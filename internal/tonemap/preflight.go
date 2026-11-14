@@ -455,16 +455,16 @@ func inspectSourceFrame(ctx context.Context, request SourcePreflightRequest, pos
 
 // sourceIntervalProbeArgs builds an ffprobe command that seeks to position and
 // reads packets packets of the primary video stream.
-func sourceIntervalProbeArgs(request SourcePreflightRequest, position float64, packets int, show ...string) []string {
+func sourceIntervalProbeArgs(request SourcePreflightRequest, logLevel string, position float64, packets int, show ...string) []string {
 	interval := strconv.FormatFloat(position, 'f', 3, 64) + "%+#" + strconv.Itoa(packets)
-	args := append([]string{"-v", ffmpegErrorLogLevel, "-read_intervals", interval, "-select_streams", "v:0"}, show...)
+	args := append([]string{"-v", logLevel, "-read_intervals", interval, "-select_streams", "v:0"}, show...)
 	return append(args, "-of", "json", request.InputPath)
 }
 
 // readSourceFrames decodes the first packets video packets at position and
 // returns the frames they produced.
 func readSourceFrames(ctx context.Context, request SourcePreflightRequest, position float64, packets int, run CommandRunner) ([]preflightFrame, error) {
-	args := sourceIntervalProbeArgs(request, position, packets,
+	args := sourceIntervalProbeArgs(request, ffmpegErrorLogLevel, position, packets,
 		"-show_frames",
 		"-show_entries", "frame=color_range,color_space,color_transfer,color_primaries:frame_side_data=side_data_type")
 	output, err := runBounded(ctx, run, request.FFprobePath, args...)
@@ -484,8 +484,12 @@ func readSourceFrames(ctx context.Context, request SourcePreflightRequest, posit
 // first keyframe after the first packet, which the one-packet read already
 // failed to decode, or 0 when none lies within sourceKeyframeSearchPackets.
 // It only demuxes, so it costs no decoding.
+//
+// ffprobe writes each packet's JSON as it reads it, and the runner shares one
+// pipe between stdout and stderr, so a parser diagnostic about a damaged
+// header would land inside the JSON. The scan therefore logs nothing.
 func packetsThroughNextKeyframe(ctx context.Context, request SourcePreflightRequest, position float64, run CommandRunner) (int, error) {
-	args := sourceIntervalProbeArgs(request, position, sourceKeyframeSearchPackets,
+	args := sourceIntervalProbeArgs(request, "quiet", position, sourceKeyframeSearchPackets,
 		"-show_packets", "-show_entries", "packet=flags")
 	output, err := runBounded(ctx, run, request.FFprobePath, args...)
 	if err != nil {
