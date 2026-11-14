@@ -98,7 +98,7 @@
   "catalog.sort.imdbRating": [
     {
       "type": 0,
-      "value": "Avaliação IMDb"
+      "value": "Avaliação no IMDb"
     }
   ],
   "catalog.sort.narrator": [
@@ -108019,6 +108019,20 @@
     {
       "type": 0,
       "value": "Desconhecido"
+    }
+  ],
+  "web.common.activity.subtitle.episode": [
+    {
+      "type": 1,
+      "value": "code"
+    },
+    {
+      "type": 0,
+      "value": " · "
+    },
+    {
+      "type": 1,
+      "value": "series"
     }
   ],
   "web.common.activity.subtitle.movie": [

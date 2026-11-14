@@ -647,7 +647,7 @@ export function getPlaybackSessionSubtitle(session: AdminSession): string | null
       season: codeNumber(session.season_number),
       episode: codeNumber(session.episode_number),
     });
-    return t("web.admin.downloads.preparation.subtitle.episode", {
+    return t("web.common.activity.subtitle.episode", {
       code,
       series: session.series_name,
     });
