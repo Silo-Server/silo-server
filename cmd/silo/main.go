@@ -2564,6 +2564,9 @@ func main() {
 			if metadataImageCacheProcessor != nil {
 				itemRefreshExecutor.SetArtworkCacher(metadataImageCacheProcessor)
 			}
+			if itemRepo != nil {
+				itemRefreshExecutor.SetItemStatusReader(itemRepo)
+			}
 		}
 	}
 
