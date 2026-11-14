@@ -3329,7 +3329,16 @@ func runVirtualVersionFallbackCandidatesV3(
 				if ctx.Err() != nil {
 					return
 				}
-				listCtx, listCancel := context.WithTimeout(ctx, listingBudget)
+				// The per-listing bound comes from what the decision budget has
+				// left, never from a bare WithTimeout on an already-spent
+				// parent: that produced a negative bound and a resolve
+				// pre-empted before it started (see
+				// virtualResolveAttemptBudget).
+				listBudget, listAllowed := virtualResolveAttemptBudget(ctx, listingBudget)
+				if !listAllowed {
+					return
+				}
+				listCtx, listCancel := context.WithTimeout(ctx, listBudget)
 				resolved, ok := resolve(listCtx, candidates[idx])
 				listCancel()
 				if ok {

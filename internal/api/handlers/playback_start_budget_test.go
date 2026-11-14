@@ -65,3 +65,58 @@ func TestVirtualPinRetrySkippedWhenStartBudgetExhausted(t *testing.T) {
 		t.Fatalf("pin retry budget = %v, want the remaining start budget", budget)
 	}
 }
+
+// A virtual resolve attempt takes its bound from the request's remaining time
+// under an explicit cap, and the answer is never a negative duration. A derived
+// context built with a bare WithTimeout on an already-consumed deadline used to
+// report bound_ms=-34/-65/-95/-126 and pre-empt every wait inside it before the
+// wait started, which the version fallback then read as a provider listing
+// failure. The helper refuses the attempt instead, so the caller answers a
+// truthful retryable terminal.
+func TestVirtualResolveAttemptBudgetIsPositiveAndRequestDerived(t *testing.T) {
+	// No deadline: the cap is the whole budget.
+	if budget, ok := virtualResolveAttemptBudget(context.Background(), virtualStartupBudget); !ok || budget != virtualStartupBudget {
+		t.Fatalf("budget with no deadline = %v ok=%v, want the %v cap", budget, ok, virtualStartupBudget)
+	}
+
+	// The request's remaining time wins when it is smaller than the cap.
+	requestCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	budget, ok := virtualResolveAttemptBudget(requestCtx, virtualStartupBudget)
+	if !ok {
+		t.Fatal("a request with 3s left was refused")
+	}
+	if budget <= 0 {
+		t.Fatalf("budget = %v, want a positive duration", budget)
+	}
+	if budget > 3*time.Second {
+		t.Fatalf("budget = %v, want at most the 3s the request has left", budget)
+	}
+
+	// A short cap wins when the request has more time than the attempt needs.
+	capped, ok := virtualResolveAttemptBudget(requestCtx, time.Second)
+	if !ok || capped != time.Second {
+		t.Fatalf("budget = %v ok=%v, want the 1s cap", capped, ok)
+	}
+
+	// An already-spent deadline is a refusal, never a negative bound.
+	spent, spentCancel := context.WithDeadline(context.Background(), time.Now().Add(-40*time.Millisecond))
+	defer spentCancel()
+	budget, ok = virtualResolveAttemptBudget(spent, virtualStartupBudget)
+	if ok {
+		t.Fatalf("budget with an expired deadline = %v, want the attempt refused", budget)
+	}
+	if budget != 0 {
+		t.Fatalf("refused budget = %v, want 0 rather than a negative duration", budget)
+	}
+	if got := virtualResolveRemainingMilliseconds(spent); got != 0 {
+		t.Fatalf("remaining ms = %d, want 0 for an expired deadline", got)
+	}
+
+	// The log helper never reports time left for a deadline that already passed.
+	expired, expiredCancel := context.WithDeadline(context.Background(), time.Now().Add(-90*time.Millisecond))
+	defer expiredCancel()
+	if got := virtualResolveRemainingMilliseconds(expired); got != 0 {
+		t.Fatalf("remaining ms = %d, want 0 for an expired deadline", got)
+	}
+}

@@ -1379,6 +1379,22 @@ func (r *Resolver) servePositiveCachedCandidates(cacheKey string, generation uin
 	return candidates, true
 }
 
+// resolveBoundLogAttrs reports the remaining time one resolve wait may spend,
+// for logs. It never emits a negative bound: a deadline the caller's own budget
+// already consumed is 0 ms left, and the explicit bound_exhausted flag keeps
+// that state visible instead of logging a wait that can never happen (the
+// production series bound_ms=-34/-65/-95/-126). The bound itself is derived by
+// the caller from the request's remaining time (see
+// handlers.virtualResolveAttemptBudget), which refuses to start the attempt at
+// all once nothing is left.
+func resolveBoundLogAttrs(remaining time.Duration) []any {
+	ms := remaining.Milliseconds()
+	if ms > 0 {
+		return []any{"bound_ms", ms}
+	}
+	return []any{"bound_ms", int64(0), "bound_exhausted", true}
+}
+
 // awaitFlight waits for an in-flight provider fetch, respecting the caller's
 // context, and serves the cache entry that flight wrote when it is usable: a
 // positive answer still inside stale grace, or a fresh negative. A flight that
@@ -1401,7 +1417,7 @@ func (r *Resolver) awaitFlight(ctx context.Context, flight *candidateFlight, cac
 			logKeyCacheKey, cacheKey,
 		}
 		if deadline, ok := ctx.Deadline(); ok {
-			attrs = append(attrs, "bound_ms", time.Until(deadline).Milliseconds())
+			attrs = append(attrs, resolveBoundLogAttrs(time.Until(deadline))...)
 		}
 		waitLogger.InfoContext(ctx, "virtual resolve wait started", attrs...)
 	}
@@ -1602,7 +1618,7 @@ func (r *Resolver) fetchProviderCandidates(ctx context.Context, config Config, g
 			logKeyReason, string(reason),
 		}
 		if deadline, ok := ctx.Deadline(); ok {
-			attrs = append(attrs, "bound_ms", time.Until(deadline).Milliseconds())
+			attrs = append(attrs, resolveBoundLogAttrs(time.Until(deadline))...)
 		}
 		if event.RequestID != "" {
 			attrs = append(attrs, "request_id", event.RequestID)
