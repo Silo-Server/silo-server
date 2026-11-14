@@ -123,6 +123,22 @@ type smtpConfig struct {
 	fromName    string
 }
 
+// SMTPSettingKeys lists every setting the sender reads to reach and sign in
+// to the SMTP server, as loadConfig reads them.
+func SMTPSettingKeys() []string {
+	rec := &recordingReader{}
+	_, _ = (&SMTPSender{settings: rec}).loadConfig(context.Background())
+	return rec.keys
+}
+
+// recordingReader answers every setting as set and records which were read.
+type recordingReader struct{ keys []string }
+
+func (r *recordingReader) Get(_ context.Context, key string) (string, error) {
+	r.keys = append(r.keys, key)
+	return "1", nil
+}
+
 func (s *SMTPSender) loadConfig(ctx context.Context) (*smtpConfig, error) {
 	if s == nil || s.settings == nil {
 		return nil, ErrNotConfigured

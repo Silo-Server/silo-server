@@ -11,7 +11,7 @@ import path from "node:path";
 import { brotliDecompressSync, gunzipSync } from "node:zlib";
 import type { Rollup } from "vite";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { precompressStaticAssets } from "./vite.config";
+import { catalogParts, precompressStaticAssets } from "./vite.config";
 
 /**
  * The Go frontend handler (internal/server/frontend.go) serves an /assets/
@@ -71,5 +71,38 @@ describe("precompressStaticAssets", () => {
       expect(existsSync(path.join(dir, `${name}.br`)), `${name}.br`).toBe(false);
       expect(existsSync(path.join(dir, `${name}.gz`)), `${name}.gz`).toBe(false);
     }
+  });
+});
+
+/** Admin text must stay out of the launch bundle, and no message may fall in neither part. */
+describe("catalogParts", () => {
+  let dir: string;
+
+  beforeEach(() => {
+    dir = mkdtempSync(path.join(tmpdir(), "silo-catalog-parts-"));
+    mkdirSync(path.join(dir, "src", "locales"), { recursive: true });
+  });
+
+  afterEach(() => {
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  async function load(id: string): Promise<unknown> {
+    const hook = catalogParts().load;
+    if (typeof hook !== "function") throw new Error("load is not a plain hook");
+    const context = { addWatchFile: () => {} } as unknown as Rollup.PluginContext;
+    const code = await hook.call(context, id);
+    return typeof code === "string" ? JSON.parse(code) : code;
+  }
+
+  it("splits web.admin.* messages from the rest", async () => {
+    const file = path.join(dir, "src", "locales", "en.json");
+    writeFileSync(
+      file,
+      JSON.stringify({ "common.save": [1], "web.admin.users.title": [2], "web.administer": [3] }),
+    );
+    expect(await load(`${file}?part=app`)).toEqual({ "common.save": [1], "web.administer": [3] });
+    expect(await load(`${file}?part=admin`)).toEqual({ "web.admin.users.title": [2] });
+    expect(await load(file)).toBeNull();
   });
 });

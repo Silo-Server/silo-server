@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -12,6 +13,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
 	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/plugins"
+	"github.com/Silo-Server/silo-server/internal/userstore"
 )
 
 // fakeExternalSignIn answers the external sign-in seam from memory. The
@@ -27,6 +29,10 @@ type fakeExternalSignIn struct {
 	credentialLinks []handlers.CredentialsLinkInput
 	// networkLinks are the network identity links made.
 	networkLinks []handlers.NetworkLinkInput
+	// profiles is the household the real household-manager rule judges; nil
+	// is an unlocked primary profile (p-primary) and a second profile
+	// (p-owner).
+	profiles []userstore.Profile
 }
 
 func fixtureIdentity() handlers.ExternalIdentityView {
@@ -54,6 +60,14 @@ func (f *fakeExternalSignIn) ListIdentities(_ context.Context, userID int) ([]ha
 }
 func (f *fakeExternalSignIn) CanUnlinkAccountIdentity(_ context.Context, userID int) (bool, error) {
 	return f.allowUnlink, nil
+}
+func (f *fakeExternalSignIn) MayUnlinkAccountIdentity(ctx context.Context, userID int, profileID string, verify func(*userstore.Profile) error) (bool, error) {
+	profiles := f.profiles
+	if profiles == nil {
+		profiles = []userstore.Profile{{ID: "p-primary", IsPrimary: true}, {ID: "p-owner"}}
+	}
+	rule := &handlers.ExternalSignInHandler{Stores: householdStores{profiles: profiles}}
+	return rule.MayUnlinkAccountIdentity(ctx, userID, profileID, verify)
 }
 func (f *fakeExternalSignIn) UnlinkAccountIdentity(_ context.Context, userID int, identityID int64) error {
 	if identityID == 6 && userID == 1 {
@@ -162,7 +176,9 @@ func externalSignInDeps(f *fakeExternalSignIn) Dependencies {
 func TestAccountIdentities(t *testing.T) {
 	f := &fakeExternalSignIn{}
 	h := newTestHandler(t, externalSignInDeps(f))
-	rec := do(t, h, http.MethodGet, Prefix+"/account/identities", "", bearer(memberToken))
+	// The account's household manager: its primary profile.
+	primary := with(bearer(memberToken), "X-Profile-Id", "p-primary")
+	rec := do(t, h, http.MethodGet, Prefix+"/account/identities", "", primary)
 	if rec.Code != 200 || !strings.Contains(rec.Body.String(), `"provider_name":"Company SSO"`) || strings.Contains(rec.Body.String(), "external_subject") ||
 		!strings.Contains(rec.Body.String(), `"can_unlink":false`) {
 		t.Fatal(rec.Code, rec.Body.String())
@@ -174,16 +190,16 @@ func TestAccountIdentities(t *testing.T) {
 	}
 
 	// The last way in cannot be removed.
-	requireProblem(t, do(t, h, http.MethodDelete, Prefix+"/account/identities/4", "", bearer(memberToken)), TypeLastSignInMethod)
+	requireProblem(t, do(t, h, http.MethodDelete, Prefix+"/account/identities/4", "", primary), TypeLastSignInMethod)
 	f.allowUnlink = true
-	if rec := do(t, h, http.MethodGet, Prefix+"/account/identities", "", bearer(memberToken)); !strings.Contains(rec.Body.String(), `"can_unlink":true`) {
+	if rec := do(t, h, http.MethodGet, Prefix+"/account/identities", "", primary); !strings.Contains(rec.Body.String(), `"can_unlink":true`) {
 		t.Fatal(rec.Code, rec.Body.String())
 	}
-	if rec := do(t, h, http.MethodDelete, Prefix+"/account/identities/4", "", bearer(memberToken)); rec.Code != http.StatusNoContent || len(f.unlinked) != 1 {
+	if rec := do(t, h, http.MethodDelete, Prefix+"/account/identities/4", "", primary); rec.Code != http.StatusNoContent || len(f.unlinked) != 1 {
 		t.Fatal(rec.Code, rec.Body.String())
 	}
-	requireProblem(t, do(t, h, http.MethodDelete, Prefix+"/account/identities/5", "", bearer(memberToken)), TypeNotFound)
-	requireProblem(t, do(t, h, http.MethodDelete, Prefix+"/account/identities/zero", "", bearer(memberToken)), TypeValidationFailed)
+	requireProblem(t, do(t, h, http.MethodDelete, Prefix+"/account/identities/5", "", primary), TypeNotFound)
+	requireProblem(t, do(t, h, http.MethodDelete, Prefix+"/account/identities/zero", "", primary), TypeValidationFailed)
 	// Only the account's own signed-in session may disconnect a sign-in.
 	requireProblem(t, do(t, h, http.MethodDelete, Prefix+"/account/identities/4", "", bearer(apiKeyToken)), TypePermissionDenied)
 	requireProblem(t, do(t, h, http.MethodDelete, Prefix+"/account/identities/4", "", bearer(impersonatedToken)), TypePermissionDenied)
@@ -191,6 +207,48 @@ func TestAccountIdentities(t *testing.T) {
 		t.Fatalf("unlinked = %v", f.unlinked)
 	}
 	requireProblem(t, do(t, newTestHandler(t, pilotDeps(nil, nil)), http.MethodGet, Prefix+"/account/identities", "", bearer(memberToken)), TypeDependencyUnavailable)
+
+	// How the account signs in belongs to the household: only its manager
+	// disconnects an identity, and can_unlink says so to the profile asking.
+	unlocked := []userstore.Profile{{ID: "p-primary", IsPrimary: true}, {ID: "p-owner"}}
+	locked := []userstore.Profile{{ID: "p-primary-locked", IsPrimary: true, PINHash: "synthetic-hash"}, {ID: "p-owner"}}
+	lockedPrimary := with(bearer(memberToken), "X-Profile-Id", "p-primary-locked")
+	for _, tc := range []struct {
+		name     string
+		profiles []userstore.Profile
+		headers  map[string]string
+		want     ProblemType
+		// canUnlink is the list's answer; listRefused marks a profile the
+		// viewer gate turns away before the list runs.
+		canUnlink, listRefused bool
+	}{
+		{"primary", unlocked, primary, ProblemType{}, true, false},
+		{"secondary", unlocked, profileOwner(), TypePermissionDenied, false, false},
+		{"locked primary missing proof", locked, lockedPrimary, TypeProfileVerificationRequired, false, true},
+		{"locked primary verified", locked, with(lockedPrimary, "X-Profile-Token", "synthetic-proof"), ProblemType{}, true, false},
+		// Dropping X-Profile-Id does not get a household member past the rule.
+		{"no profile named", unlocked, bearer(memberToken), TypePermissionDenied, false, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := &fakeExternalSignIn{allowUnlink: true, profiles: tc.profiles}
+			h := newTestHandler(t, externalSignInDeps(f))
+			rec := do(t, h, http.MethodGet, Prefix+"/account/identities", "", tc.headers)
+			if tc.listRefused {
+				requireProblem(t, rec, TypeProfileVerificationRequired)
+			} else if want := `"can_unlink":` + strconv.FormatBool(tc.canUnlink); rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), want) {
+				t.Errorf("list: %d %s, want %s", rec.Code, rec.Body.String(), want)
+			}
+			rec = do(t, h, http.MethodDelete, Prefix+"/account/identities/4", "", tc.headers)
+			if tc.want != (ProblemType{}) {
+				requireProblem(t, rec, tc.want)
+				if len(f.unlinked) != 0 {
+					t.Fatalf("refused disconnect reached the service: %v", f.unlinked)
+				}
+			} else if rec.Code != http.StatusNoContent || len(f.unlinked) != 1 {
+				t.Fatalf("disconnect: %d %s unlinked=%v", rec.Code, rec.Body.String(), f.unlinked)
+			}
+		})
+	}
 }
 
 func TestAdminUserIdentities(t *testing.T) {

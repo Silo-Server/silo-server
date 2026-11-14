@@ -1,5 +1,6 @@
 import { useCallback, useState } from "react";
 import { toast } from "sonner";
+import { t } from "@/i18n";
 import {
   captureProfileRequestContext,
   isCapturedProfileAuthorityActive,
@@ -25,7 +26,7 @@ export function useRoomActions(connection: WatchTogetherRoomConnectionResult) {
       kind: NonNullable<typeof busy>,
       action: () => Promise<T>,
       success?: (value: T) => string | null,
-      failure = "Something went wrong",
+      failure = t("web.watchTogether.actions.genericFailed"),
     ): Promise<T | null> => {
       const authority = captureProfileRequestContext();
       setBusy(kind);
@@ -54,7 +55,7 @@ export function useRoomActions(connection: WatchTogetherRoomConnectionResult) {
         "stage",
         () => connection.stageItem(input),
         () => null,
-        "Could not stage that",
+        t("web.watchTogether.actions.stageFailed"),
       ),
     [connection, run],
   );
@@ -64,8 +65,8 @@ export function useRoomActions(connection: WatchTogetherRoomConnectionResult) {
       run(
         "start",
         () => connection.startPlayback(),
-        (room) => (room?.phase === "playing" ? "Starting for everyone" : null),
-        "Could not start playback",
+        (room) => (room?.phase === "playing" ? t("web.watchTogether.actions.starting") : null),
+        t("web.watchTogether.actions.startFailed"),
       ),
     [connection, run],
   );
@@ -75,8 +76,8 @@ export function useRoomActions(connection: WatchTogetherRoomConnectionResult) {
       run(
         "stop",
         () => connection.stopPlayback(),
-        (room) => (room?.phase === "lobby" ? "Stopped for everyone. Pick what's next." : null),
-        "Could not stop playback",
+        (room) => (room?.phase === "lobby" ? t("web.watchTogether.actions.stopped") : null),
+        t("web.watchTogether.actions.stopFailed"),
       ),
     [connection, run],
   );
@@ -87,8 +88,12 @@ export function useRoomActions(connection: WatchTogetherRoomConnectionResult) {
         "mode",
         () => connection.updateSelectionMode(mode),
         (room) =>
-          room ? (room.selection_mode === "vote" ? "The room votes now" : "You pick now") : null,
-        "Could not change how the room picks",
+          room
+            ? room.selection_mode === "vote"
+              ? t("web.watchTogether.actions.modeVote")
+              : t("web.watchTogether.actions.modeHostPick")
+            : null,
+        t("web.watchTogether.actions.modeFailed"),
       ),
     [connection, run],
   );
@@ -98,8 +103,8 @@ export function useRoomActions(connection: WatchTogetherRoomConnectionResult) {
       run(
         "promote",
         () => connection.promoteSuggestion(suggestionId),
-        (room) => (room ? "Starting for everyone" : null),
-        "Could not start that suggestion",
+        (room) => (room ? t("web.watchTogether.actions.starting") : null),
+        t("web.watchTogether.actions.promoteFailed"),
       ),
     [connection, run],
   );
@@ -107,7 +112,7 @@ export function useRoomActions(connection: WatchTogetherRoomConnectionResult) {
   const setReady = useCallback(
     (ready: boolean) => {
       const sent = connection.setLobbyReady(ready);
-      if (!sent.ok) toast.error("Not connected to the room yet");
+      if (!sent.ok) toast.error(t("web.watchTogether.actions.notConnected"));
       return sent.ok;
     },
     [connection],

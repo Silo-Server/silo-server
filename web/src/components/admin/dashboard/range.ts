@@ -1,3 +1,4 @@
+import { t, type MessageKey } from "@/i18n";
 import { formatDate, formatTime, preferredDateLocale } from "@/lib/datetime";
 import type { WidgetRange } from "./types";
 
@@ -39,35 +40,35 @@ const RANGE_DAYS: Record<WidgetRange, number> = {
 };
 
 /** Compact label for the segmented control. */
-const RANGE_LABELS: Record<WidgetRange, string> = {
-  hour: "1h",
-  day: "24h",
-  week: "7d",
-  month: "30d",
+const RANGE_LABELS: Record<WidgetRange, MessageKey> = {
+  hour: "web.admin.dashboard.range.label.hour",
+  day: "web.admin.dashboard.range.label.day",
+  week: "web.admin.dashboard.range.label.week",
+  month: "web.admin.dashboard.range.label.month",
 };
 
 /** Spoken form, for aria-labels and prose ("No plays in the last 7 days"). */
-const RANGE_PHRASES: Record<WidgetRange, string> = {
-  hour: "the last hour",
-  day: "the last 24 hours",
-  week: "the last 7 days",
-  month: "the last 30 days",
+const RANGE_PHRASES: Record<WidgetRange, MessageKey> = {
+  hour: "web.admin.dashboard.range.phrase.hour",
+  day: "web.admin.dashboard.range.phrase.day",
+  week: "web.admin.dashboard.range.phrase.week",
+  month: "web.admin.dashboard.range.phrase.month",
 };
 
-/** Card-title suffix, e.g. "Egress · last 30 d". */
-const RANGE_TITLE_SUFFIXES: Record<WidgetRange, string> = {
-  hour: "last 1 h",
-  day: "last 24 h",
-  week: "last 7 d",
-  month: "last 30 d",
+/** Card title with its window, e.g. "Egress · last 30 d". */
+const RANGE_TITLES: Record<WidgetRange, MessageKey> = {
+  hour: "web.admin.dashboard.range.title.hour",
+  day: "web.admin.dashboard.range.title.day",
+  week: "web.admin.dashboard.range.title.week",
+  month: "web.admin.dashboard.range.title.month",
 };
 
 /** Leading edge label on a time axis; the trailing one is always "now". */
-const RANGE_EDGE_LABELS: Record<WidgetRange, string> = {
-  hour: "1h ago",
-  day: "24h ago",
-  week: "7d ago",
-  month: "30d ago",
+const RANGE_EDGE_LABELS: Record<WidgetRange, MessageKey> = {
+  hour: "web.admin.dashboard.range.edgeStart.hour",
+  day: "web.admin.dashboard.range.edgeStart.day",
+  week: "web.admin.dashboard.range.edgeStart.week",
+  month: "web.admin.dashboard.range.edgeStart.month",
 };
 
 export function rangeHours(range: WidgetRange): number {
@@ -79,21 +80,21 @@ export function rangeDays(range: WidgetRange): number {
 }
 
 export function rangeLabel(range: WidgetRange): string {
-  return RANGE_LABELS[range];
+  return t(RANGE_LABELS[range]);
 }
 
 export function rangePhrase(range: WidgetRange): string {
-  return RANGE_PHRASES[range];
+  return t(RANGE_PHRASES[range]);
 }
 
 /** "Playback activity · last 24 h" — one format for every ranged widget. */
 export function rangeTitle(title: string, range: WidgetRange): string {
-  return `${title} · ${RANGE_TITLE_SUFFIXES[range]}`;
+  return t(RANGE_TITLES[range], { title });
 }
 
 /** Axis edges: how far back the window starts, and where it ends. */
 export function rangeEdgeLabels(range: WidgetRange): { start: string; end: string } {
-  return { start: RANGE_EDGE_LABELS[range], end: "now" };
+  return { start: t(RANGE_EDGE_LABELS[range]), end: t("web.admin.dashboard.range.edgeEnd") };
 }
 
 /**
@@ -105,19 +106,21 @@ export function rangeEdgeLabels(range: WidgetRange): { start: string; end: strin
  */
 export function formatRangeTimestamp(
   range: WidgetRange,
-  t: number,
+  time: number,
   options?: { withTime?: boolean },
 ): string {
   if (range === "hour" || range === "day") {
-    return formatTime(t);
+    return formatTime(time);
   }
-  const day = formatDayLabel(t);
-  return options?.withTime ? `${day}, ${formatTime(t)}` : day;
+  const day = formatDayLabel(time);
+  return options?.withTime
+    ? t("web.admin.dashboard.range.dayWithTime", { day, time: formatTime(time) })
+    : day;
 }
 
 /** "Aug 26" — short enough for an axis tick, unambiguous across a month. */
-export function formatDayLabel(t: number): string {
-  const date = new Date(t);
+export function formatDayLabel(time: number): string {
+  const date = new Date(time);
   if (Number.isNaN(date.getTime())) {
     return "";
   }

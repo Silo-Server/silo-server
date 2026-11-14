@@ -1,0 +1,951 @@
+/* ================================================================
+   Video player HUD
+   ================================================================
+   The HUD always sits on a picture, never on an app surface, so its
+   tokens are fixed rather than themed. The exception is the lamp, the
+   server's accent color. It marks where the viewer is and
+   what they have chosen: the played part of the timeline, the selected
+   row in a panel, keyboard focus. Nothing else uses it.
+
+   Sizes are in rem so the HUD grows with the reader's text size.
+   Imported by the player components that use it; Vite dedupes it.
+   ================================================================ */
+
+:root {
+  --hud-paper: #f5f3ef;
+  --hud-ash: #bdbab3;
+  /* The server accent, lightened where it would not read on the HUD's dark
+     panels (lib/accentColor.ts); Cinema Dark's primary without one. */
+  --hud-lamp: var(--accent-on-dark, var(--primary));
+  --hud-lamp-ink: var(--accent-on-dark-foreground, var(--primary-foreground));
+  --hud-ink: #0e0e11;
+  --hud-panel: rgb(16 16 19 / 0.93);
+  --hud-glass: rgb(20 20 24 / 0.62);
+  --hud-hairline: rgb(255 255 255 / 0.12);
+  --hud-hover: rgb(255 255 255 / 0.1);
+  --hud-ease: cubic-bezier(0.22, 1, 0.36, 1);
+  /* Post-roll: the finishing episode keeps a real share of the screen, and
+     the end screen lays out beside it. */
+  --postroll-video-width: 20rem;
+}
+
+@media (min-width: 64rem) {
+  :root {
+    --postroll-video-width: min(44vw, 52rem);
+  }
+}
+
+@keyframes hud-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@layer components {
+  .hud {
+    color: var(--hud-paper);
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* ── Scrims ─────────────────────────────────────────────────
+     Eased ramps (many stops) so the dark lands where the text is
+     without a visible band at the top of the gradient.            */
+  .hud-scrim-bottom {
+    height: max(17rem, 46%);
+    background: linear-gradient(
+      to top,
+      rgb(0 0 0 / 0.92) 0%,
+      rgb(0 0 0 / 0.86) 16%,
+      rgb(0 0 0 / 0.74) 32%,
+      rgb(0 0 0 / 0.54) 48%,
+      rgb(0 0 0 / 0.3) 64%,
+      rgb(0 0 0 / 0.13) 80%,
+      rgb(0 0 0 / 0.04) 92%,
+      rgb(0 0 0 / 0) 100%
+    );
+  }
+
+  .hud-scrim-top {
+    height: max(8rem, 18%);
+    background: linear-gradient(
+      to bottom,
+      rgb(0 0 0 / 0.66) 0%,
+      rgb(0 0 0 / 0.42) 35%,
+      rgb(0 0 0 / 0.16) 70%,
+      rgb(0 0 0 / 0) 100%
+    );
+  }
+
+  /* Upright phone: the picture's colour spilling into the letterbox. Each
+     band mirrors the strip it touches, so the edge rows meet the picture. */
+  .hud-ambient {
+    position: absolute;
+    inset-inline: 0;
+    overflow: hidden;
+    pointer-events: none;
+  }
+  .hud-ambient canvas {
+    display: block;
+    width: 100%;
+    height: 100%;
+    filter: blur(28px) saturate(1.2) brightness(0.5);
+    transform: scale(1.3, -1.3);
+  }
+  .hud-ambient--top {
+    mask-image: linear-gradient(to top, #000, rgb(0 0 0 / 0.4) 50%, transparent);
+  }
+  .hud-ambient--bottom {
+    mask-image: linear-gradient(to bottom, #000, rgb(0 0 0 / 0.4) 50%, transparent);
+  }
+  /* The title above the picture sits on the brightest part of the glow, so
+     its second line takes the title's colour instead of the dimmer grey. */
+  .hud-portrait-title .hud-meta {
+    color: var(--hud-paper);
+  }
+
+  /* ── Buttons ────────────────────────────────────────────────── */
+  .hud-icon-btn {
+    position: relative;
+    display: inline-flex;
+    flex-shrink: 0;
+    align-items: center;
+    justify-content: center;
+    gap: 0.375rem;
+    min-width: 2.75rem;
+    height: 2.75rem;
+    border-radius: 9999px;
+    color: var(--hud-paper);
+    background: transparent;
+    transition:
+      background-color 160ms var(--hud-ease),
+      transform 160ms var(--hud-ease);
+  }
+  .hud-icon-btn > svg {
+    width: 1.375rem;
+    height: 1.375rem;
+    stroke-width: 1.75;
+  }
+  .hud-icon-btn:hover,
+  .hud-icon-btn[aria-expanded="true"] {
+    background: var(--hud-hover);
+  }
+  .hud-icon-btn:active {
+    transform: scale(0.94);
+  }
+  .hud-icon-btn[aria-disabled="true"] {
+    color: rgb(245 243 239 / 0.42);
+    cursor: default;
+  }
+  .hud-icon-btn[aria-disabled="true"]:hover {
+    background: transparent;
+  }
+
+  /* An icon with its current value beside it (settings: "1080p"). */
+  .hud-icon-btn--labeled {
+    padding-inline: 0.625rem 0.875rem;
+    font-size: 0.8125rem;
+    font-weight: 600;
+    letter-spacing: 0.01em;
+  }
+
+  /* A non-default speed rides on the settings button. */
+  .hud-speed-badge {
+    padding: 0 0.3125rem;
+    border-radius: 9999px;
+    font-size: 0.6875rem;
+    font-weight: 700;
+    line-height: 1.125rem;
+    color: var(--hud-lamp-ink);
+    background: var(--hud-lamp);
+  }
+
+  /* Rail buttons carry their current value as a label on wide rails. */
+  .hud-rail-label {
+    display: none;
+    max-width: 9rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 0.8125rem;
+    font-weight: 600;
+    letter-spacing: 0.01em;
+  }
+
+  /* Glass discs for the transport and the top bar: legible on any frame. */
+  .hud-glass-btn {
+    display: inline-flex;
+    flex-shrink: 0;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    height: 2.75rem;
+    min-width: 2.75rem;
+    border-radius: 9999px;
+    color: var(--hud-paper);
+    background: var(--hud-glass);
+    border: 1px solid var(--hud-hairline);
+    backdrop-filter: blur(16px) saturate(1.3);
+    -webkit-backdrop-filter: blur(16px) saturate(1.3);
+    transition:
+      background-color 160ms var(--hud-ease),
+      transform 160ms var(--hud-ease);
+  }
+  .hud-glass-btn:hover {
+    background: rgb(40 40 46 / 0.78);
+  }
+  .hud-glass-btn:active {
+    transform: scale(0.95);
+  }
+  .hud-glass-btn > svg {
+    width: 1.25rem;
+    height: 1.25rem;
+    stroke-width: 1.9;
+  }
+  .hud-glass-btn--text {
+    padding-inline: 0.875rem 1.125rem;
+    font-size: 0.875rem;
+    font-weight: 600;
+  }
+
+  .hud-transport-btn {
+    width: 3rem;
+    height: 3rem;
+  }
+  .hud-transport-btn > svg {
+    width: 1.625rem;
+    height: 1.625rem;
+  }
+
+  .hud-play-btn {
+    display: inline-flex;
+    flex-shrink: 0;
+    align-items: center;
+    justify-content: center;
+    width: 3.75rem;
+    height: 3.75rem;
+    border-radius: 9999px;
+    color: var(--hud-ink);
+    background: var(--hud-paper);
+    box-shadow: 0 0.75rem 2rem -0.75rem rgb(0 0 0 / 0.7);
+    transition: transform 160ms var(--hud-ease);
+  }
+  .hud-play-btn:hover {
+    transform: scale(1.04);
+  }
+  .hud-play-btn:active {
+    transform: scale(0.96);
+  }
+  .hud-play-btn > svg {
+    width: 1.625rem;
+    height: 1.625rem;
+  }
+  .hud-play-btn {
+    position: relative;
+  }
+  .hud-play-btn--large {
+    width: 4.5rem;
+    height: 4.5rem;
+  }
+  .hud-play-btn--large > svg {
+    width: 2rem;
+    height: 2rem;
+  }
+
+  /* Transport folded into the dock row of a short touch player: every
+     button at the touch minimum, so the dock stays as short as it can. */
+  .hud-inline-transport .hud-play-btn,
+  .hud-inline-transport .hud-transport-btn {
+    width: 2.75rem;
+    height: 2.75rem;
+  }
+  .hud-inline-transport .hud-play-btn > svg {
+    width: 1.375rem;
+    height: 1.375rem;
+  }
+
+  /* Skip glyph: a curved arrow with the interval inside it. */
+  .hud-skip-glyph {
+    position: relative;
+    display: flex;
+    width: 1.75rem;
+    height: 1.75rem;
+    align-items: center;
+    justify-content: center;
+  }
+  .hud-skip-glyph > svg {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    stroke-width: 1.6;
+  }
+  .hud-skip-glyph > span {
+    padding-top: 0.0625rem;
+    font-size: 0.5625rem;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* ── Type ───────────────────────────────────────────────────── */
+  .hud-title {
+    font-size: 1.25rem;
+    font-weight: 650;
+    line-height: 1.2;
+    letter-spacing: -0.012em;
+    color: var(--hud-paper);
+  }
+  .hud-meta {
+    display: flex;
+    min-width: 0;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 0.8125rem;
+    line-height: 1.3;
+    color: var(--hud-ash);
+  }
+  /* Separator dot drawn as a shape, so it is not text to read or contrast-check. */
+  .hud-dot {
+    flex-shrink: 0;
+    width: 0.1875rem;
+    height: 0.1875rem;
+    border-radius: 9999px;
+    background: currentColor;
+    opacity: 0.8;
+  }
+  .hud-time {
+    flex-shrink: 0;
+    min-width: 3.25rem;
+    font-size: 0.8125rem;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: 0.01em;
+    color: var(--hud-paper);
+  }
+
+  /* ── Timeline ───────────────────────────────────────────────── */
+  .hud-track {
+    position: relative;
+    width: 100%;
+    height: 0.375rem;
+    border-radius: 9999px;
+    transition: height 180ms var(--hud-ease);
+  }
+  .player-seekbar:hover .hud-track,
+  .player-seekbar:focus-within .hud-track,
+  .hud-track[data-active="true"] {
+    height: 0.5625rem;
+  }
+  .hud-track-base {
+    background: rgb(255 255 255 / 0.26);
+  }
+  .hud-track-buffered {
+    background: rgb(255 255 255 / 0.42);
+  }
+  .hud-track-played {
+    background: var(--hud-lamp);
+  }
+  .hud-thumb {
+    width: 1rem;
+    height: 1rem;
+    border-radius: 9999px;
+    background: var(--hud-paper);
+    box-shadow:
+      0 0 0 0.1875rem rgb(0 0 0 / 0.28),
+      0 0.25rem 0.75rem rgb(0 0 0 / 0.5);
+  }
+
+  /* Hover preview bubble above the timeline. */
+  .hud-preview {
+    overflow: hidden;
+    border-radius: 0.75rem;
+    background: var(--hud-panel);
+    border: 1px solid var(--hud-hairline);
+    box-shadow: 0 1.25rem 3rem -1rem rgb(0 0 0 / 0.75);
+    color: var(--hud-paper);
+  }
+
+  .hud-preview-caret {
+    width: 0.75rem;
+    height: 0.375rem;
+    margin-top: -1px;
+    background: var(--hud-panel);
+    clip-path: polygon(0 0, 100% 0, 50% 100%);
+  }
+  .hud-hover-line {
+    width: 2px;
+    height: 1.125rem;
+    border-radius: 9999px;
+    background: var(--hud-paper);
+    box-shadow: 0 0 0 1px rgb(0 0 0 / 0.35);
+  }
+
+  /* ── Panels (menus) ─────────────────────────────────────────── */
+  .hud-panel {
+    display: flex;
+    flex-direction: column;
+    min-width: 18rem;
+    max-width: min(26rem, calc(100vw - 2rem));
+    padding-block: 0.375rem;
+    border-radius: 1rem;
+    color: var(--hud-paper);
+    background: var(--hud-panel);
+    border: 1px solid var(--hud-hairline);
+    box-shadow: 0 1.5rem 4rem -1rem rgb(0 0 0 / 0.8);
+    backdrop-filter: blur(24px) saturate(1.4);
+    -webkit-backdrop-filter: blur(24px) saturate(1.4);
+  }
+  .hud-panel-scroll {
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    scrollbar-width: thin;
+    scrollbar-color: rgb(255 255 255 / 0.22) transparent;
+  }
+  .hud-panel-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    padding: 0.625rem 1rem 0.375rem;
+    font-size: 0.9375rem;
+    font-weight: 650;
+    letter-spacing: -0.005em;
+  }
+  .hud-panel-section {
+    padding: 0.75rem 1rem 0.25rem;
+    font-size: 0.6875rem;
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--hud-ash);
+  }
+  .hud-panel-divider {
+    height: 1px;
+    margin: 0.375rem 1rem;
+    background: var(--hud-hairline);
+  }
+
+  .hud-item {
+    display: flex;
+    width: calc(100% - 0.75rem);
+    min-height: 2.75rem;
+    margin-inline: 0.375rem;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 0.5rem 0.625rem;
+    border-radius: 0.625rem;
+    text-align: start;
+    font-size: 0.9375rem;
+    line-height: 1.3;
+    color: var(--hud-paper);
+    transition: background-color 120ms var(--hud-ease);
+  }
+  .hud-item:hover {
+    background: var(--hud-hover);
+  }
+  .hud-item[aria-checked="true"],
+  .hud-item[aria-current="true"] {
+    font-weight: 600;
+  }
+  .hud-item:disabled,
+  .hud-item[aria-disabled="true"] {
+    color: rgb(245 243 239 / 0.45);
+    cursor: default;
+  }
+  .hud-item:disabled:hover {
+    background: transparent;
+  }
+  /* Reserved check column: rows line up whether or not they are chosen. */
+  .hud-check {
+    display: flex;
+    width: 1.125rem;
+    flex-shrink: 0;
+    justify-content: center;
+    color: var(--hud-lamp);
+  }
+  .hud-check > svg {
+    width: 1.125rem;
+    height: 1.125rem;
+    stroke-width: 2.5;
+  }
+  .hud-item-secondary {
+    font-size: 0.75rem;
+    font-weight: 400;
+    color: var(--hud-ash);
+  }
+  .hud-chip {
+    display: inline-flex;
+    align-items: center;
+    padding: 0.0625rem 0.375rem;
+    border-radius: 0.3125rem;
+    border: 1px solid rgb(255 255 255 / 0.18);
+    font-size: 0.6875rem;
+    font-weight: 600;
+    line-height: 1.1rem;
+    letter-spacing: 0.02em;
+    white-space: nowrap;
+    color: var(--hud-ash);
+  }
+
+  .hud-item-icon {
+    display: flex;
+    width: 1.25rem;
+    flex-shrink: 0;
+    justify-content: center;
+    color: var(--hud-ash);
+  }
+  .hud-item-icon > svg {
+    width: 1.25rem;
+    height: 1.25rem;
+    stroke-width: 1.75;
+  }
+
+  /* Desktop panels rise just above their rail button. A tall panel may
+     cover the timeline while it is open. */
+  .hud-popover {
+    position: absolute;
+    inset-inline-end: 0;
+    bottom: calc(100% + 0.75rem);
+    z-index: 30;
+    max-height: min(32rem, calc(100cqh - 10rem));
+    /* A short player can hold less than the panel's fixed rows; the panel
+       then scrolls as a whole, its track list still scrolling on its own. */
+    overflow-y: auto;
+  }
+
+  /* A long list inside a panel scrolls on its own under the header, with a
+     visible scrollbar as the cue that there is more. */
+  .hud-scroll-list {
+    min-height: 0;
+    flex: 1 1 auto;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    scrollbar-width: thin;
+    scrollbar-color: rgb(255 255 255 / 0.32) transparent;
+  }
+
+  /* Chapters: fixed rows, and a list sized to whole rows so the panel never
+     ends on half a chapter. */
+  .hud-chapter-list {
+    --hud-chapter-row: 4rem;
+    max-height: calc(var(--hud-chapter-row) * 7);
+  }
+  .hud-chapter-list .hud-chapter {
+    height: var(--hud-chapter-row);
+  }
+
+  /* Fine pointers get denser rows; touch keeps the 44px minimum. */
+  .player-controls[data-touch="false"] .hud-item {
+    min-height: 2.5rem;
+  }
+
+  .hud-chapter {
+    gap: 0.875rem;
+    padding-block: 0.375rem;
+  }
+  .hud-chapter-thumb {
+    width: 5.5rem;
+    aspect-ratio: 16 / 9;
+    flex-shrink: 0;
+    border-radius: 0.375rem;
+    object-fit: cover;
+    box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.08);
+  }
+  .hud-chapter[aria-current="true"] .hud-chapter-thumb {
+    box-shadow: 0 0 0 2px var(--hud-lamp);
+  }
+  .hud-chapter-number {
+    display: flex;
+    width: 1.75rem;
+    flex-shrink: 0;
+    justify-content: center;
+    font-size: 0.8125rem;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    color: var(--hud-ash);
+  }
+  .hud-chapter[aria-current="true"] .hud-chapter-number,
+  .hud-now {
+    color: var(--hud-lamp);
+  }
+
+  /* Touch: menus become a bottom sheet with a handle, title and close. */
+  .hud-sheet {
+    inset-inline: 0;
+    max-height: 75dvh;
+    border-radius: 1.25rem 1.25rem 0 0;
+    color: var(--hud-paper);
+    background: var(--hud-panel);
+    border-top: 1px solid var(--hud-hairline);
+    box-shadow: 0 -1.5rem 4rem -1rem rgb(0 0 0 / 0.8);
+    backdrop-filter: blur(24px) saturate(1.4);
+    -webkit-backdrop-filter: blur(24px) saturate(1.4);
+  }
+  /* A landscape phone keeps the picture: the sheet becomes a side drawer. */
+  @media (orientation: landscape) and (max-height: 32rem) {
+    .hud-sheet {
+      top: 0;
+      inset-inline-start: auto;
+      width: min(24rem, 55vw);
+      max-height: none;
+      border-radius: 0;
+      border-start-start-radius: 1.25rem;
+      border-end-start-radius: 1.25rem;
+      border-top: none;
+      border-inline-start: 1px solid var(--hud-hairline);
+      padding-top: max(0.5rem, env(safe-area-inset-top));
+    }
+    .hud-sheet .hud-sheet-handle {
+      display: none;
+    }
+  }
+  .hud-sheet-handle {
+    align-self: center;
+    width: 2.5rem;
+    height: 0.3125rem;
+    margin-top: 0.5rem;
+    border-radius: 9999px;
+    background: rgb(255 255 255 / 0.28);
+  }
+  .hud-sheet .hud-panel-header {
+    padding-block: 0.25rem;
+    font-size: 1.0625rem;
+  }
+
+  /* Segmented row (speed): equal segments, the chosen one filled. */
+  .hud-segmented {
+    display: grid;
+    grid-auto-columns: minmax(0, 1fr);
+    grid-auto-flow: column;
+    gap: 0.125rem;
+    padding: 0.1875rem;
+    border-radius: 0.625rem;
+    background: rgb(255 255 255 / 0.07);
+  }
+  /* In a touch sheet the speeds wrap to two rows of full-size targets. */
+  .hud-sheet .hud-segmented {
+    grid-auto-flow: row;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+  }
+  .hud-sheet .hud-segment {
+    height: 2.75rem;
+  }
+  .hud-segment {
+    height: 2.25rem;
+    border-radius: 0.4375rem;
+    font-size: 0.8125rem;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    color: var(--hud-ash);
+    transition: background-color 120ms var(--hud-ease);
+  }
+  .hud-segment:hover {
+    color: var(--hud-paper);
+    background: var(--hud-hover);
+  }
+  .hud-segment[aria-checked="true"] {
+    color: var(--hud-ink);
+    background: var(--hud-paper);
+  }
+  .hud .hud-segment:focus-visible {
+    outline-offset: -2px;
+    box-shadow: none;
+  }
+
+  /* A switch drawn inside a panel row (Fill screen, Playback info). */
+  .hud-switch {
+    position: relative;
+    flex-shrink: 0;
+    width: 2.125rem;
+    height: 1.25rem;
+    margin-inline-start: auto;
+    border-radius: 9999px;
+    background: rgb(255 255 255 / 0.22);
+    transition: background-color 160ms var(--hud-ease);
+  }
+  .hud-switch::after {
+    content: "";
+    position: absolute;
+    top: 0.1875rem;
+    inset-inline-start: 0.1875rem;
+    width: 0.875rem;
+    height: 0.875rem;
+    border-radius: 9999px;
+    background: var(--hud-paper);
+    transition: transform 160ms var(--hud-ease);
+  }
+  [aria-checked="true"] > .hud-switch {
+    background: var(--hud-lamp);
+  }
+  [aria-checked="true"] > .hud-switch::after {
+    transform: translateX(calc(0.875rem * var(--dir-sign)));
+    background: var(--hud-lamp-ink);
+  }
+
+  /* Small inline action inside a panel (delay −/+, Reset). */
+  .hud-mini-btn {
+    display: inline-flex;
+    min-width: 2.25rem;
+    height: 2.25rem;
+    align-items: center;
+    justify-content: center;
+    padding-inline: 0.5rem;
+    border-radius: 0.5rem;
+    font-size: 0.8125rem;
+    font-weight: 600;
+    color: var(--hud-paper);
+    background: rgb(255 255 255 / 0.08);
+    transition: background-color 120ms var(--hud-ease);
+  }
+  .hud-mini-btn:hover {
+    background: rgb(255 255 255 / 0.16);
+  }
+  .hud-mini-btn:disabled {
+    color: rgb(245 243 239 / 0.4);
+    background: rgb(255 255 255 / 0.04);
+    cursor: default;
+  }
+  .hud-mini-btn > svg {
+    width: 1rem;
+    height: 1rem;
+  }
+
+  /* ── Cards: overlays that float over the picture ───────────── */
+  .hud-card {
+    border-radius: 1rem;
+    color: var(--hud-paper);
+    background: var(--hud-panel);
+    border: 1px solid var(--hud-hairline);
+    box-shadow: 0 1.5rem 4rem -1rem rgb(0 0 0 / 0.8);
+    backdrop-filter: blur(24px) saturate(1.4);
+    -webkit-backdrop-filter: blur(24px) saturate(1.4);
+  }
+
+  .hud-primary-btn {
+    display: inline-flex;
+    min-height: 2.75rem;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    padding-inline: 1.125rem;
+    border-radius: 9999px;
+    font-size: 0.875rem;
+    font-weight: 650;
+    color: var(--hud-ink);
+    background: var(--hud-paper);
+    transition: transform 160ms var(--hud-ease);
+  }
+  .hud-primary-btn:hover {
+    background: #fff;
+  }
+  .hud-primary-btn:active {
+    transform: scale(0.97);
+  }
+  .hud-primary-btn > svg {
+    width: 1.125rem;
+    height: 1.125rem;
+  }
+  .hud-secondary-btn {
+    display: inline-flex;
+    min-height: 2.75rem;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    padding-inline: 1.125rem;
+    border-radius: 9999px;
+    font-size: 0.875rem;
+    font-weight: 600;
+    color: var(--hud-paper);
+    background: rgb(255 255 255 / 0.1);
+    border: 1px solid var(--hud-hairline);
+    transition:
+      background-color 160ms var(--hud-ease),
+      transform 160ms var(--hud-ease);
+  }
+  .hud-secondary-btn:hover {
+    background: rgb(255 255 255 / 0.17);
+  }
+  .hud-secondary-btn:active {
+    transform: scale(0.97);
+  }
+
+  /* Spinner: a lamp-free ring, visible on white and black frames alike. */
+  .hud-spinner {
+    width: 2.25rem;
+    height: 2.25rem;
+    border-radius: 9999px;
+    border: 0.1875rem solid rgb(255 255 255 / 0.2);
+    border-top-color: var(--hud-paper);
+    animation: hud-spin 0.9s linear infinite;
+  }
+  .hud-spinner--lamp {
+    border-color: rgb(255 255 255 / 0.16);
+    border-top-color: var(--hud-lamp);
+  }
+  /* Loading covers show the title's backdrop dimmed well under the spinner. */
+  .hud-loading-backdrop {
+    opacity: 0.22;
+  }
+
+  /* Over playing video: a dark disc keeps the ring visible on a light frame. */
+  .hud-spinner--float {
+    background: rgb(0 0 0 / 0.55);
+    box-shadow: 0 0 1rem rgb(0 0 0 / 0.35);
+  }
+
+  /* ── Keyboard focus ─────────────────────────────────────────
+     Accent ring plus a dark halo: it reads on white buttons, on the
+     panel, and on any frame of video.                              */
+  .hud :focus-visible {
+    outline: 2px solid var(--hud-lamp);
+    outline-offset: 2px;
+    box-shadow: 0 0 0 5px rgb(0 0 0 / 0.6);
+  }
+  .hud .hud-item:focus-visible {
+    outline-offset: -2px;
+    box-shadow: none;
+  }
+}
+
+/* ── Compact layouts ─────────────────────────────────────────────
+   Narrow desktop windows keep the transport in the bottom row, centred;
+   only phone-sized players move it over the picture, where touch
+   controls already live.                                          */
+@layer utilities {
+  /* A touch sheet owns the screen while it is up: the player's top bar
+     steps back instead of drawing over the sheet's header. In this layer
+     so it outranks the bar's own opacity utility. */
+  .player-container:has(.hud-sheet) .hud-top-chrome {
+    opacity: 0;
+    pointer-events: none;
+  }
+
+  @container player-controls (min-width: 48rem) {
+    .player-controls[data-compact="true"][data-touch="false"] .player-compact-transport {
+      top: auto;
+      bottom: max(1.25rem, env(safe-area-inset-bottom));
+      height: 3.75rem;
+    }
+    .player-controls[data-compact="true"][data-touch="false"] .player-hud {
+      z-index: auto;
+    }
+    .player-controls[data-compact="true"][data-touch="false"] .player-compact-row {
+      min-height: 3.75rem;
+    }
+    .player-controls[data-compact="true"][data-touch="false"] .player-compact-metadata {
+      max-width: calc(50% - 11rem);
+      margin-inline-end: auto;
+    }
+  }
+
+  /* Full-width rails spell out what each menu holds and what it is set to.
+     The title shares the control row, so it stays row-sized. */
+  .player-controls[data-compact="false"] .hud-rail-btn {
+    padding-inline: 0.625rem 0.875rem;
+  }
+  .player-controls[data-compact="false"] .hud-rail-label {
+    display: inline;
+  }
+  .player-controls[data-compact="false"] .hud-title {
+    font-size: 1.125rem;
+  }
+
+  /* Below desktop-monitor widths the rail drops its value labels, so it fits
+     beside the centred transport without pushing it off the centreline. */
+  @container player-controls (width < 96rem) {
+    .player-controls[data-compact="false"] .hud-rail-label {
+      display: none;
+    }
+    .player-controls[data-compact="false"] .hud-rail-btn {
+      padding-inline: 0;
+    }
+  }
+
+  /* Laptop-wide rails: a shorter volume slider leaves the groups room. */
+  @container player-controls (width < 100rem) {
+    .player-controls .group\/vol [role="slider"] {
+      width: 4.5rem;
+    }
+  }
+
+  /* Laptop rails: the volume slider rises above the mute button on hover or
+     focus instead of taking a place in the row, and the gear drops its label,
+     so the transport stays on the centreline. The pill is drawn behind the
+     slider, not as padding, because the slider maps the pointer across its
+     own width. */
+  @container player-controls (width < 80rem) {
+    .player-controls[data-compact="false"] .group\/vol {
+      position: relative;
+    }
+    .player-controls[data-compact="false"] .group\/vol [role="slider"] {
+      position: absolute;
+      bottom: 100%;
+      left: 50%;
+      width: 6rem;
+      transform: translateX(-50%);
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 160ms var(--hud-ease);
+    }
+    .player-controls[data-compact="false"] .group\/vol [role="slider"]::before {
+      content: "";
+      position: absolute;
+      inset-block: 0.375rem;
+      inset-inline: -0.875rem;
+      z-index: -1;
+      border-radius: 9999px;
+      background: var(--hud-panel);
+      border: 1px solid var(--hud-hairline);
+    }
+    .player-controls[data-compact="false"] .group\/vol:hover [role="slider"],
+    .player-controls[data-compact="false"] .group\/vol:focus-within [role="slider"] {
+      opacity: 1;
+      pointer-events: auto;
+    }
+    .player-controls[data-compact="false"] .player-quality-label {
+      display: none;
+    }
+  }
+
+  /* Compact rows keep the settings gear without its value label. */
+  @container player-controls (width < 60rem) {
+    .player-quality-label {
+      display: none;
+    }
+  }
+
+  /* Too narrow for chapter cuts to read as segments rather than a dashed line. */
+  @container player-controls (width < 40rem) {
+    .hud-track {
+      mask-image: none !important;
+      -webkit-mask-image: none !important;
+    }
+  }
+
+  /* A short landscape player (or very large text) keeps the controls and
+     drops the title line rather than pushing the dock under the top bar. */
+  @container player-controls (height < 22rem) {
+    .hud-touch-title {
+      display: none;
+    }
+  }
+
+  /* Compact menus stay anchored inside the player at every width. */
+  .player-controls[data-compact="true"] .player-menu-surface {
+    position: fixed;
+    right: max(0.75rem, env(safe-area-inset-right));
+    bottom: max(0.75rem, env(safe-area-inset-bottom));
+    width: min(22rem, calc(100cqw - 1.5rem));
+    min-width: 0;
+    max-width: none;
+    max-height: calc(100cqh - 1.5rem);
+    margin: 0;
+    overflow-y: auto;
+    z-index: 60;
+  }
+  /* Right to left the utility buttons sit bottom left, so their menus do too. */
+  :root[dir="rtl"] .player-controls[data-compact="true"] .player-menu-surface {
+    right: auto;
+    left: max(0.75rem, env(safe-area-inset-left));
+  }
+}

@@ -19,7 +19,7 @@ func TestServeLocalFileEntityTag(t *testing.T) {
 	serve := func(ctx context.Context) string {
 		t.Helper()
 		w := httptest.NewRecorder()
-		if err := (&Service{}).serveLocalFile(ctx, w, httptest.NewRequest(http.MethodHead, "/file", nil), path, 1); err != nil {
+		if err := (&Service{}).serveLocalFile(ctx, w, httptest.NewRequest(http.MethodHead, "/file", nil), path, "", 1); err != nil {
 			t.Fatal(err)
 		}
 		return w.Header().Get("ETag")

@@ -6,6 +6,7 @@ const (
 	QuirkFireTVAFTKRTHigh10V3       = "android.fire_tv.aftkrt.h264_high10_l52_v1"
 	QuirkFireTVAFTKRTEAC3HLSV3      = "android.fire_tv.aftkrt.eac3_7_1_hls_audio_adapt_v1"
 	QuirkFireTVDV8HDR10PlusV3       = "android.fire_tv.dv8_hdr10plus_sei_v1"
+	QuirkMediaTekDV8HDR10PlusV3     = "android.mediatek.dv8_hdr10plus_sei_v1"
 	QuirkFirefoxMatroskaAACTimingV3 = "web.firefox.matroska_aac_timestamps_v1"
 	legacyAndroidMedia3HLSBuildV3   = "15"
 )
@@ -60,16 +61,29 @@ func usesFirstPartyAndroidMedia3HLSV3(request StartRequestV3) bool {
 		strings.TrimSpace(request.ClientPlaybackContext.AppBuild) == legacyAndroidMedia3HLSBuildV3
 }
 
+// dv8HDR10PlusRuntimeCorrectionV3 asks the client to strip HDR10+ SEI from
+// hybrid Dolby Vision Profile 8 samples on devices whose native Dolby Vision
+// decoder switches the output to HDR10+ when both metadata types are present.
+// Fire TV is matched by model because Fire OS does not report its SoC; other
+// MediaTek devices are matched by the SoC the client reports.
 func dv8HDR10PlusRuntimeCorrectionV3(source SourceDescriptorV3, request StartRequestV3, deliveryClass string) (*AppliedQuirkV3, bool) {
 	if !deviceQuirkProtocolAvailableV3(request) || source.DVProfile != 8 || !source.HDR10Plus ||
-		!isAmazonFireTVV3(request) || !deliverySupportsFeatureV3(request, deliveryClass, ClientDV8HDR10PlusSanitizerV3) {
+		!deliverySupportsFeatureV3(request, deliveryClass, ClientDV8HDR10PlusSanitizerV3) {
 		return nil, false
 	}
 	quirk := AppliedQuirkV3{
-		ID:               QuirkFireTVDV8HDR10PlusV3,
 		RegistryRevision: DeviceQuirkRegistryRevisionV3,
 		Action:           "client_runtime_correction",
-		Reason:           "The native Fire TV Dolby Vision path requires HDR10+ dynamic-metadata SEI removal for hybrid Profile 8 samples.",
+	}
+	switch {
+	case isAmazonFireTVV3(request):
+		quirk.ID = QuirkFireTVDV8HDR10PlusV3
+		quirk.Reason = "The native Fire TV Dolby Vision path requires HDR10+ dynamic-metadata SEI removal for hybrid Profile 8 samples."
+	case isMediaTekSoCV3(request):
+		quirk.ID = QuirkMediaTekDV8HDR10PlusV3
+		quirk.Reason = "The native MediaTek Dolby Vision path outputs HDR10+ instead of Dolby Vision unless HDR10+ dynamic-metadata SEI is removed from hybrid Profile 8 samples."
+	default:
+		return nil, false
 	}
 	return &quirk, true
 }
@@ -156,6 +170,13 @@ func isAmazonFireTVV3(request StartRequestV3) bool {
 	device := request.ClientPlaybackContext.Device
 	return strings.HasPrefix(strings.ToUpper(strings.TrimSpace(device.Model)), "AFT") &&
 		strings.EqualFold(device.Manufacturer, "Amazon")
+}
+
+// isMediaTekSoCV3 reads the SoC vendor Android reports from API 31 onward
+// (Build.SOC_MANUFACTURER, for example "Mediatek").
+func isMediaTekSoCV3(request StartRequestV3) bool {
+	soc := request.ClientPlaybackContext.Device.PlatformDetails["soc_manufacturer"]
+	return strings.EqualFold(strings.TrimSpace(soc), "mediatek")
 }
 
 func isHigh10ProfileV3(profile string) bool {

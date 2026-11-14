@@ -43,36 +43,65 @@ func emailOutboxFixture(t *testing.T) (*EmailPrefsRepository, *pgxpool.Pool, str
 	if _, err = pool.Exec(ctx, `CREATE TABLE users(id integer PRIMARY KEY,username text,email text);INSERT INTO users VALUES(7,'owner','owner@example.test'),(8,'other','other@example.test')`); err != nil {
 		t.Fatal(err)
 	}
-	b, err := os.ReadFile("../../migrations/sql/20260612001031_profile_email_notifications.sql")
-	if err != nil {
-		t.Fatal(err)
-	}
-	ddl := string(b)
-	start := strings.Index(ddl, "CREATE TABLE public.notification_email_prefs (")
-	end := strings.Index(ddl[start:], ");") + start + 2
-	if _, err = pool.Exec(ctx, strings.ReplaceAll(ddl[start:end], "public.", "")); err != nil {
-		t.Fatal(err)
-	}
-	if _, err = pool.Exec(ctx, `CREATE UNIQUE INDEX email_fixture_verified_unique ON notification_email_prefs(lower(custom_email)) WHERE custom_email<>''`); err != nil {
-		t.Fatal(err)
-	}
-	b, err = os.ReadFile("../../migrations/sql/20260906191317_notification_email_verification_outbox.sql")
-	if err != nil {
-		t.Fatal(err)
-	}
-	ddl = strings.Split(strings.Split(string(b), "-- +goose StatementBegin")[1], "-- +goose StatementEnd")[0]
-	if _, err = pool.Exec(ctx, strings.ReplaceAll(ddl, "public.", "")); err != nil {
-		t.Fatal(err)
-	}
-	b, err = os.ReadFile("../../migrations/sql/20260907045012_notification_email_verification_dispatch.sql")
-	if err != nil {
-		t.Fatal(err)
-	}
-	ddl = strings.Split(strings.Split(string(b), "-- +goose StatementBegin")[1], "-- +goose StatementEnd")[0]
-	if _, err = pool.Exec(ctx, strings.ReplaceAll(ddl, "public.", "")); err != nil {
+	preAccountKeyEmailTables(t, pool)
+	up, _ := emailAccountKeyMigration(t)
+	if _, err = pool.Exec(ctx, up); err != nil {
 		t.Fatal(err)
 	}
 	return NewEmailPrefsRepository(pool), pool, schema
+}
+
+// preAccountKeyEmailTables builds the email notification tables as they were
+// before 20261108230041 keyed them by account, plus stand-ins holding only the
+// columns that migration reads from the tables that say which accounts use a
+// profile id. The pool's search path must start with a fresh schema.
+func preAccountKeyEmailTables(t *testing.T, pool *pgxpool.Pool) {
+	t.Helper()
+	_, prefs, ok := strings.Cut(emailMigration(t, "20260612001031_profile_email_notifications.sql"), "-- +goose Up")
+	if ok {
+		_, prefs, ok = strings.Cut(prefs, "DROP TABLE notification_email_prefs;")
+	}
+	if ok {
+		prefs, _, ok = strings.Cut(prefs, "-- The per-profile sweep")
+	}
+	if !ok {
+		t.Fatal("unexpected email prefs migration layout")
+	}
+	ddl := []string{
+		prefs,
+		strings.Split(strings.Split(emailMigration(t, "20260906191317_notification_email_verification_outbox.sql"), "-- +goose StatementBegin")[1], "-- +goose StatementEnd")[0],
+		strings.Split(strings.Split(emailMigration(t, "20260907045012_notification_email_verification_dispatch.sql"), "-- +goose StatementBegin")[1], "-- +goose StatementEnd")[0],
+		`CREATE TABLE user_profiles (user_id integer, id text);
+		CREATE TABLE profile_series_interest (user_id integer, profile_id text);
+		CREATE TABLE notification_deliveries (user_id integer, profile_id text);
+		CREATE TABLE notification_preferences (user_id integer, profile_id text);`,
+	}
+	for _, sql := range ddl {
+		if _, err := pool.Exec(t.Context(), sql); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+// emailAccountKeyMigration returns 20261108230041's Up and Down SQL,
+// unqualified so they apply to the test schema.
+func emailAccountKeyMigration(t *testing.T) (string, string) {
+	t.Helper()
+	up, down, ok := strings.Cut(emailMigration(t, "20261108230041_email_prefs_account_key.sql"), "-- +goose Down")
+	if !ok {
+		t.Fatal("missing Down section")
+	}
+	return up, down
+}
+
+// emailMigration reads a migration with its public. qualifiers removed.
+func emailMigration(t *testing.T, name string) string {
+	t.Helper()
+	data, err := os.ReadFile("../../migrations/sql/" + name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return strings.ReplaceAll(string(data), "public.", "")
 }
 func tokenHashFromMessage(t *testing.T, message mail.Message) string {
 	t.Helper()

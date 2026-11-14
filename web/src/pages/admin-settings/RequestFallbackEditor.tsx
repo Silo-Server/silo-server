@@ -10,6 +10,7 @@ import { EditorConflict } from "@/components/admin/EditorConflict";
 import { Button } from "@/components/ui/button";
 import { DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { useUpdateRequestRoute } from "@/hooks/queries/admin/requests";
+import { useT } from "@/i18n";
 
 import { RouteDestinationEditor } from "./RequestRouteFields";
 import { EditorErrors, type RoutingScope } from "./RequestRuleEditor";
@@ -49,7 +50,8 @@ export function RequestFallbackEditor({
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [formError, setFormError] = useState<string | null>(null);
   const updateRoute = useUpdateRequestRoute({ inlineErrors: true });
-  const plural = scope.mediaType === "series" ? "series" : "movies";
+  const t = useT();
+  const mediaType = { media_type: scope.mediaType };
 
   function edit(tier: "hd" | "uhd", next: DestinationChoice) {
     setFieldErrors({});
@@ -66,7 +68,11 @@ export function RequestFallbackEditor({
       setFieldErrors({});
       setFormError(null);
     } catch (error) {
-      setFormError(error instanceof Error ? error.message : "Reload failed");
+      setFormError(
+        error instanceof Error
+          ? error.message
+          : t("web.admin.settings.requests.shared.reloadFailed"),
+      );
     }
   }
 
@@ -98,10 +104,9 @@ export function RequestFallbackEditor({
   return (
     <>
       <DialogHeader>
-        <DialogTitle>Everything else — {plural}</DialogTitle>
+        <DialogTitle>{t("web.admin.settings.requests.fallback.title", mediaType)}</DialogTitle>
         <DialogDescription>
-          Where {plural} go when no rule matches them. Leave a setting on its server default to use
-          what the server itself is set to.
+          {t("web.admin.settings.requests.fallback.description", mediaType)}
         </DialogDescription>
       </DialogHeader>
 
@@ -136,14 +141,16 @@ export function RequestFallbackEditor({
 
       <DialogFooter className="gap-2">
         <Button type="button" variant="outline" onClick={onDone}>
-          Cancel
+          {t("common.cancel")}
         </Button>
         <Button
           type="button"
           onClick={save}
           disabled={updateRoute.isPending || conflict || !choices.hd.dest.integration_id}
         >
-          {updateRoute.isPending ? "Saving…" : "Save"}
+          {updateRoute.isPending
+            ? t("web.admin.settings.requests.shared.saving")
+            : t("common.save")}
         </Button>
       </DialogFooter>
     </>

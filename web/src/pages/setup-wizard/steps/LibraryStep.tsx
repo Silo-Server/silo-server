@@ -9,6 +9,7 @@ import { useLibraryForm } from "@/components/admin/libraries/useLibraryForm";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { Button } from "@/components/ui/button";
 import { useDeleteLibrary } from "@/hooks/queries/admin/libraries";
+import { useT } from "@/i18n";
 
 import { librarySummary } from "../librarySummary";
 import { StepFrame, StepSection, StepSkeleton } from "../StepFrame";
@@ -34,6 +35,7 @@ function LibraryEditor({
     onClose: onDone,
     resetAfterCreate: true,
   });
+  const t = useT();
 
   function handleSubmit(e: FormEvent) {
     e.preventDefault();
@@ -45,25 +47,29 @@ function LibraryEditor({
       onSubmit={handleSubmit}
       className="setup-section setup-section-padded setup-library-editor"
     >
-      <h2 className="setup-section-title">{library ? `Edit ${library.name}` : "New library"}</h2>
+      <h2 className="setup-section-title">
+        {library
+          ? t("web.setup.library.editLabel", { name: library.name })
+          : t("web.setup.library.newTitle")}
+      </h2>
       <GeneralFields form={form} />
       <div className="space-y-2">
-        <p className="text-[13px] font-medium">Folders</p>
+        <p className="text-[13px] font-medium">{t("web.setup.library.folders")}</p>
         <FolderFields form={form} />
       </div>
       <div className="flex flex-wrap items-center gap-3 pt-1">
         <Button type="submit" variant="secondary" disabled={form.isPending}>
           {form.isPending
             ? library
-              ? "Saving…"
-              : "Adding…"
+              ? t("web.setup.wizard.saving")
+              : t("web.setup.library.adding")
             : library
-              ? "Save changes"
-              : "Add library"}
+              ? t("web.setup.library.saveChanges")
+              : t("web.setup.library.add")}
         </Button>
         {onCancel ? (
           <Button type="button" variant="ghost" onClick={onCancel} disabled={form.isPending}>
-            Cancel
+            {t("common.cancel")}
           </Button>
         ) : null}
       </div>
@@ -76,6 +82,7 @@ type EditorState = { mode: "closed" } | { mode: "new" } | { mode: "edit"; librar
 export function LibraryStep() {
   const { libraries, librariesLoading, markDone, refetchLibraries } = useWizardContext();
   const deleteLibrary = useDeleteLibrary();
+  const t = useT();
   const [editor, setEditor] = useState<EditorState>({ mode: "closed" });
   const [pendingDelete, setPendingDelete] = useState<Library | null>(null);
 
@@ -108,8 +115,8 @@ export function LibraryStep() {
 
   return (
     <StepFrame
-      title="Add your media"
-      lede="Point Silo at the folders your files live in. Each library holds one kind of media and scans on its own schedule."
+      title={t("web.setup.library.title")}
+      lede={t("web.setup.library.lede")}
       onContinue={() => markDone("library")}
       // An open editor holds edits Continue would not submit; the editor's
       // own Add / Save / Cancel closes it first.
@@ -117,12 +124,12 @@ export function LibraryStep() {
       onSkip={() => markDone("library")}
       footnote={
         activeEditor.mode !== "closed" && libraries.length > 0
-          ? "Save or cancel the open library editor to continue."
-          : "Metadata languages, providers, and extras live in Admin › Libraries."
+          ? t("web.setup.library.footnoteEditorOpen")
+          : t("web.setup.library.footnote")
       }
     >
       {libraries.length > 0 ? (
-        <StepSection title="Your libraries">
+        <StepSection title={t("web.setup.library.listTitle")}>
           {libraries.map((library) => {
             const meta = libraryTypeMeta(library.type);
             const Icon = meta.icon;
@@ -137,7 +144,10 @@ export function LibraryStep() {
                 <div className="min-w-0 flex-1">
                   <p className="truncate text-sm font-medium">{library.name}</p>
                   <p className="text-muted-foreground truncate text-xs">
-                    {meta.label} · {library.paths.join(", ")}
+                    {t("web.setup.library.rowDetail", {
+                      type: meta.label,
+                      paths: library.paths.join(", "),
+                    })}
                   </p>
                 </div>
                 <div className="flex shrink-0 items-center gap-0.5">
@@ -146,7 +156,7 @@ export function LibraryStep() {
                     variant="ghost"
                     size="icon"
                     className="text-muted-foreground hover:text-foreground size-8"
-                    aria-label={`Edit ${library.name}`}
+                    aria-label={t("web.setup.library.editLabel", { name: library.name })}
                     aria-pressed={editing}
                     onClick={() =>
                       setEditor(editing ? { mode: "closed" } : { mode: "edit", library })
@@ -159,7 +169,7 @@ export function LibraryStep() {
                     variant="ghost"
                     size="icon"
                     className="text-muted-foreground hover:text-destructive size-8"
-                    aria-label={`Delete ${library.name}`}
+                    aria-label={t("web.setup.library.deleteLabel", { name: library.name })}
                     onClick={() => setPendingDelete(library)}
                   >
                     <Trash2 className="size-3.5" />
@@ -187,7 +197,7 @@ export function LibraryStep() {
       ) : (
         <button type="button" className="setup-add-row" onClick={() => setEditor({ mode: "new" })}>
           <Plus className="size-3.5" aria-hidden="true" />
-          Add another library
+          {t("web.setup.library.addAnother")}
         </button>
       )}
 
@@ -196,9 +206,13 @@ export function LibraryStep() {
         onOpenChange={(open) => {
           if (!open) setPendingDelete(null);
         }}
-        title={pendingDelete ? `Delete ${pendingDelete.name}?` : "Delete library?"}
-        description="Removes the library and everything Silo learned about it. Your files on disk are not touched."
-        confirmLabel="Delete library"
+        title={
+          pendingDelete
+            ? t("web.setup.library.deleteTitle", { name: pendingDelete.name })
+            : t("web.setup.library.deleteTitleGeneric")
+        }
+        description={t("web.setup.library.deleteDescription")}
+        confirmLabel={t("web.setup.library.deleteConfirm")}
         variant="destructive"
         onConfirm={confirmDelete}
         isPending={deleteLibrary.isPending}

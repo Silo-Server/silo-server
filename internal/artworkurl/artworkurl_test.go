@@ -260,3 +260,28 @@ func TestSignedKeyAcceptsOnlyItsOwnValidURLs(t *testing.T) {
 		}
 	}
 }
+
+// The artwork signer never signs, and never accepts, a key under a namespace
+// that shares a local root with artwork but is not artwork: a backup's
+// database dump, a diagnostic bundle, a job artifact. Other signers (job
+// artifacts, backup objects) sign their own keys as before.
+func TestArtworkSignerRefusesOperationalKeys(t *testing.T) {
+	s := NewSigner("secret", time.Hour)
+	now := time.Now()
+	for _, key := range []string{"backups/server/20261102t040000z/db.dump", "/backups/x", "diagnostics/1/report.tar.gz", "catalog-seeds/a.json"} {
+		if u, _ := s.Sign(key, now); u != "" {
+			t.Errorf("signed %s as artwork: %s", key, u)
+		}
+		exp := now.Add(time.Hour).Unix()
+		// A signature made as if the key were artwork is refused too.
+		if err := s.Verify(key, exp, s.signature(key, exp), now); !errors.Is(err, ErrRefusedKey) {
+			t.Errorf("verifying %s = %v, want ErrRefusedKey", key, err)
+		}
+	}
+	if u, _ := s.Sign("local/movies/m1/abcd1234/poster/original.r1.jpg", now); u == "" {
+		t.Error("an artwork key was refused")
+	}
+	if u, _ := NewBackupObjectSigner("secret", time.Hour).Sign(BackupObjectKey("20261102t040000z", "db.dump"), now); u == "" {
+		t.Error("the backup object signer refused its own key")
+	}
+}

@@ -19,6 +19,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Switch } from "@/components/ui/switch";
 import { useOverlayPrefs } from "@/hooks/useOverlayPrefs";
 import { useShownRatingSources } from "@/hooks/queries/ratingsCapability";
+import { useT, type MessageKey } from "@/i18n";
 import type { EnabledCardQuickActionMode } from "@/lib/cardQuickActions";
 import {
   ACCENT_PALETTE,
@@ -42,13 +43,15 @@ import { ResetButton } from "./ResetButton";
 
 type ShortcutChoice = "off" | EnabledCardQuickActionMode;
 
-const SHORTCUT_CHOICES: readonly { value: ShortcutChoice; label: string }[] = [
-  { value: "off", label: "Off" },
-  { value: "watched", label: "Watched" },
-  { value: "favorites", label: "Favorite" },
-  { value: "both", label: "Both" },
+const SHORTCUT_CHOICES: readonly { value: ShortcutChoice; labelKey: MessageKey }[] = [
+  { value: "off", labelKey: "web.settings.cardOverlay.shortcutOff" },
+  { value: "watched", labelKey: "web.settings.cardOverlay.shortcutWatched" },
+  { value: "favorites", labelKey: "web.settings.cardOverlay.shortcutFavorite" },
+  { value: "both", labelKey: "web.settings.cardOverlay.shortcutBoth" },
 ];
 
+// Positions on the poster artwork, which doesn't mirror (CardOverlays.tsx).
+/* eslint-disable silo/no-physical-direction -- places on the artwork, not the layout */
 const POSITION_CLASSES: Record<OverlayPosition, string> = {
   "top-left": "top-1 left-1 h-4 w-7",
   "left-edge": "top-1/2 left-0 h-7 w-3 -translate-y-1/2 rounded-l-none",
@@ -56,6 +59,7 @@ const POSITION_CLASSES: Record<OverlayPosition, string> = {
   "bottom-left": "bottom-1 left-1 h-4 w-7",
   "bottom-right": "bottom-1 right-1 h-4 w-7",
 };
+/* eslint-enable silo/no-physical-direction -- end of the artwork positions */
 
 interface BadgeAdjustProps {
   overlayId: OverlayId;
@@ -75,6 +79,7 @@ function BadgeAdjust({
   supportsStyles,
   onChange,
 }: BadgeAdjustProps) {
+  const t = useT();
   const def = getOverlayDef(overlayId);
   const iconSwitchId = useId();
   if (!def) return null;
@@ -90,10 +95,10 @@ function BadgeAdjust({
           variant="ghost"
           size="sm"
           className="text-muted-foreground hover:text-foreground"
-          aria-label={`Adjust ${def.label}`}
+          aria-label={t("web.settings.cardOverlay.adjustLabel", { badge: def.label })}
         >
           <SlidersHorizontal className="h-4 w-4" aria-hidden="true" />
-          <span className="hidden sm:inline">Adjust</span>
+          <span className="hidden sm:inline">{t("web.settings.cardOverlay.adjust")}</span>
         </Button>
       </PopoverTrigger>
       <PopoverContent align="end" className="max-h-[80vh] w-80 space-y-4 overflow-y-auto p-4">
@@ -102,12 +107,13 @@ function BadgeAdjust({
         <div className="flex items-start gap-4">
           <div
             role="radiogroup"
-            aria-label="Position"
+            aria-label={t("web.settings.cardOverlay.position")}
             className="bg-muted/50 border-border/70 relative aspect-[2/3] w-20 shrink-0 rounded-md border"
           >
             {/* The top-right corner is the watch-status indicator's. */}
             <span
               aria-hidden="true"
+              // eslint-disable-next-line silo/no-physical-direction -- a corner of the artwork
               className="border-foreground/25 absolute top-1 right-1 h-3.5 w-3.5 rounded-full border border-dashed"
             />
             {POSITION_OPTIONS.map((option) => {
@@ -131,22 +137,25 @@ function BadgeAdjust({
             })}
           </div>
           <div className="space-y-1">
-            <p className="text-sm font-medium">Position</p>
+            <p className="text-sm font-medium">{t("web.settings.cardOverlay.position")}</p>
             <p className="text-muted-foreground text-[13px] leading-relaxed">
-              Pick a corner or a side. Badges in the same place stack. The top-right corner shows
-              whether you watched it.
+              {t("web.settings.cardOverlay.positionHint")}
             </p>
             {shortcutsOn && config.position.startsWith("bottom") ? (
               <p className="text-muted-foreground text-[13px] leading-relaxed">
-                Shortcut buttons cover the bottom corners while they show.
+                {t("web.settings.cardOverlay.positionShortcutsHint")}
               </p>
             ) : null}
           </div>
         </div>
 
         <div className="space-y-2">
-          <p className="text-sm font-medium">Color</p>
-          <div className="flex flex-wrap gap-1.5" role="radiogroup" aria-label="Color">
+          <p className="text-sm font-medium">{t("web.settings.cardOverlay.color")}</p>
+          <div
+            className="flex flex-wrap gap-1.5"
+            role="radiogroup"
+            aria-label={t("web.settings.cardOverlay.color")}
+          >
             <button
               type="button"
               role="radio"
@@ -157,7 +166,7 @@ function BadgeAdjust({
                 !color && "border-primary text-foreground",
               )}
             >
-              Default
+              {t("web.settings.cardOverlay.colorDefault")}
             </button>
             {ACCENT_PALETTE.map((swatch) => (
               <button
@@ -186,7 +195,7 @@ function BadgeAdjust({
         {def.iconCapable ? (
           <div className="flex items-center justify-between gap-3">
             <Label htmlFor={iconSwitchId} className="text-sm font-medium">
-              Show icon
+              {t("web.settings.cardOverlay.showIcon")}
             </Label>
             <Switch
               id={iconSwitchId}
@@ -223,13 +232,17 @@ function BadgeRow({
   supportsStyles,
   onUpdate,
 }: BadgeRowProps) {
+  const t = useT();
   const switchId = useId();
   const def = getOverlayDef(overlayId);
   if (!def) return null;
   const config = prefs.items[overlayId];
   const suppressedBy = config.enabled ? overlaySuppressedBy(overlayId, prefs) : null;
+  const suppressor = suppressedBy ? getOverlayDef(suppressedBy) : undefined;
   const hint = suppressedBy
-    ? `Hidden while the combined ${getOverlayDef(suppressedBy)?.label.replace(" (combined)", "")} badge is on.`
+    ? t("web.settings.cardOverlay.suppressedHint", {
+        badge: suppressor ? (suppressor.shortLabel ?? suppressor.label) : "",
+      })
     : def.availabilityNote;
   const update = (next: Partial<OverlayItemConfig>) =>
     onUpdate({ ...prefs, items: { ...prefs.items, [overlayId]: { ...config, ...next } } });
@@ -268,6 +281,7 @@ function BadgeRow({
  * when that layout cannot be edited.
  */
 export function CardOverlaySettings({ onShortcutsPicked }: { onShortcutsPicked?: () => void }) {
+  const t = useT();
   const shownRatingSources = useShownRatingSources();
   const {
     editablePrefs,
@@ -297,7 +311,7 @@ export function CardOverlaySettings({ onShortcutsPicked }: { onShortcutsPicked?:
     try {
       await resetPrefs("quickActions");
     } catch {
-      toast.error("Couldn't reset shortcuts");
+      toast.error(t("web.settings.cardOverlay.resetShortcutsFailed"));
     }
   };
 
@@ -306,7 +320,7 @@ export function CardOverlaySettings({ onShortcutsPicked }: { onShortcutsPicked?:
       await resetPrefs("badges");
       setConfirmBadgeResetOpen(false);
     } catch {
-      toast.error("Couldn't reset badges");
+      toast.error(t("web.settings.cardOverlay.resetBadgesFailed"));
     }
   };
 
@@ -328,12 +342,12 @@ export function CardOverlaySettings({ onShortcutsPicked }: { onShortcutsPicked?:
   return (
     <>
       <SettingsGroup
-        title="Shortcuts"
-        description="Buttons on a poster that mark it watched or add it to your favorites, without opening it."
+        title={t("web.settings.cardOverlay.shortcutsTitle")}
+        description={t("web.settings.cardOverlay.shortcutsDescription")}
         actions={
           hasQuickActionOverride ? (
             <ResetButton
-              label="Reset shortcuts"
+              label={t("web.settings.cardOverlay.resetShortcuts")}
               disabled={isResetting}
               onClick={() => void resetShortcuts()}
             />
@@ -341,21 +355,24 @@ export function CardOverlaySettings({ onShortcutsPicked }: { onShortcutsPicked?:
         }
       >
         <ChoiceButtons
-          label="Shortcut buttons"
+          label={t("web.settings.cardOverlay.shortcutButtons")}
           hideLabel
           value={quickActionsEnabled ? quickActionPreference : "off"}
-          options={SHORTCUT_CHOICES}
+          options={SHORTCUT_CHOICES.map((choice) => ({
+            value: choice.value,
+            label: t(choice.labelKey),
+          }))}
           onChange={pickShortcuts}
         />
       </SettingsGroup>
 
       <SettingsGroup
-        title="Badges"
-        description="Small labels on posters, such as 4K, Dolby Vision, or a rating."
+        title={t("web.settings.cardOverlay.badgesTitle")}
+        description={t("web.settings.cardOverlay.badgesDescription")}
         actions={
           hasBadgeOverride ? (
             <ResetButton
-              label="Reset badges"
+              label={t("web.settings.cardOverlay.resetBadges")}
               disabled={isResetting}
               onClick={() => setConfirmBadgeResetOpen(true)}
             />
@@ -364,7 +381,7 @@ export function CardOverlaySettings({ onShortcutsPicked }: { onShortcutsPicked?:
       >
         <div className="flex items-center justify-between gap-3">
           <Label htmlFor={badgesSwitchId} className="text-sm font-medium">
-            Show badges on posters
+            {t("web.settings.cardOverlay.showBadges")}
           </Label>
           <Switch
             id={badgesSwitchId}
@@ -376,7 +393,7 @@ export function CardOverlaySettings({ onShortcutsPicked }: { onShortcutsPicked?:
         {overlaysEnabled ? (
           <>
             <div>
-              <SettingsSubheading>Style</SettingsSubheading>
+              <SettingsSubheading>{t("web.settings.cardOverlay.style")}</SettingsSubheading>
               <OverlayLookControls
                 prefs={displayPrefs}
                 onChange={setPrefs}
@@ -400,7 +417,12 @@ export function CardOverlaySettings({ onShortcutsPicked }: { onShortcutsPicked?:
                     <AccordionTrigger className="items-center hover:no-underline">
                       <span className="flex-1">{title}</span>
                       <span className="text-muted-foreground text-xs font-normal tabular-nums">
-                        {onCount === 0 ? "None on" : `${onCount} of ${overlays.length} on`}
+                        {onCount === 0
+                          ? t("web.settings.cardOverlay.noneOn")
+                          : t("web.settings.cardOverlay.someOn", {
+                              on: onCount,
+                              total: overlays.length,
+                            })}
                       </span>
                     </AccordionTrigger>
                     <AccordionContent className="pb-2">
@@ -427,9 +449,9 @@ export function CardOverlaySettings({ onShortcutsPicked }: { onShortcutsPicked?:
       <ConfirmDialog
         open={confirmBadgeResetOpen}
         onOpenChange={setConfirmBadgeResetOpen}
-        title="Reset badges?"
-        description="Your badge choices are cleared, and this profile follows your server's badge settings from then on."
-        confirmLabel="Reset badges"
+        title={t("web.settings.cardOverlay.resetBadgesConfirmTitle")}
+        description={t("web.settings.cardOverlay.resetBadgesConfirmDescription")}
+        confirmLabel={t("web.settings.cardOverlay.resetBadges")}
         variant="destructive"
         isPending={isResetting}
         onConfirm={() => {

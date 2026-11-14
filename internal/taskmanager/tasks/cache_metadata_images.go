@@ -4,10 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"math"
 	"os"
 	"runtime"
-	"runtime/debug"
 	"sync/atomic"
 	"time"
 
@@ -71,33 +69,6 @@ func imageCacheWorkerCount(configured, numCPU int, memoryBytes int64) int {
 	return workers
 }
 
-// detectImageCacheMemoryBytes returns the tightest memory bound the process
-// can see, or 0 when none is detectable (macOS dev boxes, bare Linux without
-// cgroups). Every source is consulted and the smallest wins, because none
-// implies the others: GOMEMLIMIT can be set looser than a cgroup limit, and
-// the effective cgroup limit — own cgroup, ancestors, and root, so a systemd
-// MemoryMax= or an inherited pod/slice limit binds, not just a namespaced
-// container's root files — can sit above or below host memory.
-func detectImageCacheMemoryBytes() int64 {
-	goLimit := int64(0)
-	if limit := debug.SetMemoryLimit(-1); limit < math.MaxInt64 {
-		goLimit = limit
-	}
-	hostTotal, _ := nodemetrics.ReadMeminfoTotalBytes("/proc/meminfo")
-	return tightestMemoryLimit(goLimit, nodemetrics.EffectiveMemoryLimitBytes(), hostTotal)
-}
-
-// tightestMemoryLimit returns the smallest positive limit, or 0 when none is.
-func tightestMemoryLimit(limits ...int64) int64 {
-	tightest := int64(0)
-	for _, limit := range limits {
-		if limit > 0 && (tightest == 0 || limit < tightest) {
-			tightest = limit
-		}
-	}
-	return tightest
-}
-
 // cacheMetadataImagesConfiguredWorkers is the administrator's
 // metadata.image_workers value, hot-reloaded through SetImageWorkers. Zero
 // selects the CPU-derived default.
@@ -116,7 +87,7 @@ func ImageWorkerBudget() int { return cacheMetadataImagesWorkers() }
 
 // cacheMetadataImagesWorkers resolves the pool size for a run.
 func cacheMetadataImagesWorkers() int {
-	return imageCacheWorkerCount(int(cacheMetadataImagesConfiguredWorkers.Load()), runtime.GOMAXPROCS(0), detectImageCacheMemoryBytes())
+	return imageCacheWorkerCount(int(cacheMetadataImagesConfiguredWorkers.Load()), runtime.GOMAXPROCS(0), nodemetrics.ProcessMemoryLimitBytes())
 }
 
 // cacheMetadataImagesClaimPerWorker sizes the queue page stamped with one
@@ -131,8 +102,9 @@ func cacheMetadataImagesWorkers() int {
 // preempt the synchronous decode/encode segment (imageutil.Thumbhash,
 // GenerateVariants take no context) — it only stops the job at the next
 // context-aware step. That segment operates on inputs capped at 25 MiB
-// (imagecache's download limit), so its overshoot is bounded by CPU speed,
-// not by the network; 4 jobs per worker budgets the worst chain at
+// (imagecache's download limit), so its overshoot is bounded by CPU speed
+// and by two waits of imageutil's decode budget (30 seconds each), not by
+// the network; 4 jobs per worker budgets the worst chain at
 // 4 × (timeout + overshoot), which stays inside the lease with a generous
 // overshoot allowance of nearly two minutes per job.
 // TestImageCacheWorkerCount asserts the timeout part of this arithmetic

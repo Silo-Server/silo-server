@@ -1,5 +1,6 @@
 import { useId, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
+import { useT } from "@/i18n";
 import type { PickerCard, PickerGroup, RowGroup } from "@/lib/homeRows/catalog";
 import { cn } from "@/lib/utils";
 import { PickerRail } from "./PickerRail";
@@ -31,6 +32,7 @@ export function RowPicker({
   narrow: boolean;
   onPick: (card: PickerCard, presetKey?: string) => void;
 }) {
+  const t = useT();
   const baseId = useId();
   const pane = useRef<HTMLDivElement>(null);
   const [selected, setSelected] = useState<RowGroup | undefined>();
@@ -61,10 +63,10 @@ export function RowPicker({
     return (
       <div className="grid place-items-center gap-3 px-6 py-16 text-center">
         <p className="text-muted-foreground text-sm" role="status">
-          No rows match “{query}”.
+          {t("web.home.addRow.picker.noMatch", { query })}
         </p>
         <Button type="button" variant="outline" size="sm" onClick={onClearSearch}>
-          Clear search
+          {t("web.home.addRow.picker.clearSearch")}
         </Button>
       </div>
     );
@@ -79,7 +81,7 @@ export function RowPicker({
           : "grid-cols-[232px_minmax(0,1fr)]",
       )}
     >
-      <div className={cn(!narrow && "border-border overflow-y-auto border-r px-3 py-4")}>
+      <div className={cn(!narrow && "border-border overflow-y-auto border-e px-3 py-4")}>
         <PickerRail
           baseId={baseId}
           groups={groups}
@@ -89,8 +91,10 @@ export function RowPicker({
         />
         {narrow ? null : (
           <p className="border-border text-muted-foreground mx-1 mt-3.5 border-t px-2 pt-3.5 text-[13px] leading-[1.55]">
-            Rows marked <b className="text-foreground font-medium">On {pageLabel}</b> are already
-            here. You can add them again with other settings.
+            {t("web.home.addRow.picker.onPageNote", {
+              page: pageLabel,
+              b: (chunks) => <b className="text-foreground font-medium">{chunks}</b>,
+            })}
           </p>
         )}
       </div>

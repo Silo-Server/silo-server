@@ -69,7 +69,7 @@ export const goldens = {
       },
     },
   ] satisfies Writes,
-  /** Admin smart create from the editor page: `query_definition` keeps numeric library ids; the top-level `library_ids` are strings. */
+  /** Admin smart create from the editor page, with the one rule it needs: `query_definition` keeps numeric library ids; the top-level `library_ids` are strings. */
   adminSmartCreate: [
     {
       operation: "POST /api/v2/admin/collections",
@@ -84,7 +84,7 @@ export const goldens = {
         query_definition: {
           library_ids: [1],
           match: "all",
-          groups: [],
+          groups: [{ match: "all", rules: [{ field: "genre", op: "is", value: "Comedy" }] }],
           sort: {
             field: "added_at",
             order: "desc",
@@ -391,7 +391,7 @@ export const goldens = {
       },
     ],
   } satisfies ByLimit,
-  /** Personal smart create from the editor page, with `description`; the poster file uploads after the POST. */
+  /** Personal smart create from the editor page, with `description` and the one rule it needs; the poster file uploads after the POST. */
   personalSmartCreate: [
     {
       operation: "POST /api/v2/collections",
@@ -405,7 +405,7 @@ export const goldens = {
         query_definition: {
           library_ids: [],
           match: "all",
-          groups: [],
+          groups: [{ match: "all", rules: [{ field: "genre", op: "is", value: "Comedy" }] }],
           sort: {
             field: "added_at",
             order: "desc",

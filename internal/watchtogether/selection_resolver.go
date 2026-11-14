@@ -62,8 +62,16 @@ func (r *CatalogSelectionResolver) ResolveSelection(
 // Each viewer's playback planner applies device capabilities and server policy
 // to that source, including 4K transcoding and tone mapping when available.
 func preferredRoomVersion(versions []catalog.FileVersion) catalog.FileVersion {
+	// The room's edition and part come from the file with the lowest ID. The
+	// catalog lists versions best first, and that order can start with a later
+	// part of a multipart presentation.
 	best := versions[0]
 	for _, candidate := range versions[1:] {
+		if candidate.FileID < best.FileID {
+			best = candidate
+		}
+	}
+	for _, candidate := range versions {
 		if candidate.EditionKey != best.EditionKey || candidate.PresentationKind != best.PresentationKind ||
 			candidate.PresentationGroupKey != best.PresentationGroupKey || candidate.PresentationPartIndex != best.PresentationPartIndex {
 			continue

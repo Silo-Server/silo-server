@@ -258,8 +258,9 @@ func (s *TranscodeSession) subtitleSegmentSource(segNum int) (file string, ready
 			if liveOK {
 				head = max(head, liveHead)
 			}
-			// A planned copy runs on from the start to every planned segment
-			// and its video request waits for that (plannedSegmentWait).
+			// A planned copy's video request for any segment either waits
+			// for the running FFmpeg or restarts it there, so its subtitle
+			// segment comes too.
 			imminent = imminent || segNum <= head+maxSequentialMissingSegments+1 || s.copyPlan != nil
 		}
 		covered := span.end >= 0 && segNum <= span.end
@@ -281,9 +282,11 @@ func (s *TranscodeSession) subtitleSegmentSource(segNum int) (file string, ready
 // player readiness the way a whole-file sidecar extraction did. The wait is
 // brief unless the live generation is about to reach the segment, when it is
 // as long as the matching video segment's. A keyframe-planned copy is the
-// exception: its video request for a segment FFmpeg has not reached waits and
-// then fails with ErrSegmentNotFound, so its subtitle segment does the same
-// rather than answer a final empty document the player would keep.
+// exception: its video request for any planned segment FFmpeg has not
+// produced waits for FFmpeg or restarts it there, even after it exited, so its
+// subtitle segment waits too and, if no generation reaches it, fails with
+// ErrSegmentNotFound rather than answer a final empty document the player
+// would keep.
 func (s *TranscodeSession) SubtitleSegmentVTT(ctx context.Context, segNum int) ([]byte, error) {
 	opts := s.Opts()
 	if subtitleRenditionsOnDemand(opts) {
@@ -295,6 +298,7 @@ func (s *TranscodeSession) SubtitleSegmentVTT(ctx context.Context, segNum int) (
 	poll := subtitleCuePollInterval
 	for {
 		file, ready, waitable, imminent := s.subtitleSegmentSource(segNum)
+		waitable = waitable || s.plannedSegmentRestartable(segNum)
 		if imminent {
 			deadline = started.Add(subtitleSegmentProductionWait)
 		}
@@ -462,6 +466,16 @@ func (s *TranscodeSession) subtitleSpanOrigin(ctx context.Context, file string, 
 		shiftKnown = err == nil
 		if !shiftKnown && !s.noteSubtitleVideoStartMiss(file, span.start, err) {
 			return span
+		}
+		if shiftKnown && s.copyGroups != nil {
+			// A planned generation's first frame can be a keyframe before
+			// its first segment; measure the shift from the segment's start.
+			lead, ok := span.lead, span.leadKnown
+			if !ok && span.end < 0 {
+				lead, ok = s.copyGroups.runLead()
+			}
+			videoStart += lead
+			shiftKnown = ok
 		}
 	}
 

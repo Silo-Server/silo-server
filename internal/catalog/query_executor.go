@@ -436,7 +436,11 @@ func (e *QueryExecutor) buildPreviewPagePlan(
 		}
 	}
 
-	ApplySectionAccessFilter("mi", access, &conditions, &args, &argIdx)
+	if isEpisodeCatalogScope(effectiveScope) {
+		applyEpisodeRelationAccessFilter("mi", access, &conditions, &args, &argIdx)
+	} else {
+		applyAccessFilter("mi", access, &conditions, &args, &argIdx)
+	}
 
 	if e.SnapshotAt != nil {
 		conditions = append(conditions, fmt.Sprintf("mi.created_at <= $%d", argIdx))

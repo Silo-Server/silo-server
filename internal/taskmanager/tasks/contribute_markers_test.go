@@ -4,12 +4,15 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"log/slog"
 	"slices"
 	"testing"
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/markers"
 	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/opslog"
 )
 
 type contribTestProgress struct{ data json.RawMessage }
@@ -229,6 +232,81 @@ func TestContributeMarkersTaskStopsAfterRepeatedShortRateLimits(t *testing.T) {
 	}
 }
 
+func TestContributeMarkersTaskFailsWhenAllSubmissionsError(t *testing.T) {
+	runner := &fakeContribRunner{outcomes: []markers.ContributionOutcome{{
+		Status: markers.OutcomeStatusError, Provider: "introdb", Reason: "AccessDenied",
+	}}}
+	cands := &fakeCandidates{ids: []int{10, 11}}
+	runner.auto = []markers.AutoContributor{{Provider: "introdb"}}
+	task := NewContributeMarkersTask(runner, cands, fakeFileLoader{})
+	task.wait = noWait
+
+	prog := &contribTestProgress{}
+	err := task.Execute(context.Background(), prog)
+	if err == nil {
+		t.Fatal("expected Execute to return an error when every submission fails")
+	}
+
+	var data map[string]int
+	if jsonErr := json.Unmarshal(prog.data, &data); jsonErr != nil {
+		t.Fatalf("decode result data: %v", jsonErr)
+	}
+	if data["submitted"] != 0 || data["failed"] != 2 {
+		t.Fatalf("result = %v, want submitted=0 failed=2", data)
+	}
+}
+
+func TestContributeMarkersTaskSucceedsWhenFailuresMixWithSkips(t *testing.T) {
+	runner := &fakeContribRunner{outcomes: []markers.ContributionOutcome{
+		{Status: markers.OutcomeStatusSkipped, Provider: "introdb", Segment: markers.MarkerKindIntro},
+		{Status: markers.OutcomeStatusError, Provider: "introdb", Segment: markers.MarkerKindCredits, Reason: "AccessDenied"},
+	}}
+	cands := &fakeCandidates{ids: []int{10}}
+	runner.auto = []markers.AutoContributor{{Provider: "introdb"}}
+	task := NewContributeMarkersTask(runner, cands, fakeFileLoader{})
+
+	if err := task.Execute(context.Background(), &contribTestProgress{}); err != nil {
+		t.Fatalf("a run with skipped outcomes reported total failure: %v", err)
+	}
+}
+
+type contributionLogWriter struct{ entries []opslog.Entry }
+
+func (w *contributionLogWriter) Write(entry opslog.Entry) { w.entries = append(w.entries, entry) }
+func (*contributionLogWriter) Close() error               { return nil }
+
+func TestContributeMarkersTaskLogsResolverErrorText(t *testing.T) {
+	writer := &contributionLogWriter{}
+	previous := slog.Default()
+	slog.SetDefault(slog.New(opslog.NewHandler(slog.DiscardHandler, writer, slog.LevelInfo, "test")))
+	t.Cleanup(func() { slog.SetDefault(previous) })
+	runner := &fakeContribRunner{
+		// File 10, the first call, fails before reaching a provider.
+		errs:     map[int]error{0: fmt.Errorf("resolve movie external ids: %w", errors.New("database unavailable"))},
+		outcomes: []markers.ContributionOutcome{{Status: markers.SubmissionStatusPending, Provider: "introdb", Segment: markers.MarkerKindIntro}},
+	}
+	runner.auto = []markers.AutoContributor{{Provider: "introdb"}}
+	task := NewContributeMarkersTask(runner, &fakeCandidates{ids: []int{10, 11}}, fakeFileLoader{})
+	task.wait = noWait
+	progress := &contribTestProgress{}
+	if err := task.Execute(t.Context(), progress); err != nil {
+		t.Fatal(err)
+	}
+	if len(writer.entries) != 1 {
+		t.Fatalf("got %d logs, want one resolver warning", len(writer.entries))
+	}
+	if got := writer.entries[0].Attrs["error"]; got != "resolve movie external ids: database unavailable" {
+		t.Fatalf("error attribute = %v", got)
+	}
+	var counts map[string]int
+	if err := json.Unmarshal(progress.data, &counts); err != nil {
+		t.Fatal(err)
+	}
+	if counts["submitted"] != 1 || counts["failed"] != 1 {
+		t.Fatalf("counts = %v", counts)
+	}
+}
+
 func TestContributeMarkersTaskBacksOffFailingFiles(t *testing.T) {
 	failed := []markers.ContributionOutcome{{Provider: "introdb", Status: markers.OutcomeStatusError}}
 	skipped := []markers.ContributionOutcome{{Provider: "introdb", Status: markers.OutcomeStatusSkipped}}
@@ -244,6 +322,8 @@ func TestContributeMarkersTaskBacksOffFailingFiles(t *testing.T) {
 		wantCalls  []int
 		wantWaits  []time.Duration
 		wantFailed int
+		// wantErr is a run where every attempt failed, which Execute reports.
+		wantErr bool
 	}{
 		{
 			name:       "stops after the longest backoff",
@@ -252,6 +332,7 @@ func TestContributeMarkersTaskBacksOffFailingFiles(t *testing.T) {
 			wantCalls:  []int{1, 2, 3, 4, 5, 6, 7, 8, 9},
 			wantWaits:  []time.Duration{30 * time.Second, time.Minute, 2 * time.Minute, 4 * time.Minute, 8 * time.Minute, 10 * time.Minute, 10 * time.Minute, 10 * time.Minute},
 			wantFailed: 9,
+			wantErr:    true,
 		},
 		{
 			name:       "a provider refusal resets the streak",
@@ -303,8 +384,8 @@ func TestContributeMarkersTaskBacksOffFailingFiles(t *testing.T) {
 			}
 
 			prog := &contribTestProgress{}
-			if err := task.Execute(context.Background(), prog); err != nil {
-				t.Fatalf("Execute: %v", err)
+			if err := task.Execute(context.Background(), prog); (err != nil) != tc.wantErr {
+				t.Fatalf("Execute error = %v, want an error: %v", err, tc.wantErr)
 			}
 			var data map[string]int
 			if err := json.Unmarshal(prog.data, &data); err != nil {

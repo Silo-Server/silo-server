@@ -9,18 +9,25 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/Silo-Server/silo-server/internal/auditmutation"
 	"github.com/Silo-Server/silo-server/internal/logstream"
 )
 
 // Consumer batch-inserts one node's activity log entries into PostgreSQL and
 // fans them out to the admin live tail.
 type Consumer struct {
-	pool      *pgxpool.Pool
+	pool      consumerDB
 	batchSize int
 	interval  time.Duration
 	streamHub *logstream.Hub
+}
+
+type consumerDB interface {
+	queryer
+	Exec(context.Context, string, ...any) (pgconn.CommandTag, error)
 }
 
 // NewConsumer creates a new activity log consumer.
@@ -57,7 +64,7 @@ func (c *Consumer) Run(ctx context.Context, ch <-chan LogEntry) {
 // its newest entry in the batch. Accounts are written in id order so batches
 // from different nodes lock the same rows in the same order and cannot
 // deadlock; an older timestamp never overwrites a newer one.
-func recordLastActivity(ctx context.Context, pool *pgxpool.Pool, entries []LogEntry) error {
+func recordLastActivity(ctx context.Context, pool consumerDB, entries []LogEntry) error {
 	latest := map[int]time.Time{}
 	for _, e := range entries {
 		if e.UserID == nil {
@@ -128,7 +135,7 @@ func (c *Consumer) insertRows(ctx context.Context, entries []LogEntry) error {
 		args = append(args, e.Timestamp, logstream.SafeText(e.ClientIP), e.UserID, e.ImpersonatorUserID,
 			logstream.SafeText(e.SessionID), logstream.SafeText(e.PlaybackSessionID), logstream.SafeText(e.RequestID),
 			logstream.SafeText(e.NodeID), logstream.SafeText(e.Method), logstream.SafeText(e.Path),
-			logstream.SafeText(e.PathPattern), e.StatusCode, logstream.SafeText(e.UserAgent), e.DurationMs)
+			logstream.SafeText(e.PathPattern), e.StatusCode, auditmutation.BoundUserAgent(e.UserAgent), e.DurationMs)
 	}
 	b.WriteString(" RETURNING id, timestamp, client_ip::text, user_id, impersonator_user_id, COALESCE(session_id, ''), COALESCE(playback_session_id, ''), COALESCE(request_id, ''), COALESCE(node_id, ''), method, path, COALESCE(path_pattern, ''), COALESCE(status_code, 0), COALESCE(user_agent, ''), COALESCE(duration_ms, 0)")
 
@@ -160,6 +167,7 @@ func (c *Consumer) insertRows(ctx context.Context, entries []LogEntry) error {
 		); err != nil {
 			return fmt.Errorf("scan inserted activity log row: %w", err)
 		}
+		entry.UserAgent = auditmutation.BoundUserAgent(entry.UserAgent)
 		inserted = append(inserted, entry)
 	}
 	if err := rows.Err(); err != nil {

@@ -25,11 +25,13 @@ type HDR10PlusBackfiller interface {
 // read it from a decoded frame, so HDR10+ files stop showing as HDR10. Scans
 // record it themselves; this task covers files no scan has reprobed since,
 // and files whose frame read failed on storage or was skipped by playback's
-// probe repair.
+// probe repair. The same read records the frame's color range, which tone
+// mapping trusts over a contradicting container tag.
 //
 // It runs at startup and then daily. It reads only PQ files without a
-// recorded status, once each, so after the first pass it reads only the few
-// new ones. Every API process runs the task manager, so an advisory lock
+// recorded status or frame range, once each, so after the first pass it reads
+// only the few new ones. The first pass after an upgrade that added the frame
+// range reads every PQ file once more. Every API process runs the task manager, so an advisory lock
 // keeps one pass reading media across the cluster.
 type BackfillHDR10PlusTask struct {
 	backfiller HDR10PlusBackfiller

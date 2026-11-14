@@ -6,6 +6,7 @@ import {
 } from "@/api/client";
 import { v2, type V2Body } from "@/api/v2/request";
 import type { components } from "@/api/v2/schema";
+import { t } from "@/i18n";
 
 export type EbookReaderProgressPayload = {
   file_id: number;
@@ -41,7 +42,7 @@ function progressFromV2(
   if (!progress || !progress.location.trim()) return null;
   const fileID = Number(progress.file_id);
   if (!Number.isSafeInteger(fileID) || fileID <= 0) {
-    throw new Error("The reader cannot represent this file identifier.");
+    throw new Error(t("web.reader.error.fileIdentifier"));
   }
   return { ...progress, file_id: fileID };
 }

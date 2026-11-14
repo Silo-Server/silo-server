@@ -392,8 +392,9 @@ must use the returned height and reject chunks whose geometry differs.
 - MPEG-4 Part 2 (`mpeg4`, `msmpeg4*`) adds `-flags:v +low_delay`. Its
   decoder otherwise holds each picture back for B-frames that a
   keyframes-only read never sends, and releases it when the next keyframe
-  arrives; in AVI, whose packets carry no PTS, the frame then takes that
-  keyframe's time, and every cell showed the keyframe a GOP before its own.
+  arrives, and a frame without a PTS of its own then takes that keyframe's
+  time: before windows demuxed with genpts (below), every cell of a
+  packed-bitstream AVI showed the keyframe a GOP before its own.
   Keyframes-only and reference-only reads decode no B-frames, so low delay
   changes no picture. The repeat repair keeps its own `noref`.
 - A window also copies the same input's video packets to a `framecrc`
@@ -402,15 +403,31 @@ must use the returned height and reject chunks whose geometry differs.
   bound the final keyframe's coverage without decoding extra frames or
   reading the file again. Samples beyond that observed extent remain missing, so
   premature EOF cannot turn every trailing cell into a decoded preview.
-- A packet without a PTS counts by its DTS only when the decoder runs in
-  low delay (MPEG-4 Part 2, above). A DTS never runs ahead of its PTS, so
-  the extent can only shrink, by the reorder delay. Without a PTS the decoder
-  stamps each frame with the DTS of the packet that released it, which is
-  the frame's own only when the decoder releases each keyframe as it
-  arrives. A reordering decoder does not: H.264 with B-frames in AVI
-  releases each keyframe two GOPs late in a keyframes-only read, and low
-  delay does not change that. Such windows fail with no usable packet timing
-  rather than publish every cell at an earlier keyframe.
+  The timing file also holds the packets of every audio stream the probe
+  found a sample rate for; the muxer refuses a stream without one, such as
+  an MPEG-TS track that is declared but never carried. A file whose audio
+  runs on after its video ends has packets past the video's extent, while a
+  truncated file's streams stop together, so samples after the video but
+  within the audio show the window's last decoded keyframe and count as
+  decoded, as samples between keyframes do. That keyframe can come before
+  the video's final frame. A window counts a cell as filled when it has no
+  frame of its own or, after a dropped keyframe (below), shows an earlier
+  keyframe than its own; a tail sample's own frame is the last keyframe at
+  or before its time, as for any other sample. A file's duration follows
+  its longest track, so without this the samples of such an audio tail
+  failed every run; counting them as filled would still fail a short last
+  chunk made mostly of tail samples.
+- A window demuxes with `-fflags +genpts`. AVI packets carry a DTS but no
+  PTS, and without one the decoder stamps each frame with the DTS of the
+  packet that released it. A reordering decoder holds each keyframe of a
+  keyframes-only read back: H.264 with B-frames in AVI released each two
+  GOPs late, and low delay does not change that, so every cell showed an
+  earlier keyframe and the timing file had no packet time at all. genpts
+  fills each missing PTS from the stream's later DTS before the packet is
+  decoded or copied, so frames and the timing file keep their own times;
+  packets that carry a PTS keep it. A derived PTS can sit a frame after the
+  keyframe's true time, as it does in playback, which demuxes with genpts
+  too. A video packet still without a PTS has no usable time.
 - A cell without a frame shows the previous cell's frame, and cells before
   the first frame show the first, so the grid never shifts. A run that had
   to fill more than 10 % of its cells (and more than one) fails as `empty`,

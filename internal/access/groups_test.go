@@ -3,6 +3,7 @@ package access
 import (
 	"context"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/Silo-Server/silo-server/internal/models"
@@ -454,5 +455,51 @@ func TestApplyGroupPolicyIgnoresGroupOnAdmin(t *testing.T) {
 	want.Permissions = []string{"marker_edit"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("ApplyGroupPolicy(admin, group) = %#v, want %#v", got, want)
+	}
+}
+
+// TestWiderThan: a restore creates an account only when the policy here
+// grants nothing the backup's did not, so every field's open value
+// (unrestricted libraries, no quality ceiling, 0 caps) counts as wider than
+// any limit, and narrower values never do.
+func TestWiderThan(t *testing.T) {
+	limit := EffectiveUserPolicy{LibraryIDs: []int{1, 2}, MaxPlaybackQuality: "1080p", MaxStreams: 2, MaxTranscodes: 1,
+		MaxRemoteStreamBitrateKbps: 8000, MaxLocalStreamBitrateKbps: 0, MaxProfiles: 3, Permissions: []string{"marker_edit"}, RequestsAllowed: true}
+	cases := []struct {
+		name   string
+		change func(*EffectiveUserPolicy)
+		want   []string
+	}{
+		{"same", func(*EffectiveUserPolicy) {}, nil},
+		{"narrower everywhere", func(p *EffectiveUserPolicy) {
+			p.LibraryIDs, p.MaxStreams, p.MaxTranscodes, p.MaxRemoteStreamBitrateKbps, p.MaxLocalStreamBitrateKbps = []int{}, 1, 1, 4000, 1000
+			p.MaxProfiles, p.Permissions, p.RequestsAllowed = 1, nil, false
+		}, nil},
+		{"libraries unrestricted", func(p *EffectiveUserPolicy) { p.LibraryIDs = nil }, []string{"library_ids"}},
+		{"a library added", func(p *EffectiveUserPolicy) { p.LibraryIDs = []int{1, 3} }, []string{"library_ids"}},
+		{"quality ceiling lifted", func(p *EffectiveUserPolicy) { p.MaxPlaybackQuality = "" }, []string{"max_playback_quality"}},
+		{"quality ceiling raised", func(p *EffectiveUserPolicy) { p.MaxPlaybackQuality = "4K" }, []string{"max_playback_quality"}},
+		{"stream cap lifted", func(p *EffectiveUserPolicy) { p.MaxStreams = 0 }, []string{"max_streams"}},
+		{"bitrate cap raised", func(p *EffectiveUserPolicy) { p.MaxRemoteStreamBitrateKbps = 9000 }, []string{"max_remote_stream_bitrate_kbps"}},
+		{"more profiles", func(p *EffectiveUserPolicy) { p.MaxProfiles = 4 }, []string{"max_profiles"}},
+		{"downloads allowed", func(p *EffectiveUserPolicy) { p.DownloadAllowed = true }, []string{"download_allowed"}},
+		{"a permission added", func(p *EffectiveUserPolicy) { p.Permissions = []string{"marker_edit", "metadata_curation"} }, []string{"permissions"}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			policy := limit
+			policy.LibraryIDs = append([]int(nil), limit.LibraryIDs...)
+			c.change(&policy)
+			var fields []string
+			for _, w := range WiderThan(policy, limit) {
+				fields = append(fields, w.Field)
+			}
+			if strings.Join(fields, ",") != strings.Join(c.want, ",") {
+				t.Fatalf("WiderThan = %v, want %v", fields, c.want)
+			}
+		})
+	}
+	if got := WiderThan(EffectiveUserPolicy{LibraryIDs: []int{5}}, EffectiveUserPolicy{}); len(got) != 0 {
+		t.Fatalf("an unrestricted limit has nothing to widen: %+v", got)
 	}
 }

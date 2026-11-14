@@ -16,7 +16,6 @@ remains zero. `gpu` and `system.disks` are arrays, including when empty;
 
 Both operations require an acting administrator. Resource disk paths are available
 only behind this gate. Responses use the native API's default no-store policy.
-The frozen v1 inspection operations retain their existing representation.
 
 The web build display and API-host resource panel consume these v2 operations.
 The migration inventory identifies no Apple or Android consumers for these two

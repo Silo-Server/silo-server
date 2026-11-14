@@ -9,6 +9,7 @@ import {
   useAdminUserProfileActivity,
 } from "@/hooks/queries/admin/userActivity";
 import { edgeMask, useScrollStrip } from "@/hooks/useScrollStrip";
+import { useT } from "@/i18n";
 import { cn } from "@/lib/utils";
 
 import { countCustomPolicyRows, countCustomRequestTerms } from "./access/policySources";
@@ -22,10 +23,12 @@ function Count({ children }: { children: ReactNode }) {
 /**
  * The page's tab strip. Each tab carries a hint of what is inside: how many
  * limits the account sets, a dot while it is watching, and item counts. It
- * scrolls sideways on a narrow screen, fades the edge that has more tabs past
- * it, and keeps the active tab in view. Render it inside the page's `Tabs`.
+ * scrolls sideways on a narrow screen (with no scrollbar below `lg`), fades
+ * the edge that has more tabs past it, and keeps the active tab in view.
+ * Render it inside the page's `Tabs`.
  */
 export function UserDetailTabBar({ user, active }: { user: AdminUser; active: UserDetailTab }) {
+  const t = useT();
   const {
     ref: scroller,
     edges,
@@ -46,33 +49,40 @@ export function UserDetailTabBar({ user, active }: { user: AdminUser; active: Us
   const preferences = settingCounts.account + settingCounts.device;
 
   const tabs: Array<{ value: UserDetailTab; label: string; extra?: ReactNode }> = [
-    { value: "overview", label: "Overview" },
+    { value: "overview", label: t("web.admin.users.detail.tabs.overview") },
     {
       value: "profiles",
-      label: "Profiles",
+      label: t("web.admin.users.detail.tabs.profiles"),
       extra: profiles.data ? <Count>{profiles.data.length}</Count> : null,
     },
     {
       value: "access",
-      label: "Access & limits",
-      extra: custom > 0 ? <Count>{custom} custom</Count> : null,
+      label: t("web.admin.users.detail.tabs.access"),
+      extra:
+        custom > 0 ? (
+          <Count>{t("web.admin.users.detail.tabs.customCount", { count: custom })}</Count>
+        ) : null,
     },
-    { value: "sign-in", label: "Sign-in" },
+    { value: "sign-in", label: t("web.admin.users.detail.tabs.signIn") },
     {
       value: "activity",
-      label: "Activity",
+      label: t("web.admin.users.detail.tabs.activity"),
       extra: watching ? (
-        <span role="img" aria-label="Watching now" className="bg-success size-2 rounded-full" />
+        <span
+          role="img"
+          aria-label={t("web.admin.users.detail.common.watchingNow")}
+          className="bg-success size-2 rounded-full"
+        />
       ) : null,
     },
     {
       value: "downloads",
-      label: "Downloads",
+      label: t("web.admin.users.detail.tabs.downloads"),
       extra: accountDownloads && downloads.data ? <Count>{downloads.data.total}</Count> : null,
     },
     {
       value: "preferences",
-      label: "Preferences",
+      label: t("web.admin.users.detail.tabs.preferences"),
       extra: preferencesLoaded ? <Count>{preferences}</Count> : null,
     },
   ];
@@ -81,14 +91,21 @@ export function UserDetailTabBar({ user, active }: { user: AdminUser; active: Us
     <div
       ref={scroller}
       onScroll={measure}
-      className={cn("border-border/70 -mx-1 overflow-x-auto border-b px-1", edgeMask(edges))}
+      className={cn(
+        "border-border/70 -mx-1 overflow-x-auto border-b px-1 max-lg:[scrollbar-width:none] max-lg:[&::-webkit-scrollbar]:hidden",
+        edgeMask(edges),
+      )}
     >
       <TabsList
         variant="line"
         className="h-auto w-max min-w-full flex-nowrap justify-start gap-1 rounded-none bg-transparent p-0 pb-1.5"
       >
         {tabs.map((tab) => (
-          <TabsTrigger key={tab.value} value={tab.value} className="flex-none px-3 py-1.5">
+          <TabsTrigger
+            key={tab.value}
+            value={tab.value}
+            className="flex-none px-3 py-1.5 max-lg:min-h-11"
+          >
             {tab.label}
             {tab.extra}
           </TabsTrigger>

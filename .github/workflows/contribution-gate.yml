@@ -1,0 +1,20 @@
+name: Contribution gate
+
+# Closes pull requests that fall outside the policy in CONTRIBUTING.md. The rules
+# live in reusable-contribution-gate.yml, which the client repositories call too.
+
+on:
+  pull_request_target:
+    types: [opened, reopened, converted_to_draft]
+
+permissions: {}
+
+concurrency:
+  group: contribution-gate-${{ github.event.pull_request.number }}
+
+jobs:
+  gate:
+    permissions:
+      issues: read
+      pull-requests: write
+    uses: ./.github/workflows/reusable-contribution-gate.yml

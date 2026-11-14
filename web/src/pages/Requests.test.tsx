@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, within } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router";
 import type {
   MediaRequest,
@@ -16,6 +17,7 @@ const mocks = vi.hoisted(() => ({
   cancel: vi.fn(),
   remove: vi.fn(),
   create: vi.fn(),
+  profileRequestsAllowed: true,
 }));
 
 vi.mock("@/hooks/queries/useRequests", () => {
@@ -42,6 +44,10 @@ vi.mock("@/hooks/queries/useRequests", () => {
 });
 vi.mock("@/hooks/useWatchlistTitleToggle", () => ({
   useWatchlistTitleToggle: () => ({ enabled: false, toggle: vi.fn(), isPending: () => false }),
+}));
+vi.mock("@/hooks/useCanRequest", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/hooks/useCanRequest")>()),
+  useProfileRequestsAllowed: () => mocks.profileRequestsAllowed,
 }));
 vi.mock("@/hooks/useDocumentTitle", () => ({ useDocumentTitle: () => {} }));
 vi.mock("@/components/BrandCarousel", () => ({
@@ -99,13 +105,15 @@ function LocationProbe() {
 
 function renderAt(url: string) {
   render(
-    <MemoryRouter initialEntries={[url]}>
-      <Routes>
-        <Route path="/requests" element={<Requests />} />
-        <Route path="*" element={null} />
-      </Routes>
-      <LocationProbe />
-    </MemoryRouter>,
+    <QueryClientProvider client={new QueryClient()}>
+      <MemoryRouter initialEntries={[url]}>
+        <Routes>
+          <Route path="/requests" element={<Requests />} />
+          <Route path="*" element={null} />
+        </Routes>
+        <LocationProbe />
+      </MemoryRouter>
+    </QueryClientProvider>,
   );
 }
 
@@ -119,6 +127,7 @@ beforeEach(() => {
   mocks.create.mockReset().mockResolvedValue({});
   mocks.mine = [];
   mocks.sections = [];
+  mocks.profileRequestsAllowed = true;
   mocks.rows = [];
 });
 
@@ -343,5 +352,53 @@ describe("Requests (Yours list)", () => {
     fireEvent.click(within(dialog).getByRole("button", { name: "Remove request" }));
 
     expect(mocks.remove).toHaveBeenCalledExactlyOnceWith("r40");
+  });
+});
+
+describe("Requests for a profile blocked from requests", () => {
+  beforeEach(() => {
+    mocks.profileRequestsAllowed = false;
+    mocks.sections = [
+      {
+        key: "trending_movies",
+        title: "Trending Movies",
+        page: 1,
+        total_pages: 1,
+        total_results: 1,
+        results: [result(1, "Heat")],
+      },
+    ];
+  });
+
+  it("lists the profile's requests without discovery, search or title links", () => {
+    mocks.mine = [request("r1", "Waiting Movie", { requested_by_profile_id: "kid" })];
+    renderAt("/requests");
+
+    expect(screen.getByRole("heading", { level: 1, name: "Requests" })).toBeInTheDocument();
+    expect(screen.getByText(/turned off for this profile/i)).toBeInTheDocument();
+    expect(screen.queryByRole("tab")).not.toBeInTheDocument();
+    expect(screen.queryByRole("textbox", { name: "Search movies and series" })).toBeNull();
+    expect(screen.queryByRole("region", { name: "Trending Movies" })).not.toBeInTheDocument();
+    expect(screen.getByText("Waiting Movie")).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Waiting Movie" })).not.toBeInTheDocument();
+  });
+
+  it("still cancels a request made before the block", () => {
+    mocks.mine = [request("r1", "Waiting Movie", { requested_by_profile_id: "kid" })];
+    renderAt("/requests?tab=yours");
+
+    fireEvent.click(screen.getByRole("button", { name: "Cancel request for Waiting Movie" }));
+    fireEvent.click(
+      within(screen.getByRole("alertdialog")).getByRole("button", { name: "Cancel request" }),
+    );
+
+    expect(mocks.cancel).toHaveBeenCalledExactlyOnceWith("r1");
+  });
+
+  it("offers no way to Discover when there are no requests", () => {
+    renderAt("/requests");
+
+    expect(screen.getByText(/haven.t requested anything/i)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Browse Discover" })).not.toBeInTheDocument();
   });
 });
