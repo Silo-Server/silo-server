@@ -310,6 +310,23 @@ func TestQuickConnectToDeletedProfileKeepsNoSession(t *testing.T) {
 	if session, ok := store.Get(quickConnectSessionToken("SECRET")); ok {
 		t.Fatalf("deleted profile kept session %+v", session)
 	}
+
+	// A first collection that stopped before its check left the session
+	// behind: asking again with the same secret does not hand it out.
+	left, err := resolver.newSession(quickConnectSessionToken("SECRET"), "alice#Deleted", service.collect.User, service.collect.TokenPair, "deleted", "Deleted")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Put(left); err != nil {
+		t.Fatal(err)
+	}
+	service.collect = &auth.DeviceLoginPollResult{Status: auth.DeviceLoginStatusConsumed}
+	if _, err := resolver.ResolveQuickConnect(context.Background(), "SECRET"); !errors.Is(err, ErrProfileNotFound) {
+		t.Fatalf("repeated collection for a deleted profile = %v, want ErrProfileNotFound", err)
+	}
+	if session, ok := store.Get(quickConnectSessionToken("SECRET")); ok {
+		t.Fatalf("repeated collection kept session %+v", session)
+	}
 }
 
 // TestQuickConnectSpendsDeviceBudgets: opening a request spends the native

@@ -261,7 +261,28 @@ func (r *LoginResolver) ResolveQuickConnect(ctx context.Context, secret string) 
 		// The app signed out since.
 		return nil, ErrQuickConnectNotAuthorized
 	}
-	return existing, err
+	if err != nil {
+		return nil, err
+	}
+	// The first collection may have stopped before its own profile check.
+	// Its token is derived from the app's secret, so a session it left for a
+	// since-deleted profile would otherwise be handed out again here. A
+	// failed read keeps the session, which may still be valid.
+	store, err := r.storeProvider.ForUser(ctx, existing.StreamAppUserID)
+	if err != nil {
+		return nil, fmt.Errorf("opening user store: %w", err)
+	}
+	profile, err := store.GetProfile(ctx, existing.ProfileID)
+	if err != nil {
+		return nil, fmt.Errorf("re-reading profile: %w", err)
+	}
+	if profile == nil {
+		if err := r.dropSession(ctx, existing.Token); err != nil {
+			return nil, fmt.Errorf("dropping the session of a deleted profile: %w", err)
+		}
+		return nil, ErrProfileNotFound
+	}
+	return existing, nil
 }
 
 // quickConnectSessionToken is the compat token of the session a Quick
