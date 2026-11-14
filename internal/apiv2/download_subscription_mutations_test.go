@@ -80,10 +80,20 @@ func TestSubscriptionMutationTransport(t *testing.T) {
 		t.Fatalf("%d %s %+v", rec.Code, rec.Body.String(), svc.patch)
 	}
 	current := rec.Header().Get("ETag")
-	for _, body := range []string{`{"max_storage_bytes":-1}`} {
-		rec = do(t, h, "PATCH", path+"/monitor", body, with(device, "If-Match", current))
-		if rec.Code != 400 {
-			t.Fatalf("invalid %d %s", rec.Code, rec.Body.String())
+	// An out-of-range bound is a validation failure at the member, with
+	// create's code and detail.
+	tooMany := strings.TrimSuffix(strings.Repeat("1,", 10001), ",")
+	for _, tc := range []struct{ patch, create, location, detail string }{
+		{`{"max_storage_bytes":-1}`, `"season_numbers":[1],"max_storage_bytes":-1`, "body.max_storage_bytes", "expected number >= 0"},
+		{`{"season_numbers":[` + tooMany + `]}`, `"season_numbers":[` + tooMany + `],"max_storage_bytes":0`, "body.season_numbers", "expected array length <= 10000"},
+	} {
+		p := requireProblem(t, do(t, h, "PATCH", path+"/monitor", tc.patch, with(device, "If-Match", current)), TypeValidationFailed)
+		if len(p.Errors) != 1 || p.Errors[0].Location != tc.location || p.Errors[0].Code != "out_of_range" || p.Errors[0].Detail != tc.detail {
+			t.Fatalf("%s: errors = %+v", tc.location, p.Errors)
+		}
+		create := requireProblem(t, do(t, h, "POST", path, `{"series_id":"series","mode":"specific_seasons","delete_watched":false,`+tc.create+`}`, device), TypeValidationFailed)
+		if len(create.Errors) != 1 || create.Errors[0] != p.Errors[0] {
+			t.Fatalf("%s: patch errors %+v, create errors %+v; want the same", tc.location, p.Errors, create.Errors)
 		}
 	}
 	// Null on a monitor field is a validation failure naming the member.
