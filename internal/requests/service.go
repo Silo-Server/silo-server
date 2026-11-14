@@ -2217,11 +2217,11 @@ func (s *Service) submitApprovedRequest(ctx context.Context, req Request, actor 
 	var submitted *Request
 	var submitErr error
 	if noRouter {
-		done, err := s.settleUnsendableRetry(ctx, *claimed, actor, fc)
-		if done != nil || err != nil {
-			return done, err
+		// A settling error backs off like any failed attempt.
+		submitted, submitErr = s.settleUnsendableRetry(ctx, *claimed, actor, fc)
+		if submitted == nil && submitErr == nil {
+			submitErr = errors.New(msgNoRouter)
 		}
-		submitErr = errors.New(msgNoRouter)
 	} else {
 		submitted, submitErr = s.submitClaimed(ctx, *claimed, actor, fc, missingSeasons)
 	}

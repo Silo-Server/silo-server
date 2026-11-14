@@ -546,3 +546,26 @@ func TestRetryWithNoRouterAndNothingLeftToSendCompletes(t *testing.T) {
 		t.Fatalf("request = %s/%s (%q), want completed/active", got.Status, got.Outcome, got.LastError)
 	}
 }
+
+// deleteFailingStore fails every target delete.
+type deleteFailingStore struct{ *fakeStore }
+
+func (deleteFailingStore) DeleteTarget(context.Context, int64) error {
+	return errors.New("database unavailable")
+}
+
+// A retry with no request server whose settling fails backs off like any
+// failed attempt, rather than holding its claim until the lease runs out.
+func TestRetryWithNoRouterBacksOffWhenSettlingFails(t *testing.T) {
+	store := newFakeStore()
+	svc, _ := newRoutedService(store)
+	retryingMovie(store, svc)
+	svc.SetEntitlementResolver(fixedCeiling{q: "1080p"})
+	svc.store = deleteFailingStore{store}
+	if _, err := svc.Retry(context.Background(), Viewer{UserID: 1, IsAdmin: true}, "r1"); err != nil {
+		t.Fatalf("Retry: %v", err)
+	}
+	if got := store.requests["r1"]; got.NextSubmitAt == nil || got.SubmitLeaseUntil != nil || got.LastError == "" {
+		t.Fatalf("request = %s/%s, next submit %v, lease %v, error %q; want backing off with the error", got.Status, got.Outcome, got.NextSubmitAt, got.SubmitLeaseUntil, got.LastError)
+	}
+}
