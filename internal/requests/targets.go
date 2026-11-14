@@ -224,9 +224,12 @@ func (r *Repository) DeleteTarget(ctx context.Context, id int64) error {
 	return nil
 }
 
-// UpdateTargetStatus updates one target and recomputes the parent request's
-// aggregate status/outcome, all in one transaction. A target that completes
-// or fails loses its download progress.
+// UpdateTargetStatus updates one queued or downloading target and recomputes
+// the parent request's aggregate status/outcome, all in one transaction. A
+// target that completes or fails loses its download progress. A target that
+// has already completed or failed is left alone and answers ErrInvalidState:
+// the caller read it while it was live, and a late report must not fail a
+// failed target again while a retry is resending it.
 func (r *Repository) UpdateTargetStatus(ctx context.Context, targetID int64, status Status,
 	externalID, externalStatus, lastErr string, actor Viewer) (*Request, error) {
 	tx, err := r.pool.Begin(ctx)
@@ -242,9 +245,16 @@ func (r *Repository) UpdateTargetStatus(ctx context.Context, targetID int64, sta
 		    external_id = CASE WHEN $3 = '' THEN external_id ELSE $3 END,
 		    external_status = CASE WHEN $4 = '' THEN external_status ELSE $4 END,
 		    last_error=$5, updated_at=now()
-		WHERE id=$1 RETURNING request_id`,
+		WHERE id=$1 AND status IN ('queued', 'downloading') RETURNING request_id`,
 		targetID, status, externalID, externalStatus, lastErr).Scan(&requestID); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
+			var exists bool
+			if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM media_request_targets WHERE id = $1)`, targetID).Scan(&exists); err != nil {
+				return nil, fmt.Errorf("check target existence: %w", err)
+			}
+			if exists {
+				return nil, ErrInvalidState
+			}
 			return nil, ErrNotFound
 		}
 		return nil, fmt.Errorf("update target: %w", err)

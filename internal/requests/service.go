@@ -2949,7 +2949,12 @@ func (s *Service) applyTargetStatuses(ctx context.Context, check *completionChec
 		}
 		status := target.Status
 		if newStatus := check.reported(ctx, s, target.Status, st.Status); newStatus != "" && newStatus != target.Status {
-			if _, err := s.store.UpdateTargetStatus(ctx, target.ID, newStatus, "", st.ExternalStatus, st.Message, Viewer{}); err != nil {
+			_, err := s.store.UpdateTargetStatus(ctx, target.ID, newStatus, "", st.ExternalStatus, st.Message, Viewer{})
+			if errors.Is(err, ErrInvalidState) {
+				// Another pass finished the target since it was read.
+				continue
+			}
+			if err != nil {
 				return reconcileUnchanged, err
 			}
 			status = newStatus
@@ -3200,6 +3205,10 @@ func (s *Service) retireStalledTargets(ctx context.Context, req Request, targets
 			continue
 		}
 		next, err := s.store.UpdateTargetStatus(ctx, t.ID, StatusCompleted, "", ExternalStatusPresenceConfirmed, "", Viewer{})
+		if errors.Is(err, ErrInvalidState) {
+			// Another pass finished the target since it was read.
+			continue
+		}
 		if err != nil {
 			return updated, retired, err
 		}

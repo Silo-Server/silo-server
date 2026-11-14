@@ -2262,9 +2262,18 @@ func (f *fakeStore) DeleteTarget(_ context.Context, id int64) error {
 	return ErrNotFound
 }
 
+// UpdateTargetStatus mirrors the repository: it writes only a queued or
+// downloading target and answers ErrInvalidState for a finished one.
 func (f *fakeStore) UpdateTargetStatus(_ context.Context, targetID int64, status Status, externalID, externalStatus, lastErr string, _ Viewer) (*Request, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	for _, ts := range f.targets {
+		for _, t := range ts {
+			if t.ID == targetID && t.Status != StatusQueued && t.Status != StatusDownloading {
+				return nil, ErrInvalidState
+			}
+		}
+	}
 	return f.updateTargetLocked(targetID, status, externalID, externalStatus, lastErr)
 }
 

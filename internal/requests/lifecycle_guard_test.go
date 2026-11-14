@@ -356,6 +356,51 @@ func TestRetryKeepsFailedTargetUntilResendRecorded(t *testing.T) {
 	}
 }
 
+// pollingRouter runs during before each Fulfill call, to interleave another
+// API server's work with a submission's router call.
+type pollingRouter struct {
+	*fakeRouterProvider
+	during func()
+}
+
+func (p *pollingRouter) Fulfill(ctx context.Context, installationID int, capabilityID string, req Request, qualities []Quality, conns []ResolvedRouterConnection) ([]RouterTarget, string, error) {
+	p.during()
+	return p.fakeRouterProvider.Fulfill(ctx, installationID, capabilityID, req, qualities, conns)
+}
+
+// A status poll that read a target as queued before it failed, and lands
+// while a Retry is resending that failed tier, leaves the target and the
+// request alone, so the resend is recorded.
+func TestStalePollDoesNotFailRetryInFlight(t *testing.T) {
+	ctx := context.Background()
+	store := newFakeStore()
+	store.integrations = []Integration{routerInst("router-1")}
+	store.requests["r1"] = &Request{ID: "r1", MediaType: MediaTypeMovie, TMDBID: 550, Status: StatusQueued, Outcome: OutcomeFailed}
+	store.targets = map[string][]Target{"r1": {
+		{ID: 1, RequestID: "r1", IntegrationID: "router-1", Quality: Quality1080p, Status: StatusCompleted},
+		{ID: 2, RequestID: "r1", IntegrationID: "router-1", Quality: Quality2160p, Status: StatusFailed, ExternalID: "4k"},
+	}}
+	store.targetSeq = 2
+	svc := newTestService(store)
+	stale := []Target{store.targets["r1"][0], store.targets["r1"][1]}
+	stale[1].Status = StatusQueued
+	svc.SetRouterProvider(&pollingRouter{fakeRouterProvider: &fakeRouterProvider{}, during: func() {
+		req := *store.requests["r1"]
+		if _, err := svc.applyTargetStatuses(ctx, newCompletionCheck(req, nil), stale,
+			[]RouterTargetStatus{{Quality: Quality2160p, ConnectionID: "router-1", Status: StatusFailed}}); err != nil {
+			t.Errorf("stale poll: %v", err)
+		}
+	}})
+
+	req, err := svc.Retry(ctx, Viewer{UserID: 1, IsAdmin: true}, "r1")
+	if err != nil {
+		t.Fatalf("Retry returned error: %v", err)
+	}
+	if req.Status != StatusQueued || req.Outcome != OutcomeActive {
+		t.Fatalf("request = %s/%s, want queued/active with the resend recorded", req.Status, req.Outcome)
+	}
+}
+
 // RecordSubmission replaces a resent quality's failed target in the same
 // transaction that records the resend, and a write it refuses or rolls back
 // leaves the failure in place.
@@ -409,6 +454,39 @@ func TestRecordSubmissionReplacesFailedTargetDatabase(t *testing.T) {
 	}
 	if req.Status != StatusQueued || req.Outcome != OutcomeActive {
 		t.Fatalf("request = %s/%s, want queued/active", req.Status, req.Outcome)
+	}
+}
+
+// A status report for a target another pass already finished leaves the
+// target and its request alone.
+func TestUpdateTargetStatusLeavesFinishedTargetDatabase(t *testing.T) {
+	repo, pool := lifecycleTestRepository(t)
+	ctx := t.Context()
+	insertLifecycleRequest(t, repo, "r1", 1, 101, StatusApproved)
+	var failedID int64
+	if err := pool.QueryRow(ctx, `INSERT INTO media_request_targets (request_id, quality, status, last_error)
+		VALUES ('r1', '2160p', 'failed', 'radarr 4k unreachable') RETURNING id`).Scan(&failedID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.UpdateTargetStatus(ctx, failedID, StatusFailed, "", "", "late report", Viewer{}); !errors.Is(err, ErrInvalidState) {
+		t.Fatalf("update a failed target: err = %v, want ErrInvalidState", err)
+	}
+	req, err := repo.GetRequest(ctx, "r1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if req.Status != StatusApproved || req.Outcome != OutcomeActive {
+		t.Fatalf("request = %s/%s, want approved/active left alone", req.Status, req.Outcome)
+	}
+	targets, err := repo.ListTargets(ctx, "r1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(targets) != 1 || targets[0].LastError != "radarr 4k unreachable" {
+		t.Fatalf("targets = %+v, want the failed target unchanged", targets)
+	}
+	if _, err := repo.UpdateTargetStatus(ctx, failedID+1000, StatusFailed, "", "", "", Viewer{}); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("update a missing target: err = %v, want ErrNotFound", err)
 	}
 }
 
