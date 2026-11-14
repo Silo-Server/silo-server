@@ -8,7 +8,7 @@ import { cn } from "@/lib/utils";
 // known only from TMDB read the same under their artwork.
 export const MEDIA_CARD_CAPTION_CLASS = "px-1 pt-3";
 export const MEDIA_CARD_TITLE_CLASS =
-  "block truncate text-[0.875rem] font-semibold tracking-tight hover:underline";
+  "bidi-text block truncate text-[0.875rem] font-semibold tracking-tight hover:underline";
 export const MEDIA_CARD_META_CLASS =
   "text-muted-foreground mt-1 block truncate text-[0.6875rem] font-medium tracking-[0.14em] uppercase hover:underline";
 
@@ -96,6 +96,7 @@ export default function MediaCardArtwork({
           )}
           loading={priority ? "eager" : lazy ? "lazy" : undefined}
           fetchPriority={priority ? "high" : undefined}
+          decoding={priority ? undefined : "async"}
           onLoad={onLoad}
           onError={() => {
             onError();

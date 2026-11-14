@@ -6,7 +6,7 @@ import (
 	"fmt"
 )
 
-const schemaVersion = 37
+const schemaVersion = 38
 
 func runMigrations(db *sql.DB) error {
 	version, err := userVersion(db)
@@ -403,6 +403,14 @@ WHERE key = 'ui.card_presentation'
 			return err
 		}
 	}
+	if version < 38 {
+		if err := addProfileRequestsBlocked(tx); err != nil {
+			return fmt.Errorf("migration v38 failed: %w", err)
+		}
+		if _, err := tx.ExecContext(context.Background(), "PRAGMA user_version = 38"); err != nil {
+			return err
+		}
+	}
 	if _, err := tx.Exec(profilePINRevisionSchema); err != nil {
 		return fmt.Errorf("creating profile PIN revision trigger: %w", err)
 	}
@@ -780,5 +788,16 @@ func addHistoryRemovalCutoff(tx *sql.Tx) error {
 		return nil
 	}
 	_, err := tx.ExecContext(context.Background(), "ALTER TABLE hidden_history_items ADD COLUMN removed_before TEXT")
+	return err
+}
+
+// addProfileRequestsBlocked adds profiles.requests_blocked. Same reasoning as
+// v27: a fresh profiles table already has the column. The Postgres store adds
+// the same column in 20261016213027_profile_requests_blocked.sql.
+func addProfileRequestsBlocked(tx *sql.Tx) error {
+	if columnExists(tx, "profiles", "requests_blocked") {
+		return nil
+	}
+	_, err := tx.ExecContext(context.Background(), `ALTER TABLE profiles ADD COLUMN requests_blocked BOOLEAN NOT NULL DEFAULT false`)
 	return err
 }

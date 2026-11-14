@@ -3,6 +3,7 @@ package sections
 import (
 	"encoding/json"
 	"reflect"
+	"slices"
 	"sort"
 	"strings"
 
@@ -44,6 +45,9 @@ func Resolve(admin []*PageSection, overrides []ProfileSectionOverride) []Resolve
 			ItemLimit:   ClampItemLimit(s.ItemLimit),
 			Config:      s.Config,
 			Position:    s.Position,
+			WebOnly:     s.WebOnly,
+			TitleKey:    s.TitleKey,
+			TitleArgs:   s.TitleArgs,
 		}
 
 		if hasOverride {
@@ -53,6 +57,7 @@ func Resolve(admin []*PageSection, overrides []ProfileSectionOverride) []Resolve
 			}
 			if o.Title != "" {
 				rs.Title = o.Title
+				rs.TitleKey, rs.TitleArgs = overrideTitleKey(s, o.Title)
 			}
 			if o.Featured != nil {
 				rs.Featured = *o.Featured
@@ -114,6 +119,9 @@ func ResolveForSettings(admin []*PageSection, overrides []ProfileSectionOverride
 			ItemLimit:   ClampItemLimit(s.ItemLimit),
 			Config:      s.Config,
 			Position:    s.Position,
+			WebOnly:     s.WebOnly,
+			TitleKey:    s.TitleKey,
+			TitleArgs:   s.TitleArgs,
 		}
 
 		if hasOverride {
@@ -124,6 +132,7 @@ func ResolveForSettings(admin []*PageSection, overrides []ProfileSectionOverride
 			}
 			if o.Title != "" {
 				rs.Title = o.Title
+				rs.TitleKey, rs.TitleArgs = overrideTitleKey(s, o.Title)
 			}
 			if o.Featured != nil {
 				rs.Featured = *o.Featured
@@ -140,6 +149,7 @@ func ResolveForSettings(admin []*PageSection, overrides []ProfileSectionOverride
 		// an admin title saved as the raw key still equals Title when the
 		// profile has no title override.
 		rs.DefaultTitle = readableTitle(rs.SectionType, s.Title, rs.Config)
+		rs.DefaultTitleKey, rs.DefaultTitleArgs = s.TitleKey, s.TitleArgs
 		rs.Title = readableTitle(rs.SectionType, rs.Title, rs.Config)
 		result = append(result, rs)
 	}
@@ -156,6 +166,20 @@ func ResolveForSettings(admin []*PageSection, overrides []ProfileSectionOverride
 	})
 
 	return result
+}
+
+// ForClient returns the sections a client receives, in display order. The
+// web app receives every section. Any other client loses the page's hero
+// banner when the admin limited it to the web: the web shows the first
+// featured section as the banner and any later one as a regular row, and the
+// apps show every section as a regular row, so only that first one is the
+// web's alone. The input slice is never modified.
+func ForClient(resolved []ResolvedSection, web bool) []ResolvedSection {
+	hero := slices.IndexFunc(resolved, func(s ResolvedSection) bool { return s.Featured })
+	if web || hero < 0 || !resolved[hero].WebOnly {
+		return resolved
+	}
+	return slices.Delete(slices.Clone(resolved), hero, hero+1)
 }
 
 // resolveUserAdded converts a user-added ProfileSectionOverride into a
@@ -204,6 +228,17 @@ func resolveUserAdded(o ProfileSectionOverride) ResolvedSection {
 		IsCustom:    true,
 		Hidden:      o.Hidden,
 	}
+}
+
+// overrideTitleKey is the title key of admin section s under a profile's
+// title override. Before October 2026 the web saved the admin title with
+// every override of a row, so an override equal to the stored admin title
+// keeps its key; any other override is the profile's own text.
+func overrideTitleKey(s *PageSection, title string) (string, map[string]string) {
+	if title == s.Title {
+		return s.TitleKey, s.TitleArgs
+	}
+	return "", nil
 }
 
 // readableTitle replaces a blank title, or one that is just the raw

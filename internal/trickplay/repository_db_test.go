@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -218,5 +219,81 @@ func TestClaimPublishAndServeDB(t *testing.T) {
 	}
 	if got := f.queued(t, file); !slices.Equal(got, []string{revisionPrefix(file, revision)}) {
 		t.Fatalf("queued %v, want the displaced revision", got)
+	}
+}
+
+func TestExternalDeliveryConfirmationDB(t *testing.T) {
+	// A store of its own keeps other tests' revisions out of the claims.
+	const store = "local|/trickplay-delivery-test"
+	f := newFixture(t)
+	file := f.file(t, f.library(t, "movies", true), "movie")
+	f.reconcile(t)
+	job, err := f.repo.ClaimFile(t.Context(), file, "server-a", time.Minute)
+	if err != nil || job == nil {
+		t.Fatalf("claim: %v %v", job, err)
+	}
+	revision, ok, err := f.repo.BeginUpload(t.Context(), file, job.LeaseToken)
+	if err != nil || !ok {
+		t.Fatalf("begin upload: %v %t", err, ok)
+	}
+	if ok, err := f.repo.Publish(t.Context(), file, job.LeaseToken, revision, Published{
+		Recipe: testRecipe, StoreIdentity: store, Height: 168, Count: 360, SheetBytes: []int{1, 1, 1, 1, 1},
+		DeliveryScope: "scope-old",
+	}); err != nil || !ok {
+		t.Fatalf("publish: %v %t", err, ok)
+	}
+	served := func(scope string) string {
+		t.Helper()
+		reader := NewReader(f.pool, identityStore(store), originURLs("/api/v2/artwork/"))
+		reader.SetExternalDelivery(scope, originURLs("https://cdn.example/"))
+		signed, ok, err := reader.SignedManifest(t.Context(), file)
+		if err != nil || !ok {
+			t.Fatalf("signed manifest: %v %t", err, ok)
+		}
+		origin, _, _ := strings.Cut(signed.SheetURLs[0], "trickplay/")
+		return origin
+	}
+	if got := served("scope-old"); got != "https://cdn.example/" {
+		t.Fatalf("a revision confirmed at publish was served from %q", got)
+	}
+	if got := served("scope-a"); got != "/api/v2/artwork/" {
+		t.Fatalf("an unconfirmed revision was served from %q", got)
+	}
+
+	// Publishing counts as a check, so the revision is due only after its
+	// recheck.
+	if checks, _ := f.repo.ClaimDeliveryChecks(t.Context(), store, "scope-a", time.Hour, 10); len(checks) != 0 {
+		t.Fatal("a revision just checked at publish was claimed")
+	}
+	checks, err := f.repo.ClaimDeliveryChecks(t.Context(), store, "scope-a", 0, 10)
+	if err != nil || !slices.Equal(checks, []DeliveryCheck{{FileID: file, Revision: revision, SheetCount: 5}}) {
+		t.Fatalf("claimed %+v, %v", checks, err)
+	}
+	if again, _ := f.repo.ClaimDeliveryChecks(t.Context(), store, "scope-a", time.Hour, 10); len(again) != 0 {
+		t.Fatal("a revision was claimed again before its recheck")
+	}
+	// A confirmation of a revision replaced meanwhile changes nothing.
+	if err := f.repo.RecordDelivery(t.Context(), file, revision+1, store, "scope-a"); err != nil {
+		t.Fatal(err)
+	}
+	if got := served("scope-a"); got != "/api/v2/artwork/" {
+		t.Fatalf("a stale confirmation was served from %q", got)
+	}
+	if err := f.repo.RecordDelivery(t.Context(), file, revision, store, "scope-a"); err != nil {
+		t.Fatal(err)
+	}
+	if got := served("scope-a"); got != "https://cdn.example/" {
+		t.Fatalf("a confirmed revision was served from %q", got)
+	}
+
+	// A new endpoint configuration has confirmed nothing yet.
+	if got := served("scope-b"); got != "/api/v2/artwork/" {
+		t.Fatalf("a revision confirmed under another scope was served from %q", got)
+	}
+	if checks, _ := f.repo.ClaimDeliveryChecks(t.Context(), store, "scope-b", 0, 10); len(checks) != 1 {
+		t.Fatalf("claimed %+v under the new scope", checks)
+	}
+	if checks, _ := f.repo.ClaimDeliveryChecks(t.Context(), store, "scope-a", 0, 10); len(checks) != 0 {
+		t.Fatalf("claimed %+v under the confirmed scope", checks)
 	}
 }

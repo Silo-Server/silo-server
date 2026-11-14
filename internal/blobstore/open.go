@@ -183,6 +183,14 @@ func openRecorded(ctx context.Context, store Store, settings SettingsStore) (Sto
 	if err != nil {
 		return nil, "", fmt.Errorf("read %s: %w", IdentitySettingKey, err)
 	}
+	if fs, ok := store.(*Filesystem); ok && SameLocalRoot(active, fs.Identity()) {
+		// The recorded root is this directory under another path. Keep the
+		// recorded identity without rewriting the row: trickplay manifests,
+		// delivery scopes, and sweep checkpoints are keyed by it, and an image
+		// that still reaches the directory by the recorded path must keep
+		// opening it.
+		fs.identity = active
+	}
 	if active != "" && active != store.Identity() {
 		if !legacyIdentityMatches(active, store.Identity()) {
 			return nil, "", fmt.Errorf("artwork storage is recorded as %q but configured as %q; use the managed storage transition in Admin settings", active, store.Identity())
@@ -237,6 +245,8 @@ type recordingStore struct {
 	recorded bool
 }
 
+func (s *recordingStore) unwrapStore() Store { return s.Store }
+
 type recordingDirectStore struct {
 	*recordingStore
 	DirectURLer
@@ -288,6 +298,25 @@ func (s *recordingStore) PutStream(ctx context.Context, key string, r io.Reader,
 		return err
 	}
 	return s.recordBackend(ctx)
+}
+
+// RecordIdentity records store's storage identity now, as its first write
+// would. A caller that will write while it holds a database connection calls
+// it first, so the write never needs another connection for the settings
+// row (with a one-connection pool, it would wait forever). A store opened
+// without settings records nothing.
+func RecordIdentity(ctx context.Context, store Store) error {
+	for store != nil {
+		switch s := store.(type) {
+		case interface{ recordBackend(context.Context) error }:
+			return s.recordBackend(ctx)
+		case interface{ unwrapStore() Store }:
+			store = s.unwrapStore()
+		default:
+			return nil
+		}
+	}
+	return nil
 }
 
 func (s *recordingStore) recordBackend(ctx context.Context) error {

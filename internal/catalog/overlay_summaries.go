@@ -2,7 +2,6 @@ package catalog
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -43,6 +42,13 @@ const overlaySummaryRangeRankSQL = `CASE
 				ELSE 0
 			END`
 
+// overlaySummaryHasSubtitlesSQL is whether a file has any embedded or external
+// subtitle track, the only fact overlays takes from those columns. Deciding it
+// in SQL keeps the largest JSON columns out of every card's row.
+const overlaySummaryHasSubtitlesSQL = `(
+			CASE jsonb_typeof(mf.subtitle_tracks) WHEN 'array' THEN jsonb_array_length(mf.subtitle_tracks) > 0 ELSE false END
+			OR CASE jsonb_typeof(mf.external_subtitles) WHEN 'array' THEN jsonb_array_length(mf.external_subtitles) > 0 ELSE false END)`
+
 // ListOverlaySummaries reduces accessible files to one badge winner per card.
 // Sections retain their existing content/episode/file tie order; catalog lists
 // use file ID, matching their scanner projections.
@@ -68,7 +74,6 @@ func listOverlaySummaries(ctx context.Context, pool *pgxpool.Pool, contentIDs []
 
 	args := []any{contentIDs}
 	conditions := []string{
-		"(mf.content_id = ANY($1) OR mf.episode_id = ANY($1))",
 		playableFileExists,
 		"g.group_key = ANY($1)",
 	}
@@ -77,8 +82,20 @@ func listOverlaySummaries(ctx context.Context, pool *pgxpool.Pool, contentIDs []
 
 	// Filter through the existing content/episode indexes before expanding the
 	// requested groups. Sort narrow candidates, then fetch each winner's JSON.
+	// A multi-episode file also badges each later episode of its range.
 	query := fmt.Sprintf(`
-		WITH winners AS (
+		WITH served AS MATERIALIZED (
+			-- Collected once: inlined, the planner can rerun the union for
+			-- every media_files row it scans.
+			SELECT linked.id AS file_id, linked_group.group_key
+			FROM media_files linked
+			CROSS JOIN LATERAL (VALUES (linked.content_id), (linked.episode_id)) AS linked_group(group_key)
+			WHERE linked.content_id = ANY($1) OR linked.episode_id = ANY($1)
+			UNION ALL
+			SELECT mf.id, covered.content_id
+			FROM episodes covered`+spannedEpisodeJoinSQL+`
+			WHERE covered.content_id = ANY($1)
+		), winners AS (
 			SELECT DISTINCT ON (group_key) group_key, id
 			FROM (
 				SELECT
@@ -86,18 +103,20 @@ func listOverlaySummaries(ctx context.Context, pool *pgxpool.Pool, contentIDs []
 					mf.id, mf.content_id, mf.episode_id,
 					%s AS resolution_rank,
 					%s AS range_rank
-				FROM media_files mf
-				CROSS JOIN LATERAL (VALUES (mf.content_id), (mf.episode_id)) AS g(group_key)
+				FROM served g
+				JOIN media_files mf ON mf.id = g.file_id
 				WHERE %s
 			) candidates
 			ORDER BY group_key, resolution_rank DESC, range_rank DESC, %s
 		)
-		SELECT winners.group_key, coalesce(mf.content_id, ''), mf.episode_id, mf.file_path, mf.resolution, mf.codec_audio,
-			mf.audio_tracks, coalesce(mf.hdr, false), mf.video_tracks, mf.codec_video, mf.audio_channels, mf.container,
-			mf.subtitle_tracks, mf.external_subtitles, mf.edition_key
+		SELECT winners.group_key, mf.file_path, coalesce(mf.resolution, ''), coalesce(mf.hdr, false),
+			coalesce(mf.codec_video, ''), coalesce(mf.codec_audio, ''), coalesce(mf.audio_channels, 0),
+			coalesce(mf.container, ''), coalesce(mf.edition_key, ''), mf.video_tracks, mf.audio_tracks,
+			%s
 		FROM winners
 		JOIN media_files mf ON mf.id = winners.id
-	`, overlaySummaryResolutionRankSQL, overlaySummaryRangeRankSQL, strings.Join(conditions, " AND "), tieOrder)
+	`, overlaySummaryResolutionRankSQL, overlaySummaryRangeRankSQL, strings.Join(conditions, " AND "), tieOrder,
+		overlaySummaryHasSubtitlesSQL)
 
 	rows, err := pool.Query(ctx, query, args...)
 	if err != nil {
@@ -107,76 +126,18 @@ func listOverlaySummaries(ctx context.Context, pool *pgxpool.Pool, contentIDs []
 
 	for rows.Next() {
 		var groupKey string
-		var contentID string
-		var episodeID *string
-		var filePath string
-		var resolution *string
-		var codecAudio *string
-		var audioTracksJSON []byte
-		var hdr bool
-		var videoTracksJSON []byte
-		var codecVideo *string
-		var audioChannels *int
-		var container *string
-		var subtitleTracksJSON []byte
-		var externalSubtitlesJSON []byte
-		var editionKey *string
-
+		var file overlays.StoredFile
 		if err := rows.Scan(
-			&groupKey, &contentID, &episodeID, &filePath, &resolution, &codecAudio, &audioTracksJSON, &hdr,
-			&videoTracksJSON, &codecVideo, &audioChannels, &container, &subtitleTracksJSON, &externalSubtitlesJSON, &editionKey,
+			&groupKey, &file.FilePath, &file.Resolution, &file.HDR, &file.CodecVideo, &file.CodecAudio,
+			&file.AudioChannels, &file.Container, &file.EditionKey, &file.VideoTracks, &file.AudioTracks, &file.HasSubtitles,
 		); err != nil {
 			return nil, fmt.Errorf("scanning overlay summary row: %w", err)
 		}
-
-		file := &models.MediaFile{
-			ContentID: contentID,
-			FilePath:  filePath,
-			HDR:       hdr,
+		summary, err := overlays.BuildStoredSummary(&file)
+		if err != nil {
+			return nil, fmt.Errorf("building overlay summary: %w", err)
 		}
-		if episodeID != nil {
-			file.EpisodeID = *episodeID
-		}
-		if resolution != nil {
-			file.Resolution = *resolution
-		}
-		if codecAudio != nil {
-			file.CodecAudio = *codecAudio
-		}
-		if codecVideo != nil {
-			file.CodecVideo = *codecVideo
-		}
-		if audioChannels != nil {
-			file.AudioChannels = *audioChannels
-		}
-		if container != nil {
-			file.Container = *container
-		}
-		if editionKey != nil {
-			file.EditionKey = *editionKey
-		}
-		if len(audioTracksJSON) > 0 {
-			if err := json.Unmarshal(audioTracksJSON, &file.AudioTracks); err != nil {
-				return nil, fmt.Errorf("unmarshaling overlay audio tracks: %w", err)
-			}
-		}
-		if len(videoTracksJSON) > 0 {
-			if err := json.Unmarshal(videoTracksJSON, &file.VideoTracks); err != nil {
-				return nil, fmt.Errorf("unmarshaling overlay video tracks: %w", err)
-			}
-		}
-		if len(subtitleTracksJSON) > 0 {
-			if err := json.Unmarshal(subtitleTracksJSON, &file.SubtitleTracks); err != nil {
-				return nil, fmt.Errorf("unmarshaling overlay subtitle tracks: %w", err)
-			}
-		}
-		if len(externalSubtitlesJSON) > 0 {
-			if err := json.Unmarshal(externalSubtitlesJSON, &file.ExternalSubtitles); err != nil {
-				return nil, fmt.Errorf("unmarshaling overlay external subtitles: %w", err)
-			}
-		}
-
-		if summary := overlays.BuildSummary([]*models.MediaFile{file}); summary != nil {
+		if summary != nil {
 			summaries[groupKey] = summary
 		}
 	}

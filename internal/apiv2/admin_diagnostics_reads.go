@@ -25,7 +25,7 @@ type AdminDiagnosticSummary struct {
 	CapturedAt         Instant  `json:"captured_at"`
 	ReceivedAt         Instant  `json:"received_at"`
 	ReportType         string   `json:"report_type" enum:"crash,anr,native_crash,hang,abnormal_exit,manual"`
-	Platform           string   `json:"platform" enum:"android,android-tv,ios,tvos"`
+	Platform           string   `json:"platform" enum:"android,android-tv,ios,tvos,roku"`
 	AppVersion         string   `json:"app_version"`
 	AppBuild           string   `json:"app_build"`
 	CrashSummary       *string  `json:"crash_summary,omitempty"`

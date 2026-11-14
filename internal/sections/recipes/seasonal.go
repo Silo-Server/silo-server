@@ -16,10 +16,22 @@ import (
 // the seasonal window.
 type DatePredicate func(time.Time) bool
 
+// seasonEndGrace keeps a dated season up this long after its last day ends.
+// Days are the server's (UTC by default), so without it Halloween would end
+// on the evening of October 31 for viewers in the Americas. On a server set
+// to the viewer's own zone, the season runs into the next morning instead.
+const seasonEndGrace = 12 * time.Hour
+
 // inYearlyWindow reports whether t falls between start and end (MM-DD,
-// inclusive). An end before the start wraps across New Year. An unparseable
-// bound never matches.
+// inclusive), or within seasonEndGrace after end. An end before the start
+// wraps across New Year. An unparseable bound never matches.
 func inYearlyWindow(t time.Time, start, end string) bool {
+	return onYearlyWindowDay(t, start, end) || onYearlyWindowDay(t.Add(-seasonEndGrace), start, end)
+}
+
+// onYearlyWindowDay reports whether t's date falls between start and end
+// (MM-DD, inclusive).
+func onYearlyWindowDay(t time.Time, start, end string) bool {
 	sm, sd, ok1 := parseMonthDay(start)
 	em, ed, ok2 := parseMonthDay(end)
 	if !ok1 || !ok2 {
@@ -53,8 +65,15 @@ func weekdaysFromHour(hour int, weekdays ...time.Weekday) DatePredicate {
 	}
 }
 
-// easterWindow matches Palm Sunday through Easter Monday.
+// easterWindow matches Palm Sunday through Easter Monday, and seasonEndGrace
+// after it.
 func easterWindow(t time.Time) bool {
+	return onEasterWindowDay(t) || onEasterWindowDay(t.Add(-seasonEndGrace))
+}
+
+// onEasterWindowDay reports whether t's date is Palm Sunday through Easter
+// Monday.
+func onEasterWindowDay(t time.Time) bool {
 	easter := easterSunday(t.Year(), t.Location())
 	day := time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, t.Location())
 	return !day.Before(easter.AddDate(0, 0, -7)) && !day.After(easter.AddDate(0, 0, 1))
@@ -361,6 +380,10 @@ type SeasonalPick struct {
 	Vibe    string
 	ListURL string
 	Title   string
+	// TitleKey is the catalog key of Title while it is a built-in vibe's own
+	// title, and empty for a title an admin typed (a custom holiday's, or a
+	// theme title override).
+	TitleKey string
 }
 
 // ActiveSeasonalPick returns what the row shows at now, or false when nothing
@@ -392,11 +415,14 @@ func ActiveSeasonalPick(p SeasonalThemedParams, now time.Time) (SeasonalPick, bo
 		return SeasonalPick{}, false
 	}
 	vibe := entry.Vibe(p.Vibes[theme])
-	title := strings.TrimSpace(p.ThemeTitles[theme])
+	title, titleKey := strings.TrimSpace(p.ThemeTitles[theme]), ""
 	if title == "" {
 		title = vibe.Title
+		if title != "" {
+			titleKey = seasonalVibeTitleKey(theme, vibe.Key)
+		}
 	}
-	return SeasonalPick{Theme: theme, Vibe: vibe.Key, ListURL: vibe.ListURL, Title: title}, true
+	return SeasonalPick{Theme: theme, Vibe: vibe.Key, ListURL: vibe.ListURL, Title: title, TitleKey: titleKey}, true
 }
 
 // SeasonalListURLsAround returns the list URLs a row will show from now

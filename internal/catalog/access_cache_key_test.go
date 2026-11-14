@@ -114,6 +114,10 @@ func nonZeroMaturityLimits(t *testing.T) []namedMaturityLimits {
 			field.SetBool(true)
 		case reflect.Int:
 			field.SetInt(10)
+		case reflect.Slice:
+			// AllowedTitleIDs widens rather than restricts, but it changes
+			// which rows match all the same.
+			field.Set(reflect.ValueOf([]string{"allowed-title"}))
 		default:
 			t.Fatalf("MaturityLimits.%s has kind %s; teach this test a restricting value", typ.Field(i).Name, field.Kind())
 		}

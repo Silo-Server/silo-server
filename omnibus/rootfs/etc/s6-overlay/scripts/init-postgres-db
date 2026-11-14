@@ -1,0 +1,72 @@
+#!/command/with-contenv bash
+# shellcheck shell=bash
+# Create the silo database. Silo's migrations create the extensions they
+# need, as they do in the Compose stack; the silo role is the superuser.
+set -euo pipefail
+# shellcheck source=omnibus/rootfs/etc/silo-omnibus/lib.sh
+source /etc/silo-omnibus/lib.sh
+
+enabled postgres || exit 0
+export HOME=/config/silo
+
+psql_silo() {
+  s6-setuidgid silo psql -v ON_ERROR_STOP=1 -qAtX -h /run/postgresql -U silo "$@"
+}
+
+if [[ "$(psql_silo -d postgres -c "SELECT 1 FROM pg_database WHERE datname = 'silo'")" != "1" ]]; then
+  log "creating the silo database"
+  psql_silo -d postgres -c 'CREATE DATABASE silo'
+fi
+
+# Nodes sign in as silo with POSTGRES_PASSWORD. Without node access the role
+# has no password, so only peer authentication on the socket lets anyone in.
+# The password travels in psql's environment, not on its command line. The
+# network rule goes in only after it is set: until then the server listens but
+# admits no remote login, so a password rotated out cannot be used meanwhile.
+if [[ -e "$STATE_DIR/postgres.network" ]]; then
+  SILO_ROLE_PASSWORD="$POSTGRES_PASSWORD" s6-setuidgid silo \
+    psql -v ON_ERROR_STOP=1 -qAtX -h /run/postgresql -U silo -d postgres <<'SQL'
+\getenv password SILO_ROLE_PASSWORD
+ALTER ROLE silo PASSWORD :'password';
+SQL
+  printf 'host    silo         silo  all           scram-sha-256\n' |
+    append_as postgres /config/postgres/data/pg_hba.conf
+  psql_silo -d postgres -c 'SELECT pg_reload_conf()' >/dev/null
+else
+  psql_silo -d postgres -c 'ALTER ROLE silo PASSWORD NULL'
+fi
+
+# Each database records the C library collation version it was created under.
+# Another version, from an image on a newer Debian release or from a cluster
+# the Compose stack's PostgreSQL image created, can sort text differently, and
+# an index built in the old order can miss rows. Rebuild the indexes whose keys
+# use a libc collation, and every partial or expression index, since pg_index
+# records no collation for a predicate or expression; then record the new
+# version, before Silo connects. Vector indexes are left out: their keys are not
+# text, and rebuilding them is slow. template0 records none: a database created
+# from it takes the library's version then.
+changed="$(psql_silo -d postgres -c 'SELECT datname, datallowconn FROM pg_database
+  WHERE datcollversion <> pg_database_collation_actual_version(oid)')"
+while IFS='|' read -r db connectable; do
+  [[ -n "$db" ]] || continue
+  # The version is only refreshed after the rebuild, so a database that cannot
+  # be rebuilt keeps reporting the mismatch rather than hiding stale indexes.
+  if [[ "$connectable" != t ]]; then
+    warn "database $db does not accept connections, so its text indexes were not rebuilt for the new C library collation version"
+    continue
+  fi
+  log "the C library collation version changed; rebuilding the text indexes in database $db"
+  psql_silo -d "$db" <<'SQL'
+SELECT format('REINDEX INDEX %s', i.indexrelid::regclass)
+FROM pg_index i
+JOIN pg_class ic ON ic.oid = i.indexrelid
+JOIN pg_am am ON am.oid = ic.relam
+WHERE EXISTS (SELECT FROM unnest(i.indcollation::oid[]) AS k(coll)
+              JOIN pg_collation c ON c.oid = k.coll
+              WHERE c.collprovider IN ('d', 'c')
+                AND NOT (c.collnamespace = 'pg_catalog'::regnamespace AND c.collname IN ('C', 'POSIX')))
+   OR ((i.indpred IS NOT NULL OR i.indexprs IS NOT NULL) AND am.amname NOT IN ('hnsw', 'ivfflat'))
+\gexec
+SQL
+  psql_silo -d postgres -v name="$db" <<<'ALTER DATABASE :"name" REFRESH COLLATION VERSION'
+done <<<"$changed"

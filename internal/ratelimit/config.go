@@ -9,6 +9,13 @@ import (
 
 const globalRequestsPerSecondSetting = "ratelimit.global.requests_per_second"
 
+// Session quota settings.
+const (
+	sessionModeSetting            = "ratelimit.session.mode"
+	sessionRequestsPerHourSetting = "ratelimit.session.requests_per_hour"
+	sessionBurstSetting           = "ratelimit.session.burst"
+)
+
 // SettingsStore is the interface for reading/writing server_settings.
 // Satisfied by *catalog.ServerSettingsRepo.
 type SettingsStore interface {
@@ -55,6 +62,12 @@ func ConfigFromSettings(all map[string]string) Config {
 	cfg.IPReqPerMinute = parseRate(all, "ratelimit.ip.requests_per_minute", defaults.IPReqPerMinute, MaxRequestsPerWindow)
 	cfg.IPBurst = parseInt(all, "ratelimit.ip.burst", defaults.IPBurst)
 
+	cfg.Session = SessionQuotaConfig{
+		Mode:            parseSessionMode(all, defaults.Session.Mode),
+		RequestsPerHour: parseRate(all, sessionRequestsPerHourSetting, defaults.Session.RequestsPerHour, MaxRequestsPerWindow),
+		Burst:           parseInt(all, sessionBurstSetting, defaults.Session.Burst),
+	}
+
 	cfg.AuthEndpoints = make(map[string]AuthEndpointConfig)
 	for name, ep := range defaults.AuthEndpoints {
 		prefix := "ratelimit.auth." + name + "."
@@ -67,14 +80,9 @@ func ConfigFromSettings(all map[string]string) Config {
 	return cfg
 }
 
-// SeedDefaults writes default rate limit settings if they don't exist yet.
-func SeedDefaults(ctx context.Context, store SettingsStore) error {
-	all, err := store.GetAll(ctx)
-	if err != nil {
-		return fmt.Errorf("seed rate limit defaults: %w", err)
-	}
-
-	defaults := map[string]string{
+// DefaultSettings are the rate limit settings SeedDefaults writes, by key.
+func DefaultSettings() map[string]string {
+	return map[string]string{
 		"ratelimit.enabled":                                  "true",
 		globalRequestsPerSecondSetting:                       "1000",
 		"ratelimit.tier.standard.requests_per_second":        "20",
@@ -100,7 +108,19 @@ func SeedDefaults(ctx context.Context, store SettingsStore) error {
 		"ratelimit.auth.device_lookup.burst":                 "20",
 		"ratelimit.auth.device_poll.requests_per_minute":     "120",
 		"ratelimit.auth.device_poll.burst":                   "30",
+		sessionModeSetting:                                   SessionQuotaLog,
+		sessionRequestsPerHourSetting:                        "10000",
+		sessionBurstSetting:                                  "30000",
 	}
+}
+
+// SeedDefaults writes default rate limit settings if they don't exist yet.
+func SeedDefaults(ctx context.Context, store SettingsStore) error {
+	all, err := store.GetAll(ctx)
+	if err != nil {
+		return fmt.Errorf("seed rate limit defaults: %w", err)
+	}
+	defaults := DefaultSettings()
 
 	// Sort keys for deterministic seeding order
 	keys := make([]string, 0, len(defaults))
@@ -142,6 +162,9 @@ func ConfigSettings(cfg Config) map[string]string {
 		pairs[prefix+"requests_per_minute"] = strconv.FormatFloat(ep.RequestsPerMinute, 'f', -1, 64)
 		pairs[prefix+"burst"] = strconv.Itoa(ep.Burst)
 	}
+	pairs[sessionModeSetting] = cfg.Session.Mode
+	pairs[sessionRequestsPerHourSetting] = strconv.FormatFloat(cfg.Session.RequestsPerHour, 'f', -1, 64)
+	pairs[sessionBurstSetting] = strconv.Itoa(cfg.Session.Burst)
 	return pairs
 }
 
@@ -183,6 +206,22 @@ func parseRate(m map[string]string, key string, def, maxValue float64) float64 {
 		if f, err := strconv.ParseFloat(v, 64); err == nil && f > 0 && f <= maxValue {
 			return f
 		}
+	}
+	return def
+}
+
+// ValidSessionQuotaMode reports whether mode is one the session quota knows.
+func ValidSessionQuotaMode(mode string) bool {
+	switch mode {
+	case SessionQuotaOff, SessionQuotaLog, SessionQuotaEnforce:
+		return true
+	}
+	return false
+}
+
+func parseSessionMode(m map[string]string, def string) string {
+	if v := m[sessionModeSetting]; ValidSessionQuotaMode(v) {
+		return v
 	}
 	return def
 }

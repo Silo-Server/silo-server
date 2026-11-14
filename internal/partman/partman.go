@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -19,7 +20,22 @@ import (
 // range. Hit in production during the Continuum-to-Silo Postgres migration.
 const pgCheckViolation = "23514"
 
+// pgLockNotAvailable is the SQLSTATE Postgres returns when lock_timeout ends a
+// lock wait.
+const pgLockNotAvailable = "55P03"
+
+// ErrPartitionBusy reports that dropping a partition gave up waiting for a
+// lock another session held on the table. The next scheduled run retries it.
+var ErrPartitionBusy = errors.New("partitioned table busy")
+
 const deleteBatchSize = 10000
+
+// dropLockTimeout bounds each lock wait when dropping a partition. The drop
+// takes ACCESS EXCLUSIVE on the parent, then on the partition and the default
+// partition, and every later query on the parent queues behind it, so one long
+// reader or writer would otherwise stall all traffic to the table until it
+// finished.
+const dropLockTimeout = 5 * time.Second
 
 var partitionBoundsRE = regexp.MustCompile(`FROM \('([^']+)'\) TO \('([^']+)'\)`)
 
@@ -35,6 +51,7 @@ type Manager struct {
 	table       string
 	granularity Granularity
 	createAhead int
+	dropWait    time.Duration
 }
 
 func NewManager(pool *pgxpool.Pool, table string, granularity Granularity, createAhead int) *Manager {
@@ -43,6 +60,7 @@ func NewManager(pool *pgxpool.Pool, table string, granularity Granularity, creat
 		table:       table,
 		granularity: granularity,
 		createAhead: createAhead,
+		dropWait:    dropLockTimeout,
 	}
 }
 
@@ -216,15 +234,41 @@ func (m *Manager) DropExpiredPartitions(ctx context.Context, cutoff time.Time) (
 		return partitions[i].upper.Before(partitions[j].upper)
 	})
 
+	// A drop that runs out of lock wait returns ErrPartitionBusy. Stop at the
+	// first failure: the remaining drops need the same parent lock and would
+	// stall the table again. Callers fall back to row deletes, and the next
+	// scheduled run retries the drop.
 	dropped := make([]string, 0, len(partitions))
 	for _, partition := range partitions {
-		if _, err := m.pool.Exec(ctx, fmt.Sprintf(`DROP TABLE public.%s`, quoteIdent(partition.name))); err != nil {
+		if err := m.dropPartition(ctx, partition.name); err != nil {
 			return dropped, fmt.Errorf("drop partition %s: %w", partition.name, err)
 		}
 		dropped = append(dropped, partition.name)
 	}
 
 	return dropped, nil
+}
+
+// dropPartition drops one partition, waiting at most m.dropWait for each lock.
+// The timeout is transaction-local, so it never leaks into the pooled session.
+func (m *Manager) dropPartition(ctx context.Context, name string) error {
+	tx, err := m.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	if _, err := tx.Exec(ctx, `SELECT set_config('lock_timeout', $1, true)`, strconv.FormatInt(max(m.dropWait.Milliseconds(), 1), 10)); err != nil {
+		return fmt.Errorf("set lock timeout: %w", err)
+	}
+	if _, err := tx.Exec(ctx, "DROP TABLE public."+quoteIdent(name)); err != nil {
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == pgLockNotAvailable {
+			return fmt.Errorf("%w: %w", ErrPartitionBusy, err)
+		}
+		return err
+	}
+	return tx.Commit(ctx)
 }
 
 func (m *Manager) DeleteExpiredRowsFromDefault(ctx context.Context, cutoff time.Time) (int64, error) {

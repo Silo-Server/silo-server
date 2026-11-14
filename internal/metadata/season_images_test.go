@@ -63,7 +63,13 @@ func TestFetchSeasonImagesReturnsFullExactGallery(t *testing.T) {
 			{URL: "tmdb://season-2-high.jpg", Type: ImagePoster, Rating: 9, SeasonNumber: &seasonTwo},
 			{URL: "tmdb://unscoped-show.jpg", Type: ImagePoster, Rating: 10},
 			{URL: "tmdb://season-1.jpg", Type: ImagePoster, Rating: 8, SeasonNumber: &seasonOne},
+			{URL: "tmdb://season-2-backdrop.jpg", Type: ImageBackdrop, Rating: 5, SeasonNumber: &seasonTwo},
 		}},
+		itemImages: []RemoteImage{
+			{URL: "tmdb://show-poster.jpg", Type: ImagePoster, Rating: 10},
+			{URL: "tmdb://show-backdrop.jpg", Type: ImageBackdrop, Rating: 10},
+			{URL: "tmdb://season-2-backdrop.jpg", Type: ImageBackdrop, Rating: 10},
+		},
 	}
 	service := &MetadataService{chainCache: map[string]chainCacheEntry{
 		"42:season": {providers: []Provider{provider}, expiresAt: time.Now().Add(time.Hour)},
@@ -78,11 +84,20 @@ func TestFetchSeasonImagesReturnsFullExactGallery(t *testing.T) {
 	if len(providerErrors) != 0 {
 		t.Fatalf("provider errors = %v, want none", providerErrors)
 	}
-	if len(images) != 2 || images[0].URL != "tmdb://season-2-high.jpg" || images[1].URL != "tmdb://season-2-low.jpg" {
-		t.Fatalf("images = %#v, want exact Season 2 gallery sorted by rating", images)
+	// The exact Season 2 gallery comes first, sorted by rating. Show
+	// backdrops follow as landscape fallbacks; show posters do not, because a
+	// numbered season has its own.
+	want := []string{"tmdb://season-2-high.jpg", "tmdb://season-2-backdrop.jpg", "tmdb://season-2-low.jpg", "tmdb://show-backdrop.jpg"}
+	if len(images) != len(want) {
+		t.Fatalf("images = %#v, want %v", images, want)
 	}
-	if len(provider.imageRequests) != 1 || provider.imageRequests[0].SeasonNumber == nil || *provider.imageRequests[0].SeasonNumber != 2 {
-		t.Fatalf("image requests = %#v, want exact Season 2", provider.imageRequests)
+	for i := range want {
+		if images[i].URL != want[i] {
+			t.Fatalf("images[%d] = %q, want %q", i, images[i].URL, want[i])
+		}
+	}
+	if len(provider.imageRequests) != 2 || provider.imageRequests[0].SeasonNumber == nil || *provider.imageRequests[0].SeasonNumber != 2 || provider.imageRequests[1].SeasonNumber != nil {
+		t.Fatalf("image requests = %#v, want exact Season 2 then the show gallery", provider.imageRequests)
 	}
 	if len(provider.seasonRequests) != 0 {
 		t.Fatalf("GetSeasons calls = %d, want no compatibility fallback", len(provider.seasonRequests))
@@ -187,6 +202,17 @@ func TestFetchSeasonImagesUsesPrimaryCompatibilityFallback(t *testing.T) {
 	}
 	if len(images) != 1 || images[0].URL != "legacy://season-3-primary.jpg" {
 		t.Fatalf("images = %#v, want exact primary compatibility fallback", images)
+	}
+
+	// A season backdrop is not a season poster: the primary still fills in.
+	seasonThree := 3
+	provider.seasonGalleries = map[int][]RemoteImage{3: {{URL: "legacy://season-3-backdrop.jpg", Type: ImageBackdrop, SeasonNumber: &seasonThree}}}
+	images, _, err = service.FetchSeasonImages(context.Background(), map[string]string{"legacy": "1"}, "en", 9, 3)
+	if err != nil {
+		t.Fatalf("FetchSeasonImages() error = %v", err)
+	}
+	if len(images) != 2 || images[0].URL != "legacy://season-3-backdrop.jpg" || images[1].URL != "legacy://season-3-primary.jpg" {
+		t.Fatalf("images = %#v, want the season backdrop and the primary poster", images)
 	}
 }
 

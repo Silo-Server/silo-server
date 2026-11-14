@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -355,26 +356,40 @@ func TestControlSocketAckAndResultRouteToRegistrationOwner(t *testing.T) {
 }
 
 func TestControlSocketClosesOnAuthorityOrSessionLoss(t *testing.T) {
-	for _, loss := range []string{"login", "session"} {
+	for _, loss := range []string{"login", "session", "deadline"} {
 		t.Run(loss, func(t *testing.T) {
 			f := newControlSocketFixture(t)
-			conn, _, err := f.dial(t, f.mint(t, controlInstallation), nil) //nolint:bodyclose // dial registers t.Cleanup to close the response body
+			identity := f.identity(7, "profile-7")
+			if loss == "deadline" {
+				// Authority stays valid; only the access expiry ends the socket.
+				identity.AccessExpiresAt = time.Now().Add(time.Second)
+			}
+			ticket, _, err := f.handler.Mint(t.Context(), identity, f.session.ID, controlInstallation)
+			if err != nil {
+				t.Fatal(err)
+			}
+			conn, _, err := f.dial(t, ticket, nil) //nolint:bodyclose // dial registers t.Cleanup to close the response body
 			if err != nil {
 				t.Fatal(err)
 			}
 			f.hello(t, conn)
-			if loss == "login" {
+			switch loss {
+			case "login":
 				f.invalid.Store(true)
-			} else if err := f.manager.StopSession(f.session.ID); err != nil {
-				t.Fatal(err)
+			case "session":
+				if err := f.manager.StopSession(f.session.ID); err != nil {
+					t.Fatal(err)
+				}
 			}
 			if err := conn.SetReadDeadline(time.Now().Add(2 * time.Second)); err != nil {
 				t.Fatal(err)
 			}
-			if _, _, err := conn.ReadMessage(); err == nil {
-				t.Fatal("connection survived authority loss")
+			// A read timeout means the server never closed the socket.
+			var netErr net.Error
+			if _, _, err := conn.ReadMessage(); err == nil || (errors.As(err, &netErr) && netErr.Timeout()) {
+				t.Fatalf("connection survived authority loss: %v", err)
 			}
-			if loss == "login" {
+			if loss != "session" {
 				waitForCondition(t, func() bool {
 					s, err := f.manager.GetSession(f.session.ID)
 					return err == nil && !s.HasRealtimeConnection

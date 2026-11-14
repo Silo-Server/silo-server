@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"os"
+	"reflect"
 	"testing"
 	"time"
 
@@ -198,7 +199,7 @@ func TestToneMapRecipeEnvelopeFailsClosedOnLegacyReader(t *testing.T) {
 		t.Fatalf("legacy flat decode = %+v, want incomplete recipe", legacy)
 	}
 	decoded, ok := unmarshalCard(data)
-	if !ok || decoded != card {
+	if !ok || !reflect.DeepEqual(decoded, card) {
 		t.Fatalf("current decode = (%+v, %v), want original card", decoded, ok)
 	}
 }
@@ -229,7 +230,7 @@ func TestStereoDownmixRecipeEnvelopeFailsClosedOnLegacyReader(t *testing.T) {
 			t.Fatalf("legacy flat decode = %+v, want incomplete recipe", legacy)
 		}
 		decoded, ok := unmarshalCard(data)
-		if !ok || decoded != card {
+		if !ok || !reflect.DeepEqual(decoded, card) {
 			t.Fatalf("current decode = (%+v, %v), want original card", decoded, ok)
 		}
 	}
@@ -255,11 +256,11 @@ func TestOrdinaryRecipeRemainsLegacyFlatJSON(t *testing.T) {
 		}
 		want := card
 		want.SourceAudioChannels = 0
-		if legacy != want {
+		if !reflect.DeepEqual(legacy, want) {
 			t.Fatalf("legacy flat decode = %+v, want sanitized %+v", legacy, want)
 		}
 		decoded, ok := unmarshalCard(data)
-		if !ok || decoded != want {
+		if !ok || !reflect.DeepEqual(decoded, want) {
 			t.Fatalf("current decode = (%+v, %v), want sanitized %+v", decoded, ok, want)
 		}
 	}

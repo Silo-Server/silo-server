@@ -9,6 +9,7 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/auditmutation"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -57,64 +58,16 @@ type ListResult struct {
 
 // Repo provides query access to the activity_log table.
 type Repo struct {
-	pool *pgxpool.Pool
+	pool queryer
+}
+
+type queryer interface {
+	Query(context.Context, string, ...any) (pgx.Rows, error)
 }
 
 // NewRepo creates a new activity log repository.
 func NewRepo(pool *pgxpool.Pool) *Repo {
 	return &Repo{pool: pool}
-}
-
-// UserIPs returns the IP addresses used by a given user within the lookback window.
-func (r *Repo) UserIPs(ctx context.Context, userID int, days int) ([]UserIPEntry, error) {
-	rows, err := r.pool.Query(ctx, `
-		SELECT client_ip::text, min(timestamp) AS first_seen, max(timestamp) AS last_seen, count(*) AS request_count
-		FROM activity_log
-		WHERE user_id = $1 AND timestamp > now() - make_interval(days => $2)
-		GROUP BY client_ip
-		ORDER BY last_seen DESC
-	`, userID, days)
-	if err != nil {
-		return nil, fmt.Errorf("query user IPs: %w", err)
-	}
-	defer rows.Close()
-
-	var results []UserIPEntry
-	for rows.Next() {
-		var e UserIPEntry
-		if err := rows.Scan(&e.ClientIP, &e.FirstSeen, &e.LastSeen, &e.RequestCount); err != nil {
-			return nil, fmt.Errorf("scan user IP row: %w", err)
-		}
-		results = append(results, e)
-	}
-	return results, rows.Err()
-}
-
-// IPUsers returns the users that have connected from a given IP within the lookback window.
-func (r *Repo) IPUsers(ctx context.Context, ip string, days int) ([]IPUserEntry, error) {
-	rows, err := r.pool.Query(ctx, `
-		SELECT a.user_id, COALESCE(u.username, ''), min(a.timestamp) AS first_seen,
-		       max(a.timestamp) AS last_seen, count(*) AS request_count
-		FROM activity_log a
-		LEFT JOIN users u ON u.id = a.user_id
-		WHERE a.client_ip = $1::inet AND a.timestamp > now() - make_interval(days => $2) AND a.user_id IS NOT NULL
-		GROUP BY a.user_id, u.username
-		ORDER BY last_seen DESC
-	`, ip, days)
-	if err != nil {
-		return nil, fmt.Errorf("query IP users: %w", err)
-	}
-	defer rows.Close()
-
-	var results []IPUserEntry
-	for rows.Next() {
-		var e IPUserEntry
-		if err := rows.Scan(&e.UserID, &e.Username, &e.FirstSeen, &e.LastSeen, &e.RequestCount); err != nil {
-			return nil, fmt.Errorf("scan IP user row: %w", err)
-		}
-		results = append(results, e)
-	}
-	return results, rows.Err()
 }
 
 func (r *Repo) List(ctx context.Context, opts ListOptions) (ListResult, error) {
@@ -209,12 +162,12 @@ func (r *Repo) List(ctx context.Context, opts ListOptions) (ListResult, error) {
 
 	query := fmt.Sprintf(`
 		SELECT id, timestamp, client_ip::text, user_id, impersonator_user_id, COALESCE(session_id, ''), COALESCE(playback_session_id, ''), COALESCE(request_id, ''), COALESCE(node_id, ''),
-		       method, path, COALESCE(path_pattern, ''), COALESCE(status_code, 0), COALESCE(user_agent, ''), COALESCE(duration_ms, 0), action, target_type, target_id, changes
+		       method, path, COALESCE(path_pattern, ''), COALESCE(status_code, 0), LEFT(COALESCE(user_agent, ''), %d), COALESCE(duration_ms, 0), action, target_type, target_id, changes
 		FROM activity_log
 		WHERE %s
 		ORDER BY timestamp DESC, id DESC
 		LIMIT $%d
-	`, strings.Join(conditions, " AND "), argIdx)
+	`, auditmutation.MaxUserAgentBytes, strings.Join(conditions, " AND "), argIdx)
 	args = append(args, limit+1)
 
 	rows, err := r.pool.Query(ctx, query, args...)
@@ -246,6 +199,7 @@ func (r *Repo) List(ctx context.Context, opts ListOptions) (ListResult, error) {
 		); err != nil {
 			return ListResult{}, fmt.Errorf("scan activity log row: %w", err)
 		}
+		entry.UserAgent = auditmutation.BoundUserAgent(entry.UserAgent)
 		entries = append(entries, entry)
 	}
 	if err := rows.Err(); err != nil {

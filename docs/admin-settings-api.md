@@ -11,7 +11,8 @@ no-store responses:
   whose changes need a server restart.
 - `GET /api/v2/admin/settings/sensitive-status`: configured secret key names and
   `managed_by_env` names. Values are never returned. Both fields are arrays,
-  including when empty.
+  including when empty. `configured` leaves out machine-managed keys, such as
+  the JWT signing keys the server generates itself.
 
 `managed_by_env` lists the keys the server's environment sets on every start:
 `redis.url` and `redis.db` (`REDIS_URL`), `clientip.trusted_proxies`
@@ -35,8 +36,9 @@ problem without database error details. Restart metadata is available without
 settings storage.
 
 The web settings pages use the v2 effective settings, restart metadata, and
-sensitive-status operations. Writes remain on their existing bridge operations
-until the corresponding mutation contracts migrate. The migration inventory lists
+sensitive-status operations, and write through `PUT /api/v2/admin/settings` and
+`PUT /api/v2/admin/settings/{key}` (see
+[general settings writes in v2](admin-api.md#general-settings-writes-in-v2)). The migration inventory lists
 no Apple or Android consumers for these inspection operations. Jellyfin
 compatibility does not expose these administrator settings contracts.
 
@@ -136,12 +138,27 @@ uses the model's default. Explicit values come from the model's capability
 response. The server validates known model families against their supported
 levels; an unknown custom model is validated by the provider connection check.
 Text requests read the persisted authentication mode, text provider, model,
-effort, and active registration together at request start.
+effort, service tier, and active registration together at request start.
+
+`ai.service_tier` applies only to a text provider whose registry type is `openai`
+while `ai.auth_mode` is `api_key`. Its default, an empty string, omits OpenAI's
+`service_tier` parameter and inherits the OpenAI project's setting. `priority`
+requests Fast/Priority processing through Chat Completions; `ultrafast` uses
+API-key-authenticated Responses with storage disabled. Only completed text
+output is accepted; incomplete responses and refusals never replace source text.
+OpenAI decides whether the account and model support the requested tier. Silo
+does not silently fall back after a provider rejection. Switching to another
+provider or a ChatGPT plan keeps the setting but omits it from requests. Speech
+and embedding requests do not use this setting.
 
 The following operations require an acting administrator:
 
 - `GET /api/v2/admin/ai/capabilities?model=...` discovers supported reasoning
-  levels and whether the ChatGPT connection service is available.
+  levels and whether the ChatGPT connection service is available. The optional
+  `openai_service_tiers` list advertises `default`, `priority`, and `ultrafast`
+  as configuration choices for OpenAI API-key text providers; it does not
+  guarantee availability for an individual model or account. Clients must not
+  offer the tier control when this capability is absent.
 - `GET /api/v2/admin/ai/chatgpt` returns saved registrations, active account,
   connection status, and the latest login outcome without credentials.
   `attempt_id` identifies the attempt that produced that outcome.
@@ -329,15 +346,14 @@ after 10 seconds, even for a URL that turns the socket timeouts off.
 
 - The connection changes when the write leaves a different `redis.url`, or a
   different database number in use, than the stored settings. Both
-  writes and both API versions apply the check. A write that leaves the
+  writes apply the check. A write that leaves the
   connection as it is, clears `redis.url`, or runs in a process started with
   `REDIS_URL` connects to nothing.
 - Connecting selects the database number, so a number the Redis server does
   not have (16 or more on a Redis with the default 16 databases) fails the
   same way an unreachable host does. So does a Redis user whose ACL does not
   grant the channels (the pattern `&silo:*`).
-- A failed connection answers a `422` validation problem on `/api/v2` and
-  `400 invalid_settings` on `/api/v1`. The detail says whether Redis refused
+- A failed connection answers a `422` validation problem. The detail says whether Redis refused
   the connection, refused the channels, or could not be reached, or that
   `redis.url` is not a URL the Redis clients can read (a bare `host:port` an
   older build saved). It does not quote the client error, which can name hosts

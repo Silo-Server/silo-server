@@ -182,6 +182,8 @@ func adminPlaybackReplayResponse() map[string]*huma.Response {
 // adminPlaybackCommandProblem renders the sequenced command seam's errors.
 func adminPlaybackCommandProblem(err error) *Problem {
 	switch {
+	case errors.Is(err, handlers.ErrAdminPlaybackCommandNoReply):
+		return NewProblem(TypeDependencyUnavailable, "The server holding this playback session did not answer in time, so the command may have been applied. Try again: a retry with the same command identity returns its receipt instead of applying it twice.").WithRetryAfter(30)
 	case errors.Is(err, handlers.ErrAdminPlaybackCommandUnavailable):
 		return unavailable("administrator playback commands")
 	case errors.Is(err, playback.ErrSessionNotFound):

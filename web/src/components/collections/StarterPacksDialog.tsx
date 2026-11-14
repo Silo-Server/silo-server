@@ -25,6 +25,7 @@ import {
 
 import type { Library } from "@/api/types";
 import { templateResultFromV2 } from "@/api/adminCollections";
+import { useT, type Translate } from "@/i18n";
 import { StepDialog } from "@/components/calm/StepDialog";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -62,7 +63,6 @@ import {
   packLibraries,
   packPlan,
   packResultHeading,
-  plural,
   starterPacksOf,
   type HeroChoices,
   type PackLibraryRow,
@@ -83,10 +83,6 @@ function freshDraft(packId: string): PackDraft {
   return { packId, libraryIds: null, heroesOn: false, heroes: {} };
 }
 
-function libraryPageLabel(libraryName: string) {
-  return `the ${libraryName} page`;
-}
-
 /**
  * Starter packs: the server's template bundles, one pack applied at a time.
  * Each pack shows a dry run per library before anything changes; hero banners
@@ -104,6 +100,7 @@ export function StarterPacksDialog({
   initialLibraryId: number | null;
   onClose: () => void;
 }) {
+  const t = useT();
   const queryClient = useQueryClient();
   const narrow = useMediaQuery("(max-width: 1023px)");
   const titleRef = useRef<HTMLHeadingElement>(null);
@@ -141,7 +138,8 @@ export function StarterPacksDialog({
   const dryRun = useQuery({ ...dryRunQuery, enabled: !!pack && libraryIds.length > 0 });
   const plan = useMemo(
     () => (pack && dryRun.data ? packPlan(dryRun.data, pack, libraryIds) : null),
-    [pack, dryRun.data, libraryIds],
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- `t` changes with the language the plan's words are in.
+    [pack, dryRun.data, libraryIds, t],
   );
   const newCount = plan?.reduce((sum, row) => sum + row.added.length, 0) ?? 0;
 
@@ -198,11 +196,15 @@ export function StarterPacksDialog({
 
   const canAdd =
     !running && dryRun.isSuccess && !dryRun.isFetching && (newCount > 0 || featured !== undefined);
-  let addLabel = "Add";
-  if (running) addLabel = "Adding…";
-  else if (newCount > 0) addLabel = `Add ${plural(newCount, "collection")}`;
-  else if (featured) addLabel = "Set hero banners";
-  else if (dryRun.isSuccess) addLabel = "Nothing new to add";
+  let addLabel = t("web.collections.starterPacks.add");
+  if (running) addLabel = t("web.collections.starterPacks.adding");
+  else if (newCount > 0)
+    addLabel = t("web.collections.starterPacks.addCollections", {
+      count: newCount,
+      count_text: newCount,
+    });
+  else if (featured) addLabel = t("web.collections.starterPacks.setHeroBanners");
+  else if (dryRun.isSuccess) addLabel = t("web.collections.starterPacks.nothingNewToAdd");
 
   const progress = job.data?.progress;
   const footerStart = running ? (
@@ -211,15 +213,22 @@ export function StarterPacksDialog({
       className="text-muted-foreground inline-flex items-center gap-2 text-[13px]"
     >
       <Loader2 aria-hidden className="size-4 animate-spin" />
-      Adding {run?.pack.title ?? pack?.title}…
-      {progress && progress.total > 0 ? ` ${progress.current} of ${progress.total}` : null}
+      {progress && progress.total > 0
+        ? t("web.collections.starterPacks.addingPackProgress", {
+            pack: run?.pack.title ?? pack?.title ?? "",
+            current: progress.current,
+            total: progress.total,
+          })
+        : t("web.collections.starterPacks.addingPack", {
+            pack: run?.pack.title ?? pack?.title ?? "",
+          })}
     </span>
   ) : (
     <span className="text-muted-foreground inline-flex min-w-0 items-center gap-2 text-[13px]">
       <RefreshCw aria-hidden className="size-4 shrink-0 max-sm:hidden" />
       {/* Phones only fit the buttons; screen readers still hear the note. */}
       <span className="truncate max-sm:sr-only">
-        They sync for the first time right after. Then you can add another pack.
+        {t("web.collections.starterPacks.footerNote")}
       </span>
     </span>
   );
@@ -231,9 +240,9 @@ export function StarterPacksDialog({
       size="picker"
       onClose={onClose}
       onOpenFocus={() => titleRef.current?.focus()}
-      title="Starter packs"
+      title={t("web.collections.starterPacks.title")}
       titleRef={titleRef}
-      description="Add a ready-made set of synced lists to your libraries. Nothing changes until you press Add."
+      description={t("web.collections.starterPacks.description")}
       footerStart={footerStart}
       actions={
         <Button type="button" disabled={!canAdd} onClick={() => void add()}>
@@ -244,7 +253,7 @@ export function StarterPacksDialog({
     >
       <div className="border-border grid min-h-0 flex-1 border-t lg:grid-cols-[236px_minmax(0,1fr)]">
         {!narrow ? (
-          <div className="border-border overflow-y-auto border-r p-3">
+          <div className="border-border overflow-y-auto border-e p-3">
             {packs.length > 0 && pack ? (
               <PackRail
                 packs={packs}
@@ -266,11 +275,13 @@ export function StarterPacksDialog({
         >
           {bundles.isError ? (
             <p role="alert" className="text-sm">
-              The starter packs didn't load. Close this and try again.
+              {t("web.collections.starterPacks.loadFailed")}
             </p>
           ) : !pack ? (
             <p role="status" className="text-muted-foreground text-sm">
-              {bundles.isPending ? "Loading starter packs…" : "This server has no starter packs."}
+              {bundles.isPending
+                ? t("web.collections.starterPacks.loading")
+                : t("web.collections.starterPacks.noPacks")}
             </p>
           ) : (
             <>
@@ -301,14 +312,14 @@ export function StarterPacksDialog({
 
               {fitting.length === 0 ? (
                 <p className="text-sm">
-                  None of your libraries can take this pack.{" "}
-                  <span className="text-muted-foreground">
-                    Its lists are for movie and TV libraries. Add one in{" "}
-                    <Link to="/admin/libraries" className="text-foreground underline">
-                      Libraries
-                    </Link>
-                    .
-                  </span>
+                  {t("web.collections.starterPacks.noFittingLibrary", {
+                    muted: (chunks) => <span className="text-muted-foreground">{chunks}</span>,
+                    link: (chunks) => (
+                      <Link to="/admin/libraries" className="text-foreground underline">
+                        {chunks}
+                      </Link>
+                    ),
+                  })}
                 </p>
               ) : (
                 <>
@@ -350,9 +361,10 @@ export function StarterPacksDialog({
 }
 
 function AddedTag() {
+  const t = useT();
   return (
     <span className="rounded-full bg-emerald-500/15 px-2 py-0.5 text-[11px] font-medium text-emerald-600 dark:text-emerald-400">
-      Added
+      {t("web.collections.starterPacks.added")}
     </span>
   );
 }
@@ -376,6 +388,7 @@ function PackRail({
   panelId: string;
   onSelect: (id: string) => void;
 }) {
+  const t = useT();
   const activeIndex = Math.max(
     0,
     packs.findIndex((pack) => pack.id === active),
@@ -398,7 +411,7 @@ function PackRail({
   return (
     <div
       role="tablist"
-      aria-label="Packs"
+      aria-label={t("web.collections.starterPacks.packs")}
       aria-orientation="vertical"
       onKeyDown={handleKeyDown}
       className="grid content-start gap-0.5"
@@ -423,12 +436,15 @@ function PackRail({
             onClick={() => {
               if (!locked) onSelect(pack.id);
             }}
-            className="text-muted-foreground hover:text-foreground aria-selected:bg-accent aria-selected:text-foreground aria-selected:ring-border focus-visible:ring-ring/50 grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-2 gap-y-1 rounded-[10px] px-3 py-[9px] text-left text-sm outline-none focus-visible:ring-[3px] disabled:cursor-not-allowed disabled:opacity-60 aria-selected:ring-1 aria-selected:ring-inset"
+            className="text-muted-foreground hover:text-foreground aria-selected:bg-accent aria-selected:text-foreground aria-selected:ring-border focus-visible:ring-ring/50 grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-2 gap-y-1 rounded-[10px] px-3 py-[9px] text-start text-sm outline-none focus-visible:ring-[3px] disabled:cursor-not-allowed disabled:opacity-60 aria-selected:ring-1 aria-selected:ring-inset"
           >
             <span className="truncate">{pack.title}</span>
             <span className="text-xs tabular-nums opacity-80">
-              {pack.templates.length}
-              <span className="sr-only"> {pack.templates.length === 1 ? "list" : "lists"}</span>
+              {t("web.collections.starterPacks.tabCount", {
+                count: pack.templates.length,
+                count_text: pack.templates.length,
+                sr: (chunks) => <span className="sr-only">{chunks}</span>,
+              })}
             </span>
             {added.has(pack.id) ? (
               <span className="col-span-2">
@@ -456,16 +472,26 @@ function PackSelect({
   locked: boolean;
   onSelect: (id: string) => void;
 }) {
+  const t = useT();
   return (
     <Select value={active} onValueChange={onSelect} disabled={locked}>
-      <SelectTrigger aria-label="Pack" className="h-11 w-full">
+      <SelectTrigger aria-label={t("web.collections.starterPacks.pack")} className="h-11 w-full">
         <SelectValue />
       </SelectTrigger>
       <SelectContent>
         {packs.map((pack) => (
           <SelectItem key={pack.id} value={pack.id}>
-            {pack.title} · {plural(pack.templates.length, "list")}
-            {added.has(pack.id) ? " · Added" : ""}
+            {added.has(pack.id)
+              ? t("web.collections.starterPacks.packOptionAdded", {
+                  pack: pack.title,
+                  count: pack.templates.length,
+                  count_text: pack.templates.length,
+                })
+              : t("web.collections.starterPacks.packOption", {
+                  pack: pack.title,
+                  count: pack.templates.length,
+                  count_text: pack.templates.length,
+                })}
           </SelectItem>
         ))}
       </SelectContent>
@@ -484,11 +510,12 @@ function LibraryChips({
   locked: boolean;
   onChange: (ids: number[]) => void;
 }) {
+  const t = useT();
   const id = useId();
   return (
     <div role="group" aria-labelledby={`${id}-label`}>
       <span id={`${id}-label`} className="mb-2 block text-sm leading-none font-medium">
-        Add to these libraries
+        {t("web.collections.starterPacks.addToLibraries")}
       </span>
       <div className="flex flex-wrap gap-2">
         {libraries.map((library) => {
@@ -497,7 +524,7 @@ function LibraryChips({
             <label
               key={library.id}
               className={cn(
-                "border-border has-focus-visible:ring-ring/50 hover:bg-accent/60 inline-flex h-10 cursor-pointer items-center gap-2.5 rounded-[12px] border pr-3.5 pl-3 text-sm font-medium transition-colors has-focus-visible:ring-[3px] has-disabled:cursor-not-allowed has-disabled:opacity-60",
+                "border-border has-focus-visible:ring-ring/50 hover:bg-accent/60 inline-flex h-10 cursor-pointer items-center gap-2.5 rounded-[12px] border ps-3 pe-3.5 text-sm font-medium transition-colors has-focus-visible:ring-[3px] has-disabled:cursor-not-allowed has-disabled:opacity-60",
                 checked && "bg-accent border-foreground/55",
               )}
             >
@@ -531,9 +558,13 @@ function Tag({ children, pin = false }: { children: string; pin?: boolean }) {
   );
 }
 
-function heroEntryLabel(entry: ApplyCollectionTemplateBundleResponse["featured"][number]) {
-  const page = entry.surface === "home" ? "Home" : libraryPageLabel(entry.library_name ?? "");
-  return `Hero banner on ${page}`;
+function heroEntryLabel(
+  t: Translate,
+  entry: ApplyCollectionTemplateBundleResponse["featured"][number],
+) {
+  return entry.surface === "home"
+    ? t("web.collections.starterPacks.heroOnHome")
+    : t("web.collections.starterPacks.heroOnLibraryPage", { library: entry.library_name ?? "" });
 }
 
 /** The dry run as a table: one row per library, expandable to every list. */
@@ -556,6 +587,7 @@ function WhatWillHappen({
   heroesOn: boolean;
   newCount: number;
 }) {
+  const t = useT();
   const id = useId();
   // Libraries the admin opened or closed. The first library starts open, the others closed.
   const [toggled, setToggled] = useState<ReadonlySet<number>>(new Set());
@@ -569,20 +601,24 @@ function WhatWillHappen({
 
   let body;
   if (noLibraries) {
-    body = <p className="text-muted-foreground text-sm">Pick at least one library.</p>;
+    body = (
+      <p className="text-muted-foreground text-sm">{t("web.collections.copy.pickALibrary")}</p>
+    );
   } else if (failed) {
     body = (
       <div role="alert" className="flex flex-wrap items-center gap-3 text-sm">
-        <span>Couldn't check this pack</span>
+        <span>{t("web.collections.starterPacks.checkFailed")}</span>
         <Button type="button" size="sm" variant="outline" onClick={onRetry}>
-          Retry
+          {t("common.retry")}
         </Button>
       </div>
     );
   } else if (loading || !plan || !result) {
     body = (
       <div role="status" className="grid gap-2">
-        <span className="text-muted-foreground text-[13px]">Checking…</span>
+        <span className="text-muted-foreground text-[13px]">
+          {t("web.collections.starterPacks.checking")}
+        </span>
         <Skeleton className="h-9 w-full rounded-lg" />
         <Skeleton className="h-9 w-full rounded-lg" />
       </div>
@@ -597,20 +633,20 @@ function WhatWillHappen({
     body = (
       <>
         <div className="border-border overflow-x-auto rounded-xl border">
-          <table aria-labelledby={`${id}-label`} className="w-full text-left text-sm">
+          <table aria-labelledby={`${id}-label`} className="w-full text-start text-sm">
             <thead className="text-muted-foreground text-[12.5px]">
               <tr>
                 <th scope="col" className="px-3.5 py-2.5 font-medium">
-                  Library
+                  {t("web.collections.starterPacks.columnLibrary")}
                 </th>
                 <th scope="col" className="px-3.5 py-2.5 font-medium">
-                  New
+                  {t("web.collections.starterPacks.columnNew")}
                 </th>
                 <th scope="col" className="px-3.5 py-2.5 font-medium">
-                  Already there
+                  {t("web.collections.starterPacks.alreadyThere")}
                 </th>
                 <th scope="col" className="px-3.5 py-2.5 font-medium">
-                  Not for this library
+                  {t("web.collections.starterPacks.columnNotForLibrary")}
                 </th>
               </tr>
             </thead>
@@ -640,14 +676,23 @@ function WhatWillHappen({
                     <td className="px-3.5 py-2.5">
                       <span className="inline-flex flex-wrap items-center gap-1.5">
                         <span className="whitespace-nowrap">
-                          <b className="font-semibold">{row.added.length}</b> new
+                          {t("web.collections.starterPacks.newCount", {
+                            count: row.added.length,
+                            b: (chunks) => <b className="font-semibold">{chunks}</b>,
+                          })}
                         </span>
-                        {pinned > 0 ? <Tag pin>{`${pinned} pinned first`}</Tag> : null}
+                        {pinned > 0 ? (
+                          <Tag pin>
+                            {t("web.collections.starterPacks.pinnedFirstCount", {
+                              count: pinned,
+                            })}
+                          </Tag>
+                        ) : null}
                       </span>
                     </td>
                     <td className="px-3.5 py-2.5 tabular-nums">{row.existing.length}</td>
                     <td className="text-muted-foreground px-3.5 py-2.5">
-                      {row.notForLibrary || "None"}
+                      {row.notForLibrary || t("web.collections.starterPacks.none")}
                     </td>
                   </tr>,
                 ];
@@ -668,11 +713,15 @@ function WhatWillHappen({
                   className="border-border border-t"
                 >
                   <th scope="row" colSpan={2} className="px-3.5 py-2.5 font-medium">
-                    {heroEntryLabel(entry)}
+                    {heroEntryLabel(t, entry)}
                   </th>
                   <td colSpan={2} className="px-3.5 py-2.5">
-                    {entry.template_title}
-                    {heroFailed ? ` · Can't set it: ${failureReason(entry.reason)}` : null}
+                    {heroFailed
+                      ? t("web.collections.starterPacks.heroCantSet", {
+                          title: entry.template_title,
+                          reason: failureReason(entry.reason),
+                        })
+                      : entry.template_title}
                   </td>
                 </tr>
               ))}
@@ -681,8 +730,7 @@ function WhatWillHappen({
         </div>
         {newCount > SYNC_LOAD_THRESHOLD ? (
           <p className="text-muted-foreground text-[13px]">
-            That's {newCount} new lists. Their first syncs run in the background and can take a
-            while to finish.
+            {t("web.collections.starterPacks.syncLoad", { count: newCount })}
           </p>
         ) : null}
       </>
@@ -693,22 +741,24 @@ function WhatWillHappen({
     <div className="grid gap-2.5">
       <div className="flex items-baseline justify-between gap-3">
         <span id={`${id}-label`} className="text-sm font-medium">
-          What will happen
+          {t("web.collections.starterPacks.whatWillHappen")}
         </span>
         {result && !loading && !failed ? (
-          <span className="text-muted-foreground text-xs">Checked just now</span>
+          <span className="text-muted-foreground text-xs">
+            {t("web.collections.starterPacks.checkedJustNow")}
+          </span>
         ) : null}
       </div>
       {body}
       <p className="text-muted-foreground flex items-start gap-2 text-[13px] leading-normal">
         <Layers3 aria-hidden className="mt-[3px] size-3.5 shrink-0" />
         <span>
-          New lists land under <b className="text-foreground/85 font-medium">No heading</b> on each
-          library's Collections tab, ready to move into a shelf in Arrange. “Already there” lists
-          aren't touched.{" "}
-          {heroesOn
-            ? "Hero banners are added to the pages you picked below."
-            : "No sections are added unless you turn on hero banners."}
+          {t(
+            heroesOn
+              ? "web.collections.starterPacks.whereListsLandHeroes"
+              : "web.collections.starterPacks.whereListsLandNoHeroes",
+            { b: (chunks) => <b className="text-foreground/85 font-medium">{chunks}</b> },
+          )}
         </span>
       </p>
     </div>
@@ -716,6 +766,7 @@ function WhatWillHappen({
 }
 
 function PackLists({ row }: { row: PackLibraryRow }) {
+  const t = useT();
   const item = (entry: PackListEntry, tag: string | null, pin = false) => (
     <li
       key={`${entry.templateId}-${tag ?? "new"}`}
@@ -726,17 +777,22 @@ function PackLists({ row }: { row: PackLibraryRow }) {
     >
       <span className="min-w-0 truncate">{entry.title}</span>
       {tag ? (
-        <span className="ml-auto">
+        <span className="ms-auto">
           <Tag pin={pin}>{tag}</Tag>
         </span>
       ) : null}
     </li>
   );
   return (
-    <ul aria-label={`Lists for ${row.libraryName}`} className="grid gap-x-6 pl-6 sm:grid-cols-2">
-      {row.added.map((entry) => item(entry, entry.pinned ? "Pinned first" : null, true))}
-      {row.existing.map((entry) => item(entry, "Already there"))}
-      {row.failed.map((entry) => item(entry, "Can't add"))}
+    <ul
+      aria-label={t("web.collections.starterPacks.listsFor", { library: row.libraryName })}
+      className="grid gap-x-6 ps-6 sm:grid-cols-2"
+    >
+      {row.added.map((entry) =>
+        item(entry, entry.pinned ? t("web.collections.starterPacks.pinnedFirst") : null, true),
+      )}
+      {row.existing.map((entry) => item(entry, t("web.collections.starterPacks.alreadyThere")))}
+      {row.failed.map((entry) => item(entry, t("web.collections.starterPacks.cantAdd")))}
     </ul>
   );
 }
@@ -763,6 +819,7 @@ function HeroBanners({
   onToggle: (on: boolean) => void;
   onChange: (heroes: HeroChoices) => void;
 }) {
+  const t = useT();
   const pages = useQueries({
     queries: [
       adminSectionsQuery("home"),
@@ -783,32 +840,39 @@ function HeroBanners({
     <div className="border-border grid gap-3 rounded-xl border p-4">
       <div className="flex items-center justify-between gap-4">
         <div>
-          <div className="text-sm font-medium">Also use the pack's hero banners</div>
+          <div className="text-sm font-medium">{t("web.collections.starterPacks.useHeroes")}</div>
           <div className="text-muted-foreground text-[13px]">
-            Off keeps the hero banners you have now.
+            {t("web.collections.starterPacks.useHeroesHelp")}
           </div>
         </div>
         <Switch
           checked={on}
           disabled={locked}
           onCheckedChange={onToggle}
-          aria-label="Also use the pack's hero banners"
+          aria-label={t("web.collections.starterPacks.useHeroes")}
         />
       </div>
       <div className={cn("grid gap-2", !on && "opacity-55")}>
-        {!on ? <div className="text-[13px] font-medium">If you turn it on</div> : null}
+        {!on ? (
+          <div className="text-[13px] font-medium">
+            {t("web.collections.starterPacks.ifYouTurnItOn")}
+          </div>
+        ) : null}
         <HeroLine
           testId="hero-home"
           icon={<House aria-hidden className="size-3.5" />}
-          page="Home"
-          label="Hero banner on Home"
+          page={t("web.collections.rows.home")}
+          label={t("web.collections.starterPacks.heroOnHome")}
           disabled={!on || locked}
           value={heroes.home}
           options={homeOptions.map(({ library, template }) => ({
             value: `${library.id}:${template.id}`,
             label:
               homeTitleCount(template.id) > 1
-                ? `${template.title} · ${library.name}`
+                ? t("web.collections.starterPacks.heroOptionInLibrary", {
+                    title: template.title,
+                    library: library.name,
+                  })
                 : template.title,
           }))}
           current={heroOf(0)}
@@ -819,8 +883,8 @@ function HeroBanners({
             key={library.id}
             testId={`hero-library-${library.id}`}
             icon={<LibraryBig aria-hidden className="size-3.5" />}
-            page={`${library.name} page`}
-            label={`Hero banner on ${libraryPageLabel(library.name)}`}
+            page={t("web.collections.copy.libraryPage", { library: library.name })}
+            label={t("web.collections.starterPacks.heroOnLibraryPage", { library: library.name })}
             disabled={!on || locked}
             value={heroes.libraries[library.id] ?? KEEP_CURRENT}
             options={heroTemplates(pack, library).map((template) => ({
@@ -860,16 +924,16 @@ function HeroLine({
   current: { title: string | null } | null;
   onChange: (value: string) => void;
 }) {
+  const t = useT();
   let note: ReactNode = null;
   if (current && !current.title) {
-    note = "No hero banner there now";
+    note = t("web.collections.starterPacks.noHeroNow");
   } else if (current?.title) {
-    note = (
-      <>
-        {value === KEEP_CURRENT ? "Keeps " : "replaces "}
-        <b className="text-foreground/85 font-medium">{current.title}</b>
-      </>
-    );
+    const b = (chunks: ReactNode[]) => <b className="text-foreground/85 font-medium">{chunks}</b>;
+    note =
+      value === KEEP_CURRENT
+        ? t("web.collections.starterPacks.keepsHero", { title: current.title, b })
+        : t("web.collections.starterPacks.replacesHero", { title: current.title, b });
   }
   return (
     <div
@@ -884,7 +948,9 @@ function HeroLine({
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value={KEEP_CURRENT}>Keep current</SelectItem>
+            <SelectItem value={KEEP_CURRENT}>
+              {t("web.collections.starterPacks.keepCurrent")}
+            </SelectItem>
             {options.map((option) => (
               <SelectItem key={option.value} value={option.value}>
                 {option.label}
@@ -915,28 +981,57 @@ function ApplyResult({
   failure: string | undefined;
   result: ApplyCollectionTemplateBundleResponse | undefined;
 }) {
+  const t = useT();
   const id = useId();
   const heading = packResultHeading(pack.title, succeeded, added);
   const rows = result ? appliedRows(result, pack) : [];
   const lines: string[] = [];
   if (!succeeded) {
-    lines.push(failure ?? "The job stopped before it finished.");
+    lines.push(failure ?? t("web.collections.starterPacks.jobStopped"));
   } else {
     for (const row of rows) {
       if (row.added.length > 0)
-        lines.push(`Added ${plural(row.added.length, "list")} to ${row.libraryName}.`);
+        lines.push(
+          t("web.collections.starterPacks.addedToLibrary", {
+            count: row.added.length,
+            count_text: row.added.length,
+            library: row.libraryName,
+          }),
+        );
       for (const entry of row.failed)
-        lines.push(`Couldn't add ${entry.title} to ${row.libraryName}: ${entry.reason}.`);
+        lines.push(
+          t("web.collections.starterPacks.couldntAddTo", {
+            title: entry.title,
+            library: row.libraryName,
+            reason: entry.reason ?? "",
+          }),
+        );
     }
-    if (rows.every((row) => row.added.length === 0)) lines.unshift("Nothing new was added.");
+    if (rows.every((row) => row.added.length === 0))
+      lines.unshift(t("web.collections.starterPacks.nothingNewAdded"));
     for (const entry of result?.featured ?? [])
-      lines.push(`${heroEntryLabel(entry)}: ${entry.template_title}.`);
+      lines.push(
+        entry.surface === "home"
+          ? t("web.collections.starterPacks.heroSetOnHome", { title: entry.template_title })
+          : t("web.collections.starterPacks.heroSetOnLibraryPage", {
+              library: entry.library_name ?? "",
+              title: entry.template_title,
+            }),
+      );
     for (const entry of result?.featured_failed ?? [])
       lines.push(
-        `Couldn't set the ${heroEntryLabel(entry).toLowerCase()}: ${failureReason(entry.reason)}.`,
+        entry.surface === "home"
+          ? t("web.collections.starterPacks.heroFailedOnHome", {
+              reason: failureReason(entry.reason),
+            })
+          : t("web.collections.starterPacks.heroFailedOnLibraryPage", {
+              // Kept as before: the whole label was lower-cased, library name included.
+              library: (entry.library_name ?? "").toLowerCase(),
+              reason: failureReason(entry.reason),
+            }),
       );
     if ((result?.sync_queued?.length ?? 0) > 0)
-      lines.push("First syncs run in the background; lists fill in as each one finishes.");
+      lines.push(t("web.collections.starterPacks.firstSyncsRun"));
   }
   return (
     <section

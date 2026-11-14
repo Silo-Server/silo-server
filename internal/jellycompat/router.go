@@ -34,6 +34,7 @@ func NewRouter(deps Dependencies) chi.Router {
 	deps = withDefaults(deps)
 
 	r := chi.NewRouter()
+	r.Use(httpstream.NoSniff)
 	r.Use(stripSlashesExceptWeb)
 	r.Use(middleware.RequestID)
 	r.Use(observeCompatRequest)
@@ -59,7 +60,7 @@ func NewRouter(deps Dependencies) chi.Router {
 		MaxAge:           86400,
 	}))
 	r.Use(normalizeCompatPathMiddleware)
-	r.Use(httpstream.CompressExcept(5, skipCompatMediaCompression, "application/json"))
+	r.Use(httpstream.CompressExcept(skipCompatMediaCompression, "application/json"))
 	if debugPath := os.Getenv("JELLYCOMPAT_DEBUG_LOG"); debugPath != "" {
 		rotator := &lumberjack.Logger{
 			Filename:   debugPath,
@@ -97,6 +98,8 @@ func NewRouter(deps Dependencies) chi.Router {
 		subtitleRepo = subtitles.NewPgRepository(deps.DB, deps.SecretCipher)
 	}
 	itemsHandler := NewItemsHandler(deps.ContentService, deps.UserDataService, deps.IDCodec, deps.Config, deps.ImageCache, nextUpRepo, deps.BrowseRepo, deps.PersonRepo, deps.DetailSvc, deps.ItemRepo, deps.EpisodeRepo, deps.SeasonRepo, deps.AccessFilterFn, subtitleRepo)
+	shownRatings := newShownRatings(deps.RatingSources)
+	itemsHandler.mapper.ratings = shownRatings
 	itemsHandler.storeProvider = deps.UserStoreProvider
 	itemsHandler.adminDefaults = deps.AdminDefaults
 	itemsHandler.MarkerPopulation = deps.MarkerPopulation
@@ -130,8 +133,9 @@ func NewRouter(deps Dependencies) chi.Router {
 	// Rate limiting mirrors the native API: credential endpoints spend their
 	// per-endpoint budget, and authenticated routes, media included, run the
 	// generic limiter after auth, as the native authenticated group does.
-	// Anonymous artwork, avatars, web assets, and public server info stay
-	// unlimited like native public artwork and server reads.
+	// Anonymous artwork, web assets, and public server info stay unlimited
+	// like native public artwork and server reads. User avatars spend the
+	// per-IP budget: each one reads the session, profile, and blob stores.
 	rateLimit := compatRateLimit(deps.RateLimit)
 	autoscanVirtualFoldersRegistered := false
 	if deps.Authenticator != nil && adminAPIKeyAuth != nil && autoscanHandler != nil {
@@ -142,6 +146,7 @@ func NewRouter(deps Dependencies) chi.Router {
 		autoscanVirtualFoldersRegistered = true
 	}
 	userDataHandler := NewUserDataHandler(deps.ContentService, deps.UserDataService, deps.IDCodec, deps.Config)
+	userDataHandler.mapper.ratings = shownRatings
 	if store, ok := deps.PlaybackStore.(*DurableCompatPlaybackStore); ok && store.pool != nil {
 		if manager, ok := deps.SessionMgr.(interface {
 			SetCompatActivityReader(playback.SessionActivityReader)
@@ -186,6 +191,7 @@ func NewRouter(deps Dependencies) chi.Router {
 		playbackHandler.signalsNotifier = deps.RecWorker
 	}
 	playbackHandler.SettingsRepo = deps.SettingsRepo
+	playbackHandler.ratings = shownRatings
 	playbackHandler.RecipeNodeStore = deps.RecipeNodeStore
 	itemsHandler.themeRouter = compatThemeRouter(deps, playbackHandler)
 	itemsHandler.themeFFmpegPath = func() string { return playback.ResolveFFmpegPath(playbackHandler.FFmpegPath) }
@@ -194,6 +200,9 @@ func NewRouter(deps Dependencies) chi.Router {
 	playbackHandler.StableIdentityResolver = deps.StableIdentityResolver
 	playbackHandler.Trickplay = deps.Trickplay
 	playbackHandler.PlaySync = deps.SubtitlePlaySync
+	if deps.KeptSubtitles != nil {
+		playbackHandler.SubtitleCache.SetEmbeddedSource(deps.KeptSubtitles)
+	}
 	if subtitleRepo != nil {
 		playbackHandler.SubtitleRepo = subtitleRepo
 		playbackHandler.SubtitleBlobs = deps.SubtitleBlobs
@@ -202,6 +211,9 @@ func NewRouter(deps Dependencies) chi.Router {
 			playbackHandler.ExternalTimings = timings
 		}
 	}
+	// Last: move requests run on the event bus's goroutine and read the
+	// handler's fields.
+	subscribeTranscodeMoveRequests(deps, playbackHandler)
 	imagesHandler := NewImagesHandler(deps.ContentService, deps.IDCodec, deps.SessionStore, deps.ImageCache, deps.PersonRepo, deps.DetailSvc, deps.ItemRepo, deps.FolderRepo, deps.SeasonRepo, deps.EpisodeRepo, deps.AccessFilterFn, deps.PosterPresigner, deps.PresignTTL, deps.JWTSecret, deps.HTTPClient)
 	if deps.DB != nil {
 		imagesHandler.extraRepo = catalog.NewExtraRepository(deps.DB)
@@ -211,8 +223,12 @@ func NewRouter(deps Dependencies) chi.Router {
 	imagesHandler.keyAuth = adminAPIKeyAuth
 	imagesHandler.frontendFS = deps.FrontendFS
 	imagesHandler.artworkStore = deps.ArtworkStore
+	userAvatars := newCompatUserAvatars(deps.SessionStore, deps.UserStoreProvider, deps.AvatarStore)
+	imagesHandler.userAvatars = userAvatars
+	authHandler.avatars = userAvatars
 	displayPrefsHandler := NewDisplayPreferencesHandler(deps.UserStoreProvider)
 	recsHandler := NewRecommendationsHandler(deps.RecommendationReader, deps.ItemRepo, deps.DetailSvc, deps.UserDataService, deps.IDCodec, deps.Config, deps.AccessFilterFn)
+	recsHandler.mapper.ratings = shownRatings
 
 	r.Get("/System/Info/Public", systemHandler.HandlePublicInfo)
 	r.Get("/System/Info", systemHandler.HandleInfo)
@@ -234,12 +250,13 @@ func NewRouter(deps Dependencies) chi.Router {
 	// Jellyfin user-avatar images are anonymous: clients fetch them via plain
 	// <img> tags that carry no auth, so the route is registered top-level rather
 	// than inside the session-auth group.
-	r.Get(compatUserImageRoute, imagesHandler.HandleUserImage)
-	r.Method(http.MethodHead, compatUserImageRoute, http.HandlerFunc(imagesHandler.HandleUserImage))
+	userImage := r.With(rateLimit)
+	userImage.Get(compatUserImageRoute, imagesHandler.HandleUserImage)
+	userImage.Method(http.MethodHead, compatUserImageRoute, http.HandlerFunc(imagesHandler.HandleUserImage))
 	// Modern Jellyfin clients fetch the current user's avatar via /UserImage?userId=
-	// (the path form above is [Obsolete] upstream). Same anonymous palette handler.
-	r.Get(compatUserImageQueryRoute, imagesHandler.HandleUserImage)
-	r.Method(http.MethodHead, compatUserImageQueryRoute, http.HandlerFunc(imagesHandler.HandleUserImage))
+	// (the path form above is [Obsolete] upstream). Same anonymous handler.
+	userImage.Get(compatUserImageQueryRoute, imagesHandler.HandleUserImage)
+	userImage.Method(http.MethodHead, compatUserImageQueryRoute, http.HandlerFunc(imagesHandler.HandleUserImage))
 	webHandler := http.StripPrefix("/web", newDynamicCompatWebHandler(deps))
 	r.Get("/", func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/web/", http.StatusFound)
@@ -269,6 +286,7 @@ func NewRouter(deps Dependencies) chi.Router {
 			r.Get("/Items/Latest", itemsHandler.HandleLatest)
 			r.Get("/Items/Filters", itemsHandler.HandleFiltersStub)
 			r.Get("/Items/Filters2", itemsHandler.HandleFilters2Stub)
+			r.Get("/Items/Counts", itemsHandler.HandleItemCounts)
 			r.Get("/Items/Suggestions", itemsHandler.HandleSuggestions)
 			r.Get("/Users/{id}/Items/Latest", itemsHandler.HandleLatest)
 			r.Get("/Items/{id}/Similar", itemsHandler.HandleSimilar)
@@ -301,7 +319,6 @@ func NewRouter(deps Dependencies) chi.Router {
 			r.Get("/Shows/NextUp", itemsHandler.HandleNextUp)
 			r.Get("/Shows/Upcoming", itemsHandler.HandleUpcoming)
 			r.Get("/MediaSegments/{id}", itemsHandler.HandleMediaSegments)
-			r.Get(compatTrickplaySheetRoute, playbackHandler.HandleTrickplaySheet)
 			r.Get(compatTrickplayPlaylistRoute, playbackHandler.HandleTrickplayPlaylist)
 			r.Get("/Episode/{id}/Timestamps", itemsHandler.HandleItemStub)
 			r.Get("/Episode/{id}/IntroTimestamps", itemsHandler.HandleItemStub)
@@ -396,6 +413,8 @@ func NewRouter(deps Dependencies) chi.Router {
 		r.Get("/Videos/{id}/remux-dv-v1/hls/{playlistId}/stream.m3u8", observeCompat(deps.StreamTelemetry, http.MethodGet, "/Videos/{id}/remux-dv-v1/hls/{playlistId}/stream.m3u8", playbackHandler.HandleRemuxDVV1HLSManifest))
 		r.Get("/Videos/{id}/remux-dv-v1/hls/{playlistId}/{segmentId}.{segmentContainer}", observeCompat(deps.StreamTelemetry, http.MethodGet, "/Videos/{id}/remux-dv-v1/hls/{playlistId}/{segmentId}.{segmentContainer}", playbackHandler.HandleRemuxDVV1HLSSegment))
 		r.Get("/Videos/{routeItemId}/{routeMediaSourceId}/Subtitles/{routeIndex}/stream.{routeFormat}", observeCompat(deps.StreamTelemetry, http.MethodGet, "/Videos/{routeItemId}/{routeMediaSourceId}/Subtitles/{routeIndex}/stream.{routeFormat}", playbackHandler.HandleSubtitleStream))
+		// Sheet URLs in a trickplay playlist carry a PlaySessionId, not a token.
+		r.Get(compatTrickplaySheetRoute, playbackHandler.HandleTrickplaySheet)
 		r.Get("/Videos/{id}/{routeMediaSourceId}/Attachments/{routeIndex}", observeCompat(deps.StreamTelemetry, http.MethodGet, "/Videos/{id}/{routeMediaSourceId}/Attachments/{routeIndex}", playbackHandler.HandleAttachment))
 		// Jellyfin subtitle routes encode the start position in ticks in this component.
 		r.Get("/Videos/{routeItemId}/{routeMediaSourceId}/Subtitles/{routeIndex}/{routeStartPositionTicks}/stream.{routeFormat}", observeCompat(deps.StreamTelemetry, http.MethodGet, "/Videos/{routeItemId}/{routeMediaSourceId}/Subtitles/{routeIndex}/{routeStartPositionTicks}/stream.{routeFormat}", playbackHandler.HandleSubtitleStream))
@@ -429,7 +448,10 @@ func skipCompatActivityLog(pattern string) bool {
 		compatTrickplaySheetRoute, compatTrickplayPlaylistRoute:
 		return true
 	}
-	return strings.HasPrefix(pattern, "/Videos/") && strings.Contains(pattern, "/hls/{playlistId}/")
+	// A request the router refused on an HLS path, such as a HEAD, arrives here
+	// as the path the client sent, which carries the play session ID. Matching
+	// the path shape skips it along with the HLS route patterns.
+	return redactHLSPlaySessionID(pattern) != pattern
 }
 
 func skipCompatMediaCompression(r *http.Request) bool {

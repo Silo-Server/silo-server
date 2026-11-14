@@ -1,6 +1,6 @@
 # Deterministic, Cross-Server `content_id`
 
-**Status:** Implemented (branch `feat/deterministic-content-id`)
+**Status:** Implemented
 **Scope:** catalog / scanner / metadata
 **Key code:** `internal/contentid`, `internal/metadata/service.go`,
 `internal/catalog/history_source.go`,
@@ -45,7 +45,7 @@ stored as **`text COLLATE "C"`**:
 | Series | `series-tvdb-296762` |
 | Season | `season-tvdb-296762-1` |
 | Episode | `episode-tvdb-296762-1-5` |
-| Unmatched / local | `local-<128-bit path hash, hex>` |
+| Unmatched / local | `local-<112-bit path hash, hex>` |
 
 Why this shape:
 
@@ -164,6 +164,10 @@ tags mint the same id with no provider API call. This is the primary target
 (Radarr/Sonarr/Plex-tagged libraries). Untagged new items get a path-derived
 `local-` id keyed on the **file path** (not the folder), so distinct pre-merge
 skeletons in a shared folder stay separate while being stable across rescans.
+A flat series (episode files directly in a series library root, in one resolved
+scanner group) instead hashes `group:<folder id>:<group key version>:<group key>`
+into its `local-` id, so episodes matched on different nodes converge on one
+series item.
 
 Same-server convergence is preserved by the existing dedup
 (`findExistingByProviderIDs`) plus `UpsertTx`'s
@@ -292,6 +296,15 @@ Provider-derived IDs are pure ASCII, but `content_id` inherits the DB default
 - For **equality / hash joins** (the watch-history join), `en_US.utf8` is
   deterministic so PostgreSQL already compares raw bytes — collation is
   irrelevant.
+- **Mixed collations are not.** A join between a `C` column and a column in the
+  default collation compares under one of the two, and a B-tree index in the
+  other cannot answer it, even for equality: the join falls back to filtering a
+  scan of the other table for each row. So every column with a foreign key to
+  `media_items`, `seasons` or `episodes` is `C` too, and a new table must declare
+  it. `TestContentIDFamilyReferencesUseCCollationPostgres` checks those foreign
+  keys, and migration `20261104070617_content_id_references_c_collation` moved
+  the ten tables created without it. Soft references without a foreign key are
+  neither moved nor checked; give one `COLLATE "C"` before joining on it.
 - For **ordering** comparisons (B-tree descent on PK probes, `ORDER BY`, range
   scans), `en_US.utf8` invokes libc `strcoll` while `C` is a plain `memcmp`.
 - Structured keys share long prefixes (`episode-tvdb-296762-…`), which makes

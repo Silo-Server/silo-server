@@ -1,12 +1,13 @@
 import { useThemeMusic } from "./useThemeMusic";
 import { useEffect, useState } from "react";
-import { Navigate, useParams, useSearchParams } from "react-router";
+import { useParams, useSearchParams } from "react-router";
 import { useCatalogItemDetail } from "@/hooks/queries/catalogRead";
 import { useUserLibraries } from "@/hooks/queries/libraries";
 import type { ItemDetail } from "@/api/types";
 import { isNotFoundProblem } from "@/api/v2/request";
 import { useDocumentTitle } from "@/hooks/useDocumentTitle";
 import { Button } from "@/components/ui/button";
+import { loadErrorDescription } from "@/components/loadErrorDescription";
 import PageUnavailable from "@/components/PageUnavailable";
 import ViewTransitionLink from "@/components/ViewTransitionLink";
 import { toast } from "sonner";
@@ -25,6 +26,7 @@ import {
 import { parseOptionalLibraryId } from "@/components/sidebarItemNavigation";
 import { useShowAdvisoryAge } from "@/hooks/useShowAdvisoryAge";
 import { useShowTitleArt } from "@/hooks/useTitleArt";
+import { useT } from "@/i18n";
 
 interface HomeItemTransitionShape {
   compact: boolean;
@@ -56,6 +58,7 @@ function getHomeItemTransitionShape(
 }
 
 function HomeItemTransitionShell({ item }: { item?: ItemDetail }) {
+  const t = useT();
   const showTitleArt = useShowTitleArt();
   const [shape] = useState(() => getHomeItemTransitionShape(item, showTitleArt));
   const { compact, hidePoster, squarePoster, hasLogo } = shape;
@@ -66,7 +69,7 @@ function HomeItemTransitionShell({ item }: { item?: ItemDetail }) {
       className="bg-background min-h-screen"
       aria-busy="true"
     >
-      <span className="sr-only">Loading item details</span>
+      <span className="sr-only">{t("web.detail.page.loadingDetails")}</span>
       <section aria-hidden="true" className="border-border/10 border-b">
         <div
           className={`page-shell-wide flex flex-col justify-end pb-8 ${
@@ -124,6 +127,7 @@ function HomeItemTransitionShell({ item }: { item?: ItemDetail }) {
  * when the viewer can still open it.
  */
 function ItemUnavailable({ libraryId }: { libraryId?: number }) {
+  const t = useT();
   const { data: libraries, dataUpdatedAt, isFetching, isError, refetch } = useUserLibraries();
   const [shownAt] = useState(() => Date.now());
   // The 404 may mean the viewer just lost this library, which a cached list
@@ -140,12 +144,14 @@ function ItemUnavailable({ libraryId }: { libraryId?: number }) {
 
   return (
     <PageUnavailable
-      title="This item isn't available"
-      description="It may have been removed, or you may not have access to it."
+      title={t("web.detail.page.unavailableTitle")}
+      description={t("web.detail.page.unavailableBody")}
     >
       {library && (
         <Button asChild variant="outline">
-          <ViewTransitionLink to={`/library/${library.id}`}>Browse library</ViewTransitionLink>
+          <ViewTransitionLink to={`/library/${library.id}`}>
+            {t("web.detail.page.browseLibrary")}
+          </ViewTransitionLink>
         </Button>
       )}
     </PageUnavailable>
@@ -153,6 +159,7 @@ function ItemUnavailable({ libraryId }: { libraryId?: number }) {
 }
 
 export default function ItemDetail() {
+  const t = useT();
   const { id } = useParams<{ id: string }>();
   const [searchParams] = useSearchParams();
   const libraryId = parseOptionalLibraryId(searchParams.get("libraryId"));
@@ -175,15 +182,24 @@ export default function ItemDetail() {
   const showAdvisoryAge = useShowAdvisoryAge(item?.advisory_age != null);
   const enteredItemFromHome = useSidebarItemEnteredFromHome();
 
-  useDocumentTitle(itemNotFound ? "Not found" : (item?.title ?? "Item"));
+  useDocumentTitle(
+    itemNotFound
+      ? t("web.detail.page.notFoundTitle")
+      : (item?.title ?? t("web.detail.page.itemTabFallback")),
+  );
   useThemeMusic(item, loading);
 
   useEffect(() => {
     // A 404 has the page to itself; a toast would only repeat it.
     if (itemError && !isNotFoundProblem(itemError)) {
-      toast.error(itemError instanceof Error ? itemError.message : "Failed to load item");
+      toast.error(
+        loadErrorDescription(
+          itemError,
+          itemError instanceof Error ? itemError.message : t("web.detail.page.loadFailedToast"),
+        ),
+      );
     }
-  }, [itemError]);
+  }, [itemError, t]);
 
   if (loading || !itemDetailsReady) {
     if (enteredItemFromHome) {
@@ -196,8 +212,8 @@ export default function ItemDetail() {
     if (itemError && !itemNotFound) {
       return (
         <PageUnavailable
-          title="Couldn't load this item"
-          description="Something went wrong while loading it. Try again in a moment."
+          title={t("web.detail.page.itemLoadFailed")}
+          description={loadErrorDescription(itemError, t("web.detail.page.loadFailedBody"))}
           onRetry={() => void refetch()}
           retrying={isFetching}
         />
@@ -213,6 +229,7 @@ export default function ItemDetail() {
       return (
         <MovieContent
           item={item as ItemDetail & { type: "movie" }}
+          libraryId={libraryId}
           showAdvisoryAge={showAdvisoryAge}
         />
       );
@@ -220,13 +237,16 @@ export default function ItemDetail() {
       return (
         <SeriesContent
           item={item as ItemDetail & { type: "series" }}
+          libraryId={libraryId}
           showAdvisoryAge={showAdvisoryAge}
         />
       );
     case "season":
-      return <SeasonContent item={item as ItemDetail & { type: "season" }} />;
+      return <SeasonContent item={item as ItemDetail & { type: "season" }} libraryId={libraryId} />;
     case "episode":
-      return <EpisodeContent item={item as ItemDetail & { type: "episode" }} />;
+      return (
+        <EpisodeContent item={item as ItemDetail & { type: "episode" }} libraryId={libraryId} />
+      );
     case "audiobook":
       return (
         <AudiobookContent item={item as ItemDetail & { type: "audiobook" }} libraryId={libraryId} />
@@ -248,11 +268,25 @@ export default function ItemDetail() {
         />
       );
     case "podcast":
-      return <Navigate to={`/podcasts/show/${item.content_id}`} replace />;
+      // Podcasts are listed in libraries, but no web page shows one yet.
+      return (
+        <PageUnavailable
+          title={t("web.detail.page.podcastUnsupportedTitle")}
+          description={t("web.detail.page.podcastUnsupportedBody", { title: item.title })}
+        >
+          {libraryId !== undefined && (
+            <Button asChild variant="outline">
+              <ViewTransitionLink to={`/library/${libraryId}`}>
+                {t("web.detail.page.browseLibrary")}
+              </ViewTransitionLink>
+            </Button>
+          )}
+        </PageUnavailable>
+      );
     default:
       return (
         <div className="page-shell text-muted-foreground py-8">
-          Unsupported item type: {item.type}
+          {t("web.detail.page.unsupportedType", { type: item.type })}
         </div>
       );
   }

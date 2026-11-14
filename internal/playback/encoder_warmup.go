@@ -4,11 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os/exec"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/procgroup"
 	"github.com/Silo-Server/silo-server/internal/tonemap"
 	"golang.org/x/sync/singleflight"
 )
@@ -125,7 +125,7 @@ func warmHardwareEncoderWithRunner(ctx context.Context, timeout time.Duration, f
 }
 
 func runHardwareEncoderWarmup(ctx context.Context, ffmpegPath string, args ...string) ([]byte, error) {
-	return exec.CommandContext(ctx, ffmpegPath, args...).CombinedOutput()
+	return procgroup.CommandContext(ctx, ffmpegPath, args...).CombinedOutput()
 }
 
 func hardwareEncoderWarmupDevices(backend, configured string) []string {

@@ -1,0 +1,9 @@
+#!/bin/sh
+# As the redis account: s6-notifyoncheck runs this as root with HOME set to
+# /config/redis. Signs in when ENABLE_NODE_ACCESS gave Redis a password.
+auth=/run/silo-omnibus/redis-auth.conf
+if [ -f "$auth" ]; then
+  REDISCLI_AUTH="$(sed -n 's/^requirepass //p' "$auth")"
+  export REDISCLI_AUTH
+fi
+s6-setuidgid redis redis-cli -h 127.0.0.1 -p 6379 ping 2>/dev/null | grep -q PONG

@@ -834,6 +834,44 @@ describe("RealtimeEventsProvider", () => {
     expect(queryClient.getQueryData(otherKey)).toBeDefined();
   });
 
+  it("refreshes the series a progress event names for an uncached episode", async () => {
+    const queryClient = new QueryClient();
+    const seriesKey = catalogKeys.itemDetail("series-1");
+    const otherSeriesKey = catalogKeys.itemDetail("series-9");
+    queryClient.setQueryData(seriesKey, { content_id: "series-1", type: "series" });
+    queryClient.setQueryData(otherSeriesKey, { content_id: "series-9", type: "series" });
+
+    render(
+      <QueryClientProvider client={queryClient}>
+        <RealtimeEventsProvider>
+          <div />
+        </RealtimeEventsProvider>
+      </QueryClientProvider>,
+    );
+
+    await act(async () => {});
+    await act(async () => {
+      FakeWebSocket.instances[0]?.emitMessage({
+        type: "event",
+        channel: "user_state",
+        event: "user_state.changed",
+        data: {
+          profile_id: "profile-1",
+          content_id: "episode-elsewhere",
+          series_id: "series-1",
+          change: "progress",
+        },
+      });
+    });
+    // Surface refreshes coalesce for 600ms.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(700);
+    });
+
+    expect(queryClient.getQueryState(seriesKey)?.isInvalidated).toBe(true);
+    expect(queryClient.getQueryState(otherSeriesKey)?.isInvalidated).toBe(false);
+  });
+
   it("refetches request state once per burst of request notifications, for any profile", async () => {
     const queryClient = new QueryClient();
     const refreshed = [

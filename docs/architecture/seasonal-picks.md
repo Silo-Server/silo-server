@@ -16,7 +16,11 @@ themes declare a yearly `Start`–`End` window (MM-DD, wrapping across New
 Year when End comes first) and the predicate is built from it; Easter computes
 its window, and weekly themes (Saturday Morning, Family Movie Night) use a
 weekday-and-hour rule. A row may replace any non-weekly theme's window with its
-own in `theme_dates`; a moved Easter stays on those dates every year. A
+own in `theme_dates`; a moved Easter stays on those dates every year. Dates
+are the server's (its `TZ`, UTC by default), so every dated window, built-in
+or custom, stays open 12 hours past its last day (`seasonEndGrace`); otherwise
+Halloween would end on the evening of October 31 for viewers in the Americas.
+Weekly themes have no grace and follow the server's clock hour. A
 vibe is a curated MDBList list with a name and an in-season row title. The
 first vibe is the default. Theme and vibe keys are stored in section configs,
 so they are never renamed or reused. `GET /api/v2/sections/seasonal-themes`
@@ -40,7 +44,9 @@ drift off theme (Christmas lists that include Mean Girls).
 
 Nothing in season means an empty row, which the home API drops. The row title
 in season is `theme_titles[theme]`, else the vibe's title (a custom holiday's
-`title`, else its name).
+`title`, else its name). The vibe's title carries a `title_key`
+(`home.section.seasonal.<theme>.<vibe>`) in the v2 section, so a client can translate it; a
+title an admin typed carries none.
 
 ## Lists
 

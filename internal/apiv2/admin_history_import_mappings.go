@@ -57,6 +57,8 @@ func (reg *Registry) adminHistoryMappingWriteResult(ctx context.Context, id int,
 func registerAdminHistoryImportMappings(reg *Registry, op func(string, string, string, bool) Operation) {
 	create := op(http.MethodPost, "/admin/history-imports/mappings", "createAdminHistoryImportMapping", false)
 	create.DefaultStatus = http.StatusCreated
+	// A mapping for the same external user on the source is 409.
+	create.Errors = append(create.Errors, http.StatusConflict)
 	Register(reg, create, func(ctx context.Context, in *AdminHistoryImportMappingCreateInput) (*AdminHistoryImportMappingOutput, error) {
 		s, p := reg.adminHistoryImports()
 		if p != nil {

@@ -1,6 +1,9 @@
 package jellycompat
 
 import (
+	"context"
+	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -8,6 +11,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -15,6 +19,62 @@ import (
 	"github.com/Silo-Server/silo-server/internal/nodeauth/nodeauthtest"
 	"github.com/Silo-Server/silo-server/internal/transcodeproxy"
 )
+
+// TestRemoteCompatSegmentEndsHungBodyBeforeViewerCancellation catches a relay
+// that watches headers but leaves a stalled segment body waiting for the viewer,
+// and one that ends the stalled body cleanly instead of aborting it.
+func TestRemoteCompatSegmentEndsHungBodyBeforeViewerCancellation(t *testing.T) {
+	transport, ok := transcodeproxy.NodeClient().Transport.(*http.Transport)
+	if !ok {
+		t.Fatal("node client transport is not *http.Transport")
+	}
+	// The node transport serves this scheme in memory. The separate health
+	// transport rejects it without opening sockets, so probes get no answer.
+	// Each run needs its own scheme because RegisterProtocol has no unregister.
+	scheme := fmt.Sprintf("compat-body-%d", time.Now().UnixNano())
+	synctest.Test(t, func(t *testing.T) {
+		reader, writer := io.Pipe()
+		defer func() { _ = reader.Close() }()
+		defer func() { _ = writer.Close() }()
+		transport.RegisterProtocol(scheme, compatRelayRoundTrip(func(req *http.Request) (*http.Response, error) {
+			stop := context.AfterFunc(req.Context(), func() { _ = reader.CloseWithError(req.Context().Err()) })
+			t.Cleanup(func() { stop() })
+			return &http.Response{
+				StatusCode:    http.StatusOK,
+				Header:        http.Header{transcodeproxy.GenerationHeader: []string{"7"}},
+				ContentLength: -1,
+				Body:          reader,
+			}, nil
+		}))
+		go func() { _, _ = io.WriteString(writer, "partial") }()
+		ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
+		defer cancel()
+		req := httptest.NewRequestWithContext(ctx, http.MethodGet, "/videos/item/hls1/main/7.ts", nil)
+		rr := httptest.NewRecorder()
+		handler := &PlaybackHandler{JWTSecret: "compat-relay-secret"}
+		started := time.Now()
+		var recovered any
+		func() {
+			defer func() { recovered = recover() }()
+			handler.proxyRemoteCompatSegment(rr, req, scheme+"://hung-node.test", "remote-session", "seg_00007.ts")
+		}()
+		if ctx.Err() != nil {
+			t.Fatalf("segment relay waits for viewer cancellation: elapsed = %v, request error = %v", time.Since(started), ctx.Err())
+		}
+		if rr.Code != http.StatusOK || rr.Body.String() != "partial" {
+			t.Fatalf("relay response = %d %q, want 200 with partial body", rr.Code, rr.Body.String())
+		}
+		if recovered != http.ErrAbortHandler { //nolint:errorlint // sentinel compared by identity, as net/http does
+			t.Fatalf("relay ended with %v, want panic(http.ErrAbortHandler) so the viewer sees a short body", recovered)
+		}
+	})
+}
+
+type compatRelayRoundTrip func(*http.Request) (*http.Response, error)
+
+func (f compatRelayRoundTrip) RoundTrip(req *http.Request) (*http.Response, error) {
+	return f(req)
+}
 
 // TestRemoteCompatRelayReusesNodeConnectionsAndRecordsDependencyMetrics guards
 // the Jellyfin-compatible relay to a remote transcode node. Concurrent segment

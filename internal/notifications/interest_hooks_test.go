@@ -448,6 +448,9 @@ func TestInterestTrackingStoreConditionalCapabilities(t *testing.T) {
 			if _, ok := wrapped.(userstore.PreferenceSettingsTransactioner); !ok {
 				t.Error("dropped PreferenceSettingsTransactioner")
 			}
+			if _, ok := wrapped.(userstore.AuditedProfileDeleter); !ok {
+				t.Error("dropped AuditedProfileDeleter")
+			}
 			if _, ok := wrapped.(userstore.SettingValueCompareAndSetter); !ok {
 				t.Error("dropped SettingValueCompareAndSetter")
 			}

@@ -304,8 +304,10 @@ Discover reads the profile's watched set once per request and shares it
 between its rows and the airings it blends in; Watch Tonight shares it
 between its candidates, its cold-start fallback and the handler's filter; a
 Home render shares it between its For You and Because You Watched rows. On
-the Postgres user store the set is one query planned for the profile; only a
-user store outside Postgres is walked page by page.
+the Postgres user store the set is one query planned for the profile, and the
+progress that abandoned titles and the taste profile come from is one query
+plus one for ebook reading progress; only a user store outside Postgres is
+walked page by page.
 
 Cache rows expire 26 hours after the run that wrote them, past the next daily
 cache run. A global row whose rebuild fails keeps its last good version until
@@ -519,9 +521,8 @@ passing over those it rated 2 stars or lower; the worker, the reads and
 Watch Tonight choose them the same way. A read asks for a refresh only when
 there are anchors and none has a cached row.
 
-List reads return at most 50 items per row (default 20); the v1 for-you and
-similar-users reads keep 20, and section "see all" reads return up to 60, a
-whole cached row. Home and library sections read the whole cached pool,
+List reads return at most 50 items per row (default 20), and section "see all"
+reads return up to 60, a whole cached row. Home and library sections read the whole cached pool,
 scope it to the section's libraries, then trim to the section's size. The
 main row is ranked for every title the profile can see, so a library with a
 small share of the catalog can hold few of its titles. A library's For You
@@ -535,5 +536,5 @@ Jellyfin's `/Movies/Recommendations` sends only rows its headings describe
 truthfully: up to two Because You Watched rows under their anchor's title,
 dropped when the viewer cannot see the anchor, and the taste-cluster rows
 under their genre label (see [jellycompat-api.md](../jellycompat-api.md)). A
-per-section items request that fails to load answers `500`; the aggregate
-sections endpoints still degrade to empty rows.
+per-section items request that fails to load answers `500`; the v2 aggregate
+sections endpoints leave that row out.

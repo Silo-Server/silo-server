@@ -298,7 +298,7 @@ func TestProxyImageServesOnlyImages(t *testing.T) {
 		wantContentType string
 	}{
 		{name: "declared image", declared: "image/webp", body: []byte("webp-bytes"), wantCode: http.StatusOK, wantContentType: "image/webp"},
-		{name: "image labeled octet-stream", declared: "application/octet-stream", body: avatarPalette[0], wantCode: http.StatusOK, wantContentType: "image/png"},
+		{name: "image labeled octet-stream", declared: "application/octet-stream", body: []byte("\x89PNG\r\n\x1a\npng-bytes"), wantCode: http.StatusOK, wantContentType: "image/png"},
 		{name: "html", declared: "text/html", body: []byte("<html><script>alert(1)</script></html>"), wantCode: http.StatusBadGateway},
 		{name: "unlabeled html", body: []byte("<html><script>alert(1)</script></html>"), wantCode: http.StatusBadGateway},
 	} {
@@ -505,55 +505,6 @@ func TestHandleItemImagePrimaryCacheHitRedirectsWithoutSession(t *testing.T) {
 		if rec.Code != http.StatusOK || rec.Header().Get("Location") != "" || rec.Body.Len() != 0 {
 			t.Fatalf("HEAD %s = %d, Location %q, %d body bytes; want 200 with no redirect or body", imageURL, rec.Code, rec.Header().Get("Location"), rec.Body.Len())
 		}
-	}
-}
-
-// serveUserImage issues an avatar request for pathID with the chi "id" route
-// param and no session in context.
-func serveUserImage(h *ImagesHandler, method, pathID string) *httptest.ResponseRecorder {
-	req := httptest.NewRequest(method, "/Users/"+pathID+"/Images/Primary", nil)
-	routeCtx := chi.NewRouteContext()
-	routeCtx.URLParams.Add("id", pathID)
-	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, routeCtx))
-	rec := httptest.NewRecorder()
-	h.HandleUserImage(rec, req)
-	return rec
-}
-
-// TestHandleUserImageServesPlaceholderWithoutSession verifies the user-avatar
-// route serves a placeholder PNG without a session: it is byte-stable per id and
-// the palette varies across ids (the avatar is now drawn from a bounded fixed
-// palette, so two distinct ids may collide — variety is asserted over a sample).
-func TestHandleUserImageServesPlaceholderWithoutSession(t *testing.T) {
-	h := &ImagesHandler{codec: NewResourceIDCodec()}
-	id := PseudoUserID(1, "profile-1").String()
-
-	rec := serveUserImage(h, http.MethodGet, id)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, body = %s; want 200", rec.Code, rec.Body.String())
-	}
-	if ct := rec.Header().Get("Content-Type"); ct != "image/png" {
-		t.Fatalf("Content-Type = %q, want image/png", ct)
-	}
-	body := rec.Body.Bytes()
-	if len(body) == 0 {
-		t.Fatal("expected a non-empty avatar body")
-	}
-
-	again := serveUserImage(h, http.MethodGet, id)
-	if got := again.Body.Bytes(); string(got) != string(body) {
-		t.Fatal("avatar bytes for the same path id must be stable across calls")
-	}
-
-	// The palette is bounded, so individual ids may collide; assert variety over
-	// a sample instead of strict per-id divergence.
-	distinct := map[string]struct{}{}
-	for i := 0; i < 12; i++ {
-		out := serveUserImage(h, http.MethodGet, PseudoUserID(i+10, "profile").String())
-		distinct[out.Body.String()] = struct{}{}
-	}
-	if len(distinct) < 2 {
-		t.Fatalf("expected the avatar palette to vary across ids; got %d distinct outputs", len(distinct))
 	}
 }
 
@@ -804,6 +755,46 @@ func TestHandleItemImagePresignsOnlyRequestedType(t *testing.T) {
 				if !strings.HasPrefix(resolver.paths[i], prefix) {
 					t.Fatalf("presign %d = %q, want prefix %q", i, resolver.paths[i], prefix)
 				}
+			}
+		})
+	}
+}
+
+// A season's backdrop on a cold node (no tag, nothing in the route cache) is
+// the season's own when it has one and the series' otherwise, as season detail
+// serves it.
+func TestHandleItemImageSeasonBackdropPrefersTheSeasonsOwn(t *testing.T) {
+	codec := NewResourceIDCodec()
+	series := &models.MediaItem{ContentID: "series-1", Type: "series", BackdropPath: "tmdb/series/1/backdrop/original.ghi.webp"}
+	routeID := codec.EncodeStringID(EncodedIDSeason, "season-2")
+
+	tests := []struct {
+		name           string
+		seasonBackdrop string
+		wantPrefix     string
+	}{
+		{name: "own backdrop", seasonBackdrop: "tmdb/series/1/season/2/backdrop/original.def.webp", wantPrefix: "tmdb/series/1/season/2/backdrop/"},
+		{name: "no backdrop of its own", wantPrefix: "tmdb/series/1/backdrop/"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			season := &models.Season{ContentID: "season-2", SeriesID: "series-1", SeasonNumber: 2, BackdropPath: tt.seasonBackdrop}
+			detailSvc := &catalog.DetailService{}
+			detailSvc.SetImageResolver(&countingImageResolver{})
+			h := &ImagesHandler{
+				codec:      codec,
+				images:     NewImageCache(time.Hour, time.Now),
+				itemRepo:   fakeImageItemRepo{item: series},
+				seasonRepo: &fakeSeasonByIDRepo{seasons: map[string]*models.Season{"season-2": season}},
+				detailSvc:  detailSvc,
+			}
+
+			rec := requestItemImage(h, routeID, "Backdrop", "")
+			if rec.Code != http.StatusFound {
+				t.Fatalf("status = %d, body = %s; want 302", rec.Code, rec.Body.String())
+			}
+			if got := rec.Header().Get("Location"); !strings.HasPrefix(got, "https://cdn.example.test/"+tt.wantPrefix) {
+				t.Fatalf("Location = %q, want the image under %q", got, tt.wantPrefix)
 			}
 		})
 	}

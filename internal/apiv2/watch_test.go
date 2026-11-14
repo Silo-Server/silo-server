@@ -224,3 +224,39 @@ func TestGetProgressCapabilities(t *testing.T) {
 		t.Fatalf("unconfigured: %d %s", rec.Code, rec.Body.String())
 	}
 }
+
+// A marker's confidence is optional because 0 is a rating: the field is absent when
+// nobody rated the range, and present as 0 when a source rated it worthless. A client
+// renders those differently, so the distinction has to survive the wire.
+func TestWatchMarkerCarriesConfidenceOnlyWhenRated(t *testing.T) {
+	rated := 0.0
+	ratedBody, err := json.Marshal(watchMarkerOf(&catalogpkg.Marker{Start: 0, End: 90, Confidence: &rated}))
+	if err != nil {
+		t.Fatalf("marshal rated marker: %v", err)
+	}
+
+	var ratedFields map[string]json.RawMessage
+	if err := json.Unmarshal(ratedBody, &ratedFields); err != nil {
+		t.Fatalf("unmarshal rated marker: %v", err)
+	}
+	value, ok := ratedFields["confidence"]
+	if !ok {
+		t.Fatalf("a rated 0 was dropped: %s", ratedBody)
+	}
+	if string(value) != "0" {
+		t.Fatalf("confidence = %s, want 0", value)
+	}
+
+	unratedBody, err := json.Marshal(watchMarkerOf(&catalogpkg.Marker{Start: 0, End: 90}))
+	if err != nil {
+		t.Fatalf("marshal unrated marker: %v", err)
+	}
+
+	var unratedFields map[string]json.RawMessage
+	if err := json.Unmarshal(unratedBody, &unratedFields); err != nil {
+		t.Fatalf("unmarshal unrated marker: %v", err)
+	}
+	if value, ok := unratedFields["confidence"]; ok {
+		t.Fatalf("an unrated marker serialized confidence %s: %s", value, unratedBody)
+	}
+}

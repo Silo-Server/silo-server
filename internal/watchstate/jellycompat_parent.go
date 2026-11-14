@@ -21,7 +21,7 @@ func (s *Service) RecordJellycompatParent(ctx context.Context, userID int, profi
 	}
 	edit := userstore.JellycompatParentEdit{MediaItemID: parentID, IsFavorite: favorite, Played: played}
 	if played {
-		edit.Targets, edit.History = s.markWatchedBatchEntries(ctx, profileID, targetIDs, time.Now().UTC(), userstore.WatchHistorySourceJellycompat)
+		edit.Targets, edit.History = s.markWatchedBatchEntries(ctx, profileID, targetIDs, time.Now().UTC(), userstore.WatchHistorySourceJellycompat, false)
 	} else {
 		for _, id := range targetIDs {
 			edit.Targets = append(edit.Targets, userstore.MarkWatchedTarget{MediaItemID: id})

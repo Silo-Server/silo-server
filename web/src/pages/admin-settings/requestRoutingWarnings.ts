@@ -4,6 +4,7 @@ import type {
   RequestRouteConditions,
   RequestRouteMediaType,
 } from "@/api/v2/adminRequests";
+import { t } from "@/i18n";
 
 import {
   cleanConditions,
@@ -56,6 +57,7 @@ type IncludeField = (typeof LIST_CONDITION_FIELDS)[keyof typeof LIST_CONDITION_F
 const SINGLE_VALUED: ReadonlySet<IncludeField> = new Set([
   "original_languages",
   "requester_user_ids",
+  "series_statuses",
 ]);
 
 const KNOWN_KEYS = new Set<string>([
@@ -135,30 +137,51 @@ function destinationServers(route: RequestRoute): string[] {
   ] as string[];
 }
 
+/** Whose requests wait on a server that is off: one rule's, or Everything else's. */
+type OffServerScope = "rule" | "fallback";
+
 function serverWarnings(
   route: RequestRoute,
   input: RoutingWarningInput,
-  waits: string,
+  scope: OffServerScope,
 ): RoutingWarning[] {
   const out: RoutingWarning[] = [];
-  const plural = input.mediaType === "series" ? "series" : "movies";
   const wanted = WANTED_KIND[input.mediaType];
   for (const id of destinationServers(route)) {
     const server = input.servers.find((candidate) => candidate.id === id);
     if (!server) {
-      out.push({ key: `missing-${id}`, text: "A server this sends to no longer exists." });
+      out.push({
+        key: `missing-${id}`,
+        text: t("web.admin.settings.requests.warnings.serverMissing"),
+      });
       continue;
     }
     const kind = serverKind(server);
     if (KIND_LABEL[kind] && kind !== wanted) {
       out.push({
         key: `kind-${id}`,
-        text: `${server.name} is a ${KIND_LABEL[kind]} server; ${plural} need ${KIND_LABEL[wanted]}.`,
+        text: t("web.admin.settings.requests.warnings.serverWrongKind", {
+          server: server.name,
+          kind: KIND_LABEL[kind],
+          media_type: input.mediaType,
+          wanted_kind: KIND_LABEL[wanted]!,
+        }),
       });
     } else if (!server.enabled) {
-      out.push({ key: `off-${id}`, text: `${server.name} is turned off. ${waits}` });
+      out.push({
+        key: `off-${id}`,
+        text: t(
+          scope === "rule"
+            ? "web.admin.settings.requests.warnings.serverOffRule"
+            : "web.admin.settings.requests.warnings.serverOffFallback",
+          { server: server.name },
+        ),
+      });
     } else if (!serverReady(server, input.installations)) {
-      out.push({ key: `setup-${id}`, text: `${server.name} needs setup.` });
+      out.push({
+        key: `setup-${id}`,
+        text: t("web.admin.settings.requests.warnings.serverNeedsSetup", { server: server.name }),
+      });
     }
   }
   return out;
@@ -206,7 +229,7 @@ export function routingWarnings(input: RoutingWarningInput): Map<string, Routing
     if (shadow) {
       warnings.push({
         key: "never-used",
-        text: `Never used: “${shadow.name}” above catches every request this rule would.`,
+        text: t("web.admin.settings.requests.warnings.neverUsed", { rule: shadow.name }),
         fix: { kind: "move-above", targetId: shadow.id },
       });
     }
@@ -215,22 +238,16 @@ export function routingWarnings(input: RoutingWarningInput): Map<string, Routing
       if (first && first.id !== shadow?.id) {
         warnings.push({
           key: "anime-order",
-          text: `Anime titles are usually Japanese, so “${first.name}” above catches most of them first.`,
+          text: t("web.admin.settings.requests.warnings.animeOrder", { rule: first.name }),
           fix: { kind: "move-above", targetId: first.id },
         });
       }
     }
-    warnings.push(
-      ...serverWarnings(
-        rule,
-        input,
-        "Requests this rule sends there can't go through until it's back on.",
-      ),
-    );
+    warnings.push(...serverWarnings(rule, input, "rule"));
     if (animeSeriesTypeTiers(rule, input).length > 0) {
       warnings.push({
         key: "anime-series-type",
-        text: "Sonarr will add these as standard series.",
+        text: t("web.admin.settings.requests.warnings.animeSeriesType"),
         fix: { kind: "set-anime-series-type" },
       });
     }
@@ -239,15 +256,11 @@ export function routingWarnings(input: RoutingWarningInput): Map<string, Routing
 
   const fallback = input.fallback;
   if (fallback?.hd.integration_id) {
-    const warnings = serverWarnings(
-      fallback,
-      input,
-      "Requests sent there can't go through until it's back on.",
-    );
+    const warnings = serverWarnings(fallback, input, "fallback");
     if (input.forceDual && !fallback.uhd.integration_id) {
       warnings.push({
         key: "force-dual",
-        text: "“Also request a 4K version of every title” is on, but Everything else doesn't send 4K versions. Titles no rule sends to a 4K server get HD only.",
+        text: t("web.admin.settings.requests.warnings.forceDual"),
         fix: { kind: "edit-fallback" },
       });
     }
@@ -260,10 +273,10 @@ export function routingWarnings(input: RoutingWarningInput): Map<string, Routing
 export function fixLabel(fix: RoutingWarningFix): string {
   switch (fix.kind) {
     case "move-above":
-      return "Move above";
+      return t("web.admin.settings.requests.warnings.fixMoveAbove");
     case "set-anime-series-type":
-      return "Set series type to Anime";
+      return t("web.admin.settings.requests.warnings.fixAnimeSeriesType");
     case "edit-fallback":
-      return "Choose a 4K server";
+      return t("web.admin.settings.requests.warnings.fixChoose4KServer");
   }
 }

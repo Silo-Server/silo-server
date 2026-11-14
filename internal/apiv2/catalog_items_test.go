@@ -9,6 +9,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
 	catalogpkg "github.com/Silo-Server/silo-server/internal/catalog"
@@ -30,7 +31,7 @@ type fakeCatalog struct {
 }
 
 func (f *fakeCatalog) ContextAccessFilter(ctx context.Context, opts handlers.AccessFilterOptions) (catalogpkg.AccessFilter, error) {
-	return catalogpkg.AccessFilter{UserID: claimsFrom(ctx).UserID, ProfileID: "p-owner", AllowedLibraryIDs: []int{1, 2}, PresentationLibraryID: opts.PresentationLibraryID, ScopeFilesToLibrary: opts.ScopeFilesToLibrary, SelectedFileID: opts.SelectedFileID, DeviceID: opts.DeviceID}, nil
+	return catalogpkg.AccessFilter{UserID: claimsFrom(ctx).UserID, ProfileID: "p-owner", AllowedLibraryIDs: []int{1, 2}, PresentationLibraryID: opts.PresentationLibraryID, ScopeFilesToLibrary: opts.ScopeFilesToLibrary, SeriesLibraryCoversEpisodes: opts.SeriesLibraryCoversEpisodes, SelectedFileID: opts.SelectedFileID, DeviceID: opts.DeviceID}, nil
 }
 
 func fakeListingCard(id string) handlers.CollectionItemView {
@@ -548,6 +549,11 @@ func TestGetCatalogItem(t *testing.T) {
 	if fake.lastViewer.Access.PresentationLibraryID == nil || *fake.lastViewer.Access.PresentationLibraryID != 2 || fake.lastViewer.Access.SelectedFileID != 120 || fake.lastViewer.Access.ScopeFilesToLibrary {
 		t.Fatalf("viewer = %+v", fake.lastViewer.Access)
 	}
+	// A native read named a library, so an episode opens under a library that
+	// holds its series.
+	if !fake.lastViewer.Access.SeriesLibraryCoversEpisodes {
+		t.Fatalf("viewer = %+v, want SeriesLibraryCoversEpisodes", fake.lastViewer.Access)
+	}
 	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/catalog/items/movie:nope", "", viewerHeaders()), TypeNotFound)
 	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/catalog/items/movie:heat-1995?file_id=abc", "", viewerHeaders()), TypeValidationFailed)
 	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/catalog/items/movie:heat-1995", "", bearer(memberToken)), TypeValidationFailed)
@@ -773,5 +779,15 @@ func TestCatalogDatesLeaveOutFreeText(t *testing.T) {
 		Seasons: []mediarequests.RequestSeason{{Number: 1, AirDate: "2015"}}})
 	if request.ReleaseDate != "1995-12-15" || request.FirstAirDate != "" || request.Seasons[0].AirDate != "" {
 		t.Fatalf("request dates = %q %q %q", request.ReleaseDate, request.FirstAirDate, request.Seasons[0].AirDate)
+	}
+}
+
+func TestCatalogListingCarriesSectionCardProgress(t *testing.T) {
+	stamp := "2026-01-02T03:04:05Z"
+	view := fakeListingCard("movie:heat-1995")
+	view.ProgressUpdatedAt, view.ItemSource = &stamp, "in_progress"
+	item := catalogItemOfListing(view, ratingsources.Selection{})
+	if item.ItemSource != "in_progress" || item.ProgressUpdatedAt == nil || item.ProgressUpdatedAt.Time.UTC().Format(time.RFC3339) != stamp {
+		t.Fatalf("listing card = source %q at %v, want in_progress at %s", item.ItemSource, item.ProgressUpdatedAt, stamp)
 	}
 }

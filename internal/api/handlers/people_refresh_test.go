@@ -4,18 +4,13 @@ import (
 	"context"
 	"errors"
 	"net/http"
-	"net/http/httptest"
 	"slices"
-	"strings"
 	"testing"
 	"time"
 
-	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
 
 	"github.com/Silo-Server/silo-server/internal/access"
-	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
-	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/ratelimit"
@@ -192,77 +187,42 @@ func (r *matureOnlyPersonRepo) GetVisible(_ context.Context, id int64, filter ca
 	return &models.Person{ID: 1, Name: "Bryan Cranston", Bio: "Actor", TmdbID: "17419", UpdatedAt: time.Now()}, nil
 }
 
-func (r *matureOnlyPersonRepo) SearchAlphabetical(_ context.Context, _ string, _ int, filter catalog.AccessFilter) ([]models.Person, error) {
-	r.filters = append(r.filters, filter)
-	if filter.MaxContentRating != "" {
-		return nil, nil
-	}
-	return []models.Person{{ID: 1, Name: "Bryan Cranston", Bio: "Actor", TmdbID: "17419", UpdatedAt: time.Now()}}, nil
-}
-
-func TestV1PeopleRoutesHonorViewerAccess(t *testing.T) {
+// A person the viewer can see through no credit answers what an unknown one
+// does, on detail and on refresh, and nothing is queued for them.
+func TestHiddenPersonAnswersLikeAnUnknownOne(t *testing.T) {
 	repo := &matureOnlyPersonRepo{}
 	queue := &recordingPersonRefreshQueue{}
-	h := &PeopleHandler{personRepo: repo, itemsHandler: &ItemsHandler{}, refreshQueue: queue, refreshLimiter: ratelimit.NewMemoryLimiter()}
-	router := chi.NewRouter()
-	router.Get("/people", h.HandleSearch)
-	router.Get("/people/{id}", h.HandleGetPerson)
-	router.Post("/people/{id}/refresh", h.HandleRefreshPerson)
-	serve := func(method, path string, scope access.Scope) *httptest.ResponseRecorder {
-		t.Helper()
-		req := httptest.NewRequest(method, path, nil)
-		ctx := apimw.SetClaims(req.Context(), &auth.Claims{UserID: 5})
-		req = req.WithContext(access.SetScope(ctx, scope))
-		rec := httptest.NewRecorder()
-		router.ServeHTTP(rec, req)
-		return rec
-	}
-	kid := access.Scope{AllowedLibraryIDs: []int{3}, MaturityLimits: access.MaturityLimits{MaxContentRating: "TV-Y7"}}
-	adult := access.Scope{AllowedLibraryIDs: []int{3}}
+	h := &PeopleHandler{personRepo: repo, refreshQueue: queue, refreshLimiter: ratelimit.NewMemoryLimiter()}
+	kid := catalog.AccessFilter{UserID: 5, AllowedLibraryIDs: []int{3}, MaturityLimits: access.MaturityLimits{MaxContentRating: "TV-Y7"}}
+	adult := catalog.AccessFilter{UserID: 5, AllowedLibraryIDs: []int{3}}
 
-	unknown := serve(http.MethodGet, "/people/2", kid)
-	hidden := serve(http.MethodGet, "/people/1", kid)
-	if hidden.Code != http.StatusNotFound || hidden.Body.String() != unknown.Body.String() || strings.Contains(hidden.Body.String(), "Cranston") {
-		t.Fatalf("hidden person: %d %s, unknown: %d %s", hidden.Code, hidden.Body.String(), unknown.Code, unknown.Body.String())
+	notFound := func(name string, err error) {
+		t.Helper()
+		apiErr, ok := errors.AsType[*APIError](err)
+		if !ok || apiErr.Status != http.StatusNotFound {
+			t.Fatalf("%s: err = %v, want 404", name, err)
+		}
 	}
-	got := repo.filters[len(repo.filters)-1]
-	if got.MaxContentRating != "TV-Y7" || !slices.Equal(got.AllowedLibraryIDs, []int{3}) {
+	_, unknownErr := h.Person(t.Context(), 2, true, kid)
+	notFound("unknown person", unknownErr)
+	_, hiddenErr := h.Person(t.Context(), 1, true, kid)
+	notFound("hidden person", hiddenErr)
+	if hiddenErr.Error() != unknownErr.Error() {
+		t.Fatalf("hidden person answers %q, unknown answers %q", hiddenErr, unknownErr)
+	}
+	if got := repo.filters[len(repo.filters)-1]; got.MaxContentRating != "TV-Y7" || !slices.Equal(got.AllowedLibraryIDs, []int{3}) {
 		t.Fatalf("detail did not pass the viewer's access: %+v", got)
 	}
-	if rec := serve(http.MethodGet, "/people?q=cranston", kid); rec.Code != http.StatusOK || strings.Contains(rec.Body.String(), "Cranston") {
-		t.Fatalf("hidden person in search: %d %s", rec.Code, rec.Body.String())
-	}
-	if got := repo.filters[len(repo.filters)-1]; got.MaxContentRating != "TV-Y7" {
-		t.Fatalf("search did not pass the viewer's access: %+v", got)
-	}
-	if rec := serve(http.MethodGet, "/people?q=cranston", adult); rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"name":"Bryan Cranston"`) {
-		t.Fatalf("visible person in search: %d %s", rec.Code, rec.Body.String())
-	}
-	if rec := serve(http.MethodPost, "/people/1/refresh", kid); rec.Code != http.StatusNotFound {
-		t.Fatalf("hidden refresh: %d %s", rec.Code, rec.Body.String())
-	}
+	notFound("hidden refresh", h.RefreshPerson(t.Context(), 5, 1, kid))
 	if len(queue.ids) != 0 {
 		t.Fatalf("hidden person was queued: %v", queue.ids)
 	}
 
-	visible := serve(http.MethodGet, "/people/1", adult)
-	if visible.Code != http.StatusOK || !strings.Contains(visible.Body.String(), `"name":"Bryan Cranston"`) {
-		t.Fatalf("visible person: %d %s", visible.Code, visible.Body.String())
+	if _, err := h.Person(t.Context(), 1, false, adult); err != nil {
+		t.Fatalf("visible person: %v", err)
 	}
-	viewed := len(queue.ids) // The view may queue a due refresh on its own.
-	if rec := serve(http.MethodPost, "/people/1/refresh", adult); rec.Code != http.StatusAccepted || len(queue.ids) != viewed+1 {
-		t.Fatalf("visible refresh: %d %s, queued %v", rec.Code, rec.Body.String(), queue.ids)
-	}
-}
-
-func TestV1PersonDetailFailsClosedWithoutAccessResolver(t *testing.T) {
-	h := &PeopleHandler{personRepo: &matureOnlyPersonRepo{}}
-	router := chi.NewRouter()
-	router.Get("/people/{id}", h.HandleGetPerson)
-	rec := httptest.NewRecorder()
-	router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/people/1", nil))
-	if rec.Code != http.StatusInternalServerError || strings.Contains(rec.Body.String(), "Cranston") {
-		t.Fatalf("%d %s", rec.Code, rec.Body.String())
+	if err := h.RefreshPerson(t.Context(), 5, 1, adult); err != nil || !slices.Equal(queue.ids, []int64{1}) {
+		t.Fatalf("visible refresh: %v, queued %v", err, queue.ids)
 	}
 }
 

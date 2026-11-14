@@ -45,6 +45,13 @@ type subtitleCueSpan struct {
 	// read instead, and for playlists with known durations.
 	durations []float64
 	final     bool
+	// lead is, for a keyframe-planned generation, how much earlier on the
+	// source's timeline its first video frame is than segment start: a
+	// restart's seek lands on a keyframe before the segment. Its recorded
+	// video start is that frame's. Valid when leadKnown; the live
+	// generation's is read from the assembler.
+	lead      float64
+	leadKnown bool
 }
 
 // startSubtitleSpanLocked records the generation that was just spawned.
@@ -53,8 +60,12 @@ func (s *TranscodeSession) startSubtitleSpanLocked(opts TranscodeOpts) {
 	if !subtitleRenditionActive(opts) || opts.subtitleCueFile == "" {
 		return
 	}
+	startTime := subtitleSpanStartTime(opts)
+	if s.copyGroups != nil {
+		startTime = s.copyPlan.cueStart(opts.StartSegmentNumber)
+	}
 	s.subtitleSpans = append(s.subtitleSpans, subtitleCueSpan{
-		file: opts.subtitleCueFile, start: opts.StartSegmentNumber, end: -1, startTime: subtitleSpanStartTime(opts),
+		file: opts.subtitleCueFile, start: opts.StartSegmentNumber, end: -1, startTime: startTime,
 	})
 }
 
@@ -77,8 +88,19 @@ func subtitleSpanStartTime(opts TranscodeOpts) float64 {
 // A generation on FFmpeg's own playlist keeps the durations that playlist
 // listed, since the next generation replaces it.
 func (s *TranscodeSession) closeSubtitleSpan() {
-	data, _ := s.liveGenerationPlaylist()
-	_, head, ok := playlistSegmentRange(data)
+	var data []byte
+	var head int
+	var ok, leadKnown bool
+	var lead float64
+	if s.copyGroups != nil {
+		// A planned generation writes no playlist of its own; the assembler
+		// still holds its run.
+		head, ok = s.copyGroups.runHead()
+		lead, leadKnown = s.copyGroups.runLead()
+	} else {
+		data, _ = s.liveGenerationPlaylist()
+		_, head, ok = playlistSegmentRange(data)
+	}
 	followsFFmpeg := followsFFmpegPlaylist(s.Opts(), s.copyPlan)
 	s.mu.Lock()
 	for i := range s.subtitleSpans {
@@ -91,6 +113,7 @@ func (s *TranscodeSession) closeSubtitleSpan() {
 			break
 		}
 		span.end = head
+		span.lead, span.leadKnown = lead, leadKnown
 		if followsFFmpeg {
 			durations, final, own := generationPlaylistTimeline(data, span.start)
 			if !own {
@@ -113,16 +136,20 @@ func (s *TranscodeSession) liveGenerationPlaylist() ([]byte, bool) {
 	s.mu.Lock()
 	inherited := s.inheritedManifest
 	s.mu.Unlock()
-	data, info, err := readManifestFile(filepath.Join(s.outputDir, "stream.m3u8"))
-	if err != nil || inherited != nil && sameManifestFile(info, inherited) {
+	data, err := readManifestFile(filepath.Join(s.outputDir, "stream.m3u8"), inherited)
+	if err != nil {
 		return nil, false
 	}
 	return data, true
 }
 
 // liveProducedHead returns the last segment the current generation's own
-// playlist lists.
+// playlist lists, or for a keyframe-planned session the last one its run has
+// written.
 func (s *TranscodeSession) liveProducedHead() (int, bool) {
+	if s.copyGroups != nil {
+		return s.copyGroups.runHead()
+	}
 	data, ok := s.liveGenerationPlaylist()
 	if !ok {
 		return 0, false
@@ -176,9 +203,12 @@ const subtitleSpanRecordName = "subtitle_spans.json"
 
 // subtitleSpanRecord is the content of subtitleSpanRecordName. Track and
 // SegmentDuration tie it to the recipe whose grid its segment numbers use.
+// OnDemand marks the spans of on-demand renditions, which wrote no cue files
+// and serve every track, so Track does not bind them.
 type subtitleSpanRecord struct {
 	Track           int                     `json:"track"`
 	SegmentDuration int                     `json:"segment_duration"`
+	OnDemand        bool                    `json:"on_demand,omitempty"`
 	Spans           []subtitleSpanRecordRow `json:"spans"`
 }
 
@@ -239,7 +269,7 @@ func (s *TranscodeSession) saveSubtitleSpans() {
 		return
 	}
 	opts := s.opts
-	record := subtitleSpanRecord{Track: opts.SubtitleTrackIndex, SegmentDuration: renditionSegmentDuration(opts)}
+	record := subtitleSpanRecord{Track: opts.SubtitleTrackIndex, SegmentDuration: renditionSegmentDuration(opts), OnDemand: subtitleRenditionsOnDemand(opts)}
 	for _, span := range s.subtitleSpans {
 		startTime := span.startTime
 		row := subtitleSpanRecordRow{File: span.file, Start: span.start, End: span.end, StartTime: &startTime, Durations: span.durations, Final: span.final}
@@ -296,10 +326,11 @@ func writeFileAtomic(dir, name string, data []byte) error {
 // directory this recipe reuses, and the first generation number whose cue file
 // name none of them used. It runs before the new process starts, while the
 // playlist on disk is still the earlier process's. A span is kept only while
-// it can serve its cues: its cue file exists and, for the generation that was
-// live when the earlier session went away, its own playlist on disk shows how
-// far it got. On FFmpeg's own playlist a span also needs its segments'
-// durations. plan is the session's keyframe plan, if any.
+// it can serve its cues: its cue file exists (on-demand renditions have none)
+// and, for the generation that was live when the earlier session went away,
+// its own playlist on disk shows how far it got. On FFmpeg's own playlist a
+// span also needs its segments' durations. plan is the session's keyframe
+// plan, if any.
 func loadSubtitleSpans(opts TranscodeOpts, plan *copySegmentPlan) ([]subtitleCueSpan, uint64) {
 	root, err := os.OpenRoot(opts.OutputDir)
 	if err != nil {
@@ -317,16 +348,18 @@ func loadSubtitleSpans(opts TranscodeOpts, plan *copySegmentPlan) ([]subtitleCue
 	var spans []subtitleCueSpan
 	next := uint64(0)
 	followsFFmpeg := followsFFmpegPlaylist(opts, plan)
+	onDemand := subtitleRenditionsOnDemand(opts)
 	for i, row := range record.Spans {
 		generation, ok := subtitleCueFileGeneration(row.File)
 		if !ok {
 			continue
 		}
 		next = max(next, generation+1)
-		if record.Track != opts.SubtitleTrackIndex || record.SegmentDuration != renditionSegmentDuration(opts) || row.Start < 0 {
+		if record.OnDemand != onDemand || !onDemand && record.Track != opts.SubtitleTrackIndex ||
+			record.SegmentDuration != renditionSegmentDuration(opts) || row.Start < 0 {
 			continue
 		}
-		if _, err := root.Stat(row.File); err != nil {
+		if _, err := root.Stat(row.File); err != nil && !onDemand {
 			continue
 		}
 		span := subtitleCueSpan{file: row.File, start: row.Start, end: row.End, durations: row.Durations, final: row.Final}

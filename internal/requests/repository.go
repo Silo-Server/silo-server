@@ -514,9 +514,7 @@ func (r *Repository) ListLibraryWaitCandidates(ctx context.Context, limit int) (
 		WHERE (outcome = 'active' AND status = 'pending')
 		   OR (outcome = 'failed'
 		       AND updated_at > now() - interval '30 days'
-		       AND NOT EXISTS (
-		         SELECT 1 FROM media_request_targets t
-		         WHERE t.request_id = media_requests.id AND t.status = 'completed'))
+		       AND `+deliveredNothing+`)
 		ORDER BY last_reconciled_at ASC NULLS FIRST, id
 		LIMIT $1
 	`, limit)
@@ -643,7 +641,8 @@ const guardCondition = `(cardinality($2::text[]) = 0 OR status = ANY($2::text[])
 		  AND (cardinality($3::text[]) = 0 OR outcome = ANY($3::text[]))
 		  AND (NOT $4::boolean OR status <> 'approved' OR (
 		    (submit_lease_until IS NULL OR submit_lease_until <= now())
-		    AND NOT EXISTS (SELECT 1 FROM media_request_targets t WHERE t.request_id = media_requests.id)))`
+		    AND NOT EXISTS (SELECT 1 FROM media_request_targets t
+		      WHERE t.request_id = media_requests.id AND t.status <> 'failed')))`
 
 func guardArgs(g StateGuard) ([]string, []string, bool) {
 	statuses := make([]string, 0, len(g.Statuses))
@@ -804,6 +803,32 @@ func (r *Repository) ReopenFailed(ctx context.Context, id string, actor Viewer) 
 	return req, nil
 }
 
+// deliveredNothing matches a media_requests row none of whose targets
+// completed. A failed request that delivered one quality keeps its failure for
+// an admin to retry: the library does not complete it, and its requester
+// cannot remove it.
+const deliveredNothing = `NOT EXISTS (
+		SELECT 1 FROM media_request_targets t
+		WHERE t.request_id = media_requests.id AND t.status = 'completed')`
+
+// DeleteFailed removes a failed request with its targets, events and follows.
+// The guard sits on the DELETE itself, so a retry or a library completion that
+// commits first leaves the row in place.
+func (r *Repository) DeleteFailed(ctx context.Context, id string) error {
+	tag, err := r.pool.Exec(ctx, `
+		DELETE FROM media_requests
+		WHERE id = $1
+		  AND outcome = 'failed'
+		  AND `+deliveredNothing, id)
+	if err != nil {
+		return fmt.Errorf("delete failed request: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return guardMiss(ctx, r.pool, id)
+	}
+	return nil
+}
+
 func (r *Repository) ClaimSubmission(ctx context.Context, id string, lease time.Duration) (*Request, bool, error) {
 	req, err := scanRequest(r.pool.QueryRow(ctx, `
 		UPDATE media_requests
@@ -910,13 +935,16 @@ func (r *Repository) MarkAvailable(ctx context.Context, id string, actor Viewer)
 		  AND (
 		    (outcome = 'active'
 		      AND status IN ('pending', 'approved', 'queued', 'downloading')
-		      AND (status <> 'approved' OR submit_lease_until IS NULL OR submit_lease_until <= now()))
+		      AND (status <> 'approved' OR (
+		        (submit_lease_until IS NULL OR submit_lease_until <= now())
+		        -- An approved request that delivered some quality is a retry
+		        -- resending the rest. The library holds the delivered copy,
+		        -- so only the resend, or its failure, settles the request.
+		        AND `+deliveredNothing+`)))
 		    -- A failed request is complete only when the title came from
 		    -- elsewhere. One that failed after delivering some quality keeps
 		    -- its failure visible for an admin to retry.
-		    OR (outcome = 'failed' AND NOT EXISTS (
-		      SELECT 1 FROM media_request_targets t
-		      WHERE t.request_id = media_requests.id AND t.status = 'completed'))
+		    OR (outcome = 'failed' AND `+deliveredNothing+`)
 		  )
 		  -- The title arriving completes only a request with nothing still on
 		  -- its way; a submission that queued a target since the caller looked
@@ -1369,6 +1397,10 @@ func buildRequestListSQL(baseCondition string, baseArgs []any, filter ListFilter
 	if filter.RequestedByUserID > 0 {
 		args = append(args, filter.RequestedByUserID)
 		conditions = append(conditions, "requested_by_user_id = $"+strconv.Itoa(len(args)))
+	}
+	if filter.RequestedByProfileID != "" {
+		args = append(args, filter.RequestedByProfileID)
+		conditions = append(conditions, "requested_by_profile_id = $"+strconv.Itoa(len(args)))
 	}
 	if q := strings.TrimSpace(filter.Query); q != "" {
 		args = append(args, "%"+likeEscaper.Replace(q)+"%")

@@ -140,7 +140,7 @@ func (s *Sweeper) sweepNamespace(ctx context.Context, conn *pgxpool.Conn, ns Nam
 			delete(newest, lastPrefix)
 			break
 		}
-		objects, next, err := s.store.List(ctx, ns.Root, cursor, sweepPageSize)
+		objects, next, err := ns.storeOr(s.store).List(ctx, ns.Root, cursor, sweepPageSize)
 		if err != nil {
 			return stats, namespaceCheckpoint{}, fmt.Errorf("list: %w", err)
 		}

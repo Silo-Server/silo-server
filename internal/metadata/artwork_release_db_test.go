@@ -65,6 +65,7 @@ func storedArtworkReleaseTestPool(t *testing.T) *pgxpool.Pool {
 	CREATE TABLE seasons (
 		content_id TEXT PRIMARY KEY, series_id TEXT NOT NULL,
 		poster_path TEXT DEFAULT '', poster_source_path TEXT DEFAULT '', poster_thumbhash TEXT DEFAULT '',
+		backdrop_path TEXT DEFAULT '', backdrop_source_path TEXT DEFAULT '', backdrop_thumbhash TEXT DEFAULT '',
 		updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 	);
 	CREATE TABLE season_localizations (
@@ -84,7 +85,8 @@ func storedArtworkReleaseTestPool(t *testing.T) *pgxpool.Pool {
 		lease_expires_at TIMESTAMPTZ, last_attempt_at TIMESTAMPTZ, last_success_at TIMESTAMPTZ,
 		attempt_count INTEGER NOT NULL DEFAULT 0, last_error TEXT NOT NULL DEFAULT '',
 		updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), PRIMARY KEY (target_type, content_id)
-	)`); err != nil {
+	);
+	CREATE TABLE artwork_revision_gc_candidates (LIKE public.artwork_revision_gc_candidates INCLUDING ALL)`); err != nil {
 		t.Fatal(err)
 	}
 	return pool
@@ -141,7 +143,8 @@ func TestStoredArtworkReleaseDB(t *testing.T) {
 	exec(`INSERT INTO media_items (content_id, type, last_refreshed, poster_path, poster_source_path, backdrop_path, backdrop_source_path)
 		VALUES ('movie-g', 'movie', NULL, 'tmdb://poster/g.jpg', 'tmdb://poster/g.jpg', 'tmdb://backdrop/g.jpg', 'tmdb://backdrop/g.jpg')`)
 	exec(`INSERT INTO media_items (content_id, type) VALUES ('series-s', 'series')`)
-	exec(`INSERT INTO seasons (content_id, series_id, poster_path, poster_source_path) VALUES ('season-1', 'series-s', $1, 'tvdb://s1.jpg')`, stored)
+	exec(`INSERT INTO seasons (content_id, series_id, poster_path, poster_source_path, backdrop_path, backdrop_source_path)
+		VALUES ('season-1', 'series-s', $1, 'tvdb://s1.jpg', $1, 'tvdb://s1-backdrop.jpg')`, stored)
 	exec(`INSERT INTO season_localizations (season_content_id, language, poster_path, poster_source_path) VALUES ('season-1', 'de', $1, 'tvdb://s1de.jpg')`, stored)
 	exec(`INSERT INTO episodes (content_id, series_id, still_path, still_source_path) VALUES
 		('episode-1', 'series-s', $1, 'https://img.example/e1.jpg'), ('episode-2', 'series-s', $1, 'file:///m/s/e2-thumb.jpg?v=1-1')`, stored)
@@ -179,6 +182,7 @@ func TestStoredArtworkReleaseDB(t *testing.T) {
 		"movie-b fr poster":     {text(`SELECT poster_path FROM media_item_localizations WHERE content_id = 'movie-b'`), stored},
 		"book-c poster":         {text(`SELECT poster_path FROM media_items WHERE content_id = 'book-c'`), stored},
 		"season-1 poster":       {text(`SELECT poster_path FROM seasons`), "tvdb://s1.jpg"},
+		"season-1 backdrop":     {text(`SELECT backdrop_path FROM seasons`), "tvdb://s1-backdrop.jpg"},
 		"season-1 de poster":    {text(`SELECT poster_path FROM season_localizations`), "tvdb://s1de.jpg"},
 		"episode-1 still":       {text(`SELECT still_path FROM episodes WHERE content_id = 'episode-1'`), "https://img.example/e1.jpg"},
 		"episode-2 local still": {text(`SELECT still_path FROM episodes WHERE content_id = 'episode-2'`), stored},

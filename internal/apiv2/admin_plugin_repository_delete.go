@@ -3,6 +3,7 @@ package apiv2
 import (
 	"context"
 	"errors"
+	"net/http"
 
 	"github.com/Silo-Server/silo-server/internal/plugins"
 )
@@ -16,6 +17,8 @@ type AdminPluginRepositoryDeleteInput struct {
 
 func registerAdminPluginRepositoryDelete(reg *Registry) {
 	op := Operation{Operation: humaOp("DELETE", Prefix+"/admin/plugins/repositories/{id}", "deleteAdminPluginRepository", "admin-plugins", "Delete one stored external repository. Managed repositories cannot be deleted. No installation removal, runtime operation or replay identity; reconcile uncertain completion explicitly."), Class: ClassActingAdmin, DemoRestricted: true, ServiceBacked: true, RetrySafety: RetrySafetyNonRetryable}
+	// A managed repository cannot be deleted: 409.
+	op.Errors = []int{http.StatusConflict}
 	Register(reg, op, func(ctx context.Context, in *AdminPluginRepositoryDeleteInput) (*struct{}, error) {
 		id, err := intOfID(ID(in.ID))
 		if err != nil || id <= 0 {

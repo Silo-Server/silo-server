@@ -117,7 +117,7 @@ describe("Your collections", () => {
     rects.set(handle.closest("[data-collection-id]")!, new DOMRect(0, 0, 300, 100));
     rects.set(other.closest("[data-collection-id]")!, new DOMRect(320, 0, 300, 100));
     expect(document.getElementById(handle.getAttribute("aria-describedby")!)).toHaveTextContent(
-      "To pick up a draggable item, press the space bar.",
+      "To move an item, focus its handle and press Space or Enter. Use the arrow keys to move it, Space or Enter to drop it, or Escape to cancel.",
     );
 
     const announcements = recordAnnouncements();
@@ -169,11 +169,12 @@ describe("Server collections", () => {
       ],
     });
     show();
-    // The only library's collections under the Server collections heading,
-    // once loaded, without pills to switch between.
-    const server = await screen.findByRole("region", { name: "Server collections" });
-    expect(await within(server).findByRole("link", { name: /Oscar Winners/ })).toBeInTheDocument();
-    expect(within(server).queryByRole("group", { name: "Library" })).toBeNull();
-    expect(screen.queryByRole("region", { name: "Shared with me" })).toBeNull();
+    // The only library's collections on the wall once loaded, without a
+    // library pill to switch to or a Shared one.
+    const wall = await screen.findByRole("region", { name: "All collections" });
+    expect(await within(wall).findByRole("link", { name: /Oscar Winners/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^Server/ })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^Movies/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: /^Shared/ })).toBeNull();
   });
 });

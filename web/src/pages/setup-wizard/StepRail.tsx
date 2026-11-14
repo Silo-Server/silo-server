@@ -1,6 +1,7 @@
 import { useEffect, useRef } from "react";
 import { Check } from "lucide-react";
 
+import { useT } from "@/i18n";
 import { cn } from "@/lib/utils";
 import type { SkippableStep } from "./setupStorage";
 import type { StepDef, WizardStepId } from "./useWizardSteps";
@@ -21,6 +22,7 @@ interface StepRailProps {
 export function StepRail({ steps, summaries, onVisit }: StepRailProps) {
   const activeIndex = steps.findIndex((step) => step.active);
   const listRef = useRef<HTMLOListElement>(null);
+  const t = useT();
 
   // On the narrow horizontal strip the current rung can sit past the edge;
   // bring it into view whenever the step changes. A no-op on the vertical rail.
@@ -30,7 +32,7 @@ export function StepRail({ steps, summaries, onVisit }: StepRailProps) {
   }, [activeIndex]);
 
   return (
-    <nav aria-label="Setup steps" className="setup-rail">
+    <nav aria-label={t("web.setup.rail.label")} className="setup-rail">
       <ol ref={listRef} className="setup-rail-list">
         {steps.map((step, index) => {
           const state = step.active ? "active" : step.complete ? "done" : "todo";
@@ -49,7 +51,7 @@ export function StepRail({ steps, summaries, onVisit }: StepRailProps) {
                     Math.abs(index - activeIndex) > 1 && "max-[52rem]:sr-only",
                   )}
                 >
-                  {step.label}
+                  {t(step.label)}
                 </span>
                 {summary ? <span className="setup-rail-summary">{summary}</span> : null}
               </span>

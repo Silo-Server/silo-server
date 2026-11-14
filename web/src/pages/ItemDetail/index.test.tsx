@@ -1,10 +1,10 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { MemoryRouter } from "react-router";
+import { MemoryRouter, Route, Routes } from "react-router";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { V2ProblemError } from "@/api/v2/request";
+import { V2ProblemError, V2TimeoutError } from "@/api/v2/request";
 
 const mocks = vi.hoisted(() => ({
   useCatalogItemDetail: vi.fn(),
@@ -273,6 +273,56 @@ describe("ItemDetail", () => {
 
       await userEvent.click(screen.getByRole("button", { name: "Try again" }));
       expect(refetch).toHaveBeenCalledTimes(1);
+    });
+
+    it("says the server isn't responding when the item read times out", () => {
+      mocks.useCatalogItemDetail.mockReturnValue({
+        data: undefined,
+        isLoading: false,
+        isFetching: false,
+        error: new V2TimeoutError("getCatalogItem", 30_000),
+        refetch: vi.fn(),
+      });
+
+      renderInRouter(<ItemDetail />);
+
+      expect(
+        screen.getByRole("heading", { level: 1, name: "Couldn't load this item" }),
+      ).toBeInTheDocument();
+      expect(
+        screen.getByText("The server isn't responding. Try again in a moment."),
+      ).toBeInTheDocument();
+      expect(mocks.toastError).toHaveBeenCalledWith(
+        "The server isn't responding. Try again in a moment.",
+      );
+    });
+
+    // Issue #3068: the web app has no podcast page, and a redirect to a route
+    // that does not exist dropped the viewer on Home with no explanation.
+    it("explains on the page that a podcast cannot be opened instead of leaving it", () => {
+      mocks.id = "podcast-1";
+      mocks.search = "libraryId=4";
+      mocks.useCatalogItemDetail.mockReturnValue({
+        data: { content_id: "podcast-1", title: "Some Show", type: "podcast" },
+        isLoading: false,
+        error: null,
+      });
+
+      render(
+        <MemoryRouter initialEntries={["/item/podcast-1?libraryId=4"]}>
+          <Routes>
+            <Route path="/item/:id" element={<ItemDetail />} />
+            <Route path="*" element={<div>Left the item page</div>} />
+          </Routes>
+        </MemoryRouter>,
+      );
+
+      expect(screen.queryByText("Left the item page")).not.toBeInTheDocument();
+      expect(screen.getByRole("heading", { level: 1 })).toBeInTheDocument();
+      expect(screen.getByRole("link", { name: "Browse library" })).toHaveAttribute(
+        "href",
+        "/library/4",
+      );
     });
   });
 });

@@ -59,8 +59,8 @@ func (r recordingItemTargets) UpdateArtworkIfSourceMatches(_ context.Context, co
 
 type recordingSeasonTargets struct{ *recordingArtworkTargets }
 
-func (r recordingSeasonTargets) UpdateArtworkIfSourceMatches(_ context.Context, contentID, _, cachedPath, _ string) (bool, error) {
-	return r.record(ImageCacheTargetSeason+":"+contentID+":"+ImageCacheImagePoster, cachedPath)
+func (r recordingSeasonTargets) UpdateArtworkIfSourceMatches(_ context.Context, contentID, imageType, _, cachedPath, _ string) (bool, error) {
+	return r.record(ImageCacheTargetSeason+":"+contentID+":"+imageType, cachedPath)
 }
 
 type recordingEpisodeTargets struct{ *recordingArtworkTargets }

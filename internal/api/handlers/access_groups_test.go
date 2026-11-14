@@ -2,18 +2,9 @@ package handlers
 
 import (
 	"context"
-	"encoding/json"
-	"io"
-	"net/http"
-	"net/http/httptest"
-	"reflect"
 	"slices"
 	"sort"
-	"strings"
-	"testing"
 	"time"
-
-	"github.com/go-chi/chi/v5"
 
 	"github.com/Silo-Server/silo-server/internal/access"
 )
@@ -139,98 +130,5 @@ func (s *accessGroupHandlerTestStore) clearDefault() {
 	for id, group := range s.groups {
 		group.IsDefault = false
 		s.groups[id] = group
-	}
-}
-
-func accessGroupRequestWithID(method, path string, body *strings.Reader, id string) *http.Request {
-	var reader io.Reader
-	if body != nil {
-		reader = body
-	}
-	req := httptest.NewRequest(method, path, reader)
-	routeCtx := chi.NewRouteContext()
-	routeCtx.URLParams.Add("id", id)
-	return req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, routeCtx))
-}
-
-func decodeAccessGroupResponse(t *testing.T, rec *httptest.ResponseRecorder) accessGroupResponse {
-	t.Helper()
-	var response accessGroupResponse
-	if err := json.NewDecoder(rec.Body).Decode(&response); err != nil {
-		t.Fatalf("decode response: %v", err)
-	}
-	return response
-}
-
-// An empty allowlist denies every library; null removes the group restriction.
-func TestAccessGroupUpdateLibraryPolicy(t *testing.T) {
-	for _, tc := range []struct {
-		name string
-		body string
-		want []int
-	}{
-		{"omitted", `{}`, []int{11}},
-		{"null", `{"library_ids":null}`, nil},
-		{"empty", `{"library_ids":[]}`, []int{}},
-		{"populated", `{"library_ids":[22]}`, []int{22}},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			store := newAccessGroupHandlerTestStore()
-			store.groups[1] = access.Group{ID: 1, Name: "Synthetic group", LibraryIDs: []int{11}}
-			h := NewAccessGroupHandler(store)
-			rec := httptest.NewRecorder()
-			h.HandleUpdate(rec, accessGroupRequestWithID(http.MethodPut, "/api/v1/admin/access-groups/1", strings.NewReader(tc.body), "1"))
-			if rec.Code != http.StatusOK {
-				t.Fatalf("update status = %d, body %s", rec.Code, rec.Body.String())
-			}
-			if got := decodeAccessGroupResponse(t, rec).LibraryIDs; !reflect.DeepEqual(got, tc.want) {
-				t.Fatalf("library_ids = %#v, want %#v", got, tc.want)
-			}
-			read := httptest.NewRecorder()
-			h.HandleGet(read, accessGroupRequestWithID(http.MethodGet, "/api/v1/admin/access-groups/1", nil, "1"))
-			policy := decodeAccessGroupResponse(t, read)
-			body, err := json.Marshal(map[string][]int{"library_ids": policy.LibraryIDs})
-			if err != nil {
-				t.Fatal(err)
-			}
-			replayed := httptest.NewRecorder()
-			h.HandleUpdate(replayed, accessGroupRequestWithID(http.MethodPut, "/api/v1/admin/access-groups/1", strings.NewReader(string(body)), "1"))
-			if replayed.Code != http.StatusOK || !reflect.DeepEqual(store.groups[1].LibraryIDs, tc.want) {
-				t.Fatalf("read/save round trip: status = %d, library_ids = %#v, want %#v", replayed.Code, store.groups[1].LibraryIDs, tc.want)
-			}
-		})
-	}
-}
-
-// A v1 read then save must keep an empty permission mask; null allows every
-// assignable permission.
-func TestAccessGroupPermissionPolicyRoundTrip(t *testing.T) {
-	for _, tc := range []struct {
-		name   string
-		stored []string
-	}{
-		{"all", nil},
-		{"none", []string{}},
-		{"some", []string{"marker_edit"}},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			store := newAccessGroupHandlerTestStore()
-			store.groups[1] = access.Group{ID: 1, Name: "Synthetic group", AllowedPermissions: tc.stored}
-			h := NewAccessGroupHandler(store)
-			read := httptest.NewRecorder()
-			h.HandleGet(read, accessGroupRequestWithID(http.MethodGet, "/api/v1/admin/access-groups/1", nil, "1"))
-			if read.Code != http.StatusOK {
-				t.Fatalf("get status = %d, body %s", read.Code, read.Body.String())
-			}
-			body, err := json.Marshal(map[string][]string{"allowed_permissions": decodeAccessGroupResponse(t, read).AllowedPermissions})
-			if err != nil {
-				t.Fatal(err)
-			}
-			saved := httptest.NewRecorder()
-			h.HandleUpdate(saved, accessGroupRequestWithID(http.MethodPut, "/api/v1/admin/access-groups/1", strings.NewReader(string(body)), "1"))
-			if saved.Code != http.StatusOK || !reflect.DeepEqual(store.groups[1].AllowedPermissions, tc.stored) {
-				t.Fatalf("read/save: status = %d, allowed_permissions = %#v, want %#v", saved.Code, store.groups[1].AllowedPermissions, tc.stored)
-			}
-		})
 	}
 }

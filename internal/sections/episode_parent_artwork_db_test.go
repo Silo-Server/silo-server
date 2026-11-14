@@ -15,7 +15,8 @@ import (
 // Episode cards carry their season poster and series poster and backdrop
 // from the queries that already load them: the section episode query (Home,
 // Continue Watching, Next Up, Watch Tonight) and the listing card context
-// (browse and search). An episode without a season row has no season poster.
+// (browse and search). Section cards also carry the season backdrop. An
+// episode without a season row has no season artwork.
 // Section episode cards also carry the air date as their release date and
 // both ratings; an unaired, unrated episode carries none.
 func TestEpisodeCardsCarryParentArtworkPostgres(t *testing.T) {
@@ -39,7 +40,8 @@ func TestEpisodeCardsCarryParentArtworkPostgres(t *testing.T) {
 		VALUES ($1, 'series', 'Show', 'matched', 'series/poster', 'sp', 'series/backdrop', 'sb')`, series); err != nil {
 		t.Fatalf("seed series: %v", err)
 	}
-	if _, err := pool.Exec(ctx, `INSERT INTO seasons (content_id, series_id, season_number, poster_path, poster_thumbhash) VALUES ($1, $2, 1, 'season/poster', 'ss')`, season, series); err != nil {
+	if _, err := pool.Exec(ctx, `INSERT INTO seasons (content_id, series_id, season_number, poster_path, poster_thumbhash, backdrop_path, backdrop_thumbhash)
+		VALUES ($1, $2, 1, 'season/poster', 'ss', 'season/backdrop', 'sbd')`, season, series); err != nil {
 		t.Fatalf("seed season: %v", err)
 	}
 	for i, episode := range []struct{ id, seasonID string }{{withSeason, season}, {withoutSeason, ""}} {
@@ -55,9 +57,11 @@ func TestEpisodeCardsCarryParentArtworkPostgres(t *testing.T) {
 		SeriesPosterPath: "series/poster", SeriesPosterThumbhash: "sp",
 		SeriesBackdropPath: "series/backdrop", SeriesBackdropThumbhash: "sb",
 		SeasonPosterPath: "season/poster", SeasonPosterThumbhash: "ss",
+		SeasonBackdropPath: "season/backdrop", SeasonBackdropThumbhash: "sbd",
 	}
 	seriesOnly := full
 	seriesOnly.SeasonPosterPath, seriesOnly.SeasonPosterThumbhash = "", ""
+	seriesOnly.SeasonBackdropPath, seriesOnly.SeasonBackdropThumbhash = "", ""
 	want := map[string]models.EpisodeParentArtwork{withSeason: full, withoutSeason: seriesOnly}
 
 	items, meta, err := NewFetcher(pool).fetchEpisodeTargetsByContentIDs(ctx, []string{withSeason, withoutSeason}, nil, nil, catalog.AccessFilter{})
@@ -88,7 +92,10 @@ func TestEpisodeCardsCarryParentArtworkPostgres(t *testing.T) {
 		t.Fatalf("card contexts = %v, %v", contexts, err)
 	}
 	for id, c := range contexts {
-		if c.ParentArtwork != want[id] || c.SeriesID != series || c.SeriesTitle != "Show" || c.StillPath != "episode/still" {
+		// Listing cards draw no season backdrop, so their context leaves it out.
+		wantListing := want[id]
+		wantListing.SeasonBackdropPath, wantListing.SeasonBackdropThumbhash = "", ""
+		if c.ParentArtwork != wantListing || c.SeriesID != series || c.SeriesTitle != "Show" || c.StillPath != "episode/still" {
 			t.Errorf("%s card context = %+v", id, c)
 		}
 	}

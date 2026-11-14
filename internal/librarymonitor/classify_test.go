@@ -68,6 +68,7 @@ func TestWalkTreeSkipsWhatTheScannerSkips(t *testing.T) {
 		"@eaDir/thumbs",
 		"Downloading.partial",
 		".downloads",
+		".tool-workspace/Inside",
 		"Target/Deep",
 	)
 	writeFile(t, filepath.Join(root, "NoMedia", ".nomedia"), "")
@@ -80,6 +81,10 @@ func TestWalkTreeSkipsWhatTheScannerSkips(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := os.Symlink(root, filepath.Join(root, "Target", "Loop")); err != nil {
+		t.Fatal(err)
+	}
+	// A hidden symlink to a directory is skipped like a hidden directory.
+	if err := os.Symlink(filepath.Join(root, "Target"), filepath.Join(root, ".linked")); err != nil {
 		t.Fatal(err)
 	}
 

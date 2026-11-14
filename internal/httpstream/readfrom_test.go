@@ -2,7 +2,6 @@ package httpstream
 
 import (
 	"bytes"
-	"compress/gzip"
 	"errors"
 	"io"
 	"net/http"
@@ -116,7 +115,7 @@ func TestCompressExceptBypassPreservesReaderFromAndKeptRouteCompresses(t *testin
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write(bytes.Repeat([]byte("x"), 2048))
 	})
-	handler := CompressExcept(gzip.BestSpeed, func(r *http.Request) bool { return r.URL.Path == "/media" })(next)
+	handler := CompressExcept(func(r *http.Request) bool { return r.URL.Path == "/media" })(next)
 
 	mediaWriter := &readerFromResponseWriter{header: make(http.Header)}
 	mediaReq := httptest.NewRequest(http.MethodGet, "/media", nil)

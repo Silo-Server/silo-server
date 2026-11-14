@@ -1,9 +1,8 @@
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { Link, useNavigate } from "react-router";
 import { House, Library as LibraryIcon, Lock, MoreHorizontal, Pencil } from "lucide-react";
 
 import { ConfirmDialog } from "@/components/ConfirmDialog";
-import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -20,24 +19,36 @@ import { useCollectionCapabilities } from "@/hooks/queries/collections";
 import { useAvailableUserLibraries, useUserLibraries } from "@/hooks/queries/libraries";
 import type { CollectionPageAccess } from "@/hooks/useCollectionPageAccess";
 import {
-  ADD_TO_MY_HOME,
-  ADD_TO_MY_LIBRARY_PAGE,
+  addToMyHome,
+  addToMyLibraryPage,
   libraryPageLabel,
   personalDeleteDescription,
   serverDeleteDescription,
+  syncNow,
 } from "@/lib/collections/copy";
 import { addToMyHomePath, matchedLibraries, rowPages } from "@/lib/collections/rows";
 import { PERSONAL_SCOPE, type CollectionScope, type EditorSnapshot } from "@/lib/collections/scope";
 import type { RowLinkCollection } from "@/lib/homeRows/rowLinks";
+import { cn } from "@/lib/utils";
 import { buildLibraryCollectionCatalogHref } from "@/pages/catalogSearchParams";
+import { useT } from "@/i18n";
+
+/** The collection hero's glass pills, the homepage hero's secondary button. */
+const HERO_PILL =
+  "pill pill-glass outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50 [&_svg]:size-4";
+const HERO_ICON_PILL = cn(HERO_PILL, "size-11 p-0");
 
 /** "by *Name* · Read-only" under the title of another profile's shared collection. */
 export function CollectionByline({ access }: { access: CollectionPageAccess }) {
+  const t = useT();
   if (access.kind !== "read-only" || !access.ownerName) return null;
   return (
     <p className="text-muted-foreground text-sm">
-      by <span className="text-foreground font-medium">{access.ownerName}</span> ·{" "}
-      <span>Read-only</span>
+      {t("web.collections.pageActions.byline", {
+        owner: access.ownerName,
+        name: (chunks) => <span className="text-foreground font-medium">{chunks}</span>,
+        readOnly: (chunks) => <span>{chunks}</span>,
+      })}
     </p>
   );
 }
@@ -50,7 +61,11 @@ export function ReadOnlyCollectionCallout({
   access: CollectionPageAccess;
   collectionName: string;
 }) {
+  const t = useT();
   if (access.kind !== "read-only") return null;
+  const name = (chunks: ReactNode) => (
+    <strong className="text-foreground font-semibold">{chunks}</strong>
+  );
   return (
     <div
       role="note"
@@ -58,16 +73,20 @@ export function ReadOnlyCollectionCallout({
     >
       <Lock className="mt-0.5 size-4 shrink-0" aria-hidden />
       <p>
-        Only {access.ownerName ?? "admins"} can change{" "}
-        <strong className="text-foreground font-semibold">{collectionName}</strong>, so you're on
-        its page instead. You can still watch it and add it to your Home.
+        {access.ownerName
+          ? t("web.collections.pageActions.readOnlyOwner", {
+              owner: access.ownerName,
+              collection: collectionName,
+              name,
+            })
+          : t("web.collections.pageActions.readOnlyAdmins", { collection: collectionName, name })}
       </p>
     </div>
   );
 }
 
 /**
- * Top-right on a collection page: Edit + ⋯ for viewers who may change the
+ * Beside Shuffle in a collection page's hero: Edit + ⋯ for viewers who may change the
  * collection, Add to my Home + ⋯ for everyone else.
  */
 export function CollectionPageActions({
@@ -102,6 +121,7 @@ function ManageActions({
   snapshot?: EditorSnapshot;
   libraryId?: number;
 }) {
+  const t = useT();
   const navigate = useNavigate();
   const [confirmOpen, setConfirmOpen] = useState(false);
   const { data: libraries } = useAvailableUserLibraries();
@@ -135,23 +155,25 @@ function ManageActions({
     : personalDeleteDescription(view?.personal?.shared ?? false);
 
   return (
-    <div className="flex items-center gap-2">
-      <Button asChild variant="outline" size="sm">
-        <Link to={scope.paths.edit(id, { libraryId })}>
-          <Pencil aria-hidden />
-          Edit
-        </Link>
-      </Button>
+    <div className="flex items-center gap-3">
+      <Link to={scope.paths.edit(id, { libraryId })} className={HERO_PILL}>
+        <Pencil aria-hidden />
+        {t("web.collections.pageActions.edit")}
+      </Link>
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
-          <Button type="button" variant="outline" size="icon-sm" aria-label="More actions">
+          <button
+            type="button"
+            className={HERO_ICON_PILL}
+            aria-label={t("web.collections.actions.moreActions")}
+          >
             <MoreHorizontal />
-          </Button>
+          </button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" className="min-w-48">
           {openIn.length > 0 ? (
             <DropdownMenuSub>
-              <DropdownMenuSubTrigger>Open in</DropdownMenuSubTrigger>
+              <DropdownMenuSubTrigger>{t("web.collections.actions.openIn")}</DropdownMenuSubTrigger>
               <DropdownMenuSubContent>
                 {openIn.map((library) => (
                   <DropdownMenuItem key={library.id} asChild>
@@ -165,7 +187,7 @@ function ManageActions({
           ) : null}
           {canSync ? (
             <DropdownMenuItem disabled={sync.isPending} onSelect={() => sync.mutate(id)}>
-              {sync.isPending ? "Syncing…" : "Sync now"}
+              {sync.isPending ? t("web.collections.actions.syncing") : syncNow()}
             </DropdownMenuItem>
           ) : null}
           {openIn.length > 0 || canSync ? <DropdownMenuSeparator /> : null}
@@ -174,7 +196,7 @@ function ManageActions({
             disabled={!snapshot || remove.isPending}
             onSelect={() => setConfirmOpen(true)}
           >
-            Delete…
+            {t("web.collections.actions.delete")}
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
@@ -182,9 +204,9 @@ function ManageActions({
         <ConfirmDialog
           open={confirmOpen}
           onOpenChange={setConfirmOpen}
-          title={`Delete "${snapshot.view.name}"?`}
+          title={t("web.collections.pageActions.deleteTitle", { name: snapshot.view.name })}
           description={deleteDescription}
-          confirmLabel="Delete"
+          confirmLabel={t("web.collections.deleteDialog.delete")}
           variant="destructive"
           isPending={remove.isPending}
           onConfirm={() => remove.mutate({ id, etag: snapshot.etag })}
@@ -207,6 +229,7 @@ function AddToMyHomeActions({
   collection: RowLinkCollection;
   libraryIds: readonly number[];
 }) {
+  const t = useT();
   const userLibraries = useUserLibraries();
   // Until the display preferences load, the list still holds hidden libraries.
   const libraries = (userLibraries.isLoading ? undefined : userLibraries.data) ?? [];
@@ -220,33 +243,35 @@ function AddToMyHomeActions({
     addToMyHomePath(collection, { kind: "library", libraryId: library.id });
 
   return (
-    <div className="flex items-center gap-2">
-      <Button asChild variant="outline" size="sm">
-        <Link to={addToMyHomePath(collection, { kind: "home" })}>
-          <House aria-hidden />
-          {ADD_TO_MY_HOME}
-        </Link>
-      </Button>
+    <div className="flex items-center gap-3">
+      <Link to={addToMyHomePath(collection, { kind: "home" })} className={HERO_PILL}>
+        <House aria-hidden />
+        {addToMyHome()}
+      </Link>
       {pages.length > 0 ? (
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <Button type="button" variant="outline" size="icon-sm" aria-label="More actions">
+            <button
+              type="button"
+              className={HERO_ICON_PILL}
+              aria-label={t("web.collections.actions.moreActions")}
+            >
               <MoreHorizontal />
-            </Button>
+            </button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="min-w-48">
             {pages.length === 1 ? (
               <DropdownMenuItem asChild>
                 <Link to={pageLink(pages[0]!)}>
                   <LibraryIcon aria-hidden />
-                  {`Add to my ${libraryPageLabel(pages[0]!.name)}`}
+                  {t("web.collections.pageActions.addToMyLibraryPage", { library: pages[0]!.name })}
                 </Link>
               </DropdownMenuItem>
             ) : (
               <DropdownMenuSub>
                 <DropdownMenuSubTrigger>
                   <LibraryIcon aria-hidden />
-                  {ADD_TO_MY_LIBRARY_PAGE}
+                  {addToMyLibraryPage()}
                 </DropdownMenuSubTrigger>
                 <DropdownMenuSubContent>
                   {pages.map((library) => (

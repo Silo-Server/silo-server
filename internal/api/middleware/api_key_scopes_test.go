@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/go-chi/chi/v5"
+
 	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
@@ -28,16 +30,15 @@ func TestAPIKeyScopesAllow(t *testing.T) {
 		path   string
 		want   bool
 	}{
-		{"unscoped allows anything", nil, http.MethodPost, "/api/v1/admin/settings", true},
-		{"empty scopes allow anything", []string{}, http.MethodGet, "/api/v1/watch/home", true},
+		{"unscoped allows anything", nil, http.MethodPost, "/api/v2/admin/settings", true},
+		{"empty scopes allow anything", []string{}, http.MethodGet, "/api/v2/watch/home", true},
 
-		{"users list", users, http.MethodGet, "/api/v1/admin/users", true},
-		{"users create", users, http.MethodPost, "/api/v1/admin/users", true},
-		{"users get", users, http.MethodGet, "/api/v1/admin/users/42", true},
-		{"users update", users, http.MethodPut, "/api/v1/admin/users/42", true},
-		{"users delete", users, http.MethodDelete, "/api/v1/admin/users/42", true},
-		{"users profiles", users, http.MethodGet, "/api/v1/admin/users/42/profiles", true},
-		{"users v2 list", users, http.MethodGet, "/api/v2/admin/users", true},
+		{"users list", users, http.MethodGet, "/api/v2/admin/users", true},
+		{"users create", users, http.MethodPost, "/api/v2/admin/users", true},
+		{"users get", users, http.MethodGet, "/api/v2/admin/users/42", true},
+		{"users update", users, http.MethodPut, "/api/v2/admin/users/42", true},
+		{"users delete", users, http.MethodDelete, "/api/v2/admin/users/42", true},
+		{"users profiles", users, http.MethodGet, "/api/v2/admin/users/42/profiles", true},
 		{"users exact identity lookup", users, http.MethodGet, "/api/v2/admin/users?identity=admin%40example.test", true},
 		{"summary read", []string{auth.ScopeAdminSessionsSummaryRead}, http.MethodGet, "/api/v2/admin/sessions/summary?user_id=42&limit=5", true},
 		{"summary capabilities", []string{auth.ScopeAdminSessionsSummaryRead}, http.MethodGet, "/api/v2/admin/sessions/capabilities", true},
@@ -46,7 +47,9 @@ func TestAPIKeyScopesAllow(t *testing.T) {
 		{"summary denies account editing", []string{auth.ScopeAdminSessionsSummaryRead}, http.MethodPut, "/api/v2/admin/users/42", false},
 		{"monitor sessions", monitor, http.MethodGet, "/api/v2/admin/sessions?limit=50", true},
 		{"monitor history", monitor, http.MethodGet, "/api/v2/admin/playback-history", true},
+		{"monitor history capabilities", monitor, http.MethodGet, "/api/v2/admin/playback-history/capabilities", true},
 		{"monitor activity stats", monitor, http.MethodGet, "/api/v2/admin/stats/top-activity", true},
+		{"monitor stream timeseries", monitor, http.MethodGet, "/api/v2/admin/stats/timeseries", true},
 		{"monitor user detail", monitor, http.MethodGet, "/api/v2/admin/users/42", true},
 		{"monitor user downloads summary", monitor, http.MethodGet, "/api/v2/admin/users/42/downloads/summary", true},
 		{"monitor download entries", monitor, http.MethodGet, "/api/v2/admin/downloads/entries", true},
@@ -81,10 +84,6 @@ func TestAPIKeyScopesAllow(t *testing.T) {
 		{"library denies storage metadata", []string{auth.ScopeLibrariesRead}, http.MethodGet, "/api/v2/libraries", false},
 		{"library denies management", []string{auth.ScopeLibrariesRead}, http.MethodPost, "/api/v2/libraries", false},
 		{"library denies playback", []string{auth.ScopeLibrariesRead}, http.MethodPost, "/api/v2/playback/start", false},
-		{"users v2 create", users, http.MethodPost, "/api/v2/admin/users", true},
-		{"users v2 update", users, http.MethodPut, "/api/v2/admin/users/42", true},
-		{"users v2 delete", users, http.MethodDelete, "/api/v2/admin/users/42", true},
-		{"users v2 profiles", users, http.MethodGet, "/api/v2/admin/users/42/profiles", true},
 		{"users v2 denies impersonation", users, http.MethodPost, "/api/v2/admin/users/42/impersonate", false},
 		{"users v2 denies settings", users, http.MethodPut, "/api/v2/admin/users/42/settings/values/key", false},
 		{"users v2 denies keys", users, http.MethodGet, "/api/v2/admin/users/42/api-keys", false},
@@ -93,31 +92,31 @@ func TestAPIKeyScopesAllow(t *testing.T) {
 		{"groups v2 denies write", groups, http.MethodPut, "/api/v2/admin/access-groups/3", false},
 		{"users scope denies v2 profile update", users, http.MethodPatch, "/api/v2/profiles/1", false},
 
-		{"users scope denies impersonate", users, http.MethodPost, "/api/v1/admin/users/42/impersonate", false},
-		{"users scope denies settings values", users, http.MethodGet, "/api/v1/admin/users/42/settings/values", false},
-		{"users scope denies user api keys", users, http.MethodGet, "/api/v1/admin/users/42/api-keys", false},
-		{"users scope denies user ips", users, http.MethodGet, "/api/v1/admin/users/42/ips", false},
-		{"users scope denies collection delete", users, http.MethodDelete, "/api/v1/admin/users", false},
-		{"users scope denies admin settings", users, http.MethodGet, "/api/v1/admin/settings", false},
-		{"users scope denies access groups", users, http.MethodGet, "/api/v1/admin/access-groups", false},
-		{"users scope denies non-admin surface", users, http.MethodGet, "/api/v1/watch/home", false},
-		{"users scope denies the scope catalog", users, http.MethodGet, "/api/v1/api-keys/scopes", false},
-		{"users scope denies non-numeric id", users, http.MethodGet, "/api/v1/admin/users/abc", false},
+		{"users scope denies settings values", users, http.MethodGet, "/api/v2/admin/users/42/settings/values", false},
+		{"users scope denies collection delete", users, http.MethodDelete, "/api/v2/admin/users", false},
+		{"users scope denies admin settings", users, http.MethodGet, "/api/v2/admin/settings", false},
+		{"users scope denies access groups", users, http.MethodGet, "/api/v2/admin/access-groups", false},
+		{"users scope denies non-admin surface", users, http.MethodGet, "/api/v2/watch/home", false},
+		{"users scope denies the scope catalog", users, http.MethodGet, "/api/v2/api-keys/scopes", false},
+		{"users scope denies non-numeric id", users, http.MethodGet, "/api/v2/admin/users/abc", false},
 
-		{"traversal cannot dodge the allowlist", users, http.MethodGet, "/api/v1/admin/settings/../users", true},
-		{"traversal cannot reach unlisted route", users, http.MethodGet, "/api/v1/admin/users/42/../../settings", false},
-		{"double slash is cleaned before matching", users, http.MethodGet, "/api/v1//admin//users", true},
+		// The router reads these spellings as other routes than their cleaned
+		// or decoded forms, so a scoped key is refused them outright.
+		{"dot segments are refused", users, http.MethodGet, "/api/v2/admin/settings/../users", false},
+		{"traversal cannot reach unlisted route", users, http.MethodGet, "/api/v2/admin/users/42/../../settings", false},
+		{"double slash is refused", users, http.MethodGet, "/api/v2//admin//users", false},
+		{"trailing slash is refused", users, http.MethodGet, "/api/v2/admin/users/", false},
+		{"encoded slash traversal is refused", users, http.MethodPut, "/api/v2/admin/settings/..%2Fusers%2F1", false},
+		{"needless escape is refused", users, http.MethodGet, "/api/v2/admin/users/%34%32", false},
+		{"unscoped keys keep encoded paths", nil, http.MethodPut, "/api/v2/admin/settings/a%2Fb", true},
 
-		{"groups read list", groups, http.MethodGet, "/api/v1/admin/access-groups", true},
-		{"groups read get", groups, http.MethodGet, "/api/v1/admin/access-groups/3", true},
-		{"groups scope denies create", groups, http.MethodPost, "/api/v1/admin/access-groups", false},
-		{"groups scope denies update", groups, http.MethodPut, "/api/v1/admin/access-groups/3", false},
-		{"groups scope denies delete", groups, http.MethodDelete, "/api/v1/admin/access-groups/3", false},
-		{"groups scope denies users", groups, http.MethodGet, "/api/v1/admin/users", false},
-		{"groups scope denies v2 users", groups, http.MethodGet, "/api/v2/admin/users", false},
+		{"groups read list", groups, http.MethodGet, "/api/v2/admin/access-groups", true},
+		{"groups scope denies create", groups, http.MethodPost, "/api/v2/admin/access-groups", false},
+		{"groups scope denies delete", groups, http.MethodDelete, "/api/v2/admin/access-groups/3", false},
+		{"groups scope denies users", groups, http.MethodGet, "/api/v2/admin/users", false},
 
-		{"combined scopes union", both, http.MethodGet, "/api/v1/admin/access-groups", true},
-		{"combined scopes still deny elsewhere", both, http.MethodPut, "/api/v1/admin/settings", false},
+		{"combined scopes union", both, http.MethodGet, "/api/v2/admin/access-groups", true},
+		{"combined scopes still deny elsewhere", both, http.MethodPut, "/api/v2/admin/settings", false},
 	}
 
 	for _, tt := range tests {
@@ -184,7 +183,7 @@ func TestRequireAuthEnforcesAPIKeyScopes(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 	}))
 
-	allowed := httptest.NewRequest(http.MethodGet, "/api/v1/admin/users", nil)
+	allowed := httptest.NewRequest(http.MethodGet, "/api/v2/admin/users", nil)
 	allowed.Header.Set("Authorization", "Bearer sa_test")
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, allowed)
@@ -192,12 +191,89 @@ func TestRequireAuthEnforcesAPIKeyScopes(t *testing.T) {
 		t.Fatalf("in-scope route: status = %d, want 200", rec.Code)
 	}
 
-	denied := httptest.NewRequest(http.MethodGet, "/api/v1/admin/settings", nil)
+	denied := httptest.NewRequest(http.MethodGet, "/api/v2/admin/settings", nil)
 	denied.Header.Set("Authorization", "Bearer sa_test")
 	rec = httptest.NewRecorder()
 	handler.ServeHTTP(rec, denied)
 	if rec.Code != http.StatusForbidden {
 		t.Fatalf("out-of-scope route: status = %d, want 403", rec.Code)
+	}
+}
+
+// A scoped key must reach exactly the handler its allowlist judged. chi
+// routes on the escaped path and never cleans it, so this drives the real
+// root ServeMux, RequireAuth and a chi router with the settings route the
+// encoded-traversal report used: the users scope may update a user and must
+// never reach the settings handler, however the path is spelled.
+func TestRequireAuthScopedKeyReachesOnlyTheJudgedRoute(t *testing.T) {
+	key := &models.APIKey{ID: 1, UserID: 7, Key: "sa_test", Scopes: []string{auth.ScopeAdminUsers}}
+	owner := &models.User{ID: 7, Role: "admin", Enabled: true}
+	am := NewAuthMiddleware(nil, nil, &fakeAPIKeyValidator{key: key}, &fakeAPIKeyUserLoader{user: owner})
+
+	var reached []string
+	router := chi.NewRouter()
+	router.Group(func(r chi.Router) {
+		r.Use(am.RequireAuth)
+		r.Put("/api/v2/admin/users/{id}", func(w http.ResponseWriter, r *http.Request) {
+			reached = append(reached, "users:"+chi.URLParam(r, "id"))
+		})
+		r.Put("/api/v2/admin/settings/values/{key}", func(w http.ResponseWriter, r *http.Request) {
+			reached = append(reached, "settings:"+chi.URLParam(r, "key"))
+		})
+		// Stands in for any route whose last parameter spans segments.
+		r.Put("/api/v2/admin/settings/*", func(w http.ResponseWriter, r *http.Request) {
+			reached = append(reached, "settings:"+chi.URLParam(r, "*"))
+		})
+	})
+	root := http.NewServeMux()
+	root.Handle("/api/", router)
+
+	tests := []struct {
+		target string
+		want   int
+		reach  string
+	}{
+		{"/api/v2/admin/users/1", http.StatusOK, "users:1"},
+		{"/api/v2/admin/settings/plain.key", http.StatusForbidden, ""},
+		{"/api/v2/admin/settings/..%2Fusers%2F1", http.StatusForbidden, ""},
+		{"/api/v2/admin/settings/attacker.key%2F..%2F..%2Fusers%2F1", http.StatusForbidden, ""},
+		{"/api/v2/admin/settings/%2E%2E%2Fusers%2F1", http.StatusForbidden, ""},
+		{"/api/v2/admin/settings/values/..%2F..%2Fusers%2F1", http.StatusForbidden, ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.target, func(t *testing.T) {
+			reached = nil
+			req := httptest.NewRequest(http.MethodPut, tt.target, nil)
+			req.Header.Set("Authorization", "Bearer sa_test")
+			rec := httptest.NewRecorder()
+			root.ServeHTTP(rec, req)
+			if rec.Code != tt.want {
+				t.Fatalf("status = %d, want %d (reached %v)", rec.Code, tt.want, reached)
+			}
+			if got := strings.Join(reached, ","); got != tt.reach {
+				t.Fatalf("reached %q, want %q", got, tt.reach)
+			}
+		})
+	}
+
+	// The root mux redirects dot segments before the API router sees them,
+	// but RequireAuth must not lean on that: chi alone routes the literal
+	// segments to the settings catch-all, while the cleaned form is a users
+	// route.
+	for _, target := range []string{
+		"/api/v2/admin/settings/../users/1",
+		"/api/v2/admin/settings/./../users/1",
+	} {
+		t.Run("router only "+target, func(t *testing.T) {
+			reached = nil
+			req := httptest.NewRequest(http.MethodPut, target, nil)
+			req.Header.Set("Authorization", "Bearer sa_test")
+			rec := httptest.NewRecorder()
+			router.ServeHTTP(rec, req)
+			if rec.Code != http.StatusForbidden || len(reached) != 0 {
+				t.Fatalf("status = %d, reached %v; want 403 and no handler", rec.Code, reached)
+			}
+		})
 	}
 }
 

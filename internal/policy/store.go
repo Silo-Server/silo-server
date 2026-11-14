@@ -79,28 +79,6 @@ const versionColumns = `id, document_id, version_number, rego_source, source_sha
 
 const versionMetadataColumns = `id, document_id, version_number, source_sha256, compiled_ok, compile_error, created_by_user_id, comment, created_at`
 
-// ListDocuments returns every policy document ordered by domain and id.
-func (s *PolicyStore) ListDocuments(ctx context.Context) ([]Document, error) {
-	rows, err := s.pool.Query(ctx, `SELECT `+documentColumns+` FROM policy_documents ORDER BY domain ASC, id ASC`)
-	if err != nil {
-		return nil, fmt.Errorf("list policy documents: %w", err)
-	}
-	defer rows.Close()
-
-	var documents []Document
-	for rows.Next() {
-		document, err := scanDocument(rows)
-		if err != nil {
-			return nil, err
-		}
-		documents = append(documents, document)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterate policy documents: %w", err)
-	}
-	return documents, nil
-}
-
 // GetDocument returns one policy document by id.
 func (s *PolicyStore) GetDocument(ctx context.Context, id int64) (Document, error) {
 	document, err := scanDocument(s.pool.QueryRow(ctx, `SELECT `+documentColumns+` FROM policy_documents WHERE id = $1`, id))
@@ -187,35 +165,6 @@ func (s *PolicyStore) CreateVersion(ctx context.Context, documentID int64, regoS
 	return version, nil
 }
 
-// ListVersions returns metadata for every immutable version on a document,
-// newest first. Rego source is intentionally omitted for list views.
-func (s *PolicyStore) ListVersions(ctx context.Context, documentID int64) ([]Version, error) {
-	rows, err := s.pool.Query(ctx, `
-		SELECT `+versionMetadataColumns+`
-		FROM policy_document_versions
-		WHERE document_id = $1
-		ORDER BY version_number DESC`,
-		documentID,
-	)
-	if err != nil {
-		return nil, fmt.Errorf("list policy versions: %w", err)
-	}
-	defer rows.Close()
-
-	var versions []Version
-	for rows.Next() {
-		version, err := scanVersionMetadata(rows)
-		if err != nil {
-			return nil, err
-		}
-		versions = append(versions, version)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterate policy versions: %w", err)
-	}
-	return versions, nil
-}
-
 // GetVersion returns one immutable version, including its Rego source.
 func (s *PolicyStore) GetVersion(ctx context.Context, documentID, versionID int64) (Version, error) {
 	version, err := scanVersion(s.pool.QueryRow(ctx, `
@@ -236,19 +185,6 @@ func (s *PolicyStore) GetVersion(ctx context.Context, documentID, versionID int6
 func (s *PolicyStore) Activate(ctx context.Context, documentID, versionID int64, evalBudget ...time.Duration) (int64, error) {
 	result, err := s.activate(ctx, documentID, versionID, nil, mutationEvalBudget(evalBudget))
 	return result.Generation, err
-}
-
-// SetEnabled preserves the legacy unconditional write contract. Its mutation
-// still advances the editor witness and validates the locked active source.
-func (s *PolicyStore) SetEnabled(ctx context.Context, documentID int64, enabled bool, evalBudget ...time.Duration) (int64, error) {
-	result, err := s.setEnabled(ctx, documentID, enabled, nil, mutationEvalBudget(evalBudget))
-	return result.Generation, err
-}
-
-// DeleteDocument rejects documents with an active version while holding the
-// same parent lock used by version append, activation, and guarded writes.
-func (s *PolicyStore) DeleteDocument(ctx context.Context, id int64) error {
-	return s.deleteDocument(ctx, id, nil)
 }
 
 // ActiveSources returns enabled documents that have an active compiled version,

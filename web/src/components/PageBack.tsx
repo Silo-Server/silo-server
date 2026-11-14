@@ -2,9 +2,11 @@ import { ChevronLeft } from "lucide-react";
 import { type To } from "react-router";
 
 import { useViewTransitionNavigate } from "@/hooks/useViewTransition";
+import { useT } from "@/i18n";
 import { hasEarlierEntry } from "@/lib/navigationHistory";
 
 interface PageBackProps {
+  /** Accessible name; defaults to "Go back". */
   label?: string;
   to?: To;
   /**
@@ -23,16 +25,12 @@ interface PageBackProps {
   floating?: boolean;
 }
 
-export default function PageBack({
-  label = "Go back",
-  to = "/",
-  up = false,
-  floating = false,
-}: PageBackProps) {
+export default function PageBack({ label, to = "/", up = false, floating = false }: PageBackProps) {
+  const t = useT();
   const navigate = useViewTransitionNavigate();
   const position = floating
-    ? "absolute top-4 left-2 sm:top-6 lg:fixed lg:left-[268px]"
-    : "absolute top-4 left-2 sm:top-6";
+    ? "absolute top-4 start-2 sm:top-6 lg:fixed lg:start-[268px]"
+    : "absolute top-4 start-2 sm:top-6";
 
   function goBack() {
     // With nothing behind us — a cold entry, a shared link — there is no step
@@ -48,7 +46,7 @@ export default function PageBack({
   return (
     <button
       type="button"
-      aria-label={label}
+      aria-label={label ?? t("web.shell.pageBack.goBack")}
       onClick={goBack}
       className={`glass glass-hover glass-hover-accent text-foreground ${position} z-20 flex items-center justify-center rounded-full p-1.5 shadow-md`}
     >

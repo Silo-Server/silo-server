@@ -268,3 +268,36 @@ it.each([
   mount("/admin/logs?tab=audit");
   expect(screen.getByText(field.replaceAll("_", " ")).parentElement).toHaveTextContent(expected);
 });
+
+it.each([
+  ["false", "true", "pin: set"],
+  ["true", "false", "pin: cleared"],
+  ["true", "true", "pin: changed"],
+  [undefined, "true", "pin: absent → set"],
+])("shows a profile PIN marker %s → %s without a value", (before, after, expected) => {
+  vi.mocked(useAdminLogStream).mockReturnValue({
+    rows: [
+      {
+        id: 903,
+        timestamp: "2026-10-08T10:00:00Z",
+        client_ip: "192.0.2.1",
+        method: "PATCH",
+        path: "/api/v2/profiles/3f2b47eb",
+        status_code: 200,
+        duration_ms: 1,
+        user_id: 4,
+        action: before === undefined ? "profile.created" : "profile.updated",
+        target_type: "profile",
+        target_id: "3f2b47eb",
+        changes: [{ field: "pin", before, after }],
+      },
+    ],
+    isConnecting: false,
+    isLive: true,
+    connectionState: "live",
+    reconnect: vi.fn(),
+  });
+  mount("/admin/logs?tab=audit");
+  expect(screen.getByText("profile #3f2b47eb")).toBeInTheDocument();
+  expect(screen.getByText("pin").parentElement).toHaveTextContent(expected);
+});

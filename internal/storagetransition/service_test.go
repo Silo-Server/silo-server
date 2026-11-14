@@ -8,6 +8,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
+	"path/filepath"
 	"slices"
 	"sort"
 	"strings"
@@ -890,6 +892,35 @@ func TestCopyMigrationRejectsOverlappingS3Namespaces(t *testing.T) {
 				t.Fatalf("overlapping migration touched storage: lists=%d target=%#v", source.lists, target.objects)
 			}
 		})
+	}
+}
+
+// The active store can keep the identity recorded under another path to its
+// directory, so a target inside that directory must still count as overlap.
+func TestCopyMigrationRejectsTargetInsideAliasedLocalRoot(t *testing.T) {
+	base := t.TempDir()
+	state := filepath.Join(base, "config", "silo")
+	if err := os.MkdirAll(filepath.Join(state, "artwork"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	linked := filepath.Join(base, "var-lib-silo")
+	if err := os.Symlink(state, linked); err != nil {
+		t.Fatal(err)
+	}
+	source := &memoryStore{identity: "local|" + filepath.Join(linked, "artwork"), objects: map[string][]byte{"tmdb/a.webp": []byte("poster")}}
+	target := &memoryStore{identity: "local|" + filepath.Join(state, "artwork", "moved"), objects: map[string][]byte{}}
+	stage := stagedTarget{ID: "aliased-overlap", Policy: PolicyMigrateAll, SourceIdentity: source.Identity(), Phase: transitionPhaseStaged, Values: map[string]string{settingArtworkBackend: blobstore.BackendLocal, settingArtworkLocalPath: filepath.Join(state, "artwork", "moved")}}
+	settings := stagedSettings(t, stage)
+	service := New(nil, settings, nil, source, nil)
+	service.openPublic = func(map[string]string) (blobstore.Store, error) { return target, nil }
+	service.openPrivate = func(map[string]string) blobstore.Store { return nil }
+
+	_, err := service.ExecuteStorageTransition(t.Context(), adminjob.StorageTransitionRequest{TransitionID: stage.ID, Policy: PolicyMigrateAll}, func(adminjob.StorageTransitionProgress) {})
+	if err == nil || !strings.Contains(err.Error(), "overlap") {
+		t.Fatalf("ExecuteStorageTransition() error = %v, want overlap rejection", err)
+	}
+	if source.lists != 0 || len(target.objects) != 0 {
+		t.Fatalf("overlapping migration touched storage: lists=%d target=%#v", source.lists, target.objects)
 	}
 }
 

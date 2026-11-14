@@ -2,6 +2,7 @@ package discoverrows
 
 import (
 	"fmt"
+	"net/url"
 	"regexp"
 	"slices"
 	"strings"
@@ -235,7 +236,14 @@ type tmdbListKind struct{}
 
 func (tmdbListKind) Normalize(row *Row) FieldErrors {
 	// The stored URL is the list page without its slug.
-	return normalizeList(row, collectionutil.CanonicalTMDBListURL)
+	errs := normalizeList(row, collectionutil.CanonicalTMDBListURL)
+	if row.List != nil && row.List.Order != "" {
+		if errs == nil {
+			errs = FieldErrors{}
+		}
+		errs["list.order"] = "a tmdb_list row keeps the list's order"
+	}
+	return errs
 }
 
 func (k tmdbListKind) Source(env Env, row Row) Source {
@@ -257,10 +265,33 @@ type mdbListKind struct{}
 
 func (mdbListKind) Normalize(row *Row) FieldErrors {
 	// The stored URL is the list page, without the /json suffix its feed adds.
-	return normalizeList(row, func(raw string) (string, error) {
+	errs := normalizeList(row, func(raw string) (string, error) {
 		feed, err := collectionutil.CanonicalMDBListURL(raw)
 		return strings.TrimSuffix(feed, "/json"), err
 	})
+	if row.List == nil {
+		return errs
+	}
+	order := strings.TrimSpace(row.List.Order)
+	if order == ListOrderList {
+		order = ""
+	}
+	if order != "" && mdblistFeedOrders[order] == nil {
+		if errs == nil {
+			errs = FieldErrors{}
+		}
+		errs["list.order"] = fmt.Sprintf("one of %s, %s or %s", ListOrderList, ListOrderNewestAdded, ListOrderNewestReleased)
+	}
+	row.List.Order = order
+	return errs
+}
+
+// mdblistFeedOrders maps an mdblist row's order to the feed's sort. MDBList
+// inverts sortorder for its date sorts: asc puts the newest first, matching
+// what its list page shows for a newest-first sort.
+var mdblistFeedOrders = map[string]url.Values{
+	ListOrderNewestAdded:    {"sort": {"added"}, "sortorder": {"asc"}},
+	ListOrderNewestReleased: {"sort": {"released"}, "sortorder": {"asc"}},
 }
 
 func (k mdbListKind) Source(env Env, row Row) Source {
@@ -275,6 +306,11 @@ func (mdbListKind) SourceKey(row Row) string {
 	if err != nil {
 		return ""
 	}
+	// Each order is its own stored copy, so two rows showing one list in
+	// different orders don't overwrite each other's.
+	if row.List.Order != "" {
+		return "mdblist:" + feed + "?order=" + row.List.Order
+	}
 	return "mdblist:" + feed
 }
 
@@ -284,11 +320,11 @@ func normalizeList(row *Row, canonical func(string) (string, error)) FieldErrors
 	if errs := onlySpec(row, "list"); len(errs) > 0 {
 		return errs
 	}
-	url, err := canonical(row.List.URL)
+	canonicalURL, err := canonical(row.List.URL)
 	if err != nil {
 		return FieldErrors{"list.url": err.Error()}
 	}
-	row.List = &ListSpec{URL: url}
+	row.List = &ListSpec{URL: canonicalURL, Order: row.List.Order}
 	return nil
 }
 

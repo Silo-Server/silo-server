@@ -45,6 +45,7 @@ import type {
 import { normalizeQueryDefinition } from "@/api/types";
 import { requiredETag } from "@/api/v2/etag";
 import { v2, V2ProblemError } from "@/api/v2/request";
+import { t } from "@/i18n";
 import { normalizeSmartCollectionLimit } from "@/components/collections/smartCollectionLimits";
 import {
   invalidateAdminCollectionQueries,
@@ -108,7 +109,11 @@ export interface CollectionDraft {
   kind: CollectionKind;
   name: string;
   description: string;
-  /** Server: the libraries the collection belongs to. Personal smart: the libraries it matches; [] = all. */
+  /**
+   * Server: the libraries whose Collections tabs show it (a Smart collection's
+   * rules name the libraries it draws from). Personal smart: the libraries it
+   * matches; [] = all.
+   */
   libraryIds: number[];
   /** Smart only. A "no limit" limit is already cleared. */
   rules?: QueryDefinition;
@@ -279,7 +284,7 @@ function rulesFor(kind: CollectionKind, query: QueryDefinitionInput) {
     : undefined;
 }
 
-/** Smart rules match the draft's libraries; the draft's list is the one the editor shows. */
+/** A Smart draft's rules, with the libraries they draw from. */
 function smartRules(draft: ManualOrSmartDraft): QueryDefinition | undefined {
   return draft.kind === "smart" ? draftRules(draft) : undefined;
 }
@@ -356,7 +361,7 @@ function isStaged(slot: ArtworkSlotDraft | undefined) {
 
 function followedList(draft: SyncedCreateDraft) {
   const { list } = draft.synced;
-  if (!list) throw new Error("Pick a list first.");
+  if (!list) throw new Error(t("web.collections.scope.pickAListFirst"));
   return list;
 }
 
@@ -440,7 +445,9 @@ async function hideFromTabs(id: string): Promise<string | undefined> {
     return undefined;
   } catch (error) {
     // The list exists either way; say that it still shows.
-    return `It still shows on Collections tabs: ${adminMutationMessage(error, "hiding it failed")}`;
+    return t("web.collections.scope.stillShowsOnTabs", {
+      reason: adminMutationMessage(error, t("web.collections.scope.hidingFailed")),
+    });
   }
 }
 
@@ -491,7 +498,7 @@ async function createPersonalSynced(draft: SyncedCreateDraft) {
       });
     } catch (error) {
       outcome.warnings.push(
-        personalMutationMessage(error, "Couldn't show it on the Collections tab"),
+        personalMutationMessage(error, t("web.collections.scope.showOnTabFailed")),
       );
     }
   }
@@ -649,7 +656,7 @@ function personalFields(draft: ManualOrSmartDraft) {
 
 function personalMutationMessage(error: unknown, fallback: string) {
   if (error instanceof V2ProblemError && error.status === 412) {
-    return "This collection changed while you were editing. Reload it and review your changes before saving again.";
+    return t("web.collections.scope.changedWhileEditing");
   }
   return error instanceof Error ? error.message : fallback;
 }
@@ -745,7 +752,8 @@ export const SERVER_SCOPE: CollectionScope<LibraryCollection> = {
       name: view?.name ?? "",
       description: view?.description ?? "",
       libraryIds,
-      rules: rulesFor(draftKind, { ...view?.raw.query_definition, library_ids: libraryIds }),
+      // The rules name their own libraries. Opened from a library, a new one starts there.
+      rules: rulesFor(draftKind, view ? view.raw.query_definition : { library_ids: libraryIds }),
       rawSortConfig: view?.raw.sort_config ?? {},
       artwork: {},
       server: { visibility: view?.server?.visibility ?? "visible" },

@@ -5,11 +5,14 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
 
+	"github.com/Silo-Server/silo-server/internal/auditmutation"
 	"github.com/Silo-Server/silo-server/internal/auth/passwordhash"
 	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/models"
@@ -120,6 +123,9 @@ type Service struct {
 	// signInAttempts bounds password attempts per sign-in name; nil allows
 	// every attempt (SetSignInAttempts).
 	signInAttempts SignInAttemptLimiter
+	// sessionsRevoked runs after a password change signed the account out
+	// of its other sessions; see OnSessionsRevoked.
+	sessionsRevoked func(ctx context.Context, userID int)
 }
 
 // PluginProviderSource supplies the current auth-plugin providers. The
@@ -297,30 +303,128 @@ func (s *Service) LoginWithProvider(
 // sent to a directory. Any other name goes to the enabled credentials plugin
 // (LDAP), which may link or create the account; without one it is local.
 func (s *Service) routePasswordLogin(ctx context.Context, username string) (string, error) {
-	directory := ""
-	for _, registered := range s.pluginProviders() {
-		if registered.Info.Mode == ProviderModeCredentials {
-			directory = registered.Info.ID
-			break
-		}
-	}
-	if directory == "" || s.users == nil {
+	directory, ok := s.directoryProvider()
+	if !ok || s.users == nil {
 		return LocalProviderID, nil
 	}
 	user, err := LookupLogin(ctx, s.users, username)
 	if err != nil {
 		if IsNotFound(err) {
-			return directory, nil
+			return directory.Info.ID, nil
 		}
 		return "", fmt.Errorf("looking up user: %w", err)
 	}
-	if user.LocalPasswordLoginEnabled {
+	return passwordRoute(user, directory.Info.ID), nil
+}
+
+// directoryProvider is the enabled credentials plugin (LDAP), if any.
+func (s *Service) directoryProvider() (RegisteredProvider, bool) {
+	for _, registered := range s.pluginProviders() {
+		if registered.Info.Mode == ProviderModeCredentials {
+			return registered, true
+		}
+	}
+	return RegisteredProvider{}, false
+}
+
+// passwordRoute is routePasswordLogin's choice for an existing account,
+// with directory the enabled credentials plugin's provider ID or empty.
+func passwordRoute(user *models.User, directory string) string {
+	if directory == "" || user.LocalPasswordLoginEnabled {
 		// Whatever the server-wide switch says: with it off the local
 		// provider refuses with local_login_disabled, but the password never
 		// reaches the directory.
-		return LocalProviderID, nil
+		return LocalProviderID
 	}
-	return directory, nil
+	return directory
+}
+
+// PasswordSignIn is how a password sign-in that names no provider (a
+// Jellyfin or Audiobookshelf client, an app's password form) goes for one
+// account. At most one of Local and Directory is set; neither means no
+// password signs the account in.
+type PasswordSignIn struct {
+	// Local: the account's own Silo password signs in.
+	Local bool
+	// Directory: the name and password go to the directory (LDAP), which
+	// answers for the account through the identity linked there.
+	Directory bool
+	// DirectoryUsername is the username of that identity, the name to sign
+	// in with.
+	DirectoryUsername string
+}
+
+// PasswordSignInFor answers PasswordSignIn for userID from the decisions a
+// sign-in makes (routePasswordLogin, then LocalProvider.Authenticate's
+// policy), without a password. The directory's own answer, such as its group
+// rules, is not known until it is asked.
+func (s *Service) PasswordSignInFor(ctx context.Context, userID int) (PasswordSignIn, error) {
+	if s.users == nil {
+		return PasswordSignIn{}, errors.New("auth service has no user repository")
+	}
+	user, err := s.users.GetByID(ctx, userID)
+	if err != nil {
+		return PasswordSignIn{}, err
+	}
+	// Compatibility sign-ins refuse a temporary password's holder whichever
+	// provider answers (loginWithProvider, OpenIdentitySession).
+	if !user.Enabled || user.PasswordChangeRequired {
+		return PasswordSignIn{}, nil
+	}
+	directory, hasDirectory := s.directoryProvider()
+	directoryID := ""
+	if hasDirectory {
+		directoryID = directory.Info.ID
+	}
+	if passwordRoute(user, directoryID) == LocalProviderID && user.LocalPasswordLoginEnabled && user.PasswordHash != "" {
+		err = localPasswordPolicy(ctx, s.users.pool, user)
+		if err == nil {
+			return PasswordSignIn{Local: true}, nil
+		}
+		if !errors.Is(err, ErrLocalLoginDisabled) && !errors.Is(err, ErrNotPermitted) {
+			return PasswordSignIn{}, err
+		}
+	}
+	// The account's own name does not sign it in. A directory identity
+	// linked under another name is routed by that name, so it may still.
+	if !hasDirectory {
+		return PasswordSignIn{}, nil
+	}
+	return s.directorySignIn(ctx, user.ID, directory)
+}
+
+// directorySignIn is PasswordSignInFor for an account whose own name and
+// password do not sign it in. The directory answers for the account through
+// an identity linked there. Account resolution never matches a directory person to an
+// account by name, so without one (an OIDC account, say) there is no
+// directory username known to sign in with.
+func (s *Service) directorySignIn(ctx context.Context, userID int, directory RegisteredProvider) (PasswordSignIn, error) {
+	identities, err := listIdentitiesForUser(ctx, s.users.pool, userID)
+	if err != nil {
+		return PasswordSignIn{}, err
+	}
+	for _, identity := range identities {
+		if identity.InstallationID != directory.Info.InstallationID {
+			continue
+		}
+		// An administrator's link may record no username until the
+		// directory signs the person in: there is no name to offer.
+		if strings.TrimSpace(identity.Username) == "" {
+			return PasswordSignIn{}, nil
+		}
+		// The sign-in routes the typed name, which is the directory
+		// username: another account holding that name with a local password
+		// takes it.
+		route, err := s.routePasswordLogin(ctx, identity.Username)
+		if err != nil {
+			return PasswordSignIn{}, err
+		}
+		if route != directory.Info.ID {
+			return PasswordSignIn{}, nil
+		}
+		return PasswordSignIn{Directory: true, DirectoryUsername: identity.Username}, nil
+	}
+	return PasswordSignIn{}, nil
 }
 
 // HasLoginName reports whether a password sign-in with name would find an
@@ -377,6 +481,13 @@ func (s *Service) SetProviderRecheck(r *ProviderRecheck) {
 // to sign-in, discovery and the OAuth handshake.
 func (s *Service) SetPluginProviderSource(src PluginProviderSource) {
 	s.pluginSource = src
+}
+
+// OnSessionsRevoked registers fn to run after ChangePassword signed the
+// account out of its other sessions, so every replica drops the
+// Jellyfin-compatible sessions it holds in memory.
+func (s *Service) OnSessionsRevoked(fn func(ctx context.Context, userID int)) {
+	s.sessionsRevoked = fn
 }
 
 func (s *Service) pluginProviders() []RegisteredProvider {
@@ -463,7 +574,13 @@ func (s *Service) ResolveOAuthLogin(ctx context.Context, in OAuthLoginInput) (*m
 	}
 	// A linking flow (LinkingUserID > 0) links the identity to that account
 	// or refuses one linked elsewhere; see AccountResolver.
-	return provider.CompleteOAuth(ctx, in.Response, in.LinkingUserID)
+	return provider.CompleteOAuth(ctx, in.Response, in.LinkingUserID, in.AnswerFence)
+}
+
+// ProviderAnswerFence takes the answer fence of an OAuth sign-in, which the
+// handler passes back in OAuthLoginInput.AnswerFence (takeAnswerFence).
+func (s *Service) ProviderAnswerFence(ctx context.Context) (int64, error) {
+	return takeAnswerFence(ctx, s.sessions.pool)
 }
 
 // OpenOAuthSession opens the login session of a completion code being
@@ -496,7 +613,7 @@ type IdentitySession struct {
 // token pair. The account is locked and read again, so one disabled since
 // the provider answered is refused and account changes serialize with the
 // session's creation; the identity and its enabled installation are locked
-// too. A network identity's primary-provider refusal is read again under the
+// too, and an identity a re-check has refused since is not signed in. A network identity's primary-provider refusal is read again under the
 // account lock, which a re-check that refuses the account also holds.
 func (s *Service) OpenIdentitySession(ctx context.Context, db OAuthSessionDB, c IdentitySession) (*TokenPair, error) {
 	if db == nil {
@@ -584,15 +701,22 @@ func lockOAuthIdentity(ctx context.Context, db OAuthSessionDB, userID int, ident
 	if !enabled {
 		return 0, ErrProviderUnavailable
 	}
-	var lockedIdentityID int64
-	err = db.QueryRow(ctx, `SELECT id FROM plugin_auth_identities
+	// The provider answered active when the sign-in resolved. A refusal on
+	// record now was committed by a re-check since then, under the account
+	// lock held here, and it ended the account's sessions: this one must not
+	// open after it.
+	var refused bool
+	err = db.QueryRow(ctx, `SELECT last_check_status = ANY($4) OR pending_refusal = ANY($4) FROM plugin_auth_identities
 		WHERE id = $1 AND user_id = $2 AND plugin_installation_id = $3 FOR UPDATE`,
-		identityID, userID, installationID).Scan(&lockedIdentityID)
+		identityID, userID, installationID, refusalStatuses).Scan(&refused)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return 0, ErrNotPermitted
 	}
 	if err != nil {
 		return 0, fmt.Errorf("lock oauth identity: %w", err)
+	}
+	if refused {
+		return 0, ErrNotPermitted
 	}
 	return installationID, nil
 }
@@ -610,7 +734,7 @@ func (s *Service) LinkOAuthIdentity(ctx context.Context, in OAuthLoginInput) (*m
 	if provider == nil {
 		return nil, ErrProviderUnavailable
 	}
-	user, _, err := provider.CompleteOAuth(ctx, in.Response, in.LinkingUserID)
+	user, _, err := provider.CompleteOAuth(ctx, in.Response, in.LinkingUserID, 0)
 	return user, err
 }
 
@@ -797,22 +921,11 @@ func (s *Service) loginWithProvider(
 				if err := lockServerSettings(ctx, tx); err != nil {
 					return err
 				}
-				allowed, err := localPasswordLoginAllowed(ctx, tx)
-				if err != nil {
-					return err
-				}
-				if !allowed {
-					return ErrLocalLoginDisabled
-				}
-				// A re-check refusing the person holds this row lock too, so
-				// a refusal cannot land between this check and the session.
-				refused, err := networkRefused(ctx, tx, current.ID)
-				if err != nil {
-					return err
-				}
-				if refused {
-					return ErrNotPermitted
-				}
+			}
+			// A re-check refusing the person holds the account row lock too,
+			// so a refusal cannot land between this check and the session.
+			if err := localPasswordPolicy(ctx, tx, current); err != nil {
+				return err
 			}
 			if err := s.sessions.createWithQuerier(ctx, tx, session); err != nil {
 				return err
@@ -1114,9 +1227,15 @@ func (s *Service) StartImpersonation(ctx context.Context, adminUserID, targetUse
 	if err := s.sessions.createWithQuerier(ctx, tx, session); err != nil {
 		return nil, nil, nil, fmt.Errorf("creating session: %w", err)
 	}
+	audit, err := auditmutation.RecordMutation(ctx, tx, auditmutation.ActionImpersonationStarted, auditmutation.TargetUser,
+		strconv.Itoa(target.ID), http.StatusOK, auditmutation.Created(auditFieldImpersonationSession, sessionID))
+	if err != nil {
+		return nil, nil, nil, err
+	}
 	if err := tx.Commit(ctx); err != nil {
 		return nil, nil, nil, err
 	}
+	auditmutation.CommitMutation(ctx, audit)
 
 	pair, err := s.generateTokenPair(Claims{
 		UserID:             target.ID,
@@ -1131,20 +1250,27 @@ func (s *Service) StartImpersonation(ctx context.Context, adminUserID, targetUse
 	return pair, admin, target, nil
 }
 
+// auditFieldImpersonationSession names the login session a View as user
+// runs in. A session ID identifies the session; it is not a credential.
+const auditFieldImpersonationSession = "impersonation_session_id"
+
+// auditFieldLoginSession names a login session one revocation ended.
+const auditFieldLoginSession = "login_session_id"
+
 // EndImpersonation revokes an impersonated session without affecting the original admin session.
 func (s *Service) EndImpersonation(ctx context.Context, sessionID string, impersonatorUserID int) error {
-	session, err := s.sessions.GetByID(ctx, sessionID)
-	if err != nil {
-		return err
-	}
-	if session.ImpersonatorUserID == nil {
-		return ErrNotImpersonating
-	}
-	if *session.ImpersonatorUserID != impersonatorUserID {
-		return ErrImpersonationNotAllowed
-	}
-
-	return s.sessions.Revoke(ctx, sessionID)
+	return s.sessions.revokeChecked(ctx, sessionID, func(session *models.AuthSession) error {
+		if session.ImpersonatorUserID == nil {
+			return ErrNotImpersonating
+		}
+		if *session.ImpersonatorUserID != impersonatorUserID {
+			return ErrImpersonationNotAllowed
+		}
+		return nil
+	}, func(tx pgx.Tx, session *models.AuthSession) (*auditmutation.Entry, error) {
+		return auditmutation.RecordMutation(ctx, tx, auditmutation.ActionImpersonationEnded, auditmutation.TargetUser,
+			strconv.Itoa(session.UserID), http.StatusNoContent, auditmutation.Removed(auditFieldImpersonationSession, session.ID))
+	})
 }
 
 // Refresh validates the refresh token, checks that the associated session is
@@ -1163,7 +1289,60 @@ func (s *Service) Refresh(ctx context.Context, refreshToken string) (*TokenPair,
 		return nil, fmt.Errorf("invalid refresh token: %w", ErrInvalidToken)
 	}
 
-	session, err := s.sessions.GetByID(ctx, claims.SessionID)
+	standing, err := s.checkSessionStanding(ctx, claims.SessionID)
+	if err != nil {
+		return nil, err
+	}
+	session, user := standing.session, standing.user
+
+	// Slide the session window forward so an active client never hits the
+	// hard expires_at set at login. A failure here is non-fatal: the refresh
+	// still returns fresh tokens; the session just keeps its prior expiry.
+	if err := s.sessions.ExtendExpiresAt(ctx, session.ID, standing.expiry); err != nil {
+		switch {
+		case !IsSessionNotFound(err):
+			return nil, sessionCheckUnavailable("extending session", err)
+		case standing.rechecked:
+			// A check on another node (a role change, a refused account)
+			// revoked the session while this refresh waited for it.
+			return nil, ErrSessionRevoked
+		}
+	}
+
+	// An impersonating administrator is not the one who must change the
+	// password, so only the account's own sessions are restricted.
+	refreshed := Claims{
+		UserID:                 user.ID,
+		Role:                   user.Role,
+		SessionID:              session.ID,
+		ImpersonatorUserID:     session.ImpersonatorUserID,
+		PasswordChangeRequired: user.PasswordChangeRequired && session.ImpersonatorUserID == nil,
+	}
+	if session.IsRemotePlayback() {
+		refreshed = remotePlaybackClaims(refreshed, session)
+	}
+	return s.generateTokenPair(refreshed)
+}
+
+// sessionStanding is what checkSessionStanding establishes about a login
+// session before tokens are issued from it.
+type sessionStanding struct {
+	session *models.AuthSession
+	user    *models.User
+	// expiry is the furthest the session may now run: Refresh slides it
+	// there, and a token that does not slide it ends no later.
+	expiry time.Time
+	// rechecked is set when the external provider was consulted.
+	rechecked bool
+}
+
+// checkSessionStanding applies the checks a login session must pass before
+// tokens are issued from it: the session and account are live, an
+// impersonating administrator still holds the role, and a session opened
+// through an external provider passes the provider re-check under its outage
+// policy. Errors follow Refresh's contract.
+func (s *Service) checkSessionStanding(ctx context.Context, sessionID string) (*sessionStanding, error) {
+	session, err := s.sessions.GetByID(ctx, sessionID)
 	if err != nil {
 		if IsSessionNotFound(err) {
 			return nil, ErrSessionRevoked
@@ -1196,9 +1375,6 @@ func (s *Service) Refresh(ctx context.Context, refreshToken string) (*TokenPair,
 		return nil, sessionCheckUnavailable("checking impersonator", err)
 	}
 
-	// Slide the session window forward so an active client never hits the
-	// hard expires_at set at login. A failure here is non-fatal: the refresh
-	// still returns fresh tokens; the session just keeps its prior expiry.
 	now := time.Now()
 	newExpiry := now.Add(s.jwt.RefreshExpiry())
 
@@ -1242,30 +1418,42 @@ func (s *Service) Refresh(ctx context.Context, refreshToken string) (*TokenPair,
 	if session.AbsoluteExpiresAt != nil && session.AbsoluteExpiresAt.Before(newExpiry) {
 		newExpiry = *session.AbsoluteExpiresAt
 	}
-	if err := s.sessions.ExtendExpiresAt(ctx, session.ID, newExpiry); err != nil {
-		switch {
-		case !IsSessionNotFound(err):
-			return nil, sessionCheckUnavailable("extending session", err)
-		case rechecked:
-			// A check on another node (a role change, a refused account)
-			// revoked the session while this refresh waited for it.
-			return nil, ErrSessionRevoked
-		}
-	}
+	return &sessionStanding{session: session, user: user, expiry: newExpiry, rechecked: rechecked}, nil
+}
 
-	// An impersonating administrator is not the one who must change the
-	// password, so only the account's own sessions are restricted.
-	refreshed := Claims{
-		UserID:                 user.ID,
-		Role:                   user.Role,
-		SessionID:              session.ID,
-		ImpersonatorUserID:     session.ImpersonatorUserID,
-		PasswordChangeRequired: user.PasswordChangeRequired && session.ImpersonatorUserID == nil,
+// RenewPluginAccess re-issues a plugin access token from claims, a valid
+// plugin token, for the same session and profile. The session must pass the
+// checks Refresh applies, so an open plugin page stops renewing exactly when
+// the session could no longer refresh. Renewal never slides the session, and
+// the new token ends no later than the session does. Errors follow Refresh's
+// contract.
+func (s *Service) RenewPluginAccess(ctx context.Context, claims *Claims, ttl time.Duration) (string, error) {
+	if claims == nil || claims.TokenType != TokenTypePluginAccess || claims.SessionID == "" {
+		return "", ErrInvalidToken
 	}
-	if session.IsRemotePlayback() {
-		refreshed = remotePlaybackClaims(refreshed, session)
+	standing, err := s.checkSessionStanding(ctx, claims.SessionID)
+	if err != nil {
+		return "", err
 	}
-	return s.generateTokenPair(refreshed)
+	session, user := standing.session, standing.user
+	// Plugins are not part of a remote-playback handoff, and a session that
+	// must change its password may only do that.
+	if session.UserID != claims.UserID || session.IsRemotePlayback() ||
+		(user.PasswordChangeRequired && session.ImpersonatorUserID == nil) {
+		return "", ErrSessionRevoked
+	}
+	ends := standing.expiry
+	if session.ExpiresAt.Before(ends) {
+		ends = session.ExpiresAt
+	}
+	return s.jwt.generateToken(Claims{
+		UserID:             user.ID,
+		Role:               user.Role,
+		SessionID:          session.ID,
+		ProfileID:          claims.ProfileID,
+		ProfilePINRevision: claims.ProfilePINRevision,
+		SessionEndsAt:      ends,
+	}, TokenTypePluginAccess, ttl)
 }
 
 func (s *Service) validateImpersonator(ctx context.Context, impersonatorUserID *int) error {
@@ -1310,8 +1498,10 @@ func (s *Service) PasswordChangeAvailable(ctx context.Context, userID int) (bool
 // Profile authorization and impersonation checks belong to the HTTP boundary;
 // this method owns only the account credential transition. sessionID is the
 // login session making the change: when it replaces a temporary password,
-// every other session of the account is revoked.
-func (s *Service) ChangePassword(ctx context.Context, userID int, sessionID, currentPassword, newPassword string) error {
+// every other login session of the account is revoked. signOutOtherSessions
+// also signs the account out everywhere else, as a password reset does,
+// except sessionID.
+func (s *Service) ChangePassword(ctx context.Context, userID int, sessionID, currentPassword, newPassword string, signOutOtherSessions bool) error {
 	user, err := s.users.GetByID(ctx, userID)
 	if err != nil {
 		return fmt.Errorf("getting user: %w", err)
@@ -1320,14 +1510,21 @@ func (s *Service) ChangePassword(ctx context.Context, userID int, sessionID, cur
 		return err
 	}
 
-	swap := s.users.CompareAndSwapPassword
-	if user.PasswordChangeRequired {
-		swap = func(ctx context.Context, id int, expectedHash, newPassword string) error {
-			return s.users.ReplaceTemporaryPassword(ctx, id, expectedHash, newPassword, sessionID)
-		}
+	switch {
+	case signOutOtherSessions:
+		err = s.users.ReplacePasswordSigningOutOthers(ctx, userID, user.PasswordHash, newPassword, sessionID)
+	case user.PasswordChangeRequired:
+		err = s.users.ReplaceTemporaryPassword(ctx, userID, user.PasswordHash, newPassword, sessionID)
+	default:
+		err = s.users.CompareAndSwapPassword(ctx, userID, user.PasswordHash, newPassword)
 	}
-	if err := swap(ctx, userID, user.PasswordHash, newPassword); err != nil {
+	if err != nil {
 		return fmt.Errorf("updating password: %w", err)
+	}
+	if signOutOtherSessions && s.sessionsRevoked != nil {
+		cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+		defer cancel()
+		s.sessionsRevoked(cleanupCtx, userID)
 	}
 	return nil
 }
@@ -1365,11 +1562,6 @@ func ValidateNewPassword(password string) error {
 	return nil
 }
 
-// GetSessions returns all sessions for the given user ID.
-func (s *Service) GetSessions(ctx context.Context, userID int) ([]*models.AuthSession, error) {
-	return s.sessions.ListByUser(ctx, userID)
-}
-
 // GetSessionsPage returns one keyset page of the user's live sessions; see
 // SessionRepository.ListByUserPage.
 func (s *Service) GetSessionsPage(ctx context.Context, userID int, after *SessionKey, limit int) ([]*models.AuthSession, error) {
@@ -1398,16 +1590,15 @@ func (s *Service) LoginSessionActive(ctx context.Context, sessionID string) (boo
 // RevokeSession revokes a specific session. It verifies the session belongs
 // to the given user before revoking.
 func (s *Service) RevokeSession(ctx context.Context, sessionID string, userID int) error {
-	session, err := s.sessions.GetByID(ctx, sessionID)
-	if err != nil {
-		return err
-	}
-
-	if session.UserID != userID {
-		return ErrSessionNotFound
-	}
-
-	return s.sessions.Revoke(ctx, sessionID)
+	return s.sessions.revokeChecked(ctx, sessionID, func(session *models.AuthSession) error {
+		if session.UserID != userID {
+			return ErrSessionNotFound
+		}
+		return nil
+	}, func(tx pgx.Tx, session *models.AuthSession) (*auditmutation.Entry, error) {
+		return auditmutation.RecordMutation(ctx, tx, auditmutation.ActionLoginSessionRevoked, auditmutation.TargetUser,
+			strconv.Itoa(session.UserID), http.StatusNoContent, auditmutation.Removed(auditFieldLoginSession, session.ID))
+	})
 }
 
 // generateTokenPair creates a new access/refresh token pair for the given

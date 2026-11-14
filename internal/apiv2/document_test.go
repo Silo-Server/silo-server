@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -56,6 +57,36 @@ func TestProfileHeaderRequiredMatchesGateChain(t *testing.T) {
 				t.Fatalf("%s: header has no description", class)
 			}
 		})
+	}
+}
+
+// TestBucketLimitedPublicOperationsDocument429: a public operation whose gate
+// chain runs the per-endpoint limiter documents the 429 it answers. Every
+// gated class implies 429 already.
+func TestBucketLimitedPublicOperationsDocument429(t *testing.T) {
+	api := huma.NewAPI(humaConfig(), noopAdapter{})
+	registerAll(&Registry{api: api})
+	deps := Dependencies{BucketRateLimit: func(string) func(http.Handler) http.Handler {
+		return func(next http.Handler) http.Handler { return next }
+	}}
+	limited := 0
+	for path, item := range api.OpenAPI().Paths {
+		for _, op := range []*huma.Operation{item.Get, item.Head, item.Post, item.Put, item.Patch, item.Delete} {
+			if op == nil || op.Metadata[metaClass] != ClassPublic {
+				continue
+			}
+			bucket, _ := op.Metadata[metaRateLimitBucket].(string)
+			if chain, _ := gateChain(deps, ClassPublic, "", false, false, false, bucket); len(chain) == 0 {
+				continue
+			}
+			limited++
+			if _, ok := op.Responses[strconv.Itoa(http.StatusTooManyRequests)]; !ok {
+				t.Errorf("%s %s runs the %q limiter but does not document 429", op.Method, path, bucket)
+			}
+		}
+	}
+	if limited == 0 {
+		t.Fatal("no public operation runs a bucket limiter")
 	}
 }
 

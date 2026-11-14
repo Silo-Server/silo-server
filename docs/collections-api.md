@@ -1,8 +1,7 @@
 # Personal collections API
 
 > **API lifecycle:** this documents the stable `/api/v2` native contract, which locks with Silo
-> 1.0. The frozen alpha `/api/v1` surface answers the same features through the pre-1.0 bridge
-> window and is then retired. See [the native API contract](architecture/api-contract.md).
+> 1.0. See [the native API contract](architecture/api-contract.md).
 
 A personal collection belongs to the profile that created it (`creator_profile_id`). Collections
 for the whole server are admin collections and are not covered here. Paths below omit the
@@ -47,8 +46,20 @@ at once; stored manual members are hidden, not deleted, and return with the acce
 to `item_count`, item pages, the catalog `user_collection` source, home rows and the library
 Collections tab. It never changes what a viewer can open elsewhere.
 
+List reads (`listCollections`, `getLibraryCollections`, `listLibraryUserCollections`) remember a
+hand-picked or imported collection's `item_count`, and that it has no title with a poster for a
+collage, per viewer for up to five minutes. A change to the collection's members or definition, or
+to the viewer's or creator's access, shows on the next read. A catalog change alone, such as a
+title leaving a library, a new rating or newly fetched artwork, can take up to five minutes to
+reach a list. `getCollection` and the `/api/v1` list routes always count live.
+
 Smart rules on watch state, favorites and the watchlist, and display filters, are evaluated for
 the viewer. A shared collection never reveals its creator's activity.
+
+A smart collection needs at least one complete rule: `createCollection`, and an
+`updateCollection` that sends a smart collection's `query_definition`, answer
+`422 validation_failed` at `body.query_definition.groups` without one (see
+[catalog-api.md](catalog-api.md#rule-fields-and-operators)).
 
 ## Posters
 
@@ -65,10 +76,31 @@ own network (loopback, a private or link-local range, or a name that resolves to
 one reached through a redirect, fails the poster with one fixed error. See
 [Outbound address guard](architecture/outbound-address-guard.md#collection-artwork).
 
-`uploadCollectionPoster` answers `422 validation_failed` for a poster it cannot use and keeps the
-stored one: an image libvips cannot read, whether uploaded or linked; a JPEG or PNG of up to 4
-megapixels whose pixel data does not decode; and a `source_url` with no http(s) host, an answer
-other than `200`, or more than 10 MiB. Other processing failures stay `500`.
+The server reads and decodes a poster before it writes anything. `uploadCollectionPoster`, and
+`createCollection` with a `poster_source_url`, answer a poster that fails by its cause:
+
+- `422 validation_failed` for a poster the server cannot use: an image libvips cannot read,
+  whether uploaded or linked; a JPEG or PNG of up to 4 megapixels whose pixel data does not
+  decode; and a `source_url` or `poster_source_url` with no http(s) host, an answer other than
+  `200`, or more than 10 MiB.
+- `503 dependency_unavailable` with `Retry-After` when the server is too busy to decode another
+  image. The poster may be fine; send the request again.
+- `500 internal_error` for any other failure, such as a source that could not be reached, a
+  source address the server refuses (above), or a storage error. The answer carries no detail;
+  the server logs the cause, except for a refused address, which is not logged. For a source it
+  could not download, the log line holds the source's host and the kind of failure (a
+  timeout, a DNS, connection or TLS certificate failure, or any other) and no other part of
+  the URL the request or a redirect named.
+
+A poster that fails before it is stored creates and changes nothing: `createCollection` creates
+no collection, so repeating the request cannot leave two, and `uploadCollectionPoster` keeps the
+stored poster. A poster that decoded but could not be written is the one failure left after
+`createCollection` has stored the collection: the answer is `500` and the collection exists
+without the poster.
+
+An import's `poster_url` is a bundled template poster path (`/images/collection-templates/...`)
+or an http(s) image URL. Any other value answers `422 validation_failed` at `body.poster_url`
+and creates no collection. The server does not fetch the URL: clients load it themselves.
 
 - `listCollections`, `getLibraryCollections` and `listLibraryUserCollections` return the
   collage in `poster_url` and mark it with `poster_is_collage: true`.
@@ -85,9 +117,6 @@ other than `200`, or more than 10 MiB. Other processing failures stay `500`.
   It is false when the server has no artwork storage (and then `artwork` is false too), and for
   an account on the SQLite user store.
 - `deleteCollectionImage` removes an uploaded poster; the collection then shows its collage.
-
-The `/api/v1` bridge does not show collages: its personal collection and library tab reads keep
-returning only uploaded and imported posters.
 
 ## Listing and order
 
@@ -128,11 +157,3 @@ contract keeps their members with fixed values:
   body); a value is a `422 validation_failed`.
 
 A later change removes these operations and members from `/api/v2` before the 1.0 lock.
-
-## `/api/v1` bridge
-
-The frozen v1 routes share the same rules. `GET /api/v1/collections` returns own and shared
-collections; `groups` is always `[]` and `group_id` always `null`. `allowed_profile_ids` reports
-the effective audience (the creator alone, or every profile on the login) and is ignored on
-input. `PUT /api/v1/collections/order` accepts only a null or absent `group_id`, and its
-`ordered_ids` names only the acting profile's own collections. The v1 group routes answer `501`. See the [v1 removals table](architecture/v1-scope.md#breaking-removals-taken-before-lock).

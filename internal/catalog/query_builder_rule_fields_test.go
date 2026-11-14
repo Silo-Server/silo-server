@@ -2,6 +2,7 @@ package catalog
 
 import (
 	"errors"
+	"fmt"
 	"net/url"
 	"strings"
 	"testing"
@@ -84,6 +85,12 @@ func TestMalformedRuleValuesFailValidation(t *testing.T) {
 		{Field: "added_at", Op: "in_last", Value: "70000000h"},
 		{Field: "rating_imdb", Op: "gt", Value: "high"},
 		{Field: "latest_episode_added", Op: "between", Value: []any{"2024-01-01", "soon"}},
+		{Field: "watched", Op: "is", Value: "True"},
+		{Field: "in_progress", Op: "is", Value: "1"},
+		{Field: "favorited", Op: "is", Value: "yes"},
+		{Field: "in_watchlist", Op: "is", Value: 1.0},
+		{Field: "hdr", Op: "is", Value: " true"},
+		{Field: "dolby_vision", Op: "is", Value: nil},
 	} {
 		def := QueryDefinition{Match: "all", Groups: []QueryGroup{{Match: "all", Rules: []QueryRule{rule}}}}
 		if _, _, err := NewQueryBuilder("mi").Build(def); err == nil {
@@ -113,6 +120,39 @@ func TestMalformedRuleValuesFailValidation(t *testing.T) {
 	}
 }
 
+func TestBooleanRuleStringValuesBuildAsBooleans(t *testing.T) {
+	// Released clients (Android TV v1.0.0-beta.27) send "true" and "false" as
+	// JSON strings. They keep working, and build exactly as the real booleans.
+	for _, field := range []string{"watched", "in_progress", "favorited", "in_watchlist", "hdr", "dolby_vision"} {
+		for _, value := range []bool{true, false} {
+			text := map[bool]string{true: "true", false: "false"}[value]
+			for _, match := range []string{"all", "any"} {
+				def := func(v any) QueryDefinition {
+					return QueryDefinition{Match: "all", Groups: []QueryGroup{{Match: match, Rules: []QueryRule{{Field: field, Op: "is", Value: v}}}}}
+				}
+				if err := def(text).Validate(); err != nil {
+					t.Errorf("%s %q (%s): expected validation to accept it, got %v", field, text, match, err)
+				}
+				if err := validateCatalogOverlayQuery(CatalogRequest{Query: def(text)}, catalogPersonalRuleFields, catalogQuerySortFields(), false); err != nil {
+					t.Errorf("%s %q (%s): expected the catalog request to validate, got %v", field, text, match, err)
+				}
+				gotSQL, gotArgs, err := NewQueryBuilder("mi").WithUserScope(7, "profile-1").Build(def(text))
+				if err != nil {
+					t.Errorf("%s %q (%s): expected the builder to accept it, got %v", field, text, match, err)
+					continue
+				}
+				wantSQL, wantArgs, err := NewQueryBuilder("mi").WithUserScope(7, "profile-1").Build(def(value))
+				if err != nil {
+					t.Fatalf("%s %v (%s): %v", field, value, match, err)
+				}
+				if gotSQL != wantSQL || fmt.Sprintf("%#v", gotArgs) != fmt.Sprintf("%#v", wantArgs) {
+					t.Errorf("%s %q (%s): built %q %#v, want the boolean form %q %#v", field, text, match, gotSQL, gotArgs, wantSQL, wantArgs)
+				}
+			}
+		}
+	}
+}
+
 func TestRelativeDurationCutoff_LongHourSpanDoesNotOverflow(t *testing.T) {
 	// 3,000,000 hours is past what a time.Duration holds (about 292 years).
 	now := time.Date(2026, 10, 8, 12, 0, 0, 0, time.UTC)
@@ -127,16 +167,16 @@ func TestParseCatalogRequest_TitleValuesStayText(t *testing.T) {
 	// values are read as the scalars they look like.
 	for _, field := range []string{"title", "show_title"} {
 		for _, title := range []string{"1917", "true", "007"} {
-			req, err := ParseCatalogRequestWithOptions(url.Values{
+			req, err := ParseCatalogRequest(url.Values{
 				"groups[0][rules][0][field]": {field},
 				"groups[0][rules][0][op]":    {"is"},
 				"groups[0][rules][0][value]": {title},
 				"groups[0][rules][1][field]": {"year"},
 				"groups[0][rules][1][op]":    {"is"},
 				"groups[0][rules][1][value]": {"1917"},
-			}, CatalogRequestOptions{ExtendedRules: true})
+			})
 			if err != nil {
-				t.Fatalf("ParseCatalogRequestWithOptions: %v", err)
+				t.Fatalf("ParseCatalogRequest: %v", err)
 			}
 			rules := req.Query.Groups[0].Rules
 			if rules[0].Value != title || rules[1].Value != 1917 {

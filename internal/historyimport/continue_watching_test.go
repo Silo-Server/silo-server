@@ -167,7 +167,7 @@ func TestReconcileContinueWatchingDropsUnfinishedShowsTheRowLeavesOut(t *testing
 		{itemID: "silo-ahead-1", sourceSeriesID: "src-silo-ahead", at: played},
 	}
 
-	dropped, err := service.reconcileContinueWatching(context.Background(), 7, "profile-1", row, episodes)
+	dropped, err := service.reconcileContinueWatching(context.Background(), 7, "profile-1", row, importedShowsOf(t, service.seriesDrops, episodes))
 	if err != nil {
 		t.Fatalf("reconcile: %v", err)
 	}
@@ -326,7 +326,7 @@ func TestReconcileContinueWatchingDropDecisions(t *testing.T) {
 
 			drops := &fakeSeriesDrops{seriesOf: tc.seriesOf}
 			service := reconcileService(drops, surfaceAll(drops), tc.matcher)
-			if _, err := service.reconcileContinueWatching(context.Background(), 7, "p", tc.row, tc.episodes); err != nil {
+			if _, err := service.reconcileContinueWatching(context.Background(), 7, "p", tc.row, importedShowsOf(t, service.seriesDrops, tc.episodes)); err != nil {
 				t.Fatalf("reconcile: %v", err)
 			}
 			if len(tc.want) == 0 {
@@ -359,7 +359,7 @@ func TestReconcileContinueWatchingTakesBackADropRacedByPlayback(t *testing.T) {
 		{itemID: "raced-1", sourceSeriesID: "src-raced", at: played},
 		{itemID: "hidden-1", sourceSeriesID: "src-hidden", at: played},
 	}
-	dropped, err := service.reconcileContinueWatching(context.Background(), 7, "p", row, episodes)
+	dropped, err := service.reconcileContinueWatching(context.Background(), 7, "p", row, importedShowsOf(t, service.seriesDrops, episodes))
 	if err != nil {
 		t.Fatalf("reconcile: %v", err)
 	}
@@ -399,7 +399,7 @@ func TestReconcileContinueWatchingKeepsTheProfilesOwnChoices(t *testing.T) {
 		row.UnfinishedSourceSeries["src-"+id] = true
 		episodes = append(episodes, importedEpisode{itemID: id, sourceSeriesID: "src-" + id, at: imported})
 	}
-	dropped, err := service.reconcileContinueWatching(context.Background(), 7, "profile-1", row, episodes)
+	dropped, err := service.reconcileContinueWatching(context.Background(), 7, "profile-1", row, importedShowsOf(t, service.seriesDrops, episodes))
 	if err != nil {
 		t.Fatalf("reconcile: %v", err)
 	}
@@ -424,7 +424,7 @@ func TestReconcileContinueWatchingDatesDropsOfUndatedImportsAtTheRun(t *testing.
 		newImportedEpisode("ep", Record{Kind: KindEpisode, SourceSeriesID: "src", Played: true}),
 		newImportedEpisode("ep2", Record{Kind: KindEpisode, SourceSeriesID: "src2", Played: true}),
 	}
-	if _, err := service.reconcileContinueWatching(context.Background(), 7, "p", row, episodes); err != nil {
+	if _, err := service.reconcileContinueWatching(context.Background(), 7, "p", row, importedShowsOf(t, service.seriesDrops, episodes)); err != nil {
 		t.Fatalf("reconcile: %v", err)
 	}
 	if len(drops.imported) != 1 || drops.imported[0].seriesID != "s-1" || !drops.imported[0].droppedAt.Equal(reconcileNow) {
@@ -452,9 +452,15 @@ func TestReconcileContinueWatchingStopsOnStoreErrors(t *testing.T) {
 	failure := errors.New("database unavailable")
 	drops := &fakeSeriesDrops{resolveErr: failure}
 	service := reconcileService(drops, &fakeNextUp{}, nil)
-	episodes := []importedEpisode{{itemID: "ep", sourceSeriesID: "src", at: time.Now()}}
-	if _, err := service.reconcileContinueWatching(context.Background(), 7, "p", ContinueWatchingRow{}, episodes); !errors.Is(err, failure) {
-		t.Fatalf("err = %v, want %v", err, failure)
+	shows := newImportedShows()
+	shows.add(context.Background(), service.seriesDrops, []importedEpisode{{itemID: "ep", sourceSeriesID: "src", at: time.Now()}})
+	if !errors.Is(shows.failed, failure) {
+		t.Fatalf("failed = %v, want %v", shows.failed, failure)
+	}
+	summary := ExecutionSummary{}
+	service.reconcileRun(context.Background(), &Run{ID: "r", UserID: 7, ProfileID: "p"}, ContinueWatchingRow{}, shows, false, &summary)
+	if len(summary.Warnings) != 1 || summary.Warnings[0] != warnContinueWatchingNotReconciled {
+		t.Fatalf("warnings = %v, want the not-reconciled warning", summary.Warnings)
 	}
 	if len(drops.imported) != 0 {
 		t.Fatalf("drops after an error = %v, want none", drops.importedIDs())
@@ -467,7 +473,7 @@ type rowProvider struct {
 	ok  bool
 }
 
-func (rowProvider) Fetch(context.Context) ([]Record, []string, error) { return nil, nil, nil }
+func (rowProvider) Stream(context.Context, *StreamPosition, RecordSink) error { return nil }
 
 func (p rowProvider) ContinueWatchingRow() (ContinueWatchingRow, bool) { return p.row, p.ok }
 
@@ -477,9 +483,8 @@ func TestPrivateNetworkProviderPassesTheRowThrough(t *testing.T) {
 	t.Parallel()
 
 	want := ContinueWatchingRow{SourceSeriesIDs: map[string]bool{"lasso": true}}
-	var wrapped Provider = privateNetworkProvider{rowProvider{row: want, ok: true}}
-	reporter, ok := wrapped.(ContinueWatchingRowReporter)
-	if !ok {
+	reporter := continueWatchingReporter(privateNetworkProvider{rowProvider{row: want, ok: true}})
+	if reporter == nil {
 		t.Fatal("wrapped provider does not report a row")
 	}
 	if row, ok := reporter.ContinueWatchingRow(); !ok || !row.SourceSeriesIDs["lasso"] {
@@ -487,12 +492,12 @@ func TestPrivateNetworkProviderPassesTheRowThrough(t *testing.T) {
 	}
 
 	// The wrapped Emby provider, as queued runs build it.
-	if _, ok := Provider(privateNetworkProvider{NewEmbyProvider(nil, embyLocalAuth{})}).(ContinueWatchingRowReporter); !ok {
+	if continueWatchingReporter(privateNetworkProvider{NewEmbyProvider(nil, embyLocalAuth{})}) == nil {
 		t.Fatal("wrapped Emby provider does not report a row")
 	}
 
 	// A provider without a row reports none through the wrapper.
-	if _, ok := (privateNetworkProvider{staticWatchlistProvider{}}).ContinueWatchingRow(); ok {
-		t.Fatal("wrapped provider without a row reported one")
+	if continueWatchingReporter(privateNetworkProvider{staticWatchlistProvider{}}) != nil {
+		t.Fatal("wrapped provider without a row has a reporter")
 	}
 }

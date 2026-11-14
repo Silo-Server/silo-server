@@ -19,7 +19,7 @@ func (p recordingSubtitleProvider) Search(_ context.Context, request subtitles.S
 	*p.request = request
 	return []subtitles.SubtitleResult{{ID: "result", Provider: "example", Language: "en", Format: subtitles.FormatSRT}}, nil
 }
-func (p recordingSubtitleProvider) Download(context.Context, string) ([]byte, subtitles.SubtitleFormat, error) {
+func (p recordingSubtitleProvider) Download(context.Context, string, subtitles.DownloadTarget) ([]byte, subtitles.SubtitleFormat, error) {
 	return nil, "", errors.New("unexpected download")
 }
 

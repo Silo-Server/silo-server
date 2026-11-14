@@ -88,6 +88,17 @@ func (s *Service) RecordManualMarkWatchedWithResult(ctx context.Context, userID 
 	return s.recordMarkWatched(ctx, userID, profileID, targets, watchedAt, userstore.WatchHistorySourceManual)
 }
 
+// RecordSpannedEpisodesWatched marks the later episodes of a completed
+// multi-episode file watched, recorded as playback like the play of its first
+// episode. Episodes the profile already completed are left alone.
+func (s *Service) RecordSpannedEpisodesWatched(ctx context.Context, userID int, profileID string, targets []LeafWatchTarget, watchedAt time.Time) error {
+	if len(targets) == 0 {
+		return nil
+	}
+	_, err := s.recordMarkWatched(ctx, userID, profileID, targets, watchedAt, userstore.WatchHistorySourcePlayback)
+	return err
+}
+
 // RecordManualMarkUnwatched clears the targets' watched state and resume
 // position and keeps their plays in watch history. Nothing goes to watch
 // providers, so their history keeps the plays too.
@@ -390,9 +401,12 @@ func (s *Service) RecordJellycompatMarkUnplayed(ctx context.Context, userID int,
 // a single batch upsert and writes corresponding history entries. Used by
 // jellycompat's series-mark-played path to collapse a per-episode loop into
 // one progress upsert plus per-episode history inserts (audit 2026-05-01 §2.7).
-func (s *Service) RecordJellycompatMarkPlayedBatch(ctx context.Context, userID int, profileID string, targetIDs []string, watchedAt time.Time) error {
+// With recordRewatch, a target already watched that has a resume position
+// records another play and loses the position, as RecordRewatch does for a
+// manual mark; jellycompat sets it for a movie or episode, never a parent.
+func (s *Service) RecordJellycompatMarkPlayedBatch(ctx context.Context, userID int, profileID string, targetIDs []string, watchedAt time.Time, recordRewatch bool) error {
 	watchedAt = clientclock.Clamp(watchedAt, time.Now().UTC())
-	return s.recordMarkWatchedBatch(ctx, userID, profileID, targetIDs, watchedAt, userstore.WatchHistorySourceJellycompat)
+	return s.recordMarkWatchedBatch(ctx, userID, profileID, targetIDs, watchedAt, userstore.WatchHistorySourceJellycompat, recordRewatch)
 }
 
 // RecordJellycompatMarkUnplayedBatch clears the watched state and progress of
@@ -538,6 +552,7 @@ func (s *Service) recordMarkWatchedBatch(
 	targetIDs []string,
 	watchedAt time.Time,
 	source userstore.WatchHistorySource,
+	recordRewatch bool,
 ) error {
 	if len(targetIDs) == 0 {
 		return nil
@@ -555,7 +570,7 @@ func (s *Service) recordMarkWatchedBatch(
 	// still resolve per episode, now in a single bulk lookup. No durations are
 	// available here, and the store leaves a known duration in place when a
 	// target supplies zero.
-	batchTargets, entries := s.markWatchedBatchEntries(ctx, profileID, targetIDs, watchedAt, source)
+	batchTargets, entries := s.markWatchedBatchEntries(ctx, profileID, targetIDs, watchedAt, source, recordRewatch)
 	if _, err := userstore.MarkWatchedBatch(ctx, store, profileID, batchTargets, entries); err != nil {
 		return err
 	}
@@ -654,12 +669,12 @@ func (s *Service) RecordJellycompatProgress(ctx context.Context, userID int, pro
 	return nil
 }
 
-func (s *Service) markWatchedBatchEntries(ctx context.Context, profileID string, targetIDs []string, watchedAt time.Time, source userstore.WatchHistorySource) ([]userstore.MarkWatchedTarget, []userstore.WatchHistoryEntry) {
+func (s *Service) markWatchedBatchEntries(ctx context.Context, profileID string, targetIDs []string, watchedAt time.Time, source userstore.WatchHistorySource, recordRewatch bool) ([]userstore.MarkWatchedTarget, []userstore.WatchHistoryEntry) {
 	identities := s.resolveStableIdentities(ctx, targetIDs)
 	batchTargets := make([]userstore.MarkWatchedTarget, 0, len(targetIDs))
 	entries := make([]userstore.WatchHistoryEntry, 0, len(targetIDs))
 	for _, targetID := range targetIDs {
-		target := userstore.MarkWatchedTarget{MediaItemID: targetID}
+		target := userstore.MarkWatchedTarget{MediaItemID: targetID, RecordRewatch: recordRewatch}
 		if source == userstore.WatchHistorySourceJellycompat {
 			target.EventAt = new(watchedAt)
 		}

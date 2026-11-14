@@ -47,6 +47,12 @@ type Claims struct {
 	// SessionEndsAt, when set, caps the expiry of tokens generated from
 	// these claims at the session's absolute end. Never serialized.
 	SessionEndsAt time.Time `json:"-"`
+	// ProfilePINRevision is, on a plugin access token, the profile's PIN
+	// revision when its profile was verified (userstore.Profile.PINRevision).
+	// Renewing the token requires it to still match, so changing the PIN
+	// ends renewal as it ends the profile's verification tokens. Absent on
+	// tokens without a profile and on tokens from older releases.
+	ProfilePINRevision *int64 `json:"profile_pin_revision,omitempty"`
 	jwt.RegisteredClaims
 }
 
@@ -67,6 +73,12 @@ const (
 	// parameter, so a browser navigation that cannot send headers still
 	// carries the selected profile's limits.
 	TokenTypeDirectDownloadLink = "direct_download_link"
+	// TokenTypeStreamReference marks claims built from a playback plan's
+	// signed stream reference (`st`). It is never issued as an account JWT:
+	// only the native delivery routes accept the reference, for the one
+	// session it names, so a receiver that is handed a URL and cannot send
+	// headers (a Google Cast device) can play that session.
+	TokenTypeStreamReference = "stream_reference"
 )
 
 // DirectDownloadLinkTTL bounds how long a direct-download link may start a
@@ -82,6 +94,14 @@ const DirectDownloadLinkTTL = 5 * time.Minute
 func (c *Claims) IsOwnLoginSession() bool {
 	return c != nil && c.TokenType != TokenTypeAPIKey && c.SessionID != "" && c.ImpersonatorUserID == nil &&
 		!c.IsRemotePlayback()
+}
+
+// SkipsProfilePIN reports whether the credential may act as a PIN-locked
+// profile without its verification token: an API key or a view-as session.
+// Scopes resolved this way are PINVerificationSkipped; see
+// docs/architecture/profile-verification-tokens.md.
+func (c *Claims) SkipsProfilePIN() bool {
+	return c != nil && (c.TokenType == TokenTypeAPIKey || c.ImpersonatorUserID != nil)
 }
 
 // IsRemotePlayback reports whether the claims belong to a remote-playback
@@ -147,16 +167,17 @@ func (j *JWTService) GenerateRefreshToken(userID int, role, sessionID string) (s
 }
 
 func (j *JWTService) GeneratePluginAccessToken(
-	userID int, role, sessionID, profileID string, ttl time.Duration,
+	userID int, role, sessionID, profileID string, profilePINRevision *int64, ttl time.Duration,
 ) (string, error) {
 	if ttl <= 0 {
 		ttl = 5 * time.Minute
 	}
 	return j.generateToken(Claims{
-		UserID:    userID,
-		Role:      role,
-		SessionID: sessionID,
-		ProfileID: profileID,
+		UserID:             userID,
+		Role:               role,
+		SessionID:          sessionID,
+		ProfileID:          profileID,
+		ProfilePINRevision: profilePINRevision,
 	}, TokenTypePluginAccess, ttl)
 }
 

@@ -231,6 +231,9 @@ type Candidate struct {
 	FileHash        string
 	FileSize        int64
 	DurationSeconds float64
+	// MarkersInvalidatedAt is when the database last cleared the file's
+	// derived markers because its identity changed; nil when it never did.
+	MarkersInvalidatedAt *time.Time
 	// CodecVideo and CodecAudio are the probed codecs of the file's first
 	// video and audio streams, empty when it has none.
 	CodecVideo string
@@ -461,4 +464,8 @@ type RunSummary struct {
 	// MovieBudgetExhausted reports that the run stopped starting movies
 	// when the movie budget ran out; the rest wait for the next run.
 	MovieBudgetExhausted bool `json:"movie_budget_exhausted"`
+	// EpisodeBudgetExhausted reports that the episodes stopped early to
+	// leave the movies their share of the run's time limit; the rest wait
+	// for the next run.
+	EpisodeBudgetExhausted bool `json:"episode_budget_exhausted"`
 }

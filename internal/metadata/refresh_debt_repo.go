@@ -363,6 +363,47 @@ func (r *RefreshDebtRepository) DeleteTargetDebt(ctx context.Context, targetType
 	return nil
 }
 
+// RestartTerminalEpisodeDebt records the episode reason on an existing row.
+// It also resets terminal debt to nextRefreshAt with no attempts when the row
+// is not due or leased and was last attempted before attemptedBefore. Otherwise
+// only the reason changes, so a running refresh retains it when settling core
+// metadata. All conditions are evaluated against the current row atomically.
+func (r *RefreshDebtRepository) RestartTerminalEpisodeDebt(
+	ctx context.Context,
+	targetType string,
+	contentID string,
+	attemptedBefore time.Time,
+	nextRefreshAt time.Time,
+) error {
+	if err := r.requireConfigured(); err != nil {
+		return err
+	}
+	targetType = NormalizeRefreshTargetType(targetType)
+	contentID = strings.TrimSpace(contentID)
+	if targetType == "" || contentID == "" {
+		return nil
+	}
+
+	const canRestart = `attempt_count >= $6 AND last_attempt_at < $7
+		AND next_refresh_at > NOW()
+		AND (lease_expires_at IS NULL OR lease_expires_at < NOW())`
+	_, err := r.pool.Exec(ctx, `
+		UPDATE metadata_refresh_debt
+		SET reason_mask = reason_mask | $3,
+			priority = CASE WHEN `+canRestart+` THEN GREATEST(priority, $4) ELSE priority END,
+			attempt_count = CASE WHEN `+canRestart+` THEN 0 ELSE attempt_count END,
+			next_refresh_at = CASE WHEN `+canRestart+` THEN $5 ELSE next_refresh_at END,
+			updated_at = NOW()
+		WHERE target_type = $1 AND content_id = $2
+		  AND ((reason_mask & $3) = 0 OR (`+canRestart+`))
+	`, targetType, contentID, RefreshDebtReasonEpisodeIncomplete, refreshDebtPriority(RefreshDebtReasonEpisodeIncomplete),
+		nextRefreshAt.UTC(), refreshDebtEpisodeTerminalAttempts, attemptedBefore.UTC())
+	if err != nil {
+		return fmt.Errorf("recording terminal episode refresh debt: %w", err)
+	}
+	return nil
+}
+
 // SnapshotEpisodeDebts captures short-lived PostgreSQL row-version tokens before
 // the caller reads episode completeness. xmin changes across transactions; ctid
 // also changes when a row is rewritten within the same transaction. These tokens

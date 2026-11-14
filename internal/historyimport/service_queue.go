@@ -131,6 +131,7 @@ func logRunFailure(ctx context.Context, logger *slog.Logger, claim RunClaim, cau
 		"run_id", claim.RunID,
 		"dispatch_kind", claim.DispatchKind,
 		"error", runFailureCause(cause),
+		"limit", exceededLimit(cause),
 	)
 }
 

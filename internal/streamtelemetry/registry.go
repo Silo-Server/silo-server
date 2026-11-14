@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"sort"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -79,11 +80,17 @@ func NewRegistry(cfg Config, store SnapshotStore, logger *slog.Logger) *Registry
 	if cfg.PublisherEpoch == 0 {
 		cfg.PublisherEpoch = now().UnixNano()
 	}
+	cfg.NodeID = strings.Clone(cfg.NodeID)
+	cfg.PublisherID = strings.Clone(cfg.PublisherID)
 	if store == nil {
 		store = NewLocalStore()
 	}
 	if logger == nil {
 		logger = slog.Default()
+	}
+	if !retainedConfigFits(cfg) {
+		cfg.Enabled = false
+		logger.Warn("stream telemetry disabled: internal retained-record bounds exceeded")
 	}
 	r := &Registry{cfg: cfg, store: store, logger: logger, seed: maphash.MakeSeed(), transfers: make(map[string]*transfer), stop: make(chan struct{}), done: make(chan struct{})}
 	for i := range r.shards {
@@ -125,7 +132,17 @@ func reserve(counter *atomic.Int64, max int64) bool {
 }
 
 func (r *Registry) begin(route MediaRoute, capture CaptureSet) *Observation {
+	capture = normalizeCapture(capture)
 	obs := newObservation(r, route, capture)
+	if !validText(route.Method, maxTagBytes) || !validText(route.Pattern, maxPatternBytes) || !validText(string(route.Role), maxTagBytes) || !validText(string(route.Class), maxTagBytes) {
+		obs.countingOnly = true
+		r.drop("invalid telemetry route metadata")
+		return obs
+	}
+	obs.route.Method = strings.Clone(route.Method)
+	obs.route.Pattern = strings.Clone(route.Pattern)
+	obs.route.Role = Role(strings.Clone(string(route.Role)))
+	obs.route.Class = Class(strings.Clone(string(route.Class)))
 	if reserve(&r.observationReservations, r.cfg.MaxObservations) {
 		obs.reserved = true
 	} else {
@@ -141,6 +158,14 @@ func (r *Registry) attach(obs *Observation, attachment Attachment) {
 	if obs.released || obs.countingOnly {
 		return
 	}
+	if !validAttachment(attachment) {
+		if obs.attachment == nil {
+			obs.countingOnly = true
+		}
+		r.drop("invalid telemetry attachment metadata")
+		return
+	}
+	attachment = cloneAttachment(attachment)
 	observedAt := obs.Capture.ReceivedAt
 	if observedAt.IsZero() {
 		observedAt = now()
@@ -264,7 +289,9 @@ func (r *Registry) attach(obs *Observation, attachment Attachment) {
 	if obs.Capture.UserAgent != "" {
 		s.userAgents.add(obs.Capture.UserAgent)
 	}
-	s.tokenIssuedSources[attachment.TokenIssuedAtSource]++
+	if !incrementBounded(s.tokenIssuedSources, attachment.TokenIssuedAtSource) {
+		r.drop("telemetry token source metadata omitted")
+	}
 	if !attachment.TokenIssuedAt.IsZero() {
 		s.tokenIssuedAts.add(attachment.TokenIssuedAt.UnixNano())
 	}
@@ -297,7 +324,9 @@ func (r *Registry) release(obs *Observation, outcome httpstream.StreamOutcome) {
 		t.bytesFolded += bytes
 		t.openObservations--
 		t.lastObservationEnd = now()
-		t.outcomes[outcome]++
+		if !incrementBounded(t.outcomes, outcome) {
+			r.drop("telemetry outcome metadata omitted")
+		}
 		delete(t.observations, obs.id)
 		t.mu.Unlock()
 	} else if target.session != nil {
@@ -307,7 +336,9 @@ func (r *Registry) release(obs *Observation, outcome httpstream.StreamOutcome) {
 		s.bytesFolded += bytes
 		s.openObservations--
 		s.lastObservationEnd = now()
-		s.outcomes[outcome]++
+		if !incrementBounded(s.outcomes, outcome) {
+			r.drop("telemetry outcome metadata omitted")
+		}
 		if activity := s.routes[routeID(obs.Capture.Method, obs.Capture.Pattern)]; activity != nil {
 			activity.Open--
 			activity.BytesFolded += bytes
@@ -393,6 +424,11 @@ func (r *Registry) SetRealtimeConnection(sessionID string, connected bool) {
 	if r == nil || !r.cfg.Enabled || sessionID == "" {
 		return
 	}
+	if !validText(sessionID, maxIdentityBytes) {
+		r.drop("invalid telemetry realtime session id")
+		return
+	}
+	sessionID = strings.Clone(sessionID)
 	shard := r.shard(sessionID)
 	shard.Lock()
 	if s := shard.sessions[sessionID]; s != nil {

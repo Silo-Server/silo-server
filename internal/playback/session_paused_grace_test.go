@@ -144,3 +144,113 @@ func TestReplacementClearsStopReported(t *testing.T) {
 		t.Fatal("RollbackReplacement kept the stop mark")
 	}
 }
+
+// agePlaybackTestPlan makes the session's current plan, and its last activity,
+// age old: the client received the plan then and has been quiet since.
+func agePlaybackTestPlan(manager *SessionManager, sessionID string, age time.Duration) {
+	manager.mu.Lock()
+	defer manager.mu.Unlock()
+	session := manager.sessions[sessionID]
+	session.PlanCommittedAt = time.Now().Add(-age)
+	session.LastActivityAt = session.PlanCommittedAt
+	session.UpdatedAt = session.PlanCommittedAt
+}
+
+// A client that cannot start a plan sends no progress, because its player has
+// no position yet, and asks for the next fallback only when its startup
+// timeout (60s on the web) runs out. The session must outlive that wait
+// (issue #3202), the wait restarts with each replacement plan, and a startup
+// the client abandoned is still reaped.
+func TestSessionSurvivesClientStartupWindow(t *testing.T) {
+	m := NewSessionManager(0, 0)
+	session := startPlaybackTestSession(t, m, 1, "profile-1", 100, PlayDirect)
+	assertPresent := func(stage string) {
+		t.Helper()
+		if _, err := m.GetSession(session.ID); err != nil {
+			t.Fatalf("%s: session was reaped: %v", stage, err)
+		}
+	}
+	// idleFor ages only the activity, leaving the plan's own timestamp.
+	idleFor := func(age time.Duration) {
+		m.mu.Lock()
+		defer m.mu.Unlock()
+		s := m.sessions[session.ID]
+		s.LastActivityAt = time.Now().Add(-age)
+		s.UpdatedAt = s.LastActivityAt
+	}
+
+	agePlaybackTestPlan(m, session.ID, 61*time.Second)
+	m.CleanStale()
+	assertPresent("first plan past the web startup timeout")
+
+	// The fallback replaces a plan that is already past its own window.
+	agePlaybackTestPlan(m, session.ID, StartupSessionGrace+time.Second)
+	if _, err := m.ApplyReplacement(session.ID, SessionReplacement{EffectiveMediaFileID: 100}); err != nil {
+		t.Fatal(err)
+	}
+	idleFor(61 * time.Second)
+	m.CleanStale()
+	assertPresent("fallback plan past the web startup timeout")
+
+	agePlaybackTestPlan(m, session.ID, StartupSessionGrace+time.Second)
+	m.CleanStale()
+	if _, err := m.GetSession(session.ID); err == nil {
+		t.Fatal("session survived past the startup grace; an abandoned startup must still be reaped")
+	}
+
+	// A replica that lost the session rebuilds it mid-startup; the client is
+	// still waiting out its timeout.
+	m.RegisterReconstructed(&Session{ID: session.ID, UserID: 1, ProfileID: "profile-1", MediaFileID: 100, PlayMethod: PlayDirect})
+	idleFor(61 * time.Second)
+	m.CleanStale()
+	assertPresent("reconstructed plan past the web startup timeout")
+
+	// A replan that is rolled back handed the client no plan, so it must not
+	// restart the window.
+	agePlaybackTestPlan(m, session.ID, StartupSessionGrace+time.Second)
+	rollback, err := m.ApplyReplacement(session.ID, SessionReplacement{EffectiveMediaFileID: 100})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := m.RollbackReplacement(session.ID, rollback); err != nil {
+		t.Fatal(err)
+	}
+	idleFor(61 * time.Second)
+	m.CleanStale()
+	if _, err := m.GetSession(session.ID); err == nil {
+		t.Fatal("a rolled-back replan restarted the startup window")
+	}
+}
+
+// A paused player that has gone quiet (its tab was closed, its app was
+// killed) no longer holds the account's stream slot, while the session itself
+// keeps the paused grace so a client that comes back can still resume (#243),
+// and its transcode slot stays held with its encoder. A paused player that
+// still reports, even only once a minute from a throttled background tab,
+// keeps its slot.
+func TestQuietPausedSessionReleasesStreamSlot(t *testing.T) {
+	m := NewSessionManager(1, 1)
+	paused := startPlaybackTestSession(t, m, 1, "profile-1", 100, PlayTranscode)
+	if err := m.UpdateProgress(paused.ID, 42, true); err != nil {
+		t.Fatalf("UpdateProgress(paused): %v", err)
+	}
+
+	for _, quiet := range []time.Duration{10 * time.Second, 100 * time.Second} {
+		backdatePlaybackTestSession(m, paused.ID, quiet)
+		if _, err := m.StartSession(1, "profile-1", 101, PlayDirect, false); err == nil {
+			t.Fatalf("a second stream started while a paused stream quiet for %s held the only slot", quiet)
+		}
+	}
+
+	backdatePlaybackTestSession(m, paused.ID, 3*time.Minute)
+	m.CleanStale()
+	if _, err := m.GetSession(paused.ID); err != nil {
+		t.Fatalf("quiet paused session was reaped inside the paused grace: %v", err)
+	}
+	if got := m.TranscodeCount(1); got != 1 {
+		t.Fatalf("TranscodeCount = %d, want 1: the quiet paused transcode still holds its encoder", got)
+	}
+	if _, err := m.StartSession(1, "profile-1", 101, PlayDirect, false); err != nil {
+		t.Fatalf("a quiet paused session still held the stream slot: %v", err)
+	}
+}

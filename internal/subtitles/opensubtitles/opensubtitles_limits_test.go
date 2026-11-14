@@ -36,7 +36,7 @@ func serveDownload(t *testing.T, status int, file []byte) *Provider {
 
 func TestDownloadReturnsSubtitle(t *testing.T) {
 	srt := "1\n00:00:01,000 --> 00:00:02,000\nHello\n"
-	data, format, err := serveDownload(t, http.StatusOK, []byte(srt)).Download(netguard.WithPrivateAccess(t.Context()), "7")
+	data, format, err := serveDownload(t, http.StatusOK, []byte(srt)).Download(netguard.WithPrivateAccess(t.Context()), "7", subtitles.DownloadTarget{})
 	if err != nil {
 		t.Fatalf("Download() error = %v", err)
 	}
@@ -48,7 +48,7 @@ func TestDownloadReturnsSubtitle(t *testing.T) {
 func TestDownloadRejectsOversizedFile(t *testing.T) {
 	p := serveDownload(t, http.StatusOK, make([]byte, subtitles.MaxProviderResponseSize+1))
 
-	if _, _, err := p.Download(netguard.WithPrivateAccess(t.Context()), "7"); !errors.Is(err, subtitles.ErrSubtitleTooLarge) {
+	if _, _, err := p.Download(netguard.WithPrivateAccess(t.Context()), "7", subtitles.DownloadTarget{}); !errors.Is(err, subtitles.ErrSubtitleTooLarge) {
 		t.Fatalf("Download() error = %v, want ErrSubtitleTooLarge", err)
 	}
 }
@@ -58,7 +58,7 @@ func TestDownloadRefusesLinkOnTheServersNetwork(t *testing.T) {
 
 	// The dialer refuses the address before connecting, so the file host
 	// never sees the request.
-	if _, _, err := p.Download(t.Context(), "7"); !errors.Is(err, netguard.ErrPrivateDestination) {
+	if _, _, err := p.Download(t.Context(), "7", subtitles.DownloadTarget{}); !errors.Is(err, netguard.ErrPrivateDestination) {
 		t.Fatalf("Download() error = %v, want ErrPrivateDestination", err)
 	}
 }
@@ -67,7 +67,7 @@ func TestDownloadRejectsFileHostError(t *testing.T) {
 	const errorBody = "<html>410 Gone</html>"
 	p := serveDownload(t, http.StatusGone, []byte(errorBody))
 
-	data, format, err := p.Download(netguard.WithPrivateAccess(t.Context()), "7")
+	data, format, err := p.Download(netguard.WithPrivateAccess(t.Context()), "7", subtitles.DownloadTarget{})
 	if err == nil {
 		t.Fatalf("Download() = %q, %q, nil; want an error", data, format)
 	}

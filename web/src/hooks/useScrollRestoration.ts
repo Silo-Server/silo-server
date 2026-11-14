@@ -17,6 +17,15 @@ const RESTORE_TIMEOUT_MS = 10_000;
 /** Input that means the user is moving the page themselves. */
 const USER_SCROLL_EVENTS = ["wheel", "touchstart", "keydown", "pointerdown"] as const;
 
+/**
+ * Location state a link sets to keep the viewer's scroll position across a
+ * move to a new pathname, for sibling pages that share a layout (episode to
+ * episode in the "More episodes" carousel).
+ */
+export interface ScrollPreservingState {
+  preserveScroll?: boolean;
+}
+
 function maxScrollY(): number {
   return document.documentElement.scrollHeight - window.innerHeight;
 }
@@ -25,14 +34,14 @@ function maxScrollY(): number {
  * Opens a new page at the top and returns Back and Forward to where the entry
  * was left. Mount once, above every route.
  *
- * A push or replace to a new pathname scrolls to the top. One that keeps the
- * pathname, such as a filter or page change in the URL, leaves the scroll
- * alone. A history pop restores the entry's saved position: a page with an
- * `ItemGrid` restores its own anchor once its rows exist, and any other page
- * gets the pixel offset once the document is tall enough for it. Either way
- * the restore is re-applied as the loading page changes height until it holds
- * still, and gives up when the user scrolls, taps or types first, or after
- * `RESTORE_TIMEOUT_MS`.
+ * A push or replace to a new pathname scrolls to the top, unless its state
+ * carries `preserveScroll`. One that keeps the pathname, such as a filter or
+ * page change in the URL, leaves the scroll alone. A history pop restores the
+ * entry's saved position: a page with an `ItemGrid` restores its own anchor
+ * once its rows exist, and any other page gets the pixel offset once the
+ * document is tall enough for it. Either way the restore is re-applied as the
+ * loading page changes height until it holds still, and gives up when the
+ * user scrolls, taps or types first, or after `RESTORE_TIMEOUT_MS`.
  */
 export function useScrollRestoration(): void {
   const location = useLocation();
@@ -66,9 +75,14 @@ export function useScrollRestoration(): void {
     const pathnameChanged = previousPathname.current !== location.pathname;
     previousPathname.current = location.pathname;
     const saved = enterHistoryEntry(historyEntryId(location), navigationType === "POP");
+    // A history pop ignores the flag: the offset on screen then belongs to the
+    // page being left.
+    const keepScroll =
+      navigationType !== "POP" &&
+      (location.state as ScrollPreservingState | null)?.preserveScroll === true;
 
     if (!saved) {
-      if (pathnameChanged) window.scrollTo(0, 0);
+      if (pathnameChanged && !keepScroll) window.scrollTo(0, 0);
       // An entry that keeps the previous offset may never scroll; record it now.
       recordScroll(window.scrollY);
       return;

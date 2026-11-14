@@ -45,8 +45,8 @@ func TestFilterUnreferencedImageDirsPostgres(t *testing.T) {
  INSERT INTO media_item_backdrops(content_id,ordinal,path) VALUES
  ('imgdir-kept',1,'imgdirtest/movies/1/extra/b.webp'),
  ('imgdir-gone',1,'imgdirtest/movies/2/extra/b.webp');
- INSERT INTO seasons(content_id,series_id,season_number,poster_path) VALUES
- ('imgdir-series-s1','imgdir-series',1,'imgdirtest/series/3/season1/p.webp');
+ INSERT INTO seasons(content_id,series_id,season_number,poster_path,backdrop_path) VALUES
+ ('imgdir-series-s1','imgdir-series',1,'imgdirtest/series/3/season1/p.webp','imgdirtest/series/3/season1-backdrop/b.webp');
  INSERT INTO episodes(content_id,series_id,season_number,episode_number,still_path) VALUES
  ('imgdir-series-e1','imgdir-series',1,1,'imgdirtest/series/3/e1/still.webp'),
  ('imgdir-gone-series-e1','imgdir-gone-series',1,1,'imgdirtest/series/4/e1/still.webp');
@@ -54,6 +54,18 @@ func TestFilterUnreferencedImageDirsPostgres(t *testing.T) {
  ('imgdir-kept-extra','imgdir-kept','featurette','Making Of','imgdirtest/extras/1/still/a.webp'),
  ('imgdir-gone-extra','imgdir-gone','featurette','Making Of','imgdirtest/extras/2/still/a.webp');`); err != nil {
 		t.Fatal(err)
+	}
+
+	// Deleting a series collects every artwork directory its rows hold,
+	// including the season backdrop's, as candidates for the filter below.
+	collected, err := collectRawImageDirs(ctx, tx, []string{"imgdir-series"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"imgdirtest/series/3/season1/", "imgdirtest/series/3/season1-backdrop/", "imgdirtest/series/3/e1/"} {
+		if !slices.Contains(collected, want) {
+			t.Errorf("collected dirs = %q, want %q among them", collected, want)
+		}
 	}
 
 	candidates := []string{
@@ -65,6 +77,7 @@ func TestFilterUnreferencedImageDirsPostgres(t *testing.T) {
 		"imgdirtest/movies/1/extra/",  // live extra backdrop: kept
 		"imgdirtest/movies/2/extra/",  // extra backdrop of an owner being deleted
 		"imgdirtest/series/3/season1/",
+		"imgdirtest/series/3/season1-backdrop/", // live season backdrop: kept
 		"imgdirtest/series/3/e1/",
 		"imgdirtest/extras/1/still/",  // live local extra still: kept
 		"imgdirtest/extras/2/still/",  // extra still of an owner being deleted

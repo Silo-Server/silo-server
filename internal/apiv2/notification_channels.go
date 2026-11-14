@@ -7,6 +7,7 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/notifications"
+	"github.com/Silo-Server/silo-server/internal/userstore"
 )
 
 // discordManagementDescription states the household-manager rule on every
@@ -14,7 +15,7 @@ import (
 const discordManagementDescription = "Discord delivery is account-wide, so only the account's household manager may change it. X-Profile-Id must name the account's primary profile, with X-Profile-Token when that profile is PIN-protected (without it the request is 403 profile_verification_required); naming any other profile is 403 permission_denied, including on an admin account. A request without X-Profile-Id is accepted only from an admin account's API key, or from an admin account's login session while no profile on the account is PIN-protected or access-restricted; otherwise it is 403 permission_denied."
 
 type NotificationDiscordManagementService interface {
-	MayManageDiscordNotifications(context.Context, int, string, func(string) error) (bool, error)
+	MayManageDiscordNotifications(context.Context, int, string, func(*userstore.Profile) error) (bool, error)
 }
 
 func (reg *Registry) requireDiscordNotificationManagement(ctx context.Context) *Problem {

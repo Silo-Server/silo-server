@@ -88,6 +88,7 @@ type userDTOResponse struct {
 	EnableAutoLogin           bool                      `json:"EnableAutoLogin"`
 	LastLoginDate             string                    `json:"LastLoginDate"`
 	LastActivityDate          string                    `json:"LastActivityDate"`
+	PrimaryImageTag           string                    `json:"PrimaryImageTag,omitempty"`
 	Policy                    userPolicyResponse        `json:"Policy"`
 	Configuration             userConfigurationResponse `json:"Configuration"`
 }
@@ -179,6 +180,8 @@ type AuthHandler struct {
 	loginResolver loginResolver
 	authenticator *Authenticator
 	storeProvider userstore.UserStoreProvider
+	// avatars decides the PrimaryImageTag; nil reports no user avatars.
+	avatars *compatUserAvatars
 }
 
 // NewAuthHandler creates a new auth handler. The config provider is invoked
@@ -340,7 +343,7 @@ func (h *AuthHandler) HandleUserByID(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if chi.URLParam(r, "id") != session.PseudoUserID.String() {
+	if !isPseudoUser(chi.URLParam(r, "id"), session.PseudoUserID) {
 		writeError(w, http.StatusNotFound, "NotFound", "User not found")
 		return
 	}
@@ -375,7 +378,7 @@ func (h *AuthHandler) userDTO(session *Session) userDTOResponse {
 	}
 
 	return userDTOResponse{
-		ID:                        session.PseudoUserID.String(),
+		ID:                        compatUserID(session.PseudoUserID),
 		Name:                      name,
 		ServerID:                  h.cfg().JellyfinCompat.ServerID,
 		HasPassword:               true,
@@ -478,7 +481,7 @@ func (h *AuthHandler) sessionInfo(r *http.Request, session *Session) *sessionInf
 		RemoteEndPoint:        clientip.FromContext(r.Context()),
 		PlayableMediaTypes:    []string{},
 		ID:                    strings.ReplaceAll(sessionID.String(), "-", ""),
-		UserID:                session.PseudoUserID.String(),
+		UserID:                compatUserID(session.PseudoUserID),
 		UserName:              name,
 		Client:                authorizationValue(r, "Client"),
 		LastActivityDate:      now,

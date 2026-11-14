@@ -47,10 +47,14 @@ export function useContinueWatching(
 
   const entries = progressData?.items ?? [];
 
+  // The player's On Deck row draws these details as cards, so it keeps its own
+  // card-width copy under a longer key than the detail page's; invalidating the
+  // item's detail still reaches it.
   const detailQueries = useQueries({
     queries: entries.map((entry) => ({
-      queryKey: catalogKeys.itemDetail(entry.media_item_id),
-      queryFn: ({ signal }) => fetchCatalogItemDetail(entry.media_item_id, undefined, { signal }),
+      queryKey: [...catalogKeys.itemDetail(entry.media_item_id), "on-deck"],
+      queryFn: ({ signal }) =>
+        fetchCatalogItemDetail(entry.media_item_id, undefined, { signal }, "onDeck"),
       enabled: enabled && !!entry.media_item_id,
       staleTime: 2 * 60 * 1000,
     })),

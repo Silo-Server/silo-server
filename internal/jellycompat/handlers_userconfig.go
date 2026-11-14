@@ -39,6 +39,16 @@ func (h *AuthHandler) resolvedUserDTO(ctx context.Context, session *Session) (us
 	if err != nil {
 		return dto, err
 	}
+	// The image route finds the profile through stored sessions, so a session
+	// synthesized for an sa_ API key (no login session, never stored) gets no
+	// tag rather than one whose image would 404.
+	if h.avatars != nil && session.LoginSessionID != "" {
+		profile, err := store.GetProfile(ctx, session.ProfileID)
+		if err != nil {
+			return dto, err
+		}
+		dto.PrimaryImageTag = h.avatars.primaryImageTag(profile)
+	}
 	raw, err := store.GetSetting(ctx, configurationKey(session.ProfileID))
 	if err != nil {
 		return dto, err
@@ -52,7 +62,7 @@ func (h *AuthHandler) resolvedUserDTO(ctx context.Context, session *Session) (us
 	if err != nil {
 		return dto, err
 	}
-	values, err := settingsresolve.New(contract).Resolve(ctx, store, settingsresolve.Context{ProfileID: session.ProfileID}, []string{settingskeys.PlaybackAudioLanguage, settingskeys.PlaybackSubtitleLanguage, settingskeys.PlaybackSubtitleMode, settingskeys.PlaybackShowForcedSubtitles, settingskeys.PlaybackAutoPlayNext}, nil)
+	values, err := settingsresolve.New(contract).Resolve(ctx, store, settingsresolve.Context{ProfileID: session.ProfileID}, []string{settingskeys.PlaybackAudioLanguage, settingskeys.PlaybackSubtitleLanguage, settingskeys.PlaybackSubtitleMode, settingskeys.PlaybackShowForcedSubtitles, settingskeys.PlaybackAutoPlayNext, settingskeys.HomeHideWatchedItems}, nil)
 	if err != nil {
 		return dto, err
 	}
@@ -74,6 +84,8 @@ func (h *AuthHandler) resolvedUserDTO(ctx context.Context, session *Session) (us
 			dto.Configuration.SubtitleLanguagePreference = compatLanguagePreference(dto.Configuration.SubtitleLanguagePreference)
 		case settingskeys.PlaybackAutoPlayNext:
 			_ = json.Unmarshal(value.Value, &dto.Configuration.EnableNextEpisodeAutoPlay)
+		case settingskeys.HomeHideWatchedItems:
+			_ = json.Unmarshal(value.Value, &dto.Configuration.HidePlayedInLatest)
 		case settingskeys.PlaybackSubtitleMode:
 			_ = json.Unmarshal(value.Value, &nativeSubtitleMode)
 			subtitleModeSet = value.Source != settingscontract.ScopeDefault
@@ -156,6 +168,7 @@ func (h *AuthHandler) HandleUpdateConfiguration(w http.ResponseWriter, r *http.R
 	// "auto" with forced subtitles hidden reads as Smart, which writes back as
 	// auto with forced subtitles shown.
 	currentSubtitleMode := dto.Configuration.SubtitleMode
+	currentHidePlayed := dto.Configuration.HidePlayedInLatest
 	currentLanguages := map[string]string{
 		"audiolanguagepreference":    dto.Configuration.AudioLanguagePreference,
 		"subtitlelanguagepreference": dto.Configuration.SubtitleLanguagePreference,
@@ -166,7 +179,7 @@ func (h *AuthHandler) HandleUpdateConfiguration(w http.ResponseWriter, r *http.R
 		return
 	}
 	values := map[string]json.RawMessage{}
-	for field, key := range map[string]string{"audiolanguagepreference": settingskeys.PlaybackAudioLanguage, "subtitlelanguagepreference": settingskeys.PlaybackSubtitleLanguage, "enablenextepisodeautoplay": settingskeys.PlaybackAutoPlayNext, "subtitlemode": settingskeys.PlaybackSubtitleMode} {
+	for field, key := range map[string]string{"audiolanguagepreference": settingskeys.PlaybackAudioLanguage, "subtitlelanguagepreference": settingskeys.PlaybackSubtitleLanguage, "enablenextepisodeautoplay": settingskeys.PlaybackAutoPlayNext, "subtitlemode": settingskeys.PlaybackSubtitleMode, "hideplayedinlatest": settingskeys.HomeHideWatchedItems} {
 		value, ok := patch[field]
 		if !ok {
 			continue
@@ -184,6 +197,13 @@ func (h *AuthHandler) HandleUpdateConfiguration(w http.ResponseWriter, r *http.R
 			}
 			value, _ = json.Marshal(mode)
 			values[settingskeys.PlaybackShowForcedSubtitles], _ = json.Marshal(showForced)
+		} else if field == "hideplayedinlatest" {
+			// Silo's Home reads the same setting. An unchanged echo from another
+			// settings page must not pin the default as a profile value.
+			if dto.Configuration.HidePlayedInLatest == currentHidePlayed {
+				continue
+			}
+			value, _ = json.Marshal(dto.Configuration.HidePlayedInLatest)
 		} else if field != "enablenextepisodeautoplay" {
 			var tag string
 			if err := json.Unmarshal(value, &tag); err != nil {

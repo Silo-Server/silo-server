@@ -2,8 +2,9 @@ import type { UseQueryResult } from "@tanstack/react-query";
 
 import type { AdminTimeseries } from "@/api/types";
 import { ChartEmptyState, ChartSkeleton, LineChart } from "../charts";
-import type { LineChartOverlay, LineChartPoint } from "../charts";
+import type { LineChartOverlay, LineChartPoint, LineChartStack } from "../charts";
 import { SectionError } from "../feedback";
+import { useT } from "@/i18n";
 
 export interface TimeseriesChartBodyProps {
   query: UseQueryResult<AdminTimeseries>;
@@ -20,6 +21,8 @@ export interface TimeseriesChartBodyProps {
   minTickStep?: number;
   /** Secondary series drawn over the primary one; see LineChart. */
   overlays?: readonly LineChartOverlay[];
+  /** Bands drawn stacked instead of the primary line; see LineChart. */
+  stacks?: readonly LineChartStack[];
   height?: number;
   /**
    * Fill the card's content area instead of a fixed `height`. Widget rows are
@@ -41,16 +44,18 @@ export function TimeseriesChartBody({
   seriesLabel,
   ariaLabel,
   errorMessage,
-  emptyMessage = "No samples yet",
+  emptyMessage,
   formatValue,
   formatTick,
   formatTimestamp,
   edgeLabels,
   minTickStep,
   overlays,
+  stacks,
   height = 160,
   fill = false,
 }: TimeseriesChartBodyProps) {
+  const t = useT();
   if (query.isLoading) {
     return <ChartSkeleton height={height} fill={fill} />;
   }
@@ -64,9 +69,9 @@ export function TimeseriesChartBody({
       <ChartEmptyState
         height={height}
         fill={fill}
-        message={emptyMessage}
+        message={emptyMessage ?? t("web.admin.dashboard.widgets.timeseriesChart.empty")}
         since={query.data?.oldest_sample_at ?? null}
-        detail="The metrics sampler collects one sample a minute while the server runs."
+        detail={t("web.admin.dashboard.widgets.timeseriesChart.emptyDetail")}
       />
     );
   }
@@ -84,6 +89,7 @@ export function TimeseriesChartBody({
       edgeLabels={edgeLabels}
       minTickStep={minTickStep}
       overlays={overlays}
+      stacks={stacks}
     />
   );
 }

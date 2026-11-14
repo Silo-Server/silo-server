@@ -22,6 +22,10 @@ type Reader struct {
 	repo  *Repository
 	store SheetStore
 	urls  artworkurl.Resolver
+	// direct resolves URLs on an external read endpoint, used for revisions
+	// confirmed fetchable under deliveryScope.
+	direct        artworkurl.Resolver
+	deliveryScope string
 }
 
 // SheetStore is the assets store sheets are read from.
@@ -37,6 +41,17 @@ func NewReader(pool *pgxpool.Pool, store SheetStore, urls artworkurl.Resolver) *
 		return nil
 	}
 	return &Reader{repo: NewRepository(pool), store: store, urls: urls}
+}
+
+// SetExternalDelivery signs sheets of a revision confirmed fetchable through
+// the external read endpoint named by scope with direct, so clients read
+// them from the endpoint instead of through the server. Other revisions keep
+// the reader's own URLs. See Service.SetExternalDelivery.
+func (r *Reader) SetExternalDelivery(scope string, direct artworkurl.Resolver) {
+	if scope == "" || direct == nil {
+		return
+	}
+	r.direct, r.deliveryScope = direct, scope
 }
 
 // TrickplayGrids returns the layout of the servable sheets of fileIDs; a
@@ -79,7 +94,11 @@ func (r *Reader) SignedManifest(ctx context.Context, fileID int) (SignedManifest
 	for i := range keys {
 		keys[i] = manifest.SheetKey(i)
 	}
-	resolved := r.urls.ResolveURLs(ctx, keys)
+	urls := r.urls
+	if r.direct != nil && manifest.DeliveryScope == r.deliveryScope {
+		urls = r.direct
+	}
+	resolved := urls.ResolveURLs(ctx, keys)
 	signed := SignedManifest{Manifest: manifest, SheetURLs: make([]string, len(keys))}
 	var latestExpiry time.Time
 	for i, key := range keys {

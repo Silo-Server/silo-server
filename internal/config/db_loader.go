@@ -398,6 +398,11 @@ func LoadFromDB(m map[string]string) (*Config, error) {
 		return nil, err
 	}
 	cfg.Playback.SubtitleSyncNodeCapacity = subtitleSyncNodeCapacity
+	trickplayNodeCapacity, err := intOr(m, "playback.trickplay_node_capacity", 1)
+	if err != nil {
+		return nil, err
+	}
+	cfg.Playback.TrickplayNodeCapacity = trickplayNodeCapacity
 	transcodeEnabled, err := boolOr(m, "playback.transcode_enabled", true)
 	if err != nil {
 		return nil, err
@@ -517,9 +522,10 @@ func LoadFromDB(m map[string]string) (*Config, error) {
 	// validation refuses to store one.
 	cfg.AI.AuthMode = stringOr(m, "ai.auth_mode", "api_key")
 	cfg.AI.ReasoningEffort = stringOr(m, "ai.reasoning_effort", "")
+	cfg.AI.ServiceTier = ResolveAIServiceTier(m)
 	cfg.AI.TextProviderID = strings.TrimSpace(m[AITextProviderSettingKey])
 	cfg.AI.BaseURL, cfg.AI.APIKey, _ = aiProviders.Resolve(cfg.AI.TextProviderID, AICapabilityChat)
-	cfg.AI.ChatModel = stringOr(m, "ai.chat_model", stringOr(m, "subtitle_ai.chat_model", "gpt-4o-mini"))
+	cfg.AI.ChatModel = stringOr(m, "ai.chat_model", stringOr(m, "subtitle_ai.chat_model", "gpt-6-luna"))
 	cfg.AI.SpeechProviderID = strings.TrimSpace(m[AISpeechProviderSettingKey])
 	cfg.AI.ASRBaseURL, cfg.AI.ASRAPIKey, _ = aiProviders.Resolve(cfg.AI.SpeechProviderID, AICapabilitySpeech)
 	cfg.AI.ASRModel = stringOr(m, "ai.asr_model", "whisper-1")

@@ -62,7 +62,8 @@ type AdminDiscoverFilter struct {
 
 // AdminDiscoverList is a public list by URL.
 type AdminDiscoverList struct {
-	URL string `json:"url" maxLength:"2048" format:"uri-reference" doc:"A themoviedb.org list page (or its number) for tmdb_list; an mdblist.com list page for mdblist. Stored canonical" example:"https://mdblist.com/lists/garycrawfordgc/top-watched-movies-of-the-week"`
+	URL   string `json:"url" maxLength:"2048" format:"uri-reference" doc:"A themoviedb.org list page (or its number) for tmdb_list; an mdblist.com list page for mdblist. Stored canonical" example:"https://mdblist.com/lists/garycrawfordgc/top-watched-movies-of-the-week"`
+	Order string `json:"order,omitempty" enum:"list,newest_added,newest_released" doc:"mdblist only: list keeps the list's rank order (the default, stored as absent), newest_added puts the latest additions to the list first, newest_released the newest release dates first. A tmdb_list row keeps the list's order"`
 }
 
 // AdminDiscoverRowBody is one row of the Discover layout as an admin edits
@@ -91,6 +92,7 @@ type AdminDiscoverSource struct {
 // AdminDiscoverRow is one row of the stored layout.
 type AdminDiscoverRow struct {
 	AdminDiscoverRowBody
+	SectionTitleKey
 	Source *AdminDiscoverSource `json:"source,omitempty" doc:"List rows only: their stored copy, which the server refreshes about every 12 hours"`
 }
 
@@ -180,7 +182,7 @@ func discoverLayoutTag(ctx context.Context, l *mediarequests.DiscoverLayoutAdmin
 func adminDiscoverLayoutOutput(ctx context.Context, l *mediarequests.DiscoverLayoutAdmin) *AdminDiscoverLayoutOutput {
 	out := AdminDiscoverLayout{Customized: l.Customized, Rows: make([]AdminDiscoverRow, 0, len(l.Rows)), UpdatedAt: adminSyncInstant(l.UpdatedAt), MaxRows: discoverrows.MaxRows}
 	for _, row := range l.Rows {
-		wire := AdminDiscoverRow{AdminDiscoverRowBody: adminDiscoverRowOf(row)}
+		wire := AdminDiscoverRow{AdminDiscoverRowBody: adminDiscoverRowOf(row), SectionTitleKey: sectionTitleKeyOf(discoverrows.TitleKey(row.ID, row.Title), nil)}
 		if status, ok := l.Sources[row.ID]; ok {
 			wire.Source = &AdminDiscoverSource{State: status.State, Entries: status.Entries, RefreshedAt: adminSyncInstant(status.RefreshedAt), Error: status.Error}
 		}

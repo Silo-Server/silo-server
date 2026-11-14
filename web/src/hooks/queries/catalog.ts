@@ -6,6 +6,7 @@ import { catalogFiltersFromV2, catalogItemFromV2 } from "@/api/v2/catalog";
 import { v2, type V2Body, type V2Query, type V2Result } from "@/api/v2/request";
 import type { CatalogParams } from "@/hooks/queries/keys";
 import { catalogKeys } from "@/hooks/queries/keys";
+import { artworkQuery, type ArtworkWidthQuery } from "@/lib/artworkWidths";
 import { createEmptyQueryDefinition, type CatalogSource } from "@/api/types";
 import {
   buildCatalogApiSearchParams,
@@ -73,13 +74,18 @@ function catalogScopeQuery(state: CatalogSearchState): CatalogScopeQuery {
 export interface CatalogPage extends CatalogResponse {
   next_cursor?: string;
   search_diagnostics?: V2Result<"POST /api/v2/catalog/query">["search_diagnostics"];
+  /**
+   * The artwork widths this page was read with. The server binds them into
+   * the page's cursors, so a page continuing from them must send them again.
+   */
+  artwork: ArtworkWidthQuery;
 }
 
 export async function fetchCatalogPage(
   state: CatalogSearchState,
   limit: number,
   offset: number,
-  options?: RequestInit,
+  options?: Pick<RequestInit, "signal"> & { artwork?: ArtworkWidthQuery },
   includeTotal = true,
   snapshot?: string,
   nextCursor?: string,
@@ -102,11 +108,14 @@ export async function fetchCatalogPage(
     cursor: nextCursor || snapshot,
     seek: nextCursor ? undefined : offset > 0 || snapshot !== undefined ? offset : undefined,
   };
+  const artwork = options?.artwork ?? artworkQuery("grid");
   const result = await v2("POST /api/v2/catalog/query", {
     body,
+    query: artwork,
     signal: options?.signal ?? undefined,
   });
   return {
+    artwork,
     items: result.items.map(catalogItemFromV2),
     total: result.total,
     total_exact: result.total_exact,
@@ -133,8 +142,9 @@ export const MAX_CATALOG_PAGE = 100;
 /**
  * The items `state` lists, up to `max` (every one when `max` is omitted), read
  * a page of at most `MAX_CATALOG_PAGE` at a time through the response cursor.
- * Every page asks for the same `limit`: a cursor is bound to the one it was
- * issued for, and a page may come back short with more to follow.
+ * Every page asks for the same `limit` and artwork widths: a cursor is bound
+ * to the ones it was issued for, and a page may come back short with more to
+ * follow.
  */
 export async function fetchCatalogItems(
   state: CatalogSearchState,
@@ -142,10 +152,19 @@ export async function fetchCatalogItems(
 ): Promise<CatalogPage["items"]> {
   const { max = Number.POSITIVE_INFINITY, signal } = options;
   const limit = Math.min(MAX_CATALOG_PAGE, max);
+  const artwork = artworkQuery("grid");
   const items: CatalogPage["items"] = [];
   let cursor: string | undefined;
   do {
-    const page = await fetchCatalogPage(state, limit, 0, { signal }, false, undefined, cursor);
+    const page = await fetchCatalogPage(
+      state,
+      limit,
+      0,
+      { signal, artwork },
+      false,
+      undefined,
+      cursor,
+    );
     items.push(...page.items);
     cursor = page.has_more ? page.next_cursor : undefined;
   } while (cursor && items.length < max);
@@ -249,6 +268,10 @@ export function useCatalogWindow(
   });
 
   const snapshot = page0Result.data?.snapshot;
+  // Page 0's snapshot cursor is bound to the widths page 0 was read with, so
+  // every later page sends those, not widths recomputed after a resize or a
+  // late images capability.
+  const artwork = page0Result.data?.artwork;
   const canFetchRemainingPages =
     enabled && page0Result.data !== undefined && !page0Result.isPlaceholderData;
 
@@ -338,7 +361,7 @@ export function useCatalogWindow(
       state,
       limit,
       pageIndex * limit,
-      { signal },
+      { signal, artwork },
       false,
       snapshot,
       nextCursor,

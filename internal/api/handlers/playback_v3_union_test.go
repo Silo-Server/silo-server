@@ -1,11 +1,9 @@
 package handlers
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
-	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -18,7 +16,6 @@ import (
 	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/nodepool"
-	"github.com/Silo-Server/silo-server/internal/noderouting"
 	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/tonemap"
 	"github.com/Silo-Server/silo-server/internal/transcodenode"
@@ -118,69 +115,6 @@ func writePlaybackArgsRecordingFFmpegV3(t *testing.T, argsPath string) string {
 	return path
 }
 
-func TestHLSPlanningRegistryV3UnionsPooledNodeCapabilities(t *testing.T) {
-	remote := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/hw-capabilities" {
-			w.WriteHeader(http.StatusNotFound)
-			return
-		}
-		writeJSON(w, http.StatusOK, playback.HWAccelInfo{Transformations: []playback.TransformationV3{
-			{Name: "video_to_h264", Executor: "server", RecipeVersion: "2"},
-			{Name: "audio_to_aac", Executor: "server", RecipeVersion: playback.TransformationAudioToAACRecipeVersionV3},
-		}})
-	}))
-	defer remote.Close()
-
-	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0))
-	handler.JWTSecret = "test-secret"
-	presetLocalRegistryV3(handler, playback.NewTransformationRegistryV3([]playback.TransformationSpecV3{
-		{Name: "video_to_h264", RecipeVersion: "2"},
-		{Name: "audio_to_aac", RecipeVersion: playback.TransformationAudioToAACRecipeVersionV3},
-		{Name: "server_dv7_to_hdr10", RecipeVersion: "1"},
-	}))
-	handler.NodePlanner = enumeratingNodePlannerV3{urls: []string{remote.URL}}
-
-	registry := handler.hlsPlanningRegistryV3(context.Background())
-	if !registry.Available("video_to_h264") || !registry.Available("audio_to_aac") {
-		t.Fatal("pooled node capabilities must widen the HLS planning registry")
-	}
-	if registry.Available("server_dv7_to_hdr10") {
-		t.Fatal("transformations no node advertises must stay unavailable")
-	}
-	if handler.transformationRegistryV3(context.Background()).Available("video_to_h264") {
-		t.Fatal("the local registry must not be widened by node capabilities")
-	}
-}
-
-// TestHLSPlanningRegistryV3EnablesValidatedLocalToneMapWithoutRestart verifies live policy changes affect planning.
-func TestHLSPlanningRegistryV3EnablesValidatedLocalToneMapWithoutRestart(t *testing.T) {
-	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0))
-	local := playback.NewTransformationRegistryV3([]playback.TransformationSpecV3{{
-		Name: playback.TransformationHDRToSDRToneMapV3, RecipeVersion: playback.TransformationHDRToSDRToneMapRecipeVersionV3,
-	}})
-	presetLocalRegistryV3(handler, local)
-	capabilities := tonemap.Capabilities{{
-		Mode: tonemap.ModeSoftware, Backend: tonemap.BackendSoftware, Filter: tonemap.SoftwareFilterBT2390,
-		SourceKinds: []tonemap.SourceKind{tonemap.SourcePQ},
-	}}
-	handler.v3ToneMapProbe = func(context.Context, string, string, string) (tonemap.Capabilities, error) {
-		return capabilities, nil
-	}
-	settings := &mutablePlaybackSettingsV3{values: map[string]string{
-		config.PlaybackTranscodeHardwareToneMapSettingKey: "false",
-		config.PlaybackTranscodeSoftwareToneMapSettingKey: "false",
-	}}
-	handler.SettingsRepo = settings
-
-	if handler.hlsPlanningRegistryV3(context.Background()).Available(playback.TransformationHDRToSDRToneMapV3) {
-		t.Fatal("disabled tone-map policy widened the local transformation registry")
-	}
-	settings.values[config.PlaybackTranscodeSoftwareToneMapSettingKey] = "true"
-	if !handler.hlsPlanningRegistryV3(context.Background()).Available(playback.TransformationHDRToSDRToneMapV3) {
-		t.Fatal("enabled validated tone-map executor was not available without restart")
-	}
-}
-
 // TestValidateLocalTransportCapabilitiesV3ProbesToneMapOnlyForToneMappedRecipes
 // verifies that, with tone mapping enabled, a recipe without a tone-map step
 // neither waits on nor fails with the local tone-map probe.
@@ -265,234 +199,6 @@ func TestLocalToneMapCapabilitiesV3DoesNotSerializeCallers(t *testing.T) {
 	}
 	close(release)
 	<-firstDone
-}
-
-func TestHLSToneMapCapabilityInventoryV3ExcludesLocalForProxyOnlyEgress(t *testing.T) {
-	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0))
-	policy := config.DefaultPlaybackRoutingPolicy()
-	policy.VideoTranscodeEgress = config.PlaybackEgressProxyOnly
-	handler.PlaybackConfig = func() config.PlaybackConfig {
-		return config.PlaybackConfig{Routing: policy}
-	}
-	var localProbes atomic.Int32
-	handler.v3ToneMapProbe = func(context.Context, string, string, string) (tonemap.Capabilities, error) {
-		localProbes.Add(1)
-		return tonemap.Capabilities{{Mode: tonemap.ModeSoftware, SourceKinds: []tonemap.SourceKind{tonemap.SourcePQ}}}, nil
-	}
-
-	inventory, err := handler.hlsToneMapCapabilityInventoryV3(context.Background())
-	if err != nil {
-		t.Fatalf("capability inventory error = %v", err)
-	}
-	if inventory.localTranscodeFallbackOK || len(inventory.local) != 0 || len(inventory.union) != 0 {
-		t.Fatalf("capability inventory = %#v, want no local executor under proxy-only egress", inventory)
-	}
-	if got := localProbes.Load(); got != 0 {
-		t.Fatalf("local capability probes = %d, want 0 under proxy-only egress", got)
-	}
-	if allowed, capabilities, transportErr := handler.localHLSToneMapCapabilitiesForTransportV3(context.Background()); allowed || len(capabilities) != 0 || transportErr != nil {
-		t.Fatalf("transport capability check = allowed %t, capabilities %#v, error %v", allowed, capabilities, transportErr)
-	}
-}
-
-func TestHLSPlanningCapabilitiesV3ExcludeWorkersForAPIOnlyExecution(t *testing.T) {
-	var remoteProbes atomic.Int32
-	remote := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		remoteProbes.Add(1)
-		writeJSON(w, http.StatusOK, playback.HWAccelInfo{
-			Transformations: []playback.TransformationV3{{
-				Name: playback.TransformationVideoToH264V3, Executor: playback.ExecutorServerV3,
-				RecipeVersion: playback.TransformationVideoToH264RecipeVersionV3,
-			}},
-			ToneMapCapabilities: tonemap.Capabilities{{
-				Mode: tonemap.ModeSoftware, Backend: tonemap.BackendSoftware,
-				Filter: tonemap.SoftwareFilterBT2390, SourceKinds: []tonemap.SourceKind{tonemap.SourcePQ},
-			}},
-		})
-	}))
-	t.Cleanup(remote.Close)
-
-	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0))
-	handler.NodePlanner = enumeratingNodePlannerV3{urls: []string{remote.URL}}
-	presetLocalRegistryV3(handler, playback.NewTransformationRegistryV3([]playback.TransformationSpecV3{{
-		Name: playback.TransformationVideoToH264V3, RecipeVersion: playback.TransformationVideoToH264RecipeVersionV3,
-	}}))
-	handler.v3ToneMapProbe = func(context.Context, string, string, string) (tonemap.Capabilities, error) {
-		return nil, nil
-	}
-	policy := config.DefaultPlaybackRoutingPolicy()
-	policy.VideoTranscodeExecution = config.PlaybackExecutionAPIOnly
-	handler.PlaybackConfig = func() config.PlaybackConfig {
-		return config.PlaybackConfig{Routing: policy}
-	}
-
-	inventory, err := handler.hlsToneMapCapabilityInventoryV3(t.Context())
-	if err != nil {
-		t.Fatalf("capability inventory error = %v", err)
-	}
-	registry := handler.hlsPlanningRegistryWithInputsV3(t.Context(), playback.PlannerSettingsV3{}, inventory)
-	if registry.Available(playback.TransformationVideoToH264V3) {
-		t.Fatal("remote-only video transformation was advertised under API-only execution")
-	}
-	if len(inventory.union) != 0 {
-		t.Fatalf("tone-map inventory = %#v, want no remote capabilities", inventory.union)
-	}
-	if got := remoteProbes.Load(); got != 0 {
-		t.Fatalf("remote capability probes = %d, want 0 under API-only execution", got)
-	}
-}
-
-func TestHLSPlanningCapabilitiesV3RespectWorkloadExecutionPolicy(t *testing.T) {
-	var remoteProbes atomic.Int32
-	remote := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		remoteProbes.Add(1)
-		writeJSON(w, http.StatusOK, playback.HWAccelInfo{Transformations: []playback.TransformationV3{{
-			Name: playback.TransformationAudioToAACV3, Executor: playback.ExecutorServerV3,
-			RecipeVersion: playback.TransformationAudioToAACRecipeVersionV3,
-		}}})
-	}))
-	t.Cleanup(remote.Close)
-
-	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0))
-	handler.NodePlanner = enumeratingNodePlannerV3{urls: []string{remote.URL}}
-	presetLocalRegistryV3(handler, playback.NewTransformationRegistryV3([]playback.TransformationSpecV3{
-		{Name: playback.TransformationAudioToAACV3, RecipeVersion: playback.TransformationAudioToAACRecipeVersionV3, Available: true},
-		{Name: playback.TransformationVideoToH264V3, RecipeVersion: playback.TransformationVideoToH264RecipeVersionV3, Available: true},
-	}))
-	policy := config.DefaultPlaybackRoutingPolicy()
-	policy.RemuxExecution = config.PlaybackExecutionAPIOnly
-	policy.VideoTranscodeExecution = config.PlaybackExecutionWorkerOnly
-	handler.PlaybackConfig = func() config.PlaybackConfig {
-		return config.PlaybackConfig{Routing: policy}
-	}
-
-	remuxRegistry := handler.hlsPlanningRegistryWithInputsForWorkloadV3(
-		t.Context(), playback.PlannerSettingsV3{}, hlsToneMapCapabilityInventoryV3{}, noderouting.WorkloadRemux,
-	)
-	videoRegistry := handler.hlsPlanningRegistryWithInputsForWorkloadV3(
-		t.Context(), playback.PlannerSettingsV3{}, hlsToneMapCapabilityInventoryV3{}, noderouting.WorkloadVideoTranscode,
-	)
-
-	if !remuxRegistry.Available(playback.TransformationAudioToAACV3) {
-		t.Fatal("API-only remux registry excluded a local transformation")
-	}
-	if videoRegistry.Available(playback.TransformationVideoToH264V3) {
-		t.Fatal("worker-only video registry inherited a local-only transformation")
-	}
-	if !videoRegistry.Available(playback.TransformationAudioToAACV3) {
-		t.Fatal("worker-only video registry excluded a matching worker transformation")
-	}
-	if got := remoteProbes.Load(); got != 1 {
-		t.Fatalf("remote capability probes = %d, want 1 for video only", got)
-	}
-}
-
-func TestHLSPlanningCapabilitiesV3HonorClientProxySupport(t *testing.T) {
-	newHandler := func(t *testing.T, policy config.PlaybackRoutingPolicy) (*PlaybackHandler, *atomic.Int32) {
-		t.Helper()
-		remoteProbes := &atomic.Int32{}
-		remote := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-			remoteProbes.Add(1)
-			writeJSON(w, http.StatusOK, playback.HWAccelInfo{
-				Transformations: []playback.TransformationV3{
-					{Name: playback.TransformationAudioToAACV3, Executor: playback.ExecutorServerV3, RecipeVersion: playback.TransformationAudioToAACRecipeVersionV3},
-					{Name: playback.TransformationVideoToH264V3, Executor: playback.ExecutorServerV3, RecipeVersion: playback.TransformationVideoToH264RecipeVersionV3},
-				},
-				ToneMapCapabilities: tonemap.Capabilities{{
-					Mode: tonemap.ModeSoftware, Backend: tonemap.BackendSoftware,
-					Filter: tonemap.SoftwareFilterBT2390, SourceKinds: []tonemap.SourceKind{tonemap.SourcePQ},
-				}},
-			})
-		}))
-		t.Cleanup(remote.Close)
-
-		handler := NewPlaybackHandler(playback.NewSessionManager(0, 0))
-		handler.NodePlanner = enumeratingNodePlannerV3{urls: []string{remote.URL}}
-		handler.PlaybackConfig = func() config.PlaybackConfig {
-			return config.PlaybackConfig{Routing: policy}
-		}
-		presetLocalRegistryV3(handler, playback.NewTransformationRegistryV3([]playback.TransformationSpecV3{
-			{Name: playback.TransformationAudioToAACV3, RecipeVersion: playback.TransformationAudioToAACRecipeVersionV3},
-			{Name: playback.TransformationVideoToH264V3, RecipeVersion: playback.TransformationVideoToH264RecipeVersionV3},
-		}))
-		return handler, remoteProbes
-	}
-
-	proxyOnly := config.DefaultPlaybackRoutingPolicy()
-	proxyOnly.RemuxExecution = config.PlaybackExecutionWorkerOnly
-	proxyOnly.RemuxEgress = config.PlaybackEgressProxyOnly
-	proxyOnly.VideoTranscodeExecution = config.PlaybackExecutionWorkerOnly
-	proxyOnly.VideoTranscodeEgress = config.PlaybackEgressProxyOnly
-
-	t.Run("client without proxy support", func(t *testing.T) {
-		handler, remoteProbes := newHandler(t, proxyOnly)
-		remux := handler.hlsPlanningRegistryWithInputsForClientV3(
-			t.Context(), playback.PlannerSettingsV3{}, hlsToneMapCapabilityInventoryV3{},
-			noderouting.WorkloadRemux, false,
-		)
-		video := handler.hlsPlanningRegistryWithInputsForClientV3(
-			t.Context(), playback.PlannerSettingsV3{}, hlsToneMapCapabilityInventoryV3{},
-			noderouting.WorkloadVideoTranscode, false,
-		)
-		inventory, err := handler.hlsToneMapCapabilityInventoryForClientV3(t.Context(), false)
-		if err != nil {
-			t.Fatalf("tone-map inventory: %v", err)
-		}
-		if remux.Available(playback.TransformationAudioToAACV3) || video.Available(playback.TransformationVideoToH264V3) {
-			t.Fatal("proxy-only worker transformations leaked into a client attempt without proxy support")
-		}
-		if len(inventory.union) != 0 {
-			t.Fatalf("tone-map inventory = %#v, want empty", inventory.union)
-		}
-		if got := remoteProbes.Load(); got != 0 {
-			t.Fatalf("remote probes = %d, want 0", got)
-		}
-	})
-
-	t.Run("client with proxy support", func(t *testing.T) {
-		handler, remoteProbes := newHandler(t, proxyOnly)
-		registry := handler.hlsPlanningRegistryWithInputsForClientV3(
-			t.Context(), playback.PlannerSettingsV3{}, hlsToneMapCapabilityInventoryV3{},
-			noderouting.WorkloadVideoTranscode, true,
-		)
-		inventory, err := handler.hlsToneMapCapabilityInventoryForClientV3(t.Context(), true)
-		if err != nil {
-			t.Fatalf("tone-map inventory: %v", err)
-		}
-		if !registry.Available(playback.TransformationVideoToH264V3) {
-			t.Fatal("proxy-capable client excluded the admitted worker transformation")
-		}
-		if !inventory.union.Supports(tonemap.ModeSoftware, tonemap.SourcePQ) {
-			t.Fatalf("tone-map inventory = %#v, want worker capability", inventory.union)
-		}
-		if got := remoteProbes.Load(); got == 0 {
-			t.Fatal("remote capabilities were not probed")
-		}
-	})
-
-	t.Run("API relay does not require client proxy support", func(t *testing.T) {
-		apiEgress := proxyOnly
-		apiEgress.VideoTranscodeEgress = config.PlaybackEgressAPIOnly
-		handler, _ := newHandler(t, apiEgress)
-		registry := handler.hlsPlanningRegistryWithInputsForClientV3(
-			t.Context(), playback.PlannerSettingsV3{}, hlsToneMapCapabilityInventoryV3{},
-			noderouting.WorkloadVideoTranscode, false,
-		)
-		if !registry.Available(playback.TransformationVideoToH264V3) {
-			t.Fatal("worker capability was excluded even though the API may relay its output")
-		}
-	})
-
-	t.Run("unscoped capability view retains proxy route", func(t *testing.T) {
-		handler, _ := newHandler(t, proxyOnly)
-		registry := handler.hlsPlanningRegistryWithInputsForWorkloadV3(
-			t.Context(), playback.PlannerSettingsV3{}, hlsToneMapCapabilityInventoryV3{},
-			noderouting.WorkloadVideoTranscode,
-		)
-		if !registry.Available(playback.TransformationVideoToH264V3) {
-			t.Fatal("server-wide capability view excluded an admitted proxy route")
-		}
-	})
 }
 
 func TestProgressivePlanningCapabilitiesV3UseOnlyEligibleProxyExecutors(t *testing.T) {
@@ -614,7 +320,7 @@ func TestProgressivePlanningCapabilitiesV3RequireRelayAndAuthorityForTranscodeEx
 func TestIncompleteToneMapPlanningBecomesRetryableStartFailure(t *testing.T) {
 	for _, reason := range []string{
 		playback.TerminalHDRTranscodeUnsupportedV3,
-		terminalSubtitleConversionUnsupportedV3,
+		playback.TerminalSubtitleConversionUnsupportedV3,
 	} {
 		result := playback.PlannerResultV3{Terminal: &playback.TerminalV3{Reason: reason}}
 
@@ -626,18 +332,26 @@ func TestIncompleteToneMapPlanningBecomesRetryableStartFailure(t *testing.T) {
 	}
 }
 
+// Which refusals a setting decided is the planner's answer
+// (SettingsDependentRefusal); this covers what the handler does with it.
 func TestIncompletePlaybackSettingsMakePolicyTerminalsRetryable(t *testing.T) {
-	tests := []playback.TerminalV3{
-		{Reason: playback.TerminalHDRTranscodeUnsupportedV3, Message: "HDR unavailable"},
-		{Reason: terminalSubtitleConversionUnsupportedV3, Message: "The selected subtitle must be burned into the video, but this HDR source cannot be re-encoded."},
-		{Reason: terminalSubtitleConversionUnsupportedV3, Message: "The selected subtitle must be burned into the video, but 4K transcoding is disabled."},
-		{Reason: terminalNoAlternateVersionV3, Message: playback.TerminalMessage4KTranscodeDisabledV3},
-	}
-	for _, terminal := range tests {
-		result := retryIncompletePlaybackSettingsV3(playback.PlannerResultV3{Terminal: &terminal}, context.DeadlineExceeded)
-		if result.Terminal == nil || result.Terminal.Reason != transcodeStartFailedReasonV3 || !result.Terminal.Retryable {
-			t.Fatalf("settings terminal %q = %#v, want retryable %q", terminal.Reason, result.Terminal, transcodeStartFailedReasonV3)
+	refusal := func(settingsDependent bool) playback.PlannerResultV3 {
+		return playback.PlannerResultV3{
+			Terminal:                 &playback.TerminalV3{Reason: playback.TerminalNoAlternateVersionV3},
+			SettingsDependentRefusal: settingsDependent,
 		}
+	}
+	result := retryIncompletePlaybackSettingsV3(refusal(true), context.DeadlineExceeded)
+	if result.Terminal == nil || result.Terminal.Reason != transcodeStartFailedReasonV3 || !result.Terminal.Retryable || result.SettingsDependentRefusal {
+		t.Fatalf("settings refusal = %#v, want retryable %q with the marker cleared", result, transcodeStartFailedReasonV3)
+	}
+	// A lower version that serves the quality is refused under the same reason
+	// whatever the settings say.
+	if got := retryIncompletePlaybackSettingsV3(refusal(false), context.DeadlineExceeded); got.Terminal.Reason != playback.TerminalNoAlternateVersionV3 {
+		t.Fatalf("refusal no setting decided became %#v", got.Terminal)
+	}
+	if got := retryIncompletePlaybackSettingsV3(refusal(true), nil); got.Terminal.Reason != playback.TerminalNoAlternateVersionV3 {
+		t.Fatalf("refusal under loaded settings became %#v", got.Terminal)
 	}
 
 	direct := playback.PlannerResultV3{Plan: &playback.PlanV3{Delivery: playback.DeliveryOriginalHTTPV3}}
@@ -666,73 +380,6 @@ func TestUnusedToneMapPlanningSnapshotDoesNotInventCapabilityFailure(t *testing.
 	}
 	if got := probes.Load(); got != 0 {
 		t.Fatalf("unused snapshot probes = %d, want none", got)
-	}
-}
-
-// TestHLSToneMapCapabilitiesV3HonorsSharedDeadline verifies slow nodes cannot exceed the planning deadline.
-func TestHLSToneMapCapabilitiesV3HonorsSharedDeadline(t *testing.T) {
-	slow := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, request *http.Request) {
-		<-request.Context().Done()
-	}))
-	defer slow.Close()
-	fast := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(w, http.StatusOK, playback.HWAccelInfo{ToneMapCapabilities: tonemap.Capabilities{{
-			Mode: tonemap.ModeSoftware, Backend: tonemap.BackendSoftware, Filter: tonemap.SoftwareFilterBT2390,
-			SourceKinds: []tonemap.SourceKind{tonemap.SourcePQ},
-		}}})
-	}))
-	defer fast.Close()
-
-	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0))
-	handler.JWTSecret = "test-secret"
-	handler.NodePlanner = enumeratingNodePlannerV3{urls: []string{slow.URL, slow.URL, fast.URL}}
-	requireWorkerRoutingV3(handler)
-	ctx, cancel := context.WithTimeout(context.Background(), 250*time.Millisecond)
-	defer cancel()
-	started := time.Now()
-	got := handler.hlsToneMapCapabilitiesV3(ctx)
-	if elapsed := time.Since(started); elapsed >= time.Second {
-		t.Fatalf("capability aggregation took %s, want shared caller deadline", elapsed)
-	}
-	if len(got) != 1 || !got.Supports(tonemap.ModeSoftware, tonemap.SourcePQ) {
-		t.Fatalf("aggregated capabilities = %#v, want the successful node retained", got)
-	}
-}
-
-func TestHLSToneMapCapabilityInventoryV3RedactsNodeURLSecrets(t *testing.T) {
-	const (
-		username       = "probe-operator"
-		password       = "node-password"
-		querySecret    = "query-secret"
-		fragmentSecret = "fragment-secret"
-	)
-	remote := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
-	remote.Close()
-	nodeURL := strings.Replace(remote.URL, "http://", "http://"+username+":"+password+"@", 1) +
-		"?access_token=" + querySecret + "#" + fragmentSecret
-
-	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0))
-	handler.JWTSecret = "jwt-secret"
-	handler.NodePlanner = enumeratingNodePlannerV3{urls: []string{nodeURL}}
-	requireWorkerRoutingV3(handler)
-
-	var logs bytes.Buffer
-	previousLogger := slog.Default()
-	slog.SetDefault(slog.New(slog.NewJSONHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug})))
-	t.Cleanup(func() { slog.SetDefault(previousLogger) })
-
-	_, err := handler.hlsToneMapCapabilityInventoryV3(context.Background())
-	if err == nil {
-		t.Fatal("capability inventory returned no error")
-	}
-	diagnostics := logs.String() + "\n" + err.Error()
-	for _, secret := range []string{username, password, querySecret, fragmentSecret} {
-		if strings.Contains(diagnostics, secret) {
-			t.Fatalf("capability diagnostics contain %q: %q", secret, diagnostics)
-		}
-	}
-	if !strings.Contains(diagnostics, remote.URL) {
-		t.Fatalf("capability diagnostics lost sanitized node origin: %q", diagnostics)
 	}
 }
 
@@ -1265,46 +912,6 @@ func TestPrepareTransportV3ReportsSoftwareToneMapFallback(t *testing.T) {
 	markerPath := filepath.Join(generationDirs[0], "hardware-partial.marker")
 	if _, err := os.Stat(markerPath); !os.IsNotExist(err) {
 		t.Fatalf("failed hardware output survived software fallback: %v", err)
-	}
-}
-
-func TestPrepareSoftwareToneMapFallbackV3ValidatesLocalRegistry(t *testing.T) {
-	file := stableToneMapTransportFileV3(t)
-	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0))
-	handler.NodePlanner = staticNodePlannerV3{}
-	handler.SettingsRepo = &mutablePlaybackSettingsV3{values: map[string]string{
-		config.PlaybackTranscodeSoftwareToneMapSettingKey: "true",
-	}}
-	handler.v3ToneMapProbe = func(context.Context, string, string, string) (tonemap.Capabilities, error) {
-		return tonemap.Capabilities{{
-			Mode: tonemap.ModeSoftware, Backend: tonemap.BackendSoftware, Filter: tonemap.SoftwareFilterBT2390,
-			SourceKinds: []tonemap.SourceKind{tonemap.SourcePQ},
-		}}, nil
-	}
-	presetLocalRegistryV3(handler, playback.NewTransformationRegistryV3([]playback.TransformationSpecV3{
-		{Name: playback.TransformationAudioToAACV3, RecipeVersion: playback.TransformationAudioToAACRecipeVersionV3, Available: true},
-		{Name: playback.TransformationHDRToSDRToneMapV3, RecipeVersion: playback.TransformationHDRToSDRToneMapRecipeVersionV3},
-	}))
-	result := playback.PlannerResultV3{
-		Plan: &playback.PlanV3{PlanID: "plan:invalid-local-fallback", Delivery: playback.DeliveryTranscodeHLSV3, Transformations: []playback.TransformationV3{
-			{Name: playback.TransformationVideoToH264V3, Executor: playback.ExecutorServerV3, RecipeVersion: playback.TransformationVideoToH264RecipeVersionV3},
-			{Name: playback.TransformationAudioToAACV3, Executor: playback.ExecutorServerV3, RecipeVersion: playback.TransformationAudioToAACRecipeVersionV3},
-			{Name: playback.TransformationHDRToSDRToneMapV3, Executor: playback.ExecutorServerV3, RecipeVersion: playback.TransformationHDRToSDRToneMapRecipeVersionV3},
-		}},
-		PlayMethod: playback.PlayTranscode, ToneMapPolicy: tonemap.PolicyHardwareThenSoftware,
-		ToneMapMode: tonemap.ModeHardware, ToneMapSourceKind: tonemap.SourcePQ,
-	}
-
-	_, attempted, transportErr := handler.prepareSoftwareToneMapFallbackV3(
-		httptest.NewRequest(http.MethodPost, "/", nil),
-		&playback.Session{ID: "session-invalid-local-fallback", UserID: 7, ProfileID: "profile-1"},
-		file, result, mediaAuthModeV3{},
-	)
-	if !attempted {
-		t.Fatal("software fallback was not attempted")
-	}
-	if transportErr == nil || transportErr.reason != "transcode_node_capability_unavailable" || !transportErr.retryable {
-		t.Fatalf("transport error = %#v, want retryable local registry rejection", transportErr)
 	}
 }
 

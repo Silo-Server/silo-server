@@ -29,13 +29,37 @@ function numericId(id: string | undefined): number | undefined {
   return Number.isFinite(n) ? n : undefined;
 }
 
+/**
+ * The provenance fields the v1-shaped view model carries, when the server
+ * reported any.
+ *
+ * Absent stays absent: an unrated marker's confidence is sent as 0, and copying
+ * that through as a real confidence would render "0% confidence" for a range
+ * nobody ever rated. The wire omits the field instead, which is what the
+ * check below relies on.
+ */
+function provenanceFromV2(marker: WatchMarkerV2) {
+  return {
+    ...(marker.source ? { source: marker.source } : {}),
+    ...(marker.provider ? { provider: marker.provider } : {}),
+    ...(marker.confidence != null ? { confidence: marker.confidence } : {}),
+    ...(marker.algorithm ? { algorithm: marker.algorithm } : {}),
+  };
+}
+
 function markerFromV2(marker: WatchMarkerV2 | undefined): TimeRange | null {
   if (!marker) return null;
-  return { start: marker.start_seconds, end: marker.end_seconds };
+  return {
+    start: marker.start_seconds,
+    end: marker.end_seconds,
+    ...provenanceFromV2(marker),
+  };
 }
 
 function optionalMarkerFromV2(marker: WatchMarkerV2 | undefined): TimeRange | undefined {
-  return marker ? { start: marker.start_seconds, end: marker.end_seconds } : undefined;
+  return marker
+    ? { start: marker.start_seconds, end: marker.end_seconds, ...provenanceFromV2(marker) }
+    : undefined;
 }
 
 function fileVersionFromV2(version: WatchFileVersionV2): FileVersion {
@@ -135,5 +159,7 @@ export function watchDetailFromV2(detail: WatchDetailV2): WatchDetail {
     effective_version_hdr: detail.effective_version_hdr,
     effective_version_codec_video: detail.effective_version_codec_video,
     effective_version_edition_key: detail.effective_version_edition_key,
+    backdrop_url: detail.backdrop_url || undefined,
+    backdrop_thumbhash: detail.backdrop_thumbhash || undefined,
   };
 }

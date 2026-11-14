@@ -54,7 +54,7 @@ func TestDownloadFetchesWellFormedIDFromDownloadHost(t *testing.T) {
 	p := New(Config{DLBaseURL: dl.URL, APIKey: "synthetic-server-key"})
 	// An ID issued before result IDs dropped SubDL's signed query: the
 	// client's query is not forwarded, the server signs with its own key.
-	data, format, err := p.Download(t.Context(), "/subtitle/3197651-3213944.zip?api_key=client-supplied&x=1")
+	data, format, err := p.Download(t.Context(), "/subtitle/3197651-3213944.zip?api_key=client-supplied&x=1", subtitles.DownloadTarget{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -88,7 +88,7 @@ func TestSignedSearchRowYieldsKeylessIDThatDownloads(t *testing.T) {
 	if len(results) != 1 || results[0].ID != "/subtitle/3520378-8443030.zip" {
 		t.Fatalf("results = %+v", results)
 	}
-	if _, _, err := p.Download(t.Context(), results[0].ID); err != nil {
+	if _, _, err := p.Download(t.Context(), results[0].ID, subtitles.DownloadTarget{}); err != nil {
 		t.Fatal(err)
 	}
 	if gotQuery != "api_key="+key {
@@ -124,7 +124,7 @@ func TestDownloadRefusesIDsThatLeaveTheDownloadHost(t *testing.T) {
 	}
 	p := New(Config{DLBaseURL: dl.URL})
 	for _, id := range ids {
-		_, _, err := p.Download(t.Context(), id)
+		_, _, err := p.Download(t.Context(), id, subtitles.DownloadTarget{})
 		if !errors.Is(err, subtitles.ErrInvalidSubtitleID) {
 			t.Errorf("Download(%q) error = %v, want ErrInvalidSubtitleID", id, err)
 		}
@@ -144,7 +144,7 @@ func TestDownloadRefusesRedirectOffTheDownloadHost(t *testing.T) {
 	}))
 	defer dl.Close()
 
-	_, _, err := New(Config{DLBaseURL: dl.URL, APIKey: "synthetic-subdl-key"}).Download(t.Context(), "/subtitle/1-2.zip")
+	_, _, err := New(Config{DLBaseURL: dl.URL, APIKey: "synthetic-subdl-key"}).Download(t.Context(), "/subtitle/1-2.zip", subtitles.DownloadTarget{})
 	if err == nil {
 		t.Fatal("download followed an off-host redirect")
 	}
@@ -159,7 +159,7 @@ func TestDownloadRefusesRedirectOffTheDownloadHost(t *testing.T) {
 func TestDownloadTransportErrorOmitsAPIKey(t *testing.T) {
 	dl := httptest.NewServer(http.NotFoundHandler())
 	dl.Close()
-	_, _, err := New(Config{DLBaseURL: dl.URL, APIKey: "synthetic-subdl-key"}).Download(t.Context(), "/subtitle/1-2.zip")
+	_, _, err := New(Config{DLBaseURL: dl.URL, APIKey: "synthetic-subdl-key"}).Download(t.Context(), "/subtitle/1-2.zip", subtitles.DownloadTarget{})
 	if err == nil {
 		t.Fatal("download from a closed server succeeded")
 	}
@@ -178,7 +178,7 @@ func TestDownloadFollowsRedirectOnTheDownloadHost(t *testing.T) {
 	}))
 	defer dl.Close()
 
-	data, _, err := New(Config{DLBaseURL: dl.URL}).Download(t.Context(), "/subtitle/1-2.zip")
+	data, _, err := New(Config{DLBaseURL: dl.URL}).Download(t.Context(), "/subtitle/1-2.zip", subtitles.DownloadTarget{})
 	if err != nil || string(data) != "redirected" {
 		t.Fatalf("got %q, %v", data, err)
 	}

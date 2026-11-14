@@ -2,10 +2,15 @@ package catalog
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
+	"reflect"
 	"sync/atomic"
 	"testing"
 
 	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/settingscontract"
+	"github.com/Silo-Server/silo-server/internal/settingskeys"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
 
@@ -75,4 +80,94 @@ func TestBuildPlaybackInfo_AudioPrefLookupsDoNotScaleWithFileCount(t *testing.T)
 	if got := atomic.LoadInt32(&counting.getAudioPref); got != 1 {
 		t.Fatalf("GetAudioPreference called %d times for %d files; want 1", got, fileCount)
 	}
+}
+
+// A movie's detail resolves the audio language of every library its files are
+// in and its subtitle settings from one settings read. Each context must rank
+// as it does alone: library, series and device rows for other contexts share
+// the candidate set.
+func TestPrefetchMoviePlaybackDefaultsMatchesOneReadPerContext(t *testing.T) {
+	store := newDetailTestStore(t)
+	const movie = "movie-1"
+	setProfileAudioLanguage(t, store, "en")
+	setScopedAudioLanguageForDevice(t, store, settingscontract.ScopeProfileDevice, "", 0, "apple-tv", "ja")
+	setScopedAudioLanguage(t, store, settingscontract.ScopeProfileLibrary, "", 12, "es")
+	setScopedAudioLanguage(t, store, settingscontract.ScopeProfileSeries, "movie-2", 0, "fr")
+	seed := func(key string, identity userstore.SettingIdentity, value any) {
+		t.Helper()
+		encoded, err := json.Marshal(value)
+		if err != nil {
+			t.Fatal(err)
+		}
+		identity.Key, identity.ProfileID = key, "profile-1"
+		if _, err := store.UpsertSettingValue(context.Background(), identity, encoded); err != nil {
+			t.Fatalf("seeding %s: %v", key, err)
+		}
+	}
+	seed(settingskeys.PlaybackSubtitleMode, userstore.SettingIdentity{Scope: settingscontract.ScopeProfile}, "auto")
+	seed(settingskeys.PlaybackSubtitleMode, userstore.SettingIdentity{Scope: settingscontract.ScopeProfileLibrary, LibraryID: 13}, "always")
+	seed(settingskeys.PlaybackSubtitleLanguage, userstore.SettingIdentity{Scope: settingscontract.ScopeProfileLibrary, LibraryID: 12}, "de")
+	seed(settingskeys.PlaybackSubtitleLanguage, userstore.SettingIdentity{Scope: settingscontract.ScopeProfileSeries, SeriesID: movie}, "nl")
+	seed(settingskeys.PlaybackShowForcedSubtitles, userstore.SettingIdentity{Scope: settingscontract.ScopeProfileDevice, DeviceID: "apple-tv"}, false)
+	if err := store.SetAudioPreference(context.Background(), userstore.AudioPreference{
+		ProfileID: "profile-1", SeriesID: movie, AudioTrackIndex: 2,
+		// Matches no track, so each library's language decides.
+		TrackSignature: &userstore.AudioTrackSignature{Language: "ko", Codec: "ac3", Channels: 6},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SetSubtitlePreference(context.Background(), userstore.SubtitlePreference{
+		ProfileID: "profile-1", SeriesID: movie,
+		TrackSignature: &userstore.SubtitleTrackSignature{Source: "embedded", Language: "nl", Codec: "subrip"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	tracks := []models.AudioTrack{
+		{Language: "en", Codec: "aac", Default: true}, {Language: "ja", Codec: "aac"},
+		{Language: "es", Codec: "ac3", Channels: 6}, {Language: "fr", Codec: "aac"},
+	}
+	files := []*models.MediaFile{
+		{ID: 1, MediaFolderID: 12, Resolution: "1080p", AudioTracks: tracks},
+		{ID: 2, MediaFolderID: 13, Resolution: "2160p", AudioTracks: tracks},
+		{ID: 3, MediaFolderID: 99, Resolution: "720p", AudioTracks: tracks},
+	}
+	item := &models.MediaItem{ContentID: movie, Type: playableTypeMovie}
+	for _, filter := range []AccessFilter{
+		{UserID: 1, ProfileID: "profile-1"},
+		{UserID: 1, ProfileID: "profile-1", DeviceID: "apple-tv"},
+		{UserID: 1, ProfileID: "profile-1", DeviceID: "apple-tv", SelectedFileID: 1},
+	} {
+		counting := &countingUserStore{UserStore: store}
+		service := &DetailService{}
+		service.SetUserStoreProvider(testDetailUserStoreProvider{store: counting})
+
+		lazy := service.newAudioPrefResolver(context.Background(), filter, movie)
+		wantVersions, _, _, _, _, _, _ := service.buildPlaybackInfoWith(context.Background(), files, filter, lazy, nil, false)
+		wantSubtitles := service.effectiveSubtitleDefaults(context.Background(), filter, movie, files)
+		lazyReads := atomic.LoadInt32(&counting.resolveValues)
+
+		atomic.StoreInt32(&counting.resolveValues, 0)
+		prefetched := service.newAudioPrefResolver(context.Background(), filter, movie)
+		gotSubtitles, ok := service.prefetchMoviePlaybackDefaults(context.Background(), filter, item, files, prefetched)
+		if !ok {
+			t.Fatal("prefetchMoviePlaybackDefaults reported failure")
+		}
+		gotVersions, _, _, _, _, _, _ := service.buildPlaybackInfoWith(context.Background(), files, filter, prefetched, nil, false)
+		if !reflect.DeepEqual(gotVersions, wantVersions) || !reflect.DeepEqual(gotSubtitles, wantSubtitles) {
+			t.Errorf("device %q file %d:\n got %+v %+v\nwant %+v %+v", filter.DeviceID, filter.SelectedFileID,
+				audioSelections(gotVersions), gotSubtitles, audioSelections(wantVersions), wantSubtitles)
+		}
+		if got := atomic.LoadInt32(&counting.resolveValues); got != 1 || lazyReads != 4 {
+			t.Errorf("settings reads: prefetched %d, one per context %d; want 1 and 4", got, lazyReads)
+		}
+	}
+}
+
+func audioSelections(versions []FileVersion) []string {
+	out := make([]string, 0, len(versions))
+	for _, v := range versions {
+		out = append(out, fmt.Sprintf("%d:%d/%s", v.FileID, *v.EffectiveAudioTrackIndex, v.EffectiveAudioLanguage))
+	}
+	return out
 }

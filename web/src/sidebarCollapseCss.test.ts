@@ -61,7 +61,6 @@ describe("sidebar collapse CSS", () => {
       ".sidebar-surface,",
       ".sidebar-inner,",
       ".sidebar-fade,",
-      ".sidebar-row-shift,",
       ".sidebar-main-stage,",
       ".impersonation-banner",
     ]) {

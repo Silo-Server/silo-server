@@ -27,7 +27,7 @@ const (
 )
 
 type ThemeSongService interface {
-	Discover(context.Context, string, bool, catalogpkg.AccessFilter) (themesongs.Set, error)
+	Discover(context.Context, themesongs.Item, bool, catalogpkg.AccessFilter) (themesongs.Set, error)
 	Authorize(context.Context, themesongs.Identity, string, string, catalogpkg.AccessFilter, []themesongs.Format, time.Time) (themesongs.Authorization, error)
 	OpenGrant(context.Context, string, string, string) (themesongs.File, themesongs.Delivery, *os.File, error)
 	ServeConverted(http.ResponseWriter, *http.Request, themesongs.File)

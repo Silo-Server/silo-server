@@ -6,12 +6,15 @@ import (
 	"slices"
 	"testing"
 	"time"
+
+	"github.com/Silo-Server/silo-server/internal/metadata/showstatus"
+	"github.com/Silo-Server/silo-server/internal/metadata/tmdb"
 )
 
 func ratingPtr(r string) *string { return &r }
 
 func TestExcludeAndRatingConditions(t *testing.T) {
-	facts := capturedFacts(RoutingFacts{OriginalLanguage: "ja", GenreIDs: []int{16}, ContentRating: ratingPtr("TV-14")})
+	facts := capturedFacts(RoutingFacts{OriginalLanguage: "ja", GenreIDs: []int{16}, ContentRating: ratingPtr("TV-14"), SeriesStatus: new("ended")})
 	req := Request{MediaType: MediaTypeSeries, RequestedByUserID: 7, RoutingFacts: facts}
 	for _, tc := range []struct {
 		name string
@@ -26,6 +29,9 @@ func TestExcludeAndRatingConditions(t *testing.T) {
 		{"TV-14 is within R", RouteConditions{MaxContentRating: "R"}, nil},
 		{"TV-14 is above TV-PG", RouteConditions{MaxContentRating: "TV-PG"}, []string{condMaxContentRating}},
 		{"every failure is listed", RouteConditions{GenreIDs: []int{10751}, MaxContentRating: "PG"}, []string{condGenreIDs, condMaxContentRating}},
+		{"ended or canceled takes an ended show", RouteConditions{SeriesStatuses: []string{showstatus.Ended, showstatus.Canceled}}, nil},
+		{"continuing or upcoming fails an ended show", RouteConditions{SeriesStatuses: []string{"returning", "in_production", "upcoming"}}, []string{condSeriesStatuses}},
+		{"not ended fails an ended show", RouteConditions{ExcludeSeriesStatuses: []string{"ended"}}, []string{condExcludeSeriesStatuses}},
 	} {
 		if got := tc.c.Unmet(req); !slices.Equal(got, tc.want) {
 			t.Errorf("%s: unmet = %v, want %v", tc.name, got, tc.want)
@@ -36,6 +42,15 @@ func TestExcludeAndRatingConditions(t *testing.T) {
 		unrated := Request{RoutingFacts: capturedFacts(RoutingFacts{ContentRating: rating})}
 		if (RouteConditions{MaxContentRating: "R"}).Matches(unrated) {
 			t.Errorf("rating %v matched a ceiling", rating)
+		}
+	}
+	// A series with no TMDB status has none: it fails a status list and
+	// passes an exclude one.
+	for _, status := range []*string{nil, new("")} {
+		unknown := Request{MediaType: MediaTypeSeries, RoutingFacts: capturedFacts(RoutingFacts{SeriesStatus: status})}
+		if (RouteConditions{SeriesStatuses: showstatus.Known}).Matches(unknown) ||
+			!(RouteConditions{ExcludeSeriesStatuses: []string{"ended"}}).Matches(unknown) {
+			t.Errorf("status %v: matched a status list or failed an exclude one", status)
 		}
 	}
 }
@@ -99,6 +114,89 @@ func TestRuleValidationForNewConditions(t *testing.T) {
 	if err := svc.validateRoute(context.Background(), &onlyExclude); err != nil {
 		t.Fatalf("an exclude-only rule is a rule: %v", err)
 	}
+
+	series := Route{MediaType: MediaTypeSeries, Name: "Ended", Enabled: true}
+	for _, tc := range []struct {
+		name       string
+		mediaType  MediaType
+		conditions RouteConditions
+		field      string
+	}{
+		{"a movie rule on status", MediaTypeMovie, RouteConditions{ExcludeSeriesStatuses: []string{"ended"}}, "conditions.exclude_series_statuses"},
+		{"TMDB's own spelling", MediaTypeSeries, RouteConditions{SeriesStatuses: []string{"Canceled"}}, "conditions.series_statuses"},
+		{"a status both wanted and excluded", MediaTypeSeries, RouteConditions{SeriesStatuses: []string{"ended"}, ExcludeSeriesStatuses: []string{"ENDED"}}, "conditions"},
+	} {
+		route := series
+		route.MediaType, route.Conditions = tc.mediaType, tc.conditions
+		if err := svc.validateRoute(context.Background(), &route); !errors.As(err, &verr) || verr.FieldErrors[tc.field] == "" {
+			t.Errorf("%s: err = %v, want an error on %s", tc.name, err, tc.field)
+		}
+	}
+}
+
+// A series captured before its status was is given one when a route checks
+// status, read once: the capture time, which times the rating's recheck,
+// stays, and a status already stored is not read again, so a show that ends
+// after it was requested keeps its route. When another API server stored a
+// status first, its value wins.
+func TestSeriesStatusIsReadOnce(t *testing.T) {
+	ctx := context.Background()
+	store := routingStore(capturedFacts(RoutingFacts{}))
+	store.requests["r1"].MediaType = MediaTypeSeries
+	tmdbClient := &fakeTMDBClient{detail: &tmdb.MediaDetail{MediaType: "series", ID: 129, Status: "Returning Series"}}
+	svc := newTestServiceWithTMDB(store, tmdbClient)
+	routes := append(testRoutes(), Route{ID: "ended", MediaType: MediaTypeSeries, Name: "Ended", Enabled: true,
+		Conditions: RouteConditions{SeriesStatuses: []string{showstatus.Ended, showstatus.Canceled}}, HD: RouteDestination{IntegrationID: "sonarr-ended"}})
+	req := *store.requests["r1"]
+	captured := *req.RoutingFacts.CapturedAt
+
+	if err := svc.ensureRoutingFacts(ctx, &req, testRoutes()); err != nil || tmdbClient.detailCalls != 0 {
+		t.Fatalf("no status route: %d detail reads, err %v; want none", tmdbClient.detailCalls, err)
+	}
+	if err := svc.ensureRoutingFacts(ctx, &req, routes); err != nil {
+		t.Fatal(err)
+	}
+	if s := req.RoutingFacts.SeriesStatus; s == nil || *s != "returning" || !req.RoutingFacts.CapturedAt.Equal(captured) || tmdbClient.detailCalls != 1 {
+		t.Fatalf("facts = %+v after %d reads, want status returning and the capture time kept", req.RoutingFacts, tmdbClient.detailCalls)
+	}
+
+	tmdbClient.detail = &tmdb.MediaDetail{MediaType: "series", ID: 129, Status: "Ended"}
+	if err := svc.ensureRoutingFacts(ctx, &req, routes); err != nil || tmdbClient.detailCalls != 1 || *req.RoutingFacts.SeriesStatus != "returning" {
+		t.Fatalf("second pass: facts %+v after %d reads, err %v; want the stored returning", req.RoutingFacts, tmdbClient.detailCalls, err)
+	}
+	if decision, ok := decideRoutes(routes, req, []Quality{Quality1080p})[Quality1080p]; ok {
+		t.Fatalf("a show that ended after it was requested went to %q", decision.RouteName)
+	}
+
+	// This copy was read before another server stored "returning".
+	stale := req
+	stale.RoutingFacts.SeriesStatus = nil
+	if err := svc.ensureRoutingFacts(ctx, &stale, routes); err != nil || stale.RoutingFacts.SeriesStatus == nil || *stale.RoutingFacts.SeriesStatus != "returning" {
+		t.Fatalf("status %v, err %v; want the status stored first", stale.RoutingFacts.SeriesStatus, err)
+	}
+
+	store.requests["r1"].RoutingFacts.SeriesStatus = nil
+	stale.RoutingFacts.SeriesStatus = nil
+	tmdbClient.detail, tmdbClient.detailErr = nil, errors.New("tmdb down")
+	if err := svc.ensureRoutingFacts(ctx, &stale, routes); err == nil {
+		t.Fatal("a TMDB failure must fail the submission so it retries")
+	}
+	// A series TMDB no longer lists has no status, and is sent.
+	tmdbClient.detailErr = tmdb.ErrNotFound
+	if err := svc.ensureRoutingFacts(ctx, &stale, routes); err != nil || stale.RoutingFacts.SeriesStatus == nil || *stale.RoutingFacts.SeriesStatus != "" {
+		t.Fatalf("status %v, err %v; want none, and no error", stale.RoutingFacts.SeriesStatus, err)
+	}
+
+	// A copy read before another server captured the facts, without a
+	// status (a server not yet upgraded), still gets one.
+	store.requests["r1"].RoutingFacts.SeriesStatus = nil
+	uncaptured := stale
+	uncaptured.RoutingFacts = RoutingFacts{}
+	tmdbClient.detail, tmdbClient.detailErr = &tmdb.MediaDetail{MediaType: "series", ID: 129, Status: "Ended"}, nil
+	if err := svc.ensureRoutingFacts(ctx, &uncaptured, routes); err != nil ||
+		uncaptured.RoutingFacts.SeriesStatus == nil || *uncaptured.RoutingFacts.SeriesStatus != showstatus.Ended {
+		t.Fatalf("facts %+v, err %v; want the stored capture with status ended", uncaptured.RoutingFacts, err)
+	}
 }
 
 // A request captured before its US rating was is given one when a route
@@ -111,11 +209,15 @@ func TestRatingIsCapturedLazily(t *testing.T) {
 	svc := NewService(store, certs, &fakePresence{})
 	svc.SetUserRepository(requestUserRepo{})
 	req := *store.requests["r1"]
+	// Another API server stores a fact after this copy was read; writing
+	// the rating keeps it.
+	store.requests["r1"].RoutingFacts.SeriesStatus = new("ended")
 	if err := svc.ensureRoutingFacts(context.Background(), &req, store.routes); err != nil {
 		t.Fatal(err)
 	}
-	if req.RoutingFacts.ContentRating == nil || *req.RoutingFacts.ContentRating != "G" || certs.calls != 1 {
-		t.Fatalf("facts = %+v after %d calls, want rating G", req.RoutingFacts, certs.calls)
+	if req.RoutingFacts.ContentRating == nil || *req.RoutingFacts.ContentRating != "G" || certs.calls != 1 ||
+		req.RoutingFacts.SeriesStatus == nil {
+		t.Fatalf("facts = %+v after %d calls, want rating G and the stored status kept", req.RoutingFacts, certs.calls)
 	}
 	if err := svc.ensureRoutingFacts(context.Background(), &req, store.routes); err != nil || certs.calls != 1 {
 		t.Fatalf("second pass looked the rating up again (%d calls, err %v)", certs.calls, err)

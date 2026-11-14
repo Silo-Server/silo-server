@@ -148,7 +148,7 @@ func (s stubProvider) Search(context.Context, SearchRequest) ([]SubtitleResult, 
 	return nil, nil
 }
 
-func (s stubProvider) Download(context.Context, string) ([]byte, SubtitleFormat, error) {
+func (s stubProvider) Download(context.Context, string, DownloadTarget) ([]byte, SubtitleFormat, error) {
 	return s.data, FormatSRT, nil
 }
 
@@ -166,7 +166,7 @@ func TestManagerSearchWarningsOmitProviderErrorText(t *testing.T) {
 
 	manager := NewManager(newMockSubtitleRepo(), newMockBlobStore())
 	manager.RegisterProvider(failingSearchProvider{stubProvider{name: "example"}})
-	resp, err := manager.SearchBridge(t.Context(), SearchRequest{Title: "Example"})
+	resp, err := manager.Search(t.Context(), SearchRequest{Title: "Example"})
 	if err != nil {
 		t.Fatal(err)
 	}

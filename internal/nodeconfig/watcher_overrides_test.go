@@ -10,6 +10,7 @@ import (
 // row is consulted.
 func clusterSettings() map[string]string {
 	return map[string]string{
+		"auth.jwt_secret":    testJWTSecret,
 		"playback.hw_accel":  "qsv",
 		"playback.hw_device": "/dev/dri/renderD128",
 	}

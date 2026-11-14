@@ -168,6 +168,96 @@ func candidateIDs(candidates []Candidate) []int {
 	return ids
 }
 
+// A changed identity clears a movie's local credits while its stored tail
+// still matches the file, so the movie is listed again until a run places its
+// credits from that tail, without sampling it again.
+func TestMovieWithInvalidatedMarkersIsAnalyzedAgainPostgres(t *testing.T) {
+	pool := movieTestPool(t)
+	f := seedMovieFixture(t, pool)
+	repo := NewRepository(pool)
+	ctx := t.Context()
+	if _, err := pool.Exec(ctx, `UPDATE media_files SET codec_video = 'h264' WHERE file_path LIKE $1`, "/"+f.prefix+"%"); err != nil {
+		t.Fatal(err)
+	}
+	sampler := &fakeMovieSampler{}
+	analyzer := &Analyzer{
+		repo: repo, extractor: &fakeFingerprintExtractor{}, movieSampler: sampler, config: DefaultConfig("ffmpeg"),
+		node: "node-a", logger: slog.New(slog.DiscardHandler), moviePageSize: 10, workers: 1,
+	}
+	if _, err := analyzer.RunMovies(ctx, allMarkerKinds, nil); err != nil {
+		t.Fatal(err)
+	}
+	if got := f.listed(t, repo, "node-a"); len(got) != 0 {
+		t.Fatalf("candidates after the first run %v, want every movie settled", got)
+	}
+	tails := sampler.tailCount()
+
+	// A rescan that sees a new modification time is an identity change.
+	if _, err := pool.Exec(ctx, `UPDATE media_files SET file_modified_at = NOW() WHERE id = $1`, f.files["newer"]); err != nil {
+		t.Fatal(err)
+	}
+	var creditsStart *float64
+	if err := pool.QueryRow(ctx, `SELECT credits_start FROM media_files WHERE id = $1`, f.files["newer"]).Scan(&creditsStart); err != nil {
+		t.Fatal(err)
+	}
+	if creditsStart != nil {
+		t.Fatalf("credits_start = %v after the identity change, want the trigger to clear it", *creditsStart)
+	}
+	if got := f.listed(t, repo, "node-a"); len(got) != 1 || got[0] != "newer" {
+		t.Fatalf("candidates %v, want the invalidated movie listed again", got)
+	}
+
+	if _, err := analyzer.RunMovies(ctx, allMarkerKinds, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := pool.QueryRow(ctx, `SELECT credits_start FROM media_files WHERE id = $1`, f.files["newer"]).Scan(&creditsStart); err != nil {
+		t.Fatal(err)
+	}
+	if creditsStart == nil {
+		t.Fatal("credits were not placed again from the stored tail")
+	}
+	if got := sampler.tailCount(); got != tails {
+		t.Fatalf("%d tail passes, want %d: the stored tail is reused", got, tails)
+	}
+	if got := f.listed(t, repo, "node-a"); len(got) != 0 {
+		t.Fatalf("candidates %v after the second run, want the movie settled again", got)
+	}
+}
+
+// The trigger records an identity change and nothing else.
+func TestMarkerInvalidationTimeTracksIdentityChangesPostgres(t *testing.T) {
+	pool := movieTestPool(t)
+	f := seedMovieFixture(t, pool)
+	ctx := t.Context()
+	id := f.files["older"]
+	stamp := func() *time.Time {
+		t.Helper()
+		var at *time.Time
+		if err := pool.QueryRow(ctx, `SELECT markers_invalidated_at FROM media_files WHERE id = $1`, id).Scan(&at); err != nil {
+			t.Fatal(err)
+		}
+		return at
+	}
+	for _, tc := range []struct {
+		name, update string
+		want         bool
+	}{
+		{"unrelated column", `UPDATE media_files SET codec_video = 'hevc' WHERE id = $1`, false},
+		{"identity column rewritten unchanged", `UPDATE media_files SET file_hash = file_hash, content_id = content_id WHERE id = $1`, false},
+		{"modification time", `UPDATE media_files SET file_modified_at = NOW() WHERE id = $1`, true},
+	} {
+		if _, err := pool.Exec(ctx, `UPDATE media_files SET markers_invalidated_at = NULL WHERE id = $1`, id); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := pool.Exec(ctx, tc.update, id); err != nil {
+			t.Fatal(err)
+		}
+		if got := stamp() != nil; got != tc.want {
+			t.Errorf("%s: stamped = %v, want %v", tc.name, got, tc.want)
+		}
+	}
+}
+
 // A tail pass that fails on a movie with a metadata unusable row from an
 // earlier build replaces that row with the failure, so the movie backs off
 // like any other failure instead of being decoded again on every run.

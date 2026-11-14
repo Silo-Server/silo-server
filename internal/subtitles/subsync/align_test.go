@@ -1,9 +1,16 @@
 package subsync
 
 import (
+	"bytes"
+	"compress/gzip"
 	"errors"
+	"fmt"
+	"io"
 	"math"
 	"math/rand/v2"
+	"os"
+	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -134,6 +141,113 @@ func TestAlignRejectsSubtitleOfAnotherTitle(t *testing.T) {
 	}
 	if got.Matched() || Decide(got, subtitles.Timing{}, seconds(runtime)) != StatusNoMatch {
 		t.Fatalf("another title's subtitle matched: %+v", got)
+	}
+}
+
+// laughTrack loads a sitcom episode's speech levels, where a laugh track
+// and music fill the pauses, with the cue times of a subtitle that matches
+// it as it is.
+func laughTrack(t *testing.T) ([]mediasample.SpeechLevels, []subtitles.SubtitleCue) {
+	t.Helper()
+	packed, err := os.ReadFile("testdata/laugh-track.speech.gz")
+	if err != nil {
+		t.Fatal(err)
+	}
+	gz, err := gzip.NewReader(bytes.NewReader(packed))
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := io.ReadAll(gz)
+	if err != nil {
+		t.Fatal(err)
+	}
+	windows, err := decodeSpeech(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text, err := os.ReadFile("testdata/laugh-track.cues")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var cues []subtitles.SubtitleCue
+	for _, line := range strings.Split(strings.TrimSpace(string(text)), "\n") {
+		var start, end int
+		if _, err := fmt.Sscanf(line, "%d %d", &start, &end); err != nil {
+			continue
+		}
+		cues = append(cues, subtitles.SubtitleCue{
+			Start: time.Duration(start) * time.Millisecond, End: time.Duration(end) * time.Millisecond, Lines: []string{"line"},
+		})
+	}
+	return windows, cues
+}
+
+// Under a laugh track no single window's best lag stands out, so too few
+// agree; the joint search finds the timing all of them support.
+func TestAlignFindsDialogUnderALaughTrack(t *testing.T) {
+	windows, cues := laughTrack(t)
+	const runtime = 1269.27
+
+	if got := alignWindowsOnly(windows, cues); got.Matched() {
+		t.Fatalf("the window search alone matched; the fixture no longer exercises the joint search: %+v", got)
+	}
+	got, err := Align(windows, cues)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !got.Matched() || got.JointProminence == 0 {
+		t.Fatalf("no joint match: %+v", got)
+	}
+	if status := Decide(got, subtitles.Timing{}, seconds(runtime)); status != StatusAlreadySynced {
+		t.Fatalf("status %s, timing %+v", status, got.Timing)
+	}
+
+	// The same subtitle cut for 25 fps and running 41.5 s late is put back.
+	truth := subtitles.Timing{Scale: 25 / 23.976, OffsetMS: -41500}
+	moved := make([]subtitles.SubtitleCue, 0, len(cues))
+	for _, c := range cues {
+		moved = append(moved, subtitles.SubtitleCue{
+			Start: seconds((c.Start.Seconds() + 41.5) / truth.Scale), End: seconds((c.End.Seconds() + 41.5) / truth.Scale), Lines: c.Lines,
+		})
+	}
+	got, err = Align(windows, moved)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !got.Matched() {
+		t.Fatalf("no match for the shifted subtitle: %+v", got)
+	}
+	for _, at := range []float64{0, runtime / 2, runtime} {
+		if diff := math.Abs((got.Timing.Apply(seconds(at)) - truth.Apply(seconds(at))).Seconds()); diff > 0.15 {
+			t.Fatalf("timing %+v is %.3fs from %+v at %.0fs", got.Timing, diff, truth, at)
+		}
+	}
+}
+
+// alignWindowsOnly is Align without the joint search.
+func alignWindowsOnly(windows []mediasample.SpeechLevels, cues []subtitles.SubtitleCue) Alignment {
+	signals, cues, search, err := prepare(windows, cues)
+	if err != nil {
+		return Alignment{}
+	}
+	return alignWindows(signals, cues, search)
+}
+
+// The cue map marks exactly the union of the cues' spans, whatever their
+// order, overlap, or reach past the start of the clock.
+func TestCueMapMarksTheUnionOfCues(t *testing.T) {
+	cue := func(from, to float64) subtitles.SubtitleCue {
+		return subtitles.SubtitleCue{Start: seconds(from), End: seconds(to), Lines: []string{"x"}}
+	}
+	m := newCueMap([]subtitles.SubtitleCue{
+		cue(0.08, 0.12), cue(0.02, 0.05), cue(0.03, 0.04), // nested, unsorted
+		cue(0.10, 0.15),  // overlapping the first
+		cue(-0.05, 0.01), // before the clock starts
+		cue(0.18, 0.18),  // empty
+	}, 1)
+	want := []byte{1, 0, 1, 1, 1, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0}
+	if !slices.Equal(m.fine, want) {
+		t.Fatalf("fine = %v, want %v", m.fine, want)
 	}
 }
 

@@ -58,7 +58,10 @@ type movieCandidateCursor struct {
 // or unusable, or failed on this server and still backing off. A sampled
 // tail is stored only once the credits placed from it are written, so a
 // complete tail means its credits were settled; admin refresh or playback
-// analyze it again on request. An unusable row an earlier build stored from
+// analyze it again on request. A complete tail settles the movie only for
+// the invalidation time it was stored with: a later invalidation cleared the
+// credits placed from it, so the movie is listed until a run stores the tail
+// again. An unusable row an earlier build stored from
 // probe metadata does not count: that verdict is now decided on every
 // analysis, so a probe repair brings the file back. Such files, and movies
 // that get credits from a chapter, are listed on every run, but their
@@ -116,7 +119,8 @@ func (r *Repository) ListMovieCandidates(ctx context.Context, node string, after
 		           art.file_hash = COALESCE(mf.file_hash, '')
 		           AND art.file_size = COALESCE(mf.file_size, 0)
 		           AND art.duration_seconds = COALESCE(mf.duration, 0)
-		           AND (art.status = $6
+		           AND ((art.status = $6
+		                 AND art.markers_invalidated_at IS NOT DISTINCT FROM mf.markers_invalidated_at)
 		                OR (art.status = $7 AND COALESCE(art.detail, '') NOT IN ($10, $11))
 		                OR (art.status = $8 AND art.retry_after > NOW() AND art.recorded_by = $9)),
 		           false))`+page+`

@@ -19,17 +19,21 @@ function rms(samples: Float32Array): number {
 // Each fixture is 0.25 s of a 1 kHz tone (amplitude 1/8, RMS 0.088) on the
 // center channel of a 5.1(side) layout with silence elsewhere; MLP carries a
 // stereo downmix of the same signal, so the tone sits equally on both sides.
+// dts-laced-stripped.mka holds the dts.mka frames the way mkvmerge often
+// writes DTS: fixed-size lacing, with each frame's sync word removed by
+// Matroska header stripping, which the demuxer restores per frame.
 describe("FFmpegAudioDecoder", () => {
   const cases: Array<[FFmpegAudioCodec, string, number]> = [
     ["ac3", "ac3.mka", 6],
     ["eac3", "eac3.mka", 6],
     ["dts", "dts.mka", 6],
+    ["dts", "dts-laced-stripped.mka", 6],
     ["truehd", "truehd.mka", 6],
     ["mlp", "mlp.mka", 2],
   ];
 
   for (const [codec, file, channels] of cases) {
-    it(`decodes ${codec} with its channel layout`, async () => {
+    it(`decodes ${codec} from ${file} with its channel layout`, async () => {
       const module = await loadFFmpegAudioDecoders({ wasmBinary: wasm });
       const input = new Input({
         formats: ALL_FORMATS,

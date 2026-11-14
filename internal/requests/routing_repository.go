@@ -3,7 +3,10 @@ package requests
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+
+	"github.com/jackc/pgx/v5"
 )
 
 const routeColumns = `id, media_type, position, name, enabled, is_fallback, conditions,
@@ -51,6 +54,32 @@ func scanRoute(row requestScanner) (Route, error) {
 	return route, nil
 }
 
+func (r *Repository) UpdateRoutingFacts(ctx context.Context, id string, facts RoutingFacts) (*Request, error) {
+	return r.mergeRoutingFacts(ctx, id, facts, `routing_facts || $2::jsonb`)
+}
+
+func (r *Repository) FillRoutingFacts(ctx context.Context, id string, facts RoutingFacts) (*Request, error) {
+	return r.mergeRoutingFacts(ctx, id, facts, `$2::jsonb || routing_facts`)
+}
+
+// mergeRoutingFacts merges facts into a request's stored facts with merged,
+// a jsonb concatenation of the stored routing_facts and $2 in which the
+// right-hand side wins a key both hold.
+func (r *Repository) mergeRoutingFacts(ctx context.Context, id string, facts RoutingFacts, merged string) (*Request, error) {
+	raw, err := encodeRoutingFacts(facts)
+	if err != nil {
+		return nil, err
+	}
+	req, err := scanRequest(r.pool.QueryRow(ctx, `
+		UPDATE media_requests SET routing_facts = `+merged+`
+		WHERE id = $1
+		RETURNING `+requestColumns(), id, raw))
+	if err != nil {
+		return nil, fmt.Errorf("merge request routing facts: %w", err)
+	}
+	return req, nil
+}
+
 func (r *Repository) SetRoutingFacts(ctx context.Context, id string, facts RoutingFacts) (*Request, error) {
 	raw, err := encodeRoutingFacts(facts)
 	if err != nil {
@@ -58,8 +87,12 @@ func (r *Repository) SetRoutingFacts(ctx context.Context, id string, facts Routi
 	}
 	req, err := scanRequest(r.pool.QueryRow(ctx, `
 		UPDATE media_requests SET routing_facts = $2, is_anime = $3
-		WHERE id = $1
+		WHERE id = $1 AND NOT routing_facts ? 'captured_at'
 		RETURNING `+requestColumns(), id, raw, facts.Anime))
+	if errors.Is(err, pgx.ErrNoRows) {
+		// Another API server captured the facts first; route on its.
+		return r.GetRequest(ctx, id)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("set request routing facts: %w", err)
 	}

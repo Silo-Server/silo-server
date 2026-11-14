@@ -142,14 +142,12 @@ func (p *Provider) Search(ctx context.Context, req subtitles.SearchRequest) ([]s
 			Downloads:       d.Attributes.DownloadCount,
 			HearingImpaired: d.Attributes.HearingImpaired,
 		}
-		resultRaw := d.Attributes.Language
-		result.SetRawLanguageForBridge(resultRaw)
 		results = append(results, result)
 	}
 	return results, nil
 }
 
-func (p *Provider) Download(ctx context.Context, id string) ([]byte, subtitles.SubtitleFormat, error) {
+func (p *Provider) Download(ctx context.Context, id string, _ subtitles.DownloadTarget) ([]byte, subtitles.SubtitleFormat, error) {
 	if err := p.limiter.Wait(ctx); err != nil {
 		return nil, "", err
 	}

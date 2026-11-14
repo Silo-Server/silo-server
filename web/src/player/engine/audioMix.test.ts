@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  continuousAudioStart,
   defaultSpeakers,
   LinearResampler,
   mixMatrix,
@@ -8,6 +9,7 @@ import {
   SPEAKER,
   speakersFromMask,
   unpackPCM,
+  type PreviousAudioFrame,
 } from "./audioMix";
 
 const S = SPEAKER;
@@ -106,5 +108,36 @@ describe("LinearResampler", () => {
     const first = resampler.process([new Float32Array([0, 2])])[0]!;
     const second = resampler.process([new Float32Array([4, 6])])[0]!;
     expect(Array.from([...first, ...second])).toEqual([0, 1, 2, 3, 4, 5, 6]);
+  });
+});
+
+describe("continuousAudioStart", () => {
+  const FRAME = 512 / 48_000;
+
+  function place(stamps: number[]): number[] {
+    let previous: PreviousAudioFrame | null = null;
+    return stamps.map((stamped) => {
+      const start = continuousAudioStart(stamped, previous);
+      previous = { stamped, end: start + FRAME };
+      return start;
+    });
+  }
+
+  it("lays frames that share a laced block's timestamp end to end", () => {
+    // A cluster's last block: every frame stamped 2.848 s, then the next
+    // cluster's first block at its rounded millisecond.
+    const starts = place([...Array<number>(8).fill(2.848), 2.933]);
+    starts.forEach((start, i) => expect(start).toBeCloseTo(2.848 + i * FRAME, 9));
+  });
+
+  it("continues a shared timestamp however long the block runs", () => {
+    const starts = place(Array<number>(256).fill(10));
+    expect(starts[255]).toBeCloseTo(10 + 255 * FRAME, 9);
+  });
+
+  it("keeps a stamp after a real gap or a backward jump", () => {
+    expect(place([5, 5.1])).toEqual([5, 5.1]);
+    expect(place([5, 4.9])).toEqual([5, 4.9]);
+    expect(place([5, 1])).toEqual([5, 1]);
   });
 });

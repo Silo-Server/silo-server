@@ -78,6 +78,20 @@ type Store interface {
 	Resolve(context.Context, string, bool, catalog.AccessFilter) (string, []File, error)
 }
 
+// Item is a catalog item that can own themes: a movie, series, season (stored
+// or synthetic), or episode. SeriesID is the item itself for a movie or
+// series; SeasonID is an episode's stored season, empty for a synthetic one.
+type Item struct {
+	ID, Type, SeriesID, SeasonID string
+	SeasonNumber                 int
+}
+
+// itemStore is the optional Store form for an item the caller already looked
+// up and authorized. A store without it resolves the item by ID instead.
+type itemStore interface {
+	ResolveItem(context.Context, Item, bool, catalog.AccessFilter) (string, []File, error)
+}
+
 type Identity struct {
 	UserID         int    `json:"user_id"`
 	ProfileID      string `json:"profile_id"`
@@ -124,8 +138,17 @@ func NewService(store Store, secret string) *Service {
 	return &Service{Store: store, key: key}
 }
 
-func (s *Service) Discover(ctx context.Context, id string, inherit bool, filter catalog.AccessFilter) (Set, error) {
-	owner, files, err := s.Store.Resolve(ctx, id, inherit, filter)
+// Discover lists the themes of an item the caller has already authorized
+// under filter, as item detail has, so the item is not looked up again.
+func (s *Service) Discover(ctx context.Context, item Item, inherit bool, filter catalog.AccessFilter) (Set, error) {
+	var owner string
+	var files []File
+	var err error
+	if store, ok := s.Store.(itemStore); ok {
+		owner, files, err = store.ResolveItem(ctx, item, inherit, filter)
+	} else {
+		owner, files, err = s.Store.Resolve(ctx, item.ID, inherit, filter)
+	}
 	set := Set{OwnerID: owner, Items: []Song{}}
 	for _, file := range files {
 		set.Items = append(set.Items, file.Song)

@@ -4,10 +4,13 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"unicode/utf8"
 )
 
@@ -176,5 +179,108 @@ func TestDecodeAllKeepsUnchangedSlice(t *testing.T) {
 	got := DecodeAll([]string{"-i", encoded, "subtitles=filename='" + encoded + "'"})
 	if got[1] != "/media/B\xe5rd.mkv" || got[2] != "subtitles=filename='/media/B\xe5rd.mkv'" {
 		t.Fatalf("DecodeAll = %q", got)
+	}
+}
+
+// A wedged mount must not pin the callers: each returns when its own context
+// ends, and callers for the same path share one blocked stat instead of
+// stranding a goroutine per request.
+func TestStatContextReturnsWhenContextEndsWhileStatBlocks(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		release := make(chan struct{})
+		var calls atomic.Int32
+		orig := osStat
+		osStat = func(name string) (os.FileInfo, error) {
+			calls.Add(1)
+			<-release
+			return nil, os.ErrNotExist
+		}
+		defer func() { osStat = orig }()
+		released := false
+		defer func() {
+			if !released {
+				close(release)
+			}
+		}()
+
+		const path = "/media/wedged/movie.mkv"
+		first, cancelFirst := context.WithCancel(context.Background())
+		defer cancelFirst()
+		firstDone := make(chan error, 1)
+		go func() {
+			_, err := StatContext(first, path)
+			firstDone <- err
+		}()
+		secondDone := make(chan error, 1)
+		go func() {
+			_, err := StatContext(context.Background(), path)
+			secondDone <- err
+		}()
+		synctest.Wait()
+		if n := calls.Load(); n != 1 {
+			t.Fatalf("stat ran %d times for one path, want the callers to share one", n)
+		}
+
+		cancelFirst()
+		synctest.Wait()
+		select {
+		case err := <-firstDone:
+			if !errors.Is(err, context.Canceled) {
+				t.Fatalf("StatContext error = %v, want context.Canceled", err)
+			}
+		default:
+			t.Fatal("StatContext still waiting on the blocked stat after its context ended")
+		}
+		select {
+		case err := <-secondDone:
+			t.Fatalf("caller with a live context returned %v before the stat did", err)
+		default:
+		}
+
+		close(release)
+		released = true
+		if err := <-secondDone; !os.IsNotExist(err) {
+			t.Fatalf("shared StatContext result = %v, want the stat's not-exist error", err)
+		}
+	})
+}
+
+// Cancel just after the entry check observes a live context, so completion
+// and cancellation are both ready when StatContext starts waiting.
+type cancelAfterErrCheckContext struct {
+	context.Context //nolint:containedctx // Wrap a real context to cancel immediately after the entry check.
+	cancel          context.CancelFunc
+}
+
+func (c *cancelAfterErrCheckContext) Err() error {
+	err := c.Context.Err()
+	if c.cancel != nil {
+		c.cancel()
+		c.cancel = nil
+	}
+	return err
+}
+
+func TestStatContextPrefersCancellationToCompletedStat(t *testing.T) {
+	const path = "/media/completed/movie.mkv"
+	done := make(chan struct{})
+	close(done)
+	statCallsMu.Lock()
+	statCalls[path] = &statCall{done: done, err: os.ErrNotExist}
+	statCallsMu.Unlock()
+	t.Cleanup(func() {
+		statCallsMu.Lock()
+		delete(statCalls, path)
+		statCallsMu.Unlock()
+	})
+
+	// Exercise both select branches without relying on scheduler timing.
+	for range 64 {
+		ctx, cancel := context.WithCancel(t.Context())
+		_, err := StatContext(&cancelAfterErrCheckContext{Context: ctx, cancel: cancel}, path)
+		cancel()
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("StatContext error = %v, want context.Canceled instead of the completed stat", err)
+		}
 	}
 }

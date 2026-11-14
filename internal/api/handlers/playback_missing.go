@@ -83,7 +83,9 @@ func writePlaybackSessionEnded(w http.ResponseWriter) {
 }
 
 func writePlaybackSessionEndedError(w http.ResponseWriter, err error) bool {
-	if !errors.Is(err, errPlaybackSessionEnded) {
+	// A session whose keyframe playlist can't be rebuilt is over too: no
+	// rebuild can serve the playlist its player holds.
+	if !errors.Is(err, errPlaybackSessionEnded) && !errors.Is(err, playback.ErrKeyframePlanChanged) {
 		return false
 	}
 	writePlaybackSessionEnded(w)
@@ -103,7 +105,7 @@ func preflightPlaybackFile(
 		return &playbackFilePreflightError{notFound: true}
 	}
 
-	if _, err := fspath.Stat(file.FilePath); err != nil {
+	if _, err := fspath.StatContext(ctx, file.FilePath); err != nil {
 		if os.IsNotExist(err) {
 			markPlaybackFileMissing(ctx, file, marker, eventsHub)
 			return &playbackFilePreflightError{notFound: true, err: err}
