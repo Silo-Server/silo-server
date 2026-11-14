@@ -55,7 +55,7 @@ export interface PlayerFileVersion {
   failed?: boolean;
   /**
    * The catalog's liveness verdict for this version, stamped from the server's
-   * `POST /catalog/versions/check` result before the rows reach the player.
+   * `POST /api/v2/catalog/versions/check` result before the rows reach the player.
    * Absent means unknown (no result yet); `false` means the server's last check
    * could not resolve the row, which the version menu warns about. It is never
    * derived from the client's own playback failures.
@@ -403,7 +403,7 @@ export interface WatchPageProps {
   versions: PlayerFileVersion[];
   /**
    * The liveness verdicts the parent already stamped onto `versions`, from
-   * `POST /catalog/versions/check`. The watch detail does not carry them, so a
+   * `POST /api/v2/catalog/versions/check`. The watch detail does not carry them, so a
    * fresh detail read (the realtime reconnect reconcile) has to re-apply the
    * same map to keep the `available: false` / failed badges on the rows it
    * replaces.

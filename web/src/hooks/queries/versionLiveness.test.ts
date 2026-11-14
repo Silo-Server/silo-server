@@ -6,12 +6,17 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { FileVersion } from "@/api/types";
 
 const mocks = vi.hoisted(() => ({
-  api: vi.fn(),
+  v2: vi.fn(),
+  apiV1: vi.fn(),
+}));
+
+vi.mock("@/api/v2/request", () => ({
+  v2: mocks.v2,
 }));
 
 vi.mock("@/api/client", () => ({
-  api: mocks.api,
-  apiV1: mocks.api,
+  api: mocks.apiV1,
+  apiV1: mocks.apiV1,
 }));
 
 import {
@@ -55,17 +60,41 @@ function createWrapper(queryClient: QueryClient) {
 
 describe("fetchVersionLiveness", () => {
   beforeEach(() => {
-    mocks.api.mockReset();
+    mocks.v2.mockReset();
+    mocks.apiV1.mockReset();
   });
 
-  it("POSTs the file_ids to the batched check endpoint", async () => {
-    mocks.api.mockResolvedValue({ results: [] });
+  it("POSTs the file_ids to the v2 check operation and never the retired v1 route", async () => {
+    mocks.v2.mockResolvedValue({ results: [] });
     await fetchVersionLiveness([1, 2, 3]);
 
-    expect(mocks.api).toHaveBeenCalledWith("/catalog/versions/check", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ file_ids: [1, 2, 3] }),
+    expect(mocks.v2).toHaveBeenCalledWith("POST /api/v2/catalog/versions/check", {
+      body: { file_ids: ["1", "2", "3"] },
+    });
+    expect(mocks.apiV1).not.toHaveBeenCalled();
+  });
+
+  it("maps the v2 string ids and source mismatch back to numeric rows", async () => {
+    mocks.v2.mockResolvedValue({
+      results: [
+        {
+          file_id: 40,
+          available: false,
+          failed: true,
+          source_mismatch: { served_bytes: 42, declared_bytes: 64 },
+        },
+      ],
+    });
+
+    expect(await fetchVersionLiveness([40])).toEqual({
+      results: [
+        {
+          file_id: 40,
+          available: false,
+          failed: true,
+          source_mismatch: { served_bytes: 42, declared_bytes: 64 },
+        },
+      ],
     });
   });
 });
@@ -160,7 +189,8 @@ describe("mergeVersionLiveness", () => {
 
 describe("useVersionLiveness", () => {
   beforeEach(() => {
-    mocks.api.mockReset();
+    mocks.v2.mockReset();
+    mocks.apiV1.mockReset();
   });
 
   it("does not fire while disabled", () => {
@@ -169,7 +199,7 @@ describe("useVersionLiveness", () => {
       wrapper: createWrapper(createQueryClient()),
     });
 
-    expect(mocks.api).not.toHaveBeenCalled();
+    expect(mocks.v2).not.toHaveBeenCalled();
   });
 
   it("fires one batched request per chunk with the sorted virtual file_ids", async () => {
@@ -178,10 +208,10 @@ describe("useVersionLiveness", () => {
       makeVersion({ file_id: 1, container: "virtual" }),
       makeVersion({ file_id: 3, container: "mkv" }),
     ];
-    mocks.api.mockResolvedValue({
+    mocks.v2.mockResolvedValue({
       results: [
-        { file_id: 1, available: true },
-        { file_id: 2, available: false },
+        { file_id: "1", available: true },
+        { file_id: "2", available: false },
       ],
     });
 
@@ -191,12 +221,11 @@ describe("useVersionLiveness", () => {
 
     await waitFor(() => expect(result.current.get(2)?.available).toBe(false));
 
-    expect(mocks.api).toHaveBeenCalledTimes(1);
-    expect(mocks.api).toHaveBeenCalledWith("/catalog/versions/check", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ file_ids: [1, 2] }),
+    expect(mocks.v2).toHaveBeenCalledTimes(1);
+    expect(mocks.v2).toHaveBeenCalledWith("POST /api/v2/catalog/versions/check", {
+      body: { file_ids: ["1", "2"] },
     });
+    expect(mocks.apiV1).not.toHaveBeenCalled();
     expect(result.current.get(1)?.available).toBe(true);
     expect(result.current.has(3)).toBe(false);
   });
@@ -206,10 +235,10 @@ describe("useVersionLiveness", () => {
       makeVersion({ file_id: 1, container: "virtual", available: false }),
       makeVersion({ file_id: 2, container: "virtual" }),
     ];
-    mocks.api.mockResolvedValue({
+    mocks.v2.mockResolvedValue({
       results: [
-        { file_id: 1, available: true },
-        { file_id: 2, available: false },
+        { file_id: "1", available: true },
+        { file_id: "2", available: false },
       ],
     });
 
@@ -229,7 +258,7 @@ describe("useVersionLiveness", () => {
     // fresh array with the same virtual ids must keep the cached chunk keys,
     // or the check re-probes the same rows for every re-render.
     const rows = [makeVersion({ file_id: 1, container: "virtual" })];
-    mocks.api.mockResolvedValue({ results: [{ file_id: 1, available: true }] });
+    mocks.v2.mockResolvedValue({ results: [{ file_id: "1", available: true }] });
 
     const { result, rerender } = renderHook(
       ({ versions }: { versions: FileVersion[] }) => useVersionLiveness(versions, true),
@@ -240,18 +269,18 @@ describe("useVersionLiveness", () => {
     );
 
     await waitFor(() => expect(result.current.get(1)?.available).toBe(true));
-    expect(mocks.api).toHaveBeenCalledTimes(1);
+    expect(mocks.v2).toHaveBeenCalledTimes(1);
 
     rerender({ versions: [makeVersion({ file_id: 1, container: "virtual" })] });
     rerender({ versions: [makeVersion({ file_id: 1, container: "virtual", resolution: "4k" })] });
 
     await waitFor(() => expect(result.current.get(1)?.available).toBe(true));
-    expect(mocks.api).toHaveBeenCalledTimes(1);
+    expect(mocks.v2).toHaveBeenCalledTimes(1);
   });
 
   it("caches results across re-enables (no second request while fresh)", async () => {
     const versions = [makeVersion({ file_id: 1, container: "virtual" })];
-    mocks.api.mockResolvedValue({ results: [{ file_id: 1, available: false }] });
+    mocks.v2.mockResolvedValue({ results: [{ file_id: "1", available: false }] });
 
     const queryClient = createQueryClient();
     const { result, rerender } = renderHook(
@@ -263,13 +292,13 @@ describe("useVersionLiveness", () => {
     );
 
     await waitFor(() => expect(result.current.get(1)?.available).toBe(false));
-    expect(mocks.api).toHaveBeenCalledTimes(1);
+    expect(mocks.v2).toHaveBeenCalledTimes(1);
 
     rerender({ enabled: false });
     rerender({ enabled: true });
 
     await waitFor(() => expect(result.current.get(1)?.available).toBe(false));
-    expect(mocks.api).toHaveBeenCalledTimes(1);
+    expect(mocks.v2).toHaveBeenCalledTimes(1);
   });
 });
 

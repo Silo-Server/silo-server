@@ -667,4 +667,65 @@ describe("EpisodeContent", () => {
       );
     });
   });
+
+  describe("version liveness", () => {
+    beforeEach(() => {
+      installPolicyStorageMocks();
+      setAccessToken("account");
+      setProfileId("profile-1");
+    });
+    afterEach(() => {
+      cleanup();
+      vi.unstubAllGlobals();
+    });
+
+    it("checks the item page's versions through v2 and never the retired v1 route", async () => {
+      const requests: { path: string; method: string; body?: unknown }[] = [];
+      const fetchMock = vi.fn<typeof fetch>(async (url, init) => {
+        const path = new URL(String(url), "http://silo.test").pathname;
+        requests.push({
+          path,
+          method: init?.method ?? "GET",
+          body: typeof init?.body === "string" ? JSON.parse(init.body) : undefined,
+        });
+        return jsonResponse({ results: [] });
+      });
+      vi.stubGlobal("fetch", fetchMock);
+
+      render(
+        <QueryClientProvider client={new QueryClient()}>
+          <MemoryRouter initialEntries={["/item/episode-1"]}>
+            <EpisodeContent
+              item={makeEpisodeItem({
+                versions: [
+                  makeFileVersion({
+                    file_id: 11,
+                    container: "virtual",
+                    file_path: "virtual://movie/tt1?result=all",
+                  }),
+                ],
+              })}
+            />
+          </MemoryRouter>
+        </QueryClientProvider>,
+      );
+
+      await waitFor(() =>
+        expect(requests.some((request) => request.path === "/api/v2/catalog/versions/check")).toBe(
+          true,
+        ),
+      );
+
+      const livenessRequests = requests.filter((request) =>
+        request.path.endsWith("/catalog/versions/check"),
+      );
+      expect(livenessRequests).toHaveLength(1);
+      expect(livenessRequests[0]).toMatchObject({
+        path: "/api/v2/catalog/versions/check",
+        method: "POST",
+        body: { file_ids: ["11"] },
+      });
+      expect(requests.some((request) => request.path.startsWith("/api/v1/"))).toBe(false);
+    });
+  });
 });
