@@ -280,6 +280,82 @@ func TestRebindWaitsForItemEditPostgres(t *testing.T) {
 	}
 }
 
+// A repair that moves an ID off a provisional owner leaves the owner alone
+// when an edit it waited for took the ID off the owner.
+func TestProviderIDDriftRepairSkipsChangedOwnerPostgres(t *testing.T) {
+	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("SILO_TEST_DATABASE_URL is not set")
+	}
+	ctx := t.Context()
+	pool, err := pgxpool.New(ctx, dsn)
+	if err != nil {
+		t.Fatalf("connect test database: %v", err)
+	}
+	t.Cleanup(pool.Close)
+	suffix := uuid.NewString()
+	contentID, owner := "drift-repair-item-"+suffix, "drift-repair-owner-"+suffix
+	tmdbID, editedID := "drift-"+suffix, "edited-"+suffix
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM media_items WHERE content_id = ANY($1)`, []string{contentID, owner})
+	})
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO media_items (content_id, type, title, genres, status, tmdb_id)
+		VALUES ($1, 'movie', 'Drift Repair', '{}'::text[], 'matched', $3),
+			($2, 'movie', 'Provisional Owner', '{}'::text[], 'pending', $3)`,
+		contentID, owner, tmdbID); err != nil {
+		t.Fatalf("seed items: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO media_item_provider_ids (content_id, item_type, provider, provider_id)
+		VALUES ($1, 'movie', 'tmdb', $2)`, owner, tmdbID); err != nil {
+		t.Fatalf("seed durable id: %v", err)
+	}
+
+	// An admin's edit holds the owner while it moves the owner to another ID.
+	edit, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatalf("begin edit: %v", err)
+	}
+	defer edit.Rollback(ctx) //nolint:errcheck // a no-op once the edit commits
+	if _, err := edit.Exec(ctx, `SELECT 1 FROM media_items WHERE content_id = $1 FOR UPDATE`, owner); err != nil {
+		t.Fatalf("lock owner: %v", err)
+	}
+	row := providerIDDriftRow{ContentID: contentID, ItemType: "movie", Status: "matched", TMDBID: tmdbID}
+	repaired := make(chan error, 1)
+	go func() {
+		moved, err := NewProviderIDIntegrityRepairer(pool).moveProvisionalProviderClaim(ctx, owner, row, providerEntriesFromDrift(row))
+		if err == nil && moved {
+			err = errors.New("repair moved an ID the owner no longer holds")
+		}
+		repaired <- err
+	}()
+	waitForMediaItemLockWait(t, pool, repaired)
+	if _, err := edit.Exec(ctx, `UPDATE media_items SET tmdb_id = $2 WHERE content_id = $1`, owner, editedID); err != nil {
+		t.Fatalf("edit column: %v", err)
+	}
+	if _, err := edit.Exec(ctx, `
+		UPDATE media_item_provider_ids SET provider_id = $2
+		WHERE content_id = $1 AND provider = 'tmdb'`, owner, editedID); err != nil {
+		t.Fatalf("edit durable id: %v", err)
+	}
+	if err := edit.Commit(ctx); err != nil {
+		t.Fatalf("commit edit: %v", err)
+	}
+	if err := <-repaired; err != nil {
+		t.Fatalf("repair: %v", err)
+	}
+	var durable string
+	if err := pool.QueryRow(ctx, `
+		SELECT provider_id FROM media_item_provider_ids
+		WHERE content_id = $1 AND provider = 'tmdb'`, owner).Scan(&durable); err != nil {
+		t.Fatalf("read owner durable id: %v", err)
+	}
+	if durable != editedID {
+		t.Fatalf("owner durable tmdb = %q, want the edited %q", durable, editedID)
+	}
+}
+
 // waitForMediaItemLockWait returns once another session of this database
 // waits on a lock in a statement on the media_item tables, and fails if done
 // reports first.

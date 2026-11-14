@@ -387,6 +387,23 @@ func (r *ProviderIDIntegrityRepairer) moveProvisionalProviderClaim(ctx context.C
 	if isConfirmedOwnershipStatus(ownerStatus) {
 		return false, fmt.Errorf("refusing to move provider IDs from %s: status is now %q", ownerContentID, ownerStatus)
 	}
+	// The owner was found before these locks; skip it when it no longer holds
+	// any of the IDs, such as after an edit this repair waited for.
+	providers, providerIDs := make([]string, len(entries)), make([]string, len(entries))
+	for i, entry := range entries {
+		providers[i], providerIDs[i] = entry.Provider, entry.ProviderID
+	}
+	var holds bool
+	if err := tx.QueryRow(ctx, `
+		SELECT EXISTS (SELECT 1 FROM media_item_provider_ids pid
+		WHERE pid.content_id = $1 AND pid.item_type = $2
+		  AND (pid.provider, pid.provider_id) IN (SELECT * FROM unnest($3::text[], $4::text[])))`,
+		ownerContentID, row.ItemType, providers, providerIDs).Scan(&holds); err != nil {
+		return false, fmt.Errorf("rechecking provisional owner %s: %w", ownerContentID, err)
+	}
+	if !holds {
+		return false, nil
+	}
 	if _, err := tx.Exec(ctx, `DELETE FROM media_item_provider_ids WHERE content_id = $1`, ownerContentID); err != nil {
 		return false, fmt.Errorf("clear provisional provider ids for %s: %w", ownerContentID, err)
 	}
