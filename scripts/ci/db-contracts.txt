@@ -973,6 +973,13 @@
 # An audiobook enrichment match keeps the fields an admin locked.
 ./internal/audiobooks TestPersistKeepsAdminLockedFieldsDB
 
+# Audiobook enrichment failures back off, honor retry-after, and stop at a
+# terminal failed outcome; failures do not reset the no-match count.
+./internal/audiobooks TestAudiobookEnrichmentRetryStateDB
+# One node sweeps at a time, and a rate-limited provider is left alone for the
+# rest of the sweep.
+./internal/audiobooks TestAudiobookEnrichmentSweepRateLimitDB
+
 # An audiobook rescan keeps the authors and narrators an admin locked with the
 # crew lock.
 ./internal/scanner TestAudiobookRescanKeepsCrewLockedCreditsDB

@@ -23,13 +23,13 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
+	"github.com/Silo-Server/silo-server/internal/database/pglock"
 	"github.com/Silo-Server/silo-server/internal/metadata"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/scanner"
@@ -58,6 +58,11 @@ const (
 	// enough for the final item in the default 250-item batch to reach its
 	// provider, while still allowing another replica to recover abandoned work.
 	defaultEnrichClaimLease = 2 * time.Hour
+
+	// enrichSweepLock lets one node sweep at a time ("SILOABEN"). Every API
+	// node runs the task; without it, N nodes would claim N disjoint batches
+	// and multiply the request rate against the same providers.
+	enrichSweepLock int64 = 0x53494C4F4142454E
 )
 
 // audiobookEnrichBatchSize returns the configured maximum sweep size.
@@ -97,11 +102,15 @@ type enrichmentItemRow struct {
 	Language    string // resolved from media_folders.metadata_language
 	Author      string // from item_people where kind = PersonKindAuthor (7), best-effort
 	ProviderIDs map[string]string
+	// Chain holds the slugs of the providers resolved for this item, so a
+	// failure takes its retry-after from those providers' pauses only.
+	Chain []string
 }
 
 type audiobookProviderIDRepository interface {
 	metadata.ProviderIDOwnerLookup
 	GetByContentID(ctx context.Context, contentID string) ([]*models.MediaItemProviderID, error)
+	GetByContentIDs(ctx context.Context, contentIDs []string) (map[string][]*models.MediaItemProviderID, error)
 	ReplaceByContentID(ctx context.Context, contentID string, providerIDs map[string]string) error
 	ReplaceByContentIDTx(ctx context.Context, tx pgx.Tx, contentID, itemType string, providerIDs map[string]string) error
 }
@@ -125,6 +134,7 @@ type Enricher struct {
 	imageCacheJobs   metadata.ImageCacheJobEnqueuer
 	workLinker       literaryWorkLinker
 	resolveProviders func(context.Context, int, string) ([]metadata.Provider, error)
+	gate             providerGate
 	ffmpegPath       string
 	batchSize        int
 	workers          int
@@ -192,14 +202,29 @@ func (e *Enricher) SetFFmpegPath(path string) {
 	e.ffmpegPath = path
 }
 
-// Run executes one sweep. It is safe to call concurrently (each call does its
-// own SELECT FOR UPDATE SKIP LOCKED to avoid double-processing) but the task
-// manager will only call it from a single goroutine on its interval.
+// Run executes one sweep and returns how many items it matched. Only one node
+// sweeps at a time: Run returns 0 at once while another holds the sweep lock,
+// so adding nodes does not add provider load. Claims still fence each item, so
+// a lease that outlives a lost lock cannot be processed twice.
 func (e *Enricher) Run(ctx context.Context) (int, error) {
 	if e == nil || e.pool == nil || e.chainRepo == nil {
 		return 0, nil
 	}
+	lock, acquired, err := pglock.TryAcquire(ctx, e.pool, enrichSweepLock)
+	if err != nil {
+		return 0, fmt.Errorf("audiobook enrichment: take the sweep lock: %w", err)
+	}
+	if !acquired {
+		slog.InfoContext(ctx, "audiobook enrichment: another node is sweeping; skipping this run", "component", "audiobooks")
+		return 0, nil
+	}
+	defer func() { _ = lock.Release(context.WithoutCancel(ctx)) }()
 
+	// The sweep summary compares against database time, not this node's clock.
+	var started time.Time
+	if err := e.pool.QueryRow(ctx, `SELECT now()`).Scan(&started); err != nil {
+		return 0, fmt.Errorf("audiobook enrichment: read database time: %w", err)
+	}
 	items, err := e.claimBatch(ctx)
 	if err != nil {
 		return 0, fmt.Errorf("audiobook enrichment: claim batch: %w", err)
@@ -213,13 +238,74 @@ func (e *Enricher) Run(ctx context.Context) (int, error) {
 		"workers", e.workers,
 	)
 
-	enriched := e.runBatch(ctx, items, e.enrichItem)
+	e.runBatch(ctx, items, e.enrichItem)
 
+	summary, err := e.sweepSummary(context.WithoutCancel(ctx), items, started)
+	if err != nil {
+		slog.WarnContext(ctx, "audiobook enrichment: could not summarize sweep", "component", "audiobooks", "error", err)
+	}
 	slog.InfoContext(ctx, "audiobook enrichment: sweep complete", "component", "audiobooks",
-		"attempted", len(items),
-		"enriched", enriched,
+		"claimed", len(items),
+		"enriched", summary.enriched,
+		"no_match", summary.noMatch,
+		"skipped", summary.skipped,
+		"failed_retrying", summary.retrying,
+		"failed_terminal", summary.failed,
+		"deferred", len(items)-summary.recorded(),
 	)
-	return enriched, nil
+	return summary.enriched, nil
+}
+
+// sweepSummary counts what a sweep recorded for its claimed items. It reads the
+// state table rather than worker return values, which cannot tell a match
+// from a clean no-match or a skip.
+type sweepSummary struct {
+	enriched, noMatch, skipped, retrying, failed int
+}
+
+func (s sweepSummary) recorded() int {
+	return s.enriched + s.noMatch + s.skipped + s.retrying + s.failed
+}
+
+func (e *Enricher) sweepSummary(ctx context.Context, items []enrichmentItemRow, since time.Time) (sweepSummary, error) {
+	var summary sweepSummary
+	ids := make([]string, len(items))
+	for i := range items {
+		ids[i] = items[i].ContentID
+	}
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	rows, err := e.pool.Query(ctx, `
+		SELECT COALESCE(outcome, ''), count(*)
+		FROM audiobook_enrichment_state
+		WHERE content_id = ANY($1)
+		  AND last_attempt_at >= $2
+		GROUP BY 1
+	`, ids, since)
+	if err != nil {
+		return summary, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var outcome string
+		var n int
+		if err := rows.Scan(&outcome, &n); err != nil {
+			return summary, err
+		}
+		switch EnrichmentOutcome(outcome) {
+		case EnrichmentOutcomeSuccess:
+			summary.enriched = n
+		case EnrichmentOutcomeNoMatch:
+			summary.noMatch = n
+		case EnrichmentOutcomeSkipped:
+			summary.skipped = n
+		case EnrichmentOutcomeFailed:
+			summary.failed = n
+		default:
+			summary.retrying = n
+		}
+	}
+	return summary, rows.Err()
 }
 
 // HasPendingItems reports whether a scheduled sweep has any audiobook rows to
@@ -231,8 +317,19 @@ func (e *Enricher) HasPendingItems(ctx context.Context) (bool, error) {
 		return false, nil
 	}
 
+	// A sweep in progress on another node owns the work; this node's scheduled
+	// run would only find the lock taken.
+	lock, acquired, err := pglock.TryAcquire(ctx, e.pool, enrichSweepLock)
+	if err != nil {
+		return false, fmt.Errorf("checking the audiobook enrichment sweep lock: %w", err)
+	}
+	if !acquired {
+		return false, nil
+	}
+	_ = lock.Release(context.WithoutCancel(ctx))
+
 	var exists bool
-	err := e.pool.QueryRow(ctx, `
+	err = e.pool.QueryRow(ctx, `
 		SELECT EXISTS(
 			SELECT 1
 			FROM media_items mi
@@ -256,7 +353,7 @@ func (e *Enricher) HasPendingItems(ctx context.Context) (bool, error) {
 			          WHERE retry.content_id = mi.content_id
 			            AND retry.outcome IN ('no_match', 'skipped')
 			            AND (retry.next_attempt_at IS NULL OR retry.next_attempt_at <= now())
-			            AND (retry.outcome = 'skipped' OR retry.attempts < $1)
+			            AND (retry.outcome = 'skipped' OR retry.no_matches < $1)
 			      )
 			      OR EXISTS (
 			          SELECT 1
@@ -272,6 +369,7 @@ func (e *Enricher) HasPendingItems(ctx context.Context) (bool, error) {
 			        AND (
 			            s.next_attempt_at > now()
 			            OR s.lease_until > now()
+			            OR s.outcome = 'failed'
 			        )
 			  )
 			LIMIT 1
@@ -285,10 +383,9 @@ func (e *Enricher) HasPendingItems(ctx context.Context) (bool, error) {
 
 // runBatch processes items in parallel using e.workers goroutines. The
 // enrichFn parameter exists for testing: production calls pass e.enrichItem.
-// Returns the count of items where enrichFn returned nil.
-func (e *Enricher) runBatch(ctx context.Context, items []enrichmentItemRow, enrichFn func(context.Context, enrichmentItemRow) error) int {
+func (e *Enricher) runBatch(ctx context.Context, items []enrichmentItemRow, enrichFn func(context.Context, enrichmentItemRow) error) {
 	if len(items) == 0 {
-		return 0
+		return
 	}
 	workers := e.workers
 	if workers <= 0 {
@@ -299,10 +396,7 @@ func (e *Enricher) runBatch(ctx context.Context, items []enrichmentItemRow, enri
 	}
 
 	ch := make(chan enrichmentItemRow, workers)
-	var (
-		wg       sync.WaitGroup
-		enriched int64
-	)
+	var wg sync.WaitGroup
 	// Claim cleanup must outlive the canceled batch context, but it cannot
 	// hand every remaining item its own five-second timeout: the drain is
 	// serial, so an unreachable database would stretch cancellation by five
@@ -342,9 +436,7 @@ func (e *Enricher) runBatch(ctx context.Context, items []enrichmentItemRow, enri
 						"title", item.Title,
 						"error", err,
 					)
-					continue
 				}
-				atomic.AddInt64(&enriched, 1)
 			}
 		}()
 	}
@@ -360,7 +452,6 @@ func (e *Enricher) runBatch(ctx context.Context, items []enrichmentItemRow, enri
 	}
 	close(ch)
 	wg.Wait()
-	return int(enriched)
 }
 
 // releaseClaim returns an unprocessed claim to the pool. ctx is the batch's
@@ -417,7 +508,7 @@ func (e *Enricher) claimBatch(ctx context.Context) ([]enrichmentItemRow, error) 
 			          WHERE retry.content_id = mi.content_id
 			            AND retry.outcome IN ('no_match', 'skipped')
 			            AND (retry.next_attempt_at IS NULL OR retry.next_attempt_at <= now())
-			            AND (retry.outcome = 'skipped' OR retry.attempts < $3)
+			            AND (retry.outcome = 'skipped' OR retry.no_matches < $3)
 			      )
 			      OR EXISTS (
 			          SELECT 1
@@ -433,6 +524,7 @@ func (e *Enricher) claimBatch(ctx context.Context) ([]enrichmentItemRow, error) 
 			        AND (
 			            s.next_attempt_at > now()
 			            OR s.lease_until > now()
+			            OR s.outcome = 'failed'
 			        )
 			  )
 			ORDER BY mi.created_at ASC, mi.content_id ASC
@@ -521,13 +613,19 @@ func (e *Enricher) claimBatch(ctx context.Context) ([]enrichmentItemRow, error) 
 		return nil, fmt.Errorf("iterating audiobook enrichment rows: %w", err)
 	}
 
-	// Load any durable provider IDs for each item.
-	if e.providerIDs != nil {
+	// Load any durable provider IDs for the batch in one query.
+	if e.providerIDs != nil && len(items) > 0 {
+		ids := make([]string, len(items))
 		for i := range items {
-			pids, err := e.providerIDs.GetByContentID(ctx, items[i].ContentID)
-			if err == nil {
-				items[i].ProviderIDs = providerIDMapFromRows(pids)
-			}
+			ids[i] = items[i].ContentID
+		}
+		pids, err := e.providerIDs.GetByContentIDs(ctx, ids)
+		if err != nil {
+			// The claim stands; the items search without their stored IDs.
+			slog.WarnContext(ctx, "audiobook enrichment: could not load provider IDs for the batch", "component", "audiobooks", "error", err)
+		}
+		for i := range items {
+			items[i].ProviderIDs = providerIDMapFromRows(pids[items[i].ContentID])
 		}
 	}
 
@@ -556,7 +654,9 @@ func (e *Enricher) enrichItem(ctx context.Context, item enrichmentItemRow) error
 	}
 	if err != nil {
 		resolveErr := fmt.Errorf("resolving audiobook chain for folder %d: %w", item.FolderID, err)
-		e.recordFailure(ctx, item, classifyProviderError(resolveErr), resolveErr.Error())
+		// Classify the cause, not the wrapper: folder 403 must not read as
+		// an HTTP status.
+		e.recordFailure(ctx, item, classifyProviderError(err), resolveErr.Error())
 		return resolveErr
 	}
 	if len(providers) == 0 {
@@ -565,6 +665,16 @@ func (e *Enricher) enrichItem(ctx context.Context, item enrichmentItemRow) error
 			"folder_id", item.FolderID,
 		)
 		return e.completeWithoutMetadata(ctx, item, EnrichmentOutcomeSkipped)
+	}
+	// Route calls through the rate-limit gate. When every provider in the
+	// chain is paused, nothing would be asked: hand the item back for after the
+	// pause without counting an attempt.
+	providers = e.gate.wrap(providers)
+	for _, p := range providers {
+		item.Chain = append(item.Chain, p.Slug())
+	}
+	if until, paused := e.gate.allPaused(providers); paused {
+		return e.deferItem(ctx, item, until)
 	}
 
 	// Seed accumulated provider IDs from durable store.
@@ -777,10 +887,7 @@ func (e *Enricher) enrichItem(ctx context.Context, item enrichmentItemRow) error
 			// the class too, so a rate-limited afternoon is afterwards
 			// distinguishable from a genuine no-match -- the distinction the
 			// ebook backlog lost.
-			joined := errors.Join(providerErrs...)
-			e.recordFailure(ctx, item, classifyProviderError(joined), joined.Error())
-			return fmt.Errorf("no metadata obtained, %d provider error(s): %w",
-				len(providerErrs), joined)
+			return e.failOrDefer(ctx, item, providerErrs)
 		}
 		// Providers ran cleanly but nothing matched — stamp last_refreshed so we
 		// skip on the next sweep.
@@ -1275,13 +1382,61 @@ func (e *Enricher) recordOutcome(ctx context.Context, item enrichmentItemRow, ou
 	}
 }
 
+// failOrDefer records an item that got no metadata because providers failed.
+// When every error came from a paused provider, no provider was asked, so the
+// item is deferred to the end of the pause instead of charged a failure.
+func (e *Enricher) failOrDefer(ctx context.Context, item enrichmentItemRow, providerErrs []error) error {
+	if until, ok := pausedOnly(providerErrs); ok {
+		return e.deferItem(ctx, item, until)
+	}
+	joined := errors.Join(providerErrs...)
+	e.recordFailure(ctx, item, classifyProviderError(joined), joined.Error())
+	return fmt.Errorf("no metadata obtained, %d provider error(s): %w", len(providerErrs), joined)
+}
+
+// pausedOnly reports whether every error came from a paused provider, and the
+// latest pause end among them.
+func pausedOnly(errs []error) (time.Time, bool) {
+	var until time.Time
+	for _, err := range errs {
+		var paused *providerPausedError
+		if !errors.As(err, &paused) {
+			return time.Time{}, false
+		}
+		if paused.until.After(until) {
+			until = paused.until
+		}
+	}
+	return until, len(errs) > 0
+}
+
+// deferItem returns a claimed item untouched until the providers' pause ends.
+func (e *Enricher) deferItem(ctx context.Context, item enrichmentItemRow, until time.Time) error {
+	slog.DebugContext(ctx, "audiobook enrichment: providers paused; deferring item", "component", "audiobooks",
+		"content_id", item.ContentID,
+		"until", until,
+	)
+	if e.state == nil {
+		return nil
+	}
+	return e.state.Defer(ctx, item.ContentID, item.ClaimToken, until)
+}
+
 // recordFailure stamps a classified failure and parks a retry. Swallowed for
-// the same reason as recordOutcome.
+// the same reason as recordOutcome. A rate-limited item stays out at least
+// until the gate lets its own providers be called again, which carries a
+// provider's retry-after over to the item.
 func (e *Enricher) recordFailure(ctx context.Context, item enrichmentItemRow, class EnrichmentErrorClass, cause string) {
 	if e == nil || e.state == nil {
 		return
 	}
-	if err := e.state.RecordFailure(ctx, item.ContentID, item.ClaimToken, class, cause); err != nil {
+	var retryAfter time.Duration
+	if class == EnrichmentErrorRateLimited {
+		if until := e.gate.latestPause(item.Chain); !until.IsZero() {
+			retryAfter = time.Until(until)
+		}
+	}
+	if err := e.state.RecordFailure(ctx, item.ContentID, item.ClaimToken, class, retryAfter, cause); err != nil {
 		slog.WarnContext(ctx, "audiobook enrichment: could not record failure", "component", "audiobooks",
 			"content_id", item.ContentID,
 			"class", string(class),
@@ -1290,13 +1445,19 @@ func (e *Enricher) recordFailure(ctx context.Context, item enrichmentItemRow, cl
 	}
 }
 
+// audiobookProviderErrors reads an untyped HTTP 403 as rate limiting. The
+// audiobook metadata plugin forwards source errors such as "itunes: HTTP 403"
+// from GetMetadata without a gRPC code, and Apple's API answers throttling
+// with 403. Under the default policy that text parked the item for 30 days.
+var audiobookProviderErrors = metadata.ProviderErrorPolicy{ForbiddenIsRateLimit: true}
+
 // classifyProviderError sorts a provider failure into the classes that decide
 // how long the item is parked. Rate limiting is singled out because retrying
 // into a closed window is what turns a throttle into a backlog -- and because
 // a throttled answer recorded as a plain no-match is precisely how the ebook
 // side ended up with 90,721 unreadable rows.
 func classifyProviderError(err error) EnrichmentErrorClass {
-	class, _ := metadata.ClassifyProviderError(err)
+	class, _ := audiobookProviderErrors.Classify(err)
 	switch class {
 	case metadata.ProviderErrorRateLimited:
 		return EnrichmentErrorRateLimited
