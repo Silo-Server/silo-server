@@ -1,18 +1,10 @@
 package handlers
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
-	"net/http"
-	"net/http/httptest"
 	"sync"
 	"testing"
 
-	"github.com/go-chi/chi/v5"
-
-	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
-	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/subtitles"
 )
 
@@ -73,25 +65,6 @@ func (r *adminSubtitleConfigRepo) providerConfig(name string) subtitles.Provider
 	return r.configs[name]
 }
 
-type blockedSubtitleUpsertRepo struct {
-	*adminSubtitleConfigRepo
-	upsertPersisted chan struct{}
-	releaseUpsert   chan struct{}
-}
-
-func (r *blockedSubtitleUpsertRepo) UpsertProviderConfig(ctx context.Context, cfg *subtitles.ProviderConfig) error {
-	if err := r.adminSubtitleConfigRepo.UpsertProviderConfig(ctx, cfg); err != nil {
-		return err
-	}
-	close(r.upsertPersisted)
-	select {
-	case <-r.releaseUpsert:
-		return nil
-	case <-ctx.Done():
-		return ctx.Err()
-	}
-}
-
 type adminSubtitleTestProvider struct {
 	name string
 	key  string
@@ -122,193 +95,6 @@ func newTestableAdminSubtitleHandler(repo *adminSubtitleConfigRepo) (*AdminSubti
 	return handler, manager
 }
 
-func newTestableAdminSubtitleHandlerWithRepo(
-	repo subtitles.Repository,
-) (*AdminSubtitleHandler, *subtitles.Manager) {
-	manager := subtitles.NewManager(repo, newMockBlobStoreForHandler())
-	handler := NewAdminSubtitleHandler(repo)
-	handler.SetDownloadedSubtitleDeps(nil, manager)
-	handler.providerFactory = func(cfg *subtitles.ProviderConfig) (subtitles.Provider, error) {
-		return &adminSubtitleTestProvider{name: cfg.ProviderName, key: cfg.APIKey}, nil
-	}
-	return handler, manager
-}
-
-func TestUpdateSubtitleProviderAppliesSavedDraftLive(t *testing.T) {
-	repo := newAdminSubtitleConfigRepo()
-	repo.configs["subdl"] = subtitles.ProviderConfig{
-		ProviderName: "subdl", Enabled: true, APIKey: subtitleTestCredential("old"),
-	}
-	handler, manager := newTestableAdminSubtitleHandler(repo)
-
-	body, _ := json.Marshal(updateSubtitleProviderRequest{
-		Enabled: true,
-		APIKey:  subtitleTestCredential("valid"),
-	})
-	req := withSubtitleRouteParam(
-		newAdminSubtitleRequest(http.MethodPut, "/admin/subtitle-providers/subdl", body),
-		"provider", "subdl",
-	)
-	rec := httptest.NewRecorder()
-	handler.HandleUpdateProvider(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
-	}
-	if got := repo.providerConfig("subdl").APIKey; got != subtitleTestCredential("valid") {
-		t.Fatalf("saved API key = %q, want valid test credential", got)
-	}
-	results, err := manager.Search(context.Background(), subtitles.SearchRequest{Title: "Movie"})
-	if err != nil || len(results.Results) != 1 {
-		t.Fatalf("live provider results = %#v, err = %v", results, err)
-	}
-}
-
-func TestUpdateLegacySubtitleProviderPreservesV1Compatibility(t *testing.T) {
-	repo := newAdminSubtitleConfigRepo()
-	handler := NewAdminSubtitleHandler(repo)
-	body, _ := json.Marshal(updateSubtitleProviderRequest{
-		Enabled: true,
-		APIKey:  subtitleTestCredential("legacy"),
-	})
-	req := withSubtitleRouteParam(
-		newAdminSubtitleRequest(http.MethodPut, "/admin/subtitle-providers/legacy-provider", body),
-		"provider", "legacy-provider",
-	)
-	rec := httptest.NewRecorder()
-
-	handler.HandleUpdateProvider(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200; body = %s", rec.Code, rec.Body.String())
-	}
-	if got := repo.providerConfig("legacy-provider"); !got.Enabled ||
-		got.APIKey != subtitleTestCredential("legacy") {
-		t.Fatalf("stored legacy provider = %#v", got)
-	}
-	var response struct {
-		AppliedLive bool `json:"applied_live"`
-	}
-	if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
-		t.Fatal(err)
-	}
-	if response.AppliedLive {
-		t.Fatal("legacy provider reported as applied live")
-	}
-}
-
-func TestUpdateSubtitleProviderExplicitlyClearsCredentialsAndDisablesLiveProvider(t *testing.T) {
-	repo := newAdminSubtitleConfigRepo()
-	repo.configs["subdl"] = subtitles.ProviderConfig{
-		ProviderName: "subdl", Enabled: true, APIKey: subtitleTestCredential("valid"),
-	}
-	handler, manager := newTestableAdminSubtitleHandler(repo)
-	manager.RegisterProvider(&adminSubtitleTestProvider{
-		name: "subdl",
-		key:  subtitleTestCredential("valid"),
-	})
-
-	body, _ := json.Marshal(updateSubtitleProviderRequest{Enabled: true, ClearCredentials: true})
-	req := withSubtitleRouteParam(
-		newAdminSubtitleRequest(http.MethodPut, "/admin/subtitle-providers/subdl", body),
-		"provider", "subdl",
-	)
-	rec := httptest.NewRecorder()
-	handler.HandleUpdateProvider(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
-	}
-	if got := repo.providerConfig("subdl"); got.Enabled || got.APIKey != "" {
-		t.Fatalf("cleared config = %#v", got)
-	}
-	results, err := manager.Search(context.Background(), subtitles.SearchRequest{Title: "Movie"})
-	if err != nil || len(results.Results) != 0 {
-		t.Fatalf("cleared live provider results = %#v, err = %v", results, err)
-	}
-}
-
-func TestConcurrentSubtitlePutAndClearApplyLatestCommittedConfig(t *testing.T) {
-	baseRepo := newAdminSubtitleConfigRepo()
-	repo := &blockedSubtitleUpsertRepo{
-		adminSubtitleConfigRepo: baseRepo,
-		upsertPersisted:         make(chan struct{}),
-		releaseUpsert:           make(chan struct{}),
-	}
-	handler, manager := newTestableAdminSubtitleHandlerWithRepo(repo)
-
-	putBody, _ := json.Marshal(updateSubtitleProviderRequest{
-		Enabled: true,
-		APIKey:  subtitleTestCredential("valid"),
-	})
-	putReq := withSubtitleRouteParam(
-		newAdminSubtitleRequest(http.MethodPut, "/admin/subtitle-providers/subdl", putBody),
-		"provider", "subdl",
-	)
-	putRec := httptest.NewRecorder()
-	putDone := make(chan struct{})
-	go func() {
-		defer close(putDone)
-		handler.HandleUpdateProvider(putRec, putReq)
-	}()
-
-	<-repo.upsertPersisted
-
-	clearBody, _ := json.Marshal(updateSubtitleProviderRequest{ClearCredentials: true})
-	clearReq := withSubtitleRouteParam(
-		newAdminSubtitleRequest(http.MethodPut, "/admin/subtitle-providers/subdl", clearBody),
-		"provider", "subdl",
-	)
-	clearRec := httptest.NewRecorder()
-	handler.HandleUpdateProvider(clearRec, clearReq)
-	if clearRec.Code != http.StatusOK {
-		t.Fatalf("clear status = %d, body = %s", clearRec.Code, clearRec.Body.String())
-	}
-
-	close(repo.releaseUpsert)
-	<-putDone
-	if putRec.Code != http.StatusOK {
-		t.Fatalf("PUT status = %d, body = %s", putRec.Code, putRec.Body.String())
-	}
-
-	if got := repo.providerConfig("subdl"); got.Enabled || got.APIKey != "" {
-		t.Fatalf("latest persisted config = %#v, want disabled with cleared credentials", got)
-	}
-	results, err := manager.Search(context.Background(), subtitles.SearchRequest{Title: "Movie"})
-	if err != nil || len(results.Results) != 0 {
-		t.Fatalf("live provider results = %#v, err = %v; stale PUT config was applied", results, err)
-	}
-}
-
-func TestSubtitleProviderConnectionTestUsesUnsavedDraft(t *testing.T) {
-	repo := newAdminSubtitleConfigRepo()
-	repo.configs["subdl"] = subtitles.ProviderConfig{
-		ProviderName: "subdl", Enabled: true, APIKey: subtitleTestCredential("old"),
-	}
-	handler, _ := newTestableAdminSubtitleHandler(repo)
-
-	body, _ := json.Marshal(updateSubtitleProviderRequest{APIKey: subtitleTestCredential("valid")})
-	req := withSubtitleRouteParam(
-		newAdminSubtitleRequest(http.MethodPost, "/admin/subtitle-providers/subdl/test", body),
-		"provider", "subdl",
-	)
-	rec := httptest.NewRecorder()
-	handler.HandleTestProvider(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
-	}
-	var response struct {
-		Success bool `json:"success"`
-	}
-	if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil || !response.Success {
-		t.Fatalf("response = %s, err = %v", rec.Body.String(), err)
-	}
-	if got := repo.providerConfig("subdl").APIKey; got != subtitleTestCredential("old") {
-		t.Fatalf("connection test persisted draft key %q", got)
-	}
-}
-
 func TestSubtitleProviderConnectionTestRequiresSearchResultsForEveryBuiltin(t *testing.T) {
 	for _, provider := range []string{"opensubtitles", "subdl", "subsource"} {
 		t.Run(provider, func(t *testing.T) {
@@ -323,24 +109,18 @@ func TestSubtitleProviderConnectionTestRequiresSearchResultsForEveryBuiltin(t *t
 	}
 }
 
-func newAdminSubtitleRequest(method, path string, body []byte) *http.Request {
-	var reader *bytes.Reader
-	if body != nil {
-		reader = bytes.NewReader(body)
-	} else {
-		reader = bytes.NewReader(nil)
-	}
-	req := httptest.NewRequest(method, path, reader)
-	ctx := apimw.SetClaims(context.Background(), &auth.Claims{
-		UserID:    1,
-		Role:      "admin",
-		TokenType: auth.TokenTypeAccess,
-	})
-	return req.WithContext(ctx)
-}
+// A connection test checks the submitted draft credentials over the saved
+// ones and saves nothing.
+func TestSubtitleProviderConnectionTestUsesUnsavedDraft(t *testing.T) {
+	repo := newAdminSubtitleConfigRepo()
+	repo.configs["subdl"] = subtitles.ProviderConfig{ProviderName: "subdl", Enabled: true, APIKey: subtitleTestCredential("old")}
+	handler, _ := newTestableAdminSubtitleHandler(repo)
 
-func withSubtitleRouteParam(req *http.Request, key, value string) *http.Request {
-	routeCtx := chi.NewRouteContext()
-	routeCtx.URLParams.Add(key, value)
-	return req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, routeCtx))
+	view := handler.TestSubtitleProvider(context.Background(), "subdl", SubtitleProviderTestConfig{APIKey: subtitleTestCredential("valid")})
+	if !view.Success {
+		t.Fatalf("view = %#v, want the draft key to pass", view)
+	}
+	if got := repo.providerConfig("subdl").APIKey; got != subtitleTestCredential("old") {
+		t.Fatalf("connection test persisted draft key %q", got)
+	}
 }

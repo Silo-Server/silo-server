@@ -2,6 +2,7 @@ package intromarkers
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -37,6 +38,9 @@ type Analyzer struct {
 	// moviePageSize is how many movies a scheduled run lists at a time;
 	// zero means movieCandidatePageSize.
 	moviePageSize int
+	// episodeSeasonsPerPage is how many seasons a scheduled run loads at a
+	// time; zero means episodeCandidateSeasonsPerPage.
+	episodeSeasonsPerPage int
 	// node names this server in recorded silence refinement failures, which
 	// only defer retries on the server that recorded them.
 	node string
@@ -77,7 +81,8 @@ func WithPlaybackPriority(ctx context.Context) context.Context {
 
 type introRepository interface {
 	CountEnabledLibraries(ctx context.Context) (int, error)
-	ListEligibleCandidates(ctx context.Context) ([]Candidate, error)
+	CountEligibleCandidates(ctx context.Context) (int, error)
+	ListEligibleCandidatePage(ctx context.Context, after *episodeCandidateCursor, seasons int) ([]Candidate, *episodeCandidateCursor, error)
 	ListCandidatesForEpisode(ctx context.Context, episodeID string) ([]Candidate, error)
 	ListCandidatesForGroup(ctx context.Context, mediaFolderID int, seasonID, analysisGroupKey string) ([]Candidate, error)
 	ListChapterSilenceBackfillCandidates(ctx context.Context, limit int, cfg Config, node string) ([]Candidate, error)
@@ -316,6 +321,15 @@ func (a *Analyzer) run(ctx context.Context, kinds EpisodeMarkerKinds, progress P
 		report(100, "Credits detection is turned off")
 		return summary, nil
 	}
+	// With credits on, movies follow the episodes: in this run, or in the
+	// RunMovies pass a server without Chromaprint runs after RunEpisodes.
+	// Their share of the time limit is reserved now, so the library lookup
+	// comes out of the episodes' share.
+	episodeCtx, stopEpisodes := ctx, context.CancelFunc(func() {})
+	if passes.episodes && kinds.Credits {
+		episodeCtx, stopEpisodes = a.episodeContext(ctx)
+	}
+	defer stopEpisodes()
 	libraries, err := a.repo.CountEnabledLibraries(ctx)
 	if err != nil {
 		return summary, err
@@ -331,9 +345,12 @@ func (a *Analyzer) run(ctx context.Context, kinds EpisodeMarkerKinds, progress P
 	}
 
 	if !movies {
-		episodeSummary, err := a.runEpisodes(ctx, kinds, report)
-		mergeRunSummary(&summary, episodeSummary)
-		if err != nil {
+		if err := a.runEpisodeShare(episodeCtx, kinds, report, &summary); err != nil {
+			return summary, err
+		}
+		// The episodes' share ending is not an error, but the run's own end
+		// still is, when it comes at the same time.
+		if err := ctx.Err(); err != nil {
 			return summary, err
 		}
 		if passes.movies {
@@ -347,10 +364,9 @@ func (a *Analyzer) run(ctx context.Context, kinds EpisodeMarkerKinds, progress P
 	moviesFrom := 0.0
 	if passes.episodes {
 		moviesFrom = 85
-		episodeSummary, err := a.runEpisodes(ctx, kinds, func(percent float64, message string) {
+		err := a.runEpisodeShare(episodeCtx, kinds, func(percent float64, message string) {
 			report(percent*moviesFrom/100, message)
-		})
-		mergeRunSummary(&summary, episodeSummary)
+		}, &summary)
 		if err != nil {
 			return summary, err
 		}
@@ -364,92 +380,150 @@ func (a *Analyzer) run(ctx context.Context, kinds EpisodeMarkerKinds, progress P
 	if err != nil {
 		return summary, err
 	}
-	if summary.MovieBudgetExhausted {
+	switch {
+	case summary.EpisodeBudgetExhausted && summary.MovieBudgetExhausted:
+		report(100, "Marker detection completed; remaining episodes and movies wait for the next run")
+	case summary.EpisodeBudgetExhausted:
+		report(100, "Marker detection completed; remaining episodes wait for the next run")
+	case summary.MovieBudgetExhausted:
 		report(100, "Marker detection completed; remaining movies wait for the next run")
-		return summary, nil
+	default:
+		report(100, "Marker detection completed")
 	}
-	report(100, "Marker detection completed")
 	return summary, nil
 }
 
+// errEpisodeBudgetSpent is the cause of an episode pass stopped to leave the
+// movies their share of the run's time.
+var errEpisodeBudgetSpent = errors.New("episode share of the run's time limit spent")
+
+// episodeContext bounds the episode pass of a run that has a deadline, such
+// as a scheduled run with a max runtime, so the episodes cannot use the whole
+// run and leave none for the movies after them. It reserves the movie budget
+// before the deadline, or half the time left when that is shorter. A run
+// without a deadline, or with no movie to analyze, gets ctx unchanged.
+func (a *Analyzer) episodeContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	deadline, ok := ctx.Deadline()
+	if !ok || !a.moviesPending(ctx) {
+		return ctx, func() {}
+	}
+	reserve := min(a.movieRunBudget(), time.Until(deadline)/2)
+	return context.WithDeadlineCause(ctx, deadline.Add(-reserve), errEpisodeBudgetSpent)
+}
+
+// moviesPending reports whether the movie pass would list a movie, so a
+// server whose movies need no analysis, such as one with only TV libraries,
+// gives its episodes the whole run. A failed lookup counts as pending; the
+// movie pass then reports the error.
+func (a *Analyzer) moviesPending(ctx context.Context) bool {
+	candidates, _, err := a.repo.ListMovieCandidates(ctx, a.nodeName(), nil, 1)
+	return err != nil || len(candidates) > 0
+}
+
+// runEpisodeShare runs the episodes under episodeCtx, from episodeContext,
+// and merges them into summary. Episodes stopped at the end of their share
+// are not an error: they stopped where a cancel stops them, the season groups
+// they finished are saved, and the next run resumes there. Any other error,
+// such as a repository failure, is returned.
+func (a *Analyzer) runEpisodeShare(episodeCtx context.Context, kinds EpisodeMarkerKinds, report ProgressFunc, summary *RunSummary) error {
+	episodeSummary, err := a.runEpisodes(episodeCtx, kinds, report)
+	mergeRunSummary(summary, episodeSummary)
+	if errors.Is(context.Cause(episodeCtx), errEpisodeBudgetSpent) && (err == nil || errors.Is(err, context.DeadlineExceeded)) {
+		summary.EpisodeBudgetExhausted = true
+		return nil
+	}
+	return err
+}
+
+// episodeCandidateSeasonsPerPage is how many seasons the library-wide run
+// loads at a time. A page holds every eligible file of its seasons, so the
+// run's memory follows the page size rather than the library size.
+const episodeCandidateSeasonsPerPage = 500
+
 // runEpisodes analyzes the episodes of every enabled library for kinds,
-// reporting progress from 0 to 100.
+// reporting progress from 0 to 100. It loads the episodes a page of seasons
+// at a time: each page gets its chapter passes, then its season groups go to
+// the workers, and the next page loads once the workers have taken them all.
 func (a *Analyzer) runEpisodes(ctx context.Context, kinds EpisodeMarkerKinds, report ProgressFunc) (RunSummary, error) {
 	summary := RunSummary{}
-	candidates, err := a.repo.ListEligibleCandidates(ctx)
+	total, err := a.repo.CountEligibleCandidates(ctx)
 	if err != nil {
 		return summary, err
 	}
-	summary.FilesConsidered = len(candidates)
-	if len(candidates) == 0 {
+	if total == 0 {
 		report(100, "No eligible episode files")
 		return summary, nil
 	}
-
-	report(10, fmt.Sprintf("Checking embedded chapters for %d files", len(candidates)))
-	if kinds.Intro {
-		_, chapterSummary := a.processChapterCandidates(ctx, candidates, chapterProcessingOptions{
-			allowEpisodeCopy: true,
-			progress: func(i, total int) {
-				if i%25 == 0 {
-					report(10+float64(i)/float64(total)*20, fmt.Sprintf("Checked %d/%d files for chapter markers", i+1, total))
-				}
-			},
-		})
-		mergeRunSummary(&summary, chapterSummary)
-		if err := ctx.Err(); err != nil {
-			return summary, err
-		}
-	}
-	var withdrawnCredits map[int]struct{}
-	if kinds.Credits {
-		var chapterSummary RunSummary
-		chapterSummary, withdrawnCredits = a.processCreditsChapters(ctx, candidates)
-		mergeRunSummary(&summary, chapterSummary)
-		if err := ctx.Err(); err != nil {
-			return summary, err
-		}
+	seasonsPerPage := a.episodeSeasonsPerPage
+	if seasonsPerPage <= 0 {
+		seasonsPerPage = episodeCandidateSeasonsPerPage
 	}
 
-	// Each kind compares the files whose marker of that kind local analysis
-	// may write, so an online intro does not keep a file out of the credits
-	// comparison.
+	// Pages and workers both report, so progress is serialized and follows
+	// the files checked so far.
+	var progressMu sync.Mutex
+	checked := 0
+	progress := func(message string) {
+		progressMu.Lock()
+		defer progressMu.Unlock()
+		report(5+90*float64(min(checked, total))/float64(total), message)
+	}
+	progress(fmt.Sprintf("Checking %d episode files", total))
+
 	creditsTail := kinds.Credits && a.creditsTailReady(ctx)
-	var jobs []groupJob
-	for _, kind := range kinds.markerKinds() {
-		for _, group := range groupCandidates(ownCandidates(candidates, kind), minimumGroupEpisodes(kind, creditsTail)) {
-			jobs = append(jobs, groupJob{kind: kind, group: group})
+	var (
+		loadErr     error
+		sawJobs     bool
+		unsupported bool
+	)
+	// The feed runs on this goroutine, so it alone writes summary until
+	// analyzeGroups returns.
+	groupSummary := a.analyzeGroups(ctx, analyzeGroupOptions{persistState: true, creditsTail: creditsTail}, func(done int) {
+		progress(fmt.Sprintf("Analyzed %d season groups", done))
+	}, func(send func(groupJob) bool) {
+		var after *episodeCandidateCursor
+		for {
+			candidates, next, err := a.repo.ListEligibleCandidatePage(ctx, after, seasonsPerPage)
+			if err != nil {
+				loadErr = err
+				return
+			}
+			pageSummary, jobs := a.checkEpisodePage(ctx, kinds, creditsTail, candidates)
+			mergeRunSummary(&summary, pageSummary)
+			progressMu.Lock()
+			checked += len(candidates)
+			progressMu.Unlock()
+			progress(fmt.Sprintf("Checked %d/%d files", min(checked, total), total))
+			if ctx.Err() != nil {
+				return
+			}
+			if len(jobs) > 0 && !sawJobs {
+				sawJobs = true
+				progress("Checking FFmpeg Chromaprint support")
+				if err := a.extractor.Preflight(ctx); err != nil {
+					unsupported = true
+					summary.ChromaprintSupportMessage = err.Error()
+				}
+			}
+			countGroupJobs(&summary, jobs)
+			if !unsupported {
+				for _, job := range jobs {
+					if !send(job) {
+						return
+					}
+				}
+			}
+			if next == nil {
+				return
+			}
+			after = next
 		}
-	}
-	countGroupJobs(&summary, jobs)
-	if len(jobs) == 0 {
-		backfillSummary, err := a.runSilenceBackfill(ctx, kinds)
-		mergeRunSummary(&summary, backfillSummary)
-		if err != nil {
-			return summary, err
-		}
-		report(100, "No season groups eligible for Chromaprint")
-		return summary, nil
-	}
-
-	report(35, "Checking FFmpeg Chromaprint support")
-	if err := a.extractor.Preflight(ctx); err != nil {
-		summary.ChromaprintSupported = false
-		summary.ChromaprintSupportMessage = err.Error()
-		backfillSummary, backfillErr := a.runSilenceBackfill(ctx, kinds)
-		mergeRunSummary(&summary, backfillSummary)
-		if backfillErr != nil {
-			return summary, backfillErr
-		}
-		report(100, "Chromaprint unsupported; chapter detection completed")
-		return summary, nil
-	}
-	summary.ChromaprintSupported = true
-
-	groupSummary := a.analyzeGroups(ctx, jobs, analyzeGroupOptions{persistState: true, creditsTail: creditsTail, unsettledFileIDs: withdrawnCredits}, func(done int) {
-		report(40+float64(done)/float64(len(jobs))*55, fmt.Sprintf("Analyzed season group %d/%d", done, len(jobs)))
 	})
 	mergeRunSummary(&summary, groupSummary)
+	summary.ChromaprintSupported = sawJobs && !unsupported
+	if loadErr != nil {
+		return summary, loadErr
+	}
 	if err := ctx.Err(); err != nil {
 		return summary, err
 	}
@@ -459,8 +533,53 @@ func (a *Analyzer) runEpisodes(ctx context.Context, kinds EpisodeMarkerKinds, re
 	if err != nil {
 		return summary, err
 	}
-	report(100, "Episode marker detection completed")
+	switch {
+	case !sawJobs:
+		report(100, "No season groups eligible for Chromaprint")
+	case unsupported:
+		report(100, "Chromaprint unsupported; chapter detection completed")
+	default:
+		report(100, "Episode marker detection completed")
+	}
 	return summary, nil
+}
+
+// checkEpisodePage runs the chapter passes over one page of episode files and
+// returns the season group jobs for the kinds local analysis owns. A page
+// holds whole seasons, so every version of an episode and every file of a
+// season group is in it.
+func (a *Analyzer) checkEpisodePage(ctx context.Context, kinds EpisodeMarkerKinds, creditsTail bool, candidates []Candidate) (RunSummary, []groupJob) {
+	summary := RunSummary{FilesConsidered: len(candidates)}
+	if len(candidates) == 0 {
+		return summary, nil
+	}
+	if kinds.Intro {
+		_, chapterSummary := a.processChapterCandidates(ctx, candidates, chapterProcessingOptions{allowEpisodeCopy: true})
+		mergeRunSummary(&summary, chapterSummary)
+		if ctx.Err() != nil {
+			return summary, nil
+		}
+	}
+	var withdrawnCredits map[int]struct{}
+	if kinds.Credits {
+		var chapterSummary RunSummary
+		chapterSummary, withdrawnCredits = a.processCreditsChapters(ctx, candidates)
+		mergeRunSummary(&summary, chapterSummary)
+		if ctx.Err() != nil {
+			return summary, nil
+		}
+	}
+
+	// Each kind compares the files whose marker of that kind local analysis
+	// may write, so an online intro does not keep a file out of the credits
+	// comparison.
+	var jobs []groupJob
+	for _, kind := range kinds.markerKinds() {
+		for _, group := range groupCandidates(ownCandidates(candidates, kind), minimumGroupEpisodes(kind, creditsTail)) {
+			jobs = append(jobs, groupJob{kind: kind, group: group, unsettledFileIDs: withdrawnCredits})
+		}
+	}
+	return summary, jobs
 }
 
 // EpisodeMarkerKinds selects the marker kinds an episode analysis looks for.
@@ -697,7 +816,6 @@ type chapterProcessingOptions struct {
 	forceExistingScanner bool
 	allowEpisodeCopy     bool
 	deadline             time.Time
-	progress             func(index, total int)
 }
 
 type chapterSourceMarker struct {
@@ -713,10 +831,7 @@ func (a *Analyzer) processChapterCandidates(ctx context.Context, candidates []Ca
 	directByEpisode := map[string]chapterSourceMarker{}
 	directFileIDs := map[int]struct{}{}
 
-	for i, candidate := range candidates {
-		if opts.progress != nil {
-			opts.progress(i, len(candidates))
-		}
+	for _, candidate := range candidates {
 		if err := ctx.Err(); err != nil {
 			summary.Errors = append(summary.Errors, err.Error())
 			return remaining, summary
@@ -1004,6 +1119,10 @@ type groupJob struct {
 	// patchFileIDs limits which files the analysis may write; nil allows
 	// every file in the group.
 	patchFileIDs map[int]struct{}
+	// unsettledFileIDs are the files of the job's page whose chapter credits
+	// were just withdrawn; analyzeGroups passes them as the job's
+	// analyzeGroupOptions.unsettledFileIDs.
+	unsettledFileIDs map[int]struct{}
 }
 
 // countGroupJobs counts the season groups each marker kind considers.
@@ -1025,11 +1144,14 @@ func (a *Analyzer) analyzeJob(ctx context.Context, job groupJob, opts analyzeGro
 	return a.analyzeGroup(ctx, job.group, opts)
 }
 
-// analyzeGroups runs season group jobs on workerCount workers with opts.
-// Most jobs are skipped or served from cached fingerprints, so workers keep
-// the ffmpeg slots busy while other jobs compare or wait on the database.
-// progress is called with the number of jobs finished.
-func (a *Analyzer) analyzeGroups(ctx context.Context, jobs []groupJob, opts analyzeGroupOptions, progress func(done int)) RunSummary {
+// analyzeGroups runs the season group jobs feed sends on workerCount workers
+// with opts. Most jobs are skipped or served from cached fingerprints, so
+// workers keep the ffmpeg slots busy while other jobs compare or wait on the
+// database. feed runs on the calling goroutine; send blocks until a worker
+// takes the job and reports false once ctx is done, so feed can load more
+// jobs only as the workers free up. progress is called with the number of
+// jobs finished.
+func (a *Analyzer) analyzeGroups(ctx context.Context, opts analyzeGroupOptions, progress func(done int), feed func(send func(groupJob) bool)) RunSummary {
 	var (
 		mu      sync.Mutex
 		summary RunSummary
@@ -1037,12 +1159,14 @@ func (a *Analyzer) analyzeGroups(ctx context.Context, jobs []groupJob, opts anal
 		wg      sync.WaitGroup
 	)
 	work := make(chan groupJob)
-	for range min(len(jobs), a.workerCount()) {
+	for range a.workerCount() {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
 			for job := range work {
-				groupSummary, err := a.analyzeJob(ctx, job, opts)
+				jobOpts := opts
+				jobOpts.unsettledFileIDs = job.unsettledFileIDs
+				groupSummary, err := a.analyzeJob(ctx, job, jobOpts)
 				if err != nil {
 					a.logger.WarnContext(ctx, "marker group analysis failed",
 						"kind", job.kind.String(),
@@ -1061,14 +1185,14 @@ func (a *Analyzer) analyzeGroups(ctx context.Context, jobs []groupJob, opts anal
 			}
 		}()
 	}
-feed:
-	for _, job := range jobs {
+	feed(func(job groupJob) bool {
 		select {
 		case work <- job:
+			return true
 		case <-ctx.Done():
-			break feed
+			return false
 		}
-	}
+	})
 	close(work)
 	wg.Wait()
 	return summary
@@ -1472,5 +1596,8 @@ func mergeRunSummary(dst *RunSummary, src RunSummary) {
 	dst.MovieCreditsMarkersWritten += src.MovieCreditsMarkersWritten
 	if src.MovieBudgetExhausted {
 		dst.MovieBudgetExhausted = true
+	}
+	if src.EpisodeBudgetExhausted {
+		dst.EpisodeBudgetExhausted = true
 	}
 }

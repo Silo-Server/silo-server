@@ -221,6 +221,7 @@ type fakeProfiles struct {
 	sessions         []handlers.PlaybackSessionView
 	err              error
 	avatarStore      bool
+	maxProfiles      int
 	// noAvatarStore makes UploadAvatar answer the v1 503 (no upload store).
 	noAvatarStore bool
 	// lockedPrimary, when set, is the PIN-locked primary profile the fake
@@ -234,7 +235,7 @@ func (f *fakeProfiles) ListProfiles(_ context.Context, _ int) (handlers.ProfileL
 	if f.err != nil {
 		return handlers.ProfileListView{}, f.err
 	}
-	return handlers.ProfileListView{Profiles: []handlers.ProfileView{f.view}, AvatarUploadEnabled: f.avatarStore}, nil
+	return handlers.ProfileListView{Profiles: []handlers.ProfileView{f.view}, AvatarUploadEnabled: f.avatarStore, MaxProfiles: f.maxProfiles}, nil
 }
 
 func (f *fakeProfiles) GetProfile(_ context.Context, _ int, profileID string) (handlers.ProfileView, error) {

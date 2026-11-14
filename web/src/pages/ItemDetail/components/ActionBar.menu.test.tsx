@@ -1,12 +1,14 @@
 import type { ReactElement } from "react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import ActionBar from "./ActionBar";
 
+const playback = vi.hoisted(() => ({ startPlayback: vi.fn() }));
 vi.mock("@/playback/watchPlaybackContext", () => ({
-  useWatchPlaybackController: () => ({ startPlayback: vi.fn() }),
+  useWatchPlaybackController: () => playback,
 }));
 
 const addToCollection = vi.hoisted(() => ({
@@ -172,6 +174,45 @@ describe("ActionBar Mark Unwatched for a partly watched item", () => {
     await userEvent.click(screen.getByTitle("More"));
     const labels = screen.getAllByRole("menuitem").map((item) => item.textContent);
     expect(labels.slice(0, 2)).toEqual(["Play from Beginning", "Mark Unwatched"]);
+  });
+
+  it("starts part 1 over without the later part's track picks", async () => {
+    playback.startPlayback.mockClear();
+    renderBar(
+      <QueryClientProvider client={new QueryClient()}>
+        <ActionBar
+          contentId="movie-1"
+          playHref="/watch/movie-1"
+          playLabel="Resume"
+          restartHref="/watch/movie-1?restart=1"
+          versions={[{ file_id: 1 }, { file_id: 2 }] as never}
+          selectedVersion={{ file_id: 2 } as never}
+          restartVersion={{ file_id: 1 } as never}
+          audioSelectionMode="explicit"
+          explicitAudioTrackIndex={1}
+          prePlaySubtitleMode="explicit"
+          explicitSubtitleSelection={{
+            source: "external",
+            language: "fr",
+            track_index: 3,
+            external_subtitle_path: "/media/movie-part2.fr.srt",
+          }}
+        />
+      </QueryClientProvider>,
+    );
+
+    await userEvent.click(screen.getByTitle("More"));
+    await userEvent.click(screen.getByRole("menuitem", { name: "Play from Beginning" }));
+
+    const [input] = playback.startPlayback.mock.calls[0] ?? [];
+    expect(input).toMatchObject({ fileId: 1, restart: true, audioTrackIndex: undefined });
+    expect(input.prePlaySubtitleSelection).toEqual({
+      source: "external",
+      language: "fr",
+      track_index: undefined,
+      external_subtitle_path: undefined,
+      downloaded_subtitle_id: undefined,
+    });
   });
 });
 

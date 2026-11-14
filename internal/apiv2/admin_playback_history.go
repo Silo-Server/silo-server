@@ -4,12 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
-	"slices"
 	"strconv"
 	"strings"
 	"time"
-
-	"github.com/danielgtaylor/huma/v2"
 
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
 )
@@ -71,18 +68,6 @@ type AdminPlaybackHistoryEntry struct {
 	AudioDecision        *string  `json:"audio_decision" nullable:"true" enum:"direct,remux,transcode" doc:"How the audio stream was delivered when the play ended, with the video_decision values. Null when unknown"`
 	EndReason            *string  `json:"end_reason" nullable:"true" enum:"stopped,terminated,expired,aborted,replaced" doc:"Why the attempt ended: stopped by the viewer's client, terminated by an administrator, expired after the client went quiet, aborted by the server, or replaced by a new session for the same play (a Jellyfin client switched play method). Null when unknown, which includes every attempt recorded before it existed and a server teardown the client never recovered from"`
 	LifecycleSeq         *int64   `json:"lifecycle_seq" nullable:"true" doc:"Sequence number of the end this row records on the sessions channel: higher than every earlier number for the session, so the row supersedes any live row or session.* event with a lower one. Null on rows recorded before lifecycle numbers existed"`
-}
-
-// TransformSchema admits null in the nullable enums: JSON Schema applies the
-// enum and the type separately, so an enum of strings alone refuses the null
-// an unknown value takes.
-func (AdminPlaybackHistoryEntry) TransformSchema(_ huma.Registry, s *huma.Schema) *huma.Schema {
-	for _, name := range []string{"video_decision", "audio_decision", "end_reason"} {
-		if property := s.Properties[name]; property != nil && !slices.Contains(property.Enum, nil) {
-			property.Enum = append(property.Enum, nil)
-		}
-	}
-	return s
 }
 
 // AdminPlaybackHistoryCollection is the named envelope the contract carries.

@@ -361,7 +361,7 @@ func ResolveHWAccelWithFFmpegContext(ctx context.Context, hwAccel, ffmpegPath, h
 
 // hwAccelAuto is the configured hw_accel value that asks this package to pick
 // a backend by probing the host, rather than the operator naming one outright.
-const hwAccelAuto = "auto"
+const hwAccelAuto = HWAccelAuto
 
 // hwAccelPreferenceOrder is the auto-resolution order; the first backend whose
 // probe passes wins.
@@ -1323,15 +1323,24 @@ func videoToolboxProbeCacheKey(execPath string) string {
 
 // StartupRetryHWAccel returns the acceleration for the single retry after a
 // transcode dies before producing its first segment. VideoToolbox has no
-// alternate render device to move to, so an ordinary encode retries on the
-// CPU. A frozen hardware tone-map recipe cannot take that acceleration-only
-// shortcut because its mode and filter would no longer describe the executor;
-// the owner must replan it as a complete software recipe instead. Every other
-// accel keeps its configured value and moves render devices via AvoidHWDevice.
+// alternate render device to move to, and neither has QSV or VAAPI on a host
+// with no configured or detected render device (a container started without
+// /dev/dri), so an ordinary encode retries on the CPU. A frozen hardware
+// tone-map recipe cannot take that acceleration-only shortcut because its mode
+// and filter would no longer describe the executor; the owner must replan it
+// as a complete software recipe instead. Every other accel keeps its
+// configured value and moves render devices via AvoidHWDevice.
 func StartupRetryHWAccel(opts TranscodeOpts) string {
-	if opts.ToneMapMode != tonemap.ModeHardware &&
-		ResolveHWAccelWithFFmpeg(opts.HWAccel, opts.FFmpegPath, opts.HWDevice) == transcodeHWVideoToolbox {
+	if opts.ToneMapMode == tonemap.ModeHardware {
+		return opts.HWAccel
+	}
+	switch ResolveHWAccelWithFFmpeg(opts.HWAccel, opts.FFmpegPath, opts.HWDevice) {
+	case transcodeHWVideoToolbox:
 		return transcodeHWNone
+	case transcodeHWQSV, transcodeHWVAAPI:
+		if PickRenderDevice(opts.HWDevice) == "" {
+			return transcodeHWNone
+		}
 	}
 	return opts.HWAccel
 }

@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Tabs as TabsPrimitive } from "radix-ui";
 import { Shuffle } from "lucide-react";
+import { useT, type MessageKey } from "@/i18n";
 import { cn } from "@/lib/utils";
 import { isAudiobookLibraryType } from "@/pages/libraryPageSearchParams";
 
@@ -23,17 +24,17 @@ interface LibraryHeaderProps {
 
 const DEFAULT_TABS: readonly LibraryTab[] = ["recommended", "library", "collections"];
 
-const TAB_LABELS: Record<LibraryTab, string> = {
-  recommended: "Recommended",
-  library: "Library",
-  collections: "Collections",
+const TAB_LABELS: Record<LibraryTab, MessageKey> = {
+  recommended: "web.library.header.recommendedTab",
+  library: "web.library.header.libraryTab",
+  collections: "web.library.header.collectionsTab",
 };
 
 // Audiobook libraries open on a resume-first deck rather than a discovery
 // feed, so "Recommended" would mislabel what the tab actually shows.
-const AUDIOBOOK_TAB_LABELS: Record<LibraryTab, string> = {
+const AUDIOBOOK_TAB_LABELS: Record<LibraryTab, MessageKey> = {
   ...TAB_LABELS,
-  recommended: "Home",
+  recommended: "web.library.header.homeTab",
 };
 
 /** Scroll distance (in px) at which an overlay header switches to glass. */
@@ -47,6 +48,7 @@ export default function LibraryHeader({
   onShuffle,
   shuffleDisabled = false,
 }: LibraryHeaderProps) {
+  const t = useT();
   const tabLabels = isAudiobookLibraryType(libraryType) ? AUDIOBOOK_TAB_LABELS : TAB_LABELS;
   const [pastThreshold, setPastThreshold] = useState(false);
 
@@ -73,7 +75,8 @@ export default function LibraryHeader({
           tab pills or truncate to "LIBRAR…". */}
       <div className="hidden min-w-0 items-center gap-4 sm:flex">
         <p className="hero-eyebrow truncate">
-          <span>Library</span>
+          <span>{t("web.library.header.eyebrow")}</span>
+          {/* eslint-disable-next-line formatjs/no-literal-string-in-jsx -- a divider glyph, not text */}
           <span className="hero-eyebrow-divider">/</span>
           <span className="hero-eyebrow-strong">{libraryName}</span>
         </p>
@@ -87,18 +90,21 @@ export default function LibraryHeader({
               className="marquee-tab-trigger gap-1.5 disabled:cursor-default disabled:opacity-60"
               onClick={onShuffle}
               disabled={shuffleDisabled}
-              title="Shuffle"
-              aria-label="Shuffle"
+              title={t("web.library.header.shuffle")}
+              aria-label={t("web.library.header.shuffle")}
             >
               <Shuffle className="size-4" aria-hidden="true" />
-              <span className="hidden sm:inline">Shuffle</span>
+              <span className="hidden sm:inline">{t("web.library.header.shuffle")}</span>
             </button>
           </div>
         )}
-        <TabsPrimitive.List className="marquee-tab-bar" aria-label="Library view">
+        <TabsPrimitive.List
+          className="marquee-tab-bar"
+          aria-label={t("web.library.header.tabsLabel")}
+        >
           {availableTabs.map((tab) => (
             <TabsPrimitive.Trigger key={tab} value={tab} className="marquee-tab-trigger">
-              {tabLabels[tab]}
+              {t(tabLabels[tab])}
             </TabsPrimitive.Trigger>
           ))}
         </TabsPrimitive.List>

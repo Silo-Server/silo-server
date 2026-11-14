@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { Check, Copy } from "lucide-react";
 import { toast } from "sonner";
 
@@ -13,6 +13,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { useT, type Translate } from "@/i18n";
 import { copyTextToClipboard } from "@/lib/clipboard";
 
 import { settingsPathFor, triggersFor } from "./webhookSetup";
@@ -33,6 +34,7 @@ export function WebhookInstructions({
   url: string;
   provider: AutoscanWebhookProvider | "auto";
 }) {
+  const t = useT();
   const [copied, setCopied] = useState(false);
   const triggers = triggersFor(provider);
 
@@ -42,14 +44,14 @@ export function WebhookInstructions({
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     } catch {
-      toast.error("Couldn't copy — select the URL and copy it manually.");
+      toast.error(t("web.admin.autoscan.webhook.instructions.copyFailed"));
     }
   }
 
   return (
     <div className="space-y-4">
       <div className="space-y-1.5">
-        <Label htmlFor="webhook-url">1. Copy this URL</Label>
+        <Label htmlFor="webhook-url">{t("web.admin.autoscan.webhook.instructions.copyStep")}</Label>
         <div className="flex gap-2">
           <Input
             id="webhook-url"
@@ -60,25 +62,25 @@ export function WebhookInstructions({
           />
           <Button type="button" variant="outline" size="sm" onClick={copyURL}>
             {copied ? <Check className="text-success" /> : <Copy />}
-            {copied ? "Copied" : "Copy"}
+            {copied
+              ? t("web.admin.autoscan.webhook.instructions.copied")
+              : t("web.admin.autoscan.webhook.copyButton")}
           </Button>
         </div>
       </div>
 
       <div className="space-y-1.5">
-        <Label>2. In your download manager, go to</Label>
+        <Label>{t("web.admin.autoscan.webhook.instructions.settingsStep")}</Label>
         <p className="border-border bg-muted/30 rounded-md border px-3 py-2 font-mono text-xs">
           {settingsPathFor(provider)}
         </p>
         <p className="text-muted-foreground text-xs">
-          Paste the URL into <span className="font-medium">Webhook URL</span> and leave the method
-          as <span className="font-medium">POST</span>. No username or password is needed. For an
-          existing connection, replace its saved URL with this one.
+          {t("web.admin.autoscan.webhook.instructions.pasteURL", { b: medium })}
         </p>
       </div>
 
       <div className="space-y-2">
-        <Label>3. Tick these triggers</Label>
+        <Label>{t("web.admin.autoscan.webhook.instructions.triggersStep")}</Label>
         <ul className="space-y-2">
           {triggers.map((trigger) => (
             <li key={trigger.label} className="flex items-start gap-2 text-sm">
@@ -89,31 +91,43 @@ export function WebhookInstructions({
                 <Check className="size-3" />
               </span>
               <span className="min-w-0">
-                <span className="font-medium">{trigger.label}</span>
-                {!trigger.required && <span className="text-muted-foreground"> (optional)</span>}
-                <span className="text-muted-foreground block text-xs">{trigger.reason}</span>
+                {trigger.required ? (
+                  <span className="font-medium">{trigger.label}</span>
+                ) : (
+                  t("web.admin.autoscan.webhook.instructions.optionalTrigger", {
+                    trigger: trigger.label,
+                    b: medium,
+                    muted: (chunks) => <span className="text-muted-foreground">{chunks}</span>,
+                  })
+                )}
+                <span className="text-muted-foreground block text-xs">{t(trigger.reason)}</span>
               </span>
             </li>
           ))}
         </ul>
         <p className="text-muted-foreground text-xs">
-          Leave every other trigger unchecked — Silo ignores them.
+          {t("web.admin.autoscan.webhook.instructions.otherTriggers")}
         </p>
       </div>
 
       <p className="text-muted-foreground text-xs">
-        Save the connection in your download manager. You can use its
-        <span className="font-medium"> Test </span> button — Silo accepts test payloads and will
-        show the delivery on this source.
+        {t("web.admin.autoscan.webhook.instructions.testDelivery", { b: medium })}
       </p>
     </div>
   );
 }
 
+function medium(chunks: ReactNode[]) {
+  return <span className="font-medium">{chunks}</span>;
+}
+
 /** "A, B, C and D" */
-function joinAnd(items: string[]): string {
+function joinAnd(t: Translate, items: string[]): string {
   if (items.length <= 1) return items.join("");
-  return `${items.slice(0, -1).join(", ")} and ${items[items.length - 1]}`;
+  return t("web.admin.autoscan.webhook.triggerHint.listAnd", {
+    items: items.slice(0, -1).join(", "),
+    last: items[items.length - 1]!,
+  });
 }
 
 /**
@@ -121,13 +135,20 @@ function joinAnd(items: string[]): string {
  * that is already set up, where the reader only needs a reminder.
  */
 export function WebhookTriggerHint({ provider }: { provider: AutoscanWebhookProvider | "auto" }) {
+  const t = useT();
   const triggers = triggersFor(provider).map((trigger) => trigger.label);
   return (
     <p className="text-muted-foreground text-xs">
-      Paste into {settingsPathFor(provider)}, method POST. Tick {joinAnd(triggers)}.
+      {t("web.admin.autoscan.webhook.triggerHint.text", {
+        settings_path: settingsPathFor(provider),
+        triggers: joinAnd(t, triggers),
+      })}
     </p>
   );
 }
+
+const SONARR = "Sonarr";
+const RADARR = "Radarr";
 
 /** Which arr posts to a webhook source; drives the instructions and payload parsing. */
 export function WebhookProviderSelect({
@@ -139,21 +160,22 @@ export function WebhookProviderSelect({
   value: AutoscanWebhookProvider;
   onChange: (next: AutoscanWebhookProvider) => void;
 }) {
+  const t = useT();
   return (
     <div className="space-y-1.5">
-      <Label htmlFor={id}>Sent by</Label>
+      <Label htmlFor={id}>{t("web.admin.autoscan.webhook.provider.label")}</Label>
       <Select value={value} onValueChange={(next) => onChange(next as AutoscanWebhookProvider)}>
         <SelectTrigger id={id} className="w-full sm:w-56">
           <SelectValue />
         </SelectTrigger>
         <SelectContent>
-          <SelectItem value="auto">Detect automatically</SelectItem>
-          <SelectItem value="sonarr">Sonarr</SelectItem>
-          <SelectItem value="radarr">Radarr</SelectItem>
+          <SelectItem value="auto">{t("web.admin.autoscan.webhook.provider.auto")}</SelectItem>
+          <SelectItem value="sonarr">{SONARR}</SelectItem>
+          <SelectItem value="radarr">{RADARR}</SelectItem>
         </SelectContent>
       </Select>
       <p className="text-muted-foreground text-xs">
-        Detect automatically reads Sonarr or Radarr from each delivery.
+        {t("web.admin.autoscan.webhook.provider.autoHelp")}
       </p>
     </div>
   );

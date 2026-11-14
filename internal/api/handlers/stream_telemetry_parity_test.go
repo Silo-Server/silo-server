@@ -2,33 +2,11 @@ package handlers
 
 import (
 	"context"
-	"encoding/json"
-	"net/http"
-	"net/http/httptest"
 	"testing"
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/streamtelemetry"
 )
-
-func decodeParity(t *testing.T, recorder *httptest.ResponseRecorder) parityResponse {
-	t.Helper()
-	if recorder.Code != http.StatusOK {
-		t.Fatalf("status = %d, body = %s", recorder.Code, recorder.Body.String())
-	}
-	var response parityResponse
-	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
-		t.Fatalf("decode: %v; body = %s", err, recorder.Body.String())
-	}
-	return response
-}
-
-func serveParity(t *testing.T, handler *StreamTelemetryParityHandler) parityResponse {
-	t.Helper()
-	recorder := httptest.NewRecorder()
-	handler.HandleGetStreamTelemetryParity(recorder, httptest.NewRequest(http.MethodGet, "/admin/stream-telemetry/parity", nil))
-	return decodeParity(t, recorder)
-}
 
 func enabledParityHandler(t *testing.T) *StreamTelemetryParityHandler {
 	t.Helper()
@@ -52,7 +30,7 @@ func enabledParityHandler(t *testing.T) *StreamTelemetryParityHandler {
 // sessions by construction, so a parity report built on one is evidence of
 // blindness rather than disagreement.
 func TestStreamTelemetryParitySurfacesViewCompleteness(t *testing.T) {
-	response := serveParity(t, enabledParityHandler(t))
+	response := enabledParityHandler(t).ReadStreamTelemetryParity(t.Context())
 	if !response.Enabled {
 		t.Fatalf("response = %+v", response)
 	}
@@ -99,7 +77,7 @@ func TestStreamTelemetryParitySurfacesViewCompleteness(t *testing.T) {
 func TestStreamTelemetryParityReusesTheCachedView(t *testing.T) {
 	handler := enabledParityHandler(t)
 	for i := 0; i < 4; i++ {
-		if response := serveParity(t, handler); response.View.Refreshes != 1 {
+		if response := handler.ReadStreamTelemetryParity(t.Context()); response.View.Refreshes != 1 {
 			t.Fatalf("request %d rebuilt the view: refreshes = %d", i, response.View.Refreshes)
 		}
 	}

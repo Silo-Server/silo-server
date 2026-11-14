@@ -9,7 +9,9 @@ import {
   useSettingsCapabilities,
 } from "@/hooks/queries/settingValues";
 import { useTitleArtSetting } from "@/hooks/useTitleArt";
+import { useT } from "@/i18n";
 import { SETTING_DEFINITIONS, SETTING_KEYS } from "@/lib/settingsContract";
+import { settingLabel } from "@/lib/settingsText";
 
 /**
  * Title art and its "Apply to all devices" companion. Unlike the rest of the
@@ -18,6 +20,7 @@ import { SETTING_DEFINITIONS, SETTING_KEYS } from "@/lib/settingsContract";
  * server default an administrator may set.
  */
 export function TitleArtSettingsGroup() {
+  const t = useT();
   const capabilities = useSettingsCapabilities();
   const titleArt = useTitleArtSetting();
 
@@ -27,14 +30,17 @@ export function TitleArtSettingsGroup() {
 
   const disabled = titleArt.isLoading || titleArt.isError || titleArt.isSaving;
   const save = (write: Promise<void>) =>
-    write.catch(() => toast.error("Could not save the title art setting"));
+    write.catch(() => toast.error(t("web.settings.titleArt.saveFailed")));
 
   return (
-    <SettingsGroup title="Title" description="How a movie or show is named at the top of its page.">
+    <SettingsGroup
+      title={t("web.settings.titleArt.title")}
+      description={t("web.settings.titleArt.description")}
+    >
       <SettingRow
         icon={<Type />}
-        label={SETTING_DEFINITIONS[SETTING_KEYS.UI_TITLE_ART].label}
-        description="Use logo artwork as the title when available."
+        label={settingLabel(SETTING_DEFINITIONS[SETTING_KEYS.UI_TITLE_ART])}
+        description={t("web.settings.titleArt.titleArtDescription")}
         control={(id) => (
           <Switch
             id={id}
@@ -46,8 +52,8 @@ export function TitleArtSettingsGroup() {
       />
       <SettingRow
         icon={<MonitorSmartphone />}
-        label="Apply to all devices"
-        description="Use this choice on every device signed into this profile."
+        label={t("web.settings.titleArt.allDevices")}
+        description={t("web.settings.titleArt.allDevicesDescription")}
         control={(id) => (
           <Switch
             id={id}
@@ -61,19 +67,20 @@ export function TitleArtSettingsGroup() {
         <p className="bg-foreground/5 text-foreground/85 flex gap-2.5 rounded-xl px-3.5 py-3 text-[13px] leading-relaxed">
           <Info aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
           <span>
-            Title art is {titleArt.showTitleArt ? "on" : "off"} on every device signed into this
-            profile. Changing it here changes it everywhere. Turn off “Apply to all devices” to
-            choose per device again.
+            {titleArt.showTitleArt
+              ? t("web.settings.titleArt.allDevicesOnNote")
+              : t("web.settings.titleArt.allDevicesOffNote")}
           </span>
         </p>
       ) : titleArt.followsServerDefault ? (
         <p className="text-muted-foreground text-[13px] leading-relaxed">
-          Using the server default ({titleArt.showTitleArt ? "on" : "off"}). Change it here to
-          choose for this browser.
+          {titleArt.showTitleArt
+            ? t("web.settings.titleArt.serverDefaultOnNote")
+            : t("web.settings.titleArt.serverDefaultOffNote")}
         </p>
       ) : titleArt.hasOwnChoice ? (
         <p className="text-muted-foreground text-[13px] leading-relaxed">
-          Only affects this browser. Your other devices keep their own setting.
+          {t("web.settings.titleArt.ownChoiceNote")}
         </p>
       ) : null}
       {titleArt.hasOwnChoice ? (
@@ -84,7 +91,7 @@ export function TitleArtSettingsGroup() {
           className="text-muted-foreground hover:text-foreground inline-flex min-h-11 items-center gap-1.5 text-[13px] transition-colors disabled:opacity-50 sm:min-h-0"
         >
           <RotateCcw aria-hidden="true" className="size-3.5" />
-          Use server default
+          {t("web.settings.titleArt.useServerDefault")}
         </button>
       ) : null}
     </SettingsGroup>

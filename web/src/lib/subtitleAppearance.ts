@@ -1,4 +1,5 @@
 import type { CSSProperties } from "react";
+import { t } from "@/i18n";
 import type { VideoFitMode } from "@/player/types";
 
 // ─── Types ──────────────────────────────────────────────────────────────────
@@ -35,30 +36,105 @@ export const DEFAULT_SUBTITLE_APPEARANCE: SubtitleAppearance = {
 // ─── Option Arrays ──────────────────────────────────────────────────────────
 
 export const FONT_SIZE_OPTIONS = [
-  { value: "small" as const, label: "Small" },
-  { value: "medium" as const, label: "Medium" },
-  { value: "large" as const, label: "Large" },
-  { value: "xlarge" as const, label: "X-Large" },
-  { value: "xxlarge" as const, label: "XX-Large" },
+  {
+    value: "small" as const,
+    get label() {
+      return t("web.settings.subtitleOptions.fontSize.small");
+    },
+  },
+  {
+    value: "medium" as const,
+    get label() {
+      return t("web.settings.subtitleOptions.fontSize.medium");
+    },
+  },
+  {
+    value: "large" as const,
+    get label() {
+      return t("web.settings.subtitleOptions.fontSize.large");
+    },
+  },
+  {
+    value: "xlarge" as const,
+    get label() {
+      return t("web.settings.subtitleOptions.fontSize.xLarge");
+    },
+  },
+  {
+    value: "xxlarge" as const,
+    get label() {
+      return t("web.settings.subtitleOptions.fontSize.xxLarge");
+    },
+  },
 ];
 
 export const FONT_FAMILY_OPTIONS = [
-  { value: "sans-serif" as const, label: "Sans-serif" },
-  { value: "serif" as const, label: "Serif" },
-  { value: "monospace" as const, label: "Monospace" },
+  {
+    value: "sans-serif" as const,
+    get label() {
+      return t("web.settings.subtitleOptions.fontFamily.sansSerif");
+    },
+  },
+  {
+    value: "serif" as const,
+    get label() {
+      return t("web.settings.subtitleOptions.fontFamily.serif");
+    },
+  },
+  {
+    value: "monospace" as const,
+    get label() {
+      return t("web.settings.subtitleOptions.fontFamily.monospace");
+    },
+  },
 ];
 
 export const BACKGROUND_STYLE_OPTIONS = [
-  { value: "box" as const, label: "Box" },
-  { value: "shadow" as const, label: "Drop Shadow" },
-  { value: "outline" as const, label: "Outline" },
-  { value: "none" as const, label: "None" },
+  {
+    value: "box" as const,
+    get label() {
+      return t("web.settings.subtitleOptions.backgroundStyle.box");
+    },
+  },
+  {
+    value: "shadow" as const,
+    get label() {
+      return t("web.settings.subtitleOptions.backgroundStyle.dropShadow");
+    },
+  },
+  {
+    value: "outline" as const,
+    get label() {
+      return t("web.settings.subtitleOptions.backgroundStyle.outline");
+    },
+  },
+  {
+    value: "none" as const,
+    get label() {
+      return t("web.settings.subtitleOptions.backgroundStyle.none");
+    },
+  },
 ];
 
 export const POSITION_OPTIONS = [
-  { value: "bottom" as const, label: "Bottom" },
-  { value: "lower-third" as const, label: "Lower Third" },
-  { value: "top" as const, label: "Top" },
+  {
+    value: "bottom" as const,
+    get label() {
+      return t("web.settings.subtitleOptions.position.bottom");
+    },
+  },
+  {
+    value: "lower-third" as const,
+    get label() {
+      return t("web.settings.subtitleOptions.position.lowerThird");
+    },
+  },
+  {
+    value: "top" as const,
+    get label() {
+      return t("web.settings.subtitleOptions.position.top");
+    },
+  },
 ];
 
 // ─── Color Palettes ─────────────────────────────────────────────────────────
@@ -69,23 +145,93 @@ interface ColorSwatch {
 }
 
 export const FONT_COLOR_PALETTE: ColorSwatch[] = [
-  { hex: "#ffffff", label: "White" },
-  { hex: "#facc15", label: "Yellow" },
-  { hex: "#22c55e", label: "Green" },
-  { hex: "#06b6d4", label: "Cyan" },
-  { hex: "#d946ef", label: "Magenta" },
-  { hex: "#ef4444", label: "Red" },
-  { hex: "#3b82f6", label: "Blue" },
-  { hex: "#9ca3af", label: "Gray" },
-  { hex: "#000000", label: "Black" },
+  {
+    hex: "#ffffff",
+    get label() {
+      return t("web.settings.subtitleOptions.fontColor.white");
+    },
+  },
+  {
+    hex: "#facc15",
+    get label() {
+      return t("web.settings.subtitleOptions.fontColor.yellow");
+    },
+  },
+  {
+    hex: "#22c55e",
+    get label() {
+      return t("web.settings.subtitleOptions.fontColor.green");
+    },
+  },
+  {
+    hex: "#06b6d4",
+    get label() {
+      return t("web.settings.subtitleOptions.fontColor.cyan");
+    },
+  },
+  {
+    hex: "#d946ef",
+    get label() {
+      return t("web.settings.subtitleOptions.fontColor.magenta");
+    },
+  },
+  {
+    hex: "#ef4444",
+    get label() {
+      return t("web.settings.subtitleOptions.fontColor.red");
+    },
+  },
+  {
+    hex: "#3b82f6",
+    get label() {
+      return t("web.settings.subtitleOptions.fontColor.blue");
+    },
+  },
+  {
+    hex: "#9ca3af",
+    get label() {
+      return t("web.settings.subtitleOptions.fontColor.gray");
+    },
+  },
+  {
+    hex: "#000000",
+    get label() {
+      return t("web.settings.subtitleOptions.fontColor.black");
+    },
+  },
 ];
 
 export const BG_COLOR_PALETTE: ColorSwatch[] = [
-  { hex: "#000000", label: "Black" },
-  { hex: "#374151", label: "Dark Gray" },
-  { hex: "#1e3a5f", label: "Navy" },
-  { hex: "#7f1d1d", label: "Dark Red" },
-  { hex: "#14532d", label: "Dark Green" },
+  {
+    hex: "#000000",
+    get label() {
+      return t("web.settings.subtitleOptions.backgroundColor.black");
+    },
+  },
+  {
+    hex: "#374151",
+    get label() {
+      return t("web.settings.subtitleOptions.backgroundColor.darkGray");
+    },
+  },
+  {
+    hex: "#1e3a5f",
+    get label() {
+      return t("web.settings.subtitleOptions.backgroundColor.navy");
+    },
+  },
+  {
+    hex: "#7f1d1d",
+    get label() {
+      return t("web.settings.subtitleOptions.backgroundColor.darkRed");
+    },
+  },
+  {
+    hex: "#14532d",
+    get label() {
+      return t("web.settings.subtitleOptions.backgroundColor.darkGreen");
+    },
+  },
 ];
 
 // ─── Parser ─────────────────────────────────────────────────────────────────

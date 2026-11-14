@@ -101,7 +101,7 @@ func TestNextUpModeStatementBudgetPostgres(t *testing.T) {
 		t.Fatalf("store hide-watched: %v", err)
 	}
 
-	engine, err := policy.NewEngine(ctx)
+	engine, err := policy.NewEngine(ctx, policy.WithEvalTimeout(time.Minute))
 	if err != nil {
 		t.Fatalf("NewEngine: %v", err)
 	}

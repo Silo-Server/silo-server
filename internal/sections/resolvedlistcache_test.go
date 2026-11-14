@@ -1119,3 +1119,18 @@ func TestEvictResolvedListItemsRetriesCallerThatJoinedAnOlderRebuild(t *testing.
 		t.Fatalf("caller before the eviction got %v", got)
 	}
 }
+
+// Recently added TV rows hold only arrivals within the viewer's playback
+// quality ceiling, so a row cached for a viewer with one must not be served
+// to a viewer with another, or to one with none.
+func TestRecentlyAddedCacheKeySeparatesQualityCeilings(t *testing.T) {
+	recent := ResolvedSection{SectionType: SectionRecentlyAdded, ItemLimit: 20}
+	keys := map[string]string{}
+	for _, ceiling := range []string{"", "1080p", "2160p"} {
+		key := resolvedListCacheKey(recent, nil, []int{1}, catalog.AccessFilter{MaxPlaybackQuality: ceiling})
+		if other, ok := keys[key]; ok {
+			t.Fatalf("ceilings %q and %q share the key %q", other, ceiling, key)
+		}
+		keys[key] = ceiling
+	}
+}

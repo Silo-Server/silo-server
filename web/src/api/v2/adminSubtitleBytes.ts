@@ -5,6 +5,7 @@ import {
   StaleApiRequestContextError,
 } from "@/api/client";
 import { adminSubtitleListScope, type AdminStoredSubtitle } from "./adminSubtitles";
+import { t } from "@/i18n";
 
 // This raw attachment boundary owns status/body handling; JSON v2 decoding does not apply.
 export async function downloadAdminSubtitle(
@@ -32,13 +33,14 @@ export async function downloadAdminSubtitle(
     false,
   );
   requireAuthority();
-  if (res.status !== 200) throw new Error(`Subtitle download failed (${res.status}).`);
+  if (res.status !== 200)
+    throw new Error(t("web.admin.errors.subtitleDownloadFailed", { status: res.status }));
   const media = res.headers.get("Content-Type")?.split(";")[0]?.trim().toLowerCase();
   if (
     !media ||
     !["application/x-subrip", "text/vtt", "text/x-ssa", "application/octet-stream"].includes(media)
   )
-    throw new Error("Unexpected subtitle download response.");
+    throw new Error(t("web.admin.errors.subtitleDownloadUnexpected"));
   const blob = await res.blob();
   requireAuthority();
   // A deterministic filename avoids interpreting an untrusted Content-Disposition header.

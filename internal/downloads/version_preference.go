@@ -15,7 +15,8 @@ import (
 // follows what the profile watches rather than the largest file: the file last
 // played for the item itself, then, for episodes, the version closest to the
 // one last played anywhere in the series, then the highest resolution. A
-// request that sends media_file_id never reaches it.
+// request that sends media_file_id never reaches it; a batch that names a
+// version template uses templatePreference instead.
 type versionPreference struct {
 	// lastFile maps an item's content ID to the file the profile last played.
 	lastFile map[string]int
@@ -67,6 +68,18 @@ func (p versionPreference) seriesScore(f *models.MediaFile) int {
 		score++
 	}
 	return score
+}
+
+// templatePreference matches every episode to the version a batch request
+// named: the named file itself for its own episode, then each episode's version
+// closest to it on edition, resolution, HDR and video codec, scored as a
+// series' last play is. Watch history is not read.
+func templatePreference(f *models.MediaFile) versionPreference {
+	edition, resolution, hdr, codec := f.EditionKey, f.Resolution, f.HDR, f.CodecVideo
+	return versionPreference{
+		lastFile: map[string]int{f.EpisodeID: f.ID},
+		series:   &userstore.WatchProgress{LastEditionKey: &edition, LastResolution: &resolution, LastHDR: &hdr, LastCodecVideo: &codec},
+	}
 }
 
 // preferredByDefault orders files no preference separates: highest resolution

@@ -8,7 +8,9 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"runtime"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -105,6 +107,58 @@ func TestLocalExtractorReportsUnreadableInput(t *testing.T) {
 	_, err := extractor.Extract(t.Context(), nil, req)
 	if _, ok := errors.AsType[*inputError](err); !ok {
 		t.Fatalf("error=%v, want inputError", err)
+	}
+}
+
+// runAccelSettings answers playback.hw_accel with the accelerator in the
+// run's context, as runs that read the setting on either side of a change do.
+type runAccelSettings struct{}
+
+type runAccelKey struct{}
+
+func (runAccelSettings) Get(ctx context.Context, key string) (string, error) {
+	if key == hwAccelSetting {
+		return ctx.Value(runAccelKey{}).(string), nil
+	}
+	return "", nil
+}
+
+// TestLocalExtractorConcurrentRunsResolveTheirOwnAccelerator runs extractions
+// at once that read different playback.hw_accel values and expects each
+// hardware attempt to decode on the accelerator its own run read.
+func TestLocalExtractorConcurrentRunsResolveTheirOwnAccelerator(t *testing.T) {
+	extractor := NewLocalExtractor(runAccelSettings{})
+	// A real resolution probes the host while it holds the resolver's lock;
+	// yielding there lets the other runs queue up behind it.
+	extractor.hardware.Resolve = func(_ context.Context, hwAccel, _, _ string) string {
+		runtime.Gosched()
+		return hwAccel
+	}
+	extractor.exec = func(context.Context, string, []string, io.Reader, io.Writer, io.Writer) error {
+		return errors.New("exit status 1")
+	}
+	accels := []string{"vaapi", "qsv"}
+	var wrong atomic.Int32
+	var wg sync.WaitGroup
+	for worker := range 8 {
+		wg.Go(func() {
+			for run := range 200 {
+				accel := accels[(worker+run)%len(accels)]
+				_, err := extractor.Extract(context.WithValue(t.Context(), runAccelKey{}, accel), nil, nodeRequest())
+				failure, ok := errors.AsType[*mediasample.Error](err)
+				if !ok || len(failure.Attempts) == 0 {
+					t.Errorf("error=%v, want a failed hardware attempt", err)
+					return
+				}
+				if failure.Attempts[0].Decoder != "hardware:"+accel {
+					wrong.Add(1)
+				}
+			}
+		})
+	}
+	wg.Wait()
+	if n := wrong.Load(); n > 0 {
+		t.Fatalf("%d runs decoded on another run's accelerator", n)
 	}
 }
 

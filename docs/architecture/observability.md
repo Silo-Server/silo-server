@@ -97,6 +97,13 @@ writers never block and never log. Neither Redis nor Postgres is on that path.
   class 22, for example a client address that is not an `inet`), the consumer inserts
   that batch one row at a time, so only the rejected rows are dropped. Any other batch
   the server rejects is dropped at once, so it cannot hold up the stream.
+- Audit User-Agent metadata is an owned prefix of at most 512 UTF-8 bytes, bounded
+  before queue admission and in transactional audit capture. The raw prefix is
+  bounded before invalid-text replacement, and the result is bounded again because
+  replacement can expand it. A valid rune crossing the boundary is omitted. The
+  consumer enforces the same bound for alternate inputs; retained history bounds
+  the returned database projection and normalizes its byte length without changing
+  stored rows. This diagnostic policy does not change request headers or identities.
 - `opslog.Handler` encodes non-scalar attribute values (maps, slices, structs,
   pointers) to JSON when the record is logged. The consumer builds the row on its own
   goroutine later, and a caller may change a map once the log call returns.
@@ -319,7 +326,7 @@ The native API exposes administrator summaries at
 OpenAPI. The resource response identifies the sampled API process with a random
 instance ID, which matters when a load balancer sends successive requests to
 different replicas. Workers attach the same attribution to authenticated health
-transport. Frozen v1 resource fields retain their existing meaning.
+transport.
 
 | Measurement | Population and limits |
 | --- | --- |
@@ -586,8 +593,7 @@ or else the `X-Silo-Client` product name that also labels
 `streamapp_apiv2_requests_total{client}`. The first-party clients send only
 `X-Silo-Client`. Only an inserted row counts. A v2 report that
 repeats its `event_id` inserts nothing on any replica, so a retry is not counted
-twice. Legacy v1-bridge reports carry no event id and are counted on every
-report. Events dropped because the in-process write queue is full are never
+twice. Events dropped because the in-process write queue is full are never
 observed. Each replica exports the events it wrote; sum across replicas.
 
 The clients do not time the same interval yet. The web player measures from the

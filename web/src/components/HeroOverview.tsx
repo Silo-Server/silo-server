@@ -2,6 +2,7 @@ import { Languages } from "lucide-react";
 import type { SectionItem } from "@/api/types";
 import { useOnViewTranslation } from "@/hooks/useOnViewTranslation";
 import MachineTranslatedLabel from "@/pages/ItemDetail/components/MachineTranslatedLabel";
+import { useT } from "@/i18n";
 import { HeroOverviewText } from "./HeroOverviewText";
 
 /**
@@ -24,6 +25,7 @@ export default function HeroOverview({
   pendingContentIds: ReadonlySet<string>;
   onRefreshItems?: () => void;
 }) {
+  const t = useT();
   const { translating, onTranslate } = useOnViewTranslation(item, {
     onPoll: onRefreshItems,
     pendingContentIds,
@@ -39,7 +41,7 @@ export default function HeroOverview({
       {translating ? (
         <span className="text-muted-foreground/70 mt-1 inline-flex items-center gap-1.5 text-xs">
           <Languages className="h-3 w-3 animate-pulse" />
-          Translating…
+          {t("web.home.hero.translating")}
         </span>
       ) : (
         (machineTranslated || onTranslate) && (
@@ -52,7 +54,7 @@ export default function HeroOverview({
                 className="text-muted-foreground hover:text-foreground border-border/60 inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-xs transition-colors"
               >
                 <Languages className="h-3 w-3" />
-                Translate
+                {t("web.home.hero.translate")}
               </button>
             )}
           </div>

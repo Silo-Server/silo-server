@@ -5,6 +5,7 @@ import { useOverlayPrefs } from "@/hooks/useOverlayPrefs";
 import { useUICustomization } from "@/hooks/useUICustomization";
 import { buildBoxSetHref } from "@/lib/mediaNavigation";
 import { carouselCardWidthClasses } from "@/lib/uiCustomization";
+import { useT } from "@/i18n";
 
 /**
  * The box set row on a movie's page: the box set's movies in release order,
@@ -19,6 +20,7 @@ export default function MovieBoxSetRow({
   contentId: string;
   libraryId?: number;
 }) {
+  const t = useT();
   const { data: boxSet } = useItemBoxSet(contentId, libraryId);
   const { cardPresentation } = useUICustomization();
   const { prefs: overlayPrefs, quickActionMode } = useOverlayPrefs();
@@ -53,7 +55,7 @@ export default function MovieBoxSetRow({
                 <>
                   <div className="ring-foreground/80 pointer-events-none absolute inset-x-0 top-0 aspect-[2/3] rounded-xl ring-2 ring-inset" />
                   <span className="bg-background/85 text-foreground pointer-events-none absolute top-0 left-1/2 mt-[calc(150%-2rem)] -translate-x-1/2 rounded-full px-2.5 py-0.5 text-[0.625rem] font-semibold tracking-[0.14em] whitespace-nowrap uppercase">
-                    This film
+                    {t("web.detail.boxSet.thisFilm")}
                   </span>
                 </>
               ) : null}

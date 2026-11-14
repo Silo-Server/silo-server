@@ -155,6 +155,25 @@ describe("TasteSeed destinations", () => {
     fireEvent.click(screen.getByRole("button", { name: "Done" }));
 
     expect(await screen.findByText("recommendations page")).toBeTruthy();
-    expect(mocks.submit).toHaveBeenCalledWith(["m1", "m2", "m3"]);
+    expect(mocks.submit).toHaveBeenCalledWith({ add: ["m1", "m2", "m3"], remove: [] });
+  });
+
+  // Unselecting a title that is already a favourite removes it on Done.
+  it("removes an unselected favourite", async () => {
+    const favorite = (id: string) => ({ ...card(id), user_state: { is_favorite: true } });
+    mocks.useTasteSeedItems.mockReturnValue(
+      pickerState({
+        pages: [{ items: ["m1", "m2", "m3", "m4"].map(favorite) as CatalogCardItem[] }],
+        hasNextPage: false,
+      }),
+    );
+    mocks.submit.mockResolvedValue({ added: 0, removed: 1 });
+
+    renderAt("/taste-seed?from=settings");
+    fireEvent.click(screen.getByRole("option", { name: "Deselect Title m4" }));
+    fireEvent.click(screen.getByRole("button", { name: "Done" }));
+
+    expect(await screen.findByText("settings page")).toBeTruthy();
+    expect(mocks.submit).toHaveBeenCalledWith({ add: [], remove: ["m4"] });
   });
 });

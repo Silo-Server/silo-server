@@ -10,6 +10,7 @@ import type { WatchProviderConnection } from "@/hooks/queries/watchProviders";
 
 const mocks = vi.hoisted(() => ({
   updateConnection: vi.fn(),
+  triggerSync: vi.fn(),
   idleMutation: () => ({ mutate: () => {}, isPending: false, error: null }),
 }));
 
@@ -31,7 +32,7 @@ vi.mock("@/hooks/queries/watchProviders", () => ({
   usePollWatchProviderDeviceAuth: mocks.idleMutation,
   useConnectWatchProviderAPIKey: mocks.idleMutation,
   useDeleteWatchProviderConnection: mocks.idleMutation,
-  useTriggerWatchProviderSync: mocks.idleMutation,
+  useTriggerWatchProviderSync: () => useMutation({ retry: false, mutationFn: mocks.triggerSync }),
 }));
 
 import WatchProvidersSettings from "./WatchProvidersSettings";
@@ -88,6 +89,18 @@ function conflictError() {
   } as Problem);
 }
 
+function cooldownError(retryAfterSeconds: number) {
+  return new V2ProblemError(
+    "triggerWatchProviderSync",
+    {
+      type: "https://siloserver.org/problems/rate_limited",
+      title: "Too many requests",
+      status: 429,
+    } as Problem,
+    retryAfterSeconds,
+  );
+}
+
 function deferred<T>() {
   let resolve!: (value: T) => void;
   let reject!: (reason: unknown) => void;
@@ -127,11 +140,46 @@ describe("WatchProvidersSettings", () => {
     document.body.appendChild(container);
     root = createRoot(container);
     mocks.updateConnection.mockReset();
+    mocks.triggerSync.mockReset();
   });
 
   afterEach(() => {
     act(() => root.unmount());
     container.remove();
+    vi.useRealTimers();
+  });
+
+  it("counts the sync cooldown down and re-enables Sync now when it ends", async () => {
+    vi.useFakeTimers();
+    mocks.triggerSync.mockRejectedValueOnce(cooldownError(90));
+    // One act per second, so React runs the effect that schedules each tick.
+    const advanceSeconds = async (seconds: number) => {
+      for (let i = 0; i < seconds; i++) {
+        await act(() => vi.advanceTimersByTimeAsync(1000));
+      }
+    };
+
+    act(() => {
+      root.render(
+        <QueryClientProvider client={new QueryClient()}>
+          <WatchProvidersSettings />
+        </QueryClientProvider>,
+      );
+    });
+
+    act(() => findButton(container, "Sync now").click());
+    await act(() => vi.advanceTimersByTimeAsync(0));
+    expect(mocks.triggerSync).toHaveBeenCalledTimes(1);
+    expect(findButton(container, "Cooldown 2m").disabled).toBe(true);
+
+    // The label follows the time left rather than the first answer.
+    await advanceSeconds(30);
+    expect(findButton(container, "Cooldown 1m").disabled).toBe(true);
+    await advanceSeconds(31);
+    expect(findButton(container, "Cooldown 29s").disabled).toBe(true);
+
+    await advanceSeconds(29);
+    expect(findButton(container, "Sync now").disabled).toBe(false);
   });
 
   it("keeps the settings open while retrying a conflicted change", async () => {

@@ -774,6 +774,11 @@ func TestValidateValueRejectsOutOfContractValues(t *testing.T) {
 		{name: "nullable language tag", key: keyAudioLanguage, value: jsonNull},
 		{name: "malformed language tag", key: keyAudioLanguage, value: `"not a language"`, wantErr: true},
 
+		// The interface language is an open tag; null, not "", means follow the device.
+		{name: "app language tag", key: "ui.app_language", value: `"pt-BR"`},
+		{name: "app language follows the device", key: "ui.app_language", value: jsonNull},
+		{name: "app language empty string rejected", key: "ui.app_language", value: `""`, wantErr: true},
+
 		{name: "non-nullable boolean rejects null", key: keyAutoPlayNext, value: jsonNull, wantErr: true},
 	}
 

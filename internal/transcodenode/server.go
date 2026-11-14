@@ -77,6 +77,7 @@ type TranscodeStartRequest struct {
 	TargetResolution           string                 `json:"target_resolution"`
 	TargetCodecVideo           string                 `json:"target_codec_video"`
 	TargetCodecAudio           string                 `json:"target_codec_audio"`
+	CopyAudioCodec             string                 `json:"copy_audio_codec,omitempty"`
 	TargetAudioChannels        int                    `json:"target_audio_channels,omitempty"`
 	TargetAudioBitrateKbps     int                    `json:"target_audio_bitrate_kbps,omitempty"`
 	TargetBitrateKbps          int                    `json:"target_bitrate_kbps"`
@@ -154,6 +155,10 @@ type TranscodeStartResponse struct {
 	// remux as MPEG-TS. Older nodes omit it and are rejected before an fMP4
 	// stream is published under a plan that promises MPEG-TS.
 	CopyVideoMPEGTS bool `json:"copy_video_mpegts,omitempty"`
+	// CopyAudioCodec attests the copied audio codec the executor applies.
+	// Older nodes omit it and are rejected before they copy AAC into fMP4
+	// segments without aac_adtstoasc.
+	CopyAudioCodec string `json:"copy_audio_codec,omitempty"`
 }
 
 var ErrAudioRecipeAttestationMismatch = errors.New("transcode node audio recipe attestation mismatch")
@@ -238,6 +243,27 @@ var ErrCopyVideoMPEGTSAttestationMismatch = errors.New("transcode node mpeg-ts c
 func ValidateCopyVideoMPEGTSAttestation(req TranscodeStartRequest, response TranscodeStartResponse) error {
 	if req.CopyVideoMPEGTS && !response.CopyVideoMPEGTS {
 		return ErrCopyVideoMPEGTSAttestationMismatch
+	}
+	return nil
+}
+
+// ErrCopyAudioCodecAttestationMismatch reports an executor that ignored the
+// copied audio codec of a run that needs aac_adtstoasc.
+var ErrCopyAudioCodecAttestationMismatch = errors.New("transcode node copied audio codec attestation mismatch")
+
+// ValidateCopyAudioCodecAttestation rejects an executor that did not confirm
+// the copied codec of a run that copies AAC into fMP4 segments. Other requests
+// stay compatible with older nodes, which omit the field.
+func ValidateCopyAudioCodecAttestation(req TranscodeStartRequest, response TranscodeStartResponse) error {
+	opts := playback.TranscodeOpts{
+		SourceVideoCodec: req.SourceVideoCodec,
+		TargetCodecVideo: req.TargetCodecVideo,
+		TargetCodecAudio: req.TargetCodecAudio,
+		CopyAudioCodec:   req.CopyAudioCodec,
+		CopyVideoMPEGTS:  req.CopyVideoMPEGTS,
+	}
+	if playback.HLSCopiesAACIntoFMP4(opts) && response.CopyAudioCodec != req.CopyAudioCodec {
+		return fmt.Errorf("%w: got %q, want %q", ErrCopyAudioCodecAttestationMismatch, response.CopyAudioCodec, req.CopyAudioCodec)
 	}
 	return nil
 }
@@ -420,7 +446,7 @@ type Server struct {
 	// against work admission. See healthStatus.
 	drainFence      sync.Mutex
 	drainedReported atomic.Bool
-	// trickplay admits one trickplay run at a time.
+	// trickplay admits up to playback.trickplay_node_capacity runs at once.
 	trickplay trickplayWork
 	// shuttingDown is guarded by reloadMu. Once set, no fresh or reconstructed
 	// session may register after the shutdown drain has taken its snapshot.
@@ -598,6 +624,7 @@ func (s *Server) restartSegmentLocked(
 	sessionID string,
 	session *playback.TranscodeSession,
 	segNum int,
+	seenGeneration time.Time,
 ) (playback.SegmentRecoveryTarget, bool, error) {
 	unlock := s.lockSessionLifecycle(sessionID)
 	defer unlock()
@@ -607,7 +634,7 @@ func (s *Server) restartSegmentLocked(
 	if !ok || live != session {
 		return playback.SegmentRecoveryTarget{}, false, playback.ErrSessionSuperseded
 	}
-	return session.RestartSegment(ctx, segNum)
+	return session.RestartSegmentSince(ctx, segNum, seenGeneration)
 }
 
 // NewServer creates a new transcode server.
@@ -1812,6 +1839,7 @@ func (s *Server) handleStart(w http.ResponseWriter, r *http.Request) {
 		TargetResolution:           req.TargetResolution,
 		TargetCodecVideo:           req.TargetCodecVideo,
 		TargetCodecAudio:           req.TargetCodecAudio,
+		CopyAudioCodec:             req.CopyAudioCodec,
 		TargetAudioChannels:        req.TargetAudioChannels,
 		TargetAudioBitrateKbps:     req.TargetAudioBitrateKbps,
 		TargetBitrateKbps:          req.TargetBitrateKbps,
@@ -1994,6 +2022,7 @@ func (s *Server) handleStart(w http.ResponseWriter, r *http.Request) {
 		KeyframePlaylist:      session.Opts().KeyframePlaylist,
 		SubtitleRendition:     session.HasSubtitleRendition(),
 		CopyVideoMPEGTS:       session.Opts().CopyVideoMPEGTS,
+		CopyAudioCodec:        session.Opts().CopyAudioCodec,
 	}
 	response.SubtitleRenditionTracks = session.SubtitleRenditionTrackCount()
 	if err := json.NewEncoder(w).Encode(response); err != nil {
@@ -2247,6 +2276,9 @@ func (s *Server) spawnReconstruct(r *http.Request, sessionID string, requestedSe
 		return nil, r.Context().Err()
 	}
 	defer release()
+	// Past admission the rebuild serves every request waiting on it, so its
+	// probes and its start must not end with the request that triggered it.
+	rebuildCtx := context.WithoutCancel(r.Context())
 
 	// Resume near the segment the client is actually requesting. The card records
 	// the original start; if the client has played past it, spawning at the old
@@ -2268,14 +2300,21 @@ func (s *Server) spawnReconstruct(r *http.Request, sessionID string, requestedSe
 
 	// Under hw_accel=auto the reconstruct walks the same safer paths as a
 	// fresh start in this output directory, keeping a slow process rather than
-	// duplicating it.
-	pipeline := s.autoTranscodePipeline(r.Context(), opts)
-	adaptive := pipeline.Enabled()
+	// duplicating it. Under an explicit backend it starts once, and when the
+	// GPU decoder rejects the source (a card minted where the GPU decodes it)
+	// it moves to CPU decoding. An accel StartupRetryHWAccel would change
+	// (VideoToolbox, or QSV/VAAPI without a render device) is not waited on
+	// here: it keeps the software-encode retry below, which has its own wait.
+	pipeline := s.autoTranscodePipeline(rebuildCtx, opts)
+	retryAccel := opts.HWAccel
+	if !pipeline.Enabled() {
+		retryAccel = playback.StartupRetryHWAccel(opts)
+	}
 	var session *playback.TranscodeSession
-	if adaptive {
-		session, err = playback.StartReconstructTranscode(r.Context(), pipeline, playback.TranscodeStartup{Timeout: playback.ManifestStartupTimeout})
+	if retryAccel != opts.HWAccel {
+		session, err = playback.StartTranscode(rebuildCtx, opts)
 	} else {
-		session, err = playback.StartTranscode(r.Context(), opts)
+		session, err = playback.StartReconstructTranscode(rebuildCtx, pipeline, playback.TranscodeStartup{Timeout: playback.ManifestStartupTimeout})
 	}
 	if err != nil {
 		slog.ErrorContext(r.Context(), "transcode node reconstruct start failed", "component", "transcodenode", "error", err,
@@ -2288,11 +2327,7 @@ func (s *Server) spawnReconstruct(r *http.Request, sessionID string, requestedSe
 	// these dimensions), and registering the dead session would serve this
 	// media as permanently missing. Outside the automatic pipeline, mirror
 	// handleStart's software retry for the accel StartupRetryHWAccel would
-	// change; other accels keep the existing register-immediately behavior.
-	retryAccel := opts.HWAccel
-	if !adaptive {
-		retryAccel = playback.StartupRetryHWAccel(opts)
-	}
+	// change.
 	if retryAccel != opts.HWAccel {
 		if _, waitErr := session.WaitForManifest(playback.ManifestStartupTimeout); waitErr != nil {
 			if session.IsRunning() {
@@ -2305,7 +2340,7 @@ func (s *Server) spawnReconstruct(r *http.Request, sessionID string, requestedSe
 					"component", "transcodenode", "error", waitErr, "session", sessionID, "playback_session_id", sessionID)
 				retryOpts := opts
 				retryOpts.HWAccel = retryAccel
-				session, err = playback.StartTranscode(context.WithoutCancel(r.Context()), retryOpts)
+				session, err = playback.StartTranscode(rebuildCtx, retryOpts)
 				if err != nil {
 					slog.ErrorContext(r.Context(), "transcode node reconstruct retry failed", "component", "transcodenode", "error", err,
 						"session", sessionID, "playback_session_id", sessionID)
@@ -3046,6 +3081,7 @@ func (s *Server) handleSegment(w http.ResponseWriter, r *http.Request) {
 					sessionID,
 					session,
 					segNum,
+					decision.Progress.GenerationStartedAt,
 				)
 				// A restart skipped because the request ended is not a failure.
 				if restartErr != nil && !errors.Is(restartErr, playback.ErrManifestNotReady) && !errors.Is(restartErr, r.Context().Err()) {

@@ -10,7 +10,6 @@ package imagesize
 
 import (
 	"fmt"
-	"net/http"
 	"strconv"
 	"strings"
 
@@ -62,14 +61,6 @@ func Parse(raw string) (Size, error) {
 	default:
 		return Unset, fmt.Errorf("imagesize: unknown %s %q (want small, medium, large, or original)", QueryParam, raw)
 	}
-}
-
-// FromRequest reads the image size from a request's query string.
-func FromRequest(r *http.Request) (Size, error) {
-	if r == nil || r.URL == nil {
-		return Unset, nil
-	}
-	return Parse(r.URL.Query().Get(QueryParam))
 }
 
 // Variant returns the cached artwork variant for an explicitly requested size.

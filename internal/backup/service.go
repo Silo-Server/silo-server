@@ -1,0 +1,989 @@
+package backup
+
+import (
+	"archive/tar"
+	"bytes"
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"hash"
+	"io"
+	"log/slog"
+	"maps"
+	"os"
+	"path"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/Silo-Server/silo-server/internal/adminjob"
+	"github.com/Silo-Server/silo-server/internal/blobstore"
+	"github.com/Silo-Server/silo-server/internal/buildinfo"
+	"github.com/Silo-Server/silo-server/internal/secret"
+	"github.com/Silo-Server/silo-server/internal/taskmanager"
+)
+
+var (
+	// ErrSQLiteUserStore refuses a backup that could not include user data.
+	ErrSQLiteUserStore = errors.New("Backups need the PostgreSQL user store. Import your SQLite user store first.") //nolint:staticcheck // shown to admins as written
+	// ErrNoDestination reports that the default destination does not exist:
+	// an S3 artwork backend with no private bucket has no operational store.
+	ErrNoDestination = errors.New("this server has no private storage for backups; configure a private S3 bucket, or use local artwork storage")
+	// ErrNotEnoughSpace refuses a local backup that could fill the disk the
+	// database shares.
+	ErrNotEnoughSpace = errors.New("not enough free space at the backup destination")
+)
+
+const (
+	// lastSuccessWarnAge is when the Backups page warns that no backup has
+	// completed recently.
+	lastSuccessWarnAge = 48 * time.Hour
+	// freeSpaceMargin is added to 1.5 times the previous backup's size.
+	freeSpaceMargin = 1 << 30
+	// stderrLimit bounds the pg_dump and pg_restore output kept for errors.
+	stderrLimit = 8 << 10
+)
+
+// SettingsReader reads server_settings, decrypted.
+type SettingsReader interface {
+	Get(ctx context.Context, key string) (string, error)
+}
+
+// SettingsWriter writes one server_settings row, encrypting sensitive keys.
+type SettingsWriter interface {
+	Set(ctx context.Context, key, value string) error
+}
+
+// TaskStarter starts the backup task on this process.
+type TaskStarter interface {
+	StartTask(key string) (taskmanager.TaskInfo, error)
+}
+
+// Options configure a Service.
+type Options struct {
+	Pool *pgxpool.Pool
+	// DatabaseURL is the DATABASE_URL pg_dump connects with.
+	DatabaseURL string
+	Settings    SettingsReader
+	// Stores are the blob stores backups copy blobs from. Destination is
+	// the default destination, the operational store; nil when none exists.
+	// Uploads always use it. backup.destination=s3 writes backups to the
+	// backup.s3.* bucket instead. Backups in a bucket, either one, are
+	// encrypted.
+	Stores      blobstore.Stores
+	Destination Destination
+	Locker      Locker
+	ServerID    func(context.Context) (string, error)
+	// KeyCheck is secret.KeyCheckValue of this server's SECRET_KEY.
+	KeyCheck string
+	// ArchiveKey encrypts every object written to a bucket (the S3
+	// destination, or the default one on a private bucket) and decrypts
+	// encrypted backups and uploads. Nil refuses both.
+	ArchiveKey *ArchiveKey
+	// SettingsWriter records the confirmed key check value; nil cannot.
+	SettingsWriter SettingsWriter
+	// ManifestKey is secret.BackupManifestKey of this server's SECRET_KEY:
+	// backups sign their manifests with it, and every read of one checks
+	// it. Nil writes unsigned manifests and checks none (tests).
+	ManifestKey []byte
+	// Cipher is this server's data cipher. A restore decrypts a backup's
+	// encrypted settings with it when the key check values match.
+	Cipher *secret.Cipher
+	// UserStoreBackend reports userdb.backend; backups refuse "sqlite".
+	UserStoreBackend func() string
+	// AllowUnratedContent reports access.unrated_content, which a restored
+	// profile's maturity limits read; nil hides unrated titles from a
+	// profile with a rating ceiling, the default.
+	AllowUnratedContent func(context.Context) bool
+	// Status publishes the active operation and the latest run for every
+	// API server. Nil publishes nothing.
+	Status StatusStore
+	// ActiveRestore returns the request of the restore job queued or
+	// running now, or nil when there is none. Rotation and deletes keep its
+	// source. New reads the admin jobs on Pool when it is nil; a service
+	// with neither deletes no backup.
+	ActiveRestore func(ctx context.Context) (*RestoreRequest, error)
+	// FindTools overrides tool discovery for tests.
+	FindTools func(context.Context) (Tools, error)
+	// UploadCheckTimeout overrides how long a completion may read an
+	// upload's parts.
+	UploadCheckTimeout time.Duration
+	// UploadPartWriteTimeout shortens a part's storage write deadline.
+	UploadPartWriteTimeout time.Duration
+	Now                    func() time.Time
+	// Location is the zone nightly slots are on (nightlySlot): the daily
+	// trigger's, time.Local unless set.
+	Location *time.Location
+}
+
+// Service owns taking, listing, and deleting backups.
+type Service struct {
+	opts    Options
+	stores  blobStores
+	starter TaskStarter
+
+	toolsMu sync.Mutex
+	tools   *Tools
+
+	pendingMu sync.Mutex
+	pending   *pendingRun
+
+	// manifests are the manifests the listing read (listFolders).
+	manifests manifestCache
+
+	targets RestoreTargets
+	// restoreSets shares validated restore sets among previews.
+	restoreSets restoreSetCache
+
+	// lastUploadSweep is when this server last swept upload objects.
+	uploadSweepMu   sync.Mutex
+	lastUploadSweep time.Time
+}
+
+// pendingRun hands a lock taken by StartManual to the task run it starts.
+type pendingRun struct {
+	id   string
+	kind Kind
+	held Held
+}
+
+// New builds a Service.
+func New(opts Options) *Service {
+	if opts.Location == nil {
+		opts.Location = time.Local
+	}
+	if opts.Now == nil {
+		opts.Now = time.Now
+	}
+	if opts.KeyCheck == "" && opts.ArchiveKey != nil {
+		opts.KeyCheck = opts.ArchiveKey.Check
+	}
+	if opts.FindTools == nil {
+		opts.FindTools = FindTools
+	}
+	if opts.ActiveRestore == nil && opts.Pool != nil {
+		opts.ActiveRestore = activeRestoreJob(adminjob.NewRepository(opts.Pool))
+	}
+	stores := blobStores{}
+	if opts.Stores.Assets != nil {
+		stores[storeAssets] = opts.Stores.Assets
+	}
+	if opts.Stores.Operational != nil {
+		stores[storeOperational] = opts.Stores.Operational
+	}
+	go sweepOrphanedSetDirs(os.TempDir())
+	return &Service{opts: opts, stores: stores}
+}
+
+// Configured reports whether the current destination exists: the default
+// one has an operational store, or backup.destination is s3, and a bucket
+// has the archive key its backups are encrypted with. It reads the setting
+// but probes nothing; a setting it cannot read reports false.
+func (s *Service) Configured() bool {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	destination, err := s.destinationSetting(ctx)
+	if err != nil {
+		slog.WarnContext(ctx, "reading the backup destination failed", "component", "backup", "error", err)
+		return false
+	}
+	if s.encrypts(destination) && s.opts.ArchiveKey == nil {
+		return false
+	}
+	return destination == DestinationS3 || s.opts.Destination != nil
+}
+
+// Destinations lists the destinations this server can write to.
+func (s *Service) Destinations() []string {
+	var out []string
+	if s.opts.Destination != nil && (!s.opts.Destination.Encrypted() || s.opts.ArchiveKey != nil) {
+		out = append(out, DestinationDefault)
+	}
+	if s.opts.ArchiveKey != nil {
+		out = append(out, DestinationS3)
+	}
+	return out
+}
+
+// SetTaskStarter wires "Back up now" to the task manager, which is built
+// after the service.
+func (s *Service) SetTaskStarter(starter TaskStarter) { s.starter = starter }
+
+// RunResult is a finished run, recorded as the task's result data.
+type RunResult struct {
+	ID           string        `json:"id,omitempty"`
+	Kind         Kind          `json:"kind,omitempty"`
+	Status       Status        `json:"status,omitempty"`
+	SizeBytes    int64         `json:"size_bytes,omitempty"`
+	DurationMs   int64         `json:"duration_ms,omitempty"`
+	MissingBlobs []MissingBlob `json:"missing_blobs,omitempty"`
+	// Omitted lists restore-set items the backup could not carry.
+	Omitted  []OmittedItem `json:"omitted,omitempty"`
+	Rotated  []string      `json:"rotated,omitempty"`
+	Swept    []string      `json:"swept,omitempty"`
+	Skipped  string        `json:"skipped,omitempty"`
+	Warnings []string      `json:"warnings,omitempty"`
+}
+
+// SkippedBusy is the reason a scheduled run records when the lock is held,
+// and SkippedAlreadyDone when another server already backed up its slot.
+const (
+	SkippedBusy        = "skipped: another backup or restore is running"
+	SkippedAlreadyDone = "skipped: tonight's backup already ran on another server"
+)
+
+// StartManual takes the lock and starts the backup task on this process with
+// it, so "Back up now" either starts a backup or answers ErrBusy: there is no
+// window in which another server could take the lock after the check.
+func (s *Service) StartManual(ctx context.Context) (string, error) {
+	if s.starter == nil {
+		return "", errors.New("backup task is not registered")
+	}
+	if _, err := s.preflight(ctx); err != nil {
+		return "", err
+	}
+	held, err := s.opts.Locker.TryLock(ctx)
+	if err != nil {
+		return "", err
+	}
+	// The id is reserved under the lock the run inherits, so the id
+	// returned is the folder the backup writes.
+	prep, err := s.prepareBackup(ctx, KindManual, "", s.opts.Now())
+	if err != nil {
+		held.Release(ctx)
+		return "", err
+	}
+	id := prep.id
+	s.pendingMu.Lock()
+	s.pending = &pendingRun{id: id, kind: KindManual, held: held}
+	s.pendingMu.Unlock()
+	if _, err := s.starter.StartTask(TaskKey); err != nil {
+		if run := s.takePending(); run != nil {
+			run.held.Release(ctx)
+			if errors.Is(err, taskmanager.ErrTaskAlreadyRunning) {
+				return "", ErrBusy
+			}
+			return "", err
+		}
+		// A run that had already reserved the worker took the lock and is
+		// backing up under this id.
+	}
+	return id, nil
+}
+
+func (s *Service) takePending() *pendingRun {
+	s.pendingMu.Lock()
+	defer s.pendingMu.Unlock()
+	run := s.pending
+	s.pending = nil
+	return run
+}
+
+// RunTask is the task body: a manual run uses the lock StartManual handed
+// over; a scheduled run takes the lock itself and records a skip when another
+// backup or restore holds it.
+func (s *Service) RunTask(ctx context.Context, progress func(float64, string)) (RunResult, error) {
+	run := s.takePending()
+	if run == nil {
+		var skipped RunResult
+		var err error
+		if run, skipped, err = s.lockScheduled(ctx); run == nil {
+			return skipped, err
+		}
+	}
+	held, id, kind := run.held, run.id, run.kind
+	defer held.Release(context.WithoutCancel(ctx))
+	ctx, cancel := withLost(ctx, held)
+	defer cancel()
+	return s.Backup(ctx, held, kind, id, progress)
+}
+
+// lockScheduled takes the lock for a run the task manager started: a
+// manual one, or the nightly one, which skips when the lock is held or
+// another server already backed up its slot. A nil run is a skip or an
+// error.
+func (s *Service) lockScheduled(ctx context.Context) (*pendingRun, RunResult, error) {
+	kind := KindNightly
+	if taskmanager.StartedManually(ctx) {
+		kind = KindManual
+	}
+	held, err := s.opts.Locker.TryLock(ctx)
+	if errors.Is(err, ErrBusy) {
+		return nil, RunResult{Skipped: SkippedBusy}, nil
+	}
+	if err != nil {
+		return nil, RunResult{}, err
+	}
+	if kind == KindNightly {
+		// Every API server fires the trigger; under the lock, the first to
+		// finish the slot's backup leaves the others nothing to do.
+		done, err := s.slotBackedUp(ctx, nightlySlot(s.opts.Now(), s.backupTime(ctx), s.opts.Location))
+		if err != nil || done {
+			held.Release(context.WithoutCancel(ctx))
+			if err != nil {
+				return nil, RunResult{}, err
+			}
+			return nil, RunResult{Skipped: SkippedAlreadyDone}, nil
+		}
+	}
+	return &pendingRun{held: held, kind: kind}, RunResult{}, nil
+}
+
+// Backup takes one backup under held, the subsystem lock the caller holds; a
+// restore calls this directly for its before-restore copy. id may be empty.
+// On success rotation and the sweep run; a failed backup deletes nothing. The
+// run is published as the active operation and then as the latest run.
+func (s *Service) Backup(ctx context.Context, held Held, kind Kind, id string, progress func(float64, string)) (RunResult, error) {
+	return s.backupWith(ctx, held, kind, id, progress, nil, nil)
+}
+
+// backupWith is Backup with ids its rotation must keep (a restore pins its
+// source, so the before-restore backup it takes cannot rotate it away) and,
+// for a before-upgrade backup, the upgrade its manifest records.
+func (s *Service) backupWith(ctx context.Context, held Held, kind Kind, id string, progress func(float64, string), pinned map[string]bool, upgrade *UpgradeRecord) (RunResult, error) {
+	if progress == nil {
+		progress = func(float64, string) {}
+	}
+	started := s.opts.Now()
+	prep, prepErr := s.prepareBackup(ctx, kind, id, started)
+	if prepErr == nil {
+		id, prep.held, prep.upgrade = prep.id, held, upgrade
+	} else if id == "" {
+		id = FolderName(started, kind)
+	}
+	op := s.beginOperation(ctx, held, ActiveOperation{Operation: OperationBackup, BackupID: id, Kind: kind, StartedAt: started})
+	report := func(percent float64, message string) {
+		progress(percent, message)
+		op.progress(ctx, percent, message)
+	}
+	result, err := RunResult{}, prepErr
+	if err == nil {
+		result, err = s.backup(ctx, prep, kind, started, report, pinned)
+	}
+	last := &LastRun{ID: id, Kind: kind, StartedAt: started, FinishedAt: s.opts.Now(), Status: string(result.Status)}
+	if kind == KindNightly {
+		last.NightlySlot = nightlySlot(started, s.backupTime(ctx), s.opts.Location)
+	}
+	if err != nil {
+		last.Status, last.Error = RunFailed, err.Error()
+	}
+	op.end(ctx, last)
+	return result, err
+}
+
+// backupPrep is what a backup resolves before it writes: the destination,
+// this server's folder there, the folders already in it, and the reserved
+// id of the new one.
+type backupPrep struct {
+	t        target
+	serverID string
+	folders  []folder
+	id       string
+	// held is the subsystem lock the backup runs under.
+	held Held
+	// upgrade is what a before-upgrade backup's manifest records.
+	upgrade *UpgradeRecord
+}
+
+// prepareBackup resolves the destination and reserves the backup's id under
+// the subsystem lock the caller holds. A requested id (a manual run's,
+// reserved when it was queued) is kept unless a folder took its time since,
+// which only a change of destination could do; then another is reserved.
+func (s *Service) prepareBackup(ctx context.Context, kind Kind, id string, started time.Time) (backupPrep, error) {
+	t, err := s.preflight(ctx)
+	if err != nil {
+		return backupPrep{}, err
+	}
+	serverID, err := s.serverID(ctx)
+	if err != nil {
+		return backupPrep{}, err
+	}
+	folders, err := s.folders(ctx, t, serverID)
+	if err != nil {
+		return backupPrep{}, fmt.Errorf("listing existing backups: %w", err)
+	}
+	at, requestedKind, ok := ParseFolderName(id)
+	if !ok || requestedKind != kind {
+		at = started
+	}
+	reserved := reserveID(folders, at, kind)
+	if ok && reserved != id {
+		slog.WarnContext(ctx, "the reserved backup id is taken at the destination; using another", "component", "backup", "id", id, "now", reserved)
+	}
+	return backupPrep{t: t, serverID: serverID, folders: folders, id: reserved}, nil
+}
+
+// publishedOperation is one operation's status writes. It writes only while
+// its lock is held, and every write after Begin carries the operation's
+// token, so a holder that lost the lock cannot touch what the next holder
+// published. A failed write is logged: the status reports the work, it is
+// never a reason to stop it.
+type publishedOperation struct {
+	store StatusStore
+	held  Held
+	token string
+}
+
+// beginOperation publishes op for the holder of held. Begin also records an
+// active operation left by a holder that died as an interrupted run. A
+// before-upgrade backup publishes nothing: it runs against the previous
+// release's schema, which may have no status table.
+func (s *Service) beginOperation(ctx context.Context, held Held, op ActiveOperation) *publishedOperation {
+	p := &publishedOperation{store: s.opts.Status, held: held}
+	if p.store == nil || held == nil || op.Kind == KindBeforeUpgrade || p.lost(ctx) {
+		return p
+	}
+	op.Lock = held.Session()
+	token, err := p.store.Begin(ctx, held, op)
+	if err != nil {
+		slog.WarnContext(ctx, "publishing backup status failed", "component", "backup", "error", err)
+		return p
+	}
+	p.token = token
+	return p
+}
+
+func (p *publishedOperation) lost(ctx context.Context) bool {
+	if lockLost(ctx) {
+		return true
+	}
+	select {
+	case <-p.held.Lost():
+		return true
+	default:
+		return false
+	}
+}
+
+func (p *publishedOperation) progress(ctx context.Context, percent float64, message string) {
+	if p.token == "" || p.lost(ctx) {
+		return
+	}
+	if err := p.store.Progress(ctx, p.held, p.token, percent, message); err != nil {
+		slog.WarnContext(ctx, "publishing backup progress failed", "component", "backup", "error", err)
+	}
+}
+
+func (p *publishedOperation) end(ctx context.Context, last *LastRun) {
+	if p.token == "" || p.lost(ctx) {
+		return
+	}
+	if err := p.store.End(context.WithoutCancel(ctx), p.held, p.token, last); err != nil {
+		slog.WarnContext(ctx, "publishing the backup outcome failed", "component", "backup", "error", err)
+	}
+}
+
+func (s *Service) backup(ctx context.Context, prep backupPrep, kind Kind, started time.Time, progress func(float64, string), pinned map[string]bool) (RunResult, error) {
+	serverID, id := prep.serverID, prep.id
+	tools, err := s.findTools(ctx)
+	if err != nil {
+		return RunResult{}, err
+	}
+	t, err := prepareTarget(ctx, prep.t, prep.folders)
+	if err != nil {
+		return RunResult{}, err
+	}
+	// A before-upgrade backup runs against the schema the previous release
+	// left: the dump and the core inventory only, which check each table
+	// before reading it. Migrations do not touch blobs.
+	withBlobs := !kind.databaseOnly()
+	includeFingerprints, includeSubtitles, err := s.contentSettings(ctx, withBlobs)
+	if err != nil {
+		return RunResult{}, err
+	}
+	excluded := excludedTableData(includeFingerprints)
+
+	// The dump streams into the destination while the snapshot holds a pool
+	// connection; a store recording its identity on that first write would
+	// need another one.
+	if recorder, ok := t.Destination.(interface{ RecordIdentity(context.Context) error }); ok {
+		if err := recorder.RecordIdentity(ctx); err != nil {
+			return RunResult{}, fmt.Errorf("recording the destination storage: %w", err)
+		}
+	}
+	progress(5, "Opening a database snapshot")
+	conn, err := s.opts.Pool.Acquire(ctx)
+	if err != nil {
+		return RunResult{}, fmt.Errorf("opening a database connection: %w", err)
+	}
+	defer conn.Release()
+	tx, err := conn.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.RepeatableRead, AccessMode: pgx.ReadOnly})
+	if err != nil {
+		return RunResult{}, fmt.Errorf("opening a snapshot transaction: %w", err)
+	}
+	defer func() { _ = tx.Rollback(context.WithoutCancel(ctx)) }()
+	var snapshot string
+	if err := tx.QueryRow(ctx, `SELECT pg_export_snapshot()`).Scan(&snapshot); err != nil {
+		return RunResult{}, fmt.Errorf("exporting the snapshot: %w", err)
+	}
+	facts, err := readSnapshot(ctx, tx, withBlobs, includeSubtitles)
+	if err != nil {
+		return RunResult{}, err
+	}
+	if err := CheckToolsFor(tools, facts.serverMajor); err != nil {
+		return RunResult{}, err
+	}
+
+	progress(10, "Dumping the database")
+	dumpEntry, tocMode, err := s.dump(ctx, t, tools, snapshot, excluded, objectKey(serverID, id, t.name(DumpName)))
+	if err != nil {
+		return RunResult{}, err
+	}
+	created := folderTime(id, started)
+	closeSnapshot := sync.OnceFunc(func() { _ = tx.Rollback(ctx); conn.Release() })
+	objects, restoreSet, err := s.restoreSetFor(ctx, t, tx, closeSnapshot, kind, serverID, id, created, progress)
+	if err != nil {
+		return RunResult{}, err
+	}
+	objects = append([]ObjectEntry{dumpEntry}, objects...)
+
+	blobObjects, copied, err := s.blobsFor(ctx, t, kind, objectKey(serverID, id, t.name(BlobsName)), facts.blobs, progress)
+	if err != nil {
+		return RunResult{}, err
+	}
+
+	manifest := &Manifest{
+		Format: manifestFormat, Version: manifestVersion,
+		ID: id, Kind: kind, ServerID: serverID,
+		CreatedAt: created, CompletedAt: s.opts.Now().UTC(),
+		SiloVersion: buildinfo.Current().Display, GooseVersion: facts.gooseVersion,
+		AppliedMigrations: facts.applied,
+		PostgresVersion:   facts.postgresVersion, PgDumpVersion: tools.Version,
+		ExcludedTableData: excluded,
+		Objects:           append(objects, blobObjects...),
+		RestoreSet:        restoreSet,
+		Upgrade:           prep.upgrade,
+		Encrypted:         t.key != nil,
+		KeyCheck:          s.opts.KeyCheck,
+		TOCCheck:          tocMode,
+		Blobs:             BlobSummary{Count: copied.count, Bytes: copied.bytes, IncludesSubtitles: includeSubtitles},
+		MissingBlobs:      copied.missing,
+		Tables:            facts.tables,
+	}
+	progress(95, "Writing the manifest")
+	if err := writeManifest(ctx, t, manifest, s.opts.ManifestKey); err != nil {
+		return RunResult{}, err
+	}
+	result := RunResult{ID: id, Kind: kind, Status: manifest.Status(), SizeBytes: manifest.Size(), MissingBlobs: manifest.MissingBlobs}
+	if restoreSet != nil {
+		result.Omitted = restoreSet.Omitted
+	}
+	result.Rotated, result.Swept, result.Warnings = s.rotate(ctx, prep.held, t, serverID, pinned, withBlobs)
+	if manifest.MissingBlobsTotal > 0 {
+		result.Warnings = append(result.Warnings, fmt.Sprintf("%d stored files were missing; the manifest lists the first %d", manifest.MissingBlobsTotal, len(manifest.MissingBlobs)))
+	}
+	result.DurationMs = s.opts.Now().Sub(started).Milliseconds()
+	progress(100, "Backed up "+id)
+	return result, nil
+}
+
+// writeManifest writes m last of a backup's objects: its presence completes
+// the backup.
+func writeManifest(ctx context.Context, t target, m *Manifest, key []byte) error {
+	if m.MissingBlobs == nil {
+		m.MissingBlobs = []MissingBlob{}
+	}
+	if len(m.MissingBlobs) > maxRecordedMissingBlobs {
+		m.MissingBlobsTotal, m.MissingBlobs = len(m.MissingBlobs), m.MissingBlobs[:maxRecordedMissingBlobs]
+	}
+	if err := m.sign(key); err != nil {
+		return err
+	}
+	data, err := json.MarshalIndent(m, "", "  ")
+	if err != nil {
+		return err
+	}
+	if len(data) > MaxManifestBytes {
+		return fmt.Errorf("the manifest would be %d bytes, more than a reader takes (%d)", len(data), MaxManifestBytes)
+	}
+	if err := t.Put(ctx, objectKey(m.ServerID, m.ID, ManifestName), bytes.NewReader(data)); err != nil {
+		return fmt.Errorf("writing the manifest: %w", err)
+	}
+	return nil
+}
+
+// preflight refuses what no backup on this server could survive, and
+// returns the destination a backup starting now writes to. Encrypted
+// backups (any bucket) are paused while the confirmed key check value is
+// not this server's.
+func (s *Service) preflight(ctx context.Context) (target, error) {
+	if s.sqliteUserStore() {
+		return target{}, ErrSQLiteUserStore
+	}
+	t, err := s.target(ctx)
+	if err != nil {
+		return target{}, err
+	}
+	if t.key != nil {
+		confirmed, err := s.keyConfirmed(ctx)
+		if err != nil {
+			return target{}, err
+		}
+		if !confirmed {
+			return target{}, ErrKeyNotConfirmed
+		}
+	}
+	return t, nil
+}
+
+func (s *Service) sqliteUserStore() bool {
+	return s.opts.UserStoreBackend != nil && strings.EqualFold(strings.TrimSpace(s.opts.UserStoreBackend()), "sqlite")
+}
+
+func (s *Service) serverID(ctx context.Context) (string, error) {
+	if s.opts.ServerID == nil {
+		return "", errors.New("server identity unavailable")
+	}
+	id, err := s.opts.ServerID(ctx)
+	if err != nil {
+		return "", fmt.Errorf("reading the server identity: %w", err)
+	}
+	if !validServerID(id) {
+		return "", fmt.Errorf("server identity %q cannot name a backup folder", id)
+	}
+	return id, nil
+}
+
+// findTools caches a successful discovery for the process.
+func (s *Service) findTools(ctx context.Context) (Tools, error) {
+	s.toolsMu.Lock()
+	defer s.toolsMu.Unlock()
+	if s.tools != nil {
+		return *s.tools, nil
+	}
+	tools, err := s.opts.FindTools(ctx)
+	if err != nil {
+		return Tools{}, err
+	}
+	s.tools = &tools
+	return tools, nil
+}
+
+// checkFreeSpace requires 1.5 times the previous backup plus 1 GB free on a
+// local destination. The default destination shares a disk with the
+// database, and filling it would take Postgres down.
+func checkFreeSpace(ctx context.Context, t target, folders []folder) error {
+	free, ok, err := t.FreeBytes(ctx)
+	if err != nil || !ok {
+		return err
+	}
+	var previous int64
+	var newest time.Time
+	for _, f := range folders {
+		if f.manifest != nil && f.at.After(newest) {
+			previous, newest = f.manifest.Size(), f.at
+		}
+	}
+	need := uint64(previous)*3/2 + freeSpaceMargin
+	if free < need {
+		return fmt.Errorf("%w: %s free, %s needed (1.5 times the previous backup plus 1 GB)", ErrNotEnoughSpace, formatBytes(free), formatBytes(need))
+	}
+	return nil
+}
+
+// prepareTarget checks a local destination's free space and sizes a
+// bucket's upload parts, both from the previous backup. The returned target
+// carries the part size; the shared default destination is never changed.
+func prepareTarget(ctx context.Context, t target, folders []folder) (target, error) {
+	if d, ok := t.Destination.(partSizer); ok {
+		t.Destination = d.withPartSize(partSizeFor(largestObject(folders)))
+	}
+	return t, checkFreeSpace(ctx, t, folders)
+}
+
+// largestObject is the largest object of the newest complete backup whose
+// manifest this server authenticated: the size the next backup's objects
+// are likely to reach.
+func largestObject(folders []folder) int64 {
+	var largest int64
+	var newest time.Time
+	for _, f := range folders {
+		// An unverified manifest's sizes could be anyone's: a huge one
+		// would size every part to the largest S3 takes, held in memory.
+		if f.manifest == nil || !f.verified || !f.at.After(newest) {
+			continue
+		}
+		newest, largest = f.at, 0
+		for _, o := range f.manifest.Objects {
+			largest = max(largest, o.Size)
+		}
+	}
+	return largest
+}
+
+// writeBlobs streams blobs.tar into the destination while hashing it.
+func (s *Service) writeBlobs(ctx context.Context, t target, key string, refs []blobRef) (ObjectEntry, blobCopyResult, error) {
+	pr, pw := io.Pipe()
+	var copied blobCopyResult
+	done := make(chan error, 1)
+	go func() {
+		result, err := writeBlobTar(ctx, pw, s.stores, refs)
+		copied = result
+		_ = pw.CloseWithError(err)
+		done <- err
+	}()
+	entry, putErr := t.put(ctx, key, pr)
+	_ = pr.CloseWithError(errBlobUploadEnded)
+	copyErr := <-done
+	switch {
+	case putErr != nil && (copyErr == nil || errors.Is(copyErr, errBlobUploadEnded)):
+		// The destination failed first and the copy only saw the closed pipe.
+		return ObjectEntry{}, copied, fmt.Errorf("writing blobs.tar: %w", putErr)
+	case copyErr != nil:
+		return ObjectEntry{}, copied, fmt.Errorf("copying blobs: %w", copyErr)
+	}
+	return entry, copied, nil
+}
+
+// errBlobUploadEnded is what the blob copy reads once the upload has returned.
+var errBlobUploadEnded = errors.New("blob upload ended")
+
+// folderTime is the backup's creation time: the time its id names.
+func folderTime(id string, started time.Time) time.Time {
+	if at, _, ok := ParseFolderName(id); ok {
+		return at
+	}
+	return started.UTC()
+}
+
+// restoreSetFor writes restore-set.tar from the snapshot for every kind but
+// before-upgrade, which has none, and then calls closeSnapshot: the dump has
+// imported the snapshot, and the blob copies run outside it.
+func (s *Service) restoreSetFor(ctx context.Context, t target, tx pgx.Tx, closeSnapshot func(), kind Kind, serverID, id string, created time.Time, progress func(float64, string)) ([]ObjectEntry, *RestoreSetSummary, error) {
+	if kind.databaseOnly() {
+		closeSnapshot()
+		return nil, nil, nil
+	}
+	progress(60, "Writing the restore set")
+	entry, summary, err := s.writeRestoreSet(ctx, t, tx, closeSnapshot, objectKey(serverID, id, t.name(RestoreSetName)),
+		restoreSetMeta{serverID: serverID, keyCheck: s.opts.KeyCheck, createdAt: created, version: buildinfo.Current().Display})
+	closeSnapshot()
+	if err != nil {
+		return nil, nil, err
+	}
+	return []ObjectEntry{entry}, summary, nil
+}
+
+// writeRestoreSet streams restore-set.tar into the destination while
+// hashing it. Its documents and plugin archives come from the snapshot
+// transaction; closeSnapshot then ends it, and the section blobs are copied
+// after, as blobs.tar's are.
+func (s *Service) writeRestoreSet(ctx context.Context, t target, tx pgx.Tx, closeSnapshot func(), key string, meta restoreSetMeta) (ObjectEntry, *RestoreSetSummary, error) {
+	build, err := buildRestoreSet(ctx, tx, meta)
+	if err != nil {
+		return ObjectEntry{}, nil, err
+	}
+	pr, pw := io.Pipe()
+	var entry ObjectEntry
+	putDone := make(chan error, 1)
+	go func() {
+		var err error
+		entry, err = t.put(ctx, key, pr)
+		_ = pr.CloseWithError(errors.New("restore set upload ended"))
+		putDone <- err
+	}()
+	tw := tar.NewWriter(pw)
+	err = build.writeSnapshotPart(ctx, tw, tx)
+	closeSnapshot()
+	if err == nil {
+		err = build.writeBlobPart(ctx, tw, s.stores)
+	}
+	if err == nil {
+		err = tw.Close()
+	}
+	_ = pw.CloseWithError(err)
+	putErr := <-putDone
+	if err != nil {
+		return ObjectEntry{}, nil, fmt.Errorf("writing the restore set: %w", err)
+	}
+	if putErr != nil {
+		return ObjectEntry{}, nil, fmt.Errorf("writing %s: %w", RestoreSetName, putErr)
+	}
+	return entry, build.summary(), nil
+}
+
+// errNoDatabase is a service without a database (tests): it cannot read
+// which migrations are applied.
+var errNoDatabase = errors.New("no database")
+
+// rotate runs rotation and the sweeps (incomplete folders, and with
+// sweepUploads expired and orphaned uploads) after a manifest landed, under
+// the subsystem lock. pinned, the source of a queued or running restore,
+// and a before-upgrade copy whose upgrade has not completed are never
+// rotated away; when that restore cannot be read, nothing is. A
+// before-upgrade backup skips the upload sweep: the schema it runs against
+// may predate the upload tables. Failures are warnings: the backup itself
+// succeeded.
+func (s *Service) rotate(ctx context.Context, held Held, t target, serverID string, pinned map[string]bool, sweepUploads bool) (rotated, swept, warnings []string) {
+	folders, err := s.folders(ctx, t, serverID)
+	if err != nil {
+		return nil, nil, []string{"rotation skipped: " + err.Error()}
+	}
+	now := s.opts.Now()
+	keep, err := s.settingKeep(ctx)
+	if err != nil {
+		return nil, nil, []string{"rotation skipped: " + err.Error()}
+	}
+	// A queued restore's source is kept like the running one's: restores are
+	// queued under the lock this rotation holds.
+	active, err := s.activeRestoreSource(ctx)
+	if err != nil {
+		return nil, nil, []string{"rotation skipped: " + err.Error()}
+	}
+	pinned = maps.Clone(pinned)
+	if pinned == nil {
+		pinned = map[string]bool{}
+	}
+	if active.backupID != "" {
+		pinned[active.backupID] = true
+	}
+	// The copy from before an upgrade that has not completed is the way
+	// back from what its failed migrations left; when the applied
+	// migrations cannot be read, every copy that records its upgrade is.
+	var applied []int64
+	appliedErr := errNoDatabase
+	if s.opts.Pool != nil {
+		if _, applied, appliedErr = appliedMigrations(ctx, s.opts.Pool); appliedErr != nil {
+			warnings = append(warnings, "keeping every before-upgrade backup: "+appliedErr.Error())
+		}
+	}
+	for _, f := range folders {
+		if f.kind == KindBeforeUpgrade && f.manifest != nil && (appliedErr != nil || f.manifest.upgradeUnfinished(applied)) {
+			pinned[f.id] = true
+		}
+	}
+	for _, id := range planRotation(folders, keep, now, pinned) {
+		if err := deleteBackupFolder(ctx, t, folderPrefix(serverID, id)); err != nil {
+			// A bucket that refuses deletes (object lock) leaves retention to
+			// its lifecycle rules.
+			warnings = append(warnings, fmt.Sprintf("could not delete %s: %v", id, err))
+			continue
+		}
+		rotated = append(rotated, id)
+	}
+	for _, id := range planSweep(folders, now) {
+		if err := deleteBackupFolder(ctx, t, folderPrefix(serverID, id)); err != nil {
+			warnings = append(warnings, fmt.Sprintf("could not delete incomplete %s: %v", id, err))
+			continue
+		}
+		swept = append(swept, id)
+	}
+	if sweepUploads {
+		uploads, uploadWarnings := s.sweepUploads(ctx, true, held)
+		swept, warnings = append(swept, uploads...), append(warnings, uploadWarnings...)
+	}
+	for _, w := range warnings {
+		slog.WarnContext(ctx, "backup rotation", "component", "backup", "warning", w)
+	}
+	return rotated, swept, warnings
+}
+
+// readManifest reads and checks the manifest of backup id of serverID: it
+// must name that backup and server, and one written under this server's
+// SECRET_KEY must verify (checkMAC). Authenticated reports whether it did.
+func (s *Service) readManifest(ctx context.Context, t target, serverID, id string) (*Manifest, error) {
+	m, err := readManifestObject(ctx, t, objectKey(serverID, id, ManifestName))
+	if err != nil {
+		return nil, err
+	}
+	if m.ID != id || m.ServerID != serverID {
+		return nil, fmt.Errorf("the manifest of %s names backup %s of server %s", id, m.ID, m.ServerID)
+	}
+	if m.authenticated, err = m.checkMAC(s.opts.ManifestKey, s.opts.KeyCheck); err != nil {
+		return nil, err
+	}
+	return m, nil
+}
+
+func readManifestObject(ctx context.Context, t target, key string) (*Manifest, error) {
+	body, _, err := t.Open(ctx, key)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = body.Close() }()
+	data, err := io.ReadAll(io.LimitReader(body, MaxManifestBytes))
+	if err != nil {
+		return nil, err
+	}
+	m, err := ParseManifest(data)
+	if err != nil {
+		return nil, err
+	}
+	if t.Encrypted() && !m.Encrypted {
+		return nil, ErrPlaintextInBucket
+	}
+	m.storedSize = int64(len(data))
+	return m, nil
+}
+
+// ErrPlaintextInBucket refuses a manifest that says its backup is not
+// encrypted where every backup is. The manifest is the one object a backup
+// leaves in plaintext: anyone who can write the bucket could otherwise pass
+// off a dump and restore set of their own, with hashes they chose, which
+// only the encryption of every other object (keyed by SECRET_KEY) rules out.
+var ErrPlaintextInBucket = errors.New("a backup in a bucket must be encrypted, and this manifest says it is not; it was not written by this server")
+
+// target is the destination one operation uses, read from the settings when
+// it starts, and the key its new objects are encrypted with: nil stores
+// them as they are.
+type target struct {
+	Destination
+	key *ArchiveKey
+}
+
+// name is the stored name of a new object of base at t.
+func (t target) name(base string) string { return storedName(base, t.key != nil) }
+
+// put streams plaintext r into key, encrypting when t encrypts, and returns
+// the stored object's entry: its name, size, and the SHA-256 of the stored
+// bytes.
+func (t target) put(ctx context.Context, key string, r io.Reader) (ObjectEntry, error) {
+	body := r
+	if t.key != nil {
+		enc := t.key.encryptingReader(r)
+		defer func() { _ = enc.Close() }()
+		body = enc
+	}
+	sum := newSum()
+	if err := t.Put(ctx, key, io.TeeReader(body, sum)); err != nil {
+		return ObjectEntry{}, err
+	}
+	return sum.entry(path.Base(key)), nil
+}
+
+// WrongKeyError is an encrypted backup taken with another SECRET_KEY.
+type WrongKeyError struct{ Backup, Server string }
+
+func (e *WrongKeyError) Error() string {
+	return fmt.Sprintf("this backup is encrypted with a different SECRET_KEY (key check %s; this server's is %s), so this server cannot read it", e.Backup, e.Server)
+}
+
+func (e *WrongKeyError) Unwrap() error { return ErrWrongKey }
+
+// sum hashes and counts the bytes written through it.
+type sum struct {
+	h hash.Hash
+	n int64
+}
+
+func newSum() *sum { return &sum{h: sha256.New()} }
+
+func (s *sum) Write(p []byte) (int, error) {
+	s.n += int64(len(p))
+	return s.h.Write(p)
+}
+
+func (s *sum) entry(name string) ObjectEntry {
+	return ObjectEntry{Name: name, Size: s.n, SHA256: hex.EncodeToString(s.h.Sum(nil))}
+}
+
+func formatBytes(n uint64) string {
+	const unit = 1 << 30
+	return fmt.Sprintf("%.1f GB", float64(n)/unit)
+}

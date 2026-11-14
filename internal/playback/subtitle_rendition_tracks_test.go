@@ -942,6 +942,12 @@ func TestPlannedCopyOnDemandSegmentNoGenerationReachesIsNotFound(t *testing.T) {
 			time.Since(started) < subtitleSegmentProductionWait {
 			t.Fatalf("segment before the generation = %q, %v after %v", body, err, time.Since(started))
 		}
+		// Once FFmpeg has exited, the segment's video request restarts it
+		// there, so the answer is still one the player retries.
+		session.running = false
+		if body, err := session.subtitleTrackSegmentVTT(t.Context(), 3, 1); !errors.Is(err, ErrSegmentNotFound) || body != nil {
+			t.Fatalf("segment before the generation after FFmpeg exited = %q, %v", body, err)
+		}
 	})
 }
 

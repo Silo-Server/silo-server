@@ -17,8 +17,7 @@ the missing kinds that are on and skips files with none left. v2
 `redetect-markers` and `refresh-markers` narrow their kinds the same way;
 `redetect-markers` answers `409` when none of the requested kinds are on, and
 `refresh-markers` does too in `local` mode; in `both` mode the online refresh
-still runs. v2 `redetect-intro` and the v1 routes predate the settings and
-ignore them. Turning a kind off never deletes its markers.
+still runs. v2 `redetect-intro` predates the settings and ignores them. Turning a kind off never deletes its markers.
 
 Every API server runs the task manager, so the task takes a PostgreSQL
 advisory lock before it analyzes anything. While one server holds it, a run on
@@ -457,7 +456,16 @@ last movie of the one before in that order, so a movie analyzed in this run
 that is still eligible is not listed again in it. The run starts no new
 movie, and lists no further page, once 60 minutes have passed since it
 started listing movies, and then reports `movie_budget_exhausted`; the
-remaining movies wait for the next run. Run summaries count
+remaining movies wait for the next run. When the run has a deadline, such as
+a scheduled run with a max runtime, the episode pass stops early enough to
+leave the movies that 60 minutes, or half the time left when the run starts if
+that is shorter. It stops where a cancel stops it, keeping the season groups
+it finished, reports `episode_budget_exhausted`, and the movie pass runs. A
+server without Chromaprint, which runs its episodes and then a separate movie
+pass under the cluster lock, leaves the same share when credits are on, even
+if another server then holds the lock and runs the movies. A run without a
+deadline, or one whose movie pass would list no movie, gives the episodes as
+long as they take. Run summaries count
 `movies_considered` (the movies the run listed) and
 `movie_credits_markers_written`; the credits tail counters include movies.
 
@@ -478,8 +486,8 @@ never sent either: a detector that finds nothing is no evidence of absence.
 A manual clear is sent as an absent submission (`absent` set, no times,
 source `manual`, algorithm `manual:v1`, confidence 1), only to providers whose
 marker capability declares `supports_absent`. Every clear path sends it: the
-v1 segment clear (`HandleClearFileSegment`) and the set-markers clear that the
-v1 and v2 marker writes share. Its content hash and claim carry NULL times,
+segment clear (`clearFileMarkerSegment`) and a clear inside a marker write
+(`setFileMarkers`, `setItemMarkers`). Its content hash and claim carry NULL times,
 which `currentAmendHashSQL` hashes as `ContentHash` does, so the amend check
 below matches them against the stored tombstone.
 
@@ -560,8 +568,7 @@ may still show a provider's marker. Provenance is written with the marker in
 one statement, so it survives restarts, races between saves, and changes to
 the item's metadata. Everywhere else, including write priority, local
 detection, the API, and jellycompat, `manual:withheld:v1` is a manual marker
-like `manual:v1`. `/api/v2` reports the stored algorithm; the frozen `/api/v1`
-reports `manual:v1` for both.
+like `manual:v1`. `/api/v2` reports the stored algorithm.
 
 With stored markers, a save is compared with the row as it is when the save
 arrives, not with what the editor showed, which the API does not send. If the

@@ -319,23 +319,68 @@ func mergeAdvisory(target, source *MetadataResult, mode MergeMode) {
 	}
 }
 
+// clearPreviousMatch empties the stored fields a metadata provider supplies,
+// before a correction of the item's match merges the new match's values. The
+// stored values describe a different title, so one the new match lacks must not
+// stay behind, even when a provider failed to answer. Locked fields keep the
+// admin's value. A refresh never does this: it can't tell a value the provider
+// lacks from one it failed to send.
+//
+// The title stays, since an item always has one, and artwork stays, since local
+// artwork and cached copies have their own rules in the artwork pass.
+func clearPreviousMatch(stored *MetadataResult, locked []MetadataField) {
+	if !isFieldLocked(locked, FieldName) {
+		stored.SortTitle, stored.OriginalTitle = "", ""
+	}
+	if !isFieldLocked(locked, FieldOverview) {
+		stored.Overview, stored.Tagline = "", ""
+	}
+	if !isFieldLocked(locked, FieldRuntime) {
+		stored.Runtime = 0
+	}
+	if !isFieldLocked(locked, FieldContentRating) {
+		stored.ContentRating = ""
+	}
+	stored.AdvisoryAge, stored.AdvisorySource = 0, ""
+	if !isFieldLocked(locked, FieldRating) {
+		stored.Ratings = Ratings{}
+	}
+	if !isFieldLocked(locked, FieldReleaseDates) {
+		stored.Year = 0
+		stored.ReleaseDate, stored.DigitalReleaseDate, stored.PhysicalReleaseDate = "", "", ""
+		stored.FirstAirDate, stored.LastAirDate = "", ""
+	}
+	stored.OriginalLanguage, stored.ShowStatus, stored.SeasonCount = "", "", 0
+	if !isFieldLocked(locked, FieldAirSchedule) {
+		stored.AirTime, stored.AirTimezone = "", ""
+	}
+	if !isFieldLocked(locked, FieldGenres) {
+		stored.Genres = []string{}
+	}
+	if !isFieldLocked(locked, FieldStudios) {
+		stored.Studios, stored.Networks = []string{}, []string{}
+	}
+	if !isFieldLocked(locked, FieldTags) {
+		stored.Countries, stored.Keywords = []string{}, []string{}
+	}
+	cast, crew := splitPeopleByRole(stored.People)
+	stored.People = nil
+	if isFieldLocked(locked, FieldCast) {
+		stored.People = append(stored.People, cast...)
+	}
+	if isFieldLocked(locked, FieldCrew) {
+		stored.People = append(stored.People, crew...)
+	}
+}
+
 // refreshHomeReleaseDates gives a stored item the provider chain's current
 // home release dates, whatever the refresh's merge mode. Providers announce
 // them late and revise them, they alone place a movie on the calendar, and only
 // a provider supplies them, so a stored date is never a manual correction a
-// fill-empty refresh must keep. The FieldReleaseDates lock still holds them.
-//
-// A refresh keeps a date the provider stops sending, but a correction of the
-// item's match is a different movie: its dates replace the stored ones even
-// when empty, so the wrong match's release cannot keep the item on the
-// calendar.
-func refreshHomeReleaseDates(stored, fresh *MetadataResult, locked []MetadataField, rematch bool) {
+// fill-empty refresh must keep. The FieldReleaseDates lock still holds them. A
+// date the provider stops sending stays.
+func refreshHomeReleaseDates(stored, fresh *MetadataResult, locked []MetadataField) {
 	if isFieldLocked(locked, FieldReleaseDates) {
-		return
-	}
-	if rematch {
-		stored.DigitalReleaseDate = fresh.DigitalReleaseDate
-		stored.PhysicalReleaseDate = fresh.PhysicalReleaseDate
 		return
 	}
 	mergeScalar(&stored.DigitalReleaseDate, fresh.DigitalReleaseDate, MergeReplaceUnlocked)

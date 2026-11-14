@@ -9,6 +9,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import { useT } from "@/i18n";
 
 interface ConfirmDialogProps {
   open: boolean;
@@ -31,6 +32,8 @@ interface ConfirmDialogProps {
   onCloseAutoFocus?: (event: Event) => void;
   /** Why the action didn't happen, shown in the dialog; the caller keeps it open. */
   error?: string | null;
+  /** Extra classes for the dialog's content, e.g. a page's touch-target sizing. */
+  className?: string;
 }
 
 export function ConfirmDialog({
@@ -38,8 +41,8 @@ export function ConfirmDialog({
   onOpenChange,
   title,
   description,
-  confirmLabel = "Confirm",
-  cancelLabel = "Cancel",
+  confirmLabel,
+  cancelLabel,
   variant = "default",
   onConfirm,
   isPending,
@@ -48,7 +51,10 @@ export function ConfirmDialog({
   irreversible = false,
   onCloseAutoFocus,
   error,
+  className,
 }: ConfirmDialogProps) {
+  const t = useT();
+  const confirmText = confirmLabel ?? t("web.shell.confirmDialog.confirm");
   const id = useId();
   const items = bullets?.items ?? [];
   const itemId = (index: number) => `${id}-item-${index}`;
@@ -63,7 +69,7 @@ export function ConfirmDialog({
   ].join(" ");
   const buttons = (
     <>
-      <AlertDialogCancel>{cancelLabel}</AlertDialogCancel>
+      <AlertDialogCancel>{cancelLabel ?? t("common.cancel")}</AlertDialogCancel>
       <AlertDialogAction
         onClick={onConfirm}
         variant={variant === "destructive" ? "destructive" : "default"}
@@ -71,18 +77,22 @@ export function ConfirmDialog({
       >
         {isPending ? (
           <>
-            <span className="mr-2 inline-block h-3 w-3 animate-spin rounded-full border-2 border-current border-t-transparent" />
-            {confirmLabel}
+            <span className="me-2 inline-block h-3 w-3 animate-spin rounded-full border-2 border-current border-t-transparent" />
+            {confirmText}
           </>
         ) : (
-          confirmLabel
+          confirmText
         )}
       </AlertDialogAction>
     </>
   );
   return (
     <AlertDialog open={open} onOpenChange={onOpenChange}>
-      <AlertDialogContent aria-describedby={describedBy} onCloseAutoFocus={onCloseAutoFocus}>
+      <AlertDialogContent
+        aria-describedby={describedBy}
+        onCloseAutoFocus={onCloseAutoFocus}
+        className={className}
+      >
         <AlertDialogHeader>
           <AlertDialogTitle>{title}</AlertDialogTitle>
           <AlertDialogDescription>
@@ -90,7 +100,7 @@ export function ConfirmDialog({
           </AlertDialogDescription>
         </AlertDialogHeader>
         {items.length > 0 ? (
-          <ul aria-label={bullets?.label} className="m-0 grid list-disc gap-1 pl-5 text-sm">
+          <ul aria-label={bullets?.label} className="m-0 grid list-disc gap-1 ps-5 text-sm">
             {items.map((item, index) => (
               <li key={`${item}-${index}`} id={itemId(index)}>
                 {item}
@@ -106,7 +116,7 @@ export function ConfirmDialog({
         {irreversible ? (
           <AlertDialogFooter className="items-center sm:justify-between">
             <p id={noteId} className="text-muted-foreground text-sm">
-              This can&apos;t be undone.
+              {t("web.shell.confirmDialog.irreversible")}
             </p>
             <div className="flex gap-2">{buttons}</div>
           </AlertDialogFooter>

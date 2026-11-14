@@ -227,28 +227,6 @@ func TestDiscoverRowSendsTheStricterCertification(t *testing.T) {
 	}
 }
 
-func TestDiscoverAllKeepsTheBuiltInRowsWhateverTheLayout(t *testing.T) {
-	// /api/v1 is frozen: a layout without the built-in rows does not change it.
-	rows := []discoverrows.Row{{ID: "r_mine", Type: discoverrows.TypeTMDBChart, Title: "Mine", Enabled: true, Chart: &discoverrows.ChartSpec{Preset: "top_rated", MediaType: "series"}}}
-	client := &rowsTMDB{charts: map[string]*tmdb.MediaPage{"trending/movie": moviePage(1)}}
-	service := newLayoutService(t, rows, client, nil, "")
-	sections, err := service.DiscoverAll(t.Context(), testViewer(1))
-	if err != nil {
-		t.Fatal(err)
-	}
-	var keys []string
-	for _, s := range sections {
-		keys = append(keys, s.Key+"="+s.Title)
-	}
-	want := []string{"trending_movies=Trending Movies", "trending_series=Trending Series", "popular_movies=Popular Movies", "popular_series=Popular Series", "upcoming_movies=Upcoming Movies", "on_air_series=On Air Series"}
-	if !slices.Equal(keys, want) {
-		t.Fatalf("v1 sections = %v, want %v", keys, want)
-	}
-	if got := resultIDs(sections[0].Results); !slices.Equal(got, []int{1}) {
-		t.Fatalf("trending_movies = %v, want the trending/movie chart", got)
-	}
-}
-
 func TestDiscoverLayoutDatabase(t *testing.T) {
 	repo := editorTestRepository(t)
 	ctx := t.Context()

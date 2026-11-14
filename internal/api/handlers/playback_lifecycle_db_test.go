@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"testing"
 	"time"
@@ -10,6 +11,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/playback"
 )
 
@@ -348,6 +350,61 @@ func TestLifecycleSweepPassesLiveJellyfinPlaysDB(t *testing.T) {
 	if len(candidates) == 0 || candidates[0].sessionID != abandoned || reporting[candidates[0].sessionID] {
 		t.Fatalf("first candidate after the sweep = %+v, want the abandoned play %s", candidates, abandoned)
 	}
+}
+
+// TestLifecycleSweepBacksOffFailedEndsDB pins what the sweep does when a
+// session's history write fails: the session stays live so a later sweep
+// can still record it, but waits a grace before the next try and moves
+// behind sessions idle for longer, so a hundred ends that keep failing
+// neither retry every sweep nor keep the abandoned session behind them from
+// being ended.
+func TestLifecycleSweepBacksOffFailedEndsDB(t *testing.T) {
+	ctx, pool, account := lifecycleTestDB(t)
+	file := lifecycleTestFile(t, ctx, pool)
+	insert := func(idle time.Duration) string {
+		t.Helper()
+		id := uuid.NewString()
+		if _, err := pool.Exec(ctx, `INSERT INTO playback_session_lifecycle
+			(session_id, frontend, state, seq, user_id, profile_id, media_file_id, requested_media_file_id, started_at, updated_at)
+			VALUES ($1, 'native', 'playing', nextval('playback_session_lifecycle_seq'), $2, 'p-1', $3, $3, NOW() - interval '3 hours', $4)`,
+			id, account, file, time.Now().Add(-idle)); err != nil {
+			t.Fatal(err)
+		}
+		return id
+	}
+	failing := map[string]bool{}
+	for range lifecycleSweepBatch {
+		failing[insert(2*time.Hour)] = true
+	}
+	abandoned := insert(time.Hour)
+	h := NewPlaybackHandler(playback.NewSessionManager(0, 0))
+	h.AdminStore = failingEndAdminStore{NewPGPlaybackAdminStore(pool, nil)}
+	h.fileResolver = testPlaybackFileResolver{file: &models.MediaFile{ID: file, Duration: 3600}}
+	now := time.Now()
+	h.sweepLifecycle(ctx, pool, now)
+	candidates, err := loadLifecycleCandidates(ctx, pool, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(candidates) == 0 || candidates[0].sessionID != abandoned || failing[candidates[0].sessionID] {
+		t.Fatalf("first candidate after the sweep = %+v, want the abandoned session %s", candidates, abandoned)
+	}
+	var live int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM playback_session_lifecycle WHERE user_id = $1 AND state = 'playing'`,
+		account).Scan(&live); err != nil {
+		t.Fatal(err)
+	}
+	if live != len(failing)+1 {
+		t.Fatalf("%d sessions still live, want all %d kept for a later retry", live, len(failing)+1)
+	}
+}
+
+// failingEndAdminStore is the Postgres admin store whose end write always
+// fails, as a NOT NULL violation does.
+type failingEndAdminStore struct{ *PGPlaybackAdminStore }
+
+func (failingEndAdminStore) RecordEnd(context.Context, AdminPlaybackHistoryEntry, string) (LifecycleTransition, bool, error) {
+	return LifecycleTransition{}, false, errors.New("null value in column violates not-null constraint")
 }
 
 func lifecycleTestFile(t *testing.T, ctx context.Context, pool *pgxpool.Pool) int {

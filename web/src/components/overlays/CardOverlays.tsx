@@ -615,8 +615,12 @@ export default function CardOverlays({
   });
 
   return (
+    // Positions are on the artwork, which doesn't mirror: the layer lays out left to
+    // right in every language (its rows are flex rows, and the overflow check
+    // measures right edges).
     <div
       ref={layerRef}
+      dir="ltr"
       data-card-overlays={variant}
       className="@container/card-overlays pointer-events-none absolute inset-0 z-10"
     >
@@ -684,7 +688,12 @@ export default function CardOverlays({
               ...bandScrim("bottom"),
               paddingTop: `calc(${edgeInset} * 3)`,
               paddingInline: edgeInset,
-              paddingBottom: hasProgressBar ? `calc(${edgeInset} * 2)` : edgeInset,
+              // The progress bar's top edge sits at a fixed 0.5rem + 3px
+              // (WatchProgressBar) while edgeInset shrinks with the card, so
+              // small cards need the fixed floor to keep the marks clear of it.
+              paddingBottom: hasProgressBar
+                ? `max(calc(${edgeInset} * 2), calc(0.5rem + 6px))`
+                : edgeInset,
             }}
           >
             <BandMarks

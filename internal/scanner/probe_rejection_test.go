@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"testing"
 	"time"
 
@@ -58,6 +59,72 @@ func TestIsProbeRejectionSeparatesRefusedFilesFromProbeTrouble(t *testing.T) {
 		t.Fatal("nil error reported as a rejection")
 	}
 
+	// ffprobe can exit 0 on a damaged file after guessing its format: an AVI
+	// with a broken header reads as a bare MPEG-4 stream at score 5. A guess
+	// (AVPROBE_SCORE_RETRY, 25, or lower) of a format the extension does not
+	// name is checked by reading the file with the extension's own demuxer,
+	// and counts as a rejection only when that read fails too.
+	const invalid = "Invalid data found when processing input"
+	avi := filepath.Join(t.TempDir(), "Movie (2019).avi")
+	if err := os.WriteFile(avi, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		name        string
+		score       int
+		forcedExit  int
+		forcedError string
+		wideScore   int
+		wideFormat  string
+		rejection   bool
+		failure     bool
+	}{
+		{"guess the container demuxer refuses", 25, 1, invalid, 25, "m4v", true, true},
+		{"guess the container demuxer reads", 5, 0, invalid, 5, "m4v", false, false},
+		{"guess a wider read is sure of", 25, 1, invalid, 26, "m4v", false, false},
+		// A wider read that finds another format neither confirms the guess
+		// nor shows damage.
+		{"guess a wider read contradicts", 25, 1, invalid, 26, "mp3", false, true},
+		// A read that storage fails says nothing about the file, whichever
+		// of the two reads it is.
+		{"guess a wider read cannot finish", 25, 1, invalid, -1, "m4v", false, true},
+		{"guess the container demuxer cannot finish reading", 25, 1, "Input/output error", -2, "m4v", false, true},
+		{"confident reading", 26, 1, invalid, 26, "m4v", false, false},
+	} {
+		guess := filepath.Join(t.TempDir(), "ffprobe")
+		writeFakeTool(t, guess, fmt.Sprintf(`#!/bin/sh
+score=%d
+format=m4v
+for arg; do
+	case "$arg" in
+	-f)
+		echo '%s' >&2
+		exit %d
+		;;
+	-formatprobesize)
+		score=%d
+		format=%s
+		;;
+	esac
+done
+if [ "$score" -eq -1 ]; then
+	echo 'Movie.avi: Input/output error' >&2
+	exit 1
+elif [ "$score" -lt 0 ]; then
+	echo 'Movie.avi: Invalid data found when processing input' >&2
+	exit 1
+fi
+printf '%%s\n' '{"format":{"format_name":"'"$format"'","probe_score":'"$score"'},"streams":[{"codec_type":"video","codec_name":"mpeg4","width":640,"height":360}]}'
+`, tc.score, tc.forcedError, tc.forcedExit, tc.wideScore, tc.wideFormat))
+		probe, err := ProbeFile(ctx, guess, avi)
+		if got := err != nil && IsProbeRejection(ctx, avi, err); got != tc.rejection || (err != nil) != tc.failure {
+			t.Fatalf("%s: err = %v, rejection = %v, want rejection %v and failure %v", tc.name, err, got, tc.rejection, tc.failure)
+		}
+		if err == nil && probe.Container != "m4v" {
+			t.Fatalf("%s: container = %q, want the guess kept", tc.name, probe.Container)
+		}
+	}
+
 	// The shell and the dynamic loader exit 126 or 127 when ffprobe itself
 	// cannot start, such as a shared library it cannot map.
 	for _, code := range []int{126, 127} {
@@ -96,12 +163,57 @@ func TestIsProbeRejectionWithRealFFprobe(t *testing.T) {
 	if truncated, ok := writeTruncatedMP4(t, dir); ok {
 		cases = append(cases, truncated)
 	}
+	broken, healthy := writeGuessedFormatFiles(t, dir, random[:4096])
+	cases = append(cases, broken...)
 	for _, path := range cases {
 		_, err := ProbeFile(t.Context(), ffprobe, path)
 		if err == nil || !IsProbeRejection(t.Context(), path, err) {
 			t.Fatalf("%s: probe error = %v, want a rejection", filepath.Base(path), err)
 		}
 	}
+	for _, path := range healthy {
+		if _, err := ProbeFile(t.Context(), ffprobe, path); err != nil {
+			t.Fatalf("%s: probe error = %v, want a healthy file read", filepath.Base(path), err)
+		}
+	}
+}
+
+// writeGuessedFormatFiles returns the AVI from issue #2862 as rejected: its
+// first 4 KiB are overwritten with damage, so ffprobe exits 0 after guessing a
+// bare MPEG-4 stream. The healthy files must still probe: a one-frame MPEG-TS
+// small enough that ffprobe only guesses at it, the undamaged AVI under an
+// .mkv name, which ffprobe identifies with confidence, and a bare 4K MPEG-4
+// stream under an .avi name, which ffprobe is sure of only when it reads
+// further than its default. It returns nothing when ffmpeg is unavailable.
+func writeGuessedFormatFiles(t *testing.T, dir string, damage []byte) (rejected, healthy []string) {
+	t.Helper()
+	ffmpeg, err := exec.LookPath("ffmpeg")
+	if err != nil {
+		return nil, nil
+	}
+	encode := func(name string, args ...string) string {
+		path := filepath.Join(dir, name)
+		args = append([]string{"-v", "error", "-f", "lavfi"}, append(args, "-y", path)...)
+		if out, err := exec.Command(ffmpeg, args...).CombinedOutput(); err != nil {
+			t.Fatalf("encode %s: %v: %s", name, err, out)
+		}
+		return path
+	}
+	whole, err := os.ReadFile(encode("whole.avi", "-i", "testsrc=duration=6:size=640x360:rate=24", "-c:v", "mpeg4"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	mislabeled := filepath.Join(dir, "mislabeled.mkv")
+	if err := os.WriteFile(mislabeled, whole, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	broken := filepath.Join(dir, "broken-header.avi")
+	if err := os.WriteFile(broken, append(slices.Clone(damage), whole[len(damage):]...), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	oneFrame := encode("one-frame.ts", "-i", "color=black:size=64x64:rate=24", "-frames:v", "1", "-c:v", "mpeg2video", "-f", "mpegts")
+	bareStream := encode("bare-stream.avi", "-i", "testsrc2=size=3840x2160:rate=24", "-frames:v", "12", "-c:v", "mpeg4", "-q:v", "2", "-f", "m4v")
+	return []string{broken}, []string{oneFrame, mislabeled, bareStream}
 }
 
 // writeTruncatedMP4 encodes a short MP4 whose moov atom is written at the end,

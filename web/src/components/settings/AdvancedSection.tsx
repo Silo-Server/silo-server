@@ -1,6 +1,7 @@
 import { useState, type ReactNode } from "react";
 import { ChevronRight } from "lucide-react";
 
+import { useT } from "@/i18n";
 import { cn } from "@/lib/utils";
 import "@/styles/admin-settings.css";
 
@@ -55,11 +56,13 @@ export interface AdvancedSectionProps {
 export function AdvancedSection({
   id,
   count,
-  title = "Advanced",
+  title: titleProp,
   defaultOpen = false,
   forceOpen = false,
   children,
 }: AdvancedSectionProps) {
+  const t = useT();
+  const title = titleProp ?? t("web.settings.advancedSection.title");
   // Persisted choice, read once: a section's id is fixed for the life of the
   // instance (give the component a `key` if a caller ever swaps ids).
   const [persistedOpen, setPersistedOpen] = useState(() => readPersisted(id) ?? defaultOpen);
@@ -90,7 +93,13 @@ export function AdvancedSection({
   // The number reads as a bare count on screen; the accessible name spells out
   // what it counts, since it is visually pushed to the right of the row.
   const accessibleLabel =
-    typeof count === "number" ? `${title} · ${count} setting${count === 1 ? "" : "s"}` : title;
+    typeof count === "number"
+      ? t("web.settings.advancedSection.accessibleLabel", {
+          title,
+          count,
+          count_text: count,
+        })
+      : title;
 
   return (
     <div className="min-w-0">
@@ -101,20 +110,22 @@ export function AdvancedSection({
         onClick={toggle}
         className={cn(
           "text-muted-foreground hover:text-foreground flex w-full items-center gap-2.5",
-          "py-3 text-left text-[13px] transition-colors",
+          "py-3 text-start text-[13px] transition-colors",
           open && "text-foreground",
         )}
       >
         <ChevronRight
           className={cn(
             "size-3.5 shrink-0 transition-transform",
-            open ? "rotate-90 text-[var(--settings-accent)]" : "text-muted-foreground",
+            open
+              ? "rotate-90 text-[var(--settings-accent)] rtl:-rotate-90"
+              : "text-muted-foreground",
           )}
           aria-hidden="true"
         />
         <span className="min-w-0 font-medium">{title}</span>
         {typeof count === "number" ? (
-          <span aria-hidden="true" className="text-muted-foreground ml-auto shrink-0 text-xs">
+          <span aria-hidden="true" className="text-muted-foreground ms-auto shrink-0 text-xs">
             {count}
           </span>
         ) : null}
@@ -122,7 +133,7 @@ export function AdvancedSection({
       {open ? (
         <div
           className={cn(
-            "ml-[6px] border-l-2 border-[var(--settings-accent-line)] pl-[15px]",
+            "ms-[6px] border-s-2 border-[var(--settings-accent-line)] ps-[15px]",
             "settings-field-list",
           )}
         >

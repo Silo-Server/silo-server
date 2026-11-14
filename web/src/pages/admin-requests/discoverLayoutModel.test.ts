@@ -9,11 +9,26 @@ import {
   fromTMDBChart,
   missingStockRows,
   newRow,
+  rowBody,
   rowErrors,
   sortForMediaType,
   toTMDBChart,
   withRow,
 } from "./discoverLayoutModel";
+
+describe("rowBody", () => {
+  it("drops what the server adds on a read, which a write refuses", () => {
+    const body = BUILT_IN_ROWS[0]!;
+    expect(
+      rowBody({
+        ...body,
+        title_key: "home.section.discoverTrendingMovies",
+        title_args: {},
+        source: { state: "ready", entries: 3 },
+      }),
+    ).toEqual(body);
+  });
+});
 
 describe("withRow", () => {
   const rows = BUILT_IN_ROWS.slice(0, 3);

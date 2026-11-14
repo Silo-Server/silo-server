@@ -167,16 +167,16 @@ func TestParseCatalogRequest_TitleValuesStayText(t *testing.T) {
 	// values are read as the scalars they look like.
 	for _, field := range []string{"title", "show_title"} {
 		for _, title := range []string{"1917", "true", "007"} {
-			req, err := ParseCatalogRequestWithOptions(url.Values{
+			req, err := ParseCatalogRequest(url.Values{
 				"groups[0][rules][0][field]": {field},
 				"groups[0][rules][0][op]":    {"is"},
 				"groups[0][rules][0][value]": {title},
 				"groups[0][rules][1][field]": {"year"},
 				"groups[0][rules][1][op]":    {"is"},
 				"groups[0][rules][1][value]": {"1917"},
-			}, CatalogRequestOptions{ExtendedRules: true})
+			})
 			if err != nil {
-				t.Fatalf("ParseCatalogRequestWithOptions: %v", err)
+				t.Fatalf("ParseCatalogRequest: %v", err)
 			}
 			rules := req.Query.Groups[0].Rules
 			if rules[0].Value != title || rules[1].Value != 1917 {
