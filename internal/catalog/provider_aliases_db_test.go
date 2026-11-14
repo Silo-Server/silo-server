@@ -9,10 +9,11 @@ import (
 )
 
 // TestResolveProviderAliasesSkipsItemsWithAnotherTMDBIDDB pins that an IMDb
-// or TVDB alias only resolves a watchlist title to an item that has no TMDB
-// ID of its own, or one of the title's. An item holding a different TMDB ID
-// is another title, and promoting the watchlisted title onto it would replace
-// the user's pick with a different movie.
+// or TVDB alias only resolves a watchlist title to an item that is not
+// another title by its type's anchor precedence. A movie holding a different
+// TMDB ID is another movie, and promoting the watchlisted title onto it would
+// replace the user's pick; a series sharing the title's TVDB ID is the same
+// show whatever its TMDB ID.
 func TestResolveProviderAliasesSkipsItemsWithAnotherTMDBIDDB(t *testing.T) {
 	pool := newBatchEquivTestPool(t)
 	ctx := context.Background()
@@ -27,7 +28,7 @@ func TestResolveProviderAliasesSkipsItemsWithAnotherTMDBIDDB(t *testing.T) {
 		t.Fatalf("seed folder: %v", err)
 	}
 
-	type item struct{ name, tmdb, tvdb, imdb, mipTMDB, staleTMDB string }
+	type item struct{ name, itemType, tmdb, tvdb, imdb, mipTMDB, staleTMDB string }
 	items := []item{
 		// Another title: its own TMDB ID, plus IDs a watchlist title shares.
 		{name: "other", tmdb: id(1), tvdb: id(2), imdb: "tt" + id(3)},
@@ -39,21 +40,30 @@ func TestResolveProviderAliasesSkipsItemsWithAnotherTMDBIDDB(t *testing.T) {
 		{name: "slug", tmdb: id(7) + "-some-title", imdb: "tt" + id(8)},
 		// Only a TMDB ID the provider rejected: not the item's ID.
 		{name: "stale", imdb: "tt" + id(9), staleTMDB: id(10)},
+		// No TMDB ID, so IMDb decides: a different one is another movie.
+		{name: "other-imdb", tvdb: id(11), imdb: "tt" + id(12)},
+		// The title's TMDB ID stored with surrounding spaces.
+		{name: "padded", tmdb: " " + id(16) + " ", imdb: "tt" + id(17)},
+		// A series is anchored by TVDB first.
+		{name: "show", itemType: "series", tmdb: id(13), tvdb: id(14), imdb: "tt" + id(15)},
 	}
 	contentID := func(name string) string { return fmt.Sprintf("provider-aliases-%s-%d", name, suffix) }
 	var contentIDs []string
 	for _, it := range items {
 		cid := contentID(it.name)
 		contentIDs = append(contentIDs, cid)
+		if it.itemType == "" {
+			it.itemType = "movie"
+		}
 		batchEquivExec(t, pool, `
 			INSERT INTO media_items (content_id, type, title, tmdb_id, tvdb_id, imdb_id)
-			VALUES ($1, 'movie', $2, $3, $4, $5)`,
-			cid, it.name, it.tmdb, it.tvdb, it.imdb)
+			VALUES ($1, $2, $3, $4, $5, $6)`,
+			cid, it.itemType, it.name, it.tmdb, it.tvdb, it.imdb)
 		batchEquivExec(t, pool, `INSERT INTO media_item_libraries (content_id, media_folder_id) VALUES ($1, $2)`, cid, lib)
 		if it.mipTMDB != "" {
 			batchEquivExec(t, pool, `
 				INSERT INTO media_item_provider_ids (content_id, item_type, provider, provider_id)
-				VALUES ($1, 'movie', 'tmdb', $2)`, cid, it.mipTMDB)
+				VALUES ($1, $2, 'tmdb', $3)`, cid, it.itemType, it.mipTMDB)
 		}
 		if it.staleTMDB != "" {
 			batchEquivExec(t, pool, `
@@ -69,6 +79,11 @@ func TestResolveProviderAliasesSkipsItemsWithAnotherTMDBIDDB(t *testing.T) {
 	alias := func(key int64, provider, providerID string) ProviderAlias {
 		return ProviderAlias{Key: key, MediaType: "movie", Provider: provider, ProviderID: providerID}
 	}
+	seriesAlias := func(key int64, provider, providerID string) ProviderAlias {
+		a := alias(key, provider, providerID)
+		a.MediaType = "series"
+		return a
+	}
 	cases := []struct {
 		name    string
 		aliases []ProviderAlias
@@ -81,6 +96,10 @@ func TestResolveProviderAliasesSkipsItemsWithAnotherTMDBIDDB(t *testing.T) {
 		{"imdb on an item with a former tmdb alias, slugged", []ProviderAlias{alias(1, "tmdb", titleTMDB), alias(1, "tmdb", id(7)), alias(1, "imdb", "tt"+id(8))}, "slug"},
 		{"imdb on an item with only a rejected tmdb id", []ProviderAlias{alias(1, "tmdb", titleTMDB), alias(1, "imdb", "tt"+id(9))}, "stale"},
 		{"imdb with no tmdb alias to conflict with", []ProviderAlias{alias(1, "imdb", "tt"+id(3))}, "other"},
+		{"tvdb on an item without a tmdb id but another imdb id", []ProviderAlias{alias(1, "tmdb", titleTMDB), alias(1, "imdb", "tt"+id(20)), alias(1, "tvdb", id(11))}, ""},
+		{"imdb on an item with the tmdb id padded", []ProviderAlias{alias(1, "tmdb", id(16)), alias(1, "imdb", "tt"+id(17))}, "padded"},
+		{"series tvdb on a show with another tmdb id", []ProviderAlias{seriesAlias(1, "tmdb", titleTMDB), seriesAlias(1, "tvdb", id(14))}, "show"},
+		{"series imdb on a show with another tvdb id", []ProviderAlias{seriesAlias(1, "tmdb", titleTMDB), seriesAlias(1, "tvdb", id(21)), seriesAlias(1, "imdb", "tt"+id(15))}, ""},
 	}
 	repo := NewItemRepository(pool)
 	for _, tc := range cases {

@@ -122,13 +122,17 @@ alias when any of these holds:
 - a `stale_media_ids` row equals the alias, which catches an item that carries,
   or once carried, a TMDB duplicate ID since deleted.
 
-An `imdb` or `tvdb` match counts only when the item holds no TMDB ID (in
-`media_items.tmdb_id` or a `media_item_provider_ids` row) other than one of the
-title's TMDB aliases, with TMDB's `id-slug` form counting as the bare ID. An
-item with a different TMDB ID is another title that shares a stale or wrong
-IMDb or TVDB ID, and promoting onto it would swap the user's title for another.
-A `stale_media_ids` TMDB value is one the provider rejected, so it never
-conflicts.
+A `tmdb` match always counts. An `imdb` or `tvdb` match counts only when the
+item is not another title by its type's anchor precedence
+(`catalog.IdentityProviderIDsContradict`): at the first provider both the title
+and the item carry (TMDB, IMDb, TVDB for a movie; TVDB, TMDB, IMDb for a
+series), one of the title's aliases must equal one of the item's IDs. The
+item's IDs are its columns and `media_item_provider_ids` rows, and TMDB's
+`id-slug` form counts as the bare ID. A movie with a different TMDB ID is
+another movie that shares a stale or wrong IMDb or TVDB ID, and promoting onto
+it would swap the user's title for another; a series sharing the title's TVDB
+ID is the same show whatever its TMDB ID. `stale_media_ids` values are IDs a
+provider rejected, so they never decide.
 
 Only items of the title's media type with a `media_item_libraries` row in an
 enabled folder count. Unlike `LookupExternalIDs`, it returns every distinct
