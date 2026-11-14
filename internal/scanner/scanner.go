@@ -2658,6 +2658,28 @@ func requirePathInLibrary(path string, folder *models.MediaFolder) error {
 	return fmt.Errorf("%w: library %d, path %s", ErrPathOutsideLibrary, folder.ID, path)
 }
 
+type explicitFileRequestKey struct{}
+
+// WithExplicitFileRequest marks ctx as an admin's scan request for an exact
+// file path. ScanFile then scans the file even if the library's ignore files
+// exclude it.
+func WithExplicitFileRequest(ctx context.Context) context.Context {
+	return context.WithValue(ctx, explicitFileRequestKey{}, true)
+}
+
+// audiobookFileScanHonorsIgnores reports whether an audiobook file scan
+// applies the library's ignore files to the books it rebuilds. It does unless
+// an admin named this file explicitly and the ignore files exclude it, or one
+// of them cannot be read: as when the request is resolved, the admin's file is
+// scanned rather than refused.
+func audiobookFileScanHonorsIgnores(ctx context.Context, file string, libraryRoots []string) bool {
+	if explicit, _ := ctx.Value(explicitFileRequestKey{}).(bool); !explicit {
+		return true
+	}
+	ignored, err := FileIgnored(file, libraryRoots)
+	return err == nil && !ignored
+}
+
 // ScanFile scans a single file and upserts it into the database. filePath
 // must lie under one of folder's roots.
 func (s *Scanner) ScanFile(ctx context.Context, filePath string, folder *models.MediaFolder) error {
@@ -2680,12 +2702,13 @@ func (s *Scanner) ScanFile(ctx context.Context, filePath string, folder *models.
 		if err != nil {
 			return err
 		}
+		honorIgnores := audiobookFileScanHonorsIgnores(ctx, cleanFile, folder.Paths)
 		if handled, err := s.reconcileVanishedFileIfNeeded(ctx, folder, cleanFile); handled {
 			if err != nil {
 				return err
 			}
 			if info, statErr := fspath.Stat(scanRoot); statErr == nil && info.IsDir() {
-				if err := s.scanAudiobookPaths(ctx, folder, []string{scanRoot}, false, false); err != nil {
+				if err := s.scanAudiobookPaths(ctx, folder, []string{scanRoot}, false, honorIgnores); err != nil {
 					return err
 				}
 			} else if statErr != nil && !errors.Is(statErr, os.ErrNotExist) {
@@ -2693,7 +2716,7 @@ func (s *Scanner) ScanFile(ctx context.Context, filePath string, folder *models.
 			}
 			return s.syncFolderScopedAudioLibraryState(ctx, folder.ID)
 		}
-		if err := s.scanAudiobookPaths(ctx, folder, []string{scanRoot}, false, false); err != nil {
+		if err := s.scanAudiobookPaths(ctx, folder, []string{scanRoot}, false, honorIgnores); err != nil {
 			return err
 		}
 		return s.syncFolderScopedAudioLibraryState(ctx, folder.ID)

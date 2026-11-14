@@ -24,6 +24,24 @@ const (
 	ModeFile    = "file"
 )
 
+// Triggers recorded for an admin's scan request that names a path, without
+// and with a library ID.
+const (
+	TriggerPath          = "path"
+	TriggerLibraryIDPath = "library_id_path"
+)
+
+// FileScanContext returns the context for running a file scan recorded with
+// trigger. Only an admin's request for the exact path scans a file that the
+// library's ignore files exclude; a scan Silo starts on its own honors them
+// even if they changed after the request was resolved.
+func FileScanContext(ctx context.Context, trigger string) context.Context {
+	if trigger == TriggerPath || trigger == TriggerLibraryIDPath {
+		return scanner.WithExplicitFileRequest(ctx)
+	}
+	return ctx
+}
+
 type FolderRepository interface {
 	GetByID(ctx context.Context, id int) (*models.MediaFolder, error)
 	List(ctx context.Context) ([]*models.MediaFolder, error)
@@ -201,7 +219,7 @@ func (r *Resolver) matchEnabledFolder(ctx context.Context, cleanPath string) (*m
 
 func normalizeTrigger(trigger string) string {
 	if trigger = strings.TrimSpace(trigger); trigger == "" {
-		return "path"
+		return TriggerPath
 	}
 	return trigger
 }
@@ -353,9 +371,9 @@ func (r *Resolver) resolve(ctx context.Context, req Request, pathFolders []*mode
 	// scans Silo starts on its own honor the library's ignore files here.
 	explicit := trigger == "manual"
 	if trigger == "manual" {
-		trigger = "path"
+		trigger = TriggerPath
 		if req.LibraryID != nil {
-			trigger = "library_id_path"
+			trigger = TriggerLibraryIDPath
 		}
 	}
 

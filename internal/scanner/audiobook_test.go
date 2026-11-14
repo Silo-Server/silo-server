@@ -516,6 +516,49 @@ func TestScanFileAudiobookLibraryUsesAudiobookPipeline(t *testing.T) {
 	}
 }
 
+// A file change from real-time monitoring or autoscan rebuilds the books under
+// the file's folder with the library's ignore files, as a library scan does. For
+// a file directly in the library root, that is every book in the library.
+func TestScanFileAudiobookHonorsIgnoreFiles(t *testing.T) {
+	root := t.TempDir()
+	writeTestFile(t, filepath.Join(root, ".siloignore"), "Drafts\n")
+	writeTestFile(t, filepath.Join(root, "intro.mp3"), "audio")
+	writeTestFile(t, filepath.Join(root, "Kept Book", "01.mp3"), "audio")
+	writeTestFile(t, filepath.Join(root, "Drafts", "Draft Book", "01.mp3"), "audio")
+	writeTestFile(t, filepath.Join(root, "Hidden Book", ".nomedia"), "")
+	writeTestFile(t, filepath.Join(root, "Hidden Book", "01.mp3"), "audio")
+
+	// Every book fails to parse without ffprobe, so the error names each book
+	// the scan rebuilt.
+	s := &Scanner{ffprobePath: "definitely-missing-ffprobe"}
+	err := s.ScanFile(t.Context(), filepath.Join(root, "intro.mp3"), &models.MediaFolder{ID: 42, Type: "audiobooks", Paths: []string{root}})
+	if err == nil {
+		t.Fatal("ScanFile returned nil, want audiobook parse failures")
+	}
+	if !strings.Contains(err.Error(), "Kept Book") {
+		t.Errorf("error = %q, want Kept Book rebuilt", err)
+	}
+	for _, excluded := range []string{"Draft Book", "Hidden Book"} {
+		if strings.Contains(err.Error(), excluded) {
+			t.Errorf("error = %q, want excluded %s left alone", err, excluded)
+		}
+	}
+}
+
+// An admin's request for an excluded file's exact path still scans it.
+func TestScanFileAudiobookExplicitRequestScansExcludedFile(t *testing.T) {
+	root := t.TempDir()
+	writeTestFile(t, filepath.Join(root, ".siloignore"), "Drafts\n")
+	file := filepath.Join(root, "Drafts", "Draft Book", "01.mp3")
+	writeTestFile(t, file, "audio")
+
+	s := &Scanner{ffprobePath: "definitely-missing-ffprobe"}
+	err := s.ScanFile(WithExplicitFileRequest(t.Context()), file, &models.MediaFolder{ID: 42, Type: "audiobooks", Paths: []string{root}})
+	if err == nil || !strings.Contains(err.Error(), "Draft Book") {
+		t.Fatalf("ScanFile error = %v, want Draft Book rebuilt", err)
+	}
+}
+
 func TestScanFileAudiobookLibraryRejectsRelativeScopedRoot(t *testing.T) {
 	s := &Scanner{}
 
