@@ -55,20 +55,22 @@ describe("watch provider failure toasts", () => {
     });
   });
 
-  it("asks for the code to be approved when finishing too early", async () => {
+  it.each([
+    ["conflict", 409, "web.common.toast.watchProviders.authNotApproved"],
+    ["not_permitted", 403, "web.common.toast.watchProviders.authDeclined"],
+  ] as const)("explains a %s answer to finishing the connection", async (type, status, reason) => {
     vi.mocked(v2).mockRejectedValueOnce(
       new V2ProblemError("pollWatchProviderDeviceAuth", {
-        type: "https://siloserver.org/docs/api/v2/problems/conflict",
-        title: "Conflict",
-        status: 409,
-        detail: "Authorization isn't finished yet.",
+        type: `https://siloserver.org/docs/api/v2/problems/${type}`,
+        title: type,
+        status,
       } as never),
     );
     const { result } = renderHook(() => usePollWatchProviderDeviceAuth("simkl"), { wrapper });
     await act(() => result.current.mutateAsync("auth-1").catch(() => undefined));
     expect(toast.error).toHaveBeenLastCalledWith(
       t("web.common.toast.watchProviders.finishAuthFailed"),
-      { description: t("web.common.toast.watchProviders.authNotApproved") },
+      { description: t(reason) },
     );
   });
 });

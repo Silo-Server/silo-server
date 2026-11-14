@@ -136719,6 +136719,12 @@
       "value": "تم رفع الترجمة"
     }
   ],
+  "web.common.toast.watchProviders.authDeclined": [
+    {
+      "type": 0,
+      "value": "رُفض الاتصال في موقع المزود. اختر «ربط» للمحاولة مرة أخرى."
+    }
+  ],
   "web.common.toast.watchProviders.authNotApproved": [
     {
       "type": 0,

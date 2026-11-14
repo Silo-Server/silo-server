@@ -12793,7 +12793,7 @@ export interface paths {
     put?: never;
     /**
      * Poll device authorization. Concurrent polls are not durably coalesced.
-     * @description Refusals, by problem type: 409 conflict (the person has not approved the code yet); 409 already_linked (this authorization already completed); 410 device_login_expired (the code expired); 403 not_permitted (the person declined it on the provider's site).
+     * @description Refusals, by problem type: 409 conflict (the person has not approved the code yet); 410 device_login_expired (the code expired, or was already used and the connection no longer exists); 403 not_permitted (the person declined it on the provider's site). Polling a session that already completed answers the connection again, so retrying after a lost answer is safe.
      */
     post: operations["pollWatchProviderDeviceAuth"];
     delete?: never;

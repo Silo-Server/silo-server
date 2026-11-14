@@ -380,7 +380,7 @@ func registerRequestLifecycle(reg *Registry, requests RequestLifecycleService, p
 		return &WatchProviderDeviceAuthOutput{Body: WatchProviderDeviceAuth{ID(s.ID), s.Provider, s.UserCode, s.VerificationURL, s.IntervalSeconds, NewInstant(s.ExpiresAt)}}, nil
 	})
 	poll := op(http.MethodPost, "/watch-providers/{provider}/auth/poll", "pollWatchProviderDeviceAuth", "Poll device authorization. Concurrent polls are not durably coalesced.")
-	poll.Description = "Refusals, by problem type: 409 conflict (the person has not approved the code yet); 409 already_linked (this authorization already completed); 410 device_login_expired (the code expired); 403 not_permitted (the person declined it on the provider's site)."
+	poll.Description = "Refusals, by problem type: 409 conflict (the person has not approved the code yet); 410 device_login_expired (the code expired, or was already used and the connection no longer exists); 403 not_permitted (the person declined it on the provider's site). Polling a session that already completed answers the connection again, so retrying after a lost answer is safe."
 	poll.Errors = append(poll.Errors, http.StatusGone)
 	Register(reg, poll, func(ctx context.Context, in *WatchProviderPollInput) (*WatchProviderConnectionOutput, error) {
 		u, p, err := scope(ctx)
@@ -388,6 +388,13 @@ func registerRequestLifecycle(reg *Registry, requests RequestLifecycleService, p
 			return nil, err
 		}
 		if _, err = providers.PollDeviceAuth(ctx, u, p, in.Provider, in.Body.AuthSessionID); err != nil {
+			if errors.Is(err, watchsync.ErrAuthSessionCompleted) {
+				// A retry after a lost success answer: report the connection
+				// that poll created rather than fail.
+				if out, connErr := connection(ctx, u, p, in.Provider); connErr == nil && out.Body.Connected {
+					return out, nil
+				}
+			}
 			return nil, watchProviderProblem(err)
 		}
 		return connection(ctx, u, p, in.Provider)
@@ -469,7 +476,7 @@ func watchProviderProblem(err error) *Problem {
 		return NewProblem(TypeDeviceLoginExpired, "The authorization code expired. Start connecting again.")
 	}
 	if errors.Is(err, watchsync.ErrAuthSessionCompleted) {
-		return NewProblem(TypeAlreadyLinked, "This authorization was already completed.")
+		return NewProblem(TypeDeviceLoginExpired, "This authorization code was already used. Start connecting again.")
 	}
 	if errors.Is(err, watchsync.ErrDeviceAuthDenied) {
 		return NewProblem(TypeNotPermitted, "The authorization was declined on the watch provider's site.")

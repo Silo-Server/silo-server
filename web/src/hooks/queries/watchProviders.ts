@@ -34,6 +34,18 @@ function failureReason(err: unknown): string | undefined {
   return undefined;
 }
 
+/**
+ * Device-authorization outcomes whose shared problem text, written for other
+ * flows, would mislead here: a code not approved yet answers conflict, and a
+ * declined one not_permitted.
+ */
+function pollFailureReason(err: unknown): string | undefined {
+  if (!(err instanceof V2ProblemError)) return undefined;
+  if (err.problemType === "conflict") return t("web.common.toast.watchProviders.authNotApproved");
+  if (err.problemType === "not_permitted") return t("web.common.toast.watchProviders.authDeclined");
+  return undefined;
+}
+
 function toastFailure(action: MessageKey, err: unknown, reason?: string) {
   toast.error(t(action), { description: reason ?? failureReason(err) });
 }
@@ -370,15 +382,7 @@ export function usePollWatchProviderDeviceAuth(provider: string) {
       toast.success(t("web.common.toast.watchProviders.connected"));
     },
     onError: (err) =>
-      toastFailure(
-        "web.common.toast.watchProviders.finishAuthFailed",
-        err,
-        // The provider has not seen the code approved yet. The server's English
-        // says so too; the generic conflict text other languages get does not.
-        err instanceof V2ProblemError && err.problemType === "conflict"
-          ? t("web.common.toast.watchProviders.authNotApproved")
-          : undefined,
-      ),
+      toastFailure("web.common.toast.watchProviders.finishAuthFailed", err, pollFailureReason(err)),
   });
 }
 

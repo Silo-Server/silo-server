@@ -110317,6 +110317,12 @@
       "value": "Subtítulo subido"
     }
   ],
+  "web.common.toast.watchProviders.authDeclined": [
+    {
+      "type": 0,
+      "value": "Se rechazó la conexión en el sitio del proveedor. Selecciona Conectar para volver a intentarlo."
+    }
+  ],
   "web.common.toast.watchProviders.authNotApproved": [
     {
       "type": 0,

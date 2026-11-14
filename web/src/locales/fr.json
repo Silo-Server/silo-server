@@ -110005,6 +110005,12 @@
       "value": "Sous-titre envoyé"
     }
   ],
+  "web.common.toast.watchProviders.authDeclined": [
+    {
+      "type": 0,
+      "value": "La connexion a été refusée sur le site du fournisseur. Sélectionnez « Connecter » pour réessayer."
+    }
+  ],
   "web.common.toast.watchProviders.authNotApproved": [
     {
       "type": 0,

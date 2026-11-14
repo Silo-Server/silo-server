@@ -110235,6 +110235,12 @@
       "value": "Legenda enviada"
     }
   ],
+  "web.common.toast.watchProviders.authDeclined": [
+    {
+      "type": 0,
+      "value": "A conexão foi recusada no site do provedor. Selecione Conectar para tentar novamente."
+    }
+  ],
   "web.common.toast.watchProviders.authNotApproved": [
     {
       "type": 0,
