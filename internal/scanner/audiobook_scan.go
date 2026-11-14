@@ -1179,13 +1179,13 @@ func (s *Scanner) findAudiobookDuplicate(ctx context.Context, book *parsedAudiob
 	// The query matches on the first author and narrator only. Recordings
 	// that share those but differ in the rest of the cast are different
 	// editions, so the whole credit set must agree.
+	credits, err := s.audiobookCandidateCredits(ctx, candidates)
+	if err != nil {
+		return nil
+	}
 	desired := book.credits()
 	for _, candidateID := range candidates {
-		people, err := s.itemRepo.GetPeople(ctx, candidateID)
-		if err != nil {
-			return nil
-		}
-		if audiobookPeopleCreditsEqual(audiobookAuthorNarratorCredits(people), desired) {
+		if audiobookPeopleCreditsEqual(credits[candidateID], desired) {
 			existingID = candidateID
 			break
 		}
@@ -1533,16 +1533,31 @@ func (b *parsedAudiobook) credits() []audiobookCredit {
 	return out
 }
 
-// audiobookAuthorNarratorCredits keeps the author and narrator credits, the
-// ones the scanner derives from tags.
-func audiobookAuthorNarratorCredits(people []models.ItemPerson) []models.ItemPerson {
-	out := make([]models.ItemPerson, 0, len(people))
-	for _, p := range people {
-		if p.Kind == models.PersonKindAuthor || p.Kind == models.PersonKindNarrator {
-			out = append(out, p)
-		}
+// audiobookCandidateCredits loads the author and narrator credits of the
+// duplicate candidates in one query.
+func (s *Scanner) audiobookCandidateCredits(ctx context.Context, contentIDs []string) (map[string][]models.ItemPerson, error) {
+	out := make(map[string][]models.ItemPerson, len(contentIDs))
+	if len(contentIDs) == 0 {
+		return out, nil
 	}
-	return out
+	rows, err := s.fileRepo.Pool().Query(ctx, `
+		SELECT ip.content_id, p.name, ip.kind
+		FROM item_people ip JOIN people p ON p.id = ip.person_id
+		WHERE ip.content_id = ANY($1) AND ip.kind IN ($2, $3)
+	`, contentIDs, models.PersonKindAuthor, models.PersonKindNarrator)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var contentID string
+		var person models.ItemPerson
+		if err := rows.Scan(&contentID, &person.Name, &person.Kind); err != nil {
+			return nil, err
+		}
+		out[contentID] = append(out[contentID], person)
+	}
+	return out, rows.Err()
 }
 
 // upsertAudiobookPeople upserts author and narrator rows into item_people,

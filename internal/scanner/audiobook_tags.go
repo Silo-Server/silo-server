@@ -168,19 +168,25 @@ func parseGenresFromTags(tags map[string]string) []string {
 var audiobookTrackTitleRE = regexp.MustCompile(`(?i)^\s*(?:(?:chapter|chap|track|part|pt|disc|cd)\.?\s*\d+\b|\d+\s*$)`)
 
 // partTitlesNameParts reports whether the parts' title tags name the parts
-// rather than the book: they differ from part to part, or the first one
-// reads like a track title.
+// rather than the book: the present ones differ from part to part, or the
+// first one reads like a track title. A part without a title tag says
+// nothing either way.
 func partTitlesNameParts(titles []string) bool {
-	if len(titles) == 0 {
+	var present []string
+	for _, t := range titles {
+		if t = strings.ToLower(strings.TrimSpace(t)); t != "" {
+			present = append(present, t)
+		}
+	}
+	if len(present) == 0 {
 		return false
 	}
-	first := strings.ToLower(strings.TrimSpace(titles[0]))
-	for _, t := range titles[1:] {
-		if strings.ToLower(strings.TrimSpace(t)) != first {
+	for _, t := range present[1:] {
+		if t != present[0] {
 			return true
 		}
 	}
-	return audiobookTrackTitleRE.MatchString(first)
+	return audiobookTrackTitleRE.MatchString(present[0])
 }
 
 // parseTagPosition reads the leading number of a track or disc tag ("3",

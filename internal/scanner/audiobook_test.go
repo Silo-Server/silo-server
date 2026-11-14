@@ -1036,6 +1036,9 @@ func TestPartTitlesNameParts(t *testing.T) {
 	if partTitlesNameParts([]string{"Book Title", "book title"}) {
 		t.Error("one shared title names the book")
 	}
+	if partTitlesNameParts([]string{"Book Title", "", "Book Title"}) {
+		t.Error("a part without a title tag must not make the titles differ")
+	}
 }
 
 // mp4Box builds an MP4 box with a 32-bit size.
