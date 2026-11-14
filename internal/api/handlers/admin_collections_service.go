@@ -314,17 +314,20 @@ func (h *LibraryCollectionHandler) updateAdminCollection(ctx context.Context, co
 }
 
 // titleCheckLibraries returns the libraries an update must check its title
-// in: every library of the collection when the title changes (beyond case and
-// spaces), only the added ones when just its libraries grow, and nil when
-// neither, so a collection that already shares its title (an import's, or one
-// from before the rule) still saves the rest of a full editor draft.
+// in: an empty list when the title changes (beyond case and spaces), which the
+// repository reads as every library the collection is in inside its
+// transaction, so a move by another request after existing was loaded can't
+// leave the rename checked against the old libraries; only the added ones when
+// just its libraries grow; and nil when neither, so a collection that already
+// shares its title (an import's, or one from before the rule) still saves the
+// rest of a full editor draft.
 func titleCheckLibraries(existing *models.LibraryCollection, req AdminCollectionUpdate) []int {
+	if req.Title != nil && comparableCollectionTitle(*req.Title) != comparableCollectionTitle(existing.Title) {
+		return []int{}
+	}
 	libraries := existing.LibraryIDs
 	if req.LibraryIDs != nil {
 		libraries = *req.LibraryIDs
-	}
-	if req.Title != nil && comparableCollectionTitle(*req.Title) != comparableCollectionTitle(existing.Title) {
-		return libraries
 	}
 	var added []int
 	for _, libraryID := range libraries {
