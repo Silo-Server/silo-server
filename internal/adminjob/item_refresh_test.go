@@ -666,6 +666,60 @@ func TestItemRefreshExecutorCompleteRefreshWaitsForTheRelink(t *testing.T) {
 	})
 }
 
+// A series root match links the root's files to a pending skeleton before it
+// asks the providers, and the provider match can merge that skeleton away. A
+// complete refresh waits for the match to finish instead of resolving to the
+// skeleton, and fails with errRebuiltItemMatching when it doesn't finish.
+func TestItemRefreshExecutorCompleteRefreshWaitsForTheSeriesMatch(t *testing.T) {
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		run := func(pendingReads int, wait time.Duration) (*ItemRefreshResult, *itemRefreshTestItemStatuses, error) {
+			statuses := &itemRefreshTestItemStatuses{pendingReads: pendingReads}
+			executor := NewItemRefreshExecutor(
+				&itemRefreshTestFolderRepo{folder: &models.MediaFolder{ID: 7, Enabled: true, Paths: []string{"/media/tv"}}},
+				&itemRefreshTestFileRepo{filesByPath: []*models.MediaFile{{ContentID: "new-id", FilePath: "/media/tv/Title/Title S01E01.mkv"}}},
+				&itemRefreshTestRootClaimRepo{}, &itemRefreshTestGroupClaimRepo{}, newItemRefreshTestSkippedRootRepo(),
+				nil, nil, &itemRefreshTestIngester{}, &itemRefreshTestScanRuns{}, &itemRefreshTestRefresher{}, nil, nil,
+			)
+			executor.relinkWait = wait
+			executor.SetItemStatusReader(statuses)
+			result, err := executor.Execute(context.Background(), ItemRefreshRequest{
+				RequestedContentID: "old-id", RequestedType: "series", RefreshContentID: "old-id",
+				ScanFolderID: 7, ScanPath: "/media/tv/Title", Mode: ItemRefreshModeComplete,
+			}, nil)
+			return result, statuses, err
+		}
+
+		result, statuses, err := run(2, 5*time.Second)
+		if err != nil || result.RefreshContentID != "new-id" || statuses.reads < 3 {
+			t.Fatalf("matched after %d status reads: result %+v, err %v; want new-id after the 3rd", statuses.reads, result, err)
+		}
+		if _, _, err := run(1_000, 50*time.Millisecond); !errors.Is(err, errRebuiltItemMatching) {
+			t.Fatalf("never matched: err = %v, want errRebuiltItemMatching", err)
+		}
+	})
+}
+
+// itemRefreshTestItemStatuses reports every item as pending for its first
+// pendingReads reads, then as matched.
+type itemRefreshTestItemStatuses struct {
+	pendingReads int
+	reads        int
+}
+
+func (r *itemRefreshTestItemStatuses) GetStatusByIDs(_ context.Context, ids []string) (map[string]string, error) {
+	r.reads++
+	status := "matched"
+	if r.reads <= r.pendingReads {
+		status = "pending"
+	}
+	out := make(map[string]string, len(ids))
+	for _, id := range ids {
+		out[id] = status
+	}
+	return out, nil
+}
+
 // A complete refresh waits for the whole scope: while a file in it is still
 // unlinked, or the requested episode row isn't there yet, it checks again. A
 // file that never links doesn't fail the refresh once the wait passes.

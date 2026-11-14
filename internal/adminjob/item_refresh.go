@@ -478,6 +478,9 @@ type ItemRefreshExecutor struct {
 	// relinkWait bounds how long a complete refresh waits for its scope's
 	// files to be linked again; zero means completeRefreshRelinkWait.
 	relinkWait time.Duration
+	// itemStatuses lets a complete refresh wait out a series match that
+	// another worker is still running; see SetItemStatusReader.
+	itemStatuses itemRefreshItemStatusReader
 }
 
 // A complete refresh resolves the rebuilt item from the files its scope links
@@ -497,6 +500,15 @@ var errNoRebuiltContent = errors.New("no rebuilt content found in refresh scope"
 // errRebuiltTargetNotFound is a requested season or episode that the rebuilt
 // series does not hold (yet): its row can appear after the first file links.
 var errRebuiltTargetNotFound = errors.New("target not found")
+
+// errRebuiltItemMatching is a scope whose files are linked to a series
+// skeleton that the match worker hasn't matched yet.
+var errRebuiltItemMatching = errors.New("rebuilt series is still being matched")
+
+// itemRefreshItemStatusReader reads catalog item statuses.
+type itemRefreshItemStatusReader interface {
+	GetStatusByIDs(ctx context.Context, ids []string) (map[string]string, error)
+}
 
 // isSeriesTarget reports whether a refresh of requestedType rebuilds a series
 // root, which the TV match queue matches.
@@ -541,6 +553,12 @@ func NewItemRefreshExecutor(
 
 func (e *ItemRefreshExecutor) SetArtworkCacher(cacher ItemRefreshArtworkCacher) {
 	e.artworkCacher = cacher
+}
+
+// SetItemStatusReader lets a complete refresh of a series, season or episode
+// tell a series that another worker is still matching from the rebuilt one.
+func (e *ItemRefreshExecutor) SetItemStatusReader(reader itemRefreshItemStatusReader) {
+	e.itemStatuses = reader
 }
 
 func (e *ItemRefreshExecutor) Execute(ctx context.Context, req ItemRefreshRequest, progress func(current, total int, message string)) (*ItemRefreshResult, error) {
@@ -731,10 +749,12 @@ func (e *ItemRefreshExecutor) prepareCompleteRefresh(ctx context.Context, folder
 }
 
 // resolveRelinkedTargets is resolveCompleteRefreshTargets once the scope is
-// rebuilt: while a present file in it is still unlinked, or the requested
-// season or episode isn't there yet, it checks again until relinkWait passes.
-// Then it resolves with what is linked, so a file that never matches does not
-// fail the refresh, and reports errNoRebuiltContent when nothing is.
+// rebuilt: while a present file in it is still unlinked, the linked series is
+// still a pending skeleton, or the requested season or episode isn't there
+// yet, it checks again until relinkWait passes. Then it resolves with what is
+// linked, so a file that never matches does not fail the refresh, and reports
+// errNoRebuiltContent when nothing is and errRebuiltItemMatching when the
+// series match hasn't finished.
 func (e *ItemRefreshExecutor) resolveRelinkedTargets(ctx context.Context, req ItemRefreshRequest) (string, string, error) {
 	wait := e.relinkWait
 	if wait <= 0 {
@@ -743,7 +763,8 @@ func (e *ItemRefreshExecutor) resolveRelinkedTargets(ctx context.Context, req It
 	deadline := time.Now().Add(wait)
 	for {
 		refreshID, detailID, unlinked, err := e.resolveCompleteRefreshTargets(ctx, req)
-		rebuilding := errors.Is(err, errNoRebuiltContent) || errors.Is(err, errRebuiltTargetNotFound) || (err == nil && unlinked > 0)
+		rebuilding := errors.Is(err, errNoRebuiltContent) || errors.Is(err, errRebuiltTargetNotFound) ||
+			errors.Is(err, errRebuiltItemMatching) || (err == nil && unlinked > 0)
 		if !rebuilding || !time.Now().Before(deadline) {
 			return refreshID, detailID, err
 		}
@@ -790,6 +811,19 @@ func (e *ItemRefreshExecutor) resolveCompleteRefreshTargets(ctx context.Context,
 	refreshContentID := ""
 	for contentID := range distinctContentIDs {
 		refreshContentID = contentID
+	}
+	// A series root match links the root's files to a pending skeleton before
+	// it asks the providers; the provider match can then merge that skeleton
+	// into another item. Until the match finishes, the skeleton isn't the
+	// rebuilt item.
+	if e.itemStatuses != nil && isSeriesTarget(req.RequestedType) {
+		statuses, err := e.itemStatuses.GetStatusByIDs(ctx, []string{refreshContentID})
+		if err != nil {
+			return "", "", unlinked, fmt.Errorf("loading rebuilt item status: %w", err)
+		}
+		if strings.EqualFold(strings.TrimSpace(statuses[refreshContentID]), "pending") {
+			return "", "", unlinked, errRebuiltItemMatching
+		}
 	}
 
 	detailContentID := refreshContentID

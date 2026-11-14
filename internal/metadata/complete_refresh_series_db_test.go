@@ -132,11 +132,13 @@ func newSeriesRefreshHarness(t *testing.T, providers ...metadata.Provider) *seri
 	ingest := libraryingest.NewExecutor(scan, worker, folders, skipped, nil, nil)
 
 	refreshed := &recordedRefresh{}
+	refresh := adminjob.NewItemRefreshExecutor(folders, files, rootClaims, catalog.NewGroupClaimRepository(pool), skipped,
+		seasons, episodes, ingest, scanqueue.NewRepository(pool), refreshed, nil, nil)
+	refresh.SetItemStatusReader(items)
 	return &seriesRefreshHarness{
 		pool: pool, files: files, folders: folders, ingest: ingest,
-		resolver: adminjob.NewItemRefreshResolver(items, seasons, episodes, folders, files),
-		refresh: adminjob.NewItemRefreshExecutor(folders, files, rootClaims, catalog.NewGroupClaimRepository(pool), skipped,
-			seasons, episodes, ingest, scanqueue.NewRepository(pool), refreshed, nil, nil),
+		resolver:  adminjob.NewItemRefreshResolver(items, seasons, episodes, folders, files),
+		refresh:   refresh,
 		refreshed: refreshed,
 	}
 }
