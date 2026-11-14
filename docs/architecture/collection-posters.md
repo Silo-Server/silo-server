@@ -60,8 +60,8 @@ A list read never runs a smart collection's query. A background refresh reads it
 matches, builds their collage, and records it, keyed by collection and a hash of the viewer's
 access filter, with a hash of the definition it was made for (no collage when the viewer can see
 no match with a poster). A read serves those records with one statement for all of a list's
-smart collections. It queues a refresh when the record is missing or names another definition
-(serving nothing until then), or is older than the refresh interval (15 minutes; serving the
+smart collections. It queues a refresh when the record is missing, names another definition, or
+names a collage the artwork reconcile cleared (serving nothing until then), or is older than the refresh interval (15 minutes; serving the
 recorded collage meanwhile), so a new match reaches the collage within that time. A record goes
 with its collection, and with its collage when that collage is retired as unused. Server and
 personal smart collections share this (`smartCollageSet`):

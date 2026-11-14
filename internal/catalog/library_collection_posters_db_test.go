@@ -244,6 +244,21 @@ func TestServerSmartCollectionCollagesDB(t *testing.T) {
 		})
 	})
 
+	t.Run("a collage the artwork reconcile cleared is rebuilt on the next read", func(t *testing.T) {
+		// The reconcile resets a collage whose object is missing by clearing
+		// its path (metadata.artworkSweepTables), keeping the row.
+		if _, err := f.repo.pool.Exec(ctx, `
+			UPDATE library_collection_poster_variants SET poster_path = '', poster_thumbhash = ''
+			WHERE collection_id = $1 AND variant_key = $2
+		`, f.collection.ID, CollectionCollageKey(everyMatch)); err != nil {
+			t.Fatalf("clear collage: %v", err)
+		}
+		pollUntil(t, "the cleared collage was rebuilt", func() bool {
+			got, ok := posterOf(unrestricted)
+			return ok && got.CollageKey == CollectionCollageKey(everyMatch)
+		})
+	})
+
 	t.Run("an uploaded poster wins over the collage", func(t *testing.T) {
 		uploaded := *f.collection
 		uploaded.PosterURL = "collection-images/uploaded/original.webp"

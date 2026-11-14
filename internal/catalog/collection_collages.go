@@ -413,7 +413,10 @@ func (s smartCollageSet) serve(ctx context.Context, collections []smartCollageCo
 			s.refreshLater(c, accessKey)
 			continue
 		}
-		if now.Sub(r.refreshedAt) >= s.refreshInterval {
+		// A recorded collage whose stored row the artwork reconcile cleared
+		// reads as missing and is rebuilt now, not when the record comes due.
+		cleared := r.collage.Key != "" && r.collage.Path == ""
+		if cleared || now.Sub(r.refreshedAt) >= s.refreshInterval {
 			s.refreshLater(c, accessKey)
 		}
 		if r.collage.Path == "" {
