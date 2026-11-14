@@ -5,9 +5,11 @@ import (
 	"database/sql"
 	"fmt"
 	"net/url"
+	"slices"
 	"testing"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/userdb"
 	"github.com/Silo-Server/silo-server/internal/userstore"
@@ -81,6 +83,68 @@ func TestDirectUserDataServiceCompletedListsReportPlayDate(t *testing.T) {
 			got, err := time.Parse(time.RFC3339Nano, entries[0].UpdatedAt)
 			if err != nil || !got.Equal(played) {
 				t.Fatalf("UpdatedAt = %q, want play date %s", entries[0].UpdatedAt, played.Format(time.RFC3339))
+			}
+		})
+	}
+}
+
+// SortBy=DatePlayed orders the played list by play date, not by the order the
+// rows were written, in both directions and across pages (#2978).
+func TestItemsPlayedListSortsByPlayDate(t *testing.T) {
+	store := newJellycompatUserStore(t)
+	provider := compatTestUserStoreProvider{store: store}
+	service := &directUserDataService{storeProvider: provider, watchState: watchstate.NewService(provider)}
+	session := &Session{StreamAppUserID: 1, ProfileID: "profile-1"}
+	// Marked out of play order. The rows may share a write second, so the
+	// write order is whatever ListProgress returns; the two play-date orders
+	// are opposite, so at most one of them can match it by chance.
+	for _, mark := range []struct {
+		id   string
+		date time.Time
+	}{
+		{"movie-2020", time.Date(2020, 6, 1, 12, 30, 0, 0, time.UTC)},
+		{"movie-2025", time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)},
+		{"movie-2015", time.Date(2015, 1, 1, 0, 0, 0, 0, time.UTC)},
+	} {
+		if err := service.MarkPlayedBatchAt(t.Context(), session, []string{mark.id}, mark.date, false); err != nil {
+			t.Fatal(err)
+		}
+	}
+	idsOf := func(rows []upstreamProgress, err error) []string {
+		t.Helper()
+		if err != nil {
+			t.Fatal(err)
+		}
+		out := make([]string, 0, len(rows))
+		for _, row := range rows {
+			out = append(out, row.MediaItemID)
+		}
+		return out
+	}
+	h := &ItemsHandler{userData: service}
+	ids := func(query itemsQuery, limit, offset int) []string {
+		t.Helper()
+		return idsOf(h.fetchProgressRows(t.Context(), session, progressStatusCompleted, query, nil, nil, false, limit, offset))
+	}
+	byDate := func(order string) itemsQuery {
+		return itemsQuery{sortExplicit: true, sortByKey: sortKeyDatePlayed, order: order}
+	}
+	writeOrder := idsOf(service.ListProgress(t.Context(), session, progressStatusCompleted, 10, 0))
+	for _, tc := range []struct {
+		name          string
+		query         itemsQuery
+		limit, offset int
+		want          []string
+	}{
+		{"ascending", byDate(sortOrderAscending), 10, 0, []string{"movie-2015", "movie-2020", "movie-2025"}},
+		{"descending", byDate(catalog.BrowseOrderDescending), 10, 0, []string{"movie-2025", "movie-2020", "movie-2015"}},
+		{"second page", byDate(sortOrderAscending), 2, 2, []string{"movie-2025"}},
+		{"no sort keeps write order", itemsQuery{}, 10, 0, writeOrder},
+		{"another sort keeps write order", itemsQuery{sortExplicit: true, sortByKey: "datecreated", order: sortOrderAscending}, 10, 0, writeOrder},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := ids(tc.query, tc.limit, tc.offset); !slices.Equal(got, tc.want) {
+				t.Fatalf("rows = %v, want %v", got, tc.want)
 			}
 		})
 	}

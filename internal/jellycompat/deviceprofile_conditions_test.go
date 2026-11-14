@@ -401,11 +401,13 @@ func TestBuildPlaybackSourceCodecProfiles(t *testing.T) {
 				HDR10Plus:      true,
 				VideoRangeType: "HDR10Plus",
 			}, "2160p"),
-			codecProfiles:      []CodecProfile{unsupportedRangeProfile("hevc", "DOVIInvalid|DOVIWithEL|DOVIWithELHDR10Plus|HDR10Plus")},
-			wantDirectPlay:     false,
+			codecProfiles:  []CodecProfile{unsupportedRangeProfile("hevc", "DOVIInvalid|DOVIWithEL|DOVIWithELHDR10Plus|HDR10Plus")},
+			wantDirectPlay: false,
+			// An HLS copy still accepts the HDR10 base (hlsRemuxHDR10PlusConditionMatches),
+			// so the video is copied and only the TrueHD audio is encoded.
 			wantDirectStream:   false,
 			wantTranscoding:    true,
-			wantTranscodeAudio: false,
+			wantTranscodeAudio: true,
 		},
 		{
 			name: "audio channel limit preserves video copy and transcodes audio",
@@ -774,7 +776,7 @@ func TestConditionMatchesUsesRealTrackValues(t *testing.T) {
 		},
 		{
 			name:      "track bitrate fails a video bitrate cap",
-			version:   catalog.FileVersion{VideoTracks: []models.VideoTrack{{Codec: "h264", Width: 1920, Height: 1080, Bitrate: 20_000_000}}},
+			version:   catalog.FileVersion{VideoTracks: []models.VideoTrack{{Codec: "h264", Width: 1920, Height: 1080, Bitrate: 20_000}}},
 			condition: ProfileCondition{Condition: "LessThanEqual", Property: "VideoBitrate", Value: "10000000"},
 			want:      false,
 		},
@@ -800,9 +802,20 @@ func TestConditionMatchesUsesRealTrackValues(t *testing.T) {
 			name: "audio bitrate cap is enforced",
 			version: catalog.FileVersion{
 				CodecAudio:  "truehd",
-				AudioTracks: []models.AudioTrack{{Codec: "truehd", Channels: 8, Bitrate: 4_000_000, Default: true}},
+				AudioTracks: []models.AudioTrack{{Codec: "truehd", Channels: 8, Bitrate: 4_000, Default: true}},
 			},
 			condition: ProfileCondition{Condition: "LessThanEqual", Property: "AudioBitrate", Value: "640000"},
+			want:      false,
+		},
+		{
+			// Track bitrates are kbps and caps are bits per second: 448 kbps
+			// must not slip under a 320000 cap as the number 448.
+			name: "kbps track bitrate is compared in bits per second",
+			version: catalog.FileVersion{
+				CodecAudio:  "ac3",
+				AudioTracks: []models.AudioTrack{{Codec: "ac3", Channels: 6, Bitrate: 448, Default: true}},
+			},
+			condition: ProfileCondition{Condition: "LessThanEqual", Property: "AudioBitrate", Value: "320000"},
 			want:      false,
 		},
 	}

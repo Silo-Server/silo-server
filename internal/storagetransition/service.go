@@ -996,6 +996,10 @@ func (s *Service) copyTransitionData(ctx context.Context, staged stagedTarget, p
 		}
 	}
 	copyScope := func(scope string, source, destination blobstore.Store, prefix string, excluded ...string) error {
+		// Backups never move with storage: local ones hold unencrypted dumps
+		// that must not reach a bucket, and a bucket's are tied to their
+		// destination. Every pass, public or private, leaves them out.
+		excluded = append(excluded, blobstore.BackupNamespace)
 		copied, bytes, skipped, err := s.copyPrefixPass(ctx, staged.ID, scope, source, destination, prefix, progress, pass.objects, runID, sameRunListings, finalPass, excluded...)
 		if err != nil {
 			return err

@@ -3,6 +3,7 @@ package policy_test
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/config"
@@ -120,7 +121,7 @@ func legacyAdmissionAllowed(limits playback.SessionLimits, activeStreams, active
 
 func newActionParityPDP(t *testing.T) *policy.PDP {
 	t.Helper()
-	engine, err := policy.NewEngine(context.Background())
+	engine, err := policy.NewEngine(context.Background(), policy.WithEvalTimeout(time.Minute))
 	if err != nil {
 		t.Fatalf("NewEngine() error: %v", err)
 	}

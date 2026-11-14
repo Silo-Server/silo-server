@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { t } from "@/i18n";
 import type { PlayerConfig } from "../context/PlayerConfigContext";
 import { PlayerFetchError } from "../player-fetch";
 import { playerV2 } from "../player-v2";
@@ -435,9 +436,13 @@ export function useSubtitleSync({
       if (err instanceof PlayerFetchError && err.status === 403) {
         patch(key, { busy: false, forbidden: true, error: undefined });
       } else if (err instanceof PlayerFetchError && err.status === 422) {
-        patch(key, { busy: false, unsupported: true, error: "This format can't be synced." });
+        patch(key, {
+          busy: false,
+          unsupported: true,
+          error: t("web.subtitles.sync.error.unsupportedFormat"),
+        });
       } else if (err instanceof PlayerFetchError && err.status === 412) {
-        patch(key, { busy: false, error: "The subtitle changed. Try again." });
+        patch(key, { busy: false, error: t("web.subtitles.sync.error.changed") });
       } else {
         patch(key, { busy: false, error: actionError(err, fallback) });
       }
@@ -464,7 +469,7 @@ export function useSubtitleSync({
         observe(res.subtitle, { watch: res.subtitle.sync?.id, sentAt });
         patch(key, { busy: false });
       } catch (err) {
-        if (current()) handleActionError(key, err, "Sync failed");
+        if (current()) handleActionError(key, err, t("web.subtitles.sync.error.syncFailed"));
       }
     },
     [playerConfig, mediaFileId, capture, patch, observe, handleActionError],
@@ -485,7 +490,7 @@ export function useSubtitleSync({
           },
         });
         if (!current()) return;
-        if (!etag) throw new Error("Couldn't read the subtitle's current version.");
+        if (!etag) throw new Error(t("web.subtitles.sync.error.noVersion"));
         const sentAt = observationRef.current;
         const res = await playerV2(
           playerConfig,
@@ -496,7 +501,7 @@ export function useSubtitleSync({
         if (res?.subtitle) observe(res.subtitle, { sentAt });
         patch(key, { busy: false });
       } catch (err) {
-        if (current()) handleActionError(key, err, "Couldn't reset timing");
+        if (current()) handleActionError(key, err, t("web.subtitles.sync.error.resetFailed"));
       }
     },
     [playerConfig, mediaFileId, capture, patch, observe, handleActionError],

@@ -2,15 +2,8 @@ package handlers
 
 import (
 	"context"
-	"encoding/json"
-	"net/http"
-	"net/url"
-	"strconv"
 	"time"
 
-	"github.com/go-chi/chi/v5"
-
-	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/ratelimit"
@@ -96,99 +89,6 @@ type PersonView struct {
 	PlexGUID       string  `json:"plex_guid,omitempty"`
 }
 
-// HandleSearch serves GET /api/people?q=&limit=
-func (h *PeopleHandler) HandleSearch(w http.ResponseWriter, r *http.Request) {
-	filter, ok := h.viewerAccessFilter(w, r)
-	if !ok {
-		return
-	}
-	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
-	resp, err := h.SearchPeople(r.Context(), r.URL.Query().Get("q"), limit, filter)
-	if err != nil {
-		writeAPIError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, resp)
-}
-
-// HandleGetPerson serves GET /api/people/:id
-func (h *PeopleHandler) HandleGetPerson(w http.ResponseWriter, r *http.Request) {
-	id, ok := parsePersonID(w, r)
-	if !ok {
-		return
-	}
-	filter, ok := h.viewerAccessFilter(w, r)
-	if !ok {
-		return
-	}
-	resp, err := h.Person(r.Context(), id, true, filter)
-	if err != nil {
-		writeAPIError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, resp)
-}
-
-// viewerAccessFilter resolves the requesting profile's catalog access, the
-// same filter the v2 people operations use. It fails closed and writes the
-// error answer itself.
-func (h *PeopleHandler) viewerAccessFilter(w http.ResponseWriter, r *http.Request) (catalog.AccessFilter, bool) {
-	if h.itemsHandler == nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to resolve user access")
-		return catalog.AccessFilter{}, false
-	}
-	filter, err := h.itemsHandler.ContextAccessFilter(r.Context(), AccessFilterOptions{})
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to resolve user access")
-		return catalog.AccessFilter{}, false
-	}
-	return filter, true
-}
-
-// HandleRefreshPerson serves POST /api/v1/people/:id/refresh.
-func (h *PeopleHandler) HandleRefreshPerson(w http.ResponseWriter, r *http.Request) {
-	if h.refreshQueue == nil {
-		writeError(w, http.StatusServiceUnavailable, "unavailable", "Person refresh is not configured")
-		return
-	}
-	id, ok := parsePersonID(w, r)
-	if !ok {
-		return
-	}
-	filter, ok := h.viewerAccessFilter(w, r)
-	if !ok {
-		return
-	}
-	if err := h.RefreshPerson(r.Context(), apimw.GetUserID(r.Context()), id, filter); err != nil {
-		writeAPIError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusAccepted, map[string]any{
-		"status":    "queued",
-		"person_id": id,
-	})
-}
-
-// HandleAdminRefreshPerson serves POST /api/v1/admin/people/:id/refresh.
-func (h *PeopleHandler) HandleAdminRefreshPerson(w http.ResponseWriter, r *http.Request) {
-	if h.refresher == nil {
-		writeError(w, http.StatusServiceUnavailable, "unavailable", "Person refresh is not configured")
-		return
-	}
-
-	id, ok := parsePersonID(w, r)
-	if !ok {
-		return
-	}
-
-	person, err := h.RefreshAdminPerson(r.Context(), id)
-	if err != nil {
-		writeAPIError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, person)
-}
-
 type UpdatePersonRequest struct {
 	Name       *string `json:"name"`
 	Bio        *string `json:"bio"`
@@ -199,77 +99,6 @@ type UpdatePersonRequest struct {
 	TmdbID     *string `json:"tmdb_id"`
 	ImdbID     *string `json:"imdb_id"`
 	TvdbID     *string `json:"tvdb_id"`
-}
-
-// HandleAdminUpdatePerson serves PATCH /api/v1/admin/people/:id.
-func (h *PeopleHandler) HandleAdminUpdatePerson(w http.ResponseWriter, r *http.Request) {
-	id, ok := parsePersonID(w, r)
-	if !ok {
-		return
-	}
-
-	var req UpdatePersonRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "Invalid request body")
-		return
-	}
-
-	person, err := h.UpdateAdminPerson(r.Context(), id, req)
-	if err != nil {
-		writeAPIError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, person)
-}
-
-// HandleGetPersonItems serves GET /api/people/:id/items?type=&limit=&offset=
-func (h *PeopleHandler) HandleGetPersonItems(w http.ResponseWriter, r *http.Request) {
-	writeDeprecatedReadHeaders(w, "/api/v1/catalog?source=person")
-	idStr := chi.URLParam(r, "id")
-	if _, err := strconv.ParseInt(idStr, 10, 64); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid_id", "invalid person ID")
-		return
-	}
-
-	values := url.Values{}
-	for key, rawValues := range r.URL.Query() {
-		for _, value := range rawValues {
-			values.Add(key, value)
-		}
-	}
-	values.Set("source", "person")
-	values.Set("person_id", idStr)
-	if values.Get("limit") == "" {
-		values.Set("limit", "24")
-	}
-
-	req, err := catalog.ParseCatalogRequest(values)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", err.Error())
-		return
-	}
-
-	filter, ok := h.itemsHandler.accessFilterOrError(w, r)
-	if !ok {
-		return
-	}
-
-	result, err := h.catalogResolver.Resolve(r.Context(), req, filter)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "browse_failed", err.Error())
-		return
-	}
-
-	items := make([]itemListResponse, 0, len(result.Items))
-	for _, item := range result.Items {
-		items = append(items, h.itemsHandler.toItemListResponse(r.Context(), viewerFromRequest(r, filter), item, filter.Artwork()))
-	}
-
-	writeJSON(w, http.StatusOK, browseResponse{
-		Total:   result.Total,
-		HasMore: req.Offset+len(items) < result.Total,
-		Items:   items,
-	})
 }
 
 func (h *PeopleHandler) toResponse(ctx context.Context, p models.Person) PersonView {
@@ -326,14 +155,4 @@ func parseOptionalPersonDate(raw string) (*time.Time, error) {
 	}
 
 	return &parsed, nil
-}
-
-func parsePersonID(w http.ResponseWriter, r *http.Request) (int64, bool) {
-	idStr := chi.URLParam(r, "id")
-	id, err := strconv.ParseInt(idStr, 10, 64)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid_id", "invalid person ID")
-		return 0, false
-	}
-	return id, true
 }

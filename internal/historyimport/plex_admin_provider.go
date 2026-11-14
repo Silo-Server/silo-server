@@ -2,6 +2,7 @@ package historyimport
 
 import (
 	"context"
+	"hash/fnv"
 )
 
 // PlexAdminProvider fetches watch history for a specific Plex account using an admin token.
@@ -29,106 +30,170 @@ func NewPlexAdminProvider(client *PlexClient, baseURL, token, accountID string) 
 	}
 }
 
-// Fetch satisfies the Provider interface. It fetches all history entries for the
-// configured account, enriches episodes with series metadata, and returns normalized Records.
-func (p *PlexAdminProvider) Fetch(ctx context.Context) ([]Record, []string, error) {
-	items, err := p.client.FetchUserHistory(ctx, p.baseURL, p.token, p.accountID)
+const plexStageHistory = "history"
+
+// Stream reads the account's history, requested newest play first. An item
+// appears once per play; only its newest play is imported, which the seen set
+// preserves across pages. It keeps each item's newest time rather than trusting
+// the sort, so a server that ignores it still imports the newest play.
+func (p *PlexAdminProvider) Stream(ctx context.Context, from *StreamPosition, sink RecordSink) error {
+	series := newPlexSeriesLookup(p.client, p.baseURL, p.token)
+	var ids plexItemIDLookup
+	seen := make(map[uint64]int64)
+	// A resume reads the pages before its checkpoint again, without applying
+	// them, because they say which items already imported their newest play.
+	resumeAt := stageOffset(from, plexStageHistory)
+	err := p.client.forEachUserHistoryPage(ctx, p.baseURL, p.token, p.accountID, 0, func(page []PlexHistoryItem, start int) error {
+		if start < resumeAt {
+			markSeenHistory(page, seen)
+			return nil
+		}
+		records, err := p.normalizePage(ctx, page, series, &ids, seen)
+		if err != nil {
+			return err
+		}
+		return sink(RecordBatch{Records: records, Resume: StreamPosition{Stage: plexStageHistory, Offset: start}})
+	})
 	if err != nil {
-		return nil, nil, err
+		return err
+	}
+	var warnings []string
+	if warning := series.warning(); warning != "" {
+		warnings = append(warnings, warning)
+	}
+	if ids.unresolved > 0 {
+		warnings = append(warnings, plexUnresolvedIDsWarning(plexAdminHistoryIDScope, "unique items", ids.unresolved, ids.asked, ids.firstErr, ids.aborted))
+	}
+	if len(warnings) == 0 {
+		return nil
+	}
+	return sink(RecordBatch{Warnings: warnings})
+}
+
+// historySeenKey hashes a rating key, so the seen set costs the same for any
+// key length.
+func historySeenKey(ratingKey string) uint64 {
+	hash := fnv.New64a()
+	_, _ = hash.Write([]byte(ratingKey))
+	return hash.Sum64()
+}
+
+// keepNewestPlay records item as seen and reports whether it is newer than any
+// play of the same item seen so far.
+func keepNewestPlay(item PlexHistoryItem, seen map[uint64]int64) bool {
+	key := historySeenKey(item.RatingKey)
+	newest, ok := seen[key]
+	if ok && item.ViewedAt <= newest {
+		return false
+	}
+	if ok || len(seen) < maxSeenHistoryItems {
+		seen[key] = item.ViewedAt
+	}
+	return true
+}
+
+func markSeenHistory(page []PlexHistoryItem, seen map[uint64]int64) {
+	for _, item := range page {
+		if item.RatingKey != "" {
+			keepNewestPlay(item, seen)
+		}
+	}
+}
+
+func (p *PlexAdminProvider) normalizePage(ctx context.Context, rows []PlexHistoryItem, series *plexSeriesLookup, ids *plexItemIDLookup, seen map[uint64]int64) ([]Record, error) {
+	// Plex is inconsistent about including Guid on history rows for one item,
+	// so a row borrows ids from another row of the item on the page.
+	guids := make(map[string]PlexGuids, len(rows))
+	for _, item := range rows {
+		if hasMatchablePlexGuid(item.Guid) {
+			guids[item.RatingKey] = item.Guid
+		}
+	}
+	page := make([]PlexHistoryItem, 0, len(rows))
+	for _, item := range rows {
+		if item.RatingKey == "" || !keepNewestPlay(item, seen) {
+			continue
+		}
+		if borrowed, found := guids[item.RatingKey]; found && !hasMatchablePlexGuid(item.Guid) {
+			item.Guid = borrowed
+		}
+		page = append(page, item)
 	}
 
-	var warnings []string
 	// Enrich episodes with series-level metadata (for external IDs on the series).
-	var seriesKeys []string
-	for _, item := range items {
+	seriesKeys := make([]string, 0, len(page))
+	for _, item := range page {
 		if item.Type == KindEpisode {
 			seriesKeys = append(seriesKeys, item.GrandparentRatingKey)
 		}
 	}
-	seriesMeta, err := fetchPlexSeriesMetadata(ctx, p.client, p.baseURL, p.token, seriesKeys, &warnings)
+	seriesMeta, err := series.resolve(ctx, seriesKeys)
 	if err != nil {
-		return nil, warnings, err
+		return nil, err
 	}
-	itemMeta, err := p.fetchItemMetadata(ctx, items, seriesMeta, &warnings)
+	itemMeta, err := p.fetchItemMetadata(ctx, page, seriesMeta, ids)
 	if err != nil {
-		return nil, warnings, err
+		return nil, err
 	}
-
-	// Normalize history items to Records, then deduplicate by rating key.
-	merged := make(map[string]Record, len(items))
-	for _, item := range items {
+	records := make([]Record, 0, len(page))
+	for _, item := range page {
 		item = enrichPlexHistoryItem(item, itemMeta[item.RatingKey])
-		record := NormalizePlexHistoryItem(item, seriesMeta[item.GrandparentRatingKey])
-		if record.ExternalID == "" {
-			continue
-		}
-		existing, ok := merged[record.ExternalID]
-		if !ok {
-			merged[record.ExternalID] = record
-			continue
-		}
-		merged[record.ExternalID] = mergeRecords(existing, record)
+		records = append(records, NormalizePlexHistoryItem(item, seriesMeta[item.GrandparentRatingKey]))
 	}
+	return records, nil
+}
 
-	records := make([]Record, 0, len(merged))
-	for _, record := range merged {
-		records = append(records, record)
-	}
-	return records, warnings, nil
+// plexItemIDLookup totals a run's per-item id lookups for one warning.
+type plexItemIDLookup struct {
+	asked, unresolved int
+	firstErr          error
+	aborted           bool
+	failureStreak     int
 }
 
 // fetchItemMetadata resolves external provider IDs omitted by Plex's session-history
 // endpoint. Only movies and episodes are looked up: the matcher rejects every other
 // kind, so fetching metadata for music tracks or clips would be wasted requests.
 // Episodes whose series already carries ids match on series ids plus season/episode
-// numbers and are skipped. Rating keys are fetched once each, in batches, because
-// one item can appear many times in the raw history.
+// numbers and are skipped. After a sweep gives up, later pages stop asking.
 func (p *PlexAdminProvider) fetchItemMetadata(
 	ctx context.Context,
 	items []PlexHistoryItem,
 	seriesMeta map[string]*PlexItem,
-	warnings *[]string,
+	ids *plexItemIDLookup,
 ) (map[string]*PlexItem, error) {
-	// A rating key is resolved when any of its history entries already carries usable
-	// ids (Plex is inconsistent about including Guid on history rows for one item).
-	eligible := make(map[string]struct{})
-	resolved := make(map[string]struct{})
-	for _, item := range items {
-		if item.RatingKey == "" || (item.Type != KindMovie && item.Type != KindEpisode) {
-			continue
-		}
-		eligible[item.RatingKey] = struct{}{}
-		if hasMatchablePlexGuid(item.Guid) || hasMatchableSeriesFallback(item, seriesMeta) {
-			resolved[item.RatingKey] = struct{}{}
-		}
-	}
 	var pending []string
 	for _, item := range items {
-		if _, ok := eligible[item.RatingKey]; !ok {
+		if item.Type != KindMovie && item.Type != KindEpisode {
 			continue
 		}
-		if _, ok := resolved[item.RatingKey]; ok {
-			continue
+		if !hasMatchablePlexGuid(item.Guid) && !hasMatchableSeriesFallback(item, seriesMeta) {
+			pending = append(pending, item.RatingKey)
 		}
-		pending = append(pending, item.RatingKey)
 	}
 	pending = uniqueNonEmpty(pending)
-
-	sweep, err := p.client.fetchMetadataByKey(ctx, p.baseURL, p.token, pending)
+	if len(pending) == 0 {
+		return nil, nil
+	}
+	ids.asked += len(pending)
+	if ids.aborted {
+		ids.unresolved += len(pending)
+		return nil, nil
+	}
+	sweep, err := p.client.fetchMetadataByKey(ctx, p.baseURL, p.token, pending, &ids.failureStreak)
 	if err != nil {
 		return nil, err
 	}
-	unresolved := 0
 	for _, key := range pending {
 		meta, ok := sweep.items[key]
 		if !ok || !hasMatchablePlexGuid(meta.Guid) {
-			unresolved++
+			ids.unresolved++
 		}
 	}
-	if unresolved > 0 {
-		*warnings = append(*warnings, plexUnresolvedIDsWarning(
-			plexAdminHistoryIDScope, "unique items", unresolved, len(pending), sweep.firstErr, sweep.aborted))
+	if ids.firstErr == nil {
+		ids.firstErr = sweep.firstErr
 	}
+	ids.aborted = ids.aborted || sweep.aborted || ids.failureStreak >= plexMetadataFailureStreakLimit
 	return sweep.items, nil
 }
 

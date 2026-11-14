@@ -44,6 +44,6 @@ Apple sends progress through `POST /api/v2/sync/progress`
 (`iosApp/iosApp/Networking/APIv2/APIv2Client+Progress.swift`): queued offline
 progress in batches of at most 100 distinct items, and single-item writes from
 the audiobook player and the video player's session bridge. Android sends
-progress through v2 playback sessions and does not use this batch route. The
-frozen v1 request and response are unchanged. Jellyfin compatibility does not use this native
+progress through v2 playback sessions and does not use this batch route.
+Jellyfin compatibility does not use this native
 batch envelope and needs no transport change.

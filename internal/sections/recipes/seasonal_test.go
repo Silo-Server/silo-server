@@ -210,6 +210,7 @@ func TestActiveSeasonalPick(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			got, ok := ActiveSeasonalPick(tc.p, tc.now)
+			got.TitleKey = "" // TestSeasonalPickKeysOnlyBuiltInTitles covers the key
 			if ok != tc.wantOK || got != tc.want {
 				t.Fatalf("ActiveSeasonalPick = %+v, %v; want %+v, %v", got, ok, tc.want, tc.wantOK)
 			}
@@ -255,6 +256,7 @@ func TestActiveSeasonalPickHonorsThemeDates(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			got, ok := ActiveSeasonalPick(tc.p, tc.now)
+			got.TitleKey = "" // TestSeasonalPickKeysOnlyBuiltInTitles covers the key
 			if ok != tc.wantOK || got != tc.want {
 				t.Fatalf("ActiveSeasonalPick = %+v, %v; want %+v, %v", got, ok, tc.want, tc.wantOK)
 			}

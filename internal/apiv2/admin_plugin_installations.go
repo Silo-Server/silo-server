@@ -210,6 +210,23 @@ type AdminPluginRuntime struct {
 	NextRestartAt *Instant `json:"next_restart_at,omitempty" doc:"Scheduled automatic restart while in backoff"`
 }
 
+// AdminPluginUpdateFailure is the last automatic update Silo refused to
+// install. It is cleared when the installed version changes or a later
+// update check no longer fails.
+type AdminPluginUpdateFailure struct {
+	Version  string  `json:"version" doc:"The version Silo tried and failed to install"`
+	Reason   string  `json:"reason" doc:"Why the update was refused, written for the administrator; it names no URL or checksum"`
+	FailedAt Instant `json:"failed_at"`
+}
+
+// AdminPluginSignature is the release signature check Silo ran when it
+// installed the package. It is recorded once at install and not re-run.
+type AdminPluginSignature struct {
+	State      string   `json:"state" enum:"unknown,verified,unsigned,invalid" doc:"verified: the release's Sigstore bundle proved it was built from source_repo at the version's tag. unsigned: there was nothing to check, as for an upload, an archive install, or a catalog entry without a signature. invalid: a signature was checked and did not prove that. unknown: not checked, as for an installation from before Silo checked signatures or an install whose check could not run."`
+	SourceRepo string   `json:"source_repo,omitempty" format:"uri" doc:"The repository the verified signature names. Present only when state is verified."`
+	VerifiedAt *Instant `json:"verified_at,omitempty" doc:"When Silo verified the signature. Present only when state is verified."`
+}
+
 // AdminPluginInstallation is one manageable installation with its redacted
 // configuration and bindings.
 type AdminPluginInstallation struct {
@@ -227,6 +244,8 @@ type AdminPluginInstallation struct {
 	RepoURL            string                    `json:"repo_url,omitempty" format:"uri-reference"`
 	Presentation       *AdminPluginPresentation  `json:"presentation,omitempty"`
 	UpdatesPaused      bool                      `json:"updates_paused" doc:"True while the installation's repository is disabled. Silo does not check it for new versions or install from it, so available_version cannot be applied until the repository is enabled again."`
+	UpdateFailure      *AdminPluginUpdateFailure `json:"update_failure,omitempty" doc:"The last automatic update that failed, such as a download that did not match its catalog checksum. Absent when the last check did not fail for this plugin."`
+	Signature          AdminPluginSignature      `json:"signature" doc:"The release signature check of the installed package."`
 	Capabilities       []AdminPluginCapability   `json:"capabilities"`
 	GlobalConfigSchema []AdminPluginConfigSchema `json:"global_config_schema"`
 	UserConfigSchema   []AdminPluginConfigSchema `json:"user_config_schema"`
@@ -396,6 +415,10 @@ func (reg *Registry) adminPluginInstallationOf(v handlers.PluginInstallationView
 	if v.AvailableVersion != nil {
 		out.AvailableVersion = *v.AvailableVersion
 	}
+	if f := v.UpdateFailure; f != nil {
+		out.UpdateFailure = &AdminPluginUpdateFailure{Version: f.Version, Reason: f.Reason, FailedAt: NewInstant(f.FailedAt)}
+	}
+	out.Signature = adminPluginSignatureOf(v.Signature)
 	for _, c := range v.GlobalConfigs {
 		out.GlobalConfigs = append(out.GlobalConfigs, AdminPluginConfigValue{Key: c.Key, Value: NonNilMap(PluginJSONValue(c.Value)), ConfiguredSecrets: NonNil(c.ConfiguredSecrets)})
 	}
@@ -425,6 +448,23 @@ func (reg *Registry) adminPluginInstallationOf(v handlers.PluginInstallationView
 		out.TaskBindings = append(out.TaskBindings, AdminPluginTaskBinding{CapabilityID: b.CapabilityID, Enabled: b.Enabled, Trigger: NonNilMap(PluginJSONValue(b.Trigger)), CreatedAt: NewInstant(b.CreatedAt), UpdatedAt: NewInstant(b.UpdatedAt)})
 	}
 	return out, nil
+}
+
+func adminPluginSignatureOf(sig plugins.Signature) AdminPluginSignature {
+	out := AdminPluginSignature{State: string(sig.State)}
+	if out.State == "" {
+		out.State = string(plugins.SignatureStateUnknown)
+	}
+	if sig.State != plugins.SignatureStateVerified {
+		return out
+	}
+	if sig.SourceRepo != nil {
+		out.SourceRepo = *sig.SourceRepo
+	}
+	if sig.VerifiedAt != nil {
+		out.VerifiedAt = new(NewInstant(*sig.VerifiedAt))
+	}
+	return out
 }
 
 // authBindingIsOAuth reports whether the installation's auth_provider.v1

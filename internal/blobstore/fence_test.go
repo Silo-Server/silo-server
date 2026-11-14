@@ -3,6 +3,8 @@ package blobstore
 import (
 	"context"
 	"errors"
+	"io"
+	"strings"
 	"testing"
 	"testing/synctest"
 )
@@ -96,4 +98,34 @@ func TestPauseMutationsReleasesTakenFencesWhenCanceled(t *testing.T) {
 			t.Fatal(err)
 		}
 	})
+}
+
+// partSizedStore records the part size a multipart write asked for.
+type partSizedStore struct {
+	*Filesystem
+	partSize int64
+}
+
+func (s *partSizedStore) PutStreamParts(ctx context.Context, key string, r io.Reader, contentType string, partSize int64) error {
+	s.partSize = partSize
+	return s.PutStream(ctx, key, r, contentType)
+}
+
+// A fenced store keeps a backup's part size: the operational store is the
+// fenced assets store when no private bucket is configured.
+func TestMutationFenceForwardsPartSize(t *testing.T) {
+	base, err := NewFilesystem(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	inner := &partSizedStore{Filesystem: base}
+	sized, ok := WithMutationFence(inner).(interface {
+		PutStreamParts(ctx context.Context, key string, r io.Reader, contentType string, partSize int64) error
+	})
+	if !ok {
+		t.Fatal("a fenced store does not take a part size")
+	}
+	if err := sized.PutStreamParts(t.Context(), "backups/x", strings.NewReader("dump"), "", 64<<20); err != nil || inner.partSize != 64<<20 {
+		t.Fatalf("part size reached the store as %d (%v), want %d", inner.partSize, err, 64<<20)
+	}
 }

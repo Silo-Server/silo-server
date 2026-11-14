@@ -11,18 +11,6 @@ import (
 var nativeMediaRoutes = []streamtelemetry.MediaRoute{
 	nativeRoute(http.MethodGet, "/api/v2/catalog/items/{id}/themes/{theme_id}/audio", streamtelemetry.ClassTransfer, false),
 	nativeRoute(http.MethodHead, "/api/v2/catalog/items/{id}/themes/{theme_id}/audio", streamtelemetry.ClassTransfer, false),
-	nativeRoute(http.MethodGet, "/api/v1/stream/{session_id}", streamtelemetry.ClassPlayback, true),
-	nativeRoute(http.MethodHead, "/api/v1/stream/{session_id}", streamtelemetry.ClassPlayback, true),
-	nativeRoute(http.MethodGet, "/api/v1/stream/{session_id}/subtitles/{track}", streamtelemetry.ClassPlayback, true),
-	nativeRoute(http.MethodHead, "/api/v1/stream/{session_id}/subtitles/{track}", streamtelemetry.ClassPlayback, true),
-	nativeRoute(http.MethodGet, "/api/v1/stream/{session_id}/subtitles/{track}/fonts", streamtelemetry.ClassPlayback, true),
-	nativeRoute(http.MethodGet, "/api/v1/playback/transcode/{session_id}/master.m3u8", streamtelemetry.ClassManifest, true),
-	nativeRoute(http.MethodGet, "/api/v1/playback/transcode/{session_id}/segment/{name}", streamtelemetry.ClassPlayback, true),
-	nativeRoute(http.MethodGet, "/api/v1/downloads/{id}/file", streamtelemetry.ClassTransfer, false),
-	nativeRoute(http.MethodHead, "/api/v1/downloads/{id}/file", streamtelemetry.ClassTransfer, false),
-	nativeRoute(http.MethodGet, "/api/v1/downloads/{id}/file-proxy", streamtelemetry.ClassTransfer, false),
-	nativeRoute(http.MethodHead, "/api/v1/downloads/{id}/file-proxy", streamtelemetry.ClassTransfer, false),
-	nativeRoute(http.MethodGet, "/api/v1/downloads/{id}/subtitles/{ref}", streamtelemetry.ClassTransfer, false),
 	nativeRoute(http.MethodGet, "/api/v2/downloads/{id}/file", streamtelemetry.ClassTransfer, false),
 	nativeRoute(http.MethodHead, "/api/v2/downloads/{id}/file", streamtelemetry.ClassTransfer, false),
 	nativeRoute(http.MethodGet, "/api/v2/downloads/{id}/file-proxy", streamtelemetry.ClassTransfer, false),
@@ -33,12 +21,6 @@ var nativeMediaRoutes = []streamtelemetry.MediaRoute{
 	nativeRoute(http.MethodHead, "/api/v2/direct-download", streamtelemetry.ClassTransfer, false),
 	nativeRoute(http.MethodGet, "/api/v2/direct-download-proxy", streamtelemetry.ClassTransfer, false),
 	nativeRoute(http.MethodHead, "/api/v2/direct-download-proxy", streamtelemetry.ClassTransfer, false),
-	nativeRoute(http.MethodGet, "/api/v1/direct-download", streamtelemetry.ClassTransfer, false),
-	nativeRoute(http.MethodHead, "/api/v1/direct-download", streamtelemetry.ClassTransfer, false),
-	nativeRoute(http.MethodGet, "/api/v1/direct-download-proxy", streamtelemetry.ClassTransfer, false),
-	nativeRoute(http.MethodHead, "/api/v1/direct-download-proxy", streamtelemetry.ClassTransfer, false),
-	nativeRoute(http.MethodGet, "/api/v1/ebooks/{content_id}/files/{file_id}/read", streamtelemetry.ClassTransfer, false),
-	nativeRoute(http.MethodHead, "/api/v1/ebooks/{content_id}/files/{file_id}/read", streamtelemetry.ClassTransfer, false),
 }
 
 func nativeRoute(method, pattern string, class streamtelemetry.Class, capRelevant bool) streamtelemetry.MediaRoute {

@@ -4,14 +4,18 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"log/slog"
 	"net/http"
 	"strings"
+
+	"golang.org/x/sync/errgroup"
 
 	"github.com/Silo-Server/silo-server/internal/adminjob"
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/collections/templates"
 	"github.com/Silo-Server/silo-server/internal/models"
-	"golang.org/x/sync/errgroup"
+	"github.com/Silo-Server/silo-server/internal/userstore"
 )
 
 const (
@@ -114,72 +118,53 @@ func (h *LibraryCollectionHandler) createAdminCollection(ctx context.Context, re
 	if !hasLibrarySelection(req.LibraryID, req.LibraryIDs) || strings.TrimSpace(req.Title) == "" {
 		return none, apiError(http.StatusBadRequest, "bad_request", "library_id/library_ids and title are required")
 	}
-	if err := validateTMDBListSourceConfig(req.SourceConfig, req.SourceURL); err != nil {
-		return none, apiError(http.StatusBadRequest, "bad_request", err.Error())
-	}
 	if req.Slug == "" {
 		req.Slug = slugifyCollectionName(req.Title)
 	}
 	if req.CollectionType == "" {
 		req.CollectionType = collectionManagementModeManual
 	}
-	queryDefinition := defaultJSON(req.QueryDefinition)
-	if req.CollectionType == collectionTypeSmart {
-		var err error
-		queryDefinition, err = normalizeSmartCollectionQueryDefinitionJSON(queryDefinition, false, false, req.V1Rules)
-		if err != nil {
-			return none, apiError(http.StatusBadRequest, "bad_request", "Invalid query_definition")
-		}
-	} else if len(req.QueryDefinition) > 0 {
-		var err error
-		queryDefinition, err = normalizeQueryDefinitionJSON(queryDefinition, false, false, req.V1Rules)
-		if err != nil {
-			return none, apiError(http.StatusBadRequest, "bad_request", "Invalid query_definition")
-		}
-	}
-
-	// Library collections resolve with user scope stripped, so per-profile sort
-	// fields are rejected here rather than failing at browse time.
-	sortConfig, err := NormalizeCollectionSortConfig(req.SortConfig, false)
-	if err != nil {
-		return none, apiError(http.StatusBadRequest, "bad_request", err.Error())
-	}
-
 	var syncSchedule *string
 	if s := strings.TrimSpace(req.SyncSchedule); s != "" {
-		if err := catalog.ParseCronExpression(s); err != nil {
-			return none, apiError(http.StatusBadRequest, "bad_request", err.Error())
-		}
 		syncSchedule = &s
 	}
-	managementMode, managementSource, managementKey, err := normalizeCollectionManagementFields(req.ManagementMode, req.ManagementSource, req.ManagementKey)
-	if err != nil {
-		return none, apiError(http.StatusBadRequest, "bad_request", err.Error())
-	}
-
-	collection, err := h.repo.Create(ctx, catalog.CreateLibraryCollectionInput{
+	input := catalog.CreateLibraryCollectionInput{
 		LibraryID:        req.LibraryID,
 		LibraryIDs:       req.LibraryIDs,
 		Slug:             req.Slug,
 		Title:            req.Title,
 		Description:      req.Description,
 		CollectionType:   req.CollectionType,
-		Visibility:       defaultCollectionVisibility(req.Visibility),
+		Visibility:       req.Visibility,
 		SortOrder:        req.SortOrder,
 		GroupID:          req.GroupID,
 		Featured:         req.Featured,
 		PosterURL:        req.PosterURL,
 		BackdropURL:      req.BackdropURL,
 		SourceURL:        req.SourceURL,
-		QueryDefinition:  queryDefinition,
-		SortConfig:       json.RawMessage(sortConfig),
-		SourceConfig:     defaultCollectionSourceConfig(req.SourceConfig),
-		ManagementMode:   managementMode,
-		ManagementSource: managementSource,
-		ManagementKey:    managementKey,
+		QueryDefinition:  req.QueryDefinition,
+		SortConfig:       req.SortConfig,
+		SourceConfig:     req.SourceConfig,
+		ManagementMode:   req.ManagementMode,
+		ManagementSource: req.ManagementSource,
+		ManagementKey:    req.ManagementKey,
 		SyncSchedule:     syncSchedule,
-	})
+		UniqueTitle:      true,
+	}
+	if err := normalizeAdminCollectionInput(&input); err != nil {
+		return none, err
+	}
+	if input.CollectionType == collectionTypeSmart {
+		if err := requireSmartCollectionRule(input.QueryDefinition); err != nil {
+			return none, err
+		}
+	}
+
+	collection, err := h.repo.Create(ctx, input)
 	if err != nil {
+		if fieldErr := collectionNameError(err); fieldErr != nil {
+			return none, fieldErr
+		}
 		return none, apiError(http.StatusInternalServerError, "internal_error", "Failed to create collection")
 	}
 
@@ -188,7 +173,7 @@ func (h *LibraryCollectionHandler) createAdminCollection(ctx context.Context, re
 		return none, apiError(http.StatusInternalServerError, "internal_error", "Failed to process template poster")
 	}
 	if err := artwork(collection.ID, req.PosterSourceURL, req.BackdropSourceURL); err != nil {
-		return none, apiError(http.StatusInternalServerError, "internal_error", "Failed to process uploaded images")
+		return none, collectionArtworkError(err, "Failed to process uploaded images")
 	}
 	if posterStored || artwork != nil || strings.TrimSpace(req.PosterSourceURL) != "" || strings.TrimSpace(req.BackdropSourceURL) != "" {
 		collection, err = h.repo.GetByID(ctx, collection.ID)
@@ -206,11 +191,21 @@ func (h *LibraryCollectionHandler) CreateAdminCollection(ctx context.Context, re
 
 func (h *LibraryCollectionHandler) updateAdminCollection(ctx context.Context, collectionID string, req AdminCollectionUpdate, artwork adminCollectionArtwork) (AdminCollection, error) {
 	var none AdminCollection
+	if req.CollectionType != nil {
+		if err := validateCollectionType(*req.CollectionType); err != nil {
+			return none, err
+		}
+	}
 	visibility, err := normalizeCollectionVisibilityUpdate(req.Visibility)
 	if err != nil {
 		return none, err
 	}
 	req.Visibility = visibility
+	// A collection shows in at least one library; with none it would drop out
+	// of every library's list while the update reported success.
+	if req.LibraryIDs != nil && len(uniquePositiveInts(*req.LibraryIDs)) == 0 {
+		return none, fieldError("library_ids", "Choose at least one library")
+	}
 	existing, err := h.repo.GetByID(ctx, collectionID)
 	if err != nil {
 		return none, adminCollectionLookupAPIError(err)
@@ -222,20 +217,16 @@ func (h *LibraryCollectionHandler) updateAdminCollection(ctx context.Context, co
 	if len(req.QueryDefinition) > 0 {
 		var err error
 		if req.CollectionType == nil || *req.CollectionType == collectionTypeSmart {
-			queryDefinition, err = normalizeSmartCollectionQueryDefinitionJSON(req.QueryDefinition, false, false, req.V1Rules)
+			queryDefinition, err = normalizeSmartCollectionQueryDefinitionJSON(req.QueryDefinition, false, false)
 		} else {
-			queryDefinition, err = normalizeQueryDefinitionJSON(req.QueryDefinition, false, false, req.V1Rules)
+			queryDefinition, err = normalizeQueryDefinitionJSON(req.QueryDefinition, false, false)
 		}
 		if err != nil {
 			return none, apiError(http.StatusBadRequest, "bad_request", "Invalid query_definition")
 		}
-	} else if req.V1Rules && req.CollectionType != nil && *req.CollectionType == collectionTypeSmart &&
-		existing.CollectionType != collectionTypeSmart && len(existing.QueryDefinition) > 0 {
-		// Switching to Smart activates the stored rules, so, as with a changed
-		// section definition, a v1 update must find them in its vocabulary.
-		if err := catalog.ValidateV1Rules(existing.QueryDefinition); err != nil {
-			return none, apiError(http.StatusBadRequest, "bad_request", "Invalid query_definition")
-		}
+	}
+	if err := adminSmartRuleCheck(existing.CollectionType, existing.QueryDefinition, req, queryDefinition); err != nil {
+		return none, err
 	}
 
 	sortConfig := req.SortConfig
@@ -285,7 +276,11 @@ func (h *LibraryCollectionHandler) updateAdminCollection(ctx context.Context, co
 		ManagementSource: req.ManagementSource,
 		ManagementKey:    req.ManagementKey,
 		SyncSchedule:     req.SyncSchedule,
+		UniqueTitle:      true,
 	}); err != nil {
+		if fieldErr := collectionNameError(err); fieldErr != nil {
+			return none, fieldErr
+		}
 		if errors.Is(err, catalog.ErrLibraryCollectionRevisionMismatch) || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 			return none, err
 		}
@@ -297,9 +292,12 @@ func (h *LibraryCollectionHandler) updateAdminCollection(ctx context.Context, co
 		}
 		return none, apiError(http.StatusInternalServerError, "internal_error", "Failed to update collection")
 	}
+	if req.Title != nil {
+		h.renameCollectionRows(ctx, collectionID, existing.Title, *req.Title)
+	}
 
 	if err := artwork(collectionID, pointerStringValue(req.PosterSourceURL), pointerStringValue(req.BackdropSourceURL)); err != nil {
-		return none, apiError(http.StatusInternalServerError, "internal_error", "Failed to process uploaded images")
+		return none, collectionArtworkError(err, "Failed to process uploaded images")
 	}
 
 	updated, err := h.repo.GetByID(ctx, collectionID)
@@ -310,6 +308,32 @@ func (h *LibraryCollectionHandler) updateAdminCollection(ctx context.Context, co
 		h.refreshSmartCountAsync(collectionID)
 	}
 	return h.libraryCollectionResponseOf(ctx, h.withViewerPoster(ctx, updated)), nil
+}
+
+// collectionNameError answers a title another collection in one of the
+// collection's libraries already has, or a slug another collection of its
+// library already uses, as a validation error at that field, which v2
+// answers as 422 validation_failed at body.title or body.slug. Nil for any
+// other error.
+func collectionNameError(err error) *APIError {
+	if taken, ok := errors.AsType[*catalog.LibraryCollectionTitleTakenError](err); ok {
+		return fieldError("title", fmt.Sprintf("Another collection in %s already has this name", taken.LibraryName)).WithCause(err)
+	}
+	if catalog.IsLibraryCollectionSlugConflict(err) {
+		return fieldError("slug", "Another collection in this library already uses this slug").WithCause(err)
+	}
+	return nil
+}
+
+// validateCollectionType rejects values the library_collections
+// collection_type CHECK constraint would refuse. Create and restore skip it for
+// an empty value, which defaults to manual; an update has no default to fall
+// back to, so an explicit empty value is an error.
+func validateCollectionType(collectionType string) error {
+	if catalog.IsKnownType(collectionType) {
+		return nil
+	}
+	return fieldError("collection_type", "collection_type must be manual, smart, mdblist, or tmdb")
 }
 
 // normalizeCollectionVisibilityUpdate validates an update's visibility. Nil
@@ -327,6 +351,76 @@ func normalizeCollectionVisibilityUpdate(visibility *string) (*string, error) {
 		return &v, nil
 	}
 	return visibility, nil
+}
+
+// normalizeAdminCollectionInput validates and normalizes the fields of a new
+// admin collection as the create command takes them: its visibility, type, title,
+// TMDB list source, rules (a smart collection's checked as smart rules),
+// sort, sync schedule, and management fields. It fills the defaults the
+// command stores and rewrites the JSON fields in their normalized form.
+func normalizeAdminCollectionInput(in *catalog.CreateLibraryCollectionInput) error {
+	if err := validateCollectionVisibility(in.Visibility); err != nil {
+		return err
+	}
+	if in.CollectionType != "" {
+		if err := validateCollectionType(in.CollectionType); err != nil {
+			return err
+		}
+	}
+	if strings.TrimSpace(in.Title) == "" {
+		return apiError(http.StatusBadRequest, "bad_request", "title is required")
+	}
+	if err := validateTMDBListSourceConfig(in.SourceConfig, in.SourceURL); err != nil {
+		return apiError(http.StatusBadRequest, "bad_request", err.Error())
+	}
+	queryDefinition := defaultJSON(in.QueryDefinition)
+	if in.CollectionType == collectionTypeSmart {
+		var err error
+		if queryDefinition, err = normalizeSmartCollectionQueryDefinitionJSON(queryDefinition, false, false); err != nil {
+			return apiError(http.StatusBadRequest, "bad_request", "Invalid query_definition")
+		}
+	} else if len(in.QueryDefinition) > 0 {
+		var err error
+		if queryDefinition, err = normalizeQueryDefinitionJSON(queryDefinition, false, false); err != nil {
+			return apiError(http.StatusBadRequest, "bad_request", "Invalid query_definition")
+		}
+	}
+	// Library collections resolve with user scope stripped, so per-profile sort
+	// fields are rejected here rather than failing at browse time.
+	sortConfig, err := NormalizeCollectionSortConfig(in.SortConfig, false)
+	if err != nil {
+		return apiError(http.StatusBadRequest, "bad_request", err.Error())
+	}
+	if in.SyncSchedule != nil {
+		if err := catalog.ParseCronExpression(*in.SyncSchedule); err != nil {
+			return apiError(http.StatusBadRequest, "bad_request", err.Error())
+		}
+	}
+	managementMode, managementSource, managementKey, err := normalizeCollectionManagementFields(in.ManagementMode, in.ManagementSource, in.ManagementKey)
+	if err != nil {
+		return apiError(http.StatusBadRequest, "bad_request", err.Error())
+	}
+	in.Visibility = defaultCollectionVisibility(in.Visibility)
+	in.QueryDefinition, in.SortConfig = queryDefinition, json.RawMessage(sortConfig)
+	in.SourceConfig = defaultCollectionSourceConfig(in.SourceConfig)
+	in.ManagementMode, in.ManagementSource, in.ManagementKey = managementMode, managementSource, managementKey
+	return nil
+}
+
+// CheckRestoredCollection applies the admin collection create command's
+// checks (normalizeAdminCollectionInput) to a collection a backup restore
+// writes, so a restore stores nothing the editor would refuse.
+func (h *LibraryCollectionHandler) CheckRestoredCollection(in catalog.CreateLibraryCollectionInput) error {
+	return restoreCheckError(normalizeAdminCollectionInput(&in))
+}
+
+// restoreCheckError is an editor's refusal as a restore reports it: the
+// message an admin would have read, without the API error code.
+func restoreCheckError(err error) error {
+	if api, ok := errors.AsType[*APIError](err); ok {
+		return errors.New(api.Message)
+	}
+	return err
 }
 
 // validateCollectionVisibility rejects values the library_collections
@@ -375,7 +469,7 @@ func (h *LibraryCollectionHandler) PreviewAdminCollection(ctx context.Context, r
 	}
 	var def catalog.QueryDefinition
 	if len(req.QueryDefinition) > 0 {
-		normalized, err := normalizeQueryDefinitionJSON(req.QueryDefinition, false, false, req.V1Rules)
+		normalized, err := normalizeQueryDefinitionJSON(req.QueryDefinition, false, false)
 		if err != nil {
 			return none, apiError(http.StatusBadRequest, "bad_request", "Invalid query_definition")
 		}
@@ -416,7 +510,7 @@ func (h *LibraryCollectionHandler) importAdminMDBList(ctx context.Context, req A
 	// Process admin artwork before sync so MaybeGenerateCollage sees the
 	// uploaded poster and skips collage generation.
 	if err := artwork(collection.ID, req.PosterSourceURL, req.BackdropSourceURL); err != nil {
-		return none, apiError(http.StatusInternalServerError, "internal_error", "Failed to process uploaded images")
+		return none, collectionArtworkError(err, "Failed to process uploaded images")
 	}
 
 	run, err := h.service.SyncCollection(ctx, collection.ID)
@@ -461,7 +555,7 @@ func (h *LibraryCollectionHandler) importAdminTMDB(ctx context.Context, req Admi
 	// Process admin artwork before sync so MaybeGenerateCollage sees the
 	// uploaded poster and skips collage generation.
 	if err := artwork(collection.ID, req.PosterSourceURL, req.BackdropSourceURL); err != nil {
-		return none, apiError(http.StatusInternalServerError, "internal_error", "Failed to process uploaded images")
+		return none, collectionArtworkError(err, "Failed to process uploaded images")
 	}
 
 	run, err := h.service.SyncCollection(ctx, collection.ID)
@@ -503,7 +597,7 @@ func (h *LibraryCollectionHandler) importAdminTMDBList(ctx context.Context, req 
 	// Process admin artwork before sync so MaybeGenerateCollage sees the
 	// uploaded poster and skips collage generation.
 	if err := artwork(collection.ID, req.PosterSourceURL, req.BackdropSourceURL); err != nil {
-		return none, apiError(http.StatusInternalServerError, "internal_error", "Failed to process uploaded images")
+		return none, collectionArtworkError(err, "Failed to process uploaded images")
 	}
 
 	run, err := h.service.SyncCollection(ctx, collection.ID)
@@ -714,4 +808,41 @@ func (h *LibraryCollectionHandler) DeleteAdminCollection(ctx context.Context, id
 	}
 	h.cleanupDeletedCollection(ctx, id)
 	return nil
+}
+
+// renameCollectionRows carries a rename into the rows that still show the
+// collection under its old name, following the collection's current title so
+// overlapping renames end on the last one (userstore.FollowCollectionTitle).
+// Admin rows are retitled before the response re-reads the collection,
+// because retitling one advances the collection's revision and the caller's
+// next If-Match needs the new one. The rows profiles built, in every account,
+// are retitled after the response, detached from the request: that sweep
+// leaves the revision alone and grows with the number of accounts. The rename
+// has committed, so a dropped request must not cut either short; each has its
+// own deadline instead. A failure is logged and leaves those rows on the old
+// name.
+func (h *LibraryCollectionHandler) renameCollectionRows(ctx context.Context, collectionID, oldTitle, newTitle string) {
+	if strings.TrimSpace(oldTitle) == strings.TrimSpace(newTitle) {
+		return
+	}
+	detached := context.WithoutCancel(ctx)
+	ctx, cancel := context.WithTimeout(detached, userstore.RetitleTimeout)
+	defer cancel()
+	currentTitle := func(ctx context.Context) (string, error) { return h.repo.Title(ctx, collectionID) }
+	if h.SectionRepo != nil {
+		err := userstore.FollowCollectionTitle(ctx, oldTitle, currentTitle, func(ctx context.Context, from, to string) error {
+			return h.SectionRepo.RenameLibraryCollectionRows(ctx, collectionID, from, to)
+		})
+		if err != nil {
+			slog.WarnContext(ctx, "collection rename: retitling admin rows failed", "component", "api",
+				"collection_id", collectionID, "error", err)
+		}
+	}
+	if h.CollectionRowRenamer != nil {
+		go func() {
+			ctx, cancel := context.WithTimeout(detached, userstore.RetitleSweepTimeout)
+			defer cancel()
+			h.CollectionRowRenamer.RenameForCollection(ctx, collectionID, oldTitle, currentTitle)
+		}()
+	}
 }

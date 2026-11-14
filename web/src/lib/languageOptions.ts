@@ -5,6 +5,7 @@ import {
   type SettingKey,
 } from "@/lib/settingsContract";
 import { getLanguageName, languageIdentity } from "@/lib/languageNames";
+import { settingUnsetLabel } from "@/lib/settingsText";
 
 /** One choice in a settings dropdown. */
 export interface SettingOption {
@@ -86,5 +87,5 @@ export function languageOptionsFor(
   const named = namedLanguageOptionsFor(key, currentValue, runtimeValues, revision);
   const definition = SETTING_DEFINITIONS[key];
   if (!definition.nullable) return named;
-  return [{ value: "", label: definition.unsetLabel ?? "Unset" }, ...named];
+  return [{ value: "", label: settingUnsetLabel(definition) }, ...named];
 }

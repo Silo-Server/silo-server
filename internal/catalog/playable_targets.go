@@ -8,10 +8,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Silo-Server/silo-server/internal/access"
-	"github.com/Silo-Server/silo-server/internal/userstore"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/Silo-Server/silo-server/internal/userstore"
 )
 
 const (
@@ -187,14 +187,8 @@ func (r *PlayableTargetResolver) ResolveTargets(ctx context.Context, q PlayableT
 		playableFileExists,
 		"EXISTS (SELECT 1 FROM media_folders pf WHERE pf.id = mf.media_folder_id AND pf.enabled = TRUE)",
 	}
-	if maxQuality := access.NormalizePlaybackQuality(q.Access.MaxPlaybackQuality); maxQuality != "" {
-		maxRank := 3
-		if maxQuality == access.PlaybackQuality4K {
-			maxRank = 4
-		}
-		fileConditions = append(fileConditions, fmt.Sprintf(`CASE UPPER(BTRIM(COALESCE(mf.resolution, '')))
-			WHEN '480P' THEN 1 WHEN '720P' THEN 2 WHEN '1080P' THEN 3
-			WHEN '2160P' THEN 4 WHEN '4320P' THEN 5 ELSE 0 END <= %d`, maxRank))
+	if ceiling := MediaFileQualityCeilingSQL("mf", q.Access.MaxPlaybackQuality); ceiling != "" {
+		fileConditions = append(fileConditions, ceiling)
 	}
 	effectiveLibraries, none := q.Access.LibraryScope(uniquePositiveInts(q.LibraryIDs))
 	switch {

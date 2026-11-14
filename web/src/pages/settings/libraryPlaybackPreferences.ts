@@ -1,18 +1,33 @@
 import type { EffectiveSettingsMap, SettingIdentity } from "@/hooks/queries/settingValues";
+import { t } from "@/i18n";
 import { getLanguageName } from "@/lib/languageNames";
 import { SETTING_KEYS, type SettingKey } from "@/lib/settingsContract";
 import { optionsFor } from "@/lib/settingsDisplay";
 import { SETTING_DEFINITIONS } from "@/lib/settingsContract";
+import { settingUnsetLabel } from "@/lib/settingsText";
 
 export const INHERIT_VALUE = "inherit";
 export const NONE_VALUE = "none";
 export const DEFAULT_SUBTITLE_MODE = "auto";
 export const DEFAULT_SHOW_FORCED_SUBTITLES = true;
 
-/** Behavior modes, from the contract rather than a parallel literal list. */
-export const SUBTITLE_MODE_OPTIONS = optionsFor(
-  SETTING_DEFINITIONS[SETTING_KEYS.PLAYBACK_SUBTITLE_MODE],
-);
+/**
+ * Behavior modes, from the contract rather than a parallel literal list, with
+ * labels in the current interface language (so call it at render).
+ */
+export function subtitleModeOptions() {
+  return optionsFor(SETTING_DEFINITIONS[SETTING_KEYS.PLAYBACK_SUBTITLE_MODE]);
+}
+
+/** "No preference": the contract's label for an unset audio language. */
+function noAudioLanguageLabel() {
+  return settingUnsetLabel(SETTING_DEFINITIONS[SETTING_KEYS.PLAYBACK_AUDIO_LANGUAGE]);
+}
+
+/** "None": the contract's label for an unset subtitle language. */
+function noSubtitleLanguageLabel() {
+  return settingUnsetLabel(SETTING_DEFINITIONS[SETTING_KEYS.PLAYBACK_SUBTITLE_LANGUAGE]);
+}
 
 /**
  * The four playback preferences a library can override. All four are declared
@@ -53,36 +68,51 @@ export function getLanguageLabel(code: string) {
 }
 
 export function getSubtitleModeLabel(mode: string) {
-  return SUBTITLE_MODE_OPTIONS.find((option) => option.value === mode)?.label ?? mode;
+  return subtitleModeOptions().find((option) => option.value === mode)?.label ?? mode;
 }
 
 export function getSubtitleLanguageLabel(value: string) {
-  return value === "" || value === NONE_VALUE ? "None" : getLanguageLabel(value);
+  return value === "" || value === NONE_VALUE ? noSubtitleLanguageLabel() : getLanguageLabel(value);
 }
 
 export function getForcedSubtitlesLabel(value: string) {
-  return value === "on" ? "On" : "Off";
+  return value === "on" ? t("web.settings.library.on") : t("web.settings.library.off");
 }
 
 export function buildLibraryPlaybackSummaryFromState(state: LibraryPlaybackEditorState) {
   const parts: string[] = [];
 
   if (state.audioLanguage !== INHERIT_VALUE) {
-    parts.push(`Audio: ${getLanguageLabel(state.audioLanguage)}`);
+    parts.push(
+      t("web.settings.library.summary.audio", { language: getLanguageLabel(state.audioLanguage) }),
+    );
   }
   if (state.subtitleLanguage !== INHERIT_VALUE) {
     parts.push(
-      `Subtitles: ${state.subtitleLanguage === NONE_VALUE ? "None" : getLanguageLabel(state.subtitleLanguage)}`,
+      t("web.settings.library.summary.subtitles", {
+        language:
+          state.subtitleLanguage === NONE_VALUE
+            ? noSubtitleLanguageLabel()
+            : getLanguageLabel(state.subtitleLanguage),
+      }),
     );
   }
   if (state.subtitleMode !== INHERIT_VALUE) {
-    parts.push(`Behavior: ${getSubtitleModeLabel(state.subtitleMode)}`);
+    parts.push(
+      t("web.settings.library.summary.behavior", {
+        mode: getSubtitleModeLabel(state.subtitleMode),
+      }),
+    );
   }
   if (state.showForcedSubtitles !== INHERIT_VALUE) {
-    parts.push(`Forced subtitles: ${getForcedSubtitlesLabel(state.showForcedSubtitles)}`);
+    parts.push(
+      t("web.settings.library.summary.forcedSubtitles", {
+        value: getForcedSubtitlesLabel(state.showForcedSubtitles),
+      }),
+    );
   }
 
-  return parts.length > 0 ? parts.join(" • ") : "Uses profile defaults";
+  return parts.length > 0 ? parts.join(" • ") : t("web.settings.library.summary.profileDefaults");
 }
 
 /**
@@ -158,33 +188,41 @@ function planLanguage(key: SettingKey, value: string): LibraryPlaybackMutation {
 }
 
 export function buildInheritedLanguageLabel(_value: string) {
-  return "Profile default";
+  return t("web.settings.library.profileDefault");
 }
 
 export function buildInheritedSubtitleLanguageLabel(_value: string) {
-  return "Profile default";
+  return t("web.settings.library.profileDefault");
 }
 
 export function buildInheritedSubtitleModeLabel(_value: string) {
-  return "Profile default";
+  return t("web.settings.library.profileDefault");
 }
 
 export function buildInheritedShowForcedSubtitlesLabel(_value: boolean | undefined) {
-  return "Profile default";
+  return t("web.settings.library.profileDefault");
 }
 
 export function getProfileDefaultLanguageHint(value: string | null | undefined) {
-  return `Default: ${value ? getLanguageLabel(value) : "No preference"}`;
+  return t("web.settings.library.defaultHint", {
+    value: value ? getLanguageLabel(value) : noAudioLanguageLabel(),
+  });
 }
 
 export function getProfileDefaultSubtitleLanguageHint(value: string | null | undefined) {
-  return `Default: ${value ? getLanguageLabel(value) : "None"}`;
+  return t("web.settings.library.defaultHint", {
+    value: value ? getLanguageLabel(value) : noSubtitleLanguageLabel(),
+  });
 }
 
 export function getProfileDefaultSubtitleModeHint(value: string | null | undefined) {
-  return `Default: ${getSubtitleModeLabel(value || DEFAULT_SUBTITLE_MODE)}`;
+  return t("web.settings.library.defaultHint", {
+    value: getSubtitleModeLabel(value || DEFAULT_SUBTITLE_MODE),
+  });
 }
 
 export function getProfileDefaultForcedSubtitlesHint(value: boolean | undefined) {
-  return `Default: ${getForcedSubtitlesLabel((value ?? DEFAULT_SHOW_FORCED_SUBTITLES) ? "on" : "off")}`;
+  return t("web.settings.library.defaultHint", {
+    value: getForcedSubtitlesLabel((value ?? DEFAULT_SHOW_FORCED_SUBTITLES) ? "on" : "off"),
+  });
 }

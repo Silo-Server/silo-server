@@ -89,9 +89,10 @@ type WatchedMutationOptions = {
 type RefreshMetadataVariables = {
   item: { content_id: string; type: string };
   mode: "quick" | "complete";
+  onReplaced?: (contentID: string) => void;
 };
 
-type RefreshMetadataContext = { toastID: string | number };
+type RefreshMetadataContext = { toastID: string | number; startURL: string };
 
 type RefreshMetadataMutationOptions = {
   onMutate?: (variables: RefreshMetadataVariables) => RefreshMetadataContext;
@@ -107,7 +108,10 @@ type RefreshMetadataMutationOptions = {
   ) => void;
 };
 
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => {
+  vi.unstubAllGlobals();
+  window.history.replaceState(null, "", "/");
+});
 
 describe("item query helpers", () => {
   beforeEach(() => {
@@ -165,7 +169,18 @@ describe("item query helpers", () => {
     expect(mocks.toastError).toHaveBeenCalledWith("The file is not a JPEG, PNG or WebP image");
   });
 
-  it("warns when the refresh succeeded but artwork caching did not finish", async () => {
+  it.each([
+    // A job read through the API: the flag, with admin text that has not loaded formatting as "".
+    {
+      payload: { artwork_cache_incomplete: true, artwork_cache_warning: "" },
+      description: undefined,
+    },
+    // A job that arrived as a live event: only the server's own warning text.
+    {
+      payload: { artwork_cache_warning: "2 refreshed artwork image(s) failed to cache" },
+      description: "2 refreshed artwork image(s) failed to cache",
+    },
+  ])("warns when the refresh succeeded but artwork caching did not finish", async (shape) => {
     const invalidateQueries = vi.fn().mockResolvedValue(undefined);
     mocks.useQueryClient.mockReturnValue({ invalidateQueries });
 
@@ -184,7 +199,7 @@ describe("item query helpers", () => {
         job: {
           result_payload: {
             refresh_content_id: "series-1",
-            artwork_cache_warning: "2 refreshed artwork image(s) failed to cache",
+            ...shape.payload,
           },
         },
       },
@@ -195,13 +210,57 @@ describe("item query helpers", () => {
     expect(mocks.toastSuccess).not.toHaveBeenCalled();
     expect(mocks.toastWarning).toHaveBeenCalledWith(
       "Metadata refreshed, but artwork caching did not finish",
-      {
-        id: "refresh-toast",
-        description: "2 refreshed artwork image(s) failed to cache",
-      },
+      { id: "refresh-toast", description: shape.description },
     );
     // The refresh still committed, so the caches must be invalidated anyway.
     expect(invalidateQueries).toHaveBeenCalled();
+  });
+
+  // A Complete Refresh can finish minutes later, after the admin has moved on.
+  // The page that started it may also have unmounted because the old ID now
+  // 404s, so following depends on the URL, not on that page still being mounted.
+  it.each([
+    { label: "still on the page that started it", laterURL: undefined, follows: true },
+    {
+      label: "after a skip link changed only the hash",
+      laterURL: "/item/movie-1?libraryId=5#main-content",
+      follows: true,
+    },
+    { label: "on another item", laterURL: "/item/movie-2?libraryId=5", follows: false },
+    { label: "on another library's page", laterURL: "/item/movie-1?libraryId=6", follows: false },
+    { label: "on another page", laterURL: "/search", follows: false },
+  ])("follows a replaced item only while $label", async ({ laterURL, follows }) => {
+    mocks.useQueryClient.mockReturnValue({
+      invalidateQueries: vi.fn().mockResolvedValue(undefined),
+    });
+    window.history.pushState(null, "", "/item/movie-1?libraryId=5");
+    const onReplaced = vi.fn();
+
+    useRefreshItemMetadata();
+    const options = mocks.useMutation.mock.calls[
+      mocks.useMutation.mock.calls.length - 1
+    ]?.[0] as RefreshMetadataMutationOptions;
+    const variables: RefreshMetadataVariables = {
+      item: { content_id: "movie-1", type: "movie" },
+      mode: "complete",
+      onReplaced,
+    };
+
+    const context = options.onMutate?.(variables);
+    if (laterURL) window.history.pushState(null, "", laterURL);
+    await options.onSuccess?.(
+      {
+        job: { result_payload: { refresh_content_id: "movie-1b", detail_content_id: "movie-1b" } },
+      },
+      variables,
+      context,
+    );
+
+    if (follows) {
+      expect(onReplaced).toHaveBeenCalledWith("movie-1b");
+    } else {
+      expect(onReplaced).not.toHaveBeenCalled();
+    }
   });
 
   it("optimistically flips played state and reverts only that field on failure", async () => {

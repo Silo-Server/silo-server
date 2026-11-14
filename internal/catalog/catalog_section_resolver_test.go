@@ -26,9 +26,9 @@ type rowBackedSectionResolver struct {
 
 func (f *rowBackedSectionResolver) ResolveCatalogSection(context.Context, CatalogRequest) (SectionDefinition, error) {
 	return SectionDefinition{SectionType: f.sectionType, Title: "Row", ItemLimit: 20, Config: json.RawMessage(`{}`),
-		FetchItems: func(_ context.Context, limit int) ([]*models.MediaItem, error) {
+		FetchItems: func(_ context.Context, limit int) (SectionRowItems, error) {
 			f.limits = append(f.limits, limit)
-			return f.items, f.err
+			return SectionRowItems{Items: f.items}, f.err
 		}}, nil
 }
 

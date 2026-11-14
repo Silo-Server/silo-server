@@ -57,6 +57,7 @@ type AndroidPushRegistrationCapability struct {
 	Capability
 	RegistrationAvailable bool     `json:"registration_available" doc:"Local ordered registration storage is configured; does not assert provider delivery availability."`
 	Platforms             []string `json:"platforms"`
+	BindsLoginSession     bool     `json:"binds_login_session" doc:"A registration applied at a new generation records the calling login session, and push to it stops when that session ends. A replay of the current generation records nothing, so an older registration binds only at a newer generation."`
 }
 type AndroidPushRegistrationCapabilityOutput struct {
 	Status       int
@@ -91,13 +92,13 @@ func (reg *Registry) androidPushCommand(ctx context.Context, authority AndroidPu
 	if err != nil {
 		return notifications.AndroidPushCommand{}, err
 	}
-	return notifications.AndroidPushCommand{UserID: user, ProfileID: profile, DeviceID: device, InstallationKey: authority.InstallationKey, Generation: generation}, nil
+	return notifications.AndroidPushCommand{UserID: user, ProfileID: profile, DeviceID: device, InstallationKey: authority.InstallationKey, Generation: generation, LoginSessionID: claimsFrom(ctx).SessionID}, nil
 }
 func registerOrderedAndroidPush(reg *Registry) {
 	capOp := notificationOperation(http.MethodGet, "/push/devices/capabilities", "getPushRegistrationCapabilities")
 	capOp.Summary = "Describe ordered registration support separately from push delivery availability."
 	Register(reg, capOp, func(context.Context, *CapabilityInput) (*AndroidPushRegistrationCapabilityOutput, error) {
-		return &AndroidPushRegistrationCapabilityOutput{Body: AndroidPushRegistrationCapability{RegistrationAvailable: reg.deps.OrderedAndroidPush != nil && reg.deps.OrderedAndroidPush.OrderedAndroidPushAvailable(), Platforms: []string{notifications.PushPlatformAndroid}}}, nil
+		return &AndroidPushRegistrationCapabilityOutput{Body: AndroidPushRegistrationCapability{RegistrationAvailable: reg.deps.OrderedAndroidPush != nil && reg.deps.OrderedAndroidPush.OrderedAndroidPushAvailable(), Platforms: []string{notifications.PushPlatformAndroid}, BindsLoginSession: true}}, nil
 	})
 	op := notificationOperation(http.MethodPost, "/push/devices", "registerPushDevice")
 	op.Summary = "Apply one ordered Android installation registration intent. Replay only the exact persisted generation, credential and payload; never advance a generation to retry uncertainty."

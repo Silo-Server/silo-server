@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 
-import { changedFields, clearDefaultSort, mergeDraft, takeFields } from "./draft";
+import type { QueryRule } from "@/api/types";
+
+import { changedFields, clearDefaultSort, hasCompleteRule, mergeDraft, takeFields } from "./draft";
 import type { CollectionDraft } from "./scope";
 
 const base: CollectionDraft = {
@@ -127,20 +129,61 @@ describe("smart rules and their libraries", () => {
     },
   };
 
-  it("counts a library change once, as Libraries, not as Rules too", () => {
+  it("personal: counts a library change once, as Libraries, not as Rules too", () => {
+    const personal: CollectionDraft = {
+      ...smart,
+      server: undefined,
+      personal: { shared: false, inLibraryTabs: false },
+    };
     expect(
-      changedFields(smart, {
-        ...smart,
+      changedFields(personal, {
+        ...personal,
         libraryIds: [1],
-        rules: { ...smart.rules!, library_ids: [1] },
+        rules: { ...personal.rules!, library_ids: [1] },
       }),
     ).toEqual(["libraryIds"]);
+  });
+
+  it("server: the rules' libraries are Rules, apart from where it shows", () => {
+    expect(changedFields(smart, { ...smart, rules: { ...smart.rules!, library_ids: [] } })).toEqual(
+      ["rules"],
+    );
+    expect(changedFields(smart, { ...smart, libraryIds: [3] })).toEqual(["libraryIds"]);
+    expect(
+      changedFields(smart, { ...smart, rules: { ...smart.rules!, library_ids: [2, 1] } }),
+    ).toEqual([]);
   });
 
   it("still sees a rule change", () => {
     expect(changedFields(smart, { ...smart, rules: { ...smart.rules!, limit: 50 } })).toEqual([
       "rules",
     ]);
+  });
+});
+
+// Mirrors the server's QueryDefinition.HasCompleteRule, so the editor never
+// offers a save the API refuses.
+describe("hasCompleteRule", () => {
+  const rules = (...list: QueryRule[]) => ({
+    library_ids: [],
+    match: "all" as const,
+    groups: [{ match: "all" as const, rules: list }],
+    sort: { field: "added_at" as const, order: "desc" as const },
+  });
+  it.each([
+    ["a blank value", { field: "genre", op: "is", value: "  " }, false],
+    ["an open range", { field: "year", op: "between", value: [1990, ""] }, false],
+    ["no field", { field: "", op: "is", value: "Comedy" }, false],
+    ["text", { field: "genre", op: "is", value: "Comedy" }, true],
+    ["zero", { field: "year", op: "is", value: 0 }, true],
+    ["false", { field: "watched", op: "is", value: false }, true],
+    ["a range", { field: "year", op: "between", value: [1990, 1999] }, true],
+  ] as const)("%s", (_label, rule, complete) => {
+    expect(hasCompleteRule(rules(rule as QueryRule))).toBe(complete);
+  });
+
+  it("needs a rule in some group", () => {
+    expect(hasCompleteRule({ ...rules(), groups: [] })).toBe(false);
   });
 });
 

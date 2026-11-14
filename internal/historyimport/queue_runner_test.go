@@ -323,13 +323,13 @@ type heldQueueProvider struct {
 	release chan struct{}
 }
 
-func (p heldQueueProvider) Fetch(ctx context.Context) ([]Record, []string, error) {
+func (p heldQueueProvider) Stream(ctx context.Context, _ *StreamPosition, _ RecordSink) error {
 	close(p.started)
 	select {
 	case <-p.release:
-		return []Record{}, nil, nil
+		return nil
 	case <-ctx.Done():
-		return nil, nil, ctx.Err()
+		return ctx.Err()
 	}
 }
 

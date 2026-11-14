@@ -6,6 +6,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useAdminUsers } from "@/hooks/queries/admin/users";
 import { useDiscoverNetworks, useDiscoverStudios } from "@/hooks/queries/useRequests";
+import { useT, type MessageKey } from "@/i18n";
 import { useRequestRouting, useUpdateRequestRouting } from "@/hooks/queries/admin/requests";
 
 import { FieldGroup } from "./FieldGroup";
@@ -25,9 +26,9 @@ function brandMap(brands: readonly DiscoverBrandCard[] | undefined): Map<number,
   );
 }
 
-const MEDIA_TYPES: readonly { value: RequestRouteMediaType; label: string }[] = [
-  { value: "movie", label: "Movies" },
-  { value: "series", label: "Series" },
+const MEDIA_TYPES: readonly { value: RequestRouteMediaType; label: MessageKey }[] = [
+  { value: "movie", label: "web.admin.settings.requests.routing.movies" },
+  { value: "series", label: "web.admin.settings.requests.routing.series" },
 ];
 
 /**
@@ -61,6 +62,7 @@ export function RequestRoutingGroup({
   /** "Also request a 4K version of every title", as saved. */
   forceDual: boolean;
 }) {
+  const t = useT();
   const [tab, setTab] = useState<RequestRouteMediaType>("movie");
   const routing = useRequestRouting();
   const switchRouting = useUpdateRequestRouting();
@@ -97,9 +99,9 @@ export function RequestRoutingGroup({
         brands: brands.data ?? [],
         brandsHint:
           requestsEnabled === false
-            ? "Turn on requests to pick networks and studios by name."
+            ? t("web.admin.settings.requests.routing.brandsNeedRequests")
             : brands.isError
-              ? `Couldn't load the ${mediaType === "series" ? "network" : "studio"} list.`
+              ? t("web.admin.settings.requests.routing.brandsFailed", { media_type: mediaType })
               : undefined,
       },
       names,
@@ -111,11 +113,11 @@ export function RequestRoutingGroup({
   const advanced = routing.data?.mode === "advanced";
   return (
     <FieldGroup
-      label="Where requests go"
+      label={t("web.admin.settings.requests.routing.label")}
       description={
         advanced
-          ? "Silo checks the rules from the top. The first rule that matches a request decides where it goes; anything no rule matches goes to Everything else. Changes save right away."
-          : "Choose how Silo picks the server for each request. Changes save right away."
+          ? t("web.admin.settings.requests.routing.advancedDescription")
+          : t("web.admin.settings.requests.routing.standardDescription")
       }
     >
       {routesLoading || serversLoading || routing.isPending ? (
@@ -124,7 +126,9 @@ export function RequestRoutingGroup({
           <Skeleton className="h-9 w-full" />
         </div>
       ) : routesError || routing.isError ? (
-        <p className="text-destructive py-3.5 text-sm">Routing could not be loaded.</p>
+        <p className="text-destructive py-3.5 text-sm">
+          {t("web.admin.settings.requests.routing.loadFailed")}
+        </p>
       ) : (
         <div className="space-y-3 pt-3">
           <RoutingModeChoice
@@ -134,10 +138,10 @@ export function RequestRoutingGroup({
           />
           {advanced ? (
             <Tabs value={tab} onValueChange={(value) => setTab(value as RequestRouteMediaType)}>
-              <TabsList aria-label="Media type">
+              <TabsList aria-label={t("web.admin.settings.requests.routing.mediaType")}>
                 {MEDIA_TYPES.map((type) => (
                   <TabsTrigger key={type.value} value={type.value} className="px-4">
-                    {type.label}
+                    {t(type.label)}
                   </TabsTrigger>
                 ))}
               </TabsList>

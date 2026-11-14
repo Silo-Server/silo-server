@@ -8,6 +8,7 @@ import type { PolicyCompileIssue } from "@/api/adminPolicy";
 import { mapPolicyIssuesToDiagnostics } from "@/lib/policyDiagnostics";
 import { regoLanguage } from "@/lib/regoLanguage";
 import { cn } from "@/lib/utils";
+import { useT } from "@/i18n";
 
 const editorTheme = EditorView.theme({
   "&": {
@@ -39,9 +40,10 @@ export function RegoEditor({
   issues = [],
   readOnly = false,
   height = "360px",
-  ariaLabel = "Rego policy source",
+  ariaLabel,
   className,
 }: RegoEditorProps) {
+  const t = useT();
   const extensions = useMemo(() => {
     const diagnostics = mapPolicyIssuesToDiagnostics(value, issues);
     return [
@@ -56,14 +58,15 @@ export function RegoEditor({
   }, [issues, readOnly, value]);
 
   return (
-    <div className={cn("border-border overflow-hidden rounded-lg border", className)}>
+    // Code reads left to right in every language.
+    <div dir="ltr" className={cn("border-border overflow-hidden rounded-lg border", className)}>
       <CodeMirror
         value={value}
         height={height}
         basicSetup={false}
         extensions={extensions}
         onChange={(nextValue) => onChange?.(nextValue)}
-        aria-label={ariaLabel}
+        aria-label={ariaLabel ?? t("web.profiles.policy.regoSource")}
       />
     </div>
   );
