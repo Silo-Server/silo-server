@@ -31,8 +31,15 @@ func (r fakeSubtitleRepository) InsertDownloadedSubtitle(context.Context, *subti
 	panic("unused")
 }
 
-func (r fakeSubtitleRepository) GetDownloadedSubtitle(context.Context, int) (*subtitles.DownloadedSubtitle, error) {
-	panic("unused")
+func (r fakeSubtitleRepository) GetDownloadedSubtitle(_ context.Context, id int) (*subtitles.DownloadedSubtitle, error) {
+	for _, stored := range r.downloaded {
+		for i := range stored {
+			if stored[i].ID == id {
+				return &stored[i], nil
+			}
+		}
+	}
+	return nil, nil
 }
 
 func (r fakeSubtitleRepository) ListDownloadedSubtitles(_ context.Context, mediaFileID int) ([]subtitles.DownloadedSubtitle, error) {
@@ -532,5 +539,97 @@ func TestHandleSubtitleStreamAppliesSidecarTiming(t *testing.T) {
 	played := subtitles.SyncTarget{MediaFileID: 42, ExternalPath: path}
 	if len(plays.targets) != 2 || plays.targets[0] != played || plays.targets[1] != played {
 		t.Fatalf("played %+v", plays.targets)
+	}
+}
+
+// A stored subtitle's issued DeliveryUrl keeps serving that subtitle after an
+// earlier stored subtitle is deleted, and stops serving once its own is gone,
+// instead of sliding onto whichever subtitle now holds its stream index.
+func TestStoredSubtitleDeliveryURLSurvivesEarlierDeletion(t *testing.T) {
+	codec := NewResourceIDCodec()
+	contentID := "movie-1"
+	version := catalog.FileVersion{
+		FileID: 42, Duration: 3600, Container: "mkv", Bitrate: 8000,
+		VideoTracks: []models.VideoTrack{{Codec: "h264", Width: 1920, Height: 1080}},
+		AudioTracks: []models.AudioTrack{{Codec: "aac", Default: true}},
+	}
+	file := &models.MediaFile{
+		ID:          42,
+		VideoTracks: version.VideoTracks,
+		AudioTracks: version.AudioTracks,
+	}
+	stored := func(id int, language string) subtitles.DownloadedSubtitle {
+		return subtitles.DownloadedSubtitle{ID: id, MediaFileID: 42, Language: language, Format: subtitles.FormatSRT, Provider: "opensubtitles", S3Key: language + ".srt"}
+	}
+	repo := fakeSubtitleRepository{downloaded: map[int][]subtitles.DownloadedSubtitle{
+		42: {stored(7, "fre"), stored(8, "ger"), stored(9, "spa")},
+	}}
+	cue := func(text string) []byte { return []byte("1\n00:00:01,000 --> 00:00:02,000\n" + text + "\n") }
+	handler := &PlaybackHandler{
+		content:        &stubContentService{detail: &upstreamItemDetail{ContentID: contentID, Versions: []catalog.FileVersion{version}}},
+		codec:          codec,
+		deviceProfiles: NewDeviceProfileStore(time.Hour, nil),
+		playbackStore:  NewPlaybackSessionStore(time.Hour, nil),
+		fileResolver:   testCompatFileResolver{file: file},
+		SubtitleRepo:   repo,
+		SubtitleBlobs:  fakeSubtitleBlobs{"fre.srt": cue("Bonjour"), "ger.srt": cue("Hallo"), "spa.srt": cue("Hola")},
+	}
+	session := &Session{Token: "token-1", StreamAppUserID: 7}
+
+	routeID := codec.EncodeStringID(EncodedIDItem, contentID)
+	req := httptest.NewRequest(http.MethodPost, "/Items/"+routeID+"/PlaybackInfo", strings.NewReader(`{}`))
+	routeCtx := chi.NewRouteContext()
+	routeCtx.URLParams.Add("id", routeID)
+	ctx := context.WithValue(req.Context(), chi.RouteCtxKey, routeCtx)
+	rr := httptest.NewRecorder()
+	handler.HandlePlaybackInfo(rr, req.WithContext(context.WithValue(ctx, compatSessionKey, session)))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("PlaybackInfo status = %d, body = %s", rr.Code, rr.Body.String())
+	}
+	var resp playbackInfoResponseDTO
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal PlaybackInfo: %v", err)
+	}
+	urls := map[string]string{}
+	for _, stream := range resp.MediaSources[0].MediaStreams {
+		if stream.Type == "Subtitle" {
+			urls[stream.Language] = stream.DeliveryURL
+		}
+	}
+
+	fetch := func(rawURL string) *httptest.ResponseRecorder {
+		t.Helper()
+		parsed, err := url.Parse(rawURL)
+		if err != nil {
+			t.Fatalf("parse %q: %v", rawURL, err)
+		}
+		// /Videos/{item}/{source}/Subtitles/{index}/stream.{format}
+		parts := strings.Split(strings.TrimPrefix(parsed.Path, "/"), "/")
+		if len(parts) != 6 {
+			t.Fatalf("unexpected subtitle URL %q", rawURL)
+		}
+		routeCtx := chi.NewRouteContext()
+		routeCtx.URLParams.Add("routeItemId", parts[1])
+		routeCtx.URLParams.Add("routeMediaSourceId", parts[2])
+		routeCtx.URLParams.Add("routeIndex", parts[4])
+		routeCtx.URLParams.Add("routeFormat", strings.TrimPrefix(parts[5], "stream."))
+		ctx := context.WithValue(t.Context(), chi.RouteCtxKey, routeCtx)
+		ctx = context.WithValue(ctx, compatSessionKey, session)
+		recorder := httptest.NewRecorder()
+		handler.HandleSubtitleStream(recorder, httptest.NewRequest(http.MethodGet, rawURL, nil).WithContext(ctx))
+		return recorder
+	}
+	if rr := fetch(urls["ger"]); rr.Code != http.StatusOK || !strings.Contains(rr.Body.String(), "Hallo") {
+		t.Fatalf("German before deletion = %d %q", rr.Code, rr.Body.String())
+	}
+
+	// Delete the French subtitle, which precedes German in the stored list.
+	repo.downloaded[42] = []subtitles.DownloadedSubtitle{stored(8, "ger"), stored(9, "spa")}
+
+	if rr := fetch(urls["ger"]); rr.Code != http.StatusOK || !strings.Contains(rr.Body.String(), "Hallo") {
+		t.Fatalf("German URL after deleting French = %d %q, want the German subtitle", rr.Code, rr.Body.String())
+	}
+	if rr := fetch(urls["fre"]); rr.Code != http.StatusNotFound {
+		t.Fatalf("French URL after deleting French = %d %q, want 404", rr.Code, rr.Body.String())
 	}
 }
