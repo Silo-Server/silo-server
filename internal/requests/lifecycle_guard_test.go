@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"slices"
 	"testing"
 	"time"
 
@@ -132,6 +133,25 @@ func TestDeleteFailedRequestDatabase(t *testing.T) {
 	}
 	if err := repo.DeleteFailed(ctx, "missing"); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("delete missing: err = %v, want ErrNotFound", err)
+	}
+}
+
+// The library completes an approved request only when it delivered nothing:
+// one that delivered a quality is a retry resending the rest.
+func TestMarkAvailableLeavesARetryResendingATierDatabase(t *testing.T) {
+	repo, pool := lifecycleTestRepository(t)
+	ctx := t.Context()
+	insertLifecycleRequest(t, repo, "retrying", 1, 101, StatusApproved)
+	insertLifecycleRequest(t, repo, "fresh", 1, 102, StatusApproved)
+	if _, err := pool.Exec(ctx, `INSERT INTO media_request_targets (request_id, quality, status)
+		VALUES ('retrying', '1080p', 'completed')`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.MarkAvailable(ctx, "retrying", Viewer{}); !errors.Is(err, ErrInvalidState) {
+		t.Fatalf("retrying: err = %v, want ErrInvalidState", err)
+	}
+	if req, err := repo.MarkAvailable(ctx, "fresh", Viewer{}); err != nil || req.Status != StatusCompleted {
+		t.Fatalf("fresh: request = %+v, err = %v, want completed", req, err)
 	}
 }
 
@@ -432,5 +452,82 @@ func TestSubmitLastAttemptWithExpiredLeaseLeavesNewerClaim(t *testing.T) {
 	}
 	if req.Outcome != OutcomeActive || req.Status != StatusApproved || req.LastError != "" {
 		t.Fatalf("request = %+v, want the newer claim's request left approved/active", req)
+	}
+}
+
+// retryingMovie stores movie request r1, failed after delivering 1080p but not
+// 2160p, with its title in the library from the 1080p copy.
+func retryingMovie(store *fakeStore, svc *Service) {
+	store.requests["r1"] = &Request{ID: "r1", MediaType: MediaTypeMovie, TMDBID: 550, Status: StatusQueued, Outcome: OutcomeFailed}
+	store.candidates = []*Request{store.requests["r1"]}
+	store.targets = map[string][]Target{"r1": {
+		{ID: 1, RequestID: "r1", IntegrationID: "router-1", Quality: Quality1080p, Status: StatusCompleted},
+		{ID: 2, RequestID: "r1", Quality: Quality2160p, Status: StatusFailed, LastError: msgNoTargetForQuality},
+	}}
+	store.targetSeq = 2
+	svc.SetEntitlementResolver(fixedCeiling{q: "2160p"})
+	svc.presence = &fakePresence{available: map[MediaType]map[int]bool{MediaTypeMovie: {550: true}}}
+}
+
+// A Retry resending a failed tier is not completed by the library, which only
+// holds the tier that arrived: not while the resend waits out its backoff, and
+// not ahead of the resend once the backoff is over.
+func TestRetryOfAFailedTierIsNotCompletedByTheLibrary(t *testing.T) {
+	ctx := context.Background()
+	store := newFakeStore()
+	store.integrations = []Integration{routerInst("router-1")}
+	svc, router := newRoutedService(store)
+	retryingMovie(store, svc)
+	router.fulfillErr = errors.New("radarr unreachable")
+	if _, err := svc.Retry(ctx, Viewer{UserID: 1, IsAdmin: true}, "r1"); err != nil {
+		t.Fatalf("Retry: %v", err)
+	}
+	if _, err := svc.ReconcileRequests(ctx, 10); err != nil {
+		t.Fatal(err)
+	}
+	if got := store.requests["r1"]; got.Status != StatusApproved || got.Outcome != OutcomeActive {
+		t.Fatalf("in backoff: request = %s/%s, want approved/active, waiting to resend the 4K tier", got.Status, got.Outcome)
+	}
+
+	router.fulfillErr = nil
+	due := svc.now().Add(-time.Second) // past on the service's and the store's clocks
+	store.requests["r1"].NextSubmitAt = &due
+	if _, err := svc.ReconcileRequests(ctx, 10); err != nil {
+		t.Fatal(err)
+	}
+	if got := store.requests["r1"]; got.Status != StatusQueued {
+		t.Fatalf("after backoff: request = %s/%s, want queued with the 4K tier resent", got.Status, got.Outcome)
+	}
+	if !slices.ContainsFunc(store.targets["r1"], func(tg Target) bool { return tg.Quality == Quality2160p && tg.Status == StatusQueued }) {
+		t.Fatalf("targets = %+v, want a queued 2160p target", store.targets["r1"])
+	}
+}
+
+// A Retry with no request server left for the media type backs off with the
+// reason, then fails, rather than waiting on a library that already holds the
+// delivered copy and so never settles it.
+func TestRetryOfAFailedTierWithNoRouterFailsAgain(t *testing.T) {
+	ctx := context.Background()
+	store := newFakeStore()
+	svc, _ := newRoutedService(store)
+	retryingMovie(store, svc)
+	if _, err := svc.Retry(ctx, Viewer{UserID: 1, IsAdmin: true}, "r1"); err != nil {
+		t.Fatalf("Retry: %v", err)
+	}
+	if _, err := svc.ReconcileRequests(ctx, 10); err != nil {
+		t.Fatal(err)
+	}
+	if got := store.requests["r1"]; got.Status != StatusApproved || got.Outcome != OutcomeActive || got.LastError == "" {
+		t.Fatalf("in backoff: request = %s/%s (%q), want approved/active with the reason", got.Status, got.Outcome, got.LastError)
+	}
+
+	due := svc.now().Add(-time.Second)
+	store.requests["r1"].NextSubmitAt = &due
+	store.requests["r1"].SubmitAttempts = maxSubmitAttempts - 1
+	if _, err := svc.ReconcileRequests(ctx, 10); err != nil {
+		t.Fatal(err)
+	}
+	if got := store.requests["r1"]; got.Outcome != OutcomeFailed || got.LastError == "" {
+		t.Fatalf("after the last attempt: request = %s/%s (%q), want failed with the reason", got.Status, got.Outcome, got.LastError)
 	}
 }

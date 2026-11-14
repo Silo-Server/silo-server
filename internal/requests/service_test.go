@@ -1813,15 +1813,17 @@ func (f *fakeStore) MarkAvailable(_ context.Context, id string, _ Viewer) (*Requ
 		return nil, ErrNotFound
 	}
 	open := req.Status == StatusPending || req.Status == StatusApproved || req.Status == StatusQueued || req.Status == StatusDownloading
-	claimed := req.Status == StatusApproved && req.SubmitLeaseUntil != nil && req.SubmitLeaseUntil.After(time.Now())
 	partlyDelivered := false
 	for _, t := range f.targets[id] {
 		if t.Status == StatusCompleted {
 			partlyDelivered = true
 		}
 	}
+	// An approved request that delivered a quality is resending the rest.
+	submitting := req.Status == StatusApproved &&
+		(partlyDelivered || req.SubmitLeaseUntil != nil && req.SubmitLeaseUntil.After(time.Now()))
 	failedElsewhere := req.Outcome == OutcomeFailed && !partlyDelivered
-	if !failedElsewhere && (req.Outcome != OutcomeActive || !open || claimed) {
+	if !failedElsewhere && (req.Outcome != OutcomeActive || !open || submitting) {
 		return nil, ErrInvalidState
 	}
 	f.statusUpdates = append(f.statusUpdates, StatusCompleted)

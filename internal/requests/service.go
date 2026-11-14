@@ -492,11 +492,12 @@ func (s *Service) missingAPIKey(ctx context.Context, fc *fulfillContext, in Inte
 	return !features.APIKeyOptional, nil
 }
 
-// Reasons a configured router connection cannot take a submission, recorded in
-// the request's last_error.
+// Reasons no router connection can take a submission, recorded in the
+// request's last_error.
 const (
 	msgRouterUnbound = "request backend connection is not bound to a plugin installation; re-save it in admin"
 	msgRouterNoKey   = "request backend connection has no API key; add it in admin"
+	msgNoRouter      = "no request backend serves this media type; add one in admin"
 )
 
 // unusableRouterMessage explains why no configured connection could take a
@@ -2145,10 +2146,21 @@ func (s *Service) submitApprovedRequest(ctx context.Context, req Request, actor 
 		}
 		fc = built
 	}
-	if s.router == nil || !routerConfiguredFor(fc, req.MediaType) {
+	noRouter := s.router == nil || !routerConfiguredFor(fc, req.MediaType)
+	if noRouter {
 		// No router serves this media type: the request stays approved and
 		// the reconcile pass completes it when the title reaches the library.
-		return &req, nil
+		// A retry of a request that delivered a quality is the exception: the
+		// library holds that copy and does not complete it (MarkAvailable), so
+		// the retry goes through the claim below and backs off, then fails,
+		// with the reason.
+		retrying, err := s.deliveredSome(ctx, req.ID)
+		if err != nil {
+			return nil, err
+		}
+		if !retrying {
+			return &req, nil
+		}
 	}
 	missingSeasons := false
 	if req.MediaType == MediaTypeSeries && len(req.Seasons) > 0 {
@@ -2161,15 +2173,14 @@ func (s *Service) submitApprovedRequest(ctx context.Context, req Request, actor 
 			return nil, err
 		}
 		if match := matches[req.TMDBID]; match.Available {
-			targets, err := s.store.ListTargets(ctx, req.ID)
-			if err != nil {
-				return nil, err
-			}
 			// A retry of a request that delivered one quality resends the
 			// others. The library holds the delivered copy, so its seasons
 			// say nothing about the tiers being resent, and only the servers
 			// those tiers go to need to take seasons (checked after the claim).
-			retrying := slices.ContainsFunc(targets, func(t Target) bool { return t.Status == StatusCompleted })
+			retrying, err := s.deliveredSome(ctx, req.ID)
+			if err != nil {
+				return nil, err
+			}
 			if !retrying {
 				// Seasons that reached the library since the request was made
 				// need no download: the reconcile pass completes the request.
@@ -2203,7 +2214,13 @@ func (s *Service) submitApprovedRequest(ctx context.Context, req Request, actor 
 	// The claim reloads the row; keep this call's external-ID lookup result.
 	claimed.externalIDsResolved = req.externalIDsResolved
 	claimed.tvdbLookupFailed = req.tvdbLookupFailed
-	submitted, submitErr := s.submitClaimed(ctx, *claimed, actor, fc, missingSeasons)
+	var submitted *Request
+	var submitErr error
+	if noRouter {
+		submitErr = errors.New(msgNoRouter)
+	} else {
+		submitted, submitErr = s.submitClaimed(ctx, *claimed, actor, fc, missingSeasons)
+	}
 	if submitErr == nil {
 		return submitted, nil
 	}
@@ -2883,22 +2900,30 @@ func (s *Service) reconcileRequest(ctx context.Context, req Request, fc *fulfill
 			if req.Status == StatusCompleted {
 				return reconcileUnchanged, nil
 			}
-			if _, err := s.store.MarkAvailable(ctx, req.ID, Viewer{}); err != nil {
-				if errors.Is(err, ErrInvalidState) {
-					// Another actor moved it first, or a submission holds the
-					// claim; a later pass completes it.
-					return reconcileUnchanged, nil
-				}
+			_, err = s.store.MarkAvailable(ctx, req.ID, Viewer{})
+			switch {
+			case err == nil:
+				return reconcileCompleted, nil
+			case !errors.Is(err, ErrInvalidState):
+				return reconcileUnchanged, err
+			case req.Status != StatusApproved:
+				// Another actor moved it first; a later pass completes it.
+				return reconcileUnchanged, nil
+			}
+			// A retry resending a quality the library can't vouch for is
+			// settled by the submission below. Anything else was refused for
+			// a submission holding the claim; a later pass completes it.
+			if retrying, err := s.deliveredSome(ctx, req.ID); err != nil || !retrying {
 				return reconcileUnchanged, err
 			}
-			return reconcileCompleted, nil
-		}
-		updated, retired, err := s.retireStalledTargets(ctx, req, live)
-		if err != nil {
-			return reconcileUnchanged, err
-		}
-		if retired && updated != nil && updated.Status == StatusCompleted {
-			return reconcileCompleted, nil
+		} else {
+			updated, retired, err := s.retireStalledTargets(ctx, req, live)
+			if err != nil {
+				return reconcileUnchanged, err
+			}
+			if retired && updated != nil && updated.Status == StatusCompleted {
+				return reconcileCompleted, nil
+			}
 		}
 	}
 
@@ -3145,6 +3170,16 @@ func integrationByID(fc *fulfillContext, id string) *Integration {
 		}
 	}
 	return nil
+}
+
+// deliveredSome reports whether any of the request's targets completed. An
+// approved request that delivered a quality is a retry resending the rest.
+func (s *Service) deliveredSome(ctx context.Context, requestID string) (bool, error) {
+	targets, err := s.store.ListTargets(ctx, requestID)
+	if err != nil {
+		return false, err
+	}
+	return slices.ContainsFunc(targets, func(t Target) bool { return t.Status == StatusCompleted }), nil
 }
 
 // liveTargets returns the request's non-terminal (queued or downloading)
