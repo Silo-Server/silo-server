@@ -39,13 +39,24 @@ func TestClaimTakesRegeneratedThenNewestDB(t *testing.T) {
 	if _, err := f.repo.Regenerate(t.Context(), []int{oldest}); err != nil {
 		t.Fatal(err)
 	}
+	// Claim names no file. On a database other tests share it may take one of
+	// theirs, so it runs in a transaction that is rolled back.
+	tx, err := f.pool.Begin(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	job, err := f.repo.claim(t.Context(), tx, "server", time.Minute, nil)
+	_ = tx.Rollback(t.Context())
+	if err != nil || job == nil {
+		t.Fatalf("claim of any file took %+v, error %v; want a due file", job, err)
+	}
 	for _, want := range []int{oldest, newest, older} {
-		job, err := f.repo.claim(t.Context(), "server", time.Minute, f.files)
+		job, err := f.repo.claim(t.Context(), f.pool, "server", time.Minute, f.files)
 		if err != nil || job == nil || job.FileID != want {
 			t.Fatalf("claimed %+v, error %v; want file %d", job, err, want)
 		}
 	}
-	if job, err := f.repo.claim(t.Context(), "server", time.Minute, f.files); err != nil || job != nil {
+	if job, err := f.repo.claim(t.Context(), f.pool, "server", time.Minute, f.files); err != nil || job != nil {
 		t.Fatalf("claimed %+v, error %v; want nothing due", job, err)
 	}
 }

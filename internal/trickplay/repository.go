@@ -84,29 +84,30 @@ type Job struct {
 // play next, and a backlog must not hold it back. Mutations must use the
 // returned Job.LeaseToken, which changes on every claim.
 func (r *Repository) Claim(ctx context.Context, owner string, lease time.Duration) (*Job, error) {
-	return r.claim(ctx, owner, lease, nil)
+	return r.claim(ctx, r.pool, owner, lease, nil)
 }
 
 // ClaimFile leases fileID if it is due.
 func (r *Repository) ClaimFile(ctx context.Context, fileID int, owner string, lease time.Duration) (*Job, error) {
-	return r.claim(ctx, owner, lease, []int{fileID})
+	return r.claim(ctx, r.pool, owner, lease, []int{fileID})
 }
 
-// claim leases the next due file, among the given files when any are named.
-func (r *Repository) claim(ctx context.Context, owner string, lease time.Duration, among []int) (*Job, error) {
+// claim leases the next due file on db, any file when among is nil and one
+// of those files otherwise.
+func (r *Repository) claim(ctx context.Context, db reconcileConn, owner string, lease time.Duration, among []int) (*Job, error) {
 	var job Job
 	leaseToken := owner + ":" + rand.Text()
 	var videoTracks []byte
 	var container, codec *string
 	var hdr *bool
 	var duration *int
-	err := r.pool.QueryRow(ctx, `
+	err := db.QueryRow(ctx, `
 		WITH next AS (
 			SELECT t.media_file_id FROM public.media_file_trickplay t
 			JOIN public.media_files mf ON mf.id = t.media_file_id
 			JOIN public.media_folders f ON f.id = mf.media_folder_id
 			WHERE t.state = 'pending' AND t.available_at <= now() AND t.recipe_version <= $3
-			  AND (cardinality($4::bigint[]) = 0 OR t.media_file_id = ANY($4))
+			  AND ($4::bigint[] IS NULL OR t.media_file_id = ANY($4))
 			  AND f.trickplay_enabled AND f.enabled IS NOT FALSE AND lower(btrim(f.type)) = ANY($5::text[])
 			  AND mf.missing_since IS NULL AND mf.probe_updated_at IS NOT NULL AND mf.duration > 0
 			  AND jsonb_typeof(mf.video_tracks) = 'array' AND jsonb_array_length(mf.video_tracks) > 0
