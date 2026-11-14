@@ -26,8 +26,6 @@ func TestServiceRecordsFailureWithClaimTokenDB(t *testing.T) {
 	}
 }
 
-// TestClaimTakesRegeneratedThenNewestDB claims without naming a file, so it
-// needs a database whose queue holds only its own rows, as the CI copy does.
 func TestClaimTakesRegeneratedThenNewestDB(t *testing.T) {
 	f := newFixture(t)
 	folder := f.library(t, "movies", true)
@@ -42,12 +40,12 @@ func TestClaimTakesRegeneratedThenNewestDB(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, want := range []int{oldest, newest, older} {
-		job, err := f.repo.Claim(t.Context(), "server", time.Minute)
+		job, err := f.repo.claim(t.Context(), "server", time.Minute, f.files)
 		if err != nil || job == nil || job.FileID != want {
 			t.Fatalf("claimed %+v, error %v; want file %d", job, err, want)
 		}
 	}
-	if job, err := f.repo.Claim(t.Context(), "server", time.Minute); err != nil || job != nil {
+	if job, err := f.repo.claim(t.Context(), "server", time.Minute, f.files); err != nil || job != nil {
 		t.Fatalf("claimed %+v, error %v; want nothing due", job, err)
 	}
 }
