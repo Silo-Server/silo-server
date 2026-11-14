@@ -113,16 +113,19 @@ export default function TasteSeed() {
       toast.error(t("web.home.tasteSeed.minPicks", { count: MIN_PICKS }));
       return;
     }
-    // Only submit IDs that aren't already favorited — the server will skip
-    // duplicates anyway, but trimming the request keeps it small.
-    const alreadyFavorited = new Set(
-      items.filter((i) => i.user_state?.is_favorite).map((i) => i.content_id),
-    );
-    const newPicks = Array.from(selected).filter((id) => !alreadyFavorited.has(id));
+    // Add the picks that aren't favourites yet and remove the favourites the
+    // user unselected. Only loaded cards count: a favourite on a page the
+    // user never scrolled to stays put.
+    const alreadyFavorited = items
+      .filter((i) => i.user_state?.is_favorite)
+      .map((i) => i.content_id);
+    const favoritedSet = new Set(alreadyFavorited);
+    const add = Array.from(selected).filter((id) => !favoritedSet.has(id));
+    const remove = alreadyFavorited.filter((id) => !selected.has(id));
 
-    if (newPicks.length === 0) {
-      // All selected items are already favorited — no work to do, but still
-      // record the dismissed flag so future logins skip the redirect.
+    if (add.length === 0 && remove.length === 0) {
+      // Nothing changed, but still record the dismissed flag so future
+      // logins skip the redirect.
       if (profile) {
         setTasteSeedDismissed(profile.id);
       }
@@ -131,11 +134,16 @@ export default function TasteSeed() {
     }
 
     try {
-      const result = await submit.mutateAsync(newPicks);
+      const result = await submit.mutateAsync({ add, remove });
       if (profile) {
         setTasteSeedDismissed(profile.id);
       }
-      toast.success(t("web.home.tasteSeed.added", { count: result.added }));
+      if (result.added > 0 || result.removed === 0) {
+        toast.success(t("web.home.tasteSeed.added", { count: result.added }));
+      }
+      if (result.removed > 0) {
+        toast.success(t("web.common.toast.favorites.removed"));
+      }
       navigate(donePath, { replace: true });
     } catch (err) {
       toast.error(err instanceof Error ? err.message : t("web.home.tasteSeed.saveFailed"));
