@@ -37,11 +37,17 @@ keyframes only when it starts at the beginning of the source, the duration is
 known, the keyframe index exists and records where the video ends, the plan
 fits within the synthetic playlist's 50,000-segment limit, and the node can
 record the plan in the session's output directory. Any other copy keeps
-FFmpeg's playlist. A keyframe-planned copy never seek-restarts. While FFmpeg is
-running, a request for a segment past the last one it produced waits up to 30
-seconds for the copy to get there. When FFmpeg has stopped, or the segment is
-behind the produced head and gone, the copy restarts from the beginning, so
-FFmpeg cuts the same segments.
+FFmpeg's playlist. The plan comes from the Cues, which the node checks against
+only a few clusters, so a planned copy compares the segments FFmpeg writes with
+the plan. On the first mismatch, later playbacks of that file version on that
+process keep FFmpeg's playlist, until the file changes or the process
+restarts; the playback that found it keeps its plan. A keyframe-planned copy
+never seek-restarts. While FFmpeg is running, a request for a segment past the
+last one it produced waits up to 30 seconds for the copy to get there. When
+FFmpeg has stopped, or the segment is behind the produced head and gone, the
+copy restarts from the beginning, so FFmpeg cuts the same segments. A segment
+FFmpeg didn't write in a run that finished the whole stream gets a 404, since
+a restart wouldn't cut it either.
 
 The throttle fields belong to the internal API-to-node contract. Apple and
 Android clients require no request or response changes.

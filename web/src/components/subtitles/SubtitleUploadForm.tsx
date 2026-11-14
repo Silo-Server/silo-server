@@ -244,7 +244,7 @@ export function SubtitleUploadForm({
           {t("web.subtitles.upload.heading")}
         </p>
         <p className={cn("text-xs", isPlayer ? "text-white/50" : "text-muted-foreground")}>
-          {t("web.subtitles.upload.help")}
+          {t("web.subtitles.upload.help", { megabytes: 5 })}
         </p>
       </div>
 
@@ -385,7 +385,7 @@ export function SubtitleUploadForm({
           <Button
             onClick={handleUpload}
             disabled={uploading || detectingLanguage || !selectedFile}
-            className="sm:ml-auto"
+            className="sm:ms-auto"
           >
             {uploading ? (
               <Loader2 className="size-4 animate-spin" />

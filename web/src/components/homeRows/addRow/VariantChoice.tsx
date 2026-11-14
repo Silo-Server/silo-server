@@ -2,7 +2,7 @@ import { useId } from "react";
 import { RadioCardItem, RadioGroup } from "@/components/ui/radio-group";
 import { useT } from "@/i18n";
 import { variantFamily, variantOf } from "@/lib/homeRows/variants";
-import type { GalleryPreset } from "@/lib/recipes";
+import { presetShortText, type GalleryPreset } from "@/lib/recipes";
 import { cn } from "@/lib/utils";
 
 const COLUMNS: Record<number, string> = {
@@ -10,6 +10,11 @@ const COLUMNS: Record<number, string> = {
   3: "sm:grid-cols-3",
   4: "grid-cols-2 sm:grid-cols-4",
 };
+
+function hintFromPreset(preset: GalleryPreset | undefined): string | undefined {
+  // The text is translated, so drop the full stop of whichever script it ends in.
+  return preset ? presetShortText(preset).replace(/[.。]$/, "") : undefined;
+}
 
 /**
  * Radio cards for the presets of one row kind. A config that matches no
@@ -51,9 +56,7 @@ export function VariantChoice({
             hint={
               option.hint
                 ? t(option.hint)
-                : presets
-                    ?.find((preset) => preset.key === option.presetKey)
-                    ?.description_short.replace(/\.$/, "")
+                : hintFromPreset(presets?.find((preset) => preset.key === option.presetKey))
             }
           />
         ))}

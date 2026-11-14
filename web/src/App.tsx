@@ -30,10 +30,11 @@ import { useScrollRestoration } from "@/hooks/useScrollRestoration";
 import { ThemeProvider } from "@/hooks/useTheme";
 import { DateTimeFormatProvider, useDateTimeFormat } from "@/hooks/useDateTimeFormat";
 import { LocaleProvider } from "@/hooks/useAppLocale";
-import { requestAdminMessages } from "@/i18n";
+import { requestAdminMessages, useT } from "@/i18n";
 import { BrandingProvider } from "@/contexts/BrandingProvider";
 import { UICustomizationProvider } from "@/contexts/UICustomizationProvider";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
+import { RouteLoading } from "@/components/RouteLoading";
 import ImpersonationBanner from "@/components/ImpersonationBanner";
 import { loadStoredImpersonationAdminSession } from "@/lib/impersonationSession";
 import { Toaster } from "@/components/ui/sonner";
@@ -184,13 +185,20 @@ const HOT_ROUTE_CHUNKS: readonly RouteChunkImport[] = [
 
 /** Announces route changes to screen readers via an aria-live region. */
 function RouteAnnouncer() {
+  const t = useT();
   const location = useLocation();
   const [announcement, setAnnouncement] = useState("");
+  // Read at announce time, so a language change doesn't announce the page again.
+  const fallbackText = t("web.common.shell.pageLoaded");
+  const fallback = useRef(fallbackText);
+  useEffect(() => {
+    fallback.current = fallbackText;
+  }, [fallbackText]);
 
   useEffect(() => {
     // Small delay so document.title has time to update via useDocumentTitle hooks
     const id = setTimeout(() => {
-      setAnnouncement(document.title || "Page loaded");
+      setAnnouncement(document.title || fallback.current);
     }, 100);
     return () => clearTimeout(id);
   }, [location.pathname]);
@@ -218,16 +226,8 @@ function NavigationDirectionManager() {
   return null;
 }
 
-function RouteLoading() {
-  return (
-    <div className="p-8" role="status" aria-live="polite">
-      <span className="sr-only">Loading page</span>
-      Loading...
-    </div>
-  );
-}
-
 function RequireAuth({ children }: { children: ReactNode }) {
+  const t = useT();
   const { user, pendingPasswordChange, loading, setupLoading } = useAuth();
   const location = useLocation();
   // Setup status only decides where a signed-out visitor goes; a restored
@@ -235,8 +235,8 @@ function RequireAuth({ children }: { children: ReactNode }) {
   if (loading || (setupLoading && !user)) {
     return (
       <div className="p-8" role="status" aria-live="polite">
-        <span className="sr-only">Loading application</span>
-        Loading...
+        <span className="sr-only">{t("web.common.shell.loadingApplication")}</span>
+        {t("web.ui.loading")}
       </div>
     );
   }
@@ -249,12 +249,13 @@ function RequireAuth({ children }: { children: ReactNode }) {
 }
 
 function SetupGate({ children }: { children: ReactNode }) {
+  const t = useT();
   const { user, setupLoading, setupRequired } = useAuth();
   if (setupLoading && !user) {
     return (
       <div className="p-8" role="status" aria-live="polite">
-        <span className="sr-only">Loading application</span>
-        Loading...
+        <span className="sr-only">{t("web.common.shell.loadingApplication")}</span>
+        {t("web.ui.loading")}
       </div>
     );
   }
@@ -291,12 +292,13 @@ function RequirePrimaryOrAdmin({ children }: { children: ReactNode }) {
 }
 
 function RequireRequestsEnabled({ children }: { children: ReactNode }) {
+  const t = useT();
   const status = useRequestFeatureStatus();
   if (status.isLoading) {
     return (
       <div className="p-8" role="status" aria-live="polite">
-        <span className="sr-only">Loading request availability</span>
-        Loading...
+        <span className="sr-only">{t("web.common.shell.loadingRequestAvailability")}</span>
+        {t("web.ui.loading")}
       </div>
     );
   }
@@ -383,6 +385,7 @@ export function QueryCacheManager() {
 }
 
 function AppChrome() {
+  const t = useT();
   const { user, isImpersonating, endImpersonation } = useAuth();
   const navigate = useNavigate();
 
@@ -396,7 +399,9 @@ function AppChrome() {
     try {
       if (await endImpersonation()) navigate(returnPath, { replace: true });
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Failed to end impersonation");
+      toast.error(
+        error instanceof Error ? error.message : t("web.common.shell.endImpersonationFailed"),
+      );
     }
   }
 
@@ -481,8 +486,9 @@ function AppRoutes() {
       <Route path="/activate" element={<ActivateDevice />} />
       <Route path="/setup" element={<SetupWizard />} />
       <Route path="/signup" element={<Signup />} />
-      <Route path="/invite/:token" element={<InviteClaim />} />
-      <Route path="/reset-password/:token" element={<PasswordReset />} />
+      {/* The link's token is out of the address by now; see lib/linkToken. */}
+      <Route path="/invite" element={<InviteClaim />} />
+      <Route path="/reset-password" element={<PasswordReset />} />
       <Route path="/forgot-password" element={<ForgotPassword />} />
       <Route path={CHANGE_PASSWORD_PATH} element={<ChoosePassword />} />
       {/* Shared Watch Party links: offers the native app on phones, else forwards to /rooms. */}
@@ -636,7 +642,14 @@ function AppRoutes() {
                   <Route path="libraries" element={<LibrarySettings />} />
                   <Route path="history-import" element={<HistoryImportSettings />} />
                   <Route path="plex-webhooks" element={<LegacyWebhookSyncRedirect />} />
-                  <Route path="webhook-sync" element={<WebhookSyncSettings />} />
+                  <Route
+                    path="webhook-sync"
+                    element={
+                      <RequirePrimaryOrAdmin>
+                        <WebhookSyncSettings />
+                      </RequirePrimaryOrAdmin>
+                    }
+                  />
                   <Route path="watch-providers" element={<WatchProvidersSettings />} />
                   <Route path="subtitle-appearance" element={<SubtitleAppearanceSettings />} />
                   <Route path="home-screen" element={<HomeScreenSettings />} />
@@ -785,6 +798,13 @@ function AppRoutes() {
 
 function RealtimeEventChannels() {
   const actingAdmin = useIsActingAdmin();
+  const { user } = useAuth();
+  // An account with a delegated permission (metadata curation, marker editing)
+  // uses item tools that show admin text, so it needs that catalog chunk too.
+  const delegated = (user?.permissions?.length ?? 0) > 0;
+  useEffect(() => {
+    if (delegated) requestAdminMessages();
+  }, [delegated]);
 
   useEventChannel("catalog");
   useEventChannel("user_state");

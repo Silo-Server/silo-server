@@ -36,7 +36,7 @@ export function LoginSessionRow({
         </span>
         <div className="min-w-0 flex-1 basis-36">
           <div className="flex flex-wrap items-center gap-2 text-sm font-medium">
-            <span>{device.name}</span>
+            <span className="max-w-full min-w-0 wrap-anywhere">{device.name}</span>
             {session.current && (
               <Badge variant="outline">{t("web.settings.sessions.row.thisBrowser")}</Badge>
             )}
@@ -59,7 +59,7 @@ export function LoginSessionRow({
             })}
           </p>
         </div>
-        <div className="ml-auto flex items-center gap-1">
+        <div className="ms-auto flex items-center gap-1">
           {onSignOut && (
             <Button
               type="button"
@@ -99,7 +99,7 @@ export function LoginSessionRow({
       {expanded && (
         <dl
           id={detailsId}
-          className="border-border mt-3 grid grid-cols-1 gap-3 border-t pt-3 text-xs sm:grid-cols-2 sm:pl-12"
+          className="border-border mt-3 grid grid-cols-1 gap-3 border-t pt-3 text-xs sm:grid-cols-2 sm:ps-12"
         >
           {[
             [

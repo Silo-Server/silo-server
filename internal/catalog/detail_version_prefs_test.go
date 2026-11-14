@@ -309,6 +309,88 @@ func TestBuildPlaybackInfo_GroupsMultipartVariants(t *testing.T) {
 	}
 }
 
+// A viewer who may not curate metadata gets no path or file name from any
+// version, playback variant parts included, nor an external subtitle's file
+// name or the title filled from it. Audiobooks keep their file names.
+func TestDetailHideFileIdentity(t *testing.T) {
+	file := &models.MediaFile{
+		ID: 11, ContentID: "movie-1", FilePath: "/media/Movie (2023)/Movie.2023.2160p.WEB-DL-GROUP.mkv", Resolution: "2160p",
+		ExternalSubtitles: []models.ExternalSubtitle{
+			{Path: "/media/Movie (2023)/Movie.2023.2160p.WEB-DL-GROUP.en.srt", Language: "en", Format: "srt"},
+			// The scanner stores a sidecar's file name as its title.
+			{Path: "/media/Movie (2023)/Movie.2023.2160p.WEB-DL-GROUP.es.srt", Language: "es", Format: "srt", Title: "Movie.2023.2160p.WEB-DL-GROUP.es.srt"},
+			{Path: "/media/Movie (2023)/Movie.fr.srt", Language: "fr", Format: "srt", Title: "Commentary"},
+			// A second untitled English sidecar is numbered, as the playback
+			// inventory numbers it, so a saved choice tells the two apart.
+			{Path: "/media/Movie (2023)/Movie.2023.2160p.WEB-DL-OTHER.en.srt", Language: "en", Format: "srt"},
+			// A file name that starts with a space is still only a file name.
+			{Path: "/media/Movie (2023)/ Movie.2023.2160p.WEB-DL-GROUP.de.srt", Language: "de", Format: "srt", Title: " Movie.2023.2160p.WEB-DL-GROUP.de.srt"},
+		},
+	}
+	for _, tc := range []struct {
+		itemType  string
+		keepNames bool
+	}{{itemType: "movie"}, {itemType: "audiobook", keepNames: true}} {
+		t.Run(tc.itemType, func(t *testing.T) {
+			versions, variants, _, _, _, _, _ := (&DetailService{}).buildPlaybackInfo(context.Background(), []*models.MediaFile{file}, AccessFilter{}, "movie-1")
+			// Saved before this viewer stopped seeing file names: the second
+			// English sidecar, labeled by its file name.
+			saved := &userstore.SubtitleTrackSignature{Source: "external", Language: "en", Codec: "srt", Label: "Movie.2023.2160p.WEB-DL-OTHER.en.srt"}
+			detail := &ItemDetail{Type: tc.itemType, Versions: versions, PlaybackVariants: variants, FolderPaths: []string{"/media/Movie (2023)"},
+				EffectiveSubtitleTrackSignature: saved}
+
+			detail.HideFileIdentity()
+
+			if want := map[bool]string{false: "en 2", true: saved.Label}[tc.keepNames]; detail.EffectiveSubtitleTrackSignature.Label != want {
+				t.Errorf("saved choice label = %q, want %q", detail.EffectiveSubtitleTrackSignature.Label, want)
+			}
+			if saved.Label != "Movie.2023.2160p.WEB-DL-OTHER.en.srt" {
+				t.Errorf("the stored signature was changed in place: %q", saved.Label)
+			}
+			if !tc.keepNames {
+				// A label the viewer cannot see on a current sidecar, such as
+				// a removed sidecar's file name, is dropped; a visible title stays.
+				for label, want := range map[string]string{"Movie.2019.720p.HDTV-OLD.en.srt": "", "Commentary": "Commentary"} {
+					sig := &userstore.SubtitleTrackSignature{Source: "external", Language: "en", Codec: "srt", Label: label}
+					if got := relabelSavedSidecarChoice(sig, detail.Versions, nil); got.Label != want {
+						t.Errorf("saved choice %q relabeled to %q, want %q", label, got.Label, want)
+					}
+				}
+			}
+
+			if detail.FolderPaths != nil {
+				t.Errorf("FolderPaths = %v, want none", detail.FolderPaths)
+			}
+			for _, v := range []FileVersion{detail.Versions[0], detail.PlaybackVariants[0].Parts[0].Versions[0]} {
+				if v.FilePath != "" || v.Resolution != "2160p" {
+					t.Errorf("version path %q resolution %q, want no path and the resolution kept", v.FilePath, v.Resolution)
+				}
+				if (v.FileName != "") != tc.keepNames {
+					t.Errorf("version file name = %q, keep names %v", v.FileName, tc.keepNames)
+				}
+				for _, named := range v.SubtitleTracks[:2] {
+					if (named.FileName != "" || named.Title != "") != tc.keepNames {
+						t.Errorf("sidecar titled by its file name = %+v, keep names %v", named, tc.keepNames)
+					}
+				}
+				titled := v.SubtitleTracks[2]
+				if (titled.FileName != "") != tc.keepNames {
+					t.Errorf("titled sidecar file name = %q, keep names %v", titled.FileName, tc.keepNames)
+				}
+				if titled.Title != "Commentary" {
+					t.Errorf("titled sidecar title = %q, want Commentary", titled.Title)
+				}
+				if second := v.SubtitleTracks[3]; !tc.keepNames && (second.Title != "en 2" || second.FileName != "") {
+					t.Errorf("second untitled English sidecar = %+v, want title \"en 2\" and no file name", second)
+				}
+				if spaced := v.SubtitleTracks[4]; !tc.keepNames && (spaced.Title != "" || spaced.FileName != "") {
+					t.Errorf("sidecar whose file name starts with a space = %+v, want no title or file name", spaced)
+				}
+			}
+		})
+	}
+}
+
 func TestBuildPlaybackInfo_SelectedFileWithoutIntroDoesNotInheritAnotherVersionIntro(t *testing.T) {
 	service := &DetailService{}
 	introStart := 12.5
@@ -410,6 +492,23 @@ func TestSortFileVersions_PrefersLargerFilesWithinQualityTier(t *testing.T) {
 	}
 	if got := chooseDefaultVariantVersion(versions, 0); got == nil || got.FileID != 2 {
 		t.Fatalf("default version = %#v, want file 2", got)
+	}
+}
+
+// A caller that takes versions[0] as the default (Jellyfin Download, the
+// download manifest fallback) must never get a later part, even a larger one.
+func TestSortVideoVersions_KeepsLaterPartsBehindStartingFiles(t *testing.T) {
+	versions := []FileVersion{
+		{FileID: 1, Resolution: "1080p", FileSize: 1_000, PresentationPartIndex: 1, PresentationPartTotal: 2},
+		{FileID: 2, Resolution: "1080p", FileSize: 3_000, PresentationPartIndex: 2, PresentationPartTotal: 2},
+		{FileID: 3, Resolution: "720p", FileSize: 500},
+	}
+
+	sortVideoVersions(playableTypeMovie, versions)
+
+	got := []int{versions[0].FileID, versions[1].FileID, versions[2].FileID}
+	if want := []int{1, 3, 2}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("order = %v, want %v", got, want)
 	}
 }
 

@@ -138,9 +138,9 @@ export function useAdminBulkRun() {
           );
       toast.success(
         t("web.admin.historyImport.toast.bulkQueued", {
-          accepted: String(data.accepted),
-          active: String(data.active),
-          failed: String(data.failed),
+          accepted: data.accepted,
+          active: data.active,
+          failed: data.failed,
         }),
       );
       queryClient.invalidateQueries({ queryKey: ["admin", "historyImportAdminRuns"] });

@@ -42,14 +42,14 @@ export function GlobalSearchBoxSetRow({
       className={cn(rowClassName, "data-[selected]:bg-accent rounded-md transition-colors")}
     >
       {/* Two offset sleeves behind the poster mark it as a stack of films. */}
-      <div className={cn(posterClassName, "mt-1.5 mr-1.5")}>
+      <div className={cn(posterClassName, "me-1.5 mt-1.5")}>
         <span
           aria-hidden
-          className="bg-surface-raised border-border absolute -top-1.5 left-1.5 h-full w-full rounded-md border"
+          className="bg-surface-raised border-border absolute start-1.5 -top-1.5 h-full w-full rounded-md border"
         />
         <span
           aria-hidden
-          className="bg-surface-hover border-border absolute -top-0.75 left-0.75 h-full w-full rounded-md border"
+          className="bg-surface-hover border-border absolute start-0.75 -top-0.75 h-full w-full rounded-md border"
         />
         <div className="bg-muted relative h-full w-full overflow-hidden rounded-md">
           {boxSet.poster_url ? (

@@ -340,6 +340,8 @@ export function buildProfileRowUpdate(
     customized: section.customized ?? false,
     position: section.position ?? 0,
     default_title: section.default_title,
+    default_title_key: section.default_title_key,
+    default_title_args: section.default_title_args,
     config,
   };
 }

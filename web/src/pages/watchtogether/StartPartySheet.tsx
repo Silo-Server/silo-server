@@ -17,7 +17,7 @@ import { useOptionalAuth } from "@/hooks/useAuth";
 import { useSettingValue } from "@/hooks/queries/settingValues";
 import { useViewTransitionNavigate } from "@/hooks/useViewTransition";
 import { useSeasonEpisodes, useSeasons } from "@/hooks/queries/episodes";
-import { useT, type MessageKey } from "@/i18n";
+import { codeNumber, useT, type MessageKey } from "@/i18n";
 import { createWatchTogetherRoom, type WatchTogetherSelectionMode } from "@/lib/watchTogether";
 import { copyWatchTogetherInvite } from "@/lib/watchTogetherActions";
 import { decodeThumbhash } from "@/lib/thumbhash";
@@ -110,7 +110,7 @@ function EpisodeChooser({
           >
             {s.is_specials
               ? t("web.watchTogether.common.specials")
-              : t("web.watchTogether.common.season", { number: String(s.season_number) })}
+              : t("web.watchTogether.common.season", { number: s.season_number })}
           </button>
         ))}
       </div>
@@ -120,11 +120,11 @@ function EpisodeChooser({
             <button
               type="button"
               onClick={() => onPick(episode, season ?? episode.season_number)}
-              className="flex w-full items-center gap-3 rounded-lg px-2 py-2 text-left hover:bg-white/[0.04]"
+              className="flex w-full items-center gap-3 rounded-lg px-2 py-2 text-start hover:bg-white/[0.04]"
             >
               <span className="text-muted-foreground w-7 shrink-0 text-xs font-semibold tabular-nums">
                 {t("web.watchTogether.common.episodeNumber", {
-                  number: String(episode.episode_number),
+                  number: codeNumber(episode.episode_number),
                 })}
               </span>
               <span className="min-w-0 flex-1 truncate text-sm">{episode.title}</span>
@@ -347,7 +347,7 @@ export function StartPartySheet({
                 ? item.season_count
                   ? t("web.watchTogether.startSheet.seriesSeasons", {
                       count: item.season_count,
-                      count_text: String(item.season_count),
+                      count_text: item.season_count,
                     })
                   : t("web.watchTogether.common.series")
                 : item.type === "season"
@@ -419,7 +419,7 @@ export function StartPartySheet({
                 role="radio"
                 aria-checked={selected}
                 onClick={() => setMode(option.value)}
-                className={`rounded-lg border px-3 py-2.5 text-left text-sm transition-colors ${
+                className={`rounded-lg border px-3 py-2.5 text-start text-sm transition-colors ${
                   selected
                     ? "border-foreground/50 bg-accent"
                     : "text-muted-foreground hover:bg-muted/60"

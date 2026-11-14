@@ -1,5 +1,7 @@
 import type { AdminBackupS3TestBody, AdminBackupS3TestResult } from "@/api/v2/adminBackups";
 
+import { t } from "@/i18n";
+
 import { BACKUP_DESTINATION_KEY } from "./backupPresentation";
 
 /**
@@ -94,11 +96,12 @@ export function s3SaveBlocker({
   outcome: S3TestOutcome | null;
   keyKept: boolean;
 }): string | null {
-  if (!fields.endpoint.trim() || !fields.bucket.trim()) return "Enter the endpoint and the bucket.";
+  if (!fields.endpoint.trim() || !fields.bucket.trim())
+    return t("web.admin.backups.s3.blocker.fields");
   const test = currentS3Test(fields, outcome);
-  if (!test) return "Test the connection first.";
-  if (!test.ok) return "The connection test failed.";
-  if (!keyKept) return "Confirm you keep a copy of SECRET_KEY.";
+  if (!test) return t("web.admin.backups.s3.blocker.untested");
+  if (!test.ok) return t("web.admin.backups.s3.blocker.failed");
+  if (!keyKept) return t("web.admin.backups.s3.blocker.keyKept");
   return null;
 }
 

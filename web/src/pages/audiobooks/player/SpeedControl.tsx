@@ -8,12 +8,13 @@ import {
   AUDIOBOOK_RATE_STEP,
   clampAudiobookRate,
 } from "./useAudiobookPrefs";
+import { formatDecimal } from "@/lib/numberFormat";
 
 const HOLD_DELAY_MS = 250;
 const HOLD_REPEAT_MS = 80;
 
 export function formatRate(t: Translate, rate: number): string {
-  return t("web.audiobooks.player.rate", { rate: String(rate) });
+  return t("web.audiobooks.player.rate", { rate: formatDecimal(rate, 2, 0) });
 }
 
 interface SpeedControlProps {
@@ -106,7 +107,7 @@ export function SpeedControl({ value, onChange }: SpeedControlProps) {
         <div
           role="dialog"
           aria-label={t("web.audiobooks.player.speed")}
-          className="absolute right-0 bottom-full mb-2 flex w-[230px] flex-col gap-3 rounded-lg bg-black/90 px-4 py-3 shadow-xl backdrop-blur-sm"
+          className="absolute end-0 bottom-full mb-2 flex w-[230px] flex-col gap-3 rounded-lg bg-black/90 px-4 py-3 shadow-xl backdrop-blur-sm"
           onKeyDown={handlePopoverKeyDown}
         >
           <div className="flex items-center justify-between">

@@ -1,7 +1,7 @@
 import type { ScopeKind } from "./scope";
 import type { CollectionKind } from "./types";
 import { t, type MessageKey } from "@/i18n";
-import { appLanguage } from "@/lib/appLocale";
+import { appLanguage, formatLocale } from "@/lib/appLocale";
 import { titlesAlreadySaved } from "./copyEditor";
 
 export * from "./copyEditor";
@@ -148,12 +148,10 @@ export function showToOtherProfilesShortHelp() {
 export function librariesNotPicked() {
   return t("web.collections.copy.librariesNotPicked");
 }
-/**
- * A server Smart collection's Libraries row: where it shows, not where its titles come from.
- * English until the catalog has a key for it (a follow-up).
- */
-export const SMART_LIBRARIES_HELP =
-  "Their Collections tabs list it. Its rules pick where titles come from.";
+/** A server Smart collection's Libraries row: where it shows, not where its titles come from. */
+export function smartLibrariesHelp() {
+  return t("web.collections.copy.smartLibrariesHelp");
+}
 /** The Shelf row of a collection that isn't created yet, after "No heading". */
 export function shelfAfterCreate() {
   return t("web.collections.copy.shelfAfterCreate");
@@ -189,12 +187,12 @@ export function hideCollectionDescription(
   const rows = places
     ? t("web.collections.copy.hideCollectionRowsOn", {
         count: rowCount,
-        count_text: String(rowCount),
+        count_text: rowCount,
         places,
       })
     : t("web.collections.copy.hideCollectionRows", {
         count: rowCount,
-        count_text: String(rowCount),
+        count_text: rowCount,
       });
   if (libraryNames.length === 0) return rows;
   return `${t("web.collections.copy.hideCollectionLeaves", { tabs: collectionsTabs(libraryNames) })} ${rows}`;
@@ -272,7 +270,7 @@ export function addToMyLibraryPage() {
 }
 
 export function rowCountLabel(count: number): string {
-  return t("web.collections.copy.rowCount", { count, count_text: String(count) });
+  return t("web.collections.copy.rowCount", { count, count_text: count });
 }
 
 /** "Kids page": the rows above a library's grid. */
@@ -315,7 +313,7 @@ export function deleteWithRowsDescription(
     libraryNames.length > 0
       ? t("web.collections.copy.removedFromForEveryone", { libraries: joinNames(libraryNames) })
       : t("web.collections.copy.removedForEveryone");
-  return `${removed} ${t("web.collections.copy.rowsShowIt", { count: rowCount, count_text: String(rowCount) })}`;
+  return `${removed} ${t("web.collections.copy.rowsShowIt", { count: rowCount, count_text: rowCount })}`;
 }
 
 export function keepRowsHint() {
@@ -331,7 +329,7 @@ export function checkingRows() {
 export function deleteWithRowsLabel(rowCount: number): string {
   return t("web.collections.copy.deleteWithRowsLabel", {
     count: rowCount,
-    count_text: String(rowCount),
+    count_text: rowCount,
   });
 }
 
@@ -368,21 +366,21 @@ function someNames(names: readonly string[]): string {
     names.length > 5
       ? [
           ...names.slice(0, 4),
-          t("web.collections.copy.moreNames", { count: more, count_text: String(more) }),
+          t("web.collections.copy.moreNames", { count: more, count_text: more }),
         ]
       : names;
   return joinNames(shown);
 }
 
 export function syncListsLabel(count: number): string {
-  return t("web.collections.copy.syncLists", { count, count_text: String(count) });
+  return t("web.collections.copy.syncLists", { count, count_text: count });
 }
 
 /** Sync works on synced lists only; says how many picked collections it passes over. */
 export function syncSkipNote(smart: number, manual: number): string | null {
   if (smart + manual === 0) return null;
   const kinds = smart && manual ? "both" : smart ? "smart" : "manual";
-  return t("web.collections.copy.syncSkipNote", { kinds, count: String(smart + manual) });
+  return t("web.collections.copy.syncSkipNote", { kinds, count: smart + manual });
 }
 
 export type BatchAction = "sync" | "show" | "hide";
@@ -397,7 +395,7 @@ export function batchResult(
   total: number,
   warned = 0,
 ): { tone: "success" | "warning" | "error"; message: string } {
-  const warnings = String(warned);
+  const warnings = warned;
   if (done === total)
     return {
       tone: warned > 0 ? "warning" : "success",
@@ -406,10 +404,10 @@ export function batchResult(
           ? t("web.collections.copy.batchAllWarned", {
               action,
               count: done,
-              count_text: String(done),
+              count_text: done,
               warned: warnings,
             })
-          : t("web.collections.copy.batchAll", { action, count: done, count_text: String(done) }),
+          : t("web.collections.copy.batchAll", { action, count: done, count_text: done }),
     };
   if (done > 0)
     return {
@@ -418,16 +416,16 @@ export function batchResult(
         warned > 0
           ? t("web.collections.copy.batchSomeWarned", {
               action,
-              done: String(done),
+              done: done,
               count: total,
-              count_text: String(total),
+              count_text: total,
               warned: warnings,
             })
           : t("web.collections.copy.batchSome", {
               action,
-              done: String(done),
+              done: done,
               count: total,
-              count_text: String(total),
+              count_text: total,
             }),
     };
   return {
@@ -435,7 +433,7 @@ export function batchResult(
     message: t("web.collections.copy.batchNone", {
       action,
       count: total,
-      count_text: String(total),
+      count_text: total,
     }),
   };
 }
@@ -447,14 +445,14 @@ export function alreadyShown(shown: boolean): string {
 }
 
 export function hideCollectionsTitle(count: number): string {
-  return t("web.collections.copy.hideCollectionsTitle", { count, count_text: String(count) });
+  return t("web.collections.copy.hideCollectionsTitle", { count, count_text: count });
 }
 
 /** Hiding several collections rows show: `rowCount` is the rows' total. */
 export function hideCollectionsDescription(rowCount: number): string {
   return t("web.collections.copy.hideCollectionsDescription", {
     count: rowCount,
-    count_text: String(rowCount),
+    count_text: rowCount,
   });
 }
 
@@ -464,7 +462,7 @@ export function deleteCollectionsTitle(
   kind: CollectionKind | null,
   where: string | null,
 ): string {
-  const values = { kind: kind ?? "mixed", count, count_text: String(count) };
+  const values = { kind: kind ?? "mixed", count, count_text: count };
   return where
     ? t("web.collections.copy.deleteCollectionsTitleIn", { ...values, where })
     : t("web.collections.copy.deleteCollectionsTitle", values);
@@ -498,7 +496,7 @@ export function nameWithPlace(name: string, place: string): string {
 export function keptForRows(titles: readonly string[]): string {
   return t("web.collections.copy.keptForRows", {
     count: titles.length,
-    count_text: String(titles.length),
+    count_text: titles.length,
     names: someNames(titles),
   });
 }
@@ -535,7 +533,7 @@ export function removedTitle(title: string): string {
 }
 
 export function createdButNotAdded(count: number): string {
-  return t("web.collections.copy.createdButNotAdded", { count, count_text: String(count) });
+  return t("web.collections.copy.createdButNotAdded", { count, count_text: count });
 }
 
 // --- Add to collection -----------------------------------------------------
@@ -546,12 +544,15 @@ export function addToCollectionFootnote() {
 
 /** "Manual · 15 titles": a manual collection's line in a picker. */
 export function manualTitleCount(count: number): string {
-  return t("web.collections.copy.manualTitleCount", { count, count_text: String(count) });
+  return t("web.collections.copy.manualTitleCount", {
+    count,
+    count_text: count.toLocaleString(formatLocale()),
+  });
 }
 
 /** The Add to collection footer: how many of the profile's collections hold the title. */
 export function inCollections(count: number): string {
-  return t("web.collections.copy.inCollections", { count, count_text: String(count) });
+  return t("web.collections.copy.inCollections", { count, count_text: count });
 }
 
 /** The new collection was kept, but the title it was made for didn't go in. */
@@ -667,7 +668,7 @@ export function firstSyncMessage(sync?: { status: string; message: string; items
       tone: "warning" as const,
       text: t("web.collections.copy.firstSyncWarned", {
         count: sync.itemsMatched,
-        count_text: String(sync.itemsMatched),
+        count_text: sync.itemsMatched,
       }),
     };
   }
@@ -675,7 +676,7 @@ export function firstSyncMessage(sync?: { status: string; message: string; items
     tone: "success" as const,
     text: t("web.collections.copy.firstSyncFound", {
       count: sync.itemsMatched,
-      count_text: String(sync.itemsMatched),
+      count_text: sync.itemsMatched,
     }),
   };
 }
@@ -693,15 +694,15 @@ export function syncedAgo(iso: string, now = Date.now()): string {
   ];
   let value = Math.round(seconds / 60);
   for (const [size, unit] of steps) {
-    if (value < size) return t(unit, { count: value, count_text: String(value) });
+    if (value < size) return t(unit, { count: value, count_text: value });
     value = Math.round(value / size);
   }
-  return t("web.collections.copy.agoYears", { count: value, count_text: String(value) });
+  return t("web.collections.copy.agoYears", { count: value, count_text: value });
 }
 
 /** "41 titles skipped". */
 export function titlesSkipped(count: number): string {
-  return t("web.collections.copy.titlesSkipped", { count, count_text: String(count) });
+  return t("web.collections.copy.titlesSkipped", { count, count_text: count });
 }
 
 /** Why a synced list skips titles, and what brings them in. */
@@ -717,7 +718,7 @@ export function skippedExplanation(
       ? t("web.collections.copy.skippedUncountedSync", { where })
       : t("web.collections.copy.skippedUncounted", { where });
   }
-  return t("web.collections.copy.skippedCounted", { count, count_text: String(count), where });
+  return t("web.collections.copy.skippedCounted", { count, count_text: count, where });
 }
 
 /** The red callout at the top of a list whose last sync failed. */
@@ -728,11 +729,11 @@ export function syncFailedLead(lastAt: string | undefined): string {
 }
 
 export function keepsTitles(count: number): string {
-  return t("web.collections.copy.keepsTitles", { count, count_text: String(count) });
+  return t("web.collections.copy.keepsTitles", { count, count_text: count });
 }
 
 export function titlesReadyToAdd(count: number): string {
-  return t("web.collections.copy.titlesReadyToAdd", { count, count_text: String(count) });
+  return t("web.collections.copy.titlesReadyToAdd", { count, count_text: count });
 }
 
 /** "Name and description": the first field as labelled, the rest in lower case. */
@@ -774,7 +775,7 @@ export function personalDeleteDescription(shared: boolean): string {
 export function deleteShelfDescription(collectionCount: number, libraryName: string): string {
   const members = t("web.collections.copy.deleteShelfMembers", {
     count: collectionCount,
-    count_text: String(collectionCount),
+    count_text: collectionCount,
     library: libraryName,
   });
   return `${members} ${t("web.collections.copy.deleteShelfOnly", { library: libraryName })}`;

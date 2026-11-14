@@ -22,9 +22,9 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { useAllMarkerEditHistory } from "@/hooks/queries/admin/markers";
-import { MARKER_LABELS, formatClock } from "@/lib/markers";
+import { MARKER_LABEL_KEYS, formatClock } from "@/lib/markers";
 import { formatTime, preferredDateLocale } from "@/lib/datetime";
-import { useT, type Translate } from "@/i18n";
+import { numberText, type Translate, useT } from "@/i18n";
 
 const LIMIT_OPTIONS = ["25", "50", "100"] as const;
 
@@ -141,7 +141,7 @@ function MarkerHistoryRow({ row }: { row: MarkerEditAuditEntry }) {
             t("web.admin.markers.history.mediaFileFallback", { id: String(row.media_file_id) })}
         </div>
       </TableCell>
-      <TableCell>{MARKER_LABELS[row.segment]}</TableCell>
+      <TableCell>{t(MARKER_LABEL_KEYS[row.segment])}</TableCell>
       <TableCell>
         <div className="flex items-center gap-2">
           <Badge variant={row.action === "clear" ? "outline" : "secondary"}>
@@ -192,7 +192,7 @@ function MarkerHistorySkeleton() {
 function formatHistoryRange(t: Translate, marker: MarkerSegment | null): string {
   if (!marker || marker.start == null || marker.end == null)
     return t("web.admin.markers.history.rangeNone");
-  return `${formatClock(marker.start)}-${formatClock(marker.end)}`;
+  return numberText(`${formatClock(marker.start)}-${formatClock(marker.end)}`);
 }
 
 function formatHistoryDate(value: string): string {

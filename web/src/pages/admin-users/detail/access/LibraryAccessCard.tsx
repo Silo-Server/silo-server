@@ -34,6 +34,7 @@ import {
   setAssignedPermission,
 } from "@/lib/permissions";
 import { cn } from "@/lib/utils";
+import { TOUCH_TARGETS } from "@/lib/touchTargets";
 
 import { KeyValueRow } from "../ui";
 import { EditableCard, type AccessCardProps } from "./EditableCard";
@@ -149,7 +150,7 @@ function GroupSummary({ group, libraries }: { group: AccessGroup; libraries: Lib
     formatQuality(group.max_playback_quality),
     t("web.admin.users.detail.access.library.summaryStreams", {
       count: group.max_streams,
-      count_text: String(group.max_streams),
+      count_text: group.max_streams,
     }),
     approval === undefined ? undefined : t(approval),
   ].filter(Boolean);
@@ -240,7 +241,7 @@ export function LibraryAccessCard({
                 <SelectTrigger id={groupSelectId} className="w-full sm:w-64">
                   <SelectValue />
                 </SelectTrigger>
-                <SelectContent>
+                <SelectContent className={TOUCH_TARGETS}>
                   <SelectItem value="none">
                     {t("web.admin.users.detail.access.library.noGroup")}
                   </SelectItem>
@@ -313,7 +314,8 @@ export function LibraryAccessCard({
               choose && "border-amber-500/40 bg-amber-500/5",
             )}
           >
-            <label className="flex cursor-pointer items-start gap-3">
+            {/* Below `lg` the label reaches into the box's padding: a 44px target, same layout. */}
+            <label className="flex cursor-pointer items-start gap-3 max-lg:-my-3 max-lg:py-3">
               <input
                 type="radio"
                 name={radioName}
@@ -332,7 +334,7 @@ export function LibraryAccessCard({
               </span>
             </label>
             {choose ? (
-              <div className="mt-2.5 space-y-2 pl-7">
+              <div className="mt-2.5 space-y-2 ps-7">
                 <div className="flex flex-wrap gap-2">
                   {libraries.map((library) => {
                     const checked = d.libraryIds?.includes(library.id) ?? false;
@@ -340,7 +342,7 @@ export function LibraryAccessCard({
                       <label
                         key={library.id}
                         className={cn(
-                          "border-border/70 inline-flex cursor-pointer items-center gap-2 rounded-full border px-3 py-1 text-[13px]",
+                          "border-border/70 inline-flex cursor-pointer items-center gap-2 rounded-full border px-3 py-1 text-[13px] max-lg:min-h-11",
                           checked && "border-amber-500/40 bg-amber-500/10",
                         )}
                       >

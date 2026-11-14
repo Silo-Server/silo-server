@@ -19,6 +19,7 @@ import { useAdminUserDevices } from "@/hooks/queries/admin/userActivity";
 import { useAdminUserCapabilities, useAdminUserSettings } from "@/hooks/queries/admin/users";
 import { useAppLanguage, useT } from "@/i18n";
 import { cn } from "@/lib/utils";
+import { TOUCH_TARGETS } from "@/lib/touchTargets";
 
 import { userDetailTabSearch } from "../userDetailTabs";
 import { buildPreferenceLevels, type PreferenceLevel } from "./levels";
@@ -125,7 +126,7 @@ export function PreferencesTab({ user }: { user: AdminUser }) {
         >
           <SelectValue />
         </SelectTrigger>
-        <SelectContent>
+        <SelectContent className={TOUCH_TARGETS}>
           {groups.map((group) => (
             <SelectGroup key={group.key}>
               <SelectLabel>{group.title}</SelectLabel>
@@ -136,11 +137,11 @@ export function PreferencesTab({ user }: { user: AdminUser }) {
                     ? t("web.admin.users.detail.preferences.tab.levelOption", {
                         profile: level.profileName,
                         level: level.name,
-                        count: String(level.entries.length),
+                        count: level.entries.length,
                       })
                     : t("web.admin.users.detail.preferences.tab.levelOptionNoProfile", {
                         level: level.name,
-                        count: String(level.entries.length),
+                        count: level.entries.length,
                       })}
                 </SelectItem>
               ))}
@@ -168,8 +169,8 @@ export function PreferencesTab({ user }: { user: AdminUser }) {
                   aria-current={active ? "true" : undefined}
                   onClick={() => select(level.id)}
                   className={cn(
-                    "flex w-full items-center gap-2.5 rounded-lg py-1.5 pr-3 text-left text-sm transition-colors",
-                    top ? "pl-3" : "pl-7",
+                    "flex w-full items-center gap-2.5 rounded-lg py-1.5 pe-3 text-start text-sm transition-colors max-lg:min-h-11",
+                    top ? "ps-3" : "ps-7",
                     active
                       ? "bg-accent text-foreground font-medium"
                       : "text-foreground/85 hover:bg-accent/50",

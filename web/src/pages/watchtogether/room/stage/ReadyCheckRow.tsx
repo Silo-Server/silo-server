@@ -16,9 +16,9 @@ export function ReadyCheckRow({ room }: { room: WatchTogetherRoomSnapshot }) {
         <div className="text-sm font-semibold">{t("web.watchTogether.readyCheck.title")}</div>
         <div className="text-muted-foreground text-xs">
           {t("web.watchTogether.presence.ready", {
-            ready: String(ready),
+            ready: ready,
             total,
-            total_text: String(total),
+            total_text: total,
           })}
         </div>
       </div>

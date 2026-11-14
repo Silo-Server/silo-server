@@ -21,6 +21,8 @@ interface DownloadVersionPickerProps {
   versions: FileVersion[];
   title?: string;
   summaryBuilder?: (version: FileVersion) => string;
+  /** The versions are one presentation's parts in play order; list them as given. */
+  partsInOrder?: boolean;
 }
 
 export default function DownloadVersionPicker({
@@ -29,9 +31,10 @@ export default function DownloadVersionPicker({
   versions,
   title,
   summaryBuilder,
+  partsInOrder = false,
 }: DownloadVersionPickerProps) {
   const t = useT();
-  const sorted = sortByResolution(versions);
+  const sorted = partsInOrder ? versions : sortByResolution(versions);
   const [downloading, setDownloading] = useState<number | null>(null);
 
   const active = useRef<symbol | null>(null);
@@ -86,7 +89,7 @@ export default function DownloadVersionPicker({
                 type="button"
                 onClick={() => handleDownload(version)}
                 disabled={downloading !== null}
-                className="border-border/50 bg-accent/30 hover:bg-accent/60 flex w-full items-center gap-3 rounded-xl border px-4 py-3 text-left transition-colors disabled:opacity-50"
+                className="border-border/50 bg-accent/30 hover:bg-accent/60 flex w-full items-center gap-3 rounded-xl border px-4 py-3 text-start transition-colors disabled:opacity-50"
               >
                 <span className="bg-primary/10 text-primary flex size-9 shrink-0 items-center justify-center rounded-full">
                   {downloading === version.file_id ? (

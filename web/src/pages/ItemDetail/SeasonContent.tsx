@@ -33,7 +33,7 @@ function seasonLabel(t: Translate, seasonNumber: number, title?: string) {
   // default, as getSeasonDisplayTitle does, so it matches the season indicator.
   if (title && (seasonNumber === 0 || title !== `Season ${seasonNumber}`)) return title;
   if (seasonNumber === 0) return t("web.detail.seasons.specials");
-  return t("web.detail.seasons.numbered", { season: String(seasonNumber) });
+  return t("web.detail.seasons.numbered", { season: seasonNumber });
 }
 
 export default function SeasonContent({
@@ -116,7 +116,7 @@ export default function SeasonContent({
   const seasonIndicator =
     item.is_specials || seasonNumber === 0
       ? t("web.detail.seasons.specials")
-      : t("web.detail.seasons.numbered", { season: String(seasonNumber) });
+      : t("web.detail.seasons.numbered", { season: seasonNumber });
 
   const breadcrumb = (
     <DetailBreadcrumb
@@ -222,7 +222,7 @@ export default function SeasonContent({
                 )}
                 <span className="text-muted-foreground text-sm">
                   {t("web.detail.seasons.totalCount", {
-                    count: String(item.episode_count ?? episodes.length),
+                    count: item.episode_count ?? episodes.length,
                   })}
                 </span>
               </div>

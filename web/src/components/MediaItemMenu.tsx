@@ -411,7 +411,7 @@ function MediaItemActionSheetRow({
       type="button"
       disabled={disabled}
       onClick={onSelect}
-      className="hover:bg-accent/60 active:bg-accent flex min-h-11 w-full items-center gap-3 px-5 py-3 text-left text-sm font-medium transition-colors disabled:opacity-50"
+      className="hover:bg-accent/60 active:bg-accent flex min-h-11 w-full items-center gap-3 px-5 py-3 text-start text-sm font-medium transition-colors disabled:opacity-50"
     >
       {children}
     </button>
@@ -450,7 +450,7 @@ function MediaItemActionSheet({
         className="max-h-[80svh] gap-0 overflow-y-auto rounded-t-2xl p-0 pb-[env(safe-area-inset-bottom)]"
       >
         <SheetHeader className="px-5 pt-4 pb-2">
-          <SheetTitle className="truncate text-left text-base">
+          <SheetTitle className="truncate text-start text-base">
             {title ?? t("web.item.menu.sheetTitle")}
           </SheetTitle>
           <SheetDescription className="sr-only">
@@ -1474,6 +1474,7 @@ export default function MediaItemMenu({
     onContextMenu: () => warmUp({ dropdown }),
   });
 
+  /* eslint-disable silo/no-physical-direction -- quick actions sit on the poster artwork, which doesn't mirror; matches CardOverlays and CardWatchStatus */
   return (
     <>
       {(showWatchedQuickAction || showPosterFavorite) && currentUserState && (
@@ -1529,6 +1530,7 @@ export default function MediaItemMenu({
                 ? "right-1.5 bottom-1.5 sm:right-2 sm:bottom-2"
                 : "right-1.5 bottom-1.5 sm:right-2.5 sm:bottom-2.5",
         )}
+        /* eslint-enable silo/no-physical-direction -- end of the quick-action corners */
         onClick={stopMenuEvent}
         onPointerDown={stopMenuEvent}
         {...warmUpHandlers(true)}

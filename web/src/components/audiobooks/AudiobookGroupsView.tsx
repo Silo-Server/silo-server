@@ -33,7 +33,7 @@ function groupStats(t: Translate, group: AudiobookGroup): string {
   const parts = [
     t("web.audiobooks.groups.statBooks", {
       count: group.item_count,
-      count_text: String(group.item_count),
+      count_text: group.item_count,
     }),
     formatHoursMinutes(group.total_duration_seconds),
   ];
@@ -41,7 +41,7 @@ function groupStats(t: Translate, group: AudiobookGroup): string {
     parts.push(
       t("web.audiobooks.groups.statInProgress", {
         count: group.in_progress_count,
-        count_text: String(group.in_progress_count),
+        count_text: group.in_progress_count,
       }),
     );
   } else if (group.finished_count > 0 && group.finished_count === group.item_count) {
@@ -50,7 +50,7 @@ function groupStats(t: Translate, group: AudiobookGroup): string {
     parts.push(
       t("web.audiobooks.groups.statFinished", {
         count: group.finished_count,
-        count_text: String(group.finished_count),
+        count_text: group.finished_count,
       }),
     );
   }
@@ -176,24 +176,24 @@ export default function AudiobookGroupsView({
       ? t("web.audiobooks.groups.countAll", {
           group_by: groupBy,
           count: total,
-          total: String(total),
+          total: total,
         })
       : t("web.audiobooks.groups.countPartial", {
           group_by: groupBy,
-          shown: String(groups.length),
+          shown: groups.length,
           count: total,
-          total: String(total),
+          total: total,
         })
     : hasNextPage
       ? t("web.audiobooks.groups.countAtLeast", {
           group_by: groupBy,
           count: groups.length,
-          loaded: String(groups.length),
+          loaded: groups.length,
         })
       : t("web.audiobooks.groups.countAll", {
           group_by: groupBy,
           count: groups.length,
-          total: String(groups.length),
+          total: groups.length,
         });
 
   return (
@@ -215,7 +215,7 @@ export default function AudiobookGroupsView({
             <SelectItem value="duration">{t("web.audiobooks.groups.sortDuration")}</SelectItem>
           </SelectContent>
         </Select>
-        {firstPage && <span className="text-muted-foreground ml-auto text-sm">{countLabel}</span>}
+        {firstPage && <span className="text-muted-foreground ms-auto text-sm">{countLabel}</span>}
       </div>
 
       {isInitialLoading ? (
@@ -256,7 +256,7 @@ export default function AudiobookGroupsView({
                 key={group.name}
                 type="button"
                 onClick={() => onSelectGroup(group.name)}
-                className="group/series text-left"
+                className="group/series text-start"
               >
                 <div className="transition-transform duration-(--duration-fast) group-hover/series:scale-[1.02]">
                   <CoverStack group={group} large />
@@ -282,7 +282,7 @@ export default function AudiobookGroupsView({
                 key={group.name}
                 type="button"
                 onClick={() => onSelectGroup(group.name)}
-                className="surface-panel hover:bg-muted/40 flex items-center gap-4 rounded-xl border-0 px-4 py-3 text-left transition-colors duration-(--duration-fast)"
+                className="surface-panel hover:bg-muted/40 flex items-center gap-4 rounded-xl border-0 px-4 py-3 text-start transition-colors duration-(--duration-fast)"
               >
                 <CoverStack group={group} />
                 <div className="min-w-0 flex-1">

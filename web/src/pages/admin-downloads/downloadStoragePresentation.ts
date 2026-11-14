@@ -5,6 +5,7 @@ import type {
   AdminDownloadStorageLocation,
 } from "@/api/v2/adminDownloadStorage";
 import { t, type MessageKey } from "@/i18n";
+import { formatDecimal } from "@/lib/numberFormat";
 
 /**
  * Values for a plural message: `count` selects the form, `count_text` prints
@@ -30,7 +31,7 @@ export function formatStorageBytes(bytes: number | null | undefined): string {
     index++;
   }
   if (index === 0) return `${Math.round(scaled)} B`;
-  return `${scaled >= 100 ? Math.round(scaled) : scaled.toFixed(scaled >= 10 ? 0 : 1)} ${units[index]}`;
+  return `${scaled >= 100 ? Math.round(scaled) : formatDecimal(scaled, scaled >= 10 ? 0 : 1)} ${units[index]}`;
 }
 
 /** Fill at which a node stops taking playback sessions (scratch pressure). */
@@ -149,10 +150,10 @@ export function storageWarnings(storage: AdminDownloadStorage): StorageWarning[]
         }),
         body: usage?.shares_scratch
           ? t("web.admin.downloads.presentation.warning.fill.bodyScratch", {
-              ceiling: String(ceiling),
-              scratch: String(SCRATCH_ADMISSION_PERCENT),
+              ceiling: ceiling,
+              scratch: SCRATCH_ADMISSION_PERCENT,
             })
-          : t("web.admin.downloads.presentation.warning.fill.body", { ceiling: String(ceiling) }),
+          : t("web.admin.downloads.presentation.warning.fill.body", { ceiling: ceiling }),
         location: location.key,
         action: "edit_location",
       });
@@ -223,7 +224,7 @@ export function storageWarnings(storage: AdminDownloadStorage): StorageWarning[]
       title: t("web.admin.downloads.presentation.warning.stale.title", {
         size: formatStorageBytes(stale),
         days: storage.stale_device_days,
-        days_text: String(storage.stale_device_days),
+        days_text: storage.stale_device_days,
       }),
       body: t("web.admin.downloads.presentation.warning.stale.body"),
       action: "review_devices",
@@ -296,7 +297,7 @@ export function storageFileTitle(file: AdminDownloadStorageFile): string {
 
 export function storageFileSubtitle(file: AdminDownloadStorageFile): string {
   if (file.season_number != null && file.episode_number != null) {
-    const values = { season: String(file.season_number), episode: String(file.episode_number) };
+    const values = { season: file.season_number, episode: file.episode_number };
     return file.episode_title
       ? t("web.admin.downloads.presentation.file.episodeWithTitle", {
           ...values,
@@ -321,7 +322,7 @@ export function storageFileRecipe(file: AdminDownloadStorageFile): {
   const main = [file.resolution, codec].filter(Boolean).join(" ");
   const detail = file.bitrate_kbps
     ? t("web.admin.downloads.presentation.recipe.bitrate", {
-        mbps: String(Math.round(file.bitrate_kbps / 1000)),
+        mbps: Math.round(file.bitrate_kbps / 1000),
       })
     : "";
   return { main: main || t("web.admin.downloads.presentation.recipe.transcode"), detail };

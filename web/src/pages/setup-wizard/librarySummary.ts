@@ -7,6 +7,6 @@ export function librarySummary(libraries: Library[]): string {
   if (libraries.length === 1) return libraries[0]!.name;
   return t("web.setup.library.summaryCount", {
     count: libraries.length,
-    shown: String(libraries.length),
+    shown: libraries.length,
   });
 }

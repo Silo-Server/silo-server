@@ -11,80 +11,6 @@ import (
 	"github.com/Silo-Server/silo-server/internal/playback"
 )
 
-func TestNativeSubtitleFailureFallsBackWithoutChangingVideoAndStaysDisabled(t *testing.T) {
-	for name, features := range map[string][]string{
-		"canonical":             {playback.FeatureEmbeddedSubtitlesV3},
-		"normalized_duplicates": {playback.FeatureEmbeddedSubtitlesV3, " EMBEDDED_SUBTITLES_V1 ", "Embedded_Subtitles_V1"},
-	} {
-		t.Run(name, func(t *testing.T) {
-			assertNativeSubtitleFailureFallsBackAndStaysDisabled(t, features)
-		})
-	}
-}
-
-func assertNativeSubtitleFailureFallsBackAndStaysDisabled(t *testing.T, features []string) {
-	t.Helper()
-	file := v3HandlerFixtureFile(t)
-	file.SubtitleTracks = []models.SubtitleTrack{{Index: 3, ContainerTrackID: "4", Codec: "mov_text", Language: "eng"}}
-	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0), testPlaybackFileResolver{file: file})
-	handler.ItemAccess = allowAllPlaybackItemAccess{}
-	handler.SettingsRepo = &mutablePlaybackSettingsV3{values: map[string]string{"allow_4k_transcode": "true"}}
-	start := v3HandlerStartRequest()
-	start.ClientFeatures = append(start.ClientFeatures, features...)
-	start.SubtitleTrackIndex = new(0)
-	start.SubtitleTrackID = playback.TrackIDV3(file.ID, "subtitle", 0)
-	caps := start.ClientPlaybackContext.Deliveries[playback.DeliveryClassOriginalHTTPV3]
-	caps.Subtitles.NativeEmbedded = []playback.NativeEmbeddedSubtitleCapabilityV3{{Container: "mp4", Codecs: []string{"mov_text"}, TrackIdentity: "container_track_id"}}
-	start.ClientPlaybackContext.Deliveries[playback.DeliveryClassOriginalHTTPV3] = caps
-	started := startPlayablePlaybackV3(t, handler, marshalV3StartRequest(t, start))
-	native := started.PlaybackPlan
-	if native.Delivery != playback.DeliveryOriginalHTTPV3 || native.Subtitle.Embedded == nil || native.Subtitle.Embedded.StreamIndex != 3 || native.Subtitle.Embedded.ContainerTrackID != "4" || native.Subtitle.Artifact != nil {
-		t.Fatalf("native plan=%+v subtitle=%+v", native, native.Subtitle)
-	}
-	if len(native.Subtitle.Inventory) != 1 || native.Subtitle.Inventory[0].URL == "" {
-		t.Fatal("fallback inventory missing")
-	}
-	request := playback.ReplanRequestV3{
-		ProtocolVersion: playback.ProtocolV3, ClientFeatures: start.ClientFeatures,
-		Operation: playback.ReplanOperationFailureRecoveryV3, PlaybackAttemptID: start.PlaybackAttemptID,
-		ReplanRequestID: "native-recovery-0001", FailedPlanID: native.PlanID, PlanAttemptID: "native-attempt-0001",
-		PlanAttemptKey: native.PlanAttemptKey, AttemptedPlanKeys: []string{native.PlanAttemptKey}, AttemptCount: 1, PositionSeconds: 120,
-		SelectedTracks: native.SelectedTracks, Failure: playback.FailureV3{Classification: "subtitle_embedded_failed"},
-		Capabilities: start.Capabilities, ClientPlaybackContext: start.ClientPlaybackContext,
-	}
-	recovered := postPlaybackReplanV3(t, handler, started.SessionID, request)
-	if recovered.PlaybackPlan == nil {
-		t.Fatalf("fallback=%+v", recovered)
-	}
-	sidecar := recovered.PlaybackPlan
-	if sidecar.Delivery != playback.DeliveryOriginalHTTPV3 || sidecar.Subtitle.Embedded != nil || sidecar.Subtitle.Artifact == nil || sidecar.Subtitle.Artifact.Format != "vtt" || sidecar.Subtitle.Artifact.TimingOriginSeconds != 0 {
-		t.Fatalf("fallback plan=%+v subtitle=%+v", sidecar, sidecar.Subtitle)
-	}
-	if sidecar.PlanID == native.PlanID || sidecar.PlanAttemptKey == native.PlanAttemptKey {
-		t.Fatal("native failure retried same route")
-	}
-	// A refreshed capability report cannot accidentally reactivate a failed route.
-	request.Operation = playback.ReplanOperationOutputChangeV3
-	request.ReplanRequestID = "native-recovery-output-0002"
-	request.FailedPlanID = sidecar.PlanID
-	request.PlanAttemptID = "native-attempt-0002"
-	request.PlanAttemptKey = sidecar.PlanAttemptKey
-	request.AttemptedPlanKeys = nil
-	request.Failure = playback.FailureV3{}
-	request.ClientPlaybackContext.Output.OutputContextID = "route-2"
-	next := postPlaybackReplanV3(t, handler, started.SessionID, request)
-	if next.PlaybackPlan == nil || next.PlaybackPlan.Subtitle.Embedded != nil || next.PlaybackPlan.Subtitle.Artifact == nil {
-		t.Fatalf("native route reenabled: %+v", next)
-	}
-	record, err := handler.PlanStoreV3.GetAttempt(t.Context(), started.SessionID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if playback.HasFeatureV3(record.NormalizedRequest.ClientFeatures, playback.FeatureEmbeddedSubtitlesV3) {
-		t.Fatal("failure did not persist native disablement")
-	}
-}
-
 func TestRemapSubtitleSelectionRetainsHearingImpairedVariant(t *testing.T) {
 	for _, external := range []bool{true, false} {
 		source := &models.MediaFile{ID: 1}
@@ -313,7 +239,7 @@ func TestNativeSubtitleSwitchReplansTheSameMedia(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			rr := servePlaybackReplanNativeV3(handler, started.SessionID, body)
+			rr := replanPlaybackRecorderV2(t, handler, started.SessionID, body)
 			var switched playback.DecisionResponseV3
 			if rr.Code != http.StatusOK || json.Unmarshal(rr.Body.Bytes(), &switched) != nil || switched.PlaybackPlan == nil {
 				t.Fatalf("switch status = %d, body = %s", rr.Code, rr.Body.String())
@@ -355,7 +281,7 @@ func TestSubtitleTrackChangedRecoveryStaysOnEffectiveAlternate(t *testing.T) {
 	start.QualityPreference = "auto"
 	start.ClientPlaybackContext.Deliveries[playback.DeliveryClassProgressiveV3] = playback.DeliveryCapabilityV3{Enabled: true, SupportedOnDevice: true, Subtitles: playback.DeliverySubtitleCapabilitiesV3{SidecarText: true}}
 	start.ClientPlaybackContext.Deliveries[playback.DeliveryClassHLSV3] = playback.DeliveryCapabilityV3{Enabled: true, SupportedOnDevice: true, Subtitles: playback.DeliverySubtitleCapabilitiesV3{SidecarText: true}}
-	started := startPlayablePlaybackV3(t, handler, marshalV3StartRequest(t, start))
+	started := startPlayableDecisionV2(t, handler, marshalV3StartRequest(t, start))
 	before := started.PlaybackPlan
 	if before.EffectiveMediaFileID != alternate.ID {
 		t.Fatalf("start played file %d, want the alternate %d", before.EffectiveMediaFileID, alternate.ID)
@@ -370,7 +296,7 @@ func TestSubtitleTrackChangedRecoveryStaysOnEffectiveAlternate(t *testing.T) {
 	upgraded.VideoDecode[0].MaxWidth, upgraded.VideoDecode[0].MaxHeight = 3840, 2160
 	upgraded.VideoDecode[0].MaxBitrateKbps = 50_000
 	spanish := 1
-	after := postPlaybackReplanV3(t, handler, started.SessionID, playback.ReplanRequestV3{
+	after := replanPlaybackDecisionV2(t, handler, started.SessionID, playback.ReplanRequestV3{
 		ProtocolVersion: playback.ProtocolV3, Operation: playback.ReplanOperationFailureRecoveryV3,
 		Failure:           playback.FailureV3{Classification: "subtitle_track_changed"},
 		PlaybackAttemptID: start.PlaybackAttemptID, ReplanRequestID: "alternate-subtitle-recovery-0001",
@@ -384,5 +310,78 @@ func TestSubtitleTrackChangedRecoveryStaysOnEffectiveAlternate(t *testing.T) {
 	}
 	if after.SelectedTracks.Subtitle == nil || after.SelectedTracks.Subtitle.Index == nil || *after.SelectedTracks.Subtitle.Index != spanish {
 		t.Fatalf("subtitle = %+v, want the alternate's track %d", after.SelectedTracks.Subtitle, spanish)
+	}
+}
+func assertNativeSubtitleFailureFallsBackAndStaysDisabled(t *testing.T, features []string) {
+	t.Helper()
+	file := v3HandlerFixtureFile(t)
+	file.SubtitleTracks = []models.SubtitleTrack{{Index: 3, ContainerTrackID: "4", Codec: "mov_text", Language: "eng"}}
+	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0), testPlaybackFileResolver{file: file})
+	handler.ItemAccess = allowAllPlaybackItemAccess{}
+	handler.SettingsRepo = &mutablePlaybackSettingsV3{values: map[string]string{"allow_4k_transcode": "true"}}
+	start := v3HandlerStartRequest()
+	start.ClientFeatures = append(start.ClientFeatures, features...)
+	start.SubtitleTrackIndex = new(0)
+	start.SubtitleTrackID = playback.TrackIDV3(file.ID, "subtitle", 0)
+	caps := start.ClientPlaybackContext.Deliveries[playback.DeliveryClassOriginalHTTPV3]
+	caps.Subtitles.NativeEmbedded = []playback.NativeEmbeddedSubtitleCapabilityV3{{Container: "mp4", Codecs: []string{"mov_text"}, TrackIdentity: "container_track_id"}}
+	start.ClientPlaybackContext.Deliveries[playback.DeliveryClassOriginalHTTPV3] = caps
+	started := startPlayableDecisionV2(t, handler, marshalV3StartRequest(t, start))
+	native := started.PlaybackPlan
+	if native.Delivery != playback.DeliveryOriginalHTTPV3 || native.Subtitle.Embedded == nil || native.Subtitle.Embedded.StreamIndex != 3 || native.Subtitle.Embedded.ContainerTrackID != "4" || native.Subtitle.Artifact != nil {
+		t.Fatalf("native plan=%+v subtitle=%+v", native, native.Subtitle)
+	}
+	if len(native.Subtitle.Inventory) != 1 || native.Subtitle.Inventory[0].URL == "" {
+		t.Fatal("fallback inventory missing")
+	}
+	request := playback.ReplanRequestV3{
+		ProtocolVersion: playback.ProtocolV3, ClientFeatures: start.ClientFeatures,
+		Operation: playback.ReplanOperationFailureRecoveryV3, PlaybackAttemptID: start.PlaybackAttemptID,
+		ReplanRequestID: "native-recovery-0001", FailedPlanID: native.PlanID, PlanAttemptID: "native-attempt-0001",
+		PlanAttemptKey: native.PlanAttemptKey, AttemptedPlanKeys: []string{native.PlanAttemptKey}, AttemptCount: 1, PositionSeconds: 120,
+		SelectedTracks: native.SelectedTracks, Failure: playback.FailureV3{Classification: "subtitle_embedded_failed"},
+		Capabilities: start.Capabilities, ClientPlaybackContext: start.ClientPlaybackContext,
+	}
+	recovered := replanPlaybackDecisionV2(t, handler, started.SessionID, request)
+	if recovered.PlaybackPlan == nil {
+		t.Fatalf("fallback=%+v", recovered)
+	}
+	sidecar := recovered.PlaybackPlan
+	if sidecar.Delivery != playback.DeliveryOriginalHTTPV3 || sidecar.Subtitle.Embedded != nil || sidecar.Subtitle.Artifact == nil || sidecar.Subtitle.Artifact.Format != "vtt" || sidecar.Subtitle.Artifact.TimingOriginSeconds != 0 {
+		t.Fatalf("fallback plan=%+v subtitle=%+v", sidecar, sidecar.Subtitle)
+	}
+	if sidecar.PlanID == native.PlanID || sidecar.PlanAttemptKey == native.PlanAttemptKey {
+		t.Fatal("native failure retried same route")
+	}
+	// A refreshed capability report cannot accidentally reactivate a failed route.
+	request.Operation = playback.ReplanOperationOutputChangeV3
+	request.ReplanRequestID = "native-recovery-output-0002"
+	request.FailedPlanID = sidecar.PlanID
+	request.PlanAttemptID = "native-attempt-0002"
+	request.PlanAttemptKey = sidecar.PlanAttemptKey
+	request.AttemptedPlanKeys = nil
+	request.Failure = playback.FailureV3{}
+	request.ClientPlaybackContext.Output.OutputContextID = "route-2"
+	next := replanPlaybackDecisionV2(t, handler, started.SessionID, request)
+	if next.PlaybackPlan == nil || next.PlaybackPlan.Subtitle.Embedded != nil || next.PlaybackPlan.Subtitle.Artifact == nil {
+		t.Fatalf("native route reenabled: %+v", next)
+	}
+	record, err := handler.PlanStoreV3.GetAttempt(t.Context(), started.SessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if playback.HasFeatureV3(record.NormalizedRequest.ClientFeatures, playback.FeatureEmbeddedSubtitlesV3) {
+		t.Fatal("failure did not persist native disablement")
+	}
+}
+
+func TestNativeSubtitleFailureFallsBackWithoutChangingVideoAndStaysDisabled(t *testing.T) {
+	for name, features := range map[string][]string{
+		"canonical":             {playback.FeatureEmbeddedSubtitlesV3},
+		"normalized_duplicates": {playback.FeatureEmbeddedSubtitlesV3, " EMBEDDED_SUBTITLES_V1 ", "Embedded_Subtitles_V1"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			assertNativeSubtitleFailureFallsBackAndStaysDisabled(t, features)
+		})
 	}
 }

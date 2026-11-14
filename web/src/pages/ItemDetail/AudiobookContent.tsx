@@ -18,7 +18,7 @@ import { useAudiobookPlaybackController } from "@/pages/audiobooks/player/audiob
 import { coldResumePosition } from "@/pages/audiobooks/player/smartRewind";
 import { getAudiobookSmartRewind } from "@/pages/audiobooks/player/useAudiobookPrefs";
 import { hasMachineTranslation } from "./components/machineTranslation";
-import { useAppLanguage, useT, type Translate } from "@/i18n";
+import { numberText, useAppLanguage, useT, type Translate } from "@/i18n";
 
 function formatSeconds(t: Translate, totalSeconds: number): string {
   if (!Number.isFinite(totalSeconds) || totalSeconds < 0) return "";
@@ -27,17 +27,17 @@ function formatSeconds(t: Translate, totalSeconds: number): string {
   const s = Math.floor(totalSeconds % 60);
   if (h > 0) {
     return t("web.detail.duration.hoursMinutes", {
-      hours: String(h),
-      minutes: String(m).padStart(2, "0"),
+      hours: h,
+      minutes: numberText(String(m).padStart(2, "0")),
     });
   }
   if (m > 0) {
     return t("web.detail.mediaInfo.durationMs", {
-      minutes: String(m),
-      seconds: String(s).padStart(2, "0"),
+      minutes: m,
+      seconds: numberText(String(s).padStart(2, "0")),
     });
   }
-  return t("web.detail.mediaInfo.durationS", { seconds: String(s) });
+  return t("web.detail.mediaInfo.durationS", { seconds: s });
 }
 
 function leafUserData(userData: ItemDetail["user_data"]): LeafItemUserData | undefined {
@@ -244,7 +244,7 @@ export default function AudiobookContent({
                   <p className="text-muted-foreground mt-1 text-xs">
                     {t("web.detail.audiobook.listenedProgress", {
                       time: formatSeconds(t, resumeSeconds),
-                      percent: String(Math.round((resumeSeconds / durationTotal) * 100)),
+                      percent: Math.round((resumeSeconds / durationTotal) * 100),
                     })}
                   </p>
                 </div>
@@ -298,7 +298,7 @@ export default function AudiobookContent({
               poster_url: entry.poster_url,
               subtitle:
                 typeof entry.series_index === "number"
-                  ? t("web.detail.books.bookNumber", { number: String(entry.series_index) })
+                  ? t("web.detail.books.bookNumber", { number: entry.series_index })
                   : undefined,
               highlight: entry.content_id === item.content_id,
             }))}

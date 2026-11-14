@@ -631,7 +631,7 @@ export function SourceDialog(props: SourceDialogProps) {
 
   const problemMessage = firstProblem ? (
     <p
-      className="text-destructive flex items-center gap-1.5 text-xs sm:mr-auto sm:self-center"
+      className="text-destructive flex items-center gap-1.5 text-xs sm:me-auto sm:self-center"
       role="alert"
     >
       <AlertTriangle className="size-3.5 shrink-0" />
@@ -684,7 +684,7 @@ export function SourceDialog(props: SourceDialogProps) {
       <Dialog open={open} onOpenChange={handleOpenChange}>
         <DialogContent className="max-h-[calc(100dvh-2rem)] grid-cols-[minmax(0,1fr)] overflow-y-auto sm:max-w-2xl">
           <DialogHeader>
-            <DialogTitle className="pr-6 break-words">
+            <DialogTitle className="pe-6 break-words">
               {t("web.admin.autoscan.sourceDialog.editTitle", { name: props.title })}
             </DialogTitle>
             <DialogDescription>{props.description}</DialogDescription>
@@ -736,7 +736,7 @@ export function SourceDialog(props: SourceDialogProps) {
             <Button
               type="button"
               variant="ghost"
-              className="text-destructive hover:text-destructive hover:bg-destructive/10 sm:mr-auto"
+              className="text-destructive hover:text-destructive hover:bg-destructive/10 sm:me-auto"
               onClick={() => props.onRequestDelete(editSource)}
             >
               <Trash2 />

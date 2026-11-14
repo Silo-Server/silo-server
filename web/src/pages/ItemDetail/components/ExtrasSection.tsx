@@ -6,7 +6,7 @@ import { useWatchPlaybackController } from "@/playback/watchPlaybackContext";
 import { extraKindGroupLabel } from "@/lib/extraKinds";
 import { formatClock } from "@/lib/markers";
 import { decodeThumbhash } from "@/lib/thumbhash";
-import { useAppLanguage, useT } from "@/i18n";
+import { numberText, useAppLanguage, useT } from "@/i18n";
 
 interface ExtrasSectionProps {
   extras: ItemExtra[];
@@ -87,7 +87,7 @@ function ExtraCard({ extra, onPlay }: { extra: ItemExtra; onPlay: () => void }) 
   const stillUrl = extra.still_url && extra.still_url !== failedSrc ? extra.still_url : null;
 
   return (
-    <button type="button" onClick={onPlay} className="group/extra block w-full text-left">
+    <button type="button" onClick={onPlay} className="group/extra block w-full text-start">
       <div
         className="media-card-image bg-muted relative mb-2 aspect-video overflow-hidden rounded-lg"
         style={
@@ -112,6 +112,7 @@ function ExtraCard({ extra, onPlay }: { extra: ItemExtra; onPlay: () => void }) 
         )}
         <div className="absolute inset-0 flex items-center justify-center bg-black/0 transition-colors duration-200 group-hover/extra:bg-black/30">
           <span className="flex h-10 w-10 items-center justify-center rounded-full bg-black/60 opacity-0 backdrop-blur-sm transition-opacity duration-200 group-hover/extra:opacity-100 group-focus-visible/extra:opacity-100">
+            {/* eslint-disable-next-line silo/no-physical-direction -- centres the play triangle, which doesn't mirror */}
             <Play className="ml-0.5 h-4 w-4 fill-white text-white" />
           </span>
         </div>
@@ -120,7 +121,7 @@ function ExtraCard({ extra, onPlay }: { extra: ItemExtra; onPlay: () => void }) 
         <span className="text-foreground block truncate text-[0.8125rem] font-medium">{title}</span>
         {extra.duration_seconds != null && extra.duration_seconds > 0 && (
           <span className="text-muted-foreground block text-[0.6875rem] tabular-nums">
-            {formatClock(extra.duration_seconds)}
+            {numberText(formatClock(extra.duration_seconds))}
           </span>
         )}
       </div>

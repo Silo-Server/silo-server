@@ -7,6 +7,8 @@ import { PlatformTile, classifyPlatform, platformLabel } from "@/components/admi
 import { Button } from "@/components/ui/button";
 import { useAdminUserDevices } from "@/hooks/queries/admin/userActivity";
 import { useT } from "@/i18n";
+import { TOUCH_HIT_AREA } from "@/lib/touchTargets";
+import { cn } from "@/lib/utils";
 
 import { formatLastSeen } from "../format";
 import { deviceLevelId } from "../preferences/levels";
@@ -55,7 +57,7 @@ export function DevicesCard({ userId }: { userId: number }) {
             <Button variant="ghost" size="sm" onClick={() => setShowAll((value) => !value)}>
               {showAll
                 ? t("web.admin.users.detail.activity.devices.showRecent")
-                : t("web.admin.users.detail.activity.showAllCount", { count: String(all.length) })}
+                : t("web.admin.users.detail.activity.showAllCount", { count: all.length })}
             </Button>
           )}
           <Button variant="ghost" size="sm" asChild>
@@ -99,11 +101,14 @@ export function DevicesCard({ userId }: { userId: number }) {
                       {" · "}
                       <Link
                         to={{ search: preferencesSearch(device) }}
-                        className="hover:text-foreground underline-offset-2 hover:underline"
+                        className={cn(
+                          "hover:text-foreground underline-offset-2 hover:underline",
+                          TOUCH_HIT_AREA,
+                        )}
                       >
                         {t("web.admin.users.detail.activity.devices.savedSettings", {
                           count: device.override_count,
-                          count_text: String(device.override_count),
+                          count_text: device.override_count,
                         })}
                       </Link>
                     </>

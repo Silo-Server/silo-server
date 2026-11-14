@@ -272,7 +272,7 @@ export default function SeriesContent({
                       />
                       <span className="text-muted-foreground text-sm">
                         {t("web.detail.seasons.totalCount", {
-                          count: String(singleSeason.episode_count),
+                          count: singleSeason.episode_count,
                         })}
                       </span>
                     </div>

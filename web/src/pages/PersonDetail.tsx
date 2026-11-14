@@ -218,7 +218,7 @@ export default function PersonDetail() {
                 <span className="metadata-badge">
                   {t("web.person.died", {
                     date: formatBirthDate(person.death_date),
-                    age: String(computeAge(person.birth_date, person.death_date)),
+                    age: computeAge(person.birth_date, person.death_date),
                   })}
                 </span>
               )}

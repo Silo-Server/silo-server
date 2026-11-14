@@ -7,6 +7,7 @@ import type { BrowseItem } from "@/api/types";
 import { isNotFoundProblem } from "@/api/v2/request";
 import ItemGrid from "@/components/ItemGrid";
 import { cn } from "@/lib/utils";
+import { formatLocale } from "@/lib/appLocale";
 import PageUnavailable from "@/components/PageUnavailable";
 import ViewTransitionLink from "@/components/ViewTransitionLink";
 import CastCarousel from "@/components/CastCarousel";
@@ -37,7 +38,7 @@ import {
 import { useCanRequest } from "@/hooks/useCanRequest";
 import { useDebounce } from "@/hooks/useDebounce";
 import { useDocumentTitle } from "@/hooks/useDocumentTitle";
-import { useT, type Translate } from "@/i18n";
+import { numberText, useT, type Translate } from "@/i18n";
 import { requestSearchTypeForScope } from "@/lib/mediaRequests";
 import SearchBar from "@/components/SearchBar";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
@@ -418,8 +419,8 @@ function CatalogResults({
     ? t("web.catalog.page.inLibraryNoun")
     : t("web.catalog.page.resultNoun", { count: totalItems });
   const resultCount = inLibrary
-    ? t("web.catalog.page.inLibraryCount", { count: String(totalItems) })
-    : t("web.catalog.page.resultCount", { count: totalItems, shown: String(totalItems) });
+    ? t("web.catalog.page.inLibraryCount", { count: totalItems })
+    : t("web.catalog.page.resultCount", { count: totalItems, shown: totalItems });
 
   if (collectionUnavailable) {
     return (
@@ -462,11 +463,11 @@ function CatalogResults({
             <div className="items-baseline gap-3 sm:flex">
               <div className="hidden h-8 w-px bg-current opacity-15 sm:block" />
               {showExactResultCount ? (
-                <div className="text-right tabular-nums" role="status" aria-live="polite">
+                <div className="text-end tabular-nums" role="status" aria-live="polite">
                   <span className="hidden text-3xl font-extralight tracking-tight sm:inline">
-                    {totalItems}
+                    {numberText(totalItems)}
                   </span>
-                  <span className="text-muted-foreground ml-1.5 hidden text-xs font-medium tracking-widest uppercase sm:inline">
+                  <span className="text-muted-foreground ms-1.5 hidden text-xs font-medium tracking-widest uppercase sm:inline">
                     {resultNoun}
                   </span>
                   <span className="text-muted-foreground text-xs sm:hidden">{resultCount}</span>
@@ -519,7 +520,10 @@ function CatalogResults({
             // A collection's hero has no count of its own; the filter bar shows it.
             resultCountLabel={
               isCollectionSource && showExactResultCount
-                ? `${totalItems} title${totalItems === 1 ? "" : "s"}`
+                ? t("web.catalog.page.titleCount", {
+                    count: totalItems,
+                    shown: totalItems.toLocaleString(formatLocale()),
+                  })
                 : undefined
             }
             resultCountLoading={
@@ -567,7 +571,7 @@ function CatalogResults({
                 ) : (
                   <>
                     <span className="text-muted-foreground text-sm">
-                      {t("web.catalog.page.selectedCount", { count: String(selectedIds.size) })}
+                      {t("web.catalog.page.selectedCount", { count: selectedIds.size })}
                     </span>
                     <Button
                       variant="outline"

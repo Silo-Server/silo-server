@@ -11,6 +11,7 @@ import {
   useAdminRatingSources,
 } from "@/hooks/queries/admin/ratingSources";
 import { useRestartKeys } from "@/hooks/useRestartKeys";
+import { useT, type Translate } from "@/i18n";
 import { languageOptions } from "@/player/utils/languageNames";
 import { useSettingsForm } from "@/hooks/useSettingsForm";
 import { FieldGroup } from "./FieldGroup";
@@ -37,7 +38,7 @@ import { WORKER_SETTING_DEFAULTS, hasWorkerOverrides } from "./settingsWorkerDef
 const GENERAL_KEYS = ["catalog.scope_versions_to_library", "metadata.fallback_language"];
 
 // The server takes two-letter codes; regional variants such as pt-BR are left out.
-function fallbackLanguageOptions() {
+function fallbackLanguageOptions(t: Translate) {
   return [
     ...languageOptions()
       .filter((lang) => !lang.code.includes("-"))
@@ -45,7 +46,10 @@ function fallbackLanguageOptions() {
         value: lang.code,
         label: lang.label,
       })),
-    { value: "original", label: "Original language" },
+    {
+      value: "original",
+      label: t("web.admin.settings.libraryMetadata.general.fallbackLanguage.original"),
+    },
   ];
 }
 
@@ -90,6 +94,7 @@ const KEYS = [
 ];
 
 export default function LibraryMetadataSettings() {
+  const t = useT();
   const form = useSettingsForm({ keys: KEYS });
   const restartKeys = useRestartKeys();
   // An older API node has no rating source list, so the Ratings group shows
@@ -149,32 +154,36 @@ export default function LibraryMetadataSettings() {
 
   if (form.isLoading) {
     return (
-      <div className="space-y-6" role="status" aria-label="Loading settings">
+      <div
+        className="space-y-6"
+        role="status"
+        aria-label={t("web.admin.settings.fields.loadingSettings")}
+      >
         <Skeleton className="h-8 w-48" />
         <Skeleton className="h-32 w-full" />
         <Skeleton className="h-32 w-full" />
         <Skeleton className="h-40 w-full" />
-        <span className="sr-only">Loading settings</span>
+        <span className="sr-only">{t("web.admin.settings.fields.loadingSettings")}</span>
       </div>
     );
   }
 
   return (
     <div className="flex h-full flex-col">
-      <SettingsPageHeader title="Library & Metadata" />
+      <SettingsPageHeader title={t("web.admin.settings.libraryMetadata.title")} />
 
       <div className="flex-1 space-y-5">
         <FieldGroup
-          label="General"
+          label={t("web.admin.settings.libraryMetadata.general.group")}
           restartAll={allRestart(GENERAL_KEYS)}
           dirty={anyDirty(GENERAL_KEYS)}
         >
           {/* Shown as the opposite of the stored key: on is the default, where
               catalog.scope_versions_to_library is false. */}
           <SettingField
-            label="Show all library versions on detail page"
+            label={t("web.admin.settings.libraryMetadata.general.allVersions.label")}
             type="toggle"
-            description="When a title is in several libraries, its detail page lists every version the viewer can access, wherever they opened it. Off, it lists only the files in the library they opened it from. Playback always sees every version."
+            description={t("web.admin.settings.libraryMetadata.general.allVersions.description")}
             value={form.getValue("catalog.scope_versions_to_library") === "true" ? "false" : "true"}
             onChange={(value) =>
               form.setValue(
@@ -185,18 +194,20 @@ export default function LibraryMetadataSettings() {
             restartRequired={restartKeys.has("catalog.scope_versions_to_library")}
           />
           <SettingField
-            label="Fallback metadata language"
+            label={t("web.admin.settings.libraryMetadata.general.fallbackLanguage.label")}
             type="select"
-            description="Used for titles, descriptions, and posters a library's metadata language has no text for, before the original language. Existing items change on their next manual refresh."
+            description={t(
+              "web.admin.settings.libraryMetadata.general.fallbackLanguage.description",
+            )}
             value={form.getValue("metadata.fallback_language") || "en"}
             onChange={(value) => form.setValue("metadata.fallback_language", value)}
-            options={fallbackLanguageOptions()}
+            options={fallbackLanguageOptions(t)}
             restartRequired={restartKeys.has("metadata.fallback_language")}
           />
         </FieldGroup>
 
         <FieldGroup
-          label="Scanning"
+          label={t("web.admin.settings.libraryMetadata.scanning.group")}
           restartAll={allRestart(SCANNING_GROUP_KEYS)}
           dirty={anyDirty(SCANNING_GROUP_KEYS)}
           actions={
@@ -209,41 +220,45 @@ export default function LibraryMetadataSettings() {
                 onClick={restoreWorkerDefaults}
               >
                 <RotateCcw aria-hidden="true" />
-                Restore defaults
+                {t("web.admin.settings.libraryMetadata.scanning.restoreDefaults")}
               </Button>
             ) : undefined
           }
         >
           {showRealtimeSwitch && (
             <SettingField
-              label="Real-time monitoring"
+              label={t("web.admin.settings.libraryMetadata.scanning.realtime.label")}
               type="toggle"
-              description="Off for every library. When on, each library's own switch decides whether its folders are watched."
+              description={t("web.admin.settings.libraryMetadata.scanning.realtime.description")}
               value={form.getValue(REALTIME_MONITORING_KEY) || "true"}
               onChange={(value) => form.setValue(REALTIME_MONITORING_KEY, value)}
               restartRequired={restartKeys.has(REALTIME_MONITORING_KEY)}
             />
           )}
           <SettingField
-            label="Scanner workers"
+            label={t("web.admin.settings.libraryMetadata.scanning.scannerWorkers.label")}
             type="number"
-            description="How many files Silo reads at once."
+            description={t(
+              "web.admin.settings.libraryMetadata.scanning.scannerWorkers.description",
+            )}
             value={form.getValue("scanner.workers")}
             onChange={(value) => form.setValue("scanner.workers", value)}
             restartRequired={restartKeys.has("scanner.workers")}
           />
           <SettingField
-            label="Matcher workers"
+            label={t("web.admin.settings.libraryMetadata.scanning.matcherWorkers.label")}
             type="number"
-            description="How many items Silo looks up at once."
+            description={t(
+              "web.admin.settings.libraryMetadata.scanning.matcherWorkers.description",
+            )}
             value={form.getValue("matcher.workers")}
             onChange={(value) => form.setValue("matcher.workers", value)}
             restartRequired={restartKeys.has("matcher.workers")}
           />
           <SettingField
-            label="Image encoding workers"
+            label={t("web.admin.settings.libraryMetadata.scanning.imageWorkers.label")}
             type="number"
-            description="How many artwork images Silo encodes at once. 0 uses one per CPU core."
+            description={t("web.admin.settings.libraryMetadata.scanning.imageWorkers.description")}
             value={form.getValue("metadata.image_workers")}
             onChange={(value) => form.setValue("metadata.image_workers", value)}
             restartRequired={restartKeys.has("metadata.image_workers")}
@@ -254,17 +269,21 @@ export default function LibraryMetadataSettings() {
             forceOpen={anyDirty(SCANNER_ADVANCED_KEYS)}
           >
             <SettingField
-              label="Person lookups per minute"
+              label={t("web.admin.settings.libraryMetadata.scanning.personRefresh.label")}
               type="number"
-              description="How many cast and crew members each server looks up per minute in the background. Opening a person's page isn't limited."
+              description={t(
+                "web.admin.settings.libraryMetadata.scanning.personRefresh.description",
+              )}
               value={form.getValue("metadata.person_refresh_per_minute")}
               onChange={(value) => form.setValue("metadata.person_refresh_per_minute", value)}
               restartRequired={restartKeys.has("metadata.person_refresh_per_minute")}
             />
             <SettingField
-              label="Matcher batch size"
+              label={t("web.admin.settings.libraryMetadata.scanning.matcherBatch.label")}
               type="number"
-              description="How many items each matcher worker claims per round."
+              description={t(
+                "web.admin.settings.libraryMetadata.scanning.matcherBatch.description",
+              )}
               value={form.getValue("matcher.batch_size")}
               onChange={(value) => form.setValue("matcher.batch_size", value)}
               restartRequired={restartKeys.has("matcher.batch_size")}
@@ -273,19 +292,25 @@ export default function LibraryMetadataSettings() {
         </FieldGroup>
 
         <FieldGroup
-          label="Maturity limits"
-          description="For profiles with a maximum content rating, which is set on each profile."
+          label={t("web.admin.settings.libraryMetadata.maturity.group")}
+          description={t("web.admin.settings.libraryMetadata.maturity.description")}
           restartAll={allRestart(MATURITY_KEYS)}
         >
           <SettingField
-            label="Titles with no age rating"
+            label={t("web.admin.settings.libraryMetadata.maturity.unrated.label")}
             type="select"
-            description="Applies to profiles with a maturity ceiling: whether they see titles with no rating, or marked Not Rated. A rating the server cannot read stays hidden from them either way. Profiles without a ceiling always see these titles."
+            description={t("web.admin.settings.libraryMetadata.maturity.unrated.description")}
             value={form.getValue("access.unrated_content") || "hide"}
             onChange={(value) => form.setValue("access.unrated_content", value)}
             options={[
-              { value: "hide", label: "Hide from profiles with a ceiling" },
-              { value: "allow", label: "Show to every profile" },
+              {
+                value: "hide",
+                label: t("web.admin.settings.libraryMetadata.maturity.unrated.hide"),
+              },
+              {
+                value: "allow",
+                label: t("web.admin.settings.libraryMetadata.maturity.unrated.allow"),
+              },
             ]}
             restartRequired={restartKeys.has("access.unrated_content")}
           />
@@ -293,23 +318,33 @@ export default function LibraryMetadataSettings() {
 
         {pluginRatingSources && (
           <FieldGroup
-            label="Ratings"
-            description="IMDb and TMDB scores have no switch: a title shows them whenever a supported metadata plugin or the title's .nfo file provides them. Metadata providers can add other ratings; turn one on to show its scores on title pages in every app. A title page shows at most three ratings, in this order, so a rating turned on shows only where fewer than three come before it. Rotten Tomatoes scores also show on poster badges. Check a rating's terms before you turn it on: some, such as Rotten Tomatoes, restrict how others may display their scores."
+            label={t("web.admin.settings.libraryMetadata.ratings.group")}
+            description={t("web.admin.settings.libraryMetadata.ratings.description")}
             restartAll={allRestart(RATINGS_KEYS)}
           >
             {ratingSources.isError && (
-              <SettingFieldStatus tone="warn">Couldn't load the rating sources.</SettingFieldStatus>
+              <SettingFieldStatus tone="warn">
+                {t("web.admin.settings.libraryMetadata.ratings.loadError")}
+              </SettingFieldStatus>
             )}
             {ratingSources.isSuccess &&
               ratingSourceGroups.length === 0 &&
               undeclaredSources.length === 0 && (
                 <SettingFieldStatus tone="muted">
-                  No metadata plugin adds other ratings.
+                  {t("web.admin.settings.libraryMetadata.ratings.empty")}
                 </SettingFieldStatus>
               )}
             {ratingSourceGroups.map(({ provider, sources }) => (
-              <div key={provider} role="group" aria-label={`From ${provider}`}>
-                <p className="text-muted-foreground pt-2 text-xs font-semibold">From {provider}</p>
+              <div
+                key={provider}
+                role="group"
+                aria-label={t("web.admin.settings.libraryMetadata.ratings.fromProvider", {
+                  provider,
+                })}
+              >
+                <p className="text-muted-foreground pt-2 text-xs font-semibold">
+                  {t("web.admin.settings.libraryMetadata.ratings.fromProvider", { provider })}
+                </p>
                 {sources.map(({ source, label }) => (
                   <SettingField
                     key={source}
@@ -323,13 +358,15 @@ export default function LibraryMetadataSettings() {
               </div>
             ))}
             {undeclaredSources.length > 0 && (
-              <div role="group" aria-label="Not added by an enabled plugin">
+              <div
+                role="group"
+                aria-label={t("web.admin.settings.libraryMetadata.ratings.undeclared.heading")}
+              >
                 <p className="text-muted-foreground pt-2 text-xs font-semibold">
-                  Not added by an enabled plugin
+                  {t("web.admin.settings.libraryMetadata.ratings.undeclared.heading")}
                 </p>
                 <p className="text-muted-foreground text-xs">
-                  These show nothing until an enabled plugin adds them again. Turn them off so they
-                  do not come back on their own.
+                  {t("web.admin.settings.libraryMetadata.ratings.undeclared.description")}
                 </p>
                 {undeclaredSources.map((source) => (
                   <SettingField
@@ -347,15 +384,15 @@ export default function LibraryMetadataSettings() {
         )}
 
         <FieldGroup
-          label="Subtitle sync"
-          description="Shifts subtitle timing to match the video's audio."
+          label={t("web.admin.settings.libraryMetadata.subtitleSync.group")}
+          description={t("web.admin.settings.libraryMetadata.subtitleSync.description")}
           restartAll={allRestart(SUBTITLE_SYNC_KEYS)}
           dirty={anyDirty(SUBTITLE_SYNC_KEYS)}
         >
           <SettingField
-            label="Sync subtitles automatically"
+            label={t("web.admin.settings.libraryMetadata.subtitleSync.auto.label")}
             type="toggle"
-            description="Aligns subtitles to the video's audio: downloaded and uploaded ones when they're added, any other the first time it's played. Fixes subtitles cut for a different release."
+            description={t("web.admin.settings.libraryMetadata.subtitleSync.auto.description")}
             dirty={form.isDirty("subtitles.auto_sync")}
             value={form.getValue("subtitles.auto_sync") || "true"}
             onChange={(value) => form.setValue("subtitles.auto_sync", value)}
@@ -372,14 +409,16 @@ export default function LibraryMetadataSettings() {
             }
           >
             <SettingField
-              label="Where to analyze audio"
+              label={t("web.admin.settings.libraryMetadata.subtitleSync.execution.label")}
               type="select"
-              description="Sync decodes a few minutes of the file's audio."
+              description={t(
+                "web.admin.settings.libraryMetadata.subtitleSync.execution.description",
+              )}
               options={subtitleSyncExecutionOptions(syncExecution, transcodeNodeAvailable)}
               status={
                 !transcodeNodeAvailable && syncOnNodes ? (
                   <SettingFieldStatus tone="warn">
-                    No transcode nodes are connected
+                    {t("web.admin.settings.libraryMetadata.subtitleSync.execution.noNodes")}
                   </SettingFieldStatus>
                 ) : undefined
               }
@@ -390,9 +429,11 @@ export default function LibraryMetadataSettings() {
             />
             {showSyncCapacity && (
               <SettingField
-                label="Concurrent syncs per transcode node"
+                label={t("web.admin.settings.libraryMetadata.subtitleSync.capacity.label")}
                 type="number"
-                description="How many subtitles one transcode node syncs at once."
+                description={t(
+                  "web.admin.settings.libraryMetadata.subtitleSync.capacity.description",
+                )}
                 dirty={form.isDirty("subtitles.sync_node_capacity")}
                 value={form.getValue("subtitles.sync_node_capacity") || "1"}
                 onChange={(value) => form.setValue("subtitles.sync_node_capacity", value)}

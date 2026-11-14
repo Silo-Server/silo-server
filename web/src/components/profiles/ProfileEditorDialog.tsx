@@ -79,6 +79,7 @@ export function ProfileEditorDialog({
   profileContext,
   save,
   onOpenChange,
+  className,
   onSaveSuccess,
 }: ProfileEditorDialogProps) {
   const t = useT();
@@ -90,7 +91,7 @@ export function ProfileEditorDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-3xl">
+      <DialogContent className={cn("sm:max-w-3xl", className)}>
         <DialogHeader>
           <DialogTitle>
             {mode === "edit"
@@ -483,7 +484,7 @@ function ProfileEditorForm({
                     setPresetBatch(0);
                   }}
                   className={cn(
-                    "rounded-2xl border px-4 py-3 text-left transition-colors",
+                    "rounded-2xl border px-4 py-3 text-start transition-colors",
                     selected
                       ? "border-primary bg-primary/8 text-foreground"
                       : "border-border hover:border-primary/40",
@@ -499,7 +500,7 @@ function ProfileEditorForm({
             <p className="text-muted-foreground text-xs">
               {t("web.profiles.editor.presetsShowing", {
                 count: visiblePresets.length,
-                count_text: String(visiblePresets.length),
+                count_text: visiblePresets.length,
                 summary:
                   PROFILE_AVATAR_STYLES.find((style) => style.id === activePresetStyle)?.summary ??
                   "",

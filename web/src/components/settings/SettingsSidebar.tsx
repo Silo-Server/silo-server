@@ -72,7 +72,7 @@ export function SettingsSidebar({
       data-settings-sidebar=""
       data-sidebar-entrance={entrance}
       className={cn(
-        "border-sidebar-border/70 bg-sidebar/92 fixed top-0 bottom-0 left-0 z-40 flex flex-col border-r backdrop-blur-2xl",
+        "border-sidebar-border/70 bg-sidebar/92 fixed start-0 top-0 bottom-0 z-40 flex flex-col border-e backdrop-blur-2xl",
         className,
       )}
     >
@@ -99,8 +99,14 @@ export function SettingsSidebar({
       </div>
 
       <nav aria-label={title} className="sidebar-scroll flex-1 space-y-5 overflow-y-auto px-3 pb-6">
-        {groups.map((group) => (
-          <SideNavSection key={group.label} label={group.label} idPrefix={idPrefix}>
+        {groups.map((group, index) => (
+          // The groups carry no id; the position only has to be unique in this render.
+          <SideNavSection
+            key={group.label}
+            id={String(index)}
+            label={group.label}
+            idPrefix={idPrefix}
+          >
             {group.items.map((item) => (
               <SideNavItem
                 key={item.id}

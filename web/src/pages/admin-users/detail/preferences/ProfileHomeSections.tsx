@@ -20,9 +20,9 @@ import {
   hydrateRemovedSystemSections,
 } from "@/lib/homeRows/profileOverrides";
 import { useT, type Translate } from "@/i18n";
+import { TOUCH_TARGETS } from "@/lib/touchTargets";
 import { fetchRecipeCatalog } from "@/lib/recipes";
 
-import { possessiveText } from "../format";
 import { DetailCard } from "../ui";
 
 // A refused save names its reason in the problem's first error (a 400 from
@@ -106,7 +106,7 @@ export function ProfileHomeSections({
   } else if (settings.isError || overrides.isError) {
     body = (
       <p role="alert" className="text-destructive px-5 py-8 text-center text-sm">
-        {possessiveText(t, "web.admin.users.detail.preferences.home.loadFailed", {
+        {t("web.admin.users.detail.preferences.home.loadFailed", {
           profile: profileName,
         })}
       </p>
@@ -131,7 +131,7 @@ export function ProfileHomeSections({
     <>
       <DetailCard
         title={t("web.admin.users.detail.preferences.home.title", { profile: profileName })}
-        description={possessiveText(t, "web.admin.users.detail.preferences.home.description", {
+        description={t("web.admin.users.detail.preferences.home.description", {
           profile: profileName,
         })}
         actions={
@@ -145,19 +145,20 @@ export function ProfileHomeSections({
       <ConfirmDialog
         open={confirmReset}
         onOpenChange={setConfirmReset}
-        title={possessiveText(t, "web.admin.users.detail.preferences.home.resetTitle", {
+        title={t("web.admin.users.detail.preferences.home.resetTitle", {
           profile: profileName,
         })}
-        description={possessiveText(t, "web.admin.users.detail.preferences.home.resetDescription", {
+        description={t("web.admin.users.detail.preferences.home.resetDescription", {
           profile: profileName,
         })}
         confirmLabel={t("web.admin.users.detail.preferences.home.resetConfirm")}
+        className={TOUCH_TARGETS}
         onConfirm={() => {
           setConfirmReset(false);
           reset.mutate(undefined, {
             onSuccess: () =>
               toast.success(
-                possessiveText(t, "web.admin.users.detail.preferences.home.resetDone", {
+                t("web.admin.users.detail.preferences.home.resetDone", {
                   profile: profileName,
                 }),
               ),

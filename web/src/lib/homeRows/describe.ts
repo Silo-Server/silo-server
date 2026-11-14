@@ -1,6 +1,8 @@
 import { queryDefinitionFromSectionConfig, type LibraryCollection } from "@/api/types";
-import { t, type MessageKey } from "@/i18n";
+import { serverText, t, type MessageKey } from "@/i18n";
 import { collectionKindLabel, collectionKindOf } from "@/lib/collections/types";
+import { formatDecimal } from "@/lib/numberFormat";
+import { homeRowTitle } from "@/lib/sectionTitle";
 import { rowKindLabel } from "./catalog";
 import type { HomeRow, PageRef, Surface } from "./types";
 
@@ -101,9 +103,9 @@ function positive(value: unknown, fallback: number): number {
   return n !== undefined && n > 0 ? n : fallback;
 }
 
-/** A TMDB rating floor as the presets write it: 7.5, 8.0. */
+/** A TMDB rating floor as the presets write it, shown with one decimal: 7.5, 8.0. */
 function rating(value: unknown, fallback: number): string {
-  return (num(value) || fallback).toFixed(1);
+  return formatDecimal(num(value) || fallback, 1);
 }
 
 function cadence(config: Record<string, unknown>): string {
@@ -258,7 +260,8 @@ function describeRecentlyAdded(config: Record<string, unknown>, onHome: boolean)
  */
 export function describeRow(row: HomeRow, context: DescribeContext): DescriptionPart[] {
   if (row.renamedFrom) {
-    return withStrong(t("web.home.rows.describe.renamedFrom", { name: STRONG }), row.renamedFrom);
+    const name = serverText(row.renamedFromKey?.key, row.renamedFromKey?.args, row.renamedFrom);
+    return withStrong(t("web.home.rows.describe.renamedFrom", { name: STRONG }), name);
   }
   const own = context.surface === "profile" ? profileSentence(row) : undefined;
   if (own) return [t(own)];
@@ -279,7 +282,7 @@ function describeKind(row: HomeRow, context: DescribeContext): DescriptionPart[]
       return [describeRecentlyAdded(config, onHome)];
     case "new_to_library": {
       const days = num(config.lookback_days) ?? 30;
-      return [t("web.home.rows.describe.newToLibrary", { count: days, days: String(days) })];
+      return [t("web.home.rows.describe.newToLibrary", { count: days, days: days })];
     }
     case "trending_on_server": {
       const window = SERVER_WINDOWS[str(config.window) ?? ""];
@@ -308,12 +311,12 @@ function describeKind(row: HomeRow, context: DescribeContext): DescriptionPart[]
         }),
       ];
     case "trending_discover": {
-      // The movies-only and TV-only wording is new; its catalog keys are a follow-up,
-      // so those two stay English until the catalog has them.
       if (config.filter_type === "movie" || config.filter_type === "series") {
-        const what = config.filter_type === "movie" ? "Movies trending" : "TV shows trending";
         return [
-          `${what} on TMDB ${config.window === "day" ? "today" : "this week"}, from what you have`,
+          t("web.home.rows.describe.trendingDiscoverFiltered", {
+            media: config.filter_type,
+            window: config.window === "day" ? "day" : "week",
+          }),
         ];
       }
       return [
@@ -343,7 +346,7 @@ function describeKind(row: HomeRow, context: DescribeContext): DescriptionPart[]
           votes: MIN_VOTES,
           plays,
           // The count as typed: `#` would group it (1,234).
-          plays_text: String(plays),
+          plays_text: plays,
         }),
       ];
     }
@@ -358,10 +361,10 @@ function describeKind(row: HomeRow, context: DescribeContext): DescriptionPart[]
       const days = positive(config.lookback_days, 365);
       return [
         t("web.home.rows.describe.forgotten", {
-          rating: "7.0",
+          rating: formatDecimal(7, 1),
           votes: MIN_VOTES,
           count: days,
-          days: String(days),
+          days: days,
         }),
       ];
     }
@@ -378,7 +381,7 @@ function describeKind(row: HomeRow, context: DescribeContext): DescriptionPart[]
       return [
         t("web.home.rows.describe.shortWatches", {
           count: minutes,
-          minutes: String(minutes),
+          minutes: minutes,
           rating: rating(config.min_rating, 6),
           votes: MIN_VOTES,
         }),
@@ -394,7 +397,7 @@ function describeKind(row: HomeRow, context: DescribeContext): DescriptionPart[]
 }
 
 export function titleCount(count: number): string {
-  return t("web.home.rows.describe.titleCount", { count, count_text: String(count) });
+  return t("web.home.rows.describe.titleCount", { count, count_text: count });
 }
 
 /**
@@ -423,14 +426,14 @@ export function rowSwitchLabel(
 ): string {
   if (surface === "profile") {
     return t("web.home.rows.describe.switchProfile", {
-      row: row.title,
+      row: homeRowTitle(row),
       page_kind: profilePageKind(page, pageLabel),
       page: pageLabel,
     });
   }
   return t("web.home.rows.describe.switchAdmin", {
     shown: row.shown ? "yes" : "no",
-    row: row.title,
+    row: homeRowTitle(row),
   });
 }
 

@@ -76,8 +76,8 @@ export default function BoxSetPage() {
               {boxSet.played_count > 0 ? (
                 <span className="metadata-badge">
                   {t("web.detail.boxSet.watchedOf", {
-                    played: String(boxSet.played_count),
-                    total: String(boxSet.movie_count),
+                    played: boxSet.played_count,
+                    total: boxSet.movie_count,
                   })}
                 </span>
               ) : null}

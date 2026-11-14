@@ -61,7 +61,7 @@ export function MetadataTranslatePanel({ item }: { item: ItemDetail }) {
           ? t("web.item.translate.nothingToTranslate")
           : t("web.item.translate.translated", {
               count: lastJob.fields_done,
-              field_count: String(lastJob.fields_done),
+              field_count: lastJob.fields_done,
             }),
       );
       void invalidateMediaSurfaceQueries(queryClient, { itemId: item.content_id });
@@ -135,8 +135,8 @@ export function MetadataTranslatePanel({ item }: { item: ItemDetail }) {
           {activeJob.fields_total > 0
             ? t("web.item.translate.statusWithFields", {
                 status: activeJob.progress_message || t("web.item.translate.working"),
-                done: String(activeJob.fields_done),
-                total: String(activeJob.fields_total),
+                done: activeJob.fields_done,
+                total: activeJob.fields_total,
               })
             : t("web.item.translate.status", {
                 status: activeJob.progress_message || t("web.item.translate.working"),

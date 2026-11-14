@@ -44,6 +44,28 @@ func packageErrorTestServer(t *testing.T, status int, body []byte) *httptest.Ser
 	return server
 }
 
+// manifestScript is a plugin binary whose manifest command prints manifest
+// with its own SHA-256 as the checksum, as the SDK does. When ranMarker is
+// set, running it also creates that file, so a test can tell whether the
+// installer executed the binary.
+func manifestScript(t *testing.T, manifest *pluginv1.PluginManifest, ranMarker string) []byte {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("uses shell scripts")
+	}
+	manifest.Checksum = "CHECKSUM"
+	out, err := protojson.Marshal(manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	script := "#!/bin/sh\n"
+	if ranMarker != "" {
+		script += "touch '" + ranMarker + "'\n"
+	}
+	return []byte(script + "sum=$( (sha256sum \"$0\" 2>/dev/null || shasum -a 256 \"$0\") | cut -d' ' -f1)\n" +
+		"sed \"s/CHECKSUM/$sum/\" <<'MANIFEST'\n" + string(out) + "\nMANIFEST\n")
+}
+
 func sha256Hex(data []byte) string {
 	sum := sha256.Sum256(data)
 	return hex.EncodeToString(sum[:])
@@ -123,7 +145,6 @@ func TestInstallBinaryChecksumMismatchIsPackageError(t *testing.T) {
 	_, err := installer.InstallBinary(context.Background(), InstallBinaryRequest{
 		BinaryURL: server.URL + "/plugin",
 		Checksum:  sha256Hex([]byte("original")),
-		Manifest:  packageErrorTestManifest("test.plugin", "1.0.0"),
 	})
 	requirePackageError(t, err, "SHA-256 checksum")
 	requireTransient(t, err, false)
@@ -168,10 +189,6 @@ func TestInstallBinaryUnreachableHostIsTransient(t *testing.T) {
 // or another version: the catalog's identity decides which installation an
 // install replaces.
 func TestInstallBinaryRejectsBinaryNotListedByCatalog(t *testing.T) {
-	body := []byte("binary")
-	server := packageErrorTestServer(t, http.StatusOK, body)
-	installer := NewInstaller(nil, InstallerOptions{BaseDir: t.TempDir(), HTTPClient: server.Client()})
-
 	for _, tc := range []struct {
 		name     string
 		manifest *pluginv1.PluginManifest
@@ -180,10 +197,12 @@ func TestInstallBinaryRejectsBinaryNotListedByCatalog(t *testing.T) {
 		{name: "other version", manifest: packageErrorTestManifest("test.plugin", "2.0.0")},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			body := manifestScript(t, tc.manifest, "")
+			server := packageErrorTestServer(t, http.StatusOK, body)
+			installer := NewInstaller(nil, InstallerOptions{BaseDir: t.TempDir(), HTTPClient: server.Client()})
 			_, err := installer.InstallBinary(context.Background(), InstallBinaryRequest{
 				BinaryURL: server.URL + "/plugin",
 				Checksum:  sha256Hex(body),
-				Manifest:  tc.manifest,
 				PluginID:  "test.plugin",
 				Version:   "1.0.0",
 			})

@@ -1002,11 +1002,11 @@ export function useImportCatalogSeed() {
         t("web.admin.libraries.toast.imported", {
           items: t("web.admin.libraries.toast.importedItems", {
             count: payload.result.items_created,
-            count_text: String(payload.result.items_created),
+            count_text: payload.result.items_created,
           }),
           files: t("web.admin.libraries.toast.importedFiles", {
             count: payload.result.files_created,
-            count_text: String(payload.result.files_created),
+            count_text: payload.result.files_created,
           }),
         }),
       );

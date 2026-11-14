@@ -50,6 +50,7 @@ import { isActingAdmin } from "@/lib/permissions";
 import { AlertTriangle, CheckCircle2, CircleSlash2, Clock, Loader2, XCircle } from "lucide-react";
 import { formatRelativeTime as formatRelativeTimeBase } from "@/lib/date";
 import { useT, type Translate } from "@/i18n";
+import { formatLocale } from "@/lib/appLocale";
 
 const STATUS_CONFIG = {
   queued: {
@@ -929,7 +930,7 @@ function SourceCard({
       type="button"
       onClick={onClick}
       className={cn(
-        "relative rounded-xl border p-4 text-left transition-all duration-200",
+        "relative rounded-xl border p-4 text-start transition-all duration-200",
         selected
           ? isEmby
             ? "border-emerald-500/40 bg-emerald-500/[0.06]"
@@ -960,7 +961,7 @@ function SourceCard({
         </div>
       </div>
       {selected && (
-        <div className="absolute top-3 right-3">
+        <div className="absolute end-3 top-3">
           <div
             className={cn(
               "h-2 w-2 rounded-full",
@@ -1080,8 +1081,9 @@ function RunSummary({ run }: { run: PersonalImportRun | null }) {
             <div className="h-full w-1/3 animate-pulse rounded-full bg-amber-400" />
           </div>
           <div className="text-muted-foreground text-xs tabular-nums">
-            {/* eslint-disable-next-line formatjs/no-literal-string-in-jsx -- reworded on main; its catalog key is a follow-up */}
-            {processed.toLocaleString()} processed so far
+            {t("web.settings.historyImport.processedSoFar", {
+              processed: processed.toLocaleString(formatLocale()),
+            })}
           </div>
         </div>
       )}
@@ -1160,8 +1162,8 @@ function RunSummary({ run }: { run: PersonalImportRun | null }) {
                 <div className="font-medium">
                   {sample.title}
                   {sample.year ? (
-                    <span className="text-muted-foreground ml-1.5 font-normal">
-                      {t("web.settings.historyImport.sampleYear", { year: String(sample.year) })}
+                    <span className="text-muted-foreground ms-1.5 font-normal">
+                      {t("web.settings.historyImport.sampleYear", { year: sample.year })}
                     </span>
                   ) : null}
                 </div>
@@ -1228,7 +1230,7 @@ function HistoryRunCard({
       type="button"
       onClick={onClick}
       className={cn(
-        "flex w-full items-center justify-between rounded-[1.2rem] px-4 py-3 text-left transition-all duration-200",
+        "flex w-full items-center justify-between rounded-[1.2rem] px-4 py-3 text-start transition-all duration-200",
         active ? "surface-panel-subtle ring-1 ring-white/[0.08]" : "hover:surface-panel-subtle",
       )}
     >
@@ -1261,7 +1263,7 @@ function HistoryRunCard({
             {run.matched > 0
               ? t("web.settings.historyImport.timeWithMatched", {
                   time: formatRelativeTime(t, run.created_at),
-                  count: String(run.matched),
+                  count: run.matched,
                   detail: (chunks) => <span>{chunks}</span>,
                 })
               : formatRelativeTime(t, run.created_at)}
@@ -1294,14 +1296,13 @@ function formatRelativeTime(t: Translate, dateStr: string): string {
 
 function formatDuration(t: Translate, startStr: string, endStr: string): string {
   const seconds = Math.floor((new Date(endStr).getTime() - new Date(startStr).getTime()) / 1000);
-  if (seconds < 60)
-    return t("web.settings.historyImport.duration.seconds", { seconds: String(seconds) });
+  if (seconds < 60) return t("web.settings.historyImport.duration.seconds", { seconds: seconds });
   const m = Math.floor(seconds / 60);
   const s = seconds % 60;
   return s > 0
     ? t("web.settings.historyImport.duration.minutesSeconds", {
-        minutes: String(m),
-        seconds: String(s),
+        minutes: m,
+        seconds: s,
       })
-    : t("web.settings.historyImport.duration.minutes", { minutes: String(m) });
+    : t("web.settings.historyImport.duration.minutes", { minutes: m });
 }

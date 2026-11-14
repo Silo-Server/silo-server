@@ -29,8 +29,8 @@ export default function PageBack({ label, to = "/", up = false, floating = false
   const t = useT();
   const navigate = useViewTransitionNavigate();
   const position = floating
-    ? "absolute top-4 left-2 sm:top-6 lg:fixed lg:left-[268px]"
-    : "absolute top-4 left-2 sm:top-6";
+    ? "absolute top-4 start-2 sm:top-6 lg:fixed lg:start-[268px]"
+    : "absolute top-4 start-2 sm:top-6";
 
   function goBack() {
     // With nothing behind us — a cold entry, a shared link — there is no step

@@ -15,6 +15,7 @@ import { RowChangedError, type HomeRow, type LibraryPage } from "@/lib/homeRows/
 import { LibraryPageChips } from "./addRow/LibraryPageChips";
 import { useT } from "@/i18n";
 import { appLanguage } from "@/lib/appLocale";
+import { useHomeRowTitle } from "@/lib/sectionTitle";
 
 /**
  * ⋯ Add to other libraries…: copies an existing row to other library pages.
@@ -42,6 +43,7 @@ export function AddToOtherLibrariesDialog({
   const [open, setOpen] = useState(true);
   const busyRef = useRef(false);
   const t = useT();
+  const rowTitle = useHomeRowTitle();
 
   async function confirm() {
     if (busyRef.current || selectedIds.length === 0) return;
@@ -77,7 +79,7 @@ export function AddToOtherLibrariesDialog({
       >
         <DialogHeader>
           <DialogTitle>
-            {t("web.home.rows.addToOtherLibraries.title", { row: row.title })}
+            {t("web.home.rows.addToOtherLibraries.title", { row: rowTitle(row) })}
           </DialogTitle>
           <DialogDescription>
             {t("web.home.rows.addToOtherLibraries.description")}
@@ -98,7 +100,7 @@ export function AddToOtherLibrariesDialog({
         />
         {changed ? (
           <p role="alert" className="text-sm">
-            {t("web.home.rows.addToOtherLibraries.changed", { row: row.title })}
+            {t("web.home.rows.addToOtherLibraries.changed", { row: rowTitle(row) })}
           </p>
         ) : null}
         <DialogFooter>

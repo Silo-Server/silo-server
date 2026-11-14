@@ -170,18 +170,18 @@ export function DeviceList({
   return (
     <div className="surface-panel rounded-[1.5rem] border-0 p-3 shadow-none">
       <div className="relative mb-1">
-        <Search className="text-muted-foreground pointer-events-none absolute top-1/2 left-2.5 h-3.5 w-3.5 -translate-y-1/2" />
+        <Search className="text-muted-foreground pointer-events-none absolute start-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2" />
         <Input
           value={search}
           onChange={(event) => onSearchChange(event.target.value)}
           placeholder={t("web.settings.deviceList.searchPlaceholder", {
             count: devices.length,
-            count_text: String(devices.length),
+            count_text: devices.length,
           })}
           aria-label={t("web.settings.deviceList.searchLabel")}
           // text-base on mobile: iOS Safari zooms the viewport when a focused
           // input's font is under 16px, and the zoom does not undo itself.
-          className="h-11 pl-8 text-base xl:h-9 xl:text-[13px]"
+          className="h-11 ps-8 text-base xl:h-9 xl:text-[13px]"
         />
       </div>
 
@@ -229,7 +229,7 @@ export function DeviceList({
           with a few hundred devices produced a thirteen-thousand-pixel page,
           so the settings never came into view. The list keeps its own scroll
           and the page stays roughly one screen. */}
-      <div className="overlay-scroll -mr-1.5 max-h-[min(60vh,520px)] overflow-y-auto overscroll-contain pr-1.5 xl:max-h-[calc(100vh-16rem)]">
+      <div className="overlay-scroll -me-1.5 max-h-[min(60vh,520px)] overflow-y-auto overscroll-contain pe-1.5 xl:max-h-[calc(100vh-16rem)]">
         {sections.map((section) => (
           <section key={section.title}>
             <h3 className="text-muted-foreground bg-surface sticky top-0 z-10 px-2 pt-3 pb-1 text-xs font-semibold tracking-[0.09em] uppercase">
@@ -263,7 +263,7 @@ export function DeviceList({
             ? t("web.settings.deviceList.hideUnused")
             : t("web.settings.deviceList.showUnused", {
                 count: dormantCount,
-                count_text: String(dormantCount),
+                count_text: dormantCount,
               })}
         </button>
       ) : null}
@@ -332,7 +332,7 @@ function ProfileChip({
       aria-label={t("web.settings.deviceList.profileChipLabel", {
         label,
         count,
-        count_text: String(count),
+        count_text: count,
       })}
       className={cn(
         "inline-flex min-h-11 shrink-0 items-center gap-1.5 rounded-full border px-3.5 text-[13px] font-medium whitespace-nowrap transition-colors xl:min-h-0 xl:px-2.5 xl:py-1 xl:text-[12px]",
@@ -366,7 +366,7 @@ function DeviceRow({
       aria-current={selected ? "true" : undefined}
       onClick={() => onSelect(device)}
       className={cn(
-        "flex w-full items-center gap-2.5 rounded-xl px-2 py-2.5 text-left transition-colors",
+        "flex w-full items-center gap-2.5 rounded-xl px-2 py-2.5 text-start transition-colors",
         // Rows are a tap target on a phone and a selection on a desktop, so
         // they carry a comfortable minimum height only where that matters.
         "min-h-14 xl:min-h-0",
@@ -414,7 +414,7 @@ function ChangedCount({ count }: { count: number }) {
   return (
     <span
       className="shrink-0 rounded-full border border-amber-500/30 bg-amber-500/10 px-1.5 text-xs font-semibold text-amber-300"
-      aria-label={t("web.settings.deviceList.changedCount", { count, count_text: String(count) })}
+      aria-label={t("web.settings.deviceList.changedCount", { count, count_text: count })}
     >
       {count}
     </span>

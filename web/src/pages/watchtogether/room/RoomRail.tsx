@@ -13,9 +13,8 @@ function relativeTime(at: number, now: number, t: Translate) {
   const seconds = Math.max(0, Math.round((now - at) / 1000));
   if (seconds < 45) return t("web.watchTogether.activity.timeNow");
   const minutes = Math.round(seconds / 60);
-  if (minutes < 60)
-    return t("web.watchTogether.activity.timeMinutes", { minutes: String(minutes) });
-  return t("web.watchTogether.activity.timeHours", { hours: String(Math.round(minutes / 60)) });
+  if (minutes < 60) return t("web.watchTogether.activity.timeMinutes", { minutes: minutes });
+  return t("web.watchTogether.activity.timeHours", { hours: Math.round(minutes / 60) });
 }
 
 const modeText: Record<string, MessageKey> = {
@@ -215,7 +214,7 @@ export function RoomRailBody({
         <TabsTrigger value="people">
           {t("web.watchTogether.rail.people")}
           {room ? (
-            <span className="bg-surface-raised ml-1.5 rounded-full px-1.5 py-0.5 text-[10px] font-semibold">
+            <span className="bg-surface-raised ms-1.5 rounded-full px-1.5 py-0.5 text-[10px] font-semibold">
               {room.member_count}
             </span>
           ) : null}
@@ -252,19 +251,19 @@ export function RoomRail(props: {
   const latest = props.entries[0];
   return (
     <>
-      <aside className="border-border/60 hidden min-h-0 w-80 shrink-0 border-l md:flex md:flex-col">
+      <aside className="border-border/60 hidden min-h-0 w-80 shrink-0 border-s md:flex md:flex-col">
         <RoomRailBody {...props} />
       </aside>
       <div className="border-border/60 flex items-center gap-3 border-t px-4 py-2 md:hidden">
         <button
           type="button"
           onClick={() => setOpen(true)}
-          className="flex min-w-0 flex-1 items-center gap-3 text-left text-sm"
+          className="flex min-w-0 flex-1 items-center gap-3 text-start text-sm"
           aria-label={t("web.watchTogether.rail.openLabel")}
         >
           <span className="font-semibold">
             {t("web.watchTogether.rail.peopleCount", {
-              count: String(props.room?.member_count ?? 0),
+              count: props.room?.member_count ?? 0,
             })}
           </span>
           <span className="text-muted-foreground truncate text-xs">

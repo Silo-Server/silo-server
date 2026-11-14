@@ -12,14 +12,16 @@ import {
   useUpdateAdminUserSetting,
   type AdminUserSettingEntry,
 } from "@/hooks/queries/admin/users";
-import { useT, type MessageKey, type Translate } from "@/i18n";
+import { useAppLanguage, useT, type MessageKey, type Translate } from "@/i18n";
+import { TOUCH_TARGETS } from "@/lib/touchTargets";
 import {
   formatSettingValue,
   getSettingDefinition,
   isStructuredSetting,
 } from "@/lib/settingsDisplay";
+import { settingDescription, settingLabel } from "@/lib/settingsText";
 
-import { formatLastSeen, possessiveText } from "../format";
+import { formatLastSeen } from "../format";
 import { DetailCard } from "../ui";
 import { AddSettingPicker } from "./AddSettingPicker";
 import {
@@ -60,18 +62,18 @@ function levelDescription(t: Translate, level: PreferenceLevel): string {
           : null,
       ].filter(Boolean);
       return meta.length > 0
-        ? possessiveText(t, "web.admin.users.detail.preferences.level.descDeviceWithMeta", {
+        ? t("web.admin.users.detail.preferences.level.descDeviceWithMeta", {
             meta: meta.join(" · "),
             profile,
           })
-        : possessiveText(t, "web.admin.users.detail.preferences.level.descDevice", { profile });
+        : t("web.admin.users.detail.preferences.level.descDevice", { profile });
     }
     case "client":
-      return possessiveText(t, "web.admin.users.detail.preferences.level.descClient", { profile });
+      return t("web.admin.users.detail.preferences.level.descClient", { profile });
     case "library":
-      return possessiveText(t, "web.admin.users.detail.preferences.level.descLibrary", { profile });
+      return t("web.admin.users.detail.preferences.level.descLibrary", { profile });
     case "series":
-      return possessiveText(t, "web.admin.users.detail.preferences.level.descSeries", { profile });
+      return t("web.admin.users.detail.preferences.level.descSeries", { profile });
   }
 }
 
@@ -108,7 +110,7 @@ function emptyText(t: Translate, level: PreferenceLevel): { title: string; detai
   }
   return {
     title: t(EMPTY_TITLE[level.kind]),
-    detail: possessiveText(t, "web.admin.users.detail.preferences.empty.detail", {
+    detail: t("web.admin.users.detail.preferences.empty.detail", {
       profile: level.profileName,
     }),
   };
@@ -132,7 +134,7 @@ function SettingRow({
 }) {
   const t = useT();
   const definition = getSettingDefinition(entry.key);
-  const label = definition?.label ?? entry.key;
+  const label = definition ? settingLabel(definition) : entry.key;
   // A key this build does not know, an object-valued one, or one the manifest
   // edits through a panel has no inline control that renders its value
   // truthfully; those go through the raw JSON editor.
@@ -158,7 +160,10 @@ function SettingRow({
             ? categoryTitle(definition.category)
             : t("web.admin.users.detail.preferences.row.notInVersion")}
         </div>
-        <div className="text-sm font-medium break-words" title={definition?.description}>
+        <div
+          className="text-sm font-medium break-words"
+          title={definition ? settingDescription(definition) : undefined}
+        >
           {label}
         </div>
         <div className="text-muted-foreground text-xs">{replaces}</div>
@@ -166,7 +171,10 @@ function SettingRow({
       <div className="col-start-2 flex min-w-0 flex-wrap items-center gap-2 md:col-start-auto md:justify-end">
         {jsonOnly ? (
           <>
-            <span className="text-muted-foreground max-w-[14rem] truncate font-mono text-xs">
+            <span
+              title={formatSettingValue(entry.key, entry.value)}
+              className="text-muted-foreground max-w-[14rem] truncate font-mono text-xs"
+            >
               {formatSettingValue(entry.key, entry.value)}
             </span>
             {/* Without a definition the save can't keep the value's JSON type,
@@ -226,9 +234,12 @@ export function LevelSettings({
   };
 
   const busy = updateSetting.isPending || deleteSetting.isPending || clearDevice.isPending;
+  // Labels are read in the current language when the list is built.
+  const language = useAppLanguage();
   const addable = useMemo(
     () => addableSettings(level, profileEntries, profileAllEntries),
-    [level, profileEntries, profileAllEntries],
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- `language` rebuilds the translated labels
+    [level, profileEntries, profileAllEntries, language],
   );
   const canAdd = addable.length > 0;
   const addLabel = t(ADD_LABEL[level.kind]);
@@ -253,11 +264,16 @@ export function LevelSettings({
   ) : null;
 
   const removal = removing ? replacedFor(removing.key) : null;
-  const removingLabel = removing ? (getSettingDefinition(removing.key)?.label ?? removing.key) : "";
+  const removingDefinition = removing ? getSettingDefinition(removing.key) : undefined;
+  const removingLabel = removing
+    ? removingDefinition
+      ? settingLabel(removingDefinition)
+      : removing.key
+    : "";
   const fromProfile = removal?.profileName != null;
   const place = levelPlace(level, t);
   const removalTitle = fromProfile
-    ? possessiveText(t, "web.admin.users.detail.preferences.removal.titleProfile", {
+    ? t("web.admin.users.detail.preferences.removal.titleProfile", {
         profile: level.profileName,
         place,
       })
@@ -267,11 +283,11 @@ export function LevelSettings({
   if (fromProfile) {
     const values = { setting: removingLabel, profile: level.profileName, place };
     removalDescription = removalValue
-      ? possessiveText(t, "web.admin.users.detail.preferences.removal.toProfileWithValue", {
+      ? t("web.admin.users.detail.preferences.removal.toProfileWithValue", {
           ...values,
           value: removalValue,
         })
-      : possessiveText(t, "web.admin.users.detail.preferences.removal.toProfile", values);
+      : t("web.admin.users.detail.preferences.removal.toProfile", values);
   } else {
     const values = { setting: removingLabel, place };
     removalDescription = removalValue
@@ -356,11 +372,12 @@ export function LevelSettings({
         description={removalDescription}
         confirmLabel={
           fromProfile
-            ? possessiveText(t, "web.admin.users.detail.preferences.removal.confirmProfile", {
+            ? t("web.admin.users.detail.preferences.removal.confirmProfile", {
                 profile: level.profileName,
               })
             : t("web.admin.users.detail.preferences.removal.confirmDefault")
         }
+        className={TOUCH_TARGETS}
         onConfirm={() => {
           if (removing) {
             deleteSetting.mutate({ userId, key: removing.key, identity: identityOf(removing) });
@@ -372,14 +389,15 @@ export function LevelSettings({
         <ConfirmDialog
           open={clearing}
           onOpenChange={setClearing}
-          title={possessiveText(t, "web.admin.users.detail.preferences.clear.title", {
+          title={t("web.admin.users.detail.preferences.clear.title", {
             profile: level.profileName,
             device: level.name,
           })}
-          description={possessiveText(t, "web.admin.users.detail.preferences.clear.description", {
+          description={t("web.admin.users.detail.preferences.clear.description", {
             profile: level.profileName,
           })}
           confirmLabel={t("web.admin.users.detail.preferences.clear.confirm")}
+          className={TOUCH_TARGETS}
           variant="destructive"
           onConfirm={() => {
             clearDevice.mutate({

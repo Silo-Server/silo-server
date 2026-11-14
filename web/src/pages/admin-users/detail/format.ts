@@ -1,19 +1,8 @@
-import type { ReactNode } from "react";
-
-import { t, type MessageKey, type TextValues, type Translate } from "@/i18n";
+import { codeNumber, t, type MessageKey } from "@/i18n";
 import { formatRelativeTime } from "@/lib/date";
 import { formatDate, formatTime, preferredDateLocale } from "@/lib/datetime";
 import { activityMethodMeta, formatDecisionLabel } from "@/pages/adminActivityPresentation";
-
-/**
- * A message as plain text whose `<owner>` tag only marks a name that an ASCII
- * apostrophe follows (`<owner>{profile}</owner>'s`): the catalog rejects an
- * apostrophe right after a placeholder.
- */
-export function possessiveText(translate: Translate, id: MessageKey, values: TextValues): string {
-  const node = translate(id, { ...values, owner: (chunks: ReactNode[]) => chunks.join("") });
-  return Array.isArray(node) ? node.join("") : String(node);
-}
+import { formatDecimal } from "@/lib/numberFormat";
 
 function validDate(iso: string | null | undefined): Date | null {
   if (!iso) return null;
@@ -28,10 +17,10 @@ export function formatWatchTime(seconds: number): string {
   const minutes = Math.floor((total % 3600) / 60);
   return hours > 0
     ? t("web.admin.users.detail.common.watchTime.hoursMinutes", {
-        hours: String(hours),
-        minutes: String(minutes),
+        hours: hours,
+        minutes: minutes,
       })
-    : t("web.admin.users.detail.common.watchTime.minutes", { minutes: String(minutes) });
+    : t("web.admin.users.detail.common.watchTime.minutes", { minutes: minutes });
 }
 
 /** A month and day, "Sep 26"; "" when there is no date. */
@@ -94,10 +83,9 @@ export function episodeCode(
   episode: number | null | undefined,
 ): string {
   if (season == null || episode == null) return "";
-  const pad = (n: number) => String(n).padStart(2, "0");
   return t("web.admin.users.detail.common.episodeCode", {
-    season: pad(season),
-    episode: pad(episode),
+    season: codeNumber(season, 2),
+    episode: codeNumber(episode, 2),
   });
 }
 
@@ -119,7 +107,7 @@ export function formatBytes(bytes: number): string {
   if (Number((value / size).toFixed(digits)) >= 1000 && index < BYTE_UNITS.length - 1) {
     ({ unit, size, digits } = BYTE_UNITS[index + 1]!);
   }
-  return t(unit, { value: (value / size).toFixed(digits) });
+  return t(unit, { value: formatDecimal(value / size, digits) });
 }
 
 /**
@@ -131,10 +119,10 @@ export function formatStorageLimit(bytes: number): string {
   const value = Number.isFinite(bytes) ? Math.max(0, bytes) : 0;
   const gb = value / 1024 ** 3;
   if (gb >= 1) {
-    return t("web.admin.users.detail.common.bytes.gb", { value: String(Number(gb.toFixed(1))) });
+    return t("web.admin.users.detail.common.bytes.gb", { value: formatDecimal(gb, 1, 0) });
   }
   return t("web.admin.users.detail.common.bytes.mb", {
-    value: String(Math.round(value / 1024 ** 2)),
+    value: Math.round(value / 1024 ** 2),
   });
 }
 

@@ -121,7 +121,7 @@ function inheritedVideoText(allowed: boolean, max: number): string {
   if (!allowed) return t("web.admin.users.detail.access.inline.notAllowed");
   return max === 0
     ? t("web.admin.users.detail.access.inline.videoUnlimited")
-    : t("web.admin.users.detail.access.inline.videoUpTo", { max: String(max) });
+    : t("web.admin.users.detail.access.inline.videoUpTo", { max: max });
 }
 
 function inlineAllowed(allowed: boolean): string {
@@ -278,7 +278,7 @@ export function formatVideoTranscoding(v: VideoTranscoding): string {
     case "unlimited":
       return t("web.admin.users.detail.access.value.unlimited");
     case "limit":
-      return t("web.admin.users.detail.access.value.upToAtATime", { max: String(v.max) });
+      return t("web.admin.users.detail.access.value.upToAtATime", { max: v.max });
   }
 }
 

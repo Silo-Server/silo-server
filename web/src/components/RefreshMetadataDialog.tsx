@@ -37,7 +37,7 @@ export default function RefreshMetadataDialog({
             type="button"
             disabled={isPending}
             onClick={() => onConfirm("quick")}
-            className="border-border bg-surface hover:bg-surface/80 flex w-full items-start gap-3 rounded-xl border p-4 text-left transition-colors disabled:cursor-not-allowed disabled:opacity-60"
+            className="border-border bg-surface hover:bg-surface/80 flex w-full items-start gap-3 rounded-xl border p-4 text-start transition-colors disabled:cursor-not-allowed disabled:opacity-60"
           >
             {isPending ? (
               <Loader2 className="text-muted-foreground mt-0.5 size-5 animate-spin" />
@@ -54,7 +54,7 @@ export default function RefreshMetadataDialog({
             type="button"
             disabled={isPending}
             onClick={() => onConfirm("complete")}
-            className="border-border bg-surface hover:bg-surface/80 flex w-full items-start gap-3 rounded-xl border p-4 text-left transition-colors disabled:cursor-not-allowed disabled:opacity-60"
+            className="border-border bg-surface hover:bg-surface/80 flex w-full items-start gap-3 rounded-xl border p-4 text-start transition-colors disabled:cursor-not-allowed disabled:opacity-60"
           >
             {isPending ? (
               <Loader2 className="text-muted-foreground mt-0.5 size-5 animate-spin" />

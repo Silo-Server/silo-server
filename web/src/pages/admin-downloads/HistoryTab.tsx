@@ -68,7 +68,7 @@ export default function HistoryTab() {
             settings
               ? t(`${H}.cacheHours`, {
                   count: settings.cache_hours,
-                  count_text: String(settings.cache_hours),
+                  count_text: settings.cache_hours,
                 })
               : "—"
           }
@@ -77,9 +77,7 @@ export default function HistoryTab() {
         <StatTile
           label={t(`${H}.diskCeiling`)}
           value={
-            settings
-              ? t(`${H}.diskCeilingValue`, { percent: String(settings.disk_ceiling_percent) })
-              : "—"
+            settings ? t(`${H}.diskCeilingValue`, { percent: settings.disk_ceiling_percent }) : "—"
           }
           detail={t(`${H}.diskCeilingDetail`)}
         />
@@ -146,7 +144,7 @@ export default function HistoryTab() {
               <TableHead>{t(`${H}.column.whatHappened`)}</TableHead>
               <TableHead>{t(`${H}.column.item`)}</TableHead>
               <TableHead className="hidden sm:table-cell">{t(`${H}.column.location`)}</TableHead>
-              <TableHead className="text-right">{t(`${H}.column.size`)}</TableHead>
+              <TableHead className="text-end">{t(`${H}.column.size`)}</TableHead>
               <TableHead className="hidden md:table-cell">{t(`${H}.column.by`)}</TableHead>
             </TableRow>
           </TableHeader>
@@ -183,7 +181,7 @@ export default function HistoryTab() {
                   <TableCell className="hidden sm:table-cell">
                     {storageEventLocation(event)}
                   </TableCell>
-                  <TableCell className="text-right whitespace-nowrap tabular-nums">
+                  <TableCell className="text-end whitespace-nowrap tabular-nums">
                     {formatStorageBytes(event.bytes)}
                   </TableCell>
                   <TableCell className="text-muted-foreground hidden md:table-cell">

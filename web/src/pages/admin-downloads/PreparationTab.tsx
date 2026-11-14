@@ -263,9 +263,9 @@ export default function PreparationTab() {
                         : workerFilter && "opacity-30",
                     )}
                   >
-                    <span className="text-muted-foreground mr-1">{worker.label}</span>
+                    <span className="text-muted-foreground me-1">{worker.label}</span>
                     {worker.name}
-                    <span className="text-muted-foreground ml-1.5 tabular-nums">
+                    <span className="text-muted-foreground ms-1.5 tabular-nums">
                       {worker.count}
                     </span>
                   </button>
@@ -278,20 +278,20 @@ export default function PreparationTab() {
 
       <div className="flex flex-wrap items-center gap-2">
         <div className="relative max-w-md min-w-[200px] flex-1">
-          <Search className="text-muted-foreground pointer-events-none absolute top-1/2 left-3 h-3.5 w-3.5 -translate-y-1/2" />
+          <Search className="text-muted-foreground pointer-events-none absolute start-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2" />
           <Input
             placeholder={t(`${K}.filter.placeholder`)}
             aria-label={t(`${K}.filter.label`)}
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            className="h-8 pl-9 text-[13px]"
+            className="h-8 ps-9 text-[13px]"
           />
           {search && (
             <button
               type="button"
               aria-label={t(`${K}.filter.clear`)}
               onClick={() => setSearch("")}
-              className="text-muted-foreground hover:text-foreground absolute top-1/2 right-2.5 -translate-y-1/2"
+              className="text-muted-foreground hover:text-foreground absolute end-2.5 top-1/2 -translate-y-1/2"
             >
               <X className="h-3.5 w-3.5" />
             </button>
@@ -321,7 +321,7 @@ export default function PreparationTab() {
           <span className="text-[12px] font-medium tabular-nums">
             {t(`${K}.selection.count`, jobCount(selectedItems.length))}
           </span>
-          <div className="ml-auto flex flex-wrap gap-1.5">
+          <div className="ms-auto flex flex-wrap gap-1.5">
             <Button
               size="sm"
               variant="outline"
@@ -373,8 +373,8 @@ export default function PreparationTab() {
         <div className="text-muted-foreground text-[11px]">
           {t(`${K}.showing`, {
             total: items.length,
-            shown: String(filtered.length),
-            total_text: String(items.length),
+            shown: filtered.length,
+            total_text: items.length,
           })}
         </div>
       )}
@@ -760,7 +760,7 @@ function ProgressCell({ prep }: { prep: AdminDownloadPreparation }) {
         <div className="space-y-1">
           <div className="flex items-center justify-between gap-2 text-[11px]">
             <span className="font-semibold tabular-nums">
-              {t(`${K}.progress.percent`, { percent: String(Math.floor(percent)) })}
+              {t(`${K}.progress.percent`, { percent: Math.floor(percent) })}
             </span>
             <span className="text-muted-foreground truncate tabular-nums">{detail}</span>
           </div>
@@ -803,8 +803,8 @@ function ProgressCell({ prep }: { prep: AdminDownloadPreparation }) {
           <div className="text-muted-foreground line-clamp-2 text-[10px]">
             {[
               t(`${K}.progress.attempt`, {
-                attempt: String(prep.attempts + 1),
-                max: String(prep.max_attempts),
+                attempt: prep.attempts + 1,
+                max: prep.max_attempts,
                 retry_in: formatRetryIn(prep.next_retry_at),
               }),
               prep.error,
@@ -880,7 +880,7 @@ function Requesters({ prep }: { prep: AdminDownloadPreparation }) {
         {rest.length > 0
           ? t(`${K}.requesters.deviceMore`, {
               count: rest.length,
-              count_text: String(rest.length),
+              count_text: rest.length,
               device: requesterDevice(first),
             })
           : requesterDevice(first)}
@@ -998,7 +998,7 @@ function PreparationDetails({
                     ? t(`${K}.details.encodedOfPercent`, {
                         encoded: formatClock(prep.progress.encoded_seconds),
                         duration: formatClock(prep.progress.duration_seconds),
-                        percent: String(Math.floor(percent)),
+                        percent: Math.floor(percent),
                       })
                     : t(`${K}.details.encodedOf`, {
                         encoded: formatClock(prep.progress.encoded_seconds),
@@ -1087,18 +1087,18 @@ function jobStatus(t: Translate, prep: AdminDownloadPreparation): string {
     case "running":
       return t(`${K}.status.running`, {
         label: preparationRunningLabel(prep),
-        attempt: String(Math.max(prep.attempts, 1)),
-        max: String(prep.max_attempts),
+        attempt: Math.max(prep.attempts, 1),
+        max: prep.max_attempts,
       });
     case "queued":
       return prep.queue_position
-        ? t(`${K}.status.queuedPosition`, { position: String(prep.queue_position) })
+        ? t(`${K}.status.queuedPosition`, { position: prep.queue_position })
         : t(`${K}.status.queued`);
     case "retrying":
       return t(`${K}.status.retrying`, {
         retry_in: formatRetryIn(prep.next_retry_at),
-        attempt: String(prep.attempts + 1),
-        max: String(prep.max_attempts),
+        attempt: prep.attempts + 1,
+        max: prep.max_attempts,
       });
     case "paused": {
       const ago = formatAgo(prep.paused_at);
@@ -1124,7 +1124,7 @@ function FFmpegConsole({
   return (
     <div className="mt-3 space-y-2">
       {isFetching && !isLoading && (
-        <div className="text-muted-foreground text-right text-[10px]">
+        <div className="text-muted-foreground text-end text-[10px]">
           {t(`${K}.ffmpeg.refreshing`)}
         </div>
       )}

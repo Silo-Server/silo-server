@@ -1,13 +1,17 @@
-import { t } from "@/i18n";
+import { messageNumberingSystem, t } from "@/i18n";
 import { appLanguage } from "@/lib/appLocale";
 
-let relative: { language: string; format: Intl.RelativeTimeFormat } | null = null;
+let relative: { locale: string; format: Intl.RelativeTimeFormat } | null = null;
 
-/** One formatter per interface language; cards call this in long grids. */
+/**
+ * One formatter per interface language and the digits messages use (Arabic
+ * names them); cards call this in long grids.
+ */
 function relativeFormat(): Intl.RelativeTimeFormat {
-  const language = appLanguage();
-  if (relative?.language !== language) {
-    relative = { language, format: new Intl.RelativeTimeFormat(language, { numeric: "always" }) };
+  const numberingSystem = messageNumberingSystem();
+  const locale = numberingSystem ? `${appLanguage()}-u-nu-${numberingSystem}` : appLanguage();
+  if (relative?.locale !== locale) {
+    relative = { locale, format: new Intl.RelativeTimeFormat(locale, { numeric: "always" }) };
   }
   return relative.format;
 }

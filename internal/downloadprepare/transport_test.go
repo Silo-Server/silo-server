@@ -191,6 +191,30 @@ func TestRequestExecutionFingerprintBindsRecipeButNotArtifactHandle(t *testing.T
 	}
 }
 
+// The source frame rate reaches the node, which reads the encode's progress
+// from it, and leaves the fingerprint alone: it changes no bytes, and an
+// older node that drops it must still return the matching fingerprint.
+func TestRequestCarriesTheFrameRateOutsideTheFingerprint(t *testing.T) {
+	opts := playback.TranscodeOpts{InputPath: "/media/movie.mkv", TargetCodecVideo: "h264", TargetCodecAudio: "aac", TotalDuration: 600, SourceFrameRate: 24}
+	request := NewRequest("attempt-a", opts)
+	wire, err := json.Marshal(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decoded Request
+	if err := json.Unmarshal(wire, &decoded); err != nil {
+		t.Fatal(err)
+	}
+	if got := decoded.TranscodeOpts("ffmpeg", "none", "", nil).SourceFrameRate; got != 24 {
+		t.Fatalf("node frame rate = %v, want 24 (%s)", got, wire)
+	}
+	olderNode := decoded
+	olderNode.SourceFrameRate = 0
+	if olderNode.ExecutionFingerprint() != decoded.ExecutionFingerprint() {
+		t.Fatal("the frame rate changed the execution fingerprint")
+	}
+}
+
 func TestRequestStereoDownmixBoostRequested(t *testing.T) {
 	for _, test := range []struct {
 		name string

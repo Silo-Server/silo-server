@@ -53,7 +53,7 @@ export function BadgeStylePicker({
             title={preset.description}
             onClick={() => onChange(id)}
             className={cn(
-              "focus-visible:ring-ring flex flex-col items-stretch gap-2 rounded-xl border p-2 text-left transition-colors focus-visible:ring-2 focus-visible:outline-none",
+              "focus-visible:ring-ring flex flex-col items-stretch gap-2 rounded-xl border p-2 text-start transition-colors focus-visible:ring-2 focus-visible:outline-none",
               active ? "border-primary bg-primary/8" : "border-border/60 hover:border-border",
             )}
           >

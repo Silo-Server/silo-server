@@ -81,7 +81,7 @@ export function RowPicker({
           : "grid-cols-[232px_minmax(0,1fr)]",
       )}
     >
-      <div className={cn(!narrow && "border-border overflow-y-auto border-r px-3 py-4")}>
+      <div className={cn(!narrow && "border-border overflow-y-auto border-e px-3 py-4")}>
         <PickerRail
           baseId={baseId}
           groups={groups}

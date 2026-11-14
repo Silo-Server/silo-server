@@ -27,7 +27,7 @@ import { useEpisodeSpoilerPrefs } from "@/hooks/useEpisodeSpoilerPrefs";
 import { isEpisodeStill, isEpisodeUnwatched } from "@/lib/episodeSpoilers";
 import { RatingEntry } from "@/components/ratings/RatingEntry";
 import { formatHeroMetadata } from "./heroMetadata";
-import { useAppLanguage, useT, type Translate } from "@/i18n";
+import { numberText, useAppLanguage, useT, type Translate } from "@/i18n";
 
 // On-view translation for the visible slide loads after the hero itself, so
 // it stays out of the launch bundle; the plain overview shows meanwhile.
@@ -64,55 +64,14 @@ interface HeroBannerProps {
   onRefreshItems?: () => void;
 }
 
-/**
- * Alternating slow pans for consecutive hero slides.
- *
- * These must be written out literally. Tailwind only keeps a theme variable
- * whose name it can find in the scanned source, and assembling the name from a
- * template literal hid both from it — so the real values were tree-shaken out
- * of the bundle and `var(--animate-ken-burns-a)` resolved to nothing at
- * runtime. app.css still overrides both to `none` under
- * `prefers-reduced-motion`, which is what keeps this accessible.
- */
-const KEN_BURNS_ANIMATIONS = ["var(--animate-ken-burns-a)", "var(--animate-ken-burns-b)"] as const;
-const HERO_BACKDROP_FADE_MS = 1000;
-
-/** A slide still fading out. `id` tells two fades of the same slide apart. */
-interface OutgoingBackdrop {
-  index: number;
-  id: number;
-}
-
-let nextOutgoingBackdropId = 0;
-
-/**
- * The fading slides after switching from `from` to `to`. Every slide keeps its
- * motion until its own fade ends: dropping the animation of a slide that is
- * still visible (say, after two quick clicks) would snap it back to its
- * unscaled, unpanned frame.
- */
-function withOutgoingBackdrop(
-  outgoing: OutgoingBackdrop[],
-  from: number,
-  to: number,
-): OutgoingBackdrop[] {
-  const rest = outgoing.filter((entry) => entry.index !== from && entry.index !== to);
-  if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return rest;
-  return [...rest, { index: from, id: nextOutgoingBackdropId++ }];
-}
-
 const HeroBackdropSlide = memo(function HeroBackdropSlide({
   slide,
-  index,
   isActive,
-  keepsMotion,
   shouldLoad,
   hideImage,
 }: {
   slide: SectionItem;
-  index: number;
   isActive: boolean;
-  keepsMotion: boolean;
   shouldLoad: boolean;
   hideImage: boolean;
 }) {
@@ -144,13 +103,9 @@ const HeroBackdropSlide = memo(function HeroBackdropSlide({
           fetchPriority={isActive ? "high" : "low"}
           className={cn(
             "h-full w-full object-cover object-[center_20%] transition-opacity duration-(--duration-slow)",
-            isActive && "will-change-transform",
             loadedUrl ? "opacity-100" : "opacity-0",
           )}
           style={{
-            animation: keepsMotion
-              ? KEN_BURNS_ANIMATIONS[index % KEN_BURNS_ANIMATIONS.length]
-              : "none",
             filter: `brightness(var(--hero-backdrop-brightness, 0.78)) saturate(var(--hero-backdrop-saturate, 0.95))${hideImage ? " blur(24px)" : ""}`,
           }}
           onLoad={() => setLoadedUrl(imageUrl)}
@@ -211,10 +166,7 @@ export default function HeroBanner({
       ),
     [slides],
   );
-  const [{ activeIndex, outgoing }, setBackdropState] = useState({
-    activeIndex: 0,
-    outgoing: [] as OutgoingBackdrop[],
-  });
+  const [activeIndex, setActiveIndex] = useState(0);
   const [paused, setPaused] = useState(false);
   const { isVisible: pageVisible } = usePageActivity();
   const sectionRef = useRef<HTMLElement>(null);
@@ -234,49 +186,12 @@ export default function HeroBanner({
   const [playCycle, setPlayCycle] = useState(0);
 
   const next = useCallback(() => {
-    setBackdropState(({ activeIndex: current, outgoing }) => {
-      const target = (current + 1) % slides.length;
-      return { activeIndex: target, outgoing: withOutgoingBackdrop(outgoing, current, target) };
-    });
+    setActiveIndex((current) => (current + 1) % slides.length);
   }, [slides.length]);
 
   const prev = useCallback(() => {
-    setBackdropState(({ activeIndex: current, outgoing }) => {
-      const target = (current - 1 + slides.length) % slides.length;
-      return { activeIndex: target, outgoing: withOutgoingBackdrop(outgoing, current, target) };
-    });
+    setActiveIndex((current) => (current - 1 + slides.length) % slides.length);
   }, [slides.length]);
-
-  // Release each fading slide's motion when its own fade ends. Each fade gets
-  // one timer; a fade cut short (its slide became active again) drops its own.
-  const fadeTimers = useRef(new Map<number, number>());
-  useEffect(() => {
-    const timers = fadeTimers.current;
-    const live = new Set(outgoing.map((entry) => entry.id));
-    for (const [id, timer] of timers) {
-      if (live.has(id)) continue;
-      window.clearTimeout(timer);
-      timers.delete(id);
-    }
-    for (const { id } of outgoing) {
-      if (timers.has(id)) continue;
-      const timer = window.setTimeout(() => {
-        timers.delete(id);
-        setBackdropState((current) => ({
-          ...current,
-          outgoing: current.outgoing.filter((entry) => entry.id !== id),
-        }));
-      }, HERO_BACKDROP_FADE_MS);
-      timers.set(id, timer);
-    }
-  }, [outgoing]);
-  useEffect(() => {
-    const timers = fadeTimers.current;
-    return () => {
-      for (const timer of timers.values()) window.clearTimeout(timer);
-      timers.clear();
-    };
-  }, []);
 
   // Pause/play helpers. Unpausing bumps playCycle so the rail animation
   // restarts at scaleX(0) in sync with the fresh 8s interval started below.
@@ -334,7 +249,7 @@ export default function HeroBanner({
   const metadata = formatHeroMetadata(current);
 
   const slideCount = slides.length;
-  const padded = (n: number) => String(n).padStart(2, "0");
+  const padded = (n: number) => numberText(String(n).padStart(2, "0"));
   const activeAudiobookPlaying =
     current.type === "audiobook" && audiobookPlayback?.active?.contentId === current.content_id
       ? audiobookPlayback.active.playing
@@ -365,7 +280,7 @@ export default function HeroBanner({
     <section
       ref={sectionRef}
       className={cn(
-        "home-hero group relative w-full overflow-hidden",
+        "home-hero group relative flex w-full flex-col overflow-hidden",
         heightClassName,
         bleed ? "-mt-[96px] mb-0 sm:-mt-[104px]" : "border-border/60 mb-10 border-b",
       )}
@@ -394,14 +309,8 @@ export default function HeroBanner({
               position_seconds: slide.position_seconds,
             })
           }
-          index={i}
           isActive={i === activeIndex}
-          keepsMotion={i === activeIndex || outgoing.some((entry) => entry.index === i)}
-          shouldLoad={
-            i === activeIndex ||
-            i === outgoing.at(-1)?.index ||
-            (shown && i === (activeIndex + 1) % slideCount)
-          }
+          shouldLoad={i === activeIndex || (shown && i === (activeIndex + 1) % slideCount)}
         />
       ))}
 
@@ -415,21 +324,18 @@ export default function HeroBanner({
       {/* Content */}
       <div
         className={cn(
-          "relative z-10 flex h-full min-h-0 items-end px-4 pb-10 sm:px-6 sm:pb-12 lg:px-10 lg:pb-16 xl:px-12",
-          reserveHeaderSpace && "pt-24 sm:pt-28 lg:pt-32",
+          "relative z-10 flex flex-1 items-end px-4 pb-10 sm:px-6 sm:pb-12 lg:px-10 lg:pb-16 xl:px-12",
+          // A tall title block grows the hero rather than overflowing it;
+          // the top padding keeps the title off the top edge (and, below
+          // sm, clear of the slide counter) when that happens.
+          reserveHeaderSpace ? "pt-24 sm:pt-28 lg:pt-32" : "pt-16",
         )}
       >
         <div className="w-full max-w-[1380px]">
           <div className="max-w-3xl">
-            <p className="hero-eyebrow mb-4 hidden sm:block">
-              <span className="hero-eyebrow-strong">{t("web.home.hero.eyebrow")}</span>
-              {/* eslint-disable-next-line formatjs/no-literal-string-in-jsx -- a divider glyph, not text */}
-              <span className="hero-eyebrow-divider">—</span>
-              <span>{t("web.home.hero.slideNumber", { number: padded(activeIndex + 1) })}</span>
-            </p>
             <h1
               key={current.content_id}
-              className="font-display mb-4 max-w-4xl text-4xl font-extrabold tracking-[-0.04em] text-balance sm:text-5xl lg:text-6xl xl:text-7xl"
+              className="bidi-text font-display mb-4 max-w-4xl text-4xl font-extrabold tracking-[-0.04em] text-balance sm:text-5xl lg:text-6xl xl:text-7xl"
               style={{ textShadow: "var(--hero-text-shadow, none)" }}
             >
               {current.title}
@@ -502,7 +408,7 @@ export default function HeroBanner({
           <button
             type="button"
             onClick={prev}
-            className="glass-subtle absolute top-1/2 left-3 z-20 -translate-y-1/2 rounded-full p-1.5 opacity-60 transition-opacity duration-(--duration-fast) hover:opacity-100 sm:left-5 sm:p-2 sm:opacity-80 lg:opacity-0 lg:group-hover:opacity-90"
+            className="glass-subtle absolute start-3 top-1/2 z-20 -translate-y-1/2 rounded-full p-1.5 opacity-60 transition-opacity duration-(--duration-fast) hover:opacity-100 sm:start-5 sm:p-2 sm:opacity-80 lg:opacity-0 lg:group-hover:opacity-90"
             aria-label={t("web.home.hero.previousSlide")}
           >
             <ChevronLeft className="size-4 sm:size-5" />
@@ -510,7 +416,7 @@ export default function HeroBanner({
           <button
             type="button"
             onClick={next}
-            className="glass-subtle absolute top-1/2 right-3 z-20 -translate-y-1/2 rounded-full p-1.5 opacity-60 transition-opacity duration-(--duration-fast) hover:opacity-100 sm:right-5 sm:p-2 sm:opacity-80 lg:opacity-0 lg:group-hover:opacity-90"
+            className="glass-subtle absolute end-3 top-1/2 z-20 -translate-y-1/2 rounded-full p-1.5 opacity-60 transition-opacity duration-(--duration-fast) hover:opacity-100 sm:end-5 sm:p-2 sm:opacity-80 lg:opacity-0 lg:group-hover:opacity-90"
             aria-label={t("web.home.hero.nextSlide")}
           >
             <ChevronRight className="size-4 sm:size-5" />
@@ -525,7 +431,7 @@ export default function HeroBanner({
               offset the content uses to clear that header. */}
           <div
             className={cn(
-              "absolute right-4 z-20 flex items-center gap-2 sm:hidden",
+              "absolute end-4 z-20 flex items-center gap-2 sm:hidden",
               reserveHeaderSpace ? "top-24" : "top-4",
             )}
           >
@@ -546,7 +452,7 @@ export default function HeroBanner({
               {paused ? <Play className="size-3" /> : <Pause className="size-3" />}
             </button>
           </div>
-          <div className="absolute right-6 bottom-6 z-20 hidden items-center gap-3 sm:flex lg:right-10 lg:bottom-8 xl:right-12">
+          <div className="absolute end-6 bottom-6 z-20 hidden items-center gap-3 sm:flex lg:end-10 lg:bottom-8 xl:end-12">
             <div className="hero-slide-counter" aria-hidden="true">
               <span className="num">{padded(activeIndex + 1)}</span>
               <span className="sep" />

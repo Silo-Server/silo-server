@@ -8,6 +8,7 @@ import { formatSeasonMeta, formatSeasonProgress, getSeasonDisplayTitle } from ".
 import CardPlayOverlay from "@/components/CardPlayOverlay";
 import ViewTransitionLink from "@/components/ViewTransitionLink";
 import { useAppLanguage, useT } from "@/i18n";
+import WatchProgressBar from "@/components/WatchProgressBar";
 
 interface SeasonCarouselProps {
   seasons: Season[];
@@ -69,23 +70,17 @@ export default function SeasonCarousel({ seasons, libraryId }: SeasonCarouselPro
 
                   {/* Completed checkmark */}
                   {isCompleted && (
-                    <div className="absolute top-2.5 right-2.5 rounded-full bg-green-500/90 p-1 text-white shadow-sm">
+                    <div className="absolute end-2.5 top-2.5 rounded-full bg-green-500/90 p-1 text-white shadow-sm">
                       <Check className="size-3.5" strokeWidth={3} />
                     </div>
                   )}
 
-                  {/* Progress bar — inset pill so a full bar doesn't read
-                      as a stray edge along the artwork */}
                   {(isCompleted || hasProgress) && (
-                    <div className="absolute inset-x-2.5 bottom-2 h-[3px] overflow-hidden rounded-full bg-black/40">
-                      <div
-                        className="h-full rounded-full transition-all duration-300"
-                        style={{
-                          width: isCompleted ? "100%" : `${progressPercent}%`,
-                          background: isCompleted ? "#4caf50" : "var(--primary)",
-                        }}
-                      />
-                    </div>
+                    <WatchProgressBar
+                      percent={isCompleted ? 100 : progressPercent}
+                      fillColor={isCompleted ? "#4caf50" : undefined}
+                      animate
+                    />
                   )}
                 </ViewTransitionLink>
                 {season.play_content_id ? (
@@ -129,7 +124,7 @@ export function SeasonRail({ count, children }: { count: number; children: React
       <div className="mb-5 flex items-end justify-between gap-4">
         <h2 className="text-xl font-semibold">{t("web.detail.seasons.heading")}</h2>
         <span className="text-muted-foreground text-sm">
-          {t("web.detail.seasons.totalCount", { count: String(count) })}
+          {t("web.detail.seasons.totalCount", { count: count })}
         </span>
       </div>
 
@@ -138,7 +133,7 @@ export function SeasonRail({ count, children }: { count: number; children: React
           <button
             type="button"
             onClick={scrollPrev}
-            className="from-background/90 absolute top-0 bottom-0 left-0 z-10 flex h-11 w-11 items-center justify-center self-center bg-gradient-to-r to-transparent opacity-0 transition-opacity duration-200 group-hover/carousel:opacity-100 focus-visible:opacity-100"
+            className="from-background/90 absolute start-0 top-0 bottom-0 z-10 flex h-11 w-11 items-center justify-center self-center bg-gradient-to-r to-transparent opacity-0 transition-opacity duration-200 group-hover/carousel:opacity-100 focus-visible:opacity-100 rtl:bg-gradient-to-l"
             aria-label={t("web.detail.carousel.scrollLeft")}
           >
             <ChevronLeft className="text-foreground h-6 w-6" />
@@ -155,7 +150,7 @@ export function SeasonRail({ count, children }: { count: number; children: React
           <button
             type="button"
             onClick={scrollNext}
-            className="from-background/90 absolute top-0 right-0 bottom-0 z-10 flex h-11 w-11 items-center justify-center self-center bg-gradient-to-l to-transparent opacity-0 transition-opacity duration-200 group-hover/carousel:opacity-100 focus-visible:opacity-100"
+            className="from-background/90 absolute end-0 top-0 bottom-0 z-10 flex h-11 w-11 items-center justify-center self-center bg-gradient-to-l to-transparent opacity-0 transition-opacity duration-200 group-hover/carousel:opacity-100 focus-visible:opacity-100 rtl:bg-gradient-to-r"
             aria-label={t("web.detail.carousel.scrollRight")}
           >
             <ChevronRight className="text-foreground h-6 w-6" />

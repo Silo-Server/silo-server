@@ -60,7 +60,7 @@ export function CollectionPageHero({
         // hero does; the strong bottom fade melts it into the page under the filters.
         <div
           aria-hidden="true"
-          className="pointer-events-none absolute -top-8 right-[calc(var(--page-gutter,0px)*-1)] -bottom-24 left-[calc(var(--page-gutter,0px)*-1)] -z-10 overflow-hidden sm:-top-10 lg:-top-14"
+          className="pointer-events-none absolute start-[calc(var(--page-gutter,0px)*-1)] end-[calc(var(--page-gutter,0px)*-1)] -top-8 -bottom-24 -z-10 overflow-hidden sm:-top-10 lg:-top-14"
         >
           <HeroBackdropArtwork
             backdropUrl={backdrop.backdropUrl}
@@ -81,8 +81,7 @@ export function CollectionPageHero({
 
       <div className="max-w-3xl min-w-0">
         <p className="hero-eyebrow mb-3 hidden sm:mb-4 sm:block">
-          {/* eslint-disable-next-line formatjs/no-literal-string-in-jsx -- new on main; its catalog key is a follow-up */}
-          <span className="hero-eyebrow-strong">Collection</span>
+          <span className="hero-eyebrow-strong">{t("collections.collection")}</span>
         </p>
         <h1
           className="font-display text-4xl font-extrabold tracking-[-0.04em] text-balance sm:text-5xl lg:text-6xl"

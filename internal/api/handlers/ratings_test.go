@@ -50,7 +50,8 @@ func (idsFailingItemRepo) EnsureAccessibleIDs(context.Context, []string, catalog
 }
 
 // A restricted profile reads only the ratings of items it may see: a hidden
-// item answers 404 whether or not it was rated, and the lists leave it out.
+// item answers 404 whether or not it was rated. The list applies the same
+// filter in its page query, which the catalog database tests cover.
 func TestRatingsFollowViewerAccess(t *testing.T) {
 	now := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
 	repo := &memoryRatings{rows: []catalog.UserRating{
@@ -79,16 +80,6 @@ func TestRatingsFollowViewerAccess(t *testing.T) {
 		if _, _, err := h.GetRating(ctx, 1, "p1", id, access); !errors.As(err, &apiErr) || apiErr.Status != http.StatusNotFound {
 			t.Fatalf("get %q = %v, want 404", id, err)
 		}
-	}
-
-	list, err := h.ListRatings(ctx, 1, "p1", access, 50, 0)
-	if err != nil || len(list) != 2 || list[0].MediaItemID != "movie:visible" || list[1].MediaItemID != "movie:also-visible" {
-		t.Fatalf("list = %+v, %v", list, err)
-	}
-
-	var listErr *APIError
-	if _, err := NewRatingsHandler(repo, idsFailingItemRepo{items}).ListRatings(ctx, 1, "p1", access, 50, 0); !errors.As(err, &listErr) || listErr.Status != http.StatusInternalServerError {
-		t.Fatalf("failed list access check = %v, want 500", err)
 	}
 
 	// A failed access check is a server error, not a missing rating.

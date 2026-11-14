@@ -72,7 +72,7 @@ export function confidencePercent(provenance: PlayerMarkerProvenance): string | 
   const { confidence } = provenance;
   if (confidence == null || !Number.isFinite(confidence)) return null;
   const clamped = Math.min(1, Math.max(0, confidence));
-  return t("web.markers.provenance.confidence", { percent: String(Math.round(clamped * 100)) });
+  return t("web.markers.provenance.confidence", { percent: Math.round(clamped * 100) });
 }
 
 /**

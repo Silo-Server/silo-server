@@ -11,15 +11,7 @@ import type { MessageKey } from "@/i18n";
 /** The four editable marker kinds, in display order. */
 export const MARKER_KINDS: MarkerKind[] = ["intro", "recap", "credits", "preview"];
 
-/** Human labels. "credits" doubles as the outro, so we say so. */
-export const MARKER_LABELS: Record<MarkerKind, string> = {
-  intro: "Intro",
-  recap: "Recap",
-  credits: "Credits / Outro",
-  preview: "Preview",
-};
-
-/** Message ids of the labels above, for screens that translate them. */
+/** Message ids of the kinds' labels. "credits" doubles as the outro, so its label says so. */
 export const MARKER_LABEL_KEYS: Record<MarkerKind, MessageKey> = {
   intro: "web.markers.kind.intro",
   recap: "web.markers.kind.recap",
@@ -59,5 +51,4 @@ export function parseClock(value: string): number | null {
  * markers with Silo" toggle and the provider tile of every provider whose
  * manifest declares default_contribute_enabled show it.
  */
-export const MARKER_SHARING_DISCLOSURE =
-  "Help other Silo servers skip intros, credits, recaps and previews. Silo shares the movie, show and episode IDs, each file's hash, size and length, and the marker times it finds or you edit, including sections you mark as missing, with how each was found and how sure it is. It never shares file names, paths or your library list.";
+export const MARKER_SHARING_DISCLOSURE_KEY: MessageKey = "web.common.markers.sharingDisclosure";

@@ -1,4 +1,4 @@
-import { t } from "@/i18n";
+import { codeNumber, t } from "@/i18n";
 import { formatTime, preferredDateLocale } from "@/lib/datetime";
 
 interface UpcomingPresentationEvent {
@@ -53,13 +53,13 @@ export function formatUpcomingSubtitle(event: UpcomingPresentationEvent): string
     (event.type === "episode" || event.type === "season_premiere") &&
     event.season_number != null
   ) {
-    const season = String(event.season_number);
+    const season = event.season_number;
     const title = event.episode_title;
     if (event.episode_number != null) {
-      const episode = String(event.episode_number);
+      const code = { season: codeNumber(season), episode: codeNumber(event.episode_number) };
       return title
-        ? t("web.calendar.event.episodeTitled", { season, episode, title })
-        : t("web.calendar.event.episode", { season, episode });
+        ? t("web.calendar.event.episodeTitled", { ...code, title })
+        : t("web.calendar.event.episode", code);
     }
     return title
       ? t("web.calendar.event.seasonTitled", { season, title })

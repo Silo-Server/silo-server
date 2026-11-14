@@ -102,7 +102,7 @@ export function DoneStep() {
       <div className="setup-actions">
         <Button onClick={() => void completeSetup("/")} disabled={finishing} className="min-w-40">
           {finishing ? t("web.setup.done.starting") : t("web.setup.done.start")}
-          <ChevronRight className="ml-1 size-4" />
+          <ChevronRight className="ms-1 size-4" />
         </Button>
         <Button
           type="button"

@@ -22,7 +22,7 @@ import type {
 } from "@/api/types";
 import { ItemLibraryPicker } from "@/components/ItemLibraryPicker";
 import { useItemFiles, useSearchItemMatchCandidates, useSplitItem } from "@/hooks/queries/items";
-import { useT, type MessageKey } from "@/i18n";
+import { codeNumber, useT, type MessageKey } from "@/i18n";
 import { libraryIdsOfFiles } from "@/lib/itemLibraries";
 import { cn } from "@/lib/utils";
 
@@ -213,15 +213,15 @@ export default function SplitItemDialog({ item, open, onOpenChange }: SplitItemD
           <DialogTitle>{t("web.item.split.title")}</DialogTitle>
         </DialogHeader>
 
-        <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto pr-1">
+        <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto pe-1">
           <div className="bg-muted/50 shrink-0 rounded-lg px-3 py-2 text-sm">
             <span className="font-medium">{item.title}</span>
             {item.year ? (
-              <span className="text-muted-foreground ml-2">
-                {t("web.item.dialog.yearInParens", { year: String(item.year) })}
+              <span className="text-muted-foreground ms-2">
+                {t("web.item.dialog.yearInParens", { year: item.year })}
               </span>
             ) : null}
-            <Badge variant="secondary" className="ml-2 text-[10px]">
+            <Badge variant="secondary" className="ms-2 text-[10px]">
               {item.type}
             </Badge>
           </div>
@@ -255,7 +255,7 @@ export default function SplitItemDialog({ item, open, onOpenChange }: SplitItemD
                           {root}
                         </span>
                       </label>
-                      <div className="mt-1 space-y-1 pl-6">
+                      <div className="mt-1 space-y-1 ps-6">
                         {rootFiles.map((file) => (
                           <label
                             key={file.id}
@@ -276,8 +276,8 @@ export default function SplitItemDialog({ item, open, onOpenChange }: SplitItemD
                             {file.season_number && file.episode_number ? (
                               <Badge variant="outline" className="text-[10px]">
                                 {t("web.item.split.episodeCode", {
-                                  season: String(file.season_number),
-                                  episode: String(file.episode_number),
+                                  season: codeNumber(file.season_number),
+                                  episode: codeNumber(file.episode_number),
                                 })}
                               </Badge>
                             ) : null}
@@ -350,7 +350,7 @@ export default function SplitItemDialog({ item, open, onOpenChange }: SplitItemD
             </Button>
 
             {candidates.length > 0 && (
-              <div className="max-h-56 space-y-1 overflow-y-auto pr-1">
+              <div className="max-h-56 space-y-1 overflow-y-auto pe-1">
                 {candidates.map((candidate, index) => {
                   const key = Object.entries(candidate.provider_ids)
                     .map(([k, v]) => `${k}-${v}`)
@@ -360,7 +360,7 @@ export default function SplitItemDialog({ item, open, onOpenChange }: SplitItemD
                       key={`${key}-${index}`}
                       type="button"
                       className={cn(
-                        "flex w-full min-w-0 items-center gap-3 rounded-lg border p-2 text-left transition-colors",
+                        "flex w-full min-w-0 items-center gap-3 rounded-lg border p-2 text-start transition-colors",
                         selectedCandidate === candidate
                           ? "border-primary bg-primary/5"
                           : "border-border hover:bg-muted/50",
@@ -439,12 +439,12 @@ export default function SplitItemDialog({ item, open, onOpenChange }: SplitItemD
               <div className="font-medium">
                 {t("web.item.split.previewHeading", {
                   count: preview.files_moved,
-                  file_count: String(preview.files_moved),
+                  file_count: preview.files_moved,
                   target_id: preview.target_content_id,
                   id: (chunks) => <span className="font-mono text-xs">{chunks}</span>,
                 })}
                 {preview.target_created ? (
-                  <Badge variant="secondary" className="ml-2 text-[10px]">
+                  <Badge variant="secondary" className="ms-2 text-[10px]">
                     {t("web.item.split.newItem")}
                   </Badge>
                 ) : null}
@@ -452,24 +452,24 @@ export default function SplitItemDialog({ item, open, onOpenChange }: SplitItemD
               <ul className="text-muted-foreground list-inside list-disc text-xs">
                 <li>
                   {t("web.item.split.resumePoints", {
-                    count: String(preview.reattribution.progress_moved),
+                    count: preview.reattribution.progress_moved,
                   })}
                 </li>
                 <li>
                   {t("web.item.split.historyEntries", {
-                    moved: String(preview.reattribution.history_moved),
-                    ambiguous: String(preview.reattribution.history_ambiguous),
+                    moved: preview.reattribution.history_moved,
+                    ambiguous: preview.reattribution.history_ambiguous,
                   })}
                 </li>
                 <li>
                   {t("web.item.split.downloads", {
-                    count: String(preview.reattribution.downloads),
+                    count: preview.reattribution.downloads,
                   })}
                 </li>
                 {preview.episode_pairs > 0 && (
                   <li>
                     {t("web.item.split.episodesReanchored", {
-                      count: String(preview.episode_pairs),
+                      count: preview.episode_pairs,
                     })}
                   </li>
                 )}
@@ -477,8 +477,8 @@ export default function SplitItemDialog({ item, open, onOpenChange }: SplitItemD
                   0 && (
                   <li>
                     {t("web.item.split.overridesPinned", {
-                      folders: String(preview.root_overrides?.length ?? 0),
-                      files: String(preview.file_overrides?.length ?? 0),
+                      folders: preview.root_overrides?.length ?? 0,
+                      files: preview.file_overrides?.length ?? 0,
                     })}
                   </li>
                 )}

@@ -6,10 +6,10 @@ import (
 )
 
 // NormalizeQueryDefinitionJSON is the canonical form of a collection's
-// rules as its editors store them: decoded, normalized, and validated, with
-// the v1 rule limits when v1Rules. Every writer of a collection definition
-// goes through it, a restore or import included.
-func NormalizeQueryDefinitionJSON(raw []byte, allowPersonalizedSorts, allowPersonalizedFields, v1Rules bool) (json.RawMessage, error) {
+// rules as its editors store them: decoded, normalized, and validated. Every
+// writer of a collection definition goes through it, a restore or import
+// included.
+func NormalizeQueryDefinitionJSON(raw []byte, allowPersonalizedSorts, allowPersonalizedFields bool) (json.RawMessage, error) {
 	var def QueryDefinition
 	if len(raw) > 0 {
 		if err := json.Unmarshal(raw, &def); err != nil {
@@ -20,18 +20,13 @@ func NormalizeQueryDefinitionJSON(raw []byte, allowPersonalizedSorts, allowPerso
 	if err := def.ValidateWithOptions(allowPersonalizedSorts, allowPersonalizedFields); err != nil {
 		return nil, err
 	}
-	if v1Rules {
-		if err := ValidateV1Rules(def); err != nil {
-			return nil, err
-		}
-	}
 	return json.Marshal(def)
 }
 
 // NormalizeSmartCollectionQueryJSON is NormalizeQueryDefinitionJSON for a
 // smart collection, whose item limit is capped (ApplySmartCollectionItemLimit).
-func NormalizeSmartCollectionQueryJSON(raw []byte, allowPersonalizedSorts, allowPersonalizedFields, v1Rules bool) (json.RawMessage, error) {
-	normalized, err := NormalizeQueryDefinitionJSON(raw, allowPersonalizedSorts, allowPersonalizedFields, v1Rules)
+func NormalizeSmartCollectionQueryJSON(raw []byte, allowPersonalizedSorts, allowPersonalizedFields bool) (json.RawMessage, error) {
+	normalized, err := NormalizeQueryDefinitionJSON(raw, allowPersonalizedSorts, allowPersonalizedFields)
 	if err != nil {
 		return nil, err
 	}

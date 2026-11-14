@@ -44,9 +44,10 @@ import {
   tmdbImageURL,
   type RequestDisplayState,
 } from "@/lib/mediaRequests";
+import { useSectionTitle } from "@/lib/sectionTitle";
 import { carouselCardWidthClasses } from "@/lib/uiCustomization";
 import { cn } from "@/lib/utils";
-import { useT, type MessageKey } from "@/i18n";
+import { numberText, useT, type MessageKey } from "@/i18n";
 
 type RequestTab = "discover" | "yours";
 type RequestGroupKey = "attention" | "on_the_way" | "in_library" | "cancelled";
@@ -145,7 +146,7 @@ function RequestsHub() {
             <TabsTrigger value="yours" className="flex-none px-3">
               {t("web.requests.hub.yours")}
               {totalMine > 0 && (
-                <span className="bg-muted/80 text-muted-foreground ml-1.5 inline-flex h-5 min-w-5 items-center justify-center rounded-full px-1.5 text-[10px] font-semibold tabular-nums">
+                <span className="bg-muted/80 text-muted-foreground ms-1.5 inline-flex h-5 min-w-5 items-center justify-center rounded-full px-1.5 text-[10px] font-semibold tabular-nums">
                   {totalMine}
                 </span>
               )}
@@ -173,6 +174,7 @@ function RequestsHub() {
 
 function DiscoverTab() {
   const t = useT();
+  const sectionTitle = useSectionTitle();
   const discovery = useRequestDiscovery();
   const watchlist = useWatchlistTitleToggle();
 
@@ -201,7 +203,7 @@ function DiscoverTab() {
     <div className="space-y-10">
       {(discovery.data?.rows ?? []).map((row) => {
         if (isBrandSourceType(row.type)) {
-          return <BrandRow key={row.key} type={row.type} title={row.title} />;
+          return <BrandRow key={row.key} type={row.type} title={sectionTitle(row)} />;
         }
         const section = sections.get(row.key);
         return section ? (
@@ -247,10 +249,11 @@ function DiscoverRow({
   section: RequestDiscoverySection;
   watchlist: ReturnType<typeof useWatchlistTitleToggle>;
 }) {
+  const sectionTitle = useSectionTitle();
   if (section.results.length === 0) return null;
   return (
     <MediaCarousel
-      title={section.title}
+      title={sectionTitle(section)}
       // A row trimmed to its size has more titles even on a one-page source.
       viewAllHref={
         section.total_pages > 1 || section.total_results > section.results.length
@@ -331,7 +334,7 @@ function YoursTab({
             <section key={key} aria-labelledby={headingID} className="space-y-1">
               <h2 id={headingID} className="text-foreground text-lg font-semibold">
                 {t(titleKey)}
-                <span className="text-muted-foreground ml-2 text-sm font-normal tabular-nums">
+                <span className="text-muted-foreground ms-2 text-sm font-normal tabular-nums">
                   {items.length}
                 </span>
               </h2>
@@ -418,7 +421,7 @@ function RequestRow({
   const MediaIcon = request.media_type === "series" ? Tv : Film;
   const details = [
     formatMediaType(request.media_type),
-    request.year ? String(request.year) : "",
+    request.year ? numberText(request.year) : "",
     request.seasons?.length ? formatSeasonList(request.seasons) : "",
     state === "partially_available" && request.season_progress?.length
       ? formatSeasonProgress(request.season_progress)
@@ -543,7 +546,7 @@ function StatusHelp() {
   return (
     <Popover>
       <PopoverTrigger asChild>
-        <Button variant="ghost" size="sm" className="text-muted-foreground -ml-2 sm:-mr-2 sm:ml-0">
+        <Button variant="ghost" size="sm" className="text-muted-foreground -ms-2 sm:ms-0 sm:-me-2">
           <Info className="h-4 w-4" aria-hidden />
           {t("web.requests.hub.statusHelp")}
         </Button>

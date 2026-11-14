@@ -47,7 +47,7 @@ export function IPAddressesCard({ userId }: { userId: number }) {
           <Button variant="ghost" size="sm" onClick={() => setExpanded(true)}>
             {history.hasNextPage
               ? t("web.admin.users.detail.activity.ips.showAll")
-              : t("web.admin.users.detail.activity.showAllCount", { count: String(ips.length) })}
+              : t("web.admin.users.detail.activity.showAllCount", { count: ips.length })}
           </Button>
         ) : undefined
       }
@@ -56,7 +56,7 @@ export function IPAddressesCard({ userId }: { userId: number }) {
           <Button
             variant="outline"
             size="sm"
-            className="ml-auto"
+            className="ms-auto"
             disabled={history.isFetchingNextPage}
             onClick={() => void history.fetchNextPage()}
           >
@@ -90,7 +90,9 @@ export function IPAddressesCard({ userId }: { userId: number }) {
               key={entry.client_ip}
               className="border-border/50 grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 gap-y-1 border-t px-4 py-2.5 first:border-t-0 sm:grid-cols-[minmax(0,1fr)_auto_auto] sm:px-5"
             >
-              <span className="truncate font-mono text-[13px]">{entry.client_ip}</span>
+              <span className="truncate font-mono text-[13px] max-lg:wrap-anywhere max-lg:whitespace-normal">
+                {entry.client_ip}
+              </span>
               <span className="text-xs">
                 {isNewRemoteAddress(entry) ? (
                   <Badge
@@ -111,7 +113,7 @@ export function IPAddressesCard({ userId }: { userId: number }) {
                   </span>
                 ) : null}
               </span>
-              <span className="text-muted-foreground col-span-2 text-xs tabular-nums sm:col-span-1 sm:text-right">
+              <span className="text-muted-foreground col-span-2 text-xs tabular-nums sm:col-span-1 sm:text-end">
                 {t("web.admin.users.detail.activity.ips.requests", {
                   count: entry.request_count,
                   count_text: entry.request_count.toLocaleString(formatLocale()),

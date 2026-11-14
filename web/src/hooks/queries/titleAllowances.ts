@@ -76,7 +76,7 @@ export function describeMaturityLimit(limit: {
   const parts: string[] = [];
   if (limit.max_content_rating.trim() !== "") parts.push(limit.max_content_rating);
   if ((limit.max_advisory_age ?? 0) > 0)
-    parts.push(t("web.profiles.allowances.ageLimit", { age: String(limit.max_advisory_age) }));
+    parts.push(t("web.profiles.allowances.ageLimit", { age: limit.max_advisory_age }));
   return parts.join(" · ");
 }
 

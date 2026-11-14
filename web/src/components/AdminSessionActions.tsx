@@ -318,7 +318,7 @@ export function AdminSessionActions({
                 name:
                   session.username ||
                   t("web.admin.sessions.playback.messageDialog.userFallback", {
-                    id: String(session.user_id),
+                    id: session.user_id,
                   }),
               })}
             </DialogDescription>

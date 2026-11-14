@@ -32,6 +32,8 @@ interface ConfirmDialogProps {
   onCloseAutoFocus?: (event: Event) => void;
   /** Why the action didn't happen, shown in the dialog; the caller keeps it open. */
   error?: string | null;
+  /** Extra classes for the dialog's content, e.g. a page's touch-target sizing. */
+  className?: string;
 }
 
 export function ConfirmDialog({
@@ -49,6 +51,7 @@ export function ConfirmDialog({
   irreversible = false,
   onCloseAutoFocus,
   error,
+  className,
 }: ConfirmDialogProps) {
   const t = useT();
   const confirmText = confirmLabel ?? t("web.shell.confirmDialog.confirm");
@@ -74,7 +77,7 @@ export function ConfirmDialog({
       >
         {isPending ? (
           <>
-            <span className="mr-2 inline-block h-3 w-3 animate-spin rounded-full border-2 border-current border-t-transparent" />
+            <span className="me-2 inline-block h-3 w-3 animate-spin rounded-full border-2 border-current border-t-transparent" />
             {confirmText}
           </>
         ) : (
@@ -85,7 +88,11 @@ export function ConfirmDialog({
   );
   return (
     <AlertDialog open={open} onOpenChange={onOpenChange}>
-      <AlertDialogContent aria-describedby={describedBy} onCloseAutoFocus={onCloseAutoFocus}>
+      <AlertDialogContent
+        aria-describedby={describedBy}
+        onCloseAutoFocus={onCloseAutoFocus}
+        className={className}
+      >
         <AlertDialogHeader>
           <AlertDialogTitle>{title}</AlertDialogTitle>
           <AlertDialogDescription>
@@ -93,7 +100,7 @@ export function ConfirmDialog({
           </AlertDialogDescription>
         </AlertDialogHeader>
         {items.length > 0 ? (
-          <ul aria-label={bullets?.label} className="m-0 grid list-disc gap-1 pl-5 text-sm">
+          <ul aria-label={bullets?.label} className="m-0 grid list-disc gap-1 ps-5 text-sm">
             {items.map((item, index) => (
               <li key={`${item}-${index}`} id={itemId(index)}>
                 {item}

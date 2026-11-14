@@ -201,7 +201,7 @@ export function StarterPacksDialog({
   else if (newCount > 0)
     addLabel = t("web.collections.starterPacks.addCollections", {
       count: newCount,
-      count_text: String(newCount),
+      count_text: newCount,
     });
   else if (featured) addLabel = t("web.collections.starterPacks.setHeroBanners");
   else if (dryRun.isSuccess) addLabel = t("web.collections.starterPacks.nothingNewToAdd");
@@ -216,8 +216,8 @@ export function StarterPacksDialog({
       {progress && progress.total > 0
         ? t("web.collections.starterPacks.addingPackProgress", {
             pack: run?.pack.title ?? pack?.title ?? "",
-            current: String(progress.current),
-            total: String(progress.total),
+            current: progress.current,
+            total: progress.total,
           })
         : t("web.collections.starterPacks.addingPack", {
             pack: run?.pack.title ?? pack?.title ?? "",
@@ -253,7 +253,7 @@ export function StarterPacksDialog({
     >
       <div className="border-border grid min-h-0 flex-1 border-t lg:grid-cols-[236px_minmax(0,1fr)]">
         {!narrow ? (
-          <div className="border-border overflow-y-auto border-r p-3">
+          <div className="border-border overflow-y-auto border-e p-3">
             {packs.length > 0 && pack ? (
               <PackRail
                 packs={packs}
@@ -436,13 +436,13 @@ function PackRail({
             onClick={() => {
               if (!locked) onSelect(pack.id);
             }}
-            className="text-muted-foreground hover:text-foreground aria-selected:bg-accent aria-selected:text-foreground aria-selected:ring-border focus-visible:ring-ring/50 grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-2 gap-y-1 rounded-[10px] px-3 py-[9px] text-left text-sm outline-none focus-visible:ring-[3px] disabled:cursor-not-allowed disabled:opacity-60 aria-selected:ring-1 aria-selected:ring-inset"
+            className="text-muted-foreground hover:text-foreground aria-selected:bg-accent aria-selected:text-foreground aria-selected:ring-border focus-visible:ring-ring/50 grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-2 gap-y-1 rounded-[10px] px-3 py-[9px] text-start text-sm outline-none focus-visible:ring-[3px] disabled:cursor-not-allowed disabled:opacity-60 aria-selected:ring-1 aria-selected:ring-inset"
           >
             <span className="truncate">{pack.title}</span>
             <span className="text-xs tabular-nums opacity-80">
               {t("web.collections.starterPacks.tabCount", {
                 count: pack.templates.length,
-                count_text: String(pack.templates.length),
+                count_text: pack.templates.length,
                 sr: (chunks) => <span className="sr-only">{chunks}</span>,
               })}
             </span>
@@ -485,12 +485,12 @@ function PackSelect({
               ? t("web.collections.starterPacks.packOptionAdded", {
                   pack: pack.title,
                   count: pack.templates.length,
-                  count_text: String(pack.templates.length),
+                  count_text: pack.templates.length,
                 })
               : t("web.collections.starterPacks.packOption", {
                   pack: pack.title,
                   count: pack.templates.length,
-                  count_text: String(pack.templates.length),
+                  count_text: pack.templates.length,
                 })}
           </SelectItem>
         ))}
@@ -524,7 +524,7 @@ function LibraryChips({
             <label
               key={library.id}
               className={cn(
-                "border-border has-focus-visible:ring-ring/50 hover:bg-accent/60 inline-flex h-10 cursor-pointer items-center gap-2.5 rounded-[12px] border pr-3.5 pl-3 text-sm font-medium transition-colors has-focus-visible:ring-[3px] has-disabled:cursor-not-allowed has-disabled:opacity-60",
+                "border-border has-focus-visible:ring-ring/50 hover:bg-accent/60 inline-flex h-10 cursor-pointer items-center gap-2.5 rounded-[12px] border ps-3 pe-3.5 text-sm font-medium transition-colors has-focus-visible:ring-[3px] has-disabled:cursor-not-allowed has-disabled:opacity-60",
                 checked && "bg-accent border-foreground/55",
               )}
             >
@@ -633,7 +633,7 @@ function WhatWillHappen({
     body = (
       <>
         <div className="border-border overflow-x-auto rounded-xl border">
-          <table aria-labelledby={`${id}-label`} className="w-full text-left text-sm">
+          <table aria-labelledby={`${id}-label`} className="w-full text-start text-sm">
             <thead className="text-muted-foreground text-[12.5px]">
               <tr>
                 <th scope="col" className="px-3.5 py-2.5 font-medium">
@@ -677,14 +677,14 @@ function WhatWillHappen({
                       <span className="inline-flex flex-wrap items-center gap-1.5">
                         <span className="whitespace-nowrap">
                           {t("web.collections.starterPacks.newCount", {
-                            count: String(row.added.length),
+                            count: row.added.length,
                             b: (chunks) => <b className="font-semibold">{chunks}</b>,
                           })}
                         </span>
                         {pinned > 0 ? (
                           <Tag pin>
                             {t("web.collections.starterPacks.pinnedFirstCount", {
-                              count: String(pinned),
+                              count: pinned,
                             })}
                           </Tag>
                         ) : null}
@@ -730,7 +730,7 @@ function WhatWillHappen({
         </div>
         {newCount > SYNC_LOAD_THRESHOLD ? (
           <p className="text-muted-foreground text-[13px]">
-            {t("web.collections.starterPacks.syncLoad", { count: String(newCount) })}
+            {t("web.collections.starterPacks.syncLoad", { count: newCount })}
           </p>
         ) : null}
       </>
@@ -777,7 +777,7 @@ function PackLists({ row }: { row: PackLibraryRow }) {
     >
       <span className="min-w-0 truncate">{entry.title}</span>
       {tag ? (
-        <span className="ml-auto">
+        <span className="ms-auto">
           <Tag pin={pin}>{tag}</Tag>
         </span>
       ) : null}
@@ -786,7 +786,7 @@ function PackLists({ row }: { row: PackLibraryRow }) {
   return (
     <ul
       aria-label={t("web.collections.starterPacks.listsFor", { library: row.libraryName })}
-      className="grid gap-x-6 pl-6 sm:grid-cols-2"
+      className="grid gap-x-6 ps-6 sm:grid-cols-2"
     >
       {row.added.map((entry) =>
         item(entry, entry.pinned ? t("web.collections.starterPacks.pinnedFirst") : null, true),
@@ -994,7 +994,7 @@ function ApplyResult({
         lines.push(
           t("web.collections.starterPacks.addedToLibrary", {
             count: row.added.length,
-            count_text: String(row.added.length),
+            count_text: row.added.length,
             library: row.libraryName,
           }),
         );

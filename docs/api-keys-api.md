@@ -1,9 +1,7 @@
 # API Keys API
 
 > **API lifecycle:** this documents the stable `/api/v2` native contract, which locks with Silo
-> 1.0. The frozen alpha `/api/v1` key routes are summarized in
-> [Bridge note](#bridge-note) and are served through the pre-1.0 bridge window. See
-> [the native API contract](architecture/api-contract.md).
+> 1.0. See [the native API contract](architecture/api-contract.md).
 
 API keys are long-lived credentials for scripts and integrations. A key is a
 string with an `sa_` prefix and is sent the same way as a JWT access token:
@@ -200,23 +198,3 @@ four hours. The key's revision and scope are rechecked every 15 seconds; see
 `GET /api/v2/admin/sessions/command-capabilities`. It grants no reads beyond
 that; combine it with `admin:monitor:read` to find the sessions to act on.
 
-## Bridge note
-
-The frozen alpha surface serves the same features at `/api/v1/api-keys`,
-`/api/v1/api-keys/scopes`, `/api/v1/admin/api-keys`,
-`/api/v1/admin/users/{userId}/api-keys`, and `/api/v1/admin/api-keys/{id}/tier`. It
-uses integer IDs, spells the tier field `tier` rather than `rate_tier`, has no
-cursor pagination, and does not use `ETag`/`If-Match` preconditions. V1 answers
-the admin-boundary refusals under [Scopes](#scopes) with `403 insufficient_scope`
-rather than `permission_denied`. Those routes are
-frozen: no feature work lands on them. After the bridge window, and once a maintainer
-decides to retire it ([#886](https://github.com/Silo-Server/silo-server/issues/886)), the
-main API listener answers the `/api/v1` business routes with `410 Gone` and the
-`client_upgrade_required` problem code; `/api/v1/health` and `/api/v1/ready` keep
-answering. Build against `/api/v2`.
-Both `POST /api/v1/api-keys` and `POST /api/v2/api-keys` require
-an admin account acting through its primary profile, as described under
-[Personal key management](#personal-key-management); v1 refuses anyone else with
-`403 forbidden` before reading the body. Applying the primary-profile rule to v1 is a
-critical bridge fix: before it, a child profile on an admin account could mint a key
-and use it to open PIN-protected profiles.

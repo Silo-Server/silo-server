@@ -162,7 +162,7 @@ export default function Collections() {
   // only once what it shows has loaded: a slow or failed request isn't "none".
   let emptyMessage: string | undefined;
   if (show === "mine" && personalLoaded && own.length === 0)
-    emptyMessage = "You haven't made any collections yet.";
+    emptyMessage = t("web.collections.page.emptyMine");
   else if (
     show === "all" &&
     personalLoaded &&
@@ -170,7 +170,7 @@ export default function Collections() {
     server.isSuccess &&
     own.length + sharedCards.length + libraries.length === 0
   )
-    emptyMessage = "There are no collections yet.";
+    emptyMessage = t("web.collections.page.emptyAll");
 
   function changeShow(next: string) {
     setSearchParams(
@@ -491,8 +491,8 @@ function moveAnnouncements(t: Translate, collections: Collection[]): Announcemen
     t("web.collections.page.dndUnknownCollection");
   const position = (id: UniqueIdentifier) =>
     t("web.collections.dnd.position", {
-      position: String(collections.findIndex((collection) => collection.id === id) + 1),
-      total: String(collections.length),
+      position: collections.findIndex((collection) => collection.id === id) + 1,
+      total: collections.length,
     });
   return {
     onDragStart: ({ active }) =>
@@ -553,7 +553,11 @@ function SortableCollectionGrid({
       sensors={sensors}
       collisionDetection={closestCenter}
       // In the body, not inline: inline it would put divs inside the wall's list.
-      accessibility={{ announcements: moveAnnouncements(t, collections), container: document.body }}
+      accessibility={{
+        announcements: moveAnnouncements(t, collections),
+        screenReaderInstructions: { draggable: t("web.common.sortable.instructions") },
+        container: document.body,
+      }}
       onDragStart={handleDragStart}
       onDragEnd={handleDragEnd}
       onDragCancel={blockClicks.settle}
@@ -683,7 +687,7 @@ function Wall({
               className="text-sm font-medium underline-offset-4 hover:underline"
             >
               {t("web.collections.page.seeAllIn", {
-                count: String(entry.total_count),
+                count: entry.total_count,
                 library: entry.library_name,
               })}
             </Link>

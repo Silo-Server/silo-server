@@ -270,11 +270,11 @@ export function PolicyDecisionLogTable({ domains }: PolicyDecisionLogTableProps)
                     <TableCell className="max-w-[260px] truncate font-mono text-xs">
                       {entry.input_digest || t("web.admin.access.policy.noValue")}
                     </TableCell>
-                    <TableCell className="text-right">
+                    <TableCell className="text-end">
                       {expanded ? (
-                        <ChevronUp className="text-muted-foreground ml-auto size-4" />
+                        <ChevronUp className="text-muted-foreground ms-auto size-4" />
                       ) : (
-                        <ChevronDown className="text-muted-foreground ml-auto size-4" />
+                        <ChevronDown className="text-muted-foreground ms-auto size-4" />
                       )}
                     </TableCell>
                   </TableRow>

@@ -146,7 +146,7 @@ export function PolicyVendorViewer() {
                   ))}
                 </ul>
                 {meta.overrideCan && (
-                  <p className="text-muted-foreground border-border mt-4 border-l-2 pl-3 text-xs leading-relaxed">
+                  <p className="text-muted-foreground border-border mt-4 border-s-2 ps-3 text-xs leading-relaxed">
                     {meta.overrideCan}
                   </p>
                 )}

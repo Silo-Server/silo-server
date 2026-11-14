@@ -1,4 +1,10 @@
 import { usePlaybackBarHeight } from "@/hooks/usePlaybackBarHeight";
+import {
+  consumeAutomaticStart,
+  expectAutomaticStart,
+  recordAutoAdvance,
+  resetStillWatchingStreak,
+} from "@/player/stillWatching";
 import { useSeekPreferences } from "@/hooks/queries/seekPreferences";
 import {
   lazy,
@@ -30,7 +36,7 @@ import { LocalErrorBoundary } from "@/components/LocalErrorBoundary";
 import { Button } from "@/components/ui/button";
 import { Slider } from "@/components/ui/slider";
 import { useDocumentTitle } from "@/hooks/useDocumentTitle";
-import { useT, type Translate } from "@/i18n";
+import { codeNumber, numberText, useT, type Translate } from "@/i18n";
 import { fetchCatalogItemDetail } from "@/hooks/queries/catalogRead";
 import { useContinueWatching } from "@/hooks/queries/progress";
 import {
@@ -137,18 +143,21 @@ function buildPlaybackSubtitle(
   }
 
   if (item.series_title && item.season_number != null && item.episode_number != null) {
-    const code = { season: String(item.season_number), episode: String(item.episode_number) };
+    const code = {
+      season: codeNumber(item.season_number),
+      episode: codeNumber(item.episode_number),
+    };
     return item.title
       ? t("web.player.episode.codeWithTitle", { ...code, title: item.title })
       : t("web.player.episode.code", code);
   }
 
   if (item.year) {
-    return String(item.year);
+    return numberText(item.year);
   }
 
   if (request.libraryId != null) {
-    return t("web.player.bar.library", { id: String(request.libraryId) });
+    return t("web.player.bar.library", { id: request.libraryId });
   }
 
   return undefined;
@@ -326,6 +335,12 @@ export function WatchPlaybackProvider({ children }: { children: ReactNode }) {
   }, [profileId, state.request]);
 
   const syncRouteRequest = useCallback((request: WatchRouteRequest) => {
+    // A post-roll start adopts its request before the route syncs, so the
+    // automatic marker is consumed whether or not the request is new.
+    const automatic = consumeAutomaticStart(request.contentId);
+    if (!automatic && stateRef.current.request?.requestKey !== request.requestKey) {
+      resetStillWatchingStreak();
+    }
     dispatch({ type: "SYNC_ROUTE_REQUEST", request });
   }, []);
 
@@ -345,6 +360,8 @@ export function WatchPlaybackProvider({ children }: { children: ReactNode }) {
   const startPlayback = useCallback(
     (input: WatchPlaybackStartInput | WatchRouteRequest, trigger: PlaybackStartTrigger) => {
       const request = normalizeWatchPlaybackRequest(input);
+      if (trigger === "viewer") resetStillWatchingStreak();
+      else expectAutomaticStart(request.contentId);
       // Press-play-to-first-frame starts here, before any navigation or
       // Picture-in-Picture exit the viewer also waits for. The route rebuilds
       // the same request key, so the player's session can claim the mark.
@@ -370,6 +387,10 @@ export function WatchPlaybackProvider({ children }: { children: ReactNode }) {
             request,
             mode: "background-bar",
           });
+          // No route follows a background start, so nothing else would use
+          // up its automatic marker, and a later pick of this title from a
+          // link would keep the count.
+          consumeAutomaticStart(request.contentId);
           return;
         }
 
@@ -888,6 +909,7 @@ function WatchPlaybackHostContent() {
         return;
       }
 
+      if (trigger === "automatic") recordAutoAdvance();
       controller.startPlayback(
         {
           contentId: nextContentId,
@@ -1335,6 +1357,7 @@ export function WatchPlaybackBar() {
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-2">
               <div className="bg-primary/15 text-primary flex h-10 w-10 shrink-0 items-center justify-center rounded-xl">
+                {/* eslint-disable-next-line silo/no-physical-direction -- centres the play triangle, which doesn't mirror */}
                 <Play className="ml-0.5 h-4 w-4 fill-current" />
               </div>
               <div className="min-w-0">
@@ -1354,8 +1377,10 @@ export function WatchPlaybackBar() {
               )}
             </div>
 
-            <div className="mt-3 space-y-1.5">
+            {/* The timeline reads left to right in every language, like the player's. */}
+            <div dir="ltr" className="mt-3 space-y-1.5">
               <Slider
+                dir="ltr"
                 value={[displayedTime]}
                 min={0}
                 max={Math.max(snapshot?.duration ?? 0, 0)}
@@ -1391,7 +1416,7 @@ export function WatchPlaybackBar() {
             </div>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div dir="ltr" className="flex items-center gap-2">
             <Button
               variant="glass"
               size="icon"
@@ -1408,9 +1433,9 @@ export function WatchPlaybackBar() {
               disabled={!transport}
             >
               {snapshot?.playing ? (
-                <Pause className="mr-2 h-4 w-4" />
+                <Pause className="me-2 h-4 w-4" />
               ) : (
-                <Play className="mr-2 h-4 w-4 fill-current" />
+                <Play className="me-2 h-4 w-4 fill-current" />
               )}
               {snapshot?.playing ? t("web.player.bar.pause") : t("web.player.bar.play")}
             </Button>
@@ -1430,7 +1455,7 @@ export function WatchPlaybackBar() {
               onClick={returnToWatch}
               title={t("web.player.bar.returnTitle")}
             >
-              <Tv className="mr-2 h-4 w-4" />
+              <Tv className="me-2 h-4 w-4" />
               {t("web.player.bar.watch")}
             </Button>
             <Button

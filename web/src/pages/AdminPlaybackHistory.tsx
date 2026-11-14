@@ -294,7 +294,7 @@ export default function AdminPlaybackHistory() {
                       <TableHead>{t("web.admin.history.column.watchTime")}</TableHead>
                       <TableHead>{t("web.admin.history.column.status")}</TableHead>
                       <TableHead>{t("web.admin.history.column.ended")}</TableHead>
-                      <TableHead className="text-right">
+                      <TableHead className="text-end">
                         {t("web.admin.history.column.logs")}
                       </TableHead>
                     </TableRow>
@@ -340,7 +340,7 @@ export default function AdminPlaybackHistory() {
                               className="hover:text-primary font-medium transition-colors hover:underline"
                             >
                               {row.username ||
-                                t("web.admin.activity.userFallback", { id: String(row.user_id) })}
+                                t("web.admin.activity.userFallback", { id: row.user_id })}
                             </Link>
                           </TableCell>
                           <TableCell>
@@ -398,7 +398,7 @@ export default function AdminPlaybackHistory() {
                               </div>
                             </div>
                           </TableCell>
-                          <TableCell className="text-right">
+                          <TableCell className="text-end">
                             <div className="flex justify-end gap-3">
                               <Link
                                 to={`/admin/logs?playback_session_id=${encodeURIComponent(row.session_id)}&focus=playback`}
@@ -425,9 +425,9 @@ export default function AdminPlaybackHistory() {
                   <div className="flex items-center gap-4">
                     <span className="text-muted-foreground text-sm">
                       {t("web.admin.history.pagination.range", {
-                        from: String(page * pageSize + 1),
-                        to: String(Math.min((page + 1) * pageSize, total)),
-                        total: String(total),
+                        from: page * pageSize + 1,
+                        to: Math.min((page + 1) * pageSize, total),
+                        total: total,
                       })}
                     </span>
                     <Select
@@ -437,7 +437,7 @@ export default function AdminPlaybackHistory() {
                         setPage(0);
                       }}
                     >
-                      <SelectTrigger className="h-8 w-[100px]">
+                      <SelectTrigger className="h-8 min-w-[100px]">
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
@@ -497,7 +497,7 @@ function historyRowTitle(
     title:
       row.media_title ||
       row.media_item_id ||
-      t("web.admin.activity.title.file", { id: String(row.media_file_id) }),
+      t("web.common.activity.title.file", { id: row.media_file_id }),
     detail: "",
   };
 }
@@ -542,17 +542,17 @@ function formatDuration(seconds: number | null, t: Translate) {
 
   if (hours > 0) {
     return t("web.admin.history.duration.hoursMinutes", {
-      hours: String(hours),
-      minutes: String(minutes),
+      hours: hours,
+      minutes: minutes,
     });
   }
   if (minutes > 0) {
     return t("web.admin.history.duration.minutesSeconds", {
-      minutes: String(minutes),
-      seconds: String(secs),
+      minutes: minutes,
+      seconds: secs,
     });
   }
-  return t("web.admin.history.duration.seconds", { seconds: String(secs) });
+  return t("web.admin.history.duration.seconds", { seconds: secs });
 }
 
 function formatDateTime(value: string) {

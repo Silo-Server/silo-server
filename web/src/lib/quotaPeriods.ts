@@ -9,11 +9,11 @@ export const QUOTA_PERIODS = ["day", "week", "month"] as const;
 export function quotaPeriodWindowLabel(period: string): string | undefined {
   switch (period) {
     case "day":
-      return t("web.subtitles.quotaWindow.day");
+      return t("web.subtitles.quotaWindow.day", { hours: 24 });
     case "week":
-      return t("web.subtitles.quotaWindow.week");
+      return t("web.subtitles.quotaWindow.week", { days: 7 });
     case "month":
-      return t("web.subtitles.quotaWindow.month");
+      return t("web.subtitles.quotaWindow.month", { days: 30 });
     default:
       return undefined;
   }

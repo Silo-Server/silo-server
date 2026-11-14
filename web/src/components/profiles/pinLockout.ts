@@ -15,5 +15,5 @@ export function pinLockoutMessage(error: unknown): string | null {
     return t("web.profiles.pin.lockedLater");
   }
   const minutes = Math.max(1, Math.ceil(seconds / 60));
-  return t("web.profiles.pin.lockedMinutes", { count: minutes, count_text: String(minutes) });
+  return t("web.profiles.pin.lockedMinutes", { count: minutes, count_text: minutes });
 }

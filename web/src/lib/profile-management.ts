@@ -109,7 +109,7 @@ export const ADVISORY_AGE_OPTIONS: AdvisoryAgeOption[] = [
     return {
       value: age,
       get label() {
-        return t("web.profiles.helpers.advisoryAge.agesAndUnder", { age, age_text: String(age) });
+        return t("web.profiles.helpers.advisoryAge.agesAndUnder", { age, age_text: age });
       },
     };
   }),
@@ -254,18 +254,22 @@ export function buildProfileAccessSummary(
         profile.require_advisory_age
           ? "web.profiles.helpers.access.advisoryAgeMaxRatedOnly"
           : "web.profiles.helpers.access.advisoryAgeMax",
-        { age: String(profile.max_advisory_age) },
+        { age: profile.max_advisory_age },
       )
     : "";
   const libraryCount = sortUniqueLibraryIDs(profile.allowed_library_ids).length;
   const libraries = profile.library_restrictions_enabled
     ? t("web.profiles.helpers.access.libraries", {
         count: libraryCount,
-        count_text: String(libraryCount),
+        count_text: libraryCount,
       })
     : t("web.profiles.helpers.access.allLibraries");
-  const qualityLabel = formatPlaybackQualityPreset(profile.max_playback_quality);
-  const playbackQuality = t("web.profiles.helpers.access.quality", { quality: qualityLabel });
+  const playbackQuality =
+    playbackQualityPresetFromValue(profile.max_playback_quality) === "any"
+      ? t("web.profiles.helpers.access.anyQuality")
+      : t("web.profiles.helpers.access.quality", {
+          quality: formatPlaybackQualityPreset(profile.max_playback_quality),
+        });
 
   return {
     contentRating,
@@ -332,6 +336,5 @@ export function canSwitchProfile(profileCount: number, maxProfiles: number | nul
 
 /** The sentence shown in place of New profile once the household is full. */
 export function profileLimitMessage(maxProfiles: number): string {
-  const noun = maxProfiles === 1 ? "profile" : "profiles";
-  return `This account can have ${maxProfiles} ${noun}. An administrator can raise the limit.`;
+  return t("web.settings.profiles.limitReached", { count: maxProfiles });
 }

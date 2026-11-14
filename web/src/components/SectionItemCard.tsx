@@ -21,7 +21,7 @@ import {
 import type { SectionItem } from "@/api/types";
 import { buildItemHref } from "@/lib/mediaNavigation";
 import CardPlayOverlay from "@/components/CardPlayOverlay";
-import { useAppLanguage, useT } from "@/i18n";
+import { numberText, useAppLanguage, useT } from "@/i18n";
 
 interface SectionItemCardProps {
   item: SectionItem;
@@ -73,6 +73,7 @@ export default memo(function SectionItemCard({
             priority={priority}
           >
             {item.status === "ambiguous" && (
+              // eslint-disable-next-line silo/no-physical-direction -- on the poster artwork, which doesn't mirror; matches CardOverlays and CardWatchStatus
               <span className="absolute top-2.5 left-2.5 rounded-full border border-amber-500/25 bg-black/40 px-2 py-0.5 text-[0.625rem] leading-none font-semibold tracking-wide text-amber-200 uppercase backdrop-blur-sm">
                 {t("web.home.sectionRow.ambiguous")}
               </span>
@@ -84,6 +85,7 @@ export default memo(function SectionItemCard({
               <CardWatchStatus userState={item.user_state} />
             )}
             {upcomingEvent && upcomingEvent.badges.length > 0 && (
+              // eslint-disable-next-line silo/no-physical-direction -- on the poster artwork, which doesn't mirror; matches CardOverlays and CardWatchStatus
               <div className="absolute top-2.5 left-2.5 flex max-w-[calc(100%-2.5rem)] flex-wrap gap-1">
                 {upcomingEvent.badges.map((badge) => (
                   <span
@@ -139,7 +141,7 @@ export default memo(function SectionItemCard({
         ) : episodeLabels ? (
           <ViewTransitionLink to={itemHref} className="block hover:underline">
             {episodeLabels.episodeTitle ? (
-              <div className="text-muted-foreground mt-1 truncate text-[0.75rem] font-medium">
+              <div className="bidi-text text-muted-foreground mt-1 truncate text-[0.75rem] font-medium">
                 {episodeLabels.episodeTitle}
               </div>
             ) : null}
@@ -156,7 +158,7 @@ export default memo(function SectionItemCard({
         ) : (
           <ViewTransitionLink to={itemHref} className={MEDIA_CARD_META_CLASS}>
             {/* eslint-disable-next-line formatjs/no-literal-string-in-jsx -- a space, not text */}
-            {item.year ? String(item.year) : null}{" "}
+            {item.year ? numberText(item.year) : null}{" "}
             {item.type === "series" ? t("web.home.sectionRow.seriesType") : null}
           </ViewTransitionLink>
         )}

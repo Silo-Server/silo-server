@@ -10,7 +10,7 @@ import type {
   RequestSearchMediaType,
   RequestUserState,
 } from "@/api/types";
-import { t } from "@/i18n";
+import { numberText, t } from "@/i18n";
 import { formatDate } from "@/lib/datetime";
 
 export function formatMediaType(mediaType: RequestMediaType): string {
@@ -260,7 +260,9 @@ export function formatSeasonList(seasons: number[]): string {
   for (let i = 0; i < sorted.length; ) {
     let j = i;
     while (j + 1 < sorted.length && sorted[j + 1] === sorted[j]! + 1) j++;
-    runs.push(j > i ? `${sorted[i]}–${sorted[j]}` : String(sorted[i]));
+    runs.push(
+      j > i ? `${numberText(sorted[i]!)}–${numberText(sorted[j]!)}` : numberText(sorted[i]!),
+    );
     i = j + 1;
   }
   return t("web.requests.status.seasonList", { count: sorted.length, list: runs.join(", ") });
@@ -327,12 +329,12 @@ export function upcomingRequestSeasons(seasons: RequestMediaSeason[], now = new 
 /** "2022 · 9 episodes", or "Not announced" before TMDB dates or fills the season. */
 export function formatRequestSeasonMeta(season: RequestMediaSeason): string {
   const parts: string[] = [];
-  if (season.air_date) parts.push(season.air_date.slice(0, 4));
+  if (season.air_date) parts.push(numberText(season.air_date.slice(0, 4)));
   if (season.episode_count > 0) {
     parts.push(
       t("web.requests.status.seasonEpisodes", {
         count: season.episode_count,
-        count_text: String(season.episode_count),
+        count_text: season.episode_count,
       }),
     );
   }
@@ -353,8 +355,8 @@ export function formatSeasonProgress(progress: RequestSeasonProgress[]): string 
   if (aired === 0) return "";
   return t("web.requests.status.seasonProgress", {
     aired,
-    have: String(have),
-    aired_text: String(aired),
+    have: have,
+    aired_text: aired,
   });
 }
 

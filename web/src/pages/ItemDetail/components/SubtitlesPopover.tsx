@@ -108,7 +108,7 @@ function SelectionRow({
     <button
       type="button"
       onClick={onSelect}
-      className={`flex w-full items-start gap-3 rounded-lg px-3 py-2 text-left transition-colors ${
+      className={`flex w-full items-start gap-3 rounded-lg px-3 py-2 text-start transition-colors ${
         active ? "bg-accent/50" : "hover:bg-accent/30"
       }`}
     >
@@ -353,7 +353,7 @@ export default function SubtitlesPopover({
                 setOpen(false);
                 onSearchSubtitles();
               }}
-              className="hover:bg-accent/30 flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm font-medium transition-colors"
+              className="hover:bg-accent/30 flex w-full items-center gap-2 rounded-lg px-3 py-2 text-start text-sm font-medium transition-colors"
             >
               <Search className="text-muted-foreground size-4" />
               {t("web.detail.subtitles.search")}

@@ -250,13 +250,13 @@ function AddToCollectionPanel({
       <div className="relative">
         <Search
           aria-hidden
-          className="text-muted-foreground absolute top-1/2 left-3 size-4 -translate-y-1/2"
+          className="text-muted-foreground absolute start-3 top-1/2 size-4 -translate-y-1/2"
         />
         <Input
           type="search"
           aria-label={t("web.collections.addToCollection.find")}
           placeholder={t("web.collections.addToCollection.find")}
-          className="h-10 pl-9"
+          className="h-10 ps-9"
           value={query}
           onChange={(event) => setQuery(event.target.value)}
         />
@@ -397,11 +397,11 @@ function CollectionChoice({
             ) : null}
           </span>
         </span>
-        <span role="status" className="text-success min-w-12 text-right text-xs font-semibold">
+        <span role="status" className="text-success min-w-12 text-end text-xs font-semibold">
           {flash === "Added" ? t("web.collections.addToCollection.added") : null}
           {flash === "Removed" ? t("web.collections.addToCollection.removed") : null}
           {!flash && saving ? (
-            <Loader2 aria-hidden className="ml-auto size-3.5 animate-spin" />
+            <Loader2 aria-hidden className="ms-auto size-3.5 animate-spin" />
           ) : null}
         </span>
       </label>

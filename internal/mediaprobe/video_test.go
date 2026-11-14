@@ -78,6 +78,27 @@ func TestNormalizeVideoTrackReadsHDR10PlusFromFrameSideData(t *testing.T) {
 	}
 }
 
+func TestNormalizeVideoTrackRecordsTheFirstFrameRange(t *testing.T) {
+	tests := []struct {
+		name   string
+		stream Stream
+		want   string
+	}{
+		{name: "full-range frame under a limited tag", stream: Stream{ColorRange: "tv", FrameSideDataRead: true, FrameColorRange: "pc"}, want: "pc"},
+		{name: "frame without a range", stream: Stream{ColorRange: "tv", FrameSideDataRead: true}, want: "unknown"},
+		{name: "frame not read", stream: Stream{ColorRange: "tv"}, want: ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tt.stream.CodecType, tt.stream.CodecName, tt.stream.ColorTransfer = "video", "hevc", "smpte2084"
+			track := NormalizeVideoTrack(tt.stream)
+			if track.FrameColorRange != tt.want || track.ColorRange != "tv" {
+				t.Fatalf("FrameColorRange = %q, ColorRange = %q; want %q, %q", track.FrameColorRange, track.ColorRange, tt.want, "tv")
+			}
+		})
+	}
+}
+
 func TestNeedsFrameSideDataOnlyForPrimaryPQVideo(t *testing.T) {
 	tests := []struct {
 		name   string

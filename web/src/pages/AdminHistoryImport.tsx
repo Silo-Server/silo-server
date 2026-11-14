@@ -457,12 +457,12 @@ function SourceDialog({
                       }
                       value={adminToken}
                       onChange={(e) => setAdminToken(e.target.value)}
-                      className="pr-10"
+                      className="pe-10"
                     />
                     <button
                       type="button"
                       onClick={() => setShowToken((v) => !v)}
-                      className="text-muted-foreground hover:text-foreground absolute top-1/2 right-3 -translate-y-1/2"
+                      className="text-muted-foreground hover:text-foreground absolute end-3 top-1/2 -translate-y-1/2"
                     >
                       {showToken ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                     </button>
@@ -645,12 +645,12 @@ function TokenDialog({
                     placeholder={t("web.admin.historyImport.tokenDialog.tokenPlaceholder")}
                     value={token}
                     onChange={(e) => setToken(e.target.value)}
-                    className="pr-10"
+                    className="pe-10"
                   />
                   <button
                     type="button"
                     onClick={() => setShowToken((v) => !v)}
-                    className="text-muted-foreground hover:text-foreground absolute top-1/2 right-3 -translate-y-1/2"
+                    className="text-muted-foreground hover:text-foreground absolute end-3 top-1/2 -translate-y-1/2"
                   >
                     {showToken ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                   </button>
@@ -827,7 +827,7 @@ function DiscoverDialog({
                     ? t("web.admin.historyImport.discover.allMapped")
                     : t("web.admin.historyImport.discover.unmappedFound", {
                         count: unmappedUsers.length,
-                        count_text: String(unmappedUsers.length),
+                        count_text: unmappedUsers.length,
                       })}
                 </p>
                 <Button variant="ghost" size="sm" onClick={() => refetch()}>
@@ -838,12 +838,12 @@ function DiscoverDialog({
               {unmappedUsers.length > 0 && (
                 <>
                   <div className="relative">
-                    <Search className="text-muted-foreground absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2" />
+                    <Search className="text-muted-foreground absolute start-3 top-1/2 h-4 w-4 -translate-y-1/2" />
                     <Input
                       placeholder={t("web.admin.historyImport.discover.searchPlaceholder")}
                       value={search}
                       onChange={(e) => setSearch(e.target.value)}
-                      className="pl-9"
+                      className="ps-9"
                     />
                   </div>
                   <div className="surface-panel-subtle max-h-96 divide-y overflow-y-auto rounded-xl border-0">
@@ -862,7 +862,7 @@ function DiscoverDialog({
                             setProfileId("");
                           }}
                           className={cn(
-                            "flex w-full items-center justify-between px-4 py-2.5 text-left transition-colors",
+                            "flex w-full items-center justify-between px-4 py-2.5 text-start transition-colors",
                             mappingTarget?.id === u.id ? "bg-accent" : "hover:bg-accent/50",
                           )}
                         >
@@ -947,7 +947,7 @@ function DiscoverDialog({
                     >
                       {createMapping.isPending ? (
                         <>
-                          <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+                          <Loader2 className="me-1.5 h-3.5 w-3.5 animate-spin" />
                           {t("web.admin.historyImport.credential.saving")}
                         </>
                       ) : (
@@ -1009,7 +1009,7 @@ function SourceBar({
           </p>
         </div>
         <Button size="sm" onClick={onAdd}>
-          <Plus className="mr-2 h-4 w-4" />
+          <Plus className="me-2 h-4 w-4" />
           {t("web.admin.historyImport.sourceBar.addServer")}
         </Button>
       </div>
@@ -1076,7 +1076,7 @@ function SourceBar({
             </>
           )}
           <Button size="sm" variant="outline" onClick={onAdd}>
-            <Plus className="mr-1.5 h-3.5 w-3.5" />
+            <Plus className="me-1.5 h-3.5 w-3.5" />
             {t("web.admin.historyImport.sourceBar.add")}
           </Button>
         </div>
@@ -1090,7 +1090,7 @@ function SourceBar({
             {t("web.admin.historyImport.sourceBar.noApiKey")}
           </p>
           <Button size="sm" variant="outline" onClick={() => onSetToken(selected)}>
-            <KeyRound className="mr-1.5 h-3.5 w-3.5" />
+            <KeyRound className="me-1.5 h-3.5 w-3.5" />
             {t("web.admin.historyImport.sourceBar.setApiKey")}
           </Button>
         </div>
@@ -1184,15 +1184,15 @@ function MappingsSection({
               disabled={bulkRun.isPending || mappings.length > 200}
             >
               {bulkRun.isPending ? (
-                <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+                <Loader2 className="me-1.5 h-3.5 w-3.5 animate-spin" />
               ) : (
-                <Play className="mr-1.5 h-3.5 w-3.5" />
+                <Play className="me-1.5 h-3.5 w-3.5" />
               )}
               {t("web.admin.historyImport.mappings.importAll")}
             </Button>
           )}
           <Button size="sm" onClick={() => setDiscoverOpen(true)}>
-            <Search className="mr-1.5 h-3.5 w-3.5" />
+            <Search className="me-1.5 h-3.5 w-3.5" />
             {t("web.admin.historyImport.mappings.discoverUsers")}
           </Button>
         </div>
@@ -1202,21 +1202,21 @@ function MappingsSection({
         <div role="status" className="space-y-1 text-sm">
           <p>
             {t("web.admin.historyImport.mappings.bulkSummary", {
-              accepted: String(bulkRun.data.accepted),
-              active: String(bulkRun.data.active),
-              failed: String(bulkRun.data.failed),
+              accepted: bulkRun.data.accepted,
+              active: bulkRun.data.active,
+              failed: bulkRun.data.failed,
             })}
           </p>
           {bulkRun.data.outcomes.map((outcome) => (
             <p key={outcome.mapping_id}>
               {outcome.error
                 ? t("web.admin.historyImport.mappings.bulkOutcomeWithError", {
-                    id: String(outcome.mapping_id),
+                    id: outcome.mapping_id,
                     status: outcome.status,
                     error: outcome.error,
                   })
                 : t("web.admin.historyImport.mappings.bulkOutcome", {
-                    id: String(outcome.mapping_id),
+                    id: outcome.mapping_id,
                     status: outcome.status,
                   })}
             </p>
@@ -1232,7 +1232,7 @@ function MappingsSection({
             {t("web.admin.historyImport.mappings.empty")}
           </p>
           <Button size="sm" variant="outline" onClick={() => setDiscoverOpen(true)}>
-            <Search className="mr-1.5 h-3.5 w-3.5" />
+            <Search className="me-1.5 h-3.5 w-3.5" />
             {t("web.admin.historyImport.mappings.discoverUsers")}
           </Button>
         </div>
@@ -1247,7 +1247,7 @@ function MappingsSection({
                 </TableHead>
                 <TableHead>{t("web.admin.historyImport.mappings.column.siloUser")}</TableHead>
 
-                <TableHead className="w-24 text-right">
+                <TableHead className="w-24 text-end">
                   {t("web.admin.historyImport.mappings.column.actions")}
                 </TableHead>
               </TableRow>
@@ -1266,7 +1266,7 @@ function MappingsSection({
                   <TableCell>
                     <p className="text-sm">
                       {users.find((user) => user.id === m.silo_user_id)?.username ||
-                        t("web.admin.historyImport.userFallback", { id: String(m.silo_user_id) })}
+                        t("web.admin.historyImport.userFallback", { id: m.silo_user_id })}
                     </p>
                     {m.silo_profile_name && (
                       <p className="text-muted-foreground text-xs">{m.silo_profile_name}</p>
@@ -1428,7 +1428,7 @@ function RunsSection({ sourceId }: { sourceId: number }) {
               const expanded = expandedId === run.id;
               const runUser =
                 userMap.get(run.user_id) ??
-                t("web.admin.historyImport.userFallback", { id: String(run.user_id) });
+                t("web.admin.historyImport.userFallback", { id: run.user_id });
               return (
                 <div key={run.id}>
                   <div className="flex items-center gap-3 px-4 py-3">
@@ -1478,7 +1478,7 @@ function RunsSection({ sourceId }: { sourceId: number }) {
                         <span>
                           {t("web.admin.historyImport.runs.fetchedCount", {
                             count: run.fetched,
-                            count_text: String(run.fetched),
+                            count_text: run.fetched,
                           })}
                         </span>
                       )}
@@ -1486,7 +1486,7 @@ function RunsSection({ sourceId }: { sourceId: number }) {
                         <span className="text-success">
                           {t("web.admin.historyImport.runs.matchedCount", {
                             count: run.matched,
-                            count_text: String(run.matched),
+                            count_text: run.matched,
                           })}
                         </span>
                       )}
@@ -1494,7 +1494,7 @@ function RunsSection({ sourceId }: { sourceId: number }) {
                         <span className="text-warning">
                           {t("web.admin.historyImport.runs.unmatchedCount", {
                             count: run.unmatched,
-                            count_text: String(run.unmatched),
+                            count_text: run.unmatched,
                           })}
                         </span>
                       )}
@@ -1574,7 +1574,7 @@ function RunsSection({ sourceId }: { sourceId: number }) {
                           <p className="text-muted-foreground text-xs font-medium">
                             {t("web.admin.historyImport.runs.warnings", {
                               count: run.warnings.length,
-                              count_text: String(run.warnings.length),
+                              count_text: run.warnings.length,
                             })}
                           </p>
                           <ul className="text-muted-foreground list-inside list-disc space-y-0.5 text-xs">
@@ -1585,7 +1585,7 @@ function RunsSection({ sourceId }: { sourceId: number }) {
                               <li className="italic">
                                 {t("web.admin.historyImport.runs.moreWarnings", {
                                   count: run.warnings.length - 5,
-                                  count_text: String(run.warnings.length - 5),
+                                  count_text: run.warnings.length - 5,
                                 })}
                               </li>
                             )}
@@ -1603,7 +1603,7 @@ function RunsSection({ sourceId }: { sourceId: number }) {
                                 {s.year
                                   ? t("web.admin.historyImport.runs.sampleWithYear", {
                                       title: s.title,
-                                      year: String(s.year),
+                                      year: s.year,
                                       reason: s.reason,
                                     })
                                   : t("web.admin.historyImport.runs.sample", {
@@ -1819,7 +1819,7 @@ function PlexAdminImportLimits() {
           {t("web.admin.historyImport.plexLimits.title")}
         </p>
         <p>{t("web.admin.historyImport.plexLimits.intro")}</p>
-        <ul className="list-disc space-y-0.5 pl-5">
+        <ul className="list-disc space-y-0.5 ps-5">
           <li>{t("web.admin.historyImport.plexLimits.resumePoints")}</li>
           <li>{t("web.admin.historyImport.plexLimits.markedWatched")}</li>
           <li>{t("web.admin.historyImport.plexLimits.watchlists")}</li>

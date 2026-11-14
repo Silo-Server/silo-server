@@ -513,7 +513,7 @@ export default function ConnectionsPanel() {
                   <Label htmlFor="conn-key">
                     {t("web.admin.autoscan.connections.form.apiKey")}
                     {dialog.editing?.has_api_key && (
-                      <span className="text-muted-foreground ml-1 font-normal">
+                      <span className="text-muted-foreground ms-1 font-normal">
                         {t("web.admin.autoscan.connections.dialog.apiKeyKeep")}
                       </span>
                     )}

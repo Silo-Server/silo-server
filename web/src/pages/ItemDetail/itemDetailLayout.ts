@@ -8,6 +8,8 @@ export interface SeriesPrimaryAction {
 
 export interface LeafPrimaryAction {
   label: string;
+  /** True when the action continues a live resume point rather than starting. */
+  resuming: boolean;
   progress?: number;
 }
 
@@ -41,7 +43,7 @@ export function resolveLeafPrimaryAction(
 
   const playLabel = defaultLabel ?? t("web.detail.actions.play");
   if (!userData || !("position_seconds" in userData)) {
-    return { label: playLabel };
+    return { label: playLabel, resuming: false };
   }
 
   const positionSeconds = userData.position_seconds ?? 0;
@@ -57,12 +59,14 @@ export function resolveLeafPrimaryAction(
   if (isInProgress) {
     return {
       label: t("web.detail.actions.resume"),
+      resuming: true,
       progress,
     };
   }
 
   return {
     label: playLabel,
+    resuming: false,
     progress,
   };
 }
@@ -76,11 +80,11 @@ export function getSeasonDisplayTitle(season: Season): string {
     return season.title;
   }
 
-  return t("web.detail.seasons.numbered", { season: String(season.season_number) });
+  return t("web.detail.seasons.numbered", { season: season.season_number });
 }
 
 export function formatEpisodeCount(count: number): string {
-  return t("web.detail.seasons.episodeCount", { count, count_text: String(count) });
+  return t("web.detail.seasons.episodeCount", { count, count_text: count });
 }
 
 export function formatSeasonMeta(season: Season): string {
@@ -91,8 +95,8 @@ export function formatSeasonMeta(season: Season): string {
 export function formatSeasonProgress(season: Season, watchedCount: number): string {
   return t("web.detail.seasons.watchedProgress", {
     count: season.episode_count,
-    watched: String(watchedCount),
-    count_text: String(season.episode_count),
+    watched: watchedCount,
+    count_text: season.episode_count,
   });
 }
 
@@ -132,5 +136,5 @@ export function resolveSeriesPrimaryAction(
     return { label: t("web.detail.actions.playNext"), href };
   }
   // Unstarted and fully watched series both resolve to the first episode.
-  return { label: t("web.detail.actions.startFromFirstEpisode"), href };
+  return { label: t("web.detail.actions.startFromFirstEpisode", { episode: 1 }), href };
 }

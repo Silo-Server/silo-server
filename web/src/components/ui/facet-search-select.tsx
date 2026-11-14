@@ -126,7 +126,7 @@ export function FacetSearchSelect({
           <span className="truncate">
             {value || (placeholder ?? t("web.ui.select.searchPlaceholder"))}
           </span>
-          <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+          <ChevronsUpDown className="ms-2 h-4 w-4 shrink-0 opacity-50" />
         </button>
       </PopoverPrimitive.Trigger>
 
@@ -188,7 +188,7 @@ export function FacetSearchSelect({
                   }}
                 >
                   <Check
-                    className={cn("mr-2 h-4 w-4 shrink-0", value ? "opacity-0" : "opacity-100")}
+                    className={cn("me-2 h-4 w-4 shrink-0", value ? "opacity-0" : "opacity-100")}
                   />
                   <span className="text-muted-foreground italic">{t("web.ui.select.any")}</span>
                 </button>
@@ -212,7 +212,7 @@ export function FacetSearchSelect({
                   >
                     <Check
                       className={cn(
-                        "mr-2 h-4 w-4 shrink-0",
+                        "me-2 h-4 w-4 shrink-0",
                         value === option ? "opacity-100" : "opacity-0",
                       )}
                     />

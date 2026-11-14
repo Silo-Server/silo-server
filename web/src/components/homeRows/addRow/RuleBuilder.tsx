@@ -270,8 +270,7 @@ export function RuleBuilder({
         {groups.length === 0 ? (
           <p className="text-muted-foreground text-sm">
             {context === "collection"
-              ? // eslint-disable-next-line formatjs/no-literal-string-in-jsx -- reworded on main; its catalog key is a follow-up
-                "No rules yet. Add one to choose which titles it holds."
+              ? t("web.home.addRow.rules.noRulesCollectionYet")
               : t("web.home.addRow.rules.noRulesRow")}
           </p>
         ) : null}
@@ -280,7 +279,7 @@ export function RuleBuilder({
             key={index}
             role={several ? "group" : undefined}
             aria-label={
-              several ? t("web.home.addRow.rules.group", { number: String(index + 1) }) : undefined
+              several ? t("web.home.addRow.rules.group", { number: index + 1 }) : undefined
             }
             className="grid gap-2"
           >
@@ -298,8 +297,9 @@ export function RuleBuilder({
                   ),
                   match: () => (
                     <MatchSelect
-                      // eslint-disable-next-line formatjs/no-literal-string-in-jsx -- the catalog validator rejects "}'s", and English must not change; see the i18n README
-                      label={`How group ${index + 1}'s rules combine`}
+                      label={t("web.home.addRow.rules.groupMatchLabel", {
+                        number: index + 1,
+                      })}
                       value={group.match}
                       names={RULE_NAMES}
                       onChange={(match) => setGroup(index, { ...group, match })}
@@ -311,9 +311,9 @@ export function RuleBuilder({
                   variant="ghost"
                   size="icon"
                   aria-label={t("web.home.addRow.rules.removeGroup", {
-                    number: String(index + 1),
+                    number: index + 1,
                   })}
-                  className="text-muted-foreground ml-auto size-8"
+                  className="text-muted-foreground ms-auto size-8"
                   onClick={() => {
                     setFocusRule(null);
                     setGroups(groups.filter((_, at) => at !== index));
@@ -332,7 +332,7 @@ export function RuleBuilder({
                 onChange={(updates) => updateRule(index, ruleIndex, updates)}
                 onRemove={() => removeRule(index, ruleIndex)}
                 roomy
-                label={t("web.home.addRow.rules.rule", { number: String(ruleIndex + 1) })}
+                label={t("web.home.addRow.rules.rule", { number: ruleIndex + 1 })}
                 valueScope={valueScope}
                 focusValue={focusRule === `${index}:${ruleIndex}`}
               />

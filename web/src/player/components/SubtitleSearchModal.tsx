@@ -385,7 +385,7 @@ export function SubtitleSearchModal({
                 <button
                   key={key}
                   type="button"
-                  className="mb-1.5 flex w-full items-center gap-2 rounded bg-white/5 px-3 py-2 text-left hover:bg-white/10 focus-visible:ring-2 focus-visible:ring-white/70 focus-visible:outline-none disabled:opacity-50"
+                  className="mb-1.5 flex w-full items-center gap-2 rounded bg-white/5 px-3 py-2 text-start hover:bg-white/10 focus-visible:ring-2 focus-visible:ring-white/70 focus-visible:outline-none disabled:opacity-50"
                   onClick={() => handleDownload(result)}
                   disabled={downloading !== null}
                 >

@@ -30,7 +30,7 @@ export default function ImpersonationBanner({
 
   return (
     <div role="status" aria-live="polite" className="impersonation-banner sticky top-0 z-50">
-      <div className="impersonation-banner-inner flex items-center gap-3 px-4 py-2 sm:gap-4 sm:px-6 lg:pr-8 lg:pl-8">
+      <div className="impersonation-banner-inner flex items-center gap-3 px-4 py-2 sm:gap-4 sm:px-6 lg:ps-8 lg:pe-8">
         <div className="flex shrink-0 items-center gap-2">
           <span className="relative inline-flex h-2 w-2" aria-hidden="true">
             <span className="impersonation-pulse absolute inset-0 rounded-full motion-safe:animate-ping" />
@@ -52,7 +52,7 @@ export default function ImpersonationBanner({
 
         <span className="text-muted-foreground hidden truncate text-xs sm:inline">
           {/* eslint-disable-next-line formatjs/no-literal-string-in-jsx -- decorative separator */}
-          <span className="text-muted-foreground/60 mr-2">·</span>
+          <span className="text-muted-foreground/60 me-2">·</span>
           {t("web.shell.impersonation.authorizedBy", {
             name: impersonatorName,
             strong: (chunks) => <span className="text-foreground/80 font-medium">{chunks}</span>,
@@ -64,7 +64,7 @@ export default function ImpersonationBanner({
           onClick={() => void handleEnd()}
           disabled={isEnding}
           aria-label={t("web.shell.impersonation.endSessionLabel")}
-          className="impersonation-end-btn group ml-auto inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md px-3 text-xs font-semibold whitespace-nowrap transition-all duration-150 outline-none disabled:pointer-events-none disabled:opacity-50"
+          className="impersonation-end-btn group ms-auto inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md px-3 text-xs font-semibold whitespace-nowrap transition-all duration-150 outline-none disabled:pointer-events-none disabled:opacity-50"
         >
           <X
             className="h-3.5 w-3.5 transition-transform duration-200 motion-safe:group-hover:rotate-90"

@@ -72,8 +72,8 @@ function formatRequestLimit(t: Translate, quota: RequestQuota, inline = false): 
   }
   return t("web.admin.users.detail.access.requests.perWindow", {
     days: quota.days,
-    days_text: String(quota.days),
-    max: String(quota.max),
+    days_text: quota.days,
+    max: quota.max,
   });
 }
 
@@ -475,7 +475,7 @@ export function RequestsCard({
                         <span className="text-muted-foreground text-xs font-normal">
                           {SPACE}
                           {t("web.admin.users.detail.access.requests.used", {
-                            used: String(used),
+                            used: used,
                           })}
                         </span>
                       ) : null}

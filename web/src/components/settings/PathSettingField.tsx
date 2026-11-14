@@ -80,7 +80,7 @@ export function PathSettingField({
             // field instead of leaving a screen reader with three identical
             // "Reset to default" buttons.
             aria-label={t("web.settings.pathSettingField.resetLabel", { label })}
-            className="text-muted-foreground hover:text-foreground -mr-2 self-end"
+            className="text-muted-foreground hover:text-foreground -me-2 self-end"
             onClick={() => onChange("")}
           >
             {t("web.settings.pathSettingField.reset")}

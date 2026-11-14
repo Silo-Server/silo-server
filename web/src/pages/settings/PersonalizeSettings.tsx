@@ -46,7 +46,7 @@ export default function PersonalizeSettings() {
             <Button asChild>
               <Link to="/taste-seed?from=settings">
                 {t("web.settings.personalize.openPicker")}
-                <ArrowRight className="ml-1 h-4 w-4" />
+                <ArrowRight className="ms-1 h-4 w-4" />
               </Link>
             </Button>
           </div>
@@ -85,7 +85,7 @@ export default function PersonalizeSettings() {
             ? t("web.settings.personalize.noFavorites")
             : t("web.settings.personalize.favoriteCount", {
                 count: favoriteCount,
-                count_text: String(favoriteCount),
+                count_text: favoriteCount,
               })}
         </span>
       </div>

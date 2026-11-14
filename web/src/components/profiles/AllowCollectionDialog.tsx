@@ -134,7 +134,7 @@ function CopyRow({ profile, collectionId }: { profile: Profile; collectionId: st
         note={
           added === null
             ? undefined
-            : t("web.profiles.allow.allowedTitles", { count: added, count_text: String(added) })
+            : t("web.profiles.allow.allowedTitles", { count: added, count_text: added })
         }
       />
       <Button

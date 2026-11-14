@@ -107,7 +107,7 @@ export default function CatalogFiltersPanel({
     libraries ??
     state.query_definition.library_ids.map((id) => ({
       id,
-      name: t("web.catalog.filters.libraryFallback", { id: String(id) }),
+      name: t("web.catalog.filters.libraryFallback", { id: id }),
     }));
 
   // The toolbar sets only the media type and sort, so it patches those onto

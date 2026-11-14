@@ -381,7 +381,7 @@ function TitleRow({
       ) : (
         <span />
       )}
-      <span className="text-muted-foreground text-right text-[13px] tabular-nums">{index + 1}</span>
+      <span className="text-muted-foreground text-end text-[13px] tabular-nums">{index + 1}</span>
       <Poster url={row.info?.posterUrl} />
       <span className="min-w-0">
         <span className="block truncate text-[14.5px] font-semibold">{label}</span>
@@ -443,7 +443,7 @@ function UndoToast({
       onMouseLeave={() => setPaused((p) => ({ ...p, hover: false }))}
       onFocus={() => setPaused((p) => ({ ...p, focus: true }))}
       onBlur={() => setPaused((p) => ({ ...p, focus: false }))}
-      className="border-border bg-popover flex w-fit items-center gap-3 rounded-xl border py-1.5 pr-1.5 pl-3 text-[13.5px] shadow-lg"
+      className="border-border bg-popover flex w-fit items-center gap-3 rounded-xl border py-1.5 ps-3 pe-1.5 text-[13.5px] shadow-lg"
     >
       <span className="font-medium">{message}</span>
       <Button type="button" size="sm" variant="outline" className="h-8 gap-1.5" onClick={onUndo}>
@@ -702,8 +702,8 @@ export function ManualContentsPanel({
       rows.find((row) => row.id === id)?.info?.title ?? t("web.collections.dnd.unknownTitle");
     const positionOf = (id: UniqueIdentifier) =>
       t("web.collections.dnd.position", {
-        position: String(rows.findIndex((row) => row.id === id) + 1),
-        total: String(rows.length),
+        position: rows.findIndex((row) => row.id === id) + 1,
+        total: rows.length,
       });
     return {
       onDragStart: ({ active }) => {
@@ -880,7 +880,10 @@ export function ManualContentsPanel({
         <DndContext
           sensors={sensors}
           collisionDetection={closestCenter}
-          accessibility={{ announcements }}
+          accessibility={{
+            announcements,
+            screenReaderInstructions: { draggable: t("web.common.sortable.instructions") },
+          }}
           onDragStart={() => {
             dragOrder.current = orderSnapshot;
           }}
@@ -916,7 +919,7 @@ export function ManualContentsPanel({
             >
               {expanded
                 ? t("web.collections.manual.showFewer")
-                : t("web.collections.manual.showAll", { count: String(rows.length) })}
+                : t("web.collections.manual.showAll", { count: rows.length })}
             </Button>
           ) : (
             <span />

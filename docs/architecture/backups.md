@@ -703,7 +703,7 @@ collections in `collections.json`, and an omitted item's `cause` and
 `error`; version 4 a home section's `web_only`; version 5 no new field, but a
 server smart collection's rules now draw from their own `library_ids`, so a
 restore pins an older set's smart collection rules to the collection's
-libraries), the source
+libraries; version 6 a home section's `title_key` and `title_args`), the source
 server id and name, Silo version, creation time, `SECRET_KEY` check value, and
 a section index: for each section its item count, each of its files with
 size and SHA-256, and the blob keys its documents reference. Plugin archive
@@ -725,9 +725,15 @@ format version: an older reader refuses a newer set as "from a newer Silo"
 instead of failing on what it does not know, and a set that claims an older
 version while holding something added later (`users` in version 1,
 `home_sections` or template collections in version 2, a `web_only` section
-in version 3) is refused. A set without `web_only` reads it as false, the
-column's default. Readers accept versions 1 to 4; version 4 is always
-written.
+in version 3, a `title_key` section in version 5) is refused. A set without
+`web_only` reads it as false, the column's default. A set without `title_key`
+reads every title as typed text, so a restored title never gains a key; a
+keyed title keeps its key and arguments when a restore creates or replaces the
+section. A restore never takes a key away: replacing a section with a title
+that has no key leaves the key the section already has when the title is the
+same text, because the two then show the same English, and a set written
+before version 6 cannot say whether its title was typed. The restore preview
+reports a section that differs only by its key as changed. Readers accept versions 1 to 6; version 6 is always written.
 
 | Section | Holds | Blob prefixes |
 |---|---|---|
@@ -2021,7 +2027,9 @@ neither list.
   stays linked; the others are deleted. Accepted and revoked invitations
   are the restored history and stay. A live credential whose account,
   profile, access group, item, autoscan source, or connection is not in the
-  restored data is dropped, and so is one whose account (owner, inviter, or
+  restored data is dropped (a profile counts only under the credential's own
+  account, since a profile id is unique only within one), and so is one whose
+  account (owner, inviter, or
   creator) has more authority in the restored data than on the live server:
   a higher role (the Owner over admin over user), enabled where it is
   disabled now, break-glass access, an effective account policy wider in

@@ -43,16 +43,33 @@ const (
 	variantUpdateChunk = 1000
 )
 
-// ListVariantFilesByPathPrefix returns the present files of a media folder at
-// or under pathPrefix in the narrow variant projection. The range form of the
-// path predicate keeps the folder/path index usable under a generic plan.
-func (r *FileRepository) ListVariantFilesByPathPrefix(ctx context.Context, folderID int, pathPrefix string) ([]VariantFile, error) {
-	clauses, clauseArgs := pathscope.RangeCoverageClauses("file_path", []string{pathPrefix}, 2)
-	query := `SELECT ` + variantFileColumns + ` FROM media_files
+// ListVariantFilesByPathPrefix returns one page of the present files of a
+// media folder at or under pathPrefix in the narrow variant projection: up to
+// limit files under pathPrefix whose path sorts after the cursor, in bytewise
+// path order. An empty cursor starts the listing, and that first page also
+// carries the file at pathPrefix itself, which sorts below everything under
+// it, so it can hold limit+1 files. The next cursor is the greatest path of
+// the page by Go string comparison, and a page shorter than limit is the last.
+//
+// The range form of the path predicate and the matching sort order let the
+// folder/path index find each page directly, under a generic plan too.
+func (r *FileRepository) ListVariantFilesByPathPrefix(ctx context.Context, folderID int, pathPrefix, after string, limit int) ([]VariantFile, error) {
+	lower, upper := pathscope.DescendantRange(pathPrefix)
+	query := `(SELECT ` + variantFileColumns + ` FROM media_files
 		WHERE media_folder_id = $1
 		  AND missing_since IS NULL
-		  AND ` + clauses[0]
-	args := append([]any{folderID}, clauseArgs...)
+		  AND file_path ~>=~ $2 AND file_path ~<~ $3 AND file_path ~>~ $4
+		ORDER BY file_path USING ~<~
+		LIMIT $5)`
+	args := []any{folderID, lower, upper, after, limit}
+	if after == "" {
+		query = `(SELECT ` + variantFileColumns + ` FROM media_files
+		WHERE media_folder_id = $1
+		  AND missing_since IS NULL
+		  AND file_path = $6)
+		UNION ALL ` + query
+		args = append(args, pathPrefix)
+	}
 	rows, err := r.pool.Query(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("querying variant files by path prefix: %w", err)

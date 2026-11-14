@@ -71,7 +71,7 @@ export function BufferingQualityPill({
         >
           <span
             aria-hidden="true"
-            className="absolute inset-y-0 left-0 bg-white/15"
+            className="absolute inset-y-0 start-0 bg-white/15"
             style={{ width: `${progress * 100}%` }}
           />
           <span className="relative">

@@ -143,7 +143,7 @@ export default function CatalogFilterSheet({
               </div>
             </div>
             {guidedAvailable ? null : (
-              <p className="text-muted-foreground text-xs">{GUIDED_UNAVAILABLE_MESSAGE}</p>
+              <p className="text-muted-foreground text-xs">{t(GUIDED_UNAVAILABLE_MESSAGE)}</p>
             )}
           </SheetHeader>
 

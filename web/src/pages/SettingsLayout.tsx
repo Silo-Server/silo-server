@@ -56,7 +56,7 @@ export default function SettingsLayout() {
     <div className="lg:pt-8">
       <Link
         to="/settings"
-        className="text-muted-foreground hover:text-foreground focus-visible:ring-ring mb-5 inline-flex w-fit items-center gap-1.5 rounded-lg pr-2 text-sm font-medium transition-colors focus-visible:ring-2 focus-visible:outline-none lg:hidden"
+        className="text-muted-foreground hover:text-foreground focus-visible:ring-ring mb-5 inline-flex w-fit items-center gap-1.5 rounded-lg pe-2 text-sm font-medium transition-colors focus-visible:ring-2 focus-visible:outline-none lg:hidden"
       >
         <ChevronLeft className="h-4 w-4" aria-hidden="true" />
         {t("web.settings.layout.allSettings")}

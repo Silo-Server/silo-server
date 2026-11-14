@@ -60,7 +60,7 @@ function AppHandoff({ appLink, hubHref }: { appLink: string; hubHref: string }) 
         <CardContent className="space-y-3">
           <Button asChild size="lg" className="h-12 w-full text-base font-semibold">
             <a href={appLink}>
-              <Smartphone className="mr-2 h-5 w-5" /> {t("web.watchTogether.invite.openApp")}
+              <Smartphone className="me-2 h-5 w-5" /> {t("web.watchTogether.invite.openApp")}
             </a>
           </Button>
           <p className="text-muted-foreground text-center text-xs">

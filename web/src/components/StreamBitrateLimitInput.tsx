@@ -10,6 +10,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import {
+  LOW_STREAM_BITRATE_LIMIT_KBPS,
   STREAM_BITRATE_LIMIT_PRESETS_KBPS,
   formatStreamBitrateLimit,
   isLowStreamBitrateLimit,
@@ -17,6 +18,7 @@ import {
   parseStreamBitrateMbps,
   streamBitrateLimitMbpsText,
 } from "@/lib/streamBitrateLimit";
+import { TOUCH_TARGETS } from "@/lib/touchTargets";
 
 const UNLIMITED = "0";
 const CUSTOM = "custom";
@@ -54,7 +56,7 @@ export function StreamBitrateLimitInput({
   disabled?: boolean;
 }) {
   const t = useT();
-  const invalidMbps = t("web.player.bitrateLimit.invalid");
+  const invalidMbps = t("web.player.bitrateLimit.invalid", { places: 3, min: 0 });
   const [choice, setChoice] = useState(() =>
     invalidDraft !== undefined && (invalidDraft !== "" || value !== null)
       ? CUSTOM
@@ -103,7 +105,7 @@ export function StreamBitrateLimitInput({
           <SelectTrigger id={id} className={custom ? "w-32 shrink-0" : "w-full"}>
             <SelectValue placeholder={t("web.player.bitrateLimit.choosePlaceholder")} />
           </SelectTrigger>
-          <SelectContent>
+          <SelectContent className={TOUCH_TARGETS}>
             <SelectItem value={UNLIMITED}>{t("web.player.bitrateLimit.unlimited")}</SelectItem>
             {STREAM_BITRATE_LIMIT_PRESETS_KBPS.map((kbps) => (
               <SelectItem key={kbps} value={String(kbps)}>
@@ -125,9 +127,9 @@ export function StreamBitrateLimitInput({
               placeholder={t("web.player.bitrateLimit.customPlaceholder")}
               value={draft}
               onChange={(event) => handleDraftChange(event.target.value)}
-              className="pr-14"
+              className="pe-14"
             />
-            <span className="text-muted-foreground pointer-events-none absolute inset-y-0 right-3 flex items-center text-sm">
+            <span className="text-muted-foreground pointer-events-none absolute inset-y-0 end-3 flex items-center text-sm">
               {t("web.player.bitrateLimit.unit")}
             </span>
           </div>
@@ -137,7 +139,11 @@ export function StreamBitrateLimitInput({
         <p className="text-muted-foreground text-xs">{invalidMbps}</p>
       )}
       {custom && draftValue !== null && isLowStreamBitrateLimit(draftValue) && (
-        <p className="text-warning text-xs">{t("web.player.bitrateLimit.lowWarning")}</p>
+        <p className="text-warning text-xs">
+          {t("web.player.bitrateLimit.lowWarning", {
+            mbps: LOW_STREAM_BITRATE_LIMIT_KBPS / 1000,
+          })}
+        </p>
       )}
     </div>
   );

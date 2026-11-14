@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Moon } from "lucide-react";
-import { useT } from "@/i18n";
+import { numberText, useT } from "@/i18n";
 
 export type SleepSetting =
   | { kind: "off" }
@@ -19,7 +19,7 @@ function formatCountdown(ms: number): string {
   const total = Math.max(0, Math.ceil(ms / 1000));
   const m = Math.floor(total / 60);
   const s = total % 60;
-  return `${m}:${String(s).padStart(2, "0")}`;
+  return numberText(`${m}:${String(s).padStart(2, "0")}`);
 }
 
 export function SleepTimerMenu({ setting, remainingMs, onChange }: SleepTimerMenuProps) {
@@ -49,7 +49,7 @@ export function SleepTimerMenu({ setting, remainingMs, onChange }: SleepTimerMen
     <div ref={menuRef} className="relative" onBlur={handleBlur}>
       <button
         type="button"
-        className="player-utility-btn flex items-center gap-1.5 px-2 text-xs"
+        className="player-utility-btn flex w-auto items-center gap-1.5 px-2 text-xs"
         onClick={() => setOpen((v) => !v)}
         aria-label={t("web.player.sleepTimer.trigger")}
         aria-expanded={open}
@@ -62,7 +62,7 @@ export function SleepTimerMenu({ setting, remainingMs, onChange }: SleepTimerMen
       {open && (
         <div
           role="menu"
-          className="absolute right-0 bottom-full z-30 mb-2 flex min-w-[160px] flex-col overflow-hidden rounded-lg bg-black/90 py-1.5 shadow-xl backdrop-blur-sm"
+          className="absolute end-0 bottom-full z-30 mb-2 flex min-w-[160px] flex-col overflow-hidden rounded-lg bg-black/90 py-1.5 shadow-xl backdrop-blur-sm"
         >
           {armed && (
             <button
@@ -71,7 +71,7 @@ export function SleepTimerMenu({ setting, remainingMs, onChange }: SleepTimerMen
               }}
               role="menuitem"
               type="button"
-              className="w-full px-4 py-2 text-left text-sm text-white/85 hover:bg-white/10"
+              className="w-full px-4 py-2 text-start text-sm text-white/85 hover:bg-white/10"
               onClick={() => {
                 onChange({ kind: "off" });
                 setOpen(false);
@@ -88,19 +88,19 @@ export function SleepTimerMenu({ setting, remainingMs, onChange }: SleepTimerMen
               }}
               role="menuitem"
               type="button"
-              className="w-full px-4 py-2 text-left text-sm text-white/85 hover:bg-white/10"
+              className="w-full px-4 py-2 text-start text-sm text-white/85 hover:bg-white/10"
               onClick={() => {
                 onChange({ kind: "duration", seconds });
                 setOpen(false);
               }}
             >
-              {t("web.player.sleepTimer.minutes", { minutes: String(seconds / 60) })}
+              {t("web.player.sleepTimer.minutes", { minutes: seconds / 60 })}
             </button>
           ))}
           <button
             role="menuitem"
             type="button"
-            className="w-full px-4 py-2 text-left text-sm text-white/85 hover:bg-white/10"
+            className="w-full px-4 py-2 text-start text-sm text-white/85 hover:bg-white/10"
             onClick={() => {
               onChange({ kind: "end-of-chapter" });
               setOpen(false);

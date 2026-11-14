@@ -8,8 +8,8 @@ import {
   previewEmptyHelp,
   previewFailed,
   previewLive,
-  PREVIEW_NEEDS_RULE,
-  PREVIEW_NEEDS_RULE_HELP,
+  previewNeedsRule,
+  previewNeedsRuleHelp,
   previewMatches,
 } from "@/lib/collections/copy";
 import { cn } from "@/lib/utils";
@@ -71,7 +71,7 @@ export function CollectionPreviewPane({
                     {DOT}
                   </span>
                   <span className="text-muted-foreground">
-                    {t("web.collections.preview.showing", { shown: String(ready.items.length) })}
+                    {t("web.collections.preview.showing", { shown: ready.items.length })}
                   </span>
                 </>
               ) : null}
@@ -91,8 +91,8 @@ function PreviewBody({ preview, needsRules }: { preview: ScopePreview; needsRule
   if (needsRules) {
     return (
       <PreviewGhosts announce>
-        <p className="text-[14.5px] font-semibold">{PREVIEW_NEEDS_RULE}</p>
-        <p className="text-muted-foreground mt-1 text-[13px]">{PREVIEW_NEEDS_RULE_HELP}</p>
+        <p className="text-[14.5px] font-semibold">{previewNeedsRule()}</p>
+        <p className="text-muted-foreground mt-1 text-[13px]">{previewNeedsRuleHelp()}</p>
       </PreviewGhosts>
     );
   }

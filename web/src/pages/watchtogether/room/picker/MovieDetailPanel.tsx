@@ -20,7 +20,7 @@ function stateLabel(state: MemberWatchState | undefined, t: Translate) {
   if (state.state === "watched") return t("watchParty.whoSeen.watched");
   if (state.position_seconds !== undefined && state.duration_seconds) {
     const pct = Math.round((state.position_seconds / state.duration_seconds) * 100);
-    return t("web.watchTogether.movie.percentIn", { percent: String(pct) });
+    return t("web.watchTogether.movie.percentIn", { percent: pct });
   }
   return t("watchParty.whoSeen.inProgress");
 }
@@ -61,12 +61,12 @@ export function MemberWatchList({
                 ? t("web.watchTogether.movie.rewatchForEveryone")
                 : seen === 0
                   ? t("web.watchTogether.movie.startedOf", {
-                      started: String(started),
-                      total: String(members.length),
+                      started: started,
+                      total: members.length,
                     })
                   : t("web.watchTogether.movie.seenOf", {
-                      seen: String(seen),
-                      total: String(members.length),
+                      seen: seen,
+                      total: members.length,
                     })}
           </span>
         ) : null}
@@ -199,7 +199,7 @@ export function MovieDetailPanel({
           size="icon-sm"
           onClick={onClose}
           aria-label={t("web.watchTogether.movie.close")}
-          className="absolute top-2 right-2 bg-black/30 hover:bg-black/50"
+          className="absolute end-2 top-2 bg-black/30 hover:bg-black/50"
         >
           <X className="size-4" />
         </Button>
@@ -222,7 +222,7 @@ export function MovieDetailPanel({
           <p className="text-muted-foreground text-xs italic">
             {item.tagline}
             {hasMachineTranslation(item.machine_translated_fields, "tagline") && (
-              <MachineTranslatedLabel compact className="ml-1.5 align-middle not-italic" />
+              <MachineTranslatedLabel compact className="ms-1.5 align-middle not-italic" />
             )}
           </p>
         ) : null}
@@ -247,7 +247,7 @@ export function MovieDetailPanel({
 
       <div className="border-border/60 flex shrink-0 flex-wrap items-center justify-end gap-2 border-t px-4 py-3">
         {replaces ? (
-          <span className="text-muted-foreground mr-auto text-xs">
+          <span className="text-muted-foreground me-auto text-xs">
             {t("web.watchTogether.common.replaces", { title: replaces })}
           </span>
         ) : null}

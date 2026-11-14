@@ -49,10 +49,10 @@ export function RoomStatusStrip({
   const count = room?.member_count ?? 0;
   const phaseLabel =
     room?.phase === "playing"
-      ? t("web.watchTogether.strip.playing", { count, count_text: String(count) })
+      ? t("web.watchTogether.strip.playing", { count, count_text: count })
       : room?.selection_mode === "vote"
-        ? t("web.watchTogether.strip.voting", { count, count_text: String(count) })
-        : t("web.watchTogether.strip.live", { count, count_text: String(count) });
+        ? t("web.watchTogether.strip.voting", { count, count_text: count })
+        : t("web.watchTogether.strip.live", { count, count_text: count });
 
   return (
     <div className="border-border/60 flex items-center gap-2 border-b px-4 py-2.5 sm:px-5">
@@ -129,7 +129,7 @@ export function RoomStatusStrip({
         ) : null}
       </div>
 
-      <div className="ml-auto flex shrink-0 items-center gap-2">
+      <div className="ms-auto flex shrink-0 items-center gap-2">
         <span className="text-muted-foreground flex items-center gap-1.5 text-xs">
           <ConnectionStatusDot state={connectionState} />
           <span className="hidden sm:inline">

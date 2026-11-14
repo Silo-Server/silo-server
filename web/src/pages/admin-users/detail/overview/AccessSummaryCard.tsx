@@ -4,6 +4,7 @@ import { Download, LayoutGrid, Mail, Play } from "lucide-react";
 
 import type { AdminUser } from "@/api/types";
 import { Button } from "@/components/ui/button";
+import { useServerDownloadSwitches } from "@/hooks/admin/useServerDownloadSwitches";
 import { useAccessGroups } from "@/hooks/queries/admin/accessGroups";
 import { useAdminLibraries } from "@/hooks/queries/admin/libraries";
 import { useAdminUserCapabilities } from "@/hooks/queries/admin/users";
@@ -14,6 +15,7 @@ import {
   PERMISSION_METADATA_CURATION,
   hasAssignedPermission,
 } from "@/lib/permissions";
+import { playbackQualityPresetFromValue } from "@/lib/playback-quality";
 import type { ResolvedRequestTerms } from "@/lib/requestAccess";
 import { formatStreamBitrateLimit } from "@/lib/streamBitrateLimit";
 
@@ -66,7 +68,7 @@ function videoTranscodingText(t: Translate, video: VideoTranscoding): string {
     case "limit":
       return t("web.admin.users.detail.overview.access.videoTranscodeLimit", {
         count: video.max,
-        count_text: String(video.max),
+        count_text: video.max,
       });
   }
 }
@@ -103,17 +105,17 @@ function formatQuota(t: Translate, quota: ResolvedRequestTerms["quota"]): string
       ? t("web.admin.users.detail.overview.access.quotaDay")
       : t("web.admin.users.detail.overview.access.quotaDays", {
           days: quota.days,
-          days_text: String(quota.days),
+          days_text: quota.days,
         });
   return t("web.admin.users.detail.overview.access.quota", {
     count: quota.max,
-    count_text: String(quota.max),
+    count_text: quota.max,
     period,
   });
 }
 
 const CUSTOM = (
-  <span className="ml-1.5 inline-block align-middle">
+  <span className="ms-1.5 inline-block align-middle">
     <SourceTag source="custom" />
   </span>
 );
@@ -121,6 +123,7 @@ const CUSTOM = (
 /** A few lines on what the account can do, with the account's own limits marked. */
 export function AccessSummaryCard({ user }: { user: AdminUser }) {
   const t = useT();
+  const { downloadsOff, conversionOff } = useServerDownloadSwitches();
   const groups = useAccessGroups().data ?? [];
   const libraries = useAdminLibraries().data ?? [];
   const capabilities = useAdminUserCapabilities().data;
@@ -146,23 +149,36 @@ export function AccessSummaryCard({ user }: { user: AdminUser }) {
   const remote = effective.max_remote_stream_bitrate_kbps;
 
   const summary = downloads.data;
+  // With downloads off server-wide only the counts remain: they describe
+  // copies already on the account's devices.
   const downloadsDetail = [
-    effective.download_transcode_allowed
-      ? t("web.admin.users.detail.overview.access.serverCopiesAllowed")
-      : t("web.admin.users.detail.overview.access.originalFilesOnly"),
+    ...(downloadsOff
+      ? []
+      : [
+          effective.download_transcode_allowed && !conversionOff
+            ? t("web.admin.users.detail.overview.access.serverCopiesAllowed")
+            : t("web.admin.users.detail.overview.access.originalFilesOnly"),
+        ]),
     ...(accountDownloads && summary
       ? [
           t("web.admin.users.detail.overview.access.downloadsConfirmed", {
             count: summary.completed,
-            count_text: String(summary.completed),
+            count_text: summary.completed,
           }),
           t("web.admin.users.detail.overview.access.seriesMonitored", {
             count: summary.monitored_series,
-            count_text: String(summary.monitored_series),
+            count_text: summary.monitored_series,
           }),
         ]
       : []),
   ].join(" · ");
+
+  let downloadsTitle = t("web.admin.users.detail.overview.access.downloadsNotAllowed");
+  if (downloadsOff) {
+    downloadsTitle = t("web.admin.users.detail.overview.access.downloadsServerOff");
+  } else if (effective.download_allowed) {
+    downloadsTitle = t("web.admin.users.detail.overview.access.downloadsAllowed");
+  }
 
   const canRequest = effective.requests_allowed && server?.requests_enabled !== false;
   const requestsLine = requestsSummary(t, canRequest, terms);
@@ -195,16 +211,18 @@ export function AccessSummaryCard({ user }: { user: AdminUser }) {
         icon={<Play />}
         title={
           <>
-            {t("web.admin.users.detail.overview.access.quality", {
-              quality: formatQuality(effective.max_playback_quality),
-            })}
+            {playbackQualityPresetFromValue(effective.max_playback_quality) === "any"
+              ? t("web.admin.users.detail.overview.access.anyQuality")
+              : t("web.admin.users.detail.overview.access.quality", {
+                  quality: formatQuality(effective.max_playback_quality),
+                })}
             {user.max_playback_quality !== null ? CUSTOM : null}
             {" · "}
             {effective.max_streams === 0
               ? t("web.admin.users.detail.overview.access.unlimitedStreams")
               : t("web.admin.users.detail.overview.access.streams", {
                   count: effective.max_streams,
-                  count_text: String(effective.max_streams),
+                  count_text: effective.max_streams,
                 })}
             {user.max_streams !== null ? CUSTOM : null}
           </>
@@ -224,12 +242,8 @@ export function AccessSummaryCard({ user }: { user: AdminUser }) {
       />
       <SummaryLine
         icon={<Download />}
-        title={
-          effective.download_allowed
-            ? t("web.admin.users.detail.overview.access.downloadsAllowed")
-            : t("web.admin.users.detail.overview.access.downloadsNotAllowed")
-        }
-        detail={downloadsDetail}
+        title={downloadsTitle}
+        detail={downloadsDetail || undefined}
       />
       <SummaryLine icon={<Mail />} title={requestsLine.title} detail={requestsLine.detail} />
     </DetailCard>

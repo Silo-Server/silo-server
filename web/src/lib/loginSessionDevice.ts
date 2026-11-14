@@ -96,14 +96,14 @@ export function sessionLastSeen(value: string | null, now = Date.now()): string 
   if (minutes < 60)
     return t("web.settings.sessions.lastSeen.minutes", {
       count: minutes,
-      count_text: String(minutes),
+      count_text: minutes,
     });
   if (minutes < 1440) {
     const hours = Math.floor(minutes / 60);
-    return t("web.settings.sessions.lastSeen.hours", { count: hours, count_text: String(hours) });
+    return t("web.settings.sessions.lastSeen.hours", { count: hours, count_text: hours });
   }
   const days = Math.floor(minutes / 1440);
-  return t("web.settings.sessions.lastSeen.days", { count: days, count_text: String(days) });
+  return t("web.settings.sessions.lastSeen.days", { count: days, count_text: days });
 }
 
 /** Milliseconds since the session was last seen, or null when that isn't recorded. */

@@ -29,7 +29,7 @@ import {
 import { useT } from "@/i18n";
 
 // The badge takes the top-right corner and truncates when the card is narrow.
-const BADGE_CLASS = "ml-auto max-w-full shrink-0";
+const BADGE_CLASS = "ms-auto max-w-full shrink-0";
 const DETAIL_CLASS = "text-muted-foreground mt-1 truncate text-[0.75rem] font-medium";
 
 type DiscoverProps = {
@@ -182,7 +182,7 @@ function MineCard({ request, fluid, onCancel, isCancelling }: Omit<MineProps, "v
               onClick={onCancel}
               disabled={isCancelling}
               aria-label={t("web.requests.cancel.actionFor", { title: request.title })}
-              className="text-muted-foreground mt-1.5 -ml-2"
+              className="text-muted-foreground -ms-2 mt-1.5"
             >
               {t("web.requests.cancel.action")}
             </Button>
@@ -255,6 +255,7 @@ function ExternalTitleCard({
           </div>
         ) : null}
         {cornerAction ? (
+          // eslint-disable-next-line silo/no-physical-direction -- on the poster artwork, which doesn't mirror; matches CardOverlays and CardWatchStatus
           <div className="absolute right-1.5 bottom-1.5 z-20 sm:right-2.5 sm:bottom-2.5">
             {cornerAction}
           </div>

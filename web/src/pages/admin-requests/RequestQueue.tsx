@@ -22,7 +22,7 @@ import {
   useRetryMediaRequest,
 } from "@/hooks/queries/admin/requests";
 import { useDebounce } from "@/hooks/useDebounce";
-import { useT, type MessageKey, type Translate } from "@/i18n";
+import { numberText, useT, type MessageKey, type Translate } from "@/i18n";
 import { formatRelativeTime } from "@/lib/date";
 import { formatDateTime } from "@/lib/datetime";
 import { formatMediaType, formatSeasonList, requestDetailHref } from "@/lib/mediaRequests";
@@ -221,7 +221,7 @@ export function RequestQueue() {
         <div className="flex flex-wrap items-center gap-2">
           <div className="relative min-w-[220px] flex-1 sm:max-w-sm">
             <Search
-              className="text-muted-foreground pointer-events-none absolute top-1/2 left-3 h-3.5 w-3.5 -translate-y-1/2"
+              className="text-muted-foreground pointer-events-none absolute start-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2"
               aria-hidden="true"
             />
             <Input
@@ -230,7 +230,7 @@ export function RequestQueue() {
               placeholder={t("web.admin.requests.queue.searchPlaceholder")}
               value={search}
               onChange={(event) => setSearch(event.target.value)}
-              className="h-8 pl-9 text-[13px]"
+              className="h-8 ps-9 text-[13px]"
             />
           </div>
           <div
@@ -252,7 +252,7 @@ export function RequestQueue() {
             ))}
           </div>
           {userId !== undefined ? (
-            <Badge variant="outline" className="h-7 gap-1.5 pr-1 text-xs">
+            <Badge variant="outline" className="h-7 gap-1.5 pe-1 text-xs">
               {t("web.admin.requests.queue.requestedByFilter", {
                 name: username(userId) ?? accountFallback(t, userId),
               })}
@@ -270,7 +270,7 @@ export function RequestQueue() {
             type="button"
             variant="ghost"
             size="sm"
-            className="ml-auto"
+            className="ms-auto"
             disabled={refresh.isRefreshing}
             onClick={refresh.refresh}
           >
@@ -332,13 +332,13 @@ function newerRequest(a: MediaRequest | undefined, b: MediaRequest | undefined) 
 
 /** An account's name when its username isn't known: "User 7". */
 function accountFallback(t: Translate, id: number) {
-  return t("web.admin.requests.userFallback", { id: String(id) });
+  return t("web.admin.requests.userFallback", { id: id });
 }
 
 function reasonDialogText(t: Translate, prompt: ReasonPrompt | null) {
   if (prompt?.action === "bulk-decline") {
     const n = prompt.requests.length;
-    const values = { count: n, count_text: String(n) };
+    const values = { count: n, count_text: n };
     return {
       title: t("web.admin.requests.reasonDialog.bulkDecline.title", values),
       description: t("web.admin.requests.reasonDialog.bulkDecline.description", values),
@@ -503,7 +503,7 @@ function QueueList({
               <span>{t("web.admin.requests.queue.column.state")}</span>
               <span>{t("web.admin.requests.queue.column.servers")}</span>
             </div>
-            <span className="w-60 shrink-0 text-right">
+            <span className="w-60 shrink-0 text-end">
               <span className="sr-only">{t("web.admin.requests.queue.column.actions")}</span>
             </span>
           </div>
@@ -569,7 +569,7 @@ function BulkBar({
 }) {
   const t = useT();
   const count = selectedRows.length;
-  const countValues = { count, count_text: String(count) };
+  const countValues = { count, count_text: count };
   const someSelected = count > 0 && !allSelected;
   return (
     <div className="space-y-2">
@@ -589,7 +589,7 @@ function BulkBar({
             ? t("web.admin.requests.bulk.selected", countValues)
             : t("web.admin.requests.bulk.selectAll", {
                 count: rows.length,
-                count_text: String(rows.length),
+                count_text: rows.length,
               })}
         </label>
         {count > 0 ? (
@@ -675,7 +675,7 @@ function QueueRow({
           </Link>
           <p className="text-muted-foreground text-xs">
             {[
-              request.year,
+              request.year ? numberText(request.year) : null,
               formatMediaType(request.media_type),
               request.seasons?.length ? formatSeasonList(request.seasons) : null,
             ]

@@ -65,7 +65,7 @@ export default function CalendarEventCard({ event }: { event: CalendarEvent }) {
           )}
           <div className="from-background/70 pointer-events-none absolute inset-x-0 bottom-0 h-24 bg-gradient-to-t to-transparent opacity-90" />
           {event.badges.length > 0 && (
-            <div className="absolute top-2.5 left-2.5 flex flex-wrap gap-1">
+            <div className="absolute start-2.5 top-2.5 flex flex-wrap gap-1">
               {event.badges.map((badge) => (
                 <span
                   key={badge}

@@ -207,7 +207,7 @@ export default function EbookContent({
               poster_url: entry.poster_url,
               subtitle:
                 typeof entry.series_index === "number"
-                  ? t("web.detail.books.bookNumber", { number: String(entry.series_index) })
+                  ? t("web.detail.books.bookNumber", { number: entry.series_index })
                   : undefined,
               highlight: entry.content_id === item.content_id,
             }))}

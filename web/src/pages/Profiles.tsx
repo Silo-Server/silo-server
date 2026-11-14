@@ -55,7 +55,7 @@ export default function Profiles() {
   );
   const [addSession, setAddSession] = useState<AddProfileSession | null>(null);
   const [preparingAdd, setPreparingAdd] = useState(false);
-  const { selectProfile, verifyProfilePin, logout } = useAuth();
+  const { selectProfile, verifyProfilePin, logout, isImpersonating } = useAuth();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const redirectTarget = sanitizeAuthRedirect(searchParams.get("redirect"));
@@ -72,7 +72,8 @@ export default function Profiles() {
   }
 
   function handleSelect(profile: Profile) {
-    if (profile.has_pin) {
+    // View-as opens a locked profile without its PIN; the server allows it too.
+    if (profile.has_pin && !isImpersonating) {
       setPinRequest({ profile, purpose: "select" });
       return;
     }
@@ -252,7 +253,7 @@ export default function Profiles() {
                   </AvatarFallback>
                 </Avatar>
                 {profile.has_pin ? (
-                  <span className="bg-surface border-border text-muted-foreground absolute -right-0.5 -bottom-0.5 flex h-6 w-6 items-center justify-center rounded-full border">
+                  <span className="bg-surface border-border text-muted-foreground absolute -end-0.5 -bottom-0.5 flex h-6 w-6 items-center justify-center rounded-full border">
                     <Lock className="h-3 w-3" aria-hidden="true" />
                   </span>
                 ) : null}

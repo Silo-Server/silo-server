@@ -87,6 +87,7 @@ export default function WatchlistTitleCard({
           <RequestAction title={label} pending={isRequesting} onRequest={onRequest} />
         ) : null}
         {onRemove ? (
+          // eslint-disable-next-line silo/no-physical-direction -- on the poster artwork, which doesn't mirror; matches CardOverlays and CardWatchStatus
           <div className="absolute right-1.5 bottom-1.5 z-20 sm:right-2.5 sm:bottom-2.5">
             <WatchlistAction
               title={title.title}

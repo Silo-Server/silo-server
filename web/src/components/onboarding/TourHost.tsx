@@ -248,7 +248,7 @@ function StoreLink({ link }: { link: OnboardingStepLink }) {
       <Button variant="outline" size="sm" asChild className="max-w-full">
         <a href={link.url} target="_blank" rel="noopener noreferrer">
           <span className="truncate">{link.label}</span>
-          <ExternalLink className="ml-1.5 size-3.5 shrink-0" aria-hidden="true" />
+          <ExternalLink className="ms-1.5 size-3.5 shrink-0" aria-hidden="true" />
         </a>
       </Button>
     );
@@ -365,7 +365,7 @@ function SettingControl({ step }: { step: OnboardingStep }) {
           type="button"
           onClick={() => save(opt.value)}
           className={cn(
-            "flex items-center gap-3 rounded-lg px-3 py-2 text-left text-sm transition-colors",
+            "flex items-center gap-3 rounded-lg px-3 py-2 text-start text-sm transition-colors",
             value === opt.value ? "bg-secondary font-medium" : "hover:bg-secondary/50",
           )}
         >

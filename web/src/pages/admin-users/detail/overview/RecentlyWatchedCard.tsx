@@ -57,10 +57,8 @@ export function RecentlyWatchedCard({ user }: { user: AdminUser }) {
           const progress = play.completed
             ? t("web.admin.users.detail.overview.recent.finished")
             : t("web.admin.users.detail.common.percent", {
-                percent: String(
-                  Math.round(
-                    watchedFraction(play.watched_seconds, play.duration_seconds, false) * 100,
-                  ),
+                percent: Math.round(
+                  watchedFraction(play.watched_seconds, play.duration_seconds, false) * 100,
                 ),
               });
           return (

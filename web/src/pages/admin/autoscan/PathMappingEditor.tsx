@@ -158,7 +158,7 @@ export function PathMappingEditor({
                     variant="ghost"
                     size="icon-sm"
                     aria-label={t("web.admin.autoscan.pathMapping.removeAria", {
-                      index: String(index + 1),
+                      index: index + 1,
                     })}
                     className="self-end sm:mb-1"
                     onClick={() => onChange(mappings.filter((_, i) => i !== index))}

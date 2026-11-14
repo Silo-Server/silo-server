@@ -1,4 +1,5 @@
 import type { PluginCapability } from "@/api/types";
+import { useAppLanguage } from "@/i18n";
 import { providerMonogram } from "@/lib/monogram";
 import { pluginCapabilityKinds } from "@/lib/pluginCapabilities";
 import { cn } from "@/lib/utils";
@@ -60,6 +61,8 @@ export function PluginStatusLabel({
 
 /** One icon per primary capability, each named for screen readers and on hover. */
 export function PluginCapabilityIcons({ capabilities }: { capabilities: PluginCapability[] }) {
+  // The kind labels come from t() in a plain helper; follow the language.
+  useAppLanguage();
   const kinds = pluginCapabilityKinds(capabilities);
   if (kinds.length === 0) return null;
   return (

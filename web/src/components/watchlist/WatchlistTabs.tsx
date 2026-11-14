@@ -56,7 +56,7 @@ export default function WatchlistTabs({
           <span className="sm:hidden">{t("web.library.watchlist.notInLibraryTabShort")}</span>
           <span className="hidden sm:inline">{t("web.library.watchlist.notInLibraryTab")}</span>
           {count !== undefined && count > 0 ? (
-            <span className="bg-muted/80 text-muted-foreground ml-1.5 inline-flex h-5 min-w-5 items-center justify-center rounded-full px-1.5 text-[0.625rem] font-semibold tabular-nums">
+            <span className="bg-muted/80 text-muted-foreground ms-1.5 inline-flex h-5 min-w-5 items-center justify-center rounded-full px-1.5 text-[0.625rem] font-semibold tabular-nums">
               {count}
             </span>
           ) : null}
@@ -65,7 +65,7 @@ export default function WatchlistTabs({
               <span
                 aria-hidden
                 data-testid="watchlist-attention-dot"
-                className="ml-1.5 inline-block size-2 rounded-full bg-amber-400"
+                className="ms-1.5 inline-block size-2 rounded-full bg-amber-400"
               />
               <span className="sr-only">{t("web.library.watchlist.needsAttention")}</span>
             </>

@@ -1,9 +1,7 @@
 # Scan API
 
 > **API lifecycle:** this documents the stable `/api/v2` native contract, which locks with Silo
-> 1.0. The frozen alpha `/api/v1` scan routes are summarized in [Bridge note](#bridge-note) and
-> are retired after the pre-1.0 bridge window. See
-> [the native API contract](architecture/api-contract.md).
+> 1.0. See [the native API contract](architecture/api-contract.md).
 
 Silo's scan API lets external tools trigger media library scans on demand. Use it to integrate
 with download managers like Sonarr and Radarr, or with relay tools like Autoscan that notify your
@@ -426,12 +424,3 @@ that folder. Scans running on different servers in a cluster are not serialized.
 - **Scripts require `jq`.** The integration scripts use `jq` to build JSON safely, which handles
   paths containing quotes or backslashes. Install it with your package manager (`apt install jq`,
   `brew install jq`).
-
-## Bridge note
-
-The frozen alpha surface serves the same two commands at `POST /api/v1/scan` and
-`POST /api/v1/scan/cancel`, with integer `library_id` values, a flat `{error, message}` error
-envelope, and no problem-document `type`. Those routes are frozen: no feature work lands on them.
-After the bridge window, and once a maintainer decides to retire it (#886), the main API listener
-answers the `/api/v1` business routes with `410 Gone` and the `client_upgrade_required` problem
-code; `/api/v1/health` and `/api/v1/ready` keep answering. Point new integrations at `/api/v2`.

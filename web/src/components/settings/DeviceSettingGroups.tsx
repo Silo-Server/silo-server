@@ -25,16 +25,27 @@ import { normalizeQualityPreferenceV3 } from "@/player/protocol-v3";
 
 const EMPTY_SELECT_VALUE = "__empty__";
 
+/**
+ * Whose settings these are: the viewer's own (`self`), or the named profile's
+ * when the household parent is acting for someone else.
+ */
+export interface DeviceSettingsOwner {
+  self: boolean;
+  name: string;
+}
+
+/** The select and placeholder values for the "your" / "Sam's" messages. */
+function ownerValues(owner: DeviceSettingsOwner) {
+  return { owner: owner.self ? "self" : "other", name: owner.name };
+}
+
 export interface DeviceSettingGroupsProps {
   /** Effective values resolved for the device being edited. */
   settings: Partial<Record<SettingKey, EffectiveSetting>>;
   /** Definitions supported by the connected server contract. */
   keys?: readonly SettingKey[];
-  /**
-   * Whose settings these are, for the reset label. "your" on your own devices,
-   * a name when the household parent is acting for someone else.
-   */
-  ownerLabel: string;
+  /** Whose settings these are, for the reset label and the source note. */
+  owner: DeviceSettingsOwner;
   /**
    * The target device's self-reported platform string. When given, settings
    * the manifest marks as not applying to that platform are hidden — unless
@@ -58,7 +69,7 @@ export interface DeviceSettingGroupsProps {
 export function DeviceSettingGroups({
   settings,
   keys,
-  ownerLabel,
+  owner,
   devicePlatform,
   storedOnDevice,
   disabled = false,
@@ -87,7 +98,7 @@ export function DeviceSettingGroups({
               settingKey={key}
               effective={settings[key]}
               storedOnDevice={storedOnDevice}
-              ownerLabel={ownerLabel}
+              owner={owner}
               disabled={disabled}
               onChange={onChange}
               onReset={onReset}
@@ -104,7 +115,7 @@ interface DeviceSettingRowProps {
   settingKey: SettingKey;
   effective: EffectiveSetting | undefined;
   storedOnDevice: Partial<Record<SettingKey, unknown>> | undefined;
-  ownerLabel: string;
+  owner: DeviceSettingsOwner;
   disabled: boolean;
   onChange: (key: SettingKey, value: unknown) => void;
   onReset: (key: SettingKey) => void;
@@ -115,7 +126,7 @@ function DeviceSettingRow({
   settingKey,
   effective,
   storedOnDevice,
-  ownerLabel,
+  owner,
   disabled,
   onChange,
   onReset,
@@ -147,7 +158,7 @@ function DeviceSettingRow({
   const inheritedFrom =
     changedHere || profileWide || constrained
       ? null
-      : sourceLabel(t, effective, ownerLabel, definition.adminDefault === true);
+      : sourceLabel(t, effective, owner, definition.adminDefault === true);
   // A stored null is a value ("No limit"), not a missing one, so only a
   // missing answer falls back to the default.
   const value = displayedValue(settingKey, effective ? effective.value : definition.defaultValue);
@@ -213,7 +224,7 @@ function DeviceSettingRow({
               className="text-muted-foreground hover:text-foreground inline-flex min-h-11 items-center gap-1 text-[13px] transition-colors disabled:opacity-50 sm:min-h-0 sm:pt-0.5 sm:text-xs"
             >
               <RotateCcw className="h-3.5 w-3.5 sm:h-3 sm:w-3" />
-              {t("web.settings.deviceSettingGroups.useOwnerSetting", { owner: ownerLabel })}
+              {t("web.settings.deviceSettingGroups.useOwnerSetting", ownerValues(owner))}
             </button>
           ) : null}
         </div>
@@ -253,12 +264,12 @@ function displayedValue(settingKey: SettingKey, value: unknown): unknown {
 function sourceLabel(
   t: Translate,
   effective: EffectiveSetting | undefined,
-  ownerLabel: string,
+  owner: DeviceSettingsOwner,
   adminDefault: boolean,
 ): string | null {
   switch (effective?.source) {
     case "profile":
-      return t("web.settings.deviceSettingGroups.fromOwnerProfile", { owner: ownerLabel });
+      return t("web.settings.deviceSettingGroups.fromOwnerProfile", ownerValues(owner));
     case "default":
       // An administrator may have replaced this one's default for the server.
       return adminDefault

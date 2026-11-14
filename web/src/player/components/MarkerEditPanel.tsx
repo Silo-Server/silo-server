@@ -80,7 +80,7 @@ export function MarkerEditPanel({ editor, currentTime }: MarkerEditPanelProps) {
   return (
     <div
       ref={panelRef}
-      className="absolute bottom-40 left-4 z-50 w-[22rem] overflow-hidden rounded-2xl border border-white/10 bg-neutral-900/95 text-white shadow-2xl backdrop-blur-xl sm:bottom-44 sm:left-6"
+      className="absolute start-4 bottom-40 z-50 w-[22rem] overflow-hidden rounded-2xl border border-white/10 bg-neutral-900/95 text-white shadow-2xl backdrop-blur-xl sm:start-6 sm:bottom-44"
       style={{ transform: `translate(${offset.x}px, ${offset.y}px)` }}
       onClick={(e) => e.stopPropagation()}
     >
@@ -103,7 +103,7 @@ export function MarkerEditPanel({ editor, currentTime }: MarkerEditPanelProps) {
         <button
           type="button"
           aria-label={t("web.markers.panel.closeLabel")}
-          className="-mr-1 rounded-md p-1 text-white/50 transition-colors hover:bg-white/10 hover:text-white"
+          className="-me-1 rounded-md p-1 text-white/50 transition-colors hover:bg-white/10 hover:text-white"
           onPointerDown={(e) => e.stopPropagation()}
           onClick={editor.cancel}
         >
@@ -128,7 +128,7 @@ export function MarkerEditPanel({ editor, currentTime }: MarkerEditPanelProps) {
               <button
                 type="button"
                 onClick={() => editor.selectKind(kind)}
-                className="flex w-full items-center gap-2.5 rounded-md py-1 text-left"
+                className="flex w-full items-center gap-2.5 rounded-md py-1 text-start"
               >
                 <span
                   className={[
@@ -147,7 +147,7 @@ export function MarkerEditPanel({ editor, currentTime }: MarkerEditPanelProps) {
                 </span>
                 <span
                   className={[
-                    "ml-auto font-mono text-[11px] tabular-nums",
+                    "ms-auto font-mono text-[11px] tabular-nums",
                     range ? "text-white/75" : "text-white/35",
                   ].join(" ")}
                 >
@@ -168,7 +168,7 @@ export function MarkerEditPanel({ editor, currentTime }: MarkerEditPanelProps) {
                   <EdgeButton onClick={() => editor.setEdge(kind, "end", currentTime)}>
                     {t("web.markers.panel.setEnd")}
                   </EdgeButton>
-                  <div className="ml-auto flex items-center gap-0.5">
+                  <div className="ms-auto flex items-center gap-0.5">
                     <button
                       type="button"
                       aria-label={t("web.markers.panel.resetLabel", { kind: label })}

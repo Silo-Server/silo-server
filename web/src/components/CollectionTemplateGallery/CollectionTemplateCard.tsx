@@ -4,6 +4,7 @@ import { RadioGroup as RadioGroupPrimitive } from "radix-ui";
 import { RadioDot } from "@/components/ui/radio-group";
 import { mediaKindLabel, type CollectionTemplate } from "@/lib/collectionTemplates";
 import { useT, type Translate } from "@/i18n";
+import { formatLocale } from "@/lib/appLocale";
 
 const SOURCE_TAG: Partial<Record<CollectionTemplate["source"], string>> = {
   mdblist: "MDBList",
@@ -52,7 +53,7 @@ export function PickRow({
       value={value}
       aria-labelledby={`${id}-title`}
       aria-describedby={tag ? `${id}-tag ${id}-meta` : `${id}-meta`}
-      className="group/radio hover:bg-accent/60 focus-visible:ring-ring/50 data-[state=checked]:bg-accent grid w-full grid-cols-[18px_30px_minmax(0,1fr)] items-center gap-x-3 px-3.5 py-2.5 text-left outline-none focus-visible:ring-[3px] focus-visible:ring-inset"
+      className="group/radio hover:bg-accent/60 focus-visible:ring-ring/50 data-[state=checked]:bg-accent grid w-full grid-cols-[18px_30px_minmax(0,1fr)] items-center gap-x-3 px-3.5 py-2.5 text-start outline-none focus-visible:ring-[3px] focus-visible:ring-inset"
     >
       <RadioDot />
       <span
@@ -91,7 +92,7 @@ export function CollectionTemplateCard({ template }: { template: CollectionTempl
     template.default_limit
       ? t("web.collections.metaLine.titleCount", {
           count: template.default_limit,
-          shown: String(template.default_limit),
+          shown: template.default_limit.toLocaleString(formatLocale()),
         })
       : null,
     template.default_sync_schedule ? scheduleDescription(t, template.default_sync_schedule) : null,

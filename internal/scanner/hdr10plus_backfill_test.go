@@ -86,7 +86,9 @@ type hdr10PlusBackfillRow struct {
 	name     string
 	tracks   string
 	sideData []ffprobeSideData
-	readErr  error
+	// frameRange is the first frame's color range.
+	frameRange string
+	readErr    error
 }
 
 func insertHDR10PlusBackfillRow(t *testing.T, ctx context.Context, pool *pgxpool.Pool, folderID int, path, tracks string) (int, time.Time) {
@@ -142,11 +144,11 @@ func TestHDR10PlusBackfillRecordsFrameStatusDB(t *testing.T) {
 	var mu sync.Mutex
 	reads := map[string]int{}
 	backfiller := NewHDR10PlusBackfiller(NewFileRepository(pool), "ffprobe")
-	backfiller.readFrame = func(_ context.Context, _, filePath, streamSpecifier string) ([]ffprobeSideData, error) {
+	backfiller.readFrame = func(_ context.Context, _, filePath, streamSpecifier string) (firstVideoFrame, error) {
 		row, ok := byPath[filePath]
 		if !ok {
 			// Another test's row: leave it untouched.
-			return nil, errors.New("not this test's file")
+			return firstVideoFrame{}, errors.New("not this test's file")
 		}
 		if streamSpecifier != "V:0" {
 			t.Errorf("stream specifier = %q, want the primary video V:0", streamSpecifier)
@@ -154,7 +156,7 @@ func TestHDR10PlusBackfillRecordsFrameStatusDB(t *testing.T) {
 		mu.Lock()
 		reads[row.name]++
 		mu.Unlock()
-		return row.sideData, row.readErr
+		return firstVideoFrame{SideData: row.sideData, ColorRange: row.frameRange}, row.readErr
 	}
 
 	if _, err := backfiller.Run(ctx, nil); err != nil {
@@ -208,14 +210,16 @@ func hdr10PlusBackfillTestRows(t *testing.T) []hdr10PlusBackfillRow {
 		sdrTrack   = `{"codec":"h264","color_transfer":"bt709","video_range_type":"SDR"}`
 	)
 	return []hdr10PlusBackfillRow{
-		{name: "hdr10plus", tracks: "[" + hdr10Track + "]", sideData: hdr10PlusFrame},
+		{name: "hdr10plus", tracks: "[" + hdr10Track + "]", sideData: hdr10PlusFrame, frameRange: "tv"},
 		{name: "dv81-hdr10plus", tracks: "[" + dv81Track + "]", sideData: hdr10PlusFrame},
 		{name: "plain-hdr10", tracks: `[{"codec":"hevc","color_transfer":"smpte2084"}]`, sideData: staticFrame},
 		{name: "undecodable", tracks: "[" + hdr10Track + "]", readErr: commandError(t, "echo 'Invalid data found when processing input' >&2; exit 1")},
 		{name: "storage-error", tracks: "[" + hdr10Track + "]", readErr: commandError(t, "echo 'movie.mkv: Input/output error' >&2; exit 1")},
 		{name: "timed-out", tracks: "[" + hdr10Track + "]", readErr: fmt.Errorf("%w after 30s", errFrameSideDataTimeout)},
 		{name: "sdr", tracks: "[" + sdrTrack + "]", sideData: hdr10PlusFrame},
-		{name: "already-checked", tracks: `[{"codec":"hevc","color_transfer":"smpte2084","hdr10_plus":false}]`, sideData: hdr10PlusFrame},
+		{name: "already-checked", tracks: `[{"codec":"hevc","color_transfer":"smpte2084","hdr10_plus":false,"frame_color_range":"tv"}]`, sideData: hdr10PlusFrame},
+		// Checked for HDR10+ before Silo recorded the frame's range.
+		{name: "checked-before-frame-range", tracks: `[{"codec":"hevc","color_transfer":"smpte2084","color_range":"tv","hdr10_plus":false}]`, sideData: hdr10PlusFrame, frameRange: "pc"},
 		{name: "changed-on-disk", tracks: "[" + hdr10Track + "]", sideData: hdr10PlusFrame},
 	}
 }
@@ -237,8 +241,13 @@ func readHDR10PlusBackfillTrack(t *testing.T, ctx context.Context, pool *pgxpool
 // of hdr10PlusBackfillTestRows, and that it skipped the files it should.
 func checkHDR10PlusBackfillFirstPass(t *testing.T, track func(string) map[string]any, reads map[string]int) {
 	t.Helper()
-	if got := track("hdr10plus"); got["hdr10_plus"] != true || got["video_range_type"] != "HDR10Plus" || got["future_field"] != "kept" {
-		t.Fatalf("HDR10+ file = %v, want hdr10_plus true, range HDR10Plus and its other fields kept", got)
+	if got := track("hdr10plus"); got["hdr10_plus"] != true || got["video_range_type"] != "HDR10Plus" || got["future_field"] != "kept" || got["frame_color_range"] != "tv" {
+		t.Fatalf("HDR10+ file = %v, want hdr10_plus true, range HDR10Plus, frame range tv and its other fields kept", got)
+	}
+	if got := track("checked-before-frame-range"); got["hdr10_plus"] != false || got["frame_color_range"] != "pc" || got["color_range"] != "tv" {
+		t.Fatalf("file checked before frame ranges = %v, want its HDR10+ status and stream range kept and frame range pc added", got)
+	} else if _, ok := got["video_range_type"]; ok {
+		t.Fatalf("file checked before frame ranges = %v, want no video_range_type added", got)
 	}
 	if got := track("dv81-hdr10plus"); got["hdr10_plus"] != true || got["video_range_type"] != "DOVIWithHDR10Plus" {
 		t.Fatalf("DV 8.1 file = %v, want hdr10_plus true, range DOVIWithHDR10Plus", got)
@@ -272,15 +281,15 @@ func TestHDR10PlusBackfillLeavesARowRewrittenDuringTheReadDB(t *testing.T) {
 	fileID, _ := insertHDR10PlusBackfillRow(t, ctx, pool, folderID, path, `[{"codec":"hevc","color_transfer":"smpte2084","video_range_type":"HDR10"}]`)
 
 	backfiller := NewHDR10PlusBackfiller(NewFileRepository(pool), "ffprobe")
-	backfiller.readFrame = func(ctx context.Context, _, filePath, _ string) ([]ffprobeSideData, error) {
+	backfiller.readFrame = func(ctx context.Context, _, filePath, _ string) (firstVideoFrame, error) {
 		if filePath != path {
-			return nil, errors.New("not this test's file")
+			return firstVideoFrame{}, errors.New("not this test's file")
 		}
 		// A scan reprobes the file while its frame is being read.
 		if _, err := pool.Exec(ctx, `UPDATE media_files SET video_tracks = '[{"codec":"hevc","color_transfer":"smpte2084","video_range_type":"HDR10","bit_depth":10}]' WHERE id = $1`, fileID); err != nil {
 			t.Errorf("rewrite row: %v", err)
 		}
-		return []ffprobeSideData{{SideDataType: "HDR Dynamic Metadata SMPTE2094-40 (HDR10+)"}}, nil
+		return firstVideoFrame{SideData: []ffprobeSideData{{SideDataType: "HDR Dynamic Metadata SMPTE2094-40 (HDR10+)"}}}, nil
 	}
 	result, err := backfiller.Run(ctx, nil)
 	if err != nil {
@@ -314,11 +323,11 @@ func TestHDR10PlusBackfillStopsWhenStorageStallsDB(t *testing.T) {
 	timedOut := fmt.Errorf("%w after 30s", errFrameSideDataTimeout)
 	backfiller := NewHDR10PlusBackfiller(NewFileRepository(pool), "ffprobe")
 	backfiller.workers = 1
-	backfiller.readFrame = func(_ context.Context, _, filePath, _ string) ([]ffprobeSideData, error) {
+	backfiller.readFrame = func(_ context.Context, _, filePath, _ string) (firstVideoFrame, error) {
 		if !paths[filePath] {
-			return nil, errors.New("not this test's file")
+			return firstVideoFrame{}, errors.New("not this test's file")
 		}
-		return nil, timedOut
+		return firstVideoFrame{}, timedOut
 	}
 	_, err := backfiller.Run(ctx, nil)
 	if !errors.Is(err, errHDR10PlusStorageStalled) {
@@ -335,21 +344,21 @@ func TestNewHDR10PlusBackfillerNeedsADatabase(t *testing.T) {
 // Playback's probe repair skips the frame read. It keeps a recorded HDR10+
 // status only when the reprobed stream is the one that was checked.
 func TestCarryCheckedHDR10PlusKeepsStatusForTheSameStream(t *testing.T) {
-	checked := models.VideoTrack{Codec: "hevc", Width: 3840, Height: 2160, ColorRange: "tv", ColorTransfer: "smpte2084", HDR10Plus: true, VideoRangeType: "HDR10Plus"}
+	checked := models.VideoTrack{Codec: "hevc", Width: 3840, Height: 2160, ColorRange: "tv", FrameColorRange: "pc", ColorTransfer: "smpte2084", HDR10Plus: true, VideoRangeType: "HDR10Plus"}
 	reprobed := func() []models.VideoTrack {
 		return []models.VideoTrack{{Codec: "hevc", Width: 3840, Height: 2160, ColorRange: "tv", ColorTransfer: "smpte2084", VideoRangeType: "HDR10", HDR10PlusUnchecked: true}}
 	}
 
 	next := reprobed()
 	carryCheckedHDR10Plus([]models.VideoTrack{checked}, next)
-	if next[0].HDR10PlusUnchecked || !next[0].HDR10Plus || next[0].VideoRangeType != "HDR10Plus" {
-		t.Fatalf("same stream = %+v, want the checked HDR10+ status kept", next[0])
+	if next[0].HDR10PlusUnchecked || !next[0].HDR10Plus || next[0].VideoRangeType != "HDR10Plus" || next[0].FrameColorRange != "pc" {
+		t.Fatalf("same stream = %+v, want the checked HDR10+ status and frame range kept", next[0])
 	}
 
 	next = reprobed()
 	next[0].Width = 1920
 	carryCheckedHDR10Plus([]models.VideoTrack{checked}, next)
-	if !next[0].HDR10PlusUnchecked || next[0].HDR10Plus {
+	if !next[0].HDR10PlusUnchecked || next[0].HDR10Plus || next[0].FrameColorRange != "" {
 		t.Fatalf("different stream = %+v, want it left unchecked", next[0])
 	}
 
@@ -393,7 +402,7 @@ func TestPlaybackProbeRepairKeepsCheckedHDR10Plus(t *testing.T) {
 		ID: 7, FilePath: "/library/hdr10plus.mkv", FileSize: 1_000,
 		// No probe source: playback must repair the row before planning.
 		CodecVideo: "hevc", Container: "mkv", Duration: 5400, Resolution: "2160p",
-		VideoTracks: []models.VideoTrack{{Codec: "hevc", Width: 3840, Height: 2160, ColorRange: "tv", ColorTransfer: "smpte2084", HDR10Plus: true, VideoRangeType: "HDR10Plus"}},
+		VideoTracks: []models.VideoTrack{{Codec: "hevc", Width: 3840, Height: 2160, ColorRange: "tv", FrameColorRange: "pc", ColorTransfer: "smpte2084", HDR10Plus: true, VideoRangeType: "HDR10Plus"}},
 	}
 	repo := &probeRepairTestRepository{files: map[int]*models.MediaFile{stored.ID: stored}}
 	ensurer := &PlaybackProbeEnsurer{
@@ -410,8 +419,8 @@ func TestPlaybackProbeRepairKeepsCheckedHDR10Plus(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Ensure() error = %v", err)
 	}
-	if track := got.VideoTracks[0]; track.HDR10PlusUnchecked || !track.HDR10Plus || track.VideoRangeType != "HDR10Plus" {
-		t.Fatalf("repaired track = %+v, want the checked HDR10+ status kept", track)
+	if track := got.VideoTracks[0]; track.HDR10PlusUnchecked || !track.HDR10Plus || track.VideoRangeType != "HDR10Plus" || track.FrameColorRange != "pc" {
+		t.Fatalf("repaired track = %+v, want the checked HDR10+ status and frame range kept", track)
 	}
 }
 
@@ -423,8 +432,8 @@ func TestHDR10PlusBackfillBoundsTheOnDiskCheck(t *testing.T) {
 	var released sync.Once
 	t.Cleanup(func() { released.Do(func() { close(release) }) })
 	backfiller := &HDR10PlusBackfiller{
-		readFrame: func(context.Context, string, string, string) ([]ffprobeSideData, error) {
-			return []ffprobeSideData{{SideDataType: "HDR Dynamic Metadata SMPTE2094-40 (HDR10+)"}}, nil
+		readFrame: func(context.Context, string, string, string) (firstVideoFrame, error) {
+			return firstVideoFrame{SideData: []ffprobeSideData{{SideDataType: "HDR Dynamic Metadata SMPTE2094-40 (HDR10+)"}}}, nil
 		},
 		statFile: func(string) (fs.FileInfo, error) {
 			<-release

@@ -5,6 +5,7 @@ import type { LibraryTabCollection } from "@/api/types";
 import ViewTransitionLink from "@/components/ViewTransitionLink";
 import { useToggleSidebarPin } from "@/hooks/queries/sidebarPins";
 import { useT } from "@/i18n";
+import { formatLocale } from "@/lib/appLocale";
 import {
   buildLibraryCollectionCatalogHref,
   buildUserCollectionCatalogHref,
@@ -62,8 +63,8 @@ export function CollectionPosterCard({
   }
 
   return (
-    <div className="group/card relative w-full text-left">
-      <ViewTransitionLink to={href} className="block w-full text-left">
+    <div className="group/card relative w-full text-start">
+      <ViewTransitionLink to={href} className="block w-full text-start">
         <div className="media-card-image relative aspect-[2/3] overflow-hidden rounded-xl">
           {collection.poster_url ? (
             <img
@@ -87,8 +88,8 @@ export function CollectionPosterCard({
             </div>
           )}
           {meta === undefined ? (
-            <span className="bg-background/60 text-foreground absolute right-2 bottom-2 rounded-md px-2 py-0.5 text-[0.6875rem] font-bold backdrop-blur-sm">
-              {collection.item_count}
+            <span className="bg-background/60 text-foreground absolute end-2 bottom-2 rounded-md px-2 py-0.5 text-[0.6875rem] font-bold backdrop-blur-sm">
+              {collection.item_count.toLocaleString(formatLocale())}
             </span>
           ) : null}
         </div>
@@ -99,8 +100,8 @@ export function CollectionPosterCard({
       </ViewTransitionLink>
       {meta !== undefined ? <div className="px-0.5">{meta}</div> : null}
       {tag ? <div className="px-0.5 pt-1.5">{tag}</div> : null}
-      {menu ? <div className="absolute top-2 right-2 z-10">{menu}</div> : null}
-      {handle ? <div className="absolute top-2 left-2 z-10">{handle}</div> : null}
+      {menu ? <div className="absolute end-2 top-2 z-10">{menu}</div> : null}
+      {handle ? <div className="absolute start-2 top-2 z-10">{handle}</div> : null}
       {!isUserCollection && libraryId !== undefined ? (
         <SidebarPinButton collection={collection} libraryId={libraryId} />
       ) : null}
@@ -131,7 +132,7 @@ function SidebarPinButton({
           label: collection.title,
         });
       }}
-      className={`absolute top-2 left-2 rounded-lg p-1.5 backdrop-blur-sm transition-all ${
+      className={`absolute start-2 top-2 rounded-lg p-1.5 backdrop-blur-sm transition-all ${
         pinned
           ? "bg-primary/90 text-primary-foreground"
           : "bg-background/50 text-foreground opacity-0 group-hover/card:opacity-100"

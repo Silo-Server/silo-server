@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"reflect"
 	"strconv"
+	"strings"
 
 	"github.com/danielgtaylor/huma/v2"
 	"github.com/danielgtaylor/huma/v2/adapters/humachi"
@@ -40,6 +41,8 @@ const (
 	playbackBinaryFormat       = "binary"
 	playbackCacheControlHeader = "Cache-Control"
 	playbackContentEncoding    = "Content-Encoding"
+	// playbackTranscodePath prefixes the HLS playlist and segment routes.
+	playbackTranscodePath = "/playback/transcode/"
 )
 
 // PlaybackMediaHandlers shares the raw byte delivery protocols and the typed
@@ -103,7 +106,7 @@ func registerPlaybackDelivery(reg *Registry) {
 		params := []*huma.Param{
 			{Name: "session_id", In: playbackParamPath, Required: true, Schema: &huma.Schema{Type: huma.TypeString, MinLength: new(1)}},
 			{Name: playbackAccountToken, In: playbackParamQuery, Description: "Media-element fallback for the account bearer token when an Authorization header cannot be set. Header-authenticated media requires the Authorization header and the profile selector.", Schema: &huma.Schema{Type: huma.TypeString}},
-			{Name: "st", In: playbackParamQuery, Description: "Signed stream reference the plan URL carries; it reconstructs the session after a restart. Omitted for header-authenticated media. Account and viewer authorization are always required.", Schema: &huma.Schema{Type: huma.TypeString}},
+			{Name: "st", In: playbackParamQuery, Description: "Signed stream reference the plan URL carries; it reconstructs the session after a restart. Without an Authorization header or token, it alone authorizes this session's media as the account and profile it names, while the login session that started playback is active; viewer authorization still applies. Omitted for header-authenticated media.", Schema: &huma.Schema{Type: huma.TypeString}},
 		}
 		if route.protocol == "media-bytes" {
 			params = append(params, &huma.Param{Name: playback.RemuxRangeQueryParam, In: playbackParamQuery, Description: "Set to refuse by the server on a server_remux_progressive URL whose attempt listed progressive_range_refusal_v1 in deliveries.progressive.features. A progressive remux streams from its seek origin and cannot resume: with it, a GET whose Range starts past byte 0 (or is a suffix range) answers 409 before the remux starts, and the client reopens the stream at its current position. Without it such a range streams from the origin with 200.", Schema: &huma.Schema{Type: huma.TypeString, Enum: []any{playback.RemuxRangeRefuse}}})
@@ -111,7 +114,7 @@ func registerPlaybackDelivery(reg *Registry) {
 		if route.id == playbackSegmentOperation {
 			params = append(params, &huma.Param{Name: playbackSegmentName, In: playbackParamPath, Required: true, Description: "Segment name from the media playlist. sub_NNNNN.vtt names a WebVTT subtitle rendition segment, answered from the cues already produced; one the transcode does not reach in time is an empty WebVTT document. sub_<track>_NNNNN.vtt names a segment of the on-demand rendition of container track <track> (hls_subtitle_renditions_all_v1), read from the source when it is requested.", Schema: &huma.Schema{Type: huma.TypeString, MinLength: new(1)}})
 		}
-		if route.id == "getPlaybackManifest" {
+		if route.id == playbackManifestOperation {
 			params = append(params, &huma.Param{Name: playback.SubtitleRenditionQueryParam, In: playbackParamQuery, Description: "Set by the multivariant playlist of a plan with subtitle.hls_rendition: video selects the media playlist, subtitles the WebVTT subtitle playlist. Absent, such a plan's manifest is the multivariant playlist.", Schema: &huma.Schema{Type: huma.TypeString, Enum: []any{"video", "subtitles"}}},
 				&huma.Param{Name: playback.SubtitleRenditionTrackQueryParam, In: playbackParamQuery, Description: "Set with silo_rendition=subtitles by the multivariant playlist of a plan with on-demand renditions (hls_subtitle_renditions_all_v1): the container track number whose WebVTT playlist to answer.", Schema: &huma.Schema{Type: huma.TypeString, Pattern: "^[1-9][0-9]{0,19}$"}})
 		}
@@ -157,7 +160,9 @@ func registerPlaybackDelivery(reg *Registry) {
 		if subtitle {
 			reason = "Token-authorized sidecar text and bitmap bytes are streamed as extracted."
 		}
-		raw := RawOperation{Operation: Operation{Operation: huma.Operation{Method: route.method, Path: Prefix + route.path, OperationID: route.id, Tags: []string{playbackTag}, Parameters: params, Responses: responses}, Class: ClassProfileScoped, ProfileOptional: true, ServiceBacked: true}, Protocol: route.protocol, Reason: reason}
+		// A Google Cast receiver plays HLS through a script on its own origin,
+		// so the playlist and segments must be readable cross-origin.
+		raw := RawOperation{Operation: Operation{Operation: huma.Operation{Method: route.method, Path: Prefix + route.path, OperationID: route.id, Tags: []string{playbackTag}, Parameters: params, Responses: responses}, Class: ClassProfileScoped, ProfileOptional: true, ServiceBacked: true}, Protocol: route.protocol, Reason: reason, CrossOrigin: strings.HasPrefix(route.path, playbackTranscodePath)}
 		RegisterRaw(reg, raw, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if !playbackUUID(chi.URLParam(r, "session_id")) {
 				writeProblem(w, r, validationProblem("path.session_id", "invalid", "Expected a canonical UUID."))

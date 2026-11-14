@@ -58,7 +58,7 @@ export function DeleteCollectionsDialog({
       irreversible
       error={blocked}
       confirmDisabled={blocked !== null}
-      confirmLabel={t("web.collections.deleteDialog.deleteCount", { count: String(count) })}
+      confirmLabel={t("web.collections.deleteDialog.deleteCount", { count: count })}
       variant="destructive"
       onConfirm={onConfirm}
     />

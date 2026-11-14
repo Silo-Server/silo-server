@@ -7,6 +7,7 @@ import type {
   AdminUserEffectivePolicy,
   Library,
 } from "@/api/types";
+import { DownloadsServerNotice } from "@/components/admin/DownloadsServerNotice";
 import { LibraryAccessSelector } from "@/components/LibraryAccessSelector";
 import { StreamBitrateLimitInput } from "@/components/StreamBitrateLimitInput";
 import { Input } from "@/components/ui/input";
@@ -279,7 +280,7 @@ function BooleanPolicyRow({
       >
         <SelectTrigger
           id={id}
-          className="max-w-full min-w-40 shrink-0 text-left whitespace-normal data-[size=default]:h-auto data-[size=default]:min-h-9 *:data-[slot=select-value]:line-clamp-none"
+          className="max-w-full min-w-40 shrink-0 text-start whitespace-normal data-[size=default]:h-auto data-[size=default]:min-h-9 *:data-[slot=select-value]:line-clamp-none"
         >
           <SelectValue />
         </SelectTrigger>
@@ -389,7 +390,7 @@ function LimitPolicyField({
   const help =
     draftValue === null
       ? min > 0
-        ? t(DEFAULT_SOURCE_TEXT[source].limitHelpMin, { min: String(min) })
+        ? t(DEFAULT_SOURCE_TEXT[source].limitHelpMin, { min: min })
         : t(DEFAULT_SOURCE_TEXT[source].limitHelp)
       : min === 0
         ? t("web.profiles.userPolicy.zeroUnlimited")
@@ -536,10 +537,11 @@ export function PolicyAccessFields({
               ? t("web.profiles.libraryAccess.allLibraries")
               : t("web.profiles.libraries.count", {
                   count: effective.library_ids.length,
-                  count_text: String(effective.library_ids.length),
+                  count_text: effective.library_ids.length,
                 }),
         )}
       />
+      <DownloadsServerNotice />
       <div className="grid gap-2 sm:grid-cols-2">
         <BooleanPolicyRow
           label={t("web.profiles.userPolicy.downloads")}

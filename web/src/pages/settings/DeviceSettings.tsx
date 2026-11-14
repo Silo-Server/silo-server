@@ -220,7 +220,7 @@ function HouseholdSwitch({
       <SwitchButton active={household} onClick={() => onChange(true)}>
         <Users className="h-3.5 w-3.5" />
         {household && count > 0
-          ? t("web.settings.device.household.everyoneCount", { count: String(count) })
+          ? t("web.settings.device.household.everyoneCount", { count: count })
           : t("web.settings.device.household.everyone")}
       </SwitchButton>
     </div>
@@ -269,10 +269,9 @@ function DeviceDetail({
   // Acting for someone else changes the copy throughout: the banner, the reset
   // labels, and every mutation's identity.
   const forSomeoneElse = Boolean(device.profile_id) && device.profile_id !== actingProfileId;
-  // An English possessive ("Sam's"): DeviceSettingGroups builds its own
-  // sentences around it, and the messages below take it as {owner}, since the
-  // catalog rejects an ASCII apostrophe after a placeholder.
-  const ownerLabel = forSomeoneElse ? `${device.profile_name}'s` : "your";
+  // The other profile's name, for the messages shown when acting for someone else.
+  const ownerName = device.profile_name ?? "";
+  const owner = { self: !forSomeoneElse, name: ownerName };
   const targetProfileId = forSomeoneElse ? device.profile_id : undefined;
 
   const capabilities = useSettingsCapabilities();
@@ -338,7 +337,7 @@ function DeviceDetail({
   const [renaming, setRenaming] = useState(false);
   const scopeDetail = [
     forSomeoneElse
-      ? t("web.settings.device.scopeDetailOther", { owner: ownerLabel })
+      ? t("web.settings.device.scopeDetailOther", { name: ownerName })
       : t("web.settings.device.scopeDetailOwn"),
     device.is_current_device ? null : t("web.settings.device.scopeNextUse"),
   ]
@@ -353,7 +352,7 @@ function DeviceDetail({
       <button
         type="button"
         onClick={onBack}
-        className="text-muted-foreground hover:text-foreground -ml-1 inline-flex min-h-11 items-center gap-1 text-sm font-medium xl:hidden"
+        className="text-muted-foreground hover:text-foreground -ms-1 inline-flex min-h-11 items-center gap-1 text-sm font-medium xl:hidden"
       >
         <ChevronLeft className="h-4 w-4" />
         {t("web.settings.device.allDevices")}
@@ -394,7 +393,7 @@ function DeviceDetail({
                 changedCount > 0
                   ? t("web.settings.device.changedCount", {
                       count: changedCount,
-                      count_text: String(changedCount),
+                      count_text: changedCount,
                     })
                   : t("web.settings.device.nothingChanged"),
               ].join(" · ")}
@@ -423,13 +422,13 @@ function DeviceDetail({
                     forSomeoneElse
                       ? t("web.settings.device.resetConfirmOther", {
                           count: changedCount,
-                          count_text: String(changedCount),
-                          owner: ownerLabel,
+                          count_text: changedCount,
+                          name: ownerName,
                           device: displayName,
                         })
                       : t("web.settings.device.resetConfirm", {
                           count: changedCount,
-                          count_text: String(changedCount),
+                          count_text: changedCount,
                           device: displayName,
                         }),
                   )
@@ -488,8 +487,7 @@ function DeviceDetail({
       {forSomeoneElse ? (
         <Callout tone="warning" icon={<Users className="h-4 w-4" />}>
           {t("web.settings.device.otherProfileWarning", {
-            owner: ownerLabel,
-            name: device.profile_name,
+            name: ownerName,
             strong: (chunks) => <strong className="text-foreground font-semibold">{chunks}</strong>,
           })}
         </Callout>
@@ -501,7 +499,7 @@ function DeviceDetail({
       <Callout tone="info" icon={<Info className="h-4 w-4" />}>
         <span className="block">
           {forSomeoneElse
-            ? t("web.settings.device.scopeOther", { owner: ownerLabel, strong: scopeStrong })
+            ? t("web.settings.device.scopeOther", { name: ownerName, strong: scopeStrong })
             : t("web.settings.device.scopeOwn", { strong: scopeStrong })}
         </span>
         <span className="text-muted-foreground mt-1 block text-[13px]">{scopeDetail}</span>
@@ -537,7 +535,7 @@ function DeviceDetail({
         <DeviceSettingGroups
           settings={settings}
           keys={supportedKeys}
-          ownerLabel={ownerLabel}
+          owner={owner}
           devicePlatform={device.device_platform}
           storedOnDevice={storedOnDevice}
           disabled={setValue.isPending || clearValue.isPending}
@@ -606,7 +604,7 @@ function DeviceDetail({
         }}
         resetLabel={
           forSomeoneElse
-            ? t("web.settings.device.appearance.resetOther", { owner: ownerLabel })
+            ? t("web.settings.device.appearance.resetOther", { name: ownerName })
             : t("web.settings.device.appearance.resetOwn")
         }
         eyebrow={

@@ -54,16 +54,23 @@ func CoverageClauses(column string, roots []string, firstArg int) ([]string, []a
 func RangeCoverageClauses(column string, roots []string, firstArg int) ([]string, []any) {
 	clauses := make([]string, 0, len(roots))
 	args := make([]any, 0, len(roots)*4)
-	separator := string(filepath.Separator)
 	for i, root := range roots {
-		prefix := filepath.Clean(root)
-		if prefix != separator {
-			prefix += separator
-		}
-		upper := prefix[:len(prefix)-1] + string(rune(filepath.Separator)+1)
+		prefix, upper := DescendantRange(root)
 		pathArg := firstArg + i*4
 		clauses = append(clauses, fmt.Sprintf(`(%s = $%d OR (%s ~>=~ $%d AND %s ~<~ $%d AND %s LIKE $%d ESCAPE '\'))`, column, pathArg, column, pathArg+1, column, pathArg+2, column, pathArg+3))
 		args = append(args, root, prefix, upper, PrefixLike(root))
 	}
 	return clauses, args
+}
+
+// DescendantRange returns the bytewise bounds of the paths under root: a path
+// is a descendant when lower <= path < upper under PostgreSQL's ~>=~ and ~<~
+// operators. The root itself is outside the range and sorts below it.
+func DescendantRange(root string) (lower, upper string) {
+	separator := string(filepath.Separator)
+	lower = filepath.Clean(root)
+	if lower != separator {
+		lower += separator
+	}
+	return lower, lower[:len(lower)-1] + string(rune(filepath.Separator)+1)
 }

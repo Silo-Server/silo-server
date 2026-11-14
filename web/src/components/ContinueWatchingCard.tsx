@@ -21,6 +21,7 @@ import type { CardQuickActionMode } from "@/lib/cardQuickActions";
 import { isEpisodeStill, isEpisodeUnwatched, SPOILER_IMAGE_CLASS } from "@/lib/episodeSpoilers";
 import { cn } from "@/lib/utils";
 import { useAppLanguage, useT } from "@/i18n";
+import WatchProgressBar from "@/components/WatchProgressBar";
 
 type ContinueWatchingCardProps = (
   | {
@@ -155,7 +156,7 @@ function ContinueWatchingCardView({ spoilerPrefs, ...props }: ContinueWatchingCa
   // Detail-page link target for the card's image and meta lines: manga
   // chapters head to the series page like the heading does.
   const detailHref = isMangaChapter ? headingHref : card.itemHref;
-  const episodeNumbers = { season: String(card.seasonNumber), episode: String(card.episodeNumber) };
+  const episodeNumbers = { season: card.seasonNumber, episode: card.episodeNumber };
   const episodeMeta = hasEpisodeMeta
     ? card.seriesTitle && card.title
       ? t("web.home.continueWatching.episodeLabelWithTitle", {
@@ -176,13 +177,13 @@ function ContinueWatchingCardView({ spoilerPrefs, ...props }: ContinueWatchingCa
       : t("web.home.continueWatching.nextEpisode")
     : card.type === "ebook"
       ? t("web.home.continueWatching.percentRead", {
-          percent: String(Math.round(Math.min(Math.max(progressPercent, 0), 100))),
+          percent: Math.round(Math.min(Math.max(progressPercent, 0), 100)),
         })
       : card.durationSeconds > 0
         ? card.type === "audiobook"
           ? formatListeningTimeLeft(card.positionSeconds, card.durationSeconds)
           : t("web.home.continueWatching.minutesLeft", {
-              minutes: String(Math.round((card.durationSeconds - card.positionSeconds) / 60)),
+              minutes: Math.round((card.durationSeconds - card.positionSeconds) / 60),
             })
         : "\u00A0";
   const handleWatchClick = useCallback(
@@ -287,19 +288,7 @@ function ContinueWatchingCardView({ spoilerPrefs, ...props }: ContinueWatchingCa
             {/* Hover dim behind the play button */}
             <div className="media-card-hover-dim absolute inset-0 bg-black/0 transition-colors duration-150" />
 
-            {/* Progress bar — inset pill so a full bar doesn't read as a
-                stray edge along the artwork */}
-            {showProgressBar && (
-              <div className="absolute inset-x-2.5 bottom-2 h-[3px] overflow-hidden rounded-full bg-black/40">
-                <div
-                  className="h-full rounded-full transition-all duration-300"
-                  style={{
-                    width: `${Math.min(progressPercent, 100)}%`,
-                    background: "var(--primary)",
-                  }}
-                />
-              </div>
-            )}
+            {showProgressBar && <WatchProgressBar percent={progressPercent} animate />}
           </div>
         </ViewTransitionLink>
         {isPoster && playableContentId && isVideoWatchHref(card.watchHref) ? (
@@ -324,6 +313,7 @@ function ContinueWatchingCardView({ spoilerPrefs, ...props }: ContinueWatchingCa
             {card.type === "ebook" ? (
               <BookOpen className="h-5 w-5" />
             ) : (
+              // eslint-disable-next-line silo/no-physical-direction -- centres the play triangle, which doesn't mirror
               <Play className="ml-0.5 h-5 w-5" fill="currentColor" />
             )}
           </ViewTransitionLink>

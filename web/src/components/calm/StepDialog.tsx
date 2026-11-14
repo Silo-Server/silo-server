@@ -24,9 +24,7 @@ export function StepCount({ step, children }: { step: 1 | 2; children: string })
           step === 2 ? "bg-foreground" : "bg-border",
         )}
       />
-      <span className="shrink-0">
-        {t("web.ui.stepDialog.stepCount", { step: String(step), total: "2" })}
-      </span>
+      <span className="shrink-0">{t("web.ui.stepDialog.stepCount", { step, total: 2 })}</span>
       {/* Phones only fit the step count; screen readers still hear the note. */}
       <span aria-hidden className="max-sm:hidden">
         {/* eslint-disable-next-line formatjs/no-literal-string-in-jsx -- a decorative separator, hidden from assistive tech */}
@@ -108,7 +106,7 @@ export function StepDialog({
         }}
         className={cn(
           "flex flex-col gap-0 overflow-hidden rounded-[20px] p-0 sm:max-w-none",
-          "max-lg:top-auto max-lg:bottom-0 max-lg:left-0 max-lg:w-full max-lg:max-w-none max-lg:translate-x-0 max-lg:translate-y-0 max-lg:rounded-b-none",
+          "max-lg:start-0 max-lg:top-auto max-lg:bottom-0 max-lg:w-full max-lg:max-w-none max-lg:translate-x-0 max-lg:translate-y-0 max-lg:rounded-b-none",
           size === "picker" &&
             "max-lg:h-[calc(100dvh-2.5rem)] max-lg:max-h-none lg:h-[min(860px,calc(100dvh-4rem))] lg:w-[min(1000px,calc(100vw-3rem))]",
           size === "form" &&
@@ -127,7 +125,7 @@ export function StepDialog({
               type="button"
               variant="ghost"
               size="sm"
-              className="text-muted-foreground -ml-2.5 h-7 w-fit gap-1.5 px-2"
+              className="text-muted-foreground -ms-2.5 h-7 w-fit gap-1.5 px-2"
               onClick={back.onClick}
             >
               <ChevronLeft aria-hidden className="size-4" />
@@ -137,7 +135,7 @@ export function StepDialog({
           <DialogTitle
             ref={titleRef}
             tabIndex={-1}
-            className="pr-10 text-xl font-semibold tracking-[-0.02em] outline-none"
+            className="pe-10 text-xl font-semibold tracking-[-0.02em] outline-none"
           >
             {title}
           </DialogTitle>
@@ -161,7 +159,7 @@ export function StepDialog({
           </div>
         </div>
 
-        <DialogClose className="text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:ring-ring/50 absolute top-[18px] right-[18px] grid size-11 place-items-center rounded-[10px] outline-none focus-visible:ring-[3px] lg:size-[34px]">
+        <DialogClose className="text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:ring-ring/50 absolute end-[18px] top-[18px] grid size-11 place-items-center rounded-[10px] outline-none focus-visible:ring-[3px] lg:size-[34px]">
           <X aria-hidden className="size-[18px]" />
           <span className="sr-only">{t("web.ui.close")}</span>
         </DialogClose>

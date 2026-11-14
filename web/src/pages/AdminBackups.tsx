@@ -20,6 +20,7 @@ import {
 import { useAdminBackupUploads } from "@/hooks/queries/admin/backupUploads";
 import { useTask } from "@/hooks/queries/admin/tasks";
 import { adminKeys } from "@/hooks/queries/keys";
+import { useT } from "@/i18n";
 import { formatTime } from "@/lib/datetime";
 import { cn } from "@/lib/utils";
 import { useSettingsForm } from "@/hooks/useSettingsForm";
@@ -79,30 +80,34 @@ function asDestination(value: string): AdminBackupDestination {
 
 /** What the operation holding the backup lock is doing. */
 function ActiveOperation({ active }: { active: AdminBackupActive }) {
+  const t = useT();
   switch (active.operation) {
     case "backup":
-      return `Backing up, started at ${formatTime(active.started_at)}.`;
+      return t("web.admin.backups.active.backingUp", { time: formatTime(active.started_at) });
     case "restore": {
       const path = activeRestorePath(active);
       return (
         <>
-          A restore is running.{" "}
+          {t("web.admin.backups.active.restoreRunning")}{" "}
           {path ? (
             <Link to={path} className="underline underline-offset-2">
-              See its progress
+              {t("web.admin.backups.active.restoreProgressLink")}
             </Link>
           ) : null}
         </>
       );
     }
     case "upload":
-      return "Checking an uploaded backup.";
+      return t("web.admin.backups.active.checkingUpload");
     default:
-      return active.upload_id ? "Deleting an uploaded backup." : "Deleting a backup.";
+      return active.upload_id
+        ? t("web.admin.backups.active.deletingUpload")
+        : t("web.admin.backups.active.deleting");
   }
 }
 
 export default function AdminBackups() {
+  const t = useT();
   const now = useMinuteClock();
   const queryClient = useQueryClient();
   const capabilities = useAdminBackupCapabilities();
@@ -217,24 +222,24 @@ export default function AdminBackups() {
     if (!pending || listUpdatedAt <= pending.at || busy) return;
     started.current = null;
     if (lastRun?.id !== pending.id) return;
-    if (lastRun.status === "complete") toast.success("Backup finished");
+    if (lastRun.status === "complete") toast.success(t("web.admin.backups.toast.finished"));
     else if (lastRun.status === "complete_with_warnings")
-      toast.success("Backup finished with warnings", {
-        description: "Some files were missing. The table lists them.",
+      toast.success(t("web.admin.backups.toast.finishedWithWarnings"), {
+        description: t("web.admin.backups.toast.finishedWithWarningsDescription"),
       });
-    else toast.error("The backup didn't finish", { description: lastRun.error });
-  }, [busy, lastRun, listUpdatedAt]);
+    else toast.error(t("web.admin.backups.toast.didntFinish"), { description: lastRun.error });
+  }, [busy, lastRun, listUpdatedAt, t]);
 
   const backUpNow = () =>
     startBackup.mutate(undefined, {
       onSuccess: (result) => {
         started.current = { id: result.id, at: Date.now() };
-        toast.success("Backup started", {
-          description: "It keeps running if you leave this page.",
+        toast.success(t("web.admin.backups.toast.started"), {
+          description: t("web.admin.backups.toast.startedDescription"),
         });
       },
       onError: (error) =>
-        toast.error("Couldn't start a backup", {
+        toast.error(t("web.admin.backups.toast.startFailed"), {
           description: backupErrorMessage(error),
         }),
     });
@@ -256,7 +261,7 @@ export default function AdminBackups() {
       ) : (
         <DatabaseBackup data-icon="inline-start" aria-hidden="true" />
       )}
-      Back up now
+      {t("web.admin.backups.backUpNow.button")}
     </Button>
   );
 
@@ -265,8 +270,8 @@ export default function AdminBackups() {
       <UnsavedChangesGuard />
       <div>
         <PageHeader
-          title="Backups"
-          subtitle="Every night Silo saves its database and the files people uploaded."
+          title={t("web.admin.backups.header.title")}
+          subtitle={t("web.admin.backups.header.subtitle")}
           className="mb-4"
           actions={
             <div className="flex flex-col items-end gap-1">
@@ -274,13 +279,13 @@ export default function AdminBackups() {
                 {uploadAvailable ? (
                   <Button variant="outline" onClick={() => setUploading(true)}>
                     <Upload data-icon="inline-start" aria-hidden="true" />
-                    Upload a backup
+                    {t("web.admin.backups.header.upload")}
                   </Button>
                 ) : null}
                 {backUpNowButton}
               </div>
               {blocker ? (
-                <p id={blockerId} className="text-muted-foreground max-w-72 text-right text-xs">
+                <p id={blockerId} className="text-muted-foreground max-w-72 text-end text-xs">
                   {blocker}
                 </p>
               ) : null}
@@ -313,12 +318,17 @@ export default function AdminBackups() {
                   </span>
                   {active.operation === "backup" ? (
                     <span className="text-muted-foreground tabular-nums">
-                      {Math.round(active.progress)}%
+                      {t("web.admin.backups.active.percent", {
+                        percent: Math.round(active.progress),
+                      })}
                     </span>
                   ) : null}
                 </div>
                 {active.operation === "backup" ? (
-                  <Progress value={active.progress} aria-label="Backup progress" />
+                  <Progress
+                    value={active.progress}
+                    aria-label={t("web.admin.backups.active.progressLabel")}
+                  />
                 ) : null}
                 {active.message ? (
                   <p className="text-muted-foreground text-xs">{active.message}</p>
@@ -337,7 +347,7 @@ export default function AdminBackups() {
                 </SettingFieldStatus>
                 {warning.code === "key_not_confirmed" && needsKey ? (
                   <Button variant="outline" size="sm" onClick={() => setConfirmingKey(true)}>
-                    Confirm the key
+                    {t("web.admin.backups.confirmKey.button")}
                   </Button>
                 ) : null}
               </div>
@@ -347,29 +357,35 @@ export default function AdminBackups() {
       </div>
 
       {backups.isPending ? (
-        <div className="space-y-4" role="status" aria-label="Loading backups">
+        <div className="space-y-4" role="status" aria-label={t("web.admin.backups.list.loading")}>
           <Skeleton className="h-28 w-full rounded-xl" />
           <Skeleton className="h-48 w-full rounded-2xl" />
         </div>
       ) : backups.isError ? (
         <div role="alert" className="surface-panel space-y-3 rounded-2xl p-6">
-          <p>Couldn&apos;t read the backups. {backupErrorMessage(backups.error)}</p>
+          <p>
+            {t("web.admin.backups.list.loadFailed", {
+              reason: backupErrorMessage(backups.error),
+            })}
+          </p>
           <Button variant="outline" size="sm" onClick={() => void backups.refetch()}>
-            Try again
+            {t("common.tryAgain")}
           </Button>
         </div>
       ) : items.length === 0 && running ? (
         <div className="surface-panel rounded-2xl p-6" role="status">
-          <p className="font-medium">Taking the first backup.</p>
-          <p className="text-muted-foreground text-sm">It shows here when it finishes.</p>
+          <p className="font-medium">{t("web.admin.backups.list.firstRunning")}</p>
+          <p className="text-muted-foreground text-sm">
+            {t("web.admin.backups.list.firstRunningDetail")}
+          </p>
         </div>
       ) : items.length === 0 ? (
         <div className="surface-panel space-y-3 rounded-2xl p-6">
-          <p className="font-medium">No backups yet.</p>
+          <p className="font-medium">{t("web.admin.backups.list.empty")}</p>
           <p className="text-muted-foreground text-sm">
             {configured
-              ? "Take the first one now instead of waiting for the schedule."
-              : "This server has nowhere to keep them yet. Where backups are kept, below, says what to set up."}
+              ? t("web.admin.backups.list.emptyConfigured")
+              : t("web.admin.backups.list.emptyUnconfigured")}
           </p>
           {configured ? backUpNowButton : null}
         </div>
@@ -378,14 +394,14 @@ export default function AdminBackups() {
           <div className="space-y-3">
             <div className="space-y-1">
               <h2 id="saved-backups-heading" className="text-[15px] font-semibold tracking-tight">
-                Saved backups
+                {t("web.admin.backups.list.heading")}
               </h2>
               <p className="text-muted-foreground text-[13px]">
-                {retentionNote({ keep, plan, next, running, now })}
+                {retentionNote({ keep, plan, next, running, now, t })}
               </p>
               {list?.encrypted ? (
                 <p className="text-muted-foreground text-[13px]">
-                  Backups in this bucket are encrypted with this server&apos;s SECRET_KEY.
+                  {t("web.admin.backups.list.encrypted")}
                 </p>
               ) : null}
             </div>
@@ -408,15 +424,19 @@ export default function AdminBackups() {
       {uploads.data ? <UploadedBackups uploads={uploads.data} /> : null}
 
       {form.isLoading ? (
-        <div className="space-y-4" role="status" aria-label="Loading settings">
+        <div
+          className="space-y-4"
+          role="status"
+          aria-label={t("web.admin.backups.settings.loading")}
+        >
           <Skeleton className="h-10 w-full" />
           <Skeleton className="h-10 w-full" />
         </div>
       ) : form.loadError ? (
         <div role="alert" className="surface-panel space-y-3 rounded-2xl p-6">
-          <p>Couldn&apos;t read the backup settings. Check that Silo is running, then try again.</p>
+          <p>{t("web.admin.backups.settings.loadFailed")}</p>
           <Button variant="outline" size="sm" onClick={() => void form.retryLoad()}>
-            Try again
+            {t("common.tryAgain")}
           </Button>
         </div>
       ) : (

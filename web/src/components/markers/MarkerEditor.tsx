@@ -18,7 +18,7 @@ import type {
   SetMarkersRequest,
 } from "@/api/types";
 import { MARKER_KINDS, MARKER_LABEL_KEYS, formatClock, parseClock } from "@/lib/markers";
-import { useT, type MessageKey, type Translate } from "@/i18n";
+import { type MessageKey, numberText, type Translate, useT } from "@/i18n";
 import { useItemMarkerHistory, useItemMarkers, useSetItemMarkers } from "@/hooks/queries/markers";
 import { useIsActingAdmin } from "@/hooks/useIsActingAdmin";
 import { formatTime, preferredDateLocale } from "@/lib/datetime";
@@ -257,7 +257,7 @@ function segmentLabel(t: Translate, segment: MarkerKind): string {
 
 function formatHistoryRange(t: Translate, marker: MarkerSegment | null): string {
   if (!marker || marker.start == null || marker.end == null) return t("web.markers.history.none");
-  return `${formatClock(marker.start)}-${formatClock(marker.end)}`;
+  return numberText(`${formatClock(marker.start)}-${formatClock(marker.end)}`);
 }
 
 function formatHistoryDate(value: string): string {

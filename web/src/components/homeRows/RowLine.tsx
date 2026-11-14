@@ -103,7 +103,7 @@ export function RowLine({
           {row.hero ? (
             // Phones have no room for the tag next to the name.
             <span className="text-warning font-semibold sm:hidden">
-              <Star className="mr-1 inline size-3 align-[-1px]" aria-hidden />
+              <Star className="me-1 inline size-3 align-[-1px]" aria-hidden />
               {/* The short label fits the phone line, which the description shares. */}
               {webOnlyBanner
                 ? t("web.home.rows.line.webOnlyHero")

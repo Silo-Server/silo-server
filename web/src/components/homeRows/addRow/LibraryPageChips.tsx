@@ -54,7 +54,7 @@ export function LibraryPageChips({
             <label
               key={page.id}
               className={cn(
-                "border-border has-focus-visible:ring-ring/50 inline-flex h-10 items-center gap-2.5 rounded-[12px] border pr-3.5 pl-3 text-sm font-medium transition-colors has-focus-visible:ring-[3px]",
+                "border-border has-focus-visible:ring-ring/50 inline-flex h-10 items-center gap-2.5 rounded-[12px] border ps-3 pe-3.5 text-sm font-medium transition-colors has-focus-visible:ring-[3px]",
                 checked && "bg-accent border-foreground/55",
                 current || locked
                   ? "cursor-default opacity-80"

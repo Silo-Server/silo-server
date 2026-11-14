@@ -401,7 +401,7 @@ export default function LibraryBrowse({
       ) : (
         <div
           className={
-            reservesLetterBar ? "pr-6 sm:pr-9 [@media(max-height:599px)]:pr-14" : undefined
+            reservesLetterBar ? "pe-6 sm:pe-9 [@media(max-height:599px)]:pe-14" : undefined
           }
         >
           <ItemGrid

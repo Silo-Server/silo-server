@@ -1,7 +1,8 @@
 import type { AdminSession } from "@/api/types";
-import { t, type TextValues } from "@/i18n";
+import { codeNumber, t, type TextValues } from "@/i18n";
 import type { MessageKey } from "@/locales/keys";
 import { formatCodecLabel } from "@/lib/mediaFormat";
+import { formatDecimal } from "@/lib/numberFormat";
 
 export function formatDecisionLabel(decision?: string): string {
   switch (decision) {
@@ -128,34 +129,34 @@ interface ActivityMethodStyle {
 // popover cannot drift apart. Labels are message keys, resolved per call.
 const ACTIVITY_METHOD_META: Record<string, ActivityMethodStyle> = {
   direct: {
-    label: "web.admin.activity.method.direct.label",
-    description: "web.admin.activity.method.direct.description",
+    label: "web.common.activity.method.direct.label",
+    description: "web.common.activity.method.direct.description",
     swatchClass: "bg-success",
     badgeClass: "bg-success/10 text-success border-success/15",
   },
   remux: {
-    label: "web.admin.activity.method.remux.label",
-    description: "web.admin.activity.method.remux.description",
+    label: "web.common.activity.method.remux.label",
+    description: "web.common.activity.method.remux.description",
     swatchClass: "bg-info",
     badgeClass: "bg-info/10 text-info border-info/15",
   },
   direct_stream: {
-    label: "web.admin.activity.method.directStream.label",
-    description: "web.admin.activity.method.directStream.description",
+    label: "web.common.activity.method.directStream.label",
+    description: "web.common.activity.method.directStream.description",
     swatchClass: "bg-warning",
     badgeClass: "bg-warning/10 text-warning border-warning/15",
   },
   transcode: {
-    label: "web.admin.activity.method.transcode.label",
-    description: "web.admin.activity.method.transcode.description",
+    label: "web.common.activity.method.transcode.label",
+    description: "web.common.activity.method.transcode.description",
     swatchClass: "bg-destructive",
     badgeClass: "bg-destructive/10 text-destructive border-destructive/15",
   },
 };
 
 const UNKNOWN_ACTIVITY_METHOD_META: ActivityMethodStyle = {
-  label: "web.admin.activity.method.unknown.label",
-  description: "web.admin.activity.method.unknown.description",
+  label: "web.common.activity.method.unknown.label",
+  description: "web.common.activity.method.unknown.description",
   swatchClass: "bg-muted-foreground",
   badgeClass: "bg-surface text-muted-foreground border-border",
 };
@@ -292,7 +293,7 @@ export function formatSessionBitrate(kbps?: number | null): string | null {
     return null;
   }
   if (kbps >= 1000) {
-    return `${(kbps / 1000).toFixed(1)} Mbps`;
+    return `${formatDecimal(kbps / 1000, 1)} Mbps`;
   }
   return `${Math.round(kbps)} kbps`;
 }
@@ -637,21 +638,25 @@ export function getPlaybackSessionTitle(session: AdminSession): string {
   if (session.series_name && session.season_number != null && session.episode_number != null) {
     return session.episode_name || `S${session.season_number}E${session.episode_number}`;
   }
-  return (
-    session.media_title || t("web.admin.activity.title.file", { id: String(session.media_file_id) })
-  );
+  return session.media_title || t("web.common.activity.title.file", { id: session.media_file_id });
 }
 
 export function getPlaybackSessionSubtitle(session: AdminSession): string | null {
   if (session.series_name && session.season_number != null && session.episode_number != null) {
-    const episode = `S${session.season_number}E${session.episode_number}`;
-    return session.series_name ? `${episode} · ${session.series_name}` : episode;
+    const code = t("web.detail.episodeCode", {
+      season: codeNumber(session.season_number),
+      episode: codeNumber(session.episode_number),
+    });
+    return t("web.common.activity.subtitle.episode", {
+      code,
+      series: session.series_name,
+    });
   }
   if (session.media_type === "movie") {
-    return t("web.admin.activity.subtitle.movie");
+    return t("web.common.activity.subtitle.movie");
   }
   if (session.media_type === "series") {
-    return t("web.admin.activity.subtitle.series");
+    return t("web.common.activity.subtitle.series");
   }
   return null;
 }

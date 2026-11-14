@@ -18,6 +18,7 @@ import { hiddenFromTab, hiddenTag, onHome, pinnedTag } from "@/lib/collections/c
 import { collectionKindLabel, collectionKindOf } from "@/lib/collections/types";
 import { cn } from "@/lib/utils";
 import { useAppLanguage, useT } from "@/i18n";
+import { formatLocale } from "@/lib/appLocale";
 
 const TAG =
   "inline-flex h-[22px] shrink-0 items-center gap-1 rounded-full px-2 text-[11.5px] font-semibold";
@@ -51,7 +52,7 @@ function SyncStatus({ collection, syncing }: { collection: LibraryCollection; sy
     return (
       <>
         <MetaDot />
-        <Loader2 aria-hidden className="mr-1 inline size-3 animate-spin align-[-1px]" />
+        <Loader2 aria-hidden className="me-1 inline size-3 animate-spin align-[-1px]" />
         {t("web.collections.list.syncingNow")}
       </>
     );
@@ -140,7 +141,10 @@ function ListItem({
             </>
           ) : null}
           <MetaDot />
-          {t("web.collections.metaLine.titleCount", { count: titles, shown: String(titles) })}
+          {t("web.collections.metaLine.titleCount", {
+            count: titles,
+            shown: titles.toLocaleString(formatLocale()),
+          })}
           <SyncStatus collection={collection} syncing={syncing} />
         </>
       }
@@ -211,10 +215,10 @@ function CompactItem({
       style={style}
       data-collection-id={collection.id}
       className={cn(
-        "bg-card/60 border-border/80 hover:bg-accent/50 relative grid min-h-[54px] items-center gap-2.5 rounded-[14px] border py-1.5 pr-1.5",
+        "bg-card/60 border-border/80 hover:bg-accent/50 relative grid min-h-[54px] items-center gap-2.5 rounded-[14px] border py-1.5 pe-1.5",
         handleProps
-          ? "grid-cols-[28px_30px_minmax(0,1fr)_auto_auto] pl-1"
-          : "grid-cols-[30px_minmax(0,1fr)_auto_auto] pl-3",
+          ? "grid-cols-[28px_30px_minmax(0,1fr)_auto_auto] ps-1"
+          : "grid-cols-[30px_minmax(0,1fr)_auto_auto] ps-3",
         dragging && "bg-surface-raised z-10 shadow-lg",
       )}
     >
@@ -234,7 +238,10 @@ function CompactItem({
         <p className="text-muted-foreground truncate text-[12.5px]">
           {collectionKindLabel(collectionKindOf(collection.collection_type))}
           <MetaDot />
-          {t("web.collections.metaLine.titleCount", { count: titles, shown: String(titles) })}
+          {t("web.collections.metaLine.titleCount", {
+            count: titles,
+            shown: titles.toLocaleString(formatLocale()),
+          })}
         </p>
       </div>
       <span className="inline-flex items-center gap-2">
@@ -266,10 +273,8 @@ export function CollectionColumnHeader({ count }: { count: number }) {
   const t = useT();
   return (
     <div className="text-muted-foreground flex items-center justify-between px-4 pt-1 pb-2 text-[12.5px]">
-      <span role="status">
-        {t("web.collections.shelves.count", { count, count_text: String(count) })}
-      </span>
-      <span aria-hidden className="pr-14 max-lg:pr-16">
+      <span role="status">{t("web.collections.shelves.count", { count, count_text: count })}</span>
+      <span aria-hidden className="pe-14 max-lg:pe-16">
         {t("web.collections.admin.onCollectionsTab")}
       </span>
     </div>

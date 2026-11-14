@@ -1,13 +1,15 @@
 import { useId, useState } from "react";
 import { ChevronRight } from "lucide-react";
 import MediaCarousel from "@/components/MediaCarousel";
-import { useT, type Translate } from "@/i18n";
+import { codeNumber, useT, type Translate } from "@/i18n";
 import { decodeThumbhash } from "@/lib/thumbhash";
 import type { PickerEntry } from "@/api/v2/watchTogetherPicker";
 import type { WatchTogetherRoomMember } from "@/lib/watchTogether";
 import { MemberAvatar } from "../MemberAvatar";
 import { memberTints, type MemberTint } from "../members";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import WatchProgressBar from "@/components/WatchProgressBar";
+import { cn } from "@/lib/utils";
 
 /** The subset of a catalog card the picker needs; both search and picker rows fit it. */
 export interface PickerCard {
@@ -46,7 +48,7 @@ export function PosterTile({
     <button
       type="button"
       onClick={onClick}
-      className="group/tile focus-visible:outline-ring w-28 shrink-0 rounded-lg text-left focus-visible:outline-2 focus-visible:outline-offset-4 sm:w-32"
+      className="group/tile focus-visible:outline-ring w-28 shrink-0 rounded-lg text-start focus-visible:outline-2 focus-visible:outline-offset-4 sm:w-32"
       aria-label={card.title}
       aria-describedby={memberNames ? memberDescriptionId : undefined}
     >
@@ -72,7 +74,13 @@ export function PosterTile({
           </div>
         )}
         {card.type === "series" ? (
-          <span className="glass-subtle absolute right-1.5 bottom-1.5 flex items-center gap-0.5 rounded-full border border-white/15 px-1.5 py-0.5 text-[10px] font-semibold text-white/90">
+          <span
+            className={cn(
+              "glass-subtle absolute end-1.5 flex items-center gap-0.5 rounded-full border border-white/15 px-1.5 py-0.5 text-[10px] font-semibold text-white/90",
+              // Sit above the progress bar rather than across it.
+              progress !== undefined ? "bottom-4" : "bottom-1.5",
+            )}
+          >
             {t("web.watchTogether.common.series")} <ChevronRight className="size-2.5" />
           </span>
         ) : null}
@@ -83,7 +91,7 @@ export function PosterTile({
             </span>
             <span
               aria-hidden="true"
-              className="absolute top-2 left-2 flex items-center gap-1 rounded-full border border-white/20 bg-zinc-900 p-0.5 shadow-md"
+              className="absolute start-2 top-2 flex items-center gap-1 rounded-full border border-white/20 bg-zinc-900 p-0.5 shadow-md"
             >
               {who.slice(0, 2).map((member) => (
                 <MemberAvatar
@@ -95,21 +103,14 @@ export function PosterTile({
                 />
               ))}
               {who.length > 2 ? (
-                <span className="pr-1 text-[11px] font-semibold text-white">
-                  {t("web.watchTogether.picker.moreMembers", { count: String(who.length - 2) })}
+                <span className="pe-1 text-[11px] font-semibold text-white">
+                  {t("web.watchTogether.picker.moreMembers", { count: who.length - 2 })}
                 </span>
               ) : null}
             </span>
           </>
         ) : null}
-        {progress !== undefined ? (
-          <span className="absolute inset-x-0 bottom-0 h-1 bg-black/40">
-            <span
-              className="bg-foreground block h-full"
-              style={{ width: `${Math.round(progress * 100)}%` }}
-            />
-          </span>
-        ) : null}
+        {progress !== undefined ? <WatchProgressBar percent={progress * 100} /> : null}
       </div>
       <div className="px-0.5 pt-2">
         <div className="truncate text-[13px] font-semibold">{card.title}</div>
@@ -141,8 +142,8 @@ export function PosterTile({
 function pickerCaption(entry: PickerEntry, t: Translate) {
   if (entry.next_up) {
     return t("web.watchTogether.common.episodeCode", {
-      season: String(entry.next_up.season_number),
-      episode: String(entry.next_up.episode_number),
+      season: codeNumber(entry.next_up.season_number),
+      episode: codeNumber(entry.next_up.episode_number),
     });
   }
   return undefined;

@@ -18,6 +18,7 @@ import { useAdminPolicyDefaults, useViewerIsOwner } from "@/hooks/queries/admin/
 import { useAuth } from "@/hooks/useAuth";
 import { useT, type MessageKey, type Translate } from "@/i18n";
 import { invalidEmailMessage, isValidEmail } from "@/lib/email";
+import { TOUCH_TARGETS } from "@/lib/touchTargets";
 
 import { KeyValueRow } from "../ui";
 import { EditableCard, type AccessCardProps } from "./EditableCard";
@@ -201,7 +202,7 @@ export function SignInCard({
     used !== undefined ? (
       <span className="text-muted-foreground text-xs font-normal">
         {SPACE}
-        {t("web.admin.users.detail.access.signIn.profilesUsedSuffix", { used: String(used) })}
+        {t("web.admin.users.detail.access.signIn.profilesUsedSuffix", { used: used })}
       </span>
     ) : null;
 
@@ -260,7 +261,7 @@ export function SignInCard({
                 <SelectTrigger id={roleId} className="w-40">
                   <SelectValue />
                 </SelectTrigger>
-                <SelectContent>
+                <SelectContent className={TOUCH_TARGETS}>
                   {base.is_owner ? (
                     <SelectItem value="owner">
                       {t("web.admin.users.detail.access.role.owner")}
@@ -308,7 +309,7 @@ export function SignInCard({
             }
             description={
               used !== undefined
-                ? t("web.admin.users.detail.access.signIn.profilesUsed", { used: String(used) })
+                ? t("web.admin.users.detail.access.signIn.profilesUsed", { used: used })
                 : undefined
             }
             changed={changed.has(PROFILES_ROW)}

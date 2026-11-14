@@ -1200,18 +1200,18 @@ function ListFilters({
       <div className="relative min-w-[200px] flex-1 sm:max-w-[280px]">
         <Search
           aria-hidden
-          className="text-muted-foreground pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2"
+          className="text-muted-foreground pointer-events-none absolute start-3 top-1/2 size-4 -translate-y-1/2"
         />
         <Input
           type="search"
           aria-label={t("web.admin.collections.list.searchLabel")}
           placeholder={t("web.admin.collections.list.searchPlaceholder", {
             count: total,
-            count_text: String(total),
+            count_text: total,
           })}
           value={state.q}
           onChange={(event) => onChange({ q: event.target.value })}
-          className="h-9 rounded-xl pl-9"
+          className="h-9 rounded-xl ps-9"
         />
       </div>
       <Segmented
@@ -1226,7 +1226,7 @@ function ListFilters({
           aria-pressed={state.failed}
           onClick={() => onChange({ failed: !state.failed })}
           className={cn(
-            "focus-visible:ring-ring/50 ml-auto inline-flex h-8 items-center gap-2 rounded-full border px-3 text-[13px] font-medium outline-none focus-visible:ring-[3px] max-lg:h-11",
+            "focus-visible:ring-ring/50 ms-auto inline-flex h-8 items-center gap-2 rounded-full border px-3 text-[13px] font-medium outline-none focus-visible:ring-[3px] max-lg:h-11",
             state.failed
               ? "border-destructive bg-destructive/15 text-destructive"
               : "border-destructive/40 text-destructive hover:bg-destructive/10",
@@ -1235,7 +1235,7 @@ function ListFilters({
           <span aria-hidden className="bg-destructive size-2 rounded-full" />
           {t("web.admin.collections.list.syncsFailed", {
             count: failedCount,
-            count_text: String(failedCount),
+            count_text: failedCount,
           })}
         </button>
       ) : null}
@@ -1475,8 +1475,8 @@ function CollectionApplyJobBanner({ job }: { job: AdminJob | null }) {
 function deleteProgressLabel(t: Translate, completed: number, total: number) {
   return t("web.admin.collections.more.deleting", {
     count: total,
-    done_text: String(completed),
-    count_text: String(total),
+    done_text: completed,
+    count_text: total,
   });
 }
 

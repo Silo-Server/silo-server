@@ -31,6 +31,7 @@ import {
   formatSourceContainerSummary,
   formatToneMapSummary,
   formatTranscodeModeSummary,
+  getPlaybackSessionSubtitle,
   getSessionClientLabel,
   getSessionClientLabelFull,
   getSessionRouteNodes,
@@ -63,7 +64,7 @@ import {
 } from "lucide-react";
 import { formatDateTime, formatTime } from "@/lib/datetime";
 import { formatLocale } from "@/lib/appLocale";
-import { englishText, useT, type TextValues, type Translate } from "@/i18n";
+import { englishText, numberText, type TextValues, type Translate, useT } from "@/i18n";
 import type { MessageKey } from "@/locales/keys";
 
 type SortField = "username" | "media" | "method" | "node" | "started";
@@ -289,9 +290,9 @@ export default function AdminActivity() {
             ? t("web.admin.activity.page.noStreams")
             : t("web.admin.activity.page.subtitle", {
                 count: sessions.length,
-                count_text: String(sessions.length),
+                count_text: sessions.length,
                 nodes: routeNodes.length,
-                nodes_text: String(routeNodes.length),
+                nodes_text: routeNodes.length,
               })
         }
         actions={
@@ -301,7 +302,7 @@ export default function AdminActivity() {
                 <Radio className="h-3 w-3" />
                 {t("web.admin.activity.page.liveCount", {
                   count: sessions.length,
-                  count_text: String(sessions.length),
+                  count_text: sessions.length,
                 })}
               </span>
             )}
@@ -320,7 +321,7 @@ export default function AdminActivity() {
                 ? t("web.admin.activity.page.refreshing")
                 : t("web.admin.activity.page.refresh")}
             </Button>
-            <div className="min-w-[8.75rem] px-1 text-right">
+            <div className="min-w-[8.75rem] px-1 text-end">
               <div className="text-muted-foreground text-[10px] font-semibold tracking-wider uppercase">
                 {t("web.admin.activity.realtime.heading")}
               </div>
@@ -357,7 +358,7 @@ export default function AdminActivity() {
               className="max-w-xs font-mono text-sm"
             />
             <Button type="submit" variant="outline" size="sm" disabled={!ipSearch.trim()}>
-              <Search className="mr-1 h-3.5 w-3.5" />
+              <Search className="me-1 h-3.5 w-3.5" />
               {t("web.admin.activity.ipLookup.submit")}
             </Button>
           </form>
@@ -382,7 +383,7 @@ export default function AdminActivity() {
                       <TableHead>{t("web.admin.activity.ipLookup.column.user")}</TableHead>
                       <TableHead>{t("web.admin.activity.ipLookup.column.firstSeen")}</TableHead>
                       <TableHead>{t("web.admin.activity.ipLookup.column.lastSeen")}</TableHead>
-                      <TableHead className="text-right">
+                      <TableHead className="text-end">
                         {t("web.admin.activity.ipLookup.column.requests")}
                       </TableHead>
                     </TableRow>
@@ -396,14 +397,14 @@ export default function AdminActivity() {
                             className="text-primary font-medium hover:underline"
                           >
                             {entry.username ||
-                              t("web.admin.activity.userFallback", { id: String(entry.user_id) })}
+                              t("web.admin.activity.userFallback", { id: entry.user_id })}
                           </Link>
                         </TableCell>
                         <TableCell className="text-sm">
                           {formatDateTime(entry.first_seen)}
                         </TableCell>
                         <TableCell className="text-sm">{formatDateTime(entry.last_seen)}</TableCell>
-                        <TableCell className="text-right">
+                        <TableCell className="text-end">
                           {entry.request_count.toLocaleString(formatLocale())}
                         </TableCell>
                       </TableRow>
@@ -449,7 +450,7 @@ export default function AdminActivity() {
                     key={method}
                     title={t("web.admin.activity.summary.methodSegment", {
                       method: activityMethodMeta(method).label,
-                      count: String(count),
+                      count: count,
                     })}
                     className={`transition-all duration-500 ${activityMethodMeta(method).swatchClass}`}
                     style={{ width: `${(count / sessions.length) * 100}%` }}
@@ -466,7 +467,7 @@ export default function AdminActivity() {
                     title={activityMethodMeta(method).description}
                     aria-label={t("web.admin.activity.summary.methodFilter", {
                       method: activityMethodMeta(method).label,
-                      count: String(count),
+                      count: count,
                     })}
                     aria-pressed={methodFilter === method}
                     onClick={() => setMethodFilter(methodFilter === method ? null : method)}
@@ -505,9 +506,9 @@ export default function AdminActivity() {
                             : ""
                       }`}
                     >
-                      <span className="text-muted-foreground mr-1">{node.label}</span>
+                      <span className="text-muted-foreground me-1">{node.label}</span>
                       {node.name}
-                      <span className="text-muted-foreground ml-1.5 tabular-nums">
+                      <span className="text-muted-foreground ms-1.5 tabular-nums">
                         {node.count}
                       </span>
                     </button>
@@ -521,17 +522,17 @@ export default function AdminActivity() {
       {/* Search + filters */}
       <div className="flex flex-wrap items-center gap-2">
         <div className="relative min-w-[200px] flex-1">
-          <Search className="text-muted-foreground pointer-events-none absolute top-1/2 left-3 h-3.5 w-3.5 -translate-y-1/2" />
+          <Search className="text-muted-foreground pointer-events-none absolute start-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2" />
           <Input
             placeholder={t("web.admin.activity.filter.placeholder")}
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            className="h-8 pl-9 text-[13px]"
+            className="h-8 ps-9 text-[13px]"
           />
           {search && (
             <button
               onClick={() => setSearch("")}
-              className="text-muted-foreground hover:text-foreground absolute top-1/2 right-2.5 -translate-y-1/2"
+              className="text-muted-foreground hover:text-foreground absolute end-2.5 top-1/2 -translate-y-1/2"
             >
               <X className="h-3.5 w-3.5" />
             </button>
@@ -574,8 +575,8 @@ export default function AdminActivity() {
         <div className="text-muted-foreground text-[11px]">
           {t("web.admin.activity.filter.showing", {
             total: sessions.length,
-            shown: String(filtered.length),
-            total_text: String(sessions.length),
+            shown: filtered.length,
+            total_text: sessions.length,
           })}
         </div>
       )}
@@ -632,7 +633,7 @@ export default function AdminActivity() {
             >
               {t("web.admin.activity.column.time")}
             </SortHeader>
-            <div className="text-muted-foreground text-right text-[10px] font-semibold tracking-wider uppercase">
+            <div className="text-muted-foreground text-end text-[10px] font-semibold tracking-wider uppercase">
               {t("web.admin.activity.column.actions")}
             </div>
           </div>
@@ -669,9 +670,9 @@ function StreamRow({
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [ffmpegOpen, setFFmpegOpen] = useState(false);
   const title = getDisplayTitle(session, t);
-  const subtitle = getDisplaySubtitle(session, t);
+  const subtitle = getPlaybackSessionSubtitle(session);
   const username =
-    session.username || t("web.admin.activity.userFallback", { id: String(session.user_id) });
+    session.username || t("web.admin.activity.userFallback", { id: session.user_id });
   const elapsed = getElapsed(session.started_at);
   const profileDisplay = session.profile_name || session.profile_id || "";
   const userHref = `/admin/users/${session.user_id}`;
@@ -858,7 +859,7 @@ function StreamRow({
         </div>
 
         {/* Duration */}
-        <div className="min-w-0 text-right">
+        <div className="min-w-0 text-end">
           <div className="flex items-center justify-end">
             <span
               className={`inline-flex min-w-[4.75rem] items-center justify-center gap-1 rounded border px-1.5 py-0.5 text-[9px] font-semibold ${
@@ -939,7 +940,7 @@ function StreamRow({
             <Link to={userHref} className="hover:text-primary truncate transition-colors">
               <span className="text-[13px] font-semibold">{username}</span>
               {profileDisplay ? (
-                <span className="border-primary/30 bg-primary/15 text-primary ml-1.5 rounded border px-1.5 py-0.5 text-[10px] leading-none">
+                <span className="border-primary/30 bg-primary/15 text-primary ms-1.5 rounded border px-1.5 py-0.5 text-[10px] leading-none">
                   {profileDisplay}
                 </span>
               ) : null}
@@ -1491,19 +1492,7 @@ function getDisplayTitle(
   if (session.series_name && session.season_number != null && session.episode_number != null) {
     return session.episode_name || `S${session.season_number}E${session.episode_number}`;
   }
-  return (
-    session.media_title || t("web.admin.activity.title.file", { id: String(session.media_file_id) })
-  );
-}
-
-function getDisplaySubtitle(session: AdminSession, t: Translate): string | null {
-  if (session.series_name && session.season_number != null && session.episode_number != null) {
-    const ep = `S${session.season_number}E${session.episode_number}`;
-    return session.series_name ? `${ep} · ${session.series_name}` : ep;
-  }
-  if (session.media_type === "movie") return t("web.admin.activity.subtitle.movie");
-  if (session.media_type === "series") return t("web.admin.activity.subtitle.series");
-  return null;
+  return session.media_title || t("web.common.activity.title.file", { id: session.media_file_id });
 }
 
 function getElapsed(dateStr: string): string {
@@ -1512,8 +1501,8 @@ function getElapsed(dateStr: string): string {
   const h = Math.floor(totalSec / 3600);
   const m = Math.floor((totalSec % 3600) / 60);
   const s = totalSec % 60;
-  if (h > 0) return `${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
-  return `${m}:${String(s).padStart(2, "0")}`;
+  if (h > 0) return numberText(`${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`);
+  return numberText(`${m}:${String(s).padStart(2, "0")}`);
 }
 
 function formatPlaybackPosition(session: AdminSession): string {
@@ -1530,9 +1519,9 @@ function formatClockTime(seconds: number): string {
   const m = Math.floor((safeSeconds % 3600) / 60);
   const s = safeSeconds % 60;
   if (h > 0) {
-    return `${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+    return numberText(`${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`);
   }
-  return `${m}:${String(s).padStart(2, "0")}`;
+  return numberText(`${m}:${String(s).padStart(2, "0")}`);
 }
 
 function stringAttr(entry: OperationalLogEntry, key: string) {

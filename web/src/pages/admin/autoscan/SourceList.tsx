@@ -252,7 +252,7 @@ export function SourceListRow({
       </div>
 
       <div className="flex min-w-0 flex-wrap items-center gap-1.5 [grid-area:feeds]">
-        <span className="text-muted-foreground mr-1 text-xs @2xl:sr-only">
+        <span className="text-muted-foreground me-1 text-xs @2xl:sr-only">
           {t("web.admin.autoscan.sources.row.feedsLabel")}
         </span>
         {feeds}

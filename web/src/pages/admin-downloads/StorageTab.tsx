@@ -287,10 +287,7 @@ export default function StorageTab({
 /** Why deleting untracked files failed. */
 function untrackedDeleteError(t: Translate, error: Error, name: string): ReactNode {
   if (error instanceof V2ProblemError && error.status === 503) {
-    return t("web.admin.downloads.storage.untracked.listFailed", {
-      name,
-      location: (chunks) => chunks,
-    });
+    return t("web.admin.downloads.storage.untracked.listFailed", { name });
   }
   return t("web.admin.downloads.storage.untracked.deleteFailed");
 }
@@ -610,8 +607,8 @@ function DiskMeter({
             className={cn(
               "h-full min-w-[2px]",
               SEGMENT_CLASS[s.kind],
-              index === 0 && "rounded-l-[4px]",
-              index === visible.length - 1 && "rounded-r-[4px]",
+              index === 0 && "rounded-s-[4px]",
+              index === visible.length - 1 && "rounded-e-[4px]",
             )}
             style={{ flex: `${Math.max(s.fraction, 0.002)} 1 0%` }}
           />
@@ -619,13 +616,13 @@ function DiskMeter({
       </div>
       <span
         className="bg-warning absolute -top-1 -bottom-1 w-0.5 rounded-full"
-        style={{ left: `${ceiling}%` }}
+        style={{ insetInlineStart: `${ceiling}%` }}
         aria-hidden="true"
       />
       {scratch ? (
         <span
           className="bg-destructive absolute -top-1 -bottom-1 w-0.5 rounded-full"
-          style={{ left: `${SCRATCH_ADMISSION_PERCENT}%` }}
+          style={{ insetInlineStart: `${SCRATCH_ADMISSION_PERCENT}%` }}
           aria-hidden="true"
         />
       ) : null}
@@ -639,12 +636,12 @@ function MeterKey({ ceiling }: { ceiling: number }) {
     <div className="text-muted-foreground flex flex-wrap gap-x-4 gap-y-1 text-xs">
       <span className="flex items-center gap-1.5">
         <span className="bg-warning inline-block h-2.5 w-0.5 rounded-full" aria-hidden="true" />
-        {t("web.admin.downloads.storage.meter.ceiling", { ceiling: String(ceiling) })}
+        {t("web.admin.downloads.storage.meter.ceiling", { ceiling: ceiling })}
       </span>
       <span className="flex items-center gap-1.5">
         <span className="bg-destructive inline-block h-2.5 w-0.5 rounded-full" aria-hidden="true" />
         {t("web.admin.downloads.storage.meter.scratch", {
-          percent: String(SCRATCH_ADMISSION_PERCENT),
+          percent: SCRATCH_ADMISSION_PERCENT,
         })}
       </span>
     </div>

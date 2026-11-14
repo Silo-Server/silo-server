@@ -21,8 +21,13 @@ import {
 } from "@/pages/adminActivityPresentation";
 import { formatDateTime } from "@/lib/datetime";
 import { formatLocale } from "@/lib/appLocale";
+import { useT } from "@/i18n";
+
+/** Placeholder for a session without a client label; a symbol, not text. */
+const EM_DASH = "—";
 
 export default function AdminStats() {
+  const t = useT();
   const statsQuery = useAdminStats();
   const sessionsQuery = useAdminSessions();
   const sessions = sessionsQuery.data ?? [];
@@ -30,8 +35,8 @@ export default function AdminStats() {
   return (
     <div className="space-y-6 pb-4 sm:pb-6">
       <PageHeader
-        title="System stats"
-        subtitle="Track the size of the library and inspect the sessions currently playing through the system."
+        title={t("web.admin.stats.page.title")}
+        subtitle={t("web.admin.stats.page.subtitle")}
       />
 
       <StatsCards
@@ -61,8 +66,9 @@ function StatsCards({
   isLoading: boolean;
   error: unknown;
 }) {
+  const t = useT();
   if (error) {
-    return <SectionError message="Failed to load stats." />;
+    return <SectionError message={t("web.admin.stats.cards.loadFailed")} />;
   }
   if (isLoading || !stats) {
     return (
@@ -75,10 +81,26 @@ function StatsCards({
   }
   return (
     <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 md:grid-cols-4">
-      <StatCard title="Media Items" value={stats.total_items} icon={<Film className="h-4 w-4" />} />
-      <StatCard title="Files" value={stats.total_files} icon={<FileVideo className="h-4 w-4" />} />
-      <StatCard title="Users" value={stats.total_users} icon={<Users className="h-4 w-4" />} />
-      <StatCard title="Active Sessions" value={sessionCount} icon={<Play className="h-4 w-4" />} />
+      <StatCard
+        title={t("web.admin.stats.cards.mediaItems")}
+        value={stats.total_items}
+        icon={<Film className="h-4 w-4" />}
+      />
+      <StatCard
+        title={t("web.admin.stats.cards.files")}
+        value={stats.total_files}
+        icon={<FileVideo className="h-4 w-4" />}
+      />
+      <StatCard
+        title={t("web.admin.stats.cards.users")}
+        value={stats.total_users}
+        icon={<Users className="h-4 w-4" />}
+      />
+      <StatCard
+        title={t("web.admin.stats.cards.activeSessions")}
+        value={sessionCount}
+        icon={<Play className="h-4 w-4" />}
+      />
     </div>
   );
 }
@@ -92,9 +114,10 @@ function SessionsSection({
   isLoading: boolean;
   error: unknown;
 }) {
+  const t = useT();
   return (
     <div className="space-y-3">
-      <h2 className="text-lg font-medium tracking-tight">Active playback sessions</h2>
+      <h2 className="text-lg font-medium tracking-tight">{t("web.admin.stats.sessions.title")}</h2>
       {isLoading ? (
         <div className="surface-panel space-y-2 rounded-2xl p-4">
           {Array.from({ length: 3 }).map((_, i) => (
@@ -102,34 +125,36 @@ function SessionsSection({
           ))}
         </div>
       ) : error ? (
-        <SectionError message="Failed to load active sessions." />
+        <SectionError message={t("web.admin.stats.sessions.loadFailed")} />
       ) : sessions.length === 0 ? (
         <div className="surface-panel text-muted-foreground rounded-2xl py-12 text-center text-sm">
-          No active sessions.
+          {t("web.admin.stats.sessions.empty")}
         </div>
       ) : (
         <div className="surface-panel overflow-x-auto rounded-2xl border-0">
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>Session ID</TableHead>
-                <TableHead>User ID</TableHead>
-                <TableHead>File ID</TableHead>
-                <TableHead>Method</TableHead>
-                <TableHead>Client</TableHead>
-                <TableHead>Started</TableHead>
+                <TableHead>{t("web.admin.stats.sessions.sessionId")}</TableHead>
+                <TableHead>{t("web.admin.stats.sessions.userId")}</TableHead>
+                <TableHead>{t("web.admin.stats.sessions.fileId")}</TableHead>
+                <TableHead>{t("web.admin.stats.sessions.method")}</TableHead>
+                <TableHead>{t("web.admin.stats.sessions.client")}</TableHead>
+                <TableHead>{t("web.admin.stats.sessions.started")}</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {sessions.map((s) => (
                 <TableRow key={s.session_id}>
-                  <TableCell className="font-mono text-xs">{s.session_id.slice(0, 8)}...</TableCell>
+                  <TableCell className="font-mono text-xs">
+                    {t("web.admin.stats.sessions.shortSessionId", { id: s.session_id.slice(0, 8) })}
+                  </TableCell>
                   <TableCell>{s.user_id}</TableCell>
                   <TableCell>{s.media_file_id}</TableCell>
                   <TableCell>{activityMethodMeta(classifyActivityMethod(s)).label}</TableCell>
                   <TableCell>
                     <span className="inline-flex items-center gap-1.5">
-                      {getSessionClientLabel(s) || "—"}
+                      {getSessionClientLabel(s) || EM_DASH}
                       <JellyfinSessionPill session={s} />
                     </span>
                   </TableCell>

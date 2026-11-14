@@ -46,7 +46,7 @@ import {
 } from "@/components/ui/table";
 import { useEventChannel } from "@/components/realtimeEventsContext";
 import { useDebounce } from "@/hooks/useDebounce";
-import { useT, type MessageKey, type Translate } from "@/i18n";
+import { numberText, useT, type MessageKey, type Translate } from "@/i18n";
 import {
   useAutoscanConnections,
   useAutoscanEvents,
@@ -62,7 +62,7 @@ import {
   compareActiveScans,
   formatActiveScanMode,
   formatActiveScanProgress,
-  formatActiveScanTime,
+  formatActiveScanStarted,
   formatActiveScanTrigger,
 } from "@/lib/scanRuns";
 import { cn } from "@/lib/utils";
@@ -70,6 +70,7 @@ import { formatTime as formatTimePreferred, preferredDateLocale } from "@/lib/da
 
 import { eventSourceName } from "./sourceDisplay";
 import { formatLocale } from "@/lib/appLocale";
+import { formatDecimal } from "@/lib/numberFormat";
 
 const HISTORY_PAGE_SIZE_OPTIONS = [25, 50, 100];
 const DEFAULT_HISTORY_PAGE_SIZE = 25;
@@ -95,17 +96,16 @@ function formatTimestamp(value: string | undefined): string {
 }
 
 function formatDuration(t: Translate, ms: number): string {
-  if (ms < 1000)
-    return t("web.admin.autoscan.activity.duration.milliseconds", { value: String(ms) });
+  if (ms < 1000) return t("web.admin.autoscan.activity.duration.milliseconds", { value: ms });
   if (ms < 60_000)
     return t("web.admin.autoscan.activity.duration.seconds", {
-      value: String(Math.round(ms / 100) / 10),
+      value: formatDecimal(Math.round(ms / 100) / 10, 1, 0),
     });
   const minutes = Math.floor(ms / 60_000);
   const seconds = Math.round((ms % 60_000) / 1000);
   return t("web.admin.autoscan.activity.duration.minutesSeconds", {
-    minutes: String(minutes),
-    seconds: String(seconds),
+    minutes: minutes,
+    seconds: seconds,
   });
 }
 
@@ -202,7 +202,7 @@ function scanSourceName(t: Translate, scan: AutoscanScan, lookups: SourceLabelLo
 function libraryName(t: Translate, librariesByID: Map<number, Library>, libraryID: number): string {
   return (
     librariesByID.get(libraryID)?.name ??
-    t("web.admin.autoscan.activity.libraryFallback", { id: String(libraryID) })
+    t("web.admin.autoscan.activity.libraryFallback", { id: libraryID })
   );
 }
 
@@ -655,14 +655,14 @@ function eventDetailsSummary(t: Translate, event: AutoscanEvent): string {
   );
   const linkedText = t("web.admin.autoscan.activity.details.linkedCount", {
     count: linked,
-    count_text: `${linked}${event.changes_truncated ? "+" : ""}`,
+    count_text: `${numberText(linked)}${event.changes_truncated ? "+" : ""}`,
   });
   return [paths, linkedText].join(SEPARATOR);
 }
 
 /** Plural values for a count printed without digit grouping. */
 function rawCountValues(count: number) {
-  return { count, count_text: String(count) };
+  return { count, count_text: count };
 }
 
 function PollMetricStrip({ event }: { event: AutoscanEvent }) {
@@ -717,7 +717,7 @@ function QueueCard({
             <span>{formatActiveScanTrigger(scan.trigger)}</span>
             <span>
               {scan.status === "running"
-                ? formatActiveScanTime(scan.started_at, "Started")
+                ? formatActiveScanStarted(scan.started_at)
                 : t("web.admin.autoscan.activity.queue.waiting")}
             </span>
           </div>
@@ -819,7 +819,7 @@ function AutoscanQueue({
             <TableHead>{t("web.admin.autoscan.activity.column.library")}</TableHead>
             <TableHead>{t("web.admin.autoscan.activity.column.scope")}</TableHead>
             <TableHead>{t("web.admin.autoscan.activity.column.progress")}</TableHead>
-            <TableHead className="w-20 text-right">
+            <TableHead className="w-20 text-end">
               {t("web.admin.autoscan.activity.column.action")}
             </TableHead>
           </>
@@ -836,7 +836,7 @@ function AutoscanQueue({
                 {libraryName(t, librariesByID, scan.library_id)}
                 <div className="text-muted-foreground mt-1 text-xs">
                   {scan.status === "running"
-                    ? formatActiveScanTime(scan.started_at, "Started")
+                    ? formatActiveScanStarted(scan.started_at)
                     : t("web.admin.autoscan.activity.queue.waiting")}
                 </div>
               </TableCell>
@@ -849,7 +849,7 @@ function AutoscanQueue({
               <TableCell className="text-muted-foreground text-xs [overflow-wrap:anywhere]">
                 {progress || formatActiveScanTrigger(scan.trigger)}
               </TableCell>
-              <TableCell className="text-right">
+              <TableCell className="text-end">
                 <Button
                   variant="ghost"
                   size="icon"
@@ -872,7 +872,7 @@ function AutoscanQueue({
           pageSize={QUEUE_PAGE_SIZE}
           total={scans.length}
           onPageChange={setPage}
-          itemNoun="scan"
+          summaryKey="web.admin.common.pagination.scans"
         />
       ) : null}
     </section>
@@ -1081,7 +1081,7 @@ function PollEventCard({
           </div>
           <PollMetricStrip event={event} />
         </div>
-        <div className="text-muted-foreground text-right text-xs tabular-nums">
+        <div className="text-muted-foreground text-end text-xs tabular-nums">
           <div>{pollEventTimestamp(event)}</div>
           <div>{pollEventDuration(t, event)}</div>
         </div>
@@ -1272,7 +1272,10 @@ export default function ActivityPanel() {
   const activeStatus = historyView === "scans" ? scanStatus : pollStatus;
   const hasHistoryFilters = debouncedHistoryQuery !== "" || activeStatus !== "all";
   const isRefreshing = status.isFetching || activeQuery.isFetching;
-  const itemNoun = historyView === "scans" ? "scan" : "poll";
+  const summaryKey =
+    historyView === "scans"
+      ? "web.admin.common.pagination.scans"
+      : "web.admin.common.pagination.polls";
 
   // If a background refresh shrinks the result set below the current page,
   // pull the viewer back to the last page that still has rows. Adjusting state
@@ -1391,7 +1394,7 @@ export default function ActivityPanel() {
               </Button>
             </div>
             <div className="relative min-w-0">
-              <Search className="text-muted-foreground pointer-events-none absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2" />
+              <Search className="text-muted-foreground pointer-events-none absolute start-3 top-1/2 h-4 w-4 -translate-y-1/2" />
               <Input
                 value={historyQuery}
                 onChange={(event) => {
@@ -1403,12 +1406,12 @@ export default function ActivityPanel() {
                     ? t("web.admin.autoscan.activity.history.searchScans")
                     : t("web.admin.autoscan.activity.history.searchPolls")
                 }
-                className="pr-9 pl-9"
+                className="ps-9 pe-9"
               />
               {historyQuery ? (
                 <button
                   type="button"
-                  className="text-muted-foreground hover:text-foreground absolute top-1/2 right-2 rounded p-1 transition-colors"
+                  className="text-muted-foreground hover:text-foreground absolute end-2 top-1/2 rounded p-1 transition-colors"
                   onClick={() => setHistoryQuery("")}
                   aria-label={t("web.admin.autoscan.activity.history.clearSearch")}
                 >
@@ -1531,7 +1534,7 @@ export default function ActivityPanel() {
                 setPage(0);
               }}
               pageSizeOptions={HISTORY_PAGE_SIZE_OPTIONS}
-              itemNoun={itemNoun}
+              summaryKey={summaryKey}
               isFetching={activeQuery.isFetching}
             />
           </div>

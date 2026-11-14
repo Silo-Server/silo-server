@@ -28,17 +28,17 @@ function measuredAgo(t: Translate, measuredAt: string, now: number): string {
   if (minutes < 60)
     return t("web.settings.playbackConnection.ago.minutes", {
       count: minutes,
-      count_text: String(minutes),
+      count_text: minutes,
     });
   if (minutes < 24 * 60) {
     const hours = Math.floor(minutes / 60);
     return t("web.settings.playbackConnection.ago.hours", {
       count: hours,
-      count_text: String(hours),
+      count_text: hours,
     });
   }
   const days = Math.floor(minutes / (24 * 60));
-  return t("web.settings.playbackConnection.ago.days", { count: days, count_text: String(days) });
+  return t("web.settings.playbackConnection.ago.days", { count: days, count_text: days });
 }
 
 /**
@@ -228,7 +228,7 @@ export function PlaybackConnection({ ignoresLearnedLimit = false }) {
                       say(
                         t("web.settings.playbackConnection.rateLimited", {
                           count: error.retryAfter,
-                          count_text: String(error.retryAfter),
+                          count_text: error.retryAfter,
                         }),
                         error.retryAfter * 1000,
                       );

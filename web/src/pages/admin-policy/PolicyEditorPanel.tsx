@@ -140,7 +140,7 @@ function LifecycleRail({ step, liveVersion }: { step: LifecycleStep; liveVersion
               {done && <Check aria-hidden className="size-3" />}
               {stage.id === "active" && liveVersion !== undefined && step === "live"
                 ? t("web.admin.access.policy.editor.stage.activeVersion", {
-                    version: String(liveVersion),
+                    version: liveVersion,
                   })
                 : t(stage.label)}
             </span>
@@ -422,10 +422,10 @@ const PolicyEditorState = memo(function PolicyEditorState({
       setMessage(
         result.compiled_ok
           ? t("web.admin.access.policy.editor.savedVersion", {
-              version: String(result.version_number),
+              version: result.version_number,
             })
           : t("web.admin.access.policy.editor.savedVersionNotCompiled", {
-              version: String(result.version_number),
+              version: result.version_number,
             }),
       );
     } catch (error) {
@@ -532,7 +532,7 @@ const PolicyEditorState = memo(function PolicyEditorState({
             <span className="text-warning">
               {newerSeed.versionNumber !== undefined
                 ? t("web.admin.access.policy.editor.newerVersion", {
-                    version: String(newerSeed.versionNumber),
+                    version: newerSeed.versionNumber,
                   })
                 : t("web.admin.access.policy.editor.newerRevision")}
             </span>
@@ -587,7 +587,7 @@ const PolicyEditorState = memo(function PolicyEditorState({
         {saved && saved.source !== draft && (
           <p className="text-muted-foreground text-sm">
             {t("web.admin.access.policy.editor.editsNotSaved", {
-              version: String(saved.target.version_number),
+              version: saved.target.version_number,
             })}
           </p>
         )}
@@ -606,8 +606,8 @@ const PolicyEditorState = memo(function PolicyEditorState({
                 <li key={issueKey(issue, index)}>
                   {issue.row > 0
                     ? t("web.admin.access.policy.compileIssue", {
-                        row: String(issue.row),
-                        col: String(issue.col),
+                        row: issue.row,
+                        col: issue.col,
                         message: issue.message,
                       })
                     : issue.message}

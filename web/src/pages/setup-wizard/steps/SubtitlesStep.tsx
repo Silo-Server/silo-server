@@ -192,7 +192,7 @@ function ProviderRow({
             >
               {test.isPending ? (
                 <>
-                  <Loader2 className="mr-1.5 size-3 animate-spin" />
+                  <Loader2 className="me-1.5 size-3 animate-spin" />
                   {t("web.setup.subtitles.testing")}
                 </>
               ) : (
@@ -302,7 +302,7 @@ export function SubtitlesStep() {
     enabledProviders > 0
       ? t("web.setup.subtitles.summary", {
           count: enabledProviders,
-          shown: String(enabledProviders),
+          shown: enabledProviders,
         })
       : undefined,
   );

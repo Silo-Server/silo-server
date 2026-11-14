@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 
+import { useT } from "@/i18n";
 import { formatTime } from "@/lib/datetime";
 import { cn } from "@/lib/utils";
 import { chartSeriesColor, stackSegments } from "./chartMath";
@@ -58,11 +59,12 @@ export function StackedColumnChart({
   height = 160,
   fill = false,
   formatValue = defaultFormatValue,
-  formatBucket = (t) => formatTime(t),
-  totalLabel = "Total",
+  formatBucket = (time) => formatTime(time),
+  totalLabel,
   ariaLabel,
   className,
 }: StackedColumnChartProps) {
+  const t = useT();
   const [activeIndex, setActiveIndex] = useState<number | null>(null);
 
   const columns = useMemo(
@@ -89,8 +91,10 @@ export function StackedColumnChart({
     columns.length > 0 ? (index + 0.5) / columns.length : 0.5;
   const activeRatio = activeIndex === null ? 0.5 : columnRatio(activeIndex);
 
+  // Time runs left to right in every language; the plot and its labels use physical
+  // coordinates (eslint.config.js PHYSICAL_DIRECTION).
   return (
-    <div className={cn("w-full", fill && "flex min-h-0 flex-1 flex-col", className)}>
+    <div dir="ltr" className={cn("w-full", fill && "flex min-h-0 flex-1 flex-col", className)}>
       <ChartLegend
         className="mb-2.5 shrink-0"
         entries={seriesLabels.map((label, index) => ({
@@ -116,7 +120,10 @@ export function StackedColumnChart({
                 activeIndex === index && "bg-foreground/5",
               )}
               tabIndex={0}
-              aria-label={`${formatBucket(column.t)}: ${formatValue(column.total)}`}
+              aria-label={t("web.admin.dashboard.chart.columnReading", {
+                bucket: formatBucket(column.t),
+                value: formatValue(column.total),
+              })}
               onPointerEnter={() => setActiveIndex(index)}
               onFocus={() => setActiveIndex(index)}
               onBlur={() => setActiveIndex(null)}
@@ -156,9 +163,12 @@ export function StackedColumnChart({
                 value={formatValue(active.segments[index]?.value ?? 0)}
               />
             ))}
-            {totalLabel ? (
+            {totalLabel !== "" ? (
               <div className="border-border/60 mt-1 border-t pt-1">
-                <ChartTooltipRow label={totalLabel} value={formatValue(active.total)} />
+                <ChartTooltipRow
+                  label={totalLabel ?? t("web.admin.dashboard.chart.total")}
+                  value={formatValue(active.total)}
+                />
               </div>
             ) : null}
           </ChartTooltip>

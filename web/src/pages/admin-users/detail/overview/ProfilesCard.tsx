@@ -30,8 +30,8 @@ export function ProfilesCard({
         count === undefined
           ? undefined
           : t("web.admin.users.detail.common.profilesAllowed", {
-              count: String(count),
-              max: String(user.effective_policy.max_profiles),
+              count: count,
+              max: user.effective_policy.max_profiles,
             })
       }
       actions={

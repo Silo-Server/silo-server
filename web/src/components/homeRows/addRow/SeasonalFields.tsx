@@ -243,15 +243,14 @@ function CustomHolidays({ config, onChange, max }: FieldProps & { max: number })
       </p>
       {holidays.map((holiday, index) => {
         const label =
-          holiday.name.trim() ||
-          t("web.home.addRow.seasonal.holidayNumber", { number: String(index + 1) });
+          holiday.name.trim() || t("web.home.addRow.seasonal.holidayNumber", { number: index + 1 });
         const problem = customHolidayProblem(holiday);
         return (
           <div key={index} className="border-border grid gap-2 rounded-xl border px-3.5 py-3">
             <div className="flex items-center gap-2">
               <Input
                 aria-label={t("web.home.addRow.seasonal.holidayName", {
-                  number: String(index + 1),
+                  number: index + 1,
                 })}
                 placeholder={t("web.home.addRow.seasonal.holidayNamePlaceholder")}
                 className="h-8 text-[13px]"
@@ -389,10 +388,10 @@ export function HolidayFields({ config, onChange }: FieldProps) {
                   <Label htmlFor={checkboxId} className="font-normal">
                     {theme.name}
                   </Label>
-                  <span className="text-muted-foreground ml-auto text-xs">{when}</span>
+                  <span className="text-muted-foreground ms-auto text-xs">{when}</span>
                 </div>
                 {on ? (
-                  <div className="grid gap-2 pl-7">
+                  <div className="grid gap-2 ps-7">
                     {theme.vibes.length > 1 ? (
                       <VibeSelect
                         theme={theme}

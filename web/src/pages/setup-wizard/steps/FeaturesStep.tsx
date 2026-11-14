@@ -7,7 +7,7 @@ import {
 import { MobilePushPrivacyDisclosure } from "@/components/notifications/MobilePushPrivacyDisclosure";
 import { useSettingsForm } from "@/hooks/useSettingsForm";
 import { useT } from "@/i18n";
-import { MARKER_SHARING_DISCLOSURE } from "@/lib/markers";
+import { MARKER_SHARING_DISCLOSURE_KEY } from "@/lib/markers";
 import { EmbeddingProviderField } from "@/pages/admin-settings/AIProviders";
 import { ModelField } from "@/pages/admin-settings/AIModelField";
 import { SettingField } from "@/pages/admin-settings/SettingField";
@@ -170,7 +170,7 @@ export function FeaturesStep() {
         <SettingField
           label={t("web.setup.features.shareMarkersLabel")}
           type="toggle"
-          description={MARKER_SHARING_DISCLOSURE}
+          description={t(MARKER_SHARING_DISCLOSURE_KEY)}
           value={shareMarkers ? "true" : "false"}
           onChange={(value) => form.setValue(SHARE_MARKERS_KEY, value)}
         />

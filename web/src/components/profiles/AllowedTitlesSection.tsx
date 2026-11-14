@@ -15,6 +15,7 @@ import {
 } from "@/hooks/queries/titleAllowances";
 import { useDebounce } from "@/hooks/useDebounce";
 import { useT, type MessageKey } from "@/i18n";
+import { formatLocale } from "@/lib/appLocale";
 
 const SEARCH_LIMIT = 10;
 const SEARCH_DEBOUNCE_MS = 250;
@@ -108,7 +109,7 @@ export function AllowedTitlesSection({ profileId }: { profileId: string }) {
               <span className="min-w-0 flex-1 truncate text-sm">
                 {item.title}
                 {item.year ? (
-                  <span className="text-muted-foreground ml-1.5 text-xs">{item.year}</span>
+                  <span className="text-muted-foreground ms-1.5 text-xs">{item.year}</span>
                 ) : null}
               </span>
               <Button
@@ -169,11 +170,11 @@ export function AllowedTitlesSection({ profileId }: { profileId: string }) {
                     {collection.live
                       ? t("web.profiles.allowedTitles.titleCount", {
                           count: collection.item_count,
-                          count_text: String(collection.item_count),
+                          count_text: collection.item_count.toLocaleString(formatLocale()),
                         })
                       : t("web.profiles.allowedTitles.titleCountPaused", {
                           count: collection.item_count,
-                          count_text: String(collection.item_count),
+                          count_text: collection.item_count.toLocaleString(formatLocale()),
                         })}
                   </span>
                 </span>
@@ -253,13 +254,13 @@ function AddAllowedTitle({
       <div className="relative">
         <Search
           aria-hidden
-          className="text-muted-foreground absolute top-1/2 left-3 size-4 -translate-y-1/2"
+          className="text-muted-foreground absolute start-3 top-1/2 size-4 -translate-y-1/2"
         />
         <Input
           type="search"
           aria-label={t("web.profiles.allowedTitles.searchLabel")}
           placeholder={t("web.profiles.allowedTitles.searchPlaceholder")}
-          className="pl-9"
+          className="ps-9"
           autoComplete="off"
           value={query}
           onChange={(event) => setQuery(event.target.value)}
@@ -293,7 +294,7 @@ function AddAllowedTitle({
               <li key={item.content_id} className="flex items-center gap-2 px-3 py-2 text-sm">
                 <span className="min-w-0 flex-1 truncate">
                   {item.title}
-                  <span className="text-muted-foreground ml-1.5 text-xs">
+                  <span className="text-muted-foreground ms-1.5 text-xs">
                     {[item.year, t("web.profiles.allowedTitles.resultType", { type: item.type })]
                       .filter(Boolean)
                       .join(" · ")}

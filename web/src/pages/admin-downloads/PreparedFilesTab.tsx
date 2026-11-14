@@ -233,7 +233,7 @@ export default function PreparedFilesTab({
               .filter(Boolean)
               .join(" · ")}
           </span>
-          <div className="ml-auto flex gap-1.5">
+          <div className="ms-auto flex gap-1.5">
             <Button
               size="sm"
               variant="ghost"
@@ -279,7 +279,7 @@ export default function PreparedFilesTab({
                 {t("web.admin.downloads.preparedFiles.column.preparedAs")}
               </TableHead>
               <TableHead>{t("web.admin.downloads.preparedFiles.column.location")}</TableHead>
-              <TableHead className="text-right">
+              <TableHead className="text-end">
                 {t("web.admin.downloads.preparedFiles.column.onDisk")}
               </TableHead>
               <TableHead className="hidden sm:table-cell">
@@ -413,7 +413,7 @@ function FileRow({
         ) : null}
       </TableCell>
       <TableCell className="whitespace-nowrap">{row.location_name}</TableCell>
-      <TableCell className="text-right whitespace-nowrap tabular-nums">
+      <TableCell className="text-end whitespace-nowrap tabular-nums">
         {row.state === "expired" ? NONE : formatStorageBytes(row.bytes)}
       </TableCell>
       <TableCell className="hidden whitespace-nowrap sm:table-cell">

@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"google.golang.org/protobuf/encoding/protojson"
 
@@ -26,7 +27,7 @@ func TestInstallerInstallBinaryPersistsPackagedArchive(t *testing.T) {
 	checksum := sha256.Sum256(binaryData)
 	manifest.Checksum = hex.EncodeToString(checksum[:])
 
-	result, err := installer.installBinary(ctx, binaryData, manifest.GetChecksum(), manifest, nil, nil)
+	result, err := installer.installBinary(ctx, binaryData, manifest.GetChecksum(), manifest, nil, nil, unsignedSignature)
 	if err != nil {
 		t.Fatalf("installBinary() returned error: %v", err)
 	}
@@ -58,6 +59,7 @@ func TestInstallerReplaceBinaryPreservesInstallationID(t *testing.T) {
 	manifest.Checksum = hex.EncodeToString(checksum[:])
 
 	oldRepository := 7
+	oldRepo, verifiedAt := "https://github.com/Silo-Server/silo-plugin-metadb", time.Now()
 	result, err := installer.replaceBinary(ctx, &Installation{
 		ID:            15,
 		RepositoryID:  &oldRepository,
@@ -66,7 +68,8 @@ func TestInstallerReplaceBinaryPreservesInstallationID(t *testing.T) {
 		InstallPath:   oldPath,
 		Enabled:       true,
 		UpdateFailure: &UpdateFailure{Version: "0.0.19", Reason: "refused earlier"},
-	}, binaryData, hex.EncodeToString(checksum[:]), manifest, nil, nil)
+		Signature:     Signature{State: SignatureStateVerified, SourceRepo: &oldRepo, VerifiedAt: &verifiedAt},
+	}, binaryData, hex.EncodeToString(checksum[:]), manifest, nil, nil, unsignedSignature)
 	if err != nil {
 		t.Fatalf("replaceBinary() returned error: %v", err)
 	}
@@ -113,6 +116,10 @@ func TestInstallerReplaceBinaryPreservesInstallationID(t *testing.T) {
 	// row named, so the row must stop claiming it.
 	if !update.SetRepository || update.RepositoryID != nil || result.Installation.RepositoryID != nil {
 		t.Fatalf("update repository = %t/%v, result repository = %v; want cleared", update.SetRepository, update.RepositoryID, result.Installation.RepositoryID)
+	}
+	// Nor may it keep the verified signature of the package it replaced.
+	if update.Signature == nil || update.Signature.State != SignatureStateUnsigned || result.Installation.Signature.State != SignatureStateUnsigned {
+		t.Fatalf("update signature = %+v, result signature = %+v; want unsigned", update.Signature, result.Installation.Signature)
 	}
 	if update.Version == nil || *update.Version != "0.0.19" {
 		t.Fatalf("update version = %v, want 0.0.19", update.Version)

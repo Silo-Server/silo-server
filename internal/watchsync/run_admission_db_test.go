@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"os"
-	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -19,7 +18,8 @@ import (
 )
 
 // admissionLockTrace coordinates two repository calls at the row lock. These
-// fixtures never execute a service or provider, and use no timing-based waits.
+// fixtures never execute a service or provider, and wait only on observed
+// database state.
 type admissionLockTrace struct {
 	started chan uint32
 	locked  chan struct{}
@@ -54,23 +54,31 @@ type admissionReply struct {
 }
 
 // awaitAdmissionLock observes a real PostgreSQL wait, rather than a client
-// query-start callback. Its read-only snapshots are bounded; only the two fixed
+// query-start callback. It polls until the test's context ends: the traced
+// query reaches the server some time after it starts on the client, and on a
+// busy runner a fixed number of snapshots ran out first. Only the two fixed
 // admission operations above contend, and no provider work runs.
 func awaitAdmissionLock(t *testing.T, ctx context.Context, observer interface {
 	QueryRow(context.Context, string, ...any) pgx.Row
 }, pid uint32) {
 	t.Helper()
-	for range 128 {
+	for {
 		var blocked bool
 		if err := observer.QueryRow(ctx, "SELECT cardinality(pg_blocking_pids($1::integer)) > 0", pid).Scan(&blocked); err != nil {
+			if ctx.Err() != nil {
+				t.Fatal("repository operation did not enter the expected PostgreSQL lock wait")
+			}
 			t.Fatal(err)
 		}
 		if blocked {
 			return
 		}
-		runtime.Gosched()
+		select {
+		case <-ctx.Done():
+			t.Fatal("repository operation did not enter the expected PostgreSQL lock wait")
+		case <-time.After(time.Millisecond):
+		}
 	}
-	t.Fatal("repository operation did not enter the expected PostgreSQL lock wait")
 }
 
 //nolint:funlen,gocyclo // Transaction scenarios share one bounded synthetic account fixture.

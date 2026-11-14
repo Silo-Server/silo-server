@@ -18,6 +18,23 @@ const collectionSelectColumns = `id, profile_id, creator_profile_id, name, descr
 	last_sync_at, last_sync_status, last_sync_message, COALESCE(display_query_definition::text, '') AS display_query_definition, item_count, include_in_server_collections,
 	poster_url, poster_thumbhash, sort_order, group_id, created_at, updated_at`
 
+// AccountCollectionIDs lists the IDs of every personal collection on account
+// userID, read in tx. Deleting the account removes the rows through the users
+// foreign key, so its delete reads them first to remove their artwork after
+// the commit; the account row locked for that delete keeps new collections
+// out.
+func AccountCollectionIDs(ctx context.Context, tx pgx.Tx, userID int) ([]string, error) {
+	rows, err := tx.Query(ctx, `SELECT id FROM user_personal_collections WHERE user_id = $1`, userID)
+	if err != nil {
+		return nil, fmt.Errorf("listing account collections: %w", err)
+	}
+	ids, err := pgx.CollectRows(rows, pgx.RowTo[string])
+	if err != nil {
+		return nil, fmt.Errorf("listing account collections: %w", err)
+	}
+	return ids, nil
+}
+
 func scanCollection(scanner interface{ Scan(dest ...any) error }) (*userstore.Collection, error) {
 	var c userstore.Collection
 	var (
@@ -564,7 +581,9 @@ func (s *PostgresUserStore) ReplaceCollectionItems(ctx context.Context, collecti
 	defer tx.Rollback(ctx) //nolint:errcheck
 
 	// Concurrent replaces of one collection must not interleave their diffs.
-	if err := s.lockCollectionRow(ctx, tx, collectionID); err != nil {
+	// The items have no foreign key to the collection, so a replace that
+	// waited out a delete must not write them under the deleted ID.
+	if err := s.lockExistingCollectionRow(ctx, tx, collectionID); err != nil {
 		return err
 	}
 	// Lock the current members before the first write. Each item statement's

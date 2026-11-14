@@ -7,6 +7,7 @@ import { useOverlayPrefs } from "@/hooks/useOverlayPrefs";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Sparkles, RefreshCw } from "lucide-react";
 import { useUICustomization } from "@/hooks/useUICustomization";
+import { useSectionTitle } from "@/lib/sectionTitle";
 import { carouselCardWidthClasses } from "@/lib/uiCustomization";
 import { useT, type MessageKey } from "@/i18n";
 
@@ -156,6 +157,7 @@ export default function Recommendations() {
   // The viewer-facing name, as on the native apps; admin and setup screens
   // keep "Recommendations" for the server feature.
   const t = useT();
+  const sectionTitle = useSectionTitle();
   useDocumentTitle(t("web.recommendations.title"));
 
   const tasteProfileQuery = useTasteProfile();
@@ -197,7 +199,7 @@ export default function Recommendations() {
         rows.map((row, i) => (
           <MediaCarousel
             key={`${row.type}-${i}`}
-            title={row.label}
+            title={sectionTitle({ ...row, title: row.label })}
             titleHref={buildSectionHref(row)}
           >
             {row.items.map((item) => (

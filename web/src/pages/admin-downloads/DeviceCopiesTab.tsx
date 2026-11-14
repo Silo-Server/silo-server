@@ -87,7 +87,7 @@ export default function DeviceCopiesTab({ initialStale = false }: { initialStale
         >
           {t("web.admin.downloads.deviceCopies.staleFilter", {
             days: staleDays,
-            days_text: String(staleDays),
+            days_text: staleDays,
           })}
         </Button>
         <Select value={sort} onValueChange={(value) => setSort(value as Sort)}>
@@ -118,7 +118,7 @@ export default function DeviceCopiesTab({ initialStale = false }: { initialStale
               <TableHead className="hidden sm:table-cell">
                 {t("web.admin.downloads.deviceCopies.column.copies")}
               </TableHead>
-              <TableHead className="text-right">
+              <TableHead className="text-end">
                 {t("web.admin.downloads.deviceCopies.column.onDevice")}
               </TableHead>
               <TableHead className="w-0" />
@@ -192,7 +192,7 @@ export default function DeviceCopiesTab({ initialStale = false }: { initialStale
                       <TableCell className="hidden sm:table-cell">
                         <div>
                           {t("web.admin.downloads.deviceCopies.copiesSummary", {
-                            copies: String(device.copies),
+                            copies: device.copies,
                             summary:
                               [
                                 device.finished &&
@@ -234,10 +234,10 @@ export default function DeviceCopiesTab({ initialStale = false }: { initialStale
                           </div>
                         ) : null}
                       </TableCell>
-                      <TableCell className="text-right whitespace-nowrap tabular-nums">
+                      <TableCell className="text-end whitespace-nowrap tabular-nums">
                         {formatStorageBytes(device.bytes_on_device)}
                       </TableCell>
-                      <TableCell className="text-right">
+                      <TableCell className="text-end">
                         <Button
                           variant="outline"
                           size="sm"
@@ -285,8 +285,8 @@ function entryTitle(t: Translate, entry: AdminDownloadEntry) {
   if (entry.episode) {
     return t("web.admin.downloads.deviceCopies.episodeTitle", {
       series: entry.title || t("web.admin.downloads.deviceCopies.unknownSeries"),
-      season: String(entry.episode.season_number),
-      episode: String(entry.episode.episode_number),
+      season: entry.episode.season_number,
+      episode: entry.episode.episode_number,
     });
   }
   return entry.title || t("web.admin.downloads.deviceCopies.unknownTitle");
@@ -357,7 +357,7 @@ function DeviceEntries({
   const chosen = revocable.filter((row) => selected.has(row.id));
   if (entries.isLoading) return <Skeleton className="m-3 h-16" />;
   return (
-    <div className="space-y-2 px-3 py-3 sm:pl-12">
+    <div className="space-y-2 px-3 py-3 sm:ps-12">
       {chosen.length > 0 ? (
         <div className="flex items-center gap-2 text-xs">
           <span>{t("web.admin.downloads.deviceCopies.selected", countValues(chosen.length))}</span>
@@ -412,7 +412,7 @@ function DeviceEntries({
               >
                 {status.label}
               </span>
-              <span className="w-20 text-right tabular-nums">
+              <span className="w-20 text-end tabular-nums">
                 {formatStorageBytes(row.file_size)}
               </span>
               {row.status !== "revoked" ? (
@@ -500,7 +500,6 @@ function RevokeDialog({
         count,
         profile: device.profile_name,
         device: textDevice,
-        owner: (chunks) => chunks,
       })
     : t("web.admin.downloads.deviceCopies.revokeDialog.description", {
         count,

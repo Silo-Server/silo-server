@@ -85,7 +85,7 @@ function SimulateVerdict({ decision }: { decision: unknown }) {
             .join(" · ")
         : t("web.admin.access.policy.simulate.anyRating"),
       ...(advisoryAge
-        ? [t("web.admin.access.policy.simulate.advisoryAge", { age: String(advisoryAge) })]
+        ? [t("web.admin.access.policy.simulate.advisoryAge", { age: advisoryAge })]
         : []),
       quality
         ? t("web.admin.access.policy.simulate.qualityCeiling", { quality })
@@ -213,8 +213,8 @@ export function PolicySimulatePanel({ domains, domain, source }: PolicySimulateP
             <li key={`${issue.row}-${issue.col}-${index}`}>
               {issue.row > 0
                 ? t("web.admin.access.policy.compileIssue", {
-                    row: String(issue.row),
-                    col: String(issue.col),
+                    row: issue.row,
+                    col: issue.col,
                     message: issue.message,
                   })
                 : issue.message}

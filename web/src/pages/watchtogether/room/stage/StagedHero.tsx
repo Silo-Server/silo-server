@@ -18,7 +18,7 @@ export function itemHeadline(item: ItemDetail, t: (id: MessageKey, values?: Text
       : t("web.watchTogether.hero.episode", code);
   }
   return item.year
-    ? t("web.watchTogether.hero.movieYear", { title: item.title, year: String(item.year) })
+    ? t("web.watchTogether.hero.movieYear", { title: item.title, year: item.year })
     : item.title;
 }
 
@@ -76,7 +76,7 @@ export function StagedHero({
           onLoad={() => setBackdropLoaded(true)}
         />
       ) : null}
-      <div className="from-background via-background/90 absolute inset-0 bg-gradient-to-r to-transparent" />
+      <div className="from-background via-background/90 absolute inset-0 bg-gradient-to-r to-transparent rtl:bg-gradient-to-l" />
       <div className="relative flex gap-5 p-5 sm:p-6">
         <div
           className="media-card-image hidden aspect-[2/3] w-28 shrink-0 overflow-hidden sm:block"
