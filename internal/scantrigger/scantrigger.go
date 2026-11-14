@@ -31,12 +31,18 @@ const (
 	TriggerLibraryIDPath = "library_id_path"
 )
 
+// ExplicitPathTrigger reports whether trigger records an admin's scan request
+// that names a path.
+func ExplicitPathTrigger(trigger string) bool {
+	return trigger == TriggerPath || trigger == TriggerLibraryIDPath
+}
+
 // FileScanContext returns the context for running a file scan recorded with
 // trigger. Only an admin's request for the exact path scans a file that the
 // library's ignore files exclude; a scan Silo starts on its own honors them
 // even if they changed after the request was resolved.
 func FileScanContext(ctx context.Context, trigger string) context.Context {
-	if trigger == TriggerPath || trigger == TriggerLibraryIDPath {
+	if ExplicitPathTrigger(trigger) {
 		return scanner.WithExplicitFileRequest(ctx)
 	}
 	return ctx
