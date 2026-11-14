@@ -36,7 +36,7 @@ import MediaInfoDialog from "./components/MediaInfoDialog";
 import SubtitleSearchDialog from "./components/SubtitleSearchDialog";
 import { sortByResolution } from "./components/VersionFlyout";
 import { selectDefaultPlaybackVariantVersion } from "./components/versionRankingUtils";
-import { readRequestedFileId, rememberRequestedFileId } from "@/playback/requestedVersion";
+import { readRequestedVersion, rememberRequestedFileId } from "@/playback/requestedVersion";
 import { resolveSelectedMediaSummary } from "./components/selectedMediaSummary";
 import { RecommendationGridSkeleton } from "./components/SectionSkeletons";
 import { resolveLeafPrimaryAction } from "./itemDetailLayout";
@@ -125,10 +125,11 @@ export default function MovieContent({
   // store is profile-scoped, and a pre-resolution read would alias another
   // profile's pick. A pick made in place is held in state below.
   const requestedProfileId = currentProfile?.id ?? null;
-  const requestedFileId = useMemo(
-    () => (requestedProfileId ? readRequestedFileId(item.content_id, requestedProfileId) : null),
+  const requestedVersion = useMemo(
+    () => (requestedProfileId ? readRequestedVersion(item.content_id, requestedProfileId) : null),
     [item.content_id, requestedProfileId],
   );
+  const requestedFileId = requestedVersion?.fileId ?? null;
   const defaultSelectedVersion = useMemo(
     () =>
       selectDefaultPlaybackVariantVersion(
@@ -199,6 +200,15 @@ export default function MovieContent({
   useEffect(() => {
     onSelectedFileIdChange?.(explicitSelectedFileId);
   }, [explicitSelectedFileId, onSelectedFileIdChange]);
+  // Play must tell the server whether this row is the viewer's or the page's.
+  // A pick made in place says so directly; a remembered one only while it is
+  // still the row the catalog gives us to play, and only if the viewer named it
+  // themselves. An Auto start's row is remembered as a hint, not a pin.
+  const explicitFileSelection =
+    !selectedVersionMissing &&
+    (manualSelectedFileId != null ||
+      (requestedVersion?.explicit === true &&
+        requestedVersion.fileId === selectedVersion?.file_id));
   const selectedMediaSummary = useMemo(
     () => resolveSelectedMediaSummary(selectedVersion, item.playback_variants, item.runtime ?? 0),
     [item.playback_variants, item.runtime, selectedVersion],
@@ -232,8 +242,11 @@ export default function MovieContent({
     (version: FileVersion) => {
       setManualSelectedFileId(version.file_id);
       // Remember the pick across reloads: the server records the row that
-      // actually plays, which may be a substitute for this one.
-      rememberRequestedFileId(item.content_id, version.file_id, requestedProfileId);
+      // actually plays, which may be a substitute for this one. The standing
+      // travels with it so a later Play still pins this row after a reload.
+      rememberRequestedFileId(item.content_id, version.file_id, requestedProfileId, {
+        explicit: true,
+      });
       setAudioSelectionMode("auto");
       setExplicitAudioTrackIndex(null);
       setSubtitleSelectionMode("auto");
@@ -427,7 +440,7 @@ export default function MovieContent({
               selectedVersionMissing={selectedVersionMissing}
               onSelectVersion={handleSelectVersion}
               onVersionPickerOpenChange={handleVersionPickerOpenChange}
-              explicitFileSelection={manualSelectedFileId != null}
+              explicitFileSelection={explicitFileSelection}
               onDownload={
                 user?.download_allowed && item.versions.length > 0
                   ? () => setDownloadOpen(true)

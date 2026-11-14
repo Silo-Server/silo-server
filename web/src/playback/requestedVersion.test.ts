@@ -2,7 +2,11 @@
 
 import { afterEach, describe, expect, it } from "vitest";
 
-import { readRequestedFileId, rememberRequestedFileId } from "./requestedVersion";
+import {
+  readRequestedFileId,
+  readRequestedVersion,
+  rememberRequestedFileId,
+} from "./requestedVersion";
 
 const PROFILE = "profile-a";
 
@@ -99,5 +103,41 @@ describe("requested version store", () => {
     expect(Object.keys(stored).length).toBeLessThanOrEqual(200);
     // The newest pick always survives the trim.
     expect(readRequestedFileId("movie-259", PROFILE)).toBe(260);
+  });
+
+  // The row alone cannot say whether the viewer named it: progress persistence
+  // writes the row the server served, which may be an Auto choice. Only the
+  // standing can tell a pin from a hint after a reload.
+  it("remembers whether the viewer named the row", () => {
+    rememberRequestedFileId("movie-1", 12, PROFILE, { explicit: true });
+
+    expect(readRequestedVersion("movie-1", PROFILE)).toEqual({ fileId: 12, explicit: true });
+    expect(readRequestedFileId("movie-1", PROFILE)).toBe(12);
+  });
+
+  it("keeps a row the viewer did not name substitutable", () => {
+    rememberRequestedFileId("movie-1", 12, PROFILE);
+
+    expect(readRequestedVersion("movie-1", PROFILE)).toEqual({ fileId: 12, explicit: false });
+  });
+
+  it("keeps an existing standing when a write does not state one", () => {
+    rememberRequestedFileId("movie-1", 12, PROFILE, { explicit: true });
+    // A later write that only refreshes which row played must not demote the
+    // pin, and one that does not state a standing must not upgrade a hint.
+    rememberRequestedFileId("movie-1", 12, PROFILE);
+    expect(readRequestedVersion("movie-1", PROFILE)).toEqual({ fileId: 12, explicit: true });
+
+    rememberRequestedFileId("movie-2", 13, PROFILE);
+    expect(readRequestedVersion("movie-2", PROFILE)).toEqual({ fileId: 13, explicit: false });
+  });
+
+  it("reads an entry written before the standing existed as a hint", () => {
+    localStorage.setItem(
+      "silo-requested-version",
+      JSON.stringify({ "profile-a:movie-1": { fileId: 12, updatedAt: 1 } }),
+    );
+
+    expect(readRequestedVersion("movie-1", PROFILE)).toEqual({ fileId: 12, explicit: false });
   });
 });

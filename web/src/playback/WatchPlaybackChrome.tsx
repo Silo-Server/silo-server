@@ -44,7 +44,7 @@ import { useVersionLiveness } from "@/hooks/queries/versionLiveness";
 import { useStampedVersions } from "./useStampedVersions";
 import { catalogKeys } from "@/hooks/queries/keys";
 import { applyPlaybackProgressToCache } from "@/hooks/queries/playbackProgressCache";
-import { readRequestedFileId, rememberRequestedFileId } from "./requestedVersion";
+import { readRequestedVersion, rememberRequestedFileId } from "./requestedVersion";
 import { invalidatePlaybackSurfaceQueries } from "@/hooks/queries/playbackSurfaceRefresh";
 import { useAuth } from "@/hooks/useAuth";
 import { lastBufferingMode, rememberBufferingMode } from "@/player/buffering-mode-memory";
@@ -229,7 +229,8 @@ function buildWatchLocationState(request: WatchRouteRequest) {
     request.audioTrackIndex == null &&
     request.prePlaySubtitleMode == null &&
     request.prePlaySubtitleSelection == null &&
-    !request.versionPicked
+    !request.versionPicked &&
+    request.explicitFileSelection !== true
   ) {
     return undefined;
   }
@@ -240,6 +241,10 @@ function buildWatchLocationState(request: WatchRouteRequest) {
     prePlaySubtitleMode: request.prePlaySubtitleMode,
     prePlaySubtitleSelection: request.prePlaySubtitleSelection ?? null,
     versionPicked: request.versionPicked,
+    // The watch URL names a file, not why: without this the route rebuilds
+    // the request as an Auto start and the viewer's pick is downgraded to
+    // something the server may replace.
+    explicitFileSelection: request.explicitFileSelection === true,
   };
 }
 
@@ -833,6 +838,8 @@ function WatchPlaybackHostContent() {
         return;
       }
 
+      // No standing here: this write only records which row played. An Auto
+      // session must not become a pin, and a pin must keep its standing.
       rememberRequestedFileId(contentId, exitState.selectedFileId, currentProfile?.id ?? null);
     },
     [activeItem, activeRequest, currentProfile?.id],
@@ -843,10 +850,10 @@ function WatchPlaybackHostContent() {
   // an exit state: post-roll close and next-episode navigation never reach
   // `handleEnded`.
   const handleRequestedVersionChange = useCallback(
-    (fileId: number | null) => {
+    (fileId: number | null, explicit: boolean) => {
       const contentId = activeItem?.content_id ?? activeRequest?.contentId;
       if (!contentId || fileId == null) return;
-      rememberRequestedFileId(contentId, fileId, currentProfile?.id ?? null);
+      rememberRequestedFileId(contentId, fileId, currentProfile?.id ?? null, { explicit });
     },
     [activeItem, activeRequest, currentProfile?.id],
   );
@@ -1259,9 +1266,10 @@ function WatchPlaybackHostContent() {
   // request is the only durable record of their choice. Read inline rather than
   // memoized: this render path is not the time-tick lane, and the read must not
   // add a hook after this component's conditional returns.
-  const requestedFileId = activeRequest
-    ? readRequestedFileId(activeRequest.contentId, currentProfile?.id ?? null)
+  const requestedVersion = activeRequest
+    ? readRequestedVersion(activeRequest.contentId, currentProfile?.id ?? null)
     : null;
+  const requestedFileId = requestedVersion?.fileId ?? null;
   // The URL names no row, the viewer picked one on this device, and the
   // catalog no longer carries it. `selectFileId` would fall through to the
   // plan's default, so return to the item page's pick-again state instead.
@@ -1285,6 +1293,7 @@ function WatchPlaybackHostContent() {
     // fallback in place rather than blocking playback on a settings fetch.
     qualityPreference: canonicalQuality,
     requestedFileId,
+    requestedVersionExplicit: requestedVersion?.explicit === true,
   });
   // The resolved answer already folds in the profile layer, so the props built
   // from the profile record are only the pre-resolution fallback.

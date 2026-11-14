@@ -598,7 +598,46 @@ describe("WatchPage exit selection", () => {
       }),
     );
 
-    await waitFor(() => expect(onRequestedVersionChange).toHaveBeenCalledWith(8));
+    // A row the session committed outside Auto is the viewer's pick, and the
+    // host records it as one so a later Play keeps pinning it.
+    await waitFor(() => expect(onRequestedVersionChange).toHaveBeenCalledWith(8, true));
+  });
+
+  it("reports the row Auto chose as a hint, not a pin", async () => {
+    const onRequestedVersionChange = vi.fn();
+    playbackSessionMock.mockReturnValue(
+      playbackSession({
+        plan: fixturePlanV3({ requested_media_file_id: 7 }),
+        autoFallback: true,
+      }),
+    );
+    const { rerender } = render(
+      createElement(WatchPage, {
+        ...watchPageProps,
+        onRequestedVersionChange,
+      }),
+    );
+    await waitFor(() => expect(videoPlayerMock).toHaveBeenCalled());
+
+    playbackSessionMock.mockReturnValue(
+      playbackSession({
+        plan: fixturePlanV3({
+          plan_id: "plan:auto-pick",
+          requested_media_file_id: 9,
+          effective_media_file_id: 9,
+        }),
+        mediaFileId: 9,
+        autoFallback: true,
+      }),
+    );
+    rerender(
+      createElement(WatchPage, {
+        ...watchPageProps,
+        onRequestedVersionChange,
+      }),
+    );
+
+    await waitFor(() => expect(onRequestedVersionChange).toHaveBeenCalledWith(9, false));
   });
 });
 

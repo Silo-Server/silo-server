@@ -466,6 +466,134 @@ describe("routeEventPlanIdentityV3", () => {
   });
 });
 
+describe("usePlaybackSession version selection", () => {
+  function stubStartBodies() {
+    const startBodies: Array<Record<string, unknown>> = [];
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith("/playback/start")) {
+        const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+        startBodies.push(body);
+        return jsonResponse(
+          {
+            protocol_version: 3,
+            server_features: ["playback_plan_v3"],
+            outcome: "playable",
+            session_id: "session-1",
+            playback_plan: fixturePlanV3({
+              requested_media_file_id: (body.file_id as number) ?? 7,
+            }),
+          },
+          { status: 201 },
+        );
+      }
+      if (url.endsWith("/playback/route-events")) return new Response(null, { status: 202 });
+      if (init?.method === "DELETE") return new Response(null, { status: 204 });
+      throw new Error(`Unexpected request: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    return startBodies;
+  }
+
+  it("tells the server to start the viewer's pick and leaves Auto disarmed", async () => {
+    const startBodies = stubStartBodies();
+
+    const { result, unmount } = renderHook(
+      () =>
+        usePlaybackSession(
+          "request-1",
+          [],
+          [],
+          7,
+          0,
+          false,
+          "auto",
+          null,
+          undefined,
+          null,
+          undefined,
+          undefined,
+          true,
+        ),
+      { wrapper },
+    );
+
+    await waitFor(() => expect(result.current.plan).not.toBeNull());
+    expect(startBodies[0]).toMatchObject({ file_id: 7, file_selection: "explicit" });
+    // The version menu reads this: an explicit pick must not show Auto checked.
+    expect(result.current.autoFallback).toBe(false);
+
+    unmount();
+  });
+
+  it("keeps Auto checked and the selection server-owned for an Auto start", async () => {
+    const startBodies = stubStartBodies();
+
+    const { result, unmount } = renderHook(
+      () => usePlaybackSession("request-1", [], [], 7, 0, false, "auto"),
+      { wrapper },
+    );
+
+    await waitFor(() => expect(result.current.plan).not.toBeNull());
+    expect(startBodies[0]).toMatchObject({ file_id: 7, file_selection: "auto" });
+    expect(result.current.autoFallback).toBe(true);
+
+    unmount();
+  });
+
+  // An explicit pick takes away the server's licence to substitute, so a
+  // refusal has to reach the viewer as a refusal: the error card is what
+  // points them at the version list.
+  it("surfaces a refused explicit start instead of substituting", async () => {
+    const startBodies: Array<Record<string, unknown>> = [];
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith("/playback/start")) {
+        startBodies.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
+        return jsonResponse({
+          protocol_version: 3,
+          server_features: ["playback_plan_v3"],
+          outcome: "terminal",
+          session_id: "session-1",
+          terminal: { reason: "no_alternate_version", message: "", retryable: true },
+        });
+      }
+      if (url.endsWith("/playback/route-events")) return new Response(null, { status: 202 });
+      if (init?.method === "DELETE") return new Response(null, { status: 204 });
+      throw new Error(`Unexpected request: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { result, unmount } = renderHook(
+      () =>
+        usePlaybackSession(
+          "request-1",
+          [],
+          [],
+          7,
+          0,
+          false,
+          "auto",
+          null,
+          undefined,
+          null,
+          undefined,
+          undefined,
+          true,
+        ),
+      { wrapper },
+    );
+
+    await waitFor(() => expect(result.current.error).toBeTruthy());
+    expect(result.current.error).toContain("Try another version");
+    // No silent second attempt: the refusal is the answer.
+    expect(startBodies).toHaveLength(1);
+    expect(result.current.errorReason).toBe("no_alternate_version");
+
+    unmount();
+  });
+});
+
 describe("usePlaybackSession quality changes", () => {
   it("rolls back a rejected quality and keeps it out of later replans", async () => {
     const plan = fixturePlanV3();

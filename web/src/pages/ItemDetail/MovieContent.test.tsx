@@ -431,6 +431,47 @@ describe("MovieContent", () => {
     });
   });
 
+  // A reload keeps the row but loses the click that chose it. Without the
+  // remembered standing, Play sends the row as an Auto start and the server is
+  // free to start a different file than the one the bar shows.
+  it("plays a remembered explicit pick as an explicit selection", () => {
+    mocks.useCurrentProfile.mockReturnValue({ profile: { id: PROFILE_ID } });
+    const other = makeFileVersion({ file_id: 1 });
+    const picked = makeFileVersion({ file_id: 2, resolution: "1080p" });
+    rememberRequestedFileId("movie-1", picked.file_id, PROFILE_ID, { explicit: true });
+
+    renderInQueryClient(
+      <MemoryRouter initialEntries={["/item/movie-1"]}>
+        <MovieContent item={makeMovieItem({ versions: [other, picked] })} />
+      </MemoryRouter>,
+    );
+
+    expect(mocks.capturedActionBarProps.value).toMatchObject({
+      selectedVersion: expect.objectContaining({ file_id: picked.file_id }),
+      explicitFileSelection: true,
+    });
+  });
+
+  // The store also carries the row an Auto start played, so that the picker
+  // can follow it. That row is not a pick and must stay substitutable.
+  it("keeps a remembered Auto row substitutable", () => {
+    mocks.useCurrentProfile.mockReturnValue({ profile: { id: PROFILE_ID } });
+    const other = makeFileVersion({ file_id: 1 });
+    const served = makeFileVersion({ file_id: 2, resolution: "1080p" });
+    rememberRequestedFileId("movie-1", served.file_id, PROFILE_ID);
+
+    renderInQueryClient(
+      <MemoryRouter initialEntries={["/item/movie-1"]}>
+        <MovieContent item={makeMovieItem({ versions: [other, served] })} />
+      </MemoryRouter>,
+    );
+
+    expect(mocks.capturedActionBarProps.value).toMatchObject({
+      selectedVersion: expect.objectContaining({ file_id: served.file_id }),
+      explicitFileSelection: false,
+    });
+  });
+
   it("asks for a replacement pick when the requested row is gone", () => {
     mocks.useCurrentProfile.mockReturnValue({ profile: { id: PROFILE_ID } });
     rememberRequestedFileId("movie-1", 3, PROFILE_ID);

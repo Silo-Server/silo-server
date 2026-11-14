@@ -79,6 +79,7 @@ function buildWatchRouteRequestKey(
   prePlaySubtitleMode: "auto" | "off" | "explicit" | undefined,
   prePlaySubtitleSelection: PrePlaySubtitleSelection | null | undefined,
   versionPicked: boolean,
+  explicitFileSelection: boolean,
 ): string {
   return JSON.stringify([
     contentId,
@@ -92,6 +93,10 @@ function buildWatchRouteRequestKey(
     prePlaySubtitleMode ?? null,
     prePlaySubtitleSelection ?? null,
     versionPicked,
+    // Two starts that differ only here are different requests: one lets the
+    // server pick the file, the other pins it. A route sync must not fold the
+    // second into the first.
+    explicitFileSelection,
   ]);
 }
 
@@ -138,6 +143,7 @@ export function createWatchRouteRequest({
       prePlaySubtitleMode,
       prePlaySubtitleSelection,
       versionPicked,
+      explicitFileSelection === true,
     ),
   };
 }
@@ -284,6 +290,7 @@ export function buildWatchPageProps({
   seriesEpisodes,
   qualityPreference = currentProfileQualityFallback(currentProfile),
   requestedFileId = null,
+  requestedVersionExplicit = false,
 }: {
   request: WatchRouteRequest;
   item: WatchDetail;
@@ -304,6 +311,13 @@ export function buildWatchPageProps({
    * quality cap.
    */
   requestedFileId?: number | null;
+  /**
+   * Whether that remembered row is one the viewer named themselves. A reload
+   * keeps the row but loses the navigation that carried `explicitFileSelection`,
+   * so the store's standing is the only thing that can still tell a pick from
+   * an Auto start.
+   */
+  requestedVersionExplicit?: boolean;
 }): DerivedWatchPageProps {
   const basePreferredSubtitleLanguage =
     item.effective_subtitle_language !== undefined
@@ -478,7 +492,13 @@ export function buildWatchPageProps({
     forceInitialPosition: request.restart,
     qualityPreference,
     explicitAudioTrackIndex: request.audioTrackIndex ?? null,
-    explicitFileSelection: request.explicitFileSelection,
+    // The navigation that carried the pick says so directly. A reload or a
+    // directly opened watch URL has only the store's standing to go on, and it
+    // counts only while it still names the row this request asks for: a row
+    // the viewer merely let the server choose must stay substitutable.
+    explicitFileSelection:
+      request.explicitFileSelection === true ||
+      (request.fileId != null && request.fileId === requestedFileId && requestedVersionExplicit),
     forceRelink: request.forceRelink,
     initialSubtitleTrackIndexByFileId: initialSubtitleTrackIndexes.start,
     initialBitmapSubtitleTrackIndexByFileId: initialSubtitleTrackIndexes.bitmap,

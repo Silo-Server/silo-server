@@ -480,7 +480,12 @@ export interface WatchPageProps {
    * viewer's request, because completion paths such as post-roll close and
    * next-episode navigation do not pass through `onEnded`.
    */
-  onRequestedVersionChange?: (fileId: number | null) => void;
+  /**
+   * `explicit` says whether the viewer named the row, so the host can keep the
+   * device's remembered pick a pin rather than a hint. The player's own Auto
+   * entry reports the row it is playing as no longer pinned.
+   */
+  onRequestedVersionChange?: (fileId: number | null, explicit: boolean) => void;
   onExit: (state?: PlaybackExitState) => void | Promise<void>;
   onMinimize?: (state?: PlaybackExitState) => void | Promise<void>;
   resumeHints?: ResumeHints;

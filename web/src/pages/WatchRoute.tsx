@@ -36,6 +36,7 @@ export default function WatchRoute() {
         downloaded_subtitle_id?: number;
       } | null;
       versionPicked?: boolean;
+      explicitFileSelection?: boolean;
     } | null;
 
     return createWatchRouteRequest({
@@ -50,6 +51,7 @@ export default function WatchRoute() {
       prePlaySubtitleMode: locationState?.prePlaySubtitleMode,
       prePlaySubtitleSelection: locationState?.prePlaySubtitleSelection,
       versionPicked: locationState?.versionPicked,
+      explicitFileSelection: locationState?.explicitFileSelection,
       returnHref: locationState?.watchReturnHref,
     });
   }, [id, location.state, searchParams]);
