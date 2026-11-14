@@ -2077,7 +2077,8 @@ func (h *PlaybackHandler) cleanupPlaySession(
 	// finds nothing while one is in flight. Wait for it and close what it
 	// registered: the play is over, and nothing else would. The close above
 	// stays outside the lock because a restart holds the lock through its hook,
-	// which can wait on the FFmpeg context that only a close cancels.
+	// which can wait on its FFmpeg context. That close cancels the context at
+	// once; one under the lock would wait out restartHookTimeout first.
 	unlock := h.tm.LockSessionLifecycle(playSession.UpstreamSessionID)
 	h.tm.CloseTranscodeSession(playSession.UpstreamSessionID, "")
 	// Deliberate stop: drop the node recipe so a buffered/retrying request after
