@@ -12,7 +12,9 @@ import { FolderPlus, MoreVertical, Pause, Play } from "lucide-react";
 import AddToCollectionDialog from "@/components/AddToCollectionDialog";
 import EditMetadataDialog from "@/components/EditMetadataDialog";
 import MatchItemDialog from "@/components/MatchItemDialog";
+import RefreshMetadataDialog from "@/components/RefreshMetadataDialog";
 import { MediaActionIcon } from "@/components/mediaActionIcons";
+import { useRefreshItemMetadata } from "@/hooks/queries/items";
 import { useAuth } from "@/hooks/useAuth";
 import { useCurrentProfile } from "@/hooks/useCurrentProfile";
 import { canCurateMetadata as canCurateMetadataForUser } from "@/lib/permissions";
@@ -97,9 +99,23 @@ export default function AudiobookContent({
   const [addToCollectionOpen, setAddToCollectionOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
   const [matchOpen, setMatchOpen] = useState(false);
+  const [refreshOpen, setRefreshOpen] = useState(false);
+  const refreshMetadataMutation = useRefreshItemMetadata();
   const audiobookPlayback = useAudiobookPlaybackController();
   const navigate = useNavigate();
   const { search } = useLocation();
+  // Follow a match or refresh that gives the book a new content ID. Keep the
+  // page context but not a request to start playback.
+  const followReplacedItem = (contentID: string) => {
+    const params = new URLSearchParams(search);
+    params.delete("play");
+    params.delete("restart");
+    const query = params.toString();
+    navigate(
+      { pathname: `/item/${contentID}`, search: query ? `?${query}` : "" },
+      { replace: true },
+    );
+  };
   const { user } = useAuth();
   const { profile: currentProfile } = useCurrentProfile();
   const canCurateMetadata = canCurateMetadataForUser(user, currentProfile);
@@ -211,17 +227,16 @@ export default function AudiobookContent({
             item={scopedItem}
             open={matchOpen}
             onOpenChange={setMatchOpen}
-            onReplaced={(contentID) => {
-              // Keep the page context but not a request to start playback.
-              const params = new URLSearchParams(search);
-              params.delete("play");
-              params.delete("restart");
-              const query = params.toString();
-              navigate(
-                { pathname: `/item/${contentID}`, search: query ? `?${query}` : "" },
-                { replace: true },
-              );
+            onReplaced={followReplacedItem}
+          />
+          <RefreshMetadataDialog
+            open={refreshOpen}
+            onOpenChange={setRefreshOpen}
+            onConfirm={(mode) => {
+              setRefreshOpen(false);
+              refreshMetadataMutation.mutate({ item, mode, onReplaced: followReplacedItem });
             }}
+            isPending={refreshMetadataMutation.isPending}
           />
         </>
       )}
@@ -344,6 +359,16 @@ export default function AudiobookContent({
                       <DropdownMenuItem onSelect={() => setMatchOpen(true)}>
                         <MediaActionIcon action="matchItem" />
                         {t("web.detail.actions.matchItem")}
+                      </DropdownMenuItem>
+                      <DropdownMenuItem
+                        disabled={refreshMetadataMutation.isPending}
+                        onSelect={() => setRefreshOpen(true)}
+                      >
+                        <MediaActionIcon
+                          action="refreshMetadata"
+                          isPending={refreshMetadataMutation.isPending}
+                        />
+                        {t("web.detail.actions.refreshMetadata")}
                       </DropdownMenuItem>
                     </DropdownMenuContent>
                   </DropdownMenu>

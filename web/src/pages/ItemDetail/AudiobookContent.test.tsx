@@ -22,6 +22,7 @@ const mocks = vi.hoisted(() => ({
   startPlayback: vi.fn(),
   toggleActivePlayback: vi.fn(),
   user: null as null | { role: "admin" | "user"; permissions?: string[] },
+  refresh: vi.fn(),
 }));
 
 vi.mock("@/hooks/useAuth", () => ({
@@ -33,6 +34,9 @@ vi.mock("@/hooks/useCurrentProfile", () => ({
 vi.mock("@/components/EditMetadataDialog", () => ({
   default: ({ open, item }: { open: boolean; item: { title: string } }) =>
     open ? <div>Editing {item.title}</div> : null,
+}));
+vi.mock("@/hooks/queries/items", () => ({
+  useRefreshItemMetadata: () => ({ mutate: mocks.refresh, isPending: false }),
 }));
 vi.mock("@/components/MatchItemDialog", () => ({
   default: ({ open, item }: { open: boolean; item: { title: string; library_id?: number } }) =>
@@ -194,6 +198,16 @@ describe("AudiobookContent metadata actions", () => {
     await userEvent.click(screen.getByRole("button", { name: "More actions" }));
     await userEvent.click(screen.getByRole("menuitem", { name: "Match Item" }));
     expect(screen.getByText("Matching Test Book in 7")).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: "More actions" }));
+    await userEvent.click(screen.getByRole("menuitem", { name: "Refresh Metadata" }));
+    await userEvent.click(screen.getByRole("button", { name: /Quick Refresh/ }));
+    expect(mocks.refresh).toHaveBeenCalledWith(
+      expect.objectContaining({
+        item: expect.objectContaining({ title: "Test Book" }),
+        mode: "quick",
+      }),
+    );
   });
 
   it("offers no metadata actions to a listener", () => {
