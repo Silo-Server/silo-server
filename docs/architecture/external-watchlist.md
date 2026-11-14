@@ -122,6 +122,14 @@ alias when any of these holds:
 - a `stale_media_ids` row equals the alias, which catches an item that carries,
   or once carried, a TMDB duplicate ID since deleted.
 
+An `imdb` or `tvdb` match counts only when the item holds no TMDB ID (in
+`media_items.tmdb_id` or a `media_item_provider_ids` row) other than one of the
+title's TMDB aliases, with TMDB's `id-slug` form counting as the bare ID. An
+item with a different TMDB ID is another title that shares a stale or wrong
+IMDb or TVDB ID, and promoting onto it would swap the user's title for another.
+A `stale_media_ids` TMDB value is one the provider rejected, so it never
+conflicts.
+
 Only items of the title's media type with a `media_item_libraries` row in an
 enabled folder count. Unlike `LookupExternalIDs`, it returns every distinct
 match:

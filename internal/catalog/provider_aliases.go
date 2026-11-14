@@ -27,33 +27,38 @@ type ProviderAlias struct {
 // its providers rejected (stale_media_ids), so a library item that carries or
 // once carried a since-deleted duplicate ID still matches. Each source is its
 // own branch so every lookup uses its index. Only items of the alias's media
-// type with a row in an enabled folder count.
+// type with a row in an enabled folder count. An IMDb or TVDB match stands in
+// for a TMDB match only when the item holds no TMDB ID of its own (column or
+// durable provider ID) outside the key's TMDB aliases: an item with another
+// TMDB ID is another title that shares a stale or wrong ID. TMDB's "id-slug"
+// form counts as the same ID (see sameTMDBID). Values a provider rejected
+// (stale_media_ids) are not the item's ID, so they never conflict.
 func resolveProviderAliasesSQL() string {
 	return `
 		WITH requested(key, media_type, provider, provider_id) AS (
 			SELECT * FROM unnest($1::bigint[], $2::text[], $3::text[], $4::text[])
 		),
-		matches(key, media_type, content_id) AS (
-			SELECT r.key, r.media_type, mi.content_id
+		matches(key, media_type, provider, content_id) AS (
+			SELECT r.key, r.media_type, r.provider, mi.content_id
 			FROM requested r
 			JOIN media_items mi ON r.provider = 'tmdb' AND mi.tmdb_id <> '' AND mi.tmdb_id = r.provider_id
 			UNION
-			SELECT r.key, r.media_type, mi.content_id
+			SELECT r.key, r.media_type, r.provider, mi.content_id
 			FROM requested r
 			JOIN media_items mi ON r.provider = 'imdb' AND mi.imdb_id <> '' AND mi.imdb_id = r.provider_id
 			UNION
-			SELECT r.key, r.media_type, mi.content_id
+			SELECT r.key, r.media_type, r.provider, mi.content_id
 			FROM requested r
 			JOIN media_items mi ON r.provider = 'tvdb' AND mi.tvdb_id <> '' AND mi.tvdb_id = r.provider_id
 			UNION
-			SELECT r.key, r.media_type, mip.content_id
+			SELECT r.key, r.media_type, r.provider, mip.content_id
 			FROM requested r
 			JOIN media_item_provider_ids mip
 			  ON mip.provider = r.provider
 			 AND mip.provider_id = r.provider_id
 			 AND mip.item_type = r.media_type
 			UNION
-			SELECT r.key, r.media_type, s.content_id
+			SELECT r.key, r.media_type, r.provider, s.content_id
 			FROM requested r
 			JOIN stale_media_ids s ON s.provider = r.provider AND s.provider_id = r.provider_id
 		)
@@ -67,6 +72,22 @@ func resolveProviderAliasesSQL() string {
 			WHERE mil.content_id = mi.content_id
 			  AND mf.enabled = true
 		)
+		  AND (m.provider = 'tmdb' OR NOT EXISTS (
+			SELECT 1
+			FROM (
+				SELECT mi.tmdb_id
+				UNION ALL
+				SELECT mip.provider_id FROM media_item_provider_ids mip
+				WHERE mip.content_id = mi.content_id AND mip.provider = 'tmdb'
+			) own(tmdb_id)
+			WHERE own.tmdb_id <> ''
+			  AND EXISTS (SELECT 1 FROM requested r WHERE r.key = m.key AND r.provider = 'tmdb')
+			  AND NOT EXISTS (
+				SELECT 1 FROM requested r
+				WHERE r.key = m.key AND r.provider = 'tmdb'
+				  AND (own.tmdb_id = r.provider_id OR starts_with(own.tmdb_id, r.provider_id || '-'))
+			  )
+		  ))
 		ORDER BY m.key, m.content_id`
 }
 
