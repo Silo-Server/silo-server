@@ -551,4 +551,16 @@ func TestExplicitFileRequestJoinsActiveRunAsFollowUpDB(t *testing.T) {
 	if err != nil || followUp == nil || followUp.Trigger != "path" || followUp.Mode != ModeFile || followUp.Path != automatic.Path {
 		t.Fatalf("complete run: err=%v follow-up=%#v", err, followUp)
 	}
+
+	// The admin run may already have scanned the file when another admin
+	// request arrives, so that request replaces an automatic follow-up.
+	if _, err := repo.Start(ctx, followUp.ID); err != nil {
+		t.Fatalf("start admin run: %v", err)
+	}
+	if owed, _, err := repo.Create(ctx, automatic); err != nil || owed.FollowupTrigger != "realtime_monitor" {
+		t.Fatalf("automatic request on running admin run: err=%v run=%#v", err, owed)
+	}
+	if owed, _, err := repo.Create(ctx, explicit); err != nil || owed.FollowupTrigger != "path" {
+		t.Fatalf("admin request on running admin run: err=%v run=%#v", err, owed)
+	}
 }

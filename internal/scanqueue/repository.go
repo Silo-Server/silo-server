@@ -154,11 +154,11 @@ func (r *Repository) createOrCoalesce(ctx context.Context, db dbExecutor, input 
 // Direct admin triggers are never recorded because queue workers do not claim
 // them; a follow-up carrying one would sit until the stale janitor failed it.
 //
-// An admin's request for a file's exact path is owed as a follow-up on any
-// active run that carries no such trigger yet, accepted or running: only that
-// trigger lets the file scan import a file the library's ignore files exclude
-// (scantrigger.FileScanContext). It replaces an automatic follow-up, which its
-// own scan of the scope covers.
+// An admin's request for a file's exact path is owed as a follow-up unless the
+// run already carries such a trigger as its follow-up, or as its own trigger
+// while it has not started: only that trigger lets the file scan import a file
+// the library's ignore files exclude (scantrigger.FileScanContext). It
+// replaces an automatic follow-up, which its own scan of the scope covers.
 func (r *Repository) coalesceIntoActive(ctx context.Context, db dbExecutor, input CreateInput) (*models.ScanRun, error) {
 	requeue := !isDirectTrigger(input.Trigger)
 	explicitFile := input.Mode == ModeFile && scantrigger.ExplicitPathTrigger(input.Trigger)
@@ -199,7 +199,7 @@ func (r *Repository) coalesceIntoActive(ctx context.Context, db dbExecutor, inpu
 // run's follow-up.
 const oweFollowupSQL = `$5 AND (
 					(status = $6 AND followup_trigger = '')
-					OR ($8 AND NOT trigger = ANY($9) AND NOT followup_trigger = ANY($9))
+					OR ($8 AND NOT followup_trigger = ANY($9) AND (status = $6 OR NOT trigger = ANY($9)))
 				)`
 
 type dbExecutor interface {
