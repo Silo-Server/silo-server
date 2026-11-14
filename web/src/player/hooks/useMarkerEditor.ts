@@ -99,6 +99,16 @@ export function useMarkerEditor({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const originalRef = useRef<MarkerDraft>(EMPTY_DRAFT);
+  const [draftFileId, setDraftFileId] = useState(fileId);
+
+  // A draft belongs to the file it was opened on. A version switch keeps the
+  // player mounted and hands us another file, so close the draft rather than
+  // let Save write it to a file the edits were never made on.
+  if (draftFileId !== fileId) {
+    setDraftFileId(fileId);
+    setEditing(false);
+    setError(null);
+  }
 
   const canEdit = canEditParam && fileId != null && duration > 0;
 
@@ -167,7 +177,7 @@ export function useMarkerEditor({
   const dirty = MARKER_KINDS.some((kind) => !rangesEqual(draft[kind], originalRef.current[kind]));
 
   const save = useCallback(async () => {
-    if (fileId == null || !canEdit) return;
+    if (!editing || fileId == null || !canEdit) return;
     const original = originalRef.current;
     const body: Record<string, { start: number; end: number } | null> = {};
     for (const kind of MARKER_KINDS) {
@@ -200,7 +210,7 @@ export function useMarkerEditor({
     } catch (e) {
       console.error("Marker save callback failed:", e);
     }
-  }, [canEdit, config, draft, fileId, onSaved]);
+  }, [canEdit, config, draft, editing, fileId, onSaved]);
 
   return {
     editing,

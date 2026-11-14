@@ -129,3 +129,30 @@ it("reopens with the host's markers after a save whose realtime echo beat its re
   act(() => result.current.begin());
   expect(result.current.draft).toEqual(fromAnotherSession);
 });
+
+it("closes the draft when the player switches to another file version", async () => {
+  const fetchMock = vi.fn<typeof fetch>(async () => new Response("{}", { status: 200 }));
+  vi.stubGlobal("fetch", fetchMock);
+  const markers: MarkerDraft = {
+    intro: null,
+    recap: null,
+    credits: null,
+    preview: { start: 1440, end: 1461 },
+  };
+  const { result, rerender } = renderHook(
+    ({ fileId }) => useMarkerEditor({ fileId, duration: 1500, markers }),
+    { wrapper, initialProps: { fileId: 142 } },
+  );
+  act(() => result.current.begin());
+  act(() => result.current.setEdge("preview", "start", 0));
+
+  // A version switch keeps the player mounted and hands the hook the new file.
+  rerender({ fileId: 73 });
+  expect(result.current.editing).toBe(false);
+
+  await act(() => result.current.save());
+  expect(fetchMock).not.toHaveBeenCalled();
+
+  rerender({ fileId: 142 });
+  expect(result.current.editing).toBe(false);
+});
