@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"slices"
 	"testing"
@@ -324,6 +325,206 @@ func TestSubmitKeepsFailedTargetWhenEntitlementLookupFails(t *testing.T) {
 	targets, _ := store.ListTargets(context.Background(), "r1")
 	if len(targets) != 2 {
 		t.Fatalf("targets = %+v, want the failed 4K target kept after a failed entitlement lookup", targets)
+	}
+}
+
+// A Retry whose resend errors keeps the failed tier's target through the
+// backoff, so the failure stays visible and the next attempt still resends
+// that tier; a resend that reaches the router replaces it.
+func TestRetryKeepsFailedTargetUntilResendRecorded(t *testing.T) {
+	ctx := context.Background()
+	store := newFakeStore()
+	store.integrations = []Integration{routerInst("router-1")}
+	store.requests["r1"] = &Request{ID: "r1", MediaType: MediaTypeMovie, TMDBID: 550, Status: StatusQueued, Outcome: OutcomeFailed}
+	store.targets = map[string][]Target{"r1": {
+		{ID: 1, RequestID: "r1", IntegrationID: "router-1", Quality: Quality1080p, Status: StatusCompleted},
+		{ID: 2, RequestID: "r1", Quality: Quality2160p, Status: StatusFailed, LastError: "radarr 4k unreachable"},
+	}}
+	store.targetSeq = 2
+	svc, router := newRoutedService(store)
+	router.fulfillErr = errors.New("router unreachable")
+
+	req, err := svc.Retry(ctx, Viewer{UserID: 1, IsAdmin: true}, "r1")
+	if err != nil {
+		t.Fatalf("Retry returned error: %v", err)
+	}
+	if req.Status != StatusApproved || req.Outcome != OutcomeActive {
+		t.Fatalf("request = %s/%s, want approved/active in backoff", req.Status, req.Outcome)
+	}
+	targets, _ := store.ListTargets(ctx, "r1")
+	if len(targets) != 2 {
+		t.Fatalf("targets = %+v, want the failed 4K target kept while the resend backs off", targets)
+	}
+
+	store.requests["r1"].NextSubmitAt = nil
+	router.fulfillErr = nil
+	router.gotQualities = nil
+	req, err = svc.submitApprovedRequest(ctx, *store.requests["r1"], Viewer{}, nil)
+	if err != nil {
+		t.Fatalf("second attempt: %v", err)
+	}
+	if !slices.Equal(router.gotQualities, []Quality{Quality2160p}) {
+		t.Fatalf("resent qualities = %v, want 2160p", router.gotQualities)
+	}
+	if req.Status != StatusQueued || req.Outcome != OutcomeActive {
+		t.Fatalf("request = %s/%s, want queued/active", req.Status, req.Outcome)
+	}
+	targets, _ = store.ListTargets(ctx, "r1")
+	if len(targets) != 2 || !slices.ContainsFunc(targets, func(t Target) bool { return t.Quality == Quality2160p && t.Status == StatusQueued }) {
+		t.Fatalf("targets = %+v, want the completed 1080p and the queued 2160p resend", targets)
+	}
+}
+
+// pollingRouter runs during before each Fulfill call, to interleave another
+// API server's work with a submission's router call.
+type pollingRouter struct {
+	*fakeRouterProvider
+	during func()
+}
+
+func (p *pollingRouter) Fulfill(ctx context.Context, installationID int, capabilityID string, req Request, qualities []Quality, conns []ResolvedRouterConnection) ([]RouterTarget, string, error) {
+	p.during()
+	return p.fakeRouterProvider.Fulfill(ctx, installationID, capabilityID, req, qualities, conns)
+}
+
+// A status poll that read a target as queued before it failed, and lands
+// while a Retry is resending that failed tier, leaves the target and the
+// request alone, so the resend is recorded.
+func TestStalePollDoesNotFailRetryInFlight(t *testing.T) {
+	ctx := context.Background()
+	store := newFakeStore()
+	store.integrations = []Integration{routerInst("router-1")}
+	store.requests["r1"] = &Request{ID: "r1", MediaType: MediaTypeMovie, TMDBID: 550, Status: StatusQueued, Outcome: OutcomeFailed}
+	store.targets = map[string][]Target{"r1": {
+		{ID: 1, RequestID: "r1", IntegrationID: "router-1", Quality: Quality1080p, Status: StatusCompleted},
+		{ID: 2, RequestID: "r1", IntegrationID: "router-1", Quality: Quality2160p, Status: StatusFailed, ExternalID: "4k"},
+	}}
+	store.targetSeq = 2
+	svc := newTestService(store)
+	stale := []Target{store.targets["r1"][0], store.targets["r1"][1]}
+	stale[1].Status = StatusQueued
+	svc.SetRouterProvider(&pollingRouter{fakeRouterProvider: &fakeRouterProvider{}, during: func() {
+		req := *store.requests["r1"]
+		if _, err := svc.applyTargetStatuses(ctx, newCompletionCheck(req, nil), stale,
+			[]RouterTargetStatus{{Quality: Quality2160p, ConnectionID: "router-1", Status: StatusFailed}}); err != nil {
+			t.Errorf("stale poll: %v", err)
+		}
+	}})
+
+	req, err := svc.Retry(ctx, Viewer{UserID: 1, IsAdmin: true}, "r1")
+	if err != nil {
+		t.Fatalf("Retry returned error: %v", err)
+	}
+	if req.Status != StatusQueued || req.Outcome != OutcomeActive {
+		t.Fatalf("request = %s/%s, want queued/active with the resend recorded", req.Status, req.Outcome)
+	}
+}
+
+// RecordSubmission replaces a resent quality's failed target in the same
+// transaction that records the resend, and a write it refuses or rolls back
+// leaves the failure in place.
+func TestRecordSubmissionReplacesFailedTargetDatabase(t *testing.T) {
+	repo, pool := lifecycleTestRepository(t)
+	ctx := t.Context()
+	insertLifecycleRequest(t, repo, "r1", 1, 101, StatusApproved)
+	if _, err := pool.Exec(ctx, `INSERT INTO media_request_targets (request_id, quality, status, last_error)
+		VALUES ('r1', '1080p', 'completed', ''), ('r1', '2160p', 'failed', 'radarr 4k unreachable')`); err != nil {
+		t.Fatal(err)
+	}
+	claimed, ok, err := repo.ClaimSubmission(ctx, "r1", time.Minute)
+	if err != nil || !ok {
+		t.Fatalf("claim: ok=%v err=%v", ok, err)
+	}
+	lease := *claimed.SubmitLeaseUntil
+	statuses := func() map[Quality]Status {
+		t.Helper()
+		targets, err := repo.ListTargets(ctx, "r1")
+		if err != nil {
+			t.Fatal(err)
+		}
+		out := map[Quality]Status{}
+		for _, target := range targets {
+			out[target.Quality] = target.Status
+		}
+		return out
+	}
+	kept := map[Quality]Status{Quality1080p: StatusCompleted, Quality2160p: StatusFailed}
+	resend := []Target{{Quality: Quality2160p, Status: StatusQueued, ExternalID: "4k"}}
+
+	if _, err := repo.RecordSubmission(ctx, "r1", lease.Add(-time.Second), resend, Viewer{}); !errors.Is(err, ErrInvalidState) {
+		t.Fatalf("stale lease: err = %v, want ErrInvalidState", err)
+	}
+	if got := statuses(); !maps.Equal(got, kept) {
+		t.Fatalf("after stale record: targets = %v, want %v", got, kept)
+	}
+	if _, err := repo.RecordSubmission(ctx, "r1", lease, []Target{{Quality: Quality2160p, Status: "bogus"}}, Viewer{}); err == nil {
+		t.Fatal("invalid target recorded, want an error")
+	}
+	if got := statuses(); !maps.Equal(got, kept) {
+		t.Fatalf("after rolled-back record: targets = %v, want %v", got, kept)
+	}
+
+	req, err := repo.RecordSubmission(ctx, "r1", lease, resend, Viewer{})
+	if err != nil {
+		t.Fatalf("record resend: %v", err)
+	}
+	if want := (map[Quality]Status{Quality1080p: StatusCompleted, Quality2160p: StatusQueued}); !maps.Equal(statuses(), want) {
+		t.Fatalf("after resend: targets = %v, want %v", statuses(), want)
+	}
+	if req.Status != StatusQueued || req.Outcome != OutcomeActive {
+		t.Fatalf("request = %s/%s, want queued/active", req.Status, req.Outcome)
+	}
+}
+
+// A status report for a target another pass already finished leaves the
+// target and its request alone.
+func TestUpdateTargetStatusLeavesFinishedTargetDatabase(t *testing.T) {
+	repo, pool := lifecycleTestRepository(t)
+	ctx := t.Context()
+	insertLifecycleRequest(t, repo, "r1", 1, 101, StatusApproved)
+	var failedID int64
+	if err := pool.QueryRow(ctx, `INSERT INTO media_request_targets (request_id, quality, status, last_error)
+		VALUES ('r1', '2160p', 'failed', 'radarr 4k unreachable') RETURNING id`).Scan(&failedID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.UpdateTargetStatus(ctx, failedID, StatusFailed, "", "", "late report", Viewer{}); !errors.Is(err, ErrInvalidState) {
+		t.Fatalf("update a failed target: err = %v, want ErrInvalidState", err)
+	}
+	req, err := repo.GetRequest(ctx, "r1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if req.Status != StatusApproved || req.Outcome != OutcomeActive {
+		t.Fatalf("request = %s/%s, want approved/active left alone", req.Status, req.Outcome)
+	}
+	targets, err := repo.ListTargets(ctx, "r1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(targets) != 1 || targets[0].LastError != "radarr 4k unreachable" {
+		t.Fatalf("targets = %+v, want the failed target unchanged", targets)
+	}
+	if _, err := repo.UpdateTargetStatus(ctx, failedID+1000, StatusFailed, "", "", "", Viewer{}); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("update a missing target: err = %v, want ErrNotFound", err)
+	}
+}
+
+// A retry backing off holds only failed targets until it resends, so it can
+// still be withdrawn; a target that went anywhere keeps it in the pipeline.
+func TestWithdrawIgnoresFailedTargetsDatabase(t *testing.T) {
+	repo, pool := lifecycleTestRepository(t)
+	ctx := t.Context()
+	insertLifecycleRequest(t, repo, "only-failed", 1, 101, StatusApproved)
+	insertLifecycleRequest(t, repo, "delivered", 1, 102, StatusApproved)
+	if _, err := pool.Exec(ctx, `INSERT INTO media_request_targets (request_id, quality, status)
+		VALUES ('only-failed', '1080p', 'failed'), ('delivered', '1080p', 'completed'), ('delivered', '2160p', 'failed')`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.SetOutcome(ctx, "only-failed", guardWithdrawable, OutcomeCancelled, Viewer{UserID: 1}, ""); err != nil {
+		t.Fatalf("cancel a retry holding only failed targets: %v", err)
+	}
+	if _, err := repo.SetOutcome(ctx, "delivered", guardWithdrawable, OutcomeCancelled, Viewer{UserID: 1}, ""); !errors.Is(err, ErrInvalidState) {
+		t.Fatalf("cancel a request that delivered a quality: err = %v, want ErrInvalidState", err)
 	}
 }
 

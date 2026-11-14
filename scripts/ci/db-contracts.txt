@@ -485,6 +485,9 @@
 ./internal/requests TestDeleteFailedRequestDatabase
 ./internal/requests TestMarkAvailableLeavesARetryResendingATierDatabase
 ./internal/requests TestListDownloadingRequestsOrderDatabase
+./internal/requests TestRecordSubmissionReplacesFailedTargetDatabase
+./internal/requests TestWithdrawIgnoresFailedTargetsDatabase
+./internal/requests TestUpdateTargetStatusLeavesFinishedTargetDatabase
 ./internal/downloads TestConcurrentArtifactCreatesCannotBypassQuotaDB
 ./internal/downloads TestParkedDownloadIsNotServedOrPreparedFromItsOldFileDB
 ./internal/downloads TestRegistrationRefusesAFileOfAnotherTitleDB
