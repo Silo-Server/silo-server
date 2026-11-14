@@ -2562,12 +2562,22 @@ func (h *PlaybackHandler) handlePlaybackReport(w http.ResponseWriter, r *http.Re
 			positionSeconds = 0
 		}
 	}
+	// remembered is the report the series' remembered tracks follow; an audio
+	// switch the server refused leaves out its audio.
+	remembered := req
 	// Jellyfin web/mobile clients send AudioStreamIndex on every progress
 	// report, not just on track changes. Restarting ffmpeg on each report
 	// (every ~10s) tears down segments the player is still appending and
 	// causes an hls.js retry loop. Only act when the index actually changes.
 	if selectedAudioStreamIndex, ok := req.AudioStreamIndex.get(); (!stop || !unidentified) && ok && audioSelectionChanged(playSession, req.MediaSourceID, selectedAudioStreamIndex) {
-		playSession = h.applyReportedAudioSelection(r.Context(), playSession, req.MediaSourceID, selectedAudioStreamIndex, positionSeconds)
+		var accepted bool
+		playSession, accepted = h.applyReportedAudioSelection(r.Context(), playSession, req.MediaSourceID, selectedAudioStreamIndex, positionSeconds)
+		if !accepted {
+			remembered.AudioStreamIndex = compatIntValue{}
+		}
+	}
+	if !stop || !unidentified {
+		h.rememberCompatTracks(r.Context(), session, playSession, remembered, stop)
 	}
 	if positionReported && h.sessionMgr != nil {
 		err := h.applyCompatReport(
@@ -3598,8 +3608,9 @@ func (h *PlaybackHandler) preflightCompatAudioSelection(ctx context.Context, pla
 }
 
 // applyReportedAudioSelection switches a playback session to the audio stream a
-// progress report names and returns the session to continue with.
-func (h *PlaybackHandler) applyReportedAudioSelection(ctx context.Context, playSession *PlaybackSession, mediaSourceID string, selectedAudioStreamIndex int, positionSeconds float64) *PlaybackSession {
+// progress report names. It returns the session to continue with and whether
+// the server accepted the switch.
+func (h *PlaybackHandler) applyReportedAudioSelection(ctx context.Context, playSession *PlaybackSession, mediaSourceID string, selectedAudioStreamIndex int, positionSeconds float64) (*PlaybackSession, bool) {
 	audioTrackIndex := 0
 	updatedPlaySession, updatedSource, restarted, selectionErr := h.applyCompatAudioSelection(
 		ctx, playSession, mediaSourceID, selectedAudioStreamIndex, positionSeconds,
@@ -3613,7 +3624,9 @@ func (h *PlaybackHandler) applyReportedAudioSelection(ctx context.Context, playS
 			"audio_stream_index", selectedAudioStreamIndex,
 			"error", selectionErr,
 		)
-	} else if updatedSource != nil {
+		return playSession, false
+	}
+	if updatedSource != nil {
 		if resolvedAudioTrackIndex, ok := compatAudioTrackIndex(*updatedSource); ok {
 			audioTrackIndex = resolvedAudioTrackIndex
 		}
@@ -3625,7 +3638,7 @@ func (h *PlaybackHandler) applyReportedAudioSelection(ctx context.Context, playS
 			"transcode_restarted", restarted,
 		)
 	}
-	return playSession
+	return playSession, true
 }
 
 func (h *PlaybackHandler) applyCompatAudioSelection(

@@ -183,6 +183,10 @@ type Dependencies struct {
 	// KeptSubtitles reads embedded tracks from kept copies or through the
 	// file's index before the subtitle cache demuxes a source; nil demuxes.
 	KeptSubtitles playback.EmbeddedSubtitleSource
+	// AudioPreferences and SubtitlePreferences save the tracks Jellyfin
+	// clients play as the series' remembered tracks (optional).
+	AudioPreferences    AudioPreferenceWriter
+	SubtitlePreferences SubtitlePreferenceWriter
 	// SubtitlePlaySync aligns a subtitle the first time a client is served
 	// it, when it was never synced; nil leaves that to a request.
 	SubtitlePlaySync subtitles.PlaySyncer
