@@ -31,12 +31,13 @@ func scopeLibraryRoot(path string, libraryRoots []string) string {
 // directory between it and the root, has a name the walk skips
 // (SkippedDirName), so a scoped scan never reads what a full scan passes over.
 func scanRootIgnoreRules(path string, libraryRoots []string) ([]ignoreRules, bool, error) {
-	return ancestorIgnoreRules(path, libraryRoots, fspath.ReadDir)
+	return ancestorIgnoreRules(path, libraryRoots, fspath.ReadDir, false)
 }
 
 // ancestorIgnoreRules is scanRootIgnoreRules with the directory listing it
-// reads each ancestor's ignore files from.
-func ancestorIgnoreRules(path string, libraryRoots []string, listDir func(string) ([]fs.DirEntry, error)) ([]ignoreRules, bool, error) {
+// reads each ancestor's ignore files from. file says path is a regular file,
+// so it is matched as one even if it has vanished since the caller saw it.
+func ancestorIgnoreRules(path string, libraryRoots []string, listDir func(string) ([]fs.DirEntry, error), file bool) ([]ignoreRules, bool, error) {
 	path = filepath.Clean(path)
 	root := scopeLibraryRoot(path, libraryRoots)
 	if root == "" || root == path {
@@ -72,9 +73,11 @@ func ancestorIgnoreRules(path string, libraryRoots []string, listDir func(string
 		}
 	}
 	// A scope is a directory unless the filesystem says otherwise.
-	isDir := true
-	if info, err := fspath.Stat(path); err == nil {
-		isDir = info.IsDir()
+	isDir := !file
+	if !file {
+		if info, err := fspath.Stat(path); err == nil {
+			isDir = info.IsDir()
+		}
 	}
 	if isDir && SkippedDirName(filepath.Base(path)) {
 		return rules, true, nil
@@ -88,7 +91,7 @@ func ancestorIgnoreRules(path string, libraryRoots []string, listDir func(string
 // error means an ignore file or directory on the way could not be read, which
 // a walk records as a failure there.
 func FileIgnored(file string, libraryRoots []string) (bool, error) {
-	_, ignored, err := ancestorIgnoreRules(file, libraryRoots, ignoreFileEntries)
+	_, ignored, err := ancestorIgnoreRules(file, libraryRoots, ignoreFileEntries, true)
 	return ignored, err
 }
 
