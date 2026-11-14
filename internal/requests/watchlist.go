@@ -262,13 +262,14 @@ func (s *Service) RequestFromWatchlist(ctx context.Context, viewer Viewer, title
 // RequestQueuedWatchlistTitles applies watchlist requests, in order, to
 // titles watch provider sync keeps on the viewer's watchlist, so a title the
 // quota refused when it was imported is requested on a later run, once the
-// window has room. A title with an open request is followed. A title with a
-// closed request on record, declined, canceled or done, is skipped, so a
-// decline or a withdrawal is never undone. The queue stops at the first title
-// the quota or a block refuses and at a failure, so a later title never takes
-// an earlier one's place; a refusal that names only the title, such as a
-// rating ceiling, moves on to the next. It makes no call while watchlist
-// requests don't apply to the viewer.
+// window has room. It only ever requests: a title with an open request is
+// left alone, since a follow the profile dropped must stay dropped, and a
+// title the profile requested before, whatever became of that request, is
+// skipped, so a decline or a withdrawal is never undone. The queue stops at
+// the first title the quota or a block refuses, so a later title never takes
+// an earlier one's place. A title whose request fails otherwise is skipped
+// until the next run, so one title that keeps failing can't hold up the rest.
+// It makes no call while watchlist requests don't apply to the viewer.
 func (s *Service) RequestQueuedWatchlistTitles(ctx context.Context, viewer Viewer, titles []WatchlistTitle) error {
 	if err := validateViewer(viewer); err != nil || len(titles) == 0 {
 		return err
@@ -287,16 +288,12 @@ func (s *Service) RequestQueuedWatchlistTitles(ctx context.Context, viewer Viewe
 		byType[mediaType] = append(byType[mediaType], titles[i].tmdbIDs()...)
 	}
 	active := map[MediaType]map[int]*Request{}
-	following := map[MediaType]map[int]bool{}
 	requested := map[MediaType]map[int]bool{}
 	for mediaType, ids := range byType {
 		if active[mediaType], err = s.store.ListActiveByTMDB(ctx, mediaType, ids); err != nil {
 			return err
 		}
-		if following[mediaType], err = s.followedTitles(ctx, viewer, mediaType, active[mediaType]); err != nil {
-			return err
-		}
-		if requested[mediaType], err = s.store.ListRequestedTMDB(ctx, mediaType, ids); err != nil {
+		if requested[mediaType], err = s.store.ListRequestedTMDB(ctx, viewer, mediaType, ids); err != nil {
 			return err
 		}
 	}
@@ -304,10 +301,7 @@ func (s *Service) RequestQueuedWatchlistTitles(ctx context.Context, viewer Viewe
 		if byType[title.MediaType] == nil || title.TMDBID <= 0 {
 			continue
 		}
-		if req := title.requestOf(active[title.MediaType]); req != nil {
-			if !following[title.MediaType][req.TMDBID] {
-				s.followFromWatchlist(ctx, viewer, title, req)
-			}
+		if title.requestOf(active[title.MediaType]) != nil {
 			continue
 		}
 		if slices.ContainsFunc(title.tmdbIDs(), func(id int) bool { return requested[title.MediaType][id] }) {
@@ -321,10 +315,8 @@ func (s *Service) RequestQueuedWatchlistTitles(ctx context.Context, viewer Viewe
 		if policy.Blocked || (!policy.Unlimited && policy.Remaining <= 0) {
 			return nil
 		}
-		refusal, err := s.applyWatchlistRequest(ctx, viewer, title)
-		if err != nil {
-			return err
-		}
+		// applyWatchlistRequest logs a failure; the title waits for the next run.
+		refusal, _ := s.applyWatchlistRequest(ctx, viewer, title)
 		if refusal == reasonQuotaExceeded || refusal == reasonBlocked {
 			return nil
 		}
