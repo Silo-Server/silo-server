@@ -221,6 +221,11 @@ describe("item query helpers", () => {
   // 404s, so following depends on the URL, not on that page still being mounted.
   it.each([
     { label: "still on the page that started it", laterURL: undefined, follows: true },
+    {
+      label: "after a skip link changed only the hash",
+      laterURL: "/item/movie-1?libraryId=5#main-content",
+      follows: true,
+    },
     { label: "on another item", laterURL: "/item/movie-2?libraryId=5", follows: false },
     { label: "on another library's page", laterURL: "/item/movie-1?libraryId=6", follows: false },
     { label: "on another page", laterURL: "/search", follows: false },

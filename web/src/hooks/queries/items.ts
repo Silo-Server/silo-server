@@ -104,7 +104,7 @@ interface ItemRefreshJobResult {
 
 interface RefreshItemMetadataContext {
   toastID: string | number;
-  startURL: string; // onReplaced follows only while the browser is still on this URL.
+  startURL: string; // Path and query; onReplaced follows only while the browser is still on them.
 }
 
 export function useRefreshItemMetadata() {
@@ -118,7 +118,7 @@ export function useRefreshItemMetadata() {
           ? t("web.item.toast.refreshRunningComplete")
           : t("web.item.toast.refreshRunningQuick"),
       ),
-      startURL: window.location.href,
+      startURL: window.location.pathname + window.location.search,
     }),
     mutationFn: async ({ item, mode }: RefreshItemMetadataVariables) => {
       const job = adminTaskJobFromV2(
@@ -223,8 +223,8 @@ export function useRefreshItemMetadata() {
       }
 
       // Runs after unmount too. Check the URL, not mount: a page whose old ID 404s must follow.
-      const stillOnStartPage = window.location.href === context?.startURL;
-      if (detailContentID && detailContentID !== item.content_id && stillOnStartPage) {
+      const onStartURL = window.location.pathname + window.location.search === context?.startURL;
+      if (detailContentID && detailContentID !== item.content_id && onStartURL) {
         await onReplaced?.(detailContentID);
       }
     },
