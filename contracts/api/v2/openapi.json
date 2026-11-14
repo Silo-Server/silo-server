@@ -22349,6 +22349,13 @@
             "format": "double",
             "type": "number"
           },
+          "started_at": {
+            "description": "When the run in progress on this process started. Absent while the task is idle.",
+            "format": "date-time",
+            "pattern": "^(?:[1-9][0-9]{3}|0[1-9][0-9]{2}|00[1-9][0-9]|000[2-9])-",
+            "patternDescription": "a non-zero RFC 3339 instant",
+            "type": "string"
+          },
           "state": {
             "enum": [
               "idle",
@@ -25466,7 +25473,7 @@
         "additionalProperties": false,
         "properties": {
           "reset": {
-            "description": "True when the server cleared the installation's binding and its Apple push registrations. False when there was nothing to clear: no ordered record for this device_id, or one already bound to the sent key, whose generation order still applies. After a cleared or absent record, the next registration with that key binds at any positive generation.",
+            "description": "True when the server cleared the installation's binding and its Apple push registrations. False when there was nothing to clear: no ordered record for this device_id, or one already bound to the sent key, whose generation order still applies. After a cleared or absent record, the next registration with that key binds at any positive generation, unless a retirement reached the cleared record first and fenced older generations.",
             "type": "boolean"
           }
         },
@@ -33805,29 +33812,17 @@
         "additionalProperties": false,
         "properties": {
           "active": {
-            "type": [
-              "boolean",
-              "null"
-            ]
+            "type": "boolean"
           },
           "delete_watched": {
-            "type": [
-              "boolean",
-              "null"
-            ]
+            "type": "boolean"
           },
           "max_storage_bytes": {
             "format": "int64",
-            "type": [
-              "integer",
-              "null"
-            ]
+            "type": "integer"
           },
           "mode": {
-            "type": [
-              "string",
-              "null"
-            ]
+            "type": "string"
           },
           "quality": {
             "description": "Quality preset for episodes registered from now on; already-registered downloads keep theirs.",
@@ -33839,20 +33834,14 @@
               "2mbps",
               "1mbps"
             ],
-            "type": [
-              "string",
-              "null"
-            ]
+            "type": "string"
           },
           "season_numbers": {
             "items": {
               "format": "int64",
               "type": "integer"
             },
-            "type": [
-              "array",
-              "null"
-            ]
+            "type": "array"
           }
         },
         "type": "object"
@@ -201434,7 +201423,7 @@
             }
           },
           {
-            "description": "Signed stream reference the plan URL carries; it reconstructs the session after a restart. Omitted for header-authenticated media. Account and viewer authorization are always required.",
+            "description": "Signed stream reference the plan URL carries; it reconstructs the session after a restart. Without an Authorization header or token, it alone authorizes this session's media as the account and profile it names, while the login session that started playback is active; viewer authorization still applies. Omitted for header-authenticated media.",
             "in": "query",
             "name": "st",
             "schema": {
@@ -201648,7 +201637,7 @@
             }
           },
           {
-            "description": "Signed stream reference the plan URL carries; it reconstructs the session after a restart. Omitted for header-authenticated media. Account and viewer authorization are always required.",
+            "description": "Signed stream reference the plan URL carries; it reconstructs the session after a restart. Without an Authorization header or token, it alone authorizes this session's media as the account and profile it names, while the login session that started playback is active; viewer authorization still applies. Omitted for header-authenticated media.",
             "in": "query",
             "name": "st",
             "schema": {
@@ -221659,7 +221648,7 @@
             }
           },
           {
-            "description": "Signed stream reference the plan URL carries; it reconstructs the session after a restart. Omitted for header-authenticated media. Account and viewer authorization are always required.",
+            "description": "Signed stream reference the plan URL carries; it reconstructs the session after a restart. Without an Authorization header or token, it alone authorizes this session's media as the account and profile it names, while the login session that started playback is active; viewer authorization still applies. Omitted for header-authenticated media.",
             "in": "query",
             "name": "st",
             "schema": {
@@ -222247,7 +222236,7 @@
             }
           },
           {
-            "description": "Signed stream reference the plan URL carries; it reconstructs the session after a restart. Omitted for header-authenticated media. Account and viewer authorization are always required.",
+            "description": "Signed stream reference the plan URL carries; it reconstructs the session after a restart. Without an Authorization header or token, it alone authorizes this session's media as the account and profile it names, while the login session that started playback is active; viewer authorization still applies. Omitted for header-authenticated media.",
             "in": "query",
             "name": "st",
             "schema": {
@@ -222539,7 +222528,7 @@
             }
           },
           {
-            "description": "Signed stream reference the plan URL carries; it reconstructs the session after a restart. Omitted for header-authenticated media. Account and viewer authorization are always required.",
+            "description": "Signed stream reference the plan URL carries; it reconstructs the session after a restart. Without an Authorization header or token, it alone authorizes this session's media as the account and profile it names, while the login session that started playback is active; viewer authorization still applies. Omitted for header-authenticated media.",
             "in": "query",
             "name": "st",
             "schema": {
@@ -222819,7 +222808,7 @@
             }
           },
           {
-            "description": "Signed stream reference the plan URL carries; it reconstructs the session after a restart. Omitted for header-authenticated media. Account and viewer authorization are always required.",
+            "description": "Signed stream reference the plan URL carries; it reconstructs the session after a restart. Without an Authorization header or token, it alone authorizes this session's media as the account and profile it names, while the login session that started playback is active; viewer authorization still applies. Omitted for header-authenticated media.",
             "in": "query",
             "name": "st",
             "schema": {

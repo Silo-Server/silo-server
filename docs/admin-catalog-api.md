@@ -395,6 +395,17 @@ update and existing invalidation events.
 A follow-up detail-read failure can occur after persistence; it does not roll
 back the metadata change.
 
+A season stores `title`, `sort_title`, `original_title`, `overview`, `tagline`,
+`air_date`, `season_number` and the `imdb_id`, `tmdb_id` and `tvdb_id` provider
+IDs. An episode stores the same text fields and IDs, plus `episode_number`,
+`runtime`, `rating_imdb` and `rating_tmdb`. Neither stores a
+`content_rating`: the series' rating decides age limits for its episodes. No
+metadata provider writes a season's or episode's sort title, original title or
+tagline, or a season's IDs, so a refresh keeps them without a lock. A refresh
+does write an episode's IDs. Reset to Provider empties them, except that a reset
+in another language than the series' own keeps the sort title, original title
+and tagline, as it keeps the title and overview.
+
 `locked_fields` holds the `MetadataField` numbers a refresh, library scan or
 seed import must keep. A season accepts the name, overview and release-date
 locks, which cover its title, overview and air date; an episode also accepts the
@@ -403,8 +414,8 @@ their artwork locks on the parent series, and their numbers can't lock because
 refreshes find the rows by them. Each row's locks are its own, so clearing a
 series' locks leaves its seasons' and episodes' in place. A correction that
 replaces the show, by an Identify or a corrected NFO, clears the season and
-episode locks and resets the values they held; an Identify that confirms the same
-show keeps them. A locked title or overview
+episode locks, resets the values they held and empties the title details above;
+an Identify that confirms the same show keeps them. A locked title or overview
 shows in every language unless a manual or AI translation of the overview exists.
 
 Both operations preserve item-scoped `metadata_curation` authorization and are

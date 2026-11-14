@@ -22,6 +22,8 @@ import (
 	"testing/synctest"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/playback/keyframes"
+
 	"github.com/Silo-Server/silo-server/internal/embeddedsub"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
@@ -1650,6 +1652,47 @@ func TestCopyRemuxSubtitleRenditionRealFFmpeg(t *testing.T) {
 			}
 		})
 	}
+
+	// A keyframe-planned copy writes no playlist of its own; its cues follow
+	// the assembled segments, from the start and after a restart mid-stream,
+	// whose seek lands on the keyframe before its segment.
+	t.Run("planned", func(t *testing.T) {
+		if _, err := keyframes.Load(base); err != nil {
+			t.Fatal(err)
+		}
+		session, err := StartTranscode(ctx, TranscodeOpts{
+			SessionID: "planned-rendition", InputPath: base, OutputDir: t.TempDir(), FFmpegPath: ffmpeg, HWAccel: HWAccelNone,
+			SourceVideoCodec: "h264", TargetCodecVideo: "copy", TargetCodecAudio: "aac", KeyframePlaylist: true,
+			CopySeekAnchorResolved: true, SegmentDuration: 2, TotalDuration: 48,
+			SubtitleTrackIndex: 0, SubtitleCodec: "subrip", SubtitleRendition: true,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = session.Close() })
+		if session.copyGroups == nil {
+			t.Fatal("no plan for a Matroska source with complete Cues")
+		}
+		<-session.Done()
+		segments := len(session.copyPlan.durations)
+		if served := checkCopyRemuxCues(ctx, t, session, 0, 0, segments, true); !served["Early"] || !served["Middle"] || !served["Late"] {
+			t.Fatalf("planned copy served %v, want every cue", served)
+		}
+
+		const restartAt = 8 // starts at the keyframe at 20 s
+		for n := restartAt; n < segments; n++ {
+			if err := os.Remove(filepath.Join(session.outputDir, plannedSegmentName(n))); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if _, ok, err := session.RestartSegment(ctx, restartAt); err != nil || !ok {
+			t.Fatalf("RestartSegment = %v, %v", ok, err)
+		}
+		<-session.Done()
+		if served := checkCopyRemuxCues(ctx, t, session, 0, session.copyPlan.keyframes[session.copyPlan.firstKey[restartAt]]-session.copyPlan.inputStart, segments, true); !served["Middle"] || !served["Late"] {
+			t.Fatalf("planned restart served %v, want Middle and Late", served)
+		}
+	})
 }
 
 // copyRemuxRealSources writes a 48 s H.264 Matroska source with B-frames and

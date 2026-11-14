@@ -337,7 +337,20 @@ on the 45-second window. A session is never ended within **90 seconds** of its
 another server, however long it has been idle: a player that cannot start a
 plan has no position to report, and this window lets it wait out a startup
 timeout of up to 60 seconds and still ask for the next fallback. The windows are
-fixed. These count as activity:
+fixed.
+
+A paused session counts toward the account's stream limit only while it has
+shown activity within the last **2 minutes** (or is inside the 90-second startup
+window). A client that keeps reporting progress stays inside it, even from a
+background browser tab whose timers are throttled to about once a minute. Past
+that it keeps its 30-minute paused grace, so a client that comes back can still
+resume, but it no longer holds a stream slot: a player closed while paused frees
+its slot within about two minutes. It still counts toward the transcode limit
+until it ends, because its encoder is kept for it. Limits are checked when a
+stream starts: a paused session that reports again after another stream took
+its slot keeps playing, even if the account is then over its stream limit.
+
+These count as activity:
 
 | Activity | Note |
 | --- | --- |
@@ -1811,11 +1824,15 @@ moves with neither: on a default x264 source the lead is two frames. Each
 copy generation therefore also writes its first video packet, unshifted, as
 `framecrc` beside its cue file (`subtitles_N_video.crc`); the shift is the
 first segment's observed start less that packet's time, read with O, and
-recorded with it. The packet's record is read before the segment; after three
+recorded with it. A keyframe-planned restart's seek can land on a keyframe
+before its first segment, so its packet's time is moved forward by the
+planned time between that keyframe and the segment's start. The packet's
+record is read before the segment; after three
 reads that find none, O is taken without a shift. A segment whose cues are not produced yet is waited for
 while FFmpeg runs: as long as its video segment would be (up to 30 s) when the
 running or restarting stream is about to reach it, or is a keyframe-planned
-copy, which runs on to every segment; otherwise a few seconds. It is then
+copy, whose video request either waits for FFmpeg or restarts it at the
+segment; otherwise a few seconds. It is then
 answered as a valid WebVTT document with no cues, which a player keeps, so
 the longer wait is what keeps cues after a slow seek restart. A
 keyframe-planned copy is the exception: like its video segment, a subtitle

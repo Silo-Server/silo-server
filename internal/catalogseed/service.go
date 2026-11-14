@@ -257,12 +257,14 @@ func (s *Service) ImportWithProgress(ctx context.Context, data []byte, opts Impo
 				season.ContentID, season.SeriesID, season.SeasonNumber, season.Title, season.Overview, season.AirDate,
 				season.PosterPath, season.PosterThumbhash, season.MetadataS3Path, season.MetadataEtag,
 				season.CreatedAt, season.UpdatedAt, cloneInts(season.LockedFields),
+				season.SortTitle, season.OriginalTitle, season.Tagline, season.ImdbID, season.TmdbID, season.TvdbID,
 			})
 		}
 		if err := copyInsertBatches(ctx, tx, "seasons",
 			[]string{
 				"content_id", "series_id", "season_number", "title", "overview", "air_date",
 				"poster_path", "poster_thumbhash", "metadata_s3_path", "metadata_etag", "created_at", "updated_at", "locked_fields",
+				"sort_title", "original_title", "tagline", "imdb_id", "tmdb_id", "tvdb_id",
 			},
 			seasonRows, func(processed int) {
 				currentWork += processed
@@ -290,6 +292,7 @@ func (s *Service) ImportWithProgress(ctx context.Context, data []byte, opts Impo
 				episode.Title, episode.Overview, episode.AirDate, episode.Runtime, episode.RatingIMDB, episode.RatingTMDB,
 				episode.StillPath, episode.StillThumbhash, episode.MetadataS3Path, episode.MetadataEtag,
 				episode.CreatedAt, episode.UpdatedAt, cloneInts(episode.LockedFields),
+				episode.SortTitle, episode.OriginalTitle, episode.Tagline,
 			})
 		}
 		if err := copyInsertBatches(ctx, tx, "episodes",
@@ -297,6 +300,7 @@ func (s *Service) ImportWithProgress(ctx context.Context, data []byte, opts Impo
 				"content_id", "series_id", "season_id", "season_number", "episode_number",
 				"title", "overview", "air_date", "runtime", "rating_imdb", "rating_tmdb",
 				"still_path", "still_thumbhash", "metadata_s3_path", "metadata_etag", "created_at", "updated_at", "locked_fields",
+				"sort_title", "original_title", "tagline",
 			},
 			episodeRows, func(processed int) {
 				currentWork += processed
@@ -432,14 +436,16 @@ func (s *Service) ImportWithProgress(ctx context.Context, data []byte, opts Impo
 			season.ContentID, season.SeriesID, season.SeasonNumber, season.Title, season.Overview, season.AirDate,
 			season.PosterPath, season.PosterThumbhash, season.MetadataS3Path, season.MetadataEtag,
 			season.CreatedAt, season.UpdatedAt, cloneInts(season.LockedFields),
+			season.SortTitle, season.OriginalTitle, season.Tagline, season.ImdbID, season.TmdbID, season.TvdbID,
 		})
 	}
 	seasonCounts, err := executeUpsertBatches(ctx, tx, `
 		INSERT INTO seasons (
 			content_id, series_id, season_number, title, overview, air_date,
-			poster_path, poster_thumbhash, metadata_s3_path, metadata_etag, created_at, updated_at, locked_fields
+			poster_path, poster_thumbhash, metadata_s3_path, metadata_etag, created_at, updated_at, locked_fields,
+			sort_title, original_title, tagline, imdb_id, tmdb_id, tvdb_id
 		) VALUES `,
-		seasonRows, 13, nil,
+		seasonRows, 19, nil,
 		` ON CONFLICT (content_id) DO NOTHING`,
 		`
 		ON CONFLICT (content_id) DO UPDATE SET
@@ -453,7 +459,13 @@ func (s *Service) ImportWithProgress(ctx context.Context, data []byte, opts Impo
 			metadata_s3_path = EXCLUDED.metadata_s3_path,
 			metadata_etag = EXCLUDED.metadata_etag,
 			updated_at = EXCLUDED.updated_at,
-			locked_fields = EXCLUDED.locked_fields`,
+			locked_fields = EXCLUDED.locked_fields,
+			sort_title = EXCLUDED.sort_title,
+			original_title = EXCLUDED.original_title,
+			tagline = EXCLUDED.tagline,
+			imdb_id = EXCLUDED.imdb_id,
+			tmdb_id = EXCLUDED.tmdb_id,
+			tvdb_id = EXCLUDED.tvdb_id`,
 		opts.ConflictMode, func(processed int) {
 			currentWork += processed
 			reportProgress("Importing seasons", currentWork, totalWork)
@@ -473,15 +485,17 @@ func (s *Service) ImportWithProgress(ctx context.Context, data []byte, opts Impo
 			episode.Title, episode.Overview, episode.AirDate, episode.Runtime, episode.RatingIMDB, episode.RatingTMDB,
 			episode.StillPath, episode.StillThumbhash, episode.MetadataS3Path, episode.MetadataEtag,
 			episode.CreatedAt, episode.UpdatedAt, cloneInts(episode.LockedFields),
+			episode.SortTitle, episode.OriginalTitle, episode.Tagline,
 		})
 	}
 	episodeCounts, err := executeUpsertBatches(ctx, tx, `
 		INSERT INTO episodes (
 			content_id, series_id, season_id, season_number, episode_number,
 			title, overview, air_date, runtime, rating_imdb, rating_tmdb,
-			still_path, still_thumbhash, metadata_s3_path, metadata_etag, created_at, updated_at, locked_fields
+			still_path, still_thumbhash, metadata_s3_path, metadata_etag, created_at, updated_at, locked_fields,
+			sort_title, original_title, tagline
 		) VALUES `,
-		episodeRows, 18, nil,
+		episodeRows, 21, nil,
 		` ON CONFLICT (content_id) DO NOTHING`,
 		`
 		ON CONFLICT (content_id) DO UPDATE SET
@@ -500,7 +514,10 @@ func (s *Service) ImportWithProgress(ctx context.Context, data []byte, opts Impo
 			metadata_s3_path = EXCLUDED.metadata_s3_path,
 			metadata_etag = EXCLUDED.metadata_etag,
 			updated_at = EXCLUDED.updated_at,
-			locked_fields = EXCLUDED.locked_fields`,
+			locked_fields = EXCLUDED.locked_fields,
+			sort_title = EXCLUDED.sort_title,
+			original_title = EXCLUDED.original_title,
+			tagline = EXCLUDED.tagline`,
 		opts.ConflictMode, func(processed int) {
 			currentWork += processed
 			reportProgress("Importing episodes", currentWork, totalWork)
@@ -687,7 +704,8 @@ func (s *Service) loadSeasons(ctx context.Context, seriesID string) ([]SeasonRec
 	rows, err := s.pool.Query(ctx, `
 		SELECT content_id, series_id, season_number, title, overview,
 			air_date, poster_path, poster_thumbhash, metadata_s3_path, metadata_etag,
-			created_at, updated_at, locked_fields
+			created_at, updated_at, locked_fields,
+			sort_title, original_title, tagline, imdb_id, tmdb_id, tvdb_id
 		FROM seasons
 		WHERE series_id = $1
 		ORDER BY season_number ASC`, seriesID)
@@ -713,6 +731,12 @@ func (s *Service) loadSeasons(ctx context.Context, seriesID string) ([]SeasonRec
 			&record.CreatedAt,
 			&record.UpdatedAt,
 			&record.LockedFields,
+			&record.SortTitle,
+			&record.OriginalTitle,
+			&record.Tagline,
+			&record.ImdbID,
+			&record.TmdbID,
+			&record.TvdbID,
 		); err != nil {
 			return nil, fmt.Errorf("scanning season for %s: %w", seriesID, err)
 		}
@@ -726,7 +750,8 @@ func (s *Service) loadEpisodes(ctx context.Context, seriesID string) ([]EpisodeR
 		SELECT content_id, series_id, season_id, season_number, episode_number,
 			title, overview, air_date, runtime, rating_imdb, rating_tmdb,
 			still_path, still_thumbhash, metadata_s3_path, metadata_etag,
-			created_at, updated_at, locked_fields
+			created_at, updated_at, locked_fields,
+			sort_title, original_title, tagline
 		FROM episodes
 		WHERE series_id = $1
 		ORDER BY season_number ASC, episode_number ASC`, seriesID)
@@ -758,6 +783,9 @@ func (s *Service) loadEpisodes(ctx context.Context, seriesID string) ([]EpisodeR
 			&record.CreatedAt,
 			&record.UpdatedAt,
 			&record.LockedFields,
+			&record.SortTitle,
+			&record.OriginalTitle,
+			&record.Tagline,
 		); err != nil {
 			return nil, fmt.Errorf("scanning episode for %s: %w", seriesID, err)
 		}
