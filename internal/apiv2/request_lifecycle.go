@@ -23,6 +23,7 @@ const opUpdateWatchProviderConnection = "updateWatchProviderConnection"
 // RequestLifecycleService preserves the domain's viewer checks for cancellation.
 type RequestLifecycleService interface {
 	Cancel(context.Context, mediarequests.Viewer, string, string) (*mediarequests.Request, error)
+	RemoveFailed(context.Context, mediarequests.Viewer, string) error
 	GetFeatureStatus(context.Context, mediarequests.Viewer) (mediarequests.FeatureStatus, error)
 	RequestCapabilityAllowed(context.Context, mediarequests.Viewer) (bool, error)
 }
@@ -34,6 +35,9 @@ type RequestCancelInput struct {
 	Body struct {
 		Reason string `json:"reason,omitempty" maxLength:"2000"`
 	}
+}
+type RequestRemoveInput struct {
+	ID ID `path:"id"`
 }
 type FeatureStatus struct {
 	Capability
@@ -55,12 +59,14 @@ type FeatureStatus struct {
 	// and in_watchlist on discovery results and title detail. It follows
 	// RequestsEnabled because the operations answer 409 capability_disabled
 	// while requests are off.
-	WatchlistTitlesSupported bool `json:"watchlist_titles_supported" doc:"Whether the server keeps watchlist entries for titles the library doesn't have: the /watchlist/titles operations, and in_watchlist on discovery results and the title detail. False while requests are disabled, when those operations answer 409 capability_disabled; the entries are kept."`
+	WatchlistTitlesSupported bool `json:"watchlist_titles_supported" doc:"Whether the server keeps watchlist entries for titles the library doesn't have: the /watchlist/titles operations, and in_watchlist on discovery results and the title detail. False while requests are disabled, when those operations answer 409 capability_disabled, and for a profile blocked from requests, when they answer 403; the entries are kept."`
 	// WatchlistRequests is the effective watchlist-requests setting for the
 	// viewer.
 	WatchlistRequests bool `json:"watchlist_requests" doc:"Whether adding a title the library doesn't have to the watchlist also requests it (or follows its request) for this viewer: requests and watchlist requests are on for the server, the profile has not opted out, and the viewer may request."`
 	// DiscoverRowsSupported advertises the admin-defined Discover layout.
 	DiscoverRowsSupported bool `json:"discover_rows_supported" doc:"Whether the Discover page follows an admin-defined layout: listDiscoverSections may hold rows beyond the six built-in ones, in any order, and lists every row in row_order; getDiscoverRow pages any title row."`
+	// RemoveFailedSupported advertises DELETE /requests/{id}.
+	RemoveFailedSupported bool `json:"remove_failed_supported" doc:"Whether removeFailedRequest is available: a requester can delete their own failed request that delivered nothing."`
 }
 type RequestFeatureStatusOutput struct {
 	Status       int
@@ -227,8 +233,8 @@ func registerRequestLifecycle(reg *Registry, requests RequestLifecycleService, p
 				return nil, requestProblem(err)
 			}
 		}
-		return &RequestFeatureStatusOutput{Body: FeatureStatus{Capability: Capability{State: enabledCapabilityState(status.RequestsEnabled), Allowed: &allowed}, RequestsEnabled: status.RequestsEnabled, RatingRestrictionsEnforced: status.RatingRestrictionsEnforced, FollowSupported: true, SeasonRequestsSupported: true, MissingSeasonsRequestable: status.MissingSeasonsRequestable, DownloadProgressSupported: true, DiscoverRowsSupported: true,
-			WatchlistTitlesSupported: status.RequestsEnabled && reg.deps.WatchlistTitles != nil && reg.deps.WatchlistRequests != nil, WatchlistRequests: status.WatchlistRequests && allowed}}, nil
+		return &RequestFeatureStatusOutput{Body: FeatureStatus{Capability: Capability{State: enabledCapabilityState(status.RequestsEnabled), Allowed: &allowed}, RequestsEnabled: status.RequestsEnabled, RatingRestrictionsEnforced: status.RatingRestrictionsEnforced, FollowSupported: true, SeasonRequestsSupported: true, MissingSeasonsRequestable: status.MissingSeasonsRequestable, DownloadProgressSupported: true, DiscoverRowsSupported: true, RemoveFailedSupported: true,
+			WatchlistTitlesSupported: status.RequestsEnabled && !status.ProfileRequestsBlocked && reg.deps.WatchlistTitles != nil && reg.deps.WatchlistRequests != nil, WatchlistRequests: status.WatchlistRequests && allowed}}, nil
 	})
 	Register(reg, op(http.MethodPost, "/requests/{id}/cancel", "cancelRequest", "Cancel an accessible request."), func(ctx context.Context, in *RequestCancelInput) (*MediaRequestOutput, error) {
 		if requests == nil {
@@ -243,6 +249,21 @@ func registerRequestLifecycle(reg *Registry, requests RequestLifecycleService, p
 			return nil, requestProblem(err)
 		}
 		return &MediaRequestOutput{Body: mediaRequestOf(result, viewer)}, nil
+	})
+	remove := op(http.MethodDelete, "/requests/{id}", "removeFailedRequest", "Delete an accessible failed request that delivered nothing. Answers 409 when the request is no longer failed (an admin retried it, or the library completed it) or delivered a copy before failing.")
+	remove.DefaultStatus = http.StatusNoContent
+	Register(reg, remove, func(ctx context.Context, in *RequestRemoveInput) (*struct{}, error) {
+		if requests == nil {
+			return nil, unavailable("requests")
+		}
+		viewer, p := lifecycleViewer(ctx)
+		if p != nil {
+			return nil, p
+		}
+		if err := requests.RemoveFailed(ctx, viewer, string(in.ID)); err != nil {
+			return nil, requestProblem(err)
+		}
+		return nil, nil
 	})
 	scope := func(ctx context.Context) (int, string, error) {
 		if providers == nil {
@@ -358,12 +379,26 @@ func registerRequestLifecycle(reg *Registry, requests RequestLifecycleService, p
 		}
 		return &WatchProviderDeviceAuthOutput{Body: WatchProviderDeviceAuth{ID(s.ID), s.Provider, s.UserCode, s.VerificationURL, s.IntervalSeconds, NewInstant(s.ExpiresAt)}}, nil
 	})
-	Register(reg, op(http.MethodPost, "/watch-providers/{provider}/auth/poll", "pollWatchProviderDeviceAuth", "Poll device authorization. Concurrent polls are not durably coalesced."), func(ctx context.Context, in *WatchProviderPollInput) (*WatchProviderConnectionOutput, error) {
+	poll := op(http.MethodPost, "/watch-providers/{provider}/auth/poll", "pollWatchProviderDeviceAuth", "Poll device authorization. Concurrent polls are not durably coalesced.")
+	poll.Description = "Refusals, by problem type: 409 conflict (the person has not approved the code yet); 410 device_login_expired (the code expired, or was already used and the connection no longer exists); 403 not_permitted (the person declined it on the provider's site). Polling a session that already completed answers the connection again, so retrying after a lost answer is safe."
+	poll.Errors = append(poll.Errors, http.StatusGone)
+	Register(reg, poll, func(ctx context.Context, in *WatchProviderPollInput) (*WatchProviderConnectionOutput, error) {
 		u, p, err := scope(ctx)
 		if err != nil {
 			return nil, err
 		}
 		if _, err = providers.PollDeviceAuth(ctx, u, p, in.Provider, in.Body.AuthSessionID); err != nil {
+			if errors.Is(err, watchsync.ErrAuthSessionCompleted) {
+				// A retry after a lost success answer: report the connection
+				// that poll created rather than fail.
+				out, connErr := connection(ctx, u, p, in.Provider)
+				if connErr != nil {
+					return nil, connErr
+				}
+				if out.Body.Connected {
+					return out, nil
+				}
+			}
 			return nil, watchProviderProblem(err)
 		}
 		return connection(ctx, u, p, in.Provider)
@@ -436,8 +471,19 @@ func watchProviderProblem(err error) *Problem {
 	if errors.Is(err, pgx.ErrNoRows) || errors.Is(err, watchsync.ErrConnectionNotFound) || errors.Is(err, watchsync.ErrAuthSessionMismatch) {
 		return NewProblem(TypeNotFound, "Watch-provider connection or authorization session not found.")
 	}
-	if errors.Is(err, watchsync.ErrAuthSessionCompleted) || errors.Is(err, watchsync.ErrAuthSessionExpired) || watchsync.IsDeviceAuthPending(err) {
-		return NewProblem(TypeConflict, err.Error())
+	// Each device-authorization outcome has its own type, so a client can
+	// say what to do next in the viewer's language.
+	if watchsync.IsDeviceAuthPending(err) {
+		return NewProblem(TypeConflict, "Authorization isn't finished yet. Approve the code on the watch provider's site, then try again.")
+	}
+	if errors.Is(err, watchsync.ErrAuthSessionExpired) {
+		return NewProblem(TypeDeviceLoginExpired, "The authorization code expired. Start connecting again.")
+	}
+	if errors.Is(err, watchsync.ErrAuthSessionCompleted) {
+		return NewProblem(TypeDeviceLoginExpired, "This authorization code was already used. Start connecting again.")
+	}
+	if errors.Is(err, watchsync.ErrDeviceAuthDenied) {
+		return NewProblem(TypeNotPermitted, "The authorization was declined on the watch provider's site.")
 	}
 	if _, ok := errors.AsType[watchsync.ProviderCapabilityError](err); ok {
 		return NewProblem(TypeCapabilityUnsupported, "The watch provider does not support this operation.")

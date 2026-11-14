@@ -40,6 +40,16 @@ func TestCatalogScopedLibraryRequestPreservesGlobalDisabledLibraries(t *testing.
 	}
 }
 
+func TestCatalogSearchAccessPreservesAccountID(t *testing.T) {
+	searchAccess, _, earlyEmpty := catalogSearchAccess(CatalogRequest{}, AccessFilter{UserID: 7})
+	if earlyEmpty {
+		t.Fatal("catalogSearchAccess returned early empty")
+	}
+	if searchAccess.UserID != 7 {
+		t.Fatalf("search account = %d, want 7", searchAccess.UserID)
+	}
+}
+
 func TestValidateCatalogQueryRequest_RejectsPersonalizedSortWithoutProfileScopedSurface(t *testing.T) {
 	req := CatalogRequest{
 		Source: CatalogSourceQuery,
@@ -169,6 +179,38 @@ func TestResolveDirectSearchSource_EarlyEmptyOmitsDiagnostics(t *testing.T) {
 	}
 	if got.Provider != "" {
 		t.Fatalf("early-empty Provider = %q, want empty", got.Provider)
+	}
+}
+
+// TestResolveDirectSearchSource_PassesViewerProfile asserts that search hands
+// the provider the viewer's user and profile, which personalized sorts such as
+// plays need (#3626).
+func TestResolveDirectSearchSource_PassesViewerProfile(t *testing.T) {
+	provider := &fakeSearchProvider{result: &CatalogSearchResult{Provider: SearchProviderPostgres}}
+	resolver := &CatalogResolver{searchProvider: provider}
+
+	_, err := resolver.resolveDirectSearchSource(
+		context.Background(),
+		CatalogRequest{
+			Source:      CatalogSourceQuery,
+			SearchQuery: "dune",
+			Limit:       20,
+			Query:       QueryDefinition{Sort: QuerySort{Field: "plays", Order: "desc"}},
+		},
+		AccessFilter{AllowedLibraryIDs: []int{7}, UserID: 42, ProfileID: "profile-1"},
+	)
+	if err != nil {
+		t.Fatalf("resolveDirectSearchSource error: %v", err)
+	}
+	if len(provider.requests) != 1 {
+		t.Fatalf("provider requests = %d, want 1", len(provider.requests))
+	}
+	access := provider.requests[0].Access
+	if access.UserID != 42 || access.ProfileID != "profile-1" {
+		t.Fatalf("search access user/profile = %d/%q, want 42/%q", access.UserID, access.ProfileID, "profile-1")
+	}
+	if !slices.Equal(access.AllowedLibraryIDs, []int{7}) {
+		t.Fatalf("search allowed libraries = %v, want [7]", access.AllowedLibraryIDs)
 	}
 }
 

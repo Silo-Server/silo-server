@@ -1,3 +1,4 @@
+import { useT } from "@/i18n";
 import type { PickerCard } from "@/lib/homeRows/catalog";
 import { variantFamily } from "@/lib/homeRows/variants";
 
@@ -11,6 +12,7 @@ export function VariantChips({
   card: PickerCard;
   onPick: (presetKey: string) => void;
 }) {
+  const t = useT();
   const options = variantFamily(card.type)?.options ?? [];
   if (options.length < 2) return null;
   const hidden = options.length - MAX_CHIPS;
@@ -20,16 +22,19 @@ export function VariantChips({
         <button
           key={option.presetKey}
           type="button"
-          aria-label={`${card.label}, ${option.chip}`}
+          aria-label={t("web.home.addRow.chips.label", {
+            kind: card.label,
+            variant: t(option.chip),
+          })}
           onClick={() => onPick(option.presetKey)}
           className="border-border bg-background/60 text-foreground/80 hover:bg-secondary hover:text-foreground focus-visible:ring-ring/50 inline-flex h-[26px] items-center rounded-full border px-2.5 text-[13px] font-medium whitespace-nowrap outline-none focus-visible:ring-[3px]"
         >
-          {option.chip}
+          {t(option.chip)}
         </button>
       ))}
       {hidden > 0 ? (
         <span className="border-border text-muted-foreground inline-flex h-[26px] items-center rounded-full border border-dashed px-2.5 text-[13px] font-medium">
-          +{hidden}
+          {t("web.home.addRow.chips.more", { count: hidden })}
         </span>
       ) : null}
     </span>

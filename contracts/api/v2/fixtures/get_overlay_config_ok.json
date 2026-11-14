@@ -1,5 +1,7 @@
 {
   "enabled": true,
   "quick_actions_enabled": false,
-  "quick_actions_default": "both"
+  "quick_actions_default": "both",
+  "images": [],
+  "image_uploads_available": false
 }

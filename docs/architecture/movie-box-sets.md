@@ -1,8 +1,10 @@
 # Movie box sets
 
-A library with `box_sets_enabled` browses the movies TMDB lists in one
-collection as one box set card. This note records the invariants; the wire
-contract is in [catalog-api.md](../catalog-api.md#movie-box-sets).
+A library with `box_sets_enabled` gathers the movies TMDB lists in one
+collection into a box set, which search, the box set page, and a movie page's
+row show. Library browse does not group movies into box sets; each movie keeps
+its own card. This note records the invariants; the wire contract is in
+[catalog-api.md](../catalog-api.md#movie-box-sets).
 
 ## Data
 
@@ -30,7 +32,7 @@ contract is in [catalog-api.md](../catalog-api.md#movie-box-sets).
 ## Sync
 
 The `sync_movie_box_sets` task (`internal/boxsets`) is the only code that calls
-TMDB for box sets; browsing and search read stored rows only. It looks up
+TMDB for box sets; the box set reads use stored rows only. It looks up
 movies of box set libraries that were never looked up, were rematched, or were
 last looked up 30 days ago, then fetches collections that are new or were
 fetched 7 days ago, then caches collection artwork still served from TMDB
@@ -39,27 +41,16 @@ as item artwork. It runs at startup, hourly, when a library turns box sets
 on, and 20 seconds after the node that matched a movie publishes its catalog
 change. A run stops after 25 failed TMDB calls; the next run resumes.
 
-## Grouping
+## Which box sets a viewer sees
 
-A box set browse first lists the library's box sets as the viewer sees them
-(`CatalogResolver.BoxSetGroups`): collections with at least
-`box_set_min_movies` movies in that library that pass the viewer's access
-filter. The browse filters do not change which collections qualify. The
-qualifying collection IDs then join the work-grouping plan
-(`previewPagePlan.groupedByWork`), which keeps the first row of each group in
-the requested order before paging, so totals, cursors, seeks, and the letter
-index all count the grouped list. The API layer replaces each representative
-movie with its box set card.
-
-The qualifying collections are recomputed on every page, not carried in the
-browse cursor. A sync that stores or drops a collection while a viewer is
-scrolling can group earlier and later pages differently until the browse is
-reloaded; the window is the sync's run, which is short after the first one.
+`CatalogResolver.BoxSetGroups` lists a library's box sets as the viewer sees
+them: collections with at least `box_set_min_movies` movies in that library
+that pass the viewer's access filter. The box set page and search read it.
 
 ## Movie page
 
 `CatalogResolver.MovieBoxSet` picks the box set a movie's page shows: the
 movie's current collection in the first of its libraries with box sets on,
-using the same viewer filter and minimum as browse. The movie itself must be
+using the same viewer filter and minimum as `BoxSetGroups`. The movie itself must be
 one of the members the viewer sees, so a movie outside the viewer's access
 never reveals its box set.

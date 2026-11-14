@@ -2,17 +2,11 @@ package handlers
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
-	"net/http"
 	"slices"
 	"strconv"
 	"strings"
 
-	"github.com/go-chi/chi/v5"
-
-	"github.com/Silo-Server/silo-server/internal/access"
-	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/metadata/translation"
 	"github.com/Silo-Server/silo-server/internal/models"
@@ -96,73 +90,6 @@ func NewMetadataAIHandler(service *translation.Service) *MetadataAIHandler {
 	return &MetadataAIHandler{service: service}
 }
 
-// HandleStatus reports whether metadata AI translation is available and the
-// viewer-facing on-view mode, so the metadata editor and detail pages can
-// show or hide their entry points.
-// GET /api/v1/metadata/ai/status
-func (h *MetadataAIHandler) HandleStatus(w http.ResponseWriter, r *http.Request) {
-	view := h.Status(r.Context())
-	writeJSON(w, http.StatusOK, map[string]any{
-		metadataAIStatusEnabledKey: view.Enabled,
-		"on_view":                  view.OnView,
-	})
-}
-
-// WriteMetadataAIDisabledStatus answers the status probe with a clean negative
-// when no metadata AI handler is wired.
-func WriteMetadataAIDisabledStatus(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]any{metadataAIStatusEnabledKey: false, "on_view": metadataAIOnViewOff})
-}
-
-type translateDescriptionRequest struct {
-	// TargetLanguage echoes the detail response's pending_translation_language.
-	TargetLanguage string `json:"target_language"`
-}
-
-// HandleTranslateOnView is the viewer-facing on-demand description
-// translation: any profile that can access the item may request its
-// descriptions in the language the detail response reported missing. Gated by
-// metadata_ai.on_view; duplicate viewers collapse onto one job and recently
-// failed targets are not retried (cooldown in the service).
-// POST /api/v1/items/{id}/translate-description
-func (h *MetadataAIHandler) HandleTranslateOnView(w http.ResponseWriter, r *http.Request) {
-	contentID := chi.URLParam(r, "id")
-	var req translateDescriptionRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid_request", "Invalid request body")
-		return
-	}
-	if req.TargetLanguage == "" {
-		writeError(w, http.StatusBadRequest, "bad_request", "target_language is required")
-		return
-	}
-
-	scope, ok := access.GetScope(r.Context())
-	if !ok || h.ItemAccess == nil {
-		writeError(w, http.StatusForbidden, "forbidden", "Viewer access is required")
-		return
-	}
-	filter := catalog.AccessFilter{
-		AllowedLibraryIDs:         scope.AllowedLibraryIDs,
-		DisabledLibraryIDs:        scope.DisabledLibraryIDs,
-		MaturityLimits:            scope.MaturityLimits,
-		ProfilePreferredLanguage:  scope.PreferredMetadataLanguage,
-		MetadataLanguageOverrides: scope.MetadataLanguageOverrides,
-		UserID:                    scope.UserID,
-		ProfileID:                 scope.ProfileID,
-	}
-	var requestedBy *int
-	if userID := apimw.GetUserID(r.Context()); userID != 0 {
-		requestedBy = &userID
-	}
-	job, err := h.TranslateOnView(r.Context(), filter, contentID, req.TargetLanguage, requestedBy)
-	if err != nil {
-		writeAPIError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusAccepted, map[string]any{"job": job})
-}
-
 type metadataAIItemLibraries interface {
 	LibraryIDsForItem(ctx context.Context, contentID string) ([]int, error)
 }
@@ -183,20 +110,30 @@ func (h *MetadataAIHandler) viewerPendingLanguage(ctx context.Context, target me
 	if matches(pending) || h.ItemLibraries == nil {
 		return pending, nil
 	}
-	// An episode page in a library is validated against the episode's own
-	// memberships, which can differ from its series'; seasons and items use
-	// the item the request authorizes.
-	membershipID := target.accessContentID
-	if target.episode != nil {
-		membershipID = target.episode.ContentID
+	// An episode page opens under the episode's own libraries, and on the
+	// native reads (catalog.AccessFilter.SeriesLibraryCoversEpisodes) also under
+	// its series'; seasons and items use the item the request authorizes.
+	var libraryIDs []int
+	if target.episode == nil || filter.SeriesLibraryCoversEpisodes {
+		libraryIDs, err = h.ItemLibraries.LibraryIDsForItem(ctx, target.accessContentID)
+		if err != nil {
+			return "", err
+		}
 	}
-	libraryIDs, err := h.ItemLibraries.LibraryIDsForItem(ctx, membershipID)
-	if err != nil {
-		return "", err
+	if target.episode != nil {
+		episodeLibraryIDs, err := h.ItemLibraries.LibraryIDsForItem(ctx, target.episode.ContentID)
+		if err != nil {
+			return "", err
+		}
+		for _, libraryID := range episodeLibraryIDs {
+			if !slices.Contains(libraryIDs, libraryID) {
+				libraryIDs = append(libraryIDs, libraryID)
+			}
+		}
 	}
 	// No membership means no library-scoped page resolves the target (an
-	// episode without files, say). LibraryScope would read an empty list as
-	// the viewer's whole allowlist, so stop here.
+	// episode whose series is in no library either, say). LibraryScope would
+	// read an empty list as the viewer's whole allowlist, so stop here.
 	if len(libraryIDs) == 0 {
 		return pending, nil
 	}
@@ -287,51 +224,4 @@ type TranslateMetadataRequest struct {
 	TargetLanguage  string `json:"target_language"`
 	IncludeChildren *bool  `json:"include_children"` // default true
 	Force           bool   `json:"force"`
-}
-
-// HandleTranslate enqueues a translation job for an item.
-// POST /api/v1/admin/items/{id}/metadata-translation
-func (h *MetadataAIHandler) HandleTranslate(w http.ResponseWriter, r *http.Request) {
-	contentID := chi.URLParam(r, "id")
-	var req TranslateMetadataRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid_request", "Invalid request body")
-		return
-	}
-	job, err := h.TranslateAdminMetadata(r.Context(), contentID, req, apimw.GetUserID(r.Context()))
-	if err != nil {
-		writeAPIError(w, err)
-		return
-	}
-
-	writeJSON(w, http.StatusAccepted, map[string]any{"job": job})
-}
-
-// HandleListJobs lists recent translation jobs for an item; the metadata
-// editor polls this for progress.
-// GET /api/v1/admin/items/{id}/metadata-translation/jobs
-func (h *MetadataAIHandler) HandleListJobs(w http.ResponseWriter, r *http.Request) {
-	jobs, err := h.ListAdminMetadataTranslationJobs(r.Context(), chi.URLParam(r, "id"))
-	if err != nil {
-		writeAPIError(w, err)
-		return
-	}
-
-	writeJSON(w, http.StatusOK, map[string]any{"jobs": jobs})
-}
-
-// HandleCancelJob cancels a job belonging to the item in the URL.
-// POST /api/v1/admin/items/{id}/metadata-translation/jobs/{job_id}/cancel
-func (h *MetadataAIHandler) HandleCancelJob(w http.ResponseWriter, r *http.Request) {
-	jobID, err := strconv.ParseInt(chi.URLParam(r, "job_id"), 10, 64)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid_id", "Invalid job ID")
-		return
-	}
-	if err := h.CancelAdminMetadataTranslation(r.Context(), chi.URLParam(r, "id"), jobID); err != nil {
-		writeAPIError(w, err)
-		return
-	}
-
-	w.WriteHeader(http.StatusNoContent)
 }

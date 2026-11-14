@@ -16,6 +16,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"time"
 
 	"github.com/google/uuid"
@@ -1029,7 +1030,7 @@ func (p *ImageCacheProcessor) processLocalOne(ctx context.Context, job *models.M
 	// through an opened library root. A failure there first asks whether this
 	// server has the file's storage mounted at all; when it does not, the job
 	// waits for one that does (deferLocalJobWithoutStorage).
-	data, err := readConfinedLocalImage(localPath, roots)
+	data, err := readLocalImageOfTitle(ctx, p.libraryRoots, rootsContentID, localPath, roots)
 	if err != nil {
 		if p.deferLocalJobWithoutStorage(ctx, job, localPath, roots) {
 			return imageCacheProcessResult{outcome: imageCacheOutcomeDeferred}
@@ -1109,6 +1110,9 @@ func readConfinedLocalImage(localPath string, roots []string) ([]byte, error) {
 	if errors.Is(err, fs.ErrNotExist) {
 		return nil, fmt.Errorf("local image missing: %s", localPath)
 	}
+	if errors.Is(err, errLocalImageOutsideRoots) {
+		return nil, fmt.Errorf("%w: %w", localImageOutsideRootsError(localPath), errLocalImageEscapedRoots)
+	}
 	if err != nil {
 		return nil, localImageOutsideRootsError(localPath)
 	}
@@ -1129,6 +1133,257 @@ func readConfinedLocalImage(localPath string, roots []string) ([]byte, error) {
 		return nil, localImageOutsideRootsError(localPath)
 	}
 	return readLocalImageFile(localPath, root, rel)
+}
+
+// errLocalImageEscapedRoots marks an outside-roots failure for a path that is
+// inside a library root as written but leads out of every root through a
+// symlink, such as a per-title folder linked into another tree.
+var errLocalImageEscapedRoots = errors.New("a symlink leads out of the library roots")
+
+// catalogedFileLister lists the files the scanner cataloged for a title.
+// The image cache processor's LibraryRootResolver may implement it to let
+// local artwork through a title folder that is a symlink out of the library;
+// *catalog.FolderRepository does.
+type catalogedFileLister interface {
+	// CatalogedFilesUnder returns up to limit present media file paths of
+	// contentID (a title, or a series for its episodes' files) under dir
+	// that sort after after, in path order, as the scanner recorded them.
+	CatalogedFilesUnder(ctx context.Context, contentID, dir, after string, limit int) ([]string, error)
+}
+
+// catalogedFilePageSize is how many cataloged files are listed at a time
+// while looking for one that vouches for a folder. Usually the first one is
+// enough.
+const catalogedFilePageSize = 32
+
+// readLocalImageOfTitle reads a local image of contentID under roots with
+// readConfinedLocalImage. When the image's folder leads out of the roots
+// through a symlink and resolver can list cataloged files, it gets one more
+// chance through readCatalogedLocalImage.
+func readLocalImageOfTitle(ctx context.Context, resolver LibraryRootResolver, contentID, localPath string, roots []string) ([]byte, error) {
+	data, err := readConfinedLocalImage(localPath, roots)
+	if !errors.Is(err, errLocalImageEscapedRoots) {
+		return data, err
+	}
+	lister, ok := resolver.(catalogedFileLister)
+	if !ok || contentID == "" {
+		return nil, err
+	}
+	return readCatalogedLocalImage(ctx, lister, contentID, localPath, roots, err)
+}
+
+// readCatalogedLocalImage reads a local image whose folder leads out of the
+// library roots through a symlink, as a per-title folder linked into another
+// tree does. The scanner follows those links and catalogs the videos behind
+// them, so the image is trusted when a folder it sits in, below the library
+// root, also holds a file the scanner cataloged for the same title. That
+// folder is opened as a root, the cataloged file must be the same file
+// reached through it, and the image is read through it with the usual leaf
+// checks. Anything else keeps the outside-roots failure, escaped, unless
+// checking ran into an I/O error, which is reported as a read failure so the
+// job is retried as usual rather than parked.
+func readCatalogedLocalImage(ctx context.Context, lister catalogedFileLister, contentID, localPath string, roots []string, escaped error) ([]byte, error) {
+	libraryRoot := ""
+	for _, root := range roots {
+		root = filepath.Clean(strings.TrimSpace(root))
+		if localImagePathWithinRoots(localPath, []string{root}) && len(root) > len(libraryRoot) {
+			libraryRoot = root
+		}
+	}
+	if libraryRoot == "" {
+		return nil, escaped
+	}
+	// ioErr is the first failure that says nothing about where the image is,
+	// such as a mount that stopped answering.
+	var ioErr error
+	noteIOErr := func(err error) {
+		if localFileIOError(err) {
+			ioErr = cmp.Or(ioErr, err)
+		}
+	}
+	untrusted := func() error {
+		if ioErr != nil {
+			return fmt.Errorf("local image read failed: checking cataloged files: %w", ioErr)
+		}
+		return escaped
+	}
+	resolvedImageDir, err := fspath.EvalSymlinks(filepath.Dir(localPath))
+	if err != nil {
+		noteIOErr(err)
+		return nil, untrusted()
+	}
+	for dir := filepath.Dir(localPath); dir != libraryRoot && localImagePathWithinRoots(dir, []string{libraryRoot}); dir = filepath.Dir(dir) {
+		// Only a folder the image physically sits in can vouch for it: one
+		// above the link that leads out holds the image only through that
+		// link.
+		resolvedDir, err := fspath.EvalSymlinks(dir)
+		if err != nil {
+			noteIOErr(err)
+			continue
+		}
+		if !localImagePathWithinRoots(resolvedImageDir, []string{resolvedDir}) {
+			continue
+		}
+		// Every cataloged file is tried, a page at a time, so the answer
+		// does not depend on which files happen to be listed first.
+		for after := ""; ; {
+			files, err := lister.CatalogedFilesUnder(ctx, contentID, dir, after, catalogedFilePageSize)
+			if err != nil {
+				return nil, fmt.Errorf("local image read failed: listing cataloged files: %w", err)
+			}
+			if len(files) == 0 {
+				break
+			}
+			data, trusted, err := readLocalImageBesideCatalogedFile(localPath, dir, resolvedDir, resolvedImageDir, files)
+			if trusted {
+				return data, err
+			}
+			noteIOErr(err)
+			if len(files) < catalogedFilePageSize {
+				break
+			}
+			after = files[len(files)-1]
+		}
+	}
+	return nil, untrusted()
+}
+
+// localFileIOError reports whether err is the operating system failing a
+// call on storage, such as a share that stopped answering, rather than a path
+// that is missing, forbidden, refused for leaving an opened folder, or no
+// longer shaped as cataloged (a file where a folder was, a link loop, a name
+// too long).
+func localFileIOError(err error) bool {
+	var errno syscall.Errno
+	if !errors.As(err, &errno) || errors.Is(err, fs.ErrNotExist) || errors.Is(err, fs.ErrPermission) {
+		return false
+	}
+	switch errno {
+	case syscall.ENOTDIR, syscall.ELOOP, syscall.ENAMETOOLONG:
+		return false
+	}
+	return true
+}
+
+// readLocalImageBesideCatalogedFile opens dir, which resolves to
+// resolvedDir, as a root and reads localPath through it when one of files,
+// cataloged paths under dir, is the same file inside the root as at its
+// cataloged path. The image's path inside the root comes from its resolved
+// path, as in readConfinedLocalImage, so a link inside the folder that stays
+// in it, absolute or not, doesn't stop the read. trusted reports whether a
+// file vouched for the folder; when none did, err is a storage failure met
+// while checking.
+func readLocalImageBesideCatalogedFile(localPath, dir, resolvedDir, resolvedImageDir string, files []string) (data []byte, trusted bool, err error) {
+	imageRel, err := filepath.Rel(resolvedDir, filepath.Join(resolvedImageDir, filepath.Base(localPath)))
+	if err != nil || !filepath.IsLocal(imageRel) {
+		return nil, false, nil
+	}
+	root, err := os.OpenRoot(fspath.Decode(dir))
+	if err != nil {
+		return nil, false, err
+	}
+	defer func() { _ = root.Close() }()
+	var ioErr error
+	noteIOErr := func(err error) {
+		if localFileIOError(err) {
+			ioErr = cmp.Or(ioErr, err)
+		}
+	}
+	for _, file := range files {
+		rel, err := filepath.Rel(dir, file)
+		if err != nil || !filepath.IsLocal(rel) {
+			continue
+		}
+		// A cataloged file behind a link out of the folder is no proof, and
+		// the link's target, which may be a stalled mount, is never touched.
+		rel, inFolder, err := pathInsideFolder(resolvedDir, rel)
+		if !inFolder {
+			noteIOErr(err)
+			continue
+		}
+		inside, err := root.Stat(fspath.Decode(rel))
+		if err != nil {
+			noteIOErr(err)
+			continue
+		}
+		cataloged, err := fspath.Stat(file)
+		if err != nil {
+			noteIOErr(err)
+			continue
+		}
+		if !fspath.SameFile(inside, cataloged) {
+			continue
+		}
+		data, err := readLocalImageFile(localPath, root, imageRel)
+		return data, true, err
+	}
+	return nil, false, ioErr
+}
+
+// maxFolderLinks bounds how many symlinks pathInsideFolder follows, so a
+// loop ends.
+const maxFolderLinks = 40
+
+// pathInsideFolder resolves rel, a path under the folder at resolvedDir (a
+// path with no symlinks), one component at a time without leaving the folder.
+// A symlink is read, not followed: its target, absolute or relative, must lie
+// inside the folder, and resolution carries on from there. A ".." steps back
+// from the link-free path resolved so far, as the kernel does after following
+// a link, and never above the folder. It returns the link-free path relative
+// to resolvedDir, or inFolder false when a link leads out of the folder, a
+// component is missing, or links loop; err is a failure met on the way. Only
+// paths inside the folder are ever looked at.
+func pathInsideFolder(resolvedDir, rel string) (resolved string, inFolder bool, err error) {
+	sep := string(filepath.Separator)
+	pending := strings.Split(filepath.Clean(rel), sep)
+	links := 0
+	for len(pending) > 0 {
+		part := pending[0]
+		pending = pending[1:]
+		if part == "" || part == "." {
+			continue
+		}
+		if part == ".." {
+			if resolved == "" {
+				return "", false, nil
+			}
+			if resolved = filepath.Dir(resolved); resolved == "." {
+				resolved = ""
+			}
+			continue
+		}
+		next := filepath.Join(resolved, part)
+		full := filepath.Join(resolvedDir, next)
+		info, err := fspath.Lstat(full)
+		if err != nil {
+			return "", false, err
+		}
+		if info.Mode()&fs.ModeSymlink == 0 {
+			resolved = next
+			continue
+		}
+		if links++; links > maxFolderLinks {
+			return "", false, nil
+		}
+		target, err := fspath.Readlink(full)
+		if err != nil {
+			return "", false, err
+		}
+		// A relative target carries on from the link's folder, resolved so
+		// far; an absolute one from the folder's root, which it must name
+		// as written. Its components are not cleaned, so a ".." after a link
+		// in it applies to where that link leads.
+		if filepath.IsAbs(target) {
+			prefix := strings.TrimSuffix(resolvedDir, sep) + sep
+			if target != resolvedDir && !strings.HasPrefix(target, prefix) {
+				return "", false, nil
+			}
+			target = strings.TrimPrefix(strings.TrimPrefix(target, resolvedDir), sep)
+			resolved = ""
+		}
+		pending = append(strings.Split(target, sep), pending...)
+	}
+	return resolved, resolved != "", nil
 }
 
 // openedLibraryRoot is a library root opened before the image path is

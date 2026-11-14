@@ -131,6 +131,57 @@ func TestArtworkReconcileBulkResetVerifiesUploadsDB(t *testing.T) {
 	}
 }
 
+// Catalog reads trust the publication manifest, so the verify sweep checks every
+// size a revision published, not only the stored key. A provider poster missing
+// one size is reset to its source like a missing stored key. Uploaded and
+// sidecar posters keep their intact originals and are reported: clearing an
+// upload loses it, and a refresh does not restore a locked sidecar.
+func TestArtworkReconcileFindsMissingPublishedSizeDB(t *testing.T) {
+	pool := storedArtworkReleaseTestPool(t)
+	ctx := t.Context()
+	const (
+		provider = "tmdb/movies/9/poster/original.r1.webp"
+		uploaded = "local/movies/up/1a2b3c4d/poster/original.r1.webp"
+		sidecar  = "local/movies/side/5e6f7a8b/poster/original.r1.webp"
+	)
+	if _, err := pool.Exec(ctx, `INSERT INTO media_items (content_id, type, locked_fields, poster_path, poster_source_path) VALUES
+		('provider', 'movie', '{}', $1, 'tmdb://poster/p.jpg'),
+		('uploaded', 'movie', '{10}', $2, 'upload://sha256:aa'),
+		('sidecar', 'movie', '{}', $3, 'file:///m/poster.jpg?v=1-1')`, provider, uploaded, sidecar); err != nil {
+		t.Fatal(err)
+	}
+	for _, original := range []string{provider, uploaded, sidecar} {
+		if _, err := pool.Exec(ctx, `INSERT INTO artwork_revision_gc_candidates (original_path, image_type, object_keys, published_keys, not_before)
+			VALUES ($1, 'poster', $2, $2, NOW())`, original, []string{original, variantKey(original, "w500")}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var surface artworkSweepSurface
+	for _, s := range artworkSweepSurfaces() {
+		if s.name == "item posters" {
+			surface = s
+		}
+	}
+	// Every original survives; every w500 size was deleted outside Silo.
+	r := &ArtworkCacheReconciler{pool: pool, s3: presentObjects{provider: true, uploaded: true, sidecar: true}}
+	var stats ArtworkReconcileStats
+	if err := r.sweepSurface(ctx, surface, &stats, func(int) {}); err != nil {
+		t.Fatal(err)
+	}
+	if stats.Checked != 3 || stats.Requeued != 1 || stats.Cleared != 0 || stats.Unrecovered != 2 || stats.Verified != 0 {
+		t.Fatalf("stats = %#v, want the provider poster reset and the other two kept and reported", stats)
+	}
+	for id, path := range map[string]string{"provider": "tmdb://poster/p.jpg", "uploaded": uploaded, "sidecar": sidecar} {
+		var got string
+		if err := pool.QueryRow(ctx, `SELECT poster_path FROM media_items WHERE content_id = $1`, id).Scan(&got); err != nil {
+			t.Fatal(err)
+		}
+		if got != path {
+			t.Errorf("%s poster_path = %q, want %q", id, got, path)
+		}
+	}
+}
+
 // A collection created from a built-in template can keep its bundled poster
 // path, such as "/images/collection-templates/<id>.jpg". It is not a storage
 // key: checking it failed every verify sweep with an invalid key, and a bulk

@@ -123,9 +123,15 @@ func TestMediaSourceDTOEmitsStableAudioV2HLSRoute(t *testing.T) {
 	// can select the surround track without requesting PlaybackInfo again.
 	source.SelectedAudioStreamIndex = intPtr(len(version.VideoTracks))
 
-	dto := (&PlaybackHandler{}).mediaSourceDTO("item-1", "play-1", "token-1", source)
-	if !strings.HasPrefix(dto.TranscodingURL, "/Videos/item-1/audio-v2/master.m3u8?") {
-		t.Fatalf("surround-capable HLS URL = %q, want audio-v2 route", dto.TranscodingURL)
+	dto := (&PlaybackHandler{}).mediaSourceDTO("item-1", "play-1", source)
+	if dto.TranscodingURL != "" {
+		t.Fatalf("direct-play source TranscodingURL = %q, want none so clients take the direct URL", dto.TranscodingURL)
+	}
+	transcodeOnly := source
+	transcodeOnly.SupportsDirectPlay, transcodeOnly.SupportsDirectStream = false, false
+	hlsDTO := (&PlaybackHandler{}).mediaSourceDTO("item-1", "play-1", transcodeOnly)
+	if !strings.HasPrefix(hlsDTO.TranscodingURL, "/Videos/item-1/audio-v2/master.m3u8?") {
+		t.Fatalf("surround-capable HLS URL = %q, want audio-v2 route", hlsDTO.TranscodingURL)
 	}
 	if !strings.HasPrefix(dto.DirectStreamURL, "/Videos/item-1/stream?static=true") {
 		t.Fatalf("static direct URL = %q, want legacy direct-file route", dto.DirectStreamURL)
@@ -142,7 +148,8 @@ func TestMediaSourceDTOEmitsStableAudioV2HLSRoute(t *testing.T) {
 		stereoVersion.AudioTracks[index].Channels = 2
 	}
 	stereo := testCompatSource(NewResourceIDCodec(), stereoVersion)
-	stereoDTO := (&PlaybackHandler{}).mediaSourceDTO("item-1", "play-2", "token-1", stereo)
+	stereo.SupportsDirectPlay, stereo.SupportsDirectStream = false, false
+	stereoDTO := (&PlaybackHandler{}).mediaSourceDTO("item-1", "play-2", stereo)
 	if !strings.HasPrefix(stereoDTO.TranscodingURL, "/Videos/item-1/master.m3u8?") {
 		t.Fatalf("all-stereo HLS URL = %q, want legacy route", stereoDTO.TranscodingURL)
 	}
@@ -151,11 +158,12 @@ func TestMediaSourceDTOEmitsStableAudioV2HLSRoute(t *testing.T) {
 func TestMediaSourceDTOEmitsDedicatedMPEGTSRemuxRoute(t *testing.T) {
 	for _, transcodeAudio := range []bool{false, true} {
 		source := testCompatSource(NewResourceIDCodec(), testCompatVersion())
+		source.SupportsDirectPlay, source.SupportsDirectStream = false, false
 		source.HLSRemux = true
 		source.HLSRemuxMPEGTS = true
 		source.TranscodeAudio = transcodeAudio
 
-		dto := (&PlaybackHandler{}).mediaSourceDTO("item-1", "play-1", "token-1", source)
+		dto := (&PlaybackHandler{}).mediaSourceDTO("item-1", "play-1", source)
 		if !strings.HasPrefix(dto.TranscodingURL, "/Videos/item-1/remux-ts-v1/master.m3u8?") {
 			t.Fatalf("TranscodeAudio=%v MPEG-TS URL = %q, want dedicated remux-ts-v1 route", transcodeAudio, dto.TranscodingURL)
 		}
@@ -165,11 +173,12 @@ func TestMediaSourceDTOEmitsDedicatedMPEGTSRemuxRoute(t *testing.T) {
 func TestMediaSourceDTOEmitsDedicatedDolbyVisionStripRoute(t *testing.T) {
 	for _, transcodeAudio := range []bool{false, true} {
 		source := testCompatSource(NewResourceIDCodec(), testCompatVersion())
+		source.SupportsDirectPlay, source.SupportsDirectStream = false, false
 		source.HLSRemux = true
 		source.TranscodeAudio = transcodeAudio
 		source.DVStripToHDR10 = true
 
-		dto := (&PlaybackHandler{}).mediaSourceDTO("item-1", "play-1", "token-1", source)
+		dto := (&PlaybackHandler{}).mediaSourceDTO("item-1", "play-1", source)
 		if !strings.HasPrefix(dto.TranscodingURL, "/Videos/item-1/remux-dv-v1/master.m3u8?") {
 			t.Fatalf("TranscodeAudio=%v strip URL = %q, want dedicated remux-dv-v1 route", transcodeAudio, dto.TranscodingURL)
 		}

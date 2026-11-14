@@ -109,7 +109,7 @@ func TestSweptEndRecordsTheAcceptedPosition(t *testing.T) {
 	admin := &liveRowAdminStore{live: &live}
 	f.handler.AdminStore = admin
 	f.handler.fileResolver = testPlaybackFileResolver{file: &models.MediaFile{ID: 100, ContentID: "movie-1", Duration: 3600}}
-	f.handler.endLifecycleFromFacts(context.Background(), f.session.ID, PlaybackEndExpired)
+	f.handler.endLifecycleFromFacts(context.Background(), nil, f.session.ID, PlaybackEndExpired, time.Now())
 	if len(admin.history) != 1 || admin.history[0].WatchedSeconds != 100 {
 		t.Fatalf("admin history = %+v, want one row at the accepted 100", admin.history)
 	}

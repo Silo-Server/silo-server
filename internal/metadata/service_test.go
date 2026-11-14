@@ -34,7 +34,8 @@ type fakeItemRepo struct {
 	items map[string]*models.MediaItem
 
 	// replacedPeople records each ReplacePeople call by content ID.
-	replacedPeople map[string][]models.ItemPerson
+	replacedPeople   map[string][]models.ItemPerson
+	replacePeopleErr error
 
 	// Trailer refresh cooldown state (metadataTrailerRefreshRepo).
 	trailersRequestedAt    map[string]time.Time
@@ -184,6 +185,9 @@ func (r *fakeItemRepo) IncrementRefreshFailure(_ context.Context, contentID stri
 func (r *fakeItemRepo) ReplacePeople(_ context.Context, contentID string, people []models.ItemPerson) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if r.replacePeopleErr != nil {
+		return r.replacePeopleErr
+	}
 	if r.replacedPeople == nil {
 		r.replacedPeople = make(map[string][]models.ItemPerson)
 	}
@@ -525,6 +529,25 @@ func (r *fakeRefreshDebtRepo) DeleteTargetDebt(_ context.Context, targetType, co
 	return nil
 }
 
+func (r *fakeRefreshDebtRepo) RestartTerminalEpisodeDebt(_ context.Context, targetType, contentID string, attemptedBefore, nextRefreshAt time.Time) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	debt, ok := r.debts[fakeRefreshDebtKey(targetType, contentID)]
+	if !ok {
+		return nil
+	}
+	debt.ReasonMask |= RefreshDebtReasonEpisodeIncomplete
+	now := time.Now()
+	if debt.AttemptCount < refreshDebtEpisodeTerminalAttempts || debt.LastAttemptAt == nil || !debt.LastAttemptAt.Before(attemptedBefore) ||
+		!debt.NextRefreshAt.After(now) || (debt.LeaseExpiresAt != nil && !debt.LeaseExpiresAt.Before(now)) {
+		return nil
+	}
+	debt.Priority = max(debt.Priority, refreshDebtPriority(RefreshDebtReasonEpisodeIncomplete))
+	debt.AttemptCount = 0
+	debt.NextRefreshAt = nextRefreshAt
+	return nil
+}
+
 // fakeFileRepo implements FileContentUpdater with an in-memory store.
 type fakeFileRepo struct {
 	mu                  sync.Mutex
@@ -555,7 +578,17 @@ func newFakeFileRepo() *fakeFileRepo {
 	}
 }
 
-func (r *fakeFileRepo) UpdateContentID(_ context.Context, fileID int, contentID string) error {
+func (r *fakeFileRepo) UnlinkContentID(_ context.Context, fileID int, contentID string) (bool, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.contentIDs[fileID] != contentID {
+		return false, nil
+	}
+	r.contentIDs[fileID] = ""
+	return true, nil
+}
+
+func (r *fakeFileRepo) UpdateContentID(_ context.Context, fileID int, _ string, contentID string) error {
 	r.mu.Lock()
 	if err := r.updateErrors[fileID]; err != nil {
 		r.mu.Unlock()

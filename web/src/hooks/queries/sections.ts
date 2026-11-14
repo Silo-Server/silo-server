@@ -7,6 +7,7 @@ import {
   type QueryClient,
 } from "@tanstack/react-query";
 import { toast } from "sonner";
+import { t } from "@/i18n";
 import type { ProfileRequestContextSnapshot } from "@/api/client";
 import { V2ProblemError } from "@/api/v2/request";
 import {
@@ -224,7 +225,17 @@ export function fetchLibrarySectionItems(
   }).then((section) => ({ section: sectionFromV2(section) }));
 }
 
-export function useLibraryLayout(libraryId: number) {
+/**
+ * A library's Recommended layout. Two components observe it: LibraryPage
+ * starts the read while it waits for the saved page state and refetches a
+ * failed read when the tab is shown again, so LibraryRecommended passes
+ * `retryOnMount: false` and shows a failure that landed before it mounted
+ * instead of starting a second deadline.
+ */
+export function useLibraryLayout(
+  libraryId: number,
+  options?: { enabled?: boolean; retryOnMount?: boolean },
+) {
   return useQuery({
     queryKey: sectionKeys.libraryLayout(libraryId),
     queryFn: ({ signal }): Promise<LibraryLayoutResponse> =>
@@ -232,7 +243,8 @@ export function useLibraryLayout(libraryId: number) {
         (layout) => ({ sections: layout.sections }),
       ),
     staleTime: 5 * 60 * 1000,
-    enabled: libraryId > 0,
+    enabled: libraryId > 0 && (options?.enabled ?? true),
+    retryOnMount: options?.retryOnMount,
   });
 }
 
@@ -303,15 +315,30 @@ export function useDeleteSections() {
     },
     onSuccess: async ({ requested, deleted, failed, firstError }) => {
       if (failed === 0) {
-        toast.success(`Deleted ${deleted} section${deleted === 1 ? "" : "s"}`);
+        toast.success(
+          t("web.admin.common.sections.deleted", { count: deleted, count_text: deleted }),
+        );
       } else if (deleted > 0) {
-        toast.warning(`Deleted ${deleted} of ${requested} sections`, {
-          description: firstError,
-        });
+        toast.warning(
+          t("web.admin.common.sections.partiallyDeleted", {
+            count: requested,
+            count_text: requested,
+            deleted: deleted,
+          }),
+          {
+            description: firstError,
+          },
+        );
       } else {
-        toast.error(`Failed to delete ${failed} section${failed === 1 ? "" : "s"}`, {
-          description: firstError,
-        });
+        toast.error(
+          t("web.admin.common.sections.deleteFailed", {
+            count: failed,
+            count_text: failed,
+          }),
+          {
+            description: firstError,
+          },
+        );
       }
       await Promise.all([
         qc.invalidateQueries({ queryKey: sectionKeys.all }),

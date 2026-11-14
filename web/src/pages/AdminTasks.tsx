@@ -20,23 +20,26 @@ import { describeTrigger } from "@/lib/taskTrigger";
 import { formatRelativeTime } from "@/lib/date";
 import { formatDateTime as formatPreferredDateTime } from "@/lib/datetime";
 import { clampTaskProgress, formatTaskProgress } from "@/lib/taskProgress";
+import { useServerText, useT, type MessageKey, type Translate } from "@/i18n";
+import { taskText } from "@/lib/taskText";
 
 const CATEGORY_ORDER: TaskCategory[] = ["library", "metadata", "system"];
 const RUN_BUTTON_MIN_VISIBLE_MS = 1_000;
 
-const CATEGORY_LABELS: Record<TaskCategory, string> = {
-  library: "Library",
-  metadata: "Metadata",
-  system: "System",
+const CATEGORY_LABELS: Record<TaskCategory, MessageKey> = {
+  library: "web.admin.tasks.category.library",
+  metadata: "web.admin.tasks.category.metadata",
+  system: "web.admin.tasks.category.system",
 };
 
-const REFRESH_REASON_LABELS: Record<string, string> = {
-  episode_incomplete: "Episode incomplete",
-  stale_provider_id: "Stale provider ID",
-  refresh_failure: "Refresh failure",
-  core_metadata_incomplete: "Core metadata incomplete",
-  trailers_requested: "Trailers requested",
-  provider_artwork: "Provider artwork",
+const REFRESH_REASON_LABELS: Record<string, MessageKey> = {
+  episode_incomplete: "web.admin.tasks.refreshReason.episodeIncomplete",
+  stale_provider_id: "web.admin.tasks.refreshReason.staleProviderId",
+  provider_id_incomplete: "web.admin.tasks.refreshReason.providerIdIncomplete",
+  refresh_failure: "web.admin.tasks.refreshReason.refreshFailure",
+  core_metadata_incomplete: "web.admin.tasks.refreshReason.coreMetadataIncomplete",
+  trailers_requested: "web.admin.tasks.refreshReason.trailersRequested",
+  provider_artwork: "web.admin.tasks.refreshReason.providerArtwork",
 };
 
 function useTaskClock() {
@@ -56,17 +59,27 @@ function useTaskClock() {
   return now;
 }
 
-function formatDuration(ms: number): string {
-  if (ms <= 0) return "<1ms";
-  if (ms < 1000) return `${ms}ms`;
+function formatDuration(t: Translate, ms: number): string {
+  if (ms <= 0) return t("web.admin.tasks.duration.underOneMs");
+  if (ms < 1000) return t("web.admin.tasks.duration.milliseconds", { ms: ms });
   const totalSeconds = Math.floor(ms / 1000);
-  if (totalSeconds < 60) return `${totalSeconds}s`;
+  if (totalSeconds < 60) {
+    return t("web.admin.tasks.duration.seconds", { seconds: totalSeconds });
+  }
   const minutes = Math.floor(totalSeconds / 60);
   const remainSec = totalSeconds - minutes * 60;
-  if (minutes < 60) return `${minutes}m ${remainSec}s`;
+  if (minutes < 60) {
+    return t("web.admin.tasks.duration.minutesSeconds", {
+      minutes: minutes,
+      seconds: remainSec,
+    });
+  }
   const hours = Math.floor(minutes / 60);
   const remainMinutes = minutes % 60;
-  return `${hours}h ${remainMinutes}m`;
+  return t("web.admin.tasks.duration.hoursMinutes", {
+    hours: hours,
+    minutes: remainMinutes,
+  });
 }
 
 function describeSchedule(triggers: TriggerConfig[]): string | null {
@@ -78,20 +91,31 @@ function isOverdue(dateStr: string, now: number): boolean {
   return new Date(dateStr).getTime() < now;
 }
 
-function formatNextRun(dateStr: string, now: number): string {
+function formatNextRun(t: Translate, dateStr: string, now: number): string {
   const diff = new Date(dateStr).getTime() - now;
-  if (diff < 0) return "overdue";
+  if (diff < 0) return t("web.admin.tasks.nextRun.overdue");
   const minutes = Math.floor(diff / 60_000);
-  if (minutes < 60) return `in ${minutes}m`;
+  if (minutes < 60) return t("web.admin.tasks.nextRun.inMinutes", { minutes: minutes });
   const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `in ${hours}h`;
+  if (hours < 24) return t("web.admin.tasks.nextRun.inHours", { hours: hours });
   const days = Math.floor(hours / 24);
-  return `in ${days}d`;
+  return t("web.admin.tasks.nextRun.inDays", { days: days });
+}
+
+const EM_DASH = "—";
+
+function lastRunTime(completedAt: string | undefined): string {
+  return formatRelativeTime(completedAt, { rounding: "floor" }) ?? EM_DASH;
 }
 
 function formatDateTime(dateStr?: string | null): string {
-  if (!dateStr) return "—";
+  if (!dateStr) return EM_DASH;
   return formatPreferredDateTime(dateStr);
+}
+
+function refreshReasonLabel(t: Translate, reason: string): string {
+  const key = REFRESH_REASON_LABELS[reason] as MessageKey | undefined;
+  return key ? t(key) : reason;
 }
 
 function delay(ms: number) {
@@ -99,29 +123,36 @@ function delay(ms: number) {
 }
 
 function RefreshMetadataSummary({ metrics }: { metrics: MetadataRefreshMetrics }) {
+  const t = useT();
   const topReasons = metrics.reason_counts.filter((entry) => entry.count > 0);
 
   return (
     <div className="bg-muted/20 mt-3 rounded-xl p-3">
       <div className="grid gap-2 text-xs sm:grid-cols-5">
         <div>
-          <div className="text-muted-foreground">Refresh Backlog</div>
+          <div className="text-muted-foreground">{t("web.admin.tasks.refreshMetrics.backlog")}</div>
           <div className="text-foreground font-medium">{metrics.total}</div>
         </div>
         <div>
-          <div className="text-muted-foreground">Due for Refresh</div>
+          <div className="text-muted-foreground">{t("web.admin.tasks.refreshMetrics.due")}</div>
           <div className="text-foreground font-medium">{metrics.due}</div>
         </div>
         <div>
-          <div className="text-muted-foreground">Processing</div>
+          <div className="text-muted-foreground">
+            {t("web.admin.tasks.refreshMetrics.processing")}
+          </div>
           <div className="text-foreground font-medium">{metrics.leased}</div>
         </div>
         <div>
-          <div className="text-muted-foreground">Waiting Since</div>
+          <div className="text-muted-foreground">
+            {t("web.admin.tasks.refreshMetrics.waitingSince")}
+          </div>
           <div className="text-foreground font-medium">{formatDateTime(metrics.oldest_due_at)}</div>
         </div>
         <div>
-          <div className="text-muted-foreground">Next Claim Timeout</div>
+          <div className="text-muted-foreground">
+            {t("web.admin.tasks.refreshMetrics.nextClaimTimeout")}
+          </div>
           <div className="text-foreground font-medium">
             {formatDateTime(metrics.oldest_lease_expires_at)}
           </div>
@@ -132,7 +163,10 @@ function RefreshMetadataSummary({ metrics }: { metrics: MetadataRefreshMetrics }
         <div className="mt-3 flex flex-wrap gap-2">
           {topReasons.map((entry) => (
             <Badge key={entry.reason} variant="secondary">
-              {REFRESH_REASON_LABELS[entry.reason] ?? entry.reason}: {entry.count}
+              {t("web.admin.tasks.refreshMetrics.reasonCount", {
+                reason: refreshReasonLabel(t, entry.reason),
+                count: entry.count,
+              })}
             </Badge>
           ))}
         </div>
@@ -150,6 +184,8 @@ function TaskRow({
   refreshMetrics?: MetadataRefreshMetrics;
   now: number;
 }) {
+  const t = useT();
+  const serverText = useServerText();
   const runTask = useRunTask();
   const cancelTask = useCancelTask();
   const runFeedbackStartedAtRef = useRef<number | null>(null);
@@ -184,7 +220,7 @@ function TaskRow({
           to={`/admin/tasks/${task.key}`}
           className="text-foreground hover:text-primary text-sm font-medium transition-colors"
         >
-          {task.name}
+          {taskText(serverText, task, "name")}
         </Link>
 
         <div className="text-muted-foreground mt-0.5 text-xs">
@@ -192,29 +228,39 @@ function TaskRow({
             <>
               {describeSchedule(task.triggers) && <span>{describeSchedule(task.triggers)}</span>}
               {!describeSchedule(task.triggers) && (
-                <span>{task.manual_only ? "Manual only" : "No schedule"}</span>
+                <span>
+                  {task.manual_only
+                    ? t("web.admin.tasks.row.manualOnly")
+                    : t("web.admin.tasks.row.noSchedule")}
+                </span>
               )}
               {task.last_execution && (
-                <span className="ml-2">
-                  · Last run:{" "}
-                  {formatRelativeTime(task.last_execution.completed_at, { rounding: "floor" }) ??
-                    "—"}
+                <span className="ms-2">
                   {typeof task.last_execution.duration_ms === "number"
-                    ? ` · Duration: ${formatDuration(task.last_execution.duration_ms)}`
-                    : ""}
+                    ? t("web.admin.tasks.row.lastRunWithDuration", {
+                        time: lastRunTime(task.last_execution.completed_at),
+                        duration: formatDuration(t, task.last_execution.duration_ms),
+                      })
+                    : t("web.admin.tasks.row.lastRun", {
+                        time: lastRunTime(task.last_execution.completed_at),
+                      })}
                 </span>
               )}
               {!task.last_execution && !describeSchedule(task.triggers) && (
-                <span> · Never run</span>
+                <span> {t("web.admin.tasks.row.neverRun")}</span>
               )}
               {task.next_run_at &&
                 (isOverdue(task.next_run_at, now) ? (
-                  <span className="text-warning ml-2 inline-flex items-center gap-1 font-medium">
+                  <span className="text-warning ms-2 inline-flex items-center gap-1 font-medium">
                     <AlertTriangle className="h-3 w-3" aria-hidden="true" />
-                    Overdue
+                    {t("web.admin.tasks.row.overdue")}
                   </span>
                 ) : (
-                  <span className="ml-2">· Next: {formatNextRun(task.next_run_at, now)}</span>
+                  <span className="ms-2">
+                    {t("web.admin.tasks.row.next", {
+                      next: formatNextRun(t, task.next_run_at, now),
+                    })}
+                  </span>
                 ))}
             </>
           )}
@@ -232,7 +278,9 @@ function TaskRow({
             </div>
             <div className="text-muted-foreground flex items-center justify-between gap-3 text-xs">
               <p className="min-w-0 truncate">
-                {task.state === "cancelling" ? "Cancelling..." : "Running"}
+                {task.state === "cancelling"
+                  ? t("web.admin.tasks.progress.cancelling")
+                  : t("web.admin.tasks.progress.running")}
               </p>
               {task.state !== "cancelling" && task.progress > 0 && (
                 <span className="shrink-0 font-medium tabular-nums">
@@ -264,17 +312,21 @@ function TaskRow({
           )}
           onClick={() => cancelTask.mutate(task.key)}
           disabled={!isRunning || cancelTask.isPending || task.state === "cancelling"}
-          title={isRunning ? "Stop this task run" : undefined}
+          title={isRunning ? t("web.admin.tasks.row.stopTitle") : undefined}
           aria-busy={isShowingRunFeedback}
         >
           {task.state === "cancelling" ? (
-            <Square className="mr-1.5 h-3.5 w-3.5 fill-current" />
+            <Square className="me-1.5 h-3.5 w-3.5 fill-current" />
           ) : isRunning ? (
-            <Square className="mr-1.5 h-3.5 w-3.5 fill-current" />
+            <Square className="me-1.5 h-3.5 w-3.5 fill-current" />
           ) : (
-            <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+            <Loader2 className="me-1.5 h-3.5 w-3.5 animate-spin" />
           )}
-          {task.state === "cancelling" ? "Stopping..." : isRunning ? "Stop" : "Starting..."}
+          {task.state === "cancelling"
+            ? t("web.admin.tasks.row.stopping")
+            : isRunning
+              ? t("web.admin.tasks.row.stop")
+              : t("web.admin.tasks.row.starting")}
         </Button>
       ) : (
         <Button
@@ -286,8 +338,8 @@ function TaskRow({
           }}
           disabled={runTask.isPending}
         >
-          <Play className="mr-1.5 h-3.5 w-3.5" />
-          Run Now
+          <Play className="me-1.5 h-3.5 w-3.5" />
+          {t("web.admin.tasks.actions.runNow")}
         </Button>
       )}
     </div>
@@ -295,34 +347,37 @@ function TaskRow({
 }
 
 export default function AdminTasks() {
+  const t = useT();
   useEventChannel("tasks");
   const now = useTaskClock();
   const { data: tasks, isLoading } = useTasks();
   const { data: refreshMetrics } = useTaskMetrics("refresh_metadata");
 
-  const scheduledTasks = (tasks ?? []).filter((t) => !t.manual_only);
+  const scheduledTasks = (tasks ?? []).filter((task) => !task.manual_only);
   const grouped: { id: string; label: string; description?: string; tasks: TaskInfo[] }[] = [
     ...CATEGORY_ORDER.map((cat) => ({
       id: cat,
-      label: CATEGORY_LABELS[cat],
-      tasks: scheduledTasks.filter((t) => t.category === cat),
+      label: t(CATEGORY_LABELS[cat]),
+      tasks: scheduledTasks.filter((task) => task.category === cat),
     })),
     {
       id: "on-demand",
-      label: "On demand",
-      description: "These never run on a schedule. Use them for repairs and one-off maintenance.",
-      tasks: (tasks ?? []).filter((t) => t.manual_only),
+      label: t("web.admin.tasks.onDemand.label"),
+      description: t("web.admin.tasks.onDemand.description"),
+      tasks: (tasks ?? []).filter((task) => task.manual_only),
     },
   ].filter((g) => g.tasks.length > 0);
 
   return (
     <div className="space-y-6 pb-4 sm:pb-6">
       <PageHeader
-        title="Scheduled Tasks"
-        subtitle="View and manage background tasks. You can trigger tasks manually or adjust their schedules, including whether a task runs on server startup. Internal workers that need no attention run automatically and are not listed."
+        title={t("web.admin.tasks.page.title")}
+        subtitle={t("web.admin.tasks.page.subtitle")}
       />
 
-      {isLoading && <p className="text-muted-foreground text-sm">Loading tasks...</p>}
+      {isLoading && (
+        <p className="text-muted-foreground text-sm">{t("web.admin.tasks.page.loading")}</p>
+      )}
 
       {grouped.map((group) => (
         <div key={group.id} className="space-y-3">

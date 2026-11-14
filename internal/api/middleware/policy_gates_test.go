@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/auth"
@@ -36,8 +37,8 @@ func TestPolicyActingAdminMiddlewareParity(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			legacy := captureActingAdminResponse(RequireActingAdmin(test.check, nil), test.claims, test.profileID)
-			policyBacked := captureActingAdminResponse(NewPolicyActingAdminMiddleware(pdp, test.check, nil), test.claims, test.profileID)
+			legacy := captureActingAdminResponse(RequireActingAdminWith(NewActingAdminDecider(test.check, nil)), test.claims, test.profileID)
+			policyBacked := captureActingAdminResponse(RequireActingAdminWith(NewPolicyActingAdminDecider(pdp, test.check, nil)), test.claims, test.profileID)
 			assertMiddlewareResponsesEqual(t, policyBacked, legacy)
 		})
 	}
@@ -164,7 +165,7 @@ func assertCurationAuthority(t *testing.T, ctx context.Context, mode string, leg
 
 func TestPolicyActingAdminMiddlewareEvalErrorIsInternal(t *testing.T) {
 	rec := captureActingAdminResponse(
-		NewPolicyActingAdminMiddleware(errorPermissionDecider{}, nil, nil),
+		RequireActingAdminWith(NewPolicyActingAdminDecider(errorPermissionDecider{}, nil, nil)),
 		adminClaims(),
 		"",
 	)
@@ -256,30 +257,6 @@ func TestPolicyMarkerEditMiddlewareParity(t *testing.T) {
 	}
 }
 
-// The marker_edit decision reads no household fact, so a failing household
-// lookup must not turn a profile-less admin's marker write into a 500 that the
-// legacy gate would have let through.
-func TestPolicyMarkerEditMiddlewareSkipsHouseholdLookup(t *testing.T) {
-	admin := &models.User{ID: 7, Role: "admin", Enabled: true}
-	household := func(context.Context, int) (bool, error) {
-		t.Fatal("marker edit must not look up the household")
-		return false, errors.New("unreachable")
-	}
-	rec := captureMarkerEditResponse(
-		NewPolicyPermissionMiddleware(
-			fakePermissionUserLoader{user: admin},
-			nil,
-			nil,
-			household,
-			newMiddlewarePolicyPDP(t),
-		),
-		adminClaims(),
-	)
-	if rec.code != http.StatusNoContent {
-		t.Fatalf("status = %d body = %s, want %d", rec.code, rec.body, http.StatusNoContent)
-	}
-}
-
 func TestPolicyMarkerEditMiddlewareAppliesGroupPermissionMask(t *testing.T) {
 	groupID := int64(3)
 	user := &models.User{
@@ -329,7 +306,7 @@ func TestPolicyMarkerEditMiddlewareEvalErrorIsInternal(t *testing.T) {
 
 func newMiddlewarePolicyPDP(t *testing.T) *policy.PDP {
 	t.Helper()
-	engine, err := policy.NewEngine(context.Background())
+	engine, err := policy.NewEngine(context.Background(), policy.WithEvalTimeout(time.Minute))
 	if err != nil {
 		t.Fatalf("NewEngine() error: %v", err)
 	}

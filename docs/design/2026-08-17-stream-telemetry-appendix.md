@@ -21,7 +21,7 @@ Found by building, measuring or testing — not by review.
 | **P0a's first sendfile fix** (`79493512`) | It restored `ReadFrom` forwarding but kept the nested limiter, so it did not actually restore sendfile. A byte-exact body and a correct `Range` status prove HTTP correctness, not sendfile. |
 | **ORing `StartedAtDegraded` across every publisher** | A relay-only contribution carries a publisher-local first-seen stamp, so correlating a transcode node degraded an otherwise authoritative viewer-edge session. Start-time authority is viewer-edge-owned (§2.5). Caught by adversarial plan review before it shipped. |
 | **"401/403/404 create no logical activity" as a blanket rule** | Conflicts with why manifest routes are enrolled at all: the compat master manifest finishes authorization, *then* starts a transcode, and can still 404. The boundary is authorization success, not response status (§4.2). |
-| **A family flag defaulting to every family** | Would widen instrumentation across two more live byte paths inside the API process on upgrade alone. The default must be what already shipped; "set the variable before deploying" is a runbook, not a safe default (§6). |
+| **A family flag defaulting to every family** | Would widen instrumentation across two more live byte paths inside the API process on upgrade alone. The default must be what already shipped; "set the variable before deploying" is a runbook, not a safe default (§6). Reversed by owner decision after the P0 soak: an unset variable now observes every family, and naming it can only narrow or switch off observation (§6, P0b). |
 | **Folding "field absent on one side" into a parity mismatch** | Legacy rows carry no value for several compared fields, so `agrees` would be permanently false and the flag useless. Absence is its own axis, counted in `fields_absent` (§6/P0d). Settled by writing the test and finding the assertion wrong, not the code. |
 | **Asserting byte totals from `Registry.Snapshot()`** | `BytesAccepted` there is `lastSweptBytes`; only `Sweep()` folds live observations. Five tests, one full remediation round (§2.2). |
 | **Repointing admin reads onto telemetry in P0d** | The payload is a join onto ~50 display fields telemetry is not canonical for, and parity has never been observed. The design orders comparison before repoint for a reason (§6/P0d). |
@@ -132,16 +132,11 @@ spine of the design: **an in-flight HTTP transfer is not a playback session.**
 
 This design supersedes an earlier attempt — 26 commits, ~12.5k lines, based on a commit
 70 branches behind `main`. That branch was **mined, not rebased**, and still exists as
-`origin/feat/sauron-async-enforcer` (`d01b5de3`). Its four planning documents were
+`feat/sauron-async-enforcer` (`d01b5de3`). Its four planning documents were
 copied verbatim into this branch for context and have been removed again now that their
-conclusions are recorded here. They remain readable at:
-
-| Document | Path on `origin/feat/sauron-async-enforcer` |
-|---|---|
-| Original plan + as-built deltas | `docs/superpowers/plans/2026-07-04-stream-monitoring-and-kill-switch.md` |
-| The widened architecture decision | `docs/superpowers/plans/2026-07-07-abuse-cold-enforcer-architecture.md` |
-| Path × monitoring × kill coverage matrix | `docs/architecture/playback-paths-monitoring-kill-matrix.md` |
-| Adversarial abuse scoring, corrections 1–9, decisions A1–A8 | `docs/architecture/stream-abuse-matrix.md` |
+conclusions are recorded here. They remain on that branch at that commit, with the two
+matrices at `docs/architecture/playback-paths-monitoring-kill-matrix.md` and
+`docs/architecture/stream-abuse-matrix.md`.
 
 **Kept from it — the ideas, not the code:** server-observed existence rather than
 client-reported liveness; every reason collapsing to a small set of enforcement actions;

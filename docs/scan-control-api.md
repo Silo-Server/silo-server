@@ -5,11 +5,11 @@ and the webhook receiver — see [the scan API guide](scan-api.md).
 
 The v2 scan commands use the same acting-administrator and profile-verification
 gates as library administration. The existing demo policy applies, including its
-administrator exemption. They share target resolution, dispatch and cancellation
-with the bridge; this transport does not implement another scheduler.
+administrator exemption. They use the existing target resolution, dispatch and cancellation;
+this transport does not implement another scheduler.
 
-`GET /api/v2/scan/capabilities` returns revision `1` and state `available` when a
-scan queue or local ingester exists, otherwise `not_configured`.
+`GET /api/v2/scan/capabilities` returns an opaque `revision` and state `available`
+when a scan queue or local ingester exists, otherwise `not_configured`.
 
 `POST /api/v2/scan` accepts optional string `library_id` and optional `path`.
 The existing resolver requires enough information to identify a configured
@@ -38,12 +38,11 @@ may cancel scans created after the original dispatch; it is not an idempotent
 cancellation of a stable scan identity. Neither operation adds scheduling,
 leases, durable cancellation receipts or cross-replica replay guarantees.
 
-The bridge retains its numeric IDs and response shapes. Operations owns the web
+Operations owns the web
 scan controls and their v2 adoption, including disabling automatic mutation and
 authentication replay, retaining captured administrator/profile authority, and
-converting IDs at the boundary. The two ordinary migration rows stay proposed
-until independent review and that consumer adoption are accepted. There is no
-native or Jellyfin scan-control consumer in the migration inventory.
+converting IDs at the boundary. The two ordinary migration rows are ratified.
+There is no native or Jellyfin scan-control consumer in the migration inventory.
 
 The web library page, dashboard widget and autoscan activity cancellation now use
 these v2 commands through shared hooks. Submission captures the selected library

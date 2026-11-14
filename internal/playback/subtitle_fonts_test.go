@@ -1,9 +1,12 @@
 package playback
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -51,7 +54,7 @@ done
 `)
 
 	if _, err := dumpFontAttachments(context.Background(), "input.mkv", ffmpegPath,
-		[]attachmentProbeStream{{Index: 2, ExtraDataSize: 1}, {Index: 5, ExtraDataSize: 1}}, maxSubtitleFontBytes); err != nil {
+		[]attachmentProbeStream{{Index: 2, ExtraDataSize: 1}, {Index: 5, ExtraDataSize: 1}}, 0, maxSubtitleFontBytes); err != nil {
 		t.Fatalf("dumpFontAttachments returned error: %v", err)
 	}
 
@@ -79,11 +82,36 @@ done
 	if lastDumpIdx < 0 || lastDumpIdx > inputIdx {
 		t.Fatalf("dump_attachment flags must precede -i; argv=%v", argv)
 	}
-	if mapIdx < 0 || argv[mapIdx+1] != "0:t?" {
-		t.Fatalf("argv missing -map 0:t?: %v", argv)
+	// One video stream limited to no frames ends the run at the header;
+	// mapping the attachments alone demuxes the whole file.
+	if mapIdx < 0 || argv[mapIdx+1] != "0:0" || !containsSeq(argv, "-frames:v", "0") {
+		t.Fatalf("argv missing -map 0:0 -frames:v 0: %v", argv)
 	}
 	if !containsSeq(argv, "-c", "copy") {
 		t.Fatalf("argv missing -c copy: %v", argv)
+	}
+}
+
+// A source without video still gives up its fonts: the header-only dump maps a
+// video stream, so one without keeps the attachment-only output.
+func TestExtractAttachedSubtitleFontsFromAudioOnlySource(t *testing.T) {
+	ffmpeg, err := exec.LookPath("ffmpeg")
+	if err != nil {
+		t.Skip("ffmpeg not installed")
+	}
+	font := testFontFile(t)
+	src := filepath.Join(t.TempDir(), "lyrics.mka")
+	if out, err := exec.Command(ffmpeg, "-nostdin", "-v", "error", "-f", "lavfi", "-i", "anullsrc=d=1", "-c:a", "aac",
+		"-attach", font, "-metadata:s:t", "mimetype=application/x-truetype-font", src).CombinedOutput(); err != nil {
+		t.Fatalf("mux fixture: %v\n%s", err, out)
+	}
+	want, err := os.ReadFile(font)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fonts, err := ExtractAttachedSubtitleFonts(t.Context(), src, ffmpeg)
+	if err != nil || len(fonts) != 1 || !bytes.Equal(fonts[0].Data, want) {
+		t.Fatalf("ExtractAttachedSubtitleFonts() = %d fonts, %v; want the attached font", len(fonts), err)
 	}
 }
 
@@ -168,6 +196,43 @@ done
 	}
 }
 
+// Fansub releases can attach more font data than the bundle limit. The bundle
+// must skip a font that does not fit and fill its place with later fonts,
+// rather than fail and leave none.
+func TestExtractAttachedSubtitleFontsSkipsFontsOverByteLimit(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell script test helper is unix-only")
+	}
+	dir := t.TempDir()
+	ffmpeg := filepath.Join(dir, "ffmpeg")
+	streams := []string{fmt.Sprintf(`{"index":2,"extradata_size":%d,"codec_name":"ttf","codec_type":"attachment","tags":{"filename":"huge.ttf"}}`, maxSubtitleFontBytes+1)}
+	want := make([]string, 0, maxSubtitleFontAttachments)
+	for i := 3; i < 3+maxSubtitleFontAttachments; i++ {
+		streams = append(streams, fmt.Sprintf(`{"index":%d,"extradata_size":1,"codec_name":"ttf","codec_type":"attachment","tags":{"filename":"f%d.ttf"}}`, i, i))
+		want = append(want, fmt.Sprintf("f%d.ttf:1", i))
+	}
+	writeExecutable(t, filepath.Join(dir, "ffprobe"), "#!/bin/sh\nprintf '%s' '{\"streams\":["+strings.Join(streams, ",")+"]}'\n")
+	writeExecutable(t, ffmpeg, `#!/bin/sh
+for arg do
+ case "$arg" in
+  -dump_attachment:2) exit 42 ;;
+  -dump_attachment:*) printf f ;;
+ esac
+done
+`)
+	fonts, err := ExtractAttachedSubtitleFonts(t.Context(), "input.mkv", ffmpeg)
+	if err != nil {
+		t.Fatalf("ExtractAttachedSubtitleFonts returned error: %v", err)
+	}
+	got := make([]string, 0, len(fonts))
+	for _, font := range fonts {
+		got = append(got, fmt.Sprintf("%s:%d", font.Name, len(font.Data)))
+	}
+	if fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Fatalf("fonts = %v, want %v", got, want)
+	}
+}
+
 func TestUnsafeFontAttachmentNameAndMIMEAreReplaced(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("shell script test helper is unix-only")
@@ -215,7 +280,7 @@ done
 `)
 
 	fonts, err := dumpFontAttachments(context.Background(), "input.mkv", ffmpegPath,
-		[]attachmentProbeStream{{Index: 2, ExtraDataSize: 8}, {Index: 3, ExtraDataSize: 8}}, maxSubtitleFontBytes)
+		[]attachmentProbeStream{{Index: 2, ExtraDataSize: 8}, {Index: 3, ExtraDataSize: 8}}, 0, maxSubtitleFontBytes)
 	if err == nil || len(fonts) != 0 {
 		t.Fatalf("missing attachment data accepted: %d fonts, %v", len(fonts), err)
 	}
@@ -228,19 +293,19 @@ func TestDumpFontAttachmentsBoundedPipe(t *testing.T) {
 	ffmpeg := filepath.Join(t.TempDir(), "ffmpeg")
 	writeExecutable(t, ffmpeg, fakeFFmpegDumping("1234"))
 	streams := []attachmentProbeStream{{Index: 2, ExtraDataSize: 4}, {Index: 7, ExtraDataSize: 4}}
-	fonts, err := dumpFontAttachments(t.Context(), "input.mkv", ffmpeg, streams, 8)
+	fonts, err := dumpFontAttachments(t.Context(), "input.mkv", ffmpeg, streams, 0, 8)
 	if err != nil || len(fonts) != 2 || string(fonts[0].Data) != "1234" || string(fonts[1].Data) != "1234" {
 		t.Fatalf("exact bound: %+v %v", fonts, err)
 	}
 	for _, size := range []int64{-1, 0, 9} {
-		if _, err := dumpFontAttachments(t.Context(), "input.mkv", "missing-ffmpeg", []attachmentProbeStream{{Index: 2, ExtraDataSize: size}}, 8); err == nil || strings.Contains(err.Error(), "start attachment") {
+		if _, err := dumpFontAttachments(t.Context(), "input.mkv", "missing-ffmpeg", []attachmentProbeStream{{Index: 2, ExtraDataSize: size}}, 0, 8); err == nil || strings.Contains(err.Error(), "start attachment") {
 			t.Fatalf("invalid size %d reached FFmpeg: %v", size, err)
 		}
 	}
 	writeExecutable(t, ffmpeg, "#!/bin/sh\nwhile :; do printf '1234567890'; done\n")
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
-	if _, err := dumpFontAttachments(ctx, "input.mkv", ffmpeg, streams, 8); err == nil || !strings.Contains(err.Error(), "exceeds probed size") {
+	if _, err := dumpFontAttachments(ctx, "input.mkv", ffmpeg, streams, 0, 8); err == nil || !strings.Contains(err.Error(), "exceeds probed size") {
 		t.Fatalf("fast writer overflow: %v", err)
 	}
 	if ctx.Err() != nil {

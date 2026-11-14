@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
@@ -108,6 +109,9 @@ type TitleKey struct {
 	MediaType string
 	TMDBID    int
 }
+
+// Key returns the snapshot's TMDB identity.
+func (s Snapshot) Key() TitleKey { return TitleKey{MediaType: s.MediaType, TMDBID: s.TMDBID} }
 
 // Snapshot is what a TMDB detail says about a title: its current IDs and the
 // fields a watchlist page displays.
@@ -361,10 +365,22 @@ func (s *Titles) PurgeProfile(ctx context.Context, userID int, profileID string)
 // LibraryMatches returns every library item (enabled folders, same media
 // type) that carries or once carried any of the IDs. The add path uses it to
 // send a title the library already has to the library watchlist instead.
+// The IDs a stored title holding one of the TMDB IDs has kept count too, so
+// add and remove find the item promotion would move the title onto.
 func (s *Titles) LibraryMatches(ctx context.Context, mediaType string, tmdbIDs []int, imdbID string, tvdbID int) ([]string, error) {
 	aliases := make([]catalog.ProviderAlias, 0, len(tmdbIDs)+2)
+	tmdbAliases := make([]string, 0, len(tmdbIDs))
 	for _, id := range tmdbIDs {
-		aliases = append(aliases, catalog.ProviderAlias{MediaType: mediaType, Provider: contentid.ProviderTMDB, ProviderID: strconv.Itoa(id)})
+		tmdbID := strconv.Itoa(id)
+		tmdbAliases = append(tmdbAliases, tmdbID)
+		aliases = append(aliases, catalog.ProviderAlias{MediaType: mediaType, Provider: contentid.ProviderTMDB, ProviderID: tmdbID})
+	}
+	stored, err := s.repo.aliasesOfTMDBOwners(ctx, mediaType, tmdbAliases)
+	if err != nil {
+		return nil, err
+	}
+	for _, a := range stored {
+		aliases = append(aliases, catalog.ProviderAlias{MediaType: a.MediaType, Provider: a.Provider, ProviderID: a.ProviderID})
 	}
 	if imdbID != "" {
 		aliases = append(aliases, catalog.ProviderAlias{MediaType: mediaType, Provider: contentid.ProviderIMDB, ProviderID: imdbID})
@@ -571,6 +587,20 @@ func (s *Titles) PromoteWatchlistItem(ctx context.Context, access catalog.Access
 		slog.WarnContext(ctx, "watchlist promotion failed; the read continues without it",
 			"component", "watchlist", "user_id", v.UserID, "profile_id", v.ProfileID, "content_id", contentID, "error", err)
 	}
+}
+
+// QueuePromotable queues on b whether the access filter's profile has any
+// watchlist title entry. PromoteWatchlistItem can only promote one it has,
+// so a caller batching this with its own reads can skip the promotion's
+// queries for the many profiles without any. Closing the sent batch's results
+// without error sets *promotable.
+func (s *Titles) QueuePromotable(b *pgx.Batch, access catalog.AccessFilter, promotable *bool) {
+	*promotable = false
+	v, ok := viewerFromAccess(access)
+	if s == nil || !ok {
+		return
+	}
+	b.Queue(profileHasEntriesSQL, v.UserID, v.ProfileID).QueryRow(func(row pgx.Row) error { return row.Scan(promotable) })
 }
 
 func viewerFromAccess(access catalog.AccessFilter) (Viewer, bool) {

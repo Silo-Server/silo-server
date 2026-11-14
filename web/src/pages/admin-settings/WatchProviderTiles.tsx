@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { Link, useNavigate } from "react-router";
 
 import type { PluginInstallation } from "@/api/types";
@@ -8,6 +9,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { useAdminPluginInstallations } from "@/hooks/queries/admin/plugins";
 import { providerMonogram } from "@/lib/monogram";
 import { pluginPagePath } from "@/lib/pluginPresentation";
+import { useT } from "@/i18n";
 
 /**
  * The capability type watch-provider plugins declare (see
@@ -59,25 +61,26 @@ function pluginWatchProviders(installations: PluginInstallation[]): PluginWatchP
  * only report status and link out; nothing here is staged or saved.
  */
 export function WatchProviderTiles() {
+  const t = useT();
   const navigate = useNavigate();
   const { data: installations, isLoading, isError, refetch } = useAdminPluginInstallations();
   const providers = pluginWatchProviders(installations ?? []);
 
   if (isLoading) {
     return (
-      <div role="status" aria-label="Loading watch providers">
+      <div role="status" aria-label={t("web.admin.settings.watchProviders.loading")}>
         <Skeleton className="h-24 w-full" />
-        <span className="sr-only">Loading watch providers</span>
+        <span className="sr-only">{t("web.admin.settings.watchProviders.loading")}</span>
       </div>
     );
   }
 
-  const catalogLink = (
+  const catalogLink = (chunks: ReactNode) => (
     <Link
       to="/admin/plugins?tab=catalog"
       className="hover:text-foreground font-medium underline underline-offset-2 transition-colors"
     >
-      plugin catalog
+      {chunks}
     </Link>
   );
 
@@ -85,9 +88,9 @@ export function WatchProviderTiles() {
     <>
       {isError ? (
         <div role="alert" className="flex flex-wrap items-center gap-3 text-sm">
-          <span>Couldn&apos;t load the installed watch provider plugins.</span>
+          <span>{t("web.admin.settings.watchProviders.loadError")}</span>
           <Button type="button" size="sm" variant="outline" onClick={() => void refetch()}>
-            Retry
+            {t("common.retry")}
           </Button>
         </div>
       ) : providers.length > 0 ? (
@@ -96,27 +99,29 @@ export function WatchProviderTiles() {
             <ProviderTile
               key={`plugin-${provider.installationId}-${provider.capabilityId}`}
               name={provider.name}
-              tagline="Watch provider plugin"
+              tagline={t("web.admin.settings.watchProviders.tagline")}
               monogram={providerMonogram(provider.name)}
               monogramClass="bg-violet-500/20 text-violet-700 dark:text-violet-300"
               state={provider.enabled && provider.configReady ? "connected" : "not_connected"}
               statePill={
-                !provider.enabled ? "Disabled" : provider.configReady ? "Enabled" : "Needs setup"
+                !provider.enabled
+                  ? t("web.admin.settings.watchProviders.disabled")
+                  : provider.configReady
+                    ? t("web.admin.settings.watchProviders.enabled")
+                    : t("web.admin.settings.watchProviders.needsSetup")
               }
               primaryAction={{
-                label: "Configure",
+                label: t("web.admin.settings.watchProviders.configure"),
                 onClick: () => navigate(pluginPagePath(provider.pluginId)),
               }}
             />
           ))}
         </ProviderTileGrid>
       ) : (
-        <p className="text-sm">No watch provider plugins are installed.</p>
+        <p className="text-sm">{t("web.admin.settings.watchProviders.empty")}</p>
       )}
       <p className="text-muted-foreground mt-3 text-xs">
-        Simkl, MDBList, and other watch providers install from the {catalogLink}. A provider&apos;s
-        app credentials live on its plugin page, and viewers link their own accounts from profile
-        settings.
+        {t("web.admin.settings.watchProviders.footnote", { link: catalogLink })}
       </p>
     </>
   );

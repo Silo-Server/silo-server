@@ -5,16 +5,16 @@ import { MemoryRouter, Route, Routes } from "react-router";
 import Collections from "./Collections";
 
 /**
- * Renders the Collections page at /collections; a link it follows shows `elsewhere`.
- * Returns the page's query client.
+ * Renders the Collections page at /collections (or `at`, with its query); a
+ * link it follows shows `elsewhere`. Returns the page's query client.
  */
-export function renderCollectionsPage(elsewhere: ReactNode = null) {
+export function renderCollectionsPage(elsewhere: ReactNode = null, at = "/collections") {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   });
   render(
     <QueryClientProvider client={client}>
-      <MemoryRouter initialEntries={["/collections"]}>
+      <MemoryRouter initialEntries={[at]}>
         <Routes>
           <Route path="/collections" element={<Collections />} />
           <Route path="*" element={elsewhere} />

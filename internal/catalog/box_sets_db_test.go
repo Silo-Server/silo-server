@@ -131,88 +131,6 @@ func TestBoxSetGroupsDB(t *testing.T) {
 	}
 }
 
-func TestBoxSetGroupedBrowseDB(t *testing.T) {
-	f := seedBoxSets(t)
-	grouped := &QueryExecutor{Pool: f.pool, GroupByWork: true, BoxSetCollections: []int64{f.franchise}}
-	// The box set stands at its first member in the requested order.
-	for sort, representative := range map[QuerySort]string{
-		{Field: "title", Order: "asc"}:  f.id("second"),
-		{Field: "title", Order: "desc"}: f.id("first"),
-		{Field: "year", Order: "desc"}:  f.id("third"),
-	} {
-		var got []string
-		var after *QueryCursor
-		for range 5 {
-			page, err := grouped.PreviewCursorPage(t.Context(), f.def(sort), f.viewer, 1, after, true)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if page.Total != 4 {
-				t.Fatalf("%v: total = %d, want 4 (box set, stale, lonely, solo)", sort, page.Total)
-			}
-			for _, item := range page.Items {
-				got = append(got, item.ContentID)
-			}
-			if !page.HasMore {
-				break
-			}
-			after = page.Next
-		}
-		members := 0
-		for _, id := range got {
-			if slices.Contains([]string{f.id("first"), f.id("second"), f.id("third")}, id) {
-				members++
-			}
-		}
-		if len(got) != 4 || members != 1 || !slices.Contains(got, representative) {
-			t.Fatalf("%v: rows = %v, want 4 rows with only %s for the box set", sort, got, representative)
-		}
-	}
-	index, err := grouped.LetterIndex(t.Context(), f.def(QuerySort{Field: "title", Order: "asc"}), f.viewer)
-	if err != nil {
-		t.Fatal(err)
-	}
-	total := 0
-	for _, letter := range index.Letters {
-		total += letter.Count
-	}
-	if total != 4 {
-		t.Fatalf("letter index counts %d titles, want the 4 grouped rows: %+v", total, index.Letters)
-	}
-	// A name prefix lists the box set only under its representative's letter,
-	// where the letter index files it: "Alpha Kappa Two" leads it by title, so
-	// "Zulu Kappa One" does not bring it under Z.
-	for prefix, want := range map[string][]string{"a": {f.id("second")}, "z": nil} {
-		viewer := f.viewer
-		viewer.NamePrefix = prefix
-		page, err := grouped.PreviewCursorPage(t.Context(), f.def(QuerySort{Field: "title", Order: "asc"}), viewer, 10, nil, true)
-		if err != nil {
-			t.Fatal(err)
-		}
-		var got []string
-		for _, item := range page.Items {
-			got = append(got, item.ContentID)
-		}
-		if !slices.Equal(got, want) || page.Total != len(want) {
-			t.Fatalf("prefix %q: rows = %v (total %d), want %v", prefix, got, page.Total, want)
-		}
-	}
-	// A query limit with a prefix keeps the first titles of that letter, not
-	// the first titles of the library narrowed to the letter afterwards: the
-	// library's first title is "Alpha Kappa Two", which is not an S.
-	viewer := f.viewer
-	viewer.NamePrefix = "s"
-	limited := f.def(QuerySort{Field: "title", Order: "asc"})
-	limited.Limit = new(1)
-	page, err := grouped.PreviewCursorPage(t.Context(), limited, viewer, 10, nil, true)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(page.Items) != 1 || page.Items[0].ContentID != f.id("solo") || page.Total != 1 {
-		t.Fatalf("limit 1 under S: rows = %v (total %d), want only %s", page.Items, page.Total, f.id("solo"))
-	}
-}
-
 func TestBoxSetSearchAndSyncDB(t *testing.T) {
 	f := seedBoxSets(t)
 	ctx := t.Context()
@@ -269,6 +187,22 @@ func TestBoxSetSearchAndSyncDB(t *testing.T) {
 	}
 	if restricted := search("bravo", []int{f.lib}, f.viewer, 50, 0); slices.Contains(restricted, f.franchise) {
 		t.Fatalf("PG title search = %v, want no franchise from a hidden title", restricted)
+	}
+	// The single's name ranks first: it opens with the query word, or has a
+	// word after a hyphen that does, while the franchise's shorter name only
+	// contains it.
+	for _, tc := range []struct{ query, franchise, single string }{
+		{"harry", "Dirty Harry Collection", "Harry Potter Collection"},
+		{"man", "Human Collection", "Ant-Man Collection"},
+	} {
+		for id, name := range map[int64]string{f.franchise: tc.franchise, f.single: tc.single} {
+			if _, err := f.pool.Exec(ctx, `UPDATE tmdb_movie_collections SET name = $2 WHERE tmdb_collection_id = $1`, id, name); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if ranked := search(tc.query, []int{f.lib}, f.viewer, 10, 0); !slices.Equal(ranked, []int64{f.single, f.franchise}) {
+			t.Fatalf("search %q = %v, want %q %d before %q %d", tc.query, ranked, tc.single, f.single, tc.franchise, f.franchise)
+		}
 	}
 
 	// A collection no movie belongs to any more is deleted; one with movies

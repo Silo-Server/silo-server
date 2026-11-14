@@ -231,6 +231,64 @@ var resolverPlayMethodCases = []struct {
 		},
 		want: playback.PlayDirect,
 	},
+	{
+		// An audiobook's cover art is not video to decode: AAC in MP4 is
+		// served as it is, never encoded to H.264 for the cover (#3486).
+		name: "audio-only media ignores the video caps",
+		file: &models.MediaFile{
+			BaseType: "audiobook", CodecAudio: "aac", Container: "mp4",
+			AudioTracks: []models.AudioTrack{{Codec: "aac", Channels: 2}},
+		},
+		caps: &playback.ClientCapabilities{
+			CodecsVideo: []string{"h264"}, CodecsAudio: []string{"aac"},
+			Containers: []string{"mp4", "m4b"}, MaxResolution: "1080p",
+		},
+		want: playback.PlayDirect,
+	},
+	{
+		// Older scans recorded the cover as an MJPEG video track; it still
+		// takes the audio route, here an audio transcode the device can play.
+		name:      "legacy cover-art video on audio-only media remuxes its audio",
+		file:      &models.MediaFile{BaseType: "audiobook", CodecVideo: "mjpeg", CodecAudio: "flac", Container: "flac", Resolution: "2160p"},
+		want:      playback.PlayRemux,
+		wantAudio: &yes,
+	},
+	{
+		// Converting an audiobook's audio is its transcode: with transcoding
+		// off it is served as it is, never queued for a remux.
+		name: "audio-only media needing conversion falls to direct with transcode disabled",
+		file: &models.MediaFile{BaseType: "audiobook", CodecAudio: "mp3", Container: "mp3", AudioTracks: []models.AudioTrack{{Codec: "mp3", Channels: 2}}},
+		edit: func(_ *playback.ClientCapabilities, s *playback.AdminSettings) { s.TranscodeEnabled = false },
+		want: playback.PlayDirect,
+	},
+	{
+		// A container-only remux copies the audio, so it is no transcode and
+		// still goes ahead with transcoding off.
+		name:      "audio-only media needing only a new container remuxes with transcode disabled",
+		file:      &models.MediaFile{BaseType: "audiobook", CodecAudio: "aac", Container: "mkv", AudioTracks: []models.AudioTrack{{Codec: "aac", Channels: 2}}},
+		edit:      func(_ *playback.ClientCapabilities, s *playback.AdminSettings) { s.TranscodeEnabled = false },
+		want:      playback.PlayRemux,
+		wantAudio: &no,
+	},
+	{
+		// The client decodes FLAC, but MP4 cannot hold it, so a remux would
+		// encode the audio: with transcoding off the book is served as it is.
+		name: "audio-only FLAC the remux would encode falls to direct with transcode disabled",
+		file: &models.MediaFile{BaseType: "audiobook", CodecAudio: "flac", Container: "flac", AudioTracks: []models.AudioTrack{{Codec: "flac", Channels: 2}}},
+		edit: func(c *playback.ClientCapabilities, s *playback.AdminSettings) {
+			c.CodecsAudio = append(c.CodecsAudio, "flac")
+			s.TranscodeEnabled = false
+		},
+		want: playback.PlayDirect,
+	},
+	{
+		// The primary AAC track would copy, but the FLAC second track would
+		// be encoded, so with transcoding off the book is served as it is.
+		name: "audio-only media with a track the remux would encode falls to direct with transcode disabled",
+		file: &models.MediaFile{BaseType: "audiobook", CodecAudio: "aac", Container: "mkv", AudioTracks: []models.AudioTrack{{Codec: "aac", Channels: 2}, {Codec: "flac", Channels: 2}}},
+		edit: func(_ *playback.ClientCapabilities, s *playback.AdminSettings) { s.TranscodeEnabled = false },
+		want: playback.PlayDirect,
+	},
 }
 
 func TestResolverPlayMethod(t *testing.T) {

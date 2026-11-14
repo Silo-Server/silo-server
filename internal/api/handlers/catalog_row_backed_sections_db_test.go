@@ -103,3 +103,35 @@ func TestMergeSectionBrowseItemsLeadsWithTheRow(t *testing.T) {
 		t.Fatalf("capped merge = %v, want %v", got, want)
 	}
 }
+
+func TestSectionBrowseProgressCoversTheWholeBrowse(t *testing.T) {
+	stamp := func(s string) *string { return &s }
+	shownAt, widerAt := stamp("2026-01-02T03:04:05Z"), stamp("2026-01-01T00:00:00Z")
+	row := func(meta map[string]sections.SectionItemMeta) sections.SectionWithItems {
+		return sections.SectionWithItems{ItemMeta: meta}
+	}
+	shown := row(map[string]sections.SectionItemMeta{
+		"movie": {ProgressUpdatedAt: shownAt, ItemSource: "in_progress"},
+	})
+	more := row(map[string]sections.SectionItemMeta{
+		"movie":   {ProgressUpdatedAt: widerAt, ItemSource: "in_progress"},
+		"episode": {ItemSource: "next_up"},
+		"cut":     {ItemSource: "next_up"},
+	})
+	items := []*models.MediaItem{{ContentID: "movie"}, {ContentID: "episode"}, {ContentID: "no-meta"}}
+
+	for _, sectionType := range []sections.SectionType{sections.SectionContinueWatching, sections.SectionNextUp} {
+		got := sectionBrowseProgress(sectionType, shown, more, items)
+		want := map[string]catalog.SectionCardProgress{
+			"movie":   {ProgressUpdatedAt: shownAt, ItemSource: "in_progress"},
+			"episode": {ItemSource: "next_up"},
+		}
+		if !reflect.DeepEqual(got, want) {
+			t.Fatalf("%s progress = %+v, want %+v", sectionType, got, want)
+		}
+	}
+	// Only progress rows offer removal; another row's source must not.
+	if got := sectionBrowseProgress(sections.SectionNextInSeries, shown, more, items); got != nil {
+		t.Fatalf("next_in_series progress = %+v, want none", got)
+	}
+}

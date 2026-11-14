@@ -15,4 +15,8 @@ type TaskInfo struct {
 	LastExecution   *ExecutionResult `json:"last_execution,omitempty"`
 	Triggers        []TriggerConfig  `json:"triggers"`
 	NextRunAt       *time.Time       `json:"next_run_at,omitempty"`
+	// StartedAt is when the run in progress started, or nil while idle. It
+	// stays out of JSON so the task.updated event and the events WebSocket's
+	// task snapshot keep their shape; /api/v2 maps it explicitly.
+	StartedAt *time.Time `json:"-"`
 }

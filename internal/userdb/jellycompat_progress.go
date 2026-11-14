@@ -23,6 +23,22 @@ func setJellycompatProgress(ctx context.Context, tx *sql.Tx, profileID, itemID s
 	return err
 }
 
+// ListJellycompatPlayedByDate implements userstore.JellycompatPlayedByDateLister.
+// The per-user SQLite store has no catalog tables, so types and libraryID are
+// left to the caller, as in ListProgressFiltered. event_at is RFC 3339 text
+// with or without fractional seconds, so it is ordered by its julianday value
+// rather than as text.
+func (s *SQLiteUserStore) ListJellycompatPlayedByDate(_ context.Context, profileID string, _ []string, _ *int, ascending bool, limit, offset int) ([]userstore.WatchProgress, error) {
+	direction := "DESC"
+	if ascending {
+		direction = "ASC"
+	}
+	query := progressListSelect + progressStatusPredicate("completed") + `
+		ORDER BY julianday(COALESCE(event_at, updated_at)) ` + direction + `, media_item_id ` + direction + `
+		LIMIT ? OFFSET ?`
+	return queryProgressRows(s.db, query, profileID, limit, offset)
+}
+
 func (s *SQLiteUserStore) ListJellycompatProgressDates(ctx context.Context, profileID string, ids []string) (map[string]string, error) {
 	encoded, err := json.Marshal(ids)
 	if err != nil {

@@ -34,8 +34,7 @@ Two switches control monitoring:
   only while it is saved off, which is where the library editor sends an admin
   to turn it back on.
 - `media_folders.realtime_monitoring`, the per-library switch (default `true`
-  for existing and new libraries). It is exposed on `/api/v2/libraries` only;
-  the frozen `/api/v1` routes neither return nor change it.
+  for existing and new libraries). It is exposed on `/api/v2/libraries`.
 
 A library is monitored only when the server switch is on, the library is
 enabled, and its own switch is on. The monitor's desired set is exactly those
@@ -208,8 +207,10 @@ directories the scanner would enter (`walkTree`). They skip:
   `lost+found`. Files and directories with these names are also
   dropped from events before tracking, and a rename from an ignored name
   (`movie.mkv.part` to `movie.mkv`) counts as a move in.
-- The scanner's other ignored directory names, also case-insensitive:
-  `@Recycle`, `.Trash`, `$RECYCLE.BIN`, `.deleted`, `.inbound`, `.downloads`.
+- Every directory the scanner skips by name (`scanner.SkippedDirName`): any
+  hidden (dot-prefixed) directory, and `@Recycle` and `$RECYCLE.BIN`
+  (case-insensitive). See
+  [scanner ignore files](scanner-ignore-files.md#hidden-and-housekeeping-directories).
 - A directory holding a regular `.nomedia` file, or a regular `.ignore` file
   without a valid pattern, is skipped with everything below it. The decision
   is the scanner's own (`scanner.DirSkipped`, see

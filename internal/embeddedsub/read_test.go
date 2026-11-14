@@ -1097,7 +1097,7 @@ func TestPacketReadsBoundAbandonedWork(t *testing.T) {
 					cancel()
 					wantErr := context.Canceled
 					if (sameWindow && i > 0) || i == maxPacketReads {
-						wantErr = errPacketReadBusy
+						wantErr = ErrReadBusy
 					}
 					if err := <-done; !errors.Is(err, wantErr) {
 						t.Fatalf("window %d: %v, want %v", i, err, wantErr)

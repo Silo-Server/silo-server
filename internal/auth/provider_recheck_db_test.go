@@ -713,7 +713,7 @@ func TestProviderRecheckSessionIdentityDB(t *testing.T) {
 		if err := devices.Approve(WithClaims(ctx, tc.claims), DeviceLoginLookupInput{UserCode: start.UserCode}, env.user.ID); err != nil {
 			t.Fatalf("%s: approve: %v", tc.name, err)
 		}
-		poll, err := devices.Poll(ctx, start.DeviceCode)
+		poll, err := devices.Poll(ctx, start.DeviceCode, "")
 		if err != nil || poll.TokenPair == nil {
 			t.Fatalf("%s: poll = %+v, %v", tc.name, poll, err)
 		}
@@ -801,7 +801,7 @@ func TestProviderRecheckDeviceChainKeepsAbsoluteAgeDB(t *testing.T) {
 		DeviceLoginLookupInput{UserCode: start.UserCode}, env.user.ID); err != nil {
 		t.Fatal(err)
 	}
-	poll, err := devices.Poll(ctx, start.DeviceCode)
+	poll, err := devices.Poll(ctx, start.DeviceCode, "")
 	if err != nil || poll.TokenPair == nil {
 		t.Fatalf("poll = %+v, %v", poll, err)
 	}
@@ -864,7 +864,7 @@ func TestProviderRecheckRemotePlaybackHandoffChainDB(t *testing.T) {
 		DeviceLoginLookupInput{UserCode: start.UserCode}, env.user.ID, profiles[0].ID); err != nil {
 		t.Fatal(err)
 	}
-	poll, err := devices.Poll(ctx, start.DeviceCode)
+	poll, err := devices.Poll(ctx, start.DeviceCode, "")
 	if err != nil || poll.TokenPair == nil {
 		t.Fatalf("poll = %+v, %v", poll, err)
 	}

@@ -94,3 +94,38 @@ func TestDeviceHeaderGuardCoversEveryOperation(t *testing.T) {
 		}
 	}
 }
+
+// Every operation that records X-Silo-Device-* on the login session it opens
+// declares the headers, so an over-long device id is the declared
+// out_of_range refusal there, as on the settings operations, rather than a
+// sign-in that silently records no device id.
+func TestSignInOperationsBoundDeviceID(t *testing.T) {
+	h := newTestHandler(t, pilotDeps(nil, nil))
+	for _, path := range []string{
+		"/auth/login",
+		"/auth/network/5/sign-in",
+		"/auth/oauth/complete",
+		"/auth/setup",
+		"/auth/signup",
+		"/invitations/tok/accept",
+		"/password-resets/tok/complete",
+		"/auth/device/poll",
+	} {
+		p := requireProblem(t, do(t, h, http.MethodPost, Prefix+path, `{}`, map[string]string{"X-Silo-Device-Id": strings.Repeat("x", 129)}), TypeValidationFailed)
+		found := false
+		for _, e := range p.Errors {
+			found = found || strings.EqualFold(e.Location, "header.X-Silo-Device-Id") && e.Code == "out_of_range"
+		}
+		if !found {
+			t.Fatalf("%s: over-long device id not refused: %+v", path, p.Errors)
+		}
+	}
+	// A 128-character id is still recorded on the session.
+	deps := pilotDeps(nil, nil)
+	sessions := deps.Sessions.(*fakeSessionService)
+	id := strings.Repeat("a", 128)
+	rec := do(t, newTestHandler(t, deps), http.MethodPost, Prefix+"/auth/login", `{"username":"laura","password":"pw"}`, map[string]string{"X-Silo-Device-Id": id, "X-Silo-Device-Name": strings.Repeat("n", 200)})
+	if rec.Code != http.StatusOK || sessions.lastLoginDevice.ID != id || len(sessions.lastLoginDevice.Name) != 120 {
+		t.Fatalf("%d %s %+v", rec.Code, rec.Body.String(), sessions.lastLoginDevice)
+	}
+}

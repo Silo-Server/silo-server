@@ -39,6 +39,15 @@ func (p *PostgresProvider) SupportsAtomicSectionProfileReset(pool *pgxpool.Pool)
 	return p != nil && pool != nil && p.pool == pool
 }
 
+// StoresAccountsIn reports whether every account's profiles and setting
+// values live in pool's shared tables, so a caller may read them there
+// directly, batched with its own reads. As with
+// SupportsAtomicSectionProfileReset, a decorator may forward it only when it
+// preserves this provider's storage for every account.
+func (p *PostgresProvider) StoresAccountsIn(pool *pgxpool.Pool) bool {
+	return p != nil && pool != nil && p.pool == pool
+}
+
 // CreateProfileInTransaction joins account provisioning's transaction so the
 // profile can reference the new user before the account and invite commit.
 func (p *PostgresProvider) CreateProfileInTransaction(ctx context.Context, tx pgx.Tx, userID int, profile userstore.Profile) error {

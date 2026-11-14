@@ -26,7 +26,7 @@ import {
   applyNotificationCreated,
   applyNotificationRead,
   applyNotificationsSnapshot,
-  formatEpisodeCode,
+  notificationToast,
 } from "@/hooks/queries/notifications";
 import { toast } from "sonner";
 import {
@@ -42,6 +42,7 @@ import {
   scheduleProgressHomeRefresh,
   userStateChangeAffectsSectionMembership,
 } from "@/components/realtimeCatalogInvalidation";
+import { jobCancelledError, jobFailedError } from "@/lib/adminJobErrors";
 import { bumpHomeRefreshSignal } from "@/pages/homeSurfaceRefresh";
 import { createRealtimeQueryRefreshScheduler } from "@/components/realtimeQueryRefresh";
 import { adminSessionsKey } from "@/api/v2/adminSessionsCache";
@@ -164,10 +165,10 @@ async function pollAdminJobUntilTerminal(jobId: string): Promise<AdminJob> {
       return job;
     }
     if (job.status === "failed") {
-      throw new Error(job.error_message || job.message || "Job failed");
+      throw jobFailedError(job);
     }
     if (job.status === "cancelled") {
-      throw new Error(job.message || "Job cancelled");
+      throw jobCancelledError(job);
     }
     await new Promise((resolve) => window.setTimeout(resolve, 1_000));
   }
@@ -538,10 +539,10 @@ export function RealtimeEventsProvider({ children }: { children: ReactNode }) {
       return;
     }
     if (job.status === "cancelled") {
-      waiter.reject(new Error(job.message || "Job cancelled"));
+      waiter.reject(jobCancelledError(job));
       return;
     }
-    waiter.reject(new Error(job.error_message || job.message || "Job failed"));
+    waiter.reject(jobFailedError(job));
   };
 
   const currentChannels = useCallback(() => {
@@ -662,7 +663,12 @@ export function RealtimeEventsProvider({ children }: { children: ReactNode }) {
       case "tasks":
         // Reconnect must also catch up history/metrics for tasks that finished
         // while disconnected. One sweep avoids refetching each detail twice.
-        refreshQueries({ queryKey: adminKeys.tasks() });
+        // A plugin update check that finished meanwhile may have changed the
+        // installations too.
+        refreshQueries(
+          { queryKey: adminKeys.tasks() },
+          { queryKey: adminKeys.pluginInstallations() },
+        );
         break;
       case "scans":
         hydrateScans(queryClient, (message.data as ScanRun[]) ?? []);
@@ -706,38 +712,8 @@ export function RealtimeEventsProvider({ children }: { children: ReactNode }) {
         return;
       }
       applyNotificationCreated(queryClient, notification);
-      if (notification.type === "episode.available" && notification.series_title) {
-        const episodeCode = formatEpisodeCode(notification);
-        toast(`New episode of ${notification.series_title}`, {
-          description: [episodeCode, notification.episode_title].filter(Boolean).join(" — "),
-        });
-      } else if (notification.type === "request.fulfilled") {
-        const follower = notification.reason_flags?.follower === true;
-        toast(
-          notification.series_title
-            ? `${notification.series_title} is now available`
-            : follower
-              ? "A title you followed is now available"
-              : "Your request is now available",
-          {
-            description: follower
-              ? "A title you asked to hear about has arrived in the library."
-              : "Your media request has arrived in the library.",
-          },
-        );
-      } else if (
-        notification.type === "request.approved" ||
-        notification.type === "request.declined"
-      ) {
-        const verb = notification.type === "request.approved" ? "approved" : "declined";
-        const title = notification.reason_flags?.title;
-        toast(title ? `Request ${verb}: ${title}` : `Your request was ${verb}`, {
-          description:
-            notification.type === "request.declined"
-              ? notification.reason_flags?.reason
-              : undefined,
-        });
-      }
+      const content = notificationToast(notification);
+      if (content) toast(content.title, { description: content.description });
       return;
     }
     if (message.event === "notification.read") {
@@ -812,6 +788,11 @@ export function RealtimeEventsProvider({ children }: { children: ReactNode }) {
               { queryKey: adminKeys.taskHistory(task.key) },
               { queryKey: adminKeys.taskMetrics(task.key) },
             );
+            // A finished plugin update check may have updated plugins or
+            // recorded a refused update on them.
+            if (task.key === "check_plugin_updates") {
+              filters.push({ queryKey: adminKeys.pluginInstallations() });
+            }
           }
           refreshQueries(...filters);
         }
@@ -1195,12 +1176,10 @@ export function RealtimeEventsProvider({ children }: { children: ReactNode }) {
           return Promise.resolve(cachedJob);
         }
         if (cachedJob.status === "failed") {
-          return Promise.reject(
-            new Error(cachedJob.error_message || cachedJob.message || "Job failed"),
-          );
+          return Promise.reject(jobFailedError(cachedJob));
         }
         if (cachedJob.status === "cancelled") {
-          return Promise.reject(new Error(cachedJob.message || "Job cancelled"));
+          return Promise.reject(jobCancelledError(cachedJob));
         }
       }
 

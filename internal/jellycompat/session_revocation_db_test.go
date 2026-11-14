@@ -144,7 +144,7 @@ func TestDeletedProfileCompatSessionsEndPostgres(t *testing.T) {
 		}
 	}
 
-	if err := profiles.DeleteProfile(ctx, deletedProfile); err != nil {
+	if _, err := profiles.DeleteProfile(ctx, deletedProfile); err != nil {
 		t.Fatal(err)
 	}
 
@@ -269,7 +269,7 @@ type deletingAfterListStore struct {
 func (s deletingAfterListStore) ListProfiles(ctx context.Context) ([]userstore.Profile, error) {
 	profiles, err := s.UserStore.ListProfiles(ctx)
 	if err == nil {
-		err = s.DeleteProfile(ctx, s.profileID)
+		_, err = s.DeleteProfile(ctx, s.profileID)
 	}
 	return profiles, err
 }

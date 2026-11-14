@@ -6,6 +6,9 @@
       "avatar": "preset:avatar-3",
       "avatar_url": "/profile-avatars/avatar-3.svg",
       "avatar_source": "preset",
+      "has_pin": true,
+      "is_primary": true,
+      "is_child": false,
       "last_seen_at": "2026-01-02T03:04:05.678Z"
     },
     {
@@ -13,6 +16,9 @@
       "name": "Guest",
       "avatar": "",
       "avatar_source": "none",
+      "has_pin": false,
+      "is_primary": false,
+      "is_child": true,
       "last_seen_at": null
     }
   ],

@@ -47,6 +47,9 @@ type Store interface {
 	// ReopenFailed moves a failed request back to active + approved with a
 	// fresh submission budget, in one guarded write.
 	ReopenFailed(ctx context.Context, id string, actor Viewer) (*Request, error)
+	// DeleteFailed removes a failed request that delivered nothing, in one
+	// guarded write; otherwise it returns ErrInvalidState.
+	DeleteFailed(ctx context.Context, id string) error
 	// ClaimSubmission takes the right to submit an approved request: it
 	// succeeds for one caller at a time, only while the request is active,
 	// approved, not leased, and past its backoff, and it counts the attempt.
@@ -65,8 +68,9 @@ type Store interface {
 	// cannot fail a newer claim's attempt.
 	FailSubmission(ctx context.Context, id string, leaseUntil time.Time, actor Viewer, message string) (*Request, error)
 	// RecordSubmission stores the targets a claimed submission created,
-	// releases the claim, and re-derives the request's status from its
-	// targets, in one transaction. It is fenced on leaseUntil the same way as
+	// replacing any failed target of the same quality, releases the claim,
+	// and re-derives the request's status from its targets, in one
+	// transaction. It is fenced on leaseUntil the same way as
 	// DeferSubmission: an attempt that outlived its lease while the request
 	// was withdrawn, completed or claimed again gets ErrInvalidState and
 	// writes nothing.
@@ -118,8 +122,9 @@ type Store interface {
 	ListTargetsForRequests(ctx context.Context, requestIDs []string) (map[string][]Target, error)
 	CreateTarget(ctx context.Context, target Target) (Target, error)
 	DeleteTarget(ctx context.Context, id int64) error
-	// UpdateTargetStatus also clears the target's download progress when it
-	// completes or fails.
+	// UpdateTargetStatus writes only a queued or downloading target, and
+	// answers ErrInvalidState for one that already completed or failed. It
+	// also clears the target's download progress when it completes or fails.
 	UpdateTargetStatus(ctx context.Context, targetID int64, status Status, externalID, externalStatus, lastErr string, actor Viewer) (*Request, error)
 	// UpdateTargetDownload stores a target's download progress, or clears it
 	// when progress is nil, only while the target is queued or downloading. It

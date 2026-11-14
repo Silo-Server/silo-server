@@ -6,6 +6,7 @@ import {
 } from "@/api/client";
 import { v2 } from "@/api/v2/request";
 import { adminKeys } from "../keys";
+import { t } from "@/i18n";
 function authority() {
   const value = captureProfileRequestContext();
   if (!value) throw new StaleApiRequestContextError();
@@ -29,7 +30,7 @@ function nextPage(page: { has_more: boolean; next_cursor?: string } | undefined,
       (!page.next_cursor || typeof page.next_cursor !== "string" || page.next_cursor === cursor)) ||
     (!page.has_more && page.next_cursor)
   )
-    throw new Error("Invalid activity page. Reload history.");
+    throw new Error(t("web.admin.errors.activityPageInvalid"));
   return page.has_more ? page.next_cursor : undefined;
 }
 export function useUserIPs(userId: number, days = 30) {
@@ -48,14 +49,14 @@ export function useUserIPs(userId: number, days = 30) {
         profileContext: c,
       });
       if (!isCapturedProfileAuthorityActive(c)) throw new StaleApiRequestContextError();
-      if (!Array.isArray(result.items)) throw new Error("Invalid activity items. Reload history.");
+      if (!Array.isArray(result.items)) throw new Error(t("web.admin.errors.activityItemsInvalid"));
       const next = nextPage(result.page, pageParam);
       const params =
         client.getQueryData<{ pageParams: (string | undefined)[] }>(queryKey)?.pageParams ?? [];
       const index = params.indexOf(pageParam);
       const prior = index < 0 ? params : params.slice(0, index + 1);
       if (next && prior.includes(next))
-        throw new Error("Activity cursor repeated. Reload history.");
+        throw new Error(t("web.admin.errors.activityCursorRepeated"));
       return result;
     },
     getNextPageParam: (page) => nextPage(page.page),
@@ -83,7 +84,7 @@ export function useIPUsers(ip: string, days = 30) {
         profileContext: c,
       });
       if (!isCapturedProfileAuthorityActive(c)) throw new StaleApiRequestContextError();
-      if (!Array.isArray(result.items)) throw new Error("Invalid activity items. Reload history.");
+      if (!Array.isArray(result.items)) throw new Error(t("web.admin.errors.activityItemsInvalid"));
       for (const row of result.items) numericUserID(row.user_id);
       const next = nextPage(result.page, pageParam);
       const params =
@@ -91,7 +92,7 @@ export function useIPUsers(ip: string, days = 30) {
       const index = params.indexOf(pageParam);
       const prior = index < 0 ? params : params.slice(0, index + 1);
       if (next && prior.includes(next))
-        throw new Error("Activity cursor repeated. Reload history.");
+        throw new Error(t("web.admin.errors.activityCursorRepeated"));
       return result;
     },
     getNextPageParam: (page) => nextPage(page.page),

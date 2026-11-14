@@ -25,8 +25,8 @@ type fakeThemeSongs struct {
 	routed   string
 }
 
-func (s *fakeThemeSongs) Discover(_ context.Context, id string, _ bool, _ catalogpkg.AccessFilter) (themesongs.Set, error) {
-	return themesongs.Set{OwnerID: id, Items: []themesongs.Song{{ID: "7", Title: "Opening", DurationSeconds: 60, Container: "mp3"}}}, s.fail
+func (s *fakeThemeSongs) Discover(_ context.Context, item themesongs.Item, _ bool, _ catalogpkg.AccessFilter) (themesongs.Set, error) {
+	return themesongs.Set{OwnerID: item.ID, Items: []themesongs.Song{{ID: "7", Title: "Opening", DurationSeconds: 60, Container: "mp3"}}}, s.fail
 }
 
 // Authorize mirrors the service's negotiation over a fixed mp3 theme: an

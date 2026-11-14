@@ -242,6 +242,7 @@ var itemColumnNames = []string{
 	"matched_at", "last_refreshed", "refresh_failures",
 	"episode_metadata_incomplete", "episode_metadata_last_checked_at", "locked_fields", "status", "created_at", "updated_at",
 	advisoryAgeColumn, advisorySourceColumn,
+	"digital_release_date::text", "physical_release_date::text",
 }
 
 // nullableStringItemColumns are media_items columns that may hold NULL but
@@ -380,6 +381,8 @@ func scanItem(row pgx.Row) (*models.MediaItem, error) {
 		&item.UpdatedAt,
 		&item.AdvisoryAge,
 		&item.AdvisorySource,
+		&item.DigitalReleaseDate,
+		&item.PhysicalReleaseDate,
 	)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -458,6 +461,8 @@ func listItemScanDests(item *models.MediaItem) []any {
 		&item.UpdatedAt,
 		&item.AdvisoryAge,
 		&item.AdvisorySource,
+		&item.DigitalReleaseDate,
+		&item.PhysicalReleaseDate,
 	}
 }
 
@@ -685,7 +690,8 @@ func (r *ItemRepository) writeItem(ctx context.Context, execer itemExecer, item 
 			content_rating_age,
 			advisory_age, advisory_source,
 			banner_path, banner_source_path, banner_thumbhash, thumb_path, thumb_source_path, thumb_thumbhash,
-			clearart_path, clearart_source_path, disc_path, disc_source_path
+			clearart_path, clearart_source_path, disc_path, disc_source_path,
+			digital_release_date, physical_release_date
 		) VALUES (
 			$1, $2, $3, $4, $5, $6, $7, $8,
 			$9, $10, $11, $12,
@@ -700,7 +706,8 @@ func (r *ItemRepository) writeItem(ctx context.Context, execer itemExecer, item 
 			$48,
 			$49, $50,
 			$51, $52, $53, $54, $55, $56,
-			$57, $58, $59, $60
+			$57, $58, $59, $60,
+			$61, $62
 		)`
 	conflict := `
 		ON CONFLICT (content_id) DO NOTHING`
@@ -738,6 +745,8 @@ func (r *ItemRepository) writeItem(ctx context.Context, execer itemExecer, item 
 			keywords = EXCLUDED.keywords,
 			original_language = EXCLUDED.original_language,
 			release_date = EXCLUDED.release_date,
+			digital_release_date = EXCLUDED.digital_release_date,
+			physical_release_date = EXCLUDED.physical_release_date,
 			first_air_date = EXCLUDED.first_air_date,
 			last_air_date = EXCLUDED.last_air_date,
 			air_time = EXCLUDED.air_time,
@@ -822,6 +831,8 @@ func (r *ItemRepository) writeItem(ctx context.Context, execer itemExecer, item 
 		item.ClearArtSourcePath,
 		item.DiscPath,
 		item.DiscSourcePath,
+		item.DigitalReleaseDate,
+		item.PhysicalReleaseDate,
 	)
 	if err != nil {
 		return false, fmt.Errorf("writing media item: %w", err)
@@ -2744,6 +2755,19 @@ func (r *ItemRepository) ReplacePeople(ctx context.Context, contentID string, pe
 	return tx.Commit(ctx)
 }
 
+// ClearPeopleTx removes every credit on a media item in the caller's
+// transaction, so the change commits or fails with the item write it belongs
+// to.
+func (r *ItemRepository) ClearPeopleTx(ctx context.Context, tx pgx.Tx, contentID string) error {
+	if _, err := tx.Exec(ctx, "DELETE FROM item_people WHERE content_id = $1", contentID); err != nil {
+		return fmt.Errorf("delete existing people: %w", err)
+	}
+	if err := r.searchIndexEvents.EnqueueUpsert(ctx, tx, contentID); err != nil {
+		return fmt.Errorf("enqueueing catalog search people update: %w", err)
+	}
+	return nil
+}
+
 // GetPeople returns all people credited on a media item via the item_people + people JOIN.
 func (r *ItemRepository) GetPeople(ctx context.Context, contentID string) ([]models.ItemPerson, error) {
 	rows, err := r.pool.Query(ctx, `
@@ -2769,12 +2793,15 @@ func (r *ItemRepository) GetPeople(ctx context.Context, contentID string) ([]mod
 // cleared rating also loses its per-source row. Always bumps updated_at.
 // Returns ErrItemNotFound if no row matches contentID.
 func (r *ItemRepository) UpdateMetadata(ctx context.Context, contentID string, upd *MetadataUpdate) error {
-	tx, err := r.pool.Begin(ctx)
+	tx, err := r.pool.BeginTx(ctx, MetadataCurationTxOptions(ctx))
 	if err != nil {
 		return fmt.Errorf("begin metadata update tx: %w", err)
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck
 
+	if err := lockCuratedProviderIDs(ctx, tx, contentID, upd); err != nil {
+		return err
+	}
 	if err := r.UpdateMetadataTx(ctx, tx, contentID, upd); err != nil {
 		return err
 	}
@@ -3205,7 +3232,9 @@ func lookupExternalIDsSQL() string {
 		),
 		direct_matches AS (
 			SELECT r.query_tmdb_id, mi.content_id, r.provider, mil.media_folder_id::text, mi.title, r.ord,
-			       CASE r.provider WHEN 'tmdb' THEN 0 WHEN 'tvdb' THEN 1 WHEN 'imdb' THEN 2 ELSE 3 END AS provider_rank
+			       CASE r.provider WHEN 'tmdb' THEN 0 WHEN 'tvdb' THEN 1 WHEN 'imdb' THEN 2 ELSE 3 END AS provider_rank,
+			       COALESCE(mi.tmdb_id, '') AS item_tmdb_id, COALESCE(mi.tvdb_id, '') AS item_tvdb_id,
+			       COALESCE(mi.imdb_id, '') AS item_imdb_id
 			FROM requested r
 			JOIN media_items mi
 			  ON mi.type = $5
@@ -3220,7 +3249,9 @@ func lookupExternalIDsSQL() string {
 		),
 		provider_matches AS (
 			SELECT r.query_tmdb_id, mi.content_id, r.provider, mil.media_folder_id::text, mi.title, r.ord,
-			       CASE r.provider WHEN 'tmdb' THEN 0 WHEN 'tvdb' THEN 1 WHEN 'imdb' THEN 2 ELSE 3 END AS provider_rank
+			       CASE r.provider WHEN 'tmdb' THEN 0 WHEN 'tvdb' THEN 1 WHEN 'imdb' THEN 2 ELSE 3 END AS provider_rank,
+			       COALESCE(mi.tmdb_id, '') AS item_tmdb_id, COALESCE(mi.tvdb_id, '') AS item_tvdb_id,
+			       COALESCE(mi.imdb_id, '') AS item_imdb_id
 			FROM requested r
 			JOIN media_item_provider_ids mip
 			  ON mip.provider = r.provider
@@ -3231,8 +3262,10 @@ func lookupExternalIDsSQL() string {
 			JOIN media_folders mf ON mf.id = mil.media_folder_id
 			WHERE mf.enabled = true
 		)
-		SELECT DISTINCT ON (query_tmdb_id)
-		       query_tmdb_id, content_id, provider, media_folder_id, title
+		-- Every match, best first per query_tmdb_id. LookupExternalIDs keeps
+		-- the first one that names the requested title.
+		SELECT query_tmdb_id, content_id, provider, media_folder_id, title, ord,
+		       item_tmdb_id, item_tvdb_id, item_imdb_id
 		FROM (
 			SELECT * FROM direct_matches
 			UNION ALL
@@ -3282,11 +3315,39 @@ func (r *ItemRepository) LookupExternalIDs(
 	defer rows.Close()
 
 	out := make([]ExternalIDMatchRow, 0)
+	matched := make(map[string]bool)
 	for rows.Next() {
 		var row ExternalIDMatchRow
-		if err := rows.Scan(&row.QueryTMDBID, &row.MediaID, &row.MatchedProvider, &row.LibraryID, &row.Title); err != nil {
+		var ord int32
+		var itemTMDB, itemTVDB, itemIMDb string
+		if err := rows.Scan(&row.QueryTMDBID, &row.MediaID, &row.MatchedProvider, &row.LibraryID, &row.Title,
+			&ord, &itemTMDB, &itemTVDB, &itemIMDb); err != nil {
 			return nil, fmt.Errorf("scanning external id lookup row: %w", err)
 		}
+		if matched[row.QueryTMDBID] {
+			continue
+		}
+		// A TVDB or IMDb match stands in for the requested TMDB ID only when
+		// the item is not another title by the type's anchor precedence: an
+		// item holding a different TMDB ID is another movie, while a series
+		// sharing the TVDB ID is the same show whatever its TMDB ID.
+		if row.MatchedProvider != contentid.ProviderTMDB {
+			candidate := candidates[ord]
+			requested := map[string]string{
+				contentid.ProviderTMDB: candidate.TMDBID,
+				contentid.ProviderTVDB: candidate.TVDBID,
+				contentid.ProviderIMDB: candidate.IMDbID,
+			}
+			item := map[string]string{
+				contentid.ProviderTMDB: itemTMDB,
+				contentid.ProviderTVDB: itemTVDB,
+				contentid.ProviderIMDB: itemIMDb,
+			}
+			if IdentityProviderIDsContradict(mediaType, requested, item) {
+				continue
+			}
+		}
+		matched[row.QueryTMDBID] = true
 		out = append(out, row)
 	}
 	if err := rows.Err(); err != nil {

@@ -4,10 +4,12 @@ A device without a keyboard (a TV) signs in by showing a code that a person
 approves somewhere they are already signed in: the web page `/activate`, or a
 Silo phone app. The device never handles a password. The state machine lives in
 `internal/auth/device_login.go`; the operations are in
-`internal/apiv2/device_login.go` and, frozen, in `internal/api/handlers/auth_device.go`.
+`internal/apiv2/device_login.go`, over the handler methods in
+`internal/api/handlers/auth_device.go`.
 The operation contract is in [auth-api.md](../auth-api.md#device-sign-in).
 Jellyfin apps reach the same requests through Quick Connect; see
-[Jellyfin Quick Connect](#jellyfin-quick-connect).
+[Jellyfin Quick Connect](#jellyfin-quick-connect). A device can tie its
+requests to a secret it keeps; see [Session binding](#session-binding).
 
 ## Codes
 
@@ -21,9 +23,9 @@ Jellyfin apps reach the same requests through Quick Connect; see
   as globally meaningful. `user_code_hash` is unique across every stored
   request, so a start that draws a stored code draws again (up to five times).
 - **Device code:** 32 random bytes the device polls with. Never shown.
-- **Browser code:** 32 random bytes. Only the frozen v1 start link still
-  carries it; lookups by `token` keep working for those links and for v2
-  links issued before user codes moved into the link.
+- **Browser code:** 32 random bytes. No current link carries it; lookups by
+  `token` keep working for links issued before user codes moved into the
+  link.
 - **Match code:** two English words. Kept on the wire for older clients and the
   LAN setup protocol's consistency check. People compare the user code
   instead. TV apps released before user codes show only the match words, so
@@ -44,16 +46,16 @@ Jellyfin apps reach the same requests through Quick Connect; see
 `<base>/activate?code=<8 digits>`, which keeps the TV's QR code small. `<base>`
 is `server.public_url` when it is configured and a valid origin, because a
 phone off the TV's network can't open a LAN address; otherwise it is the origin
-the device used. There is no shared short URL: each server's link is its own.
-The frozen v1 start keeps its own link; see Frozen v1 surface.
+the device used, from `clientip.RequestOrigin`: `X-Forwarded-Proto` and
+`X-Forwarded-Host` count only when a trusted proxy sent them. There is no
+shared short URL: each server's link is its own.
 
 ## Lifetimes
 
-- A request lives 15 minutes from start (10 minutes when started through the
-  frozen v1 route).
-- The first v2 approver lookup of a pending request records `opened_at`; the
+- A request lives 15 minutes from start.
+- The first approver lookup of a pending request records `opened_at`; the
   device's poll then reports `opened: true`, and the TV stops replacing its code.
-- Every v2 lookup of a pending request extends its expiry to at least 5
+- Every lookup of a pending request extends its expiry to at least 5
   minutes from now, never past 30 minutes after it started, so repeated
   lookups can't keep a code alive.
 - A pending poll answer carries the request's current `expires_at`. The
@@ -80,7 +82,7 @@ approvals that were not yet collected.
 Approve, approve-handoff and deny need a login session of the account. An
 API key, an impersonation session or a
 [remote-playback handoff](#remote-playback-handoff) session is refused with 403
-(v2 `permission_denied`, v1 `forbidden`) before the code is looked at. An
+(`permission_denied`) before the code is looked at. An
 approval gives the device a login session of the account: from an API key
 that would turn a credential no refresh re-checks into a refreshing session,
 from an impersonation session it would give the device a session with no
@@ -91,8 +93,8 @@ external sign-in provider inherits that session's provider chain
 ([external-sign-in.md](external-sign-in.md#provider-re-check)).
 
 The first approval holds. Approving a request another account (or, for
-approve-handoff, another profile) already approved is refused with 409 (v2
-`conflict`, v1 `approval_conflict`), and so is another account's deny: anyone
+approve-handoff, another profile) already approved is refused with 409
+(`conflict`), and so is another account's deny: anyone
 holding the code could otherwise cancel a sign-in someone else approved. Deny
 from the approving account, from any of its profiles, withdraws its approval
 before the device collects it. An approval whose approving account or profile
@@ -105,6 +107,63 @@ authenticated before its session was revoked cannot approve afterwards.
 Provider refusal withdraws approvals made through that identity, including
 those from a break-glass account; its approvals made through local login stay
 independent of the provider.
+
+## Session binding
+
+A phone setting up a TV over the LAN can sign it in to several accounts and
+servers in one session. The person compares the TV's code once, for the first
+request; the phone approves the later requests without a comparison. Without
+more, an attacker on the LAN path could swap one of those later requests for
+its own, and the phone would approve it with the person's account. Session
+binding lets the phone tell the TV's requests from anyone else's:
+
+1. For one setup session the TV draws a 32-byte random secret and keeps it. It
+   sends it only over HTTPS to the server.
+2. Every v2 `startDeviceLogin` in that session, on every server, sends
+   `binding`: base64url without padding of SHA-256 of the secret, 43
+   characters of `[A-Za-z0-9_-]`. Anything else, including an empty string,
+   is 422 `validation_failed` at `body.binding`. Without `binding` the request
+   is unbound, as before.
+3. `getDeviceLogin` returns the request's `binding` (absent when unbound). The
+   phone trusts the binding of the request whose code the person compared. It
+   approves a later request with the same binding without a comparison, asks
+   for a comparison when a later request has none, and refuses one with
+   another binding.
+4. Every `pollDeviceLogin` of a bound request must send `binding_secret`, the
+   secret as unpadded base64url. The server compares base64url(SHA-256(secret))
+   with the stored binding in constant time. A poll without it, or with
+   another secret, is 403 `device_binding_mismatch` whatever the request's
+   state, and changes nothing: the request is neither consumed nor marked, and
+   the TV holding the secret can still collect it. `binding_secret` is ignored
+   for an unbound request. A `binding_secret` longer than 64 characters is
+   422 `validation_failed` at `body.binding_secret` before it is hashed.
+
+The binding is public, since anyone holding the code can read it, but it is
+only a hash. An attacker that copies it into its own request gets a request
+the phone approves without asking, yet it cannot poll that request to tokens
+without the secret. The worst it can do is make one sign-in fail.
+
+The binding is stored as `binding_hash` on `device_login_requests` and never
+changes after start. Approve, approve-handoff, deny and cancel ignore it.
+`GET /api/v2/auth/device/capability` reports `session_binding: true`; a TV
+sends `binding` and `binding_secret` only to a server that reports it. The
+phone needs no flag: it acts on what the lookup returns.
+
+A TV uses one secret for every server in a pairing session, so each of those
+servers learns it from the TV's polls. A hostile server among the person's
+chosen targets, working with an attacker on the network path, could therefore
+start a bound request on another chosen server that the phone approves
+without a comparison. The project accepts that residual risk; see the client
+design for the alternatives.
+
+**Rolling deploys.** A node from an older release ignores `binding` on start
+and does not check `binding_secret` on poll. It cannot collect a bound request
+all the same: the schema refuses to mark a bound request consumed unless
+`binding_checked` is set, and only this release sets it, after checking the
+secret. An older node's collection of a bound request fails as a server error
+and rolls back the session it inserted, so the request stays approved for the
+TV to collect through an updated node. Rolling the migration back refuses
+every live bound request before it drops the columns.
 
 ## Remote-playback handoff
 
@@ -133,8 +192,8 @@ the session was bound is held to the same rules:
 session but never moves `expires_at` past `absolute_expires_at`; a database
 trigger holds the same limit for every writer. Both tokens expire no later
 than the session's end, and `expires_in` counts down to it when that is
-sooner than the usual access lifetime. Once it passes, refresh answers 401 on
-v1 and v2, and the TV apps end the handoff.
+sooner than the usual access lifetime. Once it passes, refresh answers 401, and the
+TV apps end the handoff.
 
 **One profile.** A request that names no profile acts as the bound profile, so
 the viewer gate resolves its limits and, for a PIN profile, checks the
@@ -153,7 +212,7 @@ only the v2 routes in `remotePlaybackRoutes`
 and browsing reads for the bound profile, its track choices, subtitles and
 their sync and timing, the settings reads the player makes and the events
 socket. Every other route answers 403
-(v2 `permission_denied`), so a route added later stays closed to handoffs
+(`permission_denied`), so a route added later stays closed to handoffs
 until it is listed, and so is a path whose encoding the router would read
 differently. That shuts out:
 
@@ -163,8 +222,7 @@ differently. That shuts out:
 - household management, even when the bound profile is the primary one;
 - device approvals of every kind, Quick Connect included;
 - settings writes, downloads and download links, Apple push registration,
-  Watch Together and plugin pages;
-- every frozen `/api/v1` route except the public refresh.
+  Watch Together and plugin pages.
 
 The checks that do not run behind `RequireAuth` refuse a handoff too: Apple
 notification display tokens and direct-download links an older release minted
@@ -198,9 +256,8 @@ ordinary sign-in.
 ## Rate limits and guessing
 
 Rate limits are per server and keyed on client IP. The lookup and all three
-decisions (approve, approve-handoff, deny) take a user code, so on both v1
-and v2 they spend one shared per-IP budget, `device_lookup` (60 per minute,
-burst 20 by default), in place of the generic authenticated limiter. A
+decisions (approve, approve-handoff, deny) take a user code, so they spend one
+shared per-IP budget, `device_lookup` (60 per minute, burst 20 by default), in place of the generic authenticated limiter. A
 guesser therefore gets about 60 x 15 = 900 guesses over a code's 15-minute
 life, at most about 1,800 over the 30-minute cap, against 10^8 codes; a hit
 only lets them approve a stranger's TV into their own account. Six-digit Quick
@@ -233,27 +290,6 @@ Every Silo server is independent; there is no Silo-run service between them.
   without its separator. The app matches `server` against its saved servers
   and falls back to the exact `url`; it approves with its own session and
   never switches its active server. The link is only ever a tapped button.
-
-## Frozen v1 surface
-
-`/api/v1` has no cancel route and keeps its values:
-
-- Start answers `expires_in` 600 for a 10-minute request, and
-  `verification_uri_complete` is `<origin>/activate?token=<browser code>`.
-  `<origin>` is the address the device used, not `server.public_url`, because
-  the frozen v1 answer is defined by the request host. The user code is
-  eight digits, which the v1 `XXXX-XXXX` format admits.
-- Lookups never mark a request opened or move its expiry; only v2 lookups do.
-- A canceled request reads as `denied` in v1 lookups and polls, and a
-  decision on one answers v1's `denied` conflict code.
-- Responses never carry `opened`, `expires_at` on polls, `requested_at`,
-  `server_id` or `server_name`.
-- Approve, approve-handoff and deny spend the `device_lookup` budget, as on v2.
-- Approve, approve-handoff and deny refuse API keys and impersonation
-  sessions (see Who decides). v1 applies the rule too because it closes a
-  way to mint a refreshable login session from an API key, and it adds no
-  new v1 value: the refusal is v1's existing 403 with its existing
-  `forbidden` error code.
 
 ## Jellyfin Quick Connect
 
@@ -298,8 +334,7 @@ only for a signed-in account:
   session. Without one, a six-digit lookup answers 401, and from an
   impersonation session 403, whether or not the request exists; a client
   holding an expired token refreshes it instead of reading the code as
-  unknown. The frozen v1 routes never pass an account, so a six-digit code is
-  unknown to them.
+  unknown.
 - Every lookup or decision with a six-digit code by an account spends one
   attempt of that account's budget, `ratelimit.QuickConnectCodePolicy`: 20
   attempts, then 15 minutes locked, answered 429 `rate_limited` with

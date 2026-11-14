@@ -1091,7 +1091,7 @@ func testSettingValueDeletePaths(t *testing.T, newStore func(t *testing.T) users
 
 	t.Run("DeleteProfileCascades", func(t *testing.T) {
 		store, all := seed(t)
-		if err := store.DeleteProfile(ctx, "p1"); err != nil {
+		if _, err := store.DeleteProfile(ctx, "p1"); err != nil {
 			t.Fatalf("DeleteProfile: %v", err)
 		}
 		// Account scope belongs to the account, not to any one household member.

@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -616,6 +617,7 @@ func (e *Enricher) enrichItem(ctx context.Context, item enrichmentItemRow) error
 			Owner:               e.providerIDs,
 			ItemType:            "audiobook",
 			ContentID:           item.ContentID,
+			NoAuthor:            strings.TrimSpace(item.Author) == "",
 		})
 		if admitErr != nil {
 			providerErrs = append(providerErrs, fmt.Errorf("%s candidate admission: %w", p.Slug(), admitErr))
@@ -879,10 +881,69 @@ func (e *Enricher) cacheRemotePoster(ctx context.Context, contentID string, resu
 	}
 }
 
-// persist writes the enriched metadata back to the database.
+// persist writes the enriched metadata back to the database. With a database
+// wired, it first clears the fields an admin has locked from result, so the
+// credits and remote artwork written from result afterwards skip them too.
 func (e *Enricher) persist(ctx context.Context, item enrichmentItemRow, providerIDs map[string]string, result *metadata.MetadataResult) error {
 	contentID := item.ContentID
-	// Build the MetadataUpdate — only set fields that the provider returned.
+	persistMetadata := e.persistMetadataAndProviderIDsTx
+	if e.pool == nil || e.itemRepo == nil {
+		persistMetadata = e.persistMetadataWithoutTx
+	}
+	if err := persistMetadata(ctx, item, providerIDs, result); err != nil {
+		return err
+	}
+
+	// Write people (authors / narrators).
+	if len(result.People) > 0 && e.personRepo != nil && e.itemRepo != nil {
+		if err := e.persistPeople(ctx, contentID, result.People); err != nil {
+			// Non-fatal: log and continue so at least scalar metadata is saved.
+			slog.WarnContext(ctx, "audiobook enrichment: failed to persist people", "component", "audiobooks",
+				"content_id", contentID,
+				"error", err,
+			)
+		}
+	}
+
+	return nil
+}
+
+// clearLockedAudiobookFields drops the provider values for every field an
+// admin has locked on the item, so enrichment leaves those fields as the admin
+// set them. The tagline shares the overview lock. Audiobook credits, authors
+// and narrators, are crew, so the crew lock keeps them.
+func clearLockedAudiobookFields(result *metadata.MetadataResult, locked []int) {
+	isLocked := func(field metadata.MetadataField) bool {
+		return slices.Contains(locked, int(field))
+	}
+	if isLocked(metadata.FieldOverview) {
+		result.Overview, result.Tagline = "", ""
+	}
+	if isLocked(metadata.FieldReleaseDates) {
+		result.Year, result.ReleaseDate = 0, ""
+	}
+	if isLocked(metadata.FieldGenres) {
+		result.Genres = nil
+	}
+	if isLocked(metadata.FieldStudios) {
+		result.Studios = nil
+	}
+	if isLocked(metadata.FieldContentRating) {
+		result.ContentRating = ""
+	}
+	if isLocked(metadata.FieldCrew) {
+		result.People = nil
+	}
+	if isLocked(metadata.FieldImages) {
+		result.PosterPath, result.PosterThumbhash = "", ""
+		result.BackdropPath, result.BackdropThumbhash = "", ""
+		result.LogoPath = ""
+	}
+}
+
+// audiobookMetadataUpdate builds the update for the fields the provider
+// returned.
+func audiobookMetadataUpdate(result *metadata.MetadataResult) *catalog.MetadataUpdate {
 	upd := &catalog.MetadataUpdate{}
 
 	if result.PosterPath != "" {
@@ -934,44 +995,31 @@ func (e *Enricher) persist(ctx context.Context, item enrichmentItemRow, provider
 	if result.Year > 0 {
 		upd.Year = &result.Year
 	}
+	return upd
+}
 
-	if e.pool != nil && e.itemRepo != nil {
-		if err := e.persistMetadataAndProviderIDsTx(ctx, item, providerIDs, upd); err != nil {
-			return err
-		}
-	} else {
-		// Partially wired tests retain the legacy calls. Production always takes
-		// the transaction path above so an identity can never commit without
-		// its metadata and terminal timestamp.
-		if e.providerIDs != nil && len(providerIDs) > 0 {
-			if err := e.providerIDs.ReplaceByContentID(ctx, contentID, providerIDs); err != nil {
-				return fmt.Errorf("persisting audiobook provider IDs: %w", err)
-			}
-		}
-		if err := e.updateMetadataAndTimestamps(ctx, contentID, upd); err != nil {
-			return err
+// persistMetadataWithoutTx serves partially wired tests. Production always
+// takes persistMetadataAndProviderIDsTx so an identity can never commit
+// without its metadata and terminal timestamp.
+func (e *Enricher) persistMetadataWithoutTx(
+	ctx context.Context,
+	item enrichmentItemRow,
+	providerIDs map[string]string,
+	result *metadata.MetadataResult,
+) error {
+	if e.providerIDs != nil && len(providerIDs) > 0 {
+		if err := e.providerIDs.ReplaceByContentID(ctx, item.ContentID, providerIDs); err != nil {
+			return fmt.Errorf("persisting audiobook provider IDs: %w", err)
 		}
 	}
-
-	// Write people (authors / narrators).
-	if len(result.People) > 0 && e.personRepo != nil && e.itemRepo != nil {
-		if err := e.persistPeople(ctx, contentID, result.People); err != nil {
-			// Non-fatal: log and continue so at least scalar metadata is saved.
-			slog.WarnContext(ctx, "audiobook enrichment: failed to persist people", "component", "audiobooks",
-				"content_id", contentID,
-				"error", err,
-			)
-		}
-	}
-
-	return nil
+	return e.updateMetadataAndTimestamps(ctx, item.ContentID, audiobookMetadataUpdate(result))
 }
 
 func (e *Enricher) persistMetadataAndProviderIDsTx(
 	ctx context.Context,
 	item enrichmentItemRow,
 	providerIDs map[string]string,
-	upd *catalog.MetadataUpdate,
+	result *metadata.MetadataResult,
 ) error {
 	tx, err := e.pool.Begin(ctx)
 	if err != nil {
@@ -982,6 +1030,19 @@ func (e *Enricher) persistMetadataAndProviderIDsTx(
 	if err := e.state.AssertClaimTx(ctx, tx, item.ContentID, item.ClaimToken); err != nil {
 		return err
 	}
+	// Read the locks under the row lock, after the provider calls: an admin
+	// who locks a field while the providers answer must still win.
+	var locked []int
+	if err := tx.QueryRow(ctx, `
+		SELECT COALESCE(locked_fields, '{}'::integer[])
+		FROM media_items
+		WHERE content_id = $1
+		FOR UPDATE
+	`, item.ContentID).Scan(&locked); err != nil {
+		return fmt.Errorf("reading audiobook field locks: %w", err)
+	}
+	clearLockedAudiobookFields(result, locked)
+	upd := audiobookMetadataUpdate(result)
 	if e.providerIDs != nil && len(providerIDs) > 0 {
 		if err := e.providerIDs.ReplaceByContentIDTx(ctx, tx, item.ContentID, "audiobook", providerIDs); err != nil {
 			return fmt.Errorf("persisting audiobook provider IDs: %w", err)
@@ -1176,7 +1237,8 @@ func (e *Enricher) applyLocalCoverFallback(ctx context.Context, contentID string
 		UPDATE media_items
 		SET poster_path = $1, poster_thumbhash = $2, updated_at = NOW()
 		WHERE content_id = $3 AND (poster_path IS NULL OR poster_path = '')
-	`, poster, thumb, contentID); err != nil {
+		  AND NOT ($4 = ANY(COALESCE(locked_fields, '{}'::integer[])))
+	`, poster, thumb, contentID, int(metadata.FieldImages)); err != nil {
 		return fmt.Errorf("update poster_path: %w", err)
 	}
 	return nil

@@ -565,7 +565,13 @@ func (s *Service) streamSeasonRecords(ctx context.Context, folderIDs []int, fn f
 			COALESCE(s.metadata_s3_path, ''),
 			COALESCE(s.metadata_etag, ''),
 			s.created_at,
-			s.updated_at
+			s.updated_at,
+			s.locked_fields,
+			s.original_title,
+			s.tagline,
+			s.imdb_id,
+			s.tmdb_id,
+			s.tvdb_id
 		FROM seasons s
 		JOIN exported_series_ids ids ON ids.content_id = s.series_id
 		ORDER BY s.series_id ASC, s.season_number ASC`,
@@ -591,6 +597,12 @@ func (s *Service) streamSeasonRecords(ctx context.Context, folderIDs []int, fn f
 			&record.MetadataEtag,
 			&record.CreatedAt,
 			&record.UpdatedAt,
+			&record.LockedFields,
+			&record.OriginalTitle,
+			&record.Tagline,
+			&record.ImdbID,
+			&record.TmdbID,
+			&record.TvdbID,
 		); err != nil {
 			return fmt.Errorf("scanning export season row: %w", err)
 		}
@@ -620,7 +632,11 @@ func (s *Service) streamEpisodeRecords(ctx context.Context, folderIDs []int, fn 
 			COALESCE(e.metadata_s3_path, ''),
 			COALESCE(e.metadata_etag, ''),
 			e.created_at,
-			e.updated_at
+			e.updated_at,
+			e.locked_fields,
+			e.sort_title,
+			e.original_title,
+			e.tagline
 		FROM episodes e
 		JOIN exported_series_ids ids ON ids.content_id = e.series_id
 		ORDER BY e.series_id ASC, e.season_number ASC, e.episode_number ASC`,
@@ -651,6 +667,10 @@ func (s *Service) streamEpisodeRecords(ctx context.Context, folderIDs []int, fn 
 			&record.MetadataEtag,
 			&record.CreatedAt,
 			&record.UpdatedAt,
+			&record.LockedFields,
+			&record.SortTitle,
+			&record.OriginalTitle,
+			&record.Tagline,
 		); err != nil {
 			return fmt.Errorf("scanning export episode row: %w", err)
 		}

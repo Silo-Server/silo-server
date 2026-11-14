@@ -5,9 +5,10 @@ import (
 	"os"
 	"testing"
 
+	"github.com/jackc/pgx/v5/pgxpool"
+
 	"github.com/Silo-Server/silo-server/internal/blobstore"
 	"github.com/Silo-Server/silo-server/internal/catalog"
-	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 func TestLibraryExplicitTrickplayUpdateAlwaysReconcilesPostgres(t *testing.T) {

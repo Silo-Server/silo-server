@@ -115,7 +115,7 @@ func newDetailBatchFixture(tb testing.TB) *detailBatchFixture {
 	prefix := fmt.Sprintf("jf-detail-batch-%d-", time.Now().UnixNano())
 	userID, movieLibrary := seedDetailBatchLibrary(tb, pool, prefix)
 	users := pgstore.NewPostgresProvider(pool)
-	engine, err := policy.NewEngine(ctx)
+	engine, err := policy.NewEngine(ctx, policy.WithEvalTimeout(time.Minute))
 	if err != nil {
 		tb.Fatalf("NewEngine: %v", err)
 	}

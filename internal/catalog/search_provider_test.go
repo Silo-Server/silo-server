@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"net/http/httptest"
 	"reflect"
 	"strings"
 	"testing"
@@ -321,18 +322,22 @@ func TestMeilisearchMixedSemanticSearchBuildsFederation(t *testing.T) {
 	if federated.Federation.Offset != 100 || federated.Federation.Limit != 25 {
 		t.Fatalf("federation pagination = %#v", federated.Federation)
 	}
-	if len(federated.Queries) != 2 {
+	if len(federated.Queries) != 3 {
 		t.Fatalf("federated queries = %#v", federated.Queries)
 	}
-	media, episode := federated.Queries[0], federated.Queries[1]
-	if media.Hybrid == nil || len(media.Vector) == 0 || !strings.Contains(media.Filter, `type != "episode"`) {
-		t.Fatalf("media federation branch = %#v", media)
+	media, meaning, episode := federated.Queries[0], federated.Queries[1], federated.Queries[2]
+	if media.Hybrid != nil || media.Vector != nil || media.Query != base.Query || !strings.Contains(media.Filter, `type != "episode"`) {
+		t.Fatalf("media keyword branch = %#v", media)
 	}
-	if episode.Hybrid != nil || episode.Vector != nil || !strings.Contains(episode.Filter, `type = "episode"`) {
+	if meaning.Hybrid == nil || meaning.Hybrid.SemanticRatio != 1 || len(meaning.Vector) == 0 ||
+		meaning.RankingScoreThreshold == 0 || meaning.Filter != media.Filter {
+		t.Fatalf("media meaning branch = %#v", meaning)
+	}
+	if episode.Hybrid != nil || episode.Vector != nil || episode.RankingScoreThreshold != 0 || !strings.Contains(episode.Filter, `type = "episode"`) {
 		t.Fatalf("episode federation branch = %#v", episode)
 	}
-	if media.FederationOptions.Weight != 1 || episode.FederationOptions.Weight != 1 {
-		t.Fatalf("federation weights = %v/%v", media.FederationOptions.Weight, episode.FederationOptions.Weight)
+	if media.FederationOptions.Weight != 0.6 || meaning.FederationOptions.Weight != 0.4 || episode.FederationOptions.Weight != 0.6 {
+		t.Fatalf("federation weights = %v/%v/%v", media.FederationOptions.Weight, meaning.FederationOptions.Weight, episode.FederationOptions.Weight)
 	}
 }
 
@@ -873,4 +878,71 @@ type fakeCoverageGate struct {
 
 func (g fakeCoverageGate) CoverageReady(_ []string) (bool, string) {
 	return g.ready, g.reason
+}
+
+// Feature detection must not fail while Meilisearch is down: searches still
+// answer through the PostgreSQL fallback, so capabilities report that path.
+func TestSearchContinuationCapabilitiesReportServingProvider(t *testing.T) {
+	healthy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"pagination":{"maxTotalHits":1000}}`))
+	}))
+	defer healthy.Close()
+	down := httptest.NewServer(http.NotFoundHandler())
+	down.Close()
+	oversized := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"pagination":{"maxTotalHits":5000}}`))
+	}))
+	defer oversized.Close()
+
+	postgres := SearchContinuationCapabilities{Provider: SearchProviderPostgres}
+	for _, tc := range []struct {
+		name        string
+		url         string
+		activeUID   string
+		staleSchema bool
+		circuitOpen bool
+		wantResult  SearchContinuationCapabilities
+		wantErr     error
+	}{
+		{name: "healthy index", url: healthy.URL, activeUID: "silo_media_items", wantResult: SearchContinuationCapabilities{
+			Provider: SearchProviderMeilisearch, ResultWindowLimit: 1000,
+			SessionTTLSeconds: int(searchSessionTTL.Seconds()), MaxSessionsPerAccount: searchSessionsPerAccount,
+		}},
+		{name: "meilisearch unreachable", url: down.URL, activeUID: "silo_media_items", wantResult: postgres},
+		{name: "index not built", url: healthy.URL, wantResult: postgres},
+		{name: "index schema mismatch", url: healthy.URL, activeUID: "silo_media_items", staleSchema: true, wantResult: postgres},
+		{name: "circuit open", url: healthy.URL, activeUID: "silo_media_items", circuitOpen: true, wantResult: postgres},
+		// A window Silo cannot rank is a configuration error, not a fallback.
+		{name: "window unsupported", url: oversized.URL, activeUID: "silo_media_items", wantErr: ErrSearchWindowUnsupported},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			provider, err := NewMeilisearchSearchProvider(nil, nil, nil, MeilisearchProviderConfig{URL: tc.url})
+			if err != nil {
+				t.Fatal(err)
+			}
+			schema := catalogSearchMeilisearchSchemaVersion(provider.config.Embedder, provider.config.IndexTypes, false, false)
+			if tc.staleSchema {
+				schema = 1
+			}
+			provider.stateRepo = fakeMeilisearchIndexStateStore{state: SearchIndexState{ActiveIndexUID: tc.activeUID, SchemaVersion: schema}}
+			if tc.circuitOpen {
+				provider.tripCircuit(errors.New("meilisearch timed out"))
+			}
+			resolver := &CatalogResolver{searchProvider: provider}
+
+			got, err := resolver.SearchContinuationCapabilities(t.Context())
+			if tc.wantErr != nil {
+				if !errors.Is(err, tc.wantErr) {
+					t.Fatalf("SearchContinuationCapabilities error = %v, want %v", err, tc.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("SearchContinuationCapabilities error = %v", err)
+			}
+			if got != tc.wantResult {
+				t.Fatalf("SearchContinuationCapabilities = %+v, want %+v", got, tc.wantResult)
+			}
+		})
+	}
 }

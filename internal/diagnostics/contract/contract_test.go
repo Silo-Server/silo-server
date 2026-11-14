@@ -108,10 +108,82 @@ func TestValidateManifestRejectsCrashOnManualReports(t *testing.T) {
 	}
 }
 
+func TestValidateManifestOccurrenceCount(t *testing.T) {
+	withCount := func(t *testing.T, count string) []byte {
+		t.Helper()
+		var m map[string]json.RawMessage
+		if err := json.Unmarshal(mustReadFixture(t, "v1/fixtures/valid/android-tv-crash-ueh.json"), &m); err != nil {
+			t.Fatalf("parse crash fixture: %v", err)
+		}
+		var report map[string]json.RawMessage
+		if err := json.Unmarshal(m["report"], &report); err != nil {
+			t.Fatalf("parse report: %v", err)
+		}
+		if count == "" {
+			delete(report, "occurrence_count")
+		} else {
+			report["occurrence_count"] = json.RawMessage(count)
+		}
+		reportJSON, err := json.Marshal(report)
+		if err != nil {
+			t.Fatalf("marshal report: %v", err)
+		}
+		m["report"] = reportJSON
+		data, err := json.Marshal(m)
+		if err != nil {
+			t.Fatalf("marshal manifest: %v", err)
+		}
+		return data
+	}
+
+	for _, tc := range []struct {
+		name  string
+		count string
+		want  int
+	}{
+		{name: "absent means one occurrence", count: "", want: 0},
+		{name: "one", count: "1", want: 1},
+		{name: "repeats", count: "42", want: 42},
+		{name: "maximum", count: "1000000", want: MaxOccurrenceCount},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			manifest, err := ValidateManifest(withCount(t, tc.count))
+			if err != nil {
+				t.Fatalf("ValidateManifest() error = %v", err)
+			}
+			if manifest.Report.OccurrenceCount != tc.want {
+				t.Fatalf("OccurrenceCount = %d, want %d", manifest.Report.OccurrenceCount, tc.want)
+			}
+		})
+	}
+
+	for _, tc := range []struct {
+		count   string
+		wantErr string
+	}{
+		{count: "0", wantErr: "must be between 1 and 1000000"},
+		{count: "-1", wantErr: "must be between 1 and 1000000"},
+		{count: "1000001", wantErr: "must be between 1 and 1000000"},
+		{count: "1.5", wantErr: "must be an integer"},
+		{count: `"3"`, wantErr: "must be an integer"},
+		// The schema types the field as integer, so null is not an omission.
+		{count: "null", wantErr: "must not be null"},
+	} {
+		t.Run("rejects "+tc.count, func(t *testing.T) {
+			_, err := ValidateManifest(withCount(t, tc.count))
+			want := "manifest.report.occurrence_count: " + tc.wantErr
+			if err == nil || err.Error() != want {
+				t.Fatalf("ValidateManifest() error = %v, want %q", err, want)
+			}
+		})
+	}
+}
+
 func TestSchemaEnumsAndRequiredFieldsStayInSync(t *testing.T) {
 	manifest := mustReadObject(t, "v1/manifest.schema.json")
 	assertStringsEqual(t, "manifest.required", schemaStrings(t, manifest, "required"), manifestRequiredFields)
 	assertConstInt(t, "manifest.schema_version.const", schemaValue(t, manifest, "properties", "schema_version", "const"), SchemaVersion)
+	assertConstInt(t, "manifest.report.occurrence_count.maximum", schemaValue(t, manifest, "properties", "report", "properties", "occurrence_count", "maximum"), MaxOccurrenceCount)
 	assertStringsEqual(t, "manifest.report.required", schemaStrings(t, manifest, "properties", "report", "required"), manifestReportRequiredFields)
 	assertStringsEqual(t, "manifest.destination.required", schemaStrings(t, manifest, "properties", "destination", "required"), manifestDestinationRequiredFields)
 	assertStringsEqual(t, "manifest.consent.required", schemaStrings(t, manifest, "properties", "consent", "required"), manifestConsentRequiredFields)
@@ -320,4 +392,34 @@ func mapsEqual(got, want map[string]map[string]string) bool {
 		}
 	}
 	return true
+}
+
+func TestValidateLogLineKeepsPlaybackSummaryAndHangAttrs(t *testing.T) {
+	summary := []byte(`{"ts":"2026-07-19T21:40:02Z","run":"run_1","lvl":"I","cat":"playback","tag":"PlaybackSummary","msg":"playback session summary","attrs":{"first_frame_ms":1840,"stall_count":3,"stall_total_ms":5200,"rebuffer_count":1,"rebuffer_total_ms":2100,"rebuffer_max_ms":2100,"bitrate_change_count":1,"plan_change_count":1,"error_count":1,"failure_code":"network_timeout","session_ms":1260000}}`)
+	got, err := ValidateLogLine(summary)
+	if err != nil {
+		t.Fatalf("ValidateLogLine(summary) error = %v", err)
+	}
+	if len(got.Attrs) != 11 {
+		t.Fatalf("summary attrs = %#v, want all 11 kept", got.Attrs)
+	}
+
+	hang := []byte(`{"ts":"2026-07-19T21:41:10Z","run":"run_1","lvl":"W","cat":"lifecycle","tag":"MainThreadHang","msg":"main thread did not respond","attrs":{"duration_ms":3500,"resident_mb":412}}`)
+	got, err = ValidateLogLine(hang)
+	if err != nil {
+		t.Fatalf("ValidateLogLine(hang) error = %v", err)
+	}
+	if _, ok := got.Attrs["resident_mb"]; !ok {
+		t.Fatalf("resident_mb dropped: %#v", got.Attrs)
+	}
+
+	for _, line := range []string{
+		`{"ts":"2026-07-19T21:40:02Z","run":"run_1","lvl":"I","cat":"playback","tag":"PlaybackSummary","msg":"summary","attrs":{"stall_count":"3"}}`,
+		`{"ts":"2026-07-19T21:40:02Z","run":"run_1","lvl":"I","cat":"playback","tag":"PlaybackSummary","msg":"summary","attrs":{"failure_code":7}}`,
+		`{"ts":"2026-07-19T21:41:10Z","run":"run_1","lvl":"W","cat":"lifecycle","tag":"MainThreadHang","msg":"hang","attrs":{"resident_mb":"412"}}`,
+	} {
+		if _, err := ValidateLogLine([]byte(line)); err == nil {
+			t.Fatalf("ValidateLogLine(%s) error = nil, want type mismatch", line)
+		}
+	}
 }

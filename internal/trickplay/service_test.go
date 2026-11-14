@@ -212,6 +212,94 @@ func TestGeneratePublishesDecodedGeometryAndRejectsMixedChunks(t *testing.T) {
 	}
 }
 
+// fakeChecker serves every key except those in missing, through an endpoint
+// that fails with err.
+type fakeChecker struct {
+	missing map[string]bool
+	err     error
+}
+
+func (c fakeChecker) ObjectAvailable(_ context.Context, key string) (bool, error) {
+	return !c.missing[key], c.err
+}
+
+// fakeDeliveryRecords holds claimable checks and records confirmations.
+type fakeDeliveryRecords struct {
+	due       [][]DeliveryCheck
+	confirmed []int
+}
+
+func (r *fakeDeliveryRecords) ClaimDeliveryChecks(context.Context, string, string, time.Duration, int) ([]DeliveryCheck, error) {
+	if len(r.due) == 0 {
+		return nil, nil
+	}
+	batch := r.due[0]
+	r.due = r.due[1:]
+	return batch, nil
+}
+
+func (r *fakeDeliveryRecords) RecordDelivery(_ context.Context, fileID int, _ int64, _, _ string) error {
+	r.confirmed = append(r.confirmed, fileID)
+	return nil
+}
+
+func TestGenerateConfirmsExternalDelivery(t *testing.T) {
+	tests := map[string]struct {
+		checker fakeChecker
+		want    string
+	}{
+		"last sheet served": {fakeChecker{}, "scope-a"},
+		"last sheet lags":   {fakeChecker{missing: map[string]bool{"trickplay/42/7001/4.7001.jpg": true}}, ""},
+		"endpoint fails":    {fakeChecker{err: errors.New("status 403")}, ""},
+	}
+	for name, tt := range tests {
+		q := newFakeQueue()
+		s := testService(q, &fakeStore{}, &fakeExtractor{}, fakeSettings{})
+		s.delivery = &externalDelivery{scope: "scope-a", checker: tt.checker, records: &fakeDeliveryRecords{}}
+		s.process(t.Context(), testJob(42, 3600))
+		// An unconfirmed revision still publishes, for the signed server route.
+		if published, ok := q.published[42]; !ok || len(published.SheetBytes) != 5 || published.DeliveryScope != tt.want {
+			t.Errorf("%s: published %t with scope %q, want %q", name, ok, published.DeliveryScope, tt.want)
+		}
+	}
+}
+
+func TestConfirmDeliveryPassStopsOnEndpointTrouble(t *testing.T) {
+	full := func(first int) []DeliveryCheck {
+		batch := make([]DeliveryCheck, deliveryBatch)
+		for i := range batch {
+			batch[i] = DeliveryCheck{FileID: first + i, Revision: 1, SheetCount: 1}
+		}
+		return batch
+	}
+	lagging := map[string]bool{SheetKey(1, 1, 0): true}
+	everything := map[string]bool{}
+	for _, check := range full(1) {
+		everything[SheetKey(check.FileID, 1, 0)] = true
+	}
+	tests := map[string]struct {
+		checker fakeChecker
+		want    int
+		wantErr bool
+	}{
+		// One lagging revision waits its recheck; the pass goes on.
+		"one revision lags": {fakeChecker{missing: lagging}, 2*deliveryBatch - 1, false},
+		// A batch that confirms nothing ends the pass before the backlog.
+		"nothing served": {fakeChecker{missing: everything}, 0, false},
+		// So does a probe error.
+		"endpoint fails": {fakeChecker{err: errors.New("status 403")}, 0, true},
+	}
+	for name, tt := range tests {
+		records := &fakeDeliveryRecords{due: [][]DeliveryCheck{full(1), full(1000)}}
+		s := testService(newFakeQueue(), &fakeStore{}, &fakeExtractor{}, fakeSettings{})
+		s.delivery = &externalDelivery{scope: "scope-a", checker: tt.checker, records: records}
+		err := s.confirmDeliveryPass(t.Context())
+		if len(records.confirmed) != tt.want || (err != nil) != tt.wantErr {
+			t.Errorf("%s: confirmed %d with error %v, want %d", name, len(records.confirmed), err, tt.want)
+		}
+	}
+}
+
 func TestProcessOutcomes(t *testing.T) {
 	unreadable := errors.New("stat: no such file")
 	tests := map[string]struct {

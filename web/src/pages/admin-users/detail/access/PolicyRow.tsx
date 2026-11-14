@@ -7,6 +7,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { useT } from "@/i18n";
+import { TOUCH_HIT_AREA, TOUCH_TARGETS } from "@/lib/touchTargets";
 import { cn } from "@/lib/utils";
 
 import { KeyValueRow, SourceTag } from "../ui";
@@ -63,6 +65,7 @@ export function DefaultCustomSegment({
   disabled?: boolean;
   children?: ReactNode;
 }) {
+  const t = useT();
   const option = (pressed: boolean, text: string, next: boolean) => (
     <button
       type="button"
@@ -73,6 +76,7 @@ export function DefaultCustomSegment({
       }}
       className={cn(
         "rounded-md px-2.5 py-1 text-xs font-medium whitespace-nowrap transition-colors disabled:opacity-50",
+        TOUCH_HIT_AREA,
         !pressed && "text-muted-foreground hover:text-foreground",
         pressed && (next ? "bg-amber-500/15 text-amber-300" : "bg-accent text-foreground"),
       )}
@@ -87,8 +91,14 @@ export function DefaultCustomSegment({
         aria-label={label}
         className="border-border/70 inline-flex shrink-0 rounded-lg border p-0.5"
       >
-        {option(!custom, defaultText ? `Default · ${defaultText}` : "Default", false)}
-        {option(custom, "Custom", true)}
+        {option(
+          !custom,
+          defaultText
+            ? t("web.admin.users.detail.access.segment.defaultWithValue", { value: defaultText })
+            : t("web.admin.users.detail.access.segment.default"),
+          false,
+        )}
+        {option(custom, t("web.admin.users.detail.access.segment.custom"), true)}
       </div>
       {custom ? children : null}
     </div>
@@ -123,6 +133,7 @@ export function ChoicePolicyEdit<T extends string | boolean>({
   onChange: (row: RowDraft<T>) => void;
   disabled?: boolean;
 }) {
+  const t = useT();
   const labelOf = (value: T | undefined) =>
     value === undefined ? undefined : options.find((option) => option.value === value)?.label;
   return (
@@ -149,9 +160,9 @@ export function ChoicePolicyEdit<T extends string | boolean>({
             disabled={disabled}
           >
             <SelectTrigger aria-label={label} className="w-36">
-              <SelectValue placeholder="Choose" />
+              <SelectValue placeholder={t("web.admin.users.detail.access.choose")} />
             </SelectTrigger>
-            <SelectContent>
+            <SelectContent className={TOUCH_TARGETS}>
               {options.map((option) => (
                 <SelectItem key={key(option.value)} value={key(option.value)}>
                   {option.label}

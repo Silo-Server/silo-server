@@ -13,15 +13,20 @@ import {
   deviceRecencyGroup,
   type DeviceRecencyGroup,
 } from "@/hooks/queries/devices";
+import { useT, type MessageKey } from "@/i18n";
+import { lastSeenLabel } from "./lastSeenLabel";
 import { cn } from "@/lib/utils";
 
-const GROUP_TITLES: Record<DeviceRecencyGroup, string> = {
-  current: "Using now",
-  week: "This week",
-  earlier: "Earlier",
+const GROUP_TITLES: Record<DeviceRecencyGroup, MessageKey> = {
+  current: "web.settings.deviceList.group.current",
+  week: "web.settings.deviceList.group.week",
+  earlier: "web.settings.deviceList.group.earlier",
 };
 
 const GROUP_ORDER: DeviceRecencyGroup[] = ["current", "week", "earlier"];
+
+/** Shown in place of a zero changed-settings count. */
+const NO_CHANGES_GLYPH = "—";
 
 /**
  * A device is "dormant" when nobody has used it for three months and it carries
@@ -96,11 +101,16 @@ export function DeviceList({
   ownProfileId,
   now,
 }: DeviceListProps) {
+  const t = useT();
   const [showDormant, setShowDormant] = useState(false);
   // Counts come from the unfiltered list so a chip keeps showing how many
   // devices it would reveal, rather than collapsing to zero once another chip
   // is active.
-  const profiles = useMemo(() => profileOptions(devices, ownProfileId), [devices, ownProfileId]);
+  const otherProfile = t("web.settings.deviceList.otherProfile");
+  const profiles = useMemo(
+    () => profileOptions(devices, otherProfile, ownProfileId),
+    [devices, otherProfile, ownProfileId],
+  );
 
   const matching = useMemo(() => {
     const query = search.trim().toLowerCase();
@@ -116,7 +126,8 @@ export function DeviceList({
         device.profile_name.toLowerCase().includes(query)
       );
     });
-  }, [devices, search, profileFilter]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- t: the platform labels searched follow the interface language
+  }, [devices, search, profileFilter, t]);
 
   // Searching means you are looking for something specific, so a search spans
   // everything — hiding a dormant device from its own name would be a bug.
@@ -142,7 +153,7 @@ export function DeviceList({
           existing.devices.push(device);
         } else {
           byProfile.set(device.profile_id, {
-            title: device.profile_name || "Other profile",
+            title: device.profile_name || otherProfile,
             devices: [device],
           });
         }
@@ -151,23 +162,26 @@ export function DeviceList({
     }
 
     return GROUP_ORDER.map((group) => ({
-      title: GROUP_TITLES[group],
+      title: t(GROUP_TITLES[group]),
       devices: filtered.filter((device) => deviceRecencyGroup(device, now) === group),
     })).filter((section) => section.devices.length > 0);
-  }, [filtered, groupByProfile, profileFilter, now]);
+  }, [filtered, groupByProfile, profileFilter, now, otherProfile, t]);
 
   return (
     <div className="surface-panel rounded-[1.5rem] border-0 p-3 shadow-none">
       <div className="relative mb-1">
-        <Search className="text-muted-foreground pointer-events-none absolute top-1/2 left-2.5 h-3.5 w-3.5 -translate-y-1/2" />
+        <Search className="text-muted-foreground pointer-events-none absolute start-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2" />
         <Input
           value={search}
           onChange={(event) => onSearchChange(event.target.value)}
-          placeholder={`Search ${devices.length} ${devices.length === 1 ? "device" : "devices"}`}
-          aria-label="Search devices"
+          placeholder={t("web.settings.deviceList.searchPlaceholder", {
+            count: devices.length,
+            count_text: devices.length,
+          })}
+          aria-label={t("web.settings.deviceList.searchLabel")}
           // text-base on mobile: iOS Safari zooms the viewport when a focused
           // input's font is under 16px, and the zoom does not undo itself.
-          className="h-11 pl-8 text-base xl:h-9 xl:text-[13px]"
+          className="h-11 ps-8 text-base xl:h-9 xl:text-[13px]"
         />
       </div>
 
@@ -179,10 +193,10 @@ export function DeviceList({
         <div
           className="flex gap-1.5 overflow-x-auto px-0.5 pt-2 pb-1 [-ms-overflow-style:none] [scrollbar-width:none] xl:flex-wrap xl:gap-1 xl:overflow-visible [&::-webkit-scrollbar]:hidden"
           role="group"
-          aria-label="Filter by profile"
+          aria-label={t("web.settings.deviceList.profileFilterLabel")}
         >
           <ProfileChip
-            label="Everyone"
+            label={t("web.settings.deviceList.everyone")}
             count={devices.length}
             active={profileFilter === null}
             onClick={() => onProfileFilterChange(null)}
@@ -204,10 +218,10 @@ export function DeviceList({
       {sections.length === 0 ? (
         <p className="text-muted-foreground px-2 py-6 text-center text-[13px]">
           {devices.length === 0
-            ? "No devices yet."
+            ? t("web.settings.deviceList.emptyNone")
             : searching
-              ? "No devices match that search."
-              : "Nothing here. Try showing unused devices."}
+              ? t("web.settings.deviceList.emptySearch")
+              : t("web.settings.deviceList.emptyFiltered")}
         </p>
       ) : null}
 
@@ -215,7 +229,7 @@ export function DeviceList({
           with a few hundred devices produced a thirteen-thousand-pixel page,
           so the settings never came into view. The list keeps its own scroll
           and the page stays roughly one screen. */}
-      <div className="overlay-scroll -mr-1.5 max-h-[min(60vh,520px)] overflow-y-auto overscroll-contain pr-1.5 xl:max-h-[calc(100vh-16rem)]">
+      <div className="overlay-scroll -me-1.5 max-h-[min(60vh,520px)] overflow-y-auto overscroll-contain pe-1.5 xl:max-h-[calc(100vh-16rem)]">
         {sections.map((section) => (
           <section key={section.title}>
             <h3 className="text-muted-foreground bg-surface sticky top-0 z-10 px-2 pt-3 pb-1 text-xs font-semibold tracking-[0.09em] uppercase">
@@ -246,8 +260,11 @@ export function DeviceList({
           className="text-muted-foreground hover:text-foreground mt-1 inline-flex min-h-11 w-full items-center justify-center gap-1 rounded-xl text-[13px] transition-colors xl:min-h-9"
         >
           {showDormant
-            ? "Hide unused devices"
-            : `Show ${dormantCount} unused ${dormantCount === 1 ? "device" : "devices"}`}
+            ? t("web.settings.deviceList.hideUnused")
+            : t("web.settings.deviceList.showUnused", {
+                count: dormantCount,
+                count_text: dormantCount,
+              })}
         </button>
       ) : null}
     </div>
@@ -268,7 +285,11 @@ interface ProfileOption {
  * so a chip stays where someone last saw it, rather than moving whenever a
  * device is used.
  */
-function profileOptions(devices: UserDevice[], ownProfileId?: string): ProfileOption[] {
+function profileOptions(
+  devices: UserDevice[],
+  otherProfile: string,
+  ownProfileId?: string,
+): ProfileOption[] {
   const byId = new Map<string, ProfileOption>();
   for (const device of devices) {
     const existing = byId.get(device.profile_id);
@@ -277,7 +298,7 @@ function profileOptions(devices: UserDevice[], ownProfileId?: string): ProfileOp
     } else {
       byId.set(device.profile_id, {
         id: device.profile_id,
-        name: device.profile_name || "Other profile",
+        name: device.profile_name || otherProfile,
         count: 1,
       });
     }
@@ -300,6 +321,7 @@ function ProfileChip({
   active: boolean;
   onClick: () => void;
 }) {
+  const t = useT();
   return (
     <button
       type="button"
@@ -307,7 +329,11 @@ function ProfileChip({
       aria-pressed={active}
       // The visible label and the count are separate elements, so without this
       // a screen reader announces them run together as "Everyone3".
-      aria-label={`${label}, ${count} ${count === 1 ? "device" : "devices"}`}
+      aria-label={t("web.settings.deviceList.profileChipLabel", {
+        label,
+        count,
+        count_text: count,
+      })}
       className={cn(
         "inline-flex min-h-11 shrink-0 items-center gap-1.5 rounded-full border px-3.5 text-[13px] font-medium whitespace-nowrap transition-colors xl:min-h-0 xl:px-2.5 xl:py-1 xl:text-[12px]",
         active
@@ -332,6 +358,7 @@ function DeviceRow({
   onSelect: (device: UserDevice) => void;
   now: number;
 }) {
+  const t = useT();
   const kind = classifyPlatform(device.device_platform);
   return (
     <button
@@ -339,7 +366,7 @@ function DeviceRow({
       aria-current={selected ? "true" : undefined}
       onClick={() => onSelect(device)}
       className={cn(
-        "flex w-full items-center gap-2.5 rounded-xl px-2 py-2.5 text-left transition-colors",
+        "flex w-full items-center gap-2.5 rounded-xl px-2 py-2.5 text-start transition-colors",
         // Rows are a tap target on a phone and a selection on a desktop, so
         // they carry a comfortable minimum height only where that matters.
         "min-h-14 xl:min-h-0",
@@ -354,13 +381,15 @@ function DeviceRow({
           {deviceDisplayName(device)}
         </span>
         <span className="text-muted-foreground block truncate text-[13px]">
-          {device.is_current_device ? "This device" : lastSeenLabel(device.last_seen_at, now)}
+          {device.is_current_device
+            ? t("web.settings.deviceList.thisDevice")
+            : lastSeenLabel(device.last_seen_at, now)}
         </span>
       </span>
       {device.is_current_device ? (
         <span
           className="bg-success h-1.5 w-1.5 shrink-0 rounded-full"
-          aria-label="You're on this device"
+          aria-label={t("web.settings.deviceList.currentDeviceLabel")}
         />
       ) : null}
       <ChangedCount count={device.changed_count} />
@@ -371,36 +400,25 @@ function DeviceRow({
 }
 
 function ChangedCount({ count }: { count: number }) {
+  const t = useT();
   if (count <= 0) {
     return (
-      <span className="text-muted-foreground shrink-0 text-xs" aria-label="Nothing changed">
-        —
+      <span
+        className="text-muted-foreground shrink-0 text-xs"
+        aria-label={t("web.settings.deviceList.nothingChanged")}
+      >
+        {NO_CHANGES_GLYPH}
       </span>
     );
   }
   return (
     <span
       className="shrink-0 rounded-full border border-amber-500/30 bg-amber-500/10 px-1.5 text-xs font-semibold text-amber-300"
-      aria-label={`${count} ${count === 1 ? "setting" : "settings"} changed here`}
+      aria-label={t("web.settings.deviceList.changedCount", { count, count_text: count })}
     >
       {count}
     </span>
   );
 }
 
-/** Plain relative time; the exact timestamp is not what anyone is asking. */
-export function lastSeenLabel(iso: string, now: number): string {
-  const seen = Date.parse(iso);
-  if (Number.isNaN(seen)) return "Never used";
-  const minutes = Math.max(0, Math.round((now - seen) / 60000));
-  if (minutes < 60) return "Less than an hour ago";
-  const hours = Math.round(minutes / 60);
-  if (hours < 24) return `${hours} ${hours === 1 ? "hour" : "hours"} ago`;
-  const days = Math.round(hours / 24);
-  if (days === 1) return "Yesterday";
-  if (days < 30) return `${days} days ago`;
-  const months = Math.round(days / 30);
-  if (months < 12) return `${months} ${months === 1 ? "month" : "months"} ago`;
-  const years = Math.round(months / 12);
-  return `${years} ${years === 1 ? "year" : "years"} ago`;
-}
+export { lastSeenLabel };

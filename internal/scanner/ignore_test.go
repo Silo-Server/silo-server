@@ -96,8 +96,8 @@ func TestIgnoreFilePatternsAtLibraryRootSkipOnlyMatches(t *testing.T) {
 		t.Fatalf("scoped walk: %v, failures: %v", err, walkFailures)
 	}
 	assertFilePaths(t, files, root, []string{"Show/Season 01/Episode 01.mkv"})
-	if libraryRootSkipped(root) {
-		t.Fatal("a root .ignore with patterns must not skip the root")
+	if skipped, err := libraryRootSkipped(root); err != nil || skipped {
+		t.Fatalf("a root .ignore with patterns must not skip the root: skipped=%v err=%v", skipped, err)
 	}
 }
 
@@ -196,22 +196,47 @@ func TestIgnoreFileDirectoryPatternMatchesSymlinkedDirectory(t *testing.T) {
 func TestLibraryRootSkipped(t *testing.T) {
 	t.Parallel()
 
-	cases := []struct {
-		name  string
-		setup func(root string)
-		want  bool
-	}{
-		{"no ignore files", func(string) {}, false},
-		{"empty .ignore", func(root string) { writeTestFile(t, filepath.Join(root, ".ignore"), "") }, true},
-		{".ignore with patterns", func(root string) { writeTestFile(t, filepath.Join(root, ".ignore"), ".downloads\n") }, false},
-		{".nomedia", func(root string) { writeTestFile(t, filepath.Join(root, ".nomedia"), "") }, true},
-		{".ignore directory", func(root string) { writeTestFile(t, filepath.Join(root, ".ignore", "x"), "") }, false},
+	type rootCase struct {
+		name    string
+		setup   func(root string)
+		want    bool
+		wantErr bool
+	}
+	cases := []rootCase{
+		{"no ignore files", func(string) {}, false, false},
+		{"empty .ignore", func(root string) { writeTestFile(t, filepath.Join(root, ".ignore"), "") }, true, false},
+		{".ignore with patterns", func(root string) { writeTestFile(t, filepath.Join(root, ".ignore"), ".downloads\n") }, false, false},
+		{".nomedia", func(root string) { writeTestFile(t, filepath.Join(root, ".nomedia"), "") }, true, false},
+		{".ignore directory", func(root string) { writeTestFile(t, filepath.Join(root, ".ignore", "x"), "") }, false, false},
+	}
+	if os.Geteuid() != 0 { // permission bits do not deny root
+		cases = append(cases, rootCase{"unreadable .ignore", func(root string) {
+			writeTestFile(t, filepath.Join(root, ".ignore"), "")
+			if err := os.Chmod(filepath.Join(root, ".ignore"), 0o000); err != nil {
+				t.Fatal(err)
+			}
+		}, false, true})
 	}
 	for _, tc := range cases {
 		root := t.TempDir()
 		tc.setup(root)
-		if got := libraryRootSkipped(root); got != tc.want {
-			t.Errorf("%s: libraryRootSkipped = %v, want %v", tc.name, got, tc.want)
+		got, err := libraryRootSkipped(root)
+		if got != tc.want || (err != nil) != tc.wantErr {
+			t.Errorf("%s: libraryRootSkipped = %v, %v; want %v, error %v", tc.name, got, err, tc.want, tc.wantErr)
+		}
+	}
+}
+
+// A file that vanishes after the resolver saw it must still be matched as a
+// file, or autoscan records it as ignored and never reconciles its row.
+func TestFileIgnoredMatchesAVanishedFileAsAFile(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	writeTestFile(t, filepath.Join(root, ".ignore"), "Movie.mkv/\n")
+	for _, name := range []string{"Movie.mkv", ".Hidden.mkv"} {
+		ignored, err := FileIgnored(filepath.Join(root, name), []string{root})
+		if err != nil || ignored {
+			t.Errorf("FileIgnored(%s) = %v, %v; want false, nil", name, ignored, err)
 		}
 	}
 }
@@ -277,8 +302,10 @@ func TestDirectoryNamedLikeMarkerIsNotAMarker(t *testing.T) {
 		writeTestFile(t, filepath.Join(root, name, "Episode 01.mkv"), "test")
 		writeTestFile(t, filepath.Join(root, "Movie.mkv"), "test")
 
+		// The directory is skipped as a hidden one, but it is no marker, so
+		// its parent is still scanned.
 		files := collectTestFilePaths(t, root, "series")
-		assertFilePaths(t, files, root, []string{name + "/Episode 01.mkv", "Movie.mkv"})
+		assertFilePaths(t, files, root, []string{"Movie.mkv"})
 	}
 }
 
@@ -332,7 +359,7 @@ func TestAudiobookScanHonorsIgnoreFiles(t *testing.T) {
 	writeTestFile(t, filepath.Join(root, "junk", "Ignore Me.mp3"), "test")
 	writeTestFile(t, filepath.Join(root, ".siloignore"), "junk/*\nsample\n")
 
-	scans, err := collectAudiobookRootScans(t.Context(), 1, []string{root}, nil, true)
+	scans, err := collectAudiobookRootScans(t.Context(), 1, []string{root}, []string{root}, true)
 	if err != nil {
 		t.Fatalf("collect audiobook root scans: %v", err)
 	}
@@ -403,5 +430,96 @@ func TestPodcastShowAudioFilesAppliesInheritedRootPatterns(t *testing.T) {
 	want := []string{filepath.Join(show, "Episode 01.mp3")}
 	if len(files) != len(want) || files[0] != want[0] {
 		t.Fatalf("audio files = %v, want %v", files, want)
+	}
+}
+
+// Hidden directories below a library root are skipped without being read, so
+// one the scan cannot open is not a walk failure. A library root is walked
+// whatever its name, and a scoped scan inside a hidden directory reads nothing.
+func TestHiddenDirectoriesAreSkipped(t *testing.T) {
+	t.Parallel()
+
+	root := filepath.Join(t.TempDir(), ".media")
+	writeTestFile(t, filepath.Join(root, "Alpha (2020)", "Alpha (2020).mkv"), "x")
+	writeTestFile(t, filepath.Join(root, ".tool-workspace", "Beta (2021)", "Beta (2021).mkv"), "x")
+	writeTestFile(t, filepath.Join(root, "Alpha (2020)", ".backup", "Alpha (2020).mkv"), "x")
+	writeTestFile(t, filepath.Join(root, "Gamma (2022)", "Gamma (2022).mkv"), "x")
+	// Dangling, so reading it would be a walk failure.
+	if err := os.Symlink(filepath.Join(root, "missing"), filepath.Join(root, ".tool-workspace", "broken")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(root, "Gamma (2022)"), filepath.Join(root, ".linked")); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, libraryType := range []string{"movies", "series"} {
+		assertFilePaths(t, collectTestFilePaths(t, root, libraryType), root, []string{
+			"Alpha (2020)/Alpha (2020).mkv",
+			"Gamma (2022)/Gamma (2022).mkv",
+		})
+	}
+
+	scope := filepath.Join(root, ".tool-workspace", "Beta (2021)")
+	files, walkFailures, err := collectLogicalFilePaths(t.Context(), []string{scope}, "movies", []string{root})
+	if err != nil {
+		t.Fatalf("collectLogicalFilePaths: %v", err)
+	}
+	if len(files) != 0 || len(walkFailures) != 0 {
+		t.Fatalf("scope inside a hidden directory: files = %v, walkFailures = %v, want none", files, walkFailures)
+	}
+}
+
+// A library root nested inside another is walked by a full scan as an
+// ordinary folder of the outer root, so the outer root's ignore files apply
+// below it. Scoped walks, which subtree and Autoscan scans use, and the
+// ebook full scan, which walks every configured root, must agree, or a
+// folder the outer ignore file excludes is imported and then retired again.
+func TestOuterRootIgnoreRulesApplyBelowANestedRoot(t *testing.T) {
+	t.Parallel()
+
+	lib := t.TempDir()
+	nested := filepath.Join(lib, "nested")
+	writeTestFile(t, filepath.Join(lib, ".siloignore"), "nested/Excluded*\n")
+	writeTestFile(t, filepath.Join(nested, "Excluded Movie (2024)", "Excluded Movie (2024).mkv"), "test")
+	writeTestFile(t, filepath.Join(nested, "Kept (2024)", "Kept (2024).mkv"), "test")
+	writeTestFile(t, filepath.Join(nested, "Excluded Book.epub"), "test")
+	writeTestFile(t, filepath.Join(nested, "Kept Book.epub"), "test")
+	roots := []string{nested, lib}
+
+	full, failures, err := collectLogicalFilePaths(t.Context(), compactScanRoots(roots), "movies", roots)
+	if err != nil || len(failures) != 0 {
+		t.Fatalf("full walk: %v, failures: %v", err, failures)
+	}
+	sort.Strings(full)
+	assertFilePaths(t, full, lib, []string{"nested/Kept (2024)/Kept (2024).mkv"})
+
+	for scope, want := range map[string][]string{
+		nested: {"nested/Kept (2024)/Kept (2024).mkv"},
+		filepath.Join(nested, "Excluded Movie (2024)"): nil,
+	} {
+		files, failures, err := collectLogicalFilePaths(t.Context(), []string{scope}, "movies", roots)
+		if err != nil || len(failures) != 0 {
+			t.Fatalf("scoped walk of %s: %v, failures: %v", scope, err, failures)
+		}
+		sort.Strings(files)
+		assertFilePaths(t, files, lib, want)
+	}
+
+	scans, err := collectEbookRootScans(t.Context(), 1, roots, roots)
+	if err != nil {
+		t.Fatalf("ebook scan: %v", err)
+	}
+	var books []string
+	for _, scan := range scans {
+		books = append(books, scan.files...)
+	}
+	sort.Strings(books)
+	assertFilePaths(t, books, lib, []string{"nested/Kept Book.epub"})
+
+	// An explicit single-file scan (ScanFile) still ignores ignore files.
+	excludedBook := filepath.Join(nested, "Excluded Book.epub")
+	scans, err = collectEbookRootScans(t.Context(), 1, []string{excludedBook}, roots)
+	if err != nil || len(scans) != 1 || len(scans[0].files) != 1 || scans[0].files[0] != excludedBook {
+		t.Fatalf("explicit ebook file scan = %+v, %v; want %s", scans, err, excludedBook)
 	}
 }

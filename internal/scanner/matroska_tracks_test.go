@@ -122,6 +122,28 @@ func TestMatroskaSubtitleTrackIDsMatchesByStreamPosition(t *testing.T) {
 			subtitles: []matroskaSubtitleStream{{1, "ass"}, {2, "ass"}, {3, "ass"}},
 			want:      idMatches("", "", "4"),
 		},
+		{
+			// LanguageBCP47 overrides the legacy Language FFprobe reports,
+			// canonicalized, on every stream whose codec the entry
+			// corroborates, including one with no usable ID; a malformed
+			// tag is ignored.
+			name: "BCP 47 languages",
+			tracks: []mediaprobe.MatroskaTrack{
+				mkvTrack(1, mkvVideo, "V_VP9"),
+				{Number: 2, Type: mkvSubtitle, CodecID: "S_TEXT/UTF8", LanguageBCP47: "pt-br"},
+				{Number: 3, Type: mkvSubtitle, CodecID: "S_TEXT/WEBVTT", LanguageBCP47: "zh-Hant"},
+				{Number: 4, Type: mkvSubtitle, CodecID: "S_ASS", LanguageBCP47: "es-419"},
+				{Number: 5, Type: mkvSubtitle, CodecID: "S_TEXT/UTF8", LanguageBCP47: "not a tag"},
+			},
+			video:     1,
+			subtitles: []matroskaSubtitleStream{{1, "subrip"}, {2, ""}, {3, "ass"}, {4, "subrip"}},
+			want: []matroskaSubtitleMatch{
+				{ID: "2", Language: "pt-BR"},
+				{ID: "3", Codec: "webvtt", IndexOnly: true, Language: "zh-Hant"},
+				{Language: "es-419"},
+				{ID: "5"},
+			},
+		},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -195,27 +217,43 @@ func TestMatroskaSubtitleTrackIDsRejectsUncertainLayouts(t *testing.T) {
 	}
 }
 
-func TestProbeFileRecordsMatroskaSubtitleTrackNumbers(t *testing.T) {
+func TestProbeFileRecordsMatroskaSubtitleTracks(t *testing.T) {
 	ffprobe, err := exec.LookPath("ffprobe")
 	if err != nil {
 		t.Skip("ffprobe not installed")
 	}
-	probe, err := ProbeFile(context.Background(), ffprobe, "testdata/subtitles.mkv")
-	if err != nil {
-		t.Fatal(err)
+	type subtitle struct {
+		index    int
+		codec    string
+		id       string
+		language string
 	}
-	if probe.Container != "mkv" || len(probe.SubtitleTracks) != 2 {
-		t.Fatalf("container %q with subtitle tracks %+v", probe.Container, probe.SubtitleTracks)
+	tests := []struct {
+		fixture string
+		want    []subtitle
+	}{
+		{"testdata/subtitles.mkv", []subtitle{{2, "subrip", "3", "en"}, {3, "ass", "4", "ja"}}},
+		// Written like mkvmerge: legacy Language "por", which is all FFprobe
+		// reports, and LanguageBCP47 "pt-BR" / "pt-PT".
+		{"testdata/subtitles-bcp47.mkv", []subtitle{{1, "subrip", "2", "pt-BR"}, {2, "subrip", "3", "pt-PT"}}},
 	}
-	for i, want := range []struct {
-		index int
-		codec string
-		id    string
-	}{{2, "subrip", "3"}, {3, "ass", "4"}} {
-		got := probe.SubtitleTracks[i]
-		if got.Index != want.index || got.Codec != want.codec || got.ContainerTrackID != want.id {
-			t.Fatalf("subtitle %d = index %d codec %q id %q, want %+v", i, got.Index, got.Codec, got.ContainerTrackID, want)
-		}
+	for _, tt := range tests {
+		t.Run(tt.fixture, func(t *testing.T) {
+			probe, err := ProbeFile(context.Background(), ffprobe, tt.fixture)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if probe.Container != "mkv" || len(probe.SubtitleTracks) != len(tt.want) {
+				t.Fatalf("container %q with subtitle tracks %+v", probe.Container, probe.SubtitleTracks)
+			}
+			for i, want := range tt.want {
+				got := probe.SubtitleTracks[i]
+				if got.Index != want.index || got.Codec != want.codec || got.ContainerTrackID != want.id || got.Language != want.language {
+					t.Fatalf("subtitle %d = index %d codec %q id %q language %q, want %+v",
+						i, got.Index, got.Codec, got.ContainerTrackID, got.Language, want)
+				}
+			}
+		})
 	}
 }
 

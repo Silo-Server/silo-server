@@ -18,30 +18,23 @@ const (
 
 // CatalogRequest is the normalized request shape shared by catalog parsing and resolution.
 type CatalogRequest struct {
-	Source       CatalogSource
-	Scope        string
-	SectionID    string
-	LibraryID    int
-	CollectionID string
-	PersonID     int64
-	NamePrefix   string
-	SearchQuery  string
-	Query        QueryDefinition
-	Limit        int
-	Offset       int
-	CursorPaging bool
-	GroupByWork  bool
-	// GroupBoxSets asks for a box set browse (group=box_set); the API layer
-	// resolves it into BoxSetCollections.
-	GroupBoxSets bool
-	// BoxSetCollections, with GroupByWork, groups the movies of these TMDB
-	// collections into one row each. Only a query-source browse without
-	// search text applies it; see CatalogHandler.Browse.
-	BoxSetCollections []int64
-	After             *QueryCursor
-	Seek              *int
-	UseSourceOrder    bool
-	SkipTotal         bool
+	Source         CatalogSource
+	Scope          string
+	SectionID      string
+	LibraryID      int
+	CollectionID   string
+	PersonID       int64
+	NamePrefix     string
+	SearchQuery    string
+	Query          QueryDefinition
+	Limit          int
+	Offset         int
+	CursorPaging   bool
+	GroupByWork    bool
+	After          *QueryCursor
+	Seek           *int
+	UseSourceOrder bool
+	SkipTotal      bool
 	// SnapshotAt freezes the result set to items created at or before this
 	// timestamp, preventing offset-based pagination drift when new items are
 	// added during a scan.  Nil means the server will generate a snapshot.
@@ -58,8 +51,4 @@ type CatalogRequest struct {
 	// episode catalog; Query.MediaScope then holds the scope every other read
 	// of the request uses.
 	SearchMediaScope string
-	// V1Rules keeps the frozen /api/v1 rule vocabulary: an overlay rule on a
-	// field or with not_in_last that /api/v2 added is refused. ParseCatalogRequest
-	// sets it unless the caller opts in to ExtendedRules.
-	V1Rules bool
 }

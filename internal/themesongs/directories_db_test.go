@@ -12,6 +12,8 @@ import (
 
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/Silo-Server/silo-server/internal/catalog"
 )
 
 // A subtree theme pass runs after every autoscan. It must observe the subtree
@@ -99,6 +101,65 @@ func TestDirectoriesReadsOnlyTheScannedSubtreeDB(t *testing.T) {
 			assertIndexedGenericPlan(t, conn.Conn().PgConn(), tc.query, tc.index, tc.cond)
 		}
 	})
+}
+
+// The theme lookup reads only an item's files in folders that hold themes.
+// An item whose versions span folders must still find the themes of the one
+// folder that has them, by ID and from an item detail already resolved.
+func TestResolveFindsThemesInOneOfAnItemsFoldersDB(t *testing.T) {
+	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("SILO_TEST_DATABASE_URL is not set")
+	}
+	ctx := t.Context()
+	pool, err := pgxpool.New(ctx, dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pool.Close()
+	suffix := time.Now().UnixNano()
+	movie := fmt.Sprintf("movie-theme-folders-%d", suffix)
+	var plain, themed int
+	if err := pool.QueryRow(ctx, `INSERT INTO media_folders(type,name,enabled) VALUES('movies','theme folders plain',true) RETURNING id`).Scan(&plain); err != nil {
+		t.Fatal(err)
+	}
+	if err := pool.QueryRow(ctx, `INSERT INTO media_folders(type,name,enabled) VALUES('movies','theme folders themed',true) RETURNING id`).Scan(&themed); err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM media_files WHERE media_folder_id IN ($1,$2)`, plain, themed)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM media_items WHERE content_id=$1`, movie)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM media_folders WHERE id IN ($1,$2)`, plain, themed)
+	}()
+	if _, err := pool.Exec(ctx, `INSERT INTO media_items(content_id,type,title) VALUES($1,'movie','Theme Folders')`, movie); err != nil {
+		t.Fatal(err)
+	}
+	dir := func(folder int) string { return fmt.Sprintf("/theme-folders-%d/%d/Movie", suffix, folder) }
+	for _, folder := range []int{plain, themed} {
+		if _, err := pool.Exec(ctx, `INSERT INTO media_files(media_folder_id,file_path,file_size,canonical_root_path,content_id)
+			VALUES($1,$2,1024,$3,$4)`, folder, dir(folder)+"/movie.mkv", dir(folder), movie); err != nil {
+			t.Fatal(err)
+		}
+	}
+	repo := NewRepository(pool)
+	item := Item{ID: movie, Type: "movie", SeriesID: movie}
+	_, files, err := repo.ResolveItem(ctx, item, true, catalog.AccessFilter{})
+	if err != nil || len(files) != 0 {
+		t.Fatalf("ResolveItem without themes = %+v, %v", files, err)
+	}
+	if err := repo.Replace(ctx, themed, dir(themed), []File{{Song: Song{Title: "Theme", DurationSeconds: 30, Container: "mp3"}, AudioCodec: "mp3", AudioChannels: 2, BitrateKbps: 192, SampleRate: 44100,
+		Path: dir(themed) + "/theme.mp3", Size: 1000, Modified: time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)}}); err != nil {
+		t.Fatal(err)
+	}
+	for name, resolve := range map[string]func() (string, []File, error){
+		"by id":       func() (string, []File, error) { return repo.Resolve(ctx, movie, true, catalog.AccessFilter{}) },
+		"from detail": func() (string, []File, error) { return repo.ResolveItem(ctx, item, true, catalog.AccessFilter{}) },
+	} {
+		owner, files, err := resolve()
+		if err != nil || owner != movie || len(files) != 1 || files[0].FolderID != themed || files[0].Path != dir(themed)+"/theme.mp3" {
+			t.Fatalf("%s: owner=%q files=%+v err=%v", name, owner, files, err)
+		}
+	}
 }
 
 // assertIndexedGenericPlan fails unless the generic plan of query bounds cond on
