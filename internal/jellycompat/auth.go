@@ -216,11 +216,11 @@ func writeSessionLookupFailed(w http.ResponseWriter, r *http.Request, token stri
 	writeSessionCheckUnavailable(w)
 }
 
-// writePlaySessionLookupFailed answers a PlaySessionId-only request whose play
-// session could not be read from the playback store.
+// writePlaySessionLookupFailed answers a request whose play session could not
+// be read from the playback store.
 func writePlaySessionLookupFailed(w http.ResponseWriter, r *http.Request, playSessionID string, err error) {
 	if r.Context().Err() == nil {
-		slog.WarnContext(r.Context(), "jellycompat auth: play session lookup failed; answering 503", "component", "jellycompat",
+		slog.WarnContext(r.Context(), "jellycompat: play session lookup failed; answering 503", "component", "jellycompat",
 			"path", redactHLSPlaySessionID(r.URL.Path),
 			"play_session", playSessionFingerprint(playSessionID),
 			"error", logredact.SanitizeText(err.Error()),

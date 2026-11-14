@@ -46,12 +46,16 @@ interface SheetState {
 const NO_SHEET_STATE: SheetState = { source: null, loaded: NO_SHEETS, failed: NO_SHEETS };
 
 /**
- * Region tint in normal playback: one quiet hatch for every kind, so the track
- * never shows a colour it does not explain. The hover preview names the region;
- * the editor keeps distinct colours while regions are being adjusted.
+ * Region tint in normal playback: one colour per kind, so intro, recap, credits
+ * and preview can be told apart at a glance. The hover preview names the
+ * region with the same colour as its dot.
  */
-const REGION_HATCH =
-  "bg-[repeating-linear-gradient(135deg,rgb(255_255_255/0.6)_0_2px,rgb(255_255_255/0.22)_2px_5px)]";
+const REGION_COLORS: Record<MarkerKind, string> = {
+  intro: "bg-sky-300/45",
+  recap: "bg-violet-300/45",
+  credits: "bg-rose-300/45",
+  preview: "bg-emerald-300/45",
+};
 
 /** Brighter tint used while editing so regions stand out against the track. */
 const REGION_COLORS_EDIT: Record<MarkerKind, string> = {
@@ -542,7 +546,7 @@ export function SeekBar({
                     className={[
                       "absolute top-1/2 -translate-y-1/2 rounded-full transition-[height,box-shadow] duration-150 ease-out",
                       editing ? (isActive ? "h-3" : "h-2.5") : "h-full",
-                      editing ? REGION_COLORS_EDIT[region.kind] : REGION_HATCH,
+                      (editing ? REGION_COLORS_EDIT : REGION_COLORS)[region.kind],
                       isActive || isHovered ? "z-[2] ring-1 ring-white/80" : "z-[1]",
                     ].join(" ")}
                     style={{

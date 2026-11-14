@@ -3,7 +3,7 @@
   "title": "Validation failed",
   "status": 422,
   "detail": "ordered_ids must name each of your own collections exactly once",
-  "instance": "urn:silo:request:0000000000000000000002df",
+  "instance": "urn:silo:request:0000000000000000000002e2",
   "errors": [
     {
       "location": "body.ordered_ids",

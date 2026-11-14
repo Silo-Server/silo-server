@@ -3207,19 +3207,27 @@ func TestRemotePlaybackTransportTimeoutCoversAutoFallbackAttempts(t *testing.T) 
 		}
 	}
 
+	// An explicit hardware start can retry with CPU decode, then software,
+	// after its GPU decoder rejects the source.
+	handler := &PlaybackHandler{}
+	explicit := ready
+	explicit.HWAccel = "nvenc"
+	if got := handler.remotePlaybackTransportTimeout(nodeURL, explicit); got <= minimum {
+		t.Errorf("explicit accel: start timeout = %s, want more than %s", got, minimum)
+	}
+
 	// Starts that cannot fall back keep the single-wait budget, so an
 	// unresponsive node fails over as quickly as before.
 	singleWait := playback.ManifestStartupTimeout + 5*time.Second
 	unready := ready
 	unready.RequireReady = false
-	explicit := ready
-	explicit.HWAccel = "nvenc"
+	softwareAccel := ready
+	softwareAccel.HWAccel = playback.HWAccelNone
 	copyVideo := ready
 	copyVideo.TargetCodecVideo = "copy"
-	handler := &PlaybackHandler{}
 	for name, request := range map[string]transcodenode.TranscodeStartRequest{
 		"unready":        unready,
-		"explicit accel": explicit,
+		"software accel": softwareAccel,
 		"copy video":     copyVideo,
 	} {
 		if got := handler.remotePlaybackTransportTimeout(nodeURL, request); got != singleWait {
@@ -3516,10 +3524,11 @@ func startPlaybackV2IntoRecorder(t *testing.T, h *PlaybackHandler, rr *httptest.
 	writeJSON(rr, http.StatusCreated, response)
 }
 
-// writePlaybackTestFFmpegFailingOn writes a fake FFmpeg that exits before its
-// first manifest when its arguments contain failPattern and otherwise behaves
-// like writePlaybackTestFFmpeg. Every real transcode invocation is logged.
-func writePlaybackTestFFmpegFailingOn(t *testing.T, failPattern string) (ffmpegPath, logPath string) {
+// writePlaybackTestFFmpegFailingOn writes a fake FFmpeg that prints failMessage
+// and exits before its first manifest when its arguments contain failPattern,
+// and otherwise behaves like writePlaybackTestFFmpeg. Every real transcode
+// invocation is logged.
+func writePlaybackTestFFmpegFailingOn(t *testing.T, failPattern, failMessage string) (ffmpegPath, logPath string) {
 	t.Helper()
 	dir := t.TempDir()
 	ffmpegPath = filepath.Join(dir, "fake-ffmpeg.sh")
@@ -3528,7 +3537,7 @@ func writePlaybackTestFFmpegFailingOn(t *testing.T, failPattern string) (ffmpegP
 		"last=\"\"\n" +
 		"for arg in \"$@\"; do last=\"$arg\"; done\n" +
 		"case \"$last\" in *.m3u8) printf '%s\\n' \"$*\" >> \"" + logPath + "\" ;; esac\n" +
-		"case \"$*\" in *'" + failPattern + "'*) echo 'intentional hardware failure' >&2; exit 1 ;; esac\n" +
+		"case \"$*\" in *'" + failPattern + "'*) echo '" + failMessage + "' >&2; exit 1 ;; esac\n" +
 		"case \"$last\" in\n" +
 		"  *.m3u8) out=\"$(dirname \"$last\")\"; mkdir -p \"$out\"; " +
 		"printf x > \"$out/init.mp4\"; printf x > \"$out/seg_0.m4s\"; " +
@@ -3566,14 +3575,18 @@ func autoNVENCPipelineSeamV3(t *testing.T) func(context.Context, playback.Transc
 	}
 }
 
-func prepareAutoLocalTransportV3(t *testing.T, ffmpegPath, sessionID string) (*PlaybackHandler, preparedTransportV3, *transportErrorV3) {
+// prepareLocalTransportForTestV3 starts a local H.264 transcode under the
+// configured hwAccel. Under auto it stands in for auto resolving to NVENC.
+func prepareLocalTransportForTestV3(t *testing.T, hwAccel, ffmpegPath, sessionID string) (*PlaybackHandler, preparedTransportV3, *transportErrorV3) {
 	t.Helper()
 	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0))
 	transcodeDir := t.TempDir()
 	handler.PlaybackConfig = func() config.PlaybackConfig {
-		return config.PlaybackConfig{FFmpegPath: ffmpegPath, TranscodeDir: transcodeDir, TranscodeEnabled: true, HWAccel: "auto"}
+		return config.PlaybackConfig{FFmpegPath: ffmpegPath, TranscodeDir: transcodeDir, TranscodeEnabled: true, HWAccel: hwAccel}
 	}
-	handler.autoTranscodePipelineV3 = autoNVENCPipelineSeamV3(t)
+	if hwAccel == "auto" {
+		handler.autoTranscodePipelineV3 = autoNVENCPipelineSeamV3(t)
+	}
 	file := v3HandlerFixtureFile(t)
 	result := playback.PlannerResultV3{
 		Plan:       &playback.PlanV3{PlanID: "plan:" + sessionID, Delivery: playback.DeliveryTranscodeHLSV3},
@@ -3590,8 +3603,8 @@ func prepareAutoLocalTransportV3(t *testing.T, ffmpegPath, sessionID string) (*P
 }
 
 func TestPrepareLocalTransportV3AutoKeepsGPUEncodeWithCPUDecode(t *testing.T) {
-	ffmpegPath, logPath := writePlaybackTestFFmpegFailingOn(t, "-hwaccel cuda")
-	handler, transport, transportErr := prepareAutoLocalTransportV3(t, ffmpegPath, "session-auto-mixed")
+	ffmpegPath, logPath := writePlaybackTestFFmpegFailingOn(t, "-hwaccel cuda", "intentional hardware failure")
+	handler, transport, transportErr := prepareLocalTransportForTestV3(t, "auto", ffmpegPath, "session-auto-mixed")
 	if transportErr != nil {
 		t.Fatalf("prepare auto local transport: %v (cause: %v)", transportErr, transportErr.cause)
 	}
@@ -3618,8 +3631,8 @@ func TestPrepareLocalTransportV3AutoKeepsGPUEncodeWithCPUDecode(t *testing.T) {
 }
 
 func TestPrepareLocalTransportV3AutoTerminalFailureKeepsMainError(t *testing.T) {
-	ffmpegPath, logPath := writePlaybackTestFFmpegFailingOn(t, "-f hls")
-	_, transport, transportErr := prepareAutoLocalTransportV3(t, ffmpegPath, "session-auto-terminal")
+	ffmpegPath, logPath := writePlaybackTestFFmpegFailingOn(t, "-f hls", "intentional hardware failure")
+	_, transport, transportErr := prepareLocalTransportForTestV3(t, "auto", ffmpegPath, "session-auto-terminal")
 	if transportErr == nil {
 		transport.rollback()
 		t.Fatal("failed ffmpeg startup returned a playable transport")
@@ -3633,6 +3646,26 @@ func TestPrepareLocalTransportV3AutoTerminalFailureKeepsMainError(t *testing.T) 
 	invocations := readPlaybackTestFFmpegInvocations(t, logPath)
 	if len(invocations) != 3 || !strings.Contains(invocations[2], "libx264") {
 		t.Fatalf("invocations = %q, want full hardware, mixed, then software", invocations)
+	}
+}
+
+// An explicit NVENC setting on a card whose NVDEC cannot decode the source
+// retried the identical CUDA decode. It now decodes on the CPU and keeps NVENC.
+func TestPrepareLocalTransportV3NVENCRetriesRejectedDecodeOnCPU(t *testing.T) {
+	ffmpegPath, logPath := writePlaybackTestFFmpegFailingOn(t, "-hwaccel cuda", "[hevc @ 0x1] Hardware is lacking required capabilities")
+	handler, transport, transportErr := prepareLocalTransportForTestV3(t, "nvenc", ffmpegPath, "session-nvenc-decode")
+	if transportErr != nil {
+		t.Fatalf("prepare local transport: %v (cause: %v)", transportErr, transportErr.cause)
+	}
+	if commitErr := transport.commit(); commitErr != nil {
+		t.Fatalf("commit: %v", commitErr)
+	}
+	defer handler.tm.CloseTranscodeSession("session-nvenc-decode", "")
+
+	invocations := readPlaybackTestFFmpegInvocations(t, logPath)
+	if len(invocations) != 2 || !strings.Contains(invocations[0], "-hwaccel cuda") ||
+		strings.Contains(invocations[1], "-hwaccel cuda") || !strings.Contains(invocations[1], "h264_nvenc") {
+		t.Fatalf("invocations = %q, want CUDA decode then CPU decode with NVENC", invocations)
 	}
 }
 
@@ -3837,8 +3870,11 @@ func (f *versionChangeFixtureV3) replan(t *testing.T, previous playback.Decision
 		Capabilities:          f.startRequest.Capabilities,
 		ClientPlaybackContext: f.startRequest.ClientPlaybackContext,
 	}
-	if operation == playback.ReplanOperationQualityChangeV3 {
+	switch operation {
+	case playback.ReplanOperationQualityChangeV3:
 		request.AttemptedPlanKeys = []string{key}
+	case playback.ReplanOperationSeekFailureRecoveryV3:
+		request.Failure = playback.FailureV3{Classification: "decoder_failure"}
 	}
 	body, err := json.Marshal(request)
 	if err != nil {
@@ -5897,6 +5933,182 @@ func TestReplanPlaybackV2VersionChangeKeepsDownloadedSubtitleOfSameRelease(t *te
 	want := playback.TrackIDV3(f.alternate.ID, "subtitle", len(f.alternate.ExternalSubtitles)+len(f.alternate.SubtitleTracks))
 	if plan := lower.PlaybackPlan; plan.EffectiveMediaFileID != f.alternate.ID || selectedTrackIDV3(plan.SelectedTracks.Subtitle) != want {
 		t.Fatalf("1080p version: file=%d subtitle=%q, want %d with %q", plan.EffectiveMediaFileID, selectedTrackIDV3(plan.SelectedTracks.Subtitle), f.alternate.ID, want)
+	}
+}
+
+// Deleting a stored subtitle moves the later ones down an ordinal, and an
+// added one takes the freed place. A replan that echoes the viewer's subtitle
+// at the ordinal the playing plan gave it keeps that stored subtitle rather
+// than the one now at that ordinal, and turns subtitles off when the playing
+// stored subtitle itself was deleted.
+func TestReplanPlaybackV2KeepsDownloadedSubtitleWhenEarlierOneIsDeleted(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		operation playback.ReplanOperationV3
+		deleted   int
+		wantID    int // stored subtitle the refreshed plan selects; 0 means none
+	}{
+		{name: "track change, earlier deleted", operation: playback.ReplanOperationTrackChangeV3, deleted: 71, wantID: 72},
+		{name: "seek failure recovery, earlier deleted", operation: playback.ReplanOperationSeekFailureRecoveryV3, deleted: 71, wantID: 72},
+		{name: "track change, playing deleted", operation: playback.ReplanOperationTrackChangeV3, deleted: 72},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var repo *handlerMockSubtitleRepo
+			f := newVersionChangeFixtureV3(t, func(f *versionChangeFixtureV3) {
+				repo = newMockSubtitleRepoForHandler()
+				repo.list = []subtitles.DownloadedSubtitle{
+					{ID: 71, MediaFileID: f.source.ID, Language: "en", Format: subtitles.FormatSRT, ReleaseName: "x"},
+					{ID: 72, MediaFileID: f.source.ID, Language: "es", Format: subtitles.FormatSRT, ReleaseName: "y"},
+				}
+				for i := range repo.list {
+					repo.subtitles[repo.list[i].ID] = &repo.list[i]
+				}
+				f.handler.SubtitleRepo = perFileSubtitleRepoV3{repo}
+				if tc.operation == playback.ReplanOperationSeekFailureRecoveryV3 {
+					// Recovery leaves the failed route, so its remux must start.
+					f.handler.PlaybackConfig = playbackTestConfig(writePlaybackTestFFmpegSleep(t, "5"), t.TempDir())
+				}
+				spanish := len(f.source.ExternalSubtitles) + len(f.source.SubtitleTracks) + 1
+				f.startRequest.SubtitleTrackIndex = &spanish
+				f.startRequest.SubtitleTrackID = playback.TrackIDV3(f.source.ID, "subtitle", spanish)
+			})
+			base := len(f.source.ExternalSubtitles) + len(f.source.SubtitleTracks)
+			if got, want := selectedTrackIDV3(f.started.PlaybackPlan.SelectedTracks.Subtitle), playback.TrackIDV3(f.source.ID, "subtitle", base+1); got != want {
+				t.Fatalf("start selected subtitle %q, want %q", got, want)
+			}
+
+			// One stored subtitle is deleted and 73 is added: the survivor
+			// moves to base, and 73 takes base+1.
+			french := subtitles.DownloadedSubtitle{ID: 73, MediaFileID: f.source.ID, Language: "fr", Format: subtitles.FormatSRT, ReleaseName: "z"}
+			survivor := repo.list[0]
+			if tc.deleted == survivor.ID {
+				survivor = repo.list[1]
+			}
+			repo.list = []subtitles.DownloadedSubtitle{survivor, french}
+			delete(repo.subtitles, tc.deleted)
+			repo.subtitles[survivor.ID] = &repo.list[0]
+			repo.subtitles[73] = &repo.list[1]
+
+			refreshed := f.replan(t, f.started, "deleted-subtitle-0001", tc.operation, "", f.started.PlaybackPlan.SelectedTracks)
+			plan := refreshed.PlaybackPlan
+			if tc.wantID == 0 {
+				if plan.SelectedTracks.Subtitle != nil {
+					t.Fatalf("refreshed plan selected subtitle %+v, want none", plan.SelectedTracks.Subtitle)
+				}
+				if !slices.ContainsFunc(plan.DegradationWarnings, func(warning playback.DegradationWarningV3) bool {
+					return warning.Code == playback.DegradationWarningSubtitleTrackUnavailableV3
+				}) {
+					t.Fatalf("dropped subtitle not reported: %#v", plan.DegradationWarnings)
+				}
+				return
+			}
+			if got, want := selectedTrackIDV3(plan.SelectedTracks.Subtitle), playback.TrackIDV3(f.source.ID, "subtitle", base); got != want {
+				t.Fatalf("refreshed plan selected subtitle %q, want %q (stored subtitle %d)", got, want, tc.wantID)
+			}
+			if item, ok := playback.SubtitleInventoryItemAtV3(plan.Subtitle.Inventory, base); !ok || item.StoredSubtitleID != tc.wantID {
+				t.Fatalf("inventory at the selected ordinal = %+v, want stored subtitle %d", item, tc.wantID)
+			}
+		})
+	}
+}
+
+// An output change that probes the requested edition and falls back to the
+// alternate playing must keep the alternate's stored subtitle when a deletion
+// moved its ordinal, as a same-file replan does.
+func TestReplanPlaybackV2OutputChangeFallbackKeepsMovedDownloadedSubtitle(t *testing.T) {
+	source := v3HandlerFixtureFile(t)
+	source.Resolution, source.Bitrate = "2160p", 32_000
+	source.VideoTracks = append([]models.VideoTrack(nil), source.VideoTracks...)
+	source.VideoTracks[0].Width, source.VideoTracks[0].Height = 3840, 2160
+	source.VideoTracks[0].Level, source.VideoTracks[0].Bitrate = 51, 32_000
+
+	alternateValue := *source
+	alternate := &alternateValue
+	alternate.ID, alternate.Container, alternate.Resolution, alternate.Bitrate = 84, "mp4", "1080p", 8_000
+	alternate.VideoTracks = append([]models.VideoTrack(nil), source.VideoTracks...)
+	alternate.VideoTracks[0].Width, alternate.VideoTracks[0].Height = 1920, 1080
+	alternate.VideoTracks[0].Level, alternate.VideoTracks[0].Bitrate = 41, 8_000
+
+	repo := newMockSubtitleRepoForHandler()
+	setRows := func(rows ...subtitles.DownloadedSubtitle) {
+		repo.list = rows
+		repo.subtitles = map[int]*subtitles.DownloadedSubtitle{}
+		for i := range repo.list {
+			repo.subtitles[repo.list[i].ID] = &repo.list[i]
+		}
+	}
+	// The requested edition carries the same Spanish release, so the output
+	// change is free to try it.
+	sourceSpanish := subtitles.DownloadedSubtitle{ID: 81, MediaFileID: source.ID, Language: "es", Format: subtitles.FormatSRT, ReleaseName: "y"}
+	english := subtitles.DownloadedSubtitle{ID: 71, MediaFileID: alternate.ID, Language: "en", Format: subtitles.FormatSRT, ReleaseName: "x"}
+	spanish := subtitles.DownloadedSubtitle{ID: 72, MediaFileID: alternate.ID, Language: "es", Format: subtitles.FormatSRT, ReleaseName: "y"}
+	french := subtitles.DownloadedSubtitle{ID: 73, MediaFileID: alternate.ID, Language: "fr", Format: subtitles.FormatSRT, ReleaseName: "z"}
+	setRows(sourceSpanish, english, spanish)
+
+	files := map[int]*models.MediaFile{source.ID: source, alternate.ID: alternate}
+	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0), mapPlaybackFileResolver{files: files})
+	stubCopySeekAnchorV3(handler)
+	handler.FileVersionFetcher = testPlaybackFileVersionFetcher{byContent: map[string][]*models.MediaFile{source.ContentID: {source, alternate}}}
+	handler.SettingsRepo = &mutablePlaybackSettingsV3{values: map[string]string{"allow_4k_transcode": "false"}}
+	handler.ItemAccess = allowAllPlaybackItemAccess{}
+	handler.SubtitleRepo = perFileSubtitleRepoV3{repo}
+	startRequest := v3HandlerStartRequest()
+	startRequest.QualityPreference = "auto"
+	startRequest.ClientPlaybackContext.Deliveries[playback.DeliveryClassProgressiveV3] = playback.DeliveryCapabilityV3{
+		Enabled: true, SupportedOnDevice: true, Containers: []string{"mp4"},
+		VideoCodecs: []string{"h264"}, AudioDecodeCodecs: []string{"aac"},
+		Subtitles: playback.DeliverySubtitleCapabilitiesV3{SidecarText: true},
+	}
+	startRequest.ClientPlaybackContext.Deliveries[playback.DeliveryClassHLSV3] = playback.DeliveryCapabilityV3{
+		Enabled: true, SupportedOnDevice: true, Containers: []string{"hls"},
+		VideoCodecs: []string{"h264"}, AudioDecodeCodecs: []string{"aac"},
+		Subtitles: playback.DeliverySubtitleCapabilitiesV3{SidecarText: true},
+	}
+	base := len(alternate.ExternalSubtitles) + len(alternate.SubtitleTracks)
+	sourceSpanishIndex := len(source.ExternalSubtitles) + len(source.SubtitleTracks)
+	startRequest.SubtitleTrackIndex = &sourceSpanishIndex
+	startRequest.SubtitleTrackID = playback.TrackIDV3(source.ID, "subtitle", sourceSpanishIndex)
+
+	startRR := httptest.NewRecorder()
+	serveStartPlaybackV2(t, handler, startRR, httptest.NewRequest(http.MethodPost, "/api/v2/playback/start", strings.NewReader(marshalV3StartRequest(t, startRequest))).WithContext(newAuthorizedPlaybackContext()))
+	var started playback.DecisionResponseV3
+	if startRR.Code != http.StatusCreated || json.Unmarshal(startRR.Body.Bytes(), &started) != nil || started.PlaybackPlan == nil || started.PlaybackPlan.EffectiveMediaFileID != alternate.ID {
+		t.Fatalf("alternate start status=%d body=%s", startRR.Code, startRR.Body.String())
+	}
+	if got, want := selectedTrackIDV3(started.PlaybackPlan.SelectedTracks.Subtitle), playback.TrackIDV3(alternate.ID, "subtitle", base+1); got != want {
+		t.Fatalf("start selected subtitle %q, want %q", got, want)
+	}
+
+	// English is deleted and French added: Spanish moves to base, French
+	// takes base+1. The requested edition then plans terminal.
+	setRows(sourceSpanish, spanish, french)
+	source.Container = "mkv"
+	source.CodecVideo = "av1"
+	source.VideoTracks[0].Codec = "av1"
+	handler.SettingsRepo = &mutablePlaybackSettingsV3{values: map[string]string{"transcode_enabled": "false", "allow_4k_transcode": "false"}}
+
+	upgradedCapabilities := startRequest.Capabilities
+	upgradedCapabilities.MaxResolution = "2160p"
+	upgradedCapabilities.VideoDecode = append([]playback.VideoDecodeCapabilityV3(nil), startRequest.Capabilities.VideoDecode...)
+	upgradedCapabilities.VideoDecode[0].Levels = []int{51}
+	upgradedCapabilities.VideoDecode[0].MaxWidth = 3840
+	upgradedCapabilities.VideoDecode[0].MaxHeight = 2160
+	upgradedCapabilities.VideoDecode[0].MaxBitrateKbps = 50_000
+	response := replanPlaybackDecisionV2(t, handler, started.SessionID, playback.ReplanRequestV3{
+		ProtocolVersion: playback.ProtocolV3, Operation: playback.ReplanOperationOutputChangeV3,
+		PlaybackAttemptID: startRequest.PlaybackAttemptID, ReplanRequestID: "moved-subtitle-output-0001",
+		FailedPlanID: started.PlaybackPlan.PlanID, PlanAttemptID: "moved-subtitle-attempt-0001",
+		PlanAttemptKey: started.PlaybackPlan.PlanAttemptKey, AttemptCount: 1, PositionSeconds: 33,
+		SelectedTracks:        started.PlaybackPlan.SelectedTracks,
+		Capabilities:          upgradedCapabilities,
+		ClientPlaybackContext: startRequest.ClientPlaybackContext,
+	})
+	plan := response.PlaybackPlan
+	if response.Terminal != nil || plan == nil || plan.EffectiveMediaFileID != alternate.ID {
+		t.Fatalf("output change did not fall back to the playing alternate: %#v", response)
+	}
+	if got, want := selectedTrackIDV3(plan.SelectedTracks.Subtitle), playback.TrackIDV3(alternate.ID, "subtitle", base); got != want {
+		t.Fatalf("fallback selected subtitle %q, want %q (stored subtitle 72)", got, want)
 	}
 }
 

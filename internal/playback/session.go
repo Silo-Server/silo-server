@@ -433,6 +433,21 @@ const (
 	// §2.5 publishes it to clients.
 	StartupSessionGrace = 90 * time.Second
 
+	// PausedStreamSlotGrace is how long a paused session keeps holding one of
+	// its user's stream slots without activity. Clients report progress every
+	// 10 seconds while paused, but a browser throttles the timers of a hidden
+	// tab to about once a minute, so this outlasts that. A paused session quiet
+	// for longer has lost its player (a closed tab, a killed app): it frees the
+	// stream slot, while cleanup still keeps it for DefaultPausedSessionGrace so
+	// a returning client can resume (#243). Its transcode slot stays held until
+	// then, because its encoder does.
+	PausedStreamSlotGrace = 2 * time.Minute
+
+	// noPausedSlotCap keeps a paused session in a count for its whole paused
+	// grace. The transcode count uses it: a quiet paused session keeps its
+	// encoder until cleanup, so it keeps that slot too.
+	noPausedSlotCap time.Duration = 0
+
 	// remoteTransportIdleGrace is the floor on the idle windows for a session
 	// whose media is served by another node. See remoteTransportGrace: it must
 	// outlast a heartbeat gap on an otherwise healthy proxy stream, while still
@@ -1985,7 +2000,7 @@ func (m *SessionManager) activeCountExcludingLocked(userID int, excludeSessionID
 		if excludeSessionID != "" && s.ID == excludeSessionID {
 			continue
 		}
-		if s.UserID == userID && m.countsTowardLimitsLocked(s, now) {
+		if s.UserID == userID && m.countsTowardLimitsLocked(s, now, PausedStreamSlotGrace) {
 			count++
 		}
 	}
@@ -2004,7 +2019,7 @@ func (m *SessionManager) transcodeCountExcludingLocked(userID int, excludeSessio
 		if excludeSessionID != "" && s.ID == excludeSessionID {
 			continue
 		}
-		if s.UserID == userID && (s.PlayMethod == PlayTranscode || s.replacementPlayMethod == PlayTranscode) && m.countsTowardLimitsLocked(s, now) {
+		if s.UserID == userID && (s.PlayMethod == PlayTranscode || s.replacementPlayMethod == PlayTranscode) && m.countsTowardLimitsLocked(s, now, noPausedSlotCap) {
 			count++
 		}
 	}
@@ -2088,7 +2103,10 @@ func (m *SessionManager) touchSessionLocked(s *Session) {
 	s.UpdatedAt = now
 }
 
-func (m *SessionManager) countsTowardLimitsLocked(s *Session, now time.Time) bool {
+// countsTowardLimitsLocked reports whether s holds one of its user's slots.
+// A positive pausedSlotGrace caps how long a paused session holds the slot
+// after its last activity, below its whole paused grace.
+func (m *SessionManager) countsTowardLimitsLocked(s *Session, now time.Time, pausedSlotGrace time.Duration) bool {
 	if s == nil {
 		return false
 	}
@@ -2102,6 +2120,9 @@ func (m *SessionManager) countsTowardLimitsLocked(s *Session, now time.Time) boo
 		return true
 	}
 	activeGrace, pausedGrace := remoteTransportGrace(s, m.activeGrace, m.pausedGrace)
+	if pausedSlotGrace > 0 {
+		pausedGrace = min(pausedGrace, pausedSlotGrace)
+	}
 	return !m.sessionIsInactiveLocked(s, now, activeGrace, pausedGrace, StartupSessionGrace)
 }
 

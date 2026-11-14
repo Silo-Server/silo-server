@@ -521,7 +521,7 @@ func (r *fakeEpisodeLinkerFileRepo) addFile(file *models.MediaFile) {
 	r.files[file.ID] = &cp
 }
 
-func (r *fakeEpisodeLinkerFileRepo) UpdateEpisodeLink(_ context.Context, fileID int, episodeID string, seasonNum, episodeNum int) error {
+func (r *fakeEpisodeLinkerFileRepo) UpdateEpisodeLink(_ context.Context, fileID int, _ string, episodeID string, seasonNum, episodeNum int) error {
 	r.fakeFileRepo.mu.Lock()
 	defer r.fakeFileRepo.mu.Unlock()
 	r.episodeLinks[fileID] = episodeID

@@ -9333,12 +9333,12 @@
     },
     {
       "name": "invitation_accepted",
-      "operation_id": "acceptInvitation",
+      "operation_id": "acceptInvitationLink",
       "scenario": "Invitation lifecycle with synthetic identities and credentials.",
       "request": {
         "method": "POST",
-        "path": "/api/v2/invitations/pending/accept",
-        "body": "{\"password\":\"synthetic-password\"}"
+        "path": "/api/v2/invitations/accept",
+        "body": "{\"token\":\"pending\",\"password\":\"synthetic-password\"}"
       },
       "expected_status": 201,
       "response_headers": {
@@ -9351,12 +9351,12 @@
     },
     {
       "name": "invitation_accepted_sign_in_required",
-      "operation_id": "acceptInvitation",
+      "operation_id": "acceptInvitationLink",
       "scenario": "Invitation lifecycle with synthetic identities and credentials.",
       "request": {
         "method": "POST",
-        "path": "/api/v2/invitations/sign-in-required/accept",
-        "body": "{\"password\":\"synthetic-password\"}"
+        "path": "/api/v2/invitations/accept",
+        "body": "{\"token\":\"sign-in-required\",\"password\":\"synthetic-password\"}"
       },
       "expected_status": 201,
       "response_headers": {
@@ -9386,11 +9386,12 @@
     },
     {
       "name": "invitation_lookup",
-      "operation_id": "lookupInvitation",
+      "operation_id": "lookupInvitationLink",
       "scenario": "Invitation lifecycle with synthetic identities and credentials.",
       "request": {
-        "method": "GET",
-        "path": "/api/v2/invitations/pending"
+        "method": "POST",
+        "path": "/api/v2/invitations/lookup",
+        "body": "{\"token\":\"pending\"}"
       },
       "expected_status": 200,
       "response_headers": {
@@ -9400,6 +9401,24 @@
       "response_media_type": "application/json",
       "schema": "#/components/schemas/InvitationLookup",
       "body_file": "invitation_lookup.json"
+    },
+    {
+      "name": "invitation_lookup_not_found",
+      "operation_id": "lookupInvitationLink",
+      "scenario": "Invitation lifecycle with synthetic identities and credentials.",
+      "request": {
+        "method": "POST",
+        "path": "/api/v2/invitations/lookup",
+        "body": "{\"token\":\"expired\"}"
+      },
+      "expected_status": 404,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "invitation_lookup_not_found.json"
     },
     {
       "name": "link_account_identity_with_credentials_directory_refused",
@@ -12943,12 +12962,12 @@
     },
     {
       "name": "password_reset_completed",
-      "operation_id": "completePasswordReset",
+      "operation_id": "completePasswordResetLink",
       "scenario": "Password reset link lifecycle with synthetic identities and credentials.",
       "request": {
         "method": "POST",
-        "path": "/api/v2/password-resets/live/complete",
-        "body": "{\"password\":\"synthetic-password\"}"
+        "path": "/api/v2/password-resets/complete",
+        "body": "{\"token\":\"live\",\"password\":\"synthetic-password\"}"
       },
       "expected_status": 200,
       "response_headers": {
@@ -12960,13 +12979,31 @@
       "body_file": "password_reset_completed.json"
     },
     {
-      "name": "password_reset_completed_sign_in_required",
-      "operation_id": "completePasswordReset",
+      "name": "password_reset_completed_not_found",
+      "operation_id": "completePasswordResetLink",
       "scenario": "Password reset link lifecycle with synthetic identities and credentials.",
       "request": {
         "method": "POST",
-        "path": "/api/v2/password-resets/sign-in-required/complete",
-        "body": "{\"password\":\"synthetic-password\"}"
+        "path": "/api/v2/password-resets/complete",
+        "body": "{\"token\":\"spent\",\"password\":\"synthetic-password\"}"
+      },
+      "expected_status": 404,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "password_reset_completed_not_found.json"
+    },
+    {
+      "name": "password_reset_completed_sign_in_required",
+      "operation_id": "completePasswordResetLink",
+      "scenario": "Password reset link lifecycle with synthetic identities and credentials.",
+      "request": {
+        "method": "POST",
+        "path": "/api/v2/password-resets/complete",
+        "body": "{\"token\":\"sign-in-required\",\"password\":\"synthetic-password\"}"
       },
       "expected_status": 200,
       "response_headers": {
@@ -12979,11 +13016,12 @@
     },
     {
       "name": "password_reset_lookup",
-      "operation_id": "lookupPasswordReset",
+      "operation_id": "lookupPasswordResetLink",
       "scenario": "Password reset link lifecycle with synthetic identities and credentials.",
       "request": {
-        "method": "GET",
-        "path": "/api/v2/password-resets/live"
+        "method": "POST",
+        "path": "/api/v2/password-resets/lookup",
+        "body": "{\"token\":\"live\"}"
       },
       "expected_status": 200,
       "response_headers": {
@@ -12993,6 +13031,24 @@
       "response_media_type": "application/json",
       "schema": "#/components/schemas/PasswordResetLookup",
       "body_file": "password_reset_lookup.json"
+    },
+    {
+      "name": "password_reset_lookup_not_found",
+      "operation_id": "lookupPasswordResetLink",
+      "scenario": "Password reset link lifecycle with synthetic identities and credentials.",
+      "request": {
+        "method": "POST",
+        "path": "/api/v2/password-resets/lookup",
+        "body": "{\"token\":\"spent\"}"
+      },
+      "expected_status": 404,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "password_reset_lookup_not_found.json"
     },
     {
       "name": "pause_admin_download_preparations",

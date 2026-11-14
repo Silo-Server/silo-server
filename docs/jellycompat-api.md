@@ -285,6 +285,12 @@ Jellyfin uses. A profile that turns on `ui.next_up_new_releases_first` instead
 gets a caught-up series back at the front when its next episode is released to
 the server. `nextUpDateCutoff` still filters on last played.
 
+`CommunityRating` is the IMDb rating (0-10). `CriticRating` is the stored
+Rotten Tomatoes critic score (0-100), present only while an enabled metadata
+plugin declares the `rt_critic` rating source and an administrator shows it under
+`catalog.extra_rating_sources`, the setting native item ratings follow (see
+`GET /api/v2/capabilities/ratings`).
+
 Items carry Jellyfin 12's `OriginalLanguage` (movies and series). Episodes set
 `ParentPrimaryImageItemId` and `ParentPrimaryImageTag` to their season's poster,
 or to the series poster when the season has none; both are removed when the
@@ -554,7 +560,11 @@ one after the play session expired or stopped, or after a newer negotiation
 from the same device replaced an unstarted one, must send its own token.
 A `PlaySessionId` grant that cannot be read because the database is
 unavailable answers a retryable `503`, not `401`, unless the API server that
-answers still holds the play session. `PlaybackInfo` answers `503` instead of
+answers still holds the play session. HLS master playlist, playlist and
+segment requests that carry a token answer the same retryable `503` when their
+play session cannot be read, and so do progressive stream, subtitle and
+attachment requests; a play session that is absent or belongs to another token
+answers `404`. `PlaybackInfo` answers `503` instead of
 returning a `PlaySessionId` it could not store, since other API servers could
 not resolve it.
 
@@ -576,7 +586,11 @@ base layer (HEVC profile 5, AV1 profile 10), a client whose device profile lists
 variant, listed before the fallback variant, unless the copied audio has no
 entry. MPEG-TS remuxes keep the single variant. Audio and subtitle streams
 carry `LocalizedLanguage`, and audio streams carry `LocalizedOriginal`, in
-English.
+English. `LocalizedLanguage` and `DisplayTitle` name a tag with a region or
+script by its CLDR name, such as "Brazilian Portuguese" for `pt-BR` or
+"Portuguese (Angola)" for `pt-AO`; `Language` keeps the stored tag. A tag
+with any other subtag, or a script or region CLDR has no name for, keeps the
+title-cased tag ("Ca ES Valencia"), so distinct tags never share a label.
 
 HEVC Dolby Vision Profile 8 with a proven HDR10 base layer and no enhancement
 layer can use HLS fMP4 remux when a positive video-range condition names both

@@ -43,7 +43,7 @@ var ErrInvalidRevoke = errors.New("revoke needs download ids or one device")
 // the row stays revoked, and the server refuses its file. A revoked episode of
 // a monitored series is excluded from the monitor so the next sync does not
 // register it again. A preparation only the revoked rows were waiting on is
-// canceled.
+// stopped.
 func (s *Service) RevokeDeviceDownloads(ctx context.Context, req RevokeRequest) (*RevokeResult, error) {
 	req.IDs = uniqueIDs(req.IDs)
 	if len(req.IDs) == 0 && (req.UserID <= 0 || req.ProfileID == "" || req.DeviceID == "") {
@@ -60,7 +60,7 @@ func (s *Service) RevokeDeviceDownloads(ctx context.Context, req RevokeRequest) 
 		return nil, err
 	}
 	if s.artifacts != nil {
-		s.artifacts.cancelAbandonedPreparations(ctx, result.Revoked)
+		s.artifacts.stopAbandonedPreparations(ctx, result.Revoked...)
 		for _, d := range result.Revoked {
 			s.artifacts.publish(ctx, d)
 		}
@@ -70,26 +70,6 @@ func (s *Service) RevokeDeviceDownloads(ctx context.Context, req RevokeRequest) 
 		slog.InfoContext(ctx, "device downloads revoked", "component", "downloads", "count", len(result.Revoked), "actor", req.Actor)
 	}
 	return result, nil
-}
-
-// cancelAbandonedPreparations cancels unfinished preparations that no other
-// download needs any more, so revoked rows do not leave a node encoding for
-// nobody. A preparation any live download refers to is left alone, including
-// a finished one: canceling deletes the row, and that download's manifest and
-// any later prepare-again read its recipe.
-func (m *ArtifactManager) cancelAbandonedPreparations(ctx context.Context, revoked []*Download) {
-	var ids []string
-	for _, d := range revoked {
-		if d.ArtifactID != "" {
-			ids = append(ids, d.ArtifactID)
-		}
-	}
-	if len(ids) == 0 {
-		return
-	}
-	if _, err := m.cancelPreparations(ctx, ids, m.repo.CancelAbandonedPreparations); err != nil {
-		slog.WarnContext(ctx, "canceling preparations of revoked downloads failed", "component", "downloads", "error", err)
-	}
 }
 
 // revokeManagedSQL revokes the selected managed rows, excludes revoked

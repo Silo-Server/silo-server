@@ -246,6 +246,20 @@ func Sign(c Claims, secret string, ttl time.Duration) (string, error) {
 	return token.SignedString([]byte(secret))
 }
 
+// AuthorizesPlaybackMedia reports whether the token is a playback session's
+// stream reference: it names a session and a playback recipe, not a
+// download, a theme song or a bandwidth probe.
+func (c *Claims) AuthorizesPlaybackMedia() bool {
+	if c == nil || c.SessionID == "" || c.UserID <= 0 {
+		return false
+	}
+	switch c.PlayMethod {
+	case "", PlayMethodBandwidthProbe, PlayMethodDownload, PlayMethodToneMapDownload, PlayMethodThemeDirect, PlayMethodThemeAAC:
+		return false
+	}
+	return true
+}
+
 // Verify parses and validates a stream token JWT string.
 func Verify(tokenString, secret string) (*Claims, error) {
 	if strings.TrimSpace(secret) == "" {

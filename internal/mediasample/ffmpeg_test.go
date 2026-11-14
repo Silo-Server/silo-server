@@ -517,10 +517,9 @@ func TestRunSheetsAudioTailWithRealFFmpeg(t *testing.T) {
 
 // TestRunSheetsAVIKeyframeTimesWithRealFFmpeg reads six ten-second gray
 // scenes from AVI files with B-frames, whose packets carry no PTS, sampled
-// three seconds into each scene. MPEG-4 Part 2 (XviD) decodes with low
-// delay, so every cell shows its own scene. H.264 releases each keyframe two
-// GOPs late in a keyframes-only read, and its cells would show the scene
-// before, so the run must fail rather than publish them.
+// three seconds into each scene. Every cell shows its own scene, whether the
+// decoder releases keyframes at once (MPEG-4 Part 2 in low delay) or a GOP or
+// more late (H.264, MPEG-2).
 func TestRunSheetsAVIKeyframeTimesWithRealFFmpeg(t *testing.T) {
 	ffmpeg, _ := realFFmpeg(t)
 	grays := []int{20, 60, 100, 140, 180, 220}
@@ -531,8 +530,9 @@ func TestRunSheetsAVIKeyframeTimesWithRealFFmpeg(t *testing.T) {
 	}
 	for name, encoder := range map[string][]string{
 		// AVI's default encoder is MPEG-4 Part 2.
-		"xvid": {"-vtag", "XVID", "-bf", "2", "-q:v", "3"},
-		"h264": {"-c:v", "libx264", "-bf", "3", "-sc_threshold", "0"},
+		"xvid":  {"-vtag", "XVID", "-bf", "2", "-q:v", "3"},
+		"h264":  {"-c:v", "libx264", "-bf", "3", "-sc_threshold", "0"},
+		"mpeg2": {"-c:v", "mpeg2video", "-bf", "2", "-q:v", "3"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			clip := filepath.Join(t.TempDir(), "clip.avi")
@@ -551,12 +551,6 @@ func TestRunSheetsAVIKeyframeTimesWithRealFFmpeg(t *testing.T) {
 			ctx, cancel := context.WithTimeout(t.Context(), time.Minute)
 			defer cancel()
 			result, err := Runner{FFmpegPath: ffmpeg, Workload: processmetrics.Thumbnail}.Run(ctx, req)
-			if name == "h264" {
-				if err == nil {
-					t.Fatalf("published frames %+v, want the run to fail", result.SheetFrames)
-				}
-				return
-			}
 			if err != nil || len(result.Sheets) != 2 || result.SheetFrames != (SheetFrames{Decoded: 6}) {
 				t.Fatalf("frames %+v, %d sheets, error %v; want 6 decoded samples on 2 sheets", result.SheetFrames, len(result.Sheets), err)
 			}

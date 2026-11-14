@@ -618,7 +618,7 @@ func (s *Service) createArtifactDownload(ctx context.Context, userID int, req Cr
 			d.DeviceID = req.DeviceID
 		}
 		if err := s.repo.Create(ctx, d); err != nil {
-			if managed {
+			if managed && !errors.Is(err, errFileNotRegistrable) {
 				if existing, gerr := s.repo.GetManagedEntry(ctx, userID, req.ProfileID, req.DeviceID, file.ContentID, file.EpisodeID); gerr == nil {
 					replacement := buildManagedDownload(userID, req.ProfileID, req.DeviceID, managedItem{file: file, contentID: file.ContentID, episodeID: file.EpisodeID}, decision, "", status, size, artifact.ID)
 					row, rerr := s.reuseOrReplaceManaged(ctx, existing, replacement, req.ExpectedRevision, req.ExpectedDownloadID)
@@ -646,10 +646,13 @@ func (s *Service) createArtifactDownload(ctx context.Context, userID int, req Cr
 // and the caller's row returned: reporting an error would invite a retry
 // that duplicates the download or conflicts on its revision.
 func (s *Service) confirmArtifactLink(ctx context.Context, d *Download) *Download {
-	confirmed, err := s.repo.ConfirmArtifactLink(ctx, d)
+	confirmed, requeued, err := s.repo.ConfirmArtifactLink(ctx, d)
 	if err != nil {
 		slog.WarnContext(ctx, "confirming download artifact link failed", "component", "downloads", "download_id", d.ID, "artifact_id", d.ArtifactID, "error", err)
 		confirmed = d
+	}
+	if requeued {
+		s.artifacts.triggerDrain()
 	}
 	// A new download joining a job still being prepared changes that job's
 	// requester list; the job itself emits nothing when it is only reused.
@@ -1046,7 +1049,10 @@ func (s *Service) ensureManagedDecisions(ctx context.Context, userID int, req Cr
 			}
 			toInsert = append(toInsert, d)
 		}
-		rows, err := s.repo.CreateManagedEntriesBatch(ctx, toInsert)
+		// One request registers its entries together: a file that left its
+		// title since it was resolved fails the request without registering
+		// the others, as a file deleted meanwhile failed the insert.
+		rows, err := s.repo.CreateManagedEntriesAllOrNothing(ctx, toInsert)
 		if err != nil {
 			return err
 		}
@@ -1068,8 +1074,13 @@ func (s *Service) ensureManagedDecisions(ctx context.Context, userID int, req Cr
 			continue
 		}
 		// A concurrent create won this identity between the fetch and the
-		// batch insert (ON CONFLICT skipped it); return the winning row.
+		// batch insert (ON CONFLICT skipped it); return the winning row. With
+		// no winner, the insert wrote nothing because a file of the request
+		// went missing or left its title.
 		row, err := s.repo.GetManagedEntry(ctx, userID, req.ProfileID, req.DeviceID, items[i].contentID, items[i].episodeID)
+		if errors.Is(err, ErrNotFound) {
+			return nil, errFileNotRegistrable
+		}
 		if err != nil {
 			return nil, err
 		}
@@ -1159,6 +1170,10 @@ func (s *Service) reuseOrReplaceManaged(ctx context.Context, existing, replaceme
 		return existing, nil
 	}
 	row, err := s.repo.ReplaceManagedEntry(ctx, existing, replacement)
+	if err == nil && row.ArtifactID != existing.ArtifactID {
+		// A new quality leaves the old job without this download.
+		s.artifacts.stopAbandonedPreparations(ctx, existing)
+	}
 	// The shared CAS returns a concurrent winner after losing the update. Native
 	// creation must not report that winner as successful replacement of our target.
 	if err == nil && expected != nil && (row.ID != existing.ID || row.Revision != existing.Revision+1 || !sameManagedTarget(row, replacement)) {
@@ -1393,6 +1408,7 @@ func (s *Service) Delete(ctx context.Context, userID int, profileID, deviceID, d
 			return err
 		}
 		s.notifyPreparationRequesters(ctx, before)
+		s.artifacts.stopAbandonedPreparations(ctx, before)
 		return nil
 	}
 
@@ -1420,6 +1436,7 @@ func (s *Service) Delete(ctx context.Context, userID int, profileID, deviceID, d
 	}
 	if err == nil {
 		s.notifyPreparationRequesters(ctx, dl)
+		s.artifacts.stopAbandonedPreparations(ctx, dl)
 	}
 	return err
 }
@@ -1531,6 +1548,12 @@ func (s *Service) resolveDownloadBytesTarget(ctx context.Context, dl *Download, 
 		artifact, err := s.artifacts.Ready(ctx, dl.ArtifactID)
 		if err != nil {
 			return nil, err
+		}
+		// An artifact is prepared from one file row. A download the scanner
+		// parked on a retitle's stand-in still names the artifact of the row
+		// it left, which now belongs to another title, so it is not served.
+		if artifact.MediaFileID != dl.MediaFileID {
+			return nil, catalog.ErrItemNotFound
 		}
 		// The quality ceiling applies to what is actually served — the prepared
 		// artifact's resolution, not the source's (a 720p transcode of a 4K

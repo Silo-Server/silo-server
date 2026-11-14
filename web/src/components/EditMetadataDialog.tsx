@@ -86,6 +86,8 @@ export default function EditMetadataDialog({ item, open, onOpenChange }: EditMet
   const refreshMutation = useRefreshItemMetadata();
 
   const ownsImageLock = item.type === "movie" || item.type === "series";
+  // A season or episode has the series' content rating, which decides age limits.
+  const ownsContentRating = item.type !== "season" && item.type !== "episode";
   const fieldLockMap = FIELD_LOCK_MAPS[item.type];
   // An audiobook's fields mostly come from its file tags, which no provider
   // supplies, so a reset would empty them rather than restore them.
@@ -243,7 +245,7 @@ export default function EditMetadataDialog({ item, open, onOpenChange }: EditMet
           showCloseButton
         >
           {/* Header */}
-          <DialogHeader className="border-border/10 shrink-0 flex-row items-center justify-between border-b px-5 py-4">
+          <DialogHeader className="border-border/10 shrink-0 flex-row items-center justify-between border-b px-5 py-4 pe-12">
             <div className="flex items-center gap-2.5">
               <DialogTitle className="text-[15px] font-semibold">
                 {t("web.item.dialog.editMetadataTitle")}
@@ -343,15 +345,17 @@ export default function EditMetadataDialog({ item, open, onOpenChange }: EditMet
                   )}
 
                   <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                    <FieldRow
-                      label={t("web.item.editMetadata.contentRating")}
-                      lockIcon={renderLockIcon("content_rating")}
-                    >
-                      <Input
-                        value={form.content_rating}
-                        onChange={(e) => setField("content_rating", e.target.value)}
-                      />
-                    </FieldRow>
+                    {ownsContentRating && (
+                      <FieldRow
+                        label={t("web.item.editMetadata.contentRating")}
+                        lockIcon={renderLockIcon("content_rating")}
+                      >
+                        <Input
+                          value={form.content_rating}
+                          onChange={(e) => setField("content_rating", e.target.value)}
+                        />
+                      </FieldRow>
+                    )}
 
                     {item.type === "movie" && (
                       <FieldRow

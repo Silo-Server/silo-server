@@ -581,7 +581,9 @@ func (s *PostgresUserStore) ReplaceCollectionItems(ctx context.Context, collecti
 	defer tx.Rollback(ctx) //nolint:errcheck
 
 	// Concurrent replaces of one collection must not interleave their diffs.
-	if err := s.lockCollectionRow(ctx, tx, collectionID); err != nil {
+	// The items have no foreign key to the collection, so a replace that
+	// waited out a delete must not write them under the deleted ID.
+	if err := s.lockExistingCollectionRow(ctx, tx, collectionID); err != nil {
 		return err
 	}
 	// Lock the current members before the first write. Each item statement's
