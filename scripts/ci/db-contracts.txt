@@ -931,6 +931,10 @@
 ./internal/scanner TestAudiobookRuntimeConcurrentMetadataAndMissingPostgres
 ./internal/worker TestSessionSyncRowJSONMatchesTheSyncedRowDB
 
+# An audiobook rescan keeps the authors and narrators an admin locked with the
+# crew lock.
+./internal/scanner TestAudiobookRescanKeepsCrewLockedCreditsDB
+
 # Dashboard egress splits by stream node and API server without adding the
 # per-node rows to the total, and a wide bucket's split comes from its peak minute.
 ./internal/dashmetrics TestSampleSharedRecordsEgressPerNodeDB
