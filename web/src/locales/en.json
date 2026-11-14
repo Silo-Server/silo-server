@@ -101020,6 +101020,18 @@
       "value": "Subtitle uploaded"
     }
   ],
+  "web.common.toast.watchProviders.authDeclined": [
+    {
+      "type": 0,
+      "value": "The connection was declined on the provider's site. Select Connect to try again."
+    }
+  ],
+  "web.common.toast.watchProviders.authNotApproved": [
+    {
+      "type": 0,
+      "value": "Approve the code on the provider's site first, then try again."
+    }
+  ],
   "web.common.toast.watchProviders.connectFailed": [
     {
       "type": 0,

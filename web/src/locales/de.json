@@ -100456,6 +100456,18 @@
       "value": "Untertitel hochgeladen"
     }
   ],
+  "web.common.toast.watchProviders.authDeclined": [
+    {
+      "type": 0,
+      "value": "Die Verbindung wurde auf der Website des Anbieters abgelehnt. Wähle „Verbinden“, um es erneut zu versuchen."
+    }
+  ],
+  "web.common.toast.watchProviders.authNotApproved": [
+    {
+      "type": 0,
+      "value": "Bestätige zuerst den Code auf der Website des Anbieters und versuche es dann erneut."
+    }
+  ],
   "web.common.toast.watchProviders.connectFailed": [
     {
       "type": 0,

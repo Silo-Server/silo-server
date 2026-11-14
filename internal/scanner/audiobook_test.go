@@ -392,7 +392,7 @@ func TestCollectAudiobookRootScansKeepsSiblingFoldersWhenRootHasLooseAudio(t *te
 		t.Fatal(err)
 	}
 
-	scans, err := collectAudiobookRootScans(t.Context(), 1, []string{root}, nil, true)
+	scans, err := collectAudiobookRootScans(t.Context(), 1, []string{root}, []string{root}, true)
 	if err != nil {
 		t.Fatalf("collectAudiobookRootScans: %v", err)
 	}

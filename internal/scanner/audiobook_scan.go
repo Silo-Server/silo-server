@@ -231,11 +231,14 @@ func audiobookScanWorkers() int {
 }
 
 type audiobookRootScan struct {
-	root         string
-	candidates   []string
-	seenPaths    map[string]bool
-	rootErr      error
-	walkFailures []string // logical paths the walk could not read or resolve
+	root string
+	// walkBelowRootBook keeps discovery going below root when root holds
+	// audio. See collectAudiobookRootScans.
+	walkBelowRootBook bool
+	candidates        []string
+	seenPaths         map[string]bool
+	rootErr           error
+	walkFailures      []string // logical paths the walk could not read or resolve
 }
 
 func (r *audiobookRootScan) failed() bool {
@@ -320,8 +323,9 @@ func walkAudiobookDirectories(ctx context.Context, path string, scan *audiobookR
 	}
 	if hadAudio {
 		scan.candidates = append(scan.candidates, path)
-		// Stop below a book, but loose root audio must not hide sibling books.
-		if path != scan.root {
+		// Stop below a book, but loose audio in a library root must not hide
+		// sibling books.
+		if path != scan.root || !scan.walkBelowRootBook {
 			return nil
 		}
 	}
@@ -333,19 +337,55 @@ func walkAudiobookDirectories(ctx context.Context, path string, scan *audiobookR
 	return nil
 }
 
+// cleanAudiobookRoot returns root as a walk compares it, or "" for no root.
+func cleanAudiobookRoot(root string) string {
+	clean := filepath.Clean(strings.TrimSpace(root))
+	if clean == "." {
+		return ""
+	}
+	return clean
+}
+
+// collectAudiobookRootScans walks each root, plus every configured library root
+// inside one, since a library scan walks every configured root. Only a
+// configured root keeps discovery going below its own loose audio; any other
+// walk root holding audio is a book, as a library scan finds it. A walk that
+// reads no ignore files also keeps going below its root: it cannot tell whether
+// a library scan would skip that audio and descend.
 func collectAudiobookRootScans(ctx context.Context, folderID int, roots, libraryRoots []string, honorIgnores bool) ([]audiobookRootScan, error) {
-	scans := make([]audiobookRootScan, 0, len(roots))
+	var configured []string
+	for _, root := range libraryRoots {
+		if cleanRoot := cleanAudiobookRoot(root); cleanRoot != "" {
+			configured = append(configured, cleanRoot)
+		}
+	}
+	walkRoots := make([]string, 0, len(roots))
 	for _, root := range roots {
+		cleanRoot := cleanAudiobookRoot(root)
+		if cleanRoot == "" {
+			continue
+		}
+		walkRoots = append(walkRoots, cleanRoot)
+		for _, nested := range configured {
+			if nested != cleanRoot && pathWithinAnyRoot(nested, []string{cleanRoot}) {
+				walkRoots = append(walkRoots, nested)
+			}
+		}
+	}
+	scans := make([]audiobookRootScan, 0, len(walkRoots))
+	walked := make(map[string]bool, len(walkRoots))
+	for _, cleanRoot := range walkRoots {
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		cleanRoot := filepath.Clean(strings.TrimSpace(root))
-		if cleanRoot == "" || cleanRoot == "." {
+		if walked[cleanRoot] {
 			continue
 		}
+		walked[cleanRoot] = true
 		scan := audiobookRootScan{
-			root:      cleanRoot,
-			seenPaths: make(map[string]bool),
+			root:              cleanRoot,
+			walkBelowRootBook: !honorIgnores || slices.Contains(configured, cleanRoot),
+			seenPaths:         make(map[string]bool),
 		}
 		info, statErr := fspath.Stat(cleanRoot)
 		switch {
@@ -482,8 +522,9 @@ func (s *Scanner) reconcileAudiobookAliases(ctx context.Context, folder *models.
 // item_people.
 //
 // Directories containing audio are treated as books; discovery follows directory
-// symlinks and stops below each book so its parts remain one candidate. A root
-// containing loose audio is also a candidate without hiding sibling books.
+// symlinks and stops below each book so its parts remain one candidate. A
+// library root containing loose audio is also a candidate without hiding
+// sibling books.
 //
 // This bypasses the per-file movie/TV pipeline because audiobooks are
 // inherently folder-scoped (one book = one item, possibly multi-file).
@@ -979,9 +1020,6 @@ func (s *Scanner) updateAudiobookMediaItemTx(ctx context.Context, tx pgx.Tx, con
 		return fmt.Errorf("get audiobook media item %s: %w", contentID, err)
 	}
 	applyBookToMediaItem(item, book)
-	if item.SortTitle == "" {
-		item.SortTitle = titleutil.DeriveDefaultSortTitle(item.Title)
-	}
 	return s.itemRepo.UpsertTx(ctx, tx, item)
 }
 
@@ -1027,9 +1065,6 @@ func createAudiobookMediaItem(ctx context.Context, itemWriter filesystemMediaIte
 		Year:      book.Year,
 	}
 	applyBookToMediaItem(item, book)
-	if item.SortTitle == "" {
-		item.SortTitle = titleutil.DeriveDefaultSortTitle(item.Title)
-	}
 	if err := itemWriter.Upsert(ctx, item); err != nil {
 		return "", err
 	}
@@ -1187,6 +1222,9 @@ func applyBookToMediaItem(item *models.MediaItem, book *parsedAudiobook) {
 		item.Title = cleaned
 		if cleaned != raw && item.OriginalTitle == "" {
 			item.OriginalTitle = raw
+		}
+		if item.SortTitle == "" {
+			item.SortTitle = titleutil.DeriveDefaultSortTitle(item.Title)
 		}
 	}
 	releaseDatesLocked := slices.Contains(item.LockedFields, lockedFieldReleaseDates)

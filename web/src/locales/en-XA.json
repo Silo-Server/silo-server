@@ -109696,6 +109696,18 @@
       "value": "⟦Šûƀţîţļé ûþļöåđéđ~~~~~~~⟧"
     }
   ],
+  "web.common.toast.watchProviders.authDeclined": [
+    {
+      "type": 0,
+      "value": "⟦Ţĥé çöññéçţîöñ ŵåš đéçļîñéđ öñ ţĥé þŕöṽîđéŕ'š šîţé. Šéļéçţ Çöññéçţ ţö ţŕý åĝåîñ.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.common.toast.watchProviders.authNotApproved": [
+    {
+      "type": 0,
+      "value": "⟦Åþþŕöṽé ţĥé çöđé öñ ţĥé þŕöṽîđéŕ'š šîţé ƒîŕšţ, ţĥéñ ţŕý åĝåîñ.~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
   "web.common.toast.watchProviders.connectFailed": [
     {
       "type": 0,

@@ -161,12 +161,13 @@ func (r *Repository) PruneEphemeralOlderThan(ctx context.Context, cutoff time.Ti
 const concurrentSlotPredicate = `(status = 'preparing' OR (device_id IS NULL AND status IN ('queued', 'downloading')))`
 
 // CountActiveByUser returns how many of a user's downloads hold a slot of the
-// concurrent limit.
-func (r *Repository) CountActiveByUser(ctx context.Context, userID int) (int, error) {
+// concurrent limit, leaving out the downloads named in except.
+func (r *Repository) CountActiveByUser(ctx context.Context, userID int, except ...string) (int, error) {
 	var count int
 	err := r.pool.QueryRow(ctx,
-		`SELECT COUNT(*) FROM downloads WHERE user_id = $1 AND `+concurrentSlotPredicate,
-		userID,
+		`SELECT COUNT(*) FROM downloads WHERE user_id = $1 AND `+concurrentSlotPredicate+`
+		   AND id <> ALL($2::text[])`,
+		userID, append([]string{}, except...), // never nil: a NULL array would match no row
 	).Scan(&count)
 	if err != nil {
 		return 0, fmt.Errorf("counting active downloads: %w", err)

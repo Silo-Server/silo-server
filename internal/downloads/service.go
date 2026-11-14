@@ -1017,16 +1017,43 @@ func (s *Service) ensureManagedDecisions(ctx context.Context, userID int, req Cr
 				activating++
 			}
 		}
+		// Another request may have replaced an entry while this one waited.
+		// Check each guard against the entry as it is now, before anything
+		// is counted or an encode is queued, and replace that row.
+		preparedKeys := make([]ManagedEntryKey, len(prepared))
+		for k, r := range prepared {
+			preparedKeys[k] = keys[r.i]
+		}
+		current, err := s.repo.GetManagedEntriesByKeys(ctx, userID, req.ProfileID, req.DeviceID, preparedKeys)
+		if err != nil {
+			return err
+		}
+		for k, r := range prepared {
+			cur := current[keys[r.i]]
+			if err := checkManagedCreateRevision(cur, r.expected, r.expectedID); err != nil {
+				return err
+			}
+			if cur == nil {
+				return ErrNotFound
+			}
+			prepared[k].existing = cur
+		}
+		// A replacement whose prepared file is not ready leaves its entry
+		// preparing, whatever the entry's status is now. Count it as activating
+		// and leave the entry out of the active count, so a conversion that
+		// finishes meanwhile, which takes no lock, cannot hide its slot. A
+		// replacement to a ready file registers ready and takes no slot.
+		var startsPreparing []string
 		for _, r := range prepared {
 			d := decisions[r.i]
-			ready := s.artifacts.readyArtifact(ctx, items[r.i].file, d.DeliveryFormat, d.PrepareTarget)
-			if replacementAddsActive(r.existing, ready) {
+			if !s.artifacts.readyArtifact(ctx, items[r.i].file, d.DeliveryFormat, d.PrepareTarget) {
 				activating++
+				startsPreparing = append(startsPreparing, r.existing.ID)
 			}
 		}
 		// A replacement updates its entry in place: it can become active but
 		// creates no download, so only new entries count toward the period.
-		if err := s.limiter.CheckCounts(ctx, userID, activating, len(newIdx)); err != nil {
+		if err := s.limiter.CheckCounts(ctx, userID, activating, len(newIdx), startsPreparing...); err != nil {
 			return err
 		}
 		for _, r := range prepared {
@@ -1189,15 +1216,6 @@ func reusableManagedStatus(status string) bool {
 	default:
 		return true
 	}
-}
-
-// replacementAddsActive reports whether replacing existing with a prepared
-// entry adds an active download: the target's prepared file is not ready, so
-// the entry would start preparing, and existing does not already hold a slot
-// of the concurrent limit. A device entry holds one only while it is
-// preparing (concurrentSlotPredicate). A ready target registers ready.
-func replacementAddsActive(existing *Download, targetReady bool) bool {
-	return existing.Status != StatusPreparing && !targetReady
 }
 
 func sameManagedTarget(a, b *Download) bool {

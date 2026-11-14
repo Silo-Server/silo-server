@@ -98,6 +98,42 @@ func TestValidateSourceClassifiesDeterministicRejection(t *testing.T) {
 	}
 }
 
+// TestValidateSourceReadsToKeyframeAfterUnindexedSeek verifies a position
+// whose first packet decodes nothing, as after a seek into MPEG-TS, is read
+// again through the first keyframe a packet scan finds.
+func TestValidateSourceReadsToKeyframeAfterUnindexedSeek(t *testing.T) {
+	resetSourcePreflightCache(t)
+	request := sourcePreflightTestRequest(t)
+	conversions := 0
+	fallback := sourcePreflightTestRunner(&conversions, func() string { return "ffmpeg version ts" }, nil)
+	var rereads []string
+	runner := func(ctx context.Context, name string, args ...string) ([]byte, error) {
+		index := slices.Index(args, "-read_intervals")
+		if !strings.Contains(name, "ffprobe") || index < 0 {
+			return fallback(ctx, name, args...)
+		}
+		start, packets, _ := strings.Cut(args[index+1], "%+#")
+		switch {
+		case slices.Contains(args, "-show_packets"):
+			// The first packet is flagged as a keyframe but already decoded
+			// nothing, so the read must go on to the next one.
+			return []byte(`{"packets":[{"flags":"K_"},{"flags":"_D"},{"flags":"__"},{"flags":"K_"},{"flags":"__"}]}`), nil
+		case packets == "1" && start != "0.000":
+			// Only the sample at the start seeks onto a keyframe.
+			return []byte("[hevc] Could not find ref with POC 12\n" + `{"frames":[]}`), nil
+		case packets != "1":
+			rereads = append(rereads, args[index+1])
+		}
+		return fallback(ctx, name, args...)
+	}
+	if err := ValidateSourceWithRunner(context.Background(), request, runner); err != nil {
+		t.Fatalf("ValidateSource() = %v, want accepted", err)
+	}
+	if want := []string{"50.000%+#4", "90.000%+#4"}; !slices.Equal(rereads, want) {
+		t.Fatalf("reads through the keyframe = %v, want %v", rereads, want)
+	}
+}
+
 func TestSourcePreflightCacheBoundsSuccessfulVerdicts(t *testing.T) {
 	resetSourcePreflightCache(t)
 	now := time.Now()
