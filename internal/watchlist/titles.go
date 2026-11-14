@@ -365,10 +365,22 @@ func (s *Titles) PurgeProfile(ctx context.Context, userID int, profileID string)
 // LibraryMatches returns every library item (enabled folders, same media
 // type) that carries or once carried any of the IDs. The add path uses it to
 // send a title the library already has to the library watchlist instead.
+// The IDs a stored title holding one of the TMDB IDs has kept count too, so
+// add and remove find the item promotion would move the title onto.
 func (s *Titles) LibraryMatches(ctx context.Context, mediaType string, tmdbIDs []int, imdbID string, tvdbID int) ([]string, error) {
 	aliases := make([]catalog.ProviderAlias, 0, len(tmdbIDs)+2)
+	tmdbAliases := make([]string, 0, len(tmdbIDs))
 	for _, id := range tmdbIDs {
-		aliases = append(aliases, catalog.ProviderAlias{MediaType: mediaType, Provider: contentid.ProviderTMDB, ProviderID: strconv.Itoa(id)})
+		tmdbID := strconv.Itoa(id)
+		tmdbAliases = append(tmdbAliases, tmdbID)
+		aliases = append(aliases, catalog.ProviderAlias{MediaType: mediaType, Provider: contentid.ProviderTMDB, ProviderID: tmdbID})
+	}
+	stored, err := s.repo.aliasesOfTMDBOwners(ctx, mediaType, tmdbAliases)
+	if err != nil {
+		return nil, err
+	}
+	for _, a := range stored {
+		aliases = append(aliases, catalog.ProviderAlias{MediaType: a.MediaType, Provider: a.Provider, ProviderID: a.ProviderID})
 	}
 	if imdbID != "" {
 		aliases = append(aliases, catalog.ProviderAlias{MediaType: mediaType, Provider: contentid.ProviderIMDB, ProviderID: imdbID})

@@ -248,6 +248,7 @@ const I18N_CONVERTED = [
   "src/hooks/useTTS.ts",
   "src/hooks/useAdminNavTopics.ts",
   "src/hooks/useIsActingAdmin.ts",
+  "src/lib/accessGroupPolicyChanges.ts",
   "src/lib/accountOwner.ts",
   "src/lib/adminJobs.ts",
   "src/lib/adminNavigation.ts",
@@ -425,6 +426,7 @@ const ADMIN_TEXT_PATHS = [
   "src/components/ServerActivity.tsx",
   // Helpers only admin pages import.
   "src/hooks/queries/useAutoscan.ts",
+  "src/lib/accessGroupPolicyChanges.ts",
   "src/lib/accountOwner.ts",
   "src/lib/aiProviders.ts",
   "src/lib/externalSignInAdmin.ts",

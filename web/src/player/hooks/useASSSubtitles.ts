@@ -30,6 +30,21 @@ import liberationSansUrl from "../assets/liberation-sans.woff2?url";
 // row; reload the track once the crop settles rather than on every frame.
 const FILL_MARGIN_DEBOUNCE_MS = 150;
 
+// Attached fonts are optional: the server extracts them from the media file,
+// which can take far longer than the subtitle script itself. Once the script
+// has loaded, wait this long for them before rendering with the fallback
+// fonts; fonts that arrive later are added to the running renderer.
+const ATTACHED_FONT_WAIT_MS = 3_000;
+
+/** Resolves with the promise's value, or with undefined once `ms` pass first. */
+function settleWithin<T>(promise: Promise<T>, ms: number): Promise<T | undefined> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const expired = new Promise<undefined>((resolve) => {
+    timer = setTimeout(() => resolve(undefined), ms);
+  });
+  return Promise.race([promise, expired]).finally(() => clearTimeout(timer));
+}
+
 interface ASSFillState {
   instance: JASSUB;
   /** Track content before any Fill margin inset. */
@@ -212,39 +227,38 @@ export function useASSSubtitles(
       const classPromise = jassubImportRef.current;
       void classPromise.catch(() => {});
 
-      let subContent: string;
-      let attachedFontData: Uint8Array[] = [];
-      try {
-        const [content, loadedAttachedFontData] = await Promise.all([
-          fetch(activeUrl!, { signal }).then(async (response) => {
-            if (!response.ok) throw new Error(`HTTP ${response.status}`);
-            progress();
-            if (!response.body) return response.text();
-            const reader = response.body.getReader();
-            const decoder = new TextDecoder();
-            let text = "";
-            while (!signal.aborted && !cancelled) {
-              const { value, done } = await reader.read();
-              if (done) return text + decoder.decode();
-              progress();
-              text += decoder.decode(value, { stream: true });
+      // Requested alongside the script, but never awaited past
+      // ATTACHED_FONT_WAIT_MS: the font request reports no progress, so
+      // waiting on it would let the stall timer abort the whole attempt.
+      const attachedFonts = activeFontBundleUrl
+        ? loadSubtitleFontBundle(activeFontBundleUrl, signal).catch((err): Uint8Array[] => {
+            if ((err as Error).name !== "AbortError") {
+              console.error(
+                `[useASSSubtitles] Failed to load subtitle font bundle ${activeFontBundleUrl}:`,
+                err,
+              );
             }
-            throw new DOMException("Subtitle loading cancelled", "AbortError");
-          }),
-          activeFontBundleUrl
-            ? loadSubtitleFontBundle(activeFontBundleUrl, signal).catch((err) => {
-                if ((err as Error).name !== "AbortError") {
-                  console.error(
-                    `[useASSSubtitles] Failed to load subtitle font bundle ${activeFontBundleUrl}:`,
-                    err,
-                  );
-                }
-                return [];
-              })
-            : Promise.resolve([]),
-        ]);
-        subContent = content;
-        attachedFontData = loadedAttachedFontData;
+            return [];
+          })
+        : null;
+
+      let subContent: string;
+      try {
+        subContent = await fetch(activeUrl!, { signal }).then(async (response) => {
+          if (!response.ok) throw new Error(`HTTP ${response.status}`);
+          progress();
+          if (!response.body) return response.text();
+          const reader = response.body.getReader();
+          const decoder = new TextDecoder();
+          let text = "";
+          while (!signal.aborted && !cancelled) {
+            const { value, done } = await reader.read();
+            if (done) return text + decoder.decode();
+            progress();
+            text += decoder.decode(value, { stream: true });
+          }
+          throw new DOMException("Subtitle loading cancelled", "AbortError");
+        });
       } catch (err) {
         if (!cancelled && (err as Error).name !== "AbortError") {
           console.error(`[useASSSubtitles] Failed to fetch ${activeUrl}:`, err);
@@ -252,6 +266,11 @@ export function useASSSubtitles(
         throw err;
       }
 
+      if (cancelled || signal.aborted) return;
+
+      const attachedFontData = attachedFonts
+        ? await settleWithin(attachedFonts, ATTACHED_FONT_WAIT_MS)
+        : [];
       if (cancelled || signal.aborted) return;
 
       // libass renders missing glyphs with its *default* font — it does not
@@ -282,7 +301,7 @@ export function useASSSubtitles(
         fallbackFont && fallbackFontData
           ? forceASSFontFamily(subContent, fallbackFont.family)
           : subContent;
-      const fonts = [...attachedFontData, ...(fallbackFontData ?? [])];
+      const fonts = [...(attachedFontData ?? []), ...(fallbackFontData ?? [])];
 
       const JASSUBClass = await classPromise;
       if (cancelled || signal.aborted) return;
@@ -331,6 +350,20 @@ export function useASSSubtitles(
       };
       fillRef.current = fill;
       instance._canvas.classList.toggle("player-ass-fill", videoFitRef.current === "cover");
+      if (attachedFonts && attachedFontData === undefined) {
+        const isCurrent = () => !cancelled && !signal.aborted && jassubRef.current === instance;
+        void attachedFonts
+          .then(async (lateFonts) => {
+            if (lateFonts.length === 0) return;
+            await instance.ready;
+            if (!isCurrent()) return;
+            await instance.renderer.addFonts(lateFonts);
+            repaintASS(instance, isCurrent);
+          })
+          .catch((err) => {
+            if (isCurrent()) console.error("[useASSSubtitles] Unable to add attached fonts:", err);
+          });
+      }
       await instance.ready;
       if (cancelled || signal.aborted || jassubRef.current !== instance) return;
 

@@ -131,6 +131,7 @@ type ProfileEntry struct {
 	MaxContentRating           string `json:"max_content_rating"`
 	MaxAdvisoryAge             int    `json:"max_advisory_age"`
 	RequireAdvisoryAge         bool   `json:"require_advisory_age"`
+	RequestsBlocked            bool   `json:"requests_blocked"`
 	LibraryRestrictionsEnabled bool   `json:"library_restrictions_enabled"`
 	AllowedLibraryIDs          []int  `json:"allowed_library_ids"`
 	MaxPlaybackQuality         string `json:"max_playback_quality"`
@@ -468,7 +469,7 @@ func exportUser(ctx context.Context, tx pgx.Tx, account AccountEntry) (UserDocum
 func readBackupProfiles(ctx context.Context, tx pgx.Tx, userID int) ([]ProfileEntry, error) {
 	rows, err := tx.Query(ctx, `
 		SELECT p.id, p.name, p.avatar, p.is_primary, p.pin_hash, p.is_child, p.max_content_rating, COALESCE(p.max_advisory_age, 0),
-			p.require_advisory_age, p.library_restrictions_enabled, p.max_playback_quality,
+			p.require_advisory_age, p.requests_blocked, p.library_restrictions_enabled, p.max_playback_quality,
 			COALESCE((SELECT array_agg(l.library_id ORDER BY l.library_id) FROM user_profile_allowed_libraries l
 				WHERE l.user_id = p.user_id AND l.profile_id = p.id), '{}')
 		FROM user_profiles p WHERE p.user_id = $1 ORDER BY p.created_at, p.id`, userID)
@@ -480,7 +481,7 @@ func readBackupProfiles(ctx context.Context, tx pgx.Tx, userID int) ([]ProfileEn
 	for rows.Next() {
 		var p ProfileEntry
 		if err := rows.Scan(&p.ID, &p.Name, &p.Avatar, &p.IsPrimary, &p.PINHash, &p.IsChild, &p.MaxContentRating, &p.MaxAdvisoryAge,
-			&p.RequireAdvisoryAge, &p.LibraryRestrictionsEnabled, &p.MaxPlaybackQuality, &p.AllowedLibraryIDs); err != nil {
+			&p.RequireAdvisoryAge, &p.RequestsBlocked, &p.LibraryRestrictionsEnabled, &p.MaxPlaybackQuality, &p.AllowedLibraryIDs); err != nil {
 			return nil, err
 		}
 		out = append(out, p)

@@ -126,6 +126,7 @@ func TestLocalDownloadCanceledWritePersistsFailureDB(t *testing.T) {
 			}
 			now := time.Now().UTC()
 			row := &Download{ID: "canceled-write", UserID: 2, MediaFileID: 42, ContentID: "movie", Kind: KindQueued, Status: StatusQueued, Format: FormatOriginal, FileSize: int64(len(payload)), CreatedAt: now, UpdatedAt: now}
+			seedSchemaFiles(t, repo, &models.MediaFile{ID: 42, ContentID: "movie"})
 			if err := repo.Create(t.Context(), row); err != nil {
 				t.Fatal(err)
 			}
@@ -197,6 +198,7 @@ func TestEphemeralDownloadRechecksProfileAccessDB(t *testing.T) {
 	// requesting profile's limits hide the newer one's item.
 	row := &Download{ID: "shared-row", UserID: 2, MediaFileID: 42, ContentID: "movie", Kind: KindQueued, Status: StatusQueued, Format: FormatOriginal, FileSize: 5, CreatedAt: now, UpdatedAt: now}
 	open := &Download{ID: "open-row", UserID: 2, MediaFileID: 43, ContentID: "open-movie", Kind: KindQueued, Status: StatusQueued, Format: FormatOriginal, FileSize: 5, CreatedAt: now.Add(-time.Minute), UpdatedAt: now}
+	seedSchemaFiles(t, repo, &models.MediaFile{ID: 42, ContentID: "movie"}, &models.MediaFile{ID: 43, ContentID: "open-movie"})
 	for _, d := range []*Download{row, open} {
 		if err := repo.Create(t.Context(), d); err != nil {
 			t.Fatal(err)

@@ -1,4 +1,4 @@
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { QueryClient, QueryClientProvider, QueryObserver } from "@tanstack/react-query";
 import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -10,6 +10,7 @@ import type { V2Body } from "@/api/v2/request";
 import type { CatalogSearchState } from "@/pages/catalogSearchParams";
 import { installPolicyStorageMocks, jsonResponse } from "@/pages/admin-policy/policyTestUtils";
 import { createCatalogSearchState, useCatalogFilters, useCatalogWindow } from "./catalog";
+import { invalidateMediaSurfaceQueries } from "./mediaSurfaceRefresh";
 
 type CatalogQueryBody = V2Body<"POST /api/v2/catalog/query">;
 interface RequestRecord {
@@ -321,6 +322,67 @@ describe("catalog window cursor paging", () => {
     expect(result.current.data.pages.get(1)).toHaveLength(2);
   });
 
+  it("lands a jump while a scan's sweeps keep arriving, then sweeps the window", async () => {
+    const { requests, fetchMock, reply } = catalogTransport();
+    const heldSeeks: (() => void)[] = [];
+    fetchMock.mockImplementation(async (_url, options) => {
+      const body = JSON.parse(String(options?.body)) as CatalogQueryBody;
+      const signal = options?.signal;
+      requests.push({ body, signal });
+      // Each reply arrives as its own task, as a browser's network replies do.
+      if (body.seek === undefined) {
+        await new Promise((resolve) => setTimeout(resolve, 5));
+        return reply(body);
+      }
+      return new Promise((resolve, reject) => {
+        heldSeeks.push(() => resolve(reply(body)));
+        signal?.addEventListener("abort", () => reject(new DOMException("Aborted", "AbortError")), {
+          once: true,
+        });
+      });
+    });
+    const { wrapper, queryClient } = makeClient();
+    const { result } = renderHook(
+      () =>
+        useCatalogWindow(titleOrderedLibrary(), {
+          limit: 2,
+          includeTotal: false,
+          visibleRange: [100, 105],
+        }),
+      { wrapper },
+    );
+    await waitFor(() => expect(heldSeeks).toHaveLength(1));
+    const seek = requests.at(-1)!;
+    expect(seek.body.seek).toBe(100);
+
+    // A seek deep into a large library outlasts a scan's sweep window. A
+    // sweep that cancelled it, or re-keyed it under page 0's next snapshot,
+    // would start it over on every sweep, and it would never land.
+    for (let sweep = 0; sweep < 3; sweep++) {
+      await act(async () => {
+        await invalidateMediaSurfaceQueries(queryClient, { libraryId: 7, itemMayBeNew: true });
+      });
+    }
+    expect(seek.signal?.aborted).toBe(false);
+    expect(requests.filter(({ body }) => !body.cursor)).toHaveLength(1);
+
+    await act(async () => heldSeeks.shift()!());
+    await waitFor(() => expect(result.current.data.pages.get(50)).toHaveLength(2));
+    // The page above the jump seeks once the first visible page is in; it is
+    // a first read too.
+    await waitFor(() => expect(requests.some(({ body }) => body.seek === 98)).toBe(true));
+    await act(async () => heldSeeks.splice(0).forEach((finish) => finish()));
+
+    // Once the window's first reads are in, the held sweep reloads it under a
+    // new snapshot, showing what it loaded until the reloads land.
+    await waitFor(() => expect(requests.filter(({ body }) => !body.cursor)).toHaveLength(2));
+    expect(result.current.data.pages.get(50)?.map((item) => item.content_id)).toEqual([
+      "item-100",
+      "item-101",
+    ]);
+    heldSeeks.splice(0).forEach((finish) => finish());
+  });
+
   it.each([
     ["search text", { q: "moon" }],
     ["library", { library_id: 7 }],
@@ -353,6 +415,49 @@ describe("catalog window cursor paging", () => {
       }
     },
   );
+
+  it("gives a first read that starts late in a hold its own read time", async () => {
+    vi.useFakeTimers();
+    try {
+      const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+      const listKey = (offset: number) => ["catalog", "list", { library_id: 7, offset }];
+      // A page already on screen, which the held sweep refreshes once it runs.
+      queryClient.setQueryData(listKey(0), { items: [] });
+      const refreshShown = vi.fn(async () => ({ items: [] }));
+      const shown = new QueryObserver(queryClient, {
+        queryKey: listKey(0),
+        queryFn: refreshShown,
+        staleTime: Infinity,
+      });
+      // A first read that never lands, and one that starts 29 seconds later.
+      const early = new QueryObserver(queryClient, {
+        queryKey: listKey(100),
+        queryFn: () => new Promise<never>(() => undefined),
+      });
+      let finishLate: (page: { items: never[] }) => void = () => undefined;
+      const late = new QueryObserver(queryClient, {
+        queryKey: listKey(200),
+        queryFn: () => new Promise<{ items: never[] }>((resolve) => (finishLate = resolve)),
+      });
+      const unsubscribe = [shown.subscribe(() => undefined), early.subscribe(() => undefined)];
+
+      await invalidateMediaSurfaceQueries(queryClient, { libraryId: 7, itemMayBeNew: true });
+      await vi.advanceTimersByTimeAsync(29_000);
+      unsubscribe.push(late.subscribe(() => undefined));
+
+      // The early read's 30 seconds are up; the late one's are not.
+      await vi.advanceTimersByTimeAsync(2_000);
+      expect(refreshShown).not.toHaveBeenCalled();
+
+      finishLate({ items: [] });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(refreshShown).toHaveBeenCalledOnce();
+      unsubscribe.forEach((stop) => stop());
+      queryClient.clear();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 
   it("cancels an adjacent request when its search scope changes", async () => {
     const { requests, fetchMock, reply } = catalogTransport();

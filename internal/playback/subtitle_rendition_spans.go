@@ -45,6 +45,13 @@ type subtitleCueSpan struct {
 	// read instead, and for playlists with known durations.
 	durations []float64
 	final     bool
+	// lead is, for a keyframe-planned generation, how much earlier on the
+	// source's timeline its first video frame is than segment start: a
+	// restart's seek lands on a keyframe before the segment. Its recorded
+	// video start is that frame's. Valid when leadKnown; the live
+	// generation's is read from the assembler.
+	lead      float64
+	leadKnown bool
 }
 
 // startSubtitleSpanLocked records the generation that was just spawned.
@@ -53,8 +60,12 @@ func (s *TranscodeSession) startSubtitleSpanLocked(opts TranscodeOpts) {
 	if !subtitleRenditionActive(opts) || opts.subtitleCueFile == "" {
 		return
 	}
+	startTime := subtitleSpanStartTime(opts)
+	if s.copyGroups != nil {
+		startTime = s.copyPlan.cueStart(opts.StartSegmentNumber)
+	}
 	s.subtitleSpans = append(s.subtitleSpans, subtitleCueSpan{
-		file: opts.subtitleCueFile, start: opts.StartSegmentNumber, end: -1, startTime: subtitleSpanStartTime(opts),
+		file: opts.subtitleCueFile, start: opts.StartSegmentNumber, end: -1, startTime: startTime,
 	})
 }
 
@@ -77,8 +88,19 @@ func subtitleSpanStartTime(opts TranscodeOpts) float64 {
 // A generation on FFmpeg's own playlist keeps the durations that playlist
 // listed, since the next generation replaces it.
 func (s *TranscodeSession) closeSubtitleSpan() {
-	data, _ := s.liveGenerationPlaylist()
-	_, head, ok := playlistSegmentRange(data)
+	var data []byte
+	var head int
+	var ok, leadKnown bool
+	var lead float64
+	if s.copyGroups != nil {
+		// A planned generation writes no playlist of its own; the assembler
+		// still holds its run.
+		head, ok = s.copyGroups.runHead()
+		lead, leadKnown = s.copyGroups.runLead()
+	} else {
+		data, _ = s.liveGenerationPlaylist()
+		_, head, ok = playlistSegmentRange(data)
+	}
 	followsFFmpeg := followsFFmpegPlaylist(s.Opts(), s.copyPlan)
 	s.mu.Lock()
 	for i := range s.subtitleSpans {
@@ -91,6 +113,7 @@ func (s *TranscodeSession) closeSubtitleSpan() {
 			break
 		}
 		span.end = head
+		span.lead, span.leadKnown = lead, leadKnown
 		if followsFFmpeg {
 			durations, final, own := generationPlaylistTimeline(data, span.start)
 			if !own {
@@ -121,8 +144,12 @@ func (s *TranscodeSession) liveGenerationPlaylist() ([]byte, bool) {
 }
 
 // liveProducedHead returns the last segment the current generation's own
-// playlist lists.
+// playlist lists, or for a keyframe-planned session the last one its run has
+// written.
 func (s *TranscodeSession) liveProducedHead() (int, bool) {
+	if s.copyGroups != nil {
+		return s.copyGroups.runHead()
+	}
 	data, ok := s.liveGenerationPlaylist()
 	if !ok {
 		return 0, false

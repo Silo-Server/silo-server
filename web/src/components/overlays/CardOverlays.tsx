@@ -688,7 +688,12 @@ export default function CardOverlays({
               ...bandScrim("bottom"),
               paddingTop: `calc(${edgeInset} * 3)`,
               paddingInline: edgeInset,
-              paddingBottom: hasProgressBar ? `calc(${edgeInset} * 2)` : edgeInset,
+              // The progress bar's top edge sits at a fixed 0.5rem + 3px
+              // (WatchProgressBar) while edgeInset shrinks with the card, so
+              // small cards need the fixed floor to keep the marks clear of it.
+              paddingBottom: hasProgressBar
+                ? `max(calc(${edgeInset} * 2), calc(0.5rem + 6px))`
+                : edgeInset,
             }}
           >
             <BandMarks

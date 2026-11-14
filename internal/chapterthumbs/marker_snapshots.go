@@ -80,12 +80,15 @@ func (s *Service) markerSnapshotExpiry(fileID int) time.Time {
 	return s.markerSnapshots[fileID].expires
 }
 
+// withMarkerSnapshot overlays the provider ranges of a recent lookup on file.
+// A rename does not void the snapshot: the ranges describe the bytes, and the
+// identity check below rejects stored images computed for another path.
 func (s *Service) withMarkerSnapshot(file *models.MediaFile) *models.MediaFile {
 	s.mu.Lock()
 	entry, ok := s.markerSnapshots[file.ID]
 	s.mu.Unlock()
 	if !ok || !entry.expires.After(s.now()) || models.MarkerFileIdentity(file) != models.MarkerFileIdentity(&entry.file) ||
-		file.FilePath != entry.file.FilePath || !slices.Equal(models.EffectiveMarkerSegments(file), entry.file.MarkerThumbnailBaseSegments) {
+		!slices.Equal(models.EffectiveMarkerSegments(file), entry.file.MarkerThumbnailBaseSegments) {
 		return file
 	}
 	overlay := *file
