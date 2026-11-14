@@ -19,6 +19,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -3473,6 +3474,24 @@ func (h *PlaybackHandler) resolveVirtualStartWithVersionFallback(
 	if resolveErr == nil || !virtualStartVersionFallbackEligibleV3(req) || !virtualProviderListingOutage(resolveErr) {
 		return resolved, resolveErr
 	}
+	// A timeout is not a verdict about the release. When the start's own budget
+	// is spent, the selected row was never disproven — every alternate would be
+	// resolved with the same expired deadline, so the walk could only land on a
+	// sibling that happens to answer from cache while the viewer's release was
+	// never given a chance. Observed production shape: four resolve attempts
+	// reporting a negative bound (bound_ms=-34/-65/-95/-126), then a plan whose
+	// requested_file_id and effective_file_id named different releases. Keep the
+	// selection and let the caller answer the honest retryable terminal.
+	walkBudget, walkAllowed := virtualResolveAttemptBudget(r.Context(), virtualStartVersionFallbackDecisionBudget)
+	if !walkAllowed || r.Context().Err() != nil {
+		slog.WarnContext(r.Context(), "virtual start version fallback skipped: the start budget is exhausted",
+			"component", "api", "signal", "start_budget_exhausted",
+			"file_id", file.ID,
+			"remaining_ms", virtualResolveRemainingMilliseconds(r.Context()),
+			"budget_exhausted", true,
+			"error", logredact.SanitizeURLError(resolveErr))
+		return resolved, resolveErr
+	}
 	// One deadline owns the whole walk. resolveVirtualPlaybackSource re-bases
 	// its own cold path on r.Context() and context.WithTimeout keeps the
 	// earlier deadline, so this bounds every alternate without restarting the
@@ -3480,7 +3499,7 @@ func (h *PlaybackHandler) resolveVirtualStartWithVersionFallback(
 	// from the per-listing budget: a healthy candidate is returned the moment
 	// it resolves, while a walk of dead pins terminals once the decision budget
 	// elapses rather than waiting out the full cold-start budget per version.
-	walkCtx, cancel := context.WithTimeout(r.Context(), virtualStartVersionFallbackDecisionBudget)
+	walkCtx, cancel := context.WithTimeout(r.Context(), walkBudget)
 	defer cancel()
 	// Thread the caller's session-binding intent rather than forcing it false.
 	// The fresh-start start path declares unbound on the request context before
@@ -3535,6 +3554,14 @@ func (h *PlaybackHandler) resolveVirtualStartWithVersionFallback(
 	// is published together with its index on the runner's channel, never via a
 	// shared variable, so two concurrent successes cannot race for it and a
 	// straggler cannot overwrite the winner the caller reads.
+	//
+	// A substitute is accepted only when it can serve the viewer's selection:
+	// the same rotation guard #448 applies to a rotation (a contradictory
+	// runtime or a poorer audio/subtitle menu is refused, never served) is
+	// applied here to the cross-version fallback as well, so the two paths
+	// share one policy.
+	expectedRuntimeMinutes := h.virtualExpectedRuntimeMinutes(walkCtx, file)
+	var refusedSubstitutes atomic.Int32
 	resolveAlternate := func(listCtx context.Context, alternate *models.MediaFile) (resolvedVirtualPlaybackSource, bool) {
 		listReq := walkReq.WithContext(listCtx)
 		altResolved, altErr := h.resolveVirtualPlaybackSource(
@@ -3542,6 +3569,21 @@ func (h *PlaybackHandler) resolveVirtualStartWithVersionFallback(
 			virtualResolveOptionsV3{sessionBound: false, bypassProviderFloor: true},
 		)
 		if altErr == nil && altResolved.File != nil {
+			if reason := virtualVersionFallbackSubstitutionRejectionV3(expectedRuntimeMinutes, file, altResolved.File); reason != "" {
+				refusedSubstitutes.Add(1)
+				slog.WarnContext(listCtx, "virtual start version fallback refused a substitute that contradicts the selected release",
+					"component", "api", "requested_file_id", file.ID,
+					"effective_file_id", altResolved.File.ID,
+					"candidate_uri", alternate.FilePath,
+					"reason", reason,
+					"probed_duration_seconds", altResolved.File.Duration,
+					"expected_runtime_minutes", expectedRuntimeMinutes,
+					"selected_audio_tracks", len(file.AudioTracks),
+					"selected_subtitle_tracks", len(file.SubtitleTracks),
+					"effective_audio_tracks", len(altResolved.File.AudioTracks),
+					"effective_subtitle_tracks", len(altResolved.File.SubtitleTracks))
+				return resolvedVirtualPlaybackSource{}, false
+			}
 			return altResolved, true
 		}
 		if altErr != nil {
@@ -3559,6 +3601,12 @@ func (h *PlaybackHandler) resolveVirtualStartWithVersionFallback(
 		walkCtx, candidateRows, virtualStartVersionFallbackWorkers, virtualStartVersionFallbackListingBudget, resolveAlternate,
 	)
 	if !ok {
+		if refusedSubstitutes.Load() > 0 && virtualRequestedRowIsSelection(file) {
+			// A substitute existed but none could serve the selection. A
+			// truthful, actionable terminal beats serving different bytes with
+			// fewer tracks: name the version list so the viewer can choose.
+			return resolved, fmt.Errorf("%w: %w", errVirtualSelectedReleaseCannotPlay, resolveErr)
+		}
 		return resolved, resolveErr
 	}
 	// Mark the substitution so the plan can tell the client the requested
