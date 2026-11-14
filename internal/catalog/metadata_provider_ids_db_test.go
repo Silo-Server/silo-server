@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"maps"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -45,6 +46,14 @@ func TestMetadataUpdateKeepsDurableProviderIDsDB(t *testing.T) {
 		t.Fatalf("UpdateMetadata(tmdb): %v", err)
 	}
 	assertDurableProviderIDs(t, pool, movie, map[string]string{"tmdb": newTMDB, "imdb": oldIMDb})
+
+	// Resending an ID the item already has leaves its durable row alone: only a
+	// changed ID is a choice, which is what a curator's scope check authorizes.
+	batchEquivExec(t, pool, `UPDATE media_item_provider_ids SET provider_id = $2 WHERE content_id = $1 AND provider = 'imdb'`, movie, "tt0000001")
+	if err := repo.UpdateMetadata(ctx, movie, &MetadataUpdate{ImdbID: new(" " + strings.ToUpper(oldIMDb))}); err != nil {
+		t.Fatalf("UpdateMetadata(resent imdb): %v", err)
+	}
+	assertDurableProviderIDs(t, pool, movie, map[string]string{"tmdb": newTMDB, "imdb": "tt0000001"})
 
 	// Clearing the IMDb ID removes its durable row, which a refresh would
 	// otherwise use to put it back.

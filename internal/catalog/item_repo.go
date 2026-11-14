@@ -2932,6 +2932,19 @@ func (r *ItemRepository) UpdateMetadataTx(ctx context.Context, tx pgx.Tx, conten
 		strings.Join(setClauses, ", "), argIdx)
 	args = append(args, contentID)
 
+	// The item's ID columns before the edit, read under the lock the UPDATE
+	// takes anyway; the durable-ID sync below skips an ID this edit resends.
+	var storedIDs map[string]string
+	if upd.TmdbID != nil || upd.ImdbID != nil || upd.TvdbID != nil {
+		var tmdb, imdb, tvdb string
+		err := tx.QueryRow(ctx, `
+			SELECT COALESCE(tmdb_id, ''), COALESCE(imdb_id, ''), COALESCE(tvdb_id, '')
+			FROM media_items WHERE content_id = $1 FOR NO KEY UPDATE`, contentID).Scan(&tmdb, &imdb, &tvdb)
+		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			return fmt.Errorf("reading edited item provider ids: %w", err)
+		}
+		storedIDs = map[string]string{providerTMDB: tmdb, providerIMDb: imdb, providerTVDB: tvdb}
+	}
 	tag, err := tx.Exec(ctx, query, args...)
 	if err != nil {
 		return fmt.Errorf("updating media item metadata: %w", err)
@@ -2960,7 +2973,10 @@ func (r *ItemRepository) UpdateMetadataTx(ctx context.Context, tx pgx.Tx, conten
 		provider string
 		value    *string
 	}{{providerTMDB, upd.TmdbID}, {providerTVDB, upd.TvdbID}, {providerIMDb, upd.ImdbID}} {
-		if edited.value == nil {
+		// Only a changed ID is a choice, as lockCuratedProviderIDs judges it: an
+		// edit form resends unchanged IDs, and a curator's scope check skips
+		// them, so their durable rows stay as they are.
+		if edited.value == nil || strings.EqualFold(strings.TrimSpace(*edited.value), strings.TrimSpace(storedIDs[edited.provider])) {
 			continue
 		}
 		if err := syncEditedProviderIDTx(ctx, tx, contentID, edited.provider, *edited.value); err != nil {
