@@ -163,6 +163,10 @@
 # reconciled first, and the removal grace holds the book for the new path.
 ./internal/scanner TestScanSubtreeAudiobookRenameKeepsBookDB
 
+# A subtree scan inside a book folder rebuilds that book and marks missing the
+# files of a subfolder an earlier scoped scan imported as a book of its own.
+./internal/scanner TestScanSubtreeAudiobookInsideBookRetiresSubfolderBookDB
+
 # A rescan of a retagged, unmatched ebook keeps the fields and author credits an
 # admin locked, including locked fields left empty.
 ./internal/scanner TestEbookRescanKeepsLockedFieldsDB
