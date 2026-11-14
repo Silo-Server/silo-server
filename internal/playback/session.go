@@ -443,6 +443,11 @@ const (
 	// then, because its encoder does.
 	PausedStreamSlotGrace = 2 * time.Minute
 
+	// noPausedSlotCap keeps a paused session in a count for its whole paused
+	// grace. The transcode count uses it: a quiet paused session keeps its
+	// encoder until cleanup, so it keeps that slot too.
+	noPausedSlotCap time.Duration = 0
+
 	// remoteTransportIdleGrace is the floor on the idle windows for a session
 	// whose media is served by another node. See remoteTransportGrace: it must
 	// outlast a heartbeat gap on an otherwise healthy proxy stream, while still
@@ -2014,7 +2019,7 @@ func (m *SessionManager) transcodeCountExcludingLocked(userID int, excludeSessio
 		if excludeSessionID != "" && s.ID == excludeSessionID {
 			continue
 		}
-		if s.UserID == userID && (s.PlayMethod == PlayTranscode || s.replacementPlayMethod == PlayTranscode) && m.countsTowardLimitsLocked(s, now, 0) {
+		if s.UserID == userID && (s.PlayMethod == PlayTranscode || s.replacementPlayMethod == PlayTranscode) && m.countsTowardLimitsLocked(s, now, noPausedSlotCap) {
 			count++
 		}
 	}

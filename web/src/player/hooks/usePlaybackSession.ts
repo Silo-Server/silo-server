@@ -119,16 +119,6 @@ export function reconnectDelayMs(attempt: number): number {
 }
 
 /**
- * Whether a failed reconnect request is worth repeating later: the server was
- * unreachable or overloaded, or it asked for a retry. Anything else is its
- * considered answer.
- *
- * `installation_changed` differs by step. A replan always carries the old
- * session's installation, so repeating it cannot succeed; it falls through to
- * a fresh start instead. A refused start has already dropped the cached
- * capabilities, so the next start reads the new installation and can succeed.
- */
-/**
  * Stops the player's session as it leaves. sendBeacon doesn't support DELETE,
  * so the stop uses fetch keepalive to outlive a closing page.
  */
@@ -139,6 +129,16 @@ function stopOnPageExit(config: PlayerConfig, sessionId: string | null) {
   });
 }
 
+/**
+ * Whether a failed reconnect request is worth repeating later: the server was
+ * unreachable or overloaded, or it asked for a retry. Anything else is its
+ * considered answer.
+ *
+ * `installation_changed` differs by step. A replan always carries the old
+ * session's installation, so repeating it cannot succeed; it falls through to
+ * a fresh start instead. A refused start has already dropped the cached
+ * capabilities, so the next start reads the new installation and can succeed.
+ */
 function isRetryableReconnectError(error: unknown, step: "replan" | "start"): boolean {
   if (isTransientPlayerRequestError(error)) return true;
   return (
