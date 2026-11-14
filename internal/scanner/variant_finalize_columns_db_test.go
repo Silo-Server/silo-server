@@ -3,9 +3,12 @@ package scanner
 import (
 	"context"
 	"fmt"
+	"os"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Silo-Server/silo-server/internal/models"
@@ -318,5 +321,91 @@ func TestFinalizeVariantsPagesTheScopeDB(t *testing.T) {
 				check(t, i)
 			}
 		})
+	}
+}
+
+// variantPageHook runs onPage before each page query of the scope walk, with
+// the page's number from 1.
+type variantPageHook struct {
+	pages  *int
+	onPage func(page int)
+}
+
+func (h variantPageHook) TraceQueryStart(ctx context.Context, _ *pgx.Conn, data pgx.TraceQueryStartData) context.Context {
+	if strings.Contains(data.SQL, "ORDER BY file_path USING ~<~") {
+		*h.pages++
+		h.onPage(*h.pages)
+	}
+	return ctx
+}
+
+func (variantPageHook) TraceQueryEnd(context.Context, *pgx.Conn, pgx.TraceQueryEndData) {}
+
+// A file linked to an owner while the scope is being paged, after an earlier
+// page read that owner in full, still joins the owner's multipart group: later
+// pages skip only files written with the owner and path they still have.
+func TestFinalizeVariantsRereadsOwnerLinkedBetweenPagesDB(t *testing.T) {
+	fx := seedVariantContractMovie(t, "relinked")
+	previous := variantFinalizePageSize
+	variantFinalizePageSize = 1
+	t.Cleanup(func() { variantFinalizePageSize = previous })
+
+	ctx := context.Background()
+	paths := []string{
+		"Discs (2010)/Discs.2010.CD1.mkv",
+		"Discs (2010)/Discs.2010.CD2.mkv",
+		"Discs (2010)/Discs.2010.CD3.mkv",
+	}
+	ids := make([]int, len(paths))
+	for i, path := range paths {
+		var owner any = fx.movieID
+		if i == 2 {
+			owner = nil // linked to the movie only while the pass runs
+		}
+		if err := fx.pool.QueryRow(ctx, `
+			INSERT INTO media_files (content_id, media_folder_id, file_path, file_size)
+			VALUES ($1, $2, $3, 1024) RETURNING id`, owner, fx.folderID, fx.root+"/"+path).Scan(&ids[i]); err != nil {
+			t.Fatalf("seed %s: %v", path, err)
+		}
+	}
+
+	cfg, err := pgxpool.ParseConfig(os.Getenv("SILO_TEST_DATABASE_URL"))
+	if err != nil {
+		t.Fatalf("parse test database url: %v", err)
+	}
+	pages := 0
+	cfg.ConnConfig.Tracer = variantPageHook{pages: &pages, onPage: func(page int) {
+		// Page 1 read the movie in full and settled CD1 and CD2; link CD3
+		// before its own page is listed.
+		if page != 3 {
+			return
+		}
+		if _, err := fx.pool.Exec(context.Background(), `UPDATE media_files SET content_id = $1 WHERE id = $2`, fx.movieID, ids[2]); err != nil {
+			t.Errorf("link CD3: %v", err)
+		}
+	}}
+	pool, err := pgxpool.NewWithConfig(ctx, cfg)
+	if err != nil {
+		t.Fatalf("connect test database: %v", err)
+	}
+	t.Cleanup(pool.Close)
+
+	folder := &models.MediaFolder{ID: fx.folderID, Type: "movies", Paths: []string{fx.root}}
+	scan := &Scanner{fileRepo: NewFileRepository(pool)}
+	if err := scan.FinalizeVariantsByPathPrefix(ctx, folder, fx.root); err != nil {
+		t.Fatalf("finalize: %v", err)
+	}
+	if pages < 3 {
+		t.Fatalf("scope walk listed %d pages, want at least 3", pages)
+	}
+	for i, path := range paths {
+		var total int
+		if err := fx.pool.QueryRow(ctx, `
+			SELECT COALESCE(presentation_part_total, 0) FROM media_files WHERE id = $1`, ids[i]).Scan(&total); err != nil {
+			t.Fatalf("load %s: %v", path, err)
+		}
+		if total != 3 {
+			t.Errorf("%s: part total = %d, want 3", path, total)
+		}
 	}
 }
