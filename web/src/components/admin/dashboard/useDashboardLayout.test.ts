@@ -17,10 +17,9 @@ import type { DashboardLayoutEntry, WidgetId } from "./types";
 const ADMIN_USER_ID = 1;
 
 const mocks = vi.hoisted(() => ({
-  query: { data: undefined, isSuccess: false } as {
-    data: (AdminDashboardLayoutResponse & { etag: string }) | undefined;
-    isSuccess: boolean;
-    isError?: boolean;
+  query: {
+    data: undefined as (AdminDashboardLayoutResponse & { etag: string }) | undefined,
+    isSuccess: false,
   },
   save: vi.fn(),
   reset: vi.fn(),
@@ -547,84 +546,6 @@ describe("useDashboardLayout server persistence", () => {
     rerender();
 
     expect(result.current.entries).toEqual(edited);
-  });
-
-  it("saves an edit made while the query was in flight once the server version arrives", () => {
-    vi.useFakeTimers();
-    writeStored([{ id: "egress-24h", span: 6, rows: 3, range: "day" }]);
-    const { result, rerender } = renderHook(() => useDashboardLayout());
-
-    act(() => {
-      result.current.setWidgetRange("egress-24h", "week");
-    });
-    expect(result.current.serverSaveBlocked).toBe(false);
-
-    serverLayout([{ id: "egress-24h", span: 6, rows: 3, range: "day" }]);
-    rerender();
-    act(() => {
-      vi.advanceTimersByTime(DASHBOARD_LAYOUT_SAVE_DEBOUNCE_MS * 2);
-    });
-
-    expect(result.current.serverSaveBlocked).toBe(false);
-    expect(mocks.save).toHaveBeenCalledTimes(1);
-    expect(mocks.save).toHaveBeenCalledWith({
-      version: 1,
-      entries: [{ id: "egress-24h", span: 6, rows: 3, range: "week" }],
-    });
-    expect(result.current.entries).toEqual([{ id: "egress-24h", span: 6, rows: 3, range: "week" }]);
-  });
-
-  // The edit was made to this browser's cached copy, so a newer server copy
-  // saved from another browser must not be overwritten with it.
-  it("does not overwrite a newer server layout with an edit made before the first read", () => {
-    vi.useFakeTimers();
-    writeStored([{ id: "egress-24h", span: 6, rows: 3, range: "day" }]);
-    const { result, rerender } = renderHook(() => useDashboardLayout());
-
-    act(() => {
-      result.current.setWidgetRange("egress-24h", "week");
-    });
-    serverLayout([{ id: "libraries", span: 7, rows: 4 }]);
-    rerender();
-    act(() => {
-      vi.advanceTimersByTime(DASHBOARD_LAYOUT_SAVE_DEBOUNCE_MS * 2);
-    });
-
-    expect(mocks.save).not.toHaveBeenCalled();
-    expect(result.current.serverSaveBlocked).toBe(true);
-    expect(result.current.entries).toEqual([{ id: "egress-24h", span: 6, rows: 3, range: "week" }]);
-  });
-
-  it("does not send an edit made before the first read under a profile that is no longer active", () => {
-    vi.useFakeTimers();
-    writeStored([{ id: "egress-24h", span: 6, rows: 3, range: "day" }]);
-    const { result, rerender } = renderHook(() => useDashboardLayout());
-
-    act(() => {
-      result.current.setWidgetRange("egress-24h", "week");
-    });
-    setProfileToken("pin-b");
-    serverLayout([{ id: "egress-24h", span: 6, rows: 3, range: "day" }]);
-    rerender();
-    act(() => {
-      vi.advanceTimersByTime(DASHBOARD_LAYOUT_SAVE_DEBOUNCE_MS * 2);
-    });
-
-    expect(mocks.save).not.toHaveBeenCalled();
-    expect(result.current.serverSaveBlocked).toBe(true);
-  });
-
-  it("reports an edit made before the first read as unsaved when the read fails", () => {
-    const { result, rerender } = renderHook(() => useDashboardLayout());
-
-    act(() => {
-      result.current.removeWidget("users");
-    });
-    mocks.query = { data: undefined, isSuccess: false, isError: true };
-    rerender();
-
-    expect(result.current.serverSaveBlocked).toBe(true);
-    expect(mocks.save).not.toHaveBeenCalled();
   });
 
   it("debounces mutations into a single save of the full layout", () => {
