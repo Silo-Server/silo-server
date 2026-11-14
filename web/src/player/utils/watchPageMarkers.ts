@@ -186,7 +186,7 @@ export function patchVersionMarkers(
  * spreading that as `confidence: 0` would render a real "0%" for a range nobody
  * rated.
  */
-function provenanceOf(range: PlayerMarkerRange | null | undefined) {
+export function provenanceOf(range: PlayerMarkerProvenance | null | undefined) {
   return {
     ...(range?.source ? { source: range.source } : {}),
     ...(range?.provider ? { provider: range.provider } : {}),
