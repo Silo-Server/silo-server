@@ -92,7 +92,10 @@ announcing a release.
 3. Edit the draft release. Add upgrade, configuration, and compatibility notes.
    The first release has no earlier tag, so its notes are written by hand.
 4. Publish the draft. **Release published** then tags the commit's image with the
-   version and the tags above, including `latest`.
+   version and the tags above, including `latest`. `latest` never moves to an
+   older commit: if a `main` build after the release commit already holds it
+   (possible only before the first release), it stays there until the next
+   release.
 
 Release refuses an invalid version, a version that already exists or is older
 than the newest release, a run from a branch other than `main`, and a commit

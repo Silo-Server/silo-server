@@ -43,13 +43,35 @@ jobs:
           fetch-depth: 0 # every tag
           persist-credentials: false
 
+      # latest never moves to an older commit. Before the first release it
+      # follows every main build, so main builds merged between drafting and
+      # publishing the first release would otherwise be rolled back onto an
+      # older binary and their already-migrated database. A release commit
+      # behind latest's leaves latest where it is; a failed comparison fails
+      # the job, which can be re-run, rather than risk that downgrade.
       - name: Choose the tags
         id: tags
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           commit="$(git rev-list -n 1 "refs/tags/${TAG}")"
           version="${TAG#v}"
           image="${REGISTRY}/${IMAGE_NAME,,}"
           python3 scripts/release/release_version.py docker-tags "$TAG" > "$RUNNER_TEMP/tags.txt"
+          if grep -qx latest "$RUNNER_TEMP/tags.txt"; then
+            latest_revision="$(docker buildx imagetools inspect "${image}:latest" --format '{{json .Image}}' 2>/dev/null |
+              jq -r 'if has("linux/amd64") then ."linux/amd64" else . end | .config.Labels["org.opencontainers.image.revision"] // ""')" || latest_revision=""
+            if [[ -n "$latest_revision" && "$latest_revision" != "$commit" ]]; then
+              if ! order="$(gh api "repos/${GITHUB_REPOSITORY}/compare/${latest_revision}...${commit}" --jq .status)"; then
+                echo "::error::Couldn't compare ${TAG} with latest (${latest_revision::9}). Run Release published again."
+                exit 1
+              fi
+              if [[ "$order" == "behind" ]]; then
+                sed -i '/^latest$/d' "$RUNNER_TEMP/tags.txt"
+                echo "::warning::latest holds ${latest_revision::9}, a newer commit than ${TAG} (${commit::9}); leaving latest there until the next release."
+              fi
+            fi
+          fi
           {
             echo "commit=${commit}"
             echo "version=${version}"
