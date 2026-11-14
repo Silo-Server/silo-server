@@ -649,7 +649,8 @@ func TestApplyBookToMediaItemDoesNotBlankAllNarratorSuffixTitle(t *testing.T) {
 }
 
 // An admin's locked fields survive a changed-book rescan: tags only fill what
-// the editor has not pinned.
+// the editor has not pinned. The item's overview starts empty, as after an
+// admin clears a bad tag description.
 func TestApplyBookToMediaItemKeepsLockedFields(t *testing.T) {
 	book := &parsedAudiobook{
 		Title:       "Tagged Title",
@@ -657,6 +658,7 @@ func TestApplyBookToMediaItemKeepsLockedFields(t *testing.T) {
 		ReleaseDate: "2001-02-03",
 		Genres:      []string{"Tagged Genre"},
 		Publisher:   "Tagged Press",
+		Overview:    "Tagged overview",
 	}
 	edited := "2020-05-06"
 	newItem := func(locked ...int) *models.MediaItem {
@@ -671,17 +673,19 @@ func TestApplyBookToMediaItemKeepsLockedFields(t *testing.T) {
 	}
 
 	for _, tc := range []struct {
-		name        string
-		locked      []int
-		wantTitle   string
-		wantYear    int
-		wantGenres  []string
-		wantStudios []string
+		name         string
+		locked       []int
+		wantTitle    string
+		wantYear     int
+		wantGenres   []string
+		wantStudios  []string
+		wantOverview string
 	}{
-		{"nothing locked", nil, "Tagged Title", 2001, []string{"Admin Genre", "Tagged Genre"}, []string{"Admin Studio", "Tagged Press"}},
-		{"title locked", []int{lockedFieldName}, "Admin Title", 2001, []string{"Admin Genre", "Tagged Genre"}, []string{"Admin Studio", "Tagged Press"}},
-		{"release dates locked", []int{lockedFieldReleaseDates}, "Tagged Title", 2020, []string{"Admin Genre", "Tagged Genre"}, []string{"Admin Studio", "Tagged Press"}},
-		{"genres and studios locked", []int{lockedFieldGenres, lockedFieldStudios}, "Tagged Title", 2001, []string{"Admin Genre"}, []string{"Admin Studio"}},
+		{"nothing locked", nil, "Tagged Title", 2001, []string{"Admin Genre", "Tagged Genre"}, []string{"Admin Studio", "Tagged Press"}, "Tagged overview"},
+		{"title locked", []int{lockedFieldName}, "Admin Title", 2001, []string{"Admin Genre", "Tagged Genre"}, []string{"Admin Studio", "Tagged Press"}, "Tagged overview"},
+		{"release dates locked", []int{lockedFieldReleaseDates}, "Tagged Title", 2020, []string{"Admin Genre", "Tagged Genre"}, []string{"Admin Studio", "Tagged Press"}, "Tagged overview"},
+		{"genres and studios locked", []int{lockedFieldGenres, lockedFieldStudios}, "Tagged Title", 2001, []string{"Admin Genre"}, []string{"Admin Studio"}, "Tagged overview"},
+		{"overview locked", []int{lockedFieldOverview}, "Tagged Title", 2001, []string{"Admin Genre", "Tagged Genre"}, []string{"Admin Studio", "Tagged Press"}, ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			item := newItem(tc.locked...)
@@ -700,6 +704,9 @@ func TestApplyBookToMediaItemKeepsLockedFields(t *testing.T) {
 			}
 			if !slices.Equal(item.Studios, tc.wantStudios) {
 				t.Errorf("Studios = %v, want %v", item.Studios, tc.wantStudios)
+			}
+			if item.Overview != tc.wantOverview {
+				t.Errorf("Overview = %q, want %q", item.Overview, tc.wantOverview)
 			}
 		})
 	}

@@ -297,9 +297,9 @@ func parentFallbackAutoscanUpdateError(err error) bool {
 }
 
 // softAutoscanUpdateError reports whether a rejected path should be dropped
-// silently. Jellyfin clients batch updates for paths Silo does not manage, and
-// failing the whole batch over one of them would lose the updates that are
-// valid.
+// silently. Jellyfin clients batch updates for paths Silo does not manage or
+// that the library's ignore files exclude, and failing the whole batch over
+// one of them would lose the updates that are valid.
 func softAutoscanUpdateError(err error) bool {
 	var reqErr *scantrigger.RequestError
 	if !errors.As(err, &reqErr) || reqErr.Status != http.StatusBadRequest {
@@ -307,6 +307,7 @@ func softAutoscanUpdateError(err error) bool {
 	}
 	switch reqErr.Reason {
 	case scantrigger.ReasonNoLibraryMatch,
+		scantrigger.ReasonPathIgnored,
 		scantrigger.ReasonPathMissing,
 		scantrigger.ReasonPathNotFileOrDir,
 		scantrigger.ReasonUnsupportedExtension:

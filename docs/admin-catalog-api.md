@@ -395,16 +395,17 @@ update and existing invalidation events.
 A follow-up detail-read failure can occur after persistence; it does not roll
 back the metadata change.
 
-A season stores `title`, `sort_title`, `original_title`, `overview`, `tagline`,
-`air_date`, `season_number` and the `imdb_id`, `tmdb_id` and `tvdb_id` provider
-IDs. An episode stores the same text fields and IDs, plus `episode_number`,
-`runtime`, `rating_imdb` and `rating_tmdb`. Neither stores a
+A season stores `title`, `original_title`, `overview`, `tagline`, `air_date`,
+`season_number` and the `imdb_id`, `tmdb_id` and `tvdb_id` provider IDs. An
+episode stores the same text fields and IDs, plus `sort_title`,
+`episode_number`, `runtime`, `rating_imdb` and `rating_tmdb`. A season has no
+`sort_title`, since seasons order by number, and neither stores a
 `content_rating`: the series' rating decides age limits for its episodes. No
-metadata provider writes a season's or episode's sort title, original title or
-tagline, or a season's IDs, so a refresh keeps them without a lock. A refresh
-does write an episode's IDs. Reset to Provider empties them, except that a reset
-in another language than the series' own keeps the sort title, original title
-and tagline, as it keeps the title and overview.
+metadata provider writes a season's or episode's original title or tagline, an
+episode's sort title, or a season's IDs, so a refresh keeps them without a lock.
+A refresh does write an episode's IDs. Reset to Provider empties them, except
+that a reset in another language than the series' own keeps the sort title,
+original title and tagline, as it keeps the title and overview.
 
 `locked_fields` holds the `MetadataField` numbers a refresh, library scan or
 seed import must keep. A season accepts the name, overview and release-date
@@ -650,6 +651,22 @@ is treated as an existing target. Split and merge require acting-administrator
 access. A policy refusal returns a 403 `permission_denied` problem. Each refused
 transaction rolls back; the multi-step match pipeline has no whole-request atomicity
 guarantee. Detached split identification retains the originating curation authority.
+
+Provider IDs a delegated curator stores are held to the same policy, because work
+that runs later with no curator present acts on them: a refresh, a refresh-debt
+retry or a scheduled refresh merges the item onto the item already at the anchor
+the IDs derive or holding one of them. A metadata edit that changes `tmdb_id`,
+`imdb_id` or `tvdb_id`, and a split that creates a target from chosen provider IDs,
+lock and authorise every such existing item (other than the edited item, or the
+split source and target) and are refused with 403 when one is out of scope. Unchanged
+IDs a form resends are not re-checked. An item refresh job a delegated curator
+queues records the curator's assigned libraries in its payload (`curation_scope`)
+and runs its metadata refresh under that scope on whichever node claims it; the job
+checks that snapshot rather than a fresh policy decision. A refresh refused for
+curation scope records no refresh failure or refresh debt, since debt retries run as
+automatic work. IDs a provider adds during a later automatic refresh, and identity
+overrides a split persists for scans, are not curator choices and converge as
+automatic work does.
 
 ### Match repair
 

@@ -78,7 +78,8 @@ housekeeping folders `@eaDir`, `@Recycle`, `#recycle`, and `$RECYCLE.BIN`
 monitor shares. A skipped directory is never read, so one the scan cannot open
 is not a walk failure. Hidden files are not skipped by this rule.
 
-A configured library root is walked whatever its name. A subtree scan whose
+A configured library root is walked whatever its name, unless it lies inside
+another configured root of the same library (see Scan behavior). A subtree scan whose
 scope is a skipped directory, or lies below one, reads nothing.
 
 ## Scan behavior
@@ -99,14 +100,32 @@ scope is a skipped directory, or lies below one, reads nothing.
   listing and the read is absent. A subtree scan whose configured library root
   has an unreadable ignore file fails. Real-time monitoring keeps watching such
   a directory; the scans its changes trigger record the failure.
-- An explicit single-file scan (`ScanFile`) ignores ignore files: an
-  explicitly requested file is scanned even if a pattern would exclude it.
-  For audiobooks, this rebuilds the containing book as a whole.
+- A single-file scan (`ScanFile`) reads no ignore files. An admin's scan
+  request for a file's exact path scans it even if a pattern would exclude
+  it. For audiobooks, this rebuilds the containing book as a whole.
+- A file change from real-time monitoring or autoscan (an *arr webhook, a
+  plugin source, or the Jellyfin `/Library/Media/Updated` endpoint) that
+  would become a single-file scan is checked against the ignore files from
+  its configured library root down when it is resolved, and dropped when they
+  exclude it, so automation does not import that file only for the next
+  library scan to retire it again. If an ignore file on the way cannot be
+  read, the change is scanned anyway rather than dropped. Only the changed
+  file is checked: an audiobook file that passes still rebuilds every book
+  under its folder without ignore files (the whole library, for a file
+  directly in the library root), so the books and chapters they exclude
+  there are imported until the next library scan. A file change that becomes
+  a subtree scan needs no check; the subtree scan applies the rules.
 - Subtree folder scans inherit markers and patterns from their configured
   library root through the subtree's ancestors. Rules outside the configured
   root do not apply. If an ancestor directory cannot be read, the subtree is
   protected from missing-file reconciliation.
+- When one of a library's configured roots lies inside another, the outer
+  root is the boundary for media files. A full scan walks the inner root as an
+  ordinary folder of the outer one, so the outer root's ignore files, and the
+  hidden-folder rule for the inner root's own name, apply below it. Subtree
+  scans and the full scans of every library kind apply the same rules there.
 - A subtree scan whose configured library root is itself skipped (by
   `.nomedia` or a pattern-less `.ignore`) does nothing. Such a scan would find
   no files and retire the subtree outside the empty-root guard, so only a full
-  library scan decides what happens to a skipped root's catalog.
+  library scan decides what happens to a skipped root's catalog. The same goes
+  for a nested root that the outer root's rules exclude.
