@@ -1520,6 +1520,10 @@ func TestServeSUPExtractWindowedRemoteInputSkipsDetachedWarm(t *testing.T) {
 	c, source := newTestCache(t)
 	opts := windowedSupOpts(source, 0, 100, 3600)
 	opts.CacheIdentity = "virtual://movie/tt123?profile=1080p"
+	// A remote container small enough that a page read is cheap keeps the direct
+	// page extract; a large or unknown one is served from the progressive
+	// artifact instead (see subtitle_progressive_sup_test.go).
+	opts.SourceSizeBytes = 100 << 20
 	opts.DisableBackgroundWarm = true
 
 	var warmCalls, windowCalls int

@@ -107,6 +107,14 @@ type SubtitleCache struct {
 	failureMu    sync.Mutex
 	failureGuard map[string]subtitleExtractionGuard
 
+	// pageCostMu guards pageReadRates, the read rate last observed for each
+	// remote source identity. It prices the container prefix a further bitmap
+	// page would read, so a page that would spend its whole client fetch
+	// discarding that prefix is refused before the read instead of after it
+	// (see subtitle_page_cost.go).
+	pageCostMu    sync.Mutex
+	pageReadRates map[string]float64
+
 	// fontFailureMu guards fontFailureRetryAt, the per-font-bundle extraction
 	// backoff. A failed font extraction is optional to playback, so callers
 	// degrade to an empty pending bundle instead of retrying a flapping
@@ -202,6 +210,11 @@ const (
 	// "the extraction already running will land soon", not "the provider is
 	// failing".
 	subtitleFillBusyRetryAfter = 2 * time.Second
+	// subtitlePageCostlyRetryAfter is the Retry-After handed to a page whose
+	// extraction was killed for reading too much of the container prefix. It
+	// matches the fill-busy delay: the answer is "the progressive artifact is
+	// being read, come back for the page", not "the provider failed".
+	subtitlePageCostlyRetryAfter = subtitleFillBusyRetryAfter
 	// subtitleFillWaitTimeout bounds how long a duplicate request waits on an
 	// in-flight fill before answering retryable. A local demux finishes well
 	// inside it; a slow provider read that a second request is racing (the
@@ -332,6 +345,17 @@ func subtitleExtractRetryDelays() []time.Duration {
 // ServeExtractWithResult while a per-identity backoff is active.
 type SubtitleExtractionRetryError struct {
 	RetryAfter time.Duration
+	// Reason, when set, replaces the retryable response's default problem code
+	// with a more specific one (SubtitlePageTooCostlyReason). It is additive:
+	// the status, the Retry-After shape and the client's retry loop are
+	// unchanged.
+	Reason string
+	// CoveredUntil, when positive, is the source time, in seconds, that the
+	// track's progressive bitmap artifact has parsed. The retryable response
+	// advertises it as the covered range so a client can tell how far the
+	// artifact it will be served from has reached. Zero means nothing is
+	// covered and no coverage is advertised.
+	CoveredUntil float64
 }
 
 func (e *SubtitleExtractionRetryError) Error() string {
@@ -726,7 +750,16 @@ func (c *SubtitleCache) ServeExtractWithResult(w http.ResponseWriter, r *http.Re
 	}
 
 	w.Header().Set("Cache-Control", "no-store")
-	counter := &subtitleCountingWriter{w: w}
+	// A windowed text slice is held until its extract finishes rather than
+	// committed byte by byte. A slice cut short by the extract deadline or a
+	// canceled request must not reach the client as a 200 carrying a header and
+	// half a cue: a partial body is indistinguishable from a complete window and
+	// cannot be retried. Holding keeps the response uncommitted, so the caller
+	// answers the retryable shape instead. The hold is bounded by the same spill
+	// limit the packet conversion uses; a window that outgrows it streams, which
+	// no real 120 s slice does.
+	hold := newSubtitleResponseHold(w, subtitleSpillBytes)
+	counter := &subtitleCountingWriter{w: hold}
 	var writer io.Writer = counter
 	// A windowed text response waits for its first cue before committing a
 	// status. FFmpeg writes its muxer header before the first packet, so a
@@ -776,10 +809,24 @@ func (c *SubtitleCache) ServeExtractWithResult(w http.ResponseWriter, r *http.Re
 	// extract drops the held header so nothing commits a 200 for it.
 	err = gate.finish(err)
 	if err != nil {
-		if r.Context().Err() == nil && IsSubtitleUpstreamError(err) {
+		// Nothing reached the client while the slice was held, so the held bytes
+		// are dropped: a truncated slice is not a window. A slice that spilled
+		// past the hold is already on the wire; the caller aborts it exactly as
+		// before.
+		hold.discard()
+		if r.Context().Err() == nil && errors.Is(err, context.DeadlineExceeded) {
+			// The window ran out its own extract deadline. That is a slow
+			// source, not a broken extraction: answer retryable so the client
+			// backs off instead of spending its terminal budget on a 500.
+			err = &SubtitleExtractionRetryError{RetryAfter: subtitleFillBusyRetryAfter}
+		} else if r.Context().Err() == nil && IsSubtitleUpstreamError(err) {
 			c.noteExtractionFailure(opts, format)
 		}
 	} else {
+		// The extract completed. Commit the held slice now.
+		if finishErr := hold.finish(); finishErr != nil {
+			return result, finishErr
+		}
 		c.noteExtractionSuccess(opts, format)
 		c.storeCompletedWindow(r.Context(), windowKey, opts, format, capture)
 	}
@@ -1816,13 +1863,34 @@ func (c *SubtitleCache) serveWindowedSUP(w http.ResponseWriter, r *http.Request,
 	if served {
 		return nil
 	}
-	if cachedPath, _, ok := c.cachedEntryPath(opts.InputPath, opts.CacheIdentity, opts.TrackIndex); ok {
-		if opts.DurationSeconds > 0 {
-			// bounded: source first, artifact fallback below
-		} else {
-			opts.InputPath = cachedPath
-			opts.InputIsExtractedSup = true
+	// Every page below this point would read the source. A committed full-track
+	// artifact makes the page a local read instead, so it is exempt; without one
+	// two rules run before any source read:
+	//
+	//   - a page the track's progressive artifact already covers is copied out
+	//     of it, and a page beyond its watermark answers retryable with that
+	//     coverage (see subtitle_progressive_sup.go);
+	//   - a page whose discarded container prefix is priced beyond the page
+	//     budget is refused before the read, because refusing after it is the
+	//     wall clock this gate exists to remove (see subtitle_page_cost.go).
+	//
+	// Both must precede the packet-source path: indexing the container for one
+	// page reads the same prefix the raw demux would.
+	cachedPath, _, hasArtifact := c.cachedEntryPath(opts.InputPath, opts.CacheIdentity, opts.TrackIndex)
+	if !hasArtifact {
+		if served, progressiveErr := c.serveProgressiveSUPPage(w, r, sourceOpts, extract); served || progressiveErr != nil {
+			return progressiveErr
 		}
+		if refusal := c.pagePrefixRefusal(sourceOpts); refusal != nil {
+			return refusal
+		}
+	}
+	if hasArtifact && opts.DurationSeconds <= 0 {
+		// A bounded window (a page) reads the source first and falls back to the
+		// committed artifact below; a whole-track window reads the artifact, the
+		// small local copy, instead of demuxing the container again.
+		opts.InputPath = cachedPath
+		opts.InputIsExtractedSup = true
 	}
 	// For bounded and uncached open-ended windows, consult the embedded source
 	// before any raw demux. This is the safe PGS page path: ReadPackets returns
@@ -1850,8 +1918,8 @@ func (c *SubtitleCache) serveWindowedSUP(w http.ResponseWriter, r *http.Request,
 	// A committed full-track entry is the best last-good copy, so it is
 	// preferred over the failure backoff: an artifact-backed extract reads a
 	// local file and a previous provider failure does not apply to it.
-	artifactBacked := false
-	if cachedPath, _, ok := c.cachedEntryPath(opts.InputPath, opts.CacheIdentity, opts.TrackIndex); ok {
+	artifactBacked := hasArtifact
+	if artifactBacked {
 		slog.DebugContext(r.Context(), "windowed subtitle extract using cached full track",
 			"input", opts.InputPath, "track", opts.TrackIndex, "cache_entry", cachedPath)
 		opts.InputPath = cachedPath
@@ -1859,17 +1927,10 @@ func (c *SubtitleCache) serveWindowedSUP(w http.ResponseWriter, r *http.Request,
 		if firstCue, err := readSupFirstCue(cachedPath); err == nil {
 			opts = windowFromCachedSup(opts, firstCue)
 		}
-		artifactBacked = true
-	} else {
-		// No last-good copy: suppress an extract that is known to be inside
-		// its backoff window before any header or provider read, so the
-		// handler can answer 503 + Retry-After.
-		if retryAfter, cooling := c.extractionCoolingDownFor(sourceOpts, subtitleFormatSUP); cooling {
-			return &SubtitleExtractionRetryError{RetryAfter: retryAfter}
-		}
-		if !opts.DisableBackgroundWarm {
-			c.WarmInBackground(opts, extract, subtitleTraceRequestID(r.Context()))
-		}
+	} else if refusal := c.windowedSUPMissRefusal(sourceOpts); refusal != nil {
+		return refusal
+	} else if !opts.DisableBackgroundWarm {
+		c.WarmInBackground(opts, extract, subtitleTraceRequestID(r.Context()))
 	}
 
 	// Coalesce identical in-flight windows: a duplicate request waits for the
@@ -1946,6 +2007,14 @@ func (c *SubtitleCache) serveWindowedSUP(w http.ResponseWriter, r *http.Request,
 		writer = capture
 	}
 	opts.Writer = writer
+	// Price the next page from the rate this one reads the source at. An
+	// artifact-backed page reads a local file, so it says nothing about the
+	// provider and is left alone.
+	if !artifactBacked && opts.NoteSourceReadRate == nil {
+		opts.NoteSourceReadRate = func(bytesPerSecond float64) {
+			c.notePageReadRate(sourceOpts.CacheIdentity, bytesPerSecond)
+		}
+	}
 	// A coalesced extraction belongs to the flight, not only to the leader
 	// request. Detach it from the leader's cancellation (bounded by the
 	// timeout) so a leader disconnect does not throw away work that waiters
@@ -1967,7 +2036,25 @@ func (c *SubtitleCache) serveWindowedSUP(w http.ResponseWriter, r *http.Request,
 		recordSubtitleWarmPageOverlap(subtitleFormatSUP, time.Since(overlapStart))
 	}
 	if err != nil {
-		if r.Context().Err() == nil && IsSubtitleUpstreamError(err) {
+		if counter.bytes == 0 && errors.Is(err, ErrSubtitlePageTooCostly) {
+			// The page's extraction was killed for reading too much of the
+			// container prefix. Answer the retryable shape the client already
+			// backs off from, and arm the existing extraction backoff so a
+			// client retry does not pay the same read again; the track's
+			// progressive artifact is what serves the page once it has parsed
+			// that far.
+			recordSubtitlePageTooCostly()
+			c.noteExtractionFailure(sourceOpts, subtitleFormatSUP)
+			err = c.pageTooCostlyRetry(sourceOpts)
+		} else if counter.bytes == 0 && r.Context().Err() == nil && errors.Is(err, context.DeadlineExceeded) {
+			// The page ran out the window extract deadline before emitting a
+			// byte. That is not a server failure: the page could not be read
+			// from the source in time, so answer the same retryable shape and
+			// let the client back off instead of spending its terminal budget
+			// on a 500.
+			recordSubtitlePageTimeout()
+			err = c.pageTooCostlyRetry(sourceOpts)
+		} else if r.Context().Err() == nil && IsSubtitleUpstreamError(err) {
 			// Recorded against the original source identity (sourceOpts), not
 			// the rewritten cached-artifact path.
 			c.noteExtractionFailure(sourceOpts, subtitleFormatSUP)
@@ -1986,6 +2073,18 @@ func (c *SubtitleCache) serveWindowedSUP(w http.ResponseWriter, r *http.Request,
 			counter.bytes, outcome, time.Since(start),
 			"track", opts.TrackIndex, "format", subtitleFormatSUP)...)
 	return err
+}
+
+// windowedSUPMissRefusal returns the retryable answer while this source identity
+// is inside its extraction backoff, or nil when an extract may proceed. It runs
+// after the committed-artifact check, so a page that reads the cache never pays
+// for a previous provider failure, and before any header or provider read, so the
+// handler can answer 503 + Retry-After cleanly.
+func (c *SubtitleCache) windowedSUPMissRefusal(opts StreamExtractOpts) *SubtitleExtractionRetryError {
+	if retryAfter, cooling := c.extractionCoolingDownFor(opts, subtitleFormatSUP); cooling {
+		return &SubtitleExtractionRetryError{RetryAfter: retryAfter}
+	}
+	return nil
 }
 
 // formatEntryKey computes the in-flight/cache key for a source identity,
@@ -2718,6 +2817,10 @@ type SubtitleCacheFill struct {
 	// temp file grows as the extract runs and requests can watch it. A text
 	// batch writes its files directly and only at the end.
 	progressive bool
+	// sup indexes the display sets of a bitmap fill's growing artifact, so a
+	// bounded window inside what it has parsed is served from the artifact
+	// instead of another source read. Nil for text formats.
+	sup *supCoverage
 	// background marks a fill owned by a detached background warm rather than
 	// a client request. It exists only so the serve path can count a page
 	// extract that runs alongside the warm's demux on the same relay pipe; no
@@ -2824,6 +2927,12 @@ func (c *SubtitleCache) reserveFill(inputPath, cacheIdentity string, trackIndex 
 		progressive:   progressive,
 		done:          make(chan struct{}),
 		grew:          make(chan struct{}),
+	}
+	if format == subtitleFormatSUP {
+		// A bitmap fill's artifact is a .sup stream: index it as it grows so a
+		// page inside the parsed range is a local read (see
+		// subtitle_progressive_sup.go).
+		fill.sup = &supCoverage{}
 	}
 	// Held until the temp file exists, so a request that finds the fill
 	// cannot watch it before then.
@@ -3741,6 +3850,12 @@ func (f *SubtitleCacheFill) record(p []byte) {
 			"track", f.trackIndex, "error", err)
 	} else {
 		f.written += int64(len(p))
+		// Index the bytes that are now in the artifact, in the order they were
+		// written, so the coverage watermark never describes bytes that are not
+		// there.
+		if f.sup != nil {
+			f.sup.feed(p)
+		}
 	}
 	close(f.grew)
 	f.grew = make(chan struct{})

@@ -9,6 +9,12 @@
 import { toMediaTime } from "./mediaTimeline";
 import { isSubtitleSourceChanged } from "./subtitleSourceChanged";
 
+// The source-time range a bounded subtitle response produced. It is `<start>-<end>`
+// in seconds with three decimals, or `<start>-*` when the extract runs to the end
+// of the input. A page the server answers from its progressive artifact before
+// the artifact has parsed the page's end carries the shorter range it really
+// produced.
+export const SUBTITLE_COVERAGE_HEADER = "X-Subtitle-Coverage";
 // Explicitly bound each subtitle fetch to this many source-time seconds. A
 // bitmap slice has to be fully extracted before it can be painted, so a cold
 // remote 600 s window costs ~18-24 s. Two minutes keeps the first paint short;
@@ -136,6 +142,22 @@ export function subtitleRetryAfterMs(header: string | null, now = Date.now()): n
   return Number.isFinite(date) ? Math.max(0, date - now) : 0;
 }
 
+/**
+ * The source-time end a coverage header reports, or null when the response
+ * carried none (a whole-track or unwindowed response) or an open end. The value
+ * is what the response really produced, which for a bitmap page answered from a
+ * partially parsed track is earlier than the page it asked for.
+ */
+export function subtitleCoverageEnd(header: string | null): number | null {
+  if (!header) return null;
+  const dash = header.indexOf("-");
+  if (dash < 0) return null;
+  const end = header.slice(dash + 1).trim();
+  if (end === "*" || end === "") return null;
+  const value = Number(end);
+  return Number.isFinite(value) ? value : null;
+}
+
 /** The request for the window starting at `position`, in source seconds. */
 export function subtitleWindowUrl(
   url: string,
@@ -164,15 +186,6 @@ export function alignSubtitleWindowStart(
   if (!(cellSeconds > 0)) return Math.max(0, position);
   const anchored = Math.max(0, position - backoffSeconds);
   return Math.floor(anchored / cellSeconds) * cellSeconds;
-}
-
-/**
- * The first grid boundary at or after a source position: the page after the
- * coverage already on hand, never the page the client already holds.
- */
-export function subtitlePageBoundary(position: number, pageSeconds: number): number {
-  if (!(pageSeconds > 0)) return Math.max(0, position);
-  return Math.ceil(Math.max(0, position) / pageSeconds) * pageSeconds;
 }
 
 /**
@@ -353,10 +366,21 @@ export function createSubtitleWindowFetcher(
     const url = options.windowUrl(seekStart, duration);
     let succeeded = false;
     let sourceChangedNow = false;
+    let producedEnd = requestedEnd;
     let failure: { retryable: boolean; retryAfterMs: number } | null = null;
     try {
       armStallTimer();
       const response = await fetch(url, { signal: controller.signal });
+      // A windowed .sup page can be answered before its own end: the server's
+      // progressive artifact has parsed only part of it, so the response covers
+      // less than it asked for and says so. Committing the requested end would
+      // leave the rest of the page marked as covered and never requested again.
+      const coveredEnd = subtitleCoverageEnd(
+        response.headers?.get?.(SUBTITLE_COVERAGE_HEADER) ?? null,
+      );
+      if (coveredEnd !== null) {
+        producedEnd = Math.min(Math.max(coveredEnd, seekStart), requestedEnd);
+      }
       const sourceChangedResponse = await isSubtitleSourceChanged(response);
       // The 409 check reads the body asynchronously. A seek or disposal while
       // that read is pending must not signal a refresh for a request that is
@@ -414,15 +438,18 @@ export function createSubtitleWindowFetcher(
         lastFetchFailureAt = 0;
         hardFailures = 0;
         retryableFailures = 0;
-        // Commit coverage only after the whole window streamed in. A failed
-        // or stalled fetch must leave the range uncovered, or the gap would
-        // read as fetched and never be retried.
-        windowEnd = Math.max(windowEnd, requestedEnd);
+        // Commit coverage only after the whole window streamed in, and only the
+        // range the response says it produced: a page answered from a partially
+        // parsed artifact is shorter than requested, and its tail must stay
+        // uncovered so the next request asks for it again. A failed or stalled
+        // fetch must leave the range uncovered too, or the gap would read as
+        // fetched and never be retried.
+        windowEnd = Math.max(windowEnd, producedEnd);
         // End-of-input only when the window reaches the known media duration.
         // Where a window's cues stop says nothing: a window that ends inside a
         // dialogue gap looks the same as the end of the file.
         const mediaDuration = options.duration();
-        if (mediaDuration > 0 && requestedEnd >= mediaDuration) atEOF = true;
+        if (mediaDuration > 0 && producedEnd >= mediaDuration) atEOF = true;
         options.onWindowCommitted(fresh);
       } else if (!succeeded && !superseded && !disposed && !sourceChangedNow) {
         // A real failure (error, stall, or non-ok response) rather than a seek
@@ -489,16 +516,19 @@ export function createSubtitleWindowFetcher(
     );
     if (pageSpanSeconds > 0) {
       // Page grid: a fresh window is the page that contains the playhead, and
-      // an extend is the page after the coverage already committed. The
+      // an extend is the page that contains the coverage already committed. The
       // planner's own anchors (playhead minus a backoff, coverage minus an
       // overlap) are deliberately off that grid, so aligning them here is what
       // makes the request, the page the server stores, and the server's page
-      // prefetch the same window.
+      // prefetch the same window. A page the server could only partly produce —
+      // a page whose artifact has not parsed its end yet — commits the shorter
+      // range it really covered, so the alignment asks for that same page again
+      // rather than skipping the part it did not send.
       action =
         action.kind === "fresh"
           ? { kind: "fresh", start: alignSubtitleWindowStart(action.start, pageSpanSeconds) }
           : action.kind === "extend"
-            ? { kind: "extend", start: subtitlePageBoundary(windowEnd, pageSpanSeconds) }
+            ? { kind: "extend", start: alignSubtitleWindowStart(windowEnd, pageSpanSeconds) }
             : action;
     }
     if (action.kind === "fresh") void fetchWindow(action.start, true);

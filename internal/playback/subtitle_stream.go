@@ -30,6 +30,30 @@ type StreamExtractOpts struct {
 	// remote input. When set, subtitle caching uses a bounded generation
 	// instead of requiring os.Stat on InputPath.
 	CacheIdentity string
+	// SourceSizeBytes is the source container's size when the caller knows it
+	// (a catalog row's FileSize). It is 0 when unknown, which a virtual row's
+	// size commonly is. It decides only whether a bounded bitmap page is worth
+	// extracting directly: a container large enough that the prefix read costs
+	// a page its whole deadline is served from the track's progressive artifact
+	// instead (see subtitle_progressive_sup.go).
+	SourceSizeBytes int64
+	// SourceDurationSeconds is the source's runtime in seconds, when the caller
+	// knows it (a catalog row's Duration). Together with SourceSizeBytes it
+	// prices the container's average byte rate, which is what a bounded bitmap
+	// page's discarded prefix costs (see subtitle_page_cost.go). Zero is an
+	// unknown runtime and simply leaves the prefix to the declared bitrate.
+	SourceDurationSeconds float64
+	// SourceBitrateKbps is the container's average bitrate in kbps as a probe
+	// recorded it (a catalog row's Bitrate). It is the fallback byte rate for
+	// pricing a bitmap page's prefix when the size and runtime are not both
+	// known. Zero is unknown.
+	SourceBitrateKbps int
+	// NoteSourceReadRate, when set, receives the byte rate this extract read its
+	// input at, measured from the process's own I/O counters. The subtitle cache
+	// records it per source identity so a later bitmap page's prefix can be
+	// priced in wall-clock terms, not only in bytes. It is called at most once,
+	// after the process is reaped, and only when a rate could be measured.
+	NoteSourceReadRate func(bytesPerSecond float64)
 	// TrackIndex is the subtitle stream ordinal within the container
 	// (matches ffmpeg's `0:s:N` specifier). Callers pass the same index
 	// they would to ExtractSubtitle.
@@ -188,6 +212,12 @@ func StreamExtractSubtitle(ctx context.Context, opts StreamExtractOpts) error {
 	if err != nil {
 		return fmt.Errorf("start ffmpeg: %w", err)
 	}
+	// A windowed bitmap page that cannot seek its source reads the container
+	// from byte 0 to reach the window. Watch the child's own read count so a
+	// page that would read hundreds of megabytes to emit a few segments is
+	// killed early instead of running to the extraction timeout.
+	budget, stopBudget := opts.startPageReadBudget(extractCtx, cmd.Process.Pid, cancel)
+	defer stopBudget()
 
 	// Copy stdout → writer with per-chunk flush so the browser receives
 	// cues as they're produced rather than at ffmpeg exit. Count the bytes on
@@ -221,6 +251,17 @@ func StreamExtractSubtitle(ctx context.Context, opts StreamExtractOpts) error {
 			counter.bytes, outcome, time.Since(start),
 			"track", opts.TrackIndex, "seek", opts.SeekSeconds, "ffmpeg_err", waitErr)...)
 
+	// Publish the rate this page read the source at, so the next page's prefix
+	// can be priced in time as well as in bytes. A page killed by the cap still
+	// measured a real rate, and that is exactly the sample worth keeping.
+	if rate, ok := budget.observedBytesPerSecond(time.Since(start)); ok && opts.NoteSourceReadRate != nil {
+		opts.NoteSourceReadRate(rate)
+	}
+	// A killed extract reports a signal, which says nothing about why it was
+	// killed; the budget is the reason and replaces it.
+	if budgetErr := budget.pageReadBudgetError(); budgetErr != nil {
+		return budgetErr
+	}
 	if ctx.Err() != nil {
 		return ctx.Err()
 	}
@@ -500,14 +541,30 @@ func SetSubtitleCoverageHeader(h http.Header, opts StreamExtractOpts) {
 	if !windowed {
 		return
 	}
-	value := strconv.FormatFloat(start, 'f', 3, 64) + "-*"
-	if !openEnded {
-		value = strconv.FormatFloat(start, 'f', 3, 64) + "-" + strconv.FormatFloat(end, 'f', 3, 64)
+	if openEnded {
+		h.Set(SubtitleCoverageHeader, strconv.FormatFloat(start, 'f', 3, 64)+"-*")
+		h.Set(SubtitleWindowedHeader, "true")
+		// The subtitle routes already answer cross-origin; expose the two
+		// markers so a browser-based client (not just a native one) can read
+		// them.
+		h.Set("Access-Control-Expose-Headers", SubtitleCoverageHeader+", "+SubtitleWindowedHeader)
+		return
 	}
-	h.Set(SubtitleCoverageHeader, value)
+	SetSubtitleCoverageRange(h, start, end)
+}
+
+// SetSubtitleCoverageRange advertises an explicit covered source-time range,
+// `<start>-<end>` with three decimals, as the bounded-window markers. It exists
+// for responses that describe coverage rather than a produced slice: a
+// retryable answer that reports how far the track's progressive bitmap artifact
+// has parsed.
+func SetSubtitleCoverageRange(h http.Header, start, end float64) {
+	if h == nil {
+		return
+	}
+	h.Set(SubtitleCoverageHeader,
+		strconv.FormatFloat(start, 'f', 3, 64)+"-"+strconv.FormatFloat(end, 'f', 3, 64))
 	h.Set(SubtitleWindowedHeader, "true")
-	// The subtitle routes already answer cross-origin; expose the two markers
-	// so a browser-based client (not just a native one) can read them.
 	h.Set("Access-Control-Expose-Headers", SubtitleCoverageHeader+", "+SubtitleWindowedHeader)
 }
 
@@ -597,18 +654,22 @@ func streamExtractOutput(codec string, targetFormat ...string) (outCodec, outFor
 
 // IsSubtitleStreamMapError reports whether an ffmpeg subtitle-extract failure
 // came from a stream map that named a subtitle ordinal the input does not have
-// ("matches no streams" / "for option 'map'"). A virtual release can rotate its
-// subtitle layout between planning and extraction, so a map failure against a
-// relay input means the source rotated rather than that ffmpeg is broken.
-// Conservative by design: only ffmpeg's map diagnostics match, so genuine
-// ffmpeg failures stay loud.
+// ("matches no streams" / "for option 'map'"), or from an ordinal whose codec
+// family is not the one the plan promised ("sup muxer supports only codec
+// hdmv_pgs_subtitle" / "Could not write header"). A virtual release can rotate
+// its subtitle layout between planning and extraction, so either failure against
+// a relay input means the source rotated rather than that ffmpeg is broken: the
+// plan ordinal now names a stream of another class, and the .sup muxer refuses it
+// before writing a segment. Conservative by design: only ffmpeg's own diagnostics
+// match, so genuine ffmpeg failures stay loud.
 func IsSubtitleStreamMapError(err error) bool {
 	if err == nil {
 		return false
 	}
 	message := strings.ToLower(err.Error())
 	return strings.Contains(message, "matches no streams") ||
-		strings.Contains(message, "for option 'map'")
+		strings.Contains(message, "for option 'map'") ||
+		strings.Contains(message, "muxer supports only codec")
 }
 
 // IsSubtitleUpstreamError reports whether an ffmpeg subtitle-extract failure

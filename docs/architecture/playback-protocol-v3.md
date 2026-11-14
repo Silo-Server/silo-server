@@ -2310,19 +2310,19 @@ or failed extracts are never published. Text and ASS cache misses stream while
 extracting; repeated complete requests reuse the finished artifact. A windowed
 miss on a large virtual source starts detached fill work so later requests do
 not re-demux the source. A session still at the start warms the complete track
-(text and ASS while playing, bitmap while paused), and later requests read the
+(text and ASS while playing, a bitmap track while paused — a bitmap *page* starts
+its progressive fill while playing, see below), and later requests read the
 small cached artifact.
 
-A session past the start never builds a complete-track artifact, and that is a
-correctness rule rather than a capacity one: a complete extract always starts at
-source zero, so one started from a mid-file playhead would publish a tail slice
-as the whole track, with offsets that do not match the source timeline and
-without every cue before the seek. Playback there is served by bounded windows
-only. Such a session prefetches at most two bounded windows on the request grid
-above — the cell the live playhead falls in and the cell after it — and keeps
-them as last-good window slices. That bounded prefetch runs for a bitmap track
-while playing too, because a playing bitmap track otherwise re-demuxes the source
-at every page boundary; the complete-track bitmap warm itself stays paused-only. A
+A session past the start never builds a complete-track artifact on its own
+initiative, and that is a correctness rule rather than a capacity one: a complete
+extract always starts at source zero, so one started from a mid-file playhead
+would publish a tail slice as the whole track, with offsets that do not match the
+source timeline and without every cue before the seek. Playback there is served by
+bounded windows only. Such a session prefetches at most two bounded windows on the
+request grid above — the cell the live playhead falls in and the cell after it —
+and keeps them as last-good window slices. That bounded prefetch runs for a text
+track while playing. A
 warm that cannot reserve the track because a fill already owns it (typically the
 client's own whole-track request, or another warm) skips instead of queueing
 behind that fill and logs `subtitle cache warm skipped: a fill already owns this
@@ -2339,6 +2339,46 @@ extract from the committed artifact produces, and the advertised coverage stays
 the requested range. A failed extraction returns an error response before
 output begins, or aborts an already-started stream so clients can distinguish
 failure from a complete track and retry.
+
+A bitmap (PGS) track is the exception, because a page is not a slice the source
+can produce cheaply. A bounded bitmap page that missed the cache starts the
+track's progressive fill while the viewer is playing: that one unbounded demux
+from source zero is what publishes the pages the client keeps asking for. It
+replaces the bounded prefetch for bitmap pages, which would read the same source
+again for pages the fill is already producing, and it goes through the cache's
+warm slot and detached relay budget, never the request path. It is single-flighted
+per source identity, track and format, so a burst of pages starts exactly one
+fill. Every other bitmap request keeps its existing admission rules: the
+full-track warm is paused-only, and a request whose window names a playhead uses
+the bounded prefetch.
+
+Before any bitmap page reads its source, the server prices the container prefix
+that read would discard: `start × rate`, from the row's declared size and runtime
+or bitrate, and in wall-clock terms from the read rate the identity's own extracts
+have measured. A page beyond 256 MB of prefix, or whose prefix would take longer
+than 45 s at the measured rate, is refused before the extract with
+`503 subtitle_page_too_costly`, `Retry-After`, and `X-Subtitle-Coverage`
+describing the progressive artifact's watermark; that refusal is what starts the
+fill when the handler does not already own one. An opening page has no prefix and
+always extracts normally. The same page answered after the read started is capped
+at 256 MB of process reads; a page killed that way, or one that runs out the
+two-minute window extract deadline without emitting a byte, answers the same
+retryable shape instead of a 500. A windowed text extract is held until it
+completes, so a slice cut short by that deadline or by a canceled request is never
+committed as a 200 carrying a header and half a cue: nothing is written and the
+client receives the retryable answer.
+
+A page whose start the artifact has parsed is served from it even while the page's
+own end is still ahead of the watermark: the display sets that show in the parsed
+prefix are complete on disk, so the response answers them as a 200 and its
+`X-Subtitle-Coverage` reports the shorter range it really produced. The watermark
+is the last display set read in full (`PCS … END`), so a run still arriving never
+travels with a page. A page that starts at or past the watermark is not ready, not
+unavailable: it answers `503 subtitle_page_not_ready` with `Retry-After` and the
+same coverage header, which is a distinct code from `subtitle_source_unavailable`
+because the source was never the problem. A client that receives less than it
+asked for keeps the covered range only and asks for the same page again, so the
+part the server had not parsed is never treated as delivered.
 
 ---
 

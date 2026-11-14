@@ -4,7 +4,9 @@ import {
   createSubtitleWindowFetcher,
   nextSubtitleRetryDelay,
   planSubtitleWindow,
+  SUBTITLE_COVERAGE_HEADER,
   SUBTITLE_FETCH_RETRY_MAX_BACKOFF_MS,
+  subtitleCoverageEnd,
   subtitleWindowUrl,
   type SubtitleWindowFetcherOptions,
   type SubtitleWindowState,
@@ -76,6 +78,20 @@ describe("nextSubtitleRetryDelay", () => {
     expect(nextSubtitleRetryDelay(0)).toBe(5_000);
     expect(nextSubtitleRetryDelay(5_000)).toBe(10_000);
     expect(nextSubtitleRetryDelay(40_000)).toBe(SUBTITLE_FETCH_RETRY_MAX_BACKOFF_MS);
+  });
+});
+
+describe("subtitleCoverageEnd", () => {
+  it("reads the produced end of a bounded response", () => {
+    expect(subtitleCoverageEnd("0.000-126.543")).toBe(126.543);
+    expect(subtitleCoverageEnd("120.000-240.000")).toBe(240);
+  });
+
+  it("treats a missing, open-ended, or unreadable header as no range", () => {
+    expect(subtitleCoverageEnd(null)).toBeNull();
+    expect(subtitleCoverageEnd("")).toBeNull();
+    expect(subtitleCoverageEnd("600.000-*")).toBeNull();
+    expect(subtitleCoverageEnd("garbage")).toBeNull();
   });
 });
 
@@ -310,6 +326,46 @@ describe("createSubtitleWindowFetcher", () => {
     fetcher.maybeFetch();
     await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
     expect(fetchMock.mock.calls[2]?.[0]).toBe("/sub?position=960&duration=120");
+    fetcher.dispose();
+  });
+
+  it("commits only the range a partly produced page says it covered and asks for that page again", async () => {
+    let playhead = 5;
+    const fetchMock = vi.fn((_url: string, _init?: RequestInit) =>
+      respond(["a"], true, { headers: { [SUBTITLE_COVERAGE_HEADER]: "0.000-18.000" } }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const { fetcher } = makeFetcher(() => playhead, {
+      seekBackoffSeconds: 0,
+      windowSeconds: BITMAP_SUBTITLE_PAGE_SECONDS,
+      pageSpanSeconds: BITMAP_SUBTITLE_PAGE_SECONDS,
+      prefetchLeadSeconds: 30,
+    });
+    fetcher.maybeFetch();
+    await vi.waitFor(() => expect(fetcher.coverage().windowEnd).toBe(18));
+    expect(fetchMock.mock.calls[0]?.[0]).toBe("/sub?position=0&duration=120");
+
+    // The page the server has only partly parsed is asked for again, not
+    // skipped: committing the requested end would leave 18-120 s marked as
+    // covered while nothing there ever arrived.
+    playhead = 10;
+    fetcher.maybeFetch();
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    expect(fetchMock.mock.calls[1]?.[0]).toBe("/sub?position=0&duration=120");
+    fetcher.dispose();
+  });
+
+  it("keeps a page whole when the response carries no coverage header", async () => {
+    const fetchMock = vi.fn((_url: string, _init?: RequestInit) => respond([]));
+    vi.stubGlobal("fetch", fetchMock);
+    const { fetcher } = makeFetcher(() => 5, {
+      seekBackoffSeconds: 0,
+      windowSeconds: BITMAP_SUBTITLE_PAGE_SECONDS,
+      pageSpanSeconds: BITMAP_SUBTITLE_PAGE_SECONDS,
+      prefetchLeadSeconds: 30,
+    });
+    fetcher.maybeFetch();
+    await vi.waitFor(() => expect(fetcher.coverage().windowEnd).toBe(120));
     fetcher.dispose();
   });
 

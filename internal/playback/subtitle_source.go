@@ -390,6 +390,84 @@ func (s *spillWriter) finish() error {
 	return nil
 }
 
+// subtitleResponseHold holds a windowed response until its extract finishes, so a
+// slice that was cut short (the extract deadline, a canceled request) can be
+// dropped instead of committed. Once the held bytes pass the limit the response
+// streams and the hold stops protecting it, which bounds the memory one slice can
+// pin and keeps a pathologically large window from stalling behind a full buffer.
+//
+// It forwards Flush only after the response is committed, and it never writes a
+// header of its own: the caller sets the content type before the extract runs, and
+// the first real write commits the status.
+type subtitleResponseHold struct {
+	w         http.ResponseWriter
+	limit     int
+	buf       bytes.Buffer
+	committed bool
+}
+
+func newSubtitleResponseHold(w http.ResponseWriter, limit int) *subtitleResponseHold {
+	if limit < 0 {
+		limit = 0
+	}
+	return &subtitleResponseHold{w: w, limit: limit}
+}
+
+func (h *subtitleResponseHold) Write(p []byte) (int, error) {
+	if !h.committed && h.buf.Len()+len(p) <= h.limit {
+		return h.buf.Write(p)
+	}
+	if err := h.commit(); err != nil {
+		return 0, err
+	}
+	return h.w.Write(p)
+}
+
+// commit writes the held bytes, which commits the response status.
+func (h *subtitleResponseHold) commit() error {
+	if h.committed {
+		return nil
+	}
+	h.committed = true
+	if h.buf.Len() == 0 {
+		return nil
+	}
+	held := h.buf.Bytes()
+	h.buf = bytes.Buffer{}
+	_, err := h.w.Write(held)
+	return err
+}
+
+// finish commits what is held and flushes it.
+func (h *subtitleResponseHold) finish() error {
+	if err := h.commit(); err != nil {
+		return err
+	}
+	if f, ok := h.w.(http.Flusher); ok {
+		f.Flush()
+	}
+	return nil
+}
+
+// discard drops the held bytes without writing them. It is a no-op once the
+// response is committed, where nothing can be taken back.
+func (h *subtitleResponseHold) discard() {
+	if h.committed {
+		return
+	}
+	h.buf = bytes.Buffer{}
+}
+
+// Flush passes a flush on only once the response streams.
+func (h *subtitleResponseHold) Flush() {
+	if !h.committed {
+		return
+	}
+	if f, ok := h.w.(http.Flusher); ok {
+		f.Flush()
+	}
+}
+
 // demuxAndKeep runs today's demux of the whole source. When the source can
 // keep the track, FFmpeg also copies it into a file, which is kept once the
 // demux has served its viewers. A demux that fails with the copy runs again
