@@ -48,3 +48,13 @@ it("retires a pending selection on replacement and rejects duplicate clicks", as
   expect(close).not.toHaveBeenCalled();
   expect(mocks.error).not.toHaveBeenCalled();
 });
+it("lists a presentation's parts in play order", () => {
+  const parts = [
+    { file_id: 1, resolution: "720p", file_size: 1024 },
+    { file_id: 2, resolution: "2160p", file_size: 1024 },
+  ] as FileVersion[];
+  render(<DownloadVersionPicker open onOpenChange={vi.fn()} versions={parts} partsInOrder />);
+  const labels = screen.getAllByRole("button", { name: /720p|2160p/ }).map((b) => b.textContent);
+  expect(labels[0]).toMatch(/720p/);
+  expect(labels[1]).toMatch(/2160p/);
+});

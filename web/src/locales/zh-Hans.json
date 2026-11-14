@@ -3604,6 +3604,78 @@
       "value": "组操作失败。"
     }
   ],
+  "web.admin.access.groups.addUsers.addSelected": [
+    {
+      "type": 0,
+      "value": "添加所选项"
+    }
+  ],
+  "web.admin.access.groups.addUsers.addSelectedCount": [
+    {
+      "type": 0,
+      "value": "添加所选的"
+    },
+    {
+      "type": 1,
+      "value": "count"
+    },
+    {
+      "type": 0,
+      "value": "项"
+    }
+  ],
+  "web.admin.access.groups.addUsers.description": [
+    {
+      "type": 0,
+      "value": "不在此组中的普通账户。管理员账户无法加入组。"
+    }
+  ],
+  "web.admin.access.groups.addUsers.noGroup": [
+    {
+      "type": 0,
+      "value": "无组"
+    }
+  ],
+  "web.admin.access.groups.addUsers.noMatches": [
+    {
+      "type": 0,
+      "value": "没有与你的搜索匹配的用户。"
+    }
+  ],
+  "web.admin.access.groups.addUsers.none": [
+    {
+      "type": 0,
+      "value": "所有普通账户都已在此组中。"
+    }
+  ],
+  "web.admin.access.groups.addUsers.search": [
+    {
+      "type": 0,
+      "value": "搜索用户"
+    }
+  ],
+  "web.admin.access.groups.addUsers.searchPlaceholder": [
+    {
+      "type": 0,
+      "value": "按用户名或电子邮件搜索"
+    }
+  ],
+  "web.admin.access.groups.addUsers.title": [
+    {
+      "type": 0,
+      "value": "将用户添加到"
+    },
+    {
+      "type": 1,
+      "value": "group"
+    }
+  ],
+  "web.admin.access.groups.addUsers.unknownGroup": [
+    {
+      "type": 0,
+      "value": "未知组"
+    }
+  ],
   "web.admin.access.groups.allGroups": [
     {
       "type": 0,
@@ -3718,6 +3790,142 @@
       },
       "offset": 0,
       "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.access.groups.changes.allPermissions": [
+    {
+      "type": 0,
+      "value": "全部"
+    }
+  ],
+  "web.admin.access.groups.changes.allowed": [
+    {
+      "type": 0,
+      "value": "允许"
+    }
+  ],
+  "web.admin.access.groups.changes.audioTranscoding": [
+    {
+      "type": 0,
+      "value": "音频转码"
+    }
+  ],
+  "web.admin.access.groups.changes.concurrentStreams": [
+    {
+      "type": 0,
+      "value": "并发串流"
+    }
+  ],
+  "web.admin.access.groups.changes.concurrentTranscodes": [
+    {
+      "type": 0,
+      "value": "并发转码"
+    }
+  ],
+  "web.admin.access.groups.changes.convertedDownloads": [
+    {
+      "type": 0,
+      "value": "转码下载"
+    }
+  ],
+  "web.admin.access.groups.changes.downloads": [
+    {
+      "type": 0,
+      "value": "下载"
+    }
+  ],
+  "web.admin.access.groups.changes.householdProfiles": [
+    {
+      "type": 0,
+      "value": "家庭个人资料"
+    }
+  ],
+  "web.admin.access.groups.changes.libraries": [
+    {
+      "type": 0,
+      "value": "媒体库"
+    }
+  ],
+  "web.admin.access.groups.changes.libraryId": [
+    {
+      "type": 0,
+      "value": "#"
+    },
+    {
+      "type": 1,
+      "value": "id"
+    }
+  ],
+  "web.admin.access.groups.changes.localBitrate": [
+    {
+      "type": 0,
+      "value": "本地串流比特率"
+    }
+  ],
+  "web.admin.access.groups.changes.noLibraries": [
+    {
+      "type": 0,
+      "value": "无媒体库"
+    }
+  ],
+  "web.admin.access.groups.changes.noPermissions": [
+    {
+      "type": 0,
+      "value": "无"
+    }
+  ],
+  "web.admin.access.groups.changes.notAllowed": [
+    {
+      "type": 0,
+      "value": "不允许"
+    }
+  ],
+  "web.admin.access.groups.changes.permissions": [
+    {
+      "type": 0,
+      "value": "权限"
+    }
+  ],
+  "web.admin.access.groups.changes.playbackQuality": [
+    {
+      "type": 0,
+      "value": "播放质量"
+    }
+  ],
+  "web.admin.access.groups.changes.remoteBitrate": [
+    {
+      "type": 0,
+      "value": "远程串流比特率"
+    }
+  ],
+  "web.admin.access.groups.changes.requestApproval": [
+    {
+      "type": 0,
+      "value": "请求审批"
+    }
+  ],
+  "web.admin.access.groups.changes.requestLimit": [
+    {
+      "type": 0,
+      "value": "请求限制"
+    }
+  ],
+  "web.admin.access.groups.changes.requests": [
+    {
+      "type": 0,
+      "value": "请求"
+    }
+  ],
+  "web.admin.access.groups.changes.unlimited": [
+    {
+      "type": 0,
+      "value": "不限"
+    }
+  ],
+  "web.admin.access.groups.changes.videoTranscoding": [
+    {
+      "type": 0,
+      "value": "视频转码"
     }
   ],
   "web.admin.access.groups.conflict.message": [
@@ -4012,10 +4220,99 @@
       "value": "正在加载访问组……"
     }
   ],
+  "web.admin.access.groups.members.addFailed": [
+    {
+      "type": 0,
+      "value": "部分用户无法添加："
+    }
+  ],
+  "web.admin.access.groups.members.addUsers": [
+    {
+      "type": 0,
+      "value": "添加用户"
+    }
+  ],
+  "web.admin.access.groups.members.added": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "已将"
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": "名用户添加到"
+            },
+            {
+              "type": 1,
+              "value": "group"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.access.groups.members.couldNotAdd": [
+    {
+      "type": 0,
+      "value": "无法添加"
+    }
+  ],
+  "web.admin.access.groups.members.couldNotMove": [
+    {
+      "type": 0,
+      "value": "无法移动"
+    }
+  ],
   "web.admin.access.groups.members.empty": [
     {
       "type": 0,
       "value": "还没有成员。"
+    }
+  ],
+  "web.admin.access.groups.members.failure": [
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": "："
+    },
+    {
+      "type": 1,
+      "value": "reason"
+    }
+  ],
+  "web.admin.access.groups.members.groupChanged": [
+    {
+      "type": 0,
+      "value": "此账户在你确认后发生了更改。请检查更改并重试。"
+    }
+  ],
+  "web.admin.access.groups.members.groupsLoadFailed": [
+    {
+      "type": 0,
+      "value": "无法加载访问组，因此暂时无法移动成员。"
+    },
+    {
+      "type": 8,
+      "value": "retry",
+      "children": [
+        {
+          "type": 0,
+          "value": "重试"
+        }
+      ]
     }
   ],
   "web.admin.access.groups.members.heading": [
@@ -4052,6 +4349,79 @@
       "value": "正在加载成员……"
     }
   ],
+  "web.admin.access.groups.members.manageHelp": [
+    {
+      "type": 0,
+      "value": "将成员移至其他组，或将用户添加到此组。"
+    }
+  ],
+  "web.admin.access.groups.members.moveFailed": [
+    {
+      "type": 0,
+      "value": "部分用户无法移动："
+    }
+  ],
+  "web.admin.access.groups.members.moveSelected": [
+    {
+      "type": 0,
+      "value": "移动所选项"
+    }
+  ],
+  "web.admin.access.groups.members.moveSelectedCount": [
+    {
+      "type": 0,
+      "value": "移动所选的"
+    },
+    {
+      "type": 1,
+      "value": "count"
+    },
+    {
+      "type": 0,
+      "value": "项"
+    }
+  ],
+  "web.admin.access.groups.members.moveTarget": [
+    {
+      "type": 0,
+      "value": "将所选成员移至"
+    }
+  ],
+  "web.admin.access.groups.members.moveTargetPlaceholder": [
+    {
+      "type": 0,
+      "value": "移至组……"
+    }
+  ],
+  "web.admin.access.groups.members.moved": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "已将"
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": "名用户移至"
+            },
+            {
+              "type": 1,
+              "value": "group"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.access.groups.members.noMatches": [
     {
       "type": 0,
@@ -4062,6 +4432,196 @@
     {
       "type": 0,
       "value": "搜索成员"
+    }
+  ],
+  "web.admin.access.groups.members.selectMember": [
+    {
+      "type": 0,
+      "value": "选择"
+    },
+    {
+      "type": 1,
+      "value": "username"
+    }
+  ],
+  "web.admin.access.groups.members.selectedHidden": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "有"
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": "名所选成员未显示，移动时会包含他们。"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.access.groups.moveConfirm.change": [
+    {
+      "type": 1,
+      "value": "label"
+    },
+    {
+      "type": 0,
+      "value": "："
+    },
+    {
+      "type": 1,
+      "value": "from"
+    },
+    {
+      "type": 0,
+      "value": " → "
+    },
+    {
+      "type": 1,
+      "value": "to"
+    }
+  ],
+  "web.admin.access.groups.moveConfirm.description": [
+    {
+      "type": 0,
+      "value": "用户在自己账户上覆盖的设置保持不变。他们会立即获得新的访问权限，不会被退出登录。"
+    }
+  ],
+  "web.admin.access.groups.moveConfirm.fromGroup": [
+    {
+      "type": 0,
+      "value": "来自"
+    },
+    {
+      "type": 1,
+      "value": "group"
+    },
+    {
+      "type": 0,
+      "value": "的"
+    },
+    {
+      "type": 1,
+      "value": "count"
+    },
+    {
+      "type": 0,
+      "value": "名"
+    }
+  ],
+  "web.admin.access.groups.moveConfirm.fromNoGroup": [
+    {
+      "type": 0,
+      "value": "无组的"
+    },
+    {
+      "type": 1,
+      "value": "count"
+    },
+    {
+      "type": 0,
+      "value": "名"
+    }
+  ],
+  "web.admin.access.groups.moveConfirm.fromUnknownGroup": [
+    {
+      "type": 0,
+      "value": "来自组#"
+    },
+    {
+      "type": 1,
+      "value": "id"
+    },
+    {
+      "type": 0,
+      "value": "的"
+    },
+    {
+      "type": 1,
+      "value": "count"
+    },
+    {
+      "type": 0,
+      "value": "名"
+    }
+  ],
+  "web.admin.access.groups.moveConfirm.loadingTerms": [
+    {
+      "type": 0,
+      "value": "正在加载请求设置……"
+    }
+  ],
+  "web.admin.access.groups.moveConfirm.move": [
+    {
+      "type": 0,
+      "value": "移动"
+    }
+  ],
+  "web.admin.access.groups.moveConfirm.moving": [
+    {
+      "type": 0,
+      "value": "正在移动……"
+    }
+  ],
+  "web.admin.access.groups.moveConfirm.noChanges": [
+    {
+      "type": 0,
+      "value": "继承的设置均无变化。"
+    }
+  ],
+  "web.admin.access.groups.moveConfirm.sourceUnknown": [
+    {
+      "type": 0,
+      "value": "无法加载他们当前所在的组，因此不清楚哪些设置会更改。"
+    }
+  ],
+  "web.admin.access.groups.moveConfirm.termsFailed": [
+    {
+      "type": 0,
+      "value": "无法加载这些组的请求设置，因此不清楚哪些设置会更改。"
+    }
+  ],
+  "web.admin.access.groups.moveConfirm.title": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "将"
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": "名用户移至"
+            },
+            {
+              "type": 1,
+              "value": "group"
+            },
+            {
+              "type": 0,
+              "value": "？"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.access.groups.newGroup": [
@@ -20538,6 +21098,46 @@
     {
       "type": 0,
       "value": "计数未加载"
+    }
+  ],
+  "web.admin.common.downloadAccess.conversionOff": [
+    {
+      "type": 0,
+      "value": "服务器未准备适合设备的副本，因此所有下载都是原始文件。请在"
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "设置→下载"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "中开启。"
+    }
+  ],
+  "web.admin.common.downloadAccess.serverOff": [
+    {
+      "type": 0,
+      "value": "整个服务器已关闭下载，因此任何人都无法下载。请在"
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "设置→下载"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "中开启。"
     }
   ],
   "web.admin.common.editorConflict.message": [
@@ -45168,6 +45768,102 @@
       "value": "设置"
     }
   ],
+  "web.admin.plugins.signature.invalid": [
+    {
+      "type": 0,
+      "value": "检查未通过"
+    }
+  ],
+  "web.admin.plugins.signature.invalidBanner": [
+    {
+      "type": 8,
+      "value": "b",
+      "children": [
+        {
+          "type": 1,
+          "value": "name"
+        },
+        {
+          "type": 0,
+          "value": "的发布签名检查失败。"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "此版本附带的签名无法证明它由哪个存储库构建。详细信息请查看服务器日志。"
+    }
+  ],
+  "web.admin.plugins.signature.label": [
+    {
+      "type": 0,
+      "value": "发布签名"
+    }
+  ],
+  "web.admin.plugins.signature.tileInvalid": [
+    {
+      "type": 0,
+      "value": "签名检查失败"
+    }
+  ],
+  "web.admin.plugins.signature.tileVerified": [
+    {
+      "type": 0,
+      "value": "由"
+    },
+    {
+      "type": 1,
+      "value": "repository"
+    },
+    {
+      "type": 0,
+      "value": "构建的已签名版本"
+    }
+  ],
+  "web.admin.plugins.signature.unknown": [
+    {
+      "type": 0,
+      "value": "未检查"
+    }
+  ],
+  "web.admin.plugins.signature.unsigned": [
+    {
+      "type": 0,
+      "value": "未签名"
+    }
+  ],
+  "web.admin.plugins.signature.verified": [
+    {
+      "type": 0,
+      "value": "构建自"
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 1,
+          "value": "repository"
+        }
+      ]
+    }
+  ],
+  "web.admin.plugins.signature.verifiedAt": [
+    {
+      "type": 0,
+      "value": "验证时间："
+    },
+    {
+      "type": 1,
+      "value": "date"
+    }
+  ],
+  "web.admin.plugins.signature.verifiedNoRepository": [
+    {
+      "type": 0,
+      "value": "已验证"
+    }
+  ],
   "web.admin.plugins.source.approvedCommunity": [
     {
       "type": 0,
@@ -51484,6 +52180,12 @@
       "value": "磁盘上限（%）"
     }
   ],
+  "web.admin.settings.downloads.enabled.description": [
+    {
+      "type": 0,
+      "value": "整个服务器的开关。开启时，由访问组和账户决定谁可以下载。关闭时，任何人都无法下载。"
+    }
+  ],
   "web.admin.settings.downloads.enabled.label": [
     {
       "type": 0,
@@ -57175,7 +57877,7 @@
   "web.admin.settings.playback.transcoding.copyKeyframePlaylistDescription": [
     {
       "type": 0,
-      "value": "实验性功能。当Silo复制文件的视频时，根据文件的关键帧从一开始就列出所有分段，而不是使用随Silo复制而增长的播放列表。可防止Safari在播放中途卡住。如果拖动到Silo尚未复制的位置，需要等待复制到那里。"
+      "value": "实验性功能。当Silo复制文件的视频时，根据文件的关键帧从一开始就列出所有分段，而不是使用随Silo复制而增长的播放列表。可防止Safari在播放中途卡住。如果跳转到远超Silo已复制部分的位置，Silo会从该处重新开始复制。"
     }
   ],
   "web.admin.settings.playback.transcoding.dir": [
@@ -72838,6 +73540,12 @@
     {
       "type": 0,
       "value": "不允许下载"
+    }
+  ],
+  "web.admin.users.detail.overview.access.downloadsServerOff": [
+    {
+      "type": 0,
+      "value": "整个服务器已关闭下载"
     }
   ],
   "web.admin.users.detail.overview.access.groupSource": [

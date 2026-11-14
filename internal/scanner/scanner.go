@@ -875,6 +875,11 @@ func (s *Scanner) scanPaths(
 		seenPaths[p] = true
 	}
 	primaryPaths, extraCandidates := partitionExtraPaths(filePaths, folder.Type, folder.Paths, walkRoots)
+	// Files already known to hold no video take no part in inference.
+	primaryPaths, knownNoVideo, retiredNoVideo, err := s.dropNoVideoPaths(ctx, folder, primaryPaths)
+	if err != nil {
+		return nil, fmt.Errorf("reading files without video: %w", err)
+	}
 	rootOverrides, err := s.loadRootOverrides(ctx, folder.ID, reconcileRoots)
 	if err != nil {
 		return nil, fmt.Errorf("loading root overrides: %w", err)
@@ -950,7 +955,10 @@ func (s *Scanner) scanPaths(
 	// Phase 2: Process files concurrently with a worker pool.
 	var wg sync.WaitGroup
 	pathCh := make(chan string, s.workerCount())
-	var newCount, updatedCount, unchangedCount, errorCount, processedCount atomic.Int64
+	var newCount, updatedCount, unchangedCount, noVideoCount, retiredCount, errorCount, processedCount atomic.Int64
+	noVideoCount.Add(int64(knownNoVideo))
+	retiredCount.Add(int64(retiredNoVideo))
+	processedCount.Add(int64(knownNoVideo))
 	subtitleCache := newExternalSubtitleDirCache(folder.Type)
 
 	for range s.workerCount() {
@@ -974,6 +982,11 @@ func (s *Scanner) scanPaths(
 					slog.DebugContext(ctx, "scanner: file updated", "component", "scanner", "path", path, "reasons", updateReasons)
 				case actionUnchanged:
 					unchangedCount.Add(1)
+				case actionNoVideoRetired:
+					retiredCount.Add(1)
+					noVideoCount.Add(1)
+				case actionNoVideo:
+					noVideoCount.Add(1)
 				}
 				processedCount.Add(1)
 			}
@@ -1003,6 +1016,7 @@ func (s *Scanner) scanPaths(
 					"new", newCount.Load(),
 					"updated", updatedCount.Load(),
 					"unchanged", unchangedCount.Load(),
+					"no_video", noVideoCount.Load(),
 					"errors", errorCount.Load(),
 				)
 				reportProgress(ctx, ProgressUpdate{
@@ -1032,6 +1046,9 @@ func (s *Scanner) scanPaths(
 	result.New = int(newCount.Load())
 	result.Updated = int(updatedCount.Load())
 	result.Unchanged = int(unchangedCount.Load())
+	result.NoVideo = int(noVideoCount.Load())
+	// A retired row left the library like a vanished file's.
+	result.Missing = int(retiredCount.Load())
 	result.Errors = int(errorCount.Load())
 	reportProgress(ctx, ProgressUpdate{
 		Phase:           "reconciling",
@@ -1795,6 +1812,9 @@ func (s *Scanner) scanScope(
 	result.New = int(run.newCount.Load())
 	result.Updated = int(run.updatedCount.Load())
 	result.Unchanged = int(run.unchangedCount.Load())
+	result.NoVideo = int(run.noVideoCount.Load())
+	// A retired row left the library like a vanished file's.
+	result.Missing = int(run.retiredCount.Load())
 	result.Errors = int(run.errorCount.Load())
 	reportProgress(ctx, run.progress("reconciling", "Reconciling scan state"))
 
@@ -1904,6 +1924,7 @@ func mergeScanResult(dst *ScanResult, src *ScanResult) {
 	dst.New += src.New
 	dst.Updated += src.Updated
 	dst.Unchanged += src.Unchanged
+	dst.NoVideo += src.NoVideo
 	dst.Errors += src.Errors
 	dst.MissingSkippedProtected += src.MissingSkippedProtected
 	dst.RootObservations = append(dst.RootObservations, src.RootObservations...)
@@ -2740,6 +2761,13 @@ func (s *Scanner) ScanFile(ctx context.Context, filePath string, folder *models.
 		}
 		return nil
 	}
+	// A file already known to hold no video is left out before anything is
+	// inferred from its path.
+	if kept, _, _, err := s.dropNoVideoPaths(ctx, folder, []string{filePath}); err != nil {
+		return fmt.Errorf("reading files without video: %w", err)
+	} else if len(kept) == 0 {
+		return s.reconcileRetiredNoVideoFile(ctx, folder, cleanFile, existingByPath[filePath])
+	}
 	existingContentStatuses, err := s.itemRepo.GetStatusByIDs(ctx, collectScanStateContentIDs([]*scanStateFile{existingByPath[filePath]}))
 	if err != nil {
 		return fmt.Errorf("loading item statuses for file: %w", err)
@@ -2778,9 +2806,13 @@ func (s *Scanner) ScanFile(ctx context.Context, filePath string, folder *models.
 		return fmt.Errorf("loading group overrides for file: %w", err)
 	}
 	applyGroupOverrides(&groupInference, groupOverrides)
-	_, _, err = s.processFile(ctx, filePath, folder, existingByPath, existingContentStatuses, rootInference.Assignments[filepath.Clean(filePath)], groupInference.Assignments[filepath.Clean(filePath)], newExternalSubtitleDirCache(folder.Type))
+	action, _, err := s.processFile(ctx, filePath, folder, existingByPath, existingContentStatuses, rootInference.Assignments[filepath.Clean(filePath)], groupInference.Assignments[filepath.Clean(filePath)], newExternalSubtitleDirCache(folder.Type))
 	if err != nil {
 		return err
+	}
+	if action == actionNoVideo || action == actionNoVideoRetired {
+		// Nothing was cataloged, so no root or group is recorded for the path.
+		return s.reconcileRetiredNoVideoFile(ctx, folder, cleanFile, existingByPath[filePath])
 	}
 	if err := s.reconcileScannedRoots(
 		ctx,
@@ -2818,6 +2850,26 @@ func (s *Scanner) ScanFile(ctx context.Context, filePath string, folder *models.
 		)
 	}
 	return s.scanOptionalThemeSongs(ctx, folder, filepath.Dir(filePath), true)
+}
+
+// reconcileRetiredNoVideoFile finishes a single-file scan that left the file
+// out for having no video. Only the title of the row at the path, retired now
+// or by an earlier scan, can have lost its last file, so only its memberships
+// are reconciled, and the row waits for a folder scan's trash sweep. An
+// earlier scan's row is reconciled again because its own reconcile may have
+// failed after the row was marked. A file that never had a row needs nothing.
+func (s *Scanner) reconcileRetiredNoVideoFile(ctx context.Context, folder *models.MediaFolder, filePath string, retired *scanStateFile) error {
+	if retired == nil {
+		return nil
+	}
+	protectedRoots, err := s.protectedConfiguredRoots(ctx, folder)
+	if err != nil {
+		return err
+	}
+	if _, _, _, err := s.reconcileScopedLibraryMemberships(ctx, folder.ID, filePath, []*scanStateFile{retired}, false, protectedRoots); err != nil {
+		return fmt.Errorf("reconciling library membership after leaving out file without video: %w", err)
+	}
+	return s.syncVanishedVideoQueues(ctx, folder.ID, filePath)
 }
 
 func (s *Scanner) reconcileVanishedFileIfNeeded(ctx context.Context, folder *models.MediaFolder, filePath string) (bool, error) {
@@ -2967,6 +3019,11 @@ const (
 	actionNew fileAction = iota
 	actionUpdated
 	actionUnchanged
+	// actionNoVideo is a file in a video library that holds no video stream
+	// and was left out of the catalog (see no_video.go).
+	// actionNoVideoRetired is one whose present row was marked missing.
+	actionNoVideo
+	actionNoVideoRetired
 )
 
 // processFile handles a single file: checks if it changed, gathers hints,
@@ -3096,6 +3153,10 @@ func (s *Scanner) processFile(
 
 		// Try to get probe data.
 		probe, probeSource, probeRejected := s.probeFile(ctx, filePath)
+		probe, noVideo := s.confirmNoVideo(ctx, folder, filePath, probe)
+		if noVideo {
+			return s.excludeNoVideoFile(ctx, folder, existing, noVideoFile{FilePath: filePath, FileSize: fileSize, FileModifiedAt: fileModifiedAt, FileHash: fileHash})
+		}
 		rejectionStands := probeRejectionStands(existing, fileSize, fileModifiedAt)
 		if shouldPreserveExistingProbeAfterProbeFailure(updateReasons, probe, rejectionStands) {
 			if probeRejected {
@@ -3212,6 +3273,17 @@ func (s *Scanner) processFile(
 
 	// Try to get probe data.
 	probe, probeSource, probeRejected := s.probeFile(ctx, filePath)
+	probe, noVideo := s.confirmNoVideo(ctx, folder, filePath, probe)
+	if noVideo {
+		return s.excludeNoVideoFile(ctx, folder, nil, noVideoFile{FilePath: filePath, FileSize: fileSize, FileModifiedAt: fileModifiedAt, FileHash: fileHash})
+	}
+	if probe == nil && s.sameBytesHaveNoVideo(ctx, folder, fileHash, fileSize, fileModifiedAt) {
+		slog.InfoContext(ctx, "scanner: file matches one left out for having no video and could not be probed; leaving it for a later scan", "component", "scanner",
+			"folder_id", folder.ID,
+			"path", filePath,
+		)
+		return actionNoVideo, nil, nil
+	}
 
 	// Detect external subtitles.
 	externalSubs = loadExternalSubs()

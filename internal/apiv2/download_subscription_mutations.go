@@ -43,6 +43,8 @@ type DownloadSubscriptionPatchInput struct {
 	IfMatch     string `header:"If-Match"`
 	IfNoneMatch string `header:"If-None-Match"`
 	Body        DownloadSubscriptionPatchBody
+	// RawBody is the document as sent; see ProfileUpdateInput.
+	RawBody []byte
 }
 type DownloadSubscriptionDeleteInput struct {
 	ID          string `path:"id" minLength:"1"`
@@ -108,10 +110,12 @@ func (reg *Registry) updateDownloadSubscription(ctx context.Context, in *Downloa
 	if p != nil {
 		return nil, p
 	}
-	b := in.Body
-	if b.Mode.Null || b.SeasonNumbers.Null || b.DeleteWatched.Null || b.MaxStorageBytes.Null || b.Quality.Null || b.Active.Null {
-		return nil, NewProblem(TypeMalformedRequest, "Monitor fields cannot be null.")
+	// No monitor field can be cleared, so null on any of them is a 422
+	// naming the member.
+	if p := rejectNonNullableNulls(in.RawBody, nil); p != nil {
+		return nil, p
 	}
+	b := in.Body
 	if b.MaxStorageBytes.Present && b.MaxStorageBytes.Value < 0 || len(b.SeasonNumbers.Value) > 10000 {
 		return nil, NewProblem(TypeMalformedRequest, "Invalid monitor storage or season bounds.")
 	}

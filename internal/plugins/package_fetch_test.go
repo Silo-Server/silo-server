@@ -135,7 +135,7 @@ func TestFetchPackageResourceTimesOutStalledBody(t *testing.T) {
 	})
 	client := newPackageFetchClient(shortPackageFetchTimeouts)
 	_, err := fetchWithDeadline(t, func() ([]byte, error) {
-		return fetchPackageResourceWithIdle(context.Background(), client, server.URL, "the plugin", 100*time.Millisecond)
+		return fetchPackageResourceWithIdle(context.Background(), client, server.URL, "the plugin", 100*time.Millisecond, 0)
 	})
 	requirePackageError(t, err, "download of the plugin was interrupted")
 	requireTransient(t, err, true)
@@ -163,7 +163,7 @@ func TestFetchPackageResourceAllowsSlowProgressingBody(t *testing.T) {
 	client := newPackageFetchClient(shortPackageFetchTimeouts)
 	start := time.Now()
 	data, err := fetchWithDeadline(t, func() ([]byte, error) {
-		return fetchPackageResourceWithIdle(context.Background(), client, server.URL, "the plugin", idle)
+		return fetchPackageResourceWithIdle(context.Background(), client, server.URL, "the plugin", idle, 0)
 	})
 	if err != nil {
 		t.Fatalf("slow download failed: %v", err)
@@ -198,7 +198,7 @@ func TestFetchPackageResourceCancelDuringStalledBody(t *testing.T) {
 		cancel()
 	}()
 	_, err := fetchWithDeadline(t, func() ([]byte, error) {
-		return fetchPackageResourceWithIdle(ctx, client, server.URL, "the plugin", time.Hour)
+		return fetchPackageResourceWithIdle(ctx, client, server.URL, "the plugin", time.Hour, 0)
 	})
 	if _, ok := AsPackageError(err); ok || !errors.Is(err, context.Canceled) {
 		t.Fatalf("canceled fetch = %v, want context.Canceled and no PackageError", err)
@@ -241,7 +241,7 @@ func TestFetchPackageResourceAllowsSlowSingleChunkBody(t *testing.T) {
 	}()
 	client := newPackageFetchClient(shortPackageFetchTimeouts)
 	data, err := fetchWithDeadline(t, func() ([]byte, error) {
-		return fetchPackageResourceWithIdle(context.Background(), client, "http://"+listener.Addr().String(), "the plugin", idle)
+		return fetchPackageResourceWithIdle(context.Background(), client, "http://"+listener.Addr().String(), "the plugin", idle, 0)
 	})
 	if err != nil {
 		t.Fatalf("steady single-chunk download failed: %v", err)

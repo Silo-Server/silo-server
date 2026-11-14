@@ -17,6 +17,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
+	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/playback"
 )
 
@@ -165,6 +166,132 @@ func TestAdminEndRetiresJellyfinPlay(t *testing.T) {
 	}
 	if tm.GetTranscodeSession(upstreamID) != nil {
 		t.Error("a request after the end started the transcode again")
+	}
+}
+
+// sessionMissHook runs onMiss the first time a session lookup finds nothing.
+type sessionMissHook struct {
+	*playback.SessionManager
+	onMiss func()
+}
+
+func (m *sessionMissHook) GetSession(sessionID string) (*playback.Session, error) {
+	session, err := m.SessionManager.GetSession(sessionID)
+	if err != nil && m.onMiss != nil {
+		onMiss := m.onMiss
+		m.onMiss = nil
+		onMiss()
+	}
+	return session, err
+}
+
+// newLostTranscodePlay builds a transcoded Jellyfin play, play-1 on upstream-1,
+// with a stored recipe and no running transcode, so a playlist request
+// rebuilds it. The native session is removed during the first rebuild: after
+// the request has found it and before FFmpeg starts, which is when the rebuild
+// reads its config. That is what an expiry leaves once its close has found no
+// transcode. afterRemoval, when set, runs right after. The returned function
+// sends a playlist request and returns its status.
+func newLostTranscodePlay(t *testing.T, afterRemoval func()) (*PlaybackHandler, *sessionMissHook, *PlaybackSessionStore, func() int) {
+	t.Helper()
+	const upstreamID = "upstream-1"
+	// A title this short gets a generated playlist, so the request does not
+	// wait on the stand-in FFmpeg, which writes none.
+	source := PlaybackMediaSource{ID: "source-42", FileID: 42, Version: catalog.FileVersion{FileID: 42, Duration: 3600}}
+	sessions := &sessionMissHook{SessionManager: playback.NewSessionManager(0, 0)}
+	sessions.RegisterReconstructed(&playback.Session{
+		ID: upstreamID, UserID: 1, ProfileID: "profile-1", MediaFileID: 42,
+		PlayMethod: playback.PlayTranscode, BasePlayMethod: playback.PlayTranscode, IsJellyfinCompat: true,
+	})
+	card := playback.NewRecipeCard(1, "profile-1", 42, "", playback.TranscodeOpts{
+		SessionID: upstreamID, InputPath: "/media/movie.mkv", TargetCodecVideo: "h264", TargetCodecAudio: "aac",
+		AudioTrackIndex: compatAudioTrackIndexOrDefault(source), SegmentDuration: 2, TotalDuration: 3600,
+	})
+	store := NewPlaybackSessionStore(time.Hour, nil)
+	store.Put(PlaybackSession{
+		ID: "play-1", CompatToken: "token-1", RouteItemID: "item", UpstreamSessionID: upstreamID,
+		UpstreamPlayMethod: "transcode", ProgressPersistenceKnown: true, MediaSources: []PlaybackMediaSource{source},
+		Recipe: &card, RoutingAssignment: compatLocalVideoAPIRoutingAssignment(),
+	})
+	handler := NewPlaybackHandler(nil, nil, nil, nil, store, sessions, nil, nil)
+	handler.TranscodeDir, handler.FFmpegPath, handler.HWAccel = t.TempDir(), writeCompatTestFFmpeg(t), playback.HWAccelNone
+	tm := handler.tm
+	t.Cleanup(func() { tm.CloseTranscodeSession(upstreamID, "") })
+
+	config := tm.Config
+	removed := false
+	tm.Config = func() playback.TranscodeRuntimeConfig {
+		if !removed {
+			removed = true
+			if err := sessions.StopSession(upstreamID); err != nil {
+				t.Error(err)
+			}
+			if afterRemoval != nil {
+				afterRemoval()
+			}
+		}
+		return config()
+	}
+	requestPlaylist := func() int {
+		req := httptest.NewRequest(http.MethodGet, "/Videos/item/hls/play-1/stream.m3u8", nil)
+		routeCtx := chi.NewRouteContext()
+		routeCtx.URLParams.Add("id", "item")
+		routeCtx.URLParams.Add("playlistId", "play-1")
+		ctx := context.WithValue(req.Context(), chi.RouteCtxKey, routeCtx)
+		ctx = context.WithValue(ctx, compatSessionKey, &Session{Token: "token-1", StreamAppUserID: 1, ProfileID: "profile-1"})
+		rec := httptest.NewRecorder()
+		handler.HandleHLSManifest(rec, req.WithContext(ctx))
+		return rec.Code
+	}
+	return handler, sessions, store, requestPlaylist
+}
+
+// TestPlaylistRebuildClosesTranscodeOfEndedSession covers issue #4120. When a
+// play's native session goes away while a playlist request rebuilds its
+// transcode, whatever removed the session found no transcode to close. The
+// rebuild has to close the one it registered, or FFmpeg keeps encoding with
+// no session left to expire it. The play itself stays resumable.
+func TestPlaylistRebuildClosesTranscodeOfEndedSession(t *testing.T) {
+	handler, sessions, store, requestPlaylist := newLostTranscodePlay(t, nil)
+
+	code := requestPlaylist()
+	if code != http.StatusNotFound || handler.tm.GetTranscodeSession("upstream-1") != nil {
+		t.Errorf("playlist status = %d, rebuilt transcode still registered = %v; want 404 and no transcode left without a native session",
+			code, handler.tm.GetTranscodeSession("upstream-1") != nil)
+	}
+	if _, ok := store.Get("play-1"); !ok {
+		t.Fatal("the play is no longer routable, so the client cannot resume it")
+	}
+	if code := requestPlaylist(); code != http.StatusOK || handler.tm.GetTranscodeSession("upstream-1") == nil {
+		t.Errorf("the next playlist request = %d, transcode running = %v; want the play resumed",
+			code, handler.tm.GetTranscodeSession("upstream-1") != nil)
+	}
+	if _, err := sessions.GetSession("upstream-1"); err != nil {
+		t.Errorf("the resumed play has no native session to expire its transcode: %v", err)
+	}
+}
+
+// TestPlaylistRebuildKeepsTranscodeAResumedPlayAdopted: a second playlist
+// request can register the native session again and adopt the rebuilt
+// transcode just after the rebuild found the session gone. The rebuild must
+// not then close the transcode under the resumed play.
+func TestPlaylistRebuildKeepsTranscodeAResumedPlayAdopted(t *testing.T) {
+	var sessions *sessionMissHook
+	var requestPlaylist func() int
+	resumed := 0
+	handler, sessions, _, requestPlaylist := newLostTranscodePlay(t, func() {
+		// The next lookup to miss is the rebuild's own, once its transcode is
+		// registered.
+		sessions.onMiss = func() { resumed = requestPlaylist() }
+	})
+
+	code := requestPlaylist()
+	if resumed != http.StatusOK {
+		t.Fatalf("the resuming request = %d, want 200 (0 means it never ran)", resumed)
+	}
+	if code != http.StatusOK || handler.tm.GetTranscodeSession("upstream-1") == nil {
+		t.Errorf("rebuilding request = %d, transcode running = %v; want 200 and the adopted transcode kept",
+			code, handler.tm.GetTranscodeSession("upstream-1") != nil)
 	}
 }
 
@@ -327,4 +454,126 @@ func TestProgressiveRemuxEndsWhenItsSessionStops(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("remux status = %d %s", rec.Code, rec.Body.String())
 	}
+}
+
+// duringCrashCleanupStore runs during once, from the play lookup the crash
+// cleanup makes between closing the dead transcode and stopping the session.
+type duringCrashCleanupStore struct {
+	CompatPlaybackStore
+	during func()
+}
+
+func (s *duringCrashCleanupStore) FindByUpstreamSessionID(upstreamSessionID string) (*PlaybackSession, bool) {
+	if during := s.during; during != nil {
+		s.during = nil
+		during()
+	}
+	return s.CompatPlaybackStore.FindByUpstreamSessionID(upstreamSessionID)
+}
+
+// TestCrashCleanupKeepsSessionOfRebuiltPlay covers issue #4129. The cleanup
+// after an FFmpeg crash closes the dead transcode and then stops the native
+// session. A request in between can rebuild the play under that session, and
+// a stop that still ran would leave the new transcode with no session to
+// expire it. The rebuilt play is not reported paused either. A crash nothing
+// answered still pauses and stops.
+func TestCrashCleanupKeepsSessionOfRebuiltPlay(t *testing.T) {
+	const upstreamID = "upstream-1"
+	// A title this short gets a generated playlist, so the request does not
+	// wait on the stand-in FFmpeg, which writes none.
+	source := PlaybackMediaSource{ID: "source-42", FileID: 42, Version: catalog.FileVersion{FileID: 42, Duration: 3600}}
+	card := playback.NewRecipeCard(1, "profile-1", 42, "", playback.TranscodeOpts{
+		SessionID: upstreamID, InputPath: "/media/movie.mkv", TargetCodecVideo: "h264", TargetCodecAudio: "aac",
+		AudioTrackIndex: compatAudioTrackIndexOrDefault(source), SegmentDuration: 2, TotalDuration: 3600,
+	})
+	// crashedPlay returns a play whose FFmpeg has just died, and crash, which
+	// runs the handler's cleanup for it with during run from inside.
+	crashedPlay := func(t *testing.T) (handler *PlaybackHandler, sessions *playback.SessionManager, scrobbler *recordingCompatWatchScrobbler, crash func(during func())) {
+		sessions = playback.NewSessionManager(0, 0)
+		sessions.RegisterReconstructed(&playback.Session{
+			ID: upstreamID, UserID: 1, ProfileID: "profile-1", MediaFileID: 42,
+			PlayMethod: playback.PlayTranscode, BasePlayMethod: playback.PlayTranscode, IsJellyfinCompat: true,
+		})
+		store := &duringCrashCleanupStore{CompatPlaybackStore: NewPlaybackSessionStore(time.Hour, nil)}
+		store.Put(PlaybackSession{
+			ID: "play-1", CompatToken: "token-1", ItemID: "item-1", RouteItemID: "item", UpstreamSessionID: upstreamID,
+			UpstreamPlayMethod: "transcode", ProgressPersistenceKnown: true, MediaSources: []PlaybackMediaSource{source},
+			Recipe: &card, RoutingAssignment: compatLocalVideoAPIRoutingAssignment(),
+		})
+		handler = NewPlaybackHandler(nil, nil, nil, nil, store, sessions, nil, nil)
+		handler.TranscodeDir, handler.FFmpegPath, handler.HWAccel = t.TempDir(), writeCompatTestFFmpeg(t), playback.HWAccelNone
+		scrobbler = &recordingCompatWatchScrobbler{}
+		handler.WatchScrobbler = scrobbler
+		tm := handler.tm
+		t.Cleanup(func() { tm.CloseTranscodeSession(upstreamID, "") })
+
+		dead := &playback.TranscodeSession{}
+		tm.RegisterTranscodeSession(upstreamID, dead)
+		crash = func(during func()) {
+			store.during = during
+			tm.OnFFmpegCrash(t.Context(), upstreamID, dead)
+			if tm.GetTranscodeSession(upstreamID) == dead {
+				t.Fatal("the crash cleanup left the dead transcode registered")
+			}
+		}
+		return handler, sessions, scrobbler, crash
+	}
+
+	t.Run("a playlist request rebuilds the transcode", func(t *testing.T) {
+		handler, sessions, scrobbler, crash := crashedPlay(t)
+		tm := handler.tm
+		crash(func() {
+			req := httptest.NewRequest(http.MethodGet, "/Videos/item/hls/play-1/stream.m3u8", nil)
+			routeCtx := chi.NewRouteContext()
+			routeCtx.URLParams.Add("id", "item")
+			routeCtx.URLParams.Add("playlistId", "play-1")
+			ctx := context.WithValue(req.Context(), chi.RouteCtxKey, routeCtx)
+			ctx = context.WithValue(ctx, compatSessionKey, &Session{Token: "token-1", StreamAppUserID: 1, ProfileID: "profile-1"})
+			rec := httptest.NewRecorder()
+			handler.HandleHLSManifest(rec, req.WithContext(ctx))
+			if rec.Code != http.StatusOK {
+				t.Errorf("playlist during the crash cleanup = %d %s", rec.Code, rec.Body.String())
+			}
+		})
+		rebuilt := tm.GetTranscodeSession(upstreamID)
+		if rebuilt == nil {
+			t.Fatal("the playlist request's rebuilt transcode is not registered")
+		}
+		if _, err := sessions.GetSession(upstreamID); err != nil {
+			t.Fatalf("the rebuilt transcode is running with no native session to expire it: %v", err)
+		}
+		if len(scrobbler.calls) != 0 {
+			t.Errorf("scrobbles for a play that kept running = %+v, want none", scrobbler.calls)
+		}
+
+		// The rebuilt FFmpeg crashes in turn, and this time nothing rebuilds it.
+		tm.OnFFmpegCrash(t.Context(), upstreamID, rebuilt)
+		if tm.GetTranscodeSession(upstreamID) != nil {
+			t.Error("the crashed transcode is still registered")
+		}
+		if _, err := sessions.GetSession(upstreamID); !errors.Is(err, playback.ErrSessionNotFound) {
+			t.Errorf("a crash nothing answered left the native session running: %v", err)
+		}
+		if len(scrobbler.calls) != 1 || scrobbler.calls[0].action != "pause" {
+			t.Errorf("scrobbles for a crash nothing answered = %+v, want one pause", scrobbler.calls)
+		}
+	})
+
+	t.Run("a transcode node takes the play", func(t *testing.T) {
+		handler, sessions, scrobbler, crash := crashedPlay(t)
+		handler.JWTSecret, handler.RecipeNodeStore = "test-secret", &stubRecipeNodeStore{}
+		node := fakeTranscodeNode(t, nil)
+		crash(func() {
+			file := &models.MediaFile{ID: 42, FilePath: "/media/movie.mkv"}
+			if err := handler.startRemoteTranscode(t.Context(), "play-1", upstreamID, testRemoteTranscodeSource(), file, 0, node.URL); err != nil {
+				t.Errorf("start on the transcode node during the crash cleanup: %v", err)
+			}
+		})
+		if _, err := sessions.GetSession(upstreamID); err != nil {
+			t.Errorf("the transcode on the node is running with no native session to expire it: %v", err)
+		}
+		if len(scrobbler.calls) != 0 {
+			t.Errorf("scrobbles for a play that kept running = %+v, want none", scrobbler.calls)
+		}
+	})
 }

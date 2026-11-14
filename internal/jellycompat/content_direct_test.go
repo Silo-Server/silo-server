@@ -63,6 +63,17 @@ func TestItemDetailToUpstreamOrdersVideoVersionsLikeJellyfin(t *testing.T) {
 	}
 }
 
+func TestItemDetailToUpstreamBreaksWidthTiesByType(t *testing.T) {
+	// Ties keep file id order for video types, which the catalog ranks best
+	// first, and builder (part) order for the others.
+	for itemType, want := range map[string][]int{"movie": {1, 2}, "ebook": {2, 1}} {
+		detail := itemDetailToUpstream(&catalog.ItemDetail{Type: itemType, Versions: []catalog.FileVersion{{FileID: 2}, {FileID: 1}}})
+		if got := []int{detail.Versions[0].FileID, detail.Versions[1].FileID}; !slices.Equal(got, want) {
+			t.Errorf("%s version order = %v, want %v", itemType, got, want)
+		}
+	}
+}
+
 func TestItemEtagIncludesPremiereDate(t *testing.T) {
 	base := upstreamListItem{
 		ContentID: "movie-1",

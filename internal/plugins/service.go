@@ -385,33 +385,6 @@ func (s *Service) UpdateToAvailableVersion(ctx context.Context, installationID i
 	return s.installations.GetByID(ctx, installationID)
 }
 
-func (s *Service) InstallBinary(ctx context.Context, req InstallBinaryRequest) (*InstallResult, error) {
-	var result *InstallResult
-	var err error
-	if req.Manifest != nil && req.Manifest.GetPluginId() != "" {
-		existing, existErr := s.existingInstallationByPluginID(ctx, req.Manifest.GetPluginId())
-		if existErr != nil {
-			return nil, existErr
-		}
-		if existing != nil {
-			result, err = s.replaceStopped(ctx, existing, func() (*InstallResult, error) {
-				return s.installer.ReplaceBinary(ctx, existing, req)
-			})
-			if err != nil {
-				return nil, err
-			}
-			s.OnLifecycleChange(ctx)
-			return result, nil
-		}
-	}
-	result, err = s.installer.InstallBinary(ctx, req)
-	if err != nil {
-		return nil, err
-	}
-	s.OnLifecycleChange(ctx)
-	return result, nil
-}
-
 func (s *Service) InstallBinaryUpload(ctx context.Context, binaryData []byte) (*InstallResult, error) {
 	if len(binaryData) == 0 {
 		return nil, fmt.Errorf("binary data is required")
@@ -426,7 +399,7 @@ func (s *Service) InstallBinaryUpload(ctx context.Context, binaryData []byte) (*
 
 	var result *InstallResult
 	if s.installations == nil {
-		result, err = s.installer.installBinary(ctx, binaryData, actualChecksum, manifest, manifestJSON, nil)
+		result, err = s.installer.installBinary(ctx, binaryData, actualChecksum, manifest, manifestJSON, nil, unsignedSignature)
 		if err != nil {
 			return nil, err
 		}
@@ -439,7 +412,7 @@ func (s *Service) InstallBinaryUpload(ctx context.Context, binaryData []byte) (*
 		return nil, fmt.Errorf("list existing plugin installations for %q: %w", manifest.GetPluginId(), err)
 	}
 	if len(existing) == 0 {
-		result, err = s.installer.installBinary(ctx, binaryData, actualChecksum, manifest, manifestJSON, nil)
+		result, err = s.installer.installBinary(ctx, binaryData, actualChecksum, manifest, manifestJSON, nil, unsignedSignature)
 		if err != nil {
 			return nil, err
 		}
@@ -452,7 +425,7 @@ func (s *Service) InstallBinaryUpload(ctx context.Context, binaryData []byte) (*
 
 	oldInstallation := existing[0]
 	result, err = s.replaceStopped(ctx, oldInstallation, func() (*InstallResult, error) {
-		return s.installer.replaceBinary(ctx, oldInstallation, binaryData, actualChecksum, manifest, manifestJSON, nil)
+		return s.installer.replaceBinary(ctx, oldInstallation, binaryData, actualChecksum, manifest, manifestJSON, nil, unsignedSignature)
 	})
 	if err != nil {
 		return nil, err

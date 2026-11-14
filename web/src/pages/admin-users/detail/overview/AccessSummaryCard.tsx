@@ -4,6 +4,7 @@ import { Download, LayoutGrid, Mail, Play } from "lucide-react";
 
 import type { AdminUser } from "@/api/types";
 import { Button } from "@/components/ui/button";
+import { useServerDownloadSwitches } from "@/hooks/admin/useServerDownloadSwitches";
 import { useAccessGroups } from "@/hooks/queries/admin/accessGroups";
 import { useAdminLibraries } from "@/hooks/queries/admin/libraries";
 import { useAdminUserCapabilities } from "@/hooks/queries/admin/users";
@@ -122,6 +123,7 @@ const CUSTOM = (
 /** A few lines on what the account can do, with the account's own limits marked. */
 export function AccessSummaryCard({ user }: { user: AdminUser }) {
   const t = useT();
+  const { downloadsOff, conversionOff } = useServerDownloadSwitches();
   const groups = useAccessGroups().data ?? [];
   const libraries = useAdminLibraries().data ?? [];
   const capabilities = useAdminUserCapabilities().data;
@@ -147,10 +149,16 @@ export function AccessSummaryCard({ user }: { user: AdminUser }) {
   const remote = effective.max_remote_stream_bitrate_kbps;
 
   const summary = downloads.data;
+  // With downloads off server-wide only the counts remain: they describe
+  // copies already on the account's devices.
   const downloadsDetail = [
-    effective.download_transcode_allowed
-      ? t("web.admin.users.detail.overview.access.serverCopiesAllowed")
-      : t("web.admin.users.detail.overview.access.originalFilesOnly"),
+    ...(downloadsOff
+      ? []
+      : [
+          effective.download_transcode_allowed && !conversionOff
+            ? t("web.admin.users.detail.overview.access.serverCopiesAllowed")
+            : t("web.admin.users.detail.overview.access.originalFilesOnly"),
+        ]),
     ...(accountDownloads && summary
       ? [
           t("web.admin.users.detail.overview.access.downloadsConfirmed", {
@@ -164,6 +172,13 @@ export function AccessSummaryCard({ user }: { user: AdminUser }) {
         ]
       : []),
   ].join(" · ");
+
+  let downloadsTitle = t("web.admin.users.detail.overview.access.downloadsNotAllowed");
+  if (downloadsOff) {
+    downloadsTitle = t("web.admin.users.detail.overview.access.downloadsServerOff");
+  } else if (effective.download_allowed) {
+    downloadsTitle = t("web.admin.users.detail.overview.access.downloadsAllowed");
+  }
 
   const canRequest = effective.requests_allowed && server?.requests_enabled !== false;
   const requestsLine = requestsSummary(t, canRequest, terms);
@@ -227,12 +242,8 @@ export function AccessSummaryCard({ user }: { user: AdminUser }) {
       />
       <SummaryLine
         icon={<Download />}
-        title={
-          effective.download_allowed
-            ? t("web.admin.users.detail.overview.access.downloadsAllowed")
-            : t("web.admin.users.detail.overview.access.downloadsNotAllowed")
-        }
-        detail={downloadsDetail}
+        title={downloadsTitle}
+        detail={downloadsDetail || undefined}
       />
       <SummaryLine icon={<Mail />} title={requestsLine.title} detail={requestsLine.detail} />
     </DetailCard>

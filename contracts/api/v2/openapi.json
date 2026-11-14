@@ -17146,6 +17146,10 @@
           "runtime": {
             "$ref": "#/components/schemas/AdminPluginRuntime"
           },
+          "signature": {
+            "$ref": "#/components/schemas/AdminPluginSignature",
+            "description": "The release signature check of the installed package."
+          },
           "source_kind": {
             "enum": [
               "silo",
@@ -17198,6 +17202,7 @@
           "update_policy",
           "source_kind",
           "updates_paused",
+          "signature",
           "capabilities",
           "global_config_schema",
           "user_config_schema",
@@ -17450,6 +17455,37 @@
           "resident",
           "state",
           "restart_count"
+        ],
+        "type": "object"
+      },
+      "AdminPluginSignature": {
+        "additionalProperties": false,
+        "properties": {
+          "source_repo": {
+            "description": "The repository the verified signature names. Present only when state is verified.",
+            "format": "uri",
+            "type": "string"
+          },
+          "state": {
+            "description": "verified: the release's Sigstore bundle proved it was built from source_repo at the version's tag. unsigned: there was nothing to check, as for an upload, an archive install, or a catalog entry without a signature. invalid: a signature was checked and did not prove that. unknown: not checked, as for an installation from before Silo checked signatures or an install whose check could not run.",
+            "enum": [
+              "unknown",
+              "verified",
+              "unsigned",
+              "invalid"
+            ],
+            "type": "string"
+          },
+          "verified_at": {
+            "description": "When Silo verified the signature. Present only when state is verified.",
+            "format": "date-time",
+            "pattern": "^(?:[1-9][0-9]{3}|0[1-9][0-9]{2}|00[1-9][0-9]|000[2-9])-",
+            "patternDescription": "a non-zero RFC 3339 instant",
+            "type": "string"
+          }
+        },
+        "required": [
+          "state"
         ],
         "type": "object"
       },
@@ -244836,6 +244872,10 @@
           "source_audio_channels": {
             "format": "int64",
             "type": "integer"
+          },
+          "source_frame_rate": {
+            "format": "double",
+            "type": "number"
           },
           "source_video_bit_depth": {
             "format": "int64",
