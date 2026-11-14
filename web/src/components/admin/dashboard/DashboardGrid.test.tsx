@@ -55,6 +55,7 @@ function layoutWith(
     moveWidget: vi.fn(),
     resizeWidget: vi.fn(),
     setWidgetRange: vi.fn(),
+    setWidgetView: vi.fn(),
     removeWidget: vi.fn(),
     addWidget: vi.fn(),
     resetLayout: vi.fn(),

@@ -109,6 +109,7 @@ export function DashboardGrid({
     moveWidget,
     resizeWidget,
     setWidgetRange,
+    setWidgetView,
     removeWidget,
     addWidget,
   } = layout;
@@ -567,6 +568,8 @@ export function DashboardGrid({
                 id={entry.id}
                 range={entry.range ?? widget.ranges?.default}
                 setRange={setWidgetRange}
+                view={entry.view ?? widget.views?.default}
+                setView={setWidgetView}
                 setCollapsed={setWidgetCollapsed}
               >
                 <WidgetComponent />

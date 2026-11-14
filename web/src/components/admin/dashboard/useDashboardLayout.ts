@@ -84,6 +84,11 @@ function sanitizeRange(range: unknown, widget: DashboardWidgetDefinition): Widge
   return ranges.default;
 }
 
+/** A stored view the widget still offers, or undefined so the default applies. */
+function sanitizeView(view: unknown, widget: DashboardWidgetDefinition): string | undefined {
+  return typeof view === "string" && widget.views?.allowed.includes(view) ? view : undefined;
+}
+
 /**
  * Validates a layout document from any source — localStorage or the server —
  * and drops what this build cannot render. Returns null when the value is not
@@ -119,6 +124,10 @@ function sanitizeLayoutDocument(value: unknown): DashboardLayoutEntry[] | null {
     const range = sanitizeRange(entry.range, widget);
     if (range) {
       sanitized.range = range;
+    }
+    const view = sanitizeView(entry.view, widget);
+    if (view) {
+      sanitized.view = view;
     }
     entries.push(sanitized);
   }
@@ -205,6 +214,8 @@ export interface DashboardLayout {
    * part of the layout they expect to find again.
    */
   setWidgetRange: (id: WidgetId, range: WidgetRange) => void;
+  /** Change a widget's presentation; saved the same way as its window. */
+  setWidgetView: (id: WidgetId, view: string) => void;
   removeWidget: (id: WidgetId) => void;
   /**
    * Place a hidden widget with its default span, rows, and window. With a
@@ -497,6 +508,27 @@ export function useDashboardLayout(): DashboardLayout {
     [update],
   );
 
+  const setWidgetView = useCallback(
+    (id: WidgetId, view: string) => {
+      update((prev) => {
+        const widget = findDashboardWidget(id);
+        if (!widget || !sanitizeView(view, widget)) {
+          return prev;
+        }
+        let changed = false;
+        const next = prev.map((entry) => {
+          if (entry.id !== id || entry.view === view) {
+            return entry;
+          }
+          changed = true;
+          return { ...entry, view };
+        });
+        return changed ? next : prev;
+      });
+    },
+    [update],
+  );
+
   const removeWidget = useCallback(
     (id: WidgetId) => {
       update((prev) =>
@@ -594,6 +626,7 @@ export function useDashboardLayout(): DashboardLayout {
     moveWidget,
     resizeWidget,
     setWidgetRange,
+    setWidgetView,
     removeWidget,
     addWidget,
     resetLayout,
