@@ -107486,6 +107486,28 @@
       "value": "⟦Ûñķñöŵñ~~~⟧"
     }
   ],
+  "web.common.activity.subtitle.episode": [
+    {
+      "type": 0,
+      "value": "⟦"
+    },
+    {
+      "type": 1,
+      "value": "code"
+    },
+    {
+      "type": 0,
+      "value": " · "
+    },
+    {
+      "type": 1,
+      "value": "series"
+    },
+    {
+      "type": 0,
+      "value": "~~⟧"
+    }
+  ],
   "web.common.activity.subtitle.movie": [
     {
       "type": 0,
