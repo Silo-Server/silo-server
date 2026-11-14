@@ -29,6 +29,7 @@ import {
   resolveEffectiveVersion,
   type EffectiveVersionIdentity,
 } from "../utils/resolveEffectiveVersion";
+import { resolveVersionSubstitution } from "../utils/versionSubstitution";
 import { VideoPlayer } from "./VideoPlayer";
 import { fetchWatchDetail } from "@/hooks/queries/items";
 import {
@@ -1532,12 +1533,13 @@ function WatchPagePlayer({
   // id comparison: the server collapses `effective_media_file_id` onto the
   // requested id and publishes the concrete candidate as `effective_virtual_uri`
   // instead, so the candidate's path is compared against the requested row's
-  // own path. When the requested row carries no path (older responses) the
-  // comparison says nothing, so the notice stays quiet rather than guess.
+  // own path.
   //
-  // The server also publishes the substitution additively
-  // (`substituted_from_file_id` + `substitution_reason`), which is authoritative
-  // when present and lets the notice name the cause without re-deriving it.
+  // A moved identity is not enough on its own: a sibling mirror of the same
+  // release is a different row but the same version. The decision therefore
+  // compares release identity (the server's `substituted_from_file_id` when it
+  // sent one, else the rows' release name/size), and stays quiet when that
+  // identity is unknown rather than claiming a substitution it cannot prove.
   const plan = session.plan;
   const requestedFileId = plan?.requested_media_file_id ?? fileId ?? null;
   const requestedVersion =
@@ -1559,8 +1561,7 @@ function WatchPagePlayer({
     !!effectiveVirtualUri &&
     requestedVersion?.file_path !== undefined &&
     requestedVersion.file_path !== effectiveVirtualUri;
-  const versionWasSubstituted =
-    (plan?.substituted_from_file_id != null && plan.substituted_from_file_id !== effectiveFileId) ||
+  const identitiesDiffer =
     (requestedFileId != null && effectiveFileId != null && requestedFileId !== effectiveFileId) ||
     virtualSubstitution;
   // Name the row the plan actually landed on when we can resolve it, so the
@@ -1574,6 +1575,12 @@ function WatchPagePlayer({
     // plans that publish no URI.
     mediaFileId: effectiveVirtualUri ? null : effectiveFileId,
     effectiveVirtualUri,
+  });
+  const { substituted: versionWasSubstituted } = resolveVersionSubstitution({
+    requestedVersion,
+    effectiveVersion: effectiveVersionRow,
+    identitiesDiffer,
+    substitutedFromFileId: plan?.substituted_from_file_id,
   });
   const effectiveVersionLabel = effectiveVersionRow
     ? buildEffectiveVersionLabel(effectiveVersionRow)

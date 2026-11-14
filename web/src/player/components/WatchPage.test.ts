@@ -1124,11 +1124,20 @@ describe("WatchPage version switch feedback", () => {
   it("shows a dismissible notice when the server played a different version than auto-selected", () => {
     playbackSessionMock.mockReturnValue(
       playbackSession({
-        plan: fixturePlanV3({ requested_media_file_id: 7, effective_media_file_id: 8 }),
+        plan: fixturePlanV3({
+          requested_media_file_id: 7,
+          effective_media_file_id: 8,
+          substituted_from_file_id: 7,
+        }),
       }),
     );
 
-    render(createElement(WatchPage, watchPageProps));
+    render(
+      createElement(WatchPage, {
+        ...watchPageProps,
+        versions: [version],
+      }),
+    );
 
     expect(
       screen.getByText(
@@ -1150,11 +1159,21 @@ describe("WatchPage version switch feedback", () => {
     // release, an undecodable one). The viewer must still be told.
     playbackSessionMock.mockReturnValue(
       playbackSession({
-        plan: fixturePlanV3({ requested_media_file_id: 7, effective_media_file_id: 8 }),
+        plan: fixturePlanV3({
+          requested_media_file_id: 7,
+          effective_media_file_id: 8,
+          substituted_from_file_id: 7,
+        }),
       }),
     );
 
-    render(createElement(WatchPage, { ...watchPageProps, explicitFileSelection: true }));
+    render(
+      createElement(WatchPage, {
+        ...watchPageProps,
+        versions: [version],
+        explicitFileSelection: true,
+      }),
+    );
 
     expect(
       screen.getByText(
@@ -1207,6 +1226,7 @@ describe("WatchPage virtual version substitution notice", () => {
           requested_media_file_id: 100,
           effective_media_file_id: 100,
           effective_virtual_uri: effectiveVirtualUri,
+          substituted_from_file_id: 100,
         }),
       }),
     );
@@ -1226,6 +1246,7 @@ describe("WatchPage virtual version substitution notice", () => {
           requested_media_file_id: 100,
           effective_media_file_id: 100,
           effective_virtual_uri: "/media/Movies/Example (2024)/Uncatalogued.mkv",
+          substituted_from_file_id: 100,
         }),
       }),
     );
@@ -1269,6 +1290,7 @@ describe("WatchPage virtual version substitution notice", () => {
           requested_media_file_id: 100,
           effective_media_file_id: 100,
           effective_virtual_uri: effectiveVirtualUri,
+          substituted_from_file_id: 100,
         }),
       }),
     );
@@ -1282,6 +1304,90 @@ describe("WatchPage virtual version substitution notice", () => {
     );
 
     expect(screen.getByText(labeledNotice)).toBeInTheDocument();
+  });
+
+  it("stays quiet when the effective row is a sibling mirror of the same release", () => {
+    // Two provider rows served the same release. The ids differ, and the
+    // server may even publish a substitution because the effective row moved,
+    // but the viewer is still watching the version they picked.
+    const requestedRow: PlayerFileVersion = {
+      ...version,
+      file_id: 7,
+      release_name: "Example.2024.1080p.BluRay-GRP",
+      file_size: 4_000_000_000,
+    };
+    const mirrorRow: PlayerFileVersion = { ...requestedRow, file_id: 8 };
+    playbackSessionMock.mockReturnValue(
+      playbackSession({
+        mediaFileId: 8,
+        plan: fixturePlanV3({
+          requested_media_file_id: 7,
+          effective_media_file_id: 8,
+          substituted_from_file_id: 7,
+        }),
+      }),
+    );
+
+    render(
+      createElement(WatchPage, {
+        ...watchPageProps,
+        versions: [requestedRow, mirrorRow],
+      }),
+    );
+
+    expect(screen.queryByText(genericNotice)).not.toBeInTheDocument();
+    expect(screen.queryByText(labeledNotice)).not.toBeInTheDocument();
+  });
+
+  it("shows the notice for a genuinely different release without a server signal", () => {
+    const requestedRow: PlayerFileVersion = {
+      ...version,
+      file_id: 7,
+      release_name: "Example.2024.1080p.BluRay-GRP",
+      file_size: 4_000_000_000,
+    };
+    const otherRelease: PlayerFileVersion = {
+      ...version,
+      file_id: 8,
+      release_name: "Example.2024.2160p.WEB-DL-OTHER",
+      file_size: 9_000_000_000,
+    };
+    playbackSessionMock.mockReturnValue(
+      playbackSession({
+        mediaFileId: 8,
+        plan: fixturePlanV3({ requested_media_file_id: 7, effective_media_file_id: 8 }),
+      }),
+    );
+
+    render(
+      createElement(WatchPage, {
+        ...watchPageProps,
+        versions: [requestedRow, otherRelease],
+      }),
+    );
+
+    expect(screen.getByText(labeledNotice)).toBeInTheDocument();
+  });
+
+  it("makes no claim when the rows do not identify a release and the server sent no signal", () => {
+    const requestedRow: PlayerFileVersion = { ...version, file_id: 7, file_size: 0 };
+    const effectiveRow: PlayerFileVersion = { ...version, file_id: 8, file_size: 0 };
+    playbackSessionMock.mockReturnValue(
+      playbackSession({
+        mediaFileId: 8,
+        plan: fixturePlanV3({ requested_media_file_id: 7, effective_media_file_id: 8 }),
+      }),
+    );
+
+    render(
+      createElement(WatchPage, {
+        ...watchPageProps,
+        versions: [requestedRow, effectiveRow],
+      }),
+    );
+
+    expect(screen.queryByText(genericNotice)).not.toBeInTheDocument();
+    expect(screen.queryByText(labeledNotice)).not.toBeInTheDocument();
   });
 
   it("names the server's substitution reason when it is published", () => {
@@ -1299,7 +1405,7 @@ describe("WatchPage virtual version substitution notice", () => {
     render(
       createElement(WatchPage, {
         ...watchPageProps,
-        versions: [version, { ...version, file_id: 8 }],
+        versions: [version, { ...version, file_id: 8, file_size: 2 }],
       }),
     );
 
@@ -1336,7 +1442,7 @@ describe("WatchPage virtual version substitution notice", () => {
     render(
       createElement(WatchPage, {
         ...watchPageProps,
-        versions: [version, { ...version, file_id: 8 }],
+        versions: [version, { ...version, file_id: 8, file_size: 2 }],
       }),
     );
 
