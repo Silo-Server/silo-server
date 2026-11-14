@@ -1744,7 +1744,8 @@ func (f *fakeStore) guardAccepts(g StateGuard, req *Request) bool {
 	}
 	if g.UnsentOnly && req.Status == StatusApproved {
 		leased := req.SubmitLeaseUntil != nil && req.SubmitLeaseUntil.After(time.Now())
-		return !leased && len(f.targets[req.ID]) == 0
+		sent := slices.ContainsFunc(f.targets[req.ID], func(t Target) bool { return t.Status != StatusFailed })
+		return !leased && !sent
 	}
 	return true
 }
@@ -2352,8 +2353,9 @@ func (f *fakeStore) UpdateTargetExternalStatus(_ context.Context, targetID int64
 	return nil
 }
 
-// RecordSubmission mirrors the repository's lease fence, then records each
-// target the way a create followed by a status update would.
+// RecordSubmission mirrors the repository's lease fence and its replacement of
+// the failed targets of the qualities it records, then records each target the
+// way a create followed by a status update would.
 func (f *fakeStore) RecordSubmission(_ context.Context, id string, leaseUntil time.Time, targets []Target, _ Viewer) (*Request, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -2369,6 +2371,9 @@ func (f *fakeStore) RecordSubmission(_ context.Context, id string, leaseUntil ti
 	if f.targets == nil {
 		f.targets = map[string][]Target{}
 	}
+	f.targets[id] = slices.DeleteFunc(f.targets[id], func(old Target) bool {
+		return old.Status == StatusFailed && slices.ContainsFunc(targets, func(t Target) bool { return t.Quality == old.Quality })
+	})
 	latest := req
 	for _, t := range targets {
 		f.targetSeq++

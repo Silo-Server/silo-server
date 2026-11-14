@@ -186,6 +186,17 @@ func (r *Repository) RecordSubmission(ctx context.Context, id string, leaseUntil
 		}
 		return nil, fmt.Errorf("release request submission claim: %w", err)
 	}
+	// A resent quality's earlier failure is replaced only now that the
+	// attempt has a result for it, so a resend that errored keeps it.
+	qualities := make([]string, 0, len(targets))
+	for _, t := range targets {
+		qualities = append(qualities, string(t.Quality))
+	}
+	if _, err := tx.Exec(ctx, `
+		DELETE FROM media_request_targets
+		WHERE request_id = $1 AND status = 'failed' AND quality = ANY($2)`, id, qualities); err != nil {
+		return nil, fmt.Errorf("replace failed targets: %w", err)
+	}
 	for _, t := range targets {
 		t.RequestID = id
 		if _, err := insertTarget(ctx, tx, t); err != nil {

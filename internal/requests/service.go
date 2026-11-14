@@ -2223,8 +2223,8 @@ func (s *Service) submitApprovedRequest(ctx context.Context, req Request, actor 
 // holds. missingSeasons marks a request for seasons of a series already in the
 // library, which only a router that takes seasons may receive.
 func (s *Service) submitClaimed(ctx context.Context, req Request, actor Viewer, fc *fulfillContext, missingSeasons bool) (*Request, error) {
-	// Resolve before planSubmission drops failed targets, so a failed save
-	// leaves their error records in place.
+	// Resolve before planSubmission drops failed targets for qualities no
+	// longer wanted, so a failed save leaves their error records in place.
 	if err := s.ensureSeriesTVDBID(ctx, &req); err != nil {
 		return nil, err
 	}
@@ -2532,9 +2532,10 @@ type submissionPlan struct {
 // off, the requester lost 4K, the 4K destination removed), which would keep the
 // request failed forever, but only when allowed is certain: an entitlement
 // lookup error or a skipped connection also shrinks it, and a transient error
-// must not discard a failure an admin still needs to see. It also drops the
-// failed targets of the qualities it is about to resend. done is set when
-// nothing is left to send.
+// must not discard a failure an admin still needs to see. The failed targets
+// of the qualities it resends stay until RecordSubmission replaces them, so a
+// resend that errors keeps the failure. done is set when nothing is left to
+// send.
 func (s *Service) planSubmission(ctx context.Context, req Request, actor Viewer, allowed []Quality, certain bool) (submissionPlan, *Request, error) {
 	existing, err := s.store.ListTargets(ctx, req.ID)
 	if err != nil {
@@ -2571,13 +2572,6 @@ func (s *Service) planSubmission(ctx context.Context, req Request, actor Viewer,
 			return submissionPlan{}, nil, err
 		}
 		return submissionPlan{}, updated, nil
-	}
-	for _, t := range existing {
-		if t.Status == StatusFailed && slices.Contains(plan.want, t.Quality) {
-			if err := s.store.DeleteTarget(ctx, t.ID); err != nil {
-				return submissionPlan{}, nil, err
-			}
-		}
 	}
 	return plan, nil, nil
 }
