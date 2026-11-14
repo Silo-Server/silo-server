@@ -120,11 +120,12 @@ export function reconnectDelayMs(attempt: number): number {
 
 /**
  * Stops the player's session as it leaves. sendBeacon doesn't support DELETE,
- * so the stop uses fetch keepalive to outlive a closing page.
+ * so the stop uses fetch keepalive to outlive a closing page. An unloading
+ * page sends it at once rather than after any progress still in flight.
  */
-function stopOnPageExit(config: PlayerConfig, sessionId: string | null) {
+function stopOnPageExit(config: PlayerConfig, sessionId: string | null, unloading = false) {
   if (!sessionId) return;
-  void stopSequencedSession(config, sessionId, true).catch(() => {
+  void stopSequencedSession(config, sessionId, true, unloading).catch(() => {
     // Best effort: the session expires server-side.
   });
 }
@@ -1279,7 +1280,7 @@ export function usePlaybackSession(
   // toward the stream limit once its progress reports stop.
   useEffect(() => {
     const onPageHide = (event: PageTransitionEvent) => {
-      if (!event.persisted) stopOnPageExit(config, sessionIdRef.current);
+      if (!event.persisted) stopOnPageExit(config, sessionIdRef.current, true);
     };
     window.addEventListener("pagehide", onPageHide);
     return () => window.removeEventListener("pagehide", onPageHide);
