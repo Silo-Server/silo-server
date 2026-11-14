@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
-	"slices"
 	"strings"
 
 	"golang.org/x/sync/errgroup"
@@ -255,7 +254,6 @@ func (h *LibraryCollectionHandler) updateAdminCollection(ctx context.Context, co
 		setGroupID = &groupID
 	}
 
-	uniqueTitleLibraries := titleCheckLibraries(existing, req)
 	if err := h.repo.Update(ctx, catalog.UpdateLibraryCollectionInput{
 		ID:               collectionID,
 		ExpectedRevision: adminCollectionExpectedRevision(ctx),
@@ -278,8 +276,7 @@ func (h *LibraryCollectionHandler) updateAdminCollection(ctx context.Context, co
 		ManagementSource: req.ManagementSource,
 		ManagementKey:    req.ManagementKey,
 		SyncSchedule:     req.SyncSchedule,
-		UniqueTitle:      uniqueTitleLibraries != nil,
-		UniqueTitleIn:    uniqueTitleLibraries,
+		UniqueTitle:      true,
 	}); err != nil {
 		if fieldErr := collectionNameError(err); fieldErr != nil {
 			return none, fieldErr
@@ -311,37 +308,6 @@ func (h *LibraryCollectionHandler) updateAdminCollection(ctx context.Context, co
 		h.refreshSmartCountAsync(collectionID)
 	}
 	return h.libraryCollectionResponseOf(ctx, h.withViewerPoster(ctx, updated)), nil
-}
-
-// titleCheckLibraries returns the libraries an update must check its title
-// in: an empty list when the title changes (beyond case and spaces), which the
-// repository reads as every library the collection is in inside its
-// transaction, so a move by another request after existing was loaded can't
-// leave the rename checked against the old libraries; only the added ones when
-// just its libraries grow; and nil when neither, so a collection that already
-// shares its title (an import's, or one from before the rule) still saves the
-// rest of a full editor draft.
-func titleCheckLibraries(existing *models.LibraryCollection, req AdminCollectionUpdate) []int {
-	if req.Title != nil && comparableCollectionTitle(*req.Title) != comparableCollectionTitle(existing.Title) {
-		return []int{}
-	}
-	libraries := existing.LibraryIDs
-	if req.LibraryIDs != nil {
-		libraries = *req.LibraryIDs
-	}
-	var added []int
-	for _, libraryID := range libraries {
-		if libraryID > 0 && !slices.Contains(existing.LibraryIDs, libraryID) && !slices.Contains(added, libraryID) {
-			added = append(added, libraryID)
-		}
-	}
-	return added
-}
-
-// comparableCollectionTitle is a title as the name rule compares it: without
-// case, with runs of spaces read as one and surrounding spaces dropped.
-func comparableCollectionTitle(title string) string {
-	return strings.ToLower(strings.Join(strings.Fields(title), " "))
 }
 
 // collectionNameError answers a title another collection in one of the

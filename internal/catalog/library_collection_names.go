@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
+	"strings"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -38,7 +40,10 @@ func (e *LibraryCollectionTitleTakenError) Error() string {
 // has it, and otherwise the first free "<slug>-<n>". The slug is a URL name
 // the server derives from the title, so two titles that read differently can
 // share one ("Sci-Fi" and "Sci Fi"); neither should fail to save for it.
-func freeLibraryCollectionSlug(ctx context.Context, tx pgx.Tx, libraryID int, slug string) (string, error) {
+// taken lists candidates a unique conflict already showed are in use: a
+// SERIALIZABLE transaction's snapshot can't see a slug another writer
+// committed after it began, so a retry has to skip it by name.
+func freeLibraryCollectionSlug(ctx context.Context, tx pgx.Tx, libraryID int, slug string, taken []string) (string, error) {
 	if slug == "" {
 		slug = emptyLibraryCollectionSlug
 	}
@@ -50,7 +55,8 @@ func freeLibraryCollectionSlug(ctx context.Context, tx pgx.Tx, libraryID int, sl
 			SELECT n, $1 || '-' || n FROM generate_series(2, 10000) n
 		) s
 		WHERE NOT EXISTS (SELECT 1 FROM library_collections WHERE library_id = $2 AND slug = s.candidate)
-		ORDER BY n LIMIT 1`, slug, libraryID).Scan(&free)
+			AND s.candidate <> ALL(coalesce($3::text[], '{}'))
+		ORDER BY n LIMIT 1`, slug, libraryID, taken).Scan(&free)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return "", fmt.Errorf("no free collection slug for %q", slug)
 	}
@@ -66,6 +72,70 @@ func freeLibraryCollectionSlug(ctx context.Context, tx pgx.Tx, libraryID int, sl
 func IsLibraryCollectionSlugConflict(err error) bool {
 	var pgErr *pgconn.PgError
 	return errors.As(err, &pgErr) && pgErr.Code == "23505" && pgErr.ConstraintName == libraryCollectionSlugConstraint
+}
+
+// libraryCollectionTitleCheck is what the name rule checks for one update.
+type libraryCollectionTitleCheck struct {
+	// renamed reports a title change beyond case and spaces.
+	renamed bool
+	// legacyLibraryID is the collection's library_id before the update.
+	legacyLibraryID int
+	// within limits the check to these libraries; nil checks all of the
+	// collection's libraries.
+	within []int
+}
+
+// needed reports whether the update has to pass the check at all.
+func (c libraryCollectionTitleCheck) needed() bool {
+	return c.renamed || len(c.within) > 0
+}
+
+// planLibraryCollectionTitleCheck decides, from the collection's row as the
+// update's transaction holds it, what the name rule must check: every library
+// of the collection after a rename, only the added ones when an update just
+// grows its libraries, and nothing otherwise, so a collection that already
+// shares its title (an import's, or one from before the rule) still saves the
+// rest of a full editor draft. Call it after the collection's parent lock.
+func planLibraryCollectionTitleCheck(ctx context.Context, tx pgx.Tx, collectionID string, title *string, libraryIDs *[]int) (libraryCollectionTitleCheck, error) {
+	var check libraryCollectionTitleCheck
+	var currentTitle string
+	var scope []int32
+	err := tx.QueryRow(ctx, `
+		SELECT c.title, c.library_id,
+			coalesce(array_agg(l.library_id) FILTER (WHERE l.library_id IS NOT NULL), '{}')::int[]
+		FROM library_collections c
+		LEFT JOIN library_collection_libraries l ON l.collection_id = c.id
+		WHERE c.id = $1
+		GROUP BY c.id`, collectionID).Scan(&currentTitle, &check.legacyLibraryID, &scope)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return check, ErrLibraryCollectionNotFound
+	}
+	if err != nil {
+		return check, fmt.Errorf("loading collection title: %w", err)
+	}
+	if title != nil && comparableCollectionTitle(*title) != comparableCollectionTitle(currentTitle) {
+		check.renamed = true
+		return check, nil
+	}
+	if libraryIDs == nil {
+		return check, nil
+	}
+	current := int32SliceToInts(scope)
+	if len(current) == 0 {
+		current = []int{check.legacyLibraryID}
+	}
+	for _, libraryID := range *libraryIDs {
+		if libraryID > 0 && !slices.Contains(current, libraryID) && !slices.Contains(check.within, libraryID) {
+			check.within = append(check.within, libraryID)
+		}
+	}
+	return check, nil
+}
+
+// comparableCollectionTitle is a title as the name rule compares it: without
+// case, with runs of spaces read as one and surrounding spaces dropped.
+func comparableCollectionTitle(title string) string {
+	return strings.ToLower(strings.Join(strings.Fields(title), " "))
 }
 
 // checkLibraryCollectionTitleFree refuses, with

@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -127,4 +128,136 @@ func TestLibraryCollectionNamesDB(t *testing.T) {
 	// A client that sends the whole collection echoes the slug it read; the
 	// move still takes a free one where the slug is taken.
 	moveToShows("picks", "server-picks", "server-picks-3")
+}
+
+// TestLibraryCollectionNameRacesDB: a create waits for a library delete
+// rather than deadlocking with it, and a move that takes a free slug where it
+// lands skips one another writer claimed after the move's SERIALIZABLE
+// snapshot began, which the snapshot can't see.
+func TestLibraryCollectionNameRacesDB(t *testing.T) {
+	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("SILO_TEST_DATABASE_URL is not set")
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
+	defer cancel()
+	pool, err := pgxpool.New(ctx, dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(pool.Close)
+	stamp := time.Now().UnixNano()
+	library := func(t *testing.T, name string) int {
+		var id int
+		if err := pool.QueryRow(ctx, `INSERT INTO media_folders(type,name,enabled) VALUES('movies',$1,true) RETURNING id`, fmt.Sprintf("%s %d", name, stamp)).Scan(&id); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _, _ = pool.Exec(context.Background(), `DELETE FROM media_folders WHERE id=$1`, id) })
+		return id
+	}
+	cleanup := func(t *testing.T, id string) {
+		t.Cleanup(func() { _, _ = pool.Exec(context.Background(), `DELETE FROM library_collections WHERE id=$1`, id) })
+	}
+	repo := NewLibraryCollectionRepository(pool)
+	hold := func(t *testing.T) (pgx.Tx, func(done <-chan error)) { return holdLocks(ctx, t, pool) }
+
+	t.Run("create during a library delete", func(t *testing.T) {
+		// A library delete holds the folder row, then its cascade bumps the
+		// library's order revision.
+		deleted := library(t, "Deleted")
+		del, waitBlocked := hold(t)
+		if _, err := del.Exec(ctx, `SELECT 1 FROM media_folders WHERE id=$1 FOR UPDATE`, deleted); err != nil {
+			t.Fatal(err)
+		}
+		created := make(chan error, 1)
+		var createdID string
+		go func() {
+			c, err := repo.Create(ctx, CreateLibraryCollectionInput{LibraryIDs: []int{deleted}, Title: "Picks", Slug: "picks", UniqueTitle: true})
+			if c != nil {
+				createdID = c.ID
+			}
+			created <- err
+		}()
+		waitBlocked(created)
+		if _, err := del.Exec(ctx, `INSERT INTO library_collection_order_revisions(library_id,revision) VALUES($1,2) ON CONFLICT(library_id) DO UPDATE SET revision=library_collection_order_revisions.revision+1`, deleted); err != nil {
+			t.Fatalf("library delete's order bump: %v", err)
+		}
+		if err := del.Rollback(ctx); err != nil {
+			t.Fatal(err)
+		}
+		if err := <-created; err != nil {
+			t.Fatalf("create racing a library delete: %v", err)
+		}
+		cleanup(t, createdID)
+	})
+
+	t.Run("move after its slug is claimed", func(t *testing.T) {
+		// Another collection takes the moving one's slug in the destination while
+		// the move waits on its row.
+		from, to := library(t, "From"), library(t, "To")
+		moving, err := repo.Create(ctx, CreateLibraryCollectionInput{LibraryIDs: []int{from}, Title: "Picks", Slug: "picks"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		cleanup(t, moving.ID)
+		there, err := repo.Create(ctx, CreateLibraryCollectionInput{LibraryIDs: []int{to}, Title: "Zed", Slug: "zed"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		cleanup(t, there.ID)
+		claim, waitBlocked := hold(t)
+		if _, err := claim.Exec(ctx, `SELECT 1 FROM library_collections WHERE id=$1 FOR UPDATE`, moving.ID); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := claim.Exec(ctx, `UPDATE library_collections SET slug='picks' WHERE id=$1`, there.ID); err != nil {
+			t.Fatal(err)
+		}
+		moved := make(chan error, 1)
+		go func() {
+			anyRevision := int64(-1)
+			moved <- repo.Update(ctx, UpdateLibraryCollectionInput{ID: moving.ID, ExpectedRevision: &anyRevision, LibraryIDs: &[]int{to}})
+		}()
+		waitBlocked(moved)
+		if err := claim.Commit(ctx); err != nil {
+			t.Fatal(err)
+		}
+		if err := <-moved; err != nil {
+			t.Fatalf("move after another collection took its slug: %v", err)
+		}
+		if got, err := repo.GetByID(ctx, moving.ID); err != nil || got.LibraryID != to || got.Slug != "picks-2" {
+			t.Fatalf("moved collection: %+v, %v, want slug picks-2 in %d", got, err, to)
+		}
+	})
+}
+
+// holdLocks opens a transaction for another writer and returns it with a
+// function that waits until some backend waits on its locks, failing if the
+// writer under test reports on done first.
+func holdLocks(ctx context.Context, t *testing.T, pool *pgxpool.Pool) (pgx.Tx, func(done <-chan error)) {
+	t.Helper()
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = tx.Rollback(context.Background()) })
+	var pid int
+	if err := tx.QueryRow(ctx, `SELECT pg_backend_pid()`).Scan(&pid); err != nil {
+		t.Fatal(err)
+	}
+	return tx, func(done <-chan error) {
+		t.Helper()
+		for blocked := false; !blocked; {
+			select {
+			case err := <-done:
+				t.Fatalf("finished before the other writer let go: %v", err)
+			default:
+			}
+			if err := pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM pg_stat_activity WHERE $1 = ANY(pg_blocking_pids(pid)))`, pid).Scan(&blocked); err != nil {
+				t.Fatal(err)
+			}
+			if !blocked {
+				time.Sleep(10 * time.Millisecond) //nolint:forbidigo // the poll interval; the wait is on pg_blocking_pids, an observable lock wait
+			}
+		}
+	}
 }

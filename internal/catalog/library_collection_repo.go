@@ -80,12 +80,14 @@ type UpdateLibraryCollectionInput struct {
 	ManagementKey       *string
 	SyncSchedule        *string
 	NextSyncAt          *time.Time
-	// UniqueTitle refuses, with *LibraryCollectionTitleTakenError, an update
-	// that leaves the collection sharing its title with another collection in
-	// one of UniqueTitleIn's libraries, or of its own when that is empty. The
-	// caller sets it when the update changes the title or adds libraries.
-	UniqueTitle   bool
-	UniqueTitleIn []int
+	// UniqueTitle applies the admin editor's name rule: it refuses, with
+	// *LibraryCollectionTitleTakenError, an update that renames the
+	// collection (beyond case and spaces) to a title another collection has
+	// in one of its libraries, or adds a library where another collection
+	// has its title. Collections that already share a title keep saving
+	// their other fields. The rule reads the collection's locked row, so a
+	// rename or move by another request can't leave it checking stale state.
+	UniqueTitle bool
 }
 
 type ListLibraryCollectionsOptions struct {
@@ -277,9 +279,14 @@ func CreateLibraryCollectionInTx(ctx context.Context, tx pgx.Tx, input CreateLib
 
 	// Take the libraries' order locks before writing the row, as an update
 	// does before it writes a slug, so the two can't deadlock on the slug.
+	// Hold their folder rows first, as a library delete does before its
+	// cascade takes the same order locks, so a create can't deadlock with it.
 	lockLibraries := slices.Clone(input.LibraryIDs)
 	if legacyLibraryID > 0 {
 		lockLibraries = append(lockLibraries, legacyLibraryID)
+	}
+	if _, err := tx.Exec(ctx, `SELECT 1 FROM media_folders WHERE id = ANY($1::int[]) ORDER BY id FOR KEY SHARE`, lockLibraries); err != nil {
+		return "", fmt.Errorf("locking collection libraries: %w", err)
 	}
 	if err := lockLibraryCollectionOrderRevisions(ctx, tx, lockLibraries); err != nil {
 		return "", err
@@ -288,8 +295,9 @@ func CreateLibraryCollectionInTx(ctx context.Context, tx pgx.Tx, input CreateLib
 	// The slug only has to be unique within the legacy library, and it is
 	// derived from the title, so take a free one rather than fail the save.
 	// A writer that claims it first is retried.
+	var taken []string
 	for attempt := 1; ; attempt++ {
-		slug, err := freeLibraryCollectionSlug(ctx, tx, legacyLibraryID, input.Slug)
+		slug, err := freeLibraryCollectionSlug(ctx, tx, legacyLibraryID, input.Slug, taken)
 		if err != nil {
 			return "", err
 		}
@@ -300,6 +308,7 @@ func CreateLibraryCollectionInTx(ctx context.Context, tx pgx.Tx, input CreateLib
 		if !IsLibraryCollectionSlugConflict(err) || attempt == 5 {
 			return "", fmt.Errorf("creating library collection: %w", err)
 		}
+		taken = append(taken, slug)
 	}
 
 	var groupLibraryID *int
@@ -734,15 +743,18 @@ func (r *LibraryCollectionRepository) Update(ctx context.Context, input UpdateLi
 		if err := lockLibraryCollectionParent(ctx, tx, input.ID); err != nil {
 			return err
 		}
-		if input.UniqueTitle && input.LibraryIDs == nil && input.SetGroupID == nil {
+		var titleCheck libraryCollectionTitleCheck
+		if input.UniqueTitle {
+			var err error
+			if titleCheck, err = planLibraryCollectionTitleCheck(ctx, tx, input.ID, input.Title, input.LibraryIDs); err != nil {
+				return err
+			}
+		}
+		if titleCheck.renamed && input.LibraryIDs == nil && input.SetGroupID == nil {
 			// A rename takes its libraries' order locks, as a create and a
 			// scope change do, so two renames into one name can't both pass
 			// the title check.
-			var legacyLibraryID int
-			if err := tx.QueryRow(ctx, `SELECT library_id FROM library_collections WHERE id = $1`, input.ID).Scan(&legacyLibraryID); err != nil {
-				return fmt.Errorf("loading collection library: %w", err)
-			}
-			if err := lockLibraryCollectionMembershipOrders(ctx, tx, input.ID, []int{legacyLibraryID}); err != nil {
+			if err := lockLibraryCollectionMembershipOrders(ctx, tx, input.ID, []int{titleCheck.legacyLibraryID}); err != nil {
 				return err
 			}
 		}
@@ -886,8 +898,8 @@ func (r *LibraryCollectionRepository) Update(ctx context.Context, input UpdateLi
 				}
 			}
 		}
-		if input.UniqueTitle {
-			return checkLibraryCollectionTitleFree(ctx, tx, input.ID, input.UniqueTitleIn)
+		if titleCheck.needed() {
+			return checkLibraryCollectionTitleFree(ctx, tx, input.ID, titleCheck.within)
 		}
 		return nil
 	})
@@ -1626,8 +1638,9 @@ func keepLegacyLibraryInScope(ctx context.Context, tx pgx.Tx, collectionID strin
 	if slices.Contains(scope, currentLibraryID) {
 		return nil
 	}
+	var taken []string
 	for attempt := 1; ; attempt++ {
-		target, err := freeLibraryCollectionSlug(ctx, tx, legacyLibraryID, slug)
+		target, err := freeLibraryCollectionSlug(ctx, tx, legacyLibraryID, slug, taken)
 		if err != nil {
 			return err
 		}
@@ -1643,5 +1656,6 @@ func keepLegacyLibraryInScope(ctx context.Context, tx pgx.Tx, collectionID strin
 		if !IsLibraryCollectionSlugConflict(err) || attempt == 5 {
 			return err
 		}
+		taken = append(taken, target)
 	}
 }

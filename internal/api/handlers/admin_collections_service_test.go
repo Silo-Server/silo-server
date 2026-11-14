@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgconn"
 
@@ -207,6 +208,74 @@ func TestAdminCollectionUpdateNameRuleDB(t *testing.T) {
 	_, err := h.UpdateAdminCollection(t.Context(), other, AdminCollectionUpdate{LibraryIDs: &[]int{}})
 	if apiErr, ok := errors.AsType[*APIError](err); !ok || apiErr.Field != "library_ids" {
 		t.Fatalf("update to no libraries: err = %v, want a field error at library_ids", err)
+	}
+}
+
+// TestAdminCollectionUpdateNameRuleReadsTheLockedRowDB: an If-Match: * update
+// skips the revision check, so whether it renames is decided from the row its
+// transaction locks, not the read the handler took first. Here another
+// request renames the collection and moves it next to a same-named one while
+// the update, which echoes the old name, waits on the row; the echo is then a
+// rename into a taken name.
+func TestAdminCollectionUpdateNameRuleReadsTheLockedRowDB(t *testing.T) {
+	f := newPagingIntegrationFixture(t)
+	repo := catalog.NewLibraryCollectionRepository(f.pool)
+	h := NewLibraryCollectionHandler(repo, nil, catalog.NewItemRepository(f.pool), nil)
+	title := fmt.Sprintf("Staff Picks %d", f.account)
+	var id string
+	for _, library := range []int{f.hidden, f.library} {
+		created, err := h.CreateAdminCollection(t.Context(), AdminCollectionCreate{LibraryIDs: []int{library}, Title: title, CollectionType: "manual"})
+		if err != nil {
+			t.Fatalf("create in %d: %v", library, err)
+		}
+		id = created.ID
+		t.Cleanup(func() {
+			_, _ = f.pool.Exec(context.Background(), `DELETE FROM library_collections WHERE id = $1`, created.ID)
+		})
+	}
+
+	other, err := f.pool.Begin(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = other.Rollback(context.Background()) }()
+	var otherPID int
+	if err := other.QueryRow(t.Context(), `SELECT pg_backend_pid()`).Scan(&otherPID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := other.Exec(t.Context(), `UPDATE library_collections SET title = title || ' too', slug = slug || '-moved', library_id = $2 WHERE id = $1`, id, f.hidden); err != nil {
+		t.Fatalf("rename and move: %v", err)
+	}
+	if _, err := other.Exec(t.Context(), `UPDATE library_collection_libraries SET library_id = $2 WHERE collection_id = $1`, id, f.hidden); err != nil {
+		t.Fatalf("move scope: %v", err)
+	}
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := h.UpdateAdminCollection(WithAdminCollectionExpectedRevision(t.Context(), -1), id, AdminCollectionUpdate{Title: new(title), Description: new("Edited")})
+		done <- err
+	}()
+	// Commit only once the update waits on the row the other request holds.
+	for blocked := false; !blocked; {
+		select {
+		case err := <-done:
+			t.Fatalf("update finished before the other request committed: %v", err)
+		default:
+		}
+		if err := f.pool.QueryRow(t.Context(), `SELECT EXISTS (SELECT 1 FROM pg_stat_activity WHERE $1 = ANY(pg_blocking_pids(pid)))`, otherPID).Scan(&blocked); err != nil {
+			t.Fatal(err)
+		}
+		if !blocked {
+			time.Sleep(10 * time.Millisecond) //nolint:forbidigo // the poll interval; the wait is on pg_blocking_pids, an observable lock wait
+		}
+	}
+	if err := other.Commit(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+
+	err = <-done
+	if apiErr, ok := errors.AsType[*APIError](err); !ok || apiErr.Field != "title" {
+		t.Fatalf("echoed old name after a rename and move: err = %v, want a field error at title", err)
 	}
 }
 

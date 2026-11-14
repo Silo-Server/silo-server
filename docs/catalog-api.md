@@ -402,7 +402,8 @@ and hidden collections count. The refusal is `422 validation_failed` with one er
 `body.title`, whose `detail` names a library both collections show in ("Another collection in
 Movies already has this name"). Clients send the whole collection on update, so an update
 checks the title only when it changes it (beyond case and spaces), in all the collection's
-libraries, or adds libraries, in just the added ones. Collections that already share a title,
+libraries, or adds libraries, in just the added ones. Both compare with the collection as stored
+when the update writes, so an `If-Match: *` update racing another edit is still checked. Collections that already share a title,
 such as an import's, still save their other fields. Imports, templates and restores don't apply
 the rule.
 
