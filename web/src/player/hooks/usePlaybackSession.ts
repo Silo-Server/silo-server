@@ -128,6 +128,17 @@ export function reconnectDelayMs(attempt: number): number {
  * a fresh start instead. A refused start has already dropped the cached
  * capabilities, so the next start reads the new installation and can succeed.
  */
+/**
+ * Stops the player's session as it leaves. sendBeacon doesn't support DELETE,
+ * so the stop uses fetch keepalive to outlive a closing page.
+ */
+function stopOnPageExit(config: PlayerConfig, sessionId: string | null) {
+  if (!sessionId) return;
+  void stopSequencedSession(config, sessionId, true).catch(() => {
+    // Best effort: the session expires server-side.
+  });
+}
+
 function isRetryableReconnectError(error: unknown, step: "replan" | "start"): boolean {
   if (isTransientPlayerRequestError(error)) return true;
   return (
@@ -1268,11 +1279,7 @@ export function usePlaybackSession(
   // toward the stream limit once its progress reports stop.
   useEffect(() => {
     const onPageHide = (event: PageTransitionEvent) => {
-      const sid = sessionIdRef.current;
-      if (event.persisted || !sid) return;
-      void stopSequencedSession(config, sid, true).catch(() => {
-        // Best effort: the session expires server-side.
-      });
+      if (!event.persisted) stopOnPageExit(config, sessionIdRef.current);
     };
     window.addEventListener("pagehide", onPageHide);
     return () => window.removeEventListener("pagehide", onPageHide);
@@ -1289,12 +1296,7 @@ export function usePlaybackSession(
       endReconnect(false);
       // A start this player left still loading no longer holds off speed tests.
       playbackStartEnded();
-      const sid = sessionIdRef.current;
-      if (!sid) return;
-      // sendBeacon doesn't support DELETE, so the stop uses fetch keepalive.
-      void stopSequencedSession(config, sid, true).catch(() => {
-        // Best effort: the session expires server-side.
-      });
+      stopOnPageExit(config, sessionIdRef.current);
     };
   }, [config, endReconnect]);
 

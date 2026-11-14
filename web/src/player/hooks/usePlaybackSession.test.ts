@@ -3166,14 +3166,7 @@ describe("usePlaybackSession page unload", () => {
     window.dispatchEvent(event);
   }
 
-  it.each([
-    { name: "stops the session when the tab closes", persisted: false, stops: true },
-    {
-      name: "keeps the session for a page kept in the back-forward cache",
-      persisted: true,
-      stops: false,
-    },
-  ])("$name", async ({ persisted, stops }) => {
+  it("stops on a real unload but keeps a page entering the back-forward cache", async () => {
     const fetchMock = sessionFetch(() => {
       throw new Error("unexpected replan");
     });
@@ -3184,15 +3177,11 @@ describe("usePlaybackSession page unload", () => {
     const { result, unmount } = renderSession();
     await waitFor(() => expect(result.current.sessionId).toBe("session-1"));
 
-    act(() => pagehide(persisted));
-    if (!stops) {
-      await new Promise((resolve) => setTimeout(resolve, 0));
-      expect(stopCalls()).toHaveLength(0);
-      // The page leaving the cache for good still stops, which also proves
-      // the listener was attached during the cached unload.
-      act(() => pagehide(false));
-    }
+    act(() => pagehide(true));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(stopCalls()).toHaveLength(0);
 
+    act(() => pagehide(false));
     await waitFor(() => expect(stopCalls()).toHaveLength(1));
     expect(stopCalls()[0]?.keepalive).toBe(true);
     unmount();

@@ -1995,7 +1995,7 @@ func (m *SessionManager) activeCountExcludingLocked(userID int, excludeSessionID
 		if excludeSessionID != "" && s.ID == excludeSessionID {
 			continue
 		}
-		if s.UserID == userID && m.countsTowardLimitsLocked(s, now, true) {
+		if s.UserID == userID && m.countsTowardLimitsLocked(s, now, PausedStreamSlotGrace) {
 			count++
 		}
 	}
@@ -2014,7 +2014,7 @@ func (m *SessionManager) transcodeCountExcludingLocked(userID int, excludeSessio
 		if excludeSessionID != "" && s.ID == excludeSessionID {
 			continue
 		}
-		if s.UserID == userID && (s.PlayMethod == PlayTranscode || s.replacementPlayMethod == PlayTranscode) && m.countsTowardLimitsLocked(s, now, false) {
+		if s.UserID == userID && (s.PlayMethod == PlayTranscode || s.replacementPlayMethod == PlayTranscode) && m.countsTowardLimitsLocked(s, now, 0) {
 			count++
 		}
 	}
@@ -2099,10 +2099,9 @@ func (m *SessionManager) touchSessionLocked(s *Session) {
 }
 
 // countsTowardLimitsLocked reports whether s holds one of its user's slots.
-// With releaseQuietPause, a paused session holds its slot only for
-// PausedStreamSlotGrace after its last activity rather than the whole paused
-// grace.
-func (m *SessionManager) countsTowardLimitsLocked(s *Session, now time.Time, releaseQuietPause bool) bool {
+// A positive pausedSlotGrace caps how long a paused session holds the slot
+// after its last activity, below its whole paused grace.
+func (m *SessionManager) countsTowardLimitsLocked(s *Session, now time.Time, pausedSlotGrace time.Duration) bool {
 	if s == nil {
 		return false
 	}
@@ -2116,8 +2115,8 @@ func (m *SessionManager) countsTowardLimitsLocked(s *Session, now time.Time, rel
 		return true
 	}
 	activeGrace, pausedGrace := remoteTransportGrace(s, m.activeGrace, m.pausedGrace)
-	if releaseQuietPause && pausedGrace > PausedStreamSlotGrace {
-		pausedGrace = PausedStreamSlotGrace
+	if pausedSlotGrace > 0 {
+		pausedGrace = min(pausedGrace, pausedSlotGrace)
 	}
 	return !m.sessionIsInactiveLocked(s, now, activeGrace, pausedGrace, StartupSessionGrace)
 }
