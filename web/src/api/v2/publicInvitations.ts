@@ -10,8 +10,8 @@ export async function lookupPublicInvitation(token: string, signal: AbortSignal)
     retryAuthentication: false,
   });
   if (capability.state !== "available") throw new Error("Invitation acceptance is unavailable.");
-  const result = await v2("GET /api/v2/invitations/{token}", {
-    path: { token },
+  const result = await v2("POST /api/v2/invitations/lookup", {
+    body: { token },
     signal,
     retryAuthentication: false,
   });
@@ -42,9 +42,8 @@ export async function acceptPublicInvitation(
   signal: AbortSignal,
   email?: string,
 ): Promise<InvitationAcceptance> {
-  const result = await v2("POST /api/v2/invitations/{token}/accept", {
-    path: { token },
-    body: email === undefined ? { password } : { email, password },
+  const result = await v2("POST /api/v2/invitations/accept", {
+    body: email === undefined ? { token, password } : { token, email, password },
     signal,
     retryAuthentication: false,
   });

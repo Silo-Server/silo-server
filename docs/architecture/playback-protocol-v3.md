@@ -2258,6 +2258,14 @@ webOS) drop to HDR10 for `dvh1`. There is no MPEG-TS or progressive form.
 `video_to_h264` only when `playback.allow_hevc_encoding` is on and the client's
 HLS delivery lists HEVC and can decode that output.
 
+`video_to_h264` and `video_to_hevc` deinterlace the frames an executor decodes
+on the CPU: FFmpeg's `bwdif` converts each frame the decoder flags as interlaced
+and passes the others through, one output frame per input frame. Frames from a
+hardware decoder, and every tone-mapped transcode, are encoded as decoded, so
+an interlaced source can still reach the client with both fields in each frame.
+The recipe versions did not change for this: an executor from before it serves
+the same plans and differs only in the pictures of interlaced sources.
+
 `audio_to_aac` recipe version 4 treats the selected source channel count as a
 byte-affecting input, as version 2 began doing, and passes every AAC encode,
 remuxes included, through `aresample=async=1` so it keeps a continuous sample
@@ -2343,6 +2351,11 @@ executor's advertised filter names the choice.
 Dolby Vision compatibility IDs `1` through `6` resolve to their declared
 standards-compatible base layer: `1` and `6` are PQ, `2` is BT.709 SDR, `3` is
 legacy BT.709-gamut HLG, `4` is BT.2100 HLG, and `5` is BT.2020 SDR.
+Every executor converts that base layer, not the picture the stream's RPU
+describes. Left at their default, `tonemap_opencl` and `tonemap_cuda` reshape
+an HDR base through any single-layer RPU, `tonemap_opencl` only on some GPU
+models, so their graphs set `apply_dovi=0`; `tonemapx` reshapes only through a
+Profile 5 style RPU and keeps its default.
 A plain HLG source resolves to BT.2100 HLG, or to the BT.709-gamut HLG kind
 when its primaries and matrix are both tagged BT.709.
 Profile 5 and ID `0` carry a base only the stream's RPU can map to PQ, so they
@@ -2356,8 +2369,10 @@ record. ID `0` on any other profile says nothing about the base, so it is
 accepted only when the stream is tagged PQ, and the decoded samples must carry
 both the PQ transfer and Dolby Vision metadata; an untagged base can be plain
 SDR, which the RPU path renders blown out. The `dolby_vision` kind is not part of an executor's
-complete inventory, so an FFmpeg build that refuses `apply_dovi` keeps its
-other kinds cached. A `dolby_vision` smoke that fails for any other reason is
+complete inventory, so a `tonemapx` build that refuses `apply_dovi` keeps its
+other kinds cached. A `tonemap_opencl` or `tonemap_cuda` build that refuses it
+converts no HDR kind, because their HDR graphs always set the option. A
+`dolby_vision` smoke that fails for any other reason is
 retried after five minutes instead of being cached.
 A PQ base whose range is full (`pc`) resolves to the `pq_full_range` kind.
 The range is the first decoded frame's `frame_color_range` when it is

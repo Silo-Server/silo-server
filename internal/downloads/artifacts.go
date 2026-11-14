@@ -1250,6 +1250,7 @@ func (m *ArtifactManager) buildOpts(file *models.MediaFile, a *Artifact) playbac
 		HWAccel:                    cfg.Playback.HWAccel,
 		HWDevice:                   cfg.Playback.HWDevice,
 		TotalDuration:              float64(file.Duration),
+		SourceFrameRate:            playback.FileFrameRate(file),
 		NodeType:                   "integrated",
 		ExecutionMode:              "download_prepare",
 		FFmpegLogSink:              ffmpegLogs,

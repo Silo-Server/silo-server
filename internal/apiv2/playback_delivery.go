@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"reflect"
 	"strconv"
+	"strings"
 
 	"github.com/danielgtaylor/huma/v2"
 	"github.com/danielgtaylor/huma/v2/adapters/humachi"
@@ -40,6 +41,8 @@ const (
 	playbackBinaryFormat       = "binary"
 	playbackCacheControlHeader = "Cache-Control"
 	playbackContentEncoding    = "Content-Encoding"
+	// playbackTranscodePath prefixes the HLS playlist and segment routes.
+	playbackTranscodePath = "/playback/transcode/"
 )
 
 // PlaybackMediaHandlers shares the raw byte delivery protocols and the typed
@@ -157,7 +160,9 @@ func registerPlaybackDelivery(reg *Registry) {
 		if subtitle {
 			reason = "Token-authorized sidecar text and bitmap bytes are streamed as extracted."
 		}
-		raw := RawOperation{Operation: Operation{Operation: huma.Operation{Method: route.method, Path: Prefix + route.path, OperationID: route.id, Tags: []string{playbackTag}, Parameters: params, Responses: responses}, Class: ClassProfileScoped, ProfileOptional: true, ServiceBacked: true}, Protocol: route.protocol, Reason: reason}
+		// A Google Cast receiver plays HLS through a script on its own origin,
+		// so the playlist and segments must be readable cross-origin.
+		raw := RawOperation{Operation: Operation{Operation: huma.Operation{Method: route.method, Path: Prefix + route.path, OperationID: route.id, Tags: []string{playbackTag}, Parameters: params, Responses: responses}, Class: ClassProfileScoped, ProfileOptional: true, ServiceBacked: true}, Protocol: route.protocol, Reason: reason, CrossOrigin: strings.HasPrefix(route.path, playbackTranscodePath)}
 		RegisterRaw(reg, raw, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if !playbackUUID(chi.URLParam(r, "session_id")) {
 				writeProblem(w, r, validationProblem("path.session_id", "invalid", "Expected a canonical UUID."))

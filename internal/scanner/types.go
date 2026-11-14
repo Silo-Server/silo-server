@@ -13,9 +13,12 @@ import (
 // removal grace period, are not counted again. Two scans of the same folder
 // that overlap in time can both count the same file.
 type ScanResult struct {
-	New                int
-	Updated            int
-	Unchanged          int
+	New       int
+	Updated   int
+	Unchanged int
+	// NoVideo counts files in a movie, series or mixed library that hold no
+	// video stream and were left out of the catalog.
+	NoVideo            int
 	Missing            int
 	FilesDeleted       int
 	MembershipsRemoved int

@@ -56,6 +56,8 @@ type fakeCompleter struct {
 	linkErr    error
 }
 
+func (f *fakeCompleter) ProviderAnswerFence(context.Context) (int64, error) { return 7, nil }
+
 func (f *fakeCompleter) ResolveOAuthLogin(_ context.Context, in OAuthLoginInput) (*models.User, int64, error) {
 	f.gotInput = in
 	f.logins++
@@ -412,7 +414,8 @@ func TestOAuthCallback_HappyPath_DeliversOneTimeCompletionCode(t *testing.T) {
 		t.Errorf("completed = %+v", completed)
 	}
 	if rig.comp.gotInput.InstallationID != 42 || rig.comp.gotInput.CapabilityID != "oidc" ||
-		rig.comp.gotInput.Response.GetExternalSubject() != "https://idp.example|ws-1" || rig.comp.gotInput.LinkingUserID != 0 {
+		rig.comp.gotInput.Response.GetExternalSubject() != "https://idp.example|ws-1" || rig.comp.gotInput.LinkingUserID != 0 ||
+		rig.comp.gotInput.AnswerFence != 7 {
 		t.Errorf("completer input = %+v", rig.comp.gotInput)
 	}
 

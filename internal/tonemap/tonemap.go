@@ -590,13 +590,27 @@ func FilterConvertsFullRange(filter string) bool {
 	return filter == SoftwareFilterBT2390 || filter == SoftwareFilterHable
 }
 
-// dolbyVisionOption makes RPU application explicit on SourceDolbyVision
-// graphs instead of relying on the filters' default.
-func dolbyVisionOption(kind SourceKind) string {
+// softwareDolbyVisionOption makes RPU application explicit on tonemapx's
+// SourceDolbyVision graph instead of relying on the filter's default. Every
+// other kind keeps that default: tonemapx reshapes only through a Profile 5
+// style RPU, so a standard base already converts as declared.
+func softwareDolbyVisionOption(kind SourceKind) string {
 	if kind == SourceDolbyVision {
 		return ":apply_dovi=1"
 	}
 	return ""
+}
+
+// gpuDolbyVisionOption sets apply_dovi explicitly on tonemap_opencl and
+// tonemap_cuda. By default both reshape a standard base through any
+// single-layer RPU, tonemap_opencl depending on the GPU model, while every
+// other executor converts that base as declared. It is on only for
+// SourceDolbyVision, whose base only the RPU can map.
+func gpuDolbyVisionOption(kind SourceKind) string {
+	if kind == SourceDolbyVision {
+		return ":apply_dovi=1"
+	}
+	return ":apply_dovi=0"
 }
 
 // ValidSourceKind reports whether kind is a supported, serializable base signal.
@@ -692,7 +706,7 @@ func SoftwareFilter(kind SourceKind, filterName string) string {
 	}
 	if filterName == SoftwareFilterBT2390 {
 		return SourceParameters(kind) +
-			",tonemapx=tonemap=bt2390" + toneMapPeakOption + dolbyVisionOption(kind) +
+			",tonemapx=tonemap=bt2390" + toneMapPeakOption + softwareDolbyVisionOption(kind) +
 			",zscale=p=bt709:t=bt709:m=bt709:r=tv,format=yuv420p," + HDRMetadataRemovalFilter()
 	}
 	return SourceParameters(kind) +
@@ -796,7 +810,7 @@ const toneMapPeakOption = ":peak=100"
 
 // openCLToneMapFilter matches Jellyfin's BT.2390 GPU recipe.
 func openCLToneMapFilter(kind SourceKind) string {
-	return HardwareFilterOpenCL + "=format=nv12:p=bt709:t=bt709:m=bt709:tonemap=bt2390" + toneMapPeakOption + ":desat=0" + dolbyVisionOption(kind)
+	return HardwareFilterOpenCL + "=format=nv12:p=bt709:t=bt709:m=bt709:tonemap=bt2390" + toneMapPeakOption + ":desat=0" + gpuDolbyVisionOption(kind)
 }
 
 // vaapiToneMapFilter returns the HDR luminance and color conversion stage.
@@ -809,15 +823,9 @@ func vaapiSDRFilter() string {
 	return "scale_vaapi=format=nv12:out_color_primaries=bt709:out_color_transfer=bt709:out_color_matrix=bt709:out_range=tv"
 }
 
-// CUDAFilter returns the CUDA HDR-to-SDR conversion stage. Dolby Vision
-// processing stays off so a standard base layer converts as validated, except
-// for SourceDolbyVision, whose base only the RPU can map.
+// CUDAFilter returns the CUDA HDR-to-SDR conversion stage.
 func CUDAFilter(kind SourceKind) string {
-	applyDolbyVision := "0"
-	if kind == SourceDolbyVision {
-		applyDolbyVision = "1"
-	}
-	return HardwareFilterCUDA + "=tonemap=bt2390:format=nv12:p=bt709:t=bt709:m=bt709:r=tv:apply_dovi=" + applyDolbyVision
+	return HardwareFilterCUDA + "=tonemap=bt2390:format=nv12:p=bt709:t=bt709:m=bt709:r=tv" + gpuDolbyVisionOption(kind)
 }
 
 // VideoToolboxFilter builds Apple's HDR-to-SDR pixel-transfer conversion.

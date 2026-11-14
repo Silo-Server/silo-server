@@ -83,7 +83,7 @@ func (f *fakeInvitations) Send(_ context.Context, in invitations.SendInput) (*in
 	if emailed {
 		r.Delivery = models.InvitationDeliveryEmailSent
 	}
-	result := &invitations.SendResult{Invitation: &r, ClaimURL: "https://server.example.invalid/invite/synthetic-token", EmailSent: emailed, Delivery: in.Delivery}
+	result := &invitations.SendResult{Invitation: &r, ClaimURL: "https://server.example.invalid/invite#synthetic-token", EmailSent: emailed, Delivery: in.Delivery}
 	if in.Note == "smtp-failed" {
 		return result, errors.New("private SMTP credential")
 	}
@@ -97,7 +97,7 @@ func (f *fakeInvitations) Resend(_ context.Context, _, _ int64, delivery invitat
 	f.writes++
 	r := f.row
 	r.ID = 8
-	return &invitations.SendResult{Invitation: &r, ClaimURL: "https://server.example.invalid/invite/replacement-token", Delivery: delivery}, f.errorSend
+	return &invitations.SendResult{Invitation: &r, ClaimURL: "https://server.example.invalid/invite#replacement-token", Delivery: delivery}, f.errorSend
 }
 func (f *fakeInvitations) Revoke(context.Context, int64) error { f.writes++; return nil }
 func invitationTestHandler(f *fakeInvitations) http.Handler {
@@ -142,6 +142,20 @@ func TestInvitationValidationAndCapability(t *testing.T) {
 	}
 	f.errorAccept = auth.ErrTransactionalProfileUnavailable
 	requireProblem(t, do(t, h, http.MethodPost, Prefix+"/invitations/pending/accept", `{"password":"password123"}`, nil), TypeCapabilityUnsupported)
+}
+
+// The path forms keep answering, for released clients, and announce their
+// retirement; the body forms do not.
+func TestInvitationPathFormsAreDeprecated(t *testing.T) {
+	h := invitationTestHandler(fixtureInvitations())
+	old := do(t, h, http.MethodGet, Prefix+"/invitations/pending", "", nil)
+	if old.Code != http.StatusOK || old.Header().Get(DeprecationHeader) == "" {
+		t.Fatal(old.Code, old.Header())
+	}
+	body := do(t, h, http.MethodPost, Prefix+"/invitations/lookup", `{"token":"pending"}`, nil)
+	if body.Code != http.StatusOK || body.Header().Get(DeprecationHeader) != "" {
+		t.Fatal(body.Code, body.Header())
+	}
 }
 func TestInvitationLookupAndCursor(t *testing.T) {
 	f := fixtureInvitations()
