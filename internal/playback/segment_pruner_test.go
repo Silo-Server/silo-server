@@ -76,6 +76,42 @@ func TestFreshSegmentIsRetriedAfterGuardExpires(t *testing.T) {
 	waitForPrunePass(t, session, 4)
 }
 
+// A planned session's assembler can write a pruned segment again in the same
+// generation, so its DV8.1 conversion entry goes with the file; a retained
+// segment keeps its entry.
+func TestPruningForgetsTheDV81ConversionOfARemovedSegment(t *testing.T) {
+	dir := t.TempDir()
+	old := time.Now().Add(-time.Minute)
+	opts := TranscodeOpts{
+		SessionID:               "dv81-prune-test",
+		SegmentDuration:         2,
+		SegmentRetentionSeconds: 10,
+	}
+	for segment := 0; segment <= 9; segment++ {
+		writePrunerTestFile(t, filepath.Join(dir, segmentFilename(segment, opts)), []byte("segment"), old)
+	}
+	pruned, kept := segmentFilename(3, opts), segmentFilename(9, opts)
+	session := &TranscodeSession{
+		opts:                 opts,
+		outputDir:            dir,
+		lastPruneFloor:       -1,
+		lastRequestedSegment: 0,
+		dv81Converted:        map[string]uint64{pruned: 1, kept: 1},
+	}
+
+	session.ReportSegmentDownloaded(9)
+	waitForPrunerFileMissing(t, filepath.Join(dir, pruned))
+	waitForPrunePass(t, session, 4)
+	session.dv81Mu.Lock()
+	defer session.dv81Mu.Unlock()
+	if _, ok := session.dv81Converted[pruned]; ok {
+		t.Fatalf("conversion entries %v; want %s's removed with it", session.dv81Converted, pruned)
+	}
+	if _, ok := session.dv81Converted[kept]; !ok {
+		t.Fatalf("conversion entries %v; want %s's kept", session.dv81Converted, kept)
+	}
+}
+
 func TestPruningContinuesAcrossBoundedBatches(t *testing.T) {
 	dir := t.TempDir()
 	old := time.Now().Add(-time.Minute)

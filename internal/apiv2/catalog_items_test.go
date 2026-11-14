@@ -9,6 +9,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
 	catalogpkg "github.com/Silo-Server/silo-server/internal/catalog"
@@ -778,5 +779,15 @@ func TestCatalogDatesLeaveOutFreeText(t *testing.T) {
 		Seasons: []mediarequests.RequestSeason{{Number: 1, AirDate: "2015"}}})
 	if request.ReleaseDate != "1995-12-15" || request.FirstAirDate != "" || request.Seasons[0].AirDate != "" {
 		t.Fatalf("request dates = %q %q %q", request.ReleaseDate, request.FirstAirDate, request.Seasons[0].AirDate)
+	}
+}
+
+func TestCatalogListingCarriesSectionCardProgress(t *testing.T) {
+	stamp := "2026-01-02T03:04:05Z"
+	view := fakeListingCard("movie:heat-1995")
+	view.ProgressUpdatedAt, view.ItemSource = &stamp, "in_progress"
+	item := catalogItemOfListing(view, ratingsources.Selection{})
+	if item.ItemSource != "in_progress" || item.ProgressUpdatedAt == nil || item.ProgressUpdatedAt.Time.UTC().Format(time.RFC3339) != stamp {
+		t.Fatalf("listing card = source %q at %v, want in_progress at %s", item.ItemSource, item.ProgressUpdatedAt, stamp)
 	}
 }

@@ -2,7 +2,7 @@
  * Creating a Synced list on the collection editor page, both scopes: one
  * source panel with MDBList, TMDB chart and TMDB list tabs, ready-made picks
  * that fill only untouched fields, libraries the list can match into, and a
- * Create that stays on the new list.
+ * Create that returns to the collections list.
  */
 import { fireEvent, screen, within } from "@testing-library/react";
 import { toast } from "sonner";

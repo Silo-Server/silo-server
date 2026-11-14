@@ -43,7 +43,7 @@ func TestOrderedApplePushTransport(t *testing.T) {
 	body := `{"device_id":"install","apns_token":"` + strings.Repeat("a", 64) + `","apns_environment":"production","apns_topic":"org.siloserver.silo","push_mode":"private_push"}`
 	path := Prefix + "/devices/push/apple"
 	r := do(t, h, http.MethodPost, path, body, headers)
-	if r.Code != 200 || !strings.Contains(r.Body.String(), `"generation":"9007199254740993"`) || !strings.Contains(r.Body.String(), `"display_token":"synthetic-display"`) || !strings.Contains(r.Body.String(), `"server_id":"`+fixtureServerID+`"`) || f.identity.SessionID != "session" || f.cmd.ProfileID != "p-owner" || f.cmd.UserID != 1 {
+	if r.Code != 200 || !strings.Contains(r.Body.String(), `"generation":"9007199254740993"`) || !strings.Contains(r.Body.String(), `"display_token":"synthetic-display"`) || !strings.Contains(r.Body.String(), `"server_id":"`+fixtureServerID+`"`) || f.identity.SessionID != "session" || f.cmd.LoginSessionID != "session" || f.cmd.ProfileID != "p-owner" || f.cmd.UserID != 1 {
 		t.Fatalf("%d %s %+v", r.Code, r.Body.String(), f)
 	}
 	if r.Header().Get("Cache-Control") != "no-store" || strings.Contains(r.Body.String(), headers["X-Push-Installation-Key"]) || strings.Contains(r.Body.String(), strings.Repeat("a", 64)) {

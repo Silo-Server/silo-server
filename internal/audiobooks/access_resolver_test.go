@@ -39,6 +39,15 @@ func (s ownerProfileStore) ListProfiles(context.Context) ([]userstore.Profile, e
 	return s.profiles, nil
 }
 
+func (s ownerProfileStore) GetProfile(_ context.Context, id string) (*userstore.Profile, error) {
+	for i := range s.profiles {
+		if s.profiles[i].ID == id {
+			return &s.profiles[i], nil
+		}
+	}
+	return nil, nil
+}
+
 type ownerStoreProvider struct{ store ownerProfileStore }
 
 func (p ownerStoreProvider) ForUser(context.Context, int) (userstore.UserStore, error) {
@@ -83,7 +92,7 @@ func TestResolveABSOwnerAccess(t *testing.T) {
 	kid := userstore.Profile{ID: "kid"}
 
 	t.Run("enabled owner with profile", func(t *testing.T) {
-		filter, err := newOwnerResolver(ownerUserRepo{user: enabled}, kid).ResolveABSOwnerAccess(context.Background(), "7", "kid")
+		filter, _, err := newOwnerResolver(ownerUserRepo{user: enabled}, kid).ResolveABSOwnerAccess(context.Background(), "7", "kid")
 		if err != nil {
 			t.Fatalf("err = %v", err)
 		}
@@ -93,7 +102,7 @@ func TestResolveABSOwnerAccess(t *testing.T) {
 	})
 
 	t.Run("profileless owner on an account without profiles", func(t *testing.T) {
-		if _, err := newOwnerResolver(ownerUserRepo{user: enabled}).ResolveABSOwnerAccess(context.Background(), "7", ""); err != nil {
+		if _, _, err := newOwnerResolver(ownerUserRepo{user: enabled}).ResolveABSOwnerAccess(context.Background(), "7", ""); err != nil {
 			t.Fatalf("err = %v", err)
 		}
 	})
@@ -111,18 +120,24 @@ func TestResolveABSOwnerAccess(t *testing.T) {
 				ownerScopeResolver{err: fmt.Errorf("%w: revoked by policy", access.ErrProfileUnverified)}),
 			"kid",
 		},
+		// The primary-profile lookup an admin account takes finds nothing;
+		// that is an unavailable owner, not a failed lookup.
+		"deleted profile on an admin account": {
+			newOwnerResolver(ownerUserRepo{user: &models.User{ID: 7, Role: models.RoleAdmin, Enabled: true}}),
+			"kid",
+		},
 	}
 	for name, tc := range unavailable {
 		t.Run(name, func(t *testing.T) {
-			_, err := tc.resolver.ResolveABSOwnerAccess(context.Background(), "7", tc.profileID)
-			if !errors.Is(err, abs.ErrOwnerUnavailable) {
-				t.Fatalf("err = %v, want ErrOwnerUnavailable", err)
+			_, actingAdmin, err := tc.resolver.ResolveABSOwnerAccess(context.Background(), "7", tc.profileID)
+			if !errors.Is(err, abs.ErrOwnerUnavailable) || actingAdmin {
+				t.Fatalf("actingAdmin = %t, err = %v; want false, ErrOwnerUnavailable", actingAdmin, err)
 			}
 		})
 	}
 
 	t.Run("account lookup failure is not reported as unavailable", func(t *testing.T) {
-		_, err := newOwnerResolver(ownerUserRepo{err: errors.New("db down")}, kid).ResolveABSOwnerAccess(context.Background(), "7", "kid")
+		_, _, err := newOwnerResolver(ownerUserRepo{err: errors.New("db down")}, kid).ResolveABSOwnerAccess(context.Background(), "7", "kid")
 		if err == nil || errors.Is(err, abs.ErrOwnerUnavailable) {
 			t.Fatalf("err = %v, want a lookup error", err)
 		}
@@ -130,8 +145,38 @@ func TestResolveABSOwnerAccess(t *testing.T) {
 
 	t.Run("unconfigured resolver fails closed", func(t *testing.T) {
 		var r *ABSAccessResolver
-		if _, err := r.ResolveABSOwnerAccess(context.Background(), "7", "kid"); err == nil {
+		if _, _, err := r.ResolveABSOwnerAccess(context.Background(), "7", "kid"); err == nil {
 			t.Fatal("nil resolver returned access")
 		}
 	})
+}
+
+// The owner acts as the administrator by the native acting-admin rule: its
+// account has the server admin role and it is that account's primary profile,
+// or the account has no profiles. Another profile on an admin account is a
+// household member.
+func TestResolveABSOwnerAccessActingAdmin(t *testing.T) {
+	account := func(role string) ownerUserRepo {
+		return ownerUserRepo{user: &models.User{ID: 7, Role: role, Enabled: true}}
+	}
+	household := []userstore.Profile{{ID: "parent", IsPrimary: true}, {ID: "kid"}}
+	cases := map[string]struct {
+		users     ownerUserRepo
+		profiles  []userstore.Profile
+		profileID string
+		want      bool
+	}{
+		"primary profile on an admin account": {account(models.RoleAdmin), household, "parent", true},
+		"another profile on an admin account": {account(models.RoleAdmin), household, "kid", false},
+		"admin account without profiles":      {account(models.RoleAdmin), nil, "", true},
+		"primary profile on a user account":   {account(models.RoleUser), household, "parent", false},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			_, got, err := newOwnerResolver(tc.users, tc.profiles...).ResolveABSOwnerAccess(context.Background(), "7", tc.profileID)
+			if err != nil || got != tc.want {
+				t.Fatalf("actingAdmin = %t, %v; want %t", got, err, tc.want)
+			}
+		})
+	}
 }

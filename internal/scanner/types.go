@@ -13,9 +13,12 @@ import (
 // removal grace period, are not counted again. Two scans of the same folder
 // that overlap in time can both count the same file.
 type ScanResult struct {
-	New                int
-	Updated            int
-	Unchanged          int
+	New       int
+	Updated   int
+	Unchanged int
+	// NoVideo counts files in a movie, series or mixed library that hold no
+	// video stream and were left out of the catalog.
+	NoVideo            int
 	Missing            int
 	FilesDeleted       int
 	MembershipsRemoved int
@@ -93,12 +96,15 @@ type VideoTrackInfo struct {
 	VideoRange          string
 	VideoRangeType      string
 	ColorRange          string
-	ColorPrimaries      string
-	ColorSpace          string
-	ColorTransfer       string
-	BitDepth            int
-	PixelFormat         string
-	ReferenceFrames     int
+	// FrameColorRange is the first decoded frame's range; see
+	// models.VideoTrack.FrameColorRange.
+	FrameColorRange string
+	ColorPrimaries  string
+	ColorSpace      string
+	ColorTransfer   string
+	BitDepth        int
+	PixelFormat     string
+	ReferenceFrames int
 	// HDR10PlusUnchecked marks a PQ track whose first frame was not read;
 	// see models.VideoTrack.HDR10PlusUnchecked.
 	HDR10PlusUnchecked bool

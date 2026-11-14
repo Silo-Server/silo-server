@@ -5,6 +5,7 @@ import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { RestartBadge } from "@/components/settings/RestartBadge";
+import { useT } from "@/i18n";
 import { cn } from "@/lib/utils";
 import {
   Select,
@@ -113,6 +114,7 @@ export function SettingFieldRow({
   // A group that already says "Changes apply after a restart" does not need the
   // same fact repeated on every row inside it.
   const groupSaysRestart = useGroupRestartAll();
+  const t = useT();
 
   return (
     <div
@@ -127,7 +129,7 @@ export function SettingFieldRow({
           {dirty ? (
             <span
               className="size-1.5 shrink-0 rounded-full bg-[var(--settings-accent)]"
-              title="Unsaved change"
+              title={t("web.admin.settings.fields.unsavedChange")}
             />
           ) : null}
           <Label htmlFor={htmlFor} className="text-sm font-medium">
@@ -142,11 +144,11 @@ export function SettingFieldRow({
         ) : null}
         {status ? <div className="mt-1.5">{status}</div> : null}
       </div>
-      {/* `sm:ml-auto` pins the control column to the row's right edge. The
+      {/* `sm:ms-auto` pins the control column to the row's end edge. The
           label column stops growing at its max width, so without it a row
           with a short label and a narrow control (a switch, a link button)
           would leave its control wherever the label column ended. */}
-      <div className="flex w-full items-center gap-2 sm:ml-auto sm:w-auto sm:shrink-0 sm:justify-end">
+      <div className="flex w-full items-center gap-2 sm:ms-auto sm:w-auto sm:shrink-0 sm:justify-end">
         {/* Grows to fill the row on a stacked phone layout; content-sized and
             right-aligned from `sm` up, which is what puts every control on the
             shared edge. */}
@@ -212,6 +214,7 @@ export function SettingField({
   restartRequired,
   className,
 }: SettingFieldProps) {
+  const t = useT();
   const controlId = useId();
   const hintId = useId();
 
@@ -276,7 +279,11 @@ export function SettingField({
       <Input
         id={controlId}
         type="password"
-        placeholder={sensitiveConfigured ? "configured" : (hint ?? "Not configured")}
+        placeholder={
+          sensitiveConfigured
+            ? t("web.admin.settings.fields.passwordConfigured")
+            : (hint ?? t("web.admin.settings.fields.passwordNotConfigured"))
+        }
         value={value}
         onChange={(e) => onChange(e.target.value)}
         disabled={disabled}

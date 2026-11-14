@@ -57,18 +57,43 @@ func IsLegacyID(id string) bool {
 	return ok
 }
 
-// LegacyIDs returns the built-in rows' IDs in default order.
-func LegacyIDs() []string {
-	ids := make([]string, len(legacyRows))
-	for i, r := range legacyRows {
-		ids[i] = r.ID
-	}
-	return ids
-}
-
 func legacyRow(r Row) Row {
 	chart := *r.Chart
 	r.Chart = &chart
 	r.Type, r.Enabled, r.Limit = TypeTMDBChart, true, DefaultLimit
 	return r
+}
+
+// defaultTitleKeys maps the ID of each built-in row to the shared
+// translation catalog key of its default title, which every client can show
+// in its own language while the row still holds that title.
+var defaultTitleKeys = map[string]string{
+	"trending_movies":    "home.section.discoverTrendingMovies",
+	"trending_series":    "home.section.discoverTrendingSeries",
+	"popular_movies":     "home.section.discoverPopularMovies",
+	"popular_series":     "home.section.discoverPopularSeries",
+	"upcoming_movies":    "home.section.discoverUpcomingMovies",
+	"on_air_series":      "home.section.discoverOnAirSeries",
+	string(TypeStudios):  "home.section.discoverStudios",
+	string(TypeNetworks): "home.section.discoverNetworks",
+	string(TypeGenres):   "home.section.discoverGenres",
+}
+
+// TitleKey is the translation catalog key of the row's title while the row is
+// a built-in one still holding its default title, and "" for any other title,
+// which an admin typed. A title an admin typed that equals the default's
+// English gets the key too; the English is the same.
+func TitleKey(id, title string) string {
+	key, ok := defaultTitleKeys[id]
+	if !ok {
+		return ""
+	}
+	for _, rows := range [][]Row{legacyRows, brandRows} {
+		for _, r := range rows {
+			if r.ID == id && r.Title == title {
+				return key
+			}
+		}
+	}
+	return ""
 }

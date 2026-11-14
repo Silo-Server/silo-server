@@ -6,6 +6,7 @@ import {
   downloadKeys,
   episodeKeys,
   libraryKeys,
+  profileKeys,
   requestKeys,
   sectionKeys,
 } from "@/hooks/queries/keys";
@@ -17,13 +18,21 @@ export interface CatalogInvalidationOptions {
   libraryId?: number;
   allowDashboardRefetch: boolean;
   includeLibraryLists?: boolean;
+  /** Refresh catalog lists even while a list page is on its first read. */
+  skipFirstReadHold?: boolean;
 }
 
 export function invalidateCatalogState(
   queryClient: QueryClient,
   options: CatalogInvalidationOptions,
 ) {
-  const { itemId, libraryId, allowDashboardRefetch, includeLibraryLists = true } = options;
+  const {
+    itemId,
+    libraryId,
+    allowDashboardRefetch,
+    includeLibraryLists = true,
+    skipFirstReadHold,
+  } = options;
   // Library-scoped sweeps leave home section queries out (see
   // activeSectionQueryMatchesLibrary) so a scan cannot storm them — but the
   // refresh-signal bump below still reloads Home's rows through fetchQuery,
@@ -33,11 +42,14 @@ export function invalidateCatalogState(
   if (libraryId !== undefined) {
     void queryClient.invalidateQueries({ queryKey: sectionKeys.home(), refetchType: "none" });
   }
-  void invalidateMediaSurfaceQueries(queryClient, { itemId, libraryId, itemMayBeNew: true }).then(
-    () => {
-      bumpHomeRefreshSignal(queryClient);
-    },
-  );
+  void invalidateMediaSurfaceQueries(queryClient, {
+    itemId,
+    libraryId,
+    itemMayBeNew: true,
+    skipFirstReadHold,
+  }).then(() => {
+    bumpHomeRefreshSignal(queryClient);
+  });
   if (includeLibraryLists) {
     void queryClient.invalidateQueries({
       queryKey: adminKeys.libraries(),
@@ -55,17 +67,21 @@ export function invalidateCatalogState(
 /**
  * Refetches everything the viewer's access decides: which libraries and titles
  * they see (home, browse, search, details, people, collections, calendar) and
- * what they may do with them (requests, downloads). Runs when the events
+ * what they may do with them (requests, downloads, and the profile list that
+ * carries the household manager's per-profile limits). Runs when the events
  * socket reports that the account's access group, permissions, playback
- * quality or role changed.
+ * quality, role or a profile's access limits changed.
  */
 export function invalidateAccessDependentState(
   queryClient: QueryClient,
   options: Pick<CatalogInvalidationOptions, "allowDashboardRefetch">,
 ) {
+  // Lists showing titles the viewer may no longer see refresh now, without
+  // waiting for a page still on its first read.
   invalidateCatalogState(queryClient, {
     allowDashboardRefetch: options.allowDashboardRefetch,
     includeLibraryLists: true,
+    skipFirstReadHold: true,
   });
   for (const queryKey of [
     collectionKeys.all,
@@ -73,6 +89,7 @@ export function invalidateAccessDependentState(
     calendarKeys.all,
     requestKeys.all,
     downloadKeys.all,
+    profileKeys.list(),
   ]) {
     void queryClient.invalidateQueries({ queryKey });
   }

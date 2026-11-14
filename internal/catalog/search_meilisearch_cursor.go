@@ -42,6 +42,9 @@ func (p *MeilisearchSearchProvider) searchCursorPage(ctx context.Context, req Ca
 		if cursor.Provider != SearchProviderMeilisearch || cursor.Config != config {
 			return nil, ErrCatalogCursorChanged
 		}
+		if p.sessions == nil {
+			return nil, ErrSearchContinuationUnavailable
+		}
 		var err error
 		session, err = p.sessions.get(ctx, req.Access.UserID, cursor.SessionID)
 		if err != nil {
@@ -62,6 +65,9 @@ func (p *MeilisearchSearchProvider) searchCursorPage(ctx context.Context, req Ca
 				return nil, err
 			}
 			return p.fallbackSearch(ctx, req, "Meilisearch ranking unavailable before traversal")
+		}
+		if p.sessions == nil {
+			return nil, ErrSearchContinuationUnavailable
 		}
 		sessionID, err = p.sessions.put(ctx, req.Access.UserID, *session)
 		if err != nil {
@@ -194,7 +200,8 @@ func (p *MeilisearchSearchProvider) createRankingSession(ctx context.Context, re
 	}
 	request.Offset, request.Limit = 0, window
 	var response meilisearchSearchResponse
-	if request.Hybrid != nil && searchRequestMixesEpisodeAndMedia(req.ItemTypes) && !p.isFederationUnsupported() {
+	// Hybrid searches always federate: see buildFederatedSearchRequest.
+	if request.Hybrid != nil && !p.isFederationUnsupported() {
 		response, err = p.client.FederatedSearch(ctx, p.buildFederatedSearchRequest(state.ActiveIndexUID, req, request, 0, window))
 		if err != nil && isMeilisearchFederationUnsupported(err) {
 			p.markFederationUnsupported()
@@ -203,7 +210,7 @@ func (p *MeilisearchSearchProvider) createRankingSession(ctx context.Context, re
 			response, err = p.client.Search(ctx, state.ActiveIndexUID, request)
 		}
 	} else {
-		if request.Hybrid != nil && searchRequestMixesEpisodeAndMedia(req.ItemTypes) {
+		if request.Hybrid != nil {
 			request.Hybrid, request.Vector = nil, nil
 			fallback = "Meilisearch federation unsupported; using keyword search"
 		}

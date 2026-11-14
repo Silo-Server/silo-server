@@ -4,6 +4,7 @@ import { act, renderHook } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { SeriesContext } from "../types";
+import { recordAutoAdvance, resetStillWatchingStreak } from "../stillWatching";
 import { useNextEpisode } from "./useNextEpisode";
 
 const seriesContext: SeriesContext = {
@@ -19,7 +20,10 @@ const credits = { start: 1700, end: 1800 };
 
 describe("useNextEpisode", () => {
   beforeEach(() => vi.useFakeTimers());
-  afterEach(() => vi.useRealTimers());
+  afterEach(() => {
+    vi.useRealTimers();
+    resetStillWatchingStreak();
+  });
 
   it("starts the next episode as an automatic start when the countdown runs out", () => {
     const onNavigate = vi.fn();
@@ -40,5 +44,16 @@ describe("useNextEpisode", () => {
 
     expect(onNavigate).toHaveBeenCalledOnce();
     expect(onNavigate).toHaveBeenCalledWith("ep-2", "viewer");
+  });
+
+  it("waits for the viewer once the automatic streak reaches the limit", () => {
+    for (let i = 0; i < 3; i++) recordAutoAdvance();
+    const onNavigate = vi.fn();
+    const { result } = renderHook(() => useNextEpisode(credits, seriesContext, 1710, onNavigate));
+
+    act(() => vi.advanceTimersByTime(20_000));
+
+    expect(result.current.showCountdown).toBe(false);
+    expect(onNavigate).not.toHaveBeenCalled();
   });
 });

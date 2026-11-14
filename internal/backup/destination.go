@@ -122,21 +122,39 @@ func (d StoreDestination) Put(ctx context.Context, key string, r io.Reader) erro
 	if err := root.Mkdir(top, privateDirMode); err != nil && !errors.Is(err, fs.ErrExist) {
 		return fmt.Errorf("creating the backups folder: %w", err)
 	}
-	if err := root.Chmod(top, privateDirMode); err != nil {
+	if err := chmodInRoot(root, top, privateDirMode); err != nil {
 		return fmt.Errorf("restricting the backups folder: %w", err)
 	}
 	if err := d.Store.PutStream(ctx, key, r, "application/octet-stream"); err != nil {
 		return err
 	}
-	if err := root.Chmod(key, privateFileMode); err != nil {
+	if err := chmodInRoot(root, key, privateFileMode); err != nil {
 		return fmt.Errorf("restricting %s: %w", key, err)
 	}
 	for folder := path.Dir(key); folder != top && folder != "." && folder != "/"; folder = path.Dir(folder) {
-		if err := root.Chmod(folder, privateDirMode); err != nil {
+		if err := chmodInRoot(root, folder, privateDirMode); err != nil {
 			return fmt.Errorf("restricting %s: %w", folder, err)
 		}
 	}
 	return nil
+}
+
+// chmodInRoot sets the mode of name, under root, through an open handle.
+// It avoids os.Root.Chmod, which on Linux tries the fchmodat2 syscall first
+// and falls back only when the kernel answers ENOSYS: some vendor kernels
+// without fchmodat2 (QNAP's 5.10) answer EFAULT instead, which failed every
+// local backup there. Opening through root keeps the path confined
+// to it and follows a symlink inside it, as Root.Chmod does.
+func chmodInRoot(root *os.Root, name string, mode fs.FileMode) error {
+	f, err := root.Open(name)
+	if err != nil {
+		return err
+	}
+	err = f.Chmod(mode)
+	if closeErr := f.Close(); err == nil {
+		err = closeErr
+	}
+	return err
 }
 
 // Modes of a local destination's backup folders and objects.

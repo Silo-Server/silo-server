@@ -44,7 +44,9 @@ drift off theme (Christmas lists that include Mean Girls).
 
 Nothing in season means an empty row, which the home API drops. The row title
 in season is `theme_titles[theme]`, else the vibe's title (a custom holiday's
-`title`, else its name).
+`title`, else its name). The vibe's title carries a `title_key`
+(`home.section.seasonal.<theme>.<vibe>`) in the v2 section, so a client can translate it; a
+title an admin typed carries none.
 
 ## Lists
 

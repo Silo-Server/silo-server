@@ -73,6 +73,12 @@ const (
 	// parameter, so a browser navigation that cannot send headers still
 	// carries the selected profile's limits.
 	TokenTypeDirectDownloadLink = "direct_download_link"
+	// TokenTypeStreamReference marks claims built from a playback plan's
+	// signed stream reference (`st`). It is never issued as an account JWT:
+	// only the native delivery routes accept the reference, for the one
+	// session it names, so a receiver that is handed a URL and cannot send
+	// headers (a Google Cast device) can play that session.
+	TokenTypeStreamReference = "stream_reference"
 )
 
 // DirectDownloadLinkTTL bounds how long a direct-download link may start a
@@ -88,6 +94,14 @@ const DirectDownloadLinkTTL = 5 * time.Minute
 func (c *Claims) IsOwnLoginSession() bool {
 	return c != nil && c.TokenType != TokenTypeAPIKey && c.SessionID != "" && c.ImpersonatorUserID == nil &&
 		!c.IsRemotePlayback()
+}
+
+// SkipsProfilePIN reports whether the credential may act as a PIN-locked
+// profile without its verification token: an API key or a view-as session.
+// Scopes resolved this way are PINVerificationSkipped; see
+// docs/architecture/profile-verification-tokens.md.
+func (c *Claims) SkipsProfilePIN() bool {
+	return c != nil && (c.TokenType == TokenTypeAPIKey || c.ImpersonatorUserID != nil)
 }
 
 // IsRemotePlayback reports whether the claims belong to a remote-playback

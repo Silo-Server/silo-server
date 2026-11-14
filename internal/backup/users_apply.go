@@ -122,14 +122,13 @@ func lockPlanned(ctx context.Context, tx pgx.Tx, plan accountPlan) (bool, error)
 // and access stay); only missing profiles are added and chosen data merged.
 func (a *applier) applyAccount(ctx context.Context, tx pgx.Tx, sel UserSelection) (applied, error) {
 	item := ReportItem{Kind: KindAccount, Label: sel.Account}
-	var doc *UserDocument
-	for i := range a.rs.Users {
-		if strconv.Itoa(a.rs.Users[i].Account.ID) == sel.Account {
-			doc = &a.rs.Users[i]
-		}
-	}
-	if doc == nil {
+	ref, ok := a.rs.user(sel.Account)
+	if !ok {
 		return leftOut(item, ReasonNotInBackup, "The backup has no such account."), nil
+	}
+	doc, err := a.rs.loadUser(ref)
+	if err != nil {
+		return applied{}, err
 	}
 	planner := a.s.newUserPlanner(a.rs, tx, a.serverID, a.libraryMap())
 	plan, err := planner.plan(ctx, doc)
@@ -300,11 +299,12 @@ func accountOutcome(item ReportItem, report *ReportAccount, changed bool) Report
 // documentItems lists the content ids every profile's data names.
 func documentItems(doc *UserDocument) []string {
 	var out []string
-	for _, p := range doc.Profiles {
+	for i := range doc.Profiles {
+		p := &doc.Profiles[i]
 		for _, t := range userDataTypes {
 			if raw, ok := p.Data[t.ID()]; ok {
 				// The reader validated every document.
-				sum, _ := t.Validate(raw)
+				sum, _ := p.summary(t, raw)
 				out = append(out, sum.Items...)
 			}
 		}
@@ -549,11 +549,12 @@ func (a *applier) createProfile(ctx context.Context, tx pgx.Tx, doc *UserDocumen
 	if err != nil {
 		return false, err
 	}
-	if err := pgstore.CreateRestoredProfileInTx(ctx, tx, plan.localID, pgstore.RestoredProfile{
+	primary, err := pgstore.CreateRestoredProfileInTx(ctx, tx, plan.localID, pgstore.RestoredProfile{
 		ID: id, Name: e.Name, Avatar: avatar, IsPrimary: e.IsPrimary, PINHash: e.PINHash, IsChild: e.IsChild,
 		MaxContentRating: e.MaxContentRating, MaxAdvisoryAge: e.MaxAdvisoryAge, RequireAdvisoryAge: e.RequireAdvisoryAge,
-		LibraryRestrictionsEnabled: e.LibraryRestrictionsEnabled, AllowedLibraryIDs: pp.allowed, MaxPlaybackQuality: e.MaxPlaybackQuality,
-	}); err != nil {
+		RequestsBlocked: e.RequestsBlocked, LibraryRestrictionsEnabled: e.LibraryRestrictionsEnabled, AllowedLibraryIDs: pp.allowed, MaxPlaybackQuality: e.MaxPlaybackQuality,
+	})
+	if err != nil {
 		return false, err
 	}
 	if _, err := tx.Exec(ctx, `
@@ -564,10 +565,12 @@ func (a *applier) createProfile(ctx context.Context, tx pgx.Tx, doc *UserDocumen
 		return false, fmt.Errorf("recording the restored profile: %w", err)
 	}
 	pp.localID, rp.Created = id, true
-	if pp.preview.LibrariesLeftOut > 0 {
+	// A profile that became the primary has its account's libraries instead
+	// of its allowed ones.
+	if pp.preview.LibrariesLeftOut > 0 && !primary {
 		rp.Notes = append(rp.Notes, fmt.Sprintf("%d of its allowed libraries are not on this server and were left out.", pp.preview.LibrariesLeftOut))
 	}
-	if pp.preview.NoLibraryAccess {
+	if pp.preview.NoLibraryAccess && !primary {
 		rp.Notes = append(rp.Notes, "None of its allowed libraries are on this server, so it has no library access.")
 	}
 	return true, nil

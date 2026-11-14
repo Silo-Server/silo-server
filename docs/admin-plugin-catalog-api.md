@@ -25,7 +25,7 @@ configuration and its validator.
 
 The store seeds and locks the singleton settings row before comparing the captured
 value. It writes configuration and reconciles managed repositories in one
-transaction. The frozen bridge setter and startup reconciliation use the same row
+transaction. Startup reconciliation uses the same row
 lock, including concurrent creation of an initially absent row. A reconciliation
 failure rolls back the setting. No external plugin download or durable job is
 started by this operation. A response failure after commit can leave the outcome

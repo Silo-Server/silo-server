@@ -13,6 +13,7 @@ import (
 	"io"
 	"log/slog"
 	"maps"
+	"os"
 	"path"
 	"strings"
 	"sync"
@@ -176,6 +177,7 @@ func New(opts Options) *Service {
 	if opts.Stores.Operational != nil {
 		stores[storeOperational] = opts.Stores.Operational
 	}
+	go sweepOrphanedSetDirs(os.TempDir())
 	return &Service{opts: opts, stores: stores}
 }
 

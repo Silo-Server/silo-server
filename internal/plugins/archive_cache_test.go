@@ -352,6 +352,82 @@ func TestArchiveCacheAtOwnRootRehydratesUnderItAndPrunesOldReleases(t *testing.T
 	}
 }
 
+// Plugin IDs the installer's mapping would merge get their own cache
+// directories, so rehydrating one leaves the others' files in place (#2800).
+func TestArchiveCacheKeepsPluginsWhoseIDsDifferOnlyInSeparators(t *testing.T) {
+	ctx := t.Context()
+	root := filepath.Join(t.TempDir(), "proxy-cache")
+	ids := []string{"acme/x", "acme_x", "acme:x", "acme@x", "acme\\x", "acme%2Fx"}
+	installations := make([]*Installation, len(ids))
+	stores := make([]*legacyArchiveStore, len(ids))
+	for i, id := range ids {
+		binary := []byte("#!/bin/sh\nexit " + string(rune('0'+i)) + "\n")
+		manifest := testPluginManifest(t, id, "1.0.0")
+		manifest.Checksum = sha256Hex(binary)
+		manifestBytes, err := protojson.Marshal(manifest)
+		if err != nil {
+			t.Fatal(err)
+		}
+		archiveBytes, err := buildBinaryPluginArchive(manifestBytes, binary)
+		if err != nil {
+			t.Fatal(err)
+		}
+		stores[i] = &legacyArchiveStore{archive: &InstallationArchive{
+			InstallationID: 100 + i, ManifestJSON: manifestBytes, Checksum: manifest.GetChecksum(), Bytes: archiveBytes,
+		}}
+		installations[i] = &Installation{ID: 100 + i, PluginID: id, Version: "1.0.0",
+			InstallPath: filepath.Join(t.TempDir(), "api", "1.0.0", "install-"+string(rune('a'+i)), "plugin")}
+	}
+	if got, want := requireLocalInstallPath(t, NewArchiveCacheAt(stores[0], root), installations[0]),
+		filepath.Join(root, "acme%2Fx", "1.0.0", "install-a", "plugin"); got != want {
+		t.Fatalf("LocalInstallPath(acme/x) = %q, want %q", got, want)
+	}
+	if got, want := requireLocalInstallPath(t, NewArchiveCacheAt(stores[1], root), installations[1]),
+		filepath.Join(root, "acme_x", "1.0.0", "install-b", "plugin"); got != want {
+		t.Fatalf("LocalInstallPath(acme_x) = %q, want %q (an ID without escaped characters keeps its directory)", got, want)
+	}
+
+	paths := make([]string, len(ids))
+	for i := range ids {
+		if _, err := NewArchiveCacheAt(stores[i], root).Ensure(ctx, installations[i]); err != nil {
+			t.Fatalf("Ensure(%s): %v", ids[i], err)
+		}
+		paths[i] = requireLocalInstallPath(t, NewArchiveCacheAt(stores[i], root), installations[i])
+	}
+	for i, path := range paths {
+		if _, err := os.Stat(path); err != nil {
+			t.Errorf("%s binary after every rehydration: %v", ids[i], err)
+		}
+	}
+}
+
+// An identity whose escaped name would pass the component limit gets a
+// bounded, distinct name, so a proxy node can still rehydrate it.
+func TestCachePathSegmentStaysWithinTheComponentLimit(t *testing.T) {
+	long := strings.Repeat("a/", 100)
+	other := strings.Repeat("a:", 100)
+	names := map[string]string{}
+	for _, value := range []string{long, other, strings.Repeat("a", 255), "acme/x"} {
+		got, err := cachePathSegment(value, "plugin id")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(got) > maxCacheSegmentBytes {
+			t.Errorf("segment for a %d-byte identity is %d bytes, want at most %d", len(value), len(got), maxCacheSegmentBytes)
+		}
+		if previous, ok := names[got]; ok {
+			t.Errorf("%q and %q share segment %q", previous, value, got)
+		}
+		names[got] = value
+	}
+	if got, _ := cachePathSegment(strings.Repeat("a", 255), "plugin id"); got != strings.Repeat("a", 255) {
+		t.Errorf("a 255-byte identity without escapes = %q, want it unchanged", got)
+	}
+	if got, _ := cachePathSegment(long, "plugin id"); !strings.HasPrefix(got, "%h") {
+		t.Errorf("an over-long escaped identity = %q, want its hashed name", got)
+	}
+}
+
 type blockedArchiveStore struct {
 	*legacyArchiveStore
 	calls   atomic.Int32

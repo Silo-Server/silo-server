@@ -1,5 +1,7 @@
 package access
 
+import "slices"
+
 // Scope is the resolved effective access policy for a viewer request.
 type Scope struct {
 	UserID    int
@@ -96,6 +98,28 @@ type MaturityLimits struct {
 	//
 	// omitempty for the same reason as MaxAdvisoryAge.
 	RequireAdvisoryAge bool `json:",omitempty"`
+	// AllowedTitleIDs are the movies and series the household's primary
+	// profile allowed this profile above its limits, sorted and distinct.
+	// A title in the list, and every season and episode of an allowed series,
+	// passes the limits above whatever its rating or advisory age. It lifts
+	// nothing else: library access still applies. Only a scope with active
+	// limits carries it (see WithAllowedTitles).
+	//
+	// omitempty for the same reason as MaxAdvisoryAge.
+	AllowedTitleIDs []string `json:",omitempty"`
+}
+
+// WithAllowedTitles returns the limits carrying ids as their allowed titles
+// when the limits restrict anything, and unchanged otherwise: an allowance
+// above no limit means nothing, and leaving it out keeps unrestricted scopes
+// and their cache keys exactly as they were.
+func (m MaturityLimits) WithAllowedTitles(ids []string) MaturityLimits {
+	if !m.Active() || len(ids) == 0 {
+		m.AllowedTitleIDs = nil
+		return m
+	}
+	m.AllowedTitleIDs = slices.Clone(ids)
+	return m
 }
 
 // HidesUnadvised reports whether titles with no advisory age are hidden: a

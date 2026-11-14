@@ -21,9 +21,16 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { NOT_CREATED_YET, SAVE_BEFORE_SYNC, SYNC_NOW, SYNCING_NOW } from "@/lib/collections/copy";
+import {
+  newCollection,
+  notCreatedYet,
+  saveBeforeSync,
+  syncNow,
+  syncingNow,
+} from "@/lib/collections/copy";
 import { cn } from "@/lib/utils";
-import { COLLECTION_KIND_LABEL, type CollectionKind } from "@/lib/collections/types";
+import { collectionKindLabel, type CollectionKind } from "@/lib/collections/types";
+import { useT } from "@/i18n";
 
 const KIND_ICON: Record<CollectionKind, LucideIcon> = {
   manual: ListOrdered,
@@ -61,12 +68,13 @@ function Tag({ icon, children, tone }: { icon?: ReactNode; children: ReactNode; 
 
 /** Open ▾: one library opens at once, several offer a menu. */
 function OpenButton({ targets }: { targets: readonly OpenTarget[] }) {
+  const t = useT();
   if (targets.length === 1) {
     return (
       <Button asChild variant="outline" size="sm">
         <Link to={targets[0]!.href}>
           <Eye aria-hidden />
-          Open
+          {t("web.collections.editorHeader.open")}
         </Link>
       </Button>
     );
@@ -76,7 +84,7 @@ function OpenButton({ targets }: { targets: readonly OpenTarget[] }) {
       <DropdownMenuTrigger asChild>
         <Button type="button" variant="outline" size="sm">
           <Eye aria-hidden />
-          Open
+          {t("web.collections.editorHeader.open")}
           <ChevronDown aria-hidden />
         </Button>
       </DropdownMenuTrigger>
@@ -120,14 +128,15 @@ export function EditorHeader({
   sync?: { syncing: boolean; saveFirst?: boolean; onSyncNow: () => void };
   onDelete?: () => void;
 }) {
+  const t = useT();
   const KindIcon = KIND_ICON[kind];
   const actions: ActionMenuAction[] = [];
   if (sync) {
     actions.push({
       key: "sync",
-      label: sync.syncing ? SYNCING_NOW : SYNC_NOW,
+      label: sync.syncing ? syncingNow() : syncNow(),
       icon: sync.syncing ? Spinner : RefreshCw,
-      help: sync.saveFirst && !sync.syncing ? SAVE_BEFORE_SYNC : undefined,
+      help: sync.saveFirst && !sync.syncing ? saveBeforeSync() : undefined,
       disabled: sync.syncing || sync.saveFirst,
       onSelect: sync.onSyncNow,
     });
@@ -135,7 +144,7 @@ export function EditorHeader({
   if (onDelete) {
     actions.push({
       key: "delete",
-      label: "Delete…",
+      label: t("web.collections.actions.delete"),
       icon: Trash2,
       destructive: true,
       group: Boolean(sync),
@@ -172,24 +181,26 @@ export function EditorHeader({
         <div className="grid min-w-0 gap-1.5">
           <div className="flex flex-wrap gap-2">
             <Tag icon={<KindIcon aria-hidden className="size-3.5" />}>
-              {COLLECTION_KIND_LABEL[kind]}
+              {collectionKindLabel(kind)}
             </Tag>
             {shared ? (
               <Tag tone="shared" icon={<Users aria-hidden className="size-3.5" />}>
-                Shared
+                {t("web.collections.tags.shared")}
               </Tag>
             ) : null}
-            {!created ? <Tag>{NOT_CREATED_YET}</Tag> : null}
+            {!created ? <Tag>{notCreatedYet()}</Tag> : null}
           </div>
           <h1 className="line-clamp-2 text-[26px] leading-[1.15] font-bold tracking-[-0.02em] break-words sm:text-[32px]">
-            {name || "New collection"}
+            {name || newCollection()}
           </h1>
           {meta}
         </div>
         {created ? (
           <div className={cn("flex items-center gap-2", posterUrl && "col-span-2 sm:col-span-1")}>
             {open.length > 0 ? <OpenButton targets={open} /> : null}
-            {actions.length > 0 ? <ActionMenu label="More actions" items={actions} /> : null}
+            {actions.length > 0 ? (
+              <ActionMenu label={t("web.collections.actions.moreActions")} items={actions} />
+            ) : null}
           </div>
         ) : null}
       </header>

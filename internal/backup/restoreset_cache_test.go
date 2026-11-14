@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"maps"
+	"os"
 	"runtime"
 	"slices"
 	"strconv"
@@ -71,15 +72,17 @@ func TestPreviewsShareOneValidatedRestoreSet(t *testing.T) {
 	sets := make([]*RestoreSet, 8)
 	for i := range sets {
 		wg.Go(func() {
-			rs, _, err := svc.previewSet(ctx, restoreSource{backupID: first}, true)
+			rs, release, _, err := svc.previewSet(ctx, restoreSource{backupID: first}, true)
 			if err != nil {
 				t.Error(err)
+				return
 			}
+			release()
 			sets[i] = rs
 		})
 	}
 	wg.Wait()
-	if _, _, err := svc.previewSet(ctx, restoreSource{backupID: first}, true); err != nil {
+	if _, _, _, err := svc.previewSet(ctx, restoreSource{backupID: first}, true); err != nil {
 		t.Fatal(err)
 	}
 	if n := dest.opens.Load(); n != 1 {
@@ -90,7 +93,7 @@ func TestPreviewsShareOneValidatedRestoreSet(t *testing.T) {
 			t.Fatal("previews did not share one validated restore set")
 		}
 	}
-	if _, _, err := svc.previewSet(ctx, restoreSource{backupID: second}, true); err != nil {
+	if _, _, _, err := svc.previewSet(ctx, restoreSource{backupID: second}, true); err != nil {
 		t.Fatal(err)
 	}
 	if n := dest.opens.Load(); n != 2 {
@@ -119,9 +122,9 @@ func TestRestoreSetReadStopsWithItsLastPreview(t *testing.T) {
 	second, cancelSecond := context.WithCancel(t.Context())
 	defer cancelSecond()
 	results := make(chan error, 2)
-	go func() { _, err := c.get(first, "d", load); results <- err }()
+	go func() { _, _, err := c.get(first, "d", load); results <- err }()
 	await(t, started, "the first preview to start reading")
-	go func() { _, err := c.get(second, "d", load); results <- err }()
+	go func() { _, _, err := c.get(second, "d", load); results <- err }()
 	for deadline := time.Now().Add(10 * time.Second); ; {
 		c.mu.Lock()
 		joined := c.reading["d"] != nil && c.reading["d"].waiters == 2
@@ -201,5 +204,58 @@ func TestCachedSetIsChargedWhatItHolds(t *testing.T) {
 	c.mu.Unlock()
 	if _, ok := c.entries["a"]; ok || len(c.entries) != 2 || c.bytes != 2 {
 		t.Fatalf("cache %v (%d bytes), want the newer unverified set and the verified one", slices.Collect(maps.Keys(c.entries)), c.bytes)
+	}
+}
+
+// TestEvictedSetKeepsItsFilesWhileHeld: a set the cache drops keeps its
+// account documents until the last preview holding it releases it, and one
+// no one holds loses them at once, as do idle sets dropped for disk space.
+func TestEvictedSetKeepsItsFilesWhileHeld(t *testing.T) {
+	index, entries := testRestoreSet()
+	data := buildTar(t, index, entries)
+	var c restoreSetCache
+	read := func(digest string) (*RestoreSet, func()) {
+		rs, release, err := c.get(t.Context(), digest, func(ctx context.Context) (*RestoreSet, error) {
+			return ReadRestoreSet(ctx, bytes.NewReader(data), ReadOptions{})
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return rs, release
+	}
+	held, release := read("held")
+	if len(held.Users) == 0 {
+		t.Fatal("the test set has no accounts")
+	}
+	idle, releaseIdle := read("idle")
+	releaseIdle()
+	for i := range maxCachedRestoreSets {
+		_, r := read(fmt.Sprintf("other-%d", i))
+		r()
+	}
+	if _, err := os.Stat(idle.dir); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("an evicted set no one held kept its files: %v", err)
+	}
+	if _, err := held.loadUser(held.Users[0]); err != nil {
+		t.Fatalf("an evicted set lost its files while a preview held it: %v", err)
+	}
+	// Short of disk, the cache drops what no preview holds and nothing else.
+	cachedHeld, releaseCached := read("cached-held")
+	cachedIdle, releaseCachedIdle := read("cached-idle")
+	releaseCachedIdle()
+	if !c.evictIdle() {
+		t.Fatal("evictIdle dropped nothing")
+	}
+	if _, err := os.Stat(cachedIdle.dir); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("an idle cached set kept its files: %v", err)
+	}
+	if _, err := cachedHeld.loadUser(cachedHeld.Users[0]); err != nil {
+		t.Fatalf("a held cached set lost its files: %v", err)
+	}
+	releaseCached()
+	release()
+	release() // a second release is a no-op
+	if _, err := os.Stat(held.dir); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("an evicted set kept its files after its last release: %v", err)
 	}
 }

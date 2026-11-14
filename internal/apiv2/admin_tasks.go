@@ -77,6 +77,7 @@ type AdminTask struct {
 	LastExecution  *AdminTaskExecutionSummary `json:"last_execution,omitempty"`
 	Triggers       []AdminTaskTrigger         `json:"triggers"`
 	NextRunAt      *Instant                   `json:"next_run_at,omitempty"`
+	StartedAt      *Instant                   `json:"started_at,omitempty" doc:"When the run in progress on this process started. Absent while the task is idle."`
 	ExecutionScope string                     `json:"execution_scope" enum:"process" doc:"Live execution and cancellation concern this server process; no durable dispatch or cluster-wide status is promised."`
 }
 type AdminTaskSchedule struct {
@@ -141,13 +142,18 @@ func taskExecutionOf(e taskmanager.ExecutionResult) AdminTaskExecution {
 			out.Steps = result.Steps
 		}
 	}
-	if e.Status == adminjob.StatusFailed {
+	switch e.Status {
+	case adminjob.StatusFailed:
 		out.ErrorMessage = "Task failed. Inspect administrator diagnostics for details."
+	case adminjob.StatusCancelled:
+		// The task runner writes the message of a run it stopped itself (a
+		// max runtime stop), so unlike failure text it is safe to show.
+		out.ErrorMessage = e.ErrorMessage
 	}
 	return out
 }
 func taskOf(t taskmanager.TaskInfo) AdminTask {
-	out := AdminTask{Key: t.Key, Name: t.Name, Description: t.Description, Category: string(t.Category), State: string(t.State), Progress: t.Progress, ManualOnly: t.ManualOnly, Triggers: taskTriggersOf(t.Triggers), NextRunAt: instantPtr(t.NextRunAt), ExecutionScope: "process"}
+	out := AdminTask{Key: t.Key, Name: t.Name, Description: t.Description, Category: string(t.Category), State: string(t.State), Progress: t.Progress, ManualOnly: t.ManualOnly, Triggers: taskTriggersOf(t.Triggers), NextRunAt: instantPtr(t.NextRunAt), StartedAt: instantPtr(t.StartedAt), ExecutionScope: "process"}
 	if t.LastExecution != nil {
 		out.LastExecution = new(taskExecutionOf(*t.LastExecution).AdminTaskExecutionSummary)
 	}

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { t } from "@/i18n";
 
 import type { IntroSkipMode, PlayerTimeRange } from "../types";
 
@@ -45,9 +46,9 @@ interface IntroSkipPromptTimer {
 
 export interface IntroSkipPrompt {
   kind: "skip" | "undo";
-  label: "Skip Intro" | "Watch Intro";
+  label: string;
   /** Confirmation shown above the action for the `always` undo; absent for the `ask` offer. */
-  caption?: "Intro skipped";
+  caption?: string;
   /**
    * The countdown, or null for an `ask` offer that already timed out and is
    * back only because the controls are showing.
@@ -402,8 +403,8 @@ export function useIntroSkipPrompt({
   const prompt: IntroSkipPrompt | null = activePrompt
     ? {
         kind: activePrompt.kind,
-        label: activePrompt.kind === "skip" ? "Skip Intro" : "Watch Intro",
-        caption: activePrompt.kind === "skip" ? undefined : "Intro skipped",
+        label: activePrompt.kind === "skip" ? t("introSkip.pill.skip") : t("introSkip.pill.undo"),
+        caption: activePrompt.kind === "skip" ? undefined : t("introSkip.pill.undoCaption"),
         timer: {
           durationMs: INTRO_PROMPT_MS,
           deadlineMs: activePrompt.deadlineMs,
@@ -411,7 +412,7 @@ export function useIntroSkipPrompt({
         },
       }
     : reofferKey !== null
-      ? { kind: "skip", label: "Skip Intro", timer: null }
+      ? { kind: "skip", label: t("introSkip.pill.skip"), timer: null }
       : null;
 
   return { prompt, select, dismiss };

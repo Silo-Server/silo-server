@@ -12,6 +12,7 @@ import { PasswordInput } from "@/components/PasswordInput";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { AuthBackground } from "@/components/auth/AuthBackground";
+import { useT } from "@/i18n";
 
 /**
  * The only screen a session holding a temporary password can use: the
@@ -34,7 +35,8 @@ export default function ChoosePassword() {
   // must not resubmit the temporary password, which no longer works.
   const [settleFailed, setSettleFailed] = useState(false);
   const busy = useRef(false);
-  useDocumentTitle("Choose a New Password");
+  const t = useT();
+  useDocumentTitle(t("web.auth.choosePassword.documentTitle"));
 
   if (loading) {
     return (
@@ -75,7 +77,7 @@ export default function ChoosePassword() {
     try {
       await changePassword.mutateAsync({ current_password: current, new_password: password });
     } catch (err) {
-      setError(passwordErrorMessage(err, "Could not change the password."));
+      setError(passwordErrorMessage(err, t("web.auth.choosePassword.changeFailed")));
       busy.current = false;
       return;
     }
@@ -91,18 +93,18 @@ export default function ChoosePassword() {
         <Card className="auth-card glass panel-border w-full max-w-sm border-0">
           <CardHeader>
             <CardTitle className="text-3xl font-extrabold tracking-[-0.04em]">
-              Password changed
+              {t("web.auth.passwordRules.passwordChanged")}
             </CardTitle>
             <CardDescription className="mt-2 text-sm leading-6">
-              Your new password is saved, but signing you in did not finish.
+              {t("web.auth.choosePassword.settleFailed")}
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-3">
             <Button className="w-full" onClick={() => void settle()}>
-              Try again
+              {t("common.tryAgain")}
             </Button>
             <Button variant="outline" className="w-full" onClick={logout}>
-              Sign out and use the new password
+              {t("web.auth.choosePassword.signOutAndUseNew")}
             </Button>
           </CardContent>
         </Card>
@@ -117,10 +119,10 @@ export default function ChoosePassword() {
       <Card className="auth-card glass panel-border w-full max-w-sm border-0">
         <CardHeader>
           <CardTitle className="text-3xl font-extrabold tracking-[-0.04em]">
-            Choose a new password
+            {t("web.auth.passwordRules.chooseNewPassword")}
           </CardTitle>
           <CardDescription className="mt-2 text-sm leading-6">
-            An admin set a temporary password for {account.username}. Choose your own to continue.
+            {t("web.auth.choosePassword.description", { username: account.username })}
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -131,7 +133,9 @@ export default function ChoosePassword() {
           )}
           <form onSubmit={handleSubmit} className="space-y-4">
             <div className="space-y-2">
-              <Label htmlFor="temporary-password">Temporary password</Label>
+              <Label htmlFor="temporary-password">
+                {t("web.auth.choosePassword.temporaryPassword")}
+              </Label>
               <PasswordInput
                 id="temporary-password"
                 value={current}
@@ -143,8 +147,10 @@ export default function ChoosePassword() {
               />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="new-password">New password</Label>
-              <p className="text-muted-foreground text-xs">At least 8 characters</p>
+              <Label htmlFor="new-password">{t("web.auth.passwordRules.newPassword")}</Label>
+              <p className="text-muted-foreground text-xs">
+                {t("web.auth.passwordRules.minLength")}
+              </p>
               <PasswordInput
                 id="new-password"
                 value={password}
@@ -155,7 +161,9 @@ export default function ChoosePassword() {
               />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="confirm-new-password">Confirm new password</Label>
+              <Label htmlFor="confirm-new-password">
+                {t("web.auth.passwordRules.confirmNewPassword")}
+              </Label>
               <PasswordInput
                 id="confirm-new-password"
                 value={confirmation}
@@ -166,18 +174,21 @@ export default function ChoosePassword() {
               />
             </div>
             <Button type="submit" className="w-full" disabled={submitting}>
-              {submitting ? "Saving..." : "Save password"}
+              {submitting ? t("web.ui.saving") : t("web.auth.passwordRules.savePassword")}
             </Button>
           </form>
           <p className="text-muted-foreground mt-4 text-center text-sm">
-            Not you?{" "}
-            <button
-              type="button"
-              className="text-foreground underline hover:no-underline"
-              onClick={logout}
-            >
-              Sign out
-            </button>
+            {t("web.auth.choosePassword.notYou", {
+              signOut: (chunks) => (
+                <button
+                  type="button"
+                  className="text-foreground underline hover:no-underline"
+                  onClick={logout}
+                >
+                  {chunks}
+                </button>
+              ),
+            })}
           </p>
         </CardContent>
       </Card>

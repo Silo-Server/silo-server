@@ -11,13 +11,14 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gorilla/websocket"
+
 	"github.com/Silo-Server/silo-server/internal/access"
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/auth"
 	evt "github.com/Silo-Server/silo-server/internal/events"
 	"github.com/Silo-Server/silo-server/internal/logstream"
 	"github.com/Silo-Server/silo-server/internal/models"
-	"github.com/gorilla/websocket"
 )
 
 func adminLogsSocketFixture(t *testing.T) (*AdminLogsSocketV2, *logstream.Hub, *atomic.Bool, *atomic.Bool) {
@@ -160,35 +161,6 @@ func TestAdminLogsSocketV2ClosesOnAuthorityLoss(t *testing.T) {
 			}
 		})
 	}
-}
-
-// The bridge route keeps its answers: 503 without a hub, 400 bad_request for a
-// bad stream, and it still upgrades with the shared origin check.
-func TestHandleLogStreamWebSocketKeepsBridgeStatuses(t *testing.T) {
-	rec := httptest.NewRecorder()
-	NewAdminLogsHandler(nil, nil, nil).HandleLogStreamWebSocket(rec, httptest.NewRequest(http.MethodGet, "/api/v1/admin/logs/ws?stream=app", nil))
-	if rec.Code != http.StatusServiceUnavailable {
-		t.Fatalf("no hub: %d", rec.Code)
-	}
-	h := NewAdminLogsHandler(nil, nil, logstream.NewHub("bridge-fixture", nil))
-	rec = httptest.NewRecorder()
-	h.HandleLogStreamWebSocket(rec, httptest.NewRequest(http.MethodGet, "/api/v1/admin/logs/ws?stream=nope", nil))
-	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), `"bad_request"`) || !strings.Contains(rec.Body.String(), "Invalid stream") {
-		t.Fatalf("bad stream: %d %s", rec.Code, rec.Body.String())
-	}
-	rec = httptest.NewRecorder()
-	h.HandleLogStreamWebSocket(rec, httptest.NewRequest(http.MethodGet, "/api/v1/admin/logs/ws?stream=app&user_id=abc", nil))
-	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "user_id") {
-		t.Fatalf("bad filter: %d %s", rec.Code, rec.Body.String())
-	}
-	server := httptest.NewServer(http.HandlerFunc(h.HandleLogStreamWebSocket))
-	defer server.Close()
-	conn, resp, err := websocket.DefaultDialer.DialContext(t.Context(), "ws"+strings.TrimPrefix(server.URL, "http")+"?stream=app&token=legacy", nil)
-	if err != nil {
-		t.Fatalf("bridge upgrade with URL token: %v", err)
-	}
-	defer func() { _ = conn.Close() }()
-	_ = resp.Body.Close()
 }
 
 func TestAuditSocketDomainFilterValidationMatchesHistory(t *testing.T) {

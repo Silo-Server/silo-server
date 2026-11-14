@@ -4,6 +4,7 @@ import type {
   RestoreSection,
   RestoreSet,
 } from "@/api/v2/adminBackupRestore";
+import { t, type MessageKey } from "@/i18n";
 
 import { differingSettings, itemKey, type SelectionKeys } from "./restoreModel";
 
@@ -29,92 +30,96 @@ export function countStates(items: readonly RestoreItem[]): StateCounts {
 /** The bar's order: what can be restored first, what matches last. */
 export const STATE_ORDER: readonly ItemState[] = ["differs", "new", "blocked", "same"];
 
-const SHORT: Record<ItemState, (count: number) => string> = {
-  differs: (count) => `${count} ${count === 1 ? "differs" : "differ"}`,
-  new: (count) => `${count} new`,
-  blocked: (count) => `${count} can't`,
-  same: (count) => `${count} ${count === 1 ? "matches" : "match"}`,
+const SHORT: Record<ItemState, MessageKey> = {
+  differs: "web.admin.backups.restore.counts.differsShort",
+  new: "web.admin.backups.restore.counts.newShort",
+  blocked: "web.admin.backups.restore.counts.blockedShort",
+  same: "web.admin.backups.restore.counts.sameShort",
 };
 
-const LONG: Record<ItemState, (count: number) => string> = {
-  differs: (count) => `${count} ${count === 1 ? "differs" : "differ"} from this server`,
-  new: (count) => `${count} ${count === 1 ? "is" : "are"} not on this server`,
-  blocked: (count) => `${count} can't be restored`,
-  same: (count) => `${count} ${count === 1 ? "matches" : "match"} this server`,
+const LONG: Record<ItemState, MessageKey> = {
+  differs: "web.admin.backups.restore.counts.differsLong",
+  new: "web.admin.backups.restore.counts.newLong",
+  blocked: "web.admin.backups.restore.counts.blockedLong",
+  same: "web.admin.backups.restore.counts.sameLong",
 };
+
+function countText(key: MessageKey, count: number): string {
+  return t(key, { count, count_text: count });
+}
 
 /** The count line beside the bar: "120 match · 52 differ · 12 new · 3 can't". */
 export function stateCountsText(counts: StateCounts): string {
   const order: ItemState[] = ["same", "differs", "new", "blocked"];
   return order
     .filter((state) => counts[state] > 0)
-    .map((state) => SHORT[state](counts[state]))
+    .map((state) => countText(SHORT[state], counts[state]))
     .join(" · ");
 }
 
 /** The bar's accessible name, in words. */
 export function stateCountsLabel(counts: StateCounts): string {
   const parts = STATE_ORDER.filter((state) => counts[state] > 0).map((state) =>
-    LONG[state](counts[state]),
+    countText(LONG[state], counts[state]),
   );
-  return parts.length > 0 ? parts.join(", ") : "Nothing in this backup";
+  return parts.length > 0 ? parts.join(", ") : t("web.admin.backups.restore.counts.empty");
 }
 
 /** The one line a section with nothing to restore shows. */
 export function nothingToRestoreText(counts: StateCounts): string {
   if (counts.blocked === 0) {
-    return counts.same === 1
-      ? "It matches this server. Nothing to restore."
-      : `All ${counts.same} match this server. Nothing to restore.`;
+    return countText("web.admin.backups.restore.nothing.allMatch", counts.same);
   }
-  const parts = [
-    counts.same > 0 ? LONG.same(counts.same) : null,
-    LONG.blocked(counts.blocked),
-  ].filter(Boolean);
-  return `Nothing to restore: ${parts.join(" and ")}.`;
+  const blocked = countText(LONG.blocked, counts.blocked);
+  return counts.same > 0
+    ? t("web.admin.backups.restore.nothing.sameAndBlocked", {
+        same: countText(LONG.same, counts.same),
+        blocked,
+      })
+    : t("web.admin.backups.restore.nothing.blocked", { blocked });
 }
 
 /**
- * Why a group of items can't be restored, as the end of "8 can't be restored
- * — …". Typed over the contract's reasons, like REASON_SENTENCES.
+ * Why a group of items can't be restored, as the group's heading: "8 can't be
+ * restored — …". Typed over the contract's reasons, like REASON_SENTENCES.
  */
-const BLOCKED_PHRASES: Record<RestoreReason, string> = {
-  same: "they're already the same here",
-  path_in_use: "a folder belongs to another library here",
-  folder_missing: "their folders aren't on this server",
-  library_not_restorable: "their library can't be restored here",
-  library_not_mapped: "their library isn't on this server",
-  ambiguous_name: "more than one collection here has the name",
-  needs_another_key: "they're encrypted with a different SECRET_KEY",
-  config_needs_another_key: "their settings are encrypted with a different SECRET_KEY",
-  other_version: "another version is installed here",
-  item_not_on_this_server: "their title isn't in this server's catalog",
-  file_missing: "the image was missing from the backup",
-  not_in_backup: "the backup doesn't have them",
-  changed_since_preview: "this server changed after the preview",
-  ambiguous_account: "more than one account here matches",
-  ambiguous_profile: "more than one profile here has the name",
-  policy_wider: "this server would give them more access than the backup did",
-  group_not_on_this_server: "their access group isn't on this server",
-  login_taken: "another account here signs in with the username or email",
-  profile_limit: "the account here has no room for another profile",
-  user_store_unsupported: "accounts need the PostgreSQL user store",
-  template_not_available: "this server's starter packs don't have the template",
-  collection_not_mapped: "the collection they show isn't here or in the backup",
-  unreadable: "the backup's copy of them can't be read",
-  files_missing_here: "their files are missing on this server",
-  needs_install: "they need to be installed from a plugin catalog first",
-  kept_stricter: "they would widen access, so this server keeps its stricter values",
-  unverified_backup: "they connect to outside services and this server can't verify the backup",
-  over_restore_budget: "this restore already wrote as much collection detail as one restore may",
-  needs_primary_profile: "their primary profile has to be restored with them",
+const BLOCKED_TITLES: Record<RestoreReason, MessageKey> = {
+  same: "web.admin.backups.restore.blocked.same",
+  path_in_use: "web.admin.backups.restore.blocked.pathInUse",
+  folder_missing: "web.admin.backups.restore.blocked.folderMissing",
+  library_not_restorable: "web.admin.backups.restore.blocked.libraryNotRestorable",
+  library_not_mapped: "web.admin.backups.restore.blocked.libraryNotMapped",
+  ambiguous_name: "web.admin.backups.restore.blocked.ambiguousName",
+  needs_another_key: "web.admin.backups.restore.blocked.needsAnotherKey",
+  config_needs_another_key: "web.admin.backups.restore.blocked.configNeedsAnotherKey",
+  other_version: "web.admin.backups.restore.blocked.otherVersion",
+  item_not_on_this_server: "web.admin.backups.restore.blocked.itemNotOnThisServer",
+  file_missing: "web.admin.backups.restore.blocked.fileMissing",
+  not_in_backup: "web.admin.backups.restore.blocked.notInBackup",
+  changed_since_preview: "web.admin.backups.restore.blocked.changedSincePreview",
+  ambiguous_account: "web.admin.backups.restore.blocked.ambiguousAccount",
+  ambiguous_profile: "web.admin.backups.restore.blocked.ambiguousProfile",
+  policy_wider: "web.admin.backups.restore.blocked.policyWider",
+  group_not_on_this_server: "web.admin.backups.restore.blocked.groupNotOnThisServer",
+  login_taken: "web.admin.backups.restore.blocked.loginTaken",
+  profile_limit: "web.admin.backups.restore.blocked.profileLimit",
+  user_store_unsupported: "web.admin.backups.restore.blocked.userStoreUnsupported",
+  template_not_available: "web.admin.backups.restore.blocked.templateNotAvailable",
+  collection_not_mapped: "web.admin.backups.restore.blocked.collectionNotMapped",
+  unreadable: "web.admin.backups.restore.blocked.unreadable",
+  files_missing_here: "web.admin.backups.restore.blocked.filesMissingHere",
+  needs_install: "web.admin.backups.restore.blocked.needsInstall",
+  kept_stricter: "web.admin.backups.restore.blocked.keptStricter",
+  unverified_backup: "web.admin.backups.restore.blocked.unverifiedBackup",
+  over_restore_budget: "web.admin.backups.restore.blocked.overRestoreBudget",
+  needs_primary_profile: "web.admin.backups.restore.blocked.needsPrimaryProfile",
 };
 
 /** For an item the server gave a status but no reason. */
-const BLOCKED_STATUS_PHRASES: Partial<Record<RestoreItem["status"], string>> = {
-  folder_missing: BLOCKED_PHRASES.folder_missing,
-  ambiguous: "more than one item here matches",
-  needs_another_key: BLOCKED_PHRASES.needs_another_key,
+const BLOCKED_STATUS_TITLES: Partial<Record<RestoreItem["status"], MessageKey>> = {
+  folder_missing: BLOCKED_TITLES.folder_missing,
+  ambiguous: "web.admin.backups.restore.blocked.ambiguous",
+  needs_another_key: BLOCKED_TITLES.needs_another_key,
 };
 
 export interface BlockedGroup {
@@ -136,19 +141,19 @@ export interface SectionGroups {
 export function groupSectionItems(items: readonly RestoreItem[]): SectionGroups {
   const restorable: RestoreItem[] = [];
   const same: RestoreItem[] = [];
-  const blocked = new Map<string, { phrase: string; items: RestoreItem[] }>();
+  const blocked = new Map<string, { title: MessageKey; items: RestoreItem[] }>();
   for (const item of items) {
     const state = itemState(item);
     if (state === "same") same.push(item);
     else if (state !== "blocked") restorable.push(item);
     else {
       const key = item.reason ?? `status:${item.status}`;
-      const phrase =
-        (item.reason ? BLOCKED_PHRASES[item.reason] : BLOCKED_STATUS_PHRASES[item.status]) ??
-        "this server can't take them";
+      const title =
+        (item.reason ? BLOCKED_TITLES[item.reason] : BLOCKED_STATUS_TITLES[item.status]) ??
+        "web.admin.backups.restore.blocked.fallback";
       const group = blocked.get(key);
       if (group) group.items.push(item);
-      else blocked.set(key, { phrase, items: [item] });
+      else blocked.set(key, { title, items: [item] });
     }
   }
   return {
@@ -157,7 +162,7 @@ export function groupSectionItems(items: readonly RestoreItem[]): SectionGroups 
     blocked: [...blocked.entries()]
       .map(([key, group]) => ({
         key,
-        title: `${group.items.length} can't be restored — ${group.phrase}`,
+        title: countText(group.title, group.items.length),
         items: group.items,
       }))
       .sort((a, b) => b.items.length - a.items.length),
@@ -188,30 +193,41 @@ export interface LibraryRef {
   name: string;
 }
 
-const HOME: LibraryRef = { key: "home", name: "Home" };
-const ARTWORK: LibraryRef = { key: "artwork", name: "Artwork and branding" };
-const NO_LIBRARY: LibraryRef = { key: "none", name: "No library" };
+const HOME_KEY = "home";
+const ARTWORK_KEY = "artwork";
+const NO_LIBRARY_KEY = "none";
 
 /**
  * The library a collection or section belongs to: one mapped here, else the
  * backup's library it requires, else Home or the artwork group.
  */
 function itemLibrary(item: RestoreItem, names: LibraryNames): LibraryRef {
-  if (item.kind === "item_artwork" || item.kind === "branding") return ARTWORK;
-  if (item.home_section?.scope === "home") return HOME;
+  if (item.kind === "item_artwork" || item.kind === "branding") {
+    return { key: ARTWORK_KEY, name: t("web.admin.backups.restore.library.artwork") };
+  }
+  if (item.home_section?.scope === "home") {
+    return { key: HOME_KEY, name: t("web.admin.backups.restore.library.home") };
+  }
   const localId = item.home_section?.library_id ?? item.collection?.library_ids?.[0];
   if (localId) {
-    return { key: `local:${localId}`, name: names.local.get(localId) ?? `Library ${localId}` };
+    return {
+      key: `local:${localId}`,
+      name:
+        names.local.get(localId) ??
+        t("web.admin.backups.restore.library.fallback", { id: localId }),
+    };
   }
   const required = item.requires.find((key) => key.startsWith("libraries:"));
   if (required) {
     const backupId = required.slice("libraries:".length);
     return {
       key: `backup:${backupId}`,
-      name: names.backup.get(backupId) ?? `Library ${backupId}`,
+      name:
+        names.backup.get(backupId) ??
+        t("web.admin.backups.restore.library.fallback", { id: backupId }),
     };
   }
-  return NO_LIBRARY;
+  return { key: NO_LIBRARY_KEY, name: t("web.admin.backups.restore.library.none") };
 }
 
 export interface LibraryGroup extends LibraryRef {
@@ -228,7 +244,7 @@ export function groupByLibrary(items: readonly RestoreItem[], names: LibraryName
     else groups.set(library.key, { ...library, items: [item] });
   }
   const rank = (group: LibraryGroup) =>
-    group.key === HOME.key ? 0 : group.key === ARTWORK.key || group.key === NO_LIBRARY.key ? 2 : 1;
+    group.key === HOME_KEY ? 0 : group.key === ARTWORK_KEY || group.key === NO_LIBRARY_KEY ? 2 : 1;
   return [...groups.values()].sort((a, b) => rank(a) - rank(b) || a.name.localeCompare(b.name));
 }
 
@@ -263,9 +279,13 @@ export function matchesFilter(item: RestoreItem, query: string, names: LibraryNa
 /** "2 chosen of 12", or "nothing to restore", for the section index. */
 export function sectionProgress(section: RestoreSection, selection: SelectionKeys): string {
   const restorable = section.items.filter((item) => item.selectable);
-  if (restorable.length === 0) return "nothing to restore";
+  if (restorable.length === 0) return t("web.admin.backups.restore.progress.nothing");
   const chosen = restorable.filter((item) => selection.has(itemKey(section.id, item.id))).length;
-  return `${chosen} chosen of ${restorable.length}`;
+  return t("web.admin.backups.restore.progress.chosen", {
+    chosen,
+    chosen_text: chosen,
+    total_text: restorable.length,
+  });
 }
 
 function sectionTypeName(type: string): string {
@@ -290,23 +310,29 @@ export function rowSecondary(
   switch (item.kind) {
     case "library": {
       const local = item.library?.local_id ? names.local.get(item.library.local_id) : undefined;
-      if (itemState(item) === "same") return `Same folders as ${local ?? item.label}`;
+      if (itemState(item) === "same") {
+        return t("web.admin.backups.restore.row.sameFolders", { name: local ?? item.label });
+      }
       return item.library?.paths.join(", ") ?? null;
     }
     case "plugin":
       return item.plugin?.installed_version
-        ? `${item.plugin.installed_version} installed here`
-        : "Not installed here";
+        ? t("web.admin.backups.restore.row.pluginInstalled", {
+            version: item.plugin.installed_version,
+          })
+        : t("web.admin.backups.restore.row.pluginNotInstalled");
     case "settings_page": {
       const changed = differingSettings(item).length;
       return changed > 0
-        ? `${changed} ${changed === 1 ? "setting differs" : "settings differ"}`
+        ? countText("web.admin.backups.restore.row.settingsDiffer", changed)
         : null;
     }
     case "template_collection":
       return join(
         library,
-        item.collection?.local_id ? "your changes to it" : "created from the starter pack",
+        item.collection?.local_id
+          ? t("web.admin.backups.restore.row.templateChanges")
+          : t("web.admin.backups.restore.row.templateCreated"),
       );
     case "collection": {
       const collection = item.collection;
@@ -314,15 +340,17 @@ export function rowSecondary(
       return join(
         library,
         item.status === "differs" && collection.missing_items > 0
-          ? `adds ${collection.missing_items} ${collection.missing_items === 1 ? "item" : "items"}`
-          : `${collection.items} ${collection.items === 1 ? "item" : "items"}`,
+          ? countText("web.admin.backups.restore.row.collectionAdds", collection.missing_items)
+          : countText("web.admin.backups.restore.row.collectionItems", collection.items),
       );
     }
     case "home_section":
       return join(
         library,
         item.home_section ? sectionTypeName(item.home_section.section_type) : null,
-        item.home_section?.local_id ? "replaces the section here" : "added to the page",
+        item.home_section?.local_id
+          ? t("web.admin.backups.restore.row.sectionReplaces")
+          : t("web.admin.backups.restore.row.sectionAdded"),
       );
     default:
       return library;

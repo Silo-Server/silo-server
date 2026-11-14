@@ -108,12 +108,29 @@ func (r *ArtifactRepository) PrepareDownloadAgain(ctx context.Context, d *Downlo
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 	var status string
-	if err := tx.QueryRow(ctx, `SELECT status FROM download_artifacts WHERE id = $1 FOR UPDATE`, d.ArtifactID).Scan(&status); err != nil {
+	var artifactFileID int
+	if err := tx.QueryRow(ctx, `SELECT status, media_file_id FROM download_artifacts WHERE id = $1 FOR UPDATE`, d.ArtifactID).Scan(&status, &artifactFileID); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			// The recipe is gone with its row; only a new download can choose one.
 			return nil, false, fmt.Errorf("prepared file recipe is gone: %w", ErrDownloadNotActive)
 		}
 		return nil, false, fmt.Errorf("locking artifact to prepare again: %w", err)
+	}
+	// The artifact must be prepared from the download's own file row: a
+	// download parked on a retitle's stand-in names the artifact of a row that
+	// now belongs to another title, and preparing it again would encode that
+	// title for this download. The download is locked, after the artifact as
+	// every artifact-then-downloads writer locks them, and its file read as it
+	// is now, so a scan that parked it after the caller read it is seen here,
+	// before anything is requeued. The scanner's retitle locks the file and
+	// then the download and never the artifact, so the two cannot deadlock.
+	var downloadFileID int
+	err = tx.QueryRow(ctx, `SELECT media_file_id FROM downloads WHERE id = $1 AND artifact_id = $2 FOR UPDATE`, d.ID, d.ArtifactID).Scan(&downloadFileID)
+	if errors.Is(err, pgx.ErrNoRows) || (err == nil && (downloadFileID != d.MediaFileID || downloadFileID != artifactFileID)) {
+		return nil, false, fmt.Errorf("download no longer names this prepared file: %w", ErrDownloadNotActive)
+	}
+	if err != nil {
+		return nil, false, fmt.Errorf("locking download to prepare again: %w", err)
 	}
 	if artifactReady(&Artifact{Status: status}) {
 		return d, false, nil

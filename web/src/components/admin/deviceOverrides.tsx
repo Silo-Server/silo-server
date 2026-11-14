@@ -24,28 +24,18 @@ import { SETTING_KEYS, type SettingKey } from "@/lib/settingsContract";
 import { manifestPlatformFor, settingAppliesToPlatform } from "@/lib/deviceSettingGroups";
 import { cn } from "@/lib/utils";
 import type { AdminDeviceSetting, AdminUserSettingEntry } from "@/hooks/queries/admin/users";
-import {
-  deviceInheritedValue,
-  variesScopePhrase,
-  type InheritedValue,
-} from "@/lib/inheritedSettingValue";
+import { deviceInheritedValue, type InheritedValue } from "@/lib/inheritedSettingValue";
 import { formatRelativeTime } from "@/lib/date";
+import { settingDescription, settingLabel } from "@/lib/settingsText";
+import { useT, type Translate } from "@/i18n";
+import type { PlatformKind } from "./devicePlatformLabels";
+
+export { platformKindLabel, platformLabel, type PlatformKind } from "./devicePlatformLabels";
 
 export const UNKNOWN_PROFILE_ID = "unknown-profile";
 
-export type PlatformKind = "tv" | "mobile" | "tablet" | "desktop" | "unknown";
-
-const PLATFORM_KIND_LABELS: Record<PlatformKind, string> = {
-  tv: "TV",
-  mobile: "Mobile",
-  tablet: "Tablet",
-  desktop: "Desktop",
-  unknown: "Other",
-};
-
-export function platformKindLabel(kind: PlatformKind): string {
-  return PLATFORM_KIND_LABELS[kind];
-}
+const SEPARATOR = " · ";
+const DOT = "·";
 
 export function classifyPlatform(raw: string | undefined): PlatformKind {
   if (!raw) return "unknown";
@@ -89,10 +79,6 @@ export function classifyPlatform(raw: string | undefined): PlatformKind {
     return "desktop";
   }
   return "unknown";
-}
-
-export function platformLabel(raw: string | undefined): string {
-  return raw && raw.trim().length > 0 ? raw : "Unknown platform";
 }
 
 export function formatRelative(iso: string | undefined): string {
@@ -184,6 +170,7 @@ export interface SettingAnomaly {
  */
 export function detectSettingConflicts(
   settings: readonly AdminDeviceSetting[],
+  t: Translate,
 ): Map<string, SettingAnomaly> {
   const out = new Map<string, SettingAnomaly>();
   const byKey = new Map(settings.map((s) => [s.key, s.value]));
@@ -196,11 +183,11 @@ export function detectSettingConflicts(
   ) {
     out.set("player.dv_profile7_hdr10_fallback", {
       kind: "conflict",
-      reason: "Conflicts with HDR disabled — the fallback only applies when HDR is on.",
+      reason: t("web.admin.common.deviceOverrides.conflict.dvFallbackWithoutHdr"),
     });
     out.set("player.hdr_enabled", {
       kind: "conflict",
-      reason: "Conflicts with the Profile 7 HDR10 fallback override above.",
+      reason: t("web.admin.common.deviceOverrides.conflict.hdrWithDvFallback"),
     });
   }
 
@@ -212,7 +199,7 @@ export function detectSettingConflicts(
   ) {
     out.set("playback.auto_skip_credits", {
       kind: "conflict",
-      reason: "Skipping credits with auto-play next disabled lands the player on a blank screen.",
+      reason: t("web.admin.common.deviceOverrides.conflict.skipCreditsWithoutAutoPlay"),
     });
   }
 
@@ -227,6 +214,7 @@ export function detectSettingConflicts(
 export function getSettingAnomaly(
   setting: AdminDeviceSetting,
   isOverride: boolean,
+  t: Translate,
   options: {
     /** Days the device has been dormant; flagged when > 30. */
     deviceStaleDays?: number | null;
@@ -263,7 +251,10 @@ export function getSettingAnomaly(
         const unit = definition.unit ? ` ${definition.unit}` : "";
         return {
           kind: "extreme",
-          reason: `Far from the default (${v}${unit} vs ${def}${unit}) — likely a workaround that wasn't reverted.`,
+          reason: t("web.admin.common.deviceOverrides.anomaly.extreme", {
+            value: `${v}${unit}`,
+            default_value: `${def}${unit}`,
+          }),
         };
       }
     }
@@ -273,7 +264,10 @@ export function getSettingAnomaly(
   if (options.deviceStaleDays != null && options.deviceStaleDays > 30) {
     return {
       kind: "stale",
-      reason: `Device hasn't been seen in ${options.deviceStaleDays} days — this override may be obsolete.`,
+      reason: t("web.admin.common.deviceOverrides.anomaly.stale", {
+        count: options.deviceStaleDays,
+        count_text: options.deviceStaleDays,
+      }),
     };
   }
 
@@ -320,15 +314,16 @@ export function DeviceOverrideRow({
   onEditJson,
   onReset,
 }: DeviceOverrideRowProps) {
+  const t = useT();
   const definition = getSettingDefinition(setting.key);
   // Object-valued settings have no inline widget: they open a bespoke panel
   // (subtitle appearance) or the raw JSON editor.
   const isJsonOnly = isStructuredSetting(definition);
 
   const anomalyBadgeLabel: Record<SettingAnomalyKind, string> = {
-    extreme: "extreme",
-    conflict: "conflict",
-    stale: "stale",
+    extreme: t("web.admin.common.deviceOverrides.badge.extreme"),
+    conflict: t("web.admin.common.deviceOverrides.badge.conflict"),
+    stale: t("web.admin.common.deviceOverrides.badge.stale"),
   };
 
   return (
@@ -341,28 +336,32 @@ export function DeviceOverrideRow({
         !isOverride && "opacity-70 hover:opacity-100",
         // Anomalies get a destructive left edge so they read as "this is
         // probably the row you came here for" without dominating the UI.
-        anomaly && "border-destructive/40 -ml-3 border-l-2 pl-3",
+        anomaly && "border-destructive/40 -ms-3 border-s-2 ps-3",
       )}
     >
       <div className="min-w-0 space-y-0.5">
         <div className="flex items-center gap-2">
           <span className="text-foreground text-[13.5px] leading-tight font-medium">
-            {definition?.label ?? setting.key}
+            {definition ? settingLabel(definition) : setting.key}
           </span>
           {isOverride ? (
             <span
               className="bg-foreground/80 inline-block h-1.5 w-1.5 shrink-0 rounded-full"
-              title="Override is set on this device"
-              aria-label="overridden"
+              title={t("web.admin.common.deviceOverrides.override.setTitle")}
+              aria-label={t("web.admin.common.deviceOverrides.override.setLabel")}
             />
           ) : (
             <span
               className="text-muted-foreground/60 border-border/50 rounded-full border px-1.5 py-px text-[9.5px] font-medium tracking-[0.05em] uppercase"
-              title={`Not overridden on this device (${
-                inherited ? inheritedSourceText(inherited) : "app default"
-              })`}
+              title={t("web.admin.common.deviceOverrides.override.notSetTitle", {
+                source: inherited
+                  ? inheritedSourceText(t, inherited)
+                  : t("web.admin.common.deviceOverrides.source.appDefault"),
+              })}
             >
-              {inherited?.profileName != null ? "profile" : "default"}
+              {inherited?.profileName != null
+                ? t("web.admin.common.deviceOverrides.badge.profile")
+                : t("web.admin.common.deviceOverrides.badge.default")}
             </span>
           )}
           {anomaly && (
@@ -380,7 +379,7 @@ export function DeviceOverrideRow({
         </div>
         {definition?.description && (
           <p className="text-muted-foreground pt-1 text-[12.5px] leading-relaxed">
-            {definition.description}
+            {settingDescription(definition)}
           </p>
         )}
         <div className="text-muted-foreground pt-0.5 text-[11.5px]">
@@ -391,14 +390,16 @@ export function DeviceOverrideRow({
             ? !isJsonOnly &&
               definition && (
                 <span className="text-muted-foreground/60">
-                  {" "}
-                  · default {formatSettingValue(setting.key, defaultValueToString(definition))}
+                  {SEPARATOR}
+                  {t("web.admin.common.deviceOverrides.value.default", {
+                    value: formatSettingValue(setting.key, defaultValueToString(definition)),
+                  })}
                 </span>
               )
             : inherited && (
                 <span className="text-muted-foreground/60">
-                  {" "}
-                  · {inheritedSourceText(inherited)}
+                  {SEPARATOR}
+                  {inheritedSourceText(t, inherited)}
                 </span>
               )}
         </div>
@@ -413,7 +414,9 @@ export function DeviceOverrideRow({
       <div className="flex flex-col items-stretch gap-2 md:min-w-[220px] md:items-end">
         {isJsonOnly || !definition ? (
           <Button variant="outline" size="sm" onClick={() => onEditJson(setting, isOverride)}>
-            {setting.key === SETTING_KEYS.PLAYBACK_SUBTITLE_APPEARANCE ? "Customize" : "Edit JSON"}
+            {setting.key === SETTING_KEYS.PLAYBACK_SUBTITLE_APPEARANCE
+              ? t("web.admin.common.deviceOverrides.edit.customize")
+              : t("web.admin.common.deviceOverrides.edit.json")}
           </Button>
         ) : (
           <RegistrySettingControl
@@ -430,11 +433,11 @@ export function DeviceOverrideRow({
             className="text-muted-foreground hover:text-foreground inline-flex items-center gap-1 self-end text-[11.5px] transition-colors"
           >
             <RotateCcw className="h-3 w-3" />
-            Reset
+            {t("web.admin.common.deviceOverrides.reset")}
           </button>
         ) : (
           <span className="text-muted-foreground/60 self-end text-[11px] italic">
-            change to add override
+            {t("web.admin.common.deviceOverrides.changeToOverride")}
           </span>
         )}
       </div>
@@ -443,11 +446,17 @@ export function DeviceOverrideRow({
 }
 
 /** "from Alex's profile", "app default", plus where something else may apply. */
-function inheritedSourceText(inherited: InheritedValue): string {
+function inheritedSourceText(t: Translate, inherited: InheritedValue): string {
+  const { profileName } = inherited;
   const source =
-    inherited.profileName !== null ? `from ${inherited.profileName}'s profile` : "app default";
+    profileName !== null
+      ? t("web.admin.common.deviceOverrides.source.profile", { name: profileName })
+      : t("web.admin.common.deviceOverrides.source.appDefault");
   return inherited.orVaries
-    ? `${source}, or ${variesScopePhrase(inherited.orVaries)} setting where one applies`
+    ? t("web.admin.common.deviceOverrides.source.orVaries", {
+        source,
+        scope: inherited.orVaries.replace(/ /g, "_"),
+      })
     : source;
 }
 
@@ -604,6 +613,7 @@ export function DeviceProfileTabs({
   updatePending,
   resetPending = false,
 }: DeviceProfileTabsProps) {
+  const t = useT();
   const [activeId, setActiveId] = useState<string | null>(initialProfileId ?? null);
 
   const active = useMemo(
@@ -617,18 +627,18 @@ export function DeviceProfileTabs({
   // Conflicts depend on the active profile's settings as a whole. Memoize
   // by the active profile's reference + a content hash via the rendered
   // row keys/values — recomputes on profile switch and on save.
-  const conflictMap = useMemo(() => detectSettingConflicts(active?.settings ?? []), [active]);
+  const conflictMap = useMemo(() => detectSettingConflicts(active?.settings ?? [], t), [active, t]);
   const anomaliesByKey = useMemo(() => {
     const out = new Map<string, SettingAnomaly>();
     for (const { setting, isOverride } of rows) {
-      const a = getSettingAnomaly(setting, isOverride, {
+      const a = getSettingAnomaly(setting, isOverride, t, {
         deviceStaleDays,
         conflicts: conflictMap,
       });
       if (a) out.set(setting.key, a);
     }
     return out;
-  }, [rows, deviceStaleDays, conflictMap]);
+  }, [rows, deviceStaleDays, conflictMap, t]);
 
   if (!active) return null;
 
@@ -644,7 +654,7 @@ export function DeviceProfileTabs({
     <div className="flex h-full min-h-0 flex-col">
       <div
         role="tablist"
-        aria-label="Profiles on this device"
+        aria-label={t("web.admin.common.deviceOverrides.tabs.label")}
         className="border-border/60 scrollbar-thin flex shrink-0 gap-0.5 overflow-x-auto border-b px-2 pt-2"
       >
         {profiles.map((profile) => {
@@ -681,7 +691,7 @@ export function DeviceProfileTabs({
                 {initial}
               </span>
               <span className="max-w-[120px] truncate text-[12.5px] font-medium">
-                {profile.profileName || "Unnamed"}
+                {profile.profileName || t("web.admin.common.deviceOverrides.tabs.unnamed")}
               </span>
               <span
                 className={cn(
@@ -709,7 +719,7 @@ export function DeviceProfileTabs({
       <div
         className="border-border/60 flex shrink-0 flex-wrap items-center justify-between gap-3 border-b px-4 py-2.5"
         style={{
-          backgroundImage: `linear-gradient(90deg, color-mix(in oklab, ${accent} 8%, transparent), transparent 70%)`,
+          backgroundImage: `linear-gradient(calc(90deg * var(--dir-sign)), color-mix(in oklab, ${accent} 8%, transparent), transparent 70%)`,
         }}
       >
         <div className="text-muted-foreground flex min-w-0 items-center gap-2 text-[11px]">
@@ -719,26 +729,35 @@ export function DeviceProfileTabs({
             style={{ backgroundColor: accent }}
           />
           <span className="truncate font-mono">{active.profileId}</span>
-          <span className="text-muted-foreground/40">·</span>
+          <span className="text-muted-foreground/40">{DOT}</span>
           <span className="tabular-nums">
-            <span className="text-foreground/80 font-medium">{overrideCount}</span>{" "}
-            {overrideCount === 1 ? "override" : "overrides"}
+            {t("web.admin.common.deviceOverrides.summary.overrides", {
+              count: overrideCount,
+              count_text: overrideCount,
+              b: (chunks) => <span className="text-foreground/80 font-medium">{chunks}</span>,
+            })}
             {showAllSettings && rows.length > overrideCount && (
               <span className="text-muted-foreground/60">
-                {" "}
-                · {rows.length - overrideCount} inherited
+                {SEPARATOR}
+                {t("web.admin.common.deviceOverrides.summary.inherited", {
+                  count: rows.length - overrideCount,
+                  count_text: rows.length - overrideCount,
+                })}
               </span>
             )}
           </span>
           {anomalyCountInProfile > 0 && (
             <>
-              <span className="text-muted-foreground/40">·</span>
+              <span className="text-muted-foreground/40">{DOT}</span>
               <span
                 className="text-destructive bg-destructive/10 inline-flex items-center gap-1 rounded px-1.5 py-px text-[10px] font-medium tracking-[0.04em] uppercase"
-                title="One or more overrides in this profile look suspect — see the highlighted rows below."
+                title={t("web.admin.common.deviceOverrides.summary.suspectTitle")}
               >
                 <AlertTriangle className="h-2.5 w-2.5" />
-                {anomalyCountInProfile} suspect
+                {t("web.admin.common.deviceOverrides.summary.suspect", {
+                  count: anomalyCountInProfile,
+                  count_text: anomalyCountInProfile,
+                })}
               </span>
             </>
           )}
@@ -752,7 +771,7 @@ export function DeviceProfileTabs({
           className="text-muted-foreground hover:text-foreground disabled:hover:text-muted-foreground inline-flex items-center gap-1 text-[11.5px] transition-colors disabled:opacity-40"
         >
           <RotateCcw className="h-3 w-3" />
-          Reset all overrides
+          {t("web.admin.common.deviceOverrides.summary.resetAll")}
         </button>
       </div>
 

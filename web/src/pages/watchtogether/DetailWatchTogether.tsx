@@ -11,6 +11,7 @@ import {
   StaleApiRequestContextError,
 } from "@/api/client";
 import { useViewTransitionNavigate } from "@/hooks/useViewTransition";
+import { useT } from "@/i18n";
 import type { ItemDetail } from "@/api/types";
 import type { ActionBarWatchTogether } from "@/pages/ItemDetail/components/ActionBar";
 import { useLiveRoomPresence } from "./hooks/useLiveRoomPresence";
@@ -32,6 +33,7 @@ export function useDetailWatchTogether({
   seriesId?: string;
   initialSeasonNumber?: number;
 }) {
+  const t = useT();
   const navigate = useViewTransitionNavigate();
   const live = useLiveRoomPresence();
   const [open, setOpen] = useState(false);
@@ -48,9 +50,9 @@ export function useDetailWatchTogether({
     try {
       await createRoomSuggestion(draft);
       if (draft.authority && isCapturedProfileAuthorityActive(draft.authority)) {
-        toast.success(`Suggested to ${live.code}`, {
+        toast.success(t("web.watchTogether.detail.suggestedTo", { code: live.code }), {
           action: {
-            label: "Open room",
+            label: t("web.watchTogether.detail.openRoom"),
             onClick: () =>
               navigate(`/rooms/${live.room_id}?room_token=${encodeURIComponent(live.token)}`),
           },
@@ -58,9 +60,11 @@ export function useDetailWatchTogether({
       }
     } catch (error) {
       if (error instanceof StaleApiRequestContextError) return;
-      toast.error(error instanceof Error ? error.message : "Could not suggest that");
+      toast.error(
+        error instanceof Error ? error.message : t("web.watchTogether.common.suggestFailed"),
+      );
     }
-  }, [item.type, live, navigate, target]);
+  }, [item.type, live, navigate, t, target]);
 
   const playInLive = useCallback(async () => {
     if (!live || !target) return;
@@ -76,9 +80,13 @@ export function useDetailWatchTogether({
       }
     } catch (error) {
       if (error instanceof StaleApiRequestContextError) return;
-      toast.error(error instanceof Error ? error.message : `Could not play this in ${live.code}`);
+      toast.error(
+        error instanceof Error
+          ? error.message
+          : t("web.watchTogether.detail.playFailed", { code: live.code }),
+      );
     }
-  }, [live, navigate, target]);
+  }, [live, navigate, t, target]);
 
   const menu = useMemo<ActionBarWatchTogether | undefined>(() => {
     if (!target && !seriesId) return undefined;

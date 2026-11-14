@@ -34,6 +34,7 @@ import {
   Scissors,
   RotateCcw,
   Shuffle,
+  ShieldCheck,
   Tags,
   Eye,
   ThumbsDown,
@@ -43,6 +44,7 @@ import {
   Zap,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { numberText, type Translate, useT } from "@/i18n";
 import AddToCollectionDialog from "@/components/AddToCollectionDialog";
 import { Button } from "@/components/ui/button";
 import {
@@ -70,6 +72,7 @@ import { parseWatchHref } from "@/pages/watchRouteHelpers";
 import VersionDropdown from "./VersionDropdown";
 import AudioTracksPopover from "./AudioTracksPopover";
 import SubtitlesPopover from "./SubtitlesPopover";
+import { isRightToLeft, readingArrowKey } from "@/lib/direction";
 
 // Keep hover feedback on the compositor. Repainting these controls while the detail backdrop is
 // animating can stall the main thread on image-heavy movie and series pages.
@@ -123,7 +126,7 @@ function DetailOverflowMenuItem({
       {...props}
       type="button"
       role="menuitem"
-      className={`focus:bg-accent focus:text-accent-foreground hover:bg-accent hover:text-accent-foreground [&_svg:not([class*='text-'])]:text-muted-foreground relative flex w-full cursor-pointer items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm outline-hidden select-none disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4 ${className ?? ""}`}
+      className={`focus:bg-accent focus:text-accent-foreground hover:bg-accent hover:text-accent-foreground [&_svg:not([class*='text-'])]:text-muted-foreground relative flex w-full cursor-pointer items-center gap-2 rounded-sm px-2 py-1.5 text-start text-sm outline-hidden select-none disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4 ${className ?? ""}`}
       onClick={() => {
         closeMenu?.();
         onAction?.();
@@ -235,6 +238,10 @@ export interface ActionBarProps {
   /** Marks or clears Not interested; movies and series only. */
   onToggleNotInterested?: () => void;
   notInterested?: boolean;
+  /** Opens "Allow for…" for the household's limited profiles; primary profile only. */
+  onAllowForProfiles?: () => void;
+  /** The menu label for onAllowForProfiles, e.g. "Allowed for Emma". */
+  allowForLabel?: string;
   onRefresh?: (mode: RefreshItemMetadataMode) => void;
   isRefreshing?: boolean;
   /** Re-detects local markers; without redetectKind the admin picks intro, credits, or both. */
@@ -258,9 +265,12 @@ export interface ActionBarProps {
   versions?: FileVersion[];
   playbackVariants?: PlaybackVariant[];
   selectedVersion?: FileVersion | null;
+  /** The file Start Over plays: the first part of selectedVersion's presentation. */
+  restartVersion?: FileVersion | null;
   /** The viewer chose selectedVersion rather than playing the default version. */
   versionPicked?: boolean;
-  onSelectVersion?: (version: FileVersion) => void;
+  onSelectVersion?: (version: FileVersion | null) => void;
+  onSelectEdition?: (key: string) => void;
   onDownload?: () => void;
   onSearchSubtitles?: () => void;
   /** Opens the season picker to request seasons the library is missing. */
@@ -285,6 +295,29 @@ export interface ActionBarProps {
   showForcedSubtitles?: boolean;
 }
 
+/**
+ * Start Over can play another file than the one the pickers describe (part 1
+ * of a later part's presentation). Audio indexes belong to the picked file, so
+ * the server resolves the saved audio preference instead. A manual subtitle
+ * pick still matches by language, source and flags, but loses the picked
+ * file's track index, sidecar path and downloaded subtitle.
+ */
+function withoutFileSpecificPicks<
+  T extends { audioTrackIndex?: number; prePlaySubtitleSelection: PrePlaySubtitleSelection | null },
+>(input: T): T {
+  const selection = input.prePlaySubtitleSelection;
+  return {
+    ...input,
+    audioTrackIndex: undefined,
+    prePlaySubtitleSelection: selection && {
+      ...selection,
+      track_index: undefined,
+      external_subtitle_path: undefined,
+      downloaded_subtitle_id: undefined,
+    },
+  };
+}
+
 export default function ActionBar({
   compactMobile = false,
   contentId,
@@ -295,7 +328,7 @@ export default function ActionBar({
   secondaryActions,
   links,
   playHref,
-  playLabel = "Play",
+  playLabel: playLabelProp,
   playProgress,
   restartHref,
   onMarkUnwatched,
@@ -311,6 +344,8 @@ export default function ActionBar({
   inWatchlist = false,
   onToggleNotInterested,
   notInterested = false,
+  onAllowForProfiles,
+  allowForLabel: allowForLabelProp,
   onRefresh,
   isRefreshing = false,
   onRedetectMarkers,
@@ -327,8 +362,10 @@ export default function ActionBar({
   versions,
   playbackVariants,
   selectedVersion,
+  restartVersion,
   versionPicked = false,
   onSelectVersion,
+  onSelectEdition,
   onDownload,
   onSearchSubtitles,
   onRequestSeasons,
@@ -349,6 +386,10 @@ export default function ActionBar({
   subtitleMode,
   showForcedSubtitles,
 }: ActionBarProps) {
+  const t = useT();
+  const resumeLabel = t("web.detail.actions.resume");
+  const playLabel = playLabelProp ?? t("web.detail.actions.play");
+  const allowForLabel = allowForLabelProp ?? t("web.detail.actions.allowFor");
   const navigate = useNavigate();
   const location = useLocation();
   const playbackController = useWatchPlaybackController();
@@ -378,13 +419,13 @@ export default function ActionBar({
   const showMarkerEditor = canEditMarkers && !!contentId;
   const hasMultipleVersions = (playbackVariants?.length ?? 0) > 1 || (versions?.length ?? 0) > 1;
   const showPlayChoiceDialog =
-    !hasMultipleVersions && playLabel === "Resume" && !!playHref && !!restartHref;
-  const displayedPlayLabel = showPlayChoiceDialog ? "Play" : playLabel;
+    !hasMultipleVersions && playLabel === resumeLabel && !!playHref && !!restartHref;
+  const displayedPlayLabel = showPlayChoiceDialog ? t("web.detail.actions.play") : playLabel;
   const playText = compactMobile ? (
     <>
       <span className="detail-full-label">{displayedPlayLabel}</span>
       <span className="detail-short-label">
-        {displayedPlayLabel === "Resume" ? "Resume" : "Play"}
+        {displayedPlayLabel === resumeLabel ? resumeLabel : t("web.detail.actions.play")}
       </span>
     </>
   ) : (
@@ -394,7 +435,7 @@ export default function ActionBar({
   const progressOverlay =
     playProgress != null && playProgress > 0 && playProgress < 100 ? (
       <span
-        className="border-primary-foreground/40 bg-primary-foreground/20 pointer-events-none absolute inset-y-0 left-0 border-r-2"
+        className="border-primary-foreground/40 bg-primary-foreground/20 pointer-events-none absolute inset-y-0 start-0 border-e-2"
         style={{ width: `${playProgress}%` }}
       />
     ) : null;
@@ -440,18 +481,28 @@ export default function ActionBar({
         return;
       }
 
+      const restart = restartOverride ?? parsed.restart;
+      const file = restart ? (restartVersion ?? selectedVersion) : selectedVersion;
+      const input = buildPrePlayStartInput({
+        contentId: parsed.contentId,
+        fileId: file?.file_id ?? parsed.fileId,
+        libraryId: parsed.libraryId,
+        restart,
+        returnHref: currentHref,
+      });
       playbackController.startPlayback(
-        buildPrePlayStartInput({
-          contentId: parsed.contentId,
-          fileId: selectedVersion?.file_id ?? parsed.fileId,
-          libraryId: parsed.libraryId,
-          restart: restartOverride ?? parsed.restart,
-          returnHref: currentHref,
-        }),
+        file && file.file_id !== selectedVersion?.file_id ? withoutFileSpecificPicks(input) : input,
         "viewer",
       );
     },
-    [buildPrePlayStartInput, currentHref, navigate, playbackController, selectedVersion?.file_id],
+    [
+      buildPrePlayStartInput,
+      currentHref,
+      navigate,
+      playbackController,
+      restartVersion,
+      selectedVersion,
+    ],
   );
   const handleResumePlayback = () => {
     if (!playHref) return;
@@ -534,16 +585,27 @@ export default function ActionBar({
       );
     // Line the first item up with Manage: the menu's border and padding sit above it.
     const besideTop = clampTop(triggerRect.top - 5);
-    if (mainRect.right + gap + menuRect.width <= window.innerWidth - viewportPadding) {
-      setManagePosition({ left: mainRect.right + gap, top: besideTop });
-    } else if (mainRect.left - gap - menuRect.width >= viewportPadding) {
-      setManagePosition({ left: mainRect.left - gap - menuRect.width, top: besideTop });
+    // Beside the main menu on its end side (right, or left in a right-to-left
+    // layout), else the other side.
+    const rtl = isRightToLeft(main);
+    const right = mainRect.right + gap;
+    const left = mainRect.left - gap - menuRect.width;
+    const sides = [
+      { left: right, fits: right + menuRect.width <= window.innerWidth - viewportPadding },
+      { left, fits: left >= viewportPadding },
+    ];
+    if (rtl) sides.reverse();
+    const beside = sides.find((side) => side.fits);
+    if (beside) {
+      setManagePosition({ left: beside.left, top: besideTop });
     } else {
-      // No room beside it on a narrow screen: cascade over the main menu, under Manage.
+      // No room beside it on a narrow screen: cascade over the main menu, under
+      // Manage, stepped in from its start edge.
+      const cascade = rtl ? mainRect.right - 24 - menuRect.width : mainRect.left + 24;
       setManagePosition({
         left: Math.min(
           window.innerWidth - menuRect.width - viewportPadding,
-          Math.max(viewportPadding, mainRect.left + 24),
+          Math.max(viewportPadding, cascade),
         ),
         top: clampTop(triggerRect.bottom),
       });
@@ -645,12 +707,14 @@ export default function ActionBar({
     };
   }, [closeManageMenu, closeOverflowMenu, manageOpen, overflowOpen, positionOverflowMenu]);
   const handleOverflowKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
-    if (event.key === "ArrowRight" && event.target === manageTriggerRef.current) {
+    // The submenu opens toward the end side, so its keys follow the direction.
+    const key = readingArrowKey(event);
+    if (key === "ArrowRight" && event.target === manageTriggerRef.current) {
       event.preventDefault();
       openManageMenu(true);
       return;
     }
-    if (event.key === "ArrowLeft" && event.currentTarget === manageMenuRef.current) {
+    if (key === "ArrowLeft" && event.currentTarget === manageMenuRef.current) {
       event.preventDefault();
       closeManageMenu(true);
       return;
@@ -706,7 +770,7 @@ export default function ActionBar({
     onShuffle && (
       <DetailOverflowMenuItem key="shuffle" closeMenu={closeOverflowMenu} onAction={onShuffle}>
         <Shuffle className="size-4" />
-        Shuffle
+        {t("web.detail.actions.shuffle")}
       </DetailOverflowMenuItem>
     ),
     showRestartInMenu && (
@@ -716,7 +780,7 @@ export default function ActionBar({
         onAction={handleRestartPlayback}
       >
         <RotateCcw className="size-4" />
-        Play from Beginning
+        {t("web.detail.actions.playFromBeginning")}
       </DetailOverflowMenuItem>
     ),
     onMarkUnwatched && (
@@ -726,7 +790,7 @@ export default function ActionBar({
         onAction={onMarkUnwatched}
       >
         <Eye className="size-4" />
-        Mark Unwatched
+        {t("web.detail.actions.markUnwatched")}
       </DetailOverflowMenuItem>
     ),
   ];
@@ -738,7 +802,9 @@ export default function ActionBar({
         onAction={onToggleWatchlist}
       >
         {inWatchlist ? <Check className="size-4" /> : <Plus className="size-4" />}
-        {inWatchlist ? "Remove from Watchlist" : "Add to Watchlist"}
+        {inWatchlist
+          ? t("web.detail.actions.removeFromWatchlist")
+          : t("web.detail.actions.addToWatchlist")}
       </DetailOverflowMenuItem>
     ),
     contentId && canAddToCollection && (
@@ -748,13 +814,13 @@ export default function ActionBar({
         onAction={() => setAddToCollectionOpen(true)}
       >
         <FolderPlus className="size-4" />
-        Add to Collection
+        {t("web.detail.actions.addToCollection")}
       </DetailOverflowMenuItem>
     ),
     onDownload && (
       <DetailOverflowMenuItem key="download" closeMenu={closeOverflowMenu} onAction={onDownload}>
         <Download className="size-4" />
-        Download
+        {t("web.detail.actions.download")}
       </DetailOverflowMenuItem>
     ),
     onRequestSeasons && (
@@ -764,7 +830,7 @@ export default function ActionBar({
         onAction={onRequestSeasons}
       >
         <Inbox className="size-4" />
-        Request Seasons
+        {t("web.detail.actions.requestSeasons")}
       </DetailOverflowMenuItem>
     ),
     onToggleNotInterested && (
@@ -774,7 +840,19 @@ export default function ActionBar({
         onAction={onToggleNotInterested}
       >
         <ThumbsDown className={cn("size-4", notInterested && "fill-current")} />
-        {notInterested ? "Show in Recommendations" : "Not Interested"}
+        {notInterested
+          ? t("web.detail.actions.showInRecommendations")
+          : t("web.detail.actions.notInterested")}
+      </DetailOverflowMenuItem>
+    ),
+    onAllowForProfiles && (
+      <DetailOverflowMenuItem
+        key="allow-for-profiles"
+        closeMenu={closeOverflowMenu}
+        onAction={onAllowForProfiles}
+      >
+        <ShieldCheck className="size-4" />
+        {allowForLabel}
       </DetailOverflowMenuItem>
     ),
   ];
@@ -786,7 +864,7 @@ export default function ActionBar({
           onAction={watchTogether.onStartParty}
         >
           <UsersRound className="size-4" />
-          Start a Watch Party
+          {t("web.detail.actions.startWatchParty")}
         </DetailOverflowMenuItem>,
         watchTogether.liveRoom && (
           <DetailOverflowMenuItem
@@ -795,7 +873,7 @@ export default function ActionBar({
             onAction={watchTogether.liveRoom.onSuggest}
           >
             <Hand className="size-4" />
-            Suggest to {watchTogether.liveRoom.code}
+            {t("web.detail.actions.suggestToRoom", { code: watchTogether.liveRoom.code })}
           </DetailOverflowMenuItem>
         ),
         watchTogether.liveRoom?.onPlay && (
@@ -805,7 +883,7 @@ export default function ActionBar({
             onAction={watchTogether.liveRoom.onPlay}
           >
             <Zap className="size-4" />
-            Play in {watchTogether.liveRoom.code}
+            {t("web.detail.actions.playInRoom", { code: watchTogether.liveRoom.code })}
           </DetailOverflowMenuItem>
         ),
       ]
@@ -819,13 +897,13 @@ export default function ActionBar({
           onAction={onEditMetadata}
         >
           <MediaActionIcon action="editMetadata" />
-          Edit Metadata
+          {t("web.detail.actions.editMetadata")}
         </DetailOverflowMenuItem>
       ),
       canCurateMetadata && onMatchItem && (
         <DetailOverflowMenuItem key="match" closeMenu={closeOverflowMenu} onAction={onMatchItem}>
           <MediaActionIcon action="matchItem" />
-          Match Item
+          {t("web.detail.actions.matchItem")}
         </DetailOverflowMenuItem>
       ),
       canCurateMetadata && onRefresh && (
@@ -836,7 +914,7 @@ export default function ActionBar({
           onAction={() => setRefreshDialogOpen(true)}
         >
           <MediaActionIcon action="refreshMetadata" isPending={isRefreshing} />
-          Refresh Metadata
+          {t("web.detail.actions.refreshMetadata")}
         </DetailOverflowMenuItem>
       ),
     ],
@@ -848,7 +926,7 @@ export default function ActionBar({
           onAction={() => setMarkerEditorOpen(true)}
         >
           <Tags className="size-4" />
-          Edit Markers
+          {t("web.detail.actions.editMarkers")}
         </DetailOverflowMenuItem>
       ),
       isAdmin && onRedetectMarkers && (
@@ -862,10 +940,10 @@ export default function ActionBar({
         >
           <RefreshCw className={`size-4 ${isRedetectingMarkers ? "animate-spin" : ""}`} />
           {redetectKind === "credits"
-            ? "Re-detect Credits"
+            ? t("web.detail.actions.redetectCredits")
             : redetectKind === "intro"
-              ? "Re-detect Intro Markers"
-              : "Re-detect Markers"}
+              ? t("web.detail.actions.redetectIntro")
+              : t("web.detail.actions.redetectMarkers")}
         </DetailOverflowMenuItem>
       ),
       showTrickplay && (
@@ -875,27 +953,17 @@ export default function ActionBar({
           onAction={() => setTrickplayOpen(true)}
         >
           <GalleryHorizontal className="size-4" />
-          Seek Previews
+          {t("web.detail.actions.seekPreviews")}
         </DetailOverflowMenuItem>
       ),
       canCurateMetadata && onSplitItem && (
         <DetailOverflowMenuItem key="split" closeMenu={closeOverflowMenu} onAction={onSplitItem}>
           <Scissors className="size-4" />
-          Split Versions
+          {t("web.detail.actions.splitVersions")}
         </DetailOverflowMenuItem>
       ),
     ],
     [
-      canCurateMetadata && onShowMediaInfo && (
-        <DetailOverflowMenuItem
-          key="media-info"
-          closeMenu={closeOverflowMenu}
-          onAction={onShowMediaInfo}
-        >
-          <Info className="size-4" />
-          Media Info
-        </DetailOverflowMenuItem>
-      ),
       isAdmin && contentId && (
         <DetailOverflowMenuItem
           key="play-history"
@@ -903,10 +971,22 @@ export default function ActionBar({
           onAction={() => navigate(`/admin/history?media_item_id=${encodeURIComponent(contentId)}`)}
         >
           <MediaActionIcon action="viewPlayHistory" />
-          View Play History
+          {t("web.detail.actions.viewPlayHistory")}
         </DetailOverflowMenuItem>
       ),
     ],
+  ];
+  const infoItems = [
+    onShowMediaInfo && (
+      <DetailOverflowMenuItem
+        key="media-info"
+        closeMenu={closeOverflowMenu}
+        onAction={onShowMediaInfo}
+      >
+        <Info className="size-4" />
+        {t("web.detail.mediaInfo.title")}
+      </DetailOverflowMenuItem>
+    ),
   ];
   const manageItems = manageGroups.flat().filter(Boolean);
   // A single management action sits at the end of the menu instead of behind Manage.
@@ -915,6 +995,7 @@ export default function ActionBar({
     playbackItems,
     libraryItems,
     partyItems,
+    infoItems,
     hasManagePanel
       ? [
           <DetailOverflowMenuItem
@@ -927,8 +1008,8 @@ export default function ActionBar({
             onAction={() => openManageMenu(true)}
           >
             <Wrench className="size-4" />
-            Manage
-            <ChevronRight className="ml-auto size-4" />
+            {t("web.detail.actions.manage")}
+            <ChevronRight className="ms-auto size-4" />
           </DetailOverflowMenuItem>,
         ]
       : manageItems,
@@ -957,7 +1038,7 @@ export default function ActionBar({
         ? Math.round((resumePositionSeconds / resumeDurationSeconds) * 100)
         : null;
   const dialogDescription = showPlayChoiceDialog
-    ? buildPlayChoiceDescription(formattedResumeTime, percentComplete)
+    ? buildPlayChoiceDescription(t, formattedResumeTime, percentComplete)
     : "";
 
   // When a version is explicitly selected (multi-version), play it directly.
@@ -1077,7 +1158,9 @@ export default function ActionBar({
               <>
                 <span className="detail-full-label">{watchedLabel}</span>
                 <span className="detail-short-label">
-                  {isWatched ? "Mark Unwatched" : "Mark Watched"}
+                  {isWatched
+                    ? t("web.detail.actions.markUnwatched")
+                    : t("web.detail.actions.markWatched")}
                 </span>
               </>
             ) : (
@@ -1092,8 +1175,14 @@ export default function ActionBar({
             variant="glass"
             size="icon-lg"
             onClick={onToggleFavorite}
-            title={isFavorite ? "Unfavorite" : "Favorite"}
-            aria-label={isFavorite ? "Remove from favorites" : "Add to favorites"}
+            title={
+              isFavorite ? t("web.detail.actions.unfavorite") : t("web.detail.actions.favorite")
+            }
+            aria-label={
+              isFavorite
+                ? t("web.detail.actions.removeFromFavorites")
+                : t("web.detail.actions.addToFavorites")
+            }
             className={`${staticGlassActionClass} detail-secondary-action size-11 cursor-pointer rounded-full`}
           >
             <Heart
@@ -1113,8 +1202,8 @@ export default function ActionBar({
             ref={overflowTriggerRef}
             variant="glass"
             size="icon-lg"
-            title="More"
-            aria-label="More actions"
+            title={t("web.detail.actions.more")}
+            aria-label={t("web.detail.actions.moreActions")}
             aria-haspopup="menu"
             aria-expanded={overflowOpen}
             aria-controls={overflowOpen ? overflowMenuId : undefined}
@@ -1149,12 +1238,20 @@ export default function ActionBar({
                       onAction={onToggleFavorite}
                     >
                       <Heart className="size-4" />
-                      {isFavorite ? "Remove from favorites" : "Add to favorites"}
+                      {isFavorite
+                        ? t("web.detail.actions.removeFromFavorites")
+                        : t("web.detail.actions.addToFavorites")}
                     </DetailOverflowMenuItem>
                   )}
                   {onRatingChange && (
-                    <div className="px-2 py-2" role="group" aria-label="Your rating">
-                      <span className="mb-2 block text-sm">Your rating</span>
+                    <div
+                      className="px-2 py-2"
+                      role="group"
+                      aria-label={t("web.detail.actions.yourRating")}
+                    >
+                      <span className="mb-2 block text-sm">
+                        {t("web.detail.actions.yourRating")}
+                      </span>
                       {/* ArrowUp/ArrowDown keep moving through the menu; only
                               ArrowLeft/ArrowRight change the rating here. */}
                       <StarRating
@@ -1187,7 +1284,7 @@ export default function ActionBar({
               }}
               className={overflowMenuClass}
               role="menu"
-              aria-label="Manage"
+              aria-label={t("web.detail.actions.manage")}
               onKeyDown={handleOverflowKeyDown}
             >
               <DetailOverflowGroups groups={manageGroups} />
@@ -1198,7 +1295,9 @@ export default function ActionBar({
           <Dialog open={playChoiceOpen} onOpenChange={setPlayChoiceOpen}>
             <DialogContent className="max-w-xs gap-3 p-5">
               <DialogHeader className="gap-1.5">
-                <DialogTitle className="text-base">Resume Playback?</DialogTitle>
+                <DialogTitle className="text-base">
+                  {t("web.detail.actions.resumeDialogTitle")}
+                </DialogTitle>
                 <DialogDescription className="text-xs">{dialogDescription}</DialogDescription>
               </DialogHeader>
               <div className="grid gap-2">
@@ -1207,7 +1306,7 @@ export default function ActionBar({
                   className="h-9 justify-start gap-2.5 px-3 text-sm"
                 >
                   <Play className="size-3.5 fill-current" />
-                  Resume at {formattedResumeTime}
+                  {t("web.detail.actions.resumeAt", { time: formattedResumeTime })}
                 </Button>
                 <Button
                   variant="outline"
@@ -1215,7 +1314,7 @@ export default function ActionBar({
                   className="h-9 justify-start gap-2.5 px-3 text-sm"
                 >
                   <RotateCcw className="size-3.5" />
-                  Play from Beginning
+                  {t("web.detail.actions.playFromBeginning")}
                 </Button>
               </div>
             </DialogContent>
@@ -1272,6 +1371,8 @@ export default function ActionBar({
               playbackVariants={playbackVariants}
               selectedVersion={selectedVersion}
               onSelectVersion={onSelectVersion}
+              onSelectEdition={onSelectEdition}
+              versionPicked={versionPicked}
             />
           )}
           {selectedVersion && (selectedVersion.audio_tracks?.length ?? 0) > 0 && (
@@ -1314,19 +1415,25 @@ function formatPlaybackTime(totalSeconds: number): string {
   const remainingSeconds = seconds % 60;
 
   if (hours > 0) {
-    return `${hours}:${String(minutes).padStart(2, "0")}:${String(remainingSeconds).padStart(2, "0")}`;
+    return numberText(
+      `${hours}:${String(minutes).padStart(2, "0")}:${String(remainingSeconds).padStart(2, "0")}`,
+    );
   }
 
-  return `${minutes}:${String(remainingSeconds).padStart(2, "0")}`;
+  return numberText(`${minutes}:${String(remainingSeconds).padStart(2, "0")}`);
 }
 
 function buildPlayChoiceDescription(
+  t: Translate,
   formattedResumeTime: string,
   percentComplete: number | null,
 ): string {
   if (percentComplete != null && percentComplete > 0) {
-    return `You're ${formattedResumeTime} in, about ${percentComplete}% through.`;
+    return t("web.detail.actions.resumeDescriptionPercent", {
+      time: formattedResumeTime,
+      percent: percentComplete,
+    });
   }
 
-  return `You're ${formattedResumeTime} in. Resume where you left off or start over.`;
+  return t("web.detail.actions.resumeDescription", { time: formattedResumeTime });
 }

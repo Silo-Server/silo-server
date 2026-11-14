@@ -8,6 +8,7 @@ import {
   filterSettingsSearchGroups,
 } from "@/components/settings/settingsSearch";
 import { useSidebarEntrance, type SidebarSwap } from "@/hooks/useSidebarSwap";
+import { useT } from "@/i18n";
 import { useUserSettingsGroups } from "@/hooks/useUserSettingsGroups";
 import { userSettingsHref } from "@/lib/userSettingsNav";
 
@@ -22,6 +23,7 @@ export default function UserSettingsSidebar({
   backTo: string;
   swap?: SidebarSwap | null;
 }) {
+  const t = useT();
   const location = useLocation();
   const entrance = useSidebarEntrance(swap);
   const groups = useUserSettingsGroups();
@@ -36,9 +38,9 @@ export default function UserSettingsSidebar({
 
   return (
     <SettingsSidebar
-      title="Settings"
+      title={t("web.settings.sidebar.title")}
       backTo={backTo}
-      backLabel="Back to App"
+      backLabel={t("web.settings.sidebar.backToApp")}
       groups={filteredGroups.map((group) => ({
         label: group.label,
         items: group.items.map((item) => ({

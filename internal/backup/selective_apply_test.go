@@ -392,14 +392,14 @@ func TestSelectiveRestoreAuthenticatesTheManifest(t *testing.T) {
 				t.Fatalf("StartRestore = %v, want %v", err, tt.want)
 			}
 			// A preview refuses the same way, before it reads the restore set.
-			if _, _, err := svc.previewSet(ctx, restoreSource{backupID: id}, false); !errors.Is(err, tt.want) || (tt.want == nil) != (err == nil) {
+			if _, _, _, err := svc.previewSet(ctx, restoreSource{backupID: id}, false); !errors.Is(err, tt.want) || (tt.want == nil) != (err == nil) {
 				t.Fatalf("preview = %v, want %v", err, tt.want)
 			}
 			req.AcceptUnauthenticated = true
 			if _, err := svc.StartRestore(ctx, 1, req); !errors.Is(err, tt.wantConfirmed) || (tt.wantConfirmed == nil) != (err == nil) {
 				t.Fatalf("StartRestore confirmed = %v, want %v", err, tt.wantConfirmed)
 			}
-			if _, _, err := svc.previewSet(ctx, restoreSource{backupID: id}, true); !errors.Is(err, tt.wantConfirmed) || (tt.wantConfirmed == nil) != (err == nil) {
+			if _, _, _, err := svc.previewSet(ctx, restoreSource{backupID: id}, true); !errors.Is(err, tt.wantConfirmed) || (tt.wantConfirmed == nil) != (err == nil) {
 				t.Fatalf("preview confirmed = %v, want %v", err, tt.wantConfirmed)
 			}
 		})

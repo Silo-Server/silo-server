@@ -23,6 +23,7 @@ import { useRateLimitConfig, useUpdateRateLimitConfig } from "@/hooks/queries/ad
 import { useRestartKeys } from "@/hooks/useRestartKeys";
 import { useSettingsForm } from "@/hooks/useSettingsForm";
 import { useReportUnsavedChanges } from "@/hooks/useUnsavedChanges";
+import { useT, type MessageKey } from "@/i18n";
 import { cn } from "@/lib/utils";
 import { FieldGroup } from "./FieldGroup";
 import { SaveBar } from "@/components/SaveBar";
@@ -60,10 +61,10 @@ const DEFAULT_SESSION_QUOTA: RateLimitSessionQuota = {
   burst: 30000,
 };
 
-const SESSION_QUOTA_MODE_LABELS: Record<RateLimitSessionQuota["mode"], string> = {
-  off: "Off",
-  log: "Log only",
-  enforce: "Enforce",
+const SESSION_QUOTA_MODE_LABELS: Record<RateLimitSessionQuota["mode"], MessageKey> = {
+  off: "web.admin.settings.security.quotaMode.off",
+  log: "web.admin.settings.security.quotaMode.log",
+  enforce: "web.admin.settings.security.quotaMode.enforce",
 };
 
 const DEFAULT_CONFIG: RateLimitConfig = {
@@ -90,20 +91,20 @@ const DEFAULT_CONFIG: RateLimitConfig = {
   session_quota: DEFAULT_SESSION_QUOTA,
 };
 
-const TIER_LABELS: Record<string, string> = {
-  standard: "Standard API keys",
-  elevated: "Elevated API keys",
+const TIER_LABELS: Record<string, MessageKey> = {
+  standard: "web.admin.settings.security.tier.standard",
+  elevated: "web.admin.settings.security.tier.elevated",
 };
 
-const AUTH_ENDPOINT_LABELS: Record<string, string> = {
-  login: "Sign in",
-  signup: "Sign up",
-  setup: "First-run setup",
-  password_change: "Change password",
-  device_start: "TV sign-in: start",
-  device_lookup: "TV sign-in: code lookup",
-  device_poll: "TV sign-in: waiting for approval",
-  autoscan_webhook: "Autoscan webhook",
+const AUTH_ENDPOINT_LABELS: Record<string, MessageKey> = {
+  login: "web.admin.settings.security.endpoint.login",
+  signup: "web.admin.settings.security.endpoint.signup",
+  setup: "web.admin.settings.security.endpoint.setup",
+  password_change: "web.admin.settings.security.endpoint.passwordChange",
+  device_start: "web.admin.settings.security.endpoint.deviceStart",
+  device_lookup: "web.admin.settings.security.endpoint.deviceLookup",
+  device_poll: "web.admin.settings.security.endpoint.devicePoll",
+  autoscan_webhook: "web.admin.settings.security.endpoint.autoscanWebhook",
 };
 
 interface RateLimitField {
@@ -135,7 +136,7 @@ function RateBox({
         value={field.value}
         onChange={(e) => field.onChange(e.target.value)}
         disabled={disabled}
-        className="w-24 text-right tabular-nums"
+        className="w-24 text-end tabular-nums"
       />
     </span>
   );
@@ -161,6 +162,7 @@ function RateTriadRow({
   burst: RateLimitField;
   disabled?: boolean;
 }) {
+  const t = useT();
   const baseId = useId();
 
   return (
@@ -169,19 +171,30 @@ function RateTriadRow({
         {perSecond && (
           <RateBox
             id={`${baseId}-rps`}
-            caption="Per second"
+            caption={t("web.admin.settings.security.rate.perSecond")}
             field={perSecond}
             disabled={disabled}
           />
         )}
-        <RateBox id={`${baseId}-rpm`} caption="Per minute" field={perMinute} disabled={disabled} />
-        <RateBox id={`${baseId}-burst`} caption="Burst" field={burst} disabled={disabled} />
+        <RateBox
+          id={`${baseId}-rpm`}
+          caption={t("web.admin.settings.security.rate.perMinute")}
+          field={perMinute}
+          disabled={disabled}
+        />
+        <RateBox
+          id={`${baseId}-burst`}
+          caption={t("web.admin.settings.security.rate.burst")}
+          field={burst}
+          disabled={disabled}
+        />
       </div>
     </SettingFieldRow>
   );
 }
 
 export default function SecurityAccessSettings() {
+  const t = useT();
   const form = useSettingsForm({ keys: useMemo(() => LOCAL_NETWORK_KEYS, []) });
   const restartKeys = useRestartKeys();
   const allRestart = (keys: string[]) => keys.every((key) => restartKeys.has(key));
@@ -205,7 +218,6 @@ export default function SecurityAccessSettings() {
   const limiterInactive = serverConfig?.enabled === true && serverConfig.active === false;
   const runningBackend = serverConfig?.active === true ? serverConfig.active_backend : undefined;
   const runningBackendDiffers = Boolean(runningBackend) && runningBackend !== savedBackend;
-  const backendNoun = (backend?: string) => (backend === "redis" ? "Redis" : "in-memory");
 
   const hydratedConfig = useMemo<RateLimitConfig>(() => {
     if (!serverConfig) return DEFAULT_CONFIG;
@@ -336,7 +348,11 @@ export default function SecurityAccessSettings() {
 
   if (form.isLoading || rateLimitsLoading)
     return (
-      <div className="space-y-6" role="status" aria-label="Loading settings">
+      <div
+        className="space-y-6"
+        role="status"
+        aria-label={t("web.admin.settings.security.loading")}
+      >
         <Skeleton className="h-8 w-48" />
         <div className="space-y-4">
           <Skeleton className="h-10 w-full" />
@@ -346,7 +362,7 @@ export default function SecurityAccessSettings() {
           <Skeleton className="h-10 w-full" />
           <Skeleton className="h-10 w-full" />
         </div>
-        <span className="sr-only">Loading settings</span>
+        <span className="sr-only">{t("web.admin.settings.security.loading")}</span>
       </div>
     );
 
@@ -355,13 +371,16 @@ export default function SecurityAccessSettings() {
 
   return (
     <div className="flex h-full flex-col">
-      <SettingsPageHeader title="Security" />
+      <SettingsPageHeader title={t("web.admin.settings.security.title")} />
 
       <div className="flex-1 space-y-5">
-        <FieldGroup label="Local network" restartAll={allRestart(LOCAL_NETWORK_KEYS)}>
+        <FieldGroup
+          label={t("web.admin.settings.security.localNetwork.group")}
+          restartAll={allRestart(LOCAL_NETWORK_KEYS)}
+        >
           <SettingField
-            label="Local servers for every account"
-            description="Lets every account import history from, and sync with, Plex, Emby, and Jellyfin servers at local network addresses such as 192.168.x.x or localhost. Admins always can."
+            label={t("web.admin.settings.security.localNetwork.label")}
+            description={t("web.admin.settings.security.localNetwork.description")}
             type="toggle"
             value={form.getValue(LOCAL_MEDIA_SERVERS_KEY)}
             onChange={(v) => form.setValue(LOCAL_MEDIA_SERVERS_KEY, v)}
@@ -370,17 +389,14 @@ export default function SecurityAccessSettings() {
           {localMediaServersAllowed && (
             <div className="flex items-start gap-2 py-3 text-xs text-amber-500">
               <TriangleAlert className="mt-0.5 h-4 w-4 flex-shrink-0" />
-              <p>
-                Anyone who can sign in can make this server send requests to devices on its local
-                network. Turn this on only if you trust every account on this server.
-              </p>
+              <p>{t("web.admin.settings.security.localNetwork.warning")}</p>
             </div>
           )}
         </FieldGroup>
 
-        <FieldGroup label="Rate limiting">
+        <FieldGroup label={t("web.admin.settings.security.rateLimit.group")}>
           <SettingField
-            label="Enable rate limiting"
+            label={t("web.admin.settings.security.rateLimit.enable")}
             type="toggle"
             value={config.enabled ? "true" : "false"}
             onChange={(v) => updateConfigState((prev) => ({ ...prev, enabled: v === "true" }))}
@@ -388,27 +404,27 @@ export default function SecurityAccessSettings() {
             status={
               limiterInactive ? (
                 <SettingFieldStatus tone="warn">
-                  Enabled, but no limiter is running in this process — it may have failed to start.
-                  Check the server logs.
+                  {t("web.admin.settings.security.rateLimit.notRunning")}
                 </SettingFieldStatus>
               ) : undefined
             }
           />
 
           <SettingFieldRow
-            label="Where counters are kept"
+            label={t("web.admin.settings.security.backend.label")}
             htmlFor="rate-limit-backend"
             description={
               redisSelectable
-                ? "Redis shares counters across servers, after a restart."
-                : "Redis shares counters across servers, after a restart. Set up Redis on the General page first."
+                ? t("web.admin.settings.security.backend.description")
+                : t("web.admin.settings.security.backend.descriptionNoRedis")
             }
             status={
               runningBackendDiffers ? (
                 <SettingFieldStatus tone="warn">
-                  The running limiter is using {backendNoun(runningBackend)} counters, not the saved{" "}
-                  {backendNoun(savedBackend)} backend. If a restart does not fix it, check that the
-                  saved backend is reachable.
+                  {t("web.admin.settings.security.backend.drift", {
+                    running: runningBackend ?? "",
+                    saved: savedBackend,
+                  })}
                 </SettingFieldStatus>
               ) : undefined
             }
@@ -422,22 +438,24 @@ export default function SecurityAccessSettings() {
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="memory">This server only</SelectItem>
+                <SelectItem value="memory">
+                  {t("web.admin.settings.security.backend.memory")}
+                </SelectItem>
                 <SelectItem value="redis" disabled={!redisSelectable}>
-                  Shared via Redis
+                  {t("web.admin.settings.security.backend.redis")}
                 </SelectItem>
               </SelectContent>
             </Select>
           </SettingFieldRow>
 
           <SettingFieldRow
-            label="Whole-server limit"
+            label={t("web.admin.settings.security.global.label")}
             htmlFor="global-rps"
-            description="Ceiling across every rate-limited route."
+            description={t("web.admin.settings.security.global.description")}
             // The row's unit slot rather than a span beside the input: the
             // triad rows below have no unit, and an inline one here would
             // push this box off the column they share.
-            unit="per second"
+            unit={t("web.admin.settings.security.global.unit")}
           >
             <Input
               id="global-rps"
@@ -450,13 +468,13 @@ export default function SecurityAccessSettings() {
                 )(e.target.value)
               }
               disabled={savingRateLimits}
-              className={cn("text-right tabular-nums", SETTINGS_NUMBER_WIDTH)}
+              className={cn("text-end tabular-nums", SETTINGS_NUMBER_WIDTH)}
             />
           </SettingFieldRow>
 
           <RateTriadRow
-            label="Per address and account"
-            description="Each IP has a budget. Signed-in requests also share an account budget, four times larger, across profiles, sessions, devices and API keys."
+            label={t("web.admin.settings.security.perAddress.label")}
+            description={t("web.admin.settings.security.perAddress.description")}
             disabled={savingRateLimits}
             perSecond={{
               value: config.ip_requests_per_second,
@@ -478,11 +496,13 @@ export default function SecurityAccessSettings() {
             }}
           />
 
-          <SettingsSubheading>Per sign-in session</SettingsSubheading>
+          <SettingsSubheading>
+            {t("web.admin.settings.security.session.heading")}
+          </SettingsSubheading>
           <SettingFieldRow
-            label="Hourly request quota"
+            label={t("web.admin.settings.security.session.quotaLabel")}
             htmlFor="session-quota-mode"
-            description="Each sign-in session gets a bucket of requests that refills over the hour, which stops a client that stays under the limits above all day. Playback, downloads, admins and API keys don't count. Log only records sessions that run out; Enforce refuses them until the bucket refills. The dashboard's Busiest API clients card shows which sessions make the most requests."
+            description={t("web.admin.settings.security.session.quotaDescription")}
           >
             <Select
               value={sessionQuota.mode}
@@ -497,21 +517,21 @@ export default function SecurityAccessSettings() {
               <SelectContent>
                 {Object.entries(SESSION_QUOTA_MODE_LABELS).map(([mode, label]) => (
                   <SelectItem key={mode} value={mode}>
-                    {label}
+                    {t(label)}
                   </SelectItem>
                 ))}
               </SelectContent>
             </Select>
           </SettingFieldRow>
           <SettingFieldRow
-            label="Quota size"
+            label={t("web.admin.settings.security.session.sizeLabel")}
             htmlFor="session-quota-rph"
-            description="Requests the bucket refills per hour, and how many it holds when full. A full bucket must refill within a week."
+            description={t("web.admin.settings.security.session.sizeDescription")}
           >
             <div className="flex flex-wrap items-end justify-end gap-2.5">
               <RateBox
                 id="session-quota-rph"
-                caption="Per hour"
+                caption={t("web.admin.settings.security.rate.perHour")}
                 disabled={savingRateLimits || sessionQuota.mode === "off"}
                 field={{
                   value: sessionQuota.requests_per_hour,
@@ -522,7 +542,7 @@ export default function SecurityAccessSettings() {
               />
               <RateBox
                 id="session-quota-burst"
-                caption="Burst"
+                caption={t("web.admin.settings.security.rate.burst")}
                 disabled={savingRateLimits || sessionQuota.mode === "off"}
                 field={{
                   value: sessionQuota.burst,
@@ -532,13 +552,13 @@ export default function SecurityAccessSettings() {
             </div>
           </SettingFieldRow>
 
-          <SettingsSubheading>API key tiers</SettingsSubheading>
+          <SettingsSubheading>{t("web.admin.settings.security.tiers.heading")}</SettingsSubheading>
           {Object.keys(TIER_LABELS).map((tier) => {
             const tierConfig = config.tiers[tier] ?? DEFAULT_TIER;
             return (
               <RateTriadRow
                 key={tier}
-                label={TIER_LABELS[tier]!}
+                label={t(TIER_LABELS[tier]!)}
                 disabled={savingRateLimits}
                 perSecond={{
                   value: tierConfig.requests_per_second,
@@ -556,13 +576,15 @@ export default function SecurityAccessSettings() {
             );
           })}
 
-          <SettingsSubheading>Sign-in and webhook endpoints</SettingsSubheading>
+          <SettingsSubheading>
+            {t("web.admin.settings.security.endpoints.heading")}
+          </SettingsSubheading>
           {Object.keys(AUTH_ENDPOINT_LABELS).map((endpoint) => {
             const epConfig = config.auth_endpoints[endpoint] ?? DEFAULT_AUTH_ENDPOINT;
             return (
               <RateTriadRow
                 key={endpoint}
-                label={AUTH_ENDPOINT_LABELS[endpoint]!}
+                label={t(AUTH_ENDPOINT_LABELS[endpoint]!)}
                 disabled={savingRateLimits}
                 perMinute={{
                   value: epConfig.requests_per_minute,

@@ -2,15 +2,12 @@ package handlers
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
 	"slices"
 	"time"
-
-	"github.com/go-chi/chi/v5"
 
 	"github.com/Silo-Server/silo-server/internal/cache"
 	"github.com/Silo-Server/silo-server/internal/catalog"
@@ -115,6 +112,9 @@ type itemImageEntry struct {
 	Width       int     `json:"width"`
 	Height      int     `json:"height"`
 	Rating      float64 `json:"rating"`
+	// Fallback marks show artwork a season list offers after the season's own
+	// images. It is set only on season lists and is left out of JSON.
+	Fallback bool `json:"-"`
 }
 
 type getItemImagesResponse struct {
@@ -207,24 +207,6 @@ func (h *AdminImageHandler) resolveContentID(ctx context.Context, contentID stri
 	return nil, catalog.ErrItemNotFound
 }
 
-// HandleGetItemImages handles GET /admin/items/{id}/images.
-// It fetches available images from all enabled metadata providers.
-func (h *AdminImageHandler) HandleGetItemImages(w http.ResponseWriter, r *http.Request) {
-	contentID := chi.URLParam(r, "id")
-	if contentID == "" {
-		writeError(w, http.StatusBadRequest, "bad_request", "Item ID is required")
-		return
-	}
-
-	// Frozen v1 keeps its provider-only choices.
-	out, err := h.listItemImages(r.Context(), contentID, false)
-	if err != nil {
-		writeAPIError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, out)
-}
-
 type AdminItemImagesView = getItemImagesResponse
 
 // GetAdminItemImages lists provider choices plus, for a movie or series, the
@@ -233,6 +215,10 @@ func (h *AdminImageHandler) GetAdminItemImages(ctx context.Context, contentID st
 	return h.listItemImages(ctx, contentID, true)
 }
 
+// listItemImages fetches the image choices for a movie, series, season or
+// episode, with display URLs resolved. A season list marks show artwork as a
+// fallback. includeLocal adds sidecar artwork for a movie or series and the
+// uploaded images the item shows.
 func (h *AdminImageHandler) listItemImages(ctx context.Context, contentID string, includeLocal bool) (AdminItemImagesView, error) {
 	resolved, err := h.resolveContentID(ctx, contentID)
 	if err != nil {
@@ -343,6 +329,7 @@ func (h *AdminImageHandler) listItemImages(ctx context.Context, contentID string
 			Width:       img.Width,
 			Height:      img.Height,
 			Rating:      img.Rating,
+			Fallback:    resolved.season != nil && img.SeasonNumber == nil,
 		})
 	}
 
@@ -372,29 +359,6 @@ func (h *AdminImageHandler) listItemImages(ctx context.Context, contentID string
 		Current:        current,
 		ProviderErrors: providerErrors,
 	}, nil
-}
-
-// HandleApplyItemImage handles POST /admin/items/{id}/images/apply.
-// It downloads the selected image, caches it to S3, and updates the item.
-func (h *AdminImageHandler) HandleApplyItemImage(w http.ResponseWriter, r *http.Request) {
-	contentID := chi.URLParam(r, "id")
-	if contentID == "" {
-		writeError(w, http.StatusBadRequest, "bad_request", "Item ID is required")
-		return
-	}
-
-	var req applyItemImageRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "Invalid request body")
-		return
-	}
-	// Frozen v1 keeps applying provider images only.
-	out, err := h.applyItemImage(r.Context(), contentID, req, false)
-	if err != nil {
-		writeAPIError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, out)
 }
 
 type AdminItemImageResult = applyItemImageResponse

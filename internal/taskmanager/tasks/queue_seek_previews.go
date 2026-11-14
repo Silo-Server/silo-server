@@ -62,6 +62,6 @@ func (t *QueueSeekPreviewsTask) Execute(ctx context.Context, progress taskmanage
 		return nil
 	}
 	progress.Report(100, fmt.Sprintf("Queued %d files, requeued %d, removed %d, reclaimed %d stalled",
-		stats.Added, stats.Stale, stats.Removed, stats.Reclaimed))
+		stats.Added, stats.Stale+stats.ToneMapStale, stats.Removed, stats.Reclaimed))
 	return nil
 }

@@ -285,9 +285,10 @@ func filterAccessibleContentIDs(ctx context.Context, db interface {
 	// nothing, and it must block here too. These callers are the progress list
 	// and sync paths, so treating it as absent would let a viewer read and
 	// write progress for titles the catalog hides from them.
-	if access.HasCeiling(limits.MaxContentRating) {
+	if access.HasCeiling(limits.MaxContentRating) && len(limits.AllowedTitleIDs) == 0 {
 		if _, ok := access.AgeForCeiling(limits.MaxContentRating); !ok {
-			// Ceiling names no usable age → nothing is accessible.
+			// Ceiling names no usable age → nothing is accessible. With
+			// allowed titles the query still runs: they pass any ceiling.
 			return result, nil
 		}
 	}

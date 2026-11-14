@@ -2,8 +2,8 @@ package userstore
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
-	"sort"
 )
 
 // CollectionSortPreferenceCleaner removes cross-user viewer preferences when
@@ -33,30 +33,16 @@ func (c *CollectionSortPreferenceCleaner) DeleteForCollection(ctx context.Contex
 	if c == nil || c.users == nil || c.stores == nil {
 		return
 	}
-	users, err := c.users.List(ctx)
-	if err != nil {
-		c.logger.WarnContext(ctx, "collection sort cleanup: list users failed", "kind", kind, "collection_id", collectionID, "error", err)
-		return
-	}
-	sort.Slice(users, func(i, j int) bool { return users[i].ID < users[j].ID })
-	for _, user := range users {
-		if ctx.Err() != nil {
-			return
-		}
-		store, err := c.stores.ForUser(ctx, user.ID)
-		if err != nil {
-			c.logger.WarnContext(ctx, "collection sort cleanup: open user store failed", "kind", kind, "collection_id", collectionID, "user_id", user.ID, "error", err)
-			continue
-		}
+	forEachUserStore(ctx, c.users, c.stores, c.logger, "collection sort cleanup", []any{"kind", kind, "collection_id", collectionID}, func(userID int, store UserStore) error {
 		profiles, err := store.ListProfiles(ctx)
 		if err != nil {
-			c.logger.WarnContext(ctx, "collection sort cleanup: list profiles failed", "kind", kind, "collection_id", collectionID, "user_id", user.ID, "error", err)
-			continue
+			return fmt.Errorf("list profiles: %w", err)
 		}
 		for _, profile := range profiles {
 			if err := store.ClearCollectionSortPreference(ctx, profile.ID, kind, collectionID); err != nil {
-				c.logger.WarnContext(ctx, "collection sort cleanup: delete failed", "kind", kind, "collection_id", collectionID, "user_id", user.ID, "profile_id", profile.ID, "error", err)
+				c.logger.WarnContext(ctx, "collection sort cleanup: delete failed", "kind", kind, "collection_id", collectionID, "user_id", userID, "profile_id", profile.ID, "error", err)
 			}
 		}
-	}
+		return nil
+	})
 }

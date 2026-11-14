@@ -1,5 +1,6 @@
 import type { Profile } from "@/api/types";
 import type { ProfileCreate, ProfileUpdate } from "@/hooks/queries/profiles";
+import { t } from "@/i18n";
 import { avatarPresetRef, parseProfileAvatarPresetRef } from "@/lib/profile-avatars";
 import {
   formatPlaybackQualityPreset,
@@ -22,6 +23,8 @@ export interface ProfileDraft {
   maxPlaybackQuality: PlaybackQualityPreset;
   libraryRestrictionsEnabled: boolean;
   allowedLibraryIDs: number[];
+  /** Whether the profile may use requests and request discovery. */
+  requestsAllowed: boolean;
 }
 
 export interface ContentRatingOption {
@@ -36,6 +39,8 @@ export interface ProfileAccessSummary {
   advisoryAge: string;
   libraries: string;
   playbackQuality: string;
+  /** "" unless the profile is blocked from requests. */
+  requests: string;
   text: string;
 }
 
@@ -49,16 +54,35 @@ export interface ProfileAccessSummary {
  * admits TV-14, and R admits TV-MA and NC-17.
  */
 export const CONTENT_RATING_OPTIONS: ContentRatingOption[] = [
-  { value: "", label: "Any content", summary: "Any content" },
-  { value: "G", label: "G / TV-G / U", summary: "G max" },
-  { value: "6", label: "6 / FSK 6", summary: "6 max" },
-  { value: "PG", label: "PG / TV-PG / TV-Y7", summary: "PG max" },
-  { value: "12", label: "12 / 12A / FSK 12", summary: "12 max" },
-  { value: "PG-13", label: "PG-13 / TV-14", summary: "PG-13 max" },
-  { value: "15", label: "15 / MA 15+", summary: "15 max" },
-  { value: "16", label: "16 / FSK 16", summary: "16 max" },
-  { value: "R", label: "R / TV-MA / NC-17 / 18", summary: "R max" },
+  {
+    value: "",
+    get label() {
+      return t("web.profiles.helpers.contentRating.any");
+    },
+    get summary() {
+      return t("web.profiles.helpers.contentRating.any");
+    },
+  },
+  ratingOption("G", "G / TV-G / U"),
+  ratingOption("6", "6 / FSK 6"),
+  ratingOption("PG", "PG / TV-PG / TV-Y7"),
+  ratingOption("12", "12 / 12A / FSK 12"),
+  ratingOption("PG-13", "PG-13 / TV-14"),
+  ratingOption("15", "15 / MA 15+"),
+  ratingOption("16", "16 / FSK 16"),
+  ratingOption("R", "R / TV-MA / NC-17 / 18"),
 ];
+
+/** A rating ceiling; `label` lists certificate codes, which are the same in every language. */
+function ratingOption(value: string, label: string): ContentRatingOption {
+  return {
+    value,
+    label,
+    get summary() {
+      return t("web.profiles.helpers.contentRating.max", { rating: value });
+    },
+  };
+}
 
 export interface AdvisoryAgeOption {
   /** null is "no limit". */
@@ -78,10 +102,20 @@ export const MAX_ADVISORY_AGE_LIMIT = 21;
  * also requires an advisory age, so the content rating still has to do its job.
  */
 export const ADVISORY_AGE_OPTIONS: AdvisoryAgeOption[] = [
-  { value: null, label: "No limit" },
+  {
+    value: null,
+    get label() {
+      return t("web.profiles.helpers.advisoryAge.noLimit");
+    },
+  },
   ...Array.from({ length: MAX_ADVISORY_AGE_LIMIT - MIN_ADVISORY_AGE_LIMIT + 1 }, (_, index) => {
     const age = index + MIN_ADVISORY_AGE_LIMIT;
-    return { value: age, label: `Ages ${age} and under` };
+    return {
+      value: age,
+      get label() {
+        return t("web.profiles.helpers.advisoryAge.agesAndUnder", { age, age_text: age });
+      },
+    };
   }),
 ];
 
@@ -106,6 +140,7 @@ export function createProfileDraft(profile?: Profile | null): ProfileDraft {
     maxPlaybackQuality: playbackQualityPresetFromValue(profile?.max_playback_quality),
     libraryRestrictionsEnabled: profile?.library_restrictions_enabled ?? false,
     allowedLibraryIDs: sortUniqueLibraryIDs(profile?.allowed_library_ids),
+    requestsAllowed: profile?.requests_allowed ?? true,
   };
 }
 
@@ -126,6 +161,11 @@ export interface ProfileRequestOptions {
    * (`require_advisory_age_supported`). Same reason: never send it otherwise.
    */
   requireAdvisoryAgeSupported?: boolean;
+  /**
+   * The server accepts `requests_allowed` (`requests_allowed_supported`).
+   * Same reason: never send it otherwise.
+   */
+  requestsAllowedSupported?: boolean;
 }
 
 export function buildProfileRequestFromDraft(
@@ -156,6 +196,9 @@ export function buildProfileRequestFromDraft(
   }
   if (maxPlaybackQuality === "1080p" || maxPlaybackQuality === "2160p") {
     body.max_playback_quality = maxPlaybackQuality;
+  }
+  if (options.requestsAllowedSupported && !draft.requestsAllowed) {
+    body.requests_allowed = false;
   }
   if (!draft.clearPin && draft.pin.trim() !== "") {
     body.pin = draft.pin.trim();
@@ -195,6 +238,9 @@ export function buildProfileUpdateFromDraft(
       body.require_advisory_age = draft.maxAdvisoryAge !== null && draft.requireAdvisoryAge;
     }
   }
+  if (options.requestsAllowedSupported) {
+    body.requests_allowed = draft.requestsAllowed;
+  }
 
   if (draft.clearPin) {
     body.pin = null;
@@ -214,27 +260,45 @@ export function buildProfileAccessSummary(
     | "library_restrictions_enabled"
     | "allowed_library_ids"
     | "max_playback_quality"
+    | "requests_allowed"
   >,
 ): ProfileAccessSummary {
   const contentRating =
     CONTENT_RATING_OPTIONS.find((option) => option.value === profile.max_content_rating)?.summary ??
-    "Any content";
+    t("web.profiles.helpers.contentRating.any");
   const advisoryAge = profile.max_advisory_age
-    ? `Advisory age ${profile.max_advisory_age} max${profile.require_advisory_age ? ", rated titles only" : ""}`
+    ? t(
+        profile.require_advisory_age
+          ? "web.profiles.helpers.access.advisoryAgeMaxRatedOnly"
+          : "web.profiles.helpers.access.advisoryAgeMax",
+        { age: profile.max_advisory_age },
+      )
     : "";
   const libraryCount = sortUniqueLibraryIDs(profile.allowed_library_ids).length;
   const libraries = profile.library_restrictions_enabled
-    ? `${libraryCount} ${libraryCount === 1 ? "library" : "libraries"}`
-    : "All libraries";
-  const qualityLabel = formatPlaybackQualityPreset(profile.max_playback_quality);
-  const playbackQuality = `${qualityLabel} quality`;
+    ? t("web.profiles.helpers.access.libraries", {
+        count: libraryCount,
+        count_text: libraryCount,
+      })
+    : t("web.profiles.helpers.access.allLibraries");
+  const playbackQuality =
+    playbackQualityPresetFromValue(profile.max_playback_quality) === "any"
+      ? t("web.profiles.helpers.access.anyQuality")
+      : t("web.profiles.helpers.access.quality", {
+          quality: formatPlaybackQualityPreset(profile.max_playback_quality),
+        });
+  const requests =
+    profile.requests_allowed === false ? t("web.profiles.helpers.access.noRequests") : "";
 
   return {
     contentRating,
     advisoryAge,
     libraries,
     playbackQuality,
-    text: [contentRating, advisoryAge, libraries, playbackQuality].filter(Boolean).join(" · "),
+    requests,
+    text: [contentRating, advisoryAge, libraries, playbackQuality, requests]
+      .filter(Boolean)
+      .join(" · "),
   };
 }
 
@@ -243,6 +307,8 @@ export function applyKidsPreset(
   options: {
     contentRatingTouched: boolean;
     libraryAccessTouched: boolean;
+    /** The requests switch was changed by hand; leave it as set. */
+    requestsTouched?: boolean;
   },
 ): ProfileDraft {
   const next: ProfileDraft = {
@@ -259,6 +325,12 @@ export function applyKidsPreset(
     next.allowedLibraryIDs = [];
   }
 
+  // Request discovery browses TMDB, where the library's parental controls
+  // reach only partly, so a kids profile starts without it.
+  if (!options.requestsTouched) {
+    next.requestsAllowed = false;
+  }
+
   return next;
 }
 
@@ -272,5 +344,28 @@ export function clearKidsPreset(draft: ProfileDraft): ProfileDraft {
     maxPlaybackQuality: "any",
     libraryRestrictionsEnabled: false,
     allowedLibraryIDs: [],
+    requestsAllowed: true,
   };
+}
+
+/**
+ * Whether the household has room for another profile. With no reported limit
+ * (null) the answer is yes, so an older server keeps today's behaviour and
+ * createProfile stays the authority.
+ */
+export function canAddProfile(profileCount: number, maxProfiles: number | null): boolean {
+  return maxProfiles === null || profileCount < maxProfiles;
+}
+
+/**
+ * Whether Switch Profile leads anywhere: to another profile, or to room for a
+ * new one. A household with several profiles keeps it even at its limit.
+ */
+export function canSwitchProfile(profileCount: number, maxProfiles: number | null): boolean {
+  return profileCount > 1 || canAddProfile(profileCount, maxProfiles);
+}
+
+/** The sentence shown in place of New profile once the household is full. */
+export function profileLimitMessage(maxProfiles: number): string {
+  return t("web.settings.profiles.limitReached", { count: maxProfiles });
 }

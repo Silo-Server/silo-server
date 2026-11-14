@@ -49,6 +49,8 @@ export const itemKeys = {
   details: () => ["items", "detail"] as const,
   detail: (id: string, libraryId?: number) =>
     ["items", "detail", id, libraryId ?? "default"] as const,
+  matchHints: (id: string, libraryId?: number) =>
+    ["items", "matchHints", id, libraryId ?? "default"] as const,
   watchDetail: (id: string, fileId?: number, libraryId?: number) =>
     ["items", "watchDetail", id, fileId ?? "default", libraryId ?? "default"] as const,
   watchTrickplay: (id: string, fileId: number) => ["items", "watchTrickplay", id, fileId] as const,

@@ -697,10 +697,13 @@ users/<account id>.json           version 2 and later
 blobs/<object key>
 ```
 
-`restore-set.json` has `format: "silo-restore-set"`, `version` (4: version 2
+`restore-set.json` has `format: "silo-restore-set"`, `version` (5: version 2
 added the users section; version 3 the home sections section, template
 collections in `collections.json`, and an omitted item's `cause` and
-`error`; version 4 a home section's `web_only`), the source
+`error`; version 4 a home section's `web_only`; version 5 no new field, but a
+server smart collection's rules now draw from their own `library_ids`, so a
+restore pins an older set's smart collection rules to the collection's
+libraries; version 6 a home section's `title_key` and `title_args`), the source
 server id and name, Silo version, creation time, `SECRET_KEY` check value, and
 a section index: for each section its item count, each of its files with
 size and SHA-256, and the blob keys its documents reference. Plugin archive
@@ -722,9 +725,15 @@ format version: an older reader refuses a newer set as "from a newer Silo"
 instead of failing on what it does not know, and a set that claims an older
 version while holding something added later (`users` in version 1,
 `home_sections` or template collections in version 2, a `web_only` section
-in version 3) is refused. A set without `web_only` reads it as false, the
-column's default. Readers accept versions 1 to 4; version 4 is always
-written.
+in version 3, a `title_key` section in version 5) is refused. A set without
+`web_only` reads it as false, the column's default. A set without `title_key`
+reads every title as typed text, so a restored title never gains a key; a
+keyed title keeps its key and arguments when a restore creates or replaces the
+section. A restore never takes a key away: replacing a section with a title
+that has no key leaves the key the section already has when the title is the
+same text, because the two then show the same English, and a set written
+before version 6 cannot say whether its title was typed. The restore preview
+reports a section that differs only by its key as changed. Readers accept versions 1 to 6; version 6 is always written.
 
 | Section | Holds | Blob prefixes |
 |---|---|---|
@@ -781,17 +790,32 @@ limits on entries (200,000), document size (64 MiB for the collections and
 account documents, 32 MiB for the index, 8 MiB for `libraries.json` and
 `home-sections.json`, 4 MiB for `settings.json` and each `plugin.json`), the
 documents one read holds together (256 MiB, checked from the index's listed
-sizes before any document is read), plugin archive and blob size (256 MiB),
+sizes before any document is read; account documents are not held, see
+below), plugin archive and blob size (256 MiB),
 total bytes (32 GiB), and JSON nesting (32). What a document decodes to is
 bounded too, before it is decoded: `internal/backup/jsonsize` walks the
 document beside its Go type and adds up what `encoding/json` would allocate
 (each array element at its type's size, doubled for slice growth; map
 entries, pointers, strings, raw values). A document is refused when that is
-over 8 times its size plus 64 KiB, when the set's documents together would
-decode to over 256 MiB, or when one array or object holds over 1,000,000
-elements. A short document of empty elements (`[{},{},…]`) would otherwise
+over 8 times its size plus 64 KiB, when the set's other documents together
+would decode to over 256 MiB, or when one array or object holds over
+1,000,000 elements. A short document of empty elements (`[{},{},…]`) would otherwise
 decode to a whole struct per three bytes; documents Silo writes decode to
-about their size. Every entry a restore writes (a setting, a library, a
+about their size.
+
+Account documents grow with a server's households and watch history: a large
+server's add up to gigabytes, far past what one read may hold. The read
+writes each to the set's temporary directory (`TMPDIR`, a 0600 file checked
+against its digest as it is written), after checking from the index that
+their listed sizes plus 1 GB fit there (`ErrNotEnoughTempSpace` otherwise).
+Once the archive is verified it decodes and validates them one at a time,
+keeping only each account's entry and file (`UserRef`). The preview and a
+restore load one account's document when they plan or apply it
+(`RestoreSet.loadUser`), checking its digest and validating it again, so
+memory follows the largest account rather than their sum. `Cleanup` removes
+the directory.
+
+Every entry a restore writes (a setting, a library, a
 plugin configuration, a collection, a template collection, an item artwork,
 a branding asset, a page section, and each account's profiles) is left out
 as unusable when it encodes to more than 1 MiB, the v2 API's request body
@@ -873,9 +897,11 @@ taken; the preview and the report list it with the item.
 Previews of a backup share one validated copy of its restore set, keyed by
 the archive's SHA-256 from the manifest (at most 4 sets and 256 MiB of
 documents and blob keys, least recently used evicted), and concurrent
-previews of the same archive read it once. Only the parsed documents and
-index are kept, never blobs or archives; comparisons with this server run on
-every request. Applying a restore never uses the cache: the job reads and
+previews of the same archive read it once. Only the parsed documents, the
+index, and the account documents on disk are kept, never blobs or archives;
+comparisons with this server run on every request. Each preview holds a
+reference to the set it reads, and an evicted set's directory is removed
+when its last reference is released. Applying a restore never uses the cache: the job reads and
 verifies the whole archive again.
 
 ## Selective restore
@@ -1185,8 +1211,8 @@ the exact keys the apply step reads (a library's poster, a branding asset,
 an item artwork's family, a collection's uploaded poster and backdrop with
 their families), never a prefix. It sizes them from the preview's read of the
 same restore set, and refuses to start (`ErrNotEnoughTempSpace`) for more
-than 50,000 files, or unless the temporary directory has their size plus
-1 GB free and a free inode for each plus 10,000. The rest of the archive is
+than 50,000 files, or unless the temporary directory has their size and the
+account documents' plus 1 GB free and a free inode for each plus 10,000. The rest of the archive is
 read, checked, and discarded. Reading the set and extracting stop when the
 job is canceled; once the first item runs, a cancel stops between items.
 
@@ -1285,9 +1311,12 @@ backup. `is_owner` and `break_glass` are never carried.
 **Profile fields:** name, avatar, `is_primary`, PIN hash, and every field the
 access resolver (`internal/access/resolver.go`) reads to decide access:
 `is_child`, `max_content_rating`, `max_advisory_age`, `require_advisory_age`,
-`library_restrictions_enabled`, the allowed libraries
+`requests_blocked`, `library_restrictions_enabled`, the allowed libraries
 (`user_profile_allowed_libraries`), and `max_playback_quality`. The PIN
-revision is not carried; a restored profile starts its own.
+revision is not carried; a restored profile starts its own. A profile restored
+as the account's primary drops its library limit, since the primary profile
+inherits its account's libraries (`access.ProfileLibraryLimit`); credential
+carry reads a primary profile's stored limit the same way.
 
 **Data types**, each owned by the package that owns its tables and
 implemented against the small interface in `internal/backup/userdata`
@@ -1907,7 +1936,15 @@ that holds a bearer secret or a public capability, each one way:
   destinations that receive notifications without a session (browser and
   mobile push registrations, notification webhooks, notification email
   addresses, Discord links, server notification channels): one removed
-  since the backup would receive them again. What this server holds for
+  since the backup would receive them again. Notification retention then
+  removes a carried mobile registration when its account has no login left
+  and no API key; the phone registers again at sign-in. A browser subscription
+  bound to a login session is carried too, but it names a session the restore
+  does not have, so it receives nothing and retention removes it; the web app
+  registers it again at the next sign-in. A backup taken before subscriptions
+  recorded a login drops the binding, and retention removes such an unbound
+  subscription once its account has no login left and no API key. What this
+  server holds for
   an outside account is carried the same way: watch-provider connections
   with their tokens (one removed since would sync again), and plugins'
   configuration and stored state, which hold the keys and tokens a plugin
@@ -1990,7 +2027,9 @@ neither list.
   stays linked; the others are deleted. Accepted and revoked invitations
   are the restored history and stay. A live credential whose account,
   profile, access group, item, autoscan source, or connection is not in the
-  restored data is dropped, and so is one whose account (owner, inviter, or
+  restored data is dropped (a profile counts only under the credential's own
+  account, since a profile id is unique only within one), and so is one whose
+  account (owner, inviter, or
   creator) has more authority in the restored data than on the live server:
   a higher role (the Owner over admin over user), enabled where it is
   disabled now, break-glass access, an effective account policy wider in
@@ -2001,8 +2040,9 @@ neither list.
   since, which the credential's holder could select), or, for a profile
   both sides have, a
   protection or restriction lifted or loosened (its PIN, becoming the
-  primary profile, child profile, rating or advisory-age ceiling, library
-  restriction, playback-quality ceiling), or a looser request policy
+  primary profile, child profile, rating or advisory-age ceiling, block
+  from requests, library restriction, playback-quality ceiling), or a
+  looser request policy
   (requests at all, without limit, more titles or over a shorter window,
   or with automatic approval, as `requests.LayeredPolicy` resolves it from
   the server's, the access group's, and the account's limits). The PIN
@@ -2045,7 +2085,8 @@ neither list.
   settings (requests, auto-approval, watchlist requests); subtitle
   providers; marker sharing; per-account and per-group download,
   transcode, and request permissions; a profile's child flag, library
-  restriction, and advisory-age requirement (on wins); a personal
+  restriction, advisory-age requirement, and block from requests (on
+  wins); a personal
   collection's sharing; a profile's notification preferences; a
   watch-provider connection's sync switches; an account's `enabled`,
   `break_glass`, and `local_password_login_enabled` (off wins) and
@@ -2062,7 +2103,12 @@ neither list.
   plugin task binding, an access group's permissions, a profile's
   notifications. Only account switches roll back as they were
   (`rollsBack`), since accounts roll back whole. Nothing
-  a full restore does turns a plugin on; the admin does. These switches are
+  a full restore does turns a plugin on; the admin does. A backup taken
+  before a switch's column existed keeps nothing for it, and the restored
+  server adds the column with its default when it migrates, except for a
+  restriction that sets `addMissing` (a profile's block from requests): the
+  restore adds that column itself when a live row is restricted, so the
+  restriction is kept. These switches are
   set before the credential carry compares authority, so it compares the
   restored server as it will start; the carry also counts an account with
   every library as seeing each enabled library of its server, and drops a

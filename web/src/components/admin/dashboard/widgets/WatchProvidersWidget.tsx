@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { Link } from "react-router";
 
 import type { WatchProviderStats } from "@/api/types";
@@ -5,6 +6,8 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { useAdminStats } from "@/hooks/queries/admin/stats";
 import { formatRelativeTime } from "@/lib/date";
 import { SectionError } from "../feedback";
+import { formatLocale } from "@/lib/appLocale";
+import { useT } from "@/i18n";
 
 /**
  * Connection and 24h sync status for every watch provider.
@@ -15,7 +18,11 @@ import { SectionError } from "../feedback";
  * One line per provider: it sits in a 1-row slot by default and scrolls once
  * there are more providers than fit.
  */
+const SEPARATOR = " · ";
+const DIVIDER = "|";
+
 export function WatchProvidersWidget() {
+  const t = useT();
   const statsQuery = useAdminStats();
   const providers = statsQuery.data?.watch_providers;
 
@@ -26,7 +33,7 @@ export function WatchProvidersWidget() {
   if (statsQuery.error) {
     return (
       <div className="surface-panel flex h-full items-center rounded-2xl border-0 px-4">
-        <SectionError message="Failed to load watch provider activity." />
+        <SectionError message={t("web.admin.dashboard.widgets.watchProviders.loadFailed")} />
       </div>
     );
   }
@@ -34,7 +41,9 @@ export function WatchProvidersWidget() {
   if (!providers || providers.length === 0) {
     return (
       <div className="surface-panel flex h-full min-h-14 items-center gap-3 rounded-2xl border-0 px-4 py-3">
-        <span className="text-muted-foreground text-sm">No watch providers configured</span>
+        <span className="text-muted-foreground text-sm">
+          {t("web.admin.dashboard.widgets.watchProviders.empty")}
+        </span>
       </div>
     );
   }
@@ -49,6 +58,7 @@ export function WatchProvidersWidget() {
 }
 
 function ProviderRow({ provider }: { provider: WatchProviderStats }) {
+  const t = useT();
   const profiles = provider.connected_profiles;
   const errors = provider.sync_errors_24h + provider.failed_exports;
 
@@ -59,8 +69,10 @@ function ProviderRow({ provider }: { provider: WatchProviderStats }) {
         <span className="text-foreground font-semibold">{provider.display_name}</span>
         {profiles === 0 ? (
           <>
-            {" · "}
-            {provider.registered ? "not connected" : "not installed"}
+            {SEPARATOR}
+            {provider.registered
+              ? t("web.admin.dashboard.widgets.watchProviders.notConnected")
+              : t("web.admin.dashboard.widgets.watchProviders.notInstalled")}
           </>
         ) : (
           <ProviderActivity provider={provider} />
@@ -68,14 +80,17 @@ function ProviderRow({ provider }: { provider: WatchProviderStats }) {
       </span>
       {errors > 0 ? (
         <span className="bg-destructive/10 text-destructive flex-shrink-0 rounded-full px-2 py-0.5 text-[11px] font-medium tabular-nums">
-          {errors.toLocaleString()} {errors === 1 ? "error" : "errors"}
+          {t("web.admin.dashboard.widgets.watchProviders.errorCount", {
+            count: errors,
+            count_text: errors.toLocaleString(formatLocale()),
+          })}
         </span>
       ) : null}
       <Link
         to="/admin/tasks/sync_watch_providers"
-        className="text-muted-foreground hover:text-primary ml-auto text-[11px] whitespace-nowrap transition-colors"
+        className="text-muted-foreground hover:text-primary ms-auto text-[11px] whitespace-nowrap transition-colors"
       >
-        Manage ›
+        {t("web.admin.dashboard.widgets.watchProviders.manage")}
       </Link>
     </div>
   );
@@ -87,41 +102,44 @@ function ProviderRow({ provider }: { provider: WatchProviderStats }) {
  * exports, so "0 out" would read as a failure instead of an absence.
  */
 function ProviderActivity({ provider }: { provider: WatchProviderStats }) {
+  const t = useT();
   const profiles = provider.connected_profiles;
   const lastSync =
     formatRelativeTime(provider.last_sync_completed_at, {
       rounding: "floor",
-      justNowLabel: "Just now",
-    }) ?? "never";
+      justNowLabel: t("web.admin.dashboard.widgets.watchProviders.justNow"),
+    }) ?? t("web.admin.dashboard.widgets.watchProviders.never");
+  const value = (chunks: ReactNode[]) => (
+    <span className="text-foreground font-medium">{chunks}</span>
+  );
 
   return (
     <>
-      {" · "}
-      {profiles.toLocaleString()} {profiles === 1 ? "profile" : "profiles"}
-      {" · synced "}
-      {lastSync}
-      <span className="text-border/70 mx-1.5">|</span>
-      {"24h: "}
-      <span className="text-foreground font-medium">
-        {provider.imported_watched_24h.toLocaleString()}
-      </span>
-      {" in"}
-      {provider.exporting ? (
-        <>
-          {" / "}
-          <span className="text-foreground font-medium">
-            {provider.exported_watched_24h.toLocaleString()}
-          </span>
-          {" out"}
-        </>
-      ) : null}
+      {SEPARATOR}
+      {t("web.admin.dashboard.widgets.watchProviders.profilesSynced", {
+        count: profiles,
+        count_text: profiles.toLocaleString(formatLocale()),
+        last_sync: lastSync,
+      })}
+      <span className="text-border/70 mx-1.5">{DIVIDER}</span>
+      {provider.exporting
+        ? t("web.admin.dashboard.widgets.watchProviders.importedExported24h", {
+            imported: provider.imported_watched_24h.toLocaleString(formatLocale()),
+            exported: provider.exported_watched_24h.toLocaleString(formatLocale()),
+            value,
+          })
+        : t("web.admin.dashboard.widgets.watchProviders.imported24h", {
+            imported: provider.imported_watched_24h.toLocaleString(formatLocale()),
+            value,
+          })}
       {provider.scrobbling && provider.open_scrobbles > 0 ? (
         <>
-          {" · "}
-          <span className="text-foreground font-medium">
-            {provider.open_scrobbles.toLocaleString()}
-          </span>
-          {" scrobbling"}
+          {SEPARATOR}
+          {t("web.admin.dashboard.widgets.watchProviders.scrobbling", {
+            count: provider.open_scrobbles,
+            count_text: provider.open_scrobbles.toLocaleString(formatLocale()),
+            value,
+          })}
         </>
       ) : null}
     </>

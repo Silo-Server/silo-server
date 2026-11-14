@@ -25,12 +25,21 @@ import (
 // newer one with ErrRestoreSetTooNew. Version 2 added the users section;
 // version 3 the home_sections section, template-bundle collections in
 // collections.json, and an omitted item's cause and error; version 4 a home
-// section's web_only. A reader refuses an unknown section and an unknown
-// field, so any of those is a new version, and an older set never holds
-// them.
+// section's web_only; version 5 changed no field: a server smart
+// collection's rules draw from their own library_ids (none: every library)
+// rather than only from the collection's libraries; version 6 a home
+// section's title_key and title_args. A reader refuses an
+// unknown section and an unknown field, so any of those is a new version,
+// and an older set never holds them.
 const (
 	restoreSetFormat  = "silo-restore-set"
-	restoreSetVersion = 4
+	restoreSetVersion = 6
+	// restoreSetSmartRulesOwnLibraries is the first version whose smart
+	// collection rules keep their own libraries.
+	restoreSetSmartRulesOwnLibraries = 5
+	// restoreSetSectionTitleKeys is the first version whose home sections may
+	// carry a title key.
+	restoreSetSectionTitleKeys = 6
 
 	restoreSetIndexName = "restore-set.json"
 	restoreSetBlobDir   = "blobs/"
@@ -362,12 +371,26 @@ type HomeSectionEntry struct {
 	// later); a set of an earlier version has it false, the column's
 	// default.
 	WebOnly bool `json:"web_only,omitempty"`
+	// TitleKey and TitleArgs name the catalog message Title is the English
+	// of, while the server wrote the title (version 6 and later); empty for a
+	// title an admin typed, and for a set of an earlier version.
+	TitleKey  string            `json:"title_key,omitempty"`
+	TitleArgs map[string]string `json:"title_args,omitempty"`
 	// Collection is the section-managed collection, with its items; nil
 	// for any other section.
 	Collection *SectionCollectionEntry `json:"collection,omitempty"`
 }
 
 func (e HomeSectionEntry) itemID() string { return homeSectionItemID(e.ID) }
+
+// titleArgs are the title's placeholder values; none without a key, which
+// a title an admin typed never has.
+func (e HomeSectionEntry) titleArgs() map[string]string {
+	if e.TitleKey == "" {
+		return nil
+	}
+	return e.TitleArgs
+}
 
 func homeSectionItemID(id string) string { return "section:" + id }
 

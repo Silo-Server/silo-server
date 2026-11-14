@@ -29,7 +29,11 @@ type Profile struct {
 	// RequireAdvisoryAge hides titles with no advisory age from the profile
 	// (see access.MaturityLimits.RequireAdvisoryAge). It only takes effect
 	// with a MaxAdvisoryAge limit.
-	RequireAdvisoryAge         bool
+	RequireAdvisoryAge bool
+	// RequestsBlocked keeps the profile out of requests and request discovery
+	// even when its account may request. Stored as a block, not an allow, so
+	// the zero value of a profile built anywhere keeps today's behavior.
+	RequestsBlocked            bool
 	QualityPreference          string
 	Language                   string
 	PreferredMetadataLanguage  string // ISO 639-1; "" = inherit library metadata language
@@ -42,9 +46,15 @@ type Profile struct {
 	ShowForcedSubtitles        bool
 	LibraryRestrictionsEnabled bool
 	AllowedLibraryIDs          []int
-	MaxPlaybackQuality         string
-	CreatedAt                  string
-	UpdatedAt                  string
+	// AllowedTitleIDs are the movies and series the profile may watch above
+	// its maturity limits (access.MaturityLimits.AllowedTitleIDs): its title
+	// allowances plus the titles of its live-allowed collections, sorted.
+	// Read-only here; only single-profile reads fill it, and the allowance
+	// service writes the rows.
+	AllowedTitleIDs    []string
+	MaxPlaybackQuality string
+	CreatedAt          string
+	UpdatedAt          string
 }
 
 // DeviceSettingEntry is a server-managed setting override scoped to one
@@ -85,7 +95,9 @@ type UpdateProfileInput struct {
 	// positive age sets it.
 	MaxAdvisoryAge *int
 	// RequireAdvisoryAge: nil leaves it untouched.
-	RequireAdvisoryAge         *bool
+	RequireAdvisoryAge *bool
+	// RequestsBlocked: nil leaves it untouched.
+	RequestsBlocked            *bool
 	QualityPreference          *string
 	Language                   *string
 	PreferredMetadataLanguage  *string
@@ -140,11 +152,15 @@ type WatchProgress struct {
 	DurationSeconds float64
 	Completed       bool
 	UpdatedAt       string
-	LastFileID      *int
-	LastResolution  *string
-	LastHDR         *bool
-	LastCodecVideo  *string
-	LastEditionKey  *string
+	// UpdatedAtTime is UpdatedAt at the store's full precision, which
+	// UpdatedAt's whole seconds can lose. Zero when the store sets only
+	// UpdatedAt.
+	UpdatedAtTime  time.Time
+	LastFileID     *int
+	LastResolution *string
+	LastHDR        *bool
+	LastCodecVideo *string
+	LastEditionKey *string
 }
 
 const (

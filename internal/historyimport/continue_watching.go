@@ -2,6 +2,7 @@ package historyimport
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"maps"
 	"slices"
@@ -59,6 +60,83 @@ func newImportedEpisode(itemID string, record Record) importedEpisode {
 	}
 }
 
+// importedShows aggregates the episodes a run imported per Silo series, so
+// the Continue Watching pass costs memory per show, not per episode. It is fed
+// a page at a time. Past maxTrackedSeries it stops, and the pass is skipped
+// rather than judging shows from a partial picture.
+type importedShows struct {
+	episodes int
+	// links counts source-series-to-Silo-series pairs in bySource and sourcesOf.
+	links     int
+	shows     map[string]*importedShow
+	bySource  map[string][]string
+	sourcesOf map[string][]string
+	failed    error
+}
+
+func newImportedShows() *importedShows {
+	return &importedShows{shows: map[string]*importedShow{}, bySource: map[string][]string{}, sourcesOf: map[string][]string{}}
+}
+
+// add resolves one page's episodes to Silo series, in one lookup, and folds
+// them in. One source series can span several Silo series, as when a show is
+// split into seasons differently.
+func (a *importedShows) add(ctx context.Context, drops SeriesDropStore, episodes []importedEpisode) {
+	if a.failed != nil || drops == nil || len(episodes) == 0 {
+		return
+	}
+	seen := make(map[string]bool, len(episodes))
+	itemIDs := make([]string, 0, len(episodes))
+	for _, episode := range episodes {
+		if !seen[episode.itemID] {
+			seen[episode.itemID] = true
+			itemIDs = append(itemIDs, episode.itemID)
+		}
+	}
+	seriesOf, err := drops.EpisodeSeriesIDs(ctx, itemIDs)
+	if err != nil {
+		a.failed = err
+		return
+	}
+	for _, episode := range episodes {
+		a.episodes++
+		seriesID := seriesOf[episode.itemID]
+		if seriesID == "" {
+			continue
+		}
+		if episode.sourceSeriesID != "" && !slices.Contains(a.bySource[episode.sourceSeriesID], seriesID) {
+			// The source names its series, so it can name a new one for every
+			// episode; the same cap as for shows keeps the links bounded.
+			if a.links >= maxTrackedSeries {
+				a.failed = errors.New("too many shows to track")
+				return
+			}
+			a.links++
+			a.bySource[episode.sourceSeriesID] = append(a.bySource[episode.sourceSeriesID], seriesID)
+			a.sourcesOf[seriesID] = append(a.sourcesOf[seriesID], episode.sourceSeriesID)
+		}
+		show := a.shows[seriesID]
+		if show == nil {
+			if len(a.shows) >= maxTrackedSeries {
+				a.failed = errors.New("too many shows to track")
+				return
+			}
+			show = &importedShow{}
+			a.shows[seriesID] = show
+		}
+		// The show is in progress when its most recently played episode is:
+		// Emby leaves out a show whose paused episode is older than a later
+		// finished one, without it being hidden.
+		switch {
+		case episode.at.After(show.lastPlay):
+			show.lastPlay = episode.at
+			show.inProgress = episode.inProgress
+		case episode.at.Equal(show.lastPlay):
+			show.inProgress = show.inProgress || episode.inProgress
+		}
+	}
+}
+
 // importedShow is what a run imported of one Silo series.
 type importedShow struct {
 	// lastPlay is the newest imported stamp of its episodes.
@@ -91,7 +169,9 @@ type importedShow struct {
 // A show counts as listed when any of its copies at the source is in the
 // row: by the source series of the episodes the run imported, or by the
 // listed series' provider IDs, which mark every Silo series that has them.
-func (s *Service) reconcileContinueWatching(ctx context.Context, userID int, profileID string, row ContinueWatchingRow, episodes []importedEpisode) (int, error) {
+//
+//nolint:funlen,gocyclo // one ordered decision pass, unchanged apart from taking aggregated shows
+func (s *Service) reconcileContinueWatching(ctx context.Context, userID int, profileID string, row ContinueWatchingRow, imported *importedShows) (int, error) {
 	if s.seriesDrops == nil || s.nextUp == nil {
 		slog.InfoContext(ctx, "history import: continue watching pass skipped: stores not configured", "component", "historyimport")
 		return 0, nil
@@ -107,56 +187,21 @@ func (s *Service) reconcileContinueWatching(ctx context.Context, userID int, pro
 	defer func() {
 		slog.InfoContext(ctx, "history import: continue watching pass",
 			"component", "historyimport", "profile_id", profileID,
-			"episodes", len(episodes), "row_shows", len(row.SourceSeriesIDs), "row_includes_next_up", row.IncludesNextUp,
+			"episodes", imported.episodes, "row_shows", len(row.SourceSeriesIDs), "row_includes_next_up", row.IncludesNextUp,
 			"shows", stats.shows, "listed", stats.listed, "not_hideable", stats.settled, "row_unidentified", stats.unidentified,
 			"surfaced_unlisted", stats.surfaced, "kept_newer_activity", stats.keptNewer,
 			"kept_existing_drop", stats.keptDropped, "kept_future_play", stats.keptFuture,
 			"undone_for_new_activity", stats.undone, "dropped", stats.dropped)
 	}()
-	if len(episodes) == 0 {
+	if imported.episodes == 0 {
 		return 0, nil
 	}
-
-	// Resolve every episode, in batches: one source series can span several
-	// Silo series, as when a show is split into seasons differently.
-	itemIDs := make([]string, 0, len(episodes))
-	seen := make(map[string]bool, len(episodes))
-	for _, episode := range episodes {
-		if !seen[episode.itemID] {
-			seen[episode.itemID] = true
-			itemIDs = append(itemIDs, episode.itemID)
+	shows, bySource := imported.shows, imported.bySource
+	for seriesID, show := range shows {
+		show.unfinished = false
+		for _, sourceSeriesID := range imported.sourcesOf[seriesID] {
+			show.unfinished = show.unfinished || row.UnfinishedSourceSeries[sourceSeriesID]
 		}
-	}
-	seriesOf, err := s.seriesDrops.EpisodeSeriesIDs(ctx, itemIDs)
-	if err != nil {
-		return 0, err
-	}
-	shows := make(map[string]*importedShow)
-	bySource := make(map[string][]string)
-	for _, episode := range episodes {
-		seriesID := seriesOf[episode.itemID]
-		if seriesID == "" {
-			continue
-		}
-		if episode.sourceSeriesID != "" && !slices.Contains(bySource[episode.sourceSeriesID], seriesID) {
-			bySource[episode.sourceSeriesID] = append(bySource[episode.sourceSeriesID], seriesID)
-		}
-		show := shows[seriesID]
-		if show == nil {
-			show = &importedShow{}
-			shows[seriesID] = show
-		}
-		// The show is in progress when its most recently played episode is:
-		// Emby leaves out a show whose paused episode is older than a later
-		// finished one, without it being hidden.
-		switch {
-		case episode.at.After(show.lastPlay):
-			show.lastPlay = episode.at
-			show.inProgress = episode.inProgress
-		case episode.at.Equal(show.lastPlay):
-			show.inProgress = show.inProgress || episode.inProgress
-		}
-		show.unfinished = show.unfinished || row.UnfinishedSourceSeries[episode.sourceSeriesID]
 	}
 	stats.shows = len(shows)
 	if len(shows) == 0 {

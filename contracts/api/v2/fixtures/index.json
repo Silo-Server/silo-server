@@ -1240,6 +1240,26 @@
       "body_file": "admin_collection_template_job_accepted.json"
     },
     {
+      "name": "admin_dashboard_layout_unsaved",
+      "operation_id": "getAdminDashboardLayout",
+      "scenario": "An account with no saved layout reads null for both members and still gets a validator for its first save.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/admin/dashboard/layout",
+        "headers": {
+          "Authorization": "Bearer tok-admin"
+        }
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Content-Type": "application/json",
+        "ETag": "\"4e70bed0e7ca91734d4c67a3.2yvhksboyyzbs\""
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/AdminDashboardLayout",
+      "body_file": "admin_dashboard_layout_unsaved.json"
+    },
+    {
       "name": "admin_device",
       "operation_id": "getAdminDevice",
       "scenario": "Device detail preserves profile identities and legacy compatibility settings; canonical overrides use the settings-values API.",
@@ -2501,6 +2521,25 @@
       "response_media_type": "application/json",
       "schema": "#/components/schemas/AdminMatchApplied",
       "body_file": "admin_match_apply.json"
+    },
+    {
+      "name": "admin_match_hints",
+      "operation_id": "getAdminItemMatchHints",
+      "scenario": "Delegated curator reads the title, year, and provider IDs the scanner parsed from the item's folder.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/admin/items/item-1/match/hints",
+        "headers": {
+          "Authorization": "Bearer tok-member"
+        }
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/AdminMatchHints",
+      "body_file": "admin_match_hints.json"
     },
     {
       "name": "admin_match_search",
@@ -5174,7 +5213,8 @@
         "method": "DELETE",
         "path": "/api/v2/account/identities/4",
         "headers": {
-          "Authorization": "Bearer tok-member"
+          "Authorization": "Bearer tok-member",
+          "X-Profile-Id": "p-primary"
         }
       },
       "expected_status": 409,
@@ -5194,7 +5234,8 @@
         "method": "DELETE",
         "path": "/api/v2/account/identities/6",
         "headers": {
-          "Authorization": "Bearer tok-member"
+          "Authorization": "Bearer tok-member",
+          "X-Profile-Id": "p-primary"
         }
       },
       "expected_status": 204,
@@ -7376,7 +7417,7 @@
       "response_headers": {
         "Cache-Control": "private, no-cache",
         "Content-Type": "application/json",
-        "ETag": "\"d13e40a56af60133e079ed362f0b928b8fe0c6b5cff399307d25e1c791d74f6f\""
+        "ETag": "\"e524a14c4883542923d7e2be58ae12ff5a2e649615878e7fcafd8ff387f88801\""
       },
       "response_media_type": "application/json",
       "schema": "#/components/schemas/HomeCapabilities",
@@ -9292,12 +9333,12 @@
     },
     {
       "name": "invitation_accepted",
-      "operation_id": "acceptInvitation",
+      "operation_id": "acceptInvitationLink",
       "scenario": "Invitation lifecycle with synthetic identities and credentials.",
       "request": {
         "method": "POST",
-        "path": "/api/v2/invitations/pending/accept",
-        "body": "{\"password\":\"synthetic-password\"}"
+        "path": "/api/v2/invitations/accept",
+        "body": "{\"token\":\"pending\",\"password\":\"synthetic-password\"}"
       },
       "expected_status": 201,
       "response_headers": {
@@ -9310,12 +9351,12 @@
     },
     {
       "name": "invitation_accepted_sign_in_required",
-      "operation_id": "acceptInvitation",
+      "operation_id": "acceptInvitationLink",
       "scenario": "Invitation lifecycle with synthetic identities and credentials.",
       "request": {
         "method": "POST",
-        "path": "/api/v2/invitations/sign-in-required/accept",
-        "body": "{\"password\":\"synthetic-password\"}"
+        "path": "/api/v2/invitations/accept",
+        "body": "{\"token\":\"sign-in-required\",\"password\":\"synthetic-password\"}"
       },
       "expected_status": 201,
       "response_headers": {
@@ -9345,11 +9386,12 @@
     },
     {
       "name": "invitation_lookup",
-      "operation_id": "lookupInvitation",
+      "operation_id": "lookupInvitationLink",
       "scenario": "Invitation lifecycle with synthetic identities and credentials.",
       "request": {
-        "method": "GET",
-        "path": "/api/v2/invitations/pending"
+        "method": "POST",
+        "path": "/api/v2/invitations/lookup",
+        "body": "{\"token\":\"pending\"}"
       },
       "expected_status": 200,
       "response_headers": {
@@ -9359,6 +9401,24 @@
       "response_media_type": "application/json",
       "schema": "#/components/schemas/InvitationLookup",
       "body_file": "invitation_lookup.json"
+    },
+    {
+      "name": "invitation_lookup_not_found",
+      "operation_id": "lookupInvitationLink",
+      "scenario": "Invitation lifecycle with synthetic identities and credentials.",
+      "request": {
+        "method": "POST",
+        "path": "/api/v2/invitations/lookup",
+        "body": "{\"token\":\"expired\"}"
+      },
+      "expected_status": 404,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "invitation_lookup_not_found.json"
     },
     {
       "name": "link_account_identity_with_credentials_directory_refused",
@@ -11936,7 +11996,8 @@
         "method": "GET",
         "path": "/api/v2/webhook-sync/connections",
         "headers": {
-          "Authorization": "Bearer tok-member"
+          "Authorization": "Bearer tok-member",
+          "X-Profile-Id": "p-primary"
         }
       },
       "expected_status": 200,
@@ -12901,12 +12962,12 @@
     },
     {
       "name": "password_reset_completed",
-      "operation_id": "completePasswordReset",
+      "operation_id": "completePasswordResetLink",
       "scenario": "Password reset link lifecycle with synthetic identities and credentials.",
       "request": {
         "method": "POST",
-        "path": "/api/v2/password-resets/live/complete",
-        "body": "{\"password\":\"synthetic-password\"}"
+        "path": "/api/v2/password-resets/complete",
+        "body": "{\"token\":\"live\",\"password\":\"synthetic-password\"}"
       },
       "expected_status": 200,
       "response_headers": {
@@ -12918,13 +12979,31 @@
       "body_file": "password_reset_completed.json"
     },
     {
-      "name": "password_reset_completed_sign_in_required",
-      "operation_id": "completePasswordReset",
+      "name": "password_reset_completed_not_found",
+      "operation_id": "completePasswordResetLink",
       "scenario": "Password reset link lifecycle with synthetic identities and credentials.",
       "request": {
         "method": "POST",
-        "path": "/api/v2/password-resets/sign-in-required/complete",
-        "body": "{\"password\":\"synthetic-password\"}"
+        "path": "/api/v2/password-resets/complete",
+        "body": "{\"token\":\"spent\",\"password\":\"synthetic-password\"}"
+      },
+      "expected_status": 404,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "password_reset_completed_not_found.json"
+    },
+    {
+      "name": "password_reset_completed_sign_in_required",
+      "operation_id": "completePasswordResetLink",
+      "scenario": "Password reset link lifecycle with synthetic identities and credentials.",
+      "request": {
+        "method": "POST",
+        "path": "/api/v2/password-resets/complete",
+        "body": "{\"token\":\"sign-in-required\",\"password\":\"synthetic-password\"}"
       },
       "expected_status": 200,
       "response_headers": {
@@ -12937,11 +13016,12 @@
     },
     {
       "name": "password_reset_lookup",
-      "operation_id": "lookupPasswordReset",
+      "operation_id": "lookupPasswordResetLink",
       "scenario": "Password reset link lifecycle with synthetic identities and credentials.",
       "request": {
-        "method": "GET",
-        "path": "/api/v2/password-resets/live"
+        "method": "POST",
+        "path": "/api/v2/password-resets/lookup",
+        "body": "{\"token\":\"live\"}"
       },
       "expected_status": 200,
       "response_headers": {
@@ -12951,6 +13031,24 @@
       "response_media_type": "application/json",
       "schema": "#/components/schemas/PasswordResetLookup",
       "body_file": "password_reset_lookup.json"
+    },
+    {
+      "name": "password_reset_lookup_not_found",
+      "operation_id": "lookupPasswordResetLink",
+      "scenario": "Password reset link lifecycle with synthetic identities and credentials.",
+      "request": {
+        "method": "POST",
+        "path": "/api/v2/password-resets/lookup",
+        "body": "{\"token\":\"spent\"}"
+      },
+      "expected_status": 404,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "password_reset_lookup_not_found.json"
     },
     {
       "name": "pause_admin_download_preparations",

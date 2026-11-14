@@ -139,9 +139,16 @@ func grantCarried(table string) string {
 // plugin installation is in the restored data.
 const pluginInstalled = `EXISTS (SELECT 1 FROM plugin_installations i WHERE i.id = r.plugin_installation_id)`
 
+// profileOf is the SQL condition that the account in the account column has
+// the profile in the profile column in the restored data. A profile id is
+// unique only within an account.
+func profileOf(account, profile string) string {
+	return `EXISTS (SELECT 1 FROM user_profiles p WHERE p.user_id = ` + account + ` AND p.id = ` + profile + `)`
+}
+
 // profileExists is the SQL condition, over the live row r, that its
-// profile is in the restored data.
-const profileExists = `EXISTS (SELECT 1 FROM user_profiles p WHERE p.id = r.profile_id)`
+// account has its profile in the restored data.
+var profileExists = profileOf("r.user_id", "r.profile_id")
 
 // Reasons shared by several secretTables entries.
 const (
@@ -211,20 +218,20 @@ var secretTables = []secretTable{
 		owners: []string{columnUserID},
 		owned: ownerCarried(columnUserID) + `
 			AND EXISTS (SELECT 1 FROM media_items m WHERE m.content_id = r.library_item_id)
-			AND (r.profile_id IS NULL OR EXISTS (SELECT 1 FROM user_profiles p WHERE p.id = r.profile_id::text))`,
+			AND (r.profile_id IS NULL OR ` + profileOf("r.user_id", "r.profile_id::text") + `)`,
 		describe: `format('RSS feed %s (account %s)', r.id, r.user_id)`,
 	}},
 	{name: "webhook_sync_connections", handling: secretCarried, why: "Plex and Jellyfin webhook sync secrets", carry: &carrySpec{
 		key: "id", same: []string{"id", columnUserID, "webhook_secret"}, credential: everyRow,
 		owners: []string{columnUserID},
 		owned: ownerCarried(columnUserID) + `
-			AND (r.default_profile_id = '' OR EXISTS (SELECT 1 FROM user_profiles p WHERE p.id = r.default_profile_id))`,
+			AND (r.default_profile_id = '' OR ` + profileOf("r.user_id", "r.default_profile_id") + `)`,
 		describe: `format('webhook sync connection %s %L (account %s)', r.id, r.server_name, r.user_id)`,
 	}},
 	{name: "webhook_sync_profile_mappings", handling: secretCarried, why: "the profile mappings of those connections", carry: &carrySpec{
 		key: "id", same: []string{"id", "connection_id", "external_user_id"}, credential: everyRow,
-		owned: `EXISTS (SELECT 1 FROM webhook_sync_connections c WHERE c.id = r.connection_id)
-			AND (r.silo_profile_id IS NULL OR EXISTS (SELECT 1 FROM user_profiles p WHERE p.id = r.silo_profile_id))`,
+		owned: `EXISTS (SELECT 1 FROM webhook_sync_connections c WHERE c.id = r.connection_id
+				AND (r.silo_profile_id IS NULL OR ` + profileOf("c.user_id", "r.silo_profile_id") + `))`,
 		describe: `format('webhook sync mapping %s of connection %s', r.id, r.connection_id)`,
 	}},
 
@@ -248,7 +255,9 @@ var secretTables = []secretTable{
 	}},
 
 	// Destinations that receive notifications without a session: one removed
-	// since the backup would receive them again.
+	// since the backup would receive them again. A browser subscription bound to
+	// a login session names one the restore does not have, so it stops until the
+	// web app registers it at the next sign-in.
 	{name: "web_push_subscriptions", handling: secretCarried, why: "browser push subscriptions", carry: &carrySpec{
 		key: "id", same: []string{"id", columnUserID, "endpoint"}, credential: everyRow,
 		owners: []string{columnUserID}, owned: ownerCarried(columnUserID) + ` AND ` + profileExists,
@@ -275,7 +284,7 @@ var secretTables = []secretTable{
 		describe: `format('notification webhook %s %L (account %s)', r.id, r.name, r.user_id)`,
 	}},
 	{name: "notification_email_prefs", handling: secretCarried, why: "notification email addresses", carry: &carrySpec{
-		key: columnProfileID, same: []string{columnProfileID, columnUserID}, credential: everyRow,
+		key: columnUserID + ", " + columnProfileID, same: []string{columnUserID, columnProfileID}, credential: everyRow,
 		owners: []string{columnUserID}, owned: ownerCarried(columnUserID) + ` AND ` + profileExists,
 		describe: `format('notification email of profile %s (account %s)', r.profile_id, r.user_id)`,
 	}},
@@ -438,7 +447,7 @@ func carryCredentials(ctx context.Context, loader DatabaseLoader, dbURL, liveURL
 	}
 	_, _ = fmt.Fprintf(out, "Kept this server's %s in place of the backup's: %s.\n", carriedKinds, strings.Join(kept, ", "))
 	if len(carriedRows.Dropped) > 0 {
-		_, _ = fmt.Fprintf(out, "Dropped %d whose owner is not in the backup or has more authority there than here: %s\n",
+		_, _ = fmt.Fprintf(out, "Dropped %d whose owner is not in the backup or has more authority there than here, or that the backup's older schema cannot hold beside another account's: %s\n",
 			len(carriedRows.Dropped), strings.Join(carriedRows.Dropped, ", "))
 	}
 	if len(carriedRows.Cleared) > 0 {
@@ -708,26 +717,42 @@ func tableColumns(ctx context.Context, tx pgx.Tx, table string) ([]string, error
 // that are not the same as a carried live one, upserts the live ones whose
 // owner exists, and moves an identity sequence past the ids it wrote. Only
 // the columns the restored schema has are written, so a backup taken
-// before a column was added still restores.
+// before a column was added still restores. A backup taken before a table's
+// key widened (notification_email_prefs gained user_id) is upserted on the
+// key it has, and carried live rows that would share one of its keys are
+// dropped: it cannot hold them all, and keeping one would hand it the others'.
 func (t secretTable) carryInto(ctx context.Context, tx pgx.Tx, live string, result *CarriedCredentials) error {
 	c := t.carry
 	rows := fmt.Sprintf(`json_populate_recordset(NULL::%s, $1::json) r`, t.name)
-	dropped, err := collectStrings(ctx, tx, fmt.Sprintf(`SELECT %s FROM %s WHERE NOT (%s)`, c.describe, rows, c.owned), live)
-	if err != nil {
-		return err
-	}
-	result.Dropped = append(result.Dropped, dropped...)
 	columns, err := tableColumns(ctx, tx, t.name)
 	if err != nil {
 		return err
 	}
+	keyColumns := strings.Split(c.key, ", ")
+	owned := c.owned
+	restoredKey, err := primaryKeyColumns(ctx, tx, t.name)
+	if err != nil {
+		return err
+	}
+	if len(restoredKey) > 0 && !sameColumns(restoredKey, keyColumns) {
+		owned = fmt.Sprintf(`(%s) AND NOT EXISTS (SELECT 1 FROM (SELECT r.* FROM %s WHERE %s) o
+			WHERE ROW(%s) = ROW(%s) AND ROW(%s) IS DISTINCT FROM ROW(%s))`,
+			c.owned, rows, c.owned, prefixed("o.", restoredKey), prefixed("r.", restoredKey),
+			prefixed("o.", keyColumns), prefixed("r.", keyColumns))
+		keyColumns = restoredKey
+	}
+	key := strings.Join(keyColumns, ", ")
+	dropped, err := collectStrings(ctx, tx, fmt.Sprintf(`SELECT %s FROM %s WHERE NOT (%s)`, c.describe, rows, owned), live)
+	if err != nil {
+		return err
+	}
+	result.Dropped = append(result.Dropped, dropped...)
 	same := slices.DeleteFunc(slices.Clone(c.same), func(col string) bool { return !slices.Contains(columns, col) })
 	if _, err := tx.Exec(ctx, fmt.Sprintf(`DELETE FROM %s t WHERE %s AND NOT EXISTS (
 		SELECT 1 FROM %s WHERE (%s) AND (%s) = (%s))`,
-		t.name, c.credential, rows, c.owned, prefixed("r.", same), prefixed("t.", same)), live); err != nil {
+		t.name, c.credential, rows, owned, prefixed("r.", same), prefixed("t.", same)), live); err != nil {
 		return err
 	}
-	keyColumns := strings.Split(c.key, ", ")
 	var set []string
 	for _, col := range columns {
 		if !slices.Contains(keyColumns, col) {
@@ -739,7 +764,7 @@ func (t secretTable) carryInto(ctx context.Context, tx pgx.Tx, live string, resu
 		values[i] = "r." + col
 		if l := c.limit; l != nil && col == l.column {
 			values[i] = fmt.Sprintf("(r.%s AND (%s))", col, l.keep)
-			limited, err := collectStrings(ctx, tx, fmt.Sprintf(`SELECT %s FROM %s WHERE (%s) AND r.%s AND NOT (%s)`, c.describe, rows, c.owned, col, l.keep), live)
+			limited, err := collectStrings(ctx, tx, fmt.Sprintf(`SELECT %s FROM %s WHERE (%s) AND r.%s AND NOT (%s)`, c.describe, rows, owned, col, l.keep), live)
 			if err != nil {
 				return err
 			}
@@ -751,24 +776,45 @@ func (t secretTable) carryInto(ctx context.Context, tx pgx.Tx, live string, resu
 	tag, err := tx.Exec(ctx, fmt.Sprintf(`INSERT INTO %s (%s) OVERRIDING SYSTEM VALUE
 		SELECT %s FROM %s WHERE %s
 		ON CONFLICT (%s) DO UPDATE SET %s`,
-		t.name, strings.Join(columns, ", "), strings.Join(values, ", "), rows, c.owned, c.key, strings.Join(set, ", ")), live)
+		t.name, strings.Join(columns, ", "), strings.Join(values, ", "), rows, owned, key, strings.Join(set, ", ")), live)
 	if err != nil {
 		return err
 	}
 	result.Kept[t.name] += int(tag.RowsAffected())
-	// An identity sequence restored from the backup can be behind the live
-	// ids just written; the next credential must not collide with them. A
-	// table keyed by several columns has none.
-	if len(keyColumns) > 1 {
-		return nil
+	// A sequence restored from the backup can be behind the live values just
+	// written. The next credential must not collide with a carried id, and a
+	// carried sign-in link's answer_seq must stay behind every value taken
+	// from now on, or its sign-ins would be refused as stale.
+	for _, col := range columns {
+		var seq *string
+		if err := tx.QueryRow(ctx, `SELECT pg_get_serial_sequence($1, $2)`, t.name, col).Scan(&seq); err != nil {
+			return err
+		}
+		if seq == nil {
+			continue
+		}
+		if _, err := tx.Exec(ctx, fmt.Sprintf(`SELECT setval($1::regclass, GREATEST(
+			coalesce(pg_sequence_last_value($1::regclass), 0), (SELECT coalesce(max(%s), 0) FROM %s), 1))`, col, t.name), *seq); err != nil {
+			return err
+		}
 	}
-	var seq *string
-	if err := tx.QueryRow(ctx, `SELECT pg_get_serial_sequence($1, $2)`, t.name, c.key).Scan(&seq); err != nil || seq == nil {
-		return err
-	}
-	_, err = tx.Exec(ctx, fmt.Sprintf(`SELECT setval($1::regclass, GREATEST(
-		coalesce(pg_sequence_last_value($1::regclass), 0), (SELECT coalesce(max(%s), 0) FROM %s), 1))`, c.key, t.name), *seq)
-	return err
+	return nil
+}
+
+// primaryKeyColumns lists the columns of table's primary key, in key order;
+// none when it has no primary key.
+func primaryKeyColumns(ctx context.Context, tx pgx.Tx, table string) ([]string, error) {
+	return collectStrings(ctx, tx, `
+		SELECT a.attname::text
+		FROM pg_index i
+		JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = ANY (i.indkey)
+		WHERE i.indrelid = $1::regclass AND i.indisprimary
+		ORDER BY array_position(i.indkey::int2[], a.attnum)`, table)
+}
+
+// sameColumns reports whether a and b name the same columns in any order.
+func sameColumns(a, b []string) bool {
+	return len(a) == len(b) && !slices.ContainsFunc(a, func(col string) bool { return !slices.Contains(b, col) })
 }
 
 func prefixed(prefix string, columns []string) string {

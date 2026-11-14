@@ -197,15 +197,22 @@ func (s *Service) readSelected(ctx, work context.Context, req RestoreRequest, wa
 	if err != nil {
 		return nil, located, err
 	}
-	planned, err := s.cachedSet(reading, located)
+	planned, release, err := s.cachedSet(reading, located)
 	if err != nil {
 		return nil, located, err
 	}
 	if planned.Digest != req.Digest {
+		release()
 		return nil, located, ErrDigestMismatch
 	}
 	keep := wanted(planned)
-	if err := checkTempSpace(os.TempDir(), planned, keep); err != nil {
+	release()
+	err = checkTempSpace(os.TempDir(), planned, keep)
+	if errors.Is(err, ErrNotEnoughTempSpace) && s.restoreSets.evictIdle() {
+		// Previews' sets no one holds were taking the room.
+		err = checkTempSpace(os.TempDir(), planned, keep)
+	}
+	if err != nil {
 		return nil, located, err
 	}
 	rs, err := s.openRestoreSet(reading, located, func(key string) bool { return keep[key] })

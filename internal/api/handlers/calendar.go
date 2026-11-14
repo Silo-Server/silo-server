@@ -4,9 +4,7 @@ import (
 	"context"
 	"log/slog"
 	"net/http"
-	"slices"
 	"sort"
-	"strconv"
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
@@ -109,95 +107,6 @@ type CalendarQuery struct {
 	Filter    string
 	Location  *time.Location
 	LibraryID *int
-}
-
-// HandleGetCalendar returns calendar events for a date range.
-func (h *CalendarHandler) HandleGetCalendar(w http.ResponseWriter, r *http.Request) {
-	q := r.URL.Query()
-
-	start, err := time.Parse("2006-01-02", q.Get("start"))
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "start must be a valid date (YYYY-MM-DD)")
-		return
-	}
-	end, err := time.Parse("2006-01-02", q.Get("end"))
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "end must be a valid date (YYYY-MM-DD)")
-		return
-	}
-	if end.Before(start) {
-		writeError(w, http.StatusBadRequest, "bad_request", "end must not be before start")
-		return
-	}
-	if end.Sub(start) > 30*24*time.Hour {
-		writeError(w, http.StatusBadRequest, "bad_request", "date range cannot exceed 31 days")
-		return
-	}
-
-	filter := q.Get("filter")
-	if filter == "" {
-		filter = calendarFilterAll
-	}
-	switch filter {
-	case calendarFilterAll, calendarFilterEverything, calendarFilterFollowing,
-		calendarFilterFavorites, calendarFilterWatchlist, calendarFilterPopular, calendarFilterTrending:
-	default:
-		writeError(w, http.StatusBadRequest, "bad_request", "invalid filter")
-		return
-	}
-
-	query := CalendarQuery{Start: start, End: end, Filter: filter, Location: catalog.CalendarLocation(q.Get("timezone"))}
-	af := requestAccessFilter(r)
-
-	// v1 resolves the preset before it looks at library_id: a restricting
-	// preset with no ids is an empty calendar even when library_id is
-	// malformed, and a restriction failure is 500 before library_id is judged.
-	scope, err := h.calendarScope(r.Context(), query.Filter, af)
-	if err != nil {
-		writeAPIError(w, err)
-		return
-	}
-	if scope.empty() {
-		writeJSON(w, http.StatusOK, calendarResponse{Events: []calendarDayResponse{}})
-		return
-	}
-
-	if v := q.Get("library_id"); v != "" {
-		id, err := strconv.Atoi(v)
-		if err != nil || id <= 0 {
-			writeError(w, http.StatusBadRequest, "bad_request", "library_id must be a positive integer")
-			return
-		}
-		query.LibraryID = &id
-	}
-
-	resp, err := h.calendarEvents(r.Context(), query, af, scope)
-	if err != nil {
-		writeAPIError(w, err)
-		return
-	}
-	withoutV2OnlyBadges(resp)
-	writeJSON(w, http.StatusOK, resp)
-}
-
-// withoutV2OnlyBadges drops the home-release badges /api/v1 never had. v1
-// lists events on the same dates as v2, because both read the same calendar.
-func withoutV2OnlyBadges(resp calendarResponse) {
-	for d := range resp.Events {
-		for i := range resp.Events[d].Items {
-			item := &resp.Events[d].Items[i]
-			item.Badges = v1CalendarBadges(item.Badges)
-		}
-	}
-}
-
-// v1CalendarBadges returns badges without the home-release badges, which the
-// frozen /api/v1 contract never had. It copies, because a badge slice can be
-// shared between responses.
-func v1CalendarBadges(badges []string) []string {
-	return slices.DeleteFunc(slices.Clone(badges), func(b string) bool {
-		return b == catalog.HomeReleaseDigital || b == catalog.HomeReleasePhysical
-	})
 }
 
 // Calendar answers the viewer's calendar for a validated query. The repo

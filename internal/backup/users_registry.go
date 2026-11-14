@@ -60,6 +60,7 @@ const (
 	excludedHistoryImport  = "history-import credentials"
 	excludedDashboard      = "administrator dashboard layout"
 	excludedDiscord        = "a Discord link is an external sign-in"
+	excludedAllowances     = "rating-limit exceptions, granted again by the household manager"
 )
 
 // excludedUserTables are the per-user tables neither a restore set nor a
@@ -93,6 +94,13 @@ var excludedUserTables = map[string]string{
 	"notification_email_prefs":         "an email destination must be verified on this server",
 	"notification_email_verifications": "email verification state",
 	"userdb_import_receipts":           "SQLite import receipts of this server",
+	// Exceptions to a profile's rating limit name this server's titles and
+	// collections and widen what the profile sees; the household manager
+	// grants them again rather than a single-account restore or a profile
+	// import bringing them in. A full restore carries them, checked by
+	// profileLimits.looserThan.
+	"profile_title_allowances":      excludedAllowances,
+	"profile_collection_allowances": excludedAllowances,
 	// Downloads, playback, and logs.
 	tableDownloads:                       excludedDownloads,
 	"user_downloads":                     excludedDownloads,

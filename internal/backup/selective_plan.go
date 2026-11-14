@@ -771,10 +771,11 @@ func (s *Service) PreviewUpload(ctx context.Context, id string, acceptUnauthenti
 }
 
 func (s *Service) preview(ctx context.Context, src restoreSource, acceptUnauthenticated bool) (*RestorePreview, error) {
-	rs, authenticated, err := s.previewSet(ctx, src, acceptUnauthenticated)
+	rs, release, authenticated, err := s.previewSet(ctx, src, acceptUnauthenticated)
 	if err != nil {
 		return nil, err
 	}
+	defer release()
 	serverID, _ := s.serverID(ctx)
 	p := s.newPlanner(rs, s.opts.Pool)
 	p.authenticated = authenticated
@@ -825,13 +826,11 @@ func (s *Service) preview(ctx context.Context, src restoreSource, acceptUnauthen
 			}
 			section.Items = append(section.Items, settingsPageItems(plans)...)
 		case SectionUsers:
-			plans, err := s.previewUsers(ctx, rs, serverID, libMap)
+			items, err := s.previewUsers(ctx, rs, serverID, libMap)
 			if err != nil {
 				return nil, err
 			}
-			for _, plan := range plans {
-				section.Items = append(section.Items, plan.item)
-			}
+			section.Items = append(section.Items, items...)
 		case SectionCollections:
 			items, err := p.planCollectionsSection(ctx, libMap, restorable)
 			if err != nil {

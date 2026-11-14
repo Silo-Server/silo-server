@@ -128,7 +128,7 @@ func TestHandleItems_BoxSetMovieChildrenHonorDetailFields(t *testing.T) {
 	if content.detailCalls != 1 {
 		t.Fatalf("expected one batched detail fetch, got %d", content.detailCalls)
 	}
-	for i, wantID := range []string{"m-2", "m-1"} {
+	for i, wantFileID := range []string{"2", "1"} {
 		item := result.Items[i]
 		if item.ParentID != parentID {
 			t.Fatalf("item %d: expected ParentId %s, got %s", i, parentID, item.ParentID)
@@ -136,7 +136,7 @@ func TestHandleItems_BoxSetMovieChildrenHonorDetailFields(t *testing.T) {
 		if len(item.MediaSources) != 1 {
 			t.Fatalf("item %d: expected 1 MediaSource, got %d", i, len(item.MediaSources))
 		}
-		if wantPath := "/media/" + wantID + ".mkv"; item.Path != wantPath {
+		if wantPath := "/silo/" + wantFileID + ".mkv"; item.Path != wantPath {
 			t.Fatalf("item %d: expected Path %q, got %q", i, wantPath, item.Path)
 		}
 	}
@@ -204,7 +204,7 @@ func TestHandleItems_BoxSetEpisodeChildrenResolveWithDetailFields(t *testing.T) 
 		t.Fatalf("expected 2 episode children, got %d", len(result.Items))
 	}
 	seriesID := h.codec.EncodeStringID(EncodedIDItem, "s-1")
-	for i, want := range []struct{ id, seasonID string }{{"e-2", "season-4"}, {"e-1", "season-1"}} {
+	for i, want := range []struct{ fileID, seasonID string }{{"1", "season-4"}, {"2", "season-1"}} {
 		item := result.Items[i]
 		if item.Type != "Episode" || item.ParentID != parentID {
 			t.Fatalf("item %d: expected an Episode under %s, got Type=%q ParentId=%s", i, parentID, item.Type, item.ParentID)
@@ -218,7 +218,7 @@ func TestHandleItems_BoxSetEpisodeChildrenResolveWithDetailFields(t *testing.T) 
 		if len(item.MediaSources) != 1 {
 			t.Fatalf("item %d: expected 1 MediaSource, got %d", i, len(item.MediaSources))
 		}
-		if wantPath := "/media/" + want.id + ".mkv"; item.Path != wantPath {
+		if wantPath := "/silo/" + want.fileID + ".mkv"; item.Path != wantPath {
 			t.Fatalf("item %d: expected Path %q, got %q", i, wantPath, item.Path)
 		}
 	}

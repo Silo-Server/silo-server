@@ -75,10 +75,13 @@ func Database(t testing.TB) (*pgxpool.Pool, string) {
 	return pool, dbURL
 }
 
-// Main runs a package's tests, then drops the template database Database
-// copies.
-func Main(m *testing.M) {
+// Main runs a package's tests, then the cleanups, then drops the template
+// database Database copies.
+func Main(m *testing.M, cleanups ...func()) {
 	code := m.Run()
+	for _, cleanup := range cleanups {
+		cleanup()
+	}
 	if templateName != "" {
 		if err := dropDatabase(os.Getenv("SILO_TEST_DATABASE_URL"), templateName); err != nil {
 			fmt.Fprintf(os.Stderr, "backuptest: dropping the template database: %v\n", err)

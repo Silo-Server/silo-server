@@ -28,7 +28,9 @@
               "description_long": "",
               "default_params": {
                 "min_score": 8
-              }
+              },
+              "display_name_key": "home.recipe.caImdb.name",
+              "description_short_key": "home.recipe.caImdb.description"
             }
           ],
           "avoid_duplicates": true,
@@ -47,7 +49,9 @@
               "description_long": "",
               "default_params": {
                 "lookback_days": 365
-              }
+              },
+              "display_name_key": "home.recipe.ffDefault.name",
+              "description_short_key": "home.recipe.ffDefault.description"
             }
           ],
           "avoid_duplicates": true,
@@ -66,7 +70,9 @@
               "description_long": "",
               "default_params": {
                 "format": "4k"
-              }
+              },
+              "display_name_key": "home.recipe.fs4k.name",
+              "description_short_key": "home.recipe.fs4k.description"
             },
             {
               "key": "fs_4k_recent",
@@ -77,7 +83,9 @@
               "default_params": {
                 "format": "4k",
                 "sort": "recent"
-              }
+              },
+              "display_name_key": "home.recipe.fs4kRecent.name",
+              "description_short_key": "home.recipe.fs4kRecent.description"
             },
             {
               "key": "fs_dv",
@@ -87,7 +95,9 @@
               "description_long": "",
               "default_params": {
                 "format": "dolby_vision"
-              }
+              },
+              "display_name_key": "home.recipe.fsDv.name",
+              "description_short_key": "home.recipe.fsDv.description"
             },
             {
               "key": "fs_hdr",
@@ -97,7 +107,9 @@
               "description_long": "",
               "default_params": {
                 "format": "hdr"
-              }
+              },
+              "display_name_key": "home.recipe.fsHdr.name",
+              "description_short_key": "home.recipe.fsHdr.description"
             }
           ],
           "avoid_duplicates": false,
@@ -117,7 +129,9 @@
               "default_params": {
                 "max_play_count": 2,
                 "min_rating": 7.5
-              }
+              },
+              "display_name_key": "home.section.hiddenGems",
+              "description_short_key": "home.recipe.hiddenGemsDefault.description"
             }
           ],
           "avoid_duplicates": true,
@@ -141,7 +155,9 @@
               "description_long": "",
               "default_params": {
                 "milestone_years": 5
-              }
+              },
+              "display_name_key": "home.recipe.anniversariesDefault.name",
+              "description_short_key": "home.recipe.anniversariesDefault.description"
             }
           ],
           "avoid_duplicates": false,
@@ -162,7 +178,9 @@
                 "auto_rotate": true,
                 "rotation_cadence": "weekly",
                 "subject_type": "director"
-              }
+              },
+              "display_name_key": "home.recipe.esDirectorAuto.name",
+              "description_short_key": "home.recipe.esDirectorAuto.description"
             },
             {
               "key": "es_actor",
@@ -174,7 +192,9 @@
                 "auto_rotate": true,
                 "rotation_cadence": "weekly",
                 "subject_type": "actor"
-              }
+              },
+              "display_name_key": "home.recipe.esActor.name",
+              "description_short_key": "home.recipe.esActor.description"
             },
             {
               "key": "es_studio",
@@ -186,7 +206,9 @@
                 "auto_rotate": true,
                 "rotation_cadence": "weekly",
                 "subject_type": "studio"
-              }
+              },
+              "display_name_key": "home.recipe.esStudio.name",
+              "description_short_key": "home.recipe.esStudio.description"
             },
             {
               "key": "es_era_80s",
@@ -197,7 +219,9 @@
               "default_params": {
                 "subject": "1980s",
                 "subject_type": "era"
-              }
+              },
+              "display_name_key": "home.recipe.esEra80s.name",
+              "description_short_key": "home.recipe.esEra80s.description"
             }
           ],
           "avoid_duplicates": false,
@@ -216,7 +240,9 @@
               "description_long": "",
               "default_params": {
                 "rotation_cadence": "weekly"
-              }
+              },
+              "display_name_key": "home.recipe.genreRouletteWeekly.name",
+              "description_short_key": "home.recipe.genreRouletteWeekly.description"
             }
           ],
           "avoid_duplicates": false,
@@ -240,7 +266,9 @@
               "description_long": "",
               "default_params": {
                 "item_ids": []
-              }
+              },
+              "display_name_key": "home.recipe.aclBlank.name",
+              "description_short_key": "home.recipe.aclBlank.description"
             }
           ],
           "avoid_duplicates": false,
@@ -259,7 +287,9 @@
               "description_long": "",
               "default_params": {
                 "library_collection_id": ""
-              }
+              },
+              "display_name_key": "home.recipe.collectionPick.name",
+              "description_short_key": "home.recipe.collectionPick.description"
             }
           ],
           "avoid_duplicates": false,
@@ -283,7 +313,9 @@
               "description_long": "",
               "default_params": {
                 "continue_type": "watching"
-              }
+              },
+              "display_name_key": "home.section.continueWatching",
+              "description_short_key": "home.recipe.continueWatchingDefault.description"
             },
             {
               "key": "continue_listening_default",
@@ -293,7 +325,9 @@
               "description_long": "",
               "default_params": {
                 "continue_type": "listening"
-              }
+              },
+              "display_name_key": "home.section.continueListening",
+              "description_short_key": "home.recipe.continueListeningDefault.description"
             }
           ],
           "avoid_duplicates": false,
@@ -310,7 +344,9 @@
               "icon": "⭐",
               "description_short": "Your favorites.",
               "description_long": "",
-              "default_params": {}
+              "default_params": {},
+              "display_name_key": "home.recipe.favoritesDefault.name",
+              "description_short_key": "home.recipe.favoritesDefault.description"
             }
           ],
           "avoid_duplicates": false,
@@ -327,7 +363,9 @@
               "icon": "📚",
               "description_short": "The next audiobook in series you've finished.",
               "description_long": "",
-              "default_params": {}
+              "default_params": {},
+              "display_name_key": "home.recipe.nextInSeriesDefault.name",
+              "description_short_key": "home.recipe.nextInSeriesDefault.description"
             }
           ],
           "avoid_duplicates": false,
@@ -344,7 +382,9 @@
               "icon": "🎲",
               "description_short": "A random selection from your library.",
               "description_long": "",
-              "default_params": {}
+              "default_params": {},
+              "display_name_key": "home.recipe.randomDefault.name",
+              "description_short_key": "home.recipe.randomDefault.description"
             }
           ],
           "avoid_duplicates": false,
@@ -361,7 +401,9 @@
               "icon": "🆕",
               "description_short": "Latest additions to your library.",
               "description_long": "",
-              "default_params": {}
+              "default_params": {},
+              "display_name_key": "home.section.recentlyAdded",
+              "description_short_key": "home.recipe.recentlyAddedDefault.description"
             }
           ],
           "avoid_duplicates": false,
@@ -378,7 +420,9 @@
               "icon": "🎬",
               "description_short": "Recently released titles.",
               "description_long": "",
-              "default_params": {}
+              "default_params": {},
+              "display_name_key": "home.recipe.recentlyReleasedDefault.name",
+              "description_short_key": "home.recipe.recentlyReleasedDefault.description"
             }
           ],
           "avoid_duplicates": false,
@@ -395,7 +439,9 @@
               "icon": "🔖",
               "description_short": "Items you've saved to watch.",
               "description_long": "",
-              "default_params": {}
+              "default_params": {},
+              "display_name_key": "home.recipe.watchlistDefault.name",
+              "description_short_key": "home.recipe.watchlistDefault.description"
             }
           ],
           "avoid_duplicates": false,
@@ -419,7 +465,9 @@
               "description_long": "",
               "default_params": {
                 "mood": "feel_good"
-              }
+              },
+              "display_name_key": "home.recipe.moodFeelGood.name",
+              "description_short_key": "home.recipe.moodFeelGood.description"
             },
             {
               "key": "mood_mind_bending",
@@ -429,7 +477,9 @@
               "description_long": "",
               "default_params": {
                 "mood": "mind_bending"
-              }
+              },
+              "display_name_key": "home.recipe.moodMindBending.name",
+              "description_short_key": "home.recipe.moodMindBending.description"
             },
             {
               "key": "mood_comfort",
@@ -439,7 +489,9 @@
               "description_long": "",
               "default_params": {
                 "mood": "comfort"
-              }
+              },
+              "display_name_key": "home.recipe.moodComfort.name",
+              "description_short_key": "home.recipe.moodComfort.description"
             },
             {
               "key": "mood_edge_of_seat",
@@ -449,7 +501,9 @@
               "description_long": "",
               "default_params": {
                 "mood": "edge_of_seat"
-              }
+              },
+              "display_name_key": "home.recipe.moodEdgeOfSeat.name",
+              "description_short_key": "home.recipe.moodEdgeOfSeat.description"
             },
             {
               "key": "mood_tearjerker",
@@ -459,7 +513,9 @@
               "description_long": "",
               "default_params": {
                 "mood": "tearjerker"
-              }
+              },
+              "display_name_key": "home.recipe.moodTearjerker.name",
+              "description_short_key": "home.recipe.moodTearjerker.description"
             },
             {
               "key": "mood_quiet_sunday",
@@ -469,7 +525,9 @@
               "description_long": "",
               "default_params": {
                 "mood": "quiet_sunday"
-              }
+              },
+              "display_name_key": "home.recipe.moodQuietSunday.name",
+              "description_short_key": "home.recipe.moodQuietSunday.description"
             },
             {
               "key": "mood_date_night",
@@ -479,7 +537,9 @@
               "description_long": "",
               "default_params": {
                 "mood": "date_night"
-              }
+              },
+              "display_name_key": "home.recipe.moodDateNight.name",
+              "description_short_key": "home.recipe.moodDateNight.description"
             },
             {
               "key": "mood_after_midnight",
@@ -489,7 +549,9 @@
               "description_long": "",
               "default_params": {
                 "mood": "after_midnight"
-              }
+              },
+              "display_name_key": "home.recipe.moodAfterMidnight.name",
+              "description_short_key": "home.recipe.moodAfterMidnight.description"
             }
           ],
           "avoid_duplicates": true,
@@ -508,7 +570,9 @@
               "description_long": "",
               "default_params": {
                 "max_minutes": 95
-              }
+              },
+              "display_name_key": "home.recipe.shortWatchesDefault.name",
+              "description_short_key": "home.recipe.shortWatchesDefault.description"
             }
           ],
           "avoid_duplicates": true,
@@ -532,7 +596,9 @@
               "description_long": "",
               "default_params": {
                 "anchor_item_id": ""
-              }
+              },
+              "display_name_key": "home.section.becauseYouWatched",
+              "description_short_key": "home.recipe.bcwAuto.description"
             }
           ],
           "avoid_duplicates": true,
@@ -549,7 +615,9 @@
               "icon": "⭐",
               "description_short": "Per-profile picks from the recommendation engine.",
               "description_long": "",
-              "default_params": {}
+              "default_params": {},
+              "display_name_key": "home.recipe.forYou.name",
+              "description_short_key": "home.recipe.forYou.description"
             }
           ],
           "avoid_duplicates": true,
@@ -568,7 +636,9 @@
               "description_long": "",
               "default_params": {
                 "lookback_days": 30
-              }
+              },
+              "display_name_key": "home.section.returningShows",
+              "description_short_key": "home.recipe.returningShowsDefault.description"
             }
           ],
           "avoid_duplicates": true,
@@ -585,7 +655,9 @@
               "icon": "👥",
               "description_short": "What similar profiles are loving.",
               "description_long": "",
-              "default_params": {}
+              "default_params": {},
+              "display_name_key": "home.section.profilesLikeYouEnjoyed",
+              "description_short_key": "home.recipe.similar.description"
             }
           ],
           "avoid_duplicates": true,
@@ -602,7 +674,9 @@
               "icon": "🎯",
               "description_short": "Best matches for your strongest taste — set a genre to narrow it.",
               "description_long": "",
-              "default_params": {}
+              "default_params": {},
+              "display_name_key": "home.section.topPicksToday",
+              "description_short_key": "home.recipe.tasteTop.description"
             }
           ],
           "avoid_duplicates": true,
@@ -636,7 +710,10 @@
                   "summer_blockbuster",
                   "saturday_morning"
                 ]
-              }
+              },
+              "display_name_key": "home.section.seasonalPicks",
+              "description_short_key": "home.recipe.seAuto.description",
+              "description_long_key": "home.recipe.seAuto.details"
             },
             {
               "key": "se_family_movie_night",
@@ -648,7 +725,9 @@
                 "enabled_themes": [
                   "family_movie_night"
                 ]
-              }
+              },
+              "display_name_key": "home.recipe.seFamilyMovieNight.name",
+              "description_short_key": "home.recipe.seFamilyMovieNight.description"
             }
           ],
           "avoid_duplicates": false,
@@ -672,7 +751,9 @@
               "description_long": "",
               "default_params": {
                 "window": "week"
-              }
+              },
+              "display_name_key": "home.recipe.mwWeek.name",
+              "description_short_key": "home.recipe.mwWeek.description"
             },
             {
               "key": "mw_month",
@@ -682,7 +763,9 @@
               "description_long": "",
               "default_params": {
                 "window": "month"
-              }
+              },
+              "display_name_key": "home.recipe.mwMonth.name",
+              "description_short_key": "home.recipe.mwMonth.description"
             }
           ],
           "avoid_duplicates": false,
@@ -701,7 +784,9 @@
               "description_long": "",
               "default_params": {
                 "lookback_days": 30
-              }
+              },
+              "display_name_key": "home.recipe.ntl30.name",
+              "description_short_key": "home.recipe.ntl30.description"
             }
           ],
           "avoid_duplicates": false,
@@ -720,7 +805,9 @@
               "description_long": "",
               "default_params": {
                 "profile_id": ""
-              }
+              },
+              "display_name_key": "home.recipe.paHousehold.name",
+              "description_short_key": "home.recipe.paHousehold.description"
             }
           ],
           "avoid_duplicates": false,
@@ -740,7 +827,9 @@
               "default_params": {
                 "source": "tmdb",
                 "window": "day"
-              }
+              },
+              "display_name_key": "home.recipe.tdiscTmdbDay.name",
+              "description_short_key": "home.recipe.tdiscTmdbDay.description"
             },
             {
               "key": "tdisc_tmdb_week",
@@ -751,7 +840,9 @@
               "default_params": {
                 "source": "tmdb",
                 "window": "week"
-              }
+              },
+              "display_name_key": "home.recipe.tdiscTmdbWeek.name",
+              "description_short_key": "home.recipe.tdiscTmdbWeek.description"
             }
           ],
           "avoid_duplicates": false,
@@ -770,7 +861,9 @@
               "description_long": "",
               "default_params": {
                 "window": "24h"
-              }
+              },
+              "display_name_key": "home.recipe.tr24h.name",
+              "description_short_key": "home.recipe.tr24h.description"
             },
             {
               "key": "tr_7d",
@@ -780,7 +873,9 @@
               "description_long": "",
               "default_params": {
                 "window": "7d"
-              }
+              },
+              "display_name_key": "home.section.trendingThisWeek",
+              "description_short_key": "home.recipe.tr7d.description"
             },
             {
               "key": "tr_30d",
@@ -790,7 +885,9 @@
               "description_long": "",
               "default_params": {
                 "window": "30d"
-              }
+              },
+              "display_name_key": "home.recipe.tr30d.name",
+              "description_short_key": "home.recipe.tr30d.description"
             }
           ],
           "avoid_duplicates": false,

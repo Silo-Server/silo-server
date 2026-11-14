@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"os"
 	"path"
 	"path/filepath"
 	"runtime"
@@ -187,7 +188,7 @@ func TestReadRestoreSetAcceptsAValidArchive(t *testing.T) {
 		t.Fatal("digest is not the archive's SHA-256")
 	}
 	if len(rs.Plugins) != 1 || len(rs.Libraries.Libraries) != 1 || len(rs.Collections.Collections) != 1 || len(rs.Settings.Settings) != 1 || len(rs.Collections.Branding) != 1 ||
-		len(rs.Users) != 1 || len(rs.Users[0].Profiles) != 1 || len(rs.Collections.TemplateCollections) != 1 || len(rs.HomeSections.Sections) != 2 ||
+		len(rs.Users) != 1 || len(mustLoadUser(t, rs, rs.Users[0]).Profiles) != 1 || len(rs.Collections.TemplateCollections) != 1 || len(rs.HomeSections.Sections) != 2 ||
 		rs.HomeSections.Sections[1].Collection == nil {
 		t.Fatalf("sections not decoded: %+v", rs)
 	}
@@ -871,6 +872,23 @@ func TestReadRestoreSetReadsEveryFormatVersion(t *testing.T) {
 			}
 		}
 	}
+	titleKey := func(key string) func(*RestoreSetIndex, *[]testEntry) {
+		return func(index *RestoreSetIndex, entries *[]testEntry) {
+			for _, e := range *entries {
+				if e.name == homeSectionsDocumentName {
+					var doc HomeSectionsDocument
+					_ = json.Unmarshal(e.data, &doc)
+					for i := range doc.Sections {
+						doc.Sections[i].TitleKey = key
+						if key != "" {
+							doc.Sections[i].TitleArgs = map[string]string{"library": "Movies"}
+						}
+					}
+					setDocument(index, *entries, homeSectionsDocumentName, mustJSON(doc), len(doc.Sections))
+				}
+			}
+		}
+	}
 	read := func(index RestoreSetIndex, entries []testEntry) error {
 		_, err := ReadRestoreSet(context.Background(), bytes.NewReader(buildTar(t, index, entries)), ReadOptions{})
 		return err
@@ -892,6 +910,9 @@ func TestReadRestoreSetReadsEveryFormatVersion(t *testing.T) {
 		}, true},
 		{"version 3 without web-only sections", 3, webOnly(false), true},
 		{"version 3 with a web-only section", 3, webOnly(true), false},
+		{"version 5 without title keys", 5, titleKey(""), true},
+		{"version 5 with a title key", 5, titleKey("home.section.recentlyAddedIn"), false},
+		{"version 6 with a title key", 6, titleKey("home.section.recentlyAddedIn"), true},
 		{"version 2 with home sections", 2, func(i *RestoreSetIndex, e *[]testEntry) { dropTemplates(i, e) }, false},
 		{"version 2 with template collections", 2, func(i *RestoreSetIndex, e *[]testEntry) { dropSection(i, e, SectionHomeSections) }, false},
 	} {
@@ -933,22 +954,19 @@ func TestPendingDecodesFollowTheComparison(t *testing.T) {
 	profile := func(id string, history json.RawMessage) ProfileEntry {
 		return ProfileEntry{ID: id, Data: map[string]json.RawMessage{userdata.WatchHistory: history, userdata.Ratings: json.RawMessage(`[]`)}}
 	}
-	docs := []UserDocument{
-		{Profiles: []ProfileEntry{profile("a", good), profile("b", bad)}},
-		{Profiles: []ProfileEntry{profile("c", good), profile("d", bad)}},
-	}
-	d := startPendingDecodes(docs, 1)
+	doc := &UserDocument{Profiles: []ProfileEntry{profile("a", good), profile("b", bad), profile("c", good), profile("d", bad)}}
+	d := startPendingDecodes(doc, 1)
 	defer d.stop()
-	if r, ok := d.take(&docs[1].Profiles[0], userdata.WatchHistory); !ok || r.err != nil || r.compare == nil {
+	if r, ok := d.take(&doc.Profiles[2], userdata.WatchHistory); !ok || r.err != nil || r.compare == nil {
 		t.Fatalf("c: compare %v, err %v, ok %v; want its decoded document", r.compare != nil, r.err, ok)
 	}
-	if _, ok := d.take(&docs[0].Profiles[0], userdata.WatchHistory); ok {
+	if _, ok := d.take(&doc.Profiles[0], userdata.WatchHistory); ok {
 		t.Fatal("a was passed; want a fallback to Pending")
 	}
-	if _, ok := d.take(&docs[1].Profiles[1], userdata.Ratings); ok {
+	if _, ok := d.take(&doc.Profiles[3], userdata.Ratings); ok {
 		t.Fatal("ratings are not decoded ahead; want a fallback to Pending")
 	}
-	if r, ok := d.take(&docs[1].Profiles[1], userdata.WatchHistory); !ok || r.err == nil {
+	if r, ok := d.take(&doc.Profiles[3], userdata.WatchHistory); !ok || r.err == nil {
 		t.Fatalf("d: err %v, ok %v; want its decode error", r.err, ok)
 	}
 }
@@ -1121,5 +1139,77 @@ func TestReadRestoreSetRefusesExpandingHeaders(t *testing.T) {
 	}
 	if allocated := after.TotalAlloc - before.TotalAlloc; allocated > 4<<20 {
 		t.Fatalf("refusing allocated %d bytes", allocated)
+	}
+}
+
+func mustLoadUser(t *testing.T, rs *RestoreSet, ref UserRef) *UserDocument {
+	t.Helper()
+	doc, err := rs.loadUser(ref)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return doc
+}
+
+// TestAccountDocumentsStayOnDisk: an account's document is written to the
+// set's directory and loaded on demand, never held or charged to the set's
+// memory, so a server's accounts together may exceed maxRestoreSetMetadata;
+// blobs are still not extracted, and a written document that changed since
+// the read is refused.
+func TestAccountDocumentsStayOnDisk(t *testing.T) {
+	index, entries := testRestoreSet()
+	doc := testUserDocument(5, "upload:profile-avatars/5/p1/original.webp")
+	title := strings.Repeat("t", 1000)
+	for i := range 4000 {
+		doc.Items = append(doc.Items, ItemRef{ContentID: fmt.Sprintf("mv-%d", i), Kind: "movie", Title: title})
+	}
+	data := mustJSON(doc)
+	setDocument(&index, entries, "users/5.json", data, 1)
+	rs, err := ReadRestoreSet(context.Background(), bytes.NewReader(buildTar(t, index, entries)), ReadOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rs.Cleanup()
+	if rs.metadataBytes >= int64(len(data)) {
+		t.Fatalf("charged %d bytes for a set whose account document alone is %d", rs.metadataBytes, len(data))
+	}
+	// A read that extracts nothing writes no blob beside the documents.
+	for key, file := range rs.blobs {
+		if file != "" {
+			t.Fatalf("a preview read extracted blob %s", key)
+		}
+	}
+	if loaded := mustLoadUser(t, rs, rs.Users[0]); len(loaded.Items) != len(doc.Items) {
+		t.Fatalf("loaded %d items, want %d", len(loaded.Items), len(doc.Items))
+	}
+	if err := os.WriteFile(rs.Users[0].file, mustJSON(testUserDocument(5, "")), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := rs.loadUser(rs.Users[0]); err == nil {
+		t.Fatal("a written account document that changed was loaded")
+	}
+}
+
+// TestOrphanedSetDirs: the startup sweep removes a set directory whose owner
+// is gone and keeps one a live set holds or one too new to be locked yet.
+func TestOrphanedSetDirs(t *testing.T) {
+	parent := t.TempDir()
+	var live, gone RestoreSet
+	if err := live.makeDir(parent); err != nil {
+		t.Fatal(err)
+	}
+	defer live.Cleanup()
+	if err := gone.makeDir(parent); err != nil {
+		t.Fatal(err)
+	}
+	_ = gone.owner.Close() // as when its process exits
+	young := filepath.Join(parent, setDirPrefix+"young")
+	if err := os.Mkdir(young, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	for dir, want := range map[string]bool{live.dir: false, gone.dir: true, young: false} {
+		if got := orphanedSetDir(dir); got != want {
+			t.Errorf("orphanedSetDir(%s) = %v, want %v", filepath.Base(dir), got, want)
+		}
 	}
 }

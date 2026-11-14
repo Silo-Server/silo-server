@@ -67,6 +67,11 @@ ARG INTEL_GMMLIB_VERSION=22.10.0
 ARG INTEL_IGC_VERSION=2.34.4
 ARG INTEL_IGC_BUILD=21428
 ARG INTEL_NEO_VERSION=26.18.38308.1
+# Intel's current OpenCL runtime only drives Gen12 and newer graphics. Gen8 to
+# Gen11 (UHD 630, Jasper Lake and similar) need the legacy1 runtime and its
+# IGC 1.x compiler, which install alongside the current ones.
+ARG INTEL_IGC_LEGACY_VERSION=1.0.17537.24
+ARG INTEL_NEO_LEGACY_VERSION=24.35.30872.36
 ARG JELLYFIN_FFMPEG_VERSION=8.1.3-1
 # SHA-256 of the PGDG signing key file (primary key B97B0AFCAA1A47F044F244A07FCC7D46ACCC4CF8).
 # The key comes from the same host as the packages, so pin it here.
@@ -99,16 +104,20 @@ COPY scripts/configure-intel-qsv-runtime.sh /tmp/configure-intel-qsv-runtime.sh
 RUN sh /tmp/configure-intel-qsv-runtime.sh "${INTEL_QSV_RUNTIME}" "${TARGETARCH}" && \
     rm /tmp/configure-intel-qsv-runtime.sh
 # Debian's Intel OpenCL runtime lags the media hardware supported by the
-# Jellyfin FFmpeg build. Match Jellyfin's container packaging on amd64 so QSV
-# tone mapping can use the quality-preserving OpenCL path. Other architectures
+# Jellyfin FFmpeg build. Match Jellyfin's container packaging on amd64, legacy
+# runtime included, so QSV tone mapping can use the quality-preserving OpenCL
+# path on every Intel generation the media driver supports. Other architectures
 # retain software tone mapping unless their own hardware executor probes clean.
 RUN if [ "${TARGETARCH}" = "amd64" ]; then \
       runtime_dir="$(mktemp -d)" && \
       cd "${runtime_dir}" && \
-      curl -fsSLO "https://github.com/intel/compute-runtime/releases/download/${INTEL_NEO_VERSION}/libigdgmm12_${INTEL_GMMLIB_VERSION}_amd64.deb" && \
-      curl -fsSLO "https://github.com/intel/intel-graphics-compiler/releases/download/v${INTEL_IGC_VERSION}/intel-igc-core-2_${INTEL_IGC_VERSION}+${INTEL_IGC_BUILD}_amd64.deb" && \
-      curl -fsSLO "https://github.com/intel/intel-graphics-compiler/releases/download/v${INTEL_IGC_VERSION}/intel-igc-opencl-2_${INTEL_IGC_VERSION}+${INTEL_IGC_BUILD}_amd64.deb" && \
-      curl -fsSLO "https://github.com/intel/compute-runtime/releases/download/${INTEL_NEO_VERSION}/intel-opencl-icd_${INTEL_NEO_VERSION}-0_amd64.deb" && \
+      curl -fsSLO --retry 5 --retry-all-errors "https://github.com/intel/compute-runtime/releases/download/${INTEL_NEO_VERSION}/libigdgmm12_${INTEL_GMMLIB_VERSION}_amd64.deb" && \
+      curl -fsSLO --retry 5 --retry-all-errors "https://github.com/intel/intel-graphics-compiler/releases/download/v${INTEL_IGC_VERSION}/intel-igc-core-2_${INTEL_IGC_VERSION}+${INTEL_IGC_BUILD}_amd64.deb" && \
+      curl -fsSLO --retry 5 --retry-all-errors "https://github.com/intel/intel-graphics-compiler/releases/download/v${INTEL_IGC_VERSION}/intel-igc-opencl-2_${INTEL_IGC_VERSION}+${INTEL_IGC_BUILD}_amd64.deb" && \
+      curl -fsSLO --retry 5 --retry-all-errors "https://github.com/intel/compute-runtime/releases/download/${INTEL_NEO_VERSION}/intel-opencl-icd_${INTEL_NEO_VERSION}-0_amd64.deb" && \
+      curl -fsSLO --retry 5 --retry-all-errors "https://github.com/intel/intel-graphics-compiler/releases/download/igc-${INTEL_IGC_LEGACY_VERSION}/intel-igc-core_${INTEL_IGC_LEGACY_VERSION}_amd64.deb" && \
+      curl -fsSLO --retry 5 --retry-all-errors "https://github.com/intel/intel-graphics-compiler/releases/download/igc-${INTEL_IGC_LEGACY_VERSION}/intel-igc-opencl_${INTEL_IGC_LEGACY_VERSION}_amd64.deb" && \
+      curl -fsSLO --retry 5 --retry-all-errors "https://github.com/intel/compute-runtime/releases/download/${INTEL_NEO_LEGACY_VERSION}/intel-opencl-icd-legacy1_${INTEL_NEO_LEGACY_VERSION}_amd64.deb" && \
       apt-get update && \
       apt-get install -y --no-install-recommends ./*.deb && \
       cd / && \

@@ -266,7 +266,7 @@ func withFixedLimits(sm *playback.SessionManager, limits playback.SessionLimits)
 
 func newPlaybackPolicyPDP(t *testing.T) *policy.PDP {
 	t.Helper()
-	engine, err := policy.NewEngine(context.Background())
+	engine, err := policy.NewEngine(context.Background(), policy.WithEvalTimeout(time.Minute))
 	if err != nil {
 		t.Fatalf("NewEngine() error: %v", err)
 	}
