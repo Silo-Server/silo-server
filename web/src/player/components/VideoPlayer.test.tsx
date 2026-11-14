@@ -3761,6 +3761,117 @@ describe("VideoPlayer plan failure recovery", () => {
     expect(onSubtitleTrackChange).not.toHaveBeenCalled();
   });
 
+  // Deleting a stored subtitle moves the later ones down an ordinal. A pick
+  // still waiting for its replan names the old ordinal, which the next plan
+  // gives another track.
+  it("moves a pending stored-subtitle pick to its ordinal in the next plan", async () => {
+    const onSubtitleTrackChange = vi.fn();
+    const stored = (index: number, id: number, language: string): PlayerSubtitleInfo => ({
+      index,
+      media_file_id: 7,
+      track_id: `file:7:subtitle:${index}`,
+      language,
+      codec: "srt",
+      label: language,
+      source: "downloaded",
+      stored_subtitle_id: id,
+      sync_key: `stored-${id}`,
+      url: `/stream/session-1/subtitles/${index}.vtt`,
+    });
+    const { rerenderPlayer } = renderPlayer({
+      subtitleUrls: [stored(0, 71, "en"), stored(1, 72, "es")],
+      onSubtitleTrackChange,
+    });
+    act(() =>
+      (controls.current as unknown as { onSubtitleSelect: (i: number) => void }).onSubtitleSelect(
+        1,
+      ),
+    );
+    await waitFor(() =>
+      expect(onSubtitleTrackChange).toHaveBeenCalledWith(1, expect.any(Number), 72),
+    );
+    const callsBefore = onSubtitleTrackChange.mock.calls.length;
+
+    // English was deleted and French added before the pick's replan ran.
+    rerenderPlayer({
+      plan: fixturePlanV3({ ...directPlan, plan_id: "plan:after-delete" }),
+      planRevision: 2,
+      subtitleUrls: [stored(0, 72, "es"), stored(1, 73, "fr")],
+    });
+
+    await waitFor(() => expect(controls.current?.activeSubtitleIndex).toBe(0));
+    await act(async () => Promise.resolve());
+    const sentAfter = onSubtitleTrackChange.mock.calls
+      .slice(callsBefore)
+      .map(([index, , storedId]) => [index, storedId]);
+    expect(sentAfter).toEqual([[0, 72]]);
+  });
+
+  // A finished translation is selected at the ordinal the server gave it,
+  // while the track list may still show another stored subtitle there until
+  // the refetch lands. The pick keeps the translation's identity.
+  it("keeps a translation handed off at a server ordinal the track list still gives another track", async () => {
+    const onSubtitleTrackChange = vi.fn();
+    const stored = (index: number, id: number, language: string): PlayerSubtitleInfo => ({
+      index,
+      media_file_id: 7,
+      track_id: `file:7:subtitle:${index}`,
+      language,
+      codec: "srt",
+      label: language,
+      source: "downloaded",
+      stored_subtitle_id: id,
+      sync_key: `stored-${id}`,
+      url: `/stream/session-1/subtitles/${index}.vtt`,
+    });
+    const { rerenderPlayer } = renderPlayer({
+      subtitleUrls: [stored(0, 71, "en"), stored(1, 72, "es")],
+      onSubtitleTrackChange,
+      onApplySubtitleTrack: vi.fn(),
+    });
+    const base = { session_id: "session-1", file_id: 7, job_id: 1, track_key: "ai-1" };
+    act(() => {
+      realtimeOptions.current?.onEvent?.({
+        type: "event",
+        session_id: "session-1",
+        name: "subtitle_translation_started",
+        payload: { ...base, language: "hr", total_cues: 2 },
+      });
+    });
+    // English was deleted, so Spanish is at 0 on the server and the
+    // translation (stored 73) takes 1.
+    act(() => {
+      realtimeOptions.current?.onEvent?.({
+        type: "event",
+        session_id: "session-1",
+        name: "subtitle_translation_completed",
+        payload: {
+          ...base,
+          subtitle_id: 73,
+          language: "hr",
+          track: fixtureSubtitleInventoryItemV3({
+            combined_index: 1,
+            source: "downloaded",
+            language: "hr",
+            stored_subtitle_id: 73,
+          }),
+        },
+      });
+    });
+    await waitFor(() =>
+      expect(onSubtitleTrackChange).toHaveBeenLastCalledWith(1, expect.any(Number), 73),
+    );
+
+    rerenderPlayer({
+      plan: fixturePlanV3({ ...directPlan, plan_id: "plan:refetched" }),
+      planRevision: 2,
+      subtitleUrls: [stored(0, 72, "es"), stored(1, 73, "hr")],
+    });
+    await act(async () => Promise.resolve());
+    expect(controls.current?.activeSubtitleIndex).toBe(1);
+    expect(onSubtitleTrackChange).toHaveBeenLastCalledWith(1, expect.any(Number), 73);
+  });
+
   // The rollback is otherwise silent: the refusal only renders inside the
   // quality menu, which a user who just picked a subtitle never opens.
   it("toasts the server's refusal when a subtitle change is rolled back", async () => {

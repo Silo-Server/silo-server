@@ -152,6 +152,11 @@
 # with one statement and never runs the collections' queries.
 ./internal/catalog TestPersonalCollectionCollageListReadsSkipSmartQueriesDB
 
+# Server smart collection collages: built from the first matches each viewer
+# can access, ready once the collection is saved, and served by list reads
+# with one statement.
+./internal/catalog TestServerSmartCollectionCollagesDB
+
 # Shared personal collections: a listing resolves each other owner's access
 # once, and a profile's own collections resolve nobody.
 ./internal/api/handlers TestPersonalCollectionOwnerLookupBudgetDB
