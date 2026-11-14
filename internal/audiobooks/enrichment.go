@@ -616,6 +616,7 @@ func (e *Enricher) enrichItem(ctx context.Context, item enrichmentItemRow) error
 			Owner:               e.providerIDs,
 			ItemType:            "audiobook",
 			ContentID:           item.ContentID,
+			NoAuthor:            strings.TrimSpace(item.Author) == "",
 		})
 		if admitErr != nil {
 			providerErrs = append(providerErrs, fmt.Errorf("%s candidate admission: %w", p.Slug(), admitErr))

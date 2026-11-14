@@ -361,7 +361,7 @@ func ResolveHWAccelWithFFmpegContext(ctx context.Context, hwAccel, ffmpegPath, h
 
 // hwAccelAuto is the configured hw_accel value that asks this package to pick
 // a backend by probing the host, rather than the operator naming one outright.
-const hwAccelAuto = "auto"
+const hwAccelAuto = HWAccelAuto
 
 // hwAccelPreferenceOrder is the auto-resolution order; the first backend whose
 // probe passes wins.

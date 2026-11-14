@@ -15,7 +15,7 @@ import {
   type UpdateItemMetadataRequest,
 } from "@/hooks/queries/items";
 import { useIsActingAdmin } from "@/hooks/useIsActingAdmin";
-import { useT } from "@/i18n";
+import { useT, type MessageKey } from "@/i18n";
 import { cn } from "@/lib/utils";
 import {
   AIR_TIMEZONES,
@@ -44,13 +44,10 @@ const EPISODE_FIELD_LOCK_MAP: Record<string, number> = {
   runtime: FIELD_RUNTIME,
 };
 
-const RESET_DESCRIPTIONS: Partial<Record<ItemDetail["type"], string>> = {
-  series:
-    "This will unlock all fields on this series and refresh metadata from your providers. Any manual edits to the series will be overwritten. Locked seasons and episodes keep their edits.",
-  season:
-    "This will unlock this season's title, overview and air date and refresh metadata from your providers. Any manual edits to them will be overwritten. Artwork you picked stays locked on the series; reset the series to replace it.",
-  episode:
-    "This will unlock this episode's title, overview, runtime and air date and refresh metadata from your providers. Any manual edits to them will be overwritten.",
+const RESET_DESCRIPTION_KEYS: Partial<Record<ItemDetail["type"], MessageKey>> = {
+  series: "web.item.editMetadata.resetDescriptionSeries",
+  season: "web.item.editMetadata.resetDescriptionSeason",
+  episode: "web.item.editMetadata.resetDescriptionEpisode",
 };
 
 const FIELD_LOCK_MAPS: Partial<Record<ItemDetail["type"], Record<string, number>>> = {
@@ -80,6 +77,8 @@ export default function EditMetadataDialog({ item, open, onOpenChange }: EditMet
   const refreshMutation = useRefreshItemMetadata();
 
   const ownsImageLock = item.type === "movie" || item.type === "series";
+  // A season or episode has the series' content rating, which decides age limits.
+  const ownsContentRating = item.type !== "season" && item.type !== "episode";
   const fieldLockMap = FIELD_LOCK_MAPS[item.type];
   const canEditImages = useIsActingAdmin();
   const visibleSections = SECTIONS.filter(
@@ -190,20 +189,12 @@ export default function EditMetadataDialog({ item, open, onOpenChange }: EditMet
     });
   }
 
-  async function handleReset() {
+  function handleReset() {
     setShowResetConfirm(false);
-    // A refresh skips locked fields, so the locks must go first or the reset
-    // would keep every manual edit. If unlocking fails, the dialog stays open
-    // with the unsaved edits.
-    if (fieldLockMap && (item.locked_fields?.length ?? 0) > 0) {
-      try {
-        await updateMutation.mutateAsync({ locked_fields: [] });
-      } catch {
-        return; // useUpdateItemMetadata already reported the failure.
-      }
-    }
+    // The server clears the locks in the reset's own write, so a reset that
+    // fails keeps them.
     onOpenChange(false);
-    refreshMutation.mutate({ item, mode: "quick" });
+    refreshMutation.mutate({ item, mode: "reset" });
   }
 
   function renderLockIcon(fieldName: string) {
@@ -250,7 +241,7 @@ export default function EditMetadataDialog({ item, open, onOpenChange }: EditMet
           showCloseButton
         >
           {/* Header */}
-          <DialogHeader className="border-border/10 shrink-0 flex-row items-center justify-between border-b px-5 py-4">
+          <DialogHeader className="border-border/10 shrink-0 flex-row items-center justify-between border-b px-5 py-4 pe-12">
             <div className="flex items-center gap-2.5">
               <DialogTitle className="text-[15px] font-semibold">
                 {t("web.item.dialog.editMetadataTitle")}
@@ -350,15 +341,17 @@ export default function EditMetadataDialog({ item, open, onOpenChange }: EditMet
                   )}
 
                   <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                    <FieldRow
-                      label={t("web.item.editMetadata.contentRating")}
-                      lockIcon={renderLockIcon("content_rating")}
-                    >
-                      <Input
-                        value={form.content_rating}
-                        onChange={(e) => setField("content_rating", e.target.value)}
-                      />
-                    </FieldRow>
+                    {ownsContentRating && (
+                      <FieldRow
+                        label={t("web.item.editMetadata.contentRating")}
+                        lockIcon={renderLockIcon("content_rating")}
+                      >
+                        <Input
+                          value={form.content_rating}
+                          onChange={(e) => setField("content_rating", e.target.value)}
+                        />
+                      </FieldRow>
+                    )}
 
                     {item.type === "movie" && (
                       <FieldRow
@@ -738,7 +731,9 @@ export default function EditMetadataDialog({ item, open, onOpenChange }: EditMet
         open={showResetConfirm}
         onOpenChange={setShowResetConfirm}
         title={t("web.item.editMetadata.resetToProvider")}
-        description={RESET_DESCRIPTIONS[item.type] ?? t("web.item.editMetadata.resetDescription")}
+        description={t(
+          RESET_DESCRIPTION_KEYS[item.type] ?? "web.item.editMetadata.resetDescription",
+        )}
         confirmLabel={t("web.item.editMetadata.resetConfirm")}
         variant="destructive"
         onConfirm={handleReset}

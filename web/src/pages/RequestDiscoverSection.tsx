@@ -11,6 +11,7 @@ import ScrollToTopButton from "@/components/ScrollToTopButton";
 import { useRequestDiscoverySection } from "@/hooks/queries/useRequests";
 import { useDocumentTitle } from "@/hooks/useDocumentTitle";
 import { flattenResultPages, pendingPageSize } from "@/lib/mediaRequests";
+import { useSectionTitle } from "@/lib/sectionTitle";
 import { useT, type Translate } from "@/i18n";
 
 /**
@@ -22,7 +23,9 @@ export default function RequestDiscoverSection() {
   const { section = "" } = useParams<{ section: string }>();
   const query = useRequestDiscoverySection(section);
 
-  const title = query.data?.pages[0]?.title || humanizeSectionKey(t, section);
+  const sectionTitle = useSectionTitle();
+  const firstPage = query.data?.pages[0];
+  const title = (firstPage && sectionTitle(firstPage)) || humanizeSectionKey(t, section);
   useDocumentTitle(t("web.requests.pageTitle", { title }));
 
   const results = flattenResultPages(query.data?.pages);

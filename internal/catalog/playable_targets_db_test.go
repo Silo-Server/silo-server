@@ -13,12 +13,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Silo-Server/silo-server/internal/userdb"
-	"github.com/Silo-Server/silo-server/internal/userstore"
-	"github.com/Silo-Server/silo-server/internal/userstore/pgstore"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/Silo-Server/silo-server/internal/userdb"
+	"github.com/Silo-Server/silo-server/internal/userstore"
+	"github.com/Silo-Server/silo-server/internal/userstore/pgstore"
 )
 
 func TestPlayableTargetResolverProfileStateAvailabilityAndAccess(t *testing.T) {

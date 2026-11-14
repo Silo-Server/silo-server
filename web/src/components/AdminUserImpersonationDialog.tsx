@@ -6,6 +6,7 @@ import { useAdminUserCapabilities, useImpersonateUser } from "@/hooks/queries/ad
 import { useAuth } from "@/hooks/useAuth";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { useT } from "@/i18n";
+import { TOUCH_TARGETS } from "@/lib/touchTargets";
 
 export function AdminUserImpersonationDialog({
   user,
@@ -39,6 +40,7 @@ export function AdminUserImpersonationDialog({
           : t("web.admin.users.impersonateDialog.descriptionUser", { username: user.username })
       }
       confirmLabel={t("web.admin.users.impersonateDialog.confirm")}
+      className={TOUCH_TARGETS}
       isPending={impersonateMutation.isPending}
       onConfirm={() => {
         // Callers offer only accounts the viewer may view as

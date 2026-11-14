@@ -137,8 +137,14 @@ chunks, and messages are precompiled, so the ICU parser is aliased away in
 Admin text (`web.admin.*`) is a separate part of every catalog (the `catalogParts`
 plugin in `vite.config.ts`), so the launch bundle doesn't carry it:
 
-- `AdminLayout` and the setup wizard call `useAdminMessages()` and render once the
-  part is loaded; an admin's session asks for it at sign-in.
+- `AdminLayout` and the setup wizard call `useAdminMessages()` and show a loading
+  state until the part is loaded; an admin's session asks for it at sign-in.
+- An admin surface outside the layout (the server activity popover, the seek-preview
+  dialog) calls `useAdminMessages({ optional: true })` and renders nothing until the
+  part is ready. A failed load hides it instead of reaching the error boundary.
 - Text that a non-admin can see belongs outside `web.admin.*`, even when an admin
   component shows it too (`web.common.*`). A `web.admin.*` message formatted before
   its part loads renders empty and asks for the part.
+- The `silo-admin-text/no-admin-message` lint rule enforces this: `web.admin.*` ids
+  are allowed only in the paths listed in `ADMIN_TEXT_PATHS` (`eslint.config.js`).
+  Tests are not checked, because `test-setup.ts` preloads the admin part.

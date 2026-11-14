@@ -93,6 +93,8 @@ it("serializes guarded v2 save/reset and refetches canonical data without fabric
     vi.fn().mockImplementation((_url: unknown, init: RequestInit) => {
       if (init.method === "PUT") {
         expect(new Headers(init.headers).get("If-Match")).toBe('"A"');
+        // A reload while the save is in flight must not cancel it.
+        expect(init.keepalive).toBe(true);
         writes.push("PUT");
         return new Promise<Response>((resolve) => {
           release = () => {

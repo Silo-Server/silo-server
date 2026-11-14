@@ -73,8 +73,9 @@ func TestFixedSourceAllowsIndependentViewerQuality(t *testing.T) {
 				Settings: test.settings, Registry: registry, ToneMapCapabilities: capabilities,
 			})
 			if test.wantTerminal != "" {
-				if result.Terminal == nil || result.Terminal.Reason != test.wantTerminal {
-					t.Fatalf("result = %s; want refusal %q", ExplainPlannerResultV3(result), test.wantTerminal)
+				// Both refusals here are decided by a setting.
+				if result.Terminal == nil || result.Terminal.Reason != test.wantTerminal || !result.SettingsDependentRefusal {
+					t.Fatalf("result = %s; want settings-dependent refusal %q", ExplainPlannerResultV3(result), test.wantTerminal)
 				}
 				return
 			}

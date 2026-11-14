@@ -146,7 +146,7 @@ func TestSubtitleSyncByKeyContract(t *testing.T) {
 		job: &subsync.Job{ID: 78, ExternalTimingID: 4, Trigger: subsync.TriggerManual, Status: subsync.JobPending, CreatedAt: fixedTime()},
 		states: []handlers.SubtitleSyncState{
 			{Key: "stored-9", MediaFileID: 42, Stored: &row, Timing: row.Timing, Revision: 3},
-			{Key: externalKey, MediaFileID: 42, External: sidecar, ContentSHA256: strings.Repeat("ab", 32), Timing: subtitles.Timing{Scale: 1}},
+			{Key: externalKey, MediaFileID: 42, External: sidecar, ExternalLabel: "Movie.2021.en.srt", ContentSHA256: strings.Repeat("ab", 32), Timing: subtitles.Timing{Scale: 1}},
 		},
 	}
 	deps.SubtitleSync = sync

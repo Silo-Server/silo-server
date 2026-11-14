@@ -166,6 +166,10 @@ type AttemptRecordV3 struct {
 	// CreatedAt is when the attempt row was saved, which is when its session
 	// started. SaveAttempt ignores it.
 	CreatedAt time.Time
+	// LoginSessionID is the login session that started the attempt; empty
+	// for an API key. The plan URL's stream reference authorizes the
+	// attempt's media on its own only while that session is active.
+	LoginSessionID string
 	// DesiredTracks is the audio and subtitle the viewer asked for, which
 	// can differ from CurrentPlan's selection after a version change had to
 	// fall back. Nil on rows written before it existed.
@@ -179,6 +183,11 @@ type AttemptIdentityV3 struct {
 	SessionID         string
 	UserID            int
 	ProfileID         string
+	// Stopped reports that the attempt has been stopped (StoppedAt is set).
+	Stopped bool
+	// LoginSessionID is the login session that started the attempt, or
+	// empty; see AttemptRecordV3.LoginSessionID.
+	LoginSessionID string
 }
 
 type RouteEventRecordV3 struct {
@@ -438,7 +447,7 @@ func (s *MemoryPlanStoreV3) GetAttemptIdentity(ctx context.Context, sessionID st
 	if err != nil {
 		return nil, err
 	}
-	return &AttemptIdentityV3{PlaybackAttemptID: record.PlaybackAttemptID, SessionID: record.SessionID, UserID: record.UserID, ProfileID: record.ProfileID}, nil
+	return &AttemptIdentityV3{PlaybackAttemptID: record.PlaybackAttemptID, SessionID: record.SessionID, UserID: record.UserID, ProfileID: record.ProfileID, Stopped: record.StoppedAt != nil, LoginSessionID: record.LoginSessionID}, nil
 }
 
 func (s *MemoryPlanStoreV3) GetAttemptIdentityByPlaybackAttemptID(ctx context.Context, attemptID string) (*AttemptIdentityV3, error) {
@@ -446,7 +455,7 @@ func (s *MemoryPlanStoreV3) GetAttemptIdentityByPlaybackAttemptID(ctx context.Co
 	if err != nil {
 		return nil, err
 	}
-	return &AttemptIdentityV3{PlaybackAttemptID: record.PlaybackAttemptID, SessionID: record.SessionID, UserID: record.UserID, ProfileID: record.ProfileID}, nil
+	return &AttemptIdentityV3{PlaybackAttemptID: record.PlaybackAttemptID, SessionID: record.SessionID, UserID: record.UserID, ProfileID: record.ProfileID, Stopped: record.StoppedAt != nil, LoginSessionID: record.LoginSessionID}, nil
 }
 
 func (s *MemoryPlanStoreV3) RecordRouteEvent(_ context.Context, record RouteEventRecordV3) (bool, error) {

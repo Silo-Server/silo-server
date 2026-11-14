@@ -375,7 +375,7 @@ func TestDeletingAProfilePurgesItsRecommendationRowsPostgres(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := store.DeleteProfile(ctx, viaStore); err != nil {
+	if _, err := store.DeleteProfile(ctx, viaStore); err != nil {
 		t.Fatal(err)
 	}
 	if err := repo.PurgeProfile(ctx, userID, viaPurge); err != nil {

@@ -43,6 +43,8 @@ type DownloadSubscriptionPatchInput struct {
 	IfMatch     string `header:"If-Match"`
 	IfNoneMatch string `header:"If-None-Match"`
 	Body        DownloadSubscriptionPatchBody
+	// RawBody is the document as sent; see ProfileUpdateInput.
+	RawBody []byte
 }
 type DownloadSubscriptionDeleteInput struct {
 	ID          string `path:"id" minLength:"1"`
@@ -68,8 +70,17 @@ func subscriptionMutationProblem(err error) *Problem {
 		return p
 	}
 	switch {
-	case errors.Is(err, downloads.ErrInvalidSubscriptionMode), errors.Is(err, downloads.ErrSeasonsRequired), errors.Is(err, downloads.ErrInvalidSeasonNumbers), errors.Is(err, downloads.ErrNotSeries):
-		return NewProblem(TypeMalformedRequest, err.Error())
+	// An invalid monitor option is a validation failure at the member it
+	// names. Only the patch body reaches the mode check; create's schema
+	// enum rejects an unknown mode first, with the same code and detail.
+	case errors.Is(err, downloads.ErrInvalidSubscriptionMode):
+		return validationProblem(locationBody+".mode", codeInvalidEnum, `expected value to be one of "all, future, latest_season, specific_seasons"`)
+	case errors.Is(err, downloads.ErrSeasonsRequired):
+		return validationProblem(locationBody+".season_numbers", codeRequired, err.Error())
+	case errors.Is(err, downloads.ErrInvalidSeasonNumbers):
+		return validationProblem(locationBody+".season_numbers", codeOutOfRange, err.Error())
+	case errors.Is(err, downloads.ErrNotSeries):
+		return validationProblem(locationBody+".series_id", codeInvalid, "series_id is not a series")
 	case errors.Is(err, downloads.ErrInvalidQuality), errors.Is(err, downloads.ErrTranscodeDisabled), errors.Is(err, downloads.ErrQualityUnavailable), errors.Is(err, downloads.ErrCapacityUnavailable), errors.Is(err, downloads.ErrCapabilityUnavailable):
 		return downloadCreationProblem(err)
 	default:
@@ -108,12 +119,14 @@ func (reg *Registry) updateDownloadSubscription(ctx context.Context, in *Downloa
 	if p != nil {
 		return nil, p
 	}
-	b := in.Body
-	if b.Mode.Null || b.SeasonNumbers.Null || b.DeleteWatched.Null || b.MaxStorageBytes.Null || b.Quality.Null || b.Active.Null {
-		return nil, NewProblem(TypeMalformedRequest, "Monitor fields cannot be null.")
+	// No monitor field can be cleared, so null on any of them is a 422
+	// naming the member.
+	if p := rejectNonNullableNulls(in.RawBody, nil); p != nil {
+		return nil, p
 	}
-	if b.MaxStorageBytes.Present && b.MaxStorageBytes.Value < 0 || len(b.SeasonNumbers.Value) > 10000 {
-		return nil, NewProblem(TypeMalformedRequest, "Invalid monitor storage or season bounds.")
+	b := in.Body
+	if p := subscriptionPatchBoundsProblem(b); p != nil {
+		return nil, p
 	}
 	patch := downloads.SubscriptionPatch{Mode: subscriptionPatchPointer(b.Mode), SeasonNumbers: subscriptionPatchPointer(b.SeasonNumbers), DeleteWatched: subscriptionPatchPointer(b.DeleteWatched), MaxStorageBytes: subscriptionPatchPointer(b.MaxStorageBytes), Quality: subscriptionPatchPointer(b.Quality), Active: subscriptionPatchPointer(b.Active)}
 	row, err := reg.deps.DownloadSubscriptionMutations.UpdateSubscriptionMonitor(ctx, user, profile, in.DeviceID, in.ID, patch, handlers.AccessFilterFromContext(ctx, ""), subscriptionGuard(in.IfMatch, in.IfNoneMatch))
@@ -122,6 +135,25 @@ func (reg *Registry) updateDownloadSubscription(ctx context.Context, in *Downloa
 	}
 	return subscriptionOutput(row), nil
 }
+
+// subscriptionPatchBoundsProblem answers an out-of-range bound the way create
+// does, where the schema carries it: 422 at the member, code out_of_range.
+// The patch body checks them here because adding them to its schema would
+// change the documented request contract.
+func subscriptionPatchBoundsProblem(b DownloadSubscriptionPatchBody) *Problem {
+	var errs []ProblemError
+	if b.MaxStorageBytes.Present && b.MaxStorageBytes.Value < 0 {
+		errs = append(errs, ProblemError{Location: locationBody + ".max_storage_bytes", Code: codeOutOfRange, Detail: "expected number >= 0"})
+	}
+	if len(b.SeasonNumbers.Value) > 10000 {
+		errs = append(errs, ProblemError{Location: locationBody + ".season_numbers", Code: codeOutOfRange, Detail: "expected array length <= 10000"})
+	}
+	if len(errs) == 0 {
+		return nil
+	}
+	return NewProblem(TypeValidationFailed, "The request did not pass validation; see errors.").WithErrors(errs...)
+}
+
 func subscriptionGuard(match, none string) func(*downloads.Subscription) error {
 	return func(row *downloads.Subscription) error {
 		tag, _ := ParseEntityTag(downloadSubscriptionOf(row).ETag)

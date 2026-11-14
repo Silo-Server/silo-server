@@ -485,7 +485,7 @@ func TestStartTaskReservesBeforeAcknowledgment(t *testing.T) {
 	manager := taskmanager.New(&fakeTriggerRepository{}, fakeExecutionRepository{}, nil, nil)
 	manager.Register(task)
 	info, err := manager.StartTask(task.Key())
-	if err != nil || info.State != taskmanager.TaskStateRunning {
+	if err != nil || info.State != taskmanager.TaskStateRunning || info.StartedAt == nil {
 		t.Fatalf("start: %+v, %v", info, err)
 	}
 	t.Cleanup(manager.Stop)

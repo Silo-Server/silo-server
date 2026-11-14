@@ -157,7 +157,7 @@ func (r *countingEpisodeRepo) ListIDsBySeasonIDs(context.Context, []string) (map
 	return nil, nil
 }
 
-func (r *countingEpisodeRepo) ListAdjacentInSeries(context.Context, string, int, int) ([]*models.Episode, error) {
+func (r *countingEpisodeRepo) ListAdjacentInSeriesFor(context.Context, string, int, int, catalog.AccessFilter) ([]*models.Episode, error) {
 	return nil, errors.New("ListAdjacentInSeries not used in fallback test")
 }
 

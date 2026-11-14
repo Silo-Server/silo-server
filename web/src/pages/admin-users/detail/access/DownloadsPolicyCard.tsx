@@ -1,6 +1,7 @@
 import { Link } from "react-router";
 
 import type { AdminUser, UpdateUserRequest } from "@/api/types";
+import { DownloadsServerNotice } from "@/components/admin/DownloadsServerNotice";
 import { Button } from "@/components/ui/button";
 import { useAdminUserCapabilities } from "@/hooks/queries/admin/users";
 import { useT, type MessageKey } from "@/i18n";
@@ -94,6 +95,7 @@ export function DownloadsPolicyCard({
         ) : null
       }
     >
+      <DownloadsServerNotice className="px-4 py-3 sm:px-5" />
       {draft.editing && d ? (
         <>
           <ChoicePolicyEdit

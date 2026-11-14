@@ -8,7 +8,8 @@ import { useEventChannel } from "@/components/realtimeEventsContext";
 import { Button } from "@/components/ui/button";
 import { useTasks, useRunTask } from "@/hooks/queries/admin/tasks";
 import { formatDateTime } from "@/lib/datetime";
-import { useT, type Translate } from "@/i18n";
+import { useServerText, useT, type Translate } from "@/i18n";
+import { taskText } from "@/lib/taskText";
 
 function numberFromResultData(data: Record<string, unknown> | undefined, key: string) {
   const value = data?.[key];
@@ -62,6 +63,7 @@ function TaskActionRow({
   pending: boolean;
 }) {
   const t = useT();
+  const serverText = useServerText();
   const key = task?.key;
   const running = task?.state === "running" || task?.state === "cancelling";
 
@@ -69,11 +71,13 @@ function TaskActionRow({
     <div className="border-border flex flex-col gap-3 border-b py-4 last:border-b-0 sm:flex-row sm:items-center">
       <div className="min-w-0 flex-1">
         <div className="flex flex-wrap items-center gap-2">
-          <h3 className="text-sm font-semibold">{task?.name ?? fallbackName}</h3>
+          <h3 className="text-sm font-semibold">
+            {task ? taskText(serverText, task, "name") : fallbackName}
+          </h3>
           {task?.last_execution && <TaskStatusBadge result={task.last_execution} />}
         </div>
         <p className="text-muted-foreground mt-1 text-xs leading-relaxed">
-          {task?.description ?? fallbackDescription}
+          {task?.description ? taskText(serverText, task, "description") : fallbackDescription}
         </p>
         <p className="text-muted-foreground mt-1 text-xs">{formatTaskResult(t, task)}</p>
       </div>

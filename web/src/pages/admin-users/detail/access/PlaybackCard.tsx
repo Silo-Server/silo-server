@@ -18,6 +18,7 @@ import {
   playbackQualityPresetFromValue,
   playbackQualityValueFromPreset,
 } from "@/lib/playback-quality";
+import { TOUCH_TARGETS } from "@/lib/touchTargets";
 
 import { KeyValueRow } from "../ui";
 import { EditableCard, type AccessCardProps } from "./EditableCard";
@@ -417,7 +418,7 @@ export function PlaybackCard({
                     <SelectTrigger id={videoId} className="w-32">
                       <SelectValue placeholder={t("web.admin.users.detail.access.choose")} />
                     </SelectTrigger>
-                    <SelectContent>
+                    <SelectContent className={TOUCH_TARGETS}>
                       <SelectItem value="off">
                         {t("web.admin.users.detail.access.value.off")}
                       </SelectItem>

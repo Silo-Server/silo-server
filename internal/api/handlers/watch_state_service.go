@@ -41,6 +41,9 @@ func (h *ItemsHandler) WatchDetail(ctx context.Context, userID int, profileID, c
 		}
 	}
 
+	if !h.CanViewFilePaths(ctx) {
+		detail.HideFileIdentity()
+	}
 	if detail.Type == itemTypeMovie || detail.Type == itemTypeEpisode {
 		h.populateWatchMarkers(ctx, detail, filter.SelectedFileID)
 	}

@@ -49,7 +49,7 @@ func (h *SubtitleSearchHandler) SearchSubtitles(ctx context.Context, access cata
 	if h.manager == nil || h.mediaResolver == nil {
 		return nil, apiError(http.StatusServiceUnavailable, "dependency_unavailable", "Subtitle search is not configured")
 	}
-	result, err := h.searchAuthorizedSubtitles(ctx, fileID, languages, false)
+	result, err := h.searchAuthorizedSubtitles(ctx, fileID, languages)
 	if err != nil {
 		return nil, err
 	}

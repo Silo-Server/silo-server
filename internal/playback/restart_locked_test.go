@@ -7,7 +7,9 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 )
 
@@ -263,5 +265,86 @@ func TestRestartSessionLocked_SupersededWhenReplaced(t *testing.T) {
 	}
 	if live.IsRunning() {
 		t.Fatal("the live session must be untouched by a stale restart")
+	}
+}
+
+// The API server tears a crashed local transcode down so the client can
+// reconstruct it. A reconstruct starts on GPU decode again and dies at the same
+// frame, so the exit monitor restarts this failure on CPU decode itself, and
+// tears the session down as before when that restart cannot start.
+func TestLocalExitMonitorRestartsFilterReinitFailureOnCPUDecode(t *testing.T) {
+	for _, tc := range []struct {
+		name           string
+		ffmpegMissing  bool
+		wantTornDown   bool
+		wantRegistered bool
+	}{
+		{name: "restart starts", wantRegistered: true},
+		{name: "restart cannot start", ffmpegMissing: true, wantTornDown: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			resetDeviceLoad(t)
+			fakeDeviceStat(t, qsvPairDevA)
+			synctest.Test(t, func(t *testing.T) {
+				const sessionID = "reinit-local"
+				dir := t.TempDir()
+				argsPath := filepath.Join(dir, "restart-args")
+				ffmpegPath := filepath.Join(dir, "ffmpeg")
+				if !tc.ffmpegMissing {
+					// The replacement exits at once: a process left running
+					// would hold the bubble's clock.
+					script := "#!/bin/sh\nprintf '%s\\n' \"$@\" > \"" + argsPath + "\"\n"
+					if err := os.WriteFile(ffmpegPath, []byte(script), 0o755); err != nil {
+						t.Fatal(err)
+					}
+				}
+				exited := make(chan struct{})
+				close(exited)
+				stderr := newBoundedTailBuffer(0)
+				_, _ = stderr.Write([]byte("[vf#0:0 @ 0x5ad071e0c0c0] Error reinitializing filters!\n"))
+				s := &TranscodeSession{
+					outputDir: dir, done: exited, waitErr: errors.New("exit status 187"), stderr: stderr,
+					lastRequestedSegment: 312,
+					opts: TranscodeOpts{
+						InputPath: "/nonexistent/input.mkv", OutputDir: dir, SessionID: sessionID,
+						TargetCodecVideo: "h264", TargetCodecAudio: "aac", SegmentDuration: 2, StartSegmentNumber: 300,
+						FFmpegPath: ffmpegPath, HWAccel: transcodeHWQSV, HWDevice: qsvPairDevA,
+					},
+				}
+				m := NewTranscodeManager()
+				m.RegisterTranscodeSession(sessionID, s)
+				var tornDown atomic.Bool
+				m.OnFFmpegCrash = func(_ context.Context, id string, dead *TranscodeSession) {
+					tornDown.Store(true)
+					m.CloseTranscodeSessionIf(id, dead, "")
+				}
+
+				m.MonitorLocalTranscodeExit(sessionID, s)
+				time.Sleep(3 * time.Second) //nolint:forbidigo // synctest advances virtual time past the monitor's two-second delay
+				synctest.Wait()
+
+				if got := tornDown.Load(); got != tc.wantTornDown {
+					t.Fatalf("session torn down = %v, want %v", got, tc.wantTornDown)
+				}
+				if got := m.GetTranscodeSession(sessionID) == s; got != tc.wantRegistered {
+					t.Fatalf("session still registered = %v, want %v", got, tc.wantRegistered)
+				}
+				if tc.wantTornDown {
+					return
+				}
+				args, err := os.ReadFile(argsPath)
+				if err != nil {
+					t.Fatalf("the exit monitor did not restart the session: %v", err)
+				}
+				restart := "\n" + string(args)
+				if strings.Contains(restart, "\n-hwaccel\n") {
+					t.Fatalf("the restart repeated the GPU decode that had just failed:\n%s", restart)
+				}
+				// It resumes at the last segment the client downloaded.
+				if !strings.Contains(restart, "\n-start_number\n312\n") {
+					t.Fatalf("the restart did not resume at the client's position:\n%s", restart)
+				}
+			})
+		})
 	}
 }

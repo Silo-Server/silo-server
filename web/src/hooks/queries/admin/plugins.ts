@@ -295,7 +295,7 @@ export async function fetchPluginCatalogSettings(): Promise<PluginCatalogSetting
   ]);
   if (!isCapturedProfileAuthorityActive(profileContext)) throw new StaleApiRequestContextError();
   if (!etag || etag === "*" || etag.startsWith("W/"))
-    throw new Error("Catalog revision unavailable. Reload before editing.");
+    throw new Error(t("web.admin.errors.catalogRevisionMissing"));
   return {
     ...status,
     ...settings,

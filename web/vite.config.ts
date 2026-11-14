@@ -239,6 +239,16 @@ export default defineConfig(({ mode }) => {
       precompressStaticAssets(),
       moveManifestOutOfDist(),
     ],
+    json: {
+      // With named exports on, Vite turns every top-level key of a JSON file
+      // into JavaScript source, so each precompiled message in src/locales
+      // (about 30 MB) becomes object and array AST nodes that Rollup keeps for
+      // the whole build. That alone roughly doubles the heap `vite build`
+      // needs. Off, any file over 10 kB becomes one `JSON.parse("...")` string,
+      // which also parses faster in the browser. Nothing imports named exports
+      // from JSON.
+      namedExports: false,
+    },
     define: {
       // Reported in X-Silo-Client-Version on every v2 request (src/api/v2/request.ts).
       __SILO_WEB_VERSION__: JSON.stringify(webVersion),

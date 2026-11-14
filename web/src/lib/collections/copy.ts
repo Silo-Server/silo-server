@@ -1,7 +1,7 @@
 import type { ScopeKind } from "./scope";
 import type { CollectionKind } from "./types";
 import { t, type MessageKey } from "@/i18n";
-import { appLanguage } from "@/lib/appLocale";
+import { appLanguage, formatLocale } from "@/lib/appLocale";
 import { titlesAlreadySaved } from "./copyEditor";
 
 export * from "./copyEditor";
@@ -148,12 +148,10 @@ export function showToOtherProfilesShortHelp() {
 export function librariesNotPicked() {
   return t("web.collections.copy.librariesNotPicked");
 }
-/**
- * A server Smart collection's Libraries row: where it shows, not where its titles come from.
- * English until the catalog has a key for it (a follow-up).
- */
-export const SMART_LIBRARIES_HELP =
-  "Their Collections tabs list it. Its rules pick where titles come from.";
+/** A server Smart collection's Libraries row: where it shows, not where its titles come from. */
+export function smartLibrariesHelp() {
+  return t("web.collections.copy.smartLibrariesHelp");
+}
 /** The Shelf row of a collection that isn't created yet, after "No heading". */
 export function shelfAfterCreate() {
   return t("web.collections.copy.shelfAfterCreate");
@@ -546,7 +544,10 @@ export function addToCollectionFootnote() {
 
 /** "Manual · 15 titles": a manual collection's line in a picker. */
 export function manualTitleCount(count: number): string {
-  return t("web.collections.copy.manualTitleCount", { count, count_text: count });
+  return t("web.collections.copy.manualTitleCount", {
+    count,
+    count_text: count.toLocaleString(formatLocale()),
+  });
 }
 
 /** The Add to collection footer: how many of the profile's collections hold the title. */

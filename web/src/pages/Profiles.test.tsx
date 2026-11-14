@@ -274,6 +274,30 @@ describe("Profiles", () => {
     expect(mocks.navigate).toHaveBeenCalledWith("/");
   });
 
+  it("opens a locked profile without its PIN while an administrator views as the account", async () => {
+    const lockedProfile = makeProfile({ id: "profile-2", name: "Kids", has_pin: true });
+    mocks.useProfiles.mockReturnValue({
+      data: [makeProfile(), lockedProfile],
+      isLoading: false,
+      maxProfiles: null,
+    });
+    mocks.useAuth.mockReturnValue({
+      selectProfile,
+      verifyProfilePin,
+      logout,
+      isImpersonating: true,
+    });
+
+    await render(<Profiles />);
+
+    await click(findButton(container, "Kids"));
+
+    expect(container.textContent).not.toContain("confirm-pin");
+    expect(verifyProfilePin).not.toHaveBeenCalled();
+    expect(selectProfile).toHaveBeenCalledWith(lockedProfile);
+    expect(mocks.navigate).toHaveBeenCalledWith("/");
+  });
+
   it("returns to the sanitized redirect target after selecting a profile", async () => {
     mocks.searchParams = new URLSearchParams("redirect=%2Frooms%2Fabc%3Froom_token%3Dxyz");
 

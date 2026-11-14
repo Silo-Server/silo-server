@@ -91,6 +91,10 @@ export function useSaveAdminDashboardLayout() {
       let etag: string | null = null;
       await v2("PUT /api/v2/admin/dashboard/layout", {
         headers: { "If-Match": intent.etag },
+        // A reload or tab close must not cancel a save the admin is waiting
+        // on: without keepalive the next load adopts the older server layout.
+        // Saves run one at a time and stay far below the 64 KiB keepalive budget.
+        keepalive: true,
         onResponse: (response) => {
           etag = response.headers.get("ETag");
         },
@@ -100,8 +104,7 @@ export function useSaveAdminDashboardLayout() {
       });
       if (!isCapturedProfileAuthorityActive(intent.profileContext))
         throw new StaleApiRequestContextError();
-      if (!etag)
-        throw new Error("Server layout write revision missing; reload before saving again.");
+      if (!etag) throw new Error(t("web.admin.errors.layoutRevisionMissing"));
       return etag;
     },
     onSuccess: (_result, intent) => {
