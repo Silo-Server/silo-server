@@ -10,6 +10,8 @@
 ./internal/catalog TestLibraryCollectionDrawsFromItsRulesLibrariesDB
 ./internal/catalog TestLibraryCollectionReplaceItemsWritesOnlyTheDifferenceDB
 ./internal/catalog TestLibraryCollectionReplaceItemsRacesMemberDeleteDB
+./internal/catalog TestLibraryCollectionNamesDB
+./internal/catalog TestLibraryCollectionNameRacesDB
 ./internal/catalog TestCatalogManualCollectionCursorDB
 ./internal/catalog TestMixedCatalogMangaCounts
 ./internal/catalog TestContentRatingCeilingAcrossSystemsDB
@@ -22,6 +24,8 @@
 ./internal/sections TestCompatibilityRecentlyAddedReturnsFlatDistinctSeries
 ./internal/sections TestSectionsSkipItemsInNoLibraryPostgres
 ./internal/sections TestPersonalSmartCollectionRowKeepsTheCollectionLimitPostgres
+./internal/sections TestNextUpDismissalKeepsTheRowFullPostgres
+./internal/sections TestContinueReadingFillsTheRowAfterCollapsingMangaChaptersPostgres
 ./internal/sections TestEpisodeCardsCarryParentArtworkPostgres
 ./internal/catalog TestCatalogQueryWithoutLibraryLeavesOutItemsInNoLibraryDB
 ./internal/catalog TestCountsAndListingsLeaveOutItemsHeldByRemovalGraceDB
@@ -45,6 +49,7 @@
 ./internal/scanner TestHDR10PlusBackfillLeavesARowRewrittenDuringTheReadDB
 ./internal/scanner TestHDR10PlusBackfillStopsWhenStorageStallsDB
 ./internal/scanner TestRescanKeepsHDR10PlusWhenTheFrameReadFailsDB
+./internal/scanner TestHDR10PlusBackfillWaitsADayAfterANoFrameReadDB
 ./internal/scanner TestRescanKeepsSidecarsItCouldNotListDB
 ./internal/scanner TestScanStateCarriesProbeRejectionDB
 ./internal/scanner TestRescanKeepsProbeFactsOfARejectedUnchangedFileDB
@@ -79,6 +84,12 @@
 ./internal/catalog TestBoxSetCollectionsOfDisabledLibraryDB
 ./internal/catalog TestMovieBoxSetDB
 ./internal/catalog TestBoxSetCollectionArtworkDB
+
+# A delegated curator's provider-ID edit can't name a title in another library,
+# which a later refresh would merge the item onto, and the curator's refresh job
+# re-anchors only inside their libraries.
+./internal/catalog TestCuratedProviderIDEditsStayInCurationScopeDB
+./internal/metadata TestCuratorRefreshReanchorStaysInScopePostgres
 
 # A corrected match empties an item's localized text, keeping locks and manual translations.
 ./internal/catalog TestClearMatchTextDB
@@ -131,6 +142,14 @@
 # marks its files missing and removes the title from the library.
 ./internal/scanner TestScanSubtreeReconcilesDeletedTitleFolderDB
 
+# A full scan with a configured root emptied (a dropped mount) keeps that
+# root's cataloged files and reports it suspect, and still scans the other root.
+./internal/scanner TestScanFolderEmptyRootKeepsCatalogedFilesDB
+
+# The roots that count as holding cataloged files: present or missing files at
+# or under the root, never a sibling that only shares a string prefix.
+./internal/scanner TestListRootsWithCatalogedFilesDB
+
 # A subtree scan of a deleted book folder reconciles its files, except under a
 # configured root that is now an empty directory (a lost mount).
 ./internal/scanner TestScanSubtreeAudiobookVanishedBookUnderEmptyRootDB
@@ -170,6 +189,7 @@
 ./internal/scanner TestScanSubtreeIndexesPodcastShowFolders
 ./internal/scanner TestScanSubtreeReconcilesOnlyTheScannedPodcastShow
 ./internal/scanner TestPodcastShowScanLeavesANestedLibraryRootAlone
+./internal/scanner TestOuterRootIgnoreFileExcludesAShowInANestedLibraryRoot
 ./internal/scanner TestPodcastShowSurvivesConcurrentMembershipSweep
 ./internal/scanner TestConcurrentScansOfANewPodcastShowCreateOneShow
 ./internal/scanner TestPodcastShowScanWritesTheShowInItsTransaction
@@ -412,6 +432,8 @@
 ./internal/trickplay TestClaimPublishAndServeDB
 ./internal/trickplay TestExternalDeliveryConfirmationDB
 ./internal/trickplay TestReconcileSchedulesContinuationAfterReleasingClusterLockDB
+./internal/trickplay TestReconcileRequeuesSheetsWhoseToneMapSourceChangedDB
+./internal/trickplay TestReconcileAdoptsToneMapSourceOfOlderSheetsDB
 ./internal/subtitles TestAIPublicationPostgresLostReplyRetainsBytes
 ./internal/keptsub TestKeptTrackRowsAndGarbageDB
 ./internal/keptsub TestKeptTracksGoWithTheirFileDB
@@ -931,6 +953,9 @@
 ./internal/scanner TestAudiobookRuntimeConcurrentMetadataAndMissingPostgres
 ./internal/worker TestSessionSyncRowJSONMatchesTheSyncedRowDB
 
+# An audiobook enrichment match keeps the fields an admin locked.
+./internal/audiobooks TestPersistKeepsAdminLockedFieldsDB
+
 # Dashboard egress splits by stream node and API server without adding the
 # per-node rows to the total, and a wide bucket's split comes from its peak minute.
 ./internal/dashmetrics TestSampleSharedRecordsEgressPerNodeDB
@@ -939,6 +964,11 @@
 # Clearing admin collection artwork commits the cleared reference even when a
 # stored variant fails to delete.
 ./internal/api/handlers TestDeleteAdminCollectionArtworkClearsReferenceWhenVariantDeleteFailsDB
+
+# An admin collection update checks its name only when it renames or adds
+# libraries, and refuses to leave the collection in no library.
+./internal/api/handlers TestAdminCollectionUpdateNameRuleDB
+./internal/api/handlers TestAdminCollectionUpdateNameRuleReadsTheLockedRowDB
 
 # API usage summaries behind the admin API clients card.
 ./internal/apiusage TestAPIUsageSummaryDB
@@ -1101,3 +1131,4 @@
 ./internal/backup TestBeforeUpgradeWaitsForANightlyBackupDB
 ./internal/backup TestBeforeUpgradeDestinationsDB
 ./internal/backup TestBeforeUpgradeRetriesDB
+./internal/catalog TestExternalIDLookupSkipsItemsWithAnotherTMDBIDDB

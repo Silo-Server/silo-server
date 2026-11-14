@@ -372,11 +372,21 @@ func (s *Scanner) ScanSubtree(ctx context.Context, folder *models.MediaFolder, s
 	// A subtree scan under a skipped library root would walk nothing and
 	// retire the subtree piece by piece, bypassing the empty-root guard. Only
 	// a full library scan decides what happens to a skipped root's catalog.
-	if root := scopeLibraryRoot(cleanSubtree, folder.Paths); root != "" {
+	// Every root that holds the subtree counts, and a root nested in another
+	// is also skipped when the outer root's rules exclude it.
+	for _, root := range cleanScanRoots(folder.Paths) {
+		if !pathWithinAnyRoot(cleanSubtree, []string{root}) {
+			continue
+		}
 		skipped, err := libraryRootSkipped(root)
 		if err != nil {
 			// Without the root's rules the scope cannot tell what it excludes.
 			return nil, fmt.Errorf("library root %s: %w", root, err)
+		}
+		if !skipped {
+			// An unreadable ancestor is left to the walk, which records it
+			// as a walk failure and protects the subtree.
+			_, skipped, _ = scanRootIgnoreRules(root, folder.Paths)
 		}
 		if skipped {
 			slog.InfoContext(ctx, "scanner: library root is skipped by its ignore files; leaving subtree to a full library scan", "component", "scanner",
@@ -1229,7 +1239,7 @@ func (s *Scanner) scanFolderByRoots(
 	// compaction but can die independently of its reachable parent.
 	configuredProbes := rootcheck.ProbeManyWithTimeout(ctx, configuredRoots, rootcheck.DefaultProbeTimeout)
 	unreachableRoots := make([]string, 0)
-	suspectRoots := make([]string, 0)
+	emptyRoots := make([]string, 0)
 	for i, root := range configuredRoots {
 		probe := configuredProbes[i]
 		if !probe.Reachable {
@@ -1237,16 +1247,20 @@ func (s *Scanner) scanFolderByRoots(
 			unreachableRoots = append(unreachableRoots, root)
 			continue
 		}
-		if !probe.Empty {
-			continue
+		if probe.Empty {
+			emptyRoots = append(emptyRoots, root)
 		}
-		existing, err := s.fileRepo.GetByFolderAndPathPrefix(ctx, folder.ID, root)
-		if err != nil {
-			return nil, fmt.Errorf("listing files under empty root %q: %w", root, err)
-		}
-		if len(existing) > 0 {
-			suspectRoots = append(suspectRoots, root)
-		}
+	}
+	// Ask only whether the catalog holds anything under each empty root.
+	// Loading the rows to count them decoded every file row of a dropped
+	// mount in full, with its track, chapter and marker JSON, on every scan
+	// for as long as the drive stayed missing.
+	suspectRoots, err := s.fileRepo.ListRootsWithCatalogedFiles(ctx, folder.ID, emptyRoots)
+	if err != nil {
+		return nil, fmt.Errorf("listing files under empty roots: %w", err)
+	}
+	if suspectRoots == nil {
+		suspectRoots = make([]string, 0)
 	}
 	result.UnreachableRoots = unreachableRoots
 	unreachableSet := make(map[string]bool, len(unreachableRoots))

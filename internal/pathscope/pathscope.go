@@ -65,7 +65,8 @@ func RangeCoverageClauses(column string, roots []string, firstArg int) ([]string
 
 // DescendantRange returns the bytewise bounds of the paths under root: a path
 // is a descendant when lower <= path < upper under PostgreSQL's ~>=~ and ~<~
-// operators. The root itself is outside the range and sorts below it.
+// operators. The root itself sorts below the range, except for the
+// filesystem root, whose lower bound is the root.
 func DescendantRange(root string) (lower, upper string) {
 	separator := string(filepath.Separator)
 	lower = filepath.Clean(root)

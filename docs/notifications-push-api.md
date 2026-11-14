@@ -160,10 +160,11 @@ X-Push-Installation-Key: <the app's current installation secret>
 `resetApplePushInstallation` needs a current login session of the account the
 installation is bound to, from any of its profiles. Display tokens and API keys
 are refused. Under the installation lock it deletes the installation's Apple
-push rows, which also drops their queued delivery attempts, and clears the
-stored key and generation. The installation stays reserved for the account
-until that account registers again: another account's ordered or legacy
-registration for the `device_id` is still refused. It answers `200`:
+push rows, which also drops their queued delivery attempts, clears the
+generation, and stores the hash of the sent key in place of the old one. The
+installation stays reserved for the account until that account registers
+again: another account's ordered or legacy registration for the `device_id` is
+still refused. It answers `200`:
 
 - `{"reset": true}` when it cleared a binding.
 - `{"reset": false}` when there was nothing to clear: the server has no ordered
@@ -179,7 +180,8 @@ Then register again with the same key the reset carried. The cleared
 installation accepts any positive generation, so the app can restart its counter
 at 1. A provider request already sent cannot be recalled, and a registration
 from the same account that reaches the server after the reset binds the
-installation, as a first registration would. The app should send the reset and the registration after
+installation, as a first registration would, unless a retirement reached it
+first (see "Retirement without a session"). The app should send the reset and the registration after
 it on the same serialized path as its other registrations for that device. A
 registration with an older key that is still in flight can otherwise bind first,
 and the next registration with the new key gets `push_installation_key_mismatch`
@@ -188,7 +190,8 @@ again; the app recovers by resetting on that later attempt.
 The retained-owner guarantee requires every API writer sharing the database to
 enforce it. Upgrade all API replicas before allowing reset requests. An older
 writer can treat a cleared generation as an unowned installation and overwrite
-the reserved account. `installation_reset_available` describes the responding
+the reserved account. A reset or retirement that an older writer handles stores
+no fence, so a late registration can still bind there. `installation_reset_available` describes the responding
 server; it does not certify that other replicas have been upgraded. Recovery to
 an older release must follow the [backup and rollback policy](release-versioning.md#backups-and-rollback),
 restoring the pre-upgrade database instead of running older writers against
@@ -228,6 +231,12 @@ retirement becomes the installation's newest intent:
   `removed: true` and writes nothing. Without a stored key the server cannot
   authorize removal, so a legacy unordered registration for that `device_id` is
   left in place.
+- An installation its owner reset returns `200` with `removed: true`. When the
+  sent key is the one the reset carried, the server stores the generation as a
+  fence, so a registration sent before the retirement that arrives after it gets
+  `409` instead of turning pushes back on. Any other key writes nothing, as for
+  an installation with no ordered record. Legacy unordered rows are left in
+  place, as above.
 
 The server keeps the key hash and owner. To receive pushes again, register
 through `registerApplePushDevice` with the same key and a higher generation.
