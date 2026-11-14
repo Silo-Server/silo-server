@@ -900,6 +900,10 @@
 # (issue #3441).
 ./internal/scanqueue TestCreateOnClaimedScopeJoinsTheActiveRunDB
 
+# An admin's exact-path file request that joins an automatic run is owed as a
+# follow-up, so it keeps the ignore-file bypass (issue #4157).
+./internal/scanqueue TestExplicitFileRequestJoinsActiveRunAsFollowUpDB
+
 # A scan cut short by shutdown goes back to the queue with its owed follow-up;
 # an admin cancel still ends it cancelled, and a late requeue never takes back
 # another worker's claim.
