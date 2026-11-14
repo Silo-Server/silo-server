@@ -46,13 +46,16 @@ func TestBackgroundProbeConfirmsServedSizeMismatchOnSecondServe(t *testing.T) {
 	fx := newServedSizeMismatchFixture(t, declaredBytes, servedBytes, probedSeconds)
 	logs := captureVirtualProbeLogs(t)
 
-	// First serve: the observation. The bytes play for this request, so the
-	// session still gets an inventory, but the row keeps its previous evidence.
+	// First serve: the observation. The bytes are usable, so their measured
+	// inventory is written metadata-only; the release identity stays unproven.
 	virtualProbeFailures.markSizeMismatch(fx.key, 1, 1) // a previous stale fill armed the wrong-source damper
 	assertServedSizeMismatchObservation(t, fx, expectedMins, logs)
+	if saved := *fx.saved; len(saved) != 1 {
+		t.Fatalf("persisted %d inventories on the recording serve, want one metadata-only write: %+v", len(saved), saved)
+	}
 
 	// Second serve on the same bytes: the confirmation. Only now is the pin's
-	// identity established, so the inventory and its stamp are written.
+	// identity established, so the inventory is stamped and the pin kept.
 	logs.Reset()
 	outcome, carried := fx.probe(t, expectedMins)
 	if outcome != probeOutcomeVerified {
@@ -62,14 +65,14 @@ func TestBackgroundProbeConfirmsServedSizeMismatchOnSecondServe(t *testing.T) {
 		t.Fatalf("carried inventory = %+v, want the committed row %d", carried, fx.file.ID)
 	}
 	saved := *fx.saved
-	if len(saved) != 1 {
-		t.Fatalf("persisted %d inventories, want exactly one on the confirming serve: %+v", len(saved), saved)
+	if len(saved) != 2 {
+		t.Fatalf("persisted %d inventories, want the observation then the confirming write: %+v", len(saved), saved)
 	}
-	if saved[0].FileID != fx.file.ID {
-		t.Fatalf("inventory persisted on file %d, want %d", saved[0].FileID, fx.file.ID)
+	if saved[1].FileID != fx.file.ID || !saved[1].StampProbe {
+		t.Fatalf("confirming write = %+v, want a stamped write on file %d", saved[1], fx.file.ID)
 	}
-	if saved[0].Duration != probedSeconds {
-		t.Fatalf("persisted duration = %d, want the measured %d", saved[0].Duration, probedSeconds)
+	if saved[1].Duration != probedSeconds {
+		t.Fatalf("persisted duration = %d, want the measured %d", saved[1].Duration, probedSeconds)
 	}
 	if *fx.failStamped || fx.file.FailedAt != nil {
 		t.Fatal("the confirming serve stamped a failed_at verdict")
@@ -159,24 +162,34 @@ func (f *servedSizeMismatchFixture) probe(t *testing.T, expectedMins int) (strin
 	)
 }
 
-// assertServedSizeMismatchObservation proves the recording serve played the
-// bytes without writing them: an unwritten carrier for the session, no catalog
-// write, no failed stamp, cleared dampers, and an observation log instead of an
-// acceptance.
+// assertServedSizeMismatchObservation proves the recording serve wrote the
+// measured inventory metadata-only: the session gets the probed tracks and
+// duration, the release identity is not stamped or pinned, no failed stamp is
+// recorded, the dampers are clear, and the log says the inventory was kept.
 func assertServedSizeMismatchObservation(t *testing.T, fx *servedSizeMismatchFixture, expectedMins int, logs *bytes.Buffer) {
 	t.Helper()
 	outcome, carried := fx.probe(t, expectedMins)
 	if outcome != probeOutcomeVerified {
-		t.Fatalf("outcome = %q, want verified so the session leaves loading for a playable short posting", outcome)
+		t.Fatalf("outcome = %q, want verified so the session leaves loading for a playable size gap", outcome)
 	}
 	if !carried.committed() || carried.fileID != fx.file.ID {
 		t.Fatalf("carried inventory = %+v, want the served row %d", carried, fx.file.ID)
 	}
-	if carried.written {
-		t.Fatal("the recording serve reported a catalog write it did not make")
+	if !carried.written {
+		t.Fatal("the recording serve did not report its metadata-only catalog write")
 	}
-	if saved := *fx.saved; len(saved) != 0 {
-		t.Fatalf("the recording serve persisted %d inventories, want none: %+v", len(saved), saved)
+	saved := *fx.saved
+	if len(saved) != 1 {
+		t.Fatalf("the recording serve persisted %d inventories, want one metadata-only write: %+v", len(saved), saved)
+	}
+	if saved[0].StampProbe {
+		t.Fatal("the recording serve stamped unconfirmed bytes as the row's identity")
+	}
+	if saved[0].FileID != fx.file.ID {
+		t.Fatalf("inventory persisted on file %d, want %d", saved[0].FileID, fx.file.ID)
+	}
+	if saved[0].Duration <= 0 {
+		t.Fatal("the metadata-only write carried no measured duration")
 	}
 	if *fx.failStamped || fx.file.FailedAt != nil {
 		t.Fatal("the recording serve stamped a failed_at verdict")
@@ -188,8 +201,8 @@ func assertServedSizeMismatchObservation(t *testing.T, fx *servedSizeMismatchFix
 		t.Fatal("the recording serve kept the wrong-source damper armed")
 	}
 	logged := logs.String()
-	if !strings.Contains(logged, "recorded a served-size observation") {
-		t.Fatalf("missing the observation warning:\n%s", logged)
+	if !strings.Contains(logged, "probe inventory written, release identity unverified") {
+		t.Fatalf("missing the inventory-written warning:\n%s", logged)
 	}
 	if strings.Contains(logged, "accepted despite size mismatch") {
 		t.Fatalf("the recording serve was logged as an acceptance:\n%s", logged)
@@ -276,18 +289,18 @@ func TestBackgroundProbeRejectsServedSizeMismatchWithImplausibleDuration(t *test
 	}
 
 	logged := logs.String()
-	if !strings.Contains(logged, "background virtual probe rejected: served size mismatch") {
-		t.Fatalf("missing distinct size-mismatch warning:\n%s", logged)
+	if !strings.Contains(logged, "background virtual probe rejected: measured identity contradicts the declared release") {
+		t.Fatalf("missing distinct identity-contradiction warning:\n%s", logged)
 	}
 	if strings.Contains(logged, "accepted despite size mismatch") {
 		t.Fatalf("a wrong file was accepted:\n%s", logged)
 	}
 }
 
-// Without a duration on either side there is no identity proof, so a served-size
-// mismatch keeps the historical rejection even though the sizes disagree by the
-// same amount as an acceptable short posting.
-func TestBackgroundProbeRejectsServedSizeMismatchWithoutDurationEvidence(t *testing.T) {
+// A missing duration on either side is no identity proof, but it is also no
+// contradiction. The bytes stay usable: the probe inventory is written
+// metadata-only and played, while the release identity stays unverified.
+func TestBackgroundProbeKeepsServedSizeMismatchUsableWithoutDurationEvidence(t *testing.T) {
 	const (
 		declaredBytes = int64(6_330_000_000)
 		servedBytes   = int64(5_570_000_000)
@@ -312,7 +325,7 @@ func TestBackgroundProbeRejectsServedSizeMismatchWithoutDurationEvidence(t *test
 			})
 			logs := captureVirtualProbeLogs(t)
 
-			persisted := false
+			var saved []models.VirtualFilePersistArgs
 			h := &PlaybackHandler{
 				VirtualPlaybackSourceProber: func(_ context.Context, _ string, f *models.MediaFile) (*models.MediaFile, error) {
 					f.VideoTracks = []models.VideoTrack{{Codec: "hevc", Width: 3840, Height: 2160}}
@@ -322,13 +335,12 @@ func TestBackgroundProbeRejectsServedSizeMismatchWithoutDurationEvidence(t *test
 					f.Duration = tt.probedSeconds
 					return f, nil
 				},
-				VirtualFileSaver: func(context.Context, models.VirtualFilePersistArgs) (int64, error) {
-					persisted = true
-					return 1, nil
+				VirtualFileMetadataSaver: func(_ context.Context, args models.VirtualFilePersistArgs) (VirtualFileMetadataUpdateResult, error) {
+					saved = append(saved, args)
+					return VirtualFileMetadataUpdateResult{MetadataUpdated: true, RowsAffected: 1}, nil
 				},
 			}
 			stickyKey := "sticky-no-duration"
-			h.pinVirtualSticky(stickyKey, uri)
 			file := &models.MediaFile{
 				ID:                         604,
 				ContentID:                  "movie-tt",
@@ -338,27 +350,33 @@ func TestBackgroundProbeRejectsServedSizeMismatchWithoutDurationEvidence(t *test
 			}
 			cand := VirtualPlaybackStream{ID: "cand-1", URI: uri}
 
-			outcome, _ := h.probeVirtualSourceAndPersistWith(
+			outcome, carried := h.probeVirtualSourceAndPersistWith(
 				context.Background(), stickyKey, file, "http://provider.example/stream", *file, cand,
 				noCandidateIdentity, tt.expectedMins, 5, true, nil,
 			)
-			if outcome != probeOutcomeFailed {
-				t.Fatalf("outcome = %q, want failed without a duration identity proof", outcome)
+			if outcome != probeOutcomeVerified {
+				t.Fatalf("outcome = %q, want verified so the playable bytes are served", outcome)
 			}
-			if persisted {
-				t.Fatal("evidence without a duration identity proof must not be persisted")
+			if len(saved) != 1 {
+				t.Fatalf("persisted %d inventories, want one metadata-only write: %+v", len(saved), saved)
+			}
+			if saved[0].StampProbe {
+				t.Fatal("a size gap without a duration proof stamped the row's identity")
+			}
+			if len(carried.audio) == 0 || carried.written == false {
+				t.Fatalf("carried inventory = %+v, want the measured audio tracks", carried)
 			}
 			if got := h.peekVirtualSticky(stickyKey); got != "" {
-				t.Fatalf("rejection kept the sticky pin: %q", got)
+				t.Fatalf("unverified bytes were pinned: %q", got)
 			}
 			if virtualProbeFailures.recent(key) {
-				t.Fatal("size-mismatch rejection fed the dead-candidate failure damper")
+				t.Fatal("a size gap fed the dead-candidate failure damper")
 			}
-			if !virtualProbeFailures.recent(virtualProbeSizeMismatchKey(key)) {
-				t.Fatal("rejection did not arm the short wrong-source damper")
+			if virtualProbeFailures.recent(virtualProbeSizeMismatchKey(key)) {
+				t.Fatal("a size gap armed the wrong-source damper")
 			}
-			if logged := logs.String(); strings.Contains(logged, "accepted despite size mismatch") {
-				t.Fatalf("evidence without a duration identity proof was accepted:\n%s", logged)
+			if logged := logs.String(); !strings.Contains(logged, "probe inventory written, release identity unverified") {
+				t.Fatalf("missing the inventory-written warning:\n%s", logged)
 			}
 		})
 	}
@@ -549,14 +567,12 @@ func TestResolveVirtualPlaybackMatchingFirstProbeProbesNoSiblings(t *testing.T) 
 	}
 }
 
-// TestResolveVirtualPlaybackObservationServeWritesNothing pins why the
-// two-observation gate has to reach the catalog writes. Serving and persisting
-// the recording serve stamped the row, and the next replay then took the
-// repeat-play fast path on that stamp alone for the stamp's whole freshness
-// window, so the pin was never re-probed and one plausible-looking serve became
-// the pin's identity by persistence. The recording serve now serves, writes
-// nothing and pins nothing; the confirming serve writes the inventory and pins.
-func TestResolveVirtualPlaybackObservationServeWritesNothing(t *testing.T) {
+// TestResolveVirtualPlaybackObservationServeWritesInventoryWithoutStamping
+// pins the split between usability and identity. The recording serve writes the
+// measured inventory metadata-only so the versions list and plan see the real
+// tracks, but it does not stamp the probe or pin the candidate; only the
+// confirming serve that lands on the same bytes establishes the pin.
+func TestResolveVirtualPlaybackObservationServeWritesInventoryWithoutStamping(t *testing.T) {
 	const (
 		release  = "Movie.2024.2160p.WEB-DL"
 		declared = int64(6_330_000_000)
@@ -591,8 +607,16 @@ func TestResolveVirtualPlaybackObservationServeWritesNothing(t *testing.T) {
 		t.Fatalf("resolved URI = %q, want the served pin %q", resolved.URI, uri)
 	}
 	h.StopVirtualEvidence()
-	if len(*saved) != 0 {
-		t.Fatalf("the recording serve persisted %+v, want no catalog write", *saved)
+	if len(*saved) == 0 {
+		t.Fatal("the recording serve persisted nothing, want its measured inventory")
+	}
+	for _, write := range *saved {
+		if write.FileID != file.ID || write.StampProbe {
+			t.Fatalf("first write = %+v, want the served row %d without a probe stamp", write, file.ID)
+		}
+		if write.Duration != runtime*60 {
+			t.Fatalf("first write duration = %d, want the measured %d", write.Duration, runtime*60)
+		}
 	}
 	if got := h.peekVirtualSticky(stickyKey); got != "" {
 		t.Fatalf("the recording serve pinned %q, want no sticky pin before confirmation", got)
@@ -611,11 +635,14 @@ func TestResolveVirtualPlaybackObservationServeWritesNothing(t *testing.T) {
 		t.Fatalf("second resolved URI = %q, want %q", resolved.URI, uri)
 	}
 	h.StopVirtualEvidence()
-	if len(*saved) != 1 || (*saved)[0].FileID != file.ID {
-		t.Fatalf("saved = %+v, want one inventory on the confirming serve", *saved)
+	stamped := false
+	for _, write := range *saved {
+		if write.FileID == file.ID && write.StampProbe {
+			stamped = true
+		}
 	}
-	if !(*saved)[0].StampProbe {
-		t.Fatal("the confirming serve did not stamp the probe evidence")
+	if !stamped {
+		t.Fatalf("saved = %+v, want the confirming serve to stamp the probe evidence", *saved)
 	}
 	if got := h.peekVirtualSticky(stickyKey); got != uri {
 		t.Fatalf("sticky pin = %q, want the confirmed candidate %q", got, uri)
@@ -623,12 +650,14 @@ func TestResolveVirtualPlaybackObservationServeWritesNothing(t *testing.T) {
 }
 
 // TestResolveVirtualPlaybackImplausibleGapNeverAdmits pins the size plausibility
-// cap at the catalog-write seam. The production failure served 17.7 GB for a
-// 3.78 GB declaration (4.7x) and admitted it on a duration match; a second serve
-// of the same bytes then confirmed the pin. Such a gap is not a rounded listing,
-// so the bytes stay playable for the request but no serve may write, stamp, or
-// pin them. The normal rounded band is covered by
-// TestResolveVirtualPlaybackObservationServeWritesNothing above.
+// cap at the identity seam. The production failure served 17.7 GB for a 3.78 GB
+// declaration (4.7x) on a duration match. Such a gap is not a rounded listing,
+// so no serve may ever establish identity for it. The bytes stay usable: each
+// serve writes its measured inventory metadata-only, which is what lets the
+// client report and play the file, but no serve stamps or pins it. The normal
+// rounded band is covered by
+// TestResolveVirtualPlaybackObservationServeWritesInventoryWithoutStamping
+// above.
 func TestResolveVirtualPlaybackImplausibleGapNeverAdmits(t *testing.T) {
 	const (
 		release  = "Movie.2023.2160p.WEB-DL"
@@ -669,24 +698,32 @@ func TestResolveVirtualPlaybackImplausibleGapNeverAdmits(t *testing.T) {
 	if len(*probes) != 2 {
 		t.Fatalf("probes = %v, want one per start: an implausible serve must never become cache-confirmed", *probes)
 	}
-	if len(*saved) != 0 {
-		t.Fatalf("implausible serves persisted %+v, want no catalog write", *saved)
+	// The bounded evidence buffer may coalesce identical metadata-only writes,
+	// so the count is not the contract; the absence of any stamped write is.
+	if len(*saved) == 0 {
+		t.Fatal("implausible serves persisted nothing, want the measured inventory written")
+	}
+	for _, write := range *saved {
+		if write.StampProbe {
+			t.Fatalf("implausible serve stamped the row's identity: %+v", write)
+		}
 	}
 	if got := h.peekVirtualSticky(stickyKey); got != "" {
 		t.Fatalf("implausible serves pinned %q, want no sticky pin", got)
 	}
 }
 
-// TestResolveVirtualPlaybackCacheFirstObservationWritesNothing pins the
-// cache-first seam of the shared resolve. A probe-cache hit is a completed
-// probe, but the classification deciding what the hit may be used for is not
-// read-only: it records the pin's first served-size observation. Dropping that
-// verdict and classifying the same bytes again in the outer finalization let the
-// request read its own recording as the confirming serve, so the first-ever
-// duration-excused size gap became the pin's identity by persistence. The hit
-// now carries its verdict to the finalization, which serves it and writes
-// nothing; only a later serve landing on the recorded size persists and pins.
-func TestResolveVirtualPlaybackCacheFirstObservationWritesNothing(t *testing.T) {
+// TestResolveVirtualPlaybackCacheFirstObservationWritesInventoryWithoutStamping
+// pins the cache-first seam of the shared resolve. A probe-cache hit is a
+// completed probe, but the classification deciding what the hit may be used for
+// is not read-only: it records the pin's first served-size observation.
+// Dropping that verdict and classifying the same bytes again in the outer
+// finalization let the request read its own recording as the confirming serve,
+// so the first-ever size gap became the pin's identity by persistence. The hit
+// now carries its verdict to the finalization, which writes the measured
+// inventory metadata-only; only a later serve landing on the recorded size
+// stamps and pins.
+func TestResolveVirtualPlaybackCacheFirstObservationWritesInventoryWithoutStamping(t *testing.T) { //nolint:funlen // one fixture drives the observation and confirming serve end to end
 	const (
 		release      = "Movie.2024.2160p.WEB-DL"
 		declared     = int64(6_330_000_000)
@@ -712,10 +749,8 @@ func TestResolveVirtualPlaybackCacheFirstObservationWritesNothing(t *testing.T) 
 		return declared, nil
 	})
 	h.ItemLookup = staticRuntimeItemLookup{runtime: runtime}
-	// The measured bytes are the pin's first duration-proven size observation:
-	// they fall well short of the declaration while the duration proves the
-	// content. This is the release-posted-short case the two-observation gate
-	// exists for, served from a probe completed before any observation existed.
+	// A cache hit that records the pin's first observation: short of the
+	// declaration, with a duration that proves the content.
 	cacheHits := 0
 	h.VirtualProbeCacheLookup = func(_ string, probeFile *models.MediaFile) *models.MediaFile {
 		cacheHits++
@@ -744,11 +779,15 @@ func TestResolveVirtualPlaybackCacheFirstObservationWritesNothing(t *testing.T) 
 	if len(*probes) != 0 {
 		t.Fatalf("probes = %v, want none: the cache hit must skip the ffprobe", *probes)
 	}
-	// The write and pin are what turn one unconfirmed serve into the pin's
-	// identity, so check them first: everything below only explains why.
+	// Check the write and pin first: they are what would turn one serve into identity.
 	h.StopVirtualEvidence()
-	if len(*saved) != 0 {
-		t.Fatalf("the recording cache replay persisted %+v, want no catalog write", *saved)
+	if len(*saved) == 0 {
+		t.Fatal("the recording cache replay persisted nothing, want its measured inventory")
+	}
+	for _, write := range *saved {
+		if write.StampProbe {
+			t.Fatal("the recording cache replay stamped unconfirmed bytes as identity")
+		}
 	}
 	if got := h.peekVirtualSticky(stickyKey); got != "" {
 		t.Fatalf("the recording cache replay pinned %q, want no sticky pin before confirmation", got)
@@ -778,16 +817,17 @@ func TestResolveVirtualPlaybackCacheFirstObservationWritesNothing(t *testing.T) 
 		t.Fatal("the confirming serve was still an observation")
 	}
 	h.StopVirtualEvidence()
-	if len(*saved) == 0 {
-		t.Fatal("the confirming serve persisted nothing, want the pin's inventory written")
-	}
+	stamped := false
 	for _, write := range *saved {
 		if write.FileID != file.ID {
 			t.Fatalf("saved = %+v, want every write on the resolved row %d", *saved, file.ID)
 		}
-		if !write.StampProbe {
-			t.Fatalf("saved = %+v, want the confirming serve to stamp the probe evidence", *saved)
+		if write.StampProbe {
+			stamped = true
 		}
+	}
+	if !stamped {
+		t.Fatalf("saved = %+v, want the confirming serve to stamp the probe evidence", *saved)
 	}
 	if got := h.peekVirtualSticky(stickyKey); got != candidateURI {
 		t.Fatalf("sticky pin = %q, want the confirmed candidate %q", got, candidateURI)
@@ -897,7 +937,7 @@ func TestFallbackSubstituteProbeGatesOnTheSubstitutesOwnDeclaration(t *testing.T
 		}
 	})
 
-	t.Run("cache hit that diverges from the observation serves without writing", func(t *testing.T) {
+	t.Run("cache hit that diverges from the observation writes inventory without identity", func(t *testing.T) {
 		scanner.ResetVirtualServedSizeSnapshots()
 		t.Cleanup(scanner.ResetVirtualServedSizeSnapshots)
 		h, saved := newFixture(t, 90*60)
@@ -955,8 +995,13 @@ func TestFallbackSubstituteProbeGatesOnTheSubstitutesOwnDeclaration(t *testing.T
 			t.Fatalf("file = %+v, want the cached bytes %d", got.File, substituteDeclared)
 		}
 		h.StopVirtualEvidence()
-		if len(*saved) != 0 {
-			t.Fatalf("the unconfirmed cache replay persisted %+v, want no catalog write", *saved)
+		if len(*saved) == 0 {
+			t.Fatal("the unconfirmed cache replay persisted no inventory")
+		}
+		for _, write := range *saved {
+			if write.StampProbe {
+				t.Fatal("the unconfirmed cache replay stamped the bytes as identity")
+			}
 		}
 	})
 
@@ -1017,8 +1062,13 @@ func TestFallbackSubstituteProbeGatesOnTheSubstitutesOwnDeclaration(t *testing.T
 			t.Fatalf("recorded observation = %+v (present %v), want the served bytes %d", observation, ok, served)
 		}
 		h.StopVirtualEvidence()
-		if len(*saved) != 0 {
-			t.Fatalf("the recording cache replay persisted %+v, want no catalog write", *saved)
+		if len(*saved) == 0 {
+			t.Fatal("the recording cache replay persisted no inventory")
+		}
+		for _, write := range *saved {
+			if write.StampProbe {
+				t.Fatal("the recording cache replay stamped the bytes as identity")
+			}
 		}
 	})
 
@@ -1062,12 +1112,13 @@ func TestFallbackSubstituteProbeGatesOnTheSubstitutesOwnDeclaration(t *testing.T
 	})
 }
 
-// TestResolveVirtualPlaybackServedSizeMismatchAdoptsSameReleaseSibling pins the
-// fallback contract: the selected row's probe served a different release, so the
-// same release's second indexer row is probed and adopted, and its verified
-// inventory is persisted onto that sibling row only. The selected row keeps the
-// short wrong-source damper, and the different release (C) is never probed.
-func TestResolveVirtualPlaybackServedSizeMismatchAdoptsSameReleaseSibling(t *testing.T) {
+// TestResolveVirtualPlaybackIdentityContradictionAdoptsSameReleaseSibling pins
+// the fallback contract: the selected row's probe measured a different release
+// (a runtime contradiction), so the same release's second indexer row is probed
+// and adopted, and its verified inventory is persisted onto that sibling row
+// only. The selected row keeps the short wrong-source damper, and the different
+// release (C) is never probed.
+func TestResolveVirtualPlaybackIdentityContradictionAdoptsSameReleaseSibling(t *testing.T) {
 	const (
 		release = "Movie.2024.2160p.WEB-DL"
 		size    = int64(8_000_000_000)
@@ -1111,6 +1162,23 @@ func TestResolveVirtualPlaybackServedSizeMismatchAdoptsSameReleaseSibling(t *tes
 		}
 		return size, nil
 	})
+	// A is a genuine different file, not merely a size gap: its measured
+	// runtime contradicts the item's catalog runtime. B serves the declared
+	// release and is adopted.
+	h.ItemLookup = staticRuntimeItemLookup{runtime: 51}
+	baseProbe := h.VirtualPlaybackSourceProber
+	h.VirtualPlaybackSourceProber = func(ctx context.Context, sourceURL string, f *models.MediaFile) (*models.MediaFile, error) {
+		probed, err := baseProbe(ctx, sourceURL, f)
+		if err != nil || probed == nil {
+			return probed, err
+		}
+		if f.FilePath == uriA {
+			probed.Duration = 600 // 10 minutes against a 51-minute runtime
+		} else {
+			probed.Duration = 51 * 60
+		}
+		return probed, nil
+	}
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/playback/start", nil)
 	resolved, err := h.resolveVirtualPlaybackSource(req, file, "profile-1", false, nil, "", "", 0, false)
@@ -1149,13 +1217,13 @@ func TestResolveVirtualPlaybackServedSizeMismatchAdoptsSameReleaseSibling(t *tes
 	}
 }
 
-// TestBackgroundProbeServedSizeMismatchAdoptsSameReleaseSibling pins the shared
-// probe tail's fallback: the deferred/background probe of the selected row
-// served the wrong release's bytes, so the release's sibling row (second in the
-// version list's order) is probed and adopted. The durable write commits on the
-// sibling's row only, so the session's committed inventory belongs to the bytes
-// it verified.
-func TestBackgroundProbeServedSizeMismatchAdoptsSameReleaseSibling(t *testing.T) {
+// TestBackgroundProbeIdentityContradictionAdoptsSameReleaseSibling pins the
+// shared probe tail's fallback: the deferred/background probe measured a runtime
+// that contradicts the selected row's declared release, so the release's sibling
+// row (second in the version list's order) is probed and adopted. The durable
+// write commits on the sibling's row only, so the session's committed inventory
+// belongs to the bytes it verified.
+func TestBackgroundProbeIdentityContradictionAdoptsSameReleaseSibling(t *testing.T) {
 	const (
 		release = "Movie.2024.2160p.WEB-DL"
 		size    = int64(8_000_000_000)
@@ -1198,9 +1266,13 @@ func TestBackgroundProbeServedSizeMismatchAdoptsSameReleaseSibling(t *testing.T)
 			mu.Unlock()
 			f.ProbedFormatSize = size
 			if sourceURL == urlA {
+				// A stale cache fill of a different release: the size gap and a
+				// runtime that contradicts the 51-minute catalog runtime.
 				f.ProbedFormatSize = size * 88 / 100
+				f.Duration = 600
+			} else {
+				f.Duration = 51 * 60
 			}
-			f.Duration = 5400
 			f.VideoTracks = []models.VideoTrack{{Codec: "hevc", Width: 3840, Height: 2160}}
 			f.AudioTracks = []models.AudioTrack{{Codec: "eac3", Channels: 6, Language: "eng"}}
 			f.CodecVideo, f.CodecAudio, f.Resolution, f.Container = "hevc", "eac3", "2160p", "mkv"
@@ -1217,7 +1289,7 @@ func TestBackgroundProbeServedSizeMismatchAdoptsSameReleaseSibling(t *testing.T)
 	candA := virtualPlaybackStreamFromFile(rowA)
 	outcome, committed := h.probeVirtualSourceAndPersistWith(
 		context.Background(), "sticky-background-sibling", rowA, urlA, *rowA, *candA,
-		noCandidateIdentity, 0, 5, true, nil,
+		noCandidateIdentity, 51, 5, true, nil,
 	)
 	if outcome != probeOutcomeVerified {
 		t.Fatalf("outcome = %q, want verified from the adopted sibling", outcome)
@@ -1246,12 +1318,11 @@ func (s staticRuntimeItemLookup) GetByID(context.Context, string) (*models.Media
 	return &models.MediaItem{Runtime: s.runtime}, nil
 }
 
-// An accepted short posting is ordinary verified evidence once a second serve
-// confirms it: the pre-play probe chain writes its inventory and publishes
-// versions_updated, so an open detail page refreshes exactly as it would for a
-// size-matching release. The first serve only records the pin's observation, so
-// it writes nothing and there is no catalog change to announce.
-func TestScheduleDefaultFileProbePublishesAfterConfirmedSizeMismatch(t *testing.T) {
+// A served-size gap is usable inventory immediately: the pre-play probe chain
+// writes its measured tracks metadata-only and publishes versions_updated, so an
+// open detail page can show the real file. The second serve of the same bytes
+// adds the probe stamp and confirms the release identity.
+func TestScheduleDefaultFileProbePublishesServedSizeGapInventory(t *testing.T) {
 	const (
 		declaredBytes = int64(6_330_000_000)
 		servedBytes   = int64(5_570_000_000)
@@ -1287,25 +1358,27 @@ func TestScheduleDefaultFileProbePublishesAfterConfirmedSizeMismatch(t *testing.
 	}
 	filter := catalog.AccessFilter{SelectedFileID: row.ID, AllowedLibraryIDs: []int{77}}
 
-	// First serve: the observation. Nothing is written, so no detail page has
-	// anything to refresh and no versions_updated is announced.
+	// First serve: the inventory is written metadata-only, so the detail page
+	// gets the real track list and a versions_updated announcement.
 	h.ScheduleDefaultFileProbe(probeChainTestContent, probeChainSourceRow(), probeChainStreams(row), filter)
 	h.probeChainWG.Wait()
-	if len(saved) != 0 {
-		t.Fatalf("the recording serve persisted %+v, want no write before a confirming serve", saved)
+	if len(saved) != 1 {
+		t.Fatalf("the recording serve persisted %+v, want one metadata-only inventory", saved)
 	}
-	if types := bus.types(); len(types) != 0 {
-		t.Fatalf("the recording serve announced %v, want no catalog change with nothing written", types)
+	if saved[0].StampProbe {
+		t.Fatal("the recording serve stamped unconfirmed bytes as identity")
+	}
+	if types := bus.types(); len(types) == 0 {
+		t.Fatal("the recording serve wrote inventory but announced no catalog change")
 	}
 
-	// Second serve on the same bytes: the confirming serve writes the inventory
-	// and announces it.
+	// Second serve on the same bytes: the confirming serve stamps the inventory.
 	h.ScheduleDefaultFileProbe(probeChainTestContent, probeChainSourceRow(), probeChainStreams(row), filter)
 	h.probeChainWG.Wait()
-	if payload := waitForRecordingEvent(t, bus, 2*time.Second, "catalog.item.changed", "versions_updated", probeChainTestContent); payload == "" {
-		t.Fatal("confirmed short posting did not publish versions_updated")
+	if len(saved) != 2 || saved[1].FileID != row.ID {
+		t.Fatalf("saved = %+v, want the observation then the confirming inventory on row %d", saved, row.ID)
 	}
-	if len(saved) != 1 || saved[0].FileID != row.ID {
-		t.Fatalf("saved = %+v, want one inventory on the short-posting row %d", saved, row.ID)
+	if !saved[1].StampProbe {
+		t.Fatal("the confirming serve did not stamp the probe evidence")
 	}
 }
