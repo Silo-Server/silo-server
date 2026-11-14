@@ -2847,6 +2847,10 @@ func (h *ItemsHandler) handleBrowseItems(w http.ResponseWriter, r *http.Request,
 		h.handleEpisodeBrowse(w, r, session, query, repo)
 		return
 	}
+	if repo, ok := h.mixedEpisodeBrowser(query); ok {
+		h.handleMixedEpisodeBrowse(w, r, session, query, repo)
+		return
+	}
 	// Limit=0 asks only for TotalRecordCount (Wholphin's letter jump); the
 	// catalog treats a zero limit as its default page, so fetch one row.
 	countOnly := query.countOnly
