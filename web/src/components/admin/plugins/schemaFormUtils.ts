@@ -124,8 +124,8 @@ function coerceBoolean(value: unknown): boolean {
 
 /**
  * A declared field type, derived from the plugin's json_schema. For arrays the
- * suffix `:int` / `:num` / `:bool` records the item type; plain `array` means
- * string items, which are never coerced.
+ * suffix `:int` / `:num` / `:bool` records the item type; plain `array` holds
+ * string items or items of unknown type, and passes them through unchanged.
  */
 export type FieldType =
   | "string"
@@ -136,6 +136,27 @@ export type FieldType =
   | "array:bool"
   | "array:int"
   | "array:num";
+
+type ItemType = "string" | "integer" | "number" | "boolean";
+
+/**
+ * The type of an array's items: a plain `type`, a nullable type list such as
+ * `["string", "null"]`, or the type every `enum` value shares.
+ */
+function arrayItemType(items: unknown): ItemType | undefined {
+  if (!items || typeof items !== "object") return undefined;
+  const { type, enum: values } = items as { type?: unknown; enum?: unknown };
+  const types = Array.isArray(type) ? type.filter((t) => t !== "null") : [type];
+  if (types.length === 1 && ["string", "integer", "number", "boolean"].includes(types[0])) {
+    return types[0] as ItemType;
+  }
+  if (!Array.isArray(values) || values.length === 0) return undefined;
+  if (values.every((v) => typeof v === "string")) return "string";
+  if (values.every((v) => typeof v === "boolean")) return "boolean";
+  if (values.every((v) => Number.isInteger(v))) return "integer";
+  if (values.every((v) => typeof v === "number")) return "number";
+  return undefined;
+}
 
 /**
  * Parse the declared property types out of a plugin's (object) json_schema.
@@ -159,15 +180,11 @@ export function parseFieldTypes(jsonSchema: string | undefined | null): Record<s
     if (!value || typeof value !== "object") continue;
     const type = (value as { type?: unknown }).type;
     if (type === "array") {
-      const items = (value as { items?: unknown }).items;
-      const itemType =
-        items && typeof items === "object" ? (items as { type?: unknown }).type : undefined;
+      const itemType = arrayItemType((value as { items?: unknown }).items);
       if (itemType === "integer") out[key] = "array:int";
       else if (itemType === "number") out[key] = "array:num";
       else if (itemType === "boolean") out[key] = "array:bool";
-      else if (itemType === "string") out[key] = "array";
-      // Any other item schema (no type, enum, $ref, a nullable type list)
-      // leaves the field untyped, so the control heuristic coerces it.
+      else out[key] = "array";
     } else if (type === "string" || type === "integer" || type === "number" || type === "boolean") {
       out[key] = type;
     }

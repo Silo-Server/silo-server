@@ -79,9 +79,10 @@ describe("parseFieldTypes (#15)", () => {
         tags: { type: "array", items: { type: "integer" } },
         labels: { type: "array", items: { type: "string" } },
         flags: { type: "array", items: { type: "boolean" } },
-        // No item type to go by: left out so the control heuristic decides.
         ids: { type: "array", items: { enum: [1, 2] } },
-        anything: { type: "array" },
+        codes: { type: "array", items: { enum: ["001", "123"] } },
+        maybe_ids: { type: "array", items: { type: ["integer", "null"] } },
+        anything: { type: "array", items: { $ref: "#/$defs/thing" } },
         enabled: { type: "boolean" },
       },
     });
@@ -91,6 +92,10 @@ describe("parseFieldTypes (#15)", () => {
       tags: "array:int",
       labels: "array",
       flags: "array:bool",
+      ids: "array:int",
+      codes: "array",
+      maybe_ids: "array:int",
+      anything: "array",
       enabled: "boolean",
     });
   });
