@@ -92341,6 +92341,18 @@
       "value": "字幕已上传"
     }
   ],
+  "web.common.toast.watchProviders.authDeclined": [
+    {
+      "type": 0,
+      "value": "连接已在提供商网站上被拒绝。请选择“连接”重试。"
+    }
+  ],
+  "web.common.toast.watchProviders.authNotApproved": [
+    {
+      "type": 0,
+      "value": "请先在提供商网站上批准代码，然后重试。"
+    }
+  ],
   "web.common.toast.watchProviders.connectFailed": [
     {
       "type": 0,

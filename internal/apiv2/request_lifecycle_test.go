@@ -51,6 +51,7 @@ type fakeWatchLifecycle struct {
 	settingValues         map[string]any
 	lastUpdate            watchsync.ConnectionUpdate
 	updateErr             error
+	pollErr               error
 	WatchProviderService
 	user         int
 	profile, key string
@@ -74,6 +75,9 @@ func (f *fakeWatchLifecycle) GetConnectionStatus(_ context.Context, u int, p, ke
 }
 func (f *fakeWatchLifecycle) PollDeviceAuth(_ context.Context, u int, p, key, id string) (watchsync.Connection, error) {
 	f.user, f.profile, f.key = u, p, key
+	if f.pollErr != nil {
+		return watchsync.Connection{}, f.pollErr
+	}
 	return watchsync.Connection{AccessToken: "secret-token"}, f.err
 }
 func (f *fakeWatchLifecycle) StartDeviceAuth(_ context.Context, u int, p, key string) (watchsync.DeviceAuthSession, error) {
@@ -126,7 +130,7 @@ func TestWatchProviderLifecycleErrors(t *testing.T) {
 	for _, tc := range []struct {
 		err  error
 		want ProblemType
-	}{{watchsync.UnknownProviderError{Key: "missing"}, TypeNotFound}, {watchsync.ErrAuthSessionMismatch, TypeNotFound}, {watchsync.ErrAuthSessionCompleted, TypeConflict}, {fmt.Errorf("provider rejected the key: %w", watchsync.ErrInvalidCredential), TypeValidationFailed}, {errors.New("private database failure"), TypeInternalError}} {
+	}{{watchsync.UnknownProviderError{Key: "missing"}, TypeNotFound}, {watchsync.ErrAuthSessionMismatch, TypeNotFound}, {watchsync.ErrAuthSessionCompleted, TypeDeviceLoginExpired}, {fmt.Errorf("watch sync plugin: %w", watchsync.ErrAuthSessionExpired), TypeDeviceLoginExpired}, {fmt.Errorf("watch sync plugin: %w", watchsync.ErrDeviceAuthDenied), TypeNotPermitted}, {fmt.Errorf("provider rejected the key: %w", watchsync.ErrInvalidCredential), TypeValidationFailed}, {errors.New("private database failure"), TypeInternalError}} {
 		w.err = tc.err
 		rec := do(t, h, http.MethodPost, Prefix+"/watch-providers/trakt/auth/poll", `{"auth_session_id":"00000000-0000-4000-8000-000000000001"}`, requestOwner)
 		requireProblem(t, rec, tc.want)
@@ -146,6 +150,26 @@ func TestWatchProviderLifecycleErrors(t *testing.T) {
 	if rec.Header().Get("Retry-After") != "2" {
 		t.Fatalf("provider rate limit Retry-After = %q, want 2", rec.Header().Get("Retry-After"))
 	}
+}
+
+// Finishing a device authorization again, after its first answer was lost,
+// reports the connection that answer created; with the connection gone, the
+// used code is expired.
+func TestWatchProviderPollCompletedSession(t *testing.T) {
+	w := &fakeWatchLifecycle{pollErr: watchsync.ErrAuthSessionCompleted}
+	h := lifecycleHandler(&fakeLifecycle{}, w)
+	body := `{"auth_session_id":"00000000-0000-4000-8000-000000000001"}`
+	rec := do(t, h, http.MethodPost, Prefix+"/watch-providers/simkl/auth/poll", body, requestOwner)
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"connected":true`) {
+		t.Fatalf("retry after completion: %d %s", rec.Code, rec.Body.String())
+	}
+	w.missingConnection = true
+	rec = do(t, h, http.MethodPost, Prefix+"/watch-providers/simkl/auth/poll", body, requestOwner)
+	requireProblem(t, rec, TypeDeviceLoginExpired)
+	// A failed connection read is a server failure, not an expired code.
+	w.err = errors.New("connection read failed")
+	rec = do(t, h, http.MethodPost, Prefix+"/watch-providers/simkl/auth/poll", body, requestOwner)
+	requireProblem(t, rec, TypeInternalError)
 }
 
 // Connection config the host or the plugin rejects is a client problem, and

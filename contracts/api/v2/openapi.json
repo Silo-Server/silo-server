@@ -230110,6 +230110,7 @@
     },
     "/api/v2/watch-providers/{provider}/auth/poll": {
       "post": {
+        "description": "Refusals, by problem type: 409 conflict (the person has not approved the code yet); 410 device_login_expired (the code expired, or was already used and the connection no longer exists); 403 not_permitted (the person declined it on the provider's site). Polling a session that already completed answers the connection again, so retrying after a lost answer is safe.",
         "operationId": "pollWatchProviderDeviceAuth",
         "parameters": [
           {
@@ -230236,6 +230237,16 @@
               }
             },
             "description": "Conflict"
+          },
+          "410": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Gone"
           },
           "413": {
             "content": {
