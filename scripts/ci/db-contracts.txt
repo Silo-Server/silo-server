@@ -110,6 +110,10 @@
 ./internal/catalog TestSearchTextFoldMatchesGoPostgres
 ./internal/catalog TestFoldSearchDiacriticsMigrationPostgres
 
+# Sorting by latest episode added works when episodes can appear: mixed search
+# and the episode scope, in search and browse, with episodes and movies last.
+./internal/catalog TestSortLatestEpisodeAddedWithEpisodesDB
+
 # Section and Smart collection rule fields and operators compile to working SQL.
 ./internal/catalog TestRuleFieldsFilterCatalogDB
 ./internal/api/handlers TestCatalogProfileSectionsDB
