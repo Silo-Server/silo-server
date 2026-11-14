@@ -733,7 +733,7 @@ describe("WatchPage overlay inventory provenance", () => {
   const catalogAudio = { language: "eng", codec: "aac", channels: 2, default: true };
   const liveAudio = { language: "fra", codec: "ac3", channels: 6, default: true };
 
-  it("gates catalog subtitle rows until the probe lands, then swaps in the live inventory", () => {
+  it("shows the playing version's declared subtitles immediately, then swaps in probe evidence", () => {
     playbackSessionMock.mockReturnValue(
       playbackSession({ subtitleUrls: [], subtitleInventoryProvisional: false }),
     );
@@ -747,12 +747,11 @@ describe("WatchPage overlay inventory provenance", () => {
       shouldAutoPlay?: boolean;
       streamUrl?: string | null;
     };
-    // The pre-probe catalog rows are not offered as selectable rows: their
-    // ordinals belong to the catalog file, not the effective source, so the
-    // menus show their discovery state until the probe publishes real rows.
-    expect(props.subtitleUrls).toEqual([]);
-    expect(props.subtitleInventoryProvisional).toBe(true);
-    // Only the menu rows wait for the probe; playback starts unblocked.
+    // The playing version's own declaration is inventory: show it now rather
+    // than sitting on "Discovering" until the probe lands.
+    expect(props.subtitleUrls).toEqual([catalogSubtitle]);
+    expect(props.subtitleInventoryProvisional).toBe(false);
+    // Playback starts unblocked either way.
     expect(props.shouldAutoPlay).toBe(true);
     expect(props.streamUrl).toBe("/stream/session-1");
 
@@ -769,13 +768,17 @@ describe("WatchPage overlay inventory provenance", () => {
     expect(props.subtitleInventoryProvisional).toBe(false);
   });
 
-  it("gates catalog audio rows until the probe lands, then swaps in the live inventory", () => {
+  it("shows the plan's declared audio inventory immediately, then swaps in probe evidence", () => {
     const versionWithCatalogAudio: PlayerFileVersion = {
       ...version,
       audio_tracks: [catalogAudio],
     };
+    const declaredPlanAudio = { language: "eng", codec: "aac", channels: 2 };
     playbackSessionMock.mockReturnValue(
-      playbackSession({ planAudioTracks: [], audioInventoryProvisional: false }),
+      playbackSession({
+        planAudioTracks: [declaredPlanAudio],
+        audioInventoryProvisional: true,
+      }),
     );
     const view = render(
       createElement(WatchPage, { ...watchPageProps, versions: [versionWithCatalogAudio] }),
@@ -786,8 +789,10 @@ describe("WatchPage overlay inventory provenance", () => {
       audioInventoryProvisional?: boolean;
       shouldAutoPlay?: boolean;
     };
-    expect(props.audioTracks).toEqual([catalogAudio]);
-    expect(props.audioInventoryProvisional).toBe(true);
+    // The plan's declared rows are shown immediately and the menu labels them
+    // unverified; they are not withheld behind a discovery state.
+    expect(props.audioTracks).toEqual([declaredPlanAudio]);
+    expect(props.audioInventoryProvisional).toBe(false);
     expect(props.shouldAutoPlay).toBe(true);
 
     playbackSessionMock.mockReturnValue(
@@ -799,6 +804,25 @@ describe("WatchPage overlay inventory provenance", () => {
 
     props = videoPlayerMock.mock.calls.at(-1)?.[0] as typeof props;
     expect(props.audioTracks).toEqual([liveAudio]);
+    expect(props.audioInventoryProvisional).toBe(false);
+  });
+
+  it("falls back to the playing version's declared audio when the plan publishes none", () => {
+    const versionWithCatalogAudio: PlayerFileVersion = {
+      ...version,
+      audio_tracks: [catalogAudio],
+    };
+    playbackSessionMock.mockReturnValue(
+      playbackSession({ planAudioTracks: [], audioInventoryProvisional: true }),
+    );
+
+    render(createElement(WatchPage, { ...watchPageProps, versions: [versionWithCatalogAudio] }));
+
+    const props = videoPlayerMock.mock.calls.at(-1)?.[0] as {
+      audioTracks?: unknown[];
+      audioInventoryProvisional?: boolean;
+    };
+    expect(props.audioTracks).toEqual([catalogAudio]);
     expect(props.audioInventoryProvisional).toBe(false);
   });
 

@@ -245,7 +245,7 @@
   },
   "src/pages/ItemDetail/components/AudioTracksPopover.tsx": {
     "formatjs/no-literal-string-in-jsx": {
-      "count": 10
+      "count": 13
     },
     "silo/no-physical-direction": {
       "count": 1
@@ -268,7 +268,7 @@
   },
   "src/pages/ItemDetail/components/SubtitlesPopover.tsx": {
     "formatjs/no-literal-string-in-jsx": {
-      "count": 20
+      "count": 21
     },
     "silo/no-physical-direction": {
       "count": 2
@@ -465,7 +465,7 @@
   },
   "src/player/components/AudioTrackMenu.tsx": {
     "formatjs/no-literal-string-in-jsx": {
-      "count": 9
+      "count": 11
     },
     "react-hooks/exhaustive-deps": {
       "count": 2
@@ -518,7 +518,7 @@
   },
   "src/player/components/SubtitleMenu.tsx": {
     "formatjs/no-literal-string-in-jsx": {
-      "count": 28
+      "count": 29
     },
     "silo/no-physical-direction": {
       "count": 8

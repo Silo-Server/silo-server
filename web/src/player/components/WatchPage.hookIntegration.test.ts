@@ -208,10 +208,12 @@ describe("WatchPage with the real playback session hook", () => {
     expect(lastPlayer()?.inventoryPending).toBe(false);
     expect(lastPlayer()?.inventoryFailed).toBe(true);
 
-    // A late verified push through the hook's real fold clears the failure and
-    // both provisional menus.
+    // The plan already declares an audio row, so the overlay shows it even after
+    // the probe exhausts: it is unverified, not provisional. The subtitle menu
+    // has no declared rows, so it stays provisional on the bounded path.
     const exhausted = lastPlayer();
-    expect(exhausted?.audioInventoryProvisional).toBe(true);
+    expect(exhausted?.audioInventoryProvisional).toBe(false);
+    expect(exhausted?.subtitleInventoryProvisional).toBe(true);
     await act(async () => {
       exhausted?.onInventoryUpdated?.({
         session_id: "session-hook-int",
@@ -254,8 +256,8 @@ describe("WatchPage with the real playback session hook", () => {
       outcome: "playable",
       session_id: "session-legacy-rerender",
       // A legacy-only plan: no `inventory_url`, no `tracks_pending`, so the
-      // catalog poll (not the deferred poll) owns the discovery budget. The
-      // declared status keeps both menus provisional until probe evidence lands.
+      // catalog poll (not the deferred poll) owns the discovery budget. Its
+      // declared audio row is shown immediately as unverified, not provisional.
       playback_plan: fixturePlanV3({
         session_id: "session-legacy-rerender",
         inventory_status: "declared",
@@ -284,7 +286,9 @@ describe("WatchPage with the real playback session hook", () => {
     });
     expect(lastPlayer()?.inventoryPending).toBe(false);
     expect(lastPlayer()?.inventoryFailed).toBe(false);
-    expect(lastPlayer()?.audioInventoryProvisional).toBe(true);
+    // The plan's declared audio row is shown immediately, so the menu is not
+    // provisional while the catalog poll spends its budget.
+    expect(lastPlayer()?.audioInventoryProvisional).toBe(false);
 
     // Ordinary unrelated re-renders across the polling window. Only the title
     // changes; the inventory props keep their identity.

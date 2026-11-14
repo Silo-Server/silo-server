@@ -121,11 +121,10 @@ export function SubtitleMenu({
   // indexes; the menu shows one row per distinct descriptor, keeping the first
   // ordinal for selection. Differing forced/hearing-impaired/flag rows stay.
   const sortedTracks = useMemo(() => dedupeSubtitleTracks(sortSubtitlesBySource(tracks)), [tracks]);
-  // Declared or pending rows are placeholders for the effective file, so they
-  // stay out of the menu until probe evidence lands. A terminal failure keeps
-  // the list under its explicit "discovery did not complete" notice instead of
-  // leaving the menu empty.
-  const displayedTracks = provisional && !failed ? [] : sortedTracks;
+  // A declared list is the playing version's own inventory: show it immediately
+  // and keep the unverified badge. Probe evidence replaces it later; only an
+  // empty list waits in discovery.
+  const displayedTracks = sortedTracks;
   // A spinner with no bound is an indefinite lie about progress. Once the
   // provisional window lapses, the menu offers the same retry a terminal
   // failure does instead of spinning forever.
@@ -337,13 +336,16 @@ export function SubtitleMenu({
                 <DiscoveryRetryButton onRetry={handleRetryDiscovery} buttonRef={retryButtonRef} />
               </div>
             )}
-            {!failed && provisional && !discoveryExpired && (
+            {provisional && sortedTracks.length > 0 && (
+              <div className="px-3 py-1 text-xs text-white/45">From release listing</div>
+            )}
+            {!failed && provisional && sortedTracks.length === 0 && !discoveryExpired && (
               <div className="flex items-center gap-2 px-3 py-1 text-xs text-white/50">
                 <span className="h-3 w-3 animate-spin rounded-full border border-white/20 border-t-white/80" />
                 <span>Discovering subtitles…</span>
               </div>
             )}
-            {!failed && provisional && discoveryExpired && (
+            {!failed && provisional && sortedTracks.length === 0 && discoveryExpired && (
               <div className="flex items-center justify-between gap-2 px-3 py-1 text-xs text-white/50">
                 <span>Subtitles unavailable.</span>
                 <DiscoveryRetryButton onRetry={handleRetryDiscovery} buttonRef={retryButtonRef} />

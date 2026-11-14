@@ -32,6 +32,8 @@ interface AudioTrackMenuProps {
   /**
    * True while the server's inventory is declared metadata rather than probe
    * evidence, so the menu says so instead of presenting every row as final.
+   * Declared rows are still shown immediately and labelled; only an empty list
+   * waits in discovery.
    */
   provisional?: boolean;
   /**
@@ -196,11 +198,16 @@ export function AudioTrackMenu({
   // entry keeps its original inventory position so selection still names the
   // track the server has at that slot.
   const dedupedTracks = dedupeAudioTracks(tracks);
-  // Declared or pending rows are placeholders for the effective file, so they
-  // stay out of the menu until probe evidence lands. A terminal failure keeps
-  // the list under its explicit "discovery did not complete" notice instead of
-  // leaving the menu empty.
-  const displayedTracks = provisional && !failed ? [] : dedupedTracks;
+  // A declared list is shown immediately and marked unverified; probe evidence
+  // replaces it later. A declaration with no language or codec names no track,
+  // so it is grouped as the release listing instead of inventing a row.
+  const declaredWithoutDetail =
+    provisional &&
+    dedupedTracks.length > 0 &&
+    dedupedTracks.every(
+      ({ track }) => !track.language && !track.codec && !track.title && !track.embedded_title,
+    );
+  const displayedTracks = declaredWithoutDetail ? [] : dedupedTracks;
 
   return (
     <div ref={menuRef} className="relative" onBlur={handleBlur}>
@@ -247,13 +254,18 @@ export function AudioTrackMenu({
               <DiscoveryRetryButton onRetry={handleRetryDiscovery} buttonRef={retryButtonRef} />
             </div>
           )}
-          {!failed && provisional && !discoveryExpired && (
+          {provisional && dedupedTracks.length > 0 && (
+            <div className="px-3 py-1 text-xs text-white/45">
+              {declaredWithoutDetail ? "Audio · from release listing" : "From release listing"}
+            </div>
+          )}
+          {!failed && provisional && dedupedTracks.length === 0 && !discoveryExpired && (
             <div className="flex items-center gap-2 px-3 py-1 text-xs text-white/50">
               <span className="h-3 w-3 animate-spin rounded-full border border-white/20 border-t-white/80" />
               <span>Discovering audio tracks…</span>
             </div>
           )}
-          {!failed && provisional && discoveryExpired && (
+          {!failed && provisional && dedupedTracks.length === 0 && discoveryExpired && (
             <div className="flex items-center justify-between gap-2 px-3 py-1 text-xs text-white/50">
               <span>Audio tracks unavailable.</span>
               <DiscoveryRetryButton onRetry={handleRetryDiscovery} buttonRef={retryButtonRef} />

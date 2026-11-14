@@ -350,7 +350,7 @@ describe("SubtitleMenu", () => {
     expect(screen.queryByText("Discovering subtitles…")).toBeNull();
   });
 
-  it("gates declared track rows behind the discovery state while provisional", () => {
+  it("shows declared subtitle rows immediately and marks them unverified", () => {
     render(
       createElement(SubtitleMenu, {
         tracks: [subtitleTrack()],
@@ -364,13 +364,13 @@ describe("SubtitleMenu", () => {
     );
     fireEvent.click(screen.getByRole("button", { name: /(Enable|Disable) captions/ }));
 
-    expect(screen.getByText("Discovering subtitles…")).toBeTruthy();
-    // The declared rows are pre-probe placeholders for the effective file, so
-    // they must not sit in the menu as if they were the file's real tracks.
-    expect(screen.queryByText("English")).toBeNull();
+    expect(screen.queryByText("Discovering subtitles…")).toBeNull();
+    expect(screen.getByText("English")).toBeTruthy();
+    expect(screen.getByText("From release listing")).toBeTruthy();
+    expect(screen.getByText("Unverified")).toBeTruthy();
   });
 
-  it("swaps in live rows when the probed inventory arrives", () => {
+  it("swaps declared rows for probe evidence when it arrives", () => {
     const track = subtitleTrack();
     const view = render(
       createElement(SubtitleMenu, {
@@ -384,7 +384,8 @@ describe("SubtitleMenu", () => {
       }),
     );
     fireEvent.click(screen.getByRole("button", { name: /(Enable|Disable) captions/ }));
-    expect(screen.queryByText("English")).toBeNull();
+    expect(screen.getByText("English")).toBeTruthy();
+    expect(screen.getByText("From release listing")).toBeTruthy();
 
     view.rerender(
       createElement(SubtitleMenu, {
@@ -399,6 +400,7 @@ describe("SubtitleMenu", () => {
     );
 
     expect(screen.getByText("English")).toBeTruthy();
+    expect(screen.queryByText("From release listing")).toBeNull();
     expect(screen.queryByText("Discovering subtitles…")).toBeNull();
     expect(screen.queryByText("Unverified")).toBeNull();
   });
@@ -500,7 +502,7 @@ describe("SubtitleMenu discovery bound", () => {
   function renderProvisional(onRetryDiscovery?: () => void) {
     const view = render(
       createElement(SubtitleMenu, {
-        tracks: [subtitleTrack()],
+        tracks: [],
         activeIndex: null,
         onSelect: () => {},
         delayMs: 0,
@@ -525,9 +527,6 @@ describe("SubtitleMenu discovery bound", () => {
 
     expect(screen.queryByText("Discovering subtitles…")).toBeNull();
     expect(screen.getByText("Subtitles unavailable.")).toBeTruthy();
-    // The stalled rows are still declared metadata, so the menu does not fall
-    // back to offering them.
-    expect(screen.queryByText("English")).toBeNull();
   });
 
   it("re-triggers discovery and shows progress again on retry", () => {
@@ -555,7 +554,7 @@ describe("SubtitleMenu discovery bound", () => {
   it("returns to live rows when the retried inventory lands", () => {
     vi.useFakeTimers();
     const props = {
-      tracks: [subtitleTrack()],
+      tracks: [],
       activeIndex: null,
       onSelect: () => {},
       delayMs: 0,
@@ -570,7 +569,13 @@ describe("SubtitleMenu discovery bound", () => {
     });
     expect(screen.getByText("Subtitles unavailable.")).toBeTruthy();
 
-    view.rerender(createElement(SubtitleMenu, { ...props, provisional: false }));
+    view.rerender(
+      createElement(SubtitleMenu, {
+        ...props,
+        tracks: [subtitleTrack()],
+        provisional: false,
+      }),
+    );
 
     expect(screen.getByText("English")).toBeTruthy();
     expect(screen.queryByText("Subtitles unavailable.")).toBeNull();

@@ -525,12 +525,10 @@ function WatchPagePlayer({
         : (activeVersion?.audio_tracks ?? []),
     [activeVersion, session.planAudioTracks],
   );
-  // The fallback list is catalog metadata, not evidence for the effective file.
-  // Mark it provisional when the plan has no inventory of its own, so the
-  // overlay gates its rows instead of presenting placeholders as final.
+  // Declared rows are the playing version's own inventory: show them now and
+  // let the menu mark them unverified. Only an empty list waits on a probe.
   const audioMenuProvisional = isOverlayInventoryProvisional(
     session.audioInventoryProvisional,
-    (session.planAudioTracks?.length ?? 0) > 0,
     audioTracks.length,
   );
 
@@ -554,14 +552,11 @@ function WatchPagePlayer({
     () => resolvePlayableSubtitles(session.subtitleUrls, versionSubtitles),
     [session.subtitleUrls, versionSubtitles],
   );
-  // `playableSubtitles` knowingly falls back to the catalog rows above when the
-  // plan has not published a selectable inventory yet. Those rows are the
-  // pre-probe placeholders; mark them provisional even if the plan carries no
-  // declared marker, so the overlay waits for probe evidence instead of
-  // treating another release's catalog list as this file's final tracks.
+  // The playing version's declared subtitle rows are shown immediately; only
+  // an empty list waits for probe evidence. The active version is resolved
+  // against the effective source above, so this is never a sibling's list.
   const subtitleMenuProvisional = isOverlayInventoryProvisional(
     session.subtitleInventoryProvisional,
-    hasSelectableSessionSubtitles(session.subtitleUrls),
     playableSubtitles.length,
   );
   // What the menu may actually offer. A provisional inventory with no selectable

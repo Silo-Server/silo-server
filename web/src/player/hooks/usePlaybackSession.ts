@@ -1,9 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { usePlayerConfig } from "../context/PlayerConfigContext";
-import {
-  publishPlaybackInventory,
-  planInventoryDescribesRequestedFile,
-} from "../playbackInventoryMirror";
+import { inventoryPublicationTargets, publishPlaybackInventory } from "../playbackInventoryMirror";
 import type { PlayerConfig } from "../context/PlayerConfigContext";
 import { startPlaybackV2 } from "../start-v2";
 import { hasSequencedProgress, stopSequencedSession } from "../session-mutations";
@@ -5282,17 +5279,24 @@ export function usePlaybackSession(
   // substituted (or lower-version) release's track table says nothing about the
   // version the viewer selected.
   useEffect(() => {
-    const plan = planRef.current;
-    const requestedFileId = plan?.requested_media_file_id ?? null;
-    publishPlaybackInventory(state.mediaFileId, state.planAudioTracks, state.subtitleUrls);
-    if (
-      requestedFileId &&
-      requestedFileId !== state.mediaFileId &&
-      planInventoryDescribesRequestedFile(plan)
-    ) {
-      publishPlaybackInventory(requestedFileId, state.planAudioTracks, state.subtitleUrls);
+    // Declared rows are the plan's release listing, not probe evidence. They
+    // are published as such so the item page can show them immediately and
+    // still let verified rows win without ever regressing back.
+    const provenance = {
+      audioVerified: !state.audioInventoryProvisional,
+      subtitleVerified: !state.subtitleInventoryProvisional,
+    };
+    for (const fileId of inventoryPublicationTargets(planRef.current, state.mediaFileId)) {
+      publishPlaybackInventory(fileId, state.planAudioTracks, state.subtitleUrls, provenance);
     }
-  }, [state.mediaFileId, state.planAudioTracks, state.planRevision, state.subtitleUrls]);
+  }, [
+    state.audioInventoryProvisional,
+    state.mediaFileId,
+    state.planAudioTracks,
+    state.planRevision,
+    state.subtitleInventoryProvisional,
+    state.subtitleUrls,
+  ]);
 
   return {
     ...state,

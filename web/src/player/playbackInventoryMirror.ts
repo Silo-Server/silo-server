@@ -7,6 +7,13 @@ export interface PlaybackInventorySnapshot {
   fileId: number;
   audioTracks: PlayerAudioTrack[];
   subtitleTracks: PlayerSubtitleInfo[];
+  /**
+   * Whether each list is probe evidence for this file. A declared list is the
+   * release listing the player started from; it is shown immediately but must
+   * never replace a probed list the item page already has.
+   */
+  audioVerified: boolean;
+  subtitleVerified: boolean;
   updatedAt: number;
 }
 
@@ -18,7 +25,7 @@ function emit() {
 }
 
 /**
- * Records the player's authoritative audio/subtitle inventory for a file.
+ * Records the player's audio/subtitle inventory for a file.
  * The item page reads this after playback so its menus don't fall back to a
  * stale catalog row while the player's probe evidence is newer.
  */
@@ -26,13 +33,18 @@ export function publishPlaybackInventory(
   fileId: number | null | undefined,
   audioTracks: readonly PlayerAudioTrack[] | null | undefined,
   subtitleTracks: readonly PlayerSubtitleInfo[] | null | undefined,
+  provenance: { audioVerified?: boolean; subtitleVerified?: boolean } = {},
 ) {
   if (!fileId || fileId <= 0) return;
   const audio = (audioTracks ?? []).map((track) => ({ ...track }));
   const subtitles = (subtitleTracks ?? []).map((track) => ({ ...track }));
+  const audioVerified = provenance.audioVerified === true;
+  const subtitleVerified = provenance.subtitleVerified === true;
   const previous = snapshots.get(fileId);
   if (
     previous &&
+    previous.audioVerified === audioVerified &&
+    previous.subtitleVerified === subtitleVerified &&
     previous.audioTracks.length === audio.length &&
     previous.subtitleTracks.length === subtitles.length &&
     JSON.stringify(previous.audioTracks) === JSON.stringify(audio) &&
@@ -44,6 +56,8 @@ export function publishPlaybackInventory(
     fileId,
     audioTracks: audio,
     subtitleTracks: subtitles,
+    audioVerified,
+    subtitleVerified,
     updatedAt: Date.now(),
   });
   emit();
@@ -95,16 +109,61 @@ export function planInventoryDescribesRequestedFile(
   return requested > 0 && requested === effective;
 }
 
-/** Overlays a player inventory snapshot on a catalog/watch-detail version. */
+/**
+ * The file ids a plan's inventory belongs under.
+ *
+ * The effective row always gets it: that is the file the transport serves. The
+ * requested row gets it too only while the plan still serves that row, so a
+ * substituted release's tracks never surface on the version the viewer picked.
+ */
+export function inventoryPublicationTargets(
+  plan:
+    | {
+        requested_media_file_id?: number | null;
+        effective_media_file_id?: number | null;
+      }
+    | null
+    | undefined,
+  effectiveFileId: number | null | undefined,
+): number[] {
+  if (!effectiveFileId || effectiveFileId <= 0) return [];
+  const requested = plan?.requested_media_file_id ?? null;
+  if (requested && requested !== effectiveFileId && planInventoryDescribesRequestedFile(plan)) {
+    return [effectiveFileId, requested];
+  }
+  return [effectiveFileId];
+}
+
+interface MergePlaybackInventoryOptions {
+  /** The version's audio list is already probe evidence for this file. */
+  audioProbed?: boolean;
+  /** The version's subtitle list is already probe evidence for this file. */
+  subtitlesProbed?: boolean;
+}
+
+/**
+ * Overlays a player inventory snapshot on a catalog/watch-detail version.
+ *
+ * A declared snapshot is the player's release listing, not evidence: it may
+ * refine another declared list, but it never replaces a probed list. A verified
+ * snapshot replaces both, including a verified empty subtitle inventory.
+ */
 export function mergePlaybackInventory(
   version: FileVersion,
   snapshot: PlaybackInventorySnapshot | null | undefined,
+  options: MergePlaybackInventoryOptions = {},
 ): FileVersion {
   if (!snapshot) return version;
+  const keepProbedAudio =
+    options.audioProbed === true && !snapshot.audioVerified && snapshot.audioTracks.length > 0;
+  const keepProbedSubtitles =
+    options.subtitlesProbed === true &&
+    !snapshot.subtitleVerified &&
+    snapshot.subtitleTracks.length > 0;
   return {
     ...version,
     audio_tracks:
-      snapshot.audioTracks.length > 0
+      snapshot.audioTracks.length > 0 && !keepProbedAudio
         ? snapshot.audioTracks.map((track) => ({
             title: track.title,
             embedded_title: track.embedded_title,
@@ -119,9 +178,11 @@ export function mergePlaybackInventory(
             bit_depth: track.bit_depth,
             default: track.default,
           }))
-        : version.audio_tracks,
+        : snapshot.audioVerified && !options.audioProbed
+          ? []
+          : version.audio_tracks,
     subtitle_tracks:
-      snapshot.subtitleTracks.length > 0
+      snapshot.subtitleTracks.length > 0 && !keepProbedSubtitles
         ? snapshot.subtitleTracks.map((track) => ({
             index: track.index,
             language: track.language,
@@ -133,6 +194,8 @@ export function mergePlaybackInventory(
             default: track.default,
             external: track.source === "external",
           }))
-        : version.subtitle_tracks,
+        : snapshot.subtitleVerified && !options.subtitlesProbed
+          ? []
+          : version.subtitle_tracks,
   };
 }

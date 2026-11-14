@@ -18,11 +18,16 @@ interface AudioTracksPopoverProps {
   onSelectTrack?: (trackIndex: number) => void;
   onResetSelection?: () => void;
   /**
-   * True while the version's audio rows are the catalog fallback rather than
-   * probe evidence for the file. The menu withholds those rows and says it is
-   * still discovering instead of offering a pick that may not exist.
+   * True while the selected row has no audio rows at all and no probe evidence
+   * has landed. The menu says it is still discovering instead of inventing a
+   * list; a row that carries declared tracks never reaches this state.
    */
   inventoryProvisional?: boolean;
+  /**
+   * True while the rows are the selected row's release listing rather than
+   * probe evidence. They are shown immediately and labelled as unverified.
+   */
+  inventoryDeclared?: boolean;
   /** Re-runs inventory discovery; shown once the provisional window lapses. */
   onRetryInventory?: () => void;
 }
@@ -85,9 +90,10 @@ function AudioTracksPopover({
   onSelectTrack,
   onResetSelection,
   inventoryProvisional = false,
+  inventoryDeclared = false,
   onRetryInventory,
 }: AudioTracksPopoverProps) {
-  const tracks = version?.audio_tracks;
+  const tracks = version?.audio_tracks ?? [];
   const { expired: discoveryExpired, retry: restartDiscovery } =
     useProvisionalInventoryExpiry(inventoryProvisional);
   const handleRetryInventory = useCallback(() => {
@@ -95,9 +101,16 @@ function AudioTracksPopover({
     onRetryInventory?.();
   }, [onRetryInventory, restartDiscovery]);
 
-  if (!tracks || tracks.length === 0) return null;
+  if (tracks.length === 0 && !inventoryProvisional) return null;
 
   const isInteractive = Boolean(onSelectTrack || onResetSelection);
+  const declared = inventoryDeclared && !inventoryProvisional;
+  // A declaration with no language or codec names no track. Group it as the
+  // release listing instead of presenting a fabricated row as a probe result.
+  const declaredHasDetail = tracks.some((track) =>
+    Boolean(track.language || track.codec || track.title || track.embedded_title),
+  );
+  const declaredGroupOnly = declared && tracks.length > 0 && !declaredHasDetail;
 
   const { autoTrack, activeTrack } = resolveAudioTrackSelection(
     version,
@@ -122,11 +135,13 @@ function AudioTracksPopover({
               ? discoveryExpired
                 ? "Unavailable"
                 : "Discovering…"
-              : isInteractive
-                ? selectionMode === "auto"
-                  ? `Auto: ${autoSummary}`
-                  : activeSummary
-                : tracks.length}
+              : declaredGroupOnly
+                ? "Release listing"
+                : isInteractive
+                  ? selectionMode === "auto"
+                    ? `Auto: ${autoSummary}`
+                    : activeSummary
+                  : tracks.length}
           </span>
           <ChevronDown className="text-muted-foreground size-3" />
         </Button>
@@ -140,6 +155,16 @@ function AudioTracksPopover({
             description={inventoryProvisional ? "Profile defaults" : autoSummary}
             onSelect={onResetSelection}
           />
+        )}
+        {declared && !declaredGroupOnly && (
+          <div className="text-muted-foreground px-3 py-1 text-[0.6875rem]">
+            From release listing
+          </div>
+        )}
+        {declaredGroupOnly && (
+          <div className="text-muted-foreground px-3 py-2 text-xs">
+            Audio · from release listing
+          </div>
         )}
         {inventoryProvisional && !discoveryExpired && (
           <div className="text-muted-foreground flex items-center gap-2 px-3 py-2 text-xs">
@@ -159,7 +184,7 @@ function AudioTracksPopover({
             </button>
           </div>
         )}
-        {(inventoryProvisional ? [] : tracks).map((track, index) => {
+        {(inventoryProvisional || declaredGroupOnly ? [] : tracks).map((track, index) => {
           const codec = audioTrackLabel(track);
           const channels = formatChannels(track.channels);
           const language = getLanguageName(track.language ?? "");

@@ -477,13 +477,20 @@ export default function ActionBar({
   );
   const isWatchProbed = Boolean(selectedWatchVersion?.probed_at);
   const isCatalogProbed = Boolean(selectedVersion?.probed_at);
+  const probed = isWatchProbed || isCatalogProbed;
   const selectedVersionWithTracks = useMemo(() => {
     if (!selectedVersion) return null;
-    if (!selectedWatchVersion) return selectedVersion;
+    if (!selectedWatchVersion) {
+      return mergePlaybackInventory(selectedVersion, playerInventory, {
+        audioProbed: isCatalogProbed,
+        subtitlesProbed: isCatalogProbed,
+      });
+    }
     // When the watch detail read is probed, its inventory is authoritative even
     // if empty (verified empty). When only the catalog version carries probed_at
     // (watch read hasn't completed or is unprobed), the catalog lists are
-    // authoritative. When neither is probed, keep catalog placeholders as provisional.
+    // authoritative. When neither is probed, the selected row's declaration is
+    // still its own inventory: show it now, but let a later probe replace it.
     if (isWatchProbed) {
       return mergePlaybackInventory(
         {
@@ -492,6 +499,7 @@ export default function ActionBar({
           subtitle_tracks: selectedWatchVersion.subtitle_tracks ?? [],
         },
         playerInventory,
+        { audioProbed: true, subtitlesProbed: true },
       );
     }
     if (isCatalogProbed) {
@@ -502,6 +510,7 @@ export default function ActionBar({
           subtitle_tracks: selectedVersion.subtitle_tracks ?? [],
         },
         playerInventory,
+        { audioProbed: true, subtitlesProbed: true },
       );
     }
     return mergePlaybackInventory(
@@ -519,24 +528,21 @@ export default function ActionBar({
       playerInventory,
     );
   }, [isCatalogProbed, isWatchProbed, playerInventory, selectedVersion, selectedWatchVersion]);
-  // Probe evidence is the only thing that makes these rows this version's own
-  // inventory. An unprobed virtual row carries a listing placeholder instead:
-  // one synthesized audio track (no language, the release's codec) and, at
-  // most, the subtitle languages parsed from the release name. Counting those
-  // rows as published showed a fabricated audio track and presented an
-  // unenumerated empty subtitle list as a verified "no subtitles", while the
-  // same version in the player offered the tracks the served file actually
-  // carries. A player inventory for this exact file is evidence too; it is
-  // only published for the row it describes (see playbackInventoryMirror).
-  const audioRowsPublished =
-    isWatchProbed || isCatalogProbed || (playerInventory?.audioTracks.length ?? 0) > 0;
-  const subtitleRowsPublished =
-    isWatchProbed || isCatalogProbed || (playerInventory?.subtitleTracks.length ?? 0) > 0;
-  // Without evidence the menu stays in discovery even when placeholder rows
-  // exist, so a fallback probe reads as unavailable rather than as an empty or
-  // one-track inventory.
-  const audioInventoryProvisional = !audioRowsPublished;
-  const subtitleInventoryProvisional = !subtitleRowsPublished;
+  // The selected row's own declared tracks are inventory too: render them
+  // immediately instead of waiting on a pre-play probe that often never lands.
+  // They are that row's listing, never a sibling's, and stay labelled as
+  // unverified until probe evidence for this exact file replaces them.
+  const audioRows = selectedVersionWithTracks?.audio_tracks ?? [];
+  const subtitleRows = selectedVersionWithTracks?.subtitle_tracks ?? [];
+  const audioRowsProbed = probed || playerInventory?.audioVerified === true;
+  const subtitleRowsProbed = probed || playerInventory?.subtitleVerified === true;
+  const audioInventoryDeclared = audioRows.length > 0 && !audioRowsProbed;
+  const subtitleInventoryDeclared = subtitleRows.length > 0 && !subtitleRowsProbed;
+  // Only a row with no declared tracks and no probe evidence waits in
+  // discovery. An empty verified list stays final, and a row with declared
+  // tracks never reads as unavailable.
+  const audioInventoryProvisional = audioRows.length === 0 && !audioRowsProbed;
+  const subtitleInventoryProvisional = subtitleRows.length === 0 && !subtitleRowsProbed;
   // The watch detail read is the page's discovery path: the server persists
   // probed tracks there. Retrying re-reads it for the selected file; Play stays
   // available throughout, so a slow probe never blocks starting playback.
@@ -1552,18 +1558,18 @@ export default function ActionBar({
               />
             </div>
           )}
-          {selectedVersionWithTracks &&
-            (selectedVersionWithTracks.audio_tracks?.length ?? 0) > 0 && (
-              <AudioTracksPopover
-                version={selectedVersionWithTracks}
-                selectionMode={audioSelectionMode}
-                explicitTrackIndex={explicitAudioTrackIndex}
-                inventoryProvisional={audioInventoryProvisional}
-                onRetryInventory={handleRetryInventory}
-                onSelectTrack={onSelectAudioTrack}
-                onResetSelection={onResetAudioSelection}
-              />
-            )}
+          {selectedVersionWithTracks && (audioRows.length > 0 || audioInventoryProvisional) && (
+            <AudioTracksPopover
+              version={selectedVersionWithTracks}
+              selectionMode={audioSelectionMode}
+              explicitTrackIndex={explicitAudioTrackIndex}
+              inventoryProvisional={audioInventoryProvisional}
+              inventoryDeclared={audioInventoryDeclared}
+              onRetryInventory={handleRetryInventory}
+              onSelectTrack={onSelectAudioTrack}
+              onResetSelection={onResetAudioSelection}
+            />
+          )}
           {selectedVersionWithTracks && (
             <SubtitlesPopover
               version={selectedVersionWithTracks}
@@ -1577,6 +1583,7 @@ export default function ActionBar({
                 audioSelectionMode === "explicit" ? explicitAudioTrackIndex : null
               }
               inventoryProvisional={subtitleInventoryProvisional}
+              inventoryDeclared={subtitleInventoryDeclared}
               onRetryInventory={handleRetryInventory}
               onSelectSubtitle={onSelectSubtitle}
               onSelectSubtitleOff={onSelectSubtitleOff}
