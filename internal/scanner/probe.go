@@ -1085,12 +1085,13 @@ func probeFirstVideoFramePackets(ctx context.Context, ffprobePath, filePath, str
 	stopClose := context.AfterFunc(probeCtx, func() { _ = stdout.Close() })
 	frames, parseErr := decodeProbeFrames(stdout, stopAtFirstFrame)
 	stopped := stopAtFirstFrame && parseErr == nil && len(frames) > 0
-	switch {
-	case stopped:
+	if stopped {
 		cancel() // kills ffprobe and closes the pipe
-	case parseErr != nil:
-		// Let ffprobe finish, so its exit status can explain the bad output.
-		_, _ = io.Copy(io.Discard, stdout)
+	} else {
+		// Drain the rest while Wait runs, as cmd.Output does: output after
+		// the JSON cannot block ffprobe from exiting, and WaitDelay still
+		// ends a read held open by a child that outlives it.
+		go func() { _, _ = io.Copy(io.Discard, stdout) }()
 	}
 	stopClose()
 	waitErr := cmd.Wait()

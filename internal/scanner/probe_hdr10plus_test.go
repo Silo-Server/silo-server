@@ -170,6 +170,21 @@ func TestProbeFileRereadsWhenTheFirstPacketDecodesNoFrame(t *testing.T) {
 	}
 }
 
+// Output after ffprobe's JSON, such as a wrapper's, is drained, so it cannot
+// keep ffprobe from exiting and turn a read frame into a timeout.
+func TestProbeFileReadsTheFrameBeforeTrailingOutput(t *testing.T) {
+	ffprobe, _ := writeHDR10PlusFFprobe(t, hdr10PlusStreamsJSON,
+		"printf '%s' '"+hdr10PlusFrameJSON+"'; head -c 1048576 /dev/zero | tr '\\0' ' '")
+
+	probe, err := ProbeFile(context.Background(), ffprobe, filepath.Join(t.TempDir(), "movie.mkv"))
+	if err != nil {
+		t.Fatalf("ProbeFile: %v", err)
+	}
+	if track := probe.VideoTracks[0]; !track.HDR10Plus || track.HDR10PlusUnchecked {
+		t.Fatalf("track = %+v, want HDR10+ from the first read", track)
+	}
+}
+
 func TestProbeFileStreamsOnlyLeavesHDR10PlusUnchecked(t *testing.T) {
 	ffprobe, argsLog := writeHDR10PlusFFprobe(t, hdr10PlusStreamsJSON, "printf '%s' '"+hdr10PlusFrameJSON+"'")
 
