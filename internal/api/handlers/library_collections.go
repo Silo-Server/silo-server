@@ -818,16 +818,20 @@ func (h *LibraryCollectionHandler) refreshSmartCountAsync(collectionID string) {
 	if collectionID == "" || (h.SmartCountRefresher == nil && h.service == nil) {
 		return
 	}
+	// Each step gets its own deadline, so a slow count can't leave the
+	// collage step without time to load the collection.
 	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
-		defer cancel()
 		if h.SmartCountRefresher != nil {
+			ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 			if err := h.SmartCountRefresher.RefreshOne(ctx, collectionID); err != nil {
 				slog.Warn("smart-count refresh failed", "collection_id", collectionID, "error", err)
 			}
+			cancel()
 		}
 		if h.service != nil {
+			ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 			h.service.MaybeGenerateCollage(ctx, collectionID)
+			cancel()
 		}
 	}()
 }
