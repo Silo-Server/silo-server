@@ -25,6 +25,7 @@
 ./internal/sections TestSectionsSkipItemsInNoLibraryPostgres
 ./internal/sections TestPersonalSmartCollectionRowKeepsTheCollectionLimitPostgres
 ./internal/sections TestNextUpDismissalKeepsTheRowFullPostgres
+./internal/sections TestNextUpOutOfScopeSeriesKeepTheRowFullPostgres
 ./internal/sections TestContinueReadingFillsTheRowAfterCollapsingMangaChaptersPostgres
 ./internal/sections TestEpisodeCardsCarryParentArtworkPostgres
 ./internal/catalog TestCatalogQueryWithoutLibraryLeavesOutItemsInNoLibraryDB
@@ -485,6 +486,9 @@
 ./internal/requests TestDeleteFailedRequestDatabase
 ./internal/requests TestMarkAvailableLeavesARetryResendingATierDatabase
 ./internal/requests TestListDownloadingRequestsOrderDatabase
+./internal/requests TestRecordSubmissionReplacesFailedTargetDatabase
+./internal/requests TestWithdrawIgnoresFailedTargetsDatabase
+./internal/requests TestUpdateTargetStatusLeavesFinishedTargetDatabase
 ./internal/downloads TestConcurrentArtifactCreatesCannotBypassQuotaDB
 ./internal/downloads TestParkedDownloadIsNotServedOrPreparedFromItsOldFileDB
 ./internal/downloads TestRegistrationRefusesAFileOfAnotherTitleDB
@@ -1138,3 +1142,5 @@
 ./internal/backup TestBeforeUpgradeDestinationsDB
 ./internal/backup TestBeforeUpgradeRetriesDB
 ./internal/catalog TestExternalIDLookupSkipsItemsWithAnotherTMDBIDDB
+./internal/catalog TestResolveProviderAliasesSkipsItemsWithAnotherTMDBIDDB
+./internal/watchlist TestLibraryMatchesUsesTheTitlesRetainedIDsDB
