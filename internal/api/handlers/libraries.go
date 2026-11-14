@@ -673,7 +673,7 @@ func (h *LibraryHandler) runFileScanAsync(scanID string, folder *models.MediaFol
 			"path", filePath,
 		)
 
-		result, ingestErr := h.ingester.IngestFile(h.appCtx, folder, filePath)
+		result, ingestErr := h.ingester.IngestFile(scantrigger.FileScanContext(h.appCtx, trigger), folder, filePath)
 		if ingestErr != nil {
 			if errors.Is(ingestErr, context.Canceled) {
 				h.markScanCancelled(scanID)

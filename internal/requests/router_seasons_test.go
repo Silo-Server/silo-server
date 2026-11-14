@@ -271,3 +271,47 @@ func TestSubmitSkipsSeasonsAlreadyInTheLibrary(t *testing.T) {
 		t.Fatalf("calls = %d, request = %+v; want completed from the library", router.fulfillCalls, store.requests["done"])
 	}
 }
+
+// Retrying the failed 4K tier of a season request resends it even though the
+// delivered 1080p tier put every requested season in the library: that
+// presence says nothing about the tier that failed. Only the 4K server needs
+// to take seasons, even when the 1080p copy came through one that does not.
+func TestRetrySeasonRequestResendsTheFailedTierOnceItsSeasonsAreIn(t *testing.T) {
+	for name, hd := range map[string]string{
+		"season plugins":                    "sonarr-hd",
+		"1080p on a plugin without seasons": "sonarr-anime",
+	} {
+		t.Run(name, func(t *testing.T) {
+			store := newFakeStore()
+			seasonRoutes(store)
+			store.routes[0].HD.IntegrationID = hd
+			approvedSeasonRequest(store, "r", 95396, []int{1})
+			req := store.requests["r"]
+			req.Status, req.Outcome = StatusQueued, OutcomeFailed
+			req.RoutingFacts = capturedFacts(RoutingFacts{})
+			store.targets = map[string][]Target{"r": {
+				{ID: 1, RequestID: "r", IntegrationID: hd, Quality: Quality1080p, Status: StatusCompleted},
+				{ID: 2, RequestID: "r", IntegrationID: "sonarr-4k", Quality: Quality2160p, Status: StatusFailed, LastError: "sonarr-4k timed out"},
+			}}
+			store.targetSeq = 2
+			router := &fakeRouterProvider{seasonCapable: map[int]bool{1: true}}
+			svc := seasonService(store, severanceInLibrary())
+			svc.SetRouterProvider(router)
+			svc.SetEntitlementResolver(fixedCeiling{q: "2160p"})
+
+			got, err := svc.Retry(context.Background(), Viewer{UserID: 1, IsAdmin: true}, "r")
+			if err != nil {
+				t.Fatalf("Retry: %v", err)
+			}
+			if len(router.fulfillLog) != 1 || !slices.Equal(router.fulfillLog[0].qualities, []Quality{Quality2160p}) ||
+				router.fulfillLog[0].installationID != 1 || !slices.Equal(router.gotSeasons[0], []int{1}) {
+				t.Fatalf("fulfill calls = %+v, seasons = %v; want one resend of the 4K tier for season 1 on the season plugin", router.fulfillLog, router.gotSeasons)
+			}
+			// A queued target keeps the reconcile pass from completing the
+			// request from the library.
+			if got.Status != StatusQueued || got.Outcome != OutcomeActive {
+				t.Fatalf("request = %s/%s, want queued/active with the 4K tier in flight", got.Status, got.Outcome)
+			}
+		})
+	}
+}

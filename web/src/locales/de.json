@@ -8815,6 +8815,12 @@
       "value": "Dieser Pfad passt zu mehr als einer Mediathek."
     }
   ],
+  "web.admin.autoscan.activity.reason.pathIgnored": [
+    {
+      "type": 0,
+      "value": "Die Ignorierdateien der Mediathek schließen diese Datei aus, daher wurde sie nicht gescannt."
+    }
+  ],
   "web.admin.autoscan.activity.reason.pathNotFileOrDir": [
     {
       "type": 0,
@@ -98406,6 +98412,20 @@
       "value": "Unbekannt"
     }
   ],
+  "web.common.activity.subtitle.episode": [
+    {
+      "type": 1,
+      "value": "code"
+    },
+    {
+      "type": 0,
+      "value": " · "
+    },
+    {
+      "type": 1,
+      "value": "series"
+    }
+  ],
   "web.common.activity.subtitle.movie": [
     {
       "type": 0,
@@ -100052,6 +100072,12 @@
       "value": "Deine Daten"
     }
   ],
+  "web.common.toast.collections.created": [
+    {
+      "type": 0,
+      "value": "Sammlung erstellt"
+    }
+  ],
   "web.common.toast.collections.deleteFailed": [
     {
       "type": 0,
@@ -100062,6 +100088,12 @@
     {
       "type": 0,
       "value": "Sammlung gelöscht"
+    }
+  ],
+  "web.common.toast.collections.saved": [
+    {
+      "type": 0,
+      "value": "Sammlung gespeichert"
     }
   ],
   "web.common.toast.collections.syncFailed": [
@@ -119669,6 +119701,18 @@
       "value": "PIN entfernen"
     }
   ],
+  "web.profiles.editor.requestsAllowed": [
+    {
+      "type": 0,
+      "value": "Anfragen erlauben"
+    }
+  ],
+  "web.profiles.editor.requestsAllowedHint": [
+    {
+      "type": 0,
+      "value": "Erlaubt diesem Profil, Titel zu durchsuchen, die nicht in der Mediathek sind, und sie anzufragen. Die Altersfreigabe beschränkt diese Titel nur anhand ihrer US-Altersfreigabe, und die Begrenzung des Empfehlungsalters gilt für sie nicht."
+    }
+  ],
   "web.profiles.editor.restrictLibraries": [
     {
       "type": 0,
@@ -119785,6 +119829,12 @@
       },
       "offset": 0,
       "pluralType": "cardinal"
+    }
+  ],
+  "web.profiles.helpers.access.noRequests": [
+    {
+      "type": 0,
+      "value": "Keine Anfragen"
     }
   ],
   "web.profiles.helpers.access.quality": [
@@ -121785,6 +121835,12 @@
       "value": "Wartet auf Import"
     }
   ],
+  "web.requests.hub.blockedIntro": [
+    {
+      "type": 0,
+      "value": "Anfragen sind für dieses Profil deaktiviert. Du kannst die Anfragen dieses Profils weiterhin sehen und abbrechen."
+    }
+  ],
   "web.requests.hub.browseDiscover": [
     {
       "type": 0,
@@ -121999,6 +122055,12 @@
     {
       "type": 0,
       "value": "Anfragen von deinem Konto, gruppiert danach, was als Nächstes passiert."
+    }
+  ],
+  "web.requests.hub.yoursIntroProfile": [
+    {
+      "type": 0,
+      "value": "Anfragen, die dieses Profil gestellt hat, gruppiert danach, was als Nächstes passiert."
     }
   ],
   "web.requests.pageTitle": [

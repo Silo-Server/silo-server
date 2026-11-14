@@ -105,13 +105,17 @@ function defaultValueForField(field: PluginAdminFormField): string | boolean {
   return field.control === "SWITCH" ? false : "";
 }
 
-/** A form field's value from a saved config entry: numbers as text, else its default. */
+/**
+ * A form field's value from a saved config entry: numbers as text, a
+ * multi-select's saved list as is, else its default.
+ */
 export function formValueForField(
   field: PluginAdminFormField,
   saved?: Record<string, unknown>,
-): string | boolean {
+): string | boolean | unknown[] {
   const raw = saved?.[field.key];
   if (typeof raw === "boolean" || typeof raw === "string") return raw;
+  if (field.control === "MULTI_SELECT" && Array.isArray(raw)) return raw;
   if (typeof raw === "number") return String(raw);
   return defaultValueForField(field);
 }

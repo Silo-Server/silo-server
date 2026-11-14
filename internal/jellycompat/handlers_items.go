@@ -502,7 +502,7 @@ func (h *ItemsHandler) populateDetailSubtitles(ctx context.Context, detail *upst
 				IsHearingImpaired:      dl.HearingImpaired,
 				IsTextSubtitleStream:   true,
 				SupportsExternalStream: true,
-				DeliveryURL:            fmt.Sprintf("/Videos/%s/%s/Subtitles/%d/stream.%s", routeItemID, sourceID, streamIndex, format),
+				DeliveryURL:            storedSubtitleDeliveryURL(routeItemID, sourceID, streamIndex, format, "", dl.ID),
 				DeliveryMethod:         "External",
 				Path:                   downloadedSubtitlePath(version, dl),
 				IsExternalURL:          boolPtr(false),

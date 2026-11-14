@@ -266,11 +266,11 @@ func TestSendEmailsClaimLink(t *testing.T) {
 	if len(msg.Inline) != 1 || !strings.Contains(msg.HTMLBody, "cid:"+msg.Inline[0].ContentID) {
 		t.Error("email does not carry the header logo it references")
 	}
-	if !strings.Contains(result.ClaimURL, "https://silo.example.com/invite/") {
+	if !strings.Contains(result.ClaimURL, "https://silo.example.com/invite#") {
 		t.Errorf("claim URL = %q", result.ClaimURL)
 	}
 	// Raw token must not be stored: only its hash.
-	token := strings.TrimPrefix(result.ClaimURL, "https://silo.example.com/invite/")
+	token := strings.TrimPrefix(result.ClaimURL, "https://silo.example.com/invite#")
 	if _, ok := repo.rows[token]; ok {
 		t.Error("raw token stored in repository")
 	}
@@ -338,7 +338,7 @@ func TestAcceptCreatesUserWithEmailAsUsername(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Send: %v", err)
 	}
-	token := strings.TrimPrefix(sent.ClaimURL, "https://silo.example.com/invite/")
+	token := strings.TrimPrefix(sent.ClaimURL, "https://silo.example.com/invite#")
 
 	pair, user, err := svc.Accept(context.Background(), token, "", "hunter2hunter2", "test-device", "127.0.0.1")
 	if err != nil {
@@ -380,7 +380,7 @@ func TestAcceptRefusedWhileLocalLoginIsOff(t *testing.T) {
 		t.Fatalf("Send: %v", err)
 	}
 	sessions.localLoginOff = true
-	token := strings.TrimPrefix(sent.ClaimURL, "https://silo.example.com/invite/")
+	token := strings.TrimPrefix(sent.ClaimURL, "https://silo.example.com/invite#")
 	if _, _, err := svc.Accept(context.Background(), token, "", "hunter2hunter2", "d", ""); !errors.Is(err, auth.ErrLocalLoginDisabled) {
 		t.Fatalf("accept = %v, want ErrLocalLoginDisabled", err)
 	}
@@ -401,7 +401,7 @@ func TestLookupHidesLifecycleDetail(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Send: %v", err)
 	}
-	token := strings.TrimPrefix(sent.ClaimURL, "https://silo.example.com/invite/")
+	token := strings.TrimPrefix(sent.ClaimURL, "https://silo.example.com/invite#")
 
 	if _, err := svc.Lookup(context.Background(), token); err != nil {
 		t.Fatalf("pending lookup: %v", err)
@@ -426,7 +426,7 @@ func TestLinkBasePrefersExternalURLSetting(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Send: %v", err)
 	}
-	if !strings.HasPrefix(result.ClaimURL, "https://media.example.net/invite/") {
+	if !strings.HasPrefix(result.ClaimURL, "https://media.example.net/invite#") {
 		t.Errorf("claim URL = %q, want server public URL base", result.ClaimURL)
 	}
 }
@@ -440,7 +440,7 @@ func TestAcceptDoesNotLoginAfterProvisioningFailure(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	token := strings.TrimPrefix(sent.ClaimURL, "https://silo.example.com/invite/")
+	token := strings.TrimPrefix(sent.ClaimURL, "https://silo.example.com/invite#")
 	if _, _, err := svc.Accept(t.Context(), token, "", "test-password", "device", ""); !errors.Is(err, auth.ErrTransactionalProfileUnavailable) {
 		t.Fatal(err)
 	}
@@ -582,7 +582,7 @@ func TestResendEmailedInvitationAsLinkKeepsAddressWithoutEmail(t *testing.T) {
 	if err != nil || len(sender.sent) != 1 {
 		t.Fatalf("Send: err=%v sends=%d", err, len(sender.sent))
 	}
-	oldToken := strings.TrimPrefix(first.ClaimURL, "https://silo.example.com/invite/")
+	oldToken := strings.TrimPrefix(first.ClaimURL, "https://silo.example.com/invite#")
 
 	again, err := svc.Resend(t.Context(), first.Invitation.ID, 1, DeliveryLink)
 	if err != nil {
@@ -597,7 +597,7 @@ func TestResendEmailedInvitationAsLinkKeepsAddressWithoutEmail(t *testing.T) {
 	if _, err := svc.Lookup(t.Context(), oldToken); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("emailed link after replacement: err = %v, want ErrNotFound", err)
 	}
-	newToken := strings.TrimPrefix(again.ClaimURL, "https://silo.example.com/invite/")
+	newToken := strings.TrimPrefix(again.ClaimURL, "https://silo.example.com/invite#")
 	if view, err := svc.Lookup(t.Context(), newToken); err != nil || view.EmailRequired || view.Email != testInvitee {
 		t.Fatalf("replacement lookup = %+v err=%v, want bound to %s", view, err, testInvitee)
 	}
@@ -639,7 +639,7 @@ func TestAcceptLinkInvitationUsesEnteredEmail(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	token := strings.TrimPrefix(sent.ClaimURL, "https://silo.example.com/invite/")
+	token := strings.TrimPrefix(sent.ClaimURL, "https://silo.example.com/invite#")
 
 	lookup, err := svc.Lookup(t.Context(), token)
 	if err != nil || !lookup.EmailRequired || lookup.Email != "" || lookup.Note != "For Sam" {
@@ -670,7 +670,7 @@ func TestAcceptLinkInvitationUsesSignupEmailRule(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	token := strings.TrimPrefix(sent.ClaimURL, "https://silo.example.com/invite/")
+	token := strings.TrimPrefix(sent.ClaimURL, "https://silo.example.com/invite#")
 	if _, _, err := svc.Accept(t.Context(), token, "sam@localhost", "hunter2hunter2", "d", ""); !errors.Is(err, ErrInvalidEmail) {
 		t.Fatalf("err = %v, want ErrInvalidEmail", err)
 	}

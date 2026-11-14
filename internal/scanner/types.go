@@ -96,12 +96,15 @@ type VideoTrackInfo struct {
 	VideoRange          string
 	VideoRangeType      string
 	ColorRange          string
-	ColorPrimaries      string
-	ColorSpace          string
-	ColorTransfer       string
-	BitDepth            int
-	PixelFormat         string
-	ReferenceFrames     int
+	// FrameColorRange is the first decoded frame's range; see
+	// models.VideoTrack.FrameColorRange.
+	FrameColorRange string
+	ColorPrimaries  string
+	ColorSpace      string
+	ColorTransfer   string
+	BitDepth        int
+	PixelFormat     string
+	ReferenceFrames int
 	// HDR10PlusUnchecked marks a PQ track whose first frame was not read;
 	// see models.VideoTrack.HDR10PlusUnchecked.
 	HDR10PlusUnchecked bool

@@ -3,7 +3,7 @@
   "title": "Validation failed",
   "status": 422,
   "detail": "expected the lowercase literal true or false",
-  "instance": "urn:silo:request:00000000000000000000028b",
+  "instance": "urn:silo:request:00000000000000000000028c",
   "errors": [
     {
       "location": "query.include_artwork",
