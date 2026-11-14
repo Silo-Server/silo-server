@@ -951,6 +951,9 @@
 ./internal/scanner TestAudiobookRuntimeConcurrentMetadataAndMissingPostgres
 ./internal/worker TestSessionSyncRowJSONMatchesTheSyncedRowDB
 
+# An audiobook enrichment match keeps the fields an admin locked.
+./internal/audiobooks TestPersistKeepsAdminLockedFieldsDB
+
 # Dashboard egress splits by stream node and API server without adding the
 # per-node rows to the total, and a wide bucket's split comes from its peak minute.
 ./internal/dashmetrics TestSampleSharedRecordsEgressPerNodeDB
