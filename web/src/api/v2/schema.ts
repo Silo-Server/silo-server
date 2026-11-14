@@ -3921,7 +3921,7 @@ export interface paths {
     put?: never;
     /**
      * Test an auth plugin's connection with staged, unsaved settings.
-     * @description The running plugin tests the staged configuration (merged over the stored entries it does not replace) and persists nothing. A failed check is a 200 result with ok false. A plugin without a connection test, or a disabled installation, is 409. The check reaches the provider and is bounded by a server timeout; never retry an uncertain result automatically.
+     * @description The running plugin tests the staged configuration (merged over the stored entries it does not replace) and persists nothing. A blank secret field reuses the stored secret only while the rest of that entry is unchanged and no secret in it is entered (a secret object or list sent in it counts as entered); otherwise that entry is tested with only the secrets entered. The rule is per entry: stored entries not named here keep their secrets. A failed check is a 200 result with ok false. A plugin without a connection test, or a disabled installation, is 409. The check reaches the provider and is bounded by a server timeout; never retry an uncertain result automatically.
      */
     post: operations["testAdminPluginAuthBinding"];
     delete?: never;
@@ -11437,7 +11437,10 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** Get one of the account's media requests. */
+    /**
+     * Get one of the account's media requests.
+     * @description A profile the household manager blocked from requests gets 403 for a request another profile made, unless it acts as an admin.
+     */
     get: operations["getRequest"];
     put?: never;
     post?: never;
@@ -11660,7 +11663,10 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** List the account's media requests, newest first. */
+    /**
+     * List the account's media requests, newest first.
+     * @description Lists the requests every profile on the account made. A profile the household manager blocked from requests sees only the requests it made itself.
+     */
     get: operations["listMyRequests"];
     put?: never;
     post?: never;
@@ -12791,7 +12797,10 @@ export interface paths {
     };
     get?: never;
     put?: never;
-    /** Poll device authorization. Concurrent polls are not durably coalesced. */
+    /**
+     * Poll device authorization. Concurrent polls are not durably coalesced.
+     * @description Refusals, by problem type: 409 conflict (the person has not approved the code yet); 410 device_login_expired (the code expired, or was already used and the connection no longer exists); 403 not_permitted (the person declined it on the provider's site). Polling a session that already completed answers the connection again, so retrying after a lost answer is safe.
+     */
     post: operations["pollWatchProviderDeviceAuth"];
     delete?: never;
     options?: never;
@@ -19894,7 +19903,7 @@ export interface components {
     AdminPluginAuthBindingTestInputBody: {
       /** @description auth_provider.v1 capability to test; empty tests the plugin's first one */
       capability_id?: string;
-      /** @description Staged global configuration entries, unsaved, merged as updateAdminPluginInstallationConfig would merge them. Entries and fields not named here use the stored values; a declared non-secret field sent as null or a blank string is cleared so the plugin default applies; blank secret fields use the stored secret; clear_secrets drops it from the test */
+      /** @description Staged global configuration entries, unsaved, merged as updateAdminPluginInstallationConfig would merge them. Entries and fields not named here use the stored values; a declared non-secret field sent as null or a blank string is cleared so the plugin default applies; blank secret fields use the stored secret only while the rest of that entry is unchanged and no secret in it is entered (a secret object or list sent in it counts as entered), otherwise only the secrets entered are used and stored top-level fields the schema does not declare are left out of that entry; clear_secrets drops it from the test */
       config?: components["schemas"]["AdminPluginConfigWrite"][];
     };
     AdminPluginAuthBindingWrite: {
@@ -20006,7 +20015,7 @@ export interface components {
       clear_secrets?: string[];
       /** @description The manifest global_config_schema key */
       key: string;
-      /** @description The entry's fields, merged over the stored entry. A declared non-secret top-level field sent as null or a blank string is removed so the plugin default applies; blank secret fields preserve the stored secret */
+      /** @description The entry's fields, merged over the stored entry. A declared non-secret top-level field sent as null or a blank string is removed so the plugin default applies; blank secret fields preserve the stored secret. A connection test reuses a stored secret only while the rest of the entry is unchanged and no secret in it is entered (a secret object or list sent in it counts as entered); otherwise it also leaves out stored top-level fields the schema does not declare */
       value: {
         [key: string]: unknown;
       };
@@ -27303,7 +27312,7 @@ export interface components {
       state: "available" | "disabled" | "not_configured" | "unsupported";
       /** @description Whether adding a title the library doesn't have to the watchlist also requests it (or follows its request) for this viewer: requests and watchlist requests are on for the server, the profile has not opted out, and the viewer may request. */
       watchlist_requests: boolean;
-      /** @description Whether the server keeps watchlist entries for titles the library doesn't have: the /watchlist/titles operations, and in_watchlist on discovery results and the title detail. False while requests are disabled, when those operations answer 409 capability_disabled; the entries are kept. */
+      /** @description Whether the server keeps watchlist entries for titles the library doesn't have: the /watchlist/titles operations, and in_watchlist on discovery results and the title detail. False while requests are disabled, when those operations answer 409 capability_disabled, and for a profile blocked from requests, when they answer 403; the entries are kept. */
       watchlist_titles_supported: boolean;
     };
     FileMarkers: {
@@ -32267,6 +32276,11 @@ export interface components {
        */
       quality_preference: string;
       /**
+       * @description Whether the profile may make and follow requests and use request discovery. False keeps it out of those even when the account may request; it can still list, read and cancel the requests it made before. The account's own requests switch still applies on top. Set by the household manager
+       * @example true
+       */
+      requests_allowed: boolean;
+      /**
        * @description Hide titles with no advisory age as well, so the profile sees only titles an advisory service rated at or under max_advisory_age. Advisory ages are looked up over time, so on a large library a profile with this set starts with few titles. No effect without max_advisory_age
        * @example false
        */
@@ -32318,6 +32332,11 @@ export interface components {
       max_profiles?: number;
       /** @description Cursor state; absent for bounded unpaginated collections */
       page?: components["schemas"]["PageInfo"];
+      /**
+       * @description Whether profiles accept requests_allowed and the server enforces it
+       * @example true
+       */
+      requests_allowed_supported: boolean;
       /**
        * @description Whether profiles accept require_advisory_age and the server enforces it
        * @example true
@@ -32395,6 +32414,11 @@ export interface components {
        * @example auto
        */
       quality_preference?: string;
+      /**
+       * @description Whether the profile may make and follow requests and use request discovery. False keeps it out of those even when the account may request; it can still list, read and cancel the requests it made before. The account's own requests switch still applies on top. Set by the household manager. Omitted means allowed
+       * @example false
+       */
+      requests_allowed?: boolean;
       /**
        * @description Hide titles with no advisory age as well, so the profile sees only titles an advisory service rated at or under max_advisory_age. Advisory ages are looked up over time, so on a large library a profile with this set starts with few titles. No effect without max_advisory_age
        * @example true
@@ -32647,6 +32671,11 @@ export interface components {
        * @example auto
        */
       quality_preference?: string;
+      /**
+       * @description Whether the profile may make and follow requests and use request discovery. False keeps it out of those even when the account may request; it can still list, read and cancel the requests it made before. The account's own requests switch still applies on top. Set by the household manager
+       * @example false
+       */
+      requests_allowed?: boolean;
       /**
        * @description Hide titles with no advisory age as well, so the profile sees only titles an advisory service rated at or under max_advisory_age. Advisory ages are looked up over time, so on a large library a profile with this set starts with few titles. No effect without max_advisory_age
        * @example true
@@ -149471,6 +149500,15 @@ export interface operations {
       };
       /** @description Conflict */
       409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Gone */
+      410: {
         headers: {
           [name: string]: unknown;
         };

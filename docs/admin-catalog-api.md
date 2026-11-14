@@ -405,16 +405,17 @@ update and existing invalidation events.
 A follow-up detail-read failure can occur after persistence; it does not roll
 back the metadata change.
 
-A season stores `title`, `sort_title`, `original_title`, `overview`, `tagline`,
-`air_date`, `season_number` and the `imdb_id`, `tmdb_id` and `tvdb_id` provider
-IDs. An episode stores the same text fields and IDs, plus `episode_number`,
-`runtime`, `rating_imdb` and `rating_tmdb`. Neither stores a
+A season stores `title`, `original_title`, `overview`, `tagline`, `air_date`,
+`season_number` and the `imdb_id`, `tmdb_id` and `tvdb_id` provider IDs. An
+episode stores the same text fields and IDs, plus `sort_title`,
+`episode_number`, `runtime`, `rating_imdb` and `rating_tmdb`. A season has no
+`sort_title`, since seasons order by number, and neither stores a
 `content_rating`: the series' rating decides age limits for its episodes. No
-metadata provider writes a season's or episode's sort title, original title or
-tagline, or a season's IDs, so a refresh keeps them without a lock. A refresh
-does write an episode's IDs. Reset to Provider empties them, except that a reset
-in another language than the series' own keeps the sort title, original title
-and tagline, as it keeps the title and overview.
+metadata provider writes a season's or episode's original title or tagline, an
+episode's sort title, or a season's IDs, so a refresh keeps them without a lock.
+A refresh does write an episode's IDs. Reset to Provider empties them, except
+that a reset in another language than the series' own keeps the sort title,
+original title and tagline, as it keeps the title and overview.
 
 `locked_fields` holds the `MetadataField` numbers a refresh, library scan or
 seed import must keep. A season accepts the name, overview and release-date

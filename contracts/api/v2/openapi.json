@@ -16472,7 +16472,7 @@
             "type": "string"
           },
           "config": {
-            "description": "Staged global configuration entries, unsaved, merged as updateAdminPluginInstallationConfig would merge them. Entries and fields not named here use the stored values; a declared non-secret field sent as null or a blank string is cleared so the plugin default applies; blank secret fields use the stored secret; clear_secrets drops it from the test",
+            "description": "Staged global configuration entries, unsaved, merged as updateAdminPluginInstallationConfig would merge them. Entries and fields not named here use the stored values; a declared non-secret field sent as null or a blank string is cleared so the plugin default applies; blank secret fields use the stored secret only while the rest of that entry is unchanged and no secret in it is entered (a secret object or list sent in it counts as entered), otherwise only the secrets entered are used and stored top-level fields the schema does not declare are left out of that entry; clear_secrets drops it from the test",
             "items": {
               "$ref": "#/components/schemas/AdminPluginConfigWrite"
             },
@@ -16826,7 +16826,7 @@
           },
           "value": {
             "additionalProperties": true,
-            "description": "The entry's fields, merged over the stored entry. A declared non-secret top-level field sent as null or a blank string is removed so the plugin default applies; blank secret fields preserve the stored secret",
+            "description": "The entry's fields, merged over the stored entry. A declared non-secret top-level field sent as null or a blank string is removed so the plugin default applies; blank secret fields preserve the stored secret. A connection test reuses a stored secret only while the rest of the entry is unchanged and no secret in it is entered (a secret object or list sent in it counts as entered); otherwise it also leaves out stored top-level fields the schema does not declare",
             "type": "object",
             "x-silo-extension-bag": "plugin-json-value"
           }
@@ -35469,7 +35469,7 @@
             "type": "boolean"
           },
           "watchlist_titles_supported": {
-            "description": "Whether the server keeps watchlist entries for titles the library doesn't have: the /watchlist/titles operations, and in_watchlist on discovery results and the title detail. False while requests are disabled, when those operations answer 409 capability_disabled; the entries are kept.",
+            "description": "Whether the server keeps watchlist entries for titles the library doesn't have: the /watchlist/titles operations, and in_watchlist on discovery results and the title detail. False while requests are disabled, when those operations answer 409 capability_disabled, and for a profile blocked from requests, when they answer 403; the entries are kept.",
             "type": "boolean"
           }
         },
@@ -47015,6 +47015,13 @@
             ],
             "type": "string"
           },
+          "requests_allowed": {
+            "description": "Whether the profile may make and follow requests and use request discovery. False keeps it out of those even when the account may request; it can still list, read and cancel the requests it made before. The account's own requests switch still applies on top. Set by the household manager",
+            "examples": [
+              true
+            ],
+            "type": "boolean"
+          },
           "require_advisory_age": {
             "description": "Hide titles with no advisory age as well, so the profile sees only titles an advisory service rated at or under max_advisory_age. Advisory ages are looked up over time, so on a large library a profile with this set starts with few titles. No effect without max_advisory_age",
             "examples": [
@@ -47063,6 +47070,7 @@
           "max_content_rating",
           "max_advisory_age",
           "require_advisory_age",
+          "requests_allowed",
           "quality_preference",
           "language",
           "preferred_metadata_language",
@@ -47136,6 +47144,13 @@
             "$ref": "#/components/schemas/PageInfo",
             "description": "Cursor state; absent for bounded unpaginated collections"
           },
+          "requests_allowed_supported": {
+            "description": "Whether profiles accept requests_allowed and the server enforces it",
+            "examples": [
+              true
+            ],
+            "type": "boolean"
+          },
           "require_advisory_age_supported": {
             "description": "Whether profiles accept require_advisory_age and the server enforces it",
             "examples": [
@@ -47148,6 +47163,7 @@
           "avatar_upload_enabled",
           "max_advisory_age_supported",
           "require_advisory_age_supported",
+          "requests_allowed_supported",
           "items"
         ],
         "type": "object"
@@ -47286,6 +47302,13 @@
             ],
             "maxLength": 32,
             "type": "string"
+          },
+          "requests_allowed": {
+            "description": "Whether the profile may make and follow requests and use request discovery. False keeps it out of those even when the account may request; it can still list, read and cancel the requests it made before. The account's own requests switch still applies on top. Set by the household manager. Omitted means allowed",
+            "examples": [
+              false
+            ],
+            "type": "boolean"
           },
           "require_advisory_age": {
             "description": "Hide titles with no advisory age as well, so the profile sees only titles an advisory service rated at or under max_advisory_age. Advisory ages are looked up over time, so on a large library a profile with this set starts with few titles. No effect without max_advisory_age",
@@ -47809,6 +47832,13 @@
             ],
             "maxLength": 32,
             "type": "string"
+          },
+          "requests_allowed": {
+            "description": "Whether the profile may make and follow requests and use request discovery. False keeps it out of those even when the account may request; it can still list, read and cancel the requests it made before. The account's own requests switch still applies on top. Set by the household manager",
+            "examples": [
+              false
+            ],
+            "type": "boolean"
           },
           "require_advisory_age": {
             "description": "Hide titles with no advisory age as well, so the profile sees only titles an advisory service rated at or under max_advisory_age. Advisory ages are looked up over time, so on a large library a profile with this set starts with few titles. No effect without max_advisory_age",
@@ -109711,7 +109741,7 @@
     },
     "/api/v2/admin/plugins/installations/{id}/auth-binding/test": {
       "post": {
-        "description": "The running plugin tests the staged configuration (merged over the stored entries it does not replace) and persists nothing. A failed check is a 200 result with ok false. A plugin without a connection test, or a disabled installation, is 409. The check reaches the provider and is bounded by a server timeout; never retry an uncertain result automatically.",
+        "description": "The running plugin tests the staged configuration (merged over the stored entries it does not replace) and persists nothing. A blank secret field reuses the stored secret only while the rest of that entry is unchanged and no secret in it is entered (a secret object or list sent in it counts as entered); otherwise that entry is tested with only the secrets entered. The rule is per entry: stored entries not named here keep their secrets. A failed check is a 200 result with ok false. A plugin without a connection test, or a disabled installation, is 409. The check reaches the provider and is bounded by a server timeout; never retry an uncertain result automatically.",
         "operationId": "testAdminPluginAuthBinding",
         "parameters": [
           {
@@ -214410,6 +214440,7 @@
     },
     "/api/v2/requests/mine": {
       "get": {
+        "description": "Lists the requests every profile on the account made. A profile the household manager blocked from requests sees only the requests it made itself.",
         "operationId": "listMyRequests",
         "parameters": [
           {
@@ -215196,6 +215227,7 @@
         "x-silo-service-backed": true
       },
       "get": {
+        "description": "A profile the household manager blocked from requests gets 403 for a request another profile made, unless it acts as an admin.",
         "operationId": "getRequest",
         "parameters": [
           {
@@ -230081,6 +230113,7 @@
     },
     "/api/v2/watch-providers/{provider}/auth/poll": {
       "post": {
+        "description": "Refusals, by problem type: 409 conflict (the person has not approved the code yet); 410 device_login_expired (the code expired, or was already used and the connection no longer exists); 403 not_permitted (the person declined it on the provider's site). Polling a session that already completed answers the connection again, so retrying after a lost answer is safe.",
         "operationId": "pollWatchProviderDeviceAuth",
         "parameters": [
           {
@@ -230207,6 +230240,16 @@
               }
             },
             "description": "Conflict"
+          },
+          "410": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Gone"
           },
           "413": {
             "content": {

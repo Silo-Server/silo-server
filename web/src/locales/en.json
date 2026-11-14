@@ -101020,6 +101020,18 @@
       "value": "Subtitle uploaded"
     }
   ],
+  "web.common.toast.watchProviders.authDeclined": [
+    {
+      "type": 0,
+      "value": "The connection was declined on the provider's site. Select Connect to try again."
+    }
+  ],
+  "web.common.toast.watchProviders.authNotApproved": [
+    {
+      "type": 0,
+      "value": "Approve the code on the provider's site first, then try again."
+    }
+  ],
   "web.common.toast.watchProviders.connectFailed": [
     {
       "type": 0,
@@ -120283,6 +120295,18 @@
       "value": "Remove PIN"
     }
   ],
+  "web.profiles.editor.requestsAllowed": [
+    {
+      "type": 0,
+      "value": "Allow requests"
+    }
+  ],
+  "web.profiles.editor.requestsAllowedHint": [
+    {
+      "type": 0,
+      "value": "Lets this profile browse titles that are not in the library and request them. The content rating limits those titles by their US rating only, and the advisory-age limit does not apply to them."
+    }
+  ],
   "web.profiles.editor.restrictLibraries": [
     {
       "type": 0,
@@ -120403,6 +120427,12 @@
       },
       "offset": 0,
       "pluralType": "cardinal"
+    }
+  ],
+  "web.profiles.helpers.access.noRequests": [
+    {
+      "type": 0,
+      "value": "No requests"
     }
   ],
   "web.profiles.helpers.access.quality": [
@@ -122403,6 +122433,12 @@
       "value": "Waiting for import"
     }
   ],
+  "web.requests.hub.blockedIntro": [
+    {
+      "type": 0,
+      "value": "Requests are turned off for this profile. You can still see and cancel the requests it made."
+    }
+  ],
   "web.requests.hub.browseDiscover": [
     {
       "type": 0,
@@ -122621,6 +122657,12 @@
     {
       "type": 0,
       "value": "Requests from your account, grouped by what happens next."
+    }
+  ],
+  "web.requests.hub.yoursIntroProfile": [
+    {
+      "type": 0,
+      "value": "Requests this profile made, grouped by what happens next."
     }
   ],
   "web.requests.pageTitle": [

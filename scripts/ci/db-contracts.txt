@@ -25,6 +25,7 @@
 ./internal/sections TestSectionsSkipItemsInNoLibraryPostgres
 ./internal/sections TestPersonalSmartCollectionRowKeepsTheCollectionLimitPostgres
 ./internal/sections TestNextUpDismissalKeepsTheRowFullPostgres
+./internal/sections TestNextUpOutOfScopeSeriesKeepTheRowFullPostgres
 ./internal/sections TestContinueReadingFillsTheRowAfterCollapsingMangaChaptersPostgres
 ./internal/sections TestEpisodeCardsCarryParentArtworkPostgres
 ./internal/catalog TestCatalogQueryWithoutLibraryLeavesOutItemsInNoLibraryDB
@@ -49,6 +50,7 @@
 ./internal/scanner TestHDR10PlusBackfillLeavesARowRewrittenDuringTheReadDB
 ./internal/scanner TestHDR10PlusBackfillStopsWhenStorageStallsDB
 ./internal/scanner TestRescanKeepsHDR10PlusWhenTheFrameReadFailsDB
+./internal/scanner TestHDR10PlusBackfillWaitsADayAfterANoFrameReadDB
 ./internal/scanner TestRescanKeepsSidecarsItCouldNotListDB
 ./internal/scanner TestScanStateCarriesProbeRejectionDB
 ./internal/scanner TestRescanKeepsProbeFactsOfARejectedUnchangedFileDB
@@ -161,6 +163,10 @@
 # reconciled first, and the removal grace holds the book for the new path.
 ./internal/scanner TestScanSubtreeAudiobookRenameKeepsBookDB
 
+# A rescan of a retagged, unmatched ebook keeps the fields and author credits an
+# admin locked, including locked fields left empty.
+./internal/scanner TestEbookRescanKeepsLockedFieldsDB
+
 # A full scan that holds a few files at a time catalogs a library like one that
 # holds them all: groups and roots spanning batches, a deleted top-level
 # folder, an unreadable folder and a dropped mount.
@@ -188,6 +194,7 @@
 ./internal/scanner TestScanSubtreeIndexesPodcastShowFolders
 ./internal/scanner TestScanSubtreeReconcilesOnlyTheScannedPodcastShow
 ./internal/scanner TestPodcastShowScanLeavesANestedLibraryRootAlone
+./internal/scanner TestOuterRootIgnoreFileExcludesAShowInANestedLibraryRoot
 ./internal/scanner TestPodcastShowSurvivesConcurrentMembershipSweep
 ./internal/scanner TestConcurrentScansOfANewPodcastShowCreateOneShow
 ./internal/scanner TestPodcastShowScanWritesTheShowInItsTransaction
@@ -477,7 +484,11 @@
 # Request cleanup, prepared downloads and user-store transactions.
 ./internal/requests TestReplaceFailedIsScopedToRequesterDatabase
 ./internal/requests TestDeleteFailedRequestDatabase
+./internal/requests TestMarkAvailableLeavesARetryResendingATierDatabase
 ./internal/requests TestListDownloadingRequestsOrderDatabase
+./internal/requests TestRecordSubmissionReplacesFailedTargetDatabase
+./internal/requests TestWithdrawIgnoresFailedTargetsDatabase
+./internal/requests TestUpdateTargetStatusLeavesFinishedTargetDatabase
 ./internal/downloads TestConcurrentArtifactCreatesCannotBypassQuotaDB
 ./internal/downloads TestParkedDownloadIsNotServedOrPreparedFromItsOldFileDB
 ./internal/downloads TestRegistrationRefusesAFileOfAnotherTitleDB
@@ -514,6 +525,7 @@
 ./internal/userstore/pgstore TestPostgresConcurrentProfileDeletesWithCrossVisibility
 ./internal/userstore/pgstore TestPostgresConcurrentProfileAndCollectionDeletes
 ./internal/userstore/pgstore TestPostgresConcurrentProfileDeleteAndCollectionReorder
+./internal/userstore/pgstore TestUpdateProfileRequestsBlockedBumpsAccessPolicyRevision
 ./internal/api/handlers TestEbookReaderPurgeProfileDB
 ./internal/userstore/pgstore TestPostgresMarkWatchedBatch
 ./internal/userstore/pgstore TestPostgresProgressHints
@@ -897,6 +909,10 @@
 # (issue #3441).
 ./internal/scanqueue TestCreateOnClaimedScopeJoinsTheActiveRunDB
 
+# An admin's exact-path file request that joins an automatic run is owed as a
+# follow-up, so it keeps the ignore-file bypass (issue #4157).
+./internal/scanqueue TestExplicitFileRequestJoinsActiveRunAsFollowUpDB
+
 # A scan cut short by shutdown goes back to the queue with its owed follow-up;
 # an admin cancel still ends it cancelled, and a late requeue never takes back
 # another worker's claim.
@@ -947,6 +963,9 @@
 # drain spacing, and retention.
 ./internal/catalog TestCatalogItemChangeOutboxDB
 
+# An audiobook rescan fills an empty sort title only while the Name lock is off.
+./internal/scanner TestAudiobookRescanSortTitleFollowsNameLockDB
+
 # Existing audiobooks take the runtime their active files add up to instead of
 # a metadata provider's runtime for some other edition.
 ./migrations TestAudiobookRuntimeFromFilesBackfillPostgres
@@ -961,6 +980,10 @@
 
 # An audiobook enrichment match keeps the fields an admin locked.
 ./internal/audiobooks TestPersistKeepsAdminLockedFieldsDB
+
+# An audiobook rescan keeps the authors and narrators an admin locked with the
+# crew lock.
+./internal/scanner TestAudiobookRescanKeepsCrewLockedCreditsDB
 
 # Dashboard egress splits by stream node and API server without adding the
 # per-node rows to the total, and a wide bucket's split comes from its peak minute.
@@ -1138,3 +1161,5 @@
 ./internal/backup TestBeforeUpgradeDestinationsDB
 ./internal/backup TestBeforeUpgradeRetriesDB
 ./internal/catalog TestExternalIDLookupSkipsItemsWithAnotherTMDBIDDB
+./internal/catalog TestResolveProviderAliasesSkipsItemsWithAnotherTMDBIDDB
+./internal/watchlist TestLibraryMatchesUsesTheTitlesRetainedIDsDB

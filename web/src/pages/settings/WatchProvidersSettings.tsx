@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   AlertCircle,
   Check,
@@ -70,6 +70,25 @@ function formatRetryAfter(t: Translate, seconds?: number) {
         minutes: remainingMinutes,
       })
     : t("web.settings.watchProviders.duration.hours", { hours: hours });
+}
+
+/**
+ * Seconds left of a server-imposed wait, counted down once a second, and the
+ * function that starts it from a Retry-After value. Zero when no wait is on.
+ */
+function useCountdown(): [number, (seconds: number) => void] {
+  const [wait, setWait] = useState<{ until: number; seconds: number } | null>(null);
+  useEffect(() => {
+    if (!wait) return;
+    const timer = window.setTimeout(() => {
+      const seconds = Math.ceil((wait.until - Date.now()) / 1000);
+      setWait(seconds > 0 ? { until: wait.until, seconds } : null);
+    }, 1000);
+    return () => window.clearTimeout(timer);
+  }, [wait]);
+  const start = (seconds: number) =>
+    setWait(seconds > 0 ? { until: Date.now() + seconds * 1000, seconds } : null);
+  return [wait?.seconds ?? 0, start];
 }
 
 type StatusVariant = "connected" | "disconnected" | "pending" | "error";
@@ -438,6 +457,7 @@ function WatchProviderCard({
   const connectAPIKey = useConnectWatchProviderAPIKey(providerKey);
   const deleteConnection = useDeleteWatchProviderConnection(providerKey);
   const syncNow = useTriggerWatchProviderSync(providerKey);
+  const [cooldownSeconds, startCooldown] = useCountdown();
   const { data: syncRunsData } = useWatchProviderSyncRuns(
     providerKey,
     Boolean(savedConnection?.connected),
@@ -479,10 +499,6 @@ function WatchProviderCard({
 
   const latestRun = syncRunsData?.runs?.[0];
   const syncRunning = latestRun?.status === "queued" || latestRun?.status === "running";
-  const cooldownSeconds =
-    syncNow.error instanceof V2ProblemError && syncNow.error.status === 429
-      ? syncNow.error.retryAfterSeconds
-      : undefined;
   const syncDisabled = syncNow.isPending || syncRunning || Boolean(cooldownSeconds);
   const syncButtonLabel = syncRunning
     ? t("web.settings.watchProviders.syncing")
@@ -577,19 +593,23 @@ function WatchProviderCard({
     }
   };
 
-  const handlePoll = () => {
-    if (!authSession) return;
-    pollAuth.mutate(authSession.id, {
-      onSuccess: () => {
-        setAuthSession(null);
-        setCodeCopied(false);
-      },
-    });
-  };
-
   const handleCancelAuth = () => {
     setAuthSession(null);
     setCodeCopied(false);
+  };
+
+  const handlePoll = () => {
+    if (!authSession) return;
+    pollAuth.mutate(authSession.id, {
+      onSuccess: handleCancelAuth,
+      onError: (err) => {
+        // An expired, used, declined, or unknown code can never finish, so
+        // drop it and offer Connect again. A code not approved yet stays.
+        if (err instanceof V2ProblemError && [403, 404, 410].includes(err.status)) {
+          handleCancelAuth();
+        }
+      },
+    });
   };
 
   const handleStartConnect = () => {
@@ -640,7 +660,15 @@ function WatchProviderCard({
                 variant="outline"
                 size="sm"
                 disabled={isBusy || syncDisabled}
-                onClick={() => syncNow.mutate()}
+                onClick={() =>
+                  syncNow.mutate(undefined, {
+                    onError: (err) => {
+                      if (err instanceof V2ProblemError && err.status === 429) {
+                        startCooldown(err.retryAfterSeconds ?? 0);
+                      }
+                    },
+                  })
+                }
                 className="flex-1 sm:flex-none"
               >
                 {syncNow.isPending || syncRunning ? (

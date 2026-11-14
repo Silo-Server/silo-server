@@ -110317,6 +110317,18 @@
       "value": "Subtítulo subido"
     }
   ],
+  "web.common.toast.watchProviders.authDeclined": [
+    {
+      "type": 0,
+      "value": "Se rechazó la conexión en el sitio del proveedor. Selecciona Conectar para volver a intentarlo."
+    }
+  ],
+  "web.common.toast.watchProviders.authNotApproved": [
+    {
+      "type": 0,
+      "value": "Primero aprueba el código en el sitio del proveedor y vuelve a intentarlo."
+    }
+  ],
   "web.common.toast.watchProviders.connectFailed": [
     {
       "type": 0,
@@ -130760,6 +130772,18 @@
       "value": "Quitar PIN"
     }
   ],
+  "web.profiles.editor.requestsAllowed": [
+    {
+      "type": 0,
+      "value": "Permitir solicitudes"
+    }
+  ],
+  "web.profiles.editor.requestsAllowedHint": [
+    {
+      "type": 0,
+      "value": "Permite que este perfil explore títulos que no están en la biblioteca y los solicite. La clasificación por edad limita esos títulos solo por su clasificación de EE. UU., y el límite de edad recomendada no se aplica a ellos."
+    }
+  ],
   "web.profiles.editor.restrictLibraries": [
     {
       "type": 0,
@@ -130888,6 +130912,12 @@
       },
       "offset": 0,
       "pluralType": "cardinal"
+    }
+  ],
+  "web.profiles.helpers.access.noRequests": [
+    {
+      "type": 0,
+      "value": "Sin solicitudes"
     }
   ],
   "web.profiles.helpers.access.quality": [
@@ -132972,6 +133002,12 @@
       "value": "En espera de importación"
     }
   ],
+  "web.requests.hub.blockedIntro": [
+    {
+      "type": 0,
+      "value": "Las solicitudes están desactivadas para este perfil. Aún puedes ver y cancelar las solicitudes que hizo."
+    }
+  ],
   "web.requests.hub.browseDiscover": [
     {
       "type": 0,
@@ -133190,6 +133226,12 @@
     {
       "type": 0,
       "value": "Solicitudes de tu cuenta, agrupadas según lo que sucede a continuación."
+    }
+  ],
+  "web.requests.hub.yoursIntroProfile": [
+    {
+      "type": 0,
+      "value": "Solicitudes que hizo este perfil, agrupadas según lo que sucede a continuación."
     }
   ],
   "web.requests.pageTitle": [

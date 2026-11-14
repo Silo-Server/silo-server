@@ -25,7 +25,10 @@ func scopeLibraryRoot(path string, libraryRoots []string) string {
 }
 
 // scanRootIgnoreRules loads the rules above a scoped folder walk, stopping at
-// its configured library root. Rules outside that root cannot affect a library.
+// the outermost configured library root that contains it: a full scan walks a
+// root nested in another as part of the outer one (compactScanRoots), so the
+// outer root's rules apply below it. Rules outside that root cannot affect a
+// library.
 // A failed ancestor read makes the scope incomplete, so callers must protect it
 // from missing-file reconciliation. The scope is also ignored when it, or a
 // directory between it and the root, has a name the walk skips
@@ -39,7 +42,13 @@ func scanRootIgnoreRules(path string, libraryRoots []string) ([]ignoreRules, boo
 // so it is matched as one even if it has vanished since the caller saw it.
 func ancestorIgnoreRules(path string, libraryRoots []string, listDir func(string) ([]fs.DirEntry, error), file bool) ([]ignoreRules, bool, error) {
 	path = filepath.Clean(path)
-	root := scopeLibraryRoot(path, libraryRoots)
+	root := ""
+	for _, candidate := range compactScanRoots(libraryRoots) {
+		if pathWithinAnyRoot(path, []string{candidate}) {
+			root = candidate
+			break
+		}
+	}
 	if root == "" || root == path {
 		return nil, false, nil
 	}

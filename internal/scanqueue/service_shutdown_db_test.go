@@ -522,3 +522,45 @@ func TestCreateOnClaimedScopeJoinsTheActiveRunDB(t *testing.T) {
 		t.Fatalf("request after the active run finished: created=%v err=%v run=%#v", created, err, next)
 	}
 }
+
+// An admin's exact-path file request that joins an automatic run is owed as a
+// follow-up, so its scan runs with the trigger that lets it import a file the
+// ignore files exclude.
+func TestExplicitFileRequestJoinsActiveRunAsFollowUpDB(t *testing.T) {
+	ctx, _, repo, folderID := openDirectRunTestRepository(t)
+	automatic := CreateInput{LibraryID: folderID, Mode: ModeFile, Path: "/books/intro.mp3", Trigger: "realtime_monitor"}
+	explicit := automatic
+	explicit.Trigger = "path"
+
+	run, created, err := repo.Create(ctx, automatic)
+	if err != nil || !created {
+		t.Fatalf("create automatic run: created=%v err=%v", created, err)
+	}
+	joined, created, err := repo.Create(ctx, explicit)
+	if err != nil || created || joined.ID != run.ID || joined.Trigger != "realtime_monitor" || joined.FollowupTrigger != "path" {
+		t.Fatalf("admin request on accepted run: created=%v err=%v run=%#v", created, err, joined)
+	}
+	run, err = repo.Start(ctx, run.ID)
+	if err != nil {
+		t.Fatalf("start run: %v", err)
+	}
+	if again, _, err := repo.Create(ctx, automatic); err != nil || again.FollowupTrigger != "path" {
+		t.Fatalf("automatic request replaced the owed admin follow-up: err=%v run=%#v", err, again)
+	}
+	_, followUp, err := repo.CompleteWithFollowUp(ctx, run.ID, run.StartedAt, nil)
+	if err != nil || followUp == nil || followUp.Trigger != "path" || followUp.Mode != ModeFile || followUp.Path != automatic.Path {
+		t.Fatalf("complete run: err=%v follow-up=%#v", err, followUp)
+	}
+
+	// The admin run may already have scanned the file when another admin
+	// request arrives, so that request replaces an automatic follow-up.
+	if _, err := repo.Start(ctx, followUp.ID); err != nil {
+		t.Fatalf("start admin run: %v", err)
+	}
+	if owed, _, err := repo.Create(ctx, automatic); err != nil || owed.FollowupTrigger != "realtime_monitor" {
+		t.Fatalf("automatic request on running admin run: err=%v run=%#v", err, owed)
+	}
+	if owed, _, err := repo.Create(ctx, explicit); err != nil || owed.FollowupTrigger != "path" {
+		t.Fatalf("admin request on running admin run: err=%v run=%#v", err, owed)
+	}
+}

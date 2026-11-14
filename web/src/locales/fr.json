@@ -110005,6 +110005,18 @@
       "value": "Sous-titre envoyé"
     }
   ],
+  "web.common.toast.watchProviders.authDeclined": [
+    {
+      "type": 0,
+      "value": "La connexion a été refusée sur le site du fournisseur. Sélectionnez « Connecter » pour réessayer."
+    }
+  ],
+  "web.common.toast.watchProviders.authNotApproved": [
+    {
+      "type": 0,
+      "value": "Approuvez d’abord le code sur le site du fournisseur, puis réessayez."
+    }
+  ],
   "web.common.toast.watchProviders.connectFailed": [
     {
       "type": 0,
@@ -130380,6 +130392,18 @@
       "value": "Supprimer le PIN"
     }
   ],
+  "web.profiles.editor.requestsAllowed": [
+    {
+      "type": 0,
+      "value": "Autoriser les demandes"
+    }
+  ],
+  "web.profiles.editor.requestsAllowedHint": [
+    {
+      "type": 0,
+      "value": "Permet à ce profil de parcourir les titres qui ne sont pas dans la bibliothèque et de les demander. Pour ces titres, la classification du contenu ne s’appuie que sur leur classification américaine, et la limite d’âge conseillé ne s’applique pas."
+    }
+  ],
   "web.profiles.editor.restrictLibraries": [
     {
       "type": 0,
@@ -130512,6 +130536,12 @@
       },
       "offset": 0,
       "pluralType": "cardinal"
+    }
+  ],
+  "web.profiles.helpers.access.noRequests": [
+    {
+      "type": 0,
+      "value": "Aucune demande"
     }
   ],
   "web.profiles.helpers.access.quality": [
@@ -132588,6 +132618,12 @@
       "value": "En attente d’importation"
     }
   ],
+  "web.requests.hub.blockedIntro": [
+    {
+      "type": 0,
+      "value": "Les demandes sont désactivées pour ce profil. Vous pouvez toujours voir et annuler les demandes qu’il a faites."
+    }
+  ],
   "web.requests.hub.browseDiscover": [
     {
       "type": 0,
@@ -132806,6 +132842,12 @@
     {
       "type": 0,
       "value": "Les demandes de votre compte, regroupées selon la prochaine étape."
+    }
+  ],
+  "web.requests.hub.yoursIntroProfile": [
+    {
+      "type": 0,
+      "value": "Les demandes faites par ce profil, regroupées selon la prochaine étape."
     }
   ],
   "web.requests.pageTitle": [

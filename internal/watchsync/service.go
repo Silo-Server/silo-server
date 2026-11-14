@@ -592,7 +592,10 @@ func (s *Service) PollDeviceAuth(
 			updated.VerificationURL = session.VerificationURL
 			updated.CompletedAt = session.CompletedAt
 			if _, persistErr := s.repo.UpsertAuthSession(ctx, updated); persistErr != nil {
-				return Connection{}, errors.Join(err, fmt.Errorf("persist pending auth session: %w", persistErr))
+				// A storage failure, not a pending answer: the provider's
+				// updated challenge was lost, so the poll must not read as
+				// "approve the code and try again".
+				return Connection{}, fmt.Errorf("persist pending auth session: %w", persistErr)
 			}
 		}
 		return Connection{}, err
