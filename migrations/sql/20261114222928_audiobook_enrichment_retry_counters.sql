@@ -27,11 +27,12 @@ UPDATE audiobook_enrichment_state
 SET outcome = NULL, completed_at = NULL
 WHERE outcome = 'failed';
 
--- The older code reads attempts as the clean no-match count. Restore that
--- meaning before the new counters are dropped.
+-- The older code reads attempts as the clean no-match count, and as the
+-- backoff multiplier for failures. Restore it from the no-match count on every
+-- row that is not finished, before the new counters are dropped.
 UPDATE audiobook_enrichment_state
 SET attempts = no_matches
-WHERE outcome = 'no_match';
+WHERE outcome IS DISTINCT FROM 'success';
 
 ALTER TABLE audiobook_enrichment_state
     DROP COLUMN IF EXISTS failures,

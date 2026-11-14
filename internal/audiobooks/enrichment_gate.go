@@ -231,10 +231,10 @@ func (p gatedProvider) doGetMetadata(ctx context.Context, req metadata.MetadataR
 		return nil, &providerPausedError{slug: p.Slug(), until: until}
 	}
 	result, err := p.meta.GetMetadata(ctx, req)
-	// A nil error is not evidence of recovery: the plugin adapter answers
-	// (nil, nil) without a request when the item has no provider IDs yet, so
-	// only Search answers clear the failure streak.
-	if err != nil {
+	// (nil, nil) is not evidence either way: the plugin adapter returns it
+	// without a request when the item has no provider IDs yet. An error or a
+	// returned result is a real answer.
+	if err != nil || result != nil {
 		p.gate.observe(ctx, p.Slug(), err)
 	}
 	return result, err

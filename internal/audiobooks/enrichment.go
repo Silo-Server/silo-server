@@ -29,7 +29,6 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
-	"github.com/Silo-Server/silo-server/internal/database/pglock"
 	"github.com/Silo-Server/silo-server/internal/metadata"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/scanner"
@@ -205,9 +204,7 @@ func (e *Enricher) SetFFmpegPath(path string) {
 // Run executes one sweep and returns how many items it matched. Only one node
 // sweeps at a time: Run returns 0 at once while another holds the sweep lock,
 // so adding nodes does not add provider load. Claims still fence each item, so
-// a lease that outlives a lost lock cannot be processed twice. The exception is
-// a node whose pool allows a single connection: it sweeps without the lock
-// (see takeSweepLock), so such nodes can sweep at the same time.
+// a lease that outlives a lost lock cannot be processed twice.
 func (e *Enricher) Run(ctx context.Context) (int, error) {
 	if e == nil || e.pool == nil || e.chainRepo == nil {
 		return 0, nil
@@ -259,23 +256,50 @@ func (e *Enricher) Run(ctx context.Context) (int, error) {
 }
 
 // takeSweepLock takes the cluster-wide sweep lock and returns its release.
-// The session lock holds a pooled connection for the whole sweep, so a pool
-// of one connection would leave the sweep's own queries waiting forever. Such
-// a pool sweeps without the lock, so the one-sweeper guarantee does not hold
-// for it: several such nodes can sweep at once and add provider load. The
-// per-item claims still keep two nodes from processing the same book.
+// The lock lives on a session of its own, opened with the pool's
+// configuration but outside it, as the backup and migration locks do: the
+// sweep's own queries take pool connections, and with the lock's session in
+// the pool a pool of one connection would wait on itself. Closing the session
+// releases the lock, including when this process dies mid-sweep.
 func (e *Enricher) takeSweepLock(ctx context.Context) (release func(), acquired bool, err error) {
-	if e.pool.Config().MaxConns < 2 {
-		return func() {}, true, nil
-	}
-	lock, acquired, err := pglock.TryAcquire(ctx, e.pool, enrichSweepLock)
+	conn, err := pgx.ConnectConfig(ctx, e.pool.Config().ConnConfig.Copy())
 	if err != nil {
+		return nil, false, fmt.Errorf("audiobook enrichment: open the sweep lock session: %w", err)
+	}
+	closeConn := func() {
+		closeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		defer cancel()
+		_ = conn.Close(closeCtx)
+	}
+	// A failed query may still have been granted the lock; closing the
+	// session releases it either way.
+	if err := conn.QueryRow(ctx, `SELECT pg_try_advisory_lock($1)`, enrichSweepLock).Scan(&acquired); err != nil {
+		closeConn()
 		return nil, false, fmt.Errorf("audiobook enrichment: take the sweep lock: %w", err)
 	}
 	if !acquired {
+		closeConn()
 		return nil, false, nil
 	}
-	return func() { _ = lock.Release(context.WithoutCancel(ctx)) }, true, nil
+	return closeConn, true, nil
+}
+
+// sweepLockHeld reports whether a node holds the sweep lock, without opening
+// a session. A bigint advisory key shows in pg_locks as its high and low 32
+// bits in classid and objid, with objsubid 1.
+func (e *Enricher) sweepLockHeld(ctx context.Context) (bool, error) {
+	var held bool
+	err := e.pool.QueryRow(ctx, `
+		SELECT EXISTS (
+			SELECT 1 FROM pg_locks
+			WHERE locktype = 'advisory' AND granted AND objsubid = 1
+			  AND classid::bigint = $1 AND objid::bigint = $2
+		)
+	`, enrichSweepLock>>32, enrichSweepLock&0xFFFFFFFF).Scan(&held)
+	if err != nil {
+		return false, fmt.Errorf("checking the audiobook enrichment sweep lock: %w", err)
+	}
+	return held, nil
 }
 
 // sweepSummary counts what a sweep recorded for its claimed items. It reads the
@@ -341,17 +365,12 @@ func (e *Enricher) HasPendingItems(ctx context.Context) (bool, error) {
 
 	// A sweep in progress on another node owns the work; this node's scheduled
 	// run would only find the lock taken.
-	release, acquired, err := e.takeSweepLock(ctx)
-	if err != nil {
+	if held, err := e.sweepLockHeld(ctx); err != nil || held {
 		return false, err
 	}
-	if !acquired {
-		return false, nil
-	}
-	release()
 
 	var exists bool
-	err = e.pool.QueryRow(ctx, `
+	err := e.pool.QueryRow(ctx, `
 		SELECT EXISTS(
 			SELECT 1
 			FROM media_items mi

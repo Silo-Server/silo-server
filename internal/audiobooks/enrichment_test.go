@@ -344,3 +344,26 @@ func TestAllPausedReturnsTheEarliestPauseEnd(t *testing.T) {
 		t.Fatalf("pausedOnly = (%v, %v), want the short pause end", until, ok)
 	}
 }
+
+// A metadata request that returns a result proves the provider is up, so it
+// breaks a streak of transient failures; failures separated by successes must
+// not pause a healthy provider.
+func TestSuccessfulMetadataLookupClearsTheFailureStreak(t *testing.T) {
+	g := &providerGate{}
+	ctx := context.Background()
+	healthy := &fakeAudiobookMetadataProvider{slug: "abm", result: &metadata.MetadataResult{HasMetadata: true}}
+	gated := g.wrap([]metadata.Provider{healthy})[0].(metadata.MetadataProvider)
+	down := status.Error(codes.Unavailable, "down")
+
+	for range 3 {
+		for range providerOutageStreak - 1 {
+			g.observe(ctx, "abm", down)
+		}
+		if _, err := gated.GetMetadata(ctx, metadata.MetadataRequest{}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, paused := g.pausedUntil("abm"); paused {
+		t.Fatal("intermittent failures between successful lookups paused the provider")
+	}
+}
