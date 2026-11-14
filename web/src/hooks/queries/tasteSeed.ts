@@ -4,6 +4,7 @@ import { catalogItemFromV2, type CatalogCardItem } from "@/api/v2/catalog";
 import { v2 } from "@/api/v2/request";
 import { recKeys, favoriteKeys } from "./keys";
 import { invalidateMediaSurfaceQueries } from "./mediaSurfaceRefresh";
+import { PERSONAL_STATE_WRITE_TIMEOUT_MS } from "./personalStateWrites";
 import { bumpHomeRefreshSignal } from "@/pages/homeSurfaceRefresh";
 import { storage } from "@/utils/storage";
 
@@ -83,27 +84,64 @@ function scheduleTasteSeedRefetches(queryClient: QueryClient) {
   );
 }
 
+/** What the picker changed: titles to add to favourites and favourites to remove. */
+export interface TasteSeedChanges {
+  add: string[];
+  remove: string[];
+}
+
+export interface TasteSeedSaveResult {
+  /** Favourites the server actually created; titles already favourited don't count. */
+  added: number;
+  removed: number;
+}
+
 /**
- * Submits a batch of selected content IDs as favorites and triggers a single
- * taste-profile refresh. Uses the dedicated POST /api/v2/recommendations/taste-seed
- * endpoint so the server can debounce the refresh into one request rather than
- * one-per-favorite.
+ * Saves the picker: submits the new picks as one batch, so the server triggers
+ * a single taste-profile refresh rather than one per favourite, then removes
+ * the favourites the user unselected.
+ *
+ * The batch goes first because the server waits for its refresh before
+ * answering, and only when no refresh is already queued or running for the
+ * profile; a removal sent before it would queue one and cut that wait short.
+ * Each removal asks for a further refresh, which the delayed refetches pick up.
+ * The batch endpoint needs at least one title, so a save that only removes
+ * favourites skips it. Adding and removing are both idempotent, so a save that
+ * failed partway can simply be sent again.
  */
 export function useSubmitTasteSeed() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (itemIds: string[]) =>
-      v2("POST /api/v2/recommendations/taste-seed", { body: { item_ids: itemIds } }),
+    mutationFn: async ({ add, remove }: TasteSeedChanges): Promise<TasteSeedSaveResult> => {
+      const added =
+        add.length > 0
+          ? (await v2("POST /api/v2/recommendations/taste-seed", { body: { item_ids: add } })).added
+          : 0;
+      // One at a time: each removal also notifies connected watch providers.
+      for (const itemId of remove) {
+        await v2("DELETE /api/v2/favorites/{item_id}", {
+          path: { item_id: itemId },
+          timeoutMs: PERSONAL_STATE_WRITE_TIMEOUT_MS,
+        });
+      }
+      return { added, removed: remove.length };
+    },
     onSuccess: async () => {
       // Invalidate favorites and recommendation surfaces. The server waits
       // for the profile's refresh before answering, so the rows usually
       // already reflect the picks; the delayed refetches cover a refresh that
-      // took longer than that wait.
+      // took longer than that wait, and the one the removals asked for.
       await queryClient.invalidateQueries({ queryKey: favoriteKeys.all });
       await queryClient.invalidateQueries({ queryKey: recKeys.all });
       await invalidateMediaSurfaceQueries(queryClient);
       bumpHomeRefreshSignal(queryClient);
       scheduleTasteSeedRefetches(queryClient);
+    },
+    onError: () => {
+      // Part of the save may have landed. Refresh the favourites list without
+      // holding up the error, and leave the open picker's own pages alone so
+      // its cards don't reshuffle under the user.
+      void queryClient.invalidateQueries({ queryKey: favoriteKeys.all });
     },
   });
 }

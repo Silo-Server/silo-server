@@ -54,13 +54,65 @@ describe("taste seeding on the v2 contract", () => {
     return { result, recInvalidations, homeBumps };
   }
 
+  // Unselecting a favourite removes it. The batch goes first, since the
+  // server waits for its refresh only when none is already queued, and a
+  // save that only removes skips the batch, whose endpoint needs a title.
+  it("adds the new picks, then removes unselected favourites", async () => {
+    const requests: string[] = [];
+    stubFetch((url, init) => {
+      requests.push(`${init?.method ?? "GET"} ${decodeURIComponent(url.pathname)}`);
+      return init?.method === "DELETE"
+        ? new Response(null, { status: 204 })
+        : jsonResponse(createTasteSeedOk);
+    });
+    const { result } = renderSubmit();
+
+    await expect(
+      result.current.mutateAsync({ add: ["movie:heat-1995"], remove: ["movie:alien-1979"] }),
+    ).resolves.toEqual({ added: createTasteSeedOk.added, removed: 1 });
+    expect(requests).toEqual([
+      "POST /api/v2/recommendations/taste-seed",
+      "DELETE /api/v2/favorites/movie:alien-1979",
+    ]);
+
+    requests.length = 0;
+    await expect(
+      result.current.mutateAsync({ add: [], remove: ["movie:alien-1979"] }),
+    ).resolves.toEqual({ added: 0, removed: 1 });
+    expect(requests).toEqual(["DELETE /api/v2/favorites/movie:alien-1979"]);
+  });
+
+  // A failed removal fails the save, so the picker stays open and the user
+  // can send it again; the removals after it are not sent.
+  it("fails the save when a removal fails", async () => {
+    const requests: string[] = [];
+    stubFetch((url, init) => {
+      requests.push(`${init?.method ?? "GET"} ${decodeURIComponent(url.pathname)}`);
+      return init?.method === "DELETE"
+        ? jsonResponse({ title: "Internal Server Error", status: 500 }, 500)
+        : jsonResponse(createTasteSeedOk);
+    });
+    const { result } = renderSubmit();
+
+    await expect(
+      result.current.mutateAsync({
+        add: ["movie:heat-1995"],
+        remove: ["movie:alien-1979", "movie:ran-1985"],
+      }),
+    ).rejects.toThrow();
+    expect(requests).toEqual([
+      "POST /api/v2/recommendations/taste-seed",
+      "DELETE /api/v2/favorites/movie:alien-1979",
+    ]);
+  });
+
   it("refetches the recommendation reads again after a submission", async () => {
     stubFetch(() => jsonResponse(createTasteSeedOk));
     const { result, recInvalidations, homeBumps } = renderSubmit();
 
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
     try {
-      await result.current.mutateAsync(["movie:heat-1995"]);
+      await result.current.mutateAsync({ add: ["movie:heat-1995"], remove: [] });
       expect(recInvalidations()).toBe(1);
       expect(homeBumps()).toBe(1);
 
@@ -93,9 +145,9 @@ describe("taste seeding on the v2 contract", () => {
 
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
     try {
-      await result.current.mutateAsync(["movie:heat-1995"]);
+      await result.current.mutateAsync({ add: ["movie:heat-1995"], remove: [] });
       await vi.advanceTimersByTimeAsync(1_000);
-      await result.current.mutateAsync(["movie:alien-1979"]);
+      await result.current.mutateAsync({ add: ["movie:alien-1979"], remove: [] });
       expect(recInvalidations()).toBe(2);
 
       await vi.advanceTimersByTimeAsync(3_000);
