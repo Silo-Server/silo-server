@@ -162,6 +162,10 @@
 # reconciled first, and the removal grace holds the book for the new path.
 ./internal/scanner TestScanSubtreeAudiobookRenameKeepsBookDB
 
+# A rescan of a retagged, unmatched ebook keeps the fields and author credits an
+# admin locked, including locked fields left empty.
+./internal/scanner TestEbookRescanKeepsLockedFieldsDB
+
 # A full scan that holds a few files at a time catalogs a library like one that
 # holds them all: groups and roots spanning batches, a deleted top-level
 # folder, an unreadable folder and a dropped mount.
