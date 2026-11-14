@@ -384,9 +384,10 @@ func (s *Service) ApproveWithOptions(ctx context.Context, viewer Viewer, id stri
 	}
 	if req.RequesterChoices.IntegrationID == chosen.IntegrationID {
 		for _, earlier := range req.RequesterChoices.Choices {
-			// The admin's pick replaces the requester's, unless it is the
-			// same value: then the requester's stays as it was made.
-			if pick, replaced := picks[earlier.Key]; !replaced || pick == earlier.Value {
+			// The admin's pick replaces the requester's, also when it is the
+			// same value: the admin confirmed it, so it applies even after
+			// the server moved the option from requesters to the approver.
+			if _, replaced := picks[earlier.Key]; !replaced {
 				chosen.Choices = slices.DeleteFunc(chosen.Choices, func(c RequesterChoice) bool { return c.Key == earlier.Key })
 				chosen.Choices = append(chosen.Choices, earlier)
 			}

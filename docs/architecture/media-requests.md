@@ -417,8 +417,9 @@ the approver, and may change those it leaves to requesters.
 the server the request would go to, each defaulting to the requester's pick
 when there is one. `adminApproveRequest` takes the admin's picks as `options`
 and checks them the same way; a pick replaces the requester's for that option
-and is stored as the admin's, unless it is the requester's own pick, which
-stays theirs. The picks are stored in the same guarded update that approves
+and is stored as the admin's, also when it is the requester's own value, so
+a confirmed pick still applies after the server moves that option from
+requesters to the approver. The picks are stored in the same guarded update that approves
 the request, so when two admins approve at once the one whose approval wins is
 the one whose picks apply. A request that is approved automatically, or
 with several others at once, gets no approver pick, so an option left to the

@@ -271,8 +271,9 @@ func TestRequesterOptionsRefuseABlockedAccount(t *testing.T) {
 	}
 }
 
-func TestApproveWithOptionsKeepsTheRequestersPickTheAdminLeft(t *testing.T) {
-	service, store, _ := optionsService(map[string]any{"profile_chosen_by": "requester", "radarr_profile_id": "default"})
+func TestApproveWithOptionsStoresAConfirmedPickAsTheAdmins(t *testing.T) {
+	config := map[string]any{"profile_chosen_by": "requester", "radarr_profile_id": "default"}
+	service, store, router := optionsService(config)
 	store.settings.GlobalAutoApprovalEnabled = false
 	input := fightClubInput
 	input.Options = map[string]string{"radarr_profile_id": "4"}
@@ -280,13 +281,38 @@ func TestApproveWithOptionsKeepsTheRequestersPickTheAdminLeft(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateRequest: %v", err)
 	}
+	// The server moves the option to the approver while the request waits.
+	config["profile_chosen_by"] = "approver"
 	admin := Viewer{UserID: 9, ProfileID: "9", IsAdmin: true}
 	// The approval form sends what it shows: the requester's pick, unchanged.
 	if _, err := service.ApproveWithOptions(context.Background(), admin, req.ID, map[string]string{"radarr_profile_id": "4"}); err != nil {
 		t.Fatalf("ApproveWithOptions: %v", err)
 	}
 	stored := store.requests[req.ID].RequesterChoices
-	if len(stored.Choices) != 1 || stored.Choices[0].Value != "4" || stored.Choices[0].ByAdmin {
-		t.Fatalf("stored choices = %+v, want the requester's pick as they made it", stored)
+	if len(stored.Choices) != 1 || stored.Choices[0].Value != "4" || !stored.Choices[0].ByAdmin {
+		t.Fatalf("stored choices = %+v, want the confirmed pick stored as the admin's", stored)
+	}
+	if len(router.gotConns) != 1 || router.gotConns[0].Config["radarr_profile_id"] != "4" {
+		t.Fatalf("fulfill connections = %+v, want the confirmed radarr_profile_id 4", router.gotConns)
+	}
+}
+
+func TestApproveLeavesOutARequestersPickTheServerTookBack(t *testing.T) {
+	config := map[string]any{"profile_chosen_by": "requester", "radarr_profile_id": "default"}
+	service, store, router := optionsService(config)
+	store.settings.GlobalAutoApprovalEnabled = false
+	input := fightClubInput
+	input.Options = map[string]string{"radarr_profile_id": "4"}
+	req, err := service.CreateRequest(context.Background(), testViewer(1), input)
+	if err != nil {
+		t.Fatalf("CreateRequest: %v", err)
+	}
+	config["profile_chosen_by"] = "approver"
+	// No admin confirmed the pick, so the server's saved value applies.
+	if _, err := service.Approve(context.Background(), Viewer{UserID: 9, ProfileID: "9", IsAdmin: true}, req.ID); err != nil {
+		t.Fatalf("Approve: %v", err)
+	}
+	if len(router.gotConns) != 1 || router.gotConns[0].Config["radarr_profile_id"] != "default" {
+		t.Fatalf("fulfill connections = %+v, want the saved radarr_profile_id", router.gotConns)
 	}
 }
