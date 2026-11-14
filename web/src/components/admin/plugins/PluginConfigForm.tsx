@@ -17,7 +17,11 @@ import {
   humanizeConfigKey,
 } from "./configSchemaAdminForm";
 import { SchemaForm } from "./SchemaForm";
-import { buildSchemaValues, type BuildSchemaValuesOptions } from "./schemaFormUtils";
+import {
+  buildSchemaValues,
+  parseFieldTypes,
+  type BuildSchemaValuesOptions,
+} from "./schemaFormUtils";
 
 type PluginConfigValue = Record<string, unknown>;
 
@@ -85,6 +89,9 @@ export function PluginConfigForm({
       ),
     };
   }, [configuredSecrets, fields, inferredDescriptor, t]);
+  const fieldTypes = useMemo(() => parseFieldTypes(schema.json_schema), [schema.json_schema]);
+  const stagedValue = (draft: PluginConfigValue) =>
+    buildSchemaValues(descriptor, draft, fieldTypes, SAVE_OPTIONS);
 
   const [values, setValues] = useState<PluginConfigValue>(() =>
     formValuesFromConfig(fields, value),
@@ -108,11 +115,7 @@ export function PluginConfigForm({
       }
     }
     setClearSecrets(updated);
-    onDraftChange?.(
-      schema.key,
-      buildSchemaValues(descriptor, next, undefined, SAVE_OPTIONS),
-      Array.from(updated),
-    );
+    onDraftChange?.(schema.key, stagedValue(next), Array.from(updated));
   }
 
   function toggleClearSecret(key: string) {
@@ -120,11 +123,7 @@ export function PluginConfigForm({
     if (updated.has(key)) updated.delete(key);
     else updated.add(key);
     setClearSecrets(updated);
-    onDraftChange?.(
-      schema.key,
-      buildSchemaValues(descriptor, values, undefined, SAVE_OPTIONS),
-      Array.from(updated),
-    );
+    onDraftChange?.(schema.key, stagedValue(values), Array.from(updated));
   }
 
   async function handleTest() {
@@ -133,13 +132,7 @@ export function PluginConfigForm({
     }
 
     try {
-      setTestResult(
-        await onTest(
-          schema.key,
-          buildSchemaValues(descriptor, values, undefined, SAVE_OPTIONS),
-          Array.from(clearSecrets),
-        ),
-      );
+      setTestResult(await onTest(schema.key, stagedValue(values), Array.from(clearSecrets)));
     } catch (error) {
       setTestResult({
         success: false,
@@ -227,13 +220,7 @@ export function PluginConfigForm({
           size="sm"
           variant="outline"
           disabled={isSaving || isTesting}
-          onClick={() =>
-            onSave(
-              schema.key,
-              buildSchemaValues(descriptor, values, undefined, SAVE_OPTIONS),
-              Array.from(clearSecrets),
-            )
-          }
+          onClick={() => onSave(schema.key, stagedValue(values), Array.from(clearSecrets))}
         >
           {schema.admin_form?.submit_label || t("web.admin.plugins.configForm.save")}
         </Button>

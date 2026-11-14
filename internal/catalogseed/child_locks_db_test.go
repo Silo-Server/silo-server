@@ -86,7 +86,7 @@ func TestSeedCarriesSeasonEpisodeLocksDB(t *testing.T) {
 
 	// An overwrite takes the bundle's row, locks and title details included.
 	bundle.Seasons[0].LockedFields = []int{1}
-	bundle.Seasons[0].SortTitle = "Imported sort title"
+	bundle.Seasons[0].OriginalTitle = "Imported original title"
 	bundle.Episodes[0].LockedFields = nil // A bundle from before these locks has none.
 	bundle.Episodes[0].OriginalTitle = "Imported original title"
 	data, err := encodeBundle(bundle)
@@ -103,8 +103,8 @@ func TestSeedCarriesSeasonEpisodeLocksDB(t *testing.T) {
 	if !slices.Equal(season.LockedFields, []int{1}) {
 		t.Errorf("imported season locks = %v, want [1]", season.LockedFields)
 	}
-	if season.SortTitle != "Imported sort title" || season.Tagline != tagline || season.TvdbID != tvdbID {
-		t.Errorf("imported season title details = %q, %q, %q, want the bundle's", season.SortTitle, season.Tagline, season.TvdbID)
+	if season.OriginalTitle != "Imported original title" || season.Tagline != tagline || season.TvdbID != tvdbID {
+		t.Errorf("imported season title details = %q, %q, %q, want the bundle's", season.OriginalTitle, season.Tagline, season.TvdbID)
 	}
 	episode, err := episodes.GetByID(ctx, seriesID+"-e1")
 	if err != nil {

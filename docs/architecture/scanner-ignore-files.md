@@ -124,6 +124,9 @@ scope is a skipped directory, or lies below one, reads nothing.
   ordinary folder of the outer one, so the outer root's ignore files, and the
   hidden-folder rule for the inner root's own name, apply below it. Subtree
   scans and the full scans of every library kind apply the same rules there.
+  Local theme music discovery for movies and series uses the same boundary, so
+  it finds no theme the outer root's rules exclude or that sits in a skipped
+  folder below it.
 - A subtree scan whose configured library root is itself skipped (by
   `.nomedia` or a pattern-less `.ignore`) does nothing. Such a scan would find
   no files and retire the subtree outside the empty-root guard, so only a full
