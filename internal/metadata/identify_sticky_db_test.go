@@ -2,6 +2,7 @@ package metadata
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -10,6 +11,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/contentid"
 	"github.com/Silo-Server/silo-server/internal/models"
@@ -204,5 +206,82 @@ func checkIdentifyMoveMarks(t *testing.T, pool *pgxpool.Pool, merge bool, move f
 		if chosen != markIdentity {
 			t.Errorf("identify=%v: moved item marked = %v", markIdentity, chosen)
 		}
+	}
+}
+
+// A delegated curator's refresh job runs its re-anchor under the scope the job
+// carries: moving the item onto a title in another library is refused and
+// leaves both items as they were, while a merge or rename inside the
+// curator's libraries still goes through.
+func TestCuratorRefreshReanchorStaysInScopePostgres(t *testing.T) {
+	pool := chainBuiltinTestPool(t)
+	svc := identifyMoveService(pool)
+	ctx := context.Background()
+	itemRepo := catalog.NewItemRepository(pool)
+
+	suffix := uuid.NewString()
+	var libA, libB int
+	for _, lib := range []*int{&libA, &libB} {
+		if err := pool.QueryRow(ctx, `INSERT INTO media_folders (type, name, enabled) VALUES ('movies', $1, true) RETURNING id`,
+			fmt.Sprintf("curator-reanchor-%s-%p", suffix, lib)).Scan(lib); err != nil {
+			t.Fatalf("seed library: %v", err)
+		}
+	}
+	var created []string
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM media_items WHERE content_id = ANY($1)`, created)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM media_folders WHERE id = ANY($1)`, []int{libA, libB})
+	})
+	seed := func(contentID string, library int) {
+		t.Helper()
+		if err := itemRepo.Upsert(ctx, &models.MediaItem{ContentID: contentID, Type: "movie", Title: contentID, SortTitle: contentID, Status: "matched"}); err != nil {
+			t.Fatalf("seed %s: %v", contentID, err)
+		}
+		if _, err := pool.Exec(ctx, `INSERT INTO media_item_libraries (content_id, media_folder_id) VALUES ($1, $2)`, contentID, library); err != nil {
+			t.Fatalf("seed library membership: %v", err)
+		}
+		created = append(created, contentID)
+	}
+	curator := access.WithMetadataCurationAuthorizer(ctx, access.MetadataCurationScope{LibraryIDs: []int{libA}}.Authorizer())
+
+	for i, tc := range []struct {
+		name          string
+		targetLibrary int // 0: no item at the target yet
+		refused       bool
+	}{
+		{"onto a title in another library", libB, true},
+		{"onto a title in the curator's library", libA, false},
+		{"to a free anchor", 0, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			from := fmt.Sprintf("local:curator-reanchor-%s-%d", suffix, i)
+			seed(from, libA)
+			ids := contentid.ProviderIDs{Tmdb: fmt.Sprintf("6%09d", (time.Now().UnixNano()+int64(i))%1_000_000_000)}
+			target, err := deriveLogicalContentID("movie", ids, "")
+			if err != nil {
+				t.Fatal(err)
+			}
+			created = append(created, target)
+			if tc.targetLibrary != 0 {
+				seed(target, tc.targetLibrary)
+			}
+			got, _, err := svc.reanchorContentID(curator, from, ids, "movie", false)
+			if refused := errors.Is(err, access.ErrMetadataCurationScope); refused != tc.refused || (!tc.refused && err != nil) {
+				t.Fatalf("reanchor error = %v, want refused=%v", err, tc.refused)
+			}
+			if tc.refused {
+				var libraries []int
+				if err := pool.QueryRow(ctx, `SELECT array_agg(media_folder_id ORDER BY media_folder_id) FROM media_item_libraries WHERE content_id = $1`, target).Scan(&libraries); err != nil {
+					t.Fatal(err)
+				}
+				if _, err := itemRepo.GetByID(ctx, from); err != nil || len(libraries) != 1 || libraries[0] != libB {
+					t.Fatalf("refused re-anchor moved state: source err=%v, target libraries=%v", err, libraries)
+				}
+				return
+			}
+			if got != target {
+				t.Fatalf("re-anchored to %q, want %q", got, target)
+			}
+		})
 	}
 }

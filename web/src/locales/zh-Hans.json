@@ -8544,6 +8544,12 @@
       "value": "此路径匹配多个媒体库。"
     }
   ],
+  "web.admin.autoscan.activity.reason.pathIgnored": [
+    {
+      "type": 0,
+      "value": "媒体库的忽略文件排除了此文件，因此未被扫描。"
+    }
+  ],
   "web.admin.autoscan.activity.reason.pathNotFileOrDir": [
     {
       "type": 0,
@@ -90459,6 +90465,20 @@
       "value": "未知"
     }
   ],
+  "web.common.activity.subtitle.episode": [
+    {
+      "type": 1,
+      "value": "code"
+    },
+    {
+      "type": 0,
+      "value": " · "
+    },
+    {
+      "type": 1,
+      "value": "series"
+    }
+  ],
   "web.common.activity.subtitle.movie": [
     {
       "type": 0,
@@ -91969,6 +91989,12 @@
       "value": "你的数据"
     }
   ],
+  "web.common.toast.collections.created": [
+    {
+      "type": 0,
+      "value": "合集已创建"
+    }
+  ],
   "web.common.toast.collections.deleteFailed": [
     {
       "type": 0,
@@ -91979,6 +92005,12 @@
     {
       "type": 0,
       "value": "合集已删除"
+    }
+  ],
+  "web.common.toast.collections.saved": [
+    {
+      "type": 0,
+      "value": "合集已保存"
     }
   ],
   "web.common.toast.collections.syncFailed": [
@@ -110464,6 +110496,18 @@
       "value": "移除PIN"
     }
   ],
+  "web.profiles.editor.requestsAllowed": [
+    {
+      "type": 0,
+      "value": "允许请求"
+    }
+  ],
+  "web.profiles.editor.requestsAllowedHint": [
+    {
+      "type": 0,
+      "value": "允许此个人资料浏览媒体库中没有的作品并请求它们。最高年龄分级仅按美国分级限制这些作品，最大建议年龄对它们不适用。"
+    }
+  ],
   "web.profiles.editor.restrictLibraries": [
     {
       "type": 0,
@@ -110572,6 +110616,12 @@
       },
       "offset": 0,
       "pluralType": "cardinal"
+    }
+  ],
+  "web.profiles.helpers.access.noRequests": [
+    {
+      "type": 0,
+      "value": "不可请求"
     }
   ],
   "web.profiles.helpers.access.quality": [
@@ -112484,6 +112534,12 @@
       "value": "等待导入"
     }
   ],
+  "web.requests.hub.blockedIntro": [
+    {
+      "type": 0,
+      "value": "此个人资料的请求功能已关闭。你仍可以查看和取消它发出的请求。"
+    }
+  ],
   "web.requests.hub.browseDiscover": [
     {
       "type": 0,
@@ -112698,6 +112754,12 @@
     {
       "type": 0,
       "value": "来自你账户的请求，按下一步进展分组。"
+    }
+  ],
+  "web.requests.hub.yoursIntroProfile": [
+    {
+      "type": 0,
+      "value": "此个人资料发出的请求，按下一步进展分组。"
     }
   ],
   "web.requests.pageTitle": [

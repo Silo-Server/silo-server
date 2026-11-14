@@ -256,16 +256,16 @@ describe("buildMediaItemMenuModel", () => {
     expect(labels).not.toContain("View Play History");
   });
 
-  it("limits edit and match card actions to movies and series", () => {
-    const model = buildModel({
-      mediaType: "episode",
-      isAdmin: true,
-    });
-    const labels = model.filter((item) => item.kind === "action").map((item) => item.label);
+  it("limits edit and match card actions to movies, series and audiobooks", () => {
+    const labels = (mediaType: "episode" | "audiobook") =>
+      buildModel({ mediaType, isAdmin: true })
+        .filter((item) => item.kind === "action")
+        .map((item) => item.label);
 
-    expect(labels).toContain("Refresh Metadata");
-    expect(labels).not.toContain("Edit Metadata");
-    expect(labels).not.toContain("Match Item");
+    expect(labels("episode")).toContain("Refresh Metadata");
+    expect(labels("episode")).not.toContain("Edit Metadata");
+    expect(labels("episode")).not.toContain("Match Item");
+    expect(labels("audiobook")).toEqual(expect.arrayContaining(["Edit Metadata", "Match Item"]));
   });
 
   it("offers Mark Watched and Mark Unwatched for a partly watched movie or episode", () => {

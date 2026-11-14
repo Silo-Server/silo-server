@@ -122,6 +122,20 @@ alias when any of these holds:
 - a `stale_media_ids` row equals the alias, which catches an item that carries,
   or once carried, a TMDB duplicate ID since deleted.
 
+A `tmdb` match always counts, even for a series whose TVDB ID differs: a
+watchlist title is a TMDB entry, so an item holding one of its TMDB IDs is that
+title. An `imdb` or `tvdb` match counts only when the
+item is not another title by its type's anchor precedence
+(`catalog.IdentityProviderIDsContradict`): at the first provider both the title
+and the item carry (TMDB, IMDb, TVDB for a movie; TVDB, TMDB, IMDb for a
+series), one of the title's aliases must equal one of the item's IDs. The
+item's IDs are its columns and `media_item_provider_ids` rows, and TMDB's
+`id-slug` form counts as the bare ID. A movie with a different TMDB ID is
+another movie that shares a stale or wrong IMDb or TVDB ID, and promoting onto
+it would swap the user's title for another; a series sharing the title's TVDB
+ID is the same show whatever its TMDB ID. `stale_media_ids` values are IDs a
+provider rejected, so they never decide.
+
 Only items of the title's media type with a `media_item_libraries` row in an
 enabled folder count. Unlike `LookupExternalIDs`, it returns every distinct
 match:
@@ -301,8 +315,9 @@ cancel a watchlist-made request. The library watchlist mutations they reuse are
 Discovery results and the title detail carry `in_watchlist`, hydrated with two
 reads per page: title entries by TMDB ID, and the library watchlist by
 `library_content_id`. `GET /api/v2/requests/status` advertises
-`watchlist_titles_supported`, which is false while requests are off: the
-operations then answer `409 capability_disabled` and the entries are kept. See [api-contract.md](api-contract.md#watchlist-titles).
+`watchlist_titles_supported`, which is false while requests are off (the
+operations then answer `409 capability_disabled`) and for a profile blocked from
+requests (they answer `403`); either way the entries are kept. See [api-contract.md](api-contract.md#watchlist-titles).
 
 There is no new realtime event. `user_state.changed` is keyed by `content_id`,
 so other devices pick up entry changes on their next load; promotion emits the

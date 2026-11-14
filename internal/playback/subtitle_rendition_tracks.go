@@ -344,6 +344,7 @@ func (s *TranscodeSession) subtitleTrackSegmentVTT(ctx context.Context, number u
 	poll := subtitleCuePollInterval
 	for {
 		span, found, originPending, waitable, restarting := s.onDemandSegmentSpan(segNum)
+		waitable = waitable || s.plannedSegmentRestartable(segNum)
 		if restarting || s.copyPlan != nil {
 			// As long as its video segment would wait: a restart, or a
 			// planned copy, which runs on to every planned segment.

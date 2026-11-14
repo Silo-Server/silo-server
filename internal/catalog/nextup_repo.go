@@ -30,6 +30,12 @@ type NextUpQuery struct {
 	// up (the profile's ui.next_up_new_releases_first). Off, results keep the
 	// completion-time order and ActivityAt equals CompletedAt.
 	RankByRelease bool
+	// ExcludeEpisodeIDs leaves out a series whose next episode is listed:
+	// the episodes the profile dismissed from Home's Next Up. The exclusion
+	// runs inside the walk's result query, so the walk keeps going until it
+	// has Limit rows and a short result still means no more series are
+	// eligible.
+	ExcludeEpisodeIDs []string
 
 	// droppedSeriesIDs are the profile's actively dropped series, which a
 	// global lookup excludes. ListNextUp loads them; a series-scoped lookup
@@ -325,10 +331,10 @@ const nextUpReleaseLateral = `LEFT JOIN LATERAL (
 			LIMIT 1
 		) released ON true`
 
-// nextUpReleaseScope limits release lookups to the libraries the request can
-// reach, so an episode that arrived where the viewer can't follow never moves
-// a series ahead of one they can watch.
-func nextUpReleaseScope(q NextUpQuery, argIdx int) (string, []interface{}) {
+// nextUpLibraryScope is the libraries the request can reach: the requested
+// library or libraries within the viewer's access. Nil means every library
+// except the viewer's disabled ones; empty means none.
+func nextUpLibraryScope(q NextUpQuery) []int {
 	var requested []int
 	if q.LibraryID != nil {
 		requested = []int{*q.LibraryID}
@@ -337,8 +343,16 @@ func nextUpReleaseScope(q NextUpQuery, argIdx int) (string, []interface{}) {
 	}
 	ids, none := q.AccessFilter.LibraryScope(requested)
 	if none {
-		ids = []int{}
+		return []int{}
 	}
+	return ids
+}
+
+// nextUpReleaseScope limits release lookups to the libraries the request can
+// reach, so an episode that arrived where the viewer can't follow never moves
+// a series ahead of one they can watch.
+func nextUpReleaseScope(q NextUpQuery, argIdx int) (string, []interface{}) {
+	ids := nextUpLibraryScope(q)
 	switch {
 	case ids != nil:
 		return fmt.Sprintf(" AND ea.library_id = ANY($%d::int[])", argIdx), []interface{}{ids}
@@ -462,15 +476,32 @@ func buildListNextUpQuery(q NextUpQuery, limit int, cursor *nextUpWalkCursor) (s
 
 	// The successor stays the next episode with any present file. When none of
 	// its files fits the viewer's quality ceiling the series waits off Next Up
-	// until one arrives, rather than skipping to a later episode.
-	ceilingWhere := ""
+	// until one arrives, rather than skipping to a later episode. An excluded
+	// successor also leaves its series out, and so does a series outside the
+	// requested libraries or the viewer's access. Filtering here rather than
+	// after the limit keeps the walk going until it has limit rows.
+	var resultConditions []string
+	nextArg := len(args) + 1
+	ApplyLibraryAccessFilter("si.content_id", AccessFilter{
+		AllowedLibraryIDs:  nextUpLibraryScope(q),
+		DisabledLibraryIDs: q.AccessFilter.DisabledLibraryIDs,
+	}, &resultConditions, &args, &nextArg)
+	ApplySectionAccessFilter("si", q.AccessFilter, &resultConditions, &args, &nextArg)
 	if playable := EpisodePlayableUnderCeilingSQL("next_ep.content_id", q.AccessFilter, func(value any) int {
 		// Numbered from args itself: the release scope above binds a value
 		// without advancing argIdx.
 		args = append(args, value)
 		return len(args)
 	}); playable != "" {
-		ceilingWhere = "\n\t\tWHERE " + playable
+		resultConditions = append(resultConditions, playable)
+	}
+	if len(q.ExcludeEpisodeIDs) > 0 {
+		args = append(args, q.ExcludeEpisodeIDs)
+		resultConditions = append(resultConditions, fmt.Sprintf("NOT (next_ep.content_id = ANY($%d::text[]))", len(args)))
+	}
+	resultWhere := ""
+	if len(resultConditions) > 0 {
+		resultWhere = "\n\t\tWHERE " + strings.Join(resultConditions, "\n\t\t  AND ")
 	}
 
 	// When resumable items are disabled, suppress next-up only if the series has
@@ -683,7 +714,7 @@ func buildListNextUpQuery(q NextUpQuery, limit int, cursor *nextUpWalkCursor) (s
 		) next_ep ON true
 		%s%s
 		ORDER BY es.updated_at DESC
-		LIMIT $3`, completedEpisodesCTE, nextUpAnchorsCTE, inProgressExclusion, activityExpr, sourceTable, releaseLateral, ceilingWhere)
+		LIMIT $3`, completedEpisodesCTE, nextUpAnchorsCTE, inProgressExclusion, activityExpr, sourceTable, releaseLateral, resultWhere)
 		return query, args
 	}
 
@@ -716,7 +747,7 @@ func buildListNextUpQuery(q NextUpQuery, limit int, cursor *nextUpWalkCursor) (s
 		) next_ep ON true
 		%s%s
 		ORDER BY es.updated_at DESC
-		LIMIT $3`, activityExpr, sourceTable, releaseLateral, ceilingWhere)
+		LIMIT $3`, activityExpr, sourceTable, releaseLateral, resultWhere)
 
 	query := fmt.Sprintf(`
 		WITH %s%s%s

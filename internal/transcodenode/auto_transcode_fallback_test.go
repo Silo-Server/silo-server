@@ -234,6 +234,55 @@ func TestSpawnReconstructExplicitNVENCRetriesRejectedDecodeOnCPU(t *testing.T) {
 	}
 }
 
+// A node rebuild is shared by every request waiting on it, so once it is
+// admitted the request that triggered it can end without failing the others.
+// StartTranscode returns an ended request's error before FFmpeg runs for an
+// HEVC target, among other recipes.
+func TestSpawnReconstructOutlivesTriggeringRequest(t *testing.T) {
+	for _, test := range []struct{ name, hwAccel string }{
+		// StartupRetryHWAccel changes VideoToolbox, so the node starts it directly.
+		{name: "backend with a software retry", hwAccel: "videotoolbox"},
+		{name: "start once", hwAccel: playback.HWAccelNone},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			server := newTestServer(t)
+			server.tracker = nodesessions.NewTracker(nil, "http://node", "node", "transcode")
+			fakePath, _ := writeNodeFFmpegFailingOn(t, "no attempt fails")
+			// Answer the capability probes, then hand transcodes to the fake.
+			useFakeFFmpeg(t, server, "#!/bin/sh\n"+
+				"case \"$*\" in\n"+
+				"  *-hwaccels*) echo videotoolbox; exit 0 ;;\n"+
+				"  *-encoders*) echo ' V..... h264_videotoolbox x'; exit 0 ;;\n"+
+				"  *'-f null'*) exit 0 ;;\n"+
+				"esac\n"+
+				"exec \""+fakePath+"\" \"$@\"\n")
+			server.watcher.Config().Playback.HWAccel = test.hwAccel
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			// Called after admission, right before the start: the request ends here.
+			server.autoTranscodePipelineFn = func(stepCtx context.Context, opts playback.TranscodeOpts) *playback.AutoTranscodePipeline {
+				cancel()
+				if stepCtx.Err() != nil {
+					t.Error("fallback order resolved on the ended request's context")
+				}
+				return playback.NewAutoTranscodePipeline(stepCtx, opts)
+			}
+
+			const sessionID = "outlives-request-1"
+			card := playback.NewRecipeCard(7, "profile-1", 42, "", playback.TranscodeOpts{
+				SessionID: sessionID, InputPath: "/media/movie.mkv",
+				TargetCodecVideo: "hevc", TargetCodecAudio: "aac", TargetResolution: "720p", SegmentDuration: 2,
+			})
+			request := httptest.NewRequest(http.MethodGet, "/", nil).WithContext(ctx)
+			session, err := server.spawnReconstruct(request, sessionID, -1, card)
+			if err != nil || session == nil {
+				t.Fatalf("spawnReconstruct = %v, %v; want the session the other requests wait for", session, err)
+			}
+			_ = session.Close()
+		})
+	}
+}
+
 func TestHandleStartRequireReadyKeepsVideoToolboxSoftwareRetry(t *testing.T) {
 	server := newTestServer(t)
 	server.tracker = nodesessions.NewTracker(nil, "http://node", "node", "transcode")

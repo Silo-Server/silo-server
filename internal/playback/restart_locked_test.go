@@ -97,7 +97,7 @@ exec sleep 30
 			m.RegisterTranscodeSession("sess-copy", s)
 			t.Cleanup(func() { _ = s.Close() })
 
-			target, ok, err := m.RestartSegmentLocked(context.Background(), "sess-copy", s, 10)
+			target, ok, err := m.RestartSegmentLocked(context.Background(), "sess-copy", s, 10, time.Time{})
 			if err != nil {
 				t.Fatalf("RestartSegmentLocked: %v", err)
 			}
@@ -225,7 +225,7 @@ func TestRestartSegmentLocked_SkipsRequestThatEnded(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	if _, _, err := m.RestartSegmentLocked(ctx, sid, s, 40); !errors.Is(err, context.Canceled) {
+	if _, _, err := m.RestartSegmentLocked(ctx, sid, s, 40, time.Time{}); !errors.Is(err, context.Canceled) {
 		t.Fatalf("RestartSegmentLocked error = %v, want context.Canceled", err)
 	}
 	if s.IsRunning() {

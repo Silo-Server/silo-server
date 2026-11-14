@@ -213,17 +213,27 @@ because those clients cannot run the change; the account signs in to Silo first.
 
 An administrator can issue a single-use link that lets the account holder choose a
 new password (see [administrator accounts](admin-users-api.md#passwords)). The link
-opens `/reset-password/{token}` in the web client, which uses two public operations:
+is `/reset-password#{token}`: the token is the URL fragment, which a browser never
+sends to the server or in a `Referer` header, so reverse proxies in front of Silo do
+not log it. The web client takes the token out of the address before it renders and
+uses two public operations, which carry it in the request body:
 
-- `GET /password-resets/{token}` returns `username`, `server_name`, and `expires_at`.
-- `POST /password-resets/{token}/complete` with `{ "password": "..." }` sets the new
-  password and returns 200.
+- `POST /password-resets/lookup` (`lookupPasswordResetLink`) with `{ "token": "..." }`
+  returns `username`, `server_name`, and `expires_at`.
+- `POST /password-resets/complete` (`completePasswordResetLink`) with
+  `{ "token": "...", "password": "..." }` sets the new password and returns 200.
+
+The earlier path forms, `GET /password-resets/{token}` (`lookupPasswordReset`) and
+`POST /password-resets/{token}/complete` (`completePasswordReset`), still answer the
+same way but are deprecated, because a token in the path reaches proxy access logs.
+They send the `Deprecation` and `Link` headers and will be removed before `/api/v2`
+locks. A link issued in the old `/reset-password/{token}` form still opens.
 
 Every unusable link returns the same `404 not_found`, whether it is unknown, expired,
 used, replaced, or outdated by a password or recovery email change, or its account
 is disabled. Changing only the email's letter case preserves the link.
 Invalid passwords return `422 validation_failed` at `body.password` and leave the link
-unspent. Both operations spend the `password_reset` rate-limit budget, 20 requests per
+unspent. While password resets are not configured, every link operation returns `409`. Both operations spend the `password_reset` rate-limit budget, 20 requests per
 minute per client IP by default.
 
 Completing the reset spends the link, sets the password, clears a pending temporary
@@ -257,7 +267,7 @@ client IP by default).
 
 The server emails a link only to an enabled account that signs in with a local
 password and has a valid email address. The link opens the same
-`/reset-password/{token}` screen as an administrator's link and expires after an
+`/reset-password#{token}` screen as an administrator's link and expires after an
 hour. An account gets at most one requested link every five minutes. A requested
 link replaces the account's earlier requested link, but never a live link an
 administrator issued; while one exists, requests send nothing.
@@ -676,7 +686,7 @@ linking rule whether or not `network_sign_in` is served.
 | `POST /admin/users/{id}/identities` (`createAdminUserIdentity`) | acting admin | Links by `installation_id` and the exact `external_subject`. Turns local password sign-in off unless the account is break-glass or the installation is a network identity provider. |
 | `DELETE /admin/users/{id}/identities/{identity_id}` (`deleteAdminUserIdentity`) | acting admin | May leave the account without a sign-in method; setting a password with `updateAdminUser` turns its local password sign-in back on. |
 | `PUT /admin/users/{id}` (`updateAdminUser`) | acting admin | `break_glass` sets or clears the flag: admin accounts only, and only the server Owner may change it (403 `permission_denied`). The Owner has it by default (set at first-run setup and on every ownership move) and may clear it on its own account. A `password` also turns the account's local password sign-in back on, so an admin other than the Owner may not set its own while its local sign-in is off (403 `permission_denied`). Demoting, disabling or clearing the last usable break-glass admin while local sign-in is off is 409 `break_glass_required`; so is deleting it (`deleteAdminUser`) or turning `auth.local_password_login` off without one (`updateAdminSettings`, `updateAdminSetting`). |
-| `POST /admin/plugins/installations/{id}/auth-binding/test` (`testAdminPluginAuthBinding`) | acting admin | Sends staged `config` entries (blank secrets keep the stored value) to the plugin's `TestConnection`; answers `ok`, the plugin's `steps` and `callback_url`, the redirect URI to register at an OAuth provider (empty without a public URL). A plugin without a connection test, or a disabled installation, is 409. Not retried automatically. |
+| `POST /admin/plugins/installations/{id}/auth-binding/test` (`testAdminPluginAuthBinding`) | acting admin | Sends staged `config` entries (blank secrets keep the stored value only while the rest of that entry is unchanged and no secret in it is typed) to the plugin's `TestConnection`; answers `ok`, the plugin's `steps` and `callback_url`, the redirect URI to register at an OAuth provider (empty without a public URL). A plugin without a connection test, or a disabled installation, is 409. Not retried automatically. |
 | `PUT /admin/plugins/installations/{id}/auth-binding` (`updateAdminPluginAuthBinding`) | acting admin | Applies without a restart (`X-Silo-Restart-Required: false`). `auto_provision` defaults to true. Enabling a second binding of the same kind is 409 `provider_already_enabled`; one network identity binding may be enabled beside the one OIDC or LDAP binding. |
 | `GET /admin/plugins/installations` (`listAdminPluginInstallations`) | acting admin | Each OAuth auth binding carries `callback_url` (the callback to register at the provider) and `post_logout_redirect_url` (`/login`, to register for provider logout), both on `server.public_url`; empty without a public URL and for a password provider. The other operations that answer an installation carry them too. |
 

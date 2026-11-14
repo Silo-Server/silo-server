@@ -413,18 +413,20 @@ func (m *TranscodeManager) RestartSessionLocked(ctx context.Context, sessionID s
 // RestartSegmentLocked resolves and restarts one missing HLS segment under the
 // per-session lifecycle lock. Copy-video resolution reads the current manifest,
 // so keeping resolution and restart inside the same lock preserves the mapping
-// it observed.
+// it observed. seenGeneration is the GenerationStartedAt of the progress the
+// restart was decided on (see TranscodeSession.RestartSegmentSince).
 func (m *TranscodeManager) RestartSegmentLocked(
 	ctx context.Context,
 	sessionID string,
 	ts *TranscodeSession,
 	segNum int,
+	seenGeneration time.Time,
 ) (SegmentRecoveryTarget, bool, error) {
 	var target SegmentRecoveryTarget
 	var ok bool
 	err := m.restartSessionLocked(sessionID, ts, func() error {
 		var restartErr error
-		target, ok, restartErr = ts.RestartSegment(ctx, segNum)
+		target, ok, restartErr = ts.RestartSegmentSince(ctx, segNum, seenGeneration)
 		return restartErr
 	})
 	return target, ok, err
@@ -988,6 +990,7 @@ func (m *TranscodeManager) doReconstructTranscode(ctx context.Context, sessionID
 	cfg := m.runtimeConfig()
 	outputDir := reconstructionOutputDir(cfg.TranscodeDir, sessionID, card.OutputSubdir)
 	opts := card.TranscodeOpts(outputDir, cfg.FFmpegPath, m.logSink())
+	opts.Reconstructed = true
 	// Recipe cards preserve the original launch tuning, but a reconstruction is
 	// not a fresh generation: restore the conservative manifest lead so recovery
 	// never exposes a hardware encoder after only one fragment.
@@ -1015,12 +1018,15 @@ func (m *TranscodeManager) doReconstructTranscode(ctx context.Context, sessionID
 		return nil, ctx.Err()
 	}
 	defer slotRelease()
+	// Past admission the rebuild serves every request waiting on it, so its
+	// probes and its start must not end with the request that triggered it.
+	rebuildCtx := context.WithoutCancel(ctx)
 	var toneMapErr error
 	resolveToneMapExecutor := m.resolveToneMapExecutor
 	if resolveToneMapExecutor == nil {
 		resolveToneMapExecutor = ResolveToneMapExecutor
 	}
-	opts, toneMapErr = resolveToneMapExecutor(ctx, opts)
+	opts, toneMapErr = resolveToneMapExecutor(rebuildCtx, opts)
 	if toneMapErr != nil {
 		slog.ErrorContext(ctx, "reconstruct tone-map recipe unavailable", "component", "playback", "error", toneMapErr,
 			"session", sessionID, "playback_session_id", sessionID)
@@ -1050,7 +1056,7 @@ func (m *TranscodeManager) doReconstructTranscode(ctx context.Context, sessionID
 	// start, keeping a slow process rather than duplicating it. Every other
 	// recipe starts once, and only one that decodes on the GPU is waited on,
 	// so a decoder that rejects the source can move to CPU decoding.
-	transcodeSession, err := StartReconstructTranscode(ctx, newPipeline(ctx, opts), TranscodeStartup{Start: startTranscode})
+	transcodeSession, err := StartReconstructTranscode(rebuildCtx, newPipeline(rebuildCtx, opts), TranscodeStartup{Start: startTranscode})
 	if err != nil {
 		slog.ErrorContext(ctx, "reconstruct transcode start failed", "component", "playback", "error", err, "session", sessionID, "playback_session_id", sessionID)
 		return nil, err
@@ -1275,6 +1281,46 @@ func (m *TranscodeManager) CloseTranscodeSessionIf(sessionID string, expected *T
 	}
 
 	m.StopRemoteTranscode(sessionID, transcodeNodeURL)
+	return true
+}
+
+// CloseTranscodeSessionIfSessionGone is for a start or rebuild that may have
+// registered expected after its playback session ended: whatever removed the
+// session closed the transcode first and found none. It reports whether
+// hasSession found no session for sessionID, and in that case tears down
+// expected if it is still the registered transcode.
+//
+// hasSession is read under the transcode map lock, which a request also takes
+// to adopt a registered transcode after it has registered the session again.
+// So either that request registered the session before this read, which then
+// finds it, or it reads the map after the removal and starts its own
+// transcode. A check followed by CloseTranscodeSessionIf would close a
+// transcode adopted in between.
+//
+// The close removes the output directory, so it runs under the session
+// lifecycle lock, which a start or rebuild holds before it writes there. The
+// caller must not hold that lock, and hasSession must not call into the
+// manager.
+func (m *TranscodeManager) CloseTranscodeSessionIfSessionGone(sessionID string, expected *TranscodeSession, hasSession func() bool) bool {
+	// The usual case takes no lock: the session is there.
+	if hasSession() {
+		return false
+	}
+	unlock := m.LockSessionLifecycle(sessionID)
+	defer unlock()
+	m.transcodeMu.Lock()
+	if hasSession() {
+		m.transcodeMu.Unlock()
+		return false
+	}
+	registered := expected != nil && m.transcodes[sessionID] == expected
+	if registered {
+		delete(m.transcodes, sessionID)
+	}
+	m.transcodeMu.Unlock()
+	if registered {
+		_ = expected.Close()
+	}
 	return true
 }
 

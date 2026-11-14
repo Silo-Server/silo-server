@@ -247,6 +247,10 @@ type CompatPlaybackStore interface {
 	Update(id string, fn func(*PlaybackSession) error) error
 	// FindByRoute resolves a route item / media-source id to a session.
 	FindByRoute(compatToken, routeID string) (*PlaybackSession, *PlaybackMediaSource, bool)
+	// LookupByRoute is FindByRoute for callers that grant access by route: it
+	// returns an error, instead of not-found, when the store could not be
+	// read and holds no cached session for the route.
+	LookupByRoute(compatToken, routeID string) (*PlaybackSession, *PlaybackMediaSource, bool, error)
 	// FindUnidentifiedPlayback resolves an item/source pair to exactly one started,
 	// active session owned by the caller. Pending negotiations are not playback.
 	FindUnidentifiedPlayback(compatToken, routeItemID, mediaSourceID string) (*PlaybackSession, error)
@@ -862,6 +866,12 @@ func streamGrantMatches(session *PlaybackSession, routeItemID, mediaSourceID, cl
 }
 
 // FindByRoute resolves a route item/media-source identifier to a compat playback session.
+// LookupByRoute is FindByRoute; the in-memory store is always readable.
+func (s *PlaybackSessionStore) LookupByRoute(compatToken, routeID string) (*PlaybackSession, *PlaybackMediaSource, bool, error) {
+	session, source, ok := s.FindByRoute(compatToken, routeID)
+	return session, source, ok, nil
+}
+
 func (s *PlaybackSessionStore) FindByRoute(compatToken, routeID string) (*PlaybackSession, *PlaybackMediaSource, bool) {
 	return s.findByRoute(compatToken, routeID, false, false)
 }

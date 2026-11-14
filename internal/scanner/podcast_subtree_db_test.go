@@ -467,6 +467,44 @@ func TestPodcastShowScanLeavesANestedLibraryRootAlone(t *testing.T) {
 	f.requireEpisodeOf(t, nestedEpisode, showB, "Show B")
 }
 
+// The outer library root's ignore files apply below a library root nested in
+// it, in the full scan and in a show scan alike. When only one of them honored
+// the outer rules, each scan undid the other's work on an excluded show.
+func TestOuterRootIgnoreFileExcludesAShowInANestedLibraryRoot(t *testing.T) {
+	f := newPodcastSubtreeFixture(t)
+	nestedRoot := filepath.Join(f.root, "Show A", "extra")
+	if _, err := f.pool.Exec(context.Background(),
+		`INSERT INTO media_folder_paths (media_folder_id, path) VALUES ($1, $2)`, f.folder.ID, nestedRoot,
+	); err != nil {
+		t.Fatalf("seed nested folder path: %v", err)
+	}
+	f.folder.Paths = append([]string{nestedRoot}, f.folder.Paths...)
+	if err := os.WriteFile(filepath.Join(f.root, ".siloignore"), []byte("Show A/extra/Excluded*\n"), 0o644); err != nil {
+		t.Fatalf("write .siloignore: %v", err)
+	}
+	kept := f.addEpisode(t, filepath.Join("Show A", "extra", "Show B"), "Episode 1.mp3", "Show B", "One", "1")
+	excluded := f.addEpisode(t, filepath.Join("Show A", "extra", "Excluded Show"), "Episode 1.mp3", "Excluded Show", "One", "1")
+	requireNotCataloged := func(scan string) {
+		t.Helper()
+		var present int
+		if err := f.pool.QueryRow(context.Background(),
+			`SELECT count(*) FROM media_files WHERE media_folder_id = $1 AND file_path = $2 AND missing_since IS NULL`,
+			f.folder.ID, excluded,
+		).Scan(&present); err != nil {
+			t.Fatalf("count excluded episode: %v", err)
+		}
+		if present != 0 {
+			t.Fatalf("%s cataloged %s, which the outer root's .siloignore excludes", scan, excluded)
+		}
+	}
+
+	f.scanFolder(t)
+	requireNotCataloged("full scan")
+	f.requireEpisodeOf(t, kept, filepath.Dir(kept), "Show B")
+	f.scanSubtree(t, filepath.Dir(excluded))
+	requireNotCataloged("show scan")
+}
+
 // TestPodcastShowSurvivesConcurrentMembershipSweep covers two scans of one
 // podcast library running side by side, as subtree scans of different shows
 // do. While one scan writes a new show, the other's folder-wide membership
