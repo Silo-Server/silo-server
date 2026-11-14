@@ -279,15 +279,17 @@ func TestItemRefreshHoldsCuratorJobsToTheirLibraries(t *testing.T) {
 
 	for _, tc := range []struct {
 		name    string
+		mode    ItemRefreshMode
 		scope   *access.MetadataCurationScope
 		merge   []int
 		refused bool
 	}{
-		{"curator merge outside scope", &access.MetadataCurationScope{LibraryIDs: []int{3}}, []int{3, 4}, true},
-		{"curator merge onto item in no library", &access.MetadataCurationScope{LibraryIDs: []int{3}}, []int{}, true},
-		{"curator merge inside scope", &access.MetadataCurationScope{LibraryIDs: []int{3}}, []int{3}, false},
-		{"unrestricted curator", &access.MetadataCurationScope{}, []int{3, 4}, false},
-		{"admin or automatic job", nil, []int{4}, false},
+		{"curator merge outside scope", "", &access.MetadataCurationScope{LibraryIDs: []int{3}}, []int{3, 4}, true},
+		{"curator reset merge outside scope", ItemRefreshModeReset, &access.MetadataCurationScope{LibraryIDs: []int{3}}, []int{3, 4}, true},
+		{"curator merge onto item in no library", "", &access.MetadataCurationScope{LibraryIDs: []int{3}}, []int{}, true},
+		{"curator merge inside scope", "", &access.MetadataCurationScope{LibraryIDs: []int{3}}, []int{3}, false},
+		{"unrestricted curator", "", &access.MetadataCurationScope{}, []int{3, 4}, false},
+		{"admin or automatic job", "", nil, []int{4}, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			payload, err := json.Marshal(ItemRefreshRequest{
@@ -295,6 +297,7 @@ func TestItemRefreshHoldsCuratorJobsToTheirLibraries(t *testing.T) {
 				RefreshContentID:   "movie-1",
 				ScanFolderID:       3,
 				ScanPath:           "/media/movie",
+				Mode:               tc.mode,
 				CurationScope:      tc.scope,
 			})
 			if err != nil {
