@@ -19,7 +19,8 @@ posters. Each viewer sees the first four members it can access that have a poste
 collection order. Access uses the same predicates as the collection's member list
 (`itemAccessConditions`: library allow and deny lists, maturity limits, excluded media types),
 so a collage never shows a title the viewer's member list leaves out. A smart collection lists
-its members from its query and has no collage. Only `collection_type` makes a collection live: a
+its members from its query, so its sources are the first matches the viewer's list of it shows
+(see [Smart collections](#smart-collections)). Only `collection_type` makes a collection live: a
 query definition on any other type is ignored, and its members are its stored items
 (`catalog.ResolveLibraryCollectionMembership`).
 
@@ -36,8 +37,8 @@ the same posters:
   background build. The build is deduplicated per node, bounded, and backs off after a failure.
   A build lost with its node is retried by the next read. A source poster that doesn't resolve or
   download fails the build, so a collage is never stored without one of the posters its key names.
-- A sync, template bundle apply, or poster removal builds the unrestricted viewer's collage up
-  front, so the common case is ready before anyone asks.
+- A sync, template bundle apply, poster removal, or saving a smart collection's rules builds the
+  unrestricted viewer's collage up front, so the common case is ready before anyone asks.
 - Listing a collection or serving its collage through a Jellyfin image tag touches the
   collage's `last_used_at` at most daily. Building any collage of a collection deletes that
   collection's collages unused for a week. Rows also go with their collection
@@ -52,6 +53,26 @@ the same posters:
   collection also deletes its whole `collection-images/` prefix right away.
 - The artwork reconcile sweeps the table like other artwork surfaces. A cleared row reads as a
   missing collage and is rebuilt on the next read.
+
+## Smart collections
+
+A list read never runs a smart collection's query. A background refresh reads its first
+matches, builds their collage, and records it, keyed by collection and a hash of the viewer's
+access filter, with a hash of the definition it was made for (no collage when the viewer can see
+no match with a poster). A read serves those records with one statement for all of a list's
+smart collections. It queues a refresh when the record is missing, names another definition, or
+names a collage the artwork reconcile cleared (serving nothing until then), or is older than the refresh interval (15 minutes; serving the
+recorded collage meanwhile), so a new match reaches the collage within that time. A record goes
+with its collection, and with its collage when that collage is retired as unused. Server and
+personal smart collections share this (`smartCollageSet`):
+
+- Server collections record in `library_collection_smart_collages`. Their members never depend
+  on the viewer's account or profile, so the access hash leaves those out and viewers with the
+  same restrictions share a record. The definition hash covers the rules, the default sort
+  (`sort_config`) and the libraries the collection shows in, since each changes which titles
+  the viewer's list shows first.
+- Personal collections record in `user_personal_collection_smart_collages`; see
+  [Personal collections](#personal-collections).
 
 ## Returning a poster
 
@@ -111,15 +132,9 @@ differences:
   predicates as the collection's item count and pages, manga chapters excluded. A smart
   collection's sources are the first matches of its query, read like its item pages, so a smart
   personal collection has a collage. The display filter is not applied.
-- A list read never runs a smart collection's query. A background refresh reads its matches,
-  builds their collage, and records it in `user_personal_collection_smart_collages`, keyed by
-  collection and a hash of the viewer's access filter, with a hash of the query definition it was
-  made for (no collage when the viewer can see no match with a poster). A read serves that
-  record with one statement for all of a list's smart collections. It queues a refresh when the
-  record is missing or names another definition (serving nothing until then), or is older than
-  `SmartRefreshInterval` (15 minutes; serving the recorded collage meanwhile), so a new match
-  reaches the collage within that time. A record goes with its collection, and with its collage
-  when that collage is retired as unused.
+- A smart collection's collage is recorded as [Smart collections](#smart-collections)
+  describes, in `user_personal_collection_smart_collages`, with a hash of the query definition
+  and an interval of `SmartRefreshInterval`.
 - `user_personal_collection_poster_variants` holds the collages, keyed by account, collection
   and collage key, and goes with its collection or account (`ON DELETE CASCADE`). Its delete
   trigger is the same `queue_deleted_collection_collage`.
