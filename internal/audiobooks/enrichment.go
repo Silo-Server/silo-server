@@ -286,13 +286,16 @@ func (e *Enricher) takeSweepLock(ctx context.Context) (release func(), acquired 
 
 // sweepLockHeld reports whether a node holds the sweep lock, without opening
 // a session. A bigint advisory key shows in pg_locks as its high and low 32
-// bits in classid and objid, with objsubid 1.
+// bits in classid and objid, with objsubid 1. Advisory locks belong to one
+// database but pg_locks lists the whole server, so the probe is limited to
+// this database: another Silo database on the same server sweeps on its own.
 func (e *Enricher) sweepLockHeld(ctx context.Context) (bool, error) {
 	var held bool
 	err := e.pool.QueryRow(ctx, `
 		SELECT EXISTS (
 			SELECT 1 FROM pg_locks
 			WHERE locktype = 'advisory' AND granted AND objsubid = 1
+			  AND database = (SELECT oid FROM pg_database WHERE datname = current_database())
 			  AND classid::bigint = $1 AND objid::bigint = $2
 		)
 	`, enrichSweepLock>>32, enrichSweepLock&0xFFFFFFFF).Scan(&held)

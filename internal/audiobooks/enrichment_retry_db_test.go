@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"google.golang.org/genproto/googleapis/rpc/errdetails"
 	"google.golang.org/grpc/codes"
@@ -350,6 +351,36 @@ func TestAudiobookEnrichmentSweepRateLimitDB(t *testing.T) {
 		t.Fatalf("partly paused item: attempts=%d outcome=%v parked=%v, want deferred 3h with no outcome", row.attempts, row.outcome, row.parkedFor)
 	}
 	checkSweepRunsOnOneConnection(t, ctx, dsn, provider)
+	t.Run("a sweep lock in another database", func(t *testing.T) {
+		checkSweepLockIsPerDatabase(t, ctx, dsn, e)
+	})
+}
+
+// Advisory locks belong to one database, but pg_locks lists the whole
+// server. A sweep holding the same key in another database on the server
+// must not make this one report that its sweep is taken.
+func checkSweepLockIsPerDatabase(t *testing.T, ctx context.Context, dsn string, e *Enricher) {
+	cfg, err := pgx.ParseConfig(dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.Database = "postgres"
+	other, err := pgx.ConnectConfig(ctx, cfg)
+	if err != nil {
+		t.Skipf("no second database to hold the lock in: %v", err)
+	}
+	defer func() { _ = other.Close(context.WithoutCancel(ctx)) }()
+	var acquired bool
+	if err := other.QueryRow(ctx, `SELECT pg_try_advisory_lock($1)`, enrichSweepLock).Scan(&acquired); err != nil || !acquired {
+		t.Fatalf("taking the sweep key in the other database: acquired=%v err=%v", acquired, err)
+	}
+	held, err := e.sweepLockHeld(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if held {
+		t.Fatal("a lock held in another database counted as this database's sweep")
+	}
 }
 
 // The sweep lock holds a pooled connection, so a one-connection pool sweeps
