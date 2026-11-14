@@ -31,6 +31,12 @@ func scopeLibraryRoot(path string, libraryRoots []string) string {
 // directory between it and the root, has a name the walk skips
 // (SkippedDirName), so a scoped scan never reads what a full scan passes over.
 func scanRootIgnoreRules(path string, libraryRoots []string) ([]ignoreRules, bool, error) {
+	return ancestorIgnoreRules(path, libraryRoots, fspath.ReadDir)
+}
+
+// ancestorIgnoreRules is scanRootIgnoreRules with the directory listing it
+// reads each ancestor's ignore files from.
+func ancestorIgnoreRules(path string, libraryRoots []string, listDir func(string) ([]fs.DirEntry, error)) ([]ignoreRules, bool, error) {
 	path = filepath.Clean(path)
 	root := scopeLibraryRoot(path, libraryRoots)
 	if root == "" || root == path {
@@ -52,7 +58,7 @@ func scanRootIgnoreRules(path string, libraryRoots []string) ([]ignoreRules, boo
 		if ignoreRulesMatch(rules, dir, true) {
 			return rules, true, nil
 		}
-		entries, err := fspath.ReadDir(dir)
+		entries, err := listDir(dir)
 		if err != nil {
 			return nil, false, fmt.Errorf("read ignore ancestor %s: %w", dir, err)
 		}
@@ -74,6 +80,33 @@ func scanRootIgnoreRules(path string, libraryRoots []string) ([]ignoreRules, boo
 		return rules, true, nil
 	}
 	return rules, ignoreRulesMatch(rules, path, isDir), nil
+}
+
+// FileIgnored reports whether a library walk skips file: ignore files from
+// its configured library root down exclude it or a directory above it, or one
+// of those directories has a name the walk passes over (SkippedDirName). An
+// error means an ignore file or directory on the way could not be read, which
+// a walk records as a failure there.
+func FileIgnored(file string, libraryRoots []string) (bool, error) {
+	_, ignored, err := ancestorIgnoreRules(file, libraryRoots, ignoreFileEntries)
+	return ignored, err
+}
+
+// ignoreFileEntries lists only the ignore files in dir. FileIgnored runs for
+// single file changes, and listing a flat library root that holds thousands
+// of files for each of them would cost far more than three lookups.
+func ignoreFileEntries(dir string) ([]fs.DirEntry, error) {
+	entries := make([]fs.DirEntry, 0, 3)
+	for _, name := range []string{ignoreMarkerNoMedia, ignoreFileName, siloIgnoreFileName} {
+		info, err := fspath.Lstat(filepath.Join(dir, name))
+		switch {
+		case err == nil:
+			entries = append(entries, fs.FileInfoToDirEntry(info))
+		case !errors.Is(err, fs.ErrNotExist):
+			return nil, err
+		}
+	}
+	return entries, nil
 }
 
 // libraryRootSkipped reports whether root's own ignore files exclude the whole
