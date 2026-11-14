@@ -19,9 +19,10 @@ runtime toggle enables enforcement.
 A mutex protects exact process and account counters. Native `claims.UserID` and
 compatibility `Session.StreamAppUserID` identify the login account; profiles,
 credentials, devices, API versions and normalized aliases share the allowance.
-Every physical client connection reserves once before upgrade, subscriber
-allocation or recurring authority work. Internal `Hub.Subscribe` consumers,
-including the plugin dispatcher, do not reserve client capacity.
+Every events or Jellyfin socket connection reserves once before upgrade,
+subscriber allocation or recurring authority work. Watch Together, playback
+control and admin log sockets are not counted. Internal `Hub.Subscribe`
+consumers, including the plugin dispatcher, do not reserve client capacity.
 
 V2 checks shape/origin, consumes its one-use ticket, validates
 identity, then reserves. Nil/draining may reject before ticket consumption; a
@@ -50,54 +51,17 @@ timer. A partitioned old process can continue alongside a replacement. Admission
 has no store-outage mode; existing auth, tickets and event delivery retain their
 own store dependencies and failure semantics.
 
-## Observation and later enforcement
+## Observation
 
 Observation is not remediation and bounds no socket resources. Defaults are
-unmeasured starting thresholds. No pilot, host selection, deployment or
-enforcement is authorized by this implementation.
+unmeasured starting thresholds, and no startup setting selects enforcement;
+turning it on is a separate, reviewed change.
 
 The collector exports process `occupancy` and `high_water`, an unlabeled
 `account_occupancy` admission histogram with buckets 1, 2, 4, 8, 16, 32, 64, 128
 and overflow, and `max_account_high_water`. Names share the
 `silo_events_client_socket_` prefix. `would_refuse_total{reason="account|process"}`
 records exceeded thresholds; `refusals_total` uses bounded account, process,
-draining or unavailable reasons. No account/profile/device/credential labels
-are exported. A single admission can increment both would-refuse dimensions.
-
-A maintainer must assign an operator and separately authorize representative
-single-node and multi-node ordinary-use pilots. Before a later enforcement
-decision, record seven consecutive days of complete coverage, including
-multi-device/profile/tab use, healthy rotation, reconnect overlap and ordinary
-restarts. Retain process high-water evidence across restarts. Required exit
-criteria are zero account/process would-refuse events, account occupancy peak
-at most 32 and process peak at most 1,024. Report draining separately. Record a
-named compatible web/Android release baseline; prospective Apple generic event
-consumers inherit the recovery contract. No generic Apple consumer is implemented
-in the reviewed source. Independent Jellyfin clients have no coordinated release
-guarantee and no implicit upgrade gate is added.
-
-Missing coverage, exceeded thresholds or incompatible clients prevent
-enforcement. Extend observation or revise the policy and repeat the seven-day
-window. These gates authorize no deployment automatically. The later reviewed
-change selecting enforcing mode remains a separate maintainer decision. No
-capacity, pilot or human acceptance result follows from source and finite tests.
-
-## Coordination with work-rate admission
-
-Socket cardinality and realtime work cost are separate controls. The work-rate
-admission change is separate from this implementation. The following ordering
-requirements apply when integrating both controls, and do not describe behavior
-provided by socket admission alone.
-
-Prepaid ticket work is not a socket reservation; quota-denied v2 tickets and
-prepaid credits stay spent. A work refusal releases a pending
-reservation; an in-socket work refusal leaves the connection and reservation
-intact. Upgrade precedes watcher startup and subscription. Combined verification
-requires both stable heads and finite composition tests.
-
-Generic event retry uses 5/10/20/30-second floors for failed/short attempts and a
-one-second floor after an accepted subscription lasts at least 30 seconds, with
-0–50% jitter. Count health from the first accepted `subscribed` acknowledgement,
-not transport open. Work refusal, shield and unavailable handling takes
-precedence; preserve immediate access-change recovery and identity fences. This
-fallback does not apply to rooms or playback.
+draining or unavailable reasons. A client that abandons its handshake is not a
+draining refusal. No account/profile/device/credential labels are exported. A
+single admission can increment both would-refuse dimensions.

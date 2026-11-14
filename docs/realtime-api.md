@@ -253,7 +253,7 @@ per account per process and 2,048 per process. Exceeding either threshold record
 would-refuse metrics and still admits the connection. This does not protect
 resources or resolve the missing quota. See
 [client socket admission](architecture/client-socket-admission.md) for the
-lifecycle, metrics and the separately authorized rollout gates.
+lifecycle and metrics.
 
 The prepared enforcing mode refuses account capacity with `429` and process
 capacity with `503`, before upgrade. Draining and missing admission dependencies
@@ -272,11 +272,8 @@ accepted for at least 30 seconds resets the ladder and uses a one-second floor.
 Add uniform independent jitter from zero to 50 percent of the floor. Raise the
 floor to a readable larger `Retry-After`; browser WebSocket failures hide response
 headers. Keep one pending retry, cancel it when background work stops or identity
-changes, and preserve immediate `access_changed` recovery. When integrating
-work-rate admission, keep its reason-specific refusal, input-shield and unavailable
-recovery ahead of this generic fallback; its structured in-socket refusal must
-keep the connection. Those work-rate behaviors are not implemented by socket
-admission alone. Room and playback clients have their own recovery contracts.
+changes, and preserve immediate `access_changed` recovery. Room and playback
+clients have their own recovery contracts.
 
 ### Access changes
 
