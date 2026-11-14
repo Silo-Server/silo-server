@@ -50,6 +50,7 @@ import { isActingAdmin } from "@/lib/permissions";
 import { AlertTriangle, CheckCircle2, CircleSlash2, Clock, Loader2, XCircle } from "lucide-react";
 import { formatRelativeTime as formatRelativeTimeBase } from "@/lib/date";
 import { useT, type Translate } from "@/i18n";
+import { formatLocale } from "@/lib/appLocale";
 
 const STATUS_CONFIG = {
   queued: {
@@ -1080,8 +1081,9 @@ function RunSummary({ run }: { run: PersonalImportRun | null }) {
             <div className="h-full w-1/3 animate-pulse rounded-full bg-amber-400" />
           </div>
           <div className="text-muted-foreground text-xs tabular-nums">
-            {/* eslint-disable-next-line formatjs/no-literal-string-in-jsx -- reworded on main; its catalog key is a follow-up */}
-            {processed.toLocaleString()} processed so far
+            {t("web.settings.historyImport.processedSoFar", {
+              processed: processed.toLocaleString(formatLocale()),
+            })}
           </div>
         </div>
       )}

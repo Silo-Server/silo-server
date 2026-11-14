@@ -838,7 +838,10 @@ export function ManualContentsPanel({
         <DndContext
           sensors={sensors}
           collisionDetection={closestCenter}
-          accessibility={{ announcements }}
+          accessibility={{
+            announcements,
+            screenReaderInstructions: { draggable: t("web.common.sortable.instructions") },
+          }}
           onDragStart={() => {
             dragOrder.current = orderSnapshot;
           }}

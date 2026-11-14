@@ -2,14 +2,9 @@ package handlers
 
 import (
 	"context"
-	"net/http"
-	"net/http/httptest"
 	"testing"
 
-	"github.com/go-chi/chi/v5"
-
-	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
-	"github.com/Silo-Server/silo-server/internal/auth"
+	"github.com/Silo-Server/silo-server/internal/models"
 )
 
 // watchlistSweepRecorder counts orphan-title sweeps and checks each runs on a
@@ -26,43 +21,27 @@ func (r *watchlistSweepRecorder) SweepOrphanTitles(ctx context.Context) error {
 }
 
 // Deleting an account drops its watchlist entries through the users foreign
-// key; both delete paths then sweep the titles left without entries.
+// key; the delete then sweeps the titles left without entries. A refused
+// delete sweeps nothing.
 func TestAdminAccountDeleteSweepsWatchlistTitles(t *testing.T) {
-	t.Run("v2 delete", func(t *testing.T) {
-		sweeper := &watchlistSweepRecorder{}
-		h := &AdminHandler{userRepo: &mutatingUserRepo{current: userAccount()}, WatchlistTitlesSweeper: sweeper}
-		if err := h.DeleteAdminAccount(claimsCtx(7), testAdminID, -1, 0); err != nil {
-			t.Fatal(err)
-		}
-		if sweeper.calls != 1 || sweeper.ctxErr != nil {
-			t.Fatalf("sweeps = %d ctxErr = %v, want one on a live context", sweeper.calls, sweeper.ctxErr)
-		}
-	})
-	t.Run("v2 refused delete", func(t *testing.T) {
-		sweeper := &watchlistSweepRecorder{}
-		h := &AdminHandler{userRepo: &mutatingUserRepo{current: adminAccount()}, WatchlistTitlesSweeper: sweeper}
-		if err := h.DeleteAdminAccount(claimsCtx(7), testAdminID, -1, 0); err == nil {
-			t.Fatal("admin deleted another admin")
-		}
-		if sweeper.calls != 0 {
-			t.Fatalf("sweeps = %d after a refused delete", sweeper.calls)
-		}
-	})
-	t.Run("v1 delete", func(t *testing.T) {
-		sweeper := &watchlistSweepRecorder{}
-		h := &AdminHandler{userRepo: &scopedKeyUserRepo{user: new(userAccount())}, WatchlistTitlesSweeper: sweeper}
-		req := httptest.NewRequest(http.MethodDelete, "/api/v1/admin/users/9", nil)
-		rctx := chi.NewRouteContext()
-		rctx.URLParams.Add("id", "9")
-		req = req.WithContext(apimw.SetClaims(context.WithValue(req.Context(), chi.RouteCtxKey, rctx),
-			&auth.Claims{UserID: 7, Role: "admin", TokenType: auth.TokenTypeAccess, SessionID: "s1"}))
-		rec := httptest.NewRecorder()
-		h.HandleDeleteUser(rec, req)
-		if rec.Code != http.StatusNoContent {
-			t.Fatalf("status = %d: %s", rec.Code, rec.Body.String())
-		}
-		if sweeper.calls != 1 {
-			t.Fatalf("sweeps = %d, want 1", sweeper.calls)
-		}
-	})
+	for _, tc := range []struct {
+		name      string
+		target    models.User
+		wantErr   bool
+		wantSweep int
+	}{
+		{name: "delete", target: userAccount(), wantSweep: 1},
+		{name: "refused delete", target: adminAccount(), wantErr: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			sweeper := &watchlistSweepRecorder{}
+			h := &AdminHandler{userRepo: &mutatingUserRepo{current: tc.target}, WatchlistTitlesSweeper: sweeper}
+			if err := h.DeleteAdminAccount(claimsCtx(7), testAdminID, -1, 0); (err != nil) != tc.wantErr {
+				t.Fatalf("err = %v, want error %v", err, tc.wantErr)
+			}
+			if sweeper.calls != tc.wantSweep || sweeper.ctxErr != nil {
+				t.Fatalf("sweeps = %d ctxErr = %v, want %d on a live context", sweeper.calls, sweeper.ctxErr, tc.wantSweep)
+			}
+		})
+	}
 }

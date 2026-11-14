@@ -107,7 +107,7 @@ turning import on forces one full read so no change skipped while sending only i
 
 ## Local changes
 
-`RatingsHandler.SetRating` and `DeleteRating`, the seam shared by v1 and v2, dispatch
+`RatingsHandler.SetRating` and `DeleteRating`, which the v2 rating operations call, dispatch
 a `LocalRatingEvent` that names the changed items but carries no values. The handler
 re-reads the current rating and sends a new or changed rating right away. A removal waits
 for the next scheduled merge, which can see whether the provider changed the rating in

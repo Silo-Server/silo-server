@@ -52,7 +52,10 @@ vi.mock("@/hooks/useAuth", () => ({
 vi.mock("@/hooks/queries/qualityPreference", () => ({
   // The resolution cap comes from the settings contract; these tests render
   // without a QueryClient, so the hook stands in for the resolved answer.
-  useQualityPreference: (fallback?: string | null) => fallback ?? null,
+  useQualityPreferenceState: (fallback?: string | null) => ({
+    preference: fallback ?? null,
+    settled: true,
+  }),
 }));
 
 vi.mock("@/hooks/useCurrentProfile", () => ({

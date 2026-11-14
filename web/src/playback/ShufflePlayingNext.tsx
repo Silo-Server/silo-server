@@ -9,6 +9,7 @@ import { useT, type Translate } from "@/i18n";
 import { useShuffle } from "@/hooks/queries/shuffles";
 import type { WatchRouteRequest } from "@/pages/watchRouteHelpers";
 import { PlayingNextScreen } from "@/player/components/PlayingNextScreen";
+import { recordAutoAdvance } from "@/player/stillWatching";
 import type { PlaybackStartTrigger } from "@/player/types";
 import { shuffleNextEpisodeRef } from "./shuffleNextEpisodeRef";
 import { useWatchPlaybackController } from "./watchPlaybackContext";
@@ -87,6 +88,7 @@ export default function ShufflePlayingNext({
         const advanced = await advanceShuffle(shuffleId, request.contentId);
         queryClient.setQueryData(shuffleKeys.detail(shuffleId), advanced);
         if (leftRef.current) return;
+        if (trigger === "automatic") recordAutoAdvance();
         controller.startPlayback(
           {
             contentId: advanced.current.content_id,

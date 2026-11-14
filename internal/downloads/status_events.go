@@ -43,25 +43,17 @@ func (s *Service) ReportStatus(ctx context.Context, userID int, profileID, devic
 	if err == nil && event.Status == StatusCompleted && s.artifacts != nil {
 		// A finished copy moves its prepared file from in use to cached and
 		// changes the device's row, so open storage views re-read. A late
-		// completion can also end the preparation it was waiting on.
+		// completion, from a device that fetched the whole file before
+		// recovery reset its row, can leave the job preparing that file again
+		// for nobody: retire it as a delete would.
 		s.artifacts.notifyStorageChanged(ctx)
 		if d.ArtifactID != "" {
 			s.artifacts.notifyPreparationChanged(ctx, d.ArtifactID)
+			s.artifacts.stopAbandonedPreparations(ctx, d)
 		}
 	}
 	return d, err
 }
-
-// expireUnneededQueuedJobSQL moves a job ($1) still waiting in the queue to
-// expired when no in-flight download needs its bytes. The row keeps the recipe
-// that finished downloads refer to. A job a worker may still hold, under its
-// own lease or the unowned one a pause leaves, finishes into the cache instead:
-// an expired row keeps its id and output path, so stopping a live encode could
-// race a later prepare-again.
-const expireUnneededQueuedJobSQL = `UPDATE download_artifacts a SET ` + expireArtifactAssignment + `, paused_at = NULL
-	WHERE a.id = $1 AND a.status IN ('queued', 'tone_map_queued', 'audio_v2_queued', 'tracks_v1_queued')
-	  AND a.lease_owner IS NULL AND (a.lease_expires_at IS NULL OR a.lease_expires_at <= now())
-	  AND NOT EXISTS (SELECT 1 FROM downloads d WHERE d.artifact_id = a.id AND ` + inFlightLinkPredicate + `)`
 
 // ReportStatus locks the existing lifecycle row. Late/equal events acknowledge
 // the current state; a report for replaced bytes cannot mutate the new revision.
@@ -109,12 +101,6 @@ func (r *Repository) ReportStatus(ctx context.Context, userID int, profileID, de
 		// waiting on it finishes, not when it was last served.
 		if _, err := tx.Exec(ctx, `UPDATE download_artifacts SET last_used_at = now() WHERE id = $1`, updated.ArtifactID); err != nil {
 			return nil, fmt.Errorf("touching completed download's artifact: %w", err)
-		}
-		// A late completion may leave a requeued job that nobody waits for.
-		if current.Status == StatusPreparing {
-			if _, err := tx.Exec(ctx, expireUnneededQueuedJobSQL, updated.ArtifactID); err != nil {
-				return nil, fmt.Errorf("expiring unneeded preparation: %w", err)
-			}
 		}
 	}
 	if err := tx.Commit(ctx); err != nil {

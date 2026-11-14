@@ -517,33 +517,6 @@ func TestPausedRoomMemberIsCorrectedAfterTwoReports(t *testing.T) {
 	}
 }
 
-// The /api/v1 room socket keeps its host band: its clients may report a
-// host's scrub instead of requesting it.
-func TestLegacySocketHostKeepsTheNarrowBand(t *testing.T) {
-	for _, legacy := range []bool{false, true} {
-		f := newBufferingRoom(t, "guest")
-		f.now = f.now.Add(10 * time.Second)
-		var conn RoomConnection = f.conns["host"]
-		if legacy {
-			conn = legacyRoomConn{f.conns["host"]}
-		}
-		f.member("host").connection = conn
-		expected := f.expected()
-		if _, err := f.s.HandleStateReportForConnection(t.Context(), registrationFor(f.repo.room.ID, 7, "host", conn), 7, "host",
-			StateReport{SessionID: "host-session", PositionSeconds: expected + 4}); err != nil {
-			t.Fatal(err)
-		}
-		moved := math.Abs(f.expected()-expected) > 2
-		if moved != legacy {
-			t.Fatalf("legacy socket %v: a 4 s host scrub moved the room = %v", legacy, moved)
-		}
-	}
-}
-
-type legacyRoomConn struct{ *recordingConn }
-
-func (legacyRoomConn) LegacyRoomProtocol() bool { return true }
-
 // Snapshots show no member's commands, so a correction alone sends the room
 // no snapshot on reconciliation.
 func TestCorrectionsDoNotBroadcastSnapshots(t *testing.T) {

@@ -3,6 +3,7 @@ import { Badge } from "@/components/ui/badge";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { useT } from "@/i18n";
+import { cn } from "@/lib/utils";
 
 interface LibraryAccessSelectorProps {
   libraries: Library[];
@@ -53,7 +54,11 @@ export function LibraryAccessSelector({
           <span className="text-muted-foreground text-xs">
             {allLabel ?? t("web.profiles.libraryAccess.allLibraries")}
           </span>
-          <Switch checked={allLibraries} onCheckedChange={handleAllLibrariesChange} />
+          <Switch
+            checked={allLibraries}
+            onCheckedChange={handleAllLibrariesChange}
+            aria-label={allLabel ?? t("web.profiles.libraryAccess.allLibraries")}
+          />
         </div>
       </div>
 
@@ -67,9 +72,15 @@ export function LibraryAccessSelector({
             libraries.map((library) => {
               const checked = value?.includes(library.id) ?? false;
               return (
-                <div
+                // The row labels its switch. Below `lg` it is 44px tall and a
+                // tap anywhere on it flips the switch; from `lg` up only the
+                // switch takes the pointer.
+                <label
                   key={library.id}
-                  className="border-border flex items-center justify-between gap-3 rounded-md border px-3 py-1.5"
+                  className={cn(
+                    "border-border flex items-center justify-between gap-3 rounded-md border px-3 py-1.5",
+                    "max-lg:min-h-11 max-lg:cursor-pointer lg:pointer-events-none",
+                  )}
                 >
                   <div className="flex min-w-0 items-center gap-2">
                     <span className="text-sm">{library.name}</span>
@@ -83,8 +94,9 @@ export function LibraryAccessSelector({
                   <Switch
                     checked={checked}
                     onCheckedChange={(nextChecked) => handleLibraryToggle(library.id, nextChecked)}
+                    className="lg:pointer-events-auto"
                   />
-                </div>
+                </label>
               );
             })
           )}

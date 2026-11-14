@@ -510,6 +510,35 @@ func TestRelayMoveRefusesANodeThatDoesNotAttestMPEGTS(t *testing.T) {
 	}
 }
 
+// TestRelayMoveKeepsTheKeyframePlaylist pins that a move asks the new node for
+// the recipe's keyframe playlist and checks its echo as a start does: the
+// player may hold the planned playlist, which FFmpeg's own does not match.
+func TestRelayMoveKeepsTheKeyframePlaylist(t *testing.T) {
+	legacy := newFakeRehomeNode(t, false)
+	f := newRehomeFixture(t, []*nodepool.Node{
+		pooledNode(1, unreachableNodeURL(t)),
+		pooledNode(2, legacy.server.URL),
+	}, "ffmpeg")
+	previous := f.handler.PlaybackConfig
+	f.handler.PlaybackConfig = func() config.PlaybackConfig {
+		cfg := previous()
+		cfg.Routing = config.DefaultPlaybackRoutingPolicy()
+		cfg.Routing.RemuxExecution = config.PlaybackExecutionWorkerOnly
+		return cfg
+	}
+	card, _ := verifiedStreamCardFromToken(f.token, f.session.ID, f.handler.JWTSecret)
+	card.PlayMethod, card.CopyFMP4RecipeVersion = streamtoken.PlayMethodCopyFMP4Transcode, playback.CopyFMP4RecipeVersion
+	card.SourceVideoCodec, card.TargetCodecVideo, card.TargetCodecAudio, card.KeyframePlaylist = "h264", "copy", "copy", true
+	f.token = f.handler.signSessionToken(*card, false)
+
+	if rr := f.segment("seg_00003.ts"); rr.Code == http.StatusOK {
+		t.Fatalf("status = %d, body = %q; want the node without the keyframe-playlist echo refused", rr.Code, rr.Body.String())
+	}
+	if start := legacy.lastStart(); legacy.starts.Load() != 1 || !start.KeyframePlaylist {
+		t.Fatalf("starts = %d, request = %+v; want one keyframe-playlist start", legacy.starts.Load(), start)
+	}
+}
+
 // TestRelayMoveRestoresStoredRecipeAfterRefusedStart pins that a candidate's
 // rollback stop, which makes the node delete the transport's stored recipe,
 // does not cost a tokenless session the only recipe it has.

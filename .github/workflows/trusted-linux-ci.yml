@@ -45,7 +45,7 @@ jobs:
             --jq '.actions_caches[] | {id, key, ref, createdAt: .created_at}' > "$RUNNER_TEMP/go-caches.json"
           cache_ids="$(jq -sr --arg ref "$GITHUB_REF" '
             map(select(.ref == $ref) | . + {
-              prefix: (.key | capture("^(?<prefix>go-(lint|test|integration|db-pins|db-auth|mod)-)").prefix)
+              prefix: (.key | capture("^(?<prefix>go-(lint|vet|test|integration|db-pins|db-auth|mod)-)").prefix)
             })
             | group_by(.prefix)[]
             | sort_by(.createdAt, .id) | reverse
@@ -360,8 +360,8 @@ jobs:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          # golangci-lint and the contract diff need the merge base to tell
-          # this branch's lines from the ones it inherited.
+          # golangci-lint needs the merge base to tell this branch's lines
+          # from the ones it inherited.
           fetch-depth: 0
           persist-credentials: false
 
@@ -447,24 +447,84 @@ jobs:
 
       - name: Check Go module tidiness without rewriting
         run: go mod tidy -diff
-      - name: Scan reachable Go vulnerabilities
-        if: github.event_name == 'schedule' || (github.event_name == 'push' && github.ref_name == 'main')
-        run: |
-          go install golang.org/x/vuln/cmd/govulncheck@v1.8.0
-          govulncheck -scan=symbol -show=verbose ./...
       # - name: Check dependency edges with depaware
       #   run: depaware ./...
       # Not measured; needs a prototype with reviewed edge allowances.
 
-      - name: Run Go lint and contract checks
+      - name: Run Go lint
         shell: bash
         env:
           LINT_BASE_REF: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event_name == 'push' && github.event.before || format('origin/{0}', github.event.repository.default_branch) }}
           LINT_BASE_MODE: ${{ github.event_name == 'pull_request' && 'pr-merge' || github.event_name == 'push' && 'revision' || 'merge-base' }}
           LINT_CHANGED_TARGET_REF: ${{ format('origin/{0}', github.event.repository.default_branch) }}
           LINT_CHANGED_FULL_TREE: ${{ (github.event_name == 'schedule' || github.repository == 'Silo-Server/silo-server' && github.ref_name == 'main') && '1' || '0' }}
+        run: make -f .ci-tools/.github/actions/ci-tools/go-checks.mk --keep-going lint
+
+      - name: Save the Go cache
+        if: success() && runner.environment == 'github-hosted' && github.ref_name == github.event.repository.default_branch && github.event_name != 'pull_request' && github.event_name != 'schedule'
+        uses: ./.github/actions/save-go-cache
+        with:
+          job-status: ${{ job.status }}
+          cache-key: ${{ steps.setup-go.outputs.cache-key }}
+
+  # Whole-tree go vet and the contract checks run beside Go lint rather than
+  # after it: golangci-lint (changed lines, then router recovery) and go vet
+  # each took about half of the old combined job, and over 15 minutes when a
+  # pull request changed go.mod and every cache missed.
+  go-vet:
+    name: Go vet and contracts
+    needs: select
+    if: ${{ !cancelled() && (needs.select.result != 'success' || needs.select.outputs.go != 'false') }}
+    runs-on: ${{ inputs.self_hosted && (github.repository == 'Silo-Server/silo-server' && ((github.event_name == 'pull_request' && contains(fromJSON(vars.SILO_CI_MEMBERS || '[]'), github.event.pull_request.user.login)) || (github.event_name != 'pull_request' && contains(fromJSON('["refs/heads/main","refs/heads/apiv2"]'), github.ref)))) && fromJSON(format('["self-hosted","linux","x64","silo-linux","silo-run-{0}-{1}","silo-job-go-vet"]', github.run_id, github.run_attempt)) || 'ubuntu-24.04' }}
+    steps:
+      - *libvips-cache-key
+      - *libvips-restore
+      - *libvips-install
+
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # The contract diff needs the merge base with the target branch.
+          fetch-depth: 0
+          persist-credentials: false
+
+      # After the PR checkout, which would otherwise clean it away, and
+      # before any PR code runs.
+      - name: Check out the CI tools from main
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: Silo-Server/silo-server
+          ref: ${{ job.workflow_sha || 'refs/heads/main' }}
+          path: .ci-tools
+          fetch-depth: 1
+          sparse-checkout: |
+            /.github/actions/ci-tools/
+            /scripts/lint-changed.sh
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: ./.github/actions/setup-go
+        id: setup-go
+        with:
+          cache-name: vet
+
+      - *libvips-save
+
+      - name: Normalize tracked source mtimes
+        run: python3 scripts/ci/content_mtimes.py
+
+      - name: Scan reachable Go vulnerabilities
+        if: github.event_name == 'schedule' || (github.event_name == 'push' && github.ref_name == 'main')
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@v1.8.0
+          govulncheck -scan=symbol -show=verbose ./...
+
+      - name: Run go vet and contract checks
+        shell: bash
+        env:
           CONTRACT_BASE_REF: ${{ github.base_ref || github.event.repository.default_branch }}
-        run: make -f .ci-tools/.github/actions/ci-tools/go-checks.mk --keep-going lint contracts
+        run: make -f .ci-tools/.github/actions/ci-tools/go-checks.mk --keep-going vet contracts
 
       - name: Save the Go cache
         if: success() && runner.environment == 'github-hosted' && github.ref_name == github.event.repository.default_branch && github.event_name != 'pull_request' && github.event_name != 'schedule'
@@ -619,7 +679,7 @@ jobs:
         run: |
           : "${SILO_TEST_DATABASE_URL:?A disposable PG17 database is required}"
           for package in migrations internal/historyimport internal/api/handlers; do
-            (cd "$package" && "$RUNNER_TEMP/race/${package##*/}.test" -test.run='^(TestHistoryImportCancellation.*|TestQueue.*|TestHistoryImportV1ProfileAuthorization)$' -test.count=1 -test.timeout=10m)
+            (cd "$package" && "$RUNNER_TEMP/race/${package##*/}.test" -test.run='^(TestHistoryImportCancellation.*|TestQueue.*|TestHistoryImportProfileAuthorizationDB)$' -test.count=1 -test.timeout=10m)
           done
 
       # 20260925144545 moves marker claims between rows that share a payload
@@ -835,7 +895,7 @@ jobs:
       # a database that already holds a break-glass account.
       - name: Test external sign-in against Postgres
         run: |
-          (cd internal/api/handlers && "$RUNNER_TEMP/race/handlers.test" -test.run='^(TestLocalLoginSettingRequiresBreakGlassDB|TestV1AdminUserChangesKeepBreakGlassDB|TestDeviceApprovalInheritsSessionProviderChainDB|TestExternalSignInAdminIdentityGuardsDB)$' -test.count=1 -test.timeout=10m)
+          (cd internal/api/handlers && "$RUNNER_TEMP/race/handlers.test" -test.run='^(TestLocalLoginSettingRequiresBreakGlassDB|TestDeviceApprovalInheritsSessionProviderChainDB|TestExternalSignInAdminIdentityGuardsDB)$' -test.count=1 -test.timeout=10m)
           (cd internal/auth && "$RUNNER_TEMP/race/auth.test" -test.run='^(TestExternalSignIn|TestProviderRecheck|TestPGOAuthStore|TestOAuthNativeFlowAcrossNodes|TestOAuthNativeStartOrigin|TestOAuthWebFlowBrowserBinding|TestOAuthUnredeemedCode|TestOAuthLinkFlow|TestOAuthForcedLink|TestLinkCredentialsIdentity|TestNetworkSignIn|TestNetworkIdentity|TestLinkNetworkIdentity|TestLocalPasswordPolicy|TestPasswordLoginRouting|TestIdentityService|TestConcurrentFirstSignInCreatesOneAccount|TestEnableAccountLocalLogin|TestSignupRefusedWhileLocalLoginIsOff|TestSignupRechecksLocalPolicyBeforeSpendingInvite).*DB$' -test.count=1 -test.timeout=10m)
           (cd internal/jellycompat && "$RUNNER_TEMP/race/jellycompat.test" -test.run='^TestLoginPINConventionStaysLocalDB$' -test.count=1 -test.timeout=10m)
           (cd internal/plugins && "$RUNNER_TEMP/race/plugins.test" -test.run='^TestUpsertAuthBindingAllows(OneEnabledProvider|NetworkProviderBesidePrimary)$' -test.count=1 -test.timeout=10m)
@@ -847,16 +907,14 @@ jobs:
           job-status: ${{ job.status }}
           cache-key: ${{ steps.setup-go.outputs.cache-key }}
 
+  # One job, not a build/checks pair: each half took one to two minutes, far
+  # under the Go jobs, and every extra job waits for a slot under the
+  # organization's hosted-runner concurrency cap, which peak hours reach.
   web:
-    name: Web (${{ matrix.part }})
-    # Consolidation and two web shards: deferred: no recorded occurrence.
+    name: Web
     needs: select
     if: ${{ !cancelled() && (needs.select.result != 'success' || needs.select.outputs.web != 'false') }}
     runs-on: ${{ inputs.self_hosted && (github.repository == 'Silo-Server/silo-server' && ((github.event_name == 'pull_request' && contains(fromJSON(vars.SILO_CI_MEMBERS || '[]'), github.event.pull_request.user.login)) || (github.event_name != 'pull_request' && contains(fromJSON('["refs/heads/main","refs/heads/apiv2"]'), github.ref)))) && fromJSON(format('["self-hosted","linux","x64","silo-linux","silo-run-{0}-{1}","silo-job-web"]', github.run_id, github.run_attempt)) || 'ubuntu-24.04' }}
-    strategy:
-      fail-fast: false
-      matrix:
-        part: [build, checks]
     defaults:
       run:
         working-directory: web
@@ -886,15 +944,16 @@ jobs:
         run: pnpm config set store-dir "${XDG_DATA_HOME:-$RUNNER_TEMP}/pnpm/store"
 
       - name: Install
+        id: install
         run: pnpm install --frozen-lockfile
 
       - name: Read the web check cache directory
-        if: matrix.part == 'checks' && runner.environment == 'github-hosted'
+        if: runner.environment == 'github-hosted'
         id: web-cache
         run: echo "path=${XDG_CACHE_HOME:-$RUNNER_TEMP}/silo-web" >> "$GITHUB_OUTPUT"
 
       - name: Restore the web check cache
-        if: matrix.part == 'checks' && runner.environment == 'github-hosted' && github.event_name == 'pull_request'
+        if: runner.environment == 'github-hosted' && github.event_name == 'pull_request'
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ steps.web-cache.outputs.path }}
@@ -902,7 +961,7 @@ jobs:
           restore-keys: web-checks-${{ runner.os }}-${{ hashFiles('web/pnpm-lock.yaml', 'web/eslint.config.*', 'web/eslint-suppressions.json', 'web/.prettierrc*', 'web/.prettierignore', 'web/prettier.config.*', 'web/tailwind.config.*') }}-
 
       - name: Restore and save the web check cache
-        if: matrix.part == 'checks' && runner.environment == 'github-hosted' && github.event_name != 'pull_request'
+        if: runner.environment == 'github-hosted' && github.event_name != 'pull_request'
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ steps.web-cache.outputs.path }}
@@ -910,7 +969,6 @@ jobs:
           restore-keys: web-checks-${{ runner.os }}-${{ hashFiles('web/pnpm-lock.yaml', 'web/eslint.config.*', 'web/eslint-suppressions.json', 'web/.prettierrc*', 'web/.prettierignore', 'web/prettier.config.*', 'web/tailwind.config.*') }}-
 
       - name: Lint and format check
-        if: matrix.part == 'checks'
         env:
           ESLINT_CACHE_ID: ${{ hashFiles('web/pnpm-lock.yaml', 'web/eslint.config.*', 'web/eslint-suppressions.json') }}
           PRETTIER_CACHE_ID: ${{ hashFiles('web/pnpm-lock.yaml', 'web/.prettierrc*', 'web/.prettierignore', 'web/prettier.config.*', 'web/tailwind.config.*') }}
@@ -924,7 +982,7 @@ jobs:
           exit "$failed"
 
       - name: Audit the pinned dependency lockfile
-        if: matrix.part == 'checks' && (github.event_name == 'schedule' || (github.event_name == 'push' && github.ref_name == 'main'))
+        if: github.event_name == 'schedule' || (github.event_name == 'push' && github.ref_name == 'main')
         run: pnpm audit --audit-level=high
       # - name: Check JSX accessibility
       #   run: pnpm exec eslint . --config eslint-a11y.config.js
@@ -936,8 +994,9 @@ jobs:
       #   run: pnpm exec knip
       # Not measured; needs a prototype defining entrypoints and public consumers.
 
+      # A lint or format failure must not hide type, build or binding errors.
       - name: Typecheck and build
-        if: matrix.part == 'build'
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
         run: |
           failed=0
           pnpm exec tsrs -b || { echo "::error::Typecheck failed"; failed=1; }
@@ -948,11 +1007,10 @@ jobs:
       # imports another chunk or index.html gains a cross-origin
       # render-blocking resource.
       - name: Check the launch bundle
-        if: matrix.part == 'build'
         run: pnpm run budget:check
 
       - name: Upload frontend bundle for image builds
-        if: matrix.part == 'build' && github.event_name == 'push' && contains(fromJSON('["refs/heads/main","refs/heads/apiv2"]'), github.ref)
+        if: github.event_name == 'push' && contains(fromJSON('["refs/heads/main","refs/heads/apiv2"]'), github.ref)
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: frontend-dist-${{ github.sha }}
@@ -964,14 +1022,14 @@ jobs:
       # the bindings check lives here rather than in a Go job, which has no
       # pnpm. It needs Go to run the generator.
       - name: Set up Go
-        if: matrix.part == 'checks'
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: '>=1.26 <1.27'
           cache: ${{ runner.environment == 'github-hosted' }}
 
       - name: Verify the generated web settings binding is current
-        if: matrix.part == 'checks'
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
         working-directory: .
         run: make verify-settings-bindings-web
 
@@ -980,20 +1038,20 @@ jobs:
       # fresh generation so the typed request boundary never drifts from the
       # spec the server serves.
       - name: Verify the generated web v2 contract types are current
-        if: matrix.part == 'checks'
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
         working-directory: .
         run: make verify-apiv2-web-types
 
 
   web-test:
-    name: Web test (${{ matrix.shard }}/4)
+    name: Web test (${{ matrix.shard }}/2)
     needs: select
     if: ${{ !cancelled() && (needs.select.result != 'success' || needs.select.outputs.web != 'false') }}
     runs-on: ${{ inputs.self_hosted && (github.repository == 'Silo-Server/silo-server' && ((github.event_name == 'pull_request' && contains(fromJSON(vars.SILO_CI_MEMBERS || '[]'), github.event.pull_request.user.login)) || (github.event_name != 'pull_request' && contains(fromJSON('["refs/heads/main","refs/heads/apiv2"]'), github.ref)))) && fromJSON(format('["self-hosted","linux","x64","silo-linux","silo-run-{0}-{1}","silo-job-web-test-{2}"]', github.run_id, github.run_attempt, matrix.shard)) || 'ubuntu-24.04' }}
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3, 4]
+        shard: [1, 2]
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -1023,15 +1081,16 @@ jobs:
 
       # Includes the appearance-cache ownership tests, which are the regression
       # guard for cross-account leaks in the localStorage warm start. The
-      # suite is split across four runners; vitest assigns files to a shard
-      # deterministically, so every file runs exactly once.
+      # suite is split across two runners, about two minutes each; vitest
+      # assigns files to a shard deterministically, so every file runs exactly
+      # once.
       - name: Test
-        run: make test-web WEBTEST_ARGS="--shard=${{ matrix.shard }}/4 --maxWorkers=4"
+        run: make test-web WEBTEST_ARGS="--shard=${{ matrix.shard }}/2 --maxWorkers=4"
 
   result:
     name: CI result
     if: always()
-    needs: [select, repo-checks, go-lint, go-test, go-integration, go-db-pins, go-db-auth, web, web-test]
+    needs: [select, repo-checks, go-lint, go-vet, go-test, go-integration, go-db-pins, go-db-auth, web, web-test]
     runs-on: ubuntu-24.04
     steps:
       - name: Check out the CI tools from main

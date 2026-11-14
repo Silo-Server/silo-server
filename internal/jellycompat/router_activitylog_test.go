@@ -108,12 +108,15 @@ func TestRouter_ActivityLog(t *testing.T) {
 		}
 	})
 
-	for _, path := range []string{
-		"/Items/abc/Images/Primary",
-		"/Videos/abc/hls/p1/0.ts",
+	for _, tc := range []struct{ method, path string }{
+		{http.MethodGet, "/Items/abc/Images/Primary"},
+		{http.MethodGet, "/Videos/abc/hls/p1/0.ts"},
+		// No route answers HEAD here, so the filter sees the path the client
+		// sent, which carries the play session ID.
+		{http.MethodHead, "/emby/videos/abc/hls/p1/0.ts"},
 	} {
-		t.Run("skips "+path, func(t *testing.T) {
-			if entries := serve(http.MethodGet, path, true); len(entries) != 0 {
+		t.Run("skips "+tc.method+" "+tc.path, func(t *testing.T) {
+			if entries := serve(tc.method, tc.path, true); len(entries) != 0 {
 				t.Fatalf("entries = %+v, want none", entries)
 			}
 		})

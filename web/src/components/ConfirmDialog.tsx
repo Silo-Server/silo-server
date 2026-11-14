@@ -32,6 +32,8 @@ interface ConfirmDialogProps {
   onCloseAutoFocus?: (event: Event) => void;
   /** Why the action didn't happen, shown in the dialog; the caller keeps it open. */
   error?: string | null;
+  /** Extra classes for the dialog's content, e.g. a page's touch-target sizing. */
+  className?: string;
 }
 
 export function ConfirmDialog({
@@ -49,6 +51,7 @@ export function ConfirmDialog({
   irreversible = false,
   onCloseAutoFocus,
   error,
+  className,
 }: ConfirmDialogProps) {
   const t = useT();
   const confirmText = confirmLabel ?? t("web.shell.confirmDialog.confirm");
@@ -85,7 +88,11 @@ export function ConfirmDialog({
   );
   return (
     <AlertDialog open={open} onOpenChange={onOpenChange}>
-      <AlertDialogContent aria-describedby={describedBy} onCloseAutoFocus={onCloseAutoFocus}>
+      <AlertDialogContent
+        aria-describedby={describedBy}
+        onCloseAutoFocus={onCloseAutoFocus}
+        className={className}
+      >
         <AlertDialogHeader>
           <AlertDialogTitle>{title}</AlertDialogTitle>
           <AlertDialogDescription>

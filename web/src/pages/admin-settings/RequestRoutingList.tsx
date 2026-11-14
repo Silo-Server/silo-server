@@ -519,7 +519,10 @@ export function RequestRoutingList({
           sensors={sortable.sensors}
           collisionDetection={sortable.collisionDetection}
           onDragEnd={sortable.handleDragEnd}
-          accessibility={{ announcements }}
+          accessibility={{
+            announcements,
+            screenReaderInstructions: { draggable: t("web.common.sortable.instructions") },
+          }}
         >
           <SortableContext items={ids} strategy={verticalListSortingStrategy}>
             <ol

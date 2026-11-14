@@ -24,7 +24,8 @@ import type { ExecutionResult, TriggerConfig } from "@/api/types";
 import { describeTrigger } from "@/lib/taskTrigger";
 import { formatDateTime as formatPreferredDateTime } from "@/lib/datetime";
 import { clampTaskProgress, formatTaskProgress } from "@/lib/taskProgress";
-import { useT, type MessageKey, type Translate } from "@/i18n";
+import { useServerText, useT, type MessageKey, type Translate } from "@/i18n";
+import { taskText } from "@/lib/taskText";
 import { TriggerFormRow } from "./AdminTaskTriggerForm";
 
 const EM_DASH = "—";
@@ -32,6 +33,7 @@ const EM_DASH = "—";
 const REFRESH_REASON_LABELS: Record<string, MessageKey> = {
   episode_incomplete: "web.admin.tasks.refreshReason.episodeIncomplete",
   stale_provider_id: "web.admin.tasks.refreshReason.staleProviderId",
+  provider_id_incomplete: "web.admin.tasks.refreshReason.providerIdIncomplete",
   refresh_failure: "web.admin.tasks.refreshReason.refreshFailure",
   core_metadata_incomplete: "web.admin.tasks.refreshReason.coreMetadataIncomplete",
   trailers_requested: "web.admin.tasks.refreshReason.trailersRequested",
@@ -456,6 +458,7 @@ function HistoryRow({
 
 export default function AdminTaskDetail() {
   const t = useT();
+  const serverText = useServerText();
   const { key } = useParams<{ key: string }>();
   const { data: cachedTask, isLoading, isFetching, error, refetch } = useTask(key!);
   // A 404 outranks a cached task: a refetch that finds it gone must not leave
@@ -528,11 +531,13 @@ export default function AdminTaskDetail() {
               {t("web.admin.tasks.detail.breadcrumb.tasks")}
             </Link>
             <ChevronRight className="h-3.5 w-3.5" />
-            <span className="text-foreground font-medium">{task.name}</span>
+            <span className="text-foreground font-medium">
+              {taskText(serverText, task, "name")}
+            </span>
           </nav>
         }
-        title={task.name}
-        subtitle={task.description}
+        title={taskText(serverText, task, "name")}
+        subtitle={taskText(serverText, task, "description")}
         actions={
           <>
             <Badge variant="outline">{task.category}</Badge>

@@ -2,9 +2,11 @@ package apiv2
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -59,7 +61,7 @@ func (f *fakePasswordResets) IssuePasswordReset(_ context.Context, in passwordre
 	}
 	result := &passwordreset.IssueResult{ExpiresAt: time.Date(2099, 1, 1, 0, 0, 0, 0, time.UTC)}
 	if in.Delivery == passwordreset.DeliveryLink {
-		result.URL = "https://server.example.invalid/reset-password/synthetic-token"
+		result.URL = "https://server.example.invalid/reset-password#synthetic-token"
 		return result, nil
 	}
 	// Account 8 stands for a mail server that did not confirm delivery.
@@ -105,7 +107,7 @@ func TestAdminPasswordResetDelivery(t *testing.T) {
 	path := Prefix + "/admin/users/7/password-reset"
 
 	link := do(t, h, http.MethodPost, path, `{"delivery":"link"}`, actingRequestAdmin)
-	if link.Code != http.StatusCreated || !strings.Contains(link.Body.String(), "/reset-password/synthetic-token") || !strings.Contains(link.Body.String(), `"delivery_status":"not_requested"`) {
+	if link.Code != http.StatusCreated || !strings.Contains(link.Body.String(), "/reset-password#synthetic-token") || !strings.Contains(link.Body.String(), `"delivery_status":"not_requested"`) {
 		t.Fatal(link.Code, link.Body.String())
 	}
 	if f.issued == nil || f.issued.UserID != 7 || f.issued.IssuedBy == 0 || f.issued.Delivery != passwordreset.DeliveryLink {
@@ -163,8 +165,60 @@ func TestPublicPasswordReset(t *testing.T) {
 	}
 }
 
+// The path forms keep answering, for callers that predate the body forms, and
+// announce their retirement; the body forms do not.
+func TestPasswordResetPathFormsAreDeprecated(t *testing.T) {
+	h := passwordResetTestHandler(fixturePasswordResets())
+	old := do(t, h, http.MethodGet, Prefix+"/password-resets/live", "", nil)
+	if old.Code != http.StatusOK || old.Header().Get(DeprecationHeader) == "" {
+		t.Fatal(old.Code, old.Header())
+	}
+	body := do(t, h, http.MethodPost, Prefix+"/password-resets/lookup", `{"token":"live"}`, nil)
+	if body.Code != http.StatusOK || body.Header().Get(DeprecationHeader) != "" {
+		t.Fatal(body.Code, body.Header())
+	}
+}
+
+// A used or expired link is a 404 and an unconfigured server a 409 on every
+// link-token operation. Operations with no path parameter get no 404 from
+// the registry, so a client generated from the document would otherwise not
+// expect the ordinary dead-link answer.
+func TestLinkTokenOperationsDeclareTheirProblems(t *testing.T) {
+	raw, err := GenerateOpenAPI()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var doc struct {
+		Paths map[string]map[string]struct {
+			Responses map[string]json.RawMessage `json:"responses"`
+		} `json:"paths"`
+		Components struct {
+			Schemas map[string]struct {
+				Required []string `json:"required"`
+			} `json:"schemas"`
+		} `json:"components"`
+	}
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{"/password-resets/lookup", "/password-resets/complete", "/invitations/lookup", "/invitations/accept"} {
+		responses := doc.Paths[Prefix+path]["post"].Responses
+		for _, status := range []string{"404", "409", "429"} {
+			if _, ok := responses[status]; !ok {
+				t.Errorf("POST %s does not declare %s", path, status)
+			}
+		}
+	}
+	// Servers that predate the body operations omit token_in_body, so a
+	// client must be able to decode the capability without it.
+	if slices.Contains(doc.Components.Schemas["InvitationCapabilities"].Required, "token_in_body") {
+		t.Error("token_in_body is required; older servers omit it")
+	}
+}
+
 func TestPasswordResetsNotConfigured(t *testing.T) {
 	h := NewHandler(requestDeps(fixtureRequests()))
+	requireProblem(t, do(t, h, http.MethodPost, Prefix+"/password-resets/lookup", `{"token":"live"}`, nil), TypeCapabilityNotConfigured)
 	requireProblem(t, do(t, h, http.MethodGet, Prefix+"/password-resets/live", "", nil), TypeCapabilityNotConfigured)
 	requireProblem(t, do(t, h, http.MethodPost, Prefix+"/admin/users/7/password-reset", `{"delivery":"link"}`, actingRequestAdmin), TypeCapabilityNotConfigured)
 	requireProblem(t, do(t, h, http.MethodPost, Prefix+"/password-resets", `{"login":"alice"}`, nil), TypeCapabilityNotConfigured)

@@ -16,6 +16,7 @@ import {
   adminAuthorityScope,
   requireAdminAuthority,
 } from "./adminAuthority";
+import { t } from "@/i18n";
 
 type SourceWire = components["schemas"]["AdminHistoryImportSource"];
 type MappingWire = components["schemas"]["AdminHistoryImportMapping"];
@@ -32,7 +33,7 @@ export const adminImportScope = adminAuthorityScope;
 export const importAuthority = captureAdminAuthority;
 const checkAuthority = requireAdminAuthority;
 function tag(etag?: string) {
-  if (!etag) throw new Error("Reload this configuration before saving.");
+  if (!etag) throw new Error(t("web.admin.errors.historyImportConfigReload"));
   return etag;
 }
 export const isAdminImportConflict = (error: unknown) =>
@@ -82,8 +83,7 @@ async function walk<T>(
     rows.push(...page.items);
     if (!page.page?.has_more) break;
     const next = page.page.next_cursor;
-    if (!next || seen.has(next))
-      throw new Error("Incomplete history import page. Reload to try again.");
+    if (!next || seen.has(next)) throw new Error(t("web.admin.errors.historyImportPageIncomplete"));
     seen.add(next);
     cursor = next;
   } while (rows.length < max);
@@ -294,9 +294,7 @@ export async function createAdminImportRun(
   });
   const hint = h.run();
   if (hint.location !== `/api/v2/admin/history-imports/runs/${encodeURIComponent(body.id)}`)
-    throw new Error(
-      "The accepted import did not include its expected status location. Refresh runs before trying again.",
-    );
+    throw new Error(t("web.admin.errors.historyImportStatusMissing"));
   return { ...adminRunOf(body), ...hint };
 }
 export async function getAdminImportRunsPage(
@@ -310,7 +308,7 @@ export async function getAdminImportRunsPage(
     profileContext,
   });
   if (result.page?.has_more && (!result.page.next_cursor || result.page.next_cursor === cursor))
-    throw new Error("Incomplete history import page. Reload to try again.");
+    throw new Error(t("web.admin.errors.historyImportPageIncomplete"));
   checkAuthority(profileContext);
   return {
     items: result.items.map(adminRunOf),

@@ -242,6 +242,15 @@ func (h *ProfileHandler) createProfileWithSettingsSync(
 		if err := tx.CreateProfile(ctx, profile); err != nil {
 			return err
 		}
+		// Both stores' CreateProfile store show_forced_subtitles false as
+		// true, the default other callers rely on. Turn it off in this
+		// transaction, so a failure can't leave the profile behind (#2743).
+		if !profile.ShowForcedSubtitles {
+			off := false
+			if err := tx.UpdateProfile(ctx, profile.ID, userstore.UpdateProfileInput{ShowForcedSubtitles: &off}); err != nil {
+				return err
+			}
+		}
 		inherited, err := planInheritedLegacyUserSettings(ctx, tx)
 		if err != nil {
 			return err

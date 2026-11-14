@@ -151,8 +151,9 @@ export function TriggerFormRow({ trigger, onChange, onRemove }: TriggerFormRowPr
         )}
 
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-          {/* eslint-disable-next-line formatjs/no-literal-string-in-jsx -- enforced since main; the catalog's "(not enforced)" wording is a follow-up */}
-          <label className="text-muted-foreground text-xs whitespace-nowrap">Max runtime:</label>
+          <label className="text-muted-foreground text-xs whitespace-nowrap">
+            {t("web.admin.tasks.detail.maxRuntimeLabel")}
+          </label>
           <Input
             type="number"
             min={0}
