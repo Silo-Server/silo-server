@@ -33,7 +33,6 @@ func TestClientSocketMountedSurfacesShareAccountAndProcessCapacity(t *testing.T)
 		t.Fatal(err)
 	}
 	router := http.NewServeMux()
-	router.HandleFunc("/v1", native.HandleWebSocket)
 	router.HandleFunc("/v2", v2.ServeHTTP)
 	router.Handle("/", jellycompat.NewRouter(jellycompat.Dependencies{Config: &config.Config{}, SessionStore: sessions, ClientSocketAdmission: admission}))
 	for _, processFull := range []bool{false, true} {
@@ -50,7 +49,7 @@ func TestClientSocketMountedSurfacesShareAccountAndProcessCapacity(t *testing.T)
 			}
 			want = 503
 		}
-		for _, path := range []string{"/v1", "/v2", "/Emby/Socket"} {
+		for _, path := range []string{"/v2", "/Emby/Socket"} {
 			r := httptest.NewRequest(http.MethodGet, path, nil)
 			r.Header.Set("Connection", "Upgrade")
 			r.Header.Set("Upgrade", "websocket")

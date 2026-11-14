@@ -1,9 +1,10 @@
 import { useState } from "react";
 import { toast } from "sonner";
 import { captureProfileRequestContext } from "@/api/client";
-import { v2, V2ProblemError } from "@/api/v2/request";
+import { problemDisplayText, v2, V2ProblemError } from "@/api/v2/request";
 import { useUserLibraries } from "@/hooks/queries/libraries";
 import { useEffectiveSettings } from "@/hooks/queries/settingValues";
+import { t } from "@/i18n";
 import {
   HOME_LAYOUT_MAX_LENGTH,
   buildHomeLayoutFile,
@@ -30,9 +31,14 @@ export function layoutPageQuery(scope: HomeLayoutScope, libraryId?: number) {
 
 export function layoutProblemMessage(error: unknown): string {
   if (error instanceof V2ProblemError) {
-    return error.problem.detail?.trim() || error.problem.title || "request failed";
+    return problemDisplayText(
+      error.problem,
+      error.problem.detail?.trim() ||
+        error.problem.title ||
+        t("web.home.layout.transfer.requestFailed"),
+    );
   }
-  return error instanceof Error ? error.message : "request failed";
+  return error instanceof Error ? error.message : t("web.home.layout.transfer.requestFailed");
 }
 
 function downloadJson(fileName: string, blob: Blob) {
@@ -77,21 +83,17 @@ export function useHomeLayoutExport(): HomeLayoutExport {
   async function run() {
     if (!libraries) return;
     if (homePreferences.isError) {
-      toast.error(
-        "Couldn't read this profile's Home preferences, so the export would be incomplete. Reload the page and try again.",
-      );
+      toast.error(t("web.home.layout.transfer.preferencesFailed"));
       return;
     }
     if (librariesQuery.error) {
-      toast.error(
-        "Couldn't read which libraries this profile shows, so the export would fail. Reload the page and try again.",
-      );
+      toast.error(t("web.home.layout.transfer.librariesFailed"));
       return;
     }
     // Every read goes to the profile active now, even if it changes mid-export.
     const profileContext = captureProfileRequestContext();
     if (!profileContext) {
-      toast.error("Choose a profile before exporting its home layout.");
+      toast.error(t("web.home.layout.transfer.noProfile"));
       return;
     }
     setRunning(true);
@@ -118,15 +120,15 @@ export function useHomeLayoutExport(): HomeLayoutExport {
       });
       const blob = new Blob([`${JSON.stringify(file, null, 2)}\n`], { type: "application/json" });
       if (blob.size > HOME_LAYOUT_MAX_LENGTH) {
-        toast.error(
-          "This home layout is too large to export. Remove some custom sections and try again.",
-        );
+        toast.error(t("web.home.layout.transfer.tooLargeToExport"));
         return;
       }
       downloadJson(`silo-home-layout-${exportedAt.toISOString().slice(0, 10)}.json`, blob);
-      toast.success("Home layout exported");
+      toast.success(t("web.home.layout.transfer.exported"));
     } catch (error) {
-      toast.error(`Failed to export the home layout: ${layoutProblemMessage(error)}`);
+      toast.error(
+        t("web.home.layout.transfer.exportFailed", { reason: layoutProblemMessage(error) }),
+      );
     } finally {
       setRunning(false);
     }

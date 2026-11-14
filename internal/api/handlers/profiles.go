@@ -2,7 +2,6 @@ package handlers
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -10,7 +9,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"golang.org/x/crypto/bcrypt"
@@ -21,6 +19,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/auditmutation"
 	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/auth/passwordhash"
+	"github.com/Silo-Server/silo-server/internal/blobstore"
 	evt "github.com/Silo-Server/silo-server/internal/events"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/playback/connectionstore"
@@ -42,6 +41,9 @@ type ProfileHandler struct {
 	AvatarStore    profileAvatarStore
 	AvatarResolver artworkurl.Resolver
 	AvatarTTL      time.Duration
+	// ArtworkStore holds personal collection artwork; a profile delete
+	// removes the artwork of the collections it deleted.
+	ArtworkStore blobstore.Store
 	// DeviceLibraryPurger removes a deleted profile's device rows (and, via
 	// cascade, its managed downloads and subscriptions). Profiles may live
 	// outside Postgres, so no FK cascade covers these shared tables.
@@ -115,7 +117,10 @@ type ProfileCreateRequest struct {
 	MaxAdvisoryAge int `json:"-"`
 	// RequireAdvisoryAge hides titles with no advisory age. v2-only, like
 	// MaxAdvisoryAge.
-	RequireAdvisoryAge         bool   `json:"-"`
+	RequireAdvisoryAge bool `json:"-"`
+	// RequestsBlocked keeps the profile out of requests and request
+	// discovery. v2-only (json:"-"); v2 carries it as requests_allowed.
+	RequestsBlocked            bool   `json:"-"`
 	QualityPreference          string `json:"quality_preference,omitempty"`
 	Language                   string `json:"language,omitempty"`
 	PreferredMetadataLanguage  string `json:"preferred_metadata_language,omitempty"`
@@ -142,7 +147,9 @@ type ProfileUpdateRequest struct {
 	// it (json:"-").
 	MaxAdvisoryAge *int `json:"-"`
 	// RequireAdvisoryAge: nil leaves it untouched. v2-only (json:"-").
-	RequireAdvisoryAge         *bool   `json:"-"`
+	RequireAdvisoryAge *bool `json:"-"`
+	// RequestsBlocked: nil leaves it untouched. v2-only (json:"-").
+	RequestsBlocked            *bool   `json:"-"`
 	QualityPreference          *string `json:"quality_preference,omitempty"`
 	Language                   *string `json:"language,omitempty"`
 	PreferredMetadataLanguage  *string `json:"preferred_metadata_language,omitempty"`
@@ -156,10 +163,6 @@ type ProfileUpdateRequest struct {
 	LibraryRestrictionsEnabled *bool   `json:"library_restrictions_enabled,omitempty"`
 	AllowedLibraryIDs          *[]int  `json:"allowed_library_ids,omitempty"`
 	MaxPlaybackQuality         *string `json:"max_playback_quality,omitempty"`
-}
-
-type verifyPINRequest struct {
-	PIN string `json:"pin"`
 }
 
 type ProfileView struct {
@@ -176,7 +179,9 @@ type ProfileView struct {
 	// so only v2 emits it (json:"-").
 	MaxAdvisoryAge int `json:"-"`
 	// RequireAdvisoryAge hides titles with no advisory age. v2-only (json:"-").
-	RequireAdvisoryAge         bool   `json:"-"`
+	RequireAdvisoryAge bool `json:"-"`
+	// RequestsBlocked keeps the profile out of requests. v2-only (json:"-").
+	RequestsBlocked            bool   `json:"-"`
 	QualityPreference          string `json:"quality_preference,omitempty"`
 	Language                   string `json:"language,omitempty"`
 	PreferredMetadataLanguage  string `json:"preferred_metadata_language,omitempty"`
@@ -198,31 +203,9 @@ type ProfileView struct {
 type ProfileListView struct {
 	Profiles            []ProfileView `json:"profiles"`
 	AvatarUploadEnabled bool          `json:"avatar_upload_enabled"`
-}
-
-type verifyPINResponse struct {
-	Valid        bool   `json:"valid"`
-	ProfileToken string `json:"profile_token,omitempty"`
-	ExpiresAt    string `json:"expires_at,omitempty"`
-}
-
-// canManageHouseholdProfiles reports whether the caller may create/update/delete
-// profiles belonging to their user.
-//
-// The rule lives in household.go so the settings routes can apply the same one:
-// a household parent who may edit a child's profile may also edit that child's
-// device settings, and two definitions of "is this the household parent" would
-// eventually disagree.
-func (h *ProfileHandler) canManageHouseholdProfiles(r *http.Request, store userstore.UserStore) (bool, error) {
-	return canManageHousehold(r, store, h.ProfileTokens)
-}
-
-func writeProfileManagementPermissionError(w http.ResponseWriter, err error) {
-	if errors.Is(err, access.ErrProfileUnverified) {
-		writeError(w, http.StatusForbidden, "forbidden", "Profile management requires verifying the primary profile PIN")
-		return
-	}
-	writeError(w, http.StatusInternalServerError, "internal_error", "Failed to check profile permissions")
+	// MaxProfiles is the household profile limit, 0 when it could not be
+	// read. Only v2 listProfiles reports it: the frozen v1 body leaves it out.
+	MaxProfiles int `json:"-"`
 }
 
 // profileNameConflicts reports whether a profile other than excludeID already
@@ -257,6 +240,34 @@ func profileLimitReached(limit int) *APIError {
 		fmt.Sprintf("This account has reached its profile limit (%d)", limit))
 }
 
+// householdProfileLimit is the account's household profile limit from its
+// effective access policy, or 0 when no limit can be read (no user
+// repository, or no such account). CreateProfile enforces it and
+// ListProfiles reports it, so the limit a client shows is the one a create
+// meets.
+func (h *ProfileHandler) householdProfileLimit(ctx context.Context, userID int) (int, *APIError) {
+	if h.UserRepo == nil {
+		return 0, nil
+	}
+	user, err := h.UserRepo.GetByID(ctx, userID)
+	if err != nil {
+		slog.WarnContext(ctx, "loading the account for its profile limit failed", "component", "api", "user_id", userID, "error", err)
+		return 0, apiError(http.StatusInternalServerError, "internal_error", "Failed to load user")
+	}
+	if user == nil {
+		return 0, nil
+	}
+	effective, err := access.EffectivePolicyForUser(ctx, user, h.AccessGroups)
+	if err != nil {
+		slog.WarnContext(ctx, "resolving the account's profile limit failed", "component", "api", "user_id", userID, "error", err)
+		return 0, apiError(http.StatusInternalServerError, "internal_error", "Failed to load the account's profile limit")
+	}
+	if effective.MaxProfiles < 1 {
+		return 0, nil
+	}
+	return effective.MaxProfiles, nil
+}
+
 // invalidAdvisoryAgeLimit is the field error for an advisory-age limit outside
 // the storable range.
 func invalidAdvisoryAgeLimit() *APIError {
@@ -268,35 +279,34 @@ func invalidAdvisoryAgeLimit() *APIError {
 // only touches fields the user is allowed to change on their own profiles.
 // Admin-only fields (access policy: library restrictions, content rating,
 // advisory-age limit and its strictness, playback-quality cap, child-profile
-// flag) must be
-// rejected for non-admins.
+// flag, requests block) must be rejected for non-admins.
 func isAllowedSelfServiceProfileUpdate(req ProfileUpdateRequest) bool {
 	return req.IsChild == nil &&
 		req.MaxContentRating == nil &&
 		req.MaxAdvisoryAge == nil &&
 		req.RequireAdvisoryAge == nil &&
+		req.RequestsBlocked == nil &&
 		req.LibraryRestrictionsEnabled == nil &&
 		req.AllowedLibraryIDs == nil &&
 		req.MaxPlaybackQuality == nil
 }
 
-// --- Handler methods ---
-
-// HandleListProfiles handles GET /profiles.
-func (h *ProfileHandler) HandleListProfiles(w http.ResponseWriter, r *http.Request) {
-	userID := apimw.GetUserID(r.Context())
-	if userID == 0 {
-		writeError(w, http.StatusUnauthorized, "unauthorized", "Authentication required")
-		return
+// primaryLibraryLimitError rejects a library limit on the primary profile. The
+// primary inherits its account's libraries (access.ProfileLibraryLimit) and
+// hides the ones it doesn't want instead; turning the limit off, or an empty
+// allowlist, stays accepted so a client that always sends both still saves.
+func primaryLibraryLimitError(enabled bool, allowed []int) *APIError {
+	const message = "The primary profile can't be limited to some libraries; it can hide libraries instead"
+	switch {
+	case enabled:
+		return fieldError("library_restrictions_enabled", message)
+	case len(allowed) > 0:
+		return fieldError("allowed_library_ids", message)
 	}
-
-	resp, err := h.ListProfiles(r.Context(), userID)
-	if err != nil {
-		writeAPIError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, resp)
+	return nil
 }
+
+// --- Handler methods ---
 
 // ListProfiles lists the account's household. v1 GET /profiles and v2
 // listProfiles both call it; a failure is an *APIError carrying the v1
@@ -310,9 +320,16 @@ func (h *ProfileHandler) ListProfiles(ctx context.Context, userID int) (ProfileL
 	if err != nil {
 		return ProfileListView{}, apiError(http.StatusInternalServerError, "internal_error", "Failed to list profiles")
 	}
+	// A limit that cannot be read leaves MaxProfiles at 0 rather than failing
+	// the list: the picker needs the profiles more than the limit.
+	maxProfiles, limitErr := h.householdProfileLimit(ctx, userID)
+	if limitErr != nil {
+		maxProfiles = 0
+	}
 	return ProfileListView{
 		Profiles:            h.toProfileResponses(ctx, store, profiles),
 		AvatarUploadEnabled: h.AvatarStore != nil,
+		MaxProfiles:         maxProfiles,
 	}, nil
 }
 
@@ -375,39 +392,6 @@ func manageHouseholdAs(
 		return true, nil, nil
 	}
 	return householdManagerAs(ctx, store, activeProfileID, verify)
-}
-
-// HandleCreateProfile handles POST /profiles.
-func (h *ProfileHandler) HandleCreateProfile(w http.ResponseWriter, r *http.Request) {
-	userID := apimw.GetUserID(r.Context())
-	if userID == 0 {
-		writeError(w, http.StatusUnauthorized, "unauthorized", "Authentication required")
-		return
-	}
-
-	var req ProfileCreateRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "Invalid request body")
-		return
-	}
-	created, err := h.CreateProfile(r.Context(), ProfileCreateCommand{
-		UserID:          userID,
-		ActiveProfileID: activeProfileIDOf(r),
-		Request:         req,
-		VerifyProfile: func(profile *userstore.Profile) error {
-			return verifyProfileTokenFor(r, h.ProfileTokens, profile)
-		},
-	})
-	if err != nil {
-		var apiErr *APIError
-		if errors.As(err, &apiErr) && apiErr.Code == codeProfileManagement {
-			writeProfileManagementPermissionError(w, apiErr.cause)
-			return
-		}
-		writeAPIError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusCreated, created)
 }
 
 // ProfileCreateCommand is a profile creation with its request already parsed
@@ -495,32 +479,27 @@ func (h *ProfileHandler) CreateProfile(ctx context.Context, cmd ProfileCreateCom
 	// admin bootstrap creations must leave those fields at their defaults.
 	if isBootstrap && !apimw.IsAdmin(ctx) &&
 		(req.IsChild || req.MaxContentRating != "" || req.MaxAdvisoryAge != 0 || req.RequireAdvisoryAge ||
+			req.RequestsBlocked ||
 			req.LibraryRestrictionsEnabled || len(req.AllowedLibraryIDs) > 0 ||
 			req.MaxPlaybackQuality != "") {
 		return none, apiError(http.StatusForbidden, "forbidden", "Profile access settings require the primary profile or admin access")
+	}
+	// The first profile becomes the primary.
+	if isBootstrap {
+		if apiErr := primaryLibraryLimitError(req.LibraryRestrictionsEnabled, req.AllowedLibraryIDs); apiErr != nil {
+			return none, apiErr
+		}
 	}
 	// profileLimit is the account's household limit (0 = unlimited). This
 	// early check answers a full household before the name check, as it always
 	// has; the guarantee under concurrency is the re-count inside the creating
 	// transaction (createProfileWithSettingsSync).
-	profileLimit := 0
-	if h.UserRepo != nil {
-		user, err := h.UserRepo.GetByID(ctx, userID)
-		if err != nil {
-			return none, apiError(http.StatusInternalServerError, "internal_error", "Failed to load user")
-		}
-		if user != nil {
-			effective, err := access.EffectivePolicyForUser(ctx, user, h.AccessGroups)
-			if err != nil {
-				return none, apiError(http.StatusInternalServerError, "internal_error", "Failed to load the account's profile limit")
-			}
-			if effective.MaxProfiles >= 1 {
-				profileLimit = effective.MaxProfiles
-			}
-			if profileLimit >= 1 && len(existingProfiles) >= profileLimit {
-				return none, profileLimitReached(profileLimit)
-			}
-		}
+	profileLimit, limitErr := h.householdProfileLimit(ctx, userID)
+	if limitErr != nil {
+		return none, limitErr
+	}
+	if profileLimit >= 1 && len(existingProfiles) >= profileLimit {
+		return none, profileLimitReached(profileLimit)
 	}
 
 	if profileNameConflicts(existingProfiles, req.Name, "") {
@@ -558,6 +537,7 @@ func (h *ProfileHandler) CreateProfile(ctx context.Context, cmd ProfileCreateCom
 		MaxContentRating:           req.MaxContentRating,
 		MaxAdvisoryAge:             req.MaxAdvisoryAge,
 		RequireAdvisoryAge:         req.RequireAdvisoryAge,
+		RequestsBlocked:            req.RequestsBlocked,
 		QualityPreference:          req.QualityPreference,
 		Language:                   req.Language,
 		PreferredMetadataLanguage:  req.PreferredMetadataLanguage,
@@ -592,61 +572,7 @@ func (h *ProfileHandler) CreateProfile(ctx context.Context, cmd ProfileCreateCom
 	}
 	created := *createdPtr
 
-	if req.ShowForcedSubtitles != nil && !*req.ShowForcedSubtitles {
-		if err := store.UpdateProfile(ctx, created.ID, userstore.UpdateProfileInput{
-			ShowForcedSubtitles: req.ShowForcedSubtitles,
-		}); err != nil {
-			return none, apiError(http.StatusInternalServerError, "internal_error", "Failed to set forced subtitle preference")
-		}
-		p, err := store.GetProfile(ctx, created.ID)
-		if err != nil || p == nil {
-			return none, apiError(http.StatusInternalServerError, "internal_error", "Failed to retrieve profile after forced subtitle update")
-		}
-		created = *p
-	}
-
 	return h.toProfileResponse(ctx, store, created), nil
-}
-
-// HandleUpdateProfile handles PUT /profiles/{id}.
-func (h *ProfileHandler) HandleUpdateProfile(w http.ResponseWriter, r *http.Request) {
-	userID := apimw.GetUserID(r.Context())
-	if userID == 0 {
-		writeError(w, http.StatusUnauthorized, "unauthorized", "Authentication required")
-		return
-	}
-
-	profileID := chi.URLParam(r, "id")
-	if profileID == "" {
-		writeError(w, http.StatusBadRequest, "bad_request", "Profile ID is required")
-		return
-	}
-
-	var req ProfileUpdateRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "Invalid request body")
-		return
-	}
-	resp, err := h.UpdateProfile(r.Context(), ProfileUpdateCommand{
-		UserID:          userID,
-		ProfileID:       profileID,
-		ActiveProfileID: activeProfileIDOf(r),
-		Request:         req,
-		VerifyProfile: func(profile *userstore.Profile) error {
-			return verifyProfileTokenFor(r, h.ProfileTokens, profile)
-		},
-	})
-	if err != nil {
-		var apiErr *APIError
-		if errors.As(err, &apiErr) && apiErr.Code == codeProfileManagement {
-			writeProfileManagementPermissionError(w, apiErr.cause)
-			return
-		}
-		writeAPIError(w, err)
-		return
-	}
-
-	writeJSON(w, http.StatusOK, resp)
 }
 
 // ProfileUpdateCommand is a profile update with its request already parsed
@@ -725,6 +651,16 @@ func (h *ProfileHandler) UpdateProfile(ctx context.Context, cmd ProfileUpdateCom
 		}
 	}
 
+	if currentProfile.IsPrimary {
+		var allowed []int
+		if req.AllowedLibraryIDs != nil {
+			allowed = *req.AllowedLibraryIDs
+		}
+		if apiErr := primaryLibraryLimitError(req.LibraryRestrictionsEnabled != nil && *req.LibraryRestrictionsEnabled, allowed); apiErr != nil {
+			return none, apiErr
+		}
+	}
+
 	if req.Name != nil {
 		// Normalize to the trimmed form up front: the conflict check compares
 		// it and the store persists it, so " Laura " never lands verbatim.
@@ -762,6 +698,7 @@ func (h *ProfileHandler) UpdateProfile(ctx context.Context, cmd ProfileUpdateCom
 		MaxContentRating:           req.MaxContentRating,
 		MaxAdvisoryAge:             req.MaxAdvisoryAge,
 		RequireAdvisoryAge:         req.RequireAdvisoryAge,
+		RequestsBlocked:            req.RequestsBlocked,
 		QualityPreference:          req.QualityPreference,
 		Language:                   req.Language,
 		PreferredMetadataLanguage:  req.PreferredMetadataLanguage,
@@ -834,41 +771,6 @@ func profileManagementError(err error) *APIError {
 	return out
 }
 
-// HandleDeleteProfile handles DELETE /profiles/{id}.
-func (h *ProfileHandler) HandleDeleteProfile(w http.ResponseWriter, r *http.Request) {
-	userID := apimw.GetUserID(r.Context())
-	if userID == 0 {
-		writeError(w, http.StatusUnauthorized, "unauthorized", "Authentication required")
-		return
-	}
-
-	profileID := chi.URLParam(r, "id")
-	if profileID == "" {
-		writeError(w, http.StatusBadRequest, "bad_request", "Profile ID is required")
-		return
-	}
-
-	err := h.DeleteProfile(r.Context(), ProfileDeleteCommand{
-		UserID:          userID,
-		ProfileID:       profileID,
-		ActiveProfileID: activeProfileIDOf(r),
-		VerifyProfile: func(profile *userstore.Profile) error {
-			return verifyProfileTokenFor(r, h.ProfileTokens, profile)
-		},
-	})
-	if err != nil {
-		var apiErr *APIError
-		if errors.As(err, &apiErr) && apiErr.Code == codeProfileManagement {
-			writeProfileManagementPermissionError(w, apiErr.cause)
-			return
-		}
-		writeAPIError(w, err)
-		return
-	}
-
-	w.WriteHeader(http.StatusNoContent)
-}
-
 // ProfileDeleteCommand is a profile deletion with its caller already reduced
 // to an identity.
 type ProfileDeleteCommand struct {
@@ -933,13 +835,14 @@ func (h *ProfileHandler) DeleteProfile(ctx context.Context, cmd ProfileDeleteCom
 	var audit *auditmutation.Entry
 	var auditErr error
 	var deleteErr error
+	var deletedCollections []string
 	if deleter, ok := store.(userstore.AuditedProfileDeleter); ok && auditmutation.Recording(ctx) {
-		deleteErr = deleter.DeleteProfileAudited(ctx, profileID, func(tx pgx.Tx, deleted *userstore.Profile) error {
+		deletedCollections, deleteErr = deleter.DeleteProfileAudited(ctx, profileID, func(tx pgx.Tx, deleted *userstore.Profile) error {
 			audit, auditErr = recordProfileMutation(ctx, tx, deleted, nil)
 			return auditErr
 		})
 	} else {
-		deleteErr = store.DeleteProfile(ctx, profileID)
+		deletedCollections, deleteErr = store.DeleteProfile(ctx, profileID)
 	}
 	if auditErr != nil {
 		return apiError(http.StatusInternalServerError, "internal_error", "Failed to delete profile")
@@ -960,6 +863,7 @@ func (h *ProfileHandler) DeleteProfile(ctx context.Context, cmd ProfileDeleteCom
 			slog.WarnContext(ctx, "profile avatar cleanup failed after delete", "component", "api", "user_id", userID, "profile_id", profileID, "error", cleanupErr)
 		}
 	}
+	removeDeletedCollectionArtwork(ctx, h.ArtworkStore, userCollectionImagePrefix, deletedCollections...)
 	if h.DeviceLibraryPurger != nil {
 		purgeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
 		defer cancel()
@@ -997,55 +901,6 @@ func (h *ProfileHandler) DeleteProfile(ctx context.Context, cmd ProfileDeleteCom
 		}
 	}
 	return nil
-}
-
-// HandleVerifyPIN handles POST /profiles/{id}/verify-pin.
-func (h *ProfileHandler) HandleVerifyPIN(w http.ResponseWriter, r *http.Request) {
-	userID := apimw.GetUserID(r.Context())
-	if userID == 0 {
-		writeError(w, http.StatusUnauthorized, "unauthorized", "Authentication required")
-		return
-	}
-
-	profileID := chi.URLParam(r, "id")
-	if profileID == "" {
-		writeError(w, http.StatusBadRequest, "bad_request", "Profile ID is required")
-		return
-	}
-
-	var req verifyPINRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "Invalid request body")
-		return
-	}
-
-	if req.PIN == "" {
-		writeError(w, http.StatusBadRequest, "bad_request", "PIN is required")
-		return
-	}
-
-	claims := apimw.GetClaims(r.Context())
-	if claims == nil {
-		writeError(w, http.StatusUnauthorized, "unauthorized", "Authentication required")
-		return
-	}
-	result, err := h.VerifyPIN(r.Context(), ProfileVerifyPINCommand{
-		UserID: userID, SessionID: claims.SessionID, ProfileID: profileID, PIN: req.PIN,
-	})
-	if err != nil {
-		writeAPIError(w, err)
-		return
-	}
-
-	resp := verifyPINResponse{
-		Valid:        result.Valid,
-		ProfileToken: result.ProfileToken,
-	}
-	if !result.ExpiresAt.IsZero() {
-		resp.ExpiresAt = result.ExpiresAt.UTC().Format(time.RFC3339)
-	}
-
-	writeJSON(w, http.StatusOK, resp)
 }
 
 // ProfileVerifyPINCommand is a PIN check with its request already parsed
@@ -1212,6 +1067,12 @@ func (h *ProfileHandler) profileResponseWith(
 	ctx context.Context, p userstore.Profile, prefs profilePreferences,
 ) ProfileView {
 	avatarSource, avatarURL := h.ResolveAvatar(ctx, p.Avatar)
+	// A primary profile has no library limit (access.ProfileLibraryLimit); a
+	// stored one, from an older server or a restored backup, is not reported.
+	libraryRestricted, allowedLibraryIDs := p.LibraryRestrictionsEnabled, p.AllowedLibraryIDs
+	if p.IsPrimary {
+		libraryRestricted, allowedLibraryIDs = false, nil
+	}
 	return ProfileView{
 		ID:                         p.ID,
 		Name:                       p.Name,
@@ -1224,6 +1085,7 @@ func (h *ProfileHandler) profileResponseWith(
 		MaxContentRating:           p.MaxContentRating,
 		MaxAdvisoryAge:             p.MaxAdvisoryAge,
 		RequireAdvisoryAge:         p.RequireAdvisoryAge,
+		RequestsBlocked:            p.RequestsBlocked,
 		QualityPreference:          p.QualityPreference,
 		Language:                   prefs.AudioLanguage,
 		PreferredMetadataLanguage:  prefs.MetadataLanguage,
@@ -1234,39 +1096,12 @@ func (h *ProfileHandler) profileResponseWith(
 		AutoSkipRecap:              p.AutoSkipRecap,
 		AutoPlayNextPreview:        p.AutoPlayNextPreview,
 		ShowForcedSubtitles:        prefs.ShowForcedSubtitles,
-		LibraryRestrictionsEnabled: p.LibraryRestrictionsEnabled,
-		AllowedLibraryIDs:          append([]int(nil), p.AllowedLibraryIDs...),
+		LibraryRestrictionsEnabled: libraryRestricted,
+		AllowedLibraryIDs:          append([]int(nil), allowedLibraryIDs...),
 		MaxPlaybackQuality:         access.NormalizePlaybackQuality(p.MaxPlaybackQuality),
 		CreatedAt:                  p.CreatedAt,
 		UpdatedAt:                  p.UpdatedAt,
 	}
-}
-
-// HandleListHouseholdSessions handles GET /profiles/household/sessions.
-func (h *ProfileHandler) HandleListHouseholdSessions(w http.ResponseWriter, r *http.Request) {
-	userID := apimw.GetUserID(r.Context())
-	if userID == 0 {
-		writeError(w, http.StatusUnauthorized, "unauthorized", "Authentication required")
-		return
-	}
-
-	sessions, err := h.ListHouseholdSessions(r.Context(), HouseholdSessionsQuery{
-		UserID:          userID,
-		ActiveProfileID: activeProfileIDOf(r),
-		VerifyProfile: func(profile *userstore.Profile) error {
-			return verifyProfileTokenFor(r, h.ProfileTokens, profile)
-		},
-	})
-	if err != nil {
-		var apiErr *APIError
-		if errors.As(err, &apiErr) && apiErr.Code == codeProfileManagement {
-			writeProfileManagementPermissionError(w, apiErr.cause)
-			return
-		}
-		writeAPIError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, sessions)
 }
 
 // PlaybackSessionView is one live playback session as the session listings

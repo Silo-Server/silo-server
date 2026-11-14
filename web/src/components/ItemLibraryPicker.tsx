@@ -8,6 +8,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { useAdminLibraries } from "@/hooks/queries/admin/libraries";
+import { useT } from "@/i18n";
 
 interface ItemLibraryPickerProps {
   /** The item's own libraries; the picker offers nothing else. */
@@ -22,6 +23,7 @@ interface ItemLibraryPickerProps {
  * the library decides which metadata settings the search uses.
  */
 export function ItemLibraryPicker({ libraryIds, value, onChange }: ItemLibraryPickerProps) {
+  const t = useT();
   const { data: libraries } = useAdminLibraries();
   const names = useMemo(
     () => new Map((libraries ?? []).map((library) => [library.id, library.name])),
@@ -30,25 +32,23 @@ export function ItemLibraryPicker({ libraryIds, value, onChange }: ItemLibraryPi
 
   return (
     <div className="space-y-1">
-      <Label>Library</Label>
+      <Label>{t("web.item.libraryPicker.label")}</Label>
       <Select
         value={value === undefined ? "" : String(value)}
         onValueChange={(v) => onChange(Number(v))}
       >
-        <SelectTrigger aria-label="Library">
-          <SelectValue placeholder="Choose a library" />
+        <SelectTrigger aria-label={t("web.item.libraryPicker.label")}>
+          <SelectValue placeholder={t("web.item.libraryPicker.placeholder")} />
         </SelectTrigger>
         <SelectContent>
           {libraryIds.map((id) => (
             <SelectItem key={id} value={String(id)}>
-              {names.get(id) ?? `Library ${id}`}
+              {names.get(id) ?? t("web.item.libraryPicker.fallbackName", { id: id })}
             </SelectItem>
           ))}
         </SelectContent>
       </Select>
-      <p className="text-muted-foreground text-xs">
-        This item is in several libraries. Search uses the chosen library’s metadata settings.
-      </p>
+      <p className="text-muted-foreground text-xs">{t("web.item.libraryPicker.help")}</p>
     </div>
   );
 }

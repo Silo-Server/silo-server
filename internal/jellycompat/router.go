@@ -34,6 +34,7 @@ func NewRouter(deps Dependencies) chi.Router {
 	deps = withDefaults(deps)
 
 	r := chi.NewRouter()
+	r.Use(httpstream.NoSniff)
 	r.Use(stripSlashesExceptWeb)
 	r.Use(middleware.RequestID)
 	r.Use(observeCompatRequest)
@@ -97,6 +98,8 @@ func NewRouter(deps Dependencies) chi.Router {
 		subtitleRepo = subtitles.NewPgRepository(deps.DB, deps.SecretCipher)
 	}
 	itemsHandler := NewItemsHandler(deps.ContentService, deps.UserDataService, deps.IDCodec, deps.Config, deps.ImageCache, nextUpRepo, deps.BrowseRepo, deps.PersonRepo, deps.DetailSvc, deps.ItemRepo, deps.EpisodeRepo, deps.SeasonRepo, deps.AccessFilterFn, subtitleRepo)
+	shownRatings := newShownRatings(deps.RatingSources)
+	itemsHandler.mapper.ratings = shownRatings
 	itemsHandler.storeProvider = deps.UserStoreProvider
 	itemsHandler.adminDefaults = deps.AdminDefaults
 	itemsHandler.MarkerPopulation = deps.MarkerPopulation
@@ -143,6 +146,7 @@ func NewRouter(deps Dependencies) chi.Router {
 		autoscanVirtualFoldersRegistered = true
 	}
 	userDataHandler := NewUserDataHandler(deps.ContentService, deps.UserDataService, deps.IDCodec, deps.Config)
+	userDataHandler.mapper.ratings = shownRatings
 	if store, ok := deps.PlaybackStore.(*DurableCompatPlaybackStore); ok && store.pool != nil {
 		if manager, ok := deps.SessionMgr.(interface {
 			SetCompatActivityReader(playback.SessionActivityReader)
@@ -187,6 +191,7 @@ func NewRouter(deps Dependencies) chi.Router {
 		playbackHandler.signalsNotifier = deps.RecWorker
 	}
 	playbackHandler.SettingsRepo = deps.SettingsRepo
+	playbackHandler.ratings = shownRatings
 	playbackHandler.RecipeNodeStore = deps.RecipeNodeStore
 	itemsHandler.themeRouter = compatThemeRouter(deps, playbackHandler)
 	itemsHandler.themeFFmpegPath = func() string { return playback.ResolveFFmpegPath(playbackHandler.FFmpegPath) }
@@ -223,6 +228,7 @@ func NewRouter(deps Dependencies) chi.Router {
 	authHandler.avatars = userAvatars
 	displayPrefsHandler := NewDisplayPreferencesHandler(deps.UserStoreProvider)
 	recsHandler := NewRecommendationsHandler(deps.RecommendationReader, deps.ItemRepo, deps.DetailSvc, deps.UserDataService, deps.IDCodec, deps.Config, deps.AccessFilterFn)
+	recsHandler.mapper.ratings = shownRatings
 
 	r.Get("/System/Info/Public", systemHandler.HandlePublicInfo)
 	r.Get("/System/Info", systemHandler.HandleInfo)
@@ -313,7 +319,6 @@ func NewRouter(deps Dependencies) chi.Router {
 			r.Get("/Shows/NextUp", itemsHandler.HandleNextUp)
 			r.Get("/Shows/Upcoming", itemsHandler.HandleUpcoming)
 			r.Get("/MediaSegments/{id}", itemsHandler.HandleMediaSegments)
-			r.Get(compatTrickplaySheetRoute, playbackHandler.HandleTrickplaySheet)
 			r.Get(compatTrickplayPlaylistRoute, playbackHandler.HandleTrickplayPlaylist)
 			r.Get("/Episode/{id}/Timestamps", itemsHandler.HandleItemStub)
 			r.Get("/Episode/{id}/IntroTimestamps", itemsHandler.HandleItemStub)
@@ -408,6 +413,8 @@ func NewRouter(deps Dependencies) chi.Router {
 		r.Get("/Videos/{id}/remux-dv-v1/hls/{playlistId}/stream.m3u8", observeCompat(deps.StreamTelemetry, http.MethodGet, "/Videos/{id}/remux-dv-v1/hls/{playlistId}/stream.m3u8", playbackHandler.HandleRemuxDVV1HLSManifest))
 		r.Get("/Videos/{id}/remux-dv-v1/hls/{playlistId}/{segmentId}.{segmentContainer}", observeCompat(deps.StreamTelemetry, http.MethodGet, "/Videos/{id}/remux-dv-v1/hls/{playlistId}/{segmentId}.{segmentContainer}", playbackHandler.HandleRemuxDVV1HLSSegment))
 		r.Get("/Videos/{routeItemId}/{routeMediaSourceId}/Subtitles/{routeIndex}/stream.{routeFormat}", observeCompat(deps.StreamTelemetry, http.MethodGet, "/Videos/{routeItemId}/{routeMediaSourceId}/Subtitles/{routeIndex}/stream.{routeFormat}", playbackHandler.HandleSubtitleStream))
+		// Sheet URLs in a trickplay playlist carry a PlaySessionId, not a token.
+		r.Get(compatTrickplaySheetRoute, playbackHandler.HandleTrickplaySheet)
 		r.Get("/Videos/{id}/{routeMediaSourceId}/Attachments/{routeIndex}", observeCompat(deps.StreamTelemetry, http.MethodGet, "/Videos/{id}/{routeMediaSourceId}/Attachments/{routeIndex}", playbackHandler.HandleAttachment))
 		// Jellyfin subtitle routes encode the start position in ticks in this component.
 		r.Get("/Videos/{routeItemId}/{routeMediaSourceId}/Subtitles/{routeIndex}/{routeStartPositionTicks}/stream.{routeFormat}", observeCompat(deps.StreamTelemetry, http.MethodGet, "/Videos/{routeItemId}/{routeMediaSourceId}/Subtitles/{routeIndex}/{routeStartPositionTicks}/stream.{routeFormat}", playbackHandler.HandleSubtitleStream))
@@ -441,7 +448,10 @@ func skipCompatActivityLog(pattern string) bool {
 		compatTrickplaySheetRoute, compatTrickplayPlaylistRoute:
 		return true
 	}
-	return strings.HasPrefix(pattern, "/Videos/") && strings.Contains(pattern, "/hls/{playlistId}/")
+	// A request the router refused on an HLS path, such as a HEAD, arrives here
+	// as the path the client sent, which carries the play session ID. Matching
+	// the path shape skips it along with the HLS route patterns.
+	return redactHLSPlaySessionID(pattern) != pattern
 }
 
 func skipCompatMediaCompression(r *http.Request) bool {

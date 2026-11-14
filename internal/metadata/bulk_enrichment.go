@@ -104,7 +104,21 @@ func isRoutineEnrichmentError(p Provider, err error) bool {
 		return false
 	}
 	switch status.Code(err) {
-	case codes.ResourceExhausted, codes.Unavailable, codes.FailedPrecondition, codes.Unauthenticated, codes.PermissionDenied:
+	case codes.ResourceExhausted, codes.Unavailable:
+		return true
+	default:
+		return enrichmentProviderNotSetUp(p, err)
+	}
+}
+
+// enrichmentProviderNotSetUp reports an enrichment-only provider that can't
+// answer until an admin sets it up: its key is missing or rejected.
+func enrichmentProviderNotSetUp(p Provider, err error) bool {
+	if !isEnrichmentProvider(p) {
+		return false
+	}
+	switch status.Code(err) {
+	case codes.FailedPrecondition, codes.Unauthenticated, codes.PermissionDenied:
 		return true
 	default:
 		return false

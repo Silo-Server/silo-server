@@ -38,10 +38,10 @@ export function dashboardLayoutStorageKey(userId: number): string {
 // are updated synchronously, so the delay is never visible.
 export const DASHBOARD_LAYOUT_SAVE_DEBOUNCE_MS = 800;
 
-// Version 1 is still version 1 with row heights and per-widget windows in it:
-// `rows` and `range` are additive fields that older documents simply omit, and
-// sanitizing fills them from the widget's defaults. A bump would only be needed
-// for a change that makes an existing field mean something new.
+// Version 1 is still version 1 with row heights, per-widget windows and views
+// in it: `rows`, `range` and `view` are additive fields that older documents
+// simply omit, and the widget's defaults stand in for them. A bump would only
+// be needed for a change that makes an existing field mean something new.
 interface StoredLayout {
   version: 1;
   entries: DashboardLayoutEntry[];
@@ -84,6 +84,11 @@ function sanitizeRange(range: unknown, widget: DashboardWidgetDefinition): Widge
   return ranges.default;
 }
 
+/** A stored view the widget still offers, or undefined so the default applies. */
+function sanitizeView(view: unknown, widget: DashboardWidgetDefinition): string | undefined {
+  return typeof view === "string" && widget.views?.allowed.includes(view) ? view : undefined;
+}
+
 /**
  * Validates a layout document from any source — localStorage or the server —
  * and drops what this build cannot render. Returns null when the value is not
@@ -119,6 +124,10 @@ function sanitizeLayoutDocument(value: unknown): DashboardLayoutEntry[] | null {
     const range = sanitizeRange(entry.range, widget);
     if (range) {
       sanitized.range = range;
+    }
+    const view = sanitizeView(entry.view, widget);
+    if (view) {
+      sanitized.view = view;
     }
     entries.push(sanitized);
   }
@@ -205,6 +214,8 @@ export interface DashboardLayout {
    * part of the layout they expect to find again.
    */
   setWidgetRange: (id: WidgetId, range: WidgetRange) => void;
+  /** Change a widget's presentation; saved the same way as its window. */
+  setWidgetView: (id: WidgetId, view: string) => void;
   removeWidget: (id: WidgetId) => void;
   /**
    * Place a hidden widget with its default span, rows, and window. With a
@@ -253,7 +264,14 @@ export function useDashboardLayout(): DashboardLayout {
   // The server response is adopted at most once per mount, and never over an
   // edit the admin already made in this session.
   const settledRef = useRef(false);
-  const editedRef = useRef(false);
+  // Set by the first edit made before that response arrives: the arrangement
+  // the edit started from, and the authority it was made under. The edit can
+  // only be saved once the server version is known, and only if the server
+  // still holds that arrangement.
+  const draftRef = useRef<{
+    base: DashboardLayoutEntry[];
+    authority: NonNullable<ReturnType<typeof captureProfileRequestContext>>;
+  } | null>(null);
   const pendingRef = useRef<DashboardLayoutSaveIntent | null>(null);
   const baselineRef = useRef<string | null>(null);
   const inFlightRef = useRef<DashboardLayoutSaveIntent | null>(null);
@@ -329,10 +347,21 @@ export function useDashboardLayout(): DashboardLayout {
       timerRef.current = null;
     }
     pendingRef.current = null;
+    draftRef.current = null;
   }, []);
 
   // Send a queued write before this page goes away rather than dropping it.
-  useEffect(() => flushSave, [flushSave]);
+  // A reload or tab close inside the debounce window would otherwise lose it,
+  // and the next load would adopt the older server copy over the admin's last
+  // change. Layout saves use keepalive, so the request outlives the page.
+  useEffect(() => {
+    const flushOnPageHide = () => flushSave();
+    window.addEventListener("pagehide", flushOnPageHide);
+    return () => {
+      window.removeEventListener("pagehide", flushOnPageHide);
+      flushSave();
+    };
+  }, [flushSave]);
 
   // A different account while the hook stays mounted (impersonation starts or
   // ends without a remount) must not inherit the previous account's state: its
@@ -346,7 +375,6 @@ export function useDashboardLayout(): DashboardLayout {
     accountRef.current = userId;
     cancelPendingSave();
     settledRef.current = false;
-    editedRef.current = false;
     baselineRef.current = null;
     baselineAuthorityRef.current = null;
     inFlightRef.current = null;
@@ -357,20 +385,43 @@ export function useDashboardLayout(): DashboardLayout {
 
   const remoteData = remote.data;
   const remoteSettled = remote.isSuccess;
+  const remoteFailed = remote.isError;
 
   useEffect(() => {
-    if (!remoteSettled || settledRef.current) {
+    if (settledRef.current) {
       return;
     }
+    if (!remoteSettled) {
+      // Without a server version an edit made meanwhile cannot be saved yet.
+      if (remoteFailed && draftRef.current) {
+        setServerSaveBlocked(true);
+      }
+      return;
+    }
+    const draft = draftRef.current;
+    draftRef.current = null;
     settledRef.current = true;
     baselineRef.current = remoteData?.etag ?? null;
-    baselineAuthorityRef.current = editAuthority;
-    // An edit made while the query was in flight is newer than the response;
-    // its own debounced save carries it to the server.
-    if (editedRef.current) {
+    // A draft made under a profile or PIN that is no longer active stays
+    // unsaved: scheduleSave refuses an inactive baseline authority.
+    baselineAuthorityRef.current = draft?.authority ?? editAuthority;
+    const serverEntries = sanitizeLayoutDocument(remoteData?.layout);
+    // An edit made while the query was in flight is newer than the response,
+    // so the response is not adopted over it. The edit was made to this
+    // browser's copy, so it is saved against the version just read only when
+    // the server still holds that copy, or none (as the migration below would
+    // upload it). A different server copy, saved from another browser, is not
+    // overwritten: saving stays blocked until the admin reloads it.
+    if (draft) {
+      if (serverEntries && JSON.stringify(serverEntries) !== JSON.stringify(draft.base)) {
+        blockedRef.current = true;
+        setServerSaveBlocked(true);
+        return;
+      }
+      setServerSaveBlocked(false);
+      scheduleSave(entries);
       return;
     }
-    const serverEntries = sanitizeLayoutDocument(remoteData?.layout);
     if (serverEntries) {
       setEntries(serverEntries);
       persistLayout(userId, serverEntries);
@@ -390,7 +441,16 @@ export function useDashboardLayout(): DashboardLayout {
         flushSave();
       }
     }
-  }, [remoteSettled, remoteData, flushSave, userId, editAuthority]);
+  }, [
+    remoteSettled,
+    remoteFailed,
+    remoteData,
+    flushSave,
+    scheduleSave,
+    entries,
+    userId,
+    editAuthority,
+  ]);
 
   const update = useCallback(
     (updater: (prev: DashboardLayoutEntry[]) => DashboardLayoutEntry[]) => {
@@ -400,10 +460,13 @@ export function useDashboardLayout(): DashboardLayout {
         if (next === prev) {
           return prev;
         }
-        editedRef.current = true;
         editSequenceRef.current++;
         persistLayout(userId, next);
-        scheduleSave(next);
+        if (settledRef.current) {
+          scheduleSave(next);
+        } else {
+          draftRef.current ??= { base: prev, authority: editAuthority };
+        }
         return next;
       });
     },
@@ -487,6 +550,30 @@ export function useDashboardLayout(): DashboardLayout {
     [update],
   );
 
+  const setWidgetView = useCallback(
+    (id: WidgetId, view: string) => {
+      update((prev) => {
+        const widget = findDashboardWidget(id);
+        if (!widget?.views || !sanitizeView(view, widget)) {
+          return prev;
+        }
+        const defaultView = widget.views.default;
+        let changed = false;
+        const next = prev.map((entry) => {
+          // An entry without a view is showing the default, so picking the
+          // default there changes nothing and must not save.
+          if (entry.id !== id || (entry.view ?? defaultView) === view) {
+            return entry;
+          }
+          changed = true;
+          return { ...entry, view };
+        });
+        return changed ? next : prev;
+      });
+    },
+    [update],
+  );
+
   const removeWidget = useCallback(
     (id: WidgetId) => {
       update((prev) =>
@@ -535,7 +622,6 @@ export function useDashboardLayout(): DashboardLayout {
     blockedRef.current = true;
     setServerSaveBlocked(true);
     clearStoredLayout(userId);
-    editedRef.current = true;
     settledRef.current = true;
     setEntries([...DEFAULT_LAYOUT]);
     resetMutate();
@@ -568,7 +654,6 @@ export function useDashboardLayout(): DashboardLayout {
     blockedRef.current = false;
     setServerSaveBlocked(false);
     settledRef.current = true;
-    editedRef.current = false;
   };
 
   const hiddenWidgets = useMemo(() => {
@@ -584,6 +669,7 @@ export function useDashboardLayout(): DashboardLayout {
     moveWidget,
     resizeWidget,
     setWidgetRange,
+    setWidgetView,
     removeWidget,
     addWidget,
     resetLayout,

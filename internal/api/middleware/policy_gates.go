@@ -6,11 +6,12 @@ import (
 	"slices"
 	"time"
 
+	"github.com/go-chi/chi/v5"
+
 	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/clientip"
 	"github.com/Silo-Server/silo-server/internal/policy"
-	"github.com/go-chi/chi/v5"
 )
 
 const (
@@ -26,12 +27,6 @@ const (
 // gates. *policy.PDP satisfies it.
 type PermissionDecider interface {
 	CheckPermission(context.Context, policy.PermissionInput) (policy.PermissionDecision, policy.Meta, error)
-}
-
-// NewPolicyActingAdminMiddleware enforces the acting-admin gate through the
-// policy PDP while preserving RequireActingAdmin's response contract.
-func NewPolicyActingAdminMiddleware(pdp PermissionDecider, primaryChecker PrimaryProfileChecker, household HouseholdProfileRequirement) func(http.Handler) http.Handler {
-	return RequireActingAdminWith(NewPolicyActingAdminDecider(pdp, primaryChecker, household))
 }
 
 // NewPolicyActingAdminDecider is the acting-admin decision evaluated by the
@@ -232,7 +227,10 @@ func (m *PolicyPermissionMiddleware) RequireMetadataCurationForItem(next http.Ha
 			}
 			return nil
 		}
-		next.ServeHTTP(w, r.WithContext(access.WithMetadataCurationAuthorizer(r.Context(), authorize)))
+		// Queued work can't reach the PDP inputs of this request (device,
+		// client IP, request time), so it is held to the curator's libraries.
+		ctx := access.WithMetadataCurationScope(r.Context(), access.MetadataCurationScope{LibraryIDs: slices.Clone(effective.LibraryIDs)})
+		next.ServeHTTP(w, r.WithContext(access.WithMetadataCurationAuthorizer(ctx, authorize)))
 	})
 }
 

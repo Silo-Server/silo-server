@@ -1,8 +1,8 @@
 # Client event socket admission
 
 One `events.ClientSocketAdmission` is constructed at startup, registered as a
-Prometheus collector, and passed independently to both native handler instances
-and Jellyfin. It does not depend on the optional event hub. A nil or zero
+Prometheus collector, and passed independently to the native events handler and
+Jellyfin. It does not depend on the optional event hub. A nil or zero
 admission refuses; routers must never construct a second allowance.
 
 The production constructor uses observation mode. Thresholds are 64 pending or
@@ -23,8 +23,7 @@ Every physical client connection reserves once before upgrade, subscriber
 allocation or recurring authority work. Internal `Hub.Subscribe` consumers,
 including the plugin dispatcher, do not reserve client capacity.
 
-V1 checks claims and origin, reserves, then checks optional profile binding and
-acting authority. V2 checks shape/origin, consumes its one-use ticket, validates
+V2 checks shape/origin, consumes its one-use ticket, validates
 identity, then reserves. Nil/draining may reject before ticket consumption; a
 quota-denied ticket stays spent. Minting a ticket is not a reservation. Jellyfin
 validates the session/key, reserves, upgrades, then starts optional user-data
@@ -91,7 +90,7 @@ requirements apply when integrating both controls, and do not describe behavior
 provided by socket admission alone.
 
 Prepaid ticket work is not a socket reservation; quota-denied v2 tickets and
-prepaid credits stay spent. On v1 reserve before work charging. A work refusal releases a pending
+prepaid credits stay spent. A work refusal releases a pending
 reservation; an in-socket work refusal leaves the connection and reservation
 intact. Upgrade precedes watcher startup and subscription. Combined verification
 requires both stable heads and finite composition tests.

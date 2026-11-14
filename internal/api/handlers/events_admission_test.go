@@ -14,7 +14,6 @@ import (
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/auth"
 	evt "github.com/Silo-Server/silo-server/internal/events"
-	"github.com/Silo-Server/silo-server/internal/notifications"
 
 	"github.com/gorilla/websocket"
 	"github.com/prometheus/client_golang/prometheus/testutil"
@@ -42,72 +41,6 @@ func eventAdmissionRequest(t *testing.T, userID int) *http.Request {
 	return r
 }
 
-func TestClientSocketV1OrderingAndFailedUpgrade(t *testing.T) {
-	a := testSocketAdmission(t)
-	first, _ := a.Reserve(7, false)
-	second, _ := a.Reserve(7, false)
-	defer first.Release()
-	defer second.Release()
-	h := &EventsHandler{hub: evt.NewHub("fixture", nil), socketAdmission: a}
-	upgrades := 0
-	h.upgradeSocket = func(w http.ResponseWriter, r *http.Request, _ websocket.Upgrader) (eventSocket, error) {
-		upgrades++
-		if a.Occupancy() != 1 {
-			t.Error("upgrade did not hold pending reservation")
-		}
-		http.Error(w, "invalid upgrade", 400)
-		return nil, errors.New("fixture")
-	}
-	for _, tc := range []struct {
-		name   string
-		user   int
-		origin string
-		status int
-	}{
-		{"authority first", 0, "", 401},
-		{"origin before quota", 7, "https://foreign.example.test", 403},
-		{"account full", 7, "", 429},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			r := eventAdmissionRequest(t, tc.user)
-			if tc.origin != "" {
-				r.Header.Set("Origin", tc.origin)
-			}
-			w := httptest.NewRecorder()
-			h.HandleWebSocket(w, r)
-			if w.Code != tc.status {
-				t.Fatalf("status %d, want %d", w.Code, tc.status)
-			}
-			if tc.status == 429 && (w.Header().Get("Retry-After") != "5" || w.Header().Get("Cache-Control") != "no-store") {
-				t.Fatal("missing refusal headers")
-			}
-		})
-	}
-	if upgrades != 0 {
-		t.Fatal("refusal upgraded")
-	}
-	// A refused v1 attempt must not consume its optional profile binding.
-	tickets := notifications.NewTicketStore(nil)
-	ticket, _, err := tickets.Mint(t.Context(), notifications.Ticket{UserID: 7, ProfileID: "fixture-profile"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	h.notifications = &notifications.System{Tickets: tickets}
-	r := eventAdmissionRequest(t, 7)
-	r.URL.RawQuery = "ticket=" + ticket
-	h.HandleWebSocket(httptest.NewRecorder(), r)
-	if _, ok := tickets.Consume(t.Context(), ticket); !ok {
-		t.Fatal("quota refusal consumed v1 binding")
-	}
-	first.Release()
-	second.Release()
-	w := httptest.NewRecorder()
-	h.HandleWebSocket(w, eventAdmissionRequest(t, 7))
-	if w.Code != 400 || upgrades != 1 || a.Occupancy() != 0 {
-		t.Fatalf("failed upgrade leaked: status=%d upgrades=%d count=%d", w.Code, upgrades, a.Occupancy())
-	}
-}
-
 func TestClientSocketV2QuotaConsumesTicketWithoutUpgrade(t *testing.T) {
 	h, _ := socketTestHandler(t)
 	a := h.Events.socketAdmission
@@ -133,28 +66,16 @@ func TestClientSocketV2QuotaConsumesTicketWithoutUpgrade(t *testing.T) {
 	}
 }
 
-func TestClientSocketUnavailableAndDraining(t *testing.T) {
-	for _, mode := range []evt.ClientSocketMode{evt.ClientSocketObserve, evt.ClientSocketEnforce} {
-		t.Run(string(mode), func(t *testing.T) {
-			ctx, cancel := context.WithCancel(t.Context())
-			cancel()
-			a, err := evt.NewClientSocketAdmission(1, 1, mode)
-			if err != nil {
-				t.Fatal(err)
-			}
-			for _, h := range []*EventsHandler{
-				{hub: evt.NewHub("fixture", nil)},
-				{hub: evt.NewHub("fixture", nil), socketAdmission: a, appContext: ctx},
-				{hub: evt.NewHub("fixture", nil), socketAdmission: a, shuttingDown: func() bool { return true }},
-			} {
-				w := httptest.NewRecorder()
-				h.HandleWebSocket(w, eventAdmissionRequest(t, 7))
-				if w.Code != 503 || w.Header().Get("Retry-After") != "5" || a.Occupancy() != 0 {
-					t.Fatalf("unavailable admitted: %d %d", w.Code, a.Occupancy())
-				}
-			}
-		})
-	}
+// serveEventsV2Fixture drives h through the v2 ticket handshake for user 7.
+func serveEventsV2Fixture(t *testing.T, h *EventsHandler, w http.ResponseWriter, query string) {
+	t.Helper()
+	v2, _ := socketTestHandler(t)
+	v2.Events = h
+	ticket := socketTestTicket(t, v2, time.Now().Add(time.Minute))
+	r := eventAdmissionRequest(t, 0)
+	r.URL.RawQuery = query
+	r.Header.Set("Sec-WebSocket-Protocol", EventsSocketProtocol+", "+eventsTicketProtocolPrefix+ticket)
+	v2.ServeHTTP(w, r)
 }
 
 type admissionEventSocket struct {
@@ -194,7 +115,7 @@ func TestClientSocketAppCancellationClosesAndUnsubscribesBeforeRelease(t *testin
 		}
 	}
 	finished := make(chan struct{})
-	go func() { defer close(finished); h.HandleWebSocket(httptest.NewRecorder(), eventAdmissionRequest(t, 7)) }()
+	go func() { defer close(finished); serveEventsV2Fixture(t, h, httptest.NewRecorder(), "") }()
 	select {
 	case <-socket.writes:
 	case <-time.After(time.Second):
@@ -231,7 +152,7 @@ func TestClientSocketFailedUpgradeDoesNotStartWatcher(t *testing.T) {
 	h.upgradeSocket = func(http.ResponseWriter, *http.Request, websocket.Upgrader) (eventSocket, error) {
 		return nil, errors.New("fixture")
 	}
-	h.serveWebSocket(httptest.NewRecorder(), eventAdmissionRequest(t, 7), &auth.Claims{UserID: 7}, "", wsUpgrader, nil, func(context.Context, context.CancelFunc) { started = true })
+	h.serveWebSocket(httptest.NewRecorder(), eventAdmissionRequest(t, 7), &auth.Claims{UserID: 7}, "", websocket.Upgrader{}, nil, func(context.Context, context.CancelFunc) { started = true })
 	if started {
 		t.Fatal("failed upgrade started recurring watcher")
 	}
@@ -258,7 +179,7 @@ func TestClientSocketHelloFailureClosesBeforeUnsubscribe(t *testing.T) {
 			unsubscribed = true
 		}
 	}
-	h.HandleWebSocket(httptest.NewRecorder(), eventAdmissionRequest(t, 7))
+	serveEventsV2Fixture(t, h, httptest.NewRecorder(), "")
 	if !unsubscribed || a.Occupancy() != 0 {
 		t.Fatal("hello failure leaked")
 	}

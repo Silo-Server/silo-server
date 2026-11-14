@@ -8,7 +8,8 @@
     "app_build": "20841",
     "platform": "tvos",
     "os_version": "26.0",
-    "profile_id": "prof_den"
+    "profile_id": "prof_den",
+    "occurrence_count": 3
   },
   "destination": {
     "server_instance_id": "srv_home_01"

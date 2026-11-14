@@ -136,7 +136,7 @@ func (p *pluginAccessResolver) resolve(r *http.Request) pluginAccess {
 	profileID := claims.ProfileID
 	if profileID == "" {
 		var ok bool
-		profileID, ok = p.declaredProfile(r, &current, false)
+		profileID, ok = p.declaredProfile(r, &current, current.SkipsProfilePIN())
 		if !ok {
 			return pluginAccess{}
 		}

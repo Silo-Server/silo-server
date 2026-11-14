@@ -19,6 +19,7 @@ import {
   type CreateInvitationBody,
 } from "@/api/v2/invitations";
 import { adminKeys } from "../keys";
+import { t } from "@/i18n";
 const key = (scope: string) => [...adminKeys.invitations(), scope] as const;
 const staleTime = 30_000;
 export function useInvitationCapabilities() {
@@ -27,7 +28,8 @@ export function useInvitationCapabilities() {
     queryKey: [...key(scope), "capabilities"],
     queryFn: () => {
       const c = captureInvitationAuthority();
-      if (invitationScope(c) !== scope) throw new Error("Invitation authority changed.");
+      if (invitationScope(c) !== scope)
+        throw new Error(t("web.admin.settings.hooks.invitations.authorityChanged"));
       return getAdminInvitationCapabilities(c);
     },
     retry: false,
@@ -44,13 +46,14 @@ export function useAdminInvitations(enabled = true) {
     initialPageParam: undefined as string | undefined,
     queryFn: async ({ pageParam }) => {
       const c = captureInvitationAuthority();
-      if (invitationScope(c) !== scope) throw new Error("Invitation authority changed.");
+      if (invitationScope(c) !== scope)
+        throw new Error(t("web.admin.settings.hooks.invitations.authorityChanged"));
       const page = await listAdminInvitationsPage(pageParam, c);
       const prior = client.getQueryData<InfiniteData<InvitationPage, string | undefined>>(queryKey);
       const index = prior?.pageParams.indexOf(pageParam) ?? -1;
       const visited = index < 0 ? prior?.pageParams : prior?.pageParams.slice(0, index);
       if (page.page.has_more && visited?.includes(page.page.next_cursor))
-        throw new Error("Repeated invitation cursor. Reload history.");
+        throw new Error(t("web.admin.settings.hooks.invitations.repeatedCursor"));
       return page;
     },
     getNextPageParam: (p) => (p.page.has_more ? p.page.next_cursor : undefined),

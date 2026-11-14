@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"io"
 	"math"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -253,6 +254,22 @@ func (p DeviceProfile) SupportsDirectStream(version catalog.FileVersion) bool {
 	return false
 }
 
+// hlsVideoTranscodingContainers lists the containers of the profile's HLS
+// video transcoding profiles, for logging why no encode fit.
+func (p DeviceProfile) hlsVideoTranscodingContainers() []string {
+	var containers []string
+	for _, profile := range p.TranscodingProfiles {
+		if !matchesVideoType(profile.Type) || !strings.EqualFold(strings.TrimSpace(profile.Protocol), compatHLSPathSegment) {
+			continue
+		}
+		container := strings.ToLower(strings.TrimSpace(profile.Container))
+		if container != "" && !slices.Contains(containers, container) {
+			containers = append(containers, container)
+		}
+	}
+	return containers
+}
+
 // SupportsTranscoding reports whether the client advertises HLS transcoding.
 func (p DeviceProfile) SupportsTranscoding(version catalog.FileVersion) bool {
 	return p.supportsTranscodingOutput(version, 2, 0, "")
@@ -408,11 +425,11 @@ func (p DeviceProfile) supportsVideoTranscodingOutput(version catalog.FileVersio
 		video.Profile, video.Level = h264EncodeFacts(video, videoBitrateKbps, version)
 	}
 	if videoBitrateKbps > 0 {
-		video.Bitrate = videoBitrateKbps * 1000
+		video.Bitrate = videoBitrateKbps
 		output.Bitrate = videoBitrateKbps + audioBitrateKbps
 	}
 	output.VideoTracks = []models.VideoTrack{video}
-	output.AudioTracks = []models.AudioTrack{{Codec: compatTargetAudioCodec, Profile: compatTargetAudioProfile, Channels: channels, Bitrate: audioBitrateKbps * 1000}}
+	output.AudioTracks = []models.AudioTrack{{Codec: compatTargetAudioCodec, Profile: compatTargetAudioProfile, Channels: channels, Bitrate: audioBitrateKbps}}
 	audioIndex := len(output.VideoTracks)
 	// Both encoded outputs use HLS. Apply codec profiles scoped to its
 	// segment container, including Container=hls with SubContainer=mp4/ts.
@@ -532,7 +549,7 @@ func (p DeviceProfile) supportsHLSRemuxWithAudioTranscodeIn(version catalog.File
 	outputAudio := compatAudioTrack(version, audioStreamIndex)
 	outputAudio.Codec = compatTargetAudioCodec
 	outputAudio.Profile = compatTargetAudioProfile
-	outputAudio.Bitrate = audioBitrateKbps * 1000
+	outputAudio.Bitrate = audioBitrateKbps
 	outputAudio.Channels = targetAudioChannels
 	outputAudio.Default = true
 	outputVersion.CodecAudio = compatTargetAudioCodec

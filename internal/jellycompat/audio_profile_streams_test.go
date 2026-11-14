@@ -7,15 +7,17 @@ import (
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
-func TestBuildMediaStreamsCarriesAudioProfile(t *testing.T) {
+func TestBuildMediaStreamsCarriesAudioFacts(t *testing.T) {
 	version := catalog.FileVersion{
-		VideoTracks: []models.VideoTrack{{Codec: "hevc"}},
+		VideoTracks: []models.VideoTrack{{Codec: "hevc", Bitrate: 20_000}},
 		AudioTracks: []models.AudioTrack{
 			{
 				Codec:    "eac3",
 				Profile:  "Dolby Digital Plus + Dolby Atmos",
 				Language: "eng",
+				Layout:   "5.1(side)",
 				Channels: 6,
+				Bitrate:  768,
 				Default:  true,
 			},
 			{
@@ -38,7 +40,19 @@ func TestBuildMediaStreamsCarriesAudioProfile(t *testing.T) {
 		t.Fatalf("streams length = %d, want 4", len(streams))
 	}
 
+	// Silo stores kbps; Jellyfin's BitRate is bits per second.
+	if streams[0].BitRate != 20_000_000 {
+		t.Fatalf("video BitRate = %d, want 20000000", streams[0].BitRate)
+	}
+
 	atmos := streams[1]
+	// Jellyfin trims ffprobe's layout variant: "5.1(side)" is reported as "5.1".
+	if atmos.ChannelLayout != "5.1" {
+		t.Fatalf("atmos ChannelLayout = %q, want 5.1", atmos.ChannelLayout)
+	}
+	if atmos.BitRate != 768_000 {
+		t.Fatalf("atmos BitRate = %d, want 768000", atmos.BitRate)
+	}
 	if atmos.Profile != "Dolby Digital Plus + Dolby Atmos" {
 		t.Fatalf("atmos Profile = %q", atmos.Profile)
 	}
@@ -93,6 +107,51 @@ func TestBuildMediaStreamsJellyfin12LocalizedLabels(t *testing.T) {
 	}
 	if streams[3].LocalizedLanguage != compatLanguageName("en") || streams[3].LocalizedOriginal != "" {
 		t.Fatalf("subtitle labels = %q/%q", streams[3].LocalizedLanguage, streams[3].LocalizedOriginal)
+	}
+}
+
+// Jellyfin clients label tracks with DisplayTitle and LocalizedLanguage, so a
+// tag with a region or script needs a readable name, not "Pt BR".
+func TestBuildMediaStreamsNamesRegionalLanguages(t *testing.T) {
+	cases := []struct {
+		language          string
+		wantLanguageName  string
+		wantSubtitleTitle string
+	}{
+		{"pt", "Portuguese", "Portuguese (External, SRT)"},
+		{"pt-BR", "Brazilian Portuguese", "Brazilian Portuguese (External, SRT)"},
+		{"zh-Hant", "Traditional Chinese", "Traditional Chinese (External, SRT)"},
+		{"es-419", "Latin American Spanish", "Latin American Spanish (External, SRT)"},
+		{"pt-AO", "Portuguese (Angola)", "Portuguese (Angola) (External, SRT)"},
+		{"sr-Latn", "Serbian (Latin)", "Serbian (Latin) (External, SRT)"},
+		{"sr-Latn-RS", "Serbian (Latin, Serbia)", "Serbian (Latin, Serbia) (External, SRT)"},
+		{"sr-Latn-CS", "Sr Latn CS", "Sr Latn CS (External, SRT)"},
+		{"ur-Aran-PK", "Ur Aran PK", "Ur Aran PK (External, SRT)"},
+		{"es-lat", "Es Lat", "Es Lat (External, SRT)"},
+		{"en-sdh", "En Sdh", "En Sdh (External, SRT)"},
+		{"ca-ES-valencia", "Ca ES Valencia", "Ca ES Valencia (External, SRT)"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.language, func(t *testing.T) {
+			version := catalog.FileVersion{
+				AudioTracks:    []models.AudioTrack{{Codec: "aac", Channels: 2, Language: tc.language}},
+				SubtitleTracks: []catalog.VersionSubtitleTrack{{Codec: "subrip", Language: tc.language, External: true}},
+			}
+			streams := buildMediaStreams("item", "source", version)
+			if len(streams) != 2 {
+				t.Fatalf("streams length = %d, want 2", len(streams))
+			}
+			audio, subtitle := streams[0], streams[1]
+			if audio.DisplayTitle != tc.wantLanguageName+" - AAC Stereo" || audio.LocalizedLanguage != tc.wantLanguageName {
+				t.Fatalf("audio labels = %q/%q", audio.DisplayTitle, audio.LocalizedLanguage)
+			}
+			if subtitle.DisplayTitle != tc.wantSubtitleTitle || subtitle.LocalizedLanguage != tc.wantLanguageName {
+				t.Fatalf("subtitle labels = %q/%q", subtitle.DisplayTitle, subtitle.LocalizedLanguage)
+			}
+			if audio.Language != tc.language || subtitle.Language != tc.language {
+				t.Fatalf("wire languages = %q/%q, want %q", audio.Language, subtitle.Language, tc.language)
+			}
+		})
 	}
 }
 

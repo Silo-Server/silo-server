@@ -10,19 +10,11 @@ import (
 	"testing/synctest"
 	"time"
 
-	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
-	"github.com/Silo-Server/silo-server/internal/auth"
 	evt "github.com/Silo-Server/silo-server/internal/events"
 	"github.com/Silo-Server/silo-server/internal/historyimport"
 
 	"github.com/gorilla/websocket"
 )
-
-type authorityAdmissionSession struct{ revoked atomic.Bool }
-
-func (s *authorityAdmissionSession) ActiveSession(context.Context, string, int) (auth.SessionAuthority, bool, error) {
-	return auth.SessionAuthority{Role: "admin"}, !s.revoked.Load(), nil
-}
 
 type authorityAdmissionHistory struct {
 	blocked  chan struct{}
@@ -64,10 +56,10 @@ func (s *authorityAdmissionSocket) WriteJSON(value any) error {
 	return s.admissionEventSocket.WriteJSON(value)
 }
 
-// Fake time and transports exercise the actual v1/v2 watcher paths while one
+// Fake time and transports exercise the actual v2 watcher paths while one
 // query or write is blocked. No listener, real socket or store is involved.
 func TestClientSocketAuthorityCancellationReleasesBlockedWork(t *testing.T) {
-	for _, version := range []string{"v1", "v2 revoked", "v2 access changed"} {
+	for _, version := range []string{"v2 revoked", "v2 access changed"} {
 		for _, work := range []string{"query", "write"} {
 			t.Run(version+"/"+work, func(t *testing.T) {
 				synctest.Test(t, func(t *testing.T) {
@@ -98,31 +90,20 @@ func TestClientSocketAuthorityCancellationReleasesBlockedWork(t *testing.T) {
 					}
 					r := eventAdmissionRequest(t, 7)
 					r.URL.RawQuery = "channels=history_import"
-					var handler http.Handler = http.HandlerFunc(h.HandleWebSocket)
-					var revoke func()
-					if version == "v1" {
-						sessions := new(authorityAdmissionSession)
-						h.sessionRoles, h.sessionCheckInterval = sessions, 10*time.Millisecond
-						ctx := apimw.SetClaims(r.Context(), &auth.Claims{UserID: 7, Role: "admin", SessionID: "fixture-session"})
-						ctx = apimw.SetActingAdminDecider(ctx, func(context.Context, apimw.ActingAdminRequest) (bool, error) { return true, nil })
-						r = r.WithContext(ctx)
-						revoke = func() { sessions.revoked.Store(true) }
-					} else {
-						v2, validity := socketTestHandler(t)
-						v2.Events = h
-						ticket, err := v2.Tickets.Mint(t.Context(), evt.SocketIdentity{UserID: 7, Role: "admin", SessionID: "fixture-session", AccessFingerprint: "scope", AccessExpiresAt: time.Now().Add(time.Minute)})
-						if err != nil {
-							t.Fatal(err)
+					v2, validity := socketTestHandler(t)
+					v2.Events = h
+					ticket, err := v2.Tickets.Mint(t.Context(), evt.SocketIdentity{UserID: 7, Role: "admin", SessionID: "fixture-session", AccessFingerprint: "scope", AccessExpiresAt: time.Now().Add(time.Minute)})
+					if err != nil {
+						t.Fatal(err)
+					}
+					r.Header.Set("Sec-WebSocket-Protocol", EventsSocketProtocol+", "+eventsTicketProtocolPrefix+ticket)
+					var handler http.Handler = v2
+					revoke := func() {
+						err := evt.ErrSocketTicket
+						if version == "v2 access changed" {
+							err = errSocketAccessChanged
 						}
-						r.Header.Set("Sec-WebSocket-Protocol", EventsSocketProtocol+", "+eventsTicketProtocolPrefix+ticket)
-						handler = v2
-						revoke = func() {
-							err := evt.ErrSocketTicket
-							if version == "v2 access changed" {
-								err = errSocketAccessChanged
-							}
-							validity.fail(err)
-						}
+						validity.fail(err)
 					}
 					finished := make(chan struct{})
 					go func() { defer close(finished); handler.ServeHTTP(httptest.NewRecorder(), r) }()
