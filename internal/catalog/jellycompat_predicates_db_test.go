@@ -134,6 +134,28 @@ func TestJellycompatPredicatesPostgres(t *testing.T) {
 			t.Fatalf("page total=%d ids=%v", result.Total, orderedIDs(result.Items))
 		}
 	})
+	t.Run("critic score sort and minimum", func(t *testing.T) {
+		exec(`UPDATE media_items SET rating_rt_critic=CASE content_id WHEN $1 THEN 55 WHEN $2 THEN 90 END WHERE content_id=ANY($3)`, movieIDs[0], movieIDs[1], movieIDs[:3])
+		defer exec(`UPDATE media_items SET rating_rt_critic=NULL WHERE content_id=ANY($1)`, movieIDs[:3])
+		q := BrowseFilters{Type: "movie", ContentIDs: movieIDs[:3], UserID: userID, ProfileID: profiles[0], LibraryIDs: []int{libraryID}, MaturityLimits: access.MaturityLimits{MaxContentRating: "PG"}, Sort: BrowseSortRatingRTCritic, Order: "desc", Limit: 10}
+		for _, tc := range []struct {
+			min  float64
+			want []string
+		}{
+			{0, []string{movieIDs[1], movieIDs[0], movieIDs[2]}},
+			{60.5, []string{movieIDs[1]}},
+			{55, []string{movieIDs[1], movieIDs[0]}},
+		} {
+			q.MinCriticRating = tc.min
+			result, err := browse.BrowsePage(ctx, q, true)
+			if err != nil {
+				t.Fatalf("min %v: %v", tc.min, err)
+			}
+			if got := orderedIDs(result.Items); !slices.Equal(got, tc.want) || result.Total != len(tc.want) {
+				t.Fatalf("min %v: total=%d ids=%v, want %v", tc.min, result.Total, got, tc.want)
+			}
+		}
+	})
 	t.Run("movie played inversion", func(t *testing.T) {
 		q := base
 		q.IsPlayed = new(true)
@@ -327,6 +349,13 @@ func TestJellycompatPredicatesPostgres(t *testing.T) {
 		}
 		if len(items) != 6 || items[0].ContentID != episodeIDs[3] || items[1].ContentID != episodeIDs[1] {
 			t.Fatalf("rating order = %v, want e3 then e1 first", items)
+		}
+
+		// Episodes have no critic score, so a minimum one matches none.
+		critic := all
+		critic.MinCriticRating = 50.5
+		if items, total, err = episodes.BrowseEpisodes(ctx, "", "", nil, "", critic, access, true); err != nil || total != 0 || len(items) != 0 {
+			t.Fatalf("minimum critic score: total=%d items=%d err=%v, want no episodes", total, len(items), err)
 		}
 
 		// Filters the series listing shares map onto episode and series columns.

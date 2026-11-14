@@ -24,7 +24,9 @@ const (
 	BrowseSortCreatedAt     = "created_at"
 	BrowseSortYear          = "year"
 	BrowseSortRatingIMDB    = "rating_imdb"
-	BrowseOrderDescending   = "desc"
+	// BrowseSortRatingRTCritic orders by the Rotten Tomatoes critic score.
+	BrowseSortRatingRTCritic = "rating_rt_critic"
+	BrowseOrderDescending    = "desc"
 )
 
 // BrowseFilters represents all supported filter, sort, and pagination parameters
@@ -71,6 +73,7 @@ type BrowseFilters struct {
 	Studios                 []string // any matching studio name
 	OfficialRatings         []string // exact content ratings
 	MinCommunityRating      float64  // minimum rating_imdb, the compat CommunityRating
+	MinCriticRating         float64  // minimum rating_rt_critic (0-100), the compat CriticRating
 	MinPremiereDate         string   // inclusive YYYY-MM-DD on release/first-air date
 	MaxPremiereDate         string   // inclusive YYYY-MM-DD on release/first-air date
 	// ScopeFacetFilesToAccess limits the audio/subtitle language facets to
@@ -1636,6 +1639,8 @@ func buildOrderByPlan(sort, order string, snapshot *time.Time, argIdx int, singl
 		return fmt.Sprintf("ORDER BY mi.rating_imdb %s%s, mi.content_id ASC", direction, nullsClause), nil
 	case "rating_tmdb":
 		return fmt.Sprintf("ORDER BY mi.rating_tmdb %s%s, mi.content_id ASC", direction, nullsClause), nil
+	case BrowseSortRatingRTCritic:
+		return fmt.Sprintf("ORDER BY mi.rating_rt_critic %s%s, mi.content_id ASC", direction, nullsClause), nil
 	case "year":
 		return fmt.Sprintf("ORDER BY mi.year %s, mi.content_id ASC", direction), nil
 	case "title", "sort_title":
@@ -1754,6 +1759,9 @@ func appendCompatBrowsePredicates(filters BrowseFilters, conditions *[]string, a
 	}
 	if filters.MinCommunityRating > 0 {
 		add("mi.rating_imdb >= $%d", filters.MinCommunityRating)
+	}
+	if filters.MinCriticRating > 0 {
+		add("mi.rating_rt_critic >= $%d", filters.MinCriticRating)
 	}
 	if filters.MinPremiereDate != "" {
 		add(premiereDateKeyExpr+" >= $%d", filters.MinPremiereDate)

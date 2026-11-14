@@ -29,6 +29,7 @@ func TestBrowseJellyfinGridFiltersBindEveryParameter(t *testing.T) {
 		Studios:                 []string{"A24"},
 		OfficialRatings:         []string{"PG-13", "R"},
 		MinCommunityRating:      7.5,
+		MinCriticRating:         60,
 		MinPremiereDate:         "2020-01-02",
 		MaxPremiereDate:         "2024-12-31",
 		Limit:                   1,
@@ -43,7 +44,7 @@ func TestBrowseJellyfinGridFiltersBindEveryParameter(t *testing.T) {
 	}
 	for _, predicate := range []string{
 		sortTitleKeyExpr + " < LOWER(", sortTitleKeyExpr + " >= LOWER(",
-		"NOT (mi.content_id = ANY(", "mi.studios &&", "mi.content_rating = ANY(", "mi.rating_imdb >=",
+		"NOT (mi.content_id = ANY(", "mi.studios &&", "mi.content_rating = ANY(", "mi.rating_imdb >=", "mi.rating_rt_critic >=",
 		premiereDateKeyExpr + " >=", premiereDateKeyExpr + " <=",
 	} {
 		if !strings.Contains(sql, predicate) {
