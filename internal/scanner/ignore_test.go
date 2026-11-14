@@ -227,6 +227,20 @@ func TestLibraryRootSkipped(t *testing.T) {
 	}
 }
 
+// A file that vanishes after the resolver saw it must still be matched as a
+// file, or autoscan records it as ignored and never reconciles its row.
+func TestFileIgnoredMatchesAVanishedFileAsAFile(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	writeTestFile(t, filepath.Join(root, ".ignore"), "Movie.mkv/\n")
+	for _, name := range []string{"Movie.mkv", ".Hidden.mkv"} {
+		ignored, err := FileIgnored(filepath.Join(root, name), []string{root})
+		if err != nil || ignored {
+			t.Errorf("FileIgnored(%s) = %v, %v; want false, nil", name, ignored, err)
+		}
+	}
+}
+
 func TestSiloIgnoreSkipsMatchedFilesAndDirs(t *testing.T) {
 	t.Parallel()
 
