@@ -491,18 +491,21 @@ func TestOuterRootIgnoreRulesApplyBelowANestedRoot(t *testing.T) {
 		assertFilePaths(t, files, lib, want)
 	}
 
-	// An ebook full scan walks every configured root, a single-file root too.
-	fileRoot := filepath.Join(nested, "Excluded Book.epub")
-	for _, ebookRoots := range [][]string{roots, {fileRoot, lib}} {
-		scans, err := collectEbookRootScans(t.Context(), 1, ebookRoots, ebookRoots)
-		if err != nil {
-			t.Fatalf("ebook scan of %v: %v", ebookRoots, err)
-		}
-		var books []string
-		for _, scan := range scans {
-			books = append(books, scan.files...)
-		}
-		sort.Strings(books)
-		assertFilePaths(t, books, lib, []string{"nested/Kept Book.epub"})
+	scans, err := collectEbookRootScans(t.Context(), 1, roots, roots)
+	if err != nil {
+		t.Fatalf("ebook scan: %v", err)
+	}
+	var books []string
+	for _, scan := range scans {
+		books = append(books, scan.files...)
+	}
+	sort.Strings(books)
+	assertFilePaths(t, books, lib, []string{"nested/Kept Book.epub"})
+
+	// An explicit single-file scan (ScanFile) still ignores ignore files.
+	excludedBook := filepath.Join(nested, "Excluded Book.epub")
+	scans, err = collectEbookRootScans(t.Context(), 1, []string{excludedBook}, roots)
+	if err != nil || len(scans) != 1 || len(scans[0].files) != 1 || scans[0].files[0] != excludedBook {
+		t.Fatalf("explicit ebook file scan = %+v, %v; want %s", scans, err, excludedBook)
 	}
 }
