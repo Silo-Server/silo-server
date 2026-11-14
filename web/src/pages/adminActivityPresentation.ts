@@ -1,5 +1,5 @@
 import type { AdminSession } from "@/api/types";
-import { t, type TextValues } from "@/i18n";
+import { codeNumber, t, type TextValues } from "@/i18n";
 import type { MessageKey } from "@/locales/keys";
 import { formatCodecLabel } from "@/lib/mediaFormat";
 import { formatDecimal } from "@/lib/numberFormat";
@@ -643,8 +643,14 @@ export function getPlaybackSessionTitle(session: AdminSession): string {
 
 export function getPlaybackSessionSubtitle(session: AdminSession): string | null {
   if (session.series_name && session.season_number != null && session.episode_number != null) {
-    const episode = `S${session.season_number}E${session.episode_number}`;
-    return session.series_name ? `${episode} · ${session.series_name}` : episode;
+    const code = t("web.detail.episodeCode", {
+      season: codeNumber(session.season_number),
+      episode: codeNumber(session.episode_number),
+    });
+    return t("web.admin.downloads.preparation.subtitle.episode", {
+      code,
+      series: session.series_name,
+    });
   }
   if (session.media_type === "movie") {
     return t("web.common.activity.subtitle.movie");
