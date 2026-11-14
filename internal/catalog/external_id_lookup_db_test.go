@@ -8,10 +8,11 @@ import (
 )
 
 // TestExternalIDLookupSkipsItemsWithAnotherTMDBIDDB pins that a TVDB or IMDb
-// match only stands in for a TMDB match when the item has no TMDB ID of its
-// own, or the same one. An item that carries a different TMDB ID is another
-// title with stale or wrong IDs, and request presence must not report the
-// requested title as available because of it.
+// match only stands in for a TMDB match when the item is the same title by
+// its type's anchor precedence. A movie that carries a different TMDB ID, or
+// a series with a different TVDB ID, is another title with stale or wrong
+// IDs, and request presence must not report the requested title as available
+// because of it.
 func TestExternalIDLookupSkipsItemsWithAnotherTMDBIDDB(t *testing.T) {
 	pool := newBatchEquivTestPool(t)
 	ctx := context.Background()
@@ -31,49 +32,55 @@ func TestExternalIDLookupSkipsItemsWithAnotherTMDBIDDB(t *testing.T) {
 		batchEquivExec(t, pool, `DELETE FROM media_folders WHERE id = $1`, lib)
 	})
 
-	type item struct{ contentID, tmdb, tvdb, imdb, mipProvider, mipID string }
+	type item struct{ contentID, itemType, tmdb, tvdb, imdb, mipProvider, mipID string }
 	items := []item{
-		// Another title: its own TMDB ID, plus IDs a request might share.
-		{contentID: "other", tmdb: id(1), tvdb: id(2), imdb: "tt" + id(3), mipProvider: "tvdb", mipID: id(4)},
-		// No TMDB ID anywhere: the case the fallback exists for.
-		{contentID: "missing", imdb: "tt" + id(7)},
+		// Another movie: its own TMDB ID, plus IDs a request might share.
+		{contentID: "other", itemType: "movie", tmdb: id(1), tvdb: id(2), imdb: "tt" + id(3), mipProvider: "tvdb", mipID: id(4)},
+		// No TMDB ID: the case the fallback exists for.
+		{contentID: "missing", itemType: "movie", imdb: "tt" + id(7)},
 		// The requested TMDB ID in TMDB's "id-slug" URL form.
-		{contentID: "slug", tmdb: id(8) + "-some-title", imdb: "tt" + id(9)},
-		// The requested TMDB ID typed with spaces in the admin metadata editor.
-		{contentID: "padded", tmdb: " " + id(5) + " ", imdb: "tt" + id(6)},
+		{contentID: "slug", itemType: "movie", tmdb: id(8) + "-some-title", imdb: "tt" + id(9)},
+		// The requested TMDB ID typed with whitespace in the admin metadata editor.
+		{contentID: "padded", itemType: "movie", tmdb: "\t" + id(5) + "\n", imdb: "tt" + id(6)},
+		// A series is anchored on TVDB, so its TMDB ID does not decide.
+		{contentID: "show", itemType: "series", tmdb: id(11), tvdb: id(12), imdb: "tt" + id(13)},
 	}
 	for _, it := range items {
 		contentID := fmt.Sprintf("external-id-lookup-%s-%d", it.contentID, suffix)
 		contentIDs = append(contentIDs, contentID)
 		batchEquivExec(t, pool, `
 			INSERT INTO media_items (content_id, type, title, tmdb_id, tvdb_id, imdb_id)
-			VALUES ($1, 'movie', $2, $3, $4, $5)`,
-			contentID, it.contentID, it.tmdb, it.tvdb, it.imdb)
+			VALUES ($1, $2, $3, $4, $5, $6)`,
+			contentID, it.itemType, it.contentID, it.tmdb, it.tvdb, it.imdb)
 		batchEquivExec(t, pool, `INSERT INTO media_item_libraries (content_id, media_folder_id) VALUES ($1, $2)`, contentID, lib)
 		if it.mipProvider != "" {
 			batchEquivExec(t, pool, `
 				INSERT INTO media_item_provider_ids (content_id, item_type, provider, provider_id)
-				VALUES ($1, 'movie', $2, $3)`, contentID, it.mipProvider, it.mipID)
+				VALUES ($1, $2, $3, $4)`, contentID, it.itemType, it.mipProvider, it.mipID)
 		}
 	}
 
 	requested := id(10)
 	cases := []struct {
 		name      string
+		mediaType string
 		candidate ExternalIDLookupCandidate
 		wantTitle string
 	}{
-		{"imdb on an item with another tmdb id", ExternalIDLookupCandidate{TMDBID: requested, IMDbID: "tt" + id(3)}, ""},
-		{"tvdb on an item with another tmdb id", ExternalIDLookupCandidate{TMDBID: requested, TVDBID: id(2)}, ""},
-		{"durable tvdb on an item with another tmdb id", ExternalIDLookupCandidate{TMDBID: requested, TVDBID: id(4)}, ""},
-		{"imdb on an item without a tmdb id", ExternalIDLookupCandidate{TMDBID: requested, IMDbID: "tt" + id(7)}, "missing"},
-		{"imdb on an item with the slugged tmdb id", ExternalIDLookupCandidate{TMDBID: id(8), IMDbID: "tt" + id(9)}, "slug"},
-		{"imdb on an item with the padded tmdb id", ExternalIDLookupCandidate{TMDBID: id(5), IMDbID: "tt" + id(6)}, "padded"},
+		{"imdb on a movie with another tmdb id", "movie", ExternalIDLookupCandidate{TMDBID: requested, IMDbID: "tt" + id(3)}, ""},
+		{"tvdb on a movie with another tmdb id", "movie", ExternalIDLookupCandidate{TMDBID: requested, TVDBID: id(2)}, ""},
+		{"durable tvdb on a movie with another tmdb id", "movie", ExternalIDLookupCandidate{TMDBID: requested, TVDBID: id(4)}, ""},
+		{"rejected tvdb falls through to an imdb match", "movie", ExternalIDLookupCandidate{TMDBID: requested, TVDBID: id(2), IMDbID: "tt" + id(7)}, "missing"},
+		{"imdb on a movie without a tmdb id", "movie", ExternalIDLookupCandidate{TMDBID: requested, IMDbID: "tt" + id(7)}, "missing"},
+		{"imdb on a movie with the slugged tmdb id", "movie", ExternalIDLookupCandidate{TMDBID: id(8), IMDbID: "tt" + id(9)}, "slug"},
+		{"imdb on a movie with the padded tmdb id", "movie", ExternalIDLookupCandidate{TMDBID: id(5), IMDbID: "tt" + id(6)}, "padded"},
+		{"tvdb on a series with another tmdb id", "series", ExternalIDLookupCandidate{TMDBID: requested, TVDBID: id(12)}, "show"},
+		{"imdb on a series with another tvdb id", "series", ExternalIDLookupCandidate{TMDBID: requested, TVDBID: id(14), IMDbID: "tt" + id(13)}, ""},
 	}
 	repo := NewItemRepository(pool)
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			rows, err := repo.LookupExternalIDs(ctx, "movie", []ExternalIDLookupCandidate{tc.candidate})
+			rows, err := repo.LookupExternalIDs(ctx, tc.mediaType, []ExternalIDLookupCandidate{tc.candidate})
 			if err != nil {
 				t.Fatalf("LookupExternalIDs: %v", err)
 			}
