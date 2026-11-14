@@ -10,6 +10,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Silo-Server/silo-server/internal/webhooksync/webhooksynctest"
 )
@@ -112,5 +113,90 @@ func TestCanonicalizeMediaItemReferencesMergesNotificationMutesPostgres(t *testi
 	want := []mute{{"both", canonical, early}, {"source-only", canonical, late}}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("mutes after merge:\n got %+v\nwant %+v", got, want)
+	}
+}
+
+// A drift repair of an item waits for an admin's ID edit holding that item,
+// rather than deleting the item's provider rows first and deadlocking with
+// the edit's own delete of one of them.
+func TestProviderIDDriftRepairWaitsForItemEditPostgres(t *testing.T) {
+	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("SILO_TEST_DATABASE_URL is not set")
+	}
+	ctx := t.Context()
+	pool, err := pgxpool.New(ctx, dsn)
+	if err != nil {
+		t.Fatalf("connect test database: %v", err)
+	}
+	t.Cleanup(pool.Close)
+	contentID := "drift-repair-edit-" + uuid.NewString()
+	tmdbID := "drift-" + uuid.NewString()
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM media_items WHERE content_id = $1`, contentID)
+	})
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO media_items (content_id, type, title, genres, status, tmdb_id)
+		VALUES ($1, 'movie', 'Drift Repair', '{}'::text[], 'matched', $2)`, contentID, tmdbID); err != nil {
+		t.Fatalf("seed item: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO media_item_provider_ids (content_id, item_type, provider, provider_id)
+		VALUES ($1, 'movie', 'tmdb', $2)`, contentID, "stale-"+tmdbID); err != nil {
+		t.Fatalf("seed durable id: %v", err)
+	}
+
+	// The edit locks the item as lockCuratedProviderIDs does.
+	edit, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatalf("begin edit: %v", err)
+	}
+	defer edit.Rollback(ctx) //nolint:errcheck // a no-op once the edit commits
+	if _, err := edit.Exec(ctx, `SELECT 1 FROM media_items WHERE content_id = $1 FOR UPDATE`, contentID); err != nil {
+		t.Fatalf("lock item: %v", err)
+	}
+	row := providerIDDriftRow{ContentID: contentID, ItemType: "movie", Status: "matched", TMDBID: tmdbID}
+	repaired := make(chan error, 1)
+	go func() {
+		repaired <- NewProviderIDIntegrityRepairer(pool).insertProviderIDsForDriftRow(ctx, row, providerEntriesFromDrift(row))
+	}()
+	// Before the repair locked the item, it waited in its insert's foreign-key
+	// check instead; either wait names the media_item tables.
+	deadline := time.After(10 * time.Second)
+	for waiting := false; !waiting; {
+		if err := pool.QueryRow(ctx, `
+			SELECT EXISTS (SELECT 1 FROM pg_stat_activity
+			WHERE wait_event_type = 'Lock' AND datname = current_database()
+			  AND pid <> pg_backend_pid() AND strpos(query, 'media_item') > 0)`).Scan(&waiting); err != nil {
+			t.Fatalf("read lock waits: %v", err)
+		}
+		select {
+		case err := <-repaired:
+			t.Fatalf("repair finished without waiting on the edit: %v", err)
+		case <-deadline:
+			t.Fatal("repair never waited on the edit")
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
+	// syncEditedProviderIDTx's delete of the edited provider's row.
+	if _, err := edit.Exec(ctx, `
+		DELETE FROM media_item_provider_ids
+		WHERE content_id = $1 AND lower(provider) = 'tmdb'`, contentID); err != nil {
+		t.Fatalf("edit delete: %v", err)
+	}
+	if err := edit.Commit(ctx); err != nil {
+		t.Fatalf("commit edit: %v", err)
+	}
+	if err := <-repaired; err != nil {
+		t.Fatalf("repair: %v", err)
+	}
+	var durable string
+	if err := pool.QueryRow(ctx, `
+		SELECT provider_id FROM media_item_provider_ids
+		WHERE content_id = $1 AND provider = 'tmdb'`, contentID).Scan(&durable); err != nil {
+		t.Fatalf("read durable id: %v", err)
+	}
+	if durable != tmdbID {
+		t.Fatalf("durable tmdb = %q, want %q", durable, tmdbID)
 	}
 }

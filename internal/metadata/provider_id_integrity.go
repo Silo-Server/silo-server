@@ -310,6 +310,12 @@ func (r *ProviderIDIntegrityRepairer) insertProviderIDsForDriftRow(ctx context.C
 		return fmt.Errorf("begin clean provider-id repair: %w", err)
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck
+	// Lock the item before its provider rows, as an admin's ID edit does. A
+	// repair that deleted the rows first would wait on the edit's item lock
+	// for its inserts while the edit waits on the deleted rows: a deadlock.
+	if _, err := tx.Exec(ctx, `SELECT 1 FROM media_items WHERE content_id = $1 FOR NO KEY UPDATE`, row.ContentID); err != nil {
+		return fmt.Errorf("lock item %s for provider-id repair: %w", row.ContentID, err)
+	}
 	if _, err := tx.Exec(ctx, `DELETE FROM media_item_provider_ids WHERE content_id = $1`, row.ContentID); err != nil {
 		return fmt.Errorf("clear existing provider ids for %s: %w", row.ContentID, err)
 	}
