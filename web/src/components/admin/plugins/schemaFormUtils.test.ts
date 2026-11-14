@@ -73,12 +73,19 @@ describe("parseFieldTypes (#15)", () => {
   it("reads declared property types including array item types", () => {
     const json = JSON.stringify({
       type: "object",
+      $defs: { id: { type: "integer" }, "a/b": { type: "integer" }, "a~1b": { type: "string" } },
       properties: {
         quality_profile_id: { type: "integer" },
         root_folder: { type: "string" },
         tags: { type: "array", items: { type: "integer" } },
         labels: { type: "array", items: { type: "string" } },
         flags: { type: "array", items: { type: "boolean" } },
+        ids: { type: "array", items: { enum: [1, 2] } },
+        codes: { type: "array", items: { enum: ["001", "123"] } },
+        maybe_ids: { type: "array", items: { type: ["integer", "null"] } },
+        ref_ids: { type: "array", items: { $ref: "#/$defs/id" } },
+        escaped_ref_ids: { type: "array", items: { $ref: "#/$defs/a~1b" } },
+        anything: { type: "array", items: { $ref: "#/$defs/thing" } },
         enabled: { type: "boolean" },
       },
     });
@@ -88,6 +95,12 @@ describe("parseFieldTypes (#15)", () => {
       tags: "array:int",
       labels: "array",
       flags: "array:bool",
+      ids: "array:int",
+      codes: "array",
+      maybe_ids: "array:int",
+      ref_ids: "array:int",
+      escaped_ref_ids: "array:int",
+      anything: "array",
       enabled: "boolean",
     });
   });
@@ -116,6 +129,16 @@ describe("buildSchemaValues type-driven coercion (#15)", () => {
     expect(out.quality_profile_id).toBe(3);
     expect(out.root_folder).toBe("007"); // string preserved, NOT 7
     expect(out.tags).toEqual([1, 2]);
+  });
+  it("keeps null items in a boolean array", () => {
+    const d: PluginAdminForm = { fields: [field("flags", "Flags", "MULTI_SELECT")] };
+    const types = parseFieldTypes(
+      JSON.stringify({
+        type: "object",
+        properties: { flags: { type: "array", items: { type: ["boolean", "null"] } } },
+      }),
+    );
+    expect(buildSchemaValues(d, { flags: [null, "true"] }, types).flags).toEqual([null, true]);
   });
 });
 

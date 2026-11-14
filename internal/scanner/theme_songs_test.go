@@ -184,6 +184,58 @@ func TestThemeDiscoveryNestedMediaDirectoryKeepsCanonicalOwner(t *testing.T) {
 	}
 }
 
+// A full scan walks a root nested in another as part of the outer one, so
+// theme discovery under the nested root follows the outer root's ignore files
+// and skips the folder names the walk skips.
+func TestThemeDiscoveryNestedRootFollowsOuterRootWalk(t *testing.T) {
+	ffprobe, err := exec.LookPath("ffprobe")
+	if err != nil {
+		t.Skip("ffprobe is required")
+	}
+	ffmpeg, err := exec.LookPath("ffmpeg")
+	if err != nil {
+		t.Skip("ffmpeg is required")
+	}
+	sample := filepath.Join(t.TempDir(), "theme.mp3")
+	if out, err := exec.Command(ffmpeg, "-v", "error", "-f", "lavfi", "-i", "sine=frequency=220:duration=1", "-y", sample).CombinedOutput(); err != nil {
+		t.Fatalf("%v: %s", err, out)
+	}
+	data, err := os.ReadFile(sample)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		name, nested, owner, outerIgnore string
+		want                             int
+	}{
+		{name: "visible", nested: "nested", owner: "Movie (2024)", want: 1},
+		{name: "outer ignore file", nested: "nested", owner: "Movie (2024)", outerIgnore: "nested/Movie (2024)/theme.mp3\n"},
+		{name: "hidden nested root", nested: ".nested", owner: "Movie (2024)"},
+		{name: "housekeeping folder below nested root", nested: "nested", owner: "@eaDir/Movie (2024)"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			lib := t.TempDir()
+			nested := filepath.Join(lib, tc.nested)
+			owner := filepath.Join(nested, tc.owner)
+			if err := os.MkdirAll(owner, 0755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(owner, "theme.mp3"), data, 0600); err != nil {
+				t.Fatal(err)
+			}
+			if tc.outerIgnore != "" {
+				if err := os.WriteFile(filepath.Join(lib, ".siloignore"), []byte(tc.outerIgnore), 0600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			files, err := discoverThemeSongs(t.Context(), owner, []string{lib, nested}, ffprobe, nil)
+			if err != nil || len(files) != tc.want {
+				t.Fatalf("got %d themes, want %d: files=%+v err=%v", len(files), tc.want, files, err)
+			}
+		})
+	}
+}
+
 func TestThemeDiscoveryUnreadableAndCancelledAreNotEmptySnapshots(t *testing.T) {
 	root := t.TempDir()
 	if _, err := discoverThemeSongs(context.Background(), filepath.Join(root, "missing"), []string{root}, "ffprobe", nil); err == nil {

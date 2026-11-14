@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import type { PluginInstallation } from "@/api/types";
 
-import { missingSignInSetup, signInSetupLayout } from "./signInSetup";
+import { missingSignInSetup, signInSetupLayout, stagedEntry } from "./signInSetup";
 
 function installation(overrides: Partial<PluginInstallation>): PluginInstallation {
   return {
@@ -184,5 +184,33 @@ describe("missingSignInSetup", () => {
         ),
       ),
     ).toEqual([]);
+  });
+});
+
+describe("stagedEntry", () => {
+  it("coerces values by the schema's declared types", () => {
+    const groups = {
+      ...field("groups"),
+      control: "MULTI_SELECT" as const,
+      options: [{ value: "007", label: "007" }],
+    };
+    const schema = {
+      key: "directory",
+      title: "Directory",
+      json_schema: JSON.stringify({
+        type: "object",
+        properties: { groups: { type: "array", items: { type: "string" } } },
+      }),
+      required: false,
+      admin_form: { fields: [groups] },
+    };
+    const entry = {
+      schema,
+      descriptor: { fields: [groups] },
+      saved: undefined,
+      configuredSecrets: [],
+    };
+
+    expect(stagedEntry(entry, { groups: ["007"] })).toEqual({ groups: ["007"] });
   });
 });
