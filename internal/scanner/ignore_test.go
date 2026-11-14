@@ -454,3 +454,55 @@ func TestHiddenDirectoriesAreSkipped(t *testing.T) {
 		t.Fatalf("scope inside a hidden directory: files = %v, walkFailures = %v, want none", files, walkFailures)
 	}
 }
+
+// A library root nested inside another is walked by a full scan as an
+// ordinary folder of the outer root, so the outer root's ignore files apply
+// below it. Scoped walks, which subtree and Autoscan scans use, and the
+// ebook full scan, which walks every configured root, must agree, or a
+// folder the outer ignore file excludes is imported and then retired again.
+func TestOuterRootIgnoreRulesApplyBelowANestedRoot(t *testing.T) {
+	t.Parallel()
+
+	lib := t.TempDir()
+	nested := filepath.Join(lib, "nested")
+	writeTestFile(t, filepath.Join(lib, ".siloignore"), "nested/Excluded*\n")
+	writeTestFile(t, filepath.Join(nested, "Excluded Movie (2024)", "Excluded Movie (2024).mkv"), "test")
+	writeTestFile(t, filepath.Join(nested, "Kept (2024)", "Kept (2024).mkv"), "test")
+	writeTestFile(t, filepath.Join(nested, "Excluded Book.epub"), "test")
+	writeTestFile(t, filepath.Join(nested, "Kept Book.epub"), "test")
+	roots := []string{nested, lib}
+
+	full, failures, err := collectLogicalFilePaths(t.Context(), compactScanRoots(roots), "movies", roots)
+	if err != nil || len(failures) != 0 {
+		t.Fatalf("full walk: %v, failures: %v", err, failures)
+	}
+	sort.Strings(full)
+	assertFilePaths(t, full, lib, []string{"nested/Kept (2024)/Kept (2024).mkv"})
+
+	for scope, want := range map[string][]string{
+		nested: {"nested/Kept (2024)/Kept (2024).mkv"},
+		filepath.Join(nested, "Excluded Movie (2024)"): nil,
+	} {
+		files, failures, err := collectLogicalFilePaths(t.Context(), []string{scope}, "movies", roots)
+		if err != nil || len(failures) != 0 {
+			t.Fatalf("scoped walk of %s: %v, failures: %v", scope, err, failures)
+		}
+		sort.Strings(files)
+		assertFilePaths(t, files, lib, want)
+	}
+
+	// An ebook full scan walks every configured root, a single-file root too.
+	fileRoot := filepath.Join(nested, "Excluded Book.epub")
+	for _, ebookRoots := range [][]string{roots, {fileRoot, lib}} {
+		scans, err := collectEbookRootScans(t.Context(), 1, ebookRoots, ebookRoots)
+		if err != nil {
+			t.Fatalf("ebook scan of %v: %v", ebookRoots, err)
+		}
+		var books []string
+		for _, scan := range scans {
+			books = append(books, scan.files...)
+		}
+		sort.Strings(books)
+		assertFilePaths(t, books, lib, []string{"nested/Kept Book.epub"})
+	}
+}

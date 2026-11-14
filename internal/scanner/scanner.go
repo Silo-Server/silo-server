@@ -372,11 +372,21 @@ func (s *Scanner) ScanSubtree(ctx context.Context, folder *models.MediaFolder, s
 	// A subtree scan under a skipped library root would walk nothing and
 	// retire the subtree piece by piece, bypassing the empty-root guard. Only
 	// a full library scan decides what happens to a skipped root's catalog.
-	if root := scopeLibraryRoot(cleanSubtree, folder.Paths); root != "" {
+	// Every root that holds the subtree counts, and a root nested in another
+	// is also skipped when the outer root's rules exclude it.
+	for _, root := range cleanScanRoots(folder.Paths) {
+		if !pathWithinAnyRoot(cleanSubtree, []string{root}) {
+			continue
+		}
 		skipped, err := libraryRootSkipped(root)
 		if err != nil {
 			// Without the root's rules the scope cannot tell what it excludes.
 			return nil, fmt.Errorf("library root %s: %w", root, err)
+		}
+		if !skipped {
+			// An unreadable ancestor is left to the walk, which records it
+			// as a walk failure and protects the subtree.
+			_, skipped, _ = scanRootIgnoreRules(root, folder.Paths)
 		}
 		if skipped {
 			slog.InfoContext(ctx, "scanner: library root is skipped by its ignore files; leaving subtree to a full library scan", "component", "scanner",

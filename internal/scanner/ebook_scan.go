@@ -100,7 +100,7 @@ func collectEbookRootScans(ctx context.Context, folderID int, roots, libraryRoot
 		}
 		var rules []ignoreRules
 		var ignored bool
-		if scan.rootErr == nil && !scan.fileOnly {
+		if scan.rootErr == nil {
 			rules, ignored, scan.rootErr = scanRootIgnoreRules(cleanRoot, libraryRoots)
 		}
 		if scan.rootErr == nil && !ignored {
