@@ -1,5 +1,5 @@
 import type { AdminSession } from "@/api/types";
-import { t, type TextValues } from "@/i18n";
+import { numberText, t, type TextValues } from "@/i18n";
 import type { MessageKey } from "@/locales/keys";
 import { formatCodecLabel } from "@/lib/mediaFormat";
 import { formatDecimal } from "@/lib/numberFormat";
@@ -672,4 +672,24 @@ function formatChannelLayout(channels?: number | null): string | null {
     return "7.1";
   }
   return `${channels}ch`;
+}
+
+/** Playback position as "47:12 / 2:29:40", or the position alone when the duration is unknown. */
+export function formatPlaybackPosition(session: AdminSession): string {
+  const position = formatClockTime(session.position_seconds);
+  if (session.file_duration == null || session.file_duration <= 0) {
+    return position;
+  }
+  return `${position} / ${formatClockTime(session.file_duration)}`;
+}
+
+function formatClockTime(seconds: number): string {
+  const safeSeconds = Math.max(0, Math.floor(Number.isFinite(seconds) ? seconds : 0));
+  const h = Math.floor(safeSeconds / 3600);
+  const m = Math.floor((safeSeconds % 3600) / 60);
+  const s = safeSeconds % 60;
+  if (h > 0) {
+    return numberText(`${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`);
+  }
+  return numberText(`${m}:${String(s).padStart(2, "0")}`);
 }

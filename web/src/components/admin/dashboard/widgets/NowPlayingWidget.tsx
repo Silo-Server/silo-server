@@ -9,6 +9,7 @@ import { useMediaQuery } from "@/hooks/useMediaQuery";
 import {
   activityMethodMeta,
   classifyActivityMethod,
+  formatPlaybackPosition,
   getSessionClientLabel,
 } from "@/pages/adminActivityPresentation";
 import type { AdminSession } from "@/api/types";
@@ -256,12 +257,13 @@ function StreamCard({ session, showPoster }: { session: AdminSession; showPoster
     rounding: "floor",
     justNowLabel: t("web.admin.dashboard.widgets.nowPlaying.justNow"),
   });
+  const position = formatPlaybackPosition(session);
   const clientLabel = getSessionClientLabel(session);
   const method = classifyActivityMethod(session);
   const methodMeta = activityMethodMeta(method);
 
   return (
-    <div className="surface-panel flex flex-1 gap-3.5 rounded-2xl border-0 p-3.5 transition-colors duration-150">
+    <div className="surface-panel flex min-w-0 flex-1 gap-3.5 rounded-2xl border-0 p-3.5 transition-colors duration-150">
       {/* Poster */}
       <div
         className="bg-surface border-border relative flex w-[60px] flex-shrink-0 items-center justify-center self-start overflow-hidden rounded-lg border"
@@ -358,15 +360,25 @@ function StreamCard({ session, showPoster }: { session: AdminSession; showPoster
         </div>
 
         {/* User */}
-        <div className="mt-auto flex items-center gap-1.5">
-          <div
-            className="text-primary-foreground flex h-[22px] w-[22px] shrink-0 items-center justify-center rounded-full text-[9px] font-bold"
-            style={{ background: `var(--primary)` }}
-          >
-            {username.charAt(0).toUpperCase()}
+        {/* On a narrow card the times wrap below the name instead of hiding it,
+            and never grow wider than the card. */}
+        <div className="mt-auto flex flex-wrap items-center gap-x-1.5 gap-y-0.5">
+          <div className="flex max-w-full min-w-0 items-center gap-1.5">
+            <div
+              className="text-primary-foreground flex h-[22px] w-[22px] shrink-0 items-center justify-center rounded-full text-[9px] font-bold"
+              style={{ background: `var(--primary)` }}
+            >
+              {username.charAt(0).toUpperCase()}
+            </div>
+            <span className="min-w-0 truncate text-xs font-medium">{username}</span>
           </div>
-          <span className="min-w-0 truncate text-xs font-medium">{username}</span>
-          <span className="text-muted-foreground ms-auto shrink-0 text-[10px]">{elapsed}</span>
+          <span className="text-muted-foreground ms-auto flex max-w-full min-w-0 flex-wrap justify-end gap-x-1.5 text-[10px]">
+            <span className="min-w-0 truncate tabular-nums" title={position}>
+              {position}
+            </span>
+            {/* eslint-disable-next-line formatjs/no-literal-string-in-jsx -- punctuation separating two already-formatted times */}
+            <span className="shrink-0">· {elapsed}</span>
+          </span>
         </div>
       </div>
     </div>
