@@ -2,6 +2,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { MemoryRouter, Route, Routes } from "react-router";
+import { moveLinkTokenOutOfAddress } from "@/lib/linkToken";
 
 /** Renders `routes` (path to element) at `entry`, with `outside` above the routes. */
 export function renderRoutes(
@@ -22,6 +23,22 @@ export function renderRoutes(
       </MemoryRouter>
     </QueryClientProvider>,
   );
+}
+
+/**
+ * Opens a password reset or invitation link as a page load does: its token
+ * leaves the address before anything renders.
+ */
+export function openLink(url: string) {
+  window.history.replaceState(null, "", url);
+  moveLinkTokenOutOfAddress();
+}
+
+/** The JSON bodies of the requests a fetch mock saw whose URL ends with `suffix`. */
+export function bodiesSentTo(fetchMock: { mock: { calls: unknown[][] } }, suffix: string) {
+  return fetchMock.mock.calls
+    .filter(([url]) => String(url).endsWith(suffix))
+    .map(([, init]) => JSON.parse(String((init as RequestInit).body)) as Record<string, unknown>);
 }
 
 export function json(body: unknown, status = 200) {

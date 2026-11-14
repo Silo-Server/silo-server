@@ -468,6 +468,10 @@ func (s *interestTrackingStore) ListJellycompatProgressDates(ctx context.Context
 	return reader.ListJellycompatProgressDates(ctx, profileID, ids)
 }
 
+func (s *interestTrackingStore) ListJellycompatPlayedByDate(ctx context.Context, profileID string, types []string, libraryID *int, ascending bool, limit, offset int) ([]userstore.WatchProgress, error) {
+	return userstore.ListJellycompatPlayedByDate(ctx, s.UserStore, profileID, types, libraryID, ascending, limit, offset)
+}
+
 func (s *interestTrackingStore) SetProgressIfNewer(ctx context.Context, profileID, mediaItemID string, position, duration float64, completed bool, updatedAt time.Time) (bool, error) {
 	before := s.currentProgressState(ctx, profileID, mediaItemID)
 	applied, err := s.UserStore.SetProgressIfNewer(ctx, profileID, mediaItemID, position, duration, completed, updatedAt)

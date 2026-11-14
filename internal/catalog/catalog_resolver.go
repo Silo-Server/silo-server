@@ -2633,17 +2633,24 @@ func (r *CatalogResolver) fetchAllSearchCandidates(ctx context.Context, req Cata
 	return items, nil
 }
 
+// catalogSearchAccess narrows the viewer's access to the request's libraries
+// for a search, and returns the item types to search. The bool reports that
+// no requested library is accessible, so the search can return empty.
 func catalogSearchAccess(req CatalogRequest, access AccessFilter) (AccessFilter, []string, bool) {
 	allowedLibraryIDs, earlyEmpty := access.LibraryScope(req.Query.LibraryIDs)
 	if earlyEmpty {
 		return AccessFilter{}, nil, true
 	}
 
+	// The viewer's user and profile carry through so personalized sorts and
+	// rules (plays, date viewed, watched) resolve against that profile's
+	// history, as the request was validated for in Resolve.
 	searchAccess := AccessFilter{
 		AllowedLibraryIDs:  allowedLibraryIDs,
 		DisabledLibraryIDs: slices.Clone(access.DisabledLibraryIDs),
 		MaturityLimits:     access.MaturityLimits,
 		UserID:             access.UserID,
+		ProfileID:          access.ProfileID,
 	}
 
 	scope := req.Query.MediaScope

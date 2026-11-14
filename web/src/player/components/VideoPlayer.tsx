@@ -305,6 +305,8 @@ interface VideoPlayerProps {
    * Reports whether the replan landed a plan at the requested position.
    */
   onReanchorSeek?: (positionSeconds: number) => boolean | Promise<boolean>;
+  /** A seek the player made inside the stream it has, without a replan. */
+  onSeek?: (positionSeconds: number) => void;
   preferredSubtitleLanguage?: string | null;
   preferredSubtitleTrackSignature?: PlayerSubtitleTrackSignature | null;
   subtitleMode?: SubtitleMode;
@@ -537,6 +539,7 @@ export function VideoPlayer({
   connectionError = null,
   onPlanInvalidated,
   onReanchorSeek,
+  onSeek,
   preferredSubtitleLanguage,
   preferredSubtitleTrackSignature,
   subtitleMode,
@@ -1662,6 +1665,8 @@ export function VideoPlayer({
         replanSeekRef.current = replanningRef.current
           ? { sessionId: sessionIdRef.current, revision: planRevisionRef.current, seconds }
           : null;
+        // A change queued behind the replan in flight resumes here too.
+        onSeek?.(seconds);
         setCurrentTime(seconds);
         if (isHlsStream) video.currentTime = nativeSeconds;
         else handleSeek(nativeSeconds);
@@ -1676,6 +1681,7 @@ export function VideoPlayer({
       canSeekAnywhere,
       handleSeek,
       isHlsStream,
+      onSeek,
       reanchorAt,
       rememberPendingSeek,
       resetRoomCatchupRate,

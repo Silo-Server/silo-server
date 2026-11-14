@@ -7,6 +7,8 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+
+	"github.com/Silo-Server/silo-server/internal/models"
 )
 
 // PrepareProgress is one reading of a prepared-download encode, taken from
@@ -39,20 +41,51 @@ func DownloadPrepareLogSessionID(artifactID string) string {
 	return "download-prepare-" + artifactID
 }
 
-// prepareProgressWriter parses FFmpeg's key=value -progress stream. Each block
-// ends with a progress= line, which is when a reading is emitted.
-type prepareProgressWriter struct {
-	sink     PrepareProgressSink
-	duration float64
-	pending  []byte
-	current  PrepareProgress
+// FileFrameRate is the frame rate of file's video, which a prepared file
+// keeps, or zero for an audio-only file or one whose probe recorded none.
+func FileFrameRate(file *models.MediaFile) float64 {
+	if file == nil || file.IsAudioOnly() || len(file.VideoTracks) == 0 {
+		return 0
+	}
+	return validFrameRate(parseFrameRateV3(file.VideoTracks[0].FrameRate))
 }
 
-func newPrepareProgressWriter(sink PrepareProgressSink, duration float64) *prepareProgressWriter {
+func validFrameRate(rate float64) float64 {
+	if rate <= 0 || math.IsNaN(rate) || math.IsInf(rate, 0) {
+		return 0
+	}
+	return rate
+}
+
+// prepareProgressWriter parses FFmpeg's key=value -progress stream. Each block
+// ends with a progress= line, which is when a reading is emitted.
+//
+// FFmpeg's out_time, and the speed it derives from it, wait for every output
+// stream. A subtitle track with no cue yet holds them at its last cue, at 0
+// until its first, while the encode runs on (#3495). With the video's frame
+// rate known, a reading is the frames encoded at that rate when that is
+// further, and the speed is FFmpeg's encode rate in frames per second over
+// the frame rate.
+type prepareProgressWriter struct {
+	sink      PrepareProgressSink
+	duration  float64
+	frameRate float64
+	pending   []byte
+	current   PrepareProgress
+	frames    int64
+	fps       float64
+}
+
+func newPrepareProgressWriter(sink PrepareProgressSink, duration, frameRate float64) *prepareProgressWriter {
 	if duration < 0 || math.IsNaN(duration) || math.IsInf(duration, 0) {
 		duration = 0
 	}
-	return &prepareProgressWriter{sink: sink, duration: duration, current: PrepareProgress{DurationSeconds: duration}}
+	return &prepareProgressWriter{
+		sink:      sink,
+		duration:  duration,
+		frameRate: validFrameRate(frameRate),
+		current:   PrepareProgress{DurationSeconds: duration},
+	}
 }
 
 func (w *prepareProgressWriter) Write(p []byte) (int, error) {
@@ -79,6 +112,14 @@ func (w *prepareProgressWriter) line(line string) {
 		return
 	}
 	switch strings.TrimSpace(key) {
+	case "frame":
+		if frames, err := strconv.ParseInt(strings.TrimSpace(value), 10, 64); err == nil && frames >= 0 {
+			w.frames = frames
+		}
+	case "fps":
+		if fps, err := strconv.ParseFloat(strings.TrimSpace(value), 64); err == nil && fps >= 0 && !math.IsInf(fps, 0) {
+			w.fps = fps
+		}
 	case "out_time_us", "out_time_ms":
 		// Both keys carry microseconds; out_time_ms is a historical misnomer.
 		if micros, err := strconv.ParseInt(strings.TrimSpace(value), 10, 64); err == nil && micros >= 0 {
@@ -93,12 +134,39 @@ func (w *prepareProgressWriter) line(line string) {
 		if w.sink == nil {
 			return
 		}
-		reading := w.current
+		reading := w.byFrames(w.current)
 		if strings.TrimSpace(value) == "end" && reading.DurationSeconds > 0 {
 			reading.EncodedSeconds = reading.DurationSeconds
 		}
 		w.sink.PrepareProgress(reading)
 	}
+}
+
+// byFrames moves reading to the frames encoded at the video's frame rate when
+// that is further than FFmpeg's out_time, which a sparse subtitle can hold
+// back, capped at the duration.
+//
+// The frame rate is the file's average, so on variable-rate video the reading
+// is the share of frames encoded, not of time: a file with most of its frames
+// early reads close to the duration with much of its time left. It reaches
+// the duration only at the last frame. The speed is in the same terms.
+// PrepareFile passes no frame rate when the video is copied.
+func (w *prepareProgressWriter) byFrames(reading PrepareProgress) PrepareProgress {
+	if w.frameRate <= 0 {
+		return reading
+	}
+	encoded := float64(w.frames) / w.frameRate
+	if reading.DurationSeconds > 0 {
+		encoded = min(encoded, reading.DurationSeconds)
+	}
+	if encoded <= reading.EncodedSeconds {
+		return reading
+	}
+	reading.EncodedSeconds = encoded
+	if w.fps > 0 {
+		reading.Speed = w.fps / w.frameRate
+	}
+	return reading
 }
 
 // prepareLogWriter forwards FFmpeg's stderr to the operational log sink, one

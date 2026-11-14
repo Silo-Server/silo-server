@@ -17,6 +17,9 @@ func observeFile(action fileAction, err error) {
 			status = "updated"
 		case actionUnchanged:
 			status = "unchanged"
+		case actionNoVideo, actionNoVideoRetired:
+			// Not "skipped": the autoscan API's Skipped means an overlapping scan.
+			status = "no_video"
 		}
 	}
 	scannedFiles.WithLabelValues(status).Inc()

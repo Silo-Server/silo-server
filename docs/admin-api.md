@@ -3371,6 +3371,16 @@ check records it on the installation row, so every node returns it. It disappear
 installed version changes or a later check handles the plugin without failing; a check that
 cannot reach the plugin's repository leaves it in place.
 
+Every installation carries `signature`, the release signature check Silo ran when it installed
+the package ([plugin trust](architecture/plugin-trust.md#release-signatures)). `state` is
+`verified`, `unsigned` (nothing to check: an upload, an archive install, or a catalog entry
+without `bundle_url`), `invalid` (a bundle was checked and did not prove the policy), or
+`unknown` (installed before Silo checked signatures, or the check could not run). A verified
+installation also has `source_repo`, the repository its signing certificate names, and
+`verified_at`. The check is recorded once on the installation row and is not re-run; replacing
+the package records the new package's result. Catalog entries carry no signature, because
+nothing is verified before download.
+
 Both reads require an acting administrator and answer 503 when the
 plugin service or stores are not wired. The web plugins page and admin sidebar read these
 routes under captured profile authority and drain pages with a bounded loop; a stale
@@ -3545,7 +3555,7 @@ identifies the acting administrator. Actor filters use
 | `user.impersonation_ended` | `endImpersonation` | `impersonation_session_id` (before) |
 | `user.ownership_transferred` | `transferAdminUserOwnership`; target is the new Owner | `owner_user_id` |
 | `user.password_reset_link_created` | `createAdminUserPasswordReset` | `delivery`, `expires_at` |
-| `user.password_reset_completed` | `completePasswordReset` | `password` (field name only) |
+| `user.password_reset_completed` | `completePasswordResetLink`, `completePasswordReset` (deprecated) | `password` (field name only) |
 | `user.password_changed` | `changePassword` | `password` (field name only) |
 | `user.login_session_revoked` | `deleteSession`, `deleteAdminUserLoginSession` | `login_session_id` (before) |
 | `user.login_sessions_revoked` | `deleteAdminUserLoginSessions` | `revoked_login_sessions` count; recorded when the call ended any login session or Audiobookshelf, Jellyfin-compatible or device sign-in |
@@ -3564,9 +3574,11 @@ profile. Login session IDs identify sessions and are not credentials.
 
 Audit rows never contain a password, password or PIN hash, PIN, access or
 refresh token, API key or its prefix, reset link, its token or digest, or an
-arbitrary request body or header. The path of `completePasswordReset` is stored
-with its link token replaced by `[redacted]`, and that row has no `user_id`
-because the request is unauthenticated.
+arbitrary request body or header. `completePasswordResetLink` takes the link
+token in its body, so its path has none; the path of the deprecated
+`completePasswordReset` is stored with its link token replaced by
+`[redacted]`. Neither row has a `user_id`, because the request is
+unauthenticated.
 
 Rollbacks and refused requests record no domain action, and neither does a
 write that changes no allowlisted value: a repeated identical policy write,

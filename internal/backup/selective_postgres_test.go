@@ -1720,3 +1720,39 @@ func TestSelectiveRestoreOnOneConnectionDB(t *testing.T) {
 		t.Fatal("a restore item waited on the pool its own transaction holds")
 	}
 }
+
+// TestCarryMovesAnswerSequencePastCarriedLinksDB: a restored database holds
+// the answer sequence as of the backup, while a carried sign-in link holds a
+// later value. The carry moves the sequence past it, or every sign-in through
+// that link would look older than the link's last provider answer.
+func TestCarryMovesAnswerSequencePastCarriedLinksDB(t *testing.T) {
+	live, liveURL := backuptest.Database(t)
+	restored, restoredURL := backuptest.Database(t)
+	ctx := t.Context()
+	var account, installation int
+	if err := live.QueryRow(ctx, `INSERT INTO users (role, username) VALUES ('user', 'linked') RETURNING id`).Scan(&account); err != nil {
+		t.Fatal(err)
+	}
+	if err := live.QueryRow(ctx, `INSERT INTO plugin_installations (plugin_id, version, install_path, enabled, update_policy, kind)
+		VALUES ('answer-seq-test', '0', '/nonexistent/answer-seq-test', true, 'manual', 'plugin') RETURNING id`).Scan(&installation); err != nil {
+		t.Fatal(err)
+	}
+	dbExec(t, restored, `INSERT INTO users (id, role, username) VALUES ($1, 'user', 'linked')`, account)
+	dbExec(t, restored, `INSERT INTO plugin_installations (id, plugin_id, version, install_path, enabled, update_policy, kind)
+		OVERRIDING SYSTEM VALUE VALUES ($1, 'answer-seq-test', '0', '/nonexistent/answer-seq-test', true, 'manual', 'plugin')`, installation)
+	dbExec(t, live, `SELECT setval('plugin_auth_identity_answer_seq', 1000)`)
+	dbExec(t, live, `INSERT INTO plugin_auth_identities (plugin_installation_id, external_subject, user_id, answer_seq)
+		VALUES ($1, 'subject', $2, nextval('plugin_auth_identity_answer_seq'))`, installation, account)
+
+	if _, err := (PGLoader{}).CarryCredentials(ctx, restoredURL, liveURL); err != nil {
+		t.Fatal(err)
+	}
+	var carried, next int64
+	if err := restored.QueryRow(ctx, `SELECT (SELECT answer_seq FROM plugin_auth_identities WHERE external_subject = 'subject'),
+		nextval('plugin_auth_identity_answer_seq')`).Scan(&carried, &next); err != nil {
+		t.Fatal(err)
+	}
+	if next <= carried {
+		t.Fatalf("next answer sequence value %d is not past the carried link's %d", next, carried)
+	}
+}

@@ -32,10 +32,11 @@ wins over expired.
 ## Token model
 
 Token handling mirrors the email-verification flow: 32 random bytes,
-`base64.RawURLEncoding` in the claim URL (`/invite/<token>`), SHA-256 hex
+`base64.RawURLEncoding` as the fragment of the claim URL (`/invite#<token>`), SHA-256 hex
 stored at rest as `token_hash`. The raw token exists in the sent email (or in
 the create response when mail is unconfigured) and nowhere else — a database
-dump yields no usable links.
+dump yields no usable links. The fragment keeps the token out of every request
+line and `Referer` header; [Link tokens](password-resets.md#link-tokens) has the rule.
 
 - **Enumeration resistance.** The public lookup returns the same not-found
   result for unknown, expired, revoked, and accepted tokens; the public

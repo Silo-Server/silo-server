@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { FormEvent } from "react";
-import { Link, Navigate, useNavigate, useParams } from "react-router";
+import { Link, Navigate, useNavigate } from "react-router";
 import { captureSessionIdentity, isSessionIdentityCurrent, getAccessToken } from "@/api/client";
 import {
   acceptPublicInvitation,
@@ -22,10 +22,11 @@ import { buildInviteDeepLink, detectMobilePlatform } from "@/lib/appDeepLink";
 import { Smartphone } from "lucide-react";
 import { toast } from "sonner";
 import { invalidEmailMessage, isValidEmail } from "@/lib/email";
+import { useLinkToken } from "@/hooks/useLinkToken";
 import { useT } from "@/i18n";
 
 export default function InviteClaim() {
-  const { token = "" } = useParams();
+  const token = useLinkToken();
   return <ClaimForm key={token} token={token} />;
 }
 
@@ -47,7 +48,12 @@ function ClaimForm({ token }: { token: string }) {
     data?: InvitationLookup;
     pending: boolean;
     unavailable?: boolean;
-  }>({ pending: true });
+  }>(
+    // Opened without its token, as when something on the way dropped the
+    // link's fragment, there is nothing to look up: the invitation is
+    // unavailable, and a fresh one is the remedy.
+    token ? { pending: true } : { pending: false, unavailable: true },
+  );
   const [reload, setReload] = useState(0);
   const [recovery, setRecovery] = useState(false);
   // The server refused the acceptance because password sign-in is off; the
@@ -62,7 +68,7 @@ function ClaimForm({ token }: { token: string }) {
     return () => controller.abort();
   }, []);
   useEffect(() => {
-    if (loading || user) return;
+    if (loading || user || !token) return;
     const controller = new AbortController();
     const identity = captureSessionIdentity();
     lookupPublicInvitation(token, controller.signal)

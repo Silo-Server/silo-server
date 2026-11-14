@@ -1845,6 +1845,86 @@ func TestCustomPoliciesComeFromTheLiveServerDB(t *testing.T) {
 	}
 }
 
+// TestCarryMatchesAProfileWithinItsAccountDB: a profile id is unique only
+// within an account, so a live row naming a profile is carried only when its
+// own account has that profile in the restored data, even where another
+// account has a profile with the same id.
+func TestCarryMatchesAProfileWithinItsAccountDB(t *testing.T) {
+	live, liveURL := backuptest.Database(t)
+	restored, restoredURL := backuptest.Database(t)
+	ctx := t.Context()
+	account := func(name string) (id int) {
+		t.Helper()
+		if err := live.QueryRow(ctx, `INSERT INTO users (role, username) VALUES ('user', $1) RETURNING id`, name).Scan(&id); err != nil {
+			t.Fatal(err)
+		}
+		dbExec(t, restored, `INSERT INTO users (id, role, username) VALUES ($1, 'user', $2)`, id, name)
+		return id
+	}
+	first, second := account("first"), account("second")
+	for _, db := range []*pgxpool.Pool{live, restored} {
+		testProfile(t, db, first, "kids", "Kids", false, "")
+		testProfile(t, db, second, "default", "Default", false, "")
+	}
+	// Since the backup, the second account added a profile with the id
+	// the first account's profile has, and destinations for it.
+	testProfile(t, live, second, "kids", "Kids", false, "")
+	webhook := func(id, profile string) {
+		dbExec(t, live, `INSERT INTO notification_webhooks (id, user_id, profile_id, name, type, url_ciphertext, url_host)
+			VALUES ($1, $2, $3, $1, 'discord', 'cipher', 'example.invalid')`, id, second, profile)
+	}
+	webhook("hook-kids", "kids")
+	webhook("hook-default", "default")
+	connection := func(id, profile string) {
+		dbExec(t, live, `INSERT INTO webhook_sync_connections (id, user_id, provider, default_profile_id, webhook_secret)
+			VALUES ($1::uuid, $2, 'plex', $3, $1::text)`, id, second, profile)
+	}
+	const kidsConnection, defaultConnection = "00000000-0000-0000-0000-00000000000a", "00000000-0000-0000-0000-00000000000b"
+	connection(kidsConnection, "kids")
+	connection(defaultConnection, "default")
+	mapping := func(profile string) (id int) {
+		t.Helper()
+		if err := live.QueryRow(ctx, `INSERT INTO webhook_sync_profile_mappings (connection_id, external_user_id, silo_profile_id)
+			VALUES ($1, $2, $2) RETURNING id`, defaultConnection, profile).Scan(&id); err != nil {
+			t.Fatal(err)
+		}
+		return id
+	}
+	kidsMapping, defaultMapping := mapping("kids"), mapping("default")
+
+	carried, err := PGLoader{}.CarryCredentials(ctx, restoredURL, liveURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantDropped := []string{
+		fmt.Sprintf("notification webhook hook-kids 'hook-kids' (account %d)", second),
+		fmt.Sprintf("webhook sync connection %s '' (account %d)", kidsConnection, second),
+		fmt.Sprintf("webhook sync mapping %d of connection %s", kidsMapping, defaultConnection),
+	}
+	for _, want := range wantDropped {
+		if !slices.Contains(carried.Dropped, want) {
+			t.Errorf("dropped %q, want %q among them", carried.Dropped, want)
+		}
+	}
+	ids := func(sql string) []string {
+		t.Helper()
+		got, err := collectStrings(ctx, restored, sql)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return got
+	}
+	if got := ids(`SELECT id FROM notification_webhooks ORDER BY id`); !slices.Equal(got, []string{"hook-default"}) {
+		t.Errorf("restored webhooks %v, want only the one for a profile of its account", got)
+	}
+	if got := ids(`SELECT id::text FROM webhook_sync_connections ORDER BY id`); !slices.Equal(got, []string{defaultConnection}) {
+		t.Errorf("restored webhook sync connections %v, want only the one whose default profile is its account's", got)
+	}
+	if got := ids(`SELECT id::text FROM webhook_sync_profile_mappings ORDER BY id`); !slices.Equal(got, []string{strconv.Itoa(defaultMapping)}) {
+		t.Errorf("restored webhook sync mappings %v, want only the one naming a profile of its account", got)
+	}
+}
+
 // A backup taken before notification_email_prefs was keyed by account holds
 // one row per profile id. The carry upserts on the key that backup has, and
 // drops the live rows two accounts' profiles with the same id hold instead
