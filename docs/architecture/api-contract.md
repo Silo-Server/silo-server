@@ -733,6 +733,23 @@ resolves that profile's current limits and skips only the PIN proof the link sta
 does for the Apple display token. The link authorizes the start of a request; a transfer that
 began in time may run longer.
 
+The playback delivery routes (`getPlaybackMedia`, `getPlaybackManifest`, `getPlaybackSegment`,
+`getPlaybackSubtitle` and their HEAD forms) accept the plan's signed stream reference `st` the
+same way, for a receiver such as a Google Cast device that is handed only the plan URL. A request
+with an `Authorization` header or a `token` parameter takes the account path unchanged. Without
+either, a valid `st` that names a playback session (not a download, theme song or bandwidth
+probe) and the session in the path authorizes the request as its account, with the account's
+current role, while that session's playback attempt is live, owned by the reference's account and
+profile, and started by a login session that is still active. The attempt records that login
+session when playback starts. `X-Profile-Id` is rewritten to the reference's profile; viewer
+access then resolves that profile's limits and skips only the PIN proof, and the handlers apply
+the session-deny marker and ownership checks as for any request. A reference therefore ends when
+its session stops (even where no session-deny marker store is configured), when the login session
+signs out or is revoked (disabling an account revokes its sessions), or at the 24-hour
+stream-token expiry. An attempt with no login session, started with an API key or before attempts
+recorded one, keeps needing the account credential. Plans that negotiated
+`header_authenticated_media_v1` carry no `st`, so their media still needs the header.
+
 Household management (creating, editing, and deleting profiles, listing household sessions,
 managing another profile's devices or settings, importing history for another profile, and
 creating a personal API key, changing the account-wide Discord notification

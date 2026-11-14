@@ -90,7 +90,8 @@ func TestSummaryResolvesReplacedPlanDelivery(t *testing.T) {
 
 // An attempt's desired tracks survive the round trip through SaveAttempt and
 // CompleteReplan, and an attempt without them reads back as nil rather than
-// as an empty intent that would claim "no subtitle wanted".
+// as an empty intent that would claim "no subtitle wanted". The login session
+// that started the attempt survives the same round trip, on both reads.
 func TestAttemptDesiredTracksRoundTrip(t *testing.T) {
 	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
 	if dsn == "" {
@@ -149,12 +150,16 @@ func TestAttemptDesiredTracksRoundTrip(t *testing.T) {
 		},
 	}
 	record := newRecord(desired)
+	record.LoginSessionID = "login-" + unique
 	if err := store.SaveAttempt(ctx, record); err != nil {
 		t.Fatal(err)
 	}
 	got, err := store.GetAttempt(ctx, record.SessionID)
 	if err != nil || !reflect.DeepEqual(got.DesiredTracks, desired) {
 		t.Fatalf("desired tracks read back %+v, %v; want %+v", got.DesiredTracks, err, desired)
+	}
+	if identity, err := store.GetAttemptIdentity(ctx, record.SessionID); err != nil || got.LoginSessionID != record.LoginSessionID || identity.LoginSessionID != record.LoginSessionID {
+		t.Fatalf("login session read back %q (identity %+v, %v); want %q", got.LoginSessionID, identity, err, record.LoginSessionID)
 	}
 
 	lease, err := store.BeginReplan(ctx, record.SessionID, "replan-1", "digest", "", time.Now().Add(time.Minute))
@@ -172,5 +177,8 @@ func TestAttemptDesiredTracksRoundTrip(t *testing.T) {
 	got, err = store.GetAttempt(ctx, record.SessionID)
 	if err != nil || !reflect.DeepEqual(got.DesiredTracks, replanned.DesiredTracks) {
 		t.Fatalf("desired tracks after replan %+v, %v; want %+v", got.DesiredTracks, err, replanned.DesiredTracks)
+	}
+	if got.LoginSessionID != record.LoginSessionID {
+		t.Fatalf("login session after replan %q; want %q", got.LoginSessionID, record.LoginSessionID)
 	}
 }
