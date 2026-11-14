@@ -21,6 +21,26 @@ const mocks = vi.hoisted(() => ({
   },
   startPlayback: vi.fn(),
   toggleActivePlayback: vi.fn(),
+  user: null as null | { role: "admin" | "user"; permissions?: string[] },
+}));
+
+vi.mock("@/hooks/useAuth", () => ({
+  useAuth: () => ({ user: mocks.user }),
+}));
+vi.mock("@/hooks/useCurrentProfile", () => ({
+  useCurrentProfile: () => ({ profile: { is_primary: true } }),
+}));
+vi.mock("@/components/EditMetadataDialog", () => ({
+  default: ({ open, item }: { open: boolean; item: { title: string } }) =>
+    open ? <div>Editing {item.title}</div> : null,
+}));
+vi.mock("@/components/MatchItemDialog", () => ({
+  default: ({ open, item }: { open: boolean; item: { title: string; library_id?: number } }) =>
+    open ? (
+      <div>
+        Matching {item.title} in {item.library_id}
+      </div>
+    ) : null,
 }));
 
 vi.mock("@/pages/audiobooks/player/audiobookPlaybackContext", () => ({
@@ -151,5 +171,39 @@ describe("AudiobookContent playback actions", () => {
 
     expect(mocks.toggleActivePlayback).toHaveBeenCalledTimes(1);
     expect(mocks.startPlayback).not.toHaveBeenCalled();
+  });
+});
+
+describe("AudiobookContent metadata actions", () => {
+  beforeEach(() => {
+    mocks.controller = null;
+  });
+
+  it("lets a metadata curator edit and match the book", async () => {
+    mocks.user = { role: "user", permissions: ["metadata_curation"] };
+    render(
+      <MemoryRouter>
+        <AudiobookContent item={bookWithProgress(0)} libraryId={7} />
+      </MemoryRouter>,
+    );
+
+    await userEvent.click(screen.getByRole("button", { name: "More actions" }));
+    await userEvent.click(screen.getByRole("menuitem", { name: "Edit Metadata" }));
+    expect(screen.getByText("Editing Test Book")).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: "More actions" }));
+    await userEvent.click(screen.getByRole("menuitem", { name: "Match Item" }));
+    expect(screen.getByText("Matching Test Book in 7")).toBeInTheDocument();
+  });
+
+  it("offers no metadata actions to a listener", () => {
+    mocks.user = { role: "user", permissions: [] };
+    render(
+      <MemoryRouter>
+        <AudiobookContent item={bookWithProgress(0)} />
+      </MemoryRouter>,
+    );
+
+    expect(screen.queryByRole("button", { name: "More actions" })).not.toBeInTheDocument();
   });
 });

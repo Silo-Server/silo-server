@@ -53,6 +53,7 @@ const RESET_DESCRIPTION_KEYS: Partial<Record<ItemDetail["type"], MessageKey>> = 
 const FIELD_LOCK_MAPS: Partial<Record<ItemDetail["type"], Record<string, number>>> = {
   movie: FIELD_LOCK_MAP,
   series: FIELD_LOCK_MAP,
+  audiobook: FIELD_LOCK_MAP,
   season: SEASON_FIELD_LOCK_MAP,
   episode: EPISODE_FIELD_LOCK_MAP,
 };
@@ -228,7 +229,9 @@ export default function EditMetadataDialog({ item, open, onOpenChange }: EditMet
         ? "web.item.editMetadata.typeSeries"
         : item.type === "season"
           ? "web.item.editMetadata.typeSeason"
-          : "web.item.editMetadata.typeEpisode",
+          : item.type === "audiobook"
+            ? "web.detail.hero.typeAudiobook"
+            : "web.item.editMetadata.typeEpisode",
   );
 
   return (
@@ -414,7 +417,9 @@ export default function EditMetadataDialog({ item, open, onOpenChange }: EditMet
 
               {effectiveActiveSection === "dates" && (
                 <div className="space-y-4">
-                  {(item.type === "movie" || item.type === "series") && (
+                  {(item.type === "movie" ||
+                    item.type === "series" ||
+                    item.type === "audiobook") && (
                     <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                       <FieldRow
                         label={t("web.item.dialog.fieldYear")}
@@ -427,7 +432,7 @@ export default function EditMetadataDialog({ item, open, onOpenChange }: EditMet
                         />
                       </FieldRow>
 
-                      {item.type === "movie" && (
+                      {(item.type === "movie" || item.type === "audiobook") && (
                         <FieldRow
                           label={t("web.item.editMetadata.releaseDate")}
                           lockIcon={renderLockIcon("release_date")}
