@@ -47,7 +47,7 @@ func TestFrameSideDataProbeKillsTheWrappersChildWithIt(t *testing.T) {
 	defer cancel()
 	done := make(chan error, 1)
 	go func() {
-		_, err := probeVideoFrameSideData(ctx, wrapper.Path, filepath.Join(t.TempDir(), "S01E06.mkv"), "0")
+		_, err := probeFirstVideoFrame(ctx, wrapper.Path, filepath.Join(t.TempDir(), "S01E06.mkv"), "0")
 		done <- err
 	}()
 	pid := wrapper.ChildPID(t)

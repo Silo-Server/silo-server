@@ -35821,6 +35821,8 @@ export interface components {
       /** Format: int64 */
       dv_profile?: number;
       dv_rpu_present?: boolean;
+      /** @description Color range FFmpeg reported on the first decoded frame of a PQ track (tv, pc, or unknown when the frame carried none); absent when the frame was not read. Can differ from color_range, the container's tag */
+      frame_color_range?: string;
       frame_rate?: string;
       hdr10_plus?: boolean;
       /** Format: int64 */

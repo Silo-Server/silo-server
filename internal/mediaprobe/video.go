@@ -82,6 +82,8 @@ type Stream struct {
 	// FrameSideDataRead reports that the first frame was read, so an empty
 	// FrameSideDataList means the frame carries no side data.
 	FrameSideDataRead bool `json:"-"`
+	// FrameColorRange is the range FFmpeg reported on that first frame.
+	FrameColorRange string `json:"-"`
 }
 
 // Disposition is the subset of FFprobe disposition flags used by scans.
@@ -220,6 +222,7 @@ func NormalizeVideoTrack(stream Stream) models.VideoTrack {
 		VideoRange:          videoRangeLabel(stream, dvProfile),
 		VideoRangeType:      videoRangeType(stream, dvProfile, dvConfig.DVBLCompatID, hdr10Plus),
 		ColorRange:          colorRange,
+		FrameColorRange:     frameColorRange(stream),
 		ColorPrimaries:      stream.ColorPrimaries,
 		ColorSpace:          stream.ColorSpace,
 		ColorTransfer:       stream.ColorTransfer,
@@ -227,6 +230,22 @@ func NormalizeVideoTrack(stream Stream) models.VideoTrack {
 		PixelFormat:         stream.PixFmt,
 		ReferenceFrames:     stream.Refs,
 	}
+}
+
+// frameColorRange returns the stored form of the first decoded frame's range,
+// or "" when the frame was not read.
+func frameColorRange(stream Stream) string {
+	if !stream.FrameSideDataRead {
+		return ""
+	}
+	return RecordedFrameColorRange(stream.FrameColorRange)
+}
+
+// RecordedFrameColorRange is the value stored for a first frame that FFmpeg
+// reported range as: the range itself, or "unknown" when it reported none, so
+// a read frame is never mistaken for one not read.
+func RecordedFrameColorRange(reported string) string {
+	return firstNonEmpty(strings.TrimSpace(reported), "unknown")
 }
 
 func dolbyVisionConfigRecord(sideData []SideData) (SideData, bool) {

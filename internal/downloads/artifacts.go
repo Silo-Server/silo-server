@@ -1117,6 +1117,11 @@ func validateArtifactToneMapRevision(file *models.MediaFile, artifact *Artifact)
 	if frozen != tonemap.RevisionForFile(file) {
 		return fmt.Errorf("%w: tone-map source revision changed", tonemap.ErrSourceRevisionChanged)
 	}
+	// The HDR10+ backfill records the first frame's range without a new
+	// probe, so the revision stays the same while the source kind can change.
+	if kind := tonemap.ResolveSource(tonemap.MetadataForFile(file)).Kind; kind != artifact.ToneMapSourceKind {
+		return fmt.Errorf("%w: tone-map source kind changed from %q to %q", tonemap.ErrSourceRevisionChanged, artifact.ToneMapSourceKind, kind)
+	}
 	return nil
 }
 

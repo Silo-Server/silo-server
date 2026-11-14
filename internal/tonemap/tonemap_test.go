@@ -166,6 +166,37 @@ func TestResolveSourceClassifiesPQByRange(t *testing.T) {
 	}
 }
 
+// TestResolveSourceTakesPQRangeFromTheDecodedFrame classifies a stored track
+// by the range its first decoded frame reported, which is the range a
+// tone-map graph sees, rather than a container tag that contradicts it.
+func TestResolveSourceTakesPQRangeFromTheDecodedFrame(t *testing.T) {
+	tests := []struct {
+		name          string
+		streamRange   string
+		frameRange    string
+		want          SourceKind
+		wantPreflight bool
+	}{
+		{name: "full-range frames tagged limited", streamRange: "tv", frameRange: "pc", want: SourcePQFullRange, wantPreflight: true},
+		{name: "limited frames tagged full", streamRange: "pc", frameRange: "tv", want: SourcePQ},
+		{name: "frame without a range keeps the tag", streamRange: "pc", frameRange: "unknown", want: SourcePQFullRange, wantPreflight: true},
+		{name: "frame not read keeps the tag", streamRange: "tv", want: SourcePQ},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			file := &models.MediaFile{HDR: true, VideoTracks: []models.VideoTrack{{
+				Codec: "hevc", VideoRange: "HDR", VideoRangeType: "HDR10",
+				ColorRange: tt.streamRange, FrameColorRange: tt.frameRange,
+				ColorPrimaries: "bt2020", ColorTransfer: ColorTransferPQ, ColorSpace: "bt2020nc",
+			}}}
+			got := ResolveSource(MetadataForFile(file))
+			if got.Kind != tt.want || got.PreflightRequired != tt.wantPreflight {
+				t.Fatalf("ResolveSource() = %#v, want kind %q preflight %t", got, tt.want, tt.wantPreflight)
+			}
+		})
+	}
+}
+
 // TestSoftwareToneMapReadsFullRangePQAtItsOwnLevels encodes one PQ BT.2020
 // picture at limited and at full range, classifies each from its stream tag,
 // and requires both software graphs to convert them to the same SDR picture.

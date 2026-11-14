@@ -537,6 +537,7 @@ func convertProbeData(raw *ffprobeOutput) *ProbeData {
 				VideoRange:          normalized.VideoRange,
 				VideoRangeType:      normalized.VideoRangeType,
 				ColorRange:          normalized.ColorRange,
+				FrameColorRange:     normalized.FrameColorRange,
 				ColorPrimaries:      normalized.ColorPrimaries,
 				ColorSpace:          normalized.ColorSpace,
 				ColorTransfer:       normalized.ColorTransfer,
@@ -963,9 +964,10 @@ func primaryVideoFrameRate(streams []ffprobeStream) (string, bool) {
 const frameSideDataProbeTimeout = 30 * time.Second
 
 // applyPrimaryVideoFrameSideData reads the first decoded frame of the primary
-// video stream when that stream is PQ, and records the frame's side data on
-// the stream so normalization can see HDR10+ metadata. Only the primary
-// stream is checked because it is the one playback and the badges describe.
+// video stream when that stream is PQ, and records the frame's side data and
+// color range on the stream so normalization can see HDR10+ metadata and the
+// range the decoder takes from the bitstream. Only the primary stream is
+// checked because it is the one playback and the badges describe.
 //
 // A failed frame read is not fatal: the file keeps its stream-level facts,
 // plays and labels as HDR10, and stays unchecked, so the HDR10+ backfill reads
@@ -980,7 +982,7 @@ func applyPrimaryVideoFrameSideData(ctx context.Context, ffprobePath, filePath s
 		if !mediaprobe.NeedsFrameSideData(streams[i]) {
 			return nil
 		}
-		sideData, err := probeVideoFrameSideData(ctx, ffprobePath, filePath, strconv.Itoa(streams[i].Index))
+		frame, err := probeFirstVideoFrame(ctx, ffprobePath, filePath, strconv.Itoa(streams[i].Index))
 		if err != nil {
 			if ctxErr := ctx.Err(); ctxErr != nil {
 				return ctxErr
@@ -992,7 +994,8 @@ func applyPrimaryVideoFrameSideData(ctx context.Context, ffprobePath, filePath s
 			)
 			return nil
 		}
-		streams[i].FrameSideDataList = sideData
+		streams[i].FrameSideDataList = frame.SideData
+		streams[i].FrameColorRange = frame.ColorRange
 		streams[i].FrameSideDataRead = true
 		return nil
 	}
@@ -1008,25 +1011,36 @@ var (
 	errNoFrameDecoded = errors.New("ffprobe returned no decoded video frame")
 )
 
-// probeVideoFrameSideData decodes the first frame of the stream that
-// streamSpecifier selects and returns the side data FFmpeg attached to it.
+// firstVideoFrame is what the scanner reads from a stream's first decoded
+// frame.
+type firstVideoFrame struct {
+	// SideData is the side data FFmpeg attached to the frames read.
+	SideData []ffprobeSideData
+	// ColorRange is the first frame's range, which the decoder takes from
+	// the bitstream before the container's tag. Empty when FFmpeg reported
+	// none.
+	ColorRange string
+}
+
+// probeFirstVideoFrame decodes the first frame of the stream that
+// streamSpecifier selects and returns its side data and color range.
 //
 // One packet normally decodes to the first frame. A stream whose first packet
 // does not decode on its own, such as one that starts mid-GOP, is read again
 // over frameSideDataFallbackPackets before it counts as having no frame.
-func probeVideoFrameSideData(ctx context.Context, ffprobePath, filePath, streamSpecifier string) ([]ffprobeSideData, error) {
-	sideData, err := probeVideoFrameSideDataPackets(ctx, ffprobePath, filePath, streamSpecifier, 1)
+func probeFirstVideoFrame(ctx context.Context, ffprobePath, filePath, streamSpecifier string) (firstVideoFrame, error) {
+	frame, err := probeFirstVideoFramePackets(ctx, ffprobePath, filePath, streamSpecifier, 1)
 	if errors.Is(err, errNoFrameDecoded) {
-		return probeVideoFrameSideDataPackets(ctx, ffprobePath, filePath, streamSpecifier, frameSideDataFallbackPackets)
+		return probeFirstVideoFramePackets(ctx, ffprobePath, filePath, streamSpecifier, frameSideDataFallbackPackets)
 	}
-	return sideData, err
+	return frame, err
 }
 
 // frameSideDataFallbackPackets is the second read's packet budget: about a
 // second of video, enough to reach a keyframe in common GOP layouts.
 const frameSideDataFallbackPackets = 24
 
-func probeVideoFrameSideDataPackets(ctx context.Context, ffprobePath, filePath, streamSpecifier string, packets int) ([]ffprobeSideData, error) {
+func probeFirstVideoFramePackets(ctx context.Context, ffprobePath, filePath, streamSpecifier string, packets int) (firstVideoFrame, error) {
 	probeCtx, cancel := context.WithTimeout(ctx, frameSideDataProbeTimeout)
 	defer cancel()
 	cmd := fspath.CommandContext(probeCtx, ffprobePath,
@@ -1034,7 +1048,7 @@ func probeVideoFrameSideDataPackets(ctx context.Context, ffprobePath, filePath, 
 		"-read_intervals", "%+#"+strconv.Itoa(packets),
 		"-select_streams", streamSpecifier,
 		"-show_frames",
-		"-show_entries", "frame=media_type:frame_side_data=side_data_type",
+		"-show_entries", "frame=media_type,color_range:frame_side_data=side_data_type",
 		"-print_format", "json",
 		filePath,
 	)
@@ -1045,26 +1059,27 @@ func probeVideoFrameSideDataPackets(ctx context.Context, ffprobePath, filePath, 
 	processmetrics.Record(processmetrics.Probe, cmd.ProcessState, err, probeCtx.Err())
 	if err != nil {
 		if errors.Is(probeCtx.Err(), context.DeadlineExceeded) && ctx.Err() == nil {
-			return nil, fmt.Errorf("%w after %s for %s", errFrameSideDataTimeout, frameSideDataProbeTimeout, filePath)
+			return firstVideoFrame{}, fmt.Errorf("%w after %s for %s", errFrameSideDataTimeout, frameSideDataProbeTimeout, filePath)
 		}
-		return nil, fmt.Errorf("ffprobe frame side data failed for %s: %w", filePath, err)
+		return firstVideoFrame{}, fmt.Errorf("ffprobe frame side data failed for %s: %w", filePath, err)
 	}
 	var payload struct {
 		Frames []struct {
+			ColorRange   string            `json:"color_range"`
 			SideDataList []ffprobeSideData `json:"side_data_list"`
 		} `json:"frames"`
 	}
 	if err := json.Unmarshal(output, &payload); err != nil {
-		return nil, fmt.Errorf("ffprobe frame side data JSON parse failed for %s: %w", filePath, err)
+		return firstVideoFrame{}, fmt.Errorf("ffprobe frame side data JSON parse failed for %s: %w", filePath, err)
 	}
 	if len(payload.Frames) == 0 {
-		return nil, fmt.Errorf("%w for %s", errNoFrameDecoded, filePath)
+		return firstVideoFrame{}, fmt.Errorf("%w for %s", errNoFrameDecoded, filePath)
 	}
-	var sideData []ffprobeSideData
-	for _, frame := range payload.Frames {
-		sideData = append(sideData, frame.SideDataList...)
+	frame := firstVideoFrame{ColorRange: payload.Frames[0].ColorRange}
+	for _, decoded := range payload.Frames {
+		frame.SideData = append(frame.SideData, decoded.SideDataList...)
 	}
-	return sideData, nil
+	return frame, nil
 }
 
 // probeVideoPacketDuration derives a duration for files whose duration
