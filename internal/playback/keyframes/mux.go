@@ -5,6 +5,7 @@ import (
 	"io"
 	"math"
 	"slices"
+	"strings"
 
 	"github.com/Silo-Server/silo-server/internal/matroska"
 )
@@ -108,9 +109,13 @@ func PlanMuxSegments(idx Index, segmentSeconds float64, audio MuxAudio) ([]float
 func muxOrigins(idx Index, audio MuxAudio) ([]float64, bool) {
 	k0 := idx.Keyframes[0]
 	track, ok := mappedAudioTrack(idx.Tracks, audio)
-	if !ok || !track.HasStart {
-		// No audio, or none in the first cluster: it starts after the video.
+	if !ok {
 		return []float64{k0}, true
+	}
+	if !track.HasStart {
+		// None in the first cluster: it starts after the video, unless an
+		// encoder's priming brings it forward by an unknown amount.
+		return []float64{k0}, audio.Encoder == AudioCopied
 	}
 	lo, hi, ok := audioMuxStart(track, audio.Encoder)
 	if !ok {
@@ -118,8 +123,8 @@ func muxOrigins(idx Index, audio MuxAudio) ([]float64, bool) {
 	}
 
 	// The video's first decode time is the first keyframe less its B-frame
-	// delay: at least the reordering the first cluster shows, and none when
-	// it shows enough frames without reordering.
+	// delay: the delay its headers declare, or at most the keyframe when
+	// that is unknown.
 	videoLatest := k0 - float64(max(idx.VideoReorder, 0))*idx.VideoFrame
 	videoEarliest := k0
 	if idx.VideoReorder != 0 {
@@ -135,9 +140,9 @@ func muxOrigins(idx Index, audio MuxAudio) ([]float64, bool) {
 			firstStart = min(firstStart, t.Start)
 		}
 	}
-	if hi > firstStart+muxTie {
+	if hi > firstStart {
 		// Another track starts before the audio's first packet, which then
-		// isn't 0 after FFmpeg's shift.
+		// isn't 0 after FFmpeg's shift, however little it is ahead.
 		return nil, false
 	}
 	origins := []float64{min(lo, k0), min(hi, k0)}
@@ -233,20 +238,44 @@ func readTrackStarts(r io.ReaderAt, off int64, m *matroskaIndex) error {
 		return fmt.Errorf("keyframes: read the first cluster at %d: %w", off, err)
 	}
 	scale := float64(m.timescale) / 1e9
+	// FFmpeg subtracts each track's CodecDelay from its timestamps, the
+	// video's too, but the Keyframes keep the video's: put the starts on
+	// the Keyframes timeline.
+	var videoDelay float64
+	for _, e := range m.entries {
+		if e.Number == m.video {
+			videoDelay = float64(e.CodecDelay) / 1e9
+		}
+	}
 	m.Tracks = make([]Track, len(m.entries))
 	for i, e := range m.entries {
 		t := Track{Type: e.Type, CodecDelay: float64(e.CodecDelay) / 1e9, SampleRate: e.SamplingFrequency}
-		if e.OutputSamplingFrequency > 0 {
+		switch {
+		case e.OutputSamplingFrequency > 0:
 			t.SampleRate = e.OutputSamplingFrequency
+		case (e.CodecID == "A_AAC" || strings.HasPrefix(e.CodecID, "A_AAC/")) && t.SampleRate <= 24000:
+			// HE-AAC with implicit SBR has only its core rate here, and
+			// FFmpeg's decoder outputs twice that: the rate is unknown.
+			t.SampleRate = 0
 		}
 		if ticks, ok := starts[e.Number]; ok {
-			t.Start, t.HasStart = float64(ticks)*scale-t.CodecDelay, true
+			// As the Keyframes are computed, so equal ticks give equal times.
+			t.Start, t.HasStart = float64(ticks)*float64(m.timescale)/1e9-(t.CodecDelay-videoDelay), true
 		}
 		m.Tracks[i] = t
 	}
-	m.VideoReorder = reorderDepth(video)
-	if len(video) < 3 {
-		m.VideoReorder = ReorderUnknown
+	// FFmpeg's decoder delay is what the codec headers declare, which a
+	// first cluster without B-frames doesn't show. Without a declaration
+	// FFmpeg measures it from the frames it probes, so it is unknown here,
+	// as it is for a stream that reorders more than it declares.
+	m.VideoReorder = ReorderUnknown
+	for _, e := range m.entries {
+		if e.Number != m.video {
+			continue
+		}
+		if declared, ok := signaledReorder(e); ok && reorderDepth(video) <= declared {
+			m.VideoReorder = declared
+		}
 	}
 	m.VideoFrame = m.frameSeconds
 	if m.VideoFrame <= 0 {
@@ -292,8 +321,8 @@ func clusterBlocks(r io.ReaderAt, off, segEnd int64, video uint64) (map[uint64]i
 
 // reorderDepth returns how many frames, at most, a frame is decoded later
 // than its place in presentation order: the B-frame delay a decoder needs to
-// output decodeOrder's frames in order. FFmpeg's delay for the stream is at
-// least this.
+// output decodeOrder's frames in order, which a stream's declared delay
+// covers.
 func reorderDepth(decodeOrder []int64) int {
 	sorted := slices.Clone(decodeOrder)
 	slices.Sort(sorted)

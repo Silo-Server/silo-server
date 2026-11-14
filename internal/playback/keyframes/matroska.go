@@ -45,17 +45,18 @@ type Index struct {
 	// frames; only Load sets them. PlanMuxSegments needs them to know which
 	// packet FFmpeg's HLS muxer starts from.
 	Tracks []Track
-	// VideoReorder is how many frames the first cluster shows the video's
-	// decode order running ahead of its presentation order: 0 without
-	// B-frames, ReorderUnknown when it holds too few video frames to tell.
+	// VideoReorder is how many frames the video's codec headers declare
+	// its decoder holds back for B-frame reordering; FFmpeg decodes the
+	// video that many frames ahead of its first keyframe. ReorderUnknown
+	// when they declare none, or the first cluster reorders more.
 	VideoReorder int
 	// VideoFrame is the video's frame duration in seconds, or 0 when unknown.
 	VideoFrame float64
 }
 
-// ReorderUnknown is Index.VideoReorder when the first cluster holds fewer
-// than three video frames: a B-frame only shows up after the frame decoded
-// ahead of it, so such a cluster can't rule reordering out.
+// ReorderUnknown is Index.VideoReorder when the video's decoder delay
+// can't be told from the file: FFmpeg then measures it from the frames it
+// probes.
 const ReorderUnknown = -1
 
 // Matroska element IDs, from the Matroska specification.
@@ -166,7 +167,9 @@ func firstCluster(r io.ReaderAt, m matroskaIndex) (int64, error) {
 	if m.firstCluster >= 0 {
 		return m.firstCluster, nil
 	}
-	for at := m.scanNext; at >= 0 && at < m.segEnd; {
+	// Like the tail walk, read a bounded number of elements: Tags,
+	// Chapters and Attachments between the Cues and the media are few.
+	for at, n := m.scanNext, 0; at >= 0 && at < m.segEnd && n < maxTailElements; n++ {
 		id, dataSize, headerLen, err := matroska.ReadElementHeader(r, at)
 		if err != nil {
 			return 0, fmt.Errorf("keyframes: read element at %d: %w", at, err)

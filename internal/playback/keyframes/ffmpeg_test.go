@@ -140,13 +140,13 @@ func TestPlanSegmentsMatchesFFmpegHLS(t *testing.T) {
 // early, an AC3 track here starts 5ms early.
 func TestPlanSegmentsMatchesFFmpegHLSWhenAudioLeads(t *testing.T) {
 	ffmpeg, _ := requireFFmpeg(t)
-	mkv := func(name, audio string, bframes int) string {
+	mkv := func(name, audio, x264 string) string {
 		path := filepath.Join(t.TempDir(), name+".mkv")
 		out, err := exec.Command(ffmpeg, "-hide_banner", "-loglevel", "error", "-y",
 			"-f", "lavfi", "-i", "testsrc2=size=160x90:rate=50",
 			"-f", "lavfi", "-i", "sine=frequency=440:sample_rate=48000",
 			"-t", "12", "-c:v", "libx264", "-preset", "ultrafast",
-			"-g", "1000", "-sc_threshold", "0", "-bf", strconv.Itoa(bframes),
+			"-g", "1000", "-sc_threshold", "0", "-x264-params", x264,
 			"-force_key_frames", "0,1.98,4,6,8,9.98",
 			"-c:a", audio, path).CombinedOutput()
 		if err != nil {
@@ -154,7 +154,7 @@ func TestPlanSegmentsMatchesFFmpegHLSWhenAudioLeads(t *testing.T) {
 		}
 		return path
 	}
-	aac, ac3 := mkv("aac", "aac", 0), mkv("ac3", "ac3", 0)
+	aac, ac3 := mkv("aac", "aac", "bframes=0"), mkv("ac3", "ac3", "bframes=0")
 	for name, tc := range map[string]struct {
 		path  string
 		audio MuxAudio
@@ -164,10 +164,14 @@ func TestPlanSegmentsMatchesFFmpegHLSWhenAudioLeads(t *testing.T) {
 		"AC3 copied":         {path: ac3, plan: true},
 		"AC3 encoded to AAC": {path: ac3, audio: MuxAudio{Encoder: AudioAAC}, plan: true},
 		"AAC encoded to AAC": {path: aac, audio: MuxAudio{Encoder: AudioAAC}, plan: true},
-		// Two B-frames delay the video 40ms, which FFmpeg muxes ahead of the
-		// AAC; the first cluster shows only one frame of reordering, which
-		// can't tell that apart from audio first, so it may not plan.
-		"B-frames": {path: mkv("bframes", "aac", 2)},
+		// The SPS signals two frames of reordering, which delay the video
+		// 40ms, ahead of the AAC. The first cluster shows only one frame of
+		// it with B-frames, and none when x264 chose no B-frames there.
+		"B-frames": {path: mkv("bframes", "aac", "bframes=2"), plan: true},
+		"B-frames signaled, none in the first cluster": {
+			path:  mkv("signaled", "ac3", "bframes=2:b-adapt=2:b-bias=-90"),
+			audio: MuxAudio{Encoder: AudioAAC}, plan: true,
+		},
 	} {
 		t.Run(name, func(t *testing.T) { checkPlanMatchesFFmpegHLS(t, ffmpeg, tc.path, tc.audio, tc.plan) })
 	}

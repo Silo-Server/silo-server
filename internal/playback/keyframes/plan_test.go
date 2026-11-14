@@ -83,8 +83,8 @@ func TestPlanMuxSegments(t *testing.T) {
 		{name: "B-frames delay the video past the audio", tracks: []Track{video, audio(-0.021)}, reorder: 2, frame: 0.04, want: fromKeyframe},
 		// A delay of at least 20ms may or may not reach 21ms.
 		{name: "B-frames may delay the video past the audio", tracks: []Track{video, audio(-0.021)}, reorder: 1, frame: 0.02, want: nil},
-		// Too few video frames in the first cluster to tell: B-frames may
-		// still mux the video first.
+		// The video's headers don't declare its delay: B-frames may still
+		// mux the video first.
 		{name: "reordering unknown", tracks: []Track{video, audio(-0.021)}, reorder: ReorderUnknown, frame: 0.04, want: nil},
 		// Encoded to AAC at an unknown rate, FFmpeg's priming may lead the
 		// video by more than another encoder's.
@@ -92,6 +92,12 @@ func TestPlanMuxSegments(t *testing.T) {
 		// The audio's first packet isn't 0 after FFmpeg's shift, and the
 		// muxer would subtract it in another time base.
 		{name: "another track starts first", tracks: []Track{video, audio(-0.021), {Type: 17, Start: -1, HasStart: true}}, want: nil},
+		// FFmpeg rounds a start to its stream's time base, so even 0.4ms
+		// leaves the audio's first packet past 0.
+		{name: "another track starts just before", tracks: []Track{video, audio(-0.021), audio(-0.0214)}, want: nil},
+		// The AAC encoder's 128ms of priming at 8kHz can bring audio that
+		// starts after the first cluster ahead of the video.
+		{name: "encoded audio after the first cluster", tracks: []Track{video, {Type: 2, SampleRate: 8000}}, audio: MuxAudio{Encoder: AudioAAC}, want: nil},
 		// 1.98s is 0.2ms past the target from the audio, too close to call.
 		{name: "keyframe on a target from the audio", tracks: []Track{video, audio(-0.0202)}, want: nil},
 	} {

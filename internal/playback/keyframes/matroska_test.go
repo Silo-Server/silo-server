@@ -705,7 +705,25 @@ func TestReadPlanIndexFindsTheFirstClusterAfterLeadingCues(t *testing.T) {
 		t.Fatalf("Tracks = %+v, want audio from 0 and no video in the first cluster", idx.Tracks)
 	}
 	if idx.VideoReorder != ReorderUnknown {
-		t.Fatalf("VideoReorder = %d, want ReorderUnknown for a cluster without video", idx.VideoReorder)
+		t.Fatalf("VideoReorder = %d, want ReorderUnknown for video that declares no delay", idx.VideoReorder)
+	}
+}
+
+// FFmpeg subtracts the video's CodecDelay from its timestamps as well as
+// the audio's, but the Keyframes keep it: the audio's start moves onto their
+// timeline.
+func TestReadPlanIndexPutsStartsOnTheKeyframeTimeline(t *testing.T) {
+	tracks := el(idTracks,
+		el(idTrackEntry, uintEl(idTrackNumber, audioTrack), uintEl(idTrackType, 2), el(matroska.IDCodecID, []byte("A_AAC"))),
+		el(idTrackEntry, uintEl(idTrackNumber, videoTrack), uintEl(idTrackType, trackTypeVideo),
+			el(matroska.IDCodecID, []byte("V_MPEG4/ISO/AVC")), uintEl(matroska.IDCodecDelay, 20_000_000)),
+	)
+	idx, err := read(cuesFirstWithLeadingAudio(tracks))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(idx.Tracks) != 2 || idx.Tracks[0].Start != 0.02 {
+		t.Fatalf("Tracks = %+v, want the audio from 0.02s", idx.Tracks)
 	}
 }
 
