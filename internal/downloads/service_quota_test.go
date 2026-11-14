@@ -8,6 +8,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgxpool"
+
 	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/playback"
@@ -275,6 +277,111 @@ func TestPreparedReplacementQuotaAccountingDB(t *testing.T) {
 	second := fmt.Sprintf("dl-ep-2-%d", suffix)
 	if rows, err := replace(oneSlot, "ep-2", second); err != nil || rows[0].Status != StatusReady {
 		t.Fatalf("replacement to a ready file with no free slot: %+v %v", rows, err)
+	}
+}
+
+// TestPreparedReplacementCountsTheEntryStatusUnderTheLockDB pins that a season
+// replacement decides its concurrent slot from the entry's status under the
+// quota lock. The entry is preparing when the request reads it; while the
+// request waits for the lock, its conversion finishes (which leaves the
+// revision alone) and another download takes the freed slot. The replacement
+// would start a second conversion at a limit of 1, so it is refused.
+func TestPreparedReplacementCountsTheEntryStatusUnderTheLockDB(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	t.Cleanup(cancel)
+	f := seedManagedFixture(t)
+	ep1, ep2 := f.contentID+"-ep-1", f.contentID+"-ep-2"
+	ep1File, ep2File := f.episodeFile(t, ep1), f.episodeFile(t, ep2)
+	t.Cleanup(func() {
+		_, _ = f.pool.Exec(context.Background(), `DELETE FROM download_artifacts WHERE media_file_id = ANY($1)`, []int{ep1File, ep2File})
+	})
+	suffix := time.Now().UnixNano()
+	create := func(id, episodeID string, fileID int, status string) {
+		now := time.Now()
+		if err := f.repo.Create(ctx, &Download{
+			ID: id, UserID: f.userID, ProfileID: f.profileA, DeviceID: f.deviceA, MediaFileID: fileID,
+			ContentID: f.contentID, EpisodeID: episodeID, Kind: KindQueued, Status: status,
+			Format: FormatOriginal, Quality: QualityOriginal, EffectiveQuality: QualityOriginal,
+			FileSize: 1024, Revision: 1, CreatedAt: now, UpdatedAt: now,
+		}); err != nil {
+			t.Fatalf("create %s: %v", id, err)
+		}
+	}
+	existingID := fmt.Sprintf("dl-ep-%d", suffix)
+	create(existingID, ep1, ep1File, StatusPreparing)
+
+	// The request runs on its own pool, named so the test can see it poll
+	// for the lock.
+	appName := fmt.Sprintf("dl-replace-race-%d", suffix)
+	cfg := f.pool.Config()
+	cfg.ConnConfig.RuntimeParams["application_name"] = appName
+	reqPool, err := pgxpool.NewWithConfig(ctx, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(reqPool.Close)
+	reqRepo := NewRepository(reqPool)
+	svc := NewService(reqRepo, nil, NewQuantityLimiter(reqRepo, 1, 0, 0), nil, nil, nil, nil, nil, nil, &config.DownloadConfig{Enabled: true})
+	svc.SetArtifactManager(NewArtifactManager(
+		NewArtifactRepository(reqPool), reqRepo, nil, stubQuotaPreparer{}, "replacement-race-test",
+		func() *config.Config { return nil }, nil,
+	))
+	decision := QualityDecision{
+		RequestedQuality: Quality5Mbps, EffectiveQuality: Quality5Mbps, DeliveryFormat: FormatTranscode,
+		TargetBitrateKbps: 5000, RequiresArtifact: true,
+		PrepareTarget: playback.PrepareTarget{Container: "mp4", CodecVideo: "h264", CodecAudio: "aac", TargetBitrateKbps: 5000},
+	}
+	req := CreateRequest{ContentID: f.contentID, ProfileID: f.profileA, DeviceID: f.deviceA,
+		ExpectedEntries: map[string]ManagedCreateExpectation{ep1: {ID: existingID, Revision: 1}}}
+	item := managedItem{file: &models.MediaFile{ID: ep1File, ContentID: f.contentID, EpisodeID: ep1, FileSize: 1024}, contentID: f.contentID, episodeID: ep1}
+
+	lock, err := f.pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = lock.Rollback(context.Background()) }()
+	if _, err := lock.Exec(ctx, `SELECT pg_advisory_xact_lock($1, $2)`, downloadQuotaLockClassID, f.userID); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() {
+		_, err := svc.ensureManagedDecisions(ctx, f.userID, req, []managedItem{item}, []QualityDecision{decision}, "season")
+		done <- err
+	}()
+	// The request has read the entry once it tries for the lock.
+	for {
+		var polling bool
+		if err := f.pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM pg_stat_activity
+			WHERE application_name = $1 AND query LIKE '%pg_try_advisory_xact_lock%')`, appName).Scan(&polling); err != nil {
+			t.Fatal(err)
+		}
+		if polling {
+			break
+		}
+		select {
+		case err := <-done:
+			t.Fatalf("request finished without waiting for the lock: %v", err)
+		case <-ctx.Done():
+			t.Fatal("request never tried for the quota lock")
+		case <-time.After(5 * time.Millisecond):
+		}
+	}
+	if _, err := f.pool.Exec(ctx, `UPDATE downloads SET status = $2 WHERE id = $1`, existingID, StatusReady); err != nil {
+		t.Fatal(err)
+	}
+	create(fmt.Sprintf("dl-other-%d", suffix), ep2, ep2File, StatusPreparing)
+	if err := lock.Rollback(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := <-done; !errors.Is(err, ErrConcurrentLimitReached) {
+		var preparing int
+		_ = f.pool.QueryRow(ctx, `SELECT count(*) FROM downloads WHERE user_id = $1 AND status = 'preparing'`, f.userID).Scan(&preparing)
+		t.Fatalf("replacement after its entry's conversion finished: err = %v, want ErrConcurrentLimitReached (%d preparing at a limit of 1)", err, preparing)
+	}
+	row, err := f.repo.GetManagedEntry(ctx, f.userID, f.profileA, f.deviceA, f.contentID, ep1)
+	if err != nil || row.Status != StatusReady || row.Revision != 1 {
+		t.Fatalf("refused replacement changed the entry: %+v %v", row, err)
 	}
 }
 

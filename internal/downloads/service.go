@@ -1017,10 +1017,25 @@ func (s *Service) ensureManagedDecisions(ctx context.Context, userID int, req Cr
 				activating++
 			}
 		}
+		// Count each replacement from its entry's status now: a conversion
+		// that finished since the read above frees its slot without changing
+		// the revision, and another request may have taken that slot.
+		preparedKeys := make([]ManagedEntryKey, len(prepared))
+		for k, r := range prepared {
+			preparedKeys[k] = keys[r.i]
+		}
+		current, err := s.repo.GetManagedEntriesByKeys(ctx, userID, req.ProfileID, req.DeviceID, preparedKeys)
+		if err != nil {
+			return err
+		}
 		for _, r := range prepared {
 			d := decisions[r.i]
 			ready := s.artifacts.readyArtifact(ctx, items[r.i].file, d.DeliveryFormat, d.PrepareTarget)
-			if replacementAddsActive(r.existing, ready) {
+			entry := r.existing
+			if cur, ok := current[keys[r.i]]; ok {
+				entry = cur
+			}
+			if replacementAddsActive(entry, ready) {
 				activating++
 			}
 		}
