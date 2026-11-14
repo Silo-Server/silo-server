@@ -70,8 +70,17 @@ func subscriptionMutationProblem(err error) *Problem {
 		return p
 	}
 	switch {
-	case errors.Is(err, downloads.ErrInvalidSubscriptionMode), errors.Is(err, downloads.ErrSeasonsRequired), errors.Is(err, downloads.ErrInvalidSeasonNumbers), errors.Is(err, downloads.ErrNotSeries):
-		return NewProblem(TypeMalformedRequest, err.Error())
+	// An invalid monitor option is a validation failure at the member it
+	// names. Only the patch body reaches the mode check; create's schema
+	// enum rejects an unknown mode first, with the same code and detail.
+	case errors.Is(err, downloads.ErrInvalidSubscriptionMode):
+		return validationProblem(locationBody+".mode", codeInvalidEnum, `expected value to be one of "all, future, latest_season, specific_seasons"`)
+	case errors.Is(err, downloads.ErrSeasonsRequired):
+		return validationProblem(locationBody+".season_numbers", codeRequired, err.Error())
+	case errors.Is(err, downloads.ErrInvalidSeasonNumbers):
+		return validationProblem(locationBody+".season_numbers", codeOutOfRange, err.Error())
+	case errors.Is(err, downloads.ErrNotSeries):
+		return validationProblem(locationBody+".series_id", codeInvalid, "series_id is not a series")
 	case errors.Is(err, downloads.ErrInvalidQuality), errors.Is(err, downloads.ErrTranscodeDisabled), errors.Is(err, downloads.ErrQualityUnavailable), errors.Is(err, downloads.ErrCapacityUnavailable), errors.Is(err, downloads.ErrCapabilityUnavailable):
 		return downloadCreationProblem(err)
 	default:
