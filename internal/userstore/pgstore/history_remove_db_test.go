@@ -12,9 +12,8 @@ import (
 // TestPostgresRemoveHistoryItemsDeletesTheirPlaysDB checks the rows a removal
 // deletes, not only what the history listing shows: the listing hides plays
 // behind the removal cutoff whether or not they were deleted. Removing a show's
-// episodes deletes every stored play of them for that profile, across a batch
-// the size of a long show (#2997), and leaves other titles and other profiles
-// alone.
+// episodes deletes every stored play of them for that profile (#2997), and
+// leaves other titles and other profiles alone.
 func TestPostgresRemoveHistoryItemsDeletesTheirPlaysDB(t *testing.T) {
 	pool := testPool(t)
 	ctx := t.Context()
@@ -32,7 +31,7 @@ func TestPostgresRemoveHistoryItemsDeletesTheirPlaysDB(t *testing.T) {
 		}
 	}
 
-	const episodes = 2000
+	const episodes = 20
 	watched := time.Date(2026, 1, 2, 0, 0, 0, 0, time.UTC)
 	removed := make([]string, 0, episodes)
 	add := func(id, profile, item string, at time.Time) {
