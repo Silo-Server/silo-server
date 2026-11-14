@@ -4647,11 +4647,12 @@ func (s *TranscodeSession) LastRequestedSegment() int {
 
 // StartThrottler creates and starts a throttler for this session, replacing
 // one already running: a first start can finish after a restart hook armed its
-// own. No-op if thresholdSeconds <= 0, stdinPipe is nil, or the session is
-// closing.
+// own. No-op if thresholdSeconds <= 0, stdinPipe is nil, the session is
+// closing, or a restart is replacing the process: stdinPipe still belongs to
+// the old FFmpeg then, and the restart hook arms the new one's throttler.
 func (s *TranscodeSession) StartThrottler(thresholdSeconds int) {
 	s.mu.Lock()
-	if s.stdinPipe == nil || thresholdSeconds <= 0 || s.closing {
+	if s.stdinPipe == nil || thresholdSeconds <= 0 || s.closing || s.restarting != nil {
 		s.mu.Unlock()
 		return
 	}

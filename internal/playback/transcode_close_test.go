@@ -220,3 +220,24 @@ func TestStartThrottlerStopsTheThrottlerItReplaces(t *testing.T) {
 		t.Fatal("the replaced throttler is still running")
 	}
 }
+
+// A first start whose settings read finishes during a restart must not bind a
+// throttler to the pipe of the process being replaced. The restart hook's
+// timeout fallback would read that throttler as the new process's and leave
+// the new process unthrottled.
+func TestStartThrottlerArmsNothingDuringARestart(t *testing.T) {
+	s := newRunningFakeSession(t)
+	s.mu.Lock()
+	s.restarting = &restartFlight{done: make(chan struct{})}
+	s.mu.Unlock()
+
+	s.StartThrottler(minThresholdSeconds)
+
+	s.mu.Lock()
+	armed := s.throttler != nil
+	s.restarting = nil
+	s.mu.Unlock()
+	if armed {
+		t.Fatal("a throttler was armed on the pipe a restart is replacing")
+	}
+}
