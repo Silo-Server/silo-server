@@ -531,3 +531,18 @@ func TestRetryOfAFailedTierWithNoRouterFailsAgain(t *testing.T) {
 		t.Fatalf("after the last attempt: request = %s/%s (%q), want failed with the reason", got.Status, got.Outcome, got.LastError)
 	}
 }
+
+// A Retry with no request server left settles when nothing it still wants is
+// missing: here the requester's quality was lowered to the 1080p that arrived.
+func TestRetryWithNoRouterAndNothingLeftToSendCompletes(t *testing.T) {
+	store := newFakeStore()
+	svc, _ := newRoutedService(store)
+	retryingMovie(store, svc)
+	svc.SetEntitlementResolver(fixedCeiling{q: "1080p"})
+	if _, err := svc.Retry(context.Background(), Viewer{UserID: 1, IsAdmin: true}, "r1"); err != nil {
+		t.Fatalf("Retry: %v", err)
+	}
+	if got := store.requests["r1"]; got.Status != StatusCompleted || got.Outcome != OutcomeActive {
+		t.Fatalf("request = %s/%s (%q), want completed/active", got.Status, got.Outcome, got.LastError)
+	}
+}

@@ -2217,6 +2217,10 @@ func (s *Service) submitApprovedRequest(ctx context.Context, req Request, actor 
 	var submitted *Request
 	var submitErr error
 	if noRouter {
+		done, err := s.settleUnsendableRetry(ctx, *claimed, actor, fc)
+		if done != nil || err != nil {
+			return done, err
+		}
 		submitErr = errors.New(msgNoRouter)
 	} else {
 		submitted, submitErr = s.submitClaimed(ctx, *claimed, actor, fc, missingSeasons)
@@ -3170,6 +3174,30 @@ func integrationByID(fc *fulfillContext, id string) *Integration {
 		}
 	}
 	return nil
+}
+
+// settleUnsendableRetry settles a claimed retry that no router can send when
+// every quality it still wants has arrived, as a submission with nothing left
+// to send does: failed tiers it no longer wants are dropped and its targets
+// decide its status. It returns nil while a wanted tier is missing or the
+// wanted qualities are unknown, and then keeps the failed targets, since
+// nothing is sent in their place.
+func (s *Service) settleUnsendableRetry(ctx context.Context, claimed Request, actor Viewer, fc *fulfillContext) (*Request, error) {
+	allowed, resolved := s.allowedQualities(ctx, claimed, fc.settings)
+	if !resolved {
+		return nil, nil
+	}
+	targets, err := s.store.ListTargets(ctx, claimed.ID)
+	if err != nil {
+		return nil, err
+	}
+	for _, q := range allowed {
+		if !slices.ContainsFunc(targets, func(t Target) bool { return t.Quality == q && t.Status != StatusFailed }) {
+			return nil, nil
+		}
+	}
+	_, done, err := s.planSubmission(ctx, claimed, actor, allowed, true)
+	return done, err
 }
 
 // deliveredSome reports whether any of the request's targets completed. An
