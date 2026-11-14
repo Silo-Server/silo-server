@@ -3158,3 +3158,32 @@ it("carries a displaced Restore's clear on the request that replaced it", async 
   });
   unmount();
 });
+
+describe("usePlaybackSession page unload", () => {
+  function pagehide(persisted: boolean) {
+    const event = new Event("pagehide");
+    Object.defineProperty(event, "persisted", { value: persisted });
+    window.dispatchEvent(event);
+  }
+
+  it("stops on a real unload but keeps a page entering the back-forward cache", async () => {
+    const fetchMock = sessionFetch(() => {
+      throw new Error("unexpected replan");
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const stopCalls = () =>
+      fetchMock.mock.calls.filter(([, init]) => init?.method === "DELETE").map(([, init]) => init);
+
+    const { result, unmount } = renderSession();
+    await waitFor(() => expect(result.current.sessionId).toBe("session-1"));
+
+    act(() => pagehide(true));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(stopCalls()).toHaveLength(0);
+
+    act(() => pagehide(false));
+    await waitFor(() => expect(stopCalls()).toHaveLength(1));
+    expect(stopCalls()[0]?.keepalive).toBe(true);
+    unmount();
+  });
+});

@@ -144,6 +144,24 @@ describe("sequenced playback mutations", () => {
     expect(fetcher.mock.calls[2]![1].body).toBe(fetcher.mock.calls[1]![1].body);
   });
 
+  it("sends an unloading page's stop without waiting for progress in flight", async () => {
+    const fetcher = vi
+      .fn()
+      .mockImplementationOnce(() => new Promise<Response>(() => {}))
+      .mockImplementation(async () => stopped());
+    vi.stubGlobal("fetch", fetcher);
+    registerSessionMutations("stop-unload", "install");
+    void sendSessionProgress(config, "stop-unload", sample).catch(() => {});
+    void stopSequencedSession(config, "stop-unload", true, true);
+    // A page in pagehide gets only microtasks before teardown, no timers.
+    for (let i = 0; i < 10; i++) await Promise.resolve();
+    const init = (method: string) =>
+      fetcher.mock.calls.map((call) => call[1]).find((call) => call.method === method);
+    const stop = init("DELETE");
+    expect(stop?.keepalive).toBe(true);
+    expect(JSON.parse(stop.body).sequence).toBeGreaterThan(JSON.parse(init("POST").body).sequence);
+  });
+
   it("treats a 404 stop as already over", async () => {
     const fetcher = vi.fn().mockResolvedValue(problem(404, "not_found"));
     vi.stubGlobal("fetch", fetcher);

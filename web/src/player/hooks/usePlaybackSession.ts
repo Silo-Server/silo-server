@@ -119,6 +119,18 @@ export function reconnectDelayMs(attempt: number): number {
 }
 
 /**
+ * Stops the player's session as it leaves. sendBeacon doesn't support DELETE,
+ * so the stop uses fetch keepalive to outlive a closing page. An unloading
+ * page sends it at once rather than after any progress still in flight.
+ */
+function stopOnPageExit(config: PlayerConfig, sessionId: string | null, unloading = false) {
+  if (!sessionId) return;
+  void stopSequencedSession(config, sessionId, true, unloading).catch(() => {
+    // Best effort: the session expires server-side.
+  });
+}
+
+/**
  * Whether a failed reconnect request is worth repeating later: the server was
  * unreachable or overloaded, or it asked for a retry. Anything else is its
  * considered answer.
@@ -1262,6 +1274,18 @@ export function usePlaybackSession(
     versionPicked,
   ]);
 
+  // A closed tab, a reload or a navigation away never unmounts the player, so
+  // the stop goes out from pagehide. A page kept in the back-forward cache can
+  // come back playing, so its session stays; the server stops counting it
+  // toward the stream limit once its progress reports stop.
+  useEffect(() => {
+    const onPageHide = (event: PageTransitionEvent) => {
+      if (!event.persisted) stopOnPageExit(config, sessionIdRef.current, true);
+    };
+    window.addEventListener("pagehide", onPageHide);
+    return () => window.removeEventListener("pagehide", onPageHide);
+  }, [config]);
+
   // Clean up session on unmount.
   useEffect(() => {
     return () => {
@@ -1273,12 +1297,7 @@ export function usePlaybackSession(
       endReconnect(false);
       // A start this player left still loading no longer holds off speed tests.
       playbackStartEnded();
-      const sid = sessionIdRef.current;
-      if (!sid) return;
-      // sendBeacon doesn't support DELETE, so the stop uses fetch keepalive.
-      void stopSequencedSession(config, sid, true).catch(() => {
-        // Best effort: the session expires server-side.
-      });
+      stopOnPageExit(config, sessionIdRef.current);
     };
   }, [config, endReconnect]);
 

@@ -221,3 +221,36 @@ func TestSessionSurvivesClientStartupWindow(t *testing.T) {
 		t.Fatal("a rolled-back replan restarted the startup window")
 	}
 }
+
+// A paused player that has gone quiet (its tab was closed, its app was
+// killed) no longer holds the account's stream slot, while the session itself
+// keeps the paused grace so a client that comes back can still resume (#243),
+// and its transcode slot stays held with its encoder. A paused player that
+// still reports, even only once a minute from a throttled background tab,
+// keeps its slot.
+func TestQuietPausedSessionReleasesStreamSlot(t *testing.T) {
+	m := NewSessionManager(1, 1)
+	paused := startPlaybackTestSession(t, m, 1, "profile-1", 100, PlayTranscode)
+	if err := m.UpdateProgress(paused.ID, 42, true); err != nil {
+		t.Fatalf("UpdateProgress(paused): %v", err)
+	}
+
+	for _, quiet := range []time.Duration{10 * time.Second, 100 * time.Second} {
+		backdatePlaybackTestSession(m, paused.ID, quiet)
+		if _, err := m.StartSession(1, "profile-1", 101, PlayDirect, false); err == nil {
+			t.Fatalf("a second stream started while a paused stream quiet for %s held the only slot", quiet)
+		}
+	}
+
+	backdatePlaybackTestSession(m, paused.ID, 3*time.Minute)
+	m.CleanStale()
+	if _, err := m.GetSession(paused.ID); err != nil {
+		t.Fatalf("quiet paused session was reaped inside the paused grace: %v", err)
+	}
+	if got := m.TranscodeCount(1); got != 1 {
+		t.Fatalf("TranscodeCount = %d, want 1: the quiet paused transcode still holds its encoder", got)
+	}
+	if _, err := m.StartSession(1, "profile-1", 101, PlayDirect, false); err != nil {
+		t.Fatalf("a quiet paused session still held the stream slot: %v", err)
+	}
+}
