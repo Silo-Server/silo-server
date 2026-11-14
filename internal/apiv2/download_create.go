@@ -75,8 +75,10 @@ func downloadCreationProblem(err error) *Problem {
 		return NewProblem(TypeCapabilityUnsupported, err.Error())
 	case errors.Is(err, downloads.ErrCapacityUnavailable), errors.Is(err, downloads.ErrCapabilityUnavailable):
 		return NewProblem(TypeDependencyUnavailable, err.Error())
-	case errors.Is(err, downloads.ErrInvalidQuality), errors.Is(err, downloads.ErrNotSeries):
+	case errors.Is(err, downloads.ErrInvalidQuality):
 		return NewProblem(TypeMalformedRequest, err.Error())
+	case errors.Is(err, downloads.ErrNotSeries):
+		return validationProblem(locationBody+".content_id", codeInvalid, err.Error())
 	case errors.Is(err, downloads.ErrNoDownloadableEpisodes):
 		return NewProblem(TypeNotFound, err.Error())
 	default:

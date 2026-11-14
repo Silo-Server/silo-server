@@ -3222,6 +3222,26 @@ func (r *FileRepository) DeleteMissingByFolder(ctx context.Context, folderID int
 	return deleted, nil
 }
 
+// listRootsWithCatalogedFilesSQL backs ListRootsWithCatalogedFiles. The
+// descendants are matched by bytewise range, in an EXISTS of their own, so
+// each probe is an index range scan on (media_folder_id, file_path). A LIKE
+// pattern taken from the unnested row, or an OR with the exact match, cannot
+// become an index condition, and a root with no rows would then read every
+// file of the folder.
+const listRootsWithCatalogedFilesSQL = `
+	SELECT r.root
+	FROM unnest($2::text[], $3::text[], $4::text[]) WITH ORDINALITY AS r(root, lower_bound, upper_bound, ord)
+	WHERE EXISTS (
+		SELECT 1 FROM media_files mf
+		WHERE mf.media_folder_id = $1
+		  AND mf.file_path ~>=~ r.lower_bound AND mf.file_path ~<~ r.upper_bound
+	) OR EXISTS (
+		SELECT 1 FROM media_files mf
+		WHERE mf.media_folder_id = $1 AND mf.file_path = r.root
+	)
+	ORDER BY r.ord
+`
+
 // ListRootsWithCatalogedFiles returns the subset of roots (in input order)
 // that still have any media_files rows at or under them in the folder,
 // whether those rows are present or already marked missing.
@@ -3241,20 +3261,12 @@ func (r *FileRepository) ListRootsWithCatalogedFiles(ctx context.Context, folder
 	if len(roots) == 0 {
 		return nil, nil
 	}
-	patterns := make([]string, len(roots))
+	lowers := make([]string, len(roots))
+	uppers := make([]string, len(roots))
 	for i, root := range roots {
-		patterns[i] = pathscope.PrefixLike(root)
+		lowers[i], uppers[i] = pathscope.DescendantRange(root)
 	}
-	rows, err := r.pool.Query(ctx, `
-		SELECT r.root
-		FROM unnest($2::text[], $3::text[]) WITH ORDINALITY AS r(root, pattern, ord)
-		WHERE EXISTS (
-			SELECT 1 FROM media_files mf
-			WHERE mf.media_folder_id = $1
-			  AND (mf.file_path = r.root OR mf.file_path LIKE r.pattern ESCAPE '\')
-		)
-		ORDER BY r.ord
-	`, folderID, roots, patterns)
+	rows, err := r.pool.Query(ctx, listRootsWithCatalogedFilesSQL, folderID, roots, lowers, uppers)
 	if err != nil {
 		return nil, fmt.Errorf("querying roots with cataloged files: %w", err)
 	}

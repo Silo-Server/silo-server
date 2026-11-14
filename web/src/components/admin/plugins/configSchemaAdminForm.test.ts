@@ -4,7 +4,8 @@ import { describe, expect, it } from "vitest";
 
 import type { PluginConfigSchema } from "@/api/types";
 
-import { adminFormForConfigSchema } from "./configSchemaAdminForm";
+import { adminFormForConfigSchema, formValuesFromConfig } from "./configSchemaAdminForm";
+import { buildSchemaValues } from "./schemaFormUtils";
 import { field } from "./adminFormField.test-support";
 
 function schema(overrides: Partial<PluginConfigSchema> = {}): PluginConfigSchema {
@@ -110,5 +111,14 @@ describe("adminFormForConfigSchema", () => {
       { key: "password", secret: true },
       { key: "advanced", secret: true },
     ]);
+  });
+});
+
+describe("formValuesFromConfig", () => {
+  it("keeps a saved multi-select selection through a save of the untouched form", () => {
+    const fields = [field("tags", "Tags", "MULTI_SELECT")];
+    const values = formValuesFromConfig(fields, { tags: ["a", "b"] });
+
+    expect(buildSchemaValues({ fields }, values)).toEqual({ tags: ["a", "b"] });
   });
 });

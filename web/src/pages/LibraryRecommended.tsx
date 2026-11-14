@@ -62,7 +62,10 @@ export default function LibraryRecommended({
     error,
     refetch,
     isFetching: layoutFetching,
-  } = useLibraryLayout(libraryId);
+    // The library page owns this read and starts it on its own mount (see
+    // LibraryPage). A failure that landed while the page waited for its saved
+    // state is shown as it is, rather than starting a second deadline here.
+  } = useLibraryLayout(libraryId, { retryOnMount: false });
   const { data: sectionRefreshSignal = 0 } = useSectionRefreshSignal();
   const sectionTitle = useSectionTitle();
   const [loadedSections, setLoadedSections] = useState<Map<string, ResolvedSection>>(new Map());

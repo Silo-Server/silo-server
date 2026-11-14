@@ -285,6 +285,12 @@ Jellyfin uses. A profile that turns on `ui.next_up_new_releases_first` instead
 gets a caught-up series back at the front when its next episode is released to
 the server. `nextUpDateCutoff` still filters on last played.
 
+`CommunityRating` is the IMDb rating (0-10). `CriticRating` is the stored
+Rotten Tomatoes critic score (0-100), present only while an enabled metadata
+plugin declares the `rt_critic` rating source and an administrator shows it under
+`catalog.extra_rating_sources`, the setting native item ratings follow (see
+`GET /api/v2/capabilities/ratings`).
+
 Items carry Jellyfin 12's `OriginalLanguage` (movies and series). Episodes set
 `ParentPrimaryImageItemId` and `ParentPrimaryImageTag` to their season's poster,
 or to the series poster when the season has none; both are removed when the
@@ -630,6 +636,15 @@ rebasing; an empty timing window returns `TrackEvents: []`. Raw ASS requests req
 return 406. There is no fallback-font service, external/downloaded subtitle
 burn-in, or subtitle HLS playlist implementation. Changing a subtitle filter
 requires fresh playback negotiation.
+
+Stored (downloaded) subtitles take the stream indexes after the file's own
+tracks, in the order they are listed, so deleting one moves the later ones down.
+Their `DeliveryUrl` therefore also carries `StoredSubtitleId`, as the native
+stream route's issued URLs carry `downloaded_subtitle_id`. When the query names
+an ID, the route serves that stored subtitle of the media source's file
+whatever `{index}` says, and answers 404 once it is deleted, for an ID that is
+not one of that file's, or for a malformed ID. A URL without it, as a client
+builds from the index, resolves the index against the current list.
 
 Extracting an embedded text subtitle reads the whole source file, which can
 take minutes for a large remux on network storage. As in Jellyfin, the first
