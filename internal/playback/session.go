@@ -2101,8 +2101,13 @@ func (m *SessionManager) countsTowardLimitsLocked(s *Session, now time.Time) boo
 	if s.activeTransportCount > 0 {
 		return true
 	}
-	activeGrace, pausedGrace := remoteTransportGrace(s, m.activeGrace, m.pausedGrace)
-	return !m.sessionIsInactiveLocked(s, now, activeGrace, pausedGrace, StartupSessionGrace)
+	// Clients report progress every 10 seconds while paused too, so a paused
+	// session that has gone quiet for the active grace has lost its player (a
+	// closed tab, a killed app). It stops holding a slot then, while cleanup
+	// keeps the session for the paused grace so a returning client can still
+	// resume (#243).
+	activeGrace, _ := remoteTransportGrace(s, m.activeGrace, m.pausedGrace)
+	return !m.sessionIsInactiveLocked(s, now, activeGrace, activeGrace, StartupSessionGrace)
 }
 
 // remoteTransportGrace widens the idle windows for a session whose bytes are

@@ -1262,6 +1262,22 @@ export function usePlaybackSession(
     versionPicked,
   ]);
 
+  // A closed tab, a reload or a navigation away never unmounts the player, so
+  // the stop goes out from pagehide. A page kept in the back-forward cache can
+  // come back playing, so its session stays; the server stops counting it
+  // toward the stream limit once its progress reports stop.
+  useEffect(() => {
+    const onPageHide = (event: PageTransitionEvent) => {
+      const sid = sessionIdRef.current;
+      if (event.persisted || !sid) return;
+      void stopSequencedSession(config, sid, true).catch(() => {
+        // Best effort: the session expires server-side.
+      });
+    };
+    window.addEventListener("pagehide", onPageHide);
+    return () => window.removeEventListener("pagehide", onPageHide);
+  }, [config]);
+
   // Clean up session on unmount.
   useEffect(() => {
     return () => {

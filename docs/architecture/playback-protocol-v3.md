@@ -337,7 +337,16 @@ on the 45-second window. A session is never ended within **90 seconds** of its
 another server, however long it has been idle: a player that cannot start a
 plan has no position to report, and this window lets it wait out a startup
 timeout of up to 60 seconds and still ask for the next fallback. The windows are
-fixed. These count as activity:
+fixed.
+
+A paused session counts toward the account's stream and transcode limits only
+while it is inside the 45-second window (five minutes when a proxy node serves
+it) or the 90-second startup window, as it stays while its client keeps
+reporting progress. Past that it keeps its 30-minute paused grace, so a client
+that comes back can still resume, but it no longer holds a slot: a player closed
+while paused frees its slot within about a minute.
+
+These count as activity:
 
 | Activity | Note |
 | --- | --- |

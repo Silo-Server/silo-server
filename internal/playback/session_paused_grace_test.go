@@ -221,3 +221,31 @@ func TestSessionSurvivesClientStartupWindow(t *testing.T) {
 		t.Fatal("a rolled-back replan restarted the startup window")
 	}
 }
+
+// A paused player that has gone quiet (its tab was closed, its app was
+// killed) no longer holds the account's stream slot, while the session itself
+// keeps the paused grace so a client that comes back can still resume (#243).
+// A paused player that still reports progress keeps its slot.
+func TestQuietPausedSessionReleasesStreamSlot(t *testing.T) {
+	m := NewSessionManager(1, 0)
+	paused := startPlaybackTestSession(t, m, 1, "profile-1", 100, PlayDirect)
+	if err := m.UpdateProgress(paused.ID, 42, true); err != nil {
+		t.Fatalf("UpdateProgress(paused): %v", err)
+	}
+
+	// Still reporting: the paused session holds the only slot.
+	backdatePlaybackTestSession(m, paused.ID, 10*time.Second)
+	if _, err := m.StartSession(1, "profile-1", 101, PlayDirect, false); err == nil {
+		t.Fatal("a second stream started while a reporting paused stream held the only slot")
+	}
+
+	// Quiet for two minutes: the slot frees, the session stays.
+	backdatePlaybackTestSession(m, paused.ID, 2*time.Minute)
+	m.CleanStale()
+	if _, err := m.GetSession(paused.ID); err != nil {
+		t.Fatalf("quiet paused session was reaped inside the paused grace: %v", err)
+	}
+	if _, err := m.StartSession(1, "profile-1", 101, PlayDirect, false); err != nil {
+		t.Fatalf("a quiet paused session still held the stream slot: %v", err)
+	}
+}
