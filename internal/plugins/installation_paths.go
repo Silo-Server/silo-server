@@ -2,6 +2,8 @@ package plugins
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -33,6 +35,33 @@ func pluginPathSegment(value, label string) (string, error) {
 	segment := sanitizeFilesystemSegment(value)
 	if segment == "" || segment == "." || segment == ".." {
 		return "", fmt.Errorf("%s %q: %w", label, value, ErrInvalidPluginIdentity)
+	}
+	return segment, nil
+}
+
+// cacheSegmentEscaper names a plugin's directory under a node's own archive
+// cache. The installer's mapping replaces / \ : @ with _, so acme/x and
+// acme_x would share a directory, and each rehydration prunes every other
+// release under it (#2800). Escaping them, and the escape character %, gives
+// distinct identities distinct directories; an identity without these
+// characters keeps its name.
+var cacheSegmentEscaper = strings.NewReplacer("%", "%25", "/", "%2F", "\\", "%5C", ":", "%3A", "@", "%40")
+
+// maxCacheSegmentBytes is the longest directory name the cache writes, the
+// usual filesystem limit for one path component.
+const maxCacheSegmentBytes = 255
+
+func cachePathSegment(value, label string) (string, error) {
+	segment := cacheSegmentEscaper.Replace(value)
+	if segment == "" || segment == "." || segment == ".." {
+		return "", fmt.Errorf("%s %q: %w", label, value, ErrInvalidPluginIdentity)
+	}
+	// Escaping can triple an identity's length past the limit. Such an
+	// identity is named by its hash instead; "%h" never starts an escape, so
+	// no escaped name can equal a hashed one.
+	if len(segment) > maxCacheSegmentBytes {
+		sum := sha256.Sum256([]byte(value))
+		segment = "%h" + hex.EncodeToString(sum[:])
 	}
 	return segment, nil
 }
