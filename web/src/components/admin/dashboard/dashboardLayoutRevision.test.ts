@@ -304,11 +304,22 @@ it("keeps an earlier visit's edit unsaved under a different profile", async () =
   await settle();
   setProfileId("b");
   setProfileToken("pin-b");
-  const { result } = await mountLoaded();
+  const other = await mountLoaded();
   await debounce();
   expect(writes).toHaveLength(0);
-  expect(result.current.entries[0]?.span).toBe(7);
-  expect(result.current.serverSaveBlocked).toBe(true);
+  expect(other.result.current.entries[0]?.span).toBe(7);
+  expect(other.result.current.serverSaveBlocked).toBe(true);
+  // The other profile's own edit neither saves nor drops the pending one.
+  act(() => other.result.current.resizeWidget("users", { rows: 5 }));
+  await debounce();
+  other.unmount();
+  await settle();
+  setProfileId("a");
+  setProfileToken("pin-a");
+  await mountLoaded();
+  await debounce();
+  expect(writes).toHaveLength(1);
+  expect(JSON.parse(String(writes[0]!.body)).layout.entries[0]).toMatchObject({ span: 7, rows: 5 });
 });
 it("saves the edit another tab left pending, not this tab's older copy", async () => {
   localStorage.setItem(dashboardLayoutStorageKey(1), JSON.stringify(document(5)));

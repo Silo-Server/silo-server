@@ -320,6 +320,10 @@ export function useDashboardLayout(): DashboardLayout {
   // still holds that arrangement. It is kept in the cache too, so an edit
   // whose visit ended before the response arrived is reconciled by the next.
   const draftRef = useRef<DashboardLayoutDraft | null>(null);
+  // Another profile's unsaved edit, shown here but not ours to save. The cache
+  // keeps marking it pending, through this profile's own edits, until the
+  // admin reloads or resets the layout.
+  const foreignDraftRef = useRef<DashboardLayoutDraft | null>(null);
   const pendingRef = useRef<DashboardLayoutSaveIntent | null>(null);
   const baselineRef = useRef<string | null>(null);
   const inFlightRef = useRef<DashboardLayoutSaveIntent | null>(null);
@@ -396,6 +400,7 @@ export function useDashboardLayout(): DashboardLayout {
     }
     pendingRef.current = null;
     draftRef.current = null;
+    foreignDraftRef.current = null;
   }, []);
 
   // Send a queued write before this page goes away rather than dropping it.
@@ -472,7 +477,8 @@ export function useDashboardLayout(): DashboardLayout {
       if (restored) {
         setEntries(edited);
       }
-      persistLayout(userId, edited, draft.authority ? undefined : draft);
+      foreignDraftRef.current = draft.authority ? null : draft;
+      persistLayout(userId, edited, foreignDraftRef.current ?? undefined);
       if (
         !draft.authority ||
         (serverEntries && JSON.stringify(serverEntries) !== JSON.stringify(draft.base))
@@ -525,7 +531,7 @@ export function useDashboardLayout(): DashboardLayout {
         }
         editSequenceRef.current++;
         if (settledRef.current) {
-          persistLayout(userId, next);
+          persistLayout(userId, next, foreignDraftRef.current ?? undefined);
           scheduleSave(next);
         } else {
           // An unsaved edit left by an earlier visit keeps its base: the server
