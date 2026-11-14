@@ -1116,8 +1116,9 @@ func (s *Service) Approve(ctx context.Context, viewer Viewer, id string) (*Reque
 
 // Decline rejects a request nothing has been sent for: a pending one, or an
 // approved one still waiting for the library or backing off. Once a submission
-// is in flight or a target exists, declining could leave the downstream
-// service's state diverged from Silo's, so the guard refuses it.
+// is in flight or a target other than a failed one exists, declining could
+// leave the downstream service's state diverged from Silo's, so the guard
+// refuses it.
 func (s *Service) Decline(ctx context.Context, viewer Viewer, id, reason string) (*Request, error) {
 	if !viewer.IsAdmin {
 		return nil, ErrForbidden
@@ -1133,8 +1134,8 @@ func (s *Service) Decline(ctx context.Context, viewer Viewer, id, reason string)
 // Cancel withdraws a request that has not been sent to a downstream service:
 // pending, or approved but not yet sent (see guardWithdrawable). Owners can
 // withdraw their own; admins can withdraw any. Once a submission is in flight
-// or a target exists, the request stays in the pipeline until it completes or
-// fails.
+// or a target other than a failed one exists, the request stays in the
+// pipeline until it completes or fails.
 func (s *Service) Cancel(ctx context.Context, viewer Viewer, id, reason string) (*Request, error) {
 	return s.cancel(ctx, viewer, id, reason, false)
 }
