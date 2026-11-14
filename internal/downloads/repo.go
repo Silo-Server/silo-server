@@ -152,14 +152,16 @@ func (r *Repository) PruneEphemeralOlderThan(ctx context.Context, cutoff time.Ti
 	return tag.RowsAffected(), nil
 }
 
-// CountActiveByUser returns the number of active downloads for a user.
+// CountActiveByUser returns the number of active downloads for a user,
+// leaving out the downloads named in except.
 // 'preparing' counts: an artifact-backed row holds encode work in flight, so
 // it must consume the concurrent quota like a live transfer does.
-func (r *Repository) CountActiveByUser(ctx context.Context, userID int) (int, error) {
+func (r *Repository) CountActiveByUser(ctx context.Context, userID int, except ...string) (int, error) {
 	var count int
 	err := r.pool.QueryRow(ctx,
-		`SELECT COUNT(*) FROM downloads WHERE user_id = $1 AND status IN ('queued', 'downloading', 'preparing')`,
-		userID,
+		`SELECT COUNT(*) FROM downloads WHERE user_id = $1 AND status IN ('queued', 'downloading', 'preparing')
+		   AND id <> ALL($2::text[])`,
+		userID, append([]string{}, except...), // never nil: a NULL array would match no row
 	).Scan(&count)
 	if err != nil {
 		return 0, fmt.Errorf("counting active downloads: %w", err)
