@@ -16,6 +16,7 @@ import (
 
 // A seed carries a season's and episode's locks with their values: without
 // them the edits it exports would be overwritten by the receiver's next refresh.
+// It also carries the title details only an admin edits.
 func TestSeedCarriesSeasonEpisodeLocksDB(t *testing.T) {
 	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
 	if dsn == "" {
@@ -52,10 +53,11 @@ func TestSeedCarriesSeasonEpisodeLocksDB(t *testing.T) {
 		t.Fatal(err)
 	}
 	locks := []int{0, 1}
-	if err := seasons.UpdateMetadata(ctx, seriesID+"-s1", &catalog.MetadataUpdate{LockedFields: &locks}); err != nil {
+	tagline, tvdbID := "Edited tagline", "1234567"
+	if err := seasons.UpdateMetadata(ctx, seriesID+"-s1", &catalog.MetadataUpdate{LockedFields: &locks, Tagline: &tagline, TvdbID: &tvdbID}); err != nil {
 		t.Fatal(err)
 	}
-	if err := episodes.UpdateMetadata(ctx, seriesID+"-e1", &catalog.MetadataUpdate{LockedFields: &locks}); err != nil {
+	if err := episodes.UpdateMetadata(ctx, seriesID+"-e1", &catalog.MetadataUpdate{LockedFields: &locks, Tagline: &tagline}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -74,16 +76,19 @@ func TestSeedCarriesSeasonEpisodeLocksDB(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if len(bundle.Seasons) != 1 || !slices.Equal(bundle.Seasons[0].LockedFields, locks) {
-		t.Fatalf("exported seasons = %+v, want one with locks %v", bundle.Seasons, locks)
+	if len(bundle.Seasons) != 1 || !slices.Equal(bundle.Seasons[0].LockedFields, locks) ||
+		bundle.Seasons[0].Tagline != tagline || bundle.Seasons[0].TvdbID != tvdbID {
+		t.Fatalf("exported seasons = %+v, want one with locks %v and the edited title details", bundle.Seasons, locks)
 	}
-	if len(bundle.Episodes) != 1 || !slices.Equal(bundle.Episodes[0].LockedFields, locks) {
-		t.Fatalf("exported episodes = %+v, want one with locks %v", bundle.Episodes, locks)
+	if len(bundle.Episodes) != 1 || !slices.Equal(bundle.Episodes[0].LockedFields, locks) || bundle.Episodes[0].Tagline != tagline {
+		t.Fatalf("exported episodes = %+v, want one with locks %v and the edited tagline", bundle.Episodes, locks)
 	}
 
-	// An overwrite takes the bundle's row, locks included.
+	// An overwrite takes the bundle's row, locks and title details included.
 	bundle.Seasons[0].LockedFields = []int{1}
+	bundle.Seasons[0].SortTitle = "Imported sort title"
 	bundle.Episodes[0].LockedFields = nil // A bundle from before these locks has none.
+	bundle.Episodes[0].OriginalTitle = "Imported original title"
 	data, err := encodeBundle(bundle)
 	if err != nil {
 		t.Fatal(err)
@@ -98,11 +103,17 @@ func TestSeedCarriesSeasonEpisodeLocksDB(t *testing.T) {
 	if !slices.Equal(season.LockedFields, []int{1}) {
 		t.Errorf("imported season locks = %v, want [1]", season.LockedFields)
 	}
+	if season.SortTitle != "Imported sort title" || season.Tagline != tagline || season.TvdbID != tvdbID {
+		t.Errorf("imported season title details = %q, %q, %q, want the bundle's", season.SortTitle, season.Tagline, season.TvdbID)
+	}
 	episode, err := episodes.GetByID(ctx, seriesID+"-e1")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(episode.LockedFields) != 0 {
 		t.Errorf("imported episode locks = %v, want none", episode.LockedFields)
+	}
+	if episode.OriginalTitle != "Imported original title" || episode.Tagline != tagline {
+		t.Errorf("imported episode title details = %q, %q, want the bundle's", episode.OriginalTitle, episode.Tagline)
 	}
 }

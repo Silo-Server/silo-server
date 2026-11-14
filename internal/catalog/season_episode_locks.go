@@ -23,11 +23,17 @@ const (
 	seasonsTable  = "seasons"
 	episodesTable = "episodes"
 
-	childColumnTitle    = "title"
-	childColumnOverview = "overview"
-	childColumnRuntime  = "runtime"
-	sqlEmptyText        = "''"
-	sqlNull             = "NULL"
+	childColumnTitle         = "title"
+	childColumnOverview      = "overview"
+	childColumnRuntime       = "runtime"
+	childColumnSortTitle     = "sort_title"
+	childColumnOriginalTitle = "original_title"
+	childColumnTagline       = "tagline"
+	childColumnImdbID        = "imdb_id"
+	childColumnTmdbID        = "tmdb_id"
+	childColumnTvdbID        = "tvdb_id"
+	sqlEmptyText             = "''"
+	sqlNull                  = "NULL"
 
 	// The titles metadata's fallbackSeasonTitle and fallbackEpisodeTitle give a
 	// row the provider has no title for. A cleared row the new show doesn't
@@ -58,6 +64,15 @@ var (
 		{columnAirDate, fieldReleaseDatesLocked, sqlNull},
 		{childColumnRuntime, fieldRuntimeLocked, sqlNull},
 	}
+)
+
+// The title details only an admin writes on a season or episode. No refresh
+// writes them, so they need no lock, but they describe one show like a locked
+// field does. An episode's provider IDs are not among them: refreshes write those.
+var (
+	childEditedTextColumns = []string{childColumnSortTitle, childColumnOriginalTitle, childColumnTagline}
+	seasonEditedColumns    = slices.Concat(childEditedTextColumns, []string{childColumnImdbID, childColumnTmdbID, childColumnTvdbID})
+	episodeEditedColumns   = childEditedTextColumns
 )
 
 func lockedAssignments(table string, columns []childLockedColumn) string {
@@ -94,16 +109,22 @@ func childOverviewApplies(locks []int, source string) bool {
 	return !slices.Contains(locks, fieldOverviewLocked) || source != models.LocalizationSourceProvider
 }
 
-// ClearSeriesChildEditsTx removes every season and episode lock on seriesID and
-// resets the locked values, for a series that now names a different show. The
-// edits describe the old show, so they must not stay even when the new show's
-// provider has nothing to replace them with.
+// ClearSeriesChildEditsTx removes every season and episode lock on seriesID,
+// resets the locked values and empties the title details, for a series that now
+// names a different show. The edits describe the old show, so they must not stay
+// even when the new show's provider has nothing to replace them with.
 func ClearSeriesChildEditsTx(ctx context.Context, tx pgx.Tx, seriesID string) error {
 	for _, target := range []struct {
 		table   string
 		columns []childLockedColumn
-	}{{seasonsTable, seasonLockedColumns}, {episodesTable, episodeLockedColumns}} {
-		query := clearChildEditsSQL(target.table, target.columns, true) + ` WHERE series_id = $1 AND locked_fields <> '{}'`
+		edited  []string
+	}{{seasonsTable, seasonLockedColumns, seasonEditedColumns}, {episodesTable, episodeLockedColumns, episodeEditedColumns}} {
+		editedPredicates := make([]string, 0, len(target.edited))
+		for _, column := range target.edited {
+			editedPredicates = append(editedPredicates, column+" <> "+sqlEmptyText)
+		}
+		query := clearChildEditsSQL(target.table, target.columns, target.edited, true) +
+			fmt.Sprintf(` WHERE series_id = $1 AND (locked_fields <> '{}' OR %s)`, strings.Join(editedPredicates, " OR "))
 		if _, err := tx.Exec(ctx, query, seriesID); err != nil {
 			return fmt.Errorf("clearing %s edits of series %s: %w", target.table, seriesID, err)
 		}
@@ -117,25 +138,30 @@ func ClearSeriesChildEditsTx(ctx context.Context, tx pgx.Tx, seriesID string) er
 }
 
 // clearChildEditsSQL is the UPDATE, without its WHERE clause, that removes a
-// season's or episode's locks and empties its lockable columns: only the
-// locked ones, or all of them.
-func clearChildEditsSQL(table string, columns []childLockedColumn, onlyLocked bool) string {
+// season's or episode's locks, empties its lockable columns (only the locked
+// ones, or all of them) and empties the edited columns.
+func clearChildEditsSQL(table string, columns []childLockedColumn, edited []string, onlyLocked bool) string {
 	assignments := joinColumns(columns, ", ", func(c childLockedColumn) string {
 		if onlyLocked {
 			return fmt.Sprintf("%[1]s = CASE WHEN %[2]d = ANY(locked_fields) THEN %[3]s ELSE %[1]s END", c.column, c.field, c.empty)
 		}
 		return fmt.Sprintf("%s = %s", c.column, c.empty)
 	})
-	return fmt.Sprintf(`UPDATE %s SET %s, locked_fields = '{}', updated_at = NOW()`, table, assignments)
+	parts := []string{assignments}
+	for _, column := range edited {
+		parts = append(parts, column+" = "+sqlEmptyText)
+	}
+	return fmt.Sprintf(`UPDATE %s SET %s, locked_fields = '{}', updated_at = NOW()`, table, strings.Join(parts, ", "))
 }
 
-// ResetEdits empties a season's lockable fields and removes its locks, for
-// Reset to Provider. The refresh that follows writes the provider's values over
-// the empty ones, so a field the provider has no value for stays empty. With
-// keepText the title and overview stay: a refresh in another language than the
-// series' own writes neither.
+// ResetEdits empties a season's lockable fields and title details and removes
+// its locks, for Reset to Provider. The refresh that follows writes the
+// provider's values over the empty ones, so a field the provider has no value
+// for stays empty. With keepText the title, overview and text title details
+// stay: a reset in another language than the series' own keeps the row's own
+// text, as an item's reset does.
 func (r *SeasonRepository) ResetEdits(ctx context.Context, contentID string, keepText bool) error {
-	if _, err := r.pool.Exec(ctx, clearChildEditsSQL(seasonsTable, resetColumns(seasonLockedColumns, keepText), false)+` WHERE content_id = $1`, contentID); err != nil {
+	if _, err := r.pool.Exec(ctx, clearChildEditsSQL(seasonsTable, resetColumns(seasonLockedColumns, keepText), resetEditedColumns(seasonEditedColumns, keepText), false)+` WHERE content_id = $1`, contentID); err != nil {
 		return fmt.Errorf("resetting season %s: %w", contentID, err)
 	}
 	return nil
@@ -146,7 +172,7 @@ func (r *SeasonRepository) ResetEdits(ctx context.Context, contentID string, kee
 func (r *EpisodeRepository) ResetEdits(ctx context.Context, contentID string, keepText bool) error {
 	err := pgx.BeginTxFunc(ctx, r.pool, pgx.TxOptions{}, func(tx pgx.Tx) error {
 		var seriesID string
-		query := clearChildEditsSQL(episodesTable, resetColumns(episodeLockedColumns, keepText), false) + ` WHERE content_id = $1 RETURNING series_id`
+		query := clearChildEditsSQL(episodesTable, resetColumns(episodeLockedColumns, keepText), resetEditedColumns(episodeEditedColumns, keepText), false) + ` WHERE content_id = $1 RETURNING series_id`
 		if err := tx.QueryRow(ctx, query, contentID).Scan(&seriesID); err != nil {
 			return err
 		}
@@ -166,5 +192,16 @@ func resetColumns(columns []childLockedColumn, keepText bool) []childLockedColum
 	}
 	return slices.DeleteFunc(slices.Clone(columns), func(c childLockedColumn) bool {
 		return c.column == childColumnTitle || c.column == childColumnOverview
+	})
+}
+
+// resetEditedColumns is the edited columns a reset empties: all of them, or
+// all but the text ones.
+func resetEditedColumns(columns []string, keepText bool) []string {
+	if !keepText {
+		return columns
+	}
+	return slices.DeleteFunc(slices.Clone(columns), func(c string) bool {
+		return slices.Contains(childEditedTextColumns, c)
 	})
 }

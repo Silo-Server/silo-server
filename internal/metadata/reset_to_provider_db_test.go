@@ -80,9 +80,9 @@ func TestResetToProvider_SeasonAndEpisodeRows(t *testing.T) {
 
 			season, episode = f.read(t, seriesID)
 			if tc.otherLanguage {
-				if episode.Title != identifyEditTitle || episode.Overview != identifyEditOverview || episode.AirDate != nil || episode.Runtime != 0 || len(episode.LockedFields) != 0 {
-					t.Errorf("episode = title %q overview %q air_date %v runtime %d locks %v, want the text kept, nothing else and no locks",
-						episode.Title, episode.Overview, episode.AirDate, episode.Runtime, episode.LockedFields)
+				if episode.Title != identifyEditTitle || episode.Overview != identifyEditOverview || episode.Tagline != identifyEditTagline || episode.AirDate != nil || episode.Runtime != 0 || len(episode.LockedFields) != 0 {
+					t.Errorf("episode = title %q overview %q tagline %q air_date %v runtime %d locks %v, want the text kept, nothing else and no locks",
+						episode.Title, episode.Overview, episode.Tagline, episode.AirDate, episode.Runtime, episode.LockedFields)
 				}
 				assertChildRow(t, "season", false, "", childRow{season.Title, season.Overview, season.AirDate, 0, season.LockedFields}, identifySeasonLocks)
 				return
@@ -91,6 +91,16 @@ func TestResetToProvider_SeasonAndEpisodeRows(t *testing.T) {
 				childRow{season.Title, season.Overview, season.AirDate, 0, season.LockedFields}, identifySeasonLocks)
 			assertChildRow(t, "episode", tc.target == RefreshTargetEpisode && !tc.wantErr, tc.providerTitle,
 				childRow{episode.Title, episode.Overview, episode.AirDate, episode.Runtime, episode.LockedFields}, identifyEpisodeLocks)
+			// No provider writes the title details, so a reset leaves them empty.
+			if !tc.wantErr {
+				details := []string{episode.SortTitle, episode.OriginalTitle, episode.Tagline}
+				if tc.target == RefreshTargetSeason {
+					details = []string{season.SortTitle, season.OriginalTitle, season.Tagline, season.TvdbID}
+				}
+				if slices.ContainsFunc(details, func(v string) bool { return v != "" }) {
+					t.Errorf("%s title details = %q, want them emptied", tc.target, details)
+				}
+			}
 		})
 	}
 }

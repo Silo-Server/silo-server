@@ -848,6 +848,13 @@ type Season struct {
 	BackdropFillOnly bool `json:"-"`
 	// LockedFields lists the fields a refresh keeps; see catalog.childLockedColumn.
 	LockedFields []int
+	// No metadata provider writes these; admin edits and seed imports do.
+	SortTitle     string
+	OriginalTitle string
+	Tagline       string
+	ImdbID        string
+	TmdbID        string
+	TvdbID        string
 }
 
 // Episode represents a row in the episodes table.
@@ -883,6 +890,10 @@ type Episode struct {
 	PendingTranslationLanguage string `json:"-"`
 	// LockedFields lists the fields a refresh keeps; see catalog.childLockedColumn.
 	LockedFields []int
+	// No metadata provider writes these; admin edits and seed imports do.
+	SortTitle     string
+	OriginalTitle string
+	Tagline       string
 }
 
 // MediaItemRoot represents a row in the media_item_roots table.

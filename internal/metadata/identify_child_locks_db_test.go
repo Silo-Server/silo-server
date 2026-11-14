@@ -19,6 +19,7 @@ const (
 	identifyEditOverview = "Edited overview"
 	identifyEditAirDate  = "2001-02-03"
 	identifyEditRuntime  = 77
+	identifyEditTagline  = "Edited tagline"
 )
 
 var (
@@ -69,12 +70,13 @@ func (f *identifyLockFixture) seedAt(t *testing.T, seriesID, tvdb string) string
 	if err := f.episodes.Upsert(ctx, &models.Episode{ContentID: episodeID, SeriesID: seriesID, SeasonID: seasonID, SeasonNumber: 1, EpisodeNumber: 1, Title: "Episode 1", DefaultMetadataLanguage: "en", MetadataSource: "provider"}); err != nil {
 		t.Fatal(err)
 	}
-	title, overview, airDate := identifyEditTitle, identifyEditOverview, identifyEditAirDate
-	if err := f.seasons.UpdateMetadata(ctx, seasonID, &catalog.MetadataUpdate{Title: &title, Overview: &overview, AirDate: &airDate, LockedFields: &identifySeasonLocks}); err != nil {
+	// The title details need no lock: no provider writes them.
+	title, overview, airDate, tagline := identifyEditTitle, identifyEditOverview, identifyEditAirDate, identifyEditTagline
+	if err := f.seasons.UpdateMetadata(ctx, seasonID, &catalog.MetadataUpdate{Title: &title, SortTitle: &title, OriginalTitle: &title, Overview: &overview, Tagline: &tagline, AirDate: &airDate, TvdbID: &tvdb, LockedFields: &identifySeasonLocks}); err != nil {
 		t.Fatal(err)
 	}
 	runtime := identifyEditRuntime
-	if err := f.episodes.UpdateMetadata(ctx, episodeID, &catalog.MetadataUpdate{Title: &title, Overview: &overview, AirDate: &airDate, Runtime: &runtime, LockedFields: &identifyEpisodeLocks}); err != nil {
+	if err := f.episodes.UpdateMetadata(ctx, episodeID, &catalog.MetadataUpdate{Title: &title, SortTitle: &title, OriginalTitle: &title, Overview: &overview, Tagline: &tagline, AirDate: &airDate, Runtime: &runtime, LockedFields: &identifyEpisodeLocks}); err != nil {
 		t.Fatal(err)
 	}
 	return seriesID
@@ -247,11 +249,11 @@ func TestIdentify_SeasonEpisodeLocksFollowTheShow(t *testing.T) {
 			t.Fatalf("identify moved to %q, want %q", got, seriesID)
 		}
 		season, episode := f.read(t, seriesID)
-		if !slices.Equal(season.LockedFields, identifySeasonLocks) || season.Title != identifyEditTitle {
-			t.Errorf("season = %q with locks %v, want the edit kept", season.Title, season.LockedFields)
+		if !slices.Equal(season.LockedFields, identifySeasonLocks) || season.Title != identifyEditTitle || season.Tagline != identifyEditTagline || season.TvdbID != tvdb {
+			t.Errorf("season = %q, %q, %q with locks %v, want the edits kept", season.Title, season.Tagline, season.TvdbID, season.LockedFields)
 		}
-		if !slices.Equal(episode.LockedFields, identifyEpisodeLocks) || episode.Title != identifyEditTitle {
-			t.Errorf("episode = %q with locks %v, want the edit kept", episode.Title, episode.LockedFields)
+		if !slices.Equal(episode.LockedFields, identifyEpisodeLocks) || episode.Title != identifyEditTitle || episode.Tagline != identifyEditTagline {
+			t.Errorf("episode = %q, %q with locks %v, want the edits kept", episode.Title, episode.Tagline, episode.LockedFields)
 		}
 	})
 }
@@ -334,8 +336,14 @@ func assertEditsCleared(t *testing.T, pool *pgxpool.Pool, seriesID string, seaso
 	if season.Title != "Season 1" || season.Overview != "" || season.AirDate != nil {
 		t.Errorf("season = %q, %q, %v, want the default title and nothing else", season.Title, season.Overview, season.AirDate)
 	}
+	if details := []string{season.SortTitle, season.OriginalTitle, season.Tagline, season.TvdbID}; slices.ContainsFunc(details, func(v string) bool { return v != "" }) {
+		t.Errorf("season title details = %q, want them cleared", details)
+	}
 	if episode.Title != "Episode 1" || episode.Overview != "" || episode.AirDate != nil || episode.Runtime != 0 {
 		t.Errorf("episode = %q, %q, %v, %d, want the default title and nothing else", episode.Title, episode.Overview, episode.AirDate, episode.Runtime)
+	}
+	if details := []string{episode.SortTitle, episode.OriginalTitle, episode.Tagline}; slices.ContainsFunc(details, func(v string) bool { return v != "" }) {
+		t.Errorf("episode title details = %q, want them cleared", details)
 	}
 	var lastAired *time.Time
 	if err := pool.QueryRow(t.Context(), `SELECT last_air_date_at FROM media_items WHERE content_id = $1`, seriesID).Scan(&lastAired); err != nil {

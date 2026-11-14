@@ -60,8 +60,9 @@
 ./internal/scanner TestScanIndexesFileWithNonUTF8Name
 ./migrations TestScanRunForeignKeysHaveLeadingIndexesDB
 
-# Locked season and episode fields survive refreshes, seed imports and a change of show.
+# Season and episode edits survive refreshes and seed imports; locked fields also follow a change of show.
 ./internal/catalog TestSeasonEpisodeLockedFieldsSurviveUpsertsDB
+./internal/catalog TestSeasonEpisodeEditsKeepTitleDetailsDB
 ./internal/catalogseed TestSeedCarriesSeasonEpisodeLocksDB
 ./internal/metadata TestIdentify_SeasonEpisodeLocksFollowTheShow
 ./internal/metadata TestIdentify_SeasonEpisodeLocksClearOnEveryCorrectionPath
