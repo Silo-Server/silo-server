@@ -208,7 +208,7 @@ func (s *ABSMediaStore) ListAudiobooks(ctx context.Context, libraryID int64, lim
 
 	dataArgs := append([]any(nil), args...)
 	argIdx = len(dataArgs) + 1
-	join, orderBy := audiobookItemsOrder(q, libraryID, viewer, &dataArgs, &argIdx)
+	join, orderBy := audiobookItemsOrder(q, libraryID, viewer, access, &dataArgs, &argIdx)
 	dataSQL := `SELECT mi.content_id FROM media_items mi` + join + ` WHERE ` + where + ` ORDER BY ` + orderBy
 	if limit > 0 {
 		dataSQL += fmt.Sprintf(` LIMIT $%d OFFSET $%d`, argIdx, argIdx+1)
@@ -286,7 +286,7 @@ const audiobookTitleSortKey = `lower(coalesce(nullif(btrim(mi.sort_title), ''), 
 // sort by the added date because that is what Silo reports for both.
 // Every order ends on the title key and content_id so pages never skip or
 // repeat rows on ties.
-func audiobookItemsOrder(q abs.ItemsQuery, libraryID int64, viewer absViewer, args *[]any, argIdx *int) (join, orderBy string) {
+func audiobookItemsOrder(q abs.ItemsQuery, libraryID int64, viewer absViewer, access catalog.AccessFilter, args *[]any, argIdx *int) (join, orderBy string) {
 	dir := sqlDirection(q.Desc)
 	nulls := "NULLS LAST"
 	tail := audiobookTitleSortKey + " " + dir + ", mi.content_id " + dir
@@ -306,10 +306,18 @@ func audiobookItemsOrder(q abs.ItemsQuery, libraryID int64, viewer absViewer, ar
 			GROUP BY ip_sort.content_id) an_sort ON an_sort.content_id = mi.content_id`
 	}
 
+	// Without a route library, the added date and duration come from the
+	// libraries the viewer may see, as hydrateListing reports them.
+	visibleFolder := func(col string) string {
+		return ` AND (` + nextArg(access.AllowedLibraryIDs) + `::int[] IS NULL OR ` + col + ` = ANY(` + nextArg(access.AllowedLibraryIDs) + `))` +
+			` AND NOT (` + col + ` = ANY(COALESCE(` + nextArg(access.DisabledLibraryIDs) + `::int[], '{}')))`
+	}
+
 	switch q.Sort {
 	case absSortAddedAt, "birthtimeMs", "mtimeMs":
 		if libraryID == 0 {
-			return "", "(SELECT MIN(mil_sort.first_seen_at) FROM media_item_libraries mil_sort WHERE mil_sort.content_id = mi.content_id) " + dir + " " + nulls + ", " + tail
+			return "", "(SELECT MIN(mil_sort.first_seen_at) FROM media_item_libraries mil_sort WHERE mil_sort.content_id = mi.content_id" +
+				visibleFolder("mil_sort.media_folder_id") + ") " + dir + " " + nulls + ", " + tail
 		}
 		// The library's own first_seen_at, joined so idx_item_libraries_folder
 		// can serve the order.
@@ -323,6 +331,8 @@ func audiobookItemsOrder(q abs.ItemsQuery, libraryID int64, viewer absViewer, ar
 		dur := `(SELECT MAX(fs.duration_seconds) FROM audiobook_item_file_stats fs WHERE fs.content_id = mi.content_id`
 		if libraryID != 0 {
 			dur += ` AND fs.media_folder_id = ` + nextArg(int(libraryID))
+		} else {
+			dur += visibleFolder("fs.media_folder_id")
 		}
 		return "", dur + ") " + dir + " " + nulls + ", " + tail
 	case "media.metadata.publishedYear":

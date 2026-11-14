@@ -158,6 +158,24 @@ func TestABSLibraryItemsFiltersAndSortDB(t *testing.T) {
 		}
 	}
 
+	// Without a route library, a copy in a library the viewer cannot see does
+	// not decide where a book sorts. Alpha joined a hidden library long ago.
+	var hiddenFolder int
+	if err := store.Pool.QueryRow(ctx, `INSERT INTO media_folders (type, name, enabled) VALUES ('audiobooks', $1, true) RETURNING id`, alpha).Scan(&hiddenFolder); err != nil {
+		t.Fatalf("seed hidden folder: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = store.Pool.Exec(context.Background(), `DELETE FROM media_folders WHERE id = $1`, hiddenFolder)
+	})
+	if _, err := store.Pool.Exec(ctx, `INSERT INTO media_item_libraries (content_id, media_folder_id, first_seen_at) VALUES ($1, $2, now() - interval '10 years')`, alpha, hiddenFolder); err != nil {
+		t.Fatalf("seed hidden membership: %v", err)
+	}
+	visible := catalog.AccessFilter{AllowedLibraryIDs: []int{folderID}}
+	oldest, _, err := store.ListAudiobooks(ctx, 0, 0, 0, visible, abs.ItemsQuery{Sort: "addedAt"})
+	if got := contentIDsOf(oldest); err != nil || !slices.Equal(got, []string{delta, charlie, bravo, alpha}) {
+		t.Errorf("added order across the viewer's libraries = %v (err %v), want delta first and alpha by its visible date", got, err)
+	}
+
 	page, _, err := store.ListAudiobooks(ctx, int64(folderID), 1, 0, all, abs.ItemsQuery{Sort: "addedAt", Desc: true})
 	if err != nil || len(page) != 1 || page[0].AddedAt == nil || !page[0].AddedAt.Equal(f.now.Add(-time.Hour).Truncate(time.Microsecond)) {
 		t.Errorf("newest book added date = %+v (err %v), want %v", page, err, f.now.Add(-time.Hour))
