@@ -128,6 +128,14 @@
 # marks its files missing and removes the title from the library.
 ./internal/scanner TestScanSubtreeReconcilesDeletedTitleFolderDB
 
+# A full scan with a configured root emptied (a dropped mount) keeps that
+# root's cataloged files and reports it suspect, and still scans the other root.
+./internal/scanner TestScanFolderEmptyRootKeepsCatalogedFilesDB
+
+# The roots that count as holding cataloged files: present or missing files at
+# or under the root, never a sibling that only shares a string prefix.
+./internal/scanner TestListRootsWithCatalogedFilesDB
+
 # A subtree scan of a deleted book folder reconciles its files, except under a
 # configured root that is now an empty directory (a lost mount).
 ./internal/scanner TestScanSubtreeAudiobookVanishedBookUnderEmptyRootDB

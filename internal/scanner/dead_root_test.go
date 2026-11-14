@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -278,6 +279,99 @@ func TestScanSubtreeReconcilesDeletedTitleFolderDB(t *testing.T) {
 	}
 	if warning.Code != nil {
 		t.Fatalf("scan warning = %q, want none", *warning.Code)
+	}
+}
+
+// TestScanFolderEmptyRootKeepsCatalogedFilesDB covers a full scan of a library
+// with two configured roots when one root becomes an empty directory (the bare
+// mountpoint of a dropped drive). The files cataloged under it must not be
+// marked missing and the root must be reported as suspect, while the other
+// root keeps scanning normally.
+func TestScanFolderEmptyRootKeepsCatalogedFilesDB(t *testing.T) {
+	pool := newScannerTestPool(t)
+	ctx := t.Context()
+	droppedRoot := t.TempDir()
+	liveRoot := t.TempDir()
+	folderID := seedDeadRootTestFolder(t, pool, "movies", fmt.Sprintf("empty-root-%d", time.Now().UnixNano()))
+	folder := &models.MediaFolder{ID: folderID, Type: "movies", Paths: []string{droppedRoot, liveRoot}}
+	s := NewScanner(NewFileRepository(pool), "", nil, 2, false, time.Hour)
+
+	droppedFile := filepath.Join(droppedRoot, "Dropped (2001)", "Dropped (2001).mkv")
+	liveGone := filepath.Join(liveRoot, "Gone (2002)", "Gone (2002).mkv")
+	liveKept := filepath.Join(liveRoot, "Kept (2003)", "Kept (2003).mkv")
+	writeRelinkTestMedia(t, droppedFile, 1)
+	writeRelinkTestMedia(t, liveGone, 2)
+	writeRelinkTestMedia(t, liveKept, 3)
+	if _, err := s.ScanFolder(ctx, folder); err != nil {
+		t.Fatalf("first scan: %v", err)
+	}
+
+	if err := os.RemoveAll(filepath.Join(droppedRoot, "Dropped (2001)")); err != nil {
+		t.Fatalf("empty the dropped root: %v", err)
+	}
+	if err := os.RemoveAll(filepath.Join(liveRoot, "Gone (2002)")); err != nil {
+		t.Fatalf("remove a title from the live root: %v", err)
+	}
+	result, err := s.ScanFolder(ctx, folder)
+	if err != nil {
+		t.Fatalf("second scan: %v", err)
+	}
+
+	if len(result.SuspectEmptyRoots) != 1 || filepath.Clean(result.SuspectEmptyRoots[0]) != filepath.Clean(droppedRoot) {
+		t.Fatalf("SuspectEmptyRoots = %v, want only the emptied root", result.SuspectEmptyRoots)
+	}
+	for _, tc := range []struct {
+		name        string
+		path        string
+		wantMissing bool
+	}{
+		{"file under the emptied root", droppedFile, false},
+		{"file removed under the live root", liveGone, true},
+		{"file kept under the live root", liveKept, false},
+	} {
+		var missing bool
+		if err := pool.QueryRow(ctx, `SELECT missing_since IS NOT NULL FROM media_files WHERE file_path = $1`, tc.path).Scan(&missing); err != nil {
+			t.Fatalf("%s: read file row: %v", tc.name, err)
+		}
+		if missing != tc.wantMissing {
+			t.Fatalf("%s: marked missing = %v, want %v", tc.name, missing, tc.wantMissing)
+		}
+	}
+}
+
+// TestListRootsWithCatalogedFilesDB pins which roots count as holding
+// cataloged files: a file at or under the root, present or marked missing,
+// and nothing that only shares a string prefix with it. Roots come back in
+// input order.
+func TestListRootsWithCatalogedFilesDB(t *testing.T) {
+	pool := newScannerTestPool(t)
+	ctx := t.Context()
+	folderID := seedDeadRootTestFolder(t, pool, "movies", fmt.Sprintf("cataloged-roots-%d", time.Now().UnixNano()))
+	for _, file := range []struct {
+		path    string
+		missing bool
+	}{
+		{"/lib/live/Movie (2001)/Movie (2001).mkv", false},
+		{"/lib/gone/Movie (2002).mkv", true},
+		{"/lib/movies2/Movie (2003).mkv", false},
+		{"/lib/100%_done/Movie (2004).mkv", false},
+		{"/lib/file.mkv", false},
+	} {
+		if _, err := pool.Exec(ctx, `
+			INSERT INTO media_files (media_folder_id, file_path, file_size, missing_since)
+			VALUES ($1, $2, 1, CASE WHEN $3 THEN now() END)`, folderID, file.path, file.missing); err != nil {
+			t.Fatalf("seed %s: %v", file.path, err)
+		}
+	}
+
+	roots := []string{"/lib/gone", "/lib/empty", "/lib/movies", "/lib/live/", "/lib/100%_done", "/lib/100x_done", "/lib/file.mkv", "/lib/f"}
+	got, err := NewFileRepository(pool).ListRootsWithCatalogedFiles(ctx, folderID, roots)
+	if err != nil {
+		t.Fatalf("ListRootsWithCatalogedFiles: %v", err)
+	}
+	want := []string{"/lib/gone", "/lib/live/", "/lib/100%_done", "/lib/file.mkv"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("roots with cataloged files = %q, want %q", got, want)
 	}
 }
 

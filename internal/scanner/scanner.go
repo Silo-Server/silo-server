@@ -1229,7 +1229,7 @@ func (s *Scanner) scanFolderByRoots(
 	// compaction but can die independently of its reachable parent.
 	configuredProbes := rootcheck.ProbeManyWithTimeout(ctx, configuredRoots, rootcheck.DefaultProbeTimeout)
 	unreachableRoots := make([]string, 0)
-	suspectRoots := make([]string, 0)
+	emptyRoots := make([]string, 0)
 	for i, root := range configuredRoots {
 		probe := configuredProbes[i]
 		if !probe.Reachable {
@@ -1237,16 +1237,20 @@ func (s *Scanner) scanFolderByRoots(
 			unreachableRoots = append(unreachableRoots, root)
 			continue
 		}
-		if !probe.Empty {
-			continue
+		if probe.Empty {
+			emptyRoots = append(emptyRoots, root)
 		}
-		existing, err := s.fileRepo.GetByFolderAndPathPrefix(ctx, folder.ID, root)
-		if err != nil {
-			return nil, fmt.Errorf("listing files under empty root %q: %w", root, err)
-		}
-		if len(existing) > 0 {
-			suspectRoots = append(suspectRoots, root)
-		}
+	}
+	// Ask only whether the catalog holds anything under each empty root.
+	// Loading the rows to count them decoded every file row of a dropped
+	// mount in full, with its track, chapter and marker JSON, on every scan
+	// for as long as the drive stayed missing.
+	suspectRoots, err := s.fileRepo.ListRootsWithCatalogedFiles(ctx, folder.ID, emptyRoots)
+	if err != nil {
+		return nil, fmt.Errorf("listing files under empty roots: %w", err)
+	}
+	if suspectRoots == nil {
+		suspectRoots = make([]string, 0)
 	}
 	result.UnreachableRoots = unreachableRoots
 	unreachableSet := make(map[string]bool, len(unreachableRoots))
