@@ -107,6 +107,38 @@ func TestSubscriptionMutationTransport(t *testing.T) {
 	if len(p.Errors) != 2 || p.Errors[0].Location != "body.mode" || p.Errors[1].Location != "body.quality" {
 		t.Fatalf("two nulls: errors = %+v", p.Errors)
 	}
+	// An invalid monitor option the service rejects is a validation failure
+	// at the member, on create and on edit. Each body passes the schema.
+	// Only create names a series, so only create can get ErrNotSeries.
+	for _, tc := range []struct {
+		err            error
+		create, patch  string
+		location, code string
+	}{
+		{downloads.ErrSeasonsRequired, `"mode":"specific_seasons"`, `{"mode":"specific_seasons"}`, "body.season_numbers", "required"},
+		{downloads.ErrInvalidSeasonNumbers, `"mode":"specific_seasons","season_numbers":[-1]`, `{"season_numbers":[-1]}`, "body.season_numbers", "out_of_range"},
+		{downloads.ErrNotSeries, `"mode":"all"`, "", "body.series_id", "invalid"},
+	} {
+		svc.err = tc.err
+		problems := []problemDoc{requireProblem(t, do(t, h, "POST", path, `{"series_id":"series","delete_watched":false,"max_storage_bytes":0,`+tc.create+`}`, device), TypeValidationFailed)}
+		if tc.patch != "" {
+			problems = append(problems, requireProblem(t, do(t, h, "PATCH", path+"/monitor", tc.patch, with(device, "If-Match", current)), TypeValidationFailed))
+		}
+		for _, p := range problems {
+			if len(p.Errors) != 1 || p.Errors[0].Location != tc.location || p.Errors[0].Code != tc.code {
+				t.Fatalf("%v: errors = %+v", tc.err, p.Errors)
+			}
+		}
+	}
+	// Edit's schema has no mode enum, so the service rejects an unknown mode;
+	// the answer matches the one create's schema gives.
+	svc.err = downloads.ErrInvalidSubscriptionMode
+	patchMode := requireProblem(t, do(t, h, "PATCH", path+"/monitor", `{"mode":"weekly"}`, with(device, "If-Match", current)), TypeValidationFailed)
+	createMode := requireProblem(t, do(t, h, "POST", path, `{"series_id":"series","mode":"weekly","delete_watched":false,"max_storage_bytes":0}`, device), TypeValidationFailed)
+	if len(patchMode.Errors) != 1 || len(createMode.Errors) != 1 || patchMode.Errors[0] != createMode.Errors[0] {
+		t.Fatalf("unknown mode: patch errors %+v, create errors %+v; want the same", patchMode.Errors, createMode.Errors)
+	}
+	svc.err = nil
 	rec = do(t, h, "DELETE", path+"/monitor", "", with(device, "If-Match", tag))
 	if rec.Code != 412 {
 		t.Fatalf("stale delete %d", rec.Code)

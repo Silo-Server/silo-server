@@ -51,6 +51,8 @@
 ./internal/scanner TestFinalizeVariantsKeepsMatchSuppressionDB
 ./internal/scanner TestFinalizeVariantsRetotalsPartsLeftByARenameDB
 ./internal/scanner TestFinalizeVariantsReadsWholeGroupFoundOutsideTheScopeDB
+./internal/scanner TestFinalizeVariantsPagesTheScopeDB
+./internal/scanner TestFinalizeVariantsRereadsOwnerLinkedBetweenPagesDB
 ./internal/scanner TestScanKeepsFileRowAcrossRenameDB
 ./internal/scanner TestScanLeavesOutFilesWithoutVideoDB
 ./internal/scanner TestScanFileRetiresFileWithoutVideoDB
@@ -60,8 +62,9 @@
 ./internal/scanner TestScanIndexesFileWithNonUTF8Name
 ./migrations TestScanRunForeignKeysHaveLeadingIndexesDB
 
-# Locked season and episode fields survive refreshes, seed imports and a change of show.
+# Season and episode edits survive refreshes and seed imports; locked fields also follow a change of show.
 ./internal/catalog TestSeasonEpisodeLockedFieldsSurviveUpsertsDB
+./internal/catalog TestSeasonEpisodeEditsKeepTitleDetailsDB
 ./internal/catalogseed TestSeedCarriesSeasonEpisodeLocksDB
 ./internal/metadata TestIdentify_SeasonEpisodeLocksFollowTheShow
 ./internal/metadata TestIdentify_SeasonEpisodeLocksClearOnEveryCorrectionPath
@@ -479,6 +482,9 @@
 ./internal/downloads TestFailedPreparationRefreshIsSharedPostgres
 ./internal/downloads TestPreparationControlsPauseResumeAndCancel
 ./internal/downloads TestDownloadLinkedToCanceledPreparationFails
+./internal/downloads TestDeletingTheLastDownloadStopsItsPreparationDB
+./internal/downloads TestLateCompletionStopsItsPreparationDB
+./internal/downloads TestStaleAbandonedPreparationsAreRetiredNotClaimedDB
 ./internal/userstore/pgstore TestPostgresClearResumePosition
 ./internal/userstore/pgstore TestPostgresCollectionContinuation
 ./internal/userstore/pgstore TestPostgresFailedSyncKeepsANewerResult

@@ -5,6 +5,8 @@ import (
 	"errors"
 	"net/http"
 
+	"github.com/danielgtaylor/huma/v2"
+
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
 	catalogpkg "github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/downloads"
@@ -37,6 +39,18 @@ type DownloadSubscriptionPatchBody struct {
 	Quality         Patch[string] `json:"quality,omitzero" enum:"original,20mbps,10mbps,5mbps,2mbps,1mbps" doc:"Quality preset for episodes registered from now on; already-registered downloads keep theirs."`
 	Active          Patch[bool]   `json:"active,omitzero"`
 }
+
+// TransformSchema documents every member as non-nullable. Patch documents a
+// member as nullable, but updateDownloadSubscription refuses null on each of
+// them. Huma treats null on an optional member as absent, so that handler
+// check, not the schema, is what refuses it.
+func (DownloadSubscriptionPatchBody) TransformSchema(_ huma.Registry, s *huma.Schema) *huma.Schema {
+	for _, property := range s.Properties {
+		property.Nullable = false
+	}
+	return s
+}
+
 type DownloadSubscriptionPatchInput struct {
 	ID          string `path:"id" minLength:"1"`
 	DeviceID    string `header:"X-Silo-Device-Id" required:"true" minLength:"1" maxLength:"128"`
@@ -70,8 +84,17 @@ func subscriptionMutationProblem(err error) *Problem {
 		return p
 	}
 	switch {
-	case errors.Is(err, downloads.ErrInvalidSubscriptionMode), errors.Is(err, downloads.ErrSeasonsRequired), errors.Is(err, downloads.ErrInvalidSeasonNumbers), errors.Is(err, downloads.ErrNotSeries):
-		return NewProblem(TypeMalformedRequest, err.Error())
+	// An invalid monitor option is a validation failure at the member it
+	// names. Only the patch body reaches the mode check; create's schema
+	// enum rejects an unknown mode first, with the same code and detail.
+	case errors.Is(err, downloads.ErrInvalidSubscriptionMode):
+		return validationProblem(locationBody+".mode", codeInvalidEnum, `expected value to be one of "all, future, latest_season, specific_seasons"`)
+	case errors.Is(err, downloads.ErrSeasonsRequired):
+		return validationProblem(locationBody+".season_numbers", codeRequired, err.Error())
+	case errors.Is(err, downloads.ErrInvalidSeasonNumbers):
+		return validationProblem(locationBody+".season_numbers", codeOutOfRange, err.Error())
+	case errors.Is(err, downloads.ErrNotSeries):
+		return validationProblem(locationBody+".series_id", codeInvalid, "series_id is not a series")
 	case errors.Is(err, downloads.ErrInvalidQuality), errors.Is(err, downloads.ErrTranscodeDisabled), errors.Is(err, downloads.ErrQualityUnavailable), errors.Is(err, downloads.ErrCapacityUnavailable), errors.Is(err, downloads.ErrCapabilityUnavailable):
 		return downloadCreationProblem(err)
 	default:

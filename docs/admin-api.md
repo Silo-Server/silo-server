@@ -2211,7 +2211,8 @@ file paths.
 take `{"ids": [...]}` (1–500 job ids) and return one `{id, outcome}` per
 distinct id in request order. `outcome` is `applied`, `unchanged` (already in
 the requested state), `not_found` (no such job is being prepared: it finished,
-was canceled, or never existed), or `not_applicable` (pausing or resuming a
+was canceled, was stopped because no download needs it any more, or never
+existed), or `not_applicable` (pausing or resuming a
 failed job). Pause keeps a job's queue position but no worker claims it until
 it is resumed; a running encode stops and restarts from the beginning on resume,
 and the stopped attempt does not count against the job. Its waiting downloads
@@ -2225,8 +2226,8 @@ preparing is never touched. The three operations are idempotent.
 the realtime channel (`download_preparations`), the failure window in seconds,
 and `controls` when pause, resume, and cancel are available. The admin-only channel publishes `download_preparation.changed`
 (`{id}`) when a job is queued, claimed, assigned a worker, finishes, fails, is
-requeued, paused, resumed, or canceled, and when a user adds or removes a
-download waiting on it, and `download_preparation.progress` (`{id, progress}`) at most every
+requeued, paused, resumed, canceled, or stopped because no download needs it,
+and when a user adds or removes a download waiting on it, and `download_preparation.progress` (`{id, progress}`) at most every
 five seconds per running job. The subscription snapshot is `null`; re-read the
 list after subscribing. See
 [preparation progress](downloads-api.md#preparation-progress-admin) for how the

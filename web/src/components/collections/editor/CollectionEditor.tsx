@@ -663,11 +663,12 @@ export function CollectionEditor<Raw extends WireCollection>({
   );
 
   const artworkSlots = capabilities?.artwork === false ? [] : scope.artworkSlots;
-  // Without its own poster a collection shows a collage of its titles, except
-  // a server Smart collection, whose titles come from its rules.
-  const collages = isServer ? !smart : personalCapabilities.data?.poster_collages === true;
+  // Without its own poster a collection shows a collage of its titles: a
+  // Smart collection's first matches, or its first stored titles.
+  const collages = isServer || personalCapabilities.data?.poster_collages === true;
   const poster = useListedPoster(scope, view, {
     awaitCollage: created && collages && artworkSlots.length > 0,
+    countMayLag: isServer && smart,
     version: editor.etag,
   });
   // A new Synced list starts with its pick's poster.
