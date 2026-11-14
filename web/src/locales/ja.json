@@ -8552,6 +8552,12 @@
       "value": "このパスは複数のライブラリに一致します。"
     }
   ],
+  "web.admin.autoscan.activity.reason.pathIgnored": [
+    {
+      "type": 0,
+      "value": "ライブラリの除外ファイルによってこのファイルは除外されているため、スキャンされませんでした。"
+    }
+  ],
   "web.admin.autoscan.activity.reason.pathNotFileOrDir": [
     {
       "type": 0,
@@ -91135,6 +91141,12 @@
       "value": "データ"
     }
   ],
+  "web.common.toast.collections.created": [
+    {
+      "type": 0,
+      "value": "コレクションを作成しました"
+    }
+  ],
   "web.common.toast.collections.deleteFailed": [
     {
       "type": 0,
@@ -91145,6 +91157,12 @@
     {
       "type": 0,
       "value": "コレクションを削除しました"
+    }
+  ],
+  "web.common.toast.collections.saved": [
+    {
+      "type": 0,
+      "value": "コレクションを保存しました"
     }
   ],
   "web.common.toast.collections.syncFailed": [
@@ -91473,6 +91491,12 @@
     {
       "type": 0,
       "value": "字幕をアップロードしました"
+    }
+  ],
+  "web.common.toast.watchProviders.authNotApproved": [
+    {
+      "type": 0,
+      "value": "先にプロバイダーのサイトでコードを承認してから、もう一度お試しください。"
     }
   ],
   "web.common.toast.watchProviders.connectFailed": [

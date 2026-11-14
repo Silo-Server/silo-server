@@ -379,7 +379,10 @@ func registerRequestLifecycle(reg *Registry, requests RequestLifecycleService, p
 		}
 		return &WatchProviderDeviceAuthOutput{Body: WatchProviderDeviceAuth{ID(s.ID), s.Provider, s.UserCode, s.VerificationURL, s.IntervalSeconds, NewInstant(s.ExpiresAt)}}, nil
 	})
-	Register(reg, op(http.MethodPost, "/watch-providers/{provider}/auth/poll", "pollWatchProviderDeviceAuth", "Poll device authorization. Concurrent polls are not durably coalesced."), func(ctx context.Context, in *WatchProviderPollInput) (*WatchProviderConnectionOutput, error) {
+	poll := op(http.MethodPost, "/watch-providers/{provider}/auth/poll", "pollWatchProviderDeviceAuth", "Poll device authorization. Concurrent polls are not durably coalesced.")
+	poll.Description = "Refusals, by problem type: 409 conflict (the person has not approved the code yet); 409 already_linked (this authorization already completed); 410 device_login_expired (the code expired); 403 not_permitted (the person declined it on the provider's site)."
+	poll.Errors = append(poll.Errors, http.StatusGone)
+	Register(reg, poll, func(ctx context.Context, in *WatchProviderPollInput) (*WatchProviderConnectionOutput, error) {
 		u, p, err := scope(ctx)
 		if err != nil {
 			return nil, err
@@ -457,8 +460,19 @@ func watchProviderProblem(err error) *Problem {
 	if errors.Is(err, pgx.ErrNoRows) || errors.Is(err, watchsync.ErrConnectionNotFound) || errors.Is(err, watchsync.ErrAuthSessionMismatch) {
 		return NewProblem(TypeNotFound, "Watch-provider connection or authorization session not found.")
 	}
-	if errors.Is(err, watchsync.ErrAuthSessionCompleted) || errors.Is(err, watchsync.ErrAuthSessionExpired) || watchsync.IsDeviceAuthPending(err) {
-		return NewProblem(TypeConflict, err.Error())
+	// Each device-authorization outcome has its own type, so a client can
+	// say what to do next in the viewer's language.
+	if watchsync.IsDeviceAuthPending(err) {
+		return NewProblem(TypeConflict, "Authorization isn't finished yet. Approve the code on the watch provider's site, then try again.")
+	}
+	if errors.Is(err, watchsync.ErrAuthSessionExpired) {
+		return NewProblem(TypeDeviceLoginExpired, "The authorization code expired. Start connecting again.")
+	}
+	if errors.Is(err, watchsync.ErrAuthSessionCompleted) {
+		return NewProblem(TypeAlreadyLinked, "This authorization was already completed.")
+	}
+	if errors.Is(err, watchsync.ErrDeviceAuthDenied) {
+		return NewProblem(TypeNotPermitted, "The authorization was declined on the watch provider's site.")
 	}
 	if _, ok := errors.AsType[watchsync.ProviderCapabilityError](err); ok {
 		return NewProblem(TypeCapabilityUnsupported, "The watch provider does not support this operation.")

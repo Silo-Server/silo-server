@@ -124,7 +124,7 @@ func TestWatchProviderLifecycleErrors(t *testing.T) {
 	for _, tc := range []struct {
 		err  error
 		want ProblemType
-	}{{watchsync.UnknownProviderError{Key: "missing"}, TypeNotFound}, {watchsync.ErrAuthSessionMismatch, TypeNotFound}, {watchsync.ErrAuthSessionCompleted, TypeConflict}, {fmt.Errorf("provider rejected the key: %w", watchsync.ErrInvalidCredential), TypeValidationFailed}, {errors.New("private database failure"), TypeInternalError}} {
+	}{{watchsync.UnknownProviderError{Key: "missing"}, TypeNotFound}, {watchsync.ErrAuthSessionMismatch, TypeNotFound}, {watchsync.ErrAuthSessionCompleted, TypeAlreadyLinked}, {fmt.Errorf("watch sync plugin: %w", watchsync.ErrAuthSessionExpired), TypeDeviceLoginExpired}, {fmt.Errorf("watch sync plugin: %w", watchsync.ErrDeviceAuthDenied), TypeNotPermitted}, {fmt.Errorf("provider rejected the key: %w", watchsync.ErrInvalidCredential), TypeValidationFailed}, {errors.New("private database failure"), TypeInternalError}} {
 		w.err = tc.err
 		rec := do(t, h, http.MethodPost, Prefix+"/watch-providers/trakt/auth/poll", `{"auth_session_id":"00000000-0000-4000-8000-000000000001"}`, requestOwner)
 		requireProblem(t, rec, tc.want)

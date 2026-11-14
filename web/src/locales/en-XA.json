@@ -9351,6 +9351,12 @@
       "value": "⟦Ţĥîš þåţĥ ɱåţçĥéš ɱöŕé ţĥåñ öñé ļîƀŕåŕý.~~~~~~~~~~~~~~~~⟧"
     }
   ],
+  "web.admin.autoscan.activity.reason.pathIgnored": [
+    {
+      "type": 0,
+      "value": "⟦Ţĥé ļîƀŕåŕý'š îĝñöŕé ƒîļéš éẋçļûđé ţĥîš ƒîļé, šö îţ ŵåš ñöţ šçåññéđ.~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
   "web.admin.autoscan.activity.reason.pathNotFileOrDir": [
     {
       "type": 0,
@@ -109306,6 +109312,12 @@
       "value": "⟦Ýöûŕ Đåţå~~~~⟧"
     }
   ],
+  "web.common.toast.collections.created": [
+    {
+      "type": 0,
+      "value": "⟦Çöļļéçţîöñ çŕéåţéđ~~~~~~~~⟧"
+    }
+  ],
   "web.common.toast.collections.deleteFailed": [
     {
       "type": 0,
@@ -109316,6 +109328,12 @@
     {
       "type": 0,
       "value": "⟦Çöļļéçţîöñ đéļéţéđ~~~~~~~~⟧"
+    }
+  ],
+  "web.common.toast.collections.saved": [
+    {
+      "type": 0,
+      "value": "⟦Çöļļéçţîöñ šåṽéđ~~~~~~~⟧"
     }
   ],
   "web.common.toast.collections.syncFailed": [
@@ -109676,6 +109694,12 @@
     {
       "type": 0,
       "value": "⟦Šûƀţîţļé ûþļöåđéđ~~~~~~~⟧"
+    }
+  ],
+  "web.common.toast.watchProviders.authNotApproved": [
+    {
+      "type": 0,
+      "value": "⟦Åþþŕöṽé ţĥé çöđé öñ ţĥé þŕöṽîđéŕ'š šîţé ƒîŕšţ, ţĥéñ ţŕý åĝåîñ.~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
     }
   ],
   "web.common.toast.watchProviders.connectFailed": [

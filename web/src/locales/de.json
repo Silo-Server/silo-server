@@ -8815,6 +8815,12 @@
       "value": "Dieser Pfad passt zu mehr als einer Mediathek."
     }
   ],
+  "web.admin.autoscan.activity.reason.pathIgnored": [
+    {
+      "type": 0,
+      "value": "Die Ignorierdateien der Mediathek schließen diese Datei aus, daher wurde sie nicht gescannt."
+    }
+  ],
   "web.admin.autoscan.activity.reason.pathNotFileOrDir": [
     {
       "type": 0,
@@ -100066,6 +100072,12 @@
       "value": "Deine Daten"
     }
   ],
+  "web.common.toast.collections.created": [
+    {
+      "type": 0,
+      "value": "Sammlung erstellt"
+    }
+  ],
   "web.common.toast.collections.deleteFailed": [
     {
       "type": 0,
@@ -100076,6 +100088,12 @@
     {
       "type": 0,
       "value": "Sammlung gelöscht"
+    }
+  ],
+  "web.common.toast.collections.saved": [
+    {
+      "type": 0,
+      "value": "Sammlung gespeichert"
     }
   ],
   "web.common.toast.collections.syncFailed": [
@@ -100436,6 +100454,12 @@
     {
       "type": 0,
       "value": "Untertitel hochgeladen"
+    }
+  ],
+  "web.common.toast.watchProviders.authNotApproved": [
+    {
+      "type": 0,
+      "value": "Bestätige zuerst den Code auf der Website des Anbieters und versuche es dann erneut."
     }
   ],
   "web.common.toast.watchProviders.connectFailed": [

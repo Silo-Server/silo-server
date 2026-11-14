@@ -953,6 +953,9 @@ var (
 	ErrAuthSessionMismatch  = errors.New("auth session does not match active profile")
 	ErrAuthSessionCompleted = errors.New("auth session is already completed")
 	ErrAuthSessionExpired   = errors.New("auth session has expired")
+	// ErrDeviceAuthDenied reports that the person declined the authorization
+	// on the provider's site.
+	ErrDeviceAuthDenied = errors.New("device authorization was denied")
 	// ErrInvalidCredential reports a provider's rejection of the credential the
 	// profile supplied. Built-in providers wrap it so the listeners classify an
 	// API-key rejection as a client problem; plugin providers signal the same

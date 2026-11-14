@@ -9106,6 +9106,12 @@
       "value": "Ce chemin correspond à plusieurs bibliothèques."
     }
   ],
+  "web.admin.autoscan.activity.reason.pathIgnored": [
+    {
+      "type": 0,
+      "value": "Les fichiers d’exclusion de la bibliothèque écartent ce fichier ; il n’a donc pas été analysé."
+    }
+  ],
   "web.admin.autoscan.activity.reason.pathNotFileOrDir": [
     {
       "type": 0,
@@ -109583,6 +109589,12 @@
       "value": "Vos données"
     }
   ],
+  "web.common.toast.collections.created": [
+    {
+      "type": 0,
+      "value": "Collection créée"
+    }
+  ],
   "web.common.toast.collections.deleteFailed": [
     {
       "type": 0,
@@ -109593,6 +109605,12 @@
     {
       "type": 0,
       "value": "Collection supprimée"
+    }
+  ],
+  "web.common.toast.collections.saved": [
+    {
+      "type": 0,
+      "value": "Collection enregistrée"
     }
   ],
   "web.common.toast.collections.syncFailed": [
@@ -109985,6 +110003,12 @@
     {
       "type": 0,
       "value": "Sous-titre envoyé"
+    }
+  ],
+  "web.common.toast.watchProviders.authNotApproved": [
+    {
+      "type": 0,
+      "value": "Approuvez d’abord le code sur le site du fournisseur, puis réessayez."
     }
   ],
   "web.common.toast.watchProviders.connectFailed": [

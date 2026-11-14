@@ -9963,6 +9963,12 @@
       "value": "يطابق هذا المسار أكثر من مكتبة واحدة."
     }
   ],
+  "web.admin.autoscan.activity.reason.pathIgnored": [
+    {
+      "type": 0,
+      "value": "تستبعد ملفات التجاهل في المكتبة هذا الملف، لذا لم يُفحص."
+    }
+  ],
   "web.admin.autoscan.activity.reason.pathNotFileOrDir": [
     {
       "type": 0,
@@ -136217,6 +136223,12 @@
       "value": "بياناتك"
     }
   ],
+  "web.common.toast.collections.created": [
+    {
+      "type": 0,
+      "value": "تم إنشاء المجموعة"
+    }
+  ],
   "web.common.toast.collections.deleteFailed": [
     {
       "type": 0,
@@ -136227,6 +136239,12 @@
     {
       "type": 0,
       "value": "تم حذف المجموعة"
+    }
+  ],
+  "web.common.toast.collections.saved": [
+    {
+      "type": 0,
+      "value": "تم حفظ المجموعة"
     }
   ],
   "web.common.toast.collections.syncFailed": [
@@ -136699,6 +136717,12 @@
     {
       "type": 0,
       "value": "تم رفع الترجمة"
+    }
+  ],
+  "web.common.toast.watchProviders.authNotApproved": [
+    {
+      "type": 0,
+      "value": "وافق على الرمز في موقع المزود أولًا، ثم حاول مرة أخرى."
     }
   ],
   "web.common.toast.watchProviders.connectFailed": [

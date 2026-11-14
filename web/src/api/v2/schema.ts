@@ -12791,7 +12791,10 @@ export interface paths {
     };
     get?: never;
     put?: never;
-    /** Poll device authorization. Concurrent polls are not durably coalesced. */
+    /**
+     * Poll device authorization. Concurrent polls are not durably coalesced.
+     * @description Refusals, by problem type: 409 conflict (the person has not approved the code yet); 409 already_linked (this authorization already completed); 410 device_login_expired (the code expired); 403 not_permitted (the person declined it on the provider's site).
+     */
     post: operations["pollWatchProviderDeviceAuth"];
     delete?: never;
     options?: never;
@@ -149468,6 +149471,15 @@ export interface operations {
       };
       /** @description Conflict */
       409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Gone */
+      410: {
         headers: {
           [name: string]: unknown;
         };
