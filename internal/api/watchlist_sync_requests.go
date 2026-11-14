@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 
 	"github.com/Silo-Server/silo-server/internal/apiv2"
@@ -36,14 +37,14 @@ func (r watchlistSyncRequests) RequestWatchlistTitle(ctx context.Context, userID
 	}
 }
 
-func (r watchlistSyncRequests) WithdrawWatchlistTitle(ctx context.Context, userID int, profileID string, mediaType string, tmdbIDs []int) {
+func (r watchlistSyncRequests) WithdrawWatchlistTitle(ctx context.Context, userID int, profileID string, mediaType string, tmdbIDs []int) error {
 	viewer := mediarequests.Viewer{UserID: userID, ProfileID: profileID}
 	for _, id := range tmdbIDs {
 		if err := r.requests.WithdrawWatchlistRequest(ctx, viewer, mediarequests.MediaType(mediaType), id); err != nil {
-			slog.WarnContext(ctx, "withdrawing the watchlist request of a synced title failed", "component", "watchsync",
-				"user_id", userID, "profile_id", profileID, "media_type", mediaType, "tmdb_id", id, "error", err)
+			return fmt.Errorf("withdraw the watchlist request for %s %d: %w", mediaType, id, err)
 		}
 	}
+	return nil
 }
 
 func (r watchlistSyncRequests) RequestQueuedWatchlistTitles(ctx context.Context, userID int, profileID string, titles []watchlist.Title) {

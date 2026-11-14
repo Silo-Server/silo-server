@@ -12,11 +12,12 @@ import (
 // SyncRequests applies watchlist requests to the entries watch provider sync
 // adds and removes, as adding or removing a title by hand does: a new entry
 // requests the title or follows its request, and a removed one withdraws the
-// request it made while nothing has been sent. Failures are the
-// implementation's to log; the entry stays either way.
+// request it made while nothing has been sent. A failed request is the
+// implementation's to log and leaves the entry; a failed withdrawal is
+// returned, so the entry stays until a later sync withdraws it.
 type SyncRequests interface {
 	RequestWatchlistTitle(ctx context.Context, userID int, profileID string, title Title)
-	WithdrawWatchlistTitle(ctx context.Context, userID int, profileID string, mediaType string, tmdbIDs []int)
+	WithdrawWatchlistTitle(ctx context.Context, userID int, profileID string, mediaType string, tmdbIDs []int) error
 	// RequestQueuedWatchlistTitles requests, in order, the titles no request
 	// was ever made for, while the profile's quota has room.
 	RequestQueuedWatchlistTitles(ctx context.Context, userID int, profileID string, titles []Title)
@@ -75,8 +76,45 @@ func (t syncTitles) AddWatchlistTitle(ctx context.Context, userID int, profileID
 			stored = found
 		}
 		t.requests.RequestWatchlistTitle(ctx, userID, profileID, *stored)
+		// A delete of the same title can run between the save and the
+		// request, as it can for an add by hand: it withdraws, then removes
+		// the entry. Rechecking the entry after requesting leaves no request
+		// behind whichever way the two interleave.
+		if err := t.withdrawIfRemoved(ctx, userID, profileID, title, *stored); err != nil {
+			return true, err
+		}
 	}
 	return true, nil
+}
+
+// withdrawIfRemoved withdraws the title's request when its entry left the
+// watchlist other than by promotion onto the library watchlist.
+func (t syncTitles) withdrawIfRemoved(ctx context.Context, userID int, profileID string, title watchsync.WatchlistTitle, stored Title) error {
+	key := TitleKey{MediaType: title.Kind, TMDBID: title.TMDBID}
+	on, err := t.titles.OnWatchlist(ctx, Viewer{UserID: userID, ProfileID: profileID}, []TitleKey{key})
+	if err != nil || on[key] {
+		return err
+	}
+	promoted, err := t.WatchlistTitlePromoted(ctx, userID, profileID, title)
+	if err != nil || promoted {
+		return err
+	}
+	return t.requests.WithdrawWatchlistTitle(ctx, userID, profileID, title.Kind, heldTMDBIDs(title.TMDBID, &stored))
+}
+
+// heldTMDBIDs returns tmdbID and every TMDB ID the stored title (nil when
+// unknown) has held, once each: a request keeps the ID it was made under.
+func heldTMDBIDs(tmdbID int, stored *Title) []int {
+	ids := []int{tmdbID}
+	if stored == nil {
+		return ids
+	}
+	for _, id := range append([]int{stored.TMDBID}, stored.FormerTMDBIDs...) {
+		if !slices.Contains(ids, id) {
+			ids = append(ids, id)
+		}
+	}
+	return ids
 }
 
 // ListWatchlistTitles returns every entry of the profile outside the library.
@@ -154,26 +192,37 @@ func (t syncTitles) RequestQueuedWatchlistTitles(ctx context.Context, userID int
 	return nil
 }
 
-// RemoveWatchlistTitle withdraws the entry's request after removing it, under
-// every TMDB ID the title has held, since a request keeps the ID it was made
-// under.
+// RemoveWatchlistTitle takes the profile's entry for the title off, the way
+// removing it by hand does: the request goes first, under every TMDB ID the
+// title has held, since a request keeps the ID it was made under. A failed
+// withdrawal leaves the entry, so the next sync still finds the title and
+// retries. The second withdrawal catches a request an overlapping add made
+// after the first; it is skipped when a re-add already put the title back.
 func (t syncTitles) RemoveWatchlistTitle(ctx context.Context, userID int, profileID string, title watchsync.WatchlistTitle) error {
-	removed, _, err := t.titles.Remove(ctx, Viewer{UserID: userID, ProfileID: profileID}, title.Kind, title.TMDBID)
-	if err != nil {
+	viewer := Viewer{UserID: userID, ProfileID: profileID}
+	ids := []int{title.TMDBID}
+	if t.requests != nil {
+		known, err := t.titles.Find(ctx, title.Kind, title.TMDBID)
+		if err != nil {
+			return err
+		}
+		ids = heldTMDBIDs(title.TMDBID, known)
+		if err := t.requests.WithdrawWatchlistTitle(ctx, userID, profileID, title.Kind, ids); err != nil {
+			return err
+		}
+	}
+	if _, _, err := t.titles.Remove(ctx, viewer, title.Kind, title.TMDBID); err != nil {
 		return err
 	}
-	if t.requests != nil {
-		ids := []int{title.TMDBID}
-		if removed != nil {
-			for _, id := range append([]int{removed.TMDBID}, removed.FormerTMDBIDs...) {
-				if !slices.Contains(ids, id) {
-					ids = append(ids, id)
-				}
-			}
-		}
-		t.requests.WithdrawWatchlistTitle(ctx, userID, profileID, title.Kind, ids)
+	if t.requests == nil {
+		return nil
 	}
-	return nil
+	key := TitleKey{MediaType: title.Kind, TMDBID: title.TMDBID}
+	on, err := t.titles.OnWatchlist(ctx, viewer, []TitleKey{key})
+	if err != nil || on[key] {
+		return err
+	}
+	return t.requests.WithdrawWatchlistTitle(ctx, userID, profileID, title.Kind, ids)
 }
 
 func (t syncTitles) WatchlistTitlesListed(ctx context.Context, userID int, profileID string, titles []watchsync.WatchlistTitle) (map[watchsync.WatchlistTitle]bool, error) {

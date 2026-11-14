@@ -2,6 +2,7 @@ package watchsync
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"sort"
 	"strconv"
@@ -189,12 +190,15 @@ func (s *Service) importListTitle(
 
 // removeLocalListItem takes a shadow row's item off the local list: a
 // watchlist entry outside the library by its title, a library item through
-// the binding.
+// the binding. Before the watchlist titles are wired (a sync that starts
+// while the server boots), a title's entry can't be removed, so the run
+// fails and the next one retries rather than recording a removal that didn't
+// happen.
 func (s *Service) removeLocalListItem(ctx context.Context, store userstore.UserStore, conn Connection, b listBinding, mediaItemID string) error {
 	if title, ok := watchlistTitleFromListItemID(mediaItemID); ok {
 		titles := s.watchlistTitles(b)
 		if titles == nil {
-			return nil
+			return fmt.Errorf("watchlist titles are not available yet to remove %s", mediaItemID)
 		}
 		return titles.RemoveWatchlistTitle(ctx, conn.UserID, conn.ProfileID, title)
 	}
