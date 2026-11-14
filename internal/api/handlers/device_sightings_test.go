@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"errors"
+	"net/http"
 	"testing"
 
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
@@ -118,6 +119,25 @@ func TestFailedRegistrationIsRetried(t *testing.T) {
 	}
 	sightings.RecordFor(context.Background(), provider, 1, "profile-1", device)
 	requireRegisteredDevice(t, store, "profile-1", "tv-1", "Den TV", "Android TV")
+}
+
+// A Tizen TV sends its name in ISO-8859-1, which Postgres refuses as UTF-8
+// (#3607). The name and platform are read as Latin-1, so the device registers
+// under the name the TV shows; UTF-8 values are kept as sent.
+func TestLatin1DeviceHeadersRegisterAsUTF8(t *testing.T) {
+	store := newPlaybackTestStore(t)
+	headers := http.Header{}
+	headers.Set(deviceIDHeader, "tizen-1")
+	headers.Set(deviceNameHeader, "T\xe9l\xe9viseur")
+	headers.Set(devicePlatformHeader, "Tiz\xe9n")
+	device := DeviceMetadataFromHeaders(headers)
+
+	NewDeviceSightings().Record(context.Background(), store, "profile-1", device)
+	requireRegisteredDevice(t, store, "profile-1", "tizen-1", "Téléviseur", "Tizén")
+
+	if got := NewDeviceMetadata("tv-2", "Téléviseur", "Tizen").DeviceName; got != "Téléviseur" {
+		t.Errorf("UTF-8 name = %q, want it unchanged", got)
+	}
 }
 
 // livingRoom is the caller's own device as it declares itself.
