@@ -1159,6 +1159,7 @@ func audiobookLookupPaths(files []parsedAudiobookFile) []string {
 // change without a data migration.
 const (
 	lockedFieldName         = 0
+	lockedFieldOverview     = 1
 	lockedFieldGenres       = 2
 	lockedFieldStudios      = 3
 	lockedFieldCrew         = 5
@@ -1191,7 +1192,7 @@ func applyBookToMediaItem(item *models.MediaItem, book *parsedAudiobook) {
 	if !releaseDatesLocked {
 		item.Year = book.Year
 	}
-	if book.Overview != "" && item.Overview == "" {
+	if book.Overview != "" && item.Overview == "" && !slices.Contains(item.LockedFields, lockedFieldOverview) {
 		item.Overview = book.Overview
 	}
 	if book.Publisher != "" && !slices.Contains(item.LockedFields, lockedFieldStudios) {

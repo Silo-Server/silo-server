@@ -886,6 +886,7 @@ export function CollectionEditor<Raw extends WireCollection>({
           onChange={editor.setDraft}
           showOnly={!isServer && !smart}
           nameNote={synced ? syncedNameNote(draft) : undefined}
+          nameError={editor.nameError}
         />
         {contents}
         <WhereItShowsPanel

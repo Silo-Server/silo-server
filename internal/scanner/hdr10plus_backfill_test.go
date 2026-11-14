@@ -307,6 +307,99 @@ func TestHDR10PlusBackfillLeavesARowRewrittenDuringTheReadDB(t *testing.T) {
 	}
 }
 
+// A file whose read decodes no frame fails the same way on every pass, so it
+// waits a day before it is read again, or until it changes on disk (#3606).
+// The wait is kept outside media_files, so recording it is not a change to
+// the file, and a later read that decodes a frame records its status and
+// drops the wait.
+func TestHDR10PlusBackfillWaitsADayAfterANoFrameReadDB(t *testing.T) {
+	pool := newScannerTestPool(t)
+	ctx := context.Background()
+	folderID := seedDeadRootTestFolder(t, pool, "movies", fmt.Sprintf("hdr10plus-noframe-%d", time.Now().UnixNano()))
+	path := t.TempDir() + "/open-gop.mkv"
+	fileID, _ := insertHDR10PlusBackfillRow(t, ctx, pool, folderID, path, `[{"codec":"hevc","color_transfer":"smpte2084","video_range_type":"HDR10"}]`)
+
+	reads := 0
+	decodes := false
+	backfiller := NewHDR10PlusBackfiller(NewFileRepository(pool), "ffprobe")
+	backfiller.readFrame = func(_ context.Context, _, filePath, _ string) (firstVideoFrame, error) {
+		if filePath != path {
+			return firstVideoFrame{}, errors.New("not this test's file")
+		}
+		reads++
+		if !decodes {
+			return firstVideoFrame{}, fmt.Errorf("%w for %s", errNoFrameDecoded, filePath)
+		}
+		return firstVideoFrame{SideData: []ffprobeSideData{{SideDataType: "HDR Dynamic Metadata SMPTE2094-40 (HDR10+)"}}, ColorRange: "tv"}, nil
+	}
+	row := func() (tracks string, updatedAt time.Time) {
+		t.Helper()
+		if err := pool.QueryRow(ctx, `SELECT video_tracks::text, updated_at FROM media_files WHERE id = $1`, fileID).Scan(&tracks, &updatedAt); err != nil {
+			t.Fatal(err)
+		}
+		return tracks, updatedAt
+	}
+	waiting := func() bool {
+		t.Helper()
+		var n int
+		if err := pool.QueryRow(ctx, `SELECT count(*) FROM hdr10_plus_backfill_no_frame WHERE media_file_id = $1`, fileID).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		return n > 0
+	}
+	readAgo := func(ago time.Duration) {
+		t.Helper()
+		if _, err := pool.Exec(ctx, `UPDATE hdr10_plus_backfill_no_frame SET read_at = now() - $2 * interval '1 second' WHERE media_file_id = $1`, fileID, int64(ago/time.Second)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	pass := func(wantReads int) {
+		t.Helper()
+		reads = 0
+		if _, err := backfiller.Run(ctx, nil); err != nil {
+			t.Fatal(err)
+		}
+		if reads != wantReads {
+			t.Fatalf("pass read the file %d times, want %d", reads, wantReads)
+		}
+	}
+
+	tracksBefore, updatedBefore := row()
+	pass(1)
+	// Anything that compares the row, such as the catalog change trigger,
+	// must see no change.
+	if tracks, updated := row(); tracks != tracksBefore || !updated.Equal(updatedBefore) {
+		t.Fatalf("recording the no-frame read changed the file row: video_tracks %s, updated_at changed %v", tracks, !updated.Equal(updatedBefore))
+	}
+	if !waiting() {
+		t.Fatal("the no-frame read recorded no wait")
+	}
+
+	pass(0)
+	readAgo(23 * time.Hour)
+	pass(0)
+	readAgo(25 * time.Hour)
+	pass(1)
+
+	// The wait belongs to the file revision that was read: another revision
+	// is read on the next pass.
+	resize := func(by int) {
+		t.Helper()
+		if _, err := pool.Exec(ctx, `UPDATE media_files SET file_size = file_size + $2 WHERE id = $1`, fileID, by); err != nil {
+			t.Fatal(err)
+		}
+	}
+	resize(1)
+	pass(1)
+	resize(-1)
+	decodes = true
+	pass(1)
+	track := readHDR10PlusBackfillTrack(t, ctx, pool, fileID)
+	if track["hdr10_plus"] != true || waiting() {
+		t.Fatalf("after a read that decoded: track %v, wait kept %v; want hdr10_plus true and no wait", track, waiting())
+	}
+}
+
 // Consecutive timeouts mean stalled storage: the pass ends rather than wait
 // out every remaining file.
 func TestHDR10PlusBackfillStopsWhenStorageStallsDB(t *testing.T) {
