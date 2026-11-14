@@ -11,6 +11,7 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/contentid"
+	"github.com/Silo-Server/silo-server/internal/providerid"
 )
 
 // MetadataCurationTxOptions pins the fresh-snapshot isolation required by the
@@ -211,10 +212,12 @@ func lockCuratedProviderIDs(ctx context.Context, tx pgx.Tx, contentID string, up
 	if edits[tmdbIDColumn] == nil && edits[imdbIDColumn] == nil && edits[tvdbIDColumn] == nil {
 		return nil
 	}
+	// Lock the item before comparing: a concurrent edit to its IDs could
+	// otherwise make an ID this edit resends look unchanged when it isn't.
 	var itemType string
 	var stored contentid.ProviderIDs
 	err := tx.QueryRow(ctx, `SELECT type, COALESCE(tmdb_id, ''), COALESCE(imdb_id, ''), COALESCE(tvdb_id, '')
-		FROM media_items WHERE content_id = $1`, contentID).Scan(&itemType, &stored.Tmdb, &stored.Imdb, &stored.Tvdb)
+		FROM media_items WHERE content_id = $1 FOR UPDATE`, contentID).Scan(&itemType, &stored.Tmdb, &stored.Imdb, &stored.Tvdb)
 	if errors.Is(err, pgx.ErrNoRows) {
 		// Not a media item; seasons and episodes don't anchor merges.
 		return nil
@@ -243,6 +246,18 @@ func lockCuratedProviderIDs(ctx context.Context, tx pgx.Tx, contentID string, up
 	}
 	if !changed {
 		return nil
+	}
+	// A refresh drops IDs it can't use (a TMDB ID of "0", a short IMDb ID)
+	// before deriving the anchor, so the anchor falls through to the next ID.
+	// Derive it the same way, or an unusable ID would hide that next anchor.
+	if !providerid.IsPositiveDecimal(resulting.Tmdb) {
+		resulting.Tmdb = ""
+	}
+	if !providerid.IsIMDbID(resulting.Imdb) {
+		resulting.Imdb = ""
+	}
+	if !providerid.IsPositiveDecimal(resulting.Tvdb) {
+		resulting.Tvdb = ""
 	}
 	var anchor string
 	switch strings.ToLower(itemType) {

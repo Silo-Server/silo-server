@@ -90,4 +90,20 @@ func TestCuratedProviderIDEditsStayInCurationScopeDB(t *testing.T) {
 			}
 		})
 	}
+
+	// A refresh drops a TMDB ID it can't use and anchors on the IMDb ID the
+	// item keeps, here a library B title's anchor. Setting TMDB to "0" must be
+	// refused just as clearing it is.
+	retained := "tt" + id(4)
+	anchorImdbB, _ := contentid.ForMovie(contentid.ProviderIDs{Imdb: retained})
+	seed(anchorImdbB, "", libB)
+	for i, tmdb := range []string{"", "0"} {
+		item := fmt.Sprintf("local:curation-identity-%d-retained-%d", suffix, i)
+		seed(item, id(int64(20+i)), libA)
+		batchEquivExec(t, pool, `UPDATE media_items SET imdb_id = $2 WHERE content_id = $1`, item, retained)
+		err := repo.UpdateMetadata(access.WithMetadataCurationAuthorizer(ctx, curator), item, &MetadataUpdate{TmdbID: new(tmdb)})
+		if !errors.Is(err, access.ErrMetadataCurationScope) {
+			t.Fatalf("UpdateMetadata(tmdb_id=%q) over a library B IMDb anchor: error = %v, want refused", tmdb, err)
+		}
+	}
 }
