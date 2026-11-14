@@ -105624,6 +105624,12 @@
       "value": "\u200F\u202EYour Data\u202C"
     }
   ],
+  "web.common.toast.collections.created": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ECollection created\u202C"
+    }
+  ],
   "web.common.toast.collections.deleteFailed": [
     {
       "type": 0,
@@ -105634,6 +105640,12 @@
     {
       "type": 0,
       "value": "\u200F\u202ECollection deleted\u202C"
+    }
+  ],
+  "web.common.toast.collections.saved": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ECollection saved\u202C"
     }
   ],
   "web.common.toast.collections.syncFailed": [

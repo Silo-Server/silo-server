@@ -100636,6 +100636,12 @@
       "value": "Your Data"
     }
   ],
+  "web.common.toast.collections.created": [
+    {
+      "type": 0,
+      "value": "Collection created"
+    }
+  ],
   "web.common.toast.collections.deleteFailed": [
     {
       "type": 0,
@@ -100646,6 +100652,12 @@
     {
       "type": 0,
       "value": "Collection deleted"
+    }
+  ],
+  "web.common.toast.collections.saved": [
+    {
+      "type": 0,
+      "value": "Collection saved"
     }
   ],
   "web.common.toast.collections.syncFailed": [

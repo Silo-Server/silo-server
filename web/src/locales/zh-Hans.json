@@ -91989,6 +91989,12 @@
       "value": "你的数据"
     }
   ],
+  "web.common.toast.collections.created": [
+    {
+      "type": 0,
+      "value": "合集已创建"
+    }
+  ],
   "web.common.toast.collections.deleteFailed": [
     {
       "type": 0,
@@ -91999,6 +92005,12 @@
     {
       "type": 0,
       "value": "合集已删除"
+    }
+  ],
+  "web.common.toast.collections.saved": [
+    {
+      "type": 0,
+      "value": "合集已保存"
     }
   ],
   "web.common.toast.collections.syncFailed": [

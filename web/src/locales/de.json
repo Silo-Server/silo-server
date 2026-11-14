@@ -100072,6 +100072,12 @@
       "value": "Deine Daten"
     }
   ],
+  "web.common.toast.collections.created": [
+    {
+      "type": 0,
+      "value": "Sammlung erstellt"
+    }
+  ],
   "web.common.toast.collections.deleteFailed": [
     {
       "type": 0,
@@ -100082,6 +100088,12 @@
     {
       "type": 0,
       "value": "Sammlung gelöscht"
+    }
+  ],
+  "web.common.toast.collections.saved": [
+    {
+      "type": 0,
+      "value": "Sammlung gespeichert"
     }
   ],
   "web.common.toast.collections.syncFailed": [
