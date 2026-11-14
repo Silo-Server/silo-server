@@ -38,7 +38,16 @@ func (f *fakePlaybackSessionStore) GetPlaybackSession(_ context.Context, id stri
 func (f *fakePlaybackSessionStore) SyncPlaybackSession(context.Context, string, float64, int) error {
 	return nil
 }
-func (f *fakePlaybackSessionStore) ClosePlaybackSession(context.Context, string) error { return nil }
+func (f *fakePlaybackSessionStore) ClosePlaybackSession(_ context.Context, id string, _ *FinalSync) (bool, error) {
+	s, ok := f.sessions[id]
+	if !ok || s.ClosedAt != nil {
+		return false, nil
+	}
+	now := time.Now()
+	s.ClosedAt = &now
+	f.sessions[id] = s
+	return true, nil
+}
 func (f *fakePlaybackSessionStore) CloseOpenSessionsForPrincipal(context.Context, string, string) error {
 	return nil
 }

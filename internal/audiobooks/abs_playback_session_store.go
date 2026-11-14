@@ -95,19 +95,29 @@ func (s *ABSPlaybackSessionStore) SyncPlaybackSession(ctx context.Context, id st
 	return nil
 }
 
-// ClosePlaybackSession sets closed_at = now() for the given session.
-// Idempotent: closing an already-closed session is safe.
-func (s *ABSPlaybackSessionStore) ClosePlaybackSession(ctx context.Context, id string) error {
-	_, err := s.Pool.Exec(ctx, `
+// ClosePlaybackSession sets closed_at = now() for the given session, first
+// applying the final sync when there is one, in the same statement. It reports
+// whether this call closed the session: of concurrent or repeated closes, only
+// one does, and only its final sync is applied.
+func (s *ABSPlaybackSessionStore) ClosePlaybackSession(ctx context.Context, id string, final *abs.FinalSync) (bool, error) {
+	var position float64
+	var listening int
+	if final != nil {
+		position, listening = final.PositionSeconds, final.ListeningSeconds
+	}
+	tag, err := s.Pool.Exec(ctx, `
 		UPDATE abs_playback_sessions
-		SET closed_at = now()
+		SET closed_at                = now(),
+		    current_position_seconds = CASE WHEN $2 THEN $3 ELSE current_position_seconds END,
+		    time_listening_seconds   = time_listening_seconds + $4,
+		    last_sync_at             = CASE WHEN $2 THEN now() ELSE last_sync_at END
 		WHERE id = $1 AND closed_at IS NULL`,
-		id,
+		id, final != nil, position, listening,
 	)
 	if err != nil {
-		return fmt.Errorf("abs_playback_session_store: close: %w", err)
+		return false, fmt.Errorf("abs_playback_session_store: close: %w", err)
 	}
-	return nil
+	return tag.RowsAffected() == 1, nil
 }
 
 func (s *ABSPlaybackSessionStore) CloseOpenSessionsForPrincipal(ctx context.Context, userID, profileID string) error {
