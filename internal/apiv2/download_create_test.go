@@ -111,6 +111,13 @@ func TestDownloadCreateTransport(t *testing.T) {
 	if rec.Code != 429 {
 		t.Fatalf("quota %d", rec.Code)
 	}
+	// A series request for an item that is not a series is a validation
+	// failure at content_id.
+	svc.err = downloads.ErrNotSeries
+	p := requireProblem(t, do(t, h, "POST", path, `{"content_id":"movie","series":true,"batch_id":"intent"}`, device), TypeValidationFailed)
+	if len(p.Errors) != 1 || p.Errors[0].Location != "body.content_id" || p.Errors[0].Code != "invalid" {
+		t.Fatalf("not a series: errors = %+v", p.Errors)
+	}
 }
 
 func TestDownloadCreateRejectsEmptyBatchGuardsOnSingle(t *testing.T) {

@@ -38,10 +38,10 @@ export function dashboardLayoutStorageKey(userId: number): string {
 // are updated synchronously, so the delay is never visible.
 export const DASHBOARD_LAYOUT_SAVE_DEBOUNCE_MS = 800;
 
-// Version 1 is still version 1 with row heights and per-widget windows in it:
-// `rows` and `range` are additive fields that older documents simply omit, and
-// sanitizing fills them from the widget's defaults. A bump would only be needed
-// for a change that makes an existing field mean something new.
+// Version 1 is still version 1 with row heights, per-widget windows and views
+// in it: `rows`, `range` and `view` are additive fields that older documents
+// simply omit, and the widget's defaults stand in for them. A bump would only
+// be needed for a change that makes an existing field mean something new.
 interface StoredLayout {
   version: 1;
   entries: DashboardLayoutEntry[];
@@ -84,6 +84,11 @@ function sanitizeRange(range: unknown, widget: DashboardWidgetDefinition): Widge
   return ranges.default;
 }
 
+/** A stored view the widget still offers, or undefined so the default applies. */
+function sanitizeView(view: unknown, widget: DashboardWidgetDefinition): string | undefined {
+  return typeof view === "string" && widget.views?.allowed.includes(view) ? view : undefined;
+}
+
 /**
  * Validates a layout document from any source — localStorage or the server —
  * and drops what this build cannot render. Returns null when the value is not
@@ -119,6 +124,10 @@ function sanitizeLayoutDocument(value: unknown): DashboardLayoutEntry[] | null {
     const range = sanitizeRange(entry.range, widget);
     if (range) {
       sanitized.range = range;
+    }
+    const view = sanitizeView(entry.view, widget);
+    if (view) {
+      sanitized.view = view;
     }
     entries.push(sanitized);
   }
@@ -205,6 +214,8 @@ export interface DashboardLayout {
    * part of the layout they expect to find again.
    */
   setWidgetRange: (id: WidgetId, range: WidgetRange) => void;
+  /** Change a widget's presentation; saved the same way as its window. */
+  setWidgetView: (id: WidgetId, view: string) => void;
   removeWidget: (id: WidgetId) => void;
   /**
    * Place a hidden widget with its default span, rows, and window. With a
@@ -497,6 +508,30 @@ export function useDashboardLayout(): DashboardLayout {
     [update],
   );
 
+  const setWidgetView = useCallback(
+    (id: WidgetId, view: string) => {
+      update((prev) => {
+        const widget = findDashboardWidget(id);
+        if (!widget?.views || !sanitizeView(view, widget)) {
+          return prev;
+        }
+        const defaultView = widget.views.default;
+        let changed = false;
+        const next = prev.map((entry) => {
+          // An entry without a view is showing the default, so picking the
+          // default there changes nothing and must not save.
+          if (entry.id !== id || (entry.view ?? defaultView) === view) {
+            return entry;
+          }
+          changed = true;
+          return { ...entry, view };
+        });
+        return changed ? next : prev;
+      });
+    },
+    [update],
+  );
+
   const removeWidget = useCallback(
     (id: WidgetId) => {
       update((prev) =>
@@ -594,6 +629,7 @@ export function useDashboardLayout(): DashboardLayout {
     moveWidget,
     resizeWidget,
     setWidgetRange,
+    setWidgetView,
     removeWidget,
     addWidget,
     resetLayout,

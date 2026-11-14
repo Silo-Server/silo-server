@@ -86,7 +86,9 @@ func TestProfileAuditDB(t *testing.T) {
 		t.Fatalf("primary profile row: %s", row.Raw)
 	}
 
-	const pin = "4321"
+	// The PINs are words, not digits: a digit PIN turns up by chance in the
+	// row's ids and timestamps, and AssertNoSecrets would report it.
+	const pin = "kestrel-pin"
 	child := d.create(parent.ID, ProfileCreateRequest{Name: "Kid", IsChild: true, PIN: pin, MaxContentRating: "PG"})
 	if !child.HasPIN {
 		t.Fatal("created profile lost its PIN")
@@ -135,7 +137,7 @@ func checkProfileUpdateAudit(t *testing.T, d profileAuditDB, parentID, childID, 
 		t.Fatalf("no-op or refused update recorded: %+v", rows)
 	}
 
-	const nextPIN = "9876"
+	const nextPIN = "quokka-pin"
 	if err := update(ProfileUpdateRequest{PIN: new(nextPIN)}); err != nil {
 		t.Fatal(err)
 	}
