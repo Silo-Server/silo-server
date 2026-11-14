@@ -812,15 +812,22 @@ func applyUserCollectionSort(collections []usercollections.ServerVisibleCollecti
 	return out
 }
 
+// refreshSmartCountAsync refreshes a saved smart collection's item count and,
+// off the request, builds its collage so the next read shows it.
 func (h *LibraryCollectionHandler) refreshSmartCountAsync(collectionID string) {
-	if h.SmartCountRefresher == nil || collectionID == "" {
+	if collectionID == "" || (h.SmartCountRefresher == nil && h.service == nil) {
 		return
 	}
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 		defer cancel()
-		if err := h.SmartCountRefresher.RefreshOne(ctx, collectionID); err != nil {
-			slog.Warn("smart-count refresh failed", "collection_id", collectionID, "error", err)
+		if h.SmartCountRefresher != nil {
+			if err := h.SmartCountRefresher.RefreshOne(ctx, collectionID); err != nil {
+				slog.Warn("smart-count refresh failed", "collection_id", collectionID, "error", err)
+			}
+		}
+		if h.service != nil {
+			h.service.MaybeGenerateCollage(ctx, collectionID)
 		}
 	}()
 }

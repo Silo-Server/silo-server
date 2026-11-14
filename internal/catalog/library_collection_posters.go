@@ -2,6 +2,7 @@ package catalog
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"maps"
@@ -20,7 +21,8 @@ import (
 
 // collectionUsesLiveQuery reports whether the collection's members come from
 // its query rather than its stored items, as ResolveLibraryCollectionMembership
-// decides. Such a collection has no collage.
+// decides. Such a collection's collage is chosen from its query's first
+// matches and recorded per viewer access (smartCollageSet).
 func collectionUsesLiveQuery(c *models.LibraryCollection) bool {
 	return IsLiveQueryType(c.CollectionType)
 }
@@ -202,12 +204,13 @@ var CollectionPosterWidths = []int{500, 300}
 // described by access, keyed by collection ID. An uploaded or template poster
 // is the same for every viewer. Otherwise the poster is the collage of the
 // first members the viewer can access. A collage not built yet is left out of
-// this answer and built in the background, so a later read finds it.
-// Collections listed from a query have no collage. Collections with no poster
-// are absent.
+// this answer and built in the background, so a later read finds it. A
+// collection listed from a query serves the collage recorded for the viewer's
+// access without running the query. Collections with no poster are absent.
 func (s *LibraryCollectionService) CollectionPosters(ctx context.Context, collections []*models.LibraryCollection, access AccessFilter) map[string]CollectionPoster {
 	posters := make(map[string]CollectionPoster, len(collections))
 	var collageIDs []string
+	var smart []smartCollageCollection
 	for _, c := range collections {
 		if c == nil {
 			continue
@@ -216,11 +219,19 @@ func (s *LibraryCollectionService) CollectionPosters(ctx context.Context, collec
 			posters[c.ID] = poster
 			continue
 		}
-		if !collectionUsesLiveQuery(c) {
+		if collectionUsesLiveQuery(c) {
+			smart = append(smart, s.smartCollection(c, access))
+		} else {
 			collageIDs = append(collageIDs, c.ID)
 		}
 	}
-	if len(collageIDs) == 0 || s == nil || s.collections == nil || s.CollageGen == nil {
+	if s == nil || s.collections == nil || s.CollageGen == nil {
+		return posters
+	}
+	if len(smart) > 0 {
+		maps.Copy(posters, s.smartCollageSet().serve(ctx, smart, serverSmartCollageAccessKey(access)))
+	}
+	if len(collageIDs) == 0 {
 		return posters
 	}
 
@@ -280,4 +291,95 @@ func (s *LibraryCollectionService) buildCollage(ctx context.Context, ref Collect
 func (s *LibraryCollectionService) collageSet() collageSet {
 	s.collageBuildsOnce.Do(func() { s.collageBuilds = newCollageBuildQueue() })
 	return collageSet{store: s.collections, gen: s.CollageGen, queue: s.collageBuilds}
+}
+
+func (s *LibraryCollectionService) smartCollageSet() smartCollageSet {
+	return smartCollageSet{set: s.collageSet(), records: s.collections, refreshInterval: defaultSmartCollageRefreshInterval}
+}
+
+// smartCollection is smart collection c as the viewer described by access
+// reads it: its collage shows the first members that viewer's list of it
+// shows (PreviewLiveLibraryCollection).
+func (s *LibraryCollectionService) smartCollection(c *models.LibraryCollection, access AccessFilter) smartCollageCollection {
+	return smartCollageCollection{
+		id:            c.ID,
+		definitionKey: serverSmartDefinitionKey(c),
+		sources: func(ctx context.Context) ([]string, error) {
+			m, err := ResolveLibraryCollectionMembership(c, access)
+			if err != nil {
+				return nil, err
+			}
+			items, _, err := previewLiveLibraryCollection(ctx, s.collections.pool, m, access, smartCollageScanLimit, false)
+			if err != nil {
+				return nil, fmt.Errorf("reading smart collection matches: %w", err)
+			}
+			return firstPosters(items), nil
+		},
+	}
+}
+
+// serverSmartCollageAccessKey names the access a viewer reads a server
+// collection's members with. Server collections are shared, so the members
+// never depend on the viewer's account or profile, only on its restrictions.
+func serverSmartCollageAccessKey(access AccessFilter) string {
+	return collageAccessKey(stripCatalogUserScope(access))
+}
+
+// serverSmartDefinitionKey names everything about a smart server collection
+// that decides its members and their order: its rules, its default sort, and
+// the libraries it shows in.
+func serverSmartDefinitionKey(c *models.LibraryCollection) string {
+	encoded, err := json.Marshal(struct {
+		Query      json.RawMessage `json:"query"`
+		Sort       json.RawMessage `json:"sort"`
+		LibraryID  int             `json:"library_id"`
+		LibraryIDs []int           `json:"library_ids"`
+	}{c.QueryDefinition, c.SortConfig, c.LibraryID, sortedClone(c.LibraryIDs)})
+	if err != nil {
+		encoded = fmt.Appendf(nil, "%s|%s|%d|%v", c.QueryDefinition, c.SortConfig, c.LibraryID, sortedClone(c.LibraryIDs))
+	}
+	return shortHash(encoded)
+}
+
+func (r *LibraryCollectionRepository) getSmartCollages(ctx context.Context, collectionIDs []string, accessKey string) (map[string]smartCollage, error) {
+	rows, err := r.pool.Query(ctx, `
+		SELECT sc.collection_id, sc.definition_key, sc.refreshed_at,
+		       COALESCE(v.variant_key, ''), COALESCE(v.poster_path, ''), COALESCE(v.poster_thumbhash, ''),
+		       COALESCE(v.last_used_at, sc.refreshed_at)
+		FROM library_collection_smart_collages sc
+		LEFT JOIN library_collection_poster_variants v
+		  ON v.collection_id = sc.collection_id AND v.variant_key = sc.variant_key
+		WHERE sc.access_key = $1 AND sc.collection_id = ANY($2)
+	`, accessKey, collectionIDs)
+	if err != nil {
+		return nil, fmt.Errorf("loading smart collection collages: %w", err)
+	}
+	defer rows.Close()
+	recorded := make(map[string]smartCollage, len(collectionIDs))
+	for rows.Next() {
+		var c smartCollage
+		if err := rows.Scan(&c.collage.CollectionID, &c.definitionKey, &c.refreshedAt, &c.collage.Key, &c.collage.Path, &c.collage.Thumbhash, &c.collage.LastUsedAt); err != nil {
+			return nil, fmt.Errorf("scanning smart collection collage: %w", err)
+		}
+		recorded[c.collage.CollectionID] = c
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterating smart collection collages: %w", err)
+	}
+	return recorded, nil
+}
+
+func (r *LibraryCollectionRepository) saveSmartCollage(ctx context.Context, collectionID, accessKey, definitionKey, variantKey string) error {
+	if _, err := r.pool.Exec(ctx, `
+		INSERT INTO library_collection_smart_collages (collection_id, access_key, definition_key, variant_key)
+		SELECT $1, $2, $3, NULLIF($4, '')
+		WHERE EXISTS (SELECT 1 FROM library_collections WHERE id = $1)
+		ON CONFLICT (collection_id, access_key) DO UPDATE
+		SET definition_key = EXCLUDED.definition_key,
+		    variant_key = EXCLUDED.variant_key,
+		    refreshed_at = NOW()
+	`, collectionID, accessKey, definitionKey, variantKey); err != nil {
+		return fmt.Errorf("recording smart collection collage: %w", err)
+	}
+	return nil
 }
