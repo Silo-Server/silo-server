@@ -265,9 +265,12 @@ export interface ActionBarProps {
   versions?: FileVersion[];
   playbackVariants?: PlaybackVariant[];
   selectedVersion?: FileVersion | null;
+  /** The file Start Over plays: the first part of selectedVersion's presentation. */
+  restartVersion?: FileVersion | null;
   /** The viewer chose selectedVersion rather than playing the default version. */
   versionPicked?: boolean;
-  onSelectVersion?: (version: FileVersion) => void;
+  onSelectVersion?: (version: FileVersion | null) => void;
+  onSelectEdition?: (key: string) => void;
   onDownload?: () => void;
   onSearchSubtitles?: () => void;
   /** Opens the season picker to request seasons the library is missing. */
@@ -290,6 +293,29 @@ export interface ActionBarProps {
   preferredSubtitleTrackSignature?: PlayerSubtitleTrackSignature | null;
   subtitleMode?: SubtitleMode;
   showForcedSubtitles?: boolean;
+}
+
+/**
+ * Start Over can play another file than the one the pickers describe (part 1
+ * of a later part's presentation). Audio indexes belong to the picked file, so
+ * the server resolves the saved audio preference instead. A manual subtitle
+ * pick still matches by language, source and flags, but loses the picked
+ * file's track index, sidecar path and downloaded subtitle.
+ */
+function withoutFileSpecificPicks<
+  T extends { audioTrackIndex?: number; prePlaySubtitleSelection: PrePlaySubtitleSelection | null },
+>(input: T): T {
+  const selection = input.prePlaySubtitleSelection;
+  return {
+    ...input,
+    audioTrackIndex: undefined,
+    prePlaySubtitleSelection: selection && {
+      ...selection,
+      track_index: undefined,
+      external_subtitle_path: undefined,
+      downloaded_subtitle_id: undefined,
+    },
+  };
 }
 
 export default function ActionBar({
@@ -336,8 +362,10 @@ export default function ActionBar({
   versions,
   playbackVariants,
   selectedVersion,
+  restartVersion,
   versionPicked = false,
   onSelectVersion,
+  onSelectEdition,
   onDownload,
   onSearchSubtitles,
   onRequestSeasons,
@@ -453,18 +481,28 @@ export default function ActionBar({
         return;
       }
 
+      const restart = restartOverride ?? parsed.restart;
+      const file = restart ? (restartVersion ?? selectedVersion) : selectedVersion;
+      const input = buildPrePlayStartInput({
+        contentId: parsed.contentId,
+        fileId: file?.file_id ?? parsed.fileId,
+        libraryId: parsed.libraryId,
+        restart,
+        returnHref: currentHref,
+      });
       playbackController.startPlayback(
-        buildPrePlayStartInput({
-          contentId: parsed.contentId,
-          fileId: selectedVersion?.file_id ?? parsed.fileId,
-          libraryId: parsed.libraryId,
-          restart: restartOverride ?? parsed.restart,
-          returnHref: currentHref,
-        }),
+        file && file.file_id !== selectedVersion?.file_id ? withoutFileSpecificPicks(input) : input,
         "viewer",
       );
     },
-    [buildPrePlayStartInput, currentHref, navigate, playbackController, selectedVersion?.file_id],
+    [
+      buildPrePlayStartInput,
+      currentHref,
+      navigate,
+      playbackController,
+      restartVersion,
+      selectedVersion,
+    ],
   );
   const handleResumePlayback = () => {
     if (!playHref) return;
@@ -926,16 +964,6 @@ export default function ActionBar({
       ),
     ],
     [
-      canCurateMetadata && onShowMediaInfo && (
-        <DetailOverflowMenuItem
-          key="media-info"
-          closeMenu={closeOverflowMenu}
-          onAction={onShowMediaInfo}
-        >
-          <Info className="size-4" />
-          {t("web.detail.mediaInfo.title")}
-        </DetailOverflowMenuItem>
-      ),
       isAdmin && contentId && (
         <DetailOverflowMenuItem
           key="play-history"
@@ -948,6 +976,18 @@ export default function ActionBar({
       ),
     ],
   ];
+  const infoItems = [
+    onShowMediaInfo && (
+      <DetailOverflowMenuItem
+        key="media-info"
+        closeMenu={closeOverflowMenu}
+        onAction={onShowMediaInfo}
+      >
+        <Info className="size-4" />
+        {t("web.detail.mediaInfo.title")}
+      </DetailOverflowMenuItem>
+    ),
+  ];
   const manageItems = manageGroups.flat().filter(Boolean);
   // A single management action sits at the end of the menu instead of behind Manage.
   const hasManagePanel = manageItems.length > 1;
@@ -955,6 +995,7 @@ export default function ActionBar({
     playbackItems,
     libraryItems,
     partyItems,
+    infoItems,
     hasManagePanel
       ? [
           <DetailOverflowMenuItem
@@ -1330,6 +1371,8 @@ export default function ActionBar({
               playbackVariants={playbackVariants}
               selectedVersion={selectedVersion}
               onSelectVersion={onSelectVersion}
+              onSelectEdition={onSelectEdition}
+              versionPicked={versionPicked}
             />
           )}
           {selectedVersion && (selectedVersion.audio_tracks?.length ?? 0) > 0 && (

@@ -225,7 +225,7 @@ func TestProfileImportAndDeleteLockOrderDB(t *testing.T) {
 		t.Fatal(err)
 	}
 	deleted := make(chan error, 1)
-	go func() { deleted <- store.DeleteProfile(ctx, other) }()
+	go func() { _, err := store.DeleteProfile(ctx, other); deleted <- err }()
 	var deleter int
 	for deadline := time.Now().Add(20 * time.Second); deleter == 0; {
 		err := pool.QueryRow(ctx, `

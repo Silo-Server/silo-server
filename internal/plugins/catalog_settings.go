@@ -83,10 +83,6 @@ func (s *RepositoryStore) GetCatalogSettings(ctx context.Context) (CatalogSettin
 	}, nil
 }
 
-func (s *RepositoryStore) SetIncludeApprovedCommunity(ctx context.Context, include bool) (CatalogSettings, error) {
-	return s.SetIncludeApprovedCommunityConditional(ctx, include, nil)
-}
-
 var ErrCatalogSettingsChanged = errors.New("plugin catalog settings changed")
 
 type CatalogSettingsConflict struct{ Actual bool }

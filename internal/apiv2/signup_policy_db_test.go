@@ -2,7 +2,6 @@ package apiv2
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"os"
@@ -10,7 +9,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -71,43 +69,25 @@ func TestSignupCommitPolicyErrorsDB(t *testing.T) {
 	registration := handlers.NewAuthHandler(svc, jwt, nil)
 	deps := parityDeps(false)
 	deps.Sessions = registration
-	router := chi.NewRouter()
-	router.Post("/api/v1/auth/signup", registration.HandleSignup)
-	router.Handle(Prefix+"/*", NewHandler(deps))
-	for _, version := range []string{"v1", "v2"} {
-		t.Run(version, func(t *testing.T) {
-			name, code := "signup-"+version, "invite-"+version
-			if _, err := pool.Exec(ctx, `INSERT INTO invite_codes (code,max_uses,created_by) VALUES ($1,1,$2)`, code, creatorID); err != nil {
-				t.Fatal(err)
-			}
-			body := fmt.Sprintf(`{"username":%q,"email":%q,"password":"synthetic-password","invite_code":%q}`, name, name+"@example.test", code)
-			rec := do(t, router, http.MethodPost, "/api/"+version+"/auth/signup", body, nil)
-			if rec.Code != http.StatusForbidden {
-				t.Errorf("stale preflight signup status = %d, want 403", rec.Code)
-			} else if version == "v1" {
-				var response struct {
-					Error string `json:"error"`
-				}
-				if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil || response.Error != "signup_disabled" {
-					t.Fatalf("signup denial = %s (%v)", rec.Body, err)
-				}
-			} else {
-				requireProblem(t, rec, TypePermissionDenied)
-			}
-			var accounts, profiles, uses int
-			if err := pool.QueryRow(ctx, `SELECT count(*) FROM users WHERE username=$1`, name).Scan(&accounts); err != nil {
-				t.Fatal(err)
-			}
-			if err := pool.QueryRow(ctx, `SELECT count(*) FROM user_profiles`).Scan(&profiles); err != nil {
-				t.Fatal(err)
-			}
-			if err := pool.QueryRow(ctx, `SELECT use_count FROM invite_codes WHERE code=$1`, code).Scan(&uses); err != nil {
-				t.Fatal(err)
-			}
-			t.Logf("status=%d accounts=%d profiles=%d invite uses=%d", rec.Code, accounts, profiles, uses)
-			if accounts != 0 || profiles != 0 || uses != 0 {
-				t.Fatalf("refused signup persisted accounts=%d profiles=%d invite uses=%d", accounts, profiles, uses)
-			}
-		})
+	router := NewHandler(deps)
+	const name, code = "signup-stale", "invite-stale"
+	if _, err := pool.Exec(ctx, `INSERT INTO invite_codes (code,max_uses,created_by) VALUES ($1,1,$2)`, code, creatorID); err != nil {
+		t.Fatal(err)
+	}
+	body := fmt.Sprintf(`{"username":%q,"email":%q,"password":"synthetic-password","invite_code":%q}`, name, name+"@example.test", code)
+	rec := do(t, router, http.MethodPost, Prefix+"/auth/signup", body, nil)
+	requireProblem(t, rec, TypePermissionDenied)
+	var accounts, profiles, uses int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM users WHERE username=$1`, name).Scan(&accounts); err != nil {
+		t.Fatal(err)
+	}
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM user_profiles`).Scan(&profiles); err != nil {
+		t.Fatal(err)
+	}
+	if err := pool.QueryRow(ctx, `SELECT use_count FROM invite_codes WHERE code=$1`, code).Scan(&uses); err != nil {
+		t.Fatal(err)
+	}
+	if accounts != 0 || profiles != 0 || uses != 0 {
+		t.Fatalf("refused signup persisted accounts=%d profiles=%d invite uses=%d", accounts, profiles, uses)
 	}
 }

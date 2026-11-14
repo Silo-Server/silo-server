@@ -5,7 +5,7 @@ import { Label } from "@/components/ui/label";
 import type { PreviewState } from "@/hooks/queries/homeRows/useRowPreview";
 import type { CollectionOption } from "@/hooks/queries/useAllUserCollections";
 import { useT } from "@/i18n";
-import { findMatchingPreset, type RecipeCatalogResponse } from "@/lib/recipes";
+import { findMatchingPreset, presetShortText, type RecipeCatalogResponse } from "@/lib/recipes";
 import { ruleSortSummary } from "@/lib/homeRows/describe";
 import {
   findRecipe,
@@ -203,7 +203,7 @@ export function RowForm({
       liveLabel={liveLabel}
       offText={previewOffText}
       countUpTo={rules ? draft.itemLimit : undefined}
-      rule={preset?.description_short}
+      rule={preset ? presetShortText(preset) : undefined}
     />
   );
   const showsLine = shows ? <ShowsSummary sectionType={draft.sectionType} {...shows} /> : null;

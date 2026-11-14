@@ -2,9 +2,7 @@ package handlers
 
 import (
 	"context"
-	"encoding/json"
-	"net/http"
-	"net/http/httptest"
+	"slices"
 	"testing"
 
 	"github.com/Silo-Server/silo-server/internal/auth"
@@ -43,55 +41,26 @@ func newAuthProviderHandlerForTest(oauthRoutesAvailable bool) *AuthHandler {
 	return handler
 }
 
-func readProviderResponse(t *testing.T, handler *AuthHandler) []authProviderResponse {
-	t.Helper()
-
-	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/auth/providers", nil)
-	handler.HandleProviders(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
-	}
-
-	var providers []authProviderResponse
-	if err := json.NewDecoder(rec.Body).Decode(&providers); err != nil {
-		t.Fatalf("decode response: %v", err)
-	}
-	return providers
-}
-
-func TestAuthProvidersHideOAuthWhenOAuthRoutesUnavailable(t *testing.T) {
-	providers := readProviderResponse(t, newAuthProviderHandlerForTest(false))
-
-	if len(providers) != 1 {
-		t.Fatalf("provider count = %d, want 1: %#v", len(providers), providers)
-	}
-	if providers[0].ID != "local" {
-		t.Fatalf("provider ID = %q, want local", providers[0].ID)
-	}
-}
-
-func TestAuthProvidersIncludeOAuthWhenOAuthRoutesAvailable(t *testing.T) {
-	providers := readProviderResponse(t, newAuthProviderHandlerForTest(true))
-
-	if len(providers) != 2 {
-		t.Fatalf("provider count = %d, want 2: %#v", len(providers), providers)
-	}
-
-	var foundOAuth bool
-	for _, provider := range providers {
-		if provider.ID == "plugin:41:oidc" {
-			foundOAuth = true
-			if provider.Mode != "oauth" {
-				t.Fatalf("OAuth provider mode = %q, want oauth", provider.Mode)
-			}
-			if provider.InstallationID != 41 {
-				t.Fatalf("OAuth provider installation ID = %d, want 41", provider.InstallationID)
+// OAuth providers are offered only while the OAuth routes are served.
+func TestDiscoverProvidersFollowsOAuthRoutes(t *testing.T) {
+	for _, available := range []bool{false, true} {
+		discovery, err := newAuthProviderHandlerForTest(available).DiscoverProviders(context.Background())
+		if err != nil {
+			t.Fatalf("oauth routes %v: %v", available, err)
+		}
+		var ids []string
+		for _, provider := range discovery.Providers {
+			ids = append(ids, provider.ID)
+			if provider.ID == "plugin:41:oidc" && (provider.Mode != "oauth" || provider.InstallationID != 41) {
+				t.Fatalf("OAuth provider = %+v", provider)
 			}
 		}
-	}
-	if !foundOAuth {
-		t.Fatalf("OAuth provider missing from response: %#v", providers)
+		want := []string{"local"}
+		if available {
+			want = append(want, "plugin:41:oidc")
+		}
+		if !slices.Equal(ids, want) {
+			t.Fatalf("oauth routes %v: providers = %v, want %v", available, ids, want)
+		}
 	}
 }

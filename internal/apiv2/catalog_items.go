@@ -327,7 +327,7 @@ func itemExtrasOf(extras []catalogpkg.ItemExtraInfo) []ItemExtraInfo {
 // FileVersion is one playable file of an item.
 type FileVersion struct {
 	FileID                   ID                                `json:"file_id" example:"120"`
-	FileName                 string                            `json:"file_name,omitempty"`
+	FileName                 string                            `json:"file_name,omitempty" doc:"Absent for viewers without file-path visibility, except on audiobooks and ebooks"`
 	FilePath                 string                            `json:"file_path,omitempty" doc:"Absent for viewers without file-path visibility"`
 	Resolution               string                            `json:"resolution" example:"2160p"`
 	CodecVideo               string                            `json:"codec_video" example:"hevc"`
@@ -940,10 +940,7 @@ func (in *CatalogFiltersInput) catalogRequest() (catalogpkg.CatalogRequest, *Pro
 // 422 on the query parameter the message names; the source when it names
 // none, since the source decides what the rest must carry.
 func parseCatalogRequest(values url.Values) (catalogpkg.CatalogRequest, *Problem) {
-	req, err := catalogpkg.ParseCatalogRequestWithOptions(values, catalogpkg.CatalogRequestOptions{
-		SearchMediaScopes: true,
-		ExtendedRules:     true,
-	})
+	req, err := catalogpkg.ParseCatalogRequest(values)
 	if err != nil {
 		location := "query.source"
 		for _, name := range []string{"section_id", "collection_id", "person_id", "library_id", "scope", "groups"} {

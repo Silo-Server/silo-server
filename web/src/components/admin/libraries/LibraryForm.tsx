@@ -31,7 +31,7 @@ function FormSection({ title, children }: { title: string; children: ReactNode }
 /**
  * Inline (non-dialog) library form used by the setup wizard. The admin
  * Libraries page uses LibraryEditorDialog, which renders the same sections
- * behind a left-hand navigation rail.
+ * behind section tabs (a side rail from sm up, a top strip on a phone).
  */
 export function LibraryForm({
   library,

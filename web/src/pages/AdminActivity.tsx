@@ -31,6 +31,7 @@ import {
   formatSourceContainerSummary,
   formatToneMapSummary,
   formatTranscodeModeSummary,
+  getPlaybackSessionSubtitle,
   getSessionClientLabel,
   getSessionClientLabelFull,
   getSessionRouteNodes,
@@ -669,7 +670,7 @@ function StreamRow({
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [ffmpegOpen, setFFmpegOpen] = useState(false);
   const title = getDisplayTitle(session, t);
-  const subtitle = getDisplaySubtitle(session, t);
+  const subtitle = getPlaybackSessionSubtitle(session);
   const username =
     session.username || t("web.admin.activity.userFallback", { id: session.user_id });
   const elapsed = getElapsed(session.started_at);
@@ -1492,16 +1493,6 @@ function getDisplayTitle(
     return session.episode_name || `S${session.season_number}E${session.episode_number}`;
   }
   return session.media_title || t("web.common.activity.title.file", { id: session.media_file_id });
-}
-
-function getDisplaySubtitle(session: AdminSession, t: Translate): string | null {
-  if (session.series_name && session.season_number != null && session.episode_number != null) {
-    const ep = `S${session.season_number}E${session.episode_number}`;
-    return session.series_name ? `${ep} · ${session.series_name}` : ep;
-  }
-  if (session.media_type === "movie") return t("web.common.activity.subtitle.movie");
-  if (session.media_type === "series") return t("web.common.activity.subtitle.series");
-  return null;
 }
 
 function getElapsed(dateStr: string): string {

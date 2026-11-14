@@ -117,7 +117,7 @@ func (h *SectionHandler) CheckRestoredSection(sectionType, scope string, library
 	if msg, ok := validateSectionScope(scope, libraryID); !ok {
 		return errors.New(msg)
 	}
-	if msg, ok := validateSectionConfig(sections.SectionType(sectionType), config, false); !ok {
+	if msg, ok := validateSectionConfig(sections.SectionType(sectionType), config); !ok {
 		return errors.New(msg)
 	}
 	if msg, ok := validateRecipeConfig(sections.SectionType(sectionType), config); !ok {

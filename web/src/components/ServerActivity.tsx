@@ -28,6 +28,7 @@ import {
 } from "@/pages/adminActivityPresentation";
 import { cn } from "@/lib/utils";
 import { clampTaskProgress, formatTaskProgress } from "@/lib/taskProgress";
+import { taskText } from "@/lib/taskText";
 import {
   activePreparationCount,
   formatPreparationKind,
@@ -39,7 +40,7 @@ import {
   preparationWorker,
 } from "@/pages/adminDownloadPreparationPresentation";
 import { formatLocale } from "@/lib/appLocale";
-import { useT, type MessageKey, type Translate } from "@/i18n";
+import { useAdminMessages, useServerText, useT, type MessageKey, type Translate } from "@/i18n";
 
 const CONNECTION_PROBLEM_INDICATOR_DELAY_MS = 4_000;
 const MAX_ACTIVITY_SCAN_ROWS = 25;
@@ -146,7 +147,12 @@ function useDelayedConnectionProblem(connectionState: RealtimeConnectionState) {
   return isNonLive && connectionProblemState;
 }
 
-export default function ServerActivity({ hideWhenEmpty = false, className }: ServerActivityProps) {
+export default function ServerActivity(props: ServerActivityProps) {
+  // The sidebar mounts this for an admin outside the admin layout, so its text may not have loaded.
+  return useAdminMessages({ optional: true }) ? <ServerActivityContent {...props} /> : null;
+}
+
+function ServerActivityContent({ hideWhenEmpty = false, className }: ServerActivityProps) {
   const t = useT();
   const [open, setOpen] = useState(false);
   const location = useLocation();
@@ -419,6 +425,7 @@ function StreamCountRow({ method, count }: { method: string; count: number }) {
 
 function TaskRow({ task, onNavigate }: { task: TaskInfo; onNavigate: () => void }) {
   const t = useT();
+  const serverText = useServerText();
   const hasDeterminateProgress = task.progress > 0;
 
   return (
@@ -430,7 +437,7 @@ function TaskRow({ task, onNavigate }: { task: TaskInfo; onNavigate: () => void 
           onClick={onNavigate}
           className="hover:text-primary truncate text-[12px] font-medium transition-colors"
         >
-          {task.name}
+          {taskText(serverText, task, "name")}
         </Link>
         {hasDeterminateProgress ? (
           <span className="text-muted-foreground ms-2 shrink-0 text-[10px] font-semibold tabular-nums">

@@ -281,7 +281,8 @@ export function useAdminHomeRows(): AdminHomeRows {
           await refresh();
         } catch (error) {
           if (isStale(error)) setConflict({ scope: "row", rowId: id });
-          else toast.error(adminSectionMutationMessage(error, "Could not save this row"));
+          else
+            toast.error(adminSectionMutationMessage(error, t("web.admin.homeRows.row.saveFailed")));
           // Without a server answer the write may still have landed, so read
           // the page again before showing the row's value.
           if (!(error instanceof V2ProblemError)) await refresh();
@@ -290,7 +291,7 @@ export function useAdminHomeRows(): AdminHomeRows {
         }
       });
     },
-    [currentList, enqueue, refresh],
+    [currentList, enqueue, refresh, t],
   );
 
   const setShownMany = useCallback(
@@ -327,7 +328,10 @@ export function useAdminHomeRows(): AdminHomeRows {
                     title,
                     titleKey,
                     reason: "failed",
-                    message: adminSectionMutationMessage(error, "Could not save this row"),
+                    message: adminSectionMutationMessage(
+                      error,
+                      t("web.admin.homeRows.row.saveFailed"),
+                    ),
                   },
             );
           }
@@ -339,7 +343,7 @@ export function useAdminHomeRows(): AdminHomeRows {
         await refresh();
         return { changedIds, failures };
       }),
-    [currentList, enqueue, refresh],
+    [currentList, enqueue, refresh, t],
   );
 
   const reorder = useCallback(
@@ -360,7 +364,7 @@ export function useAdminHomeRows(): AdminHomeRows {
           if (isStale(error)) {
             setConflict({ scope: "page" });
           } else {
-            toast.error(adminSectionMutationMessage(error, "Could not move this row"));
+            toast.error(adminSectionMutationMessage(error, t("web.admin.homeRows.row.moveFailed")));
             // Without a server answer the order may still have changed, so read
             // the page again before dropping the order on screen.
             if (!(error instanceof V2ProblemError)) await refresh();
@@ -369,7 +373,7 @@ export function useAdminHomeRows(): AdminHomeRows {
         }
       });
     },
-    [enqueue, libraryId, list.data?.etag, refresh, scope],
+    [enqueue, libraryId, list.data?.etag, refresh, scope, t],
   );
 
   const create = useCallback(
@@ -416,13 +420,13 @@ export function useAdminHomeRows(): AdminHomeRows {
         }
         const source = toHomeRow(section);
         if (!canCopyToLibraries(source))
-          throw new Error("This row can't be added to other libraries.");
+          throw new Error(t("web.admin.homeRows.row.cantCopyToLibraries"));
         await bulkCreateAdminSections(
           buildBulkCopyPayload({ ...source, enabled: section.enabled }, targets),
         );
         await refresh();
       }),
-    [currentList, enqueue, libraryId, refresh],
+    [currentList, enqueue, libraryId, refresh, t],
   );
 
   const openEdit = useCallback(async (id: string) => {

@@ -27,6 +27,35 @@ func TestAdminCollectionServiceRejectsArtworkInDefinition(t *testing.T) {
 	}
 }
 
+func TestAdminCollectionServiceRejectsUnknownCollectionType(t *testing.T) {
+	h := &LibraryCollectionHandler{}
+	// Trakt collections were retired, so trakt is an unknown type too.
+	for _, v := range []string{"bogus", "trakt"} {
+		_, err := h.CreateAdminCollection(t.Context(), AdminCollectionCreate{LibraryID: 1, Title: "repro", CollectionType: v})
+		if e, ok := errors.AsType[*APIError](err); !ok || e.Status != 400 || e.Field != "collection_type" {
+			t.Fatalf("create %q: expected collection_type field error, got %v", v, err)
+		}
+	}
+	var err error
+	for _, v := range []string{"bogus", "trakt", ""} {
+		_, err = h.UpdateAdminCollection(t.Context(), "collection", AdminCollectionUpdate{CollectionType: new(v)})
+		if e, ok := errors.AsType[*APIError](err); !ok || e.Status != 400 || e.Field != "collection_type" {
+			t.Fatalf("update %q: expected collection_type field error, got %v", v, err)
+		}
+	}
+	for _, v := range []string{"manual", "smart", "mdblist", "tmdb"} {
+		if err := validateCollectionType(v); err != nil {
+			t.Fatalf("%q rejected: %v", v, err)
+		}
+	}
+	// An omitted type defaults to manual on create, so it must get past the
+	// type check; the missing title is what stops this request.
+	_, err = h.CreateAdminCollection(t.Context(), AdminCollectionCreate{LibraryID: 1})
+	if e, ok := errors.AsType[*APIError](err); !ok || e.Field == "collection_type" || e.Code != "bad_request" {
+		t.Fatalf("create without a type: expected the title error, got %v", err)
+	}
+}
+
 func TestAdminCollectionServiceRejectsUnknownVisibility(t *testing.T) {
 	h := &LibraryCollectionHandler{}
 	_, err := h.CreateAdminCollection(t.Context(), AdminCollectionCreate{LibraryID: 1, Title: "repro", Visibility: "public"})
@@ -139,7 +168,7 @@ func TestDeleteAdminCollectionArtworkClearsReferenceWhenVariantDeleteFailsDB(t *
 
 // A /api/v2 smart collection needs a complete rule: one with none would match
 // every title. The refusal names query_definition.groups so the editor can
-// point at the rules. Updates that leave the rules alone, and /api/v1, keep
+// point at the rules. Updates that leave the rules alone keep
 // working for collections saved before the check.
 func TestSmartCollectionNeedsACompleteRule(t *testing.T) {
 	const blank = `{"groups":[{"match":"all","rules":[{"field":"genre","op":"is","value":""}]}]}`
@@ -172,7 +201,6 @@ func TestSmartCollectionNeedsACompleteRule(t *testing.T) {
 		"switched to smart, no stored rule": {existingType: manual, existingRules: `{}`, req: AdminCollectionUpdate{CollectionType: &smart}, refused: true},
 		"switched to smart, stored rule":    {existingType: manual, existingRules: comedy, req: AdminCollectionUpdate{CollectionType: &smart}},
 		"manual sending empty rules":        {existingType: manual, req: AdminCollectionUpdate{QueryDefinition: json.RawMessage(`{"groups":[]}`)}},
-		"v1, rules removed":                 {existingType: smart, req: AdminCollectionUpdate{QueryDefinition: json.RawMessage(`{"groups":[]}`), V1Rules: true}},
 	} {
 		t.Run(name, func(t *testing.T) {
 			err := adminSmartRuleCheck(tc.existingType, json.RawMessage(tc.existingRules), tc.req, tc.req.QueryDefinition)

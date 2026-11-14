@@ -1,6 +1,5 @@
 // Package apiv2 embeds the committed API v2 contract artifacts so every
-// consumer reads the exact bytes that were checked in: the
-// internal/contractledger gate, internal/routeinventory, internal/scenariocatalog,
+// consumer reads the exact bytes that were checked in: internal/routeinventory
 // and the server binary, which serves and digests the OpenAPI artifact through
 // internal/apiv2.
 //
@@ -10,13 +9,12 @@ package apiv2
 
 import "embed"
 
-// FS holds route-inventory.json, migration.json, migration.schema.json,
-// offline-routes.txt, the breaking-change approvals with their schema, and
+// FS holds route-inventory.json, the breaking-change approvals with their schema, and
 // the contract fixtures (fixtures/*.json) with their index schema.
 // The post-lock marker LOCKED is deliberately not embedded: it is read from
 // the working tree by the diff command, never by the binary.
 //
-//go:embed route-inventory.json migration.json migration.schema.json offline-routes.txt breaking-approvals.json breaking-approvals.schema.json fixtures.schema.json fixtures/*.json
+//go:embed route-inventory.json breaking-approvals.json breaking-approvals.schema.json fixtures.schema.json fixtures/*.json
 var FS embed.FS
 
 // FixturesDir is the directory inside FS holding the contract fixtures and
@@ -28,11 +26,6 @@ const (
 	FixturesDir        = "fixtures"
 	FixturesSchemaPath = "fixtures.schema.json"
 )
-
-// OfflineRoutesPath is the file inside FS that pins which API listener rows
-// the scenario executor's offline router registers. TestOfflineRouteSet in
-// internal/api generates it; internal/scenariocatalog decodes it.
-const OfflineRoutesPath = "offline-routes.txt"
 
 // OpenAPI is the committed contracts/api/v2/openapi.json, byte for byte. The
 // server serves these bytes at /api/v2/openapi.json and reports their SHA-256

@@ -7,7 +7,9 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 )
 
@@ -31,29 +33,35 @@ func newFakeFFmpegSession(t *testing.T) *TranscodeSession {
 	}
 }
 
+// A copy-mode restart at a missing segment resumes on the manifest's own
+// timeline: seek to the segment's listed start, keep the stream origin, and
+// number from the playlist's first segment. The MPEG-TS row covers the
+// playlist with no init map and .ts names.
 func TestRestartSegmentLocked_UsesResolvedCopyAnchorAndManifestNumber(t *testing.T) {
-	dir := t.TempDir()
-	manifest := strings.Join([]string{
-		"#EXTM3U",
-		"#EXT-X-VERSION:7",
-		"#EXT-X-TARGETDURATION:3",
-		"#EXT-X-MEDIA-SEQUENCE:9",
-		"#EXT-X-MAP:URI=\"init.mp4\"",
-		"#EXTINF:2.669000,",
-		"seg_00009.m4s",
-		"#EXTINF:1.669000,",
-		"seg_00010.m4s",
-		"#EXTINF:1.668000,",
-		"seg_00011.m4s",
-		"",
-	}, "\n")
-	if err := os.WriteFile(filepath.Join(dir, "stream.m3u8"), []byte(manifest), 0o644); err != nil {
-		t.Fatalf("write manifest: %v", err)
-	}
+	for _, tc := range []struct {
+		name   string
+		mpegts bool
+		header []string
+		ext    string
+	}{
+		{name: "fMP4", header: []string{"#EXT-X-VERSION:7", "#EXT-X-TARGETDURATION:3", "#EXT-X-MEDIA-SEQUENCE:9", "#EXT-X-MAP:URI=\"init.mp4\""}, ext: ".m4s"},
+		{name: "MPEG-TS", mpegts: true, header: []string{"#EXT-X-VERSION:3", "#EXT-X-TARGETDURATION:3", "#EXT-X-MEDIA-SEQUENCE:9"}, ext: ".ts"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			lines := append([]string{"#EXTM3U"}, tc.header...)
+			lines = append(lines,
+				"#EXTINF:2.669000,", "seg_00009"+tc.ext,
+				"#EXTINF:1.669000,", "seg_00010"+tc.ext,
+				"#EXTINF:1.668000,", "seg_00011"+tc.ext,
+				"")
+			if err := os.WriteFile(filepath.Join(dir, "stream.m3u8"), []byte(strings.Join(lines, "\n")), 0o644); err != nil {
+				t.Fatalf("write manifest: %v", err)
+			}
 
-	argsPath := filepath.Join(dir, "restart-args")
-	ffmpegPath := filepath.Join(dir, "ffmpeg")
-	ffmpeg := `#!/bin/sh
+			argsPath := filepath.Join(dir, "restart-args")
+			ffmpegPath := filepath.Join(dir, "ffmpeg")
+			ffmpeg := `#!/bin/sh
 for arg in "$@"; do
   if [ "$arg" = "framecrc" ]; then
     printf '%s\n' '#tb 0: 1/1000'
@@ -64,61 +72,64 @@ done
 printf '%s\n' "$@" > "` + argsPath + `"
 exec sleep 30
 `
-	if err := os.WriteFile(ffmpegPath, []byte(ffmpeg), 0o755); err != nil {
-		t.Fatalf("write fake ffmpeg: %v", err)
-	}
-
-	s := &TranscodeSession{
-		outputDir: dir,
-		opts: TranscodeOpts{
-			SessionID:              "sess-copy",
-			InputPath:              "/media/movie.mkv",
-			OutputDir:              dir,
-			FFmpegPath:             ffmpegPath,
-			SeekSeconds:            18.261,
-			StreamOriginSeconds:    18,
-			CopySeekAnchorResolved: true,
-			TargetCodecVideo:       "copy",
-			TargetCodecAudio:       "copy",
-			SegmentDuration:        2,
-			StartSegmentNumber:     9,
-		},
-	}
-	m := NewTranscodeManager()
-	m.RegisterTranscodeSession("sess-copy", s)
-	t.Cleanup(func() { _ = s.Close() })
-
-	target, ok, err := m.RestartSegmentLocked(context.Background(), "sess-copy", s, 10)
-	if err != nil {
-		t.Fatalf("RestartSegmentLocked: %v", err)
-	}
-	if !ok {
-		t.Fatal("RestartSegmentLocked returned ok=false")
-	}
-	if math.Abs(target.SeekSeconds-20.669) > 0.0001 || math.Abs(target.StreamOriginSeconds-18) > 0.0001 ||
-		target.StartSegmentNumber != 9 || !target.CopySeekAnchorResolved {
-		t.Fatalf("restart target = %+v, want seek=20.669 origin=18 start=9 resolved=true", target)
-	}
-
-	opts := s.Opts()
-	if math.Abs(opts.SeekSeconds-20.669) > 0.0001 || math.Abs(opts.StreamOriginSeconds-18) > 0.0001 ||
-		opts.StartSegmentNumber != 9 || !opts.CopySeekAnchorResolved {
-		t.Fatalf("live restart opts = %+v, want resolved copy timeline", opts)
-	}
-	deadline := time.Now().Add(2 * time.Second)
-	var args []byte
-	for {
-		args, err = os.ReadFile(argsPath)
-		if err == nil && strings.Contains(string(args), "-ss\n20.669\n") && strings.Contains(string(args), "-start_number\n9\n") {
-			break
-		}
-		if time.Now().After(deadline) {
-			if err != nil {
-				t.Fatalf("read restart args: %v", err)
+			if err := os.WriteFile(ffmpegPath, []byte(ffmpeg), 0o755); err != nil {
+				t.Fatalf("write fake ffmpeg: %v", err)
 			}
-			t.Fatalf("restart args do not preserve resolved timeline:\n%s", args)
-		}
-		time.Sleep(time.Millisecond)
+
+			s := &TranscodeSession{
+				outputDir: dir,
+				opts: TranscodeOpts{
+					SessionID:              "sess-copy",
+					InputPath:              "/media/movie.mkv",
+					OutputDir:              dir,
+					FFmpegPath:             ffmpegPath,
+					SeekSeconds:            18.261,
+					StreamOriginSeconds:    18,
+					CopySeekAnchorResolved: true,
+					TargetCodecVideo:       "copy",
+					TargetCodecAudio:       "copy",
+					CopyVideoMPEGTS:        tc.mpegts,
+					SegmentDuration:        2,
+					StartSegmentNumber:     9,
+				},
+			}
+			m := NewTranscodeManager()
+			m.RegisterTranscodeSession("sess-copy", s)
+			t.Cleanup(func() { _ = s.Close() })
+
+			target, ok, err := m.RestartSegmentLocked(context.Background(), "sess-copy", s, 10)
+			if err != nil {
+				t.Fatalf("RestartSegmentLocked: %v", err)
+			}
+			if !ok {
+				t.Fatal("RestartSegmentLocked returned ok=false")
+			}
+			if math.Abs(target.SeekSeconds-20.669) > 0.0001 || math.Abs(target.StreamOriginSeconds-18) > 0.0001 ||
+				target.StartSegmentNumber != 9 || !target.CopySeekAnchorResolved {
+				t.Fatalf("restart target = %+v, want seek=20.669 origin=18 start=9 resolved=true", target)
+			}
+
+			opts := s.Opts()
+			if math.Abs(opts.SeekSeconds-20.669) > 0.0001 || math.Abs(opts.StreamOriginSeconds-18) > 0.0001 ||
+				opts.StartSegmentNumber != 9 || !opts.CopySeekAnchorResolved || opts.CopyVideoMPEGTS != tc.mpegts {
+				t.Fatalf("live restart opts = %+v, want resolved copy timeline", opts)
+			}
+			deadline := time.Now().Add(2 * time.Second)
+			var args []byte
+			for {
+				args, err = os.ReadFile(argsPath)
+				if err == nil && strings.Contains(string(args), "-ss\n20.669\n") && strings.Contains(string(args), "-start_number\n9\n") {
+					break
+				}
+				if time.Now().After(deadline) {
+					if err != nil {
+						t.Fatalf("read restart args: %v", err)
+					}
+					t.Fatalf("restart args do not preserve resolved timeline:\n%s", args)
+				}
+				time.Sleep(time.Millisecond) //nolint:forbidigo // Polls observable state: the fake FFmpeg writes its arguments from its own process.
+			}
+		})
 	}
 }
 
@@ -254,5 +265,86 @@ func TestRestartSessionLocked_SupersededWhenReplaced(t *testing.T) {
 	}
 	if live.IsRunning() {
 		t.Fatal("the live session must be untouched by a stale restart")
+	}
+}
+
+// The API server tears a crashed local transcode down so the client can
+// reconstruct it. A reconstruct starts on GPU decode again and dies at the same
+// frame, so the exit monitor restarts this failure on CPU decode itself, and
+// tears the session down as before when that restart cannot start.
+func TestLocalExitMonitorRestartsFilterReinitFailureOnCPUDecode(t *testing.T) {
+	for _, tc := range []struct {
+		name           string
+		ffmpegMissing  bool
+		wantTornDown   bool
+		wantRegistered bool
+	}{
+		{name: "restart starts", wantRegistered: true},
+		{name: "restart cannot start", ffmpegMissing: true, wantTornDown: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			resetDeviceLoad(t)
+			fakeDeviceStat(t, qsvPairDevA)
+			synctest.Test(t, func(t *testing.T) {
+				const sessionID = "reinit-local"
+				dir := t.TempDir()
+				argsPath := filepath.Join(dir, "restart-args")
+				ffmpegPath := filepath.Join(dir, "ffmpeg")
+				if !tc.ffmpegMissing {
+					// The replacement exits at once: a process left running
+					// would hold the bubble's clock.
+					script := "#!/bin/sh\nprintf '%s\\n' \"$@\" > \"" + argsPath + "\"\n"
+					if err := os.WriteFile(ffmpegPath, []byte(script), 0o755); err != nil {
+						t.Fatal(err)
+					}
+				}
+				exited := make(chan struct{})
+				close(exited)
+				stderr := newBoundedTailBuffer(0)
+				_, _ = stderr.Write([]byte("[vf#0:0 @ 0x5ad071e0c0c0] Error reinitializing filters!\n"))
+				s := &TranscodeSession{
+					outputDir: dir, done: exited, waitErr: errors.New("exit status 187"), stderr: stderr,
+					lastRequestedSegment: 312,
+					opts: TranscodeOpts{
+						InputPath: "/nonexistent/input.mkv", OutputDir: dir, SessionID: sessionID,
+						TargetCodecVideo: "h264", TargetCodecAudio: "aac", SegmentDuration: 2, StartSegmentNumber: 300,
+						FFmpegPath: ffmpegPath, HWAccel: transcodeHWQSV, HWDevice: qsvPairDevA,
+					},
+				}
+				m := NewTranscodeManager()
+				m.RegisterTranscodeSession(sessionID, s)
+				var tornDown atomic.Bool
+				m.OnFFmpegCrash = func(_ context.Context, id string, dead *TranscodeSession) {
+					tornDown.Store(true)
+					m.CloseTranscodeSessionIf(id, dead, "")
+				}
+
+				m.MonitorLocalTranscodeExit(sessionID, s)
+				time.Sleep(3 * time.Second) //nolint:forbidigo // synctest advances virtual time past the monitor's two-second delay
+				synctest.Wait()
+
+				if got := tornDown.Load(); got != tc.wantTornDown {
+					t.Fatalf("session torn down = %v, want %v", got, tc.wantTornDown)
+				}
+				if got := m.GetTranscodeSession(sessionID) == s; got != tc.wantRegistered {
+					t.Fatalf("session still registered = %v, want %v", got, tc.wantRegistered)
+				}
+				if tc.wantTornDown {
+					return
+				}
+				args, err := os.ReadFile(argsPath)
+				if err != nil {
+					t.Fatalf("the exit monitor did not restart the session: %v", err)
+				}
+				restart := "\n" + string(args)
+				if strings.Contains(restart, "\n-hwaccel\n") {
+					t.Fatalf("the restart repeated the GPU decode that had just failed:\n%s", restart)
+				}
+				// It resumes at the last segment the client downloaded.
+				if !strings.Contains(restart, "\n-start_number\n312\n") {
+					t.Fatalf("the restart did not resume at the client's position:\n%s", restart)
+				}
+			})
+		})
 	}
 }

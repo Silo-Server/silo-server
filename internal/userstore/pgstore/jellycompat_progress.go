@@ -2,6 +2,7 @@ package pgstore
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/userstore"
@@ -41,6 +42,21 @@ func (s *PostgresUserStore) ListJellycompatProgressDates(ctx context.Context, pr
 		dates[id] = date.UTC().Format(time.RFC3339Nano)
 	}
 	return dates, rows.Err()
+}
+
+// ListJellycompatPlayedByDate implements userstore.JellycompatPlayedByDateLister
+// with the same type and library pre-filter as ListProgressFiltered.
+func (s *PostgresUserStore) ListJellycompatPlayedByDate(ctx context.Context, profileID string, types []string, libraryID *int, ascending bool, limit, offset int) ([]userstore.WatchProgress, error) {
+	direction := "DESC"
+	if ascending {
+		direction = "ASC"
+	}
+	filter, args := buildProgressCatalogFilter(types, libraryID, []any{s.userID, profileID})
+	args = append(args, limit, offset)
+	query := progressListSelect + progressStatusPredicate("completed") + filter + fmt.Sprintf(`
+		ORDER BY event_at %[1]s, media_item_id %[1]s
+		LIMIT $%[2]d OFFSET $%[3]d`, direction, len(args)-1, len(args))
+	return s.queryProgressRows(ctx, query, args...)
 }
 
 func (s *PostgresUserStore) ApplyJellycompatProgress(ctx context.Context, profileID string, edit userstore.JellycompatProgressEdit) error {

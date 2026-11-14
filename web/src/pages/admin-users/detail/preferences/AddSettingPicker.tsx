@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { useT } from "@/i18n";
+import { TOUCH_TARGETS } from "@/lib/touchTargets";
 import { cn } from "@/lib/utils";
 
 import { replacedShort, type AddableCategory } from "./levels";
@@ -93,7 +94,12 @@ export function AddSettingPicker({
           {label}
         </Button>
       </PopoverTrigger>
-      <PopoverContent className="flex w-[min(24rem,calc(100vw-2rem))] flex-col overflow-hidden">
+      <PopoverContent
+        className={cn(
+          "flex w-[min(24rem,calc(100vw-2rem))] flex-col overflow-hidden",
+          TOUCH_TARGETS,
+        )}
+      >
         <div className="border-border/70 border-b p-2.5">
           <Input
             type="search"
@@ -135,7 +141,7 @@ export function AddSettingPicker({
                       title={setting.description}
                       onClick={() => toggle(setting.key)}
                       className={cn(
-                        "flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-start text-sm transition-colors",
+                        "flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-start text-sm transition-colors max-lg:min-h-11",
                         "hover:bg-accent/60 focus-visible:bg-accent/60 outline-none disabled:pointer-events-none disabled:opacity-50",
                         selected && "bg-accent",
                       )}

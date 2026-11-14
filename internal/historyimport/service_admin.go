@@ -17,19 +17,6 @@ func (s *Service) AuthenticatePlex(ctx context.Context, username, password strin
 	return s.plex.Authenticate(ctx, username, password)
 }
 
-// SetSourceAdminToken stores an admin token for the given source.
-func (s *Service) SetSourceAdminToken(ctx context.Context, sourceID int, token string) error {
-	if token == "" {
-		return fmt.Errorf("token must not be empty")
-	}
-	return s.repo.SetSourceAdminToken(ctx, sourceID, token)
-}
-
-// ClearSourceAdminToken removes the stored admin token from the given source.
-func (s *Service) ClearSourceAdminToken(ctx context.Context, sourceID int) error {
-	return s.repo.ClearSourceAdminToken(ctx, sourceID)
-}
-
 // DiscoverExternalUsers queries the external server for its user list using the
 // source's stored admin token.
 func (s *Service) DiscoverExternalUsers(ctx context.Context, sourceID int) ([]ExternalUser, error) {
@@ -63,16 +50,6 @@ func (s *Service) CreateMapping(ctx context.Context, input CreateMappingInput) (
 // ListMappings returns all mappings for a source, enriched with Silo user/profile names.
 func (s *Service) ListMappings(ctx context.Context, sourceID int) ([]UserMapping, error) {
 	return s.repo.ListMappingsForSource(ctx, sourceID)
-}
-
-// UpdateMapping changes the Silo target of an existing mapping.
-func (s *Service) UpdateMapping(ctx context.Context, id int, input UpdateMappingInput) (*UserMapping, error) {
-	return s.repo.UpdateMapping(ctx, id, input)
-}
-
-// DeleteMapping removes a mapping.
-func (s *Service) DeleteMapping(ctx context.Context, id int) error {
-	return s.repo.DeleteMapping(ctx, id)
 }
 
 // GetMapping returns a single mapping by ID.
@@ -136,18 +113,6 @@ func (s *Service) BulkCreateAdminRuns(ctx context.Context, sourceID int, opts Ad
 		result.Outcomes = append(result.Outcomes, outcome)
 	}
 	return result, nil
-}
-
-// ListAdminRuns returns recent runs across all users. If sourceID is non-nil, only
-// runs linked to that source (via mapping) are returned.
-func (s *Service) ListAdminRuns(ctx context.Context, sourceID *int, limit int) ([]Run, error) {
-	if limit <= 0 {
-		limit = 25
-	}
-	if limit > 200 {
-		limit = 200
-	}
-	return s.repo.ListAllRuns(ctx, sourceID, limit)
 }
 
 func (s *Service) ListAdminActiveRuns(ctx context.Context, sourceID *int) ([]Run, error) {
