@@ -142,7 +142,9 @@ func (h *PlaybackHandler) HandleSessions(w http.ResponseWriter, r *http.Request)
 		if h.content != nil {
 			detail, err := h.content.GetItemDetail(r.Context(), session, play.ItemID, nil)
 			if err == nil && detail != nil {
-				item := newMapper(h.codec, h.cfg).itemFromDetail(*detail, false, nil)
+				m := newMapper(h.codec, h.cfg)
+				m.ratings = h.ratings
+				item := m.itemFromDetail(*detail, false, nil)
 				dto.NowPlayingItem = &item
 			}
 		}
