@@ -135,6 +135,91 @@ func normaliseTitle(s string) string {
 	return foldNumberWords(strings.Join(strings.Fields(s), " "))
 }
 
+// titleAloneIdentifies reports whether want and candidate name the same work
+// strongly enough to admit a match on the title alone, for an item with no
+// author to check afterwards (#3161). Word overlap is not enough there: Dice
+// scores "Raw" against "Raw Stream" at 0.67, and the reverse pair the same.
+//
+// It accepts when the two titles have the same content words, in any order
+// ("Pride & Prejudice", "Hobbit, The"), or when one title's words all appear
+// in the other and that shorter title is at least minContainmentLen long, the
+// floor TitleScore's containment rule already uses. That keeps a folder title
+// with an author or series prefix ("Andy Weir - Project Hail Mary") and a
+// provider title with a series suffix, and rejects a short title that is only
+// a part of a longer one ("Dune" and "Dune Messiah"). Containment counts
+// whole words only, so "The Green Mile" doesn't cover "The Green Milestone";
+// unspaced scripts normalise to one token, so they fall back to plain
+// containment. A repeated word counts each time: "New York, New York" is not
+// "New York".
+func titleAloneIdentifies(want, candidate string) bool {
+	w, c := normaliseTitle(want), normaliseTitle(candidate)
+	if w == "" || c == "" {
+		return false
+	}
+	if w == c {
+		return true
+	}
+	shorter := min(len(w), len(c))
+	if shorter >= minContainmentLen && (containsTitle(w, c) || containsTitle(c, w)) {
+		return true
+	}
+	ws, cs := identityWords(w), identityWords(c)
+	switch {
+	case wordSubset(ws, cs) && wordSubset(cs, ws):
+		return true
+	case wordSubset(ws, cs):
+		return len(w) >= minContainmentLen
+	case wordSubset(cs, ws):
+		return len(c) >= minContainmentLen
+	}
+	return false
+}
+
+// containsTitle reports whether normalised title outer holds inner. For
+// spaced titles it matches whole words only; a title with no space, as an
+// unspaced script normalises to, is matched as plain text.
+func containsTitle(outer, inner string) bool {
+	if !strings.Contains(inner, " ") {
+		return strings.Contains(outer, inner)
+	}
+	return strings.Contains(" "+outer+" ", " "+inner+" ")
+}
+
+// identityWords counts a normalised title's words, without stopwords
+// ("The Hobbit" and "Hobbit") or a volume marker word that precedes a number
+// ("Phoenix Brothers Series 2" and "Phoenix Brothers Book 2" name the same
+// volume, and selection has already rejected a volume that disagrees). A title
+// made only of stopwords keeps them all.
+func identityWords(normalised string) map[string]int {
+	fields := strings.Fields(normalised)
+	words := make(map[string]int, len(fields))
+	for i, f := range fields {
+		if _, stop := titleStopwords[f]; stop {
+			continue
+		}
+		if i+1 < len(fields) && volumeMarkerRE.MatchString(f+" "+fields[i+1]) {
+			continue
+		}
+		words[f]++
+	}
+	if len(words) == 0 {
+		for _, f := range fields {
+			words[f]++
+		}
+	}
+	return words
+}
+
+// wordSubset reports whether every word of a appears in b at least as often.
+func wordSubset(a, b map[string]int) bool {
+	for w, n := range a {
+		if b[w] < n {
+			return false
+		}
+	}
+	return true
+}
+
 type volumeIdentity struct {
 	first int
 	last  int

@@ -52,12 +52,17 @@ const COLLAGE_POLL_MS = 3_000;
  * while one with titles shows no poster (`awaitCollage`), the list is read
  * again every few seconds for a short while. `version` names the saved state
  * the editor holds (its ETag): a save moves it and starts a new wait, even
- * after an earlier one gave up.
+ * after an earlier one gave up. With `countMayLag` (a server Smart collection,
+ * whose count is refreshed after a save) a count of 0 doesn't end the wait.
  */
 export function useListedPoster<Raw extends WireCollection>(
   scope: CollectionScope<Raw>,
   view: CollectionView<Raw> | undefined,
-  { awaitCollage, version }: { awaitCollage: boolean; version?: string },
+  {
+    awaitCollage,
+    countMayLag = false,
+    version,
+  }: { awaitCollage: boolean; countMayLag?: boolean; version?: string },
 ): { url?: string; isCollage: boolean } {
   const id = view?.id;
   // When this wait for a collage began, and for which saved version; reset
@@ -70,7 +75,7 @@ export function useListedPoster<Raw extends WireCollection>(
     select: (data) => data.collections.find((entry) => entry.id === id),
     refetchInterval: (query) => {
       const entry = query.state.data?.collections.find((c) => c.id === id);
-      if (!awaitCollage || !entry || entry.poster_url || !entry.item_count) {
+      if (!awaitCollage || !entry || entry.poster_url || (!entry.item_count && !countMayLag)) {
         waiting.current = null;
         return false;
       }

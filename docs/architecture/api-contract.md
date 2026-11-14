@@ -589,10 +589,10 @@ Enums are lowercase strings, never numbers. Request enums are closed and reject 
 with `422`; response enums are additive and clients retain an unknown/raw fallback. Existing
 values are never renamed or repurposed. A nullable enum lists `null` among its values, because
 JSON Schema applies `type` and `enum` separately: the generator adds it, and the spec lint fails a
-nullable enum anywhere in a component schema without it unless `apiv2.NullEnumWithheld` names the
-member. Polymorphic objects use a required string discriminator and named schemas. Request
-variants are closed; response variants are additive and native clients retain an unknown-variant
-representation. Untyped maps are limited to intentional named extension bags.
+nullable enum anywhere in a component schema without it. Polymorphic objects use a required string
+discriminator and named schemas. Request variants are closed; response variants are additive and
+native clients retain an unknown-variant representation. Untyped maps are limited to intentional
+named extension bags.
 
 ### Query and pagination conventions
 
@@ -737,6 +737,23 @@ routes it replaces the account credential: the login session must still be activ
 resolves that profile's current limits and skips only the PIN proof the link stands for, as it
 does for the Apple display token. The link authorizes the start of a request; a transfer that
 began in time may run longer.
+
+The playback delivery routes (`getPlaybackMedia`, `getPlaybackManifest`, `getPlaybackSegment`,
+`getPlaybackSubtitle` and their HEAD forms) accept the plan's signed stream reference `st` the
+same way, for a receiver such as a Google Cast device that is handed only the plan URL. A request
+with an `Authorization` header or a `token` parameter takes the account path unchanged. Without
+either, a valid `st` that names a playback session (not a download, theme song or bandwidth
+probe) and the session in the path authorizes the request as its account, with the account's
+current role, while that session's playback attempt is live, owned by the reference's account and
+profile, and started by a login session that is still active. The attempt records that login
+session when playback starts. `X-Profile-Id` is rewritten to the reference's profile; viewer
+access then resolves that profile's limits and skips only the PIN proof, and the handlers apply
+the session-deny marker and ownership checks as for any request. A reference therefore ends when
+its session stops (even where no session-deny marker store is configured), when the login session
+signs out or is revoked (disabling an account revokes its sessions), or at the 24-hour
+stream-token expiry. An attempt with no login session, started with an API key or before attempts
+recorded one, keeps needing the account credential. Plans that negotiated
+`header_authenticated_media_v1` carry no `st`, so their media still needs the header.
 
 Household management (creating, editing, and deleting profiles, listing household sessions,
 managing another profile's devices or settings, importing history for another profile, and
