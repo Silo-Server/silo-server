@@ -215,7 +215,12 @@ ordinal is the next free one in the plan's inventory or holds the same
 replan that carries its current selection over. The server keeps that
 selection on the same stored subtitle at its new ordinal, or turns subtitles
 off when that stored subtitle was deleted and reports it with the
-`subtitle_track_unavailable` degradation warning.
+`subtitle_track_unavailable` degradation warning. The server reads a replan
+whose subtitle ordinal equals the playing plan's as carrying that selection
+over, so a player picks an announced track only once its plan lists it at
+that ordinal. A pick queued behind a replan in flight names an ordinal in the
+older inventory; the player moves it to the ordinal its stored subtitle holds
+in the newer plan before sending it.
 
 This operation does not change Jellyfin subtitle delivery. Multipart uploads
 and AI job creation and cancellation have their own v2 operations, described

@@ -5754,6 +5754,15 @@ func (h *PlaybackHandler) executeReplanV3(r *http.Request, record *playback.Atte
 		return playback.DecisionResponseV3{}, *record, nil, &transportErrorV3{reason: "source_unavailable", message: "The effective media source is unavailable."}
 	}
 	effectiveFile := currentEffectiveFile
+	if !seekReanchor {
+		// A seek reanchor reuses the frozen recipe, which already names the
+		// stored subtitle; every other replan plans the request's ordinal.
+		// Kept before the snapshot below, so an output change that falls
+		// back to the playing file plans the kept ordinal too.
+		if h.keepPlayingDownloadedSubtitleV3(r.Context(), record, currentEffectiveFile, &start) {
+			subtitleDegraded = true
+		}
+	}
 	currentEffectiveStart := start
 	keptActiveEditionForSubtitle := false
 	// What the viewer asked for, which a fallback version may not carry. Any
@@ -5826,13 +5835,6 @@ func (h *PlaybackHandler) executeReplanV3(r *http.Request, record *playback.Atte
 		}
 	}
 	start.FileID = effectiveFile.ID
-	if !seekReanchor && effectiveFile.ID == currentEffectiveFile.ID {
-		// A seek reanchor reuses the frozen recipe, which already names the
-		// stored subtitle; every other replan plans the request's ordinal.
-		if h.keepPlayingDownloadedSubtitleV3(r.Context(), record, effectiveFile, &start) {
-			subtitleDegraded = true
-		}
-	}
 	if err := preflightPlaybackFile(r.Context(), effectiveFile, h.MissingMarker, h.EventsHub); err != nil {
 		return playback.DecisionResponseV3{}, *record, nil, &transportErrorV3{
 			reason:  "source_unavailable",

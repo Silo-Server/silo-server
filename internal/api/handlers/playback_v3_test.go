@@ -6012,6 +6012,106 @@ func TestReplanPlaybackV2KeepsDownloadedSubtitleWhenEarlierOneIsDeleted(t *testi
 	}
 }
 
+// An output change that probes the requested edition and falls back to the
+// alternate playing must keep the alternate's stored subtitle when a deletion
+// moved its ordinal, as a same-file replan does.
+func TestReplanPlaybackV2OutputChangeFallbackKeepsMovedDownloadedSubtitle(t *testing.T) {
+	source := v3HandlerFixtureFile(t)
+	source.Resolution, source.Bitrate = "2160p", 32_000
+	source.VideoTracks = append([]models.VideoTrack(nil), source.VideoTracks...)
+	source.VideoTracks[0].Width, source.VideoTracks[0].Height = 3840, 2160
+	source.VideoTracks[0].Level, source.VideoTracks[0].Bitrate = 51, 32_000
+
+	alternateValue := *source
+	alternate := &alternateValue
+	alternate.ID, alternate.Container, alternate.Resolution, alternate.Bitrate = 84, "mp4", "1080p", 8_000
+	alternate.VideoTracks = append([]models.VideoTrack(nil), source.VideoTracks...)
+	alternate.VideoTracks[0].Width, alternate.VideoTracks[0].Height = 1920, 1080
+	alternate.VideoTracks[0].Level, alternate.VideoTracks[0].Bitrate = 41, 8_000
+
+	repo := newMockSubtitleRepoForHandler()
+	setRows := func(rows ...subtitles.DownloadedSubtitle) {
+		repo.list = rows
+		repo.subtitles = map[int]*subtitles.DownloadedSubtitle{}
+		for i := range repo.list {
+			repo.subtitles[repo.list[i].ID] = &repo.list[i]
+		}
+	}
+	// The requested edition carries the same Spanish release, so the output
+	// change is free to try it.
+	sourceSpanish := subtitles.DownloadedSubtitle{ID: 81, MediaFileID: source.ID, Language: "es", Format: subtitles.FormatSRT, ReleaseName: "y"}
+	english := subtitles.DownloadedSubtitle{ID: 71, MediaFileID: alternate.ID, Language: "en", Format: subtitles.FormatSRT, ReleaseName: "x"}
+	spanish := subtitles.DownloadedSubtitle{ID: 72, MediaFileID: alternate.ID, Language: "es", Format: subtitles.FormatSRT, ReleaseName: "y"}
+	french := subtitles.DownloadedSubtitle{ID: 73, MediaFileID: alternate.ID, Language: "fr", Format: subtitles.FormatSRT, ReleaseName: "z"}
+	setRows(sourceSpanish, english, spanish)
+
+	files := map[int]*models.MediaFile{source.ID: source, alternate.ID: alternate}
+	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0), mapPlaybackFileResolver{files: files})
+	stubCopySeekAnchorV3(handler)
+	handler.FileVersionFetcher = testPlaybackFileVersionFetcher{byContent: map[string][]*models.MediaFile{source.ContentID: {source, alternate}}}
+	handler.SettingsRepo = &mutablePlaybackSettingsV3{values: map[string]string{"allow_4k_transcode": "false"}}
+	handler.ItemAccess = allowAllPlaybackItemAccess{}
+	handler.SubtitleRepo = perFileSubtitleRepoV3{repo}
+	startRequest := v3HandlerStartRequest()
+	startRequest.QualityPreference = "auto"
+	startRequest.ClientPlaybackContext.Deliveries[playback.DeliveryClassProgressiveV3] = playback.DeliveryCapabilityV3{
+		Enabled: true, SupportedOnDevice: true, Containers: []string{"mp4"},
+		VideoCodecs: []string{"h264"}, AudioDecodeCodecs: []string{"aac"},
+		Subtitles: playback.DeliverySubtitleCapabilitiesV3{SidecarText: true},
+	}
+	startRequest.ClientPlaybackContext.Deliveries[playback.DeliveryClassHLSV3] = playback.DeliveryCapabilityV3{
+		Enabled: true, SupportedOnDevice: true, Containers: []string{"hls"},
+		VideoCodecs: []string{"h264"}, AudioDecodeCodecs: []string{"aac"},
+		Subtitles: playback.DeliverySubtitleCapabilitiesV3{SidecarText: true},
+	}
+	base := len(alternate.ExternalSubtitles) + len(alternate.SubtitleTracks)
+	sourceSpanishIndex := len(source.ExternalSubtitles) + len(source.SubtitleTracks)
+	startRequest.SubtitleTrackIndex = &sourceSpanishIndex
+	startRequest.SubtitleTrackID = playback.TrackIDV3(source.ID, "subtitle", sourceSpanishIndex)
+
+	startRR := httptest.NewRecorder()
+	serveStartPlaybackV2(t, handler, startRR, httptest.NewRequest(http.MethodPost, "/api/v2/playback/start", strings.NewReader(marshalV3StartRequest(t, startRequest))).WithContext(newAuthorizedPlaybackContext()))
+	var started playback.DecisionResponseV3
+	if startRR.Code != http.StatusCreated || json.Unmarshal(startRR.Body.Bytes(), &started) != nil || started.PlaybackPlan == nil || started.PlaybackPlan.EffectiveMediaFileID != alternate.ID {
+		t.Fatalf("alternate start status=%d body=%s", startRR.Code, startRR.Body.String())
+	}
+	if got, want := selectedTrackIDV3(started.PlaybackPlan.SelectedTracks.Subtitle), playback.TrackIDV3(alternate.ID, "subtitle", base+1); got != want {
+		t.Fatalf("start selected subtitle %q, want %q", got, want)
+	}
+
+	// English is deleted and French added: Spanish moves to base, French
+	// takes base+1. The requested edition then plans terminal.
+	setRows(sourceSpanish, spanish, french)
+	source.Container = "mkv"
+	source.CodecVideo = "av1"
+	source.VideoTracks[0].Codec = "av1"
+	handler.SettingsRepo = &mutablePlaybackSettingsV3{values: map[string]string{"transcode_enabled": "false", "allow_4k_transcode": "false"}}
+
+	upgradedCapabilities := startRequest.Capabilities
+	upgradedCapabilities.MaxResolution = "2160p"
+	upgradedCapabilities.VideoDecode = append([]playback.VideoDecodeCapabilityV3(nil), startRequest.Capabilities.VideoDecode...)
+	upgradedCapabilities.VideoDecode[0].Levels = []int{51}
+	upgradedCapabilities.VideoDecode[0].MaxWidth = 3840
+	upgradedCapabilities.VideoDecode[0].MaxHeight = 2160
+	upgradedCapabilities.VideoDecode[0].MaxBitrateKbps = 50_000
+	response := replanPlaybackDecisionV2(t, handler, started.SessionID, playback.ReplanRequestV3{
+		ProtocolVersion: playback.ProtocolV3, Operation: playback.ReplanOperationOutputChangeV3,
+		PlaybackAttemptID: startRequest.PlaybackAttemptID, ReplanRequestID: "moved-subtitle-output-0001",
+		FailedPlanID: started.PlaybackPlan.PlanID, PlanAttemptID: "moved-subtitle-attempt-0001",
+		PlanAttemptKey: started.PlaybackPlan.PlanAttemptKey, AttemptCount: 1, PositionSeconds: 33,
+		SelectedTracks:        started.PlaybackPlan.SelectedTracks,
+		Capabilities:          upgradedCapabilities,
+		ClientPlaybackContext: startRequest.ClientPlaybackContext,
+	})
+	plan := response.PlaybackPlan
+	if response.Terminal != nil || plan == nil || plan.EffectiveMediaFileID != alternate.ID {
+		t.Fatalf("output change did not fall back to the playing alternate: %#v", response)
+	}
+	if got, want := selectedTrackIDV3(plan.SelectedTracks.Subtitle), playback.TrackIDV3(alternate.ID, "subtitle", base); got != want {
+		t.Fatalf("fallback selected subtitle %q, want %q (stored subtitle 72)", got, want)
+	}
+}
+
 // With 4K transcoding disabled, a 4K version still offers lower qualities when
 // the item has a lower-resolution version: choosing one moves playback to that
 // version, and Original moves it back. The menu stays the same throughout.

@@ -89,6 +89,12 @@ export interface ReplanOptions {
   /** Present only on `track_change`; `null` clears the subtitle selection. */
   audio?: TrackIdentityV3;
   subtitle?: TrackIdentityV3 | null;
+  /**
+   * The stored subtitle `subtitle` picks, when the caller knows it. Never
+   * sent: it keeps a queued pick on that subtitle when a deletion moves the
+   * ordinals before the pick goes out.
+   */
+  storedSubtitleId?: number;
   failure?: FailureV3;
 }
 

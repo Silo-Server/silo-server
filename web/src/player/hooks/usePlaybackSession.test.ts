@@ -3264,6 +3264,59 @@ describe("usePlaybackSession announced subtitle tracks", () => {
     unmount();
   });
 
+  // A conflicting announcement refetches the plan, and the viewer picks from
+  // the menu before it lands. The menu still lists en (stored 1) at 0 and es
+  // (stored 2) at 1; the refetch shows en deleted, es at 0 and fr (stored 3)
+  // at 1. A finished translation is picked at its server ordinal instead, and
+  // names its stored subtitle.
+  it.each([
+    {
+      name: "moves a menu pick made during a refetch to its ordinal",
+      storedId: undefined,
+      want: 0,
+    },
+    { name: "keeps a pick that names its stored subtitle", storedId: 3, want: 1 },
+  ])("$name", async ({ storedId, want }) => {
+    const initial = [stored(0, 1, "en"), stored(1, 2, "es")];
+    const refreshed = fixturePlanV3({
+      plan_id: "plan:refreshedinv0002",
+      plan_attempt_key: "v3:refreshedinv0002",
+      subtitle: { mode: "render", inventory: [stored(0, 2, "es"), stored(1, 3, "fr")] },
+    });
+    let resolveRefresh: ((response: Response) => void) | undefined;
+    const refreshResponse = new Promise<Response>((resolve) => {
+      resolveRefresh = resolve;
+    });
+    const replanBodies: Array<Record<string, unknown>> = [];
+    vi.stubGlobal(
+      "fetch",
+      sessionFetch(
+        (init) => {
+          replanBodies.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
+          return replanBodies.length === 1 ? refreshResponse : new Promise<Response>(() => {});
+        },
+        fixturePlanV3({ subtitle: { mode: "render", inventory: initial } }),
+      ),
+    );
+    const { result, unmount } = renderSession();
+    await waitFor(() => expect(result.current.plan).not.toBeNull());
+
+    act(() => result.current.applySubtitleTrack(stored(1, 3, "fr")));
+    await waitFor(() => expect(replanBodies).toHaveLength(1));
+    act(() => result.current.changeSubtitleTrack(1, 31, storedId));
+    await act(async () => {
+      resolveRefresh?.(jsonResponse(playable("session-1", refreshed)));
+      await refreshResponse;
+    });
+
+    await waitFor(() => expect(replanBodies).toHaveLength(2));
+    expect(replanBodies[1]).toMatchObject({
+      operation: "track_change",
+      selected_tracks: { subtitle: { index: want } },
+    });
+    unmount();
+  });
+
   // The plan lists en (stored 1) at 0 and es (stored 2) at 1. While a quality
   // change runs, the server deletes 1, so es moves to 0 and fr (stored 3) is
   // added at 1, and the viewer picks es at 1 from the stale menu. The
@@ -3278,6 +3331,11 @@ describe("usePlaybackSession announced subtitle tracks", () => {
     {
       name: "replays the pick over a seek made while the refetch runs",
       next: "seek",
+      trackless: false,
+    },
+    {
+      name: "replays the pick at an in-stream seek made while the refetch runs",
+      next: "reported",
       trackless: false,
     },
     {
@@ -3361,6 +3419,7 @@ describe("usePlaybackSession announced subtitle tracks", () => {
       if (next === "pick") result.current.changeSubtitleTrack(2, 32);
       if (next === "deleted") result.current.changeSubtitleTrack(0, 32);
       if (next === "seek") void result.current.reanchorSeek(200);
+      if (next === "reported") result.current.reportSeek(200);
     });
     await act(async () => {
       resolveRefresh?.(jsonResponse(playable("session-1", refreshed)));
@@ -3376,7 +3435,9 @@ describe("usePlaybackSession announced subtitle tracks", () => {
         selected_tracks: { subtitle: { index: next === "pick" ? 1 : 0 } },
       });
     }
-    if (next === "seek") expect(replanBodies[2]).toMatchObject({ position_seconds: 200 });
+    if (next === "seek" || next === "reported") {
+      expect(replanBodies[2]).toMatchObject({ position_seconds: 200 });
+    }
     unmount();
   });
 });
