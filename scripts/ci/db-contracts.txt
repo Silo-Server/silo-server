@@ -955,6 +955,9 @@
 # drain spacing, and retention.
 ./internal/catalog TestCatalogItemChangeOutboxDB
 
+# An audiobook rescan fills an empty sort title only while the Name lock is off.
+./internal/scanner TestAudiobookRescanSortTitleFollowsNameLockDB
+
 # Existing audiobooks take the runtime their active files add up to instead of
 # a metadata provider's runtime for some other edition.
 ./migrations TestAudiobookRuntimeFromFilesBackfillPostgres
