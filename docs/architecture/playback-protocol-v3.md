@@ -162,7 +162,7 @@ their own advertisements. `hdr_to_sdr_tonemap` additionally requires an
 administrator-enabled hardware or software policy and a successful device-level
 smoke probe for the applicable PQ, HLG, or SDR fallback-base source kind, or,
 for Dolby Vision Profile 5 and compatibility ID `0`, the `dolby_vision` kind,
-which only RPU-applying executors smoke, or, for PQ tagged full range, the
+which only RPU-applying executors smoke, or, for PQ whose decoded range is full, the
 `pq_full_range` kind, which only the software executor smokes. A client must
 not assume a transformation exists because this document names it.
 
@@ -337,7 +337,20 @@ on the 45-second window. A session is never ended within **90 seconds** of its
 another server, however long it has been idle: a player that cannot start a
 plan has no position to report, and this window lets it wait out a startup
 timeout of up to 60 seconds and still ask for the next fallback. The windows are
-fixed. These count as activity:
+fixed.
+
+A paused session counts toward the account's stream limit only while it has
+shown activity within the last **2 minutes** (or is inside the 90-second startup
+window). A client that keeps reporting progress stays inside it, even from a
+background browser tab whose timers are throttled to about once a minute. Past
+that it keeps its 30-minute paused grace, so a client that comes back can still
+resume, but it no longer holds a stream slot: a player closed while paused frees
+its slot within about two minutes. It still counts toward the transcode limit
+until it ends, because its encoder is kept for it. Limits are checked when a
+stream starts: a paused session that reports again after another stream took
+its slot keeps playing, even if the account is then over its stream limit.
+
+These count as activity:
 
 | Activity | Note |
 | --- | --- |
@@ -615,9 +628,16 @@ within its budget and keeps a recorded status only when the reprobed stream
 is unchanged. A failed read is never recorded as "not HDR10+", so a
 misbehaving ffprobe cannot mark the library that way. The
 `backfill_hdr10_plus` task, at startup and daily, reads the first frame of the
-unchecked files and sets only `hdr10_plus` and, for an HDR10+ file,
-`video_range_type`, writing only while the file and the track still match the
-row it read.
+unchecked files and sets `hdr10_plus`, for an HDR10+ file `video_range_type`,
+and `frame_color_range` (below), writing only while the file and the track
+still match the row it read.
+
+The same read records the frame's color range as `frame_color_range`
+(`unknown` when the frame carries none). The decoder takes the range from the
+bitstream before the container's tag, so the two can disagree; `color_range`
+keeps the tag, which the live stream probe at transcode start compares. A PQ
+track checked for HDR10+ before the range was recorded is read once more by
+the same task, which adds only `frame_color_range`.
 
 A client may additionally report the raw display probe in `output.display`
 with an evidence tier:
@@ -2251,6 +2271,14 @@ webOS) drop to HDR10 for `dvh1`. There is no MPEG-TS or progressive form.
 `video_to_h264` only when `playback.allow_hevc_encoding` is on and the client's
 HLS delivery lists HEVC and can decode that output.
 
+`video_to_h264` and `video_to_hevc` deinterlace the frames an executor decodes
+on the CPU: FFmpeg's `bwdif` converts each frame the decoder flags as interlaced
+and passes the others through, one output frame per input frame. Frames from a
+hardware decoder, and every tone-mapped transcode, are encoded as decoded, so
+an interlaced source can still reach the client with both fields in each frame.
+The recipe versions did not change for this: an executor from before it serves
+the same plans and differs only in the pictures of interlaced sources.
+
 `audio_to_aac` recipe version 4 treats the selected source channel count as a
 byte-affecting input, as version 2 began doing, and passes every AAC encode,
 remuxes included, through `aresample=async=1` so it keeps a continuous sample
@@ -2336,6 +2364,11 @@ executor's advertised filter names the choice.
 Dolby Vision compatibility IDs `1` through `6` resolve to their declared
 standards-compatible base layer: `1` and `6` are PQ, `2` is BT.709 SDR, `3` is
 legacy BT.709-gamut HLG, `4` is BT.2100 HLG, and `5` is BT.2020 SDR.
+Every executor converts that base layer, not the picture the stream's RPU
+describes. Left at their default, `tonemap_opencl` and `tonemap_cuda` reshape
+an HDR base through any single-layer RPU, `tonemap_opencl` only on some GPU
+models, so their graphs set `apply_dovi=0`; `tonemapx` reshapes only through a
+Profile 5 style RPU and keeps its default.
 A plain HLG source resolves to BT.2100 HLG, or to the BT.709-gamut HLG kind
 when its primaries and matrix are both tagged BT.709.
 Profile 5 and ID `0` carry a base only the stream's RPU can map to PQ, so they
@@ -2349,13 +2382,18 @@ record. ID `0` on any other profile says nothing about the base, so it is
 accepted only when the stream is tagged PQ, and the decoded samples must carry
 both the PQ transfer and Dolby Vision metadata; an untagged base can be plain
 SDR, which the RPU path renders blown out. The `dolby_vision` kind is not part of an executor's
-complete inventory, so an FFmpeg build that refuses `apply_dovi` keeps its
-other kinds cached. A `dolby_vision` smoke that fails for any other reason is
+complete inventory, so a `tonemapx` build that refuses `apply_dovi` keeps its
+other kinds cached. A `tonemap_opencl` or `tonemap_cuda` build that refuses it
+converts no HDR kind, because their HDR graphs always set the option. A
+`dolby_vision` smoke that fails for any other reason is
 retried after five minutes instead of being cached.
-A PQ base whose stream is tagged full range (`pc`) resolves to the
-`pq_full_range` kind. Every other kind's graph declares limited-range input;
-this one keeps each decoded frame's own range, because a container can tag a
-stream full range while its bitstream codes limited levels. Only the software
+A PQ base whose range is full (`pc`) resolves to the `pq_full_range` kind.
+The range is the first decoded frame's `frame_color_range` when it is
+explicit, and the stream tag otherwise (a track whose frame was not read
+yet). A full-range bitstream under a limited-range tag is therefore
+`pq_full_range`, and a limited-range bitstream under a full-range tag is
+`pq`. Every other kind's graph declares limited-range input; this one keeps
+each decoded frame's own range. Only the software
 executor advertises it, because its `zscale` and `tonemapx` stages read that
 range; the hardware filters have not been shown to, so a hardware-only policy
 refuses these sources with `hdr_transcode_unsupported`. The software

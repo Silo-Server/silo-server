@@ -5,8 +5,6 @@ package main
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -119,6 +117,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/policy"
 	"github.com/Silo-Server/silo-server/internal/proxy"
 	"github.com/Silo-Server/silo-server/internal/ratelimit"
+	"github.com/Silo-Server/silo-server/internal/ratingsources"
 	"github.com/Silo-Server/silo-server/internal/recommendations"
 	mediarequests "github.com/Silo-Server/silo-server/internal/requests"
 	"github.com/Silo-Server/silo-server/internal/requests/discoverrows"
@@ -993,19 +992,16 @@ func main() {
 	}
 
 	// Step 5: Auto-generate secrets
-	if strings.TrimSpace(settings["auth.jwt_secret"]) == "" {
-		secret := make([]byte, 32)
-		if _, err := rand.Read(secret); err != nil {
-			log.Fatalf("generating jwt secret: %v", err)
-		}
-		encoded := base64.StdEncoding.EncodeToString(secret)
+	if strings.TrimSpace(settings[auth.JWTSecretSettingKey]) == "" {
 		// Fatal, not a warning: every process, this one too once its config
 		// watcher starts, reads the secret from the database, so a secret
-		// held only in memory would leave them with none.
-		if err := settingsRepo.Set(ctx, "auth.jwt_secret", encoded); err != nil {
-			log.Fatalf("persisting generated JWT secret: %v", err)
+		// held only in memory would leave them with none. Processes starting
+		// at once converge on the first secret stored (#3312).
+		jwtSecret, err := auth.EnsureJWTSecret(ctx, settingsRepo)
+		if err != nil {
+			log.Fatalf("provisioning JWT secret: %v", err)
 		}
-		settings["auth.jwt_secret"] = encoded
+		settings[auth.JWTSecretSettingKey] = jwtSecret
 	}
 	if settings["jellyfin_compat.server_id"] == "" {
 		serverID := uuid.NewSHA1(uuid.NameSpaceURL, []byte("https://silo.local/jellycompat")).String()
@@ -1883,11 +1879,21 @@ func main() {
 			}
 			return info, nil
 		}
+		// Release signatures are checked and recorded for every catalog
+		// install, and a first-party plugin without a valid signature is
+		// refused before its binary runs
+		// (docs/architecture/plugin-trust.md#release-signatures).
+		pluginSignatures := plugins.NewSignatureChecker(plugins.SignatureCheckerOptions{
+			Enforce:   true,
+			CacheRoot: pluginCacheDir,
+		})
 		catalogService := plugins.NewCatalogService(repositoryStore, plugins.CatalogServiceOptions{
 			SiloAPIVersion: plugins.DefaultSiloAPIVersion,
+			Signatures:     pluginSignatures,
 		})
 		installer := plugins.NewInstaller(installationStore, plugins.InstallerOptions{
-			BaseDir: pluginCacheDir,
+			BaseDir:    pluginCacheDir,
+			Signatures: pluginSignatures,
 		})
 
 		libSource := pluginLibrarySource{groups: accessGroupStore}
@@ -2558,6 +2564,9 @@ func main() {
 			)
 			if metadataImageCacheProcessor != nil {
 				itemRefreshExecutor.SetArtworkCacher(metadataImageCacheProcessor)
+			}
+			if itemRepo != nil {
+				itemRefreshExecutor.SetItemStatusReader(itemRepo)
 			}
 		}
 	}
@@ -4090,6 +4099,12 @@ func main() {
 				compatDeps.UserStateEvents = eventsHub
 			}
 			compatDeps.SettingsRepo = settingsRepo
+			// The administrator's rating-source choice, read as the native
+			// API reads it, so Jellyfin clients get the Rotten Tomatoes
+			// critic score only while that source is shown.
+			compatDeps.RatingSources = ratingsources.NewPolicy(settingsRepo, func(ctx context.Context) ([]ratingsources.DeclaredSource, error) {
+				return metadata.DeclaredRatingSources(ctx, deps.DB)
+			})
 			compatDeps.PersonRepo = personRepo
 			if deps.CollectionService != nil {
 				compatDeps.CollectionPosters = deps.CollectionService

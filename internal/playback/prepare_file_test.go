@@ -22,7 +22,7 @@ func TestBuildPrepareFileArgsTunesDownloadEncodes(t *testing.T) {
 		}, "/o.mp4"), " ")
 	}
 	h264 := prepared("h264", "2160p")
-	for _, want := range []string{"-c:v libx264 -preset medium", "-maxrate 20000k", "-vf scale=-2:2160"} {
+	for _, want := range []string{"-c:v libx264 -preset medium", "-maxrate 20000k", "-vf bwdif=mode=send_frame:deint=interlaced,scale=-2:2160"} {
 		if !strings.Contains(h264, want) {
 			t.Errorf("download H.264 args missing %q: %s", want, h264)
 		}
@@ -31,7 +31,7 @@ func TestBuildPrepareFileArgsTunesDownloadEncodes(t *testing.T) {
 		t.Errorf("download H.264 args must not pin a level or retag: %s", h264)
 	}
 	hevc := prepared("hevc", "800p")
-	for _, want := range []string{"-c:v libx265 -preset fast", "-tag:v hvc1", "-vf scale=-2:800"} {
+	for _, want := range []string{"-c:v libx265 -preset fast", "-tag:v hvc1", "-vf bwdif=mode=send_frame:deint=interlaced,scale=-2:800"} {
 		if !strings.Contains(hevc, want) {
 			t.Errorf("download HEVC args missing %q: %s", want, hevc)
 		}
@@ -58,19 +58,19 @@ func TestBuildPrepareFileArgsSharesHigh10DecodeFallback(t *testing.T) {
 		{
 			name:      "vaapi keeps hardware encode with software decode upload",
 			hwAccel:   "vaapi",
-			want:      []string{"-c:v h264_vaapi", "scale=-2:720,format=nv12,hwupload"},
+			want:      []string{"-c:v h264_vaapi", "-vf bwdif=mode=send_frame:deint=interlaced,scale=-2:720,format=nv12,hwupload"},
 			forbidden: []string{"-hwaccel vaapi"},
 		},
 		{
 			name:      "nvenc falls back to software encode",
 			hwAccel:   "nvenc",
-			want:      []string{"-c:v libx264", "-vf scale=-2:720"},
+			want:      []string{"-c:v libx264", "-vf bwdif=mode=send_frame:deint=interlaced,scale=-2:720"},
 			forbidden: []string{"-hwaccel cuda", "h264_nvenc", "scale_cuda"},
 		},
 		{
 			name:      "videotoolbox keeps hardware encode with software decode",
 			hwAccel:   "videotoolbox",
-			want:      []string{"-c:v h264_videotoolbox", "-vf scale=-2:720"},
+			want:      []string{"-c:v h264_videotoolbox", "-vf bwdif=mode=send_frame:deint=interlaced,scale=-2:720"},
 			forbidden: []string{"-hwaccel videotoolbox"},
 		},
 	}

@@ -18,6 +18,7 @@ import { hiddenFromTab, hiddenTag, onHome, pinnedTag } from "@/lib/collections/c
 import { collectionKindLabel, collectionKindOf } from "@/lib/collections/types";
 import { cn } from "@/lib/utils";
 import { useAppLanguage, useT } from "@/i18n";
+import { formatLocale } from "@/lib/appLocale";
 
 const TAG =
   "inline-flex h-[22px] shrink-0 items-center gap-1 rounded-full px-2 text-[11.5px] font-semibold";
@@ -140,7 +141,10 @@ function ListItem({
             </>
           ) : null}
           <MetaDot />
-          {t("web.collections.metaLine.titleCount", { count: titles, shown: titles })}
+          {t("web.collections.metaLine.titleCount", {
+            count: titles,
+            shown: titles.toLocaleString(formatLocale()),
+          })}
           <SyncStatus collection={collection} syncing={syncing} />
         </>
       }
@@ -234,7 +238,10 @@ function CompactItem({
         <p className="text-muted-foreground truncate text-[12.5px]">
           {collectionKindLabel(collectionKindOf(collection.collection_type))}
           <MetaDot />
-          {t("web.collections.metaLine.titleCount", { count: titles, shown: titles })}
+          {t("web.collections.metaLine.titleCount", {
+            count: titles,
+            shown: titles.toLocaleString(formatLocale()),
+          })}
         </p>
       </div>
       <span className="inline-flex items-center gap-2">

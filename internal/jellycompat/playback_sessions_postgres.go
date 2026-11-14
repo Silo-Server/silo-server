@@ -1204,6 +1204,26 @@ func (d *DurableCompatPlaybackStore) FindByRoute(compatToken, routeID string) (*
 	return d.mem.FindByRoute(compatToken, routeID)
 }
 
+// LookupByRoute is FindByRoute that reports a failed refresh: when the
+// caller's rows could not be loaded and no cached session serves the route, it
+// returns the error instead of not-found, so a brief outage is not answered as
+// a missing session.
+func (d *DurableCompatPlaybackStore) LookupByRoute(compatToken, routeID string) (*PlaybackSession, *PlaybackMediaSource, bool, error) {
+	if compatToken == "" {
+		session, source, ok := d.mem.FindByRoute(compatToken, routeID)
+		return session, source, ok, nil
+	}
+	cachedSession, cachedSource, cachedOK := d.mem.FindByRoute(compatToken, routeID)
+	if cachedOK && !d.shouldRevalidateToken(compatToken) {
+		return cachedSession, cachedSource, true, nil
+	}
+	if err := d.loadByCompatToken(compatToken); err != nil && !cachedOK {
+		return nil, nil, false, err
+	}
+	session, source, ok := d.mem.FindByRoute(compatToken, routeID)
+	return session, source, ok, nil
+}
+
 // FindFinalizableByRoute is the terminal-aware, uniqueness-enforcing route
 // lookup used only by authenticated Stopped reports.
 func (d *DurableCompatPlaybackStore) FindFinalizableByRoute(
