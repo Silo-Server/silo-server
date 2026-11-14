@@ -159,22 +159,38 @@ function removeActiveContent(root: Document | DocumentFragment) {
         break;
     }
   }
-  for (const node of removals) node.parentNode?.removeChild(node);
+  for (const node of removals) {
+    // A removed element leaves an empty <template>, which renders nothing, so
+    // later siblings keep their positions. Reading locations (EPUB CFIs) count
+    // those positions, and search and saved highlights compute them from the
+    // unsanitized chapter.
+    if (node.nodeType === Node.ELEMENT_NODE) {
+      node.parentNode?.replaceChild(doc.createElementNS(XHTML_NS, "template"), node);
+    } else {
+      node.parentNode?.removeChild(node);
+    }
+  }
 }
 
 // The serializer writes a doctype's public and system identifiers without
 // escaping them, so a quote in one could end the doctype and start markup.
-// Entities are already expanded, so only the name is kept.
-function stripDoctypeIdentifiers(doc: Document) {
+// Only the name is kept (entities are already expanded). (X)HTML documents get
+// `html`, since an HTML parser reads any other name as quirks mode. A name the
+// HTML parser accepted but the DOM cannot create drops the doctype.
+function replaceDoctype(doc: Document) {
   const { doctype } = doc;
-  doctype?.replaceWith(doc.implementation.createDocumentType(doctype.name, "", ""));
+  if (!doctype) return;
+  const name = doc.documentElement?.namespaceURI === XHTML_NS ? "html" : doctype.name;
+  try {
+    doctype.replaceWith(doc.implementation.createDocumentType(name, "", ""));
+  } catch {
+    doctype.remove();
+  }
 }
 
 function addDocumentPolicy(doc: Document) {
   const root = doc.documentElement;
   if (!root || root.namespaceURI !== XHTML_NS) return;
-  // An HTML parser reads any other doctype name as quirks mode.
-  doc.doctype?.replaceWith(doc.implementation.createDocumentType("html", "", ""));
   const head = doc.head ?? doc.createElementNS(XHTML_NS, "head");
   // A head after the body would put the policy after the content it guards.
   root.prepend(head);
@@ -225,7 +241,7 @@ export function sanitizeBookDocument(markup: string, type: string): string {
   const essence = mimeEssence(type);
   const doc = new DOMParser().parseFromString(markup, parserType(essence));
   removeActiveContent(doc);
-  stripDoctypeIdentifiers(doc);
+  replaceDoctype(doc);
   addDocumentPolicy(doc);
   // The markup is re-encoded as UTF-8; drop a declaration that names another
   // encoding, which a frame rendering it as XML would honour.

@@ -7,7 +7,7 @@ import {
   protectBookContent,
   sanitizeBookDocument,
 } from "@/reader/bookContentSecurity";
-import { type BookDoc, DocumentLoader } from "@/reader/readest/libs/document";
+import { type BookDoc, CFI, DocumentLoader } from "@/reader/readest/libs/document";
 
 const CHAPTER = `<?xml version="1.0" encoding="utf-8"?>
 <html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops">
@@ -196,6 +196,42 @@ describe("book content security", () => {
     expectInertFrame(result);
     const doc = new DOMParser().parseFromString(result, "text/html");
     expect(doc.head.firstElementChild?.getAttribute("charset")).toBe("utf-8");
+  });
+
+  it("keeps a chapter whose doctype name the DOM cannot create", () => {
+    const result = sanitizeBookDocument(
+      "<!DOCTYPE 123><html><body><p>x</p></body></html>",
+      "text/html",
+    );
+    expectInertFrame(result);
+    expect(result).toMatch(/^<!DOCTYPE html>/);
+    expect(result).toContain("<p>x</p>");
+  });
+
+  // Search and saved highlights take their locations from the unsanitized
+  // chapter, so removing an element must not shift its later siblings.
+  it("keeps reading locations from the unsanitized chapter valid", () => {
+    const xhtml = `<html xmlns="http://www.w3.org/1999/xhtml"><head><title>t</title></head><body>
+<p>one</p><script>steal()</script><noscript><p>off</p></noscript>
+<svg xmlns="http://www.w3.org/2000/svg"><set attributeName="href" to="javascript:steal()"/><text>svg</text></svg>
+<p id="target">two</p></body></html>`;
+    const original = new DOMParser().parseFromString(xhtml, "application/xhtml+xml");
+    const target = original.createRange();
+    target.selectNodeContents(original.getElementById("target")!.firstChild!);
+    const svgText = original.createRange();
+    svgText.selectNodeContents(original.getElementsByTagName("text")[0]!.firstChild!);
+
+    const rendered = new DOMParser().parseFromString(
+      sanitizeBookDocument(xhtml, "application/xhtml+xml"),
+      "text/html",
+    );
+    for (const [range, text] of [
+      [target, "two"],
+      [svgText, "svg"],
+    ] as const) {
+      const resolved = CFI.toRange(rendered, CFI.parse(CFI.fromRange(range)));
+      expect(resolved.toString()).toBe(text);
+    }
   });
 
   it.each([
