@@ -173,11 +173,18 @@ export interface CompatConnectInfo {
   };
   account: {
     /**
-     * False when the account's local password can't sign in: SSO/plugin-provisioned
-     * accounts, and accounts that aren't break-glass while the server turns
-     * password sign-in off.
+     * False when the account's own Silo password can't sign in: SSO/plugin-provisioned
+     * accounts, accounts that aren't break-glass while the server turns
+     * password sign-in off, and accounts a network provider refuses.
      */
     password_login_available: boolean;
+    /**
+     * True when a password sign-in without a provider (a Jellyfin app's) goes
+     * to the server's directory (LDAP) for this account. Absent on older servers.
+     */
+    directory_login_available?: boolean;
+    /** The account's username at that directory, when one is linked. */
+    directory_username?: string;
   };
 }
 

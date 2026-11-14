@@ -21929,6 +21929,11 @@ export interface components {
       next_run_at?: string;
       /** Format: double */
       progress: number;
+      /**
+       * Format: date-time
+       * @description When the run in progress on this process started. Absent while the task is idle.
+       */
+      started_at?: string;
       /** @enum {string} */
       state: "idle" | "running" | "cancelling";
       triggers: components["schemas"]["AdminTaskTrigger"][];
@@ -25529,6 +25534,14 @@ export interface components {
       page?: components["schemas"]["PageInfo"];
     };
     CompatConnectAccountInfo: {
+      /** @description True when a password sign-in without a provider, such as a Jellyfin client's, goes to the server's directory (LDAP), where this account has a linked identity, so the directory username and password sign in */
+      directory_login_available: boolean;
+      /**
+       * @description The account's username at that directory; present when directory_login_available is true
+       * @example alice
+       */
+      directory_username?: string;
+      /** @description True when the account's own Silo password signs in */
       password_login_available: boolean;
     };
     CompatConnectInfoResponse: {
@@ -35821,6 +35834,8 @@ export interface components {
       /** Format: int64 */
       dv_profile?: number;
       dv_rpu_present?: boolean;
+      /** @description Color range FFmpeg reported on the first decoded frame of a PQ track (tv, pc, or unknown when the frame carried none); absent when the frame was not read. Can differ from color_range, the container's tag */
+      frame_color_range?: string;
       frame_rate?: string;
       hdr10_plus?: boolean;
       /** Format: int64 */
@@ -132108,7 +132123,7 @@ export interface operations {
         silo_rendition?: "video" | "subtitles";
         /** @description Set with silo_rendition=subtitles by the multivariant playlist of a plan with on-demand renditions (hls_subtitle_renditions_all_v1): the container track number whose WebVTT playlist to answer. */
         silo_track?: string;
-        /** @description Signed stream reference the plan URL carries; it reconstructs the session after a restart. Omitted for header-authenticated media. Account and viewer authorization are always required. */
+        /** @description Signed stream reference the plan URL carries; it reconstructs the session after a restart. Without an Authorization header or token, it alone authorizes this session's media as the account and profile it names, while the login session that started playback is active; viewer authorization still applies. Omitted for header-authenticated media. */
         st?: string;
         /** @description Media-element fallback for the account bearer token when an Authorization header cannot be set. Header-authenticated media requires the Authorization header and the profile selector. */
         token?: string;
@@ -132232,7 +132247,7 @@ export interface operations {
   getPlaybackSegment: {
     parameters: {
       query?: {
-        /** @description Signed stream reference the plan URL carries; it reconstructs the session after a restart. Omitted for header-authenticated media. Account and viewer authorization are always required. */
+        /** @description Signed stream reference the plan URL carries; it reconstructs the session after a restart. Without an Authorization header or token, it alone authorizes this session's media as the account and profile it names, while the login session that started playback is active; viewer authorization still applies. Omitted for header-authenticated media. */
         st?: string;
         /** @description Media-element fallback for the account bearer token when an Authorization header cannot be set. Header-authenticated media requires the Authorization header and the profile selector. */
         token?: string;
@@ -143828,7 +143843,7 @@ export interface operations {
       query?: {
         /** @description Set to refuse by the server on a server_remux_progressive URL whose attempt listed progressive_range_refusal_v1 in deliveries.progressive.features. A progressive remux streams from its seek origin and cannot resume: with it, a GET whose Range starts past byte 0 (or is a suffix range) answers 409 before the remux starts, and the client reopens the stream at its current position. Without it such a range streams from the origin with 200. */
         remux_range?: "refuse";
-        /** @description Signed stream reference the plan URL carries; it reconstructs the session after a restart. Omitted for header-authenticated media. Account and viewer authorization are always required. */
+        /** @description Signed stream reference the plan URL carries; it reconstructs the session after a restart. Without an Authorization header or token, it alone authorizes this session's media as the account and profile it names, while the login session that started playback is active; viewer authorization still applies. Omitted for header-authenticated media. */
         st?: string;
         /** @description Media-element fallback for the account bearer token when an Authorization header cannot be set. Header-authenticated media requires the Authorization header and the profile selector. */
         token?: string;
@@ -144039,7 +144054,7 @@ export interface operations {
       query?: {
         /** @description Set to refuse by the server on a server_remux_progressive URL whose attempt listed progressive_range_refusal_v1 in deliveries.progressive.features. A progressive remux streams from its seek origin and cannot resume: with it, a GET whose Range starts past byte 0 (or is a suffix range) answers 409 before the remux starts, and the client reopens the stream at its current position. Without it such a range streams from the origin with 200. */
         remux_range?: "refuse";
-        /** @description Signed stream reference the plan URL carries; it reconstructs the session after a restart. Omitted for header-authenticated media. Account and viewer authorization are always required. */
+        /** @description Signed stream reference the plan URL carries; it reconstructs the session after a restart. Without an Authorization header or token, it alone authorizes this session's media as the account and profile it names, while the login session that started playback is active; viewer authorization still applies. Omitted for header-authenticated media. */
         st?: string;
         /** @description Media-element fallback for the account bearer token when an Authorization header cannot be set. Header-authenticated media requires the Authorization header and the profile selector. */
         token?: string;
@@ -144214,7 +144229,7 @@ export interface operations {
         original?: string;
         /** @description Seek position in seconds for windowed text extraction. */
         position?: number;
-        /** @description Signed stream reference the plan URL carries; it reconstructs the session after a restart. Omitted for header-authenticated media. Account and viewer authorization are always required. */
+        /** @description Signed stream reference the plan URL carries; it reconstructs the session after a restart. Without an Authorization header or token, it alone authorizes this session's media as the account and profile it names, while the login session that started playback is active; viewer authorization still applies. Omitted for header-authenticated media. */
         st?: string;
         /** @description Media-element fallback for the account bearer token when an Authorization header cannot be set. Header-authenticated media requires the Authorization header and the profile selector. */
         token?: string;
@@ -144364,7 +144379,7 @@ export interface operations {
         original?: string;
         /** @description Seek position in seconds for windowed text extraction. */
         position?: number;
-        /** @description Signed stream reference the plan URL carries; it reconstructs the session after a restart. Omitted for header-authenticated media. Account and viewer authorization are always required. */
+        /** @description Signed stream reference the plan URL carries; it reconstructs the session after a restart. Without an Authorization header or token, it alone authorizes this session's media as the account and profile it names, while the login session that started playback is active; viewer authorization still applies. Omitted for header-authenticated media. */
         st?: string;
         /** @description Media-element fallback for the account bearer token when an Authorization header cannot be set. Header-authenticated media requires the Authorization header and the profile selector. */
         token?: string;
