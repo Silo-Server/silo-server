@@ -110496,6 +110496,18 @@
       "value": "移除PIN"
     }
   ],
+  "web.profiles.editor.requestsAllowed": [
+    {
+      "type": 0,
+      "value": "允许请求"
+    }
+  ],
+  "web.profiles.editor.requestsAllowedHint": [
+    {
+      "type": 0,
+      "value": "允许此个人资料浏览媒体库中没有的作品并请求它们。最高年龄分级仅按美国分级限制这些作品，最大建议年龄对它们不适用。"
+    }
+  ],
   "web.profiles.editor.restrictLibraries": [
     {
       "type": 0,
@@ -110604,6 +110616,12 @@
       },
       "offset": 0,
       "pluralType": "cardinal"
+    }
+  ],
+  "web.profiles.helpers.access.noRequests": [
+    {
+      "type": 0,
+      "value": "不可请求"
     }
   ],
   "web.profiles.helpers.access.quality": [
@@ -112516,6 +112534,12 @@
       "value": "等待导入"
     }
   ],
+  "web.requests.hub.blockedIntro": [
+    {
+      "type": 0,
+      "value": "此个人资料的请求功能已关闭。你仍可以查看和取消它发出的请求。"
+    }
+  ],
   "web.requests.hub.browseDiscover": [
     {
       "type": 0,
@@ -112730,6 +112754,12 @@
     {
       "type": 0,
       "value": "来自你账户的请求，按下一步进展分组。"
+    }
+  ],
+  "web.requests.hub.yoursIntroProfile": [
+    {
+      "type": 0,
+      "value": "此个人资料发出的请求，按下一步进展分组。"
     }
   ],
   "web.requests.pageTitle": [

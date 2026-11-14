@@ -12,7 +12,7 @@ func (s *Service) RequestCapabilityAllowed(ctx context.Context, viewer Viewer) (
 	if s.users == nil {
 		return false, nil
 	}
-	if err := s.ensureViewerRequestsAllowed(ctx, viewer.UserID); err != nil {
+	if err := s.ensureViewerRequestsAllowed(ctx, viewer); err != nil {
 		if errors.Is(err, ErrForbidden) {
 			return false, nil
 		}

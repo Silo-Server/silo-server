@@ -130626,6 +130626,18 @@
       "value": "Remover PIN"
     }
   ],
+  "web.profiles.editor.requestsAllowed": [
+    {
+      "type": 0,
+      "value": "Permitir solicitações"
+    }
+  ],
+  "web.profiles.editor.requestsAllowedHint": [
+    {
+      "type": 0,
+      "value": "Permite que este perfil explore títulos que não estão na biblioteca e os solicite. A classificação indicativa limita esses títulos apenas pela classificação dos EUA, e o limite de idade recomendada não se aplica a eles."
+    }
+  ],
   "web.profiles.editor.restrictLibraries": [
     {
       "type": 0,
@@ -130758,6 +130770,12 @@
       },
       "offset": 0,
       "pluralType": "cardinal"
+    }
+  ],
+  "web.profiles.helpers.access.noRequests": [
+    {
+      "type": 0,
+      "value": "Sem solicitações"
     }
   ],
   "web.profiles.helpers.access.quality": [
@@ -132830,6 +132848,12 @@
       "value": "Aguardando importação"
     }
   ],
+  "web.requests.hub.blockedIntro": [
+    {
+      "type": 0,
+      "value": "As solicitações estão desativadas para este perfil. Você ainda pode ver e cancelar as solicitações feitas por ele."
+    }
+  ],
   "web.requests.hub.browseDiscover": [
     {
       "type": 0,
@@ -133048,6 +133072,12 @@
     {
       "type": 0,
       "value": "Solicitações da sua conta, agrupadas pelo que acontece a seguir."
+    }
+  ],
+  "web.requests.hub.yoursIntroProfile": [
+    {
+      "type": 0,
+      "value": "Solicitações feitas por este perfil, agrupadas pelo que acontece a seguir."
     }
   ],
   "web.requests.pageTitle": [
