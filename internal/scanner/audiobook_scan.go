@@ -1153,15 +1153,16 @@ func audiobookLookupPaths(files []parsedAudiobookFile) []string {
 	return paths
 }
 
-// Lockable metadata fields the audiobook scan writes from tags. These mirror
-// metadata.MetadataField, which this package cannot import (metadata imports
-// scanner). The values are stored in media_items.locked_fields, so they cannot
-// change without a data migration.
+// Lockable metadata fields the audiobook and ebook scans write from file
+// metadata. These mirror metadata.MetadataField, which this package cannot
+// import (metadata imports scanner). The values are stored in
+// media_items.locked_fields, so they cannot change without a data migration.
 const (
 	lockedFieldName         = 0
 	lockedFieldOverview     = 1
 	lockedFieldGenres       = 2
 	lockedFieldStudios      = 3
+	lockedFieldCast         = 4
 	lockedFieldCrew         = 5
 	lockedFieldReleaseDates = 13
 )

@@ -3523,7 +3523,6 @@ func (s *DetailService) buildSeasonDetail(ctx context.Context, season *models.Se
 		ContentID:                  season.ContentID,
 		Type:                       "season",
 		Title:                      title,
-		SortTitle:                  season.SortTitle,
 		OriginalTitle:              season.OriginalTitle,
 		Overview:                   season.Overview,
 		Tagline:                    season.Tagline,
