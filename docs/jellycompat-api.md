@@ -289,7 +289,10 @@ the server. `nextUpDateCutoff` still filters on last played.
 Rotten Tomatoes critic score (0-100), present only while an enabled metadata
 plugin declares the `rt_critic` rating source and an administrator shows it under
 `catalog.extra_rating_sources`, the setting native item ratings follow (see
-`GET /api/v2/capabilities/ratings`).
+`GET /api/v2/capabilities/ratings`). `SortBy=CriticRating` and `MinCriticRating`
+use that score under the same condition; otherwise Silo ignores both, as it does
+an unknown key, so the order doesn't reveal a hidden score. Episodes have no
+critic score, so a `MinCriticRating` matches none.
 
 Items carry Jellyfin 12's `OriginalLanguage` (movies and series). Episodes set
 `ParentPrimaryImageItemId` and `ParentPrimaryImageTag` to their season's poster,
