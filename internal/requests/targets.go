@@ -213,15 +213,33 @@ func (r *Repository) RecordSubmission(ctx context.Context, id string, leaseUntil
 	return req, nil
 }
 
-func (r *Repository) DeleteTarget(ctx context.Context, id int64) error {
-	tag, err := r.pool.Exec(ctx, `DELETE FROM media_request_targets WHERE id = $1`, id)
+func (r *Repository) DeleteTarget(ctx context.Context, requestID string, id int64, leaseUntil time.Time) error {
+	tag, err := r.pool.Exec(ctx, `
+		DELETE FROM media_request_targets t
+		USING media_requests r
+		WHERE t.id = $1
+		  AND t.request_id = $2
+		  AND r.id = t.request_id
+		  AND r.status = 'approved'
+		  AND r.outcome = 'active'
+		  AND r.submit_lease_until = $3`, id, requestID, leaseUntil)
 	if err != nil {
 		return fmt.Errorf("delete target: %w", err)
 	}
-	if tag.RowsAffected() == 0 {
-		return ErrNotFound
+	if tag.RowsAffected() > 0 {
+		return nil
 	}
-	return nil
+	var claimed bool
+	if err := r.pool.QueryRow(ctx, `
+		SELECT EXISTS (SELECT 1 FROM media_requests
+		  WHERE id = $1 AND status = 'approved' AND outcome = 'active' AND submit_lease_until = $2)`,
+		requestID, leaseUntil).Scan(&claimed); err != nil {
+		return fmt.Errorf("check request claim: %w", err)
+	}
+	if !claimed {
+		return ErrInvalidState
+	}
+	return ErrNotFound
 }
 
 // UpdateTargetStatus updates one queued or downloading target and recomputes
