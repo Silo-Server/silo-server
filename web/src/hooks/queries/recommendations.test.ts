@@ -8,7 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import createTasteSeedOk from "../../../../contracts/api/v2/fixtures/create_taste_seed_ok.json";
 
-import { setProfileId } from "@/api/client";
+import { setAccessToken, setProfileId } from "@/api/client";
 import { mediaSurfaceKeys } from "./keys";
 import { installPolicyStorageMocks, jsonResponse } from "@/pages/admin-policy/policyTestUtils";
 import { useSubmitTasteSeed } from "./tasteSeed";
@@ -30,6 +30,7 @@ describe("taste seeding on the v2 contract", () => {
   });
 
   afterEach(() => {
+    setAccessToken(null);
     vi.unstubAllGlobals();
   });
 
@@ -104,6 +105,23 @@ describe("taste seeding on the v2 contract", () => {
       "POST /api/v2/recommendations/taste-seed",
       "DELETE /api/v2/favorites/movie:alien-1979",
     ]);
+  });
+
+  // A profile switch partway through a save must not send the rest of it as
+  // the newly active profile.
+  it("sends the whole save as the profile that started it", async () => {
+    setAccessToken("token-owner");
+    const profiles: (string | null)[] = [];
+    stubFetch((_url, init) => {
+      profiles.push(new Headers(init?.headers).get("X-Profile-Id"));
+      if (init?.method === "DELETE") return new Response(null, { status: 204 });
+      setProfileId("p-kid");
+      return jsonResponse(createTasteSeedOk);
+    });
+    const { result } = renderSubmit();
+
+    await result.current.mutateAsync({ add: ["movie:heat-1995"], remove: ["movie:alien-1979"] });
+    expect(profiles).toEqual(["p-owner", "p-owner"]);
   });
 
   it("refetches the recommendation reads again after a submission", async () => {
