@@ -79,7 +79,9 @@ type Job struct {
 }
 
 // Claim leases the next due file for owner, for a server at recipe version
-// AlgorithmVersion, or returns nil when none is due. Mutations must use the
+// AlgorithmVersion, or returns nil when none is due. The next file is one
+// Regenerate queued, else the newest: what was just added is what viewers
+// play next, and a backlog must not hold it back. Mutations must use the
 // returned Job.LeaseToken, which changes on every claim.
 func (r *Repository) Claim(ctx context.Context, owner string, lease time.Duration) (*Job, error) {
 	return r.claim(ctx, owner, lease, 0)
@@ -107,7 +109,7 @@ func (r *Repository) claim(ctx context.Context, owner string, lease time.Duratio
 			  AND f.trickplay_enabled AND f.enabled IS NOT FALSE AND lower(btrim(f.type)) = ANY($5::text[])
 			  AND mf.missing_since IS NULL AND mf.probe_updated_at IS NOT NULL AND mf.duration > 0
 			  AND jsonb_typeof(mf.video_tracks) = 'array' AND jsonb_array_length(mf.video_tracks) > 0
-			ORDER BY t.available_at, t.media_file_id
+			ORDER BY (t.available_at = '-infinity'::timestamptz) DESC, t.media_file_id DESC
 			LIMIT 1
 			FOR UPDATE OF t SKIP LOCKED
 		)
