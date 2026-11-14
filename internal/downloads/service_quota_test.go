@@ -449,4 +449,14 @@ func TestDeviceReportedTransfersHoldNoConcurrentSlotDB(t *testing.T) {
 	if activates, err := artifacts.prepareAgainActivates(ctx, reported); err != nil || !activates {
 		t.Fatalf("reported entry returning to preparing takes a slot = %v (%v), want true", activates, err)
 	}
+
+	// Preparing it again creates no download, so an account already over the
+	// period quota (an administrator lowered it) is not refused for it.
+	overPeriod := NewQuantityLimiter(f.repo, 0, 1, time.Hour)
+	if err := overPeriod.CheckCounts(ctx, f.userID, 1, 0); err != nil {
+		t.Fatalf("prepare again over the period quota: %v", err)
+	}
+	if err := overPeriod.Check(ctx, f.userID, 1); !errors.Is(err, ErrPeriodLimitReached) {
+		t.Fatalf("new download over the period quota: err = %v, want ErrPeriodLimitReached", err)
+	}
 }
