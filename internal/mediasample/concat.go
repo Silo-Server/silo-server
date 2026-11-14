@@ -2,7 +2,6 @@ package mediasample
 
 import (
 	"bytes"
-	"errors"
 	"math"
 	"strconv"
 	"strings"
@@ -91,7 +90,7 @@ func buildConcatList(input string, seconds []float64, inputStart float64) ([]byt
 // buildConcatListSpan returns the ffconcat list reading input's entries, each
 // lasting span seconds.
 func buildConcatListSpan(input string, entries []listEntry, span float64) ([]byte, error) {
-	quoted, err := concatPath(input)
+	quoted, err := fspath.FFConcatFileURL(input)
 	if err != nil {
 		return nil, err
 	}
@@ -104,21 +103,6 @@ func buildConcatListSpan(input string, entries []listEntry, span float64) ([]byt
 		list.WriteString("outpoint " + formatSampleSeconds(entry.inpoint+span) + "\n")
 	}
 	return list.Bytes(), nil
-}
-
-// concatPath returns input as a quoted file: URL for an ffconcat list. Inside
-// single quotes ffconcat takes every character literally, backslashes
-// included, so a single quote is written by closing the quotes, escaping it,
-// and reopening them. A list is read line by line and ffmpeg URLs end at a
-// NUL, so paths holding a line break or NUL are rejected. The list reaches
-// ffmpeg on stdin, not as an argument, so an fspath-encoded input is decoded
-// here to name the real file.
-func concatPath(input string) (string, error) {
-	input = fspath.Decode(input)
-	if strings.ContainsAny(input, "\n\r\x00") {
-		return "", errors.New("sampled input path must not contain a line break or NUL")
-	}
-	return "'file:" + strings.ReplaceAll(input, "'", `'\''`) + "'", nil
 }
 
 // formatSampleSeconds prints a sample time with microsecond precision, the

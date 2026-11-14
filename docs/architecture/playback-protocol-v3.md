@@ -875,6 +875,21 @@ once per binary). It is not a plan transformation or a required capability: an
 executor without the filter, or one that predates the claim, serves the plain
 copy, so it never narrows where the route may run.
 
+macOS Firefox also shows nothing from a stream whose first picture is a CRA,
+so under the same claim the executor leads a seeked copy that starts on one
+with the source's own first frame, an IDR that shares the file's parameter
+sets (`remuxIDRPrimer`). The video comes from an ffconcat list on stdin (that
+frame, then the source from the seek's keyframe), audio from the usual seeked
+input shifted by `-itsoffset`. A matching `noise` drop keeps only the primer
+frame ahead of the seek's keyframe and drops that keyframe's leading pictures.
+Before the remux, up to three
+one-packet probes on the copy-seek probe pool find the raw timestamps; the
+first one also reports whether the seek's keyframe is already an IDR, as in a
+closed-GOP encode, and then the primer is skipped. Only Matroska and MP4-family
+sources are primed, because an MPEG-TS `inpoint` seek can land a GOP away. A
+primed response reads the source twice. When a probe fails, the executor serves
+the plain copy.
+
 **Copied AAC framing.** MPEG-TS carries AAC as ADTS, which fragmented MP4
 cannot hold, and FFmpeg does not insert `aac_adtstoasc` on its own under
 `delay_moov`. A progressive remux that copies audio therefore records the copied

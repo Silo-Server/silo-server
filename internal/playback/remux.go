@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"slices"
 	"strconv"
@@ -49,11 +50,22 @@ var (
 const ResumeLeadingPictureDropBitstreamFilter = `noise=drop=lt(pts\,startpts)*not(key)`
 
 // primedResumeLeadingPictureDropBitstreamFilter is the drop for a primed copy
-// (see remuxIDRPrimer). Register 0 counts keyframes and register 1 holds the
-// second one's pts: the concat outpoint is checked against DTS, so frames that
-// follow the primer IDR in decode order still pass it, and they go along with
-// the leading pictures of the seek's keyframe.
-const primedResumeLeadingPictureDropBitstreamFilter = `noise=drop=st(0\,ld(0)+key);if(key*eq(ld(0)\,2)\,st(1\,pts));not(key)*(eq(ld(0)\,1)+eq(ld(0)\,2)*lt(pts\,ld(1)))`
+// (see remuxIDRPrimer). It keeps the first packet, the primer IDR, and drops
+// everything else until the seek's keyframe, which the concat list places
+// remuxIDRPrimerSeconds (0.001) after it; register 0 marks that keyframe as
+// seen and register 1 holds its pts. From there it drops the keyframe's
+// leading pictures as ResumeLeadingPictureDropBitstreamFilter does. The concat
+// outpoint is checked against DTS, so frames that follow the IDR in decode
+// order, a keyframe among them, still pass it; matching the seek's keyframe by
+// time rather than by keyframe count drops them all. The 3 ms window absorbs a
+// time base too coarse to hold the 1 ms offset (a 1/500 MP4 track rounds it to
+// zero) and stays clear of the next frame at up to 240 fps.
+const primedResumeLeadingPictureDropBitstreamFilter = `noise=drop=if(gt(n\,0)*key*lte(abs((pts-startpts)*tb-0.001)\,0.003)\,st(0\,1)+st(1\,pts));gt(n\,0)*(not(ld(0))+not(key)*lt(pts\,ld(1)))`
+
+// remuxIDRPrimerSeconds is the primer's span in the concat list, and the
+// offset primedResumeLeadingPictureDropBitstreamFilter finds the seek's
+// keyframe at.
+const remuxIDRPrimerSeconds = 0.001
 
 // ffmpegBinary returns the path to the ffmpeg binary.
 // Resolved once at first call, then cached for the process lifetime.
@@ -282,48 +294,66 @@ func buildRemuxArgsWithAudioV3(filePath, outputFormat string, seekSeconds float6
 // much behind the plan's origin, under a frame, so the timeline ignores it.
 // A source whose first frame is not an IDR still fails to start, as before.
 type remuxIDRPrimer struct {
+	// fileURL names the source in the concat list.
+	fileURL string
 	// firstPTS and anchorPTS are raw input timestamps: the first video
 	// packet, and the keyframe the seek lands on. anchorSeconds is that
 	// keyframe relative to the source start.
 	firstPTS, anchorPTS, anchorSeconds float64
 }
 
+// remuxIDRPrimerExtensions are the sources a primer reads: Matroska and MP4
+// families, whose index lets the concat demuxer seek to the exact packets the
+// probes saw (internal/mediasample samples by the same rule). An MPEG-TS
+// inpoint seek can land a GOP away and lose the primer.
+var remuxIDRPrimerExtensions = strings.Fields(".mkv .mk3d .webm .mp4 .m4v .mov")
+
 // resolveRemuxIDRPrimer probes the timestamps for a primer, or returns nil so
-// the remux serves the plain seeked copy.
+// the remux serves the plain seeked copy. A copy that already starts on an
+// IDR, as every seek into a closed-GOP encode does, needs no primer; that
+// takes one probe to learn, and the other two run only for a primer.
 func resolveRemuxIDRPrimer(ctx context.Context, bin, filePath string, seekSeconds float64) *remuxIDRPrimer {
-	// One concat directive per line, and FFmpeg's script parser stops at a NUL,
-	// so a path holding either can't be listed.
-	if strings.ContainsAny(fspath.Decode(filePath), "\r\n\x00") {
+	if !slices.Contains(remuxIDRPrimerExtensions, strings.ToLower(filepath.Ext(fspath.Decode(filePath)))) {
 		return nil
 	}
-	anchorSeconds, _, err := ResolveCopySeekAnchor(ctx, bin, filePath, seekSeconds, 0)
-	var firstPTS, anchorPTS float64
-	if err == nil {
-		firstPTS, err = rawCopiedVideoPacketSeconds(ctx, bin, filePath, 0)
-	}
-	if err == nil {
-		anchorPTS, err = rawCopiedVideoPacketSeconds(ctx, bin, filePath, seekSeconds)
-	}
+	fileURL, err := fspath.FFConcatFileURL(filePath)
 	if err != nil {
+		return nil
+	}
+	unavailable := func(err error) *remuxIDRPrimer {
 		slog.WarnContext(ctx, "remux IDR primer unavailable; serving the seeked copy without it", "error", err)
 		return nil
+	}
+	anchorPTS, err := rawCopiedVideoPacketSeconds(ctx, bin, filePath, seekSeconds, true)
+	if errors.Is(err, errCopiedHEVCAnchorIsIDR) {
+		return nil
+	}
+	if err != nil {
+		return unavailable(err)
+	}
+	firstPTS, err := rawCopiedVideoPacketSeconds(ctx, bin, filePath, 0, false)
+	if err != nil {
+		return unavailable(err)
 	}
 	if anchorPTS <= firstPTS {
 		return nil // the seek lands on the first frame, so the copy already starts on it
 	}
-	return &remuxIDRPrimer{firstPTS: firstPTS, anchorPTS: anchorPTS, anchorSeconds: anchorSeconds}
+	anchorSeconds, _, err := ResolveCopySeekAnchor(ctx, bin, filePath, seekSeconds, 0)
+	if err != nil {
+		return unavailable(err)
+	}
+	return &remuxIDRPrimer{fileURL: fileURL, firstPTS: firstPTS, anchorPTS: anchorPTS, anchorSeconds: anchorSeconds}
 }
 
 // concatList is the ffconcat script for the primed video: the source's first
 // frame, then the source from the seek's keyframe. The outpoint still lets
 // more than one frame through; primedResumeLeadingPictureDropBitstreamFilter
 // keeps only the first.
-func (p *remuxIDRPrimer) concatList(filePath string) string {
-	quoted := "'file:" + strings.ReplaceAll(fspath.Decode(filePath), "'", `'\''`) + "'"
+func (p *remuxIDRPrimer) concatList() string {
 	format := func(seconds float64) string { return strconv.FormatFloat(seconds, 'f', 6, 64) }
 	return "ffconcat version 1.0\n" +
-		"file " + quoted + "\ninpoint " + format(p.firstPTS) + "\noutpoint " + format(p.firstPTS+0.001) + "\n" +
-		"file " + quoted + "\ninpoint " + format(p.anchorPTS) + "\n"
+		"file " + p.fileURL + "\ninpoint " + format(p.firstPTS) + "\noutpoint " + format(p.firstPTS+remuxIDRPrimerSeconds) + "\n" +
+		"file " + p.fileURL + "\ninpoint " + format(p.anchorPTS) + "\n"
 }
 
 // buildRemuxArgsWithLeadingPictureDropV3 adds the resume leading-picture drop
@@ -550,7 +580,7 @@ func startRemuxWithOptions(ctx context.Context, filePath, outputFormat string, s
 	args := buildRemuxArgsWithLeadingPictureDropV3(filePath, outputFormat, seekSeconds, transcodeAudio, audioTrackIndex, effectiveProfile, tagSampleEntry, audioOnly, sourceAudioChannels, targetAudioChannels, targetAudioBitrateKbps, dropLeadingPictures, copyAudioCodec, primer)
 	cmd := fspath.CommandContext(ctx, bin, args...)
 	if primer != nil {
-		cmd.Stdin = strings.NewReader(primer.concatList(filePath))
+		cmd.Stdin = strings.NewReader(primer.concatList())
 	}
 	stderr := &remuxStderr{}
 	cmd.Stderr = stderr
