@@ -3229,7 +3229,8 @@ func lookupExternalIDsSQL() string {
 		),
 		direct_matches AS (
 			SELECT r.query_tmdb_id, mi.content_id, r.provider, mil.media_folder_id::text, mi.title, r.ord,
-			       CASE r.provider WHEN 'tmdb' THEN 0 WHEN 'tvdb' THEN 1 WHEN 'imdb' THEN 2 ELSE 3 END AS provider_rank
+			       CASE r.provider WHEN 'tmdb' THEN 0 WHEN 'tvdb' THEN 1 WHEN 'imdb' THEN 2 ELSE 3 END AS provider_rank,
+			       mi.tmdb_id AS item_tmdb_id
 			FROM requested r
 			JOIN media_items mi
 			  ON mi.type = $5
@@ -3244,7 +3245,8 @@ func lookupExternalIDsSQL() string {
 		),
 		provider_matches AS (
 			SELECT r.query_tmdb_id, mi.content_id, r.provider, mil.media_folder_id::text, mi.title, r.ord,
-			       CASE r.provider WHEN 'tmdb' THEN 0 WHEN 'tvdb' THEN 1 WHEN 'imdb' THEN 2 ELSE 3 END AS provider_rank
+			       CASE r.provider WHEN 'tmdb' THEN 0 WHEN 'tvdb' THEN 1 WHEN 'imdb' THEN 2 ELSE 3 END AS provider_rank,
+			       mi.tmdb_id AS item_tmdb_id
 			FROM requested r
 			JOIN media_item_provider_ids mip
 			  ON mip.provider = r.provider
@@ -3262,6 +3264,11 @@ func lookupExternalIDsSQL() string {
 			UNION ALL
 			SELECT * FROM provider_matches
 		) matches
+		-- A TVDB or IMDb match stands in only for an item without a TMDB ID or
+		-- with the requested one; an item holding another TMDB ID is another
+		-- title. Compare the way sameTMDBID does: trimmed, "id-slug" as "id".
+		WHERE provider = 'tmdb'
+		   OR split_part(btrim(item_tmdb_id), '-', 1) IN ('', query_tmdb_id)
 		ORDER BY query_tmdb_id, provider_rank ASC, ord ASC, content_id ASC, media_folder_id ASC`
 }
 
