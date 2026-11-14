@@ -663,6 +663,16 @@ func TestHandleReplanPlaybackV3TriesLater4KAlternateAfterNon4KTerminal(t *testin
 			if replanned.PlaybackPlan.EffectiveMediaFileID != playable.ID {
 				t.Fatalf("effective file = %d, want later directly playable 4K alternate %d", replanned.PlaybackPlan.EffectiveMediaFileID, playable.ID)
 			}
+			// A replan that commits a release other than the row the viewer
+			// picked must report it on that replan's plan too, not only on the
+			// start plan: the client renders the notice from the plan it is
+			// about to play.
+			if replanned.PlaybackPlan.SubstitutedFromFileID != source.ID {
+				t.Fatalf("replan substituted_from_file_id = %d, want the requested row %d", replanned.PlaybackPlan.SubstitutedFromFileID, source.ID)
+			}
+			if replanned.PlaybackPlan.SubstitutionReason == "" {
+				t.Fatal("replan substitution_reason is empty; a substituted replan must name its cause")
+			}
 
 		})
 	}

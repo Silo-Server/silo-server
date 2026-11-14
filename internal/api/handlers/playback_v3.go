@@ -4954,6 +4954,28 @@ func publishSubstitutionFieldsV3(plan *playback.PlanV3, requestedFileID, effecti
 	plan.SubstitutedFromFileID = requestedFileID
 }
 
+// replanSubstitutionReasonV3 classifies why a replan commits a release other
+// than the row the viewer selected, into the additive substitution_reason
+// vocabulary. A cause already named on the plan wins (a version-pick hunt or a
+// transport alternate knows more than the replan does); otherwise the replan's
+// own evidence names the move: a candidate rotation for a decode rejection, a
+// failure-recovery rotation for a transport failure, and anything else as a
+// release the planner could not keep. It never invents a dead-release verdict,
+// which needs a confirmation only the resolver can give.
+func replanSubstitutionReasonV3(plan *playback.PlanV3, req playback.ReplanRequestV3, decodeRotation bool) string {
+	if plan != nil && plan.SubstitutionReason != "" {
+		return plan.SubstitutionReason
+	}
+	switch {
+	case decodeRotation:
+		return substitutionReasonDecodeRejectedV3
+	case failureRecoveryOperationV3(req.EffectiveOperation()):
+		return substitutionReasonTransportFailedV3
+	default:
+		return substitutionReasonVersionNotPlayableV3
+	}
+}
+
 // recoverVirtualTransportSameReleaseV3 spends one bounded same-release retry
 // after a transient provider error, before the caller walks to another edition.
 // It fires only for a transient cause, only once per request (the retry marks
@@ -12258,6 +12280,17 @@ func (h *PlaybackHandler) executeReplanV3(r *http.Request, record *playback.Atte
 		// the canonical recipe attempt key for loop retirement.
 		finalizeReplanPlanIdentityV3(result.Plan, record.PlaybackAttemptID, req.ReplanRequestID, start.ClientPlaybackContext.Output.OutputContextID)
 		artifactRecipe.PlanID = result.Plan.PlanID
+	}
+	// Every replan that commits a release other than the row the viewer selected
+	// reports it, not only the explicit version-pick hunt: a failure-recovery
+	// rotation, a decode rotation and a rehydration after a dead source all move
+	// the session onto different bytes, and a client that cannot see that can
+	// only guess. The fields are set after the plan identity is finalized, so
+	// they never change the plan hash, and the helper is a no-op on a replan that
+	// keeps the requested row.
+	if result.Plan != nil && requestedFile != nil && effectiveFile != nil {
+		publishSubstitutionFieldsV3(result.Plan, requestedFile.ID, effectiveFile.ID,
+			replanSubstitutionReasonV3(result.Plan, req, virtualDecodeRotation))
 	}
 	response := playback.DecisionResponseV3{ProtocolVersion: playback.ProtocolV3, ServerFeatures: serverFeaturesForRequestV3(r.Context()), Outcome: playback.OutcomePlayableV3, SessionID: session.ID, PlaybackPlan: result.Plan}
 	if seekNoMovement {
