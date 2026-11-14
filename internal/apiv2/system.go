@@ -20,7 +20,7 @@ import (
 // last-resort compatibility messages — and are never a substitute for the
 // capability documents linked from `links.capabilities`.
 type SystemInfo struct {
-	ServerVersion  string          `json:"server_version" doc:"Server build identity (short revision, +dirty when built from a modified tree, or \"unavailable\"). Diagnostic only: never feature-detect on it." example:"1.0.0-dev"`
+	ServerVersion  string          `json:"server_version" doc:"Server build identity: the release version for a release build (for example 0.24.0 or 1.0.0-rc.1), otherwise the short revision; +dirty when built from a modified tree, or \"unavailable\". Diagnostic only: never feature-detect on it." example:"1.0.0-rc.1"`
 	APIMajor       int             `json:"api_major" doc:"The native API major this server serves at this path" example:"2"`
 	ContractDigest string          `json:"contract_digest" doc:"SHA-256 (hex) of the exact committed OpenAPI artifact served at links.openapi. Diagnostic and cache-identity only: never feature-detect on it." example:"3b8f0c2d9e1a4f6b7c8d9e0f1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b"`
 	Links          SystemInfoLinks `json:"links" doc:"Stable links to the contract and to capability documents"`

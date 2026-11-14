@@ -1,6 +1,8 @@
 package buildinfo
 
 import (
+	"os"
+	"path/filepath"
 	"runtime/debug"
 	"testing"
 )
@@ -256,5 +258,68 @@ func TestUserAgentForKeepsHeaderTokenCharacters(t *testing.T) {
 		if got := userAgentFor(tt.info); got != tt.want {
 			t.Errorf("userAgentFor(%q) = %q, want %q", tt.info.Display, got, tt.want)
 		}
+	}
+}
+
+func TestWithVersion(t *testing.T) {
+	t.Parallel()
+
+	clean := Info{Display: "b4c5aae1", Revision: "b4c5aae18aa653725ac697b29a05eac797576008", BuildNumber: 411, Available: true}
+	got := withVersion(clean, "0.24.0")
+	if got.Display != "0.24.0" || got.Version != "0.24.0" || got.Revision != clean.Revision || got.BuildNumber != 411 {
+		t.Fatalf("withVersion(release) = %+v", got)
+	}
+
+	dirty := clean
+	dirty.Dirty = true
+	if got := withVersion(dirty, "1.0.0-rc.1").Display; got != "1.0.0-rc.1+dirty" {
+		t.Fatalf("withVersion(dirty).Display = %q", got)
+	}
+
+	if got := withVersion(clean, ""); got != clean {
+		t.Fatalf("withVersion(no version) = %+v, want unchanged", got)
+	}
+	if got := withVersion(unavailableInfo(), "0.24.0"); got.Version != "" || got.Display != unavailableDisplay {
+		t.Fatalf("withVersion(unavailable) = %+v, want unchanged", got)
+	}
+}
+
+func TestValidVersion(t *testing.T) {
+	t.Parallel()
+
+	for _, v := range []string{"0.24.0", "1.0.0", "1.0.0-rc.1", "1.1.0-rc.12"} {
+		if got := validVersion(v); got != v {
+			t.Errorf("validVersion(%q) = %q, want it kept", v, got)
+		}
+	}
+	for _, v := range []string{"", "v0.24.0", "0.24", "1.0.0-RC1", "1.0.0-beta.1", "1.0.0-rc.0", "01.0.0", "0.24.0\nrm -rf"} {
+		if got := validVersion(v); got != "" {
+			t.Errorf("validVersion(%q) = %q, want it rejected", v, got)
+		}
+	}
+}
+
+func TestReadVersion(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	file := filepath.Join(dir, "version")
+	if err := os.WriteFile(file, []byte("0.24.0\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got := readVersion("", file); got != "0.24.0" {
+		t.Fatalf("readVersion(file) = %q", got)
+	}
+	if got := readVersion("1.0.0-rc.1", file); got != "1.0.0-rc.1" {
+		t.Fatalf("readVersion(ldflag) = %q, want the ldflag to win", got)
+	}
+	if got := readVersion("", filepath.Join(dir, "missing")); got != "" {
+		t.Fatalf("readVersion(missing file) = %q", got)
+	}
+	if err := os.WriteFile(file, []byte("build-1234\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got := readVersion("", file); got != "" {
+		t.Fatalf("readVersion(invalid file) = %q", got)
 	}
 }
