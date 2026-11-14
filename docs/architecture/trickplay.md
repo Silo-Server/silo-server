@@ -64,7 +64,10 @@ serializes it across servers.
 `recipe_version` is the newest generation algorithm (`AlgorithmVersion`)
 that has touched a row. A server claims, requeues, and invalidates only rows
 at or below its own version, so servers on different versions during a
-rolling upgrade never undo each other's work.
+rolling upgrade never undo each other's work. The one exception is the HDR
+conversion check (reconcile step 5), which servers at the same version but
+with a different classification can repeat, at most once per walk of the
+queue.
 
 ## Reconcile
 
@@ -82,6 +85,23 @@ so a large library drains without waiting for the next scheduled task:
    algorithm, with other settings (`published_recipe`), in another store, or
    from a different file. An `unusable` row is requeued when its file
    changes.
+5. Checks the HDR conversion of the finished rows among the next 5,000 queue
+   rows, in file order from a cursor kept in the database
+   (`trickplay_tone_map_cursor`), so the whole queue is covered over successive
+   passes on whichever servers run them, at a bounded cost per pass. Rows
+   checked do not continue a pass; only a full batch of requeues does.
+   `tone_map_source` records the conversion the published sheets were made with
+   (`toneMapKey`: `none`, `best_effort`, or the `tonemap.SourceKind`). A row
+   whose file's catalog facts now call for another one is requeued: a rescan or
+   backfill rewrote its color facts without changing the file, such as an HDR10
+   file first recorded as limited range and later as full range. Requeuing,
+   here and in step 4, clears `tone_map_source`, so sheets a server that does
+   not record it republishes are adopted rather than requeued again. A row
+   without one (published before the column existed) takes the conversion its
+   facts call for, except `pq_full_range`, which arrived after sheets were
+   first published: those are made again. A server whose classification of the
+   same facts differs from another's requeues an affected file at most once per
+   walk of the queue while both run.
 
 ## Generation
 

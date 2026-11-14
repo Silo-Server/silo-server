@@ -430,6 +430,8 @@
 ./internal/trickplay TestClaimPublishAndServeDB
 ./internal/trickplay TestExternalDeliveryConfirmationDB
 ./internal/trickplay TestReconcileSchedulesContinuationAfterReleasingClusterLockDB
+./internal/trickplay TestReconcileRequeuesSheetsWhoseToneMapSourceChangedDB
+./internal/trickplay TestReconcileAdoptsToneMapSourceOfOlderSheetsDB
 ./internal/subtitles TestAIPublicationPostgresLostReplyRetainsBytes
 ./internal/keptsub TestKeptTrackRowsAndGarbageDB
 ./internal/keptsub TestKeptTracksGoWithTheirFileDB
