@@ -145,21 +145,26 @@ describe("sequenced playback mutations", () => {
   });
 
   it("sends an unloading page's stop without waiting for progress in flight", async () => {
+    let progressStarted!: () => void;
+    const progressSent = new Promise<void>((resolve) => (progressStarted = resolve));
     const fetcher = vi
       .fn()
-      .mockImplementationOnce(() => new Promise<Response>(() => {}))
+      .mockImplementationOnce(() => {
+        progressStarted();
+        return new Promise<Response>(() => {});
+      })
       .mockImplementation(async () => stopped());
     vi.stubGlobal("fetch", fetcher);
     registerSessionMutations("stop-unload", "install");
     void sendSessionProgress(config, "stop-unload", sample).catch(() => {});
+    await progressSent;
     void stopSequencedSession(config, "stop-unload", true, true);
     // A page in pagehide gets only microtasks before teardown, no timers.
     for (let i = 0; i < 10; i++) await Promise.resolve();
-    const init = (method: string) =>
-      fetcher.mock.calls.map((call) => call[1]).find((call) => call.method === method);
-    const stop = init("DELETE");
-    expect(stop?.keepalive).toBe(true);
-    expect(JSON.parse(stop.body).sequence).toBeGreaterThan(JSON.parse(init("POST").body).sequence);
+    const [progress, stop] = fetcher.mock.calls.map((call) => call[1]);
+    expect([progress?.method, stop?.method]).toEqual(["POST", "DELETE"]);
+    expect(stop.keepalive).toBe(true);
+    expect(JSON.parse(stop.body).sequence).toBeGreaterThan(JSON.parse(progress.body).sequence);
   });
 
   it("treats a 404 stop as already over", async () => {
