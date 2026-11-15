@@ -56,6 +56,10 @@ const (
 	// shortIntroSeconds is the duration below which a match is treated as
 	// short.
 	shortIntroSeconds = 20.0
+	// minimumShortIntroPartners is how many partner episodes must agree on a
+	// short match before it is written. A recurring music cue is often shared
+	// by a single pair of episodes; a title card recurs across the season.
+	minimumShortIntroPartners = 2
 	// seasonDurationToleranceSeconds is how far a file's intro duration may
 	// be from the season's usual intro duration and still agree with it.
 	seasonDurationToleranceSeconds = 1.5
@@ -138,6 +142,11 @@ func compareFingerprints(inputs []fingerprintInput, profile matchProfile) map[in
 	for fileID, match := range matches {
 		segment := match.Segment
 		duration := segment.End - segment.Start
+		// A short match only one partner episode supports is as likely a
+		// recurring music cue as an intro, so it is not written.
+		if duration < profile.ShortSeconds && match.Confirmations < minimumShortIntroPartners {
+			continue
+		}
 		switch {
 		case duration < profile.ShortSeconds:
 			segment.Confidence = profile.ShortConfidence
