@@ -328,7 +328,7 @@ export function AdminSessionActions({
             onChange={(event) => setMessage(event.target.value)}
             rows={4}
             placeholder={t("web.admin.sessions.playback.messageDialog.placeholder")}
-            className="border-border bg-background text-foreground min-h-24 w-full resize-y rounded-md border px-3 py-2 text-sm outline-none focus:border-[var(--primary)]"
+            className="border-input bg-background text-foreground min-h-24 w-full resize-y rounded-md border px-3 py-2 text-sm outline-none focus:border-[var(--primary)]"
           />
           <DialogFooter>
             <Button

@@ -49,7 +49,7 @@ export function SettingJsonDialog({
           <textarea
             spellCheck={false}
             aria-label={t("web.admin.users.detail.preferences.json.rawValueAria")}
-            className="border-border bg-background focus:border-foreground/40 min-h-[260px] w-full rounded-md border px-3 py-2 font-mono text-[13px] leading-relaxed transition-colors outline-none max-sm:text-base"
+            className="border-input bg-background focus:border-foreground/40 min-h-[260px] w-full rounded-md border px-3 py-2 font-mono text-[13px] leading-relaxed transition-colors outline-none max-sm:text-base"
             value={value}
             onChange={(event) => onValueChange(event.target.value)}
           />
