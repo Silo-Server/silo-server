@@ -2,14 +2,18 @@ package jellycompat
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
+
+	"github.com/go-chi/chi/v5"
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/models"
@@ -19,6 +23,8 @@ import (
 )
 
 type recordingTrackPreferences struct {
+	// mu guards the fields below; a report writes audio and subtitles at once.
+	mu        sync.Mutex
 	audio     []userstore.AudioPreference
 	subtitles []userstore.SubtitlePreference
 	attempts  int
@@ -29,6 +35,8 @@ type recordingTrackPreferences struct {
 }
 
 func (r *recordingTrackPreferences) SetAudioPreference(_ context.Context, userID int, pref userstore.AudioPreference) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	r.attempts++
 	if userID != 1 {
 		return fmt.Errorf("user %d, want 1", userID)
@@ -41,10 +49,15 @@ func (r *recordingTrackPreferences) SetAudioPreference(_ context.Context, userID
 }
 
 func (r *recordingTrackPreferences) SetSubtitlePreferenceCanonical(_ context.Context, userID int, pref userstore.SubtitlePreference) error {
-	if before := r.beforeSubtitleWrite; before != nil {
-		r.beforeSubtitleWrite = nil
+	r.mu.Lock()
+	before := r.beforeSubtitleWrite
+	r.beforeSubtitleWrite = nil
+	r.mu.Unlock()
+	if before != nil {
 		before()
 	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	r.attempts++
 	if userID != 1 {
 		return fmt.Errorf("user %d, want 1", userID)
@@ -749,5 +762,73 @@ func TestRememberCompatTracksRepairsAfterAStopFinishesThePlay(t *testing.T) {
 	last := prefs.subtitles[len(prefs.subtitles)-1]
 	if last.SubtitleMode != profileSubtitleOff {
 		t.Fatalf("last subtitle write = %+v, want the Stopped report's off choice", last)
+	}
+}
+
+// A downloaded subtitle's stream index is its position in the stored list, so
+// deleting an earlier one moves it. A report naming the index PlaybackInfo
+// offered still saves that subtitle, not the one now at its position.
+func TestPlaybackReportRemembersTheOfferedDownloadedSubtitleAfterAnEarlierOneIsDeleted(t *testing.T) {
+	codec := NewResourceIDCodec()
+	version := trackMemoryVersion()
+	stored := func(id int, language string) subtitles.DownloadedSubtitle {
+		return subtitles.DownloadedSubtitle{ID: id, MediaFileID: version.FileID, Language: language, Format: subtitles.FormatSRT, Provider: "opensubtitles"}
+	}
+	repo := fakeSubtitleRepository{downloaded: map[int][]subtitles.DownloadedSubtitle{
+		version.FileID: {stored(7, "fre"), stored(8, "ger"), stored(9, "spa")},
+	}}
+	prefs := &recordingTrackPreferences{}
+	handler := &PlaybackHandler{
+		content:             &stubContentService{detail: &upstreamItemDetail{ContentID: "movie-1", Type: compatCatalogTypeMovie, Versions: []catalog.FileVersion{version}}},
+		codec:               codec,
+		deviceProfiles:      NewDeviceProfileStore(time.Hour, nil),
+		playbackStore:       NewPlaybackSessionStore(time.Hour, nil),
+		fileResolver:        testCompatFileResolver{file: &models.MediaFile{ID: version.FileID, VideoTracks: version.VideoTracks, AudioTracks: version.AudioTracks}},
+		SubtitleRepo:        repo,
+		AudioPreferences:    prefs,
+		SubtitlePreferences: prefs,
+	}
+	session := &Session{Token: "token-1", StreamAppUserID: 1, ProfileID: "profile-1"}
+	routeID := codec.EncodeStringID(EncodedIDItem, "movie-1")
+	routeCtx := chi.NewRouteContext()
+	routeCtx.URLParams.Add("id", routeID)
+	ctx := context.WithValue(context.WithValue(t.Context(), chi.RouteCtxKey, routeCtx), compatSessionKey, session)
+	rr := httptest.NewRecorder()
+	handler.HandlePlaybackInfo(rr, httptest.NewRequest(http.MethodPost, "/Items/"+routeID+"/PlaybackInfo", strings.NewReader(`{}`)).WithContext(ctx))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("PlaybackInfo status = %d, body = %s", rr.Code, rr.Body.String())
+	}
+	var resp playbackInfoResponseDTO
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatal(err)
+	}
+	german := -1
+	for _, stream := range resp.MediaSources[0].MediaStreams {
+		if stream.Type == "Subtitle" && stream.Language == "ger" {
+			german = stream.Index
+		}
+	}
+	if german < 0 {
+		t.Fatal("PlaybackInfo offered no German subtitle")
+	}
+
+	// Delete the French subtitle, which precedes German in the stored list.
+	repo.downloaded[version.FileID] = []subtitles.DownloadedSubtitle{stored(8, "ger"), stored(9, "spa")}
+
+	play, ok := handler.playbackStore.Get(resp.PlaySessionID)
+	if !ok {
+		t.Fatal("PlaybackInfo stored no play")
+	}
+	handler.rememberCompatTracks(t.Context(), session, play, sessionReportRequest{
+		PlaySessionID:       resp.PlaySessionID,
+		MediaSourceID:       resp.MediaSources[0].ID,
+		SubtitleStreamIndex: compatIntValueOf(german),
+	}, false)
+
+	if len(prefs.subtitles) != 1 {
+		t.Fatalf("subtitle saves = %+v, want one", prefs.subtitles)
+	}
+	if saved := prefs.subtitles[0]; saved.SubtitleLanguage != "ger" || saved.TrackSignature == nil || saved.TrackSignature.Language != "ger" {
+		t.Fatalf("saved subtitle = %+v (signature %+v), want the German subtitle", saved, saved.TrackSignature)
 	}
 }

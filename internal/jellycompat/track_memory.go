@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log/slog"
 	"slices"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -26,8 +27,9 @@ type SubtitlePreferenceWriter interface {
 	SetSubtitlePreferenceCanonical(ctx context.Context, userID int, pref userstore.SubtitlePreference) error
 }
 
-// compatTrackMemoryTimeout bounds the reads and writes one report makes to
-// remember its tracks, which outlive a client that drops the connection.
+// compatTrackMemoryTimeout bounds the reads and claim one report makes to
+// remember its tracks, and then each track's preference write. They outlive a
+// client that drops the connection.
 const compatTrackMemoryTimeout = 10 * time.Second
 
 // compatSubtitleOff is the SubtitleStreamIndex Jellyfin reports for
@@ -124,12 +126,25 @@ func (h *PlaybackHandler) rememberCompatTracks(ctx context.Context, session *Ses
 	if err != nil || (audio == nil && subtitle == nil) {
 		return
 	}
+	// Both tracks are claimed now, so neither is retried. Each write gets its
+	// own deadline and they run side by side: a slow audio write must not use
+	// up the time of a subtitle write that has not started.
+	var wg sync.WaitGroup
 	if audio != nil {
-		h.writeRememberedCompatAudio(ctx, session, playSession, source, *audio)
+		wg.Go(func() {
+			writeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), compatTrackMemoryTimeout)
+			defer cancel()
+			h.writeRememberedCompatAudio(writeCtx, session, playSession, source, *audio)
+		})
 	}
 	if subtitle != nil {
-		h.writeRememberedCompatSubtitle(ctx, session, playSession, source, *subtitle, subtitlePref)
+		wg.Go(func() {
+			writeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), compatTrackMemoryTimeout)
+			defer cancel()
+			h.writeRememberedCompatSubtitle(writeCtx, session, playSession, source, *subtitle, subtitlePref)
+		})
 	}
+	wg.Wait()
 }
 
 // writeRememberedCompatAudio saves the audio track a report claimed. A later
@@ -332,6 +347,9 @@ func (h *PlaybackHandler) compatSubtitlePreference(ctx context.Context, session 
 				"file_id", source.Version.FileID, "error", err)
 			return pref, false
 		}
+		if streamIndex, ok = currentDownloadedSubtitleIndex(source, downloaded, streamIndex); !ok {
+			return pref, false
+		}
 	}
 	candidates := compatSubtitleCandidates(source.Version, downloaded)
 	position := slices.IndexFunc(candidates, func(c compatSubtitleCandidate) bool { return c.Index == streamIndex })
@@ -351,6 +369,24 @@ func (h *PlaybackHandler) compatSubtitlePreference(ctx context.Context, session 
 		HearingImpaired: track.HearingImpaired,
 	}
 	return pref, true
+}
+
+// currentDownloadedSubtitleIndex maps a downloaded subtitle's stream index as
+// PlaybackInfo offered it to that subtitle's index in the current list, which
+// differs once an earlier one is deleted. ok is false when the subtitle is
+// gone. A play negotiated without the offered IDs keeps the index.
+func currentDownloadedSubtitleIndex(source PlaybackMediaSource, downloaded []subtitles.DownloadedSubtitle, streamIndex int) (int, bool) {
+	if source.DownloadedSubtitleIDs == nil {
+		return streamIndex, true
+	}
+	base := nextDownloadedSubtitleIndex(source.Version)
+	offered := streamIndex - base
+	if offered >= len(source.DownloadedSubtitleIDs) {
+		return 0, false
+	}
+	id := source.DownloadedSubtitleIDs[offered]
+	current := slices.IndexFunc(downloaded, func(dl subtitles.DownloadedSubtitle) bool { return dl.ID == id })
+	return base + current, current >= 0
 }
 
 // compatCombinedSubtitleIndex is the candidate's index in the playback v3

@@ -164,7 +164,12 @@ type PlaybackMediaSource struct {
 	// already comes from the remembered tracks, stands in.
 	RememberedAudioStreamIndex    *int
 	RememberedSubtitleStreamIndex *int
-	ETag                          string
+	// DownloadedSubtitleIDs are the stored subtitles PlaybackInfo offered, in
+	// stream index order from nextDownloadedSubtitleIndex. Deleting an earlier
+	// one moves the later ones' indexes, so a report's index is resolved through
+	// these IDs. Nil when the play was negotiated without them.
+	DownloadedSubtitleIDs []int
+	ETag                  string
 	// SubtitleDeliveries preserves client delivery capabilities for tracks that
 	// may be enabled later. The scalar fields above retain the selected track's
 	// delivery for sessions read by older binaries during a rolling update.

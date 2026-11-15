@@ -2529,6 +2529,9 @@ func (h *PlaybackHandler) HandlePlaybackInfo(w http.ResponseWriter, r *http.Requ
 			}
 		}
 		downloadedByFile[source.Version.FileID] = downloaded
+		for _, dl := range downloaded {
+			source.DownloadedSubtitleIDs = append(source.DownloadedSubtitleIDs, dl.ID)
+		}
 		source.DefaultSubtitleStreamIndex = compatDetailSubtitleStreamIndex(detail, source.Version, downloaded, savedSubtitleMode, effectiveCompatAudioStreamIndex(source))
 		var requestedSubtitleIndex *int
 		if index, ok := req.SubtitleStreamIndex.get(); ok {
