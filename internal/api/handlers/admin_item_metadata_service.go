@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/adminjob"
 	"github.com/Silo-Server/silo-server/internal/cache"
 	"github.com/Silo-Server/silo-server/internal/catalog"
@@ -23,7 +24,9 @@ func (h *AdminHandler) CreateItemMetadataRefresh(ctx context.Context, contentID 
 	if mode == "" {
 		mode = adminjob.ItemRefreshModeQuick
 	}
-	if mode != adminjob.ItemRefreshModeQuick && mode != adminjob.ItemRefreshModeComplete {
+	switch mode {
+	case adminjob.ItemRefreshModeQuick, adminjob.ItemRefreshModeComplete, adminjob.ItemRefreshModeReset:
+	default:
 		return nil, apiError(http.StatusBadRequest, "bad_request", "Invalid refresh mode")
 	}
 	payload, err := h.ItemRefreshResolver.ResolveWithMode(ctx, contentID, mode)
@@ -39,6 +42,12 @@ func (h *AdminHandler) CreateItemMetadataRefresh(ctx context.Context, contentID 
 		}
 		slog.ErrorContext(ctx, "admin: resolve item refresh scope failed", "component", "api", "content_id", contentID, "error", err)
 		return nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to resolve item refresh scope")
+	}
+
+	// The job runs later, possibly on another node, so the curator's scope
+	// travels in its payload rather than on this request's context.
+	if scope, ok := access.MetadataCurationScopeFrom(ctx); ok {
+		payload.CurationScope = &scope
 	}
 
 	job, err := h.JobRepo.Create(ctx, adminjob.CreateJobInput{
@@ -93,6 +102,9 @@ func (h *AdminHandler) UpdateCatalogItemMetadata(ctx context.Context, contentID 
 
 	// Try media_items first, then seasons, then episodes.
 	if err := h.DetailSvc.UpdateMediaItemMetadata(ctx, contentID, &upd); err != nil {
+		if errors.Is(err, access.ErrMetadataCurationScope) {
+			return nil, metadataCurationForbidden()
+		}
 		if !errors.Is(err, catalog.ErrItemNotFound) {
 			slog.ErrorContext(ctx, "admin: update item metadata failed", "component", "api", "content_id", contentID, "error", err)
 			return nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to update metadata")

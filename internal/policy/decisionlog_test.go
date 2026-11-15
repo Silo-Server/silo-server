@@ -137,7 +137,7 @@ func TestDecisionLoggerVerbosityGatesSamples(t *testing.T) {
 
 func TestPDPResolveViewerScopeLogsDecision(t *testing.T) {
 	ctx := context.Background()
-	engine, err := NewEngine(ctx)
+	engine, err := NewEngine(ctx, WithEvalTimeout(time.Minute))
 	if err != nil {
 		t.Fatalf("NewEngine() error: %v", err)
 	}

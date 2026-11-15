@@ -114,121 +114,6 @@ func requireRequestedVersionWithoutSubtitleV3(t *testing.T, plan *playback.PlanV
 	}
 }
 
-// A subtitle that only the requested file cannot show is no reason to switch
-// to a lower version that has no subtitle either: the viewer would lose the
-// 4K picture and still get no subtitle. Playback starts on the requested
-// file with the subtitle off and says so.
-func TestHandleStartPlaybackV3SubtitleOnlyRefusalKeepsTheRequestedVersion(t *testing.T) {
-	handler, source, _, startRequest := subtitleBlockedHDRFixtureV3(t)
-	subtitleIndex := 0
-	startRequest.SubtitleTrackID = playback.TrackIDV3(source.ID, "subtitle", subtitleIndex)
-	startRequest.SubtitleTrackIndex = &subtitleIndex
-
-	started := startPlayablePlaybackV3(t, handler, marshalV3StartRequest(t, startRequest))
-	t.Cleanup(func() { handler.tm.CloseTranscodeSession(started.SessionID, "") })
-	requireRequestedVersionWithoutSubtitleV3(t, started.PlaybackPlan, source)
-}
-
-// The same holds when the viewer turns the subtitle on during playback.
-func TestHandleReplanPlaybackV3SubtitleOnlyRefusalKeepsTheRequestedVersion(t *testing.T) {
-	handler, source, _, startRequest := subtitleBlockedHDRFixtureV3(t)
-	started := startPlayablePlaybackV3(t, handler, marshalV3StartRequest(t, startRequest))
-	t.Cleanup(func() { handler.tm.CloseTranscodeSession(started.SessionID, "") })
-	if started.PlaybackPlan.EffectiveMediaFileID != source.ID {
-		t.Fatalf("start effective file = %d, want the 4K file %d", started.PlaybackPlan.EffectiveMediaFileID, source.ID)
-	}
-
-	subtitleIndex := 0
-	replanned := postPlaybackReplanV3(t, handler, started.SessionID, playback.ReplanRequestV3{
-		ProtocolVersion: playback.ProtocolV3, Operation: playback.ReplanOperationTrackChangeV3,
-		PlaybackAttemptID: startRequest.PlaybackAttemptID, ReplanRequestID: "subtitle-only-refusal-0001",
-		FailedPlanID: started.PlaybackPlan.PlanID, PlanAttemptID: "subtitle-only-refusal-attempt-0001",
-		PlanAttemptKey: started.PlaybackPlan.PlanAttemptKey, AttemptCount: 1, PositionSeconds: 30,
-		QualityPreference: "auto",
-		SelectedTracks: playback.SelectedTracksV3{
-			Audio: started.PlaybackPlan.SelectedTracks.Audio,
-			Subtitle: &playback.TrackIdentityV3{
-				ID: playback.TrackIDV3(source.ID, "subtitle", subtitleIndex), Index: &subtitleIndex,
-			},
-		},
-		Capabilities: startRequest.Capabilities, ClientPlaybackContext: startRequest.ClientPlaybackContext,
-	})
-	if replanned.PlaybackPlan == nil || replanned.Terminal != nil {
-		t.Fatalf("subtitle replan = %#v", replanned)
-	}
-	requireRequestedVersionWithoutSubtitleV3(t, replanned.PlaybackPlan, source)
-}
-
-// outputChangeAfterKeptAlternateV3 starts on the 4K edition (every other
-// version is unreadable at start), turns its English PGS on, repairs the other
-// versions, and then switches to an output that cannot draw PGS. The active
-// 4K edition was kept only for that subtitle, so the returned plan shows
-// where playback goes once the subtitle cannot be shown there either.
-func outputChangeAfterKeptAlternateV3(t *testing.T, handler *PlaybackHandler, active, requested *models.MediaFile, startRequest playback.StartRequestV3, others ...*models.MediaFile) *playback.PlanV3 {
-	t.Helper()
-	failedAt := time.Now().UTC()
-	unreadable := append([]*models.MediaFile{requested}, others...)
-	repaired := make([]models.MediaFile, len(unreadable))
-	for i, file := range unreadable {
-		repaired[i] = *file
-		*file = models.MediaFile{ID: file.ID, ContentID: file.ContentID, FilePath: file.FilePath, ProbeFailedAt: &failedAt}
-	}
-	startRequest.FileID = requested.ID
-	original := startRequest.ClientPlaybackContext.Deliveries[playback.DeliveryClassOriginalHTTPV3]
-	original.Subtitles.EmbeddedBitmap = true
-	startRequest.ClientPlaybackContext.Deliveries = maps.Clone(startRequest.ClientPlaybackContext.Deliveries)
-	startRequest.ClientPlaybackContext.Deliveries[playback.DeliveryClassOriginalHTTPV3] = original
-
-	rec := httptest.NewRecorder()
-	handler.HandleStartPlayback(rec, httptest.NewRequest(http.MethodPost, "/api/v1/playback/start", strings.NewReader(marshalV3StartRequest(t, startRequest))).WithContext(newAuthorizedPlaybackContext()))
-	var started playback.DecisionResponseV3
-	if rec.Code != http.StatusCreated || json.Unmarshal(rec.Body.Bytes(), &started) != nil || started.PlaybackPlan == nil || started.PlaybackPlan.EffectiveMediaFileID != active.ID {
-		t.Fatalf("start did not land on the 4K edition: status=%d body=%s", rec.Code, rec.Body.String())
-	}
-	t.Cleanup(func() { handler.tm.CloseTranscodeSession(started.SessionID, "") })
-	for i, file := range unreadable {
-		*file = repaired[i]
-	}
-
-	subtitleIndex := 0
-	subtitled := postPlaybackReplanV3(t, handler, started.SessionID, playback.ReplanRequestV3{
-		ProtocolVersion: playback.ProtocolV3, Operation: playback.ReplanOperationTrackChangeV3,
-		PlaybackAttemptID: startRequest.PlaybackAttemptID, ReplanRequestID: "kept-edition-track-0001",
-		FailedPlanID: started.PlaybackPlan.PlanID, PlanAttemptID: "kept-edition-track-attempt-0001",
-		PlanAttemptKey: started.PlaybackPlan.PlanAttemptKey, AttemptCount: 1, PositionSeconds: 30,
-		QualityPreference: "auto",
-		SelectedTracks: playback.SelectedTracksV3{
-			Audio:    started.PlaybackPlan.SelectedTracks.Audio,
-			Subtitle: &playback.TrackIdentityV3{ID: playback.TrackIDV3(active.ID, "subtitle", subtitleIndex), Index: &subtitleIndex},
-		},
-		Capabilities: startRequest.Capabilities, ClientPlaybackContext: startRequest.ClientPlaybackContext,
-	})
-	if subtitled.PlaybackPlan == nil || subtitled.PlaybackPlan.EffectiveMediaFileID != active.ID || subtitled.PlaybackPlan.SelectedTracks.Subtitle == nil {
-		t.Fatalf("the PGS on the 4K edition was not selected: %#v", subtitled)
-	}
-
-	// The new output cannot draw PGS, so the 4K edition would need a burn-in
-	// its HDR picture cannot take.
-	nextContext := startRequest.ClientPlaybackContext
-	nextContext.Output.OutputContextID = "route-2"
-	nextContext.Deliveries = maps.Clone(startRequest.ClientPlaybackContext.Deliveries)
-	original.Subtitles.EmbeddedBitmap = false
-	nextContext.Deliveries[playback.DeliveryClassOriginalHTTPV3] = original
-	replanned := postPlaybackReplanV3(t, handler, started.SessionID, playback.ReplanRequestV3{
-		ProtocolVersion: playback.ProtocolV3, Operation: playback.ReplanOperationOutputChangeV3,
-		PlaybackAttemptID: startRequest.PlaybackAttemptID, ReplanRequestID: "kept-edition-output-0001",
-		FailedPlanID: subtitled.PlaybackPlan.PlanID, PlanAttemptID: "kept-edition-output-attempt-0001",
-		PlanAttemptKey: subtitled.PlaybackPlan.PlanAttemptKey, AttemptCount: 1, PositionSeconds: 40,
-		QualityPreference: "auto",
-		SelectedTracks:    subtitled.PlaybackPlan.SelectedTracks,
-		Capabilities:      startRequest.Capabilities, ClientPlaybackContext: nextContext,
-	})
-	if replanned.PlaybackPlan == nil || replanned.Terminal != nil {
-		t.Fatalf("output change = %#v", replanned)
-	}
-	return replanned.PlaybackPlan
-}
-
 // requireRequestedEditionWithoutSubtitleV3 fails unless plan is back on the
 // requested edition with the subtitle off and reported as not on that file.
 func requireRequestedEditionWithoutSubtitleV3(t *testing.T, plan *playback.PlanV3, requested *models.MediaFile) {
@@ -239,28 +124,6 @@ func requireRequestedEditionWithoutSubtitleV3(t *testing.T, plan *playback.PlanV
 	if !slices.Contains(plan.DegradationWarnings, playback.SubtitleTrackUnavailableWarningV3()) {
 		t.Fatalf("warnings = %#v, want the subtitle reported as not on this file", plan.DegradationWarnings)
 	}
-}
-
-// The requested edition is listed after every other version, which the
-// fallback tries lower resolutions first. Another version that also drops the
-// subtitle must not take its place, and neither may the 4K edition without it.
-func TestHandleReplanPlaybackV3OutputChangeReturnsToRequestedEditionAheadOfOtherVersions(t *testing.T) {
-	handler, active, requested, startRequest := subtitleBlockedHDRFixtureV3(t)
-	lowerValue := *requested
-	lower := &lowerValue
-	lower.ID = 126
-	lower.FilePath = writePlaybackTestMediaFile(t, "movie-720p.mkv")
-	lower.Resolution = "720p"
-	lower.Bitrate = 3_000
-	lower.VideoTracks = []models.VideoTrack{{
-		Codec: "h264", Profile: "high", Level: 31, Width: 1280, Height: 720,
-		FrameRate: "24000/1001", Bitrate: 3_000, BitDepth: 8,
-		VideoRange: "SDR", VideoRangeType: "SDR",
-	}}
-	handler.FileVersionFetcher = testPlaybackFileVersionFetcher{byContent: map[string][]*models.MediaFile{
-		active.ContentID: {active, requested, lower},
-	}}
-	requireRequestedEditionWithoutSubtitleV3(t, outputChangeAfterKeptAlternateV3(t, handler, active, requested, startRequest, lower), requested)
 }
 
 // workerOnlyHeaderAuthenticatedV3 moves the fixture onto header-authenticated
@@ -299,16 +162,153 @@ func requireExecutableSiblingV3(t *testing.T, response playback.DecisionResponse
 	}
 }
 
+// outputChangeAfterKeptAlternateV3 starts on the 4K edition (every other
+// version is unreadable at start), turns its English PGS on, repairs the other
+// versions, and then switches to an output that cannot draw PGS. The active
+// 4K edition was kept only for that subtitle, so the returned plan shows
+// where playback goes once the subtitle cannot be shown there either.
+func outputChangeAfterKeptAlternateV3(t *testing.T, handler *PlaybackHandler, active, requested *models.MediaFile, startRequest playback.StartRequestV3, others ...*models.MediaFile) *playback.PlanV3 {
+	t.Helper()
+	failedAt := time.Now().UTC()
+	unreadable := append([]*models.MediaFile{requested}, others...)
+	repaired := make([]models.MediaFile, len(unreadable))
+	for i, file := range unreadable {
+		repaired[i] = *file
+		*file = models.MediaFile{ID: file.ID, ContentID: file.ContentID, FilePath: file.FilePath, ProbeFailedAt: &failedAt}
+	}
+	startRequest.FileID = requested.ID
+	original := startRequest.ClientPlaybackContext.Deliveries[playback.DeliveryClassOriginalHTTPV3]
+	original.Subtitles.EmbeddedBitmap = true
+	startRequest.ClientPlaybackContext.Deliveries = maps.Clone(startRequest.ClientPlaybackContext.Deliveries)
+	startRequest.ClientPlaybackContext.Deliveries[playback.DeliveryClassOriginalHTTPV3] = original
+
+	rec := httptest.NewRecorder()
+	serveStartPlaybackV2(t, handler, rec, httptest.NewRequest(http.MethodPost, "/api/v2/playback/start", strings.NewReader(marshalV3StartRequest(t, startRequest))).WithContext(newAuthorizedPlaybackContext()))
+	var started playback.DecisionResponseV3
+	if rec.Code != http.StatusCreated || json.Unmarshal(rec.Body.Bytes(), &started) != nil || started.PlaybackPlan == nil || started.PlaybackPlan.EffectiveMediaFileID != active.ID {
+		t.Fatalf("start did not land on the 4K edition: status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	t.Cleanup(func() { handler.tm.CloseTranscodeSession(started.SessionID, "") })
+	for i, file := range unreadable {
+		*file = repaired[i]
+	}
+
+	subtitleIndex := 0
+	subtitled := replanPlaybackDecisionV2(t, handler, started.SessionID, playback.ReplanRequestV3{
+		ProtocolVersion: playback.ProtocolV3, Operation: playback.ReplanOperationTrackChangeV3,
+		PlaybackAttemptID: startRequest.PlaybackAttemptID, ReplanRequestID: "kept-edition-track-0001",
+		FailedPlanID: started.PlaybackPlan.PlanID, PlanAttemptID: "kept-edition-track-attempt-0001",
+		PlanAttemptKey: started.PlaybackPlan.PlanAttemptKey, AttemptCount: 1, PositionSeconds: 30,
+		QualityPreference: "auto",
+		SelectedTracks: playback.SelectedTracksV3{
+			Audio:    started.PlaybackPlan.SelectedTracks.Audio,
+			Subtitle: &playback.TrackIdentityV3{ID: playback.TrackIDV3(active.ID, "subtitle", subtitleIndex), Index: &subtitleIndex},
+		},
+		Capabilities: startRequest.Capabilities, ClientPlaybackContext: startRequest.ClientPlaybackContext,
+	})
+	if subtitled.PlaybackPlan == nil || subtitled.PlaybackPlan.EffectiveMediaFileID != active.ID || subtitled.PlaybackPlan.SelectedTracks.Subtitle == nil {
+		t.Fatalf("the PGS on the 4K edition was not selected: %#v", subtitled)
+	}
+
+	// The new output cannot draw PGS, so the 4K edition would need a burn-in
+	// its HDR picture cannot take.
+	nextContext := startRequest.ClientPlaybackContext
+	nextContext.Output.OutputContextID = "route-2"
+	nextContext.Deliveries = maps.Clone(startRequest.ClientPlaybackContext.Deliveries)
+	original.Subtitles.EmbeddedBitmap = false
+	nextContext.Deliveries[playback.DeliveryClassOriginalHTTPV3] = original
+	replanned := replanPlaybackDecisionV2(t, handler, started.SessionID, playback.ReplanRequestV3{
+		ProtocolVersion: playback.ProtocolV3, Operation: playback.ReplanOperationOutputChangeV3,
+		PlaybackAttemptID: startRequest.PlaybackAttemptID, ReplanRequestID: "kept-edition-output-0001",
+		FailedPlanID: subtitled.PlaybackPlan.PlanID, PlanAttemptID: "kept-edition-output-attempt-0001",
+		PlanAttemptKey: subtitled.PlaybackPlan.PlanAttemptKey, AttemptCount: 1, PositionSeconds: 40,
+		QualityPreference: "auto",
+		SelectedTracks:    subtitled.PlaybackPlan.SelectedTracks,
+		Capabilities:      startRequest.Capabilities, ClientPlaybackContext: nextContext,
+	})
+	if replanned.PlaybackPlan == nil || replanned.Terminal != nil {
+		t.Fatalf("output change = %#v", replanned)
+	}
+	return replanned.PlaybackPlan
+}
+
+// A subtitle that only the requested file cannot show is no reason to switch
+// to a lower version that has no subtitle either: the viewer would lose the
+// 4K picture and still get no subtitle. Playback starts on the requested
+// file with the subtitle off and says so.
+func TestStartPlaybackV2SubtitleOnlyRefusalKeepsTheRequestedVersion(t *testing.T) {
+	handler, source, _, startRequest := subtitleBlockedHDRFixtureV3(t)
+	subtitleIndex := 0
+	startRequest.SubtitleTrackID = playback.TrackIDV3(source.ID, "subtitle", subtitleIndex)
+	startRequest.SubtitleTrackIndex = &subtitleIndex
+
+	started := startPlayableDecisionV2(t, handler, marshalV3StartRequest(t, startRequest))
+	t.Cleanup(func() { handler.tm.CloseTranscodeSession(started.SessionID, "") })
+	requireRequestedVersionWithoutSubtitleV3(t, started.PlaybackPlan, source)
+}
+
+// The same holds when the viewer turns the subtitle on during playback.
+func TestReplanPlaybackV2SubtitleOnlyRefusalKeepsTheRequestedVersion(t *testing.T) {
+	handler, source, _, startRequest := subtitleBlockedHDRFixtureV3(t)
+	started := startPlayableDecisionV2(t, handler, marshalV3StartRequest(t, startRequest))
+	t.Cleanup(func() { handler.tm.CloseTranscodeSession(started.SessionID, "") })
+	if started.PlaybackPlan.EffectiveMediaFileID != source.ID {
+		t.Fatalf("start effective file = %d, want the 4K file %d", started.PlaybackPlan.EffectiveMediaFileID, source.ID)
+	}
+
+	subtitleIndex := 0
+	replanned := replanPlaybackDecisionV2(t, handler, started.SessionID, playback.ReplanRequestV3{
+		ProtocolVersion: playback.ProtocolV3, Operation: playback.ReplanOperationTrackChangeV3,
+		PlaybackAttemptID: startRequest.PlaybackAttemptID, ReplanRequestID: "subtitle-only-refusal-0001",
+		FailedPlanID: started.PlaybackPlan.PlanID, PlanAttemptID: "subtitle-only-refusal-attempt-0001",
+		PlanAttemptKey: started.PlaybackPlan.PlanAttemptKey, AttemptCount: 1, PositionSeconds: 30,
+		QualityPreference: "auto",
+		SelectedTracks: playback.SelectedTracksV3{
+			Audio: started.PlaybackPlan.SelectedTracks.Audio,
+			Subtitle: &playback.TrackIdentityV3{
+				ID: playback.TrackIDV3(source.ID, "subtitle", subtitleIndex), Index: &subtitleIndex,
+			},
+		},
+		Capabilities: startRequest.Capabilities, ClientPlaybackContext: startRequest.ClientPlaybackContext,
+	})
+	if replanned.PlaybackPlan == nil || replanned.Terminal != nil {
+		t.Fatalf("subtitle replan = %#v", replanned)
+	}
+	requireRequestedVersionWithoutSubtitleV3(t, replanned.PlaybackPlan, source)
+}
+
+// The requested edition is listed after every other version, which the
+// fallback tries lower resolutions first. Another version that also drops the
+// subtitle must not take its place, and neither may the 4K edition without it.
+func TestReplanPlaybackV2OutputChangeReturnsToRequestedEditionAheadOfOtherVersions(t *testing.T) {
+	handler, active, requested, startRequest := subtitleBlockedHDRFixtureV3(t)
+	lowerValue := *requested
+	lower := &lowerValue
+	lower.ID = 126
+	lower.FilePath = writePlaybackTestMediaFile(t, "movie-720p.mkv")
+	lower.Resolution = "720p"
+	lower.Bitrate = 3_000
+	lower.VideoTracks = []models.VideoTrack{{
+		Codec: "h264", Profile: "high", Level: 31, Width: 1280, Height: 720,
+		FrameRate: "24000/1001", Bitrate: 3_000, BitDepth: 8,
+		VideoRange: "SDR", VideoRangeType: "SDR",
+	}}
+	handler.FileVersionFetcher = testPlaybackFileVersionFetcher{byContent: map[string][]*models.MediaFile{
+		active.ContentID: {active, requested, lower},
+	}}
+	requireRequestedEditionWithoutSubtitleV3(t, outputChangeAfterKeptAlternateV3(t, handler, active, requested, startRequest, lower), requested)
+}
+
 // The requested file without its subtitle only replaces a playable sibling
 // when its plan can run. A progressive remux the API refuses and HLS cannot
 // carry would otherwise end the start in a terminal.
-func TestHandleStartPlaybackV3SubtitleOnlyRefusalKeepsAnExecutableSibling(t *testing.T) {
+func TestStartPlaybackV2SubtitleOnlyRefusalKeepsAnExecutableSibling(t *testing.T) {
 	handler, source, alternate, startRequest := subtitleBlockedHDRFixtureV3(t)
 	workerOnlyHeaderAuthenticatedV3(t, handler, alternate, &startRequest)
 	startRequest.SubtitleTrackID = playback.TrackIDV3(source.ID, "subtitle", 0)
 	startRequest.SubtitleTrackIndex = new(0)
 
-	started := postPlaybackStartV3(t, handler, marshalV3StartRequest(t, startRequest))
+	started := startPlaybackDecisionV2(t, handler, marshalV3StartRequest(t, startRequest))
 	if started.SessionID != "" {
 		t.Cleanup(func() { handler.tm.CloseTranscodeSession(started.SessionID, "") })
 	}
@@ -317,7 +317,7 @@ func TestHandleStartPlaybackV3SubtitleOnlyRefusalKeepsAnExecutableSibling(t *tes
 
 // The same holds for an output change that leaves the 4K file unable to show
 // the PGS it was playing with.
-func TestHandleReplanPlaybackV3SubtitleOnlyRefusalKeepsAnExecutableSibling(t *testing.T) {
+func TestReplanPlaybackV2SubtitleOnlyRefusalKeepsAnExecutableSibling(t *testing.T) {
 	handler, source, alternate, startRequest := subtitleBlockedHDRFixtureV3(t)
 	workerOnlyHeaderAuthenticatedV3(t, handler, alternate, &startRequest)
 	original := startRequest.ClientPlaybackContext.Deliveries[playback.DeliveryClassOriginalHTTPV3]
@@ -329,7 +329,7 @@ func TestHandleReplanPlaybackV3SubtitleOnlyRefusalKeepsAnExecutableSibling(t *te
 	startRequest.SubtitleTrackIndex = new(0)
 
 	rec := httptest.NewRecorder()
-	handler.HandleStartPlayback(rec, httptest.NewRequest(http.MethodPost, "/api/v1/playback/start", strings.NewReader(marshalV3StartRequest(t, startRequest))).WithContext(newAuthorizedPlaybackContext()))
+	serveStartPlaybackV2(t, handler, rec, httptest.NewRequest(http.MethodPost, "/api/v2/playback/start", strings.NewReader(marshalV3StartRequest(t, startRequest))).WithContext(newAuthorizedPlaybackContext()))
 	var started playback.DecisionResponseV3
 	if rec.Code != http.StatusCreated || json.Unmarshal(rec.Body.Bytes(), &started) != nil || started.PlaybackPlan == nil || started.PlaybackPlan.EffectiveMediaFileID != source.ID || started.PlaybackPlan.SelectedTracks.Subtitle == nil {
 		t.Fatalf("start did not play the 4K file with its PGS: status=%d body=%s", rec.Code, rec.Body.String())
@@ -344,7 +344,7 @@ func TestHandleReplanPlaybackV3SubtitleOnlyRefusalKeepsAnExecutableSibling(t *te
 	original.Containers = []string{"mp4"}
 	original.Subtitles.EmbeddedBitmap = false
 	nextContext.Deliveries[playback.DeliveryClassOriginalHTTPV3] = original
-	replanned := postPlaybackReplanV3(t, handler, started.SessionID, playback.ReplanRequestV3{
+	replanned := replanPlaybackDecisionV2(t, handler, started.SessionID, playback.ReplanRequestV3{
 		ProtocolVersion: playback.ProtocolV3, Operation: playback.ReplanOperationOutputChangeV3,
 		PlaybackAttemptID: startRequest.PlaybackAttemptID, ReplanRequestID: "executable-sibling-output-0001",
 		FailedPlanID: started.PlaybackPlan.PlanID, PlanAttemptID: "executable-sibling-output-attempt-0001",

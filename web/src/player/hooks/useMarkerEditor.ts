@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useRef, useState } from "react";
+import { t, type MessageKey } from "@/i18n";
 import { usePlayerConfig } from "../context/PlayerConfigContext";
 import { playerV2 } from "../player-v2";
 import { markerUpdateToV2 } from "../marker-wire";
@@ -7,12 +8,12 @@ import type { MarkerDraft, MarkerKind, PlayerTimeRange } from "../types";
 /** Edit order shown in the panel: chronological-ish within an episode. */
 export const MARKER_KINDS: MarkerKind[] = ["intro", "recap", "credits", "preview"];
 
-/** Human labels. "credits" doubles as the outro, so we say so. */
-export const MARKER_LABELS: Record<MarkerKind, string> = {
-  intro: "Intro",
-  recap: "Recap",
-  credits: "Credits / Outro",
-  preview: "Preview",
+/** Message ids of the human labels. "credits" doubles as the outro, so we say so. */
+export const MARKER_LABEL_KEYS: Record<MarkerKind, MessageKey> = {
+  intro: "web.markers.kind.intro",
+  recap: "web.markers.kind.recap",
+  credits: "web.markers.kind.credits",
+  preview: "web.markers.kind.preview",
 };
 
 // Initial span (seconds) given to a freshly created marker before the user
@@ -35,10 +36,6 @@ function normalizeDraft(markers: MarkerDraft): MarkerDraft {
     credits: markers.credits ?? null,
     preview: markers.preview ?? null,
   };
-}
-
-function draftsEqual(a: MarkerDraft, b: MarkerDraft): boolean {
-  return MARKER_KINDS.every((kind) => rangesEqual(a[kind], b[kind]));
 }
 
 function clampRangeToUpper(range: PlayerTimeRange, upper: number): PlayerTimeRange {
@@ -102,23 +99,11 @@ export function useMarkerEditor({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const originalRef = useRef<MarkerDraft>(EMPTY_DRAFT);
-  const savedBaselineRef = useRef<MarkerDraft | null>(null);
 
   const canEdit = canEditParam && fileId != null && duration > 0;
 
-  useEffect(() => {
-    const saved = savedBaselineRef.current;
-    if (saved && draftsEqual(normalizeDraft(markers), saved)) {
-      savedBaselineRef.current = null;
-    }
-  }, [markers]);
-
-  useEffect(() => {
-    savedBaselineRef.current = null;
-  }, [fileId]);
-
   const begin = useCallback(() => {
-    const snapshot = savedBaselineRef.current ?? normalizeDraft(markers);
+    const snapshot = normalizeDraft(markers);
     originalRef.current = snapshot;
     setDraft(snapshot);
     setActiveKind(MARKER_KINDS.find((kind) => snapshot[kind] != null) ?? "intro");
@@ -202,13 +187,12 @@ export function useMarkerEditor({
         body: markerUpdateToV2(body),
       });
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to save markers");
+      setError(e instanceof Error ? e.message : t("web.markers.saveFailed"));
       return;
     } finally {
       setSaving(false);
     }
     originalRef.current = draft;
-    savedBaselineRef.current = draft;
     setDraft(draft);
     setEditing(false);
     try {

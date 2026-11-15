@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/ai/jobrunner"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/subtitles"
 
@@ -21,7 +22,12 @@ func newReuseTestService(t *testing.T, repo *recordingRepo, file *models.MediaFi
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 	cfg := Config{Configured: true, SpeechConfigured: true, TranslateEnabled: true, TranscribeEnabled: true, ChatModel: "chat", ASRModel: "asr"}
-	return NewService(ctx, cfg, repo, nil, stubTranscriber{}, nil, nil, singleFileResolver{file: file}, nil, "", nil, nil)
+	// These tests check what Enqueue decides, not what a job does: no dispatch
+	// slot is ever free, so queued jobs never run and abort when cleanup
+	// cancels the service.
+	sem := jobrunner.NewSemaphore(1)
+	sem <- struct{}{}
+	return NewService(ctx, cfg, repo, nil, stubTranscriber{}, nil, nil, singleFileResolver{file: file}, nil, "", nil, sem)
 }
 
 // embeddedSource is the identity of reuseTestFile's embedded track.

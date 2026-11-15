@@ -7,11 +7,11 @@ import (
 	"io/fs"
 	"log/slog"
 	"os"
+	"slices"
 	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/jackc/pgx/v5/stdlib"
 	"github.com/pressly/goose/v3"
 	"github.com/pressly/goose/v3/lock"
 )
@@ -171,26 +171,21 @@ func MigrationStatuses(ctx context.Context, pool *pgxpool.Pool, fsys fs.FS, dir 
 }
 
 func newMigrationProvider(pool *pgxpool.Pool, fsys fs.FS, dir string) (*goose.Provider, error) {
-	migrationFS, err := migrationSubFS(fsys, dir)
+	p, err := openMigrationProvider(pool, fsys, dir, goMigrations())
 	if err != nil {
 		return nil, err
 	}
+	return p.Provider, nil
+}
 
-	sqlDB := stdlib.OpenDBFromPool(pool)
-
-	locker, err := lock.NewPostgresSessionLocker(lock.WithLockID(schemaMigrationsLockID))
-	if err != nil {
-		_ = sqlDB.Close()
-		return nil, fmt.Errorf("creating goose migration lock: %w", err)
-	}
-
+func newGooseProvider(sqlDB *sql.DB, migrationFS fs.FS, locker lock.SessionLocker, goMigs []*goose.Migration) (*goose.Provider, error) {
 	provider, err := goose.NewProvider(
 		goose.DialectPostgres,
 		sqlDB,
 		migrationFS,
 		goose.WithTableName(gooseVersionTable),
 		goose.WithAllowOutofOrder(true),
-		goose.WithSessionLocker(&legacyBootstrapLocker{delegate: locker}),
+		goose.WithSessionLocker(locker),
 		// These are Go rather than SQL because their conversion rules live
 		// in Go packages shared with other write paths: the settings backfill
 		// validates every value against the contract and re-encodes it as
@@ -201,20 +196,52 @@ func newMigrationProvider(pool *pgxpool.Pool, fsys fs.FS, dir string) (*goose.Pr
 		// expressed in SQL without duplicating those rules. The invalid index rebuild and the
 		// push attempt key scope decide per index whether to drop and build it
 		// concurrently, which SQL cannot do outside a transaction.
-		goose.WithGoMigrations(
-			settingsBackfillMigration(),
-			displayPrefsMoveMigration(),
-			subtitleLanguageBackfillMigration(),
-			invalidIndexRebuildMigration(),
-			pushAttemptKeyScopeMigration(),
-			externalSubtitleNameBackfillMigration(),
-		),
+		goose.WithGoMigrations(goMigs...),
 	)
 	if err != nil {
-		_ = sqlDB.Close()
 		return nil, fmt.Errorf("creating goose migration provider: %w", err)
 	}
 	return provider, nil
+}
+
+func goMigrations() []*goose.Migration {
+	return []*goose.Migration{
+		settingsBackfillMigration(),
+		displayPrefsMoveMigration(),
+		subtitleLanguageBackfillMigration(),
+		invalidIndexRebuildMigration(),
+		pushAttemptKeyScopeMigration(),
+		externalSubtitleNameBackfillMigration(),
+	}
+}
+
+// MigrationVersions lists every migration version this binary carries, SQL
+// and Go, in ascending order. A restore refuses a backup whose schema is
+// newer than the last of them, or that has applied a version not among them:
+// migrations run out of order, so a database can hold a version older than
+// the newest one here that this binary does not carry.
+func MigrationVersions(fsys fs.FS, dir string) ([]int64, error) {
+	migrationFS, err := migrationSubFS(fsys, dir)
+	if err != nil {
+		return nil, err
+	}
+	names, err := fs.Glob(migrationFS, "*.sql")
+	if err != nil {
+		return nil, err
+	}
+	versions := make([]int64, 0, len(names)+len(goMigrations()))
+	for _, name := range names {
+		version, err := goose.NumericComponent(name)
+		if err != nil {
+			return nil, fmt.Errorf("migration %s: %w", name, err)
+		}
+		versions = append(versions, version)
+	}
+	for _, m := range goMigrations() {
+		versions = append(versions, m.Version)
+	}
+	slices.Sort(versions)
+	return slices.Compact(versions), nil
 }
 
 func migrationSubFS(fsys fs.FS, dir string) (fs.FS, error) {

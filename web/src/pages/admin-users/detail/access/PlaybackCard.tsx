@@ -1,4 +1,4 @@
-import { useId } from "react";
+import { useId, type ReactNode } from "react";
 
 import type { AdminUser, UpdateUserRequest } from "@/api/types";
 import type { PolicyInheritHints } from "@/components/UserPolicyFields";
@@ -12,11 +12,13 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { useT, type MessageKey } from "@/i18n";
 import {
   PLAYBACK_QUALITY_OPTIONS,
   playbackQualityPresetFromValue,
   playbackQualityValueFromPreset,
 } from "@/lib/playback-quality";
+import { TOUCH_TARGETS } from "@/lib/touchTargets";
 
 import { KeyValueRow } from "../ui";
 import { EditableCard, type AccessCardProps } from "./EditableCard";
@@ -37,11 +39,10 @@ import {
   sameVideoTranscoding,
   videoTranscodingFromEffective,
   videoTranscodingOverrides,
-  type InheritContext,
+  allowedOptions,
   type PolicyRowKey,
   type RowDraft,
   type VideoTranscoding,
-  ALLOWED_OPTIONS,
 } from "./policySources";
 import { useAccountCardDraft } from "./useAccountCardDraft";
 
@@ -55,15 +56,13 @@ const PLAYBACK_ROWS: PolicyRowKey[] = [
 ];
 
 const LABELS = {
-  quality: "Max quality",
-  streams: "Simultaneous streams",
-  video: "Video transcoding",
-  audio: "Audio-only transcoding",
-  remote: "Bitrate cap, remote",
-  local: "Bitrate cap, local",
-} as const;
-
-const REMOTE_DESCRIPTION = "Streams from outside your network";
+  quality: "web.admin.users.detail.access.playback.maxQuality",
+  streams: "web.admin.users.detail.access.playback.streams",
+  video: "web.admin.users.detail.access.playback.video",
+  audio: "web.admin.users.detail.access.playback.audio",
+  remote: "web.admin.users.detail.access.playback.remoteBitrate",
+  local: "web.admin.users.detail.access.playback.localBitrate",
+} as const satisfies Record<string, MessageKey>;
 
 /** Where a Custom bitrate cap starts when the default is no cap. */
 const CUSTOM_BITRATE_START_KBPS = 20000;
@@ -138,8 +137,8 @@ function savedVideo(base: PlaybackDraft): VideoTranscoding | null {
   return videoOverride(base.video) ?? null;
 }
 
-function changedRows(d: PlaybackDraft, base: PlaybackDraft): string[] {
-  const rows: string[] = [];
+function changedRows(d: PlaybackDraft, base: PlaybackDraft): MessageKey[] {
+  const rows: MessageKey[] = [];
   if (rowChanged(d.quality, rowOverride(base.quality) ?? null)) rows.push(LABELS.quality);
   if (rowChanged(d.streams, rowOverride(base.streams) ?? null)) rows.push(LABELS.streams);
   if (videoChanged(d.video, savedVideo(base))) rows.push(LABELS.video);
@@ -189,14 +188,17 @@ function inheritedVideo(hints: PolicyInheritHints): VideoTranscoding | undefined
   return videoTranscodingFromEffective(hints.transcode_allowed, hints.max_transcodes);
 }
 
-function followsText(ctx: InheritContext): string {
-  return ctx.kind === "group" ? ctx.name : "the server default";
+/** The quality presets as Custom choices; call it when rendering. */
+function qualityOptions(): { value: string; label: string }[] {
+  return PLAYBACK_QUALITY_OPTIONS.map((option) => ({
+    value: playbackQualityValueFromPreset(option.value),
+    label: formatQuality(playbackQualityValueFromPreset(option.value)),
+  }));
 }
 
-const QUALITY_OPTIONS = PLAYBACK_QUALITY_OPTIONS.map((option) => ({
-  value: playbackQualityValueFromPreset(option.value),
-  label: formatQuality(playbackQualityValueFromPreset(option.value)),
-}));
+const bold = (chunks: ReactNode[]) => (
+  <strong className="text-foreground font-semibold">{chunks}</strong>
+);
 
 /** Keys quality options by preset: the "any" wire value is "", which Radix Select can't key. */
 const qualityKey = (value: string) => playbackQualityPresetFromValue(value);
@@ -210,6 +212,7 @@ export function PlaybackCard({
   ctx,
   hints,
 }: AccessCardProps) {
+  const t = useT();
   const draft = useAccountCardDraft({ id: "playback", editor, toDraft, toBody, changedRows });
   const streamsId = useId();
   const videoId = useId();
@@ -224,18 +227,29 @@ export function PlaybackCard({
   const inheritedStreams = hints.max_streams;
   const videoDefault = inheritedVideo(hints);
 
-  const viewDescription =
-    custom > 0
-      ? `${custom} ${custom === 1 ? "limit" : "limits"} set for this account; the rest follow ${followsText(ctx)}.`
-      : `Every limit follows ${followsText(ctx)}.`;
-  const editDescription = (
-    <>
-      <strong className="text-foreground font-semibold">Default</strong> follows{" "}
-      {ctx.kind === "group" ? `the ${ctx.name} group` : "the server default"}.{" "}
-      <strong className="text-foreground font-semibold">Custom</strong> sets a value for this
-      account only.
-    </>
-  );
+  let viewDescription: string;
+  if (ctx.kind === "group") {
+    viewDescription =
+      custom > 0
+        ? t("web.admin.users.detail.access.playback.customCountGroup", {
+            count: custom,
+            group: ctx.name,
+          })
+        : t("web.admin.users.detail.access.playback.allFollowGroup", { group: ctx.name });
+  } else {
+    viewDescription =
+      custom > 0
+        ? t("web.admin.users.detail.access.playback.customCountServer", { count: custom })
+        : t("web.admin.users.detail.access.playback.allFollowServer");
+  }
+  const editDescription =
+    ctx.kind === "group"
+      ? t("web.admin.users.detail.access.playback.editDescriptionGroup", {
+          group: ctx.name,
+          b: bold,
+        })
+      : t("web.admin.users.detail.access.playback.editDescriptionServer", { b: bold });
+  const allowed = allowedOptions();
 
   function bitrateRow(
     key: "remote" | "local",
@@ -244,12 +258,12 @@ export function PlaybackCard({
     inherited: number | undefined,
     description?: string,
   ) {
-    const label = LABELS[key];
+    const label = t(LABELS[key]);
     return (
       <KeyValueRow
         label={row.custom ? <Label htmlFor={id}>{label}</Label> : label}
         description={description}
-        changed={changed.has(label)}
+        changed={changed.has(LABELS[key])}
         value={
           <DefaultCustomSegment
             label={label}
@@ -297,7 +311,7 @@ export function PlaybackCard({
       {draft.editing && d ? (
         <>
           <ChoicePolicyEdit
-            label={LABELS.quality}
+            label={t(LABELS.quality)}
             row={d.quality}
             saved={rowOverride(saved.quality) ?? null}
             inherited={
@@ -305,22 +319,22 @@ export function PlaybackCard({
                 ? undefined
                 : canonicalQuality(hints.max_playback_quality)
             }
-            options={QUALITY_OPTIONS}
+            options={qualityOptions()}
             optionKey={qualityKey}
             onChange={(quality) => setDraft((prev) => ({ ...prev, quality }))}
           />
           <KeyValueRow
             label={
               d.streams.custom ? (
-                <Label htmlFor={streamsId}>{LABELS.streams}</Label>
+                <Label htmlFor={streamsId}>{t(LABELS.streams)}</Label>
               ) : (
-                LABELS.streams
+                t(LABELS.streams)
               )
             }
             changed={changed.has(LABELS.streams)}
             value={
               <DefaultCustomSegment
-                label={LABELS.streams}
+                label={t(LABELS.streams)}
                 defaultText={
                   inheritedStreams === undefined ? undefined : formatStreams(inheritedStreams)
                 }
@@ -360,19 +374,21 @@ export function PlaybackCard({
                   />
                   <span className="text-muted-foreground text-xs">
                     {d.streams.value === null
-                      ? "Enter a whole number, or switch back to Default."
-                      : "0 = unlimited"}
+                      ? t("web.admin.users.detail.access.playback.streamsInvalid")
+                      : t("web.admin.users.detail.access.playback.streamsHint")}
                   </span>
                 </div>
               </DefaultCustomSegment>
             }
           />
           <KeyValueRow
-            label={d.video.custom ? <Label htmlFor={videoId}>{LABELS.video}</Label> : LABELS.video}
+            label={
+              d.video.custom ? <Label htmlFor={videoId}>{t(LABELS.video)}</Label> : t(LABELS.video)
+            }
             changed={changed.has(LABELS.video)}
             value={
               <DefaultCustomSegment
-                label={LABELS.video}
+                label={t(LABELS.video)}
                 defaultText={videoDefault ? formatVideoTranscoding(videoDefault) : undefined}
                 custom={d.video.custom}
                 onCustomChange={(on) =>
@@ -400,12 +416,18 @@ export function PlaybackCard({
                     }
                   >
                     <SelectTrigger id={videoId} className="w-32">
-                      <SelectValue placeholder="Choose" />
+                      <SelectValue placeholder={t("web.admin.users.detail.access.choose")} />
                     </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="off">Off</SelectItem>
-                      <SelectItem value="unlimited">Unlimited</SelectItem>
-                      <SelectItem value="limit">Up to</SelectItem>
+                    <SelectContent className={TOUCH_TARGETS}>
+                      <SelectItem value="off">
+                        {t("web.admin.users.detail.access.value.off")}
+                      </SelectItem>
+                      <SelectItem value="unlimited">
+                        {t("web.admin.users.detail.access.value.unlimited")}
+                      </SelectItem>
+                      <SelectItem value="limit">
+                        {t("web.admin.users.detail.access.playback.upTo")}
+                      </SelectItem>
                     </SelectContent>
                   </Select>
                   {d.video.mode === "limit" ? (
@@ -414,7 +436,7 @@ export function PlaybackCard({
                       inputMode="numeric"
                       min={1}
                       step={1}
-                      aria-label="Video transcodes at a time"
+                      aria-label={t("web.admin.users.detail.access.playback.videoMaxAria")}
                       className="w-20"
                       value={d.video.maxText}
                       aria-invalid={
@@ -431,11 +453,11 @@ export function PlaybackCard({
             }
           />
           <ChoicePolicyEdit
-            label={LABELS.audio}
+            label={t(LABELS.audio)}
             row={d.audio}
             saved={rowOverride(saved.audio) ?? null}
             inherited={hints.audio_transcode_allowed}
-            options={ALLOWED_OPTIONS}
+            options={allowed}
             onChange={(audio) => setDraft((prev) => ({ ...prev, audio }))}
           />
           {bitrateRow(
@@ -443,26 +465,26 @@ export function PlaybackCard({
             remoteId,
             d.remote,
             hints.max_remote_stream_bitrate_kbps,
-            REMOTE_DESCRIPTION,
+            t("web.admin.users.detail.access.playback.remoteDescription"),
           )}
           {bitrateRow("local", localId, d.local, hints.max_local_stream_bitrate_kbps)}
         </>
       ) : (
         <>
           <PolicyValueRow
-            label={LABELS.quality}
+            label={t(LABELS.quality)}
             value={formatQuality(effective.max_playback_quality)}
             source={rowSource(user, "maxQuality", ctx)}
             base={inheritedValueText("maxQuality", hints, ctx, libraries)}
           />
           <PolicyValueRow
-            label={LABELS.streams}
+            label={t(LABELS.streams)}
             value={formatStreams(effective.max_streams)}
             source={rowSource(user, "maxStreams", ctx)}
             base={inheritedValueText("maxStreams", hints, ctx, libraries)}
           />
           <PolicyValueRow
-            label={LABELS.video}
+            label={t(LABELS.video)}
             value={formatVideoTranscoding(
               videoTranscodingFromEffective(effective.transcode_allowed, effective.max_transcodes),
             )}
@@ -470,20 +492,20 @@ export function PlaybackCard({
             base={inheritedValueText("videoTranscoding", hints, ctx, libraries)}
           />
           <PolicyValueRow
-            label={LABELS.audio}
+            label={t(LABELS.audio)}
             value={formatAllowed(effective.audio_transcode_allowed)}
             source={rowSource(user, "audioTranscoding", ctx)}
             base={inheritedValueText("audioTranscoding", hints, ctx, libraries)}
           />
           <PolicyValueRow
-            label={LABELS.remote}
-            description={REMOTE_DESCRIPTION}
+            label={t(LABELS.remote)}
+            description={t("web.admin.users.detail.access.playback.remoteDescription")}
             value={formatBitrateCap(effective.max_remote_stream_bitrate_kbps)}
             source={rowSource(user, "remoteBitrate", ctx)}
             base={inheritedValueText("remoteBitrate", hints, ctx, libraries)}
           />
           <PolicyValueRow
-            label={LABELS.local}
+            label={t(LABELS.local)}
             value={formatBitrateCap(effective.max_local_stream_bitrate_kbps)}
             source={rowSource(user, "localBitrate", ctx)}
             base={inheritedValueText("localBitrate", hints, ctx, libraries)}

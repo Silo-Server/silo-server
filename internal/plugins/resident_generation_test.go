@@ -156,3 +156,8 @@ func TestResidentSupervisorNewGenerationNeverAdoptsInFlightOlderLaunch(t *testin
 		t.Fatalf("stopped seqs = %v, want the adopted generation 1 process (seq 1) stopped exactly once", stopped)
 	}
 }
+
+func (h *seqFakeHost) Running(id int) bool {
+	_, err := h.Client(id)
+	return err == nil
+}

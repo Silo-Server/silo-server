@@ -1,5 +1,5 @@
 {
-  "revision": "95cac6df062e1009b5f74361932ca337f332db043d8ab1c989e92bf8126b17c4",
+  "revision": "320314e115aea81028873c8f40b8929eb63c75e2b740032428b746a34aafa2af",
   "state": "available",
   "allowed": true,
   "bounded_creation": true,
@@ -39,6 +39,7 @@
   "monitoring_modes": [],
   "bulk_quality": true,
   "monitor_quality": true,
+  "batch_version": true,
   "preparation_progress": true,
   "direct_download_links": false,
   "prepare_again": true,

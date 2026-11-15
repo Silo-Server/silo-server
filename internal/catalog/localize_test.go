@@ -248,3 +248,38 @@ func TestApplyItemLocalizationKeepsNFONamedArtwork(t *testing.T) {
 		t.Errorf("uncached NFO poster: path %q, want the localized poster", got.PosterPath)
 	}
 }
+
+// A locked title or overview is what every viewer sees: a provider's localized
+// text doesn't cover it, but a translation of the edit by hand or by AI does.
+func TestSeasonEpisodeLocalizationRespectsLocks(t *testing.T) {
+	locked := []int{fieldNameLocked, fieldOverviewLocked}
+	for _, tc := range []struct {
+		name         string
+		locks        []int
+		source       string
+		wantTitle    string
+		wantOverview string
+	}{
+		{"unlocked takes the localization", nil, models.LocalizationSourceProvider, "Titre", "Résumé"},
+		{"locked ignores provider text", locked, models.LocalizationSourceProvider, "Edited", "Edited overview"},
+		{"locked keeps a manual translation", locked, models.LocalizationSourceManual, "Edited", "Résumé"},
+		{"locked keeps an AI translation", locked, models.LocalizationSourceAI, "Edited", "Résumé"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			episode := applyEpisodeLocalization(
+				&models.Episode{Title: "Edited", Overview: "Edited overview", LockedFields: tc.locks},
+				&models.EpisodeLocalization{Title: "Titre", Overview: "Résumé", OverviewSource: tc.source},
+			)
+			if episode.Title != tc.wantTitle || episode.Overview != tc.wantOverview {
+				t.Errorf("episode = %q, %q, want %q, %q", episode.Title, episode.Overview, tc.wantTitle, tc.wantOverview)
+			}
+			season := applySeasonLocalization(
+				&models.Season{Title: "Edited", Overview: "Edited overview", LockedFields: tc.locks},
+				&models.SeasonLocalization{Title: "Titre", Overview: "Résumé", OverviewSource: tc.source}, false,
+			)
+			if season.Title != tc.wantTitle || season.Overview != tc.wantOverview {
+				t.Errorf("season = %q, %q, want %q, %q", season.Title, season.Overview, tc.wantTitle, tc.wantOverview)
+			}
+		})
+	}
+}

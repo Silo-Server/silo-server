@@ -76,7 +76,7 @@ type ApplePushResetInput struct {
 	Body ApplePushResetBody
 }
 type ApplePushResetReceipt struct {
-	Reset bool `json:"reset" doc:"True when the server cleared the installation's binding and its Apple push registrations. False when there was nothing to clear: no ordered record for this device_id, or one already bound to the sent key, whose generation order still applies. After a cleared or absent record, the next registration with that key binds at any positive generation."`
+	Reset bool `json:"reset" doc:"True when the server cleared the installation's binding and its Apple push registrations. False when there was nothing to clear: no ordered record for this device_id, or one already bound to the sent key, whose generation order still applies. After a cleared or absent record, the next registration with that key binds at any positive generation, unless a retirement reached the cleared record first and fenced older generations."`
 }
 type ApplePushResetOutput struct{ Body ApplePushResetReceipt }
 type ApplePushRegistrationCapability struct {
@@ -127,7 +127,7 @@ func registerOrderedApplePush(reg *Registry) {
 		if err != nil {
 			return nil, err
 		}
-		cmd := notifications.ApplePushCommand{UserID: user, ProfileID: profile, InstallationKey: in.InstallationKey, Generation: generation, ApplePushRegistrationInput: notifications.ApplePushRegistrationInput{DeviceID: in.Body.DeviceID, APNsToken: in.Body.APNsToken, APNsEnvironment: in.Body.APNsEnvironment, APNsTopic: in.Body.APNsTopic, PushMode: in.Body.PushMode}}
+		cmd := notifications.ApplePushCommand{UserID: user, ProfileID: profile, InstallationKey: in.InstallationKey, Generation: generation, ApplePushRegistrationInput: notifications.ApplePushRegistrationInput{DeviceID: in.Body.DeviceID, APNsToken: in.Body.APNsToken, APNsEnvironment: in.Body.APNsEnvironment, APNsTopic: in.Body.APNsTopic, PushMode: in.Body.PushMode, LoginSessionID: claims.SessionID}}
 		identity := evt.SocketIdentity{UserID: user, ProfileID: profile, SessionID: claims.SessionID, Role: claims.Role, ImpersonatorUserID: claims.ImpersonatorUserID, AccessExpiresAt: claims.ExpiresAt.Time}
 		if r := requestFrom(ctx); r != nil {
 			identity.ProfileToken = r.Header.Get("X-Profile-Token")

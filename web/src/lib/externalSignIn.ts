@@ -2,38 +2,36 @@
 // login page, the account Sign-in section and the device approval page.
 // The rules behind them are in docs/architecture/external-sign-in.md.
 
+import { t, type MessageKey } from "@/i18n";
+
 // Text for the reason= codes an OAuth flow reports: on /login after a failed
 // sign-in (error=oauth_failed) and on a linking flow's return path
 // (error=oauth_link_failed). See internal/auth/oauth_handler.go.
-const OAUTH_FAILURE_TEXT: Record<string, string> = {
-  not_permitted: "Your account at the sign-in provider isn't allowed to use this server.",
-  account_required: "You don't have an account on this server yet. Ask an admin to add you.",
-  email_in_use:
-    "An account with this email already exists. Ask an admin to connect it to the sign-in provider.",
-  identity_linked_elsewhere: "That provider account is already connected to another account.",
-  account_disabled: "This account is disabled.",
-  provider_unavailable: "The sign-in provider can't be reached right now. Try again later.",
-  state_invalid: "The sign-in didn't finish in this browser. Start again from this page.",
-  session_expired: "The sign-in took too long. Start again from this page.",
-  already_linked: "This account is already connected to the sign-in provider.",
+const OAUTH_FAILURE_TEXT: Record<string, MessageKey> = {
+  not_permitted: "web.auth.oauthFailure.notPermitted",
+  account_required: "web.auth.oauthFailure.accountRequired",
+  email_in_use: "web.auth.oauthFailure.emailInUse",
+  identity_linked_elsewhere: "web.auth.oauthFailure.identityLinkedElsewhere",
+  account_disabled: "web.auth.oauthFailure.accountDisabled",
+  provider_unavailable: "web.auth.oauthFailure.providerUnavailable",
+  state_invalid: "web.auth.oauthFailure.stateInvalid",
+  session_expired: "web.auth.oauthFailure.sessionExpired",
+  already_linked: "web.auth.oauthFailure.alreadyLinked",
 };
-const OAUTH_FAILURE_FALLBACK = "Sign-in with the provider failed. Try again.";
 
 /** Readable text for an OAuth failure reason code; unknown codes get a generic line. */
 export function oauthFailureText(reason: string | null | undefined): string {
-  return (reason && OAUTH_FAILURE_TEXT[reason]) || OAUTH_FAILURE_FALLBACK;
+  return t((reason && OAUTH_FAILURE_TEXT[reason]) || "web.auth.oauthFailure.fallback");
 }
 
 // A linking flow's reasons, where the person was already signed in and
 // asked to connect a provider; the rest read as they do on sign-in.
-const OAUTH_LINK_FAILURE_TEXT: Record<string, string> = {
-  identity_linked_elsewhere:
-    "That provider account is already connected to another account on this server.",
-  already_linked: "Your account is already connected to this sign-in provider.",
-  state_invalid: "Connecting didn't finish in this browser. Try again from this page.",
-  session_expired: "Connecting took too long. Try again from this page.",
+const OAUTH_LINK_FAILURE_TEXT: Record<string, MessageKey> = {
+  identity_linked_elsewhere: "web.auth.oauthLinkFailure.identityLinkedElsewhere",
+  already_linked: "web.auth.oauthLinkFailure.alreadyLinked",
+  state_invalid: "web.auth.oauthLinkFailure.stateInvalid",
+  session_expired: "web.auth.oauthLinkFailure.sessionExpired",
 };
-const OAUTH_LINK_FAILURE_FALLBACK = "Connecting the sign-in provider failed. Try again.";
 
 /**
  * Who a network provider (such as Tailscale) says owns this device, for a
@@ -53,11 +51,11 @@ export function networkIdentityName(provider: {
 export function networkSignInRefusalText(problemType: string, providerName: string): string | null {
   switch (problemType) {
     case "network_identity_required":
-      return `Open this server at its ${providerName} address to sign in this way.`;
+      return t("web.auth.networkSignIn.addressRequired", { provider: providerName });
     case "not_permitted":
-      return `${providerName} doesn't allow this device to sign in to this server.`;
+      return t("web.auth.networkSignIn.notPermitted", { provider: providerName });
     case "email_in_use":
-      return `An account with your email already exists. Sign in with your password, then connect ${providerName} under Settings → Sign-in.`;
+      return t("web.auth.networkSignIn.emailInUse", { provider: providerName });
     case "permission_denied":
       return oauthFailureText("account_disabled");
     case "account_required":
@@ -71,9 +69,9 @@ export function networkSignInRefusalText(problemType: string, providerName: stri
 
 /** Readable text for a linking flow's failure reason (error=oauth_link_failed). */
 export function oauthLinkFailureText(reason: string | null | undefined): string {
-  if (reason && OAUTH_LINK_FAILURE_TEXT[reason]) return OAUTH_LINK_FAILURE_TEXT[reason];
-  if (reason && OAUTH_FAILURE_TEXT[reason]) return OAUTH_FAILURE_TEXT[reason];
-  return OAUTH_LINK_FAILURE_FALLBACK;
+  if (reason && OAUTH_LINK_FAILURE_TEXT[reason]) return t(OAUTH_LINK_FAILURE_TEXT[reason]);
+  if (reason && OAUTH_FAILURE_TEXT[reason]) return t(OAUTH_FAILURE_TEXT[reason]);
+  return t("web.auth.oauthLinkFailure.fallback");
 }
 
 /**

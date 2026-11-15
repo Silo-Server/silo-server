@@ -22,6 +22,7 @@ import type {
 } from "@/api/types";
 import { ItemLibraryPicker } from "@/components/ItemLibraryPicker";
 import { useItemFiles, useSearchItemMatchCandidates, useSplitItem } from "@/hooks/queries/items";
+import { codeNumber, useT, type MessageKey } from "@/i18n";
 import { libraryIdsOfFiles } from "@/lib/itemLibraries";
 import { cn } from "@/lib/utils";
 
@@ -40,10 +41,10 @@ interface SplitItemDialogProps {
   onOpenChange: (open: boolean) => void;
 }
 
-const HISTORY_MODE_LABELS: Record<SplitHistoryMode, string> = {
-  evidence: "Follow play evidence (recommended)",
-  keep: "Keep all history on this item",
-  move_all: "Move everything to the new item",
+const HISTORY_MODE_LABELS: Record<SplitHistoryMode, MessageKey> = {
+  evidence: "web.item.split.historyEvidence",
+  keep: "web.item.split.historyKeep",
+  move_all: "web.item.split.historyMoveAll",
 };
 
 /**
@@ -53,6 +54,7 @@ const HISTORY_MODE_LABELS: Record<SplitHistoryMode, string> = {
  * keep the corrected assignment.
  */
 export default function SplitItemDialog({ item, open, onOpenChange }: SplitItemDialogProps) {
+  const t = useT();
   const { data: filesData, isLoading: filesLoading } = useItemFiles(
     open ? item.content_id : undefined,
   );
@@ -208,28 +210,32 @@ export default function SplitItemDialog({ item, open, onOpenChange }: SplitItemD
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="flex max-h-[85vh] max-w-2xl flex-col overflow-hidden">
         <DialogHeader>
-          <DialogTitle>Split Versions</DialogTitle>
+          <DialogTitle>{t("web.item.split.title")}</DialogTitle>
         </DialogHeader>
 
-        <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto pr-1">
+        <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto pe-1">
           <div className="bg-muted/50 shrink-0 rounded-lg px-3 py-2 text-sm">
             <span className="font-medium">{item.title}</span>
-            {item.year ? <span className="text-muted-foreground ml-2">({item.year})</span> : null}
-            <Badge variant="secondary" className="ml-2 text-[10px]">
+            {item.year ? (
+              <span className="text-muted-foreground ms-2">
+                {t("web.item.dialog.yearInParens", { year: item.year })}
+              </span>
+            ) : null}
+            <Badge variant="secondary" className="ms-2 text-[10px]">
               {item.type}
             </Badge>
           </div>
 
           {/* Step 1: pick the files that belong to a different title */}
           <section className="space-y-2">
-            <Label>Files to move</Label>
+            <Label>{t("web.item.split.filesToMove")}</Label>
             {filesLoading ? (
               <div className="text-muted-foreground bg-muted/30 rounded-lg border px-3 py-2 text-sm">
-                Loading files…
+                {t("web.item.split.loadingFiles")}
               </div>
             ) : files.length < 2 ? (
               <div className="text-muted-foreground bg-muted/30 rounded-lg border px-3 py-2 text-sm">
-                This item has only one file; splitting needs at least two.
+                {t("web.item.split.oneFile")}
               </div>
             ) : (
               <div className="bg-background/70 divide-border/50 divide-y rounded-lg border">
@@ -242,14 +248,14 @@ export default function SplitItemDialog({ item, open, onOpenChange }: SplitItemD
                           type="checkbox"
                           checked={allSelected}
                           onChange={() => toggleRoot(rootFiles)}
-                          aria-label={`Select all files in ${root}`}
+                          aria-label={t("web.item.split.selectFolder", { folder: root })}
                         />
                         <Folder className="text-muted-foreground h-3.5 w-3.5 shrink-0" />
                         <span className="min-w-0 flex-1 truncate font-mono text-xs" title={root}>
                           {root}
                         </span>
                       </label>
-                      <div className="mt-1 space-y-1 pl-6">
+                      <div className="mt-1 space-y-1 ps-6">
                         {rootFiles.map((file) => (
                           <label
                             key={file.id}
@@ -259,7 +265,7 @@ export default function SplitItemDialog({ item, open, onOpenChange }: SplitItemD
                               type="checkbox"
                               checked={selectedIds.has(file.id)}
                               onChange={() => toggleFile(file.id)}
-                              aria-label={`Select ${file.file_path}`}
+                              aria-label={t("web.item.split.selectFile", { path: file.file_path })}
                             />
                             <span
                               className="text-muted-foreground min-w-0 flex-1 truncate font-mono"
@@ -269,7 +275,10 @@ export default function SplitItemDialog({ item, open, onOpenChange }: SplitItemD
                             </span>
                             {file.season_number && file.episode_number ? (
                               <Badge variant="outline" className="text-[10px]">
-                                S{file.season_number}E{file.episode_number}
+                                {t("web.item.split.episodeCode", {
+                                  season: codeNumber(file.season_number),
+                                  episode: codeNumber(file.episode_number),
+                                })}
                               </Badge>
                             ) : null}
                           </label>
@@ -281,49 +290,46 @@ export default function SplitItemDialog({ item, open, onOpenChange }: SplitItemD
               </div>
             )}
             {selectedIds.size > 0 && selectedIds.size === files.length && (
-              <p className="text-destructive text-xs">
-                All files are selected — that is a re-match, not a split. Use “Match Item” instead,
-                or deselect the files that are correct.
-              </p>
+              <p className="text-destructive text-xs">{t("web.item.split.allSelected")}</p>
             )}
           </section>
 
           {/* Step 2: what the moved files actually are */}
           <section className="space-y-3">
-            <Label>Correct identity for the moved files</Label>
+            <Label>{t("web.item.split.identity")}</Label>
             <div className="grid grid-cols-2 gap-3">
               <div className="col-span-2">
                 <Input
                   value={title}
                   onChange={(e) => setTitle(e.target.value)}
-                  placeholder="Title"
-                  aria-label="Search title"
+                  placeholder={t("web.item.dialog.fieldTitle")}
+                  aria-label={t("web.item.split.searchTitle")}
                 />
               </div>
               <Input
                 value={year}
                 onChange={(e) => setYear(e.target.value)}
-                placeholder="Year"
+                placeholder={t("web.item.dialog.fieldYear")}
                 type="number"
-                aria-label="Search year"
+                aria-label={t("web.item.split.searchYear")}
               />
               <Input
                 value={tmdbId}
                 onChange={(e) => setTmdbId(e.target.value)}
-                placeholder="TMDB ID"
-                aria-label="TMDB ID"
+                placeholder={t("web.item.dialog.tmdbId")}
+                aria-label={t("web.item.dialog.tmdbId")}
               />
               <Input
                 value={imdbId}
                 onChange={(e) => setImdbId(e.target.value)}
-                placeholder="IMDb ID (tt…)"
-                aria-label="IMDb ID"
+                placeholder={t("web.item.split.imdbPlaceholder")}
+                aria-label={t("web.item.dialog.imdbId")}
               />
               <Input
                 value={tvdbId}
                 onChange={(e) => setTvdbId(e.target.value)}
-                placeholder="TVDB ID"
-                aria-label="TVDB ID"
+                placeholder={t("web.item.dialog.tvdbId")}
+                aria-label={t("web.item.dialog.tvdbId")}
               />
             </div>
             {needsLibraryPick && (
@@ -340,11 +346,11 @@ export default function SplitItemDialog({ item, open, onOpenChange }: SplitItemD
               className="w-full gap-2"
             >
               <Search className={cn("h-4 w-4", searchMutation.isPending && "animate-spin")} />
-              Search
+              {t("web.item.dialog.search")}
             </Button>
 
             {candidates.length > 0 && (
-              <div className="max-h-56 space-y-1 overflow-y-auto pr-1">
+              <div className="max-h-56 space-y-1 overflow-y-auto pe-1">
                 {candidates.map((candidate, index) => {
                   const key = Object.entries(candidate.provider_ids)
                     .map(([k, v]) => `${k}-${v}`)
@@ -354,7 +360,7 @@ export default function SplitItemDialog({ item, open, onOpenChange }: SplitItemD
                       key={`${key}-${index}`}
                       type="button"
                       className={cn(
-                        "flex w-full min-w-0 items-center gap-3 rounded-lg border p-2 text-left transition-colors",
+                        "flex w-full min-w-0 items-center gap-3 rounded-lg border p-2 text-start transition-colors",
                         selectedCandidate === candidate
                           ? "border-primary bg-primary/5"
                           : "border-border hover:bg-muted/50",
@@ -384,7 +390,9 @@ export default function SplitItemDialog({ item, open, onOpenChange }: SplitItemD
               </div>
             )}
             {searchMutation.isSuccess && candidates.length === 0 && (
-              <p className="text-muted-foreground text-center text-sm">No candidates found.</p>
+              <p className="text-muted-foreground text-center text-sm">
+                {t("web.item.dialog.noCandidates")}
+              </p>
             )}
 
             <label className="flex cursor-pointer items-center gap-2 text-sm">
@@ -396,64 +404,82 @@ export default function SplitItemDialog({ item, open, onOpenChange }: SplitItemD
                   if (e.target.checked) setSelectedCandidate(null);
                 }}
               />
-              Detach as unmatched (identify later)
+              {t("web.item.split.detachUnmatched")}
             </label>
           </section>
 
           {/* Step 3: watch-state handling */}
           <section className="space-y-2">
-            <Label>Watch history handling</Label>
+            <Label>{t("web.item.split.historyHandling")}</Label>
             <Select
               value={historyMode}
               onValueChange={(value) => setHistoryMode(value as SplitHistoryMode)}
             >
-              <SelectTrigger aria-label="Watch history handling">
+              <SelectTrigger aria-label={t("web.item.split.historyHandling")}>
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
                 {(Object.keys(HISTORY_MODE_LABELS) as SplitHistoryMode[]).map((mode) => (
                   <SelectItem key={mode} value={mode}>
-                    {HISTORY_MODE_LABELS[mode]}
+                    {t(HISTORY_MODE_LABELS[mode])}
                   </SelectItem>
                 ))}
               </SelectContent>
             </Select>
-            <p className="text-muted-foreground text-xs">
-              Resume points and downloads tied to the moved files always follow them. This controls
-              history rows without per-file evidence.
-            </p>
+            <p className="text-muted-foreground text-xs">{t("web.item.split.historyHelp")}</p>
           </section>
 
           {planValid && !preview && (
             <section className="bg-muted/30 text-muted-foreground rounded-lg border px-3 py-2 text-sm">
-              Previewing…
+              {t("web.item.split.previewing")}
             </section>
           )}
           {preview && (
             <section className="bg-muted/30 space-y-1 rounded-lg border px-3 py-2 text-sm">
               <div className="font-medium">
-                Preview — {preview.files_moved} file{preview.files_moved === 1 ? "" : "s"} →{" "}
-                <span className="font-mono text-xs">{preview.target_content_id}</span>
+                {t("web.item.split.previewHeading", {
+                  count: preview.files_moved,
+                  file_count: preview.files_moved,
+                  target_id: preview.target_content_id,
+                  id: (chunks) => <span className="font-mono text-xs">{chunks}</span>,
+                })}
                 {preview.target_created ? (
-                  <Badge variant="secondary" className="ml-2 text-[10px]">
-                    new item
+                  <Badge variant="secondary" className="ms-2 text-[10px]">
+                    {t("web.item.split.newItem")}
                   </Badge>
                 ) : null}
               </div>
               <ul className="text-muted-foreground list-inside list-disc text-xs">
-                <li>{preview.reattribution.progress_moved} resume points move</li>
                 <li>
-                  {preview.reattribution.history_moved} history entries move,{" "}
-                  {preview.reattribution.history_ambiguous} stay for lack of evidence
+                  {t("web.item.split.resumePoints", {
+                    count: preview.reattribution.progress_moved,
+                  })}
                 </li>
-                <li>{preview.reattribution.downloads} downloads move</li>
-                {preview.episode_pairs > 0 && <li>{preview.episode_pairs} episodes re-anchored</li>}
+                <li>
+                  {t("web.item.split.historyEntries", {
+                    moved: preview.reattribution.history_moved,
+                    ambiguous: preview.reattribution.history_ambiguous,
+                  })}
+                </li>
+                <li>
+                  {t("web.item.split.downloads", {
+                    count: preview.reattribution.downloads,
+                  })}
+                </li>
+                {preview.episode_pairs > 0 && (
+                  <li>
+                    {t("web.item.split.episodesReanchored", {
+                      count: preview.episode_pairs,
+                    })}
+                  </li>
+                )}
                 {(preview.root_overrides?.length ?? 0) + (preview.file_overrides?.length ?? 0) >
                   0 && (
                   <li>
-                    {preview.root_overrides?.length ?? 0} folder /{" "}
-                    {preview.file_overrides?.length ?? 0} file identity override{"(s)"} pinned for
-                    future scans
+                    {t("web.item.split.overridesPinned", {
+                      folders: preview.root_overrides?.length ?? 0,
+                      files: preview.file_overrides?.length ?? 0,
+                    })}
                   </li>
                 )}
               </ul>
@@ -469,7 +495,9 @@ export default function SplitItemDialog({ item, open, onOpenChange }: SplitItemD
             data-testid="confirm-split"
           >
             <Scissors className="h-4 w-4" />
-            {splitMutation.isPending && preview ? "Splitting…" : "Split"}
+            {splitMutation.isPending && preview
+              ? t("web.item.split.splitting")
+              : t("web.item.split.split")}
           </Button>
         </div>
       </DialogContent>

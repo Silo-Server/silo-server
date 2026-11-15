@@ -151,7 +151,8 @@ func ratingLabel(imdb, tmdb float64) string {
 	}
 }
 
-// genresLabel renders up to three genres as a comma-separated line.
+// genresLabel renders up to three genres as a comma-separated line, clipped
+// to Discord's field value limit.
 func genresLabel(genres []string) string {
 	kept := make([]string, 0, 3)
 	for _, genre := range genres {
@@ -162,17 +163,13 @@ func genresLabel(genres []string) string {
 			break
 		}
 	}
-	return strings.Join(kept, ", ")
+	return truncateWithEllipsis(strings.Join(kept, ", "), discordFieldValueLimit)
 }
 
 // overviewSnippet clips an overview to the embed teaser length, ending on a
 // word boundary so the cut reads naturally.
 func overviewSnippet(text string) string {
-	text = strings.TrimSpace(text)
-	if len(text) <= discordOverviewLimit {
-		return text
-	}
-	return clipAtWord(strings.TrimSuffix(truncateWithEllipsis(text, discordOverviewLimit), "…"))
+	return shortenTeaser(strings.TrimSpace(text), discordOverviewLimit)
 }
 
 // clipAtWord ends a clipped teaser on a word boundary, when one falls in its
@@ -192,17 +189,14 @@ func titleWithYear(title string, year int) string {
 	return title
 }
 
-// shortenTeaser clips an overview teaser to at most limit characters (code
-// points, as Discord counts them), on a word boundary like overviewSnippet.
+// shortenTeaser clips an overview teaser to at most limit characters (as
+// discordTextLen counts them), ending on a word boundary.
 func shortenTeaser(teaser string, limit int) string {
-	runes := []rune(teaser)
-	if len(runes) <= limit {
-		return teaser
+	clipped := truncateWithEllipsis(teaser, limit)
+	if clipped == teaser || clipped == "" {
+		return clipped
 	}
-	if limit <= 1 {
-		return ""
-	}
-	return clipAtWord(string(runes[:limit-1])) // leaves room for the ellipsis
+	return clipAtWord(strings.TrimSuffix(clipped, "…"))
 }
 
 // embedDescription joins the overview teaser and the provider link line.

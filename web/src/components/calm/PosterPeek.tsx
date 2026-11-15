@@ -4,7 +4,7 @@ import { PosterArt } from "./PosterTile";
 import { usePeekLimiter, type PeekRequest } from "./usePeekLimiter";
 
 /** Fanned like a row on Home; the third poster drops on phones. */
-const POSITIONS = ["left-0", "left-[21px]", "left-[42px] max-sm:hidden"];
+const POSITIONS = ["start-0", "start-[21px]", "start-[42px] max-sm:hidden"];
 
 function IconTile({ icon: Icon }: { icon: LucideIcon }) {
   return (

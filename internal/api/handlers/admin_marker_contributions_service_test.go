@@ -3,10 +3,11 @@ package handlers
 import (
 	"context"
 	"errors"
+	"testing"
+
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/markers"
 	"github.com/Silo-Server/silo-server/internal/models"
-	"testing"
 )
 
 type adminContributionCapture struct {

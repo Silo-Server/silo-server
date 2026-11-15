@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"io/fs"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -43,6 +44,28 @@ func packageErrorTestServer(t *testing.T, status int, body []byte) *httptest.Ser
 	return server
 }
 
+// manifestScript is a plugin binary whose manifest command prints manifest
+// with its own SHA-256 as the checksum, as the SDK does. When ranMarker is
+// set, running it also creates that file, so a test can tell whether the
+// installer executed the binary.
+func manifestScript(t *testing.T, manifest *pluginv1.PluginManifest, ranMarker string) []byte {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("uses shell scripts")
+	}
+	manifest.Checksum = "CHECKSUM"
+	out, err := protojson.Marshal(manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	script := "#!/bin/sh\n"
+	if ranMarker != "" {
+		script += "touch '" + ranMarker + "'\n"
+	}
+	return []byte(script + "sum=$( (sha256sum \"$0\" 2>/dev/null || shasum -a 256 \"$0\") | cut -d' ' -f1)\n" +
+		"sed \"s/CHECKSUM/$sum/\" <<'MANIFEST'\n" + string(out) + "\nMANIFEST\n")
+}
+
 func sha256Hex(data []byte) string {
 	sum := sha256.Sum256(data)
 	return hex.EncodeToString(sum[:])
@@ -70,6 +93,49 @@ func requireTransient(t *testing.T, err error, want bool) {
 	}
 }
 
+type testZipEntry struct {
+	name string
+	data []byte
+	dir  bool
+}
+
+var testBinaryEntry = testZipEntry{name: "plugin", data: []byte("#!/bin/sh\nexit 0\n")}
+
+// writeTestPluginZip writes a valid silo.metadb manifest whose checksum
+// matches testBinaryEntry, followed by entries in order.
+func writeTestPluginZip(t *testing.T, path string, assets []*pluginv1.PackagedAsset, entries ...testZipEntry) {
+	t.Helper()
+	manifest := testPluginManifest(t, "silo.metadb", "0.0.36")
+	manifest.Checksum = sha256Hex(testBinaryEntry.data)
+	manifest.Assets = assets
+	manifestBytes, err := protojson.Marshal(manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var buffer bytes.Buffer
+	archive := zip.NewWriter(&buffer)
+	for _, entry := range append([]testZipEntry{{name: "manifest.json", data: manifestBytes}}, entries...) {
+		header := &zip.FileHeader{Name: entry.name, Method: zip.Deflate}
+		header.SetMode(0o644)
+		if entry.dir {
+			header.SetMode(fs.ModeDir | 0o755)
+		}
+		writer, err := archive.CreateHeader(header)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := writer.Write(entry.data); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := archive.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, buffer.Bytes(), 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
 // A download that does not hash to the catalog's checksum is refused before
 // anything is written, with a reason the admin can read.
 func TestInstallBinaryChecksumMismatchIsPackageError(t *testing.T) {
@@ -79,7 +145,6 @@ func TestInstallBinaryChecksumMismatchIsPackageError(t *testing.T) {
 	_, err := installer.InstallBinary(context.Background(), InstallBinaryRequest{
 		BinaryURL: server.URL + "/plugin",
 		Checksum:  sha256Hex([]byte("original")),
-		Manifest:  packageErrorTestManifest("test.plugin", "1.0.0"),
 	})
 	requirePackageError(t, err, "SHA-256 checksum")
 	requireTransient(t, err, false)
@@ -124,10 +189,6 @@ func TestInstallBinaryUnreachableHostIsTransient(t *testing.T) {
 // or another version: the catalog's identity decides which installation an
 // install replaces.
 func TestInstallBinaryRejectsBinaryNotListedByCatalog(t *testing.T) {
-	body := []byte("binary")
-	server := packageErrorTestServer(t, http.StatusOK, body)
-	installer := NewInstaller(nil, InstallerOptions{BaseDir: t.TempDir(), HTTPClient: server.Client()})
-
 	for _, tc := range []struct {
 		name     string
 		manifest *pluginv1.PluginManifest
@@ -136,10 +197,12 @@ func TestInstallBinaryRejectsBinaryNotListedByCatalog(t *testing.T) {
 		{name: "other version", manifest: packageErrorTestManifest("test.plugin", "2.0.0")},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			body := manifestScript(t, tc.manifest, "")
+			server := packageErrorTestServer(t, http.StatusOK, body)
+			installer := NewInstaller(nil, InstallerOptions{BaseDir: t.TempDir(), HTTPClient: server.Client()})
 			_, err := installer.InstallBinary(context.Background(), InstallBinaryRequest{
 				BinaryURL: server.URL + "/plugin",
 				Checksum:  sha256Hex(body),
-				Manifest:  tc.manifest,
 				PluginID:  "test.plugin",
 				Version:   "1.0.0",
 			})
@@ -274,6 +337,34 @@ func TestServiceInstallLocalRefusesBeforeStoppingInstalledPlugin(t *testing.T) {
 		}},
 		{name: "unsupported API", want: `needs Silo plugin API "v2"`, write: func(t *testing.T, path string) {
 			writePluginArchive(t, path, future)
+		}},
+		// Extraction writes each entry to its cleaned path, so a second entry
+		// for the same file, on a case- or normalization-insensitive
+		// filesystem too, would replace the one that was checked.
+		{name: "manifest alias", want: "archive couldn't be read", write: func(t *testing.T, path string) {
+			writeTestPluginZip(t, path, nil, testBinaryEntry, testZipEntry{name: "./manifest.json", data: []byte("not json")})
+		}},
+		{name: "binary case alias", want: "archive couldn't be read", write: func(t *testing.T, path string) {
+			writeTestPluginZip(t, path, nil, testBinaryEntry, testZipEntry{name: "Plugin", data: []byte("other bytes")})
+		}},
+		{name: "asset normalization alias", want: "archive couldn't be read", write: func(t *testing.T, path string) {
+			writeTestPluginZip(t, path, []*pluginv1.PackagedAsset{{Path: "web/caf\u00e9.js"}}, testBinaryEntry,
+				testZipEntry{name: "web/caf\u00e9.js", data: []byte("checked")}, testZipEntry{name: "web/cafe\u0301.js", data: []byte("other")})
+		}},
+		{name: "long combining sequence alias", want: "archive couldn't be read", write: func(t *testing.T, path string) {
+			checked := "web/a" + strings.Repeat("\u0301", 30) + "\u0327.js"
+			alias := "web/a\u0327" + strings.Repeat("\u0301", 30) + ".js"
+			writeTestPluginZip(t, path, []*pluginv1.PackagedAsset{{Path: checked}}, testBinaryEntry,
+				testZipEntry{name: checked, data: []byte("checked")}, testZipEntry{name: alias, data: []byte("other")})
+		}},
+		{name: "entry inside binary", want: "archive couldn't be read", write: func(t *testing.T, path string) {
+			writeTestPluginZip(t, path, nil, testBinaryEntry, testZipEntry{name: "plugin/x", data: []byte("x")})
+		}},
+		{name: "binary directory", want: "archive couldn't be read", write: func(t *testing.T, path string) {
+			writeTestPluginZip(t, path, nil, testZipEntry{name: "plugin", data: testBinaryEntry.data, dir: true})
+		}},
+		{name: "asset directory", want: "archive couldn't be read", write: func(t *testing.T, path string) {
+			writeTestPluginZip(t, path, []*pluginv1.PackagedAsset{{Path: "web"}}, testBinaryEntry, testZipEntry{name: "web", dir: true})
 		}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

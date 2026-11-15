@@ -8,11 +8,11 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
-  CHANGED_BEFORE_DELETE,
-  DISCARD_KEEPS_IT_HIDDEN,
-  ROWS_NOT_LISTED,
-  SAVE_AFTER_CONFLICTS,
-  SHOW_ON_TAB_LABEL,
+  changedBeforeDelete,
+  discardKeepsItHidden,
+  rowsNotListed,
+  saveAfterConflicts,
+  showOnTabLabel,
 } from "@/lib/collections/copy";
 import { type AddedRowState } from "@/lib/homeRows/rowLinks";
 import {
@@ -165,7 +165,7 @@ describe("rows that show a server collection", () => {
       within(group).getByRole("link", { name: "Ghibli Favorites, Kids page · row 3 of 7" }),
     ).toHaveAttribute("href", "/admin/sections?page=2&edit=s-kids");
     expect(group).toHaveTextContent("2 rows");
-    expect(group).toHaveTextContent(ROWS_NOT_LISTED);
+    expect(group).toHaveTextContent(rowsNotListed());
   });
 
   it("numbers each row by its place in the page order, not its stored position", async () => {
@@ -269,13 +269,13 @@ describe("Add as a row", () => {
     const user = userEvent.setup();
     showPage(EDITOR);
     await screen.findByText("No Home or library page row shows it yet.");
-    fireEvent.click(await screen.findByRole("switch", { name: SHOW_ON_TAB_LABEL }));
+    fireEvent.click(await screen.findByRole("switch", { name: showOnTabLabel() }));
     const menu = await openAddAsRow(user);
     await user.click(within(menu).getByRole("menuitem", { name: "Home" }));
     const dialog = await screen.findByRole("alertdialog", { name: "Save changes first?" });
     const discard = within(dialog).getByRole("button", { name: "Discard changes" });
     expect(discard).toBeDisabled();
-    expect(discard).toHaveAccessibleDescription(DISCARD_KEEPS_IT_HIDDEN);
+    expect(discard).toHaveAccessibleDescription(discardKeepsItHidden());
     await user.click(within(dialog).getByRole("button", { name: "Save and continue" }));
     await waitFor(() => expect(location()).toMatch(/^\/admin\/sections\?/));
     const [patch] = v2Recorder.callsOf("PATCH /api/v2/admin/collections/{id}");
@@ -316,7 +316,7 @@ describe("Add as a row", () => {
     const dialog = await screen.findByRole("alertdialog", { name: "Save changes first?" });
     const saveAndGo = within(dialog).getByRole("button", { name: "Save and continue" });
     expect(saveAndGo).toBeDisabled();
-    expect(saveAndGo).toHaveAccessibleDescription(SAVE_AFTER_CONFLICTS);
+    expect(saveAndGo).toHaveAccessibleDescription(saveAfterConflicts());
     expect(v2Recorder.callsOf("PATCH /api/v2/admin/collections/{id}")).toHaveLength(1);
   });
 
@@ -342,7 +342,7 @@ describe("hiding a collection rows show", () => {
     const user = userEvent.setup();
     showPage(EDITOR);
     await screen.findByText(/On Home and the Kids page/);
-    const toggle = screen.getByRole("switch", { name: SHOW_ON_TAB_LABEL });
+    const toggle = screen.getByRole("switch", { name: showOnTabLabel() });
     await user.click(toggle);
     const dialog = await screen.findByRole("alertdialog", {
       name: "Hide Original from Collections tabs?",
@@ -372,7 +372,7 @@ describe("hiding a collection rows show", () => {
     const user = userEvent.setup();
     showPage(EDITOR);
     await within(await rowsGroup()).findByRole("alert");
-    await user.click(screen.getByRole("switch", { name: SHOW_ON_TAB_LABEL }));
+    await user.click(screen.getByRole("switch", { name: showOnTabLabel() }));
     const dialog = await screen.findByRole("alertdialog", {
       name: "Hide Original from Collections tabs?",
     });
@@ -385,7 +385,7 @@ describe("hiding a collection rows show", () => {
     rows = [];
     showPage(EDITOR);
     await screen.findByText("No Home or library page row shows it yet.");
-    const toggle = screen.getByRole("switch", { name: SHOW_ON_TAB_LABEL });
+    const toggle = screen.getByRole("switch", { name: showOnTabLabel() });
     fireEvent.click(toggle);
     expect(toggle).not.toBeChecked();
     expect(screen.queryByRole("alertdialog")).toBeNull();
@@ -496,7 +496,7 @@ describe("deleting a collection rows show", () => {
     const dialog = await openDelete(user);
     v2Recorder.bump("/api/v2/admin/collections/c1");
     await user.click(within(dialog).getByRole("button", { name: "Delete it and its 2 rows" }));
-    expect(await within(dialog).findByRole("alert")).toHaveTextContent(CHANGED_BEFORE_DELETE);
+    expect(await within(dialog).findByRole("alert")).toHaveTextContent(changedBeforeDelete());
     expect(v2Recorder.callsOf("DELETE /api/v2/admin/sections/{id}")).toHaveLength(0);
     expect(v2Recorder.callsOf("DELETE /api/v2/admin/collections/{id}")).toHaveLength(0);
     // The editor read it again, so the next Delete sends the new token.

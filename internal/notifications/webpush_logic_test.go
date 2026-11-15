@@ -98,7 +98,7 @@ func TestWebPushSubscribeValidation(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			_, err := service.Subscribe(ctx, 1, "p1", tc.endpoint, tc.p256dh, tc.auth, "test")
+			_, err := service.Subscribe(ctx, 1, "p1", tc.endpoint, tc.p256dh, tc.auth, "test", "")
 			if !errors.Is(err, ErrWebPushInvalid) {
 				t.Fatalf("Subscribe = %v, want ErrWebPushInvalid", err)
 			}

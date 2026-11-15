@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"slices"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -16,6 +17,22 @@ type SmartCountRefresher struct {
 }
 
 func (r *SmartCountRefresher) RefreshAll(ctx context.Context) (refreshed int, errs int) {
+	return r.refreshMatching(ctx, nil)
+}
+
+// RefreshLibraries refreshes the smart collections whose rules draw from any
+// of libraryIDs, including those that draw from every library. A scan that
+// adds or removes a library's titles calls it through SmartCountScheduler.
+func (r *SmartCountRefresher) RefreshLibraries(ctx context.Context, libraryIDs []int) (refreshed int, errs int) {
+	if len(libraryIDs) == 0 {
+		return 0, 0
+	}
+	return r.refreshMatching(ctx, libraryIDs)
+}
+
+// refreshMatching refreshes every smart collection when libraryIDs is nil,
+// and otherwise only those drawing from one of them.
+func (r *SmartCountRefresher) refreshMatching(ctx context.Context, libraryIDs []int) (refreshed int, errs int) {
 	if r == nil || r.Pool == nil || r.Executor == nil {
 		return 0, 0
 	}
@@ -40,6 +57,9 @@ func (r *SmartCountRefresher) RefreshAll(ctx context.Context) (refreshed int, er
 		if err := rows.Scan(&e.id, &e.def); err != nil {
 			slog.WarnContext(ctx, "smart-count refresher: scan failed", "component", "catalog", "error", err)
 			return refreshed, errs + 1
+		}
+		if libraryIDs != nil && !smartDefinitionDrawsFrom(e.def, libraryIDs) {
+			continue
 		}
 		batch = append(batch, e)
 	}
@@ -90,12 +110,35 @@ func (r *SmartCountRefresher) refreshOne(ctx context.Context, id string, defJSON
 	if err != nil {
 		return fmt.Errorf("preview: %w", err)
 	}
+	// Any write to the row advances the collection's revision, which ends open
+	// catalog cursors and fails editor saves, so an unchanged count is left
+	// alone. Scans recount often, mostly finding the same number.
 	if _, err := r.Pool.Exec(ctx, `
 		UPDATE library_collections
 		SET item_count_cached = $1, item_count_cached_at = NOW()
-		WHERE id = $2
+		WHERE id = $2 AND item_count_cached IS DISTINCT FROM $1
 	`, total, id); err != nil {
 		return fmt.Errorf("update cache: %w", err)
 	}
 	return nil
+}
+
+// smartDefinitionDrawsFrom reports whether a stored smart rule counts titles
+// from one of libraryIDs. A rule naming no library draws from all of them. A
+// rule that does not parse is left to RefreshAll, which logs it.
+func smartDefinitionDrawsFrom(defJSON []byte, libraryIDs []int) bool {
+	var def QueryDefinition
+	if err := json.Unmarshal(defJSON, &def); err != nil {
+		return false
+	}
+	def = def.Normalize()
+	if len(def.LibraryIDs) == 0 {
+		return true
+	}
+	for _, id := range def.LibraryIDs {
+		if slices.Contains(libraryIDs, id) {
+			return true
+		}
+	}
+	return false
 }

@@ -2,6 +2,7 @@ import type { FormEvent, ReactNode } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
+import { useT } from "@/i18n";
 
 interface StepFrameProps {
   title: string;
@@ -33,8 +34,8 @@ export function StepFrame({
   title,
   lede,
   children,
-  continueLabel = "Continue",
-  busyLabel = "Saving…",
+  continueLabel,
+  busyLabel,
   busy = false,
   disabled = false,
   onSkip,
@@ -42,6 +43,7 @@ export function StepFrame({
   onContinue,
   footnote,
 }: StepFrameProps) {
+  const t = useT();
   const actions = (
     <div className="setup-actions">
       <Button
@@ -50,11 +52,13 @@ export function StepFrame({
         disabled={busy || disabled}
         className="min-w-32"
       >
-        {busy ? busyLabel : continueLabel}
+        {busy
+          ? (busyLabel ?? t("web.setup.wizard.saving"))
+          : (continueLabel ?? t("web.ui.continue"))}
       </Button>
       {onSkip ? (
         <Button type="button" variant="ghost" onClick={onSkip} disabled={busy}>
-          Skip for now
+          {t("web.ui.skipForNow")}
         </Button>
       ) : null}
       {footnote ? <p className="setup-footnote">{footnote}</p> : null}
@@ -107,8 +111,9 @@ export function StepSection({
 
 /** Loading placeholder shaped like a short stack of rows. */
 export function StepSkeleton({ rows = 3 }: { rows?: number }) {
+  const t = useT();
   return (
-    <div className="setup-step" role="status" aria-label="Loading">
+    <div className="setup-step" role="status" aria-label={t("common.loading")}>
       <div className="setup-step-header">
         <Skeleton className="h-8 w-56" />
         <Skeleton className="mt-3 h-4 w-80" />

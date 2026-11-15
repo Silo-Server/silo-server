@@ -69,15 +69,21 @@ function libraryKindOf(page: LibraryPage | undefined): string | undefined {
  * The library kind a row's titles come from: "page" for a row set to a media
  * scope (a default "Recently Added Movies" row), which fits its own page's
  * kind; the book kind for Continue Listening, Continue Reading, and Next in
- * Series, which follows audiobook series; undefined for a row that fits any
- * library.
+ * Series, which follows audiobook series; the movie or TV kind for a Trending
+ * worldwide row set to show only movies or TV shows; undefined for a row that
+ * fits any library.
  */
 function rowLibraryKind(row: {
   sectionType: string;
   config: Record<string, unknown>;
-}): "page" | "audiobook" | "ebook" | undefined {
+}): "page" | "movie" | "tv" | "audiobook" | "ebook" | undefined {
   const { config } = row;
   if (typeof config.media_scope === "string" && config.media_scope !== "") return "page";
+  if (row.sectionType === "trending_discover") {
+    if (config.filter_type === "movie") return "movie";
+    if (config.filter_type === "series") return "tv";
+    return undefined;
+  }
   if (row.sectionType === "next_in_series") return "audiobook";
   if (row.sectionType !== "continue_watching") return undefined;
   const lower = (value: unknown) => (typeof value === "string" ? value.trim().toLowerCase() : "");

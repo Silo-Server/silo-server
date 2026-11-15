@@ -40,7 +40,7 @@ func (h homeHides) continueWatchingVisible(inProgress []userstore.WatchProgress)
 
 // nextUpVisible reports whether the series still shows in Next Up, given the
 // episode Home would show (nextUpEpisode). Like the Home fetcher
-// (sections.Fetcher.filterNextUpDismissals), a per-card dismissal hides the
+// (catalog.NextUpQuery.ExcludeEpisodeIDs), a per-card dismissal hides the
 // card only while its episode is still the one shown; watching on, or
 // un-watching an earlier episode, moves Next Up to another episode.
 func (h homeHides) nextUpVisible(nextEpisodeID string) bool {
@@ -51,7 +51,9 @@ func (h homeHides) nextUpVisible(nextEpisodeID string) bool {
 	return !dismissed
 }
 
-// completedEpisode is a completed progress row of the series.
+// completedEpisode is a completed progress row of the series. at is the
+// store's UpdatedAt, the time Home's Continue Watching compares
+// (catalog.ProgressSnapshots).
 type completedEpisode struct {
 	key int
 	at  time.Time
