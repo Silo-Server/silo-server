@@ -2,6 +2,7 @@ package scanner
 
 import (
 	"archive/zip"
+	"bytes"
 	"context"
 	"fmt"
 	"os"
@@ -144,7 +145,7 @@ func writeBookFile(path string, data []byte) error {
 // testCBZ returns a two-page comic archive.
 func testCBZ(t *testing.T) []byte {
 	t.Helper()
-	var buf strings.Builder
+	var buf bytes.Buffer
 	zw := zip.NewWriter(&buf)
 	for _, name := range []string{"001.jpg", "002.jpg"} {
 		w, err := zw.Create(name)
@@ -158,5 +159,5 @@ func testCBZ(t *testing.T) []byte {
 	if err := zw.Close(); err != nil {
 		t.Fatal(err)
 	}
-	return []byte(buf.String())
+	return buf.Bytes()
 }

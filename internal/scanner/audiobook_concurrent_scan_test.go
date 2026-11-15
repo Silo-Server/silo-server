@@ -89,6 +89,7 @@ func (f *concurrentBookFixture) copyPart(name string) error {
 	return os.WriteFile(filepath.Join(f.bookDir, name), []byte(name), 0o644)
 }
 
+// hookedScanner is newHookedScanner with the fixture's fake ffprobe.
 func (f *concurrentBookFixture) hookedScanner(t *testing.T, match string, fn func()) *Scanner {
 	t.Helper()
 	return newHookedScanner(t, f.ffprobe, match, fn)
