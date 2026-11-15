@@ -69,6 +69,7 @@ func buildLiveSessionSync(s *playback.Session, reportingNode string) worker.Sess
 		StartedAt:               s.StartedAt,
 		UpdatedAt:               s.UpdatedAt,
 		PositionSeconds:         s.Position,
+		TimelineDurationSeconds: s.TimelineDuration,
 		IsPaused:                s.IsPaused,
 		HasWebSocket:            s.HasWebSocket,
 		IsJellyfinCompat:        s.IsJellyfinCompat,

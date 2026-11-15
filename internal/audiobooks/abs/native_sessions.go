@@ -20,10 +20,14 @@ import (
 type PlaybackSessionManager interface {
 	StartSessionWithFilesContext(ctx context.Context, userID int, profileID string, effectiveFileID int, requestedFileID int, method playback.PlayMethod, transcodeAudio bool) (*playback.Session, error)
 	UpdateProgress(sessionID string, position float64, isPaused bool) error
+	UpdateProgressReported(sessionID string, position, total float64) error
 	UpdateStreamState(sessionID string, state playback.SessionStreamState) error
 	BeginTransport(sessionID string) error
 	EndTransport(sessionID string) error
 	SetProgressPersistenceDisabled(sessionID string, disabled bool) error
+	// SetTimelineDuration records the whole book's length, since ABS reports
+	// positions in the book rather than in the session's first file.
+	SetTimelineDuration(sessionID string, seconds float64) error
 	// FinishSession ends the play and runs the manager's finish hooks, which
 	// write the admin playback history row.
 	FinishSession(ctx context.Context, sessionID string) error
@@ -40,6 +44,7 @@ func (h *Handler) startNativePlaybackSession(
 	a ctxAuth,
 	files []*models.MediaFile,
 	startPosition float64,
+	device absDeviceInfo,
 ) (*playback.Session, error) {
 	if h == nil || h.deps.NativeSessions == nil || len(files) == 0 {
 		return nil, nil
@@ -50,7 +55,7 @@ func (h *Handler) startNativePlaybackSession(
 	}
 
 	file := files[0]
-	sessionCtx := playback.WithClientInfo(r.Context(), absPlaybackClientInfoFromRequest(r))
+	sessionCtx := playback.WithClientInfo(r.Context(), absPlaybackClientInfo(r, device))
 	session, err := h.deps.NativeSessions.StartSessionWithFilesContext(
 		sessionCtx,
 		userID,
@@ -69,6 +74,14 @@ func (h *Handler) startNativePlaybackSession(
 			"session_id", session.ID, "error", err)
 	} else {
 		session.DisableProgressPersistence = true
+	}
+
+	bookDuration := bookDurationSeconds(files)
+	if err := h.deps.NativeSessions.SetTimelineDuration(session.ID, bookDuration); err != nil {
+		slog.WarnContext(r.Context(), "abs play: set native session book duration failed", "component", "audiobooks",
+			"session_id", session.ID, "error", err)
+	} else {
+		session.TimelineDuration = bookDuration
 	}
 
 	if startPosition > 0 {
@@ -112,11 +125,15 @@ func (h *Handler) startNativePlaybackSession(
 	return session, nil
 }
 
-func (h *Handler) updateNativePlaybackProgress(ctx context.Context, sessionID string, position float64) {
+// updateNativePlaybackProgress mirrors a session sync. total is the ABS
+// session's running listening total after the sync: the time actually
+// listened, which the native session credits instead of the position, since
+// the position may have jumped by a seek.
+func (h *Handler) updateNativePlaybackProgress(ctx context.Context, sessionID string, position, total float64) {
 	if h == nil || h.deps.NativeSessions == nil || sessionID == "" {
 		return
 	}
-	if err := h.deps.NativeSessions.UpdateProgress(sessionID, position, false); err != nil {
+	if err := h.deps.NativeSessions.UpdateProgressReported(sessionID, position, total); err != nil {
 		if !errors.Is(err, playback.ErrSessionNotFound) {
 			slog.WarnContext(ctx, "abs session sync: update native session progress failed", "component", "audiobooks",
 				"session_id", sessionID, "position", position, "error", err)
@@ -124,6 +141,15 @@ func (h *Handler) updateNativePlaybackProgress(ctx context.Context, sessionID st
 		return
 	}
 	h.syncNativeSessionsNow(ctx, "abs_progress")
+}
+
+// bookDurationSeconds is the length of a book made of files.
+func bookDurationSeconds(files []*models.MediaFile) float64 {
+	var total float64
+	for _, f := range files {
+		total += float64(f.Duration)
+	}
+	return total
 }
 
 func (h *Handler) stopNativePlaybackSession(ctx context.Context, sess *ABSPlaybackSession) {
@@ -216,6 +242,25 @@ func writeNativePlaybackStartError(w http.ResponseWriter, err error) {
 		slog.Error("abs play: start native playback session failed", "error", err)
 		http.Error(w, "failed to start playback session", http.StatusInternalServerError)
 	}
+}
+
+// absDeviceInfo is the part of the deviceInfo an Audiobookshelf client sends
+// with /play that names the client.
+type absDeviceInfo struct {
+	ClientName    string `json:"clientName"`
+	ClientVersion string `json:"clientVersion"`
+}
+
+// absPlaybackClientInfo names the client of a play: the deviceInfo the client
+// sent, else the request headers.
+func absPlaybackClientInfo(r *http.Request, device absDeviceInfo) playback.ClientInfo {
+	client := absPlaybackClientInfoFromRequest(r)
+	if name := strings.TrimSpace(device.ClientName); name != "" {
+		// The headers may describe another client, so their version is not
+		// carried over to the one deviceInfo names.
+		client.Name, client.Version = name, strings.TrimSpace(device.ClientVersion)
+	}
+	return client
 }
 
 func absPlaybackClientInfoFromRequest(r *http.Request) playback.ClientInfo {
