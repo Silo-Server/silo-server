@@ -772,24 +772,28 @@ func (s *slowWindowSource) Window(ctx context.Context, path string, ref Embedded
 // A window the source reads too slowly is demuxed while the web player,
 // which gives up on a silent window after 30 seconds, still waits for it,
 // and the warm it starts demuxes too instead of reading the whole track
-// the same slow way (#4199). A track only the index can read waits for it.
+// the same slow way (#4199), as does a window open to the end whose whole
+// read gave way to slow reads. A track only the index can read waits for it.
 func TestSlowWindowReadGivesWayToTheDemux(t *testing.T) {
 	for _, tc := range []struct {
-		name  string
-		opts  StreamExtractOpts
-		ref   EmbeddedSubtitleRef
-		delay time.Duration
-		want  string
+		name   string
+		opts   StreamExtractOpts
+		ref    EmbeddedSubtitleRef
+		delay  time.Duration
+		window error
+		want   string
 	}{
 		{name: "PGS window", opts: StreamExtractOpts{SourceCodec: "hdmv_pgs_subtitle", AllowWindow: true, DurationSeconds: 600}, ref: *testEmbeddedRef, delay: 88 * time.Second, want: "demuxed"},
 		{name: "text window", opts: StreamExtractOpts{SourceCodec: "subrip", SeekSeconds: 600, DurationSeconds: 600}, ref: *testEmbeddedRef, delay: 88 * time.Second, want: "demuxed"},
 		{name: "index-only text window", opts: StreamExtractOpts{SourceCodec: "webvtt", SeekSeconds: 600, DurationSeconds: 600},
 			ref: EmbeddedSubtitleRef{MediaFileID: 7, StreamIndex: 2, ContainerTrackID: "3", Codec: "webvtt", IndexOnly: true}, delay: 20 * time.Second, want: "converted:window"},
+		{name: "PGS window open to the end", opts: StreamExtractOpts{SourceCodec: "hdmv_pgs_subtitle", AllowWindow: true, SeekSeconds: 600}, ref: *testEmbeddedRef,
+			window: fmt.Errorf("%w: the last 16 took 1s on average", embeddedsub.ErrSlowReads), want: "demuxed"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
 				c, source := newTestCache(t)
-				src := &fakeEmbeddedSource{}
+				src := &fakeEmbeddedSource{window: tc.window}
 				c.SetEmbeddedSource(&slowWindowSource{fakeEmbeddedSource: src, delay: tc.delay})
 				var mu sync.Mutex
 				var calls []StreamExtractOpts
