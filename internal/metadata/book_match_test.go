@@ -129,6 +129,23 @@ var audiobookRuleCases = []struct {
 		results: []SearchResult{bookResult("Area 51, Book 1", "A1", 1997)},
 	},
 	{
+		name: "an alias naming another volume does not establish the match",
+		want: "Dungeon Crawler Carl 2",
+		results: []SearchResult{{
+			Name: "The Gate of the Feral Gods", ProviderIDs: map[string]string{"asin": "G4"},
+			TitleAliases: []TitleAlias{{Title: "Dungeon Crawler Carl, Book 4"}},
+		}},
+	},
+	{
+		name: "an alias naming the item's volume establishes the match",
+		want: "Dungeon Crawler Carl 2",
+		results: []SearchResult{{
+			Name: "Carl's Doomsday Scenario", ProviderIDs: map[string]string{"asin": "D2"},
+			TitleAliases: []TitleAlias{{Title: "Dungeon Crawler Carl, Book 2"}},
+		}},
+		wantID: "D2",
+	},
+	{
 		name:    "a volume range is a collection",
 		want:    "The Hunger Games",
 		results: []SearchResult{bookResult("The Hunger Games Trilogy: Books 1-3", "T1", 2010)},

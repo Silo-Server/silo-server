@@ -407,9 +407,9 @@ func (r *matchRun) admitFetched(
 	if r.missingNarrator(result, byTaggedID) {
 		return nil, rejectNarrator, nil
 	}
-	// A volume the item's title states that the record's title states
-	// differently is another book, whichever path found the record.
-	if metadata.VolumesContradict(item.Title, result.Title) {
+	// A volume the item's title states that the record's title or any alias
+	// states differently is another book, whichever path found the record.
+	if slices.ContainsFunc(recordTitles(result), func(t string) bool { return metadata.VolumesContradict(item.Title, t) }) {
 		return nil, rejectVolume, nil
 	}
 	if byTaggedID && strings.TrimSpace(item.Author) != "" &&

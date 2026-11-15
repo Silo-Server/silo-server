@@ -57,6 +57,8 @@ func TestFindMatchChecksEditionAgainstItem(t *testing.T) {
 	bray, brayRec := edition("The Martian", "Z0BRAY0001", "Andy Weir", "R. C. Bray")
 	other, otherRec := edition("Unrelated Cookbook", "B002V1O7UG", "Someone Else", "Anyone")
 	_, book1Rec := edition("Dungeon Crawler Carl, Book 1", "B08V8B2CGV", "Matt Dinniman", "Jeff Hays")
+	_, feralRec := edition("The Gate of the Feral Gods", "B0FERAL004", "Matt Dinniman", "Jeff Hays")
+	feralRec.TitleAliases = []metadata.TitleAlias{{Title: "Dungeon Crawler Carl, Book 4"}}
 	_, aliasRec := edition("El marciano", "B079YDJ18Z", "Andy Weir", "Xavi Fernández")
 	aliasRec.TitleAliases = []metadata.TitleAlias{{Title: "The Martian", Kind: "original"}}
 
@@ -109,6 +111,14 @@ func TestFindMatchChecksEditionAgainstItem(t *testing.T) {
 				ProviderIDs: map[string]string{"asin": "B08V8B2CGV"},
 			},
 			provider: &editionProvider{lookupASIN: true, records: map[string]*metadata.MetadataResult{"B08V8B2CGV": book1Rec}},
+		},
+		{
+			name: "tagged ASIN record whose alias names another volume leaves the item unmatched",
+			item: enrichmentItemRow{
+				Title: "Dungeon Crawler Carl 2", Author: "Matt Dinniman",
+				ProviderIDs: map[string]string{"asin": "B0FERAL004"},
+			},
+			provider: &editionProvider{lookupASIN: true, records: map[string]*metadata.MetadataResult{"B0FERAL004": feralRec}},
 		},
 		{
 			name: "tagged ASIN record matching the item's title only through an alias is accepted",

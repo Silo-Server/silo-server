@@ -176,6 +176,11 @@ func (w bookWant) evaluate(r SearchResult) (bookCandidate, bool) {
 	score := w.prepared.score(name, normaliseTitle(name))
 	matchedTitle := name
 	for _, alias := range r.TitleAliases {
+		// An alias is held to the same volume rules as the primary title
+		// before its score may establish the match.
+		if !w.aliasFits(alias.Title) {
+			continue
+		}
 		if s := w.prepared.score(alias.Title, normaliseTitle(alias.Title)); s > score {
 			score, matchedTitle = s, alias.Title
 		}
@@ -195,6 +200,23 @@ func (w bookWant) evaluate(r SearchResult) (bookCandidate, bool) {
 		yearGap:    yearGap,
 		key:        resultKey(r, name),
 	}, true
+}
+
+// aliasFits reports whether an alias title passes the volume rules a primary
+// title must: it states no other volume or a volume range, and it is not the
+// series name standing in for the item's volume.
+func (w bookWant) aliasFits(alias string) bool {
+	wv, titleVol := volumeAgainst(w.title, alias)
+	av, aok := volumeAgainst(alias, w.title)
+	switch {
+	case aok && av.first != av.last && (!titleVol || av != wv):
+		return false
+	case titleVol && aok && av != wv:
+		return false
+	case titleVol && !aok && coversAllButVolume(w.title, wv, alias):
+		return false
+	}
+	return true
 }
 
 func boolCompare(a, b bool) int {
