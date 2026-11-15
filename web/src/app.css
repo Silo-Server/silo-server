@@ -506,6 +506,10 @@ html[data-navigation-direction]::view-transition-new(main-content) {
      content-focused. White primary creates an elegant, theater-like
      atmosphere where media artwork is the star.                    */
   [data-theme="midnight-cinema"] {
+    /* Browser-drawn UI (page scrollbar, date pickers, select popups, unchecked
+       checkboxes, autofill) follows this, not the tokens below. index.html
+       declares the same scheme so the canvas is dark before CSS loads. */
+    color-scheme: dark;
     --radius: 0.75rem;
     --font-body: "Plus Jakarta Sans", sans-serif;
     --font-display: "Plus Jakarta Sans", sans-serif;
