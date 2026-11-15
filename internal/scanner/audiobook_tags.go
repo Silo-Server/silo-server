@@ -134,13 +134,16 @@ func formatRomanNumeral(n int) string {
 //   - Title (audiobookTagTitle): the title tag, except that the album tag wins
 //     when the title is the album behind a series prefix ("Saga 2 - Book" with
 //     album "Book") or the album is the title plus a subtitle ("Book" with
-//     album "Book: A Subtitle"). Unrelated tags keep the title, since a
-//     single file's album may name its series or a collection.
-//   - Narrator (audiobookTagNarrators): the first narrator source, in the
-//     order narrator, narratedby, performer, composer, that names someone
-//     other than the tagged authors. Some files put the author in performer
-//     and the narrator in composer. When every source names only authors,
-//     the author read the book and the first source is used.
+//     album "Book: A Subtitle"). The prefix is the book's series tag with an
+//     optional position or, for a book without one, text ending in a number.
+//     A "subtitle" naming the series or ending in a position is not one.
+//     Unrelated tags keep the title, since a single file's album may name its
+//     series or a collection.
+//   - Narrator (audiobookTagNarrators): an explicit narrator tag (narrator,
+//     ©nrt, narratedby) when present. Otherwise the first of performer and
+//     composer that names someone other than the tagged authors: some files
+//     put the author in performer and the narrator in composer. When both
+//     name only authors, the author read the book and performer is used.
 //   - Genres (parseGenresFromTags): the tmp_genreN tags, one genre each,
 //     when any is present; otherwise the genre tag.
 
@@ -162,7 +165,10 @@ var (
 	audiobookNumberedPrefixRE = regexp.MustCompile(`(?i)^\S.*?[\s,]+(?:(?:book|bk|volume|vol|number|no|part|pt)\b\.?\s*)?#?\s*\d+(?:\.\d+)?$`)
 	// audiobookSeriesPositionRE matches what may follow the series name in a
 	// prefix: nothing, or a position in digits or Roman numerals.
-	audiobookSeriesPositionRE = regexp.MustCompile(`(?i)^(?:[\s,]+(?:(?:book|bk|volume|vol|number|no|part|pt)\b\.?\s*)?#?\s*(?:\d+(?:\.\d+)?|[ivxlc]+))?$`)
+	audiobookSeriesPositionRE = regexp.MustCompile(`(?i)^(?:[\s,]+(?:(?:book|bk|volume|vol|number|no|part|pt)\b\.?\s*)?#?\s*(\d+(?:\.\d+)?|[ivxlc]+))?$`)
+	// audiobookTrailingPositionRE matches a series position ending a
+	// subtitle: "..., Book 1", "... #3", "Vol. 2".
+	audiobookTrailingPositionRE = regexp.MustCompile(`(?i)(?:#|\b(?:book|bk|volume|vol|number|no|part|pt)\b\.?)\s*#?\s*\d+(?:\.\d+)?\s*$`)
 )
 
 // audiobookTagTitle picks a book's title from its title and album tags as
@@ -176,8 +182,14 @@ func audiobookTagTitle(title, album, series string) string {
 	if t == "" || a == "" || t == a {
 		return title
 	}
+	s := audiobookTitleKey(series)
 	if rest, ok := strings.CutPrefix(a, t); ok && audiobookSubtitleSeparatorRE.MatchString(rest) {
-		return album
+		// An album that adds the series ("Book: Saga, Book 1") is not a
+		// subtitle.
+		if (s == "" || !strings.Contains(rest, s)) && !audiobookTrailingPositionRE.MatchString(rest) {
+			return album
+		}
+		return title
 	}
 	prefix, ok := strings.CutSuffix(t, a)
 	if !ok {
@@ -188,15 +200,28 @@ func audiobookTagTitle(title, album, series string) string {
 		return title
 	}
 	prefix = strings.TrimSpace(prefix[:loc[0]])
-	if audiobookNumberedPrefixRE.MatchString(prefix) {
-		return album
-	}
-	if s := audiobookTitleKey(series); s != "" {
-		if rest, ok := strings.CutPrefix(prefix, s); ok && audiobookSeriesPositionRE.MatchString(rest) {
+	// With a series tag only that series counts as a prefix, so a number in
+	// the work's own name ("Apollo 13 - ...") is kept.
+	if s == "" {
+		if audiobookNumberedPrefixRE.MatchString(prefix) {
 			return album
 		}
+		return title
 	}
-	return title
+	rest, ok := strings.CutPrefix(prefix, s)
+	if !ok {
+		return title
+	}
+	m := audiobookSeriesPositionRE.FindStringSubmatch(rest)
+	if m == nil {
+		return title
+	}
+	// The position regexp takes any run of Roman numeral letters; only a
+	// well-formed numeral is a position ("Saga Civil" is not).
+	if position := m[1]; position != "" && !strings.ContainsAny(position, "0123456789") && parseRomanNumeral(position) == 0 {
+		return title
+	}
+	return album
 }
 
 // audiobookTagNarrators picks the narrators from the narrator sources as the
@@ -206,9 +231,12 @@ func audiobookTagNarrators(tags map[string]string, authors []string) []string {
 	for _, a := range authors {
 		isAuthor[strings.ToLower(a)] = true
 	}
+	if names := splitAudiobookCredits(firstNonEmpty(tags["narrator"], tags["narratedby"])); len(names) > 0 {
+		return names
+	}
 	var first []string
 	//nolint:goconst // Tag keys are data, matching the names ffprobe reports.
-	for _, key := range []string{"narrator", "narratedby", "performer", "composer"} {
+	for _, key := range []string{"performer", "composer"} {
 		names := splitAudiobookCredits(tags[key])
 		if len(names) == 0 {
 			continue
@@ -281,6 +309,15 @@ func parseGenresFromTags(tags map[string]string) []string {
 	return out
 }
 
+// joinGenrePieces rejoins comma pieces as ", "-separated trimmed names.
+func joinGenrePieces(pieces []string) string {
+	trimmed := make([]string, len(pieces))
+	for i, p := range pieces {
+		trimmed[i] = collapseSpacesRE.ReplaceAllString(strings.TrimSpace(p), " ")
+	}
+	return strings.Join(trimmed, ", ")
+}
+
 // splitCommaGenres splits a comma-joined genre tag, keeping each name in
 // audibleCommaGenres whole where it appears between commas.
 func splitCommaGenres(raw string) []string {
@@ -290,7 +327,7 @@ func splitCommaGenres(raw string) []string {
 		joined := false
 		for _, name := range audibleCommaGenres {
 			n := strings.Count(name, ",") + 1
-			if i+n <= len(pieces) && strings.EqualFold(strings.TrimSpace(strings.Join(pieces[i:i+n], ",")), name) {
+			if i+n <= len(pieces) && strings.EqualFold(joinGenrePieces(pieces[i:i+n]), name) {
 				out = append(out, name)
 				i += n - 1
 				joined = true

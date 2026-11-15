@@ -66,17 +66,19 @@ book's tags from its first part; the rules for tags that Audible export tools
 write are in `internal/scanner/audiobook_tags.go`:
 
 - Title: the `title` tag, unless `album` is the cleaner name. `album` wins
-  when `title` is `album` behind a series prefix (`Saga Name 2 - Book Title`:
-  text ending in a number, or the book's own series tag with an optional
-  position, then `-` or `:`), or when `album` is `title` plus a subtitle
-  (`Book Title: The Long Subtitle`). Otherwise `title` stays, because a single
-  file's `album` may name its series or a collection. A multi-file book whose
-  part titles name the parts uses `album`.
-- Narrators: the first of `narrator` (or the MP4 `©nrt` atom), `narratedby`,
-  `performer`, and `composer` that names someone other than the tagged
-  authors. Some files put the author in `performer` and the narrator in
-  `composer`. When every source names only authors, the book is read by its
-  author and the first source is used.
+  when `title` is `album` behind a series prefix (`Saga Name 2 - Book Title`),
+  or when `album` is `title` plus a subtitle (`Book Title: The Long Subtitle`).
+  The prefix, followed by `-` or `:`, is the book's series tag with an
+  optional position; a book without a series tag accepts any text ending in a
+  number. A "subtitle" that names the series or ends in a position is not
+  one. Otherwise `title` stays, because a single file's `album` may name its
+  series or a collection. A multi-file book whose part titles name the parts
+  uses `album`.
+- Narrators: an explicit narrator tag (`narrator`, the MP4 `©nrt` atom, or
+  `narratedby`) when present. Otherwise the first of `performer` and
+  `composer` that names someone other than the tagged authors: some files put
+  the author in `performer` and the narrator in `composer`. When both name
+  only authors, the book is read by its author and `performer` is used.
 - Genres: when any `tmp_genreN` tag is present, those tags are the genres, one
   each, with a trailing `;` or `,` dropped. Otherwise `genre` splits on `/` and
   `;` when it holds either, and on `,` when not. The comma split keeps the

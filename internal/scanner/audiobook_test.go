@@ -1050,6 +1050,7 @@ func TestParseGenresFromTags(t *testing.T) {
 		// Audible joins categories with commas; its comma names stay whole.
 		{map[string]string{"genre": "Mystery, Thriller & Suspense, Cozy"}, []string{"Mystery, Thriller & Suspense", "Cozy"}},
 		{map[string]string{"genre": "Cozy, Mystery"}, []string{"Cozy", "Mystery"}},
+		{map[string]string{"genre": "Mystery,Thriller  & Suspense,Cozy"}, []string{"Mystery, Thriller & Suspense", "Cozy"}},
 		// tmp_genreN tags hold one genre each and replace the genre tag.
 		{
 			map[string]string{"genre": "Mystery, Thriller & Suspense, Cozy", "tmp_genre1": "Mystery, Thriller & Suspense;", "tmp_genre2": "Cozy", "tmp_genre3": "cozy;"},
@@ -1078,11 +1079,18 @@ func TestAudiobookTagTitle(t *testing.T) {
 		{"Saga Name #3 - Book Title (Unabridged)", "Book Title", "", "Book Title"},
 		{"Saga Name - Book Title", "Book Title", "Saga Name", "Book Title"},
 		{"Saga Name III - Book Title", "Book Title", "Saga Name", "Book Title"},
-		// Without a number, only the book's own series counts as a prefix.
+		// With a series tag only that series is a prefix, so a number in the
+		// work's own name stays; words that look like Roman numerals are not
+		// positions.
 		{"Other Words - Book Title", "Book Title", "Saga Name", "Other Words - Book Title"},
+		{"Apollo 13 - The Mission", "The Mission", "Space Saga", "Apollo 13 - The Mission"},
+		{"Saga Civil - Book Title", "Book Title", "Saga", "Saga Civil - Book Title"},
 		// The album adds a subtitle to the title.
 		{"Book Title", "Book Title: The Long Subtitle", "", "Book Title: The Long Subtitle"},
 		{"Book Title", "Book Title - The Long Subtitle", "", "Book Title - The Long Subtitle"},
+		// An album that adds the series is not a subtitle.
+		{"Book Title", "Book Title: Saga Name, Book 1", "", "Book Title"},
+		{"Book Title", "Book Title - Saga Name", "Saga Name", "Book Title"},
 		// Unrelated tags keep the title: a single file's album may be its
 		// series or a collection.
 		{"Book Title", "Saga Name", "Saga Name", "Book Title"},
@@ -1107,6 +1115,8 @@ func TestPopulateFromTagsNarrators(t *testing.T) {
 		// A book read by its author keeps the author.
 		{map[string]string{"album_artist": "Ann Author", "performer": "Ann Author", "composer": "Ann Author"}, []string{"Ann Author"}},
 		{map[string]string{"album_artist": "Ann Author", "performer": "Ann Author"}, []string{"Ann Author"}},
+		// An explicit narrator tag wins even when it names the author.
+		{map[string]string{"album_artist": "Ann Author", "narrator": "Ann Author", "composer": "Film Composer"}, []string{"Ann Author"}},
 		// The first source naming someone else wins, as before.
 		{map[string]string{"album_artist": "Ann Author", "narrator": "Ned Narrator", "composer": "Other Reader"}, []string{"Ned Narrator"}},
 		{map[string]string{"album_artist": "Ann Author", "performer": "Ann Author & Ned Narrator", "composer": "Other Reader"}, []string{"Ann Author", "Ned Narrator"}},
