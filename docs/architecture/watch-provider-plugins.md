@@ -114,7 +114,9 @@ Several items with one key follow these rules:
   off the provider too.
 - With removal sync on, an import does not add back an item whose local
   removal has not reached the provider yet, unless the provider dated its
-  listing after the removal. An undated listing never counts as newer.
+  listing after the removal. An undated listing never counts as newer. A run
+  whose import of a list fails sends none of that list's removals, since the
+  import may have stopped before the newer listing that drops one.
 - A full import counts every IMDb, TMDB, and TVDB id on a provider row as
   present for that row's kind, since a plugin's key can use a different id than
   the one stored at export (a provider may key shows by TVDB id first). A row or stored
