@@ -666,6 +666,26 @@ func TestAudiobookDedupeTitlesKeepDifferentBooksSeparate(t *testing.T) {
 	}
 }
 
+// A release date tag that is not a calendar date must not reach Postgres,
+// which rejects it and fails the whole book; the year is kept.
+func TestNormalizeReleaseDateForSQL(t *testing.T) {
+	for in, want := range map[string]string{
+		"2015-03-04":           "2015-03-04",
+		"2015-03-04T00:00:00Z": "2015-03-04",
+		"2015":                 "2015-01-01",
+		"2015-00-00":           "2015-01-01",
+		"2015-02-30":           "2015-01-01",
+		"2015-13-01 extra":     "2015-01-01",
+		"0000-00-00":           "",
+		"abcd-01-01":           "",
+		"":                     "",
+	} {
+		if got := normalizeReleaseDateForSQL(in); got != want {
+			t.Errorf("normalizeReleaseDateForSQL(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
 func TestApplyBookToMediaItemDoesNotBlankAllNarratorSuffixTitle(t *testing.T) {
 	item := &models.MediaItem{}
 	applyBookToMediaItem(item, &parsedAudiobook{Title: "Read by Jim Dale"}, false)
