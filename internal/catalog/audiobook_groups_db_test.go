@@ -16,7 +16,7 @@ import (
 type audiobookGroupsFixture struct {
 	pool                   *pgxpool.Pool
 	library, other, userID int
-	viewer                 string
+	prefix, viewer         string
 }
 
 func (f audiobookGroupsFixture) list(t *testing.T, q AudiobookGroupsQuery, filter AccessFilter) AudiobookGroupsResult {
@@ -45,7 +45,7 @@ func seedAudiobookGroups(t *testing.T) audiobookGroupsFixture {
 	pool := newBatchEquivTestPool(t)
 	ctx := t.Context()
 	prefix := fmt.Sprintf("abgroups-%d", time.Now().UnixNano())
-	f := audiobookGroupsFixture{pool: pool, viewer: prefix + "-viewer"}
+	f := audiobookGroupsFixture{pool: pool, prefix: prefix, viewer: prefix + "-viewer"}
 	for _, row := range []struct {
 		name string
 		id   *int
@@ -162,6 +162,22 @@ func TestAudiobookGroupsDB(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Run("precomputed", func(t *testing.T) { checkAudiobookGroups(t, f, true) })
+
+	// A book that leaves the library stays in the view until the next
+	// refresh, so a viewer with library limits must not read the view: here
+	// Ancillary Justice remains only in a library the viewer may not see.
+	t.Run("book left the library since the refresh", func(t *testing.T) {
+		batchEquivExec(t, f.pool, `DELETE FROM media_item_libraries WHERE content_id = $1 AND media_folder_id = $2`, f.prefix+"-justice", f.library)
+		disabled, allowed := f.access(), f.access()
+		disabled.DisabledLibraryIDs = []int{f.other}
+		allowed.AllowedLibraryIDs = []int{f.library}
+		for _, filter := range []AccessFilter{disabled, allowed} {
+			result := f.list(t, AudiobookGroupsQuery{GroupBy: AudiobookGroupByAuthor, SearchPrefix: "ann", CursorPaging: true}, filter)
+			if len(result.Groups) != 1 || result.Groups[0].ItemCount != 1 || slices.Contains(result.Groups[0].PosterPaths, "justice.jpg") {
+				t.Fatalf("Leckie groups %+v for access %+v, want one with only Ancillary Sword", result.Groups, filter)
+			}
+		}
+	})
 }
 
 // checkAudiobookGroups runs the browse checks. precomputed says the view
@@ -241,17 +257,16 @@ func checkAudiobookGroups(t *testing.T, f audiobookGroupsFixture, precomputed bo
 		allowed []int
 		denied  []int
 		want    int
-		// viewSees: the viewer may see every book of the library.
-		viewSees bool
 	}{
-		{"allowed only another library", []int{f.other}, nil, 1, false},
-		{"another library disabled", nil, []int{f.other}, 1, false},
-		{"allowed the browsed library", []int{f.library}, nil, 2, true},
+		{"allowed only another library", []int{f.other}, nil, 1},
+		{"another library disabled", nil, []int{f.other}, 1},
+		{"allowed the browsed library", []int{f.library}, nil, 2},
 	} {
 		t.Run("library access/"+c.name, func(t *testing.T) {
 			filter := f.access()
 			filter.AllowedLibraryIDs, filter.DisabledLibraryIDs = c.allowed, c.denied
-			result := list(t, AudiobookGroupsQuery{GroupBy: AudiobookGroupByAuthor, SearchPrefix: "ann"}, filter, c.viewSees)
+			// The view never answers a viewer with library limits.
+			result := list(t, AudiobookGroupsQuery{GroupBy: AudiobookGroupByAuthor, SearchPrefix: "ann"}, filter, false)
 			if len(result.Groups) != 1 || result.Groups[0].ItemCount != c.want {
 				t.Fatalf("Leckie groups %+v, want one with %d books", result.Groups, c.want)
 			}

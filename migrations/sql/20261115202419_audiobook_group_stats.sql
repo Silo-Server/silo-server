@@ -3,8 +3,8 @@
 -- Precomputed Authors, Narrators and Series tabs of an audiobook library
 -- (listAudiobookGroups). Grouping every credit of a large library on each
 -- page takes seconds; this view turns a page into an indexed read. It counts
--- every audiobook of the library, so only a viewer whose access hides none
--- of them reads it; the rest take the live query in
+-- every audiobook of the library as of its last refresh, so only a viewer
+-- without library or maturity limits reads it; the rest take the live query in
 -- internal/catalog/audiobook_groups.go, whose group identity, counts and
 -- cover order this view must keep matching.
 --

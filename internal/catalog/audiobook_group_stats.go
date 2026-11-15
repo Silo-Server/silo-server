@@ -21,17 +21,17 @@ import (
 // holds every library's author, narrator and series groups with their book
 // counts, listening time and member books, so a page of groups is an indexed
 // read instead of a grouping of every credit in the library. It counts every
-// audiobook of a library, so it answers only for a viewer who may see all of
-// them; the live query answers everyone else. The viewer's progress counts
-// and the cover posters are read per request.
+// audiobook of a library as of its last refresh, so it answers only a viewer
+// without library or maturity limits; the live query answers everyone else.
+// The viewer's progress counts and the cover posters are read per request.
 
 // listAudiobookGroupsFromStats answers a cursor page from
 // audiobook_group_stats. served is false when the live query must answer
-// instead: the viewer's access hides some of the library's books, or the
-// view has not reached the library yet.
+// instead: the viewer has library or maturity limits, or the view has not
+// reached the library yet.
 func listAudiobookGroupsFromStats(ctx context.Context, pool *pgxpool.Pool, q AudiobookGroupsQuery, filter AccessFilter, maxLimit int) (result AudiobookGroupsResult, served bool, err error) {
-	if ok, err := audiobookGroupStatsServe(ctx, pool, q.LibraryID, filter); err != nil || !ok {
-		return AudiobookGroupsResult{}, false, err
+	if !audiobookGroupStatsServe(q.LibraryID, filter) {
+		return AudiobookGroupsResult{}, false, nil
 	}
 	probeProgress, err := viewerHasLongProgressHistory(ctx, pool, filter)
 	if err != nil {
@@ -58,23 +58,19 @@ func listAudiobookGroupsFromStats(ctx context.Context, pool *pgxpool.Pool, q Aud
 }
 
 // audiobookGroupStatsServe reports whether audiobook_group_stats is exact for
-// the viewer: the library's access conditions add nothing for them, and none
-// of their disabled libraries shares a book with it. Any condition a new
-// access rule adds sends its viewers to the live query.
-func audiobookGroupStatsServe(ctx context.Context, pool *pgxpool.Pool, libraryID int, filter AccessFilter) (bool, error) {
-	enabled := filter
-	enabled.DisabledLibraryIDs = nil
+// the viewer. Until the next refresh the view keeps a book in a library's
+// groups after it leaves the library, possibly for one the viewer may not
+// see, so it serves only a viewer without library limits for whom the
+// library's access conditions add nothing. Any condition a new access rule
+// adds sends its viewers to the live query.
+func audiobookGroupStatsServe(libraryID int, filter AccessFilter) bool {
+	if filter.AllowedLibraryIDs != nil || len(filter.DisabledLibraryIDs) > 0 {
+		return false
+	}
 	var conditions []string
 	var args []any
 	argIdx := 1
-	if !appendLibraryAudiobookAccessConditions("mi", libraryID, enabled, &conditions, &args, &argIdx) || len(conditions) > 0 {
-		return false, nil
-	}
-	if len(filter.DisabledLibraryIDs) == 0 {
-		return true, nil
-	}
-	overlap, err := LibraryOverlapsDisabled(ctx, pool, libraryID, filter.DisabledLibraryIDs)
-	return !overlap, err
+	return appendLibraryAudiobookAccessConditions("mi", libraryID, filter, &conditions, &args, &argIdx) && len(conditions) == 0
 }
 
 // audiobookGroupProgressHashRows is the most progress rows a viewer may have
