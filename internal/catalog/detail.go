@@ -3257,15 +3257,25 @@ func (s *DetailService) audiobookListeningStates(ctx context.Context, filter Acc
 }
 
 // ebookReadingStates reads the profile's ebook reading progress, finished at
-// the threshold every ebook surface uses (see mangaChaptersQuery).
+// the threshold every ebook surface uses (see mangaChaptersQuery). A row the
+// profile hid from history stays out until reading moves it past the hide,
+// as in the ebook progress store's ListByContentIDs.
 func (s *DetailService) ebookReadingStates(ctx context.Context, filter AccessFilter, ids []string) map[string]relatedBookState {
 	if s.itemRepo == nil || s.itemRepo.pool == nil {
 		return nil
 	}
 	rows, err := s.itemRepo.pool.Query(ctx, `
-		SELECT content_id, progress
-		FROM ebook_reader_progress
-		WHERE user_id = $1 AND profile_id = $2 AND content_id = ANY($3::text[])`,
+		SELECT erp.content_id, erp.progress
+		FROM ebook_reader_progress erp
+		WHERE erp.user_id = $1 AND erp.profile_id = $2 AND erp.content_id = ANY($3::text[])
+		  AND NOT EXISTS (
+			SELECT 1
+			FROM user_history_hidden_items hhi
+			WHERE hhi.user_id = erp.user_id
+			  AND hhi.profile_id = erp.profile_id
+			  AND hhi.media_item_id = erp.content_id
+			  AND erp.updated_at <= hhi.hidden_before
+		  )`,
 		filter.UserID, filter.ProfileID, ids)
 	if err != nil {
 		slog.Log(ctx, ctxerr.LogLevel(ctx, err, slog.LevelWarn), "related ebooks: reading state", "component", "catalog", "error", err)

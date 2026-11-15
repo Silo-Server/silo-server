@@ -13,7 +13,8 @@ import (
 
 // A book page's series row shows the viewing profile's own state on each
 // entry: finished, partway, or untouched. Another profile's listening never
-// shows through, and a browse card names a book's authors in credit order.
+// shows through, a book the profile hid from history shows no state until it
+// is read again, and a browse card names a book's authors in credit order.
 func TestBookPageRelatedStateAndCardAuthorsPostgres(t *testing.T) {
 	ctx := t.Context()
 	pool := newTestPool(t)
@@ -43,8 +44,8 @@ func TestBookPageRelatedStateAndCardAuthorsPostgres(t *testing.T) {
 	viewer, other := p+"-viewer", p+"-other"
 	exec(`INSERT INTO user_profiles (id,user_id,name) VALUES ($1,$3,'Viewer'), ($2,$3,'Other')`, viewer, other, userID)
 
-	finished, partway, untouched := p+"-1", p+"-2", p+"-3"
-	for i, id := range []string{finished, partway, untouched} {
+	finished, partway, untouched, hidden := p+"-1", p+"-2", p+"-3", p+"-4"
+	for i, id := range []string{finished, partway, untouched, hidden} {
 		exec(`INSERT INTO media_items (content_id,type,title,poster_thumbhash) VALUES ($1,'audiobook',$1,$2)`, id, id+"-hash")
 		exec(`INSERT INTO media_item_libraries (content_id,media_folder_id) VALUES ($1,$2)`, id, folder)
 		exec(`INSERT INTO audiobook_series (content_id,series_name,series_index) VALUES ($1,$2,$3)`, id, p+"-series", i+1)
@@ -56,6 +57,15 @@ func TestBookPageRelatedStateAndCardAuthorsPostgres(t *testing.T) {
 	exec(`INSERT INTO user_watch_progress (user_id,profile_id,media_item_id,position_seconds,duration_seconds,completed) VALUES
 		($1,$2,$3,0,1000,true), ($1,$2,$4,300,1500,false), ($1,$5,$6,100,1000,false)`,
 		userID, viewer, finished, partway, other, untouched)
+	// Finished, then hidden from history: neither the progress row nor the
+	// history row counts until the profile listens again.
+	before := time.Now().Add(-2 * time.Hour)
+	exec(`INSERT INTO user_watch_progress (user_id,profile_id,media_item_id,position_seconds,duration_seconds,completed,updated_at) VALUES ($1,$2,$3,0,1000,true,$4)`,
+		userID, viewer, hidden, before)
+	exec(`INSERT INTO user_watch_history (id,user_id,profile_id,media_item_id,watched_at,completed) VALUES ($1,$2,$3,$4,$5,true)`,
+		hidden, userID, viewer, hidden, before)
+	exec(`INSERT INTO user_history_hidden_items (user_id,profile_id,media_item_id,hidden_before) VALUES ($1,$2,$3,$4)`,
+		userID, viewer, hidden, before.Add(time.Hour))
 	// Credit order, not name order, decides which authors a card names.
 	person := time.Now().UnixNano() % 1_000_000_000_000
 	exec(`INSERT INTO people (id,name) VALUES ($1,$2), ($1+1,$3)`, person, p+"-zed", p+"-amy")
@@ -74,21 +84,57 @@ func TestBookPageRelatedStateAndCardAuthorsPostgres(t *testing.T) {
 		duration  int
 		thumbhash string
 	}
-	got := map[string]state{}
-	for _, e := range ext.Series.Entries {
-		s := state{played: e.Played, duration: e.DurationSeconds, thumbhash: e.PosterThumbhash}
-		if e.ProgressRatio != nil {
-			s.ratio = *e.ProgressRatio
+	entryStates := func(group *AudiobookSeriesGroup) map[string]state {
+		got := map[string]state{}
+		for _, e := range group.Entries {
+			s := state{played: e.Played, duration: e.DurationSeconds, thumbhash: e.PosterThumbhash}
+			if e.ProgressRatio != nil {
+				s.ratio = *e.ProgressRatio
+			}
+			got[e.ContentID] = s
 		}
-		got[e.ContentID] = s
+		return got
 	}
 	want := map[string]state{
 		finished:  {played: true, thumbhash: finished + "-hash"},
 		partway:   {ratio: 0.2, duration: 1500, thumbhash: partway + "-hash"},
 		untouched: {thumbhash: untouched + "-hash"},
+		hidden:    {thumbhash: hidden + "-hash"},
 	}
-	if fmt.Sprint(got) != fmt.Sprint(want) {
+	if got := entryStates(ext.Series); fmt.Sprint(got) != fmt.Sprint(want) {
 		t.Errorf("series entries = %v, want %v", got, want)
+	}
+
+	// Ebook reading progress follows the same history cutoff: a book read to
+	// the end and then hidden shows nothing, and one read again after the
+	// hide shows its new progress.
+	readHidden, readAgain := p+"-e1", p+"-e2"
+	for i, id := range []string{readHidden, readAgain} {
+		var file int
+		exec(`INSERT INTO media_items (content_id,type,title) VALUES ($1,'ebook',$1)`, id)
+		exec(`INSERT INTO media_item_libraries (content_id,media_folder_id) VALUES ($1,$2)`, id, folder)
+		exec(`INSERT INTO ebook_series (content_id,series_name,series_index) VALUES ($1,$2,$3)`, id, p+"-ebooks", i+1)
+		if err := pool.QueryRow(ctx, `INSERT INTO media_files (content_id,media_folder_id,file_path) VALUES ($1,$2,$3) RETURNING id`,
+			id, folder, "/"+id+".epub").Scan(&file); err != nil {
+			t.Fatal(err)
+		}
+		progress, updated := 1.0, before
+		if id == readAgain {
+			progress, updated = 0.5, time.Now()
+		}
+		exec(`INSERT INTO ebook_reader_progress (user_id,profile_id,content_id,file_id,location,progress,updated_at) VALUES ($1,$2,$3,$4,'',$5,$6)`,
+			userID, viewer, id, file, progress, updated)
+		exec(`INSERT INTO user_history_hidden_items (user_id,profile_id,media_item_id,hidden_before) VALUES ($1,$2,$3,$4)`,
+			userID, viewer, id, before.Add(time.Hour))
+	}
+	ebook := svc.buildEbookExtension(ctx, &models.MediaItem{ContentID: readHidden, Type: "ebook"}, nil,
+		AccessFilter{UserID: userID, ProfileID: viewer})
+	if ebook.Series == nil {
+		t.Fatal("ebook series row missing")
+	}
+	wantEbooks := map[string]state{readHidden: {}, readAgain: {ratio: 0.5}}
+	if got := entryStates(ebook.Series); fmt.Sprint(got) != fmt.Sprint(wantEbooks) {
+		t.Errorf("ebook series entries = %v, want %v", got, wantEbooks)
 	}
 
 	authors, err := ListBookAuthors(ctx, pool, []string{finished, partway}, 3)
