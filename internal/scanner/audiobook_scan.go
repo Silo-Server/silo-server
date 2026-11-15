@@ -221,6 +221,9 @@ func (s *Scanner) audiobookFolderShouldSkip(ctx context.Context, folder *models.
 			return 0, false, nil
 		}
 	}
+	if audiobookTagRereadRequested(ctx, contentID) {
+		return 0, false, nil
+	}
 	items, err := s.itemRepo.GetByIDs(ctx, []string{contentID})
 	if err != nil {
 		return 0, false, fmt.Errorf("get item for skip check: %w", err)
@@ -262,6 +265,10 @@ func listAudiobookDiskFiles(folderPath string, allowedPaths map[string]bool) (on
 	}
 	return onDisk, unreadable, nil
 }
+
+// audiobookScanProgressInterval is how often an audiobook scan reports how
+// many books it has finished.
+const audiobookScanProgressInterval = 3 * time.Second
 
 // audiobookScanWorkers returns the configured number of parallel workers
 // for audiobook reconciliation. Defaults to 8 — high enough to keep all
@@ -772,7 +779,7 @@ func (s *Scanner) scanAudiobookPaths(ctx context.Context, folder *models.MediaFo
 	}
 	candidates := groupAudiobookCandidates(scans)
 	reconcileRoots, seenPaths, protectedPaths := splitAudiobookReconcileRoots(scans)
-	reportAudiobookScanProgress(ctx, folder.ID, len(candidates), 0, 0, 0)
+	reportProgress(ctx, audiobookScanProgress(folder.ID, len(candidates), 0, 0, 0))
 
 	if len(candidates) == 0 {
 		// No books on disk. Still reconcile (guarded) so a legitimately-emptied
@@ -864,23 +871,34 @@ func (s *Scanner) reconcileAudiobookCandidates(ctx context.Context, folder *mode
 						"error", err,
 					)
 				}
-				n := atomic.AddInt64(&processed, 1)
-				if n%500 == 0 || n == int64(len(candidates)) {
-					failedCount := atomic.LoadInt64(&failed)
-					skippedCount := atomic.LoadInt64(&skipped)
-					slog.InfoContext(ctx, "audiobook scan: progress", "component", "scanner",
-						"folder_id", folder.ID,
-						"processed", n,
-						"failed", failedCount,
-						"skipped", skippedCount,
-						"total", len(candidates),
-						"elapsed_sec", int(time.Since(start).Seconds()),
-					)
-					reportAudiobookScanProgress(ctx, folder.ID, len(candidates), int(n), int(failedCount), int(skippedCount))
-				}
+				atomic.AddInt64(&processed, 1)
 			}
 		})
 	}
+	// Books can each take seconds, so progress follows the clock: workers
+	// only count, and one goroutine writes the counts every interval. The
+	// last counts are written however the pool ends.
+	logged := int64(-1)
+	progress := func() ProgressUpdate {
+		n, failedCount, skippedCount := atomic.LoadInt64(&processed), atomic.LoadInt64(&failed), atomic.LoadInt64(&skipped)
+		if n != logged {
+			logged = n
+			slog.InfoContext(ctx, "audiobook scan: progress", "component", "scanner",
+				"folder_id", folder.ID,
+				"processed", n,
+				"failed", failedCount,
+				"skipped", skippedCount,
+				"total", len(candidates),
+				"elapsed_sec", int(time.Since(start).Seconds()),
+			)
+		}
+		return audiobookScanProgress(folder.ID, len(candidates), int(n), int(failedCount), int(skippedCount))
+	}
+	stopProgress := reportProgressEvery(ctx, audiobookScanProgressInterval, progress)
+	defer func() {
+		stopProgress()
+		reportProgress(ctx, progress())
+	}()
 
 	for _, p := range candidates {
 		select {
@@ -993,8 +1011,8 @@ func (s *Scanner) reconcileAudiobookMissingFiles(ctx context.Context, folder *mo
 	return nil
 }
 
-func reportAudiobookScanProgress(ctx context.Context, folderID int, total, processed, failed, skipped int) {
-	reportProgress(ctx, ProgressUpdate{
+func audiobookScanProgress(folderID int, total, processed, failed, skipped int) ProgressUpdate {
+	return ProgressUpdate{
 		Phase:           "audiobook_scan",
 		Message:         fmt.Sprintf("Scanning audiobooks in folder %d", folderID),
 		CurrentScope:    strconv.Itoa(folderID),
@@ -1003,7 +1021,7 @@ func reportAudiobookScanProgress(ctx context.Context, folderID int, total, proce
 		FilesProcessed:  processed,
 		Errors:          failed,
 		Unchanged:       skipped,
-	})
+	}
 }
 
 // unreadable, when set, counts audio files ffprobe rejected that the book was
@@ -1110,6 +1128,7 @@ func (s *Scanner) reconcileAudiobookFolder(ctx context.Context, folder *models.M
 		return fmt.Errorf("upsert audiobook people: %w", err)
 	}
 	s.autoLinkLiteraryWork(ctx, contentID)
+	noteAudiobookTagReread(ctx, contentID)
 	slog.InfoContext(ctx, "audiobook scan: indexed", "component", "scanner",
 		"folder_id", folder.ID,
 		"content_id", contentID,

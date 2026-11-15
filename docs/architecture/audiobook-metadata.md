@@ -92,9 +92,42 @@ These rules decide what the tags say. The table above still decides whether
 the tags or a provider's record fills each field.
 
 An unchanged book is skipped on rescan, so a change to these rules reaches a
-book only when its files change or an admin runs a complete Refresh Metadata
-on it, which clears the book's file links and makes the next scan read its
-tags again.
+book only when its files change or a metadata refresh reads its tags again in
+place: the library Refresh Metadata in `full` mode, or an item's Refresh
+Metadata in `quick` or `reset` mode, as the next section describes.
+
+## Reading the tags again
+
+A scan skips a book whose files match their stored size and modification
+time (`audiobookFolderShouldSkip`), so a change to how tags are read reaches
+an unchanged book only when someone asks for it. A metadata refresh marks its
+scan with `scanner.WithAudiobookTagReread` and the content ID it refreshes;
+the scan then parses that book as if its files had changed and skips every
+other unchanged book it reaches, such as loose books beside it at the library
+root. The mark is set by:
+
+- the library Refresh Metadata job (`library_refresh`) in `full` mode, for
+  each item it refreshes, and the manual Refresh All Library Metadata task,
+  which runs that mode for each library. An audiobook whose match an admin
+  ignored (`match_ignored_at`) is included for the tag read alone; no
+  provider is asked about it;
+- an item's Refresh Metadata in `quick` mode, which an admin or a metadata
+  curator can start, before the provider refresh;
+- an item's Refresh Metadata in `reset` mode, after the reset. The reset
+  writes the provider's values and clears the fields and credits the
+  provider leaves out; the second read lets the tags fill what is still
+  empty, as on any scan of a matched book. The job fails when that read
+  fails or the scan did not read the book (`scanner.AudiobookTagRereadDone`),
+  since a scan of a path shared with other books succeeds when only one of
+  them failed.
+
+The book keeps its item: the scan finds it by the root path of its stored
+files, so the content ID, file rows, series row, progress, and favorites
+stay, and the ownership rules above decide which fields the tags write.
+Scheduled and library scans, real-time monitoring, and autoscan never set
+the mark, and neither does a `complete` item refresh. A `complete` refresh
+clears the files' content links before it scans, so the book gets a new item.
+Ebook scans ignore the mark.
 
 ## The enrichment sweep
 

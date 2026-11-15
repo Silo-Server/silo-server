@@ -10,7 +10,9 @@ import (
 	"reflect"
 	"slices"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgconn"
@@ -1292,4 +1294,37 @@ func TestParseAudiobookFolderSkipsRejectedPart(t *testing.T) {
 	if !errors.As(err, &unreadable) || !reflect.DeepEqual(unreadable.paths, []string{bad}) {
 		t.Fatalf("book with no readable part: err = %v, want noReadableAudiobookPartError for %s", err, bad)
 	}
+}
+
+// Progress reaches the admin on the clock while a book takes longer than the
+// interval, and nothing is written after stop.
+func TestReportProgressEveryWritesUntilStopped(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		var reports []int
+		ctx := WithProgressReporter(t.Context(), func(u ProgressUpdate) {
+			reports = append(reports, u.FilesProcessed)
+		})
+		var processed atomic.Int64
+		processed.Store(1)
+		stop := reportProgressEvery(ctx, audiobookScanProgressInterval, func() ProgressUpdate {
+			return audiobookScanProgress(1, 10, int(processed.Load()), 0, 0)
+		})
+
+		time.Sleep(audiobookScanProgressInterval + time.Millisecond) //nolint:forbidigo // synctest fake clock: advances one tick instantly.
+		synctest.Wait()
+		processed.Store(2)
+		time.Sleep(audiobookScanProgressInterval) //nolint:forbidigo // synctest fake clock: advances one more tick.
+		synctest.Wait()
+		if !slices.Equal(reports, []int{1, 2}) {
+			t.Fatalf("reports = %v, want [1 2]", reports)
+		}
+
+		stop()
+		processed.Store(3)
+		time.Sleep(2 * audiobookScanProgressInterval) //nolint:forbidigo // synctest fake clock: ticks that would fire if stop leaked.
+		synctest.Wait()
+		if len(reports) != 2 {
+			t.Fatalf("reports after stop = %v, want none added", reports)
+		}
+	})
 }

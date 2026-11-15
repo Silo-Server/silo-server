@@ -7,7 +7,6 @@ import (
 	"slices"
 	"sync"
 	"sync/atomic"
-	"time"
 
 	"github.com/Silo-Server/silo-server/internal/models"
 )
@@ -212,39 +211,21 @@ func (s *Scanner) processScanJob(ctx context.Context, run *scopeRun, job scanJob
 // logProgress reports the scope's processing progress on an interval until the
 // returned function is called.
 func (run *scopeRun) logProgress(ctx context.Context) (stop func()) {
-	stopProgress := make(chan struct{})
-	progressDone := make(chan struct{})
-	go func() {
-		ticker := time.NewTicker(scanProgressLogInterval)
-		defer ticker.Stop()
-		defer close(progressDone)
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-stopProgress:
-				return
-			case <-ticker.C:
-				update := run.progress("processing", "Processing discovered files")
-				slog.InfoContext(ctx, "scanner: processing progress", "component", "scanner",
-					"folder_id", run.folder.ID,
-					"scope", run.scope,
-					"processed", update.FilesProcessed,
-					"total", update.TotalFiles,
-					"new", update.New,
-					"updated", update.Updated,
-					"unchanged", update.Unchanged,
-					"no_video", run.noVideoCount.Load(),
-					"errors", update.Errors,
-				)
-				reportProgress(ctx, update)
-			}
-		}
-	}()
-	return func() {
-		close(stopProgress)
-		<-progressDone
-	}
+	return reportProgressEvery(ctx, scanProgressLogInterval, func() ProgressUpdate {
+		update := run.progress("processing", "Processing discovered files")
+		slog.InfoContext(ctx, "scanner: processing progress", "component", "scanner",
+			"folder_id", run.folder.ID,
+			"scope", run.scope,
+			"processed", update.FilesProcessed,
+			"total", update.TotalFiles,
+			"new", update.New,
+			"updated", update.Updated,
+			"unchanged", update.Unchanged,
+			"no_video", run.noVideoCount.Load(),
+			"errors", update.Errors,
+		)
+		return update
+	})
 }
 
 // processScopeExtras ingests a scope's extras and adds the outcome to result.

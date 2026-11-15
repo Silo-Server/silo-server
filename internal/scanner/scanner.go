@@ -1009,55 +1009,40 @@ func (s *Scanner) scanPaths(
 		})
 	}
 
-	stopProgress := make(chan struct{})
-	progressDone := make(chan struct{})
-	go func() {
-		ticker := time.NewTicker(scanProgressLogInterval)
-		defer ticker.Stop()
-		defer close(progressDone)
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-stopProgress:
-				return
-			case <-ticker.C:
-				processed := int(processedCount.Load())
-				total := len(filePaths)
-				slog.InfoContext(ctx, "scanner: processing progress", "component", "scanner",
-					"folder_id", folder.ID,
-					"scope", firstScope(reconcileRoots),
-					"processed", processed,
-					"total", total,
-					"new", newCount.Load(),
-					"updated", updatedCount.Load(),
-					"unchanged", unchangedCount.Load(),
-					"no_video", noVideoCount.Load(),
-					"errors", errorCount.Load(),
-				)
-				reportProgress(ctx, ProgressUpdate{
-					Phase:           "processing",
-					Message:         "Processing discovered files",
-					CurrentScope:    firstScope(reconcileRoots),
-					TotalFiles:      total,
-					FilesDiscovered: total,
-					FilesProcessed:  processed,
-					New:             int(newCount.Load()),
-					Updated:         int(updatedCount.Load()),
-					Unchanged:       int(unchangedCount.Load()),
-					Errors:          int(errorCount.Load()),
-				})
-			}
+	stopProgress := reportProgressEvery(ctx, scanProgressLogInterval, func() ProgressUpdate {
+		processed := int(processedCount.Load())
+		total := len(filePaths)
+		slog.InfoContext(ctx, "scanner: processing progress", "component", "scanner",
+			"folder_id", folder.ID,
+			"scope", firstScope(reconcileRoots),
+			"processed", processed,
+			"total", total,
+			"new", newCount.Load(),
+			"updated", updatedCount.Load(),
+			"unchanged", unchangedCount.Load(),
+			"no_video", noVideoCount.Load(),
+			"errors", errorCount.Load(),
+		)
+		return ProgressUpdate{
+			Phase:           "processing",
+			Message:         "Processing discovered files",
+			CurrentScope:    firstScope(reconcileRoots),
+			TotalFiles:      total,
+			FilesDiscovered: total,
+			FilesProcessed:  processed,
+			New:             int(newCount.Load()),
+			Updated:         int(updatedCount.Load()),
+			Unchanged:       int(unchangedCount.Load()),
+			Errors:          int(errorCount.Load()),
 		}
-	}()
+	})
 
 	for _, p := range primaryPaths {
 		pathCh <- p
 	}
 	close(pathCh)
 	wg.Wait()
-	close(stopProgress)
-	<-progressDone
+	stopProgress()
 
 	result.New = int(newCount.Load())
 	result.Updated = int(updatedCount.Load())

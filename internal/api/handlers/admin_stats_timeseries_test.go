@@ -34,9 +34,12 @@ func TestAssembleTimeseries(t *testing.T) {
 				Transcode:          int64Ptr(2),
 				EgressKbps:         48_211,
 				DownloadEgressKbps: 6_100,
+				PeakDirect:         int64Ptr(1),
+				PeakRemux:          int64Ptr(0),
+				PeakTranscode:      int64Ptr(2),
 			}},
 			want: []AdminTimeseriesPoint{
-				{T: minuteOne, Streams: 3, Direct: 1, Remux: 0, Transcode: 2, EgressKbps: 48_211, DownloadEgressKbps: 6_100},
+				{T: minuteOne, Streams: 3, Direct: 1, Remux: 0, Transcode: 2, EgressKbps: 48_211, DownloadEgressKbps: 6_100, StreamsByMethod: StreamsByMethod{Direct: 1, Transcode: 2}},
 			},
 		},
 		{
@@ -85,7 +88,8 @@ func TestAssembleTimeseries(t *testing.T) {
 					got[i].Remux != tt.want[i].Remux ||
 					got[i].Transcode != tt.want[i].Transcode ||
 					got[i].EgressKbps != tt.want[i].EgressKbps ||
-					got[i].DownloadEgressKbps != tt.want[i].DownloadEgressKbps {
+					got[i].DownloadEgressKbps != tt.want[i].DownloadEgressKbps ||
+					got[i].StreamsByMethod != tt.want[i].StreamsByMethod {
 					t.Fatalf("point %d = %+v, want %+v", i, got[i], tt.want[i])
 				}
 			}
