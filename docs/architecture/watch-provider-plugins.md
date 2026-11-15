@@ -147,6 +147,13 @@ library item through them and the row's provider key:
   ID that shares one of the row's IDs or its provider key. A title can have
   several such rows, one per TMDB ID it was listed under; a listing dated after
   all of their removals is a new add and drops every one of them.
+- A pending local removal holds the title in its other form too, matched the
+  same way. A removed title row holds a listing that now matches a library
+  item, unless that item is already on the list. A removed library item holds
+  a listing of the title outside the library once the library lost the item.
+  Other library items that share an ID don't hold each other's listings. A
+  listing dated after the removals is a new add, and drops the other form's
+  removal too.
 
 ## Sync-run admission
 

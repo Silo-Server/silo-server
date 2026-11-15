@@ -304,8 +304,8 @@ func (s *Service) importList(ctx context.Context, conn Connection, cfg ServerCon
 		if key == "" {
 			key = providerItemKeyForRemoteFavorite(row)
 		}
-		seenRemote.add(row.Kind,
-			key, prefixedID("imdb", row.IMDbID), prefixedID("tmdb", row.TMDBID), prefixedID("tvdb", row.TVDBID))
+		ids := []string{key, prefixedID("imdb", row.IMDbID), prefixedID("tmdb", row.TMDBID), prefixedID("tvdb", row.TVDBID)}
+		seenRemote.add(row.Kind, ids...)
 		match, reason, err := s.matcher.Match(ctx, row.HistoryRecord())
 		if err != nil {
 			return result, err
@@ -324,11 +324,11 @@ func (s *Service) importList(ctx context.Context, conn Connection, cfg ServerCon
 			}
 			continue
 		}
-		// The provider listing the item again after the local removal is a
-		// newer add; an older or undated listing is the one the removal will
-		// take off.
-		if removedAt, pending := removalsPending[match.MediaItemID]; pending &&
-			(row.FavoritedAtGuessed || !row.FavoritedAt.After(removedAt)) {
+		waits, err := s.waitsForMatchedListRemoval(ctx, conn, store, b, match.MediaItemID, row, ids, removalsPending, pendingTitles)
+		if err != nil {
+			return result, err
+		}
+		if waits {
 			continue
 		}
 		added, err := b.localAdd(ctx, store, conn.ProfileID, match.MediaItemID, row.FavoritedAt)
@@ -393,10 +393,10 @@ func (s *Service) importList(ctx context.Context, conn Connection, cfg ServerCon
 // provider still lists these items, so an import must not add them back from
 // that listing: a failed removal retries later in the run, and a removal held
 // because another library item shares the key stays until that item leaves
-// too. titles maps each ID and provider key a pending watchlist title row
-// knows to the media item IDs of the rows that know it (see pendingTitleKey),
-// for a provider that lists the title under another TMDB ID. One title can
-// have several rows, one per TMDB ID it was listed under.
+// too. titles maps each ID and provider key a pending row knows to the media
+// item IDs of the rows that know it (see pendingTitleKey), for a listing of
+// the title in its other form or under another TMDB ID. One title can have
+// several rows: a library item's, and one per TMDB ID it was listed under.
 func (s *Service) listItemsPendingRemoval(ctx context.Context, conn Connection, b listBinding) (pending map[string]time.Time, titles map[string][]string, err error) {
 	if !b.removalsEnabled(conn) {
 		return nil, nil, nil
