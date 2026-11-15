@@ -1181,3 +1181,7 @@
 ./internal/catalog TestExternalIDLookupSkipsItemsWithAnotherTMDBIDDB
 ./internal/catalog TestResolveProviderAliasesSkipsItemsWithAnotherTMDBIDDB
 ./internal/watchlist TestLibraryMatchesUsesTheTitlesRetainedIDsDB
+
+# Smart collection collage records: a refresh deletes the collection's records
+# nobody refreshed for a week, with or without a collage, and keeps the rest.
+./internal/catalog TestSmartCollageRecordsRetireWhenUnrefreshedDB
