@@ -689,9 +689,9 @@ func TestItemRefreshExecutorRunsResetJobsAsResets(t *testing.T) {
 	}
 }
 
-// A reset is committed before the audiobook's tags are read again, so a
-// failed read is a warning on the result and the reset's cache invalidation
-// and events still go out.
+// A reset is committed before the audiobook's tags are read again, so when
+// the read fails the reset's cache invalidation and events still go out, and
+// the job then fails with the read's error.
 func TestItemRefreshResetKeepsEventsWhenTagRereadFails(t *testing.T) {
 	t.Parallel()
 
@@ -699,7 +699,7 @@ func TestItemRefreshResetKeepsEventsWhenTagRereadFails(t *testing.T) {
 	executor := newItemRefreshTestExecutor(&itemRefreshTestIngester{failScan: 2}, &itemRefreshTestScanRuns{}, &itemRefreshTestRefresher{}, eventBus)
 	var evicted []string
 	executor.evictRails = func(contentIDs ...string) { evicted = append(evicted, contentIDs...) }
-	result, err := executor.Execute(context.Background(), ItemRefreshRequest{
+	_, err := executor.Execute(context.Background(), ItemRefreshRequest{
 		RequestedContentID: "book-1",
 		RequestedType:      itemTypeAudiobook,
 		RefreshContentID:   "book-1",
@@ -707,11 +707,8 @@ func TestItemRefreshResetKeepsEventsWhenTagRereadFails(t *testing.T) {
 		ScanPath:           "/media/book-1",
 		Mode:               ItemRefreshModeReset,
 	}, nil)
-	if err != nil {
-		t.Fatalf("Execute() error = %v, want the committed reset reported", err)
-	}
-	if result.TagRereadWarning == "" {
-		t.Error("TagRereadWarning is empty, want the failed read")
+	if err == nil || !strings.Contains(err.Error(), "read audiobook tags after the reset") {
+		t.Errorf("Execute() error = %v, want the failed tag read", err)
 	}
 	var changed bool
 	for _, event := range eventBus.events {
