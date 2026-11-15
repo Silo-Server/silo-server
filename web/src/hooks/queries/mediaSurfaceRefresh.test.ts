@@ -15,7 +15,7 @@ import {
   sectionKeys,
   watchlistKeys,
 } from "./keys";
-import type { HomeSectionItemsResponse } from "@/api/types";
+import type { HomeSectionItemsResponse, ItemDetail } from "@/api/types";
 import { sectionShowsWholeList } from "./homeRowLimit";
 import {
   cancelItemDetailQueries,
@@ -25,6 +25,7 @@ import {
   relatedItemIds,
   removeItemFromHomeSectionCaches,
   scheduleMediaSurfaceInvalidation,
+  updateCatalogItemDetail,
 } from "./mediaSurfaceRefresh";
 
 describe("invalidateMediaSurfaceQueries", () => {
@@ -750,5 +751,29 @@ describe("invalidateMediaSurfaceQueries", () => {
 
     expect(queryClient.getQueryState(libraryDetailKey)?.isInvalidated).toBe(true);
     expect(queryClient.getQueryState(otherDetailKey)?.isInvalidated).toBe(false);
+  });
+});
+
+describe("updateCatalogItemDetail", () => {
+  it("patches an invalidated detail without marking it fresh", async () => {
+    const queryClient = new QueryClient();
+    const invalidatedKey = catalogKeys.itemDetail("item-1");
+    const freshKey = itemKeys.detail("item-1");
+    queryClient.setQueryData(invalidatedKey, { content_id: "item-1", tagline: "old" });
+    queryClient.setQueryData(freshKey, { content_id: "item-1", tagline: "old" });
+    // Another device's metadata save, while no page shows the item.
+    await queryClient.invalidateQueries({ queryKey: invalidatedKey, exact: true });
+
+    updateCatalogItemDetail(queryClient, "item-1", (detail) => ({
+      ...detail,
+      user_state: { played: false, is_favorite: true, in_watchlist: false },
+    }));
+
+    expect(queryClient.getQueryData<ItemDetail>(invalidatedKey)?.user_state?.is_favorite).toBe(
+      true,
+    );
+    expect(queryClient.getQueryState(invalidatedKey)?.isInvalidated).toBe(true);
+    expect(queryClient.getQueryData<ItemDetail>(freshKey)?.user_state?.is_favorite).toBe(true);
+    expect(queryClient.getQueryState(freshKey)?.isInvalidated).toBe(false);
   });
 });

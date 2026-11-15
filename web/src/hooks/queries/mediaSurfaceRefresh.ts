@@ -99,12 +99,18 @@ export function updateCatalogItemDetail(
   itemId: string,
   updater: (detail: ItemDetail) => ItemDetail,
 ) {
-  queryClient.setQueriesData<ItemDetail>(
-    {
-      predicate: (query) => isItemDetailQueryKey(query.queryKey, itemId),
-    },
-    (current) => (current ? updater(current) : current),
+  const filters = { predicate: (query: Query) => isItemDetailQueryKey(query.queryKey, itemId) };
+  // Writing data marks a query fresh. A detail invalidated while no page
+  // showed it, such as by another device's metadata save, keeps this patch
+  // but must still refetch when its page next opens.
+  const invalidated = queryClient
+    .getQueryCache()
+    .findAll(filters)
+    .filter((query) => query.state.isInvalidated);
+  queryClient.setQueriesData<ItemDetail>(filters, (current) =>
+    current ? updater(current) : current,
   );
+  for (const query of invalidated) query.invalidate();
 }
 
 // Callers must await this before writing optimistic state. The default
