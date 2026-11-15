@@ -46,11 +46,17 @@ function calendarLabels(t: Translate): Partial<Labels> {
 
 // Month captions, month dropdown entries and weekday headers are shown text:
 // format them in the format locale, not react-day-picker's English default.
+// The grid is Gregorian, so month names are too, even where the locale's own
+// calendar is not (fa-IR, th-TH).
 const calendarFormatters: Partial<Formatters> = {
   formatCaption: (month) =>
-    new Intl.DateTimeFormat(formatLocale(), { month: "long", year: "numeric" }).format(month),
+    new Intl.DateTimeFormat(formatLocale(), {
+      month: "long",
+      year: "numeric",
+      calendar: "gregory",
+    }).format(month),
   formatMonthDropdown: (month) =>
-    new Intl.DateTimeFormat(formatLocale(), { month: "long" }).format(month),
+    new Intl.DateTimeFormat(formatLocale(), { month: "long", calendar: "gregory" }).format(month),
   formatWeekdayName: (weekday) =>
     new Intl.DateTimeFormat(formatLocale(), { weekday: "short" }).format(weekday),
 };
