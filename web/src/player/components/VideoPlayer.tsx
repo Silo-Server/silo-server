@@ -165,7 +165,7 @@ function pillKey(
   const isEditingOrInMenu =
     !targetInPrompt &&
     target?.closest(
-      'input, textarea, select, [contenteditable="true"], [role="dialog"], [role="menu"], [role="listbox"]',
+      'input, textarea, select, [contenteditable="true"], dialog, [role="dialog"], [role="menu"], [role="listbox"]',
     ) != null;
   if (isEditingOrInMenu) return null;
 
@@ -3675,7 +3675,7 @@ export function VideoPlayer({
     const active = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     const interactionInProgress =
       active?.closest(
-        'input, textarea, select, [contenteditable="true"], [role="dialog"], [role="menu"], [role="listbox"], [role="slider"]',
+        'input, textarea, select, [contenteditable="true"], dialog, [role="dialog"], [role="menu"], [role="listbox"], [role="slider"]',
       ) !== null ||
       containerRef.current?.querySelector('[role="dialog"], [role="menu"], [role="listbox"]') !=
         null;
