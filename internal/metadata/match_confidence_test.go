@@ -332,6 +332,11 @@ func TestTitleScoreBands(t *testing.T) {
 		// Before NFC normalisation, a decomposed accent (e + U+0301) vanished in
 		// the punctuation strip while the composed form kept its letter.
 		{"composed and decomposed spellings", "Caf\u00e9", "Cafe\u0301", one},
+		// A decimal volume is its own volume; a point standing in for a colon
+		// is not a decimal.
+		{"decimal volume against a whole one", "Series Name 0.5", "Series Name 5", zero},
+		{"decimal volumes with and without a trailing zero", "Series Name, Book 2.50", "Series Name, Book 2.5", one},
+		{"point written for a colon", "4.50 Night Express", "4:50 Night Express", one},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

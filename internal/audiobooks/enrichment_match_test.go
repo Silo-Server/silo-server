@@ -408,6 +408,7 @@ func narratorRuleCases() []narratorRuleCase {
 	_, sameEdition := edition("The Martian", "", "Andy Weir", "R. C. Bray")
 	sameEdition.ProviderIDs = map[string]string{"adds": "X1"}
 	_, cookbookRec := edition("Unrelated Cookbook", "B002V1O7UG", "Andy Weir", "Anyone")
+	_, siblingRec := edition("Series Name: The Well", "S2WELL0001", "Jo Smith", "Other Voice")
 
 	return []narratorRuleCase{
 		{
@@ -507,6 +508,16 @@ func narratorRuleCases() []narratorRuleCase {
 				ProviderIDs: map[string]string{"asin": "B002V1O7UG"},
 			},
 			providers: []metadata.Provider{&editionProvider{lookupASIN: true, records: map[string]*metadata.MetadataResult{"B002V1O7UG": cookbookRec}}},
+		},
+		{
+			// A wrong ASIN tag naming another book of the same series: the
+			// titles share the series name, but not enough to agree.
+			name: "narrator tag contradicted by a tagged-ASIN record for another book in the series: no match",
+			item: enrichmentItemRow{
+				Title: "Series Name: The Hero", Author: "Jo Smith", Narrators: []string{"Anne Reader"},
+				ProviderIDs: map[string]string{"asin": "S2WELL0001"},
+			},
+			providers: []metadata.Provider{&editionProvider{lookupASIN: true, records: map[string]*metadata.MetadataResult{"S2WELL0001": siblingRec}}},
 		},
 		{
 			name: "no author tag, narrator tag contradicted by a tagged-ASIN record with another title: no match",

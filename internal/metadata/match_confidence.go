@@ -6,6 +6,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"golang.org/x/text/unicode/norm"
 )
@@ -82,9 +83,15 @@ var (
 	nonAlnumRE = regexp.MustCompile(`[^\p{L}\p{N}]+`)
 
 	// decimalRE finds a decimal number standing as its own word ("0.5").
-	// normaliseTitle keeps it whole: split at the point, it would read as the
-	// two volumes 0 and 5.
+	// normaliseTitle keeps it whole where it numbers a volume
+	// (decimalVolumeAt): split at the point, it would read as the two volumes
+	// 0 and 5.
 	decimalRE = regexp.MustCompile(`\b\d{1,4}\.\d{1,2}\b`)
+
+	// volumeLeadRE matches text that ends in a volume marker, so a number
+	// after it numbers a volume: "book ", "vol. ", "#".
+	volumeLeadRE = regexp.MustCompile(
+		`(?:\b(?:books?|bks?|vols?|volumes?|parts?|series|episodes?|eps?)\b\.?\s*#?|#)\s*$`)
 )
 
 // numberWords maps spelled-out and Roman numerals onto digits. Providers and
@@ -143,19 +150,40 @@ func normaliseTitle(s string) string {
 }
 
 // stripPunctuation replaces punctuation with spaces, except the point of a
-// decimal number ("0.5"), which stays one word.
+// decimal volume number ("Series Name 0.5"), which stays one word, written
+// without trailing zeros ("2.50" as "2.5", "3.0" as "3").
 func stripPunctuation(s string) string {
 	var b strings.Builder
 	last := 0
 	for _, m := range decimalRE.FindAllStringIndex(s, -1) {
+		if !decimalVolumeAt(s, m[0], m[1]) {
+			continue
+		}
 		b.WriteString(nonAlnumRE.ReplaceAllString(s[last:m[0]], " "))
 		b.WriteString(" ")
-		b.WriteString(s[m[0]:m[1]])
+		if v, ok := parseVolume(s[m[0]:m[1]]); ok {
+			b.WriteString(v.word())
+		} else {
+			b.WriteString(nonAlnumRE.ReplaceAllString(s[m[0]:m[1]], " "))
+		}
 		b.WriteString(" ")
 		last = m[1]
 	}
 	b.WriteString(nonAlnumRE.ReplaceAllString(s[last:], " "))
 	return b.String()
+}
+
+// decimalVolumeAt reports whether the decimal number s[start:end] numbers a
+// volume: it follows a volume marker ("Book 2.5"), or ends the title or comes
+// before a separator ("Series Name 0.5", "Series Name 0.5 - Title"). A number
+// running into more words is a title written with a point for a colon, as
+// filenames must: "3.10 to Yuma" stays "3 10 to yuma", like "3:10 to Yuma".
+func decimalVolumeAt(s string, start, end int) bool {
+	if volumeLeadRE.MatchString(s[:start]) {
+		return true
+	}
+	next, _ := utf8.DecodeRuneInString(strings.TrimSpace(s[end:]))
+	return next == utf8.RuneError || strings.ContainsRune("-–—:;,()[]/", next)
 }
 
 // titleAloneIdentifies reports whether want and candidate name the same work
@@ -196,6 +224,12 @@ func titleAloneIdentifies(want, candidate string) bool {
 		return len(c) >= minContainmentLen
 	}
 	return false
+}
+
+// TitleIdentifies is titleAloneIdentifies for callers outside the package:
+// whether want and candidate name the same work on their titles alone.
+func TitleIdentifies(want, candidate string) bool {
+	return titleAloneIdentifies(want, candidate)
 }
 
 // containsTitle reports whether normalised title outer holds inner. For
@@ -272,7 +306,10 @@ func parseVolume(s string) (volumeIdentity, bool) {
 		if _, err := strconv.Atoi(point); err != nil {
 			return volumeIdentity{}, false
 		}
-		return volumeIdentity{first: n, last: n, point: point}, true
+		// "2.50" is "2.5", and "3.0" is 3.
+		if point = strings.TrimRight(point, "0"); point != "" {
+			return volumeIdentity{first: n, last: n, point: point}, true
+		}
 	}
 	if n == 0 {
 		return volumeIdentity{}, false
