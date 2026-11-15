@@ -64,6 +64,11 @@ type SearchMatchAdmissionRequest struct {
 	// title alone identifies the work (titleAloneIdentifies) or it carries a
 	// provider ID the item already has.
 	NoAuthor bool
+	// NoAuthorTitle is the title the NoAuthor check compares candidates
+	// with, when it differs from WantTitle: the title as searched, without a
+	// year or series marker the search dropped. WantTitle still scores the
+	// candidates and checks their volume. Empty means WantTitle.
+	NoAuthorTitle string
 }
 
 // SearchMatchAdmission is the result of applying title credibility,
@@ -83,7 +88,11 @@ type SearchMatchAdmission struct {
 func AdmitSearchMatch(ctx context.Context, req SearchMatchAdmissionRequest) (SearchMatchAdmission, error) {
 	results := req.Results
 	if req.NoAuthor {
-		results = titleOnlyCandidates(req.WantTitle, req.ExistingProviderIDs, results)
+		identity := req.NoAuthorTitle
+		if strings.TrimSpace(identity) == "" {
+			identity = req.WantTitle
+		}
+		results = titleOnlyCandidates(identity, req.ExistingProviderIDs, results)
 	}
 	selection, ok := selectBestMatchYear(req.WantTitle, req.WantYear, results)
 	if !ok {

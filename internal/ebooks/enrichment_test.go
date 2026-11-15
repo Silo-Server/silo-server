@@ -930,3 +930,27 @@ func TestEbookWithoutAnAuthorNeedsTheWholeTitle(t *testing.T) {
 		})
 	}
 }
+
+// A no-author ebook whose title carries a year the search drops is matched
+// against the title it was searched with: "Dune (2019)" is searched as "Dune"
+// and must accept "Dune", while a longer work still fails the title check.
+func TestEbookWithoutAnAuthorMatchesTheSearchedTitle(t *testing.T) {
+	for _, tc := range []struct {
+		candidate string
+		matched   bool
+	}{
+		{candidate: "Dune", matched: true},
+		{candidate: "Dune Messiah"},
+	} {
+		t.Run(tc.candidate, func(t *testing.T) {
+			providers := []metadata.Provider{&fakeEbookMetadataProvider{
+				slug:    "openlibrary",
+				results: []metadata.SearchResult{{Name: tc.candidate, ProviderIDs: map[string]string{"openlibrary": "1"}}},
+			}}
+			_, ids, _, _ := collectEbookMetadata(context.Background(), enrichmentItemRow{ContentID: "c1", Title: "Dune (2019)"}, providers, nil)
+			if matched := ids["openlibrary"] == "1"; matched != tc.matched {
+				t.Fatalf("%q for \"Dune (2019)\": matched = %v, want %v", tc.candidate, matched, tc.matched)
+			}
+		})
+	}
+}
