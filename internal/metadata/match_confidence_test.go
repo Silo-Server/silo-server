@@ -1,6 +1,10 @@
 package metadata
 
-import "testing"
+import (
+	"strings"
+	"testing"
+	"time"
+)
 
 // The pairs below are real: 20 unidentified production audiobooks were queried
 // against the iTunes audiobook search on 2026-07-27, and these are the titles
@@ -298,6 +302,19 @@ func TestBestMatchAcceptance(t *testing.T) {
 
 // TestTitleScoreBands holds the TitleScore cases that pin a score to zero, one,
 // or one side of minTitleScore.
+// normaliseTitle must stay linear in a title's length. Titles from a file's
+// tags reach it with no length limit, and checking each decimal against the
+// whole text before it once took seconds on a long title full of decimals;
+// at this length that version takes well over the bound.
+func TestNormaliseTitleIsLinearOnManyDecimals(t *testing.T) {
+	title := strings.Repeat("1.23 x ", 10000)
+	start := time.Now()
+	normaliseTitle(title)
+	if elapsed := time.Since(start); elapsed > 2*time.Second {
+		t.Fatalf("normaliseTitle took %v on a %d-byte title", elapsed, len(title))
+	}
+}
+
 func TestTitleScoreBands(t *testing.T) {
 	const (
 		zero = iota
@@ -332,6 +349,12 @@ func TestTitleScoreBands(t *testing.T) {
 		// Before NFC normalisation, a decomposed accent (e + U+0301) vanished in
 		// the punctuation strip while the composed form kept its letter.
 		{"composed and decomposed spellings", "Caf\u00e9", "Cafe\u0301", one},
+		// A decimal volume is its own volume; a point standing in for a colon
+		// is not a decimal.
+		{"decimal volume against a whole one", "Series Name 0.5", "Series Name 5", zero},
+		{"decimal volumes with and without a trailing zero", "Series Name, Book 2.50", "Series Name, Book 2.5", one},
+		{"point written for a colon", "4.50 Night Express", "4:50 Night Express", one},
+		{"dotted numeric title", "10.20.30", "10 20 30", one},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

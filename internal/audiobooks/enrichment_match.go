@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"log/slog"
 	"maps"
+	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 
 	"google.golang.org/grpc/codes"
@@ -36,11 +38,16 @@ type audiobookMatch struct {
 type fetchRejection string
 
 const (
-	rejectAuthor     fetchRejection = "author"
-	rejectNarrator   fetchRejection = "narrator"
-	rejectTitle      fetchRejection = "title"
-	rejectVolume     fetchRejection = "volume"
-	rejectProviderID fetchRejection = "provider_id"
+	rejectAuthor   fetchRejection = "author"
+	rejectNarrator fetchRejection = "narrator"
+	// rejectNarratorConflict is a record reached through the tagged ID whose
+	// narrators contradict those an accepted record already settled: two
+	// providers disagree about the edition, so only the later record is
+	// dropped.
+	rejectNarratorConflict fetchRejection = "narrator_conflict"
+	rejectTitle            fetchRejection = "title"
+	rejectVolume           fetchRejection = "volume"
+	rejectProviderID       fetchRejection = "provider_id"
 )
 
 // errMatchRejected stops matching when a record the item's IDs already pin
@@ -57,6 +64,19 @@ type matchRun struct {
 	state       []providerState // by provider index
 	agreedTitle string
 	merged      *metadata.MetadataResult
+	// narrators are the names a record's narrators are checked against: the
+	// item's narrator tags, until a record reached through the item's tagged
+	// ID overrules them (noteNarrators).
+	narrators []string
+	// narratorsSettled marks that an accepted record has listed narrators.
+	// From then on every record must agree with them: the match stores the
+	// narrators of every record it merges.
+	narratorsSettled bool
+	// bare is the item's title without its series prefix, or "".
+	bare string
+	// volumeTitle is the title the volume rules read: the item's title, or
+	// the series prefix's volume after the bare title.
+	volumeTitle string
 }
 
 // providerState is what one provider has answered for the item so far.
@@ -77,7 +97,8 @@ type providerState struct {
 // answered records a GetMetadata answer from provider i.
 func (r *matchRun) answered(i int, ids map[string]string, rejection fetchRejection) {
 	r.state[i].askedWith = ids
-	r.state[i].rejectedCredits = rejection == rejectAuthor || rejection == rejectNarrator
+	r.state[i].rejectedCredits = rejection == rejectAuthor || rejection == rejectNarrator ||
+		rejection == rejectNarratorConflict
 }
 
 // findMatch picks the record an audiobook is matched to and merges the
@@ -89,14 +110,23 @@ func (r *matchRun) answered(i int, ids map[string]string, rejection fetchRejecti
 // the item's author and narrator. A candidate that fails is dropped and the
 // next one tried, up to maxCandidateFetches. When the record behind the
 // item's own tagged ID fails, the item is left unmatched: the tag and the file
-// disagree, and no title match can settle which is right.
+// disagree, and no title match can settle which is right. Its narrators are
+// the exception when its title agrees with the item's: the tagged ID names one
+// edition, so it outranks a narrator tag, which taggers often fill with the
+// author.
 func (e *Enricher) findMatch(ctx context.Context, item enrichmentItemRow, providers []metadata.Provider) audiobookMatch {
 	run := &matchRun{
-		e:         e,
-		item:      item,
-		providers: providers,
-		ids:       maps.Clone(item.ProviderIDs),
-		state:     make([]providerState, len(providers)),
+		e:           e,
+		item:        item,
+		providers:   providers,
+		ids:         maps.Clone(item.ProviderIDs),
+		state:       make([]providerState, len(providers)),
+		narrators:   item.Narrators,
+		volumeTitle: item.Title,
+	}
+	var volume string
+	if run.bare, volume = bareSeriesTitle(item.Title, item.SeriesName, item.SeriesPosition); run.bare != "" {
+		run.volumeTitle = metadata.SeriesVolumeTitle(run.bare, volume)
 	}
 	if run.ids == nil {
 		run.ids = map[string]string{}
@@ -149,6 +179,10 @@ func (r *matchRun) lookupTaggedASIN(ctx context.Context) error {
 			r.errs = append(r.errs, fmt.Errorf("%s asin lookup identity admission: %w", p.Slug(), err))
 			continue
 		}
+		if rejection == rejectNarratorConflict {
+			r.logRejected(ctx, p, rejection, "skip: contradicts an earlier provider's narrators")
+			continue
+		}
 		if rejection != "" {
 			r.logRejected(ctx, p, rejection, "leave unmatched: tagged asin record")
 			return errMatchRejected
@@ -168,6 +202,7 @@ func (r *matchRun) lookupTaggedASIN(ctx context.Context) error {
 			}
 		}
 		r.state[i].record = admitted
+		r.noteNarrators(ctx, p, admitted)
 		maps.Copy(r.ids, admitted.ProviderIDs)
 		if r.agreedTitle == "" {
 			r.agreedTitle = agreeingTitle(r.item.Title, admitted)
@@ -184,8 +219,12 @@ func (r *matchRun) searchProvider(ctx context.Context, i int) error {
 	if r.state[i].record != nil || !ok {
 		return nil
 	}
+	query := r.item.Title
+	if r.bare != "" {
+		query = r.bare
+	}
 	results, err := sp.Search(ctx, metadata.SearchQuery{
-		Title:       r.item.Title,
+		Title:       query,
 		Author:      r.item.Author,
 		Year:        r.item.Year,
 		ContentType: audiobookItemType,
@@ -199,7 +238,7 @@ func (r *matchRun) searchProvider(ctx context.Context, i int) error {
 		return nil
 	}
 	mp, canFetch := p.(metadata.MetadataProvider)
-	rules := &metadata.BookMatchRules{SeriesPosition: r.item.SeriesPosition}
+	rules := &metadata.BookMatchRules{SeriesPosition: r.item.SeriesPosition, BareTitle: r.bare, VolumeTitle: r.volumeTitle}
 
 	remaining := results
 	for fetches := 0; fetches < maxCandidateFetches && len(remaining) > 0; {
@@ -263,6 +302,10 @@ func (r *matchRun) searchProvider(ctx context.Context, i int) error {
 			r.errs = append(r.errs, fmt.Errorf("%s metadata identity admission: %w", p.Slug(), err))
 			break
 		}
+		if rejection == rejectNarratorConflict {
+			r.logRejected(ctx, p, rejection, "skip: contradicts an earlier provider's narrators")
+			return nil
+		}
 		if rejection != "" {
 			if metadata.SharesProviderID(r.item.ProviderIDs, admission.Selected.ProviderIDs) {
 				r.logRejected(ctx, p, rejection, "leave unmatched: tagged id record")
@@ -272,6 +315,7 @@ func (r *matchRun) searchProvider(ctx context.Context, i int) error {
 			remaining = dropResult(remaining, admission.Selected)
 			continue
 		}
+		r.noteNarrators(ctx, p, admitted)
 		r.accept(ctx, i, admitted, candidateIDs, admission.AgreedTitle)
 		return nil
 	}
@@ -343,6 +387,9 @@ func (r *matchRun) fetchForMerge(ctx context.Context, i int, ids map[string]stri
 	case rejection == rejectProviderID:
 		r.logRejected(ctx, p, rejection, "skip: metadata identity contradicts an existing id")
 		return nil, nil
+	case rejection == rejectNarratorConflict:
+		r.logRejected(ctx, p, rejection, "skip: contradicts an earlier provider's narrators")
+		return nil, nil
 	case rejection != "" && prev.rejectedCredits:
 		r.logRejected(ctx, p, rejection, "skip: provider's record was already rejected")
 		return nil, nil
@@ -350,7 +397,34 @@ func (r *matchRun) fetchForMerge(ctx context.Context, i int, ids map[string]stri
 		r.logRejected(ctx, p, rejection, "leave unmatched: metadata contradicts the item")
 		return nil, errMatchRejected
 	}
+	r.noteNarrators(ctx, p, admitted)
 	return admitted, nil
+}
+
+// bareSeriesTitle is title without a leading series name and number, as in
+// "Series Name 3 - Book Title" or "Series Name, Book 3: Book Title", when
+// series is the item's series name. Providers search such a title badly, and
+// find the book by its own title. The number must equal position when that is
+// known; an unknown position (0, which a decimal one also reads as) accepts
+// any number. It returns the rest of the title and the number, or "" when
+// title has no such prefix.
+func bareSeriesTitle(title, series string, position int) (bare, volume string) {
+	series = strings.TrimSpace(series)
+	if series == "" {
+		return "", ""
+	}
+	re := regexp.MustCompile(`(?i)^\s*` + regexp.QuoteMeta(series) +
+		`[\s,:]+(?:(?:books?|bk|vol(?:ume)?|part)\.?\s*)?#?\s*(\d{1,4}(?:\.\d{1,2})?)\s*[-–—:]\s*(\S.*)$`)
+	m := re.FindStringSubmatch(title)
+	if m == nil {
+		return "", ""
+	}
+	if position > 0 {
+		if n, err := strconv.Atoi(m[1]); err != nil || n != position {
+			return "", ""
+		}
+	}
+	return strings.TrimSpace(m[2]), m[1]
 }
 
 // agreeingTitle is the record title or alias that best matches want, the
@@ -413,6 +487,50 @@ func (r *matchRun) accept(ctx context.Context, i int, record *metadata.MetadataR
 		"provider", r.providers[i].Slug(), "content_id", r.item.ContentID, "matched_ids", r.ids)
 }
 
+// noteNarrators records the narrators of an accepted record. The first
+// record to list any settles them; when they contradict the item's narrator
+// tags (admitFetched let a tagged-ID record through), they replace the tags as
+// the names later records are checked against. The match stores the record's
+// narrators in place of the tags, so a later provider describing the same
+// edition must not be rejected for agreeing with it.
+func (r *matchRun) noteNarrators(ctx context.Context, p metadata.Provider, record *metadata.MetadataResult) {
+	var names []string
+	for _, person := range record.People {
+		if person.Kind == models.PersonKindNarrator {
+			names = append(names, person.Name)
+		}
+	}
+	if len(names) == 0 || r.narratorsSettled {
+		return
+	}
+	r.narratorsSettled = true
+	if metadata.CreditsAgree(r.narrators, record.People, models.PersonKindNarrator) {
+		return
+	}
+	r.narrators = names
+	slog.InfoContext(ctx, "audiobook enrichment: tagged id record overrules the narrator tag", "component", "audiobooks",
+		"provider", p.Slug(),
+		"content_id", r.item.ContentID,
+		"title", r.item.Title,
+	)
+}
+
+// titleAgrees reports whether one of the record's titles names the item's
+// work on its own (metadata.TitleIdentifies), against the item's title or its
+// title without the series prefix. Sharing words is not enough: two books of
+// one series share the series name.
+func (r *matchRun) titleAgrees(record *metadata.MetadataResult) bool {
+	for _, t := range recordTitles(record) {
+		if strings.TrimSpace(t) == "" {
+			continue
+		}
+		if metadata.TitleIdentifies(r.item.Title, t) || (r.bare != "" && metadata.TitleIdentifies(r.bare, t)) {
+			return true
+		}
+	}
+	return false
+}
+
 func (r *matchRun) anyRecord() bool {
 	return slices.ContainsFunc(r.state, func(s providerState) bool { return s.record != nil })
 }
@@ -424,9 +542,13 @@ func (r *matchRun) metadataRequest(ids map[string]string) metadata.MetadataReque
 // admitFetched checks a fetched record against the item before any of it is
 // merged: credited author and narrator (listed narrators must agree; none
 // listed is no contradiction), stated volume, then provider IDs. byTaggedID
-// marks a record reached through the item's own tagged ID; it is also rejected
-// when the item names an author and none of its titles shares a word with the
-// item's.
+// marks a record reached through the item's own tagged ID. Such a record is
+// rejected when the item names an author and none of its titles shares a word
+// with the item's. Its narrators may contradict the narrator tag, but only if
+// one of its titles names the item's work on its own (titleAgrees), so a wrong
+// ID tag cannot pull in another book, such as another volume of the same
+// series. Once an accepted record has listed narrators, such a record that
+// contradicts them is rejectNarratorConflict: only it is dropped.
 func (r *matchRun) admitFetched(
 	ctx context.Context,
 	existing map[string]string,
@@ -437,12 +559,18 @@ func (r *matchRun) admitFetched(
 	if !metadata.CreditsAgree([]string{item.Author}, result.People, models.PersonKindAuthor) {
 		return nil, rejectAuthor, nil
 	}
-	if !metadata.CreditsAgree(item.Narrators, result.People, models.PersonKindNarrator) {
-		return nil, rejectNarrator, nil
+	if !metadata.CreditsAgree(r.narrators, result.People, models.PersonKindNarrator) {
+		tagged := byTaggedID && r.titleAgrees(result)
+		switch {
+		case !tagged:
+			return nil, rejectNarrator, nil
+		case r.narratorsSettled:
+			return nil, rejectNarratorConflict, nil
+		}
 	}
 	// A record whose titles state only volumes other than the one the item's
 	// title states is another book, whichever path found the record.
-	if metadata.RecordVolumeContradicts(item.Title, recordTitles(result)) {
+	if metadata.RecordVolumeContradicts(r.volumeTitle, recordTitles(result)) {
 		return nil, rejectVolume, nil
 	}
 	if byTaggedID && strings.TrimSpace(item.Author) != "" &&
