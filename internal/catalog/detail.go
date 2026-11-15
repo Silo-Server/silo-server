@@ -2060,11 +2060,35 @@ func (s *DetailService) GetItemVersions(ctx context.Context, contentID string, f
 	if err != nil {
 		return nil, err
 	}
+	files, audioPreferenceContentID, err := s.itemVersionFiles(ctx, contentID, target, filter)
+	if err != nil {
+		return nil, err
+	}
+	if target.season != nil || (target.item != nil && target.item.Type == playableTypeSeries) {
+		return []FileVersion{}, nil
+	}
+	files = s.prepareBrowseFiles(ctx, files)
+	versions, _, _, _, _, _, _ := s.buildPlaybackInfo(ctx, files, filter, audioPreferenceContentID)
+	return versions, nil
+}
+
+// itemVersionFiles fetches and authorizes the rows an item's version list is
+// built from. It is the one place that answers "which files does this item
+// have versions of", shared by the version list and by the playback commit
+// guard, so a plan's effective row is judged against exactly the rows the
+// client was shown. A series or season target has no version rows of its own
+// and answers an empty set.
+//
+// The rows are authorized but not probe-prepared and not duplicate-collapsed:
+// callers that need the projection collapse it themselves, and callers that
+// only need row identities skip the probe work.
+func (s *DetailService) itemVersionFiles(ctx context.Context, contentID string, target *detailTarget, filter AccessFilter) ([]*models.MediaFile, string, error) {
 	var files []*models.MediaFile
 	audioPreferenceContentID := contentID
+	var err error
 	switch {
 	case target.season != nil || (target.item != nil && target.item.Type == playableTypeSeries):
-		return []FileVersion{}, nil
+		return nil, audioPreferenceContentID, nil
 	case target.item != nil:
 		files, err = s.fileFetcher.GetByContentID(ctx, contentID)
 	case target.episode != nil:
@@ -2073,20 +2097,46 @@ func (s *DetailService) GetItemVersions(ctx context.Context, contentID string, f
 	default:
 		fetcher, ok := s.fileFetcher.(extraFileFetcher)
 		if !ok {
-			return nil, ErrItemNotFound
+			return nil, audioPreferenceContentID, ErrItemNotFound
 		}
 		files, err = fetcher.GetByExtraID(ctx, contentID)
 	}
 	if err != nil {
-		return nil, fmt.Errorf("fetching file versions: %w", err)
+		return nil, audioPreferenceContentID, fmt.Errorf("fetching file versions: %w", err)
 	}
 	files = FilterMediaFilesByAccess(files, filter)
 	if target.item != nil && target.item.Type == detailTypeAudiobook {
 		sortAudiobookMediaFiles(files)
 	}
-	files = s.prepareBrowseFiles(ctx, files)
-	versions, _, _, _, _, _, _ := s.buildPlaybackInfo(ctx, files, filter, audioPreferenceContentID)
-	return versions, nil
+	return files, audioPreferenceContentID, nil
+}
+
+// SelectableVersionFileIDs returns the ids of the version rows the item detail
+// lists for contentID under filter: the same rows, after the same duplicate
+// collapse, that GetItemVersions serves. Playback uses it to keep a plan's
+// effective row inside the version list the client can see, so "what is
+// playing" and "what I picked" name rows from one list.
+//
+// An item with no version rows of its own (a series or season) answers an empty
+// set; callers must read empty as "unknown", not as "nothing is selectable",
+// because a guard that treats it as a verdict would refuse every plan.
+func (s *DetailService) SelectableVersionFileIDs(ctx context.Context, contentID string, filter AccessFilter) (map[int]struct{}, error) {
+	target, err := s.resolveDetailTarget(ctx, contentID, filter)
+	if err != nil {
+		return nil, err
+	}
+	files, _, err := s.itemVersionFiles(ctx, contentID, target, filter)
+	if err != nil {
+		return nil, err
+	}
+	files = collapseDuplicateVirtualVersionFiles(files)
+	ids := make(map[int]struct{}, len(files))
+	for _, file := range files {
+		if file != nil && file.ID > 0 {
+			ids[file.ID] = struct{}{}
+		}
+	}
+	return ids, nil
 }
 
 // detailTarget is exactly one authorized catalog row. Keeping target resolution
