@@ -127,9 +127,11 @@ A watchlist title the library doesn't have
 ([external-watchlist.md](external-watchlist.md)) has a row whose
 `media_item_id` is `watchlist-title:<kind>:<tmdb id>`. Promotion deletes the
 title and its IDs, so the row's `title_ids` keep every ID the title has held
-(`tmdb:550`, `imdb:tt0137523`, `tvdb:121361`). Writes only add to them, and
-each import and removal pass refreshes them from the title while its entry
-stands. Sync finds the library item through them and the row's provider key:
+(`tmdb:550`, `imdb:tt0137523`, `tvdb:121361`). Writes only add to them. Each
+import and removal pass refreshes them from the title while its entry stands,
+and promotion and the profile's removal add the title's IDs to the profile's
+rows for it, under the title lock, before deleting the title. Sync finds the
+library item through them and the row's provider key:
 
 - An entry gone from the watchlist is a promotion, not a local removal, while a
   library item with one of those IDs is on the library watchlist. When exactly
