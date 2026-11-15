@@ -61,7 +61,13 @@ const audiobookDuplicateCandidateSQL = `
 		)) AS normalized_title
 	) t ON TRUE
 	WHERE mi.type = 'audiobook'
-	  AND mi.year = $3
+	  -- Compare the tag year the files were scanned with: a provider match
+	  -- owns mi.year, and a renamed folder of a matched book must still find
+	  -- its item.
+	  AND EXISTS (
+		  SELECT 1 FROM media_files yf
+		  WHERE yf.content_id = mi.content_id AND yf.base_year = $3
+	  )
 	  AND f.dur > 0
 	  AND ABS(f.dur - $4) <= $5
 	  AND (

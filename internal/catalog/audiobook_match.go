@@ -1,13 +1,18 @@
 package catalog
 
-// AudiobookProviderMatchedWhere is true when a metadata provider matched the
-// audiobook: it has a provider ID other than the ASIN the scanner reads from
-// tags (the enricher and an admin's Match Item both write one), or its last
-// enrichment outcome was success. The outcome covers a match whose only
-// stored ID is the ASIN, such as a lookup by the tagged ASIN or a match whose
-// provider's own ID another item already owns. While it holds, the provider
-// owns year, credits, genres and studios, and a rescan only fills what is
-// empty. The scanner and the admin unmatched list both use this predicate.
+// AudiobookProviderMatchedWhere is true when a metadata provider or an admin
+// matched the audiobook. Any one of these marks it:
+//   - a provider ID other than the ASIN the scanner reads from tags;
+//   - a last enrichment outcome of success, which covers an automatic match
+//     that stored only the ASIN (a lookup by the tagged ASIN, or a provider
+//     ID another item already owns);
+//   - status 'matched', which Match Item and Refresh Metadata write through
+//     the metadata pipeline in the same transaction as the match, whatever
+//     IDs it carries.
+//
+// While it holds, the provider owns year, credits, genres and studios, and a
+// rescan only fills what is empty. The scanner and the admin unmatched list
+// both use this predicate.
 func AudiobookProviderMatchedWhere(contentIDExpr string) string {
 	return `(EXISTS (
 		SELECT 1 FROM media_item_provider_ids abm
@@ -17,6 +22,10 @@ func AudiobookProviderMatchedWhere(contentIDExpr string) string {
 		SELECT 1 FROM audiobook_enrichment_state abm_state
 		WHERE abm_state.content_id = ` + contentIDExpr + `
 		  AND abm_state.outcome = 'success'
+	) OR EXISTS (
+		SELECT 1 FROM media_items abm_item
+		WHERE abm_item.content_id = ` + contentIDExpr + `
+		  AND abm_item.status = 'matched'
 	))`
 }
 

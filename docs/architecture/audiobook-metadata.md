@@ -8,12 +8,17 @@ one owner, so a rescan never leaves a book describing two sources.
 
 ## Matched means a provider identity
 
-A book is provider-matched when it has a `media_item_provider_ids` row other
-than `asin`, or its last enrichment outcome in `audiobook_enrichment_state` is
-`success`. The scanner stores the ASIN tag as an `asin` row, so that row alone
-is not a match. The enricher and an admin's Match Item write a provider's own
-ID; the outcome covers a match that stored no such ID, such as a lookup by the
-tagged ASIN or a match whose provider ID another item already owns.
+A book is provider-matched when any of these holds:
+
+- it has a `media_item_provider_ids` row other than `asin` (the scanner stores
+  the ASIN tag as an `asin` row, so that row alone is not a match);
+- its last enrichment outcome in `audiobook_enrichment_state` is `success`,
+  which covers an automatic match that stored only the ASIN, such as a lookup
+  by the tagged ASIN or a match whose provider ID another item already owns;
+- its `status` is `matched`, which Match Item and Refresh Metadata write
+  through the metadata pipeline in the same transaction as the match,
+  whatever IDs it carries.
+
 `catalog.AudiobookProviderMatchedWhere` is the one predicate; the scanner and
 the admin unmatched list both use it.
 
@@ -36,6 +41,10 @@ written in the same transaction as the rest of the match and its `success`
 outcome, so a failure leaves the book unmatched and retryable. When the
 enricher writes a poster it also writes that poster's thumbhash, empty for an
 uncached remote URL, which image caching fills in later.
+
+When a folder is renamed or moved, the scanner looks for the same recording
+under another path. That check compares the tag year stored on the files
+(`media_files.base_year`), not `media_items.year`, which a match owns.
 
 The enricher does not run again on a matched book. A book whose fields were
 mixed before this rule existed stays that way until an admin runs Refresh

@@ -12,8 +12,9 @@ import (
 
 // Audiobooks keep media_items.status empty. One whose enrichment found no
 // provider match lists as unmatched, one still waiting for enrichment does
-// not, and a match takes it off the list, whether it stores a provider ID or
-// only records a successful outcome for its tagged ASIN.
+// not, and a match takes it off the list: one that stores a provider ID, an
+// automatic match that only records a successful outcome for its tagged ASIN,
+// or an admin's Match Item.
 func TestUnmatchedItemsListsAudiobooksWithoutProviderMatchDB(t *testing.T) {
 	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
 	if dsn == "" {
@@ -78,6 +79,16 @@ func TestUnmatchedItemsListsAudiobooksWithoutProviderMatchDB(t *testing.T) {
 		t.Fatalf("listed after an asin-only match = %v, want none", got)
 	}
 	if _, err := pool.Exec(ctx, `UPDATE audiobook_enrichment_state SET outcome = 'no_match' WHERE content_id = $1`, noMatchID); err != nil {
+		t.Fatal(err)
+	}
+	// Match Item with only the ASIN writes status 'matched' and no state.
+	if _, err := pool.Exec(ctx, `UPDATE media_items SET status = 'matched' WHERE content_id = $1`, noMatchID); err != nil {
+		t.Fatal(err)
+	}
+	if got := list(); len(got) != 0 {
+		t.Fatalf("listed after an admin match = %v, want none", got)
+	}
+	if _, err := pool.Exec(ctx, `UPDATE media_items SET status = '' WHERE content_id = $1`, noMatchID); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := pool.Exec(ctx, `INSERT INTO media_item_provider_ids (content_id, provider, provider_id, item_type) VALUES ($1, 'audible', $1, 'audiobook')`, noMatchID); err != nil {
