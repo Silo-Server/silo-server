@@ -172,8 +172,10 @@ function delay(ms: number) {
   return new Promise((resolve) => window.setTimeout(resolve, ms));
 }
 
-/** The longest a job wait sleeps after failed reads, a Retry-After included. */
+/** The longest a job wait backs off after failed reads; a longer Retry-After still holds. */
 const JOB_POLL_MAX_BACKOFF_MS = 30_000;
+/** setTimeout's limit; a longer delay would fire at once. */
+const MAX_TIMEOUT_MS = 2_147_483_647;
 
 /**
  * Reads the job until it finishes. A read that may succeed later does not end
@@ -197,7 +199,8 @@ async function pollAdminJobUntilTerminal(
         throw error;
       }
       failures += 1;
-      await delay(Math.min(v2RetryDelayMs(error, 1_000 * 2 ** failures), JOB_POLL_MAX_BACKOFF_MS));
+      const backoff = Math.min(1_000 * 2 ** failures, JOB_POLL_MAX_BACKOFF_MS);
+      await delay(Math.min(v2RetryDelayMs(error, backoff), MAX_TIMEOUT_MS));
       continue;
     }
     failures = 0;
