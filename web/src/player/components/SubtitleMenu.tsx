@@ -1,5 +1,4 @@
 import { useState, useCallback, useEffect, useRef, useMemo } from "react";
-import { createPortal } from "react-dom";
 import {
   Captions,
   CaptionsOff,
@@ -421,10 +420,7 @@ export function SubtitleMenu({
 
       <SubtitleAppearancePanel open={appearanceOpen} onClose={() => setAppearanceOpen(false)} />
 
-      {searchOpen &&
-        mediaFileId &&
-        playerConfig &&
-        createPortal(
+      {searchOpen && mediaFileId && playerConfig && (
           <SubtitleSearchModal
             key={sessionId}
             mediaFileId={mediaFileId}
@@ -451,8 +447,7 @@ export function SubtitleMenu({
               }
               onRefreshSubtitles?.();
             }}
-          />,
-          document.body,
+          />
         )}
 
       {translateOpen && mediaFileId && playerConfig && (

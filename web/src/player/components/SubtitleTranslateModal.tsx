@@ -1,5 +1,4 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
-import { createPortal } from "react-dom";
 import { toast } from "sonner";
 import type { PlayerConfig } from "../context/PlayerConfigContext";
 import type { PlayerAudioTrack, PlayerSubtitleInfo } from "../types";
@@ -15,6 +14,7 @@ import {
 } from "./subtitleTranslateRequest";
 import { quotaPeriodWindowLabel } from "@/lib/quotaPeriods";
 import { useT, type MessageKey } from "@/i18n";
+import { PlayerModalDialog } from "./PlayerModalDialog";
 
 /** Glyph on the close button, which carries a translated label. */
 const CLOSE_GLYPH = "✕";
@@ -137,15 +137,6 @@ export function SubtitleTranslateModal({
     refreshQuota();
   }, [isOpen, canTranscribe, refreshQuota]);
 
-  useEffect(() => {
-    if (!isOpen) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") handleClose();
-    };
-    document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
-  }, [isOpen, handleClose]);
-
   const handleTranslate = useCallback(async () => {
     if (inFlight.current || !isOpen) return;
     const fromAudio = mode === "audio";
@@ -234,18 +225,12 @@ export function SubtitleTranslateModal({
 
   if (!isOpen) return null;
 
-  const modal = (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/80"
-      onClick={handleClose}
-      role="dialog"
-      aria-modal="true"
-      aria-label={t("web.subtitles.translate.titleTranslate")}
+  return (
+    <PlayerModalDialog
+      label={t("web.subtitles.translate.titleTranslate")}
+      className="w-full max-w-[440px] rounded-lg bg-neutral-900 text-white shadow-xl"
+      onClose={handleClose}
     >
-      <div
-        className="w-full max-w-[440px] rounded-lg bg-neutral-900 text-white shadow-xl"
-        onClick={(e) => e.stopPropagation()}
-      >
         <div className="flex items-center justify-between border-b border-white/10 px-4 py-3">
           <h2 className="text-sm font-semibold">
             {mode === "audio"
@@ -300,6 +285,7 @@ export function SubtitleTranslateModal({
                     {t("web.subtitles.translate.translateFrom")}
                   </span>
                   <select
+                    data-autofocus
                     className="w-full rounded bg-neutral-800 px-2 py-1.5 text-sm text-white focus-visible:ring-2 focus-visible:ring-white/70 focus-visible:outline-none disabled:opacity-50"
                     value={effectiveSourceIndex ?? ""}
                     onChange={(e) => setSourceIndex(Number(e.target.value))}
@@ -318,6 +304,7 @@ export function SubtitleTranslateModal({
                     {t("web.subtitles.translate.audioTrack")}
                   </span>
                   <select
+                    data-autofocus
                     className="w-full rounded bg-neutral-800 px-2 py-1.5 text-sm text-white focus-visible:ring-2 focus-visible:ring-white/70 focus-visible:outline-none disabled:opacity-50"
                     value={audioIndex}
                     onChange={(e) => setAudioIndex(Number(e.target.value))}
@@ -421,9 +408,6 @@ export function SubtitleTranslateModal({
             </>
           )}
         </div>
-      </div>
-    </div>
+    </PlayerModalDialog>
   );
-
-  return createPortal(modal, document.body);
 }

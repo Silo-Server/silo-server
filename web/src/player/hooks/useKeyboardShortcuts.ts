@@ -31,7 +31,7 @@ export function useKeyboardShortcuts(
       // the focused item instead of toggling playback. The touch sheet's close
       // and backdrop buttons sit beside the menu element, so they carry
       // data-player-menu.
-      if (target.closest?.('[role="menu"], [role="dialog"], [data-player-menu]')) return;
+      if (target.closest?.('dialog, [role="menu"], [role="dialog"], [data-player-menu]')) return;
 
       const video = videoRef.current;
       if (!video) return;
