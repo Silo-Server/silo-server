@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import type { MouseEvent as ReactMouseEvent, ReactNode } from "react";
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { Link, Navigate, useSearchParams } from "react-router";
 import { AdminSessionActions } from "@/components/AdminSessionActions";
@@ -663,6 +663,18 @@ function StreamRow({
     });
   };
   const openDetails = () => setDetailsOpen(true);
+  // A click anywhere on the row toggles its details, as a mouse shortcut for
+  // the expand button (which stays the keyboard and screen-reader control).
+  // Clicks on the row's own links and buttons keep their meaning, as do
+  // clicks that end a text selection and clicks inside portaled menus and
+  // dialogs, which React bubbles here though they sit outside the row.
+  const onRowClick = (event: ReactMouseEvent<HTMLDivElement>) => {
+    const target = event.target as Element;
+    if (!event.currentTarget.contains(target)) return;
+    if (target.closest("a, button, input, select, textarea, label, [role='button']")) return;
+    if (window.getSelection()?.type === "Range") return;
+    toggleDetails();
+  };
   const toggleFFmpeg = () => {
     setFFmpegOpen((open) => {
       const nextOpen = !open;
@@ -717,7 +729,8 @@ function StreamRow({
     <div className="border-border/40 border-b last:border-b-0">
       {/* Table row */}
       <div
-        className={`${layout.table} ${layout.columns} hover:bg-surface/40 items-center gap-3 px-3 py-2 transition-colors`}
+        onClick={onRowClick}
+        className={`${layout.table} ${layout.columns} hover:bg-surface/40 cursor-pointer items-center gap-3 px-3 py-2 transition-colors`}
       >
         {expandButton}
         <MediaCell session={session} />
@@ -764,7 +777,7 @@ function StreamRow({
       </div>
 
       {/* Stacked card */}
-      <div className={`${layout.stacked} flex gap-3 px-3 py-3`}>
+      <div onClick={onRowClick} className={`${layout.stacked} flex cursor-pointer gap-3 px-3 py-3`}>
         <Poster session={session} size="stacked" />
         <div className="min-w-0 flex-1 space-y-1">
           <div className="flex items-start gap-2">
