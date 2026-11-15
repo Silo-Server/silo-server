@@ -1106,6 +1106,13 @@ func TestAudiobookTagTitle(t *testing.T) {
 		{"Saga Name 2 - Book Title Other Words", "Book Title", "Saga Name", "2", "Book Title Other Words"},
 		{"Saga Name 2 - Book Title", "Other Words", "Saga Name", "3", "Saga Name 2 - Book Title"},
 		{"Saga Name - Book Title", "Other Words", "Saga Name", "2", "Saga Name - Book Title"},
+		// The position tag may carry a marker or be a Roman numeral, and the
+		// album may be missing.
+		{"Saga Name 2 - Book Title", "Other Words", "Saga Name", "Book #2", "Book Title"},
+		{"Saga Name III - Book Title", "Other Words", "Saga Name", "3", "Book Title"},
+		{"Saga Name 2 - Book Title", "", "Saga Name", "2", "Book Title"},
+		{"Saga Name 2 - Book Title", "", "Saga Name", "", "Saga Name 2 - Book Title"},
+		{"Saga Name 2 -", "", "Saga Name", "2", "Saga Name 2 -"},
 		// With a series tag only that series is a prefix, so a number in the
 		// work's own name stays; words that look like Roman numerals are not
 		// positions.

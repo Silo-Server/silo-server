@@ -81,8 +81,9 @@ write are in `internal/scanner/audiobook_tags.go`:
   (`Book Title: Saga Name 2`, `Book Title, Part 2`), `title` without its
   prefix wins. A numbered prefix that names the series among other words
   (`The Saga Name 2`) counts when `album` follows it. A prefix carrying the
-  series position tag's number was composed from the two tags, so `title`
-  without it wins whatever `album` says. Otherwise `title` stays, because a single file's `album` may name its
+  series position tag's number, in digits or as a Roman numeral, was composed
+  from the two tags, so `title` without it wins whatever `album` says, and
+  when there is no `album`. Otherwise `title` stays, because a single file's `album` may name its
   series or a collection. A multi-file book whose part titles name the parts
   uses `album`.
 - Narrators: an explicit narrator tag (`narrator`, the MP4 `©nrt` atom, or
