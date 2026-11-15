@@ -121,6 +121,8 @@
 
 # Episode collection counts name exactly the episodes their cursor pages list, under every rule and access limit.
 ./internal/catalog TestEpisodeCatalogCountsMatchCursorPagesPostgres
+./internal/catalog TestEpisodeCatalogRefreshWaitsForAnEpisodeEditPostgres
+./internal/catalog TestEpisodeCatalogRefreshSerializesFileChangesPostgres
 
 # PostgreSQL search keeps typo matches that contain every query word and ranks
 # titles starting with the query first, on the cursor and offset paths. Search
