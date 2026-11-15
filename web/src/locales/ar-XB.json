@@ -51132,6 +51132,30 @@
       "value": "\u200F\u202ESaving...\u202C"
     }
   ],
+  "web.admin.nodes.form.sourceAccess": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ESource access\u202C"
+    }
+  ],
+  "web.admin.nodes.form.sourceAccessCore": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EThrough the API servers\u202C"
+    }
+  ],
+  "web.admin.nodes.form.sourceAccessHelp": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EThrough the API servers, the node needs no library mount, but every byte it reads passes through the API servers, so they need the bandwidth for it.\u202C"
+    }
+  ],
+  "web.admin.nodes.form.sourceAccessLocal": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ELibrary mount on the node\u202C"
+    }
+  ],
   "web.admin.nodes.form.type": [
     {
       "type": 0,
@@ -51758,6 +51782,204 @@
     {
       "type": 0,
       "value": "\u200F\u202ESoftware\u202C"
+    }
+  ],
+  "web.admin.nodes.key.close": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EClose\u202C"
+    }
+  ],
+  "web.admin.nodes.key.copied": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ECopied\u202C"
+    }
+  ],
+  "web.admin.nodes.key.copyFailed": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ECould not copy. Select the text and copy it by hand.\u202C"
+    }
+  ],
+  "web.admin.nodes.key.copyKey": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ECopy key\u202C"
+    }
+  ],
+  "web.admin.nodes.key.copySettings": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ECopy settings\u202C"
+    }
+  ],
+  "web.admin.nodes.key.coreUrlHelp": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EThe address the node calls to reach this server. With several API servers, use their load-balanced address.\u202C"
+    }
+  ],
+  "web.admin.nodes.key.coreUrlLabel": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EServer address for the node\u202C"
+    }
+  ],
+  "web.admin.nodes.key.coreUrlMissing": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EEnter the server address to complete the settings.\u202C"
+    }
+  ],
+  "web.admin.nodes.key.dialogTitle": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EKey for \u202C"
+    },
+    {
+      "type": 1,
+      "value": "name"
+    }
+  ],
+  "web.admin.nodes.key.issue": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EIssue key\u202C"
+    }
+  ],
+  "web.admin.nodes.key.issueFor": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EIssue a key for \u202C"
+    },
+    {
+      "type": 1,
+      "value": "name"
+    }
+  ],
+  "web.admin.nodes.key.issued": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EKey issued\u202C"
+    }
+  ],
+  "web.admin.nodes.key.issuing": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EIssuing a key…\u202C"
+    }
+  ],
+  "web.admin.nodes.key.keyLabel": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ENode key\u202C"
+    }
+  ],
+  "web.admin.nodes.key.later": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ENot now\u202C"
+    }
+  ],
+  "web.admin.nodes.key.missing": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ENo key: this node takes no work until a key is issued\u202C"
+    }
+  ],
+  "web.admin.nodes.key.notShownAgain": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ECopy the key now. It is not shown again; if you lose it, rotate the key and restart the node with the new one.\u202C"
+    }
+  ],
+  "web.admin.nodes.key.offer": [
+    {
+      "type": 0,
+      "value": "\u200F"
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "\u202E takes no work until it has a key. Issue one now to get the settings the node starts with.\u202C"
+    }
+  ],
+  "web.admin.nodes.key.rotate": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ERotate key\u202C"
+    }
+  ],
+  "web.admin.nodes.key.rotateDescription": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EThe current key stops working immediately. The node loses its connection to this server: its running streams fail, and it takes no work until you restart it with the new key.\u202C"
+    }
+  ],
+  "web.admin.nodes.key.rotateDrainHint": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ETo avoid cutting streams, drain the node first and rotate the key once it shows Drained.\u202C"
+    }
+  ],
+  "web.admin.nodes.key.rotateFor": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ERotate the key for \u202C"
+    },
+    {
+      "type": 1,
+      "value": "name"
+    }
+  ],
+  "web.admin.nodes.key.rotateTitle": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ERotate the key for \u202C"
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "\u202E?\u202C"
+    }
+  ],
+  "web.admin.nodes.key.saved": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EI saved the key\u202C"
+    }
+  ],
+  "web.admin.nodes.key.settingsHelp": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EStart the node with these two settings. A node that is already running keeps its old key until you restart it.\u202C"
+    }
+  ],
+  "web.admin.nodes.key.settingsLabel": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ENode settings\u202C"
+    }
+  ],
+  "web.admin.nodes.key.unconfirmed": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ECould not confirm a new key for \u202C"
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "\u202E. Refresh the page before trying again: if a key was issued, the previous one has already stopped working.\u202C"
     }
   ],
   "web.admin.nodes.memory.noReading": [

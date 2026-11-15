@@ -53815,6 +53815,30 @@
       "value": "Enregistrement…"
     }
   ],
+  "web.admin.nodes.form.sourceAccess": [
+    {
+      "type": 0,
+      "value": "Accès aux sources"
+    }
+  ],
+  "web.admin.nodes.form.sourceAccessCore": [
+    {
+      "type": 0,
+      "value": "Via les serveurs API"
+    }
+  ],
+  "web.admin.nodes.form.sourceAccessHelp": [
+    {
+      "type": 0,
+      "value": "Via les serveurs API, le nœud n’a besoin d’aucun montage de bibliothèque, mais chaque octet qu’il lit passe par les serveurs API, qui doivent donc disposer de la bande passante nécessaire."
+    }
+  ],
+  "web.admin.nodes.form.sourceAccessLocal": [
+    {
+      "type": 0,
+      "value": "Montage de bibliothèque sur le nœud"
+    }
+  ],
   "web.admin.nodes.form.type": [
     {
       "type": 0,
@@ -54447,6 +54471,200 @@
     {
       "type": 0,
       "value": "Logiciel"
+    }
+  ],
+  "web.admin.nodes.key.close": [
+    {
+      "type": 0,
+      "value": "Fermer"
+    }
+  ],
+  "web.admin.nodes.key.copied": [
+    {
+      "type": 0,
+      "value": "Copié"
+    }
+  ],
+  "web.admin.nodes.key.copyFailed": [
+    {
+      "type": 0,
+      "value": "Impossible de copier. Sélectionnez le texte et copiez-le manuellement."
+    }
+  ],
+  "web.admin.nodes.key.copyKey": [
+    {
+      "type": 0,
+      "value": "Copier la clé"
+    }
+  ],
+  "web.admin.nodes.key.copySettings": [
+    {
+      "type": 0,
+      "value": "Copier les paramètres"
+    }
+  ],
+  "web.admin.nodes.key.coreUrlHelp": [
+    {
+      "type": 0,
+      "value": "L’adresse que le nœud appelle pour joindre ce serveur. Avec plusieurs serveurs API, utilisez leur adresse à charge équilibrée."
+    }
+  ],
+  "web.admin.nodes.key.coreUrlLabel": [
+    {
+      "type": 0,
+      "value": "Adresse du serveur pour le nœud"
+    }
+  ],
+  "web.admin.nodes.key.coreUrlMissing": [
+    {
+      "type": 0,
+      "value": "Saisissez l’adresse du serveur pour compléter les paramètres."
+    }
+  ],
+  "web.admin.nodes.key.dialogTitle": [
+    {
+      "type": 0,
+      "value": "Clé pour "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    }
+  ],
+  "web.admin.nodes.key.issue": [
+    {
+      "type": 0,
+      "value": "Générer une clé"
+    }
+  ],
+  "web.admin.nodes.key.issueFor": [
+    {
+      "type": 0,
+      "value": "Générer une clé pour "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    }
+  ],
+  "web.admin.nodes.key.issued": [
+    {
+      "type": 0,
+      "value": "Clé générée"
+    }
+  ],
+  "web.admin.nodes.key.issuing": [
+    {
+      "type": 0,
+      "value": "Génération d’une clé…"
+    }
+  ],
+  "web.admin.nodes.key.keyLabel": [
+    {
+      "type": 0,
+      "value": "Clé du nœud"
+    }
+  ],
+  "web.admin.nodes.key.later": [
+    {
+      "type": 0,
+      "value": "Pas maintenant"
+    }
+  ],
+  "web.admin.nodes.key.missing": [
+    {
+      "type": 0,
+      "value": "Aucune clé : ce nœud n’accepte aucun travail tant qu’une clé n’est pas générée"
+    }
+  ],
+  "web.admin.nodes.key.notShownAgain": [
+    {
+      "type": 0,
+      "value": "Copiez la clé maintenant. Elle ne sera plus affichée ; si vous la perdez, renouvelez la clé et redémarrez le nœud avec la nouvelle."
+    }
+  ],
+  "web.admin.nodes.key.offer": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " n’accepte aucun travail tant qu’il n’a pas de clé. Générez-en une maintenant pour obtenir les paramètres de démarrage du nœud."
+    }
+  ],
+  "web.admin.nodes.key.rotate": [
+    {
+      "type": 0,
+      "value": "Renouveler la clé"
+    }
+  ],
+  "web.admin.nodes.key.rotateDescription": [
+    {
+      "type": 0,
+      "value": "La clé actuelle cesse immédiatement de fonctionner. Le nœud perd sa connexion à ce serveur : ses flux en cours échouent, et il n’accepte aucun travail tant que vous ne l’avez pas redémarré avec la nouvelle clé."
+    }
+  ],
+  "web.admin.nodes.key.rotateDrainHint": [
+    {
+      "type": 0,
+      "value": "Pour éviter de couper des flux, videz d’abord le nœud et renouvelez la clé lorsqu’il affiche Vidé."
+    }
+  ],
+  "web.admin.nodes.key.rotateFor": [
+    {
+      "type": 0,
+      "value": "Renouveler la clé de "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    }
+  ],
+  "web.admin.nodes.key.rotateTitle": [
+    {
+      "type": 0,
+      "value": "Renouveler la clé de "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " ?"
+    }
+  ],
+  "web.admin.nodes.key.saved": [
+    {
+      "type": 0,
+      "value": "J’ai enregistré la clé"
+    }
+  ],
+  "web.admin.nodes.key.settingsHelp": [
+    {
+      "type": 0,
+      "value": "Démarrez le nœud avec ces deux paramètres. Un nœud déjà en cours d’exécution conserve son ancienne clé jusqu’à ce que vous le redémarriez."
+    }
+  ],
+  "web.admin.nodes.key.settingsLabel": [
+    {
+      "type": 0,
+      "value": "Paramètres du nœud"
+    }
+  ],
+  "web.admin.nodes.key.unconfirmed": [
+    {
+      "type": 0,
+      "value": "Impossible de confirmer une nouvelle clé pour "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": ". Actualisez la page avant de réessayer : si une clé a été générée, la précédente a déjà cessé de fonctionner."
     }
   ],
   "web.admin.nodes.memory.noReading": [
