@@ -197,9 +197,12 @@ func parseTagPosition(raw string) int {
 
 // audiobookPartOrder orders parts by disc then track tag when the tags can
 // be trusted: every part has a track number, either every part or no part
-// has a disc number, and no two parts share a disc and track. Otherwise it
-// returns false and the caller keeps the natural filename order.
-func audiobookPartOrder(tags []map[string]string) ([]int, bool) {
+// has a disc number, and no two parts share a disc and track. A part without
+// a disc tag takes its disc folder's number from folderDiscs (0 outside a
+// disc folder; nil when no part is in one), so complete tags win and a disc
+// folder stands in only for a missing disc tag. Otherwise it returns false
+// and the caller keeps the disc-folder then filename order.
+func audiobookPartOrder(tags []map[string]string, folderDiscs []int) ([]int, bool) {
 	if len(tags) < 2 {
 		return nil, false
 	}
@@ -209,6 +212,9 @@ func audiobookPartOrder(tags []map[string]string) ([]int, bool) {
 	withDisc := 0
 	for i, t := range tags {
 		k := key{disc: parseTagPosition(t["disc"]), track: parseTagPosition(t["track"])}
+		if k.disc == 0 && folderDiscs != nil {
+			k.disc = folderDiscs[i]
+		}
 		if k.track == 0 || seen[k] {
 			return nil, false
 		}
