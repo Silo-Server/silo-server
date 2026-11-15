@@ -752,6 +752,12 @@ function StreamRow({
           <div className="flex items-start gap-2">
             <div className="min-w-0 flex-1">
               <TitleLink session={session} />
+              {session.series_name ? (
+                // An episode's own title doesn't say which show it is.
+                <div className="text-muted-foreground truncate text-[12px]">
+                  {getPlaybackSessionSubtitle(session)}
+                </div>
+              ) : null}
               <div className="text-muted-foreground flex min-w-0 items-center gap-1.5 text-[12px]">
                 <span className="shrink-0">
                   {session.username ||
