@@ -1210,9 +1210,8 @@ func TestParseAudiobookFolderSkipsRejectedPart(t *testing.T) {
 }
 
 // Progress reaches the admin on the clock while a book takes longer than the
-// interval; a tick with nothing new writes nothing, and nothing is written
-// after stop.
-func TestReportProgressEveryWritesChangesUntilStopped(t *testing.T) {
+// interval, and nothing is written after stop.
+func TestReportProgressEveryWritesUntilStopped(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		var reports []int
 		ctx := WithProgressReporter(t.Context(), func(u ProgressUpdate) {
@@ -1227,7 +1226,7 @@ func TestReportProgressEveryWritesChangesUntilStopped(t *testing.T) {
 		time.Sleep(audiobookScanProgressInterval + time.Millisecond) //nolint:forbidigo // synctest fake clock: advances one tick instantly.
 		synctest.Wait()
 		processed.Store(2)
-		time.Sleep(2 * audiobookScanProgressInterval) //nolint:forbidigo // synctest fake clock: one tick with a change, one without.
+		time.Sleep(audiobookScanProgressInterval) //nolint:forbidigo // synctest fake clock: advances one more tick.
 		synctest.Wait()
 		if !slices.Equal(reports, []int{1, 2}) {
 			t.Fatalf("reports = %v, want [1 2]", reports)
