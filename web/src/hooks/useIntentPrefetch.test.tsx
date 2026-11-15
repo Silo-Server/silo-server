@@ -191,5 +191,13 @@ describe("useIntentPrefetch", () => {
     advance(30);
     fireEvent.pointerUp(element, touch(3));
     expect(prefetch).toHaveBeenCalledTimes(2);
+
+    // A hold that could not prefetch (here it drifted past the hold limit)
+    // still leaves the tap its prefetch on release.
+    fireEvent.pointerDown(element, touch(4));
+    fireEvent.pointerMove(element, touch(4, 50, 157));
+    advance(120);
+    fireEvent.pointerUp(element, touch(4, 50, 157));
+    expect(prefetch).toHaveBeenCalledTimes(3);
   });
 });

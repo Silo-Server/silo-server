@@ -56,7 +56,8 @@ export function useIntentPrefetch(
   mode: IntentPrefetchMode,
 ): IntentPrefetchHandlers {
   const timerRef = useRef<number | null>(null);
-  const touchRef = useRef<number | null>(null);
+  // The touch in progress, and whether its hold already started a prefetch.
+  const touchRef = useRef<{ pointerId: number; prefetched: boolean } | null>(null);
   const prefetchRef = useRef(prefetch);
   useEffect(() => {
     prefetchRef.current = prefetch;
@@ -129,19 +130,20 @@ export function useIntentPrefetch(
         fire("press");
         return;
       }
-      const pointerId = event.pointerId;
-      touchRef.current = pointerId;
+      const touch = { pointerId: event.pointerId, prefetched: false };
+      touchRef.current = touch;
       schedule(TOUCH_HOLD_MS, () => {
-        if (touchTravel(pointerId) <= TOUCH_HOLD_SLOP_PX) fire("touch-hold");
+        touch.prefetched = touchTravel(touch.pointerId) <= TOUCH_HOLD_SLOP_PX && fire("touch-hold");
       });
     },
     onPointerUp: (event) => {
-      if (event.pointerType !== "touch" || touchRef.current !== event.pointerId) return;
+      const touch = touchRef.current;
+      if (event.pointerType !== "touch" || touch?.pointerId !== event.pointerId) return;
       touchRef.current = null;
-      // Only a tap that beat the hold timer still needs its prefetch.
-      if (timerRef.current === null) return;
       cancel();
-      if (touchTravel(event.pointerId) <= TOUCH_SLOP_PX) fire("tap");
+      // A tap is a press and skips the speculative limits, so it prefetches
+      // unless the hold already did.
+      if (!touch.prefetched && touchTravel(touch.pointerId) <= TOUCH_SLOP_PX) fire("tap");
     },
     onPointerCancel: cancel,
     onFocus: (event) => {
