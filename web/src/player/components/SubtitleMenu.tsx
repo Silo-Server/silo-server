@@ -410,6 +410,9 @@ export function SubtitleMenu({
               type="button"
               className="hud-item"
               onClick={() => {
+                // This item unmounts with the menu, so hand focus to the
+                // trigger first: the panel returns focus there on close.
+                triggerRef.current?.focus();
                 setAppearanceOpen(true);
                 setOpen(false);
               }}

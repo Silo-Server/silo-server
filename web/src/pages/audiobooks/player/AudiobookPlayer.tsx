@@ -55,6 +55,10 @@ export default function AudiobookPlayer({
     onStopRequested: onClose,
   });
   const [mode, setMode] = useState<"mini" | "now-listening">("mini");
+  // The mini bar unmounts while Now Listening is open, so once the view has
+  // been opened the remounted bar takes focus back on its expand tile.
+  const [hasExpanded, setHasExpanded] = useState(false);
+  if (mode === "now-listening" && !hasExpanded) setHasExpanded(true);
 
   useAudiobookKeyboardShortcuts({
     playback,
@@ -161,6 +165,7 @@ export default function AudiobookPlayer({
           prefs={prefs}
           onClose={onClose}
           onExpand={() => setMode("now-listening")}
+          autoFocusExpand={hasExpanded}
         />
       ) : (
         <NowListening
