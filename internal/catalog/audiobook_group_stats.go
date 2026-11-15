@@ -280,7 +280,9 @@ type AudiobookGroupStatsRefresher struct {
 
 	mu      sync.Mutex
 	pending map[int]struct{}
-	wake    chan struct{}
+	// changedAt is when the latest pending change arrived.
+	changedAt time.Time
+	wake      chan struct{}
 }
 
 // NewAudiobookGroupStatsRefresher returns a refresher for pool. Start it with
@@ -319,6 +321,7 @@ func (r *AudiobookGroupStatsRefresher) LibraryChanged(libraryID int) {
 	}
 	r.mu.Lock()
 	r.pending[libraryID] = struct{}{}
+	r.changedAt = time.Now()
 	r.mu.Unlock()
 	select {
 	case r.wake <- struct{}{}:
@@ -332,8 +335,10 @@ func (r *AudiobookGroupStatsRefresher) Run(ctx context.Context) {
 	defer ticker.Stop()
 	// due fires delay after the first change since the last refresh.
 	var due <-chan time.Time
-	// retry is set when another server held the refresh a scan asked for.
+	// retry is set when another server held the refresh a scan asked for,
+	// and scannedAt is when the latest scan that asked for one arrived.
 	retry := false
+	var scannedAt time.Time
 	// heldUntil pauses refreshes for an interval after one fails, so a
 	// refresh that keeps failing does not run every poll or every scan.
 	var heldUntil time.Time
@@ -360,13 +365,18 @@ func (r *AudiobookGroupStatsRefresher) Run(ctx context.Context) {
 				due = time.After(wait)
 				continue
 			}
-			if !r.changedAudiobooks(ctx) && !retry {
+			if changed, at := r.changedAudiobooks(ctx); changed {
+				scannedAt = at
+			} else if !retry {
 				continue
 			}
-			// The refresh must start after the scan, so a recent one does
-			// not count; and one running now may have started before it.
+			// Any server's refresh that started after the latest scan covers
+			// it, so only an older one is redone; one running now may have
+			// started before the scan, so a busy refresh is tried again. The
+			// time since the scan is measured here and compared on the
+			// database's clock, so clock skew cannot skip a refresh.
 			var failed bool
-			retry, failed = r.run(ctx, 0)
+			retry, failed = r.run(ctx, time.Since(scannedAt))
 			if failed {
 				heldUntil = time.Now().Add(r.interval)
 			}
@@ -391,22 +401,24 @@ func (r *AudiobookGroupStatsRefresher) run(ctx context.Context, skipWithin time.
 }
 
 // changedAudiobooks takes the libraries changed since the last call and
-// reports whether one is an audiobook library. It reports true when that
-// cannot be read, so a scan's refresh is not lost.
-func (r *AudiobookGroupStatsRefresher) changedAudiobooks(ctx context.Context) bool {
+// reports whether one is an audiobook library, and when the latest change
+// arrived. It reports true when that cannot be read, so a scan's refresh is
+// not lost.
+func (r *AudiobookGroupStatsRefresher) changedAudiobooks(ctx context.Context) (bool, time.Time) {
 	r.mu.Lock()
 	libraryIDs := slices.Collect(maps.Keys(r.pending))
 	clear(r.pending)
+	at := r.changedAt
 	r.mu.Unlock()
 	if len(libraryIDs) == 0 {
-		return false
+		return false, at
 	}
 	holds, err := r.holdAudiobooks(ctx, libraryIDs)
 	if err != nil {
 		slog.WarnContext(ctx, "audiobook group stats: reading changed libraries failed", "component", "catalog", "err", err)
-		return true
+		return true, at
 	}
-	return holds
+	return holds, at
 }
 
 // librariesHoldAudiobooks reports whether any of the libraries is an

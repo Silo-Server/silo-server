@@ -10,8 +10,9 @@ import (
 )
 
 // A scan of a library without audiobooks refreshes nothing. A scan of an
-// audiobook library refreshes the groups after the delay, even right after
-// another refresh, and tries again while another server holds the refresh.
+// audiobook library refreshes the groups after the delay unless a refresh
+// started after the scan, and tries again while another server holds the
+// refresh.
 func TestAudiobookGroupStatsRefresherRefreshesAfterAudiobookScans(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		var refreshes []time.Duration
@@ -46,11 +47,11 @@ func TestAudiobookGroupStatsRefresherRefreshesAfterAudiobookScans(t *testing.T) 
 			t.Fatal("refreshed before the delay")
 		}
 		advance(2 * time.Second)
-		if !slices.Equal(refreshes, []time.Duration{0}) {
-			t.Fatalf("refreshes %v after the delay, want one that a recent refresh does not skip", refreshes)
+		if !slices.Equal(refreshes, []time.Duration{time.Minute}) {
+			t.Fatalf("refreshes %v after the delay, want one that skips only a refresh started since the scan", refreshes)
 		}
 		advance(time.Minute)
-		if !slices.Equal(refreshes, []time.Duration{0, 0}) {
+		if !slices.Equal(refreshes, []time.Duration{time.Minute, 2 * time.Minute}) {
 			t.Fatalf("refreshes %v, want the busy one tried again", refreshes)
 		}
 		advance(5 * time.Minute)
@@ -100,7 +101,9 @@ func TestAudiobookGroupStatsRefresherChecksTheRefreshAgeEachPoll(t *testing.T) {
 		}
 		fail = false
 		advance(time.Minute)
-		if len(refreshes) != 5 || !slices.Contains(refreshes[3:], 0) {
+		// The scan arrived 9m59s before the pause ended, so its refresh
+		// skips the check's if that one ran first.
+		if len(refreshes) != 5 || !slices.Contains(refreshes[3:], 9*time.Minute+59*time.Second) {
 			t.Fatalf("refreshes %v, want the check and the scan's refresh once the pause ends", refreshes)
 		}
 	})
