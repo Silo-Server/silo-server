@@ -166,8 +166,8 @@ describe("invalidateCatalogState", () => {
       limit: 60,
       offset: 0,
     });
-    const otherSectionKey = sectionKeys.libraryLayout(1);
-    const changedSectionKey = sectionKeys.libraryLayout(3);
+    const otherSectionKey = sectionKeys.libraryItems(1, "recently-added");
+    const changedSectionKey = sectionKeys.libraryItems(3, "recently-added");
     const userLibrariesKey = libraryKeys.user("profile-1");
 
     queryClient.setQueryData(adminKeys.libraries(), []);
@@ -175,8 +175,8 @@ describe("invalidateCatalogState", () => {
     queryClient.setQueryData(userLibrariesKey, []);
     queryClient.setQueryData(otherCatalogKey, { items: [] });
     queryClient.setQueryData(changedCatalogKey, { items: [] });
-    queryClient.setQueryData(otherSectionKey, { sections: [] });
-    queryClient.setQueryData(changedSectionKey, { sections: [] });
+    queryClient.setQueryData(otherSectionKey, { section: { id: "recently-added", items: [] } });
+    queryClient.setQueryData(changedSectionKey, { section: { id: "recently-added", items: [] } });
 
     invalidateCatalogState(queryClient, { libraryId: 3, allowDashboardRefetch: false });
     await Promise.resolve();
