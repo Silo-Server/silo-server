@@ -93,6 +93,19 @@ func TestExtractTextTracksWaitsForAnInFlightFill(t *testing.T) {
 	}
 }
 
+// A node with no room for another demux of a source refuses the request
+// before the batch, or the requested track alone, reads it.
+func TestExtractTextTracksAnswersBusyWithoutADemux(t *testing.T) {
+	occupyDemuxSlots(t)
+	cache, source := newTestCache(t)
+	var calls atomic.Int32
+	_, err := cache.ExtractTextTracks(t.Context(), source, TextSubtitleTrack{Ordinal: 0, Format: "srt"},
+		TextSubtitleTracks([]string{"subrip", "subrip"}), writeBatchOutputs(&calls, nil), failSingle(t))
+	if !errors.Is(err, ErrSubtitleReadsBusy) || calls.Load() != 0 {
+		t.Fatalf("err %v after %d batch demuxes, want busy before any", err, calls.Load())
+	}
+}
+
 func TestExtractTextTracksFallsBackToTheRequestedTrackAlone(t *testing.T) {
 	cache, source := newTestCache(t)
 	tracks := TextSubtitleTracks([]string{"subrip", "subrip"})

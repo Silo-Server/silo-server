@@ -151,7 +151,7 @@ func (c *SubtitleCache) ServeExtract(w http.ResponseWriter, r *http.Request, opt
 		return err
 	}
 	opts.Writer = w
-	return extract(r.Context(), opts)
+	return admitted(extract)(r.Context(), opts)
 }
 
 func (c *SubtitleCache) serveCached(w http.ResponseWriter, r *http.Request, opts StreamExtractOpts, format string) bool {
@@ -344,7 +344,7 @@ func (c *SubtitleCache) serveWindowedSUP(w http.ResponseWriter, r *http.Request,
 	w.Header().Set("Content-Type", "application/octet-stream")
 	w.Header().Set("Cache-Control", "no-store")
 	cachedPath, _, cached := c.cachedEntryPath(opts.InputPath, opts.TrackIndex)
-	warm := c.sourced(extract)
+	warm := c.readSourced(extract, false)
 	// A window open to the end is most of the track: the cached .sup answers
 	// it at once, where the source would be read whole first.
 	if !cached || opts.DurationSeconds > 0 {
@@ -379,6 +379,14 @@ func (c *SubtitleCache) serveWindowedSUP(w http.ResponseWriter, r *http.Request,
 		}
 	} else {
 		c.WarmInBackground(opts, warm)
+		// The window demuxes the source; a refusal must come before the
+		// status goes out to answer busy. The warm, in its own warm slot,
+		// goes on either way, so the next window can read the cached .sup.
+		release, err := admitDemux()
+		if err != nil {
+			return err
+		}
+		defer release()
 	}
 
 	w.WriteHeader(http.StatusOK)

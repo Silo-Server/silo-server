@@ -1713,7 +1713,7 @@ func (h *PlaybackHandler) HandleSubtitleStream(w http.ResponseWriter, r *http.Re
 	if requestedFormat == "ass" && playback.IsASS(embeddedTrack.Codec) {
 		data, err := h.extractEmbeddedTextSubtitle(r.Context(), file, embeddedOrdinal, "ass")
 		if err != nil {
-			writeError(w, http.StatusInternalServerError, "ServerError", "Failed to extract subtitle")
+			writeSubtitleExtractError(w, err)
 			return
 		}
 		h.deliverSubtitle(w, r, "ass", data, segmentPTSOffset)
@@ -1722,7 +1722,7 @@ func (h *PlaybackHandler) HandleSubtitleStream(w http.ResponseWriter, r *http.Re
 
 	data, subErr := h.extractEmbeddedTextSubtitle(r.Context(), file, embeddedOrdinal, "srt")
 	if subErr != nil {
-		writeError(w, http.StatusInternalServerError, "ServerError", "Failed to extract subtitle")
+		writeSubtitleExtractError(w, subErr)
 		return
 	}
 	format := "srt"
@@ -1809,6 +1809,18 @@ func (h *PlaybackHandler) extractEmbeddedTextSubtitle(ctx context.Context, file 
 		func(ctx context.Context) ([]byte, error) {
 			return playback.ExtractSubtitleWithFormat(ctx, file.FilePath, trackIndex, format, h.FFmpegPath)
 		})
+}
+
+// writeSubtitleExtractError answers a failed embedded text extraction: a
+// node with no room for another demux (playback.ErrSubtitleReadsBusy) as a
+// retryable 503, anything else as a 500.
+func writeSubtitleExtractError(w http.ResponseWriter, err error) {
+	if errors.Is(err, playback.ErrSubtitleReadsBusy) {
+		w.Header().Set("Retry-After", strconv.Itoa(playback.SubtitleReadsRetryAfter))
+		writeError(w, http.StatusServiceUnavailable, "ServiceUnavailable", "The server is busy; try again in a moment")
+		return
+	}
+	writeError(w, http.StatusInternalServerError, "ServerError", "Failed to extract subtitle")
 }
 
 func (h *PlaybackHandler) extractTextSubtitleBatch(ctx context.Context, inputPath string, outputs []playback.TextSubtitleOutput) error {
