@@ -26,7 +26,7 @@ func (noopMediaStore) GetAudiobookByID(context.Context, string, catalog.AccessFi
 func (noopMediaStore) GetAudiobooksByIDs(context.Context, []string, catalog.AccessFilter) (map[string]*models.MediaItem, error) {
 	return map[string]*models.MediaItem{}, nil
 }
-func (noopMediaStore) ListAudiobooks(context.Context, int64, int, int, catalog.AccessFilter, Filter) ([]*models.MediaItem, int, error) {
+func (noopMediaStore) ListAudiobooks(context.Context, int64, int, int, catalog.AccessFilter, ItemsQuery) ([]*models.MediaItem, int, error) {
 	return nil, 0, nil
 }
 func (noopMediaStore) GetMediaFiles(context.Context, string, catalog.AccessFilter) ([]*models.MediaFile, error) {
@@ -55,6 +55,12 @@ func (noopMediaStore) ListLibrarySeries(context.Context, int64, int, int, catalo
 }
 func (noopMediaStore) GetAuthorByID(context.Context, string, catalog.AccessFilter) (Author, error) {
 	return Author{}, ErrNotFound
+}
+func (noopMediaStore) SearchLibraryAuthors(context.Context, int64, string, int, catalog.AccessFilter) ([]AuthorSummary, error) {
+	return nil, nil
+}
+func (noopMediaStore) SearchLibrarySeries(context.Context, int64, string, int, catalog.AccessFilter) ([]SeriesSummary, error) {
+	return nil, nil
 }
 func (noopMediaStore) GetSeriesByName(context.Context, string, catalog.AccessFilter) (Series, error) {
 	return Series{}, ErrNotFound
