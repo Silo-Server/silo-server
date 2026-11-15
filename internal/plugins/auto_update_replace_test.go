@@ -15,8 +15,9 @@ func TestAutoUpdateServiceCheckReplacesInstalledPluginsInPlace(t *testing.T) {
 			{ID: 41, RepositoryID: pluginRepositoryID(7), PluginID: "silo.tmdb", Version: "1.2.9", UpdatePolicy: "auto", Enabled: true},
 		},
 	}
-	host := &fakeAutoUpdateHost{}
-	installer := &fakeAutoUpdateInstaller{}
+	events := []string{}
+	host := &fakeAutoUpdateHost{events: &events}
+	installer := &fakeAutoUpdateInstaller{events: &events}
 	catalog := &fakeAutoUpdateCatalog{
 		entries: []CatalogEntry{
 			{
@@ -63,43 +64,32 @@ func TestAutoUpdateServiceCheckReplacesInstalledPluginsInPlace(t *testing.T) {
 	if installer.prepared[0] != 41 {
 		t.Fatalf("prepared replacement existing_id = %d, want 41", installer.prepared[0])
 	}
-	if len(host.stopped) != 1 || host.stopped[0] != 41 {
-		t.Fatalf("stopped installations = %#v, want [41]", host.stopped)
+	// The plugin is stopped only once its replacement package passed.
+	if want := []string{"prepare", "stop", "apply"}; !slices.Equal(events, want) {
+		t.Fatalf("events = %v, want %v", events, want)
 	}
 }
 
-// The running plugin is stopped only once its replacement package passed
-// every check; a refused package leaves it running.
-func TestAutoUpdateServiceStopsPluginOnlyForAnAcceptedPackage(t *testing.T) {
-	for _, tc := range []struct {
-		name       string
-		prepareErr error
-		want       []string
-	}{
-		{name: "accepted package", want: []string{"prepare", "stop", "apply"}},
-		{name: "refused package", prepareErr: packageError(errors.New("binary checksum mismatch"), "refused"), want: []string{"prepare"}},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			events := []string{}
-			service := NewAutoUpdateService(
-				&fakeAutoUpdateRepositories{list: []*Repository{{ID: 7, Enabled: true}}},
-				&fakeAutoUpdateInstallations{list: []*Installation{{ID: 41, RepositoryID: pluginRepositoryID(7), PluginID: "silo.tmdb", Version: "1.0.0", UpdatePolicy: "auto", Enabled: true}}},
-				&fakeAutoUpdateCatalog{
-					entries:  []CatalogEntry{{RepositoryID: 7, Manifest: &pluginv1.PluginManifest{PluginId: "silo.tmdb", Version: "1.1.0"}}},
-					resolved: &ResolvedCatalogInstall{RepositoryID: 7, ArchiveURL: "https://plugins.example.test/tmdb", Checksum: "deadbeef"},
-				},
-				&fakeAutoUpdateInstaller{replaceErr: tc.prepareErr, events: &events},
-				&fakeAutoUpdateHost{events: &events},
-				nil,
-				nil,
-			)
-			if _, err := service.Check(context.Background(), AutoUpdateOptions{}); err != nil {
-				t.Fatalf("Check() returned error: %v", err)
-			}
-			if !slices.Equal(events, tc.want) {
-				t.Fatalf("events = %v, want %v", events, tc.want)
-			}
-		})
+// A refused replacement package leaves the running plugin alone.
+func TestAutoUpdateServiceRefusedPackageLeavesPluginRunning(t *testing.T) {
+	events := []string{}
+	service := NewAutoUpdateService(
+		&fakeAutoUpdateRepositories{list: []*Repository{{ID: 7, Enabled: true}}},
+		&fakeAutoUpdateInstallations{list: []*Installation{{ID: 41, RepositoryID: pluginRepositoryID(7), PluginID: "silo.tmdb", Version: "1.0.0", UpdatePolicy: "auto", Enabled: true}}},
+		&fakeAutoUpdateCatalog{
+			entries:  []CatalogEntry{{RepositoryID: 7, Manifest: &pluginv1.PluginManifest{PluginId: "silo.tmdb", Version: "1.1.0"}}},
+			resolved: &ResolvedCatalogInstall{RepositoryID: 7, ArchiveURL: "https://plugins.example.test/tmdb", Checksum: "deadbeef"},
+		},
+		&fakeAutoUpdateInstaller{replaceErr: packageError(errors.New("binary checksum mismatch"), "refused"), events: &events},
+		&fakeAutoUpdateHost{events: &events},
+		nil,
+		nil,
+	)
+	if _, err := service.Check(context.Background(), AutoUpdateOptions{}); err != nil {
+		t.Fatalf("Check() returned error: %v", err)
+	}
+	if want := []string{"prepare"}; !slices.Equal(events, want) {
+		t.Fatalf("events = %v, want %v", events, want)
 	}
 }
 
