@@ -270,9 +270,22 @@ func (r *rangeReader) cause(err error) error {
 
 // readError wraps err as the *fs.PathError every source read failure is,
 // naming the source by its entity tag rather than its capability URL.
+//
+// A failed read never carries io.EOF or io.ErrUnexpectedEOF: parsers take
+// those for the end of their data, and a fetch cut mid-transfer fails with
+// one. The source did not end there, the read did, so the error keeps the
+// text and loses the identity. The real end of a source is a bare io.EOF.
 func (e *relayEntry) readError(err error) error {
+	if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
+		err = cutReadError{text: err.Error()}
+	}
 	return &fs.PathError{Op: opRead, Path: "source " + e.etag, Err: err}
 }
+
+// cutReadError is a source read that ended early.
+type cutReadError struct{ text string }
+
+func (e cutReadError) Error() string { return "read ended early: " + e.text }
 
 // sourceInfo is a core-access source's os.FileInfo: a read-only regular file
 // of the granted size and modification time, the nanoseconds the core's stat

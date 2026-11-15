@@ -581,6 +581,25 @@ func TestCloseInterruptsABlockedRelayRead(t *testing.T) {
 	}
 }
 
+// A failed source read is never mistaken for the end of the source: parsers
+// stop quietly on io.EOF and io.ErrUnexpectedEOF.
+func TestAFailedSourceReadIsNotEndOfFile(t *testing.T) {
+	entry := &relayEntry{lease: &lease{etag: `"file-42-5-1"`}}
+	for _, cause := range []error{io.EOF, io.ErrUnexpectedEOF, fmt.Errorf("fetch page: %w", io.ErrUnexpectedEOF)} {
+		err := entry.readError(cause)
+		if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
+			t.Errorf("read failure %q reads as end of file", err)
+		}
+		if _, ok := errors.AsType[*fs.PathError](err); !ok || !strings.Contains(err.Error(), cause.Error()) {
+			t.Errorf("read failure %q lost its path error or its cause", err)
+		}
+	}
+	refused := &StatusError{Op: "read", Status: http.StatusGone}
+	if got, ok := errors.AsType[*StatusError](entry.readError(refused)); !ok || got != refused {
+		t.Error("another read failure lost its type")
+	}
+}
+
 func TestGuardRestrictsRelayedInputs(t *testing.T) {
 	url := "http://127.0.0.1:41234/src/0123456789abcdef0123456789abcdef"
 	restrictions := []string{"-protocol_whitelist", "http,tcp", "-format_whitelist", AdmittedFormats, "-http_proxy", ""}
