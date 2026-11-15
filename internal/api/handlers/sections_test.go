@@ -92,7 +92,7 @@ func TestBuildSectionsResponseSupportsMixedEpisodeAndSeriesRecentItems(t *testin
 		},
 	}}
 
-	resp := h.buildSections(t.Context(), withItems, nil, catalog.AccessFilter{}, imagesize.Request{})
+	resp := h.buildSections(t.Context(), withItems, nil, catalog.AccessFilter{}, imagesize.Request{}, false)
 	if fetcher.calls != 1 {
 		t.Fatalf("episode metadata fetch calls = %d, want 1", fetcher.calls)
 	}
@@ -184,7 +184,7 @@ func TestBuildSectionsResponseScopesPlayTargetsToLibraryAndProgress(t *testing.T
 	req = req.WithContext(ctx)
 
 	libraryID := 7
-	resp := h.buildSections(req.Context(), withItems, &libraryID, requestAccessFilter(req), imagesize.Request{})
+	resp := h.buildSections(req.Context(), withItems, &libraryID, requestAccessFilter(req), imagesize.Request{}, false)
 
 	if got := resolver.query.LibraryIDs; len(got) != 1 || got[0] != 7 {
 		t.Fatalf("library IDs = %v, want [7]", got)
@@ -228,7 +228,7 @@ func TestBuildSectionsResponseDeduplicatesItemsWithinEachSection(t *testing.T) {
 		},
 	}
 
-	resp := h.buildSections(t.Context(), withItems, nil, catalog.AccessFilter{}, imagesize.Request{})
+	resp := h.buildSections(t.Context(), withItems, nil, catalog.AccessFilter{}, imagesize.Request{}, false)
 	if len(resp.Sections) != 2 {
 		t.Fatalf("sections = %d, want 2", len(resp.Sections))
 	}

@@ -119686,6 +119686,38 @@
       "value": "音频声道"
     }
   ],
+  "web.settings.overlays.badge.availability.description": [
+    {
+      "type": 0,
+      "value": "剧集上显示已完整的季，季上显示媒体库中已有的集"
+    }
+  ],
+  "web.settings.overlays.badge.availability.label": [
+    {
+      "type": 0,
+      "value": "完整度"
+    }
+  ],
+  "web.settings.overlays.badge.availability.value.complete": [
+    {
+      "type": 0,
+      "value": "已完整"
+    }
+  ],
+  "web.settings.overlays.badge.availability.value.fraction": [
+    {
+      "type": 1,
+      "value": "have"
+    },
+    {
+      "type": 0,
+      "value": "/"
+    },
+    {
+      "type": 1,
+      "value": "total"
+    }
+  ],
   "web.settings.overlays.badge.container.description": [
     {
       "type": 0,

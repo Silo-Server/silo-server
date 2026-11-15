@@ -7,6 +7,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/settingscontract"
 )
 
@@ -80,6 +81,13 @@ type AdminDefaults struct {
 // nil *AdminDefaults, answers every key with "" (no administrator default).
 func NewAdminDefaults(settings ManySettingReader) *AdminDefaults {
 	a := &AdminDefaults{settings: settings, known: map[string]bool{}, ttl: AdminDefaultsCacheTTL, now: time.Now}
+	// The server-wide poster badge defaults predate the contract and are not
+	// admin_default definitions, but viewer-scope resolution reads them on
+	// every request too (access.ViewerPreferences.CardAvailability).
+	for _, key := range []string{access.OverlaysEnabledSettingKey, access.DefaultCardOverlaysSettingKey} {
+		a.keys = append(a.keys, key)
+		a.known[key] = true
+	}
 	contract, err := settingscontract.Load()
 	if err != nil {
 		slog.Error("administrator defaults disabled: loading the settings contract failed",

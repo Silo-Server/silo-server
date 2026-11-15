@@ -584,18 +584,19 @@ type EpisodeCollectionOutput struct {
 
 // Season is one season row.
 type Season struct {
-	ContentID               string       `json:"content_id" example:"series:severance-S01"`
-	PlayContentID           string       `json:"play_content_id,omitempty" doc:"The episode to play next"`
-	SeasonNumber            int          `json:"season_number"`
-	IsSpecials              bool         `json:"is_specials,omitempty"`
-	Title                   string       `json:"title" example:"Season 1"`
-	Overview                string       `json:"overview,omitempty"`
-	AirDate                 *string      `json:"air_date,omitempty" format:"date" doc:"Calendar date, YYYY-MM-DD"`
-	EpisodeCount            int          `json:"episode_count"`
-	PosterURL               string       `json:"poster_url,omitempty" format:"uri-reference" doc:"Presigned, short-lived"`
-	PosterThumbhash         string       `json:"poster_thumbhash,omitempty"`
-	UserData                *WatchRollup `json:"user_data,omitempty"`
-	MachineTranslatedFields []string     `json:"machine_translated_fields,omitempty" enum:"overview" doc:"Localized fields whose text was machine-translated by AI; absent when none were"`
+	ContentID               string               `json:"content_id" example:"series:severance-S01"`
+	PlayContentID           string               `json:"play_content_id,omitempty" doc:"The episode to play next"`
+	SeasonNumber            int                  `json:"season_number"`
+	IsSpecials              bool                 `json:"is_specials,omitempty"`
+	Title                   string               `json:"title" example:"Season 1"`
+	Overview                string               `json:"overview,omitempty"`
+	AirDate                 *string              `json:"air_date,omitempty" format:"date" doc:"Calendar date, YYYY-MM-DD"`
+	EpisodeCount            int                  `json:"episode_count"`
+	PosterURL               string               `json:"poster_url,omitempty" format:"uri-reference" doc:"Presigned, short-lived"`
+	PosterThumbhash         string               `json:"poster_thumbhash,omitempty"`
+	UserData                *WatchRollup         `json:"user_data,omitempty"`
+	Availability            *CatalogAvailability `json:"availability,omitempty" doc:"Episodes in the library out of the episodes this season lists. Sent only while the acting profile's poster badges are on and include the availability badge. Absent for specials and when episode metadata is incomplete."`
+	MachineTranslatedFields []string             `json:"machine_translated_fields,omitempty" enum:"overview" doc:"Localized fields whose text was machine-translated by AI; absent when none were"`
 }
 
 // SeasonCollection is the seasons of a series.
@@ -731,7 +732,7 @@ func (reg *Registry) itemViewerOnDevice(ctx context.Context, deviceID string, ar
 	}
 	filter.ImageSize = art.Size
 	filter.ImageWidths = art.Widths
-	return handlers.ItemViewer{Access: filter, ProfileID: profileID}, nil
+	return handlers.ItemViewer{Access: filter, ProfileID: profileID, IncludeCardAvailability: cardAvailabilityWanted(ctx)}, nil
 }
 
 // versionsScopedToLibrary reads catalog.scope_versions_to_library. A read
@@ -1520,5 +1521,5 @@ func episodesOf(views []handlers.EpisodeView) []Episode {
 func seasonOf(s handlers.SeasonView) Season {
 	return Season{ContentID: s.ContentID, PlayContentID: s.PlayContentID, SeasonNumber: s.SeasonNumber, IsSpecials: s.IsSpecials, Title: s.Title,
 		Overview: s.Overview, AirDate: datePtr(s.AirDate), EpisodeCount: s.EpisodeCount, PosterURL: s.PosterURL, PosterThumbhash: s.PosterThumbhash,
-		UserData: watchRollupOf(s.UserData), MachineTranslatedFields: s.MachineTranslatedFields}
+		UserData: watchRollupOf(s.UserData), Availability: catalogAvailabilityOf(s.Availability), MachineTranslatedFields: s.MachineTranslatedFields}
 }

@@ -3,6 +3,7 @@
 import type { ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { MemoryRouter, Route, Routes } from "react-router";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { PluginSettingsInstallation } from "@/hooks/queries/pluginSettings";
@@ -163,11 +164,13 @@ vi.mock("@/components/ui/dropdown-menu", () => ({
 
 function renderSidebar(entry: string, { collapsed = false }: { collapsed?: boolean } = {}) {
   return renderToStaticMarkup(
-    <MemoryRouter initialEntries={[entry]}>
-      <Routes>
-        <Route path="*" element={<AppSidebar collapsed={collapsed} />} />
-      </Routes>
-    </MemoryRouter>,
+    <QueryClientProvider client={new QueryClient()}>
+      <MemoryRouter initialEntries={[entry]}>
+        <Routes>
+          <Route path="*" element={<AppSidebar collapsed={collapsed} />} />
+        </Routes>
+      </MemoryRouter>
+    </QueryClientProvider>,
   );
 }
 

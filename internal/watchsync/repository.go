@@ -40,6 +40,9 @@ type Repository interface {
 	MarkHistoryExportStatus(ctx context.Context, id string, status string, lastError string) error
 	MarkHistoryExportSatisfiedByScrobble(ctx context.Context, connectionID string, historyID string) error
 	UpsertListItemStates(ctx context.Context, states []ListItemState) error
+	// AddListItemTitleIDs adds IDs to a title row's title IDs; see
+	// ListItemState.TitleIDs.
+	AddListItemTitleIDs(ctx context.Context, connectionID string, kind ListKind, mediaItemID string, ids []string) error
 	ListListItemStates(ctx context.Context, connectionID string, kind ListKind) ([]ListItemState, error)
 	ListPendingListItemExports(ctx context.Context, connectionID string, kind ListKind, limit int) ([]ListItemState, error)
 	ListPendingListItemRemovals(ctx context.Context, connectionID string, kind ListKind, limit int) ([]ListItemState, error)
@@ -140,7 +143,7 @@ const listItemKeyHeldElsewhere = `EXISTS (
 const listItemStateColumns = `
 	id::text, connection_id::text, list_kind, media_item_id, provider_item_key, kind, title, year,
 	remote_present, local_present, last_seen_remote_at, last_seen_local_at,
-	last_exported_at, last_removed_remote_at, last_removed_local_at, last_error, created_at, updated_at`
+	last_exported_at, last_removed_remote_at, last_removed_local_at, last_error, created_at, updated_at, title_ids`
 
 type PostgresRepository struct {
 	pool   *pgxpool.Pool
@@ -1510,9 +1513,9 @@ func (r *PostgresRepository) UpsertListItemStates(ctx context.Context, states []
 			INSERT INTO watch_provider_list_items (
 				connection_id, list_kind, media_item_id, provider_item_key, kind, title, year,
 				remote_present, local_present, last_seen_remote_at, last_seen_local_at,
-				last_exported_at, last_removed_remote_at, last_removed_local_at, last_error
+				last_exported_at, last_removed_remote_at, last_removed_local_at, last_error, title_ids
 			)
-			VALUES ($1::uuid, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+			VALUES ($1::uuid, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, COALESCE($16::text[], '{}'))
 			ON CONFLICT (connection_id, list_kind, media_item_id) DO UPDATE SET
 				provider_item_key = CASE
 					WHEN EXCLUDED.provider_item_key <> '' THEN EXCLUDED.provider_item_key
@@ -1529,13 +1532,34 @@ func (r *PostgresRepository) UpsertListItemStates(ctx context.Context, states []
 				last_removed_remote_at = COALESCE(EXCLUDED.last_removed_remote_at, watch_provider_list_items.last_removed_remote_at),
 				last_removed_local_at = COALESCE(EXCLUDED.last_removed_local_at, watch_provider_list_items.last_removed_local_at),
 				last_error = EXCLUDED.last_error,
+				title_ids = `+mergeTitleIDsSQL("watch_provider_list_items.title_ids", "EXCLUDED.title_ids")+`,
 				updated_at = now()
 		`, state.ConnectionID, string(kind), state.MediaItemID, state.ProviderItemKey, state.Kind, state.Title, state.Year,
 			state.RemotePresent, state.LocalPresent, state.LastSeenRemoteAt, state.LastSeenLocalAt,
-			state.LastExportedAt, state.LastRemovedRemoteAt, state.LastRemovedLocalAt, state.LastError)
+			state.LastExportedAt, state.LastRemovedRemoteAt, state.LastRemovedLocalAt, state.LastError, state.TitleIDs)
 		if err != nil {
 			return fmt.Errorf("upsert list item state: %w", err)
 		}
+	}
+	return nil
+}
+
+// mergeTitleIDsSQL is the union of two title ID arrays, sorted: a title keeps
+// every ID it has held, so a write that knows fewer of them loses none.
+func mergeTitleIDsSQL(stored, added string) string {
+	return `ARRAY(SELECT DISTINCT id FROM unnest(` + stored + ` || ` + added + `) AS ids(id) ORDER BY id)`
+}
+
+// AddListItemTitleIDs adds IDs to a title row's title IDs.
+func (r *PostgresRepository) AddListItemTitleIDs(ctx context.Context, connectionID string, kind ListKind, mediaItemID string, ids []string) error {
+	if _, err := r.pool.Exec(ctx, `
+		UPDATE watch_provider_list_items
+		SET title_ids = `+mergeTitleIDsSQL("title_ids", "$4::text[]")+`,
+			updated_at = now()
+		WHERE connection_id = $1::uuid AND list_kind = $2 AND media_item_id = $3
+		  AND NOT (title_ids @> $4::text[])
+	`, connectionID, string(kind), mediaItemID, ids); err != nil {
+		return fmt.Errorf("add list item title ids: %w", err)
 	}
 	return nil
 }
@@ -2261,6 +2285,7 @@ func scanListItemStates(rows pgx.Rows) ([]ListItemState, error) {
 			&state.LastError,
 			&state.CreatedAt,
 			&state.UpdatedAt,
+			&state.TitleIDs,
 		); err != nil {
 			return nil, fmt.Errorf("scan list item state: %w", err)
 		}

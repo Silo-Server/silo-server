@@ -196,6 +196,14 @@ A failure is logged and the read continues; the next read retries.
 Other catalog reads (item lists through `ItemsHandler`, people, jellycompat) do
 not promote.
 
+Watch provider sync tracks an entry it imported by the title's TMDB ID and
+keeps the title's other IDs on its own sync row, because promotion deletes the
+title and its aliases. Promotion and removal add the title's IDs to the
+profile's sync rows for it in the same transaction, before the entry goes.
+Sync uses them to tell a promotion from a removal and to find the library item
+a provider removal must take off
+([watch-provider-plugins.md](watch-provider-plugins.md#list-sync-rows)).
+
 ## ID repair without a scheduled task
 
 There is no task, lease table or queue for watchlist titles. Checks happen only

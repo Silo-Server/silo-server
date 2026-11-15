@@ -61,7 +61,7 @@ func (h *SectionHandler) homeSections(ctx context.Context, viewer SectionViewer,
 	} else {
 		withItems = dropEmptySections(withItems)
 	}
-	response := h.buildSectionsWithUserStates(ctx, withItems, nil, viewer.Access, viewer.Artwork(), userStates)
+	response := h.buildSectionsWithUserStates(ctx, withItems, nil, viewer.Access, viewer.Artwork(), userStates, viewer.IncludeCardAvailability)
 	itemCount := 0
 	for _, section := range withItems {
 		itemCount += len(section.Items)
@@ -155,7 +155,7 @@ func (h *SectionHandler) homeSectionRow(ctx context.Context, s sections.Resolved
 			row.Items, hasMore = row.Items[:limit], true
 		}
 	}
-	built := h.buildSectionsWithUserStates(ctx, rows, nil, viewer.Access, viewer.Artwork(), userStates).Sections
+	built := h.buildSectionsWithUserStates(ctx, rows, nil, viewer.Access, viewer.Artwork(), userStates, viewer.IncludeCardAvailability).Sections
 	if len(built) == 0 {
 		return resolvedSectionResponse{
 			ID:          row.ID,

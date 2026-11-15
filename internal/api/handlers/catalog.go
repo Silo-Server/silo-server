@@ -129,6 +129,16 @@ func (h *CatalogHandler) catalogItemResponses(ctx context.Context, v ItemViewer,
 		defer enrichWG.Done()
 		playTargets = h.itemsH.listPlayableTargets(ctx, v, resultItems, libraryIDs, accessFilter)
 	}()
+	// Series cards are known here, so their seasons are counted alongside the
+	// other lookups rather than after the cards are assembled.
+	var countedSeries []string
+	var seriesCounts *seriesAvailability
+	if h.itemsH != nil && v.IncludeCardAvailability {
+		countedSeries = seriesItemIDs(resultItems)
+		enrichWG.Go(func() {
+			seriesCounts = loadSeriesAvailability(ctx, h.itemsH.itemRepo, accessFilter, countedSeries)
+		})
+	}
 	enrichWG.Wait()
 
 	var (
@@ -177,6 +187,9 @@ func (h *CatalogHandler) catalogItemResponses(ctx context.Context, v ItemViewer,
 		resp.LogoURL = imageURLs[item.ContentID].logoURL
 		resp.SortMetrics = sortMetrics[item.ContentID]
 		items = append(items, resp)
+	}
+	if h.itemsH != nil && v.IncludeCardAvailability {
+		h.itemsH.attachItemListAvailability(ctx, accessFilter, items, countedSeries, seriesCounts)
 	}
 	return items
 }
