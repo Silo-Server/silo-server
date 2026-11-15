@@ -123,15 +123,33 @@ VALUES ($1,'audiobook','Emma','',2008,'{Provider Genre}'::text[])`, id); err != 
 	}
 }
 
-// A renamed folder of a provider-matched book keeps its item, and with it the
-// listening progress, when the provider's year differs from the tag year.
+// A renamed folder keeps its item, and with it the listening progress: a
+// provider-matched book whose provider year differs from the tag year, and a
+// book whose files predate base_year (migration 078 left them at 0) and whose
+// item year still equals the tag year.
 func TestAudiobookRenamedFolderFindsMatchedItemDB(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		itemYear int
+		fileYear int
+	}{
+		{"provider year differs from the tag", 2008, 2005},
+		{"files from before base_year", 2005, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			renamedFolderKeepsItem(t, tc.itemYear, tc.fileYear)
+		})
+	}
+}
+
+func renamedFolderKeepsItem(t *testing.T, itemYear, fileYear int) {
+	t.Helper()
 	pool := newBookScanTestPool(t)
 	folder := newBookScanTestFolder(t, pool, "audiobooks")
 	ctx := t.Context()
 	id := fmt.Sprintf("renamed-matched-%d", folder.ID)
 	if _, err := pool.Exec(ctx, `INSERT INTO media_items (content_id,type,title,status,year,genres)
-VALUES ($1,'audiobook','Emma','',2008,'{}'::text[])`, id); err != nil {
+VALUES ($1,'audiobook','Emma','',$2,'{}'::text[])`, id, itemYear); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {
@@ -165,10 +183,10 @@ VALUES ($1,'audiobook','Emma','',2008,'{}'::text[])`, id); err != nil {
 	if err := s.itemRepo.ReplacePeople(ctx, id, credits); err != nil {
 		t.Fatal(err)
 	}
-	// The file was scanned with the tag year 2005; the provider wrote 2008.
+	// The tag year is 2005; the file stored fileYear when it was scanned.
 	oldDir := t.TempDir()
 	if _, err := s.fileRepo.Upsert(ctx, models.MediaFile{ContentID: id, MediaFolderID: folder.ID, FilePath: filepath.Join(oldDir, "book.m4b"),
-		ObservedRootPath: oldDir, CanonicalRootPath: oldDir, BaseTitle: "Emma", BaseYear: 2005, BaseType: "audiobook", Duration: 36000}); err != nil {
+		ObservedRootPath: oldDir, CanonicalRootPath: oldDir, BaseTitle: "Emma", BaseYear: fileYear, BaseType: "audiobook", Duration: 36000}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := pool.Exec(ctx, `UPDATE media_files SET missing_since = NOW() WHERE content_id = $1`, id); err != nil {

@@ -63,10 +63,20 @@ const audiobookDuplicateCandidateSQL = `
 	WHERE mi.type = 'audiobook'
 	  -- Compare the tag year the files were scanned with: a provider match
 	  -- owns mi.year, and a renamed folder of a matched book must still find
-	  -- its item.
-	  AND EXISTS (
-		  SELECT 1 FROM media_files yf
-		  WHERE yf.content_id = mi.content_id AND yf.base_year = $3
+	  -- its item. Files from before base_year existed (migration 078) hold 0
+	  -- until their folder is rewritten; for those, fall back to mi.year.
+	  AND (
+		  EXISTS (
+			  SELECT 1 FROM media_files yf
+			  WHERE yf.content_id = mi.content_id AND yf.base_year = $3
+		  )
+		  OR (
+			  mi.year = $3
+			  AND NOT EXISTS (
+				  SELECT 1 FROM media_files yf
+				  WHERE yf.content_id = mi.content_id AND yf.base_year <> 0
+			  )
+		  )
 	  )
 	  AND f.dur > 0
 	  AND ABS(f.dur - $4) <= $5

@@ -45,6 +45,11 @@ uncached remote URL, which image caching fills in later.
 When a folder is renamed or moved, the scanner looks for the same recording
 under another path. That check compares the tag year stored on the files
 (`media_files.base_year`), not `media_items.year`, which a match owns.
+Files indexed before `base_year` existed hold 0 until their folder is
+rewritten; for those the check falls back to `media_items.year`.
+Rename detection still depends on the stored author and narrator matching
+the tags, so a matched book whose provider spells them differently gets a new
+item when its folder is renamed.
 
 The enricher does not run again on a matched book. A book whose fields were
 mixed before this rule existed stays that way until an admin runs Refresh
