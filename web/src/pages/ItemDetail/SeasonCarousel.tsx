@@ -46,16 +46,13 @@ export default function SeasonCarousel({ seasons, libraryId }: SeasonCarouselPro
 
         return (
           <li key={season.content_id} className="embla__slide shrink-0">
-            <div
-              className="group/season w-[160px] sm:w-[170px]"
-              onMouseEnter={() => prefetchSeason(season.content_id)}
-              onFocus={() => prefetchSeason(season.content_id)}
-              onTouchStart={() => prefetchSeason(season.content_id)}
-            >
+            <div className="group/season w-[160px] sm:w-[170px]">
               {/* Poster */}
               <div className="group/media relative">
                 <ViewTransitionLink
                   to={seasonHref}
+                  prefetchOn="intent"
+                  onPrefetch={() => prefetchSeason(season.content_id)}
                   className="media-card-image relative block aspect-[2/3] overflow-hidden rounded-xl"
                 >
                   {season.poster_url ? (
@@ -106,7 +103,11 @@ export default function SeasonCarousel({ seasons, libraryId }: SeasonCarouselPro
               </div>
 
               {/* Info — always the same height */}
-              <ViewTransitionLink to={seasonHref} className="block px-0.5 pt-2.5">
+              <ViewTransitionLink
+                to={seasonHref}
+                onPrefetch={() => prefetchSeason(season.content_id)}
+                className="block px-0.5 pt-2.5"
+              >
                 <div className="truncate text-[0.8125rem] font-semibold">
                   {getSeasonDisplayTitle(season)}
                 </div>

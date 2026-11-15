@@ -243,6 +243,7 @@ export default function ItemCard({
       <div className="group/media relative">
         <ViewTransitionLink
           to={itemHref}
+          prefetchOn={selectionMode ? "press" : "intent"}
           aria-label={displayTitle}
           className="block overflow-hidden rounded-xl"
         >

@@ -1,7 +1,10 @@
 import type { ReactNode } from "react";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, useLocation, useNavigationType } from "react-router";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { catalogKeys } from "@/hooks/queries/keys";
+import { resetIntentPrefetchState } from "@/lib/intentPrefetch";
 import { resetNavigationHistory, resolveCommittedDirection } from "@/lib/navigationHistory";
 import SidebarItemNavigationProvider from "./SidebarItemNavigationProvider";
 import ViewTransitionLink from "./ViewTransitionLink";
@@ -192,5 +195,66 @@ describe("ViewTransitionLink direction", () => {
     // The interception exists to stage a descent into an item's heavy detail
     // page; unwinding out of one is the opposite move.
     expect(begin).not.toHaveBeenCalled();
+  });
+});
+
+describe("ViewTransitionLink prefetch", () => {
+  it("warms the detail query an item link opens when it is pressed", () => {
+    resetIntentPrefetchState();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(() => new Promise<Response>(() => {})),
+    );
+    const queryClient = new QueryClient();
+    render(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter>
+          <ViewTransitionLink to="/item/movie-1?libraryId=2">Movie</ViewTransitionLink>
+          <ViewTransitionLink to="/library/2">Library</ViewTransitionLink>
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+
+    fireEvent.pointerDown(screen.getByRole("link", { name: "Library" }), {
+      pointerType: "mouse",
+      button: 0,
+    });
+    expect(queryClient.getQueryCache().getAll()).toHaveLength(0);
+
+    fireEvent.pointerDown(screen.getByRole("link", { name: "Movie" }), {
+      pointerType: "mouse",
+      button: 0,
+    });
+    // The key the item page reads, library scope included.
+    expect(queryClient.getQueryState(catalogKeys.itemDetail("movie-1", 2))?.fetchStatus).toBe(
+      "fetching",
+    );
+  });
+
+  it("leaves the item page its retry when the page joins a press prefetch", async () => {
+    // The page's query dedupes onto the running prefetch and inherits its
+    // options, so the prefetch must not turn retries off.
+    resetIntentPrefetchState();
+    const fetch = vi
+      .fn()
+      .mockResolvedValueOnce(new Response("{}", { status: 500 }))
+      .mockReturnValue(new Promise<Response>(() => {}));
+    vi.stubGlobal("fetch", fetch);
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: 1, retryDelay: 0 } },
+    });
+    render(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter>
+          <ViewTransitionLink to="/item/movie-1">Movie</ViewTransitionLink>
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+
+    fireEvent.pointerDown(screen.getByRole("link", { name: "Movie" }), {
+      pointerType: "mouse",
+      button: 0,
+    });
+    await waitFor(() => expect(fetch).toHaveBeenCalledTimes(2));
   });
 });
