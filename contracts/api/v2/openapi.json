@@ -246182,7 +246182,7 @@
           },
           "required": true
         },
-        "description": "A batch of the node's operational and FFmpeg log entries. The core stamps them with the authenticated node (\u003cname\u003e#\u003cid\u003e), ignoring any node in the entries, clamps their timestamps to the last 24 hours and the next 30 seconds, and stores them for the admin log viewer and its live tail. A replayed batch can duplicate entries. 413: more than 100 entries. 429: the node exceeded its request budget on this server.",
+        "description": "A batch of the node's operational and FFmpeg log entries. The core stamps them with the authenticated node (\u003cname\u003e#\u003cid\u003e), ignoring any node in the entries, clamps their timestamps to the last 24 hours and the next 30 seconds, and stores them for the admin log viewer and its live tail. A replayed batch can duplicate entries. 413: more than 100 entries. 429: the node exceeded its request budget, or its log byte budget (128 KiB a second, bursts of 4 MiB), on this server.",
         "retry_safety": "non_retryable",
         "listener": "api",
         "method": "POST",

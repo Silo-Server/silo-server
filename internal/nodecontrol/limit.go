@@ -38,6 +38,17 @@ const (
 	nodePlaybackBurst int        = 600
 )
 
+// Per-node byte budget for log batches on one API replica. The request budget
+// alone would let a node send its 1 MiB body bound twenty times a second into
+// operational_logs. A node's log lines, FFmpeg output included, come to a few
+// kilobytes a second per session, so the rate sits far above a busy node, and
+// the burst takes the backlog a node ships after the core was unreachable.
+// Only a node that has gone wrong, or a stolen key, meets it.
+const (
+	nodeLogBytesRate  rate.Limit = 128 << 10
+	nodeLogBytesBurst int        = 4 << 20
+)
+
 // nodeLimiter holds one token bucket per authenticated node. Its keys are
 // verified node ids, so it grows only with the number of nodes.
 type nodeLimiter struct {
@@ -53,7 +64,10 @@ func newNodeLimiter(limit rate.Limit, burst int) *nodeLimiter {
 	return &nodeLimiter{limit: limit, burst: burst, now: time.Now, buckets: make(map[int]*rate.Limiter)}
 }
 
-func (l *nodeLimiter) allow(nodeID int) bool {
+func (l *nodeLimiter) allow(nodeID int) bool { return l.allowN(nodeID, 1) }
+
+// allowN takes n tokens from nodeID's bucket, or none when it holds fewer.
+func (l *nodeLimiter) allowN(nodeID, n int) bool {
 	l.mu.Lock()
 	bucket, ok := l.buckets[nodeID]
 	if !ok {
@@ -61,7 +75,7 @@ func (l *nodeLimiter) allow(nodeID int) bool {
 		l.buckets[nodeID] = bucket
 	}
 	l.mu.Unlock()
-	return bucket.AllowN(l.now(), 1)
+	return bucket.AllowN(l.now(), n)
 }
 
 // LimitNode answers 429 to a node that spends its background budget on this

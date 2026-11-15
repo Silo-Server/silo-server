@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"slices"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -344,6 +345,36 @@ func TestLogsStampTheAuthenticatedNode(t *testing.T) {
 	tooMany := LogBatch{Entries: make([]opslog.Entry, MaxLogBatchEntries+1)}
 	if got := f.serve(7, key, http.MethodPost, PathLogs, tooMany, nil); got.Code != http.StatusRequestEntityTooLarge {
 		t.Fatalf("over the entry bound: %d, want 413", got.Code)
+	}
+}
+
+// A node cannot fill the operational log at the request budget's pace: log
+// batches also spend a byte budget, and a node past it is told to retry.
+func TestLogsSpendAByteBudget(t *testing.T) {
+	f := newControlFixture(t)
+	key := f.addNode(7, "gpu-7")
+	other := f.addNode(8, "gpu-8")
+	now := time.Now()
+	f.server.now = func() time.Time { return now }
+	// One entry a little under the body bound.
+	batch := LogBatch{Entries: []opslog.Entry{{Timestamp: now, Level: "INFO", Component: "ffmpeg",
+		Message: strings.Repeat("x", MaxBodyBytes-4096)}}}
+	for sent := 0; sent < nodeLogBytesBurst/MaxBodyBytes; sent++ {
+		if got := f.serve(7, key, http.MethodPost, PathLogs, batch, nil); got.Code != http.StatusNoContent {
+			t.Fatalf("batch %d within the budget: %d %s", sent, got.Code, got.Body.String())
+		}
+	}
+	got := f.serve(7, key, http.MethodPost, PathLogs, batch, nil)
+	if got.Code != http.StatusTooManyRequests || got.Header().Get("Retry-After") == "" {
+		t.Fatalf("batch past the budget: %d, want 429 with Retry-After", got.Code)
+	}
+	if got := f.serve(8, other, http.MethodPost, PathLogs, batch, nil); got.Code != http.StatusNoContent {
+		t.Fatalf("another node's batch: %d, want its own budget", got.Code)
+	}
+	// The budget refills with time.
+	now = now.Add(time.Duration(float64(MaxBodyBytes)/float64(nodeLogBytesRate)*float64(time.Second)) + time.Second)
+	if got := f.serve(7, key, http.MethodPost, PathLogs, batch, nil); got.Code != http.StatusNoContent {
+		t.Fatalf("batch after the refill: %d %s", got.Code, got.Body.String())
 	}
 }
 

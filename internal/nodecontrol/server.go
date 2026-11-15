@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"log/slog"
 	"math"
 	"net/http"
@@ -91,6 +92,8 @@ type Server struct {
 	limiter *nodeLimiter
 	// playbackLimiter is the separate budget of resolve and sources/open.
 	playbackLimiter *nodeLimiter
+	// logBytes is the byte budget of log batches.
+	logBytes *nodeLimiter
 	// warnings throttles the per-node report warnings: a node reports every
 	// second, and during a Redis outage each report would log, and this
 	// server's warnings are captured into the operational log.
@@ -111,10 +114,12 @@ func NewServer(opts Options) *Server {
 	s := &Server{opts: opts, now: time.Now,
 		limiter:         newNodeLimiter(nodeWriteRate, nodeWriteBurst),
 		playbackLimiter: newNodeLimiter(nodePlaybackRate, nodePlaybackBurst),
+		logBytes:        newNodeLimiter(nodeLogBytesRate, nodeLogBytesBurst),
 		warnings:        logthrottle.New[reportWarning](reportWarnInterval)}
 	s.warnings.SetClock(func() time.Time { return s.now() })
 	s.limiter.now = func() time.Time { return s.now() }
 	s.playbackLimiter.now = func() time.Time { return s.now() }
+	s.logBytes.now = func() time.Time { return s.now() }
 	return s
 }
 
@@ -373,8 +378,18 @@ func (s *Server) HandleLogs(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "node logs unavailable", http.StatusServiceUnavailable)
 		return
 	}
+	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, MaxBodyBytes))
+	if err != nil {
+		http.Error(w, "invalid log batch", http.StatusBadRequest)
+		return
+	}
+	if !s.logBytes.allowN(id, len(body)) {
+		w.Header().Set("Retry-After", "1")
+		http.Error(w, "too many log bytes", http.StatusTooManyRequests)
+		return
+	}
 	var batch LogBatch
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, MaxBodyBytes)).Decode(&batch); err != nil {
+	if err := json.Unmarshal(body, &batch); err != nil {
 		http.Error(w, "invalid log batch", http.StatusBadRequest)
 		return
 	}
