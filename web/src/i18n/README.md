@@ -90,8 +90,9 @@ function Dialog({ row }: { row: HomeRow }) {
 - A language's translations ship when the sync generates its `<tag>.json`; `LOCALES` in
   the generated `keys.ts` lists it then, and `hasCatalog` in `src/lib/appLocale.ts`
   reads it. Only these languages follow the browser's language and appear in the pickers;
-  a profile's stored choice applies any language in `SHIPPED_LANGUAGES`. For those eight,
-  shipping takes only the regenerate; a new language also needs its row there.
+  a profile's stored choice applies any language in `SHIPPED_LANGUAGES`. For a language
+  listed there, shipping takes only the regenerate; a new language also needs its row there
+  and its name data in `NAME_DATA` (`src/lib/languageNames.ts`).
 - Pseudo-locales are bundled only in `vite dev` and builds with
   `VITE_PSEUDO_LOCALES=1`. There, the pickers offer them and a stored `en-XA`
   (accented, longer) or `ar-XB` (right to left) applies; a sandbox can also set the
