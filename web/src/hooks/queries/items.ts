@@ -400,7 +400,7 @@ export function useItemMetadataSavePending(contentId: string) {
 // image write or a reset from an earlier opening only through these.
 function startedFor(contentId: string) {
   return (mutation: { state: { variables: unknown } }) =>
-    (mutation.state.variables as { item?: { content_id?: string } } | undefined)?.item
+    (mutation.state.variables as { item?: Pick<ItemDetail, "content_id"> } | undefined)?.item
       ?.content_id === contentId;
 }
 
@@ -418,7 +418,8 @@ export function useItemMetadataResetPending(contentId: string) {
       mutationKey: itemMetadataRefreshKey,
       predicate: (mutation) =>
         forItem(mutation) &&
-        (mutation.state.variables as { mode?: string } | undefined)?.mode === "reset",
+        (mutation.state.variables as Partial<RefreshItemMetadataVariables> | undefined)?.mode ===
+          "reset",
     }) > 0
   );
 }

@@ -27,7 +27,12 @@ vi.mock("sonner", () => ({
 }));
 beforeEach(() => {
   installPolicyStorageMocks();
-  awaitAdminJob.mockClear();
+  awaitAdminJob.mockReset();
+  awaitAdminJob.mockImplementation(async (id: string) => ({
+    id,
+    status: "completed",
+    result_payload: {},
+  }));
 });
 afterEach(() => vi.unstubAllGlobals());
 function setup(response: () => Response) {
@@ -145,25 +150,56 @@ it("finishes a save only after the item has refetched", async () => {
   expect(readOnSuccess).toEqual({ read: 2 });
 });
 
+type Writers = {
+  apply: ReturnType<typeof useApplyItemImage>;
+  upload: ReturnType<typeof useUploadItemImage>;
+  refresh: ReturnType<typeof useRefreshItemMetadata>;
+};
+const writeItem = { content_id: "item-1", type: "movie" as const };
+
 // Edit Metadata unmounts its image tab, and starts a new form, every time it
 // closes. A reopened dialog must still see an image write or a reset that an
-// earlier opening started, and only for its own item (#4243).
+// earlier opening started, and only for its own item (#4243). Each write is
+// held until the test finishes it: an image write in its request, a reset in
+// its job.
 it.each([
-  ["an image apply", "images"],
-  ["an image upload", "images"],
-  ["a reset", "reset"],
+  {
+    write: "an image apply",
+    reads: "images",
+    start: (w: Writers) =>
+      w.apply.mutate({
+        item: writeItem,
+        request: {
+          original_url: "https://images.example/p.jpg",
+          type: "poster",
+          provider_id: "tmdb",
+        },
+      }),
+  },
+  {
+    write: "an image upload",
+    reads: "images",
+    start: (w: Writers) =>
+      w.upload.mutate({
+        item: writeItem,
+        type: "poster",
+        file: new File(["x"], "poster.jpg", { type: "image/jpeg" }),
+      }),
+  },
+  {
+    write: "a reset",
+    reads: "reset",
+    start: (w: Writers) => w.refresh.mutate({ item: writeItem, mode: "reset" }),
+  },
 ] as const)(
-  "reports %s for the item after the hook that started it unmounts",
-  async (write, reads) => {
+  "reports $write for the item after the hook that started it unmounts",
+  async ({ reads, start }) => {
     let finish!: () => void;
     const gate = new Promise<void>((resolve) => (finish = resolve));
-    // A reset stays pending through its job; an image write through its request.
-    if (reads === "reset") {
-      awaitAdminJob.mockImplementationOnce(async (id: string) => {
-        await gate;
-        return { id, status: "completed", result_payload: {} };
-      });
-    }
+    awaitAdminJob.mockImplementation(async (id: string) => {
+      await gate;
+      return { id, status: "completed", result_payload: {} };
+    });
     const { wrapper } = setup(() => jsonResponse(queued, 202));
     const fetchMock = vi.mocked(fetch);
     const respond = fetchMock.getMockImplementation()!;
@@ -172,7 +208,7 @@ it.each([
       return respond(input, init);
     });
     const writer = renderHook(
-      () => ({
+      (): Writers => ({
         apply: useApplyItemImage(),
         upload: useUploadItemImage(),
         refresh: useRefreshItemMetadata(),
@@ -188,27 +224,7 @@ it.each([
       }),
       { wrapper },
     );
-    const item = { content_id: "item-1", type: "movie" as const };
-    act(() => {
-      if (write === "an image apply") {
-        writer.result.current.apply.mutate({
-          item,
-          request: {
-            original_url: "https://images.example/p.jpg",
-            type: "poster",
-            provider_id: "tmdb",
-          },
-        });
-      } else if (write === "an image upload") {
-        writer.result.current.upload.mutate({
-          item,
-          type: "poster",
-          file: new File(["x"], "poster.jpg", { type: "image/jpeg" }),
-        });
-      } else {
-        writer.result.current.refresh.mutate({ item, mode: "reset" });
-      }
-    });
+    act(() => start(writer.result.current));
     writer.unmount();
 
     await vi.waitFor(() => expect(reader.result.current[reads]).toBe(true));

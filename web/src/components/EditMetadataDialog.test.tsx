@@ -56,6 +56,8 @@ describe("EditMetadataDialog image locks", () => {
   beforeEach(() => {
     mocks.update.mockReset();
     mocks.refresh.mockReset();
+    mocks.imageWritePending = false;
+    mocks.resetPending = false;
   });
 
   it("keeps a newly fetched image lock when other metadata is saved", () => {
