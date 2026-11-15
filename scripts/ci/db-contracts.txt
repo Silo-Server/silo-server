@@ -867,6 +867,7 @@
 # AI metadata translations never replace provider or manual localized text.
 ./internal/catalog TestAITranslationNeverOverwritesProviderOrManualText
 ./internal/catalog TestPlainAITranslationFillsOnlyEmptyFields
+./internal/catalog TestAITranslationOfChangedSourceIsDropped
 
 # A provider refresh with no translation clears only a copy of the base item's text.
 ./internal/catalog TestProviderUpsertClearsCopiedBaseTextOnly
