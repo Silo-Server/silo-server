@@ -53,16 +53,17 @@ func (h *NodeHandler) UpdateAdminNode(ctx context.Context, id int, input nodepoo
 	// request goroutine; the response is the committed row and never waits on
 	// or reflects the worker's answer.
 	policyChanged := nodePolicyTargetChanged(previous, node)
+	// A transcode node takes its artifact storage from the core too, so a
+	// change to it is pushed the same way; it moves no capability.
+	configChanged := policyChanged || transcodeNodeArtifactOverridesChanged(previous, node)
 	detached := context.WithoutCancel(ctx)
 	go func() {
-		if policyChanged {
-			if !h.reloadNodeConfig(detached, node) {
-				slog.WarnContext(detached, "node has not adopted its new acceleration policy yet; transcodes dispatched to it may fail until its next config poll",
-					"component", "api", "node_id", node.ID, "name", node.Name)
-			}
-			if h.invalidateCapabilityCache != nil {
-				h.invalidateCapabilityCache(node.URL)
-			}
+		if configChanged && !h.reloadNodeConfig(detached, node) && policyChanged {
+			slog.WarnContext(detached, "node has not adopted its new acceleration policy yet; transcodes dispatched to it may fail until its next config poll",
+				"component", "api", "node_id", node.ID, "name", node.Name)
+		}
+		if policyChanged && h.invalidateCapabilityCache != nil {
+			h.invalidateCapabilityCache(node.URL)
 		}
 		if h.afterNodeUpdate != nil {
 			h.afterNodeUpdate()

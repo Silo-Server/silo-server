@@ -1890,8 +1890,11 @@ func (h *PlaybackHandler) startRemoteTranscodeWithToneMapMode(
 		}
 	}
 
+	// A Jellyfin transcode runs under its playback session's own id.
 	reqBody := transcodenode.TranscodeStartRequest{
 		SessionID:              upstreamSessionID,
+		PlaybackSessionID:      upstreamSessionID,
+		MediaFileID:            file.ID,
 		InputPath:              file.FilePath,
 		SourceVideoCodec:       sourceVideoCodec,
 		SourceVideoProfile:     sourceVideoProfile,
@@ -1917,6 +1920,11 @@ func (h *PlaybackHandler) startRemoteTranscodeWithToneMapMode(
 		TotalDuration:          float64(source.Version.Duration),
 		RequireReady:           toneMapRecipe.mode != "",
 		ThrottleSeconds:        playback.ConfiguredTranscodeThrottleSeconds(ctx, h.SettingsRepo),
+	}
+	if h.sessionMgr != nil {
+		if upstream, err := h.sessionMgr.GetSession(upstreamSessionID); err == nil && upstream != nil {
+			reqBody.UserID, reqBody.ProfileID = upstream.UserID, upstream.ProfileID
+		}
 	}
 	if playback.IsAudioToAACStereoDownmixV3(reqBody.SourceAudioChannels, reqBody.TargetCodecAudio, reqBody.TargetAudioChannels) {
 		reqBody.AudioRecipeVersion = playback.TransformationAudioToAACRecipeVersionV3

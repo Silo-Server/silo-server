@@ -94,7 +94,7 @@ func autoTranscodeStartRequest(req TranscodeStartRequest) TranscodeStartRequest 
 
 func TestHandleStartRequireReadyAutoKeepsGPUEncodeWithCPUDecode(t *testing.T) {
 	server := newTestServer(t)
-	server.tracker = nodesessions.NewTracker(nil, "http://node", "node", "transcode")
+	server.tracker = nodesessions.NewLocalTracker()
 	ffmpegPath, logPath := writeNodeFFmpegFailingOn(t, "-hwaccel cuda")
 	server.watcher.Config().Playback.FFmpegPath = ffmpegPath
 	useAutoNVENCPipeline(t, server)
@@ -170,7 +170,7 @@ func TestHandleStartAutoReplacementFailureLeavesLiveSession(t *testing.T) {
 
 func TestSpawnReconstructAutoKeepsGPUEncodeWithCPUDecode(t *testing.T) {
 	server := newTestServer(t)
-	server.tracker = nodesessions.NewTracker(nil, "http://node", "node", "transcode")
+	server.tracker = nodesessions.NewLocalTracker()
 	ffmpegPath, logPath := writeNodeFFmpegFailingOn(t, "-hwaccel cuda")
 	cfg := server.watcher.Config()
 	cfg.Playback.FFmpegPath = ffmpegPath
@@ -183,7 +183,7 @@ func TestSpawnReconstructAutoKeepsGPUEncodeWithCPUDecode(t *testing.T) {
 		TargetCodecVideo: "h264", TargetCodecAudio: "aac", TargetResolution: "720p", TargetBitrateKbps: 2000,
 		SegmentDuration: 2,
 	})
-	session, err := server.spawnReconstruct(httptest.NewRequest(http.MethodGet, "/", nil), sessionID, -1, card)
+	session, err := server.spawnReconstruct(httptest.NewRequest(http.MethodGet, "/", nil), sessionID, -1, resolutionOf(card))
 	if err != nil || session == nil {
 		t.Fatalf("spawnReconstruct = %v, %v; want the CPU-decode session", session, err)
 	}
@@ -208,7 +208,7 @@ func TestSpawnReconstructAutoKeepsGPUEncodeWithCPUDecode(t *testing.T) {
 // registering the exited process.
 func TestSpawnReconstructExplicitNVENCRetriesRejectedDecodeOnCPU(t *testing.T) {
 	server := newTestServer(t)
-	server.tracker = nodesessions.NewTracker(nil, "http://node", "node", "transcode")
+	server.tracker = nodesessions.NewLocalTracker()
 	ffmpegPath, logPath := writeNodeFFmpegFailingWith(t, "-hwaccel cuda", "[hevc @ 0x1] Hardware is lacking required capabilities")
 	cfg := server.watcher.Config()
 	cfg.Playback.FFmpegPath = ffmpegPath
@@ -220,7 +220,7 @@ func TestSpawnReconstructExplicitNVENCRetriesRejectedDecodeOnCPU(t *testing.T) {
 		TargetCodecVideo: "h264", TargetCodecAudio: "aac", TargetResolution: "720p", TargetBitrateKbps: 2000,
 		SegmentDuration: 2,
 	})
-	session, err := server.spawnReconstruct(httptest.NewRequest(http.MethodGet, "/", nil), sessionID, -1, card)
+	session, err := server.spawnReconstruct(httptest.NewRequest(http.MethodGet, "/", nil), sessionID, -1, resolutionOf(card))
 	if err != nil || session == nil {
 		t.Fatalf("spawnReconstruct = %v, %v; want the CPU-decode session", session, err)
 	}
@@ -246,7 +246,7 @@ func TestSpawnReconstructOutlivesTriggeringRequest(t *testing.T) {
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			server := newTestServer(t)
-			server.tracker = nodesessions.NewTracker(nil, "http://node", "node", "transcode")
+			server.tracker = nodesessions.NewLocalTracker()
 			fakePath, _ := writeNodeFFmpegFailingOn(t, "no attempt fails")
 			// Answer the capability probes, then hand transcodes to the fake.
 			useFakeFFmpeg(t, server, "#!/bin/sh\n"+
@@ -274,7 +274,7 @@ func TestSpawnReconstructOutlivesTriggeringRequest(t *testing.T) {
 				TargetCodecVideo: "hevc", TargetCodecAudio: "aac", TargetResolution: "720p", SegmentDuration: 2,
 			})
 			request := httptest.NewRequest(http.MethodGet, "/", nil).WithContext(ctx)
-			session, err := server.spawnReconstruct(request, sessionID, -1, card)
+			session, err := server.spawnReconstruct(request, sessionID, -1, resolutionOf(card))
 			if err != nil || session == nil {
 				t.Fatalf("spawnReconstruct = %v, %v; want the session the other requests wait for", session, err)
 			}
@@ -285,7 +285,7 @@ func TestSpawnReconstructOutlivesTriggeringRequest(t *testing.T) {
 
 func TestHandleStartRequireReadyKeepsVideoToolboxSoftwareRetry(t *testing.T) {
 	server := newTestServer(t)
-	server.tracker = nodesessions.NewTracker(nil, "http://node", "node", "transcode")
+	server.tracker = nodesessions.NewLocalTracker()
 	fakePath, logPath := writeNodeFFmpegFailingOn(t, "h264_videotoolbox")
 	// Answer the VideoToolbox capability probes, then hand real transcodes to
 	// the fake that fails hardware encodes.
@@ -312,7 +312,7 @@ func TestHandleStartRequireReadyKeepsVideoToolboxSoftwareRetry(t *testing.T) {
 // the first manifest and walk the safer paths.
 func TestHandleStartAutoFallbackReadyWalksEnabledPipeline(t *testing.T) {
 	server := newTestServer(t)
-	server.tracker = nodesessions.NewTracker(nil, "http://node", "node", "transcode")
+	server.tracker = nodesessions.NewLocalTracker()
 	ffmpegPath, logPath := writeNodeFFmpegFailingOn(t, "-hwaccel cuda")
 	server.watcher.Config().Playback.FFmpegPath = ffmpegPath
 	useAutoNVENCPipeline(t, server)
@@ -327,7 +327,7 @@ func TestHandleStartAutoFallbackReadyWalksEnabledPipeline(t *testing.T) {
 // software encoder would otherwise be closed at the readiness deadline.
 func TestHandleStartAutoFallbackReadyWithoutPipelineDoesNotWait(t *testing.T) {
 	server := newTestServer(t)
-	server.tracker = nodesessions.NewTracker(nil, "http://node", "node", "transcode")
+	server.tracker = nodesessions.NewLocalTracker()
 	// Capability queries finish immediately; only the software encode is slow.
 	useFakeFFmpeg(t, server, "#!/bin/sh\ncase \" $* \" in\n*' -f hls '*) exec sleep 30 ;;\nesac\n")
 	server.autoTranscodePipelineFn = func(ctx context.Context, opts playback.TranscodeOpts) *playback.AutoTranscodePipeline {

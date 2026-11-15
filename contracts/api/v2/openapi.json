@@ -239862,7 +239862,7 @@
         }
       },
       {
-        "description": "Reload configuration and tear down active sessions and delivery authority. Failure can follow partial effects.",
+        "description": "Reread configuration from the core, ask the core to revoke this node's recipes (POST /api/internal/nodes/self/revoke-recipes), and tear down active sessions. A failed revocation fails the command after the teardown. Failure can follow partial effects.",
         "retry_safety": "non_retryable",
         "listener": "transcode_node",
         "method": "POST",
@@ -239906,7 +239906,7 @@
         }
       },
       {
-        "description": "Reload configuration without tearing down active sessions. No durable replay receipt.",
+        "description": "Reread configuration from the core without tearing down active sessions; the core calls it after an admin change to this node. No durable replay receipt.",
         "retry_safety": "non_retryable",
         "listener": "transcode_node",
         "method": "POST",
@@ -240011,7 +240011,7 @@
           },
           "required": true
         },
-        "description": "Extract a JPEG frame from an approved input path under the worker GPU admission gate. No durable replay receipt; decoder ignores unknown JSON keys and uses zero values for omitted options. source_grant, sent by current API servers next to the input path, is the core's source grant for that input naming this node (POST /api/internal/nodes/self/sources/open exchanges it); the node still approves the input path against the catalog itself.",
+        "description": "Extract a JPEG frame from the granted source under the worker GPU admission gate. No durable replay receipt; decoder ignores unknown JSON keys and uses zero values for omitted options. source_grant is required: the node exchanges it at the core (POST /api/internal/nodes/self/sources/open) and reads only the path the core approves, never the input path the request names, for the job's life; a source the core withdraws ends the job. A missing or refused grant returns 400, a node mount that does not show the approved revision 409, a core the node cannot reach 503.",
         "retry_safety": "non_retryable",
         "listener": "transcode_node",
         "method": "POST",
@@ -240044,7 +240044,7 @@
                 }
               }
             },
-            "description": "Invalid request or unapproved input path"
+            "description": "Invalid request, or a missing or refused source grant"
           },
           "401": {
             "content": {
@@ -240055,6 +240055,16 @@
               }
             },
             "description": "Unauthorized"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/x-silo-worker-protocols/schemas/chapterthumbs_RemoteExtractErrorResponse"
+                }
+              }
+            },
+            "description": "This node's mount does not show the approved source revision"
           },
           "422": {
             "content": {
@@ -240079,7 +240089,7 @@
                 }
               }
             },
-            "description": "Node, input authority or GPU admission unavailable"
+            "description": "Node, the core's source authority or GPU admission unavailable"
           }
         }
       },
@@ -240094,7 +240104,7 @@
           },
           "required": true
         },
-        "description": "Make trickplay sprite sheets for a mediasample Sheets request of samples on an approved input path, up to the node's configured number of runs at once, at idle priority, on the node's own hardware. No durable replay receipt; the API server keeps the lease and retries elsewhere. source_grant, sent by current API servers next to the input path, is the core's source grant for that input naming this node (POST /api/internal/nodes/self/sources/open exchanges it); the node still approves the input path against the catalog itself.",
+        "description": "Make trickplay sprite sheets for a mediasample Sheets request of samples on the granted source, up to the node's configured number of runs at once, at idle priority, on the node's own hardware. No durable replay receipt; the API server keeps the lease and retries elsewhere. source_grant is required: the node exchanges it at the core (POST /api/internal/nodes/self/sources/open) and reads only the path the core approves, never the input path the request names, for the job's life; a source the core withdraws ends the job. A missing or refused grant returns 400, a node mount that does not show the approved revision 409, a core the node cannot reach 503.",
         "retry_safety": "non_retryable",
         "listener": "transcode_node",
         "method": "POST",
@@ -240125,7 +240135,7 @@
                 }
               }
             },
-            "description": "Invalid request or unapproved input path"
+            "description": "Invalid request, or a missing or refused source grant"
           },
           "401": {
             "content": {
@@ -240136,6 +240146,16 @@
               }
             },
             "description": "Unauthorized"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/x-silo-worker-protocols/schemas/trickplay_ExtractError"
+                }
+              }
+            },
+            "description": "This node's mount does not show the approved source revision"
           },
           "422": {
             "content": {
@@ -240160,7 +240180,7 @@
                 }
               }
             },
-            "description": "Node at its trickplay run capacity, re-probing, or unconfigured"
+            "description": "Node at its trickplay run capacity, re-probing, unconfigured, or unable to reach the core's source authority"
           }
         }
       },
@@ -240175,7 +240195,7 @@
           },
           "required": true
         },
-        "description": "Run one software media sampling request on an approved input path with the node's ffmpeg and return its result. Read-only analysis; a repeated request decodes the file again. source_grant, sent by current API servers next to the input path, is the core's source grant for that input naming this node (POST /api/internal/nodes/self/sources/open exchanges it); the node still approves the input path against the catalog itself.",
+        "description": "Run one software media sampling request on the granted source with the node's ffmpeg and return its result. Read-only analysis; a repeated request decodes the file again. source_grant is required: the node exchanges it at the core (POST /api/internal/nodes/self/sources/open) and reads only the path the core approves, never the input path the request names, for the job's life; a source the core withdraws ends the job. A missing or refused grant returns 400, a node mount that does not show the approved revision 409, a core the node cannot reach 503.",
         "retry_safety": "natural_idempotent",
         "listener": "transcode_node",
         "method": "POST",
@@ -240206,7 +240226,7 @@
                 }
               }
             },
-            "description": "Invalid request, hardware attempt, or unapproved input path"
+            "description": "Invalid request, hardware attempt, or a missing or refused source grant"
           },
           "401": {
             "content": {
@@ -240217,6 +240237,16 @@
               }
             },
             "description": "Unauthorized"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/x-silo-worker-protocols/schemas/mediasample_RemoteFailure"
+                }
+              }
+            },
+            "description": "This node's mount does not show the approved source revision"
           },
           "422": {
             "content": {
@@ -240241,7 +240271,7 @@
                 }
               }
             },
-            "description": "Node or input authority unavailable"
+            "description": "Node or the core's source authority unavailable"
           }
         }
       },
@@ -241250,7 +241280,7 @@
           },
           "required": true
         },
-        "description": "Synchronously prepare or reuse a node-local MP4 under an artifact lifecycle lock. The JSON decoder reads at most 64 KiB, ignores unknown keys and uses zero values for omitted options. Input path authority and GPU admission apply. Ordinary nonempty artifacts can be reused by ID alone; requested execution attestations require a matching receipt. Missing/mismatched receipts may cause replacement. Request cancellation is not proof that no artifact was published; there is no durable job admission or automatic replay guarantee. source_grant, sent by current API servers next to the input path, is the core's source grant for that input naming this node (POST /api/internal/nodes/self/sources/open exchanges it); the node still approves the input path against the catalog itself. The execution fingerprint excludes source_grant.",
+        "description": "Synchronously prepare or reuse a node-local MP4 under an artifact lifecycle lock. The JSON decoder reads at most 64 KiB, ignores unknown keys and uses zero values for omitted options. Source grant and GPU admission apply. Ordinary nonempty artifacts can be reused by ID alone; requested execution attestations require a matching receipt. Missing/mismatched receipts may cause replacement. Request cancellation is not proof that no artifact was published; there is no durable job admission or automatic replay guarantee. source_grant is required: the node exchanges it at the core (POST /api/internal/nodes/self/sources/open) and reads only the path the core approves, never the input path the request names, for the job's life; a source the core withdraws ends the job. A missing or refused grant returns 400, a node mount that does not show the approved revision 409, a core the node cannot reach 503. The execution fingerprint excludes source_grant.",
         "retry_safety": "non_retryable",
         "listener": "transcode_node",
         "method": "POST",
@@ -241287,6 +241317,16 @@
               }
             },
             "description": "Unauthorized"
+          },
+          "409": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Conflict"
           },
           "422": {
             "content": {
@@ -242573,7 +242613,7 @@
             }
           }
         ],
-        "description": "Stop a transport under its lifecycle lock. Every stop installs a process-local token-lifetime fence that refuses token reconstruction (410) until a fresh start reuses the ID, unless fence=0 marks it a release of a transport moving to another node; stored recipe deletion is required when configured. Local teardown may precede a 503 authority-deletion or shutdown failure. A missing session/recipe returns 404 after cleanup attempts. This ID-addressed command has no durable replay identity and must not be automatically repeated against a possible successor.",
+        "description": "Stop a transport under its lifecycle lock. Every stop installs a process-local token-lifetime fence that refuses token reconstruction (410) until a fresh start reuses the ID, unless fence=0 marks it a release of a transport moving to another node; a fenced stop also fences a progressive remux under the ID. The core deletes the stored recipe itself before it calls; the node closes the session's source. Local teardown may precede a 503 progressive-remux shutdown failure. A transport that runs nothing here returns 404 after cleanup attempts. This ID-addressed command has no durable replay identity and must not be automatically repeated against a possible successor.",
         "retry_safety": "non_retryable",
         "listener": "transcode_node",
         "method": "DELETE",
@@ -242582,7 +242622,7 @@
         "auth_class": "node_bearer",
         "responses": {
           "204": {
-            "description": "Legacy teardown and configured authority deletion completed; no body. Local file/session close errors are logged rather than changing this status."
+            "description": "Teardown completed; no body. Local file/session close errors are logged rather than changing this status."
           },
           "401": {
             "content": {
@@ -242627,7 +242667,7 @@
           },
           "required": true
         },
-        "description": "Start a process-local HLS session after input, recipe, GPU and configuration guards. Ordinary JSON decoding ignores unknown keys and defaults omitted fields; there is no decoder body limit. A same-ID start can tear down and replace an earlier session before failing, and RequireReady may move an early hardware startup failure to a safer path: under hw_accel=auto CPU decode with GPU encode, then software; otherwise the VideoToolbox software retry. Monitoring runs asynchronously. No durable admission/replay receipt or automatic caller retry is implied. source_grant, sent by current API servers next to the input path, is the core's source grant for that input naming this node (POST /api/internal/nodes/self/sources/open exchanges it); the node still approves the input path against the catalog itself.",
+        "description": "Start a process-local HLS session after input, recipe, GPU and configuration guards. Ordinary JSON decoding ignores unknown keys and defaults omitted fields; there is no decoder body limit. A same-ID start can tear down and replace an earlier session before failing, and RequireReady may move an early hardware startup failure to a safer path: under hw_accel=auto CPU decode with GPU encode, then software; otherwise the VideoToolbox software retry. No durable admission/replay receipt or automatic caller retry is implied. source_grant is required: the node exchanges it at the core (POST /api/internal/nodes/self/sources/open), runs FFmpeg on the path the core approves, never on input_path, and keeps the source open for the session's life; a source the core withdraws ends the session. A missing or refused grant returns 400, a node mount that does not show the approved revision 409, a core the node cannot reach 503. playback_session_id, user_id, profile_id and media_file_id name the playback session the node files its session record and stream telemetry under.",
         "retry_safety": "non_retryable",
         "listener": "transcode_node",
         "method": "POST",
@@ -242668,6 +242708,16 @@
               }
             },
             "description": "Unauthorized"
+          },
+          "409": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Conflict"
           },
           "422": {
             "content": {
@@ -245060,7 +245110,7 @@
             }
           },
           {
-            "description": "Signed recipe reference for node-side validation and deny-marker lookup; not a native user access token.",
+            "description": "Stream token a relay forwards; the node passes it unread to the core's resolve, which verifies it. Not a native user access token.",
             "in": "header",
             "name": "X-Silo-Stream-Token",
             "required": true,
@@ -245077,7 +245127,7 @@
             }
           }
         ],
-        "description": "Node bearer plus independently verified playback recipe token must bind exact transport and this node's remux-execution/proxy-egress route. Audio-downmix recipes require the exact stereo shape. A theme_aac_v1 recipe converts one detail-page theme to AAC; the theme authority approves its id, path, size and modification time in place of the media-file catalog. Input authority and current configuration are checked. A session carrying the deny marker, or revoked/stopped authority, returns410 and a concurrent GET returns409. GET starts request-scoped MP4 remux with cancellation/stop/reload tracking; committed200 can truncate on encoder/read failure. HEAD validates authority but does not check actual file existence or start an encoder. Process-local fences are not durable across node replacement.",
+        "description": "Every GET and HEAD resolves the transport at the core (POST /api/internal/nodes/self/resolve, purpose remux), passing the stream token unread; a transport this process stopped is refused with410 first. The core's refusals map to the node's answers: invalid_token401, wrong_route503, denied and stopped410, source_changed400, not_found404, anything else (the core unavailable)503. The token must bind the exact transport and this node's remux-execution/proxy-egress route; audio-downmix recipes require the exact stereo shape; a theme_aac_v1 recipe converts one detail-page theme to AAC. A GET opens the source the resolution grants (a refused grant400, a mount that does not show the approved revision409, the core unreachable503) and reads only that path; a concurrent GET returns409. GET starts request-scoped MP4 remux with cancellation/stop/reload tracking; committed200 can truncate on encoder/read failure, and a source the core withdraws ends it. HEAD validates authority but opens no source and starts no encoder. Process-local fences are not durable across node replacement.",
         "listener": "transcode_node",
         "method": "GET",
         "path": "/remux/{session_id}",
@@ -245186,7 +245236,7 @@
             }
           },
           {
-            "description": "Signed recipe reference for node-side validation and deny-marker lookup; not a native user access token.",
+            "description": "Stream token a relay forwards; the node passes it unread to the core's resolve, which verifies it. Not a native user access token.",
             "in": "header",
             "name": "X-Silo-Stream-Token",
             "required": true,
@@ -245203,7 +245253,7 @@
             }
           }
         ],
-        "description": "Node bearer plus independently verified playback recipe token must bind exact transport and this node's remux-execution/proxy-egress route. Audio-downmix recipes require the exact stereo shape. A theme_aac_v1 recipe converts one detail-page theme to AAC; the theme authority approves its id, path, size and modification time in place of the media-file catalog. Input authority and current configuration are checked. A session carrying the deny marker, or revoked/stopped authority, returns410 and a concurrent GET returns409. GET starts request-scoped MP4 remux with cancellation/stop/reload tracking; committed200 can truncate on encoder/read failure. HEAD validates authority but does not check actual file existence or start an encoder. Process-local fences are not durable across node replacement.",
+        "description": "Every GET and HEAD resolves the transport at the core (POST /api/internal/nodes/self/resolve, purpose remux), passing the stream token unread; a transport this process stopped is refused with410 first. The core's refusals map to the node's answers: invalid_token401, wrong_route503, denied and stopped410, source_changed400, not_found404, anything else (the core unavailable)503. The token must bind the exact transport and this node's remux-execution/proxy-egress route; audio-downmix recipes require the exact stereo shape; a theme_aac_v1 recipe converts one detail-page theme to AAC. A GET opens the source the resolution grants (a refused grant400, a mount that does not show the approved revision409, the core unreachable503) and reads only that path; a concurrent GET returns409. GET starts request-scoped MP4 remux with cancellation/stop/reload tracking; committed200 can truncate on encoder/read failure, and a source the core withdraws ends it. HEAD validates authority but opens no source and starts no encoder. Process-local fences are not durable across node replacement.",
         "listener": "transcode_node",
         "method": "HEAD",
         "path": "/remux/{session_id}",
@@ -245247,7 +245297,7 @@
             }
           },
           {
-            "description": "Signed recipe reference for node-side validation and deny-marker lookup; not a native user access token.",
+            "description": "Stream token a relay forwards; the node passes it unread to the core's resolve, which verifies it. Not a native user access token.",
             "in": "header",
             "name": "X-Silo-Stream-Token",
             "schema": {
@@ -245263,7 +245313,7 @@
             }
           }
         ],
-        "description": "Node bearer protects the worker listener. A session carrying the deny marker returns410 and is neither served nor reconstructed. Missing process-local sessions may reconstruct through existing signed-token/stored-recipe, input and execution authority guards; a missing/refused reconstruction can return404. Reads refresh liveness; no durable session availability, unscoped reconstruction or native route is promised. Build the playback manifest; unavailable manifest returns503. No-store response contains relative segment links.",
+        "description": "Node bearer protects the worker listener. A live process-local session is served without asking the core; the relays check the deny marker before forwarding. A missing session is rebuilt from the recipe the core resolves (POST /api/internal/nodes/self/resolve, purpose hls, the stream token passed unread) and the source it grants, unless this process stopped the transport, which returns410 before the core is asked. The core denying the session returns410, any other refusal404, a core the node cannot reach503. Reads refresh liveness; no durable session availability, unscoped reconstruction or native route is promised. Build the playback manifest; unavailable manifest returns503. No-store response contains relative segment links.",
         "listener": "transcode_node",
         "method": "GET",
         "path": "/transcode/{session_id}/master.m3u8",
@@ -245359,7 +245409,7 @@
             }
           },
           {
-            "description": "Signed recipe reference for node-side validation and deny-marker lookup; not a native user access token.",
+            "description": "Stream token a relay forwards; the node passes it unread to the core's resolve, which verifies it. Not a native user access token.",
             "in": "header",
             "name": "X-Silo-Stream-Token",
             "schema": {
@@ -245425,7 +245475,7 @@
             }
           }
         ],
-        "description": "Node bearer protects the worker listener. A session carrying the deny marker returns410 and is neither served nor reconstructed. Missing process-local sessions may reconstruct through existing signed-token/stored-recipe, input and execution authority guards; a missing/refused reconstruction can return404. Reads refresh liveness; no durable session availability, unscoped reconstruction or native route is promised. Open an exact segment lease; missing media can wait or trigger guarded seek/restart recovery. Non-numbered init data can also wait. ServeContent supplies extension/sniffed media, conditions and ranges. Private generation is emitted only on a marked proxy hop. Direct complete GET reports generation-bound completion; proxied reads await separate acknowledgment. Partial/failed responses do not advance completion and may truncate after headers.",
+        "description": "Node bearer protects the worker listener. A live process-local session is served without asking the core; the relays check the deny marker before forwarding. A missing session is rebuilt from the recipe the core resolves (POST /api/internal/nodes/self/resolve, purpose hls, the stream token passed unread) and the source it grants, unless this process stopped the transport, which returns410 before the core is asked. The core denying the session returns410, any other refusal404, a core the node cannot reach503. Reads refresh liveness; no durable session availability, unscoped reconstruction or native route is promised. Open an exact segment lease; missing media can wait or trigger guarded seek/restart recovery. Non-numbered init data can also wait. ServeContent supplies extension/sniffed media, conditions and ranges. Private generation is emitted only on a marked proxy hop. Direct complete GET reports generation-bound completion; proxied reads await separate acknowledgment. Partial/failed responses do not advance completion and may truncate after headers.",
         "listener": "transcode_node",
         "method": "GET",
         "path": "/transcode/{session_id}/segment/{name}",
@@ -246389,7 +246439,7 @@
           }
         },
         "required": [
-          "input_path"
+          "source_grant"
         ],
         "type": "object"
       },
@@ -246538,7 +246588,7 @@
         },
         "required": [
           "artifact_id",
-          "input_path"
+          "source_grant"
         ],
         "type": "object"
       },
@@ -246900,7 +246950,8 @@
           }
         },
         "required": [
-          "input"
+          "input",
+          "source_grant"
         ],
         "type": "object"
       },
@@ -248981,6 +249032,16 @@
           "keyframe_playlist": {
             "type": "boolean"
           },
+          "media_file_id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "playback_session_id": {
+            "type": "string"
+          },
+          "profile_id": {
+            "type": "string"
+          },
           "require_audio_track": {
             "type": "boolean"
           },
@@ -249107,6 +249168,10 @@
             "format": "double",
             "type": "number"
           },
+          "user_id": {
+            "format": "int64",
+            "type": "integer"
+          },
           "video_bitstream_filter": {
             "type": "string"
           },
@@ -249119,7 +249184,7 @@
         },
         "required": [
           "session_id",
-          "input_path"
+          "source_grant"
         ],
         "type": "object"
       },

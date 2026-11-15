@@ -3549,8 +3549,9 @@ func useBaseMiddleware(r chi.Router, deps Dependencies) {
 }
 
 // nodeConfigSettings reads the server settings a transcode node's
-// configuration is built from, as the node's database watcher reads them: the
-// staged storage transition belongs to storage recovery, not to Config.
+// configuration is built from, as an API server's configuration watcher reads
+// them: the staged storage transition belongs to storage recovery, not to
+// Config.
 func nodeConfigSettings(settings catalog.SettingsStore) func(context.Context) (map[string]string, error) {
 	return func(ctx context.Context) (map[string]string, error) {
 		all, err := settings.GetAll(ctx)

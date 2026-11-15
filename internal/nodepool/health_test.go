@@ -38,7 +38,7 @@ func (f *fakeCapabilityFetcher) callCount() int {
 // newHealthNode starts a stand-in node whose /health advertises capabilitiesHash.
 func newHealthNode(t *testing.T, capabilitiesHash string) string {
 	t.Helper()
-	body, err := json.Marshal(healthResponse{Status: "ok", ActiveJobs: 2, EgressKbps: 17, CapabilitiesHash: capabilitiesHash})
+	body, err := json.Marshal(healthResponse{Status: "ok", ActiveJobs: 2, EgressKbps: 17, CapabilitiesHash: capabilitiesHash, NodeControlVersion: NodeControlVersion})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -405,7 +405,7 @@ func TestCapabilityFetchBackstopSitsAboveTheFetcherBudget(t *testing.T) {
 // The health check is the first thing that runs against a node, so a base URL
 // this could not address would leave the node permanently unhealthy.
 func TestCheckNodeReachesATrailingSlashBaseURL(t *testing.T) {
-	url := newStatsHealthNode(t, `{"active_jobs":1,"capabilities_hash":"sha256:x"}`)
+	url := newStatsHealthNode(t, `{"active_jobs":1,"capabilities_hash":"sha256:x","node_control_version":1}`)
 
 	healthy, activeJobs, _, hash, _, _ := CheckNode(context.Background(), &Node{ID: 1, URL: url + "///"})
 	if !healthy {

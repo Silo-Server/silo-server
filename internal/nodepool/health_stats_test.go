@@ -209,3 +209,26 @@ func TestApplyCapabilitiesIgnoresAReportForAReplacedWorker(t *testing.T) {
 		t.Fatalf("pool took the old worker's capability report: %+v", stored)
 	}
 }
+
+// A transcode node still running a binary from before the node control
+// protocol answers health with 200 and looks alive, but cannot take the work
+// the core sends now; one whose key the core refuses cannot either. Both are
+// unhealthy with their reason. A proxy carries no version and stays healthy.
+func TestCheckNodeReportRefusesTranscodeNodesTheCoreCannotUse(t *testing.T) {
+	for name, test := range map[string]struct {
+		nodeType string
+		body     string
+		healthy  bool
+		reason   string
+	}{
+		"current transcode node": {NodeTypeTranscode, `{"status":"ok","node_control_version":1}`, true, ""},
+		"pre-change binary":      {NodeTypeTranscode, `{"status":"ok","active_jobs":0}`, false, UnhealthyNodeControlMissing},
+		"rejected key":           {NodeTypeTranscode, `{"status":"ok","node_control_version":1,"key_rejected":true}`, false, UnhealthyKeyRejected},
+		"proxy":                  {NodeTypeProxy, `{"status":"ok"}`, true, ""},
+	} {
+		report := CheckNodeReport(t.Context(), &Node{ID: 1, Type: test.nodeType, URL: newStatsHealthNode(t, test.body)})
+		if report.Healthy != test.healthy || report.Reason != test.reason {
+			t.Fatalf("%s: healthy=%v reason=%q, want healthy=%v reason=%q", name, report.Healthy, report.Reason, test.healthy, test.reason)
+		}
+	}
+}

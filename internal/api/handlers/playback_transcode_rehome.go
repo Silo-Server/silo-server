@@ -669,6 +669,10 @@ func (h *PlaybackHandler) rehomeSourceFileV3(ctx context.Context, card playback.
 func rehomeStartRequestV3(card playback.RecipeCard, transportID, hwAccel string, requestedSegment int) transcodenode.TranscodeStartRequest {
 	req := transcodenode.TranscodeStartRequest{
 		SessionID:                  transportID,
+		PlaybackSessionID:          card.SessionID,
+		UserID:                     card.UserID,
+		ProfileID:                  card.ProfileID,
+		MediaFileID:                card.MediaFileID,
 		InputPath:                  card.InputPath,
 		SourceVideoCodec:           card.SourceVideoCodec,
 		SourceVideoProfile:         card.SourceVideoProfile,

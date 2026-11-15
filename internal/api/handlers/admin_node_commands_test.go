@@ -28,7 +28,7 @@ func TestAdminNodeCheckView(t *testing.T) {
 		if r.URL.Path != "/api/v1/health" || r.Method != "GET" {
 			t.Error("wrong worker request", r.Method, r.URL.Path)
 		}
-		_, _ = w.Write([]byte(`{"active_jobs":2,"egress_kbps":8,"capabilities_hash":"observed"}`))
+		_, _ = w.Write([]byte(`{"active_jobs":2,"egress_kbps":8,"capabilities_hash":"observed","node_control_version":1}`))
 	}))
 	defer server.Close()
 	repo := &commandNodeRepo{stubNodeRepository: stubNodeRepository{node: &nodepool.Node{ID: 1, URL: server.URL, Type: nodepool.NodeTypeTranscode}}}

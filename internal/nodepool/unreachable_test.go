@@ -109,7 +109,7 @@ func flakyHealthNode(t *testing.T, failures int32) (string, *atomic.Int32) {
 			w.WriteHeader(http.StatusServiceUnavailable)
 			return
 		}
-		_ = json.NewEncoder(w).Encode(healthResponse{Status: "ok", ActiveJobs: 1})
+		_ = json.NewEncoder(w).Encode(healthResponse{Status: "ok", ActiveJobs: 1, NodeControlVersion: NodeControlVersion})
 	}))
 	t.Cleanup(server.Close)
 	return server.URL, &calls
@@ -393,7 +393,7 @@ func TestRecheckRestoresEveryEntryForTheEndpoint(t *testing.T) {
 // send it new work until the next sweep.
 func TestRecheckPublishesTheDrainStateTheNodeAnsweredWith(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_ = json.NewEncoder(w).Encode(healthResponse{Status: string(DrainStateDraining)})
+		_ = json.NewEncoder(w).Encode(healthResponse{Status: string(DrainStateDraining), NodeControlVersion: NodeControlVersion})
 	}))
 	t.Cleanup(server.Close)
 	pool := newKeyedTranscodePool()

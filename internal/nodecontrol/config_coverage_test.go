@@ -15,12 +15,9 @@ import (
 )
 
 // nodeConfigReadsNotCarried are the config fields the transcode node reads
-// that the document deliberately does not carry, each with the reason.
-var nodeConfigReadsNotCarried = map[string]string{
-	// The node still verifies stream tokens itself; the core takes that over
-	// (resolve) before the node loses its database configuration.
-	"Auth.JWTSecret": "stream token verification moves to the core",
-}
+// that the document deliberately does not carry, each with the reason. It is
+// empty: a field belongs here only with a reason the node can run without it.
+var nodeConfigReadsNotCarried = map[string]string{}
 
 // The node builds its *config.Config from the document (NodeConfigBody.ApplyTo).
 // A field internal/transcodenode reads that the document does not fill would

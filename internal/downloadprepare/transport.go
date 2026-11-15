@@ -79,7 +79,7 @@ type Request struct {
 	// SourceGrant is the core's source grant for InputPath, naming the node
 	// the job is sent to. It changes with every dispatch, so the execution
 	// fingerprint leaves it out.
-	SourceGrant                string                 `json:"source_grant,omitempty"`
+	SourceGrant                string                 `json:"source_grant,omitempty" required:"true"`
 	SourceVideoCodec           string                 `json:"source_video_codec,omitempty"`
 	SourceVideoProfile         string                 `json:"source_video_profile,omitempty"`
 	SourceVideoBitDepth        int                    `json:"source_video_bit_depth,omitempty"`

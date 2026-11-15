@@ -140,6 +140,13 @@ func NewOpener(open OpenFunc, logger *slog.Logger) *Opener {
 	}
 }
 
+// SetRenewInterval changes how often an open source renews its grant from
+// RenewInterval, so a test can watch a renewal the core refuses end a job.
+// Call it before the first Open.
+func (o *Opener) SetRenewInterval(interval time.Duration) {
+	o.renewInterval = interval
+}
+
 // Open exchanges a job's grant at the core and returns its source, renewed
 // until it is closed. The core's approved path must be a regular file of the
 // approved revision on this node's mount (*MountMismatchError otherwise). A

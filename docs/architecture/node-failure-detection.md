@@ -138,6 +138,25 @@ its client as the node being unavailable and moves nothing.
 Name lookups are the one difference between the two rules: a failed lookup counts
 as unreachable for the stop, but never marks the node.
 
+## Nodes that answer but cannot serve
+
+A transcode node's health answer carries `node_control_version` and, while the
+API refuses its key, `key_rejected: true` (see
+[worker HTTP protocol](worker-http-protocol.md)). The health check
+(`nodepool.CheckNodeReport`) treats a transcode node whose answer lacks the
+version, a binary from before nodes took their configuration and authority
+from the API, or that reports `key_rejected`, as unhealthy: placement skips it
+exactly as it skips a node that does not answer. The answer's resources, build
+and drain state are still recorded, and the `stream node unhealthy` warning
+names the reason (`unreachable`, `key_rejected` or `node_control_unsupported`).
+
+A node that cannot reach the API keeps serving the sessions it runs, which need
+no call. It cannot rebuild a lost session (`503`), resolve a progressive remux
+(`503`), or open a new job's source (`503`), and a job whose grant the API
+cannot renew before it expires ends. Its reports, log batches and drain
+announcements fail and are retried or logged; its configuration stays as last
+read.
+
 ## Other API servers
 
 The API server that saw the failure publishes `node_unreachable` on `silo:admin`

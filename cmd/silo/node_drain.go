@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/cache"
-	"github.com/Silo-Server/silo-server/internal/nodeconfig"
 	"github.com/Silo-Server/silo-server/internal/nodepool"
 	"github.com/Silo-Server/silo-server/internal/transcodenode"
 )
@@ -85,28 +84,9 @@ func (d *nodeDrain) run(sigCh <-chan os.Signal) {
 	}
 }
 
-// nodeDrainAnnouncer publishes this node's drain changes, so every API server
-// rechecks it at once rather than at its next health sweep. A node that has not
-// matched its stream_nodes row yet has no id to announce; the sweep finds it.
-func nodeDrainAnnouncer(ctx context.Context, bus cache.EventBus, watcher *nodeconfig.Watcher) func() {
-	return func() {
-		id, ok := watcher.NodeRowID()
-		if !ok {
-			return
-		}
-		go func() {
-			publishCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
-			defer cancel()
-			event := cache.Event{Type: cache.EventNodeDrainChanged, Payload: strconv.Itoa(id)}
-			if err := bus.Publish(publishCtx, cache.ChannelAdmin, event); err != nil {
-				slog.WarnContext(publishCtx, "announce node drain change", "node_id", id, "error", err)
-			}
-		}()
-	}
-}
-
 // subscribeNodeDrainChanges rechecks a transcode node when it announces a
-// drain change, so placement stops (or resumes) using it right away.
+// drain change (POST /api/internal/nodes/self/health-changed, which any API
+// server publishes as node_drain_changed), so placement stops (or resumes) using it right away.
 func subscribeNodeDrainChanges(ctx context.Context, bus cache.EventBus, healthChecker *nodepool.HealthChecker) {
 	rechecks := newNodeRechecks(func(id int) { healthChecker.CheckTranscodeNode(ctx, id) })
 	err := bus.Subscribe(ctx, cache.ChannelAdmin, func(event cache.Event) {

@@ -12,11 +12,9 @@ import (
 // the bootstrap loader dependency-free, so the two constants must stay in sync.
 const minSecretKeyLen = 32
 
-// The server modes that run as a node of a main server.
-const (
-	modeProxy     = "proxy"
-	modeTranscode = "transcode"
-)
+// modeProxy is the server mode of a proxy node. A transcode node never loads
+// this bootstrap: it starts from SILO_CORE_URL and SILO_NODE_KEY alone.
+const modeProxy = "proxy"
 
 // BootstrapConfig holds the minimal config needed before database connection.
 type BootstrapConfig struct {
@@ -82,11 +80,11 @@ func LoadBootstrap(envFile string) (*BootstrapConfig, error) {
 	if mode == "" {
 		mode = "integrated"
 	}
-	// NODE_URL is a node's whole identity: it keys session bookkeeping and
-	// selects the stream_nodes row whose acceleration overrides the node adopts.
-	// A URL guessed from the listen port would give two nodes on the same port
-	// one identity.
-	if (mode == modeProxy || mode == modeTranscode) && os.Getenv("NODE_URL") == "" {
+	// NODE_URL is a proxy's whole identity: it keys session bookkeeping and
+	// selects the stream_nodes row whose acceleration overrides the proxy
+	// adopts. A URL guessed from the listen port would give two proxies on the
+	// same port one identity.
+	if mode == modeProxy && os.Getenv("NODE_URL") == "" {
 		return nil, fmt.Errorf("MODE=%s needs NODE_URL, this node's own URL, which matches it to its entry on the main server", mode)
 	}
 

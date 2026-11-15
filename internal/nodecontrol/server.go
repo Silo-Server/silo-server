@@ -144,8 +144,9 @@ func (s *Server) HandleConfig(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// nodeConfig builds node id's configuration from the same settings and row
-// overrides a node's database watcher (internal/nodeconfig) reads.
+// nodeConfig builds node id's configuration from the server settings and its
+// row's overrides, as a proxy's database watcher (internal/nodeconfig) reads
+// them.
 func (s *Server) nodeConfig(ctx context.Context, id int) (NodeConfig, error) {
 	node, err := s.opts.Nodes.GetByID(ctx, id)
 	if err != nil {

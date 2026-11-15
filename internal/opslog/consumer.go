@@ -36,11 +36,21 @@ func NewConsumer(pool *pgxpool.Pool, streamHub *logstream.Hub) *Consumer {
 // records reach stderr and OTLP but are not captured: a warning about a failed
 // batch must not queue another entry behind it.
 func (c *Consumer) Run(ctx context.Context, ch <-chan Entry) {
+	Ship(ctx, ch, c.batchSize, c.interval, c.insertBatch)
+}
+
+// Ship hands entries from ch to insert in batches of at most size, flushing a
+// partial batch every interval, until ctx ends; see logstream.Drain for
+// retries and drops. It is Run with a caller-supplied sink: a transcode node,
+// which has no database, ships its entries to the core with it. Records the
+// pipeline logs about itself reach stderr and OTLP but are not captured, so a
+// warning about a failed batch never queues another entry behind it.
+func Ship(ctx context.Context, ch <-chan Entry, size int, interval time.Duration, insert func(context.Context, []Entry) error) {
 	logstream.Drain[Entry]{
 		Stream:   logstream.StreamApp,
-		Size:     c.batchSize,
-		Interval: c.interval,
-		Insert:   c.insertBatch,
+		Size:     size,
+		Interval: interval,
+		Insert:   insert,
 		Failed: func(ctx context.Context, f logstream.InsertFailure) {
 			if f.RetryIn > 0 {
 				slog.WarnContext(ctx, "opslog batch insert failed; retrying", "component", "opslog",

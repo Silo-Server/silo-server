@@ -50,7 +50,35 @@ type healthResponse struct {
 	// Absent on a node that predates the field or runs no providers, which
 	// reads as "no overlay origins" — see CheckNode.
 	NetworkAccess netaccess.NodeNetworkAccess `json:"network_access,omitempty"`
+	// NodeControlVersion is the node control protocol a transcode node speaks
+	// (NodeControlVersion). A transcode node that omits it runs a binary from
+	// before nodes took their configuration and playback authority from the
+	// core: it answers health but can serve nothing the core sends it now.
+	NodeControlVersion int `json:"node_control_version"`
+	// KeyRejected is a transcode node saying the core refuses its key: it was
+	// rotated or the node deleted, so every call the node makes to the core
+	// fails until it restarts with the current key.
+	KeyRejected bool `json:"key_rejected"`
 }
+
+// NodeControlVersion is the node control protocol version this build speaks:
+// a transcode node takes its configuration, playback authority and sources
+// from the core (internal/nodecontrol) and names this version in its health
+// answer. The core places work only on transcode nodes that name at least
+// this version.
+const NodeControlVersion = 1
+
+// Reasons a health check reports a node unhealthy (HealthReport.Reason).
+const (
+	// UnhealthyUnreachable is a node that did not answer 200 with a
+	// readable health body.
+	UnhealthyUnreachable = "unreachable"
+	// UnhealthyKeyRejected is a transcode node the core refuses the key of.
+	UnhealthyKeyRejected = "key_rejected"
+	// UnhealthyNodeControlMissing is a transcode node whose binary predates
+	// the node control protocol.
+	UnhealthyNodeControlMissing = "node_control_unsupported"
+)
 
 // maxHealthResponseBytes bounds a node's whole /health body.
 //
@@ -97,12 +125,18 @@ type HealthReport struct {
 	// DrainState comes from the status the node answered with. A node that did
 	// not answer, or predates draining, reports DrainStateNone.
 	DrainState DrainState
+	// Reason says why an unhealthy node is unhealthy (Unhealthy*); empty for
+	// a healthy one.
+	Reason string
 }
 
 // CheckNodeReport is CheckNode returning the whole report. A node that did not
-// answer reports DrainStateNone.
+// answer reports DrainStateNone. A transcode node that answers but refuses
+// work the core would send it, because the core refuses its key or its binary
+// predates the node control protocol, is unhealthy with its answer otherwise
+// kept, so the admin views still show its resources and build.
 func CheckNodeReport(ctx context.Context, n *Node) HealthReport {
-	unreachable := HealthReport{DrainState: DrainStateNone}
+	unreachable := HealthReport{DrainState: DrainStateNone, Reason: UnhealthyUnreachable}
 	client := &http.Client{Timeout: 5 * time.Second, CheckRedirect: RefuseRedirects}
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
@@ -139,7 +173,7 @@ func CheckNodeReport(ctx context.Context, n *Node) HealthReport {
 		return unreachable
 	}
 
-	return HealthReport{
+	report := HealthReport{
 		Healthy:          true,
 		ActiveJobs:       hr.ActiveJobs,
 		EgressKbps:       hr.EgressKbps,
@@ -147,6 +181,28 @@ func CheckNodeReport(ctx context.Context, n *Node) HealthReport {
 		LastStats:        marshalLastStats(ctx, n, hr),
 		NetworkAccess:    hr.NetworkAccess.Normalized(),
 		DrainState:       drainStateOfHealthStatus(hr.Status),
+	}
+	if n.Type == NodeTypeTranscode {
+		switch {
+		case hr.NodeControlVersion < NodeControlVersion:
+			report.Healthy, report.Reason = false, UnhealthyNodeControlMissing
+		case hr.KeyRejected:
+			report.Healthy, report.Reason = false, UnhealthyKeyRejected
+		}
+	}
+	return report
+}
+
+// unhealthyDetail explains an unhealthy reason to the administrator reading
+// the log.
+func unhealthyDetail(reason string) string {
+	switch reason {
+	case UnhealthyKeyRejected:
+		return "the node reports that this server refuses its key; restart it with its current key, or issue it a new one"
+	case UnhealthyNodeControlMissing:
+		return "the node runs a build older than this server; upgrade it to take work again"
+	default:
+		return "the node did not answer its health check"
 	}
 }
 
@@ -451,7 +507,8 @@ func (hc *HealthChecker) publishHealth(ctx context.Context, n *Node, report Heal
 	applyHealth(n.ID, n.URL, report, time.Now())
 
 	if n.Healthy && !healthy {
-		slog.WarnContext(ctx, "stream node unhealthy", "component", "nodepool", "id", n.ID, "name", n.Name, "url", n.URL)
+		slog.WarnContext(ctx, "stream node unhealthy", "component", "nodepool", "id", n.ID, "name", n.Name, "url", n.URL,
+			"reason", report.Reason, "detail", unhealthyDetail(report.Reason))
 	} else if !n.Healthy && healthy {
 		slog.InfoContext(ctx, "stream node recovered", "component", "nodepool", "id", n.ID, "name", n.Name, "url", n.URL)
 	}

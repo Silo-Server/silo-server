@@ -51,7 +51,7 @@ func healthStatusOf(t *testing.T, s *Server) HealthResponse {
 func newLoopingFFmpegServer(t *testing.T) *Server {
 	t.Helper()
 	s := newTestServer(t)
-	s.tracker = nodesessions.NewTracker(nil, "http://node", "node", "transcode")
+	s.tracker = nodesessions.NewLocalTracker()
 	useFakeFFmpeg(t, s, "#!/bin/sh\nwhile :; do sleep 0.1; done\n")
 	return s
 }
@@ -183,7 +183,7 @@ func TestAdminDrainRequestFollowsTheNodeRow(t *testing.T) {
 	var announced atomic.Int32
 	s.SetDrainAnnouncer(func() { announced.Add(1) })
 
-	s.watcher.SetNodeDrainRequestedForTest(true)
+	runtimeOf(s).SetNodeDrainRequestedForTest(true)
 	if !s.draining() || healthStatusOf(t, s).Status != HealthStatusDrained {
 		t.Fatalf("draining=%v status=%q after a drain request", s.draining(), healthStatusOf(t, s).Status)
 	}
@@ -191,7 +191,7 @@ func TestAdminDrainRequestFollowsTheNodeRow(t *testing.T) {
 		t.Fatalf("start while admin-drained: %d, want 503", rr.Code)
 	}
 
-	s.watcher.SetNodeDrainRequestedForTest(false)
+	runtimeOf(s).SetNodeDrainRequestedForTest(false)
 	if s.draining() || healthStatusOf(t, s).Status != HealthStatusOK {
 		t.Fatal("lifting the request did not put the node back to work")
 	}
@@ -200,8 +200,8 @@ func TestAdminDrainRequestFollowsTheNodeRow(t *testing.T) {
 	}
 
 	s.BeginShutdownDrain()
-	s.watcher.SetNodeDrainRequestedForTest(true)
-	s.watcher.SetNodeDrainRequestedForTest(false)
+	runtimeOf(s).SetNodeDrainRequestedForTest(true)
+	runtimeOf(s).SetNodeDrainRequestedForTest(false)
 	if !s.draining() {
 		t.Fatal("lifting an admin request ended a SIGTERM drain")
 	}
@@ -303,10 +303,10 @@ func TestDrainingNodeReconstructsUntilItReportsDrained(t *testing.T) {
 	const sessionID = "sess-drain-1"
 	const transportID = sessionID + "-plan1234-abcd1234"
 	s := newLoopingFFmpegServer(t)
-	s.SetRecipeStore(&stubRecipeStore{ok: true, card: nativeTransportCard(sessionID, transportID)})
+	coreOf(s).resolve(transportID, resolutionOf(*nativeTransportCard(sessionID, transportID)))
 	s.BeginShutdownDrain()
 
-	session, err := s.reconstructFromToken(requestWithToken(transportID, ""), transportID, 5)
+	session, err := s.reconstructLost(requestWithToken(transportID, ""), transportID, 5)
 	if err != nil || session == nil {
 		t.Fatalf("reconstruct while draining = %v, %v; want the session rebuilt", session, err)
 	}
@@ -319,7 +319,7 @@ func TestDrainingNodeReconstructsUntilItReportsDrained(t *testing.T) {
 	if got := healthStatusOf(t, s).Status; got != HealthStatusDrained {
 		t.Fatalf("status = %q, want drained", got)
 	}
-	session, err = s.reconstructFromToken(requestWithToken(transportID, ""), transportID, 5)
+	session, err = s.reconstructLost(requestWithToken(transportID, ""), transportID, 5)
 	if err != nil || session != nil {
 		if session != nil {
 			_ = session.CloseProcess()
@@ -332,7 +332,7 @@ func TestDrainingNodeReconstructsUntilItReportsDrained(t *testing.T) {
 // load at boot) is announced when the announcer is set, and so is its end.
 func TestDrainReadAtBootIsAnnounced(t *testing.T) {
 	s := newTestServer(t)
-	s.watcher.SetNodeDrainRequestedForTest(true)
+	runtimeOf(s).SetNodeDrainRequestedForTest(true)
 	announcements := make(chan struct{}, 4)
 	s.SetDrainAnnouncer(func() { announcements <- struct{}{} })
 	for _, what := range []string{"the drain read at boot", "the drained node"} {
@@ -349,7 +349,6 @@ func TestDrainReadAtBootIsAnnounced(t *testing.T) {
 func TestDrainedNodeRefusesFreshRemux(t *testing.T) {
 	server := newTestServer(t)
 	server.nodeRowID = func() (int, bool) { return 11, true }
-	server.registeredNodeURL = func() (string, bool) { return "http://node", true }
 	mediaPath := filepath.Join(t.TempDir(), "movie.mkv")
 	if err := os.WriteFile(mediaPath, []byte("source"), 0o600); err != nil {
 		t.Fatal(err)
@@ -360,19 +359,14 @@ func TestDrainedNodeRefusesFreshRemux(t *testing.T) {
 		RoutingWorkload: string(noderouting.WorkloadRemux), RoutingExecution: string(noderouting.ExecutionTranscode),
 		RoutingExecutionNodeID: 11, RoutingEgress: string(noderouting.EgressProxy),
 	}
-	card := playback.RecipeCardFromClaims(&claims)
-	server.SetRecipeStore(&stubRecipeStore{card: &card, ok: true})
-	token, err := streamtoken.Sign(claims, testSecret, time.Minute)
-	if err != nil {
-		t.Fatal(err)
-	}
+	coreOf(server).resolve(claims.TranscodeTransportID, resolutionOf(playback.RecipeCardFromClaims(&claims)))
 	server.BeginShutdownDrain()
 	if got := healthStatusOf(t, server).Status; got != HealthStatusDrained {
 		t.Fatalf("status = %q, want drained", got)
 	}
 
 	request := httptest.NewRequest(http.MethodGet, "/remux/"+claims.TranscodeTransportID+"?seek=2", nil)
-	request.Header.Set("X-Silo-Stream-Token", token)
+	request.Header.Set("X-Silo-Stream-Token", "relay-token")
 	routeContext := chi.NewRouteContext()
 	routeContext.URLParams.Add("session_id", claims.TranscodeTransportID)
 	request = request.WithContext(context.WithValue(request.Context(), chi.RouteCtxKey, routeContext))

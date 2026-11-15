@@ -8,6 +8,7 @@ import (
 	"reflect"
 
 	"github.com/Silo-Server/silo-server/internal/mediasample"
+	"github.com/Silo-Server/silo-server/internal/nodesource"
 	"github.com/Silo-Server/silo-server/internal/processmetrics"
 	"github.com/Silo-Server/silo-server/internal/workerprotocol"
 	"github.com/danielgtaylor/huma/v2"
@@ -40,9 +41,6 @@ func (s *Server) handleMediaSample(w http.ResponseWriter, r *http.Request) {
 		writeMediaSampleError(w, http.StatusServiceUnavailable, mediasample.ReasonNodeUnavailable, "node not configured")
 		return
 	}
-	if !s.requireApprovedInputPath(w, r, req.Input) {
-		return
-	}
 	if s.draining() {
 		writeMediaSampleError(w, http.StatusServiceUnavailable, mediasample.ReasonNodeUnavailable, errNodeDraining)
 		return
@@ -63,8 +61,27 @@ func (s *Server) handleMediaSample(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer release()
+	// The run reads the source the core grants, never the path the request
+	// names, and ends if the core withdraws it.
+	source, err := s.openSource(r.Context(), req.SourceGrant)
+	if err != nil {
+		// Only a request without a grant fails the same way anywhere; a
+		// refused grant or a mount that does not match is this node's
+		// problem, which the caller answers by sampling elsewhere.
+		status, message := sourceFailure(r.Context(), err)
+		reason := mediasample.ReasonNodeUnavailable
+		if errors.Is(err, nodesource.ErrNoGrant) {
+			reason = mediasample.ReasonInvalidRequest
+		}
+		writeMediaSampleError(w, status, reason, message)
+		return
+	}
+	defer func() { _ = source.Close() }()
+	ctx, cancel := sourceContext(r.Context(), source)
+	defer cancel()
+	req.Input = source.Input()
 	runner := mediasample.Runner{FFmpegPath: cfg.Playback.FFmpegPath, Workload: processmetrics.Analysis}
-	result, err := runner.Run(r.Context(), req)
+	result, err := runner.Run(ctx, req)
 	if err != nil {
 		var runErr *mediasample.Error
 		if !errors.As(err, &runErr) {
@@ -107,15 +124,16 @@ func ProtocolMediaSample(schemas huma.Registry) workerprotocol.Operation {
 	return workerprotocol.Operation{
 		Listener: listener, Method: http.MethodPost, Path: mediasample.RemotePath,
 		Handler: "(*internal/transcodenode.Server).handleMediaSample", AuthClass: bearerClass,
-		Description: "Run one software media sampling request on an approved input path with the node's ffmpeg and return its result. Read-only analysis; a repeated request decodes the file again. source_grant, sent by current API servers next to the input path, is the core's source grant for that input naming this node (POST /api/internal/nodes/self/sources/open exchanges it); the node still approves the input path against the catalog itself.",
+		Description: "Run one software media sampling request on the granted source with the node's ffmpeg and return its result. Read-only analysis; a repeated request decodes the file again. source_grant is required: the node exchanges it at the core (POST /api/internal/nodes/self/sources/open) and reads only the path the core approves, never the input path the request names, for the job's life; a source the core withdraws ends the job. A missing or refused grant returns 400, a node mount that does not show the approved revision 409, a core the node cannot reach 503.",
 		RetrySafety: "natural_idempotent",
 		RequestBody: &huma.RequestBody{Required: true, Content: map[string]*huma.MediaType{jsonMedia: {Schema: request}}},
 		Responses: map[string]*huma.Response{
 			"200": {Description: "Sampling result", Content: map[string]*huma.MediaType{jsonMedia: {Schema: result}}},
-			"400": {Description: "Invalid request, hardware attempt, or unapproved input path", Content: map[string]*huma.MediaType{jsonMedia: failure, textMedia: text}},
+			"400": {Description: "Invalid request, hardware attempt, or a missing or refused source grant", Content: map[string]*huma.MediaType{jsonMedia: failure, textMedia: text}},
+			"409": {Description: mountMismatchDescription, Content: map[string]*huma.MediaType{jsonMedia: failure}},
 			"401": {Description: "Unauthorized", Content: map[string]*huma.MediaType{textMedia: text}},
 			"422": {Description: "Sampling failed; reason is the run's classified cause", Content: map[string]*huma.MediaType{jsonMedia: failure}},
-			"503": {Description: "Node or input authority unavailable", Content: map[string]*huma.MediaType{jsonMedia: failure, textMedia: text}},
+			"503": {Description: "Node or the core's source authority unavailable", Content: map[string]*huma.MediaType{jsonMedia: failure, textMedia: text}},
 		},
 	}
 }

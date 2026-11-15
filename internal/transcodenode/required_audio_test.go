@@ -10,7 +10,7 @@ import (
 
 func TestHandleStartRetainsRequiredAudio(t *testing.T) {
 	server := newTestServer(t)
-	server.tracker = nodesessions.NewTracker(nil, "http://node", "node", "transcode")
+	server.tracker = nodesessions.NewLocalTracker()
 	useFakeFFmpeg(t, server, "#!/bin/sh\nwhile :; do sleep 0.1; done\n")
 	response := postStartRequest(t, server, TranscodeStartRequest{SessionID: "required-audio", InputPath: "/media/movie.mkv", TargetCodecVideo: "h264", TargetCodecAudio: "copy", AudioTrackIndex: 1, RequireAudioTrack: true, SegmentDuration: 2})
 	if response.Code != http.StatusAccepted {

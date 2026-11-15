@@ -378,10 +378,15 @@ provider origin, or the file is served from the API server when the planned
 proxy has none. The Jellyfin-compatible playback redirects use the same
 accessor.
 
-A node finds its own row by URL first: `NODE_URL` on the node is matched
+A transcode node needs no matching: its key (`SILO_NODE_KEY`) names its row,
+and the API serves it that row's overrides already applied in its
+configuration document (`GET /api/internal/nodes/self/config`), at its
+30-second poll and at once after an admin change to the row.
+
+A proxy finds its own row by URL first: `NODE_URL` on the proxy is matched
 against `stream_nodes.url`, ignoring a trailing slash on either side. A proxy
-or transcode node refuses to start without `NODE_URL`: a URL guessed from its
-listen port could match a different machine's row and adopt its policy.
+refuses to start without `NODE_URL`: a URL guessed from its listen port could
+match a different machine's row and adopt its policy.
 
 If the URL does not match, the node falls back to `NODE_NAME` against the
 registered name. This covers split-horizon topologies where `stream_nodes.url`
@@ -399,8 +404,8 @@ goes on dispatching that row's backend and a row that has gone is not evidence
 an operator cleared the override. Fix the mismatch: the node adopts whatever it
 finds on its next poll.
 
-The node overlays its row onto the cluster-wide playback settings on every
-config reload, so the override is what that node probes with, advertises in
+A proxy overlays its row onto the cluster-wide playback settings on every
+config reload, and a transcode node receives them overlaid, so the override is what that node probes with, advertises in
 `capabilities.resolved`, and falls back to when a start request names no
 backend. The API dispatches remote transcodes with the node's
 `hw_accel_override` in preference to its own cluster setting, so the request

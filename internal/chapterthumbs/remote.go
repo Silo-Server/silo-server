@@ -34,7 +34,7 @@ type RemoteExtractRequest struct {
 	InputPath string `json:"input_path"`
 	// SourceGrant is the core's source grant for InputPath, naming the node
 	// the request is sent to.
-	SourceGrant          string  `json:"source_grant,omitempty"`
+	SourceGrant          string  `json:"source_grant,omitempty" required:"true"`
 	SeekSeconds          float64 `json:"seek_seconds"`
 	ToneMap              bool    `json:"tone_map"`
 	AllowSoftwareToneMap bool    `json:"allow_software_tone_map"`

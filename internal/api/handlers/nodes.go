@@ -204,6 +204,25 @@ func nodePolicyTargetChanged(before, after *nodepool.Node) bool {
 		!sameOptionalString(before.HWDeviceOverride, after.HWDeviceOverride)
 }
 
+// transcodeNodeArtifactOverridesChanged reports whether an update changed a
+// transcode node's prepared-download storage overrides, which reach the node
+// in its configuration document. The directory applies when the node next
+// restarts; the size cap at once.
+func transcodeNodeArtifactOverridesChanged(before, after *nodepool.Node) bool {
+	if before == nil || after == nil || after.Type != nodepool.NodeTypeTranscode {
+		return false
+	}
+	return !sameOptionalString(before.DownloadArtifactDirOverride, after.DownloadArtifactDirOverride) ||
+		!sameOptionalInt64(before.DownloadArtifactMaxBytesOverride, after.DownloadArtifactMaxBytesOverride)
+}
+
+func sameOptionalInt64(a, b *int64) bool {
+	if a == nil || b == nil {
+		return a == nil && b == nil
+	}
+	return *a == *b
+}
+
 // sameNodeURL compares two stored node URLs the way the pools and the database
 // fences do, so a trailing slash is not a repoint.
 func sameNodeURL(a, b string) bool {
@@ -218,15 +237,17 @@ func sameOptionalString(a, b *string) bool {
 }
 
 // reloadNodeConfig asks one node to re-read its configuration now, reporting
-// whether it confirmed.
+// whether it confirmed. A transcode node has no event bus: this signed push,
+// after an admin change to its row or a drain request, and its own 30-second
+// poll of the core are how it learns of either.
 //
 // It targets /admin/reload-config, never /admin/force-reload: the latter tears
 // down every live playback session on a transcode node, which is a reasonable
 // thing for an operator to ask for explicitly and an unacceptable side effect
 // of saving a policy edit that the UI says applies to new transcodes.
 //
-// Best effort by design: the override is already stored, and the node's own
-// watcher poll is the backstop, so a node that is unreachable or predates the
+// Best effort by design: the change is already stored, and the node's own
+// configuration poll is the backstop, so a node that is unreachable or predates the
 // route must not turn a successful update into a failed one. It is bounded
 // tightly for the same reason — this runs after the response is written, but
 // still on the request's goroutine and context. The caller uses the result to
@@ -246,7 +267,7 @@ func (h *NodeHandler) reloadNodeConfig(ctx context.Context, node *nodepool.Node)
 	}
 	resp, err := telemetry.DoTrustedNode(&http.Client{Timeout: nodeConfigReloadTimeout, CheckRedirect: nodepool.RefuseRedirects}, req, "reload")
 	if err != nil {
-		slog.WarnContext(ctx, "node did not reload after an acceleration override change; it will pick it up on its next config poll",
+		slog.WarnContext(ctx, "node did not reload after a change to it; it will pick it up on its next config poll",
 			"component", "api", "node_id", node.ID, "name", node.Name, "error", logredact.SanitizeURLError(err))
 		return false
 	}
@@ -256,7 +277,7 @@ func (h *NodeHandler) reloadNodeConfig(ctx context.Context, node *nodepool.Node)
 	// warning about a reload that in fact succeeded, and leaves room for the
 	// node's answer to gain a body later.
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
-		slog.WarnContext(ctx, "node refused the reload after an acceleration override change; it will pick it up on its next config poll",
+		slog.WarnContext(ctx, "node refused the reload after a change to it; it will pick it up on its next config poll",
 			"component", "api", "node_id", node.ID, "name", node.Name, "status", resp.StatusCode)
 		return false
 	}
@@ -264,8 +285,8 @@ func (h *NodeHandler) reloadNodeConfig(ctx context.Context, node *nodepool.Node)
 }
 
 // nodeConfigReloadTimeout bounds the post-update nudge. A config reload is a
-// database read on the node, not a probe, so this only has to cover a round
-// trip to a node that is up.
+// read of the node's configuration (from the core, for a transcode node), not
+// a probe, so this only has to cover a round trip to a node that is up.
 const nodeConfigReloadTimeout = 10 * time.Second
 
 // applyHealthToPools publishes one check's result to whichever pool holds the

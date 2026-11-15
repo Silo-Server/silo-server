@@ -4,10 +4,11 @@
 # docs/architecture/omnibus-image.md describes the image.
 #
 # Optional settings are commented out in the silo service: hardware
-# transcoding (VA-API or NVIDIA), and the ports proxy or transcode nodes on
-# other hosts use to reach this server. A node's own host runs this same file
-# with MODE, DATABASE_URL, REDIS_URL, and NODE_URL in its .env; see the node
-# section of .env.example.
+# transcoding (VA-API or NVIDIA), and the ports proxy nodes on other hosts use
+# to reach this server. A node's own host runs this same file: a transcode
+# node with MODE, SILO_CORE_URL and SILO_NODE_KEY in its .env, a proxy node
+# with MODE, DATABASE_URL, REDIS_URL and NODE_URL; see the node section of
+# .env.example.
 #
 # This file is an example of a new install. An existing install keeps its own
 # Compose file; docker-compose.advanced.yml runs PostgreSQL and Redis in
@@ -75,10 +76,11 @@ services:
       - "${PORT:-8090}:8080"
       - "${JF_PORT:-8096}:8096"
       - "${ABS_PORT:-13378}:13378"
-      # Proxy or transcode nodes on other hosts: set ENABLE_NODE_ACCESS=true,
+      # Proxy nodes on other hosts: set ENABLE_NODE_ACCESS=true,
       # POSTGRES_PASSWORD, REDIS_PASSWORD, and NODE_ACCESS_HOST in .env, then
-      # uncomment these two. Nodes sign in as silo with those passwords. Neither
-      # connection is encrypted, so use an address on a network you trust.
+      # uncomment these two. Proxies sign in as silo with those passwords.
+      # Neither connection is encrypted, so use an address on a network you
+      # trust. Transcode nodes need neither: they reach this server on PORT.
       # - "${NODE_ACCESS_HOST:?Set NODE_ACCESS_HOST in .env}:${POSTGRES_PORT:-5432}:5432"
       # - "${NODE_ACCESS_HOST:?Set NODE_ACCESS_HOST in .env}:${REDIS_PORT:-6379}:6379"
     volumes:
