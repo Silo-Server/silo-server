@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 	"unicode"
+	"unicode/utf8"
 )
 
 // maxAudiobookCreditsPerRole and maxAudiobookCreditNameLen bound what one
@@ -137,6 +138,12 @@ func formatRomanNumeral(n int) string {
 //     album "Book") or the album is the title plus a subtitle ("Book" with
 //     album "Book: A Subtitle"). The prefix is the book's series tag with an
 //     optional position or, for a book without one, text ending in a number.
+//     Behind a series tag's prefix the title may also repeat the series or
+//     the album after the album ("Saga 2 - Book Saga"), and the album may go
+//     on to name the series or a position ("Book: Saga 2", "Book, Part 2");
+//     the title is then the album, or the title without its prefix. A prefix
+//     carrying the position tag's number was composed from the two tags and
+//     is cut off whatever the album says, and without an album.
 //     A "subtitle" naming the series or ending in a position is not one.
 //     Unrelated tags keep the title, since a single file's album may name its
 //     series or a collection.
@@ -164,9 +171,10 @@ var (
 	// audiobookNumberedPrefixRE matches a prefix of text ending in a series
 	// number: "Saga Name 2", "Saga Name, Book 2", "Saga Name #2.5".
 	audiobookNumberedPrefixRE = regexp.MustCompile(`(?i)^\S.*?[\s,]+(?:(?:book|bk|volume|vol|number|no|part|pt)\b\.?\s*)?#?\s*\d+(?:\.\d+)?$`)
-	// audiobookSeriesPositionRE matches what may follow the series name in a
-	// prefix: nothing, or a position in digits or Roman numerals.
-	audiobookSeriesPositionRE = regexp.MustCompile(`(?i)^(?:[\s,]+(?:(?:book|bk|volume|vol|number|no|part|pt)\b\.?\s*)?#?\s*(\d+(?:\.\d+)?|[ivxlc]+))?$`)
+	// audiobookSeriesPrefixTailRE matches what follows the series name in a
+	// series prefix: an optional position in digits or Roman numerals, then
+	// the separator before the book title (" - " or ": ").
+	audiobookSeriesPrefixTailRE = regexp.MustCompile(`(?i)^(?:[\s,]+(?:(?:book|bk|volume|vol|number|no|part|pt)\b\.?\s*)?#?\s*(\d+(?:\.\d+)?|[ivxlc]+))?\s*(?::|\s[-–—])\s*`)
 	// audiobookTrailingPositionRE matches a series position ending a
 	// subtitle: "..., Book 1", "... #3", "Vol. 2", "Book III", "(Book 1)".
 	// A Roman numeral counts only after a marker word; endsInSeriesPosition
@@ -185,66 +193,197 @@ func endsInSeriesPosition(text string) bool {
 // ignoring case and punctuation. Words are runs of letters and digits in any
 // script. An empty phrase is never contained.
 func containsTitleWords(text, phrase string) bool {
-	words := func(v string) string {
-		return " " + strings.Join(strings.FieldsFunc(strings.ToLower(v), func(r rune) bool {
-			return !unicode.IsLetter(r) && !unicode.IsNumber(r)
-		}), " ") + " "
-	}
-	p := words(phrase)
-	return strings.TrimSpace(p) != "" && strings.Contains(words(text), p)
+	p := titleWords(phrase)
+	return p != "" && strings.Contains(" "+titleWords(text)+" ", " "+p+" ")
 }
 
+// titleWords is v's words in lower case, joined by single spaces. Words are
+// runs of letters and digits in any script; an apostrophe inside a word is
+// dropped, since taggers that write file-safe titles drop it too.
+func titleWords(v string) string {
+	v = titleApostropheReplacer.Replace(strings.ToLower(v))
+	return strings.Join(strings.FieldsFunc(v, func(r rune) bool {
+		return !unicode.IsLetter(r) && !unicode.IsNumber(r)
+	}), " ")
+}
+
+var titleApostropheReplacer = strings.NewReplacer("'", "", "\u2019", "", "\u02bc", "")
+
 // audiobookTagTitle picks a book's title from its title and album tags as
-// the rules above describe. series is the book's series tag.
-func audiobookTagTitle(title, album, series string) string {
+// the rules above describe. series and position are the book's series and
+// series position tags.
+func audiobookTagTitle(title, album, series, position string) string {
 	title, album = strings.TrimSpace(title), strings.TrimSpace(album)
-	if title == "" || album == "" {
-		return firstNonEmpty(title, album)
+	if title == "" {
+		return album
 	}
 	t, a := audiobookTitleKey(title), audiobookTitleKey(album)
-	if t == "" || a == "" || t == a {
+	s := audiobookTitleKey(series)
+	if a == "" {
+		// Without an album only the position tag can vouch for a prefix.
+		if t != "" && s != "" {
+			return audiobookSeriesPrefixedTitle(title, "", s, position)
+		}
 		return title
 	}
-	s := audiobookTitleKey(series)
+	// An album that repeats the title says nothing about its prefix; only
+	// the position tag can then vouch for one.
+	if t == "" || (t == a && s == "") {
+		return title
+	}
 	if rest, ok := strings.CutPrefix(a, t); ok && audiobookSubtitleSeparatorRE.MatchString(rest) {
 		// An album that adds the series ("Book: Saga, Book 1") is not a
 		// subtitle.
+		picked := title
 		if !containsTitleWords(rest, s) && !endsInSeriesPosition(rest) {
-			return album
+			picked = album
 		}
-		return title
+		// The album starts with the whole title, so it cannot vouch for a
+		// series prefix on it; the position tag can.
+		if s != "" {
+			return audiobookSeriesPrefixedTitle(picked, "", s, position)
+		}
+		return picked
 	}
-	prefix, ok := strings.CutSuffix(t, a)
+	if s != "" {
+		return audiobookSeriesPrefixedTitle(title, album, s, position)
+	}
+	// Without a series tag, text ending in a number before the album is
+	// taken for a series prefix.
+	if _, ok := audiobookNumberedPrefix(t, a); ok {
+		return album
+	}
+	return title
+}
+
+// audiobookNumberedPrefix returns what precedes album in title when that is
+// text ending in a series number and a separator: "Saga Name 2" for
+// "Saga Name 2 - Book" and album "Book". Both are title keys.
+func audiobookNumberedPrefix(title, album string) (string, bool) {
+	prefix, ok := strings.CutSuffix(title, album)
 	if !ok {
-		return title
+		return "", false
 	}
 	loc := audiobookPrefixSeparatorRE.FindStringIndex(prefix)
 	if loc == nil {
-		return title
+		return "", false
 	}
 	prefix = strings.TrimSpace(prefix[:loc[0]])
-	// With a series tag only that series counts as a prefix, so a number in
-	// the work's own name ("Apollo 13 - ...") is kept.
-	if s == "" {
-		if audiobookNumberedPrefixRE.MatchString(prefix) {
+	return prefix, audiobookNumberedPrefixRE.MatchString(prefix)
+}
+
+// audiobookSeriesPrefixedTitle is audiobookTagTitle for a title that may sit
+// behind its series tag: "Saga 2 - Book". series is the series tag's key and
+// position the book's position tag. With a series tag only that series
+// counts as a prefix, so a number in the work's own name ("Apollo 13 - ...")
+// is kept. A numbered prefix that names the series among other words ("The
+// Saga 2" for the series "Saga") counts when the album follows it. What
+// follows the series prefix is compared with the album:
+//
+//   - the album itself ("Book"), whatever its punctuation: the album wins;
+//   - the album and then the series or the album again ("Book Saga"), which
+//     some taggers append: the album wins;
+//   - the start of an album that goes on to name the series or a position
+//     ("Book: Saga 2", "Book, Part 2"): the title without its prefix wins;
+//   - the start of an album that adds a subtitle ("Book: A Subtitle"): the
+//     album wins;
+//   - anything else, or no album: the title stays, unless its prefix carries
+//     the position tag's number, in digits or as a Roman numeral. A tagger
+//     composed that title from the two tags, so the title without its prefix
+//     wins whatever the album says.
+func audiobookSeriesPrefixedTitle(title, album, series, position string) string {
+	stripped := stripNarratorSuffix(title)
+	t, a := strings.ToLower(stripped), audiobookTitleKey(album)
+	afterSeries, ok := strings.CutPrefix(t, series)
+	var m []string
+	if ok {
+		m = audiobookSeriesPrefixTailRE.FindStringSubmatch(afterSeries)
+	}
+	if m == nil {
+		if prefix, ok := audiobookNumberedPrefix(t, a); ok && a != "" && containsTitleWords(prefix, series) {
 			return album
 		}
-		return title
-	}
-	rest, ok := strings.CutPrefix(prefix, s)
-	if !ok {
-		return title
-	}
-	m := audiobookSeriesPositionRE.FindStringSubmatch(rest)
-	if m == nil {
 		return title
 	}
 	// The position regexp takes any run of Roman numeral letters; only a
 	// well-formed numeral is a position ("Saga Civil" is not).
-	if position := m[1]; position != "" && !strings.ContainsAny(position, "0123456789") && parseRomanNumeral(position) == 0 {
+	if written := m[1]; written != "" && !strings.ContainsAny(written, "0123456789") && parseRomanNumeral(written) == 0 {
 		return title
 	}
-	return album
+	rest := afterSeries[len(m[0]):]
+	if rest == "" {
+		return title
+	}
+	// unprefixed is the title without its prefix in the tag's own spelling.
+	// Lower-casing can change a string's length; the prefix is cut off only
+	// when the two spellings still line up.
+	unprefixed := title
+	if own := stripped[len(stripped)-min(len(rest), len(stripped)):]; strings.ToLower(own) == rest {
+		unprefixed = strings.TrimSpace(own)
+	}
+	kept := title
+	if sameSeriesPosition(m[1], position) {
+		kept = unprefixed
+	}
+	if a == "" {
+		return kept
+	}
+	// Words are compared here, so punctuation the title dropped does not
+	// hide an album it otherwise repeats.
+	restWords, albumWords := titleWords(rest), titleWords(a)
+	if rest == a || albumWords != "" && (restWords == albumWords ||
+		restWords == albumWords+" "+titleWords(series) || restWords == albumWords+" "+albumWords) {
+		return album
+	}
+	if extra, ok := cutTitleWordsPrefix(a, rest); ok {
+		switch {
+		case containsTitleWords(extra, series) || endsInSeriesPosition(extra):
+			return unprefixed
+		case audiobookSubtitleSeparatorRE.MatchString(extra):
+			return album
+		}
+	}
+	return kept
+}
+
+// sameSeriesPosition reports whether written, the position in a title's
+// series prefix, is the position tag's number.
+func sameSeriesPosition(written, tag string) bool {
+	w, okW := seriesPositionNumber(written)
+	p, okP := seriesPositionNumber(tag)
+	return okW && okP && w == p
+}
+
+// audiobookSeriesPositionRE matches a whole series position, with the marker
+// a grouping tag may carry: "2", "2.5", "#2", "Book 2", "Vol. III".
+var audiobookSeriesPositionRE = regexp.MustCompile(`(?i)^(?:#|(?:book|bk|volume|vol|number|no|part|pt)\b\.?\s*#?)?\s*(?:(\d+(?:\.\d+)?)|([ivxlc]+))$`)
+
+// seriesPositionNumber reads a series position as a number, from digits or a
+// well-formed Roman numeral.
+func seriesPositionNumber(raw string) (float64, bool) {
+	m := audiobookSeriesPositionRE.FindStringSubmatch(strings.TrimSpace(raw))
+	if m == nil {
+		return 0, false
+	}
+	if m[1] != "" {
+		n, err := strconv.ParseFloat(m[1], 64)
+		return n, err == nil
+	}
+	n := parseRomanNumeral(m[2])
+	return float64(n), n != 0
+}
+
+// cutTitleWordsPrefix cuts prefix off text when text continues past it at a
+// word boundary, or ends there. extra is what follows.
+func cutTitleWordsPrefix(text, prefix string) (extra string, ok bool) {
+	extra, ok = strings.CutPrefix(text, prefix)
+	if !ok || prefix == "" {
+		return "", false
+	}
+	if r, _ := utf8.DecodeRuneInString(extra); extra != "" && (unicode.IsLetter(r) || unicode.IsNumber(r)) {
+		return "", false
+	}
+	return extra, true
 }
 
 // audiobookTagNarrators picks the narrators from the narrator sources as the
