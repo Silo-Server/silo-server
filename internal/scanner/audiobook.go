@@ -304,7 +304,7 @@ func (b *parsedAudiobook) populateFromTags(tags map[string]string) {
 			b.SeriesPosition = groupPosition
 		}
 	}
-	b.Title = audiobookTagTitle(tags["title"], tags["album"], b.Series)
+	b.Title = audiobookTagTitle(tags["title"], tags["album"], b.Series, b.SeriesPosition)
 	b.ASIN = firstNonEmpty(tags["asin"], tags["audible_asin"], tags["com.audible.asin"])
 	// ffprobe reports an M4B's long description (ldes) as "synopsis" and the
 	// short one (desc, at most 255 characters) as "description".

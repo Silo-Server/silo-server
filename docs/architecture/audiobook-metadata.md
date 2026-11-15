@@ -73,7 +73,16 @@ write are in `internal/scanner/audiobook_tags.go`:
   The prefix, followed by `-` or `:`, is the book's series tag with an
   optional position; a book without a series tag accepts any text ending in a
   number. A "subtitle" that names the series or ends in a position is not
-  one. Otherwise `title` stays, because a single file's `album` may name its
+  one. Behind a series tag's prefix the tags may agree less exactly. `album`
+  also wins when it differs from the rest of `title` only in punctuation,
+  when `title` repeats the series or `album` after it
+  (`Saga Name 2 - Book Title Saga Name`), or when it adds a subtitle. When
+  `album` instead goes on to name the series or a position
+  (`Book Title: Saga Name 2`, `Book Title, Part 2`), `title` without its
+  prefix wins. A numbered prefix that names the series among other words
+  (`The Saga Name 2`) counts when `album` follows it. A prefix carrying the
+  series position tag's number was composed from the two tags, so `title`
+  without it wins whatever `album` says. Otherwise `title` stays, because a single file's `album` may name its
   series or a collection. A multi-file book whose part titles name the parts
   uses `album`.
 - Narrators: an explicit narrator tag (`narrator`, the MP4 `©nrt` atom, or
