@@ -3,6 +3,7 @@ package catalog
 import (
 	"context"
 	"fmt"
+	"reflect"
 	"slices"
 	"testing"
 	"time"
@@ -15,7 +16,7 @@ import (
 type audiobookGroupsFixture struct {
 	pool                   *pgxpool.Pool
 	library, other, userID int
-	viewer                 string
+	prefix, viewer         string
 }
 
 func (f audiobookGroupsFixture) list(t *testing.T, q AudiobookGroupsQuery, filter AccessFilter) AudiobookGroupsResult {
@@ -44,7 +45,7 @@ func seedAudiobookGroups(t *testing.T) audiobookGroupsFixture {
 	pool := newBatchEquivTestPool(t)
 	ctx := t.Context()
 	prefix := fmt.Sprintf("abgroups-%d", time.Now().UnixNano())
-	f := audiobookGroupsFixture{pool: pool, viewer: prefix + "-viewer"}
+	f := audiobookGroupsFixture{pool: pool, prefix: prefix, viewer: prefix + "-viewer"}
 	for _, row := range []struct {
 		name string
 		id   *int
@@ -149,15 +150,73 @@ func audiobookCovers(names ...string) []string {
 // order (books without a poster skipped, a sort-title tie broken by content
 // ID), progress from the requesting profile only, count-sorted cursor pages
 // across an item-count tie, the search prefix, and library access when the
-// viewer may not see the browsed library itself. Set SILO_TEST_DATABASE_URL
-// to a migrated disposable database; every inserted row is removed on
-// completion.
+// viewer may not see the browsed library itself. It runs every check on the
+// live query, before audiobook_group_stats holds the library, and again on
+// the view once refreshed, so the two sources cannot drift apart. Set
+// SILO_TEST_DATABASE_URL to a migrated disposable database; every inserted
+// row is removed on completion.
 func TestAudiobookGroupsDB(t *testing.T) {
 	f := seedAudiobookGroups(t)
+	t.Run("live", func(t *testing.T) { checkAudiobookGroups(t, f, false) })
+	if _, err := RefreshAudiobookGroupStats(t.Context(), f.pool, 0); err != nil {
+		t.Fatal(err)
+	}
+	t.Run("precomputed", func(t *testing.T) { checkAudiobookGroups(t, f, true) })
+
+	// A book that leaves the library stays in the view until the next
+	// refresh, so a viewer with library limits must not read the view: here
+	// Ancillary Justice remains only in a library the viewer may not see.
+	t.Run("book left the library since the refresh", func(t *testing.T) {
+		batchEquivExec(t, f.pool, `DELETE FROM media_item_libraries WHERE content_id = $1 AND media_folder_id = $2`, f.prefix+"-justice", f.library)
+		disabled, allowed := f.access(), f.access()
+		disabled.DisabledLibraryIDs = []int{f.other}
+		allowed.AllowedLibraryIDs = []int{f.library}
+		for _, filter := range []AccessFilter{disabled, allowed} {
+			result := f.list(t, AudiobookGroupsQuery{GroupBy: AudiobookGroupByAuthor, SearchPrefix: "ann", CursorPaging: true}, filter)
+			if len(result.Groups) != 1 || result.Groups[0].ItemCount != 1 || slices.Contains(result.Groups[0].PosterPaths, "justice.jpg") {
+				t.Fatalf("Leckie groups %+v for access %+v, want one with only Ancillary Sword", result.Groups, filter)
+			}
+		}
+	})
+}
+
+// checkAudiobookGroups runs the browse checks. precomputed says the view
+// holds the library, so it answers each viewer whose access hides none of
+// the library's books.
+func checkAudiobookGroups(t *testing.T, f audiobookGroupsFixture, precomputed bool) {
+	list := func(t *testing.T, q AudiobookGroupsQuery, filter AccessFilter, viewSees bool) AudiobookGroupsResult {
+		t.Helper()
+		q.CursorPaging = true
+		q.LibraryID = f.library
+		_, served, err := listAudiobookGroupsFromStats(t.Context(), f.pool, q, filter, audiobookGroupsPageCap)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if want := precomputed && viewSees; served != want {
+			t.Fatalf("view answered %v, want %v", served, want)
+		}
+		result := f.list(t, q, filter)
+		if served {
+			// A viewer with a long progress history has the page's books
+			// looked up one by one; the answer must not change.
+			plan, err := buildAudiobookGroupStatsSQL(q, filter, audiobookGroupsPageCap, true)
+			if err != nil {
+				t.Fatal(err)
+			}
+			probed, err := runAudiobookGroupsPlan(t.Context(), f.pool, q, plan)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !reflect.DeepEqual(probed, result) {
+				t.Fatalf("progress looked up per book gave %+v, want %+v", probed, result)
+			}
+		}
+		return result
+	}
 
 	t.Run("count-sorted cursor pages", func(t *testing.T) {
-		q := AudiobookGroupsQuery{GroupBy: AudiobookGroupByAuthor, Sort: "count", Limit: 2, IncludeTotal: true, CursorPaging: true}
-		first := f.list(t, q, f.access())
+		q := AudiobookGroupsQuery{GroupBy: AudiobookGroupByAuthor, Sort: "count", Limit: 2, IncludeTotal: true}
+		first := list(t, q, f.access(), true)
 		if got, want := audiobookGroupKeys(first.Groups), []string{"stephen king", "ann leckie"}; !slices.Equal(got, want) || !first.HasMore || first.Total != 4 {
 			t.Fatalf("first page %v (more %v, total %d), want %v with more of 4", got, first.HasMore, first.Total, want)
 		}
@@ -170,14 +229,14 @@ func TestAudiobookGroupsDB(t *testing.T) {
 		}
 
 		q.After = first.Next
-		second := f.list(t, q, f.access())
+		second := list(t, q, f.access(), true)
 		if got, want := audiobookGroupKeys(second.Groups), []string{"ben aaronovitch", "zed author"}; !slices.Equal(got, want) || second.HasMore || second.Total != 4 {
 			t.Fatalf("second page %v (more %v, total %d), want %v with no more of 4", got, second.HasMore, second.Total, want)
 		}
 	})
 
 	t.Run("series cover order", func(t *testing.T) {
-		result := f.list(t, AudiobookGroupsQuery{GroupBy: AudiobookGroupBySeries, IncludeTotal: true}, f.access())
+		result := list(t, AudiobookGroupsQuery{GroupBy: AudiobookGroupBySeries, IncludeTotal: true}, f.access(), true)
 		if len(result.Groups) != 1 || result.Groups[0].ItemCount != 5 {
 			t.Fatalf("series groups %+v, want The Dark Tower with 5 books", result.Groups)
 		}
@@ -187,7 +246,7 @@ func TestAudiobookGroupsDB(t *testing.T) {
 	})
 
 	t.Run("search prefix", func(t *testing.T) {
-		result := f.list(t, AudiobookGroupsQuery{GroupBy: AudiobookGroupByAuthor, SearchPrefix: "ST", IncludeTotal: true}, f.access())
+		result := list(t, AudiobookGroupsQuery{GroupBy: AudiobookGroupByAuthor, SearchPrefix: "ST", IncludeTotal: true}, f.access(), true)
 		if len(result.Groups) != 1 || result.Groups[0].Name != "Stephen King" || result.Total != 1 {
 			t.Fatalf("search found %+v (total %d), want only Stephen King", result.Groups, result.Total)
 		}
@@ -206,7 +265,8 @@ func TestAudiobookGroupsDB(t *testing.T) {
 		t.Run("library access/"+c.name, func(t *testing.T) {
 			filter := f.access()
 			filter.AllowedLibraryIDs, filter.DisabledLibraryIDs = c.allowed, c.denied
-			result := f.list(t, AudiobookGroupsQuery{GroupBy: AudiobookGroupByAuthor, SearchPrefix: "ann"}, filter)
+			// The view never answers a viewer with library limits.
+			result := list(t, AudiobookGroupsQuery{GroupBy: AudiobookGroupByAuthor, SearchPrefix: "ann"}, filter, false)
 			if len(result.Groups) != 1 || result.Groups[0].ItemCount != c.want {
 				t.Fatalf("Leckie groups %+v, want one with %d books", result.Groups, c.want)
 			}
