@@ -114,6 +114,21 @@ var audiobookRuleCases = []struct {
 		wantID:  "N84",
 	},
 	{
+		name: "a number in the series name does not hide the trailing volume",
+		want: "The 39 Clues 2",
+		results: []SearchResult{
+			bookResult("The 39 Clues, Book 1", "C1", 2008),
+			bookResult("The 39 Clues", "C0", 2008),
+			bookResult("One False Note: The 39 Clues, Book 2", "C2", 2008),
+		},
+		wantID: "C2",
+	},
+	{
+		name:    "Area 51 2 is not Area 51, Book 1",
+		want:    "Area 51 2",
+		results: []SearchResult{bookResult("Area 51, Book 1", "A1", 1997)},
+	},
+	{
 		name:    "a volume range is a collection",
 		want:    "The Hunger Games",
 		results: []SearchResult{bookResult("The Hunger Games Trilogy: Books 1-3", "T1", 2010)},
@@ -265,6 +280,8 @@ func TestVolumesContradict(t *testing.T) {
 		{"Catch-22", "Catch-22, Book 1", false},
 		{"Fahrenheit 451", "Fahrenheit 451, Book 1", false},
 		{"1984", "1984, Book 1", false},
+		{"The 39 Clues 2", "The 39 Clues, Book 1", true},
+		{"Area 51 2", "Area 51, Book 1", true},
 	}
 	for _, tt := range tests {
 		if got := VolumesContradict(tt.want, tt.record); got != tt.contradicts {

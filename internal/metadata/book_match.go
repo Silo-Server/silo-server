@@ -254,16 +254,35 @@ func VolumesContradict(want, record string) bool {
 // "Slaughterhouse-Five", "Catch-22" or "Fahrenheit 451" the number is part of
 // the title, and the record "Slaughterhouse-Five, Book 1" repeats it, while
 // "Dungeon Crawler Carl" lacks the 2 of "Dungeon Crawler Carl 2".
+//
+// The bare number read is the last one, not the first: in "The 39 Clues 2"
+// or "Area 51 2" the series name carries a number of its own, and the volume
+// is the trailing 2. A record that repeats the item's trailing number and
+// also states a different explicit volume ("X 2" against "X 2, Book 1") is
+// read as "Catch-22, Book 1" is, and accepted; no real title of that shape is
+// known, while famous numeric titles are common.
 func volumeAgainst(title, other string) (volumeIdentity, bool) {
 	v, ok, bare := titleVolumeKind(title)
 	if !ok || !bare {
 		return v, ok
 	}
-	n := strconv.Itoa(v.first)
-	if slices.Contains(strings.Fields(normaliseTitle(other)), n) {
+	n, found := lastBareNumber(title)
+	if !found || slices.Contains(strings.Fields(normaliseTitle(other)), strconv.Itoa(n)) {
 		return volumeIdentity{}, false
 	}
-	return v, true
+	return volumeIdentity{first: n, last: n}, true
+}
+
+// lastBareNumber is the last word of title's normalised form that reads as a
+// volume number (1 to 999; years date an edition, not a volume).
+func lastBareNumber(title string) (int, bool) {
+	fields := strings.Fields(normaliseTitle(title))
+	for i := len(fields) - 1; i >= 0; i-- {
+		if n, err := strconv.Atoi(fields[i]); err == nil && n > 0 && n <= 999 {
+			return n, true
+		}
+	}
+	return 0, false
 }
 
 // TitleContradicts reports whether want and a record's titles share no
