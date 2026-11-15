@@ -88,6 +88,32 @@ var audiobookRuleCases = []struct {
 		results: []SearchResult{bookResult("Guards! Guards! (Abridged)", "A1", 1995), bookResult("Guards! Guards! (Dramatized)", "D1", 2001)},
 	},
 	{
+		name:    "a number in the title is not a volume: Slaughterhouse-Five",
+		want:    "Slaughterhouse-Five",
+		results: []SearchResult{bookResult("Slaughterhouse-Five, Book 1", "SF", 2000)},
+		wantID:  "SF",
+	},
+	{
+		name:    "a number in the title is not a volume: Catch-22",
+		want:    "Catch-22",
+		results: []SearchResult{bookResult("Catch-22, Book 1", "C22", 2000)},
+		wantID:  "C22",
+	},
+	{
+		name:    "a number in the title is not a volume: Fahrenheit 451",
+		want:    "Fahrenheit 451",
+		results: []SearchResult{bookResult("Fahrenheit 451, Book 1", "F451", 2000)},
+		wantID:  "F451",
+	},
+	{
+		// "1984, Book 1" itself scores at the threshold (one shared word of
+		// three), as on main; VolumesContradict covers its volume.
+		name:    "a number in the title is not a volume: 1984",
+		want:    "1984",
+		results: []SearchResult{bookResult("1984", "N84", 2000), bookResult("1984, Book 2", "N2", 2000)},
+		wantID:  "N84",
+	},
+	{
 		name:    "a volume range is a collection",
 		want:    "The Hunger Games",
 		results: []SearchResult{bookResult("The Hunger Games Trilogy: Books 1-3", "T1", 2010)},
@@ -224,5 +250,25 @@ func TestCreditsAgree(t *testing.T) {
 				t.Fatalf("CreditsAgree = %v, want %v", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestVolumesContradict(t *testing.T) {
+	tests := []struct {
+		want, record string
+		contradicts  bool
+	}{
+		{"Dungeon Crawler Carl 2", "Dungeon Crawler Carl, Book 1", true},
+		{"Dungeon Crawler Carl 2", "Carl's Doomsday Scenario: Dungeon Crawler Carl, Book 2", false},
+		{"Guards! Guards!: Discworld, Book 8", "Guards! Guards!", false},
+		{"Slaughterhouse-Five", "Slaughterhouse-Five, Book 1", false},
+		{"Catch-22", "Catch-22, Book 1", false},
+		{"Fahrenheit 451", "Fahrenheit 451, Book 1", false},
+		{"1984", "1984, Book 1", false},
+	}
+	for _, tt := range tests {
+		if got := VolumesContradict(tt.want, tt.record); got != tt.contradicts {
+			t.Errorf("VolumesContradict(%q, %q) = %v, want %v", tt.want, tt.record, got, tt.contradicts)
+		}
 	}
 }

@@ -88,13 +88,10 @@ func selectBookMatch(
 	results []SearchResult,
 ) (bestMatchSelection, bool) {
 	w := bookWant{title: want, year: wantYear, existing: existing, noAuthor: noAuthor, threshold: matchThreshold()}
+	// Volumes are compared per candidate (volumeAgainst), so the score itself
+	// carries no volume rule here.
 	w.prepared = preparedWantedTitle{normalised: normaliseTitle(want)}
-	w.prepared.volume, w.prepared.hasVolume = titleVolume(want)
-	w.volume, w.hasVolume = w.prepared.volume, w.prepared.hasVolume
-	if !w.hasVolume && rules.SeriesPosition > 0 {
-		w.volume = volumeIdentity{first: rules.SeriesPosition, last: rules.SeriesPosition}
-		w.hasVolume = true
-	}
+	w.seriesPosition = rules.SeriesPosition
 
 	var credible []bookCandidate
 	for _, r := range results {
@@ -129,14 +126,13 @@ func selectBookMatch(
 
 // bookWant is what the item asks of a candidate.
 type bookWant struct {
-	title     string
-	prepared  preparedWantedTitle
-	volume    volumeIdentity // from the title, else the series position (a tiebreak only)
-	hasVolume bool
-	year      int
-	existing  map[string]string
-	noAuthor  bool
-	threshold float64
+	title          string
+	prepared       preparedWantedTitle
+	seriesPosition int // a tiebreak only; the title's own volume rules candidates out
+	year           int
+	existing       map[string]string
+	noAuthor       bool
+	threshold      float64
 }
 
 // evaluate applies selectBookMatch's rules to one result. ok is false when
@@ -158,19 +154,22 @@ func (w bookWant) evaluate(r SearchResult) (bookCandidate, bool) {
 	}
 
 	sameVolume := false
-	cv, cok := titleVolume(name)
+	wv, titleVol := volumeAgainst(w.title, name)
+	cv, cok := volumeAgainst(name, w.title)
 	switch {
-	case cok && cv.first != cv.last && (!w.prepared.hasVolume || cv != w.volume):
+	case cok && cv.first != cv.last && (!titleVol || cv != wv):
 		// A volume range ("Books 1-3") is a collection, not this book, unless
 		// the item's title names the same range.
 		return bookCandidate{}, false
-	case w.prepared.hasVolume && cok && cv != w.volume:
-		// Only a volume the title states rules a candidate out; a tagged
-		// series position may count in another series' numbering.
+	case titleVol && cok && cv != wv:
 		return bookCandidate{}, false
-	case w.hasVolume && cok:
-		sameVolume = cv == w.volume
-	case w.prepared.hasVolume && !cok && coversAllButVolume(w.title, w.volume, name):
+	case titleVol && cok:
+		sameVolume = true
+	case !titleVol && cok && w.seriesPosition > 0:
+		// A tagged series position may count in another series' numbering,
+		// so it only breaks ties.
+		sameVolume = cv == volumeIdentity{first: w.seriesPosition, last: w.seriesPosition}
+	case titleVol && !cok && coversAllButVolume(w.title, wv, name):
 		return bookCandidate{}, false
 	}
 
@@ -238,14 +237,33 @@ func resultSharesTitleWord(want string, r SearchResult) bool {
 // VolumesContradict reports whether want's title and a record's primary title
 // both state a volume and the volumes differ: "Dungeon Crawler Carl 2" against
 // "Dungeon Crawler Carl, Book 1". A title that states none contradicts
-// nothing.
+// nothing, and a number both titles share is part of the title
+// (volumeAgainst).
 func VolumesContradict(want, record string) bool {
-	wv, wok := titleVolume(want)
-	if !wok || strings.TrimSpace(record) == "" {
+	if strings.TrimSpace(record) == "" {
 		return false
 	}
-	rv, rok := titleVolume(record)
-	return rok && rv != wv
+	wv, wok := volumeAgainst(want, record)
+	rv, rok := volumeAgainst(record, want)
+	return wok && rok && rv != wv
+}
+
+// volumeAgainst is the volume title states when compared with other. An
+// explicit marker ("Book 2", "Vol. 2", "#2", "Part 2", a range) always counts.
+// A bare number counts only when other does not have it too: in
+// "Slaughterhouse-Five", "Catch-22" or "Fahrenheit 451" the number is part of
+// the title, and the record "Slaughterhouse-Five, Book 1" repeats it, while
+// "Dungeon Crawler Carl" lacks the 2 of "Dungeon Crawler Carl 2".
+func volumeAgainst(title, other string) (volumeIdentity, bool) {
+	v, ok, bare := titleVolumeKind(title)
+	if !ok || !bare {
+		return v, ok
+	}
+	n := strconv.Itoa(v.first)
+	if slices.Contains(strings.Fields(normaliseTitle(other)), n) {
+		return volumeIdentity{}, false
+	}
+	return v, true
 }
 
 // TitleContradicts reports whether want and a record's titles share no
