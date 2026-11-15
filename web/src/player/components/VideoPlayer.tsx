@@ -18,6 +18,7 @@ import type { CSSProperties } from "react";
 import type { ParsedCue } from "../utils/parseVTT";
 import { matchSubtitleTrackAcrossVersions, resolveSubtitleAutoSelect } from "../utils/subtitleSort";
 import type HlsType from "hls.js";
+import { Play } from "lucide-react";
 import { PlayerControls } from "./PlayerControls";
 import { PlaybackInfoOverlay } from "./PlaybackInfoOverlay";
 import { PlaybackNoticeOverlay, PlaybackNoticeStack } from "./PlaybackNoticeOverlay";
@@ -76,6 +77,7 @@ import {
 import { resolveVersionAudioLanguage } from "../utils/effectiveAudioLanguage";
 import { resolveEffectiveVersion } from "../utils/resolveEffectiveVersion";
 import { StartupGuard } from "../utils/startupGuard";
+import { SegmentRetryBudget, segmentRetryDelayMs } from "../utils/segmentRetry";
 import { isTimeBuffered } from "../utils/bufferPolicy";
 import { isSafariBrowserV3, resolveHLSEngineV3 } from "../utils/hlsEngine";
 import { isFirefoxUserAgent } from "../utils/browser";
@@ -458,6 +460,11 @@ const PROGRESSIVE_REMUX_IDLE_REOPEN_MS = 60_000;
 // arrives. The budget is small so a genuinely blocked autoplay settles into a
 // paused player with working controls instead of retrying forever.
 const AUTOPLAY_RETRY_DELAY_MS = 400;
+/**
+ * The tap-to-play overlay's label. It is a module constant like the room
+ * messages below so the player's JSX carries no untranslated literal.
+ */
+const AUTOPLAY_BLOCKED_LABEL = "Tap to play";
 // Mouse clicks on the video surface wait this long for a second click
 // (fullscreen toggle) before toggling play/pause.
 const DOUBLE_CLICK_WINDOW_MS = 250;
@@ -517,6 +524,49 @@ function isAutoplayPolicyRejection(error: unknown): boolean {
     : typeof error === "object" &&
         error !== null &&
         (error as { name?: unknown }).name === "NotAllowedError";
+}
+
+/**
+ * Whether this page has ever seen a user gesture. Undefined where the API is
+ * missing, so callers act only on an explicit `false`.
+ */
+function hasHadUserActivation(): boolean | undefined {
+  const activation = (navigator as Navigator & { userActivation?: { hasBeenActive?: boolean } })
+    .userActivation;
+  return typeof activation?.hasBeenActive === "boolean" ? activation.hasBeenActive : undefined;
+}
+
+/**
+ * A browser that has never seen a gesture will not start an unmuted element,
+ * and waiting for readiness does not change that: `play()` is refused, or never
+ * called at all when the readiness event the player waits for has already
+ * passed. An element paused with media buffered and no gesture in its history
+ * is that dead end — the loading cover stays up over a player that would start
+ * on a tap.
+ */
+function isAutoplayBlockedByPolicy(media: HTMLMediaElement): boolean {
+  if (hasHadUserActivation() !== false) return false;
+  if (!media.paused || media.ended) return false;
+  if (media.readyState < HTMLMediaElement.HAVE_FUTURE_DATA) return false;
+  return bufferedEndSeconds(media) > 0;
+}
+
+/**
+ * The fragment an hls.js load failure belongs to, or null when it names no
+ * fragment (the playlist or manifest itself failed). The media sequence number
+ * identifies the segment across recoveries, including a `loadSource` reload
+ * that restarts the playlist from its first segment.
+ */
+function failedFragmentKey(data: {
+  frag?: { sn?: number | string; url?: string } | null;
+  url?: string;
+}): string | null {
+  const frag = data.frag;
+  // hls.js types `sn` as a number for media fragments and the literal
+  // "initSegment" for a fragment's initialization section.
+  if (frag?.sn !== undefined && frag.sn !== null) return `frag:${frag.sn}`;
+  if (frag?.url) return `frag:${frag.url}`;
+  return null;
 }
 
 function readNumericPayload(
@@ -880,6 +930,10 @@ export function VideoPlayer({
   const [buffering, setBuffering] = useState(false);
   const bufferingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [awaitingFirstFrame, setAwaitingFirstFrame] = useState(true);
+  // The browser refused to start playback because this page has no user
+  // gesture yet. The player cannot talk its way past that: the viewer has to
+  // tap, so it shows an overlay that starts the stream.
+  const [autoplayBlocked, setAutoplayBlocked] = useState(false);
   // The session whose video has been on screen. A transport a replan loads
   // into it (a seek outside the buffer, a quality or track change) waits for
   // its first frame behind the buffering spinner, with the controls usable;
@@ -1500,6 +1554,12 @@ export function VideoPlayer({
   // room says so, not when its media is ready.
   const roomPlaybackActiveRef = useRef(roomPlaybackActive);
   roomPlaybackActiveRef.current = roomPlaybackActive;
+  // Read by the element's own listeners, which do not restart with a prop.
+  const shouldAutoPlayRef = useRef(shouldAutoPlay);
+  shouldAutoPlayRef.current = shouldAutoPlay;
+  // The transport's settle-paused path, reached from the element's listeners so
+  // an autoplay the browser quietly never ran still ends in a usable player.
+  const settlePausedRef = useRef<() => void>(() => {});
   // Read by timers that must use the newest clock estimate without restarting.
   const serverTimeOffsetRef = useRef(watchTogether.serverTimeOffsetMs);
   serverTimeOffsetRef.current = watchTogether.serverTimeOffsetMs;
@@ -3062,9 +3122,10 @@ export function VideoPlayer({
     let hls: HlsType | null = null;
     let engineSession: BrowserEngineSession | null = null;
     let destroyed = false;
-    // Set when startup recovery loads a failed manifest again, so the reload's
-    // own failure is not swallowed by the recovery cooldown.
-    let manifestReloadPending = false;
+    // Counts this transport's failed loads, so a segment that keeps failing
+    // stops being requested and a passing hiccup is still retried.
+    const segmentRetry = new SegmentRetryBudget();
+    let recoveryTimer: ReturnType<typeof setTimeout> | null = null;
     let playbackStarted = false;
     let autoplayInFlight = false;
     let autoplayAttempts = 0;
@@ -3085,6 +3146,7 @@ export function VideoPlayer({
     mediaRecoveryAttemptsRef.current = 0;
     setError(null);
     setAwaitingFirstFrame(true);
+    setAutoplayBlocked(false);
 
     const clearAutoplayRetry = () => {
       if (autoplayRetryTimer === null) return;
@@ -3142,6 +3204,7 @@ export function VideoPlayer({
       pausedSourceLoading = true;
       endHoldOnceLoaded();
     };
+    settlePausedRef.current = settlePaused;
 
     const attemptAutoplayWhenReady = () => {
       if (destroyed || playbackStarted || autoplayInFlight) return;
@@ -3198,6 +3261,15 @@ export function VideoPlayer({
             // room's own play is refused.
             settlePaused();
             offerRoomJoinRef.current?.();
+            return;
+          }
+          if (isAutoplayPolicyRejection(error)) {
+            // The browser wants a gesture, which no retry can supply. Settle
+            // the player (so no startup timeout blames the route) and offer
+            // the only thing that can start it: a tap.
+            console.warn("[player] autoplay blocked; waiting for a tap to start", error);
+            settlePaused();
+            setAutoplayBlocked(true);
             return;
           }
           if (autoplayAttempts < MAX_AUTOPLAY_ATTEMPTS) {
@@ -3366,34 +3438,71 @@ export function VideoPlayer({
               }
 
               const now = Date.now();
-              // A reloaded manifest can fail again within the cooldown (a
-              // parse error does at once); that failure must still reach the
-              // startup guard, or the player waits for the startup timeout.
-              const reloadFailed = manifestReloadPending;
-              manifestReloadPending = false;
-              if (!reloadFailed && now - lastRecoveryRef.current < 3000) return;
-              lastRecoveryRef.current = now;
-
               if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
-                if (startupGuardRef.current?.handleFatalNetworkError() ?? true) {
-                  console.warn("[hls.js] Fatal network error, attempting recovery...");
+                // One reload or restart in flight at a time. hls.js stops
+                // loading after a fatal error, so anything it reports before
+                // the scheduled retry names the failure already being handled.
+                if (recoveryTimer !== null) return;
+                if (!(startupGuardRef.current?.handleFatalNetworkError() ?? true)) {
+                  console.error("[hls.js] Fatal startup network error, giving up");
+                  return;
+                }
+                // Repeated failure on one segment is not a hiccup: the budget
+                // stops the retries and lets the route fail, which replans
+                // instead of asking the segment layer for the same bytes again.
+                const segmentKey = failedFragmentKey(data);
+                const recoveryAttempt = segmentRetry.recordFailure(segmentKey);
+                if (recoveryAttempt === null) {
+                  console.error(
+                    "[hls.js] Fatal network error repeated past its retry budget, giving up",
+                    {
+                      segment: segmentKey,
+                      details: data.details,
+                    },
+                  );
+                  if (
+                    !reportCurrentPlanFailure({
+                      classification: "network_error",
+                      message: `HLS failed repeatedly on ${segmentKey ?? "its playlist"}.`,
+                    })
+                  ) {
+                    setError("Playback failed. Please try again.");
+                  }
+                  hls?.destroy();
+                  hlsRef.current = null;
+                  return;
+                }
+                // The retry is delayed with backoff: a source that cannot
+                // serve a segment must not be asked for it at the rate hls.js
+                // retries inside one load.
+                lastRecoveryRef.current = now;
+                const reloadManifest =
+                  data.details === Hls.ErrorDetails.MANIFEST_LOAD_ERROR ||
+                  data.details === Hls.ErrorDetails.MANIFEST_LOAD_TIMEOUT ||
+                  data.details === Hls.ErrorDetails.MANIFEST_PARSING_ERROR;
+                const delay = segmentRetryDelayMs(recoveryAttempt);
+                console.warn(
+                  `[hls.js] Fatal network error, retrying in ${delay}ms (attempt ${recoveryAttempt + 1})`,
+                );
+                recoveryTimer = setTimeout(() => {
+                  recoveryTimer = null;
+                  if (destroyed || startupGuardRef.current?.hasFailed()) return;
                   // startLoad() never requests a manifest that failed to load,
                   // so it would leave the player waiting for the startup
                   // timeout. Load the source again instead.
-                  if (
-                    data.details === Hls.ErrorDetails.MANIFEST_LOAD_ERROR ||
-                    data.details === Hls.ErrorDetails.MANIFEST_LOAD_TIMEOUT ||
-                    data.details === Hls.ErrorDetails.MANIFEST_PARSING_ERROR
-                  ) {
-                    manifestReloadPending = !streamPlayedRef.current;
-                    hls?.loadSource(effectiveStreamUrl);
-                  } else {
-                    hls?.startLoad();
-                  }
-                } else {
-                  console.error("[hls.js] Fatal startup network error, giving up");
-                }
-              } else if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
+                  if (reloadManifest) hls?.loadSource(effectiveStreamUrl);
+                  else hls?.startLoad();
+                }, delay);
+                return;
+              }
+
+              // A reloaded manifest can fail again within the cooldown (a
+              // parse error does at once); that failure must still reach the
+              // startup guard, or the player waits for the startup timeout.
+              if (now - lastRecoveryRef.current < 3000) return;
+              lastRecoveryRef.current = now;
+
+              if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
                 if (mediaRecoveryAttemptsRef.current === 0) {
                   console.warn("[hls.js] Fatal media error, attempting recovery...");
                   hls?.recoverMediaError();
@@ -3453,6 +3562,9 @@ export function VideoPlayer({
             });
             hls.on(Hls.Events.FRAG_LOADED, (_event, { frag }) => {
               if (destroyed || frag.type === "subtitle") return;
+              // The transport delivered a fragment, so failures since the last
+              // one were hiccups rather than a segment it cannot serve.
+              segmentRetry.reset();
               const { loaded, loading } = frag.stats;
               meter.received(frag.stats, loaded, loading.first, loading.end);
             });
@@ -3635,6 +3747,11 @@ export function VideoPlayer({
     return () => {
       destroyed = true;
       cleanupStartupListeners();
+      if (recoveryTimer !== null) {
+        clearTimeout(recoveryTimer);
+        recoveryTimer = null;
+      }
+      settlePausedRef.current = () => {};
       video.removeEventListener("suspend", endHoldOnceLoaded);
       video.removeEventListener("canplay", endHoldOnceLoaded);
       if (engineSession) {
@@ -3682,6 +3799,20 @@ export function VideoPlayer({
     const video = videoRef.current;
     if (!video) return;
 
+    // A page without a gesture is not allowed to start an unmuted element, and
+    // the readiness event the transport's autoplay waits for can arrive before
+    // it is listening. This runs from the element's own listeners, which are
+    // bound for as long as the player exists, and settles a player the browser
+    // will only start on a tap.
+    const probeBlockedAutoplay = () => {
+      if (!shouldAutoPlayRef.current || roomPlaybackActiveRef.current) return;
+      if (connectionReplacedRef.current || video.error) return;
+      if (startupGuardRef.current?.hasFailed()) return;
+      if (!isAutoplayBlockedByPolicy(video)) return;
+      settlePausedRef.current();
+      setAutoplayBlocked(true);
+    };
+
     const onPlay = () => {
       // Nothing can play until the reconnect hands over a new transport.
       if (connectionReplacedRef.current || connectionStatusRef.current !== "connected") {
@@ -3689,6 +3820,7 @@ export function VideoPlayer({
         return;
       }
       setPlaying(true);
+      setAutoplayBlocked(false);
       const idleSince = transportIdleSinceRef.current;
       transportIdleSinceRef.current = null;
       if (idleSince !== null && Date.now() - idleSince >= PROGRESSIVE_REMUX_IDLE_REOPEN_MS) {
@@ -3789,6 +3921,7 @@ export function VideoPlayer({
       if (mediaOutageRef.current && bufferedEndSeconds(video) > outageBufferedEndRef.current) {
         mediaOutageRef.current = false;
       }
+      probeBlockedAutoplay();
     };
     const onVolumeChange = () => {
       // A room seek pre-roll mutes the element for a moment. That mute is not
@@ -3822,6 +3955,7 @@ export function VideoPlayer({
     };
     const onCanPlay = () => {
       clearBuffering();
+      probeBlockedAutoplay();
       if (roomReadinessPending && watchTogetherSync.attachedSessionId === sessionId) {
         watchTogetherSync.reportReady();
       }
@@ -3836,6 +3970,7 @@ export function VideoPlayer({
       }
     };
     const onLoadedData = () => {
+      probeBlockedAutoplay();
       if (roomReadinessPending && watchTogetherSync.attachedSessionId === sessionId) {
         watchTogetherSync.reportReady();
       }
@@ -6383,6 +6518,28 @@ export function VideoPlayer({
           <div className="h-8 w-8 animate-spin rounded-full border-2 border-white/20 border-t-white" />
           <span className="sr-only">Loading video</span>
         </div>
+      )}
+
+      {/* Autoplay blocked: the browser will only start this stream on a
+          gesture, so the cover would otherwise sit over a player that is
+          ready and waiting. The tap is the way in. */}
+      {!isDetached && autoplayBlocked && !error && (
+        <button
+          type="button"
+          onClick={() => {
+            setAutoplayBlocked(false);
+            void videoRef.current?.play().catch(() => setAutoplayBlocked(true));
+          }}
+          className="absolute inset-0 z-50 flex cursor-pointer flex-col items-center justify-center gap-3 bg-black/60 text-white"
+        >
+          <span
+            aria-hidden="true"
+            className="flex h-16 w-16 items-center justify-center rounded-full bg-white/15 backdrop-blur transition-colors hover:bg-white/25"
+          >
+            <Play className="h-7 w-7" />
+          </span>
+          <span className="text-sm font-medium">{AUTOPLAY_BLOCKED_LABEL}</span>
+        </button>
       )}
 
       {/* Room sync overlay */}

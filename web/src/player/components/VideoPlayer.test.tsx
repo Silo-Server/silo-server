@@ -6098,9 +6098,10 @@ describe("VideoPlayer lost connection", () => {
       type: "networkError",
       details: "fragLoadError",
     };
-    // Before the first frame, hls.js keeps its startup recovery.
+    // Before the first frame, hls.js keeps its startup recovery. The retry is
+    // delayed, so the request follows rather than landing on the same tick.
     act(() => hlsJS.latest?.emit("error", fatalNetworkError));
-    expect(hlsJS.startLoad).toHaveBeenCalledOnce();
+    await waitFor(() => expect(hlsJS.startLoad).toHaveBeenCalledOnce(), { timeout: 3_000 });
     expect(onConnectionLost).not.toHaveBeenCalled();
 
     fireFrameTimeUpdate(video);
@@ -6126,18 +6127,20 @@ describe("VideoPlayer lost connection", () => {
     const fatalManifestError = { fatal: true, type: "networkError", details: "manifestLoadError" };
     vi.spyOn(Date, "now").mockReturnValue(10_000);
     act(() => hlsJS.latest?.emit("error", fatalManifestError));
-    expect(hlsJS.loadSource).toHaveBeenCalledTimes(2);
+    await waitFor(() => expect(hlsJS.loadSource).toHaveBeenCalledTimes(2), { timeout: 3_000 });
     expect(hlsJS.loadSource.mock.calls[1]).toEqual(hlsJS.loadSource.mock.calls[0]);
     expect(hlsJS.startLoad).not.toHaveBeenCalled();
     expect(onPlanFailure).not.toHaveBeenCalled();
 
+    // The reload's own failure is a second failure of the manifest, so the
+    // startup guard has nothing left and the route is reported.
     vi.spyOn(Date, "now").mockReturnValue(20_000);
     act(() => hlsJS.latest?.emit("error", fatalManifestError));
     expect(onPlanFailure).toHaveBeenCalledOnce();
     expect(onPlanFailure.mock.calls[0]?.[0]).toMatchObject({ classification: "startup_timeout" });
   });
 
-  it("reports the route failed when the reloaded manifest fails within the recovery cooldown", async () => {
+  it("reports the route failed when the reloaded manifest fails again", async () => {
     hlsJS.supported = true;
     vi.spyOn(HTMLMediaElement.prototype, "canPlayType").mockReturnValue("");
     const onPlanFailure = vi.fn();
@@ -6153,11 +6156,11 @@ describe("VideoPlayer lost connection", () => {
       type: "networkError",
       details: "manifestParsingError",
     };
-    vi.spyOn(Date, "now").mockReturnValue(10_000);
     act(() => hlsJS.latest?.emit("error", fatalManifestError));
-    expect(hlsJS.loadSource).toHaveBeenCalledTimes(2);
+    await waitFor(() => expect(hlsJS.loadSource).toHaveBeenCalledTimes(2), { timeout: 3_000 });
 
-    vi.spyOn(Date, "now").mockReturnValue(10_500);
+    // The reload failed too. It reaches the guard rather than being dropped as
+    // a duplicate of the failure that scheduled it.
     act(() => hlsJS.latest?.emit("error", fatalManifestError));
     expect(hlsJS.loadSource).toHaveBeenCalledTimes(2);
     expect(onPlanFailure).toHaveBeenCalledOnce();
@@ -6192,7 +6195,7 @@ describe("VideoPlayer lost connection", () => {
     const fatalNetworkError = { fatal: true, type: "networkError", details: "fragLoadError" };
     vi.spyOn(Date, "now").mockReturnValue(10_000);
     act(() => hlsJS.latest?.emit("error", fatalNetworkError));
-    expect(hlsJS.startLoad).toHaveBeenCalledOnce();
+    await waitFor(() => expect(hlsJS.startLoad).toHaveBeenCalledOnce(), { timeout: 3_000 });
     // The startup guard gives up on a second fatal network error and reports
     // the route as failed, so the server can pick another one.
     vi.spyOn(Date, "now").mockReturnValue(20_000);
@@ -6201,6 +6204,128 @@ describe("VideoPlayer lost connection", () => {
     expect(onConnectionLost).not.toHaveBeenCalled();
     expect(onPlanFailure).toHaveBeenCalledOnce();
     expect(onPlanFailure.mock.calls[0]?.[0]).toMatchObject({ classification: "startup_timeout" });
+  });
+
+  // A corrupt source asks the server for the same segment on every recovery,
+  // and a mid-stream transport without a reconnect handler had no bound: one
+  // deployment fetched seg_00037.ts 86 times in two minutes and kept the
+  // segment layer compiling a frame RPS it could never finish.
+  it("stops retrying the same segment and reports the route failed", async () => {
+    hlsJS.supported = true;
+    vi.spyOn(HTMLMediaElement.prototype, "canPlayType").mockReturnValue("");
+    const onPlanFailure = vi.fn();
+    const plan = fixturePlanV3({
+      stream: {
+        url: "/playback/transcode/session-1/master.m3u8",
+        protocol: "hls",
+        headers: {},
+        header_refresh: "none",
+      },
+    });
+    const { container } = renderPlayer({ plan, onPlanFailure });
+    const video = container.querySelector("video");
+    if (!video) throw new Error("expected video element");
+    await waitFor(() => expect(hlsJS.latest).not.toBeNull());
+    // The stream played; a failure here is not startup recovery.
+    fireFrameTimeUpdate(video);
+    hlsJS.startLoad.mockClear();
+
+    const corruptSegment = {
+      fatal: true,
+      type: "networkError",
+      details: "fragLoadError",
+      frag: { sn: 37, url: "/playback/transcode/session-1/seg_00037.ts" },
+    };
+
+    act(() => hlsJS.latest?.emit("error", corruptSegment));
+    await waitFor(() => expect(hlsJS.startLoad).toHaveBeenCalledOnce(), { timeout: 3_000 });
+    expect(onPlanFailure).not.toHaveBeenCalled();
+
+    // The retry lands on the same segment and fails again: the budget for that
+    // index is spent, so the player stops asking and reports the route.
+    act(() => hlsJS.latest?.emit("error", corruptSegment));
+
+    await waitFor(() => expect(onPlanFailure).toHaveBeenCalledOnce());
+    expect(onPlanFailure.mock.calls[0]?.[0]).toMatchObject({ classification: "network_error" });
+    expect(hlsJS.startLoad).toHaveBeenCalledOnce();
+  });
+});
+
+describe("VideoPlayer blocked autoplay", () => {
+  beforeEach(() => {
+    hlsJS.supported = false;
+    hlsJS.latest = null;
+    vi.spyOn(HTMLMediaElement.prototype, "play").mockResolvedValue(undefined);
+    vi.spyOn(HTMLMediaElement.prototype, "pause").mockImplementation(() => {});
+    vi.spyOn(HTMLMediaElement.prototype, "load").mockImplementation(() => {});
+    Object.defineProperty(navigator, "userActivation", {
+      configurable: true,
+      value: { hasBeenActive: false },
+    });
+  });
+
+  afterEach(() => {
+    cleanup();
+    Reflect.deleteProperty(navigator, "userActivation");
+    vi.restoreAllMocks();
+  });
+
+  function bufferedAhead(video: HTMLVideoElement, seconds: number) {
+    Object.defineProperty(video, "buffered", {
+      configurable: true,
+      value: { length: 1, start: () => 0, end: () => seconds },
+    });
+  }
+
+  it("offers a tap to play when the browser refuses the start", async () => {
+    const play = vi.mocked(HTMLMediaElement.prototype.play);
+    play.mockRejectedValueOnce(new DOMException("Autoplay blocked", "NotAllowedError"));
+    const { container } = renderPlayer();
+    const video = container.querySelector("video");
+    if (!video) throw new Error("expected video element");
+    await waitFor(() => expect(video.src).toContain("/api/v1/stream/session-1"));
+
+    Object.defineProperty(video, "readyState", {
+      configurable: true,
+      value: HTMLMediaElement.HAVE_FUTURE_DATA,
+    });
+    bufferedAhead(video, 121);
+    await act(async () => fireEvent.canPlay(video));
+
+    expect(play).toHaveBeenCalledOnce();
+    const tapToPlay = screen.getByRole("button", { name: "Tap to play" });
+    // The loading cover is gone: the player waits for the viewer, not data.
+    expect(screen.queryByRole("status", { name: "Loading video" })).not.toBeInTheDocument();
+
+    play.mockResolvedValue(undefined);
+    await act(async () => fireEvent.click(tapToPlay));
+
+    expect(play).toHaveBeenCalledTimes(2);
+    expect(screen.queryByRole("button", { name: "Tap to play" })).not.toBeInTheDocument();
+  });
+
+  it("offers a tap when a ready player never ran autoplay at all", async () => {
+    // The measured dead end: readyState 4 with 121 s buffered, no gesture in
+    // the page's history, and nothing ever called play().
+    const play = vi.mocked(HTMLMediaElement.prototype.play);
+    const { container } = renderPlayer();
+    const video = container.querySelector("video");
+    if (!video) throw new Error("expected video element");
+    await waitFor(() => expect(video.src).toContain("/api/v1/stream/session-1"));
+
+    Object.defineProperty(video, "readyState", {
+      configurable: true,
+      value: HTMLMediaElement.HAVE_ENOUGH_DATA,
+    });
+    bufferedAhead(video, 121);
+    await act(async () => fireEvent.progress(video));
+
+    expect(play).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: "Tap to play" })).toBeInTheDocument();
+    expect(screen.queryByRole("status", { name: "Loading video" })).not.toBeInTheDocument();
+
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Tap to play" })));
+    expect(play).toHaveBeenCalledOnce();
   });
 });
 
