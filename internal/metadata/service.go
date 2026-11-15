@@ -8967,6 +8967,17 @@ func (s *MetadataService) rebindItemOnto(ctx context.Context, fromContentID, toC
 			args: []any{fromContentID},
 		},
 		{
+			// Lock the source before its provider rows, as an admin's ID edit,
+			// a refresh and ReplaceByContentID do, and after its files, as
+			// scanner writers do. A rebind that changed the rows first would
+			// wait for an edit holding the source at the final delete while
+			// the edit waits on those rows: a deadlock. FOR UPDATE is the lock
+			// that delete takes.
+			name: "lock source item",
+			sql:  `SELECT 1 FROM media_items WHERE content_id = $1 FOR UPDATE`,
+			args: []any{fromContentID},
+		},
+		{
 			name: "dedupe provider ids",
 			sql: `
 				DELETE FROM media_item_provider_ids src

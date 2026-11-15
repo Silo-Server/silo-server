@@ -641,6 +641,16 @@
 # rating's per-source row with it, and recomputes series air dates.
 ./internal/catalog TestMetadataUpdateClearsNullableFieldsDB
 
+# An admin's provider-ID edit replaces or removes the item's durable provider
+# ID with the column, and skips one another item already holds.
+./internal/catalog TestMetadataUpdateKeepsDurableProviderIDsDB
+
+# A provider-ID drift repair and an automatic rebind wait for an admin's ID
+# edit on the same item instead of deadlocking with it.
+./internal/metadata TestProviderIDDriftRepairWaitsForItemEditPostgres
+./internal/metadata TestProviderIDDriftRepairSkipsChangedOwnerPostgres
+./internal/metadata TestRebindWaitsForItemEditPostgres
+
 # Watch-provider events carry catalog titles to plugins.
 ./internal/watchsync TestGetMediaTitlesDB
 
