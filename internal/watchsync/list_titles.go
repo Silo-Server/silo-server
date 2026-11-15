@@ -1,6 +1,7 @@
 package watchsync
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"log/slog"
@@ -399,6 +400,11 @@ func (s *Service) reconcileLocalListTitles(ctx context.Context, conn Connection,
 	if len(keys) == 0 {
 		return nil
 	}
+	// Rows the provider lists go first, so when several title rows promote to
+	// one library item, the item takes a provider key the provider lists.
+	slices.SortStableFunc(keys, func(a, b WatchlistTitle) int {
+		return cmp.Compare(boolRank(rows[b].RemotePresent), boolRank(rows[a].RemotePresent))
+	})
 	// A title has IDs exactly while the profile has an entry for it.
 	held, err := titles.WatchlistTitleIDs(ctx, conn.UserID, conn.ProfileID, keys)
 	if err != nil {
@@ -435,6 +441,14 @@ func (s *Service) reconcileLocalListTitles(ctx context.Context, conn Connection,
 		}
 	}
 	return nil
+}
+
+// boolRank orders false before true.
+func boolRank(b bool) int {
+	if b {
+		return 1
+	}
+	return 0
 }
 
 // keepListTitleIDs adds to the rows of the titles still listed the IDs their

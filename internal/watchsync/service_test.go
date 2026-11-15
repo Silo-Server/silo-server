@@ -588,6 +588,7 @@ func (r *serviceFakeRepo) UpsertListItemStates(_ context.Context, states []ListI
 				state.Title = cmp.Or(state.Title, old.Title)
 				state.Year = cmp.Or(state.Year, old.Year)
 				state.TitleIDs = mergeTitleIDsForTest(old.TitleIDs, state.TitleIDs)
+				state.RemotePresent = state.RemotePresent || old.RemotePresent
 				r.listItemStates[i] = state
 				replaced = true
 				break
