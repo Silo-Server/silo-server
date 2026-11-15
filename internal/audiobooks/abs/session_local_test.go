@@ -162,7 +162,7 @@ func TestLocalSessionBatchNamesItsClient(t *testing.T) {
 		started = append(started, *s)
 	}})
 	h := New(Dependencies{MediaStore: media, ProgressStore: &positionRecordingProgressFake{}, PlaybackSessionStore: &fakePlaybackSessionStore{}, NativeSessions: sessions})
-	body := fmt.Sprintf(`{"deviceInfo":{"clientName":"Prologue","clientVersion":"2026.1"},"sessions":[{"id":"local-1","libraryItemId":"book-1","currentTime":10,"updatedAt":%d}]}`,
+	body := fmt.Sprintf(`{"deviceInfo":{"ClientName":"Prologue","clientVersion":"2026.1"},"sessions":[{"id":"local-1","libraryItemId":"book-1","currentTime":10,"updatedAt":%d}]}`,
 		time.Now().UnixMilli())
 	if rec := dispatchABSWithParams(http.MethodPost, "/api/session/local-all", nil, []byte(body), "1", "p-1", h.handleSyncLocalSessions); rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, body %s", rec.Code, rec.Body.String())

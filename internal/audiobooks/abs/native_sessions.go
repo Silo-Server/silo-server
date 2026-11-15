@@ -362,10 +362,15 @@ type absDeviceInfo struct {
 // names are optional, and a malformed one must not reject the request that
 // carries it.
 func (d *absDeviceInfo) UnmarshalJSON(data []byte) error {
-	var fields map[string]any
-	_ = json.Unmarshal(data, &fields) // anything but an object leaves fields empty
-	d.ClientName, _ = fields["clientName"].(string)
-	d.ClientVersion, _ = fields["clientVersion"].(string)
+	var raw struct {
+		ClientName    json.RawMessage `json:"clientName"`
+		ClientVersion json.RawMessage `json:"clientVersion"`
+	}
+	// Field names match case-insensitively, as for any struct. Anything but
+	// an object, or a name that isn't a string, leaves the field empty.
+	_ = json.Unmarshal(data, &raw)
+	_ = json.Unmarshal(raw.ClientName, &d.ClientName)
+	_ = json.Unmarshal(raw.ClientVersion, &d.ClientVersion)
 	return nil
 }
 
