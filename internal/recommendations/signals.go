@@ -554,9 +554,10 @@ func anchorItemIDs(ctx context.Context, signals *SignalReader, ratings itemRatin
 
 // anchorCandidates returns the titles Because You Watched rows may anchor on:
 // the profile's most recently completed titles of recommendableMediaTypes
-// still in the catalog, newest first, of the latest limit, leaving out those it marked Not interested or rated DislikedRatingMax or
-// lower. A row headed "Because You Watched" a title the profile disliked
-// contradicts its taste. With no ratings reader rated titles stay. The
+// still in the catalog, newest first, of the latest limit, leaving out those
+// it marked Not interested or rated DislikedRatingMax or lower. A row headed
+// "Because You Watched" a title the profile disliked contradicts its taste.
+// With no ratings reader rated titles stay. The
 // worker, the Reader and Watch Tonight all choose anchors from these, since a
 // read can only use an anchor whose row the worker cached.
 func anchorCandidates(ctx context.Context, signals *SignalReader, ratings itemRatingReader, userID int, profileID string, limit int) ([]string, error) {

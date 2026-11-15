@@ -302,11 +302,12 @@ func (r *Reader) SectionSimilarUsersLiked(ctx context.Context, userID int, profi
 
 // SectionBecauseYouWatched returns a cached Because You Watched row for a
 // home or library section and the anchor it was built from. It uses
-// sourceItemID as the anchor when given, else the profile's anchors (see
-// anchorItemIDs) in turn: the first whose row keeps an item after filtering
-// wins. When libraryIDs is not nil an item must also be in one of
-// those libraries, so a section picks an anchor with recommendations in its
-// own scope. A caller must access-check the anchor before displaying it.
+// sourceItemID as the anchor when given, else the profile's anchors in the
+// section's scope (see scopedAnchorItemIDs) in turn: the first whose row
+// keeps an item after filtering wins. When libraryIDs is not nil the anchor
+// and every item must also be in one of those libraries, so a library
+// section anchors on what the profile watched there. A caller must
+// access-check the anchor before displaying it.
 func (r *Reader) SectionBecauseYouWatched(ctx context.Context, userID int, profileID, sourceItemID string, libraryIDs []int, filter catalog.AccessFilter) ([]ScoredItem, string, error) {
 	rows, err := r.becauseYouWatchedRows(ctx, userID, profileID, sourceItemID, 1, scopeToLibraries(filter, libraryIDs))
 	if err != nil {
@@ -333,8 +334,9 @@ func (r *Reader) GetBecauseYouWatchedRows(ctx context.Context, userID int, profi
 
 // becauseYouWatchedRows reads the cached Because You Watched rows of up to
 // maxRows anchors, filtered with filter. It uses sourceItemID as the anchor
-// when given, else the profile's anchors (see anchorItemIDs) in turn,
-// passing over an anchor whose row filters empty.
+// when given, else the profile's anchors in filter's libraries (see
+// scopedAnchorItemIDs) in turn, passing over an anchor whose row filters
+// empty.
 func (r *Reader) becauseYouWatchedRows(ctx context.Context, userID int, profileID, sourceItemID string, maxRows int, filter catalog.AccessFilter) ([]ForYouRow, error) {
 	if maxRows <= 0 || r.personalOff {
 		return nil, nil
@@ -414,8 +416,12 @@ func (r *Reader) scopedAnchorItemIDs(ctx context.Context, userID int, profileID 
 	}
 	anchors := make([]string, 0, BecauseYouWatchedAnchors)
 	for _, id := range candidates {
-		if _, ok := inScope[id]; ok && len(anchors) < BecauseYouWatchedAnchors {
-			anchors = append(anchors, id)
+		if _, ok := inScope[id]; !ok {
+			continue
+		}
+		anchors = append(anchors, id)
+		if len(anchors) == BecauseYouWatchedAnchors {
+			break
 		}
 	}
 	return anchors, nil
