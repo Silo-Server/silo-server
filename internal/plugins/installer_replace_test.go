@@ -60,7 +60,7 @@ func TestInstallerReplaceBinaryPreservesInstallationID(t *testing.T) {
 
 	oldRepository := 7
 	oldRepo, verifiedAt := "https://github.com/Silo-Server/silo-plugin-metadb", time.Now()
-	result, err := installer.replaceBinary(ctx, &Installation{
+	prepared, err := installer.prepareBinary(&Installation{
 		ID:            15,
 		RepositoryID:  &oldRepository,
 		PluginID:      "silo.metadb",
@@ -71,7 +71,11 @@ func TestInstallerReplaceBinaryPreservesInstallationID(t *testing.T) {
 		Signature:     Signature{State: SignatureStateVerified, SourceRepo: &oldRepo, VerifiedAt: &verifiedAt},
 	}, binaryData, hex.EncodeToString(checksum[:]), manifest, nil, nil, unsignedSignature)
 	if err != nil {
-		t.Fatalf("replaceBinary() returned error: %v", err)
+		t.Fatalf("prepareBinary() returned error: %v", err)
+	}
+	result, err := prepared.Apply(ctx)
+	if err != nil {
+		t.Fatalf("Apply() returned error: %v", err)
 	}
 
 	if len(store.createInputs) != 0 {
@@ -96,7 +100,7 @@ func TestInstallerReplaceBinaryPreservesInstallationID(t *testing.T) {
 		t.Fatalf("result update failure = %+v, want nil after a replacement", result.Installation.UpdateFailure)
 	}
 	if result.Installation.InstallPath == oldPath {
-		t.Fatal("expected replaceBinary() to move the installation to a new path")
+		t.Fatal("expected the replacement to move the installation to a new path")
 	}
 	if result.Installation.InstallPath != result.BinaryPath {
 		t.Fatalf("result install path = %q, want binary path %q", result.Installation.InstallPath, result.BinaryPath)

@@ -127,8 +127,8 @@ func TestPluginPathReplacementRejectsDifferentPlugin(t *testing.T) {
 	store := newRecordingInstallationStore()
 	installer := NewInstaller(store, InstallerOptions{BaseDir: t.TempDir()})
 	existing := &Installation{ID: 7, PluginID: "silo.example", Version: "1.2.2", InstallPath: "unused/plugin"}
-	_, binaryErr := installer.replaceBinary(t.Context(), existing, data, manifest.Checksum, manifest, nil, nil, unsignedSignature)
-	_, archiveErr := installer.replaceArchive(t.Context(), existing, archive, InstallArchiveRequest{})
+	_, binaryErr := installer.prepareBinary(existing, data, manifest.Checksum, manifest, nil, nil, unsignedSignature)
+	_, archiveErr := installer.prepareArchive(existing, archive, InstallArchiveRequest{})
 	for _, err := range []error{binaryErr, archiveErr} {
 		if _, ok := AsPackageError(err); !ok || !strings.Contains(err.Error(), "does not match installation") {
 			t.Fatalf("replacement mismatch = %v, want a package error", err)

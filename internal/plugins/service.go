@@ -287,11 +287,11 @@ func (s *Service) InstallLocal(ctx context.Context, req InstallArchiveRequest) (
 	}
 	var result *InstallResult
 	if existing != nil {
-		var replacement *archiveReplacement
-		replacement, err = s.installer.checkArchiveReplacement(existing, data, req)
+		var prepared *PreparedReplacement
+		prepared, err = s.installer.prepareArchive(existing, data, req)
 		if err == nil {
 			result, err = s.replaceStopped(ctx, existing, func() (*InstallResult, error) {
-				return s.installer.writeArchiveReplacement(ctx, replacement)
+				return prepared.Apply(ctx)
 			})
 		}
 	} else {
@@ -424,12 +424,12 @@ func (s *Service) InstallBinaryUpload(ctx context.Context, binaryData []byte) (*
 		return nil, fmt.Errorf("multiple existing installations found for plugin %q", manifest.GetPluginId())
 	}
 
-	replacement, err := s.installer.checkBinaryReplacement(existing[0], binaryData, actualChecksum, manifest, manifestJSON, nil, unsignedSignature)
+	prepared, err := s.installer.prepareBinary(existing[0], binaryData, actualChecksum, manifest, manifestJSON, nil, unsignedSignature)
 	if err != nil {
 		return nil, err
 	}
 	result, err = s.replaceStopped(ctx, existing[0], func() (*InstallResult, error) {
-		return s.installer.writeBinaryReplacement(ctx, replacement)
+		return prepared.Apply(ctx)
 	})
 	if err != nil {
 		return nil, err
