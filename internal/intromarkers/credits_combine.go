@@ -15,9 +15,11 @@ const (
 	// creditsRefineMinimumSeconds keeps a run starting with the audio match
 	// from counting as a later start.
 	creditsRefineMinimumSeconds = 0.5
-	// creditsVideoBlackLeadSeconds is the largest gap a video-only start
-	// may cross, keyframe by keyframe, moving back over true black before
-	// the first text.
+	// creditsVideoBlackLeadSeconds bounds moving a start back over true
+	// black before the first text. A video-only start crosses it keyframe
+	// by keyframe; an audio match's start moves to the black only when all
+	// of it lies this close to the text, since the match already holds an
+	// earlier start (blackLeadIn).
 	creditsVideoBlackLeadSeconds = 10.0
 	// creditsAudioVideoBonus raises a strong audio match that video
 	// corroborated, up to creditsAudioVideoMaximumConfidence.
@@ -85,8 +87,9 @@ type creditsEvidence struct {
 //
 //   - A strong audio match grows over text runs that overlap it or lie
 //     within creditsMergeGapSeconds, and its start moves to the first such
-//     run when that run begins up to creditsRefineWindowSeconds later and
-//     only story keyframes lie between (credits-audio:video:v1).
+//     run, or to the true black just before it, when that run begins up to
+//     creditsRefineWindowSeconds later and only story keyframes lie between
+//     (credits-audio:video:v1).
 //   - A qualifying text run reaching the end of the file that starts more
 //     than creditsMergeGapSeconds after an audio match which does not reach
 //     it wins: that match is most likely a recurring cue.
