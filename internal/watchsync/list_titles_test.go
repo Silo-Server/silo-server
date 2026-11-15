@@ -359,6 +359,28 @@ func TestServiceWatchlistImportTracksEntriesAddedBeforeAFailure(t *testing.T) {
 	}
 }
 
+// A title saved before its sync row write failed still counts as imported
+// and as a change to the local list.
+func TestServiceWatchlistImportCountsATitleWhoseRowWriteFails(t *testing.T) {
+	store, repo, conn := favoriteImportFixture(t)
+	conn.ImportWatchlistEnabled = true
+	repo.upsertListItemErr = errors.New("database unavailable")
+	titles := &titlesStub{entries: map[int]time.Time{}}
+	service := NewService(repo, NewRegistry()).
+		WithMatcher(unmatchedMatcherStub{}).
+		WithUserStoreProvider(staticStoreProvider{store: store})
+	service.SetWatchlistTitles(titles)
+	provider := &watchlistBatchProviderStub{rows: []RemoteFavorite{{ProviderItemKey: "tmdb:550", Kind: "movie", Title: "Fight Club", TMDBID: "550"}}}
+
+	result, err := service.importList(context.Background(), conn, ServerConfig{}, provider, service.watchlistBinding())
+	if err == nil {
+		t.Fatal("import succeeded, want the row write's error")
+	}
+	if result.Imported != 1 || !result.changedLocalList() {
+		t.Fatalf("result = %#v, want the saved title counted", result)
+	}
+}
+
 func listItemStateOf(repo *serviceFakeRepo, mediaItemID string) *ListItemState {
 	for i := range repo.listItemStates {
 		if repo.listItemStates[i].MediaItemID == mediaItemID {

@@ -311,18 +311,18 @@ func (s *Service) importList(ctx context.Context, conn Connection, cfg ServerCon
 		}
 		if match == nil {
 			state, kept, added, err := s.importListTitle(ctx, conn, b, row, key, removalsPending, titlesSince != nil)
-			// Counted first, so a run that fails below still reports that the
-			// local list changed.
+			// Counted first: the entry is saved, so a run that fails below
+			// still reports it.
 			if added {
 				result.added++
 			}
 			if state != nil {
+				result.Imported++
 				// An entry the add kept is tracked even when the add then
 				// failed, so a later provider removal still finds it.
 				if upsertErr := s.repo.UpsertListItemStates(ctx, []ListItemState{*state}); upsertErr != nil {
 					return result, errors.Join(err, upsertErr)
 				}
-				result.Imported++
 			}
 			if err != nil {
 				return result, err
