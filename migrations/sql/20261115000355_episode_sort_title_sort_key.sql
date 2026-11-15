@@ -651,7 +651,26 @@ BEGIN
     END LOOP;
 END;
 $$;
+-- +goose StatementEnd
 
+-- Runs before the trigger below stops firing on sort_title. A Sort Title edit
+-- made around this backfill is still refreshed, now by the restored title-only
+-- function, so it cannot leave a sort-title key behind.
+-- +goose StatementBegin
+UPDATE public.episode_catalog_entries ece
+SET sort_key = src.sort_key,
+    updated_at = NOW()
+FROM (
+    SELECT e.content_id, LOWER(COALESCE(NULLIF(BTRIM(e.title), ''), 'Episode ' || e.episode_number::text)) AS sort_key
+    FROM public.episodes e
+    WHERE NULLIF(BTRIM(e.sort_title), '') IS NOT NULL
+    FOR NO KEY UPDATE OF e
+) src
+WHERE ece.episode_id = src.content_id
+  AND ece.sort_key IS DISTINCT FROM src.sort_key;
+-- +goose StatementEnd
+
+-- +goose StatementBegin
 CREATE OR REPLACE FUNCTION public.episode_catalog_entries_episodes_trigger()
 RETURNS trigger LANGUAGE plpgsql AS $$
 DECLARE catalog_changed boolean; overview_changed boolean;
@@ -698,18 +717,4 @@ AFTER INSERT OR UPDATE OF content_id, series_id, title, overview, episode_number
     air_date, runtime, rating_imdb, rating_tmdb, created_at OR DELETE
 ON public.episodes FOR EACH ROW
 EXECUTE FUNCTION public.episode_catalog_entries_episodes_trigger();
--- +goose StatementEnd
-
--- +goose StatementBegin
-UPDATE public.episode_catalog_entries ece
-SET sort_key = src.sort_key,
-    updated_at = NOW()
-FROM (
-    SELECT e.content_id, LOWER(COALESCE(NULLIF(BTRIM(e.title), ''), 'Episode ' || e.episode_number::text)) AS sort_key
-    FROM public.episodes e
-    WHERE NULLIF(BTRIM(e.sort_title), '') IS NOT NULL
-    FOR NO KEY UPDATE OF e
-) src
-WHERE ece.episode_id = src.content_id
-  AND ece.sort_key IS DISTINCT FROM src.sort_key;
 -- +goose StatementEnd

@@ -3,14 +3,11 @@ package catalog
 import (
 	"context"
 	"fmt"
-	"os"
 	"slices"
 	"strings"
 	"testing"
 	"time"
 	"unicode/utf8"
-
-	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // letterOf mirrors letterBucketSQL for a title key, to check the database
@@ -298,16 +295,8 @@ func TestLetterIndexEpisodesMatchCursorPagesPostgres(t *testing.T) {
 // to the title. Set SILO_TEST_DATABASE_URL to a migrated disposable database;
 // every inserted row is removed on completion.
 func TestEpisodeSortTitleFilesEpisodeBrowsePostgres(t *testing.T) {
-	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
-	if dsn == "" {
-		t.Skip("SILO_TEST_DATABASE_URL is not set")
-	}
+	pool := collectionSortTestPool(t)
 	ctx := t.Context()
-	pool, err := pgxpool.New(ctx, dsn)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(pool.Close)
 	prefix := fmt.Sprintf("episode-sort-title-%d", time.Now().UnixNano())
 	seriesID, seasonID := prefix+"-series", prefix+"-season"
 	var library int
