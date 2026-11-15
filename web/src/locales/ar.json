@@ -70044,6 +70044,30 @@
       "value": "جارٍ الحفظ..."
     }
   ],
+  "web.admin.nodes.form.sourceAccess": [
+    {
+      "type": 0,
+      "value": "الوصول إلى المصدر"
+    }
+  ],
+  "web.admin.nodes.form.sourceAccessCore": [
+    {
+      "type": 0,
+      "value": "عبر خوادم API"
+    }
+  ],
+  "web.admin.nodes.form.sourceAccessHelp": [
+    {
+      "type": 0,
+      "value": "عبر خوادم API لا تحتاج العقدة إلى نقطة تحميل للمكتبة، لكن كل بايت تقرؤه يمر عبر خوادم API، لذا تحتاج هذه الخوادم إلى عرض النطاق اللازم لذلك."
+    }
+  ],
+  "web.admin.nodes.form.sourceAccessLocal": [
+    {
+      "type": 0,
+      "value": "نقطة تحميل المكتبة على العقدة"
+    }
+  ],
   "web.admin.nodes.form.type": [
     {
       "type": 0,
@@ -70831,6 +70855,204 @@
     {
       "type": 0,
       "value": "برمجي"
+    }
+  ],
+  "web.admin.nodes.key.close": [
+    {
+      "type": 0,
+      "value": "إغلاق"
+    }
+  ],
+  "web.admin.nodes.key.copied": [
+    {
+      "type": 0,
+      "value": "تم النسخ"
+    }
+  ],
+  "web.admin.nodes.key.copyFailed": [
+    {
+      "type": 0,
+      "value": "تعذّر النسخ. حدّد النص وانسخه يدويًا."
+    }
+  ],
+  "web.admin.nodes.key.copyKey": [
+    {
+      "type": 0,
+      "value": "نسخ المفتاح"
+    }
+  ],
+  "web.admin.nodes.key.copySettings": [
+    {
+      "type": 0,
+      "value": "نسخ الإعدادات"
+    }
+  ],
+  "web.admin.nodes.key.coreUrlHelp": [
+    {
+      "type": 0,
+      "value": "العنوان الذي تتصل به العقدة للوصول إلى هذا الخادم. عند وجود عدة خوادم API، استخدم عنوانها الموزَّع الحمل."
+    }
+  ],
+  "web.admin.nodes.key.coreUrlLabel": [
+    {
+      "type": 0,
+      "value": "عنوان الخادم للعقدة"
+    }
+  ],
+  "web.admin.nodes.key.coreUrlMissing": [
+    {
+      "type": 0,
+      "value": "أدخل عنوان الخادم لإكمال الإعدادات."
+    }
+  ],
+  "web.admin.nodes.key.dialogTitle": [
+    {
+      "type": 0,
+      "value": "مفتاح "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    }
+  ],
+  "web.admin.nodes.key.issue": [
+    {
+      "type": 0,
+      "value": "إصدار مفتاح"
+    }
+  ],
+  "web.admin.nodes.key.issueFor": [
+    {
+      "type": 0,
+      "value": "إصدار مفتاح لـ "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    }
+  ],
+  "web.admin.nodes.key.issued": [
+    {
+      "type": 0,
+      "value": "تم إصدار المفتاح"
+    }
+  ],
+  "web.admin.nodes.key.issuing": [
+    {
+      "type": 0,
+      "value": "جارٍ إصدار مفتاح…"
+    }
+  ],
+  "web.admin.nodes.key.keyLabel": [
+    {
+      "type": 0,
+      "value": "مفتاح العقدة"
+    }
+  ],
+  "web.admin.nodes.key.later": [
+    {
+      "type": 0,
+      "value": "ليس الآن"
+    }
+  ],
+  "web.admin.nodes.key.missing": [
+    {
+      "type": 0,
+      "value": "لا يوجد مفتاح: لا تستقبل هذه العقدة أي عمل حتى يُصدَر مفتاح"
+    }
+  ],
+  "web.admin.nodes.key.notShownAgain": [
+    {
+      "type": 0,
+      "value": "انسخ المفتاح الآن. لن يُعرض مرة أخرى؛ وإذا فقدته، فدوّر المفتاح وأعد تشغيل العقدة بالمفتاح الجديد."
+    }
+  ],
+  "web.admin.nodes.key.offer": [
+    {
+      "type": 0,
+      "value": "لا تستقبل "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " أي عمل حتى يكون لها مفتاح. أصدر مفتاحًا الآن للحصول على الإعدادات التي تبدأ بها العقدة."
+    }
+  ],
+  "web.admin.nodes.key.rotate": [
+    {
+      "type": 0,
+      "value": "تدوير المفتاح"
+    }
+  ],
+  "web.admin.nodes.key.rotateDescription": [
+    {
+      "type": 0,
+      "value": "يتوقف المفتاح الحالي عن العمل فورًا. تفقد العقدة اتصالها بهذا الخادم: تفشل البثوث الجارية عليها، ولا تستقبل أي عمل حتى تعيد تشغيلها بالمفتاح الجديد."
+    }
+  ],
+  "web.admin.nodes.key.rotateDrainHint": [
+    {
+      "type": 0,
+      "value": "لتجنّب قطع البثوث، صرّف العقدة أولًا ثم دوّر المفتاح عندما تظهر حالة «اكتمل التصريف»."
+    }
+  ],
+  "web.admin.nodes.key.rotateFor": [
+    {
+      "type": 0,
+      "value": "تدوير مفتاح "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    }
+  ],
+  "web.admin.nodes.key.rotateTitle": [
+    {
+      "type": 0,
+      "value": "تدوير مفتاح "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "؟"
+    }
+  ],
+  "web.admin.nodes.key.saved": [
+    {
+      "type": 0,
+      "value": "حفظت المفتاح"
+    }
+  ],
+  "web.admin.nodes.key.settingsHelp": [
+    {
+      "type": 0,
+      "value": "شغّل العقدة بهذين الإعدادين. العقدة التي تعمل بالفعل تحتفظ بمفتاحها القديم حتى تعيد تشغيلها."
+    }
+  ],
+  "web.admin.nodes.key.settingsLabel": [
+    {
+      "type": 0,
+      "value": "إعدادات العقدة"
+    }
+  ],
+  "web.admin.nodes.key.unconfirmed": [
+    {
+      "type": 0,
+      "value": "تعذّر تأكيد مفتاح جديد لـ "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": ". حدّث الصفحة قبل المحاولة مرة أخرى: إذا كان قد صدر مفتاح، فقد توقف المفتاح السابق عن العمل بالفعل."
     }
   ],
   "web.admin.nodes.memory.noReading": [
@@ -112792,20 +113014,6 @@
       "value": "number"
     }
   ],
-  "web.audiobooks.chapters.count": [
-    {
-      "type": 0,
-      "value": "("
-    },
-    {
-      "type": 1,
-      "value": "count"
-    },
-    {
-      "type": 0,
-      "value": ")"
-    }
-  ],
   "web.audiobooks.chapters.duration": [
     {
       "type": 1,
@@ -112830,34 +113038,76 @@
       "value": "الفصول"
     }
   ],
-  "web.audiobooks.chapters.listening": [
+  "web.audiobooks.chapters.leftInChapter": [
     {
       "type": 0,
-      "value": "قيد الاستماع"
+      "value": "يتبقى "
+    },
+    {
+      "type": 1,
+      "value": "time"
+    },
+    {
+      "type": 0,
+      "value": " من هذا الفصل"
     }
   ],
-  "web.audiobooks.chapters.sort": [
+  "web.audiobooks.chapters.showAll": [
     {
       "type": 0,
-      "value": "ترتيب"
+      "value": "عرض الكل ("
+    },
+    {
+      "type": 1,
+      "value": "count"
+    },
+    {
+      "type": 0,
+      "value": ")"
     }
   ],
-  "web.audiobooks.chapters.sortAria": [
+  "web.audiobooks.chapters.showFewer": [
     {
       "type": 0,
-      "value": "ترتيب الفصول"
+      "value": "عرض أقل"
     }
   ],
-  "web.audiobooks.chapters.sortLongest": [
+  "web.audiobooks.detail.finished": [
     {
       "type": 0,
-      "value": "الأطول أولًا"
+      "value": "مكتمل"
     }
   ],
-  "web.audiobooks.chapters.sortPosition": [
+  "web.audiobooks.detail.length": [
     {
       "type": 0,
-      "value": "حسب الترتيب"
+      "value": "المدة"
+    }
+  ],
+  "web.audiobooks.detail.publisher": [
+    {
+      "type": 0,
+      "value": "الناشر"
+    }
+  ],
+  "web.audiobooks.detail.released": [
+    {
+      "type": 0,
+      "value": "سنة الإصدار"
+    }
+  ],
+  "web.audiobooks.detail.seriesBook": [
+    {
+      "type": 1,
+      "value": "series"
+    },
+    {
+      "type": 0,
+      "value": "، الكتاب "
+    },
+    {
+      "type": 1,
+      "value": "number"
     }
   ],
   "web.audiobooks.duration.hours": [
@@ -114250,6 +114500,12 @@
       "pluralType": "cardinal"
     }
   ],
+  "web.audiobooks.hero.alsoListening": [
+    {
+      "type": 0,
+      "value": "قيد الاستماع أيضًا"
+    }
+  ],
   "web.audiobooks.hero.ariaLabel": [
     {
       "type": 0,
@@ -114288,38 +114544,6 @@
       "value": "total"
     }
   ],
-  "web.audiobooks.hero.chapterPositionTitled": [
-    {
-      "type": 0,
-      "value": "الفصل "
-    },
-    {
-      "type": 1,
-      "value": "index"
-    },
-    {
-      "type": 0,
-      "value": " من "
-    },
-    {
-      "type": 1,
-      "value": "total"
-    },
-    {
-      "type": 0,
-      "value": " · "
-    },
-    {
-      "type": 1,
-      "value": "chapter"
-    }
-  ],
-  "web.audiobooks.hero.eyebrow": [
-    {
-      "type": 0,
-      "value": "يُستمع إليه الآن"
-    }
-  ],
   "web.audiobooks.hero.listen": [
     {
       "type": 0,
@@ -114352,12 +114576,6 @@
     {
       "type": 0,
       "value": "استئناف"
-    }
-  ],
-  "web.audiobooks.narrator.heading": [
-    {
-      "type": 0,
-      "value": "الراوي"
     }
   ],
   "web.audiobooks.narrator.narrationCount": [
@@ -114439,20 +114657,16 @@
       "value": "العودة إلى المشغّل"
     }
   ],
-  "web.audiobooks.player.chapterNumber": [
-    {
-      "type": 0,
-      "value": "الفصل "
-    },
-    {
-      "type": 1,
-      "value": "number"
-    }
-  ],
   "web.audiobooks.player.close": [
     {
       "type": 0,
       "value": "إغلاق المشغّل"
+    }
+  ],
+  "web.audiobooks.player.comingUp": [
+    {
+      "type": 0,
+      "value": "التالي"
     }
   ],
   "web.audiobooks.player.faster": [
