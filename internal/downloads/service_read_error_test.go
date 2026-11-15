@@ -183,6 +183,8 @@ func TestEphemeralDownloadCompletesOnlyOnWholeFileDB(t *testing.T) {
 		hangUp                                  bool
 	}{
 		{"head", http.MethodHead, "", "", StatusQueued, false},
+		// A probe of a transfer whose lease lapsed neither fails nor revives it.
+		{"head of a lapsed transfer", http.MethodHead, "", "", StatusDownloading, false},
 		{"partial range", http.MethodGet, "bytes=0-1023", "", StatusDownloading, false},
 		{"tail range", http.MethodGet, "bytes=1024-", "", StatusDownloading, false},
 		{"not modified", http.MethodGet, "", "*", StatusDownloading, false},
@@ -197,6 +199,12 @@ func TestEphemeralDownloadCompletesOnlyOnWholeFileDB(t *testing.T) {
 			row := &Download{ID: "whole-" + strings.ReplaceAll(tc.name, " ", "-"), UserID: 2, MediaFileID: 42, ContentID: "movie", Kind: KindQueued, Status: StatusQueued, Format: FormatOriginal, FileSize: int64(len(payload)), CreatedAt: now, UpdatedAt: now}
 			if err := repo.Create(t.Context(), row); err != nil {
 				t.Fatal(err)
+			}
+			lapsed := strings.Contains(tc.name, "lapsed")
+			if lapsed {
+				if _, err := repo.pool.Exec(t.Context(), `UPDATE downloads SET status = 'downloading', updated_at = now() - interval '10 minutes' WHERE id = $1`, row.ID); err != nil {
+					t.Fatal(err)
+				}
 			}
 			req := httptest.NewRequest(tc.method, "/file", nil)
 			if tc.ranged != "" {
@@ -217,6 +225,9 @@ func TestEphemeralDownloadCompletesOnlyOnWholeFileDB(t *testing.T) {
 			stored, err := repo.GetByID(t.Context(), row.ID)
 			if err != nil {
 				t.Fatal(err)
+			}
+			if lapsed && time.Since(stored.UpdatedAt) < transferLease {
+				t.Fatalf("probe renewed the lapsed lease: updated_at %v", stored.UpdatedAt)
 			}
 			if stored.Status != tc.want || (stored.Status == StatusCompleted) != (stored.CompletedAt != nil) || (stored.Status == StatusCompleted) != (stored.BytesSent == row.FileSize) {
 				t.Fatalf("stored status %s, bytes_sent %d, completed_at %v; want %s", stored.Status, stored.BytesSent, stored.CompletedAt, tc.want)

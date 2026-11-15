@@ -1382,8 +1382,8 @@ func (s *Service) ServeFile(ctx context.Context, w http.ResponseWriter, r *http.
 	if dl.Status == StatusPreparing {
 		return fmt.Errorf("download is preparing: %w", ErrDownloadNotActive)
 	}
-	// A HEAD probe sends no bytes, so it neither starts a transfer nor holds
-	// its slot.
+	// A HEAD probe sends no bytes, so it leaves the row alone: it neither
+	// starts a transfer nor renews or fails one.
 	probe := r.Method == http.MethodHead
 	// Atomically transition queued → downloading for original rows. Artifact
 	// (remux/transcode) rows are already ready by the time bytes are served.
@@ -1395,7 +1395,7 @@ func (s *Service) ServeFile(ctx context.Context, w http.ResponseWriter, r *http.
 			slog.WarnContext(ctx, "failed to transition download to downloading", "component", "downloads", "download_id", dl.ID, "error", err)
 		}
 	}
-	if dl.Format == FormatOriginal && dl.Status == StatusDownloading {
+	if dl.Format == FormatOriginal && dl.Status == StatusDownloading && !probe {
 		if err := s.continueTransfer(ctx, dl.ID); err != nil {
 			return err
 		}
