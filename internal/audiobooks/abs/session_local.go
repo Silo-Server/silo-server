@@ -1,7 +1,6 @@
 package abs
 
 import (
-	"context"
 	"encoding/json"
 	"io"
 	"log/slog"
@@ -31,10 +30,14 @@ import (
 //   - syncLocalSession returns {id, success:false, error} when the library
 //     item can't be found, else {id, success:true, progressSynced}.
 //
-// silo does not persist arbitrary client-supplied sessions, so we do not
-// create a server-side playback-session row here. We mirror the *effect* that
-// matters — the caller's resume position — into user_watch_progress and emit
-// the same user_item_progress_updated realtime event handleSessionSync does.
+// Every session's position is mirrored into user_watch_progress, with the
+// same user_item_progress_updated realtime event handleSessionSync emits.
+// Some clients (Plappa and Prologue on iOS) never call /play: they stream the
+// files directly and post their local session every few seconds while
+// playing. A session the client updated moments ago is such a live play, and
+// is also tracked as a reported play (see trackReportedPlay), so admin
+// Activity and Playback History show it. An older session is offline
+// listening synced late and only moves the resume position.
 // An existing progress row is advanced monotonically (UpdateProgressPosition);
 // a book listened to entirely offline has no row yet, so one is created
 // (UpsertProgress) rather than silently dropping the position. Accumulated
@@ -52,6 +55,17 @@ type localPlaybackSession struct {
 	CurrentTime   float64 `json:"currentTime"`
 	TimeListening float64 `json:"timeListening"`
 	DisplayTitle  string  `json:"displayTitle"`
+	// UpdatedAt is when the client last updated the session, in Unix
+	// milliseconds. Some clients send a fraction.
+	UpdatedAt  float64       `json:"updatedAt"`
+	DeviceInfo absDeviceInfo `json:"deviceInfo"`
+}
+
+// isLive reports whether the client updated the session within
+// liveReportWindow of now, by the device's clock: playback happening now
+// rather than a late sync.
+func (s localPlaybackSession) isLive(now time.Time) bool {
+	return s.UpdatedAt > 0 && now.Sub(time.UnixMilli(int64(s.UpdatedAt))).Abs() <= liveReportWindow
 }
 
 // localSyncResult mirrors the per-session object ABS returns from
@@ -82,7 +96,7 @@ func (h *Handler) handleSyncLocalSession(w http.ResponseWriter, r *http.Request)
 		http.Error(w, "resolve access: "+err.Error(), http.StatusForbidden)
 		return
 	}
-	res := h.syncOneLocalSession(r.Context(), a, access, sess)
+	res := h.syncOneLocalSession(r, a, access, sess)
 	if !res.Success {
 		// Real ABS: res.status(500).send(result.error).
 		http.Error(w, res.Error, http.StatusInternalServerError)
@@ -124,15 +138,17 @@ func (h *Handler) handleSyncLocalSessions(w http.ResponseWriter, r *http.Request
 			results = append(results, localSyncResult{Success: false, Error: "invalid session"})
 			continue
 		}
-		results = append(results, h.syncOneLocalSession(r.Context(), a, access, sess))
+		results = append(results, h.syncOneLocalSession(r, a, access, sess))
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"results": results})
 }
 
-// syncOneLocalSession applies one offline session's position to the caller's
-// media progress and returns the ABS-shaped per-session result. It never
-// panics and never propagates an error to fail a batch.
-func (h *Handler) syncOneLocalSession(ctx context.Context, a ctxAuth, access catalog.AccessFilter, sess localPlaybackSession) localSyncResult {
+// syncOneLocalSession applies one local session's position to the caller's
+// media progress, tracks it as a reported play while it is live, and returns
+// the ABS-shaped per-session result. It never panics and never propagates an
+// error to fail a batch.
+func (h *Handler) syncOneLocalSession(r *http.Request, a ctxAuth, access catalog.AccessFilter, sess localPlaybackSession) localSyncResult {
+	ctx := r.Context()
 	res := localSyncResult{ID: sess.ID}
 
 	// Podcast episode sessions are out of scope for silo's audiobook-only
@@ -163,6 +179,7 @@ func (h *Handler) syncOneLocalSession(ctx context.Context, a ctxAuth, access cat
 	}
 
 	res.Success = true
+	h.trackReportedPlay(r, a, access, sess)
 
 	// Persist the offline resume position into user_watch_progress.
 	//

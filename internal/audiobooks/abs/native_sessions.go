@@ -9,7 +9,11 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
+	"github.com/google/uuid"
+
+	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/clientip"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/playback"
@@ -143,6 +147,95 @@ func (h *Handler) updateNativePlaybackProgress(ctx context.Context, sessionID st
 	h.syncNativeSessionsNow(ctx, "abs_progress")
 }
 
+const (
+	// liveReportWindow separates a live play from catch-up: a local session
+	// the client updated longer ago than this is offline listening synced
+	// late, or a report sent again. It is shorter than the lifecycle sweep's
+	// idle window for reported plays, so a late copy of a play's last report
+	// cannot start the play again after it ended.
+	liveReportWindow = time.Minute
+	// maxReportedPlaysPerAccount bounds the reported plays one account can
+	// have open at once across the cluster. They are outside stream limits,
+	// so without it an account could post any number of fresh session IDs.
+	// It is well above a household's devices.
+	maxReportedPlaysPerAccount = 10
+)
+
+// trackReportedPlay records a live play that a client reports only through
+// /session/local or /session/local-all. The play lives in its
+// abs_playback_sessions row and its lifecycle row; no server holds it in
+// memory, so every server applies the client's reports to the same play, it
+// never counts toward stream limits, and no media route can load it. The
+// lifecycle sweep ends it once reports stop, and a report after that starts
+// a new play with its own id and history row. A report never fails because
+// of this: the client is playing whether or not Silo shows it.
+func (h *Handler) trackReportedPlay(r *http.Request, a ctxAuth, access catalog.AccessFilter, sess localPlaybackSession) {
+	if h == nil || h.deps.PlaybackSessionStore == nil || sess.ID == "" || !sess.isLive(time.Now()) {
+		return
+	}
+	ctx := r.Context()
+	files, err := h.deps.MediaStore.GetMediaFiles(ctx, sess.LibraryItemID, access)
+	if err != nil || len(files) == 0 {
+		if err != nil {
+			slog.WarnContext(ctx, "abs local session sync: load files for reported play failed", "component", "audiobooks",
+				"library_item_id", sess.LibraryItemID, "error", err)
+		}
+		return
+	}
+	fileID, position := files[0].ID, max(sess.CurrentTime, 0)
+	id, announced, err := h.deps.PlaybackSessionStore.ReportPlay(ctx, ReportedPlay{
+		UserID:           a.UserID,
+		ProfileID:        a.ProfileID,
+		ClientSessionID:  sess.ID,
+		ContentID:        sess.LibraryItemID,
+		MediaFileID:      &fileID,
+		PositionSeconds:  position,
+		ListeningSeconds: sess.TimeListening,
+	}, uuid.NewString(), maxReportedPlaysPerAccount)
+	switch {
+	case err != nil:
+		slog.WarnContext(ctx, "abs local session sync: record reported play failed", "component", "audiobooks",
+			"library_item_id", sess.LibraryItemID, "error", err)
+		return
+	case id == "":
+		slog.WarnContext(ctx, "abs local session sync: too many reported plays for the account; not tracking this one", "component", "audiobooks",
+			"user_id", a.UserID, "limit", maxReportedPlaysPerAccount)
+		return
+	case announced:
+		return
+	}
+	userID, err := strconv.Atoi(a.UserID)
+	if err != nil {
+		return
+	}
+	// A new play, or one whose start was never recorded (a server that died
+	// between the row and its lifecycle start): record the start now.
+	announcer, ok := h.deps.NativeSessions.(interface {
+		AnnounceDetachedStart(ctx context.Context, s playback.Session, frontend string)
+	})
+	if !ok {
+		return
+	}
+	client := absPlaybackClientInfo(r, sess.DeviceInfo).Normalized()
+	announcer.AnnounceDetachedStart(ctx, playback.Session{
+		ID:                         id,
+		UserID:                     userID,
+		ProfileID:                  a.ProfileID,
+		MediaFileID:                fileID,
+		RequestedMediaFileID:       fileID,
+		PlayMethod:                 playback.PlayDirect,
+		BasePlayMethod:             playback.PlayDirect,
+		ClientIP:                   requestClientIP(r),
+		ClientName:                 client.Name,
+		ClientVersion:              client.Version,
+		ClientUserAgent:            client.UserAgent,
+		DisableProgressPersistence: true,
+		TimelineDuration:           bookDurationSeconds(files),
+		Position:                   position,
+		StartedAt:                  time.Now(),
+	}, "abs")
+}
+
 // bookDurationSeconds is the length of a book made of files.
 func bookDurationSeconds(files []*models.MediaFile) float64 {
 	var total float64
@@ -245,7 +338,7 @@ func writeNativePlaybackStartError(w http.ResponseWriter, err error) {
 }
 
 // absDeviceInfo is the part of the deviceInfo an Audiobookshelf client sends
-// with /play that names the client.
+// with /play and with its local sessions that names the client.
 type absDeviceInfo struct {
 	ClientName    string `json:"clientName"`
 	ClientVersion string `json:"clientVersion"`

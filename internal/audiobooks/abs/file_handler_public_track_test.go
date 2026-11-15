@@ -19,6 +19,7 @@ import (
 // public-track tests. Only Get is exercised; the other methods are no-ops.
 type fakePlaybackSessionStore struct {
 	sessions map[string]ABSPlaybackSession
+	reported map[string]string // client session id → open reported play id
 }
 
 func (f *fakePlaybackSessionStore) InsertPlaybackSession(_ context.Context, s ABSPlaybackSession) error {
@@ -58,6 +59,27 @@ func (f *fakePlaybackSessionStore) AggregateStats(_ context.Context, userID, pro
 
 func (f *fakePlaybackSessionStore) ListClosedSessions(_ context.Context, userID, profileID string, limit, offset int) ([]ABSPlaybackSession, int, error) {
 	return nil, 0, nil
+}
+
+// ReportPlay keeps one open reported play per client session; announced is
+// whether the play existed before this report.
+func (f *fakePlaybackSessionStore) ReportPlay(_ context.Context, p ReportedPlay, newID string, _ int) (string, bool, error) {
+	if f.sessions == nil {
+		f.sessions = map[string]ABSPlaybackSession{}
+	}
+	if f.reported == nil {
+		f.reported = map[string]string{}
+	}
+	if id, ok := f.reported[p.ClientSessionID]; ok && f.sessions[id].ClosedAt == nil {
+		s := f.sessions[id]
+		s.CurrentPositionSeconds = p.PositionSeconds
+		f.sessions[id] = s
+		return id, true, nil
+	}
+	f.reported[p.ClientSessionID] = newID
+	f.sessions[newID] = ABSPlaybackSession{ID: newID, UserID: p.UserID, ProfileID: p.ProfileID, ContentID: p.ContentID,
+		MediaFileID: p.MediaFileID, CurrentPositionSeconds: p.PositionSeconds, ReportOnly: true}
+	return newID, false, nil
 }
 
 // filesMediaStore returns a fixed slice of MediaFile entries for the

@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"strconv"
+	"sync"
 	"testing"
 
 	"github.com/google/uuid"
@@ -54,5 +55,99 @@ func TestABSPlaybackSessionKeepsItsFileDB(t *testing.T) {
 	got, err := store.GetPlaybackSession(ctx, id)
 	if err != nil || got.MediaFileID == nil || *got.MediaFileID != file {
 		t.Fatalf("session = %+v, %v; want media file %d", got, err, file)
+	}
+}
+
+// TestReportPlayKeepsOnePlayPerClientSessionDB pins how reports of plays a
+// client only reports through /session/local land: concurrent first reports
+// start one play, later reports update it and credit listening from the
+// total it began at, the account cap counts every open reported play, and a
+// report after the play closed starts a new play with its own id.
+func TestReportPlayKeepsOnePlayPerClientSessionDB(t *testing.T) {
+	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("SILO_TEST_DATABASE_URL is not set")
+	}
+	ctx := t.Context()
+	pool, err := pgxpool.New(ctx, dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(pool.Close)
+	unique := "abs-report-" + uuid.NewString()
+	var account int
+	if err := pool.QueryRow(ctx, `INSERT INTO users(username,role) VALUES($1,'user') RETURNING id`, unique).Scan(&account); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO media_items(content_id,type,title) VALUES($1,'audiobook','Book')`, unique); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM abs_playback_sessions WHERE user_id=$1`, account)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM media_items WHERE content_id=$1`, unique)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM users WHERE id=$1`, account)
+	})
+	store := &ABSPlaybackSessionStore{Pool: pool}
+	report := func(clientSession string, position, listening float64) (string, bool) {
+		t.Helper()
+		id, announced, err := store.ReportPlay(ctx, abs.ReportedPlay{
+			UserID: strconv.Itoa(account), ProfileID: "p-1", ClientSessionID: clientSession, ContentID: unique,
+			PositionSeconds: position, ListeningSeconds: listening,
+		}, uuid.NewString(), 2)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return id, announced
+	}
+
+	// Concurrent first reports, as two API servers would take them.
+	ids := make(chan string, 4)
+	var wg sync.WaitGroup
+	for range 4 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			id, _ := report("local-1", 100, 300)
+			ids <- id
+		}()
+	}
+	wg.Wait()
+	close(ids)
+	first := ""
+	for id := range ids {
+		if first == "" {
+			first = id
+		}
+		if id == "" || id != first {
+			t.Fatalf("concurrent first reports started more than one play (%q, %q)", first, id)
+		}
+	}
+	// The row began at a client total of 300; 10 more seconds were heard.
+	// Its age caps the credit, so backdate it as if it began a minute ago.
+	if _, err := pool.Exec(ctx, `UPDATE abs_playback_sessions SET started_at = now() - interval '1 minute' WHERE id = $1`, first); err != nil {
+		t.Fatal(err)
+	}
+	if id, announced := report("local-1", 110, 310); id != first || announced {
+		t.Fatalf("report = (%q, %v), want the open play %s, not yet announced", id, announced, first)
+	}
+	got, err := store.GetPlaybackSession(ctx, first)
+	if err != nil || !got.ReportOnly || got.CurrentPositionSeconds != 110 || got.TimeListeningSeconds != 10 {
+		t.Fatalf("play = %+v, %v; want report-only at 110 s with 10 s listened", got, err)
+	}
+
+	// The cap counts every open reported play of the account.
+	if id, _ := report("local-2", 0, 0); id == "" {
+		t.Fatal("second play refused under a cap of two")
+	}
+	if id, _ := report("local-3", 0, 0); id != "" {
+		t.Fatalf("third play %q admitted over a cap of two", id)
+	}
+
+	// After the play ends, the client session's next report is a new play.
+	if _, err := pool.Exec(ctx, `UPDATE abs_playback_sessions SET closed_at = now() WHERE id = $1`, first); err != nil {
+		t.Fatal(err)
+	}
+	if id, announced := report("local-1", 500, 900); id == "" || id == first || announced {
+		t.Fatalf("report after the end = (%q, %v), want a new play", id, announced)
 	}
 }

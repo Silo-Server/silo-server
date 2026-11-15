@@ -205,20 +205,26 @@ func lifecycleIDParam(sessionID string) any {
 	return nil
 }
 
-// lifecycleOnlySessions lists native sessions whose lifecycle row is live
-// and whose attempt is live, but that no server has a live row for: one a
-// node still serves while no API server holds it in memory. The row is the
-// one recorded when the session started, at the attempt's latest position.
+// lifecycleOnlySessions lists sessions whose lifecycle row is live but that
+// no server has a live row for: a native session whose attempt is live, one
+// a node still serves while no API server holds it in memory, and an
+// Audiobookshelf play a client only reports, which no server ever holds. The
+// row is the one recorded when the session started, at the attempt's latest
+// position or the reported play's.
 const lifecycleOnlySessions = `
 	SELECT (jsonb_populate_record(NULL::playback_sessions_sync, lc.start_facts || jsonb_build_object(
 		'reporting_node', '',
-		'updated_at', a.updated_at,
-		'last_sync_at', a.updated_at,
+		'updated_at', COALESCE(a.updated_at, r.last_sync_at),
+		'last_sync_at', COALESCE(a.updated_at, r.last_sync_at),
 		'is_paused', lc.state = 'paused',
-		'position_seconds', COALESCE((a.last_sample->>'position')::double precision, (lc.start_facts->>'position_seconds')::double precision, 0)))).*
+		'position_seconds', COALESCE((a.last_sample->>'position')::double precision, r.current_position_seconds,
+			(lc.start_facts->>'position_seconds')::double precision, 0)))).*
 	FROM playback_session_lifecycle lc
-	JOIN playback_v3_attempts a ON a.session_id = lc.session_id AND a.stopped_at IS NULL AND a.expires_at > NOW()
+	LEFT JOIN playback_v3_attempts a ON a.session_id = lc.session_id AND a.stopped_at IS NULL AND a.expires_at > NOW()
+	LEFT JOIN abs_playback_sessions r ON lc.frontend = 'abs' AND r.id = lc.session_id::text
+		AND r.client_session_id IS NOT NULL AND r.closed_at IS NULL
 	WHERE lc.state <> 'stopped' AND lc.start_facts <> '{}'::jsonb
+	  AND (a.session_id IS NOT NULL OR r.id IS NOT NULL)
 	  AND NOT EXISTS (SELECT 1 FROM playback_sessions_sync live WHERE live.session_id = lc.session_id::text)`
 
 type playbackSessionsReader interface {

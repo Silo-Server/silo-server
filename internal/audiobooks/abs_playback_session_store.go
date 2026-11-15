@@ -56,13 +56,15 @@ func (s *ABSPlaybackSessionStore) GetPlaybackSession(ctx context.Context, id str
 	row := s.Pool.QueryRow(ctx, `
 		SELECT id, user_id, profile_id, content_id,
 		       time_listening_seconds, current_position_seconds,
-		       started_at, last_sync_at, closed_at, media_file_id
+		       started_at, last_sync_at, closed_at, media_file_id,
+		       client_session_id IS NOT NULL
 		FROM abs_playback_sessions
 		WHERE id = $1`, id)
 	err := row.Scan(
 		&sess.ID, &uid, &profileID, &sess.ContentID,
 		&sess.TimeListeningSeconds, &sess.CurrentPositionSeconds,
 		&sess.StartedAt, &sess.LastSyncAt, &closedAt, &sess.MediaFileID,
+		&sess.ReportOnly,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return abs.ABSPlaybackSession{}, abs.ErrNotFound
@@ -74,6 +76,89 @@ func (s *ABSPlaybackSessionStore) GetPlaybackSession(ctx context.Context, id str
 	sess.ProfileID = profileID
 	sess.ClosedAt = closedAt
 	return sess, nil
+}
+
+// reportedListeningSlackSeconds is how far a reported play's listening may
+// run ahead of the time since its row began, for reporting delays.
+const reportedListeningSlackSeconds = 60
+
+// updateReportedPlaySQL applies a report to the open play of a client
+// session. Listening is the client's running total less the total the row
+// began at, never more than the row's age allows, and never decreasing. It
+// returns the play's id and whether its lifecycle start was recorded.
+const updateReportedPlaySQL = `
+	UPDATE abs_playback_sessions s
+	SET current_position_seconds = $4,
+	    time_listening_seconds   = GREATEST(s.time_listening_seconds,
+	        LEAST(FLOOR($5::double precision - s.reported_listening_base),
+	              EXTRACT(EPOCH FROM now() - s.started_at) + $6)::integer),
+	    last_sync_at             = now()
+	WHERE s.user_id = $1 AND s.profile_id = $2 AND s.client_session_id = $3 AND s.closed_at IS NULL
+	RETURNING s.id, EXISTS (SELECT 1 FROM playback_session_lifecycle lc WHERE lc.session_id = s.id::uuid)`
+
+// ReportPlay applies one live report of a play a client reports only through
+// /session/local. The client session's open play takes the report; without
+// one, a new play starts under newID unless the account already has
+// maxOpen open, which the returned id being empty reports. announced is
+// false while the play has no lifecycle row, so the caller records its start.
+//
+// The open play is looked up again under a per-account lock before a new one
+// is admitted, so concurrent first reports on different servers start one
+// play, and the cap holds across the cluster.
+func (s *ABSPlaybackSessionStore) ReportPlay(ctx context.Context, p abs.ReportedPlay, newID string, maxOpen int) (string, bool, error) {
+	uid, err := strconv.Atoi(p.UserID)
+	if err != nil {
+		return "", false, fmt.Errorf("abs_playback_session_store: invalid user_id %q: %w", p.UserID, err)
+	}
+	tx, err := s.Pool.Begin(ctx)
+	if err != nil {
+		return "", false, fmt.Errorf("abs_playback_session_store: report play: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	id, announced, err := reportPlayTx(ctx, tx, uid, p, newID, maxOpen)
+	if err != nil {
+		return "", false, fmt.Errorf("abs_playback_session_store: report play: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return "", false, fmt.Errorf("abs_playback_session_store: report play commit: %w", err)
+	}
+	return id, announced, nil
+}
+
+func reportPlayTx(ctx context.Context, tx pgx.Tx, uid int, p abs.ReportedPlay, newID string, maxOpen int) (id string, announced bool, err error) {
+	update := func() (bool, error) {
+		err := tx.QueryRow(ctx, updateReportedPlaySQL, uid, p.ProfileID, p.ClientSessionID,
+			p.PositionSeconds, p.ListeningSeconds, reportedListeningSlackSeconds).Scan(&id, &announced)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return false, nil
+		}
+		return err == nil, err
+	}
+	if found, err := update(); err != nil || found {
+		return id, announced, err
+	}
+	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended('abs_reported_plays', $1))`, uid); err != nil {
+		return "", false, err
+	}
+	if found, err := update(); err != nil || found {
+		return id, announced, err
+	}
+	var open int
+	if err := tx.QueryRow(ctx, `
+		SELECT COUNT(*) FROM abs_playback_sessions
+		WHERE user_id = $1 AND client_session_id IS NOT NULL AND closed_at IS NULL`, uid).Scan(&open); err != nil {
+		return "", false, err
+	}
+	if open >= maxOpen {
+		return "", false, nil
+	}
+	_, err = tx.Exec(ctx, `
+		INSERT INTO abs_playback_sessions
+		  (id, user_id, profile_id, content_id, media_file_id, started_at, last_sync_at,
+		   time_listening_seconds, current_position_seconds, client_session_id, reported_listening_base)
+		VALUES ($1, $2, $3, $4, $5, now(), now(), 0, $6, $7, GREATEST($8::double precision, 0))`,
+		newID, uid, p.ProfileID, p.ContentID, p.MediaFileID, p.PositionSeconds, p.ClientSessionID, p.ListeningSeconds)
+	return newID, false, err
 }
 
 // SyncPlaybackSession updates the position and accumulated listening time for
