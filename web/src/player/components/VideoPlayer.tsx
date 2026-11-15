@@ -1769,10 +1769,6 @@ export function VideoPlayer({
         reconnectFromDrainedStream();
       };
       if (canSeekAnywhere || isNativePositionInRanges(video.seekable, nativeSeconds)) {
-        if (draining && !hasMediaAhead(video, nativeSeconds)) {
-          reconnectAtTarget();
-          return true;
-        }
         rememberPendingSeek(seconds);
         replanSeekRef.current = replanningRef.current
           ? { sessionId: sessionIdRef.current, revision: planRevisionRef.current, seconds }
@@ -1780,6 +1776,10 @@ export function VideoPlayer({
         // A change queued behind the replan in flight resumes here too.
         onSeek?.(seconds);
         setCurrentTime(seconds);
+        if (draining && !hasMediaAhead(video, nativeSeconds)) {
+          reconnectFromDrainedStream();
+          return true;
+        }
         if (isHlsStream) video.currentTime = nativeSeconds;
         else handleSeek(nativeSeconds);
         return true;

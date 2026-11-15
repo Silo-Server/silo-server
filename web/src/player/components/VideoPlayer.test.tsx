@@ -6433,7 +6433,8 @@ describe("VideoPlayer lost connection", () => {
   it("reconnects at an unbuffered seek target inside the window of a draining HLS stream", async () => {
     const onConnectionLost = vi.fn();
     const onReanchorSeek = vi.fn();
-    const { video } = await drainingHlsStream({ onConnectionLost, onReanchorSeek });
+    const onSeek = vi.fn();
+    const { video } = await drainingHlsStream({ onConnectionLost, onReanchorSeek, onSeek });
     Object.defineProperty(video, "paused", { configurable: true, value: true });
     fireEvent.pause(video);
     expect(onConnectionLost).not.toHaveBeenCalled();
@@ -6441,6 +6442,8 @@ describe("VideoPlayer lost connection", () => {
     act(() => controls.current?.onSeek(1_200));
 
     expect(onReanchorSeek).not.toHaveBeenCalled();
+    // A change queued behind the replan in flight resumes at the target too.
+    expect(onSeek).toHaveBeenCalledExactlyOnceWith(1_200);
     expect(onConnectionLost).toHaveBeenCalledExactlyOnceWith(1_200, false);
   });
 
