@@ -6,6 +6,7 @@ import {
   historyKeys,
   itemKeys,
   libraryCollectionKeys,
+  libraryCollectionTitleKeys,
   mediaSurfaceKeys,
   personKeys,
   progressKeys,
@@ -326,17 +327,21 @@ describe("invalidateMediaSurfaceQueries", () => {
     expect(queryClient.getQueryState(internationalSectionKey)?.isInvalidated).toBe(true);
   });
 
-  it("leaves library layouts alone, scoped or not", async () => {
-    // The sidebar observes every pinned library's layout on every page, so a
-    // media change that refetched layouts would read each one per event.
+  it("leaves library layouts and collection titles alone, scoped or not", async () => {
+    // The sidebar observes every pinned library's layout and collection titles
+    // on every page, so a media change that refetched them would read each one
+    // per event.
     const queryClient = new QueryClient();
     const layoutKey = sectionKeys.libraryLayout(3);
+    const titlesKey = libraryCollectionTitleKeys.library(3);
     queryClient.setQueryData(layoutKey, { sections: [] });
+    queryClient.setQueryData(titlesKey, new Map());
 
     await invalidateMediaSurfaceQueries(queryClient, { libraryId: 3 });
     await invalidateMediaSurfaceQueries(queryClient);
 
     expect(queryClient.getQueryState(layoutKey)?.isInvalidated).toBe(false);
+    expect(queryClient.getQueryState(titlesKey)?.isInvalidated).toBe(false);
   });
 
   it("leaves home section queries alone for a library-scoped change", async () => {

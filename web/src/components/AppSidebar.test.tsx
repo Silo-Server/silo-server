@@ -1,12 +1,14 @@
 // @vitest-environment jsdom
 
 import type { ReactNode } from "react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { MemoryRouter, Route, Routes } from "react-router";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { PluginSettingsInstallation } from "@/hooks/queries/pluginSettings";
+import { markCriticalContentLoaded } from "@/lib/startupPriority";
 
 import AppSidebar from "./AppSidebar";
 import { groupAppNavLinks, isSidebarRailCollapsed, type AppNavLink } from "./AppSidebar.logic";
@@ -33,6 +35,16 @@ let mockLibraries = [{ id: 7, name: "Movies", type: "movies" }];
 let mockRequestsEnabled = false;
 let mockProfileRequestsAllowed = true;
 let mockMyRequests: Array<{ id: string }> = [];
+const mockV2 = vi.hoisted(() => vi.fn());
+let mockPins: Record<
+  string,
+  Array<{ type: "section" | "collection"; id: string; label: string }>
+> = {};
+
+vi.mock("@/api/v2/request", async () => ({
+  ...(await vi.importActual<typeof import("@/api/v2/request")>("@/api/v2/request")),
+  v2: mockV2,
+}));
 
 vi.mock("@/hooks/useAuth", () => {
   const useAuth = () => ({
@@ -61,9 +73,7 @@ vi.mock("@/hooks/queries/libraries", () => ({
 
 vi.mock("@/hooks/queries/sidebarPins", () => ({
   useSidebarPins: () => ({
-    pins: {
-      "7": [{ type: "section", id: "featured", label: "Featured" }],
-    },
+    pins: mockPins,
   }),
   useToggleSidebarPin: () => ({
     togglePin: mockTogglePin,
@@ -209,6 +219,9 @@ describe("AppSidebar", () => {
     mockRequestsEnabled = false;
     mockProfileRequestsAllowed = true;
     mockMyRequests = [];
+    mockPins = { "7": [{ type: "section", id: "featured", label: "Featured" }] };
+    mockV2.mockReset();
+    mockV2.mockRejectedValue(new Error("offline"));
   });
 
   it("links Requests for a blocked profile only while it has requests to manage", () => {
@@ -385,6 +398,47 @@ describe("AppSidebar", () => {
 
     expect(findCustomLink(filtered)?.getAttribute("aria-current")).toBe("page");
     expect(findCustomLink(otherLibrary)?.hasAttribute("aria-current")).toBe(false);
+  });
+
+  it("names a pinned collection by its current title, under its library and in the menu", async () => {
+    mockPins = { "7": [{ type: "collection", id: "c1", label: "Rainy Days" }] };
+    mockPrimaryMenu = {
+      items: [{ type: "collection", library_id: 7, collection_id: "c1", label: "Rainy Days" }],
+    };
+    // An administrator renamed the collection after it was pinned.
+    mockV2.mockImplementation((route: string) =>
+      route === "GET /api/v2/library/{id}/collections"
+        ? Promise.resolve({
+            library_id: "7",
+            collections: [
+              { id: "c1", library_id: "7", library_ids: ["7"], title: "Stormy Nights" },
+            ],
+            groups: [],
+          })
+        : Promise.reject(new Error("offline")),
+    );
+    markCriticalContentLoaded();
+    render(
+      <QueryClientProvider client={new QueryClient()}>
+        <MemoryRouter initialEntries={["/"]}>
+          <AppSidebar />
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+
+    try {
+      fireEvent.click(screen.getByRole("button", { name: /Movies/, expanded: false }));
+      const links = await screen.findAllByRole("link", { name: "Stormy Nights" });
+
+      // The library pin and the menu link, each opening a catalog headed with the current title.
+      expect(
+        links.map((link) =>
+          new URL(link.getAttribute("href")!, "http://silo").searchParams.get("title"),
+        ),
+      ).toEqual(["Stormy Nights", "Stormy Nights"]);
+    } finally {
+      cleanup();
+    }
   });
 
   it("preserves the current library query when linking to the active library", () => {

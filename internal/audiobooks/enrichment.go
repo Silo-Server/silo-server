@@ -570,7 +570,7 @@ func (e *Enricher) enrichItem(ctx context.Context, item enrichmentItemRow) error
 		resolveErr := fmt.Errorf("resolving audiobook chain for folder %d: %w", item.FolderID, err)
 		// Classify the cause, not the wrapper: folder 403 must not read as
 		// an HTTP status.
-		e.recordFailure(ctx, item, classifyProviderError(err), resolveErr.Error())
+		e.recordFailure(ctx, item, classifyProviderError(err), resolveErr.Error(), time.Time{})
 		return resolveErr
 	}
 	if len(providers) == 0 {
@@ -624,7 +624,7 @@ func (e *Enricher) enrichItem(ctx context.Context, item enrichmentItemRow) error
 			// A refused curator's refresh says nothing about the providers.
 			return persistErr
 		}
-		e.recordFailure(ctx, item, classifyProviderError(persistErr), persistErr.Error())
+		e.recordFailure(ctx, item, classifyProviderError(persistErr), persistErr.Error(), time.Time{})
 		return persistErr
 	}
 	e.enqueueRemoteArtwork(ctx, item.ContentID, accumulator)
@@ -1134,7 +1134,7 @@ func (e *Enricher) failOrDefer(ctx context.Context, item enrichmentItemRow, prov
 		return e.deferItem(ctx, item, until)
 	}
 	joined := errors.Join(providerErrs...)
-	e.recordFailure(ctx, item, classifyProviderError(joined), joined.Error())
+	e.recordFailure(ctx, item, classifyProviderError(joined), joined.Error(), latestPauseMet(providerErrs))
 	return fmt.Errorf("no metadata obtained, %d provider error(s): %w", len(providerErrs), joined)
 }
 
@@ -1154,6 +1154,19 @@ func pausedOnly(errs []error) (time.Time, bool) {
 	return until, len(errs) > 0
 }
 
+// latestPauseMet returns the latest pause end among the paused providers the
+// item met, or zero when it met none.
+func latestPauseMet(errs []error) time.Time {
+	var latest time.Time
+	for _, err := range errs {
+		var paused *providerPausedError
+		if errors.As(err, &paused) && paused.until.After(latest) {
+			latest = paused.until
+		}
+	}
+	return latest
+}
+
 // deferItem returns a claimed item untouched until the providers' pause ends.
 func (e *Enricher) deferItem(ctx context.Context, item enrichmentItemRow, until time.Time) error {
 	slog.DebugContext(ctx, "audiobook enrichment: providers paused; deferring item", "component", "audiobooks",
@@ -1169,14 +1182,20 @@ func (e *Enricher) deferItem(ctx context.Context, item enrichmentItemRow, until 
 // recordFailure stamps a classified failure and parks a retry. Swallowed for
 // the same reason as recordOutcome. A rate-limited item stays out at least
 // until the gate lets its own providers be called again, which carries a
-// provider's retry-after over to the item.
-func (e *Enricher) recordFailure(ctx context.Context, item enrichmentItemRow, class EnrichmentErrorClass, cause string) {
+// provider's retry-after over to the item: the end of the chain's rate-limit
+// pauses and of pausedUntil, the latest pause the item itself met. A route
+// paused as down that the item never needed does not hold it back.
+func (e *Enricher) recordFailure(ctx context.Context, item enrichmentItemRow, class EnrichmentErrorClass, cause string, pausedUntil time.Time) {
 	if e == nil || e.state == nil {
 		return
 	}
 	var retryAfter time.Duration
 	if class == EnrichmentErrorRateLimited {
-		if until := e.gate.latestPause(item.Chain); !until.IsZero() {
+		until := e.gate.latestRateLimit(item.Chain)
+		if pausedUntil.After(until) {
+			until = pausedUntil
+		}
+		if !until.IsZero() {
 			retryAfter = time.Until(until)
 		}
 	}

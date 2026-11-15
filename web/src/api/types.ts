@@ -635,7 +635,14 @@ export interface AudiobookRelatedItem {
   title: string;
   year?: number;
   poster_url?: string;
+  poster_thumbhash?: string;
   series_index?: number;
+  /** Audiobooks only: total listening time in seconds. */
+  duration_seconds?: number;
+  /** The profile finished this book; absent when not. */
+  played?: boolean;
+  /** 0-1, only while the book is started and not played. */
+  progress_ratio?: number;
 }
 
 export interface AudiobookSeriesGroup {
@@ -892,6 +899,14 @@ export interface BrowseItem {
   availability?: { have: number; total: number } | null;
   sort_metrics?: BrowseItemSortMetrics | null;
   user_state?: MediaItemUserState;
+  /** Audiobook and ebook browse cards: up to three author names in credit order. */
+  authors?: string[];
+  /**
+   * The profile's resume position and the length it is measured against, in
+   * seconds, on a title it has started and not finished.
+   */
+  position_seconds?: number;
+  duration_seconds?: number;
   // Manga-only count chips. The host populates these only for type='manga'
   // browse items; they are absent (undefined) for every other media type.
   // chapter count = loose chapters without a volume token; volume count =

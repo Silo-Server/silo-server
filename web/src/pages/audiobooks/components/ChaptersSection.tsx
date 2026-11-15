@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { ArrowUpDown, ChevronDown, Play } from "lucide-react";
+import { Check } from "lucide-react";
 import { numberText, useT, type Translate } from "@/i18n";
 import type { AudiobookChapter, AudiobookFile } from "@/lib/audiobooks/types";
 
@@ -9,8 +9,6 @@ interface ChaptersSectionProps {
   onSelect: (absoluteSeconds: number) => void;
 }
 
-type SortMode = "position" | "longest-first";
-
 interface Row {
   chapter: AudiobookChapter;
   absoluteStart: number;
@@ -18,6 +16,13 @@ interface Row {
   label: string;
   positionIndex: number; // 1-based
 }
+
+/** A book this short lists every chapter without a Show all toggle. */
+const SHOW_ALL_UP_TO = 10;
+/** Rows the collapsed list keeps before the current chapter. */
+const ROWS_BEFORE_CURRENT = 3;
+/** Rows the collapsed list shows in all. */
+const COLLAPSED_ROWS = 8;
 
 function buildRows(t: Translate, files: AudiobookFile[]): Row[] {
   const rows: Row[] = [];
@@ -57,19 +62,15 @@ function formatChapterStart(totalSeconds: number): string {
   return numberText(`${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`);
 }
 
+/**
+ * The book's chapters, open by default. A long book shows a window around the
+ * chapter the listener is in, with finished chapters ticked, and a toggle for
+ * the full list.
+ */
 export function ChaptersSection({ files, currentPositionSeconds, onSelect }: ChaptersSectionProps) {
   const t = useT();
   const rows = useMemo(() => buildRows(t, files), [t, files]);
-  const [sort, setSort] = useState<SortMode>("position");
-  const [sortOpen, setSortOpen] = useState(false);
   const [expanded, setExpanded] = useState(false);
-
-  const sorted = useMemo(() => {
-    if (sort === "longest-first") {
-      return [...rows].sort((a, b) => b.durationSeconds - a.durationSeconds);
-    }
-    return rows;
-  }, [rows, sort]);
 
   const currentIndex = useMemo(() => {
     if (currentPositionSeconds == null) return -1;
@@ -82,100 +83,91 @@ export function ChaptersSection({ files, currentPositionSeconds, onSelect }: Cha
 
   if (rows.length === 0) return null;
 
+  const collapsible = rows.length > SHOW_ALL_UP_TO;
+  let visible = rows;
+  if (collapsible && !expanded) {
+    const start = Math.max(
+      0,
+      Math.min(currentIndex - ROWS_BEFORE_CURRENT, rows.length - COLLAPSED_ROWS),
+    );
+    visible = rows.slice(start, start + COLLAPSED_ROWS);
+  }
+
   return (
     <section>
-      <div className="mb-4 flex items-center justify-between">
-        <button
-          type="button"
-          onClick={() => setExpanded((v) => !v)}
-          aria-expanded={expanded}
-          className="hover:text-primary flex items-center gap-2 text-xl font-semibold tracking-tight transition-colors"
-        >
-          <ChevronDown
-            className={`h-5 w-5 transition-transform ${expanded ? "" : "-rotate-90 rtl:rotate-90"}`}
-          />
+      <div className="mb-3 flex items-baseline justify-between gap-3">
+        <h2 className="text-xl font-semibold tracking-tight">
           {t("web.audiobooks.chapters.heading")}
-          <span className="text-muted-foreground text-sm font-normal">
-            {t("web.audiobooks.chapters.count", { count: rows.length })}
-          </span>
-        </button>
-        {expanded && (
-          <div className="relative">
-            <button
-              type="button"
-              aria-label={t("web.audiobooks.chapters.sortAria")}
-              aria-haspopup="menu"
-              aria-expanded={sortOpen}
-              className="text-muted-foreground hover:text-foreground flex items-center gap-1 text-xs"
-              onClick={() => setSortOpen((v) => !v)}
-            >
-              <ArrowUpDown className="h-3.5 w-3.5" />
-              {t("web.audiobooks.chapters.sort")}
-            </button>
-            {sortOpen && (
-              <div
-                role="menu"
-                className="bg-popover absolute end-0 mt-2 w-44 overflow-hidden rounded-md border shadow-lg"
-              >
-                {(["position", "longest-first"] as SortMode[]).map((mode) => (
-                  <button
-                    key={mode}
-                    role="menuitem"
-                    type="button"
-                    data-active={mode === sort ? "true" : undefined}
-                    className="hover:bg-muted/60 w-full px-3 py-2 text-start text-sm"
-                    onClick={() => {
-                      setSort(mode);
-                      setSortOpen(false);
-                    }}
-                  >
-                    {mode === "position"
-                      ? t("web.audiobooks.chapters.sortPosition")
-                      : t("web.audiobooks.chapters.sortLongest")}
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
+        </h2>
+        {collapsible && (
+          <button
+            type="button"
+            onClick={() => setExpanded((v) => !v)}
+            aria-expanded={expanded}
+            className="text-muted-foreground hover:text-foreground text-sm font-semibold transition-colors"
+          >
+            {expanded
+              ? t("web.audiobooks.chapters.showFewer")
+              : t("web.audiobooks.chapters.showAll", { count: numberText(rows.length) })}
+          </button>
         )}
       </div>
 
-      {expanded && (
-        <ol className="divide-border divide-y rounded-xl border">
-          {sorted.map((row) => {
-            const isCurrent = rows[currentIndex]?.chapter === row.chapter;
-            return (
-              <li key={`${row.chapter.index}-${row.absoluteStart}`}>
-                <button
-                  type="button"
-                  onClick={() => onSelect(row.absoluteStart)}
-                  data-current={isCurrent ? "true" : undefined}
-                  className={`hover:bg-muted/50 flex w-full items-center gap-3 px-4 py-3 text-start transition-colors ${
-                    isCurrent ? "bg-muted/50 border-primary border-s-2" : ""
+      <ol className="grid gap-0.5">
+        {visible.map((row) => {
+          const index = row.positionIndex - 1;
+          const isCurrent = index === currentIndex;
+          const isDone = currentIndex >= 0 && index < currentIndex;
+          const leftInChapter =
+            isCurrent && currentPositionSeconds != null
+              ? Math.max(0, row.absoluteStart + row.durationSeconds - currentPositionSeconds)
+              : 0;
+          return (
+            <li key={`${row.chapter.index}-${row.absoluteStart}`}>
+              <button
+                type="button"
+                onClick={() => onSelect(row.absoluteStart)}
+                data-current={isCurrent ? "true" : undefined}
+                aria-current={isCurrent ? "step" : undefined}
+                className={`grid w-full grid-cols-[2rem_minmax(0,1fr)_auto] items-center gap-3 rounded-lg px-3 py-2.5 text-start transition-colors sm:grid-cols-[2rem_minmax(0,1fr)_auto_auto] sm:gap-4 ${
+                  isCurrent ? "bg-primary/15 hover:bg-primary/20" : "hover:bg-muted/50"
+                }`}
+              >
+                <span
+                  className={`text-end text-xs tabular-nums ${
+                    isCurrent ? "text-foreground font-semibold" : "text-muted-foreground"
                   }`}
                 >
-                  <span className="text-muted-foreground w-8 shrink-0 text-end text-xs tabular-nums">
-                    {row.positionIndex}
+                  {row.positionIndex}
+                </span>
+                <span className="min-w-0">
+                  <span
+                    className={`block truncate text-sm ${
+                      isDone ? "text-muted-foreground" : "font-medium"
+                    } ${isCurrent ? "font-semibold" : ""}`}
+                  >
+                    {row.label}
                   </span>
-                  <span className="min-w-0 flex-1 truncate text-sm font-medium">{row.label}</span>
-                  <span className="text-muted-foreground hidden shrink-0 font-mono text-xs sm:inline">
-                    {formatChapterStart(row.absoluteStart)}
-                  </span>
-                  <span className="text-muted-foreground shrink-0 font-mono text-xs">
-                    {formatChapterDuration(t, row.durationSeconds)}
-                  </span>
-                  {isCurrent && (
-                    <span className="text-primary flex shrink-0 items-center gap-1 text-xs">
-                      <Play className="h-3 w-3 fill-current" />
-                      {t("web.audiobooks.chapters.listening")}
+                  {isCurrent && leftInChapter > 0 && (
+                    <span className="text-muted-foreground mt-0.5 block text-xs">
+                      {t("web.audiobooks.chapters.leftInChapter", {
+                        time: formatChapterDuration(t, leftInChapter),
+                      })}
                     </span>
                   )}
-                </button>
-              </li>
-            );
-          })}
-        </ol>
-      )}
+                </span>
+                <span className="text-muted-foreground hidden text-xs tabular-nums sm:inline">
+                  {formatChapterStart(row.absoluteStart)}
+                </span>
+                <span className="text-muted-foreground flex items-center justify-end gap-1.5 text-xs tabular-nums">
+                  {isDone && <Check className="text-success size-3.5" aria-hidden="true" />}
+                  {formatChapterDuration(t, row.durationSeconds)}
+                </span>
+              </button>
+            </li>
+          );
+        })}
+      </ol>
     </section>
   );
 }
