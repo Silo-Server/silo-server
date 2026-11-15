@@ -180,6 +180,13 @@
 ./internal/scanner TestScanSubtreeAudiobookRenameKeepsBookDB
 # Two copies of one recording on disk are two items; only a moved folder reuses one.
 ./internal/scanner TestScanAudiobookSecondCopyIsItsOwnItemDB
+# An admin's metadata refresh reads an unchanged audiobook's tags again and
+# keeps its item, file, and progress; an ordinary scan still skips it.
+./internal/scanner TestAudiobookTagRereadKeepsItemDB
+
+# A book whose link moves to another book while a scan reads it keeps its
+# item; the other book's metadata is not written under its root.
+./internal/scanner TestAudiobookRootMovedWhileReadKeepsItsItemDB
 
 # Subtree scans of a book folder and of the folder above it keep the book's
 # item, and the folder's own audio becomes a book beside it.
@@ -919,7 +926,8 @@
 
 # An unmatched item an admin ignored stays off the unmatched and scan-retry
 # lists, the matcher queues and library refreshes across a rescan, the matcher
-# and item refreshes skip it, and a match clears the mark.
+# and item refreshes skip it, and a match clears the mark. A full library
+# refresh still lists an ignored audiobook, for a tags-only re-read.
 ./internal/api/handlers TestIgnoredUnmatchedItemStaysIgnoredAcrossRescanDB
 ./internal/metadata TestProcessLeavesIgnoredItemUnmatchedDB
 ./internal/metadata TestMatchQueuesSkipIgnoredItemsDB
@@ -1064,6 +1072,8 @@
 # One node sweeps at a time, and a rate-limited provider is left alone for the
 # rest of the sweep.
 ./internal/audiobooks TestAudiobookEnrichmentSweepRateLimitDB
+# One sweep keeps claiming batches until no book is due.
+./internal/audiobooks TestAudiobookEnrichmentSweepDrainsBacklogDB
 
 # Audiobook enrichment loads the tagged narrators and series position its
 # candidate checks compare against.
@@ -1088,6 +1098,7 @@
 # per-node rows to the total, and a wide bucket's split comes from its peak minute.
 ./internal/dashmetrics TestSampleSharedRecordsEgressPerNodeDB
 ./internal/api/handlers TestQueryAdminTimeseriesSplitsEgressBySourceDB
+./internal/api/handlers TestQueryAdminTimeseriesSplitsStreamsByPeakMinuteDB
 
 # Clearing admin collection artwork commits the cleared reference even when a
 # stored variant fails to delete.

@@ -42,6 +42,16 @@ const (
 	// index: tens of seconds on slow network storage. A read that takes
 	// longer gives way to the demux, which streams cues as it goes.
 	wholeReadTimeout = 3 * time.Minute
+	// slowRead is the mean time a whole read's reads may take before it
+	// gives way to the demux (embeddedsub.ReadOptions.SlowRead). The time
+	// includes waiting behind the read's own 16 reads in flight: network
+	// storage answers them in tens of milliseconds, and a disk that serves
+	// one at a time in up to a few hundred. A mount of remote storage that
+	// fetches a large chunk for every small read takes from most of a
+	// second to several: reading every cue there takes minutes and starves
+	// any playback stream reading the same file, while the demux reads the
+	// file in order.
+	slowRead = 500 * time.Millisecond
 	// keepTimeout bounds storing what a read kept.
 	keepTimeout = time.Minute
 	// claimLease outlasts the read and the keep it covers, so a claim never
@@ -104,6 +114,16 @@ func windowBudget(to time.Duration) int64 {
 		return keptMaxBytes
 	}
 	return windowMaxBytes
+}
+
+// wholeSlowRead is the SlowRead of a whole read of ref's track through the
+// source's index: none for a track only the index can read, which has no
+// demux to give way to.
+func wholeSlowRead(ref playback.EmbeddedSubtitleRef) time.Duration {
+	if ref.IndexOnly {
+		return 0
+	}
+	return slowRead
 }
 
 // Options configures a Store.
@@ -330,7 +350,11 @@ func (s *Store) sourceWindow(ctx context.Context, path string, ref playback.Embe
 	if err != nil {
 		return nil, err
 	}
-	res, err := embeddedsub.ReadPackets(ctx, path, idx, number, shift(from, start), shift(to, start), embeddedsub.ReadOptions{MaxBytes: windowBudget(to)})
+	opts := embeddedsub.ReadOptions{MaxBytes: windowBudget(to)}
+	if to == embeddedsub.WholeTo {
+		opts.SlowRead = wholeSlowRead(ref)
+	}
+	res, err := embeddedsub.ReadPackets(ctx, path, idx, number, shift(from, start), shift(to, start), opts)
 	if err != nil {
 		return nil, err
 	}
@@ -511,7 +535,7 @@ func (s *Store) readAndCopy(ctx context.Context, f *flight, path string, ref pla
 		return nil, embeddedsub.ReadStats{}, nil, err
 	}
 	res, err := embeddedsub.ReadPackets(ctx, path, idx, number, embeddedsub.WholeFrom, embeddedsub.WholeTo,
-		embeddedsub.ReadOptions{Background: f.prio, MaxBytes: s.trackMaxBytes(ref.Codec)})
+		embeddedsub.ReadOptions{Background: f.prio, MaxBytes: s.trackMaxBytes(ref.Codec), SlowRead: wholeSlowRead(ref)})
 	if err != nil {
 		return nil, embeddedsub.ReadStats{}, nil, err
 	}

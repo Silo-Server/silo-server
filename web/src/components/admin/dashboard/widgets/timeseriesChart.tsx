@@ -23,6 +23,8 @@ export interface TimeseriesChartBodyProps {
   overlays?: readonly LineChartOverlay[];
   /** Bands drawn stacked instead of the primary line; see LineChart. */
   stacks?: readonly LineChartStack[];
+  /** Primary series color outside the categorical slots; see LineChart. */
+  color?: string;
   height?: number;
   /**
    * Fill the card's content area instead of a fixed `height`. Widget rows are
@@ -52,6 +54,7 @@ export function TimeseriesChartBody({
   minTickStep,
   overlays,
   stacks,
+  color,
   height = 160,
   fill = false,
 }: TimeseriesChartBodyProps) {
@@ -90,6 +93,7 @@ export function TimeseriesChartBody({
       minTickStep={minTickStep}
       overlays={overlays}
       stacks={stacks}
+      color={color}
     />
   );
 }

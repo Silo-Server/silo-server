@@ -7505,6 +7505,9 @@
             ],
             "type": "string"
           },
+          "streams_by_method": {
+            "type": "boolean"
+          },
           "timeseries": {
             "type": "boolean"
           },
@@ -7526,6 +7529,7 @@
           "downloads_stats",
           "egress_totals",
           "egress_by_source",
+          "streams_by_method",
           "api_clients",
           "revision",
           "state",
@@ -7840,6 +7844,29 @@
         ],
         "type": "object"
       },
+      "AdminDashboardStreamsByMethod": {
+        "additionalProperties": false,
+        "properties": {
+          "direct": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "remux": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "transcode": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "direct",
+          "remux",
+          "transcode"
+        ],
+        "type": "object"
+      },
       "AdminDashboardTimeseries": {
         "additionalProperties": false,
         "properties": {
@@ -7936,6 +7963,10 @@
             "format": "int64",
             "type": "integer"
           },
+          "streams_by_method": {
+            "$ref": "#/components/schemas/AdminDashboardStreamsByMethod",
+            "description": "streams split by play method, from the bucket's peak-streams minute, so the parts add up to no more than streams and can be stacked. direct, remux and transcode on the point are each their own peak and may come from different minutes. Sessions with any other play method are streams minus the sum of these values."
+          },
           "t": {
             "description": "RFC 3339 instant in UTC with millisecond precision",
             "format": "date-time",
@@ -7956,7 +7987,8 @@
           "transcode",
           "egress_kbps",
           "download_egress_kbps",
-          "egress_by_source"
+          "egress_by_source",
+          "streams_by_method"
         ],
         "type": "object"
       },

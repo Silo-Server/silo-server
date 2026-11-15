@@ -23,7 +23,10 @@ function RadioDot() {
       aria-hidden
       className="border-muted-foreground/70 group-data-[state=checked]/radio:border-foreground grid size-[18px] shrink-0 place-items-center rounded-full border-[1.5px]"
     >
-      <RadioGroupPrimitive.Indicator className="bg-foreground size-2 rounded-full" />
+      <RadioGroupPrimitive.Indicator
+        data-slot="radio-group-indicator"
+        className="bg-foreground size-2 rounded-full"
+      />
     </span>
   );
 }

@@ -99,7 +99,7 @@ VALUES ($1,'audiobook','Emma','',2008,'{Provider Genre}'::text[])`, id); err != 
 				t.Fatal(err)
 			}
 			defer func() { _ = tx.Rollback(context.Background()) }()
-			if err := s.upsertAudiobookPresentationTx(ctx, tx, folder, id, dir, book, time.Time{}); err != nil {
+			if err := s.upsertAudiobookPresentationTx(ctx, tx, folder, id, dir, canonicalTestPath(t, dir), book, time.Time{}); err != nil {
 				t.Fatal(err)
 			}
 			if err := tx.Commit(ctx); err != nil {
@@ -209,11 +209,77 @@ VALUES ($1,'audiobook','Emma','',$2,'{}'::text[])`, id, itemYear); err != nil {
 	}
 	book := &parsedAudiobook{Title: "Emma", Author: "Jane Austen", Narrator: "Juliet Stevenson", Year: 2005,
 		Files: []parsedAudiobookFile{{Path: path, Duration: 36000}}}
-	got, err := s.upsertAudiobookMediaItem(ctx, folder.ID, newDir, book)
+	got, err := s.upsertAudiobookMediaItem(ctx, folder.ID, newDir, canonicalTestPath(t, newDir), book)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if got != id {
 		t.Fatalf("renamed folder got content ID %s, want the matched item %s", got, id)
+	}
+}
+
+// A book reached through a link that moves to another book while the scan
+// reads it is left alone for this scan: the files it read belong to the other
+// book, and their metadata must not replace this book's.
+func TestAudiobookRootMovedWhileReadKeepsItsItemDB(t *testing.T) {
+	pool := newBookScanTestPool(t)
+	folder := newBookScanTestFolder(t, pool, "audiobooks")
+	ctx := t.Context()
+	root := t.TempDir()
+	first, second := filepath.Join(root, "first"), filepath.Join(root, "second")
+	mtime := time.Date(2024, 1, 2, 3, 4, 5, 0, time.UTC)
+	for _, dir := range []string{first, second} {
+		part := filepath.Join(dir, "01.mp3")
+		writeTestFile(t, part, "audio")
+		if err := os.Chtimes(part, mtime, mtime); err != nil {
+			t.Fatal(err)
+		}
+	}
+	link := filepath.Join(root, "book")
+	if err := os.Symlink(first, link); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM media_item_roots WHERE media_folder_id=$1`, folder.ID)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM media_items WHERE content_id IN (SELECT content_id FROM media_files WHERE media_folder_id=$1)`, folder.ID)
+	})
+	probe := func(title, before string) string {
+		path := filepath.Join(t.TempDir(), "ffprobe")
+		writeFakeTool(t, path, "#!/bin/sh\n"+before+"cat <<'JSON'\n"+
+			`{"format":{"format_name":"mp3","duration":"60.0","size":"5","bit_rate":"64000","tags":{"title":"`+title+`","artist":"Synthetic Author"}},"streams":[{"index":0,"codec_type":"audio","codec_name":"mp3","channels":2}],"chapters":[]}`+
+			"\nJSON\n")
+		return path
+	}
+	s := NewScanner(NewFileRepository(pool), probe("First Book", ""), nil, 1, false, 0)
+	var skipped int64
+	if err := s.reconcileAudiobookFolder(ctx, folder, link, nil, nil, time.Time{}, &skipped, nil); err != nil {
+		t.Fatal(err)
+	}
+	// Make the first book's file look changed, so the next scan reads it, and
+	// move the link to the second book while that read runs.
+	if _, err := pool.Exec(ctx, `UPDATE media_files SET file_size = 1 WHERE media_folder_id = $1`, folder.ID); err != nil {
+		t.Fatal(err)
+	}
+	s.ffprobePath = probe("Second Book", fmt.Sprintf("ln -sfn '%s' '%s'\n", second, link))
+	if err := s.reconcileAudiobookFolder(ctx, folder, link, nil, nil, time.Time{}, &skipped, nil); err == nil {
+		t.Fatal("scan of a book whose link moved while it was read succeeded")
+	}
+	var titles []string
+	rows, err := pool.Query(ctx, `SELECT DISTINCT mi.title FROM media_items mi JOIN media_files mf ON mf.content_id = mi.content_id WHERE mf.media_folder_id = $1`, folder.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for rows.Next() {
+		var title string
+		if err := rows.Scan(&title); err != nil {
+			t.Fatal(err)
+		}
+		titles = append(titles, title)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(titles, []string{"First Book"}) {
+		t.Fatalf("titles = %v, want [First Book]", titles)
 	}
 }

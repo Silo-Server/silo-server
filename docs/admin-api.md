@@ -1105,6 +1105,7 @@ though layout save and reset are served; see
 | `downloads_stats` | `GET /admin/stats/downloads` serves the offline-download aggregate, and timeseries points carry the additive `download_egress_kbps` split. |
 | `egress_totals` | `GET /admin/stats/timeseries` carries the window's additive `egress_bytes` and `download_egress_bytes` totals. |
 | `egress_by_source` | `GET /admin/stats/timeseries` carries `egress_sources` and each point's `egress_by_source` split. |
+| `streams_by_method` | `GET /admin/stats/timeseries` points carry the `streams_by_method` split. |
 | `api_clients` | `GET /admin/stats/api-clients` and `GET /admin/stats/api-clients/{session_id}/endpoints` serve per-session API request counts. |
 
 ```json
@@ -1119,6 +1120,7 @@ though layout save and reset are served; see
   "downloads_stats": true,
   "egress_totals": true,
   "egress_by_source": true,
+  "streams_by_method": true,
   "api_clients": true
 }
 ```
@@ -1316,6 +1318,14 @@ also covers sources that never served at a bucket's peak minute. Each carries
 sampled minute like the window's own `egress_bytes`. Rank sources by that, not
 by summing the per-point split, which only sees peak minutes.
 
+`direct`, `remux` and `transcode` each take their own per-bucket peak, like
+`streams`, so past the one-minute resolution they may come from different
+minutes and can add up to more than `streams`. `streams_by_method` is the
+stackable form: the same three counts read from the minute whose `streams`
+peaked in the bucket (the earliest such minute on a tie), so they add up to no
+more than that point's `streams`. The remainder is sessions with any other
+play method.
+
 A bucket with no sample in it is absent from `points` rather than zero — a gap
 (a restart, a stopped server) and an idle bucket are different facts. Stream
 telemetry being disabled means no `proc:` rows, not an error.
@@ -1343,7 +1353,8 @@ fresh install renders "collecting data" instead of an empty chart.
       "transcode": 2,
       "egress_kbps": 48211,
       "download_egress_kbps": 6100,
-      "egress_by_source": { "api": 9211, "node:4": 39000 }
+      "egress_by_source": { "api": 9211, "node:4": 39000 },
+      "streams_by_method": { "direct": 1, "remux": 0, "transcode": 2 }
     }
   ]
 }
@@ -2522,12 +2533,13 @@ invalidates the exact compatibility status scope only for the active authority.
 
 ### Dashboard capability discovery in v2
 
-`GET /api/v2/admin/dashboard/capabilities` returns the eleven dashboard support
+`GET /api/v2/admin/dashboard/capabilities` returns the twelve dashboard support
 flags to an acting administrator. These describe the v2 surface in the API build;
 they do not promise that a database or other runtime dependency is healthy.
 
 `timeseries`, `playback_activity`, `top_activity`, `health`, `watch_providers`,
-`downloads_stats`, `egress_totals`, `egress_by_source` and `api_clients` are true for
+`downloads_stats`, `egress_totals`, `egress_by_source`, `streams_by_method` and
+`api_clients` are true for
 the existing v2 dashboard operations. `server_layouts` remains false until the full
 layout lifecycle is accepted, although layout read, save and reset are served.
 `log_level_list` is true for the accepted multi-level application-log reader.

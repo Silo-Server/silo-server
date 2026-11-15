@@ -201,6 +201,9 @@ importers:
       tsrs:
         specifier: 0.18.0-ts7.1.0-dev.20260929
         version: 0.18.0-ts7.1.0-dev.20260929
+      tw-animate-css:
+        specifier: ^1.4.0
+        version: 1.4.0
       typescript:
         specifier: ^5.7.0
         version: 5.9.3
@@ -3259,6 +3262,9 @@ packages:
     resolution: {integrity: sha512-9T0b4Uam/yMFIK16GUx0fUrJqYZnJ/gvSmV9JB8NTyDePvwCI45WFWxyEV/UMV3KfdNRJG/PBsm3fSIB9WmWsA==}
     engines: {node: '>=16.20.0'}
     hasBin: true
+
+  tw-animate-css@1.4.0:
+    resolution: {integrity: sha512-7bziOlRqH0hJx80h/3mbicLW7o8qLsH5+RaLR2t+OHM3D0JlWGODQKQ4cxbK7WlvmUxpcj6Kgu6EKqjrGFe3QQ==}
 
   type-check@0.4.0:
     resolution: {integrity: sha512-XleUoc9uwGXqjWwXaUTZAmzMcFZ5858QA2vvx1Ur5xIcixXIP+8LnFDgRplU30us6teqdlskFfu+ae4K79Ooew==}
@@ -6415,6 +6421,8 @@ snapshots:
       '@tsrs/linux-arm64-musl': 0.18.0-ts7.1.0-dev.20260929
       '@tsrs/linux-x64-gnu': 0.18.0-ts7.1.0-dev.20260929
       '@tsrs/linux-x64-musl': 0.18.0-ts7.1.0-dev.20260929
+
+  tw-animate-css@1.4.0: {}
 
   type-check@0.4.0:
     dependencies:

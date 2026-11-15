@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -66,24 +67,116 @@ func audiobookDiscNumber(name string) int {
 // fail the book. A nil inventory allows every audio file and disc folder. The
 // error wraps errFolderHasNoMedia when root is gone or holds no allowed audio.
 func audiobookBookParts(root string, allowedPaths map[string]bool) ([]string, error) {
+	return (*audiobookWalkedBook)(nil).parts(root, allowedPaths)
+}
+
+// audiobookWalkedBook is what the walk already read of a book folder: its
+// canonical path and the listings of the folder and of the disc folders it
+// took. Parts are listed from it instead of reading the folders again. When
+// the walk could not take a listing whole (an ignored link it never
+// resolved), listed is false and the folders are read from disk as before.
+// A scan holds one for every book until the book is reconciled, so it keeps
+// only what parts reads and shares the walk's path strings.
+type audiobookWalkedBook struct {
+	canonical string
+	listed    bool
+	root      audiobookDirFiles     // the book folder
+	discs     []audiobookWalkedDisc // the disc folders the walk took, if any
+}
+
+// audiobookWalkedDisc is a disc folder's audio files.
+type audiobookWalkedDisc struct {
+	dir   string
+	files []string
+}
+
+// audiobookInventory is what a scan's walks found: the paths they accepted
+// (audiobookRootScan.seenPaths) and what each walk read of its book folders.
+type audiobookInventory struct {
+	seen  map[string]bool
+	walks []map[string]*audiobookWalkedBook
+}
+
+func newAudiobookInventory(seen map[string]bool, scans []audiobookRootScan) audiobookInventory {
+	inventory := audiobookInventory{seen: seen}
+	for _, scan := range scans {
+		if len(scan.books) > 0 {
+			inventory.walks = append(inventory.walks, scan.books)
+		}
+	}
+	return inventory
+}
+
+// book returns what the first walk to find path read of it, as
+// groupAudiobookCandidates keeps the first walk's path; nil for none.
+func (inv audiobookInventory) book(path string) *audiobookWalkedBook {
+	for _, books := range inv.walks {
+		if book, ok := books[path]; ok {
+			return book
+		}
+	}
+	return nil
+}
+
+// audiobookDirFiles is one directory as listAudiobookDir returns it, less
+// the entries parts never reads: other files and folders.
+type audiobookDirFiles struct {
+	files, dirs []string
+}
+
+// newAudiobookWalkedBook records the book folder root with the listings of
+// root and of the disc folders the walk took. A listing the walk could not
+// take whole (nil) leaves the book unlisted, so every folder of it is read
+// from disk.
+func newAudiobookWalkedBook(canonical, root string, files *audiobookDirFiles, discs []audiobookWalkedDisc, discsWhole bool) *audiobookWalkedBook {
+	if canonical == root {
+		canonical = root // share the walk's string
+	}
+	book := &audiobookWalkedBook{canonical: canonical}
+	if files != nil && discsWhole {
+		book.listed, book.root, book.discs = true, *files, discs
+	}
+	return book
+}
+
+// release drops the listings once the book is reconciled. Only the worker
+// reconciling the book reads it.
+func (b *audiobookWalkedBook) release() {
+	if b != nil {
+		b.listed, b.root, b.discs = false, audiobookDirFiles{}, nil
+	}
+}
+
+// add records one entry that parts can use: an audio file or a disc folder.
+// A nil listing stays nil.
+func (f *audiobookDirFiles) add(path string, isDir bool) {
+	switch {
+	case f == nil:
+	case isDir:
+		if isAudiobookDiscDirName(filepath.Base(path)) {
+			f.dirs = append(f.dirs, path)
+		}
+	case SupportsAudioFile(path):
+		f.files = append(f.files, path)
+	}
+}
+
+// parts is audiobookBookParts over the walk's listings, reading from disk any
+// folder the walk did not list. A nil book reads everything from disk.
+func (b *audiobookWalkedBook) parts(root string, allowedPaths map[string]bool) ([]string, error) {
 	allowed := func(path string) bool {
 		return SupportsAudioFile(path) && (allowedPaths == nil || allowedPaths[path])
 	}
-	info, err := fspath.Stat(root)
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			// The book was renamed or deleted between the walk and this read.
-			// It holds no media now, so the caller skips it as it would an
-			// empty folder rather than counting a scan failure.
-			return nil, fmt.Errorf("audiobook %s: %w", root, errFolderHasNoMedia)
+	list := func(dir string) ([]string, []string, error) {
+		if files, dirs, ok := b.listing(root, dir); ok {
+			return files, dirs, nil
 		}
-		return nil, fmt.Errorf("stat audiobook %s: %w", root, err)
+		return listAudiobookDir(dir)
 	}
-	if !info.IsDir() {
-		if !allowed(root) {
-			return nil, fmt.Errorf("audiobook %s: %w", root, errFolderHasNoMedia)
+	if _, _, ok := b.listing(root, root); !ok {
+		if parts, err := audiobookFileRoot(root, allowed); err != nil || parts != nil {
+			return parts, err
 		}
-		return []string{root}, nil
 	}
 
 	type part struct {
@@ -98,7 +191,7 @@ func audiobookBookParts(root string, allowedPaths map[string]bool) ([]string, er
 			}
 		}
 	}
-	files, dirs, err := listAudiobookDir(root)
+	files, dirs, err := list(root)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return nil, fmt.Errorf("audiobook folder %s: %w", root, errFolderHasNoMedia)
@@ -111,7 +204,7 @@ func audiobookBookParts(root string, allowedPaths map[string]bool) ([]string, er
 		if disc == 0 || allowedPaths != nil && !allowedPaths[dir] {
 			continue
 		}
-		discFiles, _, err := listAudiobookDir(dir)
+		discFiles, _, err := list(dir)
 		if err != nil && !errors.Is(err, os.ErrNotExist) {
 			return nil, err
 		}
@@ -134,6 +227,69 @@ func audiobookBookParts(root string, allowedPaths map[string]bool) ([]string, er
 		paths[i] = p.path
 	}
 	return paths, nil
+}
+
+// audiobookFileRoot returns the one part of a loose file book, or nothing
+// when root is a folder. It fails when root is gone or not an allowed audio
+// file.
+func audiobookFileRoot(root string, allowed func(string) bool) ([]string, error) {
+	info, err := fspath.Stat(root)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			// The book was renamed or deleted between the walk and this read.
+			// It holds no media now, so the caller skips it as it would an
+			// empty folder rather than counting a scan failure.
+			return nil, fmt.Errorf("audiobook %s: %w", root, errFolderHasNoMedia)
+		}
+		return nil, fmt.Errorf("stat audiobook %s: %w", root, err)
+	}
+	if info.IsDir() {
+		return nil, nil
+	}
+	if !allowed(root) {
+		return nil, fmt.Errorf("audiobook %s: %w", root, errFolderHasNoMedia)
+	}
+	return []string{root}, nil
+}
+
+// listing returns the walk's listing of dir, the book folder root or one of
+// its disc folders.
+func (b *audiobookWalkedBook) listing(root, dir string) (files, dirs []string, ok bool) {
+	if b == nil || !b.listed {
+		return nil, nil, false
+	}
+	if dir == root {
+		return b.root.files, b.root.dirs, true
+	}
+	for _, disc := range b.discs {
+		if disc.dir == dir {
+			return disc.files, nil, true
+		}
+	}
+	return nil, nil, false
+}
+
+// partsOrRelist lists the book's parts and runs use on them. When use fails
+// on a part that is gone, the walk's listing is out of date: the parts are
+// listed from disk, and use runs again if they differ, as it would have run
+// on a fresh listing.
+func (b *audiobookWalkedBook) partsOrRelist(root string, allowedPaths map[string]bool, use func([]string) error) error {
+	parts, err := b.parts(root, allowedPaths)
+	if err != nil {
+		return err
+	}
+	err = use(parts)
+	if b == nil || !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	fresh, freshErr := audiobookBookParts(root, allowedPaths)
+	if freshErr != nil {
+		return freshErr
+	}
+	if slices.Equal(fresh, parts) {
+		return err
+	}
+	return use(fresh)
 }
 
 // listAudiobookDir returns the files and the subdirectories, symlinks

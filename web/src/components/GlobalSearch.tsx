@@ -48,6 +48,7 @@ import CardPlayOverlay from "./CardPlayOverlay";
 import { numberText, useT, type MessageKey } from "@/i18n";
 
 import { LocalErrorBoundary } from "./LocalErrorBoundary";
+import { isImeComposing } from "@/lib/imeComposition";
 
 // The request suggestions show only once a search has run, so their cards stay
 // out of the launch bundle.
@@ -682,6 +683,7 @@ export function GlobalSearch({
                 selectedIndex >= 0 ? searchResultOptionId(selectedIndex) : undefined
               }
               onKeyDown={(e) => {
+                if (isImeComposing(e)) return;
                 if (e.key === "ArrowDown") {
                   e.preventDefault();
                   moveResultFocus(selectedIndex + 1);

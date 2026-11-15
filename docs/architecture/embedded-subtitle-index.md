@@ -111,9 +111,13 @@ in flight. An excess cold request answers 404 for the player to retry.
 
 Errors tell the caller what to do. `ErrNotSupportedContainer`, `ErrMalformed`,
 `ErrNoCues`, `ErrIncompleteCues`, `ErrUnsupported` and `ErrTooLarge` describe
-the file: fall back to FFmpeg. `ErrFileChanged` means index the file again. A
-`DamagedError` comes with the packets that were readable; a whole-track
-reader falls back. Any other error is a failed read or the caller's context.
+the file: fall back to FFmpeg. `ErrSlowReads` describes its storage, for a
+read that set `ReadOptions.SlowRead`: once its last 16 reads took longer than
+that on average, it sends no more (those already sent finish, so a read that
+needs no more still succeeds), and the caller falls back to FFmpeg too.
+`ErrFileChanged` means index the file again. A `DamagedError` comes with the
+packets that were readable; a whole-track reader falls back. Any other error
+is a failed read or the caller's context.
 
 ## Bounds
 
@@ -283,6 +287,16 @@ three minutes, and storing to one. A request waits on the read for at most
 the first byte; it then demuxes the source, which streams its first cues at
 once, while the read goes on and keeps the track.
 
+A whole read gives way sooner where its reads average over 500 ms with 16 in
+flight (`ErrSlowReads`), as on a mount of remote storage that fetches a large
+chunk for each small read: reading every cue there takes minutes and starves
+any playback stream reading the same file. So does a sidecar window open to
+the end that `keptsub.Store.Window` reads from the source when its kept
+track's copy fails. A sidecar request then demuxes, which keeps the track.
+Jellycompat and translation demux without keeping it, and a prefetch skips
+the track, so on such storage only sidecar requests keep tracks. A track
+only the index can read has no demux to give way to, and is read as before.
+
 **The first byte.** Players give up on a silent response sooner than the
 server does: Android's player client reads with a 30-second timeout, and
 Apple's player gives up after about a minute. Every WebVTT output starts
@@ -297,8 +311,9 @@ first of them aborts the response instead of answering 500. ASS and SUP
 output have no constant prefix (an ASS header is the track's own, and a SUP
 stream starts with a timestamp), so their first byte waits on the read, as
 does a SubRip or ASS answer that jellycompat or translation builds whole
-before writing it; a client that times out leaves the read running, and its
-retry finds the track kept or joins the read.
+before writing it; a client that times out leaves the read running (unless
+it gave way to slow reads), and its retry finds the track kept or joins the
+read.
 
 ## Serving
 

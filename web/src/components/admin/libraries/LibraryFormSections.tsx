@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useId, useState } from "react";
 import type { ReactNode } from "react";
 import {
   ArrowDown,
@@ -165,6 +165,7 @@ export function GeneralFields({
 
 export function FolderFields({ form }: { form: LibraryFormController }) {
   const t = useT();
+  const pathIdBase = useId();
   const [browserOpen, setBrowserOpen] = useState(false);
   const browseLabel = t("web.admin.common.libraryEditor.folders.browse");
   const addPathLabel = t("web.admin.common.libraryEditor.folders.addPath");
@@ -176,6 +177,7 @@ export function FolderFields({ form }: { form: LibraryFormController }) {
           <div key={i} className="flex items-center gap-1.5">
             <FolderOpen className="text-muted-foreground/60 size-4 shrink-0" />
             <PathAutocompleteInput
+              id={`${pathIdBase}-${i}`}
               value={path}
               onValueChange={(value) => form.updatePath(i, value)}
               placeholder={FOLDER_PATH_PLACEHOLDER}
@@ -190,6 +192,8 @@ export function FolderFields({ form }: { form: LibraryFormController }) {
                 className="text-muted-foreground hover:text-destructive size-11 shrink-0 sm:size-9"
                 onClick={() => form.removePath(i)}
                 title={t("web.admin.common.libraryEditor.folders.remove")}
+                aria-label={t("web.admin.common.libraryEditor.folders.remove")}
+                aria-describedby={`${pathIdBase}-${i}`}
               >
                 <Trash2 className="size-3.5" />
               </Button>
@@ -310,6 +314,7 @@ function ProviderLevelSection({
 }) {
   // contentLevelLabel reads the interface language.
   useAppLanguage();
+  const t = useT();
   const [collapsed, setCollapsed] = useState(false);
 
   const moveItem = (index: number, direction: -1 | 1) => {
@@ -325,6 +330,7 @@ function ProviderLevelSection({
       <button
         type="button"
         onClick={() => setCollapsed(!collapsed)}
+        aria-expanded={!collapsed}
         className="text-primary hover:text-primary/80 mb-1.5 flex min-h-11 items-center gap-1.5 text-start text-xs font-semibold tracking-wider uppercase sm:min-h-0"
       >
         {collapsed ? <ChevronRight className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
@@ -360,6 +366,7 @@ function ProviderLevelSection({
                   className="size-11 sm:size-5"
                   disabled={i === 0}
                   onClick={() => moveItem(i, -1)}
+                  aria-label={t("web.settings.interface.moveUp", { label: item.provider_slug })}
                 >
                   <ArrowUp className="size-4 sm:size-2.5" />
                 </Button>
@@ -370,6 +377,7 @@ function ProviderLevelSection({
                   className="size-11 sm:size-5"
                   disabled={i === items.length - 1}
                   onClick={() => moveItem(i, 1)}
+                  aria-label={t("web.settings.interface.moveDown", { label: item.provider_slug })}
                 >
                   <ArrowDown className="size-4 sm:size-2.5" />
                 </Button>

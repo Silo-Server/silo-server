@@ -32967,6 +32967,12 @@
       "value": "⟦Ƒåîļéđ ţö ļöåđ šţŕéåɱ ĥîšţöŕý.~~~~~~~~~~~~⟧"
     }
   ],
+  "web.admin.dashboard.widgets.concurrentStreams.otherMethod": [
+    {
+      "type": 0,
+      "value": "⟦Öţĥéŕ~~⟧"
+    }
+  ],
   "web.admin.dashboard.widgets.concurrentStreams.peak": [
     {
       "type": 0,
@@ -32991,6 +32997,42 @@
     {
       "type": 0,
       "value": "⟦Çöñçûŕŕéñţ šţŕéåɱš~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.dashboard.widgets.concurrentStreams.viewLines": [
+    {
+      "type": 0,
+      "value": "⟦Ļîñéš~~⟧"
+    }
+  ],
+  "web.admin.dashboard.widgets.concurrentStreams.viewLinesLabel": [
+    {
+      "type": 0,
+      "value": "⟦Šĥöŵ éåçĥ þļåýƀåçķ ɱéţĥöđ åš å ļîñé~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.dashboard.widgets.concurrentStreams.viewStacked": [
+    {
+      "type": 0,
+      "value": "⟦Šţåçķéđ~~~⟧"
+    }
+  ],
+  "web.admin.dashboard.widgets.concurrentStreams.viewStackedLabel": [
+    {
+      "type": 0,
+      "value": "⟦Šĥöŵ þļåýƀåçķ ɱéţĥöđš šţåçķéđ~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.dashboard.widgets.concurrentStreams.viewTotal": [
+    {
+      "type": 0,
+      "value": "⟦Ţöţåļ~~⟧"
+    }
+  ],
+  "web.admin.dashboard.widgets.concurrentStreams.viewTotalLabel": [
+    {
+      "type": 0,
+      "value": "⟦Šĥöŵ ţöţåļ šţŕéåɱš öñļý~~~~~~~~~~⟧"
     }
   ],
   "web.admin.dashboard.widgets.downloads.empty": [

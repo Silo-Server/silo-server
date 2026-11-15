@@ -759,7 +759,7 @@ export default function EbookReader() {
               aria-label={t("web.reader.toolbar.fileSelect")}
               value={selectedFile.file_id}
               onChange={(event) => handleFileChange(event.target.value)}
-              className="border-border bg-background text-foreground focus-visible:border-ring focus-visible:ring-ring/50 hidden h-8 max-w-44 rounded-md border px-2 text-xs outline-none focus-visible:ring-[3px] sm:block"
+              className="border-input bg-background text-foreground focus-visible:border-ring focus-visible:ring-ring/50 hidden h-8 max-w-44 rounded-md border px-2 text-xs outline-none focus-visible:ring-[3px] sm:block"
             >
               {readerFiles.map((file) => (
                 <option key={file.file_id} value={file.file_id}>
@@ -1028,7 +1028,7 @@ export default function EbookReader() {
                       aria-label={t("web.reader.search.input")}
                       value={searchText}
                       onChange={(event) => setSearchText(event.target.value)}
-                      className="border-border bg-background focus-visible:border-ring focus-visible:ring-ring/50 h-9 min-w-0 flex-1 rounded-md border px-3 text-sm outline-none focus-visible:ring-[3px]"
+                      className="border-input bg-background focus-visible:border-ring focus-visible:ring-ring/50 h-9 min-w-0 flex-1 rounded-md border px-3 text-sm outline-none focus-visible:ring-[3px]"
                     />
                     <Button
                       aria-label={t("web.reader.search.run")}
@@ -1214,7 +1214,7 @@ export default function EbookReader() {
                             aria-label={t("web.reader.settings.voice")}
                             value={ttsVoiceURI}
                             onChange={(event) => setTtsVoiceURI(event.target.value)}
-                            className="border-border bg-background focus-visible:border-ring focus-visible:ring-ring/50 h-9 w-full rounded-md border px-2 text-sm outline-none focus-visible:ring-[3px]"
+                            className="border-input bg-background focus-visible:border-ring focus-visible:ring-ring/50 h-9 w-full rounded-md border px-2 text-sm outline-none focus-visible:ring-[3px]"
                           >
                             <option value="">{t("web.reader.settings.voiceDefault")}</option>
                             {tts.voices.map((voice) => (
@@ -1254,7 +1254,7 @@ export default function EbookReader() {
                           theme: event.target.value as ReaderSettings["theme"],
                         })
                       }
-                      className="border-border bg-background focus-visible:border-ring focus-visible:ring-ring/50 h-9 w-full rounded-md border px-2 text-sm outline-none focus-visible:ring-[3px]"
+                      className="border-input bg-background focus-visible:border-ring focus-visible:ring-ring/50 h-9 w-full rounded-md border px-2 text-sm outline-none focus-visible:ring-[3px]"
                     >
                       <option value="light">{t("web.reader.theme.light")}</option>
                       <option value="sepia">{t("web.reader.theme.sepia")}</option>
@@ -1272,7 +1272,7 @@ export default function EbookReader() {
                         onChange={(event) =>
                           updateReaderSettings({ fontFamily: event.target.value })
                         }
-                        className="border-border bg-background focus-visible:border-ring focus-visible:ring-ring/50 h-9 w-full rounded-md border px-2 text-sm outline-none focus-visible:ring-[3px]"
+                        className="border-input bg-background focus-visible:border-ring focus-visible:ring-ring/50 h-9 w-full rounded-md border px-2 text-sm outline-none focus-visible:ring-[3px]"
                       >
                         {READER_FONT_OPTIONS.map((option) => (
                           <option key={option.value} value={option.value}>
@@ -1400,7 +1400,7 @@ export default function EbookReader() {
                             writingMode: event.target.value as ReaderSettings["writingMode"],
                           })
                         }
-                        className="border-border bg-background focus-visible:border-ring focus-visible:ring-ring/50 h-9 w-full rounded-md border px-2 text-sm outline-none focus-visible:ring-[3px]"
+                        className="border-input bg-background focus-visible:border-ring focus-visible:ring-ring/50 h-9 w-full rounded-md border px-2 text-sm outline-none focus-visible:ring-[3px]"
                       >
                         <option value="auto">{t("web.reader.writingMode.auto")}</option>
                         <option value="horizontal-tb">
@@ -1423,7 +1423,7 @@ export default function EbookReader() {
                             spread: event.target.value as ReaderSettings["spread"],
                           })
                         }
-                        className="border-border bg-background focus-visible:border-ring focus-visible:ring-ring/50 h-9 w-full rounded-md border px-2 text-sm outline-none focus-visible:ring-[3px]"
+                        className="border-input bg-background focus-visible:border-ring focus-visible:ring-ring/50 h-9 w-full rounded-md border px-2 text-sm outline-none focus-visible:ring-[3px]"
                       >
                         <option value="auto">{t("web.reader.spread.auto")}</option>
                         <option value="none">{t("web.reader.spread.single")}</option>
@@ -1440,7 +1440,7 @@ export default function EbookReader() {
                       onChange={(event) =>
                         updateReaderSettings({ flow: event.target.value as ReaderSettings["flow"] })
                       }
-                      className="border-border bg-background focus-visible:border-ring focus-visible:ring-ring/50 h-9 w-full rounded-md border px-2 text-sm outline-none focus-visible:ring-[3px]"
+                      className="border-input bg-background focus-visible:border-ring focus-visible:ring-ring/50 h-9 w-full rounded-md border px-2 text-sm outline-none focus-visible:ring-[3px]"
                     >
                       <option value="paginated">{t("web.reader.flow.paginated")}</option>
                       <option value="scrolled">{t("web.reader.flow.scrolled")}</option>

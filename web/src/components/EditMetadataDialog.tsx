@@ -352,7 +352,7 @@ function EditMetadataForm({ item, open, onOpenChange }: EditMetadataDialogProps)
                       value={form.overview}
                       onChange={(e) => setField("overview", e.target.value)}
                       rows={4}
-                      className="border-border bg-background text-foreground focus:border-ring focus:ring-ring/50 w-full resize-y rounded-md px-3 py-2.5 text-sm shadow-xs transition-[color,box-shadow] outline-none focus:ring-[3px]"
+                      className="border-input bg-background text-foreground focus:border-ring focus:ring-ring/50 w-full resize-y rounded-md px-3 py-2.5 text-sm shadow-xs transition-[color,box-shadow] outline-none focus:ring-[3px]"
                     />
                   </FieldRow>
 

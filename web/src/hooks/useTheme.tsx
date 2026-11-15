@@ -208,6 +208,25 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     applyHighContrastToDOM(highContrast);
   }, [highContrast]);
 
+  // With no stored choice, high contrast follows the system setting, so follow
+  // it while the app is open too. Re-parsing the cache keeps a stored choice
+  // winning, and a server value still overrides this state in render.
+  useEffect(() => {
+    let query: MediaQueryList | undefined;
+    try {
+      query = window.matchMedia("(prefers-contrast: more)");
+    } catch {
+      return;
+    }
+    if (typeof query?.addEventListener !== "function") return;
+    const onChange = () =>
+      setHighContrastPreference(
+        parseHighContrast(appearanceCache.get(storage.KEYS.UI_HIGH_CONTRAST, cacheOwner)),
+      );
+    query.addEventListener("change", onChange);
+    return () => query.removeEventListener("change", onChange);
+  }, [cacheOwner]);
+
   const setTextScale = useCallback(
     (value: TextScale) => {
       setTextScalePreference(value);
