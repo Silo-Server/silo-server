@@ -277,9 +277,9 @@ reports its quality step. The list follows the order of
 | `dynamic_range_unsupported` | The output can't show the source's HDR or Dolby Vision as it is (tone mapping or a Dolby Vision conversion). |
 | `resolution_limit` | The source is taller than the device's maximum resolution. |
 | `bandwidth_limit` | The client's bandwidth estimate can't carry the source. |
-| `buffering` | Buffering, reported now or remembered for this connection as a learned limit, lowered the estimate. |
-| `bandwidth_cap` | The request's or profile's bandwidth cap is below the source. |
-| `server_bitrate_limit` | The server's stream bitrate limit binds, being lower than any request cap. |
+| `buffering` | Earlier buffering lowered the estimate: the player reported rebuffering during this play, or the server applied a limit learned from recent rebuffering on this device and connection. |
+| `bandwidth_cap` | The viewer's Maximum bitrate setting (`playback.max_bitrate_kbps`, profile or device), sent as the request's cap, is below the source. |
+| `server_bitrate_limit` | The user's access group Max local or remote stream bitrate binds, being lower than any request cap. |
 | `quality_selected` | The viewer chose a quality below the source. |
 | `subtitle_burn_in` | The selected subtitle is rendered into the video. |
 | `direct_play_failed` | The client already tried the original file, or every copy route, and it failed; nothing else forced the change. |

@@ -22,11 +22,14 @@ const (
 	AdaptationResolutionLimit = "resolution_limit"
 	// The client's bandwidth estimate cannot carry the source.
 	AdaptationBandwidthLimit = "bandwidth_limit"
-	// Buffering, now or remembered for this connection, lowered the quality.
+	// Earlier buffering lowered the quality: the player reported rebuffering
+	// during this play, or the server applied a limit it learned from recent
+	// rebuffering on this device and connection.
 	AdaptationBuffering = "buffering"
-	// The client's or profile's bandwidth cap is below the source.
+	// The viewer's Maximum bitrate setting (profile or device) is below the
+	// source.
 	AdaptationBandwidthCap = "bandwidth_cap"
-	// The server's stream bitrate limit is below the source.
+	// The user's access group caps local or remote streams below the source.
 	AdaptationServerBitrateLimit = "server_bitrate_limit"
 	// The viewer chose a quality below the source.
 	AdaptationQualitySelected = "quality_selected"

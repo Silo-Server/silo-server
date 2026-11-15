@@ -7325,6 +7325,12 @@
       "value": "⟦Åçţîṽîţý~~~~⟧"
     }
   ],
+  "web.admin.activity.panel.decision": [
+    {
+      "type": 0,
+      "value": "⟦Đéçîšîöñ~~~~⟧"
+    }
+  ],
   "web.admin.activity.panel.event": [
     {
       "type": 0,
@@ -7355,10 +7361,10 @@
       "value": "⟦Öþéñ ƒûļļ ƑƑɱþéĝ ļöĝš~~~~~~~~~⟧"
     }
   ],
-  "web.admin.activity.panel.reasonsHeading": [
+  "web.admin.activity.panel.reasons": [
     {
       "type": 0,
-      "value": "⟦Ŵĥý îţ îšñ'ţ đîŕéçţ þļåý~~~~~~~~~~⟧"
+      "value": "⟦Ŕéåšöñš~~~⟧"
     }
   ],
   "web.admin.activity.panel.refreshing": [
@@ -7462,37 +7468,37 @@
   "web.admin.activity.reason.bandwidthCap.description": [
     {
       "type": 0,
-      "value": "⟦Å ƀåñđŵîđţĥ ļîɱîţ šéţ îñ ţĥé åþþ öŕ ƒöŕ ţĥîš ûšéŕ îš ƀéļöŵ ţĥé öŕîĝîñåļ ƀîţŕåţé.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+      "value": "⟦Ţĥé þŕöƒîļé'š öŕ đéṽîçé'š Ṁåẋîɱûɱ ƀîţŕåţé šéţţîñĝ îš ƀéļöŵ ţĥé öŕîĝîñåļ ƀîţŕåţé.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
     }
   ],
   "web.admin.activity.reason.bandwidthCap.label": [
     {
       "type": 0,
-      "value": "⟦Ɓåñđŵîđţĥ ļîɱîţ~~~~~~⟧"
+      "value": "⟦Ṁåẋîɱûɱ ƀîţŕåţé šéţţîñĝ~~~~~~~~~~⟧"
     }
   ],
   "web.admin.activity.reason.bandwidthLimit.description": [
     {
       "type": 0,
-      "value": "⟦Ţĥé çöññéçţîöñ îš ţöö šļöŵ ƒöŕ ţĥé öŕîĝîñåļ ƀîţŕåţé.~~~~~~~~~~~~~~~~~~~~~⟧"
+      "value": "⟦Ţĥé åþþ ɱéåšûŕéđ ţĥîš çöññéçţîöñ åš ţöö šļöŵ ƒöŕ ţĥé öŕîĝîñåļ ƀîţŕåţé.~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
     }
   ],
   "web.admin.activity.reason.bandwidthLimit.label": [
     {
       "type": 0,
-      "value": "⟦Ɓåñđŵîđţĥ ţöö ļöŵ~~~~~~~⟧"
+      "value": "⟦Çöññéçţîöñ ţöö šļöŵ~~~~~~~~⟧"
     }
   ],
   "web.admin.activity.reason.buffering.description": [
     {
       "type": 0,
-      "value": "⟦Þļåýƀåçķ ƀûƒƒéŕéđ öñ ţĥîš çöññéçţîöñ, šö ţĥé šéŕṽéŕ ļöŵéŕéđ ţĥé ǫûåļîţý.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+      "value": "⟦Þļåýƀåçķ ƀûƒƒéŕéđ éåŕļîéŕ öñ ţĥîš đéṽîçé åñđ çöññéçţîöñ, îñ ţĥîš šéššîöñ öŕ å ŕéçéñţ öñé, šö ţĥé šéŕṽéŕ ļöŵéŕéđ ţĥé ǫûåļîţý.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
     }
   ],
   "web.admin.activity.reason.buffering.label": [
     {
       "type": 0,
-      "value": "⟦Ɓûƒƒéŕîñĝ~~~~⟧"
+      "value": "⟦Éåŕļîéŕ ƀûƒƒéŕîñĝ~~~~~~~⟧"
     }
   ],
   "web.admin.activity.reason.containerUnsupported.description": [
@@ -7516,7 +7522,7 @@
   "web.admin.activity.reason.deviceWorkaround.label": [
     {
       "type": 0,
-      "value": "⟦Đéṽîçé ŵöŕķåŕöûñđ~~~~~~~⟧"
+      "value": "⟦Đéṽîçé åûđîö ŵöŕķåŕöûñđ~~~~~~~~~~⟧"
     }
   ],
   "web.admin.activity.reason.directPlayFailed.description": [
@@ -7570,13 +7576,13 @@
   "web.admin.activity.reason.serverBitrateLimit.description": [
     {
       "type": 0,
-      "value": "⟦Ţĥé šéŕṽéŕ'š šţŕéåɱîñĝ ƀîţŕåţé ļîɱîţ îš ƀéļöŵ ţĥé öŕîĝîñåļ ƀîţŕåţé.~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+      "value": "⟦Ţĥé ûšéŕ'š åççéšš ĝŕöûþ åļļöŵš å ļöŵéŕ ƀîţŕåţé ţĥåñ ţĥé öŕîĝîñåļ ƒöŕ ţĥîš ļöçåļ öŕ ŕéɱöţé šţŕéåɱ.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
     }
   ],
   "web.admin.activity.reason.serverBitrateLimit.label": [
     {
       "type": 0,
-      "value": "⟦Šéŕṽéŕ ƀîţŕåţé ļîɱîţ~~~~~~~~⟧"
+      "value": "⟦Åççéšš ĝŕöûþ ļîɱîţ~~~~~~~~⟧"
     }
   ],
   "web.admin.activity.reason.subtitleBurnIn.description": [

@@ -7033,6 +7033,12 @@
       "value": "Activity"
     }
   ],
+  "web.admin.activity.panel.decision": [
+    {
+      "type": 0,
+      "value": "Decision"
+    }
+  ],
   "web.admin.activity.panel.event": [
     {
       "type": 0,
@@ -7063,10 +7069,10 @@
       "value": "Open full FFmpeg logs"
     }
   ],
-  "web.admin.activity.panel.reasonsHeading": [
+  "web.admin.activity.panel.reasons": [
     {
       "type": 0,
-      "value": "Why it isn't direct play"
+      "value": "Reasons"
     }
   ],
   "web.admin.activity.panel.refreshing": [
@@ -7166,37 +7172,37 @@
   "web.admin.activity.reason.bandwidthCap.description": [
     {
       "type": 0,
-      "value": "A bandwidth limit set in the app or for this user is below the original bitrate."
+      "value": "The profile's or device's Maximum bitrate setting is below the original bitrate."
     }
   ],
   "web.admin.activity.reason.bandwidthCap.label": [
     {
       "type": 0,
-      "value": "Bandwidth limit"
+      "value": "Maximum bitrate setting"
     }
   ],
   "web.admin.activity.reason.bandwidthLimit.description": [
     {
       "type": 0,
-      "value": "The connection is too slow for the original bitrate."
+      "value": "The app measured this connection as too slow for the original bitrate."
     }
   ],
   "web.admin.activity.reason.bandwidthLimit.label": [
     {
       "type": 0,
-      "value": "Bandwidth too low"
+      "value": "Connection too slow"
     }
   ],
   "web.admin.activity.reason.buffering.description": [
     {
       "type": 0,
-      "value": "Playback buffered on this connection, so the server lowered the quality."
+      "value": "Playback buffered earlier on this device and connection, in this session or a recent one, so the server lowered the quality."
     }
   ],
   "web.admin.activity.reason.buffering.label": [
     {
       "type": 0,
-      "value": "Buffering"
+      "value": "Earlier buffering"
     }
   ],
   "web.admin.activity.reason.containerUnsupported.description": [
@@ -7220,7 +7226,7 @@
   "web.admin.activity.reason.deviceWorkaround.label": [
     {
       "type": 0,
-      "value": "Device workaround"
+      "value": "Device audio workaround"
     }
   ],
   "web.admin.activity.reason.directPlayFailed.description": [
@@ -7274,13 +7280,13 @@
   "web.admin.activity.reason.serverBitrateLimit.description": [
     {
       "type": 0,
-      "value": "The server's streaming bitrate limit is below the original bitrate."
+      "value": "The user's access group allows a lower bitrate than the original for this local or remote stream."
     }
   ],
   "web.admin.activity.reason.serverBitrateLimit.label": [
     {
       "type": 0,
-      "value": "Server bitrate limit"
+      "value": "Access group limit"
     }
   ],
   "web.admin.activity.reason.subtitleBurnIn.description": [

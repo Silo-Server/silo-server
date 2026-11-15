@@ -752,13 +752,20 @@ function StreamRow({
           <div className="flex items-start gap-2">
             <div className="min-w-0 flex-1">
               <TitleLink session={session} />
-              <div className="text-muted-foreground truncate text-[12px]">
-                {[
-                  session.username || t("web.admin.activity.userFallback", { id: session.user_id }),
-                  getSessionClientLabel(session),
-                ]
-                  .filter(Boolean)
-                  .join(` ${MIDDLE_DOT} `)}
+              <div className="text-muted-foreground flex min-w-0 items-center gap-1.5 text-[12px]">
+                <span className="shrink-0">
+                  {session.username ||
+                    t("web.admin.activity.userFallback", { id: session.user_id })}
+                </span>
+                <ProfilePill session={session} />
+                {getSessionClientLabel(session) ? (
+                  <>
+                    <span aria-hidden="true" className="shrink-0">
+                      {MIDDLE_DOT}
+                    </span>
+                    <span className="truncate">{getSessionClientLabel(session)}</span>
+                  </>
+                ) : null}
               </div>
             </div>
             <div className="-me-1 shrink-0">{actions}</div>
@@ -881,6 +888,19 @@ function ProgressLine({ session }: { session: AdminSession }) {
   );
 }
 
+/** The household profile playing, which can differ from the account's name. */
+function ProfilePill({ session }: { session: AdminSession }) {
+  const profile = session.profile_name?.trim() || session.profile_id?.trim();
+  return profile ? (
+    <span
+      title={profile}
+      className="border-primary/30 bg-primary/10 text-primary max-w-[7rem] shrink-0 truncate rounded border px-1.5 py-0.5 text-[10px] leading-none"
+    >
+      {profile}
+    </span>
+  ) : null;
+}
+
 function ViewerCell({
   session,
   onIPLookup,
@@ -891,7 +911,6 @@ function ViewerCell({
   const t = useT();
   const username =
     session.username || t("web.admin.activity.userFallback", { id: session.user_id });
-  const profile = session.profile_name?.trim();
   const clientLabel = getSessionClientLabel(session);
   // The row stays compact; the exact version, build, and channel live in the
   // tooltip and in the expanded panel.
@@ -916,11 +935,7 @@ function ViewerCell({
         >
           {username}
         </Link>
-        {profile && profile !== session.username ? (
-          <span className="border-primary/30 bg-primary/10 text-primary max-w-[7rem] shrink-0 truncate rounded border px-1.5 py-0.5 text-[10px] leading-none">
-            {profile}
-          </span>
-        ) : null}
+        <ProfilePill session={session} />
       </div>
       <div className="text-muted-foreground flex min-w-0 items-center gap-1.5 text-[12px]">
         <JellyfinSessionPill session={session} />
@@ -1102,6 +1117,7 @@ function PlaybackExpandedPanel({
   const audioDecision = normalizeStreamDecision(
     session.audio_decision || (session.transcode_audio ? "transcode" : session.play_method),
   );
+  const method = classifyActivityMethod(session);
   const transcodeMode = formatTranscodeModeSummary(session);
   const toneMap = formatToneMapSummary(session);
   const clientIP = session.client_ip?.trim() || "";
@@ -1111,24 +1127,30 @@ function PlaybackExpandedPanel({
 
   return (
     <div id={id} className="border-border/40 bg-surface/30 space-y-4 border-t px-4 py-3">
-      {reasons.length > 0 ? (
-        <section>
-          <h3 className="mb-1 text-[12px] font-medium">
-            {t("web.admin.activity.panel.reasonsHeading")}
-          </h3>
-          <ul className="space-y-0.5">
-            {reasons.map((reason) => (
-              <li key={reason.code} className="text-[12px] leading-snug">
-                <span className="font-medium">{reason.label}</span>
-                <span aria-hidden="true" className="text-muted-foreground mx-1.5">
-                  {MIDDLE_DOT}
-                </span>
-                <span className="text-muted-foreground">{reason.description}</span>
-              </li>
-            ))}
-          </ul>
-        </section>
-      ) : null}
+      <dl className={FACT_LIST_CLASS}>
+        <dt className="text-muted-foreground">{t("web.admin.activity.panel.decision")}</dt>
+        <dd className="min-w-0">
+          <span className="inline-flex flex-wrap items-center gap-x-2 gap-y-0.5">
+            <ActivityMethodBadge method={method} />
+            <span>{activityMethodMeta(method).description}</span>
+          </span>
+        </dd>
+        {reasons.length > 0 ? (
+          <>
+            <dt className="text-muted-foreground">{t("web.admin.activity.panel.reasons")}</dt>
+            <dd className="min-w-0">
+              <ul className="space-y-0.5">
+                {reasons.map((reason) => (
+                  <li key={reason.code} className="flex flex-col leading-snug sm:block">
+                    <span className="font-medium">{reason.label}</span>
+                    <span className="text-muted-foreground sm:ms-2">{reason.description}</span>
+                  </li>
+                ))}
+              </ul>
+            </dd>
+          </>
+        ) : null}
+      </dl>
 
       <table className="w-full max-w-3xl text-start text-[12px]">
         <thead>
@@ -1171,7 +1193,7 @@ function PlaybackExpandedPanel({
         </tbody>
       </table>
 
-      <dl className="grid max-w-3xl grid-cols-[6rem_1fr] gap-y-1 text-[12px] sm:grid-cols-[9rem_1fr] [&>dt]:pe-3">
+      <dl className={FACT_LIST_CLASS}>
         <dt className="text-muted-foreground">{t("web.admin.activity.client.heading")}</dt>
         <dd className="min-w-0">
           <div className="break-words">{clientLabel}</div>
@@ -1219,6 +1241,11 @@ function PlaybackExpandedPanel({
     </div>
   );
 }
+
+// The expanded details' label/value lists share one label column, so the
+// decision, the stream table and the client facts line up.
+const FACT_LIST_CLASS =
+  "grid max-w-3xl grid-cols-[6rem_1fr] gap-y-1 text-[12px] sm:grid-cols-[9rem_1fr] [&>dt]:pe-3";
 
 function StreamDetailRow({
   label,
