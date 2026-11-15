@@ -73,8 +73,8 @@ func TestHandleStop_ReleaseForAnotherStartLeavesNewerJob(t *testing.T) {
 
 // A retire releases the job on the node a transport left, a job some earlier
 // start or rebuild made, so it names no start. When a newer start or rebuild
-// holds the transport's lifecycle lock as the retire arrives, the retire waits
-// behind it and must then leave the job that start published.
+// publishes its job while the retire waits behind it for the transport's
+// lifecycle lock, the retire must leave that job.
 func TestHandleStop_ReleaseLeavesJobPublishedWhileItWaited(t *testing.T) {
 	const transportID = "sess-retired-node"
 	s := newTestServer(t)

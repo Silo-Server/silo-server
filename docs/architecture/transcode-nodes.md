@@ -492,8 +492,9 @@ resolve and never deletes from it.
   the node then ends only the job it held when the release arrived, not one a
   start or rebuild published while the release waited for the lifecycle lock.
   A retire that arrives after a newer job on that node is already running
-  still ends it, and the next request rebuilds it from the card. A move to the API process deletes the card. Jellyfin-compatible
-  moves write their record at commit too, then release the old node
+  still ends it, and the next request rebuilds it from the card. A move to the
+  API process deletes the card. Jellyfin-compatible moves write their record at
+  commit too, then release the old node
   ([transcode node lost mid-stream](restart-resilient-playback.md#transcode-node-lost-mid-stream)).
 - **Force reload.** The node, under its reload gate, asks the core to revoke
   its recipes (`POST /api/internal/nodes/self/revoke-recipes`,
