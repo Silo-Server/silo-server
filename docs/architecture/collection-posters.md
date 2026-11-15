@@ -65,9 +65,9 @@ names a collage the artwork reconcile cleared (serving nothing until then), or i
 recorded collage meanwhile), so a new match reaches the collage within that time. A record goes
 with its collection, and with its collage when that collage is retired as unused. A refresh also
 deletes the collection's records nobody refreshed for a week, such as one left behind when a
-profile's restrictions changed its access hash, with or without a collage; a viewer that still
-needs one gets it back on its next read. Server and
-personal smart collections share this (`smartCollageSet`):
+profile's restrictions changed its access hash, with or without a collage. A viewer that still
+reads with that access finds no record on its next read, sees no collage, and queues the refresh
+that records it again. Server and personal smart collections share this (`smartCollageSet`):
 
 - Server collections record in `library_collection_smart_collages`. Their members never depend
   on the viewer's account or profile, so the access hash leaves those out and viewers with the
