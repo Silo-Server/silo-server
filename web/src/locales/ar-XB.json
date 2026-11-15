@@ -50738,6 +50738,30 @@
       "value": "\u200F\u202ESaving...\u202C"
     }
   ],
+  "web.admin.nodes.form.sourceAccess": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ESource access\u202C"
+    }
+  ],
+  "web.admin.nodes.form.sourceAccessCore": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EThrough the API servers\u202C"
+    }
+  ],
+  "web.admin.nodes.form.sourceAccessHelp": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EThrough the API servers, the node needs no library mount, but every byte it reads passes through the API servers, so they need the bandwidth for it.\u202C"
+    }
+  ],
+  "web.admin.nodes.form.sourceAccessLocal": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ELibrary mount on the node\u202C"
+    }
+  ],
   "web.admin.nodes.form.type": [
     {
       "type": 0,

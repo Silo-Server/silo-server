@@ -1,5 +1,6 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { setAccessToken, setProfileId, setProfileToken, setRefreshToken } from "@/api/client";
@@ -43,11 +44,16 @@ const json = (body: unknown, status = 200, type = "application/json") =>
 function serve({
   nodes,
   nodeKeys = true,
+  sourceAccess = false,
   issue = () => json({ node_key: KEY }, 201),
+  bodies = [],
 }: {
   nodes: StreamNode[];
   nodeKeys?: boolean;
+  sourceAccess?: boolean;
   issue?: () => Response;
+  /** Collects the JSON body of every write. */
+  bodies?: { method: string; body: Record<string, unknown> }[];
 }) {
   const calls: string[] = [];
   vi.stubGlobal(
@@ -56,6 +62,8 @@ function serve({
       const url = String(input);
       const method = init?.method ?? "GET";
       calls.push(`${method} ${new URL(url, "http://x").pathname}`);
+      if (method !== "GET" && typeof init?.body === "string")
+        bodies.push({ method, body: JSON.parse(init.body) as Record<string, unknown> });
       if (url.includes("/admin/nodes/capabilities"))
         return Promise.resolve(
           json({
@@ -65,6 +73,7 @@ function serve({
             drain: true,
             summary: true,
             node_keys: nodeKeys,
+            source_access: sourceAccess,
           }),
         );
       if (method === "POST" && url.includes("/key")) return Promise.resolve(issue());
@@ -187,4 +196,44 @@ it("shows a refusal from the server and no key", async () => {
   );
   expect(await screen.findByRole("alert")).toHaveTextContent("Only transcode nodes take a key.");
   expect(screen.queryByText(/SILO_NODE_KEY=/)).not.toBeInTheDocument();
+});
+
+it("lets an admin choose a transcode node's source access with the capability", async () => {
+  // jsdom has no pointer capture or scrolling, which the select uses.
+  Object.defineProperties(Element.prototype, {
+    hasPointerCapture: { configurable: true, value: () => false },
+    setPointerCapture: { configurable: true, value: () => {} },
+    releasePointerCapture: { configurable: true, value: () => {} },
+    scrollIntoView: { configurable: true, value: () => {} },
+  });
+  const user = userEvent.setup();
+  const bodies: { method: string; body: Record<string, unknown> }[] = [];
+  serve({
+    nodes: [streamNode({ source_access: "local", config_etag: '"e1"' })],
+    sourceAccess: true,
+    bodies,
+  });
+  renderPage();
+  await user.click(await screen.findByRole("button", { name: "Edit Transcoder" }));
+  const field = await screen.findByRole("combobox", { name: "Source access" });
+  expect(field).toHaveTextContent("Library mount on the node");
+  expect(
+    screen.getByText(/every byte it reads passes through the API servers/),
+  ).toBeInTheDocument();
+  await user.click(field);
+  await user.click(await screen.findByRole("option", { name: "Through the API servers" }));
+  await user.click(screen.getByRole("button", { name: "Save" }));
+  await waitFor(() => expect(bodies.some((b) => b.method === "PUT")).toBe(true));
+  expect(bodies.find((b) => b.method === "PUT")?.body.source_access).toBe("core");
+});
+
+it("offers no source access without the capability, or on a proxy", async () => {
+  const user = userEvent.setup();
+  const calls = serve({ nodes: [streamNode({}), proxy], sourceAccess: false });
+  renderPage();
+  await user.click(await screen.findByRole("button", { name: "Edit Transcoder" }));
+  await screen.findByRole("dialog");
+  await waitFor(() => expect(calls).toContain("GET /api/v2/admin/nodes/capabilities"));
+  await act(async () => {});
+  expect(screen.queryByRole("combobox", { name: "Source access" })).not.toBeInTheDocument();
 });
