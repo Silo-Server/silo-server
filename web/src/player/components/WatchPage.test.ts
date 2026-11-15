@@ -1429,7 +1429,14 @@ describe("WatchPage virtual version substitution notice", () => {
       }),
     );
 
-    expect(screen.getByText(labeledNotice)).toBeInTheDocument();
+    // Both rows name a release, so the notice names the one now playing rather
+    // than its resolution: the viewer picked a release, and the format label
+    // would not say which release replaced theirs.
+    expect(
+      screen.getByText(
+        "The selected version wasn't available, so Vio is playing Example.2024.2160p.WEB-DL-OTHER instead.",
+      ),
+    ).toBeInTheDocument();
   });
 
   it("makes no claim when the rows do not identify a release and the server sent no signal", () => {
