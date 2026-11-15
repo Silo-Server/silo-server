@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -186,4 +187,54 @@ func TestLocalSessionMalformedOptionalFieldsStillSync(t *testing.T) {
 	if pos, ok := prog.pos("book-1"); !ok || pos != 42 {
 		t.Fatalf("synced position = %v (%v), want 42", pos, ok)
 	}
+}
+
+// One request tracks at most the account cap's worth of live sessions, and
+// none after the cap refuses a play.
+func TestLocalSessionBatchTracksABoundedNumberOfPlays(t *testing.T) {
+	media := &playStartMediaStore{
+		item:  &models.MediaItem{ContentID: "book-1", Type: "audiobook", Title: "Book"},
+		files: []*models.MediaFile{{ID: 42, ContentID: "book-1", Duration: 3600}},
+	}
+	store := &countingReportStore{}
+	h := New(Dependencies{MediaStore: media, ProgressStore: &positionRecordingProgressFake{}, PlaybackSessionStore: store})
+	var sessionsJSON []string
+	for i := range 3 * maxReportedPlaysPerAccount {
+		sessionsJSON = append(sessionsJSON, fmt.Sprintf(`{"id":"local-%d","libraryItemId":"book-1","currentTime":10,"updatedAt":%d}`, i, time.Now().UnixMilli()))
+	}
+	body := `{"sessions":[` + strings.Join(sessionsJSON, ",") + `]}`
+	if rec := dispatchABSWithParams(http.MethodPost, "/api/session/local-all", nil, []byte(body), "1", "p-1", h.handleSyncLocalSessions); rec.Code != http.StatusOK {
+		t.Fatalf("status = %d", rec.Code)
+	}
+	if store.updates != maxReportedPlaysPerAccount {
+		t.Fatalf("%d sessions tracked, want %d", store.updates, maxReportedPlaysPerAccount)
+	}
+
+	store.refuse, store.updates = true, 0
+	if rec := dispatchABSWithParams(http.MethodPost, "/api/session/local-all", nil, []byte(body), "1", "p-1", h.handleSyncLocalSessions); rec.Code != http.StatusOK {
+		t.Fatalf("status = %d", rec.Code)
+	}
+	if store.updates != 1 {
+		t.Fatalf("%d sessions tracked after the cap refused one, want 1", store.updates)
+	}
+}
+
+// countingReportStore counts reported-play updates and starts no play, or
+// refuses every start as the account cap would.
+type countingReportStore struct {
+	fakePlaybackSessionStore
+	updates int
+	refuse  bool
+}
+
+func (s *countingReportStore) UpdateReportedPlay(context.Context, ReportedPlay) (ReportedPlayState, bool, error) {
+	s.updates++
+	return ReportedPlayState{}, false, nil
+}
+
+func (s *countingReportStore) StartReportedPlay(context.Context, ReportedPlay, string, int) (ReportedPlayState, error) {
+	if s.refuse {
+		return ReportedPlayState{}, nil
+	}
+	return ReportedPlayState{ID: "p", Announced: true}, nil
 }

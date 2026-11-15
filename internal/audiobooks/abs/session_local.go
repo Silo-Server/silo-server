@@ -108,7 +108,7 @@ func (h *Handler) handleSyncLocalSession(w http.ResponseWriter, r *http.Request)
 		http.Error(w, "resolve access: "+err.Error(), http.StatusForbidden)
 		return
 	}
-	res := h.syncOneLocalSession(r, a, access, sess)
+	res := h.syncOneLocalSession(r, a, access, sess, &reportBudget{left: 1})
 	if !res.Success {
 		// Real ABS: res.status(500).send(result.error).
 		http.Error(w, res.Error, http.StatusInternalServerError)
@@ -146,6 +146,7 @@ func (h *Handler) handleSyncLocalSessions(w http.ResponseWriter, r *http.Request
 		return
 	}
 	results := make([]localSyncResult, 0, len(body.Sessions))
+	budget := &reportBudget{left: maxReportedPlaysPerAccount}
 	for _, raw := range body.Sessions {
 		var sess localPlaybackSession
 		if err := json.Unmarshal(raw, &sess); err != nil {
@@ -156,7 +157,7 @@ func (h *Handler) handleSyncLocalSessions(w http.ResponseWriter, r *http.Request
 		if sess.DeviceInfo.ClientName == "" {
 			sess.DeviceInfo = body.DeviceInfo
 		}
-		results = append(results, h.syncOneLocalSession(r, a, access, sess))
+		results = append(results, h.syncOneLocalSession(r, a, access, sess, budget))
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"results": results})
 }
@@ -165,7 +166,7 @@ func (h *Handler) handleSyncLocalSessions(w http.ResponseWriter, r *http.Request
 // media progress, tracks it as a reported play while it is live, and returns
 // the ABS-shaped per-session result. It never panics and never propagates an
 // error to fail a batch.
-func (h *Handler) syncOneLocalSession(r *http.Request, a ctxAuth, access catalog.AccessFilter, sess localPlaybackSession) localSyncResult {
+func (h *Handler) syncOneLocalSession(r *http.Request, a ctxAuth, access catalog.AccessFilter, sess localPlaybackSession, budget *reportBudget) localSyncResult {
 	ctx := r.Context()
 	res := localSyncResult{ID: sess.ID}
 
@@ -197,7 +198,7 @@ func (h *Handler) syncOneLocalSession(r *http.Request, a ctxAuth, access catalog
 	}
 
 	res.Success = true
-	h.trackReportedPlay(r, a, access, sess)
+	h.trackReportedPlay(r, a, access, sess, budget)
 
 	// Persist the offline resume position into user_watch_progress.
 	//

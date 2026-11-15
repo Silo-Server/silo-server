@@ -162,6 +162,12 @@ const (
 	maxReportedPlaysPerAccount = 10
 )
 
+// reportBudget bounds the live sessions one request tracks as reported
+// plays. A client has one live session at a time, so a request carrying more
+// gains nothing from the rest, and once the account's cap refuses a new play
+// the request stops trying.
+type reportBudget struct{ left int }
+
 // trackReportedPlay records a live play that a client reports only through
 // /session/local or /session/local-all. The play lives in its
 // abs_playback_sessions row and its lifecycle row; no server holds it in
@@ -170,10 +176,11 @@ const (
 // lifecycle sweep ends it once reports stop, and a report after that starts
 // a new play with its own id and history row. A report never fails because
 // of this: the client is playing whether or not Silo shows it.
-func (h *Handler) trackReportedPlay(r *http.Request, a ctxAuth, access catalog.AccessFilter, sess localPlaybackSession) {
-	if h == nil || h.deps.PlaybackSessionStore == nil || sess.ID == "" || !sess.isLive(time.Now()) {
+func (h *Handler) trackReportedPlay(r *http.Request, a ctxAuth, access catalog.AccessFilter, sess localPlaybackSession, budget *reportBudget) {
+	if h == nil || h.deps.PlaybackSessionStore == nil || sess.ID == "" || budget.left <= 0 || !sess.isLive(time.Now()) {
 		return
 	}
+	budget.left--
 	ctx := r.Context()
 	report := ReportedPlay{
 		UserID:           a.UserID,
@@ -209,6 +216,7 @@ func (h *Handler) trackReportedPlay(r *http.Request, a ctxAuth, access catalog.A
 			return
 		}
 		if state.ID == "" {
+			budget.left = 0
 			// Every report from such a device lands here, every few seconds.
 			slog.DebugContext(ctx, "abs local session sync: too many reported plays for the account; not tracking this one", "component", "audiobooks",
 				"user_id", a.UserID, "limit", maxReportedPlaysPerAccount)
