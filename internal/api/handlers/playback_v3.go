@@ -3186,6 +3186,11 @@ func (h *PlaybackHandler) prepareIdentityTransportV3(r *http.Request, session *p
 	if result.Plan != nil && result.Plan.Delivery == playback.DeliveryRemuxProgressiveV3 {
 		if seek := timeline.seekSeconds; seek > 0 {
 			streamURL = appendPlaybackQueryV3(streamURL, "seek", strconv.FormatFloat(seek, 'f', -1, 64))
+			// The resume leading-picture workaround primes the copy from the
+			// keyframe this plan's timeline starts on (playback.remuxIDRPrimer).
+			if result.RemuxResumeLeadingPictureDrop && timeline.copySeekAnchorResolved {
+				streamURL = appendPlaybackQueryV3(streamURL, playback.RemuxStreamOriginQueryParam, strconv.FormatFloat(timeline.streamOriginSeconds, 'f', -1, 64))
+			}
 		}
 		if mode.progressiveRangeRefusal && h.egressRefusesRemuxRangeV3(r.Context(), servedByProxy, proxyNode) {
 			streamURL = appendPlaybackQueryV3(streamURL, playback.RemuxRangeQueryParam, playback.RemuxRangeRefuse)

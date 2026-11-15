@@ -2429,6 +2429,39 @@ func TestPrepareTransportV3PublishesRemuxRangeRefusalOnlyToAProxyThatHonorsIt(t 
 	}
 }
 
+// The resume leading-picture workaround primes the copy from the keyframe the
+// plan's timeline starts on, so its URL carries that origin, which can sit
+// before the requested seek.
+func TestPrepareTransportV3CarriesThePlanOriginForTheResumePrimer(t *testing.T) {
+	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0))
+	handler.JWTSecret = "test-secret"
+	handler.copySeekAnchor = func(context.Context, string, string, float64, int) (float64, int, error) {
+		return 38.25, 19, nil
+	}
+	proxy := capableProxyStubV3(t)
+	handler.NodePlanner = &recordingNodePlannerV3{plan: nodepool.Plan{ProxyNode: &nodepool.Node{ID: 42, URL: proxy.URL + "/"}}}
+
+	plan := identityProxyPlanV3(playback.DeliveryRemuxProgressiveV3, playback.TransformationV3{Name: playback.TransformationAudioToAACV3, Executor: playback.ExecutorServerV3, RecipeVersion: playback.TransformationAudioToAACRecipeVersionV3})
+	plan.Timeline = playback.TimelineV3{SourceStartSeconds: 39.5}
+	transport, transportErr := handler.prepareTransportV3(
+		httptest.NewRequest(http.MethodPost, "/", nil),
+		&playback.Session{ID: "session-remux-primer", UserID: 7, ProfileID: "profile-1"},
+		v3HandlerFixtureFile(t),
+		playback.PlannerResultV3{Plan: plan, PlayMethod: playback.PlayRemux, TranscodeAudio: true, TargetAudioCodec: "aac", RemuxResumeLeadingPictureDrop: true}, mediaAuthModeV3{})
+	if transportErr != nil {
+		t.Fatalf("prepare identity transport: %v", transportErr)
+	}
+	defer transport.rollback()
+
+	parsed, err := url.Parse(transport.url)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if origin := playback.RemuxStreamOrigin(parsed.Query()); origin == nil || *origin != 38.25 || parsed.Query().Get("seek") != "39.5" {
+		t.Fatalf("remux stream url = %q, want seek=39.5 and the plan's origin 38.25", transport.url)
+	}
+}
+
 func TestPrepareTransportV3RoutesProgressiveRemuxThroughProxyNodeWithSeekAndDV(t *testing.T) {
 	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0))
 	handler.JWTSecret = "test-secret"

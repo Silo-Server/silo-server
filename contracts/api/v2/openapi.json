@@ -243442,6 +243442,14 @@
             }
           },
           {
+            "description": "Set by the server beside seek when the plan asked for the macOS Firefox HEVC resume workaround: the plan's stream origin in seconds, the keyframe the copy starts on. Without it the remux serves the plain seeked copy.",
+            "in": "query",
+            "name": "origin",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
             "description": "Set by the server when the attempt negotiated progressive_range_refusal_v1: a GET whose Range starts past byte 0, or is a suffix range, answers 409 instead of streaming from the origin.",
             "in": "query",
             "name": "remux_range",
@@ -243589,6 +243597,14 @@
             }
           },
           {
+            "description": "Set by the server beside seek when the plan asked for the macOS Firefox HEVC resume workaround: the plan's stream origin in seconds, the keyframe the copy starts on. Without it the remux serves the plain seeked copy.",
+            "in": "query",
+            "name": "origin",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
             "description": "Set by the server when the attempt negotiated progressive_range_refusal_v1: a GET whose Range starts past byte 0, or is a suffix range, answers 409 instead of streaming from the origin.",
             "in": "query",
             "name": "remux_range",
@@ -243650,6 +243666,14 @@
             "description": "Existing progressive seek interpretation; proxy-local and remote-node validation differ.",
             "in": "query",
             "name": "seek",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Set by the server beside seek when the plan asked for the macOS Firefox HEVC resume workaround: the plan's stream origin in seconds, the keyframe the copy starts on. Without it the remux serves the plain seeked copy.",
+            "in": "query",
+            "name": "origin",
             "schema": {
               "type": "string"
             }
@@ -243797,6 +243821,14 @@
             "description": "Existing progressive seek interpretation; proxy-local and remote-node validation differ.",
             "in": "query",
             "name": "seek",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Set by the server beside seek when the plan asked for the macOS Firefox HEVC resume workaround: the plan's stream origin in seconds, the keyframe the copy starts on. Without it the remux serves the plain seeked copy.",
+            "in": "query",
+            "name": "origin",
             "schema": {
               "type": "string"
             }
@@ -244230,6 +244262,14 @@
             }
           },
           {
+            "description": "Set by the server beside seek when the plan asked for the macOS Firefox HEVC resume workaround: the plan's stream origin in seconds, the keyframe the copy starts on. Without it the remux serves the plain seeked copy.",
+            "in": "query",
+            "name": "origin",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
             "description": "Set by the server when the attempt negotiated progressive_range_refusal_v1: a GET whose Range starts past byte 0, or is a suffix range, answers 409 instead of streaming from the origin.",
             "in": "query",
             "name": "remux_range",
@@ -244393,6 +244433,14 @@
             "description": "Existing progressive seek interpretation; proxy-local and remote-node validation differ.",
             "in": "query",
             "name": "seek",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Set by the server beside seek when the plan asked for the macOS Firefox HEVC resume workaround: the plan's stream origin in seconds, the keyframe the copy starts on. Without it the remux serves the plain seeked copy.",
+            "in": "query",
+            "name": "origin",
             "schema": {
               "type": "string"
             }

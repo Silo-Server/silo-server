@@ -538,13 +538,13 @@ func TestFirstVideoTrackReportsATrackTimestampScale(t *testing.T) {
 	entry := func(scale ...[]byte) []byte {
 		return el(idTrackEntry, append([][]byte{uintEl(idTrackNumber, videoTrack), uintEl(idTrackType, trackTypeVideo)}, scale...)...)
 	}
-	if _, _, scaled, found := firstVideoTrack(entry()); !found || scaled {
+	if _, _, scaled, found, _ := firstVideoTrack(entry()); !found || scaled {
 		t.Fatalf("unscaled track: scaled=%v found=%v", scaled, found)
 	}
-	if _, _, scaled, found := firstVideoTrack(entry(floatEl(idTrackTimestampScale, 1))); !found || scaled {
+	if _, _, scaled, found, _ := firstVideoTrack(entry(floatEl(idTrackTimestampScale, 1))); !found || scaled {
 		t.Fatalf("scale 1: scaled=%v found=%v", scaled, found)
 	}
-	if _, _, scaled, found := firstVideoTrack(entry(floatEl(idTrackTimestampScale, 2))); !found || !scaled {
+	if _, _, scaled, found, _ := firstVideoTrack(entry(floatEl(idTrackTimestampScale, 2))); !found || !scaled {
 		t.Fatalf("scale 2: scaled=%v found=%v", scaled, found)
 	}
 }
