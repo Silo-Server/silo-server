@@ -1,6 +1,10 @@
 package scanner
 
-import "context"
+import (
+	"context"
+	"sync"
+	"time"
+)
 
 // ProgressUpdate captures scanner-phase progress for long-running scans.
 type ProgressUpdate struct {
@@ -37,4 +41,34 @@ func reportProgress(ctx context.Context, update ProgressUpdate) {
 		return
 	}
 	reporter(update)
+}
+
+// reportProgressEvery reports progress() every interval until stop is called
+// or ctx ends. A scan's workers only bump counters; this goroutine owns the
+// writes, so their rate follows the clock rather than the number of items.
+// Every tick writes, even with nothing new, so a write that failed is retried
+// while a slow item holds the counts still. stop waits for a report already
+// in flight.
+func reportProgressEvery(ctx context.Context, interval time.Duration, progress func() ProgressUpdate) (stop func()) {
+	stopCh := make(chan struct{})
+	done := make(chan struct{})
+	go func() {
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		defer close(done)
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-stopCh:
+				return
+			case <-ticker.C:
+				reportProgress(ctx, progress())
+			}
+		}
+	}()
+	return sync.OnceFunc(func() {
+		close(stopCh)
+		<-done
+	})
 }
