@@ -4,7 +4,7 @@ import { KeyboardSensor, PointerSensor, closestCenter, useSensor, useSensors } f
 import type { DragEndEvent } from "@dnd-kit/core";
 import { arrayMove, sortableKeyboardCoordinates, useSortable } from "@dnd-kit/sortable";
 
-import { motionScrollBehavior, usePrefersReducedMotion } from "@/hooks/usePrefersReducedMotion";
+import { useMotionScrollBehavior, usePrefersReducedMotion } from "@/hooks/usePrefersReducedMotion";
 
 interface UseSortableListResult {
   sensors: ReturnType<typeof useSensors>;
@@ -25,11 +25,12 @@ export function useSortableList<T>(
   getId: (item: T) => string,
   onReorder: (orderedIds: string[]) => void,
 ): UseSortableListResult {
+  const scrollBehavior = useMotionScrollBehavior();
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
     useSensor(KeyboardSensor, {
       coordinateGetter: sortableKeyboardCoordinates,
-      scrollBehavior: motionScrollBehavior(),
+      scrollBehavior,
     }),
   );
 
@@ -62,9 +63,10 @@ export function useMotionSafeSortable(args: Parameters<typeof useSortable>[0]) {
 }
 
 /**
- * The `dropAnimation` for a `<DragOverlay>`: dnd-kit's default glide back to
- * the drop slot normally, none under reduced motion.
+ * Motion props for a `<DragOverlay>`: dnd-kit's defaults normally. Under
+ * reduced motion, no glide back to the drop slot and no keyboard-move
+ * transition.
  */
-export function useMotionSafeDropAnimation(): null | undefined {
-  return usePrefersReducedMotion() ? null : undefined;
+export function useMotionSafeOverlay(): { dropAnimation?: null; transition?: string } {
+  return usePrefersReducedMotion() ? { dropAnimation: null, transition: "none" } : {};
 }

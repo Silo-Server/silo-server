@@ -67,7 +67,7 @@ import { cn } from "@/lib/utils";
 
 import { OrderBlock } from "../fields/OrderBlock";
 import { numberText, useT, type Translate } from "@/i18n";
-import { motionScrollBehavior } from "@/hooks/usePrefersReducedMotion";
+import { useMotionScrollBehavior } from "@/hooks/usePrefersReducedMotion";
 
 const SEARCH_LIMIT = 12;
 const DEBOUNCE_MS = 250;
@@ -697,11 +697,12 @@ export function ManualContentsPanel({
     });
   }
 
+  const scrollBehavior = useMotionScrollBehavior();
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
     useSensor(KeyboardSensor, {
       coordinateGetter: sortableKeyboardCoordinates,
-      scrollBehavior: motionScrollBehavior(),
+      scrollBehavior,
     }),
   );
   const lastOver = useRef<UniqueIdentifier | null>(null);

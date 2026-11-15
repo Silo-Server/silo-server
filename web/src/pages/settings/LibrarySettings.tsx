@@ -70,8 +70,8 @@ import type { DragStartEvent, DragEndEvent } from "@dnd-kit/core";
 import { SortableContext, verticalListSortingStrategy, arrayMove } from "@dnd-kit/sortable";
 import { sortableKeyboardCoordinates } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { useMotionSafeDropAnimation, useMotionSafeSortable } from "@/hooks/useSortableList";
-import { motionScrollBehavior } from "@/hooks/usePrefersReducedMotion";
+import { useMotionSafeOverlay, useMotionSafeSortable } from "@/hooks/useSortableList";
+import { useMotionScrollBehavior } from "@/hooks/usePrefersReducedMotion";
 
 function sortLibrariesByOrder(libraries: UserLibrary[], ids: number[]) {
   const selected = new Set(ids);
@@ -526,14 +526,15 @@ export default function LibrarySettings() {
   const [disabledLibraryIDs, setDisabledLibraryIDs] = useState<number[]>([]);
   const [orderedLibraries, setOrderedLibraries] = useState<UserLibrary[]>([]);
   const [activeId, setActiveId] = useState<number | null>(null);
+  const scrollBehavior = useMotionScrollBehavior();
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
     useSensor(KeyboardSensor, {
       coordinateGetter: sortableKeyboardCoordinates,
-      scrollBehavior: motionScrollBehavior(),
+      scrollBehavior,
     }),
   );
-  const dropAnimation = useMotionSafeDropAnimation();
+  const overlayMotion = useMotionSafeOverlay();
 
   useEffect(() => {
     // Keep the editable local order in sync with the latest saved setting.
@@ -744,7 +745,7 @@ export default function LibrarySettings() {
             })}
           </div>
         </SortableContext>
-        <DragOverlay dropAnimation={dropAnimation}>
+        <DragOverlay {...overlayMotion}>
           {activeLibrary ? (
             <div className="surface-panel flex items-center gap-3 rounded-[1.5rem] px-4 py-4 shadow-lg">
               <GripVertical className="text-muted-foreground h-4 w-4" />

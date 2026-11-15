@@ -24,7 +24,7 @@ import type { HomeRow } from "@/lib/homeRows/types";
 import type { ListRowProps } from "@/components/calm/ListRow";
 import { useT } from "@/i18n";
 import { useHomeRowTitle } from "@/lib/sectionTitle";
-import { motionScrollBehavior } from "@/hooks/usePrefersReducedMotion";
+import { useMotionScrollBehavior } from "@/hooks/usePrefersReducedMotion";
 
 /** What the list hands each row so it can be dragged by its grip only. */
 export type SortableRowProps = Pick<ListRowProps, "handleProps" | "ref" | "style" | "dragging">;
@@ -86,12 +86,13 @@ export function RowList({
   // would talk over "Picked up". Only a change of position is announced.
   const lastOver = useRef<UniqueIdentifier | null>(null);
   const shownRows = drag?.rows ?? rows;
+  const scrollBehavior = useMotionScrollBehavior();
   const sensors = useSensors(
     useSensor(MouseSensor, { activationConstraint: { distance: 5 } }),
     useSensor(TouchSensor, { activationConstraint: { delay: TOUCH_DRAG_DELAY_MS, tolerance: 5 } }),
     useSensor(KeyboardSensor, {
       coordinateGetter: sortableKeyboardCoordinates,
-      scrollBehavior: motionScrollBehavior(),
+      scrollBehavior,
     }),
   );
 

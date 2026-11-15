@@ -84,9 +84,9 @@ import type { DragStartEvent, DragEndEvent, SensorDescriptor, SensorOptions } fr
 import { SortableContext, verticalListSortingStrategy, arrayMove } from "@dnd-kit/sortable";
 import { sortableKeyboardCoordinates } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { useMotionSafeDropAnimation, useMotionSafeSortable } from "@/hooks/useSortableList";
+import { useMotionSafeOverlay, useMotionSafeSortable } from "@/hooks/useSortableList";
 import { useT, type Translate } from "@/i18n";
-import { motionScrollBehavior } from "@/hooks/usePrefersReducedMotion";
+import { useMotionScrollBehavior } from "@/hooks/usePrefersReducedMotion";
 
 // Not translated: a separator glyph.
 const SEPARATOR = "·";
@@ -163,11 +163,12 @@ function LibrariesPage() {
   const sortableAccessibility = useSortableAccessibility(
     orderedLibraries.map((library) => ({ id: library.id, name: library.name })),
   );
+  const scrollBehavior = useMotionScrollBehavior();
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
     useSensor(KeyboardSensor, {
       coordinateGetter: sortableKeyboardCoordinates,
-      scrollBehavior: motionScrollBehavior(),
+      scrollBehavior,
     }),
   );
 
@@ -416,7 +417,7 @@ function LibraryTable({
   onDragCancel: () => void;
 }) {
   const t = useT();
-  const dropAnimation = useMotionSafeDropAnimation();
+  const overlayMotion = useMotionSafeOverlay();
   return (
     <DndContext
       sensors={sensors}
@@ -588,7 +589,7 @@ function LibraryTable({
           </SortableContext>
         </Table>
       </div>
-      <DragOverlay dropAnimation={dropAnimation}>
+      <DragOverlay {...overlayMotion}>
         {activeLibrary ? (
           <Table>
             <TableBody>

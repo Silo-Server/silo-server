@@ -24,3 +24,8 @@ export function motionScrollBehavior(): ScrollBehavior {
 export function usePrefersReducedMotion(): boolean {
   return useMediaQuery(REDUCED_MOTION_QUERY);
 }
+
+/** {@link motionScrollBehavior}, re-rendering when the preference changes. */
+export function useMotionScrollBehavior(): ScrollBehavior {
+  return usePrefersReducedMotion() ? "auto" : "smooth";
+}
