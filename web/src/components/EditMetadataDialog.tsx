@@ -10,7 +10,6 @@ import { TagInput } from "@/components/TagInput";
 import ImageSelectorTab from "@/components/ImageSelectorTab";
 import type { ItemDetail } from "@/api/types";
 import {
-  useItemMetadataSavePending,
   useUpdateItemMetadata,
   useRefreshItemMetadata,
   type UpdateItemMetadataRequest,
@@ -91,11 +90,7 @@ export default function EditMetadataDialog(props: EditMetadataDialogProps) {
 function EditMetadataForm({ item, open, onOpenChange }: EditMetadataDialogProps) {
   const t = useT();
   const [activeSection, setActiveSection] = useState<Section>("general");
-  // Keep only the fields this opening edited, like the locks below. The rest
-  // show the item as it is now, so a refetch that lands while the dialog is
-  // open, after a save or Reset to Provider, shows through instead of being
-  // saved back over.
-  const [edits, setEdits] = useState<Partial<ReturnType<typeof initFormState>>>({});
+  const [form, setForm] = useState(() => initFormState(item));
   // Keep only local changes to locks. Image selection updates the item while
   // this dialog is open, so a snapshot of the original locks can go stale.
   const [lockOverrides, setLockOverrides] = useState<Map<number, boolean>>(() => new Map());
@@ -103,9 +98,15 @@ function EditMetadataForm({ item, open, onOpenChange }: EditMetadataDialogProps)
   const [showResetConfirm, setShowResetConfirm] = useState(false);
 
   const updateMutation = useUpdateItemMetadata(item.content_id);
-  // Each opening has a new form, so read a save from an earlier opening too.
-  const savePending = useItemMetadataSavePending(item.content_id);
   const refreshMutation = useRefreshItemMetadata();
+  // While a save or an image apply runs, the dialog stays open: closing it
+  // and reopening would start a fresh form whose guards don't know about the
+  // write still in flight, so a second save or a reset could race it.
+  const busy = updateMutation.isPending || imageApplyPending;
+  const closeUnlessBusy = (next: boolean) => {
+    if (!next && busy) return;
+    onOpenChange(next);
+  };
 
   const ownsImageLock = item.type === "movie" || item.type === "series";
   // A season or episode has the series' content rating, which decides age limits.
@@ -125,7 +126,15 @@ function EditMetadataForm({ item, open, onOpenChange }: EditMetadataDialogProps)
     : "general";
 
   const originalForm = useMemo(() => initFormState(item), [item]);
-  const form = useMemo(() => ({ ...originalForm, ...edits }), [originalForm, edits]);
+  // A form nobody has edited follows the item when it refetches. A dialog
+  // reopened before a save's refetch arrives was seeded from the item before
+  // the save; without this, Save would send those values back once the
+  // refetch lands and undo the save.
+  const [seededFrom, setSeededFrom] = useState(originalForm);
+  if (originalForm !== seededFrom) {
+    setSeededFrom(originalForm);
+    if (JSON.stringify(form) === JSON.stringify(seededFrom)) setForm(originalForm);
+  }
   const lockedFields = useMemo(() => {
     const fields = new Set(item.locked_fields ?? []);
     for (const [field, locked] of lockOverrides) {
@@ -137,7 +146,7 @@ function EditMetadataForm({ item, open, onOpenChange }: EditMetadataDialogProps)
 
   const setField = useCallback(
     (field: string, value: unknown) => {
-      setEdits((prev) => ({ ...prev, [field]: value }));
+      setForm((prev) => ({ ...prev, [field]: value }));
       const lockField = fieldLockMap?.[field];
       if (lockField !== undefined) {
         setLockOverrides((prev) => new Map(prev).set(lockField, true));
@@ -264,7 +273,7 @@ function EditMetadataForm({ item, open, onOpenChange }: EditMetadataDialogProps)
 
   return (
     <>
-      <Dialog open={open} onOpenChange={onOpenChange}>
+      <Dialog open={open} onOpenChange={closeUnlessBusy}>
         <DialogContent
           className="flex max-w-5xl flex-col gap-0 overflow-hidden p-0 sm:max-w-5xl"
           showCloseButton
@@ -729,7 +738,7 @@ function EditMetadataForm({ item, open, onOpenChange }: EditMetadataDialogProps)
                   onClick={() => setShowResetConfirm(true)}
                   // A save or image apply still running could lock a field
                   // again after the reset unlocks it.
-                  disabled={savePending || imageApplyPending}
+                  disabled={updateMutation.isPending || imageApplyPending}
                   className="text-muted-foreground hover:text-foreground"
                 >
                   {t("web.item.editMetadata.resetToProvider")}
@@ -740,7 +749,8 @@ function EditMetadataForm({ item, open, onOpenChange }: EditMetadataDialogProps)
               <Button
                 variant="outline"
                 size="sm"
-                onClick={() => onOpenChange(false)}
+                onClick={() => closeUnlessBusy(false)}
+                disabled={busy}
                 className="max-sm:flex-1"
               >
                 {t("common.cancel")}
@@ -748,10 +758,12 @@ function EditMetadataForm({ item, open, onOpenChange }: EditMetadataDialogProps)
               <Button
                 size="sm"
                 onClick={handleSave}
-                disabled={savePending || imageApplyPending}
+                disabled={updateMutation.isPending || imageApplyPending}
                 className="max-sm:flex-1"
               >
-                {savePending ? t("web.item.dialog.saving") : t("web.item.editMetadata.saveChanges")}
+                {updateMutation.isPending
+                  ? t("web.item.dialog.saving")
+                  : t("web.item.editMetadata.saveChanges")}
               </Button>
             </div>
           </div>

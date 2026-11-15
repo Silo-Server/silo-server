@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ItemDetail } from "@/api/types";
 
 const mocks = vi.hoisted(() => ({
+  pending: false,
   update: vi.fn(),
   updateAsync: vi.fn(),
   refresh: vi.fn(),
@@ -12,10 +13,11 @@ vi.mock("@/hooks/queries/items", () => ({
   useUpdateItemMetadata: () => ({
     mutate: mocks.update,
     mutateAsync: mocks.updateAsync,
-    isPending: false,
+    get isPending() {
+      return mocks.pending;
+    },
   }),
   useRefreshItemMetadata: () => ({ mutate: mocks.refresh }),
-  useItemMetadataSavePending: () => false,
 }));
 vi.mock("@/hooks/useIsActingAdmin", () => ({ useIsActingAdmin: () => true }));
 vi.mock("@/components/MetadataTranslatePanel", () => ({ MetadataTranslatePanel: () => null }));
@@ -47,7 +49,6 @@ vi.mock("@/components/ImageSelectorTab", () => ({
 }));
 
 import EditMetadataDialog from "./EditMetadataDialog";
-import { FIELD_OVERVIEW } from "./EditMetadataDialog.form";
 
 function series(lockedFields: number[] = []): ItemDetail {
   return {
@@ -401,30 +402,61 @@ describe("EditMetadataDialog reopening", () => {
     fireEvent.click(screen.getByRole("button", { name: "Save Changes" }));
     expect(mocks.update).not.toHaveBeenCalled();
   });
+});
 
-  // Reopened before a save's or a reset's refetch lands, the dialog starts
-  // from the old values; the refetch must replace them, not be saved over.
-  it("shows a refetch that lands while it is open, and saving it sends only the edits", () => {
+describe("EditMetadataDialog writes in flight", () => {
+  beforeEach(() => {
+    mocks.pending = false;
+    mocks.update.mockReset();
+    mocks.refresh.mockReset();
+  });
+
+  const movie = (title: string) =>
+    ({
+      content_id: "movie-busy",
+      type: "movie",
+      title,
+      locked_fields: [],
+    }) as unknown as ItemDetail;
+
+  it("stays open while a save is running", () => {
+    mocks.pending = true;
+    const onOpenChange = vi.fn();
+    render(<EditMetadataDialog item={movie("Saving Title")} open onOpenChange={onOpenChange} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    fireEvent.keyDown(document.activeElement ?? document.body, { key: "Escape" });
+
+    expect(onOpenChange).not.toHaveBeenCalledWith(false);
+    mocks.pending = false;
+  });
+
+  it("stays open while an image apply is running, then closes", () => {
+    const onOpenChange = vi.fn();
+    render(<EditMetadataDialog item={movie("Image Title")} open onOpenChange={onOpenChange} />);
+    fireEvent.click(screen.getByRole("button", { name: "Begin image apply" }));
+
+    fireEvent.keyDown(document.activeElement ?? document.body, { key: "Escape" });
+    expect(onOpenChange).not.toHaveBeenCalledWith(false);
+
+    fireEvent.click(screen.getByRole("button", { name: "Finish image apply" }));
+    fireEvent.keyDown(document.activeElement ?? document.body, { key: "Escape" });
+    expect(onOpenChange).toHaveBeenCalledWith(false);
+  });
+
+  // A save closes the dialog before its refetch arrives. Reopened in between,
+  // the untouched form takes the saved values when the refetch lands, so Save
+  // doesn't send the old ones back.
+  it("takes a save's refetched values when it was reopened before they arrived", () => {
     const onOpenChange = vi.fn();
     const { rerender } = render(
-      <EditMetadataDialog item={movie("Old Title")} open onOpenChange={onOpenChange} />,
+      <EditMetadataDialog item={movie("Old Title")} open={false} onOpenChange={onOpenChange} />,
     );
-    rerender(
-      <EditMetadataDialog
-        item={{ ...movie("New Title"), overview: "Old overview" }}
-        open
-        onOpenChange={onOpenChange}
-      />,
-    );
-    expect(screen.getByDisplayValue("New Title")).toBeTruthy();
+    rerender(<EditMetadataDialog item={movie("Old Title")} open onOpenChange={onOpenChange} />);
+    rerender(<EditMetadataDialog item={movie("Saved Title")} open onOpenChange={onOpenChange} />);
 
-    fireEvent.change(screen.getByDisplayValue("Old overview"), {
-      target: { value: "Edited overview" },
-    });
+    expect(screen.getByDisplayValue("Saved Title")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Save Changes" }));
-    expect(mocks.update).toHaveBeenCalledWith(
-      { overview: "Edited overview", locked_fields: [FIELD_OVERVIEW] },
-      expect.any(Object),
-    );
+    expect(mocks.update).not.toHaveBeenCalled();
   });
 });
