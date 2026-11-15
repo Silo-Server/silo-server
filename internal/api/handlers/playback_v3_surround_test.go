@@ -59,7 +59,7 @@ func TestReplanWithoutSurroundConversionV3FallsBackToDirectPlayWhenRefused(t *te
 	} {
 		t.Run(refusal.reason, func(t *testing.T) {
 			handler, input, result := surroundFallbackFixtureV3(t)
-			fallback, ok := handler.replanWithoutSurroundConversionV3(context.Background(), mediaAuthModeV3{}, func() playback.PlannerInputV3 { return input }, result, &refusal)
+			fallback, ok := handler.replanWithoutSurroundConversionV3(context.Background(), mediaAuthModeV3{}, func() (playback.PlannerInputV3, bool) { return input, true }, result, &refusal)
 			if !ok || fallback.Plan == nil || fallback.Plan.Delivery != playback.DeliveryOriginalHTTPV3 {
 				t.Fatalf("fallback = %s (ok %v), want direct play", playback.ExplainPlannerResultV3(fallback), ok)
 			}
@@ -69,7 +69,7 @@ func TestReplanWithoutSurroundConversionV3FallsBackToDirectPlayWhenRefused(t *te
 
 func TestReplanWithoutSurroundConversionV3LeavesOtherFailuresAlone(t *testing.T) {
 	handler, input, result := surroundFallbackFixtureV3(t)
-	plannerInput := func() playback.PlannerInputV3 { return input }
+	plannerInput := func() (playback.PlannerInputV3, bool) { return input, true }
 	mode := mediaAuthModeV3{}
 	if _, ok := handler.replanWithoutSurroundConversionV3(context.Background(), mode, plannerInput, result, nil); ok {
 		t.Fatal("a successful start was replanned")
@@ -83,6 +83,10 @@ func TestReplanWithoutSurroundConversionV3LeavesOtherFailuresAlone(t *testing.T)
 	}
 	if _, ok := handler.replanWithoutSurroundConversionV3(context.Background(), mode, plannerInput, result, &transportErrorV3{reason: "internal_error"}); ok {
 		t.Fatal("an internal error outside route preparation was replanned")
+	}
+	// A stop that ended the session while its route was prepared is final.
+	if _, ok := handler.replanWithoutSurroundConversionV3(context.Background(), mode, plannerInput, result, &transportErrorV3{reason: terminalSessionExpiredV3, routePreparation: true}); ok {
+		t.Fatal("a session that ended during route preparation was replanned")
 	}
 	// The attempt record is already saved, so its ID cannot start another route.
 	if _, ok := handler.replanWithoutSurroundConversionV3(context.Background(), mode, plannerInput, result, &transportErrorV3{reason: transcodeStartFailedReasonV3, routePreparation: true, attemptPersisted: true}); ok {

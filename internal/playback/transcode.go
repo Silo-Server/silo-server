@@ -1935,8 +1935,9 @@ func appendAACEncodeFilterArgs(args []string, sourceChannels int, targetCodec st
 // appendAudioArgs adds audio codec arguments. Supports "copy" for passthrough,
 // plus opus / aac / eac3 / ac3 as re-encode targets. EAC3 and AC3 are useful
 // when we must transcode video but want to preserve surround channels for an
-// HDMI receiver — both are legal in HLS fMP4 (not MPEG-TS; ensure the HLS
-// packager is fMP4 when emitting these).
+// HDMI receiver. HLS carries both in fMP4 and in MPEG-TS segments; the
+// surround bitstream conversion (audio_to_eac3 / audio_to_ac3) packages them
+// as the client's other copy remuxes are packaged.
 func appendAudioArgs(args []string, opts TranscodeOpts) []string {
 	// Case-insensitive so the switch agrees with TranscodesAudio for any
 	// client-supplied spelling.

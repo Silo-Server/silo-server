@@ -144,6 +144,7 @@ These are the protocol-v3 feature strings this server version advertises:
 | `native_embedded_limitations_v1` | The server honors `limitations` on a `native_embedded` entry and keeps the tracks that player would show wrongly off the native route (§8). A client whose native route needs a limitation must not send that entry to a server without this feature: an older server rejects the field or ignores it and plans those tracks native |
 | `hls_subtitle_renditions_all_v1` | Only with `hls_subtitle_renditions_v1` (and `hls_remux_subtitle_renditions_v1` for a remux). Every embedded text track the source's index can read, up to 64, becomes a WebVTT rendition of the HLS plan's stream, read on demand; those inventory rows carry `hls_rendition`, and switching among them keeps the stream (§8) |
 | `progressive_range_refusal_v1` | Sent by the client in `deliveries.progressive.features` rather than `client_features`. The client reopens a progressive remux at its current position when the stream refuses a mid-stream range. Its `server_remux_progressive` URLs then carry `remux_range=refuse`, except one served by a proxy that does not advertise `remux_range_refusal_v1` (§4.1), and a GET whose `Range` starts past byte 0, or is a suffix range, answers `409` before the remux starts instead of streaming from the origin, which a browser would read again from byte zero ([playback API](../playback-api.md#delivery)) |
+| `surround_bitstream_conversion_v1` | Advertised only. A client whose exact audio evidence shows it would decode a surround track to PCM, while its sink validates E-AC-3 or AC-3 5.1 but not the source codec, may receive a copy-video `server_remux_hls` that converts the track to that codec (`decision_reason: surround_bitstream_conversion`, §11) |
 
 `plan_source_duration_v1` is the reason feature detection is a list and not a version
 number: without it, a client cannot tell a server that never sends the runtime
@@ -2309,9 +2310,9 @@ those codecs an HLS executor offers. This route ranks ahead of the original
 file. The
 plan claims passthrough for the converted codec and carries an
 `audio_converted` warning. Only routes that keep the original picture and
-subtitle presentation qualify: the native dynamic range, no Dolby Vision
-Profile 7 handling, and the same subtitle mode and claims as the original
-route. When no executor offers the recipe or the client already attempted the
+subtitle presentation qualify: the source quality with no server bitrate cap,
+the native dynamic range, no Dolby Vision Profile 7 handling, and the same
+subtitle mode and claims as the original route. When no executor offers the recipe or the client already attempted the
 plan, the planner returns the route the conversion improved on. When session
 admission or route preparation refuses the conversion on a start or replan,
 the server re-plans once without it; the refused start's session records no

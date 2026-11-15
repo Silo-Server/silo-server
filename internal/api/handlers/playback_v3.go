@@ -2214,8 +2214,8 @@ func (h *PlaybackHandler) startPlaybackApplicationV3(r *http.Request, body []byt
 	}
 	appendStartWarningsV3(&result, warnings)
 	response, statusErr := h.startPlannedPlaybackV3(r, userID, profileID, req, requestDigests, requestedFile, effectiveFile, audioIndex, intent, result, clientInfo)
-	if fallback, ok := h.replanWithoutSurroundConversionV3(r.Context(), headerAuthenticatedMediaV3(req.ClientFeatures), func() playback.PlannerInputV3 {
-		return h.plannerInputV3(r.Context(), planning, req, effectiveFile, audioIndex)
+	if fallback, ok := h.replanWithoutSurroundConversionV3(r.Context(), headerAuthenticatedMediaV3(req.ClientFeatures), func() (playback.PlannerInputV3, bool) {
+		return h.plannerInputV3(r.Context(), planning, req, effectiveFile, audioIndex), true
 	}, result, statusErr); ok {
 		markLearnedLimit(&fallback, learnedLimit, requestedFile, req, serverBitrateCapV3(r.Context()))
 		appendStartWarningsV3(&fallback, warnings)
@@ -5623,6 +5623,22 @@ func (h *PlaybackHandler) reuseActiveHLSTransportV3(ctx context.Context, session
 	return transport
 }
 
+// appendReplanDegradationWarningsV3 discloses a replan's track degradations
+// on plan: an audio track it could not keep, or a subtitle it could not keep
+// or will not show.
+func appendReplanDegradationWarningsV3(plan *playback.PlanV3, audioDegraded, subtitleDegraded, subtitleNotShown bool) {
+	if audioDegraded {
+		plan.DegradationWarnings = append(plan.DegradationWarnings, playback.AudioTrackUnavailableWarningV3())
+	}
+	if subtitleDegraded {
+		warning := playback.SubtitleTrackUnavailableWarningV3()
+		if subtitleNotShown {
+			warning = playback.SubtitleNotShownWarningV3()
+		}
+		plan.DegradationWarnings = appendWarningOnceV3(plan.DegradationWarnings, warning)
+	}
+}
+
 // executeReplanV3 prepares an atomic replacement for a failed playback route.
 func (h *PlaybackHandler) executeReplanV3(r *http.Request, record *playback.AttemptRecordV3, req playback.ReplanRequestV3) (playback.DecisionResponseV3, playback.AttemptRecordV3, *preparedTransportV3, *transportErrorV3) {
 	r = r.WithContext(withPlaybackRoutingPolicySnapshotV3(r.Context(), h.playbackRoutingPolicyV3()))
@@ -6067,16 +6083,7 @@ func (h *PlaybackHandler) executeReplanV3(r *http.Request, record *playback.Atte
 	// Replans degrade the same two ways starts do, and clients read the same
 	// contract: silently swapping audio to the default or turning subtitles
 	// off mid-session is worse than the refusal this replaced.
-	if audioDegraded {
-		result.Plan.DegradationWarnings = append(result.Plan.DegradationWarnings, playback.AudioTrackUnavailableWarningV3())
-	}
-	if subtitleDegraded {
-		warning := playback.SubtitleTrackUnavailableWarningV3()
-		if subtitleNotShown {
-			warning = playback.SubtitleNotShownWarningV3()
-		}
-		result.Plan.DegradationWarnings = appendWarningOnceV3(result.Plan.DegradationWarnings, warning)
-	}
+	appendReplanDegradationWarningsV3(result.Plan, audioDegraded, subtitleDegraded, subtitleNotShown)
 	session, err := h.sessionMgr.GetSession(record.SessionID)
 	if err != nil {
 		return playback.DecisionResponseV3{}, *record, nil, &transportErrorV3{reason: terminalSessionExpiredV3, message: "The playback session has expired.", retryable: true}
@@ -6094,12 +6101,24 @@ func (h *PlaybackHandler) executeReplanV3(r *http.Request, record *playback.Atte
 		if seekReanchor || surroundFallbackUsed {
 			return result, false
 		}
-		fallback, ok := h.replanWithoutSurroundConversionV3(r.Context(), mode, func() playback.PlannerInputV3 {
-			return h.plannerInputV3(r.Context(), planning.planningV3, start, effectiveFile, audioIndex)
+		// The fallback is planned as planReplanV3 plans: the attempt's pinned
+		// renditions, and no plan at all when a selected downloaded subtitle
+		// cannot be listed, so the refusal stands rather than turn it off.
+		fallback, ok := h.replanWithoutSurroundConversionV3(r.Context(), mode, func() (playback.PlannerInputV3, bool) {
+			additional, inventoryErr := h.listDownloadedSubtitlesV3(r.Context(), effectiveFile)
+			if inventoryErr != nil && selectsDownloadedSubtitleV3(effectiveFile, start) {
+				return playback.PlannerInputV3{}, false
+			}
+			input := h.plannerInputWithSubtitlesV3(r.Context(), planning.planningV3, start, effectiveFile, audioIndex, additional)
+			input.CueIndexedSubtitleTracks = planning.renditionTracks.cueIndexedSubtitleTracks(effectiveFile, start)
+			return input, true
 		}, result, refusal)
 		if ok {
 			surroundFallbackUsed = true
 			cancelReservation()
+			// Marked as the plan it replaces was.
+			markLearnedLimit(&fallback, learnedLimit, requestedFile, start, serverBitrateCapV3(r.Context()))
+			appendReplanDegradationWarningsV3(fallback.Plan, audioDegraded, subtitleDegraded, subtitleNotShown)
 		}
 		return fallback, ok
 	}

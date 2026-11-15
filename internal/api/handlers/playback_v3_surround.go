@@ -29,13 +29,19 @@ var surroundFallbackReasonsV3 = map[string]bool{
 // conversion. The conversion only improves on a route the client can already
 // play, so a refusal falls back to that route instead of failing playback. A
 // refusal raised after the attempt was persisted is left alone: the attempt ID
-// is spent. The fallback passes through the same progressive-remux escalation
-// as a first plan.
-func (h *PlaybackHandler) replanWithoutSurroundConversionV3(ctx context.Context, mode mediaAuthModeV3, plannerInput func() playback.PlannerInputV3, result playback.PlannerResultV3, refusal *transportErrorV3) (playback.PlannerResultV3, bool) {
-	if refusal == nil || refusal.attemptPersisted || !refusal.routePreparation && !surroundFallbackReasonsV3[refusal.reason] || !playback.IsSurroundBitstreamConversionV3(result.Plan) {
+// is spent. So is a session that ended while its route was prepared: a stop
+// that lands then is final. plannerInput reports false when the fallback
+// cannot be planned faithfully, and the refusal then stands. The fallback
+// passes through the same progressive-remux escalation as a first plan.
+func (h *PlaybackHandler) replanWithoutSurroundConversionV3(ctx context.Context, mode mediaAuthModeV3, plannerInput func() (playback.PlannerInputV3, bool), result playback.PlannerResultV3, refusal *transportErrorV3) (playback.PlannerResultV3, bool) {
+	if refusal == nil || refusal.attemptPersisted || refusal.reason == terminalSessionExpiredV3 ||
+		!refusal.routePreparation && !surroundFallbackReasonsV3[refusal.reason] || !playback.IsSurroundBitstreamConversionV3(result.Plan) {
 		return result, false
 	}
-	next := plannerInput()
+	next, ok := plannerInput()
+	if !ok {
+		return result, false
+	}
 	outputContextID := next.Request.ClientPlaybackContext.Output.OutputContextID
 	next.AttemptedKeys = append(append([]string(nil), next.AttemptedKeys...),
 		playback.PlanAttemptKeyV3(*result.Plan, outputContextID, nil))
@@ -69,10 +75,12 @@ func routePreparationErrorV3(err *transportErrorV3) *transportErrorV3 {
 }
 
 // discardRefusedStartSessionV3 tears down a session whose surround conversion
-// failed to start. It releases the same resources as a stop but writes no
-// watch history and sends no scrobble: nothing played.
+// failed to start. It ends the session's authority as the start's ordinary
+// abort does, without the user-stop steps that can fail before the session
+// stops, but writes no watch history and sends no scrobble: nothing played.
 func (h *PlaybackHandler) discardRefusedStartSessionV3(ctx context.Context, sessionID string) {
-	if err := h.dropLiveSessionByID(ctx, sessionID); err != nil {
+	if err := h.dropLiveSession(ctx, sessionID, false); err != nil {
+		slog.ErrorContext(ctx, "failed to discard a refused surround conversion session", logComponentKey, playbackLogValueV3, "session", sessionID, "error", err)
 		return
 	}
 	if h.AdminStore != nil {

@@ -85,13 +85,19 @@ func (h *PlaybackHandler) endPlaybackSessionAuthority(ctx context.Context, sessi
 // another caller owns: the live authority and the transport go, but no
 // history or provider event is written for it.
 func (h *PlaybackHandler) dropLiveSessionByID(ctx context.Context, sessionID string) error {
+	return h.dropLiveSession(ctx, sessionID, true)
+}
+
+// dropLiveSession is dropLiveSessionByID for a caller that chooses whether
+// the end is user-initiated (see endPlaybackSessionAuthority).
+func (h *PlaybackHandler) dropLiveSession(ctx context.Context, sessionID string, userInitiated bool) error {
 	session, err := h.sessionMgr.GetSession(sessionID)
 	if err != nil {
 		return err
 	}
 	unlock := h.tm.LockSessionLifecycle(session.ID)
 	defer unlock()
-	current, err := h.endPlaybackSessionAuthority(ctx, session, true)
+	current, err := h.endPlaybackSessionAuthority(ctx, session, userInitiated)
 	if err != nil {
 		return err
 	}

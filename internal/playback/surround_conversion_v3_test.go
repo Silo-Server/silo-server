@@ -191,3 +191,14 @@ func TestAppendAudioArgsFreezesSurroundBitstreamRecipe(t *testing.T) {
 		t.Fatalf("legacy eac3 args = %v", got)
 	}
 }
+
+func TestPlanPlaybackV3ConvertsToAC3WhenTheHLSDeliveryRefusesEAC3(t *testing.T) {
+	req := surroundRequestV3("ac3", "eac3")
+	hls := req.ClientPlaybackContext.Deliveries[DeliveryClassHLSV3]
+	hls.AudioPassthroughCodecs = []string{"ac3"}
+	req.ClientPlaybackContext.Deliveries[DeliveryClassHLSV3] = hls
+	result := planSurroundV3(req, surroundSourceFileV3("dts", 6, "5.1(side)"), surroundRegistryV3())
+	if result.Plan == nil || result.Plan.DecisionReason != decisionReasonSurroundBitstreamV3 || result.Plan.EffectiveRecipe.AudioCodec != "ac3" {
+		t.Fatalf("result = %s, want an AC-3 5.1 surround conversion", ExplainPlannerResultV3(result))
+	}
+}

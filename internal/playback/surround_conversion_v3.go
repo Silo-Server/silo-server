@@ -101,19 +101,23 @@ func (p *candidatePlannerV3) surroundBitstreamCodecs() []string {
 }
 
 // surroundBitstreamCandidate builds the copy-video HLS remux that converts
-// the selected audio to the first listed codec an HLS executor offers, or nil
-// when none does. It is one candidate whatever the codec, so once it was
-// attempted the planner moves on to the route it improved on.
+// the selected audio to the first listed codec that an HLS executor offers
+// and the HLS delivery accepts, or nil when none qualifies. It is one
+// candidate whatever the codec, so once it was attempted the planner moves on
+// to the route it improved on.
 func (p *candidatePlannerV3) surroundBitstreamCandidate() *PlannerResultV3 {
-	f, request, source := &p.video, p.input.Request, p.source
-	var target, name, version string
 	for _, codec := range p.surroundBitstreamCodecs() {
-		if name, version = surroundBitstreamTransformationV3(codec); p.input.hlsRemuxRegistry().Available(name) {
-			target = codec
-			break
+		if result := p.surroundBitstreamPlan(codec); result != nil {
+			return result
 		}
 	}
-	if target == "" {
+	return nil
+}
+
+func (p *candidatePlannerV3) surroundBitstreamPlan(target string) *PlannerResultV3 {
+	f, request, source := &p.video, p.input.Request, p.source
+	name, version := surroundBitstreamTransformationV3(target)
+	if !p.input.hlsRemuxRegistry().Available(name) {
 		return nil
 	}
 	plan := p.remuxBase(candidateCopyV3)
