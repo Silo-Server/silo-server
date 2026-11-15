@@ -14,7 +14,8 @@ import (
 // A book page's series row shows the viewing profile's own state on each
 // entry: finished, partway, or untouched. Another profile's listening never
 // shows through, a book the profile hid from history shows no state until it
-// is read again, and a browse card names a book's authors in credit order.
+// is read again, and a browse card names a book's authors once each, in
+// credit order.
 func TestBookPageRelatedStateAndCardAuthorsPostgres(t *testing.T) {
 	ctx := t.Context()
 	pool := newTestPool(t)
@@ -137,7 +138,7 @@ func TestBookPageRelatedStateAndCardAuthorsPostgres(t *testing.T) {
 		t.Errorf("ebook series entries = %v, want %v", got, wantEbooks)
 	}
 
-	authors, err := ListBookAuthors(ctx, pool, []string{finished, partway}, 3)
+	authors, err := ListBookAuthors(ctx, pool, []string{finished, partway, finished}, 3)
 	if err != nil {
 		t.Fatal(err)
 	}

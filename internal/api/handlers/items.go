@@ -907,13 +907,8 @@ func (h *ItemsHandler) listBookAuthors(ctx context.Context, items []*models.Medi
 		return nil
 	}
 	ids := make([]string, 0, len(items))
-	seen := make(map[string]struct{}, len(items))
 	for _, item := range items {
-		if item == nil || item.ContentID == "" || (item.Type != itemTypeAudiobook && item.Type != itemTypeEbook) {
-			continue
-		}
-		if _, ok := seen[item.ContentID]; !ok {
-			seen[item.ContentID] = struct{}{}
+		if item != nil && (item.Type == itemTypeAudiobook || item.Type == itemTypeEbook) {
 			ids = append(ids, item.ContentID)
 		}
 	}

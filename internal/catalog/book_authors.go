@@ -29,13 +29,24 @@ var bookAuthorsSQL = `
 
 // ListBookAuthors returns at most limit author names for each of contentIDs,
 // in credit order: the first names a book's detail page lists under its
-// authors. One query covers every ID; an ID with no author credit is absent.
+// authors. One query covers every ID, so callers pass one page of cards;
+// repeated and empty IDs are dropped first. An ID with no author credit is
+// absent.
 func ListBookAuthors(ctx context.Context, pool *pgxpool.Pool, contentIDs []string, limit int) (map[string][]string, error) {
-	authors := make(map[string][]string, len(contentIDs))
-	if pool == nil || len(contentIDs) == 0 || limit <= 0 {
+	ids := make([]string, 0, len(contentIDs))
+	seen := make(map[string]struct{}, len(contentIDs))
+	for _, id := range contentIDs {
+		if _, dup := seen[id]; id == "" || dup {
+			continue
+		}
+		seen[id] = struct{}{}
+		ids = append(ids, id)
+	}
+	authors := make(map[string][]string, len(ids))
+	if pool == nil || len(ids) == 0 || limit <= 0 {
 		return authors, nil
 	}
-	rows, err := pool.Query(ctx, bookAuthorsSQL, contentIDs, int(models.PersonKindAuthor), limit)
+	rows, err := pool.Query(ctx, bookAuthorsSQL, ids, int(models.PersonKindAuthor), limit)
 	if err != nil {
 		return nil, fmt.Errorf("listing book authors: %w", err)
 	}
