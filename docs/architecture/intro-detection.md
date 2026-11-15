@@ -86,12 +86,20 @@ at least 80 percent of the authored intro chapter in replay:
 |---|---|
 | At least 20 seconds, confirmed by two or more pairs, and within 1.5 seconds of the season's usual intro duration, which at least half the season's episodes share | 0.90 |
 | Other markers of at least 20 seconds | 0.65 |
-| Shorter than 20 seconds | 0.30 |
+| Shorter than 20 seconds, confirmed by two or more pairs | 0.30 |
 
-Recurring music cues mistaken for intros are short and rarely shared by most
-of a season, so they fall in the lower rows. Chapter-based markers keep 0.95,
-and silence-extended chapters 0.98. Contribution to online providers compares
-these values with each provider's minimum confidence.
+A match shorter than 20 seconds that only one partner episode confirms is not
+written: a recurring music cue is often shared by a single pair of episodes,
+while a title card recurs across the season. Such a file first gets the wider
+search, as a file with no match does, so a title card shared with episodes
+outside its neighbor window still finds its partners. That search records
+results for the file alone, so it changes no other file's match. Music cues
+that several episodes share are still written, and they fall in the lower
+rows because few of them match most of a season.
+
+Chapter-based markers keep 0.95, and silence-extended chapters 0.98.
+Contribution to online providers compares these values with each provider's
+minimum confidence.
 
 ### Chapters and online markers
 
