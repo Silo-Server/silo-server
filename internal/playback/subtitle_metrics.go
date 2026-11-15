@@ -100,6 +100,11 @@ var subtitlePageCostRejections = promauto.NewCounterVec(prometheus.CounterOpts{
 	Help: "Windowed bitmap page extracts killed for reading more of the source container than a page may cost, by output format. Measurement only.",
 }, []string{subtitleMetricLabelFormat})
 
+var subtitleWindowBudgetKills = promauto.NewCounterVec(prometheus.CounterOpts{
+	Name: "vio_subtitle_window_budget_total",
+	Help: "Request-path text subtitle window extracts killed at their elapsed budget instead of running to the window timeout. Measurement only.",
+}, []string{subtitleMetricLabelFormat})
+
 // recordSubtitleServeSource attributes one response or extraction attempt to
 // the path that produced it. Call it at the point the path is chosen, so a
 // later write error still counts the cost that was already paid.
@@ -178,4 +183,10 @@ func recordSubtitlePageCostRefused() {
 // reader needs is that a page was refused rather than which guard fired.
 func recordSubtitlePageTimeout() {
 	subtitlePageCostRejections.WithLabelValues(subtitleFormatSUP).Inc()
+}
+
+// recordSubtitleWindowBudgetKill counts one request-path text window extract
+// killed at its elapsed budget.
+func recordSubtitleWindowBudgetKill(format string) {
+	subtitleWindowBudgetKills.WithLabelValues(format).Inc()
 }
