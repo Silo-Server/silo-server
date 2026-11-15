@@ -48,6 +48,12 @@ type Repository interface {
 	MarkListItemRemoteRemoved(ctx context.Context, connectionID string, kind ListKind, mediaItemID string, removedAt time.Time) error
 	MarkListItemLocalRemoved(ctx context.Context, connectionID string, kind ListKind, mediaItemID string, removedAt time.Time) error
 	MarkListItemError(ctx context.Context, connectionID string, kind ListKind, mediaItemID, lastError string) error
+	// WatchlistTitlesSince returns when the connection's first watchlist
+	// import that keeps titles outside the library finished, or nil before it.
+	WatchlistTitlesSince(ctx context.Context, connectionID string) (*time.Time, error)
+	// MarkWatchlistTitlesSince records that import finishing, once, at the
+	// database's clock, the one list item created_at uses.
+	MarkWatchlistTitlesSince(ctx context.Context, connectionID string) error
 	ListRatingEventConnections(ctx context.Context, userID int, profileID string) ([]Connection, error)
 	ListRatingSyncStates(ctx context.Context, connectionID, providerAccountID string, mediaItemIDs []string) ([]RatingSyncState, error)
 	UpsertRatingSyncStates(ctx context.Context, states []RatingSyncState) error
@@ -1530,6 +1536,30 @@ func (r *PostgresRepository) UpsertListItemStates(ctx context.Context, states []
 		if err != nil {
 			return fmt.Errorf("upsert list item state: %w", err)
 		}
+	}
+	return nil
+}
+
+func (r *PostgresRepository) WatchlistTitlesSince(ctx context.Context, connectionID string) (*time.Time, error) {
+	var since *time.Time
+	err := r.pool.QueryRow(ctx, `
+		SELECT watchlist_titles_since FROM watch_provider_connections WHERE id = $1::uuid
+	`, connectionID).Scan(&since)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("read watchlist titles since: %w", err)
+	}
+	return since, nil
+}
+
+func (r *PostgresRepository) MarkWatchlistTitlesSince(ctx context.Context, connectionID string) error {
+	if _, err := r.pool.Exec(ctx, `
+		UPDATE watch_provider_connections SET watchlist_titles_since = now()
+		WHERE id = $1::uuid AND watchlist_titles_since IS NULL
+	`, connectionID); err != nil {
+		return fmt.Errorf("mark watchlist titles since: %w", err)
 	}
 	return nil
 }

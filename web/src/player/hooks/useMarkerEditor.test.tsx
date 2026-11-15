@@ -53,7 +53,9 @@ it("saves changed ranges through the host-owned v2 player transport", async () =
     "X-Profile-Token": "profile-token",
     "X-Silo-Device-Id": "device",
   });
-  expect(onSaved).toHaveBeenCalledOnce();
+  // Only the kinds this save sent: the draft's copy of the others can be older
+  // than what another session has saved since the panel opened.
+  expect(onSaved).toHaveBeenCalledExactlyOnceWith({ intro: { start: 0, end: 70 }, credits: null });
   expect(result.current.editing).toBe(false);
 });
 

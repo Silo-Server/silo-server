@@ -35,6 +35,9 @@
 ./internal/blobgc TestSweeperDefersPrefixSpanningBoundedRunsDB
 ./internal/blobgc TestSweeperRestartsAfterStorageMoveDB
 
+# Deleting a media file seeks its queued chapter images instead of walking the queue.
+./internal/blobgc TestDeletedFileQueueLookupSeeksChapterFileIndexDB
+
 # Chapter width replacement has one extraction and upload across API replicas.
 ./internal/chapterthumbs TestWidthBackfillSerializesReplicasPostgres
 ./internal/chapterthumbs TestWidthChangeDuringFirstChapterExtractionDB

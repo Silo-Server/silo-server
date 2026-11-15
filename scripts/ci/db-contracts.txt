@@ -127,6 +127,10 @@
 ./internal/catalog TestSearchTextFoldMatchesGoPostgres
 ./internal/catalog TestFoldSearchDiacriticsMigrationPostgres
 
+# Sorting by latest episode added works when episodes can appear: mixed search
+# and the episode scope, in search and browse, with episodes and movies last.
+./internal/catalog TestSortLatestEpisodeAddedWithEpisodesDB
+
 # Section and Smart collection rule fields and operators compile to working SQL.
 ./internal/catalog TestRuleFieldsFilterCatalogDB
 ./internal/api/handlers TestCatalogProfileSectionsDB
@@ -235,6 +239,8 @@
 ./internal/jellycompat TestApplyListFileFieldsDB
 ./internal/jellycompat TestLoginAccountNameWithHashDB
 ./internal/jellycompat TestRevokedCompatSessionStaysDeletedPostgres
+./internal/jellycompat TestDeletedProfileCompatSessionsEndPostgres
+./internal/jellycompat TestSignInRacingProfileDeleteKeepsNoSessionPostgres
 ./internal/jellycompat TestDurableCompatPlaybackStoreUpdateRejectionAcrossReplicas
 ./internal/jellycompat TestDurableCompatPlaybackStoreDropsRejectedPendingUpdate
 ./internal/jellycompat TestDurableCompatPlaybackStoreRetiresUpstreamSessionAcrossReplicas
@@ -487,6 +493,8 @@
 # Request cleanup, prepared downloads and user-store transactions.
 ./internal/requests TestReplaceFailedIsScopedToRequesterDatabase
 ./internal/requests TestDeleteFailedRequestDatabase
+./internal/requests TestClaimedTargetWritesNeedTheClaimDatabase
+./internal/requests TestDeleteTargetWaitsForAConcurrentReclaimDatabase
 ./internal/requests TestMarkAvailableLeavesARetryResendingATierDatabase
 ./internal/requests TestListDownloadingRequestsOrderDatabase
 ./internal/requests TestRecordSubmissionReplacesFailedTargetDatabase
@@ -496,6 +504,7 @@
 ./internal/downloads TestParkedDownloadIsNotServedOrPreparedFromItsOldFileDB
 ./internal/downloads TestRegistrationRefusesAFileOfAnotherTitleDB
 ./internal/downloads TestRegistrationAndRetitleSerializeOnTheFileRowDB
+./internal/downloads TestDeadAccountTransferReleasesItsConcurrentSlotDB
 ./internal/downloads TestManagedRequestRegistersNothingWhenAFileLeftItsTitleDB
 ./internal/downloads TestMonitorSyncSkipsAnEpisodeWhoseFileLeftItsTitleDB
 ./internal/downloads TestSubscriptionSyncPagePostgres
@@ -831,6 +840,10 @@
 ./internal/catalog TestLetterIndexMatchesCursorPagesPostgres
 ./internal/catalog TestLetterIndexEpisodesMatchCursorPagesPostgres
 
+# An episode's Sort Title decides its browse order and A–Z letter, falling back
+# to its title.
+./internal/catalog TestEpisodeSortTitleFilesEpisodeBrowsePostgres
+
 # Deleting a library removes its ID from access groups, account overrides and
 # invitations, without widening an emptied list; a write keeps only existing
 # libraries, even racing the delete; the migration repairs earlier deletes.
@@ -844,6 +857,7 @@
 
 # AI metadata translations never replace provider or manual localized text.
 ./internal/catalog TestAITranslationNeverOverwritesProviderOrManualText
+./internal/catalog TestPlainAITranslationFillsOnlyEmptyFields
 
 # A provider refresh with no translation clears only a copy of the base item's text.
 ./internal/catalog TestProviderUpsertClearsCopiedBaseTextOnly
@@ -1197,3 +1211,7 @@
 ./internal/catalog TestExternalIDLookupSkipsItemsWithAnotherTMDBIDDB
 ./internal/catalog TestResolveProviderAliasesSkipsItemsWithAnotherTMDBIDDB
 ./internal/watchlist TestLibraryMatchesUsesTheTitlesRetainedIDsDB
+
+# Smart collection collage records: a refresh deletes the collection's records
+# nobody refreshed for a week, with or without a collage, and keeps the rest.
+./internal/catalog TestSmartCollageRecordsRetireWhenUnrefreshedDB

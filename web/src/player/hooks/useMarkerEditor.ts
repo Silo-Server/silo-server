@@ -72,8 +72,13 @@ interface UseMarkerEditorParams {
   canEdit?: boolean;
   /** The current saved markers (from props); snapshotted into the draft on begin. */
   markers: MarkerDraft;
-  /** Notifies the host of the saved draft so it can patch local state immediately. */
-  onSaved?: (draft: MarkerDraft) => void;
+  /**
+   * Notifies the host of the kinds this save wrote so it can patch local state
+   * immediately. Kinds the save left out are absent: the draft's copy of them is
+   * the snapshot from when editing began, which another session may have
+   * changed since.
+   */
+  onSaved?: (saved: Partial<MarkerDraft>) => void;
 }
 
 /**
@@ -169,7 +174,7 @@ export function useMarkerEditor({
   const save = useCallback(async () => {
     if (fileId == null || !canEdit) return;
     const original = originalRef.current;
-    const body: Record<string, { start: number; end: number } | null> = {};
+    const body: Partial<MarkerDraft> = {};
     for (const kind of MARKER_KINDS) {
       if (rangesEqual(draft[kind], original[kind])) continue;
       const range = draft[kind];
@@ -196,7 +201,7 @@ export function useMarkerEditor({
     setDraft(draft);
     setEditing(false);
     try {
-      onSaved?.(draft);
+      onSaved?.(body);
     } catch (e) {
       console.error("Marker save callback failed:", e);
     }
