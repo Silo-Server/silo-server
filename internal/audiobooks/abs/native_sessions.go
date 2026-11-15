@@ -2,6 +2,7 @@ package abs
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -355,6 +356,19 @@ func writeNativePlaybackStartError(w http.ResponseWriter, err error) {
 type absDeviceInfo struct {
 	ClientName    string `json:"clientName"`
 	ClientVersion string `json:"clientVersion"`
+}
+
+// UnmarshalJSON keeps the string fields and ignores anything else: the
+// names are optional, and a malformed one must not reject the request that
+// carries it.
+func (d *absDeviceInfo) UnmarshalJSON(data []byte) error {
+	var fields map[string]any
+	if json.Unmarshal(data, &fields) != nil {
+		return nil
+	}
+	d.ClientName, _ = fields["clientName"].(string)
+	d.ClientVersion, _ = fields["clientVersion"].(string)
+	return nil
 }
 
 // absPlaybackClientInfo names the client of a play: the deviceInfo the client

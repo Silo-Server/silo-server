@@ -57,8 +57,20 @@ type localPlaybackSession struct {
 	DisplayTitle  string  `json:"displayTitle"`
 	// UpdatedAt is when the client last updated the session, in Unix
 	// milliseconds. Some clients send a fraction.
-	UpdatedAt  float64       `json:"updatedAt"`
+	UpdatedAt  unixMillis    `json:"updatedAt"`
 	DeviceInfo absDeviceInfo `json:"deviceInfo"`
+}
+
+// unixMillis is an optional Unix time in milliseconds. A value that is not a
+// number reads as zero (unknown) rather than rejecting the session.
+type unixMillis float64
+
+func (m *unixMillis) UnmarshalJSON(data []byte) error {
+	var v float64
+	if json.Unmarshal(data, &v) == nil {
+		*m = unixMillis(v)
+	}
+	return nil
 }
 
 // isLive reports whether the client updated the session within

@@ -171,3 +171,19 @@ func TestLocalSessionBatchNamesItsClient(t *testing.T) {
 		t.Fatalf("lifecycle starts = %+v, want one for Prologue 2026.1", started)
 	}
 }
+
+// Malformed optional fields (a client name that is not a string, an update
+// time that is not a number) never reject the sessions that carry them.
+func TestLocalSessionMalformedOptionalFieldsStillSync(t *testing.T) {
+	prog := &positionRecordingProgressFake{}
+	media := &stubMediaStore{known: map[string]*models.MediaItem{"book-1": nil}}
+	h := New(Dependencies{MediaStore: media, ProgressStore: prog})
+	body := []byte(`{"deviceInfo":{"clientName":7},"sessions":[{"id":"s1","libraryItemId":"book-1","currentTime":42,"updatedAt":"soon","deviceInfo":{"clientVersion":[]}}]}`)
+	rec := dispatchABSWithParams(http.MethodPost, "/api/session/local-all", nil, body, "1", "", h.handleSyncLocalSessions)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body %s", rec.Code, rec.Body.String())
+	}
+	if pos, ok := prog.pos("book-1"); !ok || pos != 42 {
+		t.Fatalf("synced position = %v (%v), want 42", pos, ok)
+	}
+}
