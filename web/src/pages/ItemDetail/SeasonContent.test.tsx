@@ -68,10 +68,6 @@ vi.mock("@/hooks/useOverlayPrefs", () => ({
   useOverlayPrefs: () => ({ prefs: null }),
 }));
 
-vi.mock("@/hooks/queries/catalogRead", () => ({
-  usePrefetchCatalogItemDetail: () => vi.fn(),
-}));
-
 vi.mock("@/components/MediaItemMenu", () => ({
   default: (props: Record<string, unknown>) => {
     mocks.capturedMediaMenuProps.push(props);

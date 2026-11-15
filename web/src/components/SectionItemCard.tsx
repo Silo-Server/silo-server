@@ -71,6 +71,7 @@ export default memo(function SectionItemCard({
       <div className="group/media relative">
         <ViewTransitionLink
           to={itemHref}
+          prefetchOn="intent"
           aria-label={displayTitle}
           className="block overflow-hidden rounded-xl"
         >
