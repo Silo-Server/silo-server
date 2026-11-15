@@ -137,7 +137,9 @@ func audiobookBookParts(root string, allowedPaths map[string]bool) ([]string, er
 }
 
 // listAudiobookDir returns the files and the subdirectories, symlinks
-// resolved, directly inside dir.
+// resolved, directly inside dir. A symlink whose target is gone is listed as a
+// file, which no part inventory admits; one that cannot be inspected fails the
+// listing, so a book is not rebuilt without a part it may hold.
 func listAudiobookDir(dir string) (files, dirs []string, err error) {
 	entries, err := fspath.ReadDir(dir)
 	if err != nil {
@@ -147,8 +149,12 @@ func listAudiobookDir(dir string) (files, dirs []string, err error) {
 		path := filepath.Join(dir, entry.Name())
 		isDir := entry.IsDir()
 		if entry.Type()&os.ModeSymlink != 0 {
-			if info, err := fspath.Stat(path); err == nil {
+			info, err := fspath.Stat(path)
+			switch {
+			case err == nil:
 				isDir = info.IsDir()
+			case !errors.Is(err, os.ErrNotExist):
+				return nil, nil, fmt.Errorf("inspect audiobook entry %s: %w", path, err)
 			}
 		}
 		if isDir {

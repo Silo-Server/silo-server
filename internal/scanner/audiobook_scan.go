@@ -1623,18 +1623,27 @@ var errAudiobookInventoryStale = errors.New("audiobook changed after this scan l
 
 // audiobookInventoryStaleTx reports whether a present file of the physical
 // book, written at or after inventoryAt (the database time before this scan
-// walked), has a name the book's parsed files lack. Every alias of a book lists
-// the same names, since parts sit directly in the book folder. Such a file was
-// published by a scan that saw it while this one did not, so writing this
-// scan's parts would drop it and retire its alias. The caller holds the book's
-// root lock until tx ends. A zero inventoryAt skips the check.
-func audiobookInventoryStaleTx(ctx context.Context, tx pgx.Tx, folderID int, physical string, book *parsedAudiobook, inventoryAt time.Time) (bool, error) {
+// walked), has a name the book's parsed files lack. A part's name is its path
+// relative to the book root ("CD1/01.mp3" for a part in a disc folder, "" for
+// a book rooted at its file), which every alias of the book shares. Such a
+// file was published by a scan that saw it while this one did not, so writing
+// this scan's parts would drop it and retire its alias. The caller holds the
+// book's root lock until tx ends. A zero inventoryAt skips the check.
+func audiobookInventoryStaleTx(ctx context.Context, tx pgx.Tx, folderID int, physical, folderPath string, book *parsedAudiobook, inventoryAt time.Time) (bool, error) {
 	if inventoryAt.IsZero() {
 		return false, nil
 	}
 	names := make([]string, 0, len(book.Files))
 	for _, file := range book.Files {
-		names = append(names, filepath.Base(file.Path))
+		name := ""
+		if file.Path != folderPath {
+			rel, err := filepath.Rel(folderPath, file.Path)
+			if err != nil {
+				return false, err
+			}
+			name = filepath.ToSlash(rel)
+		}
+		names = append(names, name)
 	}
 	var stale bool
 	err := tx.QueryRow(ctx, `
@@ -1642,7 +1651,8 @@ func audiobookInventoryStaleTx(ctx context.Context, tx pgx.Tx, folderID int, phy
 			SELECT 1 FROM media_files
 			WHERE media_folder_id = $1 AND canonical_root_path = $2
 			  AND missing_since IS NULL AND updated_at >= $3
-			  AND substr(file_path, length(observed_root_path) + 2) <> ALL($4::text[])
+			  AND CASE WHEN file_path = observed_root_path THEN ''
+			      ELSE substr(file_path, length(observed_root_path) + 2) END <> ALL($4::text[])
 		)`, folderID, physical, inventoryAt, names).Scan(&stale)
 	return stale, err
 }
@@ -1666,7 +1676,7 @@ func (s *Scanner) upsertAudiobookPresentationTx(
 	if err := lockAudiobookRoot(ctx, tx, folder.ID, physical); err != nil {
 		return err
 	}
-	if stale, err := audiobookInventoryStaleTx(ctx, tx, folder.ID, physical, book, inventoryAt); err != nil {
+	if stale, err := audiobookInventoryStaleTx(ctx, tx, folder.ID, physical, folderPath, book, inventoryAt); err != nil {
 		return fmt.Errorf("check audiobook inventory: %w", err)
 	} else if stale {
 		return errAudiobookInventoryStale

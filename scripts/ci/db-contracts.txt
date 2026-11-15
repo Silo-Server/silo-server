@@ -182,11 +182,13 @@
 
 # Two audiobook scans of one book at once: a scan that walked the book before
 # another scan indexed a part neither marks that part missing nor rewrites the
-# book without it; a newer scan still replaces an older alias scan's parts; and
-# a part indexed again while a scan is marking it missing stays present.
+# book without it; a newer scan still replaces an older alias scan's parts;
+# a part indexed again while a scan is marking it missing stays present; and
+# a disc book's parts are named by their path in the book, not their file name.
 ./internal/scanner TestScanFileAudiobookKeepsPartsIndexedByConcurrentScanDB
 ./internal/scanner TestScanFileAudiobookNewerAliasInventoryWinsDB
 ./internal/scanner TestScanFileAudiobookKeepsPartRestoredWhileMarkingDB
+./internal/scanner TestScanFileAudiobookDiscPartsAgainstConcurrentRowDB
 
 # A rescan of a retagged, unmatched ebook keeps the fields and author credits an
 # admin locked, including locked fields left empty.

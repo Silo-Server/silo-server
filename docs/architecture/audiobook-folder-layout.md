@@ -40,7 +40,11 @@ book and the new root's loose files writing the same item.
 
 Hidden folders and NAS housekeeping folders are skipped as everywhere else,
 and [ignore files](scanner-ignore-files.md) apply to every folder and file the
-walk reads, disc folders included.
+walk reads, disc folders included. An admin's explicit scan of a file the
+ignore files exclude admits that one file and the folders on its path, so it
+joins its book; every other file and folder they exclude stays out. If an
+ignore file on the way cannot be read, the rules are unknown and that scan
+reads no ignore files, the documented full bypass.
 
 ### Known limits and follow-up
 
@@ -81,8 +85,9 @@ belongs to, or is excluded by, the book above it, so W widens to its parent. No
 other folder needs widening, because a folder's own book does not depend on its
 subfolders.
 
-W never reaches B: a scope that is itself a configured root does not widen, and
-no scope widens across one. Ancestors are read once, outermost first, with the
+W never crosses B. It is B only when the scope already is B, or is a file
+directly in it; widening never moves W up to B or past it, so a scope that is
+itself a configured root does not widen. Ancestors are read once, outermost first, with the
 ignore files applied, and a scope the library walk only reaches through a
 symlink back to a folder above it is not widened.
 
