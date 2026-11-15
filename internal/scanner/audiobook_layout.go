@@ -74,31 +74,48 @@ func audiobookBookParts(root string, allowedPaths map[string]bool) ([]string, er
 // canonical path and the listings of the folder and of the disc folders it
 // took. Parts are listed from it instead of reading the folders again. When
 // the walk could not take a listing whole (an ignored link it never
-// resolved), listings is nil and the folders are read from disk as before.
+// resolved), listed is false and the folders are read from disk as before.
+// A scan holds one for every book until the book is reconciled, so it keeps
+// only what parts reads and shares the walk's path strings.
 type audiobookWalkedBook struct {
 	canonical string
-	listings  map[string]audiobookDirFiles
+	listed    bool
+	root      audiobookDirFiles     // the book folder
+	discs     []audiobookWalkedDisc // the disc folders the walk took, if any
+}
+
+// audiobookWalkedDisc is a disc folder's audio files.
+type audiobookWalkedDisc struct {
+	dir   string
+	files []string
 }
 
 // audiobookInventory is what a scan's walks found: the paths they accepted
-// (audiobookRootScan.seenPaths) and what they read of each book folder.
+// (audiobookRootScan.seenPaths) and what each walk read of its book folders.
 type audiobookInventory struct {
 	seen  map[string]bool
-	books map[string]*audiobookWalkedBook
+	walks []map[string]*audiobookWalkedBook
 }
 
-// walkedAudiobookBooks merges the scans' book folders; the first walk to find
-// a path keeps it, as groupAudiobookCandidates does.
-func walkedAudiobookBooks(scans []audiobookRootScan) map[string]*audiobookWalkedBook {
-	books := make(map[string]*audiobookWalkedBook)
+func newAudiobookInventory(seen map[string]bool, scans []audiobookRootScan) audiobookInventory {
+	inventory := audiobookInventory{seen: seen}
 	for _, scan := range scans {
-		for path, book := range scan.books {
-			if _, ok := books[path]; !ok {
-				books[path] = book
-			}
+		if len(scan.books) > 0 {
+			inventory.walks = append(inventory.walks, scan.books)
 		}
 	}
-	return books
+	return inventory
+}
+
+// book returns what the first walk to find path read of it, as
+// groupAudiobookCandidates keeps the first walk's path; nil for none.
+func (inv audiobookInventory) book(path string) *audiobookWalkedBook {
+	for _, books := range inv.walks {
+		if book, ok := books[path]; ok {
+			return book
+		}
+	}
+	return nil
 }
 
 // audiobookDirFiles is one directory as listAudiobookDir returns it, less
@@ -109,22 +126,25 @@ type audiobookDirFiles struct {
 
 // newAudiobookWalkedBook records the book folder root with the listings of
 // root and of the disc folders the walk took. A listing the walk could not
-// take whole (nil) leaves listings nil, so every folder of the book is read
+// take whole (nil) leaves the book unlisted, so every folder of it is read
 // from disk.
-func newAudiobookWalkedBook(canonical, root string, files *audiobookDirFiles, discs map[string]*audiobookDirFiles) *audiobookWalkedBook {
+func newAudiobookWalkedBook(canonical, root string, files *audiobookDirFiles, discs []audiobookWalkedDisc, discsWhole bool) *audiobookWalkedBook {
+	if canonical == root {
+		canonical = root // share the walk's string
+	}
 	book := &audiobookWalkedBook{canonical: canonical}
-	if files == nil {
-		return book
+	if files != nil && discsWhole {
+		book.listed, book.root, book.discs = true, *files, discs
 	}
-	listings := map[string]audiobookDirFiles{root: *files}
-	for dir, disc := range discs {
-		if disc == nil {
-			return book
-		}
-		listings[dir] = *disc
-	}
-	book.listings = listings
 	return book
+}
+
+// release drops the listings once the book is reconciled. Only the worker
+// reconciling the book reads it.
+func (b *audiobookWalkedBook) release() {
+	if b != nil {
+		b.listed, b.root, b.discs = false, audiobookDirFiles{}, nil
+	}
 }
 
 // add records one entry that parts can use: an audio file or a disc folder.
@@ -148,12 +168,12 @@ func (b *audiobookWalkedBook) parts(root string, allowedPaths map[string]bool) (
 		return SupportsAudioFile(path) && (allowedPaths == nil || allowedPaths[path])
 	}
 	list := func(dir string) ([]string, []string, error) {
-		if b.listed(dir) {
-			return b.listings[dir].files, b.listings[dir].dirs, nil
+		if files, dirs, ok := b.listing(root, dir); ok {
+			return files, dirs, nil
 		}
 		return listAudiobookDir(dir)
 	}
-	if !b.listed(root) {
+	if _, _, ok := b.listing(root, root); !ok {
 		if parts, err := audiobookFileRoot(root, allowed); err != nil || parts != nil {
 			return parts, err
 		}
@@ -232,12 +252,21 @@ func audiobookFileRoot(root string, allowed func(string) bool) ([]string, error)
 	return []string{root}, nil
 }
 
-func (b *audiobookWalkedBook) listed(dir string) bool {
-	if b == nil {
-		return false
+// listing returns the walk's listing of dir, the book folder root or one of
+// its disc folders.
+func (b *audiobookWalkedBook) listing(root, dir string) (files, dirs []string, ok bool) {
+	if b == nil || !b.listed {
+		return nil, nil, false
 	}
-	_, ok := b.listings[dir]
-	return ok
+	if dir == root {
+		return b.root.files, b.root.dirs, true
+	}
+	for _, disc := range b.discs {
+		if disc.dir == dir {
+			return disc.files, nil, true
+		}
+	}
+	return nil, nil, false
 }
 
 // partsOrRelist lists the book's parts and runs use on them. When use fails

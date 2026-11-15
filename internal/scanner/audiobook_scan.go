@@ -340,7 +340,8 @@ func walkAudiobookDirectories(ctx context.Context, path string, scan *audiobookR
 
 	hasDiscs := false
 	var others []string
-	discs := map[string]*audiobookDirFiles{}
+	var discs []audiobookWalkedDisc
+	discsWhole := true
 	for _, directory := range dir.directories {
 		outcome := audiobookNotDisc
 		if !inLibraryRoot && !scan.libraryRoots[directory] && isAudiobookDiscDirName(filepath.Base(directory)) {
@@ -350,7 +351,11 @@ func walkAudiobookDirectories(ctx context.Context, path string, scan *audiobookR
 				return err
 			}
 			if outcome == audiobookDiscTaken {
-				discs[directory] = disc
+				if disc == nil {
+					discsWhole = false
+				} else {
+					discs = append(discs, audiobookWalkedDisc{dir: directory, files: disc.files})
+				}
 			}
 		}
 		switch outcome {
@@ -384,7 +389,7 @@ func walkAudiobookDirectories(ctx context.Context, path string, scan *audiobookR
 		if scan.books == nil {
 			scan.books = make(map[string]*audiobookWalkedBook)
 		}
-		scan.books[path] = newAudiobookWalkedBook(dir.canonical, path, dir.files, discs)
+		scan.books[path] = newAudiobookWalkedBook(dir.canonical, path, dir.files, discs, discsWhole)
 	case inLibraryRoot:
 		scan.candidates = append(scan.candidates, dir.audio...)
 	}
@@ -741,7 +746,10 @@ func (s *Scanner) reconcileAudiobookAliases(ctx context.Context, folder *models.
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		if err := s.reconcileAudiobookFolder(ctx, folder, path, inventory.seen, inventory.books[path], inventoryAt, skipped, unreadable); err != nil {
+		walked := inventory.book(path)
+		err := s.reconcileAudiobookFolder(ctx, folder, path, inventory.seen, walked, inventoryAt, skipped, unreadable)
+		walked.release()
+		if err != nil {
 			if !errors.Is(err, errFolderHasNoMedia) {
 				failures = append(failures, err)
 			}
@@ -806,7 +814,7 @@ func (s *Scanner) scanAudiobookPaths(ctx context.Context, folder *models.MediaFo
 	}
 	candidates := groupAudiobookCandidates(scans)
 	reconcileRoots, seenPaths, protectedPaths := splitAudiobookReconcileRoots(scans)
-	inventory := audiobookInventory{seen: seenPaths, books: walkedAudiobookBooks(scans)}
+	inventory := newAudiobookInventory(seenPaths, scans)
 	reportProgress(ctx, audiobookScanProgress(folder.ID, len(candidates), 0, 0, 0))
 
 	if len(candidates) == 0 {

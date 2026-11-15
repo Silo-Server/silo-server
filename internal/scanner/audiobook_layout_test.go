@@ -174,7 +174,7 @@ func TestAudiobookFolderGrouping(t *testing.T) {
 				return r
 			}
 			got := make(map[string][]string)
-			books := walkedAudiobookBooks(scans)
+			inventory := newAudiobookInventory(seen, scans)
 			for _, aliases := range groupAudiobookCandidates(scans) {
 				candidate := aliases[0]
 				parts, err := audiobookBookParts(candidate, seen)
@@ -182,7 +182,7 @@ func TestAudiobookFolderGrouping(t *testing.T) {
 					t.Fatalf("parts of %s: %v", candidate, err)
 				}
 				// The parts listed from the walk's reads match a fresh read.
-				if walked, err := books[candidate].parts(candidate, seen); err != nil || !slices.Equal(walked, parts) {
+				if walked, err := inventory.book(candidate).parts(candidate, seen); err != nil || !slices.Equal(walked, parts) {
 					t.Errorf("parts of %s from the walk = %v, %v; from disk %v", rel(candidate), walked, err, parts)
 				}
 				for _, part := range parts {
@@ -217,8 +217,8 @@ func TestAudiobookPartGoneSinceTheWalkIsLeftOut(t *testing.T) {
 				t.Fatal(err)
 			}
 			_, seen, _ := splitAudiobookReconcileRoots(scans)
-			walked := walkedAudiobookBooks(scans)[book]
-			if walked == nil || walked.listings == nil {
+			walked := newAudiobookInventory(seen, scans).book(book)
+			if walked == nil || !walked.listed {
 				t.Fatal("the walk kept no listing of the book")
 			}
 			if err := os.Remove(filepath.Join(book, tc.gone)); err != nil {
