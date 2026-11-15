@@ -1,6 +1,21 @@
 package abs
 
-import "strings"
+import (
+	"strings"
+
+	"github.com/Silo-Server/silo-server/internal/models"
+)
+
+// CollapsedAudiobook is one entry of a collapsed library page: a book, and
+// when it stands for its series, the IDs of the series' matching books.
+type CollapsedAudiobook struct {
+	Item *models.MediaItem
+	// SeriesID and SeriesName are the series' key and the name the series
+	// list shows for it; SeriesBookIDs are its matching books.
+	SeriesID      string
+	SeriesName    string
+	SeriesBookIDs []string
+}
 
 // collapsedLibraryItem marks it as the entry standing for its series on a
 // collapseseries=1 page, listing the series' matching books, as real ABS

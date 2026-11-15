@@ -157,17 +157,6 @@ func SeriesID(name string) string {
 	return strings.ToLower(name)
 }
 
-// CollapsedAudiobook is one entry of a collapsed library page: a book, and
-// when it stands for its series, the IDs of the series' matching books.
-type CollapsedAudiobook struct {
-	Item *models.MediaItem
-	// SeriesID and SeriesName are the series' key and the name the series
-	// list shows for it; SeriesBookIDs are its matching books.
-	SeriesID      string
-	SeriesName    string
-	SeriesBookIDs []string
-}
-
 // Series is the detail-shape series with books ordered by series_index.
 type Series struct {
 	ID    string // SeriesID of Name
