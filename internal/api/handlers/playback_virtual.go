@@ -576,6 +576,17 @@ func virtualCandidateConfirmedDead(file *models.MediaFile, resolveErr error) boo
 	if isVirtualProviderListingTemporaryError(resolveErr) {
 		return false
 	}
+	// A refusal is not a verdict about the release. The candidate loop joins its
+	// per-candidate refusals with "no usable stream", which the dead-pin
+	// classifier below reads as a confirmed-dead pin; a row whose only fault was
+	// serving another release's bytes, or resolving to a row outside the item's
+	// version list, is still listed and still worth offering. Indicting it here
+	// is what turned one play attempt on a source-mismatch row into a durable
+	// failed:true that the version list then showed as dead.
+	if errors.Is(resolveErr, errVirtualSelectedReleaseUnverified) ||
+		errors.Is(resolveErr, errEffectiveFileNotInVersionList) {
+		return false
+	}
 	if isVirtualCandidateDeadError(resolveErr) {
 		return true
 	}
@@ -4084,6 +4095,17 @@ func (h *PlaybackHandler) resolveVirtualPlaybackSource(r *http.Request, file *mo
 						"reason", "unverified_foreign_plan")
 					h.unpinVirtualSticky(stickyKey, candidate.URI)
 					h.invalidateVirtualProbeInventory(r.Context(), file)
+					// Record the served-vs-declared byte verdict on the row the
+					// viewer picked. The versions check reads this marker, so
+					// the version list can say "source mismatch" instead of a
+					// generic unavailable, and the same bytes are not re-probed
+					// immediately. It is deliberately not a failed stamp: the
+					// release is alive, the provider served the wrong file.
+					if file.FileSize > 0 && result.File.ProbedFormatSize > 0 {
+						virtualProbeFailures.markSizeMismatch(
+							virtualProbeFailureKey(file.FilePath, file.VirtualOwnerInstallationID),
+							result.File.ProbedFormatSize, file.FileSize)
+					}
 					attemptErr = errors.Join(attemptErr, fmt.Errorf(
 						"%w: candidate %s served %d bytes for a declared %d-byte release",
 						errVirtualSelectedReleaseUnverified, candidate.URI, result.File.ProbedFormatSize, result.File.FileSize))

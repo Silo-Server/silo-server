@@ -744,6 +744,22 @@ selection, the start answers the retryable `virtual_source_unavailable` terminal
 with a message naming the version list, so the client offers the versions
 instead of playing a poorer or different release.
 
+A start's effective row is always one the item's version list carries, so the
+row a client records as playing is a row the same client can show and reconcile.
+A resolver substitution that lands on any other row is refused like an unusable
+candidate and the next one is tried; when none qualifies the terminal names the
+version list. Two cases are exempt: the requested row itself, and a
+provider-neutral listing row, which owns no bytes and therefore binds to the row
+that owns the served candidate as ordinary auto selection. A refusal for an
+unlisted row is not a verdict about the release and never stamps it failed.
+
+The refusal that reports served bytes contradicting the row answers the
+retryable `source_mismatch` terminal reason, the same verdict the version list
+publishes as `source_mismatch` (see [Catalog API](catalog-api.md)).
+The requested release is alive; the provider served the wrong file. Like every
+terminal reason, the value is additive: a client that does not recognize it
+renders the message, which names the version list.
+
 ## Progress and stop
 
 Progress accepts `{installation_id, sequence, position, is_paused}`. `sequence`

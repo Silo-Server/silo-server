@@ -117,11 +117,47 @@ func TestUnverifiedExplicitPickIsNotFulfilledByAnotherRelease(t *testing.T) {
 	if terminal.Terminal == nil || !terminal.Terminal.Retryable {
 		t.Fatalf("terminal = %+v, want a retryable terminal", terminal.Terminal)
 	}
-	if !strings.Contains(terminal.Terminal.Reason, "virtual_source_unavailable") {
-		t.Fatalf("terminal reason = %q, want virtual_source_unavailable", terminal.Terminal.Reason)
+	// The bytes contradicted the row, so the terminal names that verdict with
+	// the version list's own vocabulary instead of a generic unavailable.
+	if terminal.Terminal.Reason != sourceMismatchReasonV3 {
+		t.Fatalf("terminal reason = %q, want %q", terminal.Terminal.Reason, sourceMismatchReasonV3)
+	}
+	// The release is alive: the refusal must not have armed the dead-pin
+	// damper, which would stop the row from being retried while the provider
+	// serves it correctly again.
+	if virtualProbeFailures.recent(virtualProbeFailureKey(requestedURI, requested.VirtualOwnerInstallationID)) {
+		t.Fatal("the source-mismatch refusal armed the dead-candidate damper")
+	}
+	// The refusal left the row's own wrong-source verdict behind, so the
+	// version list can report why the pick failed.
+	if _, _, ok := virtualProbeFailures.sizeMismatchVerdict(virtualProbeFailureKey(requestedURI, requested.VirtualOwnerInstallationID)); !ok {
+		t.Fatal("the source-mismatch refusal left no wrong-source verdict for the row")
 	}
 	if resolved.File != nil {
 		t.Fatalf("resolve returned an effective file %+v, want none", resolved.File)
+	}
+	// The versions check reports the same verdict, so the version list can say
+	// "source mismatch" instead of a generic unavailable/failed row. It reads
+	// the same process-local marker the refusal armed; the row stays available
+	// because the release itself is alive.
+	checks := &CatalogResourceHandler{
+		FileResolver: versionsCheckTestResolver{file: requested},
+		ItemAccess:   permissiveItemAccess{},
+	}
+	results := checks.CheckVersions(context.Background(), []int{requested.ID})
+	if len(results) != 1 {
+		t.Fatalf("version check results = %d, want 1", len(results))
+	}
+	if !results[0].Available || results[0].Failed {
+		t.Fatalf("version check = %+v, want available and not failed", results[0])
+	}
+	if results[0].SourceMismatch == nil {
+		t.Fatal("version check did not report the refused pick as a source mismatch")
+	}
+	// The pair is the row's own declaration against what the provider served for
+	// its pick: 2.36 GB declared by the 720p row, 16.96 GB served.
+	if results[0].SourceMismatch.ServedBytes != 16_961_343_519 || results[0].SourceMismatch.DeclaredBytes != 2_360_000_000 {
+		t.Fatalf("source_mismatch = %+v, want the served/declared pair", *results[0].SourceMismatch)
 	}
 	fx.handler.StopVirtualEvidence()
 }
