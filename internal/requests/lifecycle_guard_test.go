@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"maps"
 	"os"
+	"runtime"
 	"slices"
 	"testing"
 	"time"
@@ -863,5 +864,60 @@ func TestClaimedTargetWritesNeedTheClaimDatabase(t *testing.T) {
 	}
 	if req.Status != StatusCompleted || req.Outcome != OutcomeActive {
 		t.Fatalf("request = %s/%s, want completed/active", req.Status, req.Outcome)
+	}
+}
+
+// A reclaim that commits while DeleteTarget runs stops the stale attempt's
+// delete: the request row is locked before its lease is checked, so the
+// delete waits for the reclaim and then sees the newer lease.
+func TestDeleteTargetWaitsForAConcurrentReclaimDatabase(t *testing.T) {
+	repo, pool := lifecycleTestRepository(t)
+	ctx := t.Context()
+	insertLifecycleRequest(t, repo, "r1", 1, 101, StatusApproved)
+	if _, err := pool.Exec(ctx, `INSERT INTO media_request_targets (request_id, quality, status, last_error)
+		VALUES ('r1', '2160p', 'failed', 'radarr 4k unreachable')`); err != nil {
+		t.Fatal(err)
+	}
+	claimed, ok, err := repo.ClaimSubmission(ctx, "r1", time.Minute)
+	if err != nil || !ok {
+		t.Fatalf("claim: ok=%v err=%v", ok, err)
+	}
+	targets, err := repo.ListTargets(ctx, "r1")
+	if err != nil || len(targets) != 1 {
+		t.Fatalf("targets = %+v err = %v", targets, err)
+	}
+
+	reclaim, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = reclaim.Rollback(ctx) }()
+	if _, err := reclaim.Exec(ctx, `UPDATE media_requests SET submit_lease_until = now() + interval '1 hour' WHERE id = 'r1'`); err != nil {
+		t.Fatal(err)
+	}
+	deleted := make(chan error, 1)
+	go func() { deleted <- repo.DeleteTarget(ctx, "r1", targets[0].ID, *claimed.SubmitLeaseUntil) }()
+	// Wait until the delete is blocked on the reclaim's row lock, which
+	// Postgres reports as an ungranted lock; a delete that reads past the
+	// open reclaim finishes first instead.
+	for blocked := false; !blocked; {
+		select {
+		case err := <-deleted:
+			t.Fatalf("delete finished while the reclaim was open (err = %v); want it to wait for the request lock", err)
+		default:
+		}
+		if err := pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM pg_locks WHERE NOT granted)`).Scan(&blocked); err != nil {
+			t.Fatal(err)
+		}
+		runtime.Gosched()
+	}
+	if err := reclaim.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-deleted; !errors.Is(err, ErrInvalidState) {
+		t.Fatalf("delete after the reclaim: err = %v, want ErrInvalidState", err)
+	}
+	if got, err := repo.ListTargets(ctx, "r1"); err != nil || len(got) != 1 {
+		t.Fatalf("targets after the stale delete = %+v err = %v, want the target kept", got, err)
 	}
 }

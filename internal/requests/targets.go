@@ -214,32 +214,39 @@ func (r *Repository) RecordSubmission(ctx context.Context, id string, leaseUntil
 }
 
 func (r *Repository) DeleteTarget(ctx context.Context, requestID string, id int64, leaseUntil time.Time) error {
-	tag, err := r.pool.Exec(ctx, `
-		DELETE FROM media_request_targets t
-		USING media_requests r
-		WHERE t.id = $1
-		  AND t.request_id = $2
-		  AND r.id = t.request_id
-		  AND r.status = 'approved'
-		  AND r.outcome = 'active'
-		  AND r.submit_lease_until = $3`, id, requestID, leaseUntil)
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin target delete transaction: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	// Lock the request before checking the lease, as RecomputeStatus does: a
+	// reclaim that commits while the delete runs must be seen, not read past
+	// from an older snapshot.
+	var status Status
+	var outcome Outcome
+	var lease *time.Time
+	if err := tx.QueryRow(ctx, `SELECT status, outcome, submit_lease_until FROM media_requests WHERE id = $1 FOR UPDATE`, requestID).
+		Scan(&status, &outcome, &lease); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrInvalidState
+		}
+		return fmt.Errorf("lock request for target delete: %w", err)
+	}
+	if status != StatusApproved || outcome != OutcomeActive || lease == nil || !lease.Equal(leaseUntil) {
+		return ErrInvalidState
+	}
+	tag, err := tx.Exec(ctx, `DELETE FROM media_request_targets WHERE id = $1 AND request_id = $2`, id, requestID)
 	if err != nil {
 		return fmt.Errorf("delete target: %w", err)
 	}
-	if tag.RowsAffected() > 0 {
-		return nil
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
 	}
-	var claimed bool
-	if err := r.pool.QueryRow(ctx, `
-		SELECT EXISTS (SELECT 1 FROM media_requests
-		  WHERE id = $1 AND status = 'approved' AND outcome = 'active' AND submit_lease_until = $2)`,
-		requestID, leaseUntil).Scan(&claimed); err != nil {
-		return fmt.Errorf("check request claim: %w", err)
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit target delete transaction: %w", err)
 	}
-	if !claimed {
-		return ErrInvalidState
-	}
-	return ErrNotFound
+	return nil
 }
 
 // UpdateTargetStatus updates one queued or downloading target and recomputes
