@@ -1068,6 +1068,8 @@
 # One node sweeps at a time, and a rate-limited provider is left alone for the
 # rest of the sweep.
 ./internal/audiobooks TestAudiobookEnrichmentSweepRateLimitDB
+# One sweep keeps claiming batches until no book is due.
+./internal/audiobooks TestAudiobookEnrichmentSweepDrainsBacklogDB
 
 # Audiobook enrichment loads the tagged narrators and series position its
 # candidate checks compare against.

@@ -43,13 +43,33 @@ type audiobookPosterPathReader interface {
 
 const audiobookMultipartKind = "multipart"
 
+// audiobookDuplicateCandidateSQL runs once per new book, so its plan must not
+// depend on planner statistics. On a server with a large catalog, the first
+// audiobook scan runs while the statistics still say there are no audiobooks
+// and no author or narrator credits; a freely reordered join then compares
+// every author credit with every audiobook, and each lookup gets slower as
+// the library fills. So the names are resolved first, the items credited to
+// both are materialized, and media_items is read by primary key. The type is
+// tested on the materialized rows: tested on media_items itself, it lets the
+// planner scan the partial books index once per candidate.
 const audiobookDuplicateCandidateSQL = `
+	WITH cand AS MATERIALIZED (
+		SELECT ipa.content_id
+		FROM item_people ipa
+		WHERE ipa.kind = 7
+		  AND ipa.person_id = ANY (ARRAY(SELECT id FROM people WHERE LOWER(name) = LOWER($1)))
+		INTERSECT
+		SELECT ipn.content_id
+		FROM item_people ipn
+		WHERE ipn.kind = 8
+		  AND ipn.person_id = ANY (ARRAY(SELECT id FROM people WHERE LOWER(name) = LOWER($2)))
+	), items AS MATERIALIZED (
+		SELECT i.content_id, i.title, i.type, i.year
+		FROM cand
+		JOIN media_items i ON i.content_id = cand.content_id
+	)
 	SELECT mi.content_id, mi.title
-	FROM media_items mi
-	JOIN item_people ipa ON ipa.content_id = mi.content_id AND ipa.kind = 7
-	JOIN people pa ON pa.id = ipa.person_id AND LOWER(pa.name) = LOWER($1)
-	JOIN item_people ipn ON ipn.content_id = mi.content_id AND ipn.kind = 8
-	JOIN people pn ON pn.id = ipn.person_id AND LOWER(pn.name) = LOWER($2)
+	FROM items mi
 	JOIN LATERAL (
 		SELECT COALESCE(SUM(mf.duration), 0) AS dur
 		FROM media_files mf WHERE mf.content_id = mi.content_id
