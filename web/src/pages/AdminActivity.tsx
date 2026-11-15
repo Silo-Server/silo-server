@@ -35,6 +35,7 @@ import {
   getAudioConversion,
   getPlaybackProgress,
   getPlaybackSessionSubtitle,
+  getSessionBitrate,
   getSessionClientLabel,
   getSessionClientLabelFull,
   getSessionRouteNodes,
@@ -75,7 +76,7 @@ import { formatLocale, joinList } from "@/lib/appLocale";
 import { codeNumber, englishText, numberText, type TextValues, type Translate, useT } from "@/i18n";
 import type { MessageKey } from "@/locales/keys";
 
-type SortField = "username" | "media" | "method" | "node" | "started";
+type SortField = "username" | "media" | "method" | "bitrate" | "node" | "started";
 type SortDir = "asc" | "desc";
 
 const REFRESH_SPINNER_MIN_VISIBLE_MS = 1_000;
@@ -96,26 +97,35 @@ interface TableLayout {
   table: string;
   /** Classes that show an element only in the stacked layout. */
   stacked: string;
+  /** Classes that put a row's details in three columns in the table layout. */
+  panel: string;
+  /** Classes that rule off the second and third details columns. */
+  panelColumn: string;
 }
 
 const TABLE_LAYOUT: TableLayout = {
   columns:
-    "grid-cols-[1.75rem_minmax(13rem,1.5fr)_minmax(9.5rem,1fr)_minmax(17rem,2.3fr)_5.5rem_auto]",
-  table: "hidden @min-[58rem]:grid",
-  stacked: "@min-[58rem]:hidden",
+    "grid-cols-[1.75rem_minmax(13rem,1.5fr)_minmax(9.5rem,1fr)_minmax(14rem,1.6fr)_minmax(7rem,1fr)_4.5rem_auto]",
+  table: "hidden @min-[62rem]:grid",
+  stacked: "@min-[62rem]:hidden",
+  panel: "@min-[62rem]:grid-cols-[minmax(0,1.7fr)_minmax(0,1fr)_minmax(0,1fr)]",
+  panelColumn: "@min-[62rem]:border-border/40 @min-[62rem]:border-s @min-[62rem]:ps-5",
 };
 
 const TABLE_LAYOUT_WITH_ROUTE: TableLayout = {
   columns:
-    "grid-cols-[1.75rem_minmax(13rem,1.5fr)_minmax(9.5rem,1fr)_minmax(17rem,2.3fr)_minmax(7rem,1fr)_5.5rem_auto]",
-  table: "hidden @min-[66rem]:grid",
-  stacked: "@min-[66rem]:hidden",
+    "grid-cols-[1.75rem_minmax(13rem,1.5fr)_minmax(9.5rem,1fr)_minmax(14rem,1.6fr)_minmax(7rem,1fr)_minmax(7rem,1fr)_4.5rem_auto]",
+  table: "hidden @min-[70rem]:grid",
+  stacked: "@min-[70rem]:hidden",
+  panel: "@min-[70rem]:grid-cols-[minmax(0,1.7fr)_minmax(0,1fr)_minmax(0,1fr)]",
+  panelColumn: "@min-[70rem]:border-border/40 @min-[70rem]:border-s @min-[70rem]:ps-5",
 };
 
 const STACKED_SORT_FIELDS: [SortField, MessageKey][] = [
   ["username", "web.admin.activity.column.user"],
   ["media", "web.admin.activity.column.stream"],
   ["method", "web.admin.activity.column.playback"],
+  ["bitrate", "web.admin.activity.column.bitrate"],
   ["node", "web.admin.activity.column.route"],
   ["started", "web.admin.activity.column.time"],
 ];
@@ -261,6 +271,9 @@ export default function AdminActivity() {
         case "method":
           cmp = compareActivityMethods(classifyActivityMethod(a), classifyActivityMethod(b));
           break;
+        case "bitrate":
+          cmp = (a.stream_bitrate_kbps ?? 0) - (b.stream_bitrate_kbps ?? 0);
+          break;
         case "node":
           cmp = routeSortValue(a).localeCompare(routeSortValue(b));
           break;
@@ -280,7 +293,7 @@ export default function AdminActivity() {
       setSortDir((d) => (d === "asc" ? "desc" : "asc"));
     } else {
       setSortField(field);
-      setSortDir(field === "started" ? "desc" : "asc");
+      setSortDir(field === "started" || field === "bitrate" ? "desc" : "asc");
     }
   };
 
@@ -546,6 +559,9 @@ export default function AdminActivity() {
             <SortHeader field="method" current={sortField} dir={sortDir} onClick={toggleSort}>
               {t("web.admin.activity.column.playback")}
             </SortHeader>
+            <SortHeader field="bitrate" current={sortField} dir={sortDir} onClick={toggleSort}>
+              {t("web.admin.activity.column.bitrate")}
+            </SortHeader>
             {showRoute && (
               <SortHeader field="node" current={sortField} dir={sortDir} onClick={toggleSort}>
                 {t("web.admin.activity.column.route")}
@@ -717,6 +733,7 @@ function StreamRow({
           <ConversionLine kind="video" session={session} />
           <ConversionLine kind="audio" session={session} />
         </div>
+        <BitrateCell session={session} />
         {showRoute && (
           <div className="flex min-w-0 flex-wrap gap-1">
             <PlaybackRouteBadges session={session} showLocation={false} />
@@ -802,7 +819,7 @@ function StreamRow({
           id={panelId}
           session={session}
           reasons={reasons}
-          stackedOnly={layout.stacked}
+          layout={layout}
           onIPLookup={onIPLookup}
           ffmpegOpen={ffmpegOpen}
           onToggleFFmpeg={toggleFFmpeg}
@@ -1064,7 +1081,6 @@ function ConversionLine({ kind, session }: { kind: "video" | "audio"; session: A
 
 function SessionCell({ session }: { session: AdminSession }) {
   const t = useT();
-  const bitrate = formatSessionBitrate(session.stream_bitrate_kbps);
   const elapsed = getElapsed(session.started_at);
   return (
     <div className="min-w-0 text-end">
@@ -1076,11 +1092,46 @@ function SessionCell({ session }: { session: AdminSession }) {
         <span className="sr-only">{t("web.admin.activity.row.sessionActive", { elapsed })}</span>
         <span aria-hidden="true">{elapsed}</span>
       </div>
-      {bitrate ? (
-        <div className="text-muted-foreground text-[11px] tabular-nums">{bitrate}</div>
+    </div>
+  );
+}
+
+/**
+ * The rate the viewer receives now, over the source's bitrate and, for a
+ * transcode, the ceiling it encodes to. The bar is the delivered share of the
+ * source: full for an untouched file, short when the route squeezes it.
+ */
+function BitrateCell({ session }: { session: AdminSession }) {
+  const t = useT();
+  const { live, source, limit, share } = getSessionBitrate(session);
+  const reference = bitrateReference(t, limit, source);
+  return (
+    <div className="min-w-0 tabular-nums">
+      {live ? <div className="truncate text-[12px]">{live}</div> : null}
+      {reference ? (
+        <div className="text-muted-foreground text-[11px] leading-snug">{reference}</div>
+      ) : null}
+      {share !== null ? (
+        <div
+          aria-hidden="true"
+          className="bg-border mt-1 h-1 max-w-32 overflow-hidden rounded-full"
+        >
+          <div
+            className={`h-full rounded-full ${limit ? "bg-warning" : "bg-success"}`}
+            style={{ width: `${share * 100}%` }}
+          />
+        </div>
       ) : null}
     </div>
   );
+}
+
+/** What the delivered rate is measured against: a transcode's limit, the source, or both. */
+function bitrateReference(t: Translate, limit: string | null, source: string | null): string {
+  if (limit && source) return t("web.admin.activity.bitrate.limitAndSource", { limit, source });
+  if (limit) return t("web.admin.activity.bitrate.limit", { rate: limit });
+  if (source) return t("web.admin.activity.bitrate.source", { rate: source });
+  return "";
 }
 
 function ActivityMethodBadge({ method }: { method: string }) {
@@ -1101,7 +1152,7 @@ function PlaybackExpandedPanel({
   id,
   session,
   reasons,
-  stackedOnly,
+  layout,
   onIPLookup,
   ffmpegOpen,
   onToggleFFmpeg,
@@ -1113,8 +1164,7 @@ function PlaybackExpandedPanel({
   id: string;
   session: AdminSession;
   reasons: AdaptationReason[];
-  /** Classes that show an element only in the stacked layout. */
-  stackedOnly: string;
+  layout: TableLayout;
   onIPLookup: (ip: string) => void;
   ffmpegOpen: boolean;
   onToggleFFmpeg: () => void;
@@ -1132,117 +1182,180 @@ function PlaybackExpandedPanel({
   const transcodeMode = formatTranscodeModeSummary(session);
   const toneMap = formatToneMapSummary(session);
   const clientIP = session.client_ip?.trim() || "";
-  const bitrate = formatSessionBitrate(session.stream_bitrate_kbps);
+  const bitrate = getSessionBitrate(session);
   const clientLabel = getSessionClientLabelFull(session) || t("web.admin.activity.client.unknown");
   const userAgent = session.client_user_agent?.trim() || "";
+  const devicePlatform = session.device_platform?.trim() || "";
+  const deviceID = session.device_id?.trim() || "";
 
   return (
     <div id={id} className="border-border/40 bg-surface/30 space-y-4 border-t px-4 py-3">
-      <dl className={FACT_LIST_CLASS}>
-        <dt className="text-muted-foreground">{t("web.admin.activity.panel.decision")}</dt>
-        <dd className="min-w-0">
-          <span className="inline-flex flex-wrap items-center gap-x-2 gap-y-0.5">
-            <ActivityMethodBadge method={method} />
-            <span>{activityMethodMeta(method).description}</span>
-          </span>
-        </dd>
-        {reasons.length > 0 ? (
-          <>
-            <dt className="text-muted-foreground">{t("web.admin.activity.panel.reasons")}</dt>
+      <div className={`grid gap-x-5 gap-y-4 text-[12px] ${layout.panel}`}>
+        <div className="min-w-0 space-y-4">
+          <dl className={FACT_LIST_CLASS}>
+            <dt className="text-muted-foreground">{t("web.admin.activity.panel.decision")}</dt>
             <dd className="min-w-0">
-              <ul className="space-y-0.5">
-                {reasons.map((reason) => (
-                  <li key={reason.code} className="flex flex-col leading-snug sm:block">
-                    <span className="font-medium">{reason.label}</span>
-                    <span className="text-muted-foreground sm:ms-2">{reason.description}</span>
-                  </li>
-                ))}
-              </ul>
+              <span className="inline-flex flex-wrap items-center gap-x-2 gap-y-0.5">
+                <ActivityMethodBadge method={method} />
+                <span>{activityMethodMeta(method).description}</span>
+              </span>
             </dd>
-          </>
-        ) : null}
-      </dl>
+            {reasons.length > 0 ? (
+              <>
+                <dt className="text-muted-foreground">{t("web.admin.activity.panel.reasons")}</dt>
+                <dd className="min-w-0">
+                  <ul className="space-y-0.5">
+                    {reasons.map((reason) => (
+                      <li key={reason.code} className="flex flex-col leading-snug sm:block">
+                        <span className="font-medium">{reason.label}</span>
+                        <span className="text-muted-foreground sm:ms-2">{reason.description}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </dd>
+              </>
+            ) : null}
+          </dl>
 
-      <table className="w-full max-w-3xl text-start text-[12px]">
-        <thead>
-          <tr className="text-muted-foreground">
-            <th scope="col" className="pb-1 text-start font-normal sm:w-36">
-              <span className="sr-only">{t("web.admin.activity.panel.streamDetails")}</span>
-            </th>
-            <th scope="col" className="pb-1 text-start font-normal">
-              {t("web.admin.activity.detail.source")}
-            </th>
-            <th scope="col" className="pb-1 text-start font-normal">
-              {t("web.admin.activity.detail.delivered")}
-            </th>
-          </tr>
-        </thead>
-        <tbody className="align-top">
-          <StreamDetailRow
-            label={t("web.admin.activity.row.video")}
-            decision={videoDecision}
-            source={formatVideoSummary(session)}
-            delivered={formatDeliveredVideoSummary(session)}
-            tags={[
-              ...(videoDecision === "transcode" ? [transcodeMode, toneMap?.badge] : []),
-              formatRequestedSourceSwitch(session),
-            ]}
-          />
-          <StreamDetailRow
-            label={t("web.admin.activity.row.audio")}
-            decision={audioDecision}
-            source={formatAudioSummary(session)}
-            delivered={formatDeliveredAudioSummary(session)}
-            tags={
-              audioDecision === "transcode" && videoDecision !== "transcode" ? [transcodeMode] : []
-            }
-          />
-          <StreamDetailRow
-            label={t("web.admin.activity.row.container")}
-            decision={normalizeContainerDecision(session.play_method)}
-            source={formatSourceContainerSummary(session)}
-            delivered={formatDeliveredContainerSummary(session)}
-            tags={[]}
-          />
-        </tbody>
-      </table>
+          <table className="w-full text-start">
+            <thead>
+              <tr className="text-muted-foreground">
+                <th scope="col" className="pb-1 text-start font-normal sm:w-36">
+                  <span className="sr-only">{t("web.admin.activity.panel.streamDetails")}</span>
+                </th>
+                <th scope="col" className="pb-1 text-start font-normal">
+                  {t("web.admin.activity.detail.source")}
+                </th>
+                <th scope="col" className="pb-1 text-start font-normal">
+                  {t("web.admin.activity.detail.delivered")}
+                </th>
+              </tr>
+            </thead>
+            <tbody className="align-top">
+              <StreamDetailRow
+                label={t("web.admin.activity.row.video")}
+                decision={videoDecision}
+                source={formatVideoSummary(session)}
+                delivered={formatDeliveredVideoSummary(session)}
+                tags={[
+                  ...(videoDecision === "transcode" ? [transcodeMode, toneMap?.badge] : []),
+                  formatRequestedSourceSwitch(session),
+                ]}
+              />
+              <StreamDetailRow
+                label={t("web.admin.activity.row.audio")}
+                decision={audioDecision}
+                source={formatAudioSummary(session)}
+                delivered={formatDeliveredAudioSummary(session)}
+                tags={
+                  audioDecision === "transcode" && videoDecision !== "transcode"
+                    ? [transcodeMode]
+                    : []
+                }
+              />
+              <StreamDetailRow
+                label={t("web.admin.activity.row.container")}
+                decision={normalizeContainerDecision(session.play_method)}
+                source={formatSourceContainerSummary(session)}
+                delivered={formatDeliveredContainerSummary(session)}
+                tags={[]}
+              />
+              {bitrate.live || bitrate.source ? (
+                <StreamDetailRow
+                  label={t("web.admin.activity.column.bitrate")}
+                  source={bitrate.source ?? ""}
+                  delivered={bitrate.live ?? ""}
+                  tags={[
+                    bitrate.limit
+                      ? t("web.admin.activity.bitrate.limit", { rate: bitrate.limit })
+                      : null,
+                  ]}
+                />
+              ) : null}
+            </tbody>
+          </table>
+        </div>
 
-      <dl className={FACT_LIST_CLASS}>
-        <dt className="text-muted-foreground">{t("web.admin.activity.client.heading")}</dt>
-        <dd className="min-w-0">
-          <div className="break-words">{clientLabel}</div>
-          {userAgent ? (
-            <div className="text-muted-foreground text-[11px] break-words">{userAgent}</div>
-          ) : null}
-        </dd>
-        <dt className="text-muted-foreground">{t("web.admin.activity.column.route")}</dt>
-        <dd className="flex min-w-0 flex-wrap items-center gap-1">
-          <PlaybackRouteBadges session={session} />
-          {clientIP ? (
-            <button
-              type="button"
-              onClick={() => onIPLookup(clientIP)}
-              className="hover:text-primary ms-1 tabular-nums transition-colors"
+        <section className={`min-w-0 ${layout.panelColumn}`}>
+          <h3 className={PANEL_HEADING_CLASS}>{t("web.admin.activity.client.heading")}</h3>
+          <dl className={SIDE_FACT_LIST_CLASS}>
+            <dt className="text-muted-foreground">{t("web.admin.activity.client.app")}</dt>
+            <dd className="min-w-0 break-words">{clientLabel}</dd>
+            {devicePlatform || deviceID ? (
+              <>
+                <dt className="text-muted-foreground">{t("web.admin.activity.client.device")}</dt>
+                <dd className="min-w-0">
+                  {devicePlatform ? <div className="break-words">{devicePlatform}</div> : null}
+                  {deviceID ? (
+                    <div className="text-muted-foreground font-mono text-[11px] break-all">
+                      {deviceID}
+                    </div>
+                  ) : null}
+                </dd>
+              </>
+            ) : null}
+            {userAgent ? (
+              <>
+                <dt className="text-muted-foreground">{t("web.admin.activity.client.agent")}</dt>
+                <dd className="text-muted-foreground min-w-0 text-[11px] break-words">
+                  {userAgent}
+                </dd>
+              </>
+            ) : null}
+          </dl>
+          {/* The table row already shows the route, the address and the rate. */}
+          <dl className={`${SIDE_FACT_LIST_CLASS} ${layout.stacked} mt-1`}>
+            <dt className="text-muted-foreground">{t("web.admin.activity.column.route")}</dt>
+            <dd className="flex min-w-0 flex-wrap items-center gap-1">
+              <PlaybackRouteBadges session={session} />
+              {clientIP ? (
+                <button
+                  type="button"
+                  onClick={() => onIPLookup(clientIP)}
+                  className="hover:text-primary ms-1 tabular-nums transition-colors"
+                >
+                  {clientIP}
+                </button>
+              ) : null}
+            </dd>
+          </dl>
+        </section>
+
+        <section className={`min-w-0 ${layout.panelColumn}`}>
+          <h3 className={PANEL_HEADING_CLASS}>{t("web.admin.activity.session.heading")}</h3>
+          <dl className={SIDE_FACT_LIST_CLASS}>
+            <dt className="text-muted-foreground">{t("web.admin.activity.session.started")}</dt>
+            <dd className="min-w-0 tabular-nums">
+              {t("web.admin.activity.session.startedAgo", {
+                time: formatTime(session.started_at),
+                elapsed: getElapsed(session.started_at),
+              })}
+            </dd>
+            <dt className="text-muted-foreground">{t("web.admin.activity.session.lastReport")}</dt>
+            <dd className="min-w-0 tabular-nums">
+              {t("web.admin.activity.session.lastReportAgo", {
+                elapsed: getElapsed(session.updated_at),
+              })}
+            </dd>
+            <dt className="text-muted-foreground">
+              {t("web.admin.activity.session.remoteControl")}
+            </dt>
+            <dd
+              className={`min-w-0 ${session.has_playback_control ? "" : "text-muted-foreground"}`}
             >
-              {clientIP}
-            </button>
-          ) : null}
-          {bitrate ? (
-            <span className="text-muted-foreground ms-1 tabular-nums">{bitrate}</span>
-          ) : null}
-        </dd>
-        <dt className="text-muted-foreground">{t("web.admin.activity.panel.heading")}</dt>
-        <dd className="min-w-0">
-          <div>
-            {t("web.admin.activity.row.sessionActive", { elapsed: getElapsed(session.started_at) })}
-          </div>
-          <div className="text-muted-foreground font-mono text-[11px] break-all">
-            {session.session_id}
-          </div>
-        </dd>
-      </dl>
+              {session.has_playback_control
+                ? t("web.admin.activity.session.remoteControlAvailable")
+                : t("web.admin.activity.session.remoteControlUnavailable")}
+            </dd>
+            <dt className="text-muted-foreground">{t("web.admin.activity.session.id")}</dt>
+            <dd className="text-muted-foreground min-w-0 font-mono text-[11px] break-all">
+              {session.session_id}
+            </dd>
+          </dl>
+        </section>
+      </div>
 
-      <div className={`${stackedOnly} flex flex-wrap gap-2`}>
+      <div className={`${layout.stacked} flex flex-wrap gap-2`}>
         <Button variant="outline" size="sm" onClick={onToggleFFmpeg}>
           <Terminal className="h-3.5 w-3.5" />
           {ffmpegOpen ? t("web.admin.activity.row.hideFfmpeg") : t("web.admin.activity.row.ffmpeg")}
@@ -1261,10 +1374,12 @@ function PlaybackExpandedPanel({
   );
 }
 
-// The expanded details' label/value lists share one label column, so the
-// decision, the stream table and the client facts line up.
-const FACT_LIST_CLASS =
-  "grid max-w-3xl grid-cols-[6rem_1fr] gap-y-1 text-[12px] sm:grid-cols-[9rem_1fr] [&>dt]:pe-3";
+// The decision list and the stream table share one label column, so they line
+// up; the client and session lists sit in narrower columns beside them.
+const FACT_LIST_CLASS = "grid grid-cols-[6rem_1fr] gap-y-1 sm:grid-cols-[9rem_1fr] [&>dt]:pe-3";
+const SIDE_FACT_LIST_CLASS =
+  "grid grid-cols-[6rem_1fr] gap-y-1 sm:grid-cols-[7rem_1fr] [&>dt]:pe-3";
+const PANEL_HEADING_CLASS = "text-muted-foreground mb-1.5 text-[11px] font-medium";
 
 function StreamDetailRow({
   label,
@@ -1274,7 +1389,8 @@ function StreamDetailRow({
   tags,
 }: {
   label: string;
-  decision: string;
+  /** Absent for a row that compares values rather than a stream the route handles. */
+  decision?: string;
   source: string;
   delivered: string;
   tags: (string | null | undefined)[];
@@ -1284,11 +1400,13 @@ function StreamDetailRow({
       <th scope="row" className="py-0.5 pe-3 text-start font-normal">
         <span className="inline-flex items-center gap-1.5">
           <span>{label}</span>
-          <span
-            className={`inline-flex rounded border px-1 py-0.5 text-[10px] leading-none font-semibold ${decisionBadgeClass(decision)}`}
-          >
-            {formatDecisionLabel(decision)}
-          </span>
+          {decision ? (
+            <span
+              className={`inline-flex rounded border px-1 py-0.5 text-[10px] leading-none font-semibold ${decisionBadgeClass(decision)}`}
+            >
+              {formatDecisionLabel(decision)}
+            </span>
+          ) : null}
         </span>
       </th>
       <td className="text-muted-foreground py-0.5 pe-3 break-words">{source}</td>
