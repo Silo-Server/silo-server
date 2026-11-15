@@ -363,9 +363,7 @@ type absDeviceInfo struct {
 // carries it.
 func (d *absDeviceInfo) UnmarshalJSON(data []byte) error {
 	var fields map[string]any
-	if json.Unmarshal(data, &fields) != nil {
-		return nil
-	}
+	_ = json.Unmarshal(data, &fields) // anything but an object leaves fields empty
 	d.ClientName, _ = fields["clientName"].(string)
 	d.ClientVersion, _ = fields["clientVersion"].(string)
 	return nil
