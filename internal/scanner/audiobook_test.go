@@ -1101,6 +1101,8 @@ func TestAudiobookTagTitle(t *testing.T) {
 		// position tag.
 		{"Saga Name 2 - Book Title", "Saga Name 2 - Book Title", "Saga Name", "2", "Book Title"},
 		{"Saga Name 2 - Book Title", "Saga Name 2 - Book Title", "Saga Name", "", "Saga Name 2 - Book Title"},
+		{"Saga Name 2 - Book Title", "Saga Name 2 - Book Title: The Long Subtitle", "Saga Name", "2", "Book Title: The Long Subtitle"},
+		{"Saga Name 2 - Book Title", "Saga Name 2 - Book Title: Saga Name, Book 2", "Saga Name", "2", "Book Title"},
 		// A numbered prefix that names the series among other words.
 		{"The Saga Name 2 - Book Title", "Book Title", "Saga Name;", "", "Book Title"},
 		// A prefix carrying the position tag's number was composed from the

@@ -234,10 +234,16 @@ func audiobookTagTitle(title, album, series, position string) string {
 	if rest, ok := strings.CutPrefix(a, t); ok && audiobookSubtitleSeparatorRE.MatchString(rest) {
 		// An album that adds the series ("Book: Saga, Book 1") is not a
 		// subtitle.
+		picked := title
 		if !containsTitleWords(rest, s) && !endsInSeriesPosition(rest) {
-			return album
+			picked = album
 		}
-		return title
+		// The album starts with the whole title, so it cannot vouch for a
+		// series prefix on it; the position tag can.
+		if s != "" {
+			return audiobookSeriesPrefixedTitle(picked, "", s, position)
+		}
+		return picked
 	}
 	if s != "" {
 		return audiobookSeriesPrefixedTitle(title, album, s, position)
