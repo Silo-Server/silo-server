@@ -117,20 +117,6 @@ func (i *Installer) InstallLocal(ctx context.Context, req InstallArchiveRequest)
 	return i.installArchive(ctx, data, req)
 }
 
-func (i *Installer) ReplaceLocal(ctx context.Context, existing *Installation, req InstallArchiveRequest) (*InstallResult, error) {
-	if existing == nil {
-		return nil, fmt.Errorf("existing installation is required")
-	}
-	if req.ArchivePath == "" {
-		return nil, fmt.Errorf("archive path is required")
-	}
-	data, err := os.ReadFile(req.ArchivePath)
-	if err != nil {
-		return nil, fmt.Errorf("read archive %q: %w", req.ArchivePath, err)
-	}
-	return i.replaceArchive(ctx, existing, data, req)
-}
-
 func (i *Installer) InstallRemote(ctx context.Context, req InstallArchiveRequest) (*InstallResult, error) {
 	if req.ArchiveURL == "" {
 		return nil, fmt.Errorf("archive url is required")
@@ -196,15 +182,12 @@ func (i *Installer) prepareArchiveReplacement(ctx context.Context, existing *Ins
 	if err != nil {
 		return nil, err
 	}
-	_, _, manifest, err := openInstallArchive(data, req)
+	replacement, err := i.checkArchiveReplacement(existing, data, req)
 	if err != nil {
 		return nil, err
 	}
-	if err := checkReplacementIdentity(manifest, existing); err != nil {
-		return nil, err
-	}
 	return &PreparedReplacement{apply: func(ctx context.Context) (*InstallResult, error) {
-		return i.replaceArchive(ctx, existing, data, req)
+		return i.writeArchiveReplacement(ctx, replacement)
 	}}, nil
 }
 
@@ -219,11 +202,12 @@ func (i *Installer) prepareBinaryReplacement(ctx context.Context, existing *Inst
 	if err != nil {
 		return nil, err
 	}
-	if err := checkReplacementIdentity(pkg.manifest, existing); err != nil {
+	replacement, err := i.checkBinaryReplacement(existing, pkg.data, pkg.checksum, pkg.manifest, pkg.manifestJSON, req.RepositoryID, pkg.signature)
+	if err != nil {
 		return nil, err
 	}
 	return &PreparedReplacement{apply: func(ctx context.Context) (*InstallResult, error) {
-		return i.replaceBinary(ctx, existing, pkg.data, pkg.checksum, pkg.manifest, pkg.manifestJSON, req.RepositoryID, pkg.signature)
+		return i.writeBinaryReplacement(ctx, replacement)
 	}}, nil
 }
 
@@ -304,17 +288,51 @@ func (i *Installer) replaceBinary(
 	repositoryID *int,
 	signature Signature,
 ) (*InstallResult, error) {
+	replacement, err := i.checkBinaryReplacement(existing, binaryData, checksum, manifest, manifestJSON, repositoryID, signature)
+	if err != nil {
+		return nil, err
+	}
+	return i.writeBinaryReplacement(ctx, replacement)
+}
+
+// binaryReplacement is a binary package that passed every check for
+// replacing an installation; only writing it is left.
+type binaryReplacement struct {
+	existing      *Installation
+	binaryData    []byte
+	checksum      string
+	manifest      *pluginv1.PluginManifest
+	manifestBytes []byte
+	archiveBytes  []byte
+	installRoot   string
+	capabilities  []Capability
+	repositoryID  *int
+	signature     Signature
+}
+
+// checkBinaryReplacement runs every check replaceBinary makes on the package
+// and writes nothing, so a caller can run it before stopping the installed
+// plugin.
+func (i *Installer) checkBinaryReplacement(
+	existing *Installation,
+	binaryData []byte,
+	checksum string,
+	manifest *pluginv1.PluginManifest,
+	manifestJSON []byte,
+	repositoryID *int,
+	signature Signature,
+) (*binaryReplacement, error) {
 	if existing == nil {
-		return nil, fmt.Errorf("existing installation is required")
+		return nil, errors.New("existing installation is required")
 	}
 	if len(binaryData) == 0 {
-		return nil, fmt.Errorf("binary data is required")
+		return nil, errors.New("binary data is required")
 	}
 	if checksum == "" {
-		return nil, fmt.Errorf("binary checksum is required")
+		return nil, errors.New("binary checksum is required")
 	}
 	if manifest == nil {
-		return nil, fmt.Errorf("plugin manifest is required")
+		return nil, errors.New("plugin manifest is required")
 	}
 	if err := ValidateManifest(manifest); err != nil {
 		return nil, err
@@ -331,11 +349,32 @@ func (i *Installer) replaceBinary(
 	if err != nil {
 		return nil, fmt.Errorf("package plugin archive: %w", err)
 	}
-
 	installRoot, err := pluginVersionRoot(i.baseDir, manifest.GetPluginId(), manifest.GetVersion())
 	if err != nil {
 		return nil, err
 	}
+	capabilities, err := CapabilityRecordsFromManifest(manifest)
+	if err != nil {
+		return nil, err
+	}
+	return &binaryReplacement{
+		existing:      existing,
+		binaryData:    binaryData,
+		checksum:      checksum,
+		manifest:      manifest,
+		manifestBytes: manifestBytes,
+		archiveBytes:  archiveBytes,
+		installRoot:   installRoot,
+		capabilities:  capabilities,
+		repositoryID:  repositoryID,
+		signature:     signature,
+	}, nil
+}
+
+func (i *Installer) writeBinaryReplacement(ctx context.Context, r *binaryReplacement) (*InstallResult, error) {
+	existing, binaryData, checksum, manifest := r.existing, r.binaryData, r.checksum, r.manifest
+	manifestBytes, archiveBytes, installRoot := r.manifestBytes, r.archiveBytes, r.installRoot
+	capabilities, repositoryID := r.capabilities, r.repositoryID
 	if err := os.MkdirAll(installRoot, 0755); err != nil {
 		return nil, fmt.Errorf("create plugin install root %q: %w", installRoot, err)
 	}
@@ -362,11 +401,6 @@ func (i *Installer) replaceBinary(
 		return nil, fmt.Errorf("write plugin manifest %q: %w", manifestPath, err)
 	}
 
-	capabilities, err := CapabilityRecordsFromManifest(manifest)
-	if err != nil {
-		return nil, err
-	}
-
 	if err := i.installations.SaveArchive(ctx, existing.ID, manifestBytes, checksum, archiveBytes); err != nil {
 		return nil, fmt.Errorf("persist replacement plugin archive: %w", err)
 	}
@@ -374,6 +408,7 @@ func (i *Installer) replaceBinary(
 	version := manifest.GetVersion()
 	enabled := existing.Enabled
 	availableVersion := ""
+	signature := r.signature
 	if err := i.installations.Update(ctx, existing.ID, UpdateInstallationInput{
 		Version:          &version,
 		InstallPath:      &binaryPath,
@@ -416,11 +451,33 @@ func (i *Installer) replaceArchive(
 	data []byte,
 	req InstallArchiveRequest,
 ) (*InstallResult, error) {
-	if existing == nil {
-		return nil, fmt.Errorf("existing installation is required")
+	replacement, err := i.checkArchiveReplacement(existing, data, req)
+	if err != nil {
+		return nil, err
 	}
-	repositoryID := req.RepositoryID
+	return i.writeArchiveReplacement(ctx, replacement)
+}
 
+// archiveReplacement is a zip archive that passed every check for replacing
+// an installation; only writing it is left.
+type archiveReplacement struct {
+	existing      *Installation
+	data          []byte
+	reader        *zip.Reader
+	manifest      *pluginv1.PluginManifest
+	manifestBytes []byte
+	installRoot   string
+	capabilities  []Capability
+	repositoryID  *int
+}
+
+// checkArchiveReplacement runs every check replaceArchive makes on the
+// archive and writes nothing, so a caller can run it before stopping the
+// installed plugin.
+func (i *Installer) checkArchiveReplacement(existing *Installation, data []byte, req InstallArchiveRequest) (*archiveReplacement, error) {
+	if existing == nil {
+		return nil, errors.New("existing installation is required")
+	}
 	reader, manifestBytes, manifest, err := openInstallArchive(data, req)
 	if err != nil {
 		return nil, err
@@ -428,11 +485,30 @@ func (i *Installer) replaceArchive(
 	if err := checkReplacementIdentity(manifest, existing); err != nil {
 		return nil, err
 	}
-
 	installRoot, err := pluginVersionRoot(i.baseDir, manifest.GetPluginId(), manifest.GetVersion())
 	if err != nil {
 		return nil, err
 	}
+	capabilities, err := CapabilityRecordsFromManifest(manifest)
+	if err != nil {
+		return nil, err
+	}
+	return &archiveReplacement{
+		existing:      existing,
+		data:          data,
+		reader:        reader,
+		manifest:      manifest,
+		manifestBytes: manifestBytes,
+		installRoot:   installRoot,
+		capabilities:  capabilities,
+		repositoryID:  req.RepositoryID,
+	}, nil
+}
+
+func (i *Installer) writeArchiveReplacement(ctx context.Context, r *archiveReplacement) (*InstallResult, error) {
+	existing, data, reader, manifest := r.existing, r.data, r.reader, r.manifest
+	manifestBytes, installRoot := r.manifestBytes, r.installRoot
+	capabilities, repositoryID := r.capabilities, r.repositoryID
 	if err := os.MkdirAll(installRoot, 0755); err != nil {
 		return nil, fmt.Errorf("create plugin install root %q: %w", installRoot, err)
 	}
@@ -451,10 +527,6 @@ func (i *Installer) replaceArchive(
 
 	binaryPath := filepath.Join(installDir, "plugin")
 	manifestPath := filepath.Join(installDir, "manifest.json")
-	capabilities, err := CapabilityRecordsFromManifest(manifest)
-	if err != nil {
-		return nil, err
-	}
 
 	if err := i.installations.SaveArchive(ctx, existing.ID, manifestBytes, manifest.GetChecksum(), data); err != nil {
 		return nil, fmt.Errorf("persist replacement plugin archive: %w", err)

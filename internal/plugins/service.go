@@ -287,9 +287,13 @@ func (s *Service) InstallLocal(ctx context.Context, req InstallArchiveRequest) (
 	}
 	var result *InstallResult
 	if existing != nil {
-		result, err = s.replaceStopped(ctx, existing, func() (*InstallResult, error) {
-			return s.installer.ReplaceLocal(ctx, existing, req)
-		})
+		var replacement *archiveReplacement
+		replacement, err = s.installer.checkArchiveReplacement(existing, data, req)
+		if err == nil {
+			result, err = s.replaceStopped(ctx, existing, func() (*InstallResult, error) {
+				return s.installer.writeArchiveReplacement(ctx, replacement)
+			})
+		}
 	} else {
 		result, err = s.installer.InstallLocal(ctx, req)
 	}
@@ -420,9 +424,12 @@ func (s *Service) InstallBinaryUpload(ctx context.Context, binaryData []byte) (*
 		return nil, fmt.Errorf("multiple existing installations found for plugin %q", manifest.GetPluginId())
 	}
 
-	oldInstallation := existing[0]
-	result, err = s.replaceStopped(ctx, oldInstallation, func() (*InstallResult, error) {
-		return s.installer.replaceBinary(ctx, oldInstallation, binaryData, actualChecksum, manifest, manifestJSON, nil, unsignedSignature)
+	replacement, err := s.installer.checkBinaryReplacement(existing[0], binaryData, actualChecksum, manifest, manifestJSON, nil, unsignedSignature)
+	if err != nil {
+		return nil, err
+	}
+	result, err = s.replaceStopped(ctx, existing[0], func() (*InstallResult, error) {
+		return s.installer.writeBinaryReplacement(ctx, replacement)
 	})
 	if err != nil {
 		return nil, err
@@ -460,11 +467,12 @@ func (s *Service) stopInstallationIfRunning(existing *Installation) error {
 }
 
 // replaceStopped stops the existing installation's process and runs replace.
-// Callers check the new package before calling it, so a refused package never
-// stops the running plugin. When replace fails the row still names the old release but its process is
-// gone: a lazily started plugin comes back on its next RPC, while a resident
-// only restarts on a lifecycle reconcile, so the hooks run before the error
-// is returned. On success the caller runs them after the row has changed.
+// Callers check the new package before calling it, so a refused package
+// never stops the running plugin. When replace fails the row still names the
+// old release but its process is gone: a lazily started plugin comes back on
+// its next RPC, while a resident only restarts on a lifecycle reconcile, so
+// the hooks run before the error is returned. On success the caller runs them
+// after the row has changed.
 func (s *Service) replaceStopped(ctx context.Context, existing *Installation, replace func() (*InstallResult, error)) (*InstallResult, error) {
 	if err := s.stopInstallationIfRunning(existing); err != nil {
 		return nil, err

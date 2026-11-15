@@ -387,6 +387,29 @@ func TestServiceInstallLocalRefusesBeforeStoppingInstalledPlugin(t *testing.T) {
 	}
 }
 
+// An uploaded binary that can't be stored, here because its manifest
+// declares an asset a lone binary can't carry, is refused while the
+// installed plugin keeps running.
+func TestServiceInstallBinaryUploadRefusesBeforeStoppingInstalledPlugin(t *testing.T) {
+	manifest := packageErrorTestManifest("test.plugin", "2.0.0")
+	manifest.Assets = []*pluginv1.PackagedAsset{{Path: "web/app.js"}}
+	binary := manifestScript(t, manifest, "")
+	events := []string{}
+	store := newFakeServiceInstallationStore(&Installation{ID: 7, PluginID: "test.plugin", Version: "1.0.0", InstallPath: t.TempDir(), Enabled: true})
+	store.events = &events
+	service := &Service{
+		installations: store,
+		installer:     NewInstaller(store, InstallerOptions{BaseDir: t.TempDir()}),
+		host:          &fakeServiceHost{events: &events},
+	}
+	if _, err := service.InstallBinaryUpload(context.Background(), binary); err == nil {
+		t.Fatal("InstallBinaryUpload() accepted a binary it can't store")
+	}
+	if len(events) != 0 {
+		t.Fatalf("refused upload touched the installed plugin: %v", events)
+	}
+}
+
 // An address the transport can never fetch is a final refusal, not an outage.
 func TestFetchPackageResourceRefusesInvalidAddress(t *testing.T) {
 	for _, rawURL := range []string{"ftp://example.invalid/plugin.zip", "http://[::1", "http://?x"} {

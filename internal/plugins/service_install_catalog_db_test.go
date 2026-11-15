@@ -8,6 +8,8 @@ import (
 	"reflect"
 	"testing"
 	"time"
+
+	pluginv1 "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginproto/silo/plugin/v1"
 )
 
 // Updating an installed plugin from its catalog stops the running plugin
@@ -18,16 +20,24 @@ func TestServiceInstallCatalogStopsPluginOnlyForAnAcceptedPackageDB(t *testing.T
 	for _, tc := range []struct {
 		name        string
 		wrongSum    bool
+		withAsset   bool
 		wantEvents  []string
 		wantRefusal string
 		wantVersion string
 	}{
 		{name: "checksum mismatch", wrongSum: true, wantEvents: []string{}, wantRefusal: "SHA-256 checksum", wantVersion: "1.0.0"},
+		// A binary has nowhere to carry assets, so its stored archive is
+		// refused after the download passed its checks.
+		{name: "manifest declares an asset", withAsset: true, wantEvents: []string{}, wantVersion: "1.0.0"},
 		{name: "accepted package", wantEvents: []string{"stop", "save_archive", "update"}, wantVersion: "2.0.0"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			ctx := context.Background()
-			binary := manifestScript(t, packageErrorTestManifest("test.plugin", "2.0.0"), "")
+			manifest := packageErrorTestManifest("test.plugin", "2.0.0")
+			if tc.withAsset {
+				manifest.Assets = []*pluginv1.PackagedAsset{{Path: "web/app.js"}}
+			}
+			binary := manifestScript(t, manifest, "")
 			checksum := sha256Hex(binary)
 			if tc.wrongSum {
 				checksum = sha256Hex([]byte("another build"))
@@ -66,9 +76,14 @@ func TestServiceInstallCatalogStopsPluginOnlyForAnAcceptedPackageDB(t *testing.T
 			}
 
 			_, err = service.InstallCatalog(ctx, InstallCatalogRequest{RepositoryID: repository.ID, PluginID: "test.plugin", Version: "2.0.0"})
-			if tc.wantRefusal != "" {
+			switch {
+			case tc.wantRefusal != "":
 				requirePackageError(t, err, tc.wantRefusal)
-			} else if err != nil {
+			case tc.wantVersion == "1.0.0":
+				if err == nil {
+					t.Fatal("InstallCatalog() accepted a package it can't store")
+				}
+			case err != nil:
 				t.Fatalf("InstallCatalog() returned error: %v", err)
 			}
 			if !reflect.DeepEqual(events, tc.wantEvents) {
