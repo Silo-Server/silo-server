@@ -2384,14 +2384,19 @@ A text or ASS window the client is waiting on is bounded: an extract started for
 a relay input that has not finished after 20 s is killed. If it produced
 nothing, the answer is `503` with `Retry-After` and the identity enters its usual
 extraction cooldown so a retry does not repeat the read; if part of the slice had
-already streamed, the response is aborted rather than completed. The budget
-never applies to a whole-track extract, to a window read from a committed
-artifact, to a bitmap page (PGS keeps its own page path and bounds), or to the
-detached prefetch — that prefetch is what eventually fills the window cache, so
-it may run to the window timeout. 20 s sits under the web player's 30 s subtitle fetch
-stall deadline, so the server answers before the client gives up. An opening
-window is attempted like any other rather than refused up front, so a relay too
-slow to deliver a page still gets the retryable answer instead of silence.
+already streamed, the response is aborted rather than completed. The breach also
+starts a detached recovery warm for the breached window extended by one client
+grid cell, so both an exact retry and the shifted window the client asks for
+next are covered; a retry whose range lies inside an in-flight warm joins that
+warm instead of starting a second read. The recovery warm is exempt from the
+cooldown the breach armed and is not bounded by the 20 s request budget. The
+budget never applies to a whole-track extract, to a window read from a committed
+artifact, or to a bitmap page (PGS keeps its own page path and bounds), and the
+detached warm may run to the window timeout because it is what fills the window
+cache. 20 s sits under the web player's 30 s subtitle fetch stall deadline, so
+the server answers before the client gives up. An opening window is attempted
+like any other rather than refused up front, so a relay too slow to deliver a
+page still gets the retryable answer instead of silence.
 
 ---
 
