@@ -261,11 +261,15 @@ func RefreshAudiobookGroupStats(ctx context.Context, pool *pgxpool.Pool, skipWit
 	return false, nil
 }
 
-// AudiobookGroupStatsRefresher keeps audiobook_group_stats current: once per
-// interval across the cluster, which catches metadata enrichment and edits,
-// and soon after a scan of an audiobook library, on the server that ran it.
+// AudiobookGroupStatsRefresher keeps audiobook_group_stats current: once the
+// last refresh by any server is interval old, which catches metadata
+// enrichment and edits, and soon after a scan of an audiobook library, on the
+// server that ran it.
 type AudiobookGroupStatsRefresher struct {
 	interval time.Duration
+	// poll is how often each server checks the last refresh's age, so a
+	// change shows within interval plus poll plus the refresh itself.
+	poll time.Duration
 	// delay folds a burst of scans, such as autoscan ingesting one book at a
 	// time, into one refresh.
 	delay   time.Duration
@@ -281,8 +285,8 @@ type AudiobookGroupStatsRefresher struct {
 
 // NewAudiobookGroupStatsRefresher returns a refresher for pool. Start it with
 // Run.
-func NewAudiobookGroupStatsRefresher(pool *pgxpool.Pool, interval, delay time.Duration) *AudiobookGroupStatsRefresher {
-	return newAudiobookGroupStatsRefresher(interval, delay,
+func NewAudiobookGroupStatsRefresher(pool *pgxpool.Pool, interval, poll, delay time.Duration) *AudiobookGroupStatsRefresher {
+	return newAudiobookGroupStatsRefresher(interval, poll, delay,
 		func(ctx context.Context, skipWithin time.Duration) (bool, error) {
 			return RefreshAudiobookGroupStats(ctx, pool, skipWithin)
 		},
@@ -292,12 +296,13 @@ func NewAudiobookGroupStatsRefresher(pool *pgxpool.Pool, interval, delay time.Du
 }
 
 func newAudiobookGroupStatsRefresher(
-	interval, delay time.Duration,
+	interval, poll, delay time.Duration,
 	refresh func(context.Context, time.Duration) (bool, error),
 	holdAudiobooks func(context.Context, []int) (bool, error),
 ) *AudiobookGroupStatsRefresher {
 	return &AudiobookGroupStatsRefresher{
 		interval:       interval,
+		poll:           poll,
 		delay:          delay,
 		refresh:        refresh,
 		holdAudiobooks: holdAudiobooks,
@@ -323,20 +328,27 @@ func (r *AudiobookGroupStatsRefresher) LibraryChanged(libraryID int) {
 
 // Run refreshes until ctx ends.
 func (r *AudiobookGroupStatsRefresher) Run(ctx context.Context) {
-	ticker := time.NewTicker(r.interval)
+	ticker := time.NewTicker(r.poll)
 	defer ticker.Stop()
 	// due fires delay after the first change since the last refresh.
 	var due <-chan time.Time
 	// retry is set when another server held the refresh a scan asked for.
 	retry := false
+	// heldUntil pauses the periodic check for an interval after a failed
+	// refresh, so one that keeps failing does not run every poll.
+	var heldUntil time.Time
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			// Any server's refresh within the interval will do, less slack
-			// for ticker drift.
-			r.run(ctx, r.interval*4/5)
+			if time.Now().Before(heldUntil) {
+				continue
+			}
+			// Any server's refresh within the interval will do.
+			if _, failed := r.run(ctx, r.interval); failed {
+				heldUntil = time.Now().Add(r.interval)
+			}
 		case <-r.wake:
 			if due == nil {
 				due = time.After(r.delay)
@@ -348,9 +360,13 @@ func (r *AudiobookGroupStatsRefresher) Run(ctx context.Context) {
 			}
 			// The refresh must start after the scan, so a recent one does
 			// not count; and one running now may have started before it.
-			// A failed refresh is left to the next tick, so one that keeps
-			// failing does not run every delay.
-			retry = r.run(ctx, 0)
+			// A failed refresh is left to the periodic check, after its
+			// pause, so one that keeps failing does not run every delay.
+			var failed bool
+			retry, failed = r.run(ctx, 0)
+			if failed {
+				heldUntil = time.Now().Add(r.interval)
+			}
 			if retry {
 				due = time.After(r.delay)
 			}
@@ -359,15 +375,16 @@ func (r *AudiobookGroupStatsRefresher) Run(ctx context.Context) {
 }
 
 // run refreshes the view, bounded by the interval, and reports whether
-// another server was refreshing it.
-func (r *AudiobookGroupStatsRefresher) run(ctx context.Context, skipWithin time.Duration) bool {
+// another server was refreshing it or the refresh failed.
+func (r *AudiobookGroupStatsRefresher) run(ctx context.Context, skipWithin time.Duration) (busy, failed bool) {
 	refreshCtx, cancel := context.WithTimeout(ctx, r.interval)
 	defer cancel()
 	busy, err := r.refresh(refreshCtx, skipWithin)
 	if err != nil {
 		slog.WarnContext(ctx, "audiobook group stats refresh failed", "component", "catalog", "err", err)
+		return false, true
 	}
-	return busy
+	return busy, false
 }
 
 // changedAudiobooks takes the libraries changed since the last call and

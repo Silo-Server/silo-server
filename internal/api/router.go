@@ -2359,7 +2359,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 		}
 		// The audiobook Authors, Narrators and Series tabs read precomputed
 		// groups; the periodic refresh catches enrichment and edits.
-		groupStats := catalog.NewAudiobookGroupStatsRefresher(deps.DB, 10*time.Minute, time.Minute)
+		groupStats := catalog.NewAudiobookGroupStatsRefresher(deps.DB, 10*time.Minute, time.Minute, time.Minute)
 		go groupStats.Run(appCtx)
 		// A scan that adds or removes titles publishes scan_complete with the
 		// library ID. Observing the publish, rather than subscribing, counts
