@@ -99,7 +99,7 @@ VALUES ($1,'audiobook','Emma','',2008,'{Provider Genre}'::text[])`, id); err != 
 				t.Fatal(err)
 			}
 			defer func() { _ = tx.Rollback(context.Background()) }()
-			if err := s.upsertAudiobookPresentationTx(ctx, tx, folder, id, dir, book, time.Time{}); err != nil {
+			if err := s.upsertAudiobookPresentationTx(ctx, tx, folder, id, dir, canonicalTestPath(t, dir), book, time.Time{}); err != nil {
 				t.Fatal(err)
 			}
 			if err := tx.Commit(ctx); err != nil {
@@ -209,7 +209,7 @@ VALUES ($1,'audiobook','Emma','',$2,'{}'::text[])`, id, itemYear); err != nil {
 	}
 	book := &parsedAudiobook{Title: "Emma", Author: "Jane Austen", Narrator: "Juliet Stevenson", Year: 2005,
 		Files: []parsedAudiobookFile{{Path: path, Duration: 36000}}}
-	got, err := s.upsertAudiobookMediaItem(ctx, folder.ID, newDir, book)
+	got, err := s.upsertAudiobookMediaItem(ctx, folder.ID, newDir, canonicalTestPath(t, newDir), book)
 	if err != nil {
 		t.Fatal(err)
 	}

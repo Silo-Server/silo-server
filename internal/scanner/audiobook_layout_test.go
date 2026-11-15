@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"testing"
 )
 
@@ -173,11 +174,16 @@ func TestAudiobookFolderGrouping(t *testing.T) {
 				return r
 			}
 			got := make(map[string][]string)
+			books := walkedAudiobookBooks(scans)
 			for _, aliases := range groupAudiobookCandidates(scans) {
 				candidate := aliases[0]
 				parts, err := audiobookBookParts(candidate, seen)
 				if err != nil {
 					t.Fatalf("parts of %s: %v", candidate, err)
+				}
+				// The parts listed from the walk's reads match a fresh read.
+				if walked, err := books[candidate].parts(candidate, seen); err != nil || !slices.Equal(walked, parts) {
+					t.Errorf("parts of %s from the walk = %v, %v; from disk %v", rel(candidate), walked, err, parts)
 				}
 				for _, part := range parts {
 					got[rel(candidate)] = append(got[rel(candidate)], rel(part))
@@ -187,6 +193,40 @@ func TestAudiobookFolderGrouping(t *testing.T) {
 				t.Errorf("books = %v, want %v", got, tc.books)
 			}
 		})
+	}
+}
+
+// A part deleted after the walk listed its book is left out, as a fresh read
+// would leave it out, instead of failing the book.
+func TestAudiobookPartGoneSinceTheWalkIsLeftOut(t *testing.T) {
+	root := t.TempDir()
+	book := filepath.Join(root, "Book")
+	for _, name := range []string{"01.mp3", "02.mp3"} {
+		writeTestFile(t, filepath.Join(book, name), "audio")
+	}
+	scans, err := collectAudiobookRootScans(t.Context(), 1, []string{root}, []string{root}, true, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, seen, _ := splitAudiobookReconcileRoots(scans)
+	walked := walkedAudiobookBooks(scans)[book]
+	if walked == nil || walked.listings == nil {
+		t.Fatal("the walk kept no listing of the book")
+	}
+	if err := os.Remove(filepath.Join(book, "02.mp3")); err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	err = walked.partsOrRelist(book, seen, func(parts []string) error {
+		onDisk, _, err := statAudiobookDiskFiles(parts)
+		got = nil
+		for _, f := range onDisk {
+			got = append(got, filepath.Base(f.Path))
+		}
+		return err
+	})
+	if err != nil || !slices.Equal(got, []string{"01.mp3"}) {
+		t.Fatalf("parts = %v, %v; want [01.mp3]", got, err)
 	}
 }
 
