@@ -228,6 +228,120 @@ export function selectDefaultVersion(
   return sorted[0] ?? null;
 }
 
+/** Why the item page could not keep the version row it preferred. */
+export type VersionFallbackReason = "unlisted" | "failed" | "unavailable";
+
+/** The row Play will start, and why a different row than the preferred one. */
+export interface ItemVersionSelection {
+  version: FileVersion | null;
+  /**
+   * Set only when the page could not play the row it preferred. `skipped` is
+   * null when that row is no longer in the list at all; `selected` is the row
+   * Play will start, which equals `skipped` when no other row is playable.
+   */
+  fallback: {
+    reason: VersionFallbackReason;
+    skipped: FileVersion | null;
+    selected: FileVersion | null;
+  } | null;
+}
+
+function versionPlayable(version: FileVersion): boolean {
+  return version.failed !== true && version.available !== false;
+}
+
+function unplayableReason(version: FileVersion): VersionFallbackReason {
+  return version.failed === true ? "failed" : "unavailable";
+}
+
+/**
+ * Pick the row the item page plays.
+ *
+ * Three situations used to dead-end the page, each with the Play button
+ * disabled and no way forward:
+ *
+ *  - the persisted row (`last_file_id`, or the device's own pick) is not in the
+ *    list, which is what a plan that named an effective row outside the version
+ *    list leaves behind;
+ *  - the row the server nominates as default is marked failed;
+ *  - the row the server nominates as default is unavailable right now.
+ *
+ * None of them means the item has nothing to play. An explicit pick the viewer
+ * made on this device is always kept, even when the liveness check reports it
+ * failed: Play re-links that row instead of quietly choosing another release.
+ * Any other preference (the server's `last_file_id`, or the server's default
+ * row) is skipped when it is failed or unavailable, and the page reports why so
+ * the version list stays one click away.
+ */
+export function selectItemVersion(
+  versions: FileVersion[],
+  defaultVersion: FileVersion | null,
+  persistedFileId: number | null,
+  explicitPickId: number | null = null,
+): ItemVersionSelection {
+  if (versions.length === 0) {
+    return { version: defaultVersion, fallback: null };
+  }
+  const explicitPick =
+    explicitPickId != null
+      ? versions.find((version) => version.file_id === explicitPickId)
+      : undefined;
+  if (explicitPick) {
+    return { version: explicitPick, fallback: null };
+  }
+  const persisted =
+    persistedFileId != null
+      ? versions.find((version) => version.file_id === persistedFileId)
+      : undefined;
+  const preferred = persisted ?? inListVersion(versions, defaultVersion) ?? versions[0] ?? null;
+  if (preferred && versionPlayable(preferred)) {
+    return {
+      version: preferred,
+      // A persisted row that left the list is still worth saying out loud: the
+      // viewer asked for it, and the page is about to play something else.
+      fallback:
+        persisted == null && persistedFileId != null
+          ? { reason: "unlisted", skipped: null, selected: preferred }
+          : null,
+    };
+  }
+  const replacement =
+    versions.find(
+      (version) => version.file_id !== preferred?.file_id && versionPlayable(version),
+    ) ?? null;
+  if (replacement) {
+    return {
+      version: replacement,
+      fallback: {
+        reason: preferred ? unplayableReason(preferred) : "unavailable",
+        skipped: preferred,
+        selected: replacement,
+      },
+    };
+  }
+  // Nothing is playable. Keep the preferred row anyway: starting it retries the
+  // version with a fresh link, which beats a dead page when the provider has
+  // recovered since the liveness check.
+  return {
+    version: preferred,
+    fallback: preferred
+      ? {
+          reason: unplayableReason(preferred),
+          skipped: preferred,
+          selected: preferred,
+        }
+      : null,
+  };
+}
+
+function inListVersion(
+  versions: FileVersion[],
+  version: FileVersion | null,
+): FileVersion | undefined {
+  if (!version) return undefined;
+  return versions.find((row) => row.file_id === version.file_id);
+}
+
 export function selectDefaultPlaybackVariantVersion(
   versions: FileVersion[],
   playbackVariants: PlaybackVariant[] | undefined,

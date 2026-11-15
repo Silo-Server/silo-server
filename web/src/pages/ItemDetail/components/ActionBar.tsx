@@ -85,6 +85,8 @@ import { MediaActionIcon } from "@/components/mediaActionIcons";
 import { useWatchPlaybackController } from "@/playback/watchPlaybackContext";
 import { parseWatchHref } from "@/pages/watchRouteHelpers";
 import VersionDropdown, { VersionRefreshRow } from "./VersionDropdown";
+import type { ItemVersionSelection } from "./versionRankingUtils";
+import { sanitizeVersionLabel } from "./versionFormatUtils";
 import AudioTracksPopover from "./AudioTracksPopover";
 import SubtitlesPopover from "./SubtitlesPopover";
 
@@ -96,6 +98,44 @@ const responsivePlayActionClass = `${responsivePrimaryActionClass} hover:bg-prim
 const staticGlassActionClass = "transition-none";
 const overflowMenuClass =
   "detail-overflow-menu border-border bg-popover text-popover-foreground fixed z-50 max-h-[calc(100vh-1rem)] w-max max-w-[calc(100vw-2rem)] min-w-0 overflow-y-auto rounded-md border p-1 shadow-md";
+
+/** The row's own name: its release first, then the edition, then the resolution. */
+function versionDisplayLabel(version: FileVersion | null): string {
+  if (!version) return "";
+  return (
+    sanitizeVersionLabel(version.release_name || version.edition_raw) ||
+    version.resolution ||
+    `Version ${version.file_id}`
+  );
+}
+
+/**
+ * Why Play is not starting the row the page preferred. A skipped row never
+ * disables Play: the page selects the best available row instead, so the notice
+ * names what it skipped and what it plays, keeping the version list one click
+ * away.
+ */
+function versionFallbackMessage(fallback: NonNullable<ItemVersionSelection["fallback"]>): string {
+  const selected = versionDisplayLabel(fallback.selected);
+  const skipped = versionDisplayLabel(fallback.skipped);
+  if (fallback.reason === "unlisted") {
+    return selected
+      ? `The version you last played is no longer listed. Playing ${selected}.`
+      : "The version you last played is no longer listed. Pick a version to play.";
+  }
+  if (
+    fallback.skipped &&
+    fallback.selected &&
+    fallback.skipped.file_id === fallback.selected.file_id
+  ) {
+    return fallback.reason === "failed"
+      ? `${skipped} is marked failed. Playing it retries the link.`
+      : `${skipped} is not available right now. Playing it retries the link.`;
+  }
+  return fallback.reason === "failed"
+    ? `${skipped} is marked failed. Playing ${selected} instead.`
+    : `${skipped} is not available right now. Playing ${selected} instead.`;
+}
 
 function visibleOverflowItems(menu: HTMLElement | null): HTMLButtonElement[] {
   if (!menu) return [];
@@ -284,11 +324,12 @@ export interface ActionBarProps {
   /** The viewer chose selectedVersion rather than playing the default version. */
   versionPicked?: boolean;
   /**
-   * The version the viewer picked is no longer in the refreshed row set. Play
-   * is blocked until they pick again instead of silently starting another
-   * version.
+   * Set when the page could not play the row it preferred (a row the refresh
+   * dropped, a failed row, or a row the provider is not serving right now) and
+   * plays another row instead. Play stays enabled; the notice names the row it
+   * had to skip so the version list is one click away.
    */
-  selectedVersionMissing?: boolean;
+  versionFallback?: ItemVersionSelection["fallback"];
   onSelectVersion?: (version: FileVersion) => void;
   /** Fired when a version picker popover opens or closes (open=true on open). */
   onVersionPickerOpenChange?: (open: boolean) => void;
@@ -365,7 +406,7 @@ export default function ActionBar({
   playbackVariants,
   selectedVersion,
   versionPicked = false,
-  selectedVersionMissing = false,
+  versionFallback = null,
   onSelectVersion,
   onVersionPickerOpenChange,
   onDownload,
@@ -615,9 +656,6 @@ export default function ActionBar({
   );
   const startPlaybackFromHref = useCallback(
     (href: string, restartOverride?: boolean) => {
-      // A vanished explicit selection is a pick-again state, not permission to
-      // start whatever the server chooses.
-      if (selectedVersionMissing) return;
       const parsed = parseWatchHref(href);
       if (!parsed) {
         navigate(href);
@@ -643,7 +681,6 @@ export default function ActionBar({
       navigate,
       playbackController,
       selectedVersion?.file_id,
-      selectedVersionMissing,
     ],
   );
   const handleResumePlayback = () => {
@@ -894,8 +931,7 @@ export default function ActionBar({
     items[nextIndex]?.focus({ preventScroll: true });
   };
   // With one version, Play already asks whether to resume or start over.
-  const showRestartInMenu =
-    Boolean(restartHref) && !showPlayChoiceDialog && !selectedVersionMissing;
+  const showRestartInMenu = Boolean(restartHref) && !showPlayChoiceDialog;
   const playbackItems = [
     onShuffle && (
       <DetailOverflowMenuItem key="shuffle" closeMenu={closeOverflowMenu} onAction={onShuffle}>
@@ -1210,10 +1246,9 @@ export default function ActionBar({
   );
 
   // The subtitle control is available even when the selected file has no
-  // embedded tracks because downloaded subtitles are loaded on demand. A
-  // missing pick still owns this row: it holds the replacement picker.
-  const hasReplacementVersion = selectedVersionMissing && (versions?.length ?? 0) > 0;
-  const hasStreamControls = Boolean(selectedVersion) || hasReplacementVersion;
+  // embedded tracks because downloaded subtitles are loaded on demand. It also
+  // owns the row when the item lists versions but none is selected yet.
+  const hasStreamControls = Boolean(selectedVersion) || (versions?.length ?? 0) > 0;
 
   return (
     <div className="detail-action-bar space-y-2.5" data-compact-mobile={compactMobile || undefined}>
@@ -1223,15 +1258,7 @@ export default function ActionBar({
         {primaryAction ? (
           <PrimaryActionButton action={primaryAction} />
         ) : playHref ? (
-          selectedVersionMissing ? (
-            <Button
-              disabled
-              className="h-11 gap-2.5 rounded-full px-8 text-[0.9375rem] font-bold tracking-wide"
-            >
-              <Play className="size-[18px] fill-current" />
-              Version unavailable
-            </Button>
-          ) : showPlayChoiceDialog ? (
+          showPlayChoiceDialog ? (
             <Button
               onClick={openPlayChoiceDialog}
               className={`${responsivePlayActionClass} relative h-11 cursor-pointer gap-2.5 overflow-hidden rounded-full px-8 text-[0.9375rem] font-bold tracking-wide shadow-md`}
@@ -1502,9 +1529,9 @@ export default function ActionBar({
         )}
       </div>
 
-      {selectedVersionMissing ? (
-        <p role="status" className="text-destructive text-xs">
-          The selected version is no longer available. Pick a version to play.
+      {versionFallback ? (
+        <p role="status" className="text-muted-foreground text-xs">
+          {versionFallbackMessage(versionFallback)}
         </p>
       ) : null}
 
@@ -1533,14 +1560,14 @@ export default function ActionBar({
           )}
           {versions &&
             versions.length > 0 &&
-            (hasMultipleVersions || virtualDetail || selectedVersionMissing) &&
-            (selectedVersion || selectedVersionMissing) &&
+            (hasMultipleVersions || virtualDetail || versionFallback != null) &&
+            selectedVersion &&
             onSelectVersion && (
               <VersionDropdown
                 versions={versions}
                 playbackVariants={playbackVariants}
                 selectedVersion={selectedVersionWithTracks}
-                selectionMissing={selectedVersionMissing}
+                selectionMissing={false}
                 onSelectVersion={onSelectVersion}
                 contentId={contentId}
                 onOpenChange={onVersionPickerOpenChange}

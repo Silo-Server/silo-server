@@ -232,45 +232,67 @@ describe("ActionBar", () => {
     expect(arg?.forceRelink).toBe(true);
   });
 
-  it("offers a replacement row when the chosen version vanished", () => {
+  // A page that could not keep its preferred row still has something to play.
+  // Play stays enabled on the row the page selected, and the notice names the
+  // skipped row so the version list is one click away.
+  it("plays the fallback row and names the skipped version when a pick vanished", () => {
+    discoveryMocks.capability.mockResolvedValue({ discover_before_playback: false });
     const replacement = { ...selectedVersion, file_id: 2, resolution: "2160p" };
+    const otherRow = { ...selectedVersion, file_id: 3, resolution: "720p" };
     const onSelectVersion = vi.fn();
     const view = renderActionBar({
+      contentId: "movie-1",
       playHref: "/watch/movie-1",
-      selectedVersion: null,
-      selectedVersionMissing: true,
-      versions: [replacement],
+      selectedVersion: replacement,
+      versionFallback: { reason: "unlisted", skipped: null, selected: replacement },
+      versions: [replacement, otherRow],
       onSelectVersion,
     });
 
-    expect(screen.getByRole("button", { name: "Version unavailable" })).toBeDisabled();
+    const play = screen.getByRole("button", { name: "Play" });
+    expect(play).toBeEnabled();
     expect(
-      screen.getByText("The selected version is no longer available. Pick a version to play."),
+      screen.getByText(/The version you last played is no longer listed\. Playing/),
     ).toBeInTheDocument();
-    expect(startPlayback).not.toHaveBeenCalled();
+    fireEvent.click(play);
+    expect(startPlayback).toHaveBeenCalledOnce();
 
-    // The picker is reachable even though only one replacement remains, and it
-    // does not pretend that row is already selected.
-    fireEvent.click(screen.getByRole("button", { name: "Version" }));
-    fireEvent.click(screen.getByRole("button", { name: /2160p/ }));
-    expect(onSelectVersion).toHaveBeenCalledWith(replacement);
-    expect(startPlayback).not.toHaveBeenCalled();
+    // The picker is still reachable, so the viewer can choose another row.
+    fireEvent.click(screen.getByRole("button", { name: /^Version/ }));
+    fireEvent.click(screen.getByRole("button", { name: /720p/ }));
+    expect(onSelectVersion).toHaveBeenCalledWith(otherRow);
 
-    // The page applies the pick: Play becomes available and starts that row.
+    // Once the page keeps a row the viewer picked, the notice goes away.
     view.rerender(
       actionBarUi({
         contentId: "movie-1",
         playHref: "/watch/movie-1",
-        selectedVersion: replacement,
-        selectedVersionMissing: false,
-        versions: [replacement],
+        selectedVersion: otherRow,
+        versions: [replacement, otherRow],
         onSelectVersion,
       }),
     );
-    const play = screen.getByRole("button", { name: "Play" });
-    expect(play).toBeEnabled();
-    fireEvent.click(play);
+    expect(
+      screen.queryByText(/The version you last played is no longer listed/),
+    ).not.toBeInTheDocument();
+  });
+
+  it("says why a failed row was skipped and still plays the available one", () => {
+    const failed = { ...selectedVersion, file_id: 3, failed: true, available: false };
+    const availableRow = { ...selectedVersion, file_id: 4, resolution: "1080p" };
+    renderActionBar({
+      contentId: "movie-1",
+      playHref: "/watch/movie-1",
+      selectedVersion: availableRow,
+      versionFallback: { reason: "failed", skipped: failed, selected: availableRow },
+      versions: [failed, availableRow],
+    });
+
+    expect(screen.getByText(/is marked failed\. Playing .* instead\./)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Play" }));
     expect(startPlayback).toHaveBeenCalledOnce();
+    const arg = startPlayback.mock.calls[0]?.[0] as { fileId?: number } | undefined;
+    expect(arg?.fileId).toBe(availableRow.file_id);
   });
 });
 

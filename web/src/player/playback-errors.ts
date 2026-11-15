@@ -165,6 +165,16 @@ function describeTerminalCopy(terminal: TerminalV3): { title: string; message: s
           terminal.message?.trim() ||
           "Vio couldn't prepare the selected subtitles for this device. Try a different track.",
       };
+    case "source_mismatch":
+      return {
+        title: "This version's source is wrong",
+        // Same vocabulary the version list uses for a row whose provider served
+        // another release's bytes. The release is not dead, so the server marks
+        // the terminal retryable and the message names the version list.
+        message:
+          terminal.message?.trim() ||
+          "The provider served a different release's bytes for this version. Refresh the version list and choose again.",
+      };
     case "virtual_source_unavailable":
       return {
         title: "Playback unavailable",
