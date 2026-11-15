@@ -1162,3 +1162,11 @@
 # Two transcode nodes cannot share a canonical URL.
 ./internal/nodepool TestIssueNodeKeyDB
 ./internal/nodepool TestTranscodeNodeURLsAreUniqueDB
+
+# Transcode node control plane: the core authenticates node calls against the
+# real credential registry (a disabled node keeps its access; a proxy row, a
+# keyless or deleted node is refused), and stores a node's shipped log entries
+# under the authenticated node with timestamps clamped to the core's window.
+./internal/nodecontrol TestRequireNodeWithTheCredentialRegistryDB
+./internal/opslog TestInsertNodeBatchStampsTheNodeAndKeepsGoodRowsDB
+./internal/opslog TestInsertNodeBatchClampsTimestampsDB

@@ -416,8 +416,29 @@ request carrying that header twice is refused. Because the label and version
 differ, a request captured in one direction never verifies in the other, even
 though both use the node's key. When a signature fails against the loaded key,
 the API reloads the registry once (rate-limited) and checks again, so a freshly
-rotated key is accepted before the next periodic refresh. No API route uses
-this direction yet.
+rotated key is accepted before the next periodic refresh.
+
+The API serves the node control routes in this direction under
+`/api/internal/nodes/self/` (`internal/nodecontrol`), on the API listener but
+outside user auth, user rate limits, response compression, and the request and
+activity logs. They are mounted only where the node credential registry is
+loaded; proxies do not serve them. `nodecontrol.RequireNode` answers a
+plain-text `401` to anything unsigned or badly signed and to a deleted, keyless
+or proxy row, and accepts a disabled node, which keeps serving its streams.
+Handlers take the node's identity only from the verified signature. The
+`x-silo-worker-protocols` extension lists them under listener `api` with
+authorization class `node_signed`.
+
+| Route | Behavior |
+| --- | --- |
+| `GET config` | The calling node's configuration (`nodecontrol.NodeConfig`): server settings with its own acceleration and download overrides applied, and its drain request. Strong `ETag` equal to `revision`; `If-None-Match` answers `304`; `404` when the row is gone. |
+| `POST report` | Session records and the stream telemetry snapshot, fenced on `(boot_id, seq)` in Redis (`409` for an older or equal pair, which writes nothing). Sessions replace the node's set under `silo:sessions:n<id>:`, telemetry replaces publisher `node:<id>`, both with the registered row's URL and name and the API's clock. `413` past 2,000 sessions or transfers; `204` without Redis. |
+| `POST logs` | Up to 100 operational log entries, stored in `operational_logs` and the live tail under `<name>#<id>`, with timestamps clamped to the last 24 hours and the next 30 seconds. |
+| `POST health-changed` | Publishes `node_drain_changed` so every API server health-checks the node at once ([node drain](node-drain.md)). |
+
+Each API server gives each node an in-memory budget of 20 writes a second with
+bursts of 60 across report, logs and health-changed, and answers `429` past it.
+The node side is `nodecontrol.Client`. Nodes do not call these routes yet.
 
 What this requires and allows:
 

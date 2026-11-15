@@ -245830,6 +245830,290 @@
             "description": "Service Unavailable"
           }
         }
+      },
+      {
+        "parameters": [
+          {
+            "in": "header",
+            "name": "If-None-Match",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "description": "The calling node's configuration document: the server settings it runs with, its own acceleration and download overrides applied. Revision, also the strong ETag, is the SHA-256 of the rest of the document. If-None-Match naming it answers 304. 404: the node row is gone. 503 is transient.",
+        "listener": "api",
+        "method": "GET",
+        "path": "/api/internal/nodes/self/config",
+        "handler": "(*internal/nodecontrol.Server).HandleConfig",
+        "auth_class": "node_signed",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/x-silo-worker-protocols/schemas/nodecontrol_NodeConfig"
+                }
+              }
+            },
+            "description": "Configuration document."
+          },
+          "304": {
+            "description": "Revision unchanged."
+          },
+          "401": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "404": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "503": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        }
+      },
+      {
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/x-silo-worker-protocols/schemas/nodecontrol_Report"
+              }
+            }
+          },
+          "required": true
+        },
+        "description": "The node's sessions and stream telemetry, posted every second. Fenced on (boot_id, seq): an older or repeated pair gets 409 and writes nothing. The core files the report under the authenticated node, with its own clock, and replaces the node's session records and telemetry snapshot as a whole. 413: more than 2,000 sessions or transfers. 429: the node exceeded its request budget on this server.",
+        "retry_safety": "non_retryable",
+        "listener": "api",
+        "method": "POST",
+        "path": "/api/internal/nodes/self/report",
+        "handler": "(*internal/nodecontrol.Server).HandleReport",
+        "auth_class": "node_signed",
+        "responses": {
+          "204": {
+            "description": "Accepted, or dropped by a core without Redis."
+          },
+          "400": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "404": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "413": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Request Entity Too Large"
+          },
+          "429": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "503": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        }
+      },
+      {
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/x-silo-worker-protocols/schemas/nodecontrol_LogBatch"
+              }
+            }
+          },
+          "required": true
+        },
+        "description": "A batch of the node's operational and FFmpeg log entries. The core stamps them with the authenticated node (\u003cname\u003e#\u003cid\u003e), ignoring any node in the entries, clamps their timestamps to the last 24 hours and the next 30 seconds, and stores them for the admin log viewer and its live tail. A replayed batch can duplicate entries. 413: more than 100 entries. 429: the node exceeded its request budget on this server.",
+        "retry_safety": "non_retryable",
+        "listener": "api",
+        "method": "POST",
+        "path": "/api/internal/nodes/self/logs",
+        "handler": "(*internal/nodecontrol.Server).HandleLogs",
+        "auth_class": "node_signed",
+        "responses": {
+          "204": {
+            "description": "Stored."
+          },
+          "400": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "404": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "413": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Request Entity Too Large"
+          },
+          "429": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "503": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        }
+      },
+      {
+        "description": "The node's drain state changed (an admin drain request, SIGTERM, or drained). The core publishes node_drain_changed so every API server health-checks the node at once. 429: the node exceeded its request budget on this server.",
+        "retry_safety": "natural_idempotent",
+        "listener": "api",
+        "method": "POST",
+        "path": "/api/internal/nodes/self/health-changed",
+        "handler": "(*internal/nodecontrol.Server).HandleHealthChanged",
+        "auth_class": "node_signed",
+        "responses": {
+          "204": {
+            "description": "Published."
+          },
+          "401": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "429": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "503": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        }
       }
     ],
     "schemas": {
@@ -246738,6 +247022,197 @@
         ],
         "type": "object"
       },
+      "nodecontrol_DownloadConfig": {
+        "additionalProperties": false,
+        "properties": {
+          "artifact_dir": {
+            "type": "string"
+          },
+          "artifact_max_bytes": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "artifact_dir",
+          "artifact_max_bytes"
+        ],
+        "type": "object"
+      },
+      "nodecontrol_LogBatch": {
+        "additionalProperties": false,
+        "properties": {
+          "entries": {
+            "items": {
+              "$ref": "#/x-silo-worker-protocols/schemas/opslog_Entry"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "entries"
+        ],
+        "type": "object"
+      },
+      "nodecontrol_LoggingConfig": {
+        "additionalProperties": false,
+        "properties": {
+          "capture_level": {
+            "type": "string"
+          },
+          "format": {
+            "type": "string"
+          },
+          "level": {
+            "type": "string"
+          },
+          "quiet": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "level",
+          "format",
+          "quiet",
+          "capture_level"
+        ],
+        "type": "object"
+      },
+      "nodecontrol_NodeConfig": {
+        "additionalProperties": false,
+        "properties": {
+          "download": {
+            "$ref": "#/x-silo-worker-protocols/schemas/nodecontrol_DownloadConfig"
+          },
+          "drain_requested": {
+            "type": "boolean"
+          },
+          "logging": {
+            "$ref": "#/x-silo-worker-protocols/schemas/nodecontrol_LoggingConfig"
+          },
+          "node": {
+            "$ref": "#/x-silo-worker-protocols/schemas/nodecontrol_NodeIdentity"
+          },
+          "playback": {
+            "$ref": "#/x-silo-worker-protocols/schemas/nodecontrol_PlaybackConfig"
+          },
+          "revision": {
+            "type": "string"
+          },
+          "subtitles": {
+            "$ref": "#/x-silo-worker-protocols/schemas/nodecontrol_SubtitlesConfig"
+          }
+        },
+        "required": [
+          "revision",
+          "node",
+          "drain_requested",
+          "playback",
+          "download",
+          "subtitles",
+          "logging"
+        ],
+        "type": "object"
+      },
+      "nodecontrol_NodeIdentity": {
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "name": {
+            "type": "string"
+          },
+          "url": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "url"
+        ],
+        "type": "object"
+      },
+      "nodecontrol_PlaybackConfig": {
+        "additionalProperties": false,
+        "properties": {
+          "ffmpeg_path": {
+            "type": "string"
+          },
+          "hw_accel": {
+            "type": "string"
+          },
+          "hw_device": {
+            "type": "string"
+          },
+          "segment_retention_seconds": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "transcode_dir": {
+            "type": "string"
+          },
+          "trickplay_node_capacity": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "ffmpeg_path",
+          "hw_accel",
+          "hw_device",
+          "transcode_dir",
+          "segment_retention_seconds",
+          "trickplay_node_capacity"
+        ],
+        "type": "object"
+      },
+      "nodecontrol_Report": {
+        "additionalProperties": false,
+        "properties": {
+          "boot_id": {
+            "type": "string"
+          },
+          "seq": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "sessions": {
+            "items": {
+              "$ref": "#/x-silo-worker-protocols/schemas/nodesessions_SessionInfo"
+            },
+            "type": "array"
+          },
+          "telemetry": {
+            "$ref": "#/x-silo-worker-protocols/schemas/streamtelemetry_NodeSnapshot"
+          },
+          "truncated": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "boot_id",
+          "seq",
+          "sessions"
+        ],
+        "type": "object"
+      },
+      "nodecontrol_SubtitlesConfig": {
+        "additionalProperties": false,
+        "properties": {
+          "sync_node_capacity": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "sync_node_capacity"
+        ],
+        "type": "object"
+      },
       "nodemetrics_CgroupCPUStats": {
         "additionalProperties": false,
         "properties": {
@@ -247171,6 +247646,124 @@
         ],
         "type": "object"
       },
+      "nodesessions_SessionInfo": {
+        "additionalProperties": false,
+        "properties": {
+          "auth_user_id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "codec_audio": {
+            "type": "string"
+          },
+          "codec_video": {
+            "type": "string"
+          },
+          "hw_accel": {
+            "type": "string"
+          },
+          "media_file_id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "media_item_id": {
+            "type": "string"
+          },
+          "media_title": {
+            "type": "string"
+          },
+          "node_name": {
+            "type": "string"
+          },
+          "node_url": {
+            "type": "string"
+          },
+          "profile_id": {
+            "type": "string"
+          },
+          "resolution": {
+            "type": "string"
+          },
+          "session_id": {
+            "type": "string"
+          },
+          "started_at": {
+            "type": "string"
+          },
+          "started_at_source": {
+            "type": "string"
+          },
+          "started_at_unix_nano": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "tone_map_mode": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string"
+          },
+          "user_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "session_id",
+          "node_url",
+          "node_name",
+          "type",
+          "started_at"
+        ],
+        "type": "object"
+      },
+      "opslog_Entry": {
+        "additionalProperties": false,
+        "properties": {
+          "attrs": {
+            "additionalProperties": {},
+            "type": "object"
+          },
+          "client_ip": {
+            "type": "string"
+          },
+          "component": {
+            "type": "string"
+          },
+          "level": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          },
+          "node_id": {
+            "type": "string"
+          },
+          "playback_session_id": {
+            "type": "string"
+          },
+          "request_id": {
+            "type": "string"
+          },
+          "session_id": {
+            "type": "string"
+          },
+          "timestamp": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "user_id": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "timestamp",
+          "level",
+          "component",
+          "message"
+        ],
+        "type": "object"
+      },
       "playback_DetectedBackend": {
         "additionalProperties": false,
         "properties": {
@@ -247519,6 +248112,39 @@
         "required": [
           "active_sessions"
         ],
+        "type": "object"
+      },
+      "streamtelemetry_NodeSnapshot": {
+        "additionalProperties": false,
+        "properties": {
+          "dropped_bytes": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "dropped_observations": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "sessions": {
+            "items": {},
+            "type": "array"
+          },
+          "transfers": {
+            "items": {},
+            "type": "array"
+          },
+          "truncated": {
+            "type": "boolean"
+          },
+          "unattributed_bytes": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "unattributed_observations": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
         "type": "object"
       },
       "tonemap_Capability": {

@@ -60,6 +60,7 @@ import (
 	metadatatranslation "github.com/Silo-Server/silo-server/internal/metadata/translation"
 	"github.com/Silo-Server/silo-server/internal/netaccess"
 	"github.com/Silo-Server/silo-server/internal/nodeauth"
+	"github.com/Silo-Server/silo-server/internal/nodecontrol"
 	"github.com/Silo-Server/silo-server/internal/nodemetrics"
 	"github.com/Silo-Server/silo-server/internal/nodepool"
 	"github.com/Silo-Server/silo-server/internal/noderecipe"
@@ -3416,6 +3417,35 @@ func newChiRouter(deps Dependencies) chi.Router {
 	r.Handle("/api/v1/invitations/{token}", v1Tombstone)
 	r.Handle("/api/v1/invitations/{token}/*", v1Tombstone)
 
+	// Transcode nodes call these with their own key, never with a user
+	// credential, so they sit outside every auth group and the user-facing
+	// rate limits. Any API replica serves any node: nothing a later request
+	// depends on stays in this process.
+	if deps.NodeKeyRegistry != nil && deps.NodeRepo != nil && settingsRepo != nil {
+		nodeControlOptions := nodecontrol.Options{
+			Nodes:      deps.NodeRepo,
+			Identities: deps.NodeKeyRegistry,
+			Settings:   nodeConfigSettings(settingsRepo),
+			Redis:      deps.RedisClient,
+			Telemetry:  streamtelemetry.NodeSnapshotStore(deps.StreamTelemetry),
+			Events:     deps.EventBus,
+		}
+		if deps.DB != nil {
+			nodeControlOptions.Logs = opslog.NewConsumer(deps.DB, deps.LogStreamHub)
+		}
+		nodeControl := nodecontrol.NewServer(nodeControlOptions)
+		r.Route("/api/internal/nodes/self", func(r chi.Router) {
+			r.Use(nodecontrol.RequireNode(deps.NodeKeyRegistry))
+			r.Get("/config", nodeControl.HandleConfig)
+			r.Group(func(r chi.Router) {
+				r.Use(nodeControl.LimitNode)
+				r.Post("/report", nodeControl.HandleReport)
+				r.Post("/logs", nodeControl.HandleLogs)
+				r.Post("/health-changed", nodeControl.HandleHealthChanged)
+			})
+		})
+	}
+
 	if nodeHandler != nil {
 		nodeHandler.StartConfigurationReconciliation(deps.AppContext)
 	}
@@ -3474,7 +3504,27 @@ func useBaseMiddleware(r chi.Router, deps Dependencies) {
 	}
 }
 
+// nodeConfigSettings reads the server settings a transcode node's
+// configuration is built from, as the node's database watcher reads them: the
+// staged storage transition belongs to storage recovery, not to Config.
+func nodeConfigSettings(settings catalog.SettingsStore) func(context.Context) (map[string]string, error) {
+	return func(ctx context.Context) (map[string]string, error) {
+		all, err := settings.GetAll(ctx)
+		if err != nil {
+			return nil, err
+		}
+		delete(all, config.StorageTransitionTargetKey)
+		return all, nil
+	}
+}
+
 func skipNativeMediaCompression(r *http.Request) bool {
+	// The node control routes stay identity-encoded: the configuration
+	// response carries a strong ETag that names exactly one representation,
+	// and nodes are machine clients on the cluster network.
+	if strings.HasPrefix(r.URL.Path, nodecontrol.PathPrefix) {
+		return true
+	}
 	if r.Method != http.MethodGet && r.Method != http.MethodHead {
 		return false
 	}

@@ -24,6 +24,7 @@ require (
 	filippo.io/age v1.3.2
 	github.com/SherClockHolmes/webpush-go v1.4.0
 	github.com/abadojack/whatlanggo v1.0.1
+	github.com/alicebob/miniredis/v2 v2.40.0
 	github.com/andybalholm/brotli v1.2.8
 	github.com/aws/aws-sdk-go-v2/feature/s3/manager v1.22.34
 	github.com/danielgtaylor/huma/v2 v2.38.0
@@ -172,6 +173,7 @@ require (
 	github.com/yargevad/filepathx v1.0.0 // indirect
 	github.com/yashtewari/glob-intersection v0.2.0 // indirect
 	github.com/youmark/pkcs8 v0.0.0-20240726163527-a2c0da244d78 // indirect
+	github.com/yuin/gopher-lua v1.1.1 // indirect
 	github.com/zishang520/engine.io-go-parser v1.3.2 // indirect
 	github.com/zishang520/engine.io/v2 v2.5.0 // indirect
 	github.com/zishang520/socket.io-go-parser/v2 v2.5.0 // indirect
