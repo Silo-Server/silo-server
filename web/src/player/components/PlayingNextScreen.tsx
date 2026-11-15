@@ -45,7 +45,17 @@ interface PlayingNextScreenProps {
 
 const COUNTDOWN_SECONDS = 10;
 
-export function PlayingNextScreen({
+// `reducedMotion="user"` drops the slide-up offsets under
+// `prefers-reduced-motion` and keeps the fades.
+export function PlayingNextScreen(props: PlayingNextScreenProps) {
+  return (
+    <MotionConfig reducedMotion="user">
+      <PlayingNextContent {...props} />
+    </MotionConfig>
+  );
+}
+
+function PlayingNextContent({
   seriesId,
   seriesTitle,
   nextEpisode,
@@ -157,294 +167,288 @@ export function PlayingNextScreen({
     ? t("web.player.upNext.finishedSeries", { series: seriesTitle })
     : t("upNext.endOfPlayback");
 
-  // `reducedMotion="user"` drops the slide-up offsets under
-  // `prefers-reduced-motion` and keeps the fades.
   return (
-    <MotionConfig reducedMotion="user">
-      <motion.div
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      transition={{ duration: 0.5 }}
+      className="hud fixed inset-0 z-50 flex flex-col text-white"
+    >
+      {/* Atmospheric blurred background */}
+      <div className="absolute inset-0 -z-10 overflow-hidden">
+        {episodeStillUrl ? (
+          <img
+            src={episodeStillUrl}
+            alt=""
+            className="h-full w-full scale-110 object-cover blur-3xl brightness-[0.15] saturate-150"
+          />
+        ) : blurPlaceholder ? (
+          <img
+            src={blurPlaceholder}
+            alt=""
+            className="h-full w-full scale-110 object-cover blur-3xl brightness-[0.15] saturate-150"
+          />
+        ) : null}
+        <div className="absolute inset-0 bg-black/60" />
+      </div>
+
+      {/* Close button */}
+      <motion.button
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
-        transition={{ duration: 0.5 }}
-        className="hud fixed inset-0 z-50 flex flex-col text-white"
+        transition={{ delay: 0.3 }}
+        onClick={onClose}
+        type="button"
+        className="hud-glass-btn absolute top-[max(1rem,env(safe-area-inset-top))] right-[max(1rem,env(safe-area-inset-right))] z-10 sm:end-8 sm:top-6 rtl:right-auto rtl:left-[max(1rem,env(safe-area-inset-left))] sm:rtl:left-8"
+        title={t("web.player.upNext.closeTitle")}
+        aria-label={t("web.ui.close")}
       >
-        {/* Atmospheric blurred background */}
-        <div className="absolute inset-0 -z-10 overflow-hidden">
-          {episodeStillUrl ? (
-            <img
-              src={episodeStillUrl}
-              alt=""
-              className="h-full w-full scale-110 object-cover blur-3xl brightness-[0.15] saturate-150"
-            />
-          ) : blurPlaceholder ? (
-            <img
-              src={blurPlaceholder}
-              alt=""
-              className="h-full w-full scale-110 object-cover blur-3xl brightness-[0.15] saturate-150"
-            />
-          ) : null}
-          <div className="absolute inset-0 bg-black/60" />
-        </div>
+        <X />
+      </motion.button>
 
-        {/* Close button */}
-        <motion.button
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          transition={{ delay: 0.3 }}
-          onClick={onClose}
-          type="button"
-          className="hud-glass-btn absolute top-[max(1rem,env(safe-area-inset-top))] right-[max(1rem,env(safe-area-inset-right))] z-10 sm:end-8 sm:top-6 rtl:right-auto rtl:left-[max(1rem,env(safe-area-inset-left))] sm:rtl:left-8"
-          title={t("web.player.upNext.closeTitle")}
-          aria-label={t("web.ui.close")}
-        >
-          <X />
-        </motion.button>
-
-        {/* Main content. `my-auto` on the inner block centers vertically when it
+      {/* Main content. `my-auto` on the inner block centers vertically when it
           fits and falls back to top-aligned + scrollable when content is too
           tall — avoids the `justify-center` trap that clips both ends. */}
-        {/* Wide screens: the finishing episode (VideoPlayer's mini player) holds
+      {/* Wide screens: the finishing episode (VideoPlayer's mini player) holds
           the start side, and this column is the one compact "up next" panel. */}
-        <div className="flex min-h-0 flex-1 flex-col items-center overflow-y-auto px-4 py-4 sm:px-6 sm:py-6 md:px-8 lg:items-start lg:ps-[calc(var(--postroll-video-width)+6rem)] lg:pe-14">
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.5, delay: 0.15 }}
-            className="my-auto flex w-full max-w-[min(92vw,820px)] flex-col items-center lg:max-w-[34rem] lg:items-start"
-          >
-            {shuffle && (
-              <div className="mb-3 inline-flex max-w-full items-center gap-1.5 rounded-full bg-white/10 px-3 py-1 text-xs font-semibold text-[var(--hud-paper)] ring-1 ring-white/10 backdrop-blur-sm">
-                <Shuffle className="size-3.5 shrink-0" aria-hidden="true" />
-                <span className="truncate">
-                  {t("upNext.shuffling", { scope: shuffle.scopeLabel })}
-                </span>
-              </div>
-            )}
-            {/* Label */}
-            <div className="mb-3 text-xs font-semibold tracking-[0.18em] text-[var(--hud-lamp)] uppercase sm:mb-4 lg:mb-3">
-              {nextEpisode
-                ? shuffle
-                  ? t("web.player.upNext.headingShuffle")
-                  : t("web.player.upNext.heading")
-                : t("upNext.headingFinished")}
+      <div className="flex min-h-0 flex-1 flex-col items-center overflow-y-auto px-4 py-4 sm:px-6 sm:py-6 md:px-8 lg:items-start lg:ps-[calc(var(--postroll-video-width)+6rem)] lg:pe-14">
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.5, delay: 0.15 }}
+          className="my-auto flex w-full max-w-[min(92vw,820px)] flex-col items-center lg:max-w-[34rem] lg:items-start"
+        >
+          {shuffle && (
+            <div className="mb-3 inline-flex max-w-full items-center gap-1.5 rounded-full bg-white/10 px-3 py-1 text-xs font-semibold text-[var(--hud-paper)] ring-1 ring-white/10 backdrop-blur-sm">
+              <Shuffle className="size-3.5 shrink-0" aria-hidden="true" />
+              <span className="truncate">
+                {t("upNext.shuffling", { scope: shuffle.scopeLabel })}
+              </span>
             </div>
+          )}
+          {/* Label */}
+          <div className="mb-3 text-xs font-semibold tracking-[0.18em] text-[var(--hud-lamp)] uppercase sm:mb-4 lg:mb-3">
+            {nextEpisode
+              ? shuffle
+                ? t("web.player.upNext.headingShuffle")
+                : t("web.player.upNext.heading")
+              : t("upNext.headingFinished")}
+          </div>
 
-            {nextEpisode ? (
-              <>
-                {/* Episode still. Height cap is aggressive enough that hero + metadata
+          {nextEpisode ? (
+            <>
+              {/* Episode still. Height cap is aggressive enough that hero + metadata
                   + actions typically fit above the On Deck row without scrolling. */}
-                <div
-                  className="relative mb-3 w-full overflow-hidden rounded-xl shadow-[0_8px_60px_-12px_rgba(0,0,0,0.7)] ring-1 ring-white/[0.08] sm:mb-4 sm:rounded-2xl md:mb-5"
-                  style={{ aspectRatio: "16 / 9", maxHeight: "min(30vh, 300px)" }}
-                >
-                  {episodeStillUrl ? (
-                    <img
-                      src={episodeStillUrl}
-                      alt={nextEpisode.title}
-                      className={cn("h-full w-full object-cover", hideStill && SPOILER_IMAGE_CLASS)}
-                      style={
-                        blurPlaceholder
-                          ? { backgroundImage: `url(${blurPlaceholder})`, backgroundSize: "cover" }
-                          : undefined
-                      }
+              <div
+                className="relative mb-3 w-full overflow-hidden rounded-xl shadow-[0_8px_60px_-12px_rgba(0,0,0,0.7)] ring-1 ring-white/[0.08] sm:mb-4 sm:rounded-2xl md:mb-5"
+                style={{ aspectRatio: "16 / 9", maxHeight: "min(30vh, 300px)" }}
+              >
+                {episodeStillUrl ? (
+                  <img
+                    src={episodeStillUrl}
+                    alt={nextEpisode.title}
+                    className={cn("h-full w-full object-cover", hideStill && SPOILER_IMAGE_CLASS)}
+                    style={
+                      blurPlaceholder
+                        ? { backgroundImage: `url(${blurPlaceholder})`, backgroundSize: "cover" }
+                        : undefined
+                    }
+                  />
+                ) : blurPlaceholder ? (
+                  <img
+                    src={blurPlaceholder}
+                    alt=""
+                    className={cn("h-full w-full object-cover", hideStill && SPOILER_IMAGE_CLASS)}
+                  />
+                ) : (
+                  <div className="flex h-full w-full items-center justify-center bg-white/5 text-sm text-[var(--hud-ash)]">
+                    {t("web.player.upNext.noPreview")}
+                  </div>
+                )}
+              </div>
+
+              {/* Episode metadata - centered */}
+              <div className="flex flex-col items-center gap-1 text-center lg:items-start lg:text-start">
+                {(seriesTitle || nextEpisode.episodeNumber <= 0) && (
+                  <div className="text-xl font-semibold tracking-tight text-white sm:text-2xl">
+                    {/* A movie has no series line; its own title heads the card. */}
+                    {seriesTitle || nextEpisode.title}
+                  </div>
+                )}
+                {/* A shuffled movie has no season or episode number. */}
+                {nextEpisode.episodeNumber > 0 && (
+                  <div className="flex flex-wrap items-center justify-center gap-x-2 gap-y-0.5 lg:justify-start">
+                    <span className="text-sm font-medium text-[var(--hud-ash)] tabular-nums">
+                      {t("web.player.episode.code", {
+                        season: codeNumber(nextEpisode.seasonNumber),
+                        episode: codeNumber(nextEpisode.episodeNumber),
+                      })}
+                    </span>
+                    <span
+                      aria-hidden="true"
+                      className="hud-dot hidden text-[var(--hud-ash)] sm:inline-block"
                     />
-                  ) : blurPlaceholder ? (
-                    <img
-                      src={blurPlaceholder}
-                      alt=""
-                      className={cn("h-full w-full object-cover", hideStill && SPOILER_IMAGE_CLASS)}
-                    />
-                  ) : (
-                    <div className="flex h-full w-full items-center justify-center bg-white/5 text-sm text-[var(--hud-ash)]">
-                      {t("web.player.upNext.noPreview")}
-                    </div>
+                    <span className="text-base font-semibold">{nextEpisode.title}</span>
+                  </div>
+                )}
+                <div className="flex items-center gap-2 text-sm text-[var(--hud-ash)]">
+                  {nextAirDate && (
+                    <span>
+                      {nextAirDate.toLocaleDateString(preferredDateLocale(), {
+                        year: "numeric",
+                        month: "long",
+                        day: "numeric",
+                      })}
+                    </span>
+                  )}
+                  {nextAirDate && nextEpisode.runtime > 0 && (
+                    <span aria-hidden="true" className="hud-dot" />
+                  )}
+                  {nextEpisode.runtime > 0 && (
+                    <span>{formatRuntimeMinutes(nextEpisode.runtime)}</span>
                   )}
                 </div>
+                {nextEpisode.overview && !hideOverview && (
+                  <p
+                    className="mt-1.5 line-clamp-2 max-w-xl text-sm leading-relaxed text-[var(--hud-ash)]"
+                    title={nextEpisode.overview}
+                  >
+                    {nextEpisode.overview}
+                  </p>
+                )}
+                {nextEpisode.overview &&
+                  !hideOverview &&
+                  hasMachineTranslation(nextEpisode.machineTranslatedFields) && (
+                    <MachineTranslatedLabel className="mt-1" />
+                  )}
+              </div>
 
-                {/* Episode metadata - centered */}
-                <div className="flex flex-col items-center gap-1 text-center lg:items-start lg:text-start">
-                  {(seriesTitle || nextEpisode.episodeNumber <= 0) && (
-                    <div className="text-xl font-semibold tracking-tight text-white sm:text-2xl">
-                      {/* A movie has no series line; its own title heads the card. */}
-                      {seriesTitle || nextEpisode.title}
-                    </div>
-                  )}
-                  {/* A shuffled movie has no season or episode number. */}
-                  {nextEpisode.episodeNumber > 0 && (
-                    <div className="flex flex-wrap items-center justify-center gap-x-2 gap-y-0.5 lg:justify-start">
-                      <span className="text-sm font-medium text-[var(--hud-ash)] tabular-nums">
-                        {t("web.player.episode.code", {
-                          season: codeNumber(nextEpisode.seasonNumber),
-                          episode: codeNumber(nextEpisode.episodeNumber),
-                        })}
-                      </span>
-                      <span
-                        aria-hidden="true"
-                        className="hud-dot hidden text-[var(--hud-ash)] sm:inline-block"
-                      />
-                      <span className="text-base font-semibold">{nextEpisode.title}</span>
-                    </div>
-                  )}
-                  <div className="flex items-center gap-2 text-sm text-[var(--hud-ash)]">
-                    {nextAirDate && (
-                      <span>
-                        {nextAirDate.toLocaleDateString(preferredDateLocale(), {
-                          year: "numeric",
-                          month: "long",
-                          day: "numeric",
-                        })}
-                      </span>
-                    )}
-                    {nextAirDate && nextEpisode.runtime > 0 && (
-                      <span aria-hidden="true" className="hud-dot" />
-                    )}
-                    {nextEpisode.runtime > 0 && (
-                      <span>{formatRuntimeMinutes(nextEpisode.runtime)}</span>
+              {/* Actions: Play Now, then what happens if the viewer does nothing. */}
+              <motion.div
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.4, delay: 0.3 }}
+                className="mt-5 flex flex-wrap items-center justify-center gap-x-4 gap-y-3 lg:justify-start"
+              >
+                <button
+                  onClick={() => onPlayNow?.("viewer")}
+                  type="button"
+                  className="hud-primary-btn min-h-14 px-9 text-base"
+                >
+                  <Play className="fill-current" />
+                  {t("upNext.playNow")}
+                </button>
+
+                {shuffle && (
+                  <button
+                    onClick={shuffle.onReshuffle}
+                    type="button"
+                    className="hud-secondary-btn min-h-12 px-6"
+                  >
+                    <Shuffle className="h-4 w-4" />
+                    {t("upNext.pickAnother")}
+                  </button>
+                )}
+
+                {autoplay && (
+                  <div className="flex items-center gap-2.5 text-sm text-[var(--hud-ash)]">
+                    {videoEnded ? (
+                      <>
+                        <svg
+                          width="40"
+                          height="40"
+                          viewBox="0 0 48 48"
+                          className="-rotate-90"
+                          aria-hidden="true"
+                        >
+                          <circle
+                            cx="24"
+                            cy="24"
+                            r={radius}
+                            fill="none"
+                            stroke="rgba(255,255,255,0.12)"
+                            strokeWidth="3"
+                          />
+                          <circle
+                            cx="24"
+                            cy="24"
+                            r={radius}
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth="3"
+                            strokeDasharray={circumference}
+                            strokeDashoffset={strokeDashoffset}
+                            strokeLinecap="round"
+                            className="text-[var(--hud-lamp)] transition-all duration-1000 ease-linear"
+                          />
+                        </svg>
+                        <span className="font-semibold text-[var(--hud-paper)] tabular-nums">
+                          {t("web.player.upNext.startsIn", { count: secondsRemaining })}
+                        </span>
+                      </>
+                    ) : (
+                      <span>{t("web.player.upNext.startsAfterCredits")}</span>
                     )}
                   </div>
-                  {nextEpisode.overview && !hideOverview && (
-                    <p
-                      className="mt-1.5 line-clamp-2 max-w-xl text-sm leading-relaxed text-[var(--hud-ash)]"
-                      title={nextEpisode.overview}
-                    >
-                      {nextEpisode.overview}
-                    </p>
-                  )}
-                  {nextEpisode.overview &&
-                    !hideOverview &&
-                    hasMachineTranslation(nextEpisode.machineTranslatedFields) && (
-                      <MachineTranslatedLabel className="mt-1" />
-                    )}
-                </div>
-
-                {/* Actions: Play Now, then what happens if the viewer does nothing. */}
-                <motion.div
-                  initial={{ opacity: 0, y: 10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ duration: 0.4, delay: 0.3 }}
-                  className="mt-5 flex flex-wrap items-center justify-center gap-x-4 gap-y-3 lg:justify-start"
-                >
-                  <button
-                    onClick={() => onPlayNow?.("viewer")}
-                    type="button"
-                    className="hud-primary-btn min-h-14 px-9 text-base"
-                  >
-                    <Play className="fill-current" />
-                    {t("upNext.playNow")}
-                  </button>
-
-                  {shuffle && (
-                    <button
-                      onClick={shuffle.onReshuffle}
-                      type="button"
-                      className="hud-secondary-btn min-h-12 px-6"
-                    >
-                      <Shuffle className="h-4 w-4" />
-                      {t("upNext.pickAnother")}
-                    </button>
-                  )}
-
-                  {autoplay && (
-                    <div className="flex items-center gap-2.5 text-sm text-[var(--hud-ash)]">
-                      {videoEnded ? (
-                        <>
-                          <svg
-                            width="40"
-                            height="40"
-                            viewBox="0 0 48 48"
-                            className="-rotate-90"
-                            aria-hidden="true"
-                          >
-                            <circle
-                              cx="24"
-                              cy="24"
-                              r={radius}
-                              fill="none"
-                              stroke="rgba(255,255,255,0.12)"
-                              strokeWidth="3"
-                            />
-                            <circle
-                              cx="24"
-                              cy="24"
-                              r={radius}
-                              fill="none"
-                              stroke="currentColor"
-                              strokeWidth="3"
-                              strokeDasharray={circumference}
-                              strokeDashoffset={strokeDashoffset}
-                              strokeLinecap="round"
-                              className="text-[var(--hud-lamp)] transition-all duration-1000 ease-linear"
-                            />
-                          </svg>
-                          <span className="font-semibold text-[var(--hud-paper)] tabular-nums">
-                            {t("web.player.upNext.startsIn", { count: secondsRemaining })}
-                          </span>
-                        </>
-                      ) : (
-                        <span>{t("web.player.upNext.startsAfterCredits")}</span>
-                      )}
-                    </div>
-                  )}
-                  {/* Said once when the countdown starts, not on every tick, so a
+                )}
+                {/* Said once when the countdown starts, not on every tick, so a
                     screen reader hears how long there is to turn autoplay off. */}
-                  <span className="sr-only" aria-live="polite">
-                    {autoplay && videoEnded
-                      ? t("web.player.upNext.startsIn", { count: COUNTDOWN_SECONDS })
-                      : ""}
-                  </span>
-                </motion.div>
+                <span className="sr-only" aria-live="polite">
+                  {autoplay && videoEnded
+                    ? t("web.player.upNext.startsIn", { count: COUNTDOWN_SECONDS })
+                    : ""}
+                </span>
+              </motion.div>
 
-                <div className="mt-3 flex flex-wrap items-center justify-center gap-x-2 text-sm text-[var(--hud-ash)] lg:justify-start">
-                  <button
-                    onClick={toggleAutoplay}
-                    type="button"
-                    role="switch"
-                    // The switch shows the setting; past the still-watching limit
-                    // only the countdown waits.
-                    aria-checked={autoplaySetting}
-                    className="-ms-3 flex min-h-11 items-center gap-3 rounded-full px-3 transition-colors hover:text-[var(--hud-paper)]"
-                  >
-                    {t("web.player.upNext.autoplay")}
-                    <span aria-hidden="true" className="hud-switch" />
-                  </button>
-                  {shuffle && (
-                    <>
-                      <span aria-hidden="true">{SEPARATOR}</span>
-                      <button
-                        onClick={shuffle.onStop}
-                        type="button"
-                        className="min-h-11 rounded-full px-3 transition-colors hover:text-[var(--hud-paper)]"
-                      >
-                        {t("upNext.stopShuffling")}
-                      </button>
-                    </>
-                  )}
-                </div>
-              </>
-            ) : (
-              <>
-                <div className="text-center text-xl font-bold text-white sm:text-2xl">
-                  {endOfSeriesHeading}
-                </div>
-                <div className="mt-2 max-w-md text-center text-sm text-[var(--hud-ash)]">
-                  {t("web.player.upNext.noMoreEpisodes")}
-                </div>
-                <button onClick={onClose} type="button" className="hud-secondary-btn mt-6">
-                  {t("common.back")}
+              <div className="mt-3 flex flex-wrap items-center justify-center gap-x-2 text-sm text-[var(--hud-ash)] lg:justify-start">
+                <button
+                  onClick={toggleAutoplay}
+                  type="button"
+                  role="switch"
+                  // The switch shows the setting; past the still-watching limit
+                  // only the countdown waits.
+                  aria-checked={autoplaySetting}
+                  className="-ms-3 flex min-h-11 items-center gap-3 rounded-full px-3 transition-colors hover:text-[var(--hud-paper)]"
+                >
+                  {t("web.player.upNext.autoplay")}
+                  <span aria-hidden="true" className="hud-switch" />
                 </button>
-              </>
-            )}
-            {/* On Deck follows the next item in the same column, so the screen
+                {shuffle && (
+                  <>
+                    <span aria-hidden="true">{SEPARATOR}</span>
+                    <button
+                      onClick={shuffle.onStop}
+                      type="button"
+                      className="min-h-11 rounded-full px-3 transition-colors hover:text-[var(--hud-paper)]"
+                    >
+                      {t("upNext.stopShuffling")}
+                    </button>
+                  </>
+                )}
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="text-center text-xl font-bold text-white sm:text-2xl">
+                {endOfSeriesHeading}
+              </div>
+              <div className="mt-2 max-w-md text-center text-sm text-[var(--hud-ash)]">
+                {t("web.player.upNext.noMoreEpisodes")}
+              </div>
+              <button onClick={onClose} type="button" className="hud-secondary-btn mt-6">
+                {t("common.back")}
+              </button>
+            </>
+          )}
+          {/* On Deck follows the next item in the same column, so the screen
               reads as one group rather than a header and a footer. */}
-            {onDeckItems.length > 0 && (
-              <OnDeckCarousel items={onDeckItems} onPlayItem={onPlayItem} />
-            )}
-          </motion.div>
-        </div>
+          {onDeckItems.length > 0 && <OnDeckCarousel items={onDeckItems} onPlayItem={onPlayItem} />}
+        </motion.div>
+      </div>
 
-        {/* Bottom spacer */}
-        <div className="h-3 shrink-0 sm:h-4" />
-      </motion.div>
-    </MotionConfig>
+      {/* Bottom spacer */}
+      <div className="h-3 shrink-0 sm:h-4" />
+    </motion.div>
   );
 }
 

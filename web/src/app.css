@@ -2148,9 +2148,12 @@ html[data-navigation-direction]::view-transition-new(main-content) {
       transparent 100%
     );
     background-size: 200% 100%;
+    animation: scan-accent-sweep 4s ease-in-out infinite;
     opacity: 0.6;
-    @media (prefers-reduced-motion: no-preference) {
-      animation: scan-accent-sweep 4s ease-in-out infinite;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .scan-queue-accent {
+      animation: none;
     }
   }
   @keyframes scan-accent-sweep {
@@ -2352,8 +2355,11 @@ html[data-navigation-direction]::view-transition-new(main-content) {
     background: rgba(255, 60, 60, 0.12);
     color: #f87171;
     border: 1px solid rgba(255, 60, 60, 0.2);
-    @media (prefers-reduced-motion: no-preference) {
-      animation: pulse-opacity 2s ease-in-out infinite;
+    animation: pulse-opacity 2s ease-in-out infinite;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .live-badge {
+      animation: none;
     }
   }
 
