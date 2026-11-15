@@ -36,6 +36,7 @@ const (
 	rejectAuthor     fetchRejection = "author"
 	rejectNarrator   fetchRejection = "narrator"
 	rejectTitle      fetchRejection = "title"
+	rejectVolume     fetchRejection = "volume"
 	rejectProviderID fetchRejection = "provider_id"
 )
 
@@ -234,9 +235,11 @@ func (r *matchRun) searchProvider(ctx context.Context, i int) error {
 			return nil
 		}
 		if result == nil || !result.HasMetadata {
+			// Nothing to check the candidate against: try the next one, and
+			// keep none of its IDs.
 			r.answered(i, candidateIDs, "")
-			r.ids, r.agreedTitle = candidateIDs, admission.AgreedTitle
-			return nil
+			remaining = dropResult(remaining, admission.Selected)
+			continue
 		}
 		// A candidate chosen for carrying the item's tagged ID is the tagged
 		// record, whatever IDs the provider echoes back.
@@ -358,6 +361,16 @@ func (r *matchRun) missingNarrator(result *metadata.MetadataResult, byTaggedID b
 	})
 }
 
+// recordTitles lists every title a record goes by: primary, original and
+// aliases.
+func recordTitles(result *metadata.MetadataResult) []string {
+	titles := []string{result.Title, result.OriginalTitle}
+	for _, alias := range result.TitleAliases {
+		titles = append(titles, alias.Title)
+	}
+	return titles
+}
+
 func (r *matchRun) anyRecord() bool {
 	return slices.ContainsFunc(r.state, func(s providerState) bool { return s.record != nil })
 }
@@ -387,8 +400,13 @@ func (r *matchRun) admitFetched(
 	if r.missingNarrator(result, byTaggedID) {
 		return nil, rejectNarrator, nil
 	}
+	// A volume the item's title states that the record's title states
+	// differently is another book, whichever path found the record.
+	if metadata.VolumesContradict(item.Title, result.Title) {
+		return nil, rejectVolume, nil
+	}
 	if byTaggedID && strings.TrimSpace(item.Author) != "" &&
-		metadata.TitleContradicts(item.Title, result.Title, result.OriginalTitle) {
+		metadata.TitleContradicts(item.Title, recordTitles(result)...) {
 		return nil, rejectTitle, nil
 	}
 	identity, err := metadata.AdmitProviderIDs(ctx, metadata.ProviderIDAdmissionRequest{

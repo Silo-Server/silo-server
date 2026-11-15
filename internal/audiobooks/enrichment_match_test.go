@@ -56,6 +56,9 @@ func TestFindMatchChecksEditionAgainstItem(t *testing.T) {
 	wheaton, wheatonRec := edition("The Martian", "A0WHEATON1", "Andy Weir", "Wil Wheaton")
 	bray, brayRec := edition("The Martian", "Z0BRAY0001", "Andy Weir", "R. C. Bray")
 	other, otherRec := edition("Unrelated Cookbook", "B002V1O7UG", "Someone Else", "Anyone")
+	_, book1Rec := edition("Dungeon Crawler Carl, Book 1", "B08V8B2CGV", "Matt Dinniman", "Jeff Hays")
+	_, aliasRec := edition("El marciano", "B079YDJ18Z", "Andy Weir", "Xavi Fernández")
+	aliasRec.TitleAliases = []metadata.TitleAlias{{Title: "The Martian", Kind: "original"}}
 
 	tests := []struct {
 		name     string
@@ -89,6 +92,32 @@ func TestFindMatchChecksEditionAgainstItem(t *testing.T) {
 				results:    []metadata.SearchResult{other, bray},
 				records:    map[string]*metadata.MetadataResult{"B002V1O7UG": otherRec, "Z0BRAY0001": brayRec},
 			},
+		},
+		{
+			name: "a candidate whose fetch returns nothing gives way to the next",
+			item: enrichmentItemRow{Title: "The Martian", Author: "Andy Weir", Narrators: []string{"R. C. Bray"}},
+			provider: &editionProvider{
+				results: []metadata.SearchResult{wheaton, bray},
+				records: map[string]*metadata.MetadataResult{"Z0BRAY0001": brayRec}, // nothing for Wheaton
+			},
+			wantASIN: "Z0BRAY0001",
+		},
+		{
+			name: "tagged ASIN record for another stated volume leaves the item unmatched",
+			item: enrichmentItemRow{
+				Title: "Dungeon Crawler Carl 2", Author: "Matt Dinniman",
+				ProviderIDs: map[string]string{"asin": "B08V8B2CGV"},
+			},
+			provider: &editionProvider{lookupASIN: true, records: map[string]*metadata.MetadataResult{"B08V8B2CGV": book1Rec}},
+		},
+		{
+			name: "tagged ASIN record matching the item's title only through an alias is accepted",
+			item: enrichmentItemRow{
+				Title: "The Martian", Author: "Andy Weir",
+				ProviderIDs: map[string]string{"asin": "B079YDJ18Z"},
+			},
+			provider: &editionProvider{lookupASIN: true, records: map[string]*metadata.MetadataResult{"B079YDJ18Z": aliasRec}},
+			wantASIN: "B079YDJ18Z",
 		},
 	}
 	for _, tt := range tests {

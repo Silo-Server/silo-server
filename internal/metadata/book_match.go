@@ -235,6 +235,19 @@ func resultSharesTitleWord(want string, r SearchResult) bool {
 	return !TitleContradicts(want, titles...)
 }
 
+// VolumesContradict reports whether want's title and a record's primary title
+// both state a volume and the volumes differ: "Dungeon Crawler Carl 2" against
+// "Dungeon Crawler Carl, Book 1". A title that states none contradicts
+// nothing.
+func VolumesContradict(want, record string) bool {
+	wv, wok := titleVolume(want)
+	if !wok || strings.TrimSpace(record) == "" {
+		return false
+	}
+	rv, rok := titleVolume(record)
+	return rok && rv != wv
+}
+
 // TitleContradicts reports whether want and a record's titles share no
 // identifying word. Empty titles are ignored; with nothing to compare on
 // either side there is no contradiction.
