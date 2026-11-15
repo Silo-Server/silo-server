@@ -2,7 +2,9 @@ import { useMemo } from "react";
 
 import { KeyboardSensor, PointerSensor, closestCenter, useSensor, useSensors } from "@dnd-kit/core";
 import type { DragEndEvent } from "@dnd-kit/core";
-import { arrayMove, sortableKeyboardCoordinates } from "@dnd-kit/sortable";
+import { arrayMove, sortableKeyboardCoordinates, useSortable } from "@dnd-kit/sortable";
+
+import { useMotionScrollBehavior, usePrefersReducedMotion } from "@/hooks/usePrefersReducedMotion";
 
 interface UseSortableListResult {
   sensors: ReturnType<typeof useSensors>;
@@ -23,9 +25,13 @@ export function useSortableList<T>(
   getId: (item: T) => string,
   onReorder: (orderedIds: string[]) => void,
 ): UseSortableListResult {
+  const scrollBehavior = useMotionScrollBehavior();
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
-    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+    useSensor(KeyboardSensor, {
+      coordinateGetter: sortableKeyboardCoordinates,
+      scrollBehavior,
+    }),
   );
 
   const handleDragEnd = useMemo(
@@ -43,4 +49,24 @@ export function useSortableList<T>(
   );
 
   return { sensors, collisionDetection: closestCenter, handleDragEnd };
+}
+
+/**
+ * `useSortable` that respects `prefers-reduced-motion`: under reduced motion
+ * the neighbouring items jump to their new slots instead of sliding there,
+ * and a dropped item lands without settling into place. Use it in place of
+ * `useSortable` for every sortable item.
+ */
+export function useMotionSafeSortable(args: Parameters<typeof useSortable>[0]) {
+  const reduceMotion = usePrefersReducedMotion();
+  return useSortable(reduceMotion ? { ...args, transition: null } : args);
+}
+
+/**
+ * Motion props for a `<DragOverlay>`: dnd-kit's defaults normally. Under
+ * reduced motion, no glide back to the drop slot and no keyboard-move
+ * transition.
+ */
+export function useMotionSafeOverlay(): { dropAnimation?: null; transition?: string } {
+  return usePrefersReducedMotion() ? { dropAnimation: null, transition: "none" } : {};
 }

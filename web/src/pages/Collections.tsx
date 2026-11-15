@@ -66,6 +66,7 @@ import { cardGridClasses } from "@/lib/uiCustomization";
 import { cn } from "@/lib/utils";
 import { useT, type MessageKey, type Translate } from "@/i18n";
 import { SharedCards, SortableCollectionCard } from "./Collections.cards";
+import { useMotionScrollBehavior } from "@/hooks/usePrefersReducedMotion";
 
 /** Under this width New collection moves to a bar docked at the bottom. */
 const NARROW_QUERY = "(max-width: 1023px)";
@@ -531,9 +532,13 @@ function SortableCollectionGrid({
 }) {
   const t = useT();
   const ids = collections.map((collection) => collection.id);
+  const scrollBehavior = useMotionScrollBehavior();
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
-    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+    useSensor(KeyboardSensor, {
+      coordinateGetter: sortableKeyboardCoordinates,
+      scrollBehavior,
+    }),
   );
   const blockClicks = useClickBlockAfterPointerDrag();
   function handleDragStart(event: DragStartEvent) {
