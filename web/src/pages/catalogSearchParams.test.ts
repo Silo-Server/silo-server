@@ -47,6 +47,21 @@ describe("parseCatalogSearchParams", () => {
     expect(state.query_definition.sort).toEqual({ field: "title", order: "asc" });
   });
 
+  it("keeps a numbers-only content rating as text and a year as a number", () => {
+    const state = parseCatalogSearchParams(
+      params(
+        "source=query&groups[0][match]=all" +
+          "&groups[0][rules][0][field]=content_rating&groups[0][rules][0][op]=is&groups[0][rules][0][value]=15" +
+          "&groups[0][rules][1][field]=year&groups[0][rules][1][op]=is&groups[0][rules][1][value]=2001",
+      ),
+    );
+
+    expect(state.query_definition.groups[0]?.rules).toEqual([
+      { field: "content_rating", op: "is", value: "15" },
+      { field: "year", op: "is", value: 2001 },
+    ]);
+  });
+
   it("parses the video group scope and treats type=all as unscoped", () => {
     const video = parseCatalogSearchParams(params("source=query&q=heat&type=video"));
     expect(video.query_definition.media_scope).toBe("video");
