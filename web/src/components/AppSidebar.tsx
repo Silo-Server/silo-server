@@ -1,7 +1,7 @@
 import { useState, useCallback, useEffect, useMemo, useRef } from "react";
 import type { ReactNode } from "react";
 import { Link, useLocation, useParams } from "react-router";
-import { queryOptions, useQueries } from "@tanstack/react-query";
+import { useQueries } from "@tanstack/react-query";
 import ViewTransitionLink from "@/components/ViewTransitionLink";
 import {
   getProfileMenuSide,
@@ -290,17 +290,11 @@ export default function AppSidebar({ onNavigate, collapsed = false, swap }: AppS
       );
   }, [libraries, pins, primaryMenu]);
   const pinnedSectionLayouts = useQueries({
-    queries: pinnedSectionLibraryIds.map((libraryId) =>
-      queryOptions({
-        ...libraryLayoutQuery(libraryId),
-        // Read a layout the cache has never had, then only follow the cache:
-        // realtime events invalidate every library's section queries, and an
-        // enabled observer here would refetch each pinned library's layout on
-        // every page. A failed read keeps the stored labels until the library
-        // page reads the layout again.
-        enabled: (query) => criticalContentLoaded && query.state.status === "pending",
-      }),
-    ),
+    // The layouts wait for the page's first content (see startupPriority).
+    queries: pinnedSectionLibraryIds.map((libraryId) => ({
+      ...libraryLayoutQuery(libraryId),
+      enabled: criticalContentLoaded,
+    })),
     combine: (results) => results.map((result) => result.data),
   });
   const sectionTitle = useSectionTitle();

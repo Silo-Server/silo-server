@@ -28,6 +28,7 @@ import { sectionShowsWholeList } from "./homeRowLimit";
 import {
   activeCatalogQueryMatchesLibrary,
   activeSectionQueryMatchesLibrary,
+  isLibraryLayoutQueryKey,
 } from "@/lib/queryInvalidation";
 import { bumpHomeRefreshSignal } from "@/pages/homeSurfaceRefresh";
 
@@ -430,7 +431,10 @@ function shouldInvalidateMediaSurfaceQuery(
     return activeCatalogQueryMatchesLibrary(queryKey, options.libraryId);
   }
   if (queryKeyStartsWith(queryKey, sectionKeys.all)) {
-    return activeSectionQueryMatchesLibrary(queryKey, options.libraryId);
+    return (
+      !isLibraryLayoutQueryKey(queryKey) &&
+      activeSectionQueryMatchesLibrary(queryKey, options.libraryId)
+    );
   }
   if (queryKeyStartsWith(queryKey, recKeys.all)) {
     return !(options.skipSimilarItems && queryKey[1] === "similar");
