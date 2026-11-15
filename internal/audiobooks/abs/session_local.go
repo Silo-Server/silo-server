@@ -120,6 +120,9 @@ func (h *Handler) handleSyncLocalSessions(w http.ResponseWriter, r *http.Request
 	// Decode into raw messages so one malformed session doesn't sink the batch.
 	var body struct {
 		Sessions []json.RawMessage `json:"sessions"`
+		// DeviceInfo names the client for every session in the batch, as
+		// Audiobookshelf clients send it on /session/local-all.
+		DeviceInfo absDeviceInfo `json:"deviceInfo"`
 	}
 	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&body); err != nil {
 		http.Error(w, "invalid body", http.StatusBadRequest)
@@ -137,6 +140,9 @@ func (h *Handler) handleSyncLocalSessions(w http.ResponseWriter, r *http.Request
 			slog.WarnContext(r.Context(), "abs local session sync: skipping malformed session", "component", "audiobooks", "error", err)
 			results = append(results, localSyncResult{Success: false, Error: "invalid session"})
 			continue
+		}
+		if sess.DeviceInfo.ClientName == "" {
+			sess.DeviceInfo = body.DeviceInfo
 		}
 		results = append(results, h.syncOneLocalSession(r, a, access, sess))
 	}

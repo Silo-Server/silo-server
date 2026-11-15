@@ -148,3 +148,26 @@ func TestLiveLocalSessionReportsAPlayThatIsNeverServed(t *testing.T) {
 		t.Errorf("close status = %d, want 404", rec.Code)
 	}
 }
+
+// A batch names its client once, in the envelope's deviceInfo, and a play it
+// reports carries that client.
+func TestLocalSessionBatchNamesItsClient(t *testing.T) {
+	media := &playStartMediaStore{
+		item:  &models.MediaItem{ContentID: "book-1", Type: "audiobook", Title: "Book"},
+		files: []*models.MediaFile{{ID: 42, ContentID: "book-1", Duration: 3600}},
+	}
+	sessions := playback.NewSessionManager(0, 0)
+	var started []playback.Session
+	sessions.AddLifecycleHooks(playback.LifecycleHooks{Started: func(_ context.Context, s *playback.Session, _ string) {
+		started = append(started, *s)
+	}})
+	h := New(Dependencies{MediaStore: media, ProgressStore: &positionRecordingProgressFake{}, PlaybackSessionStore: &fakePlaybackSessionStore{}, NativeSessions: sessions})
+	body := fmt.Sprintf(`{"deviceInfo":{"clientName":"Prologue","clientVersion":"2026.1"},"sessions":[{"id":"local-1","libraryItemId":"book-1","currentTime":10,"updatedAt":%d}]}`,
+		time.Now().UnixMilli())
+	if rec := dispatchABSWithParams(http.MethodPost, "/api/session/local-all", nil, []byte(body), "1", "p-1", h.handleSyncLocalSessions); rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body %s", rec.Code, rec.Body.String())
+	}
+	if len(started) != 1 || started[0].ClientName != "Prologue" || started[0].ClientVersion != "2026.1" {
+		t.Fatalf("lifecycle starts = %+v, want one for Prologue 2026.1", started)
+	}
+}
