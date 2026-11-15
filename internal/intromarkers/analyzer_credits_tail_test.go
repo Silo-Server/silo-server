@@ -524,22 +524,24 @@ func TestCreditsSeasonStateIsKeyedByTailMode(t *testing.T) {
 }
 
 // A server that cannot run tail passes keeps off a group a tail-capable
-// server settled, so its audio-only result cannot replace the audio and
-// video markers written there.
+// server settled, under this or an earlier behavior version, so its
+// audio-only result cannot replace the audio and video markers written there.
 func TestAudioOnlyCreditsRunKeepsTailSettledGroup(t *testing.T) {
 	repo := &fakeIntroRepository{}
 	analyzer := &Analyzer{repo: repo, extractor: &fakeFingerprintExtractor{}, config: DefaultConfig("ffmpeg"), logger: slog.New(slog.DiscardHandler)}
 	season := cachedCreditsSeason(t, analyzer, repo, 3)
 	group := candidateGroup{SeasonID: "season1", MediaFolderID: 7, AnalysisGroupKey: season[0].AnalysisGroupKey(), Candidates: season}
 	repo.seasonState = &SeasonState{InputSignature: creditsInputSignature(season), Status: seasonStatusComplete}
-	repo.seasonStateHash = CreditsAnalysisConfigHash(true)
 
-	summary, err := analyzer.analyzeCreditsGroup(context.Background(), group, analyzeGroupOptions{persistState: true})
-	if err != nil {
-		t.Fatalf("analyzeCreditsGroup: %v", err)
-	}
-	if summary.CreditsGroupsSkipped != 1 || len(repo.patches) != 0 || len(repo.upsertedStates) != 0 {
-		t.Fatalf("summary %+v with patches %+v and states %+v, want the tail-settled group skipped", summary, repo.patches, repo.upsertedStates)
+	for _, version := range []int{CreditsBehaviorVersion, creditsFirstTailBehaviorVersion} {
+		repo.seasonStateHash = creditsAnalysisConfigHash(true, version)
+		summary, err := analyzer.analyzeCreditsGroup(context.Background(), group, analyzeGroupOptions{persistState: true})
+		if err != nil {
+			t.Fatalf("analyzeCreditsGroup: %v", err)
+		}
+		if summary.CreditsGroupsSkipped != 1 || len(repo.patches) != 0 || len(repo.upsertedStates) != 0 {
+			t.Fatalf("version %d: summary %+v with patches %+v and states %+v, want the tail-settled group skipped", version, summary, repo.patches, repo.upsertedStates)
+		}
 	}
 
 	// Without that state the same run places the season's credits.
