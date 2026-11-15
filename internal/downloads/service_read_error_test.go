@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -164,6 +165,80 @@ func TestLocalDownloadCanceledWritePersistsFailureDB(t *testing.T) {
 			}
 		})
 	}
+}
+
+// Only a response that delivered the whole file completes an account-level
+// row: a HEAD probe or a partial range leaves it transferring (#4219).
+func TestEphemeralDownloadCompletesOnlyOnWholeFileDB(t *testing.T) {
+	repo := statusEventTestRepo(t)
+	path := filepath.Join(t.TempDir(), "fixture.mp4")
+	payload := bytes.Repeat([]byte("media"), 8192)
+	if err := os.WriteFile(path, payload, 0600); err != nil {
+		t.Fatal(err)
+	}
+	seedSchemaFiles(t, repo, &models.MediaFile{ID: 42, ContentID: "movie"})
+	svc := NewService(repo, nil, nil, fakeFileResolver{&models.MediaFile{ID: 42, FilePath: path}}, nil, nil, fakeUserRepo{&models.User{ID: 2, DownloadAllowed: new(true)}}, &syncAccess{}, nil, &config.DownloadConfig{Enabled: true})
+	for _, tc := range []struct {
+		name, method, ranged, ifNoneMatch, want string
+		hangUp                                  bool
+	}{
+		{"head", http.MethodHead, "", "", StatusQueued, false},
+		{"partial range", http.MethodGet, "bytes=0-1023", "", StatusDownloading, false},
+		{"tail range", http.MethodGet, "bytes=1024-", "", StatusDownloading, false},
+		{"not modified", http.MethodGet, "", "*", StatusDownloading, false},
+		{"whole-file range", http.MethodGet, "bytes=0-", "", StatusCompleted, false},
+		{"whole file", http.MethodGet, "", "", StatusCompleted, false},
+		// The client hangs up once it has the last byte, before the row is
+		// finalized.
+		{"whole file then hang-up", http.MethodGet, "", "", StatusCompleted, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			now := time.Now().UTC()
+			row := &Download{ID: "whole-" + strings.ReplaceAll(tc.name, " ", "-"), UserID: 2, MediaFileID: 42, ContentID: "movie", Kind: KindQueued, Status: StatusQueued, Format: FormatOriginal, FileSize: int64(len(payload)), CreatedAt: now, UpdatedAt: now}
+			if err := repo.Create(t.Context(), row); err != nil {
+				t.Fatal(err)
+			}
+			req := httptest.NewRequest(tc.method, "/file", nil)
+			if tc.ranged != "" {
+				req.Header.Set("Range", tc.ranged)
+			}
+			if tc.ifNoneMatch != "" {
+				req.Header.Set("If-None-Match", tc.ifNoneMatch)
+			}
+			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
+			var w http.ResponseWriter = httptest.NewRecorder()
+			if tc.hangUp {
+				w = &hangUpWriter{ResponseRecorder: httptest.NewRecorder(), after: len(payload), cancel: cancel}
+			}
+			if err := svc.ServeFile(ctx, w, req.WithContext(ctx), 2, "", "", row.ID, catalog.AccessFilter{}); err != nil {
+				t.Fatal(err)
+			}
+			stored, err := repo.GetByID(t.Context(), row.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if stored.Status != tc.want || (stored.Status == StatusCompleted) != (stored.CompletedAt != nil) || (stored.Status == StatusCompleted) != (stored.BytesSent == row.FileSize) {
+				t.Fatalf("stored status %s, bytes_sent %d, completed_at %v; want %s", stored.Status, stored.BytesSent, stored.CompletedAt, tc.want)
+			}
+		})
+	}
+}
+
+// hangUpWriter cancels the request once the whole body has been written, as
+// a client that closes the connection on the last byte does.
+type hangUpWriter struct {
+	*httptest.ResponseRecorder
+	after  int
+	cancel context.CancelFunc
+}
+
+func (w *hangUpWriter) Write(p []byte) (int, error) {
+	n, err := w.ResponseRecorder.Write(p)
+	if w.Body.Len() >= w.after {
+		w.cancel()
+	}
+	return n, err
 }
 
 // hiddenItemAccess hides one item, as a profile's rating limit or library

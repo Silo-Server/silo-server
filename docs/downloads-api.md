@@ -615,6 +615,11 @@ supported for resumable/background downloads. `HEAD` is accepted like
 `/direct-download`: it returns the same headers with no body so clients can
 probe size and resumability before issuing ranged `GET`s.
 
+For an ephemeral row, a `HEAD` leaves the row's status unchanged. A `GET` moves a
+`queued` original row to `downloading`, and only a `GET` whose response carries the
+whole file (a complete `200`, or one `206` range spanning every byte) marks it
+`completed`. A partial range, `304` or `416` leaves it `downloading`.
+
 Common responses:
 
 - `200` or `206`: media bytes. Multipart ranges and `416` follow ordinary HTTP

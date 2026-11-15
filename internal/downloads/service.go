@@ -1382,9 +1382,12 @@ func (s *Service) ServeFile(ctx context.Context, w http.ResponseWriter, r *http.
 	if dl.Status == StatusPreparing {
 		return fmt.Errorf("download is preparing: %w", ErrDownloadNotActive)
 	}
+	// A HEAD probe sends no bytes, so it neither starts a transfer nor holds
+	// its slot.
+	probe := r.Method == http.MethodHead
 	// Atomically transition queued → downloading for original rows. Artifact
 	// (remux/transcode) rows are already ready by the time bytes are served.
-	if dl.Format == FormatOriginal && dl.Status == StatusQueued {
+	if dl.Format == FormatOriginal && dl.Status == StatusQueued && !probe {
 		if err := s.repo.TransitionStatus(ctx, dl.ID, StatusQueued, StatusDownloading, 0, nil); err != nil {
 			if errors.Is(err, ErrStatusConflict) {
 				return fmt.Errorf("download already in progress: %w", ErrDownloadNotActive)
@@ -1398,8 +1401,12 @@ func (s *Service) ServeFile(ctx context.Context, w http.ResponseWriter, r *http.
 		}
 	}
 
-	stopRenewing := s.renewTransferLease(ctx, dl)
-	err = s.serveDownloadBytes(ctx, w, r, dl, userID, filter)
+	stopRenewing := func() {}
+	if !probe {
+		stopRenewing = s.renewTransferLease(ctx, dl)
+	}
+	response := &observedDownloadResponse{ResponseWriter: w}
+	err = s.serveDownloadBytes(ctx, response, r, dl, userID, filter)
 	stopRenewing()
 	if err != nil {
 		if dl.Format == FormatOriginal {
@@ -1412,9 +1419,19 @@ func (s *Service) ServeFile(ctx context.Context, w http.ResponseWriter, r *http.
 		}
 		return err
 	}
+	// A HEAD, a partial range or a bodyless answer (304, 416) proves nothing
+	// was downloaded; the row stays as it is until a response delivers the
+	// whole file.
+	if !response.deliveredWholeFile(r) {
+		return nil
+	}
 
+	// The client may hang up as soon as it has the last byte; the file was
+	// still delivered, so the row is finalized after the request ends.
+	completionCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+	defer cancel()
 	now := time.Now()
-	if err := s.repo.UpdateStatus(ctx, dl.ID, StatusCompleted, dl.FileSize, &now); err != nil {
+	if err := s.repo.UpdateStatus(completionCtx, dl.ID, StatusCompleted, dl.FileSize, &now); err != nil {
 		slog.ErrorContext(ctx, "failed to mark download as completed", "component", "downloads", "download_id", dl.ID, "error", err)
 	}
 	return nil
@@ -1823,6 +1840,25 @@ func (w *observedDownloadResponse) Write(p []byte) (int, error) {
 		w.err = err
 	}
 	return n, err
+}
+
+// deliveredWholeFile reports whether a GET's response carried the entire file:
+// a complete 200 body, or a 206 whose single range spans every byte.
+func (w *observedDownloadResponse) deliveredWholeFile(r *http.Request) bool {
+	if r.Method != http.MethodGet || w.err != nil {
+		return false
+	}
+	switch w.status {
+	case http.StatusOK:
+		return w.expected < 0 || w.written == w.expected
+	case http.StatusPartialContent:
+		var first, last, size int64
+		if _, err := fmt.Sscanf(w.Header().Get("Content-Range"), "bytes %d-%d/%d", &first, &last, &size); err != nil {
+			return false
+		}
+		return first == 0 && last == size-1 && w.written == size
+	}
+	return false
 }
 
 // attachmentDisposition names the saved file in the header form proxy nodes
