@@ -820,6 +820,7 @@ function StreamRow({
           session={session}
           reasons={reasons}
           layout={layout}
+          showRoute={showRoute}
           onIPLookup={onIPLookup}
           ffmpegOpen={ffmpegOpen}
           onToggleFFmpeg={toggleFFmpeg}
@@ -1153,6 +1154,7 @@ function PlaybackExpandedPanel({
   session,
   reasons,
   layout,
+  showRoute,
   onIPLookup,
   ffmpegOpen,
   onToggleFFmpeg,
@@ -1165,6 +1167,8 @@ function PlaybackExpandedPanel({
   session: AdminSession;
   reasons: AdaptationReason[];
   layout: TableLayout;
+  /** Whether the table row has a route column. */
+  showRoute: boolean;
   onIPLookup: (ip: string) => void;
   ffmpegOpen: boolean;
   onToggleFFmpeg: () => void;
@@ -1303,8 +1307,8 @@ function PlaybackExpandedPanel({
               </>
             ) : null}
           </dl>
-          {/* The table row already shows the route, the address and the rate. */}
-          <dl className={`${SIDE_FACT_LIST_CLASS} ${layout.stacked} mt-1`}>
+          {/* A table row with a route column already shows the route. */}
+          <dl className={`${SIDE_FACT_LIST_CLASS} ${showRoute ? layout.stacked : ""} mt-1`}>
             <dt className="text-muted-foreground">{t("web.admin.activity.column.route")}</dt>
             <dd className="flex min-w-0 flex-wrap items-center gap-1">
               <PlaybackRouteBadges session={session} />
