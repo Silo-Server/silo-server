@@ -2854,6 +2854,35 @@ func excludeScoredItems(items []ScoredItem, excluded map[string]struct{}) []Scor
 	return filtered
 }
 
+// ItemLibraryIDs returns the libraries each of itemIDs is in, keyed by
+// content ID. An item in no library has no entry.
+func (r *Repo) ItemLibraryIDs(ctx context.Context, itemIDs []string) (map[string][]int, error) {
+	libraries := make(map[string][]int, len(itemIDs))
+	if len(itemIDs) == 0 {
+		return libraries, nil
+	}
+	rows, err := r.pool.Query(ctx, `
+		SELECT content_id, media_folder_id
+		FROM   media_item_libraries
+		WHERE  content_id = ANY($1)`, itemIDs)
+	if err != nil {
+		return nil, fmt.Errorf("get item libraries: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id string
+		var library int
+		if err := rows.Scan(&id, &library); err != nil {
+			return nil, fmt.Errorf("scan item library: %w", err)
+		}
+		libraries[id] = append(libraries[id], library)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate item libraries: %w", err)
+	}
+	return libraries, nil
+}
+
 // ResolveCanonicalItemIDs maps each episode ID to its parent series ID and
 // maps every other ID to itself.
 func (r *Repo) ResolveCanonicalItemIDs(ctx context.Context, itemIDs []string) (map[string]string, error) {

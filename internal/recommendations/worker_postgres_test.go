@@ -825,6 +825,83 @@ func TestCacheUserRowsDoNotAnchorOnDislikedTitlesPostgres(t *testing.T) {
 	}
 }
 
+// A library's Because You Watched section anchors on the latest title watched
+// in that library, even when the profile has since finished more titles in
+// another library than a profile has anchors.
+func TestBecauseYouWatchedAnchorsEachLibraryOnItsOwnWatchesPostgres(t *testing.T) {
+	pool := newEngineTestPool(t)
+	ctx := t.Context()
+	const prefix = "tcache-library-anchor-"
+	cleanupRecoMediaItems(t, pool, prefix)
+	userID, profile := newTasteTestAccount(t, pool, prefix)
+	repo := NewRepo(pool)
+	movieLib, tvLib := newTestLibrary(t, pool, prefix+"movies"), newTestLibrary(t, pool, prefix+"tv")
+
+	seed := func(id, mediaType string, library, axis, nudge int) string {
+		seedTitle(t, pool, id, mediaType, library, "")
+		if err := repo.UpsertEmbedding(ctx, id, axisVector(axis, map[int]float32{axis + nudge: 0.05}), "test-model", id); err != nil {
+			t.Fatal(err)
+		}
+		return id
+	}
+	const movieAxis, seriesAxis = 2300, 2400
+	series := seed(prefix+"series", "series", tvLib, seriesAxis, 1)
+	seed(prefix+"series-neighbor", "series", tvLib, seriesAxis, 2)
+	var movies []string
+	for i := range BecauseYouWatchedAnchors {
+		movies = append(movies, seed(fmt.Sprintf("%smovie-%d", prefix, i), "movie", movieLib, movieAxis, i+1))
+	}
+	seed(prefix+"movie-neighbor", "movie", movieLib, movieAxis, 9)
+
+	// The series first, then one movie per anchor, the last most recent.
+	watch(t, pool, userID, profile, series, time.Duration(len(movies)+1)*time.Hour)
+	for i, movie := range movies {
+		watch(t, pool, userID, profile, movie, time.Duration(len(movies)-i)*time.Hour)
+	}
+
+	ratings := catalog.NewRatingsRepo(pool)
+	engine := NewEngine(pool, ratings, catalog.NewItemRepository(pool), nil, pgstore.NewPostgresProvider(pool), config.RecommendationsConfig{DiversityLambda: 0.7})
+	w := newJobTestWorker(&fakeLocker{}, nil)
+	w.engine = engine
+	reader := NewReader(repo, ratings, nil, pgstore.NewPostgresProvider(pool))
+	check := func(stage, home string) {
+		t.Helper()
+		if built := w.cacheUserRows(ctx, engine.repo, userID, profile, cacheExpiry(time.Now())); built.failed != 0 {
+			t.Fatalf("%s: cache build = %+v, want no failures", stage, built)
+		}
+		for _, tc := range []struct {
+			name       string
+			libraryIDs []int
+			want       string
+		}{
+			{"home", nil, home},
+			{"movie library", []int{movieLib}, movies[len(movies)-1]},
+			{"TV library", []int{tvLib}, series},
+		} {
+			items, source, err := reader.SectionBecauseYouWatched(ctx, userID, profile, "", tc.libraryIDs, catalog.AccessFilter{})
+			if err != nil || source != tc.want || len(items) == 0 {
+				t.Errorf("%s, %s: anchor = %q with %d items, %v; want %q with items", stage, tc.name, source, len(items), err, tc.want)
+			}
+		}
+	}
+	check("movies after the series", movies[len(movies)-1])
+
+	// A binge of more episodes than a store page holds, all newer than the
+	// movies, is one title: the movie library keeps its anchor.
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO episodes(content_id, series_id, season_number, episode_number, title)
+		SELECT $1 || '-e' || n, $1, 1, n, 'Episode' FROM generate_series(1, $2) n`, series, signalPageSize+1); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO user_watch_progress(user_id, profile_id, media_item_id, completed, updated_at)
+		SELECT $1, $2, $3 || '-e' || n, true, NOW() - make_interval(secs => n) FROM generate_series(1, $4) n`,
+		userID, profile, series, signalPageSize+1); err != nil {
+		t.Fatal(err)
+	}
+	check("a binge after the movies", series)
+}
+
 // A job whose lock session dies stops instead of failing every remaining
 // profile without its cluster lock, which another server may now hold.
 func TestTasteProfileJobStopsWhenItsLockSessionDiesPostgres(t *testing.T) {
