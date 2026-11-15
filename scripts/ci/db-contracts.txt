@@ -1090,6 +1090,7 @@
 # per-node rows to the total, and a wide bucket's split comes from its peak minute.
 ./internal/dashmetrics TestSampleSharedRecordsEgressPerNodeDB
 ./internal/api/handlers TestQueryAdminTimeseriesSplitsEgressBySourceDB
+./internal/api/handlers TestQueryAdminTimeseriesSplitsStreamsByPeakMinuteDB
 
 # Clearing admin collection artwork commits the cleared reference even when a
 # stored variant fails to delete.
