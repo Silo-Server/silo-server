@@ -20,6 +20,8 @@ const controls = vi.hoisted(() => ({
 }));
 const hlsJS = vi.hoisted(() => ({
   latest: null as null | { emit: (event: string, data: unknown) => void },
+  loadSource: vi.fn(),
+  startLoad: vi.fn(),
 }));
 // Captures the progress sampler's gone-session callback so a test can drive a
 // mid-stream eviction the way the real sampler reports one.
@@ -93,9 +95,13 @@ vi.mock("hls.js", () => ({
     emit(event: string, data: unknown) {
       this.handlers.get(event)?.(event, data);
     }
-    startLoad() {}
+    startLoad() {
+      hlsJS.startLoad();
+    }
     stopLoad() {}
-    loadSource() {}
+    loadSource() {
+      hlsJS.loadSource();
+    }
     attachMedia() {}
     destroy() {}
   },
@@ -286,6 +292,8 @@ beforeEach(() => {
   sessionRef.current = null;
   controls.current = null;
   hlsJS.latest = null;
+  hlsJS.loadSource.mockClear();
+  hlsJS.startLoad.mockClear();
   progressOptions.current = null;
   vi.spyOn(HTMLMediaElement.prototype, "play").mockResolvedValue(undefined);
   vi.spyOn(HTMLMediaElement.prototype, "pause").mockImplementation(() => {});
@@ -372,10 +380,12 @@ describe("VideoPlayer with the playback session: reconnect", () => {
     await waitFor(() => expect(hlsJS.latest).not.toBeNull());
 
     // The new transport never starts: hls.js gives up twice on the network,
-    // and the startup guard reports the route as failed.
+    // and the startup guard reports the route as failed. The recovery is
+    // delayed with backoff, so the second failure is the reload's.
     const fatal = { fatal: true, type: "networkError", details: "manifestLoadError" };
     const now = vi.spyOn(Date, "now").mockReturnValue(10_000);
     act(() => hlsJS.latest?.emit("error", fatal));
+    await waitFor(() => expect(hlsJS.loadSource).toHaveBeenCalledTimes(2), { timeout: 3_000 });
     now.mockReturnValue(20_000);
     act(() => hlsJS.latest?.emit("error", fatal));
     now.mockRestore();

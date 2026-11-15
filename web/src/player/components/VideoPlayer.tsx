@@ -76,6 +76,7 @@ import {
 import { resolveVersionAudioLanguage } from "../utils/effectiveAudioLanguage";
 import { resolveEffectiveVersion } from "../utils/resolveEffectiveVersion";
 import { StartupGuard } from "../utils/startupGuard";
+import { SegmentRetryBudget, segmentRetryDelayMs } from "../utils/segmentRetry";
 import { isTimeBuffered } from "../utils/bufferPolicy";
 import { isSafariBrowserV3, resolveHLSEngineV3 } from "../utils/hlsEngine";
 import { isFirefoxUserAgent } from "../utils/browser";
@@ -517,6 +518,24 @@ function isAutoplayPolicyRejection(error: unknown): boolean {
     : typeof error === "object" &&
         error !== null &&
         (error as { name?: unknown }).name === "NotAllowedError";
+}
+
+/**
+ * The fragment an hls.js load failure belongs to, or null when it names no
+ * fragment (the playlist or manifest itself failed). The media sequence number
+ * identifies the segment across recoveries, including a `loadSource` reload
+ * that restarts the playlist from its first segment.
+ */
+function failedFragmentKey(data: {
+  frag?: { sn?: number | string; url?: string } | null;
+  url?: string;
+}): string | null {
+  const frag = data.frag;
+  // hls.js types `sn` as a number for media fragments and the literal
+  // "initSegment" for a fragment's initialization section.
+  if (frag?.sn !== undefined && frag.sn !== null) return `frag:${frag.sn}`;
+  if (frag?.url) return `frag:${frag.url}`;
+  return null;
 }
 
 function readNumericPayload(
@@ -3062,9 +3081,10 @@ export function VideoPlayer({
     let hls: HlsType | null = null;
     let engineSession: BrowserEngineSession | null = null;
     let destroyed = false;
-    // Set when startup recovery loads a failed manifest again, so the reload's
-    // own failure is not swallowed by the recovery cooldown.
-    let manifestReloadPending = false;
+    // Counts this transport's failed loads, so a segment that keeps failing
+    // stops being requested and a passing hiccup is still retried.
+    const segmentRetry = new SegmentRetryBudget();
+    let recoveryTimer: ReturnType<typeof setTimeout> | null = null;
     let playbackStarted = false;
     let autoplayInFlight = false;
     let autoplayAttempts = 0;
@@ -3366,34 +3386,71 @@ export function VideoPlayer({
               }
 
               const now = Date.now();
-              // A reloaded manifest can fail again within the cooldown (a
-              // parse error does at once); that failure must still reach the
-              // startup guard, or the player waits for the startup timeout.
-              const reloadFailed = manifestReloadPending;
-              manifestReloadPending = false;
-              if (!reloadFailed && now - lastRecoveryRef.current < 3000) return;
-              lastRecoveryRef.current = now;
-
               if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
-                if (startupGuardRef.current?.handleFatalNetworkError() ?? true) {
-                  console.warn("[hls.js] Fatal network error, attempting recovery...");
+                // One reload or restart in flight at a time. hls.js stops
+                // loading after a fatal error, so anything it reports before
+                // the scheduled retry names the failure already being handled.
+                if (recoveryTimer !== null) return;
+                if (!(startupGuardRef.current?.handleFatalNetworkError() ?? true)) {
+                  console.error("[hls.js] Fatal startup network error, giving up");
+                  return;
+                }
+                // Repeated failure on one segment is not a hiccup: the budget
+                // stops the retries and lets the route fail, which replans
+                // instead of asking the segment layer for the same bytes again.
+                const segmentKey = failedFragmentKey(data);
+                const recoveryAttempt = segmentRetry.recordFailure(segmentKey);
+                if (recoveryAttempt === null) {
+                  console.error(
+                    "[hls.js] Fatal network error repeated past its retry budget, giving up",
+                    {
+                      segment: segmentKey,
+                      details: data.details,
+                    },
+                  );
+                  if (
+                    !reportCurrentPlanFailure({
+                      classification: "network_error",
+                      message: `HLS failed repeatedly on ${segmentKey ?? "its playlist"}.`,
+                    })
+                  ) {
+                    setError("Playback failed. Please try again.");
+                  }
+                  hls?.destroy();
+                  hlsRef.current = null;
+                  return;
+                }
+                // The retry is delayed with backoff: a source that cannot
+                // serve a segment must not be asked for it at the rate hls.js
+                // retries inside one load.
+                lastRecoveryRef.current = now;
+                const reloadManifest =
+                  data.details === Hls.ErrorDetails.MANIFEST_LOAD_ERROR ||
+                  data.details === Hls.ErrorDetails.MANIFEST_LOAD_TIMEOUT ||
+                  data.details === Hls.ErrorDetails.MANIFEST_PARSING_ERROR;
+                const delay = segmentRetryDelayMs(recoveryAttempt);
+                console.warn(
+                  `[hls.js] Fatal network error, retrying in ${delay}ms (attempt ${recoveryAttempt + 1})`,
+                );
+                recoveryTimer = setTimeout(() => {
+                  recoveryTimer = null;
+                  if (destroyed || startupGuardRef.current?.hasFailed()) return;
                   // startLoad() never requests a manifest that failed to load,
                   // so it would leave the player waiting for the startup
                   // timeout. Load the source again instead.
-                  if (
-                    data.details === Hls.ErrorDetails.MANIFEST_LOAD_ERROR ||
-                    data.details === Hls.ErrorDetails.MANIFEST_LOAD_TIMEOUT ||
-                    data.details === Hls.ErrorDetails.MANIFEST_PARSING_ERROR
-                  ) {
-                    manifestReloadPending = !streamPlayedRef.current;
-                    hls?.loadSource(effectiveStreamUrl);
-                  } else {
-                    hls?.startLoad();
-                  }
-                } else {
-                  console.error("[hls.js] Fatal startup network error, giving up");
-                }
-              } else if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
+                  if (reloadManifest) hls?.loadSource(effectiveStreamUrl);
+                  else hls?.startLoad();
+                }, delay);
+                return;
+              }
+
+              // A reloaded manifest can fail again within the cooldown (a
+              // parse error does at once); that failure must still reach the
+              // startup guard, or the player waits for the startup timeout.
+              if (now - lastRecoveryRef.current < 3000) return;
+              lastRecoveryRef.current = now;
+
+              if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
                 if (mediaRecoveryAttemptsRef.current === 0) {
                   console.warn("[hls.js] Fatal media error, attempting recovery...");
                   hls?.recoverMediaError();
@@ -3453,6 +3510,9 @@ export function VideoPlayer({
             });
             hls.on(Hls.Events.FRAG_LOADED, (_event, { frag }) => {
               if (destroyed || frag.type === "subtitle") return;
+              // The transport delivered a fragment, so failures since the last
+              // one were hiccups rather than a segment it cannot serve.
+              segmentRetry.reset();
               const { loaded, loading } = frag.stats;
               meter.received(frag.stats, loaded, loading.first, loading.end);
             });
@@ -3635,6 +3695,10 @@ export function VideoPlayer({
     return () => {
       destroyed = true;
       cleanupStartupListeners();
+      if (recoveryTimer !== null) {
+        clearTimeout(recoveryTimer);
+        recoveryTimer = null;
+      }
       video.removeEventListener("suspend", endHoldOnceLoaded);
       video.removeEventListener("canplay", endHoldOnceLoaded);
       if (engineSession) {
