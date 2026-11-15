@@ -1,8 +1,10 @@
 import type { QueryClient } from "@tanstack/react-query";
 import { isLibraryLayoutQueryKey } from "@/lib/queryInvalidation";
 import { adminKeys, catalogKeys, ratingKeys, recKeys, sectionKeys } from "./keys";
+import { takeOwedDetailRefresh } from "./mediaSurfaceRefresh";
 
 export async function invalidateRatingSurfaceQueries(queryClient: QueryClient, itemId: string) {
+  const refreshDetail = takeOwedDetailRefresh(queryClient, itemId);
   // No `cancelRefetch: false` here: reusing an in-flight request would let a
   // response that predates the rating change satisfy this invalidation and land
   // in the cache as fresh.
@@ -11,7 +13,7 @@ export async function invalidateRatingSurfaceQueries(queryClient: QueryClient, i
       const key = query.queryKey;
       const isCurrentDetail =
         key[0] === "catalog" && key[1] === "items" && key[2] === itemId && key[3] === "detail";
-      if (isCurrentDetail) return false;
+      if (isCurrentDetail) return refreshDetail;
       const isSimilarItems = startsWith(key, recKeys.all) && key[1] === "similar";
       if (isSimilarItems) return false;
 

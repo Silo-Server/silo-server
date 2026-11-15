@@ -755,25 +755,32 @@ describe("invalidateMediaSurfaceQueries", () => {
 });
 
 describe("updateCatalogItemDetail", () => {
-  it("patches an invalidated detail without marking it fresh", async () => {
+  it("puts off an invalidated detail's refetch until the refresh after the write", async () => {
     const queryClient = new QueryClient();
     const invalidatedKey = catalogKeys.itemDetail("item-1");
-    const freshKey = itemKeys.detail("item-1");
+    const otherKey = catalogKeys.itemDetail("item-2");
     queryClient.setQueryData(invalidatedKey, { content_id: "item-1", tagline: "old" });
-    queryClient.setQueryData(freshKey, { content_id: "item-1", tagline: "old" });
+    queryClient.setQueryData(otherKey, { content_id: "item-2", tagline: "old" });
     // Another device's metadata save, while no page shows the item.
     await queryClient.invalidateQueries({ queryKey: invalidatedKey, exact: true });
-
-    updateCatalogItemDetail(queryClient, "item-1", (detail) => ({
+    const favorite = (detail: ItemDetail) => ({
       ...detail,
       user_state: { played: false, is_favorite: true, in_watchlist: false },
-    }));
+    });
 
+    updateCatalogItemDetail(queryClient, "item-1", favorite);
+    updateCatalogItemDetail(queryClient, "item-2", favorite);
+
+    // Nothing may read the item until the favorite write lands...
     expect(queryClient.getQueryData<ItemDetail>(invalidatedKey)?.user_state?.is_favorite).toBe(
       true,
     );
+    expect(queryClient.getQueryState(invalidatedKey)?.isInvalidated).toBe(false);
+
+    // ...and the refresh after it refetches the detail it would skip.
+    await invalidateMediaSurfaceQueries(queryClient, { itemId: "item-1", skipItemDetail: true });
+    await invalidateMediaSurfaceQueries(queryClient, { itemId: "item-2", skipItemDetail: true });
     expect(queryClient.getQueryState(invalidatedKey)?.isInvalidated).toBe(true);
-    expect(queryClient.getQueryData<ItemDetail>(freshKey)?.user_state?.is_favorite).toBe(true);
-    expect(queryClient.getQueryState(freshKey)?.isInvalidated).toBe(false);
+    expect(queryClient.getQueryState(otherKey)?.isInvalidated).toBe(false);
   });
 });
