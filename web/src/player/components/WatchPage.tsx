@@ -130,6 +130,16 @@ function buildEffectiveVersionLabel(version: PlayerFileVersion): string | null {
 }
 
 /**
+ * The release a row names, when it names one. `release_name` is the provider's
+ * release name; a virtual candidate's display label (`edition_raw`) is the
+ * wire's fallback for rows that carry no name. Blank values name nothing.
+ */
+function versionReleaseName(version: PlayerFileVersion): string | null {
+  const name = version.release_name?.trim() || version.edition_raw?.trim();
+  return name ? name : null;
+}
+
+/**
  * Re-keys the resolved row for the live session file into the version list.
  *
  * A start or an in-player switch can leave the session playing a file the
@@ -1575,19 +1585,33 @@ function WatchPagePlayer({
     mediaFileId: effectiveVirtualUri ? null : effectiveFileId,
     effectiveVirtualUri,
   });
-  const effectiveVersionLabel = effectiveVersionRow
-    ? buildEffectiveVersionLabel(effectiveVersionRow)
-    : null;
+  // The notice names the release when the row knows it. The viewer picked a
+  // release, not a resolution: "2160p HEVC HDR" cannot tell them which release
+  // replaced theirs, and it is misleading when the swap kept the format. The
+  // format label stays as the fallback for rows that carry no release name.
+  const effectiveReleaseName = effectiveVersionRow ? versionReleaseName(effectiveVersionRow) : null;
+  const effectiveVersionLabel =
+    effectiveVersionRow && !effectiveReleaseName
+      ? buildEffectiveVersionLabel(effectiveVersionRow)
+      : null;
+  const playingLabel = effectiveReleaseName ?? effectiveVersionLabel;
+  // Two catalog rows can be mirrors of one release, so a moved id is not on its
+  // own a swap the viewer should be told about. Rows that both name the same
+  // release are the same thing playing, and claiming a replacement would be a
+  // downgrade claim the client cannot support.
+  const requestedReleaseName = requestedVersion ? versionReleaseName(requestedVersion) : null;
+  const sameKnownRelease =
+    requestedReleaseName !== null && requestedReleaseName === effectiveReleaseName;
   const reasonPhrase = substitutionReasonPhrase(plan?.substitution_reason);
   const substitutionCopy = reasonPhrase
-    ? effectiveVersionLabel
-      ? `${reasonPhrase}, so Vio is playing ${effectiveVersionLabel} instead.`
+    ? playingLabel
+      ? `${reasonPhrase}, so Vio is playing ${playingLabel} instead.`
       : `${reasonPhrase} — playing a different version.`
-    : effectiveVersionLabel
-      ? `The selected version wasn't available, so Vio is playing ${effectiveVersionLabel} instead.`
+    : playingLabel
+      ? `The selected version wasn't available, so Vio is playing ${playingLabel} instead.`
       : "Playing a different version than selected — the requested version isn't playable on this device.";
   const versionSwapNotice =
-    versionWasSubstituted && !versionSwapNoticeDismissed ? (
+    versionWasSubstituted && !sameKnownRelease && !versionSwapNoticeDismissed ? (
       <div className="absolute top-[max(4.5rem,calc(env(safe-area-inset-top)+3.5rem))] left-1/2 z-50 -translate-x-1/2">
         <div className="flex items-center gap-2 rounded-full border border-white/15 bg-black/70 px-3 py-1.5 text-xs font-medium text-white/80 shadow-lg backdrop-blur">
           <span>{substitutionCopy}</span>

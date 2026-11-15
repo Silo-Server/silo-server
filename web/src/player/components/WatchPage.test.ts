@@ -1344,6 +1344,72 @@ describe("WatchPage virtual version substitution notice", () => {
   });
 });
 
+describe("WatchPage substitution notice names the release", () => {
+  const requestedRow: PlayerFileVersion = {
+    ...version,
+    file_id: 7,
+    release_name: "Example.2024.1080p.BluRay.x264-GRP",
+  };
+  const effectiveRow: PlayerFileVersion = {
+    ...version,
+    file_id: 8,
+    resolution: "2160p",
+    codec_video: "hevc",
+    hdr: true,
+    release_name: "Example.2024.2160p.UHD.BluRay.x265-OTHER",
+  };
+  function substitute(rows: PlayerFileVersion[], plan: Record<string, unknown> = {}) {
+    playbackSessionMock.mockReturnValue(
+      playbackSession({
+        plan: fixturePlanV3({
+          requested_media_file_id: 7,
+          effective_media_file_id: 8,
+          substituted_from_file_id: 7,
+          ...plan,
+        }),
+      }),
+    );
+    render(createElement(WatchPage, { ...watchPageProps, versions: rows }));
+  }
+
+  it("names the release that replaced the viewer's", () => {
+    substitute([requestedRow, effectiveRow], { substitution_reason: "transport_failed" });
+
+    expect(
+      screen.getByText(
+        "The selected version wouldn't start, so Vio is playing Example.2024.2160p.UHD.BluRay.x265-OTHER instead.",
+      ),
+    ).toBeInTheDocument();
+    // The format cannot tell the viewer which release took over.
+    expect(screen.queryByText(/Vio is playing 2160p HEVC HDR/)).not.toBeInTheDocument();
+  });
+
+  it("uses the provider's label when the row carries no release name", () => {
+    substitute([
+      requestedRow,
+      { ...effectiveRow, release_name: undefined, edition_raw: "2160p UHD remux" },
+    ]);
+
+    expect(
+      screen.getByText(
+        "The selected version wasn't available, so Vio is playing 2160p UHD remux instead.",
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it("stays quiet when both rows name the same release", () => {
+    // A sibling mirror row is the same release playing, not a downgrade.
+    substitute([requestedRow, { ...effectiveRow, release_name: requestedRow.release_name }]);
+
+    expect(screen.queryByText(/so Vio is playing/)).not.toBeInTheDocument();
+    expect(
+      screen.queryByText(
+        "Playing a different version than selected — the requested version isn't playable on this device.",
+      ),
+    ).not.toBeInTheDocument();
+  });
+});
+
 describe("WatchPage effective virtual version", () => {
   it("selects the path-matched candidate when the session's id is the VIRTUAL row", () => {
     const virtualRow: PlayerFileVersion = {
