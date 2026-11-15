@@ -8,7 +8,12 @@ import {
 } from "../utils/parseVTT";
 import type { PlayerSubtitleInfo } from "../types";
 import { isASSCodec, isBitmapCodec } from "../utils/subtitleCodecs";
-import { subtitlePlayheadSeconds, subtitleWindowStartForPlayhead } from "../utils/subtitleWindows";
+import {
+  subtitlePlayheadSeconds,
+  subtitleRetryAfterMs,
+  subtitleRetryDelayMs,
+  subtitleWindowStartForPlayhead,
+} from "../utils/subtitleWindows";
 import { isSubtitleSourceChanged } from "../utils/subtitleSourceChanged";
 import { isPlaybackSessionGoneResponse } from "../playback-errors";
 
@@ -37,10 +42,10 @@ const WINDOW_OVERLAP = 5;
 // 60s matches the server relay's first-byte budget (30s) plus headroom for
 // a slow-but-progressing Usenet/altmount extraction.
 const FETCH_STALL_TIMEOUT_MS = 60_000;
-// Wait this long after a failed window fetch before retrying, so a
-// persistently failing extraction doesn't turn timeupdate into a fetch storm.
-const FETCH_RETRY_BACKOFF_MS = 5_000;
-const FETCH_RETRY_MAX_BACKOFF_MS = 60_000;
+// The backoff ladder after a failed window fetch lives in subtitleWindows
+// (subtitleRetryDelayMs): doubling, capped, and raised by the server's
+// Retry-After so a refusal it is already recovering from is not asked again too
+// early.
 // Consecutive window failures tolerated before the fetcher stops scheduling
 // retries for this track mount — the same terminal-after-budget policy the
 // ASS path (useASSSubtitles) applies to its text fetches. Without it a source
@@ -556,6 +561,11 @@ export function useSubtitleTracks(
     // response: network error or stall). Read by the failure branch to route
     // retryable statuses away from the terminal budget.
     let lastResponseStatus = 0;
+    // `Retry-After` the latest window attempt carried, in milliseconds. The
+    // server raises it for a refusal it is already recovering from (a subtitle
+    // page or window-budget answer), so honoring it is what lets the retry land
+    // on the recovery work instead of asking again too early.
+    let lastResponseRetryAfterMs = 0;
 
     // Clear the spent failure budget so a deliberate new window request (a
     // seek or a refresh rebuild) gets its own retries instead of inheriting
@@ -718,6 +728,7 @@ export function useSubtitleTracks(
 
       let succeeded = false;
       lastResponseStatus = 0;
+      lastResponseRetryAfterMs = 0;
       // Cues this window actually delivered. A window that streams in whole
       // and carries none is a valid empty window, not a failure.
       let producedCues = 0;
@@ -726,6 +737,8 @@ export function useSubtitleTracks(
         const resp = await fetch(url, { signal: controller.signal });
         if (!resp.ok || !resp.body) {
           lastResponseStatus = resp.status;
+          // Read before any body probe: those consume the response.
+          lastResponseRetryAfterMs = subtitleRetryAfterMs(resp.headers.get("Retry-After"));
           if (await isPlaybackSessionGoneResponse(resp)) {
             // A response that lands after the track was rebuilt belongs to the
             // session this fetch was minted for, not the one on screen now.
@@ -873,29 +886,34 @@ export function useSubtitleTracks(
           windowRequestedWhileBusy = false;
           if (!sourceChangedSignaled && !sessionGoneSignaled && !isParked()) {
             lastFetchFailureAt = Date.now();
-            onLoadStateRef.current?.("error");
             if (isRetryableSubtitleStatus(lastResponseStatus)) {
-              // Explicitly retryable (upstream flap, rate limit): same backoff
-              // loop, but on its own generous budget so a seconds-long outage
-              // does not spend the terminal budget and wedge the mount on
-              // "Retrying…".
+              // Explicitly retryable (a page or budget refusal the server is
+              // already recovering from, an upstream flap, a rate limit): same
+              // backoff loop, but on its own generous budget, and it must not
+              // move the player to its terminal state. Playback continues and
+              // the track stays selected; nothing on screen is dropped, and a
+              // mount that has not produced cues yet keeps claiming to load
+              // instead of telling the viewer the track failed.
               retryableFailures += 1;
               if (retryableFailures >= FETCH_MAX_RETRYABLE_FAILURES) {
+                // The retry budget is spent. That is the honest failure: the
+                // server kept refusing and no further retry is scheduled.
+                onLoadStateRef.current?.("error");
                 consecutiveFailures = FETCH_MAX_CONSECUTIVE_FAILURES;
+              } else if (!hasFetched) {
+                onLoadStateRef.current?.(placeholders ? "refreshing" : "loading");
               }
             } else {
               retryableFailures = 0;
               consecutiveFailures += 1;
+              onLoadStateRef.current?.("error");
             }
             // On the final failure the budget is spent: schedule no retry and
             // let the spent-budget gate in maybeFetch hold the mount terminal.
             // A later track rebuild (stream restart, source refresh) starts a
             // fresh budget.
             if (consecutiveFailures < FETCH_MAX_CONSECUTIVE_FAILURES) {
-              retryDelay = Math.min(
-                retryDelay ? retryDelay * 2 : FETCH_RETRY_BACKOFF_MS,
-                FETCH_RETRY_MAX_BACKOFF_MS,
-              );
+              retryDelay = subtitleRetryDelayMs(retryDelay, lastResponseRetryAfterMs);
               retryTimer = setTimeout(maybeFetch, retryDelay);
             }
           }

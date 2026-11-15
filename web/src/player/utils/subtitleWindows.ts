@@ -153,6 +153,19 @@ export function subtitleRetryAfterMs(header: string | null, now = Date.now()): n
 }
 
 /**
+ * Backoff before retrying a failed window: the doubling ladder, raised by the
+ * server's `Retry-After` when it asked for longer. The header never shortens the
+ * client's own backoff and the result stays inside the ladder's cap, so a large
+ * server delay cannot park the retry past the budget's remaining room.
+ */
+export function subtitleRetryDelayMs(previousMs: number, retryAfterMs: number): number {
+  return Math.min(
+    Math.max(nextSubtitleRetryDelay(previousMs), retryAfterMs),
+    SUBTITLE_FETCH_RETRY_MAX_BACKOFF_MS,
+  );
+}
+
+/**
  * The source-time end a coverage header reports, or null when the response
  * carried none (a whole-track or unwindowed response) or an open end. The value
  * is what the response really produced, which for a bitmap page answered from a
@@ -283,8 +296,13 @@ export interface SubtitleWindowFetcherOptions {
   onResponseEnd?: () => void;
   /** The whole window streamed in and its range now counts as covered. */
   onWindowCommitted: (fresh: boolean) => void;
-  /** A window failed or stalled; it is retried after a backoff. */
-  onWindowFailed: () => void;
+  /**
+   * A window failed or stalled; it is retried after a backoff. `retryable`
+   * reports whether the same request may survive (a 503 + Retry-After, a
+   * timeout, a stall) or the failure is one only a rebuild can fix (a 404, an
+   * unsupported format): the latter ends the track instead of retrying.
+   */
+  onWindowFailed: (retryable: boolean) => void;
   /**
    * The server answered `subtitle_source_changed` (409): the virtual release
    * rotated under this plan. No retry is scheduled and no failure budget is
@@ -495,7 +513,7 @@ export function createSubtitleWindowFetcher(
           retryAfterMs: 0,
         };
         lastFetchFailureAt = Date.now();
-        options.onWindowFailed();
+        options.onWindowFailed(retryable);
         if (retryable) retryableFailures += 1;
         else hardFailures += 1;
         if (hardFailures >= maxConsecutiveFailures || retryableFailures >= maxRetryableFailures) {
@@ -506,7 +524,7 @@ export function createSubtitleWindowFetcher(
           options.onTerminal?.();
         } else {
           // `Retry-After` raises the delay; it never shortens the backoff.
-          retryDelay = Math.max(nextSubtitleRetryDelay(retryDelay), retryAfterMs);
+          retryDelay = subtitleRetryDelayMs(retryDelay, retryAfterMs);
           retryTimer = setTimeout(maybeFetch, retryDelay);
         }
       }

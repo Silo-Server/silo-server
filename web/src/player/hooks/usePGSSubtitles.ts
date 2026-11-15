@@ -457,7 +457,15 @@ export function usePGSSubtitles({
           fetcher.releaseBefore(keepFrom);
         }
       },
-      onWindowFailed: () => onLoadStateRef.current?.("error"),
+      onWindowFailed: (retryable) => {
+        // A retryable answer (503 + Retry-After from a page or budget refusal,
+        // a timeout, a stall) is retried in the background while playback
+        // continues: the pages already parsed stay on screen and the fetch
+        // ladder owns the retry. Only a failure the same request cannot
+        // survive ends the overlay; a spent budget still reports through
+        // onTerminal, so the final failure stays honest.
+        if (!retryable) onLoadStateRef.current?.("error");
+      },
     });
     const maybeFetch = () => fetcher.maybeFetch();
     const maybeFetchAfterSeek = () => fetcher.maybeFetch(true);

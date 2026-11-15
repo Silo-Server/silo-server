@@ -757,6 +757,49 @@ describe("useSubtitleTracks", () => {
     }
   });
 
+  it("retries a retryable 503 in the background without reporting the track failed", async () => {
+    vi.useFakeTimers();
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    // The server is recovering the page it refused; Retry-After says when.
+    fetchMock.mockResolvedValue(
+      new Response(null, { status: 503, headers: { "Retry-After": "30" } }),
+    );
+    const states: string[] = [];
+    const { videoRef, unmount } = renderTracks({
+      origin: 0,
+      durationRef: { current: 7200 },
+      onLoadState: (state) => states.push(state),
+    });
+    try {
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(0);
+      });
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      // A refusal the server is already recovering from is not a failed track:
+      // playback continues, the track stays selected, and the player keeps
+      // saying it is loading rather than offering a manual retry.
+      expect(states).toContain("loading");
+      expect(states).not.toContain("error");
+
+      // The header is honored: nothing fires before 30 s even though the local
+      // ladder would have retried after 5 s.
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(5_000);
+        videoRef.current!.dispatchEvent(new Event("timeupdate"));
+      });
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(25_000);
+      });
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      expect(states).not.toContain("error");
+    } finally {
+      unmount();
+      error.mockRestore();
+      vi.useRealTimers();
+    }
+  });
+
   it("keeps retrying explicitly-retryable 503s past the terminal ceiling", async () => {
     vi.useFakeTimers();
     const error = vi.spyOn(console, "error").mockImplementation(() => {});

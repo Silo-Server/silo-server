@@ -182,7 +182,7 @@ describe("createSubtitleWindowFetcher", () => {
       onWindowStart: (fresh) => events.push(fresh ? "start fresh" : "start extend"),
       onChunk: (chunk) => events.push(`chunk ${new TextDecoder().decode(chunk)}`),
       onWindowCommitted: () => events.push("committed"),
-      onWindowFailed: () => events.push("failed"),
+      onWindowFailed: (retryable) => events.push("failed", retryable ? "retryable" : "hard"),
       ...overrides,
     });
     return { fetcher, events };
@@ -220,6 +220,35 @@ describe("createSubtitleWindowFetcher", () => {
       await vi.advanceTimersByTimeAsync(5_000);
       expect(fetchMock).toHaveBeenCalledTimes(2);
       fetcher.dispose();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("tells a retryable refusal apart from a failure the same request cannot survive", async () => {
+    vi.useFakeTimers();
+    try {
+      vi.spyOn(console, "error").mockImplementation(() => {});
+      // A page refusal the server is recovering from: the caller keeps the
+      // track selected and lets the backoff retry it.
+      let status = 503;
+      const fetchMock = vi.fn(() => respond([], false, { status }));
+      vi.stubGlobal("fetch", fetchMock);
+      const { fetcher, events } = makeFetcher(() => 100);
+      fetcher.maybeFetch();
+      await vi.waitFor(() => expect(events).toContain("failed"));
+      expect(events).toContain("retryable");
+      expect(events).not.toContain("hard");
+      fetcher.dispose();
+
+      // A track that does not exist for this file: only a rebuild can fix it.
+      status = 404;
+      const missing = makeFetcher(() => 100);
+      missing.fetcher.maybeFetch();
+      await vi.waitFor(() => expect(missing.events).toContain("failed"));
+      expect(missing.events).toContain("hard");
+      expect(missing.events).not.toContain("retryable");
+      missing.fetcher.dispose();
     } finally {
       vi.useRealTimers();
     }
