@@ -5,7 +5,13 @@ import {
   type UploadItemImageType,
 } from "@/api/v2/adminImages";
 import { getAdminItemFiles, splitAdminItem } from "@/api/v2/adminSplit";
-import { useQuery, useMutation, useQueryClient, type QueryClient } from "@tanstack/react-query";
+import {
+  useIsMutating,
+  useMutation,
+  useQuery,
+  useQueryClient,
+  type QueryClient,
+} from "@tanstack/react-query";
 import { useRealtimeEvents } from "@/components/realtimeEventsContext";
 import type {
   ApplyItemImageRequest,
@@ -348,9 +354,12 @@ export interface UpdateItemMetadataRequest {
   locked_fields?: number[];
 }
 
+const itemMetadataWriteKey = (contentId: string) => ["items", "metadata-write", contentId] as const;
+
 export function useUpdateItemMetadata(contentId: string) {
   const queryClient = useQueryClient();
   return useMutation({
+    mutationKey: itemMetadataWriteKey(contentId),
     retry: false,
     mutationFn: async (data: UpdateItemMetadataRequest) =>
       catalogItemDetailFromV2(
@@ -370,6 +379,12 @@ export function useUpdateItemMetadata(contentId: string) {
       toast.error(err instanceof Error ? err.message : t("web.item.toast.saveMetadataFailed"));
     },
   });
+}
+
+// Whether a metadata save for the item is still running, including one
+// started from an earlier opening of Edit Metadata.
+export function useItemMetadataSavePending(contentId: string) {
+  return useIsMutating({ mutationKey: itemMetadataWriteKey(contentId) }) > 0;
 }
 
 type WatchedMutationItem = Pick<

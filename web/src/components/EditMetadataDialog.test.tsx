@@ -15,6 +15,7 @@ vi.mock("@/hooks/queries/items", () => ({
     isPending: false,
   }),
   useRefreshItemMetadata: () => ({ mutate: mocks.refresh }),
+  useItemMetadataSavePending: () => false,
 }));
 vi.mock("@/hooks/useIsActingAdmin", () => ({ useIsActingAdmin: () => true }));
 vi.mock("@/components/MetadataTranslatePanel", () => ({ MetadataTranslatePanel: () => null }));
@@ -46,6 +47,7 @@ vi.mock("@/components/ImageSelectorTab", () => ({
 }));
 
 import EditMetadataDialog from "./EditMetadataDialog";
+import { FIELD_OVERVIEW } from "./EditMetadataDialog.form";
 
 function series(lockedFields: number[] = []): ItemDetail {
   return {
@@ -398,5 +400,31 @@ describe("EditMetadataDialog reopening", () => {
     expect(screen.getByDisplayValue("Provider Title")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Save Changes" }));
     expect(mocks.update).not.toHaveBeenCalled();
+  });
+
+  // Reopened before a save's or a reset's refetch lands, the dialog starts
+  // from the old values; the refetch must replace them, not be saved over.
+  it("shows a refetch that lands while it is open, and saving it sends only the edits", () => {
+    const onOpenChange = vi.fn();
+    const { rerender } = render(
+      <EditMetadataDialog item={movie("Old Title")} open onOpenChange={onOpenChange} />,
+    );
+    rerender(
+      <EditMetadataDialog
+        item={{ ...movie("New Title"), overview: "Old overview" }}
+        open
+        onOpenChange={onOpenChange}
+      />,
+    );
+    expect(screen.getByDisplayValue("New Title")).toBeTruthy();
+
+    fireEvent.change(screen.getByDisplayValue("Old overview"), {
+      target: { value: "Edited overview" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save Changes" }));
+    expect(mocks.update).toHaveBeenCalledWith(
+      { overview: "Edited overview", locked_fields: [FIELD_OVERVIEW] },
+      expect.any(Object),
+    );
   });
 });
