@@ -1,8 +1,8 @@
-import { MutationObserver, QueryClient } from "@tanstack/react-query";
+import { MutationObserver, QueryClient, QueryObserver } from "@tanstack/react-query";
 import { describe, expect, it } from "vitest";
 import type { ItemDetail } from "@/api/types";
 import { catalogKeys } from "./keys";
-import { updateCatalogItemDetail } from "./mediaSurfaceRefresh";
+import { cancelItemDetailQueries, updateCatalogItemDetail } from "./mediaSurfaceRefresh";
 import { PERSONAL_STATE_WRITE_KEY } from "./personalStateWrites";
 
 describe("updateCatalogItemDetail", () => {
@@ -62,6 +62,51 @@ describe("updateCatalogItemDetail", () => {
     await landOther();
     expect(queryClient.getQueryState(invalidatedKey)?.isInvalidated).toBe(true);
     expect(queryClient.getQueryState(otherKey)?.isInvalidated).toBe(false);
+  });
+
+  it("lets an open page read the item again only after the write lands", async () => {
+    const queryClient = new QueryClient({ defaultOptions: { queries: { staleTime: Infinity } } });
+    const key = catalogKeys.itemDetail("item-1");
+    let reads = 0;
+    const page = new QueryObserver(queryClient, {
+      queryKey: key,
+      queryFn: ({ signal }) => {
+        reads += 1;
+        const tagline = reads === 1 ? "old" : "new";
+        // The read another device's save starts stays in flight until the
+        // toggle cancels it.
+        if (reads === 2) {
+          return new Promise<ItemDetail>((_, reject) =>
+            signal.addEventListener("abort", () => reject(signal.reason)),
+          );
+        }
+        return Promise.resolve({ content_id: "item-1", tagline } as ItemDetail);
+      },
+    });
+    const stopObserving = page.subscribe(() => {});
+    await settled();
+    void queryClient.invalidateQueries({ queryKey: key, exact: true });
+    await settled();
+
+    let land!: () => void;
+    const done = new MutationObserver(queryClient, {
+      mutationKey: PERSONAL_STATE_WRITE_KEY,
+      mutationFn: () => new Promise<void>((resolve) => (land = resolve)),
+      onMutate: async () => {
+        await cancelItemDetailQueries(queryClient, "item-1");
+        updateCatalogItemDetail(queryClient, "item-1", favorite);
+      },
+    }).mutate();
+    await settled();
+    expect(reads).toBe(2);
+
+    land();
+    await done;
+    await settled();
+    await settled();
+    expect(reads).toBe(3);
+    expect(queryClient.getQueryData<ItemDetail>(key)?.tagline).toBe("new");
+    stopObserving();
   });
 
   it("refetches at once for a patch with no write behind it", async () => {
