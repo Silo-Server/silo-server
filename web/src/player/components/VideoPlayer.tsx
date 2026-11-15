@@ -1111,8 +1111,13 @@ export function VideoPlayer({
    */
   const reportHlsConnectionLost = useCallback((): boolean => {
     const video = videoRef.current;
-    if (!onConnectionLost || !video || !streamPlayedRef.current) return false;
-    if (connectionStatusRef.current === "connected" && hasMediaAhead(video)) {
+    if (
+      onConnectionLost &&
+      video &&
+      streamFramedRef.current &&
+      connectionStatusRef.current === "connected" &&
+      hasMediaAhead(video)
+    ) {
       hlsDrainingRef.current = true;
       // The element may already be stalled, with its `waiting` long gone.
       if (video.readyState < HTMLMediaElement.HAVE_FUTURE_DATA) scheduleDrainCheck();
@@ -1574,11 +1579,15 @@ export function VideoPlayer({
     if (!replanError || replanning) return;
 
     // A refused reanchor never reaches its target. Resume relative skips from
-    // the surviving stream instead of extending the abandoned request.
-    pendingSeekTimeRef.current = null;
-    setPendingSeekTime(null);
-    const video = videoRef.current;
-    if (video) setCurrentTime(toMediaTime(video.currentTime, timelineOffsetRef.current));
+    // the surviving stream instead of extending the abandoned request. A
+    // draining stream's failed reanchor handed its target to the reconnect,
+    // which still resumes there.
+    if (connectionStatusRef.current === "connected") {
+      pendingSeekTimeRef.current = null;
+      setPendingSeekTime(null);
+      const video = videoRef.current;
+      if (video) setCurrentTime(toMediaTime(video.currentTime, timelineOffsetRef.current));
+    }
 
     const failureKey = `${sessionId}:${plan.plan_attempt_key}:${planRevision}`;
     if (reportedPlanFailureKeyRef.current === failureKey) {
@@ -1728,6 +1737,9 @@ export function VideoPlayer({
     [onReanchorSeek, releasePendingSeek, rememberPendingSeek],
   );
 
+  // Counts performPlayerSeek calls, so a seek's late fallback can tell it was
+  // replaced.
+  const playerSeekGenerationRef = useRef(0);
   // Reports whether the seek was taken up, which callers that show an
   // affordance for it (the intro prompt) need in order to know whether the
   // affordance did anything.
@@ -1746,10 +1758,12 @@ export function VideoPlayer({
 
       const nativeSeconds = toPlayerTime(seconds, timelineOffsetRef.current);
       // A draining stream can only play what it buffered. The reconnect
-      // resumes at a target that needs the server.
+      // resumes at a target that needs the server, unless a later seek has
+      // replaced it while the reanchor was failing.
       const draining = hlsDrainingRef.current && connectionStatusRef.current === "connected";
+      const seekGeneration = ++playerSeekGenerationRef.current;
       const reconnectAtTarget = () => {
-        if (!hlsDrainingRef.current) return;
+        if (!hlsDrainingRef.current || playerSeekGenerationRef.current !== seekGeneration) return;
         rememberPendingSeek(seconds);
         setCurrentTime(seconds);
         reconnectFromDrainedStream();

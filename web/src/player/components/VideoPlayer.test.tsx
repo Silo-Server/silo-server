@@ -6464,6 +6464,97 @@ describe("VideoPlayer lost connection", () => {
     },
   );
 
+  it("keeps a seek back into the buffer when a draining stream's earlier reanchor fails", async () => {
+    const onConnectionLost = vi.fn();
+    let settleReanchor: (ok: boolean) => void = () => {};
+    const onReanchorSeek = vi.fn(
+      () =>
+        new Promise<boolean>((resolve) => {
+          settleReanchor = resolve;
+        }),
+    );
+    const { video } = await drainingHlsStream({ onConnectionLost, onReanchorSeek }, false);
+    Object.defineProperty(video, "seekable", {
+      configurable: true,
+      value: { length: 1, start: () => 0, end: () => 70 } as unknown as TimeRanges,
+    });
+
+    let outsideSeek: unknown;
+    act(() => {
+      outsideSeek = controls.current?.onSeek(1_200);
+    });
+    // The viewer seeks back into what is buffered before the reanchor fails.
+    act(() => controls.current?.onSeek(30));
+    await act(async () => {
+      settleReanchor(false);
+      await outsideSeek;
+    });
+
+    expect(onReanchorSeek).toHaveBeenCalledExactlyOnceWith(1_200);
+    expect(onConnectionLost).not.toHaveBeenCalled();
+    expect(video.currentTime).toBe(30);
+  });
+
+  it("skips from a draining stream's reconnect target after its reanchor fails", async () => {
+    const onConnectionLost = vi.fn();
+    const ready = vi.fn();
+    const onReanchorSeek = vi.fn((_seconds: number) => Promise.resolve(false));
+    const { rerenderPlayer } = await drainingHlsStream(
+      { onConnectionLost, onReanchorSeek, onPlaybackTransportReady: ready },
+      false,
+    );
+
+    await act(async () => {
+      await controls.current?.onSeek(1_200);
+    });
+    expect(onConnectionLost).toHaveBeenCalledExactlyOnceWith(1_200, true);
+    // The session reports the failed reanchor as the reconnect starts.
+    rerenderPlayer({ replanError: "Update failed.", connectionStatus: "reconnecting" });
+    const transport = ready.mock.lastCall![0];
+    act(() => transport.skipForward());
+
+    expect(onReanchorSeek).toHaveBeenLastCalledWith(1_230);
+  });
+
+  it("hands a fatal hls.js network error on a stream that settled paused to the reconnect", async () => {
+    hlsJS.supported = true;
+    vi.spyOn(HTMLMediaElement.prototype, "canPlayType").mockReturnValue("");
+    const onConnectionLost = vi.fn();
+    const onPlanFailure = vi.fn();
+    const plan = fixturePlanV3({
+      stream: {
+        url: "/playback/transcode/session-1/master.m3u8",
+        protocol: "hls",
+        headers: {},
+        header_refresh: "none",
+      },
+    });
+    const { container } = renderPlayer({
+      plan,
+      shouldAutoPlay: false,
+      onConnectionLost,
+      onPlanFailure,
+    });
+    const video = container.querySelector("video");
+    if (!video) throw new Error("expected video element");
+    await waitFor(() => expect(hlsJS.latest).not.toBeNull());
+
+    // With autoplay off, the first frame settles paused and never plays.
+    setElementBuffer(video, {
+      currentTime: 10,
+      bufferedEnd: 10,
+      readyState: HTMLMediaElement.HAVE_ENOUGH_DATA,
+    });
+    fireEvent.canPlay(video);
+    act(() =>
+      hlsJS.latest?.emit("error", { fatal: true, type: "networkError", details: "levelLoadError" }),
+    );
+
+    expect(onConnectionLost).toHaveBeenCalledExactlyOnceWith(10, false);
+    expect(hlsJS.startLoad).not.toHaveBeenCalled();
+    expect(onPlanFailure).not.toHaveBeenCalled();
+  });
+
   it("checks a draining HLS stream that was already stalled when hls.js gave up", async () => {
     const onConnectionLost = vi.fn();
     await drainingHlsStream({ onConnectionLost }, true, HTMLMediaElement.HAVE_METADATA);

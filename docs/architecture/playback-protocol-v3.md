@@ -1398,16 +1398,19 @@ route, so a direct-play viewer would come back on a transcode. The web player
 (`web/src/player/hooks/usePlaybackSession.ts`) recovers like this instead:
 
 1. Pause, keep the position, and tell the viewer it is reconnecting. Stop
-   reporting route failures for the dead transport. An HLS stream whose
-   segments are already buffered is not dead yet: after hls.js gives up on the
-   network, the element plays on from its buffer while at least a second of
-   it lies ahead. This step starts when the element still can't play a second
-   after `waiting` (the buffer ran out, or the playhead is stuck), on a seek to
-   a position that isn't buffered, or on another fatal error. A seek outside
-   the stream's window still asks for a `seek_reanchor` first, because only
-   that moves the window, and reconnects if the server doesn't answer. The
-   cycle below therefore starts after up to a buffer's worth of playback; a
-   viewer who pauses meanwhile reconnects when they play or seek again.
+   reporting route failures for the dead transport. An HLS stream that has
+   shown a frame and still has segments buffered is not dead yet: after
+   hls.js gives up on the network, the element plays on from its buffer while
+   at least a second of it lies ahead. This step starts when the element
+   still can't play a second after `waiting` with less than that ahead (the
+   buffer ran out), when the playhead stays put through two such checks with
+   media ahead (about two seconds), on a seek to a position that isn't
+   buffered, or on another fatal error. A seek outside the stream's window
+   still asks for a `seek_reanchor` first, because only that moves the
+   window, and reconnects at its target if the reanchor fails and no later
+   seek has replaced it. The cycle below therefore starts after up to a
+   buffer's worth of playback. A paused viewer doesn't reconnect while
+   paused; playing again plays out the rest of the buffer first.
 2. Retry with backoff (1 s doubling to a 15 s cap, about two minutes in total).
    Each attempt is a `track_change` that changes nothing, at the saved
    position. It keeps the current route eligible and returns a fresh plan.
