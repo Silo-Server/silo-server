@@ -6049,6 +6049,12 @@
       "value": "ما الذي تغيّر؟ (اختياري، يظهر في السجل)"
     }
   ],
+  "web.admin.access.policy.editor.compileIssueFallback": [
+    {
+      "type": 0,
+      "value": "خطأ في تصريف السياسة"
+    }
+  ],
   "web.admin.access.policy.editor.compileIssues": [
     {
       "type": 0,
@@ -39869,6 +39875,54 @@
       "value": "فشل"
     }
   ],
+  "web.admin.common.units.gigabytes": [
+    {
+      "type": 0,
+      "value": "GB"
+    }
+  ],
+  "web.admin.common.units.hourRange": [
+    {
+      "type": 0,
+      "value": "0-23"
+    }
+  ],
+  "web.admin.common.units.kilobytes": [
+    {
+      "type": 0,
+      "value": "KB"
+    }
+  ],
+  "web.admin.common.units.megabitsPerSecond": [
+    {
+      "type": 0,
+      "value": "Mbps"
+    }
+  ],
+  "web.admin.common.units.megabytes": [
+    {
+      "type": 0,
+      "value": "MB"
+    }
+  ],
+  "web.admin.common.units.milliseconds": [
+    {
+      "type": 0,
+      "value": "ms"
+    }
+  ],
+  "web.admin.common.units.percent": [
+    {
+      "type": 0,
+      "value": "%"
+    }
+  ],
+  "web.admin.common.units.pixels": [
+    {
+      "type": 0,
+      "value": "px"
+    }
+  ],
   "web.admin.common.userProfiles.createFailed": [
     {
       "type": 0,
@@ -40241,6 +40295,100 @@
       "value": "إعادة التعيين إلى التخطيط الافتراضي"
     }
   ],
+  "web.admin.dashboard.format.duration.days": [
+    {
+      "type": 1,
+      "value": "days"
+    },
+    {
+      "type": 0,
+      "value": " ي"
+    }
+  ],
+  "web.admin.dashboard.format.duration.daysHours": [
+    {
+      "type": 1,
+      "value": "days"
+    },
+    {
+      "type": 0,
+      "value": " ي "
+    },
+    {
+      "type": 1,
+      "value": "hours"
+    },
+    {
+      "type": 0,
+      "value": " س"
+    }
+  ],
+  "web.admin.dashboard.format.duration.hours": [
+    {
+      "type": 1,
+      "value": "hours"
+    },
+    {
+      "type": 0,
+      "value": " س"
+    }
+  ],
+  "web.admin.dashboard.format.duration.hoursMinutes": [
+    {
+      "type": 1,
+      "value": "hours"
+    },
+    {
+      "type": 0,
+      "value": " س "
+    },
+    {
+      "type": 1,
+      "value": "minutes"
+    },
+    {
+      "type": 0,
+      "value": " د"
+    }
+  ],
+  "web.admin.dashboard.format.duration.minutes": [
+    {
+      "type": 1,
+      "value": "minutes"
+    },
+    {
+      "type": 0,
+      "value": " د"
+    }
+  ],
+  "web.admin.dashboard.format.duration.minutesSeconds": [
+    {
+      "type": 1,
+      "value": "minutes"
+    },
+    {
+      "type": 0,
+      "value": " د "
+    },
+    {
+      "type": 1,
+      "value": "seconds"
+    },
+    {
+      "type": 0,
+      "value": " ث"
+    }
+  ],
+  "web.admin.dashboard.format.duration.seconds": [
+    {
+      "type": 1,
+      "value": "seconds"
+    },
+    {
+      "type": 0,
+      "value": " ث"
+    }
+  ],
   "web.admin.dashboard.format.fileCount": [
     {
       "type": 6,
@@ -40317,6 +40465,16 @@
       },
       "offset": 0,
       "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.dashboard.format.latencyMs": [
+    {
+      "type": 1,
+      "value": "value"
+    },
+    {
+      "type": 0,
+      "value": " ms"
     }
   ],
   "web.admin.dashboard.format.scanQueued": [
@@ -40635,6 +40793,16 @@
     {
       "type": 0,
       "value": "في انتظار توفر السعة"
+    }
+  ],
+  "web.admin.dashboard.format.watchTimeHours": [
+    {
+      "type": 1,
+      "value": "hours"
+    },
+    {
+      "type": 0,
+      "value": " س"
     }
   ],
   "web.admin.dashboard.grid.added": [
@@ -134129,6 +134297,12 @@
       "value": "تستخدم هذه القواعد خيارات لا يستطيع العرض الموجّه إظهارها."
     }
   ],
+  "web.common.collections.posterUpdateFailed": [
+    {
+      "type": 0,
+      "value": "فشل تحديث الملصق"
+    }
+  ],
   "web.common.date.daysAgo": [
     {
       "type": 6,
@@ -134489,6 +134663,270 @@
       "value": "منصة غير معروفة"
     }
   ],
+  "web.common.errors.accessGroupIdUnsupported": [
+    {
+      "type": 0,
+      "value": "تحتوي هذه المجموعة على معرّف غير مدعوم."
+    }
+  ],
+  "web.common.errors.accessGroupPaginationInvalid": [
+    {
+      "type": 0,
+      "value": "ترقيم صفحات المجموعات غير صالح. أعد تحميل القائمة."
+    }
+  ],
+  "web.common.errors.accessGroupReloadBeforeSaving": [
+    {
+      "type": 0,
+      "value": "أعد تحميل هذه المجموعة قبل الحفظ: يلزم ETag قوي."
+    }
+  ],
+  "web.common.errors.collectionVersionUnavailable": [
+    {
+      "type": 0,
+      "value": "أعد تحميل هذه المجموعة قبل التحرير؛ إصدارها غير متاح."
+    }
+  ],
+  "web.common.errors.downloadUnavailable": [
+    {
+      "type": 0,
+      "value": "التنزيل غير متاح ("
+    },
+    {
+      "type": 1,
+      "value": "status"
+    },
+    {
+      "type": 0,
+      "value": ")."
+    }
+  ],
+  "web.common.errors.fileIdInvalid": [
+    {
+      "type": 0,
+      "value": "معرّف الملف غير صالح."
+    }
+  ],
+  "web.common.errors.invitationAcceptanceUnavailable": [
+    {
+      "type": 0,
+      "value": "قبول الدعوات غير متاح."
+    }
+  ],
+  "web.common.errors.invitationPaginationInvalid": [
+    {
+      "type": 0,
+      "value": "ترقيم صفحات الدعوات غير صالح. أعد تحميل القائمة."
+    }
+  ],
+  "web.common.errors.invitationResponseIncomplete": [
+    {
+      "type": 0,
+      "value": "ربما تم إنشاء الدعوة، لكن الاستجابة كانت غير مكتملة. أعد تحميل السجل قبل المتابعة."
+    }
+  ],
+  "web.common.errors.joinedRoomIdentityInvalid": [
+    {
+      "type": 0,
+      "value": "هوية الغرفة المنضم إليها غير صالحة."
+    }
+  ],
+  "web.common.errors.memberIdentityInvalid": [
+    {
+      "type": 0,
+      "value": "هوية العضو غير صالحة."
+    }
+  ],
+  "web.common.errors.memberStateLimit": [
+    {
+      "type": 0,
+      "value": "تقتصر قراءة حالة الأعضاء على "
+    },
+    {
+      "type": 1,
+      "value": "max"
+    },
+    {
+      "type": 0,
+      "value": " عنصر كحد أقصى."
+    }
+  ],
+  "web.common.errors.notificationDestinationContinuationInvalid": [
+    {
+      "type": 0,
+      "value": "متابعة قائمة وجهات الإشعارات غير صالحة."
+    }
+  ],
+  "web.common.errors.notificationDestinationPageInvalid": [
+    {
+      "type": 0,
+      "value": "صفحة وجهات الإشعارات غير صالحة."
+    }
+  ],
+  "web.common.errors.notificationDestinationsTooMany": [
+    {
+      "type": 0,
+      "value": "وجهات الإشعارات أكثر من أن تُعرض. أعد تحميل القائمة."
+    }
+  ],
+  "web.common.errors.notificationLibraryIdUnsupported": [
+    {
+      "type": 0,
+      "value": "معرّف مكتبة غير مدعوم في الإشعار."
+    }
+  ],
+  "web.common.errors.notificationPageInvalid": [
+    {
+      "type": 0,
+      "value": "صفحة الإشعارات غير صالحة. أعد تحميل الإشعارات."
+    }
+  ],
+  "web.common.errors.notificationSeriesPageInvalid": [
+    {
+      "type": 0,
+      "value": "صفحة المسلسلات غير صالحة. أعد تحميل الإشعارات."
+    }
+  ],
+  "web.common.errors.notificationsReloadBeforeMarkingRead": [
+    {
+      "type": 0,
+      "value": "أعد تحميل الإشعارات قبل تمييزها كمقروءة."
+    }
+  ],
+  "web.common.errors.onboardingProgressNoRevision": [
+    {
+      "type": 0,
+      "value": "لا توجد مراجعة لتقدّم الإعداد الأولي. أعد التحميل للمتابعة."
+    }
+  ],
+  "web.common.errors.onboardingReloadTour": [
+    {
+      "type": 0,
+      "value": "أعد تحميل الجولة قبل المتابعة."
+    }
+  ],
+  "web.common.errors.onboardingStateNoRevision": [
+    {
+      "type": 0,
+      "value": "لا توجد مراجعة لحالة الإعداد الأولي. أعد التحميل للمتابعة."
+    }
+  ],
+  "web.common.errors.onboardingStillSaving": [
+    {
+      "type": 0,
+      "value": "لا يزال تقدّم الإعداد الأولي قيد الحفظ."
+    }
+  ],
+  "web.common.errors.playbackControlCredentialInvalid": [
+    {
+      "type": 0,
+      "value": "بيانات اعتماد التحكم في التشغيل غير صالحة."
+    }
+  ],
+  "web.common.errors.realtimeCredentialInvalid": [
+    {
+      "type": 0,
+      "value": "بيانات اعتماد مصافحة الاتصال الفوري غير صالحة."
+    }
+  ],
+  "web.common.errors.roomIdentityInvalid": [
+    {
+      "type": 0,
+      "value": "هوية الغرفة غير صالحة."
+    }
+  ],
+  "web.common.errors.roomSelectionIdentityInvalid": [
+    {
+      "type": 0,
+      "value": "هوية اختيار الغرفة غير صالحة."
+    }
+  ],
+  "web.common.errors.roomSnapshotInvalid": [
+    {
+      "type": 0,
+      "value": "لقطة حالة الغرفة غير صالحة."
+    }
+  ],
+  "web.common.errors.roomSocketCredentialInvalid": [
+    {
+      "type": 0,
+      "value": "بيانات اعتماد اتصال الغرفة غير صالحة."
+    }
+  ],
+  "web.common.errors.roomSuggestionInvalid": [
+    {
+      "type": 0,
+      "value": "اقتراح الغرفة غير صالح."
+    }
+  ],
+  "web.common.errors.roomSuggestionsTooMany": [
+    {
+      "type": 0,
+      "value": "اقتراحات الغرفة كثيرة جدًا. أعد تحميل الغرفة."
+    }
+  ],
+  "web.common.errors.sessionRefreshUnavailable": [
+    {
+      "type": 0,
+      "value": "تعذّر تحديث الجلسة لأن الخادم لم يستجب."
+    }
+  ],
+  "web.common.errors.sourceFallbackIdentityInvalid": [
+    {
+      "type": 0,
+      "value": "هوية المصدر البديل غير صالحة."
+    }
+  ],
+  "web.common.errors.suggestionContinuationInvalid": [
+    {
+      "type": 0,
+      "value": "متابعة قائمة الاقتراحات غير صالحة."
+    }
+  ],
+  "web.common.errors.suggestionContinuationMissing": [
+    {
+      "type": 0,
+      "value": "متابعة قائمة الاقتراحات مفقودة."
+    }
+  ],
+  "web.common.errors.suggestionReceiptInvalid": [
+    {
+      "type": 0,
+      "value": "إيصال الاقتراح غير صالح."
+    }
+  ],
+  "web.common.errors.verificationReceiptMismatch": [
+    {
+      "type": 0,
+      "value": "إيصال التحقق لا يطابق الطلب المُرسَل."
+    }
+  ],
+  "web.common.errors.watchlistPageRepeated": [
+    {
+      "type": 0,
+      "value": "كررت قائمة عناوين قائمة المشاهدة مؤشر صفحة."
+    }
+  ],
+  "web.common.format.bitrate.bps": [
+    {
+      "type": 1,
+      "value": "rate"
+    },
+    {
+      "type": 0,
+      "value": " bps"
+    }
+  ],
+  "web.common.format.bitrate.gbps": [
+    {
+      "type": 1,
+      "value": "rate"
+    },
+    {
+      "type": 0,
+      "value": " Gbps"
+    }
+  ],
   "web.common.format.bitrate.kbps": [
     {
       "type": 1,
@@ -134631,6 +135069,16 @@
     {
       "type": 1,
       "value": "chapter"
+    }
+  ],
+  "web.common.format.percent": [
+    {
+      "type": 1,
+      "value": "percent"
+    },
+    {
+      "type": 0,
+      "value": "%"
     }
   ],
   "web.common.format.runtime.hoursMinutes": [
@@ -134813,6 +135261,36 @@
       "value": " MiB"
     }
   ],
+  "web.common.format.size.pb": [
+    {
+      "type": 1,
+      "value": "size"
+    },
+    {
+      "type": 0,
+      "value": " PB"
+    }
+  ],
+  "web.common.format.size.tb": [
+    {
+      "type": 1,
+      "value": "size"
+    },
+    {
+      "type": 0,
+      "value": " TB"
+    }
+  ],
+  "web.common.format.size.tib": [
+    {
+      "type": 1,
+      "value": "size"
+    },
+    {
+      "type": 0,
+      "value": " TiB"
+    }
+  ],
   "web.common.genres.action": [
     {
       "type": 0,
@@ -134983,6 +135461,12 @@
     {
       "type": 0,
       "value": "غرب أمريكي"
+    }
+  ],
+  "web.common.job.cancellationRequested": [
+    {
+      "type": 0,
+      "value": "تم طلب الإلغاء"
     }
   ],
   "web.common.job.cancelled": [
@@ -144839,6 +145323,20 @@
       "value": "هذا ليس تصديرًا لتخطيط الرئيسية من Silo."
     }
   ],
+  "web.home.layout.transfer.pageTooLarge": [
+    {
+      "type": 0,
+      "value": "ستتجاوز هذه الصفحة "
+    },
+    {
+      "type": 1,
+      "value": "max"
+    },
+    {
+      "type": 0,
+      "value": " من تغييرات الأقسام المحفوظة"
+    }
+  ],
   "web.home.layout.transfer.preferencesFailed": [
     {
       "type": 0,
@@ -146278,6 +146776,16 @@
     {
       "type": 0,
       "value": "ما حفظته لمشاهدته لاحقًا"
+    }
+  ],
+  "web.home.rows.describe.pageNameLibrary": [
+    {
+      "type": 0,
+      "value": "صفحة "
+    },
+    {
+      "type": 1,
+      "value": "label"
     }
   ],
   "web.home.rows.describe.randomMix": [
@@ -151196,6 +151704,36 @@
     {
       "type": 0,
       "value": " فصل"
+    }
+  ],
+  "web.item.card.mangaStatus.cancelled": [
+    {
+      "type": 0,
+      "value": "ملغى"
+    }
+  ],
+  "web.item.card.mangaStatus.completed": [
+    {
+      "type": 0,
+      "value": "مكتمل"
+    }
+  ],
+  "web.item.card.mangaStatus.hiatus": [
+    {
+      "type": 0,
+      "value": "متوقف مؤقتًا"
+    }
+  ],
+  "web.item.card.mangaStatus.ongoing": [
+    {
+      "type": 0,
+      "value": "مستمر"
+    }
+  ],
+  "web.item.card.mangaStatus.upcoming": [
+    {
+      "type": 0,
+      "value": "قادم"
     }
   ],
   "web.item.card.mangaVolumes": [
@@ -156966,6 +157504,26 @@
       "value": "تحويل الترميز معطّل"
     }
   ],
+  "web.player.error.unknownMediaError": [
+    {
+      "type": 0,
+      "value": "خطأ غير معروف في عنصر الوسائط"
+    }
+  ],
+  "web.player.error.updateFailed": [
+    {
+      "type": 0,
+      "value": "فشل تحديث التشغيل ("
+    },
+    {
+      "type": 1,
+      "value": "status"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
   "web.player.error.upgradeRequired.message": [
     {
       "type": 0,
@@ -161585,6 +162143,12 @@
       "value": "0 = غير محدود"
     }
   ],
+  "web.reader.document.fallbackTitle": [
+    {
+      "type": 0,
+      "value": "مستند"
+    }
+  ],
   "web.reader.endOfBook.nextChapter": [
     {
       "type": 0,
@@ -161593,6 +162157,12 @@
     {
       "type": 1,
       "value": "chapter"
+    }
+  ],
+  "web.reader.error.fileEmpty": [
+    {
+      "type": 0,
+      "value": "الملف فارغ"
     }
   ],
   "web.reader.error.fileIdentifier": [
@@ -161611,6 +162181,18 @@
     {
       "type": 0,
       "value": "هذا الملف أكبر من أن يُفتح في المتصفح. نزّله بدلًا من ذلك."
+    }
+  ],
+  "web.reader.error.unsupportedFormat": [
+    {
+      "type": 0,
+      "value": "تنسيق الكتاب غير مدعوم"
+    }
+  ],
+  "web.reader.error.unsupportedOrCorrupted": [
+    {
+      "type": 0,
+      "value": "ملف الكتاب غير مدعوم أو تالف"
     }
   ],
   "web.reader.fileOption.unnamed": [
@@ -161809,6 +162391,92 @@
     {
       "type": 0,
       "value": "تنفيذ البحث"
+    }
+  ],
+  "web.reader.search.truncated": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "zero": {
+          "value": [
+            {
+              "type": 0,
+              "value": "يتم عرض أول "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " تطابق."
+            }
+          ]
+        },
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "يتم عرض التطابق الأول."
+            }
+          ]
+        },
+        "two": {
+          "value": [
+            {
+              "type": 0,
+              "value": "يتم عرض أول تطابقين."
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 0,
+              "value": "يتم عرض أول "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " تطابقات."
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 0,
+              "value": "يتم عرض أول "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " تطابقًا."
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "يتم عرض أول "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " تطابق."
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.reader.settings.brightness": [
@@ -171225,6 +171893,38 @@
       "value": "قنوات الصوت"
     }
   ],
+  "web.settings.overlays.badge.availability.description": [
+    {
+      "type": 0,
+      "value": "المواسم المكتملة للمسلسل، أو حلقات الموسم الموجودة في المكتبة"
+    }
+  ],
+  "web.settings.overlays.badge.availability.label": [
+    {
+      "type": 0,
+      "value": "التوفر"
+    }
+  ],
+  "web.settings.overlays.badge.availability.value.complete": [
+    {
+      "type": 0,
+      "value": "مكتمل"
+    }
+  ],
+  "web.settings.overlays.badge.availability.value.fraction": [
+    {
+      "type": 1,
+      "value": "have"
+    },
+    {
+      "type": 0,
+      "value": "/"
+    },
+    {
+      "type": 1,
+      "value": "total"
+    }
+  ],
   "web.settings.overlays.badge.container.description": [
     {
       "type": 0,
@@ -171301,6 +172001,12 @@
     {
       "type": 0,
       "value": "الترجمة متاحة"
+    }
+  ],
+  "web.settings.overlays.badge.multiSub.value": [
+    {
+      "type": 0,
+      "value": "CC"
     }
   ],
   "web.settings.overlays.badge.network.description": [
@@ -173421,6 +174127,12 @@
     {
       "type": 0,
       "value": "Wi-Fi"
+    }
+  ],
+  "web.settings.plexAuth.homeUserFallbackName": [
+    {
+      "type": 0,
+      "value": "مستخدم Plex"
     }
   ],
   "web.settings.plexAuth.homeUserNoServerAccess": [
