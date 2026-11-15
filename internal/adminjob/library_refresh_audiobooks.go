@@ -1,0 +1,190 @@
+package adminjob
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"log/slog"
+	"strconv"
+	"time"
+
+	"github.com/Silo-Server/silo-server/internal/cache"
+	"github.com/Silo-Server/silo-server/internal/events"
+	"github.com/Silo-Server/silo-server/internal/libraryingest"
+	"github.com/Silo-Server/silo-server/internal/librarykind"
+	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/notifications"
+	"github.com/Silo-Server/silo-server/internal/scanbatch"
+	"github.com/Silo-Server/silo-server/internal/scanner"
+	"github.com/Silo-Server/silo-server/internal/scanqueue"
+)
+
+// ErrLibraryScanInProgress reports that a library scan of the library is
+// already accepted or running, so a full refresh of an audiobook library does
+// not start a second one.
+var ErrLibraryScanInProgress = errors.New("a scan of this library is already running; refresh its metadata when the scan finishes")
+
+// libraryRefreshFolderIngester ingests a whole library
+// (libraryingest.Executor).
+type libraryRefreshFolderIngester interface {
+	IngestFolder(ctx context.Context, folder *models.MediaFolder) (*libraryingest.Result, error)
+}
+
+// scanRunProgressWriter persists a running scan's progress
+// (scanqueue.Repository).
+type scanRunProgressWriter interface {
+	UpdateProgress(ctx context.Context, id string, startedAt *time.Time, result *events.ScanRunResult) (*models.ScanRun, error)
+}
+
+// refreshAudiobookLibrary is a full refresh of an audiobook library. One
+// library scan, run directly and recorded as one scan run, reads every book's
+// tags again on the scanner's worker pool; it otherwise runs as any library
+// scan. Then each unmatched book is made due for the audiobook enricher's
+// next sweep. Matched books keep their match, ignored books stay ignored, and
+// no provider is asked. handled is false for a library that is not an
+// audiobook library, or when the executor cannot run a library scan.
+func (e *LibraryRefreshExecutor) refreshAudiobookLibrary(
+	ctx context.Context,
+	req LibraryRefreshRequest,
+	progress func(current, total int, message string),
+) (*LibraryRefreshResult, bool, error) {
+	ingester, ok := e.ingester.(libraryRefreshFolderIngester)
+	if !ok || e.scanRuns == nil {
+		return nil, false, nil
+	}
+	folder, err := e.folderRepo.GetByID(ctx, req.LibraryID)
+	if err != nil {
+		return nil, true, fmt.Errorf("load library %d: %w", req.LibraryID, err)
+	}
+	if !librarykind.IsAudiobook(folder.Type) {
+		return nil, false, nil
+	}
+
+	run, created, err := e.scanRuns.Create(ctx, scanqueue.CreateInput{
+		LibraryID: req.LibraryID,
+		Mode:      scanqueue.ModeLibrary,
+		Trigger:   libraryRefreshScanTrigger,
+	})
+	if err != nil {
+		return nil, true, fmt.Errorf("create scan run: %w", err)
+	}
+	if !created {
+		// idx_scan_runs_active_scope: a queued or running library scan
+		// owns the library. A refresh after it reads every book again.
+		slog.InfoContext(ctx, "library refresh: a library scan is already active", "component", "adminjob",
+			"library_id", req.LibraryID, "active_scan_id", activeScanRunID(run))
+		return nil, true, ErrLibraryScanInProgress
+	}
+	runID := run.ID
+	if run, err = e.scanRuns.Start(ctx, runID); err != nil {
+		startErr := fmt.Errorf("start scan run: %w", err)
+		cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), directScanFinishTimeout)
+		defer cancel()
+		if _, _, cancelErr := e.scanRuns.MarkCancelled(cleanupCtx, runID); cancelErr != nil {
+			startErr = errors.Join(startErr, fmt.Errorf("cancel scan run after start failure: %w", cancelErr))
+		}
+		return nil, true, startErr
+	}
+
+	if progress != nil {
+		progress(0, 0, "Reading audiobook tags")
+	}
+	scanCtx := scanner.WithAudiobookLibraryTagReread(ctx)
+	scanCtx = libraryingest.WithProgressReporter(scanCtx, e.audiobookScanProgress(run, progress))
+	stopHeartbeat := startDirectScanHeartbeat(e.scanRuns, run, directScanHeartbeatEvery)
+	ingestResult, err := ingester.IngestFolder(scanbatch.WithRunID(scanCtx, run.ID), folder)
+	stopHeartbeat()
+	if err != nil {
+		return nil, true, fmt.Errorf("scan library: %w", failDirectScan(ctx, e.scanRuns, run, err))
+	}
+	if err := completeDirectScan(ctx, e.scanRuns, run, ingestResult); err != nil {
+		return nil, true, fmt.Errorf("scan library: %w", err)
+	}
+
+	result := &LibraryRefreshResult{
+		LibraryID:   req.LibraryID,
+		LibraryName: req.LibraryName,
+		Mode:        req.Mode,
+		PipelineOK:  int(scanner.AudiobookTagRereadCount(scanCtx)),
+	}
+	if ingestResult != nil && ingestResult.ScanResult != nil {
+		result.PipelineFailed = ingestResult.ScanResult.Errors
+	}
+	if err := e.requeueUnmatchedAudiobooks(ctx, req, result); err != nil {
+		return nil, true, err
+	}
+
+	e.publish(cache.EventScanComplete, strconv.Itoa(req.LibraryID))
+	e.publish(cache.EventMetadataUpdated, strconv.Itoa(req.LibraryID))
+	if e.realtimeHub != nil {
+		_ = e.realtimeHub.PublishCatalogItemChanged(ctx, notifications.MetadataUpdateEvent{
+			LibraryID: req.LibraryID,
+			Change:    metadataUpdatedChange,
+		})
+	}
+	return result, true, nil
+}
+
+// requeueUnmatchedAudiobooks hands the library's unmatched audiobooks back to
+// the audiobook enricher, listed after the scan so books it found are
+// included.
+func (e *LibraryRefreshExecutor) requeueUnmatchedAudiobooks(ctx context.Context, req LibraryRefreshRequest, result *LibraryRefreshResult) error {
+	items, err := e.itemLister.ListLibraryItems(ctx, req.LibraryID, req.Mode)
+	if err != nil {
+		return fmt.Errorf("load library items: %w", err)
+	}
+	for _, item := range items {
+		if !item.Audiobook {
+			continue
+		}
+		result.TotalItems++
+		if e.audiobooks == nil {
+			continue
+		}
+		queued, err := e.audiobooks.RequeueUnmatched(ctx, item.ContentID)
+		if err != nil {
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
+			slog.WarnContext(ctx, "library refresh: could not queue audiobook for matching", "component", "adminjob",
+				"library_id", req.LibraryID, "content_id", item.ContentID, "error", err)
+			continue
+		}
+		if queued {
+			result.AudiobooksQueued++
+		}
+	}
+	result.ItemsWithoutIDs = result.TotalItems
+	return nil
+}
+
+// audiobookScanProgress forwards the library scan's own progress to the job
+// and to its scan run, as the scan queue does for a queued scan.
+func (e *LibraryRefreshExecutor) audiobookScanProgress(run *models.ScanRun, progress func(current, total int, message string)) func(libraryingest.ProgressUpdate) {
+	writer, _ := e.scanRuns.(scanRunProgressWriter)
+	return func(update libraryingest.ProgressUpdate) {
+		if progress != nil {
+			progress(update.FilesProcessed, update.TotalFiles, "Reading audiobook tags")
+		}
+		if writer == nil || run == nil {
+			return
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), directScanHeartbeatTimeout)
+		defer cancel()
+		if _, err := writer.UpdateProgress(ctx, run.ID, run.StartedAt, &events.ScanRunResult{
+			New:             update.New,
+			Updated:         update.Updated,
+			Unchanged:       update.Unchanged,
+			Errors:          update.Errors,
+			MatchedFiles:    update.MatchedFiles,
+			Phase:           update.Phase,
+			Message:         update.Message,
+			CurrentScope:    update.CurrentScope,
+			TotalFiles:      update.TotalFiles,
+			FilesDiscovered: update.FilesDiscovered,
+			FilesProcessed:  update.FilesProcessed,
+		}); err != nil && !errors.Is(err, scanqueue.ErrScanRunNotFound) {
+			slog.Warn("library refresh: failed to persist scan progress", "component", "adminjob", "scan_id", run.ID, "error", err)
+		}
+	}
+}

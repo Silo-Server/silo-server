@@ -24,6 +24,10 @@ import (
 const (
 	JobTypeLibraryRefresh = "library_refresh"
 
+	// metadataUpdatedChange is the realtime change a metadata refresh
+	// publishes.
+	metadataUpdatedChange = "metadata_updated"
+
 	defaultUnmatchedRefreshDelay = 2 * time.Second
 	libraryRefreshWorkerCount    = 4
 )
@@ -57,6 +61,9 @@ type LibraryRefreshResult struct {
 	RefreshedFailed int                `json:"refreshed_failed"`
 	PipelineOK      int                `json:"pipeline_ok"`
 	PipelineFailed  int                `json:"pipeline_failed"`
+	// AudiobooksQueued counts the unmatched audiobooks a full refresh of an
+	// audiobook library made due for the next enrichment sweep.
+	AudiobooksQueued int `json:"audiobooks_queued,omitempty"`
 }
 
 type LibraryRefreshItem struct {
@@ -64,9 +71,10 @@ type LibraryRefreshItem struct {
 	TmdbID    string
 	TvdbID    string
 	ImdbID    string
-	// TagsOnly marks an audiobook an admin left unmatched on purpose: a full
-	// refresh reads its tags again but asks no provider about it.
-	TagsOnly bool
+	// Audiobook marks an audiobook. A full refresh reads its tags again and
+	// leaves provider matching to the audiobook enricher; a quick refresh
+	// skips it.
+	Audiobook bool
 }
 
 type libraryRefreshItemLister interface {
@@ -85,6 +93,12 @@ type libraryRefreshIngester interface {
 	IngestSubtree(ctx context.Context, folder *models.MediaFolder, subtreePath string) (*libraryingest.Result, error)
 }
 
+// libraryRefreshAudiobookRequeuer is the audiobook enricher
+// (audiobooks.Enricher), which alone matches audiobooks.
+type libraryRefreshAudiobookRequeuer interface {
+	RequeueUnmatched(ctx context.Context, contentID string) (bool, error)
+}
+
 type libraryRefreshRefresher interface {
 	RefreshItem(ctx context.Context, contentID string) error
 	RefreshItemForLibrary(ctx context.Context, contentID string, folderID int) error
@@ -101,14 +115,14 @@ func NewPGLibraryRefreshItemLister(pool *pgxpool.Pool) *PGLibraryRefreshItemList
 func (l *PGLibraryRefreshItemLister) ListLibraryItems(ctx context.Context, libraryID int, mode LibraryRefreshMode) ([]LibraryRefreshItem, error) {
 	query := `
 		SELECT mi.content_id, COALESCE(mi.tmdb_id, ''), COALESCE(mi.tvdb_id, ''), COALESCE(mi.imdb_id, ''),
-		       mi.match_ignored_at IS NOT NULL
+		       mi.type = 'audiobook'
 		FROM media_item_libraries mil
 		JOIN media_folders f ON f.id = mil.media_folder_id
 		JOIN media_items mi ON mi.content_id = mil.content_id
 		WHERE mil.media_folder_id = $1
 		  -- An item an admin ignored is left unmatched on purpose; refreshing
 		  -- it would only rescan its folder for nothing. An ignored audiobook
-		  -- still has its tags read again (TagsOnly).
+		  -- still has its tags read again.
 		  AND (mi.match_ignored_at IS NULL OR mi.type = 'audiobook')`
 	args := []any{libraryID}
 
@@ -192,7 +206,7 @@ func (l *PGLibraryRefreshItemLister) ListLibraryItems(ctx context.Context, libra
 	items := make([]LibraryRefreshItem, 0)
 	for rows.Next() {
 		var item LibraryRefreshItem
-		if err := rows.Scan(&item.ContentID, &item.TmdbID, &item.TvdbID, &item.ImdbID, &item.TagsOnly); err != nil {
+		if err := rows.Scan(&item.ContentID, &item.TmdbID, &item.TvdbID, &item.ImdbID, &item.Audiobook); err != nil {
 			return nil, fmt.Errorf("scan library refresh item: %w", err)
 		}
 		items = append(items, item)
@@ -210,6 +224,7 @@ type LibraryRefreshExecutor struct {
 	ingester       libraryRefreshIngester
 	scanRuns       directScanRunRepository
 	refresher      libraryRefreshRefresher
+	audiobooks     libraryRefreshAudiobookRequeuer
 	eventBus       cache.EventBus
 	realtimeHub    *notifications.Hub
 	unmatchedDelay time.Duration
@@ -239,6 +254,14 @@ func libraryRefreshLockKey(libraryID int) int64 {
 // at the same time. Without a pool, Execute takes no lock.
 func (e *LibraryRefreshExecutor) SetLibraryLockPool(pool *pgxpool.Pool) {
 	e.lockPool = pool
+}
+
+// SetAudiobookEnricher installs the audiobook enricher, which a full refresh
+// asks to retry the library's unmatched audiobooks. Without it, a full
+// refresh only reads audiobook tags again. Audiobooks never go through the
+// general metadata refresher.
+func (e *LibraryRefreshExecutor) SetAudiobookEnricher(enricher libraryRefreshAudiobookRequeuer) {
+	e.audiobooks = enricher
 }
 
 func NewLibraryRefreshExecutor(
@@ -293,13 +316,20 @@ func (e *LibraryRefreshExecutor) Execute(
 		}()
 	}
 
+	if req.Mode == LibraryRefreshModeFull {
+		if result, handled, err := e.refreshAudiobookLibrary(ctx, req, progress); handled || err != nil {
+			return result, err
+		}
+	}
+
 	items, err := e.itemLister.ListLibraryItems(ctx, req.LibraryID, req.Mode)
 	if err != nil {
 		return nil, fmt.Errorf("load library items: %w", err)
 	}
-	// Only a full refresh reads an ignored audiobook's tags again.
+	// Only a full refresh touches audiobooks, and only to read their tags
+	// again and hand unmatched ones back to the audiobook enricher.
 	if req.Mode != LibraryRefreshModeFull {
-		items = slices.DeleteFunc(items, func(item LibraryRefreshItem) bool { return item.TagsOnly })
+		items = slices.DeleteFunc(items, func(item LibraryRefreshItem) bool { return item.Audiobook })
 	}
 
 	result := &LibraryRefreshResult{
@@ -317,10 +347,14 @@ func (e *LibraryRefreshExecutor) Execute(
 
 	withIDs := make([]string, 0, len(items))
 	withoutIDs := make([]string, 0, len(items))
-	tagsOnly := make(map[string]bool)
+	audiobooks := make(map[string]bool)
 	for _, item := range items {
-		if item.TagsOnly {
-			tagsOnly[item.ContentID] = true
+		if item.Audiobook {
+			// Whatever IDs an audiobook carries, the general refresher
+			// must not match or rebind it.
+			audiobooks[item.ContentID] = true
+			withoutIDs = append(withoutIDs, item.ContentID)
+			continue
 		}
 		if item.TmdbID == "" && item.TvdbID == "" && item.ImdbID == "" {
 			withoutIDs = append(withoutIDs, item.ContentID)
@@ -346,7 +380,7 @@ func (e *LibraryRefreshExecutor) Execute(
 	}
 
 	if req.Mode == LibraryRefreshModeFull && len(withoutIDs) > 0 {
-		if err := e.refreshItemsWithoutIDs(ctx, req.LibraryID, withoutIDs, tagsOnly, result, advance); err != nil {
+		if err := e.refreshItemsWithoutIDs(ctx, req.LibraryID, withoutIDs, audiobooks, result, advance); err != nil {
 			return nil, err
 		}
 	}
@@ -356,7 +390,7 @@ func (e *LibraryRefreshExecutor) Execute(
 		if e.realtimeHub != nil {
 			_ = e.realtimeHub.PublishCatalogItemChanged(ctx, notifications.MetadataUpdateEvent{
 				LibraryID: req.LibraryID,
-				Change:    "metadata_updated",
+				Change:    metadataUpdatedChange,
 			})
 		}
 	}
@@ -439,16 +473,18 @@ func (e *LibraryRefreshExecutor) refreshItemsWithoutIDs(
 	ctx context.Context,
 	libraryID int,
 	contentIDs []string,
-	tagsOnly map[string]bool,
+	audiobooks map[string]bool,
 	result *LibraryRefreshResult,
 	advance func(message string),
 ) error {
 	fullPipelineAvailable := e.resolver != nil && e.ingester != nil && e.scanRuns != nil
-	for i, contentID := range contentIDs {
+	askedProvider := false
+	for _, contentID := range contentIDs {
 		if err := e.ensureLibraryEnabled(ctx, libraryID); err != nil {
 			return err
 		}
-		if i > 0 && e.unmatchedDelay > 0 {
+		// The delay spaces provider requests; an audiobook makes none here.
+		if askedProvider && !audiobooks[contentID] && e.unmatchedDelay > 0 {
 			if err := e.wait(ctx, e.unmatchedDelay); err != nil {
 				return err
 			}
@@ -460,20 +496,24 @@ func (e *LibraryRefreshExecutor) refreshItemsWithoutIDs(
 			continue
 		}
 
-		if err := e.refreshUnmatchedItem(ctx, libraryID, contentID, tagsOnly[contentID]); err != nil {
+		if err := e.refreshUnmatchedItem(ctx, libraryID, contentID, audiobooks[contentID]); err != nil {
+			slog.WarnContext(ctx, "library refresh: item refresh failed", "component", "adminjob",
+				"library_id", libraryID, "content_id", contentID, "error", err)
 			result.PipelineFailed++
 		} else {
 			result.PipelineOK++
 		}
+		askedProvider = askedProvider || !audiobooks[contentID]
 		advance("Refreshing unmatched items")
 	}
 	return nil
 }
 
 // refreshUnmatchedItem scans the item's folder and refreshes its metadata.
-// tagsOnly leaves out the metadata refresh, for an audiobook an admin left
-// unmatched on purpose.
-func (e *LibraryRefreshExecutor) refreshUnmatchedItem(ctx context.Context, libraryID int, contentID string, tagsOnly bool) error {
+// An audiobook gets no general metadata refresh: after its tags are read
+// again, an unmatched one is made due for the audiobook enricher's next sweep,
+// and a matched or ignored one keeps its state.
+func (e *LibraryRefreshExecutor) refreshUnmatchedItem(ctx context.Context, libraryID int, contentID string, audiobook bool) error {
 	req, err := e.resolver.ResolveForLibrary(ctx, contentID, libraryID)
 	if err != nil {
 		return fmt.Errorf("resolve scope: %w", err)
@@ -504,7 +544,12 @@ func (e *LibraryRefreshExecutor) refreshUnmatchedItem(ctx context.Context, libra
 	if err := completeDirectScan(ctx, e.scanRuns, scanRun, ingestResult); err != nil {
 		return fmt.Errorf("ingest subtree: %w", err)
 	}
-	if !tagsOnly {
+	switch {
+	case audiobook && e.audiobooks != nil:
+		if _, err := e.audiobooks.RequeueUnmatched(ctx, req.RefreshContentID); err != nil {
+			return fmt.Errorf("queue audiobook for matching: %w", err)
+		}
+	case !audiobook:
 		if err := e.refresher.RefreshItemForLibrary(ctx, req.RefreshContentID, req.ScanFolderID); err != nil {
 			return fmt.Errorf("refresh metadata: %w", err)
 		}
@@ -534,7 +579,7 @@ func (e *LibraryRefreshExecutor) publishCatalogItemChanged(ctx context.Context, 
 	_ = e.realtimeHub.PublishCatalogItemChanged(ctx, notifications.MetadataUpdateEvent{
 		LibraryID: libraryID,
 		ContentID: contentID,
-		Change:    "metadata_updated",
+		Change:    metadataUpdatedChange,
 	})
 }
 

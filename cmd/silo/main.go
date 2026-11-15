@@ -2547,6 +2547,9 @@ func main() {
 				deps.RealtimeHub,
 			)
 			libraryRefreshExecutor.SetLibraryLockPool(deps.DB)
+			if audiobookEnricher != nil {
+				libraryRefreshExecutor.SetAudiobookEnricher(audiobookEnricher)
+			}
 		}
 		if metadataService != nil && deps.FileRepo != nil {
 			itemRefreshExecutor = adminjob.NewItemRefreshExecutor(
@@ -2568,6 +2571,9 @@ func main() {
 			}
 			if itemRepo != nil {
 				itemRefreshExecutor.SetItemStatusReader(itemRepo)
+			}
+			if audiobookEnricher != nil {
+				itemRefreshExecutor.SetAudiobookEnricher(audiobookEnricher)
 			}
 		}
 	}

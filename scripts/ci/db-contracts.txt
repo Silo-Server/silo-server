@@ -1095,6 +1095,14 @@
 ./internal/audiobooks TestPersistKeepsTagNarratorAndLocalCoverDB
 ./internal/api/handlers TestUnmatchedItemsListsAudiobooksWithoutProviderMatchDB
 
+# The admin Refresh Metadata actions never run the general metadata service on
+# an audiobook. A full library refresh re-reads every book in one library scan
+# run, keeps matched books' matches, makes unmatched books due for the next
+# enrichment sweep, and stands down while a library scan is active; an item
+# refresh refetches or re-matches through the audiobook enricher. Content IDs,
+# files, library membership and progress stay.
+./internal/audiobooks TestAudiobookAdminRefreshKeepsMatchDB
+
 # Dashboard egress splits by stream node and API server without adding the
 # per-node rows to the total, and a wide bucket's split comes from its peak minute.
 ./internal/dashmetrics TestSampleSharedRecordsEgressPerNodeDB

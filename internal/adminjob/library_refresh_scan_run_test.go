@@ -3,6 +3,7 @@ package adminjob
 import (
 	"context"
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 
@@ -141,22 +142,24 @@ func TestLibraryRefreshPublishesScanCompleteAfterDirectIngest(t *testing.T) {
 	t.Fatalf("events = %#v, want scan_complete for library 9", eventBus.events)
 }
 
-// An audiobook an admin left unmatched on purpose has its folder scanned but
-// is not sent to the metadata refresh.
-func TestLibraryRefreshTagsOnlyItemSkipsMetadataRefresh(t *testing.T) {
+// An audiobook has its folder scanned and is handed to the audiobook enricher,
+// never to the general metadata refresh.
+func TestLibraryRefreshAudiobookSkipsMetadataRefresh(t *testing.T) {
 	t.Parallel()
 
 	scanRuns := &itemRefreshTestScanRuns{}
+	requeuer := &libraryRefreshTestRequeuer{}
 	executor := &LibraryRefreshExecutor{
 		folderRepo: &itemRefreshTestFolderRepo{folder: &models.MediaFolder{ID: 9, Enabled: true}},
 		resolver: &libraryRefreshTestResolver{req: &ItemRefreshRequest{
 			ScanFolderID:     9,
-			ScanPath:         "/media/books/ignored-book",
+			ScanPath:         "/media/books/a-book",
 			RefreshContentID: "book-1",
 		}},
-		ingester:  &itemRefreshTestIngester{},
-		scanRuns:  scanRuns,
-		refresher: &itemRefreshTestRefresher{err: errors.New("metadata refresh must not run")},
+		ingester:   &itemRefreshTestIngester{},
+		scanRuns:   scanRuns,
+		refresher:  &itemRefreshTestRefresher{err: errors.New("metadata refresh must not run")},
+		audiobooks: requeuer,
 	}
 
 	if err := executor.refreshUnmatchedItem(context.Background(), 9, "book-1", true); err != nil {
@@ -165,4 +168,14 @@ func TestLibraryRefreshTagsOnlyItemSkipsMetadataRefresh(t *testing.T) {
 	if scanRuns.completedID != "admin-refresh-run" {
 		t.Fatalf("completed scan run = %q, want admin-refresh-run", scanRuns.completedID)
 	}
+	if !slices.Equal(requeuer.requeued, []string{"book-1"}) {
+		t.Fatalf("requeued = %v, want [book-1]", requeuer.requeued)
+	}
+}
+
+type libraryRefreshTestRequeuer struct{ requeued []string }
+
+func (r *libraryRefreshTestRequeuer) RequeueUnmatched(_ context.Context, contentID string) (bool, error) {
+	r.requeued = append(r.requeued, contentID)
+	return true, nil
 }

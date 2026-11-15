@@ -450,9 +450,51 @@ func (e *Enricher) claimBatch(ctx context.Context) ([]enrichmentItemRow, error) 
 			)
 			RETURNING content_id, claim_token
 		)
-		SELECT
-			mi.content_id,
-			c.claim_token,
+		SELECT mi.content_id, c.claim_token, `+enrichmentItemColumns+`
+		FROM claimed c
+		JOIN media_items mi ON mi.content_id = c.content_id
+		ORDER BY mi.created_at ASC, mi.content_id ASC
+	`, e.batchSize, defaultEnrichClaimLease.Seconds(), audiobookNoMatchRetryLimit)
+	if err != nil {
+		return nil, fmt.Errorf("querying unenriched audiobooks: %w", err)
+	}
+	defer rows.Close()
+
+	var items []enrichmentItemRow
+	for rows.Next() {
+		var item enrichmentItemRow
+		if err := rows.Scan(append([]any{&item.ContentID, &item.ClaimToken}, item.columnTargets()...)...); err != nil {
+			return nil, fmt.Errorf("scanning audiobook enrichment row: %w", err)
+		}
+		items = append(items, item)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterating audiobook enrichment rows: %w", err)
+	}
+
+	// Load any durable provider IDs for the batch in one query.
+	if e.providerIDs != nil && len(items) > 0 {
+		ids := make([]string, len(items))
+		for i := range items {
+			ids[i] = items[i].ContentID
+		}
+		pids, err := e.providerIDs.GetByContentIDs(ctx, ids)
+		if err != nil {
+			// The claim stands; the items search without their stored IDs.
+			slog.WarnContext(ctx, "audiobook enrichment: could not load provider IDs for the batch", "component", "audiobooks", "error", err)
+		}
+		for i := range items {
+			items[i].ProviderIDs = providerIDMapFromRows(pids[items[i].ContentID])
+		}
+	}
+
+	return items, nil
+}
+
+// enrichmentItemColumns are the media_items (alias mi) columns an
+// enrichmentItemRow holds after its content ID and claim token, in the order
+// columnTargets scans them.
+const enrichmentItemColumns = `
 			mi.title,
 			mi.year,
 			COALESCE((
@@ -499,55 +541,12 @@ func (e *Enricher) claimBatch(ctx context.Context) ([]enrichmentItemRow, error) 
 			COALESCE((
 				SELECT s.series_name FROM audiobook_series s WHERE s.content_id = mi.content_id
 			), '') AS series_name
-		FROM claimed c
-		JOIN media_items mi ON mi.content_id = c.content_id
-		ORDER BY mi.created_at ASC, mi.content_id ASC
-	`, e.batchSize, defaultEnrichClaimLease.Seconds(), audiobookNoMatchRetryLimit)
-	if err != nil {
-		return nil, fmt.Errorf("querying unenriched audiobooks: %w", err)
-	}
-	defer rows.Close()
+`
 
-	var items []enrichmentItemRow
-	for rows.Next() {
-		var item enrichmentItemRow
-		if err := rows.Scan(
-			&item.ContentID,
-			&item.ClaimToken,
-			&item.Title,
-			&item.Year,
-			&item.FolderID,
-			&item.Language,
-			&item.Author,
-			&item.Narrators,
-			&item.SeriesPosition,
-			&item.SeriesName,
-		); err != nil {
-			return nil, fmt.Errorf("scanning audiobook enrichment row: %w", err)
-		}
-		items = append(items, item)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterating audiobook enrichment rows: %w", err)
-	}
-
-	// Load any durable provider IDs for the batch in one query.
-	if e.providerIDs != nil && len(items) > 0 {
-		ids := make([]string, len(items))
-		for i := range items {
-			ids[i] = items[i].ContentID
-		}
-		pids, err := e.providerIDs.GetByContentIDs(ctx, ids)
-		if err != nil {
-			// The claim stands; the items search without their stored IDs.
-			slog.WarnContext(ctx, "audiobook enrichment: could not load provider IDs for the batch", "component", "audiobooks", "error", err)
-		}
-		for i := range items {
-			items[i].ProviderIDs = providerIDMapFromRows(pids[items[i].ContentID])
-		}
-	}
-
-	return items, nil
+// columnTargets returns the scan targets for enrichmentItemColumns.
+func (item *enrichmentItemRow) columnTargets() []any {
+	return []any{&item.Title, &item.Year, &item.FolderID, &item.Language, &item.Author,
+		&item.Narrators, &item.SeriesPosition, &item.SeriesName}
 }
 
 // enrichItem runs the Search → GetMetadata → persist cycle for a single item.
@@ -563,13 +562,7 @@ func (e *Enricher) enrichItem(ctx context.Context, item enrichmentItemRow) error
 		return e.completeWithoutMetadata(ctx, item, EnrichmentOutcomeSkipped)
 	}
 
-	var providers []metadata.Provider
-	var err error
-	if e.resolveProviders != nil {
-		providers, err = e.resolveProviders(ctx, item.FolderID, "audiobook")
-	} else {
-		providers, err = metadata.ResolveChain(ctx, item.FolderID, "audiobook", e.chainRepo, e.resolver)
-	}
+	providers, err := e.resolveChain(ctx, item.FolderID)
 	if err != nil {
 		resolveErr := fmt.Errorf("resolving audiobook chain for folder %d: %w", item.FolderID, err)
 		// Classify the cause, not the wrapper: folder 403 must not read as
@@ -639,6 +632,14 @@ func (e *Enricher) enrichItem(ctx context.Context, item enrichmentItemRow) error
 	)
 
 	return nil
+}
+
+// resolveChain returns the audiobook provider chain of library folderID.
+func (e *Enricher) resolveChain(ctx context.Context, folderID int) ([]metadata.Provider, error) {
+	if e.resolveProviders != nil {
+		return e.resolveProviders(ctx, folderID, audiobookItemType)
+	}
+	return metadata.ResolveChain(ctx, folderID, audiobookItemType, e.chainRepo, e.resolver)
 }
 
 func (e *Enricher) autoLinkLiteraryWork(ctx context.Context, contentID string) {

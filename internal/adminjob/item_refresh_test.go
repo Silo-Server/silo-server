@@ -656,50 +656,102 @@ func TestItemRefreshExecutorReportsArtworkCacheFailureAsWarning(t *testing.T) {
 }
 
 // A reset job resets its target. Run as a plain refresh, it would keep every
-// value its providers lack (#3581). An audiobook's folder is scanned again
-// after the reset, so its tags fill the fields the provider left empty.
+// value its providers lack (#3581).
 func TestItemRefreshExecutorRunsResetJobsAsResets(t *testing.T) {
 	t.Parallel()
 
 	for _, tc := range []struct {
 		mode      ItemRefreshMode
-		itemType  string
 		wantReset bool
-		wantScans int
 	}{
-		{mode: ItemRefreshModeQuick, itemType: "movie", wantScans: 1},
-		{mode: ItemRefreshModeReset, itemType: "movie", wantReset: true, wantScans: 1},
-		{mode: ItemRefreshModeQuick, itemType: "audiobook", wantScans: 1},
-		{mode: ItemRefreshModeReset, itemType: "audiobook", wantReset: true, wantScans: 2},
+		{mode: ItemRefreshModeQuick},
+		{mode: ItemRefreshModeReset, wantReset: true},
 	} {
 		refresher := &itemRefreshTestRefresher{}
 		ingester := &itemRefreshTestIngester{}
 		executor := newItemRefreshTestExecutor(ingester, &itemRefreshTestScanRuns{}, refresher, nil)
 		if _, err := executor.Execute(context.Background(), ItemRefreshRequest{
 			RequestedContentID: "item-1",
-			RequestedType:      tc.itemType,
+			RequestedType:      "movie",
 			RefreshContentID:   "item-1",
 			ScanFolderID:       3,
 			ScanPath:           "/media/item-1",
 			Mode:               tc.mode,
 		}, nil); err != nil {
-			t.Fatalf("%s %s: Execute() error = %v, want nil", tc.mode, tc.itemType, err)
+			t.Fatalf("%s: Execute() error = %v, want nil", tc.mode, err)
 		}
-		if refresher.reset != tc.wantReset || refresher.contentID != "item-1" || ingester.scans != tc.wantScans {
-			t.Errorf("%s %s: reset=%v content_id=%q scans=%d, want reset=%v on item-1 with %d scans",
-				tc.mode, tc.itemType, refresher.reset, refresher.contentID, ingester.scans, tc.wantReset, tc.wantScans)
+		if refresher.reset != tc.wantReset || refresher.contentID != "item-1" || ingester.scans != 1 {
+			t.Errorf("%s: reset=%v content_id=%q scans=%d, want reset=%v on item-1 with 1 scan",
+				tc.mode, refresher.reset, refresher.contentID, ingester.scans, tc.wantReset)
 		}
 	}
 }
 
-// A reset is committed before the audiobook's tags are read again, so when
-// the read fails the reset's cache invalidation and events still go out, and
-// the job then fails with the read's error.
-func TestItemRefreshResetKeepsEventsWhenTagRereadFails(t *testing.T) {
+type itemRefreshTestAudiobooks struct {
+	calls []string
+	err   error
+}
+
+func (a *itemRefreshTestAudiobooks) RefreshItem(_ context.Context, contentID string) error {
+	a.calls = append(a.calls, "refresh "+contentID)
+	return a.err
+}
+
+func (a *itemRefreshTestAudiobooks) ResetMatch(_ context.Context, contentID string) (bool, error) {
+	a.calls = append(a.calls, "reset "+contentID)
+	return false, nil
+}
+
+// An audiobook's refresh never reaches the general metadata refresher: its
+// tags are read in the one scan, and its match goes through the audiobook
+// enricher. A reset clears the match before that scan, and a complete refresh
+// queued as such runs as a reset, so the book keeps its content ID.
+func TestItemRefreshAudiobookUsesTheAudiobookEnricher(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		mode      ItemRefreshMode
+		wantCalls []string
+	}{
+		{ItemRefreshModeQuick, []string{"refresh book-1"}},
+		{ItemRefreshModeReset, []string{"reset book-1", "refresh book-1"}},
+		{ItemRefreshModeComplete, []string{"reset book-1", "refresh book-1"}},
+	} {
+		refresher := &itemRefreshTestRefresher{err: errors.New("the general refresher must not run")}
+		ingester := &itemRefreshTestIngester{}
+		audiobooks := &itemRefreshTestAudiobooks{}
+		executor := newItemRefreshTestExecutor(ingester, &itemRefreshTestScanRuns{}, refresher, nil)
+		executor.SetAudiobookEnricher(audiobooks)
+		result, err := executor.Execute(context.Background(), ItemRefreshRequest{
+			RequestedContentID: "book-1",
+			RequestedType:      itemTypeAudiobook,
+			RefreshContentID:   "book-1",
+			ScanFolderID:       3,
+			ScanPath:           "/media/book-1",
+			Mode:               tc.mode,
+		}, nil)
+		if err != nil {
+			t.Fatalf("%s: Execute() error = %v", tc.mode, err)
+		}
+		if !slices.Equal(audiobooks.calls, tc.wantCalls) || refresher.contentID != "" || ingester.scans != 1 || ingester.unlinked {
+			t.Errorf("%s: enricher calls %v, general refresher on %q, scans %d (unlinked %v); want %v, none, 1 linked scan",
+				tc.mode, audiobooks.calls, refresher.contentID, ingester.scans, ingester.unlinked, tc.wantCalls)
+		}
+		if result.RefreshContentID != "book-1" {
+			t.Errorf("%s: refresh content ID = %q, want book-1", tc.mode, result.RefreshContentID)
+		}
+	}
+}
+
+// The tag read is committed before the enricher runs, so when the enricher
+// fails the cache invalidation and events still go out, and the job then fails
+// with the enricher's error.
+func TestItemRefreshAudiobookKeepsEventsWhenTheEnricherFails(t *testing.T) {
 	t.Parallel()
 
 	eventBus := &libraryRefreshTestEventBus{}
-	executor := newItemRefreshTestExecutor(&itemRefreshTestIngester{failScan: 2}, &itemRefreshTestScanRuns{}, &itemRefreshTestRefresher{}, eventBus)
+	executor := newItemRefreshTestExecutor(&itemRefreshTestIngester{}, &itemRefreshTestScanRuns{}, &itemRefreshTestRefresher{}, eventBus)
+	executor.SetAudiobookEnricher(&itemRefreshTestAudiobooks{err: errors.New("no provider returned the matched record")})
 	var evicted []string
 	executor.evictRails = func(contentIDs ...string) { evicted = append(evicted, contentIDs...) }
 	_, err := executor.Execute(context.Background(), ItemRefreshRequest{
@@ -708,10 +760,10 @@ func TestItemRefreshResetKeepsEventsWhenTagRereadFails(t *testing.T) {
 		RefreshContentID:   "book-1",
 		ScanFolderID:       3,
 		ScanPath:           "/media/book-1",
-		Mode:               ItemRefreshModeReset,
+		Mode:               ItemRefreshModeQuick,
 	}, nil)
-	if err == nil || !strings.Contains(err.Error(), "read audiobook tags after the reset") {
-		t.Errorf("Execute() error = %v, want the failed tag read", err)
+	if err == nil || !strings.Contains(err.Error(), "matched record") {
+		t.Errorf("Execute() error = %v, want the enricher's failure", err)
 	}
 	var changed bool
 	for _, event := range eventBus.events {
