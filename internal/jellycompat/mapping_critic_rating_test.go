@@ -142,3 +142,74 @@ func TestCriticRatingReadsFailingPolicyOncePerList(t *testing.T) {
 		t.Fatalf("mapping 20 items read the settings %d times, want 1", got)
 	}
 }
+
+// criticBrowseContent records the browse parameters each /Items request
+// reaches the catalog with.
+type criticBrowseContent struct {
+	stubContentService
+	params []url.Values
+}
+
+func (s *criticBrowseContent) BrowseItems(_ context.Context, _ *Session, params url.Values) (*upstreamBrowseResponse, error) {
+	s.params = append(s.params, params)
+	return &upstreamBrowseResponse{Items: []upstreamListItem{}}, nil
+}
+
+// Jellyfin Web's Critic Rating sort and a MinCriticRating filter order and
+// filter by the stored rt_critic score while that source is shown. While it is
+// hidden, neither may reveal the score: CriticRating sorts as an unknown key
+// does, so the next key and its SortOrder entry apply, and the filter is
+// ignored.
+func TestCriticRatingSortAndFilterFollowShownRatingSources(t *testing.T) {
+	type want struct{ sort, order, minCritic string }
+	for _, tc := range []struct {
+		name            string
+		query           string
+		shown, declared bool
+		want            want
+	}{
+		{name: "shown sort", query: "SortBy=CriticRating,SortName,ProductionYear&SortOrder=Descending", shown: true, declared: true,
+			want: want{sort: catalog.BrowseSortRatingRTCritic, order: "desc"}},
+		{name: "shown filter", query: "SortBy=SortName&MinCriticRating=70", shown: true, declared: true,
+			want: want{sort: catalog.BrowseSortTitle, order: "asc", minCritic: "70"}},
+		{name: "not turned on", query: "SortBy=CriticRating,SortName&SortOrder=Descending,Ascending&MinCriticRating=70", declared: true,
+			want: want{sort: catalog.BrowseSortTitle, order: "asc"}},
+		{name: "not declared", query: "SortBy=CriticRating,SortName&SortOrder=Descending&MinCriticRating=70", shown: true,
+			want: want{sort: catalog.BrowseSortTitle, order: "asc"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			extra := ""
+			if tc.shown {
+				extra = models.RatingSourceRTCritic
+			}
+			policy := ratingsources.NewPolicy(stubSettingsReader{values: map[string]string{config.CatalogExtraRatingSourcesSettingKey: extra}},
+				func(context.Context) ([]ratingsources.DeclaredSource, error) {
+					if !tc.declared {
+						return nil, nil
+					}
+					return []ratingsources.DeclaredSource{{RatingSourceDefinition: models.RatingSourceDefinition{Source: models.RatingSourceRTCritic, Name: "RT", Scale: 100, Percent: true}}}, nil
+				})
+			sessions := NewSessionStore(time.Hour, time.Now)
+			if err := sessions.Put(Session{Token: "critic", StreamAppUserID: 1, ProfileID: "p1", PseudoUserID: PseudoUserID(1, "p1")}); err != nil {
+				t.Fatal(err)
+			}
+			content := &criticBrowseContent{}
+			router := NewRouter(Dependencies{Config: &config.Config{}, IDCodec: NewResourceIDCodec(), SessionStore: sessions, ContentService: content, UserDataService: &mockUserDataService{}, RatingSources: policy})
+
+			req := httptest.NewRequest(http.MethodGet, "/Users/"+PseudoUserID(1, "p1").String()+"/Items?IncludeItemTypes=Movie&Recursive=true&"+tc.query, nil)
+			req.Header.Set("X-Emby-Token", "critic")
+			rec := httptest.NewRecorder()
+			router.ServeHTTP(rec, req)
+			if rec.Code != http.StatusOK {
+				t.Fatalf("status %d: %s", rec.Code, rec.Body.String())
+			}
+			if len(content.params) != 1 {
+				t.Fatalf("browse calls = %d, want 1", len(content.params))
+			}
+			params := content.params[0]
+			if got := (want{sort: params.Get("sort"), order: params.Get("order"), minCritic: params.Get("min_critic_rating")}); got != tc.want {
+				t.Fatalf("browse sort/order/min_critic_rating = %+v, want %+v", got, tc.want)
+			}
+		})
+	}
+}
