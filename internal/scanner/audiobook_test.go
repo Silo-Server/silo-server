@@ -674,6 +674,31 @@ func TestApplyBookToMediaItemDoesNotBlankAllNarratorSuffixTitle(t *testing.T) {
 	}
 }
 
+// The default sort title follows a title the tags change. A sort title in
+// any other form, or under the Name lock, stays.
+func TestApplyBookToMediaItemSortTitleFollowsTitle(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		sortTitle string
+		locked    []int
+		tagTitle  string
+		want      string
+	}{
+		{"derived from the old title, new title has no article", "Saga Name 2 - Book Title, The", nil, "Book Title", ""},
+		{"derived from the old title, new title has an article", "Saga Name 2 - Book Title, The", nil, "A Book Title", "Book Title, A"},
+		{"set by someone", "Saga Name 02", nil, "The Book Title", "Saga Name 02"},
+		{"name locked", "Saga Name 2 - Book Title, The", []int{lockedFieldName}, "Book Title", "Saga Name 2 - Book Title, The"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			item := &models.MediaItem{Title: "The Saga Name 2 - Book Title", SortTitle: tc.sortTitle, LockedFields: tc.locked}
+			applyBookToMediaItem(item, &parsedAudiobook{Title: tc.tagTitle}, false)
+			if item.SortTitle != tc.want {
+				t.Errorf("SortTitle = %q, want %q", item.SortTitle, tc.want)
+			}
+		})
+	}
+}
+
 // An admin's locked fields survive a changed-book rescan: tags only fill what
 // the editor has not pinned. The item's overview starts empty, as after an
 // admin clears a bad tag description.

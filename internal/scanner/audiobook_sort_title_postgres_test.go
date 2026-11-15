@@ -10,15 +10,18 @@ import (
 )
 
 // A rescan fills an empty sort title from the title only while the Name lock
-// is off. With it on, a sort title the admin cleared stays empty.
+// is off. With it on, a sort title the admin cleared stays empty. A sort title
+// derived from an earlier title is derived again from the current one.
 func TestAudiobookRescanSortTitleFollowsNameLockDB(t *testing.T) {
 	for _, tc := range []struct {
 		name   string
 		locked []int
+		stored string
 		want   string
 	}{
-		{"name locked keeps a cleared sort title", []int{lockedFieldName}, ""},
-		{"unlocked derives the sort title", []int{}, "Hobbit, The"},
+		{"name locked keeps a cleared sort title", []int{lockedFieldName}, "", ""},
+		{"unlocked derives the sort title", []int{}, "", "Hobbit, The"},
+		{"unlocked replaces a sort title left from an earlier title", []int{}, "Saga Name 1 - The Hobbit, The", "Hobbit, The"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			pool := newBookScanTestPool(t)
@@ -36,7 +39,7 @@ func TestAudiobookRescanSortTitleFollowsNameLockDB(t *testing.T) {
 			id := fmt.Sprintf("sort-title-lock-%d", folder.ID)
 			// The admin cleared Sort Title, which the edit dialog stores under the Name lock.
 			if _, err := pool.Exec(ctx, `INSERT INTO media_items (content_id,type,title,sort_title,status,genres,locked_fields)
-VALUES ($1,'audiobook','The Hobbit','','local','{}'::text[],$2)`, id, tc.locked); err != nil {
+VALUES ($1,'audiobook','The Hobbit',$3,'local','{}'::text[],$2)`, id, tc.locked, tc.stored); err != nil {
 				t.Fatal(err)
 			}
 			if _, err := pool.Exec(ctx, `INSERT INTO media_item_libraries (content_id,media_folder_id) VALUES ($1,$2)`, id, folder.ID); err != nil {
