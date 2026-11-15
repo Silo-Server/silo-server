@@ -98,3 +98,52 @@ func TestPlanPlaybackV3NamesWhyTheRouteAdapts(t *testing.T) {
 		})
 	}
 }
+
+// An audio-only file takes the remux for reasons of its own: the delivery the
+// original file needs, or a channel ceiling on the progressive delivery.
+func TestPlanPlaybackV3NamesWhyAnAudioOnlyRouteAdapts(t *testing.T) {
+	for _, test := range []struct {
+		name    string
+		adjust  func(*PlannerInputV3)
+		convert bool
+		want    []string
+	}{
+		{name: "the original plays as it is"},
+		{name: "a device that offers no original-file delivery", want: []string{AdaptationContainerUnsupported},
+			adjust: func(in *PlannerInputV3) {
+				delete(in.Request.ClientPlaybackContext.Deliveries, DeliveryClassOriginalHTTPV3)
+			}},
+		{name: "more channels than the delivery allows", convert: true, want: []string{AdaptationAudioChannelsUnsupported},
+			adjust: func(in *PlannerInputV3) {
+				in.EffectiveFile.AudioChannels, in.EffectiveFile.AudioTracks[0].Channels = 6, 6
+				in.EffectiveFile.AudioTracks[0].Layout = "5.1"
+				for _, class := range []string{DeliveryClassOriginalHTTPV3, DeliveryClassProgressiveV3} {
+					delivery := in.Request.ClientPlaybackContext.Deliveries[class]
+					delivery.MaxChannels = new(2)
+					in.Request.ClientPlaybackContext.Deliveries[class] = delivery
+				}
+			}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			file := audioOnlyFixtureFileV3()
+			req := validStartRequestV3()
+			req.FileID = file.ID
+			req.Capabilities.Containers = []string{"mp4"}
+			input := PlannerInputV3{
+				Request: req, RequestedFile: file, EffectiveFile: file, AudioTrackIndex: 0,
+				Settings: PlannerSettingsV3{TranscodeEnabled: true}, Registry: testTransformationRegistryV3(),
+			}
+			if test.adjust != nil {
+				test.adjust(&input)
+			}
+			result := PlanPlaybackV3(input)
+			if result.Plan == nil {
+				t.Fatalf("result = %s", ExplainPlannerResultV3(result))
+			}
+			if result.TranscodeAudio != test.convert || !slices.Equal(result.AdaptationReasons, test.want) {
+				t.Fatalf("convert %v reasons %v, want %v %v (delivery %s)", result.TranscodeAudio, result.AdaptationReasons,
+					test.convert, test.want, result.Plan.Delivery)
+			}
+		})
+	}
+}

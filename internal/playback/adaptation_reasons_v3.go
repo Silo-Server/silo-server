@@ -209,11 +209,14 @@ func (p *candidatePlannerV3) audioOnlyAdaptationReasonsV3(result PlannerResultV3
 	if result.TranscodeAudio {
 		reasons.add(p.capAdaptationReasonV3(), capExceeded)
 		// A convert neither the codec nor the cap forced is one the
-		// progressive delivery needs.
-		reasons.add(AdaptationAudioCodecUnsupported, !audioOK || !capExceeded)
+		// progressive delivery needs: for its channel ceiling, or its codecs.
+		channelLimited := deliveryExceedsMaxChannelsV3(request, DeliveryClassProgressiveV3, source.AudioCodec, source.AudioChannels)
+		reasons.add(AdaptationAudioCodecUnsupported, !audioOK || !capExceeded && !channelLimited)
+		reasons.add(AdaptationAudioChannelsUnsupported, audioOK && !capExceeded && channelLimited)
 	}
 	reasons.add(AdaptationAudioTrackSelection, !audioSelectionUsesContainerDefaultV3(p.file, p.input.AudioTrackIndex) && !clientSelectsOriginalAudioTrackV3(request))
-	reasons.add(AdaptationContainerUnsupported, !containsFoldV3(request.Capabilities.Containers, source.Container))
+	reasons.add(AdaptationContainerUnsupported, !containsFoldV3(request.Capabilities.Containers, source.Container) ||
+		!deliveryAvailableV3(request, DeliveryClassOriginalHTTPV3))
 	p.attemptedOriginalV3(reasons)
 	return reasons.list()
 }
