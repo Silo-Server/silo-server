@@ -1,7 +1,9 @@
 @import "tailwindcss";
 /* animate-in/animate-out and their fade-/zoom-/slide- modifiers, used by the
-   radix overlay primitives in components/ui. The enter/exit keyframes are
-   redefined in § 2 below. */
+   radix overlay primitives in components/ui. Radix keeps a closing overlay
+   mounted until its exit animation ends. The enter/exit keyframes are
+   replaced in @theme below, which only works while this import stays above
+   it. */
 @import "tw-animate-css";
 
 /* Tailwind v4 wraps every `hover:` and `group-hover:` utility in
@@ -112,13 +114,13 @@
   --animate-scale-in: scale-in 0.2s cubic-bezier(0.34, 1.56, 0.64, 1);
   --animate-ken-burns-a: ken-burns-a 14s linear infinite;
 
-  /* Replace tw-animate-css's enter/exit keyframes, which also animate
-     `filter: blur()`. Nothing here uses the blur modifiers, and a filter
-     animation is not compositor-only, so keep overlay motion to opacity and
-     transform. They sit inside @theme so they replace the package's theme
-     keyframes of the same name; a top-level copy gets merged away in the
-     build. `--overlay-motion` is unset except under reduced motion, where
-     the § 2 block sets it to `none` so overlays only fade. */
+  /* tw-animate-css's enter/exit keyframes, minus its `filter: blur()` step:
+     nothing here uses the blur modifiers, and animating filter isn't
+     compositor-only. They come after the package's keyframes of the same
+     name, so they are the ones that apply (the production build drops the
+     earlier copy). `--overlay-motion` is unset except under
+     reduced motion, where it is `none`, so overlays fade without sliding or
+     zooming. overlayAnimationCss.test.ts checks the compiled result. */
   @keyframes enter {
     from {
       opacity: var(--tw-enter-opacity, 1);
@@ -449,8 +451,8 @@ html[data-navigation-direction]::view-transition-new(main-content) {
     --duration-sidebar-return: 0ms;
     --animate-ken-burns-a: none;
     /* Overlays (dialogs, sheets, menus, popovers, tooltips) keep their fade
-       but stop sliding and zooming; see the enter/exit keyframes in § 1. The
-       exit animation still runs, so radix unmounts once the fade ends. */
+       but stop sliding and zooming; see the enter/exit keyframes in @theme.
+       The exit animation still runs, so radix unmounts once the fade ends. */
     --overlay-motion: none;
   }
   .ambient-glow {

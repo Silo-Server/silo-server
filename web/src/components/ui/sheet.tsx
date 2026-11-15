@@ -54,7 +54,9 @@ function SheetContent({
       <SheetPrimitive.Content
         data-slot="sheet-content"
         className={cn(
-          "bg-background data-[state=closed]:animate-out data-[state=open]:animate-in fixed z-50 flex flex-col gap-4 shadow-lg transition duration-(--duration-slow) ease-in-out",
+          // Reduced motion stops the slide (see --overlay-motion in app.css), so
+          // the panel fades instead of holding still and then vanishing.
+          "bg-background data-[state=closed]:animate-out data-[state=open]:animate-in motion-reduce:data-[state=closed]:fade-out-0 motion-reduce:data-[state=open]:fade-in-0 fixed z-50 flex flex-col gap-4 shadow-lg transition duration-(--duration-slow) ease-in-out",
           side === "right" &&
             "data-[state=closed]:slide-out-to-end data-[state=open]:slide-in-from-end inset-y-0 end-0 h-full w-3/4 border-s sm:max-w-sm",
           side === "left" &&
