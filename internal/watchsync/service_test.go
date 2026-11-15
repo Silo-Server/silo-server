@@ -44,6 +44,7 @@ const (
 
 type serviceFakeRepo struct {
 	connections            map[string]Connection
+	watchlistTitlesSince   map[string]time.Time
 	dueConnections         []Connection
 	sessions               map[string]DeviceAuthSession
 	settings               map[string]string
@@ -577,6 +578,7 @@ func (r *serviceFakeRepo) UpsertListItemStates(_ context.Context, states []ListI
 				if state.ID == "" {
 					state.ID = r.listItemStates[i].ID
 				}
+				state.CreatedAt = r.listItemStates[i].CreatedAt
 				r.listItemStates[i] = state
 				replaced = true
 				break
@@ -586,9 +588,30 @@ func (r *serviceFakeRepo) UpsertListItemStates(_ context.Context, states []ListI
 			if state.ID == "" {
 				state.ID = "list-item-" + strconv.Itoa(len(r.listItemStates)+1)
 			}
+			if state.CreatedAt.IsZero() {
+				state.CreatedAt = time.Now()
+			}
 			r.listItemStates = append(r.listItemStates, state)
 		}
 	}
+	return nil
+}
+
+func (r *serviceFakeRepo) WatchlistTitlesSince(_ context.Context, connectionID string) (*time.Time, error) {
+	if since, ok := r.watchlistTitlesSince[connectionID]; ok {
+		return &since, nil
+	}
+	return nil, nil
+}
+
+func (r *serviceFakeRepo) MarkWatchlistTitlesSince(_ context.Context, connectionID string) error {
+	if _, ok := r.watchlistTitlesSince[connectionID]; ok {
+		return nil
+	}
+	if r.watchlistTitlesSince == nil {
+		r.watchlistTitlesSince = map[string]time.Time{}
+	}
+	r.watchlistTitlesSince[connectionID] = time.Now()
 	return nil
 }
 
