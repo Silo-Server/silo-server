@@ -116,6 +116,7 @@ import type { PlayerTrickplay } from "../trickplay";
 import type { FailureV3, PlanV3, SubtitleInventoryItemV3 } from "../protocol-v3";
 import {
   mediaDurationSeconds,
+  reloadStartSeconds,
   subtitleChangePositionSeconds,
   subtitleStartPositionSeconds,
   toMediaTime,
@@ -1366,6 +1367,9 @@ export function VideoPlayer({
   const replanSeekRef = useRef<{ sessionId: string; revision: number; seconds: number } | null>(
     null,
   );
+  // The session the mounted transport belongs to, so a replacement that starts a
+  // different session never inherits this one's playhead. See reloadStartSeconds.
+  const transportSessionRef = useRef<string | null>(null);
   useEffect(() => {
     if (!replanning && replanSeekRef.current?.revision === planRevision) {
       replanSeekRef.current = null;
@@ -3107,6 +3111,18 @@ export function VideoPlayer({
 
   // -- hls.js lifecycle --
   useEffect(() => {
+    // Where the transport this one replaces had got to, on the player clock this
+    // plan uses. A replan the viewer did not seek for (a lowering, a re-offer of
+    // the same route) can land on the generation's origin while the transport it
+    // replaces has played past it; beginning there asks the live generation for
+    // segments it produced long ago, and the segment layer answers them with a
+    // 412 that ends in a terminal recovery. A transport of a new session keeps
+    // the plan's own start. See reloadStartSeconds.
+    const replacedPlayhead =
+      streamPlayedRef.current && transportSessionRef.current === sessionIdRef.current
+        ? toPlayerTime(currentTimeRef.current, timelineOffsetRef.current)
+        : null;
+    transportSessionRef.current = sessionIdRef.current;
     // "Played" belongs to one transport. A replacement that has not shown a
     // frame yet may be a route this browser cannot reach, so its network
     // failures go through startup recovery rather than the reconnect.
@@ -3317,7 +3333,7 @@ export function VideoPlayer({
     const transportStartPosition = () => {
       const pendingSeconds = pendingSeekTimeRef.current;
       if (pendingSeconds === null || pendingSeconds === roomHeldSeekRef.current) {
-        return effectiveInitialPosition;
+        return reloadStartSeconds(effectiveInitialPosition, replacedPlayhead);
       }
       const pendingContext = pendingSeekContextRef.current;
       if (pendingContext !== null && pendingContext.sessionId !== sessionIdRef.current) {

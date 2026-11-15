@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   mediaDurationSeconds,
+  reloadStartSeconds,
   subtitleChangePositionSeconds,
   subtitleStartPositionSeconds,
   toMediaTime,
@@ -43,6 +44,24 @@ describe("mediaDurationSeconds", () => {
     expect(mediaDurationSeconds(0, 0)).toBeUndefined();
     expect(mediaDurationSeconds(null, undefined)).toBeUndefined();
     expect(mediaDurationSeconds(undefined, NaN)).toBeUndefined();
+  });
+});
+
+describe("reloadStartSeconds", () => {
+  // The regression this exists for: a re-offer replan lands on the generation's
+  // origin while the transport it replaces has played to 120 s. Starting at the
+  // plan's zero asked the live generation for segment 9 while it was producing
+  // past segment 1268, and the 412 that answered it ended the session.
+  it("keeps a played transport's position when the new plan starts at its origin", () => {
+    expect(reloadStartSeconds(0, 120)).toBe(120);
+  });
+
+  it("uses the plan's start for a first start, a new session, or a moved anchor", () => {
+    expect(reloadStartSeconds(45, null)).toBe(45);
+    expect(reloadStartSeconds(0, Number.NaN)).toBe(0);
+    // The server moved the anchor past the viewer: a target behind it is not
+    // producible, so the plan's own start stands.
+    expect(reloadStartSeconds(130, 120)).toBe(130);
   });
 });
 
