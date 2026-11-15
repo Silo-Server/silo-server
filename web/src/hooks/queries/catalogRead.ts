@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
-import { useCallback } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 import type {
   EpisodesResponse,
@@ -116,6 +116,50 @@ export function useCatalogItemDetail(id: string | undefined, libraryId?: number)
     queryFn: ({ signal }) => fetchCatalogItemDetail(id!, libraryId, { signal }),
     enabled: !!id,
   });
+}
+
+/**
+ * Reads an item's detail from the server whatever the cache holds, and returns
+ * the item only once that read has landed; from then on it follows the cache.
+ * A cached copy can look fresh yet predate a write: an unobserved query isn't
+ * refetched when invalidated, and a cache update such as a favorite toggle
+ * clears the invalidation.
+ */
+export function useFreshCatalogItemDetail(id: string, libraryId?: number) {
+  const queryClient = useQueryClient();
+  const readKey = `${id}:${libraryId ?? ""}`;
+  const [read, setRead] = useState<{ key: string; error: unknown }>();
+  const [attempt, setAttempt] = useState(0);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    const queryKey = catalogKeys.itemDetail(id, libraryId);
+    // An older read still running would otherwise land after this one.
+    void queryClient
+      .cancelQueries({ queryKey, exact: true })
+      .then(() => fetchCatalogItemDetail(id, libraryId, { signal: controller.signal }))
+      .then(
+        (detail) => {
+          queryClient.setQueryData(queryKey, detail);
+          setRead({ key: readKey, error: null });
+        },
+        (error: unknown) => {
+          if (!controller.signal.aborted) setRead({ key: readKey, error });
+        },
+      );
+    return () => controller.abort();
+  }, [queryClient, id, libraryId, readKey, attempt]);
+
+  const current = read?.key === readKey ? read : undefined;
+  const { data: item } = useCatalogItemDetail(current?.error === null ? id : undefined, libraryId);
+  return {
+    item,
+    error: current?.error ?? null,
+    retry: () => {
+      setRead(undefined);
+      setAttempt((n) => n + 1);
+    },
+  };
 }
 
 export function useCatalogItemVersions(id: string | undefined) {

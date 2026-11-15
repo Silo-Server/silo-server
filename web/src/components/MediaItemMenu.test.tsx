@@ -8,7 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import MediaItemMenu, { buildMediaItemMenuModel, MetadataActionDialogHost } from "./MediaItemMenu";
 
 const mocks = vi.hoisted(() => ({
-  useCatalogItemDetail: vi.fn(),
+  useFreshCatalogItemDetail: vi.fn(),
   editItem: vi.fn(),
   matchItem: vi.fn(),
   toggleFavorite: vi.fn(),
@@ -18,7 +18,7 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock("@/hooks/queries/catalogRead", () => ({
-  useCatalogItemDetail: (...args: unknown[]) => mocks.useCatalogItemDetail(...args),
+  useFreshCatalogItemDetail: (...args: unknown[]) => mocks.useFreshCatalogItemDetail(...args),
 }));
 
 vi.mock("@/components/EditMetadataDialog", () => ({
@@ -105,7 +105,7 @@ function menu(props: Partial<ComponentProps<typeof MediaItemMenu>> = {}) {
 }
 
 beforeEach(() => {
-  mocks.useCatalogItemDetail.mockReset();
+  mocks.useFreshCatalogItemDetail.mockReset();
   mocks.editItem.mockReset();
   mocks.matchItem.mockReset();
   mocks.toggleFavorite.mockReset();
@@ -378,7 +378,7 @@ describe("MediaItemMenu metadata dialogs", () => {
   } as ItemDetail;
 
   it("passes the full item and library context to Match Item", async () => {
-    mocks.useCatalogItemDetail.mockReturnValue({ data: detail });
+    mocks.useFreshCatalogItemDetail.mockReturnValue({ item: detail, error: null });
 
     render(
       <MetadataActionDialogHost
@@ -390,7 +390,7 @@ describe("MediaItemMenu metadata dialogs", () => {
     );
 
     expect(await screen.findByText("Match Silo")).toBeInTheDocument();
-    expect(mocks.useCatalogItemDetail).toHaveBeenCalledWith("series-1", 12);
+    expect(mocks.useFreshCatalogItemDetail).toHaveBeenCalledWith("series-1", 12);
     expect(mocks.matchItem).toHaveBeenCalledWith({ ...detail, library_id: 12 });
   });
 });

@@ -1,0 +1,86 @@
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { act, render, screen } from "@testing-library/react";
+import { afterEach, expect, it, vi } from "vitest";
+import type { ItemDetail } from "@/api/types";
+import { catalogKeys } from "@/hooks/queries/keys";
+import { MetadataActionDialogHost } from "./MediaItemMenu";
+
+const mocks = vi.hoisted(() => ({ v2: vi.fn(), editItem: vi.fn() }));
+
+vi.mock("@/api/v2/request", async () => {
+  const actual = await vi.importActual<typeof import("@/api/v2/request")>("@/api/v2/request");
+  return { ...actual, v2: mocks.v2 };
+});
+
+vi.mock("@/api/v2/catalog", async () => {
+  const actual = await vi.importActual<typeof import("@/api/v2/catalog")>("@/api/v2/catalog");
+  return { ...actual, catalogItemDetailFromV2: (detail: ItemDetail) => detail };
+});
+
+vi.mock("@/components/EditMetadataDialog", () => ({
+  default: ({ item }: { item: ItemDetail }) => {
+    mocks.editItem(item);
+    return <div>Edit {item.locked_fields?.join(",") || "none"}</div>;
+  },
+}));
+
+afterEach(() => {
+  vi.resetAllMocks();
+});
+
+function movie(locked_fields: number[]) {
+  return { content_id: "movie-1", type: "movie", title: "Silo", locked_fields } as ItemDetail;
+}
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((res) => (resolve = res));
+  return { promise, resolve };
+}
+
+function renderHost(seed?: ItemDetail) {
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { staleTime: 2 * 60_000, retry: false } },
+  });
+  if (seed) queryClient.setQueryData(catalogKeys.itemDetail("movie-1"), seed);
+  render(
+    <QueryClientProvider client={queryClient}>
+      <MetadataActionDialogHost action="edit" contentId="movie-1" onClose={() => undefined} />
+    </QueryClientProvider>,
+  );
+  return queryClient;
+}
+
+// The cached item can look fresh yet predate a write made while no dialog was open.
+it("opens Edit Metadata on a fresh read of the item, not the cached one", async () => {
+  const read = deferred<ItemDetail>();
+  mocks.v2.mockReturnValueOnce(read.promise);
+
+  const queryClient = renderHost(movie([]));
+  expect(await screen.findByText("Loading the latest item details…")).toBeInTheDocument();
+  // A cache update, such as a favorite toggle, isn't a read. Query
+  // notifications go out on a zero-delay timer.
+  await act(async () => {
+    queryClient.setQueryData(catalogKeys.itemDetail("movie-1"), movie([]));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
+
+  expect(screen.getByText("Loading the latest item details…")).toBeInTheDocument();
+  expect(mocks.editItem).not.toHaveBeenCalled();
+
+  await act(async () => read.resolve(movie([10])));
+
+  expect(await screen.findByText("Edit 10")).toBeInTheDocument();
+});
+
+it("keeps an open Edit Metadata when a later refetch fails", async () => {
+  mocks.v2.mockResolvedValueOnce(movie([10]));
+
+  const queryClient = renderHost();
+  expect(await screen.findByText("Edit 10")).toBeInTheDocument();
+
+  mocks.v2.mockRejectedValueOnce(new Error("offline"));
+  await act(() => queryClient.invalidateQueries({ queryKey: catalogKeys.itemDetail("movie-1") }));
+
+  expect(screen.getByText("Edit 10")).toBeInTheDocument();
+});
