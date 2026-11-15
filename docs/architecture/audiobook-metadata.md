@@ -199,6 +199,15 @@ A batch that still matched books while one provider was paused goes on; the
 gate keeps calls away from the paused provider. Books a pause deferred come
 due when the pause ends and the next scheduled run takes them.
 
+The gate (`internal/audiobooks/enrichment_gate.go`) pauses a provider that
+answers rate limited, for every call. It counts outages separately for the
+provider's two routes, search and metadata: three transient failures in a row
+on one route pause that route, for 15 minutes at first and twice as long each
+time it is still failing. A paused search leaves lookups by a tagged ASIN
+running, so those books keep matching while a book that needs the search is
+deferred. A paused metadata route stops searches too, since a search result
+could not be fetched.
+
 The sweep never claims a book whose match an admin ignored
 (`match_ignored_at`).
 
