@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { PlayerConfigProvider, type PlayerConfig } from "../context/PlayerConfigContext";
 import { fixturePlanV3, fixtureSubtitleInventoryItemV3 } from "../protocol-v3.fixtures";
 import type { PlanV3 } from "../protocol-v3";
-import type { SubtitleMode } from "../types";
+import type { PlayerFileVersion, SubtitleMode } from "../types";
 import { resetCodecDetectionForTests } from "../hooks/useCodecDetection";
 import { usePlaybackSession, type UsePlaybackSessionResult } from "../hooks/usePlaybackSession";
 import { resetSessionMutations } from "../session-mutations";
@@ -210,14 +210,18 @@ function stubServer(handlers: {
 
 const sessionRef: { current: UsePlaybackSessionResult | null } = { current: null };
 
+const NO_VERSIONS: PlayerFileVersion[] = [];
+
 function Harness({
   subtitleMode = "auto",
   preferredSubtitleLanguage = null,
+  versions = NO_VERSIONS,
 }: {
   subtitleMode?: SubtitleMode;
   preferredSubtitleLanguage?: string | null;
+  versions?: PlayerFileVersion[];
 }) {
-  const playback = usePlaybackSession("request-1", [], [], 7, 0, false, "auto");
+  const playback = usePlaybackSession("request-1", versions, [], 7, 0, false, "auto");
   // Published after commit, so the test reads the session the player rendered.
   useEffect(() => {
     sessionRef.current = playback;
@@ -546,5 +550,49 @@ describe("VideoPlayer with the playback session: reconnect", () => {
     expect(requests.starts[1]?.start_position).toBe(321.5);
     expect(sessionRef.current?.connectionStatus).toBe("connected");
     expect(sessionRef.current?.shouldAutoPlay).toBe(true);
+  });
+});
+
+describe("VideoPlayer with the playback session: version projection", () => {
+  it("does not reload the media element when a version check restamps the list", async () => {
+    const requests = stubServer({
+      start: () => jsonResponse(playable("session-1", directPlan()), 201),
+      replan: () => jsonResponse(playable("session-1", directPlan()), 200),
+    });
+    const versions: PlayerFileVersion[] = [
+      {
+        file_id: 7,
+        file_path: "/release-a.mkv",
+        resolution: "1080p",
+        codec_video: "h264",
+        codec_audio: "aac",
+        hdr: false,
+        container: "mkv",
+        file_size: 1,
+        duration: 3600,
+        bitrate: 1,
+      },
+    ];
+    const view = renderHarness({ versions });
+    const video = await startWatching();
+    const src = video.getAttribute("src");
+    const loadCalls = vi.mocked(HTMLMediaElement.prototype.load).mock.calls.length;
+
+    // The catalog's version-liveness check answered: the same rows, now
+    // carrying the verdict it stamped on them. That is a new list identity
+    // arriving while the transport plays.
+    view.rerender(
+      createElement(Harness, {
+        versions: [{ ...versions[0]!, available: true }],
+      }),
+    );
+    await act(async () => {});
+
+    expect(video.getAttribute("src")).toBe(src);
+    expect(document.querySelector("video")).toBe(video);
+    expect(vi.mocked(HTMLMediaElement.prototype.load).mock.calls.length).toBe(loadCalls);
+    expect(requests.starts).toHaveLength(1);
+    expect(requests.replans).toHaveLength(0);
+    expect(sessionRef.current?.planRevision).toBe(1);
   });
 });
