@@ -8,6 +8,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Silo-Server/silo-server/internal/models"
 )
@@ -98,7 +99,7 @@ VALUES ($1,'audiobook','Emma','',2008,'{Provider Genre}'::text[])`, id); err != 
 				t.Fatal(err)
 			}
 			defer func() { _ = tx.Rollback(context.Background()) }()
-			if err := s.upsertAudiobookPresentationTx(ctx, tx, folder, id, dir, book); err != nil {
+			if err := s.upsertAudiobookPresentationTx(ctx, tx, folder, id, dir, book, time.Time{}); err != nil {
 				t.Fatal(err)
 			}
 			if err := tx.Commit(ctx); err != nil {
