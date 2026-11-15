@@ -15812,6 +15812,13 @@
       "AdminPlaybackSession": {
         "additionalProperties": false,
         "properties": {
+          "adaptation_reasons": {
+            "description": "Why the route changes the file instead of playing it as it is, video causes first, from the vocabulary in the capabilities' adaptation_reason_values. Absent for direct play, for a session planned before the server recorded reasons, and for Jellyfin-protocol sessions. Clients ignore values they do not know.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
           "audio_decision": {
             "type": "string"
           },
@@ -16135,6 +16142,17 @@
       "AdminPlaybackSessionCapabilitiesOutputBody": {
         "additionalProperties": false,
         "properties": {
+          "adaptation_reason_values": {
+            "description": "Every adaptation_reasons value this server emits, in the order it reports them. A later server may add values.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "adaptation_reasons": {
+            "description": "Rows may carry adaptation_reasons",
+            "type": "boolean"
+          },
           "allowed": {
             "description": "Whether the current principal may use the capability",
             "type": "boolean"
@@ -16245,6 +16263,8 @@
           "source_video_height",
           "device_identity",
           "lifecycle_events",
+          "adaptation_reasons",
+          "adaptation_reason_values",
           "revision",
           "state",
           "allowed"

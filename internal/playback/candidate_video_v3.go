@@ -28,8 +28,11 @@ type videoFactsV3 struct {
 	base                                               PlanV3
 	// mustAdapt means no route that copies the video can work.
 	mustAdapt, remuxActive, transcodeStage, subtitleForced bool
-	transcodeReason                                        string
-	remuxAudio                                             remuxAudioFactsV3
+	// evidenceInsufficient means the client's evidence tier, not a known
+	// decode gap, kept the video off copy routes.
+	evidenceInsufficient bool
+	transcodeReason      string
+	remuxAudio           remuxAudioFactsV3
 }
 
 // remuxAudioFactsV3 is the one audio decision of each copy-remux delivery.
@@ -58,7 +61,9 @@ func (p *candidatePlannerV3) planVideo() PlannerResultV3 {
 	if p.video.transcodeStage {
 		exhausted = exhaustedV3()
 	}
-	return p.selectCandidateV3(p.videoCandidates(), p.enterVideoRoute, p.evaluateVideo, exhausted)
+	result := p.selectCandidateV3(p.videoCandidates(), p.enterVideoRoute, p.evaluateVideo, exhausted)
+	result.AdaptationReasons = p.videoAdaptationReasonsV3(result)
+	return result
 }
 
 // videoFacts fills p.video, or refuses when no candidate could exist. The
@@ -92,7 +97,7 @@ func (p *candidatePlannerV3) videoFacts() *PlannerResultV3 {
 	if quirk, ok := high10DecodeOverrideV3(source, request); !videoOK && ok {
 		videoOK, f.high10 = true, quirk
 	}
-	f.videoOK = videoOK
+	f.videoOK, f.evidenceInsufficient = videoOK, evidenceInsufficient
 	rangeOK, videoClaims := outputRangeEligibleV3(source, request)
 	f.rangeOK = rangeOK
 	f.clientManagedRange = clientManagesOriginalDynamicRangeV3(source, request)

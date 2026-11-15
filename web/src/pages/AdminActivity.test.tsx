@@ -130,7 +130,7 @@ describe("activity playback scopes", () => {
     mocks.sessions = [makeSession()];
   });
 
-  it("uses the same four labels, counts and colors for the bar, filters and row badges", () => {
+  it("uses the same four labels, counts and colors for the filters and row badges", () => {
     const methods = ["direct", "remux", "direct_stream", "transcode"];
     mocks.sessions = methods.map((method) =>
       makeSession({
@@ -144,20 +144,18 @@ describe("activity playback scopes", () => {
     );
     renderActivity();
 
-    const bar = screen.getByRole("img", { name: "Playback method distribution" });
-    expect(Array.from(bar.children, (segment) => segment.getAttribute("title"))).toEqual(
-      methods.map((method) => `${activityMethodMeta(method).label}: 1`),
-    );
+    const filters = screen.getByRole("group", { name: "Playback Method" });
+    expect(
+      within(filters)
+        .getAllByRole("button")
+        .map((chip) => chip.getAttribute("aria-label")),
+    ).toEqual(methods.map((method) => `${activityMethodMeta(method).label} 1`));
     for (const method of methods) {
       const meta = activityMethodMeta(method);
-      const segment = within(bar).getByTitle(`${meta.label}: 1`);
-      expect(segment).toHaveStyle({ width: "25%" });
-      expect(segment).toHaveClass(meta.swatchClass);
+      const chip = within(filters).getByRole("button", { name: `${meta.label} 1` });
+      expect(chip).toHaveAttribute("aria-pressed", "false");
+      expect(chip.querySelector(`.${meta.swatchClass}`)).not.toBeNull();
       expect(screen.getAllByLabelText(`Playback method: ${meta.label}`)).toHaveLength(2);
-      expect(screen.getByRole("button", { name: `${meta.label} 1` })).toHaveAttribute(
-        "aria-pressed",
-        "false",
-      );
     }
     fireEvent.click(screen.getByRole("button", { name: "Direct Stream 1" }));
     expect(screen.getByRole("button", { name: "Direct Stream 1" })).toHaveAttribute(
@@ -167,10 +165,10 @@ describe("activity playback scopes", () => {
     expect(screen.getByText("Showing 1 of 4 streams")).toBeInTheDocument();
     expect(screen.getAllByLabelText("Playback method: Direct Stream")).toHaveLength(2);
     expect(screen.queryByLabelText("Playback method: Direct Play")).not.toBeInTheDocument();
-    expect(bar.children).toHaveLength(4);
+    expect(within(filters).getAllByRole("button")).toHaveLength(4);
   });
 
-  it("keeps unknown scopes unknown and puts encoder and tone-map modes in expanded details", () => {
+  it("keeps unknown scopes unknown, shows the encoder in the row and tone mapping in details", () => {
     mocks.sessions = [
       makeSession({ session_id: "unknown", effective_play_method: "future-method" }),
       makeSession({
@@ -185,13 +183,38 @@ describe("activity playback scopes", () => {
 
     expect(screen.getAllByLabelText("Playback method: Unknown")).toHaveLength(2);
     expect(screen.getAllByLabelText("Playback method: Transcode")).toHaveLength(2);
-    expect(screen.queryByText("HW QSV")).not.toBeInTheDocument();
+    expect(screen.getAllByText("HW QSV")).toHaveLength(1);
     expect(screen.queryByText("HW Tone map")).not.toBeInTheDocument();
     expect(screen.queryByLabelText("Playback method: Direct Play")).not.toBeInTheDocument();
-    const badge = screen.getAllByLabelText("Playback method: Transcode")[0]!;
-    fireEvent.click(within(badge.parentElement!).getByRole("button", { name: "Details" }));
-    expect(screen.getByText("HW QSV")).toBeInTheDocument();
-    expect(screen.getByText("Hardware")).toBeInTheDocument();
+    // Each session has a table-row and a stacked-card expand button.
+    fireEvent.click(screen.getAllByRole("button", { name: "Details" })[2]!);
+    expect(screen.getByText("HW Tone map")).toBeInTheDocument();
+  });
+
+  it("names the first reason in the row and lists every reason in details", () => {
+    mocks.sessions = [
+      makeSession({
+        effective_play_method: "transcode",
+        video_decision: "transcode",
+        adaptation_reasons: [
+          "video_codec_unsupported",
+          "dynamic_range_unsupported",
+          "audio_codec_unsupported",
+        ],
+      }),
+    ];
+    renderActivity();
+
+    expect(screen.getAllByText("Video codec not supported")).toHaveLength(2);
+    expect(screen.queryByText("HDR not supported")).not.toBeInTheDocument();
+    fireEvent.click(screen.getAllByRole("button", { name: "Show 2 more reasons" })[0]!);
+    for (const description of [
+      "The device can't decode this video's codec, profile or bit depth.",
+      "The display can't show this HDR or Dolby Vision video as it is.",
+      "The device, or the stream format it needs, can't play this audio codec.",
+    ]) {
+      expect(screen.getByText(description)).toBeInTheDocument();
+    }
   });
 
   it("does not collapse distinct server sessions just because their display fields match", () => {
@@ -210,7 +233,7 @@ describe("IP lookup", () => {
         <AdminActivity />
       </MemoryRouter>,
     );
-    fireEvent.click(screen.getByText("IP Lookup"));
+    fireEvent.click(screen.getByRole("button", { name: "IP Lookup" }));
     fireEvent.change(screen.getByPlaceholderText(/IP lookup/), {
       target: { value: "198.51.100.1" },
     });

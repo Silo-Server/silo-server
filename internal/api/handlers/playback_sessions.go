@@ -78,89 +78,43 @@ type playbackSessionRow struct {
 	// the target codec with no channel layout rather than reusing
 	// SourceAudioChannels, which is what made a 7.1 source downmixed to AAC 5.1
 	// read as "AAC 7.1".
-	TargetAudioChannels      *int    `json:"target_audio_channels,omitempty"`
-	TargetBitrateKbps        *int    `json:"target_bitrate_kbps"`
-	TranscodeHWAccel         string  `json:"transcode_hw_accel,omitempty"`
-	ToneMapMode              string  `json:"tone_map_mode,omitempty"`
-	SourceContainer          string  `json:"source_container,omitempty"`
-	SourceBitrateKbps        *int    `json:"source_bitrate_kbps"`
-	SourceVideoCodec         string  `json:"source_video_codec,omitempty"`
-	SourceVideoResolution    string  `json:"source_video_resolution,omitempty"`
-	SourceVideoHeight        int     `json:"-"`
-	SourceAudioCodec         string  `json:"source_audio_codec,omitempty"`
-	SourceAudioChannels      *int    `json:"source_audio_channels"`
-	SourceAudioLanguage      string  `json:"source_audio_language,omitempty"`
-	SourceAudioTitle         string  `json:"source_audio_title,omitempty"`
-	SourceAudioLayout        string  `json:"source_audio_layout,omitempty"`
-	RequestedVideoCodec      string  `json:"requested_video_codec,omitempty"`
-	RequestedVideoResolution string  `json:"requested_video_resolution,omitempty"`
-	VideoDecision            string  `json:"video_decision,omitempty"`
-	AudioDecision            string  `json:"audio_decision,omitempty"`
-	EffectivePlayMethod      string  `json:"effective_play_method,omitempty"`
-	IsJellyfinClient         bool    `json:"is_jellyfin_client,omitempty"`
-	RoutingNetworkProvider   *string `json:"-"`
-	RoutingWorkload          string  `json:"routing_workload,omitempty"`
-	RoutingExecution         string  `json:"routing_execution,omitempty"`
-	RoutingExecutionNodeID   *int    `json:"routing_execution_node_id,omitempty"`
-	RoutingExecutionNodeName string  `json:"routing_execution_node_name,omitempty"`
-	RoutingEgress            string  `json:"routing_egress,omitempty"`
-	RoutingEgressNodeID      *int    `json:"routing_egress_node_id,omitempty"`
-	RoutingEgressNodeName    string  `json:"routing_egress_node_name,omitempty"`
-	CompatOrigin             bool    `json:"-"`
+	TargetAudioChannels      *int   `json:"target_audio_channels,omitempty"`
+	TargetBitrateKbps        *int   `json:"target_bitrate_kbps"`
+	TranscodeHWAccel         string `json:"transcode_hw_accel,omitempty"`
+	ToneMapMode              string `json:"tone_map_mode,omitempty"`
+	SourceContainer          string `json:"source_container,omitempty"`
+	SourceBitrateKbps        *int   `json:"source_bitrate_kbps"`
+	SourceVideoCodec         string `json:"source_video_codec,omitempty"`
+	SourceVideoResolution    string `json:"source_video_resolution,omitempty"`
+	SourceVideoHeight        int    `json:"-"`
+	SourceAudioCodec         string `json:"source_audio_codec,omitempty"`
+	SourceAudioChannels      *int   `json:"source_audio_channels"`
+	SourceAudioLanguage      string `json:"source_audio_language,omitempty"`
+	SourceAudioTitle         string `json:"source_audio_title,omitempty"`
+	SourceAudioLayout        string `json:"source_audio_layout,omitempty"`
+	RequestedVideoCodec      string `json:"requested_video_codec,omitempty"`
+	RequestedVideoResolution string `json:"requested_video_resolution,omitempty"`
+	VideoDecision            string `json:"video_decision,omitempty"`
+	AudioDecision            string `json:"audio_decision,omitempty"`
+	EffectivePlayMethod      string `json:"effective_play_method,omitempty"`
+	// AdaptationReasons is native-only: the frozen v1 projection does not
+	// carry it.
+	AdaptationReasons        []string `json:"-"`
+	IsJellyfinClient         bool     `json:"is_jellyfin_client,omitempty"`
+	RoutingNetworkProvider   *string  `json:"-"`
+	RoutingWorkload          string   `json:"routing_workload,omitempty"`
+	RoutingExecution         string   `json:"routing_execution,omitempty"`
+	RoutingExecutionNodeID   *int     `json:"routing_execution_node_id,omitempty"`
+	RoutingExecutionNodeName string   `json:"routing_execution_node_name,omitempty"`
+	RoutingEgress            string   `json:"routing_egress,omitempty"`
+	RoutingEgressNodeID      *int     `json:"routing_egress_node_id,omitempty"`
+	RoutingEgressNodeName    string   `json:"routing_egress_node_name,omitempty"`
+	CompatOrigin             bool     `json:"-"`
 	// TimelineDuration is the length the position is measured against when
 	// that is more than the file, such as a whole multi-file audiobook. The
 	// row's own file_duration stays the file's duration; v2 reads
 	// MeasuredDuration.
 	TimelineDuration *int `json:"-"`
-}
-
-// playbackSessionsCapabilitiesResponse advertises the additive fields of the
-// live admin session payload so independently deployed clients (Android,
-// Apple) can feature-detect them. The advertised fields are omitempty on the
-// wire, so absence on a row is otherwise indistinguishable from an older
-// server.
-type playbackSessionsCapabilitiesResponse struct {
-	// EffectivePlayMethod reports that rows carry effective_play_method.
-	EffectivePlayMethod bool `json:"effective_play_method"`
-	// EffectivePlayMethodValues is the closed bucket vocabulary a supported
-	// server emits (absent field = unknown).
-	EffectivePlayMethodValues []string `json:"effective_play_method_values"`
-	// IsJellyfinClient reports that rows carry is_jellyfin_client.
-	IsJellyfinClient bool `json:"is_jellyfin_client"`
-	// TranscodeHWAccel reports that rows carry the confirmed transcode executor.
-	TranscodeHWAccel bool `json:"transcode_hw_accel"`
-	// ToneMapMode reports that rows carry the confirmed tone-map executor.
-	ToneMapMode bool `json:"tone_map_mode"`
-	// ToneMapModeValues is the closed vocabulary for recognized tone-map modes.
-	ToneMapModeValues []string `json:"tone_map_mode_values"`
-	// ClientBuild reports that rows carry client_build (and the exact-version
-	// client_label_full derived from it).
-	ClientBuild bool `json:"client_build"`
-	// ClientChannel reports that rows carry client_channel.
-	ClientChannel bool `json:"client_channel"`
-	// TargetAudioChannels reports that rows carry target_audio_channels;
-	// absent on a row then means the reporting node did not know the encoded
-	// layout.
-	TargetAudioChannels bool `json:"target_audio_channels"`
-	// NodeRouting reports that rows may carry workload/execution/egress route
-	// assignment fields when the active session has resolved them.
-	NodeRouting bool `json:"node_routing"`
-}
-
-// AdminPlaybackSessionFeatures is shared by the frozen bridge and native projection.
-func AdminPlaybackSessionFeatures() playbackSessionsCapabilitiesResponse {
-	return playbackSessionsCapabilitiesResponse{
-		EffectivePlayMethod:       true,
-		EffectivePlayMethodValues: []string{"direct", "remux", "transcode", "audio"},
-		IsJellyfinClient:          true,
-		TranscodeHWAccel:          true,
-		ToneMapMode:               true,
-		ToneMapModeValues:         []string{"hardware", "software"},
-		ClientBuild:               true,
-		ClientChannel:             true,
-		TargetAudioChannels:       true,
-		NodeRouting:               true,
-	}
 }
 
 type playbackRoutingCapabilitiesResponse struct {
@@ -392,6 +346,7 @@ func (l *PlaybackSessionsLoader) load(ctx context.Context, query PlaybackSession
 			COALESCE(s.stream_location, ''),
 			COALESCE(s.device_id, ''),
 			COALESCE(s.device_platform, ''),
+			COALESCE(s.adaptation_reasons, '{}'),
 			` + lifecycleColumns + `
 		 FROM ` + source + ` s
 		 LEFT JOIN users u ON u.id = s.user_id
@@ -470,7 +425,7 @@ func (l *PlaybackSessionsLoader) load(ctx context.Context, query PlaybackSession
 			&s.CompatOrigin, &s.RoutingWorkload, &s.RoutingExecution, &s.RoutingExecutionNodeID,
 			&s.RoutingExecutionNodeName, &s.RoutingEgress, &s.RoutingEgressNodeID, &s.RoutingEgressNodeName, &s.RoutingNetworkProvider,
 			&s.OutputContainer, &s.OutputProtocol, &s.StreamLocation,
-			&s.DeviceID, &s.DevicePlatform, &s.LifecycleSeq,
+			&s.DeviceID, &s.DevicePlatform, &s.AdaptationReasons, &s.LifecycleSeq,
 		); err != nil {
 			return nil, 0, fmt.Errorf("scanning playback session: %w", err)
 		}
@@ -517,6 +472,13 @@ func enrichPlaybackSessionRow(row *playbackSessionRow, audioTracksJSON []byte) {
 
 	row.VideoDecision, row.AudioDecision = sessionComponentDecision(row.PlayMethod, row.TranscodeAudio, row.TargetVideoCodec)
 	row.EffectivePlayMethod = effectivePlayMethod(row.VideoDecision, row.AudioDecision)
+	// Direct play changes nothing; a stored value a newer server wrote is
+	// dropped rather than shown raw.
+	if row.PlayMethod == string(playback.PlayDirect) {
+		row.AdaptationReasons = nil
+	} else {
+		row.AdaptationReasons = playback.NormalizeAdaptationReasons(row.AdaptationReasons)
+	}
 	if row.PlayMethod == string(playback.PlayDirect) {
 		row.OutputContainer = row.SourceContainer
 		row.OutputProtocol = playback.OutputProtocolHTTP
@@ -627,13 +589,13 @@ func effectivePlayMethod(videoDecision, audioDecision string) string {
 	case videoDecision == "" && audioDecision == "":
 		return ""
 	case videoDecision == "transcode":
-		return "transcode"
+		return effectivePlayMethodTranscode
 	case audioDecision == "transcode":
-		return "audio"
+		return effectivePlayMethodAudio
 	case videoDecision == "direct" && audioDecision == "direct":
-		return "direct"
+		return effectivePlayMethodDirect
 	default:
-		return "remux"
+		return effectivePlayMethodRemux
 	}
 }
 
