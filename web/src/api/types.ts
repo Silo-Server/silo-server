@@ -2833,6 +2833,10 @@ export interface AdminSession {
   client_label?: string;
   client_label_full?: string;
   client_user_agent?: string;
+  /** Device the client declared when playback started; absent when none was. */
+  device_id?: string;
+  /** Platform the client declared; never derived from the user agent. */
+  device_platform?: string;
   audio_track_index: number;
   transcode_audio: boolean;
   stream_bitrate_kbps: number | null;

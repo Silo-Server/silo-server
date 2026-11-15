@@ -10,6 +10,8 @@ import { TagInput } from "@/components/TagInput";
 import ImageSelectorTab from "@/components/ImageSelectorTab";
 import type { ItemDetail } from "@/api/types";
 import {
+  useItemImageWritePending,
+  useItemMetadataResetPending,
   useItemMetadataSavePending,
   useUpdateItemMetadata,
   useRefreshItemMetadata,
@@ -99,13 +101,18 @@ function EditMetadataForm({ item, open, onOpenChange }: EditMetadataDialogProps)
   // Keep only local changes to locks. Image selection updates the item while
   // this dialog is open, so a snapshot of the original locks can go stale.
   const [lockOverrides, setLockOverrides] = useState<Map<number, boolean>>(() => new Map());
-  const [imageApplyPending, setImageApplyPending] = useState(false);
   const [showResetConfirm, setShowResetConfirm] = useState(false);
 
   const updateMutation = useUpdateItemMetadata(item.content_id);
-  // Each opening has a new form, so read a save from an earlier opening too.
+  // Each opening has a new form, so read a save, an image write, or a reset
+  // from an earlier opening too.
   const savePending = useItemMetadataSavePending(item.content_id);
+  const imageWritePending = useItemImageWritePending(item.content_id);
+  const resetPending = useItemMetadataResetPending(item.content_id);
   const refreshMutation = useRefreshItemMetadata();
+  // A save sends the whole lock list, and a reset clears the locks, so either
+  // one started while another write is running could leave the locks wrong.
+  const writePending = savePending || imageWritePending || resetPending;
 
   const ownsImageLock = item.type === "movie" || item.type === "series";
   // A season or episode has the series' content rating, which decides age limits.
@@ -712,7 +719,6 @@ function EditMetadataForm({ item, open, onOpenChange }: EditMetadataDialogProps)
                     item={item}
                     enabled={effectiveActiveSection === "images"}
                     onImageApplied={handleImageApplied}
-                    onApplyPendingChange={setImageApplyPending}
                   />
                 </div>
               )}
@@ -727,9 +733,7 @@ function EditMetadataForm({ item, open, onOpenChange }: EditMetadataDialogProps)
                   variant="ghost"
                   size="sm"
                   onClick={() => setShowResetConfirm(true)}
-                  // A save or image apply still running could lock a field
-                  // again after the reset unlocks it.
-                  disabled={savePending || imageApplyPending}
+                  disabled={writePending}
                   className="text-muted-foreground hover:text-foreground"
                 >
                   {t("web.item.editMetadata.resetToProvider")}
@@ -748,7 +752,7 @@ function EditMetadataForm({ item, open, onOpenChange }: EditMetadataDialogProps)
               <Button
                 size="sm"
                 onClick={handleSave}
-                disabled={savePending || imageApplyPending}
+                disabled={writePending}
                 className="max-sm:flex-1"
               >
                 {savePending ? t("web.item.dialog.saving") : t("web.item.editMetadata.saveChanges")}

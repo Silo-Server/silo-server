@@ -115,7 +115,7 @@ export function NowListening({
           <ChevronDown className="h-5 w-5" />
           <span>{t("web.audiobooks.player.backToPlayer")}</span>
         </button>
-        <PlayerSettingsMenu prefs={prefs} />
+        <PlayerSettingsMenu prefs={prefs} placement="below" />
       </div>
 
       <div className="grid flex-1 grid-cols-[minmax(0,1fr)] content-center items-center gap-8 px-6 pt-2 pb-10 sm:gap-10 md:grid-cols-[minmax(0,22rem)_minmax(0,32rem)] md:justify-center md:gap-12 md:px-12 xl:grid-cols-[minmax(0,24rem)_minmax(0,32rem)_17rem]">

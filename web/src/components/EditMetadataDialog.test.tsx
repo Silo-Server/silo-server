@@ -6,6 +6,8 @@ const mocks = vi.hoisted(() => ({
   update: vi.fn(),
   updateAsync: vi.fn(),
   refresh: vi.fn(),
+  imageWritePending: false,
+  resetPending: false,
 }));
 
 vi.mock("@/hooks/queries/items", () => ({
@@ -16,6 +18,8 @@ vi.mock("@/hooks/queries/items", () => ({
   }),
   useRefreshItemMetadata: () => ({ mutate: mocks.refresh }),
   useItemMetadataSavePending: () => false,
+  useItemImageWritePending: () => mocks.imageWritePending,
+  useItemMetadataResetPending: () => mocks.resetPending,
 }));
 vi.mock("@/hooks/useIsActingAdmin", () => ({ useIsActingAdmin: () => true }));
 vi.mock("@/components/MetadataTranslatePanel", () => ({ MetadataTranslatePanel: () => null }));
@@ -31,18 +35,8 @@ vi.mock("@/components/ConfirmDialog", () => ({
   }) => (open ? <button onClick={onConfirm}>{confirmLabel}</button> : null),
 }));
 vi.mock("@/components/ImageSelectorTab", () => ({
-  default: ({
-    onImageApplied,
-    onApplyPendingChange,
-  }: {
-    onImageApplied?: () => void;
-    onApplyPendingChange?: (pending: boolean) => void;
-  }) => (
-    <>
-      <button onClick={onImageApplied}>Apply image</button>
-      <button onClick={() => onApplyPendingChange?.(true)}>Begin image apply</button>
-      <button onClick={() => onApplyPendingChange?.(false)}>Finish image apply</button>
-    </>
+  default: ({ onImageApplied }: { onImageApplied?: () => void }) => (
+    <button onClick={onImageApplied}>Apply image</button>
   ),
 }));
 
@@ -62,6 +56,8 @@ describe("EditMetadataDialog image locks", () => {
   beforeEach(() => {
     mocks.update.mockReset();
     mocks.refresh.mockReset();
+    mocks.imageWritePending = false;
+    mocks.resetPending = false;
   });
 
   it("keeps a newly fetched image lock when other metadata is saved", () => {
@@ -91,13 +87,25 @@ describe("EditMetadataDialog image locks", () => {
     expect(mocks.update).toHaveBeenCalledWith({ locked_fields: [10] }, expect.any(Object));
   });
 
-  it("waits for an image apply to finish before saving metadata", () => {
-    render(<EditMetadataDialog item={series()} open onOpenChange={vi.fn()} />);
-    fireEvent.click(screen.getByRole("button", { name: "Begin image apply" }));
+  // A save or reset started while an image apply, an upload, or a reset is
+  // still running could leave the item's locks wrong, including when the
+  // write was started from an earlier opening of the dialog (#4243).
+  it.each([
+    ["an image apply or upload", "imageWritePending"],
+    ["a Reset to Provider", "resetPending"],
+  ] as const)("waits for %s for the item to finish", (_name, pending) => {
+    const onOpenChange = vi.fn();
+    mocks[pending] = true;
+    const { rerender } = render(
+      <EditMetadataDialog item={series()} open onOpenChange={onOpenChange} />,
+    );
     expect(screen.getByRole("button", { name: "Save Changes" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Reset to Provider" })).toBeDisabled();
 
-    fireEvent.click(screen.getByRole("button", { name: "Finish image apply" }));
+    mocks[pending] = false;
+    rerender(<EditMetadataDialog item={series()} open onOpenChange={onOpenChange} />);
     expect(screen.getByRole("button", { name: "Save Changes" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Reset to Provider" })).toBeEnabled();
   });
 });
 
