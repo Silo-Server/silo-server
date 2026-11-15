@@ -171,6 +171,16 @@ var (
 	audiobookTrailingPositionRE = regexp.MustCompile(`(?i)(?:#|\b(?:book|bk|volume|vol|number|no|part|pt)\b\.?)\s*#?\s*\d+(?:\.\d+)?\s*$`)
 )
 
+// containsTitleWords reports whether phrase appears in text as whole words,
+// ignoring case and punctuation. An empty phrase is never contained.
+func containsTitleWords(text, phrase string) bool {
+	words := func(v string) string {
+		return " " + strings.ToLower(strings.TrimSpace(collapseSpacesRE.ReplaceAllString(audiobookDedupeTitleTokenRE.ReplaceAllString(v, " "), " "))) + " "
+	}
+	p := words(phrase)
+	return strings.TrimSpace(p) != "" && strings.Contains(words(text), p)
+}
+
 // audiobookTagTitle picks a book's title from its title and album tags as
 // the rules above describe. series is the book's series tag.
 func audiobookTagTitle(title, album, series string) string {
@@ -186,7 +196,7 @@ func audiobookTagTitle(title, album, series string) string {
 	if rest, ok := strings.CutPrefix(a, t); ok && audiobookSubtitleSeparatorRE.MatchString(rest) {
 		// An album that adds the series ("Book: Saga, Book 1") is not a
 		// subtitle.
-		if (s == "" || !strings.Contains(rest, s)) && !audiobookTrailingPositionRE.MatchString(rest) {
+		if !containsTitleWords(rest, s) && !audiobookTrailingPositionRE.MatchString(rest) {
 			return album
 		}
 		return title
@@ -231,8 +241,11 @@ func audiobookTagNarrators(tags map[string]string, authors []string) []string {
 	for _, a := range authors {
 		isAuthor[strings.ToLower(a)] = true
 	}
-	if names := splitAudiobookCredits(firstNonEmpty(tags["narrator"], tags["narratedby"])); len(names) > 0 {
-		return names
+	//nolint:goconst // Tag keys are data, matching the names ffprobe reports.
+	for _, key := range []string{"narrator", "narratedby"} {
+		if names := splitAudiobookCredits(tags[key]); len(names) > 0 {
+			return names
+		}
 	}
 	var first []string
 	//nolint:goconst // Tag keys are data, matching the names ffprobe reports.

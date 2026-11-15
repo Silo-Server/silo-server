@@ -1091,6 +1091,8 @@ func TestAudiobookTagTitle(t *testing.T) {
 		// An album that adds the series is not a subtitle.
 		{"Book Title", "Book Title: Saga Name, Book 1", "", "Book Title"},
 		{"Book Title", "Book Title - Saga Name", "Saga Name", "Book Title"},
+		// The series must appear as whole words, not inside one.
+		{"Book Title", "Book Title: A Little Adventure", "It", "Book Title: A Little Adventure"},
 		// Unrelated tags keep the title: a single file's album may be its
 		// series or a collection.
 		{"Book Title", "Saga Name", "Saga Name", "Book Title"},
@@ -1115,6 +1117,8 @@ func TestPopulateFromTagsNarrators(t *testing.T) {
 		// A book read by its author keeps the author.
 		{map[string]string{"album_artist": "Ann Author", "performer": "Ann Author", "composer": "Ann Author"}, []string{"Ann Author"}},
 		{map[string]string{"album_artist": "Ann Author", "performer": "Ann Author"}, []string{"Ann Author"}},
+		// A narrator tag with no usable name does not hide narratedby.
+		{map[string]string{"album_artist": "Ann Author", "narrator": ";", "narratedby": "Ned Narrator", "composer": "Other Reader"}, []string{"Ned Narrator"}},
 		// An explicit narrator tag wins even when it names the author.
 		{map[string]string{"album_artist": "Ann Author", "narrator": "Ann Author", "composer": "Film Composer"}, []string{"Ann Author"}},
 		// The first source naming someone else wins, as before.
