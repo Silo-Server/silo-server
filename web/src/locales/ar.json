@@ -154282,6 +154282,286 @@
       "value": "مسح عوامل التصفية"
     }
   ],
+  "web.library.browse.countBooks": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "zero": {
+          "value": [
+            {
+              "type": 0,
+              "value": "لا كتب"
+            }
+          ]
+        },
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "كتاب واحد"
+            }
+          ]
+        },
+        "two": {
+          "value": [
+            {
+              "type": 0,
+              "value": "كتابان"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 1,
+              "value": "shown"
+            },
+            {
+              "type": 0,
+              "value": " كتب"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 1,
+              "value": "shown"
+            },
+            {
+              "type": 0,
+              "value": " كتابًا"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "shown"
+            },
+            {
+              "type": 0,
+              "value": " كتاب"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.library.browse.countEpisodes": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "zero": {
+          "value": [
+            {
+              "type": 0,
+              "value": "لا حلقات"
+            }
+          ]
+        },
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "حلقة واحدة"
+            }
+          ]
+        },
+        "two": {
+          "value": [
+            {
+              "type": 0,
+              "value": "حلقتان"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 1,
+              "value": "shown"
+            },
+            {
+              "type": 0,
+              "value": " حلقات"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 1,
+              "value": "shown"
+            },
+            {
+              "type": 0,
+              "value": " حلقة"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "shown"
+            },
+            {
+              "type": 0,
+              "value": " حلقة"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.library.browse.countMovies": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "zero": {
+          "value": [
+            {
+              "type": 0,
+              "value": "لا أفلام"
+            }
+          ]
+        },
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "فيلم واحد"
+            }
+          ]
+        },
+        "two": {
+          "value": [
+            {
+              "type": 0,
+              "value": "فيلمان"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 1,
+              "value": "shown"
+            },
+            {
+              "type": 0,
+              "value": " أفلام"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 1,
+              "value": "shown"
+            },
+            {
+              "type": 0,
+              "value": " فيلمًا"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "shown"
+            },
+            {
+              "type": 0,
+              "value": " فيلم"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.library.browse.countSeries": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "zero": {
+          "value": [
+            {
+              "type": 0,
+              "value": "لا مسلسلات"
+            }
+          ]
+        },
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "مسلسل واحد"
+            }
+          ]
+        },
+        "two": {
+          "value": [
+            {
+              "type": 0,
+              "value": "مسلسلان"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 1,
+              "value": "shown"
+            },
+            {
+              "type": 0,
+              "value": " مسلسلات"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 1,
+              "value": "shown"
+            },
+            {
+              "type": 0,
+              "value": " مسلسلًا"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "shown"
+            },
+            {
+              "type": 0,
+              "value": " مسلسل"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.library.browse.lettersRefreshFailed": [
     {
       "type": 0,

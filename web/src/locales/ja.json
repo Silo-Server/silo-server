@@ -104712,6 +104712,94 @@
       "value": "フィルターをクリア"
     }
   ],
+  "web.library.browse.countBooks": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "shown"
+            },
+            {
+              "type": 0,
+              "value": "冊"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.library.browse.countEpisodes": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "shown"
+            },
+            {
+              "type": 0,
+              "value": "エピソード"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.library.browse.countMovies": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "shown"
+            },
+            {
+              "type": 0,
+              "value": "本の映画"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.library.browse.countSeries": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "shown"
+            },
+            {
+              "type": 0,
+              "value": "シリーズ"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.library.browse.lettersRefreshFailed": [
     {
       "type": 0,
