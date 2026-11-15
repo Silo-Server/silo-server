@@ -162,6 +162,8 @@
 # A monitored rename of a book folder keeps the book: the old path is
 # reconciled first, and the removal grace holds the book for the new path.
 ./internal/scanner TestScanSubtreeAudiobookRenameKeepsBookDB
+# Two copies of one recording on disk are two items; only a moved folder reuses one.
+./internal/scanner TestScanAudiobookSecondCopyIsItsOwnItemDB
 
 # A rescan of a retagged, unmatched ebook keeps the fields and author credits an
 # admin locked, including locked fields left empty.

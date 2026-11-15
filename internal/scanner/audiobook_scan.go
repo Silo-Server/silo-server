@@ -1000,7 +1000,7 @@ func (s *Scanner) upsertAudiobookMediaItem(ctx context.Context, folderID int, fo
 	if existingID == "" {
 		if existing := s.findAudiobookByFilePath(ctx, folderID, book); existing != nil {
 			existingID = existing.ContentID
-		} else if existing := s.findAudiobookDuplicate(ctx, book, cleanTitle); existing != nil {
+		} else if existing := s.findAudiobookDuplicate(ctx, folderID, book, cleanTitle); existing != nil {
 			existingID = existing.ContentID
 		}
 	}
@@ -1121,11 +1121,17 @@ func createAudiobookMediaItem(ctx context.Context, itemWriter filesystemMediaIte
 
 // findAudiobookDuplicate returns an existing audiobook media_items row that
 // matches the parsed book on (author, narrator, year, duration ±0.5%/±10s,
-// punctuation-normalized title). Used after the file-path lookup misses to
-// detect the same recording stored under a different folder name. Returns nil
-// when no match exists or any required attribute (author, narrator, year,
-// duration) is missing — under-tagged files don't qualify for automatic dedup.
-func (s *Scanner) findAudiobookDuplicate(ctx context.Context, book *parsedAudiobook, cleanTitle string) *models.MediaItem {
+// punctuation-normalized title) and that this folder replaces. Used after the
+// file-path lookup misses, so a moved or renamed folder keeps its item and
+// listening progress. Returns nil when no match exists or any required
+// attribute (author, narrator, year, duration) is missing — under-tagged files
+// don't qualify for automatic dedup.
+//
+// The rule, per pickAudiobookDuplicate: a moved or renamed folder keeps its
+// item; two copies on disk are two items. A candidate is reused only when it
+// carries every tagged credit and none of its indexed files in this library
+// is still on disk.
+func (s *Scanner) findAudiobookDuplicate(ctx context.Context, folderID int, book *parsedAudiobook, cleanTitle string) *models.MediaItem {
 	if s.fileRepo == nil {
 		return nil
 	}
@@ -1176,22 +1182,15 @@ func (s *Scanner) findAudiobookDuplicate(ctx context.Context, book *parsedAudiob
 		return nil
 	}
 	rows.Close()
-	// The query matches on the first author and narrator only. Recordings
-	// that share those but differ in the rest of the cast are different
-	// editions, so every tagged credit must be on the candidate. The
-	// candidate may have more: a provider match stores the provider's
-	// fuller credits, and a renamed folder must keep its item.
 	credits, err := s.audiobookCandidateCredits(ctx, candidates)
 	if err != nil {
 		return nil
 	}
-	desired := book.credits()
-	for _, candidateID := range candidates {
-		if audiobookCreditsContain(credits[candidateID], desired) {
-			existingID = candidateID
-			break
-		}
+	files, err := s.audiobookCandidateFiles(ctx, folderID, candidates)
+	if err != nil {
+		return nil
 	}
+	existingID = pickAudiobookDuplicate(candidates, credits, files, book.credits(), fspath.Stat)
 	if existingID == "" {
 		return nil
 	}
@@ -1533,6 +1532,68 @@ func (b *parsedAudiobook) credits() []audiobookCredit {
 	add(b.Authors, b.Author, models.PersonKindAuthor)
 	add(b.Narrators, b.Narrator, models.PersonKindNarrator)
 	return out
+}
+
+// pickAudiobookDuplicate returns the first candidate, in query order, that
+// this folder replaces, or "" when none does.
+//   - Credits: the query matches on the first author and narrator only, and
+//     recordings that share those but differ in the rest of the cast are
+//     different editions, so every tagged credit must be on the candidate. The
+//     candidate may have more, as a provider match stores fuller credits.
+//   - Location: the folder replaces the candidate only when none of the
+//     candidate's indexed files is still on disk, which tells a move from a
+//     second copy. A stat error other than not-exist counts as present, so a
+//     storage hiccup cannot merge two copies.
+func pickAudiobookDuplicate(
+	candidates []string,
+	credits map[string][]models.ItemPerson,
+	files map[string][]string,
+	desired []audiobookCredit,
+	stat func(string) (os.FileInfo, error),
+) string {
+	for _, candidateID := range candidates {
+		if !audiobookCreditsContain(credits[candidateID], desired) {
+			continue
+		}
+		if !anyAudiobookFilePresent(files[candidateID], stat) {
+			return candidateID
+		}
+	}
+	return ""
+}
+
+func anyAudiobookFilePresent(paths []string, stat func(string) (os.FileInfo, error)) bool {
+	for _, path := range paths {
+		if _, err := stat(path); err == nil || !errors.Is(err, os.ErrNotExist) {
+			return true
+		}
+	}
+	return false
+}
+
+// audiobookCandidateFiles loads the duplicate candidates' indexed, not
+// missing file paths in this library in one query.
+func (s *Scanner) audiobookCandidateFiles(ctx context.Context, folderID int, contentIDs []string) (map[string][]string, error) {
+	out := make(map[string][]string, len(contentIDs))
+	if len(contentIDs) == 0 {
+		return out, nil
+	}
+	rows, err := s.fileRepo.Pool().Query(ctx, `
+		SELECT content_id, file_path FROM media_files
+		WHERE content_id = ANY($1) AND media_folder_id = $2 AND missing_since IS NULL
+	`, contentIDs, folderID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var contentID, path string
+		if err := rows.Scan(&contentID, &path); err != nil {
+			return nil, err
+		}
+		out[contentID] = append(out[contentID], path)
+	}
+	return out, rows.Err()
 }
 
 // audiobookCreditsContain reports whether every desired credit appears in

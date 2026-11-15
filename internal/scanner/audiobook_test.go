@@ -901,6 +901,37 @@ func TestAudiobookCreditsContain(t *testing.T) {
 	}
 }
 
+// A moved or renamed folder keeps its item; two copies on disk are two items.
+func TestPickAudiobookDuplicate(t *testing.T) {
+	tags := []audiobookCredit{
+		{Name: "Author A", Kind: models.PersonKindAuthor},
+		{Name: "Reader One", Kind: models.PersonKindNarrator},
+	}
+	provider := map[string][]models.ItemPerson{"old": {
+		{Person: models.Person{Name: "Author A"}, Kind: models.PersonKindAuthor},
+		{Person: models.Person{Name: "Reader One"}, Kind: models.PersonKindNarrator},
+		{Person: models.Person{Name: "Reader Two"}, Kind: models.PersonKindNarrator},
+	}}
+	files := map[string][]string{"old": {"/lib/Old Folder/part1.mp3", "/lib/Old Folder/part2.mp3"}}
+	statWith := func(err error) func(string) (os.FileInfo, error) {
+		return func(string) (os.FileInfo, error) { return nil, err }
+	}
+	tests := []struct {
+		name string
+		stat func(string) (os.FileInfo, error)
+		want string
+	}{
+		{"moved folder with provider credits", statWith(os.ErrNotExist), "old"},
+		{"second copy while the first exists", statWith(nil), ""},
+		{"old path cannot be checked", statWith(os.ErrPermission), ""},
+	}
+	for _, tc := range tests {
+		if got := pickAudiobookDuplicate([]string{"old"}, provider, files, tags, tc.stat); got != tc.want {
+			t.Errorf("%s: pickAudiobookDuplicate = %q, want %q", tc.name, got, tc.want)
+		}
+	}
+}
+
 func TestCollectAudiobookRootScansTreatsVanishedBookFolderAsEmpty(t *testing.T) {
 	library := t.TempDir()
 	// The encoded scope must also decode its parent before checking it.
