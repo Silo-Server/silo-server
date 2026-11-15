@@ -60,12 +60,15 @@ func TestThinNodeReadsThroughTheCore(t *testing.T) {
 	}
 
 	opens := watchOpens(t, media)
-	var coreOpens, cuts atomic.Int64
+	var coreRequests, coreOpens, cuts atomic.Int64
 	c := newThinClusterWith(t, thinClusterOptions{
 		media: media, ffmpeg: filepath.Join(bin, "ffmpeg"), sourceAccess: nodepool.SourceAccessCore,
 		wrapSources: func(next http.Handler) http.Handler {
 			return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				recorder := &statusRecorder{ResponseWriter: w}
+				// Counted before the route opens the file, so the count is
+				// never behind the opens the route has made.
+				coreRequests.Add(1)
 				if cuts.Add(-1) >= 0 {
 					// Cut this answer after its first bytes.
 					recorder.cutAfter = 32 << 10
@@ -145,13 +148,15 @@ func TestThinNodeReadsThroughTheCore(t *testing.T) {
 	if data, err := os.ReadFile(handedLibrary); err == nil {
 		t.Fatalf("FFmpeg was handed the library path: %s", data)
 	}
-	c.waitFor("the core's opens to be counted", func() bool { return opens.Load() == coreOpens.Load() })
 	if coreOpens.Load() == 0 {
 		t.Fatal("the core served no source reads")
 	}
-	time.Sleep(50 * time.Millisecond) //nolint:forbidigo // gives a stray open the time to show
-	if got, want := opens.Load(), coreOpens.Load(); got != want {
-		t.Fatalf("the file was opened %d times, the core's route opened it %d times", got, want)
+	// The sessions are still reading, so the two counts are taken in an order
+	// that cannot fail a correct run: the opens seen so far first, the
+	// requests the route has taken after. inotify may merge two opens into
+	// one event, which only lowers the first count.
+	if seen, served := opens.seen(t), coreRequests.Load(); seen > served {
+		t.Fatalf("the file was opened %d times, the core's route took %d requests", seen, served)
 	}
 
 	// Fails cleanly when the file changes: the next renewal or read gets
@@ -213,21 +218,56 @@ func (r *statusRecorder) Write(p []byte) (int, error) {
 
 func (r *statusRecorder) Unwrap() http.ResponseWriter { return r.ResponseWriter }
 
+// openWatch counts the opens of one file.
+type openWatch struct {
+	opens    atomic.Int64
+	marker   string
+	markerWd int32
+	marked   chan struct{}
+}
+
+// seen is the number of opens of the file observed so far. It opens the
+// watch's marker file and waits for that event: inotify delivers events in
+// order, so every earlier open of the watched file has been counted by then.
+func (w *openWatch) seen(t *testing.T) int64 {
+	t.Helper()
+	f, err := os.Open(w.marker)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = f.Close()
+	select {
+	case <-w.marked:
+	case <-time.After(10 * time.Second):
+		t.Fatal("the open watch never saw its marker")
+	}
+	return w.opens.Load()
+}
+
 // watchOpens counts the opens of path from now on.
-func watchOpens(t *testing.T, path string) *atomic.Int64 {
+func watchOpens(t *testing.T, path string) *openWatch {
 	t.Helper()
 	fd, err := unix.InotifyInit1(unix.IN_CLOEXEC | unix.IN_NONBLOCK)
 	if err != nil {
 		t.Skipf("inotify unavailable: %v", err)
 	}
+	watch := &openWatch{marker: filepath.Join(t.TempDir(), "marker"), marked: make(chan struct{}, 1)}
+	if err := os.WriteFile(watch.marker, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := unix.InotifyAddWatch(fd, path, unix.IN_OPEN); err != nil {
 		_ = unix.Close(fd)
 		t.Skipf("inotify watch: %v", err)
 	}
+	markerWd, err := unix.InotifyAddWatch(fd, watch.marker, unix.IN_OPEN)
+	if err != nil {
+		_ = unix.Close(fd)
+		t.Skipf("inotify watch: %v", err)
+	}
+	watch.markerWd = int32(markerWd)
 	// A non-blocking descriptor in an *os.File uses the runtime poller, so
 	// Close ends a pending Read.
 	events := os.NewFile(uintptr(fd), "inotify")
-	var opens atomic.Int64
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
@@ -239,8 +279,15 @@ func watchOpens(t *testing.T, path string) *atomic.Int64 {
 			}
 			for off := 0; off+unix.SizeofInotifyEvent <= n; {
 				event := (*unix.InotifyEvent)(unsafe.Pointer(&buf[off]))
-				if event.Mask&unix.IN_OPEN != 0 {
-					opens.Add(1)
+				switch {
+				case event.Mask&unix.IN_OPEN == 0:
+				case event.Wd == watch.markerWd:
+					select {
+					case watch.marked <- struct{}{}:
+					default:
+					}
+				default:
+					watch.opens.Add(1)
 				}
 				off += unix.SizeofInotifyEvent + int(event.Len)
 			}
@@ -250,5 +297,5 @@ func watchOpens(t *testing.T, path string) *atomic.Int64 {
 		_ = events.Close()
 		<-done
 	})
-	return &opens
+	return watch
 }

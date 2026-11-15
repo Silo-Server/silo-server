@@ -2,6 +2,8 @@ package keyframes
 
 import (
 	"errors"
+	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"slices"
@@ -57,6 +59,22 @@ func TestLoadReportsOtherFilesAsUnindexed(t *testing.T) {
 	}
 	if _, err := Load(filepath.Join(t.TempDir(), "missing.mkv")); err == nil || errors.Is(err, ErrNoIndex) {
 		t.Fatalf("missing file err = %v, want a read error", err)
+	}
+}
+
+type readerAtFunc func(p []byte, off int64) (int, error)
+
+func (f readerAtFunc) ReadAt(p []byte, off int64) (int, error) { return f(p, off) }
+
+// A relayed read cut mid-transfer fails with an end-of-file error inside a
+// path error. That is a failed read, not a file too short to be Matroska: it
+// stays transient, so Load does not cache it as a lasting missing index.
+func TestACutReadIsNotAShortFile(t *testing.T) {
+	cut := readerAtFunc(func([]byte, int64) (int, error) {
+		return 0, &fs.PathError{Op: "read", Path: "source", Err: io.ErrUnexpectedEOF}
+	})
+	if _, err := readPlanIndex(cut, 1<<20); err == nil || !transient(err) {
+		t.Fatalf("err = %v, want the read error", err)
 	}
 }
 

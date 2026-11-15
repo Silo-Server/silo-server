@@ -67,7 +67,7 @@ func Protocol(schemas huma.Registry) []workerprotocol.Operation {
 	sourceBytes.Parameters = sourceParams
 	sourceHead := op(http.MethodHead, PathSources, "HandleSource", "natural_idempotent", sourceBytesDescription, nil,
 		map[string]*huma.Response{"200": {Description: "The source's length and ETag, without a body."}},
-		http.StatusForbidden, http.StatusGone, http.StatusPreconditionFailed, http.StatusTooManyRequests, http.StatusServiceUnavailable)
+		http.StatusForbidden, http.StatusGone, http.StatusPreconditionFailed, http.StatusRequestedRangeNotSatisfiable, http.StatusTooManyRequests, http.StatusServiceUnavailable)
 	sourceHead.Parameters = sourceParams
 	return []workerprotocol.Operation{
 		config,

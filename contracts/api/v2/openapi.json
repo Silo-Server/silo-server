@@ -246317,6 +246317,16 @@
             },
             "description": "Precondition Failed"
           },
+          "416": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Requested Range Not Satisfiable"
+          },
           "429": {
             "content": {
               "text/plain": {

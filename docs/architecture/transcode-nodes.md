@@ -737,6 +737,12 @@ direct-play metrics. The bytes counter advances as the body is sent, at most
 during a long transcode. It is how an operator sizes API bandwidth before
 moving nodes to `core`.
 
+A copy remux reads far ahead of the player. FFmpeg copies as fast as its input
+allows and nothing paces it, so a copy session pulls the rest of the file from
+the API server within seconds of each start or seek. A throttled transcode
+reads about as far ahead as its throttle allows. Size API bandwidth for those
+bursts, not for the media bitrate.
+
 ### Loopback relay
 
 `internal/nodesource` (`relay.go`, `fetch.go`) serves core-access sources to
