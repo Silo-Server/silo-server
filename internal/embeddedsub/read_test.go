@@ -1126,6 +1126,68 @@ func TestPacketReadsBoundAbandonedWork(t *testing.T) {
 	}
 }
 
+// slowReaderAt takes delay over every read, as a mount of remote storage
+// that fetches a large chunk for each small read does.
+type slowReaderAt struct {
+	r     io.ReaderAt
+	delay time.Duration
+	reads atomic.Int32
+}
+
+func (s *slowReaderAt) ReadAt(p []byte, off int64) (int, error) {
+	s.reads.Add(1)
+	time.Sleep(s.delay) //nolint:forbidigo // Inside a synctest bubble this only advances the fake clock.
+	return s.r.ReadAt(p, off)
+}
+
+// On storage where every read takes a second, a whole read with SlowRead
+// gives way after its first round of reads instead of reading every cue for
+// minutes. A track whose reads all went out in that round still comes back
+// whole: nothing is left to refuse.
+func TestSlowReadsGiveWay(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		cues     int
+		giveWay  bool
+		maxReads int32
+	}{
+		{name: "many cues", cues: 64, giveWay: true, maxReads: 2 * slowReadSample},
+		{name: "one round of cues", cues: slowReadSample, maxReads: slowReadSample},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := mkvFixture{tracks: []fixtureTrack{{number: textTrack, uid: 0x3003, codec: "S_TEXT/UTF8"}}}
+			for i := range tc.cues {
+				f.clusters = append(f.clusters, fixtureCluster{ticks: uint64(i) * 10_000,
+					blocks: []fixtureBlock{textBlock(textTrack, 0, 1000, "line")}})
+			}
+			data := f.build()
+			_, idx := readFixture(t, f)
+			track, ok := idx.Track(textTrack)
+			if !ok {
+				t.Fatal("fixture has no text track")
+			}
+			synctest.Test(t, func(t *testing.T) {
+				src := &slowReaderAt{r: bytes.NewReader(data), delay: time.Second}
+				r := newFileReader(t.Context(), src, DefaultConcurrency)
+				r.giveWayWhenSlow(250 * time.Millisecond)
+				res, err := readMatroskaPackets(t.Context(), r, newBudget(0), idx, track, WholeFrom, WholeTo, ReadOptions{}, DefaultConcurrency)
+				if got := src.reads.Load(); got > tc.maxReads {
+					t.Fatalf("made %d reads, want at most %d", got, tc.maxReads)
+				}
+				if tc.giveWay {
+					if !errors.Is(err, ErrSlowReads) {
+						t.Fatalf("err = %v, want ErrSlowReads", err)
+					}
+					return
+				}
+				if err != nil || len(res.Packets) != tc.cues {
+					t.Fatalf("read %d packets, err %v; want %d", len(res.Packets), err, tc.cues)
+				}
+			})
+		})
+	}
+}
+
 func TestReadBudgetIncludesMetadata(t *testing.T) {
 	t.Run("cue jobs", func(t *testing.T) {
 		cues := make([]Cue, 1024)

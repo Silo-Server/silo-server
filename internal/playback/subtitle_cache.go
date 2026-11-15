@@ -14,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/embeddedsub"
 	"github.com/Silo-Server/silo-server/internal/fspath"
 	"github.com/Silo-Server/silo-server/internal/httpstream"
 )
@@ -356,12 +357,13 @@ func (c *SubtitleCache) serveWindowedSUP(w http.ResponseWriter, r *http.Request,
 			}
 			return err
 		}
-		if errors.Is(err, errSlowWindowRead) {
+		if errors.Is(err, errSlowWindowRead) || errors.Is(err, embeddedsub.ErrSlowReads) {
 			// Reading every cue of the track the same way would take far
-			// longer, and its random reads would starve the playback
-			// stream reading the same file; the demux reads it in order.
-			// A kept track whose local copy was slow to fetch is kept
-			// again this way, as every warm did before the index.
+			// longer, or already gave way to slow reads, and its random
+			// reads would starve the playback stream reading the same
+			// file; the demux reads it in order. A kept track whose local
+			// copy was slow to fetch is kept again this way, as every warm
+			// did before the index.
 			warm = func(ctx context.Context, opts StreamExtractOpts) error {
 				return c.demuxAndKeep(ctx, opts, extract)
 			}

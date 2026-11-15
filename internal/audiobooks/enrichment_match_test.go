@@ -22,12 +22,17 @@ type editionProvider struct {
 	// lookupASIN answers GetMetadata for a lone asin, as a plugin that
 	// declares asin in lookup_provider_ids would.
 	lookupASIN bool
+	// onlyFor, when set, is the one search title that finds the results.
+	onlyFor string
 }
 
 func (p *editionProvider) Slug() string       { return "audiobook-metadata" }
 func (p *editionProvider) Name() string       { return "audiobook-metadata" }
 func (p *editionProvider) ForTypes() []string { return []string{"audiobook"} }
-func (p *editionProvider) Search(context.Context, metadata.SearchQuery) ([]metadata.SearchResult, error) {
+func (p *editionProvider) Search(_ context.Context, q metadata.SearchQuery) ([]metadata.SearchResult, error) {
+	if p.onlyFor != "" && q.Title != p.onlyFor {
+		return nil, nil
+	}
 	return p.results, nil
 }
 
@@ -59,6 +64,8 @@ func TestFindMatchChecksEditionAgainstItem(t *testing.T) {
 	_, book1Rec := edition("Dungeon Crawler Carl, Book 1", "B08V8B2CGV", "Matt Dinniman", "Jeff Hays")
 	_, feralRec := edition("The Gate of the Feral Gods", "B0FERAL004", "Matt Dinniman", "Jeff Hays")
 	feralRec.TitleAliases = []metadata.TitleAlias{{Title: "Dungeon Crawler Carl, Book 4"}}
+	gone, goneRec := edition("Gone", "S3GONE0001", "Jo Smith", "Anne Reader")
+	gone4, gone4Rec := edition("Gone: Series Name, Book 4", "S4GONE0001", "Jo Smith", "Anne Reader")
 	_, aliasRec := edition("El marciano", "B079YDJ18Z", "Andy Weir", "Xavi Fernández")
 	aliasRec.TitleAliases = []metadata.TitleAlias{{Title: "The Martian", Kind: "original"}}
 
@@ -121,6 +128,31 @@ func TestFindMatchChecksEditionAgainstItem(t *testing.T) {
 			provider: &editionProvider{lookupASIN: true, records: map[string]*metadata.MetadataResult{"B0FERAL004": feralRec}},
 		},
 		{
+			name: "series-prefixed title is searched and scored by its bare title",
+			item: enrichmentItemRow{
+				Title: "Series Name 3 - Gone", Author: "Jo Smith",
+				SeriesName: "Series Name", SeriesPosition: 3,
+			},
+			provider: &editionProvider{
+				onlyFor: "Gone",
+				results: []metadata.SearchResult{gone},
+				records: map[string]*metadata.MetadataResult{"S3GONE0001": goneRec},
+			},
+			wantASIN: "S3GONE0001",
+		},
+		{
+			name: "series-prefixed title searched by its bare title still rejects another volume",
+			item: enrichmentItemRow{
+				Title: "Series Name 3 - Gone", Author: "Jo Smith",
+				SeriesName: "Series Name", SeriesPosition: 3,
+			},
+			provider: &editionProvider{
+				onlyFor: "Gone",
+				results: []metadata.SearchResult{gone4},
+				records: map[string]*metadata.MetadataResult{"S4GONE0001": gone4Rec},
+			},
+		},
+		{
 			name: "tagged ASIN record matching the item's title only through an alias is accepted",
 			item: enrichmentItemRow{
 				Title: "The Martian", Author: "Andy Weir",
@@ -143,6 +175,32 @@ func TestFindMatchChecksEditionAgainstItem(t *testing.T) {
 				t.Fatalf("matched %q, want %q (errors %v)", got, tt.wantASIN, m.providerErrs)
 			}
 		})
+	}
+}
+
+func TestBareSeriesTitle(t *testing.T) {
+	tests := []struct {
+		title, series string
+		position      int
+		bare, volume  string
+	}{
+		{"Series Name 3 - Book Title", "Series Name", 3, "Book Title", "3"},
+		{"series name 03 – Book Title", "Series Name", 3, "Book Title", "03"},
+		{"Series Name, Book 3: Book Title", "Series Name", 3, "Book Title", "3"},
+		{"Series Name #3 - Book Title", "Series Name", 0, "Book Title", "3"},
+		{"Series Name 0.5 - Prequel Title", "Series Name", 0, "Prequel Title", "0.5"},
+		{"Series Name 4 - Book Title", "Series Name", 3, "", ""},  // another position
+		{"Series Name 3 - Book Title", "", 3, "", ""},             // no series
+		{"Book Title", "Series Name", 3, "", ""},                  // no prefix
+		{"Series Name 3", "Series Name", 3, "", ""},               // nothing after the number
+		{"Series Names 3 - Book Title", "Series Name", 3, "", ""}, // another series
+		{"Area 51 2 - Book Title", "Area 51", 2, "Book Title", "2"},
+	}
+	for _, tt := range tests {
+		bare, volume := bareSeriesTitle(tt.title, tt.series, tt.position)
+		if bare != tt.bare || volume != tt.volume {
+			t.Errorf("bareSeriesTitle(%q, %q, %d) = %q, %q, want %q, %q", tt.title, tt.series, tt.position, bare, volume, tt.bare, tt.volume)
+		}
 	}
 }
 
@@ -306,6 +364,8 @@ type narratorRuleCase struct {
 	providers []metadata.Provider // overrides results and records
 	wantMatch bool
 	wantID    string // the audiobook-metadata ID matched, when set
+	// wantNarrators are the merged record's narrators, when set.
+	wantNarrators []string
 }
 
 func narratorRuleCases() []narratorRuleCase {
@@ -339,6 +399,20 @@ func narratorRuleCases() []narratorRuleCase {
 	finder := &searchOnly{&fixedProvider{slug: "finder", results: []metadata.SearchResult{
 		{Name: "The Martian", ProviderIDs: map[string]string{"finder": "F1"}},
 	}}}
+	// The narrator tag holds the author, as some taggers write it; the tagged
+	// ASIN names the R. C. Bray edition.
+	authorAsNarrator := enrichmentItemRow{
+		Title: "The Martian", Author: "Andy Weir", Narrators: []string{"Andy Weir"},
+		ProviderIDs: map[string]string{"asin": "Z0BRAY0001"},
+	}
+	brayLookup := &editionProvider{lookupASIN: true, records: map[string]*metadata.MetadataResult{"Z0BRAY0001": brayRec2}}
+	_, sameEdition := edition("The Martian", "", "Andy Weir", "R. C. Bray")
+	sameEdition.ProviderIDs = map[string]string{"adds": "X1"}
+	_, cookbookRec := edition("Unrelated Cookbook", "B002V1O7UG", "Andy Weir", "Anyone")
+	_, siblingRec := edition("Series Name: The Well", "S2WELL0001", "Jo Smith", "Other Voice")
+	// A second provider's record for the tagged edition with other narrators.
+	_, otherNarrators := edition("The Martian", "", "Andy Weir", "Wil Wheaton")
+	otherNarrators.ProviderIDs = map[string]string{"other": "O1"}
 
 	return []narratorRuleCase{
 		{
@@ -403,6 +477,72 @@ func narratorRuleCases() []narratorRuleCase {
 			wantMatch: true,
 		},
 		{
+			name:          "narrator tag contradicted by the tagged-ASIN lookup record: match, record's narrators kept",
+			item:          authorAsNarrator,
+			providers:     []metadata.Provider{brayLookup},
+			wantMatch:     true,
+			wantID:        "Z0BRAY0001",
+			wantNarrators: []string{"R. C. Bray"},
+		},
+		{
+			name:          "narrator tag contradicted by a search result carrying the tagged ASIN: match",
+			item:          authorAsNarrator,
+			results:       []metadata.SearchResult{bray},
+			records:       map[string]*metadata.MetadataResult{"Z0BRAY0001": brayRec2},
+			wantMatch:     true,
+			wantID:        "Z0BRAY0001",
+			wantNarrators: []string{"R. C. Bray"},
+		},
+		{
+			// The merge checks later records against the tagged record's
+			// narrators, not the overruled tag.
+			name: "narrator tag overruled by the tagged ASIN, a later record with the same narrators: match kept",
+			item: authorAsNarrator,
+			providers: []metadata.Provider{
+				brayLookup,
+				&lookupOnly{&fixedProvider{slug: "adds", answers: []*metadata.MetadataResult{sameEdition}}},
+			},
+			wantMatch: true,
+			wantID:    "Z0BRAY0001",
+		},
+		{
+			name: "two tagged-ASIN records with different narrators: the first is kept, the second dropped",
+			item: authorAsNarrator,
+			providers: []metadata.Provider{
+				brayLookup,
+				&lookupOnly{&fixedProvider{slug: "other", answers: []*metadata.MetadataResult{otherNarrators}}},
+			},
+			wantMatch:     true,
+			wantID:        "Z0BRAY0001",
+			wantNarrators: []string{"R. C. Bray"},
+		},
+		{
+			name: "narrator tag contradicted by a tagged-ASIN record with another title: no match",
+			item: enrichmentItemRow{
+				Title: "The Martian", Author: "Andy Weir", Narrators: []string{"Andy Weir"},
+				ProviderIDs: map[string]string{"asin": "B002V1O7UG"},
+			},
+			providers: []metadata.Provider{&editionProvider{lookupASIN: true, records: map[string]*metadata.MetadataResult{"B002V1O7UG": cookbookRec}}},
+		},
+		{
+			// A wrong ASIN tag naming another book of the same series: the
+			// titles share the series name, but not enough to agree.
+			name: "narrator tag contradicted by a tagged-ASIN record for another book in the series: no match",
+			item: enrichmentItemRow{
+				Title: "Series Name: The Hero", Author: "Jo Smith", Narrators: []string{"Anne Reader"},
+				ProviderIDs: map[string]string{"asin": "S2WELL0001"},
+			},
+			providers: []metadata.Provider{&editionProvider{lookupASIN: true, records: map[string]*metadata.MetadataResult{"S2WELL0001": siblingRec}}},
+		},
+		{
+			name: "no author tag, narrator tag contradicted by a tagged-ASIN record with another title: no match",
+			item: enrichmentItemRow{
+				Title: "The Martian", Narrators: []string{"Andy Weir"},
+				ProviderIDs: map[string]string{"asin": "B002V1O7UG"},
+			},
+			providers: []metadata.Provider{&editionProvider{lookupASIN: true, records: map[string]*metadata.MetadataResult{"B002V1O7UG": cookbookRec}}},
+		},
+		{
 			name:      "no narrator tag, record lists none: match",
 			item:      enrichmentItemRow{Title: "The Martian", Author: "Andy Weir"},
 			results:   []metadata.SearchResult{plain},
@@ -414,7 +554,9 @@ func narratorRuleCases() []narratorRuleCase {
 
 // For a narrator-tagged item, a record whose narrators disagree is rejected
 // and the next candidate tried; a record that lists no narrators is no
-// contradiction and is accepted as it is.
+// contradiction and is accepted as it is. A record reached through the item's
+// tagged ASIN outranks the narrator tag, unless its title shares no word with
+// the item's.
 func TestFindMatchNarratorRules(t *testing.T) {
 	for _, tt := range narratorRuleCases() {
 		t.Run(tt.name, func(t *testing.T) {
@@ -429,6 +571,17 @@ func TestFindMatchNarratorRules(t *testing.T) {
 			}
 			if tt.wantID != "" && m.ids["audiobook-metadata"] != tt.wantID {
 				t.Fatalf("matched %v, want %s", m.ids, tt.wantID)
+			}
+			if tt.wantNarrators != nil {
+				var got []string
+				for _, p := range m.metadata.People {
+					if p.Kind == models.PersonKindNarrator {
+						got = append(got, p.Name)
+					}
+				}
+				if !slices.Equal(got, tt.wantNarrators) {
+					t.Fatalf("narrators %v, want %v", got, tt.wantNarrators)
+				}
 			}
 		})
 	}
