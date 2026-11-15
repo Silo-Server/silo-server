@@ -761,6 +761,9 @@ html[data-navigation-direction]::view-transition-new(main-content) {
     font-size: calc(32px * var(--ui-text-scale-factor)) !important;
   }
   html[data-text-scale="large"] .text-\[38px\],
+  html[data-text-scale="x-large"] .text-\[38px\] {
+    font-size: calc(38px * var(--ui-text-scale-factor)) !important;
+  }
   /* Buttons are activatable, so they get the activatable cursor. Declared in
      `base` rather than as a utility, so an explicit `cursor-*` class — a
      disabled player control, a non-interactive tooltip target — still wins. */
@@ -771,9 +774,6 @@ html[data-navigation-direction]::view-transition-new(main-content) {
   button:disabled,
   [role="button"][aria-disabled="true"] {
     cursor: not-allowed;
-  }
-  html[data-text-scale="x-large"] .text-\[38px\] {
-    font-size: calc(38px * var(--ui-text-scale-factor)) !important;
   }
   body {
     background-color: var(--background);
