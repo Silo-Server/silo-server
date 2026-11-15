@@ -93,7 +93,8 @@ the tags or a provider's record fills each field.
 
 An unchanged book is skipped on rescan, so a change to these rules reaches a
 book only when its files change or a metadata refresh reads its tags again in
-place, as the next section describes.
+place: the library Refresh Metadata in `full` mode, or an item's Refresh
+Metadata in `quick` or `reset` mode, as the next section describes.
 
 ## Reading the tags again
 
