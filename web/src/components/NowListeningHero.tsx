@@ -211,8 +211,10 @@ export default function NowListeningHero({ section, libraryId }: NowListeningHer
 
   const alsoListening = rest.slice(0, ALSO_LISTENING_LIMIT);
   const shownTitle = sectionTitle(section);
+  // The server can truncate the section (has_more), so a short payload can
+  // still hold more books than the panel shows.
   const exploreHref =
-    rest.length > alsoListening.length
+    rest.length > alsoListening.length || section.has_more
       ? libraryId
         ? buildSectionCatalogHref({
             scope: "library",
@@ -261,12 +263,12 @@ export default function NowListeningHero({ section, libraryId }: NowListeningHer
                 )}
               </p>
             )}
-            <h2
+            <h1
               className="font-display mt-2 max-w-3xl text-3xl font-extrabold tracking-[-0.03em] text-balance sm:text-4xl lg:text-[2.75rem] lg:leading-[1.06]"
               style={{ textShadow: "var(--hero-text-shadow, none)" }}
             >
               {deck.title}
-            </h2>
+            </h1>
             {(author || narrator) && (
               <p className="text-foreground/75 mt-2 max-w-2xl truncate text-sm sm:text-base">
                 {author && narrator

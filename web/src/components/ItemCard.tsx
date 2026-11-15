@@ -310,7 +310,11 @@ export default function ItemCard({
             {/* Manga cards carry purpose-built status/count chips in both top
                 corners; generic overlays would render underneath them. */}
             {item.status === "matched" && item.type !== "manga" && overlayPrefs && (
-              <CardOverlays data={overlayDataFromBrowseItem(item)} prefs={overlayPrefs} />
+              <CardOverlays
+                data={overlayDataFromBrowseItem(item)}
+                prefs={overlayPrefs}
+                hasProgressBar={listening != null}
+              />
             )}
             {item.status === "matched" && item.type !== "manga" && (
               <CardWatchStatus userState={item.user_state} />
