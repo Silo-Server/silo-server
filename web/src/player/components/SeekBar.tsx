@@ -587,6 +587,9 @@ export function SeekBar({
             <>
               <MarkerHandle
                 percent={trackPercent(activeRegion.start, duration)}
+                // A range stored wholly past the duration clamps both handles to
+                // the track end; keep the start on top so it can be dragged back.
+                raised={activeRegion.start >= duration}
                 label={t("web.player.seekBar.dragMarkerStart")}
                 onPointerDown={handleEdgePointerDown(activeRegion.kind, "start")}
               />
@@ -605,10 +608,12 @@ export function SeekBar({
 
 function MarkerHandle({
   percent,
+  raised = false,
   label,
   onPointerDown,
 }: {
   percent: number;
+  raised?: boolean;
   label: string;
   onPointerDown: (e: React.PointerEvent) => void;
 }) {
@@ -617,7 +622,7 @@ function MarkerHandle({
       aria-label={label}
       onPointerDown={onPointerDown}
       onMouseDown={(e) => e.stopPropagation()}
-      className="absolute top-1/2 z-[2] flex h-5 w-5 -translate-x-1/2 -translate-y-1/2 cursor-ew-resize touch-none items-center justify-center"
+      className={`absolute top-1/2 ${raised ? "z-[3]" : "z-[2]"} flex h-5 w-5 -translate-x-1/2 -translate-y-1/2 cursor-ew-resize touch-none items-center justify-center`}
       style={{ left: `${percent}%` }}
     >
       <span className="h-4 w-1.5 rounded-full bg-white shadow-[0_2px_8px_rgb(0_0_0/0.55)] ring-1 ring-black/20" />
