@@ -117,3 +117,7 @@ otherwise maps the edge rails back to the corner on the same side and drops the 
 Settings revision 26 added the `resolution_hdr_audio` badge. A server below revision 26 rejects a
 document that contains it, so a client offers that badge only when the server advertises revision
 26 or later.
+
+Settings revision 29 added the `availability` badge. A server below revision 29 rejects a document
+that contains it, so a client offers that badge only when the server advertises revision 29 or
+later.
