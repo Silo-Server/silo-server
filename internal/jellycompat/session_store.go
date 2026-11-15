@@ -46,7 +46,8 @@ type Session struct {
 }
 
 // signedOutDeleteTimeout bounds deleting the stored row of a compat session
-// whose login session ended, so the request it refuses is not held up.
+// whose login session ended, or that a sign-in drops because its profile was
+// deleted meanwhile, so the request it refuses is not held up.
 const signedOutDeleteTimeout = 2 * time.Second
 
 // loginSessionChecker reports whether a Silo login session is live (not

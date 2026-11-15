@@ -40,8 +40,11 @@ own publish.
 Every server works the queue; the work per file is independent, so nothing
 serializes it across servers.
 
-- A claim takes the due `pending` row that has waited longest with
-  `FOR UPDATE SKIP LOCKED`, and leases it with a fresh attempt token stored
+- A claim takes the due `pending` row of the newest file (the highest
+  `media_file_id`) with `FOR UPDATE SKIP LOCKED`, after any rows an
+  administrator queued for regeneration, so new files get previews before
+  a backlog and a retry that has come due does not wait behind it. It
+  leases the row with a fresh attempt token stored
   in `lease_owner`. It records the file's size, hash, and duration at that
   moment (`source_*`).
 - The worker renews its lease while it runs. A lease that runs out, because

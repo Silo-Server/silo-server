@@ -235,6 +235,8 @@
 ./internal/jellycompat TestApplyListFileFieldsDB
 ./internal/jellycompat TestLoginAccountNameWithHashDB
 ./internal/jellycompat TestRevokedCompatSessionStaysDeletedPostgres
+./internal/jellycompat TestDeletedProfileCompatSessionsEndPostgres
+./internal/jellycompat TestSignInRacingProfileDeleteKeepsNoSessionPostgres
 ./internal/jellycompat TestDurableCompatPlaybackStoreUpdateRejectionAcrossReplicas
 ./internal/jellycompat TestDurableCompatPlaybackStoreDropsRejectedPendingUpdate
 ./internal/jellycompat TestDurableCompatPlaybackStoreRetiresUpstreamSessionAcrossReplicas
@@ -437,6 +439,7 @@
 ./internal/markers TestContributionStoreAmendSendsManualClears
 ./internal/taskmanager/tasks TestContributeMarkersTaskDoesNotReselectDeclinedFiles
 ./internal/trickplay TestClaimPublishAndServeDB
+./internal/trickplay TestClaimTakesRegeneratedThenNewestDB
 ./internal/trickplay TestExternalDeliveryConfirmationDB
 ./internal/trickplay TestReconcileSchedulesContinuationAfterReleasingClusterLockDB
 ./internal/trickplay TestReconcileRequeuesSheetsWhoseToneMapSourceChangedDB
@@ -495,6 +498,7 @@
 ./internal/downloads TestParkedDownloadIsNotServedOrPreparedFromItsOldFileDB
 ./internal/downloads TestRegistrationRefusesAFileOfAnotherTitleDB
 ./internal/downloads TestRegistrationAndRetitleSerializeOnTheFileRowDB
+./internal/downloads TestDeadAccountTransferReleasesItsConcurrentSlotDB
 ./internal/downloads TestManagedRequestRegistersNothingWhenAFileLeftItsTitleDB
 ./internal/downloads TestMonitorSyncSkipsAnEpisodeWhoseFileLeftItsTitleDB
 ./internal/downloads TestSubscriptionSyncPagePostgres
@@ -640,6 +644,16 @@
 # An admin metadata edit that clears a field stores NULL, takes a cleared
 # rating's per-source row with it, and recomputes series air dates.
 ./internal/catalog TestMetadataUpdateClearsNullableFieldsDB
+
+# An admin's provider-ID edit replaces or removes the item's durable provider
+# ID with the column, and skips one another item already holds.
+./internal/catalog TestMetadataUpdateKeepsDurableProviderIDsDB
+
+# A provider-ID drift repair and an automatic rebind wait for an admin's ID
+# edit on the same item instead of deadlocking with it.
+./internal/metadata TestProviderIDDriftRepairWaitsForItemEditPostgres
+./internal/metadata TestProviderIDDriftRepairSkipsChangedOwnerPostgres
+./internal/metadata TestRebindWaitsForItemEditPostgres
 
 # Watch-provider events carry catalog titles to plugins.
 ./internal/watchsync TestGetMediaTitlesDB
@@ -834,6 +848,7 @@
 
 # AI metadata translations never replace provider or manual localized text.
 ./internal/catalog TestAITranslationNeverOverwritesProviderOrManualText
+./internal/catalog TestPlainAITranslationFillsOnlyEmptyFields
 
 # A provider refresh with no translation clears only a copy of the base item's text.
 ./internal/catalog TestProviderUpsertClearsCopiedBaseTextOnly
@@ -1168,3 +1183,7 @@
 ./internal/catalog TestExternalIDLookupSkipsItemsWithAnotherTMDBIDDB
 ./internal/catalog TestResolveProviderAliasesSkipsItemsWithAnotherTMDBIDDB
 ./internal/watchlist TestLibraryMatchesUsesTheTitlesRetainedIDsDB
+
+# Smart collection collage records: a refresh deletes the collection's records
+# nobody refreshed for a week, with or without a collage, and keeps the rest.
+./internal/catalog TestSmartCollageRecordsRetireWhenUnrefreshedDB

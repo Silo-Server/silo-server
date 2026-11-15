@@ -1,18 +1,42 @@
 // length for context in excerpts
 const CONTEXT_LENGTH = 50
 
+// raw characters read on each side of a match before widening the window
+const CONTEXT_WINDOW = CONTEXT_LENGTH * 4
+
 const normalizeWhitespace = str => str.replace(/\s+/g, ' ')
+
+// Silo: normalize only a window next to the match instead of the whole text
+// node. Normalizing a suffix (or prefix) of a string yields a suffix (or
+// prefix) of the normalized whole, so once the window holds CONTEXT_LENGTH
+// normalized characters the excerpt equals the whole-node result. The window
+// doubles for whitespace-heavy text, which keeps total work linear in the node.
+const contextBefore = (str, offset) => {
+    for (let size = CONTEXT_WINDOW; ; size *= 2) {
+        const from = Math.max(0, offset - size)
+        const text = normalizeWhitespace(str.slice(from, offset)).trimStart()
+        if (from === 0 || text.length >= CONTEXT_LENGTH) return text
+    }
+}
+
+const contextAfter = (str, offset) => {
+    for (let size = CONTEXT_WINDOW; ; size *= 2) {
+        const to = Math.min(str.length, offset + size)
+        const text = normalizeWhitespace(str.slice(offset, to)).trimEnd()
+        if (to === str.length || text.length >= CONTEXT_LENGTH) return text
+    }
+}
 
 const makeExcerpt = (strs, { startIndex, startOffset, endIndex, endOffset }) => {
     const start = strs[startIndex]
     const end = strs[endIndex]
-    const match = start === end
+    const match = startIndex === endIndex
         ? start.slice(startOffset, endOffset)
         : start.slice(startOffset)
-            + strs.slice(start + 1, end).join('')
+            + strs.slice(startIndex + 1, endIndex).join('')
             + end.slice(0, endOffset)
-    const trimmedStart = normalizeWhitespace(start.slice(0, startOffset)).trimStart()
-    const trimmedEnd = normalizeWhitespace(end.slice(endOffset)).trimEnd()
+    const trimmedStart = contextBefore(start, startOffset)
+    const trimmedEnd = contextAfter(end, endOffset)
     const ellipsisPre = trimmedStart.length < CONTEXT_LENGTH ? '' : '…'
     const ellipsisPost = trimmedEnd.length < CONTEXT_LENGTH ? '' : '…'
     const pre = `${ellipsisPre}${trimmedStart.slice(-CONTEXT_LENGTH)}`

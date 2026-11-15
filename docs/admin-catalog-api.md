@@ -388,7 +388,17 @@ dates. `null` on any other field preserves its value. Explicit empty strings,
 zeroes, and empty arrays remain edits. An air timezone must be empty or a valid
 IANA timezone. A date must be a `YYYY-MM-DD` calendar date; any other string,
 an empty one included, is `422 validation_failed` at that member and nothing is
-written. `status` is the item's match status and must be `pending`, `matched`,
+written. `imdb_id`, `tmdb_id` and `tvdb_id` are stored trimmed, an IMDb ID in
+lowercase, and a TMDB ID without the slug of a TMDB URL (`550-fight-club` saves as
+`550`). An empty string clears the ID. Any other value that isn't an IMDb title ID
+(`tt` and 7 to 10 digits) or a positive TMDB or TVDB number is
+`422 validation_failed` at that member. On an item (not a season or episode), an
+edit that changes an ID also replaces the item's durable provider ID for that
+provider, which lookups and refreshes read, or removes it when the ID is cleared.
+An ID resent unchanged (compared trimmed and in any case) leaves the durable ID as
+it is. When another item of the
+same type already holds the new ID, only the column changes, and the next refresh
+settles which item keeps it. `status` is the item's match status and must be `pending`, `matched`,
 or `unmatched`; any other value fails with `422`. The service tries item,
 season, then episode ownership and returns canonical catalog detail after the
 update and existing invalidation events.

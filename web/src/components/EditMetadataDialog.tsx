@@ -72,7 +72,15 @@ interface EditMetadataDialogProps {
   onOpenChange: (open: boolean) => void;
 }
 
-export default function EditMetadataDialog({ item, open, onOpenChange }: EditMetadataDialogProps) {
+// The item pages keep this dialog mounted while it is closed, and a page stays
+// mounted when a link opens another title of the same kind ("More Like
+// This"). Keying the form by the item makes another title start from its own
+// values instead of the first title's (#4212).
+export default function EditMetadataDialog(props: EditMetadataDialogProps) {
+  return <EditMetadataForm key={props.item.content_id} {...props} />;
+}
+
+function EditMetadataForm({ item, open, onOpenChange }: EditMetadataDialogProps) {
   const t = useT();
   const [activeSection, setActiveSection] = useState<Section>("general");
   const [form, setForm] = useState(() => initFormState(item));

@@ -2136,7 +2136,11 @@ Redis budget call has a one-second deadline. Clients must handle incomplete
 bodies. Managed downloads retry
 through their existing Range/resume flow after dependency recovery. A stopped
 ephemeral original download marks its row `failed`, which later requests
-reject, so the client starts a new ephemeral download instead.
+reject, so the client starts a new ephemeral download instead. The server
+process serving such a transfer renews its row every minute; when that process
+dies mid-transfer, the row stops counting toward
+`download.max_concurrent_per_user` five minutes after its last renewal, and the
+next request for it marks it `failed` and is rejected the same way.
 
 `download.max_per_period` counts registrations independently for each account
 in the rolling `download.period_duration`; zero is unlimited. It is not a

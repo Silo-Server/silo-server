@@ -79,35 +79,39 @@ type Job struct {
 }
 
 // Claim leases the next due file for owner, for a server at recipe version
-// AlgorithmVersion, or returns nil when none is due. Mutations must use the
+// AlgorithmVersion, or returns nil when none is due. The next file is one
+// Regenerate queued, else the newest: what was just added is what viewers
+// play next, and a backlog must not hold it back. Mutations must use the
 // returned Job.LeaseToken, which changes on every claim.
 func (r *Repository) Claim(ctx context.Context, owner string, lease time.Duration) (*Job, error) {
-	return r.claim(ctx, owner, lease, 0)
+	return r.claim(ctx, r.pool, owner, lease, nil)
 }
 
 // ClaimFile leases fileID if it is due.
 func (r *Repository) ClaimFile(ctx context.Context, fileID int, owner string, lease time.Duration) (*Job, error) {
-	return r.claim(ctx, owner, lease, fileID)
+	return r.claim(ctx, r.pool, owner, lease, []int{fileID})
 }
 
-func (r *Repository) claim(ctx context.Context, owner string, lease time.Duration, fileID int) (*Job, error) {
+// claim leases the next due file on db, any file when among is nil and one
+// of those files otherwise.
+func (r *Repository) claim(ctx context.Context, db reconcileConn, owner string, lease time.Duration, among []int) (*Job, error) {
 	var job Job
 	leaseToken := owner + ":" + rand.Text()
 	var videoTracks []byte
 	var container, codec *string
 	var hdr *bool
 	var duration *int
-	err := r.pool.QueryRow(ctx, `
+	err := db.QueryRow(ctx, `
 		WITH next AS (
 			SELECT t.media_file_id FROM public.media_file_trickplay t
 			JOIN public.media_files mf ON mf.id = t.media_file_id
 			JOIN public.media_folders f ON f.id = mf.media_folder_id
 			WHERE t.state = 'pending' AND t.available_at <= now() AND t.recipe_version <= $3
-			  AND ($4::bigint = 0 OR t.media_file_id = $4)
+			  AND ($4::bigint[] IS NULL OR t.media_file_id = ANY($4))
 			  AND f.trickplay_enabled AND f.enabled IS NOT FALSE AND lower(btrim(f.type)) = ANY($5::text[])
 			  AND mf.missing_since IS NULL AND mf.probe_updated_at IS NOT NULL AND mf.duration > 0
 			  AND jsonb_typeof(mf.video_tracks) = 'array' AND jsonb_array_length(mf.video_tracks) > 0
-			ORDER BY t.available_at, t.media_file_id
+			ORDER BY (t.available_at = '-infinity'::timestamptz) DESC, t.media_file_id DESC
 			LIMIT 1
 			FOR UPDATE OF t SKIP LOCKED
 		)
@@ -122,7 +126,7 @@ func (r *Repository) claim(ctx context.Context, owner string, lease time.Duratio
 		  AND jsonb_typeof(mf.video_tracks) = 'array' AND jsonb_array_length(mf.video_tracks) > 0
 		RETURNING t.media_file_id, mf.file_path, mf.container, mf.codec_video, mf.duration, mf.hdr,
 		          COALESCE(mf.video_tracks, '[]'::jsonb), t.failure_count, t.lease_owner`,
-		leaseToken, lease.Seconds(), AlgorithmVersion, fileID, videoLibraryTypes,
+		leaseToken, lease.Seconds(), AlgorithmVersion, among, videoLibraryTypes,
 	).Scan(&job.FileID, &job.FilePath, &container, &codec, &duration, &hdr, &videoTracks, &job.Failures, &job.LeaseToken)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
