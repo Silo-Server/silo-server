@@ -17,6 +17,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/libraryingest"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/notifications"
+	"github.com/Silo-Server/silo-server/internal/scanner"
 )
 
 const (
@@ -475,7 +476,9 @@ func (e *LibraryRefreshExecutor) refreshUnmatchedItem(ctx context.Context, libra
 		return fmt.Errorf("ingest subtree: %w", err)
 	}
 	stopScanHeartbeat := startDirectScanHeartbeat(e.scanRuns, scanRun, directScanHeartbeatEvery)
-	ingestResult, err := e.ingester.IngestSubtree(scanCtx, folder, req.ScanPath)
+	// A full refresh is an explicit admin action, so audiobooks are read from
+	// their tags again even when their files are unchanged.
+	ingestResult, err := e.ingester.IngestSubtree(scanner.WithAudiobookTagReread(scanCtx), folder, req.ScanPath)
 	stopScanHeartbeat()
 	if err != nil {
 		return fmt.Errorf("ingest subtree: %w", failDirectScan(ctx, e.scanRuns, scanRun, err))

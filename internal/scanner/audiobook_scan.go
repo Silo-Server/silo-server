@@ -989,7 +989,15 @@ func reportAudiobookScanProgress(ctx context.Context, folderID int, total, proce
 // unreadable, when set, counts audio files ffprobe rejected that the book was
 // indexed without.
 func (s *Scanner) reconcileAudiobookFolder(ctx context.Context, folder *models.MediaFolder, folderPath string, allowedPaths map[string]bool, inventoryAt time.Time, skipped, unreadable *int64) error {
-	rejected, isUnchanged, skipErr := s.audiobookFolderShouldSkip(ctx, folder, folderPath, allowedPaths)
+	var (
+		rejected    int
+		isUnchanged bool
+		skipErr     error
+	)
+	// An explicit admin refresh reads every book again (WithAudiobookTagReread).
+	if !audiobookTagRereadRequested(ctx) {
+		rejected, isUnchanged, skipErr = s.audiobookFolderShouldSkip(ctx, folder, folderPath, allowedPaths)
+	}
 	if skipErr != nil {
 		slog.WarnContext(ctx, "audiobook scan: skip-check failed, falling through", "component", "scanner",
 			"folder_id", folder.ID,
