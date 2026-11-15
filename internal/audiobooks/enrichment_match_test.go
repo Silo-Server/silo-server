@@ -553,6 +553,11 @@ type failFirstFetch struct {
 }
 
 func (p *failFirstFetch) GetMetadata(ctx context.Context, req metadata.MetadataRequest) (*metadata.MetadataResult, error) {
+	// Like the plugin adapter, a request without the provider's own ID makes
+	// no call.
+	if req.ProviderIDs["audiobook-metadata"] == "" {
+		return nil, nil
+	}
 	p.fetches++
 	if p.fetches == 1 {
 		return nil, p.err
@@ -573,6 +578,11 @@ func TestFindMatchCandidateFetchErrors(t *testing.T) {
 	}{
 		{"NotFound tries the next candidate", status.Error(codes.NotFound, "no such book"), true, 2},
 		{"a rate limit stops the provider", status.Error(codes.ResourceExhausted, "slow down"), false, 1},
+		{"InvalidArgument tries the next candidate", status.Error(codes.InvalidArgument, "bad id"), true, 2},
+		{"Unauthenticated stops the provider", status.Error(codes.Unauthenticated, "no key"), false, 1},
+		{"PermissionDenied stops the provider", status.Error(codes.PermissionDenied, "blocked"), false, 1},
+		{"Unimplemented stops the provider", status.Error(codes.Unimplemented, "no lookup"), false, 1},
+		{"an untyped error stops the provider", errors.New("connection reset"), false, 1},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

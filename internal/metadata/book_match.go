@@ -215,7 +215,8 @@ func (w bookWant) volumeFits(r SearchResult, name string) (sameVolume, fits bool
 }
 
 // otherTitleAgrees reports whether the result's original title or an alias
-// states the volume the item's title states. A book can sit in two numbered
+// both passes the title match against the item and states the volume the
+// item's title states. A book can sit in two numbered
 // series ("Guards! Guards!" is Discworld 8 and City Watch 1), so a primary
 // title in the other numbering does not rule it out.
 func (w bookWant) otherTitleAgrees(r SearchResult) bool {
@@ -225,6 +226,10 @@ func (w bookWant) otherTitleAgrees(r SearchResult) bool {
 	}
 	for _, t := range titles {
 		if strings.TrimSpace(t) == "" {
+			continue
+		}
+		// It must name the item's work, not just carry its number.
+		if w.prepared.score(t, normaliseTitle(t)) <= w.threshold {
 			continue
 		}
 		wv, wok := volumeAgainst(w.title, t)

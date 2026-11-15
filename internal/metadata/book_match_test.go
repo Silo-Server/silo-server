@@ -155,6 +155,14 @@ var audiobookRuleCases = []struct {
 		wantID: "GW",
 	},
 	{
+		name: "an unrelated alias that only carries the item's number does not override",
+		want: "Guards! Guards!: Discworld, Book 8",
+		results: []SearchResult{{
+			Name: "Guards! Guards!: City Watch, Book 1", ProviderIDs: map[string]string{"asin": "GW"},
+			TitleAliases: []TitleAlias{{Title: "Ringworld, Book 8"}},
+		}},
+	},
+	{
 		name: "a primary title in another numbering without an agreeing alias is rejected",
 		want: "Guards! Guards!: Discworld, Book 8",
 		results: []SearchResult{{

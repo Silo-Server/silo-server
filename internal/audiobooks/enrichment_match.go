@@ -9,6 +9,9 @@ import (
 	"slices"
 	"strings"
 
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+
 	"github.com/Silo-Server/silo-server/internal/metadata"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
@@ -377,12 +380,27 @@ func recordTitles(result *metadata.MetadataResult) []string {
 	return titles
 }
 
-// perItemAnswer reports an error about the requested record only, such as
-// NotFound, after which the provider can still be asked for the next
-// candidate. A paused provider, a rate limit or a transient failure is not.
+// perItemAnswer reports an error about the requested record only, after
+// which the provider can still be asked for the next candidate: a gRPC
+// NotFound or InvalidArgument. Everything else stops the provider for the
+// item: a pause, throttling, an outage, and provider-wide refusals such as
+// Unauthenticated, PermissionDenied or Unimplemented, which the shared
+// classification also calls permanent but which would fail every candidate.
 func perItemAnswer(err error) bool {
 	var paused *providerPausedError
-	return !errors.As(err, &paused) && classifyProviderError(err) == EnrichmentErrorPermanent
+	if errors.As(err, &paused) {
+		return false
+	}
+	st, ok := status.FromError(err)
+	if !ok {
+		return false
+	}
+	switch st.Code() {
+	case codes.NotFound, codes.InvalidArgument:
+		return true
+	default:
+		return false
+	}
 }
 
 // accept makes record, fetched with ids, provider i's match.
