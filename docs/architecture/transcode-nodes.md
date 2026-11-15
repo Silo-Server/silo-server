@@ -599,7 +599,6 @@ path the core approves for it, never a path the job request names.
   transcode node changes minted, still verifies: it is read as version 2 with
   `iat` one lifetime before its expiry, so a job holding one survives the
   update.
-
 - **Revision** is `(kind, id, size, modification time)`, without device, inode
   or change time, so every host computes the same revision of a shared file.
   `mtime_ns` is what the minting stat returned; revisions compare it at
