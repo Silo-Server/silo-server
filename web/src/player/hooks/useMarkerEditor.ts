@@ -16,6 +16,18 @@ export const MARKER_LABEL_KEYS: Record<MarkerKind, MessageKey> = {
   preview: "web.markers.kind.preview",
 };
 
+/**
+ * Solid accent per kind, shared by the seek bar's hover dot and the marker
+ * editor panel. Every client uses this palette (TheIntroDB's segment colours,
+ * the Tailwind 400 shades); the seek bar tints use the same hues.
+ */
+export const MARKER_DOT_COLORS: Record<MarkerKind, string> = {
+  intro: "bg-blue-400",
+  recap: "bg-orange-400",
+  credits: "bg-purple-400",
+  preview: "bg-cyan-400",
+};
+
 // Initial span (seconds) given to a freshly created marker before the user
 // refines the opposite edge.
 const NEW_MARKER_SPAN = 60;
