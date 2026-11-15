@@ -3,6 +3,7 @@ import { codeNumber, t, type TextValues } from "@/i18n";
 import type { MessageKey } from "@/locales/keys";
 import { formatCodecLabel } from "@/lib/mediaFormat";
 import { formatDecimal } from "@/lib/numberFormat";
+import { formatClock } from "@/pages/adminDownloadPreparationPresentation";
 
 export function formatDecisionLabel(decision?: string): string {
   switch (decision) {
@@ -678,4 +679,13 @@ function formatChannelLayout(channels?: number | null): string | null {
     return "7.1";
   }
   return `${channels}ch`;
+}
+
+/** Playback position as "47:12 / 2:29:40", or the position alone when the duration is unknown. */
+export function formatPlaybackPosition(session: AdminSession): string {
+  const position = formatClock(session.position_seconds);
+  if (session.file_duration == null || session.file_duration <= 0) {
+    return position;
+  }
+  return `${position} / ${formatClock(session.file_duration)}`;
 }

@@ -267,6 +267,18 @@ type Recommender interface {
 	Similar(ctx context.Context, contentID string, limit int) ([]string, error)
 }
 
+// Downloads applies Silo's download rules to ABS downloads: the server's Allow
+// downloads setting, the account's download permission, and the policy engine.
+// The /download route is served through ServeDirect, so the download bandwidth
+// limits apply there too; RSS feeds only check their owner with
+// CheckDownloadAllowed, and their files are served without those limits.
+// *downloads.Service satisfies it, as it does jellycompat.DownloadServer.
+type Downloads interface {
+	// CheckDownloadAllowed returns nil when the account may download now.
+	CheckDownloadAllowed(ctx context.Context, userID int) error
+	ServeDirect(ctx context.Context, w http.ResponseWriter, r *http.Request, userID, fileID int, format string, filter catalog.AccessFilter) error
+}
+
 // ---------------------------------------------------------------------------
 // Config provider
 // ---------------------------------------------------------------------------
@@ -362,12 +374,20 @@ type Handler struct {
 	// native API process. Must be set before Mount: Mount is what registers the
 	// wrapped handlers, so a later call would have no effect.
 	telemetry *streamtelemetry.Registry
+	// downloads is the router's download service, built after this handler.
+	// Nil refuses every download.
+	downloads Downloads
 }
 
 // SetStreamTelemetry wires local stream observation. A nil registry is a
 // complete no-op. Call before Mount.
 func (h *Handler) SetStreamTelemetry(registry *streamtelemetry.Registry) {
 	h.telemetry = registry
+}
+
+// SetDownloads wires the download service. Call before serving requests.
+func (h *Handler) SetDownloads(d Downloads) {
+	h.downloads = d
 }
 
 // SkipMediaCompression reports whether an ABS media route must retain the

@@ -550,10 +550,11 @@ func (s *Service) createArtifactDownload(ctx context.Context, userID int, req Cr
 	resolvedTarget := decision.PrepareTarget
 	toneMapPreResolved := preparedTargetRequiresToneMap(file, resolvedTarget)
 	if toneMapPreResolved {
-		// A quick, non-authoritative quota check avoids expensive capability work
-		// for requests that are already over quota. The check is repeated under the
-		// advisory lock below to retain the concurrency guarantee.
-		if err := s.limiter.Check(ctx, userID, 1); err != nil {
+		// A quick, non-authoritative period check avoids expensive capability
+		// work for requests that are already over quota. Whether the entry
+		// takes a concurrent slot depends on the resolved target, so that is
+		// checked under the advisory lock below.
+		if err := s.limiter.CheckCounts(ctx, userID, 0, 1); err != nil {
 			return nil, err
 		}
 		var err error
@@ -569,7 +570,14 @@ func (s *Service) createArtifactDownload(ctx context.Context, userID int, req Cr
 	// creation so a rejected request cannot leave an encode job behind.
 	var d *Download
 	err := s.repo.WithUserQuotaLock(ctx, userID, func(ctx context.Context) error {
-		if err := s.limiter.Check(ctx, userID, 1); err != nil {
+		// The new entry takes a concurrent slot only when it starts
+		// preparing; one whose prepared file is already ready registers
+		// ready and counts only toward the period quota.
+		activating := 1
+		if s.artifacts.readyArtifact(ctx, file, decision.DeliveryFormat, resolvedTarget) {
+			activating = 0
+		}
+		if err := s.limiter.CheckCounts(ctx, userID, activating, 1); err != nil {
 			return err
 		}
 		var artifact *Artifact
@@ -1017,16 +1025,43 @@ func (s *Service) ensureManagedDecisions(ctx context.Context, userID int, req Cr
 				activating++
 			}
 		}
+		// Another request may have replaced an entry while this one waited.
+		// Check each guard against the entry as it is now, before anything
+		// is counted or an encode is queued, and replace that row.
+		preparedKeys := make([]ManagedEntryKey, len(prepared))
+		for k, r := range prepared {
+			preparedKeys[k] = keys[r.i]
+		}
+		current, err := s.repo.GetManagedEntriesByKeys(ctx, userID, req.ProfileID, req.DeviceID, preparedKeys)
+		if err != nil {
+			return err
+		}
+		for k, r := range prepared {
+			cur := current[keys[r.i]]
+			if err := checkManagedCreateRevision(cur, r.expected, r.expectedID); err != nil {
+				return err
+			}
+			if cur == nil {
+				return ErrNotFound
+			}
+			prepared[k].existing = cur
+		}
+		// A replacement whose prepared file is not ready leaves its entry
+		// preparing, whatever the entry's status is now. Count it as activating
+		// and leave the entry out of the active count, so a conversion that
+		// finishes meanwhile, which takes no lock, cannot hide its slot. A
+		// replacement to a ready file registers ready and takes no slot.
+		var startsPreparing []string
 		for _, r := range prepared {
 			d := decisions[r.i]
-			ready := s.artifacts.readyArtifact(ctx, items[r.i].file, d.DeliveryFormat, d.PrepareTarget)
-			if replacementAddsActive(r.existing, ready) {
+			if !s.artifacts.readyArtifact(ctx, items[r.i].file, d.DeliveryFormat, d.PrepareTarget) {
 				activating++
+				startsPreparing = append(startsPreparing, r.existing.ID)
 			}
 		}
 		// A replacement updates its entry in place: it can become active but
 		// creates no download, so only new entries count toward the period.
-		if err := s.limiter.CheckCounts(ctx, userID, activating, len(newIdx)); err != nil {
+		if err := s.limiter.CheckCounts(ctx, userID, activating, len(newIdx), startsPreparing...); err != nil {
 			return err
 		}
 		for _, r := range prepared {
@@ -1191,18 +1226,6 @@ func reusableManagedStatus(status string) bool {
 	}
 }
 
-// replacementAddsActive reports whether replacing existing with a prepared
-// entry adds an active download: existing is not already active, and the
-// target's prepared file is not ready, so the entry would start preparing. A
-// ready target, or one existing already holds, registers ready.
-func replacementAddsActive(existing *Download, targetReady bool) bool {
-	switch existing.Status {
-	case StatusQueued, StatusDownloading, StatusPreparing:
-		return false
-	}
-	return !targetReady
-}
-
 func sameManagedTarget(a, b *Download) bool {
 	return a.MediaFileID == b.MediaFileID &&
 		a.Format == b.Format &&
@@ -1228,6 +1251,15 @@ func (s *Service) List(ctx context.Context, userID int, profileID, deviceID stri
 		return nil, err
 	}
 	return s.accessibleRows(ctx, rows, filter)
+}
+
+// CheckDownloadAllowed reports whether userID may download originals now,
+// before any file is chosen: ErrFeatureDisabled or ErrDownloadNotAllowed when
+// not. It is the check ResolveDirectFile starts with, for surfaces that
+// advertise or hand out downloads without serving one themselves.
+func (s *Service) CheckDownloadAllowed(ctx context.Context, userID int) error {
+	_, _, err := s.downloadConfigForUser(ctx, userID, "")
+	return err
 }
 
 // ServeDirect validates permissions and serves a file directly for browser

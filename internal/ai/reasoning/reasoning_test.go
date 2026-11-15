@@ -37,6 +37,34 @@ func TestProModelCapabilitiesAndValidation(t *testing.T) {
 	}
 }
 
+func TestThirdPartyModelCapabilities(t *testing.T) {
+	for _, test := range []struct {
+		model  string
+		levels []string
+	}{
+		{"grok-4.5", []string{"low", "medium", "high", "xhigh"}},
+		{"grok-4.6", []string{"low", "medium", "high", "xhigh"}},
+		{"openai/Grok-4.5", []string{"low", "medium", "high", "xhigh"}},
+		{"grok-4.20-multi-agent-0309", Levels},
+		{"deepseek-v4.1-flash", []string{"low", "high", "max"}},
+		{"deepseek-flash", []string{"low", "high", "max"}},
+		{"deepseek-r1:8b", Levels},
+		{"llama-3.3-70b", Levels},
+	} {
+		t.Run(test.model, func(t *testing.T) {
+			if levels := ForModel(test.model); !slices.Equal(levels, test.levels) {
+				t.Fatalf("ForModel(%q) = %v, want %v", test.model, levels, test.levels)
+			}
+			for _, effort := range []string{"none", "minimal", "low", "medium", "high", "xhigh", "max"} {
+				accepted := Validate(test.model, effort) == nil
+				if want := slices.Contains(test.levels, effort); accepted != want {
+					t.Errorf("Validate(%q, %q) accepted = %t, want %t", test.model, effort, accepted, want)
+				}
+			}
+		})
+	}
+}
+
 func TestChatModelCapabilitiesAndValidation(t *testing.T) {
 	for _, model := range []string{
 		"chat-latest",
