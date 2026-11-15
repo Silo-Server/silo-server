@@ -42,6 +42,10 @@ func (s *Scanner) scanMangaPaths(ctx context.Context, folder *models.MediaFolder
 	if err != nil {
 		return err
 	}
+	inventoryAt, err := s.scanInventoryTime(ctx)
+	if err != nil {
+		return fmt.Errorf("manga scan: %w", err)
+	}
 	scans, err := collectEbookRootScans(ctx, folder.ID, roots, folder.Paths)
 	if err != nil {
 		return err
@@ -55,7 +59,7 @@ func (s *Scanner) scanMangaPaths(ctx context.Context, folder *models.MediaFolder
 	}
 
 	if len(candidates) == 0 {
-		return s.reconcileMangaScan(ctx, folder, scans, nil, fullScan, warning)
+		return s.reconcileMangaScan(ctx, folder, scans, inventoryAt, nil, fullScan, warning)
 	}
 
 	workers := ebookScanWorkers()
@@ -158,15 +162,15 @@ func (s *Scanner) scanMangaPaths(ctx context.Context, folder *models.MediaFolder
 	for _, p := range candidates {
 		seenPaths[p] = true
 	}
-	return s.reconcileMangaScan(ctx, folder, scans, seenPaths, fullScan, warning)
+	return s.reconcileMangaScan(ctx, folder, scans, inventoryAt, seenPaths, fullScan, warning)
 }
 
 // reconcileMangaScan runs the shared ebook missing-file reconciliation (which
 // removes vanished chapters) and then deletes any type='manga' series left with
 // no chapters. Series items are file-less parents reconciled by chapter count,
 // not file presence — catalog.ReconcileFolderMembership deliberately skips them.
-func (s *Scanner) reconcileMangaScan(ctx context.Context, folder *models.MediaFolder, scans []ebookRootScan, seenPaths map[string]bool, fullScan bool, warning catalog.ScanWarning) error {
-	if err := s.reconcileEbookScan(ctx, folder, scans, seenPaths, fullScan, warning); err != nil {
+func (s *Scanner) reconcileMangaScan(ctx context.Context, folder *models.MediaFolder, scans []ebookRootScan, inventoryAt time.Time, seenPaths map[string]bool, fullScan bool, warning catalog.ScanWarning) error {
+	if err := s.reconcileEbookScan(ctx, folder, scans, inventoryAt, seenPaths, fullScan, warning); err != nil {
 		return err
 	}
 	return s.deleteOrphanedMangaSeries(ctx, folder.ID)

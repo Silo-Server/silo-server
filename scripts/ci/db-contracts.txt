@@ -190,6 +190,10 @@
 ./internal/scanner TestScanFileAudiobookKeepsPartRestoredWhileMarkingDB
 ./internal/scanner TestScanFileAudiobookDiscPartsAgainstConcurrentRowDB
 
+# An ebook or manga library scan does not mark missing a book that a scan of
+# that file indexed after the library scan's walk or while it marked the book.
+./internal/scanner TestScanBookFolderKeepsBookIndexedByConcurrentScanDB
+
 # A rescan of a retagged, unmatched ebook keeps the fields and author credits an
 # admin locked, including locked fields left empty.
 ./internal/scanner TestEbookRescanKeepsLockedFieldsDB
