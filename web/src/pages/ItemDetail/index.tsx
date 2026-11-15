@@ -16,6 +16,7 @@ import SeriesContent from "@/pages/ItemDetail/SeriesContent";
 import SeasonContent from "@/pages/ItemDetail/SeasonContent";
 import EpisodeContent from "@/pages/ItemDetail/EpisodeContent";
 import AudiobookContent from "@/pages/ItemDetail/AudiobookContent";
+import "@/pages/audiobooks/audiobooks.css";
 import EbookContent from "@/pages/ItemDetail/EbookContent";
 import MangaContent from "@/pages/ItemDetail/MangaContent";
 import ItemDetailSkeleton from "./ItemDetailSkeleton";
@@ -63,6 +64,46 @@ function HomeItemTransitionShell({ item }: { item?: ItemDetail }) {
   const showTitleArt = useShowTitleArt();
   const [shape] = useState(() => getHomeItemTransitionShape(item, showTitleArt));
   const { compact, hidePoster, squarePoster, hasLogo } = shape;
+
+  // An audiobook opens on its own two-column page (AudiobookContent); the
+  // placeholder takes the same grid so nothing moves when the book arrives.
+  if (squarePoster) {
+    return (
+      <div
+        data-testid="home-item-transition-shell"
+        className="bg-background min-h-screen"
+        aria-busy="true"
+      >
+        <span className="sr-only">{t("web.detail.page.loadingDetails")}</span>
+        <div
+          aria-hidden="true"
+          className="page-shell-wide audiobook-detail-grid pt-16 pb-14 sm:pt-20 lg:pt-24"
+        >
+          <div className="audiobook-detail-side">
+            <div
+              data-testid="home-item-transition-poster"
+              className="audiobook-detail-cover home-item-transition-block aspect-square rounded-xl lg:rounded-2xl"
+            />
+            <div className="audiobook-detail-actions home-item-transition-block h-10 rounded-full" />
+          </div>
+          <div className="audiobook-detail-head grid gap-2.5 lg:pt-3">
+            <div className="home-item-transition-block h-4 w-40 rounded-md" />
+            <div
+              data-testid="home-item-transition-title"
+              className="home-item-transition-block h-8 w-full max-w-lg rounded-lg sm:h-11 lg:h-14"
+            />
+            <div className="home-item-transition-block h-4 w-48 rounded-md" />
+            <div className="home-item-transition-block h-4 w-40 rounded-md" />
+          </div>
+          <div className="audiobook-detail-body grid gap-3">
+            <div className="home-item-transition-block h-12 w-full max-w-md rounded-md" />
+            <div className="home-item-transition-block h-4 w-full max-w-2xl rounded-md" />
+            <div className="home-item-transition-block h-4 w-4/5 max-w-xl rounded-md" />
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div
