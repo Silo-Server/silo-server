@@ -477,6 +477,83 @@ func TestReadyArtifactSingleCreateTakesNoConcurrentSlotDB(t *testing.T) {
 	}
 }
 
+// TestPreparedSingleReplacementCountsTowardConcurrentLimitDB pins that a
+// single-item replacement that starts preparing takes a concurrent slot, as
+// a new download and a season replacement do. It creates no download, so the
+// period quota ignores it, and an entry already preparing is not counted
+// twice when it is replaced again.
+func TestPreparedSingleReplacementCountsTowardConcurrentLimitDB(t *testing.T) {
+	ctx := context.Background()
+	f := seedManagedFixture(t)
+	ep1, busyEp := f.contentID+"-ep-1", f.contentID+"-busy"
+	ep1File, busyFile := f.episodeFile(t, ep1), f.episodeFile(t, busyEp)
+	t.Cleanup(func() {
+		_, _ = f.pool.Exec(ctx, `DELETE FROM download_artifacts WHERE media_file_id = $1`, ep1File)
+	})
+	suffix := time.Now().UnixNano()
+	existingID, busyID := fmt.Sprintf("dl-ep-%d", suffix), fmt.Sprintf("dl-busy-%d", suffix)
+	for _, seed := range []struct {
+		id, episodeID, status string
+		fileID                int
+	}{{existingID, ep1, StatusReady, ep1File}, {busyID, busyEp, StatusPreparing, busyFile}} {
+		now := time.Now()
+		if err := f.repo.Create(ctx, &Download{
+			ID: seed.id, UserID: f.userID, ProfileID: f.profileA, DeviceID: f.deviceA, MediaFileID: seed.fileID,
+			ContentID: f.contentID, EpisodeID: seed.episodeID, Kind: KindQueued, Status: seed.status,
+			Format: FormatOriginal, Quality: QualityOriginal, EffectiveQuality: QualityOriginal,
+			FileSize: 1024, Revision: 1, CreatedAt: now, UpdatedAt: now,
+		}); err != nil {
+			t.Fatalf("create %s: %v", seed.id, err)
+		}
+	}
+
+	// One slot, and the account has created as many downloads this hour as
+	// the period quota allows.
+	svc := NewService(f.repo, nil, NewQuantityLimiter(f.repo, 1, 2, time.Hour), nil, nil, nil, nil, nil, nil, &config.DownloadConfig{Enabled: true})
+	svc.SetArtifactManager(NewArtifactManager(
+		NewArtifactRepository(f.pool), f.repo, nil, stubQuotaPreparer{}, "single-replacement-quota-test",
+		func() *config.Config { return nil }, nil,
+	))
+	decision := func(quality string, kbps int) QualityDecision {
+		return QualityDecision{
+			RequestedQuality: quality, EffectiveQuality: quality, DeliveryFormat: FormatTranscode,
+			TargetBitrateKbps: kbps, RequiresArtifact: true,
+			PrepareTarget: playback.PrepareTarget{Container: "mp4", CodecVideo: "h264", CodecAudio: "aac", TargetBitrateKbps: kbps},
+		}
+	}
+	file := &models.MediaFile{ID: ep1File, ContentID: f.contentID, EpisodeID: ep1, FileSize: 1024}
+	replace := func(revision int, d QualityDecision) (*Download, error) {
+		req := CreateRequest{ContentID: f.contentID, ProfileID: f.profileA, DeviceID: f.deviceA, Quality: d.RequestedQuality,
+			ExpectedRevision: new(revision), ExpectedDownloadID: existingID}
+		return svc.createArtifactDownload(ctx, f.userID, req, file, d)
+	}
+
+	if _, err := replace(1, decision(Quality5Mbps, 5000)); !errors.Is(err, ErrConcurrentLimitReached) {
+		t.Fatalf("replacement with no free slot: err = %v, want ErrConcurrentLimitReached", err)
+	}
+	row, err := f.repo.GetByID(ctx, existingID)
+	if err != nil || row.Format != FormatOriginal || row.Revision != 1 {
+		t.Fatalf("refused replacement changed the entry: %+v %v", row, err)
+	}
+	var jobs int
+	if err := f.pool.QueryRow(ctx, `SELECT count(*) FROM download_artifacts WHERE media_file_id = $1`, ep1File).Scan(&jobs); err != nil || jobs != 0 {
+		t.Fatalf("refused replacement queued %d encode jobs (%v)", jobs, err)
+	}
+
+	if _, err := f.pool.Exec(ctx, `UPDATE downloads SET status = $2 WHERE id = $1`, busyID, StatusReady); err != nil {
+		t.Fatal(err)
+	}
+	d, err := replace(1, decision(Quality5Mbps, 5000))
+	if err != nil || d.Status != StatusPreparing || d.Revision != 2 {
+		t.Fatalf("replacement with a free slot at the period limit: %+v %v", d, err)
+	}
+	// The entry now holds the only slot; replacing it again moves that slot.
+	d, err = replace(2, decision(Quality2Mbps, 2000))
+	if err != nil || d.Status != StatusPreparing || d.Revision != 3 {
+		t.Fatalf("replacing the entry that holds the slot: %+v %v", d, err)
+	}
+}
+
 // TestManagedBatchOverConcurrentCapDB pins how a new managed batch is counted
 // against the concurrent cap. Original entries register ready and the app
 // queues their transfers, so a season larger than the cap registers even when

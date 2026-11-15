@@ -416,6 +416,7 @@ export default function LibraryBrowse({
             onVisibleRangeChange={handleVisibleRangeChange}
             onTopRowChange={showLetterBar ? handleTopRowChange : undefined}
             sortField={scopedQueryDefinition.sort.field}
+            posterAspect={isAudiobookLibraryType(libraryType) ? "square" : "portrait"}
             emptyState={emptyState}
           />
         </div>

@@ -344,12 +344,12 @@ func TestHomePreferenceFiltersOnlyHomeResponses(t *testing.T) {
 	}
 	resolved := []sections.ResolvedSection{sectionItems[0].ResolvedSection}
 	prepared, states := handler.filterWatchedHomeSections(ctx, sectionItems, resolved)
-	home := handler.buildSectionsWithUserStates(ctx, prepared, nil, requestAccessFilter(req), imagesize.Request{}, states)
+	home := handler.buildSectionsWithUserStates(ctx, prepared, nil, requestAccessFilter(req), imagesize.Request{}, states, false)
 	if got := home.Sections[0].Items; len(got) != 1 || got[0].ContentID != "unwatched" {
 		t.Fatalf("Home response items = %#v, want only unwatched", got)
 	}
 
-	library := handler.buildSections(req.Context(), sectionItems, nil, requestAccessFilter(req), imagesize.Request{})
+	library := handler.buildSections(req.Context(), sectionItems, nil, requestAccessFilter(req), imagesize.Request{}, false)
 	if got := len(library.Sections[0].Items); got != 2 {
 		t.Fatalf("non-Home response has %d items, want 2", got)
 	}

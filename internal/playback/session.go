@@ -1914,6 +1914,21 @@ func (m *SessionManager) AnnounceStart(ctx context.Context, sessionID, frontend 
 	}
 }
 
+// AnnounceDetachedStart tells the lifecycle hooks a frontend started a play
+// that no replica holds in memory, such as an Audiobookshelf play a client
+// only reports. The caller supplies the snapshot; registered sessions are
+// left as they are.
+func (m *SessionManager) AnnounceDetachedStart(ctx context.Context, s Session, frontend string) {
+	m.mu.RLock()
+	hooks := append([]LifecycleHooks{}, m.lifecycleHooks...)
+	m.mu.RUnlock()
+	for _, hook := range hooks {
+		if hook.Started != nil {
+			hook.Started(ctx, &s, frontend)
+		}
+	}
+}
+
 // ReportPause tells the lifecycle hooks a client reported this pause state
 // without a progress sequence.
 func (m *SessionManager) ReportPause(ctx context.Context, sessionID string, paused bool) {

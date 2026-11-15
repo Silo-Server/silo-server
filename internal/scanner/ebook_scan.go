@@ -148,6 +148,10 @@ func (s *Scanner) scanEbookPaths(ctx context.Context, folder *models.MediaFolder
 	if err != nil {
 		return err
 	}
+	inventoryAt, err := s.scanInventoryTime(ctx)
+	if err != nil {
+		return fmt.Errorf("ebook scan: %w", err)
+	}
 	scans, err := collectEbookRootScans(ctx, folder.ID, roots, folder.Paths)
 	if err != nil {
 		return err
@@ -161,7 +165,7 @@ func (s *Scanner) scanEbookPaths(ctx context.Context, folder *models.MediaFolder
 	}
 
 	if len(candidates) == 0 {
-		return s.reconcileEbookScan(ctx, folder, scans, nil, fullScan, warning)
+		return s.reconcileEbookScan(ctx, folder, scans, inventoryAt, nil, fullScan, warning)
 	}
 
 	workers := ebookScanWorkers()
@@ -277,7 +281,7 @@ func (s *Scanner) scanEbookPaths(ctx context.Context, folder *models.MediaFolder
 	for _, p := range candidates {
 		seenPaths[p] = true
 	}
-	return s.reconcileEbookScan(ctx, folder, scans, seenPaths, fullScan, warning)
+	return s.reconcileEbookScan(ctx, folder, scans, inventoryAt, seenPaths, fullScan, warning)
 }
 
 // ebookCleanupGuardRepo is the slice of catalog.FolderRepository the
@@ -392,8 +396,9 @@ func (s *Scanner) emptyCleanupDecision(
 }
 
 // reconcileEbookScan applies the post-walk safety policy and then performs
-// missing-file reconciliation for the roots that walked cleanly.
-func (s *Scanner) reconcileEbookScan(ctx context.Context, folder *models.MediaFolder, scans []ebookRootScan, seenPaths map[string]bool, fullScan bool, warning catalog.ScanWarning) error {
+// missing-file reconciliation for the roots that walked cleanly. inventoryAt is
+// the database time the scan took before walking (scanInventoryTime).
+func (s *Scanner) reconcileEbookScan(ctx context.Context, folder *models.MediaFolder, scans []ebookRootScan, inventoryAt time.Time, seenPaths map[string]bool, fullScan bool, warning catalog.ScanWarning) error {
 	if folder != nil {
 		defer s.reconcileMissingEbookEnrichment(ctx, folder.ID)
 	}
@@ -443,7 +448,7 @@ func (s *Scanner) reconcileEbookScan(ctx context.Context, folder *models.MediaFo
 		return s.setPartialWalkWarning(ctx, folder.ID, walkFailures, true)
 	}
 
-	if err := s.reconcileMissingEbookFiles(ctx, folder, reconcileRoots, seenPaths, protectedRoots, confirmedCleanup); err != nil {
+	if err := s.reconcileMissingEbookFiles(ctx, folder, reconcileRoots, inventoryAt, seenPaths, protectedRoots, confirmedCleanup); err != nil {
 		return err
 	}
 	if walkFailures > 0 {
@@ -460,11 +465,12 @@ func (s *Scanner) reconcileEbookScan(ctx context.Context, folder *models.MediaFo
 }
 
 // reconcileMissingEbookFiles mirrors the video/audio scan cleanup: DB files
-// under the scanned roots that were not seen on disk are marked missing, the
-// folder trash is optionally emptied, and library memberships are reconciled
-// so items with no remaining files are removed (renames therefore converge on
-// the newly indexed path instead of leaving a stale duplicate item).
-func (s *Scanner) reconcileMissingEbookFiles(ctx context.Context, folder *models.MediaFolder, roots []string, seenPaths map[string]bool, protectedRoots []string, confirmedCleanup bool) error {
+// under the scanned roots that were not seen on disk are marked missing,
+// except rows written since inventoryAt, which belong to a scan that walked
+// later. The folder trash is optionally emptied, and library memberships are
+// reconciled so items with no remaining files are removed (renames therefore
+// converge on the newly indexed path instead of leaving a stale duplicate item).
+func (s *Scanner) reconcileMissingEbookFiles(ctx context.Context, folder *models.MediaFolder, roots []string, inventoryAt time.Time, seenPaths map[string]bool, protectedRoots []string, confirmedCleanup bool) error {
 	if s.fileRepo == nil || s.libraryRepo == nil || len(roots) == 0 {
 		return nil
 	}
@@ -480,16 +486,22 @@ func (s *Scanner) reconcileMissingEbookFiles(ctx context.Context, folder *models
 	now := time.Now().UTC()
 	missing := 0
 	for _, root := range roots {
-		existing, err := s.fileRepo.GetByFolderAndPathPrefix(ctx, folder.ID, root)
+		existing, err := s.fileRepo.ListScanPresenceWrittenBefore(ctx, folder.ID, root, inventoryAt)
 		if err != nil {
 			return fmt.Errorf("listing existing ebook files for %q: %w", root, err)
 		}
 		for _, mf := range existing {
-			if mf == nil || seenPaths[mf.FilePath] || pathWithinAnyRoot(mf.FilePath, protectedRoots) {
+			if seenPaths[mf.FilePath] || pathWithinAnyRoot(mf.FilePath, protectedRoots) {
 				continue
 			}
 			if mf.MissingSince == nil {
-				if err := s.fileRepo.MarkMissing(ctx, mf.ID, mf.FilePath, now); err != nil {
+				err := s.fileRepo.MarkMissingWrittenBefore(ctx, mf.ID, mf.FilePath, now, inventoryAt)
+				if errors.Is(err, ErrFileNotFound) {
+					// Another scan wrote, relinked, or deleted the row since it
+					// was listed. It is no longer this scan's to mark.
+					continue
+				}
+				if err != nil {
 					slog.ErrorContext(ctx, "ebook scan: failed to mark file missing", "component", "scanner",
 						"folder_id", folder.ID,
 						"path", mf.FilePath,
