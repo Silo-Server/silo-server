@@ -577,7 +577,12 @@ func (s *Service) reconcileMissingRemoteListItems(ctx context.Context, conn Conn
 	}
 	now := s.now()
 	for _, state := range missing {
+		// A title row, or a library item that took over one at promotion,
+		// stays while the provider lists the title under another of its IDs.
 		if title, ok := watchlistTitleFromListItemID(state.MediaItemID); ok && seenRemote.listedAny(state.Kind, heldIDs[title]) {
+			continue
+		}
+		if seenRemote.listedAny(state.Kind, state.TitleIDs) {
 			continue
 		}
 		if b.removalsEnabled(conn) && state.LocalPresent {

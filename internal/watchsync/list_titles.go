@@ -388,10 +388,10 @@ func (s *Service) reconcileLocalListTitles(ctx context.Context, conn Connection,
 		return err
 	}
 	rows := map[WatchlistTitle]ListItemState{}
-	tracked := make(map[string]bool, len(states))
+	tracked := make(map[string]ListItemState, len(states))
 	keys := make([]WatchlistTitle, 0, len(states))
 	for _, state := range states {
-		tracked[state.MediaItemID] = true
+		tracked[state.MediaItemID] = state
 		if title, ok := watchlistTitleFromListItemID(state.MediaItemID); ok && state.LocalPresent {
 			rows[title] = state
 			keys = append(keys, title)
@@ -424,10 +424,12 @@ func (s *Service) reconcileLocalListTitles(ctx context.Context, conn Connection,
 			return err
 		}
 		if len(promoted) == 1 {
-			if err := s.handOverListTitle(ctx, b, state, promoted[0], tracked[promoted[0]]); err != nil {
+			existing, ok := tracked[promoted[0]]
+			item, err := s.handOverListTitle(ctx, b, state, promoted[0], existing, ok)
+			if err != nil {
 				return err
 			}
-			tracked[promoted[0]] = true
+			tracked[promoted[0]] = item
 		}
 		// The remote side goes first: a row left local-removed but remote
 		// present would send the provider a removal.
@@ -469,9 +471,12 @@ func (s *Service) keepListTitleIDs(ctx context.Context, conn Connection, b listB
 
 // handOverListTitle gives the library item promotion moved a title onto the
 // title row's place on the provider's list, so a provider removal before the
-// next import still takes the item off and export doesn't send it again. An
-// item that already has a row keeps its provider key.
-func (s *Service) handOverListTitle(ctx context.Context, b listBinding, state ListItemState, contentID string, tracked bool) error {
+// next import still takes the item off and export doesn't send it again. The
+// item keeps the title's IDs, so a complete read listing the title under any
+// of them keeps it. It takes the title row's provider key unless it has a row
+// whose key the provider lists, or that this row can't improve on. It returns
+// the item's row as stored.
+func (s *Service) handOverListTitle(ctx context.Context, b listBinding, state ListItemState, contentID string, existing ListItemState, tracked bool) (ListItemState, error) {
 	item := ListItemState{
 		ConnectionID:  state.ConnectionID,
 		ListKind:      b.kind,
@@ -479,11 +484,17 @@ func (s *Service) handOverListTitle(ctx context.Context, b listBinding, state Li
 		Kind:          state.Kind,
 		RemotePresent: state.RemotePresent,
 		LocalPresent:  true,
+		TitleIDs:      state.keptTitleIDs(),
 	}
-	if !tracked {
+	if !tracked || (!existing.RemotePresent && state.RemotePresent) {
 		item.ProviderItemKey, item.Title, item.Year = state.ProviderItemKey, state.Title, state.Year
 	}
-	return s.repo.UpsertListItemStates(ctx, []ListItemState{item})
+	if err := s.repo.UpsertListItemStates(ctx, []ListItemState{item}); err != nil {
+		return ListItemState{}, err
+	}
+	item.RemotePresent = item.RemotePresent || existing.RemotePresent
+	item.ProviderItemKey = cmp.Or(item.ProviderItemKey, existing.ProviderItemKey)
+	return item, nil
 }
 
 // localListTitles returns the profile's watchlist entries outside the library

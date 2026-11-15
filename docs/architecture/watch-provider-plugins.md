@@ -135,9 +135,11 @@ library item through them and the row's provider key:
 
 - An entry gone from the watchlist is a promotion, not a local removal, while a
   library item with one of those IDs is on the library watchlist. When exactly
-  one is, its row takes over the title row's remote presence, and its provider
-  key when it has no row yet, before the title row retires. A provider removal
-  before the next import then still reaches it.
+  one is, its row takes over the title row's remote presence and IDs, and its
+  provider key when it has no row yet or the provider doesn't list its row,
+  before the title row retires. A provider removal before the next import then
+  still reaches it, and a complete read listing the title under another of its
+  IDs keeps it. Listed title rows hand over first.
 - A provider removal of the title also takes that one library item off the
   library watchlist, for a promotion that ran after the pass read the entry.
 - A pending local removal of a title also holds a listing under another TMDB
