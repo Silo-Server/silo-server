@@ -516,8 +516,8 @@ func (s *Service) createArtifactDownload(ctx context.Context, userID int, req Cr
 		return nil, ErrProfileRequired
 	}
 
-	// Resolve any existing managed entry first: replacing one doesn't add a
-	// row, so it stays quota-exempt and needs no quota lock.
+	// Resolve any existing managed entry first: replacing one updates it in
+	// place instead of creating a download.
 	var existing *Download
 	if managed {
 		ex, err := s.repo.GetManagedEntry(ctx, userID, req.ProfileID, req.DeviceID, file.ContentID, file.EpisodeID)
@@ -534,13 +534,46 @@ func (s *Service) createArtifactDownload(ctx context.Context, userID int, req Cr
 		}
 	}
 	if existing != nil {
-		artifact, err := s.artifacts.Ensure(ctx, file, decision.DeliveryFormat, decision.PrepareTarget)
+		// Capability discovery can probe remote nodes, so it runs before the
+		// quota lock.
+		target, err := s.artifacts.resolveToneMapTarget(ctx, file, decision.PrepareTarget)
 		if err != nil {
 			return nil, err
 		}
-		status, size := artifactRowStatus(artifact, file)
-		replacement := buildManagedDownload(userID, req.ProfileID, req.DeviceID, managedItem{file: file, contentID: file.ContentID, episodeID: file.EpisodeID}, decision, "", status, size, artifact.ID)
-		d, err := s.reuseOrReplaceManaged(ctx, existing, replacement, req.ExpectedRevision, req.ExpectedDownloadID)
+		var d *Download
+		err = s.repo.WithUserQuotaLock(ctx, userID, func(ctx context.Context) error {
+			// Another request may have replaced the entry while this one
+			// waited. Check the guard against the entry as it is now, before
+			// anything is counted or an encode is queued.
+			current, err := s.repo.GetManagedEntry(ctx, userID, req.ProfileID, req.DeviceID, file.ContentID, file.EpisodeID)
+			if err != nil && !errors.Is(err, ErrNotFound) {
+				return err
+			}
+			if err := checkManagedCreateRevision(current, req.ExpectedRevision, req.ExpectedDownloadID); err != nil {
+				return err
+			}
+			if current == nil {
+				return ErrNotFound
+			}
+			// A replacement whose prepared file is not ready leaves the entry
+			// preparing, whatever its status is now, so it takes a concurrent
+			// slot and the entry is left out of the active count, as on a
+			// season page. It creates no download, so the period quota does
+			// not apply.
+			if !s.artifacts.readyArtifact(ctx, file, decision.DeliveryFormat, target) {
+				if err := s.limiter.CheckCounts(ctx, userID, 1, 0, current.ID); err != nil {
+					return err
+				}
+			}
+			artifact, err := s.artifacts.ensureResolved(ctx, file, decision.DeliveryFormat, target)
+			if err != nil {
+				return err
+			}
+			status, size := artifactRowStatus(artifact, file)
+			replacement := buildManagedDownload(userID, req.ProfileID, req.DeviceID, managedItem{file: file, contentID: file.ContentID, episodeID: file.EpisodeID}, decision, "", status, size, artifact.ID)
+			d, err = s.reuseOrReplaceManaged(ctx, current, replacement, req.ExpectedRevision, req.ExpectedDownloadID)
+			return err
+		})
 		if err != nil {
 			return nil, err
 		}
