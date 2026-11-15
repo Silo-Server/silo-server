@@ -1409,7 +1409,7 @@ func (s *Service) ServeFile(ctx context.Context, w http.ResponseWriter, r *http.
 	err = s.serveDownloadBytes(ctx, response, r, dl, userID, filter)
 	stopRenewing()
 	if err != nil {
-		if dl.Format == FormatOriginal {
+		if dl.Format == FormatOriginal && !probe {
 			failureCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
 			updateErr := s.repo.TransitionStatus(failureCtx, dl.ID, StatusDownloading, StatusFailed, 0, nil)
 			cancel()

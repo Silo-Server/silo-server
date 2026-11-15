@@ -177,7 +177,10 @@ func TestEphemeralDownloadCompletesOnlyOnWholeFileDB(t *testing.T) {
 		t.Fatal(err)
 	}
 	seedSchemaFiles(t, repo, &models.MediaFile{ID: 42, ContentID: "movie"})
-	svc := NewService(repo, nil, nil, fakeFileResolver{&models.MediaFile{ID: 42, FilePath: path}}, nil, nil, fakeUserRepo{&models.User{ID: 2, DownloadAllowed: new(true)}}, &syncAccess{}, nil, &config.DownloadConfig{Enabled: true})
+	newService := func(path string) *Service {
+		return NewService(repo, nil, nil, fakeFileResolver{&models.MediaFile{ID: 42, FilePath: path}}, nil, nil, fakeUserRepo{&models.User{ID: 2, DownloadAllowed: new(true)}}, &syncAccess{}, nil, &config.DownloadConfig{Enabled: true})
+	}
+	svc, broken := newService(path), newService(filepath.Join(t.TempDir(), "missing.mp4"))
 	for _, tc := range []struct {
 		name, method, ranged, ifNoneMatch, want string
 		hangUp                                  bool
@@ -185,6 +188,10 @@ func TestEphemeralDownloadCompletesOnlyOnWholeFileDB(t *testing.T) {
 		{"head", http.MethodHead, "", "", StatusQueued, false},
 		// A probe of a transfer whose lease lapsed neither fails nor revives it.
 		{"head of a lapsed transfer", http.MethodHead, "", "", StatusDownloading, false},
+		// A probe that fails leaves a live transfer running; a GET that fails
+		// ends it.
+		{"head of a live transfer that fails", http.MethodHead, "", "", StatusDownloading, false},
+		{"get of a live transfer that fails", http.MethodGet, "", "", StatusFailed, false},
 		{"partial range", http.MethodGet, "bytes=0-1023", "", StatusDownloading, false},
 		{"tail range", http.MethodGet, "bytes=1024-", "", StatusDownloading, false},
 		{"not modified", http.MethodGet, "", "*", StatusDownloading, false},
@@ -200,11 +207,18 @@ func TestEphemeralDownloadCompletesOnlyOnWholeFileDB(t *testing.T) {
 			if err := repo.Create(t.Context(), row); err != nil {
 				t.Fatal(err)
 			}
-			lapsed := strings.Contains(tc.name, "lapsed")
+			lapsed, fails := strings.Contains(tc.name, "lapsed"), strings.HasSuffix(tc.name, "fails")
 			if lapsed {
 				if _, err := repo.pool.Exec(t.Context(), `UPDATE downloads SET status = 'downloading', updated_at = now() - interval '10 minutes' WHERE id = $1`, row.ID); err != nil {
 					t.Fatal(err)
 				}
+			}
+			serving := svc
+			if fails {
+				if err := repo.TransitionStatus(t.Context(), row.ID, StatusQueued, StatusDownloading, 0, nil); err != nil {
+					t.Fatal(err)
+				}
+				serving = broken
 			}
 			req := httptest.NewRequest(tc.method, "/file", nil)
 			if tc.ranged != "" {
@@ -219,8 +233,8 @@ func TestEphemeralDownloadCompletesOnlyOnWholeFileDB(t *testing.T) {
 			if tc.hangUp {
 				w = &hangUpWriter{ResponseRecorder: httptest.NewRecorder(), after: len(payload), cancel: cancel}
 			}
-			if err := svc.ServeFile(ctx, w, req.WithContext(ctx), 2, "", "", row.ID, catalog.AccessFilter{}); err != nil {
-				t.Fatal(err)
+			if err := serving.ServeFile(ctx, w, req.WithContext(ctx), 2, "", "", row.ID, catalog.AccessFilter{}); (err != nil) != fails {
+				t.Fatalf("serve error = %v, want an error: %v", err, fails)
 			}
 			stored, err := repo.GetByID(t.Context(), row.ID)
 			if err != nil {
