@@ -195,11 +195,14 @@ func (b blockingFolderIngester) IngestFolder(ctx context.Context, _ *models.Medi
 
 // A full refresh's library scan ends when its run stops being this claim's
 // running run (canceled here or on another server), instead of reading the
-// rest of the library.
+// rest of the library. Books it already re-read are committed, so the caches
+// are still invalidated.
 func TestAudiobookLibraryRefreshStopsWhenItsRunIsLost(t *testing.T) {
 	t.Parallel()
 
+	eventBus := &libraryRefreshTestEventBus{}
 	executor := &LibraryRefreshExecutor{
+		eventBus:           eventBus,
 		itemLister:         &libraryRefreshTestLister{},
 		folderRepo:         &itemRefreshTestFolderRepo{folder: &models.MediaFolder{ID: 9, Type: "audiobooks", Enabled: true}},
 		ingester:           blockingFolderIngester{&itemRefreshTestIngester{}},
@@ -210,6 +213,13 @@ func TestAudiobookLibraryRefreshStopsWhenItsRunIsLost(t *testing.T) {
 	_, err := executor.Execute(t.Context(), LibraryRefreshRequest{LibraryID: 9, Mode: LibraryRefreshModeFull}, nil)
 	if !errors.Is(err, errLibraryScanRunLost) {
 		t.Fatalf("Execute() error = %v, want errLibraryScanRunLost", err)
+	}
+	var invalidated bool
+	for _, event := range eventBus.events {
+		invalidated = invalidated || (event.Type == cache.EventScanComplete && event.Payload == "9")
+	}
+	if !invalidated {
+		t.Errorf("events = %#v, want scan_complete for library 9 after the scan ended early", eventBus.events)
 	}
 }
 

@@ -90,6 +90,12 @@ func (e *LibraryRefreshExecutor) refreshAudiobookLibrary(
 		return nil, true, startErr
 	}
 
+	// Every book the scan reaches commits its re-read tags on its own, so a
+	// scan that ends early (run lost, scan error, job canceled) has still
+	// changed some books: invalidate caches and notify clients on every
+	// return from here, as on success.
+	defer e.publishAudiobookLibraryRefreshed(ctx, req.LibraryID)
+
 	if progress != nil {
 		progress(0, 0, "Reading audiobook tags")
 	}
@@ -128,16 +134,23 @@ func (e *LibraryRefreshExecutor) refreshAudiobookLibrary(
 	if err := e.requeueUnmatchedAudiobooks(ctx, req, result); err != nil {
 		return nil, true, err
 	}
+	return result, true, nil
+}
 
-	e.publish(cache.EventScanComplete, strconv.Itoa(req.LibraryID))
-	e.publish(cache.EventMetadataUpdated, strconv.Itoa(req.LibraryID))
+// publishAudiobookLibraryRefreshed invalidates the library's cached rails and
+// notifies clients after its refresh scan, on a context that outlives a
+// canceled job.
+func (e *LibraryRefreshExecutor) publishAudiobookLibraryRefreshed(ctx context.Context, libraryID int) {
+	e.publish(cache.EventScanComplete, strconv.Itoa(libraryID))
+	e.publish(cache.EventMetadataUpdated, strconv.Itoa(libraryID))
 	if e.realtimeHub != nil {
-		_ = e.realtimeHub.PublishCatalogItemChanged(ctx, notifications.MetadataUpdateEvent{
-			LibraryID: req.LibraryID,
+		publishCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), directScanFinishTimeout)
+		defer cancel()
+		_ = e.realtimeHub.PublishCatalogItemChanged(publishCtx, notifications.MetadataUpdateEvent{
+			LibraryID: libraryID,
 			Change:    metadataUpdatedChange,
 		})
 	}
-	return result, true, nil
 }
 
 // requeueUnmatchedAudiobooks hands the library's unmatched audiobooks back to
