@@ -631,6 +631,13 @@
 ./internal/api/handlers TestLifecycleSweepPassesLiveJellyfinPlaysDB
 ./internal/api/handlers TestLifecycleSweepBacksOffFailedEndsDB
 
+# An Audiobookshelf play a client only reports through its local session is
+# one play across servers under a cluster-wide account cap; Activity lists it
+# with no server holding it, the sweep ends it once reports stop, and a report
+# after its end is a new play.
+./internal/audiobooks TestReportPlayKeepsOnePlayPerClientSessionDB
+./internal/api/handlers TestLifecycleSweepEndsReportedPlaysDB
+
 # Transactional administrator audit details and rollback isolation.
 ./internal/activitylog TestMutationCommitRollbackAndHistoryDB
 
