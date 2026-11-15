@@ -4128,12 +4128,11 @@ func (h *StreamHandler) streamEmbeddedSubtitle(w http.ResponseWriter, r *http.Re
 			if extractionRetry.WindowBudgetExceeded {
 				// The window read its source for its whole budget instead of
 				// failing, so the source is reachable and only this page is
-				// too costly for one request. Start the detached warm here:
-				// the cache's own warm is disabled for virtual inputs, and the
-				// retry this 503 asks for should read a committed slice or a
-				// window prefix rather than repeat the read that just timed
-				// out.
-				h.warmVirtualSubtitleAfterWindowMiss(file, track, session, opts, inheritedLayout, virtualActive, middleware.GetReqID(r.Context()))
+				// too costly for one request. Start the detached recovery warm
+				// here: it extracts the breached window plus one client cell,
+				// so the retry this 503 asks for is covered rather than
+				// repeating the read that just timed out.
+				h.warmVirtualSubtitleAfterBudgetBreach(file, track, session, opts, inheritedLayout, virtualActive, middleware.GetReqID(r.Context()))
 			}
 			writeSubtitleRetry(w, extractionRetry)
 			return
@@ -4564,7 +4563,19 @@ func (h *StreamHandler) warmVirtualSubtitleAfterWindowMiss(file *models.MediaFil
 	// path: no page extract produces the artifact the next page needs, and the
 	// client is already waiting on it. A whole-track bitmap request keeps the
 	// paused-only admission below.
-	h.warmVirtualSubtitle(file, track, session, opts, inherited, virtualActive, requestID, bitmapPageWaitingForFill(opts), false)
+	h.warmVirtualSubtitle(file, track, session, opts, inherited, virtualActive, requestID, bitmapPageWaitingForFill(opts), false, false)
+}
+
+// warmVirtualSubtitleAfterBudgetBreach starts the detached recovery warm for a
+// request-path text window that was answered retryably at its elapsed budget.
+// The retry a 503 asks for usually re-anchors a few seconds forward, so the
+// warm extracts the breached window plus one client grid cell and stores it as
+// the last-good window. That range covers both an exact repeat and the shifted
+// window the retry asks for; the ordinary mid-file prefetch derives its windows
+// from the playhead grid and misses both, which is why a breach used to repeat
+// at full price until the client gave up.
+func (h *StreamHandler) warmVirtualSubtitleAfterBudgetBreach(file *models.MediaFile, track models.SubtitleTrack, session *playback.Session, opts playback.StreamExtractOpts, inherited *virtualSubtitleLayoutSeed, virtualActive bool, requestID string) {
+	h.warmVirtualSubtitle(file, track, session, opts, inherited, virtualActive, requestID, false, false, true)
 }
 
 // warmVirtualSubtitleAfterProbeFailure starts the detached fill when the
@@ -4578,7 +4589,7 @@ func (h *StreamHandler) warmVirtualSubtitleAfterWindowMiss(file *models.MediaFil
 // window, which normally fills inline) and for a bitmap track while playback
 // runs, because those are exactly the cases no inline fill produced.
 func (h *StreamHandler) warmVirtualSubtitleAfterProbeFailure(file *models.MediaFile, track models.SubtitleTrack, session *playback.Session, opts playback.StreamExtractOpts, inherited *virtualSubtitleLayoutSeed, virtualActive bool, requestID string) {
-	h.warmVirtualSubtitle(file, track, session, opts, inherited, virtualActive, requestID, bitmapPageWaitingForFill(opts), true)
+	h.warmVirtualSubtitle(file, track, session, opts, inherited, virtualActive, requestID, bitmapPageWaitingForFill(opts), true, false)
 }
 
 // bitmapPageWaitingForFill reports whether this request was a bounded bitmap
@@ -4601,10 +4612,10 @@ func bitmapPageWaitingForFill(opts playback.StreamExtractOpts) bool {
 // even when a bounded page prefetch would otherwise take precedence, because
 // those pages are exactly what this fill publishes as it parses.
 func (h *StreamHandler) warmVirtualSubtitleForWaitingPage(file *models.MediaFile, track models.SubtitleTrack, session *playback.Session, opts playback.StreamExtractOpts, inherited *virtualSubtitleLayoutSeed, virtualActive bool, requestID string) {
-	h.warmVirtualSubtitle(file, track, session, opts, inherited, virtualActive, requestID, true, false)
+	h.warmVirtualSubtitle(file, track, session, opts, inherited, virtualActive, requestID, true, false, false)
 }
 
-func (h *StreamHandler) warmVirtualSubtitle(file *models.MediaFile, track models.SubtitleTrack, session *playback.Session, opts playback.StreamExtractOpts, inherited *virtualSubtitleLayoutSeed, virtualActive bool, requestID string, pageWaiting, force bool) {
+func (h *StreamHandler) warmVirtualSubtitle(file *models.MediaFile, track models.SubtitleTrack, session *playback.Session, opts playback.StreamExtractOpts, inherited *virtualSubtitleLayoutSeed, virtualActive bool, requestID string, pageWaiting, force, breach bool) {
 	if h == nil || h.SubtitleCache == nil || file == nil || session == nil || !virtualActive {
 		return
 	}
@@ -4671,6 +4682,20 @@ func (h *StreamHandler) warmVirtualSubtitle(file *models.MediaFile, track models
 		warmOpts := opts
 		warmOpts.PinnedTextArtifact = nil
 		seed := inherited
+
+		// A budget breach is recovered by warming the range the retry will ask
+		// for, not by the playhead-grid prefetch below. The client re-anchors a
+		// few seconds forward on its retry, and a grid prefetch of the same
+		// page length ends before the retry's range does, so the covering
+		// lookup rejects it and the retry pays the same read again.
+		if breach {
+			if windows, ok := virtualSubtitleBreachRecoveryWindows(opts); ok {
+				extract, _, release := h.virtualSubtitleWarmExtractor(file, track, session, planTracks, seed, warmOpts, live)
+				defer release()
+				<-h.SubtitleCache.PrefetchWindowsInBackground(warmOpts, windows, extract, requestID)
+				return
+			}
+		}
 
 		// A known playhead prefers the bounded window prefetch. It covers the
 		// pages the viewer is about to need without ever publishing a mid-file
@@ -4774,6 +4799,37 @@ func virtualSubtitleWarmPrefetchWindows(opts playback.StreamExtractOpts, positio
 		})
 	}
 	return windows, true
+}
+
+// virtualSubtitleBreachRecoveryWindows returns the bounded range a detached
+// warm should extract after a request-path text window is killed at its budget.
+//
+// The retry a 503 asks for is not the request that breached: both subtitle
+// clients re-anchor a few seconds forward (the web VTT fetcher snaps to the next
+// 30 s cell, the ASS fetcher pulls back a lead from the advanced playhead), so
+// its range starts later and ends later than the breached one. Extracting the
+// breached start with one extra grid cell on the end therefore covers both an
+// exact repeat and the shifted retry, while the ordinary playhead-grid prefetch
+// — same page length, earlier start — ends before the retry's end and is
+// rejected by the covering lookup. The extra cell is a duration bound, not a
+// time bound: the detached warm may spend the full window timeout on it.
+//
+// Only a bounded text/ASS window can be recovered this way. A bitmap page has
+// its own progressive artifact path, and an open-ended request has no end to
+// extend, so both keep their existing admission.
+func virtualSubtitleBreachRecoveryWindows(opts playback.StreamExtractOpts) ([]playback.SubtitlePrefetchWindow, bool) {
+	if playback.IsPGS(opts.SourceCodec) {
+		return nil, false
+	}
+	windowed, start, end, openEnded := opts.WindowCoverage()
+	if !windowed || openEnded || end <= start {
+		return nil, false
+	}
+	lead := playback.SubtitleRequestGridFor(opts.SourceCodec).CellSeconds
+	return []playback.SubtitlePrefetchWindow{{
+		StartSeconds:    start,
+		DurationSeconds: (end - start) + lead,
+	}}, true
 }
 
 // virtualSubtitleWarmExtractor builds the extract closure shared by the

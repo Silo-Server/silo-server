@@ -23,11 +23,12 @@ func TestSubtitleWindowBudgetAnswersRetryableAndWarms(t *testing.T) {
 	}
 	dir := t.TempDir()
 	argsLog := filepath.Join(dir, "ffmpeg.args")
-	// A window extract (-ss ...) never reaches its range; a full-track warm (no
-	// -ss) commits promptly, so the breach's warm is observable.
+	// The request window (-to 1200) never reaches its range; the recovery warm
+	// extracts the same start with one extra client cell (-to 1230) and commits
+	// promptly, so the breach's warm is observable.
 	script := "#!/bin/sh\nprintf '%s\\n' \"$*\" >> '" + argsLog + "'\n" +
 		"case \"$*\" in\n" +
-		"  *-ss*)\n    sleep 60\n    ;;\n" +
+		"  *'-to 1200.000'*)\n    sleep 60\n    ;;\n" +
 		"  *)\n    cat <<'VTT'\n" + warmSubtitleVTT + "VTT\n    ;;\n" +
 		"esac\n"
 	handler, session, file, _ := newVirtualSubtitleWindowFixture(t, dir, script)
@@ -60,6 +61,10 @@ func TestSubtitleWindowBudgetAnswersRetryableAndWarms(t *testing.T) {
 		t.Fatalf("coverage header = %q, want none on a 503", rec.Header().Get("X-Subtitle-Coverage"))
 	}
 
-	// The breach started the detached warm: the retry reads a committed slice.
-	waitForWarmInvocation(t, argsLog)
+	// The breach started the detached recovery warm for the range the retry
+	// asks for: same start, one extra client cell on the end. It must settle
+	// (commit) despite the cooldown the breach armed, or the retry repeats the
+	// read.
+	handler.waitForBackgroundSubtitleWarms()
+	assertFFmpegArgs(t, argsLog, "-ss 600", "-to 1230")
 }

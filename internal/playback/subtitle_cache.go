@@ -422,9 +422,16 @@ func (e subtitleWindowResult) spanSeconds() float64 {
 }
 
 // subtitleWindowFlight is a per-window in-flight marker; done closes when the
-// leading request finishes (success, failure, or cancellation).
+// leading request finishes (success, failure, or cancellation). It also records
+// the range being extracted so a request covered by a wider in-flight window
+// (the recovery warm a budget breach starts) waits for it instead of starting a
+// second relay read for a slice that is already being produced.
 type subtitleWindowFlight struct {
-	done chan struct{}
+	done      chan struct{}
+	base      string
+	start     float64
+	end       float64
+	openEnded bool
 }
 
 // subtitlePageFlight is a refcounted marker for the windowed extracts admitted
@@ -708,7 +715,7 @@ func (c *SubtitleCache) ServeExtractWithResult(w http.ResponseWriter, r *http.Re
 		// failure backoff behind, both re-checked after the wait.
 		if windowKey != "" {
 			for attempt := 0; attempt < subtitleWindowWaitRetries; attempt++ {
-				leader, wait := c.beginWindowFlight(windowKey)
+				leader, wait := c.beginWindowFlight(windowKey, opts)
 				if leader {
 					windowLeader = true
 					break
@@ -1330,21 +1337,47 @@ func (c *SubtitleCache) evictWindowResultsLocked(now time.Time) {
 	}
 }
 
-// beginWindowFlight reserves the in-flight marker for one exact window, or
-// returns the marker of the request already extracting it.
-func (c *SubtitleCache) beginWindowFlight(key string) (bool, <-chan struct{}) {
+// beginWindowFlight reserves the in-flight marker for one window, or returns
+// the marker of a request already extracting it. A request whose range is
+// covered by a wider in-flight window joins that flight: after a budget breach
+// the detached recovery warm extracts the breached range plus the client's next
+// cell, and the retry the 503 asks for is narrower than that warm. Joining it
+// keeps the retry from paying the same relay read a second time while the warm
+// is still running.
+func (c *SubtitleCache) beginWindowFlight(key string, opts StreamExtractOpts) (bool, <-chan struct{}) {
 	if c == nil || key == "" {
 		return true, nil
 	}
+	base := windowResultKeyBase(key)
+	_, start, end, openEnded := opts.WindowCoverage()
 	c.windowMu.Lock()
 	defer c.windowMu.Unlock()
 	if existing, ok := c.windowFlights[key]; ok {
 		return false, existing.done
 	}
+	for _, flight := range c.windowFlights {
+		if flight.base != base {
+			continue
+		}
+		covering := subtitleWindowResult{
+			startSeconds: flight.start,
+			endSeconds:   flight.end,
+			openEnded:    flight.openEnded,
+		}
+		if covering.covers(start, end, openEnded) {
+			return false, flight.done
+		}
+	}
 	if c.windowFlights == nil {
 		c.windowFlights = make(map[string]*subtitleWindowFlight)
 	}
-	flight := &subtitleWindowFlight{done: make(chan struct{})}
+	flight := &subtitleWindowFlight{
+		done:      make(chan struct{}),
+		base:      base,
+		start:     start,
+		end:       end,
+		openEnded: openEnded,
+	}
 	c.windowFlights[key] = flight
 	return true, nil
 }
@@ -2007,7 +2040,7 @@ func (c *SubtitleCache) serveWindowedSUP(w http.ResponseWriter, r *http.Request,
 	leader := false
 	for attempt := 0; windowKey != "" && attempt < subtitleWindowWaitRetries; attempt++ {
 		var wait <-chan struct{}
-		leader, wait = c.beginWindowFlight(windowKey)
+		leader, wait = c.beginWindowFlight(windowKey, opts)
 		if leader {
 			break
 		}
