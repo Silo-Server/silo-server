@@ -23968,7 +23968,7 @@ export interface components {
        * @enum {string}
        */
       advisory_source?: "commonsense" | "mdblist";
-      /** @description On a series, complete seasons out of seasons that have aired. On a season, episodes in the library out of the episodes the season lists. Absent for other types, for specials, and when episode metadata is incomplete. */
+      /** @description On a series, complete seasons out of seasons that have aired. On a season, episodes in the library out of the episodes the season lists. Sent only while the acting profile's poster badges are on and include the availability badge. Absent for other types, for specials, and when episode metadata is incomplete. */
       availability?: components["schemas"]["CatalogAvailability"];
       /** @description Whether backdrop_url is an episode still. False for series artwork; absent when provenance is unavailable. */
       backdrop_is_episode_still?: boolean;
@@ -24178,7 +24178,7 @@ export interface components {
       air_time?: string;
       air_timezone?: string;
       audiobook?: components["schemas"]["AudiobookDetailExtension"];
-      /** @description On a series, complete seasons out of seasons that have aired. On a season, episodes in the library out of the episodes the season lists. Absent for other types, for specials, and when episode metadata is incomplete. */
+      /** @description On a series, complete seasons out of seasons that have aired. On a season, episodes in the library out of the episodes the season lists. Sent only while the acting profile's poster badges are on and include the availability badge. Absent for other types, for specials, and when episode metadata is incomplete. */
       availability?: components["schemas"]["CatalogAvailability"];
       /** @description Whether backdrop_url is an episode still. False for series artwork; absent when provenance is unavailable. */
       backdrop_is_episode_still?: boolean;
@@ -27453,7 +27453,7 @@ export interface components {
        * @enum {string}
        */
       advisory_source?: "commonsense" | "mdblist";
-      /** @description On a series, complete seasons out of seasons that have aired. On a season, episodes in the library out of the episodes the season lists. Absent for other types, for specials, and when episode metadata is incomplete. */
+      /** @description On a series, complete seasons out of seasons that have aired. On a season, episodes in the library out of the episodes the season lists. Sent only while the acting profile's poster badges are on and include the availability badge. Absent for other types, for specials, and when episode metadata is incomplete. */
       availability?: components["schemas"]["CatalogAvailability"];
       /** @description Whether backdrop_url is an episode still. False for series artwork; absent when provenance is unavailable. */
       backdrop_is_episode_still?: boolean;
@@ -33714,7 +33714,7 @@ export interface components {
        * @description Calendar date, YYYY-MM-DD
        */
       air_date?: string;
-      /** @description Episodes in the library out of the episodes this season lists. Absent for specials and when episode metadata is incomplete. */
+      /** @description Episodes in the library out of the episodes this season lists. Sent only while the acting profile's poster badges are on and include the availability badge. Absent for specials and when episode metadata is incomplete. */
       availability?: components["schemas"]["CatalogAvailability"];
       /** @example series:severance-S01 */
       content_id: string;
@@ -36865,7 +36865,7 @@ export interface components {
        * @enum {string}
        */
       advisory_source?: "commonsense" | "mdblist";
-      /** @description On a series, complete seasons out of seasons that have aired. On a season, episodes in the library out of the episodes the season lists. Absent for other types, for specials, and when episode metadata is incomplete. */
+      /** @description On a series, complete seasons out of seasons that have aired. On a season, episodes in the library out of the episodes the season lists. Sent only while the acting profile's poster badges are on and include the availability badge. Absent for other types, for specials, and when episode metadata is incomplete. */
       availability?: components["schemas"]["CatalogAvailability"];
       /** @description Whether backdrop_url is an episode still. False for series artwork; absent when provenance is unavailable. */
       backdrop_is_episode_still?: boolean;
@@ -37095,7 +37095,7 @@ export interface components {
        * @enum {string}
        */
       advisory_source?: "commonsense" | "mdblist";
-      /** @description On a series, complete seasons out of seasons that have aired. On a season, episodes in the library out of the episodes the season lists. Absent for other types, for specials, and when episode metadata is incomplete. */
+      /** @description On a series, complete seasons out of seasons that have aired. On a season, episodes in the library out of the episodes the season lists. Sent only while the acting profile's poster badges are on and include the availability badge. Absent for other types, for specials, and when episode metadata is incomplete. */
       availability?: components["schemas"]["CatalogAvailability"];
       /** @description Whether backdrop_url is an episode still. False for series artwork; absent when provenance is unavailable. */
       backdrop_is_episode_still?: boolean;

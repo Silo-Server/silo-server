@@ -62,7 +62,7 @@ type CatalogItem struct {
 	MangaChapterCount      *int                      `json:"manga_chapter_count,omitempty"`
 	MangaVolumeCount       *int                      `json:"manga_volume_count,omitempty"`
 	OverlaySummary         *CatalogItemOverlay       `json:"overlay_summary,omitempty" doc:"Technical badges of the best file"`
-	Availability           *CatalogAvailability      `json:"availability,omitempty" doc:"On a series, complete seasons out of seasons that have aired. On a season, episodes in the library out of the episodes the season lists. Absent for other types, for specials, and when episode metadata is incomplete."`
+	Availability           *CatalogAvailability      `json:"availability,omitempty" doc:"On a series, complete seasons out of seasons that have aired. On a season, episodes in the library out of the episodes the season lists. Sent only while the acting profile's poster badges are on and include the availability badge. Absent for other types, for specials, and when episode metadata is incomplete."`
 	Badges                 []string                  `json:"badges,omitempty" doc:"Section-specific badges (new, returning, …)"`
 	ItemSource             string                    `json:"item_source,omitempty" doc:"On a continue-watching card: in_progress or next_up"`
 	SortMetrics            *CatalogItemSortMetrics   `json:"sort_metrics,omitempty" doc:"The values the listing was sorted by"`

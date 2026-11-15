@@ -595,7 +595,7 @@ type Season struct {
 	PosterURL               string               `json:"poster_url,omitempty" format:"uri-reference" doc:"Presigned, short-lived"`
 	PosterThumbhash         string               `json:"poster_thumbhash,omitempty"`
 	UserData                *WatchRollup         `json:"user_data,omitempty"`
-	Availability            *CatalogAvailability `json:"availability,omitempty" doc:"Episodes in the library out of the episodes this season lists. Absent for specials and when episode metadata is incomplete."`
+	Availability            *CatalogAvailability `json:"availability,omitempty" doc:"Episodes in the library out of the episodes this season lists. Sent only while the acting profile's poster badges are on and include the availability badge. Absent for specials and when episode metadata is incomplete."`
 	MachineTranslatedFields []string             `json:"machine_translated_fields,omitempty" enum:"overview" doc:"Localized fields whose text was machine-translated by AI; absent when none were"`
 }
 
@@ -732,7 +732,7 @@ func (reg *Registry) itemViewerOnDevice(ctx context.Context, deviceID string, ar
 	}
 	filter.ImageSize = art.Size
 	filter.ImageWidths = art.Widths
-	return handlers.ItemViewer{Access: filter, ProfileID: profileID, IncludeCardAvailability: true}, nil
+	return handlers.ItemViewer{Access: filter, ProfileID: profileID, IncludeCardAvailability: cardAvailabilityWanted(ctx)}, nil
 }
 
 // versionsScopedToLibrary reads catalog.scope_versions_to_library. A read

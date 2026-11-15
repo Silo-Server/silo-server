@@ -2045,8 +2045,10 @@ type ItemViewer struct {
 	Access    catalog.AccessFilter
 	ProfileID string
 	// IncludeCardAvailability runs the season/series presence lookup for
-	// poster badges. Only /api/v2 sets it: Availability is json:"-" on the
-	// frozen v1 card and season shapes, so v1 must not pay for the aggregation.
+	// poster badges. Only /api/v2 sets it, and only for a profile that draws
+	// the availability badge (access.Scope.CardAvailability): Availability is
+	// json:"-" on the frozen v1 card and season shapes, and nobody else shows
+	// the counts, so neither pays for the aggregation.
 	IncludeCardAvailability bool
 }
 

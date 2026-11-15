@@ -30,8 +30,10 @@ type SectionViewer struct {
 	// native v2 API carries them.
 	ImageWidths imagesize.Widths
 	// IncludeCardAvailability runs the season/series presence lookup for
-	// poster badges. Only /api/v2 sets it: Availability is json:"-" on the
-	// frozen v1 card shape, so v1 must not pay for the aggregation.
+	// poster badges. Only /api/v2 sets it, and only for a profile that draws
+	// the availability badge (access.Scope.CardAvailability): Availability is
+	// json:"-" on the frozen v1 card shape, and nobody else shows the counts,
+	// so neither pays for the aggregation.
 	IncludeCardAvailability bool
 	// Web is true when the caller declared the web client family
 	// (X-Silo-Client-Family: web). Only the web app receives a hero row an

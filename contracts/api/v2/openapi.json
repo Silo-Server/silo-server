@@ -27172,7 +27172,7 @@
           },
           "availability": {
             "$ref": "#/components/schemas/CatalogAvailability",
-            "description": "On a series, complete seasons out of seasons that have aired. On a season, episodes in the library out of the episodes the season lists. Absent for other types, for specials, and when episode metadata is incomplete."
+            "description": "On a series, complete seasons out of seasons that have aired. On a season, episodes in the library out of the episodes the season lists. Sent only while the acting profile's poster badges are on and include the availability badge. Absent for other types, for specials, and when episode metadata is incomplete."
           },
           "backdrop_is_episode_still": {
             "description": "Whether backdrop_url is an episode still. False for series artwork; absent when provenance is unavailable.",
@@ -27554,7 +27554,7 @@
           },
           "availability": {
             "$ref": "#/components/schemas/CatalogAvailability",
-            "description": "On a series, complete seasons out of seasons that have aired. On a season, episodes in the library out of the episodes the season lists. Absent for other types, for specials, and when episode metadata is incomplete."
+            "description": "On a series, complete seasons out of seasons that have aired. On a season, episodes in the library out of the episodes the season lists. Sent only while the acting profile's poster badges are on and include the availability badge. Absent for other types, for specials, and when episode metadata is incomplete."
           },
           "backdrop_is_episode_still": {
             "description": "Whether backdrop_url is an episode still. False for series artwork; absent when provenance is unavailable.",
@@ -35873,7 +35873,7 @@
           },
           "availability": {
             "$ref": "#/components/schemas/CatalogAvailability",
-            "description": "On a series, complete seasons out of seasons that have aired. On a season, episodes in the library out of the episodes the season lists. Absent for other types, for specials, and when episode metadata is incomplete."
+            "description": "On a series, complete seasons out of seasons that have aired. On a season, episodes in the library out of the episodes the season lists. Sent only while the acting profile's poster badges are on and include the availability badge. Absent for other types, for specials, and when episode metadata is incomplete."
           },
           "backdrop_is_episode_still": {
             "description": "Whether backdrop_url is an episode still. False for series artwork; absent when provenance is unavailable.",
@@ -50193,7 +50193,7 @@
           },
           "availability": {
             "$ref": "#/components/schemas/CatalogAvailability",
-            "description": "Episodes in the library out of the episodes this season lists. Absent for specials and when episode metadata is incomplete."
+            "description": "Episodes in the library out of the episodes this season lists. Sent only while the acting profile's poster badges are on and include the availability badge. Absent for specials and when episode metadata is incomplete."
           },
           "content_id": {
             "examples": [
@@ -57670,7 +57670,7 @@
           },
           "availability": {
             "$ref": "#/components/schemas/CatalogAvailability",
-            "description": "On a series, complete seasons out of seasons that have aired. On a season, episodes in the library out of the episodes the season lists. Absent for other types, for specials, and when episode metadata is incomplete."
+            "description": "On a series, complete seasons out of seasons that have aired. On a season, episodes in the library out of the episodes the season lists. Sent only while the acting profile's poster badges are on and include the availability badge. Absent for other types, for specials, and when episode metadata is incomplete."
           },
           "backdrop_is_episode_still": {
             "description": "Whether backdrop_url is an episode still. False for series artwork; absent when provenance is unavailable.",
@@ -58095,7 +58095,7 @@
           },
           "availability": {
             "$ref": "#/components/schemas/CatalogAvailability",
-            "description": "On a series, complete seasons out of seasons that have aired. On a season, episodes in the library out of the episodes the season lists. Absent for other types, for specials, and when episode metadata is incomplete."
+            "description": "On a series, complete seasons out of seasons that have aired. On a season, episodes in the library out of the episodes the season lists. Sent only while the acting profile's poster badges are on and include the availability badge. Absent for other types, for specials, and when episode metadata is incomplete."
           },
           "backdrop_is_episode_still": {
             "description": "Whether backdrop_url is an episode still. False for series artwork; absent when provenance is unavailable.",

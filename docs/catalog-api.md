@@ -1061,8 +1061,19 @@ Home and library section cards, catalog listings and search, box sets, and the
 season list and season detail carry the field. Item detail, favorites,
 watchlist, collections, history, and Watch Tonight cards do not.
 
-The web client draws the same counts as the Availability card overlay, off by
-default. Apple and Android clients can ignore the field until they draw it.
+The server counts seasons and episodes, and sends the field, only while the
+acting profile draws the Availability card overlay: poster badges are on
+(`ui.card_overlays_enabled`, or the server-wide default from
+`GET /api/v2/settings/overlay-config` when the profile has not chosen) and the
+profile's `ui.card_overlays` document, or the server-wide default document
+when the profile has none, enables `availability`. The badge is off by
+default, so most reads skip the count and carry no `availability`. A client
+that turns the badge on reads its cards again after saving the setting; the
+next read carries the field. The count's cost follows the episodes of the
+series on the page, not the size of the library.
+
+The web client draws these counts as the Availability card overlay. Apple and
+Android clients can ignore the field until they draw it.
 
 ## Season-list artwork
 
