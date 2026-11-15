@@ -67,6 +67,7 @@ import { formatDateTime, formatTime } from "@/lib/datetime";
 import { formatLocale } from "@/lib/appLocale";
 import { codeNumber, englishText, numberText, type TextValues, type Translate, useT } from "@/i18n";
 import type { MessageKey } from "@/locales/keys";
+import { motionScrollBehavior } from "@/hooks/usePrefersReducedMotion";
 
 type SortField = "username" | "media" | "method" | "node" | "started";
 type SortDir = "asc" | "desc";
@@ -265,7 +266,7 @@ export default function AdminActivity() {
     setActiveIP(trimmed);
     setIPLookupOpen(true);
     window.requestAnimationFrame(() => {
-      ipLookupRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+      ipLookupRef.current?.scrollIntoView({ behavior: motionScrollBehavior(), block: "nearest" });
     });
   }, []);
 

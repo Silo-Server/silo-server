@@ -81,15 +81,12 @@ import {
   useSensors,
 } from "@dnd-kit/core";
 import type { DragStartEvent, DragEndEvent, SensorDescriptor, SensorOptions } from "@dnd-kit/core";
-import {
-  SortableContext,
-  verticalListSortingStrategy,
-  useSortable,
-  arrayMove,
-} from "@dnd-kit/sortable";
+import { SortableContext, verticalListSortingStrategy, arrayMove } from "@dnd-kit/sortable";
 import { sortableKeyboardCoordinates } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
+import { useMotionSafeDropAnimation, useMotionSafeSortable } from "@/hooks/useSortableList";
 import { useT, type Translate } from "@/i18n";
+import { motionScrollBehavior } from "@/hooks/usePrefersReducedMotion";
 
 // Not translated: a separator glyph.
 const SEPARATOR = "·";
@@ -168,7 +165,10 @@ function LibrariesPage() {
   );
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
-    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+    useSensor(KeyboardSensor, {
+      coordinateGetter: sortableKeyboardCoordinates,
+      scrollBehavior: motionScrollBehavior(),
+    }),
   );
 
   useEffect(() => {
@@ -416,6 +416,7 @@ function LibraryTable({
   onDragCancel: () => void;
 }) {
   const t = useT();
+  const dropAnimation = useMotionSafeDropAnimation();
   return (
     <DndContext
       sensors={sensors}
@@ -587,7 +588,7 @@ function LibraryTable({
           </SortableContext>
         </Table>
       </div>
-      <DragOverlay>
+      <DragOverlay dropAnimation={dropAnimation}>
         {activeLibrary ? (
           <Table>
             <TableBody>
@@ -860,9 +861,10 @@ function getLibraryScanGroupName(t: Translate, library: Library | null, libraryI
 
 function SortableLibraryRow({ id, children }: { id: number; children: React.ReactNode }) {
   const t = useT();
-  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
-    id,
-  });
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
+    useMotionSafeSortable({
+      id,
+    });
 
   const style: React.CSSProperties = {
     transform: CSS.Transform.toString(transform),

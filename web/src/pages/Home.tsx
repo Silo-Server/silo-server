@@ -28,11 +28,8 @@ import { useDedupedSections } from "./sectionDedupe";
 import { useSectionRefreshSignal } from "./homeSurfaceRefresh";
 import { useUICustomization } from "@/hooks/useUICustomization";
 import { carouselIntrinsicHeight } from "@/lib/uiCustomization";
-import {
-  isFirefoxEngine,
-  isWebKitEngine,
-  prefersReducedMotion,
-} from "@/hooks/useImmediateSidebarCollapse";
+import { isFirefoxEngine, isWebKitEngine } from "@/hooks/useImmediateSidebarCollapse";
+import { prefersReducedMotion } from "@/hooks/usePrefersReducedMotion";
 import { SIDEBAR_DETAILS_REVEAL_DEADLINE_MS } from "@/components/sidebarItemNavigation";
 import { markCriticalContentLoaded } from "@/lib/startupPriority";
 

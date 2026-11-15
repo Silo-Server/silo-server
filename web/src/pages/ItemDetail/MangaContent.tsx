@@ -47,6 +47,7 @@ import { formatFileSize } from "@/lib/mediaFormat";
 import { formatPageCount, metadataLine } from "./components/versionFormatUtils";
 import { hasMachineTranslation } from "./components/machineTranslation";
 import { useAppLanguage, useT } from "@/i18n";
+import { motionScrollBehavior } from "@/hooks/usePrefersReducedMotion";
 
 function genreHref(genre: string, libraryId?: number): string {
   const params = new URLSearchParams();
@@ -406,7 +407,7 @@ export default function MangaContent({
               onClick={() => {
                 document
                   .getElementById(`manga-chapter-${resume.chapter.content_id}`)
-                  ?.scrollIntoView({ behavior: "smooth", block: "center" });
+                  ?.scrollIntoView({ behavior: motionScrollBehavior(), block: "center" });
               }}
             >
               <CornerDownRight className="size-4" />

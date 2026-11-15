@@ -2,7 +2,9 @@ import { useMemo } from "react";
 
 import { KeyboardSensor, PointerSensor, closestCenter, useSensor, useSensors } from "@dnd-kit/core";
 import type { DragEndEvent } from "@dnd-kit/core";
-import { arrayMove, sortableKeyboardCoordinates } from "@dnd-kit/sortable";
+import { arrayMove, sortableKeyboardCoordinates, useSortable } from "@dnd-kit/sortable";
+
+import { motionScrollBehavior, usePrefersReducedMotion } from "@/hooks/usePrefersReducedMotion";
 
 interface UseSortableListResult {
   sensors: ReturnType<typeof useSensors>;
@@ -25,7 +27,10 @@ export function useSortableList<T>(
 ): UseSortableListResult {
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
-    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+    useSensor(KeyboardSensor, {
+      coordinateGetter: sortableKeyboardCoordinates,
+      scrollBehavior: motionScrollBehavior(),
+    }),
   );
 
   const handleDragEnd = useMemo(
@@ -43,4 +48,23 @@ export function useSortableList<T>(
   );
 
   return { sensors, collisionDetection: closestCenter, handleDragEnd };
+}
+
+/**
+ * `useSortable` that respects `prefers-reduced-motion`: under reduced motion
+ * the neighbouring items jump to their new slots instead of sliding there,
+ * and a dropped item lands without settling into place. Use it in place of
+ * `useSortable` for every sortable item.
+ */
+export function useMotionSafeSortable(args: Parameters<typeof useSortable>[0]) {
+  const reduceMotion = usePrefersReducedMotion();
+  return useSortable(reduceMotion ? { ...args, transition: null } : args);
+}
+
+/**
+ * The `dropAnimation` for a `<DragOverlay>`: dnd-kit's default glide back to
+ * the drop slot normally, none under reduced motion.
+ */
+export function useMotionSafeDropAnimation(): null | undefined {
+  return usePrefersReducedMotion() ? null : undefined;
 }

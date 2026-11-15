@@ -1938,9 +1938,13 @@ html[data-navigation-direction]::view-transition-new(main-content) {
     }
   }
   @media (prefers-reduced-motion: reduce) {
+    /* No growing bar: full while the slideshow runs, empty while it is stopped. */
     .hero-progress-rail > span {
       animation: none;
       transform: scaleX(1);
+    }
+    .hero-progress-rail[data-paused="true"] > span {
+      transform: scaleX(0);
     }
   }
 
@@ -2144,8 +2148,10 @@ html[data-navigation-direction]::view-transition-new(main-content) {
       transparent 100%
     );
     background-size: 200% 100%;
-    animation: scan-accent-sweep 4s ease-in-out infinite;
     opacity: 0.6;
+    @media (prefers-reduced-motion: no-preference) {
+      animation: scan-accent-sweep 4s ease-in-out infinite;
+    }
   }
   @keyframes scan-accent-sweep {
     0% {
@@ -2346,7 +2352,9 @@ html[data-navigation-direction]::view-transition-new(main-content) {
     background: rgba(255, 60, 60, 0.12);
     color: #f87171;
     border: 1px solid rgba(255, 60, 60, 0.2);
-    animation: pulse-opacity 2s ease-in-out infinite;
+    @media (prefers-reduced-motion: no-preference) {
+      animation: pulse-opacity 2s ease-in-out infinite;
+    }
   }
 
   /* ── Progress Bar ────────────────────────────────────────── */
