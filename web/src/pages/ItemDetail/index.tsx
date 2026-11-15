@@ -25,6 +25,7 @@ import {
 } from "@/components/sidebarItemNavigationContext";
 import { parseOptionalLibraryId } from "@/components/sidebarItemNavigation";
 import { useShowAdvisoryAge } from "@/hooks/useShowAdvisoryAge";
+import { markItemDetailShown } from "@/lib/itemNavigationTiming";
 import { useShowTitleArt } from "@/hooks/useTitleArt";
 import { useT } from "@/i18n";
 
@@ -200,6 +201,11 @@ export default function ItemDetail() {
       );
     }
   }, [itemError, t]);
+
+  const detailShown = !loading && itemDetailsReady && item !== undefined;
+  useEffect(() => {
+    if (detailShown && id) markItemDetailShown(id);
+  }, [detailShown, id]);
 
   if (loading || !itemDetailsReady) {
     if (enteredItemFromHome) {

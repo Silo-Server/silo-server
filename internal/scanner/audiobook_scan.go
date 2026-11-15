@@ -1656,7 +1656,11 @@ func applyBookToMediaItem(item *models.MediaItem, book *parsedAudiobook, provide
 		if cleaned != raw && item.OriginalTitle == "" {
 			item.OriginalTitle = raw
 		}
-		if item.SortTitle == "" {
+		// The default sort title follows the title: one derived from an
+		// earlier title is derived again, so a book whose title changes does
+		// not keep sorting under its old name. Any other sort title is
+		// someone's own and stays.
+		if item.SortTitle == "" || titleutil.IsDefaultSortTitle(item.SortTitle) {
 			item.SortTitle = titleutil.DeriveDefaultSortTitle(item.Title)
 		}
 	}

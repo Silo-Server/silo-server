@@ -1,4 +1,4 @@
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { useCallback } from "react";
 
 import type {
@@ -156,37 +156,36 @@ export function useCatalogItemEpisodes(id: string | undefined, libraryId?: numbe
 }
 
 /**
- * Returns a callback that warms the cache for a season detail page (item
- * detail + episodes), so navigating there from a series page renders without
- * a request waterfall. Prefetches are no-ops while the cached data is fresh.
+ * Warms an item's detail query ahead of opening it. It keeps the app's retry
+ * policy: an item page opened while this is still running joins this request.
+ */
+export function prefetchCatalogItemDetail(
+  queryClient: QueryClient,
+  id: string,
+  libraryId?: number,
+): Promise<void> {
+  return queryClient.prefetchQuery({
+    queryKey: catalogKeys.itemDetail(id, libraryId),
+    queryFn: ({ signal }) => fetchCatalogItemDetail(id, libraryId, { signal }),
+  });
+}
+
+/**
+ * Returns a callback that warms a season detail page (item detail + episodes),
+ * so opening it from a series page renders without a request waterfall.
+ * Prefetches are no-ops while the cached data is fresh.
  */
 export function usePrefetchCatalogSeason(libraryId?: number) {
   const queryClient = useQueryClient();
   return useCallback(
-    (seasonId: string) => {
-      void queryClient.prefetchQuery({
-        queryKey: catalogKeys.itemDetail(seasonId, libraryId),
-        queryFn: ({ signal }) => fetchCatalogItemDetail(seasonId, libraryId, { signal }),
-      });
-      void queryClient.prefetchQuery({
-        queryKey: catalogKeys.itemEpisodes(seasonId, libraryId),
-        queryFn: ({ signal }) => fetchCatalogItemEpisodes(seasonId, libraryId, { signal }),
-      });
-    },
-    [queryClient, libraryId],
-  );
-}
-
-/** Warms an episode's detail query when the user shows intent to open it. */
-export function usePrefetchCatalogItemDetail(libraryId?: number) {
-  const queryClient = useQueryClient();
-  return useCallback(
-    (itemId: string) => {
-      void queryClient.prefetchQuery({
-        queryKey: catalogKeys.itemDetail(itemId, libraryId),
-        queryFn: ({ signal }) => fetchCatalogItemDetail(itemId, libraryId, { signal }),
-      });
-    },
+    (seasonId: string) =>
+      Promise.all([
+        prefetchCatalogItemDetail(queryClient, seasonId, libraryId),
+        queryClient.prefetchQuery({
+          queryKey: catalogKeys.itemEpisodes(seasonId, libraryId),
+          queryFn: ({ signal }) => fetchCatalogItemEpisodes(seasonId, libraryId, { signal }),
+        }),
+      ]),
     [queryClient, libraryId],
   );
 }

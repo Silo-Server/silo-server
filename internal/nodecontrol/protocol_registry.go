@@ -78,7 +78,7 @@ func Protocol(schemas huma.Registry) []workerprotocol.Operation {
 			jsonBody(reflect.TypeFor[Report]()), map[string]*huma.Response{"204": {Description: "Accepted, or dropped by a core without Redis."}},
 			http.StatusBadRequest, http.StatusNotFound, http.StatusConflict, http.StatusRequestEntityTooLarge, http.StatusTooManyRequests, http.StatusServiceUnavailable),
 		op(http.MethodPost, PathLogs, "HandleLogs", "non_retryable",
-			"A batch of the node's operational and FFmpeg log entries. The core stamps them with the authenticated node (<name>#<id>), ignoring any node in the entries, clamps their timestamps to the last 24 hours and the next 30 seconds, and stores them for the admin log viewer and its live tail. A replayed batch can duplicate entries. 413: more than 100 entries. 429: the node exceeded its request budget on this server.",
+			"A batch of the node's operational and FFmpeg log entries. The core stamps them with the authenticated node (<name>#<id>), ignoring any node in the entries, clamps their timestamps to the last 24 hours and the next 30 seconds, and stores them for the admin log viewer and its live tail. A replayed batch can duplicate entries. 413: more than 100 entries. 429: the node exceeded its request budget, or its log byte budget (128 KiB a second, bursts of 4 MiB), on this server.",
 			jsonBody(reflect.TypeFor[LogBatch]()), map[string]*huma.Response{"204": {Description: "Stored."}},
 			http.StatusBadRequest, http.StatusNotFound, http.StatusRequestEntityTooLarge, http.StatusTooManyRequests, http.StatusServiceUnavailable),
 		op(http.MethodPost, PathHealthChanged, "HandleHealthChanged", "natural_idempotent",

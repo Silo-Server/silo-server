@@ -345,8 +345,8 @@ placed.
 
 ## Rate limit
 
-Each API replica gives each node two in-memory token buckets and answers `429`
-with `Retry-After: 1` past either:
+Each API replica gives each node three in-memory token buckets and answers
+`429` with `Retry-After: 1` past any of them:
 
 - **Background** (`nodecontrol.(*Server).LimitNode`): 20 requests a second with
   bursts of 60 across config, report, logs, health-changed and revoke-recipes.
@@ -359,6 +359,11 @@ with `Retry-After: 1` past either:
   a restarted node whose 64 sessions all rebuild while their players seek sends
   about 384 calls at once (a resolve, an open and four range requests each).
   Renewals add one call per source every 20 minutes.
+- **Log bytes** (`HandleLogs`): 128 KiB of log batches a second with bursts of
+  4 MiB, on top of the background budget. The request budget alone would
+  admit the 1 MiB body bound twenty times a second into `operational_logs`.
+  A node's log lines come to a few kilobytes a second per session; the burst
+  takes the backlog a node ships after the core was unreachable.
 
 The source bytes route (see [Core source access](#core-source-access)) is under
 neither budget: each request streams for as long as FFmpeg reads, and a node
