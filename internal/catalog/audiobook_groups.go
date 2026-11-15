@@ -112,15 +112,28 @@ func listAudiobookGroupsWithLimit(ctx context.Context, pool *pgxpool.Pool, q Aud
 	if pool == nil {
 		return AudiobookGroupsResult{}, fmt.Errorf("audiobook groups: no database pool")
 	}
+	if q.CursorPaging {
+		result, served, err := listAudiobookGroupsFromStats(ctx, pool, q, filter, maxLimit)
+		if err != nil || served {
+			return result, err
+		}
+	}
 
 	plan, err := buildAudiobookGroupsSQLWithLimit(q, filter, maxLimit)
 	if err != nil {
 		return AudiobookGroupsResult{}, err
 	}
+	return runAudiobookGroupsPlan(ctx, pool, q, plan)
+}
+
+// runAudiobookGroupsPlan runs a page query of either source, live or
+// precomputed; both select the same columns.
+func runAudiobookGroupsPlan(ctx context.Context, pool *pgxpool.Pool, q AudiobookGroupsQuery, plan audiobookGroupsSQLPlan) (AudiobookGroupsResult, error) {
 	if plan.SQL == "" {
 		return AudiobookGroupsResult{Groups: []AudiobookGroup{}, TotalExact: plan.IncludeTotal}, nil
 	}
 
+	var err error
 	var queryer interface {
 		Query(context.Context, string, ...any) (pgx.Rows, error)
 		QueryRow(context.Context, string, ...any) pgx.Row
@@ -226,21 +239,7 @@ func buildAudiobookGroupsSQLWithLimit(q AudiobookGroupsQuery, filter AccessFilte
 		return audiobookGroupsSQLPlan{}, fmt.Errorf("audiobook groups: library id is required")
 	}
 
-	limit := q.Limit
-	if limit <= 0 {
-		limit = 200
-	}
-	if maxLimit <= 0 {
-		maxLimit = audiobookGroupsPageCap
-	}
-	if limit > maxLimit {
-		limit = maxLimit
-	}
-	offset := max(q.Offset, 0)
-	fetchLimit := limit
-	if !q.IncludeTotal || q.CursorPaging {
-		fetchLimit++
-	}
+	limit, fetchLimit, offset := audiobookGroupsPageSize(q, maxLimit)
 
 	args := []any{q.LibraryID}
 	argIdx := 2
@@ -314,27 +313,10 @@ func buildAudiobookGroupsSQLWithLimit(q AudiobookGroupsQuery, filter AccessFilte
 
 	seekClause := ""
 	if q.CursorPaging {
-		orderClause = "group_key"
-		sortColumn := ""
-		switch strings.ToLower(strings.TrimSpace(q.Sort)) {
-		case audiobookGroupSortCount:
-			sortColumn = "item_count"
-		case audiobookGroupSortDuration:
-			sortColumn = "total_duration_seconds"
-		}
-		if sortColumn != "" {
-			orderClause = sortColumn + " DESC, group_key"
-		}
-		if q.After != nil {
-			if sortColumn == "" {
-				seekClause = fmt.Sprintf("WHERE group_key > $%d", argIdx)
-				args = append(args, q.After.GroupKey)
-				argIdx++
-			} else {
-				seekClause = fmt.Sprintf("WHERE (%s < $%d OR (%s = $%d AND group_key > $%d))", sortColumn, argIdx, sortColumn, argIdx, argIdx+1)
-				args = append(args, q.After.Value, q.After.GroupKey)
-				argIdx += 2
-			}
+		var seek string
+		orderClause, seek = audiobookGroupSeek(q, &args, &argIdx)
+		if seek != "" {
+			seekClause = "WHERE " + seek
 		}
 	}
 	totalSelect := ""
@@ -450,6 +432,54 @@ func buildAudiobookGroupsSQLWithLimit(q AudiobookGroupsQuery, filter AccessFilte
 		Offset:       offset,
 		IncludeTotal: q.IncludeTotal,
 	}, nil
+}
+
+// audiobookGroupsPageSize returns the page size, the rows to fetch for it
+// (one more when the next page's existence is read from the fetch), and the
+// offset.
+func audiobookGroupsPageSize(q AudiobookGroupsQuery, maxLimit int) (limit, fetchLimit, offset int) {
+	limit = q.Limit
+	if limit <= 0 {
+		limit = 200
+	}
+	if maxLimit <= 0 {
+		maxLimit = audiobookGroupsPageCap
+	}
+	limit = min(limit, maxLimit)
+	fetchLimit = limit
+	if !q.IncludeTotal || q.CursorPaging {
+		fetchLimit++
+	}
+	return limit, fetchLimit, max(q.Offset, 0)
+}
+
+// audiobookGroupSeek returns the cursor order of q's sort, over a relation
+// with group_key and the sorted aggregate column, and, after a cursor, the
+// condition that resumes past it. The caller has validated the sort.
+func audiobookGroupSeek(q AudiobookGroupsQuery, args *[]any, argIdx *int) (order, seek string) {
+	sortColumn := ""
+	switch strings.ToLower(strings.TrimSpace(q.Sort)) {
+	case audiobookGroupSortCount:
+		sortColumn = "item_count"
+	case audiobookGroupSortDuration:
+		sortColumn = "total_duration_seconds"
+	}
+	if sortColumn == "" {
+		if q.After != nil {
+			seek = fmt.Sprintf("group_key > $%d", *argIdx)
+			*args = append(*args, q.After.GroupKey)
+			*argIdx++
+		}
+		return "group_key", seek
+	}
+	if q.After != nil {
+		// The leading bound lets an index on (column DESC, group_key) start
+		// at the cursor instead of at the top of the list.
+		seek = fmt.Sprintf("%[1]s <= $%[2]d AND (%[1]s < $%[2]d OR group_key > $%[3]d)", sortColumn, *argIdx, *argIdx+1)
+		*args = append(*args, q.After.Value, q.After.GroupKey)
+		*argIdx += 2
+	}
+	return sortColumn + " DESC, group_key", seek
 }
 
 func audiobookGroupSearchPattern(raw string) string {
