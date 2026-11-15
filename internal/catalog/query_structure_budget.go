@@ -61,11 +61,11 @@ func ValidateQueryStructure(definitions ...QueryDefinition) error {
 				if !boundedQueryValue(reflect.ValueOf(rule.Value), &remaining, 0) {
 					return ErrQueryComplexity
 				}
-				value, err := json.Marshal(rule.Value)
+				size, err := encodedQueryValueLen(rule.Value)
 				if err != nil {
 					return fmt.Errorf("encoding query value: %w", err)
 				}
-				budget.valueBytes += len(value)
+				budget.valueBytes += size
 				if err := budget.validate(); err != nil {
 					return err
 				}
@@ -73,6 +73,50 @@ func ValidateQueryStructure(definitions ...QueryDefinition) error {
 		}
 	}
 	return nil
+}
+
+// encodedQueryValueLen is the compact JSON length of a decoded value. HTML
+// characters stay unescaped so it matches compactQueryJSONLen of the same value
+// as PostgreSQL jsonb returns it.
+func encodedQueryValueLen(v any) (int, error) {
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
+	enc.SetEscapeHTML(false)
+	if err := enc.Encode(v); err != nil {
+		return 0, err
+	}
+	return buf.Len() - 1, nil // Encode ends with a newline.
+}
+
+// compactQueryJSONLen is the length of a raw JSON value without insignificant
+// whitespace: jsonb returns stored values with ", " and ": " separators, which
+// must not count against a definition that was admitted in compact form.
+func compactQueryJSONLen(value []byte) int {
+	n, quoted := 0, false
+	for i := 0; i < len(value); i++ {
+		c := value[i]
+		if quoted {
+			n++
+			switch c {
+			case '\\':
+				if i+1 < len(value) {
+					i++
+					n++
+				}
+			case '"':
+				quoted = false
+			}
+			continue
+		}
+		switch c {
+		case ' ', '\n', '\r', '\t':
+			continue
+		case '"':
+			quoted = true
+		}
+		n++
+	}
+	return n
 }
 
 func boundedQueryValue(v reflect.Value, remaining *int, depth int) bool {
@@ -208,7 +252,7 @@ func validateQueryJSONStructure(definitions ...[]byte) (queryStructureBudget, er
 							}
 							return walkQueryJSONObject(rule, func(key string, value []byte) error {
 								if strings.EqualFold(key, "value") {
-									budget.valueBytes += len(value)
+									budget.valueBytes += compactQueryJSONLen(value)
 								}
 								return budget.validate()
 							})

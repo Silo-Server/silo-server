@@ -1,7 +1,6 @@
 package catalog
 
 import (
-	"encoding/json"
 	"net/url"
 	"strings"
 )
@@ -74,8 +73,8 @@ func addCatalogURLValueBytes(budget *queryStructureBudget, values []string) erro
 		if len(raw) > queryMaxValueBytes-budget.valueBytes {
 			return ErrQueryComplexity
 		}
-		encoded, _ := json.Marshal(raw) // Strings always have a JSON representation.
-		budget.valueBytes += len(encoded)
+		size, _ := encodedQueryValueLen(raw) // Strings always have a JSON representation.
+		budget.valueBytes += size
 		if err := budget.validate(); err != nil {
 			return err
 		}

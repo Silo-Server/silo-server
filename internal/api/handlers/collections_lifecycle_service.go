@@ -64,8 +64,14 @@ func (h *CollectionHandler) UpdatePersonalCollection(ctx context.Context, cmd Pe
 		Description:                req.Description,
 		IncludeInServerCollections: req.IncludeInServerCollections,
 	}
+	// A manual collection's stored definition is dormant: no read runs it, so
+	// it never blocks an edit. A definition the request sends is always checked.
+	live := catalog.IsLiveQueryType(existing.CollectionType)
 	if len(req.QueryDefinition) > 0 || req.DisplayQueryDefinition != nil {
 		source, display := existing.QueryDefinition, existing.DisplayQueryDefinition
+		if !live {
+			source = ""
+		}
 		if len(req.QueryDefinition) > 0 {
 			source = string(req.QueryDefinition)
 		}
@@ -175,17 +181,13 @@ func (h *CollectionHandler) UpdatePersonalCollection(ctx context.Context, cmd Pe
 		}
 	}
 
-	proposed := *existing
-	if input.QueryDefinition != nil {
-		proposed.QueryDefinition = *input.QueryDefinition
-	}
-	if input.DisplayQueryDefinition != nil {
-		proposed.DisplayQueryDefinition = *input.DisplayQueryDefinition
-	}
 	if input.QueryDefinition != nil || input.DisplayQueryDefinition != nil {
 		input.ValidateQueryComposition = func(source, display string) error {
 			// The store supplies the locked merged state. Keep requested sides raw:
 			// normalization can discard groups, rules and duplicate library IDs.
+			if !live {
+				source = ""
+			}
 			if len(req.QueryDefinition) > 0 {
 				source = string(req.QueryDefinition)
 			}
@@ -197,10 +199,6 @@ func (h *CollectionHandler) UpdatePersonalCollection(ctx context.Context, cmd Pe
 			}
 			return nil
 		}
-	}
-	ctx, err = h.preflightV1CollectionCount(ctx, store, userID, profileID, proposed)
-	if err != nil {
-		return none, err
 	}
 	// The poster is read and decoded before the update, as create does before
 	// its insert: one the server cannot use changes nothing.
@@ -366,11 +364,13 @@ func (h *CollectionHandler) addPersonalCollectionItem(ctx context.Context, userI
 	}
 
 	if appendItem {
-		appender, ok := store.(collectionItemAppender)
-		if !ok {
+		err = userstore.ErrCollectionAppendUnsupported
+		if appender, ok := store.(userstore.CollectionItemAppender); ok {
+			err = appender.AppendCollectionItem(ctx, collectionID, itemID)
+		}
+		if errors.Is(err, userstore.ErrCollectionAppendUnsupported) {
 			return apiError(http.StatusNotImplemented, "unsupported", "This store cannot append collection items")
 		}
-		err = appender.AppendCollectionItem(ctx, collectionID, itemID)
 	} else {
 		err = store.AddCollectionItem(ctx, collectionID, itemID, position)
 	}

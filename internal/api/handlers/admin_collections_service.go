@@ -93,9 +93,6 @@ func (h *LibraryCollectionHandler) ListAdminCollections(ctx context.Context, lib
 		return none, apiError(http.StatusInternalServerError, "internal_error", "Failed to load collections")
 	}
 	collections := h.withViewerPosters(ctx, <-collectionsCh, AccessFilterFromContext(ctx, ""))
-	if err := v1CuratedCollectionCountError(ctx, collections); err != nil {
-		return none, err
-	}
 	var groups []models.LibraryCollectionGroup
 	if groupsCh != nil {
 		groups = <-groupsCh
@@ -241,6 +238,15 @@ func (h *LibraryCollectionHandler) updateAdminCollection(ctx context.Context, co
 	}
 	if req.LibraryIDs != nil || len(req.QueryDefinition) > 0 || req.CollectionType != nil {
 		libraryID, libraryIDs, definition := existing.LibraryID, existing.LibraryIDs, existing.QueryDefinition
+		collectionType := existing.CollectionType
+		if req.CollectionType != nil {
+			collectionType = *req.CollectionType
+		}
+		// Only a smart collection runs its stored definition; a manual or synced
+		// one keeps it dormant, so it never blocks a scope or type change.
+		if !catalog.IsLiveQueryType(collectionType) {
+			definition = nil
+		}
 		if req.LibraryIDs != nil {
 			libraryID, libraryIDs = 0, *req.LibraryIDs
 		}
@@ -668,9 +674,6 @@ func (h *LibraryCollectionHandler) GetAdminCollection(ctx context.Context, id st
 	}
 	c, err := h.repo.GetByID(ctx, id)
 	if err != nil {
-		return none, 0, err
-	}
-	if err := v1CuratedCollectionCountError(ctx, []*models.LibraryCollection{c}); err != nil {
 		return none, 0, err
 	}
 	after, err := h.repo.CollectionRevision(ctx, id)

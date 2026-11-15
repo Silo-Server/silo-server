@@ -209,3 +209,36 @@ func TestCollectionCountDeadlineKeepsIndependentResults(t *testing.T) {
 		t.Fatalf("deadline hid independent counts: %v %v", counts, err)
 	}
 }
+
+// One stored definition that fails at execution (a data error, not the budget)
+// must not hide the counts batched with it.
+func TestCollectionCountBatchIsolatesDataErrors(t *testing.T) {
+	newQuery := func(id string) collectionCountStatement {
+		return collectionCountStatement{id: id, sql: "SELECT 1", result: &collectionCountResult{done: make(chan struct{})}}
+	}
+	run := func(batchErr error) []collectionCountStatement {
+		queries := []collectionCountStatement{newQuery("good"), newQuery("bad")}
+		jobs := buildCollectionCountJobs(t.Context(), nil, 1, queries)
+		if len(jobs) != 1 {
+			t.Fatalf("jobs = %d", len(jobs))
+		}
+		runCollectionCountJob(jobs[0], func(_ context.Context, _ *pgxpool.Pool, _ int, _ string, args []any) (map[string]int, error) {
+			if len(args) > 1 {
+				return nil, batchErr
+			}
+			if args[0] == "bad" {
+				return nil, errors.New("invalid date")
+			}
+			return map[string]int{args[0].(string): 3}, nil
+		})
+		return queries
+	}
+	queries := run(errors.New("invalid date"))
+	if queries[0].result.err != nil || queries[0].result.count != 3 || queries[1].result.err == nil {
+		t.Fatalf("data error: good=%d/%v bad=%v", queries[0].result.count, queries[0].result.err, queries[1].result.err)
+	}
+	queries = run(ErrCollectionCountBudget)
+	if !errors.Is(queries[0].result.err, ErrCollectionCountBudget) {
+		t.Fatalf("budget exhaustion was retried: %v", queries[0].result.err)
+	}
+}

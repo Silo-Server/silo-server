@@ -21,6 +21,14 @@ func (s *interestTrackingStore) CollectionFeatures() userstore.CollectionFeature
 	return userstore.CollectionFeatures{}
 }
 
+func (s *interestTrackingStore) AppendCollectionItem(ctx context.Context, collectionID, mediaItemID string) error {
+	appender, ok := s.UserStore.(userstore.CollectionItemAppender)
+	if !ok {
+		return userstore.ErrCollectionAppendUnsupported
+	}
+	return appender.AppendCollectionItem(ctx, collectionID, mediaItemID)
+}
+
 func (s *interestTrackingStore) CollectionRevision(ctx context.Context, collectionID string) (int64, error) {
 	pager, ok := s.UserStore.(userstore.CollectionItemsPager)
 	if !ok {

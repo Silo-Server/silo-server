@@ -78,7 +78,13 @@ func executeCollectionCountBatch(ctx context.Context, pool *pgxpool.Pool, accoun
 	if err != nil {
 		return nil, classifyCollectionCountError(ctx, err)
 	}
-	defer func() { _ = tx.Rollback(ctx) }()
+	defer func() {
+		// The request deadline may have passed; pgx would then drop the
+		// connection instead of sending ROLLBACK.
+		rollbackCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), time.Second)
+		defer cancel()
+		_ = tx.Rollback(rollbackCtx)
+	}()
 	if err := setCollectionCountDeadline(ctx, tx); err != nil {
 		return nil, classifyCollectionCountError(ctx, err)
 	}

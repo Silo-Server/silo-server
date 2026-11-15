@@ -49,13 +49,6 @@ func (h *CollectionHandler) ListPersonalCollections(ctx context.Context, userID 
 		return none, apiError(http.StatusInternalServerError, "internal_error", "Failed to list collections")
 	}
 	views := h.collectionViews(ctx, store, userID, profileID, collections)
-	if !isNativeAPIV2(ctx) {
-		for _, view := range views {
-			if view.ItemCountStatus == CollectionCountUnavailable {
-				return none, collectionCountReadError(view.itemCountError)
-			}
-		}
-	}
 	return PersonalCollectionListView{
 		Collections: views,
 		Groups:      []CollectionGroupView{},
@@ -163,10 +156,6 @@ func (h *CollectionHandler) CreatePersonalCollection(ctx context.Context, cmd Pe
 	displayQueryDefinition, err := catalog.NormalizeDisplayQueryFragment(req.DisplayQueryDefinition)
 	if err != nil {
 		return none, fieldError("display_query_definition", err.Error())
-	}
-	ctx, err = h.preflightV1CollectionCount(ctx, store, cmd.UserID, cmd.ProfileID, userstore.Collection{CreatorProfileID: cmd.ProfileID, CollectionType: collectionType, QueryDefinition: queryDefinition, DisplayQueryDefinition: displayQueryDefinition})
-	if err != nil {
-		return none, err
 	}
 	// The poster is read and decoded before the insert: one the server cannot
 	// use, or is too busy to decode, creates nothing, so repeating the request
@@ -344,8 +333,8 @@ func (h *CollectionHandler) collectionViews(ctx context.Context, store userstore
 // memberCounts, or afresh when it is nil.
 func (h *CollectionHandler) collectionViewsCounted(ctx context.Context, store userstore.UserStore, userID int, profileID string, collections []userstore.Collection, memberCounts *catalog.PersonalCollectionMemberCounts) []PersonalCollectionView {
 	var reads ownedCollectionReads
-	preflightCount, preflight := ctx.Value(collectionPreflightCountKey{}).(int)
-	if userstore.HasCatalogSQLState(store) && !preflight {
+	counted := userstore.HasCatalogSQLState(store)
+	if counted {
 		sources := make([]ownedCollectionDefinition, 0, len(collections))
 		for _, c := range collections {
 			sources = append(sources, ownedCollectionDefinition{
@@ -365,13 +354,8 @@ func (h *CollectionHandler) collectionViewsCounted(ctx context.Context, store us
 			c.ItemCount = n
 		}
 		resp := toCollectionResponse(c)
-		if preflight {
-			resp.ItemCount = preflightCount
-		} else if userstore.HasCatalogSQLState(store) {
-			if _, ok := reads.counts[c.ID]; !ok {
-				resp.ItemCount, resp.ItemCountStatus = 0, CollectionCountUnavailable
-				resp.itemCountError = reads.countError
-			}
+		if _, ok := reads.counts[c.ID]; counted && !ok {
+			resp.ItemCount, resp.ItemCountStatus = 0, CollectionCountUnavailable
 		}
 		posterPath := c.PosterURL
 		if collage, ok := reads.posters[c.ID]; ok {
@@ -410,9 +394,6 @@ func (h *CollectionHandler) collectionView(ctx context.Context, store userstore.
 	if len(views) == 0 {
 		return PersonalCollectionView{}, apiError(http.StatusInternalServerError, "internal_error", "Failed to load collection")
 	}
-	if !isNativeAPIV2(ctx) && views[0].ItemCountStatus == CollectionCountUnavailable {
-		return PersonalCollectionView{}, collectionCountReadError(views[0].itemCountError)
-	}
 	return views[0], nil
 }
 
@@ -439,6 +420,9 @@ func (h *CollectionHandler) PersonalCollectionFeatures(ctx context.Context, user
 	// Without artwork storage no poster can be uploaded or composed, as
 	// server collections report it.
 	features.Artwork = features.Artwork && h.ArtworkStore != nil
+	// Append reports what the append operation will find: the store itself.
+	_, appends := store.(userstore.CollectionItemAppender)
+	features.ItemAppend = features.ItemAppend && appends
 	return features, nil
 }
 
@@ -465,20 +449,4 @@ func collectionFeatureError(store userstore.UserStore, feature string) error {
 		return apiError(http.StatusNotImplemented, "unsupported", "The acting account does not support collection "+feature)
 	}
 	return nil
-}
-
-// A v1 mutation reuses its proposed-state count after writing. Counting again
-// could fail after a committed mutation and make a successful edit look failed.
-type collectionPreflightCountKey struct{}
-
-func (h *CollectionHandler) preflightV1CollectionCount(ctx context.Context, store userstore.UserStore, userID int, profileID string, proposed userstore.Collection) (context.Context, error) {
-	if isNativeAPIV2(ctx) || !userstore.HasCatalogSQLState(store) {
-		return ctx, nil
-	}
-	reads := ownerScopedCollectionReads(ctx, h.Executor, nil, h.CollectionOwners, nil, userID, profileID, []ownedCollectionDefinition{{PersonalCollectionDefinition: usercollections.CollectionDefinition(proposed), CreatorProfileID: proposed.CreatorProfileID}}, AccessFilterFromContext(ctx, ""))
-	count, ok := reads.counts[proposed.ID]
-	if !ok {
-		return ctx, collectionCountReadError(reads.countError)
-	}
-	return context.WithValue(ctx, collectionPreflightCountKey{}, count), nil
 }

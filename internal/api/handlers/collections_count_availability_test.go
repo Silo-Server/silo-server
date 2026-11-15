@@ -2,9 +2,7 @@ package handlers
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
-	"net/http"
 	"testing"
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
@@ -36,26 +34,6 @@ func TestCollectionCountAvailabilityRecoveryDB(t *testing.T) {
 	f.exec(t, `UPDATE user_personal_collections SET item_count=99 WHERE user_id=$1 AND id=$2`, f.account, legacy.ID)
 	h := NewCollectionHandler(provider)
 	h.Executor = &catalog.QueryExecutor{Pool: f.pool}
-	assert503 := func(err error) {
-		t.Helper()
-		apiErr, ok := errors.AsType[*APIError](err)
-		if !ok || apiErr.Status != http.StatusServiceUnavailable {
-			t.Fatalf("count failure=%v, want 503", err)
-		}
-	}
-	_, err = h.ListPersonalCollections(t.Context(), f.account, "owner")
-	assert503(err)
-	// A failed preflight cannot commit a metadata edit and then report failure.
-	name := "Must not persist"
-	_, err = h.UpdatePersonalCollection(t.Context(), PersonalCollectionUpdateCommand{UserID: f.account, ProfileID: "owner", CollectionID: legacy.ID, Request: PersonalCollectionUpdateRequest{Name: &name}})
-	assert503(err)
-	stored, err := store.GetCollection(t.Context(), legacy.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if stored.Name != "Legacy" {
-		t.Fatalf("failed v1 mutation persisted name %q", stored.Name)
-	}
 	ctx := WithNativeAPIV2(t.Context())
 	listed, err := h.ListPersonalCollections(ctx, f.account, "owner")
 	if err != nil {
@@ -79,17 +57,14 @@ func TestCollectionCountAvailabilityRecoveryDB(t *testing.T) {
 	if err != nil || len(tab.Groups) != 1 || len(tab.Groups[0].Collections) != 1 || tab.Groups[0].Collections[0].ItemCountStatus != CollectionCountUnavailable {
 		t.Fatalf("library tab: %+v, %v", tab, err)
 	}
-	_, err = library.LibraryUserCollections(t.Context(), f.library, f.account, "owner")
-	assert503(err)
-	name = "Still editable"
+	name := "Still editable"
 	edited, err := h.UpdatePersonalCollection(ctx, PersonalCollectionUpdateCommand{UserID: f.account, ProfileID: "owner", CollectionID: legacy.ID, Request: PersonalCollectionUpdateRequest{Name: &name}})
 	if err != nil || edited.Name != name || edited.ItemCountStatus != CollectionCountUnavailable {
 		t.Fatalf("v2 metadata edit: %+v, %v", edited, err)
 	}
-	// Known-ID repair works through frozen v1 even while its list fails.
-	repaired, err := h.UpdatePersonalCollection(t.Context(), PersonalCollectionUpdateCommand{UserID: f.account, ProfileID: "owner", CollectionID: legacy.ID, Request: PersonalCollectionUpdateRequest{QueryDefinition: json.RawMessage(`{"media_scope":"movie","groups":[{"rules":[{"field":"year","op":"gte","value":9999}]}]}`)}})
+	repaired, err := h.UpdatePersonalCollection(ctx, PersonalCollectionUpdateCommand{UserID: f.account, ProfileID: "owner", CollectionID: legacy.ID, Request: PersonalCollectionUpdateRequest{QueryDefinition: json.RawMessage(`{"media_scope":"movie","groups":[{"rules":[{"field":"year","op":"gte","value":9999}]}]}`)}})
 	if err != nil || repaired.ItemCountStatus != CollectionCountAvailable || repaired.ItemCount != 0 {
-		t.Fatalf("v1 repair/available empty: %+v, %v", repaired, err)
+		t.Fatalf("repair/available empty: %+v, %v", repaired, err)
 	}
 	// Reintroduce the legacy row through the fixture, then delete by known ID:
 	// deletion never depends on successful counting.

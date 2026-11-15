@@ -584,10 +584,18 @@ func validateLibraryCollectionUpdateQueryBudget(ctx context.Context, tx pgx.Tx, 
 	var libraryID int
 	var libraryIDs []int
 	var definition json.RawMessage
-	if err := tx.QueryRow(ctx, `SELECT library_id, query_definition,
+	var collectionType string
+	if err := tx.QueryRow(ctx, `SELECT library_id, query_definition, collection_type,
 		ARRAY(SELECT library_id FROM library_collection_libraries WHERE collection_id=$1)
-		FROM library_collections WHERE id=$1`, input.ID).Scan(&libraryID, &definition, &libraryIDs); err != nil {
+		FROM library_collections WHERE id=$1`, input.ID).Scan(&libraryID, &definition, &collectionType, &libraryIDs); err != nil {
 		return fmt.Errorf("loading collection query budget: %w", err)
+	}
+	if input.CollectionType != nil {
+		collectionType = *input.CollectionType
+	}
+	// A manual or synced collection's stored definition is dormant.
+	if !IsLiveQueryType(collectionType) {
+		definition = nil
 	}
 	if input.LibraryIDs != nil {
 		libraryID, libraryIDs = 0, *input.LibraryIDs

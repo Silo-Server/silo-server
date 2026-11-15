@@ -114,10 +114,9 @@ type PersonalCollectionView struct {
 	DisplayQueryDefinition     json.RawMessage `json:"display_query_definition,omitempty"`
 	ItemCount                  int             `json:"item_count"`
 	ItemCountStatus            string          `json:"-"`
-	itemCountError             error
-	IncludeInServerCollections bool   `json:"include_in_server_collections"`
-	PosterURL                  string `json:"poster_url,omitempty"`
-	PosterThumbhash            string `json:"poster_thumbhash,omitempty"`
+	IncludeInServerCollections bool            `json:"include_in_server_collections"`
+	PosterURL                  string          `json:"poster_url,omitempty"`
+	PosterThumbhash            string          `json:"poster_thumbhash,omitempty"`
 	// PosterIsCollage reports that PosterURL is the collection's collage for
 	// the reading profile rather than an uploaded or imported poster. Only
 	// /api/v2 reads show collages and carry it.

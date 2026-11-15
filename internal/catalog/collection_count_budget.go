@@ -98,16 +98,39 @@ func (b *collectionCountBudget) start(pool *pgxpool.Pool) {
 					case <-b.ctx.Done():
 						return
 					case job := <-b.jobs:
-						counts, err := executeCollectionCountBatch(job.ctx, job.pool, job.accountID, job.sql, job.args)
-						for _, query := range job.queries {
-							query.result.count, query.result.err = counts[query.id], err
-							close(query.result.done)
-						}
+						runCollectionCountJob(job, executeCollectionCountBatch)
 					}
 				}
 			}()
 		}
 	})
+}
+
+type collectionCountExecutor func(ctx context.Context, pool *pgxpool.Pool, accountID int, sql string, args []any) (map[string]int, error)
+
+// runCollectionCountJob settles every query in job. A batch that fails for a
+// reason other than the budget, the deadline or cancellation (a data error in
+// one stored definition, say) is counted one statement at a time, so that
+// definition doesn't hide the others. Each retry still takes admission and
+// the request deadline; exhaustion is never retried.
+func runCollectionCountJob(job collectionCountJob, execute collectionCountExecutor) {
+	counts, err := execute(job.ctx, job.pool, job.accountID, job.sql, job.args)
+	if err != nil && len(job.queries) > 1 && !errors.Is(err, ErrCollectionCountBudget) &&
+		!errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
+		for _, query := range job.queries {
+			runCollectionCountJob(collectionCountJob{
+				ctx: job.ctx, pool: job.pool, accountID: job.accountID,
+				sql:     collectionCountSQLPart(query, 0),
+				args:    append([]any{query.id}, query.args...),
+				queries: []collectionCountStatement{query},
+			}, execute)
+		}
+		return
+	}
+	for _, query := range job.queries {
+		query.result.count, query.result.err = counts[query.id], err
+		close(query.result.done)
+	}
 }
 
 // effectiveCollectionCountKey is called only after raw structural admission.

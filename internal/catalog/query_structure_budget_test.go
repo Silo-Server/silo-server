@@ -215,3 +215,28 @@ func TestQueryStructureRawEntryPoints(t *testing.T) {
 		t.Fatalf("case-insensitive composition bypass: %v", err)
 	}
 }
+
+// A definition admitted in compact form stays admitted when PostgreSQL jsonb
+// returns it with separators, and HTML characters cost the same on both sides.
+func TestQueryStructureValueBytesMatchStoredForm(t *testing.T) {
+	values := make([]string, 15000)
+	for i := range values {
+		values[i] = "a"
+	}
+	def := QueryDefinition{Groups: []QueryGroup{{Rules: []QueryRule{{Field: "genre", Op: "in", Value: values}}}}}
+	if err := ValidateQueryStructure(def); err != nil {
+		t.Fatalf("compact definition: %v", err)
+	}
+	stored := `{"groups": [{"rules": [{"field": "genre", "op": "in", "value": ["` + strings.Join(values, `", "`) + `"]}]}]}`
+	if _, err := validateQueryJSONStructure([]byte(stored)); err != nil {
+		t.Fatalf("jsonb-formatted definition: %v", err)
+	}
+
+	html := strings.Repeat("<", 11000)
+	if err := ValidateQueryStructure(QueryDefinition{Groups: []QueryGroup{{Rules: []QueryRule{{Field: "title", Op: "contains", Value: html}}}}}); err != nil {
+		t.Fatalf("decoded HTML value: %v", err)
+	}
+	if _, err := validateQueryJSONStructure([]byte(`{"groups":[{"rules":[{"field":"title","op":"contains","value":"` + html + `"}]}]}`)); err != nil {
+		t.Fatalf("raw HTML value: %v", err)
+	}
+}

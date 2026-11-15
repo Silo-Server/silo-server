@@ -320,9 +320,6 @@ func (h *LibraryCollectionHandler) LibraryUserCollections(ctx context.Context, l
 		collections = []usercollections.ServerVisibleCollection{}
 	}
 	collections = h.withVisibleItemCounts(ctx, userID, profileID, collections)
-	if err := v1LibraryCollectionCountError(ctx, collections); err != nil {
-		return nil, err
-	}
 	for i := range collections {
 		collections[i].PosterURL = personalCollectionPosterURL(ctx, h.ArtworkResolver, collections[i].ID, collections[i].PosterPath)
 	}
@@ -354,7 +351,7 @@ func (h *LibraryCollectionHandler) withVisibleItemCounts(ctx context.Context, us
 		if n, ok := reads.counts[c.ID]; ok {
 			c.ItemCount = n
 		} else {
-			c.ItemCount, c.ItemCountStatus, c.CountError = 0, CollectionCountUnavailable, reads.countError
+			c.ItemCount, c.ItemCountStatus = 0, CollectionCountUnavailable
 		}
 		if collage, ok := reads.posters[c.ID]; ok {
 			c.PosterPath, c.PosterThumbhash, c.PosterIsCollage = collage.Path, collage.Thumbhash, true
@@ -377,9 +374,6 @@ func (h *LibraryCollectionHandler) LibraryCollectionsTab(ctx context.Context, li
 	}
 	access := AccessFilterFromContext(ctx, "")
 	adminCollections = catalog.CollectionsShownToViewer(adminCollections, h.viewerCollectionCounts(ctx, adminCollections, access))
-	if err := v1CuratedCollectionCountError(ctx, adminCollections); err != nil {
-		return LibraryCollectionTabView{}, err
-	}
 	adminCollections = h.withViewerPosters(ctx, adminCollections, access)
 	resp := LibraryCollectionTabView{
 		LibraryID:   libraryID,
@@ -410,9 +404,6 @@ func (h *LibraryCollectionHandler) LibraryCollectionsTab(ctx context.Context, li
 					return LibraryCollectionTabView{}, apiError(http.StatusInternalServerError, "internal_error", "Failed to load user collections")
 				}
 				userCollections = h.withVisibleItemCounts(ctx, userID, profileID, loadedUserCollections)
-				if err := v1LibraryCollectionCountError(ctx, userCollections); err != nil {
-					return LibraryCollectionTabView{}, err
-				}
 				userCollectionsLoaded = true
 			}
 			sorted := applyUserCollectionSort(userCollections, g.DefaultSortMode)
@@ -490,28 +481,4 @@ type CollectionItemPage struct {
 // either library too.
 func collectionSpansLibrary(collection *models.LibraryCollection, libraryID int) bool {
 	return collection.LibraryID == libraryID || slices.Contains(collection.LibraryIDs, libraryID)
-}
-
-func v1LibraryCollectionCountError(ctx context.Context, collections []usercollections.ServerVisibleCollection) error {
-	if isNativeAPIV2(ctx) {
-		return nil
-	}
-	for _, c := range collections {
-		if c.ItemCountStatus == CollectionCountUnavailable {
-			return collectionCountReadError(c.CountError)
-		}
-	}
-	return nil
-}
-
-func v1CuratedCollectionCountError(ctx context.Context, collections []*models.LibraryCollection) error {
-	if isNativeAPIV2(ctx) {
-		return nil
-	}
-	for _, c := range collections {
-		if c.ItemCountStatus == CollectionCountUnavailable {
-			return collectionCountReadError(catalog.ErrQueryComplexity)
-		}
-	}
-	return nil
 }

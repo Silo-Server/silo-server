@@ -205,3 +205,18 @@ func TestPersonalCollectionCompositionMetadataAndStoreErrors(t *testing.T) {
 		}
 	}
 }
+
+// A manual collection's stored definition is dormant, so an over-budget one
+// left from before the budget never blocks a Show only change.
+func TestPersonalCollectionDormantDefinitionAllowsDisplayEdit(t *testing.T) {
+	legacy := string(compositionRules(t, 200))
+	store := &compositionRecheckStore{lifecycleStore: lifecycleStore{collection: userstore.Collection{ID: "c", CreatorProfileID: "owner", CollectionType: "manual", QueryDefinition: legacy}}, lockedSource: legacy}
+	h := NewCollectionHandler(pagingIntegrationProvider{account: 1, store: store})
+	_, err := h.UpdatePersonalCollection(WithNativeAPIV2(t.Context()), PersonalCollectionUpdateCommand{UserID: 1, ProfileID: "owner", CollectionID: "c", Request: PersonalCollectionUpdateRequest{DisplayQueryDefinition: compositionRules(t, 1)}})
+	if errors.Is(err, catalog.ErrQueryComplexity) {
+		t.Fatalf("dormant definition blocked the edit: %v", err)
+	}
+	if apiErr, ok := errors.AsType[*APIError](err); ok && apiErr.Field == "query_definition" {
+		t.Fatalf("dormant definition blocked the edit: %v", err)
+	}
+}

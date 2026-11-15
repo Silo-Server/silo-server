@@ -19,7 +19,6 @@ type ServerVisibleCollection struct {
 	CollectionType   string `json:"collection_type"`
 	ItemCount        int    `json:"item_count"`
 	ItemCountStatus  string `json:"-"`
-	CountError       error  `json:"-"`
 	QueryDefinition  string `json:"-"`
 	// DisplayQueryDefinition is the collection's display filter, "" when none.
 	DisplayQueryDefinition string `json:"-"`

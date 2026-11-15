@@ -33,7 +33,7 @@ func TestLibraryCardLegacyCountAvailabilityRecovery(t *testing.T) {
 	}
 }
 
-func TestUnavailableCuratedCollectionCountSortAndV1(t *testing.T) {
+func TestUnavailableCuratedCollectionCountSort(t *testing.T) {
 	collections := []*models.LibraryCollection{
 		{ID: "unavailable", ItemCount: 99, ItemCountStatus: CollectionCountUnavailable},
 		{ID: "zero", ItemCountStatus: CollectionCountAvailable},
@@ -43,13 +43,6 @@ func TestUnavailableCuratedCollectionCountSortAndV1(t *testing.T) {
 		if want := []string{"populated", "zero", "unavailable"}[i]; c.ID != want {
 			t.Fatalf("position %d = %s, want %s", i, c.ID, want)
 		}
-	}
-	if err := v1CuratedCollectionCountError(WithNativeAPIV2(t.Context()), collections); err != nil {
-		t.Fatalf("v2 lost collection access: %v", err)
-	}
-	err := v1CuratedCollectionCountError(t.Context(), collections)
-	if apiErr, ok := errors.AsType[*APIError](err); !ok || apiErr.Status != 503 || apiErr.Code != "collection_count_unavailable" {
-		t.Fatalf("v1 unavailable count = %v", err)
 	}
 }
 
@@ -92,9 +85,6 @@ func TestLibraryCollectionLegacyCountRecoveryDB(t *testing.T) {
 		assertLibraryCollectionTabCount(t, tab, grouped, c.ID, status)
 	}
 	assertTab(false, CollectionCountUnavailable)
-	if _, err := h.LibraryCollectionsTab(t.Context(), f.library, f.account, "owner"); err == nil {
-		t.Fatal("v1 returned a false zero instead of a count error")
-	}
 	server, err := h.ListServerCollections(ctx, catalog.AccessFilter{})
 	if err != nil || len(server.Libraries) != 1 || server.Libraries[0].Collections[0].ItemCountStatus != CollectionCountUnavailable {
 		t.Fatalf("server cards = %+v, %v", server, err)
@@ -122,9 +112,6 @@ func TestLibraryCollectionLegacyCountRecoveryDB(t *testing.T) {
 		t.Fatalf("repaired refresh = %v", err)
 	}
 	assertTab(true, CollectionCountAvailable)
-	if _, err := h.LibraryCollectionsTab(t.Context(), f.library, f.account, "owner"); err != nil {
-		t.Fatalf("v1 real zero did not recover: %v", err)
-	}
 	// Deletion of a rejected definition also stays independent of counting.
 	f.exec(t, `UPDATE library_collections SET query_definition=$2::jsonb WHERE id=$1`, c.ID, string(legacy))
 	if err := h.DeleteAdminCollection(t.Context(), c.ID); err != nil {

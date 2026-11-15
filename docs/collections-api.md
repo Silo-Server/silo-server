@@ -76,11 +76,13 @@ Clients must also ignore counts with an unknown status. A missing status from an
 server keeps that server's existing count behavior. Count availability does not gate
 navigation, item loading, editing or deletion. Keep unavailable collections in lists,
 show **Count unavailable**, and put them after available counts in a most-items sort.
-Retrying the read can recover a transient failure. Repair an oversized legacy definition
-through `updateCollection`, or delete the collection. Count status participates in the
-editor's strong `ETag`, including a transition between unavailable and available zero.
-Personal import responses report `unavailable`: their sync membership total is not a current
-viewer-filtered catalog count. Reload the collection to evaluate its count.
+Retrying the read can recover a transient failure (admission, the deadline). A count that
+is unavailable because of the saved definition or the size of the list stays unavailable
+until that changes. Repair an oversized legacy definition through `updateCollection`, or
+delete the collection. Count status participates in the editor's strong `ETag`, including
+a transition between unavailable and available zero. A personal import response reports
+the sync's count as `available`, or `unavailable` when the collection has a display filter,
+since the sync total isn't the count through that filter.
 
 Library smart collections derive structural availability from the saved definition and
 library bindings on every read, including before the refresher has visited a legacy row.
@@ -93,19 +95,24 @@ Structural admission runs before normalization and SQL construction. A source de
 and its display filter or browse overlay share one effective-definition budget: 16 groups,
 128 rules, 256 library IDs before deduplication, and 65,536 aggregate encoded value bytes.
 Library bindings share that raw budget with a library collection's query and overlay.
-Discarded display rules and empty groups still count. Oversized new or changed definitions
-fail validation; metadata-only edits of legacy definitions remain usable in v2.
+Value bytes are the compact JSON length of each rule value, without HTML escaping, so a
+definition admitted on write is measured the same when read back from `jsonb`. Discarded
+display rules and empty groups still count. Oversized new or changed definitions fail
+validation; metadata-only edits of legacy definitions remain usable. A manual or synced
+collection's stored definition is dormant and never blocks an edit.
 
 One list request shares a ledger across all owners: at most 128 distinct effective count
 definitions, 16,384 rules and four seconds, including construction and execution. Rejected
 legacy definitions also consume construction entries, keyed by owner and collection, so
-invalid rows cannot skip admission. Results for an admitted effective definition remain
-reusable after capacity is reached. Batches
-contain at most 32 definitions, 262,144 SQL bytes and 8,192 arguments. Two fixed workers
+invalid rows cannot skip admission. Once 128 definitions are admitted, the rest of that
+owner's list is unavailable on every read until the list shrinks. Batches contain at most
+32 definitions, 262,144 SQL bytes and 8,192 arguments. Two fixed workers
 execute the request; shared admission allows at most two active count statements per
 account and four per server process, lowered for smaller connection pools. These limits
 are local to the serving process, not coordinated across cluster nodes. Exhaustion fails
-admission without an unbounded wait queue. A failed batch is not retried individually.
+admission without an unbounded wait queue. Exhaustion, the deadline and cancellation are
+never retried. A batch that fails for another reason, such as a data error in one stored
+definition, is counted again one definition at a time, each through admission.
 Each count statement runs in a read-only transaction with a server statement deadline;
 cancellation retains its admission lease through connection cleanup.
 

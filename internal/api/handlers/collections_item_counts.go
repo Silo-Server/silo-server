@@ -70,17 +70,6 @@ const (
 	CollectionCountUnavailable = models.CollectionCountUnavailable
 )
 
-// Frozen v1 cannot represent an unavailable count in its response body.
-func collectionCountReadError(err error) error {
-	if errors.Is(err, catalog.ErrCollectionCountBudget) || errors.Is(err, catalog.ErrQueryComplexity) || errors.Is(err, context.DeadlineExceeded) {
-		return apiError(http.StatusServiceUnavailable, "collection_count_unavailable", "Collection count budget exhausted; retry or repair the collection definition")
-	}
-	if apiErr, ok := errors.AsType[*APIError](err); ok {
-		return apiErr
-	}
-	return apiError(http.StatusInternalServerError, "internal_error", "Failed to count collection items")
-}
-
 // ownedCollectionDefinition is a personal collection's count definition and
 // the profile that owns it.
 type ownedCollectionDefinition struct {
@@ -99,7 +88,6 @@ type ownedCollectionReads struct {
 	posters map[string]catalog.CollectionPoster
 	// unavailable lists the collections whose owner could not be resolved.
 	unavailable map[string]bool
-	countError  error
 }
 
 // ownerScopedCollectionReads counts each collection as viewerProfileID sees
@@ -112,7 +100,6 @@ type ownedCollectionReads struct {
 func ownerScopedCollectionReads(ctx context.Context, executor *catalog.QueryExecutor, memberCounts *catalog.PersonalCollectionMemberCounts, owners catalog.PersonalCollectionAccess, collages *catalog.PersonalCollectionCollages, userID int, viewerProfileID string, collections []ownedCollectionDefinition, viewer catalog.AccessFilter) ownedCollectionReads {
 	out := ownedCollectionReads{counts: make(map[string]int, len(collections)), posters: map[string]catalog.CollectionPoster{}, unavailable: make(map[string]bool)}
 	if executor == nil || executor.Pool == nil {
-		out.countError = apiError(http.StatusServiceUnavailable, "collection_count_unavailable", "Collection counts are unavailable")
 		return out
 	}
 	countCtx, cancel := catalog.WithCollectionCountBudget(ctx)
@@ -143,9 +130,9 @@ func ownerScopedCollectionReads(ctx context.Context, executor *catalog.QueryExec
 				collaged = append(collaged, c.PersonalCollectionDefinition)
 			}
 		}
-		counts, countErr := visiblePersonalCollectionCounts(countCtx, executor, memberCounts, userID, definitions, filter)
+		// A failed count is logged there and left out of counts: unavailable.
+		counts, _ := visiblePersonalCollectionCounts(countCtx, executor, memberCounts, userID, definitions, filter)
 		maps.Copy(out.counts, counts)
-		out.countError = errors.Join(out.countError, countErr)
 		maps.Copy(out.posters, collages.Posters(ctx, userID, collaged, filter))
 	}
 	return out
