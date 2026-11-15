@@ -18,7 +18,14 @@ import {
   setRefreshToken,
 } from "../client";
 import { createAppIntl, setAppIntl } from "@/i18n";
-import { V2ProblemError, V2TransportError, problemFieldDetail, problemId, v2 } from "./request";
+import {
+  V2ProblemError,
+  V2TransportError,
+  problemFieldDetail,
+  problemId,
+  v2,
+  v2RetryDelayMs,
+} from "./request";
 
 const JSON_HEADERS = { "Content-Type": "application/json" };
 const PROBLEM_HEADERS = { "Content-Type": "application/problem+json" };
@@ -178,6 +185,23 @@ describe("v2 request boundary", () => {
     expect(err).not.toBeInstanceOf(V2ProblemError);
     expect((err as V2TransportError).status).toBe(502);
     expect((err as V2TransportError).operationId).toBe("getSetupStatus");
+  });
+
+  it("waits out a proxy's Retry-After on a non-JSON 503", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn<typeof fetch>(
+        async () =>
+          new Response("<html><body>503 Service Unavailable</body></html>", {
+            status: 503,
+            headers: { "Content-Type": "text/html", "Retry-After": "20" },
+          }),
+      ),
+    );
+
+    const err = await v2("GET /api/v2/system/setup").catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(V2TransportError);
+    expect(v2RetryDelayMs(err, 2_000)).toBe(20_000);
   });
 
   it("rethrows a network failure unchanged", async () => {

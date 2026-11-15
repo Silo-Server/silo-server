@@ -14,6 +14,7 @@ import { useSectionTitle } from "@/lib/sectionTitle";
 import { useT } from "@/i18n";
 import {
   carouselCardWidthClasses,
+  squarePosterSize,
   shortcutLabel,
   WIDE_CAROUSEL_CARD_WIDTH_CLASSES,
 } from "@/lib/uiCustomization";
@@ -107,7 +108,11 @@ export default memo(function SectionRow({
   );
   const { prefs: overlayPrefs, quickActionMode } = useOverlayPrefs();
   const { cardPresentation } = useUICustomization();
-  const posterSize = cardPresentation.poster_size;
+  // A row of audiobooks draws its square covers a size down (squarePosterSize).
+  const posterSize =
+    section.items.length > 0 && section.items.every((it) => it.type === "audiobook")
+      ? squarePosterSize(cardPresentation.poster_size)
+      : cardPresentation.poster_size;
   const posterWidthClasses = carouselCardWidthClasses(posterSize);
   const isProgressRow = isProgressSectionType(section.section_type);
   // One spoiler lookup per row rather than one per card.

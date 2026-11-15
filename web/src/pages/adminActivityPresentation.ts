@@ -299,6 +299,28 @@ export function formatSessionBitrate(kbps?: number | null): string | null {
   return `${Math.round(kbps)} kbps`;
 }
 
+export interface SessionBitrate {
+  /** The rate the viewer receives now. */
+  live: string | null;
+  /** The source file's bitrate. */
+  source: string | null;
+  /** The ceiling a transcode encodes to. */
+  limit: string | null;
+  /** Delivered rate as a share of the source's, 0 to 1; null when either is unknown. */
+  share: number | null;
+}
+
+export function getSessionBitrate(session: AdminSession): SessionBitrate {
+  const live = session.stream_bitrate_kbps ?? 0;
+  const source = session.source_bitrate_kbps ?? 0;
+  return {
+    live: formatSessionBitrate(live),
+    source: formatSessionBitrate(source),
+    limit: formatSessionBitrate(session.target_bitrate_kbps),
+    share: live > 0 && source > 0 ? Math.min(1, live / source) : null,
+  };
+}
+
 export function getSessionClientLabel(session: AdminSession): string {
   const explicitLabel = session.client_label?.trim();
   if (explicitLabel) {

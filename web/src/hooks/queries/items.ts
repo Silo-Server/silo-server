@@ -27,6 +27,7 @@ import {
   v2,
   type V2Result,
 } from "@/api/v2/request";
+import { StaleApiRequestContextError } from "@/api/client";
 import { adminTaskJobFromV2 } from "@/api/v2/adminTasks";
 import { catalogItemDetailFromV2 } from "@/api/v2/catalog";
 import { watchDetailFromV2 } from "@/api/v2/watch";
@@ -44,6 +45,7 @@ import {
   scheduleMediaSurfaceInvalidation,
   updateCatalogItemDetail,
 } from "./mediaSurfaceRefresh";
+import { PERSONAL_STATE_WRITE_KEY } from "./personalStateWrites";
 import { bumpHomeRefreshSignal } from "@/pages/homeSurfaceRefresh";
 
 /** Device pixels across the screen, capped at 1080p width, for the loading backdrop. */
@@ -113,10 +115,13 @@ interface RefreshItemMetadataContext {
   startURL: string; // Path and query; onReplaced follows only while the browser is still on them.
 }
 
+const itemMetadataRefreshKey = ["items", "metadata-refresh"] as const;
+
 export function useRefreshItemMetadata() {
   const queryClient = useQueryClient();
   const { awaitAdminJob } = useRealtimeEvents();
   return useMutation({
+    mutationKey: itemMetadataRefreshKey,
     retry: false,
     onMutate: ({ mode }: RefreshItemMetadataVariables): RefreshItemMetadataContext => ({
       toastID: toast.loading(
@@ -235,6 +240,11 @@ export function useRefreshItemMetadata() {
       }
     },
     onError: (err, _variables, context) => {
+      // Signed out or switched account while it ran: nothing failed, so say nothing.
+      if (err instanceof StaleApiRequestContextError) {
+        toast.dismiss(context?.toastID);
+        return;
+      }
       toast.error(err instanceof Error ? err.message : t("web.item.toast.refreshFailed"), {
         id: context?.toastID,
       });
@@ -355,6 +365,7 @@ export interface UpdateItemMetadataRequest {
 }
 
 const itemMetadataWriteKey = (contentId: string) => ["items", "metadata-write", contentId] as const;
+const itemImageWriteKey = ["items", "image-write"] as const;
 
 export function useUpdateItemMetadata(contentId: string) {
   const queryClient = useQueryClient();
@@ -390,6 +401,36 @@ export function useItemMetadataSavePending(contentId: string) {
   return useIsMutating({ mutationKey: itemMetadataWriteKey(contentId) }) > 0;
 }
 
+// The image and refresh mutations take the item as a variable, so these read
+// them by the item they were started for. Edit Metadata unmounts its image
+// tab and starts a new form when it closes, so a reopened dialog sees an
+// image write or a reset from an earlier opening only through these.
+function startedFor(contentId: string) {
+  return (mutation: { state: { variables: unknown } }) =>
+    (mutation.state.variables as { item?: Pick<ItemDetail, "content_id"> } | undefined)?.item
+      ?.content_id === contentId;
+}
+
+// Whether an image apply or upload for the item is still running.
+export function useItemImageWritePending(contentId: string) {
+  return useIsMutating({ mutationKey: itemImageWriteKey, predicate: startedFor(contentId) }) > 0;
+}
+
+// Whether a Reset to Provider for the item is still running, until the item
+// has refetched. Only a reset clears the item's locks.
+export function useItemMetadataResetPending(contentId: string) {
+  const forItem = startedFor(contentId);
+  return (
+    useIsMutating({
+      mutationKey: itemMetadataRefreshKey,
+      predicate: (mutation) =>
+        forItem(mutation) &&
+        (mutation.state.variables as Partial<RefreshItemMetadataVariables> | undefined)?.mode ===
+          "reset",
+    }) > 0
+  );
+}
+
 type WatchedMutationItem = Pick<
   ItemDetail,
   "content_id" | "type" | "series_id" | "season_number" | "user_data"
@@ -399,6 +440,7 @@ export function useWatchedStateMutation(item: WatchedMutationItem) {
   const queryClient = useQueryClient();
 
   return useMutation({
+    mutationKey: PERSONAL_STATE_WRITE_KEY,
     mutationFn: (nextPlayed: boolean) =>
       // Marking a series expands to every episode server-side. keepalive
       // lets the browser finish the request after a navigation or tab close,
@@ -723,6 +765,7 @@ export function useApplyItemImage() {
   const queryClient = useQueryClient();
 
   return useMutation({
+    mutationKey: itemImageWriteKey,
     mutationFn: async ({
       item,
       request,
@@ -745,6 +788,7 @@ export function useUploadItemImage() {
   const queryClient = useQueryClient();
 
   return useMutation({
+    mutationKey: itemImageWriteKey,
     mutationFn: async ({
       item,
       type,

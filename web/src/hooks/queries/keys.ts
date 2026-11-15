@@ -179,6 +179,14 @@ export const libraryCollectionKeys = {
     ["libraryCollections", "userContributed", libraryId] as const,
 };
 
+// The titles that name pinned collections, kept outside libraryCollectionKeys.all:
+// personal-collection writes and media changes invalidate that root, and
+// neither renames a library collection.
+export const libraryCollectionTitleKeys = {
+  all: ["libraryCollectionTitles"] as const,
+  library: (libraryId: number) => ["libraryCollectionTitles", libraryId] as const,
+};
+
 export const profileKeys = {
   all: ["profiles"] as const,
   list: () => ["profiles", "list"] as const,

@@ -102,7 +102,8 @@ export async function listUserLibraries({
  */
 export function useAvailableUserLibraries({
   includeHidden = false,
-}: { includeHidden?: boolean } = {}) {
+  enabled = true,
+}: { includeHidden?: boolean; enabled?: boolean } = {}) {
   const { profile } = useAuth();
   const identity = captureSessionIdentity();
   const profileContext = captureProfileRequestContext();
@@ -133,6 +134,7 @@ export function useAvailableUserLibraries({
       return libraries;
     },
     staleTime: 5 * 60 * 1000,
+    enabled,
   });
 }
 

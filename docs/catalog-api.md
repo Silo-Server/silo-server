@@ -551,7 +551,33 @@ matches titles across servers can read the IDs from a page of cards instead of
 fetching each item's detail, but must fall back to the detail document for a
 card that omits them.
 
-## Section quality badges
+## Book authors and positions on browse cards
+
+In catalog browse and search results (`listCatalogItems`, `queryCatalogItems`),
+an audiobook or ebook card carries `authors`: up to three author names in credit
+order, the names the book's detail page lists under its authors. It is absent
+for other types, for a book with no author credit, and on every other listing.
+
+The same results, and box set listings, carry `position_seconds` and
+`duration_seconds` on a card the profile has started and not finished, the pair a
+Continue Watching card carries. A card draws its progress bar and time left from
+them. They come from the profile's visible progress, the same position Continue
+Watching resumes from, and are absent while `user_state.played` is true, on
+series, seasons, and ebooks, and without a profile. Each page adds one author
+query when it holds books and one progress read when the profile is set.
+
+## Related books on a book page
+
+The entries of an audiobook or ebook detail's `series`, `related.also_by_author`,
+and `related.similar` add `poster_thumbhash`, the profile's state, and, for
+audiobooks, `duration_seconds`: the summed duration of the book's files the
+viewer can play, as the book's own `total_duration_seconds` is summed.
+`played` (present only when true) follows a catalog card's `user_state.played`:
+an audiobook's visible completed progress or completed history row, an ebook's
+reading progress past the finished threshold. `progress_ratio` (0 to 1) is
+present only on a started book that is not played: listening position over the
+progress record's duration, or ebook reading progress. One state lookup covers
+all three lists; without a profile both stay absent.
 
 Home and library section cards derive `overlay_summary` from the best accessible,
 non-missing media file: resolution first, then dynamic range. A series includes

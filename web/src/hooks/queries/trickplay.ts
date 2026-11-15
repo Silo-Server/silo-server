@@ -1,29 +1,11 @@
 import { useQuery } from "@tanstack/react-query";
-import { SessionRefreshUnavailableError } from "@/api/client";
-import { V2ProblemError, V2TimeoutError, V2TransportError, v2 } from "@/api/v2/request";
+import { isTransientV2Error, v2, v2RetryDelayMs } from "@/api/v2/request";
 import { trickplayFromV2 } from "@/api/v2/trickplay";
 import type { PlayerTrickplay } from "@/player/trickplay";
 import { itemKeys } from "./keys";
 
 /** Sheet URLs are refetched this long before they expire. */
 const TRICKPLAY_REFRESH_MARGIN_MS = 5 * 60 * 1000;
-
-/** Transient failures keep cached previews usable while the manifest recovers. */
-export function transientTrickplayError(error: unknown): boolean {
-  if (error instanceof V2ProblemError) return error.status === 429 || error.status >= 500;
-  if (error instanceof V2TransportError)
-    return error.status === 0 || error.status === 429 || error.status >= 500;
-  return (
-    error instanceof TypeError ||
-    error instanceof V2TimeoutError ||
-    error instanceof SessionRefreshUnavailableError
-  );
-}
-
-function trickplayRetryDelay(error: unknown, fallback: number): number {
-  const retryAfter = error instanceof V2ProblemError ? error.retryAfterSeconds : null;
-  return retryAfter === null ? fallback : Math.max(fallback, retryAfter * 1000);
-}
 
 export async function fetchWatchTrickplay(
   id: string,
@@ -52,13 +34,12 @@ export function useWatchTrickplay(
     queryFn: ({ signal }) => fetchWatchTrickplay(id!, fileId!, { signal }),
     enabled: !!id && !!fileId && available,
     staleTime: Infinity,
-    retry: (failures, error) => failures < 2 && transientTrickplayError(error),
-    retryDelay: (attempt, error) =>
-      trickplayRetryDelay(error, Math.min(1000 * 2 ** attempt, 30_000)),
+    retry: (failures, error) => failures < 2 && isTransientV2Error(error),
+    retryDelay: (attempt, error) => v2RetryDelayMs(error, Math.min(1000 * 2 ** attempt, 30_000)),
     refetchInterval: (query) => {
       if (query.state.status === "error") {
-        return transientTrickplayError(query.state.error)
-          ? trickplayRetryDelay(query.state.error, 60_000)
+        return isTransientV2Error(query.state.error)
+          ? v2RetryDelayMs(query.state.error, 60_000)
           : false;
       }
       const expiresAt = query.state.data?.expiresAt;

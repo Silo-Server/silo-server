@@ -756,3 +756,43 @@ func TestFindMatchCandidateFetchErrors(t *testing.T) {
 		})
 	}
 }
+
+// searchDownProvider is an editionProvider whose title search fails upstream.
+type searchDownProvider struct{ editionProvider }
+
+func (p *searchDownProvider) Search(context.Context, metadata.SearchQuery) ([]metadata.SearchResult, error) {
+	return nil, status.Error(codes.Unavailable, "search upstream down")
+}
+
+// While a source's title search is failing, a book with a tagged ASIN is
+// still looked up and matched, and a book that needs the search is deferred
+// once the search is paused instead of charged a failure.
+func TestFindMatchLooksUpTaggedASINWhileSearchIsPaused(t *testing.T) {
+	_, rec := edition("Night Ferry", "B0NIGHT001", "Ann Author", "Ned Narrator")
+	provider := &searchDownProvider{editionProvider{
+		lookupASIN: true,
+		records:    map[string]*metadata.MetadataResult{"B0NIGHT001": rec},
+	}}
+	e := &Enricher{}
+	chain := e.gate.wrap([]metadata.Provider{provider})
+	ctx := context.Background()
+	untagged := enrichmentItemRow{ContentID: "untagged", Title: "Low Water", Author: "Ann Author"}
+	for range providerOutageStreak {
+		e.findMatch(ctx, untagged, chain)
+	}
+
+	tagged := enrichmentItemRow{
+		ContentID: "tagged", Title: "Night Ferry", Author: "Ann Author",
+		ProviderIDs: map[string]string{"asin": "B0NIGHT001"},
+	}
+	if _, paused := e.gate.allPaused(chain); paused {
+		t.Fatal("provider reported paused while its lookups still answer")
+	}
+	if m := e.findMatch(ctx, tagged, chain); !m.metadata.HasMetadata || m.ids["audiobook-metadata"] != "B0NIGHT001" {
+		t.Fatalf("tagged book matched %q (errors %v), want its ASIN record", m.ids["audiobook-metadata"], m.providerErrs)
+	}
+	m := e.findMatch(ctx, untagged, chain)
+	if _, ok := pausedOnly(m.providerErrs); !ok {
+		t.Fatalf("untagged book errors = %v, want only the paused search", m.providerErrs)
+	}
+}

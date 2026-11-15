@@ -142,7 +142,7 @@ func anchorStore(itemIDs ...string) *fakeSignalStore {
 func TestSectionBecauseYouWatchedPicksAnAnchorWithItemsInScope(t *testing.T) {
 	const tvLibrary, movieLibrary = 1, 2
 	seriesRow, movieRow := scoredRun("series", 5), scoredRun("movie", 5)
-	libraries := map[string]int{}
+	libraries := map[string]int{"latest-series": tvLibrary, "older-movie": movieLibrary}
 	for _, item := range seriesRow {
 		libraries[item.MediaItemID] = tvLibrary
 	}
@@ -159,7 +159,7 @@ func TestSectionBecauseYouWatchedPicksAnAnchorWithItemsInScope(t *testing.T) {
 			libraries: libraries,
 		},
 		refresh: refresher,
-		signals: NewSignalReader(&fakeSignalRepo{}, fakeSignalProvider{store: anchorStore("latest-series", "older-movie")}),
+		signals: NewSignalReader(&fakeSignalRepo{}, fakeSignalProvider{store: anchorStore("latest-series", "older-movie")}).WithUserStoreOutsidePostgres(true),
 	}
 	ctx := t.Context()
 
@@ -233,6 +233,48 @@ func TestScopeToLibraries(t *testing.T) {
 		got := scopeToLibraries(tc.filter, tc.scope).AllowedLibraryIDs
 		if (got == nil) != (tc.want == nil) || !slices.Equal(got, tc.want) {
 			t.Errorf("%s: AllowedLibraryIDs = %#v, want %#v", name, got, tc.want)
+		}
+	}
+}
+
+// The worker builds rows for the latest anchors overall and each library's
+// latest. A title in a disabled library is hidden from every read, so it does
+// not take one of its other library's places.
+func TestLibraryAnchorItemIDs(t *testing.T) {
+	const movies, tv, hidden = 1, 2, 3
+	for name, tc := range map[string]struct {
+		candidates []string
+		libraries  map[string][]int
+		disabled   []int
+		want       []string
+	}{
+		"each library keeps its latest": {
+			[]string{"m1", "m2", "m3", "m4", "t1", "m5", "t2"},
+			map[string][]int{"m1": {movies}, "m2": {movies}, "m3": {movies}, "m4": {movies}, "m5": {movies}, "t1": {tv}, "t2": {tv}},
+			nil,
+			[]string{"m1", "m2", "m3", "t1", "t2"},
+		},
+		"a title in two libraries counts in both": {
+			[]string{"both", "m1", "m2", "m3", "t1"},
+			map[string][]int{"both": {movies, tv}, "m1": {movies}, "m2": {movies}, "m3": {movies}, "t1": {tv}},
+			nil,
+			[]string{"both", "m1", "m2", "t1"},
+		},
+		"a title in no library is kept only among the latest": {
+			[]string{"m1", "m2", "loose", "m3", "loose-older"},
+			map[string][]int{"m1": {movies}, "m2": {movies}, "m3": {movies}},
+			nil,
+			[]string{"m1", "m2", "loose", "m3"},
+		},
+		"a title in a disabled library takes no place": {
+			[]string{"h1", "h2", "h3", "m1", "m2"},
+			map[string][]int{"h1": {movies, hidden}, "h2": {movies, hidden}, "h3": {movies, hidden}, "m1": {movies}, "m2": {movies}},
+			[]int{hidden},
+			[]string{"h1", "h2", "h3", "m1", "m2"},
+		},
+	} {
+		if got := libraryAnchorItemIDs(tc.candidates, tc.libraries, tc.disabled, BecauseYouWatchedAnchors); !slices.Equal(got, tc.want) {
+			t.Errorf("%s: anchors = %v, want %v", name, got, tc.want)
 		}
 	}
 }

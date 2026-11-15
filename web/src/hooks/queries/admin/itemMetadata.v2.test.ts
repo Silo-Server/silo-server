@@ -7,7 +7,14 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { installPolicyStorageMocks, jsonResponse } from "@/pages/admin-policy/policyTestUtils";
 import queued from "../../../../../contracts/api/v2/fixtures/admin_item_refresh_queued.json";
 import updated from "../../../../../contracts/api/v2/fixtures/admin_item_metadata_updated.json";
-import { useRefreshItemMetadata, useUpdateItemMetadata } from "../items";
+import {
+  useApplyItemImage,
+  useItemImageWritePending,
+  useItemMetadataResetPending,
+  useRefreshItemMetadata,
+  useUpdateItemMetadata,
+  useUploadItemImage,
+} from "../items";
 import { itemKeys } from "../keys";
 const { awaitAdminJob } = vi.hoisted(() => ({
   awaitAdminJob: vi.fn(async (id: string) => ({ id, status: "completed", result_payload: {} })),
@@ -20,7 +27,12 @@ vi.mock("sonner", () => ({
 }));
 beforeEach(() => {
   installPolicyStorageMocks();
-  awaitAdminJob.mockClear();
+  awaitAdminJob.mockReset();
+  awaitAdminJob.mockImplementation(async (id: string) => ({
+    id,
+    status: "completed",
+    result_payload: {},
+  }));
 });
 afterEach(() => vi.unstubAllGlobals());
 function setup(response: () => Response) {
@@ -136,4 +148,107 @@ it("finishes a save only after the item has refetched", async () => {
     );
   });
   expect(readOnSuccess).toEqual({ read: 2 });
+});
+
+type Writers = {
+  apply: ReturnType<typeof useApplyItemImage>;
+  upload: ReturnType<typeof useUploadItemImage>;
+  refresh: ReturnType<typeof useRefreshItemMetadata>;
+};
+const writeItem = { content_id: "item-1", type: "movie" as const };
+
+// Edit Metadata unmounts its image tab, and starts a new form, every time it
+// closes. A reopened dialog must still see an image write or a reset that an
+// earlier opening started, and only for its own item (#4243). Each write is
+// held until the test finishes it: an image write in its request, a reset in
+// its job.
+it.each([
+  {
+    write: "an image apply",
+    reads: "images",
+    start: (w: Writers) =>
+      w.apply.mutate({
+        item: writeItem,
+        request: {
+          original_url: "https://images.example/p.jpg",
+          type: "poster",
+          provider_id: "tmdb",
+        },
+      }),
+  },
+  {
+    write: "an image upload",
+    reads: "images",
+    start: (w: Writers) =>
+      w.upload.mutate({
+        item: writeItem,
+        type: "poster",
+        file: new File(["x"], "poster.jpg", { type: "image/jpeg" }),
+      }),
+  },
+  {
+    write: "a reset",
+    reads: "reset",
+    start: (w: Writers) => w.refresh.mutate({ item: writeItem, mode: "reset" }),
+  },
+] as const)(
+  "reports $write for the item after the hook that started it unmounts",
+  async ({ reads, start }) => {
+    let finish!: () => void;
+    const gate = new Promise<void>((resolve) => (finish = resolve));
+    awaitAdminJob.mockImplementation(async (id: string) => {
+      await gate;
+      return { id, status: "completed", result_payload: {} };
+    });
+    const { wrapper } = setup(() => jsonResponse(queued, 202));
+    const fetchMock = vi.mocked(fetch);
+    const respond = fetchMock.getMockImplementation()!;
+    fetchMock.mockImplementation(async (input, init) => {
+      if (String(input).includes("/images/")) await gate;
+      return respond(input, init);
+    });
+    const writer = renderHook(
+      (): Writers => ({
+        apply: useApplyItemImage(),
+        upload: useUploadItemImage(),
+        refresh: useRefreshItemMetadata(),
+      }),
+      { wrapper },
+    );
+    const reader = renderHook(
+      () => ({
+        images: useItemImageWritePending("item-1"),
+        reset: useItemMetadataResetPending("item-1"),
+        otherImages: useItemImageWritePending("item-2"),
+        otherReset: useItemMetadataResetPending("item-2"),
+      }),
+      { wrapper },
+    );
+    act(() => start(writer.result.current));
+    writer.unmount();
+
+    await vi.waitFor(() => expect(reader.result.current[reads]).toBe(true));
+    expect(reader.result.current).toEqual({
+      images: reads === "images",
+      reset: reads === "reset",
+      otherImages: false,
+      otherReset: false,
+    });
+    await act(async () => finish());
+    await vi.waitFor(() => expect(reader.result.current[reads]).toBe(false));
+  },
+);
+
+it("does not report a quick refresh as a reset", async () => {
+  const { wrapper } = setup(() => jsonResponse(queued, 202));
+  awaitAdminJob.mockImplementationOnce(() => new Promise(() => {}));
+  const { result } = renderHook(
+    () => ({ refresh: useRefreshItemMetadata(), reset: useItemMetadataResetPending("item-1") }),
+    { wrapper },
+  );
+  act(() => {
+    result.current.refresh.mutate({ item: { content_id: "item-1", type: "movie" }, mode: "quick" });
+  });
+  await vi.waitFor(() => expect(result.current.refresh.isPending).toBe(true));
+  expect(result.current.reset).toBe(false);
 });

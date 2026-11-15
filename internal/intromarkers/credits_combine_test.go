@@ -237,6 +237,12 @@ func TestCombineCreditsRules(t *testing.T) {
 			want:  segment(1400, duration, CreditsAudioAlgorithm, 0.90),
 		},
 		{
+			name:  "strong audio starts at the black that leads into a later run",
+			audio: strong(1400, duration),
+			spec:  story(1415) + every(1416, 1419, 1, "b") + credits,
+			want:  segment(1416, duration, CreditsAudioVideoAlgorithm, 0.95),
+		},
+		{
 			name:  "strong audio keeps its start when the run begins over 60 s later",
 			audio: strong(1360, duration),
 			spec:  story(1429) + every(1430, 1495, 1, "L"),

@@ -123,33 +123,6 @@ describe("ImageSelectorTab", () => {
     expect(screen.getAllByRole("button", { name: "TMDB" })).toHaveLength(1);
   });
 
-  it("reports an in-flight image apply to the metadata editor", () => {
-    mocks.useItemImages.mockReturnValue({
-      data: { images: [], current: {} },
-      isLoading: false,
-      isError: false,
-    });
-    mocks.useApplyItemImage.mockReturnValue({ mutate: vi.fn(), isPending: false });
-    const onApplyPendingChange = vi.fn();
-    const { rerender } = render(
-      <ImageSelectorTab
-        item={item("series")}
-        enabled
-        onApplyPendingChange={onApplyPendingChange}
-      />,
-    );
-    mocks.useApplyItemImage.mockReturnValue({ mutate: vi.fn(), isPending: true });
-    rerender(
-      <ImageSelectorTab
-        item={item("series")}
-        enabled
-        onApplyPendingChange={onApplyPendingChange}
-      />,
-    );
-
-    expect(onApplyPendingChange).toHaveBeenCalledWith(true);
-  });
-
   it("uploads a chosen file for the active tab and reports it to the metadata editor", () => {
     noImages();
     const mutate = vi.fn((_request: unknown, options: { onSuccess: () => void }) =>
@@ -232,20 +205,12 @@ describe("ImageSelectorTab", () => {
     expect(screen.getByRole("button", { name: "TMDB" })).toBeInTheDocument();
   });
 
-  it("reports an in-flight upload to the metadata editor and blocks another", () => {
+  it("blocks another upload while one is in flight", () => {
     noImages();
     mocks.useUploadItemImage.mockReturnValue({ mutate: vi.fn(), isPending: true });
-    const onApplyPendingChange = vi.fn();
 
-    render(
-      <ImageSelectorTab
-        item={item("season")}
-        enabled
-        onApplyPendingChange={onApplyPendingChange}
-      />,
-    );
+    render(<ImageSelectorTab item={item("season")} enabled />);
 
-    expect(onApplyPendingChange).toHaveBeenCalledWith(true);
     expect(screen.getByRole("button", { name: "Upload poster" })).toBeDisabled();
     expect(screen.getByText("Uploading...")).toBeInTheDocument();
   });

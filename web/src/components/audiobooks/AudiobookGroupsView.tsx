@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useMemo, useState, type CSSProperties } from "react";
 import { ChevronRight } from "lucide-react";
 import type { AudiobookGroup } from "@/api/types";
 import { loadErrorDescription } from "@/components/loadErrorDescription";
@@ -29,32 +29,35 @@ interface AudiobookGroupsViewProps {
   onSelectGroup: (name: string) => void;
 }
 
-function groupStats(t: Translate, group: AudiobookGroup): string {
-  const parts = [
+/** "12 books · 61 hr": the group's size. */
+function groupTotals(t: Translate, group: AudiobookGroup): string {
+  return [
     t("web.audiobooks.groups.statBooks", {
       count: group.item_count,
       count_text: group.item_count,
     }),
     formatHoursMinutes(group.total_duration_seconds),
-  ];
+  ].join(" · ");
+}
+
+/** The profile's listening across the group, or nothing before they start it. */
+function groupListening(t: Translate, group: AudiobookGroup): string | undefined {
   if (group.in_progress_count > 0) {
-    parts.push(
-      t("web.audiobooks.groups.statInProgress", {
-        count: group.in_progress_count,
-        count_text: group.in_progress_count,
-      }),
-    );
-  } else if (group.finished_count > 0 && group.finished_count === group.item_count) {
-    parts.push(t("web.audiobooks.groups.statAllFinished"));
-  } else if (group.finished_count > 0) {
-    parts.push(
-      t("web.audiobooks.groups.statFinished", {
-        count: group.finished_count,
-        count_text: group.finished_count,
-      }),
-    );
+    return t("web.audiobooks.groups.statInProgress", {
+      count: group.in_progress_count,
+      count_text: group.in_progress_count,
+    });
   }
-  return parts.join(" · ");
+  if (group.finished_count > 0 && group.finished_count === group.item_count) {
+    return t("web.audiobooks.groups.statAllFinished");
+  }
+  if (group.finished_count > 0) {
+    return t("web.audiobooks.groups.statFinished", {
+      count: group.finished_count,
+      count_text: group.finished_count,
+    });
+  }
+  return undefined;
 }
 
 function groupInitials(name: string): string {
@@ -66,60 +69,86 @@ function groupInitials(name: string): string {
     .join("");
 }
 
-/** Up to three overlapping square covers; falls back to an initials tile. */
-function CoverStack({ group, large }: { group: AudiobookGroup; large?: boolean }) {
+/** A group's cover; one that fails to load leaves a plain tile, not a broken image. */
+function GroupCover({
+  url,
+  className,
+  style,
+}: {
+  url: string;
+  className: string;
+  style?: CSSProperties;
+}) {
+  const [failed, setFailed] = useState(false);
+  if (failed) {
+    return <div aria-hidden="true" className={`bg-surface-raised ${className}`} style={style} />;
+  }
+  return (
+    <img
+      src={url}
+      alt=""
+      loading="lazy"
+      decoding="async"
+      onError={() => setFailed(true)}
+      className={`bg-muted object-cover ${className}`}
+      style={style}
+    />
+  );
+}
+
+function InitialsTile({ name, className }: { name: string; className: string }) {
+  return (
+    <div
+      className={`bg-surface-raised text-muted-foreground flex items-center justify-center font-semibold ${className}`}
+    >
+      {groupInitials(name)}
+    </div>
+  );
+}
+
+/**
+ * A series' first covers side by side, each partly under the one before it,
+ * so the series reads as a run of books.
+ */
+function SeriesFan({ group }: { group: AudiobookGroup }) {
   const posters = group.poster_urls.slice(0, 3);
   if (posters.length === 0) {
-    return (
-      <div
-        className={`bg-surface-raised text-muted-foreground flex shrink-0 items-center justify-center font-semibold ${
-          large ? "aspect-square w-full rounded-xl text-2xl" : "h-14 w-14 rounded-lg text-sm"
-        }`}
-      >
-        {groupInitials(group.name)}
-      </div>
-    );
+    return <InitialsTile name={group.name} className="aspect-[3/2] w-full rounded-xl text-2xl" />;
   }
-
-  if (!large) {
-    return (
-      <div className="flex shrink-0 -space-x-7">
-        {posters.map((url, i) => (
-          <img
-            key={url}
-            src={url}
-            alt=""
-            loading="lazy"
-            className="border-background h-14 w-14 rounded-lg border object-cover shadow-md"
-            style={{ zIndex: posters.length - i }}
-          />
-        ))}
-      </div>
-    );
-  }
-
   return (
-    <div className="relative aspect-square w-full">
-      {posters
-        .slice()
-        .reverse()
-        .map((url, i) => {
-          // Render back-to-front; the first poster ends up on top, upright.
-          const depth = posters.length - 1 - i;
-          return (
-            <img
-              key={url}
-              src={url}
-              alt=""
-              loading="lazy"
-              className="absolute inset-0 h-full w-full rounded-xl object-cover shadow-lg transition-transform duration-(--duration-fast)"
-              style={{
-                transform:
-                  depth === 0 ? undefined : `rotate(${depth * 3}deg) translateX(${depth * 4}px)`,
-              }}
-            />
-          );
-        })}
+    <div className="relative aspect-[3/2] w-full">
+      {posters.map((url, i) => (
+        <GroupCover
+          key={url}
+          url={url}
+          className="absolute top-0 aspect-square w-[66%] rounded-xl shadow-[0_14px_26px_-12px_rgb(0_0_0/0.85),-6px_0_14px_-6px_rgb(0_0_0/0.6)]"
+          style={{
+            insetInlineStart: `${i * 17}%`,
+            zIndex: posters.length - i,
+            filter: i === 0 ? undefined : `brightness(${1 - i * 0.17})`,
+          }}
+        />
+      ))}
+    </div>
+  );
+}
+
+/** Up to four of an author's or narrator's covers in a square. */
+function CoverMosaic({ group }: { group: AudiobookGroup }) {
+  const posters = group.poster_urls.slice(0, 4);
+  if (posters.length === 0) {
+    return <InitialsTile name={group.name} className="h-16 w-16 shrink-0 rounded-xl text-sm" />;
+  }
+  const single = posters.length === 1;
+  return (
+    <div
+      className={`bg-surface-raised grid h-16 w-16 shrink-0 gap-0.5 overflow-hidden rounded-xl ${
+        single ? "grid-cols-1" : "grid-cols-2"
+      }`}
+    >
+      {posters.map((url) => (
+        <GroupCover key={url} url={url} className="h-full w-full" />
+      ))}
     </div>
   );
 }
@@ -220,10 +249,10 @@ export default function AudiobookGroupsView({
 
       {isInitialLoading ? (
         isSeries ? (
-          <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
+          <div className="grid grid-cols-2 gap-x-4 gap-y-7 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6">
             {Array.from({ length: 12 }).map((_, i) => (
               <div key={i}>
-                <Skeleton className="aspect-square w-full rounded-xl" />
+                <Skeleton className="aspect-[3/2] w-full rounded-xl" />
                 <Skeleton className="mt-2 h-4 w-3/4 rounded" />
               </div>
             ))}
@@ -250,25 +279,33 @@ export default function AudiobookGroupsView({
         </p>
       ) : isSeries ? (
         <>
-          <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
-            {groups.map((group) => (
-              <button
-                key={group.name}
-                type="button"
-                onClick={() => onSelectGroup(group.name)}
-                className="group/series text-start"
-              >
-                <div className="transition-transform duration-(--duration-fast) group-hover/series:scale-[1.02]">
-                  <CoverStack group={group} large />
-                </div>
-                <div className="mt-2.5 truncate px-0.5 text-[14px] font-semibold tracking-tight">
-                  {group.name}
-                </div>
-                <div className="text-muted-foreground truncate px-0.5 text-xs">
-                  {groupStats(t, group)}
-                </div>
-              </button>
-            ))}
+          <div className="grid grid-cols-2 gap-x-4 gap-y-7 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6">
+            {groups.map((group) => {
+              const listening = groupListening(t, group);
+              return (
+                <button
+                  key={group.name}
+                  type="button"
+                  onClick={() => onSelectGroup(group.name)}
+                  className="group/series grid content-start gap-0.5 text-start"
+                >
+                  <div className="mb-2 transition-transform duration-(--duration-fast) group-hover/series:-translate-y-0.5">
+                    <SeriesFan group={group} />
+                  </div>
+                  <div className="truncate px-0.5 text-sm font-semibold tracking-tight">
+                    {group.name}
+                  </div>
+                  <div className="text-muted-foreground truncate px-0.5 text-xs">
+                    {groupTotals(t, group)}
+                  </div>
+                  {listening && (
+                    <div className="text-foreground truncate px-0.5 text-xs font-medium">
+                      {listening}
+                    </div>
+                  )}
+                </button>
+              );
+            })}
           </div>
           <div ref={sentinelRef} className="h-8">
             {isFetchingNextPage ? <Skeleton className="mx-auto h-3 w-28 rounded" /> : null}
@@ -277,23 +314,31 @@ export default function AudiobookGroupsView({
       ) : (
         <>
           <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
-            {groups.map((group) => (
-              <button
-                key={group.name}
-                type="button"
-                onClick={() => onSelectGroup(group.name)}
-                className="surface-panel hover:bg-muted/40 flex items-center gap-4 rounded-xl border-0 px-4 py-3 text-start transition-colors duration-(--duration-fast)"
-              >
-                <CoverStack group={group} />
-                <div className="min-w-0 flex-1">
-                  <div className="truncate text-sm font-semibold">{group.name}</div>
-                  <div className="text-muted-foreground mt-0.5 truncate text-xs">
-                    {groupStats(t, group)}
+            {groups.map((group) => {
+              const listening = groupListening(t, group);
+              return (
+                <button
+                  key={group.name}
+                  type="button"
+                  onClick={() => onSelectGroup(group.name)}
+                  className="surface-panel hover:bg-muted/40 flex items-center gap-4 rounded-2xl border-0 p-3 text-start transition-colors duration-(--duration-fast)"
+                >
+                  <CoverMosaic group={group} />
+                  <div className="grid min-w-0 flex-1 gap-0.5">
+                    <div className="truncate text-sm font-semibold">{group.name}</div>
+                    <div className="text-muted-foreground truncate text-xs">
+                      {groupTotals(t, group)}
+                    </div>
+                    {listening && (
+                      <div className="text-foreground truncate text-xs font-medium">
+                        {listening}
+                      </div>
+                    )}
                   </div>
-                </div>
-                <ChevronRight className="text-muted-foreground/50 h-4 w-4 shrink-0" />
-              </button>
-            ))}
+                  <ChevronRight className="text-muted-foreground/50 h-4 w-4 shrink-0 rtl:rotate-180" />
+                </button>
+              );
+            })}
           </div>
           <div ref={sentinelRef} className="h-8">
             {isFetchingNextPage ? <Skeleton className="mx-auto h-3 w-28 rounded" /> : null}
