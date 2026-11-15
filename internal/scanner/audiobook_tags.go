@@ -241,7 +241,12 @@ func audiobookPartOrder(tags []map[string]string) ([]int, bool) {
 // probing the same bytes again and from treating the book as changed because
 // the part has no media_files row. Replacing the file changes its size or
 // time, so it is probed again. A restart forgets the list, which costs one
-// more probe of each rejected part.
+// more probe of each rejected part. The list holds at most
+// maxRejectedAudiobookParts files, so files written into a library cannot
+// grow it without bound; a full list drops an arbitrary entry, which only
+// costs one more probe of that file.
+const maxRejectedAudiobookParts = 4096
+
 var rejectedAudiobookParts = struct {
 	sync.Mutex
 	byPath map[string]rejectedAudiobookPart
@@ -255,7 +260,14 @@ type rejectedAudiobookPart struct {
 func rememberRejectedAudiobookPart(path string, size int64, modTime time.Time) {
 	rejectedAudiobookParts.Lock()
 	defer rejectedAudiobookParts.Unlock()
-	rejectedAudiobookParts.byPath[path] = rejectedAudiobookPart{size: size, modTime: modTime}
+	byPath := rejectedAudiobookParts.byPath
+	if _, known := byPath[path]; !known && len(byPath) >= maxRejectedAudiobookParts {
+		for old := range byPath {
+			delete(byPath, old)
+			break
+		}
+	}
+	byPath[path] = rejectedAudiobookPart{size: size, modTime: modTime}
 }
 
 func audiobookPartRejected(path string, size int64, modTime time.Time) bool {

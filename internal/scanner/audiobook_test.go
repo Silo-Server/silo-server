@@ -1140,6 +1140,33 @@ func TestReadMP4ItemListReadsMovementAtoms(t *testing.T) {
 	}
 }
 
+// Files written into a library cannot grow the rejected-part list without bound.
+func TestRejectedAudiobookPartsAreCapped(t *testing.T) {
+	now := time.Now()
+	t.Cleanup(func() {
+		rejectedAudiobookParts.Lock()
+		for path := range rejectedAudiobookParts.byPath {
+			if strings.HasPrefix(path, "/capped/") {
+				delete(rejectedAudiobookParts.byPath, path)
+			}
+		}
+		rejectedAudiobookParts.Unlock()
+	})
+	for i := range maxRejectedAudiobookParts + 10 {
+		rememberRejectedAudiobookPart(fmt.Sprintf("/capped/%d.mp3", i), 1, now)
+	}
+	rejectedAudiobookParts.Lock()
+	n := len(rejectedAudiobookParts.byPath)
+	rejectedAudiobookParts.Unlock()
+	if n > maxRejectedAudiobookParts {
+		t.Fatalf("remembered %d rejected parts, want at most %d", n, maxRejectedAudiobookParts)
+	}
+	last := fmt.Sprintf("/capped/%d.mp3", maxRejectedAudiobookParts+9)
+	if !audiobookPartRejected(last, 1, now) {
+		t.Fatal("the newest rejected part was not remembered")
+	}
+}
+
 // A damaged part must not keep the rest of the book out of the library.
 func TestParseAudiobookFolderSkipsRejectedPart(t *testing.T) {
 	if _, err := exec.LookPath("ffprobe"); err != nil {
