@@ -410,3 +410,47 @@ func checkSweepRunsOnOneConnection(t *testing.T, ctx context.Context, dsn string
 		t.Fatalf("Run on a one-connection pool = %v, want it to finish", err)
 	}
 }
+
+// One run keeps claiming batches through the real claim and summary until no
+// book is due, rather than stopping after the first batch.
+func TestAudiobookEnrichmentSweepDrainsBacklogDB(t *testing.T) {
+	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("SILO_TEST_DATABASE_URL is not set")
+	}
+	ctx := t.Context()
+	pool, err := pgxpool.New(ctx, dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(pool.Close)
+
+	addItem := newSweepTestLibrary(t, ctx, pool)
+	base := time.Date(1990, 1, 1, 0, 0, 0, 0, time.UTC)
+	var items []string
+	for i := range 5 {
+		items = append(items, addItem(base.Add(time.Duration(i)*time.Minute)))
+	}
+	provider := &countingProvider{fakeAudiobookMetadataProvider: fakeAudiobookMetadataProvider{slug: "abm"}}
+	e := &Enricher{
+		pool: pool, chainRepo: metadata.NewChainRepository(pool), state: newEnrichmentStateStore(pool),
+		batchSize: 2, workers: 1,
+		resolveProviders: func(context.Context, int, string) ([]metadata.Provider, error) {
+			return []metadata.Provider{provider}, nil
+		},
+	}
+	lock, acquired, err := e.takeSweepLock(ctx)
+	if err != nil || !acquired {
+		t.Fatalf("taking the sweep lock: acquired=%v err=%v", acquired, err)
+	}
+	defer lock.release()
+	noGap := func(context.Context, time.Duration) error { return nil }
+	if _, err := e.sweep(ctx, lock.check, e.runOneBatch, noGap); err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range items {
+		if row := readRetryRow(t, ctx, pool, id); row.outcome == nil || *row.outcome != string(EnrichmentOutcomeNoMatch) {
+			t.Fatalf("item %s outcome = %v after one run, want no_match", id, row.outcome)
+		}
+	}
+}

@@ -51,6 +51,9 @@ type Repository interface {
 	MarkListItemRemoteRemoved(ctx context.Context, connectionID string, kind ListKind, mediaItemID string, removedAt time.Time) error
 	MarkListItemLocalRemoved(ctx context.Context, connectionID string, kind ListKind, mediaItemID string, removedAt time.Time) error
 	MarkListItemError(ctx context.Context, connectionID string, kind ListKind, mediaItemID, lastError string) error
+	// SetListItemProviderKey changes only a row's provider key, so it can't
+	// undo a presence change written after the caller read the row.
+	SetListItemProviderKey(ctx context.Context, connectionID string, kind ListKind, mediaItemID, key string) error
 	// WatchlistTitlesSince returns when the connection's first watchlist
 	// import that keeps titles outside the library finished, or nil before it.
 	WatchlistTitlesSince(ctx context.Context, connectionID string) (*time.Time, error)
@@ -1713,6 +1716,18 @@ func (r *PostgresRepository) MarkListItemError(ctx context.Context, connectionID
 	`, connectionID, string(kind), mediaItemID, lastError)
 	if err != nil {
 		return fmt.Errorf("mark list item error: %w", err)
+	}
+	return nil
+}
+
+func (r *PostgresRepository) SetListItemProviderKey(ctx context.Context, connectionID string, kind ListKind, mediaItemID, key string) error {
+	_, err := r.pool.Exec(ctx, `
+		UPDATE watch_provider_list_items
+		SET provider_item_key = $4, updated_at = now()
+		WHERE connection_id = $1::uuid AND list_kind = $2 AND media_item_id = $3
+	`, connectionID, string(kind), mediaItemID, key)
+	if err != nil {
+		return fmt.Errorf("set list item provider key: %w", err)
 	}
 	return nil
 }

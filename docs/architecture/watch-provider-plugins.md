@@ -141,12 +141,25 @@ library item through them and the row's provider key:
   before the title row retires. A provider removal before the next import then
   still reaches it, and a complete read listing the title under another of its
   IDs keeps it. Listed title rows hand over first.
+- A complete read that keeps a title row, or the library item that took one
+  over, through another of the title's IDs moves the row to the provider key
+  that listing carried, as does a listing a pending local removal waits on. A
+  removal sends only the row's key, and plugins send the provider the one ID
+  in it, so a removal under an old key could leave the provider's entry
+  listed.
 - A provider removal of the title also takes that one library item off the
   library watchlist, for a promotion that ran after the pass read the entry.
 - A pending local removal of a title also holds a listing under another TMDB
   ID that shares one of the row's IDs or its provider key. A title can have
   several such rows, one per TMDB ID it was listed under; a listing dated after
   all of their removals is a new add and drops every one of them.
+- A pending local removal holds the title in its other form too, matched the
+  same way. A removed title row holds a listing that now matches a library
+  item, unless that item is already on the list. A removed library item holds
+  a listing of the title outside the library once the library lost the item.
+  Other library items that share an ID don't hold each other's listings. A
+  listing dated after the removals is a new add, and drops the other form's
+  removal too.
 
 ## Sync-run admission
 

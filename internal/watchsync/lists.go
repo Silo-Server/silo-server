@@ -304,8 +304,8 @@ func (s *Service) importList(ctx context.Context, conn Connection, cfg ServerCon
 		if key == "" {
 			key = providerItemKeyForRemoteFavorite(row)
 		}
-		seenRemote.add(row.Kind,
-			key, prefixedID("imdb", row.IMDbID), prefixedID("tmdb", row.TMDBID), prefixedID("tvdb", row.TVDBID))
+		ids := []string{key, prefixedID("imdb", row.IMDbID), prefixedID("tmdb", row.TMDBID), prefixedID("tvdb", row.TVDBID)}
+		seenRemote.add(row.Kind, key, ids[1:]...)
 		match, reason, err := s.matcher.Match(ctx, row.HistoryRecord())
 		if err != nil {
 			return result, err
@@ -324,11 +324,11 @@ func (s *Service) importList(ctx context.Context, conn Connection, cfg ServerCon
 			}
 			continue
 		}
-		// The provider listing the item again after the local removal is a
-		// newer add; an older or undated listing is the one the removal will
-		// take off.
-		if removedAt, pending := removalsPending[match.MediaItemID]; pending &&
-			(row.FavoritedAtGuessed || !row.FavoritedAt.After(removedAt)) {
+		waits, err := s.waitsForMatchedListRemoval(ctx, conn, store, b, match.MediaItemID, row, ids, removalsPending, pendingTitles)
+		if err != nil {
+			return result, err
+		}
+		if waits {
 			continue
 		}
 		added, err := b.localAdd(ctx, store, conn.ProfileID, match.MediaItemID, row.FavoritedAt)
@@ -393,10 +393,10 @@ func (s *Service) importList(ctx context.Context, conn Connection, cfg ServerCon
 // provider still lists these items, so an import must not add them back from
 // that listing: a failed removal retries later in the run, and a removal held
 // because another library item shares the key stays until that item leaves
-// too. titles maps each ID and provider key a pending watchlist title row
-// knows to the media item IDs of the rows that know it (see pendingTitleKey),
-// for a provider that lists the title under another TMDB ID. One title can
-// have several rows, one per TMDB ID it was listed under.
+// too. titles maps each ID and provider key a pending row knows to the media
+// item IDs of the rows that know it (see pendingTitleKey), for a listing of
+// the title in its other form or under another TMDB ID. One title can have
+// several rows: a library item's, and one per TMDB ID it was listed under.
 func (s *Service) listItemsPendingRemoval(ctx context.Context, conn Connection, b listBinding) (pending map[string]time.Time, titles map[string][]string, err error) {
 	if !b.removalsEnabled(conn) {
 		return nil, nil, nil
@@ -530,36 +530,6 @@ func sameListItemKind(states []*ListItemState) bool {
 	return true
 }
 
-// remoteListPresence records the keys a complete provider read listed, with
-// the kinds of title listed under each. TMDB and TVDB number movies and series
-// separately, so a movie row does not keep a series with the same key.
-type remoteListPresence map[string]map[string]bool
-
-func (p remoteListPresence) add(kind string, keys ...string) {
-	for _, key := range keys {
-		if key == "" {
-			continue
-		}
-		if p[key] == nil {
-			p[key] = make(map[string]bool)
-		}
-		p[key][kind] = true
-	}
-}
-
-// listed reports whether the read listed a title of this kind under key. A
-// row or stored state without a kind matches any kind.
-func (p remoteListPresence) listed(kind, key string) bool {
-	kinds := p[key]
-	return kinds[kind] || kinds[""] || (kind == "" && len(kinds) > 0)
-}
-
-// listedAny reports whether the read listed a title of this kind under any
-// of the prefixed IDs.
-func (p remoteListPresence) listedAny(kind string, ids []string) bool {
-	return slices.ContainsFunc(ids, func(id string) bool { return p.listed(kind, id) })
-}
-
 func (s *Service) reconcileMissingRemoteListItems(ctx context.Context, conn Connection, store userstore.UserStore, b listBinding, seenRemote remoteListPresence, result *ImportListResult) error {
 	states, err := s.repo.ListListItemStates(ctx, conn.ID, b.kind)
 	if err != nil {
@@ -578,11 +548,16 @@ func (s *Service) reconcileMissingRemoteListItems(ctx context.Context, conn Conn
 	now := s.now()
 	for _, state := range missing {
 		// A title row, or a library item that took over one at promotion,
-		// stays while the provider lists the title under another of its IDs.
-		if title, ok := watchlistTitleFromListItemID(state.MediaItemID); ok && seenRemote.listedAny(state.Kind, heldIDs[title]) {
-			continue
+		// stays while the provider lists the title under another of its IDs,
+		// and takes that listing's key so a removal reaches it.
+		ids := state.TitleIDs
+		if title, ok := watchlistTitleFromListItemID(state.MediaItemID); ok && heldIDs != nil {
+			ids = heldIDs[title]
 		}
-		if seenRemote.listedAny(state.Kind, state.TitleIDs) {
+		if key, ok := seenRemote.listedKeyForAny(state.Kind, ids); ok {
+			if err := s.repo.SetListItemProviderKey(ctx, conn.ID, b.kind, state.MediaItemID, key); err != nil {
+				return err
+			}
 			continue
 		}
 		if b.removalsEnabled(conn) && state.LocalPresent {
