@@ -736,10 +736,13 @@ so a client never has to guess from an id diff.
 
 A substitution is bounded by the viewer's selection. A substitute that would
 offer fewer audio or subtitle tracks than the selected row, or contradict the
-item's runtime, is refused; when no substitute can serve the selection, the
-start answers the retryable `virtual_source_unavailable` terminal with a message
-naming the version list, so the client offers the versions instead of playing a
-poorer menu.
+item's runtime, is refused. So is a substitute whose served bytes contradict the
+release it claims: a row's own candidate may still play and carry its measured
+inventory when a provider posts it short, but unverified bytes never adopt
+another release's row, plan, or inventory. When no candidate can serve the
+selection, the start answers the retryable `virtual_source_unavailable` terminal
+with a message naming the version list, so the client offers the versions
+instead of playing a poorer or different release.
 
 ## Progress and stop
 

@@ -340,6 +340,13 @@ func transportStartFailureV3(cause error, fallback *transportErrorV3) *transport
 // the version list instead of serving different bytes.
 var errVirtualSelectedReleaseCannotPlay = errors.New("the selected release cannot serve the selection")
 
+// errVirtualSelectedReleaseUnverified marks a virtual start whose selected
+// release was offered only bytes that did not establish its identity: the
+// served size contradicted the declaration and the candidate's row belonged to
+// a different release. It is retryable like an unavailable source, but it must
+// not be answered with a substitute the viewer did not select.
+var errVirtualSelectedReleaseUnverified = errors.New("the selected release was served by a different release")
+
 // virtualVersionFallbackSubstitutionRejectionV3 names why a substitute the
 // cold-start fallback walk resolved must not replace the selected release, or ""
 // when the substitute is safe. It is the same policy #448 applies to a rotation,
@@ -375,6 +382,8 @@ func virtualStartUnresolvedTerminalV3(resolveErr error) playback.DecisionRespons
 		return playback.NewTerminalResponseV3("offered_release_unavailable", "The offered release is no longer available; refresh the version list and choose again.", true)
 	case errors.Is(resolveErr, errVirtualSelectedReleaseCannotPlay):
 		return playback.NewTerminalResponseV3(virtualSourceUnavailableReasonV3, "The selected version cannot serve its audio and subtitle tracks. Refresh the version list and choose another version.", true)
+	case errors.Is(resolveErr, errVirtualSelectedReleaseUnverified):
+		return playback.NewTerminalResponseV3(virtualSourceUnavailableReasonV3, "The selected version was served by a different release. Refresh the version list and choose again.", true)
 	case errors.Is(resolveErr, resolver.ErrProviderUnavailable):
 		return playback.NewTerminalResponseV3(providerUnavailableReasonV3, "The virtual source provider is temporarily unavailable.", true)
 	case strings.Contains(strings.ToLower(fmt.Sprint(resolveErr)), "no streams available"):

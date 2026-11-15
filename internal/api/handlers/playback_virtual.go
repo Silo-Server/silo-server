@@ -4063,6 +4063,40 @@ func (h *PlaybackHandler) resolveVirtualPlaybackSource(r *http.Request, file *mo
 				}
 				continue
 			}
+			// A size gap the probe could not resolve is not identity: the
+			// bytes may play, but they cannot establish the requested release's
+			// plan. When the effective row is a genuinely different release,
+			// the plan would serve that release as if the viewer selected it.
+			// Refuse the candidate for a concrete selection and try another
+			// candidate of the requested release; a neutral placeholder may
+			// bind the owner row (it has no bytes of its own), but its measured
+			// inventory is carried in memory and never written to the catalog.
+			unverifiedForeign := result.File.ID > 0 && result.File.ID != file.ID &&
+				!virtualSiblingOwnerSharesRelease(file, result.File) &&
+				(!evidenceVerdict.EstablishesIdentity() ||
+					scanner.VirtualServedSizeMismatch(result.File.FileSize, result.File.ProbedFormatSize))
+			if unverifiedForeign {
+				if virtualRequestedRowIsSelection(file) {
+					slog.WarnContext(r.Context(), "virtual candidate refused: unverified bytes belong to a different release",
+						"component", "api", "requested_file_id", file.ID, "effective_file_id", result.File.ID,
+						"candidate_uri", candidate.URI,
+						"probed_bytes", result.File.ProbedFormatSize, "declared_bytes", result.File.FileSize,
+						"reason", "unverified_foreign_plan")
+					h.unpinVirtualSticky(stickyKey, candidate.URI)
+					h.invalidateVirtualProbeInventory(r.Context(), file)
+					attemptErr = errors.Join(attemptErr, fmt.Errorf(
+						"%w: candidate %s served %d bytes for a declared %d-byte release",
+						errVirtualSelectedReleaseUnverified, candidate.URI, result.File.ProbedFormatSize, result.File.FileSize))
+					continue
+				}
+				// A neutral listing row owns no bytes and no declared release:
+				// binding its plan to the candidate's owner is ordinary auto
+				// selection, not a substitution of a selected version. Fall
+				// through and serve the measured bytes; the persist seam
+				// confines the unverified inventory to the row whose own
+				// candidate it measured and never moves it to the foreign
+				// owner.
+			}
 			if sizeGap {
 				logVirtualProbeSizeGapV3(r.Context(), file.ID, candidate.URI, result.File.FileSize, result.File.ProbedFormatSize, result.File.Duration, expectedRuntimeMinutes,
 					virtualProbeEvidenceWithholdsIdentity(evidenceVerdict))
@@ -4844,7 +4878,7 @@ func (h *PlaybackHandler) persistVirtualProbeEvidenceDurable(ctx context.Context
 	// the pre-probe snapshot here made a successful probe look like a
 	// superseded write and left the session fail-closed on its old inventory.
 	catalogFile = h.refreshVirtualCatalogFileForEvidence(ctx, catalogFile)
-	args, _, ok := h.virtualProbeEvidenceArgs(ctx, catalogFile, resolvedPath, probed, candidate, stampProbe)
+	args, _, ok := h.virtualProbeEvidenceArgs(ctx, catalogFile, resolvedPath, probed, candidate, stampProbe, stampProbe)
 	if !ok {
 		slog.WarnContext(ctx, "durable virtual probe evidence write refused before execution",
 			"component", "api", "file_id", catalogFileIDOrZero(catalogFile), "candidate_uri", resolvedPath)
@@ -6005,6 +6039,58 @@ func (h *PlaybackHandler) persistVirtualMetadataBounded(ctx context.Context, sna
 	}), nil
 }
 
+// invalidateVirtualProbeInventory clears the probe evidence a virtual row
+// carries when a serve proved those bytes are not the release it declares. The
+// write is CAS-fenced on the row's observed revision, so a concurrent probe
+// that already re-measured the row wins and its evidence is not erased.
+//
+// It is the repair half of the unverified-evidence rule: an earlier build
+// wrote a size-gapped serve's measured inventory onto the requested row, so a
+// 720p row could report 2160p HEVC and Dolby Vision fields it never measured.
+// Clearing the inventory and the probe stamp stops the row presenting those
+// foreign facts; the next start re-probes and either lands the row's own
+// inventory or fails honestly. Collection-owned rows are skipped: their
+// materializer owns the inventory and the probe write already preserves their
+// stamp.
+func (h *PlaybackHandler) invalidateVirtualProbeInventory(ctx context.Context, row *models.MediaFile) {
+	if h == nil || row == nil || row.ID <= 0 || row.ProbeSource == virtualCollectionProbeSource {
+		return
+	}
+	if h.VirtualFileMetadataSaver == nil && h.VirtualFileSaver == nil {
+		return
+	}
+	args := models.VirtualFilePersistArgs{
+		FileID:           row.ID,
+		ExpectedFilePath: row.FilePath,
+		VideoTracks:      marshalTracksJSON(nil),
+		AudioTracks:      marshalTracksJSON(nil),
+		SubtitleTracks:   marshalTracksJSON(nil),
+		Duration:         0,
+		UpdatedAt:        row.UpdatedAt,
+		ProbeUpdatedAt:   row.ProbeUpdatedAt,
+		OwnerID:          row.VirtualOwnerInstallationID,
+		LibraryID:        row.MediaFolderID,
+		ClearProbe:       true,
+	}
+	writeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), virtualEvidencePersistBudget)
+	defer cancel()
+	if h.VirtualFileMetadataSaver != nil {
+		result, err := h.VirtualFileMetadataSaver(writeCtx, args)
+		if err != nil || !result.MetadataUpdated {
+			slog.WarnContext(ctx, "virtual probe inventory invalidation did not commit",
+				"component", "api", "file_id", row.ID, "error", err)
+			return
+		}
+		slog.InfoContext(ctx, "virtual probe inventory invalidated for bytes that are not the declared release",
+			"component", "api", "file_id", row.ID, "candidate_uri", row.FilePath)
+		return
+	}
+	if _, err := h.VirtualFileSaver(writeCtx, args); err != nil {
+		slog.WarnContext(ctx, "virtual probe inventory invalidation failed",
+			"component", "api", "file_id", row.ID, "error", err)
+	}
+}
+
 // persistVirtualProbeEvidence writes probed track inventory and the probe stamp
 // back to the catalog row for the virtual content the client requested, so the
 // next start of that row can reuse the persisted evidence instead of
@@ -6032,7 +6118,7 @@ func (h *PlaybackHandler) persistVirtualMetadataBounded(ctx context.Context, sna
 // every later play. Background and speculative callers pass false and are never
 // written directly, so the fallback cannot amplify load.
 func (h *PlaybackHandler) persistVirtualProbeEvidence(ctx context.Context, catalogFile *models.MediaFile, resolvedPath string, probed *models.MediaFile, candidate resolver.PersistedIdentityTiers, stampProbe, foreground bool) {
-	args, originFileID, ok := h.virtualProbeEvidenceArgs(ctx, catalogFile, resolvedPath, probed, candidate, stampProbe)
+	args, originFileID, ok := h.virtualProbeEvidenceArgs(ctx, catalogFile, resolvedPath, probed, candidate, stampProbe, stampProbe)
 	if !ok {
 		return
 	}
@@ -6064,8 +6150,33 @@ func (h *PlaybackHandler) persistVirtualProbeEvidence(ctx context.Context, catal
 // background-probe fix: a probed candidate URI whose path already belongs to an
 // alternate-version row must bind the evidence to the version that actually
 // plays, not be dropped onto the pinned row forever.
-func (h *PlaybackHandler) virtualProbeEvidenceArgs(ctx context.Context, catalogFile *models.MediaFile, resolvedPath string, probed *models.MediaFile, candidate resolver.PersistedIdentityTiers, stampProbe bool) (models.VirtualFilePersistArgs, int, bool) {
+//
+// identityVerified is the evidence verdict's own answer: only evidence that
+// established the bytes as the row's release may adopt a different row or move
+// the write to a foreign owner. A served-size gap that the probe did not
+// resolve is usable for the request but is not identity (see
+// virtualProbeEvidenceWithholdsIdentity), so its write is confined to the row
+// whose own candidate it measured. An unverified write whose bytes provably
+// belong to a different release is refused entirely: a size contradiction the
+// probe could not resolve must never repaint one release with another's
+// inventory, which is how a 720p row acquired 2160p Dolby Vision tracks.
+func (h *PlaybackHandler) virtualProbeEvidenceArgs(ctx context.Context, catalogFile *models.MediaFile, resolvedPath string, probed *models.MediaFile, candidate resolver.PersistedIdentityTiers, stampProbe, identityVerified bool) (models.VirtualFilePersistArgs, int, bool) {
 	if h == nil || (h.VirtualFileSaver == nil && h.VirtualFileMetadataSaver == nil) || catalogFile == nil || probed == nil || catalogFile.ID <= 0 {
+		return models.VirtualFilePersistArgs{}, 0, false
+	}
+	if !identityVerified && !virtualProbeEvidenceSharesRowRelease(catalogFile, resolvedPath, candidate) {
+		// The bytes did not establish identity and they do not belong to this
+		// row's release. Writing their inventory would present a foreign
+		// object as the requested release; leave the catalog untouched and
+		// keep the measured inventory on the live session only.
+		slog.WarnContext(ctx, "virtual probe evidence refused: unverified bytes belong to a different release",
+			"component", "api", "file_id", catalogFile.ID, "candidate_uri", resolvedPath,
+			"row_path", catalogFile.FilePath, "reason", "unverified_foreign_evidence")
+		h.publishRefusedProbeInventory(ctx, catalogFile.ID, resolvedPath, probed)
+		// An earlier build could have written these foreign bytes' inventory
+		// onto this row. Drop that evidence so the next start re-probes instead
+		// of presenting the other release's tracks as this one's.
+		h.invalidateVirtualProbeInventory(ctx, catalogFile)
 		return models.VirtualFilePersistArgs{}, 0, false
 	}
 	identityRow, evidence, ok := h.virtualProbeEvidenceRotateTarget(ctx, catalogFile, resolvedPath, probed, candidate)
@@ -6500,7 +6611,7 @@ func (h *PlaybackHandler) probeVirtualCandidateForegroundFallback(
 	mergeVirtualCandidateTracks(probed, probeCand)
 	// An unverified verdict writes metadata-only: the inventory is real, the
 	// identity is not. See virtualProbeEvidenceWithholdsIdentity.
-	args, _, ok := h.virtualProbeEvidenceArgs(requestCtx, catalogFile, probeCand.URI, probed, candidate, !withholdsIdentity)
+	args, _, ok := h.virtualProbeEvidenceArgs(requestCtx, catalogFile, probeCand.URI, probed, candidate, !withholdsIdentity, !withholdsIdentity)
 	if !ok {
 		return
 	}
@@ -7669,6 +7780,21 @@ func (h *PlaybackHandler) fallbackResolveStaleVirtualSource(
 					"component", "api", "file_id", file.ID, "candidate", stream.URI, "resolved", resolved.URI, "error", ownerErr)
 				return nil
 			} else if ownerRow != nil && ownerRow.ID != file.ID {
+				// Unverified bytes cannot establish the selected release's
+				// plan. A same-release duplicate is still that release; a
+				// genuinely different owner row is not, so refuse it and let
+				// the walk try another candidate.
+				if (resolved.EvidenceObservation ||
+					scanner.VirtualServedSizeMismatch(resolved.File.FileSize, resolved.File.ProbedFormatSize)) &&
+					!virtualSiblingOwnerSharesRelease(file, ownerRow) &&
+					virtualRequestedRowIsSelection(file) {
+					slog.WarnContext(ctx, "virtual stale fallback: refusing unverified bytes that belong to a different release",
+						"component", "api", "file_id", file.ID, "substitute_file_id", ownerRow.ID,
+						"candidate", stream.URI, "resolved", resolved.URI,
+						"reason", "unverified_foreign_owner")
+					h.invalidateVirtualProbeInventory(ctx, file)
+					continue
+				}
 				// A substitute whose path is already owned by another row of
 				// this content is an existing alternate version, not a release
 				// to fold into this row: the CAS-fenced adoption below would
@@ -8007,8 +8133,11 @@ func (h *PlaybackHandler) resolveVirtualCandidateSource(
 			candidate.URI, probed.ProbedFormatSize, candidate.FileSize)
 	}
 	if scanner.VirtualServedSizeMismatch(candidate.FileSize, probed.ProbedFormatSize) {
-		logVirtualProbeSizeGapV3(ctx, file.ID, candidate.URI, candidate.FileSize, probed.ProbedFormatSize, probed.Duration, expectedRuntimeMinutes,
-			virtualProbeEvidenceWithholdsIdentity(evidenceVerdict))
+		if virtualProbeEvidenceWithholdsIdentity(evidenceVerdict) {
+			logVirtualProbeSizeGapUnadopted(ctx, file.ID, candidate.URI, candidate.FileSize, probed.ProbedFormatSize, probed.Duration, expectedRuntimeMinutes)
+		} else {
+			logVirtualProbeSizeGapV3(ctx, file.ID, candidate.URI, candidate.FileSize, probed.ProbedFormatSize, probed.Duration, expectedRuntimeMinutes, false)
+		}
 	}
 	if virtualProbeEvidenceWithholdsIdentity(evidenceVerdict) {
 		// The bytes play for this request and their inventory is written, but
@@ -9329,6 +9458,18 @@ func logVirtualProbeSizeGapV3(ctx context.Context, fileID int, candidateURI stri
 		return
 	}
 	logVirtualProbeSizeMismatchAccepted(ctx, fileID, candidateURI, declaredBytes, servedBytes, probedSeconds, expectedRuntimeMinutes)
+}
+
+// logVirtualProbeSizeGapUnadopted records a served-size gap on a path that
+// will not write the measured inventory. It is the fallback's counterpart to
+// logVirtualProbeSizeGapV3: the bytes may still play for this request, but no
+// catalog row receives their inventory until a serve establishes identity.
+func logVirtualProbeSizeGapUnadopted(ctx context.Context, fileID int, candidateURI string, declaredBytes, servedBytes int64, probedSeconds, expectedRuntimeMinutes int) {
+	slog.WarnContext(ctx, "served size mismatch: release identity unverified, inventory not adopted",
+		"component", "api", "file_id", fileID, "candidate_uri", candidateURI,
+		"served_bytes", servedBytes, "declared_bytes", declaredBytes,
+		"probed_duration_seconds", probedSeconds,
+		"expected_runtime_minutes", expectedRuntimeMinutes)
 }
 
 // logVirtualProbeSiblingObservationPending records a same-release sibling whose

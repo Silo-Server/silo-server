@@ -937,7 +937,7 @@ func TestFallbackSubstituteProbeGatesOnTheSubstitutesOwnDeclaration(t *testing.T
 		}
 	})
 
-	t.Run("cache hit that diverges from the observation writes inventory without identity", func(t *testing.T) {
+	t.Run("cache hit that diverges from the observation writes no inventory", func(t *testing.T) {
 		scanner.ResetVirtualServedSizeSnapshots()
 		t.Cleanup(scanner.ResetVirtualServedSizeSnapshots)
 		h, saved := newFixture(t, 90*60)
@@ -995,17 +995,14 @@ func TestFallbackSubstituteProbeGatesOnTheSubstitutesOwnDeclaration(t *testing.T
 			t.Fatalf("file = %+v, want the cached bytes %d", got.File, substituteDeclared)
 		}
 		h.StopVirtualEvidence()
-		if len(*saved) == 0 {
-			t.Fatal("the unconfirmed cache replay persisted no inventory")
-		}
 		for _, write := range *saved {
-			if write.StampProbe {
-				t.Fatal("the unconfirmed cache replay stamped the bytes as identity")
+			if !write.ClearProbe || write.StampProbe || string(write.AudioTracks) != "[]" {
+				t.Fatalf("the unconfirmed cache replay persisted %+v, want only a probe invalidation", write)
 			}
 		}
 	})
 
-	t.Run("cache hit that records the first observation does not confirm itself", func(t *testing.T) {
+	t.Run("cache hit that records the first observation writes no inventory", func(t *testing.T) {
 		scanner.ResetVirtualServedSizeSnapshots()
 		t.Cleanup(scanner.ResetVirtualServedSizeSnapshots)
 		h, saved := newFixture(t, 90*60)
@@ -1062,12 +1059,9 @@ func TestFallbackSubstituteProbeGatesOnTheSubstitutesOwnDeclaration(t *testing.T
 			t.Fatalf("recorded observation = %+v (present %v), want the served bytes %d", observation, ok, served)
 		}
 		h.StopVirtualEvidence()
-		if len(*saved) == 0 {
-			t.Fatal("the recording cache replay persisted no inventory")
-		}
 		for _, write := range *saved {
-			if write.StampProbe {
-				t.Fatal("the recording cache replay stamped the bytes as identity")
+			if !write.ClearProbe || write.StampProbe || string(write.AudioTracks) != "[]" {
+				t.Fatalf("the recording cache replay persisted %+v, want only a probe invalidation", write)
 			}
 		}
 	})
