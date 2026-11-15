@@ -65,12 +65,6 @@ func TestParseRedisURLSentinel(t *testing.T) {
 	if err != nil || failover.ReadTimeout != 4*time.Second {
 		t.Fatalf("read timeout = %v (%v), want the 4s from the URL", failover.ReadTimeout, err)
 	}
-	// go-redis reads a duration of zero as "use the default".
-	_, failover, err = ParseRedisURL("redis://sentinel-1:26379?master_name=mymaster&read_timeout=0s&dial_timeout=0s")
-	if err != nil || failover.ReadTimeout != 0 || failover.DialTimeout != 5*time.Second {
-		t.Fatalf("timeouts = read %v, dial %v (%v), want the defaults", failover.ReadTimeout, failover.DialTimeout, err)
-	}
-
 	_, failover, err = ParseRedisURL("redis://[2001:db8::1]:26379?master%5Fname=mymaster")
 	if err != nil {
 		t.Fatal(err)
@@ -113,11 +107,13 @@ func TestParseRedisURLRejectsInvalid(t *testing.T) {
 		"redis://sentinel-1:26379?master_name=mymaster&password=p#ss&addr=sentinel-2:26379",
 		"redis://sentinel-1:26379?password=p#ss&master_name=mymaster",
 		"redis://sentinel-1:26379?dial_timeout=5s#&master_name=mymaster",
-		// go-redis reads the first two as no timeout, and fails every dial at
-		// once with the last two.
+		// Explicit zero or negative timeouts disable the read timeout or
+		// make every dial fail at once, including values with a unit.
 		"redis://sentinel-1:26379?master_name=mymaster&read_timeout=0",
+		"redis://sentinel-1:26379?master_name=mymaster&read_timeout=0s",
 		"redis://sentinel-1:26379?master_name=mymaster&read_timeout=-1s",
 		"redis://sentinel-1:26379?master_name=mymaster&dial_timeout=0",
+		"redis://sentinel-1:26379?master_name=mymaster&dial_timeout=0s",
 		"redis://sentinel-1:26379?master_name=mymaster&dial_timeout=-1s",
 		// A + is a space in a query string.
 		"redis://sentinel-1:26379?master_name=mymaster&password=p+ss",
