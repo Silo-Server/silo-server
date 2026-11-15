@@ -153,4 +153,16 @@ func TestGrantCheck(t *testing.T) {
 	if _, err := grants.ForFile(t.Context(), 7, &models.MediaFile{ID: 42, FilePath: filepath.Dir(path)}); !errors.Is(err, ErrSourceGone) {
 		t.Fatalf("directory: %v, want ErrSourceGone", err)
 	}
+
+	// A stat that fails for another reason says nothing about the file. A
+	// symlink loop stands in for an I/O error or a stale mount.
+	if err := os.Symlink(filepath.Base(path), path); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := claims.Check(t.Context()); err == nil || errors.Is(err, ErrSourceGone) || errors.Is(err, ErrSourceChanged) {
+		t.Fatalf("unexaminable file: %v, want the stat's own error", err)
+	}
+	if _, err := grants.ForFile(t.Context(), 7, &models.MediaFile{ID: 42, FilePath: path}); err == nil || errors.Is(err, ErrSourceGone) {
+		t.Fatalf("mint for an unexaminable file: %v, want the stat's own error", err)
+	}
 }

@@ -19,6 +19,8 @@ type Throttle[K comparable] struct {
 
 	mu   sync.Mutex
 	last map[K]time.Time
+	// swept is when the full map was last searched for expired keys.
+	swept time.Time
 }
 
 // New returns a Throttle that lets one line per key through per interval.
@@ -38,6 +40,14 @@ func (t *Throttle[K]) Allow(key K) bool {
 		return false
 	}
 	if len(t.last) >= maxKeys {
+		// A full map is searched for expired keys at most once per interval,
+		// so a flood of made-up keys does not pay for a full pass each. Keys
+		// not seen yet stay quiet until the next search, which only costs
+		// log lines.
+		if now.Sub(t.swept) < t.interval {
+			return false
+		}
+		t.swept = now
 		for k, last := range t.last {
 			if now.Sub(last) >= t.interval {
 				delete(t.last, k)

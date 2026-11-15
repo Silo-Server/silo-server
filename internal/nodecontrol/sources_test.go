@@ -251,6 +251,15 @@ func TestSourceOpenRefusals(t *testing.T) {
 		t.Fatalf("file removed = %d, want 410", status)
 	}
 
+	// A file the server could not examine is not gone: the node retries a 503
+	// and ends its job on a 410. A symlink loop stands in for an I/O error.
+	if err := os.Symlink(filepath.Base(path), path); err != nil {
+		t.Fatal(err)
+	}
+	if status, _, _ := f.open(nodeA, f.keyA, grant); status != http.StatusServiceUnavailable {
+		t.Fatalf("unexaminable file = %d, want 503", status)
+	}
+
 	f.server.opts.Grants = nodesource.NewGrants(func() string { return "" })
 	if status, _, _ := f.open(nodeA, f.keyA, grant); status != http.StatusServiceUnavailable {
 		t.Fatalf("no grant key = %d, want 503", status)

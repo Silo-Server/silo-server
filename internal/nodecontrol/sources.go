@@ -71,6 +71,10 @@ func (s *Server) HandleSourceOpen(w http.ResponseWriter, r *http.Request) {
 		if r.Context().Err() != nil {
 			status = http.StatusServiceUnavailable
 		}
+		if status == http.StatusServiceUnavailable {
+			slog.WarnContext(r.Context(), "source grant check could not examine the file", "component", "nodecontrol",
+				"node_id", id, "kind", claims.Kind, "id", claims.ID, "error", err)
+		}
 		http.Error(w, http.StatusText(status), status)
 		return
 	}
@@ -149,12 +153,18 @@ func (s *Server) verifyGrant(ctx context.Context, nodeID int, token string) (nod
 	return claims, 0
 }
 
-// sourceStatus is the status a failed source check answers with.
+// sourceStatus is the status a failed source check answers with. A node ends
+// its job on 410 and 412, so they are kept for a file that is gone or
+// changed. A file that could not be examined answers 503, which the node
+// retries.
 func sourceStatus(err error) int {
-	if errors.Is(err, nodesource.ErrSourceChanged) {
+	switch {
+	case errors.Is(err, nodesource.ErrSourceChanged):
 		return http.StatusPreconditionFailed
+	case errors.Is(err, nodesource.ErrSourceGone):
+		return http.StatusGone
 	}
-	return http.StatusGone
+	return http.StatusServiceUnavailable
 }
 
 // grantResolution checks that the catalog still has the source of a settled
