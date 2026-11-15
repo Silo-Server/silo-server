@@ -205,12 +205,10 @@ func lifecycleIDParam(sessionID string) any {
 	return nil
 }
 
-// lifecycleOnlySessions lists sessions whose lifecycle row is live but that
-// no server has a live row for: a native session whose attempt is live, one
-// a node still serves while no API server holds it in memory, and an
-// Audiobookshelf play a client only reports, which no server ever holds. The
-// row is the one recorded when the session started, at the attempt's latest
-// position or the reported play's.
+// lifecycleOnlySessions lists sessions with a live lifecycle row that no
+// server has a live row for: a native session whose attempt is live (a node
+// still serves it), and an Audiobookshelf play a client only reports. The row
+// is the one recorded at start, at the attempt's or reported play's position.
 const lifecycleOnlySessions = `
 	SELECT (jsonb_populate_record(NULL::playback_sessions_sync, lc.start_facts || jsonb_build_object(
 		'reporting_node', '',
@@ -221,8 +219,7 @@ const lifecycleOnlySessions = `
 			(lc.start_facts->>'position_seconds')::double precision, 0)))).*
 	FROM playback_session_lifecycle lc
 	LEFT JOIN playback_v3_attempts a ON a.session_id = lc.session_id AND a.stopped_at IS NULL AND a.expires_at > NOW()
-	LEFT JOIN abs_playback_sessions r ON lc.frontend = 'abs' AND r.id = lc.session_id::text
-		AND r.client_session_id IS NOT NULL AND r.closed_at IS NULL
+	LEFT JOIN abs_playback_sessions r ON lc.frontend = 'abs' AND r.id = lc.session_id::text AND r.client_session_id IS NOT NULL AND r.closed_at IS NULL
 	WHERE lc.state <> 'stopped' AND lc.start_facts <> '{}'::jsonb
 	  AND (a.session_id IS NOT NULL OR r.id IS NOT NULL)
 	  AND NOT EXISTS (SELECT 1 FROM playback_sessions_sync live WHERE live.session_id = lc.session_id::text)`
