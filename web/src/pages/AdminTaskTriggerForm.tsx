@@ -38,30 +38,72 @@ interface TriggerFormRowProps {
   onRemove: () => void;
 }
 
+type IntervalUnit = "seconds" | "minutes" | "hours";
+
+const UNIT_MS: Record<IntervalUnit, number> = {
+  seconds: 1000,
+  minutes: 60_000,
+  hours: 3_600_000,
+};
+
+interface IntervalDraft {
+  // The interval_ms this draft was read from or last sent to onChange.
+  ms: number | undefined;
+  text: string;
+  unit: IntervalUnit;
+}
+
+// Shows a stored interval in the largest unit that divides it evenly.
+function intervalToDraft(ms: number | undefined): IntervalDraft {
+  if (ms == null) return { ms, text: "", unit: "minutes" };
+  if (ms >= UNIT_MS.hours && ms % UNIT_MS.hours === 0)
+    return { ms, text: String(ms / UNIT_MS.hours), unit: "hours" };
+  if (ms >= UNIT_MS.minutes && ms % UNIT_MS.minutes === 0)
+    return { ms, text: String(ms / UNIT_MS.minutes), unit: "minutes" };
+  return { ms, text: String(ms / UNIT_MS.seconds), unit: "seconds" };
+}
+
+// The largest interval_ms the tasks API accepts.
+const MAX_INTERVAL_MS = 9_223_372_036_854;
+
+// Undefined unless the box holds an interval the API accepts. The schedule
+// panel keeps Save off until every interval trigger has one.
+function draftToMs(text: string, unit: IntervalUnit): number | undefined {
+  if (text.trim() === "") return undefined;
+  const ms = Math.round(Number(text) * UNIT_MS[unit]);
+  return Number.isFinite(ms) && ms >= 1 && ms <= MAX_INTERVAL_MS ? ms : undefined;
+}
+
 export function TriggerFormRow({ trigger, onChange, onRemove }: TriggerFormRowProps) {
   const t = useT();
-  // Convert interval_ms to a user-friendly value + unit
-  const intervalToDisplay = (ms: number): { value: number; unit: string } => {
-    if (ms >= 3_600_000 && ms % 3_600_000 === 0) return { value: ms / 3_600_000, unit: "hours" };
-    if (ms >= 60_000 && ms % 60_000 === 0) return { value: ms / 60_000, unit: "minutes" };
-    return { value: ms / 1000, unit: "seconds" };
+  // The box and the unit select show what was typed and picked, not the unit
+  // that divides interval_ms most evenly, so typing 60 minutes stays 60 minutes.
+  const [intervalDraft, setIntervalDraft] = useState(() => intervalToDraft(trigger.interval_ms));
+  if (intervalDraft.ms !== trigger.interval_ms) {
+    // interval_ms changed outside this row, so show the new value.
+    setIntervalDraft(intervalToDraft(trigger.interval_ms));
+  }
+  const updateInterval = (text: string, unit: IntervalUnit) => {
+    const ms = draftToMs(text, unit);
+    setIntervalDraft({ ms, text, unit });
+    onChange({ ...trigger, interval_ms: ms });
   };
-
-  const displayToMs = (value: number, unit: string): number => {
-    if (unit === "hours") return value * 3_600_000;
-    if (unit === "minutes") return value * 60_000;
-    return value * 1000;
-  };
-
-  const intervalDisplay = intervalToDisplay(trigger.interval_ms ?? 60_000);
-  const [intervalUnit, setIntervalUnit] = useState(intervalDisplay.unit);
 
   return (
     <div className="surface-panel-subtle flex flex-col gap-3 rounded-xl p-3 sm:flex-row sm:items-start">
       <div className="flex-1 space-y-2">
         <Select
           value={trigger.type}
-          onValueChange={(v) => onChange({ ...trigger, type: v as TriggerType })}
+          onValueChange={(v) => {
+            // Store the values the new type's inputs show until edited, so Save
+            // sends them instead of leaving the fields out of the request.
+            const type = v as TriggerType;
+            const next = { ...trigger, type };
+            if (type === "interval") next.interval_ms ??= 60_000;
+            if (type === "daily" || type === "weekly") next.time_of_day ??= "00:00";
+            if (type === "weekly") next.day_of_week ??= 0;
+            onChange(next);
+          }}
         >
           <SelectTrigger className="w-full sm:w-[160px]">
             <SelectValue />
@@ -81,21 +123,13 @@ export function TriggerFormRow({ trigger, onChange, onRemove }: TriggerFormRowPr
               type="number"
               min={1}
               className="w-full sm:w-[100px]"
-              value={intervalDisplay.value}
-              onChange={(e) => {
-                const val = parseInt(e.target.value, 10) || 1;
-                onChange({ ...trigger, interval_ms: displayToMs(val, intervalUnit) });
-              }}
+              value={intervalDraft.text}
+              aria-invalid={draftToMs(intervalDraft.text, intervalDraft.unit) === undefined}
+              onChange={(e) => updateInterval(e.target.value, intervalDraft.unit)}
             />
             <Select
-              value={intervalUnit}
-              onValueChange={(u) => {
-                setIntervalUnit(u);
-                onChange({
-                  ...trigger,
-                  interval_ms: displayToMs(intervalDisplay.value, u),
-                });
-              }}
+              value={intervalDraft.unit}
+              onValueChange={(u) => updateInterval(intervalDraft.text, u as IntervalUnit)}
             >
               <SelectTrigger className="w-full sm:w-[120px]">
                 <SelectValue />

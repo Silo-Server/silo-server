@@ -2,10 +2,12 @@ package fspath
 
 import (
 	"context"
+	"errors"
 	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"sync"
 
 	"github.com/Silo-Server/silo-server/internal/procgroup"
@@ -128,6 +130,21 @@ func Readlink(name string) (string, error) {
 // end of ctx kills every process the command started.
 func CommandContext(ctx context.Context, name string, args ...string) *exec.Cmd {
 	return procgroup.CommandContext(ctx, name, DecodeAll(args)...)
+}
+
+// FFConcatFileURL returns path as a quoted file: URL for an ffmpeg ffconcat
+// list. Inside single quotes ffconcat takes every character literally,
+// backslashes included, so a single quote is written by closing the quotes,
+// escaping it, and reopening them. A list is read line by line and ffmpeg URLs
+// end at a NUL, so paths holding a line break or NUL are rejected. A list
+// usually reaches ffmpeg on stdin, not as an argument that CommandContext
+// decodes, so an encoded path is decoded here to name the real file.
+func FFConcatFileURL(path string) (string, error) {
+	path = Decode(path)
+	if strings.ContainsAny(path, "\n\r\x00") {
+		return "", errors.New("an ffconcat path must not contain a line break or NUL")
+	}
+	return "'file:" + strings.ReplaceAll(path, "'", `'\''`) + "'", nil
 }
 
 // DecodeAll decodes each string in args. It returns args itself when no

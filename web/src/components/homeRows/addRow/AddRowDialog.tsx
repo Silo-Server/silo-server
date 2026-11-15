@@ -8,6 +8,7 @@ import { Input } from "@/components/ui/input";
 import { useRowPreview } from "@/hooks/queries/homeRows/useRowPreview";
 import { useMediaQuery } from "@/hooks/useMediaQuery";
 import { useAppLanguage, useT } from "@/i18n";
+import { joinList } from "@/lib/appLocale";
 import {
   isPersonalRowKind,
   pickerGroups,
@@ -415,7 +416,7 @@ export function AddRowDialog({
               {conflict
                 ? t("web.home.addRow.conflict")
                 : t("web.home.addRow.changedElsewhere", {
-                    fields: changedUpstream.map((field) => t(DRAFT_FIELD_LABELS[field])).join(", "),
+                    fields: joinList(changedUpstream.map((field) => t(DRAFT_FIELD_LABELS[field]))),
                   })}
             </p>
             {conflict ? (

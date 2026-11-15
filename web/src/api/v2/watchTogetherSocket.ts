@@ -1,3 +1,4 @@
+import { t } from "@/i18n";
 import {
   captureProfileRequestContext,
   isCapturedProfileAuthorityActive,
@@ -33,7 +34,7 @@ export async function mintRoomSocketTicket(
   });
   check();
   if (ticket.protocol !== "silo.room.v2" || !/^[A-Za-z0-9_-]{43}$/.test(ticket.ticket))
-    throw new Error("Invalid room socket credential.");
+    throw new Error(t("web.common.errors.roomSocketCredentialInvalid"));
   return ticket;
 }
 export function roomSocketURL(roomId: string) {

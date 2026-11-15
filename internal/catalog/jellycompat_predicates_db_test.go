@@ -170,6 +170,28 @@ func TestJellycompatPredicatesPostgres(t *testing.T) {
 			t.Fatalf("denied result: %+v", result)
 		}
 	})
+	t.Run("movie critic score sort and minimum", func(t *testing.T) {
+		// Jellyfin sends MinCriticRating as a double; the stored score is a
+		// whole percentage, and unrated movies stay last.
+		exec(`UPDATE media_items SET rating_rt_critic=CASE content_id WHEN $1 THEN 92 WHEN $2 THEN 71 WHEN $3 THEN 70 WHEN $4 THEN 30 END WHERE content_id=ANY($5)`, movieIDs[0], movieIDs[1], movieIDs[2], movieIDs[3], movieIDs)
+		defer exec(`UPDATE media_items SET rating_rt_critic=NULL WHERE content_id=ANY($1)`, movieIDs)
+		q := BrowseFilters{Type: "movie", ContentIDs: movieIDs, Sort: BrowseSortRatingRTCritic, Order: BrowseOrderDescending, Limit: 10}
+		result, err := browse.BrowsePage(ctx, q, true)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := orderedIDs(result.Items); len(got) != 8 || !slices.Equal(got[:4], []string{movieIDs[0], movieIDs[1], movieIDs[2], movieIDs[3]}) {
+			t.Fatalf("critic order = %v, want m0 m1 m2 m3 then the unrated", got)
+		}
+		q.MinCriticRating = 70.5
+		result, err = browse.BrowsePage(ctx, q, true)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := orderedIDs(result.Items); result.Total != 2 || !slices.Equal(got, []string{movieIDs[0], movieIDs[1]}) {
+			t.Fatalf("minimum 70.5 total=%d ids=%v, want m0 and m1", result.Total, got)
+		}
+	})
 	seriesID, otherSeries := prefix+"-series", prefix+"-other-series"
 	for _, id := range []string{seriesID, otherSeries} {
 		exec(`INSERT INTO media_items(content_id,type,title,genres,content_rating,content_rating_age) VALUES($1,'series','Synthetic Series',ARRAY['Drama'],'PG',8)`, id)
@@ -340,6 +362,13 @@ func TestJellycompatPredicatesPostgres(t *testing.T) {
 		}
 		if total != 4 || len(items) != 4 {
 			t.Fatalf("filtered total=%d items=%d, want the four 2024 episodes other than e0", total, len(items))
+		}
+
+		// Episodes have no critic score, so a minimum one matches none.
+		critic := all
+		critic.MinCriticRating = 60
+		if _, total, err = episodes.BrowseEpisodes(ctx, "", "", nil, "", critic, access, true); err != nil || total != 0 {
+			t.Fatalf("critic minimum total=%d err=%v, want no episodes", total, err)
 		}
 
 		// An undated episode stays last in a descending year or date sort.

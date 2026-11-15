@@ -552,6 +552,8 @@ export function useCatalogWindow(
       knownItems:
         page0Result.data?.total_exact !== false ? (page0Result.data?.total ?? 0) : loadedEnd,
       pages,
+      // Whether the first page holds the whole result. Undefined until it loads.
+      firstPageComplete: page0Result.data ? !page0Result.data.has_more : undefined,
       // Collection sources report the order they actually resolved in, after
       // the viewer's saved override and the collection's configured default.
       // Absent means the collection kept its own source order.
@@ -639,6 +641,51 @@ export function useCatalogLetters(state: CatalogSearchState, options: { enabled?
     enabled: (options.enabled ?? true) && state.source === "query" && !state.q,
     staleTime: 10 * 60 * 1000,
   });
+}
+
+/**
+ * The exact number of titles a query-source browse matches, for a count beside
+ * its filters. Order never changes which titles match, so the count is keyed
+ * without the sort and read in title order, the order every executor counts
+ * cheaply: a re-sort reuses it. A `query_limit` caps it the way it caps the
+ * browse. Undefined while it loads, when its latest read failed (a failed
+ * refresh drops the cached count rather than show a stale one), or when the
+ * server could only estimate it.
+ */
+export function useCatalogCount(state: CatalogSearchState, options: { enabled?: boolean } = {}) {
+  const scope = catalogScopeQuery(state);
+  const queryLimit = state.query_definition.limit;
+  const unordered = { ...state.query_definition, sort: undefined, limit: undefined };
+  const query = useQuery({
+    queryKey: catalogKeys.count({
+      library_id: scope.library_id ? Number(scope.library_id) : undefined,
+      type: scope.type,
+      query_fingerprint: JSON.stringify(unordered),
+    }),
+    queryFn: async ({ signal }) => {
+      const page = await fetchCatalogPage(
+        {
+          ...state,
+          query_definition: { ...unordered, sort: { field: "title", order: "asc" } },
+        },
+        1,
+        0,
+        { signal },
+        true,
+      );
+      return page.total_exact === false ? null : page.total;
+    },
+    enabled: (options.enabled ?? true) && state.source === "query" && !state.q,
+    staleTime: 10 * 60 * 1000,
+  });
+  const total = query.isError ? undefined : (query.data ?? undefined);
+  return {
+    count:
+      total !== undefined && queryLimit !== undefined && queryLimit > 0
+        ? Math.min(total, queryLimit)
+        : total,
+    isLoading: query.isLoading,
+  };
 }
 
 export function useCatalogFilters(

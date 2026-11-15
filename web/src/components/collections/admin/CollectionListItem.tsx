@@ -18,7 +18,7 @@ import { hiddenFromTab, hiddenTag, onHome, pinnedTag } from "@/lib/collections/c
 import { collectionKindLabel, collectionKindOf } from "@/lib/collections/types";
 import { cn } from "@/lib/utils";
 import { useAppLanguage, useT } from "@/i18n";
-import { formatLocale } from "@/lib/appLocale";
+import { formatLocale, joinList } from "@/lib/appLocale";
 
 const TAG =
   "inline-flex h-[22px] shrink-0 items-center gap-1 rounded-full px-2 text-[11.5px] font-semibold";
@@ -137,7 +137,7 @@ function ListItem({
           {showLibraries && libraryNames.length > 0 ? (
             <>
               <MetaDot />
-              {libraryNames.join(", ")}
+              {joinList(libraryNames)}
             </>
           ) : null}
           <MetaDot />

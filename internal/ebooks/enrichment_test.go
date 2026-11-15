@@ -903,3 +903,54 @@ func (f *fakeEnrichmentQueue) recordTransition(job EnrichmentJob) {
 	}
 	f.transitionedJobs[job.ContentID] = job
 }
+
+// An item with no author has no author check after GetMetadata, so a partial
+// title match alone must not give it another book's metadata (#4154).
+func TestEbookWithoutAnAuthorNeedsTheWholeTitle(t *testing.T) {
+	for _, tc := range []struct {
+		name, author, candidate string
+		matched                 bool
+	}{
+		{name: "a one-word prefix", candidate: "Raw"},
+		{name: "the same title", candidate: "Raw Stream", matched: true},
+		{name: "a one-word prefix with an author", author: "Someone", candidate: "Raw", matched: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			providers := []metadata.Provider{&fakeEbookMetadataProvider{
+				slug:    "openlibrary",
+				results: []metadata.SearchResult{{Name: tc.candidate, ProviderIDs: map[string]string{"openlibrary": "1"}}},
+			}}
+			// The admitted provider IDs are what GetMetadata fetches by.
+			_, ids, _, _ := collectEbookMetadata(context.Background(), enrichmentItemRow{
+				ContentID: "c1", Title: "Raw Stream", Author: tc.author,
+			}, providers, nil)
+			if matched := ids["openlibrary"] == "1"; matched != tc.matched {
+				t.Fatalf("%q for \"Raw Stream\" (author %q): matched = %v, want %v", tc.candidate, tc.author, matched, tc.matched)
+			}
+		})
+	}
+}
+
+// A no-author ebook whose title carries a year the search drops is matched
+// against the title it was searched with: "Dune (2019)" is searched as "Dune"
+// and must accept "Dune", while a longer work still fails the title check.
+func TestEbookWithoutAnAuthorMatchesTheSearchedTitle(t *testing.T) {
+	for _, tc := range []struct {
+		candidate string
+		matched   bool
+	}{
+		{candidate: "Dune", matched: true},
+		{candidate: "Dune Messiah"},
+	} {
+		t.Run(tc.candidate, func(t *testing.T) {
+			providers := []metadata.Provider{&fakeEbookMetadataProvider{
+				slug:    "openlibrary",
+				results: []metadata.SearchResult{{Name: tc.candidate, ProviderIDs: map[string]string{"openlibrary": "1"}}},
+			}}
+			_, ids, _, _ := collectEbookMetadata(context.Background(), enrichmentItemRow{ContentID: "c1", Title: "Dune (2019)"}, providers, nil)
+			if matched := ids["openlibrary"] == "1"; matched != tc.matched {
+				t.Fatalf("%q for \"Dune (2019)\": matched = %v, want %v", tc.candidate, matched, tc.matched)
+			}
+		})
+	}
+}

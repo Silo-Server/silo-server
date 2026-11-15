@@ -3,7 +3,7 @@ import { ThumbsDown } from "lucide-react";
 import type { BrowseItem } from "@/api/types";
 import { Button } from "@/components/ui/button";
 import { useNotInterestedList, useToggleNotInterested } from "@/hooks/queries/notInterested";
-import { useT } from "@/i18n";
+import { numberText, useT } from "@/i18n";
 import { buildItemHref } from "@/lib/mediaNavigation";
 
 function NotInterestedRow({ item }: { item: BrowseItem }) {
@@ -28,7 +28,7 @@ function NotInterestedRow({ item }: { item: BrowseItem }) {
         </Link>
         <span className="text-muted-foreground text-xs">
           {[
-            item.year > 0 ? item.year : null,
+            item.year > 0 ? numberText(item.year) : null,
             item.type === "series"
               ? t("web.settings.notInterestedList.series")
               : t("web.settings.notInterestedList.movie"),

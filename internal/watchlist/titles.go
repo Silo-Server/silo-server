@@ -201,6 +201,7 @@ type TitleTMDB interface {
 type promotionStore interface {
 	AddToWatchlistAt(ctx context.Context, profileID, mediaItemID string, addedAt time.Time) (bool, error)
 	GetWatchlistEntry(ctx context.Context, profileID, mediaItemID string) (*userstore.WatchlistEntry, error)
+	ListWatchlistByMediaItems(ctx context.Context, profileID string, mediaItemIDs []string) (map[string]bool, error)
 }
 
 const (
@@ -368,25 +369,43 @@ func (s *Titles) PurgeProfile(ctx context.Context, userID int, profileID string)
 // The IDs a stored title holding one of the TMDB IDs has kept count too, so
 // add and remove find the item promotion would move the title onto.
 func (s *Titles) LibraryMatches(ctx context.Context, mediaType string, tmdbIDs []int, imdbID string, tvdbID int) ([]string, error) {
-	aliases := make([]catalog.ProviderAlias, 0, len(tmdbIDs)+2)
-	tmdbAliases := make([]string, 0, len(tmdbIDs))
+	ids := make([]string, 0, len(tmdbIDs)+2)
 	for _, id := range tmdbIDs {
-		tmdbID := strconv.Itoa(id)
-		tmdbAliases = append(tmdbAliases, tmdbID)
-		aliases = append(aliases, catalog.ProviderAlias{MediaType: mediaType, Provider: contentid.ProviderTMDB, ProviderID: tmdbID})
-	}
-	stored, err := s.repo.aliasesOfTMDBOwners(ctx, mediaType, tmdbAliases)
-	if err != nil {
-		return nil, err
-	}
-	for _, a := range stored {
-		aliases = append(aliases, catalog.ProviderAlias{MediaType: a.MediaType, Provider: a.Provider, ProviderID: a.ProviderID})
+		ids = append(ids, contentid.ProviderTMDB+":"+strconv.Itoa(id))
 	}
 	if imdbID != "" {
-		aliases = append(aliases, catalog.ProviderAlias{MediaType: mediaType, Provider: contentid.ProviderIMDB, ProviderID: imdbID})
+		ids = append(ids, contentid.ProviderIMDB+":"+imdbID)
 	}
 	if tvdbID > 0 {
-		aliases = append(aliases, catalog.ProviderAlias{MediaType: mediaType, Provider: contentid.ProviderTVDB, ProviderID: strconv.Itoa(tvdbID)})
+		ids = append(ids, contentid.ProviderTVDB+":"+strconv.Itoa(tvdbID))
+	}
+	return s.libraryMatchesIDs(ctx, mediaType, ids)
+}
+
+// libraryMatchesIDs is LibraryMatches for prefixed provider IDs ("tmdb:550",
+// "imdb:tt0137523", "tvdb:121361"), any number of each.
+func (s *Titles) libraryMatchesIDs(ctx context.Context, mediaType string, ids []string) ([]string, error) {
+	aliases := make([]catalog.ProviderAlias, 0, len(ids))
+	var tmdbAliases []string
+	for _, id := range ids {
+		// ResolveProviderAliases skips empty IDs and other providers.
+		provider, providerID, _ := strings.Cut(id, ":")
+		if provider == contentid.ProviderTMDB && providerID != "" {
+			tmdbAliases = append(tmdbAliases, providerID)
+		}
+		aliases = append(aliases, catalog.ProviderAlias{MediaType: mediaType, Provider: provider, ProviderID: providerID})
+	}
+	if len(tmdbAliases) > 0 {
+		stored, err := s.repo.aliasesOfTMDBOwners(ctx, mediaType, tmdbAliases)
+		if err != nil {
+			return nil, err
+		}
+		for _, a := range stored {
+			aliases = append(aliases, catalog.ProviderAlias{MediaType: a.MediaType, Provider: a.Provider, ProviderID: a.ProviderID})
+		}
+	}
+	if len(aliases) == 0 {
+		return nil, nil
 	}
 	matches, err := s.catalog.ResolveProviderAliases(ctx, aliases)
 	if err != nil {

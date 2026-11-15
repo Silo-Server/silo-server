@@ -178,7 +178,7 @@ export function BrowseShelf({
             onChange={(event) => setQuery(event.target.value)}
             placeholder={t("web.watchTogether.browse.searchPlaceholder")}
             aria-label={t("web.watchTogether.browse.searchLabel")}
-            className="border-border bg-surface placeholder:text-muted-foreground h-10 w-full rounded-lg border py-2 ps-9 pe-3 text-sm outline-none focus:border-white/30"
+            className="border-input bg-surface placeholder:text-muted-foreground h-10 w-full rounded-lg border py-2 ps-9 pe-3 text-sm outline-none focus:border-white/30"
           />
         </div>
         <div

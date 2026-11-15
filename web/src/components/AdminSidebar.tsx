@@ -28,7 +28,7 @@ import { useBuildInfo } from "@/hooks/queries/admin/system";
 import { useAdminRequestCounts } from "@/hooks/queries/admin/requests";
 import { usePrefetchAdminServerSettings } from "@/hooks/queries/admin/settings";
 import { cn } from "@/lib/utils";
-import { useT } from "@/i18n";
+import { numberText, useT } from "@/i18n";
 
 interface AdminSidebarProps {
   onNavigate?: () => void;
@@ -113,7 +113,7 @@ export default function AdminSidebar({
   const requestsBadge =
     pendingRequests > 0 ? (
       <span className="bg-primary text-primary-foreground rounded-full px-1.5 py-px text-[10px] font-semibold tabular-nums">
-        <span aria-hidden="true">{pendingRequests}</span>
+        <span aria-hidden="true">{numberText(pendingRequests)}</span>
         <span className="sr-only">
           {t("web.admin.shell.sidebar.pendingRequests", {
             count: pendingRequests,
@@ -147,8 +147,16 @@ export default function AdminSidebar({
   const activeTopic = sections
     .flatMap((section) => section.entries)
     .find((entry) => isAdminNavTopic(entry) && entry.items.some(isActive));
+  const activeTopicId = activeTopic && isAdminNavTopic(activeTopic) ? activeTopic.id : null;
+  // Outside every topic, the sidebar item the page sits under (Dashboard,
+  // Activity) marks where the admin is, so a page beneath it counts as it.
+  const activePage = sections
+    .flatMap((section) => section.entries)
+    .find((entry) => !isAdminNavTopic(entry) && isActive(entry));
   const topics = useAdminNavTopics(
-    activeTopic && isAdminNavTopic(activeTopic) ? activeTopic.id : null,
+    activeTopicId,
+    activeTopicId ??
+      (activePage && !isAdminNavTopic(activePage) ? activePage.href : location.pathname),
   );
 
   function renderPluginItem(item: AdminNavItem) {

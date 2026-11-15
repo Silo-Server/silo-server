@@ -2236,9 +2236,11 @@ func (s *Server) startReconstructProcess(rebuildCtx context.Context, r *http.Req
 	// these dimensions), and registering the dead session would serve this
 	// media as permanently missing. Outside the automatic pipeline, mirror
 	// handleStart's software retry for the accel StartupRetryHWAccel would
-	// change.
+	// change. The rebuild reuses the lost session's output directory, so wait
+	// for a manifest this process wrote: the previous one would report a
+	// process that died at startup as ready and skip the retry (#4099).
 	if retryAccel != opts.HWAccel {
-		if _, waitErr := session.WaitForManifest(playback.ManifestStartupTimeout); waitErr != nil {
+		if _, waitErr := session.WaitForGenerationManifest(playback.ManifestStartupTimeout); waitErr != nil {
 			if session.IsRunning() {
 				slog.WarnContext(r.Context(), "reconstructed transcode slow to produce a manifest", "component", "transcodenode",
 					"error", waitErr, "session", sessionID, "playback_session_id", sessionID)
@@ -2255,7 +2257,7 @@ func (s *Server) startReconstructProcess(rebuildCtx context.Context, r *http.Req
 						"session", sessionID, "playback_session_id", sessionID)
 					return nil, err
 				}
-				if _, retryErr := session.WaitForManifest(playback.ManifestStartupTimeout); retryErr != nil {
+				if _, retryErr := session.WaitForGenerationManifest(playback.ManifestStartupTimeout); retryErr != nil {
 					_ = session.Close()
 					slog.ErrorContext(r.Context(), "reconstructed software retry failed readiness check", "component", "transcodenode", "error", retryErr,
 						"session", sessionID, "playback_session_id", sessionID)
@@ -2502,6 +2504,7 @@ func (s *Server) handleRemux(w http.ResponseWriter, r *http.Request) {
 	if err := playback.ServeRemuxWithOptions(w, request, source.Input(), "mp4", seekSeconds, claims.TranscodeAudio, claims.AudioTrackIndex, claims.DVProfile, playback.RemuxServeOptions{
 		DVMode: playback.RemuxDVMode(claims.RemuxDVMode), FFmpegPath: cfg.Playback.FFmpegPath,
 		DropResumeLeadingPictures: claims.RemuxResumeLeadingPictureDrop,
+		StreamOriginSeconds:       playback.RemuxStreamOrigin(r.URL.Query()),
 		ContentType:               playback.RemuxContentType(claims.AudioOnly), AudioOnly: claims.AudioOnly,
 		SourceAudioChannels: claims.SourceAudioChannels, TargetAudioChannels: claims.TargetAudioChannels,
 		TargetAudioBitrateKbps: claims.TargetAudioBitrateKbps, CopyAudioCodec: claims.CopyAudioCodec,

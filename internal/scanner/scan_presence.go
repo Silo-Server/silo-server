@@ -3,7 +3,12 @@ package scanner
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
+
+	"github.com/jackc/pgx/v5"
+
+	"github.com/Silo-Server/silo-server/internal/pathscope"
 )
 
 // scanPresence is the part of a cataloged file's row a full scan needs to
@@ -25,8 +30,41 @@ func (r *FileRepository) ListScanPresenceByFolderAndPathPrefix(ctx context.Conte
 	if err != nil {
 		return nil, fmt.Errorf("querying scan presence by folder and path prefix: %w", err)
 	}
-	defer rows.Close()
+	return scanPresenceRows(rows)
+}
 
+// scanInventoryTime returns the database time for a scan to take before it
+// walks. Its missing-file pass lists only rows written before then
+// (ListScanPresenceWrittenBefore): a row another scan wrote since is a file
+// this walk may have missed, and stays that scan's to reconcile.
+func (s *Scanner) scanInventoryTime(ctx context.Context) (time.Time, error) {
+	var at time.Time
+	if s.fileRepo == nil {
+		return at, nil
+	}
+	if err := s.fileRepo.Pool().QueryRow(ctx, `SELECT now()`).Scan(&at); err != nil {
+		return at, fmt.Errorf("reading database time: %w", err)
+	}
+	return at, nil
+}
+
+// ListScanPresenceWrittenBefore returns the presence rows of a folder subtree
+// that no write has touched at or after before. A scan passes the database
+// time it began walking, so rows another scan wrote since stay that scan's.
+func (r *FileRepository) ListScanPresenceWrittenBefore(ctx context.Context, folderID int, pathPrefix string, before time.Time) ([]scanPresence, error) {
+	clauses, args := pathscope.RangeCoverageClauses("file_path", []string{pathPrefix}, 3)
+	query := `SELECT id, file_path, missing_since FROM media_files
+		WHERE media_folder_id = $1 AND updated_at < $2 AND (` + strings.Join(clauses, " OR ") + `)
+		ORDER BY file_path ASC`
+	rows, err := r.pool.Query(ctx, query, append([]any{folderID, before}, args...)...)
+	if err != nil {
+		return nil, fmt.Errorf("querying scan presence written before %s: %w", before, err)
+	}
+	return scanPresenceRows(rows)
+}
+
+func scanPresenceRows(rows pgx.Rows) ([]scanPresence, error) {
+	defer rows.Close()
 	files := make([]scanPresence, 0)
 	for rows.Next() {
 		var file scanPresence

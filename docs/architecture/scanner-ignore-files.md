@@ -3,14 +3,18 @@
 Media folders honor three file-based ignore mechanisms during scans. Series,
 movie, audiobook, podcast, ebook, and manga walkers apply these rules to the
 paths they discover. Existing library layouts still apply: podcast episodes
-must be directly inside a show folder, and audiobook discovery stops below a
-book folder containing audio. Loose audio in a configured library root does
-not stop it, and a configured root inside a book is still walked as its own
-root. A subtree or audiobook file scan applies these rules from its scoped
-folder down: a scoped folder that holds audio is one book unless it is a
-configured library root. The scan doesn't look at folders above the scope,
-so a scope inside a book folder still becomes a book of its own, and an
-admin's request for an excluded file walks below its folder (see below).
+must be directly inside a show folder, and audiobook discovery follows the
+[audiobook folder layout](audiobook-folder-layout.md). A configured library
+root inside another root is walked as its own root. A subtree or audiobook
+file scan applies these rules from its scan folder down, after widening the
+scope as that layout describes. Widening stops below the deepest configured
+root that holds the scope, but the widened scan still inherits the rules of
+every ignore file between the outermost configured root that holds it and its
+scan folder, as a library scan of that outer root would. Audio the ignore
+files exclude does not count when widening, and a scope the library walk only
+reaches through a symlink back to a folder above it is not widened. An
+admin's request for an excluded file admits that file and nothing else the
+rules exclude (see below).
 
 Every ignore file must be a regular file in the directory it applies to. A
 directory or symlink with one of these names is ordinary content.
@@ -109,18 +113,20 @@ scope is a skipped directory, or lies below one, reads nothing.
 - A single-file scan (`ScanFile`) of a video, ebook, or manga file reads no
   ignore files. An admin's scan request for a file's exact path scans it even
   if a pattern would exclude it.
-- An audiobook file scan rebuilds the books under the file's folder (every
-  book in the library, for a file directly in the library root) and applies
-  the ignore files to them from the configured library root down, as a
-  subtree scan does. The one exception is an admin's request for the exact
-  path of a file the ignore files exclude, or below an ignore file that cannot
-  be read: that rebuild reads no ignore files, so the file is scanned. So is
-  every other book under its folder that they exclude (in the whole library,
-  for a file directly in the library root), until the next library scan
-  retires those again. The
-  exception follows the scan run's trigger, not the path, so a scan Silo
+- An audiobook file scan rebuilds the books under the file's folder, widened
+  as the [audiobook folder layout](audiobook-folder-layout.md) describes
+  (every book in the library, for a file directly in the library root), and
+  applies the ignore files to them from the configured library root down, as
+  a subtree scan does. An admin's request for the exact path of a file the
+  ignore files exclude admits that file past them, together with the folders
+  on its path, so it joins its book; every other file and folder the rules
+  exclude stays out. Below an ignore file that cannot be read the rules are
+  unknown, so that rebuild reads no ignore files and scans every book under
+  its folder (in the whole library, for a file directly in the library root)
+  until the next library scan retires the excluded ones again. Both
+  exceptions follow the scan run's trigger, not the path, so a scan Silo
   starts on its own always applies the rules, even when they change while the
-  scan waits in the queue.
+  scan waits in the queue. A subtree scan never bypasses them.
 - A file change from real-time monitoring or autoscan (an *arr webhook, a
   plugin source, or the Jellyfin `/Library/Media/Updated` endpoint) that
   would become a single-file scan is checked against the ignore files from

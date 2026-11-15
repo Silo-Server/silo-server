@@ -120,6 +120,9 @@ export const RATINGS_OVERLAYS: readonly OverlayDef[] = [
     iconId: "users",
     iconCapable: true,
     introducedInManifest: 13,
-    getValue: (d) => (d.advisory_age != null && d.advisory_age > 0 ? `${d.advisory_age}+` : null),
+    getValue: (d) =>
+      d.advisory_age != null && d.advisory_age > 0
+        ? t("web.detail.badges.advisory", { age: d.advisory_age })
+        : null,
   },
 ];

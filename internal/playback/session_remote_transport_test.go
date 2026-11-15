@@ -3,6 +3,7 @@ package playback
 import (
 	"context"
 	"errors"
+	"math"
 	"testing"
 	"time"
 
@@ -50,6 +51,68 @@ func TestRemoteTransportIdleGrace(t *testing.T) {
 				t.Fatalf("expired %d sessions, want %d", len(expired), tc.wantExpired)
 			}
 		})
+	}
+}
+
+// A client that reports a running listening total is credited how far it
+// rose past the highest total seen, so a late, lower report credits nothing.
+// A client that never reports a total is measured from its position.
+func TestUpdateProgressReported(t *testing.T) {
+	for _, tc := range []struct {
+		name         string
+		reports      [][2]float64 // position, total
+		wantPlayed   float64
+		wantReported float64
+	}{
+		{name: "late lower total", reports: [][2]float64{{100, 10}, {100, 5}}, wantPlayed: 10, wantReported: 10},
+		{name: "no total", reports: [][2]float64{{110, 0}}, wantPlayed: 10},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			manager := NewSessionManager(0, 0)
+			started := time.Now().Add(-10 * time.Second)
+			var watch WatchTime
+			watch.Observe(100, false, started)
+			manager.RegisterReconstructed(&Session{ID: "reported-1", UserID: 7, StartedAt: started, Watch: watch})
+			for _, r := range tc.reports {
+				if err := manager.UpdateProgressReported("reported-1", r[0], r[1]); err != nil {
+					t.Fatalf("report: %v", err)
+				}
+			}
+			s, err := manager.GetSession("reported-1")
+			if err != nil {
+				t.Fatalf("get session: %v", err)
+			}
+			if math.Abs(s.Watch.PlayedSeconds-tc.wantPlayed) > 0.01 || s.ReportedListening != tc.wantReported {
+				t.Fatalf("played = %v, reported = %v, want %v and %v", s.Watch.PlayedSeconds, s.ReportedListening, tc.wantPlayed, tc.wantReported)
+			}
+		})
+	}
+}
+
+// A delayed report with a lower total credits nothing and leaves the
+// listening baseline alone, so the next rise is capped by all the time since
+// the last accepted total, not by the gap since the delayed report.
+func TestUpdateProgressReportedStaleTotalKeepsBaseline(t *testing.T) {
+	manager := NewSessionManager(0, 0)
+	manager.RegisterReconstructed(&Session{ID: "reported-1", UserID: 7, StartedAt: time.Now().Add(-40 * time.Second)})
+	report := func(position, total float64) {
+		t.Helper()
+		if err := manager.UpdateProgressReported("reported-1", position, total); err != nil {
+			t.Fatalf("report: %v", err)
+		}
+	}
+	report(20, 20)
+	manager.mu.Lock()
+	manager.sessions["reported-1"].Watch.Until = manager.sessions["reported-1"].Watch.Until.Add(-20 * time.Second)
+	manager.mu.Unlock()
+	report(10, 10)
+	report(40, 40)
+	s, err := manager.GetSession("reported-1")
+	if err != nil {
+		t.Fatalf("get session: %v", err)
+	}
+	if math.Abs(s.Watch.PlayedSeconds-40) > 0.01 {
+		t.Fatalf("played = %v, want 40", s.Watch.PlayedSeconds)
 	}
 }
 

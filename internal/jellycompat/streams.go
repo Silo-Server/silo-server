@@ -1773,7 +1773,7 @@ func (h *PlaybackHandler) HandleSubtitleStream(w http.ResponseWriter, r *http.Re
 	if requestedFormat == "ass" && playback.IsASS(embeddedTrack.Codec) {
 		data, err := h.extractEmbeddedTextSubtitle(r.Context(), file, embeddedOrdinal, "ass")
 		if err != nil {
-			writeError(w, http.StatusInternalServerError, "ServerError", "Failed to extract subtitle")
+			writeSubtitleExtractError(w, err)
 			return
 		}
 		h.deliverSubtitle(w, r, "ass", data, segmentPTSOffset)
@@ -1782,7 +1782,7 @@ func (h *PlaybackHandler) HandleSubtitleStream(w http.ResponseWriter, r *http.Re
 
 	data, subErr := h.extractEmbeddedTextSubtitle(r.Context(), file, embeddedOrdinal, "srt")
 	if subErr != nil {
-		writeError(w, http.StatusInternalServerError, "ServerError", "Failed to extract subtitle")
+		writeSubtitleExtractError(w, subErr)
 		return
 	}
 	format := "srt"
@@ -1869,6 +1869,18 @@ func (h *PlaybackHandler) extractEmbeddedTextSubtitle(ctx context.Context, file 
 		func(ctx context.Context) ([]byte, error) {
 			return playback.ExtractSubtitleWithFormat(ctx, file.FilePath, trackIndex, format, h.FFmpegPath)
 		})
+}
+
+// writeSubtitleExtractError answers a failed embedded text extraction: a
+// node with no room for another demux (playback.ErrSubtitleReadsBusy) as a
+// retryable 503, anything else as a 500.
+func writeSubtitleExtractError(w http.ResponseWriter, err error) {
+	if errors.Is(err, playback.ErrSubtitleReadsBusy) {
+		w.Header().Set("Retry-After", strconv.Itoa(playback.SubtitleReadsRetryAfter))
+		writeError(w, http.StatusServiceUnavailable, "ServiceUnavailable", "The server is busy; try again in a moment")
+		return
+	}
+	writeError(w, http.StatusInternalServerError, "ServerError", "Failed to extract subtitle")
 }
 
 func (h *PlaybackHandler) extractTextSubtitleBatch(ctx context.Context, inputPath string, outputs []playback.TextSubtitleOutput) error {
@@ -2190,6 +2202,7 @@ const (
 	compatRangeHDR10           = "HDR10"
 	compatRangeHLG             = "HLG"
 	compatRangeSDR             = "SDR"
+	compatRangeUnknown         = "Unknown"
 )
 
 const (
@@ -2650,12 +2663,22 @@ func (h *PlaybackHandler) handlePlaybackReport(w http.ResponseWriter, r *http.Re
 			positionSeconds = 0
 		}
 	}
+	// remembered is the report the series' remembered tracks follow; an audio
+	// switch the server refused leaves out its audio.
+	remembered := req
 	// Jellyfin web/mobile clients send AudioStreamIndex on every progress
 	// report, not just on track changes. Restarting ffmpeg on each report
 	// (every ~10s) tears down segments the player is still appending and
 	// causes an hls.js retry loop. Only act when the index actually changes.
 	if selectedAudioStreamIndex, ok := req.AudioStreamIndex.get(); (!stop || !unidentified) && ok && audioSelectionChanged(playSession, req.MediaSourceID, selectedAudioStreamIndex) {
-		playSession = h.applyReportedAudioSelection(r.Context(), playSession, req.MediaSourceID, selectedAudioStreamIndex, positionSeconds)
+		var accepted bool
+		playSession, accepted = h.applyReportedAudioSelection(r.Context(), playSession, req.MediaSourceID, selectedAudioStreamIndex, positionSeconds)
+		if !accepted {
+			remembered.AudioStreamIndex = compatIntValue{}
+		}
+	}
+	if !stop || !unidentified {
+		h.rememberCompatTracks(r.Context(), session, playSession, remembered, stop)
 	}
 	if positionReported && h.sessionMgr != nil {
 		err := h.applyCompatReport(
@@ -3143,8 +3166,8 @@ func (h *PlaybackHandler) ensureTranscodeManifestWithToneMapMode(
 
 var compatManifestStartupTimeout = playback.ManifestStartupTimeout
 
-// errCompatUpstreamSessionGone means a rebuilt transcode was closed because the
-// play's native session went away while the rebuild was starting.
+// errCompatUpstreamSessionGone means a rebuilt or newly started transcode was
+// closed because the play's native session went away while it was starting.
 var errCompatUpstreamSessionGone = errors.New("upstream session ended during the transcode rebuild")
 
 func compatTranscodeSessionUsesToneMapMode(session *playback.TranscodeSession, required tonemap.Mode) bool {
@@ -3427,6 +3450,16 @@ func (h *PlaybackHandler) ensureTranscodeSessionWithToneMapMode(
 		}
 		return nil, playback.ErrSessionSuperseded
 	}
+	// As for a rebuild: a stop, an expiry or an administrator's end that ran
+	// while this start was registering found no transcode to close, and with
+	// the native session gone nothing else would close it (#4130).
+	if h.sessionMgr != nil && h.tm.CloseTranscodeSessionIfSessionGoneLocked(upstreamSessionID, transcodeSession, func() bool {
+		_, err := h.sessionMgr.GetSession(upstreamSessionID)
+		return !errors.Is(err, playback.ErrSessionNotFound)
+	}) {
+		publishUnlock()
+		return nil, errCompatUpstreamSessionGone
+	}
 	effectiveOpts := transcodeSession.Opts()
 
 	// Mirror the actual encode decisions onto the upstream session before the
@@ -3442,9 +3475,7 @@ func (h *PlaybackHandler) ensureTranscodeSessionWithToneMapMode(
 		}
 		h.tm.MonitorLocalTranscodeExit(upstreamSessionID, transcodeSession)
 	})
-	if h.tm.StartThrottler != nil {
-		h.tm.StartThrottler(ctx, transcodeSession)
-	}
+	h.tm.StartInitialThrottler(ctx, transcodeSession)
 	h.tm.MonitorLocalTranscodeExit(upstreamSessionID, transcodeSession)
 
 	if err := h.persistTranscodeRecipe(ctx, playSessionID, upstreamSessionID, effectiveOpts); err != nil {
@@ -3686,8 +3717,9 @@ func (h *PlaybackHandler) preflightCompatAudioSelection(ctx context.Context, pla
 }
 
 // applyReportedAudioSelection switches a playback session to the audio stream a
-// progress report names and returns the session to continue with.
-func (h *PlaybackHandler) applyReportedAudioSelection(ctx context.Context, playSession *PlaybackSession, mediaSourceID string, selectedAudioStreamIndex int, positionSeconds float64) *PlaybackSession {
+// progress report names. It returns the session to continue with and whether
+// the server accepted the switch.
+func (h *PlaybackHandler) applyReportedAudioSelection(ctx context.Context, playSession *PlaybackSession, mediaSourceID string, selectedAudioStreamIndex int, positionSeconds float64) (*PlaybackSession, bool) {
 	audioTrackIndex := 0
 	updatedPlaySession, updatedSource, restarted, selectionErr := h.applyCompatAudioSelection(
 		ctx, playSession, mediaSourceID, selectedAudioStreamIndex, positionSeconds,
@@ -3701,7 +3733,9 @@ func (h *PlaybackHandler) applyReportedAudioSelection(ctx context.Context, playS
 			"audio_stream_index", selectedAudioStreamIndex,
 			"error", selectionErr,
 		)
-	} else if updatedSource != nil {
+		return playSession, false
+	}
+	if updatedSource != nil {
 		if resolvedAudioTrackIndex, ok := compatAudioTrackIndex(*updatedSource); ok {
 			audioTrackIndex = resolvedAudioTrackIndex
 		}
@@ -3713,7 +3747,7 @@ func (h *PlaybackHandler) applyReportedAudioSelection(ctx context.Context, playS
 			"transcode_restarted", restarted,
 		)
 	}
-	return playSession
+	return playSession, true
 }
 
 func (h *PlaybackHandler) applyCompatAudioSelection(

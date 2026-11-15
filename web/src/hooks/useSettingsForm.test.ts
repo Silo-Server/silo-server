@@ -217,6 +217,54 @@ describe("useSettingsForm save()", () => {
     expect(result.current.dirtyCount).toBe(1);
   });
 
+  it("keeps a change back to the old value staged while that save is in flight", async () => {
+    let resolveMutation:
+      | ((value: { values: Record<string, string>; restart_required: boolean }) => void)
+      | undefined;
+    mutateAsync.mockReturnValue(
+      new Promise((resolve) => {
+        resolveMutation = resolve;
+      }),
+    );
+    const { result } = renderHook(() => useSettingsForm({ keys: KEYS }));
+
+    act(() => result.current.setValue("branding.server_name", "Casa"));
+    let savePromise: Promise<void> | undefined;
+    act(() => {
+      savePromise = result.current.save();
+    });
+    act(() => result.current.setValue("branding.server_name", "Silo"));
+    await act(async () => {
+      resolveMutation?.({ values: { "branding.server_name": "Casa" }, restart_required: false });
+      await savePromise;
+    });
+
+    expect(result.current.getValue("branding.server_name")).toBe("Silo");
+    expect(result.current.dirtyKeys).toEqual(["branding.server_name"]);
+  });
+
+  it("compares with the saved value only once the snapshot after a save arrives", async () => {
+    mutateAsync.mockResolvedValue({
+      values: { "branding.server_name": "Casa" },
+      restart_required: false,
+    });
+    const { result, rerender } = renderHook(() => useSettingsForm({ keys: KEYS }));
+
+    act(() => result.current.setValue("branding.server_name", "Casa"));
+    await act(async () => {
+      await result.current.save();
+    });
+    // The snapshot still says "Silo", but the server now holds "Casa".
+    act(() => result.current.setValue("branding.server_name", "Silo"));
+    expect(result.current.dirtyKeys).toEqual(["branding.server_name"]);
+
+    snapshot.values = { ...settingsData, "branding.server_name": "Casa" };
+    rerender();
+    act(() => result.current.setValue("branding.server_name", "Villa"));
+    act(() => result.current.setValue("branding.server_name", "Casa"));
+    expect(result.current.dirtyCount).toBe(0);
+  });
+
   it("flags a restart when any saved key requires one, and keeps it flagged", async () => {
     mutateAsync.mockImplementation((values: Record<string, string>) =>
       Promise.resolve({
@@ -289,5 +337,28 @@ describe("useSettingsForm unsaved-changes guard", () => {
       form.result.current.discard();
     });
     expect(registry.result.current).toBe(false);
+  });
+
+  it("releases an edit changed back to its saved value, but not a staged secret clear", () => {
+    const registry = renderHook(() => useHasUnsavedChanges());
+    const form = renderHook(() =>
+      useSettingsForm({ keys: ["branding.server_name", "email.smtp_password"] }),
+    );
+
+    act(() => {
+      form.result.current.setValue("branding.server_name", "Casa");
+    });
+    act(() => {
+      form.result.current.setValue("branding.server_name", "Silo");
+    });
+    expect(form.result.current.dirtyCount).toBe(0);
+    expect(registry.result.current).toBe(false);
+
+    // The snapshot leaves secrets out, so an empty secret is a clear to save.
+    act(() => {
+      form.result.current.setValue("email.smtp_password", "");
+    });
+    expect(form.result.current.isClearStaged("email.smtp_password")).toBe(true);
+    expect(registry.result.current).toBe(true);
   });
 });

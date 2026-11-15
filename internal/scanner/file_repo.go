@@ -3198,6 +3198,23 @@ func (r *FileRepository) MarkMissing(ctx context.Context, id int, filePath strin
 	return nil
 }
 
+// MarkMissingWrittenBefore is MarkMissing for a row last written before
+// before. A row another scan wrote since then is left alone and reported as
+// ErrFileNotFound, so a scan cannot hide a file a later scan just indexed.
+func (r *FileRepository) MarkMissingWrittenBefore(ctx context.Context, id int, filePath string, since, before time.Time) error {
+	tag, err := r.pool.Exec(ctx,
+		"UPDATE media_files SET missing_since = $1, updated_at = NOW() WHERE id = $2 AND file_path = $3 AND updated_at < $4",
+		since, id, filePath, before,
+	)
+	if err != nil {
+		return fmt.Errorf("marking file missing: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrFileNotFound
+	}
+	return nil
+}
+
 // DeleteMissingByFolder deletes media files in the given folder that have been
 // marked missing for longer than the grace period. Missing files are already
 // hidden from clients; the grace only delays deleting the row so a file that

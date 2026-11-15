@@ -8,7 +8,7 @@ import CardOverlays from "@/components/overlays/CardOverlays";
 import { RequestDownloadBar } from "@/components/overlays/RequestDownloadBar";
 import { RequestAction, WatchlistAction } from "@/components/RequestPosterCard";
 import ViewTransitionLink from "@/components/ViewTransitionLink";
-import { useT } from "@/i18n";
+import { numberText, useT } from "@/i18n";
 import {
   formatMediaType,
   requestDetailHref,
@@ -51,7 +51,9 @@ export default function WatchlistTitleCard({
 }) {
   const t = useT();
   const href = requestDetailHref(title.media_type, title.tmdb_id);
-  const meta = [formatMediaType(title.media_type), title.year].filter(Boolean).join(" · ");
+  const meta = [formatMediaType(title.media_type), title.year ? numberText(title.year) : null]
+    .filter(Boolean)
+    .join(" · ");
   const label = t("web.library.watchlist.cardLabel", { title: title.title, details: meta });
   const overlayData = overlayDataFromWatchlistTitle(title, status);
   const downloadPercent = overlayPrefs

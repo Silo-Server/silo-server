@@ -1236,6 +1236,37 @@ func TestTranscodeThrottlerUsesProducedHeadForGap(t *testing.T) {
 	}
 }
 
+// A check already past its progress read when Stop runs must not pause
+// FFmpeg: the throttler that replaced this one never saw the pause, so it
+// would not resume it.
+func TestStoppedTranscodeThrottlerSendsNoCommands(t *testing.T) {
+	tempDir := t.TempDir()
+	writeManifestRange(t, tempDir, 225, 293, ".ts")
+	// Far enough ahead of the client that a live throttler would pause.
+	for _, i := range []int{225, 293} {
+		writeSegmentFile(t, tempDir, segmentFilename(i, TranscodeOpts{TargetCodecVideo: "h264"}), []byte("x"), time.Now())
+	}
+	session := &TranscodeSession{
+		outputDir:            tempDir,
+		running:              true,
+		lastRequestedSegment: 225,
+		opts: TranscodeOpts{
+			TargetCodecVideo:   "h264",
+			SegmentDuration:    2,
+			StartSegmentNumber: 225,
+		},
+	}
+	writer := &recordingWriteCloser{}
+	throttler := NewTranscodeThrottler(session, writer, 60, 2)
+
+	throttler.Stop()
+	throttler.CheckOnce()
+
+	if writer.writes != "" {
+		t.Fatalf("writes after Stop = %q, want none", writer.writes)
+	}
+}
+
 type recordingWriteCloser struct {
 	writes string
 }

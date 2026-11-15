@@ -59,6 +59,9 @@ function ClaimForm({ token }: { token: string }) {
   // The server refused the acceptance because password sign-in is off; the
   // invitation stays unspent, and no account was created.
   const [localLoginDisabled, setLocalLoginDisabled] = useState(false);
+  // The server refused the acceptance before anything committed: no account
+  // was created and the invitation is unspent, so the invitee can try again.
+  const [refusal, setRefusal] = useState<string | null>(null);
   const [createdUsername, setCreatedUsername] = useState<string | null>(null);
   const busy = useRef(false);
   const lifetime = useRef<AbortController | null>(null);
@@ -157,6 +160,26 @@ function ClaimForm({ token }: { token: string }) {
     setReload((value) => value + 1);
   }
 
+  // A refusal the server answers before anything commits, as the accept
+  // contract states: a rate limit, a store that can't create the profile, an
+  // address already in use, or a request that didn't validate. Anything else,
+  // a 5xx or a lost response included, may have created the account.
+  function unspentRefusalMessage(error: unknown): string | null {
+    if (!(error instanceof V2ProblemError)) return null;
+    switch (error.problemType) {
+      case "rate_limited":
+        return t("web.auth.forgotPassword.rateLimited");
+      case "capability_unsupported":
+        return t("web.auth.invite.profileUnavailable");
+      case "conflict":
+        return t("web.auth.invite.emailTaken");
+      case "validation_failed":
+        return error.message;
+      default:
+        return null;
+    }
+  }
+
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
     if (
@@ -187,6 +210,7 @@ function ClaimForm({ token }: { token: string }) {
     const identity = captureSessionIdentity();
     busy.current = true;
     setSubmitting(true);
+    setRefusal(null);
     try {
       const data = await acceptPublicInvitation(token, password, controller.signal, enteredEmail);
       if (controller.signal.aborted || !isSessionIdentityCurrent(identity)) return;
@@ -227,6 +251,11 @@ function ClaimForm({ token }: { token: string }) {
           setEmailError(invalidEmailMessage());
           return;
         }
+      }
+      const refused = unspentRefusalMessage(error);
+      if (refused) {
+        setRefusal(refused);
+        return;
       }
       setRecovery(true);
     } finally {
@@ -304,6 +333,11 @@ function ClaimForm({ token }: { token: string }) {
                   {invitation.inviter_name
                     ? t("web.auth.invite.localLoginDisabled", { inviter: invitation.inviter_name })
                     : t("web.auth.invite.localLoginDisabledNoInviter")}
+                </p>
+              )}
+              {refusal && (
+                <p role="alert" className="mb-4">
+                  {refusal}
                 </p>
               )}
               {recovery && (

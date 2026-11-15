@@ -45,6 +45,14 @@ export const DASHBOARD_LAYOUT_SAVE_DEBOUNCE_MS = 800;
 interface StoredLayout {
   version: 1;
   entries: DashboardLayoutEntry[];
+  /**
+   * Present while `entries` hold an edit made before the server layout was
+   * read, so it is not saved yet: the arrangement the edit started from and
+   * the profile it was made under. A later visit reconciles it the way the
+   * visit that made it would have, had the read returned first. Local only;
+   * never sent to the server.
+   */
+  pending?: { base: DashboardLayoutEntry[]; profileId: string };
 }
 
 function clampSpan(span: unknown, widget: DashboardWidgetDefinition): number {
@@ -134,24 +142,59 @@ function sanitizeLayoutDocument(value: unknown): DashboardLayoutEntry[] | null {
   return entries;
 }
 
-function readStoredLayout(userId: number | null): DashboardLayoutEntry[] | null {
+function readStoredDocument(userId: number | null): unknown {
   if (userId === null) {
     return null;
   }
-  let raw: string | null = null;
   try {
-    raw = window.localStorage.getItem(dashboardLayoutStorageKey(userId));
+    const raw = window.localStorage.getItem(dashboardLayoutStorageKey(userId));
+    return raw ? JSON.parse(raw) : null;
   } catch {
     return null;
   }
-  if (!raw) {
+}
+
+function readStoredLayout(userId: number | null): DashboardLayoutEntry[] | null {
+  return sanitizeLayoutDocument(readStoredDocument(userId));
+}
+
+type ProfileAuthority = NonNullable<ReturnType<typeof captureProfileRequestContext>>;
+
+/**
+ * An edit made before the server layout was read, not yet saved: the
+ * arrangement it started from, the profile it was made under, and that
+ * profile's authority, or null when the active profile is a different one.
+ */
+interface DashboardLayoutDraft {
+  base: DashboardLayoutEntry[];
+  profileId: string;
+  authority: ProfileAuthority | null;
+}
+
+/**
+ * The unsaved edit an earlier visit left in this account's cache, with the
+ * entries it produced. Only the profile that made it can save it; under any
+ * other the draft carries no authority and stays unsaved.
+ */
+function readStoredDraft(
+  userId: number | null,
+  authority: ProfileAuthority | null,
+): { draft: DashboardLayoutDraft; entries: DashboardLayoutEntry[] } | null {
+  const stored = readStoredDocument(userId) as Partial<StoredLayout> | null;
+  const pending = stored?.pending;
+  if (!pending || typeof pending.profileId !== "string") {
     return null;
   }
-  try {
-    return sanitizeLayoutDocument(JSON.parse(raw));
-  } catch {
+  const base = sanitizeLayoutDocument({ version: 1, entries: pending.base });
+  const entries = sanitizeLayoutDocument(stored);
+  if (!base || !entries) {
     return null;
   }
+  const profileId = pending.profileId;
+  return {
+    draft: { base, profileId, authority: authority?.profileId === profileId ? authority : null },
+    entries,
+  };
 }
 
 function loadStoredLayout(userId: number | null): DashboardLayoutEntry[] {
@@ -162,12 +205,19 @@ function toLayoutDocument(entries: DashboardLayoutEntry[]): AdminDashboardLayout
   return { version: 1, entries };
 }
 
-function persistLayout(userId: number | null, entries: DashboardLayoutEntry[]) {
+function persistLayout(
+  userId: number | null,
+  entries: DashboardLayoutEntry[],
+  draft?: DashboardLayoutDraft,
+) {
   if (userId === null) {
     return;
   }
   try {
     const stored: StoredLayout = { version: 1, entries };
+    if (draft) {
+      stored.pending = { base: draft.base, profileId: draft.profileId };
+    }
     window.localStorage.setItem(dashboardLayoutStorageKey(userId), JSON.stringify(stored));
   } catch {
     // Storage may be unavailable (private mode, quota); the layout still works in-memory.
@@ -267,11 +317,15 @@ export function useDashboardLayout(): DashboardLayout {
   // Set by the first edit made before that response arrives: the arrangement
   // the edit started from, and the authority it was made under. The edit can
   // only be saved once the server version is known, and only if the server
-  // still holds that arrangement.
-  const draftRef = useRef<{
-    base: DashboardLayoutEntry[];
-    authority: NonNullable<ReturnType<typeof captureProfileRequestContext>>;
-  } | null>(null);
+  // still holds that arrangement. It is kept in the cache too, so an edit
+  // whose visit ended before the response arrived is reconciled by the next.
+  const draftRef = useRef<DashboardLayoutDraft | null>(null);
+  // A draft that settling left unsaved: another profile's, one made under a
+  // profile or PIN no longer active, or one the server layout has moved on
+  // from. The cache keeps marking it pending, through later edits here, so a
+  // later visit still reports it instead of adopting the server layout over
+  // it, until the admin reloads or resets the layout.
+  const heldDraftRef = useRef<DashboardLayoutDraft | null>(null);
   const pendingRef = useRef<DashboardLayoutSaveIntent | null>(null);
   const baselineRef = useRef<string | null>(null);
   const inFlightRef = useRef<DashboardLayoutSaveIntent | null>(null);
@@ -348,6 +402,7 @@ export function useDashboardLayout(): DashboardLayout {
     }
     pendingRef.current = null;
     draftRef.current = null;
+    heldDraftRef.current = null;
   }, []);
 
   // Send a queued write before this page goes away rather than dropping it.
@@ -393,17 +448,24 @@ export function useDashboardLayout(): DashboardLayout {
     }
     if (!remoteSettled) {
       // Without a server version an edit made meanwhile cannot be saved yet.
-      if (remoteFailed && draftRef.current) {
+      if (remoteFailed && (draftRef.current || readStoredDraft(userId, editAuthority))) {
         setServerSaveBlocked(true);
       }
       return;
     }
-    const draft = draftRef.current;
+    // A draft left by an earlier visit is reconciled with the entries it
+    // produced, which may be newer than this page's if another tab made it.
+    const restored = draftRef.current ? null : readStoredDraft(userId, editAuthority);
+    const draft = draftRef.current ?? restored?.draft ?? null;
+    const edited = restored?.entries ?? entries;
     draftRef.current = null;
     settledRef.current = true;
     baselineRef.current = remoteData?.etag ?? null;
-    // A draft made under a profile or PIN that is no longer active stays
-    // unsaved: scheduleSave refuses an inactive baseline authority.
+    // A draft made in this page under a profile or PIN that is no longer
+    // active stays unsaved, and the baseline keeps that inactive authority so
+    // later edits here are refused too. One from an earlier visit is saved
+    // under its profile's current authority, or not at all under another
+    // profile.
     baselineAuthorityRef.current = draft?.authority ?? editAuthority;
     const serverEntries = sanitizeLayoutDocument(remoteData?.layout);
     // An edit made while the query was in flight is newer than the response,
@@ -411,15 +473,25 @@ export function useDashboardLayout(): DashboardLayout {
     // browser's copy, so it is saved against the version just read only when
     // the server still holds that copy, or none (as the migration below would
     // upload it). A different server copy, saved from another browser, is not
-    // overwritten: saving stays blocked until the admin reloads it.
+    // overwritten: saving stays blocked until the admin reloads it. The cache
+    // stops marking the edit pending only once it goes to the save queue.
     if (draft) {
-      if (serverEntries && JSON.stringify(serverEntries) !== JSON.stringify(draft.base)) {
+      if (restored) {
+        setEntries(edited);
+      }
+      const unsaved =
+        !draft.authority ||
+        !isCapturedProfileAuthorityActive(draft.authority) ||
+        (serverEntries !== null && JSON.stringify(serverEntries) !== JSON.stringify(draft.base));
+      heldDraftRef.current = unsaved ? draft : null;
+      persistLayout(userId, edited, heldDraftRef.current ?? undefined);
+      if (unsaved) {
         blockedRef.current = true;
         setServerSaveBlocked(true);
         return;
       }
       setServerSaveBlocked(false);
-      scheduleSave(entries);
+      scheduleSave(edited);
       return;
     }
     if (serverEntries) {
@@ -461,11 +533,18 @@ export function useDashboardLayout(): DashboardLayout {
           return prev;
         }
         editSequenceRef.current++;
-        persistLayout(userId, next);
         if (settledRef.current) {
+          persistLayout(userId, next, heldDraftRef.current ?? undefined);
           scheduleSave(next);
         } else {
-          draftRef.current ??= { base: prev, authority: editAuthority };
+          // An unsaved edit left by an earlier visit keeps its base: the server
+          // is compared with the copy that visit last read from it.
+          draftRef.current ??= readStoredDraft(userId, editAuthority)?.draft ?? {
+            base: prev,
+            profileId: editAuthority.profileId,
+            authority: editAuthority,
+          };
+          persistLayout(userId, next, draftRef.current);
         }
         return next;
       });

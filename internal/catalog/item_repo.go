@@ -2696,15 +2696,55 @@ func (r *ItemRepository) ReplacePeople(ctx context.Context, contentID string, pe
 	}
 	defer tx.Rollback(ctx)
 
+	if err := r.ReplacePeopleTx(ctx, tx, contentID, people); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
+// ReplacePeopleTx is ReplacePeople in the caller's transaction.
+func (r *ItemRepository) ReplacePeopleTx(ctx context.Context, tx pgx.Tx, contentID string, people []models.ItemPerson) error {
 	if _, err := tx.Exec(ctx, "DELETE FROM item_people WHERE content_id = $1", contentID); err != nil {
 		return fmt.Errorf("delete existing people: %w", err)
 	}
+	return r.insertPeopleTx(ctx, tx, contentID, people)
+}
 
+// PersonKindsOf returns the distinct credit kinds in people, in first-seen
+// order.
+func PersonKindsOf(people []models.ItemPerson) []models.PersonKind {
+	var kinds []models.PersonKind
+	for _, p := range people {
+		if !slices.Contains(kinds, p.Kind) {
+			kinds = append(kinds, p.Kind)
+		}
+	}
+	return kinds
+}
+
+// ReplacePeopleKindsTx replaces only the credits of the given kinds in the
+// caller's transaction and leaves every other kind on the item as it is.
+func (r *ItemRepository) ReplacePeopleKindsTx(ctx context.Context, tx pgx.Tx, contentID string, kinds []models.PersonKind, people []models.ItemPerson) error {
+	if len(kinds) == 0 {
+		return nil
+	}
+	kindValues := make([]int, len(kinds))
+	for i, k := range kinds {
+		kindValues[i] = int(k)
+	}
+	if _, err := tx.Exec(ctx, "DELETE FROM item_people WHERE content_id = $1 AND kind = ANY($2)", contentID, kindValues); err != nil {
+		return fmt.Errorf("delete existing people: %w", err)
+	}
+	return r.insertPeopleTx(ctx, tx, contentID, people)
+}
+
+// insertPeopleTx inserts credits and queues the item's search-index update.
+func (r *ItemRepository) insertPeopleTx(ctx context.Context, tx pgx.Tx, contentID string, people []models.ItemPerson) error {
 	if len(people) == 0 {
 		if err := r.searchIndexEvents.EnqueueUpsert(ctx, tx, contentID); err != nil {
 			return fmt.Errorf("enqueueing catalog search people update: %w", err)
 		}
-		return tx.Commit(ctx)
+		return nil
 	}
 
 	// Deduplicate by (person_id, kind, character) — PostgreSQL's ON CONFLICT
@@ -2751,8 +2791,7 @@ func (r *ItemRepository) ReplacePeople(ctx context.Context, contentID string, pe
 	if err := r.searchIndexEvents.EnqueueUpsert(ctx, tx, contentID); err != nil {
 		return fmt.Errorf("enqueueing catalog search people update: %w", err)
 	}
-
-	return tx.Commit(ctx)
+	return nil
 }
 
 // ClearPeopleTx removes every credit on a media item in the caller's
@@ -2932,6 +2971,17 @@ func (r *ItemRepository) UpdateMetadataTx(ctx context.Context, tx pgx.Tx, conten
 		strings.Join(setClauses, ", "), argIdx)
 	args = append(args, contentID)
 
+	// The item's ID columns before the edit, read under the lock the UPDATE
+	// takes anyway; the durable-ID sync below skips an ID this edit resends.
+	var storedTMDB, storedIMDb, storedTVDB string
+	if upd.TmdbID != nil || upd.ImdbID != nil || upd.TvdbID != nil {
+		err := tx.QueryRow(ctx, `
+			SELECT COALESCE(tmdb_id, ''), COALESCE(imdb_id, ''), COALESCE(tvdb_id, '')
+			FROM media_items WHERE content_id = $1 FOR NO KEY UPDATE`, contentID).Scan(&storedTMDB, &storedIMDb, &storedTVDB)
+		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			return fmt.Errorf("reading edited item provider ids: %w", err)
+		}
+	}
 	tag, err := tx.Exec(ctx, query, args...)
 	if err != nil {
 		return fmt.Errorf("updating media item metadata: %w", err)
@@ -2956,8 +3006,83 @@ func (r *ItemRepository) UpdateMetadataTx(ctx context.Context, tx pgx.Tx, conten
 			return fmt.Errorf("deleting cleared rating sources: %w", err)
 		}
 	}
+	for _, edited := range []struct {
+		provider string
+		value    *string
+		stored   string
+	}{
+		{contentid.ProviderTMDB, upd.TmdbID, storedTMDB},
+		{contentid.ProviderTVDB, upd.TvdbID, storedTVDB},
+		{contentid.ProviderIMDB, upd.ImdbID, storedIMDb},
+	} {
+		// Only a changed ID is a choice, as lockCuratedProviderIDs judges it: an
+		// edit form resends unchanged IDs, and a curator's scope check skips
+		// them, so their durable rows stay as they are.
+		if edited.value == nil || strings.EqualFold(strings.TrimSpace(*edited.value), strings.TrimSpace(edited.stored)) {
+			continue
+		}
+		if err := syncEditedProviderIDTx(ctx, tx, contentID, edited.provider, *edited.value); err != nil {
+			return err
+		}
+	}
 	if err := r.searchIndexEvents.EnqueueUpsert(ctx, tx, contentID); err != nil {
 		return fmt.Errorf("enqueueing catalog search metadata update: %w", err)
+	}
+	return nil
+}
+
+// syncEditedProviderIDTx makes the item's durable provider ID for provider
+// match an edited ID column. Lookups, AttachTMDBID and a refresh's ID seeding
+// read the durable row, so leaving it would keep the replaced or cleared ID
+// in use. Callers sync providers in preferredProviderIDOrder, the order
+// ReplaceByContentIDTx writes them in, so the two can't wait on each other.
+//
+// An ID another item of the same type already holds stays on the column only,
+// as before this sync existed; the next refresh's conflict recovery decides
+// between the two items. The NOT EXISTS check settles that without waiting on
+// the holder's row, so two edits that swap IDs don't deadlock. A holder that
+// commits after the check fails the insert on the unique key instead; the
+// savepoint confines that failure to the durable row, so the edit still saves.
+// ReplaceByContentID and the provider-ID drift repair lock the item before its
+// rows, so they wait for the edit; the upsert overwrites a row any other
+// writer puts back between the delete and the insert.
+func syncEditedProviderIDTx(ctx context.Context, tx pgx.Tx, contentID, provider, value string) error {
+	if _, err := tx.Exec(ctx, `
+		DELETE FROM media_item_provider_ids
+		WHERE content_id = $1 AND lower(provider) = $2`, contentID, provider); err != nil {
+		return fmt.Errorf("deleting edited %s provider id: %w", provider, err)
+	}
+	if value == "" {
+		return nil
+	}
+	savepoint, err := tx.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("storing edited %s provider id: %w", provider, err)
+	}
+	defer savepoint.Rollback(ctx) //nolint:errcheck // a no-op once the savepoint is released
+	_, err = savepoint.Exec(ctx, `
+		INSERT INTO media_item_provider_ids (content_id, item_type, provider, provider_id, created_at, updated_at)
+		SELECT mi.content_id, mi.type, $2, $3, NOW(), NOW()
+		FROM media_items mi
+		WHERE mi.content_id = $1
+		  AND NOT EXISTS (
+			SELECT 1 FROM media_item_provider_ids held
+			WHERE held.provider = $2 AND held.provider_id = $3
+			  AND held.item_type = mi.type AND held.content_id <> mi.content_id
+		  )
+		ON CONFLICT (content_id, provider) DO UPDATE
+		SET item_type = EXCLUDED.item_type,
+		    provider_id = EXCLUDED.provider_id,
+		    updated_at = NOW()`, contentID, provider, value)
+	if pgErr, ok := errors.AsType[*pgconn.PgError](err); ok &&
+		pgErr.Code == "23505" && pgErr.ConstraintName == "media_item_provider_ids_provider_provider_id_item_type_key" {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("storing edited %s provider id: %w", provider, err)
+	}
+	if err := savepoint.Commit(ctx); err != nil {
+		return fmt.Errorf("storing edited %s provider id: %w", provider, err)
 	}
 	return nil
 }

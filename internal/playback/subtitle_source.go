@@ -80,13 +80,53 @@ type EmbeddedSubtitleSource interface {
 }
 
 // ErrSubtitleReadsBusy means the node already admits as many whole-track
-// subtitle reads as it allows. A request can retry after
-// SubtitleReadsRetryAfter seconds.
+// subtitle reads, or demuxes of source files for subtitles, as it allows. A
+// request can retry after SubtitleReadsRetryAfter seconds.
 var ErrSubtitleReadsBusy = errors.New("too many subtitle track reads")
 
 // SubtitleReadsRetryAfter is the Retry-After, in seconds, of a request
 // answered busy with ErrSubtitleReadsBusy.
 const SubtitleReadsRetryAfter = 5
+
+// subtitleDemuxSlots bounds the FFmpeg runs that read a source file for a
+// subtitle a request asked for, across every SubtitleCache in the process:
+// whole-track and window demuxes and jellycompat's batch extracts. Each one
+// reads as fast as the storage allows, so a few of them starve the playback
+// streams reading beside them. A run past the bound is refused with
+// ErrSubtitleReadsBusy, not queued, even when the response has already
+// started (a fill's viewer finishing on its own, a WebVTT header sent ahead):
+// that response ends as a failed demux would. Warms run in their warm slots
+// instead, and AI translation in its job slots.
+const subtitleDemuxSlots = 4
+
+var subtitleDemuxes = make(chan struct{}, subtitleDemuxSlots)
+
+// admitDemux takes one of the process's demux slots, or refuses with
+// ErrSubtitleReadsBusy when none is free. release gives it back.
+func admitDemux() (release func(), err error) {
+	select {
+	case subtitleDemuxes <- struct{}{}:
+		return func() { <-subtitleDemuxes }, nil
+	default:
+		return nil, ErrSubtitleReadsBusy
+	}
+}
+
+// admitted runs extract in a demux slot when it reads the source file. A
+// conversion of packets reads none and runs as it is.
+func admitted(extract SUPExtractFunc) SUPExtractFunc {
+	return func(ctx context.Context, opts StreamExtractOpts) error {
+		if opts.Packets != nil {
+			return extract(ctx, opts)
+		}
+		release, err := admitDemux()
+		if err != nil {
+			return err
+		}
+		defer release()
+		return extract(ctx, opts)
+	}
+}
 
 // DemuxCopy is a copy of a track that a demux of the whole source writes.
 type DemuxCopy struct {
@@ -129,19 +169,41 @@ const (
 	subtitleSpillBytes = 16 << 20
 	// keepDemuxedTimeout bounds keeping what a demux copied.
 	keepDemuxedTimeout = 2 * time.Minute
+	// subtitleWindowIndexWait is how long a window with a duration waits on
+	// the EmbeddedSubtitleSource before the source is demuxed instead,
+	// which streams cues as it goes. Where random reads are fast a window
+	// reads in under a second; where each one costs about a second (a FUSE
+	// mount of remote storage) a window takes minutes, and the web player
+	// gives up on one that sends nothing for 30 seconds.
+	subtitleWindowIndexWait = 10 * time.Second
 )
 
-// sourced wraps a whole-track extract so it reads the track from the
-// cache's EmbeddedSubtitleSource first, and demuxes the source, keeping a
-// copy, only when that can't. An extract whose options name no track, or
-// that already has packets, runs as it is.
+// errSlowWindowRead is the cause of a window read that ran past
+// subtitleWindowIndexWait.
+var errSlowWindowRead = errors.New("subtitle window read took too long")
+
+// sourced wraps a whole-track extract a request runs so it reads the track
+// from the cache's EmbeddedSubtitleSource first, and demuxes the source,
+// keeping a copy, only when that can't. An extract whose options name no
+// track, or that already has packets, runs as it is. A demux runs in a demux
+// slot (admitDemux), held across demuxAndKeep's second run.
 func (c *SubtitleCache) sourced(extract SUPExtractFunc) SUPExtractFunc {
+	return c.readSourced(extract, true)
+}
+
+// readSourced is sourced; a warm, which holds a warm slot, passes admit
+// false to demux without a demux slot.
+func (c *SubtitleCache) readSourced(extract SUPExtractFunc, admit bool) SUPExtractFunc {
+	demux := extract
+	if admit {
+		demux = admitted(extract)
+	}
 	if c == nil || c.source == nil {
-		return extract
+		return demux
 	}
 	return func(ctx context.Context, opts StreamExtractOpts) error {
 		if opts.Embedded == nil || opts.Packets != nil {
-			return extract(ctx, opts)
+			return demux(ctx, opts)
 		}
 		if _, format := streamExtractOutput(opts.SourceCodec, opts.TargetFormat); format == subtitleMuxerWebVTT {
 			keepalive := newPrefixKeepalive(opts.Writer, webVTTPrefix, keepaliveDelay, keepaliveInterval)
@@ -167,6 +229,13 @@ func (c *SubtitleCache) sourced(extract SUPExtractFunc) SUPExtractFunc {
 		if opts.Embedded.IndexOnly {
 			return fmt.Errorf("%w: %w", ErrSubtitleIndexOnly, err)
 		}
+		if admit {
+			release, busy := admitDemux()
+			if busy != nil {
+				return fmt.Errorf("%w; the track's own read failed: %w", busy, err)
+			}
+			defer release()
+		}
 		slog.InfoContext(ctx, "embedded subtitle track demuxed from the source", "component", "playback",
 			"file_id", opts.Embedded.MediaFileID, "stream_index", opts.Embedded.StreamIndex, "reason", err)
 		return c.demuxAndKeep(ctx, opts, extract)
@@ -174,27 +243,42 @@ func (c *SubtitleCache) sourced(extract SUPExtractFunc) SUPExtractFunc {
 }
 
 // window reads an explicit window of opts' track through the cache's
-// EmbeddedSubtitleSource, or returns nil when the source must be demuxed.
-func (c *SubtitleCache) window(ctx context.Context, opts StreamExtractOpts) *SubtitlePacketInput {
+// EmbeddedSubtitleSource. It returns nil when the source must be demuxed,
+// with the source's error, wrapped in errSlowWindowRead for a read that ran
+// past subtitleWindowIndexWait; none when the caller has gone.
+func (c *SubtitleCache) window(ctx context.Context, opts StreamExtractOpts) (*SubtitlePacketInput, error) {
 	if c == nil || c.source == nil || opts.Embedded == nil {
-		return nil
+		return nil, nil
 	}
 	from, to := embeddedsub.WholeFrom, embeddedsub.WholeTo
 	if opts.SeekSeconds > 0 {
 		from = secondsDuration(opts.SeekSeconds)
 	}
+	readCtx := ctx
 	if opts.DurationSeconds > 0 {
 		to = secondsDuration(opts.SeekSeconds + opts.DurationSeconds)
-	}
-	in, err := c.source.Window(ctx, opts.InputPath, *opts.Embedded, from, to)
-	if err != nil {
-		if ctx.Err() == nil {
-			slog.DebugContext(ctx, "subtitle window demuxed from the source", "component", "playback",
-				"file_id", opts.Embedded.MediaFileID, "stream_index", opts.Embedded.StreamIndex, "reason", err)
+		// A window open to the end reads the track whole, which has a wait
+		// of its own, and a track only the index can read has no demux to
+		// give way to.
+		if !opts.Embedded.IndexOnly {
+			var cancel context.CancelFunc
+			readCtx, cancel = context.WithTimeoutCause(ctx, subtitleWindowIndexWait, errSlowWindowRead)
+			defer cancel()
 		}
-		return nil
 	}
-	return in
+	in, err := c.source.Window(readCtx, opts.InputPath, *opts.Embedded, from, to)
+	if err != nil {
+		if ctx.Err() != nil {
+			return nil, nil
+		}
+		if errors.Is(context.Cause(readCtx), errSlowWindowRead) {
+			err = fmt.Errorf("%w: %w", errSlowWindowRead, err)
+		}
+		slog.DebugContext(ctx, "subtitle window demuxed from the source", "component", "playback",
+			"file_id", opts.Embedded.MediaFileID, "stream_index", opts.Embedded.StreamIndex, "reason", err)
+		return nil, err
+	}
+	return in, nil
 }
 
 func secondsDuration(s float64) time.Duration {
@@ -203,11 +287,12 @@ func secondsDuration(s float64) time.Duration {
 
 // serveWindowFromSource answers a window request from the cache's
 // EmbeddedSubtitleSource. It reports false, having written nothing, when
-// the caller should demux the source instead.
+// the caller should demux the source instead, with the reason the source
+// gave, if any (wrapping errSlowWindowRead for a read that took too long).
 func (c *SubtitleCache) serveWindowFromSource(ctx context.Context, w io.Writer, opts StreamExtractOpts, extract SUPExtractFunc) (bool, error) {
-	in := c.window(ctx, opts)
+	in, err := c.window(ctx, opts)
 	if in == nil {
-		return false, nil
+		return false, err
 	}
 	wrote, err := convertPackets(ctx, w, opts, in, extract)
 	if err != nil && !wrote && ctx.Err() == nil {

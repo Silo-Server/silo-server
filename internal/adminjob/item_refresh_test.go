@@ -17,6 +17,8 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/jackc/pgx/v5"
+
 	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/cache"
 	"github.com/Silo-Server/silo-server/internal/catalog"
@@ -112,6 +114,9 @@ type itemRefreshTestIngester struct {
 	err      error
 	// unlinked is set when the subtree was ingested as unlinked.
 	unlinked bool
+	// scans counts the subtree ingests; failScan, when set, fails that one.
+	scans    int
+	failScan int
 }
 
 func (s *itemRefreshTestIngester) IngestUnlinkedSubtree(ctx context.Context, folder *models.MediaFolder, subtreePath string) (*libraryingest.Result, error) {
@@ -120,6 +125,10 @@ func (s *itemRefreshTestIngester) IngestUnlinkedSubtree(ctx context.Context, fol
 }
 
 func (s *itemRefreshTestIngester) IngestSubtree(ctx context.Context, _ *models.MediaFolder, subtreePath string) (*libraryingest.Result, error) {
+	s.scans++
+	if s.failScan != 0 && s.scans == s.failScan {
+		return nil, errors.New("scan failed")
+	}
 	s.scanPath = subtreePath
 	s.runID = scanbatch.RunID(ctx)
 	if s.err != nil {
@@ -147,11 +156,13 @@ type itemRefreshTestScanRuns struct {
 	cancelErr    error
 	cancelCtxErr error
 	heartbeats   atomic.Int64
+	// heartbeatErr, when set, is what every heartbeat reports.
+	heartbeatErr error
 }
 
 func (r *itemRefreshTestScanRuns) TouchHeartbeat(_ context.Context, _ string, _ *time.Time) error {
 	r.heartbeats.Add(1)
-	return nil
+	return r.heartbeatErr
 }
 
 func (r *itemRefreshTestScanRuns) Create(_ context.Context, input scanqueue.CreateInput) (*models.ScanRun, bool, error) {
@@ -325,7 +336,7 @@ func (r *itemRefreshTestRefresher) ResetTargetForLibrary(ctx context.Context, ta
 // newItemRefreshTestExecutor builds an executor over enabled folder 3 with
 // empty claim, file and skipped-root fakes.
 func newItemRefreshTestExecutor(ingester *itemRefreshTestIngester, scanRuns *itemRefreshTestScanRuns, refresher *itemRefreshTestRefresher, eventBus cache.EventBus) *ItemRefreshExecutor {
-	return NewItemRefreshExecutor(
+	executor := NewItemRefreshExecutor(
 		&itemRefreshTestFolderRepo{folder: &models.MediaFolder{ID: 3, Enabled: true}},
 		&itemRefreshTestFileRepo{},
 		&itemRefreshTestRootClaimRepo{},
@@ -339,6 +350,9 @@ func newItemRefreshTestExecutor(ingester *itemRefreshTestIngester, scanRuns *ite
 		eventBus,
 		nil,
 	)
+	// The fake ingester runs no scanner, so the marked book counts as read.
+	executor.audiobookTagRereadDone = func(context.Context) bool { return true }
+	return executor
 }
 
 func TestItemRefreshWithholdsScanCompleteWhenMetadataFails(t *testing.T) {
@@ -658,19 +672,113 @@ func TestItemRefreshExecutorRunsResetJobsAsResets(t *testing.T) {
 		{mode: ItemRefreshModeReset, wantReset: true},
 	} {
 		refresher := &itemRefreshTestRefresher{}
-		executor := newItemRefreshTestExecutor(&itemRefreshTestIngester{}, &itemRefreshTestScanRuns{}, refresher, nil)
+		ingester := &itemRefreshTestIngester{}
+		executor := newItemRefreshTestExecutor(ingester, &itemRefreshTestScanRuns{}, refresher, nil)
 		if _, err := executor.Execute(context.Background(), ItemRefreshRequest{
-			RequestedContentID: "movie-1",
-			RefreshContentID:   "movie-1",
+			RequestedContentID: "item-1",
+			RequestedType:      "movie",
+			RefreshContentID:   "item-1",
 			ScanFolderID:       3,
-			ScanPath:           "/media/movie-1",
+			ScanPath:           "/media/item-1",
 			Mode:               tc.mode,
 		}, nil); err != nil {
 			t.Fatalf("%s: Execute() error = %v, want nil", tc.mode, err)
 		}
-		if refresher.reset != tc.wantReset || refresher.contentID != "movie-1" {
-			t.Errorf("%s: reset=%v content_id=%q, want reset=%v on movie-1", tc.mode, refresher.reset, refresher.contentID, tc.wantReset)
+		if refresher.reset != tc.wantReset || refresher.contentID != "item-1" || ingester.scans != 1 {
+			t.Errorf("%s: reset=%v content_id=%q scans=%d, want reset=%v on item-1 with 1 scan",
+				tc.mode, refresher.reset, refresher.contentID, ingester.scans, tc.wantReset)
 		}
+	}
+}
+
+type itemRefreshTestAudiobooks struct {
+	calls []string
+	err   error
+}
+
+func (a *itemRefreshTestAudiobooks) ClaimRefresh(_ context.Context, contentID string) (string, error) {
+	a.calls = append(a.calls, "claim "+contentID)
+	return "token", nil
+}
+
+func (a *itemRefreshTestAudiobooks) ResetMatchTx(_ context.Context, _ pgx.Tx, contentID, _ string) error {
+	a.calls = append(a.calls, "reset "+contentID)
+	return nil
+}
+
+func (a *itemRefreshTestAudiobooks) Refresh(_ context.Context, contentID, _ string) error {
+	a.calls = append(a.calls, "refresh "+contentID)
+	return a.err
+}
+
+func (a *itemRefreshTestAudiobooks) ReleaseRefresh(_ context.Context, contentID, _ string) {
+	a.calls = append(a.calls, "release "+contentID)
+}
+
+// An audiobook's refresh never reaches the general metadata refresher: the
+// book is claimed before its one scan, its match goes through the audiobook
+// enricher, and the claim is released at the end. A complete refresh queued
+// as such runs as a reset, so the book keeps its content ID. (The reset itself
+// runs inside the scanner's write, which the fake ingester does not run.)
+func TestItemRefreshAudiobookUsesTheAudiobookEnricher(t *testing.T) {
+	t.Parallel()
+
+	want := []string{"claim book-1", "refresh book-1", "release book-1"}
+	for _, mode := range []ItemRefreshMode{ItemRefreshModeQuick, ItemRefreshModeReset, ItemRefreshModeComplete} {
+		refresher := &itemRefreshTestRefresher{err: errors.New("the general refresher must not run")}
+		ingester := &itemRefreshTestIngester{}
+		audiobooks := &itemRefreshTestAudiobooks{}
+		executor := newItemRefreshTestExecutor(ingester, &itemRefreshTestScanRuns{}, refresher, nil)
+		executor.SetAudiobookEnricher(audiobooks)
+		result, err := executor.Execute(context.Background(), ItemRefreshRequest{
+			RequestedContentID: "book-1",
+			RequestedType:      itemTypeAudiobook,
+			RefreshContentID:   "book-1",
+			ScanFolderID:       3,
+			ScanPath:           "/media/book-1",
+			Mode:               mode,
+		}, nil)
+		if err != nil {
+			t.Fatalf("%s: Execute() error = %v", mode, err)
+		}
+		if !slices.Equal(audiobooks.calls, want) || refresher.contentID != "" || ingester.scans != 1 || ingester.unlinked {
+			t.Errorf("%s: enricher calls %v, general refresher on %q, scans %d (unlinked %v); want %v, none, 1 linked scan",
+				mode, audiobooks.calls, refresher.contentID, ingester.scans, ingester.unlinked, want)
+		}
+		if result.RefreshContentID != "book-1" {
+			t.Errorf("%s: refresh content ID = %s, want book-1", mode, result.RefreshContentID)
+		}
+	}
+}
+
+// The tag read is committed before the enricher runs, so when the enricher
+// fails the cache invalidation and events still go out, and the job then fails
+// with the enricher's error.
+func TestItemRefreshAudiobookKeepsEventsWhenTheEnricherFails(t *testing.T) {
+	t.Parallel()
+
+	eventBus := &libraryRefreshTestEventBus{}
+	executor := newItemRefreshTestExecutor(&itemRefreshTestIngester{}, &itemRefreshTestScanRuns{}, &itemRefreshTestRefresher{}, eventBus)
+	executor.SetAudiobookEnricher(&itemRefreshTestAudiobooks{err: errors.New("no provider returned the matched record")})
+	var evicted []string
+	executor.evictRails = func(contentIDs ...string) { evicted = append(evicted, contentIDs...) }
+	_, err := executor.Execute(context.Background(), ItemRefreshRequest{
+		RequestedContentID: "book-1",
+		RequestedType:      itemTypeAudiobook,
+		RefreshContentID:   "book-1",
+		ScanFolderID:       3,
+		ScanPath:           "/media/book-1",
+		Mode:               ItemRefreshModeQuick,
+	}, nil)
+	if err == nil || !strings.Contains(err.Error(), "matched record") {
+		t.Errorf("Execute() error = %v, want the enricher's failure", err)
+	}
+	var changed bool
+	for _, event := range eventBus.events {
+		changed = changed || (event.Type == cache.EventCatalogItemChanged && event.Payload == "book-1")
+	}
+	if !changed || len(evicted) == 0 {
+		t.Errorf("events = %#v, evicted = %v; want book-1 published and evicted", eventBus.events, evicted)
 	}
 }
 

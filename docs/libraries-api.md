@@ -35,7 +35,9 @@ deletion and metadata-refresh jobs return their canonical job URI in `Location`.
 ## Unmatched items
 
 `GET /api/v2/libraries/unmatched-items` (`listUnmatchedItems`) lists the items still
-`unmatched`, `pending`, or `ambiguous`, in title order. It leaves out items in no
+`unmatched`, `pending`, or `ambiguous`, in title order. Audiobooks have no such status;
+one is listed as `unmatched` when enrichment found no provider match for it or its
+providers kept failing, and leaves the list once matched. It leaves out items in no
 library, such as one whose file was renamed away and that the scanner's file removal
 grace still holds. It also leaves out items an administrator marked as intentionally
 unmatched; with `ignored=true` it lists only those, each with `ignored_at`. The cursor is bound to `q` and `ignored`.

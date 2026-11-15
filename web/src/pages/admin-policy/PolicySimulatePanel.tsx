@@ -195,7 +195,7 @@ export function PolicySimulatePanel({ domains, domain, source }: PolicySimulateP
             id="policy-sim-input"
             value={input}
             onChange={(event) => setInput(event.target.value)}
-            className="border-border bg-background focus-visible:ring-ring/60 min-h-[220px] w-full rounded-lg border px-3 py-2 font-mono text-xs outline-none focus-visible:ring-2"
+            className="border-input bg-background focus-visible:ring-ring/60 min-h-[220px] w-full rounded-lg border px-3 py-2 font-mono text-xs outline-none focus-visible:ring-2"
             spellCheck={false}
           />
         </div>

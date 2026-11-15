@@ -2,6 +2,7 @@ package metadata
 
 import (
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -75,5 +76,40 @@ func TestClassifyProviderErrorCombinesJoinedProviderFailures(t *testing.T) {
 	))
 	if class != ProviderErrorTransient || retryAfter != 0 {
 		t.Fatalf("mixed permanent/transient = (%q, %v), want (%q, 0)", class, retryAfter, ProviderErrorTransient)
+	}
+}
+
+// An untyped HTTP 403 can be a throttle or a ban. The default policy keeps
+// reading it as permanent; a caller that opts in gets rate limited, while a
+// 401 and typed gRPC denials stay permanent under either policy.
+func TestProviderErrorPolicyForbiddenIsRateLimit(t *testing.T) {
+	throttle := ProviderErrorPolicy{ForbiddenIsRateLimit: true}
+	for name, tc := range map[string]struct {
+		err         error
+		wantDefault ProviderErrorClass
+		wantOptIn   ProviderErrorClass
+	}{
+		"plugin text in an untyped status": {
+			fmt.Errorf("audiobook-metadata metadata: %w", status.Error(codes.Unknown, "itunes: HTTP 403")),
+			ProviderErrorPermanent, ProviderErrorRateLimited,
+		},
+		"forbidden text":  {errors.New("Forbidden"), ProviderErrorPermanent, ProviderErrorRateLimited},
+		"401 text":        {errors.New("HTTP 401 Unauthorized"), ProviderErrorPermanent, ProviderErrorPermanent},
+		"typed denial":    {status.Error(codes.PermissionDenied, "HTTP 403"), ProviderErrorPermanent, ProviderErrorPermanent},
+		"typed not found": {status.Error(codes.NotFound, "missing"), ProviderErrorPermanent, ProviderErrorPermanent},
+		"not found text":  {errors.New("book not found (HTTP 403)"), ProviderErrorPermanent, ProviderErrorPermanent},
+		"joined with a transient failure": {
+			errors.Join(errors.New("HTTP 403"), errors.New("connection reset")),
+			ProviderErrorTransient, ProviderErrorRateLimited,
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if got, _ := ClassifyProviderError(tc.err); got != tc.wantDefault {
+				t.Errorf("default policy = %q, want %q", got, tc.wantDefault)
+			}
+			if got, _ := throttle.Classify(tc.err); got != tc.wantOptIn {
+				t.Errorf("ForbiddenIsRateLimit = %q, want %q", got, tc.wantOptIn)
+			}
+		})
 	}
 }

@@ -24,7 +24,7 @@ import { Label } from "@/components/ui/label";
 import { useAdminLibraries } from "@/hooks/queries/admin/libraries";
 import { useAppLanguage, useT } from "@/i18n";
 import { pendingCount } from "@/lib/profileDataTypes";
-import { prefersReducedMotion } from "@/hooks/useImmediateSidebarCollapse";
+import { motionScrollBehavior } from "@/hooks/usePrefersReducedMotion";
 import { SettingFieldStatus } from "@/pages/admin-settings/SettingField";
 
 import { OmittedAccounts } from "./BackupWarningDetails";
@@ -113,7 +113,7 @@ function sectionAnchor(id: RestoreSectionId) {
 function scrollToSection(id: RestoreSectionId) {
   document.getElementById(sectionAnchor(id))?.scrollIntoView({
     block: "start",
-    behavior: prefersReducedMotion() ? "auto" : "smooth",
+    behavior: motionScrollBehavior(),
   });
 }
 

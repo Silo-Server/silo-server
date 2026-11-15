@@ -21,7 +21,7 @@ import { SUBTITLE_SYNC_MAX_MS, useSubtitleSyncSetting } from "@/hooks/queries/su
 import { useEffectiveSettings } from "@/hooks/queries/settingValues";
 import { useProfileDefaultWriter } from "@/hooks/queries/profileDefaults";
 import { SETTING_KEYS, type SettingKey } from "@/lib/settingsContract";
-import { useT } from "@/i18n";
+import { numberText, useT } from "@/i18n";
 import { optionsFor } from "@/lib/settingsDisplay";
 import { settingLabel, settingUnsetLabel } from "@/lib/settingsText";
 import { namedLanguageOptionsFor } from "@/lib/languageOptions";
@@ -43,6 +43,7 @@ import type { SubtitleAppearance } from "@/lib/subtitleAppearance";
 import { toast } from "sonner";
 
 import { ResetButton } from "./ResetButton";
+import { isImeComposing } from "@/lib/imeComposition";
 
 /* Languages, subtitle behavior and subtitle appearance are profile preferences. */
 
@@ -136,7 +137,7 @@ function PercentInput({
         onChange={(e) => setDraft(e.target.value)}
         onBlur={(e) => commit(e.target.value)}
         onKeyDown={(e) => {
-          if (e.key === "Enter") e.currentTarget.blur();
+          if (e.key === "Enter" && !isImeComposing(e)) e.currentTarget.blur();
         }}
         className="w-20 [appearance:textfield] text-end [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
       />
@@ -721,8 +722,8 @@ const SUBTITLE_OFFSET_STEP_MS = 100;
 
 /** The signed offset number ("+100", "−100", "0") the offset message wraps with its unit. */
 function formatSubtitleOffset(ms: number): string {
-  if (ms === 0) return "0";
-  return `${ms > 0 ? "+" : "−"}${Math.abs(ms)}`;
+  if (ms === 0) return numberText(0);
+  return `${ms > 0 ? "+" : "−"}${numberText(Math.abs(ms))}`;
 }
 
 function SubtitleOffsetControl({

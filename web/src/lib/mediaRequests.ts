@@ -11,6 +11,7 @@ import type {
   RequestUserState,
 } from "@/api/types";
 import { numberText, t } from "@/i18n";
+import { joinList } from "@/lib/appLocale";
 import { formatDate } from "@/lib/datetime";
 
 export function formatMediaType(mediaType: RequestMediaType): string {
@@ -269,7 +270,7 @@ export function formatSeasonList(seasons: number[]): string {
     );
     i = j + 1;
   }
-  return t("web.requests.status.seasonList", { count: sorted.length, list: runs.join(", ") });
+  return t("web.requests.status.seasonList", { count: sorted.length, list: joinList(runs) });
 }
 
 /**

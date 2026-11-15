@@ -5,9 +5,7 @@ import {
   classifyActivityMethod,
   compareActivityMethods,
   decisionBadgeClass,
-  formatAudioDetail,
   formatAudioSummary,
-  formatContainerDetail,
   formatDeliveredAudioSummary,
   formatDeliveredContainerSummary,
   formatDeliveredVideoSummary,
@@ -16,7 +14,9 @@ import {
   formatSourceContainerSummary,
   formatToneMapSummary,
   formatTranscodeModeSummary,
-  formatVideoDetail,
+  formatRequestedSourceSwitch,
+  getAudioConversion,
+  getVideoConversion,
   formatVideoSummary,
   getSessionClientLabelFull,
   getSessionRouteNodes,
@@ -71,7 +71,6 @@ describe("adminActivityPresentation", () => {
       output_protocol: protocol,
     });
     expect(formatDeliveredContainerSummary(session)).toBe(label);
-    expect(formatContainerDetail(session)).toBe(`MKV → ${label}`);
     expect(classifyActivityMethod(session)).toBe("direct_stream");
   });
 
@@ -88,20 +87,20 @@ describe("adminActivityPresentation", () => {
     });
     expect(classifyActivityMethod(copied)).toBe("remux");
     expect(formatPlaybackDecisionSummary(copied)).toBe("copy");
-    expect(formatAudioDetail(copied)).toBe("Copied without re-encoding");
     expect(formatDecisionLabel("remux")).toBe("Remux");
     expect(decisionBadgeClass("remux")).toBe(activityMethodMeta("remux").badgeClass);
   });
 
-  it("explains auto-switched requested sources in the detail line", () => {
+  it("explains auto-switched requested sources", () => {
     expect(
-      formatVideoDetail(
+      formatRequestedSourceSwitch(
         makeSession({
           media_file_id: 2,
           requested_media_file_id: 1,
         }),
       ),
-    ).toBe("Auto-switched from HEVC · 2160p · Output → H.264 · 1080p");
+    ).toBe("Auto-switched from HEVC · 2160p");
+    expect(formatRequestedSourceSwitch(makeSession())).toBeNull();
   });
 
   it("summarizes the delivered transcode output for compact rows", () => {
@@ -128,9 +127,6 @@ describe("adminActivityPresentation", () => {
     ).toBe("transcode");
     expect(formatSourceContainerSummary(session)).toBe("MKV");
     expect(formatDeliveredContainerSummary(session)).toBe("Unknown output container");
-    expect(formatContainerDetail(session)).toBe(
-      "Repackaged for streaming; output container not reported",
-    );
     expect(formatDeliveredVideoSummary(session)).toBe("H.264 · 1080p");
     expect(formatDeliveredAudioSummary(session)).toBe("AAC 5.1");
     expect(formatTranscodeModeSummary(session)).toBe("HW/SW unknown");
@@ -148,7 +144,7 @@ describe("adminActivityPresentation", () => {
     const fullSize = makeSession({ ...scope4K, target_resolution: "1600p" });
     expect(formatVideoSummary(fullSize)).toBe("HEVC · 2160p");
     expect(formatDeliveredVideoSummary(fullSize)).toBe("HEVC · 2160p");
-    expect(formatVideoDetail(fullSize)).toBe("Output → HEVC · 2160p");
+    expect(getVideoConversion(fullSize)).toEqual({ source: "HEVC 2160p", delivered: "HEVC 2160p" });
 
     expect(
       formatDeliveredVideoSummary(makeSession({ ...scope4K, target_resolution: "720p" })),
@@ -167,11 +163,6 @@ describe("adminActivityPresentation", () => {
       expect(formatDeliveredContainerSummary({ ...session, output_protocol: "hls" })).toBe(
         "Unknown output container (HLS)",
       );
-      if (play_method === "remux") {
-        expect(formatContainerDetail(session)).toBe(
-          "Repackaged for streaming; output container not reported",
-        );
-      }
     }
   });
 
@@ -197,7 +188,6 @@ describe("adminActivityPresentation", () => {
     expect(normalizeStreamDecision(session.video_decision)).toBe("direct");
     expect(normalizeStreamDecision(session.audio_decision)).toBe("direct");
     expect(formatDeliveredContainerSummary(session)).toBe("MKV");
-    expect(formatContainerDetail(session)).toBe("Original container");
     expect(formatDeliveredVideoSummary(session)).toBe("HEVC · 2160p");
     expect(formatDeliveredAudioSummary(session)).toBe("EAC3 5.1");
     expect(formatTranscodeModeSummary(session)).toBeNull();
@@ -240,7 +230,7 @@ describe("adminActivityPresentation", () => {
       target_audio_channels: 6,
     });
     expect(formatDeliveredAudioSummary(downmixed)).toBe("AAC 5.1");
-    expect(formatAudioDetail(downmixed)).toBe("→ AAC 5.1");
+    expect(getAudioConversion(downmixed).delivered).toBe("AAC 5.1");
 
     // Server did not report a target count → codec alone, not the source's.
     const unknownTarget = makeSession({
@@ -250,7 +240,7 @@ describe("adminActivityPresentation", () => {
       target_audio_codec: "aac",
     });
     expect(formatDeliveredAudioSummary(unknownTarget)).toBe("AAC");
-    expect(formatAudioDetail(unknownTarget)).toBe("→ AAC");
+    expect(getAudioConversion(unknownTarget).delivered).toBe("AAC");
 
     // The source summary still describes the source in full.
     expect(formatAudioSummary(unknownTarget)).toBe("TrueHD 7.1");

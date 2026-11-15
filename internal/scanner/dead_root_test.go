@@ -587,6 +587,68 @@ func requireEmptyRootBookState(t *testing.T, pool *pgxpool.Pool, folderID int, c
 // tagged book folder to a name that sorts later, so the old path is scanned
 // first and reconciled as deleted. The removal grace must hold the book until
 // the new path's scan matches it, keeping its content ID and added date.
+// addAudiobookTestCredit adds one credit to an item, keeping its others.
+func addAudiobookTestCredit(t *testing.T, s *Scanner, contentID, name string, kind models.PersonKind) {
+	t.Helper()
+	ctx := t.Context()
+	people, err := s.itemRepo.GetPeople(ctx, contentID)
+	if err != nil {
+		t.Fatalf("read credits: %v", err)
+	}
+	personID, err := s.personRepo.FindOrCreate(ctx, models.Person{Name: name})
+	if err != nil {
+		t.Fatalf("create person: %v", err)
+	}
+	people = append(people, models.ItemPerson{Person: models.Person{ID: personID}, Kind: kind, SortOrder: len(people)})
+	if err := s.itemRepo.ReplacePeople(ctx, contentID, people); err != nil {
+		t.Fatalf("add credit: %v", err)
+	}
+}
+
+// A second copy of a recording while the first is still on disk is its own
+// item, whatever order the scan reaches them in.
+func TestScanAudiobookSecondCopyIsItsOwnItemDB(t *testing.T) {
+	pool := newScannerTestPool(t)
+	ctx := t.Context()
+	root := t.TempDir()
+	ffprobe := filepath.Join(t.TempDir(), "ffprobe")
+	writeFakeTool(t, ffprobe, `#!/bin/sh
+cat <<'JSON'
+{"format":{"format_name":"mov,mp4,m4a","duration":"3600.0","size":"1","bit_rate":"64000","tags":{"title":"Copied Book","artist":"Copy Author","narrator":"Copy Narrator","date":"2020"}},"streams":[{"index":0,"codec_type":"audio","codec_name":"aac","channels":2}],"chapters":[]}
+JSON
+`)
+	folderID := seedDeadRootTestFolder(t, pool, "audiobooks", fmt.Sprintf("copied-book-%d", time.Now().UnixNano()))
+	folder := &models.MediaFolder{ID: folderID, Type: "audiobooks", Paths: []string{root}}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM media_items WHERE content_id IN (SELECT content_id FROM media_files WHERE media_folder_id = $1)`, folderID)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM media_item_libraries WHERE media_folder_id = $1`, folderID)
+	})
+	firstDir := filepath.Join(root, "Copy Author", "Copied Book")
+	secondDir := filepath.Join(root, "Copy Author", "Copied Book (copy)")
+	for _, dir := range []string{firstDir, secondDir} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "part.m4b"), []byte("x"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	s := NewScanner(NewFileRepository(pool), ffprobe, nil, 2, false, time.Hour)
+	if _, err := s.ScanSubtree(ctx, folder, firstDir); err != nil {
+		t.Fatalf("first copy scan: %v", err)
+	}
+	if _, err := s.ScanSubtree(ctx, folder, secondDir); err != nil {
+		t.Fatalf("second copy scan: %v", err)
+	}
+	var items int
+	if err := pool.QueryRow(ctx, `SELECT count(DISTINCT content_id) FROM media_files WHERE media_folder_id = $1 AND missing_since IS NULL`, folderID).Scan(&items); err != nil {
+		t.Fatalf("count items: %v", err)
+	}
+	if items != 2 {
+		t.Fatalf("items for two copies on disk = %d, want 2", items)
+	}
+}
+
 func TestScanSubtreeAudiobookRenameKeepsBookDB(t *testing.T) {
 	pool := newScannerTestPool(t)
 	ctx := t.Context()
@@ -624,6 +686,10 @@ JSON
 		_, _ = pool.Exec(context.Background(), `DELETE FROM media_item_libraries WHERE media_folder_id = $1`, folderID)
 		_, _ = pool.Exec(context.Background(), `DELETE FROM media_items WHERE content_id IN (SELECT content_id FROM media_files WHERE media_folder_id = $1) OR content_id = $2`, folderID, contentID)
 	})
+
+	// A provider match stores fuller credits than the tags; the renamed
+	// folder must still find its item.
+	addAudiobookTestCredit(t, s, contentID, "Provider Narrator", models.PersonKindNarrator)
 
 	if err := os.Rename(oldDir, newDir); err != nil {
 		t.Fatal(err)

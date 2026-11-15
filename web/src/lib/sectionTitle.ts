@@ -16,10 +16,11 @@ export function sectionTitleKey(section: object): SectionTitleKey {
 }
 
 /**
- * A section's title for display. The server's `title` stays the stored value
- * (edits and pins keep using it); a translated interface shows the catalog's
- * text for its `title_key`, filled from `title_args`, and falls back to `title`
- * when the key or an argument is missing. English shows `title` as sent.
+ * A section's title for display. The server's `title` stays untranslated
+ * (edits keep using it, and pins save the layout's stored title); a translated
+ * interface shows the catalog's text for its `title_key`, filled from
+ * `title_args`, and falls back to `title` when the key or an argument is
+ * missing. English shows `title` as sent.
  */
 export function useSectionTitle(): (section: { title: string } & SectionTitleKey) => string {
   const serverText = useServerText();

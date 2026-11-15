@@ -343,6 +343,8 @@ export interface WatchPageProps {
   preview?: PlayerTimeRange | null;
   autoSkipRecap?: boolean;
   autoPlayNextPreview?: boolean;
+  /** The viewer's Auto-play next episode setting; off, the Up next card does not count down. */
+  autoPlayNext?: boolean;
   canEditMarkers?: boolean;
   seriesContext?: SeriesContext;
   onNavigateEpisode?: (contentId: string, trigger: PlaybackStartTrigger) => void;
