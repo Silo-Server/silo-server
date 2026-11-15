@@ -3,10 +3,13 @@ package adminjob
 import (
 	"context"
 	"errors"
+	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Silo-Server/silo-server/internal/cache"
+	"github.com/Silo-Server/silo-server/internal/libraryingest"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/scanqueue"
 )
@@ -141,22 +144,24 @@ func TestLibraryRefreshPublishesScanCompleteAfterDirectIngest(t *testing.T) {
 	t.Fatalf("events = %#v, want scan_complete for library 9", eventBus.events)
 }
 
-// An audiobook an admin left unmatched on purpose has its folder scanned but
-// is not sent to the metadata refresh.
-func TestLibraryRefreshTagsOnlyItemSkipsMetadataRefresh(t *testing.T) {
+// An audiobook has its folder scanned and is handed to the audiobook enricher,
+// never to the general metadata refresh.
+func TestLibraryRefreshAudiobookSkipsMetadataRefresh(t *testing.T) {
 	t.Parallel()
 
 	scanRuns := &itemRefreshTestScanRuns{}
+	requeuer := &libraryRefreshTestRequeuer{}
 	executor := &LibraryRefreshExecutor{
 		folderRepo: &itemRefreshTestFolderRepo{folder: &models.MediaFolder{ID: 9, Enabled: true}},
 		resolver: &libraryRefreshTestResolver{req: &ItemRefreshRequest{
 			ScanFolderID:     9,
-			ScanPath:         "/media/books/ignored-book",
+			ScanPath:         "/media/books/a-book",
 			RefreshContentID: "book-1",
 		}},
-		ingester:  &itemRefreshTestIngester{},
-		scanRuns:  scanRuns,
-		refresher: &itemRefreshTestRefresher{err: errors.New("metadata refresh must not run")},
+		ingester:   &itemRefreshTestIngester{},
+		scanRuns:   scanRuns,
+		refresher:  &itemRefreshTestRefresher{err: errors.New("metadata refresh must not run")},
+		audiobooks: requeuer,
 	}
 
 	if err := executor.refreshUnmatchedItem(context.Background(), 9, "book-1", true); err != nil {
@@ -165,4 +170,61 @@ func TestLibraryRefreshTagsOnlyItemSkipsMetadataRefresh(t *testing.T) {
 	if scanRuns.completedID != "admin-refresh-run" {
 		t.Fatalf("completed scan run = %q, want admin-refresh-run", scanRuns.completedID)
 	}
+	if !slices.Equal(requeuer.requeued, []string{"book-1"}) {
+		t.Fatalf("requeued = %v, want [book-1]", requeuer.requeued)
+	}
+}
+
+type libraryRefreshTestRequeuer struct{ requeued []string }
+
+func (r *libraryRefreshTestRequeuer) RequeueUnmatchedInLibrary(context.Context, int) (int, error) {
+	return 0, nil
+}
+
+func (r *libraryRefreshTestRequeuer) RequeueUnmatched(_ context.Context, contentID string) (bool, error) {
+	r.requeued = append(r.requeued, contentID)
+	return true, nil
+}
+
+type blockingFolderIngester struct{ *itemRefreshTestIngester }
+
+func (b blockingFolderIngester) IngestFolder(ctx context.Context, _ *models.MediaFolder) (*libraryingest.Result, error) {
+	<-ctx.Done()
+	return nil, ctx.Err()
+}
+
+// A full refresh's library scan ends when its run stops being this claim's
+// running run (canceled here or on another server), instead of reading the
+// rest of the library. Books it already re-read are committed, so the caches
+// are still invalidated.
+func TestAudiobookLibraryRefreshStopsWhenItsRunIsLost(t *testing.T) {
+	t.Parallel()
+
+	eventBus := &libraryRefreshTestEventBus{}
+	executor := &LibraryRefreshExecutor{
+		eventBus:           eventBus,
+		itemLister:         &libraryRefreshTestLister{},
+		folderRepo:         &itemRefreshTestFolderRepo{folder: &models.MediaFolder{ID: 9, Type: "audiobooks", Enabled: true}},
+		ingester:           blockingFolderIngester{&itemRefreshTestIngester{}},
+		scanRuns:           &itemRefreshTestScanRuns{heartbeatErr: scanqueue.ErrScanRunNotFound},
+		refresher:          &itemRefreshTestRefresher{},
+		scanHeartbeatEvery: time.Millisecond,
+	}
+	_, err := executor.Execute(t.Context(), LibraryRefreshRequest{LibraryID: 9, Mode: LibraryRefreshModeFull}, nil)
+	if !errors.Is(err, errLibraryScanRunLost) {
+		t.Fatalf("Execute() error = %v, want errLibraryScanRunLost", err)
+	}
+	var invalidated bool
+	for _, event := range eventBus.events {
+		invalidated = invalidated || (event.Type == cache.EventScanComplete && event.Payload == "9")
+	}
+	if !invalidated {
+		t.Errorf("events = %#v, want scan_complete for library 9 after the scan ended early", eventBus.events)
+	}
+}
+
+type libraryRefreshTestLister struct{ items []LibraryRefreshItem }
+
+func (l *libraryRefreshTestLister) ListLibraryItems(context.Context, int, LibraryRefreshMode) ([]LibraryRefreshItem, error) {
+	return l.items, nil
 }

@@ -77,6 +77,9 @@ type matchRun struct {
 	// volumeTitle is the title the volume rules read: the item's title, or
 	// the series prefix's volume after the bare title.
 	volumeTitle string
+	// refetchOnly asks only for the records the item's stored IDs name and
+	// searches no provider, for a matched book an admin refreshes.
+	refetchOnly bool
 }
 
 // providerState is what one provider has answered for the item so far.
@@ -115,7 +118,19 @@ func (r *matchRun) answered(i int, ids map[string]string, rejection fetchRejecti
 // edition, so it outranks a narrator tag, which taggers often fill with the
 // author.
 func (e *Enricher) findMatch(ctx context.Context, item enrichmentItemRow, providers []metadata.Provider) audiobookMatch {
+	return e.runMatch(ctx, item, providers, false)
+}
+
+// refetchMatch fetches the records a matched item's stored IDs name, under
+// the same admission rules as findMatch, without searching: a refresh must
+// not move a matched book to another record.
+func (e *Enricher) refetchMatch(ctx context.Context, item enrichmentItemRow, providers []metadata.Provider) audiobookMatch {
+	return e.runMatch(ctx, item, providers, true)
+}
+
+func (e *Enricher) runMatch(ctx context.Context, item enrichmentItemRow, providers []metadata.Provider, refetchOnly bool) audiobookMatch {
 	run := &matchRun{
+		refetchOnly: refetchOnly,
 		e:           e,
 		item:        item,
 		providers:   providers,
@@ -216,7 +231,7 @@ func (r *matchRun) lookupTaggedASIN(ctx context.Context) error {
 func (r *matchRun) searchProvider(ctx context.Context, i int) error {
 	p := r.providers[i]
 	sp, ok := p.(metadata.SearchProvider)
-	if r.state[i].record != nil || !ok {
+	if r.state[i].record != nil || !ok || r.refetchOnly {
 		return nil
 	}
 	query := r.item.Title

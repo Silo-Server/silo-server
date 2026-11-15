@@ -17,6 +17,8 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/jackc/pgx/v5"
+
 	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/cache"
 	"github.com/Silo-Server/silo-server/internal/catalog"
@@ -154,11 +156,13 @@ type itemRefreshTestScanRuns struct {
 	cancelErr    error
 	cancelCtxErr error
 	heartbeats   atomic.Int64
+	// heartbeatErr, when set, is what every heartbeat reports.
+	heartbeatErr error
 }
 
 func (r *itemRefreshTestScanRuns) TouchHeartbeat(_ context.Context, _ string, _ *time.Time) error {
 	r.heartbeats.Add(1)
-	return nil
+	return r.heartbeatErr
 }
 
 func (r *itemRefreshTestScanRuns) Create(_ context.Context, input scanqueue.CreateInput) (*models.ScanRun, bool, error) {
@@ -656,50 +660,106 @@ func TestItemRefreshExecutorReportsArtworkCacheFailureAsWarning(t *testing.T) {
 }
 
 // A reset job resets its target. Run as a plain refresh, it would keep every
-// value its providers lack (#3581). An audiobook's folder is scanned again
-// after the reset, so its tags fill the fields the provider left empty.
+// value its providers lack (#3581).
 func TestItemRefreshExecutorRunsResetJobsAsResets(t *testing.T) {
 	t.Parallel()
 
 	for _, tc := range []struct {
 		mode      ItemRefreshMode
-		itemType  string
 		wantReset bool
-		wantScans int
 	}{
-		{mode: ItemRefreshModeQuick, itemType: "movie", wantScans: 1},
-		{mode: ItemRefreshModeReset, itemType: "movie", wantReset: true, wantScans: 1},
-		{mode: ItemRefreshModeQuick, itemType: "audiobook", wantScans: 1},
-		{mode: ItemRefreshModeReset, itemType: "audiobook", wantReset: true, wantScans: 2},
+		{mode: ItemRefreshModeQuick},
+		{mode: ItemRefreshModeReset, wantReset: true},
 	} {
 		refresher := &itemRefreshTestRefresher{}
 		ingester := &itemRefreshTestIngester{}
 		executor := newItemRefreshTestExecutor(ingester, &itemRefreshTestScanRuns{}, refresher, nil)
 		if _, err := executor.Execute(context.Background(), ItemRefreshRequest{
 			RequestedContentID: "item-1",
-			RequestedType:      tc.itemType,
+			RequestedType:      "movie",
 			RefreshContentID:   "item-1",
 			ScanFolderID:       3,
 			ScanPath:           "/media/item-1",
 			Mode:               tc.mode,
 		}, nil); err != nil {
-			t.Fatalf("%s %s: Execute() error = %v, want nil", tc.mode, tc.itemType, err)
+			t.Fatalf("%s: Execute() error = %v, want nil", tc.mode, err)
 		}
-		if refresher.reset != tc.wantReset || refresher.contentID != "item-1" || ingester.scans != tc.wantScans {
-			t.Errorf("%s %s: reset=%v content_id=%q scans=%d, want reset=%v on item-1 with %d scans",
-				tc.mode, tc.itemType, refresher.reset, refresher.contentID, ingester.scans, tc.wantReset, tc.wantScans)
+		if refresher.reset != tc.wantReset || refresher.contentID != "item-1" || ingester.scans != 1 {
+			t.Errorf("%s: reset=%v content_id=%q scans=%d, want reset=%v on item-1 with 1 scan",
+				tc.mode, refresher.reset, refresher.contentID, ingester.scans, tc.wantReset)
 		}
 	}
 }
 
-// A reset is committed before the audiobook's tags are read again, so when
-// the read fails the reset's cache invalidation and events still go out, and
-// the job then fails with the read's error.
-func TestItemRefreshResetKeepsEventsWhenTagRereadFails(t *testing.T) {
+type itemRefreshTestAudiobooks struct {
+	calls []string
+	err   error
+}
+
+func (a *itemRefreshTestAudiobooks) ClaimRefresh(_ context.Context, contentID string) (string, error) {
+	a.calls = append(a.calls, "claim "+contentID)
+	return "token", nil
+}
+
+func (a *itemRefreshTestAudiobooks) ResetMatchTx(_ context.Context, _ pgx.Tx, contentID, _ string) error {
+	a.calls = append(a.calls, "reset "+contentID)
+	return nil
+}
+
+func (a *itemRefreshTestAudiobooks) Refresh(_ context.Context, contentID, _ string) error {
+	a.calls = append(a.calls, "refresh "+contentID)
+	return a.err
+}
+
+func (a *itemRefreshTestAudiobooks) ReleaseRefresh(_ context.Context, contentID, _ string) {
+	a.calls = append(a.calls, "release "+contentID)
+}
+
+// An audiobook's refresh never reaches the general metadata refresher: the
+// book is claimed before its one scan, its match goes through the audiobook
+// enricher, and the claim is released at the end. A complete refresh queued
+// as such runs as a reset, so the book keeps its content ID. (The reset itself
+// runs inside the scanner's write, which the fake ingester does not run.)
+func TestItemRefreshAudiobookUsesTheAudiobookEnricher(t *testing.T) {
+	t.Parallel()
+
+	want := []string{"claim book-1", "refresh book-1", "release book-1"}
+	for _, mode := range []ItemRefreshMode{ItemRefreshModeQuick, ItemRefreshModeReset, ItemRefreshModeComplete} {
+		refresher := &itemRefreshTestRefresher{err: errors.New("the general refresher must not run")}
+		ingester := &itemRefreshTestIngester{}
+		audiobooks := &itemRefreshTestAudiobooks{}
+		executor := newItemRefreshTestExecutor(ingester, &itemRefreshTestScanRuns{}, refresher, nil)
+		executor.SetAudiobookEnricher(audiobooks)
+		result, err := executor.Execute(context.Background(), ItemRefreshRequest{
+			RequestedContentID: "book-1",
+			RequestedType:      itemTypeAudiobook,
+			RefreshContentID:   "book-1",
+			ScanFolderID:       3,
+			ScanPath:           "/media/book-1",
+			Mode:               mode,
+		}, nil)
+		if err != nil {
+			t.Fatalf("%s: Execute() error = %v", mode, err)
+		}
+		if !slices.Equal(audiobooks.calls, want) || refresher.contentID != "" || ingester.scans != 1 || ingester.unlinked {
+			t.Errorf("%s: enricher calls %v, general refresher on %q, scans %d (unlinked %v); want %v, none, 1 linked scan",
+				mode, audiobooks.calls, refresher.contentID, ingester.scans, ingester.unlinked, want)
+		}
+		if result.RefreshContentID != "book-1" {
+			t.Errorf("%s: refresh content ID = %s, want book-1", mode, result.RefreshContentID)
+		}
+	}
+}
+
+// The tag read is committed before the enricher runs, so when the enricher
+// fails the cache invalidation and events still go out, and the job then fails
+// with the enricher's error.
+func TestItemRefreshAudiobookKeepsEventsWhenTheEnricherFails(t *testing.T) {
 	t.Parallel()
 
 	eventBus := &libraryRefreshTestEventBus{}
-	executor := newItemRefreshTestExecutor(&itemRefreshTestIngester{failScan: 2}, &itemRefreshTestScanRuns{}, &itemRefreshTestRefresher{}, eventBus)
+	executor := newItemRefreshTestExecutor(&itemRefreshTestIngester{}, &itemRefreshTestScanRuns{}, &itemRefreshTestRefresher{}, eventBus)
+	executor.SetAudiobookEnricher(&itemRefreshTestAudiobooks{err: errors.New("no provider returned the matched record")})
 	var evicted []string
 	executor.evictRails = func(contentIDs ...string) { evicted = append(evicted, contentIDs...) }
 	_, err := executor.Execute(context.Background(), ItemRefreshRequest{
@@ -708,10 +768,10 @@ func TestItemRefreshResetKeepsEventsWhenTagRereadFails(t *testing.T) {
 		RefreshContentID:   "book-1",
 		ScanFolderID:       3,
 		ScanPath:           "/media/book-1",
-		Mode:               ItemRefreshModeReset,
+		Mode:               ItemRefreshModeQuick,
 	}, nil)
-	if err == nil || !strings.Contains(err.Error(), "read audiobook tags after the reset") {
-		t.Errorf("Execute() error = %v, want the failed tag read", err)
+	if err == nil || !strings.Contains(err.Error(), "matched record") {
+		t.Errorf("Execute() error = %v, want the enricher's failure", err)
 	}
 	var changed bool
 	for _, event := range eventBus.events {

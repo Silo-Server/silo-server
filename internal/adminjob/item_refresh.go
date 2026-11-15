@@ -10,6 +10,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jackc/pgx/v5"
+
 	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/cache"
 	"github.com/Silo-Server/silo-server/internal/catalog"
@@ -203,6 +205,13 @@ func (r *ItemRefreshResolver) resolveMovie(ctx context.Context, item *models.Med
 	file, err := firstPresentFileInLibrary(files, libraryID)
 	if err != nil {
 		return nil, err
+	}
+	// A complete refresh clears the scope's content links, which gives an
+	// audiobook a new content ID and orphans its progress and favorites. An
+	// audiobook's reset already clears its match and reads its tags again, so
+	// a complete refresh of one runs as a reset.
+	if item.Type == itemTypeAudiobook && mode == ItemRefreshModeComplete {
+		mode = ItemRefreshModeReset
 	}
 	req := &ItemRefreshRequest{
 		RequestedContentID: item.ContentID,
@@ -463,6 +472,18 @@ type ItemRefreshMetadataRefresher interface {
 	ResetTargetForLibrary(ctx context.Context, targetType, contentID string, folderID int) error
 }
 
+// ItemRefreshAudiobookEnricher refreshes and resets an audiobook's provider
+// match under the audiobook rules (audiobooks.Enricher). The general metadata
+// refresher never runs on an audiobook. The refresh claims the book before
+// its scan so the enrichment sweep leaves it alone until the refresh ends; an
+// empty token means the book gets no provider step (an ignored match).
+type ItemRefreshAudiobookEnricher interface {
+	ClaimRefresh(ctx context.Context, contentID string) (token string, err error)
+	ResetMatchTx(ctx context.Context, tx pgx.Tx, contentID, token string) error
+	Refresh(ctx context.Context, contentID, token string) error
+	ReleaseRefresh(ctx context.Context, contentID, token string)
+}
+
 type ItemRefreshExecutor struct {
 	folderRepo      itemRefreshFolderRepo
 	fileRepo        itemRefreshFileRepo
@@ -474,6 +495,7 @@ type ItemRefreshExecutor struct {
 	ingester        ItemRefreshIngester
 	scanRuns        directScanRunRepository
 	refresher       ItemRefreshMetadataRefresher
+	audiobooks      ItemRefreshAudiobookEnricher
 	artworkCacher   ItemRefreshArtworkCacher
 	eventBus        cache.EventBus
 	realtimeHub     *notifications.Hub
@@ -565,6 +587,13 @@ func (e *ItemRefreshExecutor) SetArtworkCacher(cacher ItemRefreshArtworkCacher) 
 	e.artworkCacher = cacher
 }
 
+// SetAudiobookEnricher installs the audiobook enricher, which refreshes and
+// resets an audiobook's match. Without it, a refresh of an audiobook only
+// reads its tags again.
+func (e *ItemRefreshExecutor) SetAudiobookEnricher(enricher ItemRefreshAudiobookEnricher) {
+	e.audiobooks = enricher
+}
+
 // SetItemStatusReader lets a complete refresh of a series, season or episode
 // tell a series that another worker is still matching from the rebuilt one.
 func (e *ItemRefreshExecutor) SetItemStatusReader(reader itemRefreshItemStatusReader) {
@@ -591,6 +620,27 @@ func (e *ItemRefreshExecutor) Execute(ctx context.Context, req ItemRefreshReques
 
 	refreshContentID := req.RefreshContentID
 	detailContentID := req.RequestedContentID
+	audiobook := req.RequestedType == itemTypeAudiobook
+	if audiobook && req.Mode == ItemRefreshModeComplete {
+		// A job queued before complete refreshes of audiobooks became resets.
+		req.Mode = ItemRefreshModeReset
+	}
+	refreshCtx := ctx
+	if req.CurationScope != nil {
+		refreshCtx = access.WithMetadataCurationAuthorizer(ctx, req.CurationScope.Authorizer())
+	}
+	// An audiobook is claimed before its scan, so the enrichment sweep leaves
+	// it alone from its tag read until the provider step below has finished.
+	audiobookToken := ""
+	if audiobook && e.audiobooks != nil {
+		token, err := e.audiobooks.ClaimRefresh(refreshCtx, refreshContentID)
+		if err != nil {
+			return nil, fmt.Errorf("claim audiobook for refresh: %w", err)
+		}
+		audiobookToken = token
+		defer e.audiobooks.ReleaseRefresh(ctx, refreshContentID, audiobookToken)
+	}
+	audiobookReset := audiobook && req.Mode == ItemRefreshModeReset
 
 	if req.Mode == ItemRefreshModeComplete {
 		if e.fileRepo == nil || e.rootClaimRepo == nil || e.groupClaimRepo == nil {
@@ -616,9 +666,19 @@ func (e *ItemRefreshExecutor) Execute(ctx context.Context, req ItemRefreshReques
 		ingest = e.ingester.IngestUnlinkedSubtree
 	}
 	// A quick refresh reads the item's tags again in place when it is an
-	// audiobook. A complete refresh has already cleared the scope's content
-	// links, and a reset refresh reads them after the reset (below).
-	if req.Mode == ItemRefreshModeQuick {
+	// audiobook, and so does an audiobook's reset. A complete refresh has
+	// already cleared the scope's content links. An audiobook's reset clears
+	// its match inside the transaction that writes the re-read tags, so a
+	// scan that cannot read the book leaves it as it was.
+	switch {
+	case audiobookReset && audiobookToken != "":
+		scanCtx = scanner.WithAudiobookTagRereadReset(scanCtx, req.RefreshContentID, func(txCtx context.Context, tx pgx.Tx) error {
+			if req.CurationScope != nil {
+				txCtx = access.WithMetadataCurationAuthorizer(txCtx, req.CurationScope.Authorizer())
+			}
+			return e.audiobooks.ResetMatchTx(txCtx, tx, req.RefreshContentID, audiobookToken)
+		})
+	case req.Mode == ItemRefreshModeQuick || audiobook:
 		scanCtx = scanner.WithAudiobookTagReread(scanCtx, req.RefreshContentID)
 	}
 	ingestResult, err := ingest(scanCtx, folder, req.ScanPath)
@@ -630,6 +690,18 @@ func (e *ItemRefreshExecutor) Execute(ctx context.Context, req ItemRefreshReques
 		return nil, fmt.Errorf("scan scope: %w", err)
 	}
 	scanResult := ingestResult.ScanResult
+	// A scan of a path shared with other books succeeds when only this one
+	// failed, so a reset checks that the book was read. A partly written
+	// book still gets the cache invalidation below; only the provider step is
+	// skipped.
+	var audiobookErr error
+	if audiobookReset {
+		if err := scanner.AudiobookTagRereadResetErr(scanCtx); err != nil {
+			audiobookErr = fmt.Errorf("reset audiobook match: %w", err)
+		} else if !e.audiobookTagRereadDone(scanCtx) {
+			audiobookErr = fmt.Errorf("the scan did not read audiobook %s", refreshContentID)
+		}
+	}
 
 	if progress != nil {
 		progress(2, progressTotal, "Matching discovered files")
@@ -665,27 +737,19 @@ func (e *ItemRefreshExecutor) Execute(ctx context.Context, req ItemRefreshReques
 			refreshTargetType = "item"
 		}
 	}
-	refreshCtx := ctx
-	if req.CurationScope != nil {
-		refreshCtx = access.WithMetadataCurationAuthorizer(ctx, req.CurationScope.Authorizer())
-	}
-	refreshTarget := e.refresher.RefreshTargetForLibrary
-	if req.Mode == ItemRefreshModeReset {
-		refreshTarget = e.refresher.ResetTargetForLibrary
-	}
-	if err := refreshTarget(refreshCtx, refreshTargetType, refreshContentID, req.ScanFolderID); err != nil {
-		return nil, fmt.Errorf("refresh metadata: %w", err)
-	}
-	// A reset writes the provider's values and clears the fields and credits
-	// the provider leaves out, some of which only an audiobook's tags supply.
-	// Reading the tags again afterwards lets them fill what is still empty,
-	// as any scan of a matched book does.
-	// The reset is committed by then, so the cache invalidation and events
-	// below run even when the read fails; the job then fails with the read's
-	// error, and running the reset again reads the tags.
-	var tagRereadErr error
-	if req.Mode == ItemRefreshModeReset && req.RequestedType == itemTypeAudiobook {
-		tagRereadErr = e.rereadAudiobookTags(ctx, folder, req.ScanPath, refreshContentID)
+	// The cache invalidation and events below run even when the audiobook
+	// refresh fails: the tag read (and a reset) are committed by then.
+	switch {
+	case audiobook && audiobookToken != "" && audiobookErr == nil:
+		audiobookErr = e.audiobooks.Refresh(refreshCtx, refreshContentID, audiobookToken)
+	case !audiobook:
+		refreshTarget := e.refresher.RefreshTargetForLibrary
+		if req.Mode == ItemRefreshModeReset {
+			refreshTarget = e.refresher.ResetTargetForLibrary
+		}
+		if err := refreshTarget(refreshCtx, refreshTargetType, refreshContentID, req.ScanFolderID); err != nil {
+			return nil, fmt.Errorf("refresh metadata: %w", err)
+		}
 	}
 	artworkWarning := ""
 	if cacheArtwork {
@@ -740,12 +804,12 @@ func (e *ItemRefreshExecutor) Execute(ctx context.Context, req ItemRefreshReques
 		_ = e.realtimeHub.PublishCatalogItemChanged(ctx, notifications.MetadataUpdateEvent{
 			LibraryID: req.ScanFolderID,
 			ContentID: refreshContentID,
-			Change:    "metadata_updated",
+			Change:    metadataUpdatedChange,
 		})
 	}
 
-	if tagRereadErr != nil {
-		return nil, fmt.Errorf("refresh metadata: read audiobook tags after the reset: %w", tagRereadErr)
+	if audiobookErr != nil {
+		return nil, fmt.Errorf("refresh metadata: %w", audiobookErr)
 	}
 	return &ItemRefreshResult{
 		RequestedContentID:  req.RequestedContentID,
@@ -760,31 +824,6 @@ func (e *ItemRefreshExecutor) Execute(ctx context.Context, req ItemRefreshReques
 
 // itemTypeAudiobook is media_items.type for an audiobook.
 const itemTypeAudiobook = "audiobook"
-
-// rereadAudiobookTags scans scanPath again, reading the audiobook contentID
-// from its files even though they are unchanged.
-func (e *ItemRefreshExecutor) rereadAudiobookTags(ctx context.Context, folder *models.MediaFolder, scanPath, contentID string) error {
-	scanCtx, scanRun, err := beginDirectSubtreeScan(ctx, e.scanRuns, folder.ID, scanPath, itemRefreshScanTrigger)
-	if err != nil {
-		return err
-	}
-	stopScanHeartbeat := startDirectScanHeartbeat(e.scanRuns, scanRun, directScanHeartbeatEvery)
-	markedCtx := scanner.WithAudiobookTagReread(scanCtx, contentID)
-	result, err := e.ingester.IngestSubtree(markedCtx, folder, scanPath)
-	stopScanHeartbeat()
-	if err != nil {
-		return failDirectScan(ctx, e.scanRuns, scanRun, err)
-	}
-	if err := completeDirectScan(ctx, e.scanRuns, scanRun, result); err != nil {
-		return err
-	}
-	// A scan of a path shared with other books succeeds when only this one
-	// failed, so check that this one was read.
-	if !e.audiobookTagRereadDone(markedCtx) {
-		return fmt.Errorf("the scan did not read audiobook %s", contentID)
-	}
-	return nil
-}
 
 func (e *ItemRefreshExecutor) prepareCompleteRefresh(ctx context.Context, folder *models.MediaFolder, req ItemRefreshRequest) error {
 	if req.CanonicalRootPath != "" {

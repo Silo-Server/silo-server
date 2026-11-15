@@ -170,6 +170,9 @@ func (t *RefreshAllLibraryMetadataTask) Execute(ctx context.Context, progress ta
 		case errors.Is(err, adminjob.ErrLibraryRefreshInProgress):
 			summary.Skipped++
 			progress.Report(base, fmt.Sprintf("Skipped %s: a metadata refresh is already queued or running", library.Name))
+		case errors.Is(err, adminjob.ErrLibraryScanInProgress):
+			summary.Skipped++
+			progress.Report(base, fmt.Sprintf("Skipped %s: a scan of this library is already running", library.Name))
 		default:
 			slog.ErrorContext(ctx, "full metadata refresh: library refresh failed", "component", "taskmanager",
 				"library_id", library.ID, "name", library.Name, "error", err)

@@ -1387,6 +1387,9 @@ func (s *Scanner) updateAudiobookMediaItemTx(ctx context.Context, tx pgx.Tx, con
 	if _, err := tx.Exec(ctx, `SELECT 1 FROM media_items WHERE content_id = $1 FOR UPDATE`, contentID); err != nil {
 		return fmt.Errorf("lock audiobook media item %s: %w", contentID, err)
 	}
+	if err := runAudiobookTagRereadReset(ctx, tx, contentID); err != nil {
+		return fmt.Errorf("reset audiobook match %s: %w", contentID, err)
+	}
 	item, err := s.itemRepo.GetByIDTx(ctx, tx, contentID)
 	if err != nil {
 		return fmt.Errorf("get audiobook media item %s: %w", contentID, err)
