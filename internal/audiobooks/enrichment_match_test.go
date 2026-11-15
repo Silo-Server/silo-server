@@ -182,23 +182,24 @@ func TestBareSeriesTitle(t *testing.T) {
 	tests := []struct {
 		title, series string
 		position      int
-		want          string
+		bare, volume  string
 	}{
-		{"Series Name 3 - Book Title", "Series Name", 3, "Book Title"},
-		{"series name 03 – Book Title", "Series Name", 3, "Book Title"},
-		{"Series Name, Book 3: Book Title", "Series Name", 3, "Book Title"},
-		{"Series Name #3 - Book Title", "Series Name", 0, "Book Title"},
-		{"Series Name 0.5 - Prequel Title", "Series Name", 0, "Prequel Title"},
-		{"Series Name 4 - Book Title", "Series Name", 3, ""},  // another position
-		{"Series Name 3 - Book Title", "", 3, ""},             // no series
-		{"Book Title", "Series Name", 3, ""},                  // no prefix
-		{"Series Name 3", "Series Name", 3, ""},               // nothing after the number
-		{"Series Names 3 - Book Title", "Series Name", 3, ""}, // another series
-		{"Area 51 2 - Book Title", "Area 51", 2, "Book Title"},
+		{"Series Name 3 - Book Title", "Series Name", 3, "Book Title", "3"},
+		{"series name 03 – Book Title", "Series Name", 3, "Book Title", "03"},
+		{"Series Name, Book 3: Book Title", "Series Name", 3, "Book Title", "3"},
+		{"Series Name #3 - Book Title", "Series Name", 0, "Book Title", "3"},
+		{"Series Name 0.5 - Prequel Title", "Series Name", 0, "Prequel Title", "0.5"},
+		{"Series Name 4 - Book Title", "Series Name", 3, "", ""},  // another position
+		{"Series Name 3 - Book Title", "", 3, "", ""},             // no series
+		{"Book Title", "Series Name", 3, "", ""},                  // no prefix
+		{"Series Name 3", "Series Name", 3, "", ""},               // nothing after the number
+		{"Series Names 3 - Book Title", "Series Name", 3, "", ""}, // another series
+		{"Area 51 2 - Book Title", "Area 51", 2, "Book Title", "2"},
 	}
 	for _, tt := range tests {
-		if got := bareSeriesTitle(tt.title, tt.series, tt.position); got != tt.want {
-			t.Errorf("bareSeriesTitle(%q, %q, %d) = %q, want %q", tt.title, tt.series, tt.position, got, tt.want)
+		bare, volume := bareSeriesTitle(tt.title, tt.series, tt.position)
+		if bare != tt.bare || volume != tt.volume {
+			t.Errorf("bareSeriesTitle(%q, %q, %d) = %q, %q, want %q, %q", tt.title, tt.series, tt.position, bare, volume, tt.bare, tt.volume)
 		}
 	}
 }
@@ -409,6 +410,9 @@ func narratorRuleCases() []narratorRuleCase {
 	sameEdition.ProviderIDs = map[string]string{"adds": "X1"}
 	_, cookbookRec := edition("Unrelated Cookbook", "B002V1O7UG", "Andy Weir", "Anyone")
 	_, siblingRec := edition("Series Name: The Well", "S2WELL0001", "Jo Smith", "Other Voice")
+	// A second provider's record for the tagged edition with other narrators.
+	_, otherNarrators := edition("The Martian", "", "Andy Weir", "Wil Wheaton")
+	otherNarrators.ProviderIDs = map[string]string{"other": "O1"}
 
 	return []narratorRuleCase{
 		{
@@ -500,6 +504,17 @@ func narratorRuleCases() []narratorRuleCase {
 			},
 			wantMatch: true,
 			wantID:    "Z0BRAY0001",
+		},
+		{
+			name: "two tagged-ASIN records with different narrators: the first is kept, the second dropped",
+			item: authorAsNarrator,
+			providers: []metadata.Provider{
+				brayLookup,
+				&lookupOnly{&fixedProvider{slug: "other", answers: []*metadata.MetadataResult{otherNarrators}}},
+			},
+			wantMatch:     true,
+			wantID:        "Z0BRAY0001",
+			wantNarrators: []string{"R. C. Bray"},
 		},
 		{
 			name: "narrator tag contradicted by a tagged-ASIN record with another title: no match",

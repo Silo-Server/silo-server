@@ -19,10 +19,21 @@ type BookMatchRules struct {
 	SeriesPosition int
 	// BareTitle, when set, is the item's title without a leading series
 	// name and number ("Book Title" for "Series Name 3 - Book Title").
-	// Candidates are scored against it, so a provider title without the
-	// series is not marked down for lacking it; the volume rules still read the
-	// number from the full title.
+	// Candidates are scored against it and against the full title, and keep
+	// the better score, so a provider title is not marked down for lacking
+	// the series or for keeping it.
 	BareTitle string
+	// VolumeTitle, when set, is the title the volume rules read in place of
+	// the full title (SeriesVolumeTitle): the volume a series prefix states,
+	// which a number in the book's own title ("Series Name 3 - Room 101")
+	// must not replace.
+	VolumeTitle string
+}
+
+// SeriesVolumeTitle states a series volume as an explicit marker after the
+// bare title: "Room 101, Book 3".
+func SeriesVolumeTitle(bare, volume string) string {
+	return bare + ", Book " + volume
 }
 
 // editionMarkerRE finds the edition words that name a different product than
@@ -95,11 +106,14 @@ func selectBookMatch(
 	w := bookWant{title: want, year: wantYear, existing: existing, noAuthor: noAuthor, threshold: matchThreshold()}
 	// Volumes are compared per candidate (volumeAgainst), so the score itself
 	// carries no volume rule here.
-	scored := want
+	w.prepared = preparedWantedTitle{normalised: normaliseTitle(want)}
 	if strings.TrimSpace(rules.BareTitle) != "" {
-		scored = rules.BareTitle
+		w.bare = &preparedWantedTitle{normalised: normaliseTitle(rules.BareTitle)}
 	}
-	w.prepared = preparedWantedTitle{normalised: normaliseTitle(scored)}
+	w.volumeTitle = want
+	if strings.TrimSpace(rules.VolumeTitle) != "" {
+		w.volumeTitle = rules.VolumeTitle
+	}
 	w.seriesPosition = rules.SeriesPosition
 
 	var credible []bookCandidate
@@ -135,8 +149,13 @@ func selectBookMatch(
 
 // bookWant is what the item asks of a candidate.
 type bookWant struct {
-	title          string
-	prepared       preparedWantedTitle
+	title    string
+	prepared preparedWantedTitle
+	// bare is the title without its series prefix, or nil.
+	bare *preparedWantedTitle
+	// volumeTitle is the title the volume rules read: title, or the
+	// series prefix's volume after the bare title.
+	volumeTitle    string
 	seriesPosition int // a tiebreak only; the title's own volume rules candidates out
 	year           int
 	existing       map[string]string
@@ -167,7 +186,7 @@ func (w bookWant) evaluate(r SearchResult) (bookCandidate, bool) {
 		return bookCandidate{}, false
 	}
 
-	score := w.prepared.score(name, normaliseTitle(name))
+	score := w.score(name)
 	matchedTitle := name
 	for _, alias := range r.TitleAliases {
 		// An alias is held to the same volume rules as the primary title
@@ -175,7 +194,7 @@ func (w bookWant) evaluate(r SearchResult) (bookCandidate, bool) {
 		if !w.aliasFits(alias.Title) {
 			continue
 		}
-		if s := w.prepared.score(alias.Title, normaliseTitle(alias.Title)); s > score {
+		if s := w.score(alias.Title); s > score {
 			score, matchedTitle = s, alias.Title
 		}
 	}
@@ -196,12 +215,23 @@ func (w bookWant) evaluate(r SearchResult) (bookCandidate, bool) {
 	}, true
 }
 
+// score is the candidate title's score against the item's title, or against
+// its bare title when that scores higher.
+func (w bookWant) score(title string) float64 {
+	normalised := normaliseTitle(title)
+	s := w.prepared.score(title, normalised)
+	if w.bare != nil {
+		s = max(s, w.bare.score(title, normalised))
+	}
+	return s
+}
+
 // volumeFits applies the volume rules to a result whose primary title is
 // name. fits is false when the result names another volume; sameVolume marks
 // one stating the item's volume, which wins ties.
 func (w bookWant) volumeFits(r SearchResult, name string) (sameVolume, fits bool) {
-	wv, titleVol := volumeAgainst(w.title, name)
-	cv, cok := volumeAgainst(name, w.title)
+	wv, titleVol := volumeAgainst(w.volumeTitle, name)
+	cv, cok := volumeAgainst(name, w.volumeTitle)
 	switch {
 	case cok && cv.first != cv.last && (!titleVol || cv != wv):
 		// A volume range ("Books 1-3") is a collection, not this book, unless
@@ -238,11 +268,11 @@ func (w bookWant) otherTitleAgrees(r SearchResult) bool {
 			continue
 		}
 		// It must name the item's work, not just carry its number.
-		if w.prepared.score(t, normaliseTitle(t)) <= w.threshold {
+		if w.score(t) <= w.threshold {
 			continue
 		}
-		wv, wok := volumeAgainst(w.title, t)
-		if tv, tok := volumeAgainst(t, w.title); wok && tok && tv == wv {
+		wv, wok := volumeAgainst(w.volumeTitle, t)
+		if tv, tok := volumeAgainst(t, w.volumeTitle); wok && tok && tv == wv {
 			return true
 		}
 	}
@@ -253,8 +283,8 @@ func (w bookWant) otherTitleAgrees(r SearchResult) bool {
 // title must: it states no other volume or a volume range, and it is not the
 // series name standing in for the item's volume.
 func (w bookWant) aliasFits(alias string) bool {
-	wv, titleVol := volumeAgainst(w.title, alias)
-	av, aok := volumeAgainst(alias, w.title)
+	wv, titleVol := volumeAgainst(w.volumeTitle, alias)
+	av, aok := volumeAgainst(alias, w.volumeTitle)
 	switch {
 	case aok && av.first != av.last && (!titleVol || av != wv):
 		return false
@@ -278,10 +308,17 @@ func boolCompare(a, b bool) int {
 }
 
 // coversAllButVolume reports whether candidate holds every word of want other
-// than its volume number: "Dungeon Crawler Carl" for "Dungeon Crawler Carl 2".
+// than its volume number, and not the number: "Dungeon Crawler Carl" for
+// "Dungeon Crawler Carl 2". A candidate that holds the number too is the
+// title itself ("Series Name 3 - Gone"), not the series name.
 func coversAllButVolume(want string, volume volumeIdentity, candidate string) bool {
 	words := identityWords(normaliseTitle(want))
-	if n := volume.word(); words[n] > 0 {
+	candidateWords := identityWords(normaliseTitle(candidate))
+	n := volume.word()
+	if candidateWords[n] > 0 {
+		return false
+	}
+	if words[n] > 0 {
 		words[n]--
 		if words[n] == 0 {
 			delete(words, n)
@@ -290,7 +327,7 @@ func coversAllButVolume(want string, volume volumeIdentity, candidate string) bo
 	if len(words) == 0 {
 		return false
 	}
-	return wordSubset(words, identityWords(normaliseTitle(candidate)))
+	return wordSubset(words, candidateWords)
 }
 
 // resultSharesTitleWord reports whether want and the result's title or an

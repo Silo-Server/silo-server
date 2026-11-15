@@ -337,6 +337,7 @@ func TestTitleScoreBands(t *testing.T) {
 		{"decimal volume against a whole one", "Series Name 0.5", "Series Name 5", zero},
 		{"decimal volumes with and without a trailing zero", "Series Name, Book 2.50", "Series Name, Book 2.5", one},
 		{"point written for a colon", "4.50 Night Express", "4:50 Night Express", one},
+		{"dotted numeric title", "10.20.30", "10 20 30", one},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

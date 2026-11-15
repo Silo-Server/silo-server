@@ -38,11 +38,16 @@ type audiobookMatch struct {
 type fetchRejection string
 
 const (
-	rejectAuthor     fetchRejection = "author"
-	rejectNarrator   fetchRejection = "narrator"
-	rejectTitle      fetchRejection = "title"
-	rejectVolume     fetchRejection = "volume"
-	rejectProviderID fetchRejection = "provider_id"
+	rejectAuthor   fetchRejection = "author"
+	rejectNarrator fetchRejection = "narrator"
+	// rejectNarratorConflict is a record reached through the tagged ID whose
+	// narrators contradict those an accepted record already settled: two
+	// providers disagree about the edition, so only the later record is
+	// dropped.
+	rejectNarratorConflict fetchRejection = "narrator_conflict"
+	rejectTitle            fetchRejection = "title"
+	rejectVolume           fetchRejection = "volume"
+	rejectProviderID       fetchRejection = "provider_id"
 )
 
 // errMatchRejected stops matching when a record the item's IDs already pin
@@ -69,6 +74,9 @@ type matchRun struct {
 	narratorsSettled bool
 	// bare is the item's title without its series prefix, or "".
 	bare string
+	// volumeTitle is the title the volume rules read: the item's title, or
+	// the series prefix's volume after the bare title.
+	volumeTitle string
 }
 
 // providerState is what one provider has answered for the item so far.
@@ -89,7 +97,8 @@ type providerState struct {
 // answered records a GetMetadata answer from provider i.
 func (r *matchRun) answered(i int, ids map[string]string, rejection fetchRejection) {
 	r.state[i].askedWith = ids
-	r.state[i].rejectedCredits = rejection == rejectAuthor || rejection == rejectNarrator
+	r.state[i].rejectedCredits = rejection == rejectAuthor || rejection == rejectNarrator ||
+		rejection == rejectNarratorConflict
 }
 
 // findMatch picks the record an audiobook is matched to and merges the
@@ -107,13 +116,17 @@ func (r *matchRun) answered(i int, ids map[string]string, rejection fetchRejecti
 // author.
 func (e *Enricher) findMatch(ctx context.Context, item enrichmentItemRow, providers []metadata.Provider) audiobookMatch {
 	run := &matchRun{
-		e:         e,
-		item:      item,
-		providers: providers,
-		ids:       maps.Clone(item.ProviderIDs),
-		state:     make([]providerState, len(providers)),
-		narrators: item.Narrators,
-		bare:      bareSeriesTitle(item.Title, item.SeriesName, item.SeriesPosition),
+		e:           e,
+		item:        item,
+		providers:   providers,
+		ids:         maps.Clone(item.ProviderIDs),
+		state:       make([]providerState, len(providers)),
+		narrators:   item.Narrators,
+		volumeTitle: item.Title,
+	}
+	var volume string
+	if run.bare, volume = bareSeriesTitle(item.Title, item.SeriesName, item.SeriesPosition); run.bare != "" {
+		run.volumeTitle = metadata.SeriesVolumeTitle(run.bare, volume)
 	}
 	if run.ids == nil {
 		run.ids = map[string]string{}
@@ -164,6 +177,10 @@ func (r *matchRun) lookupTaggedASIN(ctx context.Context) error {
 		r.answered(i, tagged, rejection)
 		if err != nil {
 			r.errs = append(r.errs, fmt.Errorf("%s asin lookup identity admission: %w", p.Slug(), err))
+			continue
+		}
+		if rejection == rejectNarratorConflict {
+			r.logRejected(ctx, p, rejection, "skip: contradicts an earlier provider's narrators")
 			continue
 		}
 		if rejection != "" {
@@ -221,7 +238,7 @@ func (r *matchRun) searchProvider(ctx context.Context, i int) error {
 		return nil
 	}
 	mp, canFetch := p.(metadata.MetadataProvider)
-	rules := &metadata.BookMatchRules{SeriesPosition: r.item.SeriesPosition, BareTitle: r.bare}
+	rules := &metadata.BookMatchRules{SeriesPosition: r.item.SeriesPosition, BareTitle: r.bare, VolumeTitle: r.volumeTitle}
 
 	remaining := results
 	for fetches := 0; fetches < maxCandidateFetches && len(remaining) > 0; {
@@ -284,6 +301,10 @@ func (r *matchRun) searchProvider(ctx context.Context, i int) error {
 		if err != nil {
 			r.errs = append(r.errs, fmt.Errorf("%s metadata identity admission: %w", p.Slug(), err))
 			break
+		}
+		if rejection == rejectNarratorConflict {
+			r.logRejected(ctx, p, rejection, "skip: contradicts an earlier provider's narrators")
+			return nil
 		}
 		if rejection != "" {
 			if metadata.SharesProviderID(r.item.ProviderIDs, admission.Selected.ProviderIDs) {
@@ -366,6 +387,9 @@ func (r *matchRun) fetchForMerge(ctx context.Context, i int, ids map[string]stri
 	case rejection == rejectProviderID:
 		r.logRejected(ctx, p, rejection, "skip: metadata identity contradicts an existing id")
 		return nil, nil
+	case rejection == rejectNarratorConflict:
+		r.logRejected(ctx, p, rejection, "skip: contradicts an earlier provider's narrators")
+		return nil, nil
 	case rejection != "" && prev.rejectedCredits:
 		r.logRejected(ctx, p, rejection, "skip: provider's record was already rejected")
 		return nil, nil
@@ -382,24 +406,25 @@ func (r *matchRun) fetchForMerge(ctx context.Context, i int, ids map[string]stri
 // series is the item's series name. Providers search such a title badly, and
 // find the book by its own title. The number must equal position when that is
 // known; an unknown position (0, which a decimal one also reads as) accepts
-// any number. It returns "" when title has no such prefix.
-func bareSeriesTitle(title, series string, position int) string {
+// any number. It returns the rest of the title and the number, or "" when
+// title has no such prefix.
+func bareSeriesTitle(title, series string, position int) (bare, volume string) {
 	series = strings.TrimSpace(series)
 	if series == "" {
-		return ""
+		return "", ""
 	}
 	re := regexp.MustCompile(`(?i)^\s*` + regexp.QuoteMeta(series) +
 		`[\s,:]+(?:(?:books?|bk|vol(?:ume)?|part)\.?\s*)?#?\s*(\d{1,4}(?:\.\d{1,2})?)\s*[-–—:]\s*(\S.*)$`)
 	m := re.FindStringSubmatch(title)
 	if m == nil {
-		return ""
+		return "", ""
 	}
 	if position > 0 {
 		if n, err := strconv.Atoi(m[1]); err != nil || n != position {
-			return ""
+			return "", ""
 		}
 	}
-	return strings.TrimSpace(m[2])
+	return strings.TrimSpace(m[2]), m[1]
 }
 
 // agreeingTitle is the record title or alias that best matches want, the
@@ -519,10 +544,11 @@ func (r *matchRun) metadataRequest(ids map[string]string) metadata.MetadataReque
 // listed is no contradiction), stated volume, then provider IDs. byTaggedID
 // marks a record reached through the item's own tagged ID. Such a record is
 // rejected when the item names an author and none of its titles shares a word
-// with the item's. Its narrators may contradict the narrator tag while no
-// accepted record has listed narrators yet, but only if one of its titles
-// names the item's work on its own (titleAgrees), so a wrong ID tag cannot
-// pull in another book, such as another volume of the same series.
+// with the item's. Its narrators may contradict the narrator tag, but only if
+// one of its titles names the item's work on its own (titleAgrees), so a wrong
+// ID tag cannot pull in another book, such as another volume of the same
+// series. Once an accepted record has listed narrators, such a record that
+// contradicts them is rejectNarratorConflict: only it is dropped.
 func (r *matchRun) admitFetched(
 	ctx context.Context,
 	existing map[string]string,
@@ -533,13 +559,18 @@ func (r *matchRun) admitFetched(
 	if !metadata.CreditsAgree([]string{item.Author}, result.People, models.PersonKindAuthor) {
 		return nil, rejectAuthor, nil
 	}
-	if !metadata.CreditsAgree(r.narrators, result.People, models.PersonKindNarrator) &&
-		(!byTaggedID || r.narratorsSettled || !r.titleAgrees(result)) {
-		return nil, rejectNarrator, nil
+	if !metadata.CreditsAgree(r.narrators, result.People, models.PersonKindNarrator) {
+		tagged := byTaggedID && r.titleAgrees(result)
+		switch {
+		case !tagged:
+			return nil, rejectNarrator, nil
+		case r.narratorsSettled:
+			return nil, rejectNarratorConflict, nil
+		}
 	}
 	// A record whose titles state only volumes other than the one the item's
 	// title states is another book, whichever path found the record.
-	if metadata.RecordVolumeContradicts(item.Title, recordTitles(result)) {
+	if metadata.RecordVolumeContradicts(r.volumeTitle, recordTitles(result)) {
 		return nil, rejectVolume, nil
 	}
 	if byTaggedID && strings.TrimSpace(item.Author) != "" &&

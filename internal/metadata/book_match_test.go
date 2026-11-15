@@ -20,6 +20,7 @@ var audiobookRuleCases = []struct {
 	noAuthor bool
 	position int
 	bare     string
+	volume   string // the VolumeTitle a series prefix gives
 	existing map[string]string
 	results  []SearchResult
 	wantID   string // "" means no match
@@ -222,6 +223,7 @@ var audiobookRuleCases = []struct {
 		name:     "a series-prefixed title is scored by its bare title",
 		want:     "Series Name 3 - Gone",
 		bare:     "Gone",
+		volume:   "Gone, Book 3",
 		position: 3,
 		results:  []SearchResult{bookResult("Gone", "G3", 2020)},
 		wantID:   "G3",
@@ -230,8 +232,38 @@ var audiobookRuleCases = []struct {
 		name:     "a series-prefixed title keeps its volume",
 		want:     "Series Name 3 - Gone",
 		bare:     "Gone",
+		volume:   "Gone, Book 3",
 		position: 3,
 		results:  []SearchResult{bookResult("Gone: Series Name, Book 4", "G4", 2020)},
+	},
+	{
+		name:     "a series-prefixed title still matches a provider title that keeps the prefix",
+		want:     "Series Name 3 - Gone",
+		bare:     "Gone",
+		volume:   "Gone, Book 3",
+		position: 3,
+		results:  []SearchResult{bookResult("Series Name 3 - Gone", "GP", 2020)},
+		wantID:   "GP",
+	},
+	{
+		name:     "a number in the bare title does not replace the series prefix's volume",
+		want:     "Series Name 3 - Room 101",
+		bare:     "Room 101",
+		volume:   "Room 101, Book 3",
+		position: 3,
+		results: []SearchResult{
+			bookResult("Room 101: Series Name, Book 4", "R4", 2020),
+			bookResult("Room 101: Series Name, Book 3", "R3", 2020),
+		},
+		wantID: "R3",
+	},
+	{
+		name:     "a number in the bare title does not let another volume through",
+		want:     "Series Name 3 - Room 101",
+		bare:     "Room 101",
+		volume:   "Room 101, Book 3",
+		position: 3,
+		results:  []SearchResult{bookResult("Room 101: Series Name, Book 4", "R4", 2020)},
 	},
 	{
 		name:     "tagged ASIN beats a higher title score",
@@ -261,7 +293,7 @@ func TestAdmitSearchMatchAudiobookRules(t *testing.T) {
 				ItemType:            "audiobook",
 				ContentID:           "item",
 				NoAuthor:            tt.noAuthor,
-				Rules:               &BookMatchRules{SeriesPosition: tt.position, BareTitle: tt.bare},
+				Rules:               &BookMatchRules{SeriesPosition: tt.position, BareTitle: tt.bare, VolumeTitle: tt.volume},
 			})
 			if err != nil {
 				t.Fatal(err)
@@ -363,6 +395,7 @@ func TestVolumesContradict(t *testing.T) {
 		{"Series Name 0.5", "Other Title: Series Name, Book 0", true},
 		{"Series Name 0.5", "Prequel Title: Series Name, Book 0.5", false},
 		{"Series Name 2.5", "Other Title: Series Name, Book 2", true},
+		{"Series Name, Book 0.50", "Series Name, Book 0.5", false},
 		{"Series Name, Book 0.5", "Series Name, Book 5", true},
 		{"Series Name #1.5", "Series Name, Book 1", true},
 		{"Engine 3.0", "Engine 3.0: A Novel", false},
