@@ -785,6 +785,10 @@
 # cleared or the installed version changes.
 ./internal/plugins TestInstallationStoreUpdateFailureDB
 
+# Updating an installed plugin from its catalog stops the running plugin only
+# after the new package passed its download and checksum checks.
+./internal/plugins TestServiceInstallCatalogStopsPluginOnlyForAnAcceptedPackageDB
+
 # Autoscan poll markers restart from now, and poll at once, only when the upstream changes.
 ./internal/autoscan TestUpdateSourceMarkerReset
 ./internal/autoscan TestUpdateConnectionMarkerReset

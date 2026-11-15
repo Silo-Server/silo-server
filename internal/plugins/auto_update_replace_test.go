@@ -3,6 +3,7 @@ package plugins
 import (
 	"context"
 	"errors"
+	"slices"
 	"testing"
 
 	pluginv1 "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginproto/silo/plugin/v1"
@@ -14,8 +15,9 @@ func TestAutoUpdateServiceCheckReplacesInstalledPluginsInPlace(t *testing.T) {
 			{ID: 41, RepositoryID: pluginRepositoryID(7), PluginID: "silo.tmdb", Version: "1.2.9", UpdatePolicy: "auto", Enabled: true},
 		},
 	}
-	host := &fakeAutoUpdateHost{}
-	installer := &fakeAutoUpdateInstaller{}
+	events := []string{}
+	host := &fakeAutoUpdateHost{events: &events}
+	installer := &fakeAutoUpdateInstaller{events: &events}
 	catalog := &fakeAutoUpdateCatalog{
 		entries: []CatalogEntry{
 			{
@@ -56,14 +58,38 @@ func TestAutoUpdateServiceCheckReplacesInstalledPluginsInPlace(t *testing.T) {
 	if len(installations.deletedIDs) != 0 {
 		t.Fatalf("deleted installation IDs = %#v, want none", installations.deletedIDs)
 	}
-	if len(installer.replaceBinary) != 1 {
-		t.Fatalf("replace binary calls = %d, want 1", len(installer.replaceBinary))
+	if len(installer.prepared) != 1 {
+		t.Fatalf("prepared replacements = %d, want 1", len(installer.prepared))
 	}
-	if installer.replaceBinary[0].existingID != 41 {
-		t.Fatalf("replace binary existing_id = %d, want 41", installer.replaceBinary[0].existingID)
+	if installer.prepared[0] != 41 {
+		t.Fatalf("prepared replacement existing_id = %d, want 41", installer.prepared[0])
 	}
-	if len(host.stopped) != 1 || host.stopped[0] != 41 {
-		t.Fatalf("stopped installations = %#v, want [41]", host.stopped)
+	// The plugin is stopped only once its replacement package passed.
+	if want := []string{"prepare", "stop", "apply"}; !slices.Equal(events, want) {
+		t.Fatalf("events = %v, want %v", events, want)
+	}
+}
+
+// A refused replacement package leaves the running plugin alone.
+func TestAutoUpdateServiceRefusedPackageLeavesPluginRunning(t *testing.T) {
+	events := []string{}
+	service := NewAutoUpdateService(
+		&fakeAutoUpdateRepositories{list: []*Repository{{ID: 7, Enabled: true}}},
+		&fakeAutoUpdateInstallations{list: []*Installation{{ID: 41, RepositoryID: pluginRepositoryID(7), PluginID: "silo.tmdb", Version: "1.0.0", UpdatePolicy: "auto", Enabled: true}}},
+		&fakeAutoUpdateCatalog{
+			entries:  []CatalogEntry{{RepositoryID: 7, Manifest: &pluginv1.PluginManifest{PluginId: "silo.tmdb", Version: "1.1.0"}}},
+			resolved: &ResolvedCatalogInstall{RepositoryID: 7, ArchiveURL: "https://plugins.example.test/tmdb", Checksum: "deadbeef"},
+		},
+		&fakeAutoUpdateInstaller{replaceErr: packageError(errors.New("binary checksum mismatch"), "refused"), events: &events},
+		&fakeAutoUpdateHost{events: &events},
+		nil,
+		nil,
+	)
+	if _, err := service.Check(context.Background(), AutoUpdateOptions{}); err != nil {
+		t.Fatalf("Check() returned error: %v", err)
+	}
+	if want := []string{"prepare"}; !slices.Equal(events, want) {
+		t.Fatalf("events = %v, want %v", events, want)
 	}
 }
 
@@ -417,22 +443,14 @@ func pluginRepositoryID(id int) *int {
 	return &id
 }
 
-type replaceBinaryCall struct {
-	existingID int
-	req        InstallBinaryRequest
-}
-
-type replaceRemoteCall struct {
-	existingID int
-	req        InstallArchiveRequest
-}
-
 type fakeAutoUpdateInstaller struct {
-	replaceErr    error
-	replaceBinary []replaceBinaryCall
-	replaceRemote []replaceRemoteCall
-	binary        []InstallBinaryRequest
-	remote        []InstallArchiveRequest
+	// replaceErr refuses the replacement package while it is prepared.
+	replaceErr error
+	// prepared lists the installation IDs a replacement was prepared for.
+	prepared []int
+	binary   []InstallBinaryRequest
+	remote   []InstallArchiveRequest
+	events   *[]string
 }
 
 func (f *fakeAutoUpdateInstaller) InstallRemote(_ context.Context, req InstallArchiveRequest) (*InstallResult, error) {
@@ -445,24 +463,25 @@ func (f *fakeAutoUpdateInstaller) InstallBinary(_ context.Context, req InstallBi
 	return &InstallResult{}, nil
 }
 
-func (f *fakeAutoUpdateInstaller) ReplaceRemote(_ context.Context, existing *Installation, req InstallArchiveRequest) (*InstallResult, error) {
-	f.replaceRemote = append(f.replaceRemote, replaceRemoteCall{existingID: existing.ID, req: req})
-	return &InstallResult{Installation: existing}, nil
-}
-
-func (f *fakeAutoUpdateInstaller) ReplaceBinary(_ context.Context, existing *Installation, req InstallBinaryRequest) (*InstallResult, error) {
-	f.replaceBinary = append(f.replaceBinary, replaceBinaryCall{existingID: existing.ID, req: req})
+func (f *fakeAutoUpdateInstaller) PrepareCatalogReplacement(_ context.Context, existing *Installation, _ *ResolvedCatalogInstall) (*PreparedReplacement, error) {
+	recordTestEvent(f.events, "prepare")
+	f.prepared = append(f.prepared, existing.ID)
 	if f.replaceErr != nil {
 		return nil, f.replaceErr
 	}
-	return &InstallResult{Installation: existing}, nil
+	return &PreparedReplacement{apply: func(context.Context) (*InstallResult, error) {
+		recordTestEvent(f.events, "apply")
+		return &InstallResult{Installation: existing}, nil
+	}}, nil
 }
 
 type fakeAutoUpdateHost struct {
 	stopped []int
+	events  *[]string
 }
 
 func (f *fakeAutoUpdateHost) Stop(installationID int) error {
+	recordTestEvent(f.events, "stop")
 	f.stopped = append(f.stopped, installationID)
 	return nil
 }

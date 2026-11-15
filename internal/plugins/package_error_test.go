@@ -97,6 +97,8 @@ type testZipEntry struct {
 	name string
 	data []byte
 	dir  bool
+	// lzma stores the entry as LZMA, which archive/zip can't decompress.
+	lzma bool
 }
 
 var testBinaryEntry = testZipEntry{name: "plugin", data: []byte("#!/bin/sh\nexit 0\n")}
@@ -120,7 +122,14 @@ func writeTestPluginZip(t *testing.T, path string, assets []*pluginv1.PackagedAs
 		if entry.dir {
 			header.SetMode(fs.ModeDir | 0o755)
 		}
-		writer, err := archive.CreateHeader(header)
+		create := archive.CreateHeader
+		if entry.lzma {
+			header.Method = 14
+			header.CompressedSize64 = uint64(len(entry.data))
+			header.UncompressedSize64 = uint64(len(entry.data))
+			create = archive.CreateRaw
+		}
+		writer, err := create(header)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -357,6 +366,12 @@ func TestServiceInstallLocalRefusesBeforeStoppingInstalledPlugin(t *testing.T) {
 			writeTestPluginZip(t, path, []*pluginv1.PackagedAsset{{Path: checked}}, testBinaryEntry,
 				testZipEntry{name: checked, data: []byte("checked")}, testZipEntry{name: alias, data: []byte("other")})
 		}},
+		// Assets are first decompressed when the archive is extracted,
+		// which happens after the installed plugin is stopped.
+		{name: "asset that can't be decompressed", want: "archive couldn't be read", write: func(t *testing.T, path string) {
+			writeTestPluginZip(t, path, []*pluginv1.PackagedAsset{{Path: "web/app.js"}}, testBinaryEntry,
+				testZipEntry{name: "web/app.js", data: []byte("not lzma"), lzma: true})
+		}},
 		{name: "entry inside binary", want: "archive couldn't be read", write: func(t *testing.T, path string) {
 			writeTestPluginZip(t, path, nil, testBinaryEntry, testZipEntry{name: "plugin/x", data: []byte("x")})
 		}},
@@ -384,6 +399,29 @@ func TestServiceInstallLocalRefusesBeforeStoppingInstalledPlugin(t *testing.T) {
 				t.Fatalf("refused upload touched the installed plugin: %v", events)
 			}
 		})
+	}
+}
+
+// An uploaded binary that can't be stored, here because its manifest
+// declares an asset a lone binary can't carry, is refused while the
+// installed plugin keeps running.
+func TestServiceInstallBinaryUploadRefusesBeforeStoppingInstalledPlugin(t *testing.T) {
+	manifest := packageErrorTestManifest("test.plugin", "2.0.0")
+	manifest.Assets = []*pluginv1.PackagedAsset{{Path: "web/app.js"}}
+	binary := manifestScript(t, manifest, "")
+	events := []string{}
+	store := newFakeServiceInstallationStore(&Installation{ID: 7, PluginID: "test.plugin", Version: "1.0.0", InstallPath: t.TempDir(), Enabled: true})
+	store.events = &events
+	service := &Service{
+		installations: store,
+		installer:     NewInstaller(store, InstallerOptions{BaseDir: t.TempDir()}),
+		host:          &fakeServiceHost{events: &events},
+	}
+	if _, err := service.InstallBinaryUpload(context.Background(), binary); err == nil {
+		t.Fatal("InstallBinaryUpload() accepted a binary it can't store")
+	}
+	if len(events) != 0 {
+		t.Fatalf("refused upload touched the installed plugin: %v", events)
 	}
 }
 
