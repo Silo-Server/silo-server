@@ -93,24 +93,7 @@ type SearchMatchAdmission struct {
 // ownership lookup succeeds, so a lookup failure cannot partially admit a
 // candidate.
 func AdmitSearchMatch(ctx context.Context, req SearchMatchAdmissionRequest) (SearchMatchAdmission, error) {
-	var (
-		selection bestMatchSelection
-		ok        bool
-	)
-	if req.Rules != nil {
-		selection, ok = selectBookMatch(req.WantTitle, req.WantYear, *req.Rules,
-			req.ExistingProviderIDs, req.NoAuthor, req.Results)
-	} else {
-		results := req.Results
-		if req.NoAuthor {
-			identity := req.NoAuthorTitle
-			if strings.TrimSpace(identity) == "" {
-				identity = req.WantTitle
-			}
-			results = titleOnlyCandidates(identity, req.ExistingProviderIDs, results)
-		}
-		selection, ok = selectBestMatchYear(req.WantTitle, req.WantYear, results)
-	}
+	selection, ok := selectForAdmission(req)
 	if !ok {
 		return SearchMatchAdmission{Status: SearchMatchNoCredibleMatch}, nil
 	}
@@ -151,6 +134,25 @@ func AdmitSearchMatch(ctx context.Context, req SearchMatchAdmissionRequest) (Sea
 		result.AgreedTitle = selection.matchedTitle
 	}
 	return result, nil
+}
+
+// selectForAdmission picks the candidate AdmitSearchMatch checks: by the
+// audiobook rules when set, otherwise by title score, keeping only the
+// candidates an item with no author can match.
+func selectForAdmission(req SearchMatchAdmissionRequest) (bestMatchSelection, bool) {
+	if req.Rules != nil {
+		return selectBookMatch(req.WantTitle, req.WantYear, *req.Rules,
+			req.ExistingProviderIDs, req.NoAuthor, req.Results)
+	}
+	results := req.Results
+	if req.NoAuthor {
+		identity := req.NoAuthorTitle
+		if strings.TrimSpace(identity) == "" {
+			identity = req.WantTitle
+		}
+		results = titleOnlyCandidates(identity, req.ExistingProviderIDs, results)
+	}
+	return selectBestMatchYear(req.WantTitle, req.WantYear, results)
 }
 
 // titleOnlyCandidates keeps the results an item with no author can be matched
