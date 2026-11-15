@@ -83,6 +83,11 @@ start is not blamed on it.
   `503 subtitle_page_not_ready` is the same retryable shape for a page whose
   start the server's progressive bitmap artifact has not parsed yet: it is a
   wait, not a failure of the source.
+- Any retryable 503 is handled in the background: the pages already parsed stay
+  on screen, the track stays selected, and the overlay keeps saying it is loading
+  without offering a manual retry. Only a non-retryable failure (a 404 for a
+  track this file does not have, an unsupported format) or a spent retry budget
+  moves the overlay to its error state.
 - On the server, windowed `.sup` extraction uses the same last-good window
   cache, in-flight coalescing, and per-identity extraction cooldown as text
   windows. A repeated or concurrent window does not spawn a second ffmpeg, and
@@ -132,6 +137,14 @@ follow.
   still capped at 256 MB of process reads; one killed that way, or one that runs
   out the two-minute window extract deadline before emitting a byte, answers the
   same retryable shape instead of a 500.
+
+  A retry that arrives while the identity is inside the extraction cooldown a
+  refusal armed is answered with the same page shape, not a generic
+  `subtitle_source_unavailable`: `subtitle_page_not_ready` with the artifact's
+  watermark while the fill is still parsing, `subtitle_page_too_costly` with an
+  empty covered range when no fill is running. The handler starts the fill from a
+  page refusal only, so naming the state is also what keeps a refusal that lost
+  its fill from becoming a dead end.
 
 All of it applies only to a remote identity, and pricing only to one whose size
 and runtime (or bitrate) are known: an unpriceable page keeps its source extract

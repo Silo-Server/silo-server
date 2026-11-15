@@ -24,6 +24,14 @@ var ErrSubtitlePageTooCostly = errors.New("subtitle page extract read too much o
 // from a provider that could not be read at all.
 const SubtitlePageTooCostlyReason = "subtitle_page_too_costly"
 
+// SubtitleWindowBudgetExceededReason is the additive problem code for a
+// request-path text/ASS window killed at its elapsed budget. Like the page
+// codes it distinguishes a cost refusal from a source failure: the source is
+// reachable, the window just costs more than one request may spend on it, and
+// the retry is answered from the recovery warm the refusal starts. The status,
+// the Retry-After shape and the client's retry loop are unchanged.
+const SubtitleWindowBudgetExceededReason = "subtitle_window_budget_exceeded"
+
 const (
 	// subtitlePageReadBudgetBytes caps how much of a remote container one
 	// windowed bitmap page extract may read. A page cannot seek a non-seekable

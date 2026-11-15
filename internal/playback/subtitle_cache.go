@@ -912,6 +912,7 @@ func (c *SubtitleCache) windowBudgetBreachError(ctx context.Context, opts Stream
 		"format", format, "budget", budget, "elapsed", elapsed)
 	return &SubtitleExtractionRetryError{
 		RetryAfter:           retryAfter,
+		Reason:               SubtitleWindowBudgetExceededReason,
 		WindowBudgetExceeded: true,
 	}
 }
@@ -2180,11 +2181,44 @@ func (c *SubtitleCache) serveWindowedSUP(w http.ResponseWriter, r *http.Request,
 // after the committed-artifact check, so a page that reads the cache never pays
 // for a previous provider failure, and before any header or provider read, so the
 // handler can answer 503 + Retry-After cleanly.
+//
+// A bounded bitmap page is answered by its track's progressive artifact, not by
+// the source extract this cooldown guards, so the refusal keeps naming that
+// state and the range the artifact covers. A generic subtitle_source_unavailable
+// here dropped both: the handler starts the recovery fill only for a page
+// refusal, so the retry could only repeat the read that earned the cooldown.
 func (c *SubtitleCache) windowedSUPMissRefusal(opts StreamExtractOpts) *SubtitleExtractionRetryError {
-	if retryAfter, cooling := c.extractionCoolingDownFor(opts, subtitleFormatSUP); cooling {
-		return &SubtitleExtractionRetryError{RetryAfter: retryAfter}
+	retryAfter, cooling := c.extractionCoolingDownFor(opts, subtitleFormatSUP)
+	if !cooling {
+		return nil
 	}
-	return nil
+	if refusal := c.bitmapPageCooldownRefusal(opts, retryAfter); refusal != nil {
+		return refusal
+	}
+	return &SubtitleExtractionRetryError{RetryAfter: retryAfter}
+}
+
+// bitmapPageCooldownRefusal names the state a bounded bitmap page is waiting on
+// while its identity is inside an extraction cooldown. With no progressive fill
+// the page has nothing behind it: the answer is the cost refusal, which is also
+// what makes the handler start the fill that will serve it. Once a fill is
+// running the page either answered from it already (see serveProgressiveSUPPage)
+// or cannot use it yet, so the cooldown's own delay is the honest answer and nil
+// is returned.
+func (c *SubtitleCache) bitmapPageCooldownRefusal(opts StreamExtractOpts, retryAfter time.Duration) *SubtitleExtractionRetryError {
+	if !opts.pageReadWatch() {
+		return nil
+	}
+	if windowed, _, _, openEnded := opts.WindowCoverage(); !windowed || openEnded {
+		return nil
+	}
+	if fill, _ := c.progressiveSUPArtifact(opts); fill != nil {
+		return nil
+	}
+	return &SubtitleExtractionRetryError{
+		RetryAfter: max(retryAfter, subtitlePageCostlyRetryAfter),
+		Reason:     SubtitlePageTooCostlyReason,
+	}
 }
 
 // formatEntryKey computes the in-flight/cache key for a source identity,

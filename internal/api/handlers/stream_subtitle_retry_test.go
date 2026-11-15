@@ -89,6 +89,28 @@ func TestWriteSubtitleRetryReportsAPageNotParsedYet(t *testing.T) {
 	}
 }
 
+// A page refused before any fill is parsing the track has nothing covered, and
+// the answer says so rather than omitting the header: an absent range reads as
+// unknown, while 0.000-0.000 is the truth and keeps the shape identical to the
+// partially parsed case.
+func TestWriteSubtitleRetryAdvertisesAnEmptyPageCoverage(t *testing.T) {
+	rec := httptest.NewRecorder()
+	writeSubtitleRetry(rec, &playback.SubtitleExtractionRetryError{
+		RetryAfter: 2 * time.Second,
+		Reason:     playback.SubtitlePageTooCostlyReason,
+	})
+
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want 503", rec.Code)
+	}
+	if got := rec.Header().Get(playback.SubtitleCoverageHeader); got != "0.000-0.000" {
+		t.Fatalf("coverage = %q, want the empty parsed range 0.000-0.000", got)
+	}
+	if got := rec.Header().Get("Retry-After"); got != "2" {
+		t.Fatalf("Retry-After = %q, want 2", got)
+	}
+}
+
 // An extraction that produced nothing must be told apart by cause, and never
 // answered as a plain failure when the cause is the source: the production run
 // turned a 120 s window extract timeout into a non-retryable 500, so the client

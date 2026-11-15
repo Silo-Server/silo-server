@@ -107,6 +107,83 @@ func TestExpensiveBitmapPageIsRefusedBeforeItsExtract(t *testing.T) {
 	}
 }
 
+// A page refused for its read cost arms the identity's extraction cooldown, and
+// a retry that lands inside that cooldown must keep saying what the page is
+// waiting for. The generic subtitle_source_unavailable answer dropped the reason,
+// so the handler (which starts the recovery fill only for a page refusal) never
+// kicked one and the retry could only repeat the read that earned the refusal.
+func TestBitmapPageCooldownRefusalKeepsItsReason(t *testing.T) {
+	c, source := newTestCache(t)
+	// An unknown-size source: nothing prices the page, so neither the prefix
+	// gate nor the progressive page path answers it and the cooldown refusal is
+	// what the retry meets.
+	opts := windowedSupOpts(source, 0, 600, 120)
+	opts.CacheIdentity = "virtual-pgs-cooldown"
+	opts.DisableBackgroundWarm = true
+	extract := func(context.Context, StreamExtractOpts) error {
+		t.Error("the source was read for a page inside its extraction cooldown")
+		return nil
+	}
+	serve := func() *SubtitleExtractionRetryError {
+		t.Helper()
+		err := c.ServeSUPExtract(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/sub.sup?windowed=1&position=600&duration=120", nil), opts, extract)
+		var retry *SubtitleExtractionRetryError
+		if !errors.As(err, &retry) {
+			t.Fatalf("serve error = %v, want the retryable shape", err)
+		}
+		return retry
+	}
+	// The refusal a runtime read-cap kill or a page timeout produces.
+	c.noteExtractionFailure(opts, subtitleFormatSUP)
+
+	retry := serve()
+	if retry.Reason != SubtitlePageTooCostlyReason {
+		t.Fatalf("reason = %q, want %q with no fill running", retry.Reason, SubtitlePageTooCostlyReason)
+	}
+	if retry.RetryAfter < subtitlePageCostlyRetryAfter {
+		t.Fatalf("retry after = %s, want at least %s", retry.RetryAfter, subtitlePageCostlyRetryAfter)
+	}
+
+	// Once the recovery fill is running, the cooldown's own delay is the honest
+	// answer: the page path answered from the artifact already if it could, and
+	// this page cannot use the artifact yet.
+	fill := startProgressiveFill(t, c, opts, pgsDisplaySetAt(10), pgsDisplaySetAt(200))
+	defer fill.Discard()
+	retry = serve()
+	if retry.Reason != "" {
+		t.Fatalf("reason = %q, want the generic cooldown answer while a fill runs", retry.Reason)
+	}
+}
+
+// The cooldown a page refusal arms must not block the fill it owns: a page the
+// recovering artifact's watermark has passed is served from it with no source
+// read, which is exactly what the retry the 503 asks for receives.
+func TestBitmapPageRefusalCooldownServesItsOwnFill(t *testing.T) {
+	c, source := newTestCache(t)
+	opts := progressiveSUPOpts(source, 120, 120)
+	opts.SourceDurationSeconds = 7200
+	opts.DisableBackgroundWarm = true
+	extract := func(context.Context, StreamExtractOpts) error {
+		t.Error("the source was read for a page the artifact has parsed")
+		return nil
+	}
+	// The refusal (runtime read cap or page timeout) armed the cooldown.
+	c.noteExtractionFailure(opts, subtitleFormatSUP)
+	fill := startProgressiveFill(t, c, opts, pgsDisplaySetAt(10), pgsDisplaySetAt(200))
+	defer fill.Discard()
+
+	rec := httptest.NewRecorder()
+	if err := c.ServeSUPExtract(rec, httptest.NewRequest(http.MethodGet, "/sub.sup?windowed=1&position=120&duration=120", nil), opts, extract); err != nil {
+		t.Fatalf("page inside the watermark error = %v, want it served from the fill", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("page inside the watermark = %d, want 200 from the fill", rec.Code)
+	}
+	if rec.Body.Len() == 0 {
+		t.Fatal("the page produced no bytes")
+	}
+}
+
 // The prefix budget must not refuse what it exists to spare: an opening page has
 // no discarded prefix, so it extracts exactly as before.
 func TestOpeningBitmapPageStillExtracts(t *testing.T) {

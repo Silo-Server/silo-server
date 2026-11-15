@@ -2382,9 +2382,12 @@ part the server had not parsed is never treated as delivered.
 
 A text or ASS window the client is waiting on is bounded: an extract started for
 a relay input that has not finished after 20 s is killed. If it produced
-nothing, the answer is `503` with `Retry-After` and the identity enters its usual
-extraction cooldown so a retry does not repeat the read; if part of the slice had
-already streamed, the response is aborted rather than completed. The breach also
+nothing, the answer is `503 subtitle_window_budget_exceeded` with `Retry-After`
+and the identity enters its usual extraction cooldown so a retry does not repeat
+the read; if part of the slice had already streamed, the response is aborted
+rather than completed. The code is distinct from `subtitle_source_unavailable`
+because the source is reachable and only this window is too expensive for one
+request. The breach also
 starts a detached recovery warm for the breached window extended by one client
 grid cell, so both an exact retry and the shifted window the client asks for
 next are covered; a retry whose range lies inside an in-flight warm joins that

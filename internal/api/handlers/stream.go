@@ -5396,9 +5396,11 @@ func writeSubtitleRetry(w http.ResponseWriter, retry *playback.SubtitleExtractio
 		seconds = 1
 	}
 	w.Header().Set("Retry-After", strconv.Itoa(seconds))
-	if retry.CoveredUntil > 0 {
+	if retry.CoveredUntil > 0 || isSubtitlePageReason(retry.Reason) {
 		// The requested page is not ready; the artifact behind it has parsed
-		// this range and will answer once it reaches the window.
+		// this range and will answer once it reaches the window. A page reason
+		// with nothing parsed yet advertises 0 so the header reflects what is
+		// actually covered instead of disappearing and reading as unknown.
 		playback.SetSubtitleCoverageRange(w.Header(), 0, retry.CoveredUntil)
 	}
 	if retry.Reason == playback.SubtitlePageTooCostlyReason {
@@ -5411,8 +5413,20 @@ func writeSubtitleRetry(w http.ResponseWriter, retry *playback.SubtitleExtractio
 			"The subtitle page is not parsed yet; retry to be served from the prefetched track")
 		return
 	}
+	if retry.Reason == playback.SubtitleWindowBudgetExceededReason {
+		writeError(w, http.StatusServiceUnavailable, playback.SubtitleWindowBudgetExceededReason,
+			"The subtitle window read past its time budget; retry to be served from the recovery extraction")
+		return
+	}
 	writeError(w, http.StatusServiceUnavailable, "subtitle_source_unavailable",
 		"Unable to verify the subtitle source; retry")
+}
+
+// isSubtitlePageReason reports whether the reason names a bitmap page whose
+// progressive artifact is what answers it. Those refusals always advertise the
+// covered range, even when the artifact has parsed nothing yet.
+func isSubtitlePageReason(reason string) bool {
+	return reason == playback.SubtitlePageTooCostlyReason || reason == playback.SubtitlePageNotReadyReason
 }
 
 // writeSubtitleProbeFailure answers a live-layout probe that could not

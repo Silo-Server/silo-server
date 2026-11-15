@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/Silo-Server/silo-server/internal/playback"
 )
 
 // A request-path window that reads its relay for its whole budget must answer
@@ -47,10 +49,11 @@ func TestSubtitleWindowBudgetAnswersRetryableAndWarms(t *testing.T) {
 	if err != nil || retryAfter < 1 {
 		t.Fatalf("Retry-After = %q, want a positive delay", rec.Header().Get("Retry-After"))
 	}
-	// The 503 carries the standard JSON problem body; what it must never carry
-	// is a partial slice.
-	if body := rec.Body.String(); !strings.Contains(body, "subtitle_source_unavailable") {
-		t.Fatalf("body = %q, want the subtitle_source_unavailable problem", body)
+	// The 503 is a cost refusal, not a source failure: its body names the
+	// budget so a client and an operator can tell them apart, and it never
+	// carries a partial slice.
+	if body := rec.Body.String(); !strings.Contains(body, playback.SubtitleWindowBudgetExceededReason) {
+		t.Fatalf("body = %q, want the %s problem", body, playback.SubtitleWindowBudgetExceededReason)
 	} else if strings.Contains(body, "WEBVTT") {
 		t.Fatalf("body = %q, want no partial subtitle slice", body)
 	}

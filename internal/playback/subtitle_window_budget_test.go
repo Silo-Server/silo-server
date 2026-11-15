@@ -53,6 +53,9 @@ func TestServeExtractTextWindowBudgetAnswersRetryable(t *testing.T) {
 	if !retry.WindowBudgetExceeded {
 		t.Fatal("retryable answer does not report the window budget")
 	}
+	if retry.Reason != SubtitleWindowBudgetExceededReason {
+		t.Fatalf("reason = %q, want %q", retry.Reason, SubtitleWindowBudgetExceededReason)
+	}
 	if retry.RetryAfter <= 0 {
 		t.Fatalf("retry after = %s, want a positive delay", retry.RetryAfter)
 	}
