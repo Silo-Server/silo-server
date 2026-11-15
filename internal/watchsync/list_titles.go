@@ -362,14 +362,34 @@ func (s *Service) removeLocalListItem(ctx context.Context, store userstore.UserS
 		return err
 	}
 	// Promotion may have moved the entry onto the library watchlist since
-	// the run read it; the title leaves in that form too. The row's IDs find
-	// the item after promotion deleted the title's own. Several items are
-	// left alone, as promotion leaves them.
+	// the run read it; the title leaves in that form too.
+	_, err := s.removePromotedListTitle(ctx, store, conn, b, titles, title, state)
+	return err
+}
+
+// removeRetiredListTitle applies a provider removal of a title row that
+// already left the local list, such as one retired at promotion while
+// another of the title's rows handed the library item its key: the title
+// leaves the library watchlist too. It reports whether it removed an item.
+func (s *Service) removeRetiredListTitle(ctx context.Context, store userstore.UserStore, conn Connection, b listBinding, state ListItemState) (bool, error) {
+	title, ok := watchlistTitleFromListItemID(state.MediaItemID)
+	titles := s.watchlistTitles(b)
+	if !ok || titles == nil || !b.removalsEnabled(conn) {
+		return false, nil
+	}
+	return s.removePromotedListTitle(ctx, store, conn, b, titles, title, state)
+}
+
+// removePromotedListTitle takes the one library item with the title's IDs off
+// the library watchlist, where promotion moves the entry. The row's IDs find
+// it after promotion deleted the title's own. Several items are left alone,
+// as promotion leaves them. It reports whether it removed one.
+func (s *Service) removePromotedListTitle(ctx context.Context, store userstore.UserStore, conn Connection, b listBinding, titles WatchlistTitles, title WatchlistTitle, state ListItemState) (bool, error) {
 	promoted, err := titles.PromotedWatchlistItems(ctx, conn.UserID, conn.ProfileID, title, state.keptTitleIDs())
 	if err != nil || len(promoted) != 1 {
-		return err
+		return false, err
 	}
-	return b.localRemove(ctx, store, conn.ProfileID, promoted[0])
+	return true, b.localRemove(ctx, store, conn.ProfileID, promoted[0])
 }
 
 // heldTitleIDs returns every ID ("tmdb:550", "imdb:tt0137523") the titles

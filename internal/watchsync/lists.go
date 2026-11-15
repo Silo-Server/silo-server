@@ -497,6 +497,10 @@ func (s *Service) applyRemoteListTombstone(
 				return nil, err
 			}
 			state.LocalPresent = false
+		} else if removed, err := s.removeRetiredListTitle(ctx, store, conn, b, *state); err != nil {
+			return nil, err
+		} else if removed {
+			result.Removed++
 		}
 		if err := s.repo.MarkListItemRemoteRemoved(ctx, conn.ID, b.kind, state.MediaItemID, now); err != nil {
 			return nil, err
