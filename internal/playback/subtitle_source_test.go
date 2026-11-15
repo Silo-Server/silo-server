@@ -753,6 +753,73 @@ func TestServeSUPWindowOrder(t *testing.T) {
 	}
 }
 
+// slowWindowSource reads a window in delay, as storage with slow random
+// reads does: the reporter's took 88 seconds.
+type slowWindowSource struct {
+	*fakeEmbeddedSource
+	delay time.Duration
+}
+
+func (s *slowWindowSource) Window(ctx context.Context, path string, ref EmbeddedSubtitleRef, from, to time.Duration) (*SubtitlePacketInput, error) {
+	select {
+	case <-time.After(s.delay):
+		return s.fakeEmbeddedSource.Window(ctx, path, ref, from, to)
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
+
+// A window the source reads too slowly is demuxed while the web player,
+// which gives up on a silent window after 30 seconds, still waits for it,
+// and the warm it starts demuxes too instead of reading the whole track
+// the same slow way (#4199). A track only the index can read waits for it.
+func TestSlowWindowReadGivesWayToTheDemux(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		opts  StreamExtractOpts
+		ref   EmbeddedSubtitleRef
+		delay time.Duration
+		want  string
+	}{
+		{name: "PGS window", opts: StreamExtractOpts{SourceCodec: "hdmv_pgs_subtitle", AllowWindow: true, DurationSeconds: 600}, ref: *testEmbeddedRef, delay: 88 * time.Second, want: "demuxed"},
+		{name: "text window", opts: StreamExtractOpts{SourceCodec: "subrip", SeekSeconds: 600, DurationSeconds: 600}, ref: *testEmbeddedRef, delay: 88 * time.Second, want: "demuxed"},
+		{name: "index-only text window", opts: StreamExtractOpts{SourceCodec: "webvtt", SeekSeconds: 600, DurationSeconds: 600},
+			ref: EmbeddedSubtitleRef{MediaFileID: 7, StreamIndex: 2, ContainerTrackID: "3", Codec: "webvtt", IndexOnly: true}, delay: 20 * time.Second, want: "converted:window"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				c, source := newTestCache(t)
+				src := &fakeEmbeddedSource{}
+				c.SetEmbeddedSource(&slowWindowSource{fakeEmbeddedSource: src, delay: tc.delay})
+				var mu sync.Mutex
+				var calls []StreamExtractOpts
+				convert := fakeConvert(&calls, &mu, false)
+				extract := func(ctx context.Context, opts StreamExtractOpts) error {
+					if err := ctx.Err(); err != nil {
+						return err
+					}
+					return convert(ctx, opts)
+				}
+				ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
+				defer cancel()
+				opts := tc.opts
+				opts.InputPath, opts.Embedded = source, &tc.ref
+				rec := httptest.NewRecorder()
+				req := httptest.NewRequest(http.MethodGet, "/subtitle", nil).WithContext(ctx)
+				if err := c.ServeExtract(rec, req, opts, extract); err != nil || rec.Body.String() != tc.want {
+					t.Fatalf("body %q, err %v", rec.Body.String(), err)
+				}
+				synctest.Wait()
+				src.mu.Lock()
+				defer src.mu.Unlock()
+				if src.wholeCalls != 0 {
+					t.Fatalf("read the whole track from the source %d times after a slow window", src.wholeCalls)
+				}
+			})
+		})
+	}
+}
+
 // The warm demuxes the tracks the source can't read in the slot it holds.
 func TestWarmEmbeddedTextTracksKeepsItsSlotForTheBatch(t *testing.T) {
 	c, source := newTestCache(t)

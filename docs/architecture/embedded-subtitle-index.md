@@ -320,8 +320,20 @@ covers most of the track, so it is read whole and kept first, as a
 whole-track request would; a PGS one is answered from the node's cached
 `.sup` first, when there is one. A PGS window answered from the source warms
 the cached `.sup` in the background, as a demuxed one did, which keeps the
-track too. Only a file without usable cues and without a kept track
-still runs FFmpeg over the source for a window.
+track too. FFmpeg still runs over the source for a window of a file
+without usable cues and without a kept track, and for a window that can't
+be read in time.
+
+A window with a duration waits at most 10 seconds for the kept track or the
+index, then is demuxed instead. Players give up on a silent window
+(the web player after 30 seconds), and on storage where each random read
+costs about a second, such as a FUSE mount of remote storage, reading one
+window through the index takes minutes. A PGS window that gave up this way
+warms the cached `.sup` with a demux, not a whole read through the index:
+that read would be slower still, and its random reads would starve the
+playback stream reading the same file. A track only the index can read waits
+for its window, and on-demand HLS rendition windows (above) have no such
+bound.
 
 The native route, offline downloads' embedded sidecars and AI translation
 share the API's cache; jellycompat's cache uses the same store, for track
