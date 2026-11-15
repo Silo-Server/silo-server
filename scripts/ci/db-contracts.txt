@@ -178,6 +178,12 @@
 # files of a subfolder an earlier scoped scan imported as a book of its own.
 ./internal/scanner TestScanSubtreeAudiobookInsideBookRetiresSubfolderBookDB
 
+# A scan that walked a book before another scan indexed its new part neither
+# marks that part missing nor rewrites the book without it, and a newer scan
+# of the book still writes the parts an older scan of its alias lacked.
+./internal/scanner TestScanFileAudiobookKeepsPartsIndexedByConcurrentScanDB
+./internal/scanner TestScanFileAudiobookNewerAliasInventoryWinsDB
+
 # A rescan of a retagged, unmatched ebook keeps the fields and author credits an
 # admin locked, including locked fields left empty.
 ./internal/scanner TestEbookRescanKeepsLockedFieldsDB
