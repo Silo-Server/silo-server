@@ -51,13 +51,13 @@ type MediaStore interface {
 	// q carries the ABS filter and sort, applied in SQL (ItemsQuery{} for
 	// none). limit <= 0 returns every match.
 	ListAudiobooks(ctx context.Context, libraryID int64, limit, offset int, access catalog.AccessFilter, q ItemsQuery) ([]*models.MediaItem, int, error)
-	// ListAudiobooksCollapsed is ListAudiobooks with each series folded into
-	// its first book in the requested order (ABS collapseseries=1); total
-	// counts the folded entries.
 	// StreamAudiobooks lists every match like ListAudiobooks with limit 0,
 	// reporting the total to onTotal first and then handing the books to
 	// emit in order, a batch at a time.
 	StreamAudiobooks(ctx context.Context, libraryID int64, access catalog.AccessFilter, q ItemsQuery, onTotal func(int) error, emit func([]*models.MediaItem) error) error
+	// ListAudiobooksCollapsed is ListAudiobooks with each series folded into
+	// its first book in the requested order (ABS collapseseries=1); total
+	// counts the folded entries.
 	ListAudiobooksCollapsed(ctx context.Context, libraryID int64, limit, offset int, access catalog.AccessFilter, q ItemsQuery) ([]CollapsedAudiobook, int, error)
 	GetMediaFiles(ctx context.Context, contentID string, access catalog.AccessFilter) ([]*models.MediaFile, error)
 	// ListAudiobookLibraries returns media_folder rows with type='audiobooks'.

@@ -461,7 +461,8 @@ func audiobookItemsOrder(q abs.ItemsQuery, libraryID int64, viewer absViewer, ac
 			return "", "(SELECT MIN(mil_sort.first_seen_at) FROM media_item_libraries mil_sort WHERE mil_sort.content_id = mi.content_id" +
 				visibleFolder("mil_sort.media_folder_id") + ") " + dir + " " + nulls + ", " + tail
 		}
-		// The library's own first_seen_at, joined so idx_item_libraries_folder
+		// The library's own first_seen_at, joined so
+		// idx_item_libraries_folder_seen_content
 		// can serve the order.
 		join = ` JOIN media_item_libraries mil_sort ON mil_sort.content_id = mi.content_id AND mil_sort.media_folder_id = ` + nextArg(int(libraryID))
 		return join, "mil_sort.first_seen_at " + dir + ", " + tail
@@ -1064,21 +1065,20 @@ func (s *ABSMediaStore) ListRecentlyAdded(ctx context.Context, libraryID int64, 
 	args := []any{limit}
 	conditions := []string{`mi.type = 'audiobook'`}
 	argIdx := 2
-	libFilter := ""
 	if libraryID != 0 {
-		libFilter = fmt.Sprintf(` AND mil.media_folder_id = $%d`, argIdx)
 		args = append(args, int(libraryID))
 		argIdx++
 	}
 	appendAudiobookAccessConditions("mi", access, &conditions, &args, &argIdx)
 	if libraryID != 0 {
-		// Walk idx_item_libraries_folder newest first and stop at limit,
-		// instead of computing every book's added date and sorting them all.
+		// Walk idx_item_libraries_folder_seen_content newest first and stop at
+		// limit, instead of computing every book's added date and sorting them
+		// all. The content_id direction matches the index.
 		sql := `
 			SELECT mi.content_id FROM media_item_libraries mil
 			JOIN media_items mi ON mi.content_id = mil.content_id
 			WHERE mil.media_folder_id = $2 AND ` + strings.Join(conditions, " AND ") + `
-			ORDER BY mil.first_seen_at DESC, mil.content_id DESC
+			ORDER BY mil.first_seen_at DESC, mil.content_id ASC
 			LIMIT $1
 		`
 		return s.listAudiobookIDs(ctx, sql, args, access, libraryID)
@@ -1088,7 +1088,7 @@ func (s *ABSMediaStore) ListRecentlyAdded(ctx context.Context, libraryID int64, 
 		JOIN LATERAL (
 		  SELECT MIN(first_seen_at) AS added_at
 		  FROM media_item_libraries mil
-		  WHERE mil.content_id = mi.content_id` + libFilter + `
+		  WHERE mil.content_id = mi.content_id
 		) added ON added.added_at IS NOT NULL
 		WHERE ` + strings.Join(conditions, " AND ") + `
 		ORDER BY added.added_at DESC
@@ -1149,10 +1149,13 @@ func (s *ABSMediaStore) RefreshAuthorCounts(ctx context.Context, minInterval tim
 	}
 	defer func() { _ = lock.Release(ctx) }()
 	conn := lock.Conn()
+	// Record when this refresh started, not when it finished: a refresh that
+	// takes minutes must not make the next tick look early and skip.
 	var fresh bool
+	var startedAt time.Time
 	if err := conn.QueryRow(ctx, `
-		SELECT EXISTS (SELECT 1 FROM abs_author_counts_refresh WHERE refreshed_at > now() - $1::interval)`,
-		minInterval).Scan(&fresh); err != nil {
+		SELECT now(), EXISTS (SELECT 1 FROM abs_author_counts_refresh WHERE refreshed_at > now() - $1::interval)`,
+		minInterval).Scan(&startedAt, &fresh); err != nil {
 		return fmt.Errorf("abs_media_store: read author counts refresh: %w", err)
 	}
 	if fresh {
@@ -1162,8 +1165,8 @@ func (s *ABSMediaStore) RefreshAuthorCounts(ctx context.Context, minInterval tim
 		return fmt.Errorf("abs_media_store: refresh author counts: %w", err)
 	}
 	if _, err := conn.Exec(ctx, `
-		INSERT INTO abs_author_counts_refresh (singleton, refreshed_at) VALUES (true, now())
-		ON CONFLICT (singleton) DO UPDATE SET refreshed_at = EXCLUDED.refreshed_at`); err != nil {
+		INSERT INTO abs_author_counts_refresh (singleton, refreshed_at) VALUES (true, $1)
+		ON CONFLICT (singleton) DO UPDATE SET refreshed_at = EXCLUDED.refreshed_at`, startedAt); err != nil {
 		return fmt.Errorf("abs_media_store: record author counts refresh: %w", err)
 	}
 	return nil
@@ -1171,22 +1174,24 @@ func (s *ABSMediaStore) RefreshAuthorCounts(ctx context.Context, minInterval tim
 
 // libraryOverlapsDisabled reports whether a book in the library is also in
 // one of the profile's disabled libraries. The author view counts such a book
-// but the profile must not see it.
+// but the profile must not see it. Without an overlap the check reads every
+// membership in the library, so its answer shares the short-lived count
+// cache: an author sync pages many times with the same answer.
 func (s *ABSMediaStore) libraryOverlapsDisabled(ctx context.Context, libraryID int64, disabled []int) (bool, error) {
 	if len(disabled) == 0 {
 		return false, nil
 	}
-	var overlap bool
-	err := s.Pool.QueryRow(ctx, `
-		SELECT EXISTS (
+	n, err := s.cachedAudiobookCount(ctx, `
+		SELECT COUNT(*) FROM (
 			SELECT 1 FROM media_item_libraries here
 			JOIN media_item_libraries hidden ON hidden.content_id = here.content_id
 			WHERE here.media_folder_id = $1 AND hidden.media_folder_id = ANY($2)
-		)`, int(libraryID), disabled).Scan(&overlap)
+			LIMIT 1
+		) overlap`, []any{int(libraryID), disabled})
 	if err != nil {
 		return false, fmt.Errorf("abs_media_store: check disabled library overlap: %w", err)
 	}
-	return overlap, nil
+	return n > 0, nil
 }
 
 // ListLibraryAuthors returns one page of distinct audiobook authors plus the
