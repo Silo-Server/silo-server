@@ -198,4 +198,30 @@ describe("foliate view search", () => {
     expect(subitems).toEqual([]);
     expect(addAnnotation).not.toHaveBeenCalled();
   });
+
+  it("pauses a long section without matches so an abort stops it there", async () => {
+    // Each section takes well over the search's time budget to scan.
+    const { view } = makeView(Array.from({ length: 3 }, () => "lorem ipsum ".repeat(10_000)));
+    const sections = (view.book as { sections: { createDocument: () => Promise<Document> }[] })
+      .sections;
+    let opened = 0;
+    for (const section of sections) {
+      const createDocument = section.createDocument;
+      section.createDocument = () => {
+        opened++;
+        return createDocument();
+      };
+    }
+    const controller = new AbortController();
+    // Queued before the scan starts, like a click on Back during the search.
+    setTimeout(() => controller.abort());
+
+    const { subitems } = await collect(
+      view.search({ query: "quixotic", signal: controller.signal }),
+    );
+
+    expect(controller.signal.aborted).toBe(true);
+    expect(subitems).toEqual([]);
+    expect(opened).toBe(1);
+  });
 });
