@@ -82,7 +82,10 @@ root. The mark is set by:
 - an item's Refresh Metadata in `reset` mode, after the reset. The reset
   writes the provider's values and clears the fields and credits the
   provider leaves out; the second read lets the tags fill what is still
-  empty, as on any scan of a matched book.
+  empty, as on any scan of a matched book. The job fails when that read
+  fails or the scan did not read the book (`scanner.AudiobookTagRereadDone`),
+  since a scan of a path shared with other books succeeds when only one of
+  them failed.
 
 The book keeps its item: the scan finds it by the root path of its stored
 files, so the content ID, file rows, series row, progress, and favorites

@@ -332,7 +332,7 @@ func (r *itemRefreshTestRefresher) ResetTargetForLibrary(ctx context.Context, ta
 // newItemRefreshTestExecutor builds an executor over enabled folder 3 with
 // empty claim, file and skipped-root fakes.
 func newItemRefreshTestExecutor(ingester *itemRefreshTestIngester, scanRuns *itemRefreshTestScanRuns, refresher *itemRefreshTestRefresher, eventBus cache.EventBus) *ItemRefreshExecutor {
-	return NewItemRefreshExecutor(
+	executor := NewItemRefreshExecutor(
 		&itemRefreshTestFolderRepo{folder: &models.MediaFolder{ID: 3, Enabled: true}},
 		&itemRefreshTestFileRepo{},
 		&itemRefreshTestRootClaimRepo{},
@@ -346,6 +346,9 @@ func newItemRefreshTestExecutor(ingester *itemRefreshTestIngester, scanRuns *ite
 		eventBus,
 		nil,
 	)
+	// The fake ingester runs no scanner, so the marked book counts as read.
+	executor.audiobookTagRereadDone = func(context.Context) bool { return true }
+	return executor
 }
 
 func TestItemRefreshWithholdsScanCompleteWhenMetadataFails(t *testing.T) {

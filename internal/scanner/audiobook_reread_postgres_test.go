@@ -79,8 +79,12 @@ JSON
 		t.Fatalf("ordinary scan read the unchanged book again: title %q", title)
 	}
 
-	if _, err := s.ScanSubtree(WithAudiobookTagReread(ctx, contentID), folder, root); err != nil {
+	marked := WithAudiobookTagReread(ctx, contentID)
+	if _, err := s.ScanSubtree(marked, folder, root); err != nil {
 		t.Fatal(err)
+	}
+	if !AudiobookTagRereadDone(marked) {
+		t.Error("AudiobookTagRereadDone = false after the book was read")
 	}
 	gotContent, gotFile, title := read()
 	if title != "Book Title" {
@@ -98,5 +102,16 @@ JSON
 		JOIN media_files mf ON mf.id = p.last_file_id AND mf.content_id = mi.content_id
 		WHERE p.user_id = $1`, userID).Scan(&position); err != nil || position != 30 {
 		t.Errorf("progress after the refresh: position %v, err %v; want 30 on the same item and file", position, err)
+	}
+
+	// When the book cannot be read, the scan still succeeds because the book
+	// beside it was skipped; the mark reports that the book was not read.
+	writeFakeTool(t, ffprobe, "#!/bin/sh\necho 'Invalid data found when processing input' >&2\nexit 1\n")
+	marked = WithAudiobookTagReread(ctx, contentID)
+	if _, err := s.ScanSubtree(marked, folder, root); err != nil {
+		t.Fatalf("scan with an unreadable marked book: %v", err)
+	}
+	if AudiobookTagRereadDone(marked) {
+		t.Error("AudiobookTagRereadDone = true for a book that could not be read")
 	}
 }

@@ -480,6 +480,9 @@ type ItemRefreshExecutor struct {
 	// evictRails drops this node's cached home rails that list the given
 	// content IDs; tests replace it.
 	evictRails func(contentIDs ...string)
+	// audiobookTagRereadDone is scanner.AudiobookTagRereadDone; tests
+	// replace it.
+	audiobookTagRereadDone func(context.Context) bool
 	// relinkWait bounds how long a complete refresh waits for its scope's
 	// files to be linked again; zero means completeRefreshRelinkWait.
 	relinkWait time.Duration
@@ -552,7 +555,9 @@ func NewItemRefreshExecutor(
 		refresher:       refresher,
 		eventBus:        eventBus,
 		evictRails:      sections.EvictResolvedListItems,
-		realtimeHub:     realtimeHub,
+
+		audiobookTagRereadDone: scanner.AudiobookTagRereadDone,
+		realtimeHub:            realtimeHub,
 	}
 }
 
@@ -764,12 +769,21 @@ func (e *ItemRefreshExecutor) rereadAudiobookTags(ctx context.Context, folder *m
 		return err
 	}
 	stopScanHeartbeat := startDirectScanHeartbeat(e.scanRuns, scanRun, directScanHeartbeatEvery)
-	result, err := e.ingester.IngestSubtree(scanner.WithAudiobookTagReread(scanCtx, contentID), folder, scanPath)
+	markedCtx := scanner.WithAudiobookTagReread(scanCtx, contentID)
+	result, err := e.ingester.IngestSubtree(markedCtx, folder, scanPath)
 	stopScanHeartbeat()
 	if err != nil {
 		return failDirectScan(ctx, e.scanRuns, scanRun, err)
 	}
-	return completeDirectScan(ctx, e.scanRuns, scanRun, result)
+	if err := completeDirectScan(ctx, e.scanRuns, scanRun, result); err != nil {
+		return err
+	}
+	// A scan of a path shared with other books succeeds when only this one
+	// failed, so check that this one was read.
+	if !e.audiobookTagRereadDone(markedCtx) {
+		return fmt.Errorf("the scan did not read audiobook %s", contentID)
+	}
+	return nil
 }
 
 func (e *ItemRefreshExecutor) prepareCompleteRefresh(ctx context.Context, folder *models.MediaFolder, req ItemRefreshRequest) error {
