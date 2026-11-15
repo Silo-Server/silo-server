@@ -273,7 +273,7 @@ export default function SearchSettings() {
                 <SettingField
                   label={t("web.admin.settings.search.meili.timeout.label")}
                   type="number"
-                  unit="ms"
+                  unit={t("web.admin.common.units.milliseconds")}
                   value={form.getValue("catalog.search.meilisearch.timeout_ms") || "800"}
                   onChange={(value) =>
                     form.setValue("catalog.search.meilisearch.timeout_ms", value)

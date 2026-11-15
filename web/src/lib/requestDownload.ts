@@ -58,7 +58,7 @@ export function formatRequestDownload(
   }
   const parts = [t("web.requests.download.downloading")];
   const percent = requestDownloadPercent(download);
-  if (percent !== undefined) parts.push(`${percent}%`);
+  if (percent !== undefined) parts.push(t("web.common.format.percent", { percent }));
   const left = downloadTimeLeft(download, now);
   if (left) parts.push(t("web.requests.download.timeLeft", { time: left }));
   return parts.join(" · ");

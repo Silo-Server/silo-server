@@ -34,13 +34,17 @@ func scopeLibraryRoot(path string, libraryRoots []string) string {
 // directory between it and the root, has a name the walk skips
 // (SkippedDirName), so a scoped scan never reads what a full scan passes over.
 func scanRootIgnoreRules(path string, libraryRoots []string) ([]ignoreRules, bool, error) {
-	return ancestorIgnoreRules(path, libraryRoots, fspath.ReadDir, false)
+	return ancestorIgnoreRules(path, libraryRoots, fspath.ReadDir, false, nil)
 }
 
 // ancestorIgnoreRules is scanRootIgnoreRules with the directory listing it
 // reads each ancestor's ignore files from. file says path is a regular file,
 // so it is matched as one even if it has vanished since the caller saw it.
-func ancestorIgnoreRules(path string, libraryRoots []string, listDir func(string) ([]fs.DirEntry, error), file bool) ([]ignoreRules, bool, error) {
+// visit, when set, sees each ancestor the walk enters, outermost first, with
+// the rules that apply to its entries. Returning true ends the pass there: the
+// result is the rules inherited from above that ancestor, which a walk rooted
+// at it starts from, and it is not ignored.
+func ancestorIgnoreRules(path string, libraryRoots []string, listDir func(string) ([]fs.DirEntry, error), file bool, visit func(dir string, rules []ignoreRules, entries []fs.DirEntry) bool) ([]ignoreRules, bool, error) {
 	path = filepath.Clean(path)
 	root := ""
 	for _, candidate := range compactScanRoots(libraryRoots) {
@@ -72,6 +76,7 @@ func ancestorIgnoreRules(path string, libraryRoots []string, listDir func(string
 		if err != nil {
 			return nil, false, fmt.Errorf("read ignore ancestor %s: %w", dir, err)
 		}
+		inherited := rules
 		var skip bool
 		rules, skip, err = dirIgnoreRules(rules, dir, dir, entries)
 		if err != nil {
@@ -79,6 +84,9 @@ func ancestorIgnoreRules(path string, libraryRoots []string, listDir func(string
 		}
 		if skip {
 			return rules, true, nil
+		}
+		if visit != nil && visit(dir, rules, entries) {
+			return inherited, false, nil
 		}
 	}
 	// A scope is a directory unless the filesystem says otherwise.
@@ -100,7 +108,7 @@ func ancestorIgnoreRules(path string, libraryRoots []string, listDir func(string
 // error means an ignore file or directory on the way could not be read, which
 // a walk records as a failure there.
 func FileIgnored(file string, libraryRoots []string) (bool, error) {
-	_, ignored, err := ancestorIgnoreRules(file, libraryRoots, ignoreFileEntries, true)
+	_, ignored, err := ancestorIgnoreRules(file, libraryRoots, ignoreFileEntries, true, nil)
 	return ignored, err
 }
 

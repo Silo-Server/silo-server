@@ -48,9 +48,9 @@ func TestRuleFieldsFilterCatalogDB(t *testing.T) {
 			($3, 'movie', 'Undated', '{}', 0, 0, NULL, NULL, NULL)`,
 		id("empire"), id("wolf"), id("undated"), recent)
 	batchEquivExec(t, pool, `
-		INSERT INTO media_items (content_id, type, title, genres, latest_episode_added_at, last_air_date_at, latest_available_episode_air_date_at) VALUES
-			($1, 'series', 'Fresh Show', '{}', NOW() - INTERVAL '2 days', CURRENT_DATE - 2, CURRENT_DATE - 2),
-			($2, 'series', 'Stale Show', '{}', NOW() - INTERVAL '400 days', CURRENT_DATE - 1, CURRENT_DATE - 400)`,
+		INSERT INTO media_items (content_id, type, title, genres, first_air_date, latest_episode_added_at, last_air_date_at, latest_available_episode_air_date_at) VALUES
+			($1, 'series', 'Fresh Show', '{}', '2020-13-45', NOW() - INTERVAL '2 days', CURRENT_DATE - 2, CURRENT_DATE - 2),
+			($2, 'series', 'Stale Show', '{}', '2019-05-01', NOW() - INTERVAL '400 days', CURRENT_DATE - 1, CURRENT_DATE - 400)`,
 		id("fresh"), id("stale"))
 	for _, movie := range []string{"empire", "wolf", "undated"} {
 		batchEquivExec(t, pool, `INSERT INTO media_item_libraries (content_id, media_folder_id) VALUES ($1, $2)`, id(movie), movies)
@@ -90,6 +90,10 @@ func TestRuleFieldsFilterCatalogDB(t *testing.T) {
 		{"tmdb rating range", "movie", QueryRule{Field: "rating_tmdb", Op: "between", Value: []any{5.0, 6.0}}, []string{"wolf"}},
 		{"released in the last", "movie", QueryRule{Field: "release_date", Op: "in_last", Value: "30d"}, []string{"wolf"}},
 		{"released not in the last", "movie", QueryRule{Field: "release_date", Op: "not_in_last", Value: "30d"}, []string{"empire"}},
+		// A series without release_date falls back to first_air_date; Fresh
+		// Show's impossible 2020-13-45 reads as unknown instead of failing the
+		// query.
+		{"premiered after, from first air date", "series", QueryRule{Field: "release_date", Op: "gt", Value: "2000-01-01"}, []string{"stale"}},
 		{"episode added in the last", "series", QueryRule{Field: "latest_episode_added", Op: "in_last", Value: "7d"}, []string{"fresh"}},
 		{"episode added not in the last", "series", QueryRule{Field: "latest_episode_added", Op: "not_in_last", Value: "7d"}, []string{"stale"}},
 		// Stale Show's newest episode aired yesterday but has no file; the

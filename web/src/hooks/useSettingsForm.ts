@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { toast } from "sonner";
+import { t } from "@/i18n";
 import { captureProfileRequestContext, isCapturedProfileAuthorityActive } from "@/api/client";
 import {
   adminSettingsKey,
@@ -197,7 +198,7 @@ export function useSettingsForm({ keys }: UseSettingsFormOptions) {
       // Callers must distinguish failed writes from acknowledged saves before
       // advancing a wizard or performing a dependent mutation.
       if (!settings) {
-        const error = new Error("Reload settings before saving.");
+        const error = new Error(t("web.admin.settings.hooks.settings.reloadBeforeSaving"));
         toast.error(error.message);
         throw error;
       }

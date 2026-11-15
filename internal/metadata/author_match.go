@@ -142,3 +142,77 @@ func foldDiacritics(s string) string {
 	}
 	return folded
 }
+
+// CreditsAgree is the audiobook form of AuthorsAgree: it checks the item's
+// credited names against the fetched people of one kind, authors or
+// narrators. As there, absence on either side is not a contradiction.
+//
+// It is stricter about short names. AuthorsAgree lets a bare surname agree
+// with anyone of that surname, which is how a "King" tag passes for any King;
+// here a one-word name agrees only with the same one word. An item name may
+// hold several people in one tag ("Michael Kramer, Kate Reading"), so a
+// fetched name found inside it also agrees.
+func CreditsAgree(itemNames []string, people []models.ItemPerson, kind models.PersonKind) bool {
+	var want []string
+	for _, n := range itemNames {
+		if n = normalisePersonName(n); n != "" {
+			want = append(want, n)
+		}
+	}
+	if len(want) == 0 {
+		return true
+	}
+	var got []string
+	for _, p := range people {
+		if p.Kind != kind {
+			continue
+		}
+		if n := normalisePersonName(p.Name); n != "" {
+			got = append(got, n)
+		}
+	}
+	if len(got) == 0 {
+		return true
+	}
+	for _, w := range want {
+		for _, g := range got {
+			if strictNamesMatch(w, g) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// strictNamesMatch is personNamesMatch without the bare-surname allowance,
+// and with surname-first order ("Bray R C") accepted as the same words.
+func strictNamesMatch(a, b string) bool {
+	if a == b {
+		return true
+	}
+	aw, bw := strings.Fields(a), strings.Fields(b)
+	if len(aw) < 2 || len(bw) < 2 {
+		return false
+	}
+	if sameWords(aw, bw) {
+		return true
+	}
+	return personNamesMatch(a, b)
+}
+
+func sameWords(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	counts := make(map[string]int, len(a))
+	for _, w := range a {
+		counts[w]++
+	}
+	for _, w := range b {
+		if counts[w] == 0 {
+			return false
+		}
+		counts[w]--
+	}
+	return true
+}

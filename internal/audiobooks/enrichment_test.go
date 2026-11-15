@@ -115,7 +115,7 @@ func (r *recordingAudiobookItemRepo) UpdateMetadataTx(_ context.Context, _ pgx.T
 	return nil
 }
 
-func (r *recordingAudiobookItemRepo) ReplacePeople(context.Context, string, []models.ItemPerson) error {
+func (r *recordingAudiobookItemRepo) ReplacePeopleKindsTx(context.Context, pgx.Tx, string, []models.PersonKind, []models.ItemPerson) error {
 	return nil
 }
 

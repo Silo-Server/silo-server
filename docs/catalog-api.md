@@ -115,8 +115,10 @@ A partial last word still matches, which keeps typeahead working. A name
 written without separators, as many Chinese, Japanese, and Korean names are,
 matches only from its start. Only the first eight distinct words count, and a
 word repeated exactly, with the same case, counts once. `%` and `_` are literal. Case-insensitive exact name
-matches come first;
-other matches sort by name, with person ID breaking ties. Ranking happens before
+matches come first. Other matches sort by how many credits the person has that
+the viewer can see within `media_scope`, most first, then by name, with person
+ID breaking ties. A query that matches more names than the server ranks, such as
+a single letter, sorts its other matches by name only. Ranking happens before
 applying the limit.
 
 The optional `media_scope` parameter limits results to people credited on items
@@ -1039,6 +1041,19 @@ episode events collapsed into their parent series; it does not require a
 completed watch. `order=asc` puts the oldest latest watch first, and `desc`
 puts the newest first. Library/media-scope/search overlays retain this order
 before pagination. History does not currently support saved sort preferences.
+
+## Season order
+
+`GET /api/v2/catalog/series/{id}/seasons` returns seasons by ascending
+`season_number`. Specials are season `0` (`is_specials` is `true`), so they come
+first, ahead of season 1. Clients list seasons in this order and label season `0`
+"Specials". The Jellyfin compatibility surface lists a series' seasons the same way.
+
+List order is not selection order. A client that opens a series on a season picks
+it from `play_season_number` (see [Play target season](#play-target-season)) or the
+viewer's progress, and otherwise the first numbered season: a series with specials
+does not open on them just because they are listed first. Play targets, Next Up and
+Continue Watching apply their own rules for specials and do not follow list order.
 
 ## Season-list artwork
 

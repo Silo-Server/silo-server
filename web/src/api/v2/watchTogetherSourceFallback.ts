@@ -1,3 +1,4 @@
+import { t } from "@/i18n";
 import {
   captureProfileRequestContext,
   isCapturedProfileAuthorityActive,
@@ -43,7 +44,7 @@ export async function fallbackRoomSource(
     !Number.isSafeInteger(input.selectionRevision) ||
     input.selectionRevision <= 0
   ) {
-    throw new Error("Invalid source fallback identity.");
+    throw new Error(t("web.common.errors.sourceFallbackIdentityInvalid"));
   }
   const result = await v2("POST /api/v2/watch-together/rooms/{room_id}/source-fallback", {
     path: { room_id: roomId },

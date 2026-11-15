@@ -12,7 +12,7 @@ import {
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { useT, type Translate } from "@/i18n";
-import { appLanguage } from "@/lib/appLocale";
+import { joinList } from "@/lib/appLocale";
 import type { PageRef } from "@/lib/homeRows/types";
 
 /** Collection rows named in the dialog before it says "and N more". */
@@ -75,7 +75,7 @@ function otherPagesLine(
 
 /** Library names as a list: "Movies, TV Shows" in English. */
 function listNames(names: string[]): string {
-  return new Intl.ListFormat(appLanguage(), { type: "unit", style: "short" }).format(names);
+  return joinList(names);
 }
 
 function OptionRow({

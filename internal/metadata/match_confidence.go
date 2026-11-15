@@ -230,6 +230,13 @@ type volumeIdentity struct {
 // ok=false when the title carries no volume at all, which is common and must
 // not be treated as a disagreement.
 func titleVolume(s string) (volumeIdentity, bool) {
+	v, ok, _ := titleVolumeKind(s)
+	return v, ok
+}
+
+// titleVolumeKind is titleVolume that also reports whether the volume came
+// from a bare number rather than an explicit marker ("Book 2", "#2", a range).
+func titleVolumeKind(s string) (v volumeIdentity, ok, bare bool) {
 	lower := strings.ToLower(s)
 
 	for _, re := range []*regexp.Regexp{volumeRangeRE, bareVolumeRangeRE} {
@@ -237,14 +244,14 @@ func titleVolume(s string) (volumeIdentity, bool) {
 			first, firstErr := strconv.Atoi(m[1])
 			last, lastErr := strconv.Atoi(m[2])
 			if firstErr == nil && lastErr == nil && first > 0 && last > 0 {
-				return volumeIdentity{first: first, last: last}, true
+				return volumeIdentity{first: first, last: last}, true, false
 			}
 		}
 	}
 
 	if m := hashVolumeRE.FindStringSubmatch(lower); m != nil {
 		if n, err := strconv.Atoi(m[1]); err == nil {
-			return volumeIdentity{first: n, last: n}, true
+			return volumeIdentity{first: n, last: n}, true, false
 		}
 	}
 
@@ -255,7 +262,7 @@ func titleVolume(s string) (volumeIdentity, bool) {
 
 	if m := volumeMarkerRE.FindStringSubmatch(folded); m != nil {
 		if n, err := strconv.Atoi(m[1]); err == nil {
-			return volumeIdentity{first: n, last: n}, true
+			return volumeIdentity{first: n, last: n}, true, false
 		}
 	}
 
@@ -268,9 +275,9 @@ func titleVolume(s string) (volumeIdentity, bool) {
 		if err != nil || n <= 0 || n > 999 {
 			continue
 		}
-		return volumeIdentity{first: n, last: n}, true
+		return volumeIdentity{first: n, last: n}, true, true
 	}
-	return volumeIdentity{}, false
+	return volumeIdentity{}, false, false
 }
 
 // titleStopwords carry no identifying signal but are common enough to inflate

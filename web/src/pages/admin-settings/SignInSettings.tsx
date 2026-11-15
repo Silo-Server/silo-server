@@ -1,4 +1,5 @@
 import { useMemo, useRef, useState } from "react";
+import { joinList } from "@/lib/appLocale";
 import { useIsMutating } from "@tanstack/react-query";
 import { ArrowRight } from "lucide-react";
 import { Link } from "react-router";
@@ -191,7 +192,7 @@ export default function SignInSettings() {
                 <SettingFieldStatus tone="muted">
                   {t("web.admin.settings.signIn.page.breakGlassAdmins", {
                     count: breakGlass.length,
-                    names: breakGlass.map((user) => user.username).join(", "),
+                    names: joinList(breakGlass.map((user) => user.username)),
                   })}
                 </SettingFieldStatus>
               ) : (

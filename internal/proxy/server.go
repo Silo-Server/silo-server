@@ -1053,6 +1053,7 @@ func (s *Server) serveRemuxClaims(w http.ResponseWriter, r *http.Request, claims
 		DVMode:                    playback.RemuxDVMode(claims.RemuxDVMode),
 		FFmpegPath:                s.watcher.Config().Playback.FFmpegPath,
 		DropResumeLeadingPictures: claims.RemuxResumeLeadingPictureDrop,
+		StreamOriginSeconds:       playback.RemuxStreamOrigin(r.URL.Query()),
 		ContentType:               playback.RemuxContentType(claims.AudioOnly),
 		AudioOnly:                 claims.AudioOnly,
 		SourceAudioChannels:       claims.SourceAudioChannels,

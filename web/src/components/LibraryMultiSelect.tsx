@@ -39,7 +39,7 @@ function formatLibraryFilterSummary(
     .filter((name): name is string => Boolean(name));
 
   if (libraryIds.length === 1) {
-    return names[0] ?? t("web.profiles.libraries.count", { count: 1, count_text: "1" });
+    return names[0] ?? t("web.profiles.libraries.count", { count: 1, count_text: 1 });
   }
   if (names.length === 0) {
     return t("web.profiles.libraries.count", {
