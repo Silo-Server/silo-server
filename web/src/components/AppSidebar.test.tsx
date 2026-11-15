@@ -6,6 +6,7 @@ import { MemoryRouter, Route, Routes } from "react-router";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { libraryCollectionKeys } from "@/hooks/queries/keys";
 import type { PluginSettingsInstallation } from "@/hooks/queries/pluginSettings";
 
 import AppSidebar from "./AppSidebar";
@@ -33,6 +34,10 @@ let mockLibraries = [{ id: 7, name: "Movies", type: "movies" }];
 let mockRequestsEnabled = false;
 let mockProfileRequestsAllowed = true;
 let mockMyRequests: Array<{ id: string }> = [];
+let mockPins: Record<
+  string,
+  Array<{ type: "section" | "collection"; id: string; label: string }>
+> = {};
 
 vi.mock("@/hooks/useAuth", () => {
   const useAuth = () => ({
@@ -61,9 +66,7 @@ vi.mock("@/hooks/queries/libraries", () => ({
 
 vi.mock("@/hooks/queries/sidebarPins", () => ({
   useSidebarPins: () => ({
-    pins: {
-      "7": [{ type: "section", id: "featured", label: "Featured" }],
-    },
+    pins: mockPins,
   }),
   useToggleSidebarPin: () => ({
     togglePin: mockTogglePin,
@@ -162,9 +165,15 @@ vi.mock("@/components/ui/dropdown-menu", () => ({
   DropdownMenuSeparator: () => <hr />,
 }));
 
-function renderSidebar(entry: string, { collapsed = false }: { collapsed?: boolean } = {}) {
+function renderSidebar(
+  entry: string,
+  {
+    collapsed = false,
+    queryClient = new QueryClient(),
+  }: { collapsed?: boolean; queryClient?: QueryClient } = {},
+) {
   return renderToStaticMarkup(
-    <QueryClientProvider client={new QueryClient()}>
+    <QueryClientProvider client={queryClient}>
       <MemoryRouter initialEntries={[entry]}>
         <Routes>
           <Route path="*" element={<AppSidebar collapsed={collapsed} />} />
@@ -209,6 +218,7 @@ describe("AppSidebar", () => {
     mockRequestsEnabled = false;
     mockProfileRequestsAllowed = true;
     mockMyRequests = [];
+    mockPins = { "7": [{ type: "section", id: "featured", label: "Featured" }] };
   });
 
   it("links Requests for a blocked profile only while it has requests to manage", () => {
@@ -385,6 +395,26 @@ describe("AppSidebar", () => {
 
     expect(findCustomLink(filtered)?.getAttribute("aria-current")).toBe("page");
     expect(findCustomLink(otherLibrary)?.hasAttribute("aria-current")).toBe(false);
+  });
+
+  it("names a pinned collection link by the collection's current title", () => {
+    mockPrimaryMenu = {
+      items: [{ type: "collection", library_id: 7, collection_id: "c1", label: "Rainy Days" }],
+    };
+    const queryClient = new QueryClient();
+    queryClient.setQueryData(libraryCollectionKeys.list(7), {
+      library_id: 7,
+      collections: [{ id: "c1", title: "Stormy Nights" }],
+      groups: [],
+    });
+
+    const document = parseMarkup(renderSidebar("/", { queryClient }));
+    const pin = document.querySelector('a[href*="collection_id=c1"]');
+
+    expect(pin?.textContent).toBe("Stormy Nights");
+    expect(new URL(pin!.getAttribute("href")!, "http://silo").searchParams.get("title")).toBe(
+      "Stormy Nights",
+    );
   });
 
   it("preserves the current library query when linking to the active library", () => {
