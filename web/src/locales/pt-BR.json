@@ -33690,6 +33690,12 @@
       "value": "Não foi possível carregar o histórico de transmissões."
     }
   ],
+  "web.admin.dashboard.widgets.concurrentStreams.otherMethod": [
+    {
+      "type": 0,
+      "value": "Outro"
+    }
+  ],
   "web.admin.dashboard.widgets.concurrentStreams.peak": [
     {
       "type": 0,
@@ -33710,6 +33716,42 @@
     {
       "type": 0,
       "value": "Transmissões simultâneas"
+    }
+  ],
+  "web.admin.dashboard.widgets.concurrentStreams.viewLines": [
+    {
+      "type": 0,
+      "value": "Linhas"
+    }
+  ],
+  "web.admin.dashboard.widgets.concurrentStreams.viewLinesLabel": [
+    {
+      "type": 0,
+      "value": "Mostrar cada método de reprodução como uma linha"
+    }
+  ],
+  "web.admin.dashboard.widgets.concurrentStreams.viewStacked": [
+    {
+      "type": 0,
+      "value": "Empilhado"
+    }
+  ],
+  "web.admin.dashboard.widgets.concurrentStreams.viewStackedLabel": [
+    {
+      "type": 0,
+      "value": "Mostrar os métodos de reprodução empilhados"
+    }
+  ],
+  "web.admin.dashboard.widgets.concurrentStreams.viewTotal": [
+    {
+      "type": 0,
+      "value": "Total"
+    }
+  ],
+  "web.admin.dashboard.widgets.concurrentStreams.viewTotalLabel": [
+    {
+      "type": 0,
+      "value": "Mostrar só o total de transmissões"
     }
   ],
   "web.admin.dashboard.widgets.downloads.empty": [

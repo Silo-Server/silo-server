@@ -42714,6 +42714,12 @@
       "value": "تعذّر تحميل سجل البث."
     }
   ],
+  "web.admin.dashboard.widgets.concurrentStreams.otherMethod": [
+    {
+      "type": 0,
+      "value": "أخرى"
+    }
+  ],
   "web.admin.dashboard.widgets.concurrentStreams.peak": [
     {
       "type": 0,
@@ -42734,6 +42740,42 @@
     {
       "type": 0,
       "value": "البث المتزامن"
+    }
+  ],
+  "web.admin.dashboard.widgets.concurrentStreams.viewLines": [
+    {
+      "type": 0,
+      "value": "خطوط"
+    }
+  ],
+  "web.admin.dashboard.widgets.concurrentStreams.viewLinesLabel": [
+    {
+      "type": 0,
+      "value": "عرض كل طريقة تشغيل كخط منفصل"
+    }
+  ],
+  "web.admin.dashboard.widgets.concurrentStreams.viewStacked": [
+    {
+      "type": 0,
+      "value": "مكدّس"
+    }
+  ],
+  "web.admin.dashboard.widgets.concurrentStreams.viewStackedLabel": [
+    {
+      "type": 0,
+      "value": "عرض طرق التشغيل مكدّسة"
+    }
+  ],
+  "web.admin.dashboard.widgets.concurrentStreams.viewTotal": [
+    {
+      "type": 0,
+      "value": "الإجمالي"
+    }
+  ],
+  "web.admin.dashboard.widgets.concurrentStreams.viewTotalLabel": [
+    {
+      "type": 0,
+      "value": "عرض إجمالي البث فقط"
     }
   ],
   "web.admin.dashboard.widgets.downloads.empty": [

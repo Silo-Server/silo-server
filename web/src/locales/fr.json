@@ -33390,6 +33390,12 @@
       "value": "Impossible de charger l’historique des flux."
     }
   ],
+  "web.admin.dashboard.widgets.concurrentStreams.otherMethod": [
+    {
+      "type": 0,
+      "value": "Autre"
+    }
+  ],
   "web.admin.dashboard.widgets.concurrentStreams.peak": [
     {
       "type": 0,
@@ -33410,6 +33416,42 @@
     {
       "type": 0,
       "value": "Flux simultanés"
+    }
+  ],
+  "web.admin.dashboard.widgets.concurrentStreams.viewLines": [
+    {
+      "type": 0,
+      "value": "Lignes"
+    }
+  ],
+  "web.admin.dashboard.widgets.concurrentStreams.viewLinesLabel": [
+    {
+      "type": 0,
+      "value": "Afficher chaque méthode de lecture sous forme de ligne"
+    }
+  ],
+  "web.admin.dashboard.widgets.concurrentStreams.viewStacked": [
+    {
+      "type": 0,
+      "value": "Empilé"
+    }
+  ],
+  "web.admin.dashboard.widgets.concurrentStreams.viewStackedLabel": [
+    {
+      "type": 0,
+      "value": "Afficher les méthodes de lecture empilées"
+    }
+  ],
+  "web.admin.dashboard.widgets.concurrentStreams.viewTotal": [
+    {
+      "type": 0,
+      "value": "Total"
+    }
+  ],
+  "web.admin.dashboard.widgets.concurrentStreams.viewTotalLabel": [
+    {
+      "type": 0,
+      "value": "Afficher uniquement le total des flux"
     }
   ],
   "web.admin.dashboard.widgets.downloads.empty": [
