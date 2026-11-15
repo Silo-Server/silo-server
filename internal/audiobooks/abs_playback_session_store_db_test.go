@@ -91,6 +91,10 @@ func TestReportPlayKeepsOnePlayPerClientSessionDB(t *testing.T) {
 	if id, announced := report("local-1", 110, 310); id != first || announced {
 		t.Fatalf("report = (%q, %v), want the open play %s, not yet announced", id, announced, first)
 	}
+	// An older report arriving late keeps the newer position.
+	if id, _ := report("local-1", 105, 305); id != first {
+		t.Fatalf("late report landed on %q, want %s", id, first)
+	}
 	got, err := store.GetPlaybackSession(ctx, first)
 	if err != nil || !got.ReportOnly || got.CurrentPositionSeconds != 110 || got.TimeListeningSeconds != 10 {
 		t.Fatalf("play = %+v, %v; want report-only at 110 s with 10 s listened", got, err)

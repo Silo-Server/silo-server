@@ -90,11 +90,15 @@ const reportedPlayIdleSeconds = 90
 // updateReportedPlaySQL applies a report to the open play of a client
 // session. Listening is the client's running total less the total the row
 // began at, never negative, never more than the row's age allows, and never
-// decreasing. It returns the play and whether its lifecycle start was
-// recorded.
+// decreasing. The client's total only rises within its session, so a report
+// whose total is behind the play's is an older one arriving late: it keeps
+// the play alive but leaves the newer position. It returns the play and
+// whether its lifecycle start was recorded.
 const updateReportedPlaySQL = `
 	UPDATE abs_playback_sessions s
-	SET current_position_seconds = $4,
+	SET current_position_seconds = CASE
+	        WHEN $5::double precision - s.reported_listening_base >= s.time_listening_seconds THEN $4
+	        ELSE s.current_position_seconds END,
 	    time_listening_seconds   = GREATEST(s.time_listening_seconds,
 	        GREATEST(LEAST(FLOOR($5::double precision - s.reported_listening_base),
 	                       EXTRACT(EPOCH FROM now() - s.started_at) + $6), 0)::integer),
