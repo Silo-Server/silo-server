@@ -156,9 +156,15 @@ func (p *candidatePlannerV3) videoAdaptationReasonsV3(result PlannerResultV3) []
 			p.originalBlockersV3(reasons)
 		}
 		// An audio-converting remux may not fit the server's cap, so the
-		// encode follows (transcodeStageFacts).
-		reasons.add(AdaptationServerBitrateLimit, len(reasons) == 0 && p.input.ServerBitrateCapKbps > 0 && f.remuxActive &&
-			(f.remuxAudio.progressiveConverts || f.remuxAudio.hlsConverts))
+		// encode follows (transcodeStageFacts). The cap is the reason only
+		// when it rejected that remux; one that fitted and then failed on the
+		// device is a failed copy.
+		if len(reasons) == 0 && p.input.ServerBitrateCapKbps > 0 && f.remuxActive &&
+			(f.remuxAudio.progressiveConverts || f.remuxAudio.hlsConverts) {
+			capRejected := p.capRejectsAudioRemuxV3()
+			reasons.add(AdaptationServerBitrateLimit, capRejected)
+			reasons.add(AdaptationDirectPlayFailed, !capRejected && len(p.input.AttemptedKeys) > 0)
+		}
 		// The encode always re-encodes audio; name the audio only when the
 		// audio alone could not have been copied.
 		reasons.add(AdaptationAudioCodecUnsupported, !f.audioOK)
@@ -190,9 +196,21 @@ func (p *candidatePlannerV3) attemptedOriginalV3(reasons adaptationReasonsV3) {
 	reasons.add(AdaptationDirectPlayFailed, len(reasons) == 0 && len(p.input.AttemptedKeys) > 0)
 }
 
+// capRejectsAudioRemuxV3 reports whether the server's bitrate cap left out an
+// audio-converting copy remux, as progressiveCandidate and hlsRemuxCandidate
+// check it.
+func (p *candidatePlannerV3) capRejectsAudioRemuxV3() bool {
+	a, request, source := &p.video.remuxAudio, p.input.Request, p.source
+	progressiveChannels := aacOutputChannelsV3(request, DeliveryClassProgressiveV3, source.AudioChannels, a.progressiveChannelLimited)
+	return a.progressiveConverts && !audioRemuxFitsServerCapV3(p.input, p.file, progressiveChannels) ||
+		a.hlsConverts && !audioRemuxFitsServerCapV3(p.input, p.file, a.hlsAACChannels)
+}
+
 // originalBlockersV3 adds what kept a copyable video from the original route.
 func (p *candidatePlannerV3) originalBlockersV3(reasons adaptationReasonsV3) {
 	f, request := &p.video, p.input.Request
+	reasons.add(AdaptationAudioChannelsUnsupported, !f.noAudioTrack &&
+		deliveryExceedsMaxChannelsV3(request, DeliveryClassOriginalHTTPV3, p.source.AudioCodec, p.source.AudioChannels))
 	reasons.add(AdaptationAudioTrackSelection, !f.originalAudioOK)
 	reasons.add(AdaptationSubtitleUnsupported, !f.originalSubtitleOK)
 	reasons.add(AdaptationContainerUnsupported, !containsFoldV3(request.Capabilities.Containers, p.source.Container) ||
@@ -214,6 +232,9 @@ func (p *candidatePlannerV3) audioOnlyAdaptationReasonsV3(result PlannerResultV3
 		reasons.add(AdaptationAudioCodecUnsupported, !audioOK || !capExceeded && !channelLimited)
 		reasons.add(AdaptationAudioChannelsUnsupported, audioOK && !capExceeded && channelLimited)
 	}
+	// The original delivery's own channel ceiling can rule it out while the
+	// remux copies the audio.
+	reasons.add(AdaptationAudioChannelsUnsupported, deliveryExceedsMaxChannelsV3(request, DeliveryClassOriginalHTTPV3, source.AudioCodec, source.AudioChannels))
 	reasons.add(AdaptationAudioTrackSelection, !audioSelectionUsesContainerDefaultV3(p.file, p.input.AudioTrackIndex) && !clientSelectsOriginalAudioTrackV3(request))
 	reasons.add(AdaptationContainerUnsupported, !containsFoldV3(request.Capabilities.Containers, source.Container) ||
 		!deliveryAvailableV3(request, DeliveryClassOriginalHTTPV3))

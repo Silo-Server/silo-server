@@ -3,6 +3,8 @@ package playback
 import (
 	"slices"
 	"testing"
+
+	"github.com/Silo-Server/silo-server/internal/models"
 )
 
 // The admin activity views say why a session adapts from these reasons, so
@@ -31,6 +33,20 @@ func TestPlanPlaybackV3NamesWhyTheRouteAdapts(t *testing.T) {
 			adjust: func(in *PlannerInputV3) {
 				original := PlanPlaybackV3(*in)
 				in.AttemptedKeys = []string{PlanAttemptKeyV3(*original.Plan, in.Request.ClientPlaybackContext.Output.OutputContextID, nil)}
+			}},
+		{name: "more channels than the original delivery allows", method: PlayRemux, want: []string{AdaptationAudioChannelsUnsupported},
+			adjust: func(in *PlannerInputV3) {
+				surroundAudioV3(in.EffectiveFile)
+				limitDeliveryChannelsV3(in, DeliveryClassOriginalHTTPV3, 2)
+			}},
+		// A remux under the server's limit that then failed on the device is
+		// a failed copy, not the limit.
+		{name: "a remux within the server limit that failed", method: PlayTranscode,
+			want: []string{AdaptationDirectPlayFailed, AdaptationAudioCodecUnsupported},
+			adjust: func(in *PlannerInputV3) {
+				in.EffectiveFile.CodecAudio, in.EffectiveFile.AudioTracks[0].Codec = "dts", "dts"
+				in.ServerBitrateCapKbps = 100_000
+				failCopyRoutesV3(in)
 			}},
 		{name: "a container the device cannot open", method: PlayRemux, want: []string{AdaptationContainerUnsupported},
 			adjust: func(in *PlannerInputV3) { in.Request.Capabilities.Containers = []string{"mp4"} }},
@@ -113,15 +129,16 @@ func TestPlanPlaybackV3NamesWhyAnAudioOnlyRouteAdapts(t *testing.T) {
 			adjust: func(in *PlannerInputV3) {
 				delete(in.Request.ClientPlaybackContext.Deliveries, DeliveryClassOriginalHTTPV3)
 			}},
+		{name: "more channels than the original delivery allows", want: []string{AdaptationAudioChannelsUnsupported},
+			adjust: func(in *PlannerInputV3) {
+				surroundAudioV3(in.EffectiveFile)
+				limitDeliveryChannelsV3(in, DeliveryClassOriginalHTTPV3, 2)
+			}},
 		{name: "more channels than the delivery allows", convert: true, want: []string{AdaptationAudioChannelsUnsupported},
 			adjust: func(in *PlannerInputV3) {
-				in.EffectiveFile.AudioChannels, in.EffectiveFile.AudioTracks[0].Channels = 6, 6
-				in.EffectiveFile.AudioTracks[0].Layout = "5.1"
-				for _, class := range []string{DeliveryClassOriginalHTTPV3, DeliveryClassProgressiveV3} {
-					delivery := in.Request.ClientPlaybackContext.Deliveries[class]
-					delivery.MaxChannels = new(2)
-					in.Request.ClientPlaybackContext.Deliveries[class] = delivery
-				}
+				surroundAudioV3(in.EffectiveFile)
+				limitDeliveryChannelsV3(in, DeliveryClassOriginalHTTPV3, 2)
+				limitDeliveryChannelsV3(in, DeliveryClassProgressiveV3, 2)
 			}},
 	} {
 		t.Run(test.name, func(t *testing.T) {
@@ -145,5 +162,28 @@ func TestPlanPlaybackV3NamesWhyAnAudioOnlyRouteAdapts(t *testing.T) {
 					test.convert, test.want, result.Plan.Delivery)
 			}
 		})
+	}
+}
+
+// surroundAudioV3 makes a fixture's only audio track 5.1.
+func surroundAudioV3(file *models.MediaFile) {
+	file.AudioChannels, file.AudioTracks[0].Channels, file.AudioTracks[0].Layout = 6, 6, "5.1"
+}
+
+func limitDeliveryChannelsV3(in *PlannerInputV3, class string, channels int) {
+	delivery := in.Request.ClientPlaybackContext.Deliveries[class]
+	delivery.MaxChannels = new(channels)
+	in.Request.ClientPlaybackContext.Deliveries[class] = delivery
+}
+
+// failCopyRoutesV3 marks each route the planner picks as attempted until it
+// picks an encode, as replans after failed copies do.
+func failCopyRoutesV3(in *PlannerInputV3) {
+	for range 4 {
+		result := PlanPlaybackV3(*in)
+		if result.Plan == nil || result.PlayMethod == PlayTranscode {
+			return
+		}
+		in.AttemptedKeys = append(in.AttemptedKeys, PlanAttemptKeyV3(*result.Plan, in.Request.ClientPlaybackContext.Output.OutputContextID, nil))
 	}
 }
