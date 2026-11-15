@@ -29,8 +29,8 @@ const (
 )
 
 // providerGate pauses a provider for the whole enricher once it answers
-// rate-limited or looks down, so the rest of a 250-item sweep does not keep
-// calling into a closed window. The zero value is ready to use.
+// rate-limited or looks down, so the rest of the sweep does not keep calling
+// into a closed window. The zero value is ready to use.
 //
 // The gate is per process. That is enough because only one node sweeps at a
 // time (see Enricher.Run). When the next sweep lands on another node, that
@@ -79,6 +79,19 @@ func (g *providerGate) pausedUntil(slug string) (time.Time, bool) {
 		return time.Time{}, false
 	}
 	return h.pausedUntil, true
+}
+
+// anyPaused reports whether any provider is paused right now.
+func (g *providerGate) anyPaused() bool {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	now := g.clock()
+	for _, h := range g.providers {
+		if now.Before(h.pausedUntil) {
+			return true
+		}
+	}
+	return false
 }
 
 // latestPause returns the end of the longest active pause among slugs, or

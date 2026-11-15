@@ -59,6 +59,26 @@ The enricher does not run again on a matched book. A book whose fields were
 mixed before this rule existed stays that way until an admin runs Refresh
 Metadata or Match Item.
 
+## The enrichment sweep
+
+The scheduled `sync_audiobook_metadata` task runs `Enricher.Run`
+(`internal/audiobooks/enrichment_sweep.go`). One node sweeps at a time: the
+run holds a Postgres advisory lock on a session of its own, and a node that
+finds it taken does nothing. A run claims a batch of due books
+(`SILO_AUDIOBOOK_ENRICH_BATCH_SIZE`), enriches it, and claims the next one
+after a short gap, so a large backlog drains at the rate the provider plugin's
+own limiter allows rather than one batch per scheduled run. It stops when:
+
+- the run is canceled (shutdown or the task's runtime limit);
+- a batch comes back short or empty, so nothing more was due;
+- the provider gate has paused a provider, so a further batch would only
+  defer books;
+- no book in the batch reached an outcome (all deferred or failed);
+- the lock's session is gone, since another node may then take the lock.
+
+Books a pause deferred come due when the pause ends and the next scheduled
+run takes them.
+
 ## Unmatched audiobooks and `status`
 
 Audiobooks keep `media_items.status` empty. Several consumers read

@@ -4,7 +4,7 @@ package audiobooks
 // metadata (poster_path, overview, etc.) by querying the configured
 // metadata-provider chain for each item's library folder.
 //
-// Design: a periodic, state-backed sweep selects up to batchSize audiobooks
+// Design: a periodic, state-backed sweep claims batches of up to batchSize audiobooks
 // that have no durable provider identity, have not completed enrichment, and
 // are due for retry. It resolves the per-folder provider chain, calls Search +
 // GetMetadata, then commits provider IDs, scalar metadata, the search-index
@@ -44,8 +44,9 @@ type audiobookCoverCacher interface {
 const (
 	audiobookMetadataImageProviderID = "audiobook-metadata"
 
-	// defaultEnrichBatchSize is the maximum number of audiobook items processed
-	// per sweep invocation. Keeps latency bounded for large libraries.
+	// defaultEnrichBatchSize is the maximum number of audiobook items claimed
+	// per batch. A sweep runs batches back to back while books are due (see
+	// Enricher.sweep), so this bounds each claim's lease, not the sweep.
 	// Override with SILO_AUDIOBOOK_ENRICH_BATCH_SIZE.
 	defaultEnrichBatchSize = 250
 	// defaultEnrichWorkers is the default fan-out used by Enricher.Run.
@@ -204,162 +205,6 @@ func (e *Enricher) SetFFmpegPath(path string) {
 		return
 	}
 	e.ffmpegPath = path
-}
-
-// Run executes one sweep and returns how many items it matched. Only one node
-// sweeps at a time: Run returns 0 at once while another holds the sweep lock,
-// so adding nodes does not add provider load. Claims still fence each item, so
-// a lease that outlives a lost lock cannot be processed twice.
-func (e *Enricher) Run(ctx context.Context) (int, error) {
-	if e == nil || e.pool == nil || e.chainRepo == nil {
-		return 0, nil
-	}
-	release, acquired, err := e.takeSweepLock(ctx)
-	if err != nil {
-		return 0, err
-	}
-	if !acquired {
-		slog.InfoContext(ctx, "audiobook enrichment: another node is sweeping; skipping this run", "component", "audiobooks")
-		return 0, nil
-	}
-	defer release()
-
-	// The sweep summary compares against database time, not this node's clock.
-	var started time.Time
-	if err := e.pool.QueryRow(ctx, `SELECT now()`).Scan(&started); err != nil {
-		return 0, fmt.Errorf("audiobook enrichment: read database time: %w", err)
-	}
-	items, err := e.claimBatch(ctx)
-	if err != nil {
-		return 0, fmt.Errorf("audiobook enrichment: claim batch: %w", err)
-	}
-	if len(items) == 0 {
-		return 0, nil
-	}
-
-	slog.InfoContext(ctx, "audiobook enrichment: sweep started", "component", "audiobooks",
-		"count", len(items),
-		"workers", e.workers,
-	)
-
-	e.runBatch(ctx, items, e.enrichItem)
-
-	summary, err := e.sweepSummary(context.WithoutCancel(ctx), items, started)
-	if err != nil {
-		slog.WarnContext(ctx, "audiobook enrichment: could not summarize sweep", "component", "audiobooks", "error", err)
-	}
-	slog.InfoContext(ctx, "audiobook enrichment: sweep complete", "component", "audiobooks",
-		"claimed", len(items),
-		"enriched", summary.enriched,
-		"no_match", summary.noMatch,
-		"skipped", summary.skipped,
-		"failed_retrying", summary.retrying,
-		"failed_terminal", summary.failed,
-		"deferred", len(items)-summary.recorded(),
-	)
-	return summary.enriched, nil
-}
-
-// takeSweepLock takes the cluster-wide sweep lock and returns its release.
-// The lock lives on a session of its own, opened with the pool's
-// configuration but outside it, as the backup and migration locks do: the
-// sweep's own queries take pool connections, and with the lock's session in
-// the pool a pool of one connection would wait on itself. Closing the session
-// releases the lock, including when this process dies mid-sweep.
-func (e *Enricher) takeSweepLock(ctx context.Context) (release func(), acquired bool, err error) {
-	conn, err := pgx.ConnectConfig(ctx, e.pool.Config().ConnConfig.Copy())
-	if err != nil {
-		return nil, false, fmt.Errorf("audiobook enrichment: open the sweep lock session: %w", err)
-	}
-	closeConn := func() {
-		closeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
-		defer cancel()
-		_ = conn.Close(closeCtx)
-	}
-	// A failed query may still have been granted the lock; closing the
-	// session releases it either way.
-	if err := conn.QueryRow(ctx, `SELECT pg_try_advisory_lock($1)`, enrichSweepLock).Scan(&acquired); err != nil {
-		closeConn()
-		return nil, false, fmt.Errorf("audiobook enrichment: take the sweep lock: %w", err)
-	}
-	if !acquired {
-		closeConn()
-		return nil, false, nil
-	}
-	return closeConn, true, nil
-}
-
-// sweepLockHeld reports whether a node holds the sweep lock, without opening
-// a session. A bigint advisory key shows in pg_locks as its high and low 32
-// bits in classid and objid, with objsubid 1. Advisory locks belong to one
-// database but pg_locks lists the whole server, so the probe is limited to
-// this database: another Silo database on the same server sweeps on its own.
-func (e *Enricher) sweepLockHeld(ctx context.Context) (bool, error) {
-	var held bool
-	err := e.pool.QueryRow(ctx, `
-		SELECT EXISTS (
-			SELECT 1 FROM pg_locks
-			WHERE locktype = 'advisory' AND granted AND objsubid = 1
-			  AND database = (SELECT oid FROM pg_database WHERE datname = current_database())
-			  AND classid::bigint = $1 AND objid::bigint = $2
-		)
-	`, enrichSweepLock>>32, enrichSweepLock&0xFFFFFFFF).Scan(&held)
-	if err != nil {
-		return false, fmt.Errorf("checking the audiobook enrichment sweep lock: %w", err)
-	}
-	return held, nil
-}
-
-// sweepSummary counts what a sweep recorded for its claimed items. It reads the
-// state table rather than worker return values, which cannot tell a match
-// from a clean no-match or a skip.
-type sweepSummary struct {
-	enriched, noMatch, skipped, retrying, failed int
-}
-
-func (s sweepSummary) recorded() int {
-	return s.enriched + s.noMatch + s.skipped + s.retrying + s.failed
-}
-
-func (e *Enricher) sweepSummary(ctx context.Context, items []enrichmentItemRow, since time.Time) (sweepSummary, error) {
-	var summary sweepSummary
-	ids := make([]string, len(items))
-	for i := range items {
-		ids[i] = items[i].ContentID
-	}
-	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
-	defer cancel()
-	rows, err := e.pool.Query(ctx, `
-		SELECT COALESCE(outcome, ''), count(*)
-		FROM audiobook_enrichment_state
-		WHERE content_id = ANY($1)
-		  AND last_attempt_at >= $2
-		GROUP BY 1
-	`, ids, since)
-	if err != nil {
-		return summary, err
-	}
-	defer rows.Close()
-	for rows.Next() {
-		var outcome string
-		var n int
-		if err := rows.Scan(&outcome, &n); err != nil {
-			return summary, err
-		}
-		switch EnrichmentOutcome(outcome) {
-		case EnrichmentOutcomeSuccess:
-			summary.enriched = n
-		case EnrichmentOutcomeNoMatch:
-			summary.noMatch = n
-		case EnrichmentOutcomeSkipped:
-			summary.skipped = n
-		case EnrichmentOutcomeFailed:
-			summary.failed = n
-		default:
-			summary.retrying = n
-		}
-	}
-	return summary, rows.Err()
 }
 
 // HasPendingItems reports whether a scheduled sweep has any audiobook rows to
