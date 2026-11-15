@@ -115,6 +115,10 @@ export function useMarkerEditor({
     setError(null);
   }
 
+  // Each opening of the panel, so a save that resolves after the panel was
+  // closed and opened again leaves the new opening's draft alone (#4108).
+  const openingRef = useRef(0);
+
   // The file playing now, for a save that resolves after a version switch.
   const currentFileIdRef = useRef(fileId);
   useEffect(() => {
@@ -125,6 +129,7 @@ export function useMarkerEditor({
 
   const begin = useCallback(() => {
     const snapshot = normalizeDraft(markers);
+    openingRef.current += 1;
     originalRef.current = snapshot;
     setDraft(snapshot);
     setActiveKind(MARKER_KINDS.find((kind) => snapshot[kind] != null) ?? "intro");
@@ -133,6 +138,7 @@ export function useMarkerEditor({
   }, [markers]);
 
   const cancel = useCallback(() => {
+    openingRef.current += 1;
     setEditing(false);
     setError(null);
   }, []);
@@ -200,6 +206,11 @@ export function useMarkerEditor({
       setEditing(false);
       return;
     }
+    const opening = openingRef.current;
+    // Whether the panel still shows the draft this save sent: the same file,
+    // and not closed or opened again since.
+    const stillThisDraft = () =>
+      currentFileIdRef.current === fileId && openingRef.current === opening;
     setSaving(true);
     setError(null);
     try {
@@ -208,18 +219,19 @@ export function useMarkerEditor({
         body: markerUpdateToV2(body),
       });
     } catch (e) {
-      if (currentFileIdRef.current === fileId) {
+      if (stillThisDraft()) {
         setError(e instanceof Error ? e.message : t("web.markers.saveFailed"));
       } else {
-        console.error("Marker save failed after a version switch:", e);
+        console.error("Marker save failed after its draft was closed:", e);
       }
       return;
     } finally {
       setSaving(false);
     }
-    // A version switch during the request closed this draft, and the editor may
-    // since hold a draft of the new file. Leave that one alone.
-    if (currentFileIdRef.current === fileId) {
+    // A version switch, or closing and reopening the panel, during the request
+    // closed this draft, and the editor may since hold a newer one. Leave that
+    // one alone.
+    if (stillThisDraft()) {
       originalRef.current = draft;
       setDraft(draft);
       setEditing(false);

@@ -197,3 +197,44 @@ it("keeps the new version's draft when a save from the old version finishes late
   expect(result.current.dirty).toBe(true);
   expect(onSaved).toHaveBeenCalledWith({ preview: { start: 0, end: 1461 } });
 });
+
+// The panel closed and opened again on the same file while a save was in
+// flight. When the save finishes, the new opening's edits stay (#4108).
+it("keeps a reopened panel's edits when an earlier save finishes late", async () => {
+  let finishSave!: (response: Response) => void;
+  const fetchMock = vi.fn<typeof fetch>(
+    () => new Promise<Response>((resolve) => (finishSave = resolve)),
+  );
+  vi.stubGlobal("fetch", fetchMock);
+  const onSaved = vi.fn();
+  const markers: MarkerDraft = {
+    intro: null,
+    recap: null,
+    credits: null,
+    preview: { start: 1440, end: 1461 },
+  };
+  const { result } = renderHook(
+    () => useMarkerEditor({ fileId: 142, duration: 1500, markers, onSaved }),
+    { wrapper },
+  );
+  act(() => result.current.begin());
+  act(() => result.current.setEdge("preview", "start", 0));
+  let saving!: Promise<void>;
+  act(() => {
+    saving = result.current.save();
+  });
+
+  act(() => result.current.cancel());
+  act(() => result.current.begin());
+  act(() => result.current.setEdge("intro", "start", 10));
+  const newDraft = result.current.draft;
+
+  await act(async () => {
+    finishSave(new Response("{}", { status: 200 }));
+    await saving;
+  });
+  expect(result.current.editing).toBe(true);
+  expect(result.current.draft).toEqual(newDraft);
+  expect(result.current.dirty).toBe(true);
+  expect(onSaved).toHaveBeenCalledWith({ preview: { start: 0, end: 1461 } });
+});
