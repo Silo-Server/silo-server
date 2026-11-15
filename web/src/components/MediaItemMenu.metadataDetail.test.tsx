@@ -2,6 +2,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, render, screen } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import type { ItemDetail } from "@/api/types";
+import { fetchCatalogItemDetail } from "@/hooks/queries/catalogRead";
 import { catalogKeys } from "@/hooks/queries/keys";
 import { MetadataActionDialogHost } from "./MediaItemMenu";
 
@@ -38,11 +39,12 @@ function deferred<T>() {
   return { promise, resolve };
 }
 
-function renderHost(seed?: ItemDetail) {
+function renderHost(seed?: ItemDetail, prepare?: (queryClient: QueryClient) => void) {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { staleTime: 2 * 60_000, retry: false } },
   });
   if (seed) queryClient.setQueryData(catalogKeys.itemDetail("movie-1"), seed);
+  prepare?.(queryClient);
   render(
     <QueryClientProvider client={queryClient}>
       <MetadataActionDialogHost action="edit" contentId="movie-1" onClose={() => undefined} />
@@ -92,6 +94,34 @@ it("opens Edit Metadata on the read after an invalidation, not the one before", 
   expect(mocks.editItem).not.toHaveBeenCalled();
 
   await act(async () => after.resolve(movie([10])));
+
+  expect(await screen.findByText("Edit 10")).toBeInTheDocument();
+});
+
+// A read already running when the dialog opens, such as a hover prefetch, may
+// have started before a write that has since landed.
+it("opens Edit Metadata on a read it started, not one already running", async () => {
+  const earlier = deferred<ItemDetail>();
+  const own = deferred<ItemDetail>();
+  mocks.v2.mockReturnValueOnce(earlier.promise).mockReturnValueOnce(own.promise);
+
+  renderHost(movie([]), (queryClient) => {
+    void queryClient.prefetchQuery({
+      queryKey: catalogKeys.itemDetail("movie-1"),
+      queryFn: () => fetchCatalogItemDetail("movie-1"),
+      staleTime: 0,
+    });
+  });
+  expect(await screen.findByText("Loading the latest item details…")).toBeInTheDocument();
+  await act(async () => {
+    earlier.resolve(movie([]));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
+
+  expect(screen.getByText("Loading the latest item details…")).toBeInTheDocument();
+  expect(mocks.editItem).not.toHaveBeenCalled();
+
+  await act(async () => own.resolve(movie([10])));
 
   expect(await screen.findByText("Edit 10")).toBeInTheDocument();
 });

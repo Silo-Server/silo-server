@@ -152,12 +152,18 @@ export function useFreshCatalogItemDetail(id: string, libraryId?: number) {
     [queryClient, queryHash],
   );
 
-  // Read when opening on a cache that looks fresh, and again when another
-  // caller cancels the read before it lands.
+  // Read on opening, replacing a read already running: it may have started
+  // before a write that has since landed.
+  useEffect(() => {
+    void refetch();
+  }, [queryHash, refetch]);
+
+  // Read again when another caller cancels the read before it lands.
   const waiting = current === undefined;
   useEffect(() => {
-    if (waiting && fetchStatus === "idle") void refetch();
-  }, [waiting, fetchStatus, refetch]);
+    const live = queryClient.getQueryCache().get(queryHash)?.state.fetchStatus;
+    if (waiting && fetchStatus === "idle" && live === "idle") void refetch();
+  }, [queryClient, queryHash, waiting, fetchStatus, refetch]);
 
   return {
     item: current?.error === null ? data : undefined,
