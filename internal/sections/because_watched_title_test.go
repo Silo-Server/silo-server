@@ -17,7 +17,9 @@ func TestBecauseWatchedTitleUsesSelectedAccessibleAnchor(t *testing.T) {
 		{"empty title", "Because You Watched", "empty", []*models.MediaItem{{ContentID: "empty", Title: "  "}}, "Because You Watched", ""},
 		{"empty section title", "", "older", []*models.MediaItem{{ContentID: "older", Title: "Actual Anchor"}}, "Because You Watched Actual Anchor", "Actual Anchor"},
 		{"empty section title without anchor", "", "hidden", nil, "Because You Watched", ""},
-		{"custom section title", "More Like Your Last Watch", "older", []*models.MediaItem{{ContentID: "older", Title: "Actual Anchor"}}, "More Like Your Last Watch", ""},
+		{"custom section title", "More Like Your Last Watch", "older", []*models.MediaItem{{ContentID: "older", Title: "Actual Anchor"}}, "More Like Your Last Watch: Actual Anchor", "Actual Anchor"},
+		{"custom section title ending in a colon", "More Like: ", "older", []*models.MediaItem{{ContentID: "older", Title: "Actual Anchor"}}, "More Like: Actual Anchor", "Actual Anchor"},
+		{"custom section title without anchor", "More Like Your Last Watch", "hidden", []*models.MediaItem{{ContentID: "other", Title: "Other"}}, "More Like Your Last Watch", ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if got, anchor := becauseWatchedTitle(tc.fallback, tc.source, tc.items); got != tc.want || anchor != tc.anchor {
