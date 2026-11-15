@@ -286,6 +286,108 @@ describe("RealtimeEventsProvider", () => {
     });
   });
 
+  describe("waiting on an admin job", () => {
+    // Serves the job read from `states`, one per poll, repeating the last;
+    // `null` answers 503. Every other request gets the socket ticket.
+    function serveJob(id: string, states: (string | null)[]) {
+      const ticket = vi.mocked(fetch).getMockImplementation()!;
+      let reads = 0;
+      vi.mocked(fetch).mockImplementation(async (input, init) => {
+        if (!String(input).endsWith(`/api/v2/admin/jobs/${id}`)) return ticket(input, init);
+        const state = states[Math.min(reads++, states.length - 1)];
+        if (state === null) {
+          return new Response(
+            JSON.stringify({ type: "about:blank", title: "Service Unavailable", status: 503 }),
+            { status: 503, headers: { "Content-Type": "application/problem+json" } },
+          );
+        }
+        return new Response(
+          JSON.stringify({ id, kind: "item_refresh", state, created_at: "2026-11-15T00:00:00Z" }),
+          { headers: { "Content-Type": "application/json" } },
+        );
+      });
+      return () => reads;
+    }
+
+    async function renderJobWaiter() {
+      const queryClient = new QueryClient();
+      const view = renderHook(() => useRealtimeEvents(), {
+        wrapper: ({ children }: { children: ReactNode }) => (
+          <QueryClientProvider client={queryClient}>
+            <RealtimeEventsProvider>{children}</RealtimeEventsProvider>
+          </QueryClientProvider>
+        ),
+      });
+      await act(async () => {});
+      return view;
+    }
+
+    // Resolves with the job, or with the error the wait rejected with.
+    function settle(wait: Promise<unknown>) {
+      return wait.then(
+        (job) => ({ job }),
+        (error: unknown) => ({ error }),
+      );
+    }
+
+    it("keeps polling through a failed read until the job finishes", async () => {
+      const reads = serveJob("job-1", ["running", null, "running", "succeeded"]);
+      const { result } = await renderJobWaiter();
+
+      const settled = settle(result.current.awaitAdminJob("job-1"));
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(10_000);
+      });
+
+      await expect(settled).resolves.toMatchObject({ job: { id: "job-1", status: "completed" } });
+      expect(reads()).toBe(4);
+    });
+
+    it("stops waiting once another account signs in", async () => {
+      const reads = serveJob("job-3", ["running", "running", "succeeded"]);
+      const { result } = await renderJobWaiter();
+
+      const settled = settle(result.current.awaitAdminJob("job-3"));
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(1_500);
+      });
+      setAccessToken("other-account");
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(10_000);
+      });
+
+      await expect(settled).resolves.toMatchObject({
+        error: expect.objectContaining({ name: "StaleApiRequestContextError" }),
+      });
+      expect(reads()).toBe(2);
+    });
+
+    it("keeps waiting on a job when the events socket rebinds", async () => {
+      setProfileId("profile-1");
+      mockState.profile = { id: "profile-1", has_pin: false, is_primary: true } as never;
+      serveJob("job-2", ["succeeded"]);
+      const { result, rerender } = await renderJobWaiter();
+      const socket = FakeWebSocket.instances[0]!;
+      await act(async () => {
+        socket.readyState = FakeWebSocket.OPEN;
+        socket.onopen?.();
+      });
+      expect(result.current.connectionState).toBe("live");
+
+      const settled = settle(result.current.awaitAdminJob("job-2"));
+      // A replacement PIN proof rebinds the socket while the job is running.
+      await act(async () => {
+        setProfileToken("replacement-pin-proof");
+        rerender();
+      });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(5_000);
+      });
+
+      await expect(settled).resolves.toMatchObject({ job: { id: "job-2", status: "completed" } });
+    });
+  });
+
   it("reconnects on same-profile PIN replacement and rejects old socket frames", async () => {
     setProfileId("profile-1");
     mockState.profile = { id: "profile-1", has_pin: false };

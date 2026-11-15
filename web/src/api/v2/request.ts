@@ -18,6 +18,7 @@ import {
   fetchWithSession,
   isProfileRequestContextCurrent,
   reportProfileUnverified,
+  SessionRefreshUnavailableError,
   StaleApiRequestContextError,
   type ProfileRequestContextSnapshot,
 } from "../client";
@@ -331,6 +332,28 @@ export function problemDisplayText(
  */
 export function isNotFoundProblem(error: unknown): boolean {
   return error instanceof V2ProblemError && error.status === 404;
+}
+
+/**
+ * Whether a failed v2 request may succeed if sent again later: the server was
+ * busy (429, 5xx), never answered (a network error, the deadline), or a
+ * session refresh got no verdict. Any other 4xx is the server's answer.
+ */
+export function isTransientV2Error(error: unknown): boolean {
+  if (error instanceof V2ProblemError) return error.status === 429 || error.status >= 500;
+  if (error instanceof V2TransportError)
+    return error.status === 0 || error.status === 429 || error.status >= 500;
+  return (
+    error instanceof TypeError ||
+    error instanceof V2TimeoutError ||
+    error instanceof SessionRefreshUnavailableError
+  );
+}
+
+/** How long to wait before retrying `error`: `fallbackMs`, or longer when the server sent `Retry-After`. */
+export function v2RetryDelayMs(error: unknown, fallbackMs: number): number {
+  const retryAfter = error instanceof V2ProblemError ? error.retryAfterSeconds : null;
+  return retryAfter === null ? fallbackMs : Math.max(fallbackMs, retryAfter * 1000);
 }
 
 /** Parses a delta-seconds `Retry-After` header; an HTTP-date form is not a contract shape. */

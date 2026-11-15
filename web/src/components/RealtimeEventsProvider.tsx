@@ -16,7 +16,15 @@ import type {
   ScanRun,
   TaskInfo,
 } from "@/api/types";
-import { isCapturedProfileAuthorityActive, type ProfileRequestContextSnapshot } from "@/api/client";
+import {
+  captureSessionIdentity,
+  isCapturedProfileAuthorityActive,
+  isSessionIdentityCurrent,
+  StaleApiRequestContextError,
+  type ProfileRequestContextSnapshot,
+  type SessionIdentitySnapshot,
+} from "@/api/client";
+import { isTransientV2Error, v2RetryDelayMs } from "@/api/v2/request";
 import {
   mintEventsSocketTicket,
   captureEventsAuthority,
@@ -78,6 +86,8 @@ interface JobWaiter {
   timeoutId: number;
   resolve: (job: AdminJob) => void;
   reject: (error: Error) => void;
+  /** Stops waiting on a socket event and polls the job instead. */
+  poll: () => void;
 }
 
 interface UserStatePayload {
@@ -158,9 +168,42 @@ function isTerminalJob(job: AdminJob) {
   return job.status === "completed" || job.status === "failed" || job.status === "cancelled";
 }
 
-async function pollAdminJobUntilTerminal(jobId: string): Promise<AdminJob> {
+function delay(ms: number) {
+  return new Promise((resolve) => window.setTimeout(resolve, ms));
+}
+
+/** The longest a job wait sleeps after failed reads, a Retry-After included. */
+const JOB_POLL_MAX_BACKOFF_MS = 30_000;
+
+/**
+ * Reads the job until it finishes. A read that may succeed later does not end
+ * the wait, since the job is still running on the server; it backs off while
+ * reads keep failing. Signing out or switching account or server ends it.
+ */
+async function pollAdminJobUntilTerminal(
+  jobId: string,
+  session: SessionIdentitySnapshot,
+): Promise<AdminJob> {
+  let failures = 0;
   for (;;) {
-    const job = await fetchAdminTaskJob(jobId);
+    if (!isSessionIdentityCurrent(session)) {
+      throw new StaleApiRequestContextError();
+    }
+    let job: AdminJob;
+    try {
+      job = await fetchAdminTaskJob(jobId);
+    } catch (error) {
+      if (!isTransientV2Error(error)) {
+        throw error;
+      }
+      failures += 1;
+      await delay(Math.min(v2RetryDelayMs(error, 1_000 * 2 ** failures), JOB_POLL_MAX_BACKOFF_MS));
+      continue;
+    }
+    failures = 0;
+    if (!isSessionIdentityCurrent(session)) {
+      throw new StaleApiRequestContextError();
+    }
     if (job.status === "completed") {
       return job;
     }
@@ -170,7 +213,7 @@ async function pollAdminJobUntilTerminal(jobId: string): Promise<AdminJob> {
     if (job.status === "cancelled") {
       throw jobCancelledError(job);
     }
-    await new Promise((resolve) => window.setTimeout(resolve, 1_000));
+    await delay(1_000);
   }
 }
 
@@ -1135,9 +1178,10 @@ export function RealtimeEventsProvider({ children }: { children: ReactNode }) {
       closedByEffect = true;
       adminRefresh.cancel();
       clearReconnect();
-      for (const [jobId, waiter] of waitersRef.current) {
+      // The server job outlives this socket: keep waiting on it by polling.
+      for (const waiter of waitersRef.current.values()) {
         window.clearTimeout(waiter.timeoutId);
-        waiter.reject(new Error(`Realtime events provider closed before job ${jobId} finished`));
+        waiter.poll();
       }
       waitersRef.current.clear();
       const socket = activeSocket;
@@ -1170,6 +1214,7 @@ export function RealtimeEventsProvider({ children }: { children: ReactNode }) {
 
   const awaitAdminJob = useCallback(
     (jobId: string) => {
+      const session = captureSessionIdentity();
       const cachedJob = findCachedAdminJob(queryClient, jobId);
       if (cachedJob) {
         if (cachedJob.status === "completed") {
@@ -1187,7 +1232,7 @@ export function RealtimeEventsProvider({ children }: { children: ReactNode }) {
       // channel isn't subscribed (not acting as admin), waiting on a live
       // event would hang until the fallback timeout — poll instead.
       if (!actingAdmin || connectionState !== "live") {
-        return pollAdminJobUntilTerminal(jobId);
+        return pollAdminJobUntilTerminal(jobId, session);
       }
 
       return new Promise<AdminJob>((resolve, reject) => {
@@ -1196,12 +1241,13 @@ export function RealtimeEventsProvider({ children }: { children: ReactNode }) {
           window.clearTimeout(existing.timeoutId);
         }
 
+        const poll = () => void pollAdminJobUntilTerminal(jobId, session).then(resolve, reject);
         const timeoutId = window.setTimeout(() => {
           waitersRef.current.delete(jobId);
-          void pollAdminJobUntilTerminal(jobId).then(resolve).catch(reject);
+          poll();
         }, 60_000);
 
-        waitersRef.current.set(jobId, { timeoutId, resolve, reject });
+        waitersRef.current.set(jobId, { timeoutId, resolve, reject, poll });
       });
     },
     [actingAdmin, connectionState, queryClient],
