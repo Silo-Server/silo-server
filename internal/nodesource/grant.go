@@ -20,9 +20,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 	"unicode/utf8"
 
@@ -172,17 +174,40 @@ func matchesRevision(info os.FileInfo, size int64, modTime time.Time) bool {
 	return info != nil && info.Mode().IsRegular() && info.Size() == size && SameModTime(info.ModTime(), modTime)
 }
 
-// Check stats the grant's path through fspath, following symlinks as the
-// scanner does for catalog paths. It returns ErrSourceGone for a missing or
-// non-regular file and ErrSourceChanged for one of another size or
-// modification time.
-func (g Grant) Check(ctx context.Context) (os.FileInfo, error) {
-	info, err := fspath.StatContext(ctx, g.Path)
+// SourceError classifies a failed stat or open of a source path. The path
+// no longer naming a file (it is missing, or a parent stopped being a
+// directory) is ErrSourceGone. Any other failure, such as an I/O error or a
+// stale or disconnected network mount, says nothing about the file: it is
+// returned as it is, so a job reading an unchanged file is not ended over it.
+func SourceError(err error) error {
+	if errors.Is(err, fs.ErrNotExist) || errors.Is(err, syscall.ENOTDIR) {
+		return fmt.Errorf("%w: %w", ErrSourceGone, err)
+	}
+	return err
+}
+
+// statSource stats path through fspath, following symlinks as the scanner
+// does for catalog paths. It returns ErrSourceGone for a missing or
+// non-regular file, and the stat's own error when the file could not be
+// examined.
+func statSource(ctx context.Context, path string) (os.FileInfo, error) {
+	info, err := fspath.StatContext(ctx, path)
 	if err != nil {
-		return nil, fmt.Errorf("%w: %w", ErrSourceGone, err)
+		return nil, SourceError(err)
 	}
 	if !info.Mode().IsRegular() {
 		return nil, fmt.Errorf("%w: not a regular file", ErrSourceGone)
+	}
+	return info, nil
+}
+
+// Check stats the grant's path. It returns ErrSourceGone for a missing or
+// non-regular file, ErrSourceChanged for one of another size or modification
+// time, and the stat's own error when the file could not be examined.
+func (g Grant) Check(ctx context.Context) (os.FileInfo, error) {
+	info, err := statSource(ctx, g.Path)
+	if err != nil {
+		return nil, err
 	}
 	if !g.Matches(info) {
 		return nil, ErrSourceChanged
@@ -235,12 +260,9 @@ func (g *Grants) mint(ctx context.Context, nodeID int, kind string, id int64, pa
 	if _, err := g.key(); err != nil {
 		return "", err
 	}
-	info, err := fspath.StatContext(ctx, path)
+	info, err := statSource(ctx, path)
 	if err != nil {
-		return "", fmt.Errorf("%w: %w", ErrSourceGone, err)
-	}
-	if !info.Mode().IsRegular() {
-		return "", fmt.Errorf("%w: not a regular file", ErrSourceGone)
+		return "", err
 	}
 	claims.Size, claims.ModTimeUnixNano = info.Size(), info.ModTime().UnixNano()
 	claims.Iat = g.now().Unix()

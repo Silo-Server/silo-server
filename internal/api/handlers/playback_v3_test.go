@@ -2445,8 +2445,9 @@ func TestPrepareTransportV3PublishesRemuxRangeRefusalOnlyToAProxyThatHonorsIt(t 
 // plan's timeline starts on, so its URL carries that origin, which can sit
 // before the requested seek.
 func TestPrepareTransportV3CarriesThePlanOriginForTheResumePrimer(t *testing.T) {
-	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0))
+	handler := newKeyedPlaybackHandler(playback.NewSessionManager(0, 0))
 	handler.JWTSecret = "test-secret"
+	handler.NodeKeys = nodeauthtest.SameKey("test-secret")
 	handler.copySeekAnchor = func(context.Context, string, string, float64, int) (float64, int, error) {
 		return 38.25, 19, nil
 	}
@@ -2468,6 +2469,9 @@ func TestPrepareTransportV3CarriesThePlanOriginForTheResumePrimer(t *testing.T) 
 	parsed, err := url.Parse(transport.url)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if !strings.HasPrefix(transport.url, proxy.URL+"/stream/remux/") {
+		t.Fatalf("remux stream url = %q, want the proxy's route", transport.url)
 	}
 	if origin := playback.RemuxStreamOrigin(parsed.Query()); origin == nil || *origin != 38.25 || parsed.Query().Get("seek") != "39.5" {
 		t.Fatalf("remux stream url = %q, want seek=39.5 and the plan's origin 38.25", transport.url)
