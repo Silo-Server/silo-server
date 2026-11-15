@@ -53,7 +53,7 @@ export function buildMethodLines(series: AdminTimeseries | undefined): LineChart
  * Streams no listed method accounts for get an "Other" band on top, present
  * only when some bucket has any, so the stack always meets the total line.
  */
-export function buildMethodBands(series: AdminTimeseries | undefined): LineChartStack[] {
+export function buildMethodBands(series: AdminTimeseries): LineChartStack[] {
   const split = (point: AdminTimeseriesPoint, method: Method) =>
     point.streams_by_method?.[method] ?? 0;
   const bands: LineChartStack[] = METHODS.map(({ method, labelKey, slot }) => ({
@@ -74,4 +74,13 @@ export function buildMethodBands(series: AdminTimeseries | undefined): LineChart
     });
   }
   return bands;
+}
+
+/**
+ * Whether the response carries the split the Stacked view needs. A server
+ * that predates `streams_by_method` (an older replica answering mid-upgrade)
+ * omits it, and stacking without it would file every stream under "Other".
+ */
+export function hasMethodSplit(series: AdminTimeseries): boolean {
+  return series.points.every((point) => point.streams_by_method !== undefined);
 }

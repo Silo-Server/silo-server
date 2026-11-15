@@ -16,6 +16,7 @@ import { WidgetViewToggle } from "../WidgetViewToggle";
 import {
   buildMethodBands,
   buildMethodLines,
+  hasMethodSplit,
   NEUTRAL_SERIES_COLOR,
 } from "./concurrentStreamsSeries";
 import { TimeseriesChartBody } from "./timeseriesChart";
@@ -44,7 +45,10 @@ export function ConcurrentStreamsWidget() {
   const language = useAppLanguage();
   const { range, view, setView } = useWidgetRange();
   const query = useAdminTimeseries(rangeHours(range));
-  const mode = view === "stacked" || view === "total" ? view : "lines";
+  // Offered until a response shows the server cannot split the total, so the
+  // switch does not lose a button while the first read is in flight.
+  const canStack = !query.data || hasMethodSplit(query.data);
+  const mode = view === "total" || (view === "stacked" && canStack) ? view : "lines";
 
   const points = useMemo(
     () => buildTimeseriesPoints(query.data, (point) => point.streams),
@@ -56,7 +60,7 @@ export function ConcurrentStreamsWidget() {
     [query.data, mode, language],
   );
   const bands = useMemo(
-    () => (mode === "stacked" ? buildMethodBands(query.data) : undefined),
+    () => (mode === "stacked" && query.data ? buildMethodBands(query.data) : undefined),
     // eslint-disable-next-line react-hooks/exhaustive-deps -- language re-runs the labels
     [query.data, mode, language],
   );
@@ -81,11 +85,15 @@ export function ConcurrentStreamsWidget() {
               label: t("web.admin.dashboard.widgets.concurrentStreams.viewLines"),
               ariaLabel: t("web.admin.dashboard.widgets.concurrentStreams.viewLinesLabel"),
             },
-            {
-              value: "stacked",
-              label: t("web.admin.dashboard.widgets.concurrentStreams.viewStacked"),
-              ariaLabel: t("web.admin.dashboard.widgets.concurrentStreams.viewStackedLabel"),
-            },
+            ...(canStack
+              ? [
+                  {
+                    value: "stacked" as const,
+                    label: t("web.admin.dashboard.widgets.concurrentStreams.viewStacked"),
+                    ariaLabel: t("web.admin.dashboard.widgets.concurrentStreams.viewStackedLabel"),
+                  },
+                ]
+              : []),
             {
               value: "total",
               label: t("web.admin.dashboard.widgets.concurrentStreams.viewTotal"),

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { AdminTimeseries, AdminTimeseriesPoint } from "@/api/types";
-import { buildMethodBands } from "./concurrentStreamsSeries";
+import { buildMethodBands, hasMethodSplit } from "./concurrentStreamsSeries";
 
 const HOUR_MS = 3_600_000;
 const TO = Date.parse("2026-10-29T12:00:00Z");
@@ -54,5 +54,18 @@ describe("buildMethodBands", () => {
       series({ streams: 5, streams_by_method: { direct: 2, remux: 0, transcode: 1 } }),
     );
     expect(valuesAt(bands)).toEqual({ direct: 2, remux: 0, transcode: 1, other: 2 });
+  });
+});
+
+describe("hasMethodSplit", () => {
+  // A server without streams_by_method must not get a Stacked view that files
+  // every stream under Other.
+  it("is false when the server omits the split", () => {
+    expect(hasMethodSplit(series({ streams: 5, direct: 5 }))).toBe(false);
+    expect(
+      hasMethodSplit(
+        series({ streams: 5, streams_by_method: { direct: 5, remux: 0, transcode: 0 } }),
+      ),
+    ).toBe(true);
   });
 });
