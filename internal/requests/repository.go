@@ -976,7 +976,7 @@ func (r *Repository) MarkReconciled(ctx context.Context, id string) error {
 	return nil
 }
 
-func (r *Repository) RecomputeStatus(ctx context.Context, id string, actor Viewer) (*Request, error) {
+func (r *Repository) RecomputeStatus(ctx context.Context, id string, leaseUntil time.Time, actor Viewer) (*Request, error) {
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("begin request recompute transaction: %w", err)
@@ -985,13 +985,16 @@ func (r *Repository) RecomputeStatus(ctx context.Context, id string, actor Viewe
 
 	var status Status
 	var outcome Outcome
-	if err := tx.QueryRow(ctx, `SELECT status, outcome FROM media_requests WHERE id = $1 FOR UPDATE`, id).Scan(&status, &outcome); err != nil {
+	var lease *time.Time
+	if err := tx.QueryRow(ctx, `SELECT status, outcome, submit_lease_until FROM media_requests WHERE id = $1 FOR UPDATE`, id).Scan(&status, &outcome, &lease); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, ErrNotFound
 		}
 		return nil, fmt.Errorf("lock request for recompute: %w", err)
 	}
-	if status != StatusApproved || outcome != OutcomeActive {
+	// An attempt that outlived its claim must not settle a request a newer
+	// claim is submitting (#4184).
+	if status != StatusApproved || outcome != OutcomeActive || lease == nil || !lease.Equal(leaseUntil) {
 		return nil, ErrInvalidState
 	}
 	req, err := r.recomputeAggregate(ctx, tx, id, actor)

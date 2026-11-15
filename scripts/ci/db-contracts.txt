@@ -493,6 +493,8 @@
 # Request cleanup, prepared downloads and user-store transactions.
 ./internal/requests TestReplaceFailedIsScopedToRequesterDatabase
 ./internal/requests TestDeleteFailedRequestDatabase
+./internal/requests TestClaimedTargetWritesNeedTheClaimDatabase
+./internal/requests TestDeleteTargetWaitsForAConcurrentReclaimDatabase
 ./internal/requests TestMarkAvailableLeavesARetryResendingATierDatabase
 ./internal/requests TestListDownloadingRequestsOrderDatabase
 ./internal/requests TestRecordSubmissionReplacesFailedTargetDatabase
