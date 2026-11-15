@@ -278,7 +278,6 @@ func (s *Service) importList(ctx context.Context, conn Connection, cfg ServerCon
 		return result, err
 	}
 	seenRemote := make(remoteListPresence, len(rows))
-	states := make([]ListItemState, 0, len(rows))
 	// orderedIDs records matched local ids in the order the provider returned
 	// them, so an order-providing list (e.g. MDBList watchlist) can mirror its
 	// sort locally.
@@ -312,18 +311,11 @@ func (s *Service) importList(ctx context.Context, conn Connection, cfg ServerCon
 			return result, err
 		}
 		if match == nil {
-			state, kept, added, err := s.importListTitle(ctx, conn, b, row, key, removalsPending, pendingTitles, titlesSince != nil)
+			kept, err := s.trackListTitle(ctx, conn, b, row, key, removalsPending, pendingTitles, titlesSince != nil, &result)
 			if err != nil {
 				return result, err
 			}
 			if kept {
-				if state != nil {
-					states = append(states, *state)
-					result.Imported++
-				}
-				if added {
-					result.added++
-				}
 				continue
 			}
 			result.Unmatched++
@@ -349,7 +341,9 @@ func (s *Service) importList(ctx context.Context, conn Connection, cfg ServerCon
 		orderedIDs = append(orderedIDs, match.MediaItemID)
 		result.Imported++
 		listedAt := row.FavoritedAt
-		states = append(states, ListItemState{
+		// Each entry is tracked as soon as it is added, so a run that fails on
+		// a later row leaves no entry the provider's removals can't reach.
+		if err := s.repo.UpsertListItemStates(ctx, []ListItemState{{
 			ConnectionID:     conn.ID,
 			ListKind:         b.kind,
 			MediaItemID:      match.MediaItemID,
@@ -361,10 +355,9 @@ func (s *Service) importList(ctx context.Context, conn Connection, cfg ServerCon
 			LocalPresent:     true,
 			LastSeenRemoteAt: &listedAt,
 			LastSeenLocalAt:  &listedAt,
-		})
-	}
-	if err := s.repo.UpsertListItemStates(ctx, states); err != nil {
-		return result, err
+		}}); err != nil {
+			return result, err
+		}
 	}
 	if !batch.Incremental {
 		if err := s.reconcileMissingRemoteListItems(ctx, conn, store, b, seenRemote, &result); err != nil {

@@ -3,6 +3,7 @@ package watchsync
 import (
 	"cmp"
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"slices"
@@ -162,7 +163,8 @@ func watchlistTitleFromListItemID(id string) (WatchlistTitle, bool) {
 // the matcher found it ambiguous, and an entry outside the library would
 // show it as missing. It returns the row's shadow state, or nil when the row
 // stays unmatched or waits for a local removal to reach the provider. A new
-// entry is requested only with request set; see listTitlesSince.
+// entry is requested only with request set; see listTitlesSince. An add that
+// kept the entry and then failed returns the state with the error.
 func (s *Service) importListTitle(
 	ctx context.Context,
 	conn Connection,
@@ -191,7 +193,7 @@ func (s *Service) importListTitle(
 	}
 	id := title.listItemID()
 	added, err = titles.AddWatchlistTitle(ctx, conn.UserID, conn.ProfileID, title, row.FavoritedAt, request)
-	if err != nil {
+	if err != nil && !added {
 		return nil, false, false, err
 	}
 	listedAt := row.FavoritedAt
@@ -208,7 +210,38 @@ func (s *Service) importListTitle(
 		LastSeenRemoteAt: &listedAt,
 		LastSeenLocalAt:  &listedAt,
 		TitleIDs:         title.IDs(),
-	}, true, added, nil
+	}, true, added, err
+}
+
+// trackListTitle imports a row that matched no library item through
+// importListTitle, writes its shadow state right away, and counts it in
+// result. It reports whether the row was kept.
+func (s *Service) trackListTitle(
+	ctx context.Context,
+	conn Connection,
+	b listBinding,
+	row RemoteFavorite,
+	key string,
+	removalsPending map[string]time.Time,
+	pendingTitles map[string][]string,
+	request bool,
+	result *ImportListResult,
+) (bool, error) {
+	state, kept, added, err := s.importListTitle(ctx, conn, b, row, key, removalsPending, pendingTitles, request)
+	// Counted first: the entry is saved, so a run that fails below still
+	// reports it.
+	if added {
+		result.added++
+	}
+	if state != nil {
+		result.Imported++
+		// An entry the add kept is tracked even when the add then failed, so
+		// a later provider removal still finds it.
+		if upsertErr := s.repo.UpsertListItemStates(ctx, []ListItemState{*state}); upsertErr != nil {
+			return kept, errors.Join(err, upsertErr)
+		}
+	}
+	return kept, err
 }
 
 // waitsForListTitleRemoval reports whether the listing waits for a local

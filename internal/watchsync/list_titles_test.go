@@ -2,6 +2,7 @@ package watchsync
 
 import (
 	"context"
+	"errors"
 	"reflect"
 	"strconv"
 	"strings"
@@ -45,6 +46,10 @@ type titlesStub struct {
 	// promotedTVDB marks titles promoted onto a library item that shares
 	// only their TVDB ID, which sync knows from the title's row.
 	promotedTVDB map[int]bool
+	// addErr fails adding the titles with these TMDB IDs, after keeping
+	// the entry when addKeeps is set.
+	addErr   map[int]error
+	addKeeps bool
 }
 
 func (s *titlesStub) LibraryHas(_ context.Context, title WatchlistTitle) (bool, error) {
@@ -52,6 +57,13 @@ func (s *titlesStub) LibraryHas(_ context.Context, title WatchlistTitle) (bool, 
 }
 
 func (s *titlesStub) AddWatchlistTitle(_ context.Context, _ int, _ string, title WatchlistTitle, addedAt time.Time, request bool) (bool, error) {
+	if err := s.addErr[title.TMDBID]; err != nil {
+		if !s.addKeeps {
+			return false, err
+		}
+		s.entries[title.TMDBID] = addedAt
+		return true, err
+	}
 	if _, ok := s.entries[title.TMDBID]; ok {
 		return false, nil
 	}
@@ -595,6 +607,77 @@ func TestServiceWatchlistProviderRemovalReachesThePromotedItem(t *testing.T) {
 				t.Fatalf("library watchlist entry = %v, %v; want the show removed with the title", entry, err)
 			}
 		})
+	}
+}
+
+// An import that fails partway still tracks the entries it already added,
+// including one whose add kept the entry and then failed, so the provider
+// dropping one before the next run takes it off the watchlist.
+func TestServiceWatchlistImportTracksEntriesAddedBeforeAFailure(t *testing.T) {
+	for _, tt := range []struct {
+		name     string
+		addKeeps bool
+		failing  int
+	}{
+		{name: "a later row fails", failing: 680},
+		{name: "the add keeps the entry and fails", addKeeps: true, failing: 550},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			store, repo, conn := favoriteImportFixture(t)
+			conn.ImportWatchlistEnabled, conn.SyncWatchlistRemovalsEnabled = true, true
+			titles := &titlesStub{
+				entries:  map[int]time.Time{},
+				addErr:   map[int]error{tt.failing: errors.New("database unavailable")},
+				addKeeps: tt.addKeeps,
+			}
+			service := NewService(repo, NewRegistry()).
+				WithMatcher(unmatchedMatcherStub{}).
+				WithUserStoreProvider(staticStoreProvider{store: store})
+			service.SetWatchlistTitles(titles)
+			provider := &watchlistBatchProviderStub{rows: []RemoteFavorite{
+				{ProviderItemKey: "tmdb:550", Kind: "movie", Title: "Fight Club", TMDBID: "550"},
+				{ProviderItemKey: "tmdb:680", Kind: "movie", Title: "Pulp Fiction", TMDBID: "680"},
+			}}
+
+			if _, err := service.importList(context.Background(), conn, ServerConfig{}, provider, service.watchlistBinding()); err == nil {
+				t.Fatal("import succeeded, want the failed add's error")
+			}
+			if _, ok := titles.entries[550]; !ok {
+				t.Fatal("the import didn't add the title")
+			}
+
+			// The provider drops the title before a run succeeds.
+			titles.addErr = nil
+			provider.rows = provider.rows[1:]
+			if _, err := service.importList(context.Background(), conn, ServerConfig{}, provider, service.watchlistBinding()); err != nil {
+				t.Fatal(err)
+			}
+			if _, ok := titles.entries[550]; ok {
+				t.Fatal("the title the provider dropped is still on the watchlist")
+			}
+		})
+	}
+}
+
+// A title saved before its sync row write failed still counts as imported
+// and as a change to the local list.
+func TestServiceWatchlistImportCountsATitleWhoseRowWriteFails(t *testing.T) {
+	store, repo, conn := favoriteImportFixture(t)
+	conn.ImportWatchlistEnabled = true
+	repo.upsertListItemErr = errors.New("database unavailable")
+	titles := &titlesStub{entries: map[int]time.Time{}}
+	service := NewService(repo, NewRegistry()).
+		WithMatcher(unmatchedMatcherStub{}).
+		WithUserStoreProvider(staticStoreProvider{store: store})
+	service.SetWatchlistTitles(titles)
+	provider := &watchlistBatchProviderStub{rows: []RemoteFavorite{{ProviderItemKey: "tmdb:550", Kind: "movie", Title: "Fight Club", TMDBID: "550"}}}
+
+	result, err := service.importList(context.Background(), conn, ServerConfig{}, provider, service.watchlistBinding())
+	if err == nil {
+		t.Fatal("import succeeded, want the row write's error")
+	}
+	if result.Imported != 1 || !result.changedLocalList() {
+		t.Fatalf("result = %#v, want the saved title counted", result)
 	}
 }
 

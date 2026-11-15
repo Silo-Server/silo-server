@@ -71,6 +71,7 @@ type serviceFakeRepo struct {
 	confirmingScrobbles    map[string]time.Time
 	markSatisfiedErr       error
 	markLocalRemovedErr    error
+	upsertListItemErr      error
 	markHistoryStatusErr   error
 	syncRunMu              sync.Mutex
 	scrobbleMu             sync.Mutex
@@ -567,6 +568,9 @@ func (r *serviceFakeRepo) MarkHistoryExportSatisfiedByScrobble(_ context.Context
 }
 
 func (r *serviceFakeRepo) UpsertListItemStates(_ context.Context, states []ListItemState) error {
+	if r.upsertListItemErr != nil {
+		return r.upsertListItemErr
+	}
 	for _, state := range states {
 		if state.ListKind == "" {
 			state.ListKind = ListKindFavorites
