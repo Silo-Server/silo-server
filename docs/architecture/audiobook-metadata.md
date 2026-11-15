@@ -131,7 +131,8 @@ enricher (`internal/audiobooks/enrichment_refresh.go`).
   own progress. When a library scan of the library is already accepted or
   running (`idx_scan_runs_active_scope`), the job fails with
   `ErrLibraryScanInProgress` instead of starting a second scan. After the
-  scan, `Enricher.RequeueUnmatched` makes each unmatched book due: its
+  scan, `Enricher.RequeueUnmatchedInLibrary` makes every unmatched book due
+  in one statement: its
   `no_match`, `failed`, or `skipped` outcome and retry counts are cleared, so
   the next sweep tries it under these rules. A matched book keeps its match
   and provider-owned fields; a book whose match an admin ignored
@@ -145,8 +146,9 @@ enricher (`internal/audiobooks/enrichment_refresh.go`).
   as one sweep item would be. An ignored book is left alone.
 - `reset` mode first clears the match (`Enricher.ResetMatch`): provider IDs,
   author and narrator credits, the fields a match owns, artwork a provider
-  supplied, the field locks, and the enrichment state. Its scan then reads
-  the tags as on an unmatched book, and `RefreshItem` matches it again. The
+  supplied, the field locks, and the enrichment state, and parks the book
+  briefly so the sweep cannot claim it first. Its scan then reads the tags
+  as on an unmatched book, and `RefreshItem` matches it again. The
   job fails when the scan did not read the book
   (`scanner.AudiobookTagRereadDone`), since a scan of a path shared with other
   books succeeds when only one of them failed.

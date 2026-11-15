@@ -97,6 +97,7 @@ type libraryRefreshIngester interface {
 // (audiobooks.Enricher), which alone matches audiobooks.
 type libraryRefreshAudiobookRequeuer interface {
 	RequeueUnmatched(ctx context.Context, contentID string) (bool, error)
+	RequeueUnmatchedInLibrary(ctx context.Context, folderID int) (int, error)
 }
 
 type libraryRefreshRefresher interface {

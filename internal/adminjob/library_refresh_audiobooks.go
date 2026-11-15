@@ -126,35 +126,26 @@ func (e *LibraryRefreshExecutor) refreshAudiobookLibrary(
 }
 
 // requeueUnmatchedAudiobooks hands the library's unmatched audiobooks back to
-// the audiobook enricher, listed after the scan so books it found are
-// included.
+// the audiobook enricher, after the scan so books it found are included.
 func (e *LibraryRefreshExecutor) requeueUnmatchedAudiobooks(ctx context.Context, req LibraryRefreshRequest, result *LibraryRefreshResult) error {
 	items, err := e.itemLister.ListLibraryItems(ctx, req.LibraryID, req.Mode)
 	if err != nil {
 		return fmt.Errorf("load library items: %w", err)
 	}
 	for _, item := range items {
-		if !item.Audiobook {
-			continue
-		}
-		result.TotalItems++
-		if e.audiobooks == nil {
-			continue
-		}
-		queued, err := e.audiobooks.RequeueUnmatched(ctx, item.ContentID)
-		if err != nil {
-			if ctx.Err() != nil {
-				return ctx.Err()
-			}
-			slog.WarnContext(ctx, "library refresh: could not queue audiobook for matching", "component", "adminjob",
-				"library_id", req.LibraryID, "content_id", item.ContentID, "error", err)
-			continue
-		}
-		if queued {
-			result.AudiobooksQueued++
+		if item.Audiobook {
+			result.TotalItems++
 		}
 	}
 	result.ItemsWithoutIDs = result.TotalItems
+	if e.audiobooks == nil {
+		return nil
+	}
+	queued, err := e.audiobooks.RequeueUnmatchedInLibrary(ctx, req.LibraryID)
+	if err != nil {
+		return fmt.Errorf("queue audiobooks for matching: %w", err)
+	}
+	result.AudiobooksQueued = queued
 	return nil
 }
 

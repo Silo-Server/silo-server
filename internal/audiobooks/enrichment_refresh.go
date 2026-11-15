@@ -62,15 +62,48 @@ func (e *Enricher) RequeueUnmatched(ctx context.Context, contentID string) (bool
 	return requeued, err
 }
 
+// RequeueUnmatchedInLibrary is RequeueUnmatched for every audiobook in
+// library folderID, in one statement. It returns how many books it made due.
+func (e *Enricher) RequeueUnmatchedInLibrary(ctx context.Context, folderID int) (int, error) {
+	if e == nil || e.pool == nil || folderID <= 0 {
+		return 0, nil
+	}
+	tag, err := e.pool.Exec(ctx, `
+		WITH target AS (
+			SELECT mi.content_id
+			FROM media_item_libraries mil
+			JOIN media_items mi ON mi.content_id = mil.content_id
+			WHERE mil.media_folder_id = $1
+			  AND mi.type = 'audiobook'
+			  AND mi.match_ignored_at IS NULL
+			  AND NOT `+catalog.AudiobookProviderMatchedWhere("mi.content_id")+`
+			ORDER BY mi.content_id
+			FOR UPDATE OF mi
+		)
+		INSERT INTO audiobook_enrichment_state (content_id, updated_at)
+		SELECT content_id, now() FROM target
+		ON CONFLICT (content_id) DO UPDATE SET `+requeueStateSet+`
+		WHERE audiobook_enrichment_state.lease_until IS NULL
+		   OR audiobook_enrichment_state.lease_until <= now()
+	`, folderID)
+	if err != nil {
+		return 0, fmt.Errorf("making library %d audiobooks due for enrichment: %w", folderID, err)
+	}
+	return int(tag.RowsAffected()), nil
+}
+
 // requeueStateSet returns a state row to "never tried": the sweep's pending
 // branch (outcome IS NULL) claims it on its next batch.
-const requeueStateSet = `
+const requeueStateSet = requeueCountsSet + `,
+	next_attempt_at  = NULL`
+
+// requeueCountsSet clears a state row's outcome and retry history.
+const requeueCountsSet = `
 	outcome          = NULL,
 	no_matches       = 0,
 	failures         = 0,
 	last_error_class = NULL,
 	last_error       = NULL,
-	next_attempt_at  = NULL,
 	completed_at     = NULL,
 	updated_at       = now()`
 
@@ -177,7 +210,10 @@ func (e *Enricher) claimForRefresh(ctx context.Context, contentID string) (item 
 	if e.providerIDs != nil {
 		rows, err := e.providerIDs.GetByContentID(ctx, contentID)
 		if err != nil {
-			return item, matched, true, fmt.Errorf("loading audiobook provider IDs: %w", err)
+			releaseCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+			defer cancel()
+			e.releaseClaim(releaseCtx, item)
+			return enrichmentItemRow{}, false, false, fmt.Errorf("loading audiobook provider IDs: %w", err)
 		}
 		item.ProviderIDs = providerIDMapFromRows(rows)
 	}
@@ -287,11 +323,16 @@ func (e *Enricher) ResetMatch(ctx context.Context, contentID string) (ignored bo
 		`, contentID); err != nil {
 			return fmt.Errorf("clearing audiobook match fields: %w", err)
 		}
+		// The book is parked for adminRefreshLease: the sweep must not
+		// claim it before the item refresh has read its tags again and
+		// matched it (RefreshItem claims it whatever its schedule). If the
+		// refresh never gets there, the sweep takes the book afterwards.
 		if _, err := tx.Exec(ctx, `
-			INSERT INTO audiobook_enrichment_state (content_id, updated_at)
-			VALUES ($1, now())
-			ON CONFLICT (content_id) DO UPDATE SET `+requeueStateSet,
-			contentID); err != nil {
+			INSERT INTO audiobook_enrichment_state (content_id, next_attempt_at, updated_at)
+			VALUES ($1, now() + make_interval(secs => $2::double precision), now())
+			ON CONFLICT (content_id) DO UPDATE SET `+requeueCountsSet+`,
+				next_attempt_at = EXCLUDED.next_attempt_at`,
+			contentID, adminRefreshLease.Seconds()); err != nil {
 			return fmt.Errorf("resetting audiobook enrichment state: %w", err)
 		}
 		return nil
