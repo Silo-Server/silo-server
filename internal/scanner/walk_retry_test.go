@@ -49,8 +49,8 @@ func TestWalkDirectoryReadRetries(t *testing.T) {
 				var files, failures []string
 				var err error
 				if kind == "audiobooks" {
-					scan := audiobookRootScan{root: root, seenPaths: make(map[string]bool)}
-					err = walkAudiobookDirectories(ctx, root, &scan, make(map[string]bool), nil, true, readDir)
+					scan := audiobookRootScan{root: root, libraryRoots: map[string]bool{root: true}, seenPaths: make(map[string]bool)}
+					err = walkAudiobookDirectories(ctx, root, &scan, make(map[string]bool), nil, true, false, readDir)
 					for path := range scan.seenPaths {
 						files = append(files, path)
 					}

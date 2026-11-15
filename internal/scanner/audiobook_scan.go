@@ -137,8 +137,8 @@ func audiobookFolderUnchanged(existing []*models.MediaFile, onDisk []audiobookDi
 	return true
 }
 
-// audiobookFolderShouldSkip returns true when every audio file on disk in
-// folderPath matches an existing media_files row by size + mtime AND the
+// audiobookFolderShouldSkip returns true when every part of the book rooted at
+// folderPath (see audiobookBookParts) matches an existing media_files row by size + mtime AND the
 // linked media_items row is in a non-unmatched status. False under any
 // drift, missing row, or unmatched status — the caller then falls through
 // to the full reconcile path.
@@ -217,22 +217,18 @@ func (s *Scanner) audiobookFolderShouldSkip(ctx context.Context, folder *models.
 	return unreadable, true, nil
 }
 
-// listAudiobookDiskFiles lists the folder's allowed audio files for the
-// unchanged check, leaving out files ffprobe already rejected and counting
-// them in unreadable.
+// listAudiobookDiskFiles lists the parts of the book rooted at folderPath
+// (audiobookBookParts) for the unchanged check, leaving out files ffprobe
+// already rejected and counting them in unreadable.
 func listAudiobookDiskFiles(folderPath string, allowedPaths map[string]bool) (onDisk []audiobookDiskFile, unreadable int, err error) {
-	entries, err := fspath.ReadDir(folderPath)
-	if err != nil {
-		return nil, 0, fmt.Errorf("read folder: %w", err)
+	parts, err := audiobookBookParts(folderPath, allowedPaths)
+	if errors.Is(err, errFolderHasNoMedia) {
+		return nil, 0, nil
 	}
-	for _, e := range entries {
-		if e.IsDir() || !SupportsAudioFile(e.Name()) {
-			continue
-		}
-		full := filepath.Join(folderPath, e.Name())
-		if allowedPaths != nil && !allowedPaths[full] {
-			continue
-		}
+	if err != nil {
+		return nil, 0, err
+	}
+	for _, full := range parts {
 		info, statErr := fspath.Stat(full)
 		if statErr != nil {
 			return nil, 0, fmt.Errorf("stat %s: %w", full, statErr)
@@ -261,14 +257,20 @@ func audiobookScanWorkers() int {
 }
 
 type audiobookRootScan struct {
-	root string
-	// walkBelowRootBook keeps discovery going below root when root holds
-	// audio. See collectAudiobookRootScans.
-	walkBelowRootBook bool
-	candidates        []string
-	seenPaths         map[string]bool
-	rootErr           error
-	walkFailures      []string // logical paths the walk could not read or resolve
+	root         string
+	libraryRoots map[string]bool // configured library roots, whose loose files are books of their own
+	candidates   []string        // book roots: directories, or the files of loose single-file books
+	seenPaths    map[string]bool // audio files the walk accepted, and the disc folders it took them from
+	// admit is a file an admin asked to scan by its exact path, which the
+	// walk keeps past the ignore files; "" for none.
+	admit        string
+	rootErr      error
+	walkFailures []string // logical paths the walk could not read or resolve
+}
+
+// admits reports whether path is the admitted file or a folder on its path.
+func (r *audiobookRootScan) admits(path string) bool {
+	return r.admit != "" && pathWithinAnyRoot(r.admit, []string{path})
 }
 
 func (r *audiobookRootScan) failed() bool {
@@ -279,52 +281,188 @@ func (r *audiobookRootScan) failed() bool {
 // following directory symlinks. Only ancestors are tracked: aliases must retain
 // their own seen paths so missing-file reconciliation does not retire them.
 // Callers filter inherited patterns before resolving or entering a directory.
-func walkAudiobookDirectories(ctx context.Context, path string, scan *audiobookRootScan, ancestors map[string]bool, ignoreRulesStack []ignoreRules, honorIgnores bool, readDir func(string) ([]os.DirEntry, error)) error {
-	if err := ctx.Err(); err != nil {
+//
+// Each directory is classified by what it holds (see audiobookBookParts for
+// the parts of a book rooted at a directory):
+//   - A folder's own audio files and the audio in its disc subfolders (Disc 1,
+//     CD2, Part 3) are one book, whatever else the folder holds.
+//   - Its other subfolders are walked, and each that holds audio is a book of
+//     its own. Below a folder that holds a book, extras folders (Bonus, Extras,
+//     Sample) are not walked.
+//   - A library root is never a book: its loose audio files are one book each,
+//     rooted at the file's path, and its disc-named folders ordinary folders.
+//
+// A folder whose own parts are uncertain, because an entry directly inside it
+// would not resolve or one of its disc folders could not be fully read, is
+// held: it is recorded as a walk failure, which protects its whole subtree
+// from missing-file reconciliation, it adds no candidates, and everything
+// indexed below it stays as it is until it reads cleanly. A library root is
+// never held.
+//
+// onlyAdmitted walks a folder the ignore files exclude, entered only on the way
+// to the file an admin asked for (audiobookRootScan.admit).
+func walkAudiobookDirectories(ctx context.Context, path string, scan *audiobookRootScan, ancestors map[string]bool, ignoreRulesStack []ignoreRules, honorIgnores, onlyAdmitted bool, readDir func(string) ([]os.DirEntry, error)) error {
+	// Checkpoints for a held folder: the failures recorded and the candidates
+	// found from here on, including those inside its disc folders, are its own.
+	failures, candidates := len(scan.walkFailures), len(scan.candidates)
+	dir, ok, err := readAudiobookDirectory(ctx, path, scan, ancestors, ignoreRulesStack, honorIgnores, onlyAdmitted, readDir)
+	if err != nil || !ok {
 		return err
+	}
+	ancestors[dir.canonical] = true
+	defer delete(ancestors, dir.canonical)
+	inLibraryRoot := scan.libraryRoots[path]
+	uncertain := len(scan.walkFailures) > failures
+
+	hasDiscs := false
+	var others []string
+	for _, directory := range dir.directories {
+		outcome := audiobookNotDisc
+		if !inLibraryRoot && !scan.libraryRoots[directory] && isAudiobookDiscDirName(filepath.Base(directory)) {
+			var err error
+			if outcome, err = takeAudiobookDisc(ctx, directory, scan, ancestors, dir.childRules, honorIgnores, dir.admittedOnly[directory], readDir); err != nil {
+				return err
+			}
+		}
+		switch outcome {
+		case audiobookDiscTaken:
+			hasDiscs = true
+		case audiobookDiscUnreadable:
+			uncertain = true
+		case audiobookNotDisc:
+			others = append(others, directory)
+		}
+	}
+	if uncertain && !inLibraryRoot {
+		scan.candidates = scan.candidates[:candidates]
+		recordWalkFailure(&scan.walkFailures, path)
+		slog.WarnContext(ctx, "audiobook scan: folder held until its contents can be read", "component", "scanner", "path", path)
+		return nil
+	}
+	holdsBook := !inLibraryRoot && (hasDiscs || len(dir.audio) > 0)
+	for _, directory := range others {
+		// An extras folder that is a configured root is walked as its own root.
+		if holdsBook && !scan.libraryRoots[directory] && isAudiobookExtrasDirName(filepath.Base(directory)) {
+			continue
+		}
+		if err := walkAudiobookDirectories(ctx, directory, scan, ancestors, dir.childRules, honorIgnores, dir.admittedOnly[directory], readDir); err != nil {
+			return err
+		}
+	}
+	switch {
+	case holdsBook:
+		scan.candidates = append(scan.candidates, path)
+	case inLibraryRoot:
+		scan.candidates = append(scan.candidates, dir.audio...)
+	}
+	return nil
+}
+
+type audiobookDiscOutcome int
+
+const (
+	audiobookNotDisc        audiobookDiscOutcome = iota // walk it like any other folder
+	audiobookDiscTaken                                  // a disc of the parent's book
+	audiobookDiscSkipped                                // excluded by an ignore file, or an ancestor
+	audiobookDiscUnreadable                             // not fully read; recorded as a walk failure, and its parent is held
+)
+
+// takeAudiobookDisc reads a disc-named folder below a book folder. A folder
+// holding audio is a disc: it is recorded in the inventory, since
+// audiobookBookParts reads only the disc folders recorded there, and its
+// subfolders are walked so books stored below a disc are still found. Extras
+// below the disc stay unwalked, as below any book.
+func takeAudiobookDisc(ctx context.Context, path string, scan *audiobookRootScan, ancestors map[string]bool, ignoreRulesStack []ignoreRules, honorIgnores, onlyAdmitted bool, readDir func(string) ([]os.DirEntry, error)) (audiobookDiscOutcome, error) {
+	failures := len(scan.walkFailures)
+	disc, ok, err := readAudiobookDirectory(ctx, path, scan, ancestors, ignoreRulesStack, honorIgnores, onlyAdmitted, readDir)
+	switch {
+	case err != nil:
+		return audiobookDiscSkipped, err
+	case len(scan.walkFailures) > failures:
+		// The folder, or an entry in it, could not be read.
+		return audiobookDiscUnreadable, nil
+	case !ok:
+		return audiobookDiscSkipped, nil
+	case len(disc.audio) == 0:
+		return audiobookNotDisc, nil
+	}
+	scan.seenPaths[path] = true
+	ancestors[disc.canonical] = true
+	defer delete(ancestors, disc.canonical)
+	for _, directory := range disc.directories {
+		if isAudiobookExtrasDirName(filepath.Base(directory)) {
+			continue
+		}
+		if err := walkAudiobookDirectories(ctx, directory, scan, ancestors, disc.childRules, honorIgnores, disc.admittedOnly[directory], readDir); err != nil {
+			return audiobookDiscSkipped, err
+		}
+	}
+	return audiobookDiscTaken, nil
+}
+
+// audiobookDirListing is one directory as the walk sees it.
+type audiobookDirListing struct {
+	canonical   string
+	audio       []string
+	directories []string
+	childRules  []ignoreRules
+	// admittedOnly marks subdirectories the ignore files exclude, entered only
+	// on the way to the admitted file.
+	admittedOnly map[string]bool
+}
+
+// readAudiobookDirectory lists one directory for the walk: the audio files it
+// holds, which it records as seen, and its subdirectories, each filtered by
+// the ignore rules. ok is false when the directory is skipped, already an
+// ancestor, or unreadable; an unreadable directory is recorded as a walk
+// failure. Only a canceled context returns an error.
+//
+// When onlyAdmitted is set, or the ignore files skip the folder or one of its
+// entries, only the admitted file and the folders on its path are kept.
+func readAudiobookDirectory(ctx context.Context, path string, scan *audiobookRootScan, ancestors map[string]bool, ignoreRulesStack []ignoreRules, honorIgnores, onlyAdmitted bool, readDir func(string) ([]os.DirEntry, error)) (dir audiobookDirListing, ok bool, err error) {
+	if err := ctx.Err(); err != nil {
+		return dir, false, err
 	}
 	recordFailure := func(err error) {
 		recordWalkFailure(&scan.walkFailures, path)
 		slog.WarnContext(ctx, "audiobook scan: walk error", "component", "scanner", "path", path, "error", err)
 	}
-	canonical, err := canonicalWalkPath(path)
+	dir.canonical, err = canonicalWalkPath(path)
 	if err != nil {
 		recordFailure(err)
-		return nil
+		return dir, false, nil
 	}
-	if ancestors[canonical] {
-		return nil
+	if ancestors[dir.canonical] {
+		return dir, false, nil
 	}
-	ancestors[canonical] = true
-	defer delete(ancestors, canonical)
 	entries, err := readDirectoryWithRetry(ctx, path, readDir)
 	if err != nil {
 		if ctx.Err() != nil {
-			return ctx.Err()
+			return dir, false, ctx.Err()
 		}
 		recordFailure(err)
-		return nil
+		return dir, false, nil
 	}
-	childRules := ignoreRulesStack
+	dir.childRules = ignoreRulesStack
 	if honorIgnores {
 		var skip bool
-		childRules, skip, err = dirIgnoreRules(ignoreRulesStack, path, path, entries)
+		dir.childRules, skip, err = dirIgnoreRules(ignoreRulesStack, path, path, entries)
 		if err != nil {
 			recordFailure(err)
-			return nil
+			return dir, false, nil
 		}
-		if skip {
-			return nil
+		if skip && !scan.admits(path) {
+			return dir, false, nil
 		}
+		onlyAdmitted = onlyAdmitted || skip
 	}
-	directories := make([]string, 0)
-	hadAudio := false
 	for _, entry := range entries {
 		if err := ctx.Err(); err != nil {
-			return err
+			return dir, false, err
 		}
 		child := filepath.Join(path, entry.Name())
-		if ignoreRulesMatch(childRules, child, entry.IsDir()) {
+		excluded := onlyAdmitted || ignoreRulesMatch(dir.childRules, child, entry.IsDir())
+		if excluded && !scan.admits(child) {
 			continue
 		}
 		isDir := entry.IsDir()
@@ -337,34 +475,29 @@ func walkAudiobookDirectories(ctx context.Context, path string, scan *audiobookR
 			}
 			isDir = info.IsDir()
 			// Directory-only patterns apply once the link resolves to a directory.
-			if isDir && ignoreRulesMatch(childRules, child, true) {
-				continue
+			if isDir && ignoreRulesMatch(dir.childRules, child, true) {
+				if !scan.admits(child) {
+					continue
+				}
+				excluded = true
 			}
 		}
 		if isDir {
-			if SkippedDirName(entry.Name()) {
-				continue
+			if !SkippedDirName(entry.Name()) {
+				dir.directories = append(dir.directories, child)
+				if excluded {
+					if dir.admittedOnly == nil {
+						dir.admittedOnly = make(map[string]bool)
+					}
+					dir.admittedOnly[child] = true
+				}
 			}
-			directories = append(directories, child)
 		} else if SupportsAudioFile(entry.Name()) {
 			scan.seenPaths[child] = true
-			hadAudio = true
+			dir.audio = append(dir.audio, child)
 		}
 	}
-	if hadAudio {
-		scan.candidates = append(scan.candidates, path)
-		// Stop below a book, but loose audio in a library root must not hide
-		// sibling books.
-		if path != scan.root || !scan.walkBelowRootBook {
-			return nil
-		}
-	}
-	for _, directory := range directories {
-		if err := walkAudiobookDirectories(ctx, directory, scan, ancestors, childRules, honorIgnores, readDir); err != nil {
-			return err
-		}
-	}
-	return nil
+	return dir, true, nil
 }
 
 // cleanAudiobookRoot returns root as a walk compares it, or "" for no root.
@@ -376,75 +509,16 @@ func cleanAudiobookRoot(root string) string {
 	return clean
 }
 
-// audiobookScope is a scoped walk root with the ignore rules it starts from,
-// read while resolving it (see audiobookScopeRoot).
-type audiobookScope struct {
-	rules   []ignoreRules
-	ignored bool
-	err     error
-}
-
-// audiobookScopeRoot returns the folder a scoped scan of scope walks, with the
-// ignore rules inherited from above that folder and whether they skip it. A
-// library walk stops at the first folder holding audio below the innermost
-// configured root that contains scope, so a scope inside that folder is lifted
-// to it. Ancestors are read once, outermost first, and the pass stops at that
-// book, so an unreadable folder below it cannot fail the scope. An ancestor
-// the walk does not enter, such as a symlink back to a folder above it, keeps
-// the scope as it is.
-func audiobookScopeRoot(scope string, libraryRoots []string) (string, audiobookScope) {
-	inner := scopeLibraryRoot(scope, libraryRoots)
-	root := scope
-	entered := make(map[string]bool)
-	unreachable := false
-	rules, ignored, err := ancestorIgnoreRules(scope, libraryRoots, fspath.ReadDir, false, func(dir string, rules []ignoreRules, entries []os.DirEntry) bool {
-		if unreachable || inner == "" || !pathWithinAnyRoot(dir, []string{inner}) {
-			return false
-		}
-		canonical, err := canonicalWalkPath(dir)
-		if err != nil || entered[canonical] {
-			unreachable = true
-			return false
-		}
-		entered[canonical] = true
-		if dir == inner || !audiobookDirHoldsAudio(dir, rules, entries) {
-			return false
-		}
-		root = dir
-		return true
-	})
-	return root, audiobookScope{rules: rules, ignored: ignored, err: err}
-}
-
-// audiobookDirHoldsAudio reports whether a walk of dir would count one of its
-// entries as audio, so dir is a book.
-func audiobookDirHoldsAudio(dir string, rules []ignoreRules, entries []os.DirEntry) bool {
-	for _, entry := range entries {
-		if entry.IsDir() || !SupportsAudioFile(entry.Name()) {
-			continue
-		}
-		child := filepath.Join(dir, entry.Name())
-		if ignoreRulesMatch(rules, child, false) {
-			continue
-		}
-		if entry.Type()&os.ModeSymlink != 0 {
-			if info, err := fspath.Stat(child); err != nil || info.IsDir() {
-				continue
-			}
-		}
-		return true
-	}
-	return false
-}
-
 // collectAudiobookRootScans walks each root, plus every configured library root
-// inside one, since a library scan walks every configured root. Only a
-// configured root keeps discovery going below its own loose audio; any other
-// walk root holding audio is a book, as a library scan finds it, and a root
-// inside such a book walks the book instead (audiobookScopeRoot). A walk that
-// reads no ignore files also keeps going below its root: it cannot tell whether
-// a library scan would skip that audio and descend.
-func collectAudiobookRootScans(ctx context.Context, folderID int, roots, libraryRoots []string, honorIgnores bool) ([]audiobookRootScan, error) {
+// inside one, since a library scan walks every configured root. A scoped root
+// is first widened to the folder a library scan would classify it in
+// (audiobookScopeRoot). Each walk classifies folders as
+// walkAudiobookDirectories describes, knowing which folders are configured
+// library roots.
+//
+// admit is a file an admin asked to scan by its exact path: the walks keep it
+// past the ignore files that exclude it, and nothing else they exclude.
+func collectAudiobookRootScans(ctx context.Context, folderID int, roots, libraryRoots []string, honorIgnores bool, admit string) ([]audiobookRootScan, error) {
 	var configured []string
 	for _, root := range libraryRoots {
 		if cleanRoot := cleanAudiobookRoot(root); cleanRoot != "" {
@@ -453,6 +527,10 @@ func collectAudiobookRootScans(ctx context.Context, folderID int, roots, library
 	}
 	walkRoots := make([]string, 0, len(roots))
 	scopes := make(map[string]audiobookScope)
+	libraryRootSet := make(map[string]bool, len(configured))
+	for _, root := range configured {
+		libraryRootSet[root] = true
+	}
 	for _, root := range roots {
 		cleanRoot := cleanAudiobookRoot(root)
 		if cleanRoot == "" {
@@ -481,9 +559,10 @@ func collectAudiobookRootScans(ctx context.Context, folderID int, roots, library
 		}
 		walked[cleanRoot] = true
 		scan := audiobookRootScan{
-			root:              cleanRoot,
-			walkBelowRootBook: !honorIgnores || slices.Contains(configured, cleanRoot),
-			seenPaths:         make(map[string]bool),
+			root:         cleanRoot,
+			libraryRoots: libraryRootSet,
+			seenPaths:    make(map[string]bool),
+			admit:        admit,
 		}
 		info, statErr := fspath.Stat(cleanRoot)
 		switch {
@@ -506,8 +585,9 @@ func collectAudiobookRootScans(ctx context.Context, folderID int, roots, library
 				rules, ignored, scan.rootErr = scanRootIgnoreRules(cleanRoot, libraryRoots)
 			}
 		}
-		if scan.rootErr == nil && !ignored {
-			walkErr := walkAudiobookDirectories(ctx, cleanRoot, &scan, make(map[string]bool), rules, honorIgnores, fspath.ReadDir)
+		// An excluded scope is still entered toward the admitted file.
+		if scan.rootErr == nil && (!ignored || scan.admits(cleanRoot)) {
+			walkErr := walkAudiobookDirectories(ctx, cleanRoot, &scan, make(map[string]bool), rules, honorIgnores, ignored, fspath.ReadDir)
 			if walkErr != nil {
 				if errors.Is(walkErr, context.Canceled) || errors.Is(walkErr, context.DeadlineExceeded) {
 					return nil, walkErr
@@ -619,14 +699,11 @@ func (s *Scanner) reconcileAudiobookAliases(ctx context.Context, folder *models.
 }
 
 // ScanAudiobookFolder walks an audiobooks-typed media folder and writes
-// one media_items row per subdirectory it can parse as an audiobook,
-// plus the corresponding media_files rows and author/narrator links in
-// item_people.
+// one media_items row per book it can parse, plus the corresponding
+// media_files rows and author/narrator links in item_people.
 //
-// Directories containing audio are treated as books; discovery follows directory
-// symlinks and stops below each book so its parts remain one candidate. A
-// library root containing loose audio is also a candidate without hiding
-// sibling books.
+// walkAudiobookDirectories decides which folders and loose files are books;
+// discovery follows directory symlinks.
 //
 // This bypasses the per-file movie/TV pipeline because audiobooks are
 // inherently folder-scoped (one book = one item, possibly multi-file).
@@ -634,10 +711,10 @@ func (s *Scanner) ScanAudiobookFolder(ctx context.Context, folder *models.MediaF
 	if folder == nil {
 		return fmt.Errorf("ScanAudiobookFolder: nil folder")
 	}
-	return s.scanAudiobookPaths(ctx, folder, folder.Paths, fullScan, true)
+	return s.scanAudiobookPaths(ctx, folder, folder.Paths, fullScan, true, "")
 }
 
-func (s *Scanner) scanAudiobookPaths(ctx context.Context, folder *models.MediaFolder, roots []string, fullScan, honorIgnores bool) error {
+func (s *Scanner) scanAudiobookPaths(ctx context.Context, folder *models.MediaFolder, roots []string, fullScan, honorIgnores bool, admit string) error {
 	if s == nil || folder == nil {
 		return fmt.Errorf("ScanAudiobookFolder: nil scanner or folder")
 	}
@@ -660,7 +737,7 @@ func (s *Scanner) scanAudiobookPaths(ctx context.Context, folder *models.MediaFo
 	// Phase 1: walk the tree to collect candidate book folders. This is
 	// I/O-light (no ffprobe), and avoids holding the worker pool open
 	// for the duration of a 240k-folder scan.
-	scans, err := collectAudiobookRootScans(ctx, folder.ID, roots, folder.Paths, honorIgnores)
+	scans, err := collectAudiobookRootScans(ctx, folder.ID, roots, folder.Paths, honorIgnores, admit)
 	if err != nil {
 		return err
 	}
@@ -700,9 +777,30 @@ func (s *Scanner) scanAudiobookPaths(ctx context.Context, folder *models.MediaFo
 		return nil
 	}
 
-	// Phase 2: reconcile in parallel. ffprobe dominates per-book wall time
-	// (hundreds of ms each), so single-threaded scans of a large library
-	// take days. Worker pool brings this to ~hours.
+	if err := s.reconcileAudiobookCandidates(ctx, folder, candidates, seenPaths, inventoryAt); err != nil {
+		return err
+	}
+
+	// Reconcile files that vanished from disk now that the full walk's
+	// seenPaths is known and the scan completed without cancellation.
+	if err := s.reconcileAudiobookMissingFiles(ctx, folder, reconcileRoots, inventoryAt, seenPaths, protectedPaths, fullScan); err != nil {
+		slog.WarnContext(ctx, "audiobook scan: missing-file reconcile failed", "component", "scanner", "folder_id", folder.ID, "error", err)
+	}
+	if walkFailures > 0 {
+		return s.setPartialWalkWarning(ctx, folder.ID, walkFailures, true)
+	}
+	if fullScan {
+		return s.clearPartialWalkWarning(ctx, folder.ID, warning)
+	}
+	return nil
+}
+
+// reconcileAudiobookCandidates rebuilds or skips each discovered book in
+// parallel. ffprobe dominates per-book wall time (hundreds of ms each), so
+// single-threaded scans of a large library take days; the worker pool brings
+// this to hours. It fails when the scan is canceled, or when every attempted
+// book failed.
+func (s *Scanner) reconcileAudiobookCandidates(ctx context.Context, folder *models.MediaFolder, candidates [][]string, seenPaths map[string]bool, inventoryAt time.Time) error {
 	workers := audiobookScanWorkers()
 	slog.InfoContext(ctx, "audiobook scan: starting", "component", "scanner",
 		"folder_id", folder.ID,
@@ -800,17 +898,6 @@ func (s *Scanner) scanAudiobookPaths(ctx context.Context, folder *models.MediaFo
 		}
 	}
 
-	// Reconcile files that vanished from disk now that the full walk's
-	// seenPaths is known and the scan completed without cancellation.
-	if err := s.reconcileAudiobookMissingFiles(ctx, folder, reconcileRoots, inventoryAt, seenPaths, protectedPaths, fullScan); err != nil {
-		slog.WarnContext(ctx, "audiobook scan: missing-file reconcile failed", "component", "scanner", "folder_id", folder.ID, "error", err)
-	}
-	if walkFailures > 0 {
-		return s.setPartialWalkWarning(ctx, folder.ID, walkFailures, true)
-	}
-	if fullScan {
-		return s.clearPartialWalkWarning(ctx, folder.ID, warning)
-	}
 	return nil
 }
 
@@ -978,13 +1065,18 @@ func (s *Scanner) reconcileAudiobookFolder(ctx context.Context, folder *models.M
 	if err := tx.Commit(ctx); err != nil {
 		return fmt.Errorf("commit audiobook folder transaction: %w", err)
 	}
-	if err := applyAudiobookSidecarCover(ctx, s.itemRepo, s.imageCacher, contentID, folderPath); err != nil {
-		slog.WarnContext(ctx, "audiobook scan: sidecar cover upload failed", "component", "scanner",
-			"folder_id", folder.ID,
-			"content_id", contentID,
-			"path", folderPath,
-			"error", err,
-		)
+	// A loose single-file book shares its directory, and so any cover image
+	// there, with other books; only a book folder's cover belongs to the book.
+	rootedAtFile := len(parsed.Files) == 1 && parsed.Files[0].Path == folderPath
+	if !rootedAtFile {
+		if err := applyAudiobookSidecarCover(ctx, s.itemRepo, s.imageCacher, contentID, folderPath); err != nil {
+			slog.WarnContext(ctx, "audiobook scan: sidecar cover upload failed", "component", "scanner",
+				"folder_id", folder.ID,
+				"content_id", contentID,
+				"path", folderPath,
+				"error", err,
+			)
+		}
 	}
 	if len(parsed.Files) > 0 && s.fileRepo != nil {
 		if _, err := applyAudiobookEmbeddedCover(ctx, s.itemRepo, s.fileRepo.Pool(), FFmpegPathFromFFprobe(s.ffprobePath), s.imageCacher, parsed.Files[0].Path, contentID); err != nil {
@@ -1321,9 +1413,14 @@ func (s *Scanner) findAudiobookDuplicate(ctx context.Context, folderID int, book
 	return items[0]
 }
 
-// findAudiobookByFilePath returns an existing audiobook media_items row
-// whose media_files reference any of this book's audio file paths.
+// findAudiobookByFilePath returns an existing audiobook media_items row whose
+// first part is one of this book's audio files, preferring the earliest part.
 // Returns nil when no match exists (a fresh scan of a new folder).
+//
+// Matching only an item's first part lets a regrouped library keep identities
+// without two books claiming one item: when separate disc items merge into one
+// book, the book keeps disc 1's item; when one item made of loose files splits
+// into one book per file, the first file keeps it and the rest get new items.
 func (s *Scanner) findAudiobookByFilePath(ctx context.Context, folderID int, book *parsedAudiobook) *models.MediaItem {
 	if s.fileRepo == nil || len(book.Files) == 0 {
 		return nil
@@ -1332,17 +1429,39 @@ func (s *Scanner) findAudiobookByFilePath(ctx context.Context, folderID int, boo
 	if len(paths) == 0 {
 		return nil
 	}
-	var existingID string
-	err := s.fileRepo.Pool().QueryRow(ctx, `
-		SELECT mf.content_id
-		FROM media_files mf
+	// A file matches its own row exactly. When no row has the exact path, a
+	// row whose path differs only in case is the same file under other casing
+	// (a case-insensitive filesystem, or a case-only rename) only if both
+	// paths reach one file or the row's path is gone; on a case-sensitive
+	// filesystem "A.mp3" and "a.mp3" are two files and must not claim one item.
+	rows, err := s.fileRepo.Pool().Query(ctx, `
+		SELECT mf.content_id, mf.file_path, p.path
+		FROM unnest($1::text[]) WITH ORDINALITY AS p(path, ord)
+		JOIN media_files mf ON mf.media_folder_id = $2 AND (
+			mf.file_path = p.path
+			OR (lower(mf.file_path) = lower(p.path) AND NOT EXISTS (
+				SELECT 1 FROM media_files e WHERE e.media_folder_id = $2 AND e.file_path = p.path)))
 		JOIN media_items mi ON mi.content_id = mf.content_id
-		WHERE mf.media_folder_id = $2
-		  AND (mf.file_path = ANY($1) OR LOWER(mf.file_path) = ANY($1))
-		  AND mi.type = 'audiobook'
-		LIMIT 1
-	`, paths, folderID).Scan(&existingID)
-	if err != nil || existingID == "" {
+		WHERE mi.type = 'audiobook'
+		  AND COALESCE(mf.presentation_part_index, 0) <= 1
+		ORDER BY p.ord, mf.id
+	`, paths, folderID)
+	if err != nil {
+		return nil
+	}
+	var existingID string
+	for rows.Next() {
+		var id, rowPath, bookPath string
+		if rows.Scan(&id, &rowPath, &bookPath) != nil {
+			break
+		}
+		if rowPath == bookPath || sameAudiobookFileOrGone(bookPath, rowPath) {
+			existingID = id
+			break
+		}
+	}
+	rows.Close()
+	if rows.Err() != nil || existingID == "" {
 		return nil
 	}
 	items, err := s.itemRepo.GetByIDs(ctx, []string{existingID})
@@ -1352,23 +1471,26 @@ func (s *Scanner) findAudiobookByFilePath(ctx context.Context, folderID int, boo
 	return items[0]
 }
 
+// sameAudiobookFileOrGone reports whether indexed, a path differing from the
+// book's file path only in case, still names that file: both reach the same
+// file on disk, or indexed no longer exists.
+func sameAudiobookFileOrGone(file, indexed string) bool {
+	indexedInfo, err := fspath.Stat(indexed)
+	if errors.Is(err, os.ErrNotExist) {
+		return true
+	}
+	if err != nil {
+		return false
+	}
+	fileInfo, err := fspath.Stat(file)
+	return err == nil && fspath.SameFile(fileInfo, indexedInfo)
+}
+
 func audiobookLookupPaths(files []parsedAudiobookFile) []string {
-	seen := make(map[string]struct{}, len(files)*2)
-	paths := make([]string, 0, len(files)*2)
+	paths := make([]string, 0, len(files))
 	for _, f := range files {
-		path := strings.TrimSpace(f.Path)
-		if path == "" {
-			continue
-		}
-		for _, candidate := range []string{path, strings.ToLower(path)} {
-			if candidate == "" {
-				continue
-			}
-			if _, ok := seen[candidate]; ok {
-				continue
-			}
-			seen[candidate] = struct{}{}
-			paths = append(paths, candidate)
+		if path := strings.TrimSpace(f.Path); path != "" && !slices.Contains(paths, path) {
+			paths = append(paths, path)
 		}
 	}
 	return paths

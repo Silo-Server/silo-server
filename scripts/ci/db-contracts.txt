@@ -176,9 +176,9 @@
 # Two copies of one recording on disk are two items; only a moved folder reuses one.
 ./internal/scanner TestScanAudiobookSecondCopyIsItsOwnItemDB
 
-# A subtree scan inside a book folder rebuilds that book and marks missing the
-# files of a subfolder an earlier scoped scan imported as a book of its own.
-./internal/scanner TestScanSubtreeAudiobookInsideBookRetiresSubfolderBookDB
+# Subtree scans of a book folder and of the folder above it keep the book's
+# item, and the folder's own audio becomes a book beside it.
+./internal/scanner TestScanSubtreeAudiobookKeepsSubfolderBookBesideFolderBookDB
 
 # Two audiobook scans of one book at once: a scan that walked the book before
 # another scan indexed a part neither marks that part missing nor rewrites the
@@ -1034,6 +1034,8 @@
 # An audiobook rescan keeps the authors and narrators an admin locked with the
 # crew lock.
 ./internal/scanner TestAudiobookRescanKeepsCrewLockedCreditsDB
+./internal/scanner TestAudiobookRegroupKeepsContentIDsDB
+./internal/scanner TestAudiobookUnreadableDiscKeepsIndexedBookDB
 
 # A provider match owns an audiobook's year, genres and credits: a rescan only
 # fills what is empty, and the match keeps the tag narrator and the book's own
