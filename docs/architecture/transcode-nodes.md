@@ -640,8 +640,9 @@ path the core approves for it, never a path the job request names.
 | `412` | The file's size or modification time differs from the grant's revision. |
 | `503` | Transient: no grant key, the catalog cannot be read, or the file could not be examined (an I/O error, a stale mount). |
 
-Each open and renewal reads the catalog once and stats the file once, so the
-catalog check is never more than one renewal interval stale.
+Each open and renewal reads the catalog once and stats the file once. A node
+that keeps renewing has a check at most one renewal interval old; a grant it
+already holds stays valid until it expires, at most one grant lifetime later.
 
 On the node, `nodesource.Opener` exchanges the grant through
 `nodecontrol.Client.OpenSource`. With local source access it stats the approved
@@ -695,7 +696,10 @@ the way never record it.
 
 1. The grant must verify, be unexpired, be younger than `MaxGrantAge` and name
    the calling node (`403`). There is no catalog query: the catalog is checked
-   at open and at every renewal, so it is at most one renewal interval stale.
+   at open and at every renewal, so the check behind a request is at most one
+   grant lifetime old. A response already being sent keeps reading the
+   descriptor it opened until it ends; a source withdrawn from the catalog
+   stops new reads, not one in flight.
 2. The core opens the granted path through `internal/fspath` without blocking
    on a FIFO, `fstat`s the descriptor, and compares the size and the
    modification time at microseconds with the grant: `410` when gone or not a
