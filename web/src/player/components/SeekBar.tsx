@@ -3,7 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { MarkerKind, MarkerRegionView, PlayerChapter } from "../types";
 import { trickplayTile, type PlayerTrickplay } from "../trickplay";
 import { formatTime } from "../utils/formatTime";
-import { MARKER_LABEL_KEYS } from "../hooks/useMarkerEditor";
+import { MARKER_DOT_COLORS, MARKER_LABEL_KEYS } from "../hooks/useMarkerEditor";
 import { useT, type Translate } from "@/i18n";
 
 interface SeekBarProps {
@@ -48,29 +48,31 @@ const NO_SHEET_STATE: SheetState = { source: null, loaded: NO_SHEETS, failed: NO
 /**
  * Region tint in normal playback: one colour per kind, so intro, recap, credits
  * and preview can be told apart at a glance. The hover preview names the
- * region with the same colour as its dot.
+ * region with the same colour as its dot (`MARKER_DOT_COLORS`), at 45%
+ * opacity.
  */
 const REGION_COLORS: Record<MarkerKind, string> = {
-  intro: "bg-sky-300/45",
-  recap: "bg-violet-300/45",
-  credits: "bg-rose-300/45",
-  preview: "bg-emerald-300/45",
+  intro: "bg-blue-400/45",
+  recap: "bg-orange-400/45",
+  credits: "bg-purple-400/45",
+  preview: "bg-cyan-400/45",
 };
 
 /** Brighter tint used while editing so regions stand out against the track. */
 const REGION_COLORS_EDIT: Record<MarkerKind, string> = {
-  intro: "bg-sky-300/75",
-  recap: "bg-violet-300/75",
-  credits: "bg-rose-300/75",
-  preview: "bg-emerald-300/75",
+  intro: "bg-blue-400/75",
+  recap: "bg-orange-400/75",
+  credits: "bg-purple-400/75",
+  preview: "bg-cyan-400/75",
 };
 
-const REGION_DOT_COLORS: Record<MarkerKind, string> = {
-  intro: "bg-sky-300",
-  recap: "bg-violet-300",
-  credits: "bg-rose-300",
-  preview: "bg-emerald-300",
-};
+/**
+ * Where a marker time sits on the track, in percent. Stored ranges can run past
+ * the probed duration, so bands and their edit handles stay on the track.
+ */
+function trackPercent(seconds: number, duration: number): number {
+  return Math.max(0, Math.min(100, (seconds / duration) * 100));
+}
 
 function markerLabel(t: Translate, kind: MarkerKind): string {
   return t(MARKER_LABEL_KEYS[kind]);
@@ -446,7 +448,7 @@ export function SeekBar({
                 <div className="mb-1 flex items-center gap-1.5 text-xs leading-tight font-semibold">
                   <span
                     aria-hidden="true"
-                    className={["h-2 w-2 rounded-full", REGION_DOT_COLORS[hoverRegion.kind]].join(
+                    className={["h-2 w-2 rounded-full", MARKER_DOT_COLORS[hoverRegion.kind]].join(
                       " ",
                     )}
                   />
@@ -537,6 +539,9 @@ export function SeekBar({
                 active segment is a touch taller and gets a ring. */}
             {duration > 0 &&
               regions.map((region) => {
+                const startPercent = trackPercent(region.start, duration);
+                const endPercent = trackPercent(region.end, duration);
+                if (endPercent <= startPercent) return null;
                 const isActive = editing && region.kind === activeEditKind;
                 const isHovered = hoverRegion === region && !dragging && edgeDrag === null;
                 return (
@@ -550,8 +555,8 @@ export function SeekBar({
                       isActive || isHovered ? "z-[2] ring-1 ring-white/80" : "z-[1]",
                     ].join(" ")}
                     style={{
-                      left: `${(region.start / duration) * 100}%`,
-                      width: `${((region.end - region.start) / duration) * 100}%`,
+                      left: `${startPercent}%`,
+                      width: `${endPercent - startPercent}%`,
                     }}
                   />
                 );
@@ -581,12 +586,15 @@ export function SeekBar({
           {activeRegion && duration > 0 && (
             <>
               <MarkerHandle
-                percent={(activeRegion.start / duration) * 100}
+                percent={trackPercent(activeRegion.start, duration)}
+                // A range stored wholly past the duration clamps both handles to
+                // the track end; keep the start on top so it can be dragged back.
+                raised={activeRegion.start >= duration}
                 label={t("web.player.seekBar.dragMarkerStart")}
                 onPointerDown={handleEdgePointerDown(activeRegion.kind, "start")}
               />
               <MarkerHandle
-                percent={(activeRegion.end / duration) * 100}
+                percent={trackPercent(activeRegion.end, duration)}
                 label={t("web.player.seekBar.dragMarkerEnd")}
                 onPointerDown={handleEdgePointerDown(activeRegion.kind, "end")}
               />
@@ -600,10 +608,12 @@ export function SeekBar({
 
 function MarkerHandle({
   percent,
+  raised = false,
   label,
   onPointerDown,
 }: {
   percent: number;
+  raised?: boolean;
   label: string;
   onPointerDown: (e: React.PointerEvent) => void;
 }) {
@@ -612,7 +622,7 @@ function MarkerHandle({
       aria-label={label}
       onPointerDown={onPointerDown}
       onMouseDown={(e) => e.stopPropagation()}
-      className="absolute top-1/2 z-[2] flex h-5 w-5 -translate-x-1/2 -translate-y-1/2 cursor-ew-resize touch-none items-center justify-center"
+      className={`absolute top-1/2 ${raised ? "z-[3]" : "z-[2]"} flex h-5 w-5 -translate-x-1/2 -translate-y-1/2 cursor-ew-resize touch-none items-center justify-center`}
       style={{ left: `${percent}%` }}
     >
       <span className="h-4 w-1.5 rounded-full bg-white shadow-[0_2px_8px_rgb(0_0_0/0.55)] ring-1 ring-black/20" />
