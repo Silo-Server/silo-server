@@ -73,7 +73,17 @@ write are in `internal/scanner/audiobook_tags.go`:
   The prefix, followed by `-` or `:`, is the book's series tag with an
   optional position; a book without a series tag accepts any text ending in a
   number. A "subtitle" that names the series or ends in a position is not
-  one. Otherwise `title` stays, because a single file's `album` may name its
+  one. Behind a series tag's prefix the tags may agree less exactly. `album`
+  also wins when it differs from the rest of `title` only in punctuation,
+  when `title` repeats the series or `album` after it
+  (`Saga Name 2 - Book Title Saga Name`), or when it adds a subtitle. When
+  `album` instead goes on to name the series or a position
+  (`Book Title: Saga Name 2`, `Book Title, Part 2`), `title` without its
+  prefix wins. A numbered prefix that names the series among other words
+  (`The Saga Name 2`) counts when `album` follows it. A prefix carrying the
+  series position tag's number, in digits or as a Roman numeral, was composed
+  from the two tags, so `title` without it wins whatever `album` says, and
+  when there is no `album`. Otherwise `title` stays, because a single file's `album` may name its
   series or a collection. A multi-file book whose part titles name the parts
   uses `album`.
 - Narrators: an explicit narrator tag (`narrator`, the MP4 `©nrt` atom, or
@@ -188,6 +198,15 @@ own limiter allows rather than one batch per scheduled run. It stops when:
 A batch that still matched books while one provider was paused goes on; the
 gate keeps calls away from the paused provider. Books a pause deferred come
 due when the pause ends and the next scheduled run takes them.
+
+The gate (`internal/audiobooks/enrichment_gate.go`) pauses a provider that
+answers rate limited, for every call. It counts outages separately for the
+provider's two routes, search and metadata: three transient failures in a row
+on one route pause that route, for 15 minutes at first and twice as long each
+time it is still failing. A paused search leaves lookups by a tagged ASIN
+running, so those books keep matching while a book that needs the search is
+deferred. A paused metadata route stops searches too, since a search result
+could not be fetched.
 
 The sweep never claims a book whose match an admin ignored
 (`match_ignored_at`).

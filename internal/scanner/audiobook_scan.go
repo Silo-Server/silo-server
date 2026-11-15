@@ -1656,7 +1656,11 @@ func applyBookToMediaItem(item *models.MediaItem, book *parsedAudiobook, provide
 		if cleaned != raw && item.OriginalTitle == "" {
 			item.OriginalTitle = raw
 		}
-		if item.SortTitle == "" {
+		// The default sort title follows the title: one derived from an
+		// earlier title is derived again, so a book whose title changes does
+		// not keep sorting under its old name. Any other sort title is
+		// someone's own and stays.
+		if item.SortTitle == "" || titleutil.IsDefaultSortTitle(item.SortTitle) {
 			item.SortTitle = titleutil.DeriveDefaultSortTitle(item.Title)
 		}
 	}
@@ -1682,31 +1686,26 @@ func applyBookToMediaItem(item *models.MediaItem, book *parsedAudiobook, provide
 }
 
 // normalizeReleaseDateForSQL coerces tag-derived date strings into the
-// ISO YYYY-MM-DD shape media_items.release_date expects. Year-only
-// tags ("2018") become "2018-01-01"; ISO already-correct values pass
-// through; everything else returns "" (skip the column).
+// ISO YYYY-MM-DD shape media_items.release_date expects. A real calendar
+// date passes through. A year alone ("2018"), or a year followed by a month
+// or day that is not one ("2015-00-00", which some taggers write for an
+// unknown date), becomes January 1 of that year. Everything else returns ""
+// (skip the column): a date Postgres rejects would fail the whole book.
 func normalizeReleaseDateForSQL(s string) string {
 	s = strings.TrimSpace(s)
-	if s == "" {
+	if len(s) < 4 {
 		return ""
 	}
-	if len(s) >= 10 && s[4] == '-' && s[7] == '-' {
-		return s[:10]
+	year := s[:4]
+	if strings.Trim(year, "0123456789") != "" || year == "0000" {
+		return ""
 	}
-	if len(s) >= 4 {
-		y := s[:4]
-		ok := true
-		for _, c := range y {
-			if c < '0' || c > '9' {
-				ok = false
-				break
-			}
-		}
-		if ok {
-			return y + "-01-01"
+	if len(s) >= 10 {
+		if _, err := time.Parse(time.DateOnly, s[:10]); err == nil {
+			return s[:10]
 		}
 	}
-	return ""
+	return year + "-01-01"
 }
 
 func mergeUniqueStrings(existing, additions []string) []string {

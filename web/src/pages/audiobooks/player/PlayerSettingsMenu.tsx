@@ -5,10 +5,13 @@ import type { AudiobookPrefs } from "./useAudiobookPrefs";
 
 interface PlayerSettingsMenuProps {
   prefs: AudiobookPrefs;
+  /** Which side of the trigger the panel opens on. The bottom-anchored mini
+   * bar opens it above; a trigger near the top of the screen needs below. */
+  placement?: "above" | "below";
 }
 
 /** Skip-interval and smart-rewind preferences, anchored to the player bar. */
-export function PlayerSettingsMenu({ prefs }: PlayerSettingsMenuProps) {
+export function PlayerSettingsMenu({ prefs, placement = "above" }: PlayerSettingsMenuProps) {
   const t = useT();
   const [open, setOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -55,7 +58,9 @@ export function PlayerSettingsMenu({ prefs }: PlayerSettingsMenuProps) {
         <div
           role="dialog"
           aria-label={t("web.audiobooks.player.settings")}
-          className="absolute end-0 bottom-full mb-2 flex w-[260px] flex-col gap-4 rounded-lg bg-black/90 px-4 py-3.5 shadow-xl backdrop-blur-sm"
+          // Below a top header the panel can't scroll into view with the page, so
+          // it stays within the viewport and scrolls itself on short screens.
+          className={`absolute end-0 ${placement === "below" ? "top-full mt-2 max-h-[calc(100dvh-5rem)] overflow-y-auto" : "bottom-full mb-2"} flex w-[260px] flex-col gap-4 rounded-lg bg-black/90 px-4 py-3.5 shadow-xl backdrop-blur-sm`}
         >
           <SkipIntervalRow
             label={t("web.audiobooks.player.settingsSkipBack")}

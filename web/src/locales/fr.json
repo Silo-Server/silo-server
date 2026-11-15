@@ -6632,6 +6632,44 @@
       "value": "version"
     }
   ],
+  "web.admin.activity.bitrate.limit": [
+    {
+      "type": 0,
+      "value": "limite "
+    },
+    {
+      "type": 1,
+      "value": "rate"
+    }
+  ],
+  "web.admin.activity.bitrate.limitAndSource": [
+    {
+      "type": 0,
+      "value": "limite "
+    },
+    {
+      "type": 1,
+      "value": "limit"
+    },
+    {
+      "type": 0,
+      "value": " · source "
+    },
+    {
+      "type": 1,
+      "value": "source"
+    }
+  ],
+  "web.admin.activity.bitrate.source": [
+    {
+      "type": 0,
+      "value": "source "
+    },
+    {
+      "type": 1,
+      "value": "rate"
+    }
+  ],
   "web.admin.activity.client.agent": [
     {
       "type": 0,
@@ -6642,6 +6680,12 @@
     {
       "type": 0,
       "value": "Application"
+    }
+  ],
+  "web.admin.activity.client.device": [
+    {
+      "type": 0,
+      "value": "Appareil"
     }
   ],
   "web.admin.activity.client.heading": [
@@ -6660,6 +6704,12 @@
     {
       "type": 0,
       "value": "Actions"
+    }
+  ],
+  "web.admin.activity.column.bitrate": [
+    {
+      "type": 0,
+      "value": "Débit"
     }
   ],
   "web.admin.activity.column.playback": [
@@ -7212,12 +7262,6 @@
       "value": "événement"
     }
   ],
-  "web.admin.activity.panel.heading": [
-    {
-      "type": 0,
-      "value": "Lecture"
-    }
-  ],
   "web.admin.activity.panel.loadingFfmpeg": [
     {
       "type": 0,
@@ -7702,6 +7746,72 @@
     {
       "type": 0,
       "value": "Voir les journaux"
+    }
+  ],
+  "web.admin.activity.session.heading": [
+    {
+      "type": 0,
+      "value": "Session"
+    }
+  ],
+  "web.admin.activity.session.id": [
+    {
+      "type": 0,
+      "value": "ID de session"
+    }
+  ],
+  "web.admin.activity.session.lastReport": [
+    {
+      "type": 0,
+      "value": "Dernier rapport"
+    }
+  ],
+  "web.admin.activity.session.lastReportAgo": [
+    {
+      "type": 0,
+      "value": "il y a "
+    },
+    {
+      "type": 1,
+      "value": "elapsed"
+    }
+  ],
+  "web.admin.activity.session.remoteControl": [
+    {
+      "type": 0,
+      "value": "Contrôle à distance"
+    }
+  ],
+  "web.admin.activity.session.remoteControlAvailable": [
+    {
+      "type": 0,
+      "value": "Disponible"
+    }
+  ],
+  "web.admin.activity.session.remoteControlUnavailable": [
+    {
+      "type": 0,
+      "value": "Non disponible"
+    }
+  ],
+  "web.admin.activity.session.started": [
+    {
+      "type": 0,
+      "value": "Début"
+    }
+  ],
+  "web.admin.activity.session.startedAgo": [
+    {
+      "type": 1,
+      "value": "time"
+    },
+    {
+      "type": 0,
+      "value": " · il y a "
+    },
+    {
+      "type": 1,
+      "value": "elapsed"
     }
   ],
   "web.admin.activity.sort.group": [
@@ -53815,6 +53925,30 @@
       "value": "Enregistrement…"
     }
   ],
+  "web.admin.nodes.form.sourceAccess": [
+    {
+      "type": 0,
+      "value": "Accès aux sources"
+    }
+  ],
+  "web.admin.nodes.form.sourceAccessCore": [
+    {
+      "type": 0,
+      "value": "Via les serveurs API"
+    }
+  ],
+  "web.admin.nodes.form.sourceAccessHelp": [
+    {
+      "type": 0,
+      "value": "Via les serveurs API, le nœud n’a besoin d’aucun montage de bibliothèque, mais chaque octet qu’il lit passe par les serveurs API, qui doivent donc disposer de la bande passante nécessaire."
+    }
+  ],
+  "web.admin.nodes.form.sourceAccessLocal": [
+    {
+      "type": 0,
+      "value": "Montage de bibliothèque sur le nœud"
+    }
+  ],
   "web.admin.nodes.form.type": [
     {
       "type": 0,
@@ -54447,6 +54581,200 @@
     {
       "type": 0,
       "value": "Logiciel"
+    }
+  ],
+  "web.admin.nodes.key.close": [
+    {
+      "type": 0,
+      "value": "Fermer"
+    }
+  ],
+  "web.admin.nodes.key.copied": [
+    {
+      "type": 0,
+      "value": "Copié"
+    }
+  ],
+  "web.admin.nodes.key.copyFailed": [
+    {
+      "type": 0,
+      "value": "Impossible de copier. Sélectionnez le texte et copiez-le manuellement."
+    }
+  ],
+  "web.admin.nodes.key.copyKey": [
+    {
+      "type": 0,
+      "value": "Copier la clé"
+    }
+  ],
+  "web.admin.nodes.key.copySettings": [
+    {
+      "type": 0,
+      "value": "Copier les paramètres"
+    }
+  ],
+  "web.admin.nodes.key.coreUrlHelp": [
+    {
+      "type": 0,
+      "value": "L’adresse que le nœud appelle pour joindre ce serveur. Avec plusieurs serveurs API, utilisez leur adresse à charge équilibrée."
+    }
+  ],
+  "web.admin.nodes.key.coreUrlLabel": [
+    {
+      "type": 0,
+      "value": "Adresse du serveur pour le nœud"
+    }
+  ],
+  "web.admin.nodes.key.coreUrlMissing": [
+    {
+      "type": 0,
+      "value": "Saisissez l’adresse du serveur pour compléter les paramètres."
+    }
+  ],
+  "web.admin.nodes.key.dialogTitle": [
+    {
+      "type": 0,
+      "value": "Clé pour "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    }
+  ],
+  "web.admin.nodes.key.issue": [
+    {
+      "type": 0,
+      "value": "Générer une clé"
+    }
+  ],
+  "web.admin.nodes.key.issueFor": [
+    {
+      "type": 0,
+      "value": "Générer une clé pour "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    }
+  ],
+  "web.admin.nodes.key.issued": [
+    {
+      "type": 0,
+      "value": "Clé générée"
+    }
+  ],
+  "web.admin.nodes.key.issuing": [
+    {
+      "type": 0,
+      "value": "Génération d’une clé…"
+    }
+  ],
+  "web.admin.nodes.key.keyLabel": [
+    {
+      "type": 0,
+      "value": "Clé du nœud"
+    }
+  ],
+  "web.admin.nodes.key.later": [
+    {
+      "type": 0,
+      "value": "Pas maintenant"
+    }
+  ],
+  "web.admin.nodes.key.missing": [
+    {
+      "type": 0,
+      "value": "Aucune clé : ce nœud n’accepte aucun travail tant qu’une clé n’est pas générée"
+    }
+  ],
+  "web.admin.nodes.key.notShownAgain": [
+    {
+      "type": 0,
+      "value": "Copiez la clé maintenant. Elle ne sera plus affichée ; si vous la perdez, renouvelez la clé et redémarrez le nœud avec la nouvelle."
+    }
+  ],
+  "web.admin.nodes.key.offer": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " n’accepte aucun travail tant qu’il n’a pas de clé. Générez-en une maintenant pour obtenir les paramètres de démarrage du nœud."
+    }
+  ],
+  "web.admin.nodes.key.rotate": [
+    {
+      "type": 0,
+      "value": "Renouveler la clé"
+    }
+  ],
+  "web.admin.nodes.key.rotateDescription": [
+    {
+      "type": 0,
+      "value": "La clé actuelle cesse immédiatement de fonctionner. Le nœud perd sa connexion à ce serveur : ses flux en cours échouent, et il n’accepte aucun travail tant que vous ne l’avez pas redémarré avec la nouvelle clé."
+    }
+  ],
+  "web.admin.nodes.key.rotateDrainHint": [
+    {
+      "type": 0,
+      "value": "Pour éviter de couper des flux, videz d’abord le nœud et renouvelez la clé lorsqu’il affiche Vidé."
+    }
+  ],
+  "web.admin.nodes.key.rotateFor": [
+    {
+      "type": 0,
+      "value": "Renouveler la clé de "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    }
+  ],
+  "web.admin.nodes.key.rotateTitle": [
+    {
+      "type": 0,
+      "value": "Renouveler la clé de "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " ?"
+    }
+  ],
+  "web.admin.nodes.key.saved": [
+    {
+      "type": 0,
+      "value": "J’ai enregistré la clé"
+    }
+  ],
+  "web.admin.nodes.key.settingsHelp": [
+    {
+      "type": 0,
+      "value": "Démarrez le nœud avec ces deux paramètres. Un nœud déjà en cours d’exécution conserve son ancienne clé jusqu’à ce que vous le redémarriez."
+    }
+  ],
+  "web.admin.nodes.key.settingsLabel": [
+    {
+      "type": 0,
+      "value": "Paramètres du nœud"
+    }
+  ],
+  "web.admin.nodes.key.unconfirmed": [
+    {
+      "type": 0,
+      "value": "Impossible de confirmer une nouvelle clé pour "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": ". Actualisez la page avant de réessayer : si une clé a été générée, la précédente a déjà cessé de fonctionner."
     }
   ],
   "web.admin.nodes.memory.noReading": [
@@ -91544,20 +91872,6 @@
       "value": "number"
     }
   ],
-  "web.audiobooks.chapters.count": [
-    {
-      "type": 0,
-      "value": "("
-    },
-    {
-      "type": 1,
-      "value": "count"
-    },
-    {
-      "type": 0,
-      "value": ")"
-    }
-  ],
   "web.audiobooks.chapters.duration": [
     {
       "type": 1,
@@ -91582,34 +91896,72 @@
       "value": "Chapitres"
     }
   ],
-  "web.audiobooks.chapters.listening": [
+  "web.audiobooks.chapters.leftInChapter": [
     {
       "type": 0,
-      "value": "en écoute"
+      "value": "Il reste "
+    },
+    {
+      "type": 1,
+      "value": "time"
+    },
+    {
+      "type": 0,
+      "value": " dans ce chapitre"
     }
   ],
-  "web.audiobooks.chapters.sort": [
+  "web.audiobooks.chapters.showAll": [
     {
       "type": 0,
-      "value": "Trier"
+      "value": "Afficher les "
+    },
+    {
+      "type": 1,
+      "value": "count"
     }
   ],
-  "web.audiobooks.chapters.sortAria": [
+  "web.audiobooks.chapters.showFewer": [
     {
       "type": 0,
-      "value": "Trier les chapitres"
+      "value": "Afficher moins"
     }
   ],
-  "web.audiobooks.chapters.sortLongest": [
+  "web.audiobooks.detail.finished": [
     {
       "type": 0,
-      "value": "Les plus longs d’abord"
+      "value": "Terminé"
     }
   ],
-  "web.audiobooks.chapters.sortPosition": [
+  "web.audiobooks.detail.length": [
     {
       "type": 0,
-      "value": "Par position"
+      "value": "Durée"
+    }
+  ],
+  "web.audiobooks.detail.publisher": [
+    {
+      "type": 0,
+      "value": "Éditeur"
+    }
+  ],
+  "web.audiobooks.detail.released": [
+    {
+      "type": 0,
+      "value": "Parution"
+    }
+  ],
+  "web.audiobooks.detail.seriesBook": [
+    {
+      "type": 1,
+      "value": "series"
+    },
+    {
+      "type": 0,
+      "value": ", tome "
+    },
+    {
+      "type": 1,
+      "value": "number"
     }
   ],
   "web.audiobooks.duration.hours": [
@@ -92502,6 +92854,12 @@
       "pluralType": "cardinal"
     }
   ],
+  "web.audiobooks.hero.alsoListening": [
+    {
+      "type": 0,
+      "value": "Également en écoute"
+    }
+  ],
   "web.audiobooks.hero.ariaLabel": [
     {
       "type": 0,
@@ -92540,38 +92898,6 @@
       "value": "total"
     }
   ],
-  "web.audiobooks.hero.chapterPositionTitled": [
-    {
-      "type": 0,
-      "value": "Chapitre "
-    },
-    {
-      "type": 1,
-      "value": "index"
-    },
-    {
-      "type": 0,
-      "value": " sur "
-    },
-    {
-      "type": 1,
-      "value": "total"
-    },
-    {
-      "type": 0,
-      "value": " · "
-    },
-    {
-      "type": 1,
-      "value": "chapter"
-    }
-  ],
-  "web.audiobooks.hero.eyebrow": [
-    {
-      "type": 0,
-      "value": "En écoute"
-    }
-  ],
   "web.audiobooks.hero.listen": [
     {
       "type": 0,
@@ -92604,12 +92930,6 @@
     {
       "type": 0,
       "value": "Reprendre"
-    }
-  ],
-  "web.audiobooks.narrator.heading": [
-    {
-      "type": 0,
-      "value": "Narrateur"
     }
   ],
   "web.audiobooks.narrator.narrationCount": [
@@ -92667,20 +92987,16 @@
       "value": "Retour au lecteur"
     }
   ],
-  "web.audiobooks.player.chapterNumber": [
-    {
-      "type": 0,
-      "value": "Chapitre "
-    },
-    {
-      "type": 1,
-      "value": "number"
-    }
-  ],
   "web.audiobooks.player.close": [
     {
       "type": 0,
       "value": "Fermer le lecteur"
+    }
+  ],
+  "web.audiobooks.player.comingUp": [
+    {
+      "type": 0,
+      "value": "À suivre"
     }
   ],
   "web.audiobooks.player.faster": [

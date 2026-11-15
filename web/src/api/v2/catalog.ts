@@ -91,6 +91,7 @@ export function catalogItemFromV2(item: CatalogItemV2): CatalogCardItem {
     sort_metrics: item.sort_metrics,
     badges: item.badges,
     user_state: item.user_state,
+    authors: item.authors,
     upcoming_event: item.upcoming_event
       ? {
           ...item.upcoming_event,

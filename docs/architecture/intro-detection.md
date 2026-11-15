@@ -62,6 +62,19 @@ agreed with TheIntroDB less often than the unrefined start, so
 `chromaprint:dialogue:v4` markers under the same-version rule in
 `markers.CanWriteMarkerUpdate`.
 
+A season comparison that no longer finds an intro for a file withdraws the
+Chromaprint intro an earlier comparison stored for it (any `chromaprint:`
+identifier), as after a stricter matching rule or a change to the season's
+files. `WithdrawMarker` clears it only while the file still holds that
+scanner result, so chapter, version-copy, manual, and online intros stay.
+Only a comparison over the whole season group withdraws: a group with a
+failed or deferred fingerprint, or with a file left out because a manual or
+online marker holds its intro, withdraws nothing, since the missing file
+could be the partner that confirms an intro. A group with a held-out file
+stores a distinct input signature, so it is compared again in full once no
+file is held out, as after the held-out file is deleted. A failed marker
+write leaves the group `failed`, so the next run analyzes it again.
+
 Chromaprint points summarize a window that starts at the point's timestamp,
 so raw matches start and end early. Fixed leads measured against authored
 intro chapters move both boundaries later.
@@ -86,12 +99,20 @@ at least 80 percent of the authored intro chapter in replay:
 |---|---|
 | At least 20 seconds, confirmed by two or more pairs, and within 1.5 seconds of the season's usual intro duration, which at least half the season's episodes share | 0.90 |
 | Other markers of at least 20 seconds | 0.65 |
-| Shorter than 20 seconds | 0.30 |
+| Shorter than 20 seconds, confirmed by two or more pairs | 0.30 |
 
-Recurring music cues mistaken for intros are short and rarely shared by most
-of a season, so they fall in the lower rows. Chapter-based markers keep 0.95,
-and silence-extended chapters 0.98. Contribution to online providers compares
-these values with each provider's minimum confidence.
+A match shorter than 20 seconds that only one partner episode confirms is not
+written: a recurring music cue is often shared by a single pair of episodes,
+while a title card recurs across the season. Such a file first gets the wider
+search, as a file with no match does, so a title card shared with episodes
+outside its neighbor window still finds its partners. That search records
+results for the file alone, so it changes no other file's match. Music cues
+that several episodes share are still written, and they fall in the lower
+rows because few of them match most of a season.
+
+Chapter-based markers keep 0.95, and silence-extended chapters 0.98.
+Contribution to online providers compares these values with each provider's
+minimum confidence.
 
 ### Chapters and online markers
 
@@ -329,6 +350,10 @@ start or end a run, and a start never moves back over them.
    lie within 20 seconds. If the first such run starts up to 60 seconds after
    the match and only story or mostly black keyframes lie between, the
    credits start there: the match often begins on music over the last shot.
+   True-black keyframes directly before the run's first text count as its
+   start when they all lie within 10 seconds of that text, since credits
+   usually cut to black before the first name; a longer stretch of black
+   keeps the match's start.
    Credits that video moved rate 0.05 higher, up to 0.95
    (`credits-audio:video:v1`); otherwise the match keeps its rating
    (`credits-audio:v1`: 0.90 when the season agrees on its duration, 0.65
@@ -378,9 +403,11 @@ Credits versions and caches:
   state. It covers the fingerprint key and, when the analysis ran tail
   passes, the tail key, so a group settled while ffmpeg could not run tail
   passes is analyzed again once it can. A run without tail passes also skips
-  a group a tail-capable run settled, so it cannot replace that run's audio
-  and video credits with audio-only ones. Bump `CreditsBehaviorVersion` to
-  re-run every credits comparison over cached fingerprints and tails.
+  a group a tail-capable run settled, under this or any earlier
+  `CreditsBehaviorVersion`, so it cannot replace that run's audio and video
+  credits with audio-only ones. Bump `CreditsBehaviorVersion` to re-run every
+  credits comparison over cached fingerprints and tails; runs without tail
+  passes keep off groups a tail-capable run settled before the bump.
 - Credits algorithms rank in `markers.scannerAlgorithmPriority` as
   `credits-chapter:v1` (30), `credits-version-copy:v1` (24),
   `credits-audio:video:v1` (22), `credits-audio:v1` (21), and

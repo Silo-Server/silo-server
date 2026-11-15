@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"os"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -575,7 +576,7 @@ func (a *Analyzer) checkEpisodePage(ctx context.Context, kinds EpisodeMarkerKind
 	// comparison.
 	var jobs []groupJob
 	for _, kind := range kinds.markerKinds() {
-		for _, group := range groupCandidates(ownCandidates(candidates, kind), minimumGroupEpisodes(kind, creditsTail)) {
+		for _, group := range groupCandidates(candidates, kind, minimumGroupEpisodes(kind, creditsTail)) {
 			jobs = append(jobs, groupJob{kind: kind, group: group, unsettledFileIDs: withdrawnCredits})
 		}
 	}
@@ -793,15 +794,16 @@ func (a *Analyzer) episodeGroups(ctx context.Context, kind markerKind, remaining
 			}
 			seasonCandidates[key] = groupCandidates
 		}
-		groupCandidates = ownCandidates(groupCandidates, kind)
-		if distinctEpisodeCount(groupCandidates) < minEpisodes {
+		owned := ownCandidates(groupCandidates, kind)
+		if distinctEpisodeCount(owned) < minEpisodes {
 			continue
 		}
 		groupsByKey[key] = candidateGroup{
 			SeasonID:         candidate.SeasonID,
 			MediaFolderID:    candidate.MediaFolderID,
 			AnalysisGroupKey: candidate.AnalysisGroupKey(),
-			Candidates:       groupCandidates,
+			Candidates:       owned,
+			HeldOut:          len(owned) < len(groupCandidates),
 		}
 	}
 	groups := make([]candidateGroup, 0, len(groupsByKey))
@@ -1202,7 +1204,13 @@ type candidateGroup struct {
 	SeasonID         string
 	MediaFolderID    int
 	AnalysisGroupKey string
-	Candidates       []Candidate
+	// Candidates are the group's files whose marker of the analyzed kind
+	// local analysis may write.
+	Candidates []Candidate
+	// HeldOut reports that some file of the group was left out of
+	// Candidates because a higher-priority source holds its marker, so the
+	// comparison may lack partners that confirmed an earlier result.
+	HeldOut bool
 }
 
 type analyzeGroupOptions struct {
@@ -1256,9 +1264,11 @@ func (a *Analyzer) creditsTailReady(ctx context.Context) bool {
 	return true
 }
 
-// groupCandidates groups candidates by season group, leaving out groups
-// with fewer than minEpisodes episodes.
-func groupCandidates(candidates []Candidate, minEpisodes int) []candidateGroup {
+// groupCandidates groups the candidates whose marker of kind local analysis
+// may write by season group, leaving out groups with fewer than minEpisodes
+// such episodes. candidates must hold whole season groups, so a group knows
+// whether any of its files was held out.
+func groupCandidates(candidates []Candidate, kind markerKind, minEpisodes int) []candidateGroup {
 	byKey := map[string]*candidateGroup{}
 	for _, candidate := range candidates {
 		key := fmt.Sprintf("%d:%s:%s", candidate.MediaFolderID, candidate.SeasonID, candidate.AnalysisGroupKey())
@@ -1270,6 +1280,10 @@ func groupCandidates(candidates []Candidate, minEpisodes int) []candidateGroup {
 				AnalysisGroupKey: candidate.AnalysisGroupKey(),
 			}
 			byKey[key] = group
+		}
+		if !candidate.ownsMarker(kind) {
+			group.HeldOut = true
+			continue
 		}
 		group.Candidates = append(group.Candidates, candidate)
 	}
@@ -1307,7 +1321,7 @@ func (a *Analyzer) analyzeGroup(ctx context.Context, group candidateGroup, opts 
 		SeasonID:         group.SeasonID,
 		MediaFolderID:    group.MediaFolderID,
 		AnalysisGroupKey: group.AnalysisGroupKey,
-		InputSignature:   InputSignature(group.Candidates),
+		InputSignature:   groupInputSignature(group),
 		EpisodeCount:     distinctEpisodeCount(group.Candidates),
 		FileCount:        len(group.Candidates),
 	}
@@ -1348,30 +1362,27 @@ func (a *Analyzer) analyzeGroup(ctx context.Context, group candidateGroup, opts 
 	}
 
 	segments := CompareFingerprints(inputs, a.config)
-	if len(segments) == 0 {
-		settle(seasonStatusNotFound)
-		if opts.persistState {
-			if err := a.repo.UpsertSeasonState(ctx, state, analysisHash); err != nil {
-				return summary, err
-			}
-		}
-		summary.GroupsNotFound++
-		return summary, nil
-	}
-
-	byFileID := make(map[int]Candidate, len(group.Candidates))
-	for _, candidate := range group.Candidates {
-		byFileID[candidate.FileID] = candidate
-	}
-	for fileID, segment := range segments {
-		if !shouldPatchGroupFile(fileID, opts.patchFileIDs) {
+	// Only a comparison over every file of the season group may withdraw an
+	// intro: a file whose extraction failed, or one held out because another
+	// source marked it, could be the partner that confirms it.
+	complete := counts.failed == 0 && counts.deferred == 0 && !group.HeldOut
+	writeFailures := 0
+	for _, input := range inputs {
+		candidate := input.Candidate
+		if !shouldPatchGroupFile(candidate.FileID, opts.patchFileIDs) {
 			continue
 		}
-		candidate := byFileID[fileID]
+		segment, found := segments[candidate.FileID]
+		if !found {
+			if complete && a.withdrawChromaprintIntro(ctx, candidate, &summary) != nil {
+				writeFailures++
+			}
+			continue
+		}
 		applied, patchErr := a.repo.PatchMarker(ctx, MarkerPatch{
 			Kind:         kindIntro,
 			ExpectedFile: candidate.expectedFile(),
-			FileID:       fileID,
+			FileID:       candidate.FileID,
 			Start:        segment.Start,
 			End:          segment.End,
 			Source:       models.MarkerSourceScanner,
@@ -1380,9 +1391,10 @@ func (a *Analyzer) analyzeGroup(ctx context.Context, group candidateGroup, opts 
 			DetectedAt:   time.Now().UTC(),
 		})
 		if patchErr != nil {
-			msg := fmt.Sprintf("file %d: %v", fileID, patchErr)
+			writeFailures++
+			msg := fmt.Sprintf("file %d: %v", candidate.FileID, patchErr)
 			summary.Errors = append(summary.Errors, msg)
-			a.logger.WarnContext(ctx, "intro marker chromaprint patch failed", "file_id", fileID, "path", candidate.FilePath, "error", patchErr)
+			a.logger.WarnContext(ctx, "intro marker chromaprint patch failed", "file_id", candidate.FileID, "path", candidate.FilePath, "error", patchErr)
 			continue
 		}
 		if applied {
@@ -1390,14 +1402,65 @@ func (a *Analyzer) analyzeGroup(ctx context.Context, group candidateGroup, opts 
 		}
 	}
 
+	status := seasonStatusComplete
+	if len(segments) == 0 {
+		status = seasonStatusNotFound
+		summary.GroupsNotFound++
+	}
 	if opts.persistState {
-		settle(seasonStatusComplete)
+		settle(status)
+		// A settled group is skipped until its inputs change, so a failed
+		// write leaves it failed, to be analyzed again by the next run.
+		if writeFailures > 0 {
+			state.Status = seasonStatusFailed
+			state.LastError = fmt.Sprintf("%d intro marker write(s) failed", writeFailures)
+		}
 		state.MarkersWritten = summary.ChromaprintMarkersWritten
 		if err := a.repo.UpsertSeasonState(ctx, state, analysisHash); err != nil {
 			return summary, err
 		}
 	}
 	return summary, nil
+}
+
+// groupInputSignature is the signature of what an intro analysis of group
+// reads. A group with held-out files withdraws nothing, so its signature
+// differs from the same files' signature without them: once none is held out,
+// as after the held-out file is deleted, the group is compared again in full.
+func groupInputSignature(group candidateGroup) string {
+	signature := InputSignature(group.Candidates)
+	if group.HeldOut {
+		signature += ":held-out"
+	}
+	return signature
+}
+
+// withdrawChromaprintIntro clears a file's intro when an earlier Chromaprint
+// comparison wrote it and the season's complete comparison no longer finds
+// one, as after a stricter matching rule or a change to the season's files.
+// Intros from any other source or detector stay. A failure is logged and
+// added to summary before it is returned.
+func (a *Analyzer) withdrawChromaprintIntro(ctx context.Context, candidate Candidate, summary *RunSummary) error {
+	stored := candidate.marker(kindIntro)
+	if !stored.present() || stored.Algorithm == nil || !strings.HasPrefix(*stored.Algorithm, chromaprintAlgorithmFamily) ||
+		candidate.effectiveSource(kindIntro) != models.MarkerSourceScanner {
+		return nil
+	}
+	withdrawn, err := a.repo.WithdrawMarker(ctx, MarkerWithdrawal{
+		Kind:         kindIntro,
+		ExpectedFile: candidate.expectedFile(),
+		FileID:       candidate.FileID,
+		Algorithm:    *stored.Algorithm,
+	})
+	if err != nil {
+		summary.Errors = append(summary.Errors, fmt.Sprintf("file %d: %v", candidate.FileID, err))
+		a.logger.WarnContext(ctx, "intro marker chromaprint withdrawal failed", "file_id", candidate.FileID, "algorithm", *stored.Algorithm, "error", err)
+		return err
+	}
+	if withdrawn {
+		summary.ChromaprintMarkersWithdrawn++
+	}
+	return nil
 }
 
 func candidateFileIDs(candidates []Candidate) map[int]struct{} {
@@ -1560,6 +1623,7 @@ func mergeRunSummary(dst *RunSummary, src RunSummary) {
 	dst.FingerprintCacheHits += src.FingerprintCacheHits
 	dst.ChapterMarkersWritten += src.ChapterMarkersWritten
 	dst.ChromaprintMarkersWritten += src.ChromaprintMarkersWritten
+	dst.ChromaprintMarkersWithdrawn += src.ChromaprintMarkersWithdrawn
 	dst.GroupsNotFound += src.GroupsNotFound
 	dst.GroupsSkipped += src.GroupsSkipped
 	dst.FingerprintExtractionErrors += src.FingerprintExtractionErrors

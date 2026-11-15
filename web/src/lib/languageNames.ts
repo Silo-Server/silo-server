@@ -21,6 +21,7 @@ const NAME_DATA: Record<Exclude<AppLanguage, "en">, () => Promise<unknown>> = {
   de: () => import("@formatjs/intl-displaynames/locale-data/de.js"),
   fr: () => import("@formatjs/intl-displaynames/locale-data/fr.js"),
   "pt-BR": () => import("@formatjs/intl-displaynames/locale-data/pt.js"),
+  nl: () => import("@formatjs/intl-displaynames/locale-data/nl.js"),
   ja: () => import("@formatjs/intl-displaynames/locale-data/ja.js"),
   "zh-Hans": () => import("@formatjs/intl-displaynames/locale-data/zh-Hans.js"),
   ar: () => import("@formatjs/intl-displaynames/locale-data/ar.js"),

@@ -442,11 +442,15 @@ type AudiobookRelatedContent struct {
 }
 
 type AudiobookRelatedItem struct {
-	ContentID   string `json:"content_id"`
-	Title       string `json:"title"`
-	Year        int    `json:"year,omitempty"`
-	PosterURL   string `json:"poster_url,omitempty" format:"uri-reference"`
-	SeriesIndex *int   `json:"series_index,omitempty"`
+	ContentID       string   `json:"content_id"`
+	Title           string   `json:"title"`
+	Year            int      `json:"year,omitempty"`
+	PosterURL       string   `json:"poster_url,omitempty" format:"uri-reference"`
+	PosterThumbhash string   `json:"poster_thumbhash,omitempty" doc:"The poster's ThumbHash, for a blurred preview while poster_url loads"`
+	SeriesIndex     *int     `json:"series_index,omitempty"`
+	DurationSeconds int      `json:"duration_seconds,omitempty" doc:"Audiobooks only: total listening time, summed over the book's files the viewer can play, as the book's own total_duration_seconds is. Absent for ebooks and when no file reports a duration" example:"41520"`
+	Played          bool     `json:"played,omitempty" doc:"The profile finished this book, by the rule a catalog card's user_state.played follows: an audiobook's visible progress or a visible completed history row, an ebook's reading progress. Absent when false and without a profile" example:"true"`
+	ProgressRatio   *float64 `json:"progress_ratio,omitempty" minimum:"0" maximum:"1" doc:"How far the profile is into the book, 0-1: listening position over the progress row's duration for an audiobook, reading progress for an ebook. Present only while the book is started and not played" example:"0.42"`
 }
 
 type AudiobookSeriesGroup struct {
@@ -2953,6 +2957,7 @@ func (s *DetailService) buildAudiobookExtension(
 	go func() { defer wg.Done(); alsoByAuthor = s.fetchAudiobookAlsoByAuthor(ctx, item.ContentID, filter) }()
 	go func() { defer wg.Done(); similar = s.fetchAudiobookSimilarByGenres(ctx, item.ContentID, filter) }()
 	wg.Wait()
+	s.applyRelatedBookStates(ctx, detailTypeAudiobook, filter, series, alsoByAuthor, similar)
 
 	return &AudiobookDetailExtension{
 		Authors:              audiobookPeopleFromCrew(crew, models.PersonKindAuthor.String()),
@@ -2991,6 +2996,7 @@ func (s *DetailService) buildEbookExtension(
 	go func() { defer wg.Done(); alsoByAuthor = s.fetchEbookAlsoByAuthor(ctx, item.ContentID, filter) }()
 	go func() { defer wg.Done(); similar = s.fetchEbookSimilarByGenres(ctx, item.ContentID, filter) }()
 	wg.Wait()
+	s.applyRelatedBookStates(ctx, detailTypeEbook, filter, series, alsoByAuthor, similar)
 
 	return &EbookDetailExtension{
 		Authors:   audiobookPeopleFromCrew(crew, models.PersonKindAuthor.String()),
@@ -3124,10 +3130,31 @@ func appendAudiobookItemAccessConditions(
 	args *[]any,
 	argIdx *int,
 ) bool {
-	if filter.AllowedLibraryIDs != nil {
-		if len(filter.AllowedLibraryIDs) == 0 {
-			return false
+	return appendLibraryAudiobookAccessConditions(alias, 0, filter, conditions, args, argIdx)
+}
+
+// appendLibraryAudiobookAccessConditions is appendAudiobookItemAccessConditions
+// for a query whose every row is joined to the item's media_item_libraries row
+// in libraryID (0 when the query joins none). That row already proves the item
+// sits in a library, and in an allowed one when libraryID is allowed, so those
+// EXISTS checks are left out. The disabled-library and rating checks stay.
+func appendLibraryAudiobookAccessConditions(
+	alias string,
+	libraryID int,
+	filter AccessFilter,
+	conditions *[]string,
+	args *[]any,
+	argIdx *int,
+) bool {
+	joined := libraryID > 0
+	switch {
+	case filter.AllowedLibraryIDs == nil:
+		if !joined {
+			*conditions = append(*conditions, InSomeLibraryWhere(alias+".content_id"))
 		}
+	case len(filter.AllowedLibraryIDs) == 0:
+		return false
+	case !joined || !slices.Contains(filter.AllowedLibraryIDs, libraryID):
 		*conditions = append(*conditions, fmt.Sprintf(`
 			EXISTS (
 				SELECT 1 FROM media_item_libraries mil_allowed
@@ -3136,8 +3163,6 @@ func appendAudiobookItemAccessConditions(
 			)`, alias, *argIdx))
 		*args = append(*args, filter.AllowedLibraryIDs)
 		*argIdx = *argIdx + 1
-	} else {
-		*conditions = append(*conditions, InSomeLibraryWhere(alias+".content_id"))
 	}
 	if len(filter.DisabledLibraryIDs) > 0 {
 		*conditions = append(*conditions, fmt.Sprintf(`
@@ -3151,6 +3176,149 @@ func appendAudiobookItemAccessConditions(
 	}
 	ApplySectionAccessFilter(alias, AccessFilter{MaturityLimits: filter.MaturityLimits}, conditions, args, argIdx)
 	return true
+}
+
+// relatedBookDurationSQL selects the total listening time of the audiobook at
+// alias: the durations of its present files the viewer may play, summed as
+// total_duration_seconds is. MediaFileAccessSQL is the SQL form of the access
+// rule the detail page filters those files by; like every SQL caller it leaves
+// out the Go-only presentation-library scope, which belongs to the opened
+// book, not to the books beside it. Ebooks have no listening time and select 0.
+func relatedBookDurationSQL(alias, mediaType string, filter AccessFilter, args *[]any, argIdx *int) string {
+	if mediaType != detailTypeAudiobook {
+		return "0"
+	}
+	conditions := []string{
+		"mf.content_id = " + alias + ".content_id",
+		playableFileExists,
+		"mf.duration > 0",
+	}
+	conditions = append(conditions, mediaFileAccessConditions("mf", filter, func(value any) int {
+		*args = append(*args, value)
+		*argIdx = len(*args) + 1
+		return len(*args)
+	})...)
+	return "(SELECT COALESCE(SUM(mf.duration), 0) FROM media_files mf WHERE " + strings.Join(conditions, " AND ") + ")"
+}
+
+// relatedBookState is the profile's state on one related book.
+type relatedBookState struct {
+	played bool
+	ratio  *float64
+}
+
+// applyRelatedBookStates sets Played and ProgressRatio on the related books of
+// a book page, the series entries and the related rows, with one lookup for
+// all of them. Without a profile they stay unset.
+func (s *DetailService) applyRelatedBookStates(ctx context.Context, mediaType string, filter AccessFilter, series *AudiobookSeriesGroup, lists ...[]AudiobookRelatedItem) {
+	if s == nil || filter.UserID == 0 || filter.ProfileID == "" {
+		return
+	}
+	if series != nil {
+		lists = append(lists, series.Entries)
+	}
+	ids := make([]string, 0, 54)
+	seen := make(map[string]struct{}, 54)
+	for _, list := range lists {
+		for _, item := range list {
+			if _, ok := seen[item.ContentID]; !ok {
+				seen[item.ContentID] = struct{}{}
+				ids = append(ids, item.ContentID)
+			}
+		}
+	}
+	if len(ids) == 0 {
+		return
+	}
+	var states map[string]relatedBookState
+	switch mediaType {
+	case detailTypeAudiobook:
+		states = s.audiobookListeningStates(ctx, filter, ids)
+	case detailTypeEbook:
+		states = s.ebookReadingStates(ctx, filter, ids)
+	}
+	for _, list := range lists {
+		for i := range list {
+			state := states[list[i].ContentID]
+			list[i].Played, list[i].ProgressRatio = state.played, state.ratio
+		}
+	}
+}
+
+// audiobookListeningStates reads the profile's audiobook state through
+// ListProgressWithCompletedHistory, the read a catalog card's
+// user_state.played follows: played on visible completed progress or a
+// visible completed history row, in progress on a visible unfinished
+// position. A failed read leaves every book unset; the rows are decoration.
+func (s *DetailService) audiobookListeningStates(ctx context.Context, filter AccessFilter, ids []string) map[string]relatedBookState {
+	if s.userStoreProvider == nil {
+		return nil
+	}
+	store, err := s.userStoreProvider.ForUser(ctx, filter.UserID)
+	if err != nil || store == nil {
+		return nil
+	}
+	progress, err := userstore.ListProgressWithCompletedHistory(ctx, store, filter.ProfileID, ids)
+	if err != nil {
+		slog.Log(ctx, ctxerr.LogLevel(ctx, err, slog.LevelWarn), "related audiobooks: listening state", "component", "catalog", "error", err)
+		return nil
+	}
+	states := make(map[string]relatedBookState, len(progress))
+	for id, p := range progress {
+		switch {
+		case p.Completed:
+			states[id] = relatedBookState{played: true}
+		case p.PositionSeconds > 0 && p.DurationSeconds > 0:
+			states[id] = relatedBookState{ratio: new(min(p.PositionSeconds/p.DurationSeconds, 1))}
+		}
+	}
+	return states
+}
+
+// ebookReadingStates reads the profile's ebook reading progress, finished at
+// the threshold every ebook surface uses (see mangaChaptersQuery). A row the
+// profile hid from history stays out until reading moves it past the hide,
+// as in the ebook progress store's ListByContentIDs.
+func (s *DetailService) ebookReadingStates(ctx context.Context, filter AccessFilter, ids []string) map[string]relatedBookState {
+	if s.itemRepo == nil || s.itemRepo.pool == nil {
+		return nil
+	}
+	rows, err := s.itemRepo.pool.Query(ctx, `
+		SELECT erp.content_id, erp.progress
+		FROM ebook_reader_progress erp
+		WHERE erp.user_id = $1 AND erp.profile_id = $2 AND erp.content_id = ANY($3::text[])
+		  AND NOT EXISTS (
+			SELECT 1
+			FROM user_history_hidden_items hhi
+			WHERE hhi.user_id = erp.user_id
+			  AND hhi.profile_id = erp.profile_id
+			  AND hhi.media_item_id = erp.content_id
+			  AND erp.updated_at <= hhi.hidden_before
+		  )`,
+		filter.UserID, filter.ProfileID, ids)
+	if err != nil {
+		slog.Log(ctx, ctxerr.LogLevel(ctx, err, slog.LevelWarn), "related ebooks: reading state", "component", "catalog", "error", err)
+		return nil
+	}
+	defer rows.Close()
+	states := make(map[string]relatedBookState, len(ids))
+	for rows.Next() {
+		var id string
+		var progress float64
+		if err := rows.Scan(&id, &progress); err != nil {
+			return nil
+		}
+		switch {
+		case progress >= models.EbookFinishedProgressThreshold:
+			states[id] = relatedBookState{played: true}
+		case progress > 0:
+			states[id] = relatedBookState{ratio: new(progress)}
+		}
+	}
+	if rows.Err() != nil {
+		return nil
+	}
+	return states
 }
 
 func (s *DetailService) fetchAudiobookAlsoByAuthor(ctx context.Context, contentID string, filter AccessFilter) []AudiobookRelatedItem {
@@ -3175,8 +3343,10 @@ func (s *DetailService) fetchBookAlsoByAuthor(ctx context.Context, contentID str
 	if !appendAudiobookItemAccessConditions("m2", filter, &conditions, &args, &argIdx) {
 		return []AudiobookRelatedItem{}
 	}
+	duration := relatedBookDurationSQL("m2", mediaType, filter, &args, &argIdx)
 	query := fmt.Sprintf(`
-		SELECT m2.content_id, m2.title, COALESCE(m2.year, 0), COALESCE(m2.poster_path, '')
+		SELECT m2.content_id, m2.title, COALESCE(m2.year, 0), COALESCE(m2.poster_path, ''),
+			COALESCE(m2.poster_thumbhash, ''), %s
 		FROM item_people ip1
 		JOIN item_people ip2
 		  ON ip2.person_id = ip1.person_id
@@ -3186,7 +3356,7 @@ func (s *DetailService) fetchBookAlsoByAuthor(ctx context.Context, contentID str
 		WHERE %s
 		ORDER BY m2.year DESC NULLS LAST, LOWER(m2.sort_title)
 		LIMIT 12
-	`, strings.Join(conditions, " AND "))
+	`, duration, strings.Join(conditions, " AND "))
 	rows, err := s.itemRepo.pool.Query(ctx, query, args...)
 	if err != nil {
 		return []AudiobookRelatedItem{}
@@ -3198,7 +3368,7 @@ func (s *DetailService) fetchBookAlsoByAuthor(ctx context.Context, contentID str
 	for rows.Next() {
 		var item AudiobookRelatedItem
 		var posterPath string
-		if err := rows.Scan(&item.ContentID, &item.Title, &item.Year, &posterPath); err != nil {
+		if err := rows.Scan(&item.ContentID, &item.Title, &item.Year, &posterPath, &item.PosterThumbhash, &item.DurationSeconds); err != nil {
 			return []AudiobookRelatedItem{}
 		}
 		if _, ok := seen[item.ContentID]; ok {
@@ -3242,6 +3412,7 @@ func (s *DetailService) fetchBookSimilarByGenres(ctx context.Context, contentID 
 	if !appendAudiobookItemAccessConditions("m", filter, &conditions, &args, &argIdx) {
 		return []AudiobookRelatedItem{}
 	}
+	duration := relatedBookDurationSQL("m", mediaType, filter, &args, &argIdx)
 	query := fmt.Sprintf(`
 		WITH this_genres AS (
 			SELECT unnest(genres) AS g FROM media_items WHERE content_id = $1
@@ -3249,7 +3420,8 @@ func (s *DetailService) fetchBookSimilarByGenres(ctx context.Context, contentID 
 		this_author AS (
 			SELECT person_id FROM item_people WHERE content_id = $1 AND kind = $2
 		)
-		SELECT m.content_id, m.title, COALESCE(m.year, 0), COALESCE(m.poster_path, '')
+		SELECT m.content_id, m.title, COALESCE(m.year, 0), COALESCE(m.poster_path, ''),
+			COALESCE(m.poster_thumbhash, ''), %s
 		FROM media_items m
 		WHERE %s
 		ORDER BY
@@ -3261,7 +3433,7 @@ func (s *DetailService) fetchBookSimilarByGenres(ctx context.Context, contentID 
 			COALESCE(m.year, 0) DESC,
 			LOWER(m.sort_title)
 		LIMIT 12
-	`, strings.Join(conditions, " AND "))
+	`, duration, strings.Join(conditions, " AND "))
 	rows, err := s.itemRepo.pool.Query(ctx, query, args...)
 	if err != nil {
 		return []AudiobookRelatedItem{}
@@ -3272,7 +3444,7 @@ func (s *DetailService) fetchBookSimilarByGenres(ctx context.Context, contentID 
 	for rows.Next() {
 		var item AudiobookRelatedItem
 		var posterPath string
-		if err := rows.Scan(&item.ContentID, &item.Title, &item.Year, &posterPath); err != nil {
+		if err := rows.Scan(&item.ContentID, &item.Title, &item.Year, &posterPath, &item.PosterThumbhash, &item.DurationSeconds); err != nil {
 			return []AudiobookRelatedItem{}
 		}
 		item.PosterURL = s.presignAudiobookPosterURL(ctx, posterPath, filter)
@@ -3310,12 +3482,15 @@ func (s *DetailService) fetchBookSeries(ctx context.Context, contentID string, m
 	if !appendAudiobookItemAccessConditions("m", filter, &conditions, &args, &argIdx) {
 		return nil
 	}
+	duration := relatedBookDurationSQL("m", mediaType, filter, &args, &argIdx)
 	query := fmt.Sprintf(`
 		SELECT
 			m.content_id,
 			m.title,
 			COALESCE(m.year, 0),
 			COALESCE(m.poster_path, ''),
+			COALESCE(m.poster_thumbhash, ''),
+			%s,
 			s.series_name,
 			s.series_index
 		FROM %s root
@@ -3324,7 +3499,7 @@ func (s *DetailService) fetchBookSeries(ctx context.Context, contentID string, m
 		WHERE %s
 		ORDER BY s.series_index NULLS LAST, LOWER(m.sort_title)
 		LIMIT 30
-	`, tableName, tableName, strings.Join(conditions, " AND "))
+	`, duration, tableName, tableName, strings.Join(conditions, " AND "))
 	rows, err := s.itemRepo.pool.Query(ctx, query, args...)
 	if err != nil {
 		return nil
@@ -3340,7 +3515,7 @@ func (s *DetailService) fetchBookSeries(ctx context.Context, contentID string, m
 			name   string
 			index  *float64
 		)
-		if err := rows.Scan(&item.ContentID, &item.Title, &item.Year, &poster, &name, &index); err != nil {
+		if err := rows.Scan(&item.ContentID, &item.Title, &item.Year, &poster, &item.PosterThumbhash, &item.DurationSeconds, &name, &index); err != nil {
 			return nil
 		}
 		if seriesName == "" {

@@ -92,6 +92,11 @@
 ./internal/catalog TestMovieBoxSetDB
 ./internal/catalog TestBoxSetCollectionArtworkDB
 
+# Audiobook Series, Authors, and Narrators browse: group counts and durations,
+# cover order, the viewer's own progress, count-sorted cursor pages, the search
+# prefix, and library access.
+./internal/catalog TestAudiobookGroupsDB
+
 # A delegated curator's provider-ID edit can't name a title in another library,
 # which a later refresh would merge the item onto, and the curator's refresh job
 # re-anchors only inside their libraries.
@@ -109,6 +114,10 @@
 
 # A failed play-target read returns its error and the pool reuses its connection.
 ./internal/catalog TestPlayableTargetQueryFailureKeepsConnection
+
+# A book page's related rows carry the viewing profile's own finished or
+# partway state, never another profile's; browse cards name authors in credit order.
+./internal/catalog TestBookPageRelatedStateAndCardAuthorsPostgres
 
 # Series air-date sort keys advance when a known episode airs. The latest
 # available episode air date counts only episodes with a file in a library:
@@ -697,6 +706,7 @@
 ./internal/partman TestDropExpiredPartitionsGivesUpOnABusyParentDB
 
 ./internal/downloads TestLocalDownloadCanceledWritePersistsFailureDB
+./internal/downloads TestEphemeralDownloadCompletesOnlyOnWholeFileDB
 ./internal/downloads TestEphemeralDownloadRechecksProfileAccessDB
 
 # Rating sources keep their merge rules, and a trigger keeps the TMDB vote pair
@@ -778,6 +788,10 @@
 # A refused automatic plugin update stays on its installation until it is
 # cleared or the installed version changes.
 ./internal/plugins TestInstallationStoreUpdateFailureDB
+
+# Updating an installed plugin from its catalog stops the running plugin only
+# after the new package passed its download and checksum checks.
+./internal/plugins TestServiceInstallCatalogStopsPluginOnlyForAnAcceptedPackageDB
 
 # Autoscan poll markers restart from now, and poll at once, only when the upstream changes.
 ./internal/autoscan TestUpdateSourceMarkerReset

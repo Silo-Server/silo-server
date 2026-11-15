@@ -292,6 +292,7 @@ func (h *AdminIntroHandler) runLocalItemAnalysis(ctx context.Context, itemID, ki
 		"season_groups_considered", summary.SeasonGroupsConsidered,
 		"chapter_markers_written", summary.ChapterMarkersWritten,
 		"chromaprint_markers_written", summary.ChromaprintMarkersWritten,
+		"chromaprint_markers_withdrawn", summary.ChromaprintMarkersWithdrawn,
 		"fingerprint_cache_hits", summary.FingerprintCacheHits,
 		"fingerprints_computed", summary.FingerprintsComputed,
 		"credits_chapter_markers_written", summary.CreditsChapterMarkersWritten,
