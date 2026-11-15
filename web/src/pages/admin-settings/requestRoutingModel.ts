@@ -294,8 +294,9 @@ type Text = (id: MessageKey, values?: TextValues) => string;
 function orList(values: readonly string[], tx: Text = t): string {
   if (values.length <= 1) return values[0] ?? "";
   return tx("web.admin.settings.requests.model.orList", {
-    // A saved name (`englishText`) keeps its English separator.
-    items: tx === t ? joinList(values.slice(0, -1)) : values.slice(0, -1).join(", "),
+    // Not joinList: a language's list format can add its own "and" (German
+    // "A, B und C"), which would contradict the "or" this message adds.
+    items: values.slice(0, -1).join(", "),
     last: values.at(-1)!,
   });
 }
@@ -304,7 +305,7 @@ function orList(values: readonly string[], tx: Text = t): string {
 function andList(values: readonly string[]): string {
   if (values.length <= 1) return values[0] ?? "";
   return t("web.admin.settings.requests.model.andList", {
-    items: joinList(values.slice(0, -1)),
+    items: values.slice(0, -1).join(", "),
     last: values.at(-1)!,
   });
 }
