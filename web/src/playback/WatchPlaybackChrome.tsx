@@ -6,6 +6,7 @@ import {
   resetStillWatchingStreak,
 } from "@/player/stillWatching";
 import { useSeekPreferences } from "@/hooks/queries/seekPreferences";
+import { useAutoPlayNextSetting } from "@/hooks/queries/autoPlayNext";
 import {
   lazy,
   Suspense,
@@ -687,6 +688,9 @@ function WatchPlaybackHostContent() {
     ],
     enabled: signedIn,
   });
+  // Read through the hook the post-roll switch writes with, so the credits
+  // card and the post-roll screen always agree on it.
+  const { enabled: autoPlayNext } = useAutoPlayNextSetting({ enabled: signedIn });
   const loadedBufferingMode = supportsBufferingQualityMode
     ? (effectivePlaybackSettings?.[SETTING_KEYS.PLAYBACK_BUFFERING_QUALITY_MODE]?.value as
         | BufferingMode
@@ -1271,6 +1275,7 @@ function WatchPlaybackHostContent() {
           bufferingMode={bufferingMode}
           autoSkipRecap={autoSkipRecap}
           autoPlayNextPreview={autoPlayNextPreview}
+          autoPlayNext={autoPlayNext}
           canEditMarkers={canEditMarkers}
           playbackRequestKey={requestKeyValue}
           onNavigateEpisode={handleNavigateEpisode}

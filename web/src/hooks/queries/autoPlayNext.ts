@@ -36,8 +36,8 @@ const PROFILE_SCOPE: SettingIdentity = { scope: "profile" };
 /** The scope a stale override can hide in, cleared on every save. */
 const DEVICE_SCOPE: SettingIdentity = { scope: "profile_device" };
 
-export function useAutoPlayNextSetting() {
-  const query = useEffectiveSettings({ keys: [KEY] });
+export function useAutoPlayNextSetting(options?: { enabled?: boolean }) {
+  const query = useEffectiveSettings({ keys: [KEY], enabled: options?.enabled });
   const setValue = useSetSettingValue();
   const clearValue = useClearSettingValue();
 

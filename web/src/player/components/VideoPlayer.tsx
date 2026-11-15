@@ -350,6 +350,8 @@ interface VideoPlayerProps {
   preview?: PlayerTimeRange | null;
   markerSegments?: PlayerMarkerSegment[];
   autoPlayNextPreview?: boolean;
+  /** The viewer's Auto-play next episode setting; off, the Up next card does not count down. */
+  autoPlayNext?: boolean;
   canEditMarkers?: boolean;
   /**
    * Notified after a successful in-player marker edit, with only the kinds it
@@ -568,6 +570,7 @@ export function VideoPlayer({
   preview = null,
   markerSegments,
   autoPlayNextPreview = false,
+  autoPlayNext = true,
   canEditMarkers = true,
   onMarkersEdited,
   duration: propDuration,
@@ -2511,6 +2514,7 @@ export function VideoPlayer({
     roomPlaybackActive ? undefined : seriesContext,
     currentTime,
     handleNavigate,
+    { autoPlay: autoPlayNext, playing },
   );
 
   // Previous-episode lookup (mirrors the helper in useNextEpisode). Auto-play
