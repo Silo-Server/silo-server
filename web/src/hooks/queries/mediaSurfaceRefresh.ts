@@ -25,6 +25,7 @@ import {
   watchlistKeys,
 } from "./keys";
 import { sectionShowsWholeList } from "./homeRowLimit";
+import { PERSONAL_STATE_WRITE_KEY } from "./personalStateWrites";
 import {
   activeCatalogQueryMatchesLibrary,
   activeSectionQueryMatchesLibrary,
@@ -104,23 +105,20 @@ export function updateCatalogItemDetail(
   updater: (detail: ItemDetail) => ItemDetail,
 ) {
   const filters = { predicate: (query: Query) => isItemDetailQueryKey(query.queryKey, itemId) };
-  if (
-    queryClient
-      .getQueryCache()
-      .findAll(filters)
-      .some((query) => query.state.isInvalidated)
-  ) {
-    refetchDetailWhenWritesSettle(queryClient, itemId);
-  }
+  const owesRefetch = queryClient
+    .getQueryCache()
+    .findAll(filters)
+    .some((query) => query.state.isInvalidated);
   queryClient.setQueriesData<ItemDetail>(filters, (current) =>
     current ? updater(current) : current,
   );
+  if (owesRefetch) refetchDetailWhenWritesSettle(queryClient, itemId);
 }
 
 // A read made while a write is pending can miss it and replace the write's
 // patch, and the toggles' own refreshes skip the item's detail. So an owed
-// detail is invalidated once no mutation is pending: overlapping writes to an
-// item share one refetch after the last of them, and a patch with no write
+// detail is invalidated once no personal-state write is pending: overlapping
+// writes share one refetch after the last of them, and a patch with no write
 // behind it, such as a realtime event's, refetches at once.
 function refetchDetailWhenWritesSettle(queryClient: QueryClient, itemId: string) {
   const waiting = owedDetailRefreshes.get(queryClient);
@@ -131,7 +129,7 @@ function refetchDetailWhenWritesSettle(queryClient: QueryClient, itemId: string)
   const owed = new Set([itemId]);
   owedDetailRefreshes.set(queryClient, owed);
   const refetchOnceSettled = () => {
-    if (queryClient.isMutating() > 0) return;
+    if (queryClient.isMutating({ mutationKey: PERSONAL_STATE_WRITE_KEY }) > 0) return;
     unsubscribe();
     owedDetailRefreshes.delete(queryClient);
     void queryClient.invalidateQueries({

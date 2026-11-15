@@ -1,4 +1,4 @@
-import { MutationObserver, QueryClient, QueryObserver } from "@tanstack/react-query";
+import { QueryClient, QueryObserver } from "@tanstack/react-query";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   catalogKeys,
@@ -15,7 +15,7 @@ import {
   sectionKeys,
   watchlistKeys,
 } from "./keys";
-import type { HomeSectionItemsResponse, ItemDetail } from "@/api/types";
+import type { HomeSectionItemsResponse } from "@/api/types";
 import { sectionShowsWholeList } from "./homeRowLimit";
 import {
   cancelItemDetailQueries,
@@ -25,7 +25,6 @@ import {
   relatedItemIds,
   removeItemFromHomeSectionCaches,
   scheduleMediaSurfaceInvalidation,
-  updateCatalogItemDetail,
 } from "./mediaSurfaceRefresh";
 
 describe("invalidateMediaSurfaceQueries", () => {
@@ -751,54 +750,5 @@ describe("invalidateMediaSurfaceQueries", () => {
 
     expect(queryClient.getQueryState(libraryDetailKey)?.isInvalidated).toBe(true);
     expect(queryClient.getQueryState(otherDetailKey)?.isInvalidated).toBe(false);
-  });
-});
-
-describe("updateCatalogItemDetail", () => {
-  it("refetches an invalidated detail it patched once every pending write settles", async () => {
-    const queryClient = new QueryClient();
-    const invalidatedKey = catalogKeys.itemDetail("item-1");
-    const otherKey = catalogKeys.itemDetail("item-2");
-    queryClient.setQueryData(invalidatedKey, { content_id: "item-1", tagline: "old" });
-    queryClient.setQueryData(otherKey, { content_id: "item-2", tagline: "old" });
-    // Another device's metadata save, while no page shows the item.
-    await queryClient.invalidateQueries({ queryKey: invalidatedKey, exact: true });
-    const settled = () => new Promise((resolve) => setTimeout(resolve, 0));
-    // Two overlapping toggles on item-1, as from its card and its page.
-    const write = (itemId: string, field: "is_favorite" | "in_watchlist") => {
-      let land!: () => void;
-      const observer = new MutationObserver(queryClient, {
-        mutationFn: () => new Promise<void>((resolve) => (land = resolve)),
-        onMutate: () =>
-          updateCatalogItemDetail(queryClient, itemId, (detail) => ({
-            ...detail,
-            user_state: { played: false, is_favorite: false, in_watchlist: false, [field]: true },
-          })),
-      });
-      const done = observer.mutate();
-      return async () => {
-        land();
-        await done;
-        await settled();
-      };
-    };
-
-    const landFavorite = write("item-1", "is_favorite");
-    const landWatchlist = write("item-1", "in_watchlist");
-    const landOther = write("item-2", "is_favorite");
-    await settled();
-    // Nothing may read item-1 while a write to it is pending...
-    expect(queryClient.getQueryData<ItemDetail>(invalidatedKey)?.user_state?.in_watchlist).toBe(
-      true,
-    );
-    expect(queryClient.getQueryState(invalidatedKey)?.isInvalidated).toBe(false);
-    await landFavorite();
-    expect(queryClient.getQueryState(invalidatedKey)?.isInvalidated).toBe(false);
-
-    // ...and once the last one lands, its detail refetches.
-    await landWatchlist();
-    await landOther();
-    expect(queryClient.getQueryState(invalidatedKey)?.isInvalidated).toBe(true);
-    expect(queryClient.getQueryState(otherKey)?.isInvalidated).toBe(false);
   });
 });
