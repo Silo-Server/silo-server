@@ -13,6 +13,7 @@ import {
   computeSubtitleStyles,
   type SubtitleAppearance,
 } from "@/lib/subtitleAppearance";
+import { isImeComposing } from "@/lib/imeComposition";
 
 export interface SubtitleAppearancePanelViewProps {
   /** Whether the panel is rendered. Mounting the portal is gated on this. */
@@ -391,7 +392,7 @@ function PercentField({
         onChange={(e) => setDraft(e.target.value)}
         onBlur={(e) => commit(e.target.value)}
         onKeyDown={(e) => {
-          if (e.key === "Enter") e.currentTarget.blur();
+          if (e.key === "Enter" && !isImeComposing(e)) e.currentTarget.blur();
         }}
         className="w-14 [appearance:textfield] rounded-md border border-white/15 bg-white/[0.06] px-2 py-1 text-end text-[13px] text-white outline-none focus-visible:ring-2 focus-visible:ring-white/70 [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
       />

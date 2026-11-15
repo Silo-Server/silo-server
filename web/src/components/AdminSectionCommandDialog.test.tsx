@@ -124,4 +124,19 @@ describe("AdminSectionCommandDialog", () => {
       document.removeEventListener("keydown", globalSearchShortcut);
     }
   });
+
+  it("ignores the Enter that confirms an IME conversion", async () => {
+    renderDialog();
+
+    const searchBox = await openDialog();
+    await userEvent.type(searchBox, "logging");
+    // Chrome and Firefox flag the confirming keydown as composing; Safari
+    // delivers it after compositionend, marked only by keyCode 229.
+    fireEvent.keyDown(searchBox, { key: "Enter", isComposing: true });
+    fireEvent.keyDown(searchBox, { key: "Enter", keyCode: 229 });
+    expect(screen.getByLabelText("Current path")).toHaveTextContent(/^\/admin$/);
+
+    fireEvent.keyDown(searchBox, { key: "Enter", keyCode: 13 });
+    expect(screen.getByLabelText("Current path")).toHaveTextContent("/admin/settings/logging");
+  });
 });

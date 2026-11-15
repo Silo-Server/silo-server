@@ -67,6 +67,7 @@ import { cn } from "@/lib/utils";
 
 import { OrderBlock } from "../fields/OrderBlock";
 import { numberText, useT, type Translate } from "@/i18n";
+import { isImeComposing } from "@/lib/imeComposition";
 
 const SEARCH_LIMIT = 12;
 const DEBOUNCE_MS = 250;
@@ -202,6 +203,7 @@ function TitleSearch({
   const active = showList ? found[Math.min(highlight, found.length - 1)] : undefined;
 
   function onKeyDown(event: KeyboardEvent<HTMLInputElement>) {
+    if (isImeComposing(event)) return;
     if (event.key === "ArrowDown" || event.key === "ArrowUp") {
       event.preventDefault();
       setOpen(true);

@@ -9,6 +9,7 @@ import { useT } from "@/i18n";
 import { cn } from "@/lib/utils";
 import { PortalContainerContext } from "./portal-container-context";
 import { formatLocale } from "@/lib/appLocale";
+import { isImeComposing } from "@/lib/imeComposition";
 
 interface FacetValuePickerProps {
   facet: CatalogFacetName;
@@ -185,6 +186,7 @@ function FacetValueList({
   }, [activeId]);
 
   function handleKeyDown(event: React.KeyboardEvent<HTMLInputElement>) {
+    if (isImeComposing(event)) return;
     const last = options.length - 1;
     const moves: Record<string, () => number> = {
       ArrowDown: () => Math.min(active + 1, last),

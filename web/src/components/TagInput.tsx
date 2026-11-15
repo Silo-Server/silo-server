@@ -2,6 +2,7 @@ import { useState, useRef, type KeyboardEvent } from "react";
 import { X } from "lucide-react";
 import { useT } from "@/i18n";
 import { cn } from "@/lib/utils";
+import { isImeComposing } from "@/lib/imeComposition";
 
 interface TagInputProps {
   value: string[];
@@ -28,6 +29,7 @@ export function TagInput({ value, onChange, placeholder, className }: TagInputPr
   }
 
   function handleKeyDown(e: KeyboardEvent<HTMLInputElement>) {
+    if (isImeComposing(e)) return;
     if ((e.key === "Enter" || e.key === ",") && input.trim()) {
       e.preventDefault();
       addTag(input);
