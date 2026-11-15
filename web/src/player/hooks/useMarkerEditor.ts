@@ -230,11 +230,29 @@ export function useMarkerEditor({
     }
     // A version switch, or closing and reopening the panel, during the request
     // closed this draft, and the editor may since hold a newer one. Leave that
-    // one alone.
+    // one's edits alone.
     if (stillThisDraft()) {
       originalRef.current = draft;
       setDraft(draft);
       setEditing(false);
+    } else if (currentFileIdRef.current === fileId) {
+      // Reopened on the same file: its "before" values were read while this
+      // save was in flight. The saved kinds are its baseline now, and a kind
+      // it hasn't touched shows the saved value, so its dirty state and its
+      // next save compare against what the server holds.
+      const before = originalRef.current;
+      const saved = { ...before };
+      for (const kind of MARKER_KINDS) {
+        if (kind in body) saved[kind] = draft[kind];
+      }
+      originalRef.current = saved;
+      setDraft((current) => {
+        const next = { ...current };
+        for (const kind of MARKER_KINDS) {
+          if (kind in body && rangesEqual(current[kind], before[kind])) next[kind] = draft[kind];
+        }
+        return next;
+      });
     }
     try {
       onSaved?.(body);

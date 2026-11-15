@@ -234,7 +234,17 @@ it("keeps a reopened panel's edits when an earlier save finishes late", async ()
     await saving;
   });
   expect(result.current.editing).toBe(true);
-  expect(result.current.draft).toEqual(newDraft);
-  expect(result.current.dirty).toBe(true);
+  // The new opening's edit stays; the kind the earlier save wrote, which this
+  // opening didn't touch, shows the saved value and is its baseline.
+  expect(result.current.draft).toEqual({ ...newDraft, preview: { start: 0, end: 1461 } });
+  expect(result.current.isKindDirty("intro")).toBe(true);
+  expect(result.current.isKindDirty("preview")).toBe(false);
   expect(onSaved).toHaveBeenCalledWith({ preview: { start: 0, end: 1461 } });
+
+  // Its next save sends only what it changed against the saved state.
+  fetchMock.mockImplementation(async () => new Response("{}", { status: 200 }));
+  await act(() => result.current.save());
+  expect(JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body))).toEqual({
+    intro: { start_seconds: 10, end_seconds: 70 },
+  });
 });
