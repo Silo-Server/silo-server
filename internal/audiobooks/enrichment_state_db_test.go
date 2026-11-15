@@ -12,8 +12,10 @@ func TestClassifyProviderErrorSortsByHowItShouldRetry(t *testing.T) {
 		{"HTTP 429 too many requests", EnrichmentErrorRateLimited},
 		{"daily quota exceeded", EnrichmentErrorRateLimited},
 		{"rate limit reached", EnrichmentErrorRateLimited},
-		{"HTTP 403: Forbidden", EnrichmentErrorPermanent},
+		// Apple answers throttling with 403, and the plugin forwards it untyped.
+		{"itunes: HTTP 403", EnrichmentErrorRateLimited},
 		{"unauthorized: bad token", EnrichmentErrorPermanent},
+		{"invalid argument: empty ASIN", EnrichmentErrorPermanent},
 		{"connection reset by peer", EnrichmentErrorTransient},
 		{"context deadline exceeded", EnrichmentErrorTransient},
 	}

@@ -442,6 +442,7 @@ func (s *directContentService) BrowseItems(ctx context.Context, session *Session
 		Studios:                 splitNonemptyGenres(params.Get("studios")),
 		OfficialRatings:         splitNonemptyGenres(params.Get("official_ratings")),
 		MinCommunityRating:      parseFloatParam(params.Get("min_community_rating")),
+		MinCriticRating:         parseFloatParam(params.Get("min_critic_rating")),
 		MinPremiereDate:         params.Get("min_premiere_date"),
 		MaxPremiereDate:         params.Get("max_premiere_date"),
 		LibraryID:               catalog.ParseIntParam(params.Get("library_id")),

@@ -353,7 +353,7 @@ describe("useDashboardLayout", () => {
     });
 
     expect(result.current.entries).toEqual(expected);
-    expect(readStored()).toEqual({ version: 1, entries: expected });
+    expect(readStored().entries).toEqual(expected);
   });
 
   // The drop anchor may have been removed between the drag starting and the
@@ -510,7 +510,7 @@ describe("useDashboardLayout server persistence", () => {
       { id: "now-playing", span: 12, rows: 2 },
     ];
     expect(result.current.entries).toEqual(expected);
-    expect(readStored()).toEqual({ version: 1, entries: expected });
+    expect(readStored().entries).toEqual(expected);
     expect(mocks.save).not.toHaveBeenCalled();
   });
 

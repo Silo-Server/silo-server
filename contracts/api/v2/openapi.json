@@ -12550,6 +12550,7 @@
             ]
           },
           "imdb_id": {
+            "description": "IMDb title ID, stored trimmed and in lowercase; an empty string clears it",
             "type": [
               "string",
               "null"
@@ -12687,12 +12688,14 @@
             ]
           },
           "tmdb_id": {
+            "description": "TMDB ID, stored trimmed and without a TMDB URL slug (550-fight-club saves as 550); an empty string clears it",
             "type": [
               "string",
               "null"
             ]
           },
           "tvdb_id": {
+            "description": "TheTVDB ID, stored trimmed; an empty string clears it",
             "type": [
               "string",
               "null"
@@ -224785,7 +224788,7 @@
     },
     "/api/v2/subtitles/detect-language": {
       "post": {
-        "description": "Detect a subtitle language from filename, metadata or content with an optional manual fallback. Does not store the file.",
+        "description": "Detect a subtitle language from filename, metadata or content with an optional manual fallback. Does not store the file. A server runs at most 4 detections at once and an account may run two of them; beyond either limit the request gets 429 with Retry-After.",
         "operationId": "detectSubtitleLanguage",
         "parameters": [
           {

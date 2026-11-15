@@ -131988,6 +131988,61 @@
       "value": "Pesquisar"
     }
   ],
+  "web.reader.search.truncated": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Mostrando a primeira "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " correspondência."
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Mostrando as primeiras "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " de correspondências."
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Mostrando as primeiras "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " correspondências."
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.reader.settings.brightness": [
     {
       "type": 0,

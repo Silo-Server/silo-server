@@ -291,3 +291,27 @@ func TestSampledDetectionMatchesFullText(t *testing.T) {
 		}
 	}
 }
+
+func TestDetectionLimiterBoundsAccountAndServer(t *testing.T) {
+	l := NewDetectionLimiter()
+	var held []func()
+	take := func(userID int) bool {
+		release, ok := l.Acquire(userID)
+		if ok {
+			held = append(held, release)
+		}
+		return ok
+	}
+	first, second := take(1), take(1)
+	if !first || !second || take(1) {
+		t.Fatal("an account must hold two detections and no third")
+	}
+	if !take(2) || !take(3) || take(4) {
+		t.Fatal("a server must hold four detections and no fifth")
+	}
+	held[0]()
+	held[0]()
+	if !take(4) || take(1) {
+		t.Fatal("a release, even repeated, must free exactly one slot")
+	}
+}

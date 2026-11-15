@@ -88,3 +88,17 @@ func ensureIndexConcurrently(ctx context.Context, db *sql.DB, qualifiedName, bui
 	}
 	return nil
 }
+
+// replaceIndexConcurrently builds keep, unless a valid copy of it exists,
+// before dropping drop, so the table always has one of the two. Both names
+// are schema-qualified. goose records a Go migration only after it returns,
+// so a run that already dropped drop runs again and must keep what it built.
+func replaceIndexConcurrently(ctx context.Context, db *sql.DB, keep, build, drop string) error {
+	if err := ensureIndexConcurrently(ctx, db, keep, build); err != nil {
+		return err
+	}
+	if _, err := db.ExecContext(ctx, "DROP INDEX CONCURRENTLY IF EXISTS "+drop); err != nil {
+		return fmt.Errorf("dropping %s: %w", drop, err)
+	}
+	return nil
+}

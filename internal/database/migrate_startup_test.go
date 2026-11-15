@@ -169,22 +169,6 @@ func TestStartupMigrationSequenceDB(t *testing.T) {
 	}
 }
 
-// waitingForWrapper counts sessions queued on the wrapper lock.
-func waitingForWrapper(t *testing.T, pool *pgxpool.Pool) int {
-	t.Helper()
-	var n int
-	err := pool.QueryRow(t.Context(), `
-		SELECT count(*) FROM pg_locks
-		WHERE locktype = 'advisory' AND NOT granted AND objsubid = 1
-		  AND classid::bigint = $1 AND objid::bigint = $2
-		  AND database = (SELECT oid FROM pg_database WHERE datname = current_database())`,
-		int64(uint64(migrationWrapperLockID)>>32), int64(uint64(migrationWrapperLockID)&0xffffffff)).Scan(&n)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return n
-}
-
 // startupWaitTimeout bounds every wait on a test channel here, so a server
 // that fails or stalls fails the test instead of hanging the package.
 const startupWaitTimeout = 2 * time.Minute
@@ -202,11 +186,17 @@ func awaitStartup(t *testing.T, ch <-chan error, what string) error {
 }
 
 // TestStartupMigrationsSerializeServersDB: while one server backs up and
-// migrates, another blocks on the wrapper and then finds nothing pending;
-// one whose wait runs out fails naming SILO_MIGRATION_WAIT.
+// migrates, another waits for the wrapper and then finds nothing pending;
+// one whose wait runs out fails naming SILO_MIGRATION_WAIT. The waiting
+// server holds no snapshot, so the first server's migrations can build an
+// index concurrently, which waits for every older snapshot.
 func TestStartupMigrationsSerializeServersDB(t *testing.T) {
 	pool := startupTestDatabase(t)
 	legacyInstall(t, pool, 1)
+	// The second server logs that it is waiting just before it first asks
+	// for the lock. Enough rows keep the build below running past that
+	// request, so a waiter that held a snapshot would stall it.
+	execSQL(t, pool, `CREATE TABLE cic_probe AS SELECT generate_series(1, 100000) AS id`)
 	ctx := t.Context()
 	entered, release := make(chan struct{}), make(chan struct{})
 	first := make(chan error, 1)
@@ -233,18 +223,27 @@ func TestStartupMigrationsSerializeServersDB(t *testing.T) {
 		t.Fatalf("a server whose wait ran out = %v, want an error naming %s", err, migrationWaitEnv)
 	}
 
+	logger, logs := newMigrationTestLogger()
+	logs.writes = make(chan string, 16)
 	second := make(chan error, 1)
 	go func() {
-		second <- migrateAtStartup(ctx, pool, StartupOptions{Wait: time.Minute, BeforeMigrate: noBackupExpected(t)}, startupMigrations(pool, ""))
+		second <- migrateAtStartup(ctx, pool, StartupOptions{Wait: time.Minute, BeforeMigrate: noBackupExpected(t), Logger: logger}, startupMigrations(pool, ""))
 	}()
-	poll, timeout := time.NewTicker(20*time.Millisecond), time.After(10*time.Second)
-	defer poll.Stop()
-	for waitingForWrapper(t, pool) == 0 {
+	timeout := time.After(10 * time.Second)
+	for waiting := false; !waiting; {
 		select {
-		case <-poll.C:
+		case line := <-logs.writes:
+			waiting = strings.Contains(line, "another server is migrating the database")
+		case err := <-second:
+			t.Fatalf("the second server finished while the first held the wrapper: %v", err)
 		case <-timeout:
-			t.Fatal("the second server never queued on the wrapper lock")
+			t.Fatal("the second server never waited for the wrapper lock")
 		}
+	}
+	buildCtx, cancelBuild := context.WithTimeout(ctx, 10*time.Second)
+	defer cancelBuild()
+	if _, err := pool.Exec(buildCtx, `CREATE INDEX CONCURRENTLY cic_probe_idx ON cic_probe (id)`); err != nil {
+		t.Fatalf("building an index concurrently while the second server waits: %v", err)
 	}
 	select {
 	case err := <-second:

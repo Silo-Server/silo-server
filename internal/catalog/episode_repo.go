@@ -1466,10 +1466,11 @@ func (r *EpisodeRepository) BrowseEpisodes(ctx context.Context, seriesID, season
 	filters.LibraryIDs, filters.DisabledLibraryIDs, filters.MaxPlaybackQuality = access.AllowedLibraryIDs, access.DisabledLibraryIDs, access.MaxPlaybackQuality
 	appendCompatBrowsePredicates(filters, &extra, &args, &index)
 	// Episode fields stand in for an item's own; studios, genres and ratings
-	// come from the series.
+	// come from the series. Episodes have no critic score, so a minimum one
+	// matches none, as in Jellyfin.
 	rewrite := strings.NewReplacer(premiereDateKeyExpr, "e.air_date::text", sortTitleKeyExpr, "LOWER(e.title)",
 		"mi.content_id", "e.content_id", "mi.genres", "s.genres", "mi.studios", "s.studios", "mi.content_rating", "s.content_rating",
-		"mi.rating_imdb", "e.rating_imdb", "mi.year", "EXTRACT(YEAR FROM e.air_date)::int", "mi.title", "e.title")
+		"mi.rating_imdb", "e.rating_imdb", "mi.rating_rt_critic", "NULL::integer", "mi.year", "EXTRACT(YEAR FROM e.air_date)::int", "mi.title", "e.title")
 	for _, condition := range extra {
 		conditions = append(conditions, rewrite.Replace(condition))
 	}

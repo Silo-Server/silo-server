@@ -121569,6 +121569,46 @@
       "value": "Run search"
     }
   ],
+  "web.reader.search.truncated": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Showing the first "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " match."
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Showing the first "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " matches."
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.reader.settings.brightness": [
     {
       "type": 0,

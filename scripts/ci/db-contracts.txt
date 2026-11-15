@@ -35,6 +35,8 @@
 ./internal/api/handlers TestPersonalListPagesKeepVisibleEpisodesDB
 ./internal/catalog TestPersonalListPageFollowsAccessDB
 ./internal/audiobooks TestABSListsLeaveOutBooksInNoLibraryDB
+./internal/audiobooks TestABSLibraryItemsFiltersAndSortDB
+./internal/audiobooks TestABSSeriesIdentityAndContinueListeningDB
 ./internal/api/handlers TestAdminStatsLeaveOutFilesAndItemsHeldByRemovalGraceDB
 ./internal/sections TestRuleRowsReadTheViewersWatchStatePostgres
 ./internal/sections TestSmartCollectionRowWithDisplayFilterReadsTheViewersWatchStatePostgres
@@ -124,6 +126,10 @@
 ./internal/catalog TestSearchRelevancePostgres
 ./internal/catalog TestSearchTextFoldMatchesGoPostgres
 ./internal/catalog TestFoldSearchDiacriticsMigrationPostgres
+
+# Sorting by latest episode added works when episodes can appear: mixed search
+# and the episode scope, in search and browse, with episodes and movies last.
+./internal/catalog TestSortLatestEpisodeAddedWithEpisodesDB
 
 # Section and Smart collection rule fields and operators compile to working SQL.
 ./internal/catalog TestRuleFieldsFilterCatalogDB
@@ -233,6 +239,8 @@
 ./internal/jellycompat TestApplyListFileFieldsDB
 ./internal/jellycompat TestLoginAccountNameWithHashDB
 ./internal/jellycompat TestRevokedCompatSessionStaysDeletedPostgres
+./internal/jellycompat TestDeletedProfileCompatSessionsEndPostgres
+./internal/jellycompat TestSignInRacingProfileDeleteKeepsNoSessionPostgres
 ./internal/jellycompat TestDurableCompatPlaybackStoreUpdateRejectionAcrossReplicas
 ./internal/jellycompat TestDurableCompatPlaybackStoreDropsRejectedPendingUpdate
 ./internal/jellycompat TestDurableCompatPlaybackStoreRetiresUpstreamSessionAcrossReplicas
@@ -435,6 +443,7 @@
 ./internal/markers TestContributionStoreAmendSendsManualClears
 ./internal/taskmanager/tasks TestContributeMarkersTaskDoesNotReselectDeclinedFiles
 ./internal/trickplay TestClaimPublishAndServeDB
+./internal/trickplay TestClaimTakesRegeneratedThenNewestDB
 ./internal/trickplay TestExternalDeliveryConfirmationDB
 ./internal/trickplay TestReconcileSchedulesContinuationAfterReleasingClusterLockDB
 ./internal/trickplay TestReconcileRequeuesSheetsWhoseToneMapSourceChangedDB
@@ -493,6 +502,7 @@
 ./internal/downloads TestParkedDownloadIsNotServedOrPreparedFromItsOldFileDB
 ./internal/downloads TestRegistrationRefusesAFileOfAnotherTitleDB
 ./internal/downloads TestRegistrationAndRetitleSerializeOnTheFileRowDB
+./internal/downloads TestDeadAccountTransferReleasesItsConcurrentSlotDB
 ./internal/downloads TestManagedRequestRegistersNothingWhenAFileLeftItsTitleDB
 ./internal/downloads TestMonitorSyncSkipsAnEpisodeWhoseFileLeftItsTitleDB
 ./internal/downloads TestSubscriptionSyncPagePostgres
@@ -508,6 +518,9 @@
 ./internal/downloads TestPreparedMonitorSyncQueuesNothingForAStaleMonitorDB
 ./internal/downloads TestPreparedSeasonReplacementCountsTowardConcurrentLimitDB
 ./internal/downloads TestPreparedReplacementQuotaAccountingDB
+./internal/downloads TestReadyArtifactSingleCreateTakesNoConcurrentSlotDB
+./internal/downloads TestPreparedReplacementCountsTheEntryStatusUnderTheLockDB
+./internal/downloads TestPreparedReplacementRefusesAStaleGuardUnderTheLockDB
 ./internal/downloads TestManagedBatchOverConcurrentCapDB
 ./internal/downloads TestAttachPreparationsPostgres
 ./internal/downloads TestFailedPreparationRefreshIsSharedPostgres
@@ -634,6 +647,16 @@
 # An admin metadata edit that clears a field stores NULL, takes a cleared
 # rating's per-source row with it, and recomputes series air dates.
 ./internal/catalog TestMetadataUpdateClearsNullableFieldsDB
+
+# An admin's provider-ID edit replaces or removes the item's durable provider
+# ID with the column, and skips one another item already holds.
+./internal/catalog TestMetadataUpdateKeepsDurableProviderIDsDB
+
+# A provider-ID drift repair and an automatic rebind wait for an admin's ID
+# edit on the same item instead of deadlocking with it.
+./internal/metadata TestProviderIDDriftRepairWaitsForItemEditPostgres
+./internal/metadata TestProviderIDDriftRepairSkipsChangedOwnerPostgres
+./internal/metadata TestRebindWaitsForItemEditPostgres
 
 # Watch-provider events carry catalog titles to plugins.
 ./internal/watchsync TestGetMediaTitlesDB
@@ -828,6 +851,7 @@
 
 # AI metadata translations never replace provider or manual localized text.
 ./internal/catalog TestAITranslationNeverOverwritesProviderOrManualText
+./internal/catalog TestPlainAITranslationFillsOnlyEmptyFields
 
 # A provider refresh with no translation clears only a copy of the base item's text.
 ./internal/catalog TestProviderUpsertClearsCopiedBaseTextOnly
@@ -972,6 +996,13 @@
 
 # An audiobook enrichment match keeps the fields an admin locked.
 ./internal/audiobooks TestPersistKeepsAdminLockedFieldsDB
+
+# Audiobook enrichment failures back off, honor retry-after, and stop at a
+# terminal failed outcome; failures do not reset the no-match count.
+./internal/audiobooks TestAudiobookEnrichmentRetryStateDB
+# One node sweeps at a time, and a rate-limited provider is left alone for the
+# rest of the sweep.
+./internal/audiobooks TestAudiobookEnrichmentSweepRateLimitDB
 
 # An audiobook rescan keeps the authors and narrators an admin locked with the
 # crew lock.
@@ -1155,3 +1186,7 @@
 ./internal/catalog TestExternalIDLookupSkipsItemsWithAnotherTMDBIDDB
 ./internal/catalog TestResolveProviderAliasesSkipsItemsWithAnotherTMDBIDDB
 ./internal/watchlist TestLibraryMatchesUsesTheTitlesRetainedIDsDB
+
+# Smart collection collage records: a refresh deletes the collection's records
+# nobody refreshed for a week, with or without a collage, and keeps the rest.
+./internal/catalog TestSmartCollageRecordsRetireWhenUnrefreshedDB
