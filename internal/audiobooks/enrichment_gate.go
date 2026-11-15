@@ -127,15 +127,17 @@ func (g *providerGate) pausedUntil(slug string, route providerRoute) (time.Time,
 	return until, true
 }
 
-// latestPause returns the end of the longest active pause among the slugs'
-// routes, or zero when none is paused.
-func (g *providerGate) latestPause(slugs []string) time.Time {
+// latestRateLimit returns the end of the longest active rate-limit pause
+// among slugs, or zero when none is rate limited. An outage pause of one
+// route is left out: it holds back only the items that met it.
+func (g *providerGate) latestRateLimit(slugs []string) time.Time {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	now := g.clock()
 	var latest time.Time
 	for _, slug := range slugs {
-		for route := range providerRouteCount {
-			if until, ok := g.pausedUntil(slug, route); ok && until.After(latest) {
-				latest = until
-			}
+		if h, ok := g.providers[slug]; ok && now.Before(h.limitedUntil) && h.limitedUntil.After(latest) {
+			latest = h.limitedUntil
 		}
 	}
 	return latest

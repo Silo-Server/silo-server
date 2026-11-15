@@ -421,9 +421,20 @@ func TestProviderGatePausesOnlyTheFailingRoute(t *testing.T) {
 		t.Fatalf("allPaused = (%v, %v), want the provider paused until %v", until, all, now.Add(providerOutagePause))
 	}
 
+	// An outage pause holds back only the items that met it; a rate limit
+	// holds back every item of the chain.
+	if until := g.latestRateLimit([]string{"abm"}); !until.IsZero() {
+		t.Fatalf("latestRateLimit = %v for a route paused as down, want none", until)
+	}
+	if until := latestPauseMet([]error{errors.New("lookup failed"), paused}); !until.Equal(now.Add(providerOutagePause)) {
+		t.Fatalf("latestPauseMet = %v, want the pause the item met", until)
+	}
 	limited := &providerGate{now: func() time.Time { return now }}
 	limited.observe(ctx, "abm", routeSearch, status.Error(codes.ResourceExhausted, "busy"))
 	if _, ok := limited.pausedUntil("abm", routeMetadata); !ok {
 		t.Fatal("a rate-limit answer on search left lookups open")
+	}
+	if until := limited.latestRateLimit([]string{"abm"}); !until.Equal(now.Add(defaultProviderPause)) {
+		t.Fatalf("latestRateLimit = %v, want %v", until, now.Add(defaultProviderPause))
 	}
 }
