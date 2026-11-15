@@ -191,22 +191,25 @@ async function pollAdminJobUntilTerminal(
     if (!isSessionIdentityCurrent(session)) {
       throw new StaleApiRequestContextError();
     }
-    let job: AdminJob;
-    try {
-      job = await fetchAdminTaskJob(jobId);
-    } catch (error) {
-      if (!isTransientV2Error(error)) {
-        throw error;
-      }
-      failures += 1;
-      const backoff = Math.min(1_000 * 2 ** failures, JOB_POLL_MAX_BACKOFF_MS);
-      await delay(Math.min(v2RetryDelayMs(error, backoff), MAX_TIMEOUT_MS));
-      continue;
-    }
-    failures = 0;
+    const read = await fetchAdminTaskJob(jobId).then(
+      (job) => ({ job }),
+      (error: unknown) => ({ error }),
+    );
+    // A read that finished after a sign-out or account switch, either way, is the old session's.
     if (!isSessionIdentityCurrent(session)) {
       throw new StaleApiRequestContextError();
     }
+    if ("error" in read) {
+      if (!isTransientV2Error(read.error)) {
+        throw read.error;
+      }
+      failures += 1;
+      const backoff = Math.min(1_000 * 2 ** failures, JOB_POLL_MAX_BACKOFF_MS);
+      await delay(Math.min(v2RetryDelayMs(read.error, backoff), MAX_TIMEOUT_MS));
+      continue;
+    }
+    failures = 0;
+    const { job } = read;
     if (job.status === "completed") {
       return job;
     }
