@@ -112,6 +112,8 @@ type itemRefreshTestIngester struct {
 	err      error
 	// unlinked is set when the subtree was ingested as unlinked.
 	unlinked bool
+	// scans counts the subtree ingests.
+	scans int
 }
 
 func (s *itemRefreshTestIngester) IngestUnlinkedSubtree(ctx context.Context, folder *models.MediaFolder, subtreePath string) (*libraryingest.Result, error) {
@@ -120,6 +122,7 @@ func (s *itemRefreshTestIngester) IngestUnlinkedSubtree(ctx context.Context, fol
 }
 
 func (s *itemRefreshTestIngester) IngestSubtree(ctx context.Context, _ *models.MediaFolder, subtreePath string) (*libraryingest.Result, error) {
+	s.scans++
 	s.scanPath = subtreePath
 	s.runID = scanbatch.RunID(ctx)
 	if s.err != nil {
@@ -646,30 +649,38 @@ func TestItemRefreshExecutorReportsArtworkCacheFailureAsWarning(t *testing.T) {
 }
 
 // A reset job resets its target. Run as a plain refresh, it would keep every
-// value its providers lack (#3581).
+// value its providers lack (#3581). An audiobook's folder is scanned again
+// after the reset, so its tags fill the fields the provider left empty.
 func TestItemRefreshExecutorRunsResetJobsAsResets(t *testing.T) {
 	t.Parallel()
 
 	for _, tc := range []struct {
 		mode      ItemRefreshMode
+		itemType  string
 		wantReset bool
+		wantScans int
 	}{
-		{mode: ItemRefreshModeQuick},
-		{mode: ItemRefreshModeReset, wantReset: true},
+		{mode: ItemRefreshModeQuick, itemType: "movie", wantScans: 1},
+		{mode: ItemRefreshModeReset, itemType: "movie", wantReset: true, wantScans: 1},
+		{mode: ItemRefreshModeQuick, itemType: "audiobook", wantScans: 1},
+		{mode: ItemRefreshModeReset, itemType: "audiobook", wantReset: true, wantScans: 2},
 	} {
 		refresher := &itemRefreshTestRefresher{}
-		executor := newItemRefreshTestExecutor(&itemRefreshTestIngester{}, &itemRefreshTestScanRuns{}, refresher, nil)
+		ingester := &itemRefreshTestIngester{}
+		executor := newItemRefreshTestExecutor(ingester, &itemRefreshTestScanRuns{}, refresher, nil)
 		if _, err := executor.Execute(context.Background(), ItemRefreshRequest{
-			RequestedContentID: "movie-1",
-			RefreshContentID:   "movie-1",
+			RequestedContentID: "item-1",
+			RequestedType:      tc.itemType,
+			RefreshContentID:   "item-1",
 			ScanFolderID:       3,
-			ScanPath:           "/media/movie-1",
+			ScanPath:           "/media/item-1",
 			Mode:               tc.mode,
 		}, nil); err != nil {
-			t.Fatalf("%s: Execute() error = %v, want nil", tc.mode, err)
+			t.Fatalf("%s %s: Execute() error = %v, want nil", tc.mode, tc.itemType, err)
 		}
-		if refresher.reset != tc.wantReset || refresher.contentID != "movie-1" {
-			t.Errorf("%s: reset=%v content_id=%q, want reset=%v on movie-1", tc.mode, refresher.reset, refresher.contentID, tc.wantReset)
+		if refresher.reset != tc.wantReset || refresher.contentID != "item-1" || ingester.scans != tc.wantScans {
+			t.Errorf("%s %s: reset=%v content_id=%q scans=%d, want reset=%v on item-1 with %d scans",
+				tc.mode, tc.itemType, refresher.reset, refresher.contentID, ingester.scans, tc.wantReset, tc.wantScans)
 		}
 	}
 }

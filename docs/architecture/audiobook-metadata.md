@@ -71,17 +71,23 @@ root. The mark is set by:
 
 - the library Refresh Metadata job (`library_refresh`) in `full` mode, for
   each item it refreshes, and the manual Refresh All Library Metadata task,
-  which runs that mode for each library;
+  which runs that mode for each library. An audiobook whose match an admin
+  ignored (`match_ignored_at`) is included for the tag read alone; no
+  provider is asked about it;
 - an item's Refresh Metadata in `quick` mode, which an admin or a metadata
-  curator can start.
+  curator can start, before the provider refresh;
+- an item's Refresh Metadata in `reset` mode, after the reset. The reset
+  writes the provider's values and clears the fields and credits the
+  provider leaves out; the second read lets the tags fill what is still
+  empty, as on any scan of a matched book.
 
 The book keeps its item: the scan finds it by the root path of its stored
 files, so the content ID, file rows, series row, progress, and favorites
 stay, and the ownership rules above decide which fields the tags write.
 Scheduled and library scans, real-time monitoring, and autoscan never set
-the mark, and neither do `reset` and `complete` item refreshes. A `complete`
-refresh clears the files' content links before it scans, so the book gets a
-new item. Ebook scans ignore the mark.
+the mark, and neither does a `complete` item refresh. A `complete` refresh
+clears the files' content links before it scans, so the book gets a new item.
+Ebook scans ignore the mark.
 
 ## Unmatched audiobooks and `status`
 
