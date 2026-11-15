@@ -31,15 +31,19 @@ func (s *criticSortContent) BrowseItems(_ context.Context, _ *Session, params ur
 // While it is hidden they are dropped, so neither the order nor the filter
 // reveals the score: the request sorts as Silo did before it knew the key.
 func TestCriticRatingSortAndFilterFollowShownRatingSources(t *testing.T) {
-	const path = "/Items?Recursive=true&IncludeItemTypes=Movie" +
+	const grid = "/Items?Recursive=true&IncludeItemTypes=Movie" +
 		"&SortBy=CriticRating,SortName,ProductionYear&SortOrder=Descending&MinCriticRating=60"
 	for _, tc := range []struct {
 		name                     string
+		path                     string
 		shown                    bool
 		wantSort, wantOrder, min string
 	}{
-		{name: "shown", shown: true, wantSort: catalog.BrowseSortRatingRTCritic, wantOrder: "desc", min: "60"},
-		{name: "hidden", wantSort: catalog.BrowseSortTitle, wantOrder: "asc"},
+		{name: "shown", path: grid, shown: true, wantSort: catalog.BrowseSortRatingRTCritic, wantOrder: "desc", min: "60"},
+		{name: "hidden", path: grid, wantSort: catalog.BrowseSortTitle, wantOrder: "asc"},
+		// A minimum is a filter, so it browses the catalog rather than the
+		// root views, as it did before; hidden, it narrows nothing.
+		{name: "hidden minimum alone", path: "/Items?MinCriticRating=60", wantSort: catalog.BrowseSortCreatedAt, wantOrder: "desc"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			extra := ""
@@ -57,7 +61,7 @@ func TestCriticRatingSortAndFilterFollowShownRatingSources(t *testing.T) {
 			content := &criticSortContent{}
 			router := NewRouter(Dependencies{Config: &config.Config{}, IDCodec: NewResourceIDCodec(), SessionStore: sessions, ContentService: content, UserDataService: &mockUserDataService{}, RatingSources: policy})
 
-			req := httptest.NewRequest(http.MethodGet, path, nil)
+			req := httptest.NewRequest(http.MethodGet, tc.path, nil)
 			req.Header.Set("X-Emby-Token", "critic")
 			rec := httptest.NewRecorder()
 			router.ServeHTTP(rec, req)

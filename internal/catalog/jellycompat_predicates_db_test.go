@@ -145,6 +145,8 @@ func TestJellycompatPredicatesPostgres(t *testing.T) {
 			{0, []string{movieIDs[1], movieIDs[0], movieIDs[2]}},
 			{60.5, []string{movieIDs[1]}},
 			{55, []string{movieIDs[1], movieIDs[0]}},
+			// A fractional minimum above a whole score leaves that score out.
+			{55.5, []string{movieIDs[1]}},
 		} {
 			q.MinCriticRating = tc.min
 			result, err := browse.BrowsePage(ctx, q, true)

@@ -1761,7 +1761,10 @@ func appendCompatBrowsePredicates(filters BrowseFilters, conditions *[]string, a
 		add("mi.rating_imdb >= $%d", filters.MinCommunityRating)
 	}
 	if filters.MinCriticRating > 0 {
-		add("mi.rating_rt_critic >= $%d", filters.MinCriticRating)
+		// The score is a whole percentage and the minimum a double: compare as
+		// a double, or Postgres types the minimum as an integer and 55.5
+		// admits 55.
+		add("mi.rating_rt_critic >= $%d::float8", filters.MinCriticRating)
 	}
 	if filters.MinPremiereDate != "" {
 		add(premiereDateKeyExpr+" >= $%d", filters.MinPremiereDate)

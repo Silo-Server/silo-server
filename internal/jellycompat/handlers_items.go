@@ -2162,13 +2162,18 @@ func (h *ItemsHandler) writeSeriesEpisodesPage(w http.ResponseWriter, r *http.Re
 }
 
 // itemsQueryFor parses r's Jellyfin item query, without the Rotten Tomatoes
-// critic sort and filter while the administrator hides that score.
+// critic sort and minimum while the administrator hides that score.
 func (h *ItemsHandler) itemsQueryFor(r *http.Request) itemsQuery {
 	var ratings *shownRatings
 	if h.mapper != nil {
 		ratings = h.mapper.ratings
 	}
-	return parseItemsQuery(withoutHiddenCriticRating(r, ratings.shows(models.RatingSourceRTCritic)), h.codec)
+	shown := ratings.shows(models.RatingSourceRTCritic)
+	query := parseItemsQuery(withCriticRatingSortHidden(r, shown), h.codec)
+	if !shown {
+		query.minCriticRating = 0
+	}
+	return query
 }
 
 // episodeBrowser is the catalog episode browse: one series' episodes, or every
