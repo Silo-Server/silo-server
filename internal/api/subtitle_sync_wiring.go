@@ -38,6 +38,9 @@ func newSubtitleSyncService(
 	if deps.TranscodePool != nil {
 		d.Nodes = deps.TranscodePool
 		d.NodeKeys = deps.NodeKeys
+		if deps.SourceGrants != nil {
+			d.SourceGrants = deps.SourceGrants
+		}
 	}
 	if notifier != nil {
 		d.Notifier = syncNotifier{notifier}

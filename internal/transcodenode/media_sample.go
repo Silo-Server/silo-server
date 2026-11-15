@@ -107,7 +107,7 @@ func ProtocolMediaSample(schemas huma.Registry) workerprotocol.Operation {
 	return workerprotocol.Operation{
 		Listener: listener, Method: http.MethodPost, Path: mediasample.RemotePath,
 		Handler: "(*internal/transcodenode.Server).handleMediaSample", AuthClass: bearerClass,
-		Description: "Run one software media sampling request on an approved input path with the node's ffmpeg and return its result. Read-only analysis; a repeated request decodes the file again.",
+		Description: "Run one software media sampling request on an approved input path with the node's ffmpeg and return its result. Read-only analysis; a repeated request decodes the file again. source_grant, sent by current API servers next to the input path, is the core's source grant for that input naming this node (POST /api/internal/nodes/self/sources/open exchanges it); the node still approves the input path against the catalog itself.",
 		RetrySafety: "natural_idempotent",
 		RequestBody: &huma.RequestBody{Required: true, Content: map[string]*huma.MediaType{jsonMedia: {Schema: request}}},
 		Responses: map[string]*huma.Response{

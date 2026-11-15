@@ -29,7 +29,7 @@ func ProtocolChapterExtraction(schemas huma.Registry) workerprotocol.Operation {
 	return workerprotocol.Operation{
 		Listener: listener, Method: http.MethodPost, Path: "/chapter-thumbnails/extract",
 		Handler: "(*internal/transcodenode.Server).handleChapterThumbnailExtract", AuthClass: "node_bearer",
-		Description: "Extract a JPEG frame from an approved input path under the worker GPU admission gate. No durable replay receipt; decoder ignores unknown JSON keys and uses zero values for omitted options.",
+		Description: "Extract a JPEG frame from an approved input path under the worker GPU admission gate. No durable replay receipt; decoder ignores unknown JSON keys and uses zero values for omitted options. source_grant, sent by current API servers next to the input path, is the core's source grant for that input naming this node (POST /api/internal/nodes/self/sources/open exchanges it); the node still approves the input path against the catalog itself.",
 		RetrySafety: "non_retryable",
 		RequestBody: &huma.RequestBody{Required: true, Content: map[string]*huma.MediaType{jsonMedia: {Schema: request}}},
 		Responses: map[string]*huma.Response{

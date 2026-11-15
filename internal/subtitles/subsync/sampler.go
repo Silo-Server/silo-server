@@ -10,8 +10,10 @@ import (
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/mediasample"
+	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/nodeauth"
 	"github.com/Silo-Server/silo-server/internal/nodepool"
+	"github.com/Silo-Server/silo-server/internal/nodesource"
 	"github.com/Silo-Server/silo-server/internal/processmetrics"
 )
 
@@ -60,6 +62,8 @@ type sampler struct {
 	remote       remoteRunner
 	local        localRunner
 	reservations *nodepool.Reservations
+	// grants grants the node the file it samples; nil sends no grant.
+	grants nodesource.FileGranter
 }
 
 func newSampler(settings SettingsReader, nodes NodeSource, keys nodeauth.Keyring, ffmpegPath func() string) *sampler {
@@ -82,13 +86,14 @@ const remoteRequestTimeout = mediasample.MaxRemoteAdmissionWait + (windowTimeout
 // errNoNode reports that transcode_nodes_only found no node to run on.
 var errNoNode = errors.New("no transcode node available for subtitle sync")
 
-// run executes reqs in order and returns their results and where they ran
-// ("local" or the node's name). All requests of a file run in one place: a
-// node is reserved once for the whole set. Under prefer_transcode_nodes a
-// node that fails for reasons of its own hands the remaining requests to
-// this server. done, when set, is called with the number of requests
-// finished after each one.
-func (s *sampler) run(ctx context.Context, reqs []mediasample.Request, done func(int)) ([]mediasample.Result, string, error) {
+// run executes reqs, all sampling file, in order and returns their results
+// and where they ran ("local" or the node's name). All requests of a file run
+// in one place: a node is reserved once for the whole set. Under
+// prefer_transcode_nodes a node that fails for reasons of its own, or that
+// cannot be granted the file, hands the remaining requests to this server.
+// done, when set, is called with the number of requests finished after each
+// one.
+func (s *sampler) run(ctx context.Context, file *models.MediaFile, reqs []mediasample.Request, done func(int)) ([]mediasample.Result, string, error) {
 	if done == nil {
 		done = func(int) {}
 	}
@@ -107,12 +112,30 @@ func (s *sampler) run(ctx context.Context, reqs []mediasample.Request, done func
 	}
 	defer release()
 
+	grant, err := nodesource.GrantFile(ctx, s.grants, node.ID, file)
+	if err != nil {
+		if mode == ExecutionTranscodeOnly {
+			return nil, nodeLabel(node), fmt.Errorf("grant the node its source: %w", err)
+		}
+		slog.WarnContext(ctx, "subtitle sync node cannot be granted its source; sampling locally", "component", "subsync",
+			"node", node.Name, "error", err)
+		results, err := s.runLocal(ctx, reqs, nil, done)
+		return results, ExecutionLocal, err
+	}
 	endpoint := nodepool.NodeEndpoint(node.URL, mediasample.RemotePath)
 	results := make([]mediasample.Result, 0, len(reqs))
 	for i, req := range reqs {
 		if err := ctx.Err(); err != nil {
 			return nil, nodeLabel(node), err
 		}
+		if i > 0 {
+			// A file's windows can take longer than a grant lives, so each
+			// window gets a fresh one, for the same revision.
+			if grant, err = s.regrant(ctx, node.ID, file, grant); err != nil {
+				return nil, nodeLabel(node), err
+			}
+		}
+		req.SourceGrant = grant
 		result, err := s.runRemote(ctx, endpoint, req)
 		if err == nil {
 			results = append(results, result)
@@ -129,6 +152,32 @@ func (s *sampler) run(ctx context.Context, reqs []mediasample.Request, done func
 		return nil, nodeLabel(node), err
 	}
 	return results, nodeLabel(node), nil
+}
+
+// regrant mints a fresh grant for node nodeID to use file, for a window
+// sampled after the first. It must pin the same revision as first: windows of
+// two versions of a file would align the subtitle against a mix of both, so a
+// file that changed fails the job with nodesource.ErrSourceChanged.
+func (s *sampler) regrant(ctx context.Context, nodeID int, file *models.MediaFile, first string) (string, error) {
+	fresh, err := nodesource.GrantFile(ctx, s.grants, nodeID, file)
+	if err != nil {
+		return "", fmt.Errorf("renew the node's source grant: %w", err)
+	}
+	if fresh == "" || first == "" {
+		return fresh, nil
+	}
+	pinned, err := nodesource.GrantRevision(first)
+	if err != nil {
+		return "", fmt.Errorf("read the node's source grant: %w", err)
+	}
+	renewed, err := nodesource.GrantRevision(fresh)
+	if err != nil {
+		return "", fmt.Errorf("read the node's renewed source grant: %w", err)
+	}
+	if !renewed.Same(pinned) {
+		return "", fmt.Errorf("%w: the file changed while its speech was sampled", nodesource.ErrSourceChanged)
+	}
+	return fresh, nil
 }
 
 // runRemote bounds one node request: the node's admission wait and attempt

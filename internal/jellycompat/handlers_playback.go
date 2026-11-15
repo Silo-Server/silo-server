@@ -41,6 +41,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/netaccess"
 	"github.com/Silo-Server/silo-server/internal/nodepool"
 	"github.com/Silo-Server/silo-server/internal/noderouting"
+	"github.com/Silo-Server/silo-server/internal/nodesource"
 	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/streamlocation"
 	"github.com/Silo-Server/silo-server/internal/streamtoken"
@@ -353,7 +354,10 @@ type PlaybackHandler struct {
 	NodePlanner    nodepool.SessionPlanner
 	JWTSecret      string
 	// NodeKeys signs calls to transcode nodes with each node's own key.
-	NodeKeys                nodeauth.Keyring
+	NodeKeys nodeauth.Keyring
+	// SourceGrants grants a transcode node the source of each start; nil
+	// sends none.
+	SourceGrants            nodesource.FileGranter
 	signalsNotifier         signalsChangedNotifier
 	FFmpegPath              string
 	HWAccel                 string
@@ -1964,6 +1968,20 @@ func (h *PlaybackHandler) startRemoteTranscodeWithToneMapMode(
 		SourceVideoBitDepth: reqBody.SourceVideoBitDepth,
 	}) {
 		reqBody.RequireReady = true
+	}
+
+	// The grant names the node the start is signed for. Every start, the first
+	// candidate's or a later one's, mints its own.
+	if h.SourceGrants != nil {
+		nodeID, err := nodepool.SignedTranscodeNodeID(h.NodeKeys, transcodeNodeURL)
+		if err != nil {
+			return fmt.Errorf("grant transcode node its source: %w", err)
+		}
+		grant, err := nodesource.GrantFile(ctx, h.SourceGrants, nodeID, file)
+		if err != nil {
+			return fmt.Errorf("grant transcode node its source: %w", err)
+		}
+		reqBody.SourceGrant = grant
 	}
 
 	dispatch := func(request transcodenode.TranscodeStartRequest) (transcodenode.TranscodeStartResponse, int, bool, error) {

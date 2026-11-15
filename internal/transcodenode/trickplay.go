@@ -187,7 +187,7 @@ func ProtocolTrickplayExtraction(schemas huma.Registry) workerprotocol.Operation
 	return workerprotocol.Operation{
 		Listener: listener, Method: http.MethodPost, Path: "/trickplay/extract",
 		Handler: "(*internal/transcodenode.Server).handleTrickplayExtract", AuthClass: bearerClass,
-		Description: "Make trickplay sprite sheets for a mediasample Sheets request of samples on an approved input path, up to the node's configured number of runs at once, at idle priority, on the node's own hardware. No durable replay receipt; the API server keeps the lease and retries elsewhere.",
+		Description: "Make trickplay sprite sheets for a mediasample Sheets request of samples on an approved input path, up to the node's configured number of runs at once, at idle priority, on the node's own hardware. No durable replay receipt; the API server keeps the lease and retries elsewhere. source_grant, sent by current API servers next to the input path, is the core's source grant for that input naming this node (POST /api/internal/nodes/self/sources/open exchanges it); the node still approves the input path against the catalog itself.",
 		RetrySafety: nonRetryable,
 		RequestBody: &huma.RequestBody{Required: true, Content: map[string]*huma.MediaType{jsonMedia: {Schema: request}}},
 		Responses: map[string]*huma.Response{

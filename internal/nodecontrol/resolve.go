@@ -80,11 +80,11 @@ func (s *Server) HandleResolve(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "unknown resolve purpose", http.StatusBadRequest)
 		return
 	}
-	// The resolution names its input by path, which the node opens through
-	// its own library mount and catalog check. A source grant for the
-	// recipe's file or theme, and the catalog check that the source still
-	// exists (a refusal with ResolveSourceChanged), belong here, once the
-	// recipe and the calling node are both settled.
+	// Once the recipe and the calling node are both settled, the catalog
+	// must still have the recipe's source, and the node gets a grant for it.
+	if refusal == nil {
+		refusal = s.grantResolution(r.Context(), id, resolution)
+	}
 	if refusal == refuseUnavailable {
 		http.Error(w, "recipe resolution unavailable", http.StatusServiceUnavailable)
 		return

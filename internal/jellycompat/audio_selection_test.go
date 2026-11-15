@@ -16,6 +16,8 @@ import (
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/nodeauth/nodeauthtest"
+	"github.com/Silo-Server/silo-server/internal/nodepool"
+	"github.com/Silo-Server/silo-server/internal/nodesource/nodesourcetest"
 	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/tonemap"
 	"github.com/Silo-Server/silo-server/internal/transcodenode"
@@ -827,11 +829,17 @@ func TestStartRemoteTranscode_IncludesSelectedAudioTrack(t *testing.T) {
 	}))
 	defer server.Close()
 
+	// The node's own key names it: the start is granted to that node.
+	nodeKey, err := nodepool.GenerateNodeKey(31)
+	if err != nil {
+		t.Fatal(err)
+	}
 	playbackStore := NewPlaybackSessionStore(time.Hour, nil)
 	playbackStore.Put(PlaybackSession{ID: "play-1", UpstreamSessionID: "upstream-1"})
 	handler := &PlaybackHandler{
 		JWTSecret:     "secret",
-		NodeKeys:      nodeauthtest.SameKey("secret"),
+		NodeKeys:      nodeauthtest.SameKey(nodeKey),
+		SourceGrants:  nodesourcetest.Granter{},
 		playbackStore: playbackStore,
 		sessionMgr: &testCompatSessionManager{sessions: map[string]*playback.Session{
 			"upstream-1": {ID: "upstream-1", UserID: 7, ProfileID: "profile-1", MediaFileID: version.FileID, PlayMethod: playback.PlayTranscode},
@@ -850,6 +858,9 @@ func TestStartRemoteTranscode_IncludesSelectedAudioTrack(t *testing.T) {
 		t.Fatalf("startRemoteTranscode: %v", err)
 	}
 
+	if want := nodesourcetest.Grant(31, version.FileID, filePath); remoteReq.SourceGrant != want {
+		t.Fatalf("remote SourceGrant = %q, want %q", remoteReq.SourceGrant, want)
+	}
 	if !remoteReq.RequireAudioTrack {
 		t.Fatal("remote request omitted negotiated audio requirement")
 	}

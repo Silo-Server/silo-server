@@ -436,13 +436,14 @@ authorization class `node_signed`.
 | `POST logs` | Up to 100 operational log entries, stored in `operational_logs` and the live tail under `<name>#<id>`, with timestamps clamped to the last 24 hours and the next 30 seconds. |
 | `POST health-changed` | Publishes `node_drain_changed` so every API server health-checks the node at once ([node drain](node-drain.md)). |
 | `POST revoke-recipes` | The node, tearing its sessions down for a force reload, withdraws every recipe bound to it: the API revokes in the node recipe store by the node's authenticated id and then by its registered URL (from the key registry, else the row), never by anything in the body. `204`, also without Redis; `503` when the store cannot be written, which the node retries; `404` when the row is gone. |
-| `POST resolve` | The recipe and playback identity (`nodecontrol.Resolution`) of one transport the node serves, for rebuilding a lost HLS transcode (`purpose: hls`) or serving one progressive remux request (`purpose: remux`). See below. |
+| `POST resolve` | The recipe and playback identity (`nodecontrol.Resolution`) of one transport the node serves, for rebuilding a lost HLS transcode (`purpose: hls`) or serving one progressive remux request (`purpose: remux`), with a source grant for its input. See below. |
+| `POST sources/open` | Exchanges a source grant for the source it approves and a renewed grant. See [Source grants](#source-grants). |
 
 Each API server gives each node an in-memory budget of 20 writes a second with
 bursts of 60 across report, logs, health-changed and revoke-recipes, and answers
 `429` past it.
-Resolve is outside that budget: it is on a viewer's request path, and a node
-restart sends one burst of rebuilds. The node side is `nodecontrol.Client`.
+Resolve and sources/open are outside that budget: they are on a viewer's
+request path, and a node restart sends one burst of rebuilds. The node side is `nodecontrol.Client`.
 Nodes do not call these routes yet.
 
 Resolve (`nodecontrol.Server.HandleResolve`) takes
@@ -462,16 +463,21 @@ with proxy egress on the calling node, and the stored authority must still
 match it field by field; a theme conversion's file must be unchanged. Either
 recipe must be bound to the calling node, by execution node id or, for a card
 without one, by `nodepool.CanonicalNodeURL` against the node's registered URL.
+Last, the catalog must still have the recipe's source, as strictly as the node's
+own input approval: the media file by id, not missing, at exactly the recipe's
+path and a regular file, or for a theme conversion the theme by id at exactly
+that path in an enabled library. The resolution then carries `source_grant`, a
+fresh grant for that source naming the calling node.
 
 | Status | Reason | Meaning |
 | --- | --- | --- |
 | `404` | `not_found` | No recipe for the transport, or a token that does not describe it. |
 | `410` | `denied` | A deny marker is set. |
 | `410` | `stopped` | The remux authority is gone or no longer matches the token. |
-| `410` | `source_changed` | The theme file changed. |
+| `410` | `source_changed` | The theme file changed, or the catalog no longer has the recipe's exact source, or the file is gone. |
 | `403` | `invalid_token` | A remux request without a valid token. |
 | `403` | `wrong_route` | The recipe is bound to another node, or to none. |
-| `503` | none | Transient: no stream secret, or the recipe store or the node's registration cannot be read. |
+| `503` | none | Transient: no stream secret or grant key, or the recipe store, the catalog or the node's registration cannot be read. |
 
 A recipe store read error is `503`, never `404`. A stored card that a force
 reload revoked counts as gone. The revocation runs only inside the node's own
@@ -479,6 +485,63 @@ force-reload teardown (today in Redis directly, later through revoke-recipes),
 so a force reload the node never ran revokes nothing. Once the card is gone, a
 complete token still resolves on the node it names, as on a node that verifies
 tokens itself.
+
+### Source grants
+
+A source grant (`internal/nodesource`) is a stateless capability the API signs
+for one revision of one catalog file, or detail-page theme file, and one node.
+It is `base64url(JSON payload) + "." + base64url(HMAC-SHA256)`, at most 8 KiB,
+keyed by `HKDF-SHA256(auth.jwt_secret, info "silo/node-source-grant/v1")`. The
+payload is `{"v": 1, "node", "kind": "file" | "theme", "id", "path", "size",
+"mtime_ns", "exp"}`. `path` is the exact fspath-encoded catalog path, so a name
+that is not valid UTF-8 survives JSON unchanged. `mtime_ns` is the modification
+time the API's stat returned, in Unix nanoseconds; revisions compare it at
+microseconds, the catalog's precision (`models.NormalizeFileModifiedAt`), and
+the entity tag is `"<kind>-<id>-<size>-<mtime in Unix microseconds>"`. A grant
+lives one hour; a node renews it every 20 minutes while the input is open, and
+renewal keeps the revision.
+
+Every job an API server sends a transcode node carries `source_grant` next to
+its existing input path field: `POST /transcode/start` (native starts, moves
+off a dead node, which grant the replacement node, and Jellyfin-compatible
+starts), `POST /downloads/prepare`, `POST /trickplay/extract`,
+`POST /chapter-thumbnails/extract` and `POST /media-samples/run`. Resolve adds
+one for rebuilds, progressive remux and theme conversion. Minting costs one
+stat of the path through `internal/fspath` and no catalog read where the caller
+holds the row; a move rereads its file by id. When a grant cannot be minted (the
+file is gone or not a regular file, or there is no secret), a native or
+Jellyfin-compatible start fails over as any failed start does, download
+preparation and subtitle-sync sampling run on the API server where local work is
+allowed, and trickplay and chapter thumbnails treat the node as unavailable.
+Nodes still approve the input path against the catalog themselves and do not
+read the grant yet.
+
+`POST sources/open` (`nodecontrol.Server.HandleSourceOpen`) takes
+`{"grant": "..."}`, for a job's input opening and for each renewal with the
+current grant:
+
+| Status | Meaning |
+| --- | --- |
+| `200` | `{"grant", "path", "size", "mtime_ns", "etag"}`: the same claims with a new hour, and the approved revision. `Cache-Control: no-store`. |
+| `400` | No grant in the body. |
+| `403` | The grant does not verify, has expired, or names another node. |
+| `410` | The catalog no longer has the source at exactly the granted path (a media file by id and not missing, a theme in an enabled library), or the file is gone or not a regular file. |
+| `412` | The file's size or modification time differs from the grant's revision. |
+| `503` | Transient: no grant key, or the catalog cannot be read. |
+
+Each open and renewal reads the catalog once. The node side is
+`nodecontrol.Client.OpenSource` and `nodesource.Opener`: it stats the approved
+path on its own mount, requires a regular file of the same size and
+modification time to the microsecond (a `nodesource.MountMismatchError`
+otherwise, which names both sides), and renews until the job closes the source.
+Transient renewal failures retry from one second to one minute until the
+current grant expires; a `400`, `403`, `404`, `410` or `412`, an answer about
+another revision, or expiry while the API is unreachable ends the input.
+
+Every API server and every transcode node must see a library file with the
+same size and the same modification time, to the microsecond, at the same
+path. This is the same assumption as identical library paths. A mismatch fails
+closed: the API answers `412`, and a node refuses the job.
 
 What this requires and allows:
 

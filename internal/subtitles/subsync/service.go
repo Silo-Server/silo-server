@@ -17,6 +17,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/mediasample"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/nodeauth"
+	"github.com/Silo-Server/silo-server/internal/nodesource"
 	"github.com/Silo-Server/silo-server/internal/subtitles"
 )
 
@@ -104,9 +105,11 @@ type Deps struct {
 	Nodes     NodeSource
 	// NodeKeys signs requests to the nodes; without it speech decoding runs
 	// on this server.
-	NodeKeys   nodeauth.Keyring
-	FFmpegPath func() string
-	Notifier   Notifier
+	NodeKeys nodeauth.Keyring
+	// SourceGrants grants a node the file it samples; nil sends no grant.
+	SourceGrants nodesource.FileGranter
+	FFmpegPath   func() string
+	Notifier     Notifier
 	// Node names this server in artifact failure records.
 	Node string
 }
@@ -146,6 +149,7 @@ func NewService(d Deps) *Service {
 	if s.node == "" {
 		s.node = "silo"
 	}
+	s.sampler.grants = d.SourceGrants
 	s.runner = jobrunner.New(d.AppContext, jobrunner.NewSemaphore(concurrentJobs), d.Jobs, "subtitle sync", nil)
 	s.runner.Recover()
 	return s
@@ -800,7 +804,7 @@ func (s *Service) speech(ctx context.Context, file *models.MediaFile, language s
 		if decoded != nil {
 			done = func(n int) { decoded(n, len(reqs)) }
 		}
-		results, executedOn, err := s.sampler.run(ctx, reqs, done)
+		results, executedOn, err := s.sampler.run(ctx, file, reqs, done)
 		if err == nil {
 			windows := make([]mediasample.SpeechLevels, 0, len(results))
 			for _, r := range results {

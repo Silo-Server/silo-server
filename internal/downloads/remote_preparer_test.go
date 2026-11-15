@@ -15,6 +15,8 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/nodeauth"
 	"github.com/Silo-Server/silo-server/internal/nodepool/nodepooltest"
+	"github.com/Silo-Server/silo-server/internal/nodesource"
+	"github.com/Silo-Server/silo-server/internal/nodesource/nodesourcetest"
 
 	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/downloadprepare"
@@ -1079,5 +1081,34 @@ func TestNodeAwarePreparerLocalFallback(t *testing.T) {
 				t.Fatalf("local calls = %d, want 0", local.calls)
 			}
 		})
+	}
+}
+
+// A job dispatched to a node carries a source grant naming that node; a
+// source that cannot be granted is prepared here instead.
+func TestNodeAwarePreparerGrantsTheChosenNodeItsSource(t *testing.T) {
+	opts := playback.TranscodeOpts{InputPath: "/media/movie.mkv", MediaFileID: 42, TargetCodecVideo: "h264", TargetCodecAudio: "aac"}
+
+	local := &recordingEncodePreparer{}
+	remote := &recordingRemotePreparer{}
+	p := newPoolPreparer(local, &nodepool.Node{ID: 17, URL: "http://idle", Enabled: true, Healthy: true})
+	p.remote = remote
+	p.SetSourceGrants(nodesourcetest.Granter{})
+	if _, err := p.PrepareFile(context.Background(), "artifact-1", opts, "/local/artifact-1.mp4"); err != nil {
+		t.Fatal(err)
+	}
+	if want := nodesourcetest.Grant(17, 42, "/media/movie.mkv"); remote.request.SourceGrant != want || local.calls != 0 {
+		t.Fatalf("remote grant = %q (local calls %d), want %q", remote.request.SourceGrant, local.calls, want)
+	}
+
+	local, remote = &recordingEncodePreparer{}, &recordingRemotePreparer{}
+	p = newPoolPreparer(local, &nodepool.Node{ID: 17, URL: "http://idle", Enabled: true, Healthy: true})
+	p.remote = remote
+	p.SetSourceGrants(nodesourcetest.Granter{Err: nodesource.ErrSourceGone})
+	if _, err := p.PrepareFile(context.Background(), "artifact-2", opts, "/local/artifact-2.mp4"); err != nil {
+		t.Fatal(err)
+	}
+	if local.calls != 1 || remote.request.ArtifactID != "" {
+		t.Fatalf("local calls = %d, remote request = %+v; want the job prepared here", local.calls, remote.request)
 	}
 }

@@ -46,8 +46,12 @@ import (
 
 // TranscodeStartRequest is the JSON body for POST /transcode/start.
 type TranscodeStartRequest struct {
-	SessionID                  string                 `json:"session_id"`
-	InputPath                  string                 `json:"input_path"`
+	SessionID string `json:"session_id"`
+	InputPath string `json:"input_path"`
+	// SourceGrant is the core's source grant for InputPath, naming this
+	// node (internal/nodesource). The node exchanges it at the core's
+	// sources/open route; until it does, InputPath stays its input.
+	SourceGrant                string                 `json:"source_grant,omitempty"`
 	SourceVideoCodec           string                 `json:"source_video_codec"`
 	SourceVideoProfile         string                 `json:"source_video_profile,omitempty"`
 	SourceVideoBitDepth        int                    `json:"source_video_bit_depth,omitempty"`

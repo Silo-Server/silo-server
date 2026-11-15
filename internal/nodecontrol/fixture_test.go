@@ -198,6 +198,7 @@ func mountForTest(server *Server, keys KeySource) http.Handler {
 	mux.Handle("POST "+PathLogs, server.LimitNode(http.HandlerFunc(server.HandleLogs)))
 	mux.Handle("POST "+PathHealthChanged, server.LimitNode(http.HandlerFunc(server.HandleHealthChanged)))
 	mux.HandleFunc("POST "+PathResolve, server.HandleResolve)
+	mux.HandleFunc("POST "+PathSourcesOpen, server.HandleSourceOpen)
 	mux.Handle("POST "+PathRevokeRecipes, server.LimitNode(http.HandlerFunc(server.HandleRevokeRecipes)))
 	return RequireNode(keys)(mux)
 }

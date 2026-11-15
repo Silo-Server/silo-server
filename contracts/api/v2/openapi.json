@@ -240011,7 +240011,7 @@
           },
           "required": true
         },
-        "description": "Extract a JPEG frame from an approved input path under the worker GPU admission gate. No durable replay receipt; decoder ignores unknown JSON keys and uses zero values for omitted options.",
+        "description": "Extract a JPEG frame from an approved input path under the worker GPU admission gate. No durable replay receipt; decoder ignores unknown JSON keys and uses zero values for omitted options. source_grant, sent by current API servers next to the input path, is the core's source grant for that input naming this node (POST /api/internal/nodes/self/sources/open exchanges it); the node still approves the input path against the catalog itself.",
         "retry_safety": "non_retryable",
         "listener": "transcode_node",
         "method": "POST",
@@ -240094,7 +240094,7 @@
           },
           "required": true
         },
-        "description": "Make trickplay sprite sheets for a mediasample Sheets request of samples on an approved input path, up to the node's configured number of runs at once, at idle priority, on the node's own hardware. No durable replay receipt; the API server keeps the lease and retries elsewhere.",
+        "description": "Make trickplay sprite sheets for a mediasample Sheets request of samples on an approved input path, up to the node's configured number of runs at once, at idle priority, on the node's own hardware. No durable replay receipt; the API server keeps the lease and retries elsewhere. source_grant, sent by current API servers next to the input path, is the core's source grant for that input naming this node (POST /api/internal/nodes/self/sources/open exchanges it); the node still approves the input path against the catalog itself.",
         "retry_safety": "non_retryable",
         "listener": "transcode_node",
         "method": "POST",
@@ -240175,7 +240175,7 @@
           },
           "required": true
         },
-        "description": "Run one software media sampling request on an approved input path with the node's ffmpeg and return its result. Read-only analysis; a repeated request decodes the file again.",
+        "description": "Run one software media sampling request on an approved input path with the node's ffmpeg and return its result. Read-only analysis; a repeated request decodes the file again. source_grant, sent by current API servers next to the input path, is the core's source grant for that input naming this node (POST /api/internal/nodes/self/sources/open exchanges it); the node still approves the input path against the catalog itself.",
         "retry_safety": "natural_idempotent",
         "listener": "transcode_node",
         "method": "POST",
@@ -241250,7 +241250,7 @@
           },
           "required": true
         },
-        "description": "Synchronously prepare or reuse a node-local MP4 under an artifact lifecycle lock. The JSON decoder reads at most 64 KiB, ignores unknown keys and uses zero values for omitted options. Input path authority and GPU admission apply. Ordinary nonempty artifacts can be reused by ID alone; requested execution attestations require a matching receipt. Missing/mismatched receipts may cause replacement. Request cancellation is not proof that no artifact was published; there is no durable job admission or automatic replay guarantee.",
+        "description": "Synchronously prepare or reuse a node-local MP4 under an artifact lifecycle lock. The JSON decoder reads at most 64 KiB, ignores unknown keys and uses zero values for omitted options. Input path authority and GPU admission apply. Ordinary nonempty artifacts can be reused by ID alone; requested execution attestations require a matching receipt. Missing/mismatched receipts may cause replacement. Request cancellation is not proof that no artifact was published; there is no durable job admission or automatic replay guarantee. source_grant, sent by current API servers next to the input path, is the core's source grant for that input naming this node (POST /api/internal/nodes/self/sources/open exchanges it); the node still approves the input path against the catalog itself. The execution fingerprint excludes source_grant.",
         "retry_safety": "non_retryable",
         "listener": "transcode_node",
         "method": "POST",
@@ -242627,7 +242627,7 @@
           },
           "required": true
         },
-        "description": "Start a process-local HLS session after input, recipe, GPU and configuration guards. Ordinary JSON decoding ignores unknown keys and defaults omitted fields; there is no decoder body limit. A same-ID start can tear down and replace an earlier session before failing, and RequireReady may move an early hardware startup failure to a safer path: under hw_accel=auto CPU decode with GPU encode, then software; otherwise the VideoToolbox software retry. Monitoring runs asynchronously. No durable admission/replay receipt or automatic caller retry is implied.",
+        "description": "Start a process-local HLS session after input, recipe, GPU and configuration guards. Ordinary JSON decoding ignores unknown keys and defaults omitted fields; there is no decoder body limit. A same-ID start can tear down and replace an earlier session before failing, and RequireReady may move an early hardware startup failure to a safer path: under hw_accel=auto CPU decode with GPU encode, then software; otherwise the VideoToolbox software retry. Monitoring runs asynchronously. No durable admission/replay receipt or automatic caller retry is implied. source_grant, sent by current API servers next to the input path, is the core's source grant for that input naming this node (POST /api/internal/nodes/self/sources/open exchanges it); the node still approves the input path against the catalog itself.",
         "retry_safety": "non_retryable",
         "listener": "transcode_node",
         "method": "POST",
@@ -246180,7 +246180,7 @@
           },
           "required": true
         },
-        "description": "The recipe and playback identity of one transport the calling node serves, for rebuilding a lost HLS transcode (purpose hls) or serving one progressive remux request (purpose remux). stream_token is the token a relay forwarded, passed through unread. The core checks the deny markers of the transport and its playback session, verifies the token, picks the recipe (a complete stored card over a complete token card, for hls) and requires it to be bound to the calling node by execution node id or, without one, by canonical node URL. A refusal carries its reason as JSON: 404 not_found, 410 denied, stopped or source_changed, 403 invalid_token or wrong_route. 503 is transient: the core cannot verify tokens or read the recipe store or the node's registration right now.",
+        "description": "The recipe and playback identity of one transport the calling node serves, for rebuilding a lost HLS transcode (purpose hls) or serving one progressive remux request (purpose remux). stream_token is the token a relay forwarded, passed through unread. The core checks the deny markers of the transport and its playback session, verifies the token, picks the recipe (a complete stored card over a complete token card, for hls) and requires it to be bound to the calling node by execution node id or, without one, by canonical node URL. It then requires the catalog to still have the recipe's exact media file (by id, not missing, at exactly the recipe's path, a regular file) or its theme in an enabled library, and returns a fresh source_grant for it naming the calling node. A refusal carries its reason as JSON: 404 not_found, 410 denied, stopped or source_changed, 403 invalid_token or wrong_route. 503 is transient: the core cannot verify tokens, mint grants, or read the recipe store, the catalog or the node's registration right now.",
         "retry_safety": "natural_idempotent",
         "listener": "api",
         "method": "POST",
@@ -246259,6 +246259,97 @@
             "description": "Service Unavailable"
           }
         }
+      },
+      {
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/x-silo-worker-protocols/schemas/nodesource_OpenRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "description": "Exchange a source grant for the source it approves, when a job's input opens and at every 20-minute renewal. The grant must verify, be unexpired and name the calling node (403). The catalog must still have the source: a media file by id, not missing, at exactly the granted path, or a theme by id at exactly that path in an enabled library (410). The core stats the path through fspath, following symlinks: gone or not a regular file is 410, another size or modification time (compared at microseconds) is 412. 200 returns the same claims as a grant valid for another hour, with the approved path, size, mtime_ns and etag, Cache-Control no-store. 400: no grant in the body. 503 is transient: no grant key, or the catalog cannot be read.",
+        "retry_safety": "natural_idempotent",
+        "listener": "api",
+        "method": "POST",
+        "path": "/api/internal/nodes/self/sources/open",
+        "handler": "(*internal/nodecontrol.Server).HandleSourceOpen",
+        "auth_class": "node_signed",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/x-silo-worker-protocols/schemas/nodesource_OpenResponse"
+                }
+              }
+            },
+            "description": "Approved source and renewed grant."
+          },
+          "400": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "410": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Gone"
+          },
+          "412": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Precondition Failed"
+          },
+          "503": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        }
       }
     ],
     "schemas": {
@@ -246289,6 +246380,9 @@
           "seek_seconds": {
             "format": "double",
             "type": "number"
+          },
+          "source_grant": {
+            "type": "string"
           },
           "tone_map": {
             "type": "boolean"
@@ -246369,6 +246463,9 @@
           "source_frame_rate": {
             "format": "double",
             "type": "number"
+          },
+          "source_grant": {
+            "type": "string"
           },
           "source_video_bit_depth": {
             "format": "int64",
@@ -246783,6 +246880,9 @@
           },
           "sheets": {
             "$ref": "#/x-silo-worker-protocols/schemas/mediasample_SheetsOutput"
+          },
+          "source_grant": {
+            "type": "string"
           },
           "stats": {
             "$ref": "#/x-silo-worker-protocols/schemas/mediasample_StatsOutput"
@@ -247361,6 +247461,9 @@
           "recipe": {
             "$ref": "#/x-silo-worker-protocols/schemas/playback_RecipeCard"
           },
+          "source_grant": {
+            "type": "string"
+          },
           "started_at": {
             "format": "date-time",
             "type": "string"
@@ -247381,7 +247484,8 @@
           "playback_session_id",
           "user_id",
           "profile_id",
-          "media_file_id"
+          "media_file_id",
+          "source_grant"
         ],
         "type": "object"
       },
@@ -247952,6 +248056,48 @@
           "node_name",
           "type",
           "started_at"
+        ],
+        "type": "object"
+      },
+      "nodesource_OpenRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "grant": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "grant"
+        ],
+        "type": "object"
+      },
+      "nodesource_OpenResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "etag": {
+            "type": "string"
+          },
+          "grant": {
+            "type": "string"
+          },
+          "mtime_ns": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "path": {
+            "type": "string"
+          },
+          "size": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "grant",
+          "path",
+          "size",
+          "mtime_ns",
+          "etag"
         ],
         "type": "object"
       },
@@ -248858,6 +249004,9 @@
           "source_audio_channels": {
             "format": "int64",
             "type": "integer"
+          },
+          "source_grant": {
+            "type": "string"
           },
           "source_video_bit_depth": {
             "format": "int64",

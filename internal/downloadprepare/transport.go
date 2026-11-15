@@ -74,8 +74,12 @@ var (
 // transcode node supplies its own FFmpeg path, hardware mode, device list, and
 // output path. ArtifactID is an opaque handle, never a caller-selected path.
 type Request struct {
-	ArtifactID                 string                 `json:"artifact_id"`
-	InputPath                  string                 `json:"input_path"`
+	ArtifactID string `json:"artifact_id"`
+	InputPath  string `json:"input_path"`
+	// SourceGrant is the core's source grant for InputPath, naming the node
+	// the job is sent to. It changes with every dispatch, so the execution
+	// fingerprint leaves it out.
+	SourceGrant                string                 `json:"source_grant,omitempty"`
 	SourceVideoCodec           string                 `json:"source_video_codec,omitempty"`
 	SourceVideoProfile         string                 `json:"source_video_profile,omitempty"`
 	SourceVideoBitDepth        int                    `json:"source_video_bit_depth,omitempty"`
@@ -260,6 +264,7 @@ func (r Request) ValidToneMapAttestation() bool {
 // deliberately excluding the idempotency handle.
 func (r Request) ExecutionFingerprint() string {
 	r.ArtifactID = ""
+	r.SourceGrant = ""
 	r.LogSessionID = ""
 	r.SourceFrameRate = 0
 	data, err := json.Marshal(r)

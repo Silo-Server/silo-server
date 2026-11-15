@@ -71,6 +71,13 @@ type Options struct {
 	// Revocations withdraws the recipes bound to a node for revoke-recipes;
 	// nil, like a core without Redis, revokes nothing and answers 204.
 	Revocations RecipeRevoker
+	// Grants mints and renews source grants; resolve and sources/open answer
+	// 503 without it.
+	Grants GrantIssuer
+	// Files and Themes are the catalog sources/open and resolve check a
+	// granted source against; a nil one answers 503 for its kind.
+	Files  FileCatalog
+	Themes ThemeCatalog
 }
 
 // Server serves the core's node control routes. Every handler is stateless

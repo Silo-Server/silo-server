@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/nodepool/nodepooltest"
+	"github.com/Silo-Server/silo-server/internal/nodesource/nodesourcetest"
 
 	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/models"
@@ -639,8 +640,10 @@ func TestExtractFramePrefersRemoteNodeWhenEnabled(t *testing.T) {
 		nodeKeys:           nodeauthtest.NodeKey("secret"),
 		remoteReservations: &nodepool.Reservations{},
 		remoteExtractor:    remote,
+		sourceGrants:       nodesourcetest.Granter{},
 	}
 	service.transcodePool.SetNodes([]*nodepool.Node{{
+		ID:         5,
 		URL:        "http://node-1",
 		Enabled:    true,
 		Healthy:    true,
@@ -649,7 +652,7 @@ func TestExtractFramePrefersRemoteNodeWhenEnabled(t *testing.T) {
 
 	data, reason, err := service.extractFrame(
 		context.Background(),
-		&models.MediaFile{FilePath: "/media/movie.mkv"},
+		&models.MediaFile{ID: 42, FilePath: "/media/movie.mkv"},
 		5,
 		chapterThumbnailHDRPolicyBestEffort,
 	)
@@ -664,6 +667,9 @@ func TestExtractFramePrefersRemoteNodeWhenEnabled(t *testing.T) {
 	}
 	if len(remote.nodes) != 1 || remote.nodes[0] != "http://node-1" {
 		t.Fatalf("remote nodes = %#v, want node-1", remote.nodes)
+	}
+	if want := nodesourcetest.Grant(5, 42, "/media/movie.mkv"); remote.requests[0].SourceGrant != want {
+		t.Fatalf("source grant = %q, want %q", remote.requests[0].SourceGrant, want)
 	}
 }
 

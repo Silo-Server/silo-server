@@ -8,6 +8,7 @@ import (
 
 	"github.com/danielgtaylor/huma/v2"
 
+	"github.com/Silo-Server/silo-server/internal/nodesource"
 	"github.com/Silo-Server/silo-server/internal/workerprotocol"
 )
 
@@ -68,10 +69,15 @@ func Protocol(schemas huma.Registry) []workerprotocol.Operation {
 			"The node, tearing its sessions down for a force reload, withdraws every recipe bound to it. The core revokes by the authenticated node id and then by the node's registered URL, never by anything in the body. 204 also from a core without Redis, which holds no recipes. 404: the node row is gone. 429: the node exceeded its request budget on this server. 503 is transient; the node retries the teardown.",
 			nil, map[string]*huma.Response{"204": {Description: "Revoked."}}, http.StatusNotFound, http.StatusTooManyRequests, http.StatusServiceUnavailable),
 		op(http.MethodPost, PathResolve, "HandleResolve", "natural_idempotent",
-			"The recipe and playback identity of one transport the calling node serves, for rebuilding a lost HLS transcode (purpose hls) or serving one progressive remux request (purpose remux). stream_token is the token a relay forwarded, passed through unread. The core checks the deny markers of the transport and its playback session, verifies the token, picks the recipe (a complete stored card over a complete token card, for hls) and requires it to be bound to the calling node by execution node id or, without one, by canonical node URL. A refusal carries its reason as JSON: 404 not_found, 410 denied, stopped or source_changed, 403 invalid_token or wrong_route. 503 is transient: the core cannot verify tokens or read the recipe store or the node's registration right now.",
+			"The recipe and playback identity of one transport the calling node serves, for rebuilding a lost HLS transcode (purpose hls) or serving one progressive remux request (purpose remux). stream_token is the token a relay forwarded, passed through unread. The core checks the deny markers of the transport and its playback session, verifies the token, picks the recipe (a complete stored card over a complete token card, for hls) and requires it to be bound to the calling node by execution node id or, without one, by canonical node URL. It then requires the catalog to still have the recipe's exact media file (by id, not missing, at exactly the recipe's path, a regular file) or its theme in an enabled library, and returns a fresh source_grant for it naming the calling node. A refusal carries its reason as JSON: 404 not_found, 410 denied, stopped or source_changed, 403 invalid_token or wrong_route. 503 is transient: the core cannot verify tokens, mint grants, or read the recipe store, the catalog or the node's registration right now.",
 			jsonBody(reflect.TypeFor[ResolveRequest]()), map[string]*huma.Response{
 				"200": {Description: "Resolution.", Content: map[string]*huma.MediaType{jsonMedia: {Schema: schemas.Schema(reflect.TypeFor[Resolution](), true, "")}}},
 				"403": refusal(http.StatusForbidden), "404": refusal(http.StatusNotFound), "410": refusal(http.StatusGone),
 			}, http.StatusBadRequest, http.StatusServiceUnavailable),
+		op(http.MethodPost, PathSourcesOpen, "HandleSourceOpen", "natural_idempotent",
+			"Exchange a source grant for the source it approves, when a job's input opens and at every 20-minute renewal. The grant must verify, be unexpired and name the calling node (403). The catalog must still have the source: a media file by id, not missing, at exactly the granted path, or a theme by id at exactly that path in an enabled library (410). The core stats the path through fspath, following symlinks: gone or not a regular file is 410, another size or modification time (compared at microseconds) is 412. 200 returns the same claims as a grant valid for another hour, with the approved path, size, mtime_ns and etag, Cache-Control no-store. 400: no grant in the body. 503 is transient: no grant key, or the catalog cannot be read.",
+			jsonBody(reflect.TypeFor[nodesource.OpenRequest]()), map[string]*huma.Response{
+				"200": {Description: "Approved source and renewed grant.", Content: map[string]*huma.MediaType{jsonMedia: {Schema: schemas.Schema(reflect.TypeFor[nodesource.OpenResponse](), true, "")}}},
+			}, http.StatusBadRequest, http.StatusForbidden, http.StatusGone, http.StatusPreconditionFailed, http.StatusServiceUnavailable),
 	}
 }

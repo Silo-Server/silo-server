@@ -68,6 +68,7 @@ type resolveCore struct {
 	nodes   *fakeNodes
 	recipes *recipeMap
 	deny    denySet
+	catalog *fakeCatalog
 	url     string
 	keys    map[int]string
 }
@@ -76,7 +77,7 @@ type resolveCore struct {
 // for them from recipes, or from an in-memory recipe map when recipes is nil.
 func newResolveCore(t *testing.T, nodeURLs map[int]string, recipes RecipeSource) *resolveCore {
 	t.Helper()
-	c := &resolveCore{t: t, nodes: &fakeNodes{}, recipes: &recipeMap{cards: map[string]playback.RecipeCard{}}, deny: denySet{}, keys: map[int]string{}}
+	c := &resolveCore{t: t, nodes: &fakeNodes{}, recipes: &recipeMap{cards: map[string]playback.RecipeCard{}}, deny: denySet{}, catalog: &fakeCatalog{}, keys: map[int]string{}}
 	for id, url := range nodeURLs {
 		c.keys[id] = c.nodes.add(t, nodepool.Node{ID: id, Name: "gpu", Type: nodepool.NodeTypeTranscode, URL: url, Enabled: true})
 	}
@@ -90,6 +91,9 @@ func newResolveCore(t *testing.T, nodeURLs map[int]string, recipes RecipeSource)
 		Recipes:      recipes,
 		Deny:         c.deny,
 		Revocations:  revocations,
+		Grants:       stubGrants{},
+		Files:        c.catalog,
+		Themes:       c.catalog,
 	})
 	core := httptest.NewServer(mountForTest(server, c.nodes))
 	t.Cleanup(core.Close)

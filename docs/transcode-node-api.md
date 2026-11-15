@@ -145,3 +145,17 @@ and the API stops a node whose count differs. Recipe cards carry the whole
 list; signed reconstruction claims carry only the track numbers, the default
 and the source version, under a method older nodes refuse, so a session
 rebuilt from a token names its renditions `Track <n>`.
+
+## Source grants
+
+Every `POST /transcode/start` request from a current API server carries
+`source_grant` next to `input_path`: the core's source grant for that file,
+naming the node the request is sent to. Download preparation
+(`/downloads/prepare`), trickplay (`/trickplay/extract`), chapter thumbnails
+(`/chapter-thumbnails/extract`) and media sampling (`/media-samples/run`)
+carry it the same way, and the core's resolve answer adds one for rebuilds and
+progressive remux. A node exchanges it at the core's `sources/open` route and
+renews it while the job runs. Nodes still approve `input_path` against the
+catalog themselves and do not read the grant yet; an older node ignores the
+field. The download execution fingerprint leaves `source_grant` out. See
+[worker HTTP contracts](architecture/worker-http-protocol.md#source-grants).

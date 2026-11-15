@@ -64,6 +64,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/nodemetrics"
 	"github.com/Silo-Server/silo-server/internal/nodepool"
 	"github.com/Silo-Server/silo-server/internal/noderecipe"
+	"github.com/Silo-Server/silo-server/internal/nodesource"
 	"github.com/Silo-Server/silo-server/internal/notifications"
 	"github.com/Silo-Server/silo-server/internal/onboarding"
 	"github.com/Silo-Server/silo-server/internal/opslog"
@@ -191,6 +192,11 @@ type Dependencies struct {
 	// and the shared secret for a URL registered as a proxy. Nil leaves calls
 	// to nodes unsigned-for, so they fail rather than fall back.
 	NodeKeys nodeauth.Keyring
+	// SourceGrants mints the source grant every piece of transcode-node work
+	// carries, and verifies and renews it at sources/open (may be nil: work
+	// is then dispatched without one, and resolve and sources/open answer
+	// 503).
+	SourceGrants *nodesource.Grants
 	// NodeCapabilityInvalidator drops one node's cached capability inventory
 	// outside the playback handler — the prepared-download preparer holds its
 	// own. nil where downloads are not wired; set before NewRouter runs.
@@ -1517,6 +1523,9 @@ func newChiRouter(deps Dependencies) chi.Router {
 			playbackHandler.NodePlanner = deps.NodePlanner
 		}
 		playbackHandler.NodeKeys = deps.NodeKeys
+		if deps.SourceGrants != nil {
+			playbackHandler.SourceGrants = deps.SourceGrants
+		}
 		if deps.Config != nil && deps.Config.Auth.JWTSecret != "" {
 			playbackHandler.JWTSecret = deps.Config.Auth.JWTSecret
 			if authMiddleware != nil && playbackHandler.PlanStoreV3 != nil {
@@ -3444,6 +3453,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 		// nothing and revokes nothing.
 		nodeRecipes := noderecipe.NewStore(deps.RedisClient, 0)
 		nodeControlOptions.Recipes, nodeControlOptions.Revocations = nodeRecipes, nodeRecipes
+		deps.wireNodeSources(&nodeControlOptions)
 		nodeControl := nodecontrol.NewServer(nodeControlOptions)
 		r.Route("/api/internal/nodes/self", func(r chi.Router) {
 			r.Use(nodecontrol.RequireNode(deps.NodeKeyRegistry))
@@ -3452,6 +3462,9 @@ func newChiRouter(deps Dependencies) chi.Router {
 			// restart, or each progressive remux request), so a burst of
 			// rebuilds must not be throttled with the background routes.
 			r.Post("/resolve", nodeControl.HandleResolve)
+			// Open and renewal sit on a job's start path too: a viewer waits
+			// for the first one.
+			r.Post("/sources/open", nodeControl.HandleSourceOpen)
 			r.Group(func(r chi.Router) {
 				r.Use(nodeControl.LimitNode)
 				r.Post("/report", nodeControl.HandleReport)
@@ -3469,6 +3482,21 @@ func newChiRouter(deps Dependencies) chi.Router {
 	// once every route above has finished wiring them.
 	playbackHandler.StartLifecycleSweep(deps.AppContext, deps.DB)
 	return r
+}
+
+// wireNodeSources gives the node control routes the source grants and the
+// catalog that resolve and sources/open check a grant against. Typed nils stay
+// out of the interfaces, so a missing piece answers 503 instead of panicking.
+func (d Dependencies) wireNodeSources(opts *nodecontrol.Options) {
+	if d.SourceGrants != nil {
+		opts.Grants = d.SourceGrants
+	}
+	if d.FileRepo != nil {
+		opts.Files = d.FileRepo
+	}
+	if d.DB != nil {
+		opts.Themes = themesongs.NewRepository(d.DB)
+	}
 }
 
 // overlayOrigins returns the source of connected overlay origins the

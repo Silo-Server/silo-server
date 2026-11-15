@@ -75,6 +75,21 @@ func ParseNodeKey(key string) (int, error) {
 	return nodeID, nil
 }
 
+// SignedTranscodeNodeID is the id of the transcode node keys signs requests to
+// nodeURL for: the node whose own key will verify them. Work for that node is
+// granted to this id, so a grant always names the node that receives it. It
+// fails as signing would (nodeauth.ErrNoNodeKey, nodeauth.ErrUnknownNode).
+func SignedTranscodeNodeID(keys nodeauth.Keyring, nodeURL string) (int, error) {
+	if keys == nil {
+		return 0, nodeauth.ErrNoSecret
+	}
+	key, err := keys.KeyFor(nodeauth.TargetTranscode, nodeURL)
+	if err != nil {
+		return 0, err
+	}
+	return ParseNodeKey(key)
+}
+
 // nodeKeyAAD binds a key ciphertext to its row, so a ciphertext copied onto
 // another node's row fails to decrypt there.
 func nodeKeyAAD(nodeID int) string {

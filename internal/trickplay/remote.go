@@ -14,8 +14,10 @@ import (
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/mediasample"
+	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/nodeauth"
 	"github.com/Silo-Server/silo-server/internal/nodepool"
+	"github.com/Silo-Server/silo-server/internal/nodesource"
 	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/telemetry"
 )
@@ -64,9 +66,16 @@ type NodeExtractor struct {
 	planner  NodeWorkPlanner
 	settings SettingsReader
 	// keys signs requests to nodes; without it every request runs here.
-	keys   nodeauth.Keyring
+	keys nodeauth.Keyring
+	// grants grants a node each run's source; nil sends none.
+	grants nodesource.FileGranter
 	client *http.Client
 	logger *slog.Logger
+}
+
+// SetSourceGrants wires the grants every remote run's source is sent with.
+func (e *NodeExtractor) SetSourceGrants(grants nodesource.FileGranter) {
+	e.grants = grants
 }
 
 // NodeWorkPlanner reserves transcode capacity shared with playback and
@@ -123,7 +132,7 @@ func (e *NodeExtractor) Extract(ctx context.Context, job *Job, req mediasample.R
 			break
 		}
 		tried[node.URL] = true
-		result, err := e.remote(ctx, node, req)
+		result, err := e.remote(ctx, node, job, req)
 		release()
 		if err == nil {
 			return result, nil
@@ -211,7 +220,19 @@ func makesTrickplay(report []byte) bool {
 
 // remote runs req on node. The node decides whether its hardware can decode,
 // so the plan always offers a hardware attempt first.
-func (e *NodeExtractor) remote(ctx context.Context, node *nodepool.Node, req mediasample.Request) (mediasample.Result, error) {
+//
+// A node that cannot be granted the job's file is unavailable for this run,
+// like one that cannot be signed for.
+func (e *NodeExtractor) remote(ctx context.Context, node *nodepool.Node, job *Job, req mediasample.Request) (mediasample.Result, error) {
+	file := &models.MediaFile{FilePath: req.Input}
+	if job != nil {
+		file.ID = job.FileID
+	}
+	grant, err := nodesource.GrantFile(ctx, e.grants, node.ID, file)
+	if err != nil {
+		return mediasample.Result{}, &ExtractError{Reason: NodeUnavailableReason, Message: "grant the node its source: " + err.Error()}
+	}
+	req.SourceGrant = grant
 	req.Attempts = AttemptPlan(true, len(req.Samples.Seconds))
 	timeout := remoteOverhead
 	for _, attempt := range req.Attempts {

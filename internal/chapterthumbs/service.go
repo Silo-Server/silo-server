@@ -19,6 +19,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/nodeauth"
 	"github.com/Silo-Server/silo-server/internal/nodepool"
+	"github.com/Silo-Server/silo-server/internal/nodesource"
 	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/scanner"
 	"github.com/Silo-Server/silo-server/internal/tonemap"
@@ -180,6 +181,8 @@ type Service struct {
 	remoteExtractor    remoteFrameExtractor
 	// nodeKeys signs remote extraction requests; nil keeps extraction local.
 	nodeKeys nodeauth.Keyring
+	// sourceGrants grants a node each extraction's source; nil sends none.
+	sourceGrants nodesource.FileGranter
 
 	extractFrameFunc           func(ctx context.Context, file *models.MediaFile, seekSeconds float64, hdrPolicy string) ([]byte, string, error)
 	uploadChapterThumbnailFunc func(ctx context.Context, fileID, chapterIndex int, frame []byte) (string, string, error)
@@ -216,6 +219,15 @@ func (s *Service) SetNodeKeys(keys nodeauth.Keyring) {
 		return
 	}
 	s.nodeKeys = keys
+}
+
+// SetSourceGrants wires the grants every remote extraction's source is sent
+// with.
+func (s *Service) SetSourceGrants(grants nodesource.FileGranter) {
+	if s == nil {
+		return
+	}
+	s.sourceGrants = grants
 }
 
 // SetBlobQueue lets the service retire the images a width change replaces.
@@ -774,12 +786,7 @@ func (s *Service) extractFrame(
 	}
 	defer release()
 
-	data, reason, err := s.remoteExtractor.ExtractFrame(ctx, node, s.nodeKeys, RemoteExtractRequest{
-		InputPath:            file.FilePath,
-		SeekSeconds:          seekSeconds,
-		ToneMap:              toneMap,
-		AllowSoftwareToneMap: allowSoftwareToneMap,
-	})
+	data, reason, err := s.extractFrameRemote(ctx, node, file, seekSeconds, toneMap, allowSoftwareToneMap)
 	if err == nil {
 		return data, "", nil
 	}
@@ -800,6 +807,30 @@ func (s *Service) extractFrame(
 	}
 
 	return nil, reason, err
+}
+
+// extractFrameRemote grants node file's source and extracts the frame there.
+// A source that cannot be granted makes the node unavailable for this frame,
+// which prefer_transcode_nodes answers by extracting locally.
+func (s *Service) extractFrameRemote(
+	ctx context.Context,
+	node *nodepool.Node,
+	file *models.MediaFile,
+	seekSeconds float64,
+	toneMap bool,
+	allowSoftwareToneMap bool,
+) ([]byte, string, error) {
+	grant, err := nodesource.GrantFile(ctx, s.sourceGrants, node.ID, file)
+	if err != nil {
+		return nil, chapterThumbnailNodeUnavailableReason, fmt.Errorf("chapter thumbnail remote extract: grant source: %w", err)
+	}
+	return s.remoteExtractor.ExtractFrame(ctx, node, s.nodeKeys, RemoteExtractRequest{
+		InputPath:            file.FilePath,
+		SourceGrant:          grant,
+		SeekSeconds:          seekSeconds,
+		ToneMap:              toneMap,
+		AllowSoftwareToneMap: allowSoftwareToneMap,
+	})
 }
 
 func (s *Service) extractFrameLocal(

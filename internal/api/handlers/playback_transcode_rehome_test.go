@@ -20,6 +20,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/nodeauth"
 	"github.com/Silo-Server/silo-server/internal/nodeauth/nodeauthtest"
 	"github.com/Silo-Server/silo-server/internal/nodepool/nodepooltest"
+	"github.com/Silo-Server/silo-server/internal/nodesource/nodesourcetest"
 
 	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/nodepool"
@@ -180,6 +181,7 @@ func TestRelayMovesTranscodeOffUnreachableNodeToAnotherNode(t *testing.T) {
 		pooledNode(1, unreachableNodeURL(t)),
 		pooledNode(2, healthy.server.URL),
 	}, "ffmpeg")
+	f.handler.SourceGrants = nodesourcetest.Granter{}
 
 	rr := f.segment("seg_00003.ts")
 	if rr.Code != http.StatusOK || rr.Body.String() != "moved:seg_00003.ts" {
@@ -196,6 +198,10 @@ func TestRelayMovesTranscodeOffUnreachableNodeToAnotherNode(t *testing.T) {
 	}
 	if start.InputPath != "/media/movie.mkv" || start.TargetCodecVideo != "h264" || !start.RequireReady {
 		t.Fatalf("start request lost the recipe: %+v", start)
+	}
+	// The replacement start is granted to the replacement node.
+	if want := nodesourcetest.Grant(2, 42, "/media/movie.mkv"); start.SourceGrant != want {
+		t.Fatalf("moved start source grant = %q, want %q", start.SourceGrant, want)
 	}
 
 	session, err := f.sessions.GetSession(f.session.ID)

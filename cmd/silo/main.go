@@ -108,6 +108,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/nodepool"
 	"github.com/Silo-Server/silo-server/internal/noderecipe"
 	"github.com/Silo-Server/silo-server/internal/nodesessions"
+	"github.com/Silo-Server/silo-server/internal/nodesource"
 	"github.com/Silo-Server/silo-server/internal/notifications"
 	"github.com/Silo-Server/silo-server/internal/opslog"
 	"github.com/Silo-Server/silo-server/internal/partman"
@@ -1681,6 +1682,9 @@ func main() {
 		// stays listed and health-checked but takes no work.
 		nodeKeyring := nodeKeys.Keyring(func() string { return configWatcher.Config().Auth.JWTSecret })
 		deps.NodeKeys = nodeKeyring
+		// Every piece of transcode-node work carries a source grant, signed
+		// with a key derived from the same secret as stream tokens.
+		deps.SourceGrants = nodesource.NewGrants(func() string { return configWatcher.Config().Auth.JWTSecret })
 		transcodePool.SetKeyCheck(nodeKeys.HasKey)
 
 		planner := nodepool.NewPlanner(proxyPool, transcodePool)
@@ -1849,6 +1853,7 @@ func main() {
 		)
 		if chapterThumbService != nil {
 			chapterThumbService.SetNodeKeys(deps.NodeKeys)
+			chapterThumbService.SetSourceGrants(deps.SourceGrants)
 			if queue := blobgc.NewQueue(deps.DB); queue != nil {
 				chapterThumbService.SetBlobQueue(queue)
 			}
@@ -3413,6 +3418,7 @@ func main() {
 				taskMgr.Register(tasks.NewSweepOrphanedMediaImagesTask(sweeper))
 			}
 			trickplayExtractor := trickplay.NewNodeExtractor(trickplay.NewLocalExtractor(settingsRepo), deps.NodePlanner, settingsRepo, deps.NodeKeys)
+			trickplayExtractor.SetSourceGrants(deps.SourceGrants)
 			if trickplayService := trickplay.NewService(deps.DB, deps.Blobs.Assets, settingsRepo, trickplayExtractor, deps.NodeID); trickplayService != nil {
 				trickplayReader := trickplay.NewReader(deps.DB, deps.Blobs.Assets, trickplayURLResolver(&deps))
 				if checker, ok := deps.Blobs.Assets.(trickplay.DeliveryChecker); ok && deps.ArtworkDelivery.External {
@@ -3497,6 +3503,7 @@ func main() {
 			}
 			preparer := downloads.NewNodeAwarePreparer(downloads.NewPlaybackPreparer(), downloadWorkPlanner, liveDownloadConfig)
 			preparer.SetNodeKeys(deps.NodeKeys)
+			preparer.SetSourceGrants(deps.SourceGrants)
 			if deps.NodeRepo != nil {
 				preparer.SetOriginLookup(deps.NodeRepo)
 			}
@@ -4090,6 +4097,7 @@ func main() {
 			EventBus:             eventBus,
 			JWTSecret:            cfg.Auth.JWTSecret,
 			NodeKeys:             deps.NodeKeys,
+			SourceGrants:         deps.SourceGrants,
 			RecWorker:            recWorker,
 			FrontendFS:           deps.FrontendFS,
 			ArtworkStore:         deps.Blobs.Assets,

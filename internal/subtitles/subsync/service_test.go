@@ -21,6 +21,8 @@ import (
 	"github.com/Silo-Server/silo-server/internal/nodeauth"
 	"github.com/Silo-Server/silo-server/internal/nodeauth/nodeauthtest"
 	"github.com/Silo-Server/silo-server/internal/nodepool"
+	"github.com/Silo-Server/silo-server/internal/nodesource"
+	"github.com/Silo-Server/silo-server/internal/nodesource/nodesourcetest"
 	"github.com/Silo-Server/silo-server/internal/subtitles"
 )
 
@@ -456,7 +458,7 @@ func TestSamplerExecution(t *testing.T) {
 	t.Run("node", func(t *testing.T) {
 		s := &sampler{settings: settings, nodes: nodeList{node}, reservations: &nodepool.Reservations{}, keys: keys, local: ok,
 			remote: fakeRemote(func(mediasample.Request) (mediasample.Result, error) { return mediasample.Result{}, nil })}
-		if _, where, err := s.run(context.Background(), reqs, nil); err != nil || where != "node:gpu-1" {
+		if _, where, err := s.run(context.Background(), nil, reqs, nil); err != nil || where != "node:gpu-1" {
 			t.Fatalf("%q %v", where, err)
 		}
 	})
@@ -471,7 +473,7 @@ func TestSamplerExecution(t *testing.T) {
 				return mediasample.Result{}, nil
 			})}
 		var done []int
-		results, where, err := s.run(context.Background(), reqs, func(n int) { done = append(done, n) })
+		results, where, err := s.run(context.Background(), nil, reqs, func(n int) { done = append(done, n) })
 		if err != nil || where != ExecutionLocal || len(results) != 2 {
 			t.Fatalf("%q %d %v", where, len(results), err)
 		}
@@ -485,7 +487,7 @@ func TestSamplerExecution(t *testing.T) {
 			remote: fakeRemote(func(mediasample.Request) (mediasample.Result, error) {
 				return mediasample.Result{}, &mediasample.RemoteError{Status: http.StatusBadRequest, Reason: mediasample.ReasonNodeUnavailable}
 			})}
-		if _, where, err := s.run(context.Background(), reqs, nil); err != nil || where != ExecutionLocal {
+		if _, where, err := s.run(context.Background(), nil, reqs, nil); err != nil || where != ExecutionLocal {
 			t.Fatalf("%q %v", where, err)
 		}
 	})
@@ -494,7 +496,7 @@ func TestSamplerExecution(t *testing.T) {
 			remote: fakeRemote(func(mediasample.Request) (mediasample.Result, error) {
 				return mediasample.Result{}, &mediasample.RemoteError{Status: http.StatusUnprocessableEntity, Reason: mediasample.ReasonInvalidData}
 			})}
-		if _, _, err := s.run(context.Background(), reqs, nil); err == nil {
+		if _, _, err := s.run(context.Background(), nil, reqs, nil); err == nil {
 			t.Fatal("invalid data fell back to local")
 		}
 	})
@@ -504,20 +506,64 @@ func TestSamplerExecution(t *testing.T) {
 			remote: fakeRemote(func(mediasample.Request) (mediasample.Result, error) {
 				return mediasample.Result{}, &mediasample.RemoteError{Status: http.StatusServiceUnavailable, Reason: mediasample.ReasonNodeUnavailable}
 			})}
-		if _, _, err := s.run(context.Background(), reqs, nil); err == nil {
+		if _, _, err := s.run(context.Background(), nil, reqs, nil); err == nil {
 			t.Fatal("transcode_nodes_only ran locally")
 		}
 	})
 	t.Run("transcode only without node", func(t *testing.T) {
 		s := &sampler{settings: settingsMap{SettingExecution: ExecutionTranscodeOnly},
 			nodes: nodeList{}, reservations: &nodepool.Reservations{}, keys: keys, local: ok}
-		if _, _, err := s.run(context.Background(), reqs, nil); !errors.Is(err, errNoNode) {
+		if _, _, err := s.run(context.Background(), nil, reqs, nil); !errors.Is(err, errNoNode) {
 			t.Fatalf("err %v", err)
+		}
+	})
+	t.Run("each window carries a grant for the node", func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), "m.mkv")
+		if err := os.WriteFile(path, []byte("media"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		file := &models.MediaFile{ID: 42, FilePath: path}
+		grants := nodesource.NewGrants(func() string { return "secret" })
+		var seen []nodesource.Grant
+		s := &sampler{settings: settings, nodes: nodeList{node}, reservations: &nodepool.Reservations{}, keys: keys, local: ok, grants: grants,
+			remote: fakeRemote(func(req mediasample.Request) (mediasample.Result, error) {
+				claims, err := grants.Verify(req.SourceGrant)
+				if err != nil {
+					t.Errorf("window grant: %v", err)
+				}
+				seen = append(seen, claims)
+				return mediasample.Result{}, nil
+			})}
+		if _, where, err := s.run(context.Background(), file, reqs, nil); err != nil || where != "node:gpu-1" {
+			t.Fatalf("%q %v", where, err)
+		}
+		if len(seen) != 2 || seen[0].Node != node.ID || seen[0].ID != 42 || seen[0].Path != path || !seen[1].Revision().Same(seen[0].Revision()) {
+			t.Fatalf("grants %+v", seen)
+		}
+
+		// A file that changes between windows fails the job rather than
+		// aligning against two versions.
+		s.remote = fakeRemote(func(mediasample.Request) (mediasample.Result, error) {
+			return mediasample.Result{}, os.WriteFile(path, []byte("replaced media"), 0o600)
+		})
+		if _, _, err := s.run(context.Background(), file, reqs, nil); !errors.Is(err, nodesource.ErrSourceChanged) {
+			t.Fatalf("err %v, want a changed source", err)
+		}
+	})
+	t.Run("a source the node cannot be granted runs locally", func(t *testing.T) {
+		s := &sampler{settings: settings, nodes: nodeList{node}, reservations: &nodepool.Reservations{}, keys: keys, local: ok,
+			grants: nodesourcetest.Granter{Err: nodesource.ErrSourceGone},
+			remote: fakeRemote(func(mediasample.Request) (mediasample.Result, error) {
+				t.Error("the node was asked without a grant")
+				return mediasample.Result{}, nil
+			})}
+		if _, where, err := s.run(context.Background(), &models.MediaFile{ID: 42, FilePath: "/m.mkv"}, reqs, nil); err != nil || where != ExecutionLocal {
+			t.Fatalf("%q %v", where, err)
 		}
 	})
 	t.Run("prefer without node runs locally", func(t *testing.T) {
 		s := &sampler{settings: settingsMap{}, nodes: nodeList{}, reservations: &nodepool.Reservations{}, keys: keys, local: ok}
-		if _, where, err := s.run(context.Background(), reqs, nil); err != nil || where != ExecutionLocal {
+		if _, where, err := s.run(context.Background(), nil, reqs, nil); err != nil || where != ExecutionLocal {
 			t.Fatalf("%q %v", where, err)
 		}
 	})

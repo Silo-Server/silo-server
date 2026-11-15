@@ -26,6 +26,7 @@ const (
 	PathHealthChanged = "/api/internal/nodes/self/health-changed"
 	PathResolve       = "/api/internal/nodes/self/resolve"
 	PathRevokeRecipes = "/api/internal/nodes/self/revoke-recipes"
+	PathSourcesOpen   = "/api/internal/nodes/self/sources/open"
 )
 
 // headerIfNoneMatch is the conditional header a node's configuration poll
@@ -201,6 +202,10 @@ type Resolution struct {
 	// Theme identifies the theme file of a theme conversion, which the
 	// recipe card has no fields for.
 	Theme *ResolvedTheme `json:"theme,omitempty"`
+	// SourceGrant is a fresh source grant for the recipe's media file, or its
+	// theme file, naming the calling node. The node exchanges it at
+	// sources/open before it reads the input.
+	SourceGrant string `json:"source_grant"`
 }
 
 // ResolvedTheme is the theme file a theme conversion token names.
@@ -223,7 +228,8 @@ const (
 	// longer matches the token.
 	ResolveStopped = "stopped"
 	// ResolveSourceChanged (410): the theme file is not the one the token
-	// describes, or the recipe's source is gone.
+	// describes, or the catalog no longer has the recipe's exact media file
+	// (or its theme in an enabled library), or that file is gone.
 	ResolveSourceChanged = "source_changed"
 	// ResolveInvalidToken (403): a remux request without a valid token.
 	ResolveInvalidToken = "invalid_token"

@@ -1232,6 +1232,7 @@ func (m *ArtifactManager) buildOpts(file *models.MediaFile, a *Artifact) playbac
 	m.mu.Unlock()
 	return playback.TranscodeOpts{
 		InputPath:                  file.FilePath,
+		MediaFileID:                file.ID,
 		SessionID:                  playback.DownloadPrepareLogSessionID(a.ID),
 		SourceVideoCodec:           sourceVideoCodec,
 		SourceVideoProfile:         sourceVideoProfile,

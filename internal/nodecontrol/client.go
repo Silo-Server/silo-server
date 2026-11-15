@@ -15,6 +15,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/logstream"
 	"github.com/Silo-Server/silo-server/internal/nodeauth"
 	"github.com/Silo-Server/silo-server/internal/nodepool"
+	"github.com/Silo-Server/silo-server/internal/nodesource"
 	"github.com/Silo-Server/silo-server/internal/opslog"
 )
 
@@ -205,6 +206,33 @@ func (c *Client) Resolve(ctx context.Context, req ResolveRequest) (*Resolution, 
 		return nil, fmt.Errorf("decode resolution: %w", err)
 	}
 	return &resolution, nil
+}
+
+// maxOpenResponseBytes bounds the sources/open answer a node reads: a grant
+// of at most 8 KiB, its path, and a few numbers.
+const maxOpenResponseBytes = 64 << 10
+
+// OpenSource exchanges a source grant at the core's sources/open route, for a
+// job's input opening or for renewal, and returns the core's answer
+// unchecked (nodesource.Opener validates it). A refusal is a
+// *nodesource.StatusError with Op "open", whose Fatal the opener's retries go
+// by. It is the nodesource.OpenFunc of the node's opener.
+func (c *Client) OpenSource(ctx context.Context, grant string) (*nodesource.OpenResponse, error) {
+	body, _ := json.Marshal(nodesource.OpenRequest{Grant: grant}) // a string only
+	resp, err := c.do(ctx, http.MethodPost, PathSourcesOpen, body, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 4096))
+		return nil, &nodesource.StatusError{Op: "open", Status: resp.StatusCode}
+	}
+	var opened nodesource.OpenResponse
+	if err := json.NewDecoder(io.LimitReader(resp.Body, maxOpenResponseBytes)).Decode(&opened); err != nil {
+		return nil, fmt.Errorf("decode source open answer: %w", err)
+	}
+	return &opened, nil
 }
 
 // RevokeRecipes asks the core to withdraw every recipe bound to this node, as

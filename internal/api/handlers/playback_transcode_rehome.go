@@ -13,9 +13,11 @@ import (
 	"syscall"
 
 	"github.com/Silo-Server/silo-server/internal/logredact"
+	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/nodeauth"
 	"github.com/Silo-Server/silo-server/internal/nodepool"
 	"github.com/Silo-Server/silo-server/internal/noderouting"
+	"github.com/Silo-Server/silo-server/internal/nodesource"
 	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/tonemap"
 	"github.com/Silo-Server/silo-server/internal/transcodenode"
@@ -531,10 +533,15 @@ func (h *PlaybackHandler) moveTranscodeToNodeV3(
 		}
 	}
 	req := rehomeStartRequestV3(card, transportID, hwAccel, requestedSegment)
+	grant, err := h.rehomeSourceGrantV3(ctx, node.ID, card)
+	if err != nil {
+		return err
+	}
+	req.SourceGrant = grant
 
 	var response transcodenode.TranscodeStartResponse
 	var status int
-	err := h.tm.WithReconstructSlot(ctx, func() error {
+	err = h.tm.WithReconstructSlot(ctx, func() error {
 		var startErr error
 		response, status, startErr = h.startRemotePlaybackTransport(ctx, node.URL, req)
 		return startErr
@@ -625,6 +632,40 @@ func (h *PlaybackHandler) moveTranscodeToNodeV3(
 
 // rehomeStartRequestV3 is the node start request for a moved transport: the
 // recipe exactly as recorded, resumed where a reconstruction would resume it.
+// rehomeSourceGrantV3 grants node nodeID the source of a moved recipe, as a
+// fresh start grants its file: the grant names the replacement node.
+func (h *PlaybackHandler) rehomeSourceGrantV3(ctx context.Context, nodeID int, card playback.RecipeCard) (string, error) {
+	if h.SourceGrants == nil {
+		return "", nil
+	}
+	file, err := h.rehomeSourceFileV3(ctx, card)
+	if err != nil {
+		return "", err
+	}
+	return nodesource.GrantFile(ctx, h.SourceGrants, nodeID, file)
+}
+
+// rehomeSourceFileV3 is the catalog file a moved recipe rebuilds from. A
+// recipe outlives the catalog row it was made from, so it is the file the
+// catalog still lists at the recipe's path; a file the catalog removed or
+// moved is nodesource.ErrSourceGone, which fails the move to this node.
+func (h *PlaybackHandler) rehomeSourceFileV3(ctx context.Context, card playback.RecipeCard) (*models.MediaFile, error) {
+	if h.fileResolver == nil {
+		return &models.MediaFile{ID: card.MediaFileID, FilePath: card.InputPath}, nil
+	}
+	current, err := h.fileResolver.GetByID(ctx, card.MediaFileID)
+	if isPlaybackFileLookupMissing(err) {
+		return nil, fmt.Errorf("%w: %w", nodesource.ErrSourceGone, err)
+	}
+	if err != nil {
+		return nil, err
+	}
+	if current == nil || current.FilePath != card.InputPath || current.MissingSince != nil {
+		return nil, fmt.Errorf("%w: the catalog no longer lists the recipe's file", nodesource.ErrSourceGone)
+	}
+	return current, nil
+}
+
 func rehomeStartRequestV3(card playback.RecipeCard, transportID, hwAccel string, requestedSegment int) transcodenode.TranscodeStartRequest {
 	req := transcodenode.TranscodeStartRequest{
 		SessionID:                  transportID,

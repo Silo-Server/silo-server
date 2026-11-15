@@ -14,8 +14,10 @@ import (
 	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/downloadprepare"
 	"github.com/Silo-Server/silo-server/internal/logredact"
+	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/nodeauth"
 	"github.com/Silo-Server/silo-server/internal/nodepool"
+	"github.com/Silo-Server/silo-server/internal/nodesource"
 	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/tonemap"
 	"github.com/Silo-Server/silo-server/internal/transcodenode"
@@ -49,11 +51,18 @@ type NodeAwarePreparer struct {
 	// storageFull reports a node over its prepared-file budget or disk
 	// ceiling with nothing left to free; such a node gets no new jobs.
 	storageFull func(nodeID int) bool
+	// sourceGrants grants a node each job's source; nil sends none.
+	sourceGrants nodesource.FileGranter
 }
 
 // SetNodeKeys wires the keyring that signs requests to transcode nodes.
 func (p *NodeAwarePreparer) SetNodeKeys(keys nodeauth.Keyring) {
 	p.nodeKeys = keys
+}
+
+// SetSourceGrants wires the grants every remote job's source is sent with.
+func (p *NodeAwarePreparer) SetSourceGrants(grants nodesource.FileGranter) {
+	p.sourceGrants = grants
 }
 
 // SetStorageGate wires the storage check placement applies to every job.
@@ -227,6 +236,13 @@ func (p *NodeAwarePreparer) PrepareFile(ctx context.Context, artifactID string, 
 		return p.prepareLocally(ctx, artifactID, opts, outputPath)
 	}
 
+	grant, err := nodesource.GrantFile(ctx, p.sourceGrants, node.ID, &models.MediaFile{ID: opts.MediaFileID, FilePath: opts.InputPath})
+	if err != nil {
+		release()
+		slog.WarnContext(ctx, "remote download artifact prepare cannot grant its source; falling back to local", "component", "downloads", "artifact_id", artifactID, "node", node.URL, "error", err)
+		return p.prepareLocally(ctx, artifactID, opts, outputPath)
+	}
+	request.SourceGrant = grant
 	slog.InfoContext(ctx, "dispatching download artifact prepare", "component", "downloads", "artifact_id", artifactID, "node", node.URL)
 	observer := prepareObserverFrom(ctx)
 	nodeID := node.ID

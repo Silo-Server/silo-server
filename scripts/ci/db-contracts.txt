@@ -1170,3 +1170,7 @@
 ./internal/nodecontrol TestRequireNodeWithTheCredentialRegistryDB
 ./internal/opslog TestInsertNodeBatchStampsTheNodeAndKeepsGoodRowsDB
 ./internal/opslog TestInsertNodeBatchClampsTimestampsDB
+
+# A transcode node's source grant is honored only while the catalog has its
+# exact media file: the row id, at exactly the granted path, not missing.
+./internal/scanner TestFileRepositoryIsActiveFileDB

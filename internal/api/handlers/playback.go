@@ -32,6 +32,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/nodeauth"
 	"github.com/Silo-Server/silo-server/internal/nodepool"
 	"github.com/Silo-Server/silo-server/internal/noderouting"
+	"github.com/Silo-Server/silo-server/internal/nodesource"
 	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/playback/connectionstore"
 	"github.com/Silo-Server/silo-server/internal/settingscontract"
@@ -206,7 +207,10 @@ type PlaybackHandler struct {
 	NodePlanner   nodepool.SessionPlanner // optional; enables proxy/transcode node selection
 	JWTSecret     string                  // needed for signing stream tokens
 	// NodeKeys signs calls to transcode nodes with each node's own key.
-	NodeKeys        nodeauth.Keyring
+	NodeKeys nodeauth.Keyring
+	// SourceGrants grants transcode nodes the source of each start and move;
+	// nil sends none.
+	SourceGrants    nodesource.FileGranter
 	StreamTelemetry *streamtelemetry.Registry // local observation-only telemetry
 	// StreamDeny revokes a session's stream tokens before they expire (see
 	// docs/architecture/restart-resilient-playback.md). Nil-safe: without Redis

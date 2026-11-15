@@ -19,6 +19,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/netaccess"
 	"github.com/Silo-Server/silo-server/internal/nodeauth"
 	"github.com/Silo-Server/silo-server/internal/nodepool"
+	"github.com/Silo-Server/silo-server/internal/nodesource"
 	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/ratelimit"
 	"github.com/Silo-Server/silo-server/internal/ratingsources"
@@ -170,9 +171,11 @@ type Dependencies struct {
 	NodePlanner            nodepool.SessionPlanner
 	JWTSecret              string
 	// NodeKeys signs calls to transcode nodes; see nodeauth.Keyring.
-	NodeKeys    nodeauth.Keyring
-	Recommender recommendations.Recommender
-	RecWorker   *recommendations.Worker
+	NodeKeys nodeauth.Keyring
+	// SourceGrants grants transcode nodes the sources they start on.
+	SourceGrants *nodesource.Grants
+	Recommender  recommendations.Recommender
+	RecWorker    *recommendations.Worker
 	// RecommendationReader serves /Movies/Recommendations from the cached
 	// rows the native API reads; nil answers an empty list.
 	RecommendationReader RecommendationRowReader
