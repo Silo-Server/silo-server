@@ -226,7 +226,9 @@ func audiobookTagTitle(title, album, series, position string) string {
 		}
 		return title
 	}
-	if t == "" || t == a {
+	// An album that repeats the title says nothing about its prefix; only
+	// the position tag can then vouch for one.
+	if t == "" || (t == a && s == "") {
 		return title
 	}
 	if rest, ok := strings.CutPrefix(a, t); ok && audiobookSubtitleSeparatorRE.MatchString(rest) {
@@ -320,10 +322,11 @@ func audiobookSeriesPrefixedTitle(title, album, series, position string) string 
 	if a == "" {
 		return kept
 	}
-	if rest == a || sameTitleWords(rest, a) {
-		return album
-	}
-	if extra, ok := cutTitleWordsPrefix(rest, a); ok && (sameTitleWords(extra, series) || sameTitleWords(extra, a)) {
+	// Words are compared here, so punctuation the title dropped does not
+	// hide an album it otherwise repeats.
+	restWords, albumWords := titleWords(rest), titleWords(a)
+	if rest == a || albumWords != "" && (restWords == albumWords ||
+		restWords == albumWords+" "+titleWords(series) || restWords == albumWords+" "+albumWords) {
 		return album
 	}
 	if extra, ok := cutTitleWordsPrefix(a, rest); ok {
@@ -375,13 +378,6 @@ func cutTitleWordsPrefix(text, prefix string) (extra string, ok bool) {
 		return "", false
 	}
 	return extra, true
-}
-
-// sameTitleWords reports whether a and b are the same words, ignoring case
-// and punctuation, and are not empty.
-func sameTitleWords(a, b string) bool {
-	words := titleWords(a)
-	return words != "" && words == titleWords(b)
 }
 
 // audiobookTagNarrators picks the narrators from the narrator sources as the

@@ -1096,6 +1096,11 @@ func TestAudiobookTagTitle(t *testing.T) {
 		{"Saga Name 2 - ", "Book Title", "Saga Name", "", "Saga Name 2 -"},
 		// The album agrees with the title whatever its punctuation.
 		{"Saga Name 2 - Her Friends Book", "Her Friend\u2019s Book", "Saga Name", "", "Her Friend\u2019s Book"},
+		{"Saga Name 2 - Her Friends Book Saga Name", "Her Friend\u2019s Book", "Saga Name", "", "Her Friend\u2019s Book"},
+		// An album that repeats the whole title leaves the prefix to the
+		// position tag.
+		{"Saga Name 2 - Book Title", "Saga Name 2 - Book Title", "Saga Name", "2", "Book Title"},
+		{"Saga Name 2 - Book Title", "Saga Name 2 - Book Title", "Saga Name", "", "Saga Name 2 - Book Title"},
 		// A numbered prefix that names the series among other words.
 		{"The Saga Name 2 - Book Title", "Book Title", "Saga Name;", "", "Book Title"},
 		// A prefix carrying the position tag's number was composed from the
