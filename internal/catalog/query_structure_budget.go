@@ -75,17 +75,23 @@ func ValidateQueryStructure(definitions ...QueryDefinition) error {
 	return nil
 }
 
-// encodedQueryValueLen is the compact JSON length of a decoded value. HTML
-// characters stay unescaped so it matches compactQueryJSONLen of the same value
-// as PostgreSQL jsonb returns it.
-func encodedQueryValueLen(v any) (int, error) {
+// encodeQueryJSON encodes a decoded definition or value with HTML characters
+// unescaped, so it measures the same as compactQueryJSONLen of the value as
+// PostgreSQL jsonb returns it, and costs the same in every budget check.
+func encodeQueryJSON(v any) ([]byte, error) {
 	var buf bytes.Buffer
 	enc := json.NewEncoder(&buf)
 	enc.SetEscapeHTML(false)
 	if err := enc.Encode(v); err != nil {
-		return 0, err
+		return nil, err
 	}
-	return buf.Len() - 1, nil // Encode ends with a newline.
+	return bytes.TrimSuffix(buf.Bytes(), []byte("\n")), nil // Encode ends with a newline.
+}
+
+// encodedQueryValueLen is the compact JSON length of a decoded value.
+func encodedQueryValueLen(v any) (int, error) {
+	encoded, err := encodeQueryJSON(v)
+	return len(encoded), err
 }
 
 // compactQueryJSONLen is the length of a raw JSON value without insignificant
@@ -184,7 +190,7 @@ func ValidateLibraryCollectionQueryBudget(libraryID int, libraryIDs []int, sourc
 	}
 	definitions := [][]byte{source}
 	for _, overlay := range overlays {
-		raw, err := json.Marshal(overlay)
+		raw, err := encodeQueryJSON(overlay)
 		if err != nil {
 			return err
 		}
@@ -202,7 +208,7 @@ func validateCollectionQueryComposition(source, display string, overlay QueryDef
 	if err := ValidateQueryStructure(overlay); err != nil {
 		return err
 	}
-	rawOverlay, err := json.Marshal(overlay)
+	rawOverlay, err := encodeQueryJSON(overlay)
 	if err != nil {
 		return err
 	}

@@ -181,7 +181,7 @@ func (r *CatalogResolver) resolveSmartCollectionCursorWithDisplay(ctx context.Co
 	if err := ValidateQueryStructure(def, req.Query); err != nil {
 		return nil, err
 	}
-	raw, err := json.Marshal(def)
+	raw, err := encodeQueryJSON(def)
 	if err != nil {
 		return nil, err
 	}

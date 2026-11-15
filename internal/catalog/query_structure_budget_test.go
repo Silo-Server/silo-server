@@ -240,3 +240,18 @@ func TestQueryStructureValueBytesMatchStoredForm(t *testing.T) {
 		t.Fatalf("raw HTML value: %v", err)
 	}
 }
+
+// An overlay or saved definition with HTML characters costs the same in the
+// composition checks as in ValidateQueryStructure.
+func TestQueryStructureCompositionKeepsHTMLUnescaped(t *testing.T) {
+	overlay := QueryDefinition{Groups: []QueryGroup{{Rules: []QueryRule{{Field: "title", Op: "contains", Value: strings.Repeat("<", 11000)}}}}}
+	if err := ValidateQueryStructure(overlay); err != nil {
+		t.Fatalf("decoded overlay: %v", err)
+	}
+	if err := validateCollectionQueryComposition("", "", overlay); err != nil {
+		t.Fatalf("personal composition: %v", err)
+	}
+	if err := ValidateLibraryCollectionQueryBudget(1, nil, nil, overlay); err != nil {
+		t.Fatalf("library composition: %v", err)
+	}
+}

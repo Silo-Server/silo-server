@@ -101,7 +101,7 @@ display rules and empty groups still count. Oversized new or changed definitions
 validation; metadata-only edits of legacy definitions remain usable. A manual or synced
 collection's stored definition is dormant and never blocks an edit.
 
-One list request shares a ledger across all owners: at most 128 distinct effective count
+One list request shares a ledger across the personal collections of all owners: at most 128 distinct effective count
 definitions, 16,384 rules and four seconds, including construction and execution. Rejected
 legacy definitions also consume construction entries, keyed by owner and collection, so
 invalid rows cannot skip admission. Once 128 definitions are admitted, the rest of that
@@ -115,6 +115,11 @@ never retried. A batch that fails for another reason, such as a data error in on
 definition, is counted again one definition at a time, each through admission.
 Each count statement runs in a read-only transaction with a server statement deadline;
 cancellation retains its admission lease through connection cleanup.
+
+Smart server collection counts for a viewer whose access narrows the catalog
+(`ViewerCollectionCounts`) are outside this ledger and admission. They run at most four
+batches at a time per request, without the read-only transaction or statement deadline,
+and retry a failed batch one statement at a time.
 
 These are starting defaults, not measured production capacity limits. They limit query
 work, never saved collection count or membership. A smart query's existing ordering and
