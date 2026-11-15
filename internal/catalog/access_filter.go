@@ -1,8 +1,11 @@
 package catalog
 
 import (
+	"context"
 	"fmt"
 	"strings"
+
+	"github.com/jackc/pgx/v5"
 
 	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/imagesize"
@@ -361,6 +364,35 @@ func appendEpisodeParentLibraryAccess(seriesIDExpr string, filter AccessFilter, 
 
 func appendEpisodeParentLibraryAccessByEpisodeID(episodeIDExpr string, filter AccessFilter, conditions *[]string, args *[]any, argIdx *int) {
 	appendEpisodeParentLibraryAccess(episodeParentSeriesIDExpr(episodeIDExpr), filter, conditions, args, argIdx)
+}
+
+// LibraryOverlapsDisabled reports whether a book in the library is also in
+// one of the profile's disabled libraries, which hides it from the profile.
+// Precomputed per-library aggregates count such a book, so a profile they
+// overlap takes the live query. It is an access answer, so it is read on
+// every request rather than cached. The disabled libraries' memberships drive
+// it, each probing this library through the primary key, and it stops at the
+// first overlap.
+func LibraryOverlapsDisabled(ctx context.Context, db interface {
+	QueryRow(context.Context, string, ...any) pgx.Row
+}, libraryID int, disabled []int) (bool, error) {
+	if len(disabled) == 0 {
+		return false, nil
+	}
+	var overlap bool
+	err := db.QueryRow(ctx, `
+		SELECT EXISTS (
+			SELECT 1 FROM media_item_libraries hidden
+			WHERE hidden.media_folder_id = ANY($2)
+			  AND EXISTS (
+				SELECT 1 FROM media_item_libraries here
+				WHERE here.content_id = hidden.content_id AND here.media_folder_id = $1
+			  )
+		)`, libraryID, disabled).Scan(&overlap)
+	if err != nil {
+		return false, fmt.Errorf("checking disabled library overlap: %w", err)
+	}
+	return overlap, nil
 }
 
 // ApplySectionAccessFilter applies non-library access constraints to section queries.

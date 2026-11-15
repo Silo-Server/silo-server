@@ -2357,6 +2357,10 @@ func newChiRouter(deps Dependencies) chi.Router {
 		if appCtx == nil {
 			appCtx = context.Background()
 		}
+		// The audiobook Authors, Narrators and Series tabs read precomputed
+		// groups; the periodic refresh catches enrichment and edits.
+		groupStats := catalog.NewAudiobookGroupStatsRefresher(deps.DB, 10*time.Minute, time.Minute)
+		go groupStats.Run(appCtx)
 		// A scan that adds or removes titles publishes scan_complete with the
 		// library ID. Observing the publish, rather than subscribing, counts
 		// each scan once on the node that ran it, with or without Redis.
@@ -2370,6 +2374,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 				}
 				if libraryID, err := strconv.Atoi(event.Payload); err == nil {
 					scheduler.LibraryChanged(libraryID)
+					groupStats.LibraryChanged(libraryID)
 				}
 			})
 			go scheduler.Run(appCtx)

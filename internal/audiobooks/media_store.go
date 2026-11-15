@@ -1169,32 +1169,6 @@ func (s *ABSMediaStore) RefreshAuthorCounts(ctx context.Context, minInterval tim
 	return nil
 }
 
-// libraryOverlapsDisabled reports whether a book in the library is also in
-// one of the profile's disabled libraries. The author view counts such a book
-// but the profile must not see it. It is an access answer, so it is read on
-// every request rather than cached. The disabled libraries' memberships drive
-// it (idx_item_libraries_folder_seen_content), each probing this library
-// through the primary key, and it stops at the first overlap.
-func (s *ABSMediaStore) libraryOverlapsDisabled(ctx context.Context, libraryID int64, disabled []int) (bool, error) {
-	if len(disabled) == 0 {
-		return false, nil
-	}
-	var overlap bool
-	err := s.Pool.QueryRow(ctx, `
-		SELECT EXISTS (
-			SELECT 1 FROM media_item_libraries hidden
-			WHERE hidden.media_folder_id = ANY($2)
-			  AND EXISTS (
-				SELECT 1 FROM media_item_libraries here
-				WHERE here.content_id = hidden.content_id AND here.media_folder_id = $1
-			  )
-		)`, int(libraryID), disabled).Scan(&overlap)
-	if err != nil {
-		return false, fmt.Errorf("abs_media_store: check disabled library overlap: %w", err)
-	}
-	return overlap, nil
-}
-
 // ListLibraryAuthors returns one page of distinct audiobook authors plus the
 // total author count for the library. It reads the precomputed
 // abs_audiobook_author_counts materialized view keyed by media_folder_id.
@@ -1225,7 +1199,7 @@ func (s *ABSMediaStore) ListLibraryAuthors(ctx context.Context, libraryID int64,
 	if access.MaxContentRating != "" || len(access.ExcludedMediaTypes) > 0 {
 		return s.listLibraryAuthorsLive(ctx, libraryID, limit, offset, sortBy, sortDesc, access)
 	}
-	if overlap, err := s.libraryOverlapsDisabled(ctx, libraryID, access.DisabledLibraryIDs); err != nil {
+	if overlap, err := catalog.LibraryOverlapsDisabled(ctx, s.Pool, int(libraryID), access.DisabledLibraryIDs); err != nil {
 		return nil, 0, err
 	} else if overlap {
 		return s.listLibraryAuthorsLive(ctx, libraryID, limit, offset, sortBy, sortDesc, access)
