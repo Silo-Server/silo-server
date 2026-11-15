@@ -333,10 +333,11 @@ func (s *Service) removeLocalListItem(ctx context.Context, store userstore.UserS
 	return b.localRemove(ctx, store, conn.ProfileID, promoted[0])
 }
 
-// heldTitleTMDBIDs returns every TMDB ID ("tmdb:550") the titles behind the
-// shadow rows have held. TMDB can repoint a title while the provider keeps
-// listing it under the other ID, and a row's key names only one of them.
-func (s *Service) heldTitleTMDBIDs(ctx context.Context, conn Connection, b listBinding, states []ListItemState) (map[WatchlistTitle][]string, error) {
+// heldTitleIDs returns every ID ("tmdb:550", "imdb:tt0137523") the titles
+// behind the shadow rows have held, from their entries and from what the rows
+// kept. TMDB can repoint a title while the provider keeps listing it under
+// the other ID, and a row's key names only one of them.
+func (s *Service) heldTitleIDs(ctx context.Context, conn Connection, b listBinding, states []ListItemState) (map[WatchlistTitle][]string, error) {
 	titles := s.watchlistTitles(b)
 	if titles == nil {
 		return nil, nil
@@ -361,7 +362,7 @@ func (s *Service) heldTitleTMDBIDs(ctx context.Context, conn Connection, b listB
 			continue
 		}
 		for _, id := range append(slices.Clone(held[title]), state.TitleIDs...) {
-			if strings.HasPrefix(id, "tmdb:") && !slices.Contains(out[title], id) {
+			if !slices.Contains(out[title], id) {
 				out[title] = append(out[title], id)
 			}
 		}
@@ -420,6 +421,7 @@ func (s *Service) reconcileLocalListTitles(ctx context.Context, conn Connection,
 			if err := s.handOverListTitle(ctx, b, state, promoted[0], tracked[promoted[0]]); err != nil {
 				return err
 			}
+			tracked[promoted[0]] = true
 		}
 		// The remote side goes first: a row left local-removed but remote
 		// present would send the provider a removal.

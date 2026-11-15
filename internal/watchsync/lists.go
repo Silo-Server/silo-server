@@ -571,7 +571,7 @@ func (s *Service) reconcileMissingRemoteListItems(ctx context.Context, conn Conn
 			missing = append(missing, state)
 		}
 	}
-	heldIDs, err := s.heldTitleTMDBIDs(ctx, conn, b, missing)
+	heldIDs, err := s.heldTitleIDs(ctx, conn, b, missing)
 	if err != nil {
 		return err
 	}
