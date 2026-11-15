@@ -643,6 +643,9 @@ type ItemPerson struct {
 type AudiobookSeriesMembership struct {
 	Name  string
 	Index *float64
+	// Key is LOWER(series_name) as the database computes it: the series
+	// identity the ABS surface groups, filters, and looks up by.
+	Key string
 }
 
 // MediaItem represents a row in the media_items table.

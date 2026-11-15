@@ -35,6 +35,11 @@
 ./internal/api/handlers TestPersonalListPagesKeepVisibleEpisodesDB
 ./internal/catalog TestPersonalListPageFollowsAccessDB
 ./internal/audiobooks TestABSListsLeaveOutBooksInNoLibraryDB
+./internal/audiobooks TestABSLibraryItemsFiltersAndSortDB
+./internal/audiobooks TestABSSeriesIdentityAndContinueListeningDB
+./internal/audiobooks TestABSCollapsedPagesAndNarrowLookupsDB
+./internal/audiobooks TestABSAuthorCountsRefreshOnOneConnectionPoolDB
+./internal/audiobooks TestABSAuthorsLeaveOutABookJustAddedToADisabledLibraryDB
 ./internal/api/handlers TestAdminStatsLeaveOutFilesAndItemsHeldByRemovalGraceDB
 ./internal/sections TestRuleRowsReadTheViewersWatchStatePostgres
 ./internal/sections TestSmartCollectionRowWithDisplayFilterReadsTheViewersWatchStatePostgres
@@ -121,6 +126,8 @@
 
 # Episode collection counts name exactly the episodes their cursor pages list, under every rule and access limit.
 ./internal/catalog TestEpisodeCatalogCountsMatchCursorPagesPostgres
+./internal/catalog TestEpisodeCatalogRefreshWaitsForAnEpisodeEditPostgres
+./internal/catalog TestEpisodeCatalogRefreshSerializesFileChangesPostgres
 
 # PostgreSQL search keeps typo matches that contain every query word and ranks
 # titles starting with the query first, on the cursor and offset paths. Search
@@ -129,6 +136,10 @@
 ./internal/catalog TestSearchRelevancePostgres
 ./internal/catalog TestSearchTextFoldMatchesGoPostgres
 ./internal/catalog TestFoldSearchDiacriticsMigrationPostgres
+
+# Sorting by latest episode added works when episodes can appear: mixed search
+# and the episode scope, in search and browse, with episodes and movies last.
+./internal/catalog TestSortLatestEpisodeAddedWithEpisodesDB
 
 # Section and Smart collection rule fields and operators compile to working SQL.
 ./internal/catalog TestRuleFieldsFilterCatalogDB
@@ -167,6 +178,22 @@
 # A monitored rename of a book folder keeps the book: the old path is
 # reconciled first, and the removal grace holds the book for the new path.
 ./internal/scanner TestScanSubtreeAudiobookRenameKeepsBookDB
+# Two copies of one recording on disk are two items; only a moved folder reuses one.
+./internal/scanner TestScanAudiobookSecondCopyIsItsOwnItemDB
+
+# Subtree scans of a book folder and of the folder above it keep the book's
+# item, and the folder's own audio becomes a book beside it.
+./internal/scanner TestScanSubtreeAudiobookKeepsSubfolderBookBesideFolderBookDB
+
+# Two audiobook scans of one book at once: a scan that walked the book before
+# another scan indexed a part neither marks that part missing nor rewrites the
+# book without it; a newer scan still replaces an older alias scan's parts;
+# a part indexed again while a scan is marking it missing stays present; and
+# a disc book's parts are named by their path in the book, not their file name.
+./internal/scanner TestScanFileAudiobookKeepsPartsIndexedByConcurrentScanDB
+./internal/scanner TestScanFileAudiobookNewerAliasInventoryWinsDB
+./internal/scanner TestScanFileAudiobookKeepsPartRestoredWhileMarkingDB
+./internal/scanner TestScanFileAudiobookDiscPartsAgainstConcurrentRowDB
 
 # A rescan of a retagged, unmatched ebook keeps the fields and author credits an
 # admin locked, including locked fields left empty.
@@ -238,6 +265,8 @@
 ./internal/jellycompat TestApplyListFileFieldsDB
 ./internal/jellycompat TestLoginAccountNameWithHashDB
 ./internal/jellycompat TestRevokedCompatSessionStaysDeletedPostgres
+./internal/jellycompat TestDeletedProfileCompatSessionsEndPostgres
+./internal/jellycompat TestSignInRacingProfileDeleteKeepsNoSessionPostgres
 ./internal/jellycompat TestDurableCompatPlaybackStoreUpdateRejectionAcrossReplicas
 ./internal/jellycompat TestDurableCompatPlaybackStoreDropsRejectedPendingUpdate
 ./internal/jellycompat TestDurableCompatPlaybackStoreRetiresUpstreamSessionAcrossReplicas
@@ -440,6 +469,7 @@
 ./internal/markers TestContributionStoreAmendSendsManualClears
 ./internal/taskmanager/tasks TestContributeMarkersTaskDoesNotReselectDeclinedFiles
 ./internal/trickplay TestClaimPublishAndServeDB
+./internal/trickplay TestClaimTakesRegeneratedThenNewestDB
 ./internal/trickplay TestExternalDeliveryConfirmationDB
 ./internal/trickplay TestReconcileSchedulesContinuationAfterReleasingClusterLockDB
 ./internal/trickplay TestReconcileRequeuesSheetsWhoseToneMapSourceChangedDB
@@ -489,6 +519,8 @@
 # Request cleanup, prepared downloads and user-store transactions.
 ./internal/requests TestReplaceFailedIsScopedToRequesterDatabase
 ./internal/requests TestDeleteFailedRequestDatabase
+./internal/requests TestClaimedTargetWritesNeedTheClaimDatabase
+./internal/requests TestDeleteTargetWaitsForAConcurrentReclaimDatabase
 ./internal/requests TestMarkAvailableLeavesARetryResendingATierDatabase
 ./internal/requests TestListDownloadingRequestsOrderDatabase
 ./internal/requests TestRecordSubmissionReplacesFailedTargetDatabase
@@ -498,6 +530,7 @@
 ./internal/downloads TestParkedDownloadIsNotServedOrPreparedFromItsOldFileDB
 ./internal/downloads TestRegistrationRefusesAFileOfAnotherTitleDB
 ./internal/downloads TestRegistrationAndRetitleSerializeOnTheFileRowDB
+./internal/downloads TestDeadAccountTransferReleasesItsConcurrentSlotDB
 ./internal/downloads TestManagedRequestRegistersNothingWhenAFileLeftItsTitleDB
 ./internal/downloads TestMonitorSyncSkipsAnEpisodeWhoseFileLeftItsTitleDB
 ./internal/downloads TestSubscriptionSyncPagePostgres
@@ -513,9 +546,11 @@
 ./internal/downloads TestPreparedMonitorSyncQueuesNothingForAStaleMonitorDB
 ./internal/downloads TestPreparedSeasonReplacementCountsTowardConcurrentLimitDB
 ./internal/downloads TestPreparedReplacementQuotaAccountingDB
+./internal/downloads TestReadyArtifactSingleCreateTakesNoConcurrentSlotDB
 ./internal/downloads TestPreparedReplacementCountsTheEntryStatusUnderTheLockDB
 ./internal/downloads TestPreparedReplacementRefusesAStaleGuardUnderTheLockDB
 ./internal/downloads TestManagedBatchOverConcurrentCapDB
+./internal/downloads TestDeviceReportedTransfersHoldNoConcurrentSlotDB
 ./internal/downloads TestAttachPreparationsPostgres
 ./internal/downloads TestFailedPreparationRefreshIsSharedPostgres
 ./internal/downloads TestPreparationControlsPauseResumeAndCancel
@@ -641,6 +676,16 @@
 # An admin metadata edit that clears a field stores NULL, takes a cleared
 # rating's per-source row with it, and recomputes series air dates.
 ./internal/catalog TestMetadataUpdateClearsNullableFieldsDB
+
+# An admin's provider-ID edit replaces or removes the item's durable provider
+# ID with the column, and skips one another item already holds.
+./internal/catalog TestMetadataUpdateKeepsDurableProviderIDsDB
+
+# A provider-ID drift repair and an automatic rebind wait for an admin's ID
+# edit on the same item instead of deadlocking with it.
+./internal/metadata TestProviderIDDriftRepairWaitsForItemEditPostgres
+./internal/metadata TestProviderIDDriftRepairSkipsChangedOwnerPostgres
+./internal/metadata TestRebindWaitsForItemEditPostgres
 
 # Watch-provider events carry catalog titles to plugins.
 ./internal/watchsync TestGetMediaTitlesDB
@@ -822,6 +867,10 @@
 ./internal/catalog TestLetterIndexMatchesCursorPagesPostgres
 ./internal/catalog TestLetterIndexEpisodesMatchCursorPagesPostgres
 
+# An episode's Sort Title decides its browse order and A–Z letter, falling back
+# to its title.
+./internal/catalog TestEpisodeSortTitleFilesEpisodeBrowsePostgres
+
 # Deleting a library removes its ID from access groups, account overrides and
 # invitations, without widening an emptied list; a write keeps only existing
 # libraries, even racing the delete; the migration repairs earlier deletes.
@@ -835,6 +884,8 @@
 
 # AI metadata translations never replace provider or manual localized text.
 ./internal/catalog TestAITranslationNeverOverwritesProviderOrManualText
+./internal/catalog TestPlainAITranslationFillsOnlyEmptyFields
+./internal/catalog TestAITranslationOfChangedSourceIsDropped
 
 # A provider refresh with no translation clears only a copy of the base item's text.
 ./internal/catalog TestProviderUpsertClearsCopiedBaseTextOnly
@@ -980,9 +1031,31 @@
 # An audiobook enrichment match keeps the fields an admin locked.
 ./internal/audiobooks TestPersistKeepsAdminLockedFieldsDB
 
+# Audiobook enrichment failures back off, honor retry-after, and stop at a
+# terminal failed outcome; failures do not reset the no-match count.
+./internal/audiobooks TestAudiobookEnrichmentRetryStateDB
+# One node sweeps at a time, and a rate-limited provider is left alone for the
+# rest of the sweep.
+./internal/audiobooks TestAudiobookEnrichmentSweepRateLimitDB
+
+# Audiobook enrichment loads the tagged narrators and series position its
+# candidate checks compare against.
+./internal/audiobooks TestClaimBatchLoadsNarratorsAndSeriesPositionDB
+
 # An audiobook rescan keeps the authors and narrators an admin locked with the
 # crew lock.
 ./internal/scanner TestAudiobookRescanKeepsCrewLockedCreditsDB
+./internal/scanner TestAudiobookRegroupKeepsContentIDsDB
+./internal/scanner TestAudiobookUnreadableDiscKeepsIndexedBookDB
+
+# A provider match owns an audiobook's year, genres and credits: a rescan only
+# fills what is empty, and the match keeps the tag narrator and the book's own
+# cover, and a renamed folder of a matched book keeps its item. Audiobooks
+# without a provider match show in the unmatched list.
+./internal/scanner TestAudiobookRescanKeepsProviderMatchDB
+./internal/scanner TestAudiobookRenamedFolderFindsMatchedItemDB
+./internal/audiobooks TestPersistKeepsTagNarratorAndLocalCoverDB
+./internal/api/handlers TestUnmatchedItemsListsAudiobooksWithoutProviderMatchDB
 
 # Dashboard egress splits by stream node and API server without adding the
 # per-node rows to the total, and a wide bucket's split comes from its peak minute.
@@ -1162,3 +1235,7 @@
 ./internal/catalog TestExternalIDLookupSkipsItemsWithAnotherTMDBIDDB
 ./internal/catalog TestResolveProviderAliasesSkipsItemsWithAnotherTMDBIDDB
 ./internal/watchlist TestLibraryMatchesUsesTheTitlesRetainedIDsDB
+
+# Smart collection collage records: a refresh deletes the collection's records
+# nobody refreshed for a week, with or without a collage, and keeps the rest.
+./internal/catalog TestSmartCollageRecordsRetireWhenUnrefreshedDB

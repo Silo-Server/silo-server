@@ -343,16 +343,28 @@ func (c *SubtitleCache) serveWindowedSUP(w http.ResponseWriter, r *http.Request,
 	w.Header().Set("Content-Type", "application/octet-stream")
 	w.Header().Set("Cache-Control", "no-store")
 	cachedPath, _, cached := c.cachedEntryPath(opts.InputPath, opts.TrackIndex)
+	warm := c.sourced(extract)
 	// A window open to the end is most of the track: the cached .sup answers
 	// it at once, where the source would be read whole first.
 	if !cached || opts.DurationSeconds > 0 {
-		if served, err := c.serveWindowFromSource(r.Context(), w, opts, extract); served {
+		served, err := c.serveWindowFromSource(r.Context(), w, opts, extract)
+		if served {
 			if !cached {
 				// As after a demuxed window: keep the track and cache its .sup
 				// for the windows to come.
-				c.WarmInBackground(opts, c.sourced(extract))
+				c.WarmInBackground(opts, warm)
 			}
 			return err
+		}
+		if errors.Is(err, errSlowWindowRead) {
+			// Reading every cue of the track the same way would take far
+			// longer, and its random reads would starve the playback
+			// stream reading the same file; the demux reads it in order.
+			// A kept track whose local copy was slow to fetch is kept
+			// again this way, as every warm did before the index.
+			warm = func(ctx context.Context, opts StreamExtractOpts) error {
+				return c.demuxAndKeep(ctx, opts, extract)
+			}
 		}
 	}
 	if cached {
@@ -364,7 +376,7 @@ func (c *SubtitleCache) serveWindowedSUP(w http.ResponseWriter, r *http.Request,
 			opts = windowFromCachedSup(opts, firstCue)
 		}
 	} else {
-		c.WarmInBackground(opts, c.sourced(extract))
+		c.WarmInBackground(opts, warm)
 	}
 
 	w.WriteHeader(http.StatusOK)

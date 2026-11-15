@@ -1,3 +1,4 @@
+import { t } from "@/i18n";
 import {
   captureProfileRequestContext,
   isCapturedProfileAuthorityActive,
@@ -56,7 +57,7 @@ export async function mintPlaybackControlSocketTicket(
     ticket.protocol !== PLAYBACK_CONTROL_SOCKET_PROTOCOL ||
     !/^[A-Za-z0-9_-]{43}$/.test(ticket.ticket)
   ) {
-    throw new Error("Invalid playback control credential.");
+    throw new Error(t("web.common.errors.playbackControlCredentialInvalid"));
   }
   return ticket;
 }

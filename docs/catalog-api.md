@@ -115,8 +115,10 @@ A partial last word still matches, which keeps typeahead working. A name
 written without separators, as many Chinese, Japanese, and Korean names are,
 matches only from its start. Only the first eight distinct words count, and a
 word repeated exactly, with the same case, counts once. `%` and `_` are literal. Case-insensitive exact name
-matches come first;
-other matches sort by name, with person ID breaking ties. Ranking happens before
+matches come first. Other matches sort by how many credits the person has that
+the viewer can see within `media_scope`, most first, then by name, with person
+ID breaking ties. A query that matches more names than the server ranks, such as
+a single letter, sorts its other matches by name only. Ranking happens before
 applying the limit.
 
 The optional `media_scope` parameter limits results to people credited on items
@@ -724,8 +726,9 @@ Unknown rule fields and unsupported operators return `422`.
 `name_prefix` matches the start of the key title sorting uses: the sort title,
 or the title when no sort title is set. "The Hobbit" with sort title
 "Hobbit, The" matches `h`, not `t` or `the`. Jellyfin's `NameStartsWith`
-follows the same rule. The one exception is recently added TV, which also
-matches an episode's own title so episode cards can be found by name.
+follows the same rule, except in an Episode browse, which matches the
+episode's title. Recently added TV also matches an episode's own title so
+episode cards can be found by name.
 
 Both operations return shared catalog cards, `page.next_cursor`, `page.has_more`,
 `total`, `total_exact`, and `window_cursor`. Send `next_cursor` unchanged as
@@ -1074,6 +1077,19 @@ series on the page, not the size of the library.
 
 The web client draws these counts as the Availability card overlay. Apple and
 Android clients can ignore the field until they draw it.
+
+## Season order
+
+`GET /api/v2/catalog/series/{id}/seasons` returns seasons by ascending
+`season_number`. Specials are season `0` (`is_specials` is `true`), so they come
+first, ahead of season 1. Clients list seasons in this order and label season `0`
+"Specials". The Jellyfin compatibility surface lists a series' seasons the same way.
+
+List order is not selection order. A client that opens a series on a season picks
+it from `play_season_number` (see [Play target season](#play-target-season)) or the
+viewer's progress, and otherwise the first numbered season: a series with specials
+does not open on them just because they are listed first. Play targets, Next Up and
+Continue Watching apply their own rules for specials and do not follow list order.
 
 ## Season-list artwork
 

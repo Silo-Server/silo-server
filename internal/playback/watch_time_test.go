@@ -99,6 +99,56 @@ func TestWatchTimeObserve(t *testing.T) {
 	}
 }
 
+func TestWatchTimeCredit(t *testing.T) {
+	type sample struct {
+		at       float64 // seconds after the play began
+		position float64
+		listened float64
+	}
+	cases := []struct {
+		name       string
+		samples    []sample
+		wantStart  float64
+		wantPlayed float64
+	}{
+		{
+			// The sync after a scrub carries the time listened on both sides
+			// of it, which position alone would discard as a seek.
+			name:       "listening around a seek is credited",
+			samples:    []sample{{21, 191, 21}, {41, 211.5, 20.5}, {70, 1943.5, 29}},
+			wantStart:  170,
+			wantPlayed: 70.5,
+		},
+		{
+			name:       "a report cannot claim more than its interval held",
+			samples:    []sample{{20, 20, 20}, {40, 40, 600}},
+			wantPlayed: 20 + 20 + watchTimeSlackSeconds,
+		},
+		{
+			name:       "a negative report credits nothing",
+			samples:    []sample{{10, 10, -5}},
+			wantStart:  10,
+			wantPlayed: 0,
+		},
+	}
+
+	base := time.Date(2026, 1, 1, 20, 0, 0, 0, time.UTC)
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var w WatchTime
+			for _, s := range tc.samples {
+				w.Credit(s.position, s.listened, base, base.Add(time.Duration(s.at*float64(time.Second))))
+			}
+			if math.Abs(w.StartPosition-tc.wantStart) > 1e-9 {
+				t.Errorf("StartPosition = %v, want %v", w.StartPosition, tc.wantStart)
+			}
+			if math.Abs(w.PlayedSeconds-tc.wantPlayed) > 1e-9 {
+				t.Errorf("PlayedSeconds = %v, want %v", w.PlayedSeconds, tc.wantPlayed)
+			}
+		})
+	}
+}
+
 // A resume confirmation can carry a paused seek that another replica
 // accepted. It is measured as paused time, not credited as viewing.
 func TestSessionManagerResumeAdoptsPausedSeek(t *testing.T) {

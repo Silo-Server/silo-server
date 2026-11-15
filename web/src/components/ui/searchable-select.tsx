@@ -4,6 +4,7 @@ import { Check, ChevronsUpDown } from "lucide-react";
 
 import { useT } from "@/i18n";
 import { cn } from "@/lib/utils";
+import { joinList } from "@/lib/appLocale";
 import { PortalContainerContext } from "./portal-container-context";
 
 interface SearchableSelectProps {
@@ -276,7 +277,7 @@ export function SearchableMultiSelect({
     value.length === 0
       ? (placeholder ?? t("web.ui.select.placeholder"))
       : value.length <= 3
-        ? value.map(labelOf).join(", ")
+        ? joinList(value.map(labelOf))
         : t("web.ui.selectedCount", { count: value.length, shown: value.length });
 
   return (

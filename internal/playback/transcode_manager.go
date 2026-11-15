@@ -1329,6 +1329,13 @@ func (m *TranscodeManager) CloseTranscodeSessionIfSessionGone(sessionID string, 
 	}
 	unlock := m.LockSessionLifecycle(sessionID)
 	defer unlock()
+	return m.CloseTranscodeSessionIfSessionGoneLocked(sessionID, expected, hasSession)
+}
+
+// CloseTranscodeSessionIfSessionGoneLocked is CloseTranscodeSessionIfSessionGone
+// for a caller that already holds sessionID's lifecycle lock, such as a start
+// publishing its transcode.
+func (m *TranscodeManager) CloseTranscodeSessionIfSessionGoneLocked(sessionID string, expected *TranscodeSession, hasSession func() bool) bool {
 	m.transcodeMu.Lock()
 	if hasSession() {
 		m.transcodeMu.Unlock()

@@ -288,3 +288,103 @@ func TestLetterIndexEpisodesMatchCursorPagesPostgres(t *testing.T) {
 		t.Fatalf("first letter starts at %d and first run at %d, want 0", got.Letters[0].Position, got.Runs[0].Position)
 	}
 }
+
+// TestEpisodeSortTitleFilesEpisodeBrowsePostgres checks that a Sort Title set
+// through the metadata editor decides where an episode sorts and which letter
+// it files under in an episode library browse, and that clearing it falls back
+// to the title. Set SILO_TEST_DATABASE_URL to a migrated disposable database;
+// every inserted row is removed on completion.
+func TestEpisodeSortTitleFilesEpisodeBrowsePostgres(t *testing.T) {
+	pool := collectionSortTestPool(t)
+	ctx := t.Context()
+	prefix := fmt.Sprintf("episode-sort-title-%d", time.Now().UnixNano())
+	seriesID, seasonID := prefix+"-series", prefix+"-season"
+	var library int
+	if err := pool.QueryRow(ctx, `INSERT INTO media_folders (type,name,enabled) VALUES ('series',$1,true) RETURNING id`, prefix).Scan(&library); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM media_items WHERE content_id=$1`, seriesID)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM media_folders WHERE id=$1`, library)
+	})
+	batchEquivExec(t, pool, `INSERT INTO media_items (content_id,type,title,genres) VALUES ($1,'series','Sort fixture','{}')`, seriesID)
+	batchEquivExec(t, pool, `INSERT INTO media_item_libraries (content_id, media_folder_id) VALUES ($1, $2)`, seriesID, library)
+	batchEquivExec(t, pool, `INSERT INTO seasons (content_id,series_id,season_number) VALUES ($1,$2,1)`, seasonID, seriesID)
+	batchEquivExec(t, pool, `INSERT INTO episodes (content_id,series_id,season_id,season_number,episode_number,title)
+		SELECT $1 || '-' || n, $2, $3, 1, n, (ARRAY['Alpha','Bravo','Charlie'])[n] FROM generate_series(1,3) n`, prefix, seriesID, seasonID)
+	batchEquivExec(t, pool, `INSERT INTO media_files (content_id,episode_id,media_folder_id,file_path)
+		SELECT $1, content_id, $2, content_id || '.mkv' FROM episodes WHERE series_id=$1`, seriesID, library)
+	batchEquivExec(t, pool, `INSERT INTO episode_libraries (episode_id,media_folder_id)
+		SELECT content_id, $2 FROM episodes WHERE series_id=$1`, seriesID, library)
+
+	episodes := NewEpisodeRepository(pool)
+	setSortTitle := func(n int, sortTitle string) {
+		t.Helper()
+		if err := episodes.UpdateMetadata(ctx, fmt.Sprintf("%s-%d", prefix, n), &MetadataUpdate{SortTitle: &sortTitle}); err != nil {
+			t.Fatalf("update sort title: %v", err)
+		}
+	}
+	resolver := NewCatalogResolver(NewBrowseRepository(pool), NewItemRepository(pool))
+	access := AccessFilter{AllowedLibraryIDs: []int{library}}
+	request := func(order, namePrefix string) CatalogRequest {
+		return CatalogRequest{
+			Source:     CatalogSourceQuery,
+			NamePrefix: namePrefix,
+			Limit:      50,
+			Query: QueryDefinition{
+				MediaScope: "episode",
+				LibraryIDs: []int{library},
+				Sort:       QuerySort{Field: querySortTitle, Order: order},
+			},
+		}
+	}
+	titles := func(order, namePrefix string) []string {
+		t.Helper()
+		result, err := resolver.Resolve(ctx, request(order, namePrefix), access)
+		if err != nil {
+			t.Fatalf("resolve: %v", err)
+		}
+		got := []string{}
+		for _, item := range result.Items {
+			got = append(got, item.Title)
+		}
+		return got
+	}
+	letters := func() []string {
+		t.Helper()
+		index, err := resolver.LetterIndex(ctx, request("asc", ""), access)
+		if err != nil {
+			t.Fatalf("letter index: %v", err)
+		}
+		got := []string{}
+		for _, bucket := range index.Letters {
+			got = append(got, fmt.Sprintf("%s:%d@%d", bucket.Letter, bucket.Count, bucket.Position))
+		}
+		return got
+	}
+
+	setSortTitle(1, "Zulu")
+	setSortTitle(3, "  Able  ")
+	for _, tc := range []struct {
+		name, order, namePrefix string
+		want                    []string
+	}{
+		{"ascending", "asc", "", []string{"Charlie", "Bravo", "Alpha"}},
+		{"descending", "desc", "", []string{"Alpha", "Bravo", "Charlie"}},
+		{"letter A", "asc", "a", []string{"Charlie"}},
+		{"letter Z", "asc", "z", []string{"Alpha"}},
+	} {
+		if got := titles(tc.order, tc.namePrefix); !slices.Equal(got, tc.want) {
+			t.Errorf("%s: got %v, want %v", tc.name, got, tc.want)
+		}
+	}
+	if got, want := letters(), []string{"A:1@0", "B:1@1", "Z:1@2"}; !slices.Equal(got, want) {
+		t.Errorf("letters: got %v, want %v", got, want)
+	}
+
+	// A cleared Sort Title files the episode under its title again.
+	setSortTitle(3, "")
+	if got, want := titles("asc", ""), []string{"Bravo", "Charlie", "Alpha"}; !slices.Equal(got, want) {
+		t.Errorf("after clearing: got %v, want %v", got, want)
+	}
+}

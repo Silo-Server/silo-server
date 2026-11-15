@@ -7443,7 +7443,7 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** Search people by name, with exact matches first and optional media scope. */
+    /** Search people by name, with exact matches first, then the most credited for a specific query, and optional media scope. */
     get: operations["listPeople"];
     put?: never;
     post?: never;
@@ -18438,6 +18438,7 @@ export interface components {
       /** @description Null clears the stored date */
       first_air_date?: string | null;
       genres?: string[] | null;
+      /** @description IMDb title ID, stored trimmed and in lowercase; an empty string clears it */
       imdb_id?: string | null;
       /** @description Null clears the stored date */
       last_air_date?: string | null;
@@ -18480,7 +18481,9 @@ export interface components {
       studios?: string[] | null;
       tagline?: string | null;
       title?: string | null;
+      /** @description TMDB ID, stored trimmed and without a TMDB URL slug (550-fight-club saves as 550); an empty string clears it */
       tmdb_id?: string | null;
+      /** @description TheTVDB ID, stored trimmed; an empty string clears it */
       tvdb_id?: string | null;
       /** Format: int64 */
       year?: number | null;
@@ -19649,7 +19652,10 @@ export interface components {
       episode_name?: string;
       /** Format: int64 */
       episode_number?: number;
-      /** Format: int64 */
+      /**
+       * Format: int64
+       * @description Length in seconds of what position_seconds is measured against: the file, or the whole book for a multi-file audiobook; null when unknown
+       */
       file_duration: number | null;
       has_playback_control: boolean;
       is_jellyfin_client?: boolean;
@@ -31467,7 +31473,7 @@ export interface components {
       episode_number: number | null;
       /**
        * Format: int64
-       * @description Seconds; null when unknown
+       * @description Length in seconds of what position_seconds is measured against: the file, or the whole book for a multi-file audiobook; null when unknown
        * @example 8520
        */
       file_duration: number | null;
@@ -35696,7 +35702,7 @@ export interface components {
       /** @example Movies */
       library_name: string;
       /**
-       * @description unmatched, pending or ambiguous
+       * @description unmatched, pending or ambiguous. An audiobook without a provider match is unmatched
        * @example unmatched
        */
       status: string;

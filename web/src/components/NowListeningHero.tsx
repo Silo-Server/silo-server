@@ -1,4 +1,5 @@
 import { useMemo, type MouseEvent } from "react";
+import { joinList } from "@/lib/appLocale";
 import { Link } from "react-router";
 import { Info, Pause, Play } from "lucide-react";
 import type { ResolvedSection } from "@/api/types";
@@ -7,6 +8,7 @@ import ViewTransitionLink from "@/components/ViewTransitionLink";
 import MediaCarousel from "@/components/MediaCarousel";
 import { useCatalogItemDetail } from "@/hooks/queries/catalogRead";
 import { useT } from "@/i18n";
+
 import { useAmbientColor } from "@/hooks/useAmbientColor";
 import { useOverlayPrefs } from "@/hooks/useOverlayPrefs";
 import { buildChapterList, findChapterAt, totalAudiobookDuration } from "@/lib/audiobooks/chapters";
@@ -24,10 +26,9 @@ interface NowListeningHeroProps {
 }
 
 function namesFromPeople(people: Array<{ name?: string }> | undefined): string | undefined {
-  const names = (people ?? [])
-    .map((person) => person.name?.trim())
-    .filter(Boolean)
-    .join(", ");
+  const names = joinList(
+    (people ?? []).map((person) => person.name?.trim()).filter((name): name is string => !!name),
+  );
   return names || undefined;
 }
 

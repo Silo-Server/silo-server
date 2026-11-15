@@ -558,6 +558,16 @@ func (s personalCollageStore) saveSmartCollage(ctx context.Context, collectionID
 	return nil
 }
 
+func (s personalCollageStore) retireUnrefreshedSmartCollages(ctx context.Context, collectionID string, cutoff time.Time) error {
+	if _, err := s.pool.Exec(ctx, `
+		DELETE FROM user_personal_collection_smart_collages
+		WHERE user_id = $1 AND collection_id = $2 AND refreshed_at < $3
+	`, s.userID, collectionID, cutoff); err != nil {
+		return fmt.Errorf("retiring unrefreshed smart collection collages: %w", err)
+	}
+	return nil
+}
+
 // collageAccessKey names the access a viewer reads collections with: every
 // field of the filter that can change which titles a query matches or which
 // posters they show. Equal filters always get the same key.

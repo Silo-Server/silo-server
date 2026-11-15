@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { joinList } from "@/lib/appLocale";
 import { Link } from "react-router";
 import { useEventChannel } from "@/components/realtimeEventsContext";
 import { AlertTriangle, Loader2, Play, Square } from "lucide-react";
@@ -16,6 +17,7 @@ import {
 import { usePageActivity } from "@/hooks/usePageActivity";
 import { cn } from "@/lib/utils";
 import type { TaskCategory, TaskInfo, TriggerConfig } from "@/api/types";
+
 import { describeTrigger } from "@/lib/taskTrigger";
 import { formatRelativeTime } from "@/lib/date";
 import { formatDateTime as formatPreferredDateTime } from "@/lib/datetime";
@@ -84,7 +86,7 @@ function formatDuration(t: Translate, ms: number): string {
 
 function describeSchedule(triggers: TriggerConfig[]): string | null {
   if (triggers.length === 0) return null;
-  return triggers.map((trigger) => describeTrigger(trigger, "short")).join(", ");
+  return joinList(triggers.map((trigger) => describeTrigger(trigger, "short")));
 }
 
 function isOverdue(dateStr: string, now: number): boolean {

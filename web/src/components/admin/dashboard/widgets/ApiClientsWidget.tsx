@@ -23,6 +23,7 @@ import { WidgetRangePicker } from "../WidgetRangePicker";
 import { formatLocale } from "@/lib/appLocale";
 import { useT, type Translate } from "@/i18n";
 import { formatDecimal } from "@/lib/numberFormat";
+import { formatPercentLabel } from "../format";
 
 const ROW_LIMIT = 8;
 const SEPARATOR = " · ";
@@ -38,7 +39,7 @@ function clientLabel(t: Translate, client: AdminApiClient): string {
 function sharePercent(requests: number, total: number): string {
   if (total <= 0) return "";
   const share = (requests / total) * 100;
-  return share >= 10 ? `${Math.round(share)}%` : `${formatDecimal(share, 1)}%`;
+  return formatPercentLabel(formatDecimal(share, share >= 10 ? 0 : 1));
 }
 
 /**

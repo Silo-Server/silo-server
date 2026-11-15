@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { joinList } from "@/lib/appLocale";
 import { useParams, Link } from "react-router";
 import { Play, Square, Plus, ChevronRight, ChevronDown } from "lucide-react";
 import { isNotFoundProblem } from "@/api/v2/request";
@@ -21,6 +22,7 @@ import {
   type TaskSchedule,
 } from "@/hooks/queries/admin/tasks";
 import type { ExecutionResult, TriggerConfig } from "@/api/types";
+
 import { describeTrigger } from "@/lib/taskTrigger";
 import { formatDateTime as formatPreferredDateTime } from "@/lib/datetime";
 import { clampTaskProgress, formatTaskProgress } from "@/lib/taskProgress";
@@ -411,7 +413,7 @@ function HistoryRow({
     .map((step) => step.name);
   const errorText =
     failedSteps.length > 0
-      ? t("web.admin.tasks.detail.history.failedSteps", { steps: failedSteps.join(", ") })
+      ? t("web.admin.tasks.detail.history.failedSteps", { steps: joinList(failedSteps) })
       : result.error_message || EM_DASH;
 
   return (

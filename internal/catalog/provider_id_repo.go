@@ -370,8 +370,11 @@ func (r *ProviderIDRepository) ReplaceByContentID(ctx context.Context, contentID
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck
 
+	// Lock the item before its provider rows, as an admin's ID edit does. A
+	// replace that deleted the rows first would wait on the edit's item lock
+	// for its inserts while the edit waits on the deleted rows: a deadlock.
 	var itemType string
-	if err := tx.QueryRow(ctx, `SELECT type FROM media_items WHERE content_id = $1`, contentID).Scan(&itemType); err != nil {
+	if err := tx.QueryRow(ctx, `SELECT type FROM media_items WHERE content_id = $1 FOR NO KEY UPDATE`, contentID).Scan(&itemType); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return fmt.Errorf("loading item type for %s: content not found", contentID)
 		}

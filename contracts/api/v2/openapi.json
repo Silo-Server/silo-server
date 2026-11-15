@@ -12550,6 +12550,7 @@
             ]
           },
           "imdb_id": {
+            "description": "IMDb title ID, stored trimmed and in lowercase; an empty string clears it",
             "type": [
               "string",
               "null"
@@ -12687,12 +12688,14 @@
             ]
           },
           "tmdb_id": {
+            "description": "TMDB ID, stored trimmed and without a TMDB URL slug (550-fight-club saves as 550); an empty string clears it",
             "type": [
               "string",
               "null"
             ]
           },
           "tvdb_id": {
+            "description": "TheTVDB ID, stored trimmed; an empty string clears it",
             "type": [
               "string",
               "null"
@@ -15831,6 +15834,7 @@
             "type": "integer"
           },
           "file_duration": {
+            "description": "Length in seconds of what position_seconds is measured against: the file, or the whole book for a multi-file audiobook; null when unknown",
             "format": "int64",
             "type": [
               "integer",
@@ -45305,7 +45309,7 @@
             ]
           },
           "file_duration": {
-            "description": "Seconds; null when unknown",
+            "description": "Length in seconds of what position_seconds is measured against: the file, or the whole book for a multi-file audiobook; null when unknown",
             "examples": [
               8520
             ],
@@ -54856,7 +54860,7 @@
             "type": "string"
           },
           "status": {
-            "description": "unmatched, pending or ambiguous",
+            "description": "unmatched, pending or ambiguous. An audiobook without a provider match is unmatched",
             "examples": [
               "unmatched"
             ],
@@ -155772,7 +155776,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Search people by name, with exact matches first and optional media scope.",
+        "summary": "Search people by name, with exact matches first, then the most credited for a specific query, and optional media scope.",
         "tags": [
           "catalog"
         ],
@@ -243492,6 +243496,14 @@
             }
           },
           {
+            "description": "Set by the server beside seek when the plan asked for the macOS Firefox HEVC resume workaround: the plan's stream origin in seconds, the keyframe the copy starts on. Without it the remux serves the plain seeked copy.",
+            "in": "query",
+            "name": "origin",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
             "description": "Set by the server when the attempt negotiated progressive_range_refusal_v1: a GET whose Range starts past byte 0, or is a suffix range, answers 409 instead of streaming from the origin.",
             "in": "query",
             "name": "remux_range",
@@ -243639,6 +243651,14 @@
             }
           },
           {
+            "description": "Set by the server beside seek when the plan asked for the macOS Firefox HEVC resume workaround: the plan's stream origin in seconds, the keyframe the copy starts on. Without it the remux serves the plain seeked copy.",
+            "in": "query",
+            "name": "origin",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
             "description": "Set by the server when the attempt negotiated progressive_range_refusal_v1: a GET whose Range starts past byte 0, or is a suffix range, answers 409 instead of streaming from the origin.",
             "in": "query",
             "name": "remux_range",
@@ -243700,6 +243720,14 @@
             "description": "Existing progressive seek interpretation; proxy-local and remote-node validation differ.",
             "in": "query",
             "name": "seek",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Set by the server beside seek when the plan asked for the macOS Firefox HEVC resume workaround: the plan's stream origin in seconds, the keyframe the copy starts on. Without it the remux serves the plain seeked copy.",
+            "in": "query",
+            "name": "origin",
             "schema": {
               "type": "string"
             }
@@ -243847,6 +243875,14 @@
             "description": "Existing progressive seek interpretation; proxy-local and remote-node validation differ.",
             "in": "query",
             "name": "seek",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Set by the server beside seek when the plan asked for the macOS Firefox HEVC resume workaround: the plan's stream origin in seconds, the keyframe the copy starts on. Without it the remux serves the plain seeked copy.",
+            "in": "query",
+            "name": "origin",
             "schema": {
               "type": "string"
             }
@@ -244280,6 +244316,14 @@
             }
           },
           {
+            "description": "Set by the server beside seek when the plan asked for the macOS Firefox HEVC resume workaround: the plan's stream origin in seconds, the keyframe the copy starts on. Without it the remux serves the plain seeked copy.",
+            "in": "query",
+            "name": "origin",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
             "description": "Set by the server when the attempt negotiated progressive_range_refusal_v1: a GET whose Range starts past byte 0, or is a suffix range, answers 409 instead of streaming from the origin.",
             "in": "query",
             "name": "remux_range",
@@ -244443,6 +244487,14 @@
             "description": "Existing progressive seek interpretation; proxy-local and remote-node validation differ.",
             "in": "query",
             "name": "seek",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Set by the server beside seek when the plan asked for the macOS Firefox HEVC resume workaround: the plan's stream origin in seconds, the keyframe the copy starts on. Without it the remux serves the plain seeked copy.",
+            "in": "query",
+            "name": "origin",
             "schema": {
               "type": "string"
             }

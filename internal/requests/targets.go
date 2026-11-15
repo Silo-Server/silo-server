@@ -213,13 +213,38 @@ func (r *Repository) RecordSubmission(ctx context.Context, id string, leaseUntil
 	return req, nil
 }
 
-func (r *Repository) DeleteTarget(ctx context.Context, id int64) error {
-	tag, err := r.pool.Exec(ctx, `DELETE FROM media_request_targets WHERE id = $1`, id)
+func (r *Repository) DeleteTarget(ctx context.Context, requestID string, id int64, leaseUntil time.Time) error {
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin target delete transaction: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	// Lock the request before checking the lease, as RecomputeStatus does: a
+	// reclaim that commits while the delete runs must be seen, not read past
+	// from an older snapshot.
+	var status Status
+	var outcome Outcome
+	var lease *time.Time
+	if err := tx.QueryRow(ctx, `SELECT status, outcome, submit_lease_until FROM media_requests WHERE id = $1 FOR UPDATE`, requestID).
+		Scan(&status, &outcome, &lease); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrInvalidState
+		}
+		return fmt.Errorf("lock request for target delete: %w", err)
+	}
+	if status != StatusApproved || outcome != OutcomeActive || lease == nil || !lease.Equal(leaseUntil) {
+		return ErrInvalidState
+	}
+	tag, err := tx.Exec(ctx, `DELETE FROM media_request_targets WHERE id = $1 AND request_id = $2`, id, requestID)
 	if err != nil {
 		return fmt.Errorf("delete target: %w", err)
 	}
 	if tag.RowsAffected() == 0 {
 		return ErrNotFound
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit target delete transaction: %w", err)
 	}
 	return nil
 }
