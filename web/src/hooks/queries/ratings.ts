@@ -1,4 +1,5 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
+import type { QueryClient, QueryKey } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { t } from "@/i18n";
 import type { ItemDetail } from "@/api/types";
@@ -36,9 +37,7 @@ export function useSetRating(itemId: string) {
       return { previous };
     },
     onError: (_err, _vars, context) => {
-      for (const [queryKey, value] of context?.previous ?? []) {
-        queryClient.setQueryData(queryKey, value);
-      }
+      rollBackRating(queryClient, context?.previous ?? []);
       toast.error(t("web.common.toast.ratings.updateFailed"));
     },
     onSettled: () => {
@@ -68,13 +67,30 @@ export function useDeleteRating(itemId: string) {
       return { previous };
     },
     onError: (_err, _vars, context) => {
-      for (const [queryKey, value] of context?.previous ?? []) {
-        queryClient.setQueryData(queryKey, value);
-      }
+      rollBackRating(queryClient, context?.previous ?? []);
       toast.error(t("web.common.toast.ratings.updateFailed"));
     },
     onSettled: () => {
       return invalidateRatingSurfaceQueries(queryClient, itemId);
     },
   });
+}
+
+// Revert only the rating. Restoring the whole snapshot would discard a detail
+// refetched while the write was in flight, such as another device's metadata
+// save. Writing marks a detail fresh, so one already marked stale is marked
+// stale again: the rating refresh leaves the current detail alone.
+function rollBackRating(
+  queryClient: QueryClient,
+  previous: Array<[QueryKey, ItemDetail | undefined]>,
+) {
+  for (const [queryKey, snapshot] of previous) {
+    if (!snapshot) continue;
+    const query = queryClient.getQueryCache().find({ queryKey, exact: true });
+    const wasInvalidated = query?.state.isInvalidated;
+    queryClient.setQueryData<ItemDetail>(queryKey, (detail) =>
+      detail ? { ...detail, user_rating: snapshot.user_rating } : detail,
+    );
+    if (wasInvalidated) query?.invalidate();
+  }
 }

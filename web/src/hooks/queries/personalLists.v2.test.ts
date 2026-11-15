@@ -150,6 +150,76 @@ describe("personal lists on the v2 contract", () => {
     }
   });
 
+  it("keeps an item detail stale when it was invalidated during a rating write that fails", async () => {
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    });
+    const wrapper = createWrapper(client);
+    const set = renderHook(() => useSetRating("movie:c"), { wrapper });
+    const remove = renderHook(() => useDeleteRating("movie:c"), { wrapper });
+    const detailKey = catalogKeys.itemDetail("movie:c");
+
+    try {
+      for (const mutation of [
+        () => set.result.current.mutateAsync(5),
+        () => remove.result.current.mutateAsync(),
+      ]) {
+        client.setQueryData(detailKey, { content_id: "movie:c", user_rating: 3 });
+        stubFetch(() => {
+          // Another device saves the item's metadata while the write is in
+          // flight; no page shows the detail, so it is only marked stale.
+          void client.invalidateQueries({ queryKey: detailKey });
+          throw new TypeError("Failed to fetch");
+        });
+        await act(async () => {
+          await expect(mutation()).rejects.toThrow();
+        });
+        expect(client.getQueryData(detailKey)).toMatchObject({ user_rating: 3 });
+        expect(client.getQueryState(detailKey)?.isInvalidated).toBe(true);
+      }
+    } finally {
+      set.unmount();
+      remove.unmount();
+      client.clear();
+    }
+  });
+
+  it("keeps an item detail refetched during a rating write that fails", async () => {
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    });
+    const wrapper = createWrapper(client);
+    const set = renderHook(() => useSetRating("movie:c"), { wrapper });
+    const remove = renderHook(() => useDeleteRating("movie:c"), { wrapper });
+    const detailKey = catalogKeys.itemDetail("movie:c");
+
+    try {
+      for (const mutation of [
+        () => set.result.current.mutateAsync(5),
+        () => remove.result.current.mutateAsync(),
+      ]) {
+        client.setQueryData(detailKey, { content_id: "movie:c", title: "Old", user_rating: 3 });
+        stubFetch(() => {
+          // The open item page refetches after another device's metadata save.
+          client.setQueryData(detailKey, { content_id: "movie:c", title: "Saved", user_rating: 3 });
+          throw new TypeError("Failed to fetch");
+        });
+        await act(async () => {
+          await expect(mutation()).rejects.toThrow();
+        });
+        expect(client.getQueryData(detailKey)).toEqual({
+          content_id: "movie:c",
+          title: "Saved",
+          user_rating: 3,
+        });
+      }
+    } finally {
+      set.unmount();
+      remove.unmount();
+      client.clear();
+    }
+  });
+
   describe("when the server cannot be reached", () => {
     afterEach(() => {
       onlineManager.setOnline(true);
