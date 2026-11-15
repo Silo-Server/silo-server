@@ -7,9 +7,76 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgxpool"
+
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/userstore/pgstore"
 )
+
+// bookRelatedFixture is one audiobook library, one account, and its Viewer and
+// Other profiles; every row the test adds is named after prefix and removed
+// when the test ends.
+type bookRelatedFixture struct {
+	t                    *testing.T
+	pool                 *pgxpool.Pool
+	prefix               string
+	folder, userID       int
+	viewer, otherProfile string
+}
+
+func newBookRelatedFixture(t *testing.T) *bookRelatedFixture {
+	f := &bookRelatedFixture{t: t, pool: newTestPool(t), prefix: fmt.Sprintf("book-related-%d", time.Now().UnixNano())}
+	f.folder = f.insertID(`INSERT INTO media_folders (type,name,enabled) VALUES ('audiobooks',$1,true) RETURNING id`, f.prefix)
+	f.userID = f.insertID(`INSERT INTO users (username,role) VALUES ($1,'user') RETURNING id`, f.prefix)
+	t.Cleanup(func() {
+		bg, pool, p := context.Background(), f.pool, f.prefix
+		_, _ = pool.Exec(bg, `DELETE FROM users WHERE id=$1`, f.userID)
+		_, _ = pool.Exec(bg, `DELETE FROM media_files WHERE media_folder_id=$1`, f.folder)
+		_, _ = pool.Exec(bg, `DELETE FROM item_people WHERE content_id LIKE $1`, p+"-%")
+		_, _ = pool.Exec(bg, `DELETE FROM media_items WHERE content_id LIKE $1`, p+"-%")
+		_, _ = pool.Exec(bg, `DELETE FROM people WHERE name LIKE $1`, p+"-%")
+		_, _ = pool.Exec(bg, `DELETE FROM media_folders WHERE id=$1`, f.folder)
+	})
+	f.viewer, f.otherProfile = f.prefix+"-viewer", f.prefix+"-other"
+	f.exec(`INSERT INTO user_profiles (id,user_id,name) VALUES ($1,$3,'Viewer'), ($2,$3,'Other')`, f.viewer, f.otherProfile, f.userID)
+	return f
+}
+
+func (f *bookRelatedFixture) exec(sql string, args ...any) {
+	f.t.Helper()
+	if _, err := f.pool.Exec(f.t.Context(), sql, args...); err != nil {
+		f.t.Fatal(err)
+	}
+}
+
+func (f *bookRelatedFixture) insertID(sql string, args ...any) int {
+	f.t.Helper()
+	var id int
+	if err := f.pool.QueryRow(f.t.Context(), sql, args...).Scan(&id); err != nil {
+		f.t.Fatal(err)
+	}
+	return id
+}
+
+// relatedEntryState is what a series row shows for one book.
+type relatedEntryState struct {
+	played    bool
+	ratio     float64
+	duration  int
+	thumbhash string
+}
+
+func relatedEntryStates(group *AudiobookSeriesGroup) map[string]relatedEntryState {
+	got := map[string]relatedEntryState{}
+	for _, e := range group.Entries {
+		s := relatedEntryState{played: e.Played, duration: e.DurationSeconds, thumbhash: e.PosterThumbhash}
+		if e.ProgressRatio != nil {
+			s.ratio = *e.ProgressRatio
+		}
+		got[e.ContentID] = s
+	}
+	return got
+}
 
 // A book page's series row shows the viewing profile's own state on each
 // entry: finished, partway, or untouched. Another profile's listening never
@@ -18,32 +85,8 @@ import (
 // credit order.
 func TestBookPageRelatedStateAndCardAuthorsPostgres(t *testing.T) {
 	ctx := t.Context()
-	pool := newTestPool(t)
-	p := fmt.Sprintf("book-related-%d", time.Now().UnixNano())
-	exec := func(sql string, args ...any) {
-		t.Helper()
-		if _, err := pool.Exec(ctx, sql, args...); err != nil {
-			t.Fatal(err)
-		}
-	}
-	var folder, userID int
-	if err := pool.QueryRow(ctx, `INSERT INTO media_folders (type,name,enabled) VALUES ('audiobooks',$1,true) RETURNING id`, p).Scan(&folder); err != nil {
-		t.Fatal(err)
-	}
-	if err := pool.QueryRow(ctx, `INSERT INTO users (username,role) VALUES ($1,'user') RETURNING id`, p).Scan(&userID); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() {
-		bg := context.Background()
-		_, _ = pool.Exec(bg, `DELETE FROM users WHERE id=$1`, userID)
-		_, _ = pool.Exec(bg, `DELETE FROM media_files WHERE media_folder_id=$1`, folder)
-		_, _ = pool.Exec(bg, `DELETE FROM item_people WHERE content_id LIKE $1`, p+"-%")
-		_, _ = pool.Exec(bg, `DELETE FROM media_items WHERE content_id LIKE $1`, p+"-%")
-		_, _ = pool.Exec(bg, `DELETE FROM people WHERE name LIKE $1`, p+"-%")
-		_, _ = pool.Exec(bg, `DELETE FROM media_folders WHERE id=$1`, folder)
-	})
-	viewer, other := p+"-viewer", p+"-other"
-	exec(`INSERT INTO user_profiles (id,user_id,name) VALUES ($1,$3,'Viewer'), ($2,$3,'Other')`, viewer, other, userID)
+	f := newBookRelatedFixture(t)
+	p, folder, userID, viewer, exec := f.prefix, f.folder, f.userID, f.viewer, f.exec
 
 	finished, partway, untouched, hidden := p+"-1", p+"-2", p+"-3", p+"-4"
 	for i, id := range []string{finished, partway, untouched, hidden} {
@@ -57,7 +100,7 @@ func TestBookPageRelatedStateAndCardAuthorsPostgres(t *testing.T) {
 		partway, folder, "/"+partway+"/1.m4b", "/"+partway+"/2.m4b", "/"+partway+"/gone.m4b")
 	exec(`INSERT INTO user_watch_progress (user_id,profile_id,media_item_id,position_seconds,duration_seconds,completed) VALUES
 		($1,$2,$3,0,1000,true), ($1,$2,$4,300,1500,false), ($1,$5,$6,100,1000,false)`,
-		userID, viewer, finished, partway, other, untouched)
+		userID, viewer, finished, partway, f.otherProfile, untouched)
 	// Finished, then hidden from history: neither the progress row nor the
 	// history row counts until the profile listens again.
 	before := time.Now().Add(-2 * time.Hour)
@@ -73,36 +116,19 @@ func TestBookPageRelatedStateAndCardAuthorsPostgres(t *testing.T) {
 	exec(`INSERT INTO item_people (id,content_id,person_id,kind,sort_order) VALUES ($1,$2,$1,$3,0), ($1+1,$2,$1+1,$3,1)`,
 		person, finished, int(models.PersonKindAuthor))
 
-	svc := &DetailService{itemRepo: NewItemRepository(pool), userStoreProvider: pgstore.NewPostgresProvider(pool)}
+	svc := &DetailService{itemRepo: NewItemRepository(f.pool), userStoreProvider: pgstore.NewPostgresProvider(f.pool)}
 	ext := svc.buildAudiobookExtension(ctx, &models.MediaItem{ContentID: finished, Type: "audiobook"}, nil, nil,
 		AccessFilter{UserID: userID, ProfileID: viewer})
 	if ext.Series == nil {
 		t.Fatal("series row missing")
 	}
-	type state struct {
-		played    bool
-		ratio     float64
-		duration  int
-		thumbhash string
-	}
-	entryStates := func(group *AudiobookSeriesGroup) map[string]state {
-		got := map[string]state{}
-		for _, e := range group.Entries {
-			s := state{played: e.Played, duration: e.DurationSeconds, thumbhash: e.PosterThumbhash}
-			if e.ProgressRatio != nil {
-				s.ratio = *e.ProgressRatio
-			}
-			got[e.ContentID] = s
-		}
-		return got
-	}
-	want := map[string]state{
+	want := map[string]relatedEntryState{
 		finished:  {played: true, thumbhash: finished + "-hash"},
 		partway:   {ratio: 0.2, duration: 1500, thumbhash: partway + "-hash"},
 		untouched: {thumbhash: untouched + "-hash"},
 		hidden:    {thumbhash: hidden + "-hash"},
 	}
-	if got := entryStates(ext.Series); fmt.Sprint(got) != fmt.Sprint(want) {
+	if got := relatedEntryStates(ext.Series); fmt.Sprint(got) != fmt.Sprint(want) {
 		t.Errorf("series entries = %v, want %v", got, want)
 	}
 
@@ -111,14 +137,10 @@ func TestBookPageRelatedStateAndCardAuthorsPostgres(t *testing.T) {
 	// hide shows its new progress.
 	readHidden, readAgain := p+"-e1", p+"-e2"
 	for i, id := range []string{readHidden, readAgain} {
-		var file int
 		exec(`INSERT INTO media_items (content_id,type,title) VALUES ($1,'ebook',$1)`, id)
 		exec(`INSERT INTO media_item_libraries (content_id,media_folder_id) VALUES ($1,$2)`, id, folder)
 		exec(`INSERT INTO ebook_series (content_id,series_name,series_index) VALUES ($1,$2,$3)`, id, p+"-ebooks", i+1)
-		if err := pool.QueryRow(ctx, `INSERT INTO media_files (content_id,media_folder_id,file_path) VALUES ($1,$2,$3) RETURNING id`,
-			id, folder, "/"+id+".epub").Scan(&file); err != nil {
-			t.Fatal(err)
-		}
+		file := f.insertID(`INSERT INTO media_files (content_id,media_folder_id,file_path) VALUES ($1,$2,$3) RETURNING id`, id, folder, "/"+id+".epub")
 		progress, updated := 1.0, before
 		if id == readAgain {
 			progress, updated = 0.5, time.Now()
@@ -133,12 +155,12 @@ func TestBookPageRelatedStateAndCardAuthorsPostgres(t *testing.T) {
 	if ebook.Series == nil {
 		t.Fatal("ebook series row missing")
 	}
-	wantEbooks := map[string]state{readHidden: {}, readAgain: {ratio: 0.5}}
-	if got := entryStates(ebook.Series); fmt.Sprint(got) != fmt.Sprint(wantEbooks) {
+	wantEbooks := map[string]relatedEntryState{readHidden: {}, readAgain: {ratio: 0.5}}
+	if got := relatedEntryStates(ebook.Series); fmt.Sprint(got) != fmt.Sprint(wantEbooks) {
 		t.Errorf("ebook series entries = %v, want %v", got, wantEbooks)
 	}
 
-	authors, err := ListBookAuthors(ctx, pool, []string{finished, partway, finished}, 3)
+	authors, err := ListBookAuthors(ctx, f.pool, []string{finished, partway, finished}, 3)
 	if err != nil {
 		t.Fatal(err)
 	}
