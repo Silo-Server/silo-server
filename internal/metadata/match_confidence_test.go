@@ -1,6 +1,10 @@
 package metadata
 
-import "testing"
+import (
+	"strings"
+	"testing"
+	"time"
+)
 
 // The pairs below are real: 20 unidentified production audiobooks were queried
 // against the iTunes audiobook search on 2026-07-27, and these are the titles
@@ -298,6 +302,19 @@ func TestBestMatchAcceptance(t *testing.T) {
 
 // TestTitleScoreBands holds the TitleScore cases that pin a score to zero, one,
 // or one side of minTitleScore.
+// normaliseTitle must stay linear in a title's length. Titles from a file's
+// tags reach it with no length limit, and checking each decimal against the
+// whole text before it once took seconds on a long title full of decimals;
+// at this length that version takes well over the bound.
+func TestNormaliseTitleIsLinearOnManyDecimals(t *testing.T) {
+	title := strings.Repeat("1.23 x ", 10000)
+	start := time.Now()
+	normaliseTitle(title)
+	if elapsed := time.Since(start); elapsed > 2*time.Second {
+		t.Fatalf("normaliseTitle took %v on a %d-byte title", elapsed, len(title))
+	}
+}
+
 func TestTitleScoreBands(t *testing.T) {
 	const (
 		zero = iota

@@ -266,6 +266,11 @@ var audiobookRuleCases = []struct {
 		results:  []SearchResult{bookResult("Room 101: Series Name, Book 4", "R4", 2020)},
 	},
 	{
+		name:    "a series name holding the volume's number is no match for that volume",
+		want:    "Zone 3, Book 3",
+		results: []SearchResult{bookResult("Zone 3", "Z0", 2020)},
+	},
+	{
 		name:     "tagged ASIN beats a higher title score",
 		want:     "Project Hail Mary",
 		existing: map[string]string{"asin": "P2"},

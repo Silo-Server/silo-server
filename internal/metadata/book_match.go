@@ -308,17 +308,18 @@ func boolCompare(a, b bool) int {
 }
 
 // coversAllButVolume reports whether candidate holds every word of want other
-// than its volume number, and not the number: "Dungeon Crawler Carl" for
-// "Dungeon Crawler Carl 2". A candidate that holds the number too is the
-// title itself ("Series Name 3 - Gone"), not the series name.
+// than its volume number: "Dungeon Crawler Carl" for "Dungeon Crawler Carl 2".
+// A candidate holding the number as often as want does is the title itself
+// ("Series Name 3 - Gone"), not the series name; one holding it fewer times
+// lacks the volume ("Zone 3" for "Zone 3, Book 3").
 func coversAllButVolume(want string, volume volumeIdentity, candidate string) bool {
 	words := identityWords(normaliseTitle(want))
 	candidateWords := identityWords(normaliseTitle(candidate))
 	n := volume.word()
-	if candidateWords[n] > 0 {
-		return false
-	}
 	if words[n] > 0 {
+		if candidateWords[n] >= words[n] {
+			return false
+		}
 		words[n]--
 		if words[n] == 0 {
 			delete(words, n)

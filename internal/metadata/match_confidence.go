@@ -6,6 +6,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"unicode"
 	"unicode/utf8"
 
 	"golang.org/x/text/unicode/norm"
@@ -87,12 +88,17 @@ var (
 	// (decimalVolumeAt): split at the point, it would read as the two volumes
 	// 0 and 5.
 	decimalRE = regexp.MustCompile(`\b\d{1,4}\.\d{1,2}\b`)
-
-	// volumeLeadRE matches text that ends in a volume marker, so a number
-	// after it numbers a volume: "book ", "vol. ", "#".
-	volumeLeadRE = regexp.MustCompile(
-		`(?:\b(?:books?|bks?|vols?|volumes?|parts?|series|episodes?|eps?)\b\.?\s*#?|#)\s*$`)
 )
+
+// volumeMarkerWords are the words volumeMarkerRE accepts before a volume
+// number, for followsVolumeMarker.
+var volumeMarkerWords = func() map[string]bool {
+	words := map[string]bool{}
+	for _, w := range strings.Fields("book books bk bks vol vols volume volumes part parts series episode episodes ep eps") {
+		words[w] = true
+	}
+	return words
+}()
 
 // numberWords maps spelled-out and Roman numerals onto digits. Providers and
 // rippers disagree freely on the form: "Part II" against "Part 2",
@@ -178,12 +184,37 @@ func stripPunctuation(s string) string {
 // before a separator ("Series Name 0.5", "Series Name 0.5 - Title"). A number
 // running into more words is a title written with a point for a colon, as
 // filenames must: "3.10 to Yuma" stays "3 10 to yuma", like "3:10 to Yuma".
+//
+// It reads only the text next to the number, back to the word before it and
+// on to the next non-space, so stripPunctuation's pass over every decimal in a
+// title stays linear in the title's length.
 func decimalVolumeAt(s string, start, end int) bool {
-	if volumeLeadRE.MatchString(s[:start]) {
+	if followsVolumeMarker(s[:start]) {
 		return true
 	}
-	next, _ := utf8.DecodeRuneInString(strings.TrimSpace(s[end:]))
+	next, _ := utf8.DecodeRuneInString(strings.TrimLeftFunc(s[end:], unicode.IsSpace))
 	return next == utf8.RuneError || strings.ContainsRune("-–—:;,()[]/", next)
+}
+
+// followsVolumeMarker reports whether lowercase text ends in a volume marker,
+// so a number after it numbers a volume: "book ", "vol. ", "book #", "#".
+// It reads back from the end over spaces and the last word only.
+func followsVolumeMarker(prefix string) bool {
+	p := strings.TrimRightFunc(prefix, unicode.IsSpace)
+	if strings.HasSuffix(p, "#") {
+		return true
+	}
+	p = strings.TrimSuffix(p, ".")
+	wordStart := strings.LastIndexFunc(p, func(r rune) bool {
+		return !unicode.IsLetter(r) && !unicode.IsNumber(r)
+	})
+	if wordStart >= 0 {
+		_, size := utf8.DecodeRuneInString(p[wordStart:])
+		wordStart += size
+	} else {
+		wordStart = 0
+	}
+	return volumeMarkerWords[p[wordStart:]]
 }
 
 // titleAloneIdentifies reports whether want and candidate name the same work
