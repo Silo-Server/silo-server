@@ -733,6 +733,9 @@ type ListItemState struct {
 	LastError           string
 	CreatedAt           time.Time
 	UpdatedAt           time.Time
+	// TitleIDs are, on a watchlist title row, the prefixed IDs ("tmdb:550",
+	// "imdb:tt0137523", "tvdb:121361") the title has held. Writes add to them.
+	TitleIDs []string
 }
 
 type ScrobbleSession struct {

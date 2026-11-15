@@ -1,6 +1,7 @@
 package watchsync
 
 import (
+	"cmp"
 	"context"
 	"database/sql"
 	"errors"
@@ -579,6 +580,14 @@ func (r *serviceFakeRepo) UpsertListItemStates(_ context.Context, states []ListI
 					state.ID = r.listItemStates[i].ID
 				}
 				state.CreatedAt = r.listItemStates[i].CreatedAt
+				// Mirror Postgres: empty identity fields keep the stored ones,
+				// and title IDs add up.
+				old := r.listItemStates[i]
+				state.ProviderItemKey = cmp.Or(state.ProviderItemKey, old.ProviderItemKey)
+				state.Kind = cmp.Or(state.Kind, old.Kind)
+				state.Title = cmp.Or(state.Title, old.Title)
+				state.Year = cmp.Or(state.Year, old.Year)
+				state.TitleIDs = mergeTitleIDsForTest(old.TitleIDs, state.TitleIDs)
 				r.listItemStates[i] = state
 				replaced = true
 				break
@@ -613,6 +622,24 @@ func (r *serviceFakeRepo) MarkWatchlistTitlesSince(_ context.Context, connection
 	}
 	r.watchlistTitlesSince[connectionID] = time.Now()
 	return nil
+}
+
+func (r *serviceFakeRepo) AddListItemTitleIDs(_ context.Context, connectionID string, kind ListKind, mediaItemID string, ids []string) error {
+	r.markListItem(connectionID, kind, mediaItemID, func(s *ListItemState) {
+		s.TitleIDs = mergeTitleIDsForTest(s.TitleIDs, ids)
+	})
+	return nil
+}
+
+func mergeTitleIDsForTest(a, b []string) []string {
+	out := slices.Clone(a)
+	for _, id := range b {
+		if !slices.Contains(out, id) {
+			out = append(out, id)
+		}
+	}
+	slices.Sort(out)
+	return out
 }
 
 func (r *serviceFakeRepo) ListListItemStates(_ context.Context, connectionID string, kind ListKind) ([]ListItemState, error) {

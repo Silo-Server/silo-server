@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"strconv"
+	"slices"
 	"strings"
 	"time"
 
@@ -260,14 +260,16 @@ func (s *Service) importList(ctx context.Context, conn Connection, cfg ServerCon
 	}
 	rows := batch.Rows
 	result := ImportListResult{Found: len(rows), Warnings: append([]string{}, batch.Warnings...)}
+	// Reconciling first lets a promoted title's library item, which takes
+	// over the title's row, receive a removal in this batch.
+	if err := s.reconcileLocalListTitles(ctx, conn, b); err != nil {
+		return result, err
+	}
 	existingByRemoteKey, err := s.listItemStatesByRemoteKey(ctx, conn.ID, b.kind, rows)
 	if err != nil {
 		return result, err
 	}
-	if err := s.reconcileLocalListTitles(ctx, conn, b); err != nil {
-		return result, err
-	}
-	removalsPending, err := s.listItemsPendingRemoval(ctx, conn, b)
+	removalsPending, pendingTitles, err := s.listItemsPendingRemoval(ctx, conn, b)
 	if err != nil {
 		return result, err
 	}
@@ -310,7 +312,7 @@ func (s *Service) importList(ctx context.Context, conn Connection, cfg ServerCon
 			return result, err
 		}
 		if match == nil {
-			state, kept, added, err := s.importListTitle(ctx, conn, b, row, key, removalsPending, titlesSince != nil)
+			state, kept, added, err := s.importListTitle(ctx, conn, b, row, key, removalsPending, pendingTitles, titlesSince != nil)
 			if err != nil {
 				return result, err
 			}
@@ -398,16 +400,19 @@ func (s *Service) importList(ctx context.Context, conn Connection, cfg ServerCon
 // provider still lists these items, so an import must not add them back from
 // that listing: a failed removal retries later in the run, and a removal held
 // because another library item shares the key stays until that item leaves
-// too.
-func (s *Service) listItemsPendingRemoval(ctx context.Context, conn Connection, b listBinding) (map[string]time.Time, error) {
+// too. titles maps each ID and provider key a pending watchlist title row
+// knows to its media item ID (see pendingTitleKey), for a provider that lists
+// the title under another TMDB ID.
+func (s *Service) listItemsPendingRemoval(ctx context.Context, conn Connection, b listBinding) (pending map[string]time.Time, titles map[string]string, err error) {
 	if !b.removalsEnabled(conn) {
-		return nil, nil
+		return nil, nil, nil
 	}
 	states, err := s.repo.ListListItemStates(ctx, conn.ID, b.kind)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	pending := make(map[string]time.Time)
+	pending = make(map[string]time.Time)
+	titles = make(map[string]string)
 	for _, state := range states {
 		if !state.LocalPresent && state.RemotePresent {
 			var removedAt time.Time
@@ -415,9 +420,14 @@ func (s *Service) listItemsPendingRemoval(ctx context.Context, conn Connection, 
 				removedAt = *state.LastRemovedLocalAt
 			}
 			pending[state.MediaItemID] = removedAt
+			if title, ok := watchlistTitleFromListItemID(state.MediaItemID); ok {
+				for _, id := range append(append(title.IDs(), state.TitleIDs...), state.ProviderItemKey) {
+					titles[pendingTitleKey(title.Kind, id)] = state.MediaItemID
+				}
+			}
 		}
 	}
-	return pending, nil
+	return pending, titles, nil
 }
 
 func (s *Service) listItemStatesByRemoteKey(
@@ -487,7 +497,7 @@ func (s *Service) applyRemoteListTombstone(
 	unlisted := make([]string, 0, len(states))
 	for _, state := range states {
 		if b.removalsEnabled(conn) && state.LocalPresent {
-			if err := s.removeLocalListItem(ctx, store, conn, b, state.MediaItemID); err != nil {
+			if err := s.removeLocalListItem(ctx, store, conn, b, *state); err != nil {
 				return nil, err
 			}
 			// Counted once the local list changed, so a failed bookkeeping
@@ -547,15 +557,10 @@ func (p remoteListPresence) listed(kind, key string) bool {
 	return kinds[kind] || kinds[""] || (kind == "" && len(kinds) > 0)
 }
 
-// listedTMDB reports whether the read listed a title of this kind under any
-// of the TMDB IDs.
-func (p remoteListPresence) listedTMDB(kind string, tmdbIDs []int) bool {
-	for _, id := range tmdbIDs {
-		if p.listed(kind, prefixedID("tmdb", strconv.Itoa(id))) {
-			return true
-		}
-	}
-	return false
+// listedAny reports whether the read listed a title of this kind under any
+// of the prefixed IDs.
+func (p remoteListPresence) listedAny(kind string, ids []string) bool {
+	return slices.ContainsFunc(ids, func(id string) bool { return p.listed(kind, id) })
 }
 
 func (s *Service) reconcileMissingRemoteListItems(ctx context.Context, conn Connection, store userstore.UserStore, b listBinding, seenRemote remoteListPresence, result *ImportListResult) error {
@@ -575,11 +580,11 @@ func (s *Service) reconcileMissingRemoteListItems(ctx context.Context, conn Conn
 	}
 	now := s.now()
 	for _, state := range missing {
-		if title, ok := watchlistTitleFromListItemID(state.MediaItemID); ok && seenRemote.listedTMDB(state.Kind, heldIDs[title]) {
+		if title, ok := watchlistTitleFromListItemID(state.MediaItemID); ok && seenRemote.listedAny(state.Kind, heldIDs[title]) {
 			continue
 		}
 		if b.removalsEnabled(conn) && state.LocalPresent {
-			if err := s.removeLocalListItem(ctx, store, conn, b, state.MediaItemID); err != nil {
+			if err := s.removeLocalListItem(ctx, store, conn, b, state); err != nil {
 				return err
 			}
 			result.Removed++

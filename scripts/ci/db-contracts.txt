@@ -693,6 +693,10 @@
 # stays on the provider while another item of the same kind still holds it.
 ./internal/watchsync TestListItemsSharingProviderKeyDB
 
+# A watchlist title's sync row keeps every ID the title has held across
+# writes that know fewer of them.
+./internal/watchsync TestListItemTitleIDsAddUpDB
+
 # A sync flow saves only its own bookkeeping: tokens refreshed meanwhile stay,
 # its cursors merge with the stored ones, only a deferral that has ended is
 # cleared, and a connection disconnected meanwhile is not restored.
@@ -1192,6 +1196,11 @@
 ./internal/catalog TestExternalIDLookupSkipsItemsWithAnotherTMDBIDDB
 ./internal/catalog TestResolveProviderAliasesSkipsItemsWithAnotherTMDBIDDB
 ./internal/watchlist TestLibraryMatchesUsesTheTitlesRetainedIDsDB
+
+# After TMDB repointed a movie and promotion moved its entry onto the library
+# item with the new ID, sync still finds that item through the IDs its row
+# kept, which the title's deleted aliases no longer give.
+./internal/watchlist TestWatchSyncFindsThePromotedItemByKeptIDsDB
 
 # Smart collection collage records: a refresh deletes the collection's records
 # nobody refreshed for a week, with or without a collage, and keeps the rest.
