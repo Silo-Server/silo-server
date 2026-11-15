@@ -710,31 +710,6 @@ type HistoryExport struct {
 	UpdatedAt       time.Time
 }
 
-// ListItemState is the per-connection, per-list shadow record tracking whether
-// an item is present locally and/or remotely, used to drive incremental
-// export/removal reconciliation. It serves both the favorites and watchlist
-// lists, discriminated by ListKind.
-type ListItemState struct {
-	ID                  string
-	ConnectionID        string
-	ListKind            ListKind
-	MediaItemID         string
-	ProviderItemKey     string
-	Kind                string
-	Title               string
-	Year                int
-	RemotePresent       bool
-	LocalPresent        bool
-	LastSeenRemoteAt    *time.Time
-	LastSeenLocalAt     *time.Time
-	LastExportedAt      *time.Time
-	LastRemovedRemoteAt *time.Time
-	LastRemovedLocalAt  *time.Time
-	LastError           string
-	CreatedAt           time.Time
-	UpdatedAt           time.Time
-}
-
 type ScrobbleSession struct {
 	PlaybackSessionID   string
 	ConnectionID        string
