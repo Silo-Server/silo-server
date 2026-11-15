@@ -59,6 +59,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/metadata/tmdb"
 	metadatatranslation "github.com/Silo-Server/silo-server/internal/metadata/translation"
 	"github.com/Silo-Server/silo-server/internal/netaccess"
+	"github.com/Silo-Server/silo-server/internal/nodeauth"
 	"github.com/Silo-Server/silo-server/internal/nodemetrics"
 	"github.com/Silo-Server/silo-server/internal/nodepool"
 	"github.com/Silo-Server/silo-server/internal/noderecipe"
@@ -185,6 +186,10 @@ type Dependencies struct {
 	NodePlanner              *nodepool.Planner               // group/cap-aware node selection (may be nil)
 	NodeHealthChecker        *nodepool.HealthChecker         // periodic node health/capability sweep (may be nil)
 	NodeKeyRegistry          *nodepool.KeyRegistry           // every stream node's credential, enabled or not (may be nil)
+	// NodeKeys signs every call to a stream node: a transcode node's own key,
+	// and the shared secret for a URL registered as a proxy. Nil leaves calls
+	// to nodes unsigned-for, so they fail rather than fall back.
+	NodeKeys nodeauth.Keyring
 	// NodeCapabilityInvalidator drops one node's cached capability inventory
 	// outside the playback handler — the prepared-download preparer holds its
 	// own. nil where downloads are not wired; set before NewRouter runs.
@@ -1510,6 +1515,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 		if deps.NodePlanner != nil {
 			playbackHandler.NodePlanner = deps.NodePlanner
 		}
+		playbackHandler.NodeKeys = deps.NodeKeys
 		if deps.Config != nil && deps.Config.Auth.JWTSecret != "" {
 			playbackHandler.JWTSecret = deps.Config.Auth.JWTSecret
 			if authMiddleware != nil && playbackHandler.PlanStoreV3 != nil {
@@ -3084,11 +3090,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 		v2deps.AdminCatalogSources = catalogSeedHandler
 		v2deps.AdminCatalogTransfer = catalogSeedHandler
 	}
-	systemJWTSecret := ""
-	if deps.Config != nil {
-		systemJWTSecret = deps.Config.Auth.JWTSecret
-	}
-	v2deps.AdminHardwareAcceleration = handlers.NewSystemHandler(deps.TranscodePool, systemJWTSecret, func() (string, string, string) {
+	v2deps.AdminHardwareAcceleration = handlers.NewSystemHandler(deps.TranscodePool, deps.NodeKeys, func() (string, string, string) {
 		cfg := deps.CurrentConfig()
 		if cfg == nil {
 			return "", "", ""
@@ -3111,11 +3113,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 	v2deps.AdminServerRestart = serverControlHandler
 	var nodeHandler *handlers.NodeHandler
 	if deps.NodeRepo != nil {
-		jwtSecret := ""
-		if deps.Config != nil {
-			jwtSecret = deps.Config.Auth.JWTSecret
-		}
-		nodeHandler = handlers.NewNodeHandler(deps.NodeRepo, deps.ProxyPool, deps.TranscodePool, deps.NodeRepo, deps.EventBus, deps.RedisClient, jwtSecret)
+		nodeHandler = handlers.NewNodeHandler(deps.NodeRepo, deps.ProxyPool, deps.TranscodePool, deps.NodeRepo, deps.EventBus, deps.RedisClient, deps.NodeKeys)
 		// A re-probe stores the node's new inventory through the sweep's own
 		// refresh, so the drift and persist rules have one implementation.
 		// Without a health checker the node still re-probes and the row

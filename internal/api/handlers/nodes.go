@@ -59,8 +59,8 @@ type NodeHandler struct {
 	transcodePool     *nodepool.TranscodePool
 	lister            NodeListEnabled
 	eventBus          cache.EventBus
-	redisClient       *redis.Client // for reading session keys
-	jwtSecret         string        // signs calls to nodes (see nodeauth)
+	redisClient       *redis.Client    // for reading session keys
+	nodeKeys          nodeauth.Keyring // signs calls to nodes (see nodeauth)
 	// capabilities refreshes a node's stored inventory on demand; nil in a
 	// deployment with no health checker, where a re-probe still runs on the node
 	// and the stored row catches up on the next sweep.
@@ -126,7 +126,7 @@ func (h *NodeHandler) SetCapabilityRefresher(refresher NodeCapabilityRefresher) 
 }
 
 // NewNodeHandler creates a new NodeHandler.
-func NewNodeHandler(repo NodeRepository, proxyPool *nodepool.ProxyPool, transcodePool *nodepool.TranscodePool, lister NodeListEnabled, eventBus cache.EventBus, redisClient *redis.Client, jwtSecret string) *NodeHandler {
+func NewNodeHandler(repo NodeRepository, proxyPool *nodepool.ProxyPool, transcodePool *nodepool.TranscodePool, lister NodeListEnabled, eventBus cache.EventBus, redisClient *redis.Client, nodeKeys nodeauth.Keyring) *NodeHandler {
 	return &NodeHandler{
 		repo:          repo,
 		proxyPool:     proxyPool,
@@ -134,7 +134,7 @@ func NewNodeHandler(repo NodeRepository, proxyPool *nodepool.ProxyPool, transcod
 		lister:        lister,
 		eventBus:      eventBus,
 		redisClient:   redisClient,
-		jwtSecret:     jwtSecret,
+		nodeKeys:      nodeKeys,
 	}
 }
 
@@ -241,10 +241,10 @@ func (h *NodeHandler) reloadNodeConfig(ctx context.Context, node *nodepool.Node)
 	if err != nil {
 		return false
 	}
-	if nodeauth.Sign(req, node.URL, h.jwtSecret) != nil {
+	if nodeauth.SignWith(req, node.SignTarget(), node.URL, h.nodeKeys) != nil {
 		return false
 	}
-	resp, err := telemetry.DoTrustedNode(&http.Client{Timeout: nodeConfigReloadTimeout}, req, "reload")
+	resp, err := telemetry.DoTrustedNode(&http.Client{Timeout: nodeConfigReloadTimeout, CheckRedirect: nodepool.RefuseRedirects}, req, "reload")
 	if err != nil {
 		slog.WarnContext(ctx, "node did not reload after an acceleration override change; it will pick it up on its next config poll",
 			"component", "api", "node_id", node.ID, "name", node.Name, "error", logredact.SanitizeURLError(err))
@@ -405,7 +405,7 @@ type nodeReprobeResponse struct {
 // mirroring the force-reload client.
 func (h *NodeHandler) reprobeNode(ctx context.Context, node *nodepool.Node) (nodeReprobeResponse, error) {
 	timeout := h.nodeReprobeTimeout(node)
-	client := &http.Client{Timeout: timeout}
+	client := &http.Client{Timeout: timeout, CheckRedirect: nodepool.RefuseRedirects}
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
@@ -413,7 +413,7 @@ func (h *NodeHandler) reprobeNode(ctx context.Context, node *nodepool.Node) (nod
 	if err != nil {
 		return nodeReprobeResponse{}, err
 	}
-	if err := nodeauth.Sign(req, node.URL, h.jwtSecret); err != nil {
+	if err := nodeauth.SignWith(req, node.SignTarget(), node.URL, h.nodeKeys); err != nil {
 		return nodeReprobeResponse{}, err
 	}
 

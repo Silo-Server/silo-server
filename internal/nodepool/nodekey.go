@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/Silo-Server/silo-server/internal/nodeauth"
 	"github.com/Silo-Server/silo-server/internal/secret"
 )
 
@@ -28,8 +29,10 @@ var (
 	// one. Only transcode nodes have keys: a proxy holds the shared secret.
 	ErrNodeKeyNotIssuable = errors.New("only transcode nodes take a node key")
 	// ErrNoNodeKey reports a transcode node with no usable key: none was
-	// issued, or the stored one does not decrypt under this SECRET_KEY.
-	ErrNoNodeKey = errors.New("transcode node has no key")
+	// issued, or the stored one does not decrypt under this SECRET_KEY. It is
+	// nodeauth.ErrNoNodeKey, so a caller tests one sentinel whether the
+	// registry or a signer reported it.
+	ErrNoNodeKey = nodeauth.ErrNoNodeKey
 )
 
 var nodeKeyEncoding = base64.RawURLEncoding.Strict()

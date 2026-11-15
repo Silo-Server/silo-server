@@ -36,6 +36,10 @@ import (
 
 const testSecret = "node-reconstruct-test-secret"
 
+// testNodeKey is the test node's own key (SILO_NODE_KEY), which verifies the
+// requests the core signs to it. It is not the shared secret.
+const testNodeKey = "snk1_1_dGVzdC1ub2RlLWtleS10ZXN0LW5vZGUta2V5LXRlc3Q"
+
 type allowInputPaths struct{}
 
 func (allowInputPaths) Allowed(context.Context, string) (bool, error) {
@@ -179,6 +183,7 @@ func newTestServer(t *testing.T) *Server {
 	w.SetConfigForTest(cfg)
 	return &Server{
 		watcher:                   w,
+		nodeKey:                   testNodeKey,
 		inputPaths:                allowInputPaths{},
 		transcodeDir:              cfg.Playback.TranscodeDir,
 		artifactRoot:              filepath.Join(cfg.Playback.TranscodeDir, downloadprepare.ArtifactDirectoryName),
@@ -727,7 +732,7 @@ func TestHandleDownloadPreparePublishesToneMapReceiptAndStatusAttestation(t *tes
 	}
 
 	head := httptest.NewRequest(http.MethodHead, "/downloads/artifacts/artifact-tone-map", nil)
-	nodeauthtest.Sign(t, head, testSecret)
+	nodeauthtest.Sign(t, head, testNodeKey)
 	headRecorder := httptest.NewRecorder()
 	server.Handler().ServeHTTP(headRecorder, head)
 	if headRecorder.Code != http.StatusOK {
@@ -1359,7 +1364,7 @@ func TestDownloadArtifactRoutesServeRangeAndDeleteNodeLocalFile(t *testing.T) {
 	}
 
 	req := httptest.NewRequest(http.MethodGet, "/downloads/artifacts/artifact-range", nil)
-	nodeauthtest.Sign(t, req, testSecret)
+	nodeauthtest.Sign(t, req, testNodeKey)
 	req.Header.Set("Range", "bytes=3-6")
 	rr := httptest.NewRecorder()
 	server.Handler().ServeHTTP(rr, req)
@@ -1371,7 +1376,7 @@ func TestDownloadArtifactRoutesServeRangeAndDeleteNodeLocalFile(t *testing.T) {
 	}
 
 	deleteReq := httptest.NewRequest(http.MethodDelete, "/downloads/artifacts/artifact-range", nil)
-	nodeauthtest.Sign(t, deleteReq, testSecret)
+	nodeauthtest.Sign(t, deleteReq, testNodeKey)
 	deleteRR := httptest.NewRecorder()
 	server.Handler().ServeHTTP(deleteRR, deleteReq)
 	if deleteRR.Code != http.StatusNoContent {
@@ -1391,7 +1396,7 @@ func TestDeleteDownloadArtifactReceiptInvalidationFailurePreservesArtifact(t *te
 	blockReceiptRemoval(t, outputPath)
 
 	request := httptest.NewRequest(http.MethodDelete, "/downloads/artifacts/artifact-delete-invalidation", nil)
-	nodeauthtest.Sign(t, request, testSecret)
+	nodeauthtest.Sign(t, request, testNodeKey)
 	recorder := httptest.NewRecorder()
 	server.Handler().ServeHTTP(recorder, request)
 	if recorder.Code != http.StatusInternalServerError {
@@ -1453,7 +1458,7 @@ func TestDownloadArtifactHeadDoesNotWaitForConcurrentRelay(t *testing.T) {
 	getDone := make(chan struct{})
 	go func() {
 		req := httptest.NewRequest(http.MethodGet, "/downloads/artifacts/"+artifactID, nil)
-		nodeauthtest.Sign(t, req, testSecret)
+		nodeauthtest.Sign(t, req, testNodeKey)
 		server.Handler().ServeHTTP(blocked, req)
 		close(getDone)
 	}()
@@ -1467,7 +1472,7 @@ func TestDownloadArtifactHeadDoesNotWaitForConcurrentRelay(t *testing.T) {
 	headDone := make(chan *httptest.ResponseRecorder, 1)
 	go func() {
 		req := httptest.NewRequest(http.MethodHead, "/downloads/artifacts/"+artifactID, nil)
-		nodeauthtest.Sign(t, req, testSecret)
+		nodeauthtest.Sign(t, req, testNodeKey)
 		rr := httptest.NewRecorder()
 		server.Handler().ServeHTTP(rr, req)
 		headDone <- rr

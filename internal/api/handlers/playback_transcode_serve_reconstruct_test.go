@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/Silo-Server/silo-server/internal/nodeauth/nodeauthtest"
 	"github.com/Silo-Server/silo-server/internal/playback"
 )
 
@@ -20,9 +21,10 @@ import (
 // front door the tone-mapped path uses.
 func TestTranscodeServeReconstructsPlainTranscodeFromTokenOnLiveSession(t *testing.T) {
 	sessionMgr := playback.NewSessionManager(0, 0)
-	handler := NewPlaybackHandler(sessionMgr)
+	handler := newKeyedPlaybackHandler(sessionMgr)
 	handler.PlaybackConfig = playbackTestConfig(writePlaybackTestFFmpegSleep(t, "30"), t.TempDir())
 	handler.JWTSecret = "test-secret"
+	handler.NodeKeys = nodeauthtest.SameKey("test-secret")
 
 	live, err := sessionMgr.StartSession(1, "profile-1", 42, playback.PlayTranscode, true)
 	if err != nil {
@@ -61,12 +63,13 @@ func TestTranscodeServeReconstructsPlainTranscodeFromTokenOnLiveSession(t *testi
 // the second-chance reconstruct branch instead of degrading into a 503.
 func TestTranscodeServePlainCardRecoveryFailureStays404(t *testing.T) {
 	sessionMgr := playback.NewSessionManager(0, 0)
-	handler := NewPlaybackHandler(sessionMgr)
+	handler := newKeyedPlaybackHandler(sessionMgr)
 	// A nonexistent ffmpeg binary fails at spawn time, so the reconstruction
 	// itself cannot be performed (as opposed to a binary that starts and never
 	// produces a manifest, which is a different 503 path).
 	handler.PlaybackConfig = playbackTestConfig(filepath.Join(t.TempDir(), "missing-ffmpeg"), t.TempDir())
 	handler.JWTSecret = "test-secret"
+	handler.NodeKeys = nodeauthtest.SameKey("test-secret")
 
 	live, err := sessionMgr.StartSession(1, "profile-1", 42, playback.PlayTranscode, true)
 	if err != nil {
@@ -108,10 +111,11 @@ func TestTranscodeServePlainCardRecoveryFailureStays404(t *testing.T) {
 // rather than left holding a stream slot nothing serves.
 func TestTranscodeServeColdPlannedRebuildThatCantPlanEndsTheSession(t *testing.T) {
 	sessionMgr := playback.NewSessionManager(0, 0)
-	handler := NewPlaybackHandler(sessionMgr)
+	handler := newKeyedPlaybackHandler(sessionMgr)
 	transcodeDir := t.TempDir()
 	handler.PlaybackConfig = playbackTestConfig(writePlaybackTestFFmpegSleep(t, "30"), transcodeDir)
 	handler.JWTSecret = "test-secret"
+	handler.NodeKeys = nodeauthtest.SameKey("test-secret")
 
 	sessionID := "5b1e6f0e-6c1d-4a51-9d0c-1770a0000001"
 	card := playback.NewRecipeCard(1, "profile-1", 42, "", playback.TranscodeOpts{
@@ -160,9 +164,10 @@ func TestTranscodeServeColdPlannedRebuildThatCantPlanEndsTheSession(t *testing.T
 // playlist.
 func TestTranscodeManifestStatesItsLength(t *testing.T) {
 	sessionMgr := playback.NewSessionManager(0, 0)
-	handler := NewPlaybackHandler(sessionMgr)
+	handler := newKeyedPlaybackHandler(sessionMgr)
 	handler.PlaybackConfig = playbackTestConfig(writePlaybackTestFFmpegSleep(t, "30"), t.TempDir())
 	handler.JWTSecret = "test-secret"
+	handler.NodeKeys = nodeauthtest.SameKey("test-secret")
 
 	live, err := sessionMgr.StartSession(1, "profile-1", 42, playback.PlayTranscode, true)
 	if err != nil {

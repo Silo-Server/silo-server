@@ -14,6 +14,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/nodeauth/nodeauthtest"
+	"github.com/Silo-Server/silo-server/internal/nodepool/nodepooltest"
+
 	"github.com/go-chi/chi/v5"
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
@@ -233,7 +236,7 @@ func TestEnsureTranscodeSessionDoesNotHoldLifecycleLockWhileWaitingForManifest(t
 		TranscodeDir: dir,
 		FFmpegPath:   ffmpegPath,
 		HWAccel:      playback.HWAccelNone,
-		tm:           playback.NewTranscodeManager(),
+		tm:           keyedTranscodeManager(),
 	}
 
 	type ensureResult struct {
@@ -352,7 +355,7 @@ func TestEnsureTranscodeSessionGivesSoftwareFallbackFreshManifestBudget(t *testi
 			config.PlaybackTranscodeSoftwareToneMapSettingKey: "true",
 		}},
 		TranscodeDir: t.TempDir(), FFmpegPath: ffmpegPath, HWAccel: tonemap.BackendVideoToolbox,
-		tm: playback.NewTranscodeManager(),
+		tm: keyedTranscodeManager(),
 		compatToneMapProbe: func(context.Context, string, string, string) (tonemap.Capabilities, error) {
 			return tonemap.Capabilities{
 				{Mode: tonemap.ModeHardware, Backend: tonemap.BackendVideoToolbox, Filter: tonemap.HardwareFilterVideoToolbox, SourceKinds: []tonemap.SourceKind{tonemap.SourcePQ}},
@@ -524,7 +527,7 @@ func TestGenerateCompatCopyVideoMasterManifestMatchesJellyfinForProfile5(t *test
 }
 
 func TestBuildProxyRedirectURLMarksCopyFMP4ForOldReaderRejection(t *testing.T) {
-	h := &PlaybackHandler{JWTSecret: "test-secret"}
+	h := &PlaybackHandler{JWTSecret: "test-secret", NodeKeys: nodeauthtest.SameKey("test-secret")}
 	source := PlaybackMediaSource{HLSRemux: true}
 	redirectURL, err := h.buildProxyRedirectURL(
 		"play-1", "upstream-1", string(playback.PlayTranscode),
@@ -548,7 +551,7 @@ func TestBuildProxyRedirectURLMarksCopyFMP4ForOldReaderRejection(t *testing.T) {
 }
 
 func TestBuildProxyRedirectURLCarriesMPEGTSForRemoteCopyRecipe(t *testing.T) {
-	h := &PlaybackHandler{JWTSecret: "test-secret"}
+	h := &PlaybackHandler{JWTSecret: "test-secret", NodeKeys: nodeauthtest.SameKey("test-secret")}
 	source := PlaybackMediaSource{HLSRemux: true, HLSRemuxMPEGTS: true}
 	redirectURL, err := h.buildProxyRedirectURL(
 		"play-1", "upstream-1", string(playback.PlayTranscode),
@@ -571,7 +574,7 @@ func TestBuildProxyRedirectURLCarriesMPEGTSForRemoteCopyRecipe(t *testing.T) {
 // and that filter rejects every other codec, so the token names the copied
 // track's codec.
 func TestBuildProxyRedirectURLCarriesCopiedRemuxAudioCodec(t *testing.T) {
-	h := &PlaybackHandler{JWTSecret: "test-secret"}
+	h := &PlaybackHandler{JWTSecret: "test-secret", NodeKeys: nodeauthtest.SameKey("test-secret")}
 	for _, test := range []struct {
 		name           string
 		method         playback.PlayMethod
@@ -644,7 +647,7 @@ func TestKeyframePlaylistOnlyComparedForCopyStreams(t *testing.T) {
 }
 
 func TestBuildProxyRedirectURLMarksToneMapForOldReaderRejection(t *testing.T) {
-	h := &PlaybackHandler{JWTSecret: "test-secret"}
+	h := &PlaybackHandler{JWTSecret: "test-secret", NodeKeys: nodeauthtest.SameKey("test-secret")}
 	source := PlaybackMediaSource{Version: catalog.FileVersion{HDR: true, VideoTracks: []models.VideoTrack{{VideoRangeType: "HDR10", ColorTransfer: "smpte2084"}}}}
 	redirectURL, err := h.buildProxyRedirectURL("play-1", "upstream-1", string(playback.PlayTranscode), &models.MediaFile{FilePath: "/media/hdr.mkv"}, source, nil, time.Time{}, "http://transcode-1", 0, &nodepool.Node{URL: "http://proxy-1"}, netaccess.Path{})
 	if err != nil {
@@ -664,7 +667,7 @@ func TestBuildProxyRedirectURLMarksToneMapForOldReaderRejection(t *testing.T) {
 }
 
 func TestBuildProxyRedirectURLCarriesAudioOnlyRemuxClaim(t *testing.T) {
-	h := &PlaybackHandler{JWTSecret: "test-secret"}
+	h := &PlaybackHandler{JWTSecret: "test-secret", NodeKeys: nodeauthtest.SameKey("test-secret")}
 	source := PlaybackMediaSource{
 		TranscodeAudio:          true,
 		DefaultAudioStreamIndex: intPtr(0),
@@ -781,7 +784,7 @@ func TestHandleVideoStreamGuardsIntegratedAudioEncodingAfterProxyFiltering(t *te
 			if tt.includeOldProxy {
 				proxyPool.SetNodes([]*nodepool.Node{{ID: 1, URL: oldProxy.URL, Enabled: true, Healthy: true}})
 			}
-			planner := nodepool.NewPlanner(proxyPool, nodepool.NewTranscodePool())
+			planner := nodepool.NewPlanner(proxyPool, nodepooltest.NewTranscodePool())
 			ffmpegPath, probeMarker, executionMarker := writeCompatAudioRecipeFFmpeg(t, tt.localSupportsV2, "remuxed")
 			mediaPath := filepath.Join(t.TempDir(), "movie.mkv")
 			if err := os.WriteFile(mediaPath, []byte("source"), 0o644); err != nil {
@@ -808,8 +811,9 @@ func TestHandleVideoStreamGuardsIntegratedAudioEncodingAfterProxyFiltering(t *te
 				fileResolver:  testCompatFileResolver{file: &models.MediaFile{ID: version.FileID, FilePath: mediaPath}},
 				NodePlanner:   planner,
 				JWTSecret:     "secret",
+				NodeKeys:      nodeauthtest.SameKey("secret"),
 				FFmpegPath:    ffmpegPath,
-				tm:            playback.NewTranscodeManager(),
+				tm:            keyedTranscodeManager(),
 			}
 			if tt.workerOnly {
 				requireCompatWorkerRouting(handler)
@@ -915,7 +919,7 @@ func assertCompatMarkerState(t *testing.T, path string, want bool) {
 const maxProxyTokenClaimGrowthBytes = 256
 
 func TestProxyRedirectURLClaimGrowthBudget(t *testing.T) {
-	h := &PlaybackHandler{JWTSecret: "test-secret"}
+	h := &PlaybackHandler{JWTSecret: "test-secret", NodeKeys: nodeauthtest.SameKey("test-secret")}
 	file := &models.MediaFile{FilePath: "/" + strings.Repeat("p", 511), VideoTracks: []models.VideoTrack{{DVProfile: 7}}}
 	source := PlaybackMediaSource{FileID: 2147483647}
 	session := &Session{StreamAppUserID: 2147483647, ProfileID: "123e4567-e89b-12d3-a456-426614174000"}
@@ -1125,7 +1129,7 @@ func TestEnsureUpstreamPlayback_ReplacesStaleUpstreamWhenRecipeMissing(t *testin
 	h := &PlaybackHandler{
 		playbackStore: store,
 		sessionMgr:    mgr,
-		tm:            playback.NewTranscodeManager(),
+		tm:            keyedTranscodeManager(),
 	}
 
 	got, err := h.ensureUpstreamPlayback(
@@ -1161,7 +1165,7 @@ func newActiveEncodingsHandler(mgr *testCompatSessionManager) (*PlaybackHandler,
 	h := &PlaybackHandler{
 		playbackStore: store,
 		sessionMgr:    mgr,
-		tm:            playback.NewTranscodeManager(),
+		tm:            keyedTranscodeManager(),
 	}
 	return h, store
 }
@@ -1299,7 +1303,7 @@ func TestRestartCompatTranscodeForAudioSelection_LocalRePersistsRecipe(t *testin
 		fileResolver:  testCompatFileResolver{file: &models.MediaFile{ID: version.FileID, FilePath: filePath}},
 		TranscodeDir:  t.TempDir(),
 		FFmpegPath:    writeCompatTestFFmpeg(t),
-		tm:            playback.NewTranscodeManager(),
+		tm:            keyedTranscodeManager(),
 	}
 
 	// Start the live transcode on the main track and persist its initial recipe
@@ -1472,7 +1476,7 @@ func TestRestartCompatTranscodeForAudioSelection_RejectsUnsupportedSurroundSwitc
 		fileResolver:  testCompatFileResolver{file: &models.MediaFile{ID: version.FileID, FilePath: mediaPath}},
 		TranscodeDir:  t.TempDir(),
 		FFmpegPath:    ffmpegPath,
-		tm:            playback.NewTranscodeManager(),
+		tm:            keyedTranscodeManager(),
 	}
 
 	transcodeSession, err := handler.ensureTranscodeSession(context.Background(), "play-1", "upstream-1", mainSource)

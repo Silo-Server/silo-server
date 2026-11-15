@@ -123,7 +123,7 @@ func TestUpdateAdminNodeNudgesWorkerOnlyOnPolicyTargetChange(t *testing.T) {
 	run := func(t *testing.T, before, after nodepool.Node, input nodepool.UpdateNodeInput) (reloads, invalidations int) {
 		after.AdminRevision = 2
 		s := &scriptedNodeConfiguration{update: &struct{ before, after *nodepool.Node }{&before, &after}}
-		h := NewNodeHandler(&stubNodeRepository{}, nil, nil, nil, nil, nil, "secret")
+		h := NewNodeHandler(&stubNodeRepository{}, nil, nil, nil, nil, nil, nodeauthtest.SameKey("secret"))
 		h.SetConfigurationStore(s)
 		invalidated := make(chan string, 4)
 		h.SetCapabilityInvalidator(func(url string) { invalidated <- url })

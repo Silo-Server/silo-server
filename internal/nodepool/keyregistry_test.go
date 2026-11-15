@@ -8,6 +8,8 @@ import (
 	"testing"
 	"testing/synctest"
 	"time"
+
+	"github.com/Silo-Server/silo-server/internal/nodeauth"
 )
 
 // fakeCredentialRows is a loader the test can rewrite between reloads.
@@ -362,4 +364,44 @@ func TestKeyRegistryInvalidateReloadsInTheBackground(t *testing.T) {
 			t.Fatalf("loads = %d, want the initial load and one reload", got)
 		}
 	})
+}
+
+// The keyring never hands the shared secret to a transcode target or a node
+// key to a proxy target, and an unknown or keyless node is an error rather
+// than a reason to fall back to the shared secret.
+func TestKeyringKeepsTranscodeNodesOffTheSharedSecret(t *testing.T) {
+	const shared = "shared-jwt-secret"
+	keyed, key := keyedRow(t, 1, "http://gpu-1")
+	rows := &fakeCredentialRows{}
+	rows.set(keyed,
+		credentialRow(2, NodeTypeTranscode, "http://gpu-2"),
+		credentialRow(3, NodeTypeProxy, "http://proxy-3"))
+	registry, _ := newTestKeyRegistry(t, rows)
+	keys := registry.Keyring(func() string { return shared })
+
+	for _, tc := range []struct {
+		target nodeauth.Target
+		url    string
+		want   string
+		err    error
+	}{
+		{nodeauth.TargetTranscode, "http://gpu-1/", key, nil},
+		{nodeauth.TargetTranscode, "http://gpu-2", "", nodeauth.ErrNoNodeKey},
+		{nodeauth.TargetTranscode, "http://proxy-3", "", nodeauth.ErrUnknownNode},
+		{nodeauth.TargetTranscode, "http://nowhere", "", nodeauth.ErrUnknownNode},
+		{nodeauth.TargetProxy, "http://proxy-3", shared, nil},
+		{nodeauth.TargetProxy, "http://gpu-1", "", nodeauth.ErrUnknownNode},
+		{nodeauth.TargetProxy, "http://gpu-2", "", nodeauth.ErrUnknownNode},
+		{nodeauth.TargetProxy, "http://nowhere", "", nodeauth.ErrUnknownNode},
+	} {
+		got, err := keys.KeyFor(tc.target, tc.url)
+		if got != tc.want || !errors.Is(err, tc.err) {
+			t.Errorf("KeyFor(%v, %q) = %q, %v; want %q, %v", tc.target, tc.url, got, err, tc.want, tc.err)
+		}
+	}
+	// Callers test one sentinel for a keyless node, whichever package
+	// reported it.
+	if _, err := registry.NodeKey(2); !errors.Is(err, nodeauth.ErrNoNodeKey) {
+		t.Fatalf("NodeKey(2) = %v, want nodeauth.ErrNoNodeKey", err)
+	}
 }

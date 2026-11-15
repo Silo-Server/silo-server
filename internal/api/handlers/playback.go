@@ -201,10 +201,12 @@ type PlaybackHandler struct {
 	LifecycleViews   PlaybackLifecycleViews
 	// LiveRowJSON renders a session as the live row a sync would store for
 	// it (worker.SessionSyncRowJSON), for a start announced before a sync.
-	LiveRowJSON     func(*playback.Session) (json.RawMessage, error)
-	MissingMarker   MissingFileMarker
-	NodePlanner     nodepool.SessionPlanner   // optional; enables proxy/transcode node selection
-	JWTSecret       string                    // needed for signing stream tokens
+	LiveRowJSON   func(*playback.Session) (json.RawMessage, error)
+	MissingMarker MissingFileMarker
+	NodePlanner   nodepool.SessionPlanner // optional; enables proxy/transcode node selection
+	JWTSecret     string                  // needed for signing stream tokens
+	// NodeKeys signs calls to transcode nodes with each node's own key.
+	NodeKeys        nodeauth.Keyring
 	StreamTelemetry *streamtelemetry.Registry // local observation-only telemetry
 	// StreamDeny revokes a session's stream tokens before they expire (see
 	// docs/architecture/restart-resilient-playback.md). Nil-safe: without Redis
@@ -297,7 +299,7 @@ type PlaybackHandler struct {
 	v3ToneMapProbe       func(context.Context, string, string, string) (tonemap.Capabilities, error)
 	v3RouteNodeProbe     func(context.Context, string) bool // nil: probeRouteNodeV3
 	v3NodeCapabilitiesMu sync.Mutex
-	v3NodeCapabilities   map[string]v3NodeCapabilityCache
+	v3NodeCapabilities   map[v3NodeCapabilityKey]v3NodeCapabilityCache
 	// v3NodeProbeBudgets holds what each node last said a capability read of it
 	// costs, guarded by v3NodeCapabilitiesMu. It is kept apart from the
 	// inventory above because the two are invalidated for different reasons: an
@@ -314,7 +316,7 @@ type PlaybackHandler struct {
 	// flight, one at a time each. Guarded by v3NodeCapabilitiesMu, the same
 	// lock as the invalidation counter, so a refresh cannot release its slot in
 	// between an invalidation and that invalidation's claim on it.
-	v3NodeCapabilityRefresh map[string]struct{}
+	v3NodeCapabilityRefresh map[v3NodeCapabilityKey]struct{}
 	v3EventOnce             sync.Once
 	v3EventQueue            chan playback.RouteEventRecordV3
 	v3StartEffectsOnce      sync.Once
@@ -360,7 +362,7 @@ func NewPlaybackHandler(sessionMgr SessionManagerInterface, opts ...FilePathReso
 	// Wire the shared transcode manager with closures so it reads the handler's
 	// (often late-set) config/store/secret fields lazily at call time, avoiding a
 	// field-ordering hazard during router setup.
-	h.tm.JWTSecretFn = func() string { return h.JWTSecret }
+	h.tm.NodeKeysFn = func() nodeauth.Keyring { return h.NodeKeys }
 	h.tm.LogSinkFn = func() playback.FFmpegLogSink { return h.FFmpegLogSink }
 	h.tm.Config = func() playback.TranscodeRuntimeConfig {
 		c := h.playbackConfig()
@@ -2392,7 +2394,9 @@ func (h *PlaybackHandler) relayToTranscodeNode(w http.ResponseWriter, r *http.Re
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return nil
 	}
-	if err := nodeauth.Sign(req, transcodeNodeURL, h.JWTSecret); err != nil {
+	if err := nodeauth.SignTranscode(req, transcodeNodeURL, h.NodeKeys); err != nil {
+		slog.WarnContext(r.Context(), "cannot sign the relay to a transcode node", "component", "playback",
+			"node", logredact.SanitizeURL(transcodeNodeURL), "error", err)
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return nil
 	}
@@ -2499,7 +2503,7 @@ func (h *PlaybackHandler) relayToTranscodeNode(w http.ResponseWriter, r *http.Re
 	fullSize := transcodeproxy.FullRepresentationSize(resp)
 	if isMediaSegment && generation != "" && r.Method == http.MethodGet &&
 		sw.CompletedFullResponse(fullSize) {
-		if ackErr := transcodeproxy.Acknowledge(r.Context(), transcodeproxy.NodeClient(), transcodeNodeURL, path, h.JWTSecret, generation); ackErr != nil {
+		if ackErr := transcodeproxy.Acknowledge(r.Context(), transcodeproxy.NodeClient(), transcodeNodeURL, path, h.NodeKeys, generation); ackErr != nil {
 			slog.WarnContext(r.Context(), "acknowledge transcode segment completion", "component", "api", "error", ackErr, "playback_session_id", sessionID)
 		}
 	}

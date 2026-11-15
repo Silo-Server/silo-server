@@ -16,6 +16,10 @@ import (
 	"github.com/Silo-Server/silo-server/internal/tonemap"
 )
 
+// testNodeKeys signs every request in these tests as a transcode node whose
+// key is "secret".
+var testNodeKeys = nodeauthtest.NodeKey("secret")
+
 func TestHTTPPreparerSendsAuthenticatedRecipe(t *testing.T) {
 	var got Request
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -33,7 +37,7 @@ func TestHTTPPreparerSendsAuthenticatedRecipe(t *testing.T) {
 	defer server.Close()
 
 	want := Request{ArtifactID: "job-1", InputPath: "/media/movie.mkv", TargetCodecVideo: "h264", TargetCodecAudio: "aac"}
-	result, err := (HTTPPreparer{}).Prepare(context.Background(), server.URL+"/", "secret", want)
+	result, err := (HTTPPreparer{}).Prepare(context.Background(), server.URL+"/", testNodeKeys, want)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -334,7 +338,7 @@ func TestHTTPPreparerReportsNodeFailure(t *testing.T) {
 	}))
 	defer server.Close()
 
-	_, err := (HTTPPreparer{}).Prepare(context.Background(), server.URL, "secret", Request{ArtifactID: "job-2"})
+	_, err := (HTTPPreparer{}).Prepare(context.Background(), server.URL, testNodeKeys, Request{ArtifactID: "job-2"})
 	if err == nil {
 		t.Fatal("expected remote failure")
 	}
@@ -359,14 +363,14 @@ func TestHTTPPreparerManagesOpaqueArtifact(t *testing.T) {
 	}))
 	defer server.Close()
 	client := HTTPPreparer{}
-	if _, err := client.Stat(context.Background(), server.URL, "secret", "../escape"); err == nil || !strings.Contains(err.Error(), "invalid artifact id") {
+	if _, err := client.Stat(context.Background(), server.URL, testNodeKeys, "../escape"); err == nil || !strings.Contains(err.Error(), "invalid artifact id") {
 		t.Fatalf("invalid artifact Stat error = %v, want invalid artifact id", err)
 	}
-	result, err := client.Stat(context.Background(), server.URL, "secret", "artifact-1")
+	result, err := client.Stat(context.Background(), server.URL, testNodeKeys, "artifact-1")
 	if err != nil || result != (Result{ArtifactID: "artifact-1", FileSize: 42}) {
 		t.Fatalf("Stat = (%+v, %v)", result, err)
 	}
-	if err := client.Delete(context.Background(), server.URL, "secret", "artifact-1"); err != nil {
+	if err := client.Delete(context.Background(), server.URL, testNodeKeys, "artifact-1"); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -392,7 +396,7 @@ func TestHTTPPreparerSignsNormalizedNodeURLPrefix(t *testing.T) {
 			server := httptest.NewServer(http.StripPrefix(tc.strip, worker))
 			defer server.Close()
 			nodeURL := tc.pad + server.URL + tc.prefix + tc.pad
-			result, err := HTTPPreparer{}.Stat(t.Context(), nodeURL, "secret", "artifact-1")
+			result, err := HTTPPreparer{}.Stat(t.Context(), nodeURL, testNodeKeys, "artifact-1")
 			if err != nil || result.FileSize != 42 {
 				t.Fatalf("Stat = (%+v, %v), want a signed request the worker accepts", result, err)
 			}
@@ -412,7 +416,7 @@ func TestHTTPPreparerStatRecoversToneMapAttestationFromHeaders(t *testing.T) {
 	}))
 	defer server.Close()
 
-	result, err := (HTTPPreparer{}).Stat(context.Background(), server.URL, "secret", "artifact-1")
+	result, err := (HTTPPreparer{}).Stat(context.Background(), server.URL, testNodeKeys, "artifact-1")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -435,7 +439,7 @@ func TestHTTPPreparerStatRejectsOversizedAttestationHeader(t *testing.T) {
 	}))
 	defer server.Close()
 
-	if _, err := (HTTPPreparer{}).Stat(context.Background(), server.URL, "secret", "artifact-1"); err == nil {
+	if _, err := (HTTPPreparer{}).Stat(context.Background(), server.URL, testNodeKeys, "artifact-1"); err == nil {
 		t.Fatal("Stat accepted an oversized attestation header")
 	}
 }
@@ -467,7 +471,7 @@ func TestHTTPPreparerDeleteStopsStalledErrorBodyRead(t *testing.T) {
 
 	started := time.Now()
 	err := (HTTPPreparer{ReadIdleTimeout: 50 * time.Millisecond}).Delete(
-		context.Background(), server.URL, "secret", "artifact-stalled-delete",
+		context.Background(), server.URL, testNodeKeys, "artifact-stalled-delete",
 	)
 	if !errors.Is(err, ErrRelayReadIdle) {
 		t.Fatalf("Delete error = %v, want ErrRelayReadIdle", err)
@@ -500,7 +504,7 @@ func TestHTTPPreparerPrepareStopsStalledResultBodyRead(t *testing.T) {
 
 	started := time.Now()
 	_, err := (HTTPPreparer{ReadIdleTimeout: 50 * time.Millisecond}).Prepare(
-		context.Background(), server.URL, "secret", Request{ArtifactID: "artifact-stalled-result"},
+		context.Background(), server.URL, testNodeKeys, Request{ArtifactID: "artifact-stalled-result"},
 	)
 	if !errors.Is(err, ErrRelayReadIdle) {
 		t.Fatalf("Prepare error = %v, want ErrRelayReadIdle", err)
@@ -557,7 +561,7 @@ func TestHTTPPreparerOpenStopsStalledBodyRead(t *testing.T) {
 	defer server.Close()
 
 	resp, err := (HTTPPreparer{ReadIdleTimeout: 50 * time.Millisecond}).Open(
-		context.Background(), server.URL, "secret", "artifact-stalled", http.MethodGet, nil,
+		context.Background(), server.URL, testNodeKeys, "artifact-stalled", http.MethodGet, nil,
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -587,7 +591,7 @@ func TestHTTPPreparerOpenAllowsContinuedBodyProgress(t *testing.T) {
 	defer server.Close()
 
 	resp, err := (HTTPPreparer{ReadIdleTimeout: 50 * time.Millisecond}).Open(
-		context.Background(), server.URL, "secret", "artifact-progress", http.MethodGet, nil,
+		context.Background(), server.URL, testNodeKeys, "artifact-progress", http.MethodGet, nil,
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -620,20 +624,20 @@ func TestHTTPPreparerProgress(t *testing.T) {
 	defer server.Close()
 	p := HTTPPreparer{Client: server.Client()}
 
-	got, err := p.Progress(context.Background(), server.URL, "secret", "running-1")
+	got, err := p.Progress(context.Background(), server.URL, testNodeKeys, "running-1")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !got.Running || got.EncodedSeconds != 12.5 || got.DurationSeconds != 100 || got.Speed != 2.5 {
 		t.Fatalf("progress = %+v", got)
 	}
-	if _, err := p.Progress(context.Background(), server.URL, "secret", "old-node"); !errors.Is(err, ErrProgressUnsupported) {
+	if _, err := p.Progress(context.Background(), server.URL, testNodeKeys, "old-node"); !errors.Is(err, ErrProgressUnsupported) {
 		t.Fatalf("404 err = %v, want ErrProgressUnsupported", err)
 	}
-	if _, err := p.Progress(context.Background(), server.URL, "secret", "other-id"); err == nil {
+	if _, err := p.Progress(context.Background(), server.URL, testNodeKeys, "other-id"); err == nil {
 		t.Fatal("accepted progress for a different artifact id")
 	}
-	if _, err := p.Progress(context.Background(), server.URL, "secret", "../escape"); err == nil || !strings.Contains(err.Error(), "invalid artifact id") {
+	if _, err := p.Progress(context.Background(), server.URL, testNodeKeys, "../escape"); err == nil || !strings.Contains(err.Error(), "invalid artifact id") {
 		t.Fatalf("invalid artifact Progress error = %v, want invalid artifact id", err)
 	}
 }

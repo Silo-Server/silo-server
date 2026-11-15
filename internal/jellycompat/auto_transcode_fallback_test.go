@@ -87,7 +87,7 @@ func newAutoCompatLocalHandler(t *testing.T, ffmpegPath string) (*PlaybackHandle
 		TranscodeDir: t.TempDir(),
 		FFmpegPath:   ffmpegPath,
 		HWAccel:      "auto",
-		tm:           playback.NewTranscodeManager(),
+		tm:           keyedTranscodeManager(),
 	}
 	handler.compatAutoTranscodePipeline = func(_ context.Context, opts playback.TranscodeOpts) *playback.AutoTranscodePipeline {
 		if opts.HWAccel != "auto" {
@@ -232,13 +232,14 @@ func startCompatRemoteTranscode(t *testing.T, hwAccel, report string, response t
 	playbackStore.Put(PlaybackSession{ID: "play-1", UpstreamSessionID: "upstream-1"})
 	handler := &PlaybackHandler{
 		JWTSecret:     "secret",
+		NodeKeys:      nodeauthtest.SameKey("secret"),
 		HWAccel:       hwAccel,
 		NodePlanner:   &nodeLookupPlannerStub{node: pooled},
 		playbackStore: playbackStore,
 		sessionMgr: &testCompatSessionManager{sessions: map[string]*playback.Session{
 			"upstream-1": {ID: "upstream-1", UserID: 7, ProfileID: "profile-1", MediaFileID: version.FileID, PlayMethod: playback.PlayTranscode},
 		}},
-		tm: playback.NewTranscodeManager(),
+		tm: keyedTranscodeManager(),
 	}
 	file := &models.MediaFile{ID: version.FileID, FilePath: "/media/movie.mkv"}
 	if err := handler.startRemoteTranscode(context.Background(), "play-1", "upstream-1", source, file, 0, node.URL); err != nil {

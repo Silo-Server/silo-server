@@ -105,7 +105,7 @@ const gpuAAACapabilities = `{"boot_id":"boot-1","render_device_details":[` +
 // the next capability refetch: after an API restart the planner routes on the
 // inventory the database already holds.
 func TestPoolsDeriveGPUKeysOnLoad(t *testing.T) {
-	transcodes := NewTranscodePool()
+	transcodes := newKeyedTranscodePool()
 	transcodes.SetNodes([]*Node{{
 		ID: 1, URL: "http://tc-1/", Enabled: true, Healthy: true,
 		Capabilities: json.RawMessage(gpuAAACapabilities),
@@ -136,7 +136,7 @@ func TestPoolsDeriveGPUKeysOnLoad(t *testing.T) {
 func TestApplyCapabilitiesDerivesGPUKeys(t *testing.T) {
 	refreshedAt := time.Date(2026, 8, 26, 12, 0, 0, 0, time.UTC)
 
-	transcodes := NewTranscodePool()
+	transcodes := newKeyedTranscodePool()
 	transcodes.SetNodes([]*Node{{ID: 1, URL: "http://tc-1", Enabled: true, Healthy: true}})
 	transcodes.ApplyCapabilities(1, "http://tc-1", []byte(gpuAAACapabilities), "sha256:aaa", refreshedAt, nil, nil)
 	if got := transcodes.Nodes()[0].PhysicalGPUKeys; !slices.Equal(got, []string{"GPU-aaa"}) {

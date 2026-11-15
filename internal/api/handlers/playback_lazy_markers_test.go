@@ -191,7 +191,7 @@ func TestMaybeQueueLazyPlaybackMarkersGates(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			analyzer := &fakePlaybackIntroAnalyzer{started: make(chan struct{}, 1)}
-			handler := NewPlaybackHandler(playback.NewSessionManager(0, 0), &fakePlaybackMarkerFileResolver{file: tt.file})
+			handler := newKeyedPlaybackHandler(playback.NewSessionManager(0, 0), &fakePlaybackMarkerFileResolver{file: tt.file})
 			handler.SettingsRepo = testPlaybackSettingsRepo{values: map[string]string{
 				markers.SettingLazyPlayback: tt.lazy,
 				markers.SettingMode:         tt.mode,
@@ -229,7 +229,7 @@ func TestMaybeQueueLazyPlaybackMarkersLocalModeRunsAnalyzerAndEmitsUpdate(t *tes
 		},
 	}
 	notifier := fakePlaybackMarkerNotifier{ch: make(chan *models.MediaFile, 1)}
-	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0), resolver)
+	handler := newKeyedPlaybackHandler(playback.NewSessionManager(0, 0), resolver)
 	handler.SettingsRepo = testPlaybackSettingsRepo{values: map[string]string{
 		markers.SettingLazyPlayback: "true",
 		markers.SettingMode:         "local",
@@ -457,7 +457,7 @@ func newLazyMarkerTestHandler(
 	analyzer *fakePlaybackIntroAnalyzer,
 	notifier PlaybackMarkerUpdateNotifier,
 ) *PlaybackHandler {
-	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0), &fakePlaybackMarkerFileResolver{file: file})
+	handler := newKeyedPlaybackHandler(playback.NewSessionManager(0, 0), &fakePlaybackMarkerFileResolver{file: file})
 	handler.SettingsRepo = testPlaybackSettingsRepo{values: map[string]string{
 		markers.SettingLazyPlayback: "true",
 		markers.SettingMode:         "local",
@@ -511,7 +511,7 @@ func (r onDemandOverlayRun) run(t *testing.T) ([]*models.MediaFile, *fakePlaybac
 			}
 		}}
 		notifier := fakePlaybackMarkerNotifier{ch: make(chan *models.MediaFile, 16)}
-		handler := NewPlaybackHandler(playback.NewSessionManager(0, 0), resolver)
+		handler := newKeyedPlaybackHandler(playback.NewSessionManager(0, 0), resolver)
 		handler.SettingsRepo = testPlaybackSettingsRepo{values: map[string]string{
 			markers.SettingLazyPlayback:  "true",
 			markers.SettingMode:          "both",

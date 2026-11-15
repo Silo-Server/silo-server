@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/Silo-Server/silo-server/internal/config"
+	"github.com/Silo-Server/silo-server/internal/nodeauth/nodeauthtest"
 	"github.com/Silo-Server/silo-server/internal/nodepool"
 	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/transcodenode"
@@ -89,8 +90,9 @@ func TestPrepareRemoteTransportV3DispatchesTheNodesEffectiveBackend(t *testing.T
 			}))
 			defer node.Close()
 
-			handler := NewPlaybackHandler(playback.NewSessionManager(0, 0))
+			handler := newKeyedPlaybackHandler(playback.NewSessionManager(0, 0))
 			handler.JWTSecret = "test-secret"
+			handler.NodeKeys = nodeauthtest.SameKey("test-secret")
 			handler.PlaybackConfig = func() config.PlaybackConfig {
 				return config.PlaybackConfig{TranscodeEnabled: true, HWAccel: test.cluster}
 			}

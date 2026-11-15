@@ -8,6 +8,9 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"github.com/Silo-Server/silo-server/internal/nodeauth/nodeauthtest"
+	"github.com/Silo-Server/silo-server/internal/nodepool/nodepooltest"
+
 	"github.com/Silo-Server/silo-server/internal/nodepool"
 	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/transcodenode"
@@ -62,14 +65,15 @@ func TestPrepareTransportV3MovesOnFromANodeThatStopsAccepting(t *testing.T) {
 	}))
 	defer live.Close()
 
-	transcodes := nodepool.NewTranscodePool()
+	transcodes := nodepooltest.NewTranscodePool()
 	transcodes.SetNodes([]*nodepool.Node{
 		{ID: 1, URL: dead.URL, Type: nodepool.NodeTypeTranscode, Enabled: true, Healthy: true},
 		{ID: 2, URL: live.URL, Type: nodepool.NodeTypeTranscode, Enabled: true, Healthy: true, ActiveJobs: 2},
 	})
 	planner := nodepool.NewPlanner(nodepool.NewProxyPool(), transcodes)
-	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0))
+	handler := newKeyedPlaybackHandler(playback.NewSessionManager(0, 0))
 	handler.JWTSecret = "test-secret"
+	handler.NodeKeys = nodeauthtest.SameKey("test-secret")
 	handler.NodePlanner = planner
 	requireWorkerRoutingV3(handler)
 	plan := &playback.PlanV3{PlanID: "plan:dead-node", Delivery: playback.DeliveryTranscodeHLSV3, Transformations: transformations}

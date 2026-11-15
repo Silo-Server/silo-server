@@ -372,7 +372,10 @@ type progressiveRemuxRequest struct {
 
 // Server is the HTTP handler for transcode mode.
 type Server struct {
-	watcher           *nodeconfig.Watcher
+	watcher *nodeconfig.Watcher
+	// nodeKey is this node's own key, the only key requireBearer accepts.
+	// Empty refuses every signed route.
+	nodeKey           string
 	streamDeny        *playback.StreamDeny
 	nodeRowID         func() (int, bool)
 	registeredNodeURL func() (string, bool)
@@ -990,6 +993,13 @@ func (s *Server) SetThemeInputAuthorizer(authorizer ThemeInputApprover) {
 // complete no-op.
 func (s *Server) SetStreamTelemetry(registry *streamtelemetry.Registry) {
 	s.telemetry = registry
+}
+
+// SetNodeKey installs this node's own key (SILO_NODE_KEY), which verifies
+// every request the core and proxies sign to it. It must be called during
+// construction, before the server handles requests.
+func (s *Server) SetNodeKey(key string) {
+	s.nodeKey = key
 }
 
 // SetStreamDeny installs the session-deny marker store this node consults
@@ -1733,17 +1743,14 @@ func writeChapterThumbnailError(w http.ResponseWriter, status int, reason string
 }
 
 // requireBearer is middleware that admits only API servers and proxies: it
-// checks the request's node signature (see nodeauth). The name predates
-// signing and is kept because the route inventory classifies by it.
+// checks the request's node signature (see nodeauth) against this node's own
+// key. There is no legacy bearer and no shared secret: only a holder of this
+// node's key can sign for it. The name predates signing and is kept because
+// the route inventory classifies by it.
 func (s *Server) requireBearer(next http.Handler) http.Handler {
 	next = telemetry.TrustedHTTPHandler("worker", next)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		cfg := s.watcher.Config()
-		if cfg == nil {
-			http.Error(w, "node not configured", http.StatusServiceUnavailable)
-			return
-		}
-		if nodeauth.Verify(r, cfg.Auth.JWTSecret) != nil {
+		if s.nodeKey == "" || nodeauth.VerifySigned(r, s.nodeKey) != nil {
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}

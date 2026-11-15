@@ -3283,8 +3283,7 @@ The key is stored encrypted in `stream_nodes.node_key_ciphertext` (see
 [secret encryption](architecture/secret-encryption.md)). It is a credential, not
 configuration: issuing it advances neither `config_etag` nor the pool
 generation. `GET /api/v2/admin/nodes/capabilities` advertises `node_keys: true`
-when this server can issue keys. Nothing signs with node keys yet; existing
-nodes keep working as before.
+when this server can issue keys.
 
 ### Force reload nodes (v2)
 

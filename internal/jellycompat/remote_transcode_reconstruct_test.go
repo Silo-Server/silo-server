@@ -15,6 +15,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/nodeauth"
+	"github.com/Silo-Server/silo-server/internal/nodeauth/nodeauthtest"
+	"github.com/Silo-Server/silo-server/internal/nodepool/nodepooltest"
+
 	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/nodepool"
@@ -296,8 +300,9 @@ func TestPersistLocalTranscodeStopsReplacedRemoteAfterCommit(t *testing.T) {
 			ID: "upstream-1", UserID: 7, ProfileID: "profile-1", MediaFileID: 42,
 			PlayMethod: playback.PlayTranscode, BasePlayMethod: playback.PlayTranscode,
 		}},
-		tm:              playback.NewTranscodeManager(),
+		tm:              keyedTranscodeManager(),
 		JWTSecret:       "test-secret",
+		NodeKeys:        nodeauthtest.SameKey("test-secret"),
 		RecipeNodeStore: recipeStore,
 	}
 
@@ -591,7 +596,7 @@ func TestMasterManifestGatesUnhealthyRemoteAdoption(t *testing.T) {
 	adoptedURL := adoptedNode.URL
 	const healthyURL = "http://healthy.invalid"
 	newPool := func(adoptedHealthy bool) *nodepool.Planner {
-		transcodes := nodepool.NewTranscodePool()
+		transcodes := nodepooltest.NewTranscodePool()
 		transcodes.SetNodes([]*nodepool.Node{
 			{URL: adoptedURL, Enabled: true, Healthy: adoptedHealthy},
 			{URL: healthyURL, Enabled: true, Healthy: true},
@@ -658,7 +663,7 @@ func TestMasterManifestReplansRouteAroundDifferentAdoptedRemote(t *testing.T) {
 	groupA, groupB := "group-a", "group-b"
 	plannedLimit, adoptedLimit := 1, 3
 	proxyLimit := 1
-	transcodes := nodepool.NewTranscodePool()
+	transcodes := nodepooltest.NewTranscodePool()
 	transcodes.SetNodes([]*nodepool.Node{
 		{ID: 1, URL: plannedURL, Group: &groupA, Enabled: true, Healthy: true, MaxJobs: &plannedLimit},
 		{ID: 2, URL: adoptedURL, Group: &groupB, Enabled: true, Healthy: true, ActiveJobs: 2, MaxJobs: &adoptedLimit},
@@ -750,7 +755,7 @@ func TestMasterManifestReplansRouteAroundDifferentAdoptedRemote(t *testing.T) {
 func TestMasterManifestWrapsRemoteCopyMediaPlaylistAsVariant(t *testing.T) {
 	const adoptedURL = "http://adopted.invalid"
 	handler, _, playbackStore := newRemoteTranscodeHandler(t, adoptedURL, &stubRecipeNodeStore{})
-	transcodes := nodepool.NewTranscodePool()
+	transcodes := nodepooltest.NewTranscodePool()
 	transcodes.SetNodes([]*nodepool.Node{{URL: adoptedURL, Enabled: true, Healthy: true}})
 	proxies := nodepool.NewProxyPool()
 	proxies.SetNodes([]*nodepool.Node{{URL: "https://proxy.example", Enabled: true, Healthy: true}})
@@ -816,8 +821,9 @@ func newRemoteTranscodeHandler(t *testing.T, nodeURL string, recipeStore *stubRe
 		playbackStore:   playbackStore,
 		sessionMgr:      sessionMgr,
 		fileResolver:    testCompatFileResolver{file: &models.MediaFile{ID: 42, FilePath: "/media/movie.mkv"}},
-		tm:              playback.NewTranscodeManager(),
+		tm:              keyedTranscodeManager(),
 		JWTSecret:       "test-secret",
+		NodeKeys:        nodeauthtest.SameKey("test-secret"),
 		RecipeNodeStore: recipeStore,
 	}
 	return handler, sessionMgr, playbackStore
@@ -1330,7 +1336,7 @@ func TestStartRemoteTranscodeDoesNotAdoptRuntimeOnDrainedNode(t *testing.T) {
 	var received transcodenode.TranscodeStartRequest
 	node := fakeTranscodeNode(t, &received)
 	handler, _, playbackStore := newRemoteTranscodeHandler(t, drainedURL, &stubRecipeNodeStore{})
-	transcodes := nodepool.NewTranscodePool()
+	transcodes := nodepooltest.NewTranscodePool()
 	transcodes.SetNodes([]*nodepool.Node{
 		{URL: drainedURL, Enabled: true, Healthy: true, DrainRequested: true, DrainState: nodepool.DrainStateDrained},
 		{URL: node.URL, Enabled: true, Healthy: true},
@@ -1460,4 +1466,12 @@ func TestPrepareCompatSegmentRecipeAcceptsLegacyOptionalAudioRemoteCard(t *testi
 			}
 		})
 	}
+}
+
+// keyedTranscodeManager is a transcode manager that signs its DELETEs to
+// nodes, as the handler's constructor wires it.
+func keyedTranscodeManager() *playback.TranscodeManager {
+	tm := playback.NewTranscodeManager()
+	tm.NodeKeysFn = func() nodeauth.Keyring { return nodeauthtest.SameKey("test-secret") }
+	return tm
 }

@@ -15,6 +15,7 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/nodeauth/nodeauthtest"
 	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/tonemap"
 	"github.com/Silo-Server/silo-server/internal/transcodenode"
@@ -351,7 +352,7 @@ func TestHandlePlaybackReport_UpdatesSelectedAudioStreamAndUpstreamTrack(t *test
 	handler := &PlaybackHandler{
 		playbackStore: playbackStore,
 		sessionMgr:    sessionMgr,
-		tm:            playback.NewTranscodeManager(),
+		tm:            keyedTranscodeManager(),
 	}
 
 	req := httptest.NewRequest(http.MethodPost, "/Sessions/Playing/Progress", strings.NewReader(`{"PlaySessionId":"play-1","MediaSourceId":"`+source.ID+`","AudioStreamIndex":2,"PositionTicks":30000000}`))
@@ -410,7 +411,7 @@ func TestHandlePlaybackReportRetriesRejectedLocalSurroundSelectionWithoutMutatio
 		TranscodeDir:  t.TempDir(),
 		FFmpegPath:    writeCompatTestFFmpeg(t),
 		HWAccel:       playback.HWAccelNone,
-		tm:            playback.NewTranscodeManager(),
+		tm:            keyedTranscodeManager(),
 	}
 	transcodeSession, err := handler.ensureTranscodeSession(t.Context(), "play-1", "upstream-1", source)
 	if err != nil {
@@ -474,7 +475,7 @@ func TestApplyCompatAudioSelectionRejectsUnsupportedRemoteHLSRemuxAudioCopy(t *t
 		playbackStore: store,
 		sessionMgr:    manager,
 		fileResolver:  testCompatFileResolver{file: &models.MediaFile{ID: version.FileID, FilePath: "/media/movie.mkv"}},
-		tm:            playback.NewTranscodeManager(),
+		tm:            keyedTranscodeManager(),
 	}
 
 	playSession, _ := store.Get("play-1")
@@ -528,10 +529,11 @@ func TestHandlePlaybackReportRollsBackRemoteAttestationFailureAndRetries(t *test
 	}}
 	handler := &PlaybackHandler{
 		JWTSecret:     "secret",
+		NodeKeys:      nodeauthtest.SameKey("secret"),
 		playbackStore: store,
 		sessionMgr:    manager,
 		fileResolver:  testCompatFileResolver{file: &models.MediaFile{ID: version.FileID, FilePath: "/media/movie.mkv"}},
-		tm:            playback.NewTranscodeManager(),
+		tm:            keyedTranscodeManager(),
 	}
 
 	for attempt := 1; attempt <= 2; attempt++ {
@@ -643,7 +645,7 @@ func TestRestartCompatAudioSelectionTreatsPublishedRemoteAsSuccess(t *testing.T)
 		playbackStore: store,
 		sessionMgr:    manager,
 		fileResolver:  testCompatFileResolver{file: &models.MediaFile{ID: version.FileID, FilePath: "/media/movie.mkv"}},
-		tm:            playback.NewTranscodeManager(),
+		tm:            keyedTranscodeManager(),
 	}
 	playSession, _ := store.Get("play-1")
 	restarted, err := handler.restartCompatTranscodeForAudioSelection(t.Context(), playSession, source, 0)
@@ -693,7 +695,7 @@ func TestEnsureTranscodeSession_RejectsLocalSurroundDownmixWithoutAudioToAACV2(t
 		fileResolver:  testCompatFileResolver{file: &models.MediaFile{ID: version.FileID, FilePath: filePath}},
 		TranscodeDir:  t.TempDir(),
 		FFmpegPath:    ffmpegPath,
-		tm:            playback.NewTranscodeManager(),
+		tm:            keyedTranscodeManager(),
 	}
 
 	transcodeSession, err := handler.ensureTranscodeSession(context.Background(), "play-1", "upstream-1", source)
@@ -732,7 +734,7 @@ func TestEnsureTranscodeSessionRejectsLiveRuntimeForDifferentAudioFacts(t *testi
 		TranscodeDir:  t.TempDir(),
 		FFmpegPath:    writeCompatTestFFmpeg(t),
 		HWAccel:       playback.HWAccelNone,
-		tm:            playback.NewTranscodeManager(),
+		tm:            keyedTranscodeManager(),
 	}
 	live, err := handler.ensureTranscodeSession(t.Context(), "play-1", "upstream-1", stereo)
 	if err != nil {
@@ -829,11 +831,12 @@ func TestStartRemoteTranscode_IncludesSelectedAudioTrack(t *testing.T) {
 	playbackStore.Put(PlaybackSession{ID: "play-1", UpstreamSessionID: "upstream-1"})
 	handler := &PlaybackHandler{
 		JWTSecret:     "secret",
+		NodeKeys:      nodeauthtest.SameKey("secret"),
 		playbackStore: playbackStore,
 		sessionMgr: &testCompatSessionManager{sessions: map[string]*playback.Session{
 			"upstream-1": {ID: "upstream-1", UserID: 7, ProfileID: "profile-1", MediaFileID: version.FileID, PlayMethod: playback.PlayTranscode},
 		}},
-		tm: playback.NewTranscodeManager(),
+		tm: keyedTranscodeManager(),
 	}
 	if err := handler.startRemoteTranscode(
 		context.Background(),
@@ -930,11 +933,11 @@ func TestStartRemoteTranscodeRejectsOldNodeWithoutRecipeAttestation(t *testing.T
 			playbackStore := NewPlaybackSessionStore(time.Hour, nil)
 			playbackStore.Put(PlaybackSession{ID: "play-1", UpstreamSessionID: "upstream-1"})
 			handler := &PlaybackHandler{
-				JWTSecret: "secret", playbackStore: playbackStore,
+				JWTSecret: "secret", NodeKeys: nodeauthtest.SameKey("secret"), playbackStore: playbackStore,
 				sessionMgr: &testCompatSessionManager{sessions: map[string]*playback.Session{
 					"upstream-1": {ID: "upstream-1", UserID: 7, ProfileID: "profile-1", MediaFileID: tc.source.FileID, PlayMethod: playback.PlayTranscode, TranscodeNodeURL: node.URL},
 				}},
-				tm: playback.NewTranscodeManager(),
+				tm: keyedTranscodeManager(),
 			}
 			err := handler.startRemoteTranscode(context.Background(), "play-1", "upstream-1", tc.source, &models.MediaFile{ID: tc.source.FileID, FilePath: "/media/movie.mkv"}, 0, node.URL)
 			if !errors.Is(err, tc.want) || !errors.Is(err, errRemoteTranscodeStartFailed) {
@@ -971,7 +974,7 @@ func TestMonoAACStartupDoesNotRequireStereoBoost(t *testing.T) {
 			store.Put(PlaybackSession{ID: "play-1", UpstreamSessionID: "upstream-1", MediaSources: []PlaybackMediaSource{source}})
 			ffmpeg, _, _ := writeCompatAudioRecipeFFmpeg(t, false, "")
 			handler := &PlaybackHandler{
-				JWTSecret: "secret", playbackStore: store,
+				JWTSecret: "secret", NodeKeys: nodeauthtest.SameKey("secret"), playbackStore: store,
 				sessionMgr: &testCompatSessionManager{sessions: map[string]*playback.Session{
 					"upstream-1": {ID: "upstream-1", UserID: 7, ProfileID: "profile-1", MediaFileID: version.FileID, PlayMethod: playback.PlayTranscode},
 				}},

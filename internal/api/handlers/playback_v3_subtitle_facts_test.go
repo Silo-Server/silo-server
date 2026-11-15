@@ -90,7 +90,7 @@ func rokuStyleStartV3(t *testing.T) (*PlaybackHandler, *models.MediaFile, playba
 	file := v3HandlerFixtureFile(t)
 	file.Container = "mkv"
 	file.SubtitleTracks = []models.SubtitleTrack{{Index: 2, ContainerTrackID: "3", Codec: "subrip", Language: "eng"}}
-	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0), testPlaybackFileResolver{file: file})
+	handler := newKeyedPlaybackHandler(playback.NewSessionManager(0, 0), testPlaybackFileResolver{file: file})
 	handler.ItemAccess = allowAllPlaybackItemAccess{}
 	handler.SettingsRepo = &mutablePlaybackSettingsV3{values: map[string]string{"allow_4k_transcode": "true"}}
 	start := v3HandlerStartRequest()

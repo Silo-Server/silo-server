@@ -2,12 +2,14 @@ package nodepool
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"net/url"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/nodeauth"
 	"github.com/Silo-Server/silo-server/internal/secret"
 )
 
@@ -339,6 +341,56 @@ func (r *KeyRegistry) Identity(nodeID int) (Identity, bool) {
 // its own lock.
 func (r *KeyRegistry) HasKey(nodeID int) bool {
 	return r.lookupID(nodeID).keyed()
+}
+
+// SignTarget is the kind of worker a request to n is signed for, from the
+// type its row records. Anything not recorded as a proxy is signed for as a
+// transcode node, which only ever gets its own key.
+func (n *Node) SignTarget() nodeauth.Target {
+	if n != nil && n.Type == NodeTypeProxy {
+		return nodeauth.TargetProxy
+	}
+	return nodeauth.TargetTranscode
+}
+
+// Keyring returns the signing keyring for calls to stream nodes: a transcode
+// node's own key, and for a proxy the shared secret sharedSecret returns (read
+// per call, so a live configuration reload applies).
+func (r *KeyRegistry) Keyring(sharedSecret func() string) nodeauth.Keyring {
+	return registryKeyring{registry: r, sharedSecret: sharedSecret}
+}
+
+type registryKeyring struct {
+	registry     *KeyRegistry
+	sharedSecret func() string
+}
+
+// KeyFor implements nodeauth.Keyring. A transcode target gets only the key of
+// the transcode node registered at nodeURL; a proxy target gets the shared
+// secret only when nodeURL is registered as a proxy. Anything else is refused
+// rather than signed with the shared secret: the URL may be a transcode node
+// this registry has not loaded yet.
+func (k registryKeyring) KeyFor(target nodeauth.Target, nodeURL string) (string, error) {
+	switch target {
+	case nodeauth.TargetTranscode:
+		cred := k.registry.transcodeByURL(nodeURL)
+		switch {
+		case cred == nil || cred.Type != NodeTypeTranscode:
+			return "", nodeauth.ErrUnknownNode
+		case cred.key == "":
+			return "", nodeauth.ErrNoNodeKey
+		}
+		return cred.key, nil
+	case nodeauth.TargetProxy:
+		if !k.registry.proxyByURL(nodeURL) {
+			return "", nodeauth.ErrUnknownNode
+		}
+		if k.sharedSecret == nil {
+			return "", nodeauth.ErrNoSecret
+		}
+		return k.sharedSecret(), nil
+	}
+	return "", errors.New("node auth: unsupported signing target")
 }
 
 // CanonicalNodeURL is the one form node URLs are compared in, for the

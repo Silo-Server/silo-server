@@ -103,7 +103,7 @@ type HealthReport struct {
 // answer reports DrainStateNone.
 func CheckNodeReport(ctx context.Context, n *Node) HealthReport {
 	unreachable := HealthReport{DrainState: DrainStateNone}
-	client := &http.Client{Timeout: 5 * time.Second}
+	client := &http.Client{Timeout: 5 * time.Second, CheckRedirect: RefuseRedirects}
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 
@@ -474,7 +474,10 @@ func (hc *HealthChecker) publishHealth(ctx context.Context, n *Node, report Heal
 		}
 	}
 
-	if healthy && capabilitiesHash != "" && capabilitiesHash != storedCapabilitiesHash(n) {
+	// A transcode node without a key cannot be asked for its report: the
+	// fetch would fail on every sweep until a key is issued.
+	keyless := n.Type != NodeTypeProxy && hc.transcodePool != nil && !hc.transcodePool.HasKey(n)
+	if healthy && !keyless && capabilitiesHash != "" && capabilitiesHash != storedCapabilitiesHash(n) {
 		hc.startCapabilityRefresh(ctx, n, applyCapabilities)
 	}
 }

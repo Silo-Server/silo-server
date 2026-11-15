@@ -11,6 +11,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/nodepool/nodepooltest"
+
+	"github.com/Silo-Server/silo-server/internal/nodeauth/nodeauthtest"
+
 	"github.com/Silo-Server/silo-server/internal/mediasample"
 	"github.com/Silo-Server/silo-server/internal/nodepool"
 )
@@ -33,7 +37,7 @@ func TestNodeExtractorReleasesCapacityAfterFailure(t *testing.T) {
 			node, _ := fakeNode(t, failure.status, failure.body)
 			node.MaxJobs = new(1)
 			planner := plannerForNodes(node)
-			extractor := NewNodeExtractor(&countingExtractor{}, planner, fakeSettings{ExecutionSetting: ExecutionTranscodeNodesOnly, jwtSecretSetting: "secret"})
+			extractor := NewNodeExtractor(&countingExtractor{}, planner, fakeSettings{ExecutionSetting: ExecutionTranscodeNodesOnly}, nodeauthtest.NodeKey("secret"))
 			if _, err := extractor.Extract(t.Context(), nil, nodeRequest()); err == nil {
 				t.Fatal("failed request returned success")
 			}
@@ -60,7 +64,7 @@ func TestNodeExtractorReleasesCapacityOnCancellation(t *testing.T) {
 	defer close(finishServer)
 	node := &nodepool.Node{URL: server.URL, Enabled: true, Healthy: true, MaxJobs: new(1), Capabilities: trickplayCapabilities}
 	planner := plannerForNodes(node)
-	extractor := NewNodeExtractor(&countingExtractor{}, planner, fakeSettings{ExecutionSetting: ExecutionTranscodeNodesOnly, jwtSecretSetting: "secret"})
+	extractor := NewNodeExtractor(&countingExtractor{}, planner, fakeSettings{ExecutionSetting: ExecutionTranscodeNodesOnly}, nodeauthtest.NodeKey("secret"))
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 	done := make(chan error, 1)
@@ -90,7 +94,7 @@ func TestNodeExtractorReleasesCapacityOnCancellation(t *testing.T) {
 }
 
 func plannerForNodes(nodes ...*nodepool.Node) plannedNodes {
-	pool := nodepool.NewTranscodePool()
+	pool := nodepooltest.NewTranscodePool()
 	pool.SetNodes(nodes)
 	return plannedNodes{nodepool.NewPlanner(nil, pool), pool}
 }
@@ -113,7 +117,7 @@ func TestNodeExtractorSharesReportedAndReservedCapacity(t *testing.T) {
 					}
 				}
 				local := &countingExtractor{}
-				_, err := NewNodeExtractor(local, planner, fakeSettings{ExecutionSetting: mode, jwtSecretSetting: "secret"}).Extract(t.Context(), nil, nodeRequest())
+				_, err := NewNodeExtractor(local, planner, fakeSettings{ExecutionSetting: mode}, nodeauthtest.NodeKey("secret")).Extract(t.Context(), nil, nodeRequest())
 				if calls.Load() != 0 {
 					t.Fatalf("full node received %d requests", calls.Load())
 				}
@@ -142,7 +146,7 @@ func TestInFlightTrickplayReservesCapacityUntilRequestEnds(t *testing.T) {
 	defer releaseRequest()
 	node := &nodepool.Node{URL: server.URL, Enabled: true, Healthy: true, MaxJobs: new(1), Capabilities: trickplayCapabilities}
 	planner := plannerForNodes(node)
-	extractor := NewNodeExtractor(&countingExtractor{}, planner, fakeSettings{ExecutionSetting: ExecutionTranscodeNodesOnly, jwtSecretSetting: "secret"})
+	extractor := NewNodeExtractor(&countingExtractor{}, planner, fakeSettings{ExecutionSetting: ExecutionTranscodeNodesOnly}, nodeauthtest.NodeKey("secret"))
 	done := make(chan error, 1)
 	go func() {
 		_, err := extractor.Extract(t.Context(), nil, nodeRequest())

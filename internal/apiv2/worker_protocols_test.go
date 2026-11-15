@@ -91,10 +91,16 @@ func TestWorkerStatusSchemasMatchRealListeners(t *testing.T) {
 	cfg.Auth.JWTSecret = "synthetic-worker-secret"
 	cfg.Playback.TranscodeDir = t.TempDir()
 	watcher.SetConfigForTest(cfg)
+	// A transcode node verifies with its own key; a proxy with the shared
+	// secret.
+	const nodeKey = "snk1_1_synthetic-worker-node-key"
+	node := transcodenode.NewServer(watcher, nil)
+	node.SetNodeKey(nodeKey)
 	handlers := map[string]http.Handler{
 		"proxy":          proxy.NewServer(watcher, nil).Handler(),
-		"transcode_node": transcodenode.NewServer(watcher, nil).Handler(),
+		"transcode_node": node.Handler(),
 	}
+	keys := map[string]string{"proxy": cfg.Auth.JWTSecret, "transcode_node": nodeKey}
 	bodies := map[string]any{}
 	schemas := map[string]*jsonschema.Schema{}
 	for _, read := range describeWorkerProtocols().Operations {
@@ -107,7 +113,7 @@ func TestWorkerStatusSchemasMatchRealListeners(t *testing.T) {
 		}
 		schemas[read.Listener] = schema
 		request := httptest.NewRequest(http.MethodGet, read.Path, nil)
-		nodeauthtest.Sign(t, request, cfg.Auth.JWTSecret)
+		nodeauthtest.Sign(t, request, keys[read.Listener])
 		response := httptest.NewRecorder()
 		handlers[read.Listener].ServeHTTP(response, request)
 		if response.Code != http.StatusOK || response.Header().Get("Content-Type") != "application/json" {
@@ -142,7 +148,10 @@ func TestWorkerArtifactConditionalProtocol(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(cfg.Download.ArtifactDir, "fixture.mp4"), []byte("0123456789"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	server := httptest.NewServer(transcodenode.NewServer(watcher, nil).Handler())
+	const nodeKey = "snk1_1_synthetic-worker-node-key"
+	node := transcodenode.NewServer(watcher, nil)
+	node.SetNodeKey(nodeKey)
+	server := httptest.NewServer(node.Handler())
 	defer server.Close()
 	registry := describeWorkerProtocols()
 	for _, tc := range []struct {
@@ -163,7 +172,7 @@ func TestWorkerArtifactConditionalProtocol(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		nodeauthtest.Sign(t, req, cfg.Auth.JWTSecret)
+		nodeauthtest.Sign(t, req, nodeKey)
 		if tc.header != "" {
 			req.Header.Set(tc.header, tc.value)
 		}

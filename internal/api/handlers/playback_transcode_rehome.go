@@ -13,6 +13,7 @@ import (
 	"syscall"
 
 	"github.com/Silo-Server/silo-server/internal/logredact"
+	"github.com/Silo-Server/silo-server/internal/nodeauth"
 	"github.com/Silo-Server/silo-server/internal/nodepool"
 	"github.com/Silo-Server/silo-server/internal/noderouting"
 	"github.com/Silo-Server/silo-server/internal/playback"
@@ -461,7 +462,7 @@ func (h *PlaybackHandler) moveTranscodeToNodeV3(
 	// Re-check the selected node against the plan with a fresh inventory, as a
 	// fresh start does: the filter above may have read a cached one.
 	if planRequiresServerTransformationsV3(plan.Plan) {
-		transformations, err := h.remoteTransformationsV3(ctx, node.URL)
+		transformations, err := h.remoteTransformationsV3(ctx, nodeauth.TargetTranscode, node.URL)
 		if err == nil {
 			err = validateAdvertisedTransformationsV3(plan.Plan, transformations)
 		}

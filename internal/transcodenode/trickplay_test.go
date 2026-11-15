@@ -26,12 +26,12 @@ func newTrickplayTestServer(t *testing.T, ffmpeg string) *Server {
 	cfg.Playback.FFmpegPath = ffmpeg
 	cfg.Playback.HWAccel = "none"
 	watcher.SetConfigForTest(cfg)
-	return &Server{watcher: watcher, inputPaths: allowInputPaths{}, sessions: make(map[string]*playback.TranscodeSession)}
+	return &Server{watcher: watcher, nodeKey: testNodeKey, inputPaths: allowInputPaths{}, sessions: make(map[string]*playback.TranscodeSession)}
 }
 
 func postTrickplay(t *testing.T, server *Server, body string) *httptest.ResponseRecorder {
 	req := httptest.NewRequest(http.MethodPost, "/trickplay/extract", strings.NewReader(body))
-	nodeauthtest.Sign(t, req, testSecret)
+	nodeauthtest.Sign(t, req, testNodeKey)
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	server.Handler().ServeHTTP(rec, req)

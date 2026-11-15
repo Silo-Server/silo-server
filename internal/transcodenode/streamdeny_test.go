@@ -28,7 +28,7 @@ func unreachableStreamDeny(t *testing.T) *playback.StreamDeny {
 func nodeRequest(t *testing.T, server *Server, method, path, token string) *httptest.ResponseRecorder {
 	t.Helper()
 	req := httptest.NewRequest(method, path, nil)
-	nodeauthtest.Sign(t, req, testSecret)
+	nodeauthtest.Sign(t, req, testNodeKey)
 	if token != "" {
 		req.Header.Set("X-Silo-Stream-Token", token)
 	}

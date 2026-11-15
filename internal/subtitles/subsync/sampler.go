@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/mediasample"
+	"github.com/Silo-Server/silo-server/internal/nodeauth"
 	"github.com/Silo-Server/silo-server/internal/nodepool"
 	"github.com/Silo-Server/silo-server/internal/processmetrics"
 )
@@ -25,7 +26,6 @@ const (
 const (
 	SettingExecution    = "subtitles.sync_execution"
 	SettingNodeCapacity = "subtitles.sync_node_capacity"
-	settingJWTSecret    = "auth.jwt_secret"
 )
 
 // DefaultExecution sends speech decoding to transcode nodes when there are
@@ -37,14 +37,15 @@ type SettingsReader interface {
 	Get(ctx context.Context, key string) (string, error)
 }
 
-// NodeSource lists the transcode nodes.
+// NodeSource lists the transcode nodes that may take new work: those a
+// request can be signed for. *nodepool.TranscodePool is one.
 type NodeSource interface {
-	Nodes() []*nodepool.Node
+	KeyedNodes() []*nodepool.Node
 }
 
 // remoteRunner runs one request on a node; mediasample.RemoteClient is one.
 type remoteRunner interface {
-	Run(ctx context.Context, endpoint, secret string, req mediasample.Request) (mediasample.Result, error)
+	Run(ctx context.Context, endpoint string, keys nodeauth.Keyring, req mediasample.Request) (mediasample.Result, error)
 }
 
 // localRunner runs one request with this server's ffmpeg.
@@ -52,17 +53,20 @@ type localRunner func(ctx context.Context, req mediasample.Request) (mediasample
 
 // sampler runs a file's speech requests on a transcode node or locally.
 type sampler struct {
-	settings     SettingsReader
-	nodes        NodeSource
+	settings SettingsReader
+	nodes    NodeSource
+	// keys signs requests to nodes; without it every request runs locally.
+	keys         nodeauth.Keyring
 	remote       remoteRunner
 	local        localRunner
 	reservations *nodepool.Reservations
 }
 
-func newSampler(settings SettingsReader, nodes NodeSource, ffmpegPath func() string) *sampler {
+func newSampler(settings SettingsReader, nodes NodeSource, keys nodeauth.Keyring, ffmpegPath func() string) *sampler {
 	return &sampler{
 		settings:     settings,
 		nodes:        nodes,
+		keys:         keys,
 		remote:       mediasample.RemoteClient{},
 		reservations: &nodepool.Reservations{},
 		local: func(ctx context.Context, req mediasample.Request) (mediasample.Result, error) {
@@ -93,7 +97,7 @@ func (s *sampler) run(ctx context.Context, reqs []mediasample.Request, done func
 		results, err := s.runLocal(ctx, reqs, nil, done)
 		return results, ExecutionLocal, err
 	}
-	node, release, secret := s.reserve(ctx)
+	node, release := s.reserve(ctx)
 	if node == nil {
 		if mode == ExecutionTranscodeOnly {
 			return nil, "", errNoNode
@@ -109,7 +113,7 @@ func (s *sampler) run(ctx context.Context, reqs []mediasample.Request, done func
 		if err := ctx.Err(); err != nil {
 			return nil, nodeLabel(node), err
 		}
-		result, err := s.runRemote(ctx, endpoint, secret, req)
+		result, err := s.runRemote(ctx, endpoint, req)
 		if err == nil {
 			results = append(results, result)
 			done(len(results))
@@ -130,10 +134,10 @@ func (s *sampler) run(ctx context.Context, reqs []mediasample.Request, done func
 // runRemote bounds one node request: the node's admission wait and attempt
 // timeout plus time to transfer the result. A node that accepts a request and then hangs
 // would otherwise hold the job, its slot, and the node reservation forever.
-func (s *sampler) runRemote(ctx context.Context, endpoint, secret string, req mediasample.Request) (mediasample.Result, error) {
+func (s *sampler) runRemote(ctx context.Context, endpoint string, req mediasample.Request) (mediasample.Result, error) {
 	ctx, cancel := context.WithTimeout(ctx, remoteRequestTimeout)
 	defer cancel()
-	return s.remote.Run(ctx, endpoint, secret, req)
+	return s.remote.Run(ctx, endpoint, s.keys, req)
 }
 
 // runLocal runs reqs here, appending their results to those already done.
@@ -152,19 +156,15 @@ func (s *sampler) runLocal(ctx context.Context, reqs []mediasample.Request, resu
 	return results, nil
 }
 
-func (s *sampler) reserve(ctx context.Context) (*nodepool.Node, func(), string) {
-	if s.nodes == nil {
-		return nil, func() {}, ""
+func (s *sampler) reserve(ctx context.Context) (*nodepool.Node, func()) {
+	if s.nodes == nil || s.keys == nil {
+		return nil, func() {}
 	}
-	secret := s.setting(ctx, settingJWTSecret)
-	if secret == "" {
-		return nil, func() {}, ""
-	}
-	node, release, outcome := s.reservations.Reserve(s.nodes.Nodes(), s.nodeCapacity(ctx))
+	node, release, outcome := s.reservations.Reserve(s.nodes.KeyedNodes(), s.nodeCapacity(ctx))
 	if outcome != nodepool.Reserved {
-		return nil, release, ""
+		return nil, release
 	}
-	return node, release, secret
+	return node, release
 }
 
 func (s *sampler) execution(ctx context.Context) string {

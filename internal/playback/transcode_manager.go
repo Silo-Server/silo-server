@@ -68,9 +68,9 @@ type TranscodeManager struct {
 	Config func() TranscodeRuntimeConfig
 	// LogSinkFn returns the ffmpeg log sink for reconstructed processes.
 	LogSinkFn func() FFmpegLogSink
-	// JWTSecretFn returns the shared secret that signs remote transcode-node
-	// DELETEs.
-	JWTSecretFn func() string
+	// NodeKeysFn returns the keyring that signs remote transcode-node
+	// DELETEs with each node's own key.
+	NodeKeysFn func() nodeauth.Keyring
 	// OnFFmpegCrash is invoked when a reconstructed/local ffmpeg exits with an
 	// error so the embedding handler can tear down the playback session (keeping
 	// the card, so a resume can respawn). dead is the exact session that crashed;
@@ -150,11 +150,11 @@ func NewTranscodeManager() *TranscodeManager {
 	}
 }
 
-func (m *TranscodeManager) jwtSecret() string {
-	if m.JWTSecretFn == nil {
-		return ""
+func (m *TranscodeManager) nodeKeys() nodeauth.Keyring {
+	if m.NodeKeysFn == nil {
+		return nil
 	}
-	return m.JWTSecretFn()
+	return m.NodeKeysFn()
 }
 
 func (m *TranscodeManager) logSink() FFmpegLogSink {
@@ -1335,7 +1335,7 @@ var remoteTranscodeControlClient = func() *http.Client {
 	}
 	transport := base.Clone()
 	transport.DialContext = nodepool.NodeDialContext()
-	return &http.Client{Transport: transport}
+	return &http.Client{Transport: transport, CheckRedirect: nodepool.RefuseRedirects}
 }()
 
 // deleteRemoteTranscode sends DELETE to the assigned transcode node with a
@@ -1359,7 +1359,7 @@ func (m *TranscodeManager) deleteRemoteTranscode(ctx context.Context, sessionID,
 	if err != nil {
 		return fmt.Errorf("build remote transcode delete request: %w", err)
 	}
-	if err := nodeauth.Sign(req, transcodeNodeURL, m.jwtSecret()); err != nil {
+	if err := nodeauth.SignTranscode(req, transcodeNodeURL, m.nodeKeys()); err != nil {
 		return fmt.Errorf("sign remote transcode delete: %w", err)
 	}
 

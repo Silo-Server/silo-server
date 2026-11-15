@@ -56,8 +56,12 @@ type Server struct {
 	tracker      *nodesessions.Tracker
 	// nodeRowID resolves this proxy's stable stream_nodes identity. Production
 	// uses the config watcher; tests replace it to model sibling proxies.
-	nodeRowID            func() (int, bool)
-	httpClient           *http.Client
+	nodeRowID  func() (int, bool)
+	httpClient *http.Client
+	// nodeKeys signs this proxy's relays to transcode nodes with each node's
+	// own key. Nil refuses every relay rather than fall back to the shared
+	// secret.
+	nodeKeys             nodeauth.Keyring
 	artifactMissReporter remoteArtifactMissReporter
 	// grants and loginSessions back the credential-free /stream/v3 routes: the
 	// grant says what to serve, the login-session validator says whether the
@@ -188,6 +192,12 @@ func (s *Server) SetClientIPResolver(resolver *clientip.Resolver) {
 // complete no-op.
 func (s *Server) SetStreamTelemetry(registry *streamtelemetry.Registry) {
 	s.telemetry = registry
+}
+
+// SetNodeKeys installs the keyring that signs relays to transcode nodes. It
+// must be called during construction, before the server handles requests.
+func (s *Server) SetNodeKeys(keys nodeauth.Keyring) {
+	s.nodeKeys = keys
 }
 
 // SetStreamDeny installs the session-deny marker store this proxy consults
@@ -847,8 +857,7 @@ func (s *Server) relayDownloadArtifact(w http.ResponseWriter, r *http.Request, c
 		return
 	}
 	attachTransfer(r.Context(), claims)
-	cfg := s.watcher.Config()
-	if cfg == nil || strings.TrimSpace(cfg.Auth.JWTSecret) == "" {
+	if s.nodeKeys == nil {
 		http.Error(w, "download unavailable", http.StatusServiceUnavailable)
 		return
 	}
@@ -856,7 +865,7 @@ func (s *Server) relayDownloadArtifact(w http.ResponseWriter, r *http.Request, c
 	// wait, as the API relay does. s.httpClient waits on headers without a
 	// deadline for transcode rebuilds, which an artifact read never needs.
 	client := downloadprepare.HTTPPreparer{}
-	resp, err := client.Open(r.Context(), claims.TranscodeNode, cfg.Auth.JWTSecret, claims.DownloadArtifactID, r.Method, r.Header)
+	resp, err := client.Open(r.Context(), claims.TranscodeNode, s.nodeKeys, claims.DownloadArtifactID, r.Method, r.Header)
 	if err != nil {
 		slog.WarnContext(r.Context(), "download artifact relay failed", "component", "proxy", "artifact_id", claims.DownloadArtifactID, "node", claims.TranscodeNode, "error", err)
 		http.Error(w, "download unavailable", http.StatusBadGateway)
@@ -1207,7 +1216,6 @@ var errBuildNodeRequest = errors.New("build transcode node request")
 // (never to the client): the client's own token on a token route, a
 // proxy-minted one on a grant route.
 func (s *Server) proxyToTranscodeNode(w http.ResponseWriter, r *http.Request, claims *streamtoken.Claims, path, forwardToken string) {
-	cfg := s.watcher.Config()
 	if claims.TranscodeNode == "" {
 		http.Error(w, "no transcode node in token", http.StatusBadRequest)
 		return
@@ -1225,7 +1233,7 @@ func (s *Server) proxyToTranscodeNode(w http.ResponseWriter, r *http.Request, cl
 		if err != nil {
 			return nil, targetURL, fmt.Errorf("%w: %w", errBuildNodeRequest, err)
 		}
-		if err := nodeauth.Sign(req, nodeURL, cfg.Auth.JWTSecret); err != nil {
+		if err := nodeauth.SignTranscode(req, nodeURL, s.nodeKeys); err != nil {
 			return nil, targetURL, fmt.Errorf("%w: %w", errBuildNodeRequest, err)
 		}
 		if isSegmentRoute {
@@ -1296,7 +1304,7 @@ func (s *Server) proxyToTranscodeNode(w http.ResponseWriter, r *http.Request, cl
 	}
 	if isMediaSegment && generation != "" && r.Method == http.MethodGet &&
 		sw.CompletedFullResponse(transcodeproxy.FullRepresentationSize(resp)) {
-		if ackErr := transcodeproxy.Acknowledge(r.Context(), s.httpClient, nodeURL, path, cfg.Auth.JWTSecret, generation); ackErr != nil {
+		if ackErr := transcodeproxy.Acknowledge(r.Context(), s.httpClient, nodeURL, path, s.nodeKeys, generation); ackErr != nil {
 			slog.WarnContext(r.Context(), "acknowledge transcode segment completion", "component", "proxy", "error", ackErr, "playback_session_id", claims.SessionID)
 		}
 	}

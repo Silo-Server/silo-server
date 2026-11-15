@@ -17,6 +17,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/imageutil"
 	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/nodeauth"
 	"github.com/Silo-Server/silo-server/internal/nodepool"
 	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/scanner"
@@ -177,6 +178,8 @@ type Service struct {
 	transcodePool      *nodepool.TranscodePool
 	remoteReservations *nodepool.Reservations
 	remoteExtractor    remoteFrameExtractor
+	// nodeKeys signs remote extraction requests; nil keeps extraction local.
+	nodeKeys nodeauth.Keyring
 
 	extractFrameFunc           func(ctx context.Context, file *models.MediaFile, seekSeconds float64, hdrPolicy string) ([]byte, string, error)
 	uploadChapterThumbnailFunc func(ctx context.Context, fileID, chapterIndex int, frame []byte) (string, string, error)
@@ -203,6 +206,16 @@ func (s *Service) SetNotifier(notifier ThumbnailNotifier) {
 		return
 	}
 	s.notifier = notifier
+}
+
+// SetNodeKeys wires the keyring that signs extraction requests to transcode
+// nodes. Without one every extraction runs on this server, or fails under
+// transcode_nodes_only.
+func (s *Service) SetNodeKeys(keys nodeauth.Keyring) {
+	if s == nil {
+		return
+	}
+	s.nodeKeys = keys
 }
 
 // SetBlobQueue lets the service retire the images a width change replaces.
@@ -761,8 +774,7 @@ func (s *Service) extractFrame(
 	}
 	defer release()
 
-	jwtSecret := s.chapterThumbnailJWTSecret(ctx)
-	data, reason, err := s.remoteExtractor.ExtractFrame(ctx, node, jwtSecret, RemoteExtractRequest{
+	data, reason, err := s.remoteExtractor.ExtractFrame(ctx, node, s.nodeKeys, RemoteExtractRequest{
 		InputPath:            file.FilePath,
 		SeekSeconds:          seekSeconds,
 		ToneMap:              toneMap,
@@ -904,26 +916,15 @@ func (s *Service) chapterThumbnailNodeCapacity(ctx context.Context) int {
 	return capacity
 }
 
-func (s *Service) chapterThumbnailJWTSecret(ctx context.Context) string {
-	if s == nil || s.settings == nil {
-		return ""
-	}
-	value, err := s.settings.Get(ctx, authJWTSecretSetting)
-	if err != nil {
-		return ""
-	}
-	return strings.TrimSpace(value)
-}
-
 func (s *Service) reserveRemoteNode(ctx context.Context) (*nodepool.Node, func(), string) {
 	if s == nil || s.transcodePool == nil || s.remoteExtractor == nil {
 		return nil, func() {}, chapterThumbnailNodeUnavailableReason
 	}
-	if s.chapterThumbnailJWTSecret(ctx) == "" {
+	if s.nodeKeys == nil {
 		return nil, func() {}, chapterThumbnailNodeUnavailableReason
 	}
 
-	node, release, outcome := s.remoteReservations.Reserve(s.transcodePool.Nodes(), s.chapterThumbnailNodeCapacity(ctx))
+	node, release, outcome := s.remoteReservations.Reserve(s.transcodePool.KeyedNodes(), s.chapterThumbnailNodeCapacity(ctx))
 	switch outcome {
 	case nodepool.Reserved:
 		return node, release, ""

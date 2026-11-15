@@ -4,10 +4,10 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
-	"strings"
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/nodeauth"
@@ -24,7 +24,6 @@ const (
 	chapterThumbnailNodeCapacitySetting         = "playback.chapter_thumbnail_node_capacity"
 	chapterThumbnailNodeUnavailableReason       = "transcode_node_unavailable"
 	chapterThumbnailNodeCapacityExhaustedReason = "transcode_node_capacity_exhausted"
-	authJWTSecretSetting                        = "auth.jwt_secret"
 )
 
 // remoteExtractOverheadBuffer covers HTTP transport and node-side scheduling
@@ -44,7 +43,7 @@ type RemoteExtractErrorResponse struct {
 }
 
 type remoteFrameExtractor interface {
-	ExtractFrame(ctx context.Context, node *nodepool.Node, jwtSecret string, req RemoteExtractRequest) ([]byte, string, error)
+	ExtractFrame(ctx context.Context, node *nodepool.Node, keys nodeauth.Keyring, req RemoteExtractRequest) ([]byte, string, error)
 }
 
 type httpRemoteFrameExtractor struct {
@@ -54,14 +53,14 @@ type httpRemoteFrameExtractor struct {
 func (e *httpRemoteFrameExtractor) ExtractFrame(
 	ctx context.Context,
 	node *nodepool.Node,
-	jwtSecret string,
+	keys nodeauth.Keyring,
 	req RemoteExtractRequest,
 ) ([]byte, string, error) {
 	if node == nil {
 		return nil, chapterThumbnailNodeUnavailableReason, fmt.Errorf("chapter thumbnail remote extract: missing node")
 	}
-	if strings.TrimSpace(jwtSecret) == "" {
-		return nil, chapterThumbnailNodeUnavailableReason, fmt.Errorf("chapter thumbnail remote extract: missing jwt secret")
+	if keys == nil {
+		return nil, chapterThumbnailNodeUnavailableReason, errors.New("chapter thumbnail remote extract: missing node keyring")
 	}
 
 	body, err := json.Marshal(req)
@@ -78,13 +77,13 @@ func (e *httpRemoteFrameExtractor) ExtractFrame(
 		return nil, chapterThumbnailNodeUnavailableReason, fmt.Errorf("chapter thumbnail remote extract: build request: %w", err)
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
-	if err := nodeauth.Sign(httpReq, node.URL, jwtSecret); err != nil {
+	if err := nodeauth.SignTranscode(httpReq, node.URL, keys); err != nil {
 		return nil, chapterThumbnailNodeUnavailableReason, fmt.Errorf("chapter thumbnail remote extract: sign request: %w", err)
 	}
 
 	client := e.client
 	if client == nil {
-		client = &http.Client{Timeout: timeout}
+		client = &http.Client{Timeout: timeout, CheckRedirect: nodepool.RefuseRedirects}
 	}
 
 	resp, err := telemetry.DoTrustedNode(client, httpReq, "chapter_extract")

@@ -17,6 +17,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/nodeauth"
+	"github.com/Silo-Server/silo-server/internal/nodeauth/nodeauthtest"
+	"github.com/Silo-Server/silo-server/internal/nodepool/nodepooltest"
+
 	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/nodepool"
 	"github.com/Silo-Server/silo-server/internal/noderouting"
@@ -108,13 +112,14 @@ type rehomeFixture struct {
 // every node in nodes.
 func newRehomeFixture(t *testing.T, nodes []*nodepool.Node, ffmpegPath string) *rehomeFixture {
 	t.Helper()
-	pool := nodepool.NewTranscodePool()
+	pool := nodepooltest.NewTranscodePool()
 	pool.SetNodes(nodes)
 	planner := nodepool.NewPlanner(nodepool.NewProxyPool(), pool)
 
 	sessions := playback.NewSessionManager(0, 0)
-	handler := NewPlaybackHandler(sessions)
+	handler := newKeyedPlaybackHandler(sessions)
 	handler.JWTSecret = "rehome-secret"
+	handler.NodeKeys = nodeauthtest.SameKey("rehome-secret")
 	handler.NodePlanner = planner
 	handler.PlaybackConfig = playbackTestConfig(ffmpegPath, t.TempDir())
 
@@ -430,15 +435,30 @@ func waitForStoredRecipeNode(t *testing.T, store *sharedRecipeStore, nodeURL str
 	}
 }
 
+// newKeyedPlaybackHandler is NewPlaybackHandler with a keyring that signs
+// every call to a node, as the router wires it. A test about signing sets its
+// own NodeKeys.
+func newKeyedPlaybackHandler(sessions SessionManagerInterface, opts ...FilePathResolver) *PlaybackHandler {
+	handler := NewPlaybackHandler(sessions, opts...)
+	handler.NodeKeys = nodeauthtest.SameKey("test-secret")
+	return handler
+}
+
+// transcodeCapabilityKey is the capability cache key of the transcode node at
+// nodeURL.
+func transcodeCapabilityKey(nodeURL string) v3NodeCapabilityKey {
+	return v3NodeCapabilityKey{target: nodeauth.TargetTranscode, url: nodepool.NormalizeNodeURL(nodeURL)}
+}
+
 // seedNodeTransformations records the transformation inventory a node
 // advertises, as a capability probe would.
 func seedNodeTransformations(h *PlaybackHandler, nodeURL, videoRecipeVersion string) {
 	h.v3NodeCapabilitiesMu.Lock()
 	defer h.v3NodeCapabilitiesMu.Unlock()
 	if h.v3NodeCapabilities == nil {
-		h.v3NodeCapabilities = map[string]v3NodeCapabilityCache{}
+		h.v3NodeCapabilities = map[v3NodeCapabilityKey]v3NodeCapabilityCache{}
 	}
-	h.v3NodeCapabilities[nodepool.NormalizeNodeURL(nodeURL)] = v3NodeCapabilityCache{
+	h.v3NodeCapabilities[transcodeCapabilityKey(nodeURL)] = v3NodeCapabilityCache{
 		transformations: []playback.TransformationV3{{Name: playback.TransformationVideoToH264V3, Executor: playback.ExecutorServerV3, RecipeVersion: videoRecipeVersion}},
 		expiresAt:       time.Now().Add(time.Hour),
 	}
@@ -704,9 +724,9 @@ func TestRelayMoveEndsOnSourceToneMapRefusal(t *testing.T) {
 	for _, url := range []string{first.URL, second.URL} {
 		f.handler.v3NodeCapabilitiesMu.Lock()
 		if f.handler.v3NodeCapabilities == nil {
-			f.handler.v3NodeCapabilities = map[string]v3NodeCapabilityCache{}
+			f.handler.v3NodeCapabilities = map[v3NodeCapabilityKey]v3NodeCapabilityCache{}
 		}
-		f.handler.v3NodeCapabilities[nodepool.NormalizeNodeURL(url)] = v3NodeCapabilityCache{
+		f.handler.v3NodeCapabilities[transcodeCapabilityKey(url)] = v3NodeCapabilityCache{
 			toneMapCapabilities: tonemap.Capabilities{{Mode: tonemap.ModeSoftware, Backend: "none", Filter: "tonemap", SourceKinds: []tonemap.SourceKind{tonemap.SourcePQ}}},
 			expiresAt:           time.Now().Add(time.Hour),
 		}
@@ -882,7 +902,7 @@ func TestRelayMoveWithoutARecordedPlanAdmitsRenditionNodes(t *testing.T) {
 	}
 	capable := node(playback.TransportFeatureHLSSubtitleRenditionV1)
 	older := node()
-	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0))
+	handler := newKeyedPlaybackHandler(playback.NewSessionManager(0, 0))
 	handler.NodePlanner = predicateEnumeratingNodePlannerV3{enumeratingNodePlannerV3{urls: []string{capable.URL, older.URL}}}
 
 	card := &playback.RecipeCard{SubtitleRendition: true, SubtitleTrackIndex: 2, SubtitleCodec: "subrip"}

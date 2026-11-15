@@ -339,15 +339,38 @@ reconstruction or new native route is introduced.
 ## Authentication
 
 API servers and proxies sign every call to a worker's node bearer routes;
-`internal/nodeauth` implements both sides. Senders call `nodeauth.Sign` just
-before sending, and the transcode node and proxy middleware call
-`nodeauth.Verify`. There is no worker-to-API call.
+`internal/nodeauth` implements both sides. Senders call `nodeauth.SignTranscode`
+or `nodeauth.SignProxy` just before sending, with a `nodeauth.Keyring` that
+supplies the input key for the target. A sender names the kind of worker from
+where it got the URL (the transcode pool, the proxy pool, a route's proxy, a
+node row's type), never by inspecting the URL. Proxies and transcode nodes both
+serve `/hw-capabilities`, so a capability read takes the target too, and the
+API's capability cache keys each inventory by target and URL.
 
-A signed request never carries the shared `auth.jwt_secret`. That secret also
-signs login, profile, and stream tokens, so a copy captured from a worker link
-would mint them. Each side instead derives a MAC key from it with HKDF-SHA256 (no salt,
-info `silo/node-request-auth/v1`, 32 bytes). Nothing else uses that label, so
-the key cannot sign or verify any other token. A request carries:
+- **A transcode node** is signed for with its own node key, and only with it.
+  The keyring is the node credential registry (`nodepool.KeyRegistry`), which
+  API servers and proxies both load from the database. A transcode node
+  without a usable key yields `nodeauth.ErrNoNodeKey` (the same sentinel as
+  `nodepool.ErrNoNodeKey`); nothing falls back to the shared secret, and
+  placement gives such a node no work while it stays listed and
+  health-checked. The node reads its key from `SILO_NODE_KEY`, refuses to start
+  without a well-formed one, and verifies with it through
+  `nodeauth.VerifySigned`, which accepts signed requests only.
+- **A proxy** is signed for with the shared `auth.jwt_secret`, and the keyring
+  gives it out only for a URL registered as a proxy. The proxy verifies with
+  `nodeauth.Verify`.
+
+A URL with no registered worker of the requested kind yields
+`nodeauth.ErrUnknownNode`, since it might be a transcode node the registry has
+not loaded yet, and a sender without a keyring or with an empty key gets
+`nodeauth.ErrNoSecret`. In every case the request is not sent.
+
+A signed request never carries the input key. The shared secret also signs
+login, profile, and stream tokens, so a copy captured from a worker link would
+mint them. Each side instead derives a MAC key from the input key with
+HKDF-SHA256 (no salt, info `silo/node-request-auth/v1`, 32 bytes). Nothing else
+uses that label, so the key cannot sign or verify any other token. A request
+carries:
 
 ```text
 Authorization: Silo-Node-HMAC-SHA256 t=<unix seconds>,b=<hex body SHA-256>,sig=<hex HMAC-SHA256>
@@ -363,48 +386,73 @@ strips it, and the worker verifies the path it receives. The worker checks, in
 order:
 
 1. the MAC, recomputed over the request it received and compared with
-   `hmac.Equal`, before reading any body, so a caller without the secret cannot
+   `hmac.Equal`, before reading any body, so a caller without the key cannot
    make the worker buffer one;
 2. the timestamp, refused when more than 30 seconds from the worker's clock in
    either direction;
 3. the body, at most 1 MiB, whose SHA-256 must equal `b`. The worker then hands
    the buffered body to the handler.
 
-Every authentication refusal is a plain-text `401`. A sender with no secret
-configured sends the request unsigned, and the worker refuses it. The worker
-logs an invalid signature, a valid signature outside the window (with the
-clock offset), and a body that does not match its signature. Each kind logs at
-most once every ten minutes and counts the refusals it suppressed.
+Every authentication refusal is a plain-text `401`. The worker logs an invalid
+signature, a valid signature outside the window (with the clock offset), and a
+body that does not match its signature. Each kind logs at most once every ten
+minutes and counts the refusals it suppressed.
+
+Every HTTP client that calls a worker refuses redirects: a signed request names
+one worker, and following a redirect would send it, and its answer, somewhere
+nobody registered.
+
+### Node to core
+
+A transcode node will also call the API, signing with its own key
+(`nodeauth.SignToCore`, verified by `nodeauth.VerifyFromNode`). The
+construction is the same with three differences: the HKDF label is
+`silo/node-to-core-auth/v1`, the canonical string opens with
+`silo-node-to-core-v1`, and the header carries `n=<node id>` so the API can find
+the key. The canonical string also ends with the value of the
+`X-Silo-Source-Grant` request header (`nodeauth.SourceGrantHeader`, empty when
+absent), so a captured request cannot be replayed with another grant, and a
+request carrying that header twice is refused. Because the label and version
+differ, a request captured in one direction never verifies in the other, even
+though both use the node's key. When a signature fails against the loaded key,
+the API reloads the registry once (rate-limited) and checks again, so a freshly
+rotated key is accepted before the next periodic refresh. No API route uses
+this direction yet.
 
 What this requires and allows:
 
 - Worker clocks stay within 30 seconds of the API servers and proxies.
 - A reverse proxy in front of a worker may strip the path prefix of the
   worker's registered URL, but must otherwise forward the path and query
-  unchanged. Headers, including `Host`, are not signed.
-- A captured signed request can be replayed, to the same or another worker,
-  until its timestamp expires. Its method, path, query, and body cannot be altered; its
-  headers can, since they are not signed. It reveals nothing that signs another
-  request or token. Signing does not encrypt: worker links that cross untrusted
-  networks still need TLS to keep media and requests private.
+  unchanged. Headers, including `Host`, are not signed, except the source
+  grant on a node-to-core request.
+- A captured signed request can be replayed until its timestamp expires: to
+  the same transcode node, or to any proxy, since proxies share the secret. Its
+  method, path, query, and body cannot be altered; its other headers can. It
+  reveals nothing that signs another request or token. Signing does not
+  encrypt: worker links that cross untrusted networks still need TLS to keep
+  media and requests private.
 
-### Upgrading to signed requests
+### Upgrade order
 
 Release notes certify which component versions may run together
-([release versioning](../release-versioning.md)). Upgrading every component
-together, as a stop-and-replace, has no mixed state. For a rolling upgrade,
-workers also accept the previous release's `Authorization: Bearer <secret>`,
-compared in constant time, and log a warning at most once every ten minutes
-when they do. Senders from this release only sign, which earlier workers
-refuse, so upgrade transcode nodes first, then proxies, then API servers. Until
-the last older sender is upgraded, its requests still carry the secret, so a
-rolling upgrade over links without TLS exposes it for that window; a
-stop-and-replace upgrade does not. Recovery from a failed upgrade is the release-wide backup and redeploy;
-rolling one worker back alone leaves it refusing every upgraded sender.
+([release versioning](../release-versioning.md)).
 
-The next release removes the legacy bearer from `nodeauth.Verify`. Its release
-notes must name this release as a required step for rolling upgrades, because
-its workers refuse senders from before this release.
+Transcode nodes have no rolling upgrade across the change to node keys. An
+older API server or proxy signs for a transcode node with the shared secret,
+which a current node refuses, and a current API server signs for an older node
+with its node key, which that node cannot verify. Upgrade the API servers and
+proxies, issue each transcode node a key, then upgrade the nodes and start them
+with `SILO_NODE_KEY`. Until a node has a key, placement gives it no work.
+
+Proxies keep the shared secret. During a rolling upgrade a proxy also accepts
+the previous release's `Authorization: Bearer <secret>` from older API servers,
+compared in constant time, and logs a warning at most once every ten minutes
+when it does. Until the last older sender is upgraded, its requests still carry
+the secret, so a rolling upgrade over links without TLS exposes it for that
+window; a stop-and-replace upgrade does not. The next release removes the
+legacy bearer from `nodeauth.Verify`. Recovery from a failed upgrade is the
+release-wide backup and redeploy.
 
 ## Media paths in stream tokens
 

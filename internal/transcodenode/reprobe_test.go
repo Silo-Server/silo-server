@@ -18,7 +18,7 @@ import (
 func postReprobe(t *testing.T, server *Server) *httptest.ResponseRecorder {
 	t.Helper()
 	request := httptest.NewRequest(http.MethodPost, "/admin/reprobe-capabilities", nil)
-	nodeauthtest.Sign(t, request, testSecret)
+	nodeauthtest.Sign(t, request, testNodeKey)
 	recorder := httptest.NewRecorder()
 	server.Handler().ServeHTTP(recorder, request)
 	return recorder
@@ -62,7 +62,7 @@ func TestReprobeCapabilitiesRecomputesAndStoresHash(t *testing.T) {
 	// The reported hash must describe the report the capability endpoint would
 	// now serve, or the API would refetch and store something else.
 	capabilityRequest := httptest.NewRequest(http.MethodGet, "/hw-capabilities", nil)
-	nodeauthtest.Sign(t, capabilityRequest, testSecret)
+	nodeauthtest.Sign(t, capabilityRequest, testNodeKey)
 	capabilityRecorder := httptest.NewRecorder()
 	server.Handler().ServeHTTP(capabilityRecorder, capabilityRequest)
 	if capabilityRecorder.Code != http.StatusOK {
@@ -173,7 +173,7 @@ func TestReloadConfigKeepsActiveSessions(t *testing.T) {
 	server.activeJobs.Store(1)
 
 	request := httptest.NewRequest(http.MethodPost, "/admin/reload-config", nil)
-	nodeauthtest.Sign(t, request, testSecret)
+	nodeauthtest.Sign(t, request, testNodeKey)
 	recorder := httptest.NewRecorder()
 	server.Handler().ServeHTTP(recorder, request)
 

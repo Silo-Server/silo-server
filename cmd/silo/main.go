@@ -102,6 +102,7 @@ import (
 	// entries in-process (no gRPC).
 	_ "github.com/Silo-Server/silo-server/internal/metadata/nfo"
 	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/nodeauth"
 	"github.com/Silo-Server/silo-server/internal/nodeconfig"
 	"github.com/Silo-Server/silo-server/internal/nodemetrics"
 	"github.com/Silo-Server/silo-server/internal/nodepool"
@@ -196,7 +197,10 @@ func resolveNodeIdentity() string {
 // contract. budget takes the node because the device set is a per-node
 // property: an hw_device override is exactly a node that probes a different
 // matrix from the one the cluster setting describes.
-func nodeCapabilityFetcher(jwtSecret string, budget func(*nodepool.Node) time.Duration) nodepool.CapabilityFetcher {
+//
+// The node's row says which kind of worker it is, and so which key signs the
+// request: a transcode node's own, or the shared secret for a proxy.
+func nodeCapabilityFetcher(keys nodeauth.Keyring, budget func(*nodepool.Node) time.Duration) nodepool.CapabilityFetcher {
 	client := &http.Client{}
 	return func(ctx context.Context, node *nodepool.Node) ([]byte, string, error) {
 		if node == nil {
@@ -204,7 +208,7 @@ func nodeCapabilityFetcher(jwtSecret string, budget func(*nodepool.Node) time.Du
 		}
 		ctx, cancel := context.WithTimeout(ctx, budget(node))
 		defer cancel()
-		info, payload, status, err := transcodenode.FetchHWCapabilitiesPayload(ctx, client, node.URL, jwtSecret)
+		info, payload, status, err := transcodenode.FetchHWCapabilitiesPayload(ctx, client, node.URL, node.SignTarget(), keys)
 		if err != nil {
 			return nil, "", err
 		}
@@ -1207,6 +1211,17 @@ func main() {
 
 	// Proxy and transcode modes run with DB + Redis for hot-reload.
 	if mode == "proxy" || mode == "transcode" {
+		// A transcode node verifies requests with its own key, so it checks
+		// for one before it connects to anything else.
+		var nodeKey string
+		if mode == serverModeTranscode {
+			key, err := transcodeNodeKey(os.Getenv)
+			if err != nil {
+				slog.Error("transcode node cannot start", "error", err)
+				os.Exit(1)
+			}
+			nodeKey = key
+		}
 		// Delivery writes run in the background with a short deadline. Honor it
 		// on the sockets too, so a stalled Redis cannot retain their connections.
 		redisClient, err := cache.NewDeadlineRedisClientForRole(cfg.Redis, "worker")
@@ -1292,8 +1307,10 @@ func main() {
 			// token or grant stops here instead of at its 24h TTL.
 			srv.SetStreamDeny(playback.NewStreamDeny(redisClient))
 			// Proxies relay to transcode nodes, so they keep the same
-			// credential registry the API servers do.
-			startProxyNodeKeyRegistry(appCtx, pool, dataCipher, eventBus)
+			// credential registry the API servers do and sign each relay
+			// with the node's own key.
+			proxyNodeKeys := startProxyNodeKeyRegistry(appCtx, pool, dataCipher, eventBus)
+			srv.SetNodeKeys(proxyNodeKeys.Keyring(func() string { return watcher.Config().Auth.JWTSecret }))
 			// Follow a Jellyfin-compatible transcode that the API moved off a
 			// transcode node this proxy cannot reach: the shared recipe store
 			// names the node it runs on now, and the event bus carries the
@@ -1317,6 +1334,7 @@ func main() {
 			handler = srv.Handler()
 		} else {
 			srv := transcodenode.NewServer(watcher, tracker)
+			srv.SetNodeKey(nodeKey)
 			srv.SetInputPathAuthorizer(transcodenode.NewCatalogPathAuthorizer(scanner.NewFileRepository(pool)))
 			srv.SetThemeInputAuthorizer(transcodenode.NewThemeInputAuthorizer(themesongs.NewRepository(pool)))
 			// Consult the session-deny marker central writes on stop, expiry,
@@ -1658,6 +1676,12 @@ func main() {
 		}
 		nodeKeys.Start(appCtx)
 		deps.NodeKeyRegistry = nodeKeys
+		// Requests to a transcode node are signed with its own key, and only
+		// proxies get the shared secret. A transcode node without a usable key
+		// stays listed and health-checked but takes no work.
+		nodeKeyring := nodeKeys.Keyring(func() string { return configWatcher.Config().Auth.JWTSecret })
+		deps.NodeKeys = nodeKeyring
+		transcodePool.SetKeyCheck(nodeKeys.HasKey)
 
 		planner := nodepool.NewPlanner(proxyPool, transcodePool)
 		deps.NodePlanner = planner
@@ -1676,7 +1700,7 @@ func main() {
 			}()
 		})
 		capabilityBudget := nodeCapabilityProbeBudget(configWatcher.Config)
-		healthChecker.SetCapabilityFetcher(nodeCapabilityFetcher(cfg.Auth.JWTSecret, capabilityBudget))
+		healthChecker.SetCapabilityFetcher(nodeCapabilityFetcher(nodeKeyring, capabilityBudget))
 		// The sweep's backstop is derived from the same budget, so it can never
 		// be the deadline that fires first on a node with many devices.
 		healthChecker.SetCapabilityFetchBudget(capabilityBudget)
@@ -1824,6 +1848,7 @@ func main() {
 			cfg.Playback.ChapterThumbnailWorkers,
 		)
 		if chapterThumbService != nil {
+			chapterThumbService.SetNodeKeys(deps.NodeKeys)
 			if queue := blobgc.NewQueue(deps.DB); queue != nil {
 				chapterThumbService.SetBlobQueue(queue)
 			}
@@ -3387,7 +3412,7 @@ func main() {
 			if sweeper := blobgc.NewSweeper(deps.DB, deps.Blobs.Assets, mediaImages...); sweeper != nil {
 				taskMgr.Register(tasks.NewSweepOrphanedMediaImagesTask(sweeper))
 			}
-			trickplayExtractor := trickplay.NewNodeExtractor(trickplay.NewLocalExtractor(settingsRepo), deps.NodePlanner, settingsRepo)
+			trickplayExtractor := trickplay.NewNodeExtractor(trickplay.NewLocalExtractor(settingsRepo), deps.NodePlanner, settingsRepo, deps.NodeKeys)
 			if trickplayService := trickplay.NewService(deps.DB, deps.Blobs.Assets, settingsRepo, trickplayExtractor, deps.NodeID); trickplayService != nil {
 				trickplayReader := trickplay.NewReader(deps.DB, deps.Blobs.Assets, trickplayURLResolver(&deps))
 				if checker, ok := deps.Blobs.Assets.(trickplay.DeliveryChecker); ok && deps.ArtworkDelivery.External {
@@ -3471,6 +3496,7 @@ func main() {
 				downloadWorkPlanner = deps.NodePlanner
 			}
 			preparer := downloads.NewNodeAwarePreparer(downloads.NewPlaybackPreparer(), downloadWorkPlanner, liveDownloadConfig)
+			preparer.SetNodeKeys(deps.NodeKeys)
 			if deps.NodeRepo != nil {
 				preparer.SetOriginLookup(deps.NodeRepo)
 			}
@@ -3497,6 +3523,7 @@ func main() {
 					}, evt.PublishOptions{UserID: d.UserID, ProfileID: d.ProfileID})
 				},
 			)
+			artifactMgr.SetNodeKeys(deps.NodeKeys)
 			artifactMgr.SetSettingsReader(settingsRepo)
 			artifactMgr.SetFFmpegLogSink(playback.NewSlogFFmpegLogSink(slog.Default(), deps.NodeID))
 			artifactMgr.SetPreparationNotifier(func(ctx context.Context, event downloads.PreparationEvent) {
@@ -4062,6 +4089,7 @@ func main() {
 			NodePlanner:          deps.NodePlanner,
 			EventBus:             eventBus,
 			JWTSecret:            cfg.Auth.JWTSecret,
+			NodeKeys:             deps.NodeKeys,
 			RecWorker:            recWorker,
 			FrontendFS:           deps.FrontendFS,
 			ArtworkStore:         deps.Blobs.Assets,

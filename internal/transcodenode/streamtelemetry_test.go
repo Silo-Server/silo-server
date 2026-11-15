@@ -35,7 +35,7 @@ func nodeMediaRequest(t *testing.T, server *httptest.Server, path, token string)
 	if err != nil {
 		t.Fatal(err)
 	}
-	nodeauthtest.Sign(t, req, testSecret)
+	nodeauthtest.Sign(t, req, testNodeKey)
 	if token != "" {
 		req.Header.Set("X-Silo-Stream-Token", token)
 	}

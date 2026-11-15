@@ -6,6 +6,9 @@ import (
 	"slices"
 	"testing"
 
+	"github.com/Silo-Server/silo-server/internal/nodeauth/nodeauthtest"
+	"github.com/Silo-Server/silo-server/internal/nodepool/nodepooltest"
+
 	"github.com/Silo-Server/silo-server/internal/cache"
 	"github.com/Silo-Server/silo-server/internal/nodepool"
 )
@@ -30,11 +33,11 @@ func (r *drainNodeRepository) SetDrainRequested(_ context.Context, _ int, reques
 func TestSetAdminNodeDrainUpdatesPoolsAndAnnounces(t *testing.T) {
 	node := &nodepool.Node{ID: 3, Name: "tc", Type: nodepool.NodeTypeTranscode, URL: "http://tc", Enabled: true, Healthy: true}
 	repo := &drainNodeRepository{stubNodeRepository: stubNodeRepository{node: node}}
-	transcodes := nodepool.NewTranscodePool()
+	transcodes := nodepooltest.NewTranscodePool()
 	transcodes.SetNodes([]*nodepool.Node{node})
 	lister := &ctxAwareLister{}
 	bus := &recordingEventBus{}
-	handler := NewNodeHandler(repo, nodepool.NewProxyPool(), transcodes, lister, bus, nil, "secret")
+	handler := NewNodeHandler(repo, nodepool.NewProxyPool(), transcodes, lister, bus, nil, nodeauthtest.SameKey("secret"))
 
 	lister.nodes = []*nodepool.Node{{ID: 3, Name: "tc", Type: nodepool.NodeTypeTranscode, URL: "http://tc", Enabled: true, Healthy: true, DrainRequested: true}}
 	got, err := handler.SetAdminNodeDrain(context.Background(), 3, true)
@@ -54,14 +57,14 @@ func TestSetAdminNodeDrainUpdatesPoolsAndAnnounces(t *testing.T) {
 
 func TestSetAdminNodeDrainRefusesProxies(t *testing.T) {
 	repo := &drainNodeRepository{stubNodeRepository: stubNodeRepository{node: &nodepool.Node{ID: 1, Type: nodepool.NodeTypeProxy}}}
-	handler := NewNodeHandler(repo, nil, nil, nil, nil, nil, "secret")
+	handler := NewNodeHandler(repo, nil, nil, nil, nil, nil, nodeauthtest.SameKey("secret"))
 	if _, err := handler.SetAdminNodeDrain(context.Background(), 1, true); !errors.Is(err, ErrNodeNotDrainable) {
 		t.Fatalf("draining a proxy = %v, want ErrNodeNotDrainable", err)
 	}
 	if len(repo.requests) != 0 {
 		t.Fatal("a proxy drain request was stored")
 	}
-	if _, err := NewNodeHandler(&drainNodeRepository{}, nil, nil, nil, nil, nil, "").SetAdminNodeDrain(context.Background(), 9, true); !errors.Is(err, nodepool.ErrNodeNotFound) {
+	if _, err := NewNodeHandler(&drainNodeRepository{}, nil, nil, nil, nil, nil, nil).SetAdminNodeDrain(context.Background(), 9, true); !errors.Is(err, nodepool.ErrNodeNotFound) {
 		t.Fatalf("draining an unknown node = %v, want ErrNodeNotFound", err)
 	}
 }

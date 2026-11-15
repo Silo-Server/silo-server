@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/nodeauth/nodeauthtest"
 	"github.com/Silo-Server/silo-server/internal/streamtoken"
 	"github.com/Silo-Server/silo-server/internal/transcodeproxy"
 )
@@ -110,6 +111,7 @@ func TestTranscodeProxyDoesNotAcknowledgeFailedDownstreamWrite(t *testing.T) {
 
 func newCompletionTestProxy(client *http.Client) *Server {
 	server := NewServer(testWatcher("proxy-test-secret"), nil)
+	server.SetNodeKeys(nodeauthtest.NodeKey("proxy-test-secret"))
 	server.httpClient = client
 	return server
 }

@@ -36,7 +36,7 @@ func TestStartPlaybackV2BitrateCapTriesCompliantAlternate(t *testing.T) {
 	alternate.VideoTracks[0].Level = 41
 	alternate.VideoTracks[0].Bitrate = 7_800
 
-	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0), testPlaybackFileResolver{file: source})
+	handler := newKeyedPlaybackHandler(playback.NewSessionManager(0, 0), testPlaybackFileResolver{file: source})
 	handler.FileVersionFetcher = testPlaybackFileVersionFetcher{byContent: map[string][]*models.MediaFile{source.ContentID: {source, alternate}}}
 	handler.SettingsRepo = &mutablePlaybackSettingsV3{values: map[string]string{"allow_4k_transcode": "false"}}
 	handler.PlaybackConfig = playbackTestConfig("", "")

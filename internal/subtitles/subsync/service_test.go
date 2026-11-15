@@ -18,6 +18,8 @@ import (
 	"github.com/Silo-Server/silo-server/internal/mediaartifact"
 	"github.com/Silo-Server/silo-server/internal/mediasample"
 	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/nodeauth"
+	"github.com/Silo-Server/silo-server/internal/nodeauth/nodeauthtest"
 	"github.com/Silo-Server/silo-server/internal/nodepool"
 	"github.com/Silo-Server/silo-server/internal/subtitles"
 )
@@ -181,11 +183,11 @@ func (s settingsMap) Get(_ context.Context, key string) (string, error) { return
 
 type nodeList []*nodepool.Node
 
-func (n nodeList) Nodes() []*nodepool.Node { return n }
+func (n nodeList) KeyedNodes() []*nodepool.Node { return n }
 
 type fakeRemote func(req mediasample.Request) (mediasample.Result, error)
 
-func (f fakeRemote) Run(_ context.Context, _, _ string, req mediasample.Request) (mediasample.Result, error) {
+func (f fakeRemote) Run(_ context.Context, _ string, _ nodeauth.Keyring, req mediasample.Request) (mediasample.Result, error) {
 	return f(req)
 }
 
@@ -212,7 +214,7 @@ func newFixture(t *testing.T, truth subtitles.Timing, settings settingsMap, layo
 		files: fakeFiles{file}, artifacts: f.artifacts, settings: settings, notifier: f.notifier, node: "test", now: time.Now,
 		inline: true,
 	}
-	f.svc.sampler = newSampler(settings, nil, func() string { return "ffmpeg" })
+	f.svc.sampler = newSampler(settings, nil, nil, func() string { return "ffmpeg" })
 	f.svc.sampler.local = func(_ context.Context, req mediasample.Request) (mediasample.Result, error) {
 		f.decodes++
 		f.center = append(f.center, req.Audio.Speech.CenterChannel)
@@ -448,10 +450,11 @@ func TestSamplerExecution(t *testing.T) {
 		return mediasample.Result{Decoder: "software"}, nil
 	}
 	node := &nodepool.Node{ID: 1, Name: "gpu-1", URL: "http://node", Enabled: true, Healthy: true}
-	settings := settingsMap{settingJWTSecret: "secret"}
+	settings := settingsMap{}
+	keys := nodeauthtest.NodeKey("secret")
 
 	t.Run("node", func(t *testing.T) {
-		s := &sampler{settings: settings, nodes: nodeList{node}, reservations: &nodepool.Reservations{}, local: ok,
+		s := &sampler{settings: settings, nodes: nodeList{node}, reservations: &nodepool.Reservations{}, keys: keys, local: ok,
 			remote: fakeRemote(func(mediasample.Request) (mediasample.Result, error) { return mediasample.Result{}, nil })}
 		if _, where, err := s.run(context.Background(), reqs, nil); err != nil || where != "node:gpu-1" {
 			t.Fatalf("%q %v", where, err)
@@ -459,7 +462,7 @@ func TestSamplerExecution(t *testing.T) {
 	})
 	t.Run("node failure falls back", func(t *testing.T) {
 		calls := 0
-		s := &sampler{settings: settings, nodes: nodeList{node}, reservations: &nodepool.Reservations{}, local: ok,
+		s := &sampler{settings: settings, nodes: nodeList{node}, reservations: &nodepool.Reservations{}, keys: keys, local: ok,
 			remote: fakeRemote(func(mediasample.Request) (mediasample.Result, error) {
 				calls++
 				if calls == 2 {
@@ -478,7 +481,7 @@ func TestSamplerExecution(t *testing.T) {
 		}
 	})
 	t.Run("node refusing the path falls back", func(t *testing.T) {
-		s := &sampler{settings: settings, nodes: nodeList{node}, reservations: &nodepool.Reservations{}, local: ok,
+		s := &sampler{settings: settings, nodes: nodeList{node}, reservations: &nodepool.Reservations{}, keys: keys, local: ok,
 			remote: fakeRemote(func(mediasample.Request) (mediasample.Result, error) {
 				return mediasample.Result{}, &mediasample.RemoteError{Status: http.StatusBadRequest, Reason: mediasample.ReasonNodeUnavailable}
 			})}
@@ -487,7 +490,7 @@ func TestSamplerExecution(t *testing.T) {
 		}
 	})
 	t.Run("file failure does not fall back", func(t *testing.T) {
-		s := &sampler{settings: settings, nodes: nodeList{node}, reservations: &nodepool.Reservations{}, local: ok,
+		s := &sampler{settings: settings, nodes: nodeList{node}, reservations: &nodepool.Reservations{}, keys: keys, local: ok,
 			remote: fakeRemote(func(mediasample.Request) (mediasample.Result, error) {
 				return mediasample.Result{}, &mediasample.RemoteError{Status: http.StatusUnprocessableEntity, Reason: mediasample.ReasonInvalidData}
 			})}
@@ -496,8 +499,8 @@ func TestSamplerExecution(t *testing.T) {
 		}
 	})
 	t.Run("transcode only does not fall back from a busy node", func(t *testing.T) {
-		s := &sampler{settings: settingsMap{SettingExecution: ExecutionTranscodeOnly, settingJWTSecret: "secret"},
-			nodes: nodeList{node}, reservations: &nodepool.Reservations{}, local: ok,
+		s := &sampler{settings: settingsMap{SettingExecution: ExecutionTranscodeOnly},
+			nodes: nodeList{node}, reservations: &nodepool.Reservations{}, keys: keys, local: ok,
 			remote: fakeRemote(func(mediasample.Request) (mediasample.Result, error) {
 				return mediasample.Result{}, &mediasample.RemoteError{Status: http.StatusServiceUnavailable, Reason: mediasample.ReasonNodeUnavailable}
 			})}
@@ -506,14 +509,14 @@ func TestSamplerExecution(t *testing.T) {
 		}
 	})
 	t.Run("transcode only without node", func(t *testing.T) {
-		s := &sampler{settings: settingsMap{SettingExecution: ExecutionTranscodeOnly, settingJWTSecret: "secret"},
-			nodes: nodeList{}, reservations: &nodepool.Reservations{}, local: ok}
+		s := &sampler{settings: settingsMap{SettingExecution: ExecutionTranscodeOnly},
+			nodes: nodeList{}, reservations: &nodepool.Reservations{}, keys: keys, local: ok}
 		if _, _, err := s.run(context.Background(), reqs, nil); !errors.Is(err, errNoNode) {
 			t.Fatalf("err %v", err)
 		}
 	})
 	t.Run("prefer without node runs locally", func(t *testing.T) {
-		s := &sampler{settings: settingsMap{}, nodes: nodeList{}, reservations: &nodepool.Reservations{}, local: ok}
+		s := &sampler{settings: settingsMap{}, nodes: nodeList{}, reservations: &nodepool.Reservations{}, keys: keys, local: ok}
 		if _, where, err := s.run(context.Background(), reqs, nil); err != nil || where != ExecutionLocal {
 			t.Fatalf("%q %v", where, err)
 		}

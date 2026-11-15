@@ -82,7 +82,7 @@ func stopSession(t *testing.T, s *Server, sessionID string) {
 
 func signed(t *testing.T, r *http.Request) *http.Request {
 	t.Helper()
-	nodeauthtest.Sign(t, r, testSecret)
+	nodeauthtest.Sign(t, r, testNodeKey)
 	return r
 }
 

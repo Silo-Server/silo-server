@@ -16,6 +16,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/mediaartifact"
 	"github.com/Silo-Server/silo-server/internal/mediasample"
 	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/nodeauth"
 	"github.com/Silo-Server/silo-server/internal/subtitles"
 )
 
@@ -96,11 +97,14 @@ type Deps struct {
 	Subtitles  *subtitles.Manager
 	Rows       subtitleRows
 	// External stores sidecar timing corrections.
-	External   externalRows
-	Files      mediaFiles
-	Artifacts  *mediaartifact.Store
-	Settings   SettingsReader
-	Nodes      NodeSource
+	External  externalRows
+	Files     mediaFiles
+	Artifacts *mediaartifact.Store
+	Settings  SettingsReader
+	Nodes     NodeSource
+	// NodeKeys signs requests to the nodes; without it speech decoding runs
+	// on this server.
+	NodeKeys   nodeauth.Keyring
 	FFmpegPath func() string
 	Notifier   Notifier
 	// Node names this server in artifact failure records.
@@ -136,7 +140,7 @@ func NewService(d Deps) *Service {
 	s := &Service{
 		jobs: d.Jobs, rows: d.Rows, content: d.Subtitles, external: d.External, readFile: fspath.ReadFile,
 		files: d.Files, artifacts: d.Artifacts,
-		settings: d.Settings, sampler: newSampler(d.Settings, d.Nodes, d.FFmpegPath),
+		settings: d.Settings, sampler: newSampler(d.Settings, d.Nodes, d.NodeKeys, d.FFmpegPath),
 		notifier: d.Notifier, node: d.Node, now: time.Now,
 	}
 	if s.node == "" {

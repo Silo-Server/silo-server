@@ -14,6 +14,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/nodeauth/nodeauthtest"
 	"github.com/Silo-Server/silo-server/internal/noderouting"
 	"github.com/Silo-Server/silo-server/internal/playback"
 )
@@ -129,6 +130,7 @@ func TestBuildPlaybackSourceHonorsProgressiveRemuxRoutingPolicy(t *testing.T) {
 			handler := &PlaybackHandler{
 				codec:     NewResourceIDCodec(),
 				JWTSecret: "test-secret",
+				NodeKeys:  nodeauthtest.SameKey("test-secret"),
 				PlaybackConfig: func() config.PlaybackConfig {
 					return config.PlaybackConfig{Routing: policy}
 				},

@@ -33,7 +33,7 @@ func TestWorkerStartActualMedia(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	nodeauthtest.Sign(t, req, testSecret)
+	nodeauthtest.Sign(t, req, testNodeKey)
 	response, err := handler.Client().Do(req)
 	if err != nil {
 		t.Fatal(err)

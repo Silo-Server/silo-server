@@ -152,7 +152,7 @@ func TestHWCapabilitiesAdvertisesThemeExecutionOnlyWithAuthority(t *testing.T) {
 	features := func() []string {
 		t.Helper()
 		request := httptest.NewRequest(http.MethodGet, "/hw-capabilities", nil)
-		nodeauthtest.Sign(t, request, testSecret)
+		nodeauthtest.Sign(t, request, testNodeKey)
 		recorder := httptest.NewRecorder()
 		server.Handler().ServeHTTP(recorder, request)
 		if recorder.Code == http.StatusServiceUnavailable {

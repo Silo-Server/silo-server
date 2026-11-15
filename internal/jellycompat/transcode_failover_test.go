@@ -10,6 +10,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/nodeauth/nodeauthtest"
+	"github.com/Silo-Server/silo-server/internal/nodepool/nodepooltest"
+
 	"github.com/go-chi/chi/v5"
 
 	"github.com/Silo-Server/silo-server/internal/cache"
@@ -87,7 +90,7 @@ func newCompatMoveFixtureOn(t *testing.T, oldNodeURL string, withLiveNode bool, 
 		f.liveURL = live.URL
 		nodes = append(nodes, &nodepool.Node{ID: compatMoveLiveNodeID, URL: live.URL, Enabled: true, Healthy: true})
 	}
-	transcodes := nodepool.NewTranscodePool()
+	transcodes := nodepooltest.NewTranscodePool()
 	transcodes.SetNodes(nodes)
 	proxies := nodepool.NewProxyPool()
 	proxies.SetNodes([]*nodepool.Node{
@@ -133,8 +136,9 @@ func newCompatMoveFixtureOn(t *testing.T, oldNodeURL string, withLiveNode bool, 
 		playbackStore:   f.store,
 		sessionMgr:      f.sessions,
 		fileResolver:    testCompatFileResolver{file: &models.MediaFile{ID: source.FileID, FilePath: "/media/movie.mkv"}},
-		tm:              playback.NewTranscodeManager(),
+		tm:              keyedTranscodeManager(),
 		JWTSecret:       "test-secret",
+		NodeKeys:        nodeauthtest.SameKey("test-secret"),
 		RecipeNodeStore: f.recipes,
 		NodePlanner:     nodepool.NewPlanner(proxies, transcodes),
 	}
@@ -528,7 +532,7 @@ func TestCompatMoveToThisServerRequiresLocalRecipeCapabilities(t *testing.T) {
 func TestCompatMoveSkipsNodesTheRequestFoundUnreachable(t *testing.T) {
 	f := newCompatMoveFixture(t, false, noderouting.EgressAPI)
 	otherDeadURL := closedNodeURL(t)
-	transcodes := nodepool.NewTranscodePool()
+	transcodes := nodepooltest.NewTranscodePool()
 	transcodes.SetNodes([]*nodepool.Node{
 		{ID: compatMoveDeadNodeID, URL: f.deadURL, Enabled: true, Healthy: true},
 		{ID: compatMoveLiveNodeID, URL: otherDeadURL, Enabled: true, Healthy: true},
