@@ -595,7 +595,15 @@ resolve and never deletes from it.
   it because it names another node. A move rechecks the deny markers before it
   commits and before it serves from the new executor. A candidate that refuses
   or fails a move's start is released in the background; the card is not
-  touched. A move to the API process deletes the card. Jellyfin-compatible
+  touched. A release is fenced to the job it was sent for, since another API
+  server's move may have started the transport on that node by the time it
+  lands. A move's start carries a fresh `start_id`, and its rollback names it,
+  so the node ends only that start's job. A retire of the node the transport
+  left names none, since that job may be a rebuild or another server's start;
+  the node then ends only the job it held when the release arrived, not one a
+  start or rebuild published while the release waited for the lifecycle lock.
+  A retire that arrives after a newer job on that node is already running
+  still ends it, and the next request rebuilds it from the card. A move to the API process deletes the card. Jellyfin-compatible
   moves write their record at commit too, then release the old node
   ([transcode node lost mid-stream](restart-resilient-playback.md#transcode-node-lost-mid-stream)).
 - **Force reload.** The node, under its reload gate, asks the core to revoke

@@ -416,13 +416,14 @@ func (h *PlaybackHandler) undoCompatTranscodeMove(
 // a fenced stop would make the old node refuse that id for the token lifetime
 // if a later move picked the node again. The release leaves the node recipe
 // record alone (nodes never touch it), so the record the move wrote before
-// this runs stays in place.
+// this runs stays in place. It names no start, since a job there may be a
+// rebuild, so the node ends only the job it holds when the release arrives.
 func (h *PlaybackHandler) retireCompatTranscodeOnDeadNode(ctx context.Context, upstreamSessionID, deadNodeURL string) {
 	detached := context.WithoutCancel(ctx)
 	go func() {
 		stopCtx, cancel := context.WithTimeout(detached, compatTranscodeMoveTimeout)
 		defer cancel()
-		if err := h.tm.ReleaseRemoteTranscode(stopCtx, upstreamSessionID, deadNodeURL); err != nil {
+		if err := h.tm.ReleaseRemoteTranscode(stopCtx, upstreamSessionID, deadNodeURL, ""); err != nil {
 			// Expected when the node is down. When it is only unreachable from
 			// here, its idle reaper ends the transcode.
 			slog.InfoContext(detached, "could not stop the transcode on the node it moved off", "component", "jellycompat",

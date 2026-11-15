@@ -47,6 +47,10 @@ import (
 // TranscodeStartRequest is the JSON body for POST /transcode/start.
 type TranscodeStartRequest struct {
 	SessionID string `json:"session_id"`
+	// StartID is an opaque id the core picks for this one start. A release
+	// that names it ends the job only while this start's job still runs, so a
+	// late release cannot end a newer start under the same transport id.
+	StartID string `json:"start_id,omitempty"`
 	// PlaybackSessionID, UserID, ProfileID and MediaFileID are the playback
 	// session the transcode serves. The node files its session record and
 	// stream telemetry under them; it reads no stream token to learn them.
@@ -2692,8 +2696,36 @@ func (s *Server) progressiveRemuxStopped(transportID string) bool {
 	return s.stoppedProgressiveRemuxes[transportID].After(time.Now())
 }
 
+// releaseSupersededLocked reports whether the HLS job under transportID is
+// not the one a release (a stop with fence=0) was sent for, so the release
+// must leave it running. A release that names a start ends only that start's
+// job. One that names none, a retire of the node a transport left, ends only
+// the job it found on arrival. A stop that ends the session for good is
+// fenced and ends any job. The caller holds mu.
+func (s *Server) releaseSupersededLocked(transportID, startID string, arrived *playback.TranscodeSession) bool {
+	session, ok := s.sessions[transportID]
+	if !ok {
+		return false
+	}
+	if startID != "" {
+		return s.identities[transportID].startID != startID
+	}
+	return session != arrived
+}
+
 func (s *Server) handleStop(w http.ResponseWriter, r *http.Request) {
 	sessionID := chi.URLParam(r, "session_id")
+	fenced := r.URL.Query().Get(playback.TranscodeStopFenceQueryParam) != "0"
+	startID := r.URL.Query().Get(playback.TranscodeStopStartIDQueryParam)
+	// A release is sent in the background and can arrive after a newer start
+	// or rebuild of the same transport id. Note the job it found on arrival:
+	// one published while it waits for the lifecycle lock is newer than it.
+	var arrived *playback.TranscodeSession
+	if !fenced {
+		s.mu.RLock()
+		arrived = s.sessions[sessionID]
+		s.mu.RUnlock()
+	}
 
 	// Serialize against in-flight starts and reconstructs. A RequireReady
 	// start registers its job only after the readiness wait; a stop racing
@@ -2706,11 +2738,15 @@ func (s *Server) handleStop(w http.ResponseWriter, r *http.Request) {
 
 	// The core deletes the transport's stored recipe before it calls here;
 	// the node keeps only its in-memory fences.
-	fenced := r.URL.Query().Get(playback.TranscodeStopFenceQueryParam) != "0"
 	s.mu.Lock()
 	now := time.Now()
 	s.pruneStopFencesLocked(now)
 	progressive, progressiveFound := s.progressiveRemuxes[sessionID]
+	if !fenced && !progressiveFound && s.releaseSupersededLocked(sessionID, startID, arrived) {
+		s.mu.Unlock()
+		http.Error(w, "session not found", http.StatusNotFound)
+		return
+	}
 	// An HLS job is tracked under the transport id it started with, which for a
 	// native v3 transcode is not its card's SessionID. Only a progressive remux
 	// still running here is tracked under the viewer's playback session id; one

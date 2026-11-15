@@ -24,10 +24,12 @@ type sessionIdentity struct {
 	userID            int
 	profileID         string
 	mediaFileID       int
+	// startID is the start request's StartID; a rebuilt session has none.
+	startID string
 }
 
 func identityOfStart(req TranscodeStartRequest) sessionIdentity {
-	return sessionIdentity{playbackSessionID: req.PlaybackSessionID, userID: req.UserID, profileID: req.ProfileID, mediaFileID: req.MediaFileID}
+	return sessionIdentity{playbackSessionID: req.PlaybackSessionID, userID: req.UserID, profileID: req.ProfileID, mediaFileID: req.MediaFileID, startID: req.StartID}
 }
 
 func identityOfResolution(resolution *nodecontrol.Resolution) sessionIdentity {
