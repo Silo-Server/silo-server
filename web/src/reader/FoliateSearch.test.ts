@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, onTestFinished, vi } from "vitest";
 
 // @ts-expect-error The vendored JavaScript module does not ship TypeScript declarations.
 import { search } from "../../vendor/foliate-js/search.js";
@@ -200,8 +200,12 @@ describe("foliate view search", () => {
   });
 
   it("pauses a long section without matches so an abort stops it there", async () => {
-    // Each section takes well over the search's time budget to scan.
-    const { view } = makeView(Array.from({ length: 3 }, () => "lorem ipsum ".repeat(10_000)));
+    // Each read of the clock moves it 30 ms, so every section runs past the
+    // search's time budget however fast the scan is.
+    let now = 0;
+    const clock = vi.spyOn(performance, "now").mockImplementation(() => (now += 30));
+    onTestFinished(() => clock.mockRestore());
+    const { view } = makeView(Array.from({ length: 3 }, () => "lorem ipsum ".repeat(1_000)));
     const sections = (view.book as { sections: { createDocument: () => Promise<Document> }[] })
       .sections;
     let opened = 0;
