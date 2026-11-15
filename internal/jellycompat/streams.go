@@ -2130,6 +2130,7 @@ const (
 	compatRangeHDR10           = "HDR10"
 	compatRangeHLG             = "HLG"
 	compatRangeSDR             = "SDR"
+	compatRangeUnknown         = "Unknown"
 )
 
 const (
