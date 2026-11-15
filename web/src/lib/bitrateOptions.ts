@@ -1,4 +1,5 @@
 import type { SettingDefinition } from "@/lib/settingsContract";
+import { t } from "@/i18n";
 import { formatDecimal } from "@/lib/numberFormat";
 
 /**
@@ -24,10 +25,9 @@ export const BITRATE_CHOICES_KBPS = [
 
 export function formatBitrateKbps(kbps: number): string {
   if (kbps >= 1000) {
-    const mbps = kbps / 1000;
-    return mbps % 1 === 0 ? `${mbps} Mbps` : `${formatDecimal(mbps, 1)} Mbps`;
+    return t("web.common.format.bitrate.mbps", { rate: formatDecimal(kbps / 1000, 1, 0) });
   }
-  return `${kbps} kbps`;
+  return t("web.common.format.bitrate.kbps", { rate: formatDecimal(kbps, 0) });
 }
 
 /**
@@ -38,9 +38,13 @@ export function formatBitrateKbps(kbps: number): string {
  */
 export function formatConnectionRateKbps(kbps: number): string {
   const value = Math.max(0, Math.floor(kbps));
-  if (value < 1000) return `${value} kbps`;
-  if (value < 10_000) return `${formatDecimal(Math.floor(value / 100) / 10, 1)} Mbps`;
-  return `${Math.floor(value / 1000)} Mbps`;
+  if (value < 1000) return t("web.common.format.bitrate.kbps", { rate: formatDecimal(value, 0) });
+  if (value < 10_000) {
+    return t("web.common.format.bitrate.mbps", {
+      rate: formatDecimal(Math.floor(value / 100) / 10, 1),
+    });
+  }
+  return t("web.common.format.bitrate.mbps", { rate: formatDecimal(Math.floor(value / 1000), 0) });
 }
 
 /**

@@ -1,3 +1,4 @@
+import { t } from "@/i18n";
 import type {
   Collection,
   CollectionsListResponse,
@@ -86,7 +87,8 @@ export async function saveCollectionPoster(
   } catch (error) {
     return {
       collection: collectionFromV2(collection),
-      posterError: error instanceof Error ? error.message : "Poster update failed",
+      posterError:
+        error instanceof Error ? error.message : t("web.common.collections.posterUpdateFailed"),
     };
   }
 }

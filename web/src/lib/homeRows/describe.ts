@@ -409,12 +409,11 @@ export function profilePageKind(page: PageRef, label: string): PageRef["kind"] {
   return page.kind === "home" || label === "Home" ? "home" : "library";
 }
 
-/**
- * "Home" or "Movies page", after "my" or "your", for Settings > Home Screen's
- * menu items, which are not translated yet: English only, so they read whole.
- */
+/** "Home" or "Movies page", after "my" or "your", for Settings > Home Screen's menu items. */
 export function profilePageName(page: PageRef, label: string): string {
-  return profilePageKind(page, label) === "home" ? "Home" : `${label} page`;
+  return profilePageKind(page, label) === "home"
+    ? t("web.home.rows.pages.home")
+    : t("web.home.rows.describe.pageNameLibrary", { label });
 }
 
 /** The switch's accessible name says what it does, not just "Enabled". */

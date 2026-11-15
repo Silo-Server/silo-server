@@ -1,5 +1,6 @@
 import type { components } from "@/api/v2/schema";
 import { t, type MessageKey } from "@/i18n";
+import { joinList } from "@/lib/appLocale";
 
 /**
  * The kinds of a profile's own data, shared by a profile's export and import
@@ -82,7 +83,7 @@ export function dataCountsPhrase(data: {
       : null,
     data.left_out > 0 ? t("web.profiles.dataTypes.counts.leftOut", { count: data.left_out }) : null,
   ].filter((part): part is string => part !== null);
-  return parts.length > 0 ? parts.join(", ") : t("web.profiles.dataTypes.counts.nothing");
+  return parts.length > 0 ? joinList(parts) : t("web.profiles.dataTypes.counts.nothing");
 }
 
 /** The most titles listed by name before "and N more". */
@@ -90,7 +91,7 @@ const TITLES_SHOWN = 10;
 
 /** Titles an import or restore left out: "A, B, C, and 12 more". */
 export function titleList(titles: readonly string[]): string {
-  const shown = titles.slice(0, TITLES_SHOWN).join(", ");
+  const shown = joinList(titles.slice(0, TITLES_SHOWN));
   const rest = titles.length - TITLES_SHOWN;
   return rest > 0
     ? t("web.profiles.dataTypes.titleListMore", { titles: shown, count: rest })

@@ -1,5 +1,5 @@
 import { useRef } from "react";
-import { useAppLanguage, useT, type Translate } from "@/i18n";
+import { numberText, useAppLanguage, useT, type MessageKey, type Translate } from "@/i18n";
 import { Check, Layers } from "lucide-react";
 import ViewTransitionLink from "@/components/ViewTransitionLink";
 import MediaCardArtwork, {
@@ -64,11 +64,13 @@ function percent(value?: number | null) {
   return value != null ? formatPercent(value) : null;
 }
 
-function formatProgress(ratio?: number | null) {
+function formatProgress(t: Translate, ratio?: number | null) {
   if (ratio == null) {
     return null;
   }
-  return `${Math.round(Math.max(0, Math.min(1, ratio)) * 100)}%`;
+  return t("web.common.format.percent", {
+    percent: numberText(Math.round(Math.max(0, Math.min(1, ratio)) * 100)),
+  });
 }
 
 // mangaCountChipLabel returns the top-right poster chip label for a manga
@@ -94,10 +96,18 @@ function mangaCountChipLabel(t: Translate, item: BrowseItem): string | null {
   return parts.length > 0 ? parts.join(" · ") : null;
 }
 
+const MANGA_STATUS_LABELS: Partial<Record<string, MessageKey>> = {
+  Ongoing: "web.item.card.mangaStatus.ongoing",
+  Completed: "web.item.card.mangaStatus.completed",
+  Hiatus: "web.item.card.mangaStatus.hiatus",
+  Cancelled: "web.item.card.mangaStatus.cancelled",
+  Upcoming: "web.item.card.mangaStatus.upcoming",
+};
+
 // mangaStatusChip returns the top-left publication-status pill for a manga
 // browse card (color-coded), or null when the item is not manga or has no
 // status. Strictly manga-gated so no other card type renders it.
-function mangaStatusChip(item: BrowseItem): { label: string; tone: string } | null {
+function mangaStatusChip(t: Translate, item: BrowseItem): { label: string; tone: string } | null {
   if (item.type !== "manga") {
     return null;
   }
@@ -113,7 +123,9 @@ function mangaStatusChip(item: BrowseItem): { label: string; tone: string } | nu
       Cancelled: "text-red-300 border-red-400/30",
       Upcoming: "text-violet-200 border-violet-400/30",
     }[status] ?? "text-foreground border-white/15";
-  return { label: status, tone };
+  // The server sends one stable English value per status; an unknown value shows as sent.
+  const labelKey = MANGA_STATUS_LABELS[status];
+  return { label: labelKey ? t(labelKey) : status, tone };
 }
 
 function SortMeta({ item, sortField }: { item: BrowseItem; sortField?: string }) {
@@ -121,7 +133,10 @@ function SortMeta({ item, sortField }: { item: BrowseItem; sortField?: string })
   useAppLanguage();
   const t = useT();
   const episodeLabels = buildEpisodeCardLabels(item);
-  const defaultLabel = [item.year || "", item.type === "series" ? t("web.item.card.series") : ""]
+  const defaultLabel = [
+    item.year ? numberText(item.year) : "",
+    item.type === "series" ? t("web.item.card.series") : "",
+  ]
     .filter(Boolean)
     .join(" · ");
 
@@ -137,7 +152,7 @@ function SortMeta({ item, sortField }: { item: BrowseItem; sortField?: string })
       }
       return <>{defaultLabel}</>;
     case "year":
-      return <>{item.year || defaultLabel}</>;
+      return <>{item.year ? numberText(item.year) : defaultLabel}</>;
     case "content_rating":
       return <>{item.content_rating || defaultLabel}</>;
     case "runtime":
@@ -169,11 +184,13 @@ function SortMeta({ item, sortField }: { item: BrowseItem; sortField?: string })
     case "bitrate":
       return <>{formatBitrate(item.sort_metrics?.bitrate_kbps ?? undefined) || defaultLabel}</>;
     case "progress":
-      return <>{formatProgress(item.sort_metrics?.progress_ratio) ?? defaultLabel}</>;
+      return <>{formatProgress(t, item.sort_metrics?.progress_ratio) ?? defaultLabel}</>;
     case "date_viewed":
       return <>{formatDate(item.sort_metrics?.viewed_at) ?? defaultLabel}</>;
-    case "plays":
-      return <>{item.sort_metrics?.play_count ?? defaultLabel}</>;
+    case "plays": {
+      const plays = item.sort_metrics?.play_count;
+      return <>{plays != null ? numberText(plays) : defaultLabel}</>;
+    }
     case "author":
       return <>{item.sort_metrics?.author || defaultLabel}</>;
     case "narrator":
@@ -218,7 +235,7 @@ export default function ItemCard({
       ? buildItemHref({ contentId: item.series_id, libraryId })
       : itemHref;
   const mangaCountLabel = mangaCountChipLabel(t, item);
-  const mangaStatus = mangaStatusChip(item);
+  const mangaStatus = mangaStatusChip(t, item);
   const cardRef = useRef<HTMLDivElement>(null);
 
   return (

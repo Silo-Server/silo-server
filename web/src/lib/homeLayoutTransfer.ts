@@ -639,7 +639,7 @@ export async function importPage(
   const overrides = mergeImportedPage(page, await api.listSaved(), sameServer, newId);
   if (overrides.length > HOME_LAYOUT_MAX_PAGE_OVERRIDES) {
     throw new Error(
-      `this page would have more than ${HOME_LAYOUT_MAX_PAGE_OVERRIDES} saved section changes`,
+      t("web.home.layout.transfer.pageTooLarge", { max: HOME_LAYOUT_MAX_PAGE_OVERRIDES }),
     );
   }
   await api.save(overrides);
