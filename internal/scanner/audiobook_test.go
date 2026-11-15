@@ -1090,6 +1090,9 @@ func TestAudiobookTagTitle(t *testing.T) {
 		{"Book Title", "Book Title - The Long Subtitle", "", "Book Title - The Long Subtitle"},
 		// An album that adds the series is not a subtitle.
 		{"Book Title", "Book Title: Saga Name, Book 1", "", "Book Title"},
+		{"Book Title", "Book Title: Saga Name, Book III", "", "Book Title"},
+		// "Civil" is letters a Roman numeral uses, not a numeral.
+		{"Book Title", "Book Title: A Volume Civil", "", "Book Title: A Volume Civil"},
 		{"Book Title", "Book Title - Saga Name", "Saga Name", "Book Title"},
 		// The series must appear as whole words, not inside one.
 		{"Book Title", "Book Title: A Little Adventure", "It", "Book Title: A Little Adventure"},

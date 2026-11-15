@@ -168,9 +168,18 @@ var (
 	// prefix: nothing, or a position in digits or Roman numerals.
 	audiobookSeriesPositionRE = regexp.MustCompile(`(?i)^(?:[\s,]+(?:(?:book|bk|volume|vol|number|no|part|pt)\b\.?\s*)?#?\s*(\d+(?:\.\d+)?|[ivxlc]+))?$`)
 	// audiobookTrailingPositionRE matches a series position ending a
-	// subtitle: "..., Book 1", "... #3", "Vol. 2".
-	audiobookTrailingPositionRE = regexp.MustCompile(`(?i)(?:#|\b(?:book|bk|volume|vol|number|no|part|pt)\b\.?)\s*#?\s*\d+(?:\.\d+)?\s*$`)
+	// subtitle: "..., Book 1", "... #3", "Vol. 2", "Book III". A Roman
+	// numeral counts only after a marker word; endsInSeriesPosition checks
+	// that it is a well-formed one.
+	audiobookTrailingPositionRE = regexp.MustCompile(`(?i)(?:#\s*\d+(?:\.\d+)?|\b(?:book|bk|volume|vol|number|no|part|pt)\b\.?\s*#?\s*(?:\d+(?:\.\d+)?|([ivxlc]+)))\s*$`)
 )
+
+// endsInSeriesPosition reports whether text ends in a series position, as
+// audiobookTrailingPositionRE describes.
+func endsInSeriesPosition(text string) bool {
+	m := audiobookTrailingPositionRE.FindStringSubmatch(text)
+	return m != nil && (m[1] == "" || parseRomanNumeral(m[1]) != 0)
+}
 
 // containsTitleWords reports whether phrase appears in text as whole words,
 // ignoring case and punctuation. Words are runs of letters and digits in any
@@ -200,7 +209,7 @@ func audiobookTagTitle(title, album, series string) string {
 	if rest, ok := strings.CutPrefix(a, t); ok && audiobookSubtitleSeparatorRE.MatchString(rest) {
 		// An album that adds the series ("Book: Saga, Book 1") is not a
 		// subtitle.
-		if !containsTitleWords(rest, s) && !audiobookTrailingPositionRE.MatchString(rest) {
+		if !containsTitleWords(rest, s) && !endsInSeriesPosition(rest) {
 			return album
 		}
 		return title
