@@ -109,18 +109,8 @@ type Session struct {
 	// Audiobookshelf book of several files. Zero means the file's own
 	// duration.
 	TimelineDuration float64
-	// IdleGrace, when set, replaces the manager's active and paused grace
-	// windows for this session. It is for a player whose progress reports
-	// are the only sign of playback, which sends no stop: the play is over
-	// once this long passes without one.
-	IdleGrace time.Duration
-	// ReportOnly marks a play the server knows only from the client's
-	// progress reports. It may be playing a downloaded copy, so it is shown in
-	// the admin views but never counts toward stream limits.
-	ReportOnly bool
-	// ReportedListening is the running listening total the client sent with
-	// its latest report, for a client that reports one (see
-	// UpdateProgressReported).
+	// ReportedListening is the highest running listening total the client
+	// has reported for the play (see UpdateProgressReported).
 	ReportedListening float64
 	// StopReported marks a session a client reported stopped without an ID
 	// that could end it (#1454). It only hides the session from the live
@@ -771,40 +761,6 @@ func (m *SessionManager) RegisterReconstructed(s *Session) *Session {
 	s.PlanCommittedAt = now
 	m.sessions[s.ID] = s
 	return s
-}
-
-// RegisterReportOnly adds a report-only session (see Session.ReportOnly)
-// under its own ID, unless the account already has maxPerUser of them live.
-// Report-only sessions are outside stream limits, so this cap is what bounds
-// how many one account can hold. It reports whether a session is now live
-// under the ID, which is also true when one already was.
-func (m *SessionManager) RegisterReportOnly(s *Session, maxPerUser int) bool {
-	if s == nil || s.ID == "" {
-		return false
-	}
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	if _, ok := m.sessions[s.ID]; ok {
-		return true
-	}
-	count := 0
-	for _, other := range m.sessions {
-		if other.UserID == s.UserID && other.ReportOnly {
-			count++
-		}
-	}
-	if count >= maxPerUser {
-		return false
-	}
-	now := time.Now()
-	if s.StartedAt.IsZero() {
-		s.StartedAt = now
-	}
-	s.ReportOnly = true
-	s.UpdatedAt = now
-	s.LastActivityAt = now
-	m.sessions[s.ID] = s
-	return true
 }
 
 // RegisterReconstructedWithLimits is RegisterReconstructed plus the same per-user
@@ -2178,7 +2134,7 @@ func (m *SessionManager) cleanInactive(activeIdle, pausedIdle, startupIdle time.
 		if s.activeTransportCount > 0 {
 			continue
 		}
-		activeIdle, pausedIdle := sessionGrace(s, activeIdle, pausedIdle)
+		activeIdle, pausedIdle := remoteTransportGrace(s, activeIdle, pausedIdle)
 		if m.sessionIsInactiveLocked(s, now, activeIdle, pausedIdle, startupIdle) {
 			cp := *s
 			expired = append(expired, &cp)
@@ -2215,26 +2171,14 @@ func (m *SessionManager) countsTowardLimitsLocked(s *Session, now time.Time, pau
 	if s.IsJellyfinCompat && m.compatExpiryClaimer != nil {
 		return true
 	}
-	if s.ReportOnly {
-		return false
-	}
 	if s.activeTransportCount > 0 {
 		return true
 	}
-	activeGrace, pausedGrace := sessionGrace(s, m.activeGrace, m.pausedGrace)
+	activeGrace, pausedGrace := remoteTransportGrace(s, m.activeGrace, m.pausedGrace)
 	if pausedSlotGrace > 0 {
 		pausedGrace = min(pausedGrace, pausedSlotGrace)
 	}
 	return !m.sessionIsInactiveLocked(s, now, activeGrace, pausedGrace, StartupSessionGrace)
-}
-
-// sessionGrace returns the idle windows that apply to s: its own IdleGrace
-// when set, widened like any other for a remotely served session.
-func sessionGrace(s *Session, activeIdle, pausedIdle time.Duration) (time.Duration, time.Duration) {
-	if s != nil && s.IdleGrace > 0 {
-		activeIdle, pausedIdle = s.IdleGrace, s.IdleGrace
-	}
-	return remoteTransportGrace(s, activeIdle, pausedIdle)
 }
 
 // remoteTransportGrace widens the idle windows for a session whose bytes are

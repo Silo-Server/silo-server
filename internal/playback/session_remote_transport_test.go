@@ -54,65 +54,6 @@ func TestRemoteTransportIdleGrace(t *testing.T) {
 	}
 }
 
-// A session's own IdleGrace replaces both default windows: a player that
-// only reports progress and sends no stop ends its play after that long, even
-// when its last report was paused.
-func TestSessionIdleGraceReplacesDefaults(t *testing.T) {
-	for _, tc := range []struct {
-		name        string
-		idle        time.Duration
-		paused      bool
-		wantExpired int
-	}{
-		// Past the 45s active default, inside the session's own window.
-		{name: "survives report gap", idle: 60 * time.Second},
-		{name: "expires after its grace", idle: 100 * time.Second, wantExpired: 1},
-		// Well inside the 30-minute paused default, past the session's own.
-		{name: "paused expires after its grace", idle: 100 * time.Second, paused: true, wantExpired: 1},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			manager := NewSessionManager(0, 0)
-			manager.RegisterReconstructed(&Session{ID: "reported-1", UserID: 7, IsPaused: tc.paused, IdleGrace: 90 * time.Second})
-			backdatePlaybackTestSession(manager, "reported-1", tc.idle)
-
-			if expired := manager.CleanInactive(DefaultActiveSessionGrace, DefaultPausedSessionGrace); len(expired) != tc.wantExpired {
-				t.Fatalf("expired %d sessions, want %d", len(expired), tc.wantExpired)
-			}
-		})
-	}
-}
-
-// A report-only play may be a downloaded copy, so it never takes a stream
-// slot from the account.
-func TestReportOnlySessionDoesNotCountTowardLimits(t *testing.T) {
-	manager := NewSessionManager(1, 0)
-	manager.RegisterReconstructed(&Session{ID: "reported-1", UserID: 7, ReportOnly: true})
-	if _, err := manager.StartSessionWithFiles(7, "profile-1", 42, 42, PlayDirect, false); err != nil {
-		t.Fatalf("start a stream beside a report-only play: %v", err)
-	}
-}
-
-// Report-only sessions are outside stream limits, so a per-account cap bounds
-// them; a session already live under the ID is not refused.
-func TestRegisterReportOnlyCapsPerAccount(t *testing.T) {
-	manager := NewSessionManager(0, 0)
-	for _, tc := range []struct {
-		id     string
-		userID int
-		want   bool
-	}{
-		{"a", 7, true},
-		{"b", 7, true},
-		{"c", 7, false},
-		{"a", 7, true},
-		{"d", 8, true},
-	} {
-		if got := manager.RegisterReportOnly(&Session{ID: tc.id, UserID: tc.userID}, 2); got != tc.want {
-			t.Errorf("register %s for user %d = %v, want %v", tc.id, tc.userID, got, tc.want)
-		}
-	}
-}
-
 // A client that reports a running listening total is credited how far it
 // rose past the highest total seen, so a late, lower report credits nothing.
 // A client that never reports a total is measured from its position.
