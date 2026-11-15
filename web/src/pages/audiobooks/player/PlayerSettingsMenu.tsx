@@ -58,7 +58,9 @@ export function PlayerSettingsMenu({ prefs, placement = "above" }: PlayerSetting
         <div
           role="dialog"
           aria-label={t("web.audiobooks.player.settings")}
-          className={`absolute end-0 ${placement === "below" ? "top-full mt-2" : "bottom-full mb-2"} flex w-[260px] flex-col gap-4 rounded-lg bg-black/90 px-4 py-3.5 shadow-xl backdrop-blur-sm`}
+          // Below a top header the panel can't scroll into view with the page, so
+          // it stays within the viewport and scrolls itself on short screens.
+          className={`absolute end-0 ${placement === "below" ? "top-full mt-2 max-h-[calc(100dvh-5rem)] overflow-y-auto" : "bottom-full mb-2"} flex w-[260px] flex-col gap-4 rounded-lg bg-black/90 px-4 py-3.5 shadow-xl backdrop-blur-sm`}
         >
           <SkipIntervalRow
             label={t("web.audiobooks.player.settingsSkipBack")}
