@@ -1,0 +1,123 @@
+/* ================================================================
+   AUDIOBOOK PAGES
+   ================================================================
+   The book page, the library's Now Listening hero and the player take
+   their colour from the book's cover. useAmbientColor publishes the
+   cover's average colour as --ambient; these surfaces mix it into the
+   page background instead of drawing a backdrop, since audiobooks have
+   square covers and no backdrop art.
+   ================================================================ */
+
+@layer components {
+  .audiobook-tint {
+    position: absolute;
+    inset: 0 0 auto 0;
+    height: min(680px, 95vh);
+    pointer-events: none;
+    z-index: -1;
+    background:
+      radial-gradient(
+        60% 90% at 18% 0%,
+        color-mix(in srgb, var(--ambient, var(--background)) 24%, transparent),
+        transparent 65%
+      ),
+      linear-gradient(
+        180deg,
+        color-mix(in srgb, var(--ambient, var(--background)) 34%, var(--background)) 0%,
+        color-mix(in srgb, var(--ambient, var(--background)) 12%, var(--background)) 55%,
+        var(--background) 100%
+      );
+  }
+
+  /* Now Listening: the player's own book colour (--book-tint, from the cover
+     it was opened with), else whatever the page set. */
+  .audiobook-player {
+    background-image:
+      radial-gradient(
+        70% 70% at 25% 30%,
+        color-mix(in srgb, var(--book-tint, var(--ambient, var(--background))) 26%, transparent),
+        transparent 70%
+      ),
+      linear-gradient(
+        160deg,
+        color-mix(
+            in srgb,
+            var(--book-tint, var(--ambient, var(--background))) 30%,
+            var(--background)
+          )
+          0%,
+        var(--background) 100%
+      );
+  }
+
+  /* Book page. Below lg the cover and the title sit side by side with the
+     listening controls under them; from lg the cover and controls form a
+     sticky column beside everything else. */
+  .audiobook-detail-grid {
+    display: grid;
+    grid-template-columns: 7rem minmax(0, 1fr);
+    grid-template-areas:
+      "cover head"
+      "actions actions"
+      "body body";
+    gap: 1.25rem 1rem;
+    align-items: end;
+  }
+
+  .audiobook-detail-side {
+    display: contents;
+  }
+
+  .audiobook-detail-cover {
+    grid-area: cover;
+  }
+
+  .audiobook-detail-head {
+    grid-area: head;
+    min-width: 0;
+  }
+
+  .audiobook-detail-actions {
+    grid-area: actions;
+  }
+
+  .audiobook-detail-body {
+    grid-area: body;
+    align-self: start;
+    min-width: 0;
+  }
+
+  @media (min-width: 40rem) {
+    .audiobook-detail-grid {
+      grid-template-columns: 11rem minmax(0, 1fr);
+      gap: 1.5rem 2rem;
+    }
+  }
+
+  @media (min-width: 64rem) {
+    .audiobook-detail-grid {
+      grid-template-columns: 16.25rem minmax(0, 1fr);
+      grid-template-rows: auto 1fr;
+      grid-template-areas:
+        "side head"
+        "side body";
+      gap: 2rem 3.5rem;
+      align-items: start;
+    }
+
+    .audiobook-detail-side {
+      grid-area: side;
+      display: grid;
+      grid-template-columns: minmax(0, 1fr);
+      gap: 1rem;
+      position: sticky;
+      top: 1.5rem;
+      align-self: start;
+    }
+
+    .audiobook-detail-cover,
+    .audiobook-detail-actions {
+      grid-area: auto;
+    }
+  }
+}

@@ -31,6 +31,8 @@ export interface AudiobookPlaybackStartInput {
   author?: string;
   narrator?: string;
   posterUrl?: string;
+  /** The cover's thumbhash; the Now Listening view takes its tint from it. */
+  posterThumbhash?: string;
   files: AudiobookFile[];
   initialPositionSeconds?: number;
   autoPlay?: boolean;
@@ -141,6 +143,7 @@ export function AudiobookPlaybackProvider({ children }: { children: ReactNode })
               author={activeRequest.author}
               narrator={activeRequest.narrator}
               posterUrl={activeRequest.posterUrl}
+              posterThumbhash={activeRequest.posterThumbhash}
               files={activeRequest.files}
               initialPositionSeconds={activeRequest.initialPositionSeconds}
               autoPlay={activeRequest.autoPlay}

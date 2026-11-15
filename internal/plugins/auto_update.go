@@ -124,8 +124,7 @@ type autoUpdateCatalog interface {
 type autoUpdateInstaller interface {
 	InstallRemote(ctx context.Context, req InstallArchiveRequest) (*InstallResult, error)
 	InstallBinary(ctx context.Context, req InstallBinaryRequest) (*InstallResult, error)
-	ReplaceRemote(ctx context.Context, existing *Installation, req InstallArchiveRequest) (*InstallResult, error)
-	ReplaceBinary(ctx context.Context, existing *Installation, req InstallBinaryRequest) (*InstallResult, error)
+	PrepareCatalogReplacement(ctx context.Context, existing *Installation, target *ResolvedCatalogInstall) (*PreparedReplacement, error)
 }
 
 type autoUpdateHost interface {
@@ -450,34 +449,33 @@ func (s *AutoUpdateService) handleExistingPlugin(ctx context.Context, existing *
 	}
 }
 
-// autoUpdatePlugin stops the running plugin and replaces it in-place so the
-// installation ID and dependent configuration rows remain stable.
+// autoUpdatePlugin replaces the plugin in-place so the installation ID and
+// dependent configuration rows remain stable. The new package is downloaded
+// and checked first; the running plugin is stopped only once it passed.
 func (s *AutoUpdateService) autoUpdatePlugin(ctx context.Context, existing *Installation, entry CatalogEntry) error {
 	pluginID := existing.PluginID
 	oldVersion := existing.Version
 	newVersion := entry.Manifest.GetVersion()
 
-	// Stop the running plugin if a host is available.
-	if s.host != nil {
-		if err := s.host.Stop(existing.ID); err != nil && !errors.Is(err, pluginhost.ErrClientNotFound) {
-			return fmt.Errorf("stop plugin %s: %w", pluginID, err)
-		}
-	}
-
-	// Install the new version.
 	target, err := s.catalog.ResolveInstall(ctx, InstallCatalogRequest{
 		RepositoryID: entry.RepositoryID,
 		PluginID:     pluginID,
 		Version:      newVersion,
 	})
+	var prepared *PreparedReplacement
 	if err == nil {
-		if target.LegacyArchive {
-			_, err = s.installer.ReplaceRemote(ctx, existing, target.ArchiveRequest())
-		} else {
-			_, err = s.installer.ReplaceBinary(ctx, existing, target.BinaryRequest())
-		}
+		prepared, err = s.installer.PrepareCatalogReplacement(ctx, existing, target)
 	}
 	if err != nil {
+		return fmt.Errorf("install updated plugin %s from %s to %s: %w", pluginID, oldVersion, newVersion, err)
+	}
+
+	if s.host != nil {
+		if err := s.host.Stop(existing.ID); err != nil && !errors.Is(err, pluginhost.ErrClientNotFound) {
+			return fmt.Errorf("stop plugin %s: %w", pluginID, err)
+		}
+	}
+	if _, err := prepared.Apply(ctx); err != nil {
 		// The old process was stopped above and the row still names the old
 		// release. A lazily started plugin comes back on its next RPC, but a
 		// resident only restarts on a lifecycle reconcile, and the run's

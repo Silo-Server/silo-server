@@ -528,15 +528,15 @@ func (f fakeItemRatings) ListForItems(_ context.Context, _ int, _ string, itemID
 	return out, nil
 }
 
-// Anchors come from the latest ten completions, newest first, passing over
-// those rated two stars or lower; a 3-star title still anchors.
+// Anchors come from the latest recentAnchorLimit completions, newest first,
+// passing over those rated two stars or lower; a 3-star title still anchors.
 func TestAnchorItemIDsPassOverDislikedCompletions(t *testing.T) {
 	recent := []string{"one-star", "liked", "three-stars", "two-stars", "next"}
-	for i := len(recent); i < 12; i++ {
+	for i := len(recent); i < recentAnchorLimit+2; i++ {
 		recent = append(recent, fmt.Sprintf("older-%d", i))
 	}
 	allLow := fakeItemRatings{}
-	for _, id := range recent[:anchorCandidateLimit] {
+	for _, id := range recent[:recentAnchorLimit] {
 		allLow[id] = 1
 	}
 	signals := NewSignalReader(&fakeSignalRepo{fallbackRecentCompleted: recent}, nil)
@@ -547,9 +547,9 @@ func TestAnchorItemIDsPassOverDislikedCompletions(t *testing.T) {
 	}{
 		{"no ratings reader", nil, recent[:3]},
 		{"disliked passed over", fakeItemRatings{"one-star": 1, "two-stars": 2, "three-stars": 3, "liked": 5}, []string{"liked", "three-stars", "next"}},
-		// Only the latest ten are looked at, so older liked titles do not
-		// anchor a profile whose recent watching it disliked.
-		{"latest ten all disliked", allLow, []string{}},
+		// Only the latest completions are looked at, so older liked titles
+		// do not anchor a profile whose recent watching it disliked.
+		{"latest all disliked", allLow, []string{}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			got, err := anchorItemIDs(t.Context(), signals, tc.ratings, 7, "p1", BecauseYouWatchedAnchors)

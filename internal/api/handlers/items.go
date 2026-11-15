@@ -367,6 +367,11 @@ type itemListResponse struct {
 
 	// ParentArtwork reaches the v2 card only; v1 is frozen.
 	ParentArtwork EpisodeParentArtworkView `json:"-"`
+	// Authors, PositionSeconds and DurationSeconds reach the v2 card only;
+	// catalog browse fills them (listBookAuthors, listInProgressPositions).
+	Authors         []string `json:"-"`
+	PositionSeconds *float64 `json:"-"`
+	DurationSeconds *float64 `json:"-"`
 }
 
 type sortMetricsResponse struct {
@@ -889,6 +894,69 @@ func (h *ItemsHandler) listItemUserStates(ctx context.Context, v ItemViewer, ite
 		return map[string]*itemUserStateResponse{}
 	}
 	return states
+}
+
+// maxCardAuthors caps the author names one browse card carries.
+const maxCardAuthors = 3
+
+// listBookAuthors returns the author names of the audiobooks and ebooks in
+// items, at most maxCardAuthors each, with one query for the page. Other
+// types are not looked up, so a page without books costs nothing.
+func (h *ItemsHandler) listBookAuthors(ctx context.Context, items []*models.MediaItem) map[string][]string {
+	if h == nil || h.browseRepo == nil || h.browseRepo.Pool() == nil {
+		return nil
+	}
+	ids := make([]string, 0, len(items))
+	for _, item := range items {
+		if item != nil && (item.Type == itemTypeAudiobook || item.Type == itemTypeEbook) {
+			ids = append(ids, item.ContentID)
+		}
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+	authors, err := catalog.ListBookAuthors(ctx, h.browseRepo.Pool(), ids, maxCardAuthors)
+	if err != nil {
+		slog.Log(ctx, ctxerr.LogLevel(ctx, err, slog.LevelWarn), "listing browse card authors", "component", "api", "error", err)
+		return nil
+	}
+	return authors
+}
+
+// listInProgressPositions returns the profile's visible progress on the items
+// it has started and not finished, with one progress read for the page.
+// Series, seasons, and ebooks have no playback position of their own and are
+// not looked up. The caller still drops items user_state reports played.
+func (h *ItemsHandler) listInProgressPositions(ctx context.Context, v ItemViewer, items []*models.MediaItem) map[string]userstore.WatchProgress {
+	store, profileID, ok := h.viewerUserStore(ctx, v.ProfileID)
+	if !ok {
+		return nil
+	}
+	ids := make([]string, 0, len(items))
+	for _, item := range items {
+		if item == nil || item.ContentID == "" {
+			continue
+		}
+		switch item.Type {
+		case "series", "season", itemTypeEbook:
+			continue
+		}
+		ids = append(ids, item.ContentID)
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+	progress, err := store.ListProgressByMediaItems(ctx, profileID, ids)
+	if err != nil {
+		slog.Log(ctx, ctxerr.LogLevel(ctx, err, slog.LevelWarn), "listing browse card positions", "component", "api", "error", err)
+		return nil
+	}
+	for id, p := range progress {
+		if p.Completed || p.PositionSeconds <= 0 || p.DurationSeconds <= 0 {
+			delete(progress, id)
+		}
+	}
+	return progress
 }
 
 // episodeResponseShell maps an already-localized episode onto the response

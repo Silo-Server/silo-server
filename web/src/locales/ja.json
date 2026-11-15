@@ -6414,6 +6414,44 @@
       "value": "version"
     }
   ],
+  "web.admin.activity.bitrate.limit": [
+    {
+      "type": 0,
+      "value": "上限"
+    },
+    {
+      "type": 1,
+      "value": "rate"
+    }
+  ],
+  "web.admin.activity.bitrate.limitAndSource": [
+    {
+      "type": 0,
+      "value": "上限"
+    },
+    {
+      "type": 1,
+      "value": "limit"
+    },
+    {
+      "type": 0,
+      "value": " · ソース"
+    },
+    {
+      "type": 1,
+      "value": "source"
+    }
+  ],
+  "web.admin.activity.bitrate.source": [
+    {
+      "type": 0,
+      "value": "ソース"
+    },
+    {
+      "type": 1,
+      "value": "rate"
+    }
+  ],
   "web.admin.activity.client.agent": [
     {
       "type": 0,
@@ -6424,6 +6462,12 @@
     {
       "type": 0,
       "value": "アプリ"
+    }
+  ],
+  "web.admin.activity.client.device": [
+    {
+      "type": 0,
+      "value": "デバイス"
     }
   ],
   "web.admin.activity.client.heading": [
@@ -6442,6 +6486,12 @@
     {
       "type": 0,
       "value": "操作"
+    }
+  ],
+  "web.admin.activity.column.bitrate": [
+    {
+      "type": 0,
+      "value": "ビットレート"
     }
   ],
   "web.admin.activity.column.playback": [
@@ -6872,12 +6922,6 @@
     {
       "type": 0,
       "value": "イベント"
-    }
-  ],
-  "web.admin.activity.panel.heading": [
-    {
-      "type": 0,
-      "value": "再生"
     }
   ],
   "web.admin.activity.panel.loadingFfmpeg": [
@@ -7332,6 +7376,76 @@
     {
       "type": 0,
       "value": "ログを表示"
+    }
+  ],
+  "web.admin.activity.session.heading": [
+    {
+      "type": 0,
+      "value": "セッション"
+    }
+  ],
+  "web.admin.activity.session.id": [
+    {
+      "type": 0,
+      "value": "セッションID"
+    }
+  ],
+  "web.admin.activity.session.lastReport": [
+    {
+      "type": 0,
+      "value": "最終報告"
+    }
+  ],
+  "web.admin.activity.session.lastReportAgo": [
+    {
+      "type": 1,
+      "value": "elapsed"
+    },
+    {
+      "type": 0,
+      "value": "前"
+    }
+  ],
+  "web.admin.activity.session.remoteControl": [
+    {
+      "type": 0,
+      "value": "リモート操作"
+    }
+  ],
+  "web.admin.activity.session.remoteControlAvailable": [
+    {
+      "type": 0,
+      "value": "利用可能"
+    }
+  ],
+  "web.admin.activity.session.remoteControlUnavailable": [
+    {
+      "type": 0,
+      "value": "利用不可"
+    }
+  ],
+  "web.admin.activity.session.started": [
+    {
+      "type": 0,
+      "value": "開始"
+    }
+  ],
+  "web.admin.activity.session.startedAgo": [
+    {
+      "type": 1,
+      "value": "time"
+    },
+    {
+      "type": 0,
+      "value": " · "
+    },
+    {
+      "type": 1,
+      "value": "elapsed"
+    },
+    {
+      "type": 0,
+      "value": "前"
     }
   ],
   "web.admin.activity.sort.group": [
@@ -77087,20 +77201,6 @@
       "value": "number"
     }
   ],
-  "web.audiobooks.chapters.count": [
-    {
-      "type": 0,
-      "value": "（"
-    },
-    {
-      "type": 1,
-      "value": "count"
-    },
-    {
-      "type": 0,
-      "value": "）"
-    }
-  ],
   "web.audiobooks.chapters.duration": [
     {
       "type": 1,
@@ -77125,34 +77225,76 @@
       "value": "チャプター"
     }
   ],
-  "web.audiobooks.chapters.listening": [
+  "web.audiobooks.chapters.leftInChapter": [
     {
       "type": 0,
-      "value": "再生中"
+      "value": "このチャプターの残り："
+    },
+    {
+      "type": 1,
+      "value": "time"
     }
   ],
-  "web.audiobooks.chapters.sort": [
+  "web.audiobooks.chapters.showAll": [
     {
       "type": 0,
-      "value": "並べ替え"
+      "value": "すべて表示（"
+    },
+    {
+      "type": 1,
+      "value": "count"
+    },
+    {
+      "type": 0,
+      "value": "）"
     }
   ],
-  "web.audiobooks.chapters.sortAria": [
+  "web.audiobooks.chapters.showFewer": [
     {
       "type": 0,
-      "value": "チャプターを並べ替え"
+      "value": "表示を減らす"
     }
   ],
-  "web.audiobooks.chapters.sortLongest": [
+  "web.audiobooks.detail.finished": [
     {
       "type": 0,
-      "value": "長い順"
+      "value": "聴き終わり"
     }
   ],
-  "web.audiobooks.chapters.sortPosition": [
+  "web.audiobooks.detail.length": [
     {
       "type": 0,
-      "value": "収録順"
+      "value": "再生時間"
+    }
+  ],
+  "web.audiobooks.detail.publisher": [
+    {
+      "type": 0,
+      "value": "出版社"
+    }
+  ],
+  "web.audiobooks.detail.released": [
+    {
+      "type": 0,
+      "value": "発行年"
+    }
+  ],
+  "web.audiobooks.detail.seriesBook": [
+    {
+      "type": 1,
+      "value": "series"
+    },
+    {
+      "type": 0,
+      "value": "、第"
+    },
+    {
+      "type": 1,
+      "value": "number"
+    },
+    {
+      "type": 0,
+      "value": "巻"
     }
   ],
   "web.audiobooks.duration.hours": [
@@ -77753,6 +77895,12 @@
       "pluralType": "cardinal"
     }
   ],
+  "web.audiobooks.hero.alsoListening": [
+    {
+      "type": 0,
+      "value": "ほかに聴いている本"
+    }
+  ],
   "web.audiobooks.hero.ariaLabel": [
     {
       "type": 0,
@@ -77791,38 +77939,6 @@
       "value": "total"
     }
   ],
-  "web.audiobooks.hero.chapterPositionTitled": [
-    {
-      "type": 0,
-      "value": "チャプター"
-    },
-    {
-      "type": 1,
-      "value": "index"
-    },
-    {
-      "type": 0,
-      "value": "/"
-    },
-    {
-      "type": 1,
-      "value": "total"
-    },
-    {
-      "type": 0,
-      "value": " · "
-    },
-    {
-      "type": 1,
-      "value": "chapter"
-    }
-  ],
-  "web.audiobooks.hero.eyebrow": [
-    {
-      "type": 0,
-      "value": "再生中"
-    }
-  ],
   "web.audiobooks.hero.listen": [
     {
       "type": 0,
@@ -77855,12 +77971,6 @@
     {
       "type": 0,
       "value": "再開"
-    }
-  ],
-  "web.audiobooks.narrator.heading": [
-    {
-      "type": 0,
-      "value": "ナレーター"
     }
   ],
   "web.audiobooks.narrator.narrationCount": [
@@ -77900,20 +78010,16 @@
       "value": "プレーヤーに戻る"
     }
   ],
-  "web.audiobooks.player.chapterNumber": [
-    {
-      "type": 0,
-      "value": "チャプター"
-    },
-    {
-      "type": 1,
-      "value": "number"
-    }
-  ],
   "web.audiobooks.player.close": [
     {
       "type": 0,
       "value": "プレーヤーを閉じる"
+    }
+  ],
+  "web.audiobooks.player.comingUp": [
+    {
+      "type": 0,
+      "value": "次のチャプター"
     }
   ],
   "web.audiobooks.player.faster": [

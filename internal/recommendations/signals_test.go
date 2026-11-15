@@ -389,7 +389,7 @@ func TestSignalReaderRecentCompletedCanonicalizesBeforeDedupAndLimit(t *testing.
 		"episode-a1": "series-a",
 		"episode-c1": "series-c",
 	}}
-	reader := NewSignalReader(repo, fakeSignalProvider{store: store})
+	reader := NewSignalReader(repo, fakeSignalProvider{store: store}).WithUserStoreOutsidePostgres(true)
 
 	ids, err := reader.RecentCompletedItemIDs(context.Background(), 7, "p1", 3)
 	if err != nil {
@@ -421,7 +421,7 @@ func TestSignalReaderRecentCompletedPagesUntilDistinctLimitIsFilled(t *testing.T
 	reader := NewSignalReader(
 		&fakeSignalRepo{canonical: canonical},
 		fakeSignalProvider{store: &fakeSignalStore{progress: progress}},
-	)
+	).WithUserStoreOutsidePostgres(true)
 	ids, err := reader.RecentCompletedItemIDs(context.Background(), 7, "p1", 3)
 	if err != nil {
 		t.Fatalf("RecentCompletedItemIDs returned error: %v", err)
@@ -499,7 +499,7 @@ func TestSignalReaderRecentCompletedResolvesTiesAcrossPages(t *testing.T) {
 	// This leaf sorts after the entire first page, but its series wins the canonical tie.
 	progress = append(progress, userstore.WatchProgress{ProfileID: "p1", MediaItemID: "a-episode", Completed: true, UpdatedAt: updated})
 	canonical["a-episode"] = "series-a"
-	reader := NewSignalReader(&fakeSignalRepo{canonical: canonical}, fakeSignalProvider{store: &fakeSignalStore{progress: progress}})
+	reader := NewSignalReader(&fakeSignalRepo{canonical: canonical}, fakeSignalProvider{store: &fakeSignalStore{progress: progress}}).WithUserStoreOutsidePostgres(true)
 	got, err := reader.RecentCompletedItemIDs(context.Background(), 7, "p1", 1)
 	if err != nil {
 		t.Fatal(err)
@@ -687,6 +687,29 @@ func TestWatchProgressReadsTheRepoUnlessTheStoreIsOutsidePostgres(t *testing.T) 
 		}
 		if !rows[0].UpdatedAt.Equal(second) {
 			t.Fatalf("outside postgres %v: %s updated at %v, want %v", outside, ids[0], rows[0].UpdatedAt, second)
+		}
+	}
+}
+
+// On the Postgres user store the recent completions Because You Watched
+// anchors on are one repo query and the store's completed progress is never
+// paged: library sections read fifty deep on every load. A store outside
+// Postgres is walked.
+func TestRecentCompletedReadsTheRepoUnlessTheStoreIsOutsidePostgres(t *testing.T) {
+	for _, outside := range []bool{false, true} {
+		store := &fakeSignalStore{progress: []userstore.WatchProgress{{ProfileID: "p1", MediaItemID: "in-store", Completed: true, UpdatedAt: "2026-10-01T12:00:00Z"}}}
+		repo := &fakeSignalRepo{fallbackRecentCompleted: []string{"in-postgres"}}
+		ids, err := NewSignalReader(repo, fakeSignalProvider{store: store}).WithUserStoreOutsidePostgres(outside).RecentCompletedItemIDs(t.Context(), 7, "p1", anchorCandidateLimit)
+		if err != nil {
+			t.Fatal(err)
+		}
+		want, wantWalks := []string{"in-postgres"}, 0
+		if outside {
+			want, wantWalks = []string{"in-store"}, 1
+		}
+		if !slices.Equal(ids, want) || store.progressPages["completed"] != wantWalks {
+			t.Fatalf("outside postgres %v: recent completed = %v, progress pages walked = %d; want %v and %d",
+				outside, ids, store.progressPages["completed"], want, wantWalks)
 		}
 	}
 }

@@ -11,9 +11,12 @@ const NOTE_PREFIX = 'foliate-note:'
 // reader. Results stop at the limit (search's `limit` option, this by default),
 // a whole-book search ends with { truncated: true } when more matches exist,
 // and long sections yield to the event loop so an aborted search stops before
-// its section is exhausted.
+// its section is exhausted. A section yields every SEARCH_YIELD_INTERVAL
+// matches and whenever it has run for SEARCH_TIME_BUDGET ms, so a section with
+// few or no matches cannot block the page either.
 export const SEARCH_RESULT_LIMIT = 1000
 const SEARCH_YIELD_INTERVAL = 100
+const SEARCH_TIME_BUDGET = 25
 const yieldToEventLoop = () => new Promise(resolve => setTimeout(resolve))
 
 const isZip = async file => {
@@ -595,16 +598,24 @@ export class View extends HTMLElement {
         return this.book.dir === 'rtl' ? this.prev() : this.next()
     }
     // Yields at most `limit` results for one section, pausing for the event
-    // loop every SEARCH_YIELD_INTERVAL matches; ends early once `signal` aborts.
+    // loop every SEARCH_YIELD_INTERVAL matches or SEARCH_TIME_BUDGET ms; ends
+    // early once `signal` aborts.
     async * #matchSection(matcher, query, index, doc, limit, signal) {
         let count = 0
         if (limit <= 0) return
-        for (const { range, excerpt } of matcher(doc, query)) {
-            yield { cfi: this.getCFI(index, range), excerpt }
-            if (++count >= limit) return
-            if (count % SEARCH_YIELD_INTERVAL === 0) {
+        let resumed = performance.now()
+        for (const result of matcher(doc, query)) {
+            let pause = false
+            if (!result.checkpoint) {
+                const { range, excerpt } = result
+                yield { cfi: this.getCFI(index, range), excerpt }
+                if (++count >= limit) return
+                pause = count % SEARCH_YIELD_INTERVAL === 0
+            }
+            if (pause || performance.now() - resumed >= SEARCH_TIME_BUDGET) {
                 await yieldToEventLoop()
                 if (signal?.aborted) return
+                resumed = performance.now()
             }
         }
     }

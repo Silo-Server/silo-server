@@ -18,6 +18,7 @@ import {
   fetchWithSession,
   isProfileRequestContextCurrent,
   reportProfileUnverified,
+  SessionRefreshUnavailableError,
   StaleApiRequestContextError,
   type ProfileRequestContextSnapshot,
 } from "../client";
@@ -333,6 +334,31 @@ export function isNotFoundProblem(error: unknown): boolean {
   return error instanceof V2ProblemError && error.status === 404;
 }
 
+/**
+ * Whether a failed v2 request may succeed if sent again later: the server was
+ * busy (429, 5xx), never answered (a network error, the deadline), or a
+ * session refresh got no verdict. Any other 4xx is the server's answer.
+ */
+export function isTransientV2Error(error: unknown): boolean {
+  if (error instanceof V2ProblemError) return error.status === 429 || error.status >= 500;
+  if (error instanceof V2TransportError)
+    return error.status === 0 || error.status === 429 || error.status >= 500;
+  return (
+    error instanceof TypeError ||
+    error instanceof V2TimeoutError ||
+    error instanceof SessionRefreshUnavailableError
+  );
+}
+
+/** How long to wait before retrying `error`: `fallbackMs`, or longer when the server sent `Retry-After`. */
+export function v2RetryDelayMs(error: unknown, fallbackMs: number): number {
+  const retryAfter =
+    error instanceof V2ProblemError || error instanceof V2TransportError
+      ? error.retryAfterSeconds
+      : null;
+  return retryAfter === null ? fallbackMs : Math.max(fallbackMs, retryAfter * 1000);
+}
+
 /** Parses a delta-seconds `Retry-After` header; an HTTP-date form is not a contract shape. */
 function retryAfterSecondsOf(res: Response): number | null {
   const raw = res.headers.get("Retry-After");
@@ -350,11 +376,19 @@ function retryAfterSecondsOf(res: Response): number | null {
 export class V2TransportError extends Error {
   readonly operationId: string;
   readonly status: number;
+  /** The `Retry-After` delay in seconds when the response carried one (a proxy's 429 or 503). */
+  readonly retryAfterSeconds: number | null;
 
-  constructor(operationId: string, status: number, reason: string) {
+  constructor(
+    operationId: string,
+    status: number,
+    reason: string,
+    retryAfterSeconds: number | null = null,
+  ) {
     super(`${operationId}: ${reason} (HTTP ${status})`);
     this.name = "V2TransportError";
     this.operationId = operationId;
+    this.retryAfterSeconds = retryAfterSeconds;
     this.status = status;
   }
 }
@@ -438,12 +472,22 @@ async function readBody(res: Response, operationId: string): Promise<unknown> {
   const text = await res.text();
   if (text.trim() === "") return undefined;
   if (!isJsonMediaType(res.headers.get("Content-Type"))) {
-    throw new V2TransportError(operationId, res.status, "the response body is not JSON");
+    throw new V2TransportError(
+      operationId,
+      res.status,
+      "the response body is not JSON",
+      retryAfterSecondsOf(res),
+    );
   }
   try {
     return JSON.parse(text) as unknown;
   } catch {
-    throw new V2TransportError(operationId, res.status, "the response body is not valid JSON");
+    throw new V2TransportError(
+      operationId,
+      res.status,
+      "the response body is not valid JSON",
+      retryAfterSecondsOf(res),
+    );
   }
 }
 
@@ -604,6 +648,7 @@ export async function decodeV2Response<K extends V2OperationKey>(
       operationId,
       res.status,
       "the error response is not a problem document",
+      retryAfterSecondsOf(res),
     );
   }
   throw new V2ProblemError(
