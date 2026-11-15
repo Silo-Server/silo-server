@@ -92,6 +92,7 @@ export function SubtitleMenu({
   const [onlineSearchEnabled, setOnlineSearchEnabled] = useState(true);
   const [appearanceOpen, setAppearanceOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
 
   const [pendingDownload, setPendingDownload] = useState<{
     id: string;
@@ -224,6 +225,7 @@ export function SubtitleMenu({
   return (
     <div ref={menuRef} className="relative" onBlur={handleBlur}>
       <button
+        ref={triggerRef}
         type="button"
         className="hud-icon-btn hud-rail-btn"
         data-active={activeIndex !== null ? "true" : "false"}
@@ -406,6 +408,9 @@ export function SubtitleMenu({
               type="button"
               className="hud-item"
               onClick={() => {
+                // This item unmounts with the menu, so hand focus to the
+                // trigger first: the panel returns focus there on close.
+                triggerRef.current?.focus();
                 setAppearanceOpen(true);
                 setOpen(false);
               }}
