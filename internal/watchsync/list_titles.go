@@ -142,7 +142,8 @@ func watchlistTitleFromListItemID(id string) (WatchlistTitle, bool) {
 // the matcher found it ambiguous, and an entry outside the library would
 // show it as missing. It returns the row's shadow state, or nil when the row
 // stays unmatched or waits for a local removal to reach the provider. A new
-// entry is requested only with request set; see listTitlesSince.
+// entry is requested only with request set; see listTitlesSince. An add that
+// kept the entry and then failed returns the state with the error.
 func (s *Service) importListTitle(
 	ctx context.Context,
 	conn Connection,
@@ -173,7 +174,7 @@ func (s *Service) importListTitle(
 		return nil, true, false, nil
 	}
 	added, err = titles.AddWatchlistTitle(ctx, conn.UserID, conn.ProfileID, title, row.FavoritedAt, request)
-	if err != nil {
+	if err != nil && !added {
 		return nil, false, false, err
 	}
 	listedAt := row.FavoritedAt
@@ -189,7 +190,7 @@ func (s *Service) importListTitle(
 		LocalPresent:     true,
 		LastSeenRemoteAt: &listedAt,
 		LastSeenLocalAt:  &listedAt,
-	}, true, added, nil
+	}, true, added, err
 }
 
 // listTitlesSince returns when the connection's first watchlist import that
