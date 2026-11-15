@@ -306,3 +306,22 @@ func TestVolumesContradict(t *testing.T) {
 		}
 	}
 }
+
+func TestRecordVolumeContradicts(t *testing.T) {
+	tests := []struct {
+		name        string
+		want        string
+		titles      []string
+		contradicts bool
+	}{
+		{"only another volume", "Dungeon Crawler Carl 2", []string{"The Gate of the Feral Gods", "Dungeon Crawler Carl, Book 4"}, true},
+		{"one numbering agrees", "Guards! Guards!: Discworld, Book 8", []string{"Guards! Guards!", "Guards! Guards!: City Watch, Book 1", "Guards! Guards!: Discworld, Book 8"}, false},
+		{"item states no volume", "Guards! Guards!", []string{"Guards! Guards!", "Guards! Guards!: City Watch, Book 1"}, false},
+		{"same volume", "Dungeon Crawler Carl 2", []string{"Carl's Doomsday Scenario", "Dungeon Crawler Carl, Book 2"}, false},
+	}
+	for _, tt := range tests {
+		if got := RecordVolumeContradicts(tt.want, tt.titles); got != tt.contradicts {
+			t.Errorf("%s: RecordVolumeContradicts = %v, want %v", tt.name, got, tt.contradicts)
+		}
+	}
+}

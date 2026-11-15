@@ -425,9 +425,9 @@ func (r *matchRun) admitFetched(
 	if !metadata.CreditsAgree(item.Narrators, result.People, models.PersonKindNarrator) {
 		return nil, rejectNarrator, nil
 	}
-	// A volume the item's title states that the record's title or any alias
-	// states differently is another book, whichever path found the record.
-	if slices.ContainsFunc(recordTitles(result), func(t string) bool { return metadata.VolumesContradict(item.Title, t) }) {
+	// A record whose titles state only volumes other than the one the item's
+	// title states is another book, whichever path found the record.
+	if metadata.RecordVolumeContradicts(item.Title, recordTitles(result)) {
 		return nil, rejectVolume, nil
 	}
 	if byTaggedID && strings.TrimSpace(item.Author) != "" &&

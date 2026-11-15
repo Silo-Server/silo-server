@@ -270,6 +270,29 @@ func VolumesContradict(want, record string) bool {
 	return wok && rok && rv != wv
 }
 
+// RecordVolumeContradicts reports whether a record's titles (primary and
+// aliases) state a volume other than the one want states, and none states
+// want's. A book can sit in two numbered series -- "Guards! Guards!" is
+// Discworld 8 and City Watch 1 -- so one alias with another number is not
+// enough while another title agrees.
+func RecordVolumeContradicts(want string, titles []string) bool {
+	contradicted := false
+	for _, t := range titles {
+		if strings.TrimSpace(t) == "" {
+			continue
+		}
+		if VolumesContradict(want, t) {
+			contradicted = true
+			continue
+		}
+		wv, wok := volumeAgainst(want, t)
+		if tv, tok := volumeAgainst(t, want); wok && tok && tv == wv {
+			return false
+		}
+	}
+	return contradicted
+}
+
 // volumeAgainst is the volume title states when compared with other. An
 // explicit marker ("Book 2", "Vol. 2", "#2", "Part 2", a range) always counts.
 // A bare number counts only when other does not have it too: in
