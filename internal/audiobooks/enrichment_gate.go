@@ -81,19 +81,6 @@ func (g *providerGate) pausedUntil(slug string) (time.Time, bool) {
 	return h.pausedUntil, true
 }
 
-// anyPaused reports whether any provider is paused right now.
-func (g *providerGate) anyPaused() bool {
-	g.mu.Lock()
-	defer g.mu.Unlock()
-	now := g.clock()
-	for _, h := range g.providers {
-		if now.Before(h.pausedUntil) {
-			return true
-		}
-	}
-	return false
-}
-
 // latestPause returns the end of the longest active pause among slugs, or
 // zero when none of them is paused.
 func (g *providerGate) latestPause(slugs []string) time.Time {

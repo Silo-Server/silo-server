@@ -15,6 +15,8 @@ import (
 // such as a manual identify gets a turn between batches.
 const sweepBatchGap = 2 * time.Second
 
+const sweepCanceled = "canceled"
+
 // sweepBatch is what one claimed batch recorded.
 type sweepBatch struct {
 	claimed int
@@ -43,13 +45,15 @@ func (e *Enricher) Run(ctx context.Context) (int, error) {
 }
 
 // sweep runs batches until one of these holds after a batch:
-//   - the run is canceled (shutdown, or the task's runtime limit);
+//   - the run is canceled (shutdown, or a runtime limit set on the task);
 //   - the batch was short or empty, so no more books were due when it was
 //     claimed;
-//   - a provider is paused, so the next batch would only defer books; the
-//     next scheduled run picks up once the deferred books come due;
-//   - no book in the batch reached an outcome (every one was deferred or
-//     failed), so the next batch would most likely go the same way.
+//   - no book in the batch reached an outcome: every one was deferred, as
+//     when the provider gate has paused the whole chain, or failed. The next
+//     batch would most likely go the same way, so the next scheduled run
+//     picks up once the deferred books come due. A batch that still matched
+//     books while one provider was paused goes on: the gate keeps calls away
+//     from the paused provider.
 //
 // Before each further batch it waits sweepBatchGap and checks that the sweep
 // lock's session is still open: once it is gone another node may take the
@@ -61,26 +65,50 @@ func (e *Enricher) sweep(
 	sleep func(context.Context, time.Duration) error,
 ) (int, error) {
 	enriched := 0
-	for {
+	for batches := 1; ; batches++ {
 		batch, err := runBatch(ctx)
 		if err != nil {
+			if ctx.Err() != nil {
+				return enriched, nil //nolint:nilerr // a canceled run is a stop, not a failure
+			}
 			return enriched, err
 		}
 		enriched += batch.summary.enriched
-		if reason := e.sweepStopReason(ctx, batch); reason != "" {
-			if batch.claimed > 0 {
-				slog.InfoContext(ctx, "audiobook enrichment: sweep stopped", "component", "audiobooks",
-					"reason", reason, "enriched", enriched)
-			}
-			return enriched, nil
+		reason := e.sweepStopReason(ctx, batch)
+		if reason == "" {
+			reason = waitForNextBatch(ctx, lockHeld, sleep)
 		}
-		if err := sleep(ctx, sweepBatchGap); err != nil {
-			return enriched, nil //nolint:nilerr // a canceled run ends as a canceled batch does, without an error
+		if reason == "" {
+			continue
 		}
-		if err := lockHeld(ctx); err != nil {
-			return enriched, fmt.Errorf("audiobook enrichment: lost the sweep lock: %w", err)
+		if batch.claimed > 0 || batches > 1 {
+			slog.InfoContext(ctx, "audiobook enrichment: sweep stopped", "component", "audiobooks",
+				"reason", reason, "batches", batches, "enriched", enriched)
 		}
+		return enriched, nil
 	}
+}
+
+// waitForNextBatch waits out the gap and checks the lock. It returns why the
+// sweep should stop instead, or "" to claim the next batch. A lost lock is a
+// stop, not a failure: the claims fence every item, so what the sweep already
+// recorded stands, and another node may sweep from here.
+func waitForNextBatch(
+	ctx context.Context,
+	lockHeld func(context.Context) error,
+	sleep func(context.Context, time.Duration) error,
+) string {
+	if sleep(ctx, sweepBatchGap) != nil || ctx.Err() != nil {
+		return sweepCanceled
+	}
+	if err := lockHeld(ctx); err != nil {
+		if ctx.Err() != nil {
+			return sweepCanceled
+		}
+		slog.WarnContext(ctx, "audiobook enrichment: lost the sweep lock; stopping", "component", "audiobooks", "error", err)
+		return "lost the sweep lock"
+	}
+	return ""
 }
 
 // sweepStopReason says why the sweep should stop after batch, or "" to go on.
@@ -88,11 +116,9 @@ func (e *Enricher) sweepStopReason(ctx context.Context, batch sweepBatch) string
 	s := batch.summary
 	switch {
 	case ctx.Err() != nil:
-		return "canceled"
+		return sweepCanceled
 	case batch.claimed == 0 || batch.claimed < e.batchSize:
 		return "no more books due"
-	case e.gate.anyPaused():
-		return "provider paused"
 	case s.enriched+s.noMatch+s.skipped == 0:
 		return "no book in the batch reached an outcome"
 	default:

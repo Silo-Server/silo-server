@@ -6,9 +6,6 @@ import (
 	"testing"
 	"testing/synctest"
 	"time"
-
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
 )
 
 // The sweep keeps claiming batches while full ones come back and stops on
@@ -19,11 +16,9 @@ func TestSweepExitConditions(t *testing.T) {
 	tests := []struct {
 		name     string
 		batches  []sweepBatch
-		pauseAt  int // pause a provider during this batch (1-based), 0 for never
 		lockLost bool
 		wantRuns int
 		wantSum  int
-		wantErr  bool
 	}{
 		{name: "nothing due", batches: []sweepBatch{{}}, wantRuns: 1},
 		{
@@ -31,9 +26,8 @@ func TestSweepExitConditions(t *testing.T) {
 			batches:  []sweepBatch{full, full, {claimed: 1, summary: sweepSummary{enriched: 1}}},
 			wantRuns: 3, wantSum: 7,
 		},
-		{name: "provider paused", batches: []sweepBatch{full, full}, pauseAt: 1, wantRuns: 1, wantSum: 3},
 		{
-			name:     "whole batch deferred",
+			name:     "whole batch deferred, as behind a paused chain",
 			batches:  []sweepBatch{{claimed: size}, full},
 			wantRuns: 1,
 		},
@@ -42,7 +36,7 @@ func TestSweepExitConditions(t *testing.T) {
 			batches:  []sweepBatch{{claimed: size, summary: sweepSummary{retrying: 2, failed: 2}}, full},
 			wantRuns: 1,
 		},
-		{name: "lock lost", batches: []sweepBatch{full, full}, lockLost: true, wantRuns: 1, wantSum: 3, wantErr: true},
+		{name: "lock lost", batches: []sweepBatch{full, full}, lockLost: true, wantRuns: 1, wantSum: 3},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -56,9 +50,6 @@ func TestSweepExitConditions(t *testing.T) {
 						gaps = append(gaps, time.Since(last))
 					}
 					runs++
-					if runs == tt.pauseAt {
-						e.gate.observe(t.Context(), "abm", status.Error(codes.ResourceExhausted, "busy"))
-					}
 					if runs > len(tt.batches) {
 						t.Fatalf("batch %d claimed after the sweep should have stopped", runs)
 					}
@@ -72,8 +63,8 @@ func TestSweepExitConditions(t *testing.T) {
 					return nil
 				}
 				got, err := e.sweep(t.Context(), lockHeld, runBatch, sleepCtx)
-				if (err != nil) != tt.wantErr {
-					t.Fatalf("err = %v, want error %v", err, tt.wantErr)
+				if err != nil {
+					t.Fatalf("err = %v, want nil: work already recorded stands", err)
 				}
 				if runs != tt.wantRuns || got != tt.wantSum {
 					t.Fatalf("batches = %d, enriched = %d; want %d and %d", runs, got, tt.wantRuns, tt.wantSum)

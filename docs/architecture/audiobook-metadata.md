@@ -69,15 +69,15 @@ finds it taken does nothing. A run claims a batch of due books
 after a short gap, so a large backlog drains at the rate the provider plugin's
 own limiter allows rather than one batch per scheduled run. It stops when:
 
-- the run is canceled (shutdown or the task's runtime limit);
+- the run is canceled (shutdown, or a runtime limit set on the task);
 - a batch comes back short or empty, so nothing more was due;
-- the provider gate has paused a provider, so a further batch would only
-  defer books;
-- no book in the batch reached an outcome (all deferred or failed);
+- no book in the batch reached an outcome: all were deferred, as when the
+  provider gate has paused the whole chain, or failed;
 - the lock's session is gone, since another node may then take the lock.
 
-Books a pause deferred come due when the pause ends and the next scheduled
-run takes them.
+A batch that still matched books while one provider was paused goes on; the
+gate keeps calls away from the paused provider. Books a pause deferred come
+due when the pause ends and the next scheduled run takes them.
 
 ## Unmatched audiobooks and `status`
 
