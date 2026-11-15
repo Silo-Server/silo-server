@@ -857,7 +857,13 @@ func (s *Scanner) reconcileAudiobookMissingFiles(ctx context.Context, folder *mo
 				continue
 			}
 			if mf.MissingSince == nil {
-				if err := s.fileRepo.MarkMissing(ctx, mf.ID, mf.FilePath, now); err != nil {
+				err := s.fileRepo.MarkMissingWrittenBefore(ctx, mf.ID, mf.FilePath, now, inventoryAt)
+				if errors.Is(err, ErrFileNotFound) {
+					// Another scan wrote, relinked, or deleted the row since it
+					// was listed. It is no longer this scan's to mark.
+					continue
+				}
+				if err != nil {
 					slog.ErrorContext(ctx, "audiobook scan: failed to mark file missing", "component", "scanner",
 						"folder_id", folder.ID, "path", mf.FilePath, "error", err)
 					continue

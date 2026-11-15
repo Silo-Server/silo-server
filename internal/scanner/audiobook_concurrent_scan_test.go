@@ -237,3 +237,46 @@ func TestScanFileAudiobookNewerAliasInventoryWinsDB(t *testing.T) {
 		"Copied Author/03.mp3 "+audiobookMultipartKind+" 3/3",
 	)
 }
+
+// TestScanFileAudiobookKeepsPartRestoredWhileMarkingDB covers a part that is
+// gone when a scan walks its book and comes back while that scan is marking it
+// missing: another scan indexes it first. The first scan's mark must not hide
+// the part that scan just indexed.
+func TestScanFileAudiobookKeepsPartRestoredWhileMarkingDB(t *testing.T) {
+	f := newConcurrentBookFixture(t)
+	for _, name := range []string{"01.mp3", "02.mp3"} {
+		if err := f.copyPart(name); err != nil {
+			t.Fatal(err)
+		}
+	}
+	other := NewScanner(NewFileRepository(f.pool), f.ffprobe, nil, 2, false, time.Hour)
+	if err := other.ScanFile(t.Context(), filepath.Join(f.bookDir, "01.mp3"), f.folder); err != nil {
+		t.Fatalf("initial ScanFile: %v", err)
+	}
+	second := filepath.Join(f.bookDir, "02.mp3")
+	if err := os.Remove(second); err != nil {
+		t.Fatal(err)
+	}
+	var otherErr error
+	ran := false
+	s := f.hookedScanner(t, "SET missing_since = $1", func() {
+		ran = true
+		if otherErr = f.copyPart("02.mp3"); otherErr == nil {
+			otherErr = other.ScanFile(context.Background(), second, f.folder)
+		}
+	})
+
+	if err := s.ScanFile(t.Context(), filepath.Join(f.bookDir, "01.mp3"), f.folder); err != nil {
+		t.Fatalf("ScanFile: %v", err)
+	}
+	if !ran {
+		t.Fatal("the other scan never ran; the missing mark was not traced")
+	}
+	if otherErr != nil {
+		t.Fatalf("other scan: %v", otherErr)
+	}
+	f.requireParts(t,
+		"Copied Author/01.mp3 "+audiobookMultipartKind+" 1/2",
+		"Copied Author/02.mp3 "+audiobookMultipartKind+" 2/2",
+	)
+}
