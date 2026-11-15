@@ -128,7 +128,8 @@ enricher (`internal/audiobooks/enrichment_refresh.go`).
   with the `admin_library_refresh` trigger, so the scanner's worker pool reads
   every book and the walk, grouping, held folders, and missing-file
   reconciliation are those of any library scan. The job reports the scan's
-  own progress. When a library scan of the library is already accepted or
+  own progress, and the scan stops when its scan run is canceled or failed
+  elsewhere. When a library scan of the library is already accepted or
   running (`idx_scan_runs_active_scope`), the job fails with
   `ErrLibraryScanInProgress` instead of starting a second scan. After the
   scan, `Enricher.RequeueUnmatchedInLibrary` makes every unmatched book due
@@ -138,20 +139,29 @@ enricher (`internal/audiobooks/enrichment_refresh.go`).
   and provider-owned fields; a book whose match an admin ignored
   (`match_ignored_at`) stays as it is. The job asks no provider. `quick` mode
   leaves audiobooks out.
-- An item's Refresh Metadata in `quick` mode reads the book's tags again in
-  its scan, then calls `Enricher.RefreshItem`. A matched book fetches the
-  records its stored IDs name, without searching, and they pass the same
-  admission checks as a sweep match; when no provider returns them the book
-  keeps its match and fields and the job fails. An unmatched book is matched
-  as one sweep item would be. An ignored book is left alone.
-- `reset` mode first clears the match (`Enricher.ResetMatch`): provider IDs,
+- An item's Refresh Metadata first claims the book (`Enricher.ClaimRefresh`)
+  and holds the claim until it ends, so the sweep cannot take the book
+  between its tag read and its provider step. A delegated curator's refresh
+  claims, and writes, only while every library holding the book is in the
+  curator's scope (`catalog.GuardMetadataCurationItems`, checked again inside
+  each write transaction).
+- `quick` mode reads the book's tags again in its scan, then calls
+  `Enricher.Refresh`. A matched book fetches the records its stored IDs name,
+  without searching, and they pass the same admission checks as a sweep
+  match; when no provider returns them the book keeps its match and fields
+  and the job fails. An unmatched book is matched as one sweep item would be.
+  An ignored book is left alone.
+- `reset` mode clears the match (`Enricher.ResetMatchTx`): provider IDs,
   author and narrator credits, the fields a match owns, artwork a provider
-  supplied, the field locks, and the enrichment state, and parks the book
-  briefly so the sweep cannot claim it first. Its scan then reads the tags
-  as on an unmatched book, and `RefreshItem` matches it again. The
-  job fails when the scan did not read the book
-  (`scanner.AudiobookTagRereadDone`), since a scan of a path shared with other
-  books succeeds when only one of them failed.
+  supplied, the field locks, and the enrichment state. It does so inside the
+  scanner transaction that writes the book's re-read tags
+  (`scanner.WithAudiobookTagRereadReset`), after the files were read, so a
+  scan that fails or is canceled leaves the book as it was. A cleared cached
+  poster is queued for collection by `media_items_artwork_revision_gc_update`
+  in that transaction. `Refresh` then matches the book again. The job fails
+  when the scan did not read the book (`scanner.AudiobookTagRereadDone`),
+  since a scan of a path shared with other books succeeds when only one of
+  them failed; the cache invalidation still runs.
 - `complete` mode runs as `reset` for an audiobook. A complete refresh clears
   its scope's content links before it scans, which would give the book a new
   content ID and orphan its progress and favorites.
@@ -178,6 +188,9 @@ own limiter allows rather than one batch per scheduled run. It stops when:
 A batch that still matched books while one provider was paused goes on; the
 gate keeps calls away from the paused provider. Books a pause deferred come
 due when the pause ends and the next scheduled run takes them.
+
+The sweep never claims a book whose match an admin ignored
+(`match_ignored_at`).
 
 ## Unmatched audiobooks and `status`
 

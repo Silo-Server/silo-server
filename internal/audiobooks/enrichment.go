@@ -28,6 +28,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/metadata"
 	"github.com/Silo-Server/silo-server/internal/models"
@@ -230,6 +231,7 @@ func (e *Enricher) HasPendingItems(ctx context.Context) (bool, error) {
 			SELECT 1
 			FROM media_items mi
 			WHERE mi.type = 'audiobook'
+			  AND mi.match_ignored_at IS NULL
 			  AND EXISTS (
 			      SELECT 1
 			      FROM media_item_libraries mil
@@ -385,6 +387,7 @@ func (e *Enricher) claimBatch(ctx context.Context) ([]enrichmentItemRow, error) 
 			SELECT mi.content_id
 			FROM media_items mi
 			WHERE mi.type = 'audiobook'
+			  AND mi.match_ignored_at IS NULL
 			  AND EXISTS (
 			      SELECT 1
 			      FROM media_item_libraries mil
@@ -617,6 +620,10 @@ func (e *Enricher) enrichItem(ctx context.Context, item enrichmentItemRow) error
 	// Phase 3: Persist.
 	if err := e.persist(ctx, item, accumulatedIDs, accumulator); err != nil {
 		persistErr := fmt.Errorf("persisting enrichment for %s: %w", item.ContentID, err)
+		if errors.Is(err, access.ErrMetadataCurationScope) {
+			// A refused curator's refresh says nothing about the providers.
+			return persistErr
+		}
 		e.recordFailure(ctx, item, classifyProviderError(persistErr), persistErr.Error())
 		return persistErr
 	}
@@ -851,6 +858,11 @@ func (e *Enricher) persistMetadataAndProviderIDsTx(
 	if err := e.state.AssertClaimTx(ctx, tx, item.ContentID, item.ClaimToken); err != nil {
 		return err
 	}
+	// A delegated curator's refresh writes only while every library holding
+	// the book is in the curator's scope. The sweep carries no authorizer.
+	if err := catalog.GuardMetadataCurationItems(ctx, tx, item.ContentID); err != nil {
+		return err
+	}
 	// Read the locks under the row lock, after the provider calls: an admin
 	// who locks a field while the providers answer must still win.
 	var locked []int
@@ -920,6 +932,9 @@ func (e *Enricher) completeWithoutMetadata(ctx context.Context, item enrichmentI
 	defer tx.Rollback(ctx) //nolint:errcheck
 
 	if err := e.state.AssertClaimTx(ctx, tx, item.ContentID, item.ClaimToken); err != nil {
+		return err
+	}
+	if err := catalog.GuardMetadataCurationItems(ctx, tx, item.ContentID); err != nil {
 		return err
 	}
 	now := time.Now().UTC()

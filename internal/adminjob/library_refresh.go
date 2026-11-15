@@ -234,6 +234,9 @@ type LibraryRefreshExecutor struct {
 	// lockRetryInterval spaces lock attempts while a recovered job waits;
 	// zero means defaultLibraryLockRetryInterval.
 	lockRetryInterval time.Duration
+	// scanHeartbeatEvery spaces an audiobook library scan's heartbeats;
+	// zero means directScanHeartbeatEvery.
+	scanHeartbeatEvery time.Duration
 }
 
 const defaultLibraryLockRetryInterval = 5 * time.Second

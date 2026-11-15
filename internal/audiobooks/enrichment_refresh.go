@@ -26,10 +26,10 @@ var ErrAudiobookEnrichmentBusy = errors.New("the audiobook enrichment sweep is m
 // were.
 var errMatchedRecordUnavailable = errors.New("no provider returned the matched record")
 
-// adminRefreshLease bounds a single-book claim taken for an admin refresh.
-// The refresh asks one book's providers, so a short lease suffices, and an
-// abandoned one frees the book for the sweep soon.
-const adminRefreshLease = 10 * time.Minute
+// adminRefreshLease bounds a single-book claim taken for an admin refresh,
+// held from before the book's tag read until its provider step finishes. An
+// abandoned one frees the book for the sweep afterwards.
+const adminRefreshLease = 30 * time.Minute
 
 // RequeueUnmatched makes an unmatched audiobook due for the next enrichment
 // sweep: its earlier no_match, failed, or skipped outcome and retry counts are
@@ -94,16 +94,13 @@ func (e *Enricher) RequeueUnmatchedInLibrary(ctx context.Context, folderID int) 
 
 // requeueStateSet returns a state row to "never tried": the sweep's pending
 // branch (outcome IS NULL) claims it on its next batch.
-const requeueStateSet = requeueCountsSet + `,
-	next_attempt_at  = NULL`
-
-// requeueCountsSet clears a state row's outcome and retry history.
-const requeueCountsSet = `
+const requeueStateSet = `
 	outcome          = NULL,
 	no_matches       = 0,
 	failures         = 0,
 	last_error_class = NULL,
 	last_error       = NULL,
+	next_attempt_at  = NULL,
 	completed_at     = NULL,
 	updated_at       = now()`
 
@@ -127,41 +124,25 @@ func lockUnmatchedForRefresh(ctx context.Context, tx pgx.Tx, contentID string) (
 	return eligible, nil
 }
 
-// RefreshItem is an admin's provider refresh of one audiobook. A matched book
-// fetches the records its stored IDs name again, under the matching rules,
-// and keeps its match when no provider returns them. An unmatched book is
-// matched now, as one sweep item would be. A book whose match an admin
-// ignored is left alone. The book's content ID, files, and library membership
-// never change.
-func (e *Enricher) RefreshItem(ctx context.Context, contentID string) error {
-	if e == nil || e.pool == nil || contentID == "" {
-		return nil
-	}
-	item, matched, ok, err := e.claimForRefresh(ctx, contentID)
-	if err != nil || !ok {
-		return err
-	}
-	defer func() {
-		// Every outcome clears the claim; this returns it after a cancel or an
-		// error that recorded nothing. A cleared claim is not touched.
-		releaseCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
-		defer cancel()
-		e.releaseClaim(releaseCtx, item)
-	}()
-	if matched {
-		return e.refreshMatched(ctx, item)
-	}
-	return e.enrichItem(ctx, item)
-}
+// An admin refresh of one audiobook claims the book first (ClaimRefresh), so
+// the enrichment sweep leaves it alone from before the refresh's tag read
+// until its provider step has finished (Refresh) or the claim is released
+// (ReleaseRefresh). A Reset to Provider clears the match inside the scan
+// transaction that writes the re-read tags (ResetMatchTx), under the same
+// claim.
 
-// claimForRefresh claims one audiobook for an admin refresh, whatever its
-// retry schedule, and loads it as the sweep would. ok is false for a book that
-// is not an audiobook or whose match an admin ignored. A new state row for a
-// matched book records success, so a claim never makes it look untried to the
-// sweep.
-func (e *Enricher) claimForRefresh(ctx context.Context, contentID string) (item enrichmentItemRow, matched, ok bool, err error) {
+// ClaimRefresh claims one audiobook for an admin refresh, whatever its retry
+// schedule. It returns an empty token for a book that is not an audiobook or
+// whose match an admin ignored: such a book gets no provider step. A delegated
+// curator's authorizer on ctx must allow every library that holds the book.
+// A new state row for a matched book records success, so a claim never makes
+// it look untried to the sweep.
+func (e *Enricher) ClaimRefresh(ctx context.Context, contentID string) (token string, err error) {
+	if e == nil || e.pool == nil || contentID == "" {
+		return "", nil
+	}
 	err = pgx.BeginFunc(ctx, e.pool, func(tx pgx.Tx) error {
-		var ignored bool
+		var ignored, matched bool
 		err := tx.QueryRow(ctx, `
 			SELECT mi.match_ignored_at IS NOT NULL, `+catalog.AudiobookProviderMatchedWhere("mi.content_id")+`
 			FROM media_items mi
@@ -174,50 +155,95 @@ func (e *Enricher) claimForRefresh(ctx context.Context, contentID string) (item 
 		if err != nil {
 			return fmt.Errorf("reading audiobook match state: %w", err)
 		}
+		if err := catalog.GuardMetadataCurationItems(ctx, tx, contentID); err != nil {
+			return err
+		}
 		if ignored {
 			return nil
 		}
 		err = tx.QueryRow(ctx, `
-			WITH claimed AS (
-				INSERT INTO audiobook_enrichment_state (content_id, outcome, completed_at, claim_token, lease_until, updated_at)
-				VALUES ($1, CASE WHEN $2 THEN 'success' END, CASE WHEN $2 THEN now() END,
-				        gen_random_uuid()::text, now() + make_interval(secs => $3::double precision), now())
-				ON CONFLICT (content_id) DO UPDATE SET
-					claim_token = EXCLUDED.claim_token,
-					lease_until = EXCLUDED.lease_until,
-					updated_at  = now()
-				WHERE audiobook_enrichment_state.lease_until IS NULL
-				   OR audiobook_enrichment_state.lease_until <= now()
-				RETURNING content_id, claim_token
-			)
-			SELECT mi.content_id, c.claim_token, `+enrichmentItemColumns+`
-			FROM claimed c
-			JOIN media_items mi ON mi.content_id = c.content_id
-		`, contentID, matched, adminRefreshLease.Seconds()).Scan(
-			append([]any{&item.ContentID, &item.ClaimToken}, item.columnTargets()...)...)
+			INSERT INTO audiobook_enrichment_state (content_id, outcome, completed_at, claim_token, lease_until, updated_at)
+			VALUES ($1, CASE WHEN $2 THEN 'success' END, CASE WHEN $2 THEN now() END,
+			        gen_random_uuid()::text, now() + make_interval(secs => $3::double precision), now())
+			ON CONFLICT (content_id) DO UPDATE SET
+				claim_token = EXCLUDED.claim_token,
+				lease_until = EXCLUDED.lease_until,
+				updated_at  = now()
+			WHERE audiobook_enrichment_state.lease_until IS NULL
+			   OR audiobook_enrichment_state.lease_until <= now()
+			RETURNING claim_token
+		`, contentID, matched, adminRefreshLease.Seconds()).Scan(&token)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return ErrAudiobookEnrichmentBusy
 		}
 		if err != nil {
 			return fmt.Errorf("claiming audiobook for refresh: %w", err)
 		}
-		ok = true
 		return nil
 	})
-	if err != nil || !ok {
-		return enrichmentItemRow{}, false, false, err
+	if err != nil {
+		return "", err
+	}
+	return token, nil
+}
+
+// ReleaseRefresh returns a refresh claim that Refresh did not complete. A
+// claim an outcome already cleared is not touched.
+func (e *Enricher) ReleaseRefresh(ctx context.Context, contentID, token string) {
+	if e == nil || token == "" {
+		return
+	}
+	releaseCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancel()
+	e.releaseClaim(releaseCtx, enrichmentItemRow{ContentID: contentID, ClaimToken: token})
+}
+
+// Refresh is the provider step of an admin refresh under a claim from
+// ClaimRefresh, after the book's tags were read again. A matched book fetches
+// the records its stored IDs name again, under the matching rules, and keeps
+// its match when no provider returns them. An unmatched book is matched now,
+// as one sweep item would be. The book's content ID, files, and library
+// membership never change.
+func (e *Enricher) Refresh(ctx context.Context, contentID, token string) error {
+	if e == nil || e.pool == nil || token == "" {
+		return nil
+	}
+	var item enrichmentItemRow
+	var matched bool
+	err := e.pool.QueryRow(ctx, `
+		SELECT mi.content_id, s.claim_token, `+catalog.AudiobookProviderMatchedWhere("mi.content_id")+`, `+enrichmentItemColumns+`
+		FROM media_items mi
+		JOIN audiobook_enrichment_state s ON s.content_id = mi.content_id
+		WHERE mi.content_id = $1 AND s.claim_token = $2 AND s.lease_until > now()
+	`, contentID, token).Scan(append([]any{&item.ContentID, &item.ClaimToken, &matched}, item.columnTargets()...)...)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return ErrAudiobookEnrichmentClaimLost
+	}
+	if err != nil {
+		return fmt.Errorf("loading claimed audiobook: %w", err)
 	}
 	if e.providerIDs != nil {
 		rows, err := e.providerIDs.GetByContentID(ctx, contentID)
 		if err != nil {
-			releaseCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
-			defer cancel()
-			e.releaseClaim(releaseCtx, item)
-			return enrichmentItemRow{}, false, false, fmt.Errorf("loading audiobook provider IDs: %w", err)
+			return fmt.Errorf("loading audiobook provider IDs: %w", err)
 		}
 		item.ProviderIDs = providerIDMapFromRows(rows)
 	}
-	return item, matched, true, nil
+	if matched {
+		return e.refreshMatched(ctx, item)
+	}
+	return e.enrichItem(ctx, item)
+}
+
+// RefreshItem claims one audiobook, runs Refresh, and releases the claim, for
+// a caller that has already read the book's tags.
+func (e *Enricher) RefreshItem(ctx context.Context, contentID string) error {
+	token, err := e.ClaimRefresh(ctx, contentID)
+	if err != nil || token == "" {
+		return err
+	}
+	defer e.ReleaseRefresh(ctx, contentID, token)
+	return e.Refresh(ctx, contentID, token)
 }
 
 // refreshMatched fetches a matched book's record again and writes it under
@@ -260,82 +286,58 @@ func (e *Enricher) refreshMatched(ctx context.Context, item enrichmentItemRow) e
 	return nil
 }
 
-// ResetMatch clears an audiobook's provider match for Reset to Provider: its
-// provider IDs, the fields and credits a match owns, artwork a provider
-// supplied, and its field locks. Tag-owned fields are cleared too, so the tag
-// read that follows writes them as on an unmatched book, and the enrichment
-// state returns to untried. A book whose match an admin ignored is left
-// alone; ignored reports it. The content ID, files, series row, progress, and
-// favorites stay.
-func (e *Enricher) ResetMatch(ctx context.Context, contentID string) (ignored bool, err error) {
-	if e == nil || e.pool == nil || contentID == "" {
-		return false, nil
-	}
-	err = pgx.BeginFunc(ctx, e.pool, func(tx pgx.Tx) error {
-		err := tx.QueryRow(ctx, `
-			SELECT match_ignored_at IS NOT NULL FROM media_items
-			WHERE content_id = $1 AND type = 'audiobook'
-			FOR UPDATE
-		`, contentID).Scan(&ignored)
-		if errors.Is(err, pgx.ErrNoRows) {
-			return fmt.Errorf("audiobook %s not found", contentID)
-		}
-		if err != nil || ignored {
-			return err
-		}
-		var leased bool
-		if err := tx.QueryRow(ctx, `
-			SELECT EXISTS (
-				SELECT 1 FROM audiobook_enrichment_state
-				WHERE content_id = $1 AND lease_until > now()
-				FOR UPDATE
-			)
-		`, contentID).Scan(&leased); err != nil {
-			return fmt.Errorf("reading audiobook enrichment claim: %w", err)
-		}
-		if leased {
-			return ErrAudiobookEnrichmentBusy
-		}
-		// The tag read that follows stores the tagged ASIN again.
-		if _, err := tx.Exec(ctx, `DELETE FROM media_item_provider_ids WHERE content_id = $1`, contentID); err != nil {
-			return fmt.Errorf("clearing audiobook provider IDs: %w", err)
-		}
-		if _, err := tx.Exec(ctx, `
-			DELETE FROM item_people WHERE content_id = $1 AND kind IN (7, 8)
-		`, contentID); err != nil {
-			return fmt.Errorf("clearing audiobook credits: %w", err)
-		}
-		if _, err := tx.Exec(ctx, `
-			UPDATE media_items SET
-				sort_title = '', original_title = '',
-				year = 0, overview = '', tagline = '', release_date = NULL,
-				genres = '{}', studios = '{}', content_rating = '',
-				tmdb_id = '', tvdb_id = '', imdb_id = '',
-				poster_path          = CASE WHEN poster_source_path LIKE 'http%' THEN '' ELSE poster_path END,
-				poster_thumbhash     = CASE WHEN poster_source_path LIKE 'http%' THEN '' ELSE poster_thumbhash END,
-				poster_source_path   = CASE WHEN poster_source_path LIKE 'http%' THEN '' ELSE poster_source_path END,
-				backdrop_path = '', backdrop_source_path = '', backdrop_thumbhash = '',
-				logo_path = '', logo_source_path = '',
-				locked_fields = '{}',
-				status = '', matched_at = NULL,
-				updated_at = now()
-			WHERE content_id = $1
-		`, contentID); err != nil {
-			return fmt.Errorf("clearing audiobook match fields: %w", err)
-		}
-		// The book is parked for adminRefreshLease: the sweep must not
-		// claim it before the item refresh has read its tags again and
-		// matched it (RefreshItem claims it whatever its schedule). If the
-		// refresh never gets there, the sweep takes the book afterwards.
-		if _, err := tx.Exec(ctx, `
-			INSERT INTO audiobook_enrichment_state (content_id, next_attempt_at, updated_at)
-			VALUES ($1, now() + make_interval(secs => $2::double precision), now())
-			ON CONFLICT (content_id) DO UPDATE SET `+requeueCountsSet+`,
-				next_attempt_at = EXCLUDED.next_attempt_at`,
-			contentID, adminRefreshLease.Seconds()); err != nil {
-			return fmt.Errorf("resetting audiobook enrichment state: %w", err)
-		}
+// ResetMatchTx clears an audiobook's provider match for Reset to Provider, in
+// tx, under the claim token from ClaimRefresh: its provider IDs, the fields
+// and credits a match owns, artwork a provider supplied, and its field locks.
+// Tag-owned fields are cleared too, so the tags applied next in the same
+// transaction are written as on an unmatched book, and the enrichment state
+// returns to untried while the claim stays held. Clearing a cached poster
+// queues its revision for collection (media_items_artwork_revision_gc_update).
+// The content ID, files, series row, progress, and favorites stay. The
+// scanner calls it from the book's write transaction, after locking the item
+// (scanner.WithAudiobookTagRereadReset).
+func (e *Enricher) ResetMatchTx(ctx context.Context, tx pgx.Tx, contentID, token string) error {
+	if e == nil || tx == nil || token == "" {
 		return nil
-	})
-	return ignored, err
+	}
+	if err := e.state.AssertClaimTx(ctx, tx, contentID, token); err != nil {
+		return err
+	}
+	if err := catalog.GuardMetadataCurationItems(ctx, tx, contentID); err != nil {
+		return err
+	}
+	// The tags applied next store the tagged ASIN again.
+	if _, err := tx.Exec(ctx, `DELETE FROM media_item_provider_ids WHERE content_id = $1`, contentID); err != nil {
+		return fmt.Errorf("clearing audiobook provider IDs: %w", err)
+	}
+	if _, err := tx.Exec(ctx, `
+		DELETE FROM item_people WHERE content_id = $1 AND kind IN (7, 8)
+	`, contentID); err != nil {
+		return fmt.Errorf("clearing audiobook credits: %w", err)
+	}
+	if _, err := tx.Exec(ctx, `
+		UPDATE media_items SET
+			sort_title = '', original_title = '',
+			year = 0, overview = '', tagline = '', release_date = NULL,
+			genres = '{}', studios = '{}', content_rating = '',
+			tmdb_id = '', tvdb_id = '', imdb_id = '',
+			poster_path          = CASE WHEN poster_source_path LIKE 'http%' THEN '' ELSE poster_path END,
+			poster_thumbhash     = CASE WHEN poster_source_path LIKE 'http%' THEN '' ELSE poster_thumbhash END,
+			poster_source_path   = CASE WHEN poster_source_path LIKE 'http%' THEN '' ELSE poster_source_path END,
+			backdrop_path = '', backdrop_source_path = '', backdrop_thumbhash = '',
+			logo_path = '', logo_source_path = '',
+			locked_fields = '{}',
+			status = '', matched_at = NULL,
+			updated_at = now()
+		WHERE content_id = $1
+	`, contentID); err != nil {
+		return fmt.Errorf("clearing audiobook match fields: %w", err)
+	}
+	if _, err := tx.Exec(ctx, `
+		UPDATE audiobook_enrichment_state SET `+requeueStateSet+`
+		WHERE content_id = $1 AND claim_token = $2
+	`, contentID, token); err != nil {
+		return fmt.Errorf("resetting audiobook enrichment state: %w", err)
+	}
+	return nil
 }

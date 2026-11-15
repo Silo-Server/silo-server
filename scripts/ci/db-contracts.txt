@@ -1077,7 +1077,8 @@
 ./internal/audiobooks TestAudiobookEnrichmentSweepDrainsBacklogDB
 
 # Audiobook enrichment loads the tagged narrators and series position its
-# candidate checks compare against.
+# candidate checks compare against, and never claims a book whose match an
+# admin ignored.
 ./internal/audiobooks TestClaimBatchLoadsNarratorsAndSeriesPositionDB
 
 # An audiobook rescan keeps the authors and narrators an admin locked with the

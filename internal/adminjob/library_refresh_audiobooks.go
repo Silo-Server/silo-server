@@ -24,6 +24,10 @@ import (
 // not start a second one.
 var ErrLibraryScanInProgress = errors.New("a scan of this library is already running; refresh its metadata when the scan finishes")
 
+// errLibraryScanRunLost reports a refresh whose scan run was canceled or
+// failed elsewhere while it scanned.
+var errLibraryScanRunLost = errors.New("the library scan was canceled")
+
 // libraryRefreshFolderIngester ingests a whole library
 // (libraryingest.Executor).
 type libraryRefreshFolderIngester interface {
@@ -89,11 +93,22 @@ func (e *LibraryRefreshExecutor) refreshAudiobookLibrary(
 	if progress != nil {
 		progress(0, 0, "Reading audiobook tags")
 	}
-	scanCtx := scanner.WithAudiobookLibraryTagReread(ctx)
+	// The scan ends when its run is canceled, here or on another server, or
+	// failed as abandoned: a canceled run must not keep reading the library.
+	runCtx, cancelRun := context.WithCancelCause(ctx)
+	defer cancelRun(nil)
+	scanCtx := scanner.WithAudiobookLibraryTagReread(runCtx)
 	scanCtx = libraryingest.WithProgressReporter(scanCtx, e.audiobookScanProgress(run, progress))
-	stopHeartbeat := startDirectScanHeartbeat(e.scanRuns, run, directScanHeartbeatEvery)
+	heartbeatEvery := e.scanHeartbeatEvery
+	if heartbeatEvery <= 0 {
+		heartbeatEvery = directScanHeartbeatEvery
+	}
+	stopHeartbeat := startDirectScanHeartbeatUntilLost(e.scanRuns, run, heartbeatEvery, func() { cancelRun(errLibraryScanRunLost) })
 	ingestResult, err := ingester.IngestFolder(scanbatch.WithRunID(scanCtx, run.ID), folder)
 	stopHeartbeat()
+	if errors.Is(context.Cause(runCtx), errLibraryScanRunLost) {
+		return nil, true, fmt.Errorf("scan library: %w", errLibraryScanRunLost)
+	}
 	if err != nil {
 		return nil, true, fmt.Errorf("scan library: %w", failDirectScan(ctx, e.scanRuns, run, err))
 	}

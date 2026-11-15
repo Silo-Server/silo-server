@@ -6,8 +6,10 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Silo-Server/silo-server/internal/cache"
+	"github.com/Silo-Server/silo-server/internal/libraryingest"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/scanqueue"
 )
@@ -182,4 +184,37 @@ func (r *libraryRefreshTestRequeuer) RequeueUnmatchedInLibrary(context.Context, 
 func (r *libraryRefreshTestRequeuer) RequeueUnmatched(_ context.Context, contentID string) (bool, error) {
 	r.requeued = append(r.requeued, contentID)
 	return true, nil
+}
+
+type blockingFolderIngester struct{ *itemRefreshTestIngester }
+
+func (b blockingFolderIngester) IngestFolder(ctx context.Context, _ *models.MediaFolder) (*libraryingest.Result, error) {
+	<-ctx.Done()
+	return nil, ctx.Err()
+}
+
+// A full refresh's library scan ends when its run stops being this claim's
+// running run (canceled here or on another server), instead of reading the
+// rest of the library.
+func TestAudiobookLibraryRefreshStopsWhenItsRunIsLost(t *testing.T) {
+	t.Parallel()
+
+	executor := &LibraryRefreshExecutor{
+		itemLister:         &libraryRefreshTestLister{},
+		folderRepo:         &itemRefreshTestFolderRepo{folder: &models.MediaFolder{ID: 9, Type: "audiobooks", Enabled: true}},
+		ingester:           blockingFolderIngester{&itemRefreshTestIngester{}},
+		scanRuns:           &itemRefreshTestScanRuns{heartbeatErr: scanqueue.ErrScanRunNotFound},
+		refresher:          &itemRefreshTestRefresher{},
+		scanHeartbeatEvery: time.Millisecond,
+	}
+	_, err := executor.Execute(t.Context(), LibraryRefreshRequest{LibraryID: 9, Mode: LibraryRefreshModeFull}, nil)
+	if !errors.Is(err, errLibraryScanRunLost) {
+		t.Fatalf("Execute() error = %v, want errLibraryScanRunLost", err)
+	}
+}
+
+type libraryRefreshTestLister struct{ items []LibraryRefreshItem }
+
+func (l *libraryRefreshTestLister) ListLibraryItems(context.Context, int, LibraryRefreshMode) ([]LibraryRefreshItem, error) {
+	return l.items, nil
 }

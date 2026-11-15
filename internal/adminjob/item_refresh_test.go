@@ -17,6 +17,8 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/jackc/pgx/v5"
+
 	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/cache"
 	"github.com/Silo-Server/silo-server/internal/catalog"
@@ -154,11 +156,13 @@ type itemRefreshTestScanRuns struct {
 	cancelErr    error
 	cancelCtxErr error
 	heartbeats   atomic.Int64
+	// heartbeatErr, when set, is what every heartbeat reports.
+	heartbeatErr error
 }
 
 func (r *itemRefreshTestScanRuns) TouchHeartbeat(_ context.Context, _ string, _ *time.Time) error {
 	r.heartbeats.Add(1)
-	return nil
+	return r.heartbeatErr
 }
 
 func (r *itemRefreshTestScanRuns) Create(_ context.Context, input scanqueue.CreateInput) (*models.ScanRun, bool, error) {
@@ -692,31 +696,35 @@ type itemRefreshTestAudiobooks struct {
 	err   error
 }
 
-func (a *itemRefreshTestAudiobooks) RefreshItem(_ context.Context, contentID string) error {
+func (a *itemRefreshTestAudiobooks) ClaimRefresh(_ context.Context, contentID string) (string, error) {
+	a.calls = append(a.calls, "claim "+contentID)
+	return "token", nil
+}
+
+func (a *itemRefreshTestAudiobooks) ResetMatchTx(_ context.Context, _ pgx.Tx, contentID, _ string) error {
+	a.calls = append(a.calls, "reset "+contentID)
+	return nil
+}
+
+func (a *itemRefreshTestAudiobooks) Refresh(_ context.Context, contentID, _ string) error {
 	a.calls = append(a.calls, "refresh "+contentID)
 	return a.err
 }
 
-func (a *itemRefreshTestAudiobooks) ResetMatch(_ context.Context, contentID string) (bool, error) {
-	a.calls = append(a.calls, "reset "+contentID)
-	return false, nil
+func (a *itemRefreshTestAudiobooks) ReleaseRefresh(_ context.Context, contentID, _ string) {
+	a.calls = append(a.calls, "release "+contentID)
 }
 
-// An audiobook's refresh never reaches the general metadata refresher: its
-// tags are read in the one scan, and its match goes through the audiobook
-// enricher. A reset clears the match before that scan, and a complete refresh
-// queued as such runs as a reset, so the book keeps its content ID.
+// An audiobook's refresh never reaches the general metadata refresher: the
+// book is claimed before its one scan, its match goes through the audiobook
+// enricher, and the claim is released at the end. A complete refresh queued
+// as such runs as a reset, so the book keeps its content ID. (The reset itself
+// runs inside the scanner's write, which the fake ingester does not run.)
 func TestItemRefreshAudiobookUsesTheAudiobookEnricher(t *testing.T) {
 	t.Parallel()
 
-	for _, tc := range []struct {
-		mode      ItemRefreshMode
-		wantCalls []string
-	}{
-		{ItemRefreshModeQuick, []string{"refresh book-1"}},
-		{ItemRefreshModeReset, []string{"reset book-1", "refresh book-1"}},
-		{ItemRefreshModeComplete, []string{"reset book-1", "refresh book-1"}},
-	} {
+	want := []string{"claim book-1", "refresh book-1", "release book-1"}
+	for _, mode := range []ItemRefreshMode{ItemRefreshModeQuick, ItemRefreshModeReset, ItemRefreshModeComplete} {
 		refresher := &itemRefreshTestRefresher{err: errors.New("the general refresher must not run")}
 		ingester := &itemRefreshTestIngester{}
 		audiobooks := &itemRefreshTestAudiobooks{}
@@ -728,17 +736,17 @@ func TestItemRefreshAudiobookUsesTheAudiobookEnricher(t *testing.T) {
 			RefreshContentID:   "book-1",
 			ScanFolderID:       3,
 			ScanPath:           "/media/book-1",
-			Mode:               tc.mode,
+			Mode:               mode,
 		}, nil)
 		if err != nil {
-			t.Fatalf("%s: Execute() error = %v", tc.mode, err)
+			t.Fatalf("%s: Execute() error = %v", mode, err)
 		}
-		if !slices.Equal(audiobooks.calls, tc.wantCalls) || refresher.contentID != "" || ingester.scans != 1 || ingester.unlinked {
+		if !slices.Equal(audiobooks.calls, want) || refresher.contentID != "" || ingester.scans != 1 || ingester.unlinked {
 			t.Errorf("%s: enricher calls %v, general refresher on %q, scans %d (unlinked %v); want %v, none, 1 linked scan",
-				tc.mode, audiobooks.calls, refresher.contentID, ingester.scans, ingester.unlinked, tc.wantCalls)
+				mode, audiobooks.calls, refresher.contentID, ingester.scans, ingester.unlinked, want)
 		}
 		if result.RefreshContentID != "book-1" {
-			t.Errorf("%s: refresh content ID = %q, want book-1", tc.mode, result.RefreshContentID)
+			t.Errorf("%s: refresh content ID = %s, want book-1", mode, result.RefreshContentID)
 		}
 	}
 }

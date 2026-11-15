@@ -2,7 +2,10 @@ package scanner
 
 import (
 	"context"
+	"sync"
 	"sync/atomic"
+
+	"github.com/jackc/pgx/v5"
 )
 
 type audiobookTagRereadKey struct{}
@@ -15,6 +18,11 @@ type audiobookTagReread struct {
 	all       bool
 	done      atomic.Bool
 	read      atomic.Int64
+	// reset, when set, runs inside the book's write transaction before
+	// the tags are applied (WithAudiobookTagRereadReset).
+	reset    func(ctx context.Context, tx pgx.Tx) error
+	resetMu  sync.Mutex
+	resetErr error
 }
 
 // WithAudiobookTagReread marks a scan as an admin's or metadata curator's
@@ -28,6 +36,43 @@ type audiobookTagReread struct {
 // book was read.
 func WithAudiobookTagReread(ctx context.Context, contentID string) context.Context {
 	return context.WithValue(ctx, audiobookTagRereadKey{}, &audiobookTagReread{contentID: contentID})
+}
+
+// WithAudiobookTagRereadReset is WithAudiobookTagReread for an admin's Reset
+// to Provider: reset runs inside the transaction that writes the book's
+// re-read tags, before they are applied, so the book's match is cleared only
+// when its files were read and the tags land in the same commit. A scan that
+// cannot read the book leaves it as it was. AudiobookTagRereadResetErr
+// reports a failed reset.
+func WithAudiobookTagRereadReset(ctx context.Context, contentID string, reset func(ctx context.Context, tx pgx.Tx) error) context.Context {
+	return context.WithValue(ctx, audiobookTagRereadKey{}, &audiobookTagReread{contentID: contentID, reset: reset})
+}
+
+// AudiobookTagRereadResetErr returns the error of the reset a scan under
+// ctx's mark ran, or nil.
+func AudiobookTagRereadResetErr(ctx context.Context) error {
+	mark, _ := ctx.Value(audiobookTagRereadKey{}).(*audiobookTagReread)
+	if mark == nil {
+		return nil
+	}
+	mark.resetMu.Lock()
+	defer mark.resetMu.Unlock()
+	return mark.resetErr
+}
+
+// runAudiobookTagRereadReset runs the mark's reset for contentID in tx.
+func runAudiobookTagRereadReset(ctx context.Context, tx pgx.Tx, contentID string) error {
+	mark, _ := ctx.Value(audiobookTagRereadKey{}).(*audiobookTagReread)
+	if mark == nil || mark.reset == nil || !mark.covers(contentID) {
+		return nil
+	}
+	err := mark.reset(ctx, tx)
+	if err != nil {
+		mark.resetMu.Lock()
+		mark.resetErr = err
+		mark.resetMu.Unlock()
+	}
+	return err
 }
 
 // WithAudiobookLibraryTagReread marks a library scan as an admin's explicit

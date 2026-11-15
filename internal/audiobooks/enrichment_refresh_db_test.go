@@ -15,6 +15,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/adminjob"
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/libraryingest"
@@ -40,6 +41,10 @@ func TestAudiobookAdminRefreshKeepsMatchDB(t *testing.T) {
 	t.Run("full library refresh waits for an active library scan", f.checkActiveScanBlocksRefresh)
 	t.Run("full library refresh", f.checkFullLibraryRefresh)
 	t.Run("item quick refresh", f.checkQuickRefresh)
+	t.Run("a refresh claim keeps the sweep away", f.checkClaimExcludesSweep)
+	t.Run("curator outside the book's libraries", f.checkCuratorScope)
+	t.Run("reset whose scan is canceled", f.checkFailedResetScan)
+	t.Run("reset retires a cached provider poster", f.checkResetRetiresPoster)
 	for _, mode := range []adminjob.ItemRefreshMode{adminjob.ItemRefreshModeReset, adminjob.ItemRefreshModeComplete} {
 		t.Run("item "+string(mode)+" refresh", func(t *testing.T) { f.checkResetRefresh(t, mode) })
 	}
@@ -58,6 +63,8 @@ type refreshFixture struct {
 	unmatchedIDs []string
 	userID       int
 	provider     *refreshTestProvider
+	enricher     *Enricher
+	ffprobe      string
 	general      *refreshTestGeneralRefresher
 	ingester     *libraryingest.Executor
 	resolver     *adminjob.ItemRefreshResolver
@@ -84,6 +91,7 @@ func newRefreshFixture(t *testing.T, dsn string) *refreshFixture {
 	f := &refreshFixture{pool: pool, provider: &refreshTestProvider{overview: "First overview"}, general: &refreshTestGeneralRefresher{}}
 
 	root, ffprobe, unmatchedParts := f.writeBooks(t)
+	f.ffprobe = ffprobe
 	var folderID int
 	if err := pool.QueryRow(ctx, `
 		INSERT INTO media_folders (type, name) VALUES ('audiobooks', $1) RETURNING id
@@ -108,6 +116,7 @@ func newRefreshFixture(t *testing.T, dsn string) *refreshFixture {
 	e := NewEnricher(pool, metadata.NewChainRepository(pool), nil, items,
 		catalog.NewPersonRepository(pool), catalog.NewProviderIDRepository(pool))
 	e.workers = 1
+	f.enricher = e
 	e.resolveProviders = func(context.Context, int, string) ([]metadata.Provider, error) {
 		return []metadata.Provider{f.provider}, nil
 	}
@@ -254,16 +263,136 @@ func (f *refreshFixture) checkFullLibraryRefresh(t *testing.T) {
 
 func (f *refreshFixture) refreshItem(t *testing.T, mode adminjob.ItemRefreshMode) {
 	t.Helper()
-	req, err := f.resolver.ResolveWithMode(t.Context(), f.matchedID, mode)
-	if err != nil {
-		t.Fatal(err)
-	}
-	result, err := f.item.Execute(t.Context(), *req, nil)
+	result, err := f.tryRefreshItem(t, mode, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if result.RefreshContentID != f.matchedID {
 		t.Errorf("refresh content ID = %s, want %s", result.RefreshContentID, f.matchedID)
+	}
+}
+
+func (f *refreshFixture) tryRefreshItem(t *testing.T, mode adminjob.ItemRefreshMode, scope *access.MetadataCurationScope) (*adminjob.ItemRefreshResult, error) {
+	t.Helper()
+	return f.tryRefreshItemCtx(t, t.Context(), mode, scope)
+}
+
+func (f *refreshFixture) tryRefreshItemCtx(t *testing.T, ctx context.Context, mode adminjob.ItemRefreshMode, scope *access.MetadataCurationScope) (*adminjob.ItemRefreshResult, error) {
+	t.Helper()
+	req, err := f.resolver.ResolveWithMode(t.Context(), f.matchedID, mode)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.CurationScope = scope
+	return f.item.Execute(ctx, *req, nil)
+}
+
+// While an admin refresh holds a book's claim, the sweep does not claim it.
+func (f *refreshFixture) checkClaimExcludesSweep(t *testing.T) {
+	unmatched := f.unmatchedIDs[0]
+	token, err := f.enricher.ClaimRefresh(t.Context(), unmatched)
+	if err != nil || token == "" {
+		t.Fatalf("ClaimRefresh = %q, %v", token, err)
+	}
+	defer f.enricher.ReleaseRefresh(t.Context(), unmatched, token)
+	claimed, err := f.enricher.claimBatch(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, item := range claimed {
+		f.enricher.releaseClaim(t.Context(), item)
+		if item.ContentID == unmatched {
+			t.Error("the sweep claimed a book an admin refresh holds")
+		}
+	}
+}
+
+// A delegated curator refreshes or resets a book only while every library
+// holding it is in the curator's scope, so the book is left as it was.
+func (f *refreshFixture) checkCuratorScope(t *testing.T) {
+	scope := &access.MetadataCurationScope{LibraryIDs: []int{f.folder.ID}}
+	f.provider.overview = "Curator overview"
+	if _, err := f.tryRefreshItem(t, adminjob.ItemRefreshModeQuick, scope); err != nil {
+		t.Fatalf("a refresh inside the curator's scope: %v", err)
+	}
+	var other int
+	if err := f.pool.QueryRow(t.Context(), `INSERT INTO media_folders (type, name) VALUES ('audiobooks', $1) RETURNING id`,
+		fmt.Sprintf("ab-refresh-other-%d", time.Now().UnixNano())).Scan(&other); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, _ = f.pool.Exec(context.Background(), `DELETE FROM media_item_libraries WHERE media_folder_id = $1`, other)
+		_, _ = f.pool.Exec(context.Background(), `DELETE FROM media_folders WHERE id = $1`, other)
+	})
+	if _, err := f.pool.Exec(t.Context(), `INSERT INTO media_item_libraries (content_id, media_folder_id) VALUES ($1, $2)`, f.matchedID, other); err != nil {
+		t.Fatal(err)
+	}
+	before := readRefreshTestBook(t, t.Context(), f.pool, f.matchedID)
+	f.provider.overview = "Out of scope overview"
+	for _, mode := range []adminjob.ItemRefreshMode{adminjob.ItemRefreshModeQuick, adminjob.ItemRefreshModeReset} {
+		if _, err := f.tryRefreshItem(t, mode, scope); !errors.Is(err, access.ErrMetadataCurationScope) {
+			t.Errorf("%s refresh of a book in another library = %v, want ErrMetadataCurationScope", mode, err)
+		}
+		if got := readRefreshTestBook(t, t.Context(), f.pool, f.matchedID); !got.sameMatch(before) || got.overview != before.overview {
+			t.Errorf("after a refused %s refresh, book = %+v, want %+v", mode, got, before)
+		}
+	}
+	if _, err := f.pool.Exec(t.Context(), `DELETE FROM media_item_libraries WHERE media_folder_id = $1`, other); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// A reset whose scan is canceled before it reads the book fails and leaves
+// the book's match, credits, and locks as they were.
+func (f *refreshFixture) checkFailedResetScan(t *testing.T) {
+	if _, err := f.pool.Exec(t.Context(), `UPDATE media_items SET locked_fields = '{0}' WHERE content_id = $1`, f.matchedID); err != nil {
+		t.Fatal(err)
+	}
+	working, err := os.ReadFile(f.ffprobe)
+	if err != nil {
+		t.Fatal(err)
+	}
+	before := readRefreshTestBook(t, t.Context(), f.pool, f.matchedID)
+	// The probe outlasts the job, which is canceled while the scan reads.
+	writeRefreshTestTool(t, f.ffprobe, "#!/bin/sh\nsleep 3\n")
+	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+	_, err = f.tryRefreshItemCtx(t, ctx, adminjob.ItemRefreshModeReset, nil)
+	cancel()
+	writeRefreshTestTool(t, f.ffprobe, string(working))
+	if err == nil {
+		t.Fatal("a reset whose scan could not read the book succeeded")
+	}
+	got := readRefreshTestBook(t, t.Context(), f.pool, f.matchedID)
+	var locked []int
+	if err := f.pool.QueryRow(t.Context(), `SELECT locked_fields FROM media_items WHERE content_id = $1`, f.matchedID).Scan(&locked); err != nil {
+		t.Fatal(err)
+	}
+	if !got.sameMatch(before) || got.overview != before.overview || !slices.Equal(locked, []int{0}) {
+		t.Errorf("after a failed reset, book = %+v locks %v, want %+v with its lock", got, locked, before)
+	}
+	var leased bool
+	if err := f.pool.QueryRow(t.Context(), `SELECT COALESCE(lease_until > now(), false) FROM audiobook_enrichment_state WHERE content_id = $1`, f.matchedID).Scan(&leased); err != nil || leased {
+		t.Errorf("claim after a failed reset: leased %v (err %v), want released", leased, err)
+	}
+}
+
+// Clearing a cached provider poster queues its revision for collection in the
+// reset's own transaction.
+func (f *refreshFixture) checkResetRetiresPoster(t *testing.T) {
+	cached := fmt.Sprintf("audiobook-metadata/audiobooks/%s/poster/original.test.webp", f.matchedID)
+	if _, err := f.pool.Exec(t.Context(), `
+		UPDATE media_items SET poster_path = $2, poster_source_path = 'https://images.example.test/cover.jpg'
+		WHERE content_id = $1`, f.matchedID, cached); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, _ = f.pool.Exec(context.Background(), `DELETE FROM artwork_revision_gc_candidates WHERE original_path = $1`, cached)
+	})
+	f.provider.overview = string(adminjob.ItemRefreshModeReset) + " overview"
+	f.refreshItem(t, adminjob.ItemRefreshModeReset)
+	var queued bool
+	if err := f.pool.QueryRow(t.Context(), `SELECT EXISTS (SELECT 1 FROM artwork_revision_gc_candidates WHERE original_path = $1)`, cached).Scan(&queued); err != nil || !queued {
+		t.Errorf("displaced poster queued for collection = %v (err %v), want true", queued, err)
 	}
 }
 
