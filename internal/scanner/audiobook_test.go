@@ -392,7 +392,7 @@ func TestCollectAudiobookRootScansKeepsSiblingFoldersWhenRootHasLooseAudio(t *te
 		t.Fatal(err)
 	}
 
-	scans, err := collectAudiobookRootScans(t.Context(), 1, []string{root}, []string{root}, true)
+	scans, err := collectAudiobookRootScans(t.Context(), 1, []string{root}, []string{root}, true, "")
 	if err != nil {
 		t.Fatalf("collectAudiobookRootScans: %v", err)
 	}
@@ -403,8 +403,8 @@ func TestCollectAudiobookRootScansKeepsSiblingFoldersWhenRootHasLooseAudio(t *te
 	for _, candidate := range scans[0].candidates {
 		got[candidate] = true
 	}
-	if !got[root] {
-		t.Fatalf("candidates = %#v, want root candidate %q", scans[0].candidates, root)
+	if loose := filepath.Join(root, "loose.m4b"); !got[loose] {
+		t.Fatalf("candidates = %#v, want loose file candidate %q", scans[0].candidates, loose)
 	}
 	if !got[sibling] {
 		t.Fatalf("candidates = %#v, want sibling candidate %q", scans[0].candidates, sibling)
@@ -661,25 +661,6 @@ func TestAudiobookDedupeTitlesKeepDifferentBooksSeparate(t *testing.T) {
 		"Adventure of Constance Verity 2 - Constance Verity Saves the World",
 	) {
 		t.Fatal("expected different series entries to remain separate")
-	}
-}
-
-func TestAudiobookLookupPathsIncludeCaseFoldedVariants(t *testing.T) {
-	got := audiobookLookupPaths([]parsedAudiobookFile{
-		{Path: "/Library/A. A. Milne/Winnie-The-Pooh.m4b"},
-		{Path: ""},
-	})
-	want := []string{
-		"/Library/A. A. Milne/Winnie-The-Pooh.m4b",
-		"/library/a. a. milne/winnie-the-pooh.m4b",
-	}
-	if len(got) != len(want) {
-		t.Fatalf("paths = %#v, want %#v", got, want)
-	}
-	for i := range want {
-		if got[i] != want[i] {
-			t.Fatalf("paths[%d] = %q, want %q", i, got[i], want[i])
-		}
 	}
 }
 
@@ -963,7 +944,7 @@ func TestCollectAudiobookRootScansTreatsVanishedBookFolderAsEmpty(t *testing.T) 
 		{"dangling legacy-named book symlink", fspath.Encode(danglingLegacy), library, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			scans, err := collectAudiobookRootScans(t.Context(), 1, []string{tc.scope}, []string{tc.libRoot}, true)
+			scans, err := collectAudiobookRootScans(t.Context(), 1, []string{tc.scope}, []string{tc.libRoot}, true, "")
 			if err != nil {
 				t.Fatalf("collectAudiobookRootScans: %v", err)
 			}
@@ -1077,19 +1058,25 @@ func TestParseGenresFromTags(t *testing.T) {
 func TestAudiobookPartOrder(t *testing.T) {
 	tag := func(disc, track string) map[string]string { return map[string]string{"disc": disc, "track": track} }
 	cases := []struct {
-		name  string
-		tags  []map[string]string
-		want  []int
-		trust bool
+		name        string
+		tags        []map[string]string
+		folderDiscs []int
+		want        []int
+		trust       bool
 	}{
-		{"tracks", []map[string]string{tag("", "4/4"), tag("", "1/4"), tag("", "3/4"), tag("", "2/4")}, []int{1, 3, 2, 0}, true},
-		{"discs then tracks", []map[string]string{tag("2/2", "1"), tag("1/2", "2"), tag("1/2", "1")}, []int{2, 1, 0}, true},
-		{"missing track", []map[string]string{tag("", "2"), tag("", "")}, nil, false},
-		{"duplicate track", []map[string]string{tag("", "1"), tag("", "1")}, nil, false},
-		{"disc on some parts", []map[string]string{tag("1", "1"), tag("", "2")}, nil, false},
+		{"tracks", []map[string]string{tag("", "4/4"), tag("", "1/4"), tag("", "3/4"), tag("", "2/4")}, nil, []int{1, 3, 2, 0}, true},
+		{"discs then tracks", []map[string]string{tag("2/2", "1"), tag("1/2", "2"), tag("1/2", "1")}, nil, []int{2, 1, 0}, true},
+		{"missing track", []map[string]string{tag("", "2"), tag("", "")}, nil, nil, false},
+		{"duplicate track", []map[string]string{tag("", "1"), tag("", "1")}, nil, nil, false},
+		{"disc on some parts", []map[string]string{tag("1", "1"), tag("", "2")}, nil, nil, false},
+		// Disc folders CD1 and CD2, each numbering its tracks from 1, with
+		// no disc tags: the folder number stands in for the disc.
+		{"disc folder for a missing disc tag", []map[string]string{tag("", "1"), tag("", "2"), tag("", "1"), tag("", "2")}, []int{1, 1, 2, 2}, []int{0, 1, 2, 3}, true},
+		{"disc tag wins over its folder", []map[string]string{tag("2", "1"), tag("1", "1")}, []int{1, 2}, []int{1, 0}, true},
+		{"loose file beside disc folders without a disc tag", []map[string]string{tag("", "1"), tag("", "1")}, []int{0, 1}, nil, false},
 	}
 	for _, tc := range cases {
-		got, ok := audiobookPartOrder(tc.tags)
+		got, ok := audiobookPartOrder(tc.tags, tc.folderDiscs)
 		if ok != tc.trust || !reflect.DeepEqual(got, tc.want) {
 			t.Errorf("%s: order %v ok %v, want %v %v", tc.name, got, ok, tc.want, tc.trust)
 		}

@@ -280,3 +280,59 @@ func TestScanFileAudiobookKeepsPartRestoredWhileMarkingDB(t *testing.T) {
 		"Copied Author/02.mp3 "+audiobookMultipartKind+" 2/2",
 	)
 }
+
+// TestScanFileAudiobookDiscPartsAgainstConcurrentRowDB covers a book whose
+// parts sit in disc folders, so two parts share a file name. A row another
+// scan wrote for CD1/01.mp3 after this scan's walk names a part this scan also
+// holds, and must not read as one it lacks: the scan still writes the book,
+// and CD2 is indexed.
+func TestScanFileAudiobookDiscPartsAgainstConcurrentRowDB(t *testing.T) {
+	f := newConcurrentBookFixture(t)
+	for _, rel := range []string{"CD1/01.mp3", "CD2/01.mp3"} {
+		path := filepath.Join(f.bookDir, rel)
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(rel), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	physical, err := canonicalWalkPath(f.bookDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	contentID := fmt.Sprintf("concurrent-disc-%d", f.folder.ID)
+	var hookErr error
+	ran := false
+	s := f.hookedScanner(t, audiobookSkipCheckSQL, func() {
+		ran = true
+		bg := context.Background()
+		for _, stmt := range []struct {
+			sql  string
+			args []any
+		}{
+			{`INSERT INTO media_items (content_id, type, title, status, genres) VALUES ($1, 'audiobook', 'Copied Book', 'local', '{}'::text[])`, []any{contentID}},
+			{`INSERT INTO media_item_libraries (content_id, media_folder_id) VALUES ($1, $2)`, []any{contentID, f.folder.ID}},
+			{`INSERT INTO media_files (content_id, media_folder_id, file_path, observed_root_path, canonical_root_path, file_size, file_modified_at)
+			  VALUES ($1, $2, $3, $4, $5, 1, now())`, []any{contentID, f.folder.ID, filepath.Join(f.bookDir, "CD1", "01.mp3"), f.bookDir, physical}},
+		} {
+			if _, err := f.pool.Exec(bg, stmt.sql, stmt.args...); err != nil && hookErr == nil {
+				hookErr = err
+			}
+		}
+	})
+
+	if err := s.ScanFile(t.Context(), filepath.Join(f.bookDir, "CD2", "01.mp3"), f.folder); err != nil {
+		t.Fatalf("ScanFile: %v", err)
+	}
+	if !ran {
+		t.Fatal("the concurrent row was never written; the skip-check query was not traced")
+	}
+	if hookErr != nil {
+		t.Fatalf("write concurrent row: %v", hookErr)
+	}
+	f.requireParts(t,
+		"Copied Author/CD1/01.mp3 "+audiobookMultipartKind+" 1/2",
+		"Copied Author/CD2/01.mp3 "+audiobookMultipartKind+" 2/2",
+	)
+}
