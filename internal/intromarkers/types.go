@@ -19,7 +19,7 @@ import (
 // or re-analysis cannot overwrite markers the old version wrote.
 const (
 	AlgorithmVersion            = 1
-	AnalysisBehaviorVersion     = 5
+	AnalysisBehaviorVersion     = 6
 	ChapterAlgorithm            = "chapter:v1"
 	ChapterSilenceAlgorithm     = "chapter:silence:v2"
 	EpisodeVersionCopyAlgorithm = "episode-version-copy:v1"
@@ -36,6 +36,11 @@ const (
 	CreditsAudioAlgorithm       = "credits-audio:v1"
 	CreditsAudioVideoAlgorithm  = "credits-audio:video:v1"
 	CreditsVideoAlgorithm       = "credits-video:v1"
+
+	// chromaprintAlgorithmFamily prefixes every Chromaprint intro identifier
+	// local analysis has stored, current and superseded, including the
+	// subtitle-refined ones markers.scannerAlgorithmPriority ranks.
+	chromaprintAlgorithmFamily = "chromaprint:"
 
 	// legacyChapterSilenceAlgorithm extended chapter ends by up to 30 seconds.
 	// The silence backfill revisits its markers under the current limit.
@@ -424,6 +429,7 @@ type RunSummary struct {
 	FingerprintExtractionErrors int      `json:"fingerprint_extraction_errors"`
 	ChapterMarkersWritten       int      `json:"chapter_markers_written"`
 	ChromaprintMarkersWritten   int      `json:"chromaprint_markers_written"`
+	ChromaprintMarkersWithdrawn int      `json:"chromaprint_markers_withdrawn"`
 	GroupsNotFound              int      `json:"groups_not_found"`
 	GroupsSkipped               int      `json:"groups_skipped"`
 	Errors                      []string `json:"errors,omitempty"`
