@@ -112,8 +112,9 @@ type itemRefreshTestIngester struct {
 	err      error
 	// unlinked is set when the subtree was ingested as unlinked.
 	unlinked bool
-	// scans counts the subtree ingests.
-	scans int
+	// scans counts the subtree ingests; failScan, when set, fails that one.
+	scans    int
+	failScan int
 }
 
 func (s *itemRefreshTestIngester) IngestUnlinkedSubtree(ctx context.Context, folder *models.MediaFolder, subtreePath string) (*libraryingest.Result, error) {
@@ -123,6 +124,9 @@ func (s *itemRefreshTestIngester) IngestUnlinkedSubtree(ctx context.Context, fol
 
 func (s *itemRefreshTestIngester) IngestSubtree(ctx context.Context, _ *models.MediaFolder, subtreePath string) (*libraryingest.Result, error) {
 	s.scans++
+	if s.failScan != 0 && s.scans == s.failScan {
+		return nil, errors.New("scan failed")
+	}
 	s.scanPath = subtreePath
 	s.runID = scanbatch.RunID(ctx)
 	if s.err != nil {
@@ -682,6 +686,39 @@ func TestItemRefreshExecutorRunsResetJobsAsResets(t *testing.T) {
 			t.Errorf("%s %s: reset=%v content_id=%q scans=%d, want reset=%v on item-1 with %d scans",
 				tc.mode, tc.itemType, refresher.reset, refresher.contentID, ingester.scans, tc.wantReset, tc.wantScans)
 		}
+	}
+}
+
+// A reset is committed before the audiobook's tags are read again, so a
+// failed read is a warning on the result and the reset's cache invalidation
+// and events still go out.
+func TestItemRefreshResetKeepsEventsWhenTagRereadFails(t *testing.T) {
+	t.Parallel()
+
+	eventBus := &libraryRefreshTestEventBus{}
+	executor := newItemRefreshTestExecutor(&itemRefreshTestIngester{failScan: 2}, &itemRefreshTestScanRuns{}, &itemRefreshTestRefresher{}, eventBus)
+	var evicted []string
+	executor.evictRails = func(contentIDs ...string) { evicted = append(evicted, contentIDs...) }
+	result, err := executor.Execute(context.Background(), ItemRefreshRequest{
+		RequestedContentID: "book-1",
+		RequestedType:      itemTypeAudiobook,
+		RefreshContentID:   "book-1",
+		ScanFolderID:       3,
+		ScanPath:           "/media/book-1",
+		Mode:               ItemRefreshModeReset,
+	}, nil)
+	if err != nil {
+		t.Fatalf("Execute() error = %v, want the committed reset reported", err)
+	}
+	if result.TagRereadWarning == "" {
+		t.Error("TagRereadWarning is empty, want the failed read")
+	}
+	var changed bool
+	for _, event := range eventBus.events {
+		changed = changed || (event.Type == cache.EventCatalogItemChanged && event.Payload == "book-1")
+	}
+	if !changed || len(evicted) == 0 {
+		t.Errorf("events = %#v, evicted = %v; want book-1 published and evicted", eventBus.events, evicted)
 	}
 }
 

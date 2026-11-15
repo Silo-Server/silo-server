@@ -83,6 +83,9 @@ type ItemRefreshResult struct {
 	// ArtworkCacheWarning is set when the metadata refresh committed but its
 	// artwork did not finish caching. The refresh itself still succeeded.
 	ArtworkCacheWarning string `json:"artwork_cache_warning,omitempty"`
+	// TagRereadWarning is set when an audiobook's reset committed but reading
+	// its tags again afterwards failed.
+	TagRereadWarning string `json:"tag_reread_warning,omitempty"`
 }
 
 type itemRefreshItemRepo interface {
@@ -675,9 +678,17 @@ func (e *ItemRefreshExecutor) Execute(ctx context.Context, req ItemRefreshReques
 	// the provider leaves out, some of which only an audiobook's tags supply.
 	// Reading the tags again afterwards lets them fill what is still empty,
 	// as any scan of a matched book does.
+	// The reset is committed by then, so a failed read is a warning on the
+	// result, and the cache invalidation and events below still run.
+	tagRereadWarning := ""
 	if req.Mode == ItemRefreshModeReset && req.RequestedType == itemTypeAudiobook {
 		if err := e.rereadAudiobookTags(ctx, folder, req.ScanPath, refreshContentID); err != nil {
-			return nil, fmt.Errorf("read audiobook tags after reset: %w", err)
+			tagRereadWarning = err.Error()
+			slog.WarnContext(ctx, "item refresh: reading audiobook tags after the reset failed",
+				"component", "adminjob",
+				"content_id", refreshContentID,
+				"error", err,
+			)
 		}
 	}
 	artworkWarning := ""
@@ -745,6 +756,7 @@ func (e *ItemRefreshExecutor) Execute(ctx context.Context, req ItemRefreshReques
 		ScanResult:          scanResult,
 		MatchedFiles:        matched,
 		ArtworkCacheWarning: artworkWarning,
+		TagRereadWarning:    tagRereadWarning,
 	}, nil
 }
 

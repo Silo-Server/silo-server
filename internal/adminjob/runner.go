@@ -1232,8 +1232,11 @@ func (r *Runner) executeItemRefresh(job *models.AdminJob) {
 		return
 	}
 	message := "Metadata refreshed"
-	if result != nil && result.ArtworkCacheWarning != "" {
+	switch {
+	case result != nil && result.ArtworkCacheWarning != "":
 		message = "Metadata refreshed, artwork incomplete"
+	case result != nil && result.TagRereadWarning != "":
+		message = "Metadata refreshed, audiobook tags not read again"
 	}
 	if err := r.repo.Complete(ctx, job.ID, CompleteJobInput{
 		ResultPayload:   result,
