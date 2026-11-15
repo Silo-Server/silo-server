@@ -338,8 +338,11 @@ func (h *PlaybackHandler) endLifecycleFromFacts(ctx context.Context, pool *pgxpo
 // credited.
 func (h *PlaybackHandler) endReportedPlay(ctx context.Context, pool *pgxpool.Pool, c lifecycleCandidate, now time.Time) {
 	if c.reportedOpen {
+		// The row's report times are the database's, so the claim's cutoff is
+		// too: an API server whose clock runs ahead must not end a live play.
 		tag, err := pool.Exec(ctx, `UPDATE abs_playback_sessions SET closed_at = now()
-			WHERE id = $1 AND closed_at IS NULL AND last_sync_at < $2`, c.sessionID, now.Add(-lifecycleReportedGrace))
+			WHERE id = $1 AND closed_at IS NULL AND last_sync_at < now() - make_interval(secs => $2)`,
+			c.sessionID, lifecycleReportedGrace.Seconds())
 		if err != nil {
 			slog.WarnContext(ctx, "lifecycle sweep could not close a reported Audiobookshelf play", "component", "api", "session", c.sessionID, "error", err)
 			return

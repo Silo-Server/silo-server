@@ -90,16 +90,19 @@ func TestReportPlayKeepsOnePlayPerClientSessionDB(t *testing.T) {
 	store := &ABSPlaybackSessionStore{Pool: pool}
 	report := func(clientSession string, position, listening float64) (string, bool) {
 		t.Helper()
-		id, announced, err := store.ReportPlay(ctx, abs.ReportedPlay{
+		p := abs.ReportedPlay{
 			UserID: strconv.Itoa(account), ProfileID: "p-1", ClientSessionID: clientSession, ContentID: unique,
 			PositionSeconds: position, ListeningSeconds: listening,
-		}, uuid.NewString(), 2)
+		}
+		st, found, err := store.UpdateReportedPlay(ctx, p)
+		if err == nil && !found {
+			st, err = store.StartReportedPlay(ctx, p, uuid.NewString(), 2)
+		}
 		if err != nil {
 			t.Fatal(err)
 		}
-		return id, announced
+		return st.ID, st.Announced
 	}
-
 	// Concurrent first reports, as two API servers would take them.
 	ids := make(chan string, 4)
 	var wg sync.WaitGroup
@@ -141,6 +144,30 @@ func TestReportPlayKeepsOnePlayPerClientSessionDB(t *testing.T) {
 	}
 	if id, _ := report("local-3", 0, 0); id != "" {
 		t.Fatalf("third play %q admitted over a cap of two", id)
+	}
+	// The first play's start is recorded; the second's never was, and once
+	// it falls silent it gives its slot up to the next new play.
+	if _, err := pool.Exec(ctx, `INSERT INTO playback_session_lifecycle
+		(session_id, frontend, state, seq, user_id, profile_id, media_file_id, requested_media_file_id, started_at)
+		VALUES ($1, 'abs', 'playing', nextval('playback_session_lifecycle_seq'), $2, 'p-1', 0, 0, NOW())`, first, account); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM playback_session_lifecycle WHERE user_id=$1`, account)
+	})
+	if id, announced := report("local-1", 110, 310); id != first || !announced {
+		t.Fatalf("report = (%q, %v), want the announced play %s", id, announced, first)
+	}
+	if _, err := pool.Exec(ctx, `UPDATE abs_playback_sessions SET last_sync_at = now() - interval '2 minutes'
+		WHERE user_id = $1 AND client_session_id = 'local-2'`, account); err != nil {
+		t.Fatal(err)
+	}
+	if id, _ := report("local-3", 0, 0); id == "" {
+		t.Fatal("a silent play whose start was never recorded still holds a slot")
+	}
+	// A nonsensical listening total does not fail the report.
+	if id, _ := report("local-3", 5, -1e15); id == "" {
+		t.Fatal("report with a negative listening total failed")
 	}
 
 	// After the play ends, the client session's next report is a new play.

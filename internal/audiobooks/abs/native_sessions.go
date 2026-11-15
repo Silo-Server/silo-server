@@ -174,6 +174,23 @@ func (h *Handler) trackReportedPlay(r *http.Request, a ctxAuth, access catalog.A
 		return
 	}
 	ctx := r.Context()
+	report := ReportedPlay{
+		UserID:           a.UserID,
+		ProfileID:        a.ProfileID,
+		ClientSessionID:  sess.ID,
+		ContentID:        sess.LibraryItemID,
+		PositionSeconds:  max(sess.CurrentTime, 0),
+		ListeningSeconds: sess.TimeListening,
+	}
+	// Most reports continue a play whose start is recorded: one statement.
+	state, found, err := h.deps.PlaybackSessionStore.UpdateReportedPlay(ctx, report)
+	if err != nil || (found && state.Announced) {
+		if err != nil {
+			slog.WarnContext(ctx, "abs local session sync: record reported play failed", "component", "audiobooks",
+				"library_item_id", sess.LibraryItemID, "error", err)
+		}
+		return
+	}
 	files, err := h.deps.MediaStore.GetMediaFiles(ctx, sess.LibraryItemID, access)
 	if err != nil || len(files) == 0 {
 		if err != nil {
@@ -182,27 +199,23 @@ func (h *Handler) trackReportedPlay(r *http.Request, a ctxAuth, access catalog.A
 		}
 		return
 	}
-	fileID, position := files[0].ID, max(sess.CurrentTime, 0)
-	id, announced, err := h.deps.PlaybackSessionStore.ReportPlay(ctx, ReportedPlay{
-		UserID:           a.UserID,
-		ProfileID:        a.ProfileID,
-		ClientSessionID:  sess.ID,
-		ContentID:        sess.LibraryItemID,
-		MediaFileID:      &fileID,
-		PositionSeconds:  position,
-		ListeningSeconds: sess.TimeListening,
-	}, uuid.NewString(), maxReportedPlaysPerAccount)
-	switch {
-	case err != nil:
-		slog.WarnContext(ctx, "abs local session sync: record reported play failed", "component", "audiobooks",
-			"library_item_id", sess.LibraryItemID, "error", err)
-		return
-	case id == "":
-		slog.WarnContext(ctx, "abs local session sync: too many reported plays for the account; not tracking this one", "component", "audiobooks",
-			"user_id", a.UserID, "limit", maxReportedPlaysPerAccount)
-		return
-	case announced:
-		return
+	fileID := files[0].ID
+	if !found {
+		report.MediaFileID = &fileID
+		if state, err = h.deps.PlaybackSessionStore.StartReportedPlay(ctx, report, uuid.NewString(), maxReportedPlaysPerAccount); err != nil {
+			slog.WarnContext(ctx, "abs local session sync: start reported play failed", "component", "audiobooks",
+				"library_item_id", sess.LibraryItemID, "error", err)
+			return
+		}
+		if state.ID == "" {
+			// Every report from such a device lands here, every few seconds.
+			slog.DebugContext(ctx, "abs local session sync: too many reported plays for the account; not tracking this one", "component", "audiobooks",
+				"user_id", a.UserID, "limit", maxReportedPlaysPerAccount)
+			return
+		}
+		if state.Announced {
+			return
+		}
 	}
 	userID, err := strconv.Atoi(a.UserID)
 	if err != nil {
@@ -218,7 +231,7 @@ func (h *Handler) trackReportedPlay(r *http.Request, a ctxAuth, access catalog.A
 	}
 	client := absPlaybackClientInfo(r, sess.DeviceInfo).Normalized()
 	announcer.AnnounceDetachedStart(ctx, playback.Session{
-		ID:                         id,
+		ID:                         state.ID,
 		UserID:                     userID,
 		ProfileID:                  a.ProfileID,
 		MediaFileID:                fileID,
@@ -231,8 +244,8 @@ func (h *Handler) trackReportedPlay(r *http.Request, a ctxAuth, access catalog.A
 		ClientUserAgent:            client.UserAgent,
 		DisableProgressPersistence: true,
 		TimelineDuration:           bookDurationSeconds(files),
-		Position:                   position,
-		StartedAt:                  time.Now(),
+		Position:                   report.PositionSeconds,
+		StartedAt:                  state.StartedAt,
 	}, "abs")
 }
 

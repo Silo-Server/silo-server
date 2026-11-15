@@ -61,25 +61,30 @@ func (f *fakePlaybackSessionStore) ListClosedSessions(_ context.Context, userID,
 	return nil, 0, nil
 }
 
-// ReportPlay keeps one open reported play per client session; announced is
-// whether the play existed before this report.
-func (f *fakePlaybackSessionStore) ReportPlay(_ context.Context, p ReportedPlay, newID string, _ int) (string, bool, error) {
+// UpdateReportedPlay and StartReportedPlay keep one open reported play per
+// client session; a play counts as announced from its second report.
+func (f *fakePlaybackSessionStore) UpdateReportedPlay(_ context.Context, p ReportedPlay) (ReportedPlayState, bool, error) {
+	id, ok := f.reported[p.ClientSessionID]
+	if !ok || f.sessions[id].ClosedAt != nil {
+		return ReportedPlayState{}, false, nil
+	}
+	s := f.sessions[id]
+	s.CurrentPositionSeconds = p.PositionSeconds
+	f.sessions[id] = s
+	return ReportedPlayState{ID: id, StartedAt: s.StartedAt, Announced: true}, true, nil
+}
+
+func (f *fakePlaybackSessionStore) StartReportedPlay(_ context.Context, p ReportedPlay, newID string, _ int) (ReportedPlayState, error) {
 	if f.sessions == nil {
 		f.sessions = map[string]ABSPlaybackSession{}
 	}
 	if f.reported == nil {
 		f.reported = map[string]string{}
 	}
-	if id, ok := f.reported[p.ClientSessionID]; ok && f.sessions[id].ClosedAt == nil {
-		s := f.sessions[id]
-		s.CurrentPositionSeconds = p.PositionSeconds
-		f.sessions[id] = s
-		return id, true, nil
-	}
 	f.reported[p.ClientSessionID] = newID
 	f.sessions[newID] = ABSPlaybackSession{ID: newID, UserID: p.UserID, ProfileID: p.ProfileID, ContentID: p.ContentID,
-		MediaFileID: p.MediaFileID, CurrentPositionSeconds: p.PositionSeconds, ReportOnly: true}
-	return newID, false, nil
+		MediaFileID: p.MediaFileID, CurrentPositionSeconds: p.PositionSeconds, StartedAt: time.Now(), ReportOnly: true}
+	return ReportedPlayState{ID: newID, StartedAt: f.sessions[newID].StartedAt}, nil
 }
 
 // filesMediaStore returns a fixed slice of MediaFile entries for the

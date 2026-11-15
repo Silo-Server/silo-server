@@ -68,12 +68,14 @@ type ABSPlaybackSessionStore interface {
 	// ListClosedSessions returns paginated closed sessions for (user, profile)
 	// ordered by started_at DESC. Returns (rows, totalRowCount, error).
 	ListClosedSessions(ctx context.Context, userID, profileID string, limit, offset int) ([]ABSPlaybackSession, int, error)
-	// ReportPlay applies a live report of a play a client reports only
-	// through /session/local to the client session's open play, or starts
-	// one under newID unless the account already has maxOpen open (id is
-	// empty then). announced is false while the play's lifecycle start is
-	// not recorded.
-	ReportPlay(ctx context.Context, p ReportedPlay, newID string, maxOpen int) (id string, announced bool, err error)
+	// UpdateReportedPlay applies a live report of a play a client reports
+	// only through /session/local to the client session's open play, in one
+	// statement. found is false when the client session has none.
+	UpdateReportedPlay(ctx context.Context, p ReportedPlay) (state ReportedPlayState, found bool, err error)
+	// StartReportedPlay applies the report to the client session's open
+	// play, or starts one under newID unless the account already has maxOpen
+	// open (the state's ID is empty then).
+	StartReportedPlay(ctx context.Context, p ReportedPlay, newID string, maxOpen int) (ReportedPlayState, error)
 }
 
 // ReportedPlay is one live report of a play that a client reports only
@@ -88,6 +90,14 @@ type ReportedPlay struct {
 	// ListeningSeconds is the client's running listening total for its
 	// session.
 	ListeningSeconds float64
+}
+
+// ReportedPlayState is a reported play after a report.
+type ReportedPlayState struct {
+	ID        string
+	StartedAt time.Time
+	// Announced is false while the play's lifecycle start is not recorded.
+	Announced bool
 }
 
 // FinalSync is the last position and listening time a close carries.
