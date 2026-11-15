@@ -11,6 +11,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgconn"
@@ -1205,4 +1206,32 @@ func TestParseAudiobookFolderSkipsRejectedPart(t *testing.T) {
 	if !errors.As(err, &unreadable) || !reflect.DeepEqual(unreadable.paths, []string{bad}) {
 		t.Fatalf("book with no readable part: err = %v, want noReadableAudiobookPartError for %s", err, bad)
 	}
+}
+
+// A book can take longer than the progress interval; the count must still
+// reach the admin while it runs, and nothing may be written after stop.
+func TestAudiobookProgressReportsWhileABookIsSlow(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		var reports []int
+		ctx := WithProgressReporter(t.Context(), func(u ProgressUpdate) {
+			reports = append(reports, u.FilesProcessed)
+		})
+		processed := 1
+		stop := reportProgressEvery(ctx, audiobookScanProgressInterval, func() ProgressUpdate {
+			return audiobookScanProgress(1, 10, processed, 0, 0)
+		})
+
+		time.Sleep(2*audiobookScanProgressInterval + time.Millisecond) //nolint:forbidigo // synctest fake clock: advances two ticks instantly.
+		synctest.Wait()
+		if !slices.Equal(reports, []int{1, 1}) {
+			t.Fatalf("reports during a slow book = %v, want [1 1]", reports)
+		}
+
+		stop()
+		time.Sleep(2 * audiobookScanProgressInterval) //nolint:forbidigo // synctest fake clock: two more ticks would fire if stop leaked.
+		synctest.Wait()
+		if len(reports) != 2 {
+			t.Fatalf("reports after stop = %v, want none added", reports)
+		}
+	})
 }

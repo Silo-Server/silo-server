@@ -243,6 +243,10 @@ func listAudiobookDiskFiles(folderPath string, allowedPaths map[string]bool) (on
 	return onDisk, unreadable, nil
 }
 
+// audiobookScanProgressInterval is how often an audiobook scan reports how
+// many books it has finished.
+const audiobookScanProgressInterval = 3 * time.Second
+
 // audiobookScanWorkers returns the configured number of parallel workers
 // for audiobook reconciliation. Defaults to 8 — high enough to keep all
 // cores busy on the ffprobe step (which dominates per-book wall time)
@@ -752,7 +756,7 @@ func (s *Scanner) scanAudiobookPaths(ctx context.Context, folder *models.MediaFo
 	}
 	candidates := groupAudiobookCandidates(scans)
 	reconcileRoots, seenPaths, protectedPaths := splitAudiobookReconcileRoots(scans)
-	reportAudiobookScanProgress(ctx, folder.ID, len(candidates), 0, 0, 0)
+	reportProgress(ctx, audiobookScanProgress(folder.ID, len(candidates), 0, 0, 0))
 
 	if len(candidates) == 0 {
 		// No books on disk. Still reconcile (guarded) so a legitimately-emptied
@@ -844,23 +848,26 @@ func (s *Scanner) reconcileAudiobookCandidates(ctx context.Context, folder *mode
 						"error", err,
 					)
 				}
-				n := atomic.AddInt64(&processed, 1)
-				if n%500 == 0 || n == int64(len(candidates)) {
-					failedCount := atomic.LoadInt64(&failed)
-					skippedCount := atomic.LoadInt64(&skipped)
-					slog.InfoContext(ctx, "audiobook scan: progress", "component", "scanner",
-						"folder_id", folder.ID,
-						"processed", n,
-						"failed", failedCount,
-						"skipped", skippedCount,
-						"total", len(candidates),
-						"elapsed_sec", int(time.Since(start).Seconds()),
-					)
-					reportAudiobookScanProgress(ctx, folder.ID, len(candidates), int(n), int(failedCount), int(skippedCount))
-				}
+				atomic.AddInt64(&processed, 1)
 			}
 		})
 	}
+	// Books can each take seconds, so progress follows the clock: workers
+	// only count, and one goroutine writes the counts every interval.
+	progress := func() ProgressUpdate {
+		n, failedCount, skippedCount := atomic.LoadInt64(&processed), atomic.LoadInt64(&failed), atomic.LoadInt64(&skipped)
+		slog.InfoContext(ctx, "audiobook scan: progress", "component", "scanner",
+			"folder_id", folder.ID,
+			"processed", n,
+			"failed", failedCount,
+			"skipped", skippedCount,
+			"total", len(candidates),
+			"elapsed_sec", int(time.Since(start).Seconds()),
+		)
+		return audiobookScanProgress(folder.ID, len(candidates), int(n), int(failedCount), int(skippedCount))
+	}
+	stopProgress := reportProgressEvery(ctx, audiobookScanProgressInterval, progress)
+	defer stopProgress()
 
 	for _, p := range candidates {
 		select {
@@ -879,6 +886,8 @@ func (s *Scanner) reconcileAudiobookCandidates(ctx context.Context, folder *mode
 	if cancelErr != nil {
 		return cancelErr
 	}
+	stopProgress()
+	reportProgress(ctx, progress())
 
 	slog.InfoContext(ctx, "audiobook scan: completed", "component", "scanner",
 		"folder_id", folder.ID,
@@ -973,8 +982,8 @@ func (s *Scanner) reconcileAudiobookMissingFiles(ctx context.Context, folder *mo
 	return nil
 }
 
-func reportAudiobookScanProgress(ctx context.Context, folderID int, total, processed, failed, skipped int) {
-	reportProgress(ctx, ProgressUpdate{
+func audiobookScanProgress(folderID int, total, processed, failed, skipped int) ProgressUpdate {
+	return ProgressUpdate{
 		Phase:           "audiobook_scan",
 		Message:         fmt.Sprintf("Scanning audiobooks in folder %d", folderID),
 		CurrentScope:    strconv.Itoa(folderID),
@@ -983,7 +992,7 @@ func reportAudiobookScanProgress(ctx context.Context, folderID int, total, proce
 		FilesProcessed:  processed,
 		Errors:          failed,
 		Unchanged:       skipped,
-	})
+	}
 }
 
 // unreadable, when set, counts audio files ffprobe rejected that the book was
