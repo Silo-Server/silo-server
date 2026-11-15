@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -356,7 +357,7 @@ func (m *TranscodeManager) StopRemoteTranscode(sessionID, transcodeNodeURL strin
 		return
 	}
 	m.deleteNodeRecipeUnlessMoved(sessionID, transcodeNodeURL)
-	if err := m.deleteRemoteTranscode(context.Background(), sessionID, transcodeNodeURL, true); err != nil {
+	if err := m.deleteRemoteTranscode(context.Background(), sessionID, transcodeNodeURL, true, ""); err != nil {
 		slog.Warn("remote transcode delete failed", "error", err, "session", sessionID, "node", transcodeNodeURL, "playback_session_id", sessionID)
 	}
 }
@@ -398,20 +399,26 @@ func (m *TranscodeManager) StopRemoteTranscodeAfterFailure(sessionID, transcodeN
 // exists. User-visible stop paths use this before removing the playback session
 // so a node partition leaves a live session the caller can retry stopping.
 func (m *TranscodeManager) CancelRemoteTranscode(ctx context.Context, sessionID, transcodeNodeURL string) error {
-	return m.deleteRemoteTranscode(ctx, sessionID, transcodeNodeURL, true)
+	return m.deleteRemoteTranscode(ctx, sessionID, transcodeNodeURL, true, "")
 }
 
 // TranscodeStopFenceQueryParam set to "0" on a node stop asks the node not to
 // fence the transport against reconstruction.
 const TranscodeStopFenceQueryParam = "fence"
 
+// TranscodeStopStartIDQueryParam on a release names the start it releases;
+// the node leaves a job another start published under the same id.
+const TranscodeStopStartIDQueryParam = "start_id"
+
 // ReleaseRemoteTranscode stops a remote job whose transport id lives on: the
 // API is moving it between nodes. The node does not fence the id, so a replica
 // or a stream token whose route still names that node can rebuild it there,
 // and a release that lands late cannot lock out a successor started under the
-// same id.
-func (m *TranscodeManager) ReleaseRemoteTranscode(ctx context.Context, sessionID, transcodeNodeURL string) error {
-	return m.deleteRemoteTranscode(ctx, sessionID, transcodeNodeURL, false)
+// same id. startID names the start being released; the node then leaves a job
+// any other start published. Without one the node ends only the job it holds
+// when the release arrives.
+func (m *TranscodeManager) ReleaseRemoteTranscode(ctx context.Context, sessionID, transcodeNodeURL, startID string) error {
+	return m.deleteRemoteTranscode(ctx, sessionID, transcodeNodeURL, false, startID)
 }
 
 // LockSessionLifecycle acquires the per-session lifecycle mutex and returns a
@@ -1421,7 +1428,7 @@ var remoteTranscodeControlClient = func() *http.Client {
 // deleteRemoteTranscode sends DELETE to the assigned transcode node with a
 // bounded timeout. A missing process is already canceled and therefore
 // succeeds; other transport and HTTP failures remain retryable by the caller.
-func (m *TranscodeManager) deleteRemoteTranscode(ctx context.Context, sessionID, transcodeNodeURL string, fence bool) error {
+func (m *TranscodeManager) deleteRemoteTranscode(ctx context.Context, sessionID, transcodeNodeURL string, fence bool, startID string) error {
 	if transcodeNodeURL == "" {
 		return nil
 	}
@@ -1433,7 +1440,11 @@ func (m *TranscodeManager) deleteRemoteTranscode(ctx context.Context, sessionID,
 
 	deleteURL := transcodeNodeURL + "/transcode/" + sessionID
 	if !fence {
-		deleteURL += "?" + TranscodeStopFenceQueryParam + "=0"
+		query := url.Values{TranscodeStopFenceQueryParam: {"0"}}
+		if startID != "" {
+			query.Set(TranscodeStopStartIDQueryParam, startID)
+		}
+		deleteURL += "?" + query.Encode()
 	}
 	req, err := http.NewRequestWithContext(deleteCtx, http.MethodDelete, deleteURL, nil)
 	if err != nil {

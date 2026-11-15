@@ -242697,9 +242697,17 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "description": "On a release (fence=0), the start_id of the start being released; a job another start published under the ID is left running. Ignored on a fenced stop.",
+            "in": "query",
+            "name": "start_id",
+            "schema": {
+              "type": "string"
+            }
           }
         ],
-        "description": "Stop a transport under its lifecycle lock. Every stop installs a process-local token-lifetime fence that refuses token reconstruction (410) until a fresh start reuses the ID, unless fence=0 marks it a release of a transport moving to another node; a fenced stop also fences a progressive remux under the ID. The core deletes the stored recipe itself before it calls; the node closes the session's source. Local teardown may precede a 503 progressive-remux shutdown failure. A transport that runs nothing here returns 404 after cleanup attempts. This ID-addressed command has no durable replay identity and must not be automatically repeated against a possible successor.",
+        "description": "Stop a transport under its lifecycle lock. Every stop installs a process-local token-lifetime fence that refuses token reconstruction (410) until a fresh start reuses the ID, unless fence=0 marks it a release of a transport moving to another node; a fenced stop also fences a progressive remux under the ID. A release ends only the job it was sent for and answers 404 for another: with start_id, the HLS job that start published; without it, the HLS job running when the release arrived, not one a start or rebuild published while it waited for the lock. A fenced stop ends any job. The core deletes the stored recipe itself before it calls; the node closes the session's source. Local teardown may precede a 503 progressive-remux shutdown failure. A transport that runs nothing here returns 404 after cleanup attempts. This ID-addressed command has no durable replay identity and must not be automatically repeated against a possible successor.",
         "retry_safety": "non_retryable",
         "listener": "transcode_node",
         "method": "DELETE",
@@ -249217,6 +249225,9 @@
             "type": "string"
           },
           "source_video_profile": {
+            "type": "string"
+          },
+          "start_id": {
             "type": "string"
           },
           "start_segment_number": {
