@@ -100,3 +100,28 @@ func TestReplanWithoutSurroundConversionV3LeavesOtherFailuresAlone(t *testing.T)
 		t.Fatal("a plan that is not a surround conversion was replanned")
 	}
 }
+
+// The fallback plans from a fresh capability snapshot. When that snapshot
+// offers the other codec, it is a conversion too, and the route the refused
+// conversion improved on still plays.
+func TestReplanWithoutSurroundConversionV3SkipsTheOtherCodec(t *testing.T) {
+	handler, input, result := surroundFallbackFixtureV3(t)
+	sink := &playback.AudioPassthroughV3{PassthroughCodecs: []string{"eac3", "ac3"}, MaxChannels: 6, Entries: []playback.AudioPassthroughEntryV3{
+		{Codec: "eac3", ChannelCounts: []int{2, 6}, Layouts: []string{"stereo", "5.1"}},
+		{Codec: "ac3", ChannelCounts: []int{2, 6}, Layouts: []string{"stereo", "5.1"}},
+	}}
+	input.Request.Capabilities.AudioPassthrough = sink
+	input.Request.ClientPlaybackContext.Output.AudioPassthrough = sink
+	input.Request.ClientPlaybackContext.Deliveries[playback.DeliveryClassHLSV3] = playback.DeliveryCapabilityV3{Enabled: true, SupportedOnDevice: true, AudioPassthroughCodecs: []string{"eac3", "ac3"}}
+	ac3Only := playback.NewTransformationRegistryV3([]playback.TransformationSpecV3{
+		{Name: playback.TransformationAudioToAACV3, RecipeVersion: playback.TransformationAudioToAACRecipeVersionV3, Available: true},
+		{Name: playback.TransformationAudioToAC3V3, RecipeVersion: playback.TransformationAudioToAC3RecipeVersionV3, Available: true},
+	})
+	presetLocalRegistryV3(handler, ac3Only)
+	input.Registry = ac3Only
+
+	fallback, ok := handler.replanWithoutSurroundConversionV3(context.Background(), mediaAuthModeV3{}, func() (playback.PlannerInputV3, bool) { return input, true }, result, &transportErrorV3{reason: transcodeLimitReachedReasonV3})
+	if !ok || playback.IsSurroundBitstreamConversionV3(fallback.Plan) {
+		t.Fatalf("fallback ok=%v plan=%s, want the route the conversion improved on", ok, playback.ExplainPlannerResultV3(fallback))
+	}
+}

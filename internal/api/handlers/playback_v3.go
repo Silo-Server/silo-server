@@ -2217,7 +2217,6 @@ func (h *PlaybackHandler) startPlaybackApplicationV3(r *http.Request, body []byt
 	if fallback, ok := h.replanWithoutSurroundConversionV3(r.Context(), headerAuthenticatedMediaV3(req.ClientFeatures), func() (playback.PlannerInputV3, bool) {
 		return h.plannerInputV3(r.Context(), planning, req, effectiveFile, audioIndex), true
 	}, result, statusErr); ok {
-		markLearnedLimit(&fallback, learnedLimit, requestedFile, req, serverBitrateCapV3(r.Context()))
 		appendStartWarningsV3(&fallback, warnings)
 		result = fallback
 		response, statusErr = h.startPlannedPlaybackV3(r, userID, profileID, req, requestDigests, requestedFile, effectiveFile, audioIndex, intent, result, clientInfo)
@@ -6116,8 +6115,6 @@ func (h *PlaybackHandler) executeReplanV3(r *http.Request, record *playback.Atte
 		if ok {
 			surroundFallbackUsed = true
 			cancelReservation()
-			// Marked as the plan it replaces was.
-			markLearnedLimit(&fallback, learnedLimit, requestedFile, start, serverBitrateCapV3(r.Context()))
 			appendReplanDegradationWarningsV3(fallback.Plan, audioDegraded, subtitleDegraded, subtitleNotShown)
 		}
 		return fallback, ok

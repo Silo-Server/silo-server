@@ -42,18 +42,36 @@ func (h *PlaybackHandler) replanWithoutSurroundConversionV3(ctx context.Context,
 	if !ok {
 		return result, false
 	}
+	// Each codec is its own attempt key, and the fallback plans from a fresh
+	// capability snapshot, which can offer the other codec. Exclude every
+	// conversion it proposes; there are only two.
 	outputContextID := next.Request.ClientPlaybackContext.Output.OutputContextID
-	next.AttemptedKeys = append(append([]string(nil), next.AttemptedKeys...),
-		playback.PlanAttemptKeyV3(*result.Plan, outputContextID, nil))
-	next.Now = time.Now()
-	fallback, capabilityErr := h.planPlaybackWithCapabilitiesV3(ctx, next)
-	if capabilityErr != nil || fallback.Terminal != nil || fallback.Plan == nil || playback.IsSurroundBitstreamConversionV3(fallback.Plan) {
+	next.AttemptedKeys = append([]string(nil), next.AttemptedKeys...)
+	refused := result
+	var fallback playback.PlannerResultV3
+	for range 3 {
+		next.AttemptedKeys = append(next.AttemptedKeys, playback.PlanAttemptKeyV3(*refused.Plan, outputContextID, nil))
+		next.Now = time.Now()
+		var capabilityErr error
+		fallback, capabilityErr = h.planPlaybackWithCapabilitiesV3(ctx, next)
+		if capabilityErr != nil || fallback.Terminal != nil || fallback.Plan == nil {
+			return result, false
+		}
+		if !playback.IsSurroundBitstreamConversionV3(fallback.Plan) {
+			break
+		}
+		refused = fallback
+	}
+	if playback.IsSurroundBitstreamConversionV3(fallback.Plan) {
 		return result, false
 	}
 	fallback, escalateErr := h.escalateRefusedProgressiveRemuxV3(ctx, mode, func() playback.PlannerInputV3 { return next }, fallback)
 	if escalateErr != nil {
 		return result, false
 	}
+	// The fallback delivers the same file at the source bitrate, so the
+	// replaced plan's settled bandwidth-limit label applies unchanged.
+	fallback.Plan.BandwidthLimit = result.Plan.BandwidthLimit
 	slog.InfoContext(ctx, "protocol v3 surround conversion refused; using the next route",
 		logComponentKey, playbackLogValueV3,
 		"refusal", refusal.reason,
