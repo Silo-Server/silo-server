@@ -698,8 +698,9 @@ the way never record it.
    the calling node (`403`). There is no catalog query: the catalog is checked
    at open and at every renewal, so the check behind a request is at most one
    grant lifetime old. A response already being sent keeps reading the
-   descriptor it opened until it ends; a source withdrawn from the catalog
-   stops new reads, not one in flight.
+   descriptor it opened until it ends. A source withdrawn from the catalog
+   stops new reads once the node's grant has expired, and does not cut one
+   in flight.
 2. The core opens the granted path through `internal/fspath` without blocking
    on a FIFO, `fstat`s the descriptor, and compares the size and the
    modification time at microseconds with the grant: `410` when gone or not a
