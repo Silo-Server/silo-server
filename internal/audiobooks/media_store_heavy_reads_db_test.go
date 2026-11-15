@@ -129,3 +129,42 @@ func TestABSAuthorCountsRefreshOnOneConnectionPoolDB(t *testing.T) {
 		t.Fatalf("refresh on a one-connection pool: %v", err)
 	}
 }
+
+// TestABSAuthorsLeaveOutABookJustAddedToADisabledLibraryDB covers the authors
+// list for a profile that disabled a library: once a book in this library
+// also joins the disabled one, the very next request must stop counting its
+// author, although the precomputed author view still does.
+func TestABSAuthorsLeaveOutABookJustAddedToADisabledLibraryDB(t *testing.T) {
+	f := seedABSItemsFixture(t)
+	ctx := t.Context()
+	store := f.store
+	var hidden int
+	if err := store.Pool.QueryRow(ctx, `INSERT INTO media_folders (type, name, enabled) VALUES ('audiobooks', $1, true) RETURNING id`, f.delta+"-hidden").Scan(&hidden); err != nil {
+		t.Fatalf("seed disabled library: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = store.Pool.Exec(context.Background(), `DELETE FROM media_folders WHERE id = $1`, hidden)
+	})
+	if err := store.RefreshAuthorCounts(ctx, 0); err != nil {
+		t.Fatalf("refresh author view: %v", err)
+	}
+	access := catalog.AccessFilter{DisabledLibraryIDs: []int{hidden}}
+	author := strconv.FormatInt(f.authorID, 10)
+	listed := func() bool {
+		t.Helper()
+		authors, _, err := store.ListLibraryAuthors(ctx, int64(f.folderID), 0, 0, "name", false, access)
+		if err != nil {
+			t.Fatalf("ListLibraryAuthors: %v", err)
+		}
+		return slices.ContainsFunc(authors, func(a abs.AuthorSummary) bool { return a.ID == author })
+	}
+	if !listed() {
+		t.Fatal("author missing before the book joined the disabled library")
+	}
+	if _, err := store.Pool.Exec(ctx, `INSERT INTO media_item_libraries (content_id, media_folder_id) VALUES ($1, $2)`, f.delta, hidden); err != nil {
+		t.Fatalf("add book to disabled library: %v", err)
+	}
+	if listed() {
+		t.Error("author of a book in a disabled library still listed on the next request")
+	}
+}

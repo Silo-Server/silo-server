@@ -66,6 +66,11 @@ func (s *ABSMediaStore) cachedAudiobookCount(ctx context.Context, countSQL strin
 		return 0, err
 	}
 
+	if n == 0 {
+		// A library mid-scan reads zero until its first books land; caching
+		// that would hide them for the whole TTL.
+		return 0, nil
+	}
 	s.countMu.Lock()
 	if s.countCache == nil {
 		s.countCache = make(map[string]absCountEntry)
@@ -335,23 +340,30 @@ func (s *ABSMediaStore) streamListing(ctx context.Context, stream *absStream, to
 }
 
 // loadListing loads and hydrates the books ids names, in that order.
+// Each query reads at most absStreamBatch IDs, so a whole-library listing
+// never sends one unbounded ID array.
 func (s *ABSMediaStore) loadListing(ctx context.Context, ids []string, access catalog.AccessFilter, libraryID int64) ([]*models.MediaItem, error) {
-	items, err := s.Items.GetByIDs(ctx, ids)
-	if err != nil {
-		return nil, fmt.Errorf("abs_media_store: load audiobooks: %w", err)
-	}
-	// GetByIDs sorts by content_id ASC; preserve the requested order.
-	byID := make(map[string]*models.MediaItem, len(items))
-	for _, it := range items {
-		byID[it.ContentID] = it
-	}
 	ordered := make([]*models.MediaItem, 0, len(ids))
-	for _, id := range ids {
-		if it, ok := byID[id]; ok {
-			ordered = append(ordered, it)
+	for start := 0; start < len(ids); start += absStreamBatch {
+		batch := ids[start:min(start+absStreamBatch, len(ids))]
+		items, err := s.Items.GetByIDs(ctx, batch)
+		if err != nil {
+			return nil, fmt.Errorf("abs_media_store: load audiobooks: %w", err)
 		}
+		// GetByIDs sorts by content_id ASC; preserve the requested order.
+		byID := make(map[string]*models.MediaItem, len(items))
+		for _, it := range items {
+			byID[it.ContentID] = it
+		}
+		loaded := make([]*models.MediaItem, 0, len(batch))
+		for _, id := range batch {
+			if it, ok := byID[id]; ok {
+				loaded = append(loaded, it)
+			}
+		}
+		s.hydrateListing(ctx, loaded, access, libraryID)
+		ordered = append(ordered, loaded...)
 	}
-	s.hydrateListing(ctx, ordered, access, libraryID)
 	return ordered, nil
 }
 
@@ -927,22 +939,7 @@ func (s *ABSMediaStore) listAudiobookIDs(ctx context.Context, sql string, args [
 	if len(ids) == 0 {
 		return []*models.MediaItem{}, nil
 	}
-	items, err := s.Items.GetByIDs(ctx, ids)
-	if err != nil {
-		return nil, fmt.Errorf("abs_media_store: load audiobooks: %w", err)
-	}
-	byID := make(map[string]*models.MediaItem, len(items))
-	for _, it := range items {
-		byID[it.ContentID] = it
-	}
-	ordered := make([]*models.MediaItem, 0, len(ids))
-	for _, id := range ids {
-		if it, ok := byID[id]; ok {
-			ordered = append(ordered, it)
-		}
-	}
-	s.hydrateListing(ctx, ordered, access, libraryID)
-	return ordered, nil
+	return s.loadListing(ctx, ids, access, libraryID)
 }
 
 // SearchAudiobooks matches the query against title plus author/narrator name.
@@ -1174,24 +1171,28 @@ func (s *ABSMediaStore) RefreshAuthorCounts(ctx context.Context, minInterval tim
 
 // libraryOverlapsDisabled reports whether a book in the library is also in
 // one of the profile's disabled libraries. The author view counts such a book
-// but the profile must not see it. Without an overlap the check reads every
-// membership in the library, so its answer shares the short-lived count
-// cache: an author sync pages many times with the same answer.
+// but the profile must not see it. It is an access answer, so it is read on
+// every request rather than cached. The disabled libraries' memberships drive
+// it (idx_item_libraries_folder_seen_content), each probing this library
+// through the primary key, and it stops at the first overlap.
 func (s *ABSMediaStore) libraryOverlapsDisabled(ctx context.Context, libraryID int64, disabled []int) (bool, error) {
 	if len(disabled) == 0 {
 		return false, nil
 	}
-	n, err := s.cachedAudiobookCount(ctx, `
-		SELECT COUNT(*) FROM (
-			SELECT 1 FROM media_item_libraries here
-			JOIN media_item_libraries hidden ON hidden.content_id = here.content_id
-			WHERE here.media_folder_id = $1 AND hidden.media_folder_id = ANY($2)
-			LIMIT 1
-		) overlap`, []any{int(libraryID), disabled})
+	var overlap bool
+	err := s.Pool.QueryRow(ctx, `
+		SELECT EXISTS (
+			SELECT 1 FROM media_item_libraries hidden
+			WHERE hidden.media_folder_id = ANY($2)
+			  AND EXISTS (
+				SELECT 1 FROM media_item_libraries here
+				WHERE here.content_id = hidden.content_id AND here.media_folder_id = $1
+			  )
+		)`, int(libraryID), disabled).Scan(&overlap)
 	if err != nil {
 		return false, fmt.Errorf("abs_media_store: check disabled library overlap: %w", err)
 	}
-	return n > 0, nil
+	return overlap, nil
 }
 
 // ListLibraryAuthors returns one page of distinct audiobook authors plus the
