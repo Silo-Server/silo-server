@@ -8,8 +8,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/nodepool/nodepooltest"
+	"github.com/Silo-Server/silo-server/internal/nodesource/nodesourcetest"
+
 	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/nodeauth"
+	"github.com/Silo-Server/silo-server/internal/nodeauth/nodeauthtest"
 	"github.com/Silo-Server/silo-server/internal/nodepool"
 	"github.com/Silo-Server/silo-server/internal/scanner"
 )
@@ -265,7 +270,7 @@ type testRemoteFrameExtractor struct {
 func (e *testRemoteFrameExtractor) ExtractFrame(
 	_ context.Context,
 	node *nodepool.Node,
-	_ string,
+	_ nodeauth.Keyring,
 	req RemoteExtractRequest,
 ) ([]byte, string, error) {
 	if node != nil {
@@ -630,13 +635,15 @@ func TestExtractFramePrefersRemoteNodeWhenEnabled(t *testing.T) {
 	service := &Service{
 		settings: testSettingsReader{values: map[string]string{
 			chapterThumbnailExecutionSetting: chapterThumbnailExecutionPreferTranscode,
-			authJWTSecretSetting:             "secret",
 		}},
-		transcodePool:      &nodepool.TranscodePool{},
+		transcodePool:      nodepooltest.NewTranscodePool(),
+		nodeKeys:           nodeauthtest.NodeKey("secret"),
 		remoteReservations: &nodepool.Reservations{},
 		remoteExtractor:    remote,
+		sourceGrants:       nodesourcetest.Granter{},
 	}
 	service.transcodePool.SetNodes([]*nodepool.Node{{
+		ID:         5,
 		URL:        "http://node-1",
 		Enabled:    true,
 		Healthy:    true,
@@ -645,7 +652,7 @@ func TestExtractFramePrefersRemoteNodeWhenEnabled(t *testing.T) {
 
 	data, reason, err := service.extractFrame(
 		context.Background(),
-		&models.MediaFile{FilePath: "/media/movie.mkv"},
+		&models.MediaFile{ID: 42, FilePath: "/media/movie.mkv"},
 		5,
 		chapterThumbnailHDRPolicyBestEffort,
 	)
@@ -660,6 +667,9 @@ func TestExtractFramePrefersRemoteNodeWhenEnabled(t *testing.T) {
 	}
 	if len(remote.nodes) != 1 || remote.nodes[0] != "http://node-1" {
 		t.Fatalf("remote nodes = %#v, want node-1", remote.nodes)
+	}
+	if want := nodesourcetest.Grant(5, 42, "/media/movie.mkv"); remote.requests[0].SourceGrant != want {
+		t.Fatalf("source grant = %q, want %q", remote.requests[0].SourceGrant, want)
 	}
 }
 
@@ -679,14 +689,14 @@ func TestExtractFramePropagatesSoftwareToneMapSettingToRemoteNode(t *testing.T) 
 			remote := &testRemoteFrameExtractor{data: []byte("remote-frame")}
 			settings := map[string]string{
 				chapterThumbnailExecutionSetting: chapterThumbnailExecutionPreferTranscode,
-				authJWTSecretSetting:             "secret",
 			}
 			if tt.settingValue != "" {
 				settings[config.ChapterThumbnailSoftwareToneMapSettingKey] = tt.settingValue
 			}
 			service := &Service{
 				settings:           testSettingsReader{values: settings},
-				transcodePool:      &nodepool.TranscodePool{},
+				transcodePool:      nodepooltest.NewTranscodePool(),
+				nodeKeys:           nodeauthtest.NodeKey("secret"),
 				remoteReservations: &nodepool.Reservations{},
 				remoteExtractor:    remote,
 			}
@@ -723,11 +733,11 @@ func TestExtractFrameFallsBackLocalWhenPreferredNodeUnavailable(t *testing.T) {
 	service := &Service{
 		settings: testSettingsReader{values: map[string]string{
 			chapterThumbnailExecutionSetting: chapterThumbnailExecutionPreferTranscode,
-			authJWTSecretSetting:             "secret",
 			// Skip auto-detection, which probes the host's real ffmpeg.
 			playbackHWAccelSetting: hwAccelNone,
 		}},
-		transcodePool:      &nodepool.TranscodePool{},
+		transcodePool:      nodepooltest.NewTranscodePool(),
+		nodeKeys:           nodeauthtest.NodeKey("secret"),
 		remoteReservations: &nodepool.Reservations{},
 		remoteExtractor: &testRemoteFrameExtractor{
 			reason: chapterThumbnailNodeUnavailableReason,
@@ -766,9 +776,9 @@ func TestExtractFrameRequiresRemoteCapacityWhenConfigured(t *testing.T) {
 		settings: testSettingsReader{values: map[string]string{
 			chapterThumbnailExecutionSetting:    chapterThumbnailExecutionTranscodeOnly,
 			chapterThumbnailNodeCapacitySetting: "1",
-			authJWTSecretSetting:                "secret",
 		}},
-		transcodePool: &nodepool.TranscodePool{},
+		transcodePool: nodepooltest.NewTranscodePool(),
+		nodeKeys:      nodeauthtest.NodeKey("secret"),
 		remoteReservations: nodepool.NewReservations(map[string]int{
 			"http://node-1": 1,
 		}),
@@ -803,9 +813,9 @@ func TestReserveRemoteNodeAccountsForReservations(t *testing.T) {
 	service := &Service{
 		settings: testSettingsReader{values: map[string]string{
 			chapterThumbnailNodeCapacitySetting: "2",
-			authJWTSecretSetting:                "secret",
 		}},
-		transcodePool: &nodepool.TranscodePool{},
+		transcodePool: nodepooltest.NewTranscodePool(),
+		nodeKeys:      nodeauthtest.NodeKey("secret"),
 		remoteReservations: nodepool.NewReservations(map[string]int{
 			"http://node-1": 1,
 		}),

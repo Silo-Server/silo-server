@@ -1307,3 +1307,29 @@
 # Smart collection collage records: a refresh deletes the collection's records
 # nobody refreshed for a week, with or without a collage, and keeps the rest.
 ./internal/catalog TestSmartCollageRecordsRetireWhenUnrefreshedDB
+
+# Transcode node keys: issuing stores only ciphertext and moves neither the
+# admin revision nor the pool generation, proxies and missing rows are
+# refused, and the credential registry loads disabled nodes and rotations.
+# Two transcode nodes cannot share a canonical URL.
+./internal/nodepool TestIssueNodeKeyDB
+./internal/nodepool TestTranscodeNodeURLsAreUniqueDB
+
+# Admin node writes reach every credential registry: the writing API server's
+# before it answers (a deleted node's key is refused at once, a moved node is
+# signable at its new URL, a disabled one keeps its key), a proxy's through
+# node_pool_changed, and another API server's through its reconciliation.
+./cmd/silo TestNodeWritesReachEveryCredentialRegistryDB
+
+# Transcode node control plane: the core authenticates node calls against the
+# real credential registry (a disabled node keeps its access; a proxy row, a
+# keyless or deleted node is refused), and stores a node's shipped log entries
+# under the authenticated node with timestamps clamped to the core's window and
+# a client_ip that is not an address cleared, so the batch stores in one insert.
+./internal/nodecontrol TestRequireNodeWithTheCredentialRegistryDB
+./internal/opslog TestInsertNodeBatchStampsTheNodeAndClearsABadAddressDB
+./internal/opslog TestInsertNodeBatchClampsTimestampsDB
+
+# A transcode node's source grant is honored only while the catalog has its
+# exact media file: the row id, at exactly the granted path, not missing.
+./internal/scanner TestFileRepositoryIsActiveFileDB

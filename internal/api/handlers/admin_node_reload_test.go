@@ -48,7 +48,7 @@ func TestAdminNodeReloadBulk(t *testing.T) {
 		{ID: 9, Name: "Disabled", URL: server.URL + "/disabled", Enabled: false},
 		{ID: 2, Name: "Second", URL: server.URL + "/second", Enabled: true},
 	}}}
-	h := NewNodeHandler(repo, nil, nil, nil, nil, nil, "synthetic-secret")
+	h := NewNodeHandler(repo, nil, nil, nil, nil, nil, nodeauthtest.SameKey("synthetic-secret"))
 	done := make(chan []ForceReloadResult, 1)
 	go func() {
 		rows, err := h.ForceReloadAdminNodes(t.Context())
@@ -93,7 +93,7 @@ func TestAdminNodeReloadSingle(t *testing.T) {
 			}))
 			defer server.Close()
 			repo := &stubNodeRepository{node: &nodepool.Node{ID: 17, URL: server.URL, Enabled: false}}
-			h := NewNodeHandler(repo, nil, nil, nil, nil, nil, "synthetic-secret")
+			h := NewNodeHandler(repo, nil, nil, nil, nil, nil, nodeauthtest.SameKey("synthetic-secret"))
 			rows, err := h.ForceReloadAdminNode(t.Context(), 17)
 			if err != nil || len(rows) != 1 || rows[0].NodeID != 17 || calls.Load() != 1 || redirected.Load() != 0 {
 				t.Fatal(rows, err, calls.Load(), redirected.Load())
@@ -106,7 +106,7 @@ func TestAdminNodeReloadSingle(t *testing.T) {
 }
 func TestAdminNodeReloadMissingAndCanceled(t *testing.T) {
 	repo := &stubNodeRepository{}
-	h := NewNodeHandler(repo, nil, nil, nil, nil, nil, "")
+	h := NewNodeHandler(repo, nil, nil, nil, nil, nil, nil)
 	if _, err := h.ForceReloadAdminNode(t.Context(), 1); !errors.Is(err, nodepool.ErrNodeNotFound) {
 		t.Fatal(err)
 	}

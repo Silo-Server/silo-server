@@ -63,7 +63,7 @@ func fakeNodeServer(t *testing.T, status int, body string) (url string, signedWi
 // slower hardware is not abandoned on a cluster-wide guess. A node that has
 // never been inventoried falls back to the generous constant.
 func TestNodeReprobeTimeoutPrefersTheNodeAdvertisedBudget(t *testing.T) {
-	handler := NewNodeHandler(&stubNodeRepository{}, nil, nil, nil, nil, nil, "secret")
+	handler := NewNodeHandler(&stubNodeRepository{}, nil, nil, nil, nil, nil, nodeauthtest.SameKey("secret"))
 	// Above the fallback, which is a floor: a node that says it needs less than
 	// the constant this handler is willing to spend does not shorten it.
 	advertised := playback.HWAccelInfo{ProbeRequestTimeoutMillis: 200_000}
@@ -92,7 +92,7 @@ func TestNodeReprobeTimeoutPrefersTheNodeAdvertisedBudget(t *testing.T) {
 func TestNodeReprobeTimeoutRepricesAWidenedDeviceOverride(t *testing.T) {
 	devices := "/dev/dri/renderD128,/dev/dri/renderD129,/dev/dri/renderD130,/dev/dri/renderD131"
 	backend := tonemap.BackendQSV
-	handler := NewNodeHandler(&stubNodeRepository{}, nil, nil, nil, nil, nil, "secret")
+	handler := NewNodeHandler(&stubNodeRepository{}, nil, nil, nil, nil, nil, nodeauthtest.SameKey("secret"))
 	handler.SetClusterPlaybackPolicy(func() config.PlaybackConfig {
 		return config.PlaybackConfig{HWAccel: tonemap.BackendQSV, HWDevice: "/dev/dri/renderD128"}
 	})
@@ -135,7 +135,7 @@ func (b *boundedCapabilityRefresher) CapabilityRefreshBound(*nodepool.Node) time
 // has already changed the node.
 func TestReprobeWriteDeadlineReservesTheNodesOwnRefreshBound(t *testing.T) {
 	node := &nodepool.Node{ID: 1, Name: "gpu-1", URL: "http://gpu-1", Type: nodepool.NodeTypeTranscode}
-	handler := NewNodeHandler(&stubNodeRepository{}, nil, nil, nil, nil, nil, "secret")
+	handler := NewNodeHandler(&stubNodeRepository{}, nil, nil, nil, nil, nil, nodeauthtest.SameKey("secret"))
 
 	// No refresher: the floor is all this handler can promise.
 	if got := handler.capabilityRefreshBound(node); got != nodepool.CapabilityRefreshTimeout {

@@ -34,6 +34,10 @@ func TestMiddlewarePathFiltering(t *testing.T) {
 		{name: "v2 admin logs ws ticket", path: "/api/v2/admin/logs/ws-ticket", logged: false},
 		{name: "v2 admin logs ws capabilities", path: "/api/v2/admin/logs/ws/capabilities", logged: false},
 
+		// Transcode nodes report and ship their logs every second.
+		{name: "node report", path: "/api/internal/nodes/self/report", logged: false},
+		{name: "node logs", path: "/api/internal/nodes/self/logs", logged: false},
+
 		// Session starts stay logged on both majors.
 		{name: "v2 stream session start", path: "/api/v2/stream/sess-1", logged: true},
 

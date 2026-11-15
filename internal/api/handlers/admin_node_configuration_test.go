@@ -5,10 +5,12 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/cache"
 	"github.com/Silo-Server/silo-server/internal/nodeauth/nodeauthtest"
 	"github.com/Silo-Server/silo-server/internal/nodepool"
 )
@@ -123,7 +125,7 @@ func TestUpdateAdminNodeNudgesWorkerOnlyOnPolicyTargetChange(t *testing.T) {
 	run := func(t *testing.T, before, after nodepool.Node, input nodepool.UpdateNodeInput) (reloads, invalidations int) {
 		after.AdminRevision = 2
 		s := &scriptedNodeConfiguration{update: &struct{ before, after *nodepool.Node }{&before, &after}}
-		h := NewNodeHandler(&stubNodeRepository{}, nil, nil, nil, nil, nil, "secret")
+		h := NewNodeHandler(&stubNodeRepository{}, nil, nil, nil, nil, nil, nodeauthtest.SameKey("secret"))
 		h.SetConfigurationStore(s)
 		invalidated := make(chan string, 4)
 		h.SetCapabilityInvalidator(func(url string) { invalidated <- url })
@@ -196,5 +198,41 @@ func TestUpdateAdminNodeNudgesWorkerOnlyOnPolicyTargetChange(t *testing.T) {
 	})
 	if destructive.Load() {
 		t.Fatal("a policy edit hit the destructive force-reload route")
+	}
+}
+
+// acceptingNodeConfiguration commits every create, update and delete.
+type acceptingNodeConfiguration struct{ scriptedNodeConfiguration }
+
+func (acceptingNodeConfiguration) Create(_ context.Context, input nodepool.CreateNodeInput) (*nodepool.Node, error) {
+	return &nodepool.Node{ID: 1, Name: input.Name, Type: input.Type, URL: input.URL}, nil
+}
+func (acceptingNodeConfiguration) Delete(context.Context, int, func(int64) error) error { return nil }
+
+// Every v2 create, update and delete publishes node_pool_changed: a proxy's
+// credential registry learns of the write only through it, so without it a
+// deleted node stays signable on the proxy until its periodic reload.
+func TestAdminNodeWritesPublishNodePoolChanged(t *testing.T) {
+	node := &nodepool.Node{ID: 1, Type: nodepool.NodeTypeTranscode, URL: "http://node.invalid"}
+	store := &acceptingNodeConfiguration{scriptedNodeConfiguration{update: &struct{ before, after *nodepool.Node }{node, node}}}
+	bus := &recordingEventBus{}
+	h := NewNodeHandler(&stubNodeRepository{}, nil, nil, nil, bus, nil, nil)
+	h.SetConfigurationStore(store)
+	updated := make(chan struct{})
+	h.afterNodeUpdate = func() { close(updated) }
+	anyRevision := func(int64) error { return nil }
+	ctx := t.Context()
+	if _, err := h.CreateAdminNode(ctx, nodepool.CreateNodeInput{Name: "n", Type: nodepool.NodeTypeTranscode, URL: node.URL}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.UpdateAdminNode(ctx, 1, nodepool.UpdateNodeInput{}, anyRevision); err != nil {
+		t.Fatal(err)
+	}
+	<-updated
+	if err := h.DeleteAdminNode(ctx, 1, anyRevision); err != nil {
+		t.Fatal(err)
+	}
+	if got := bus.types(); !slices.Equal(got, []string{cache.EventNodePoolChanged, cache.EventNodePoolChanged, cache.EventNodePoolChanged}) {
+		t.Fatalf("published %v, want node_pool_changed after each of the three writes", got)
 	}
 }

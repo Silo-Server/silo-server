@@ -24,7 +24,7 @@ func TestStartPlaybackV2PersistsBeforeTransportPublication(t *testing.T) {
 	for _, shutdown := range []bool{false, true} {
 		t.Run(map[bool]string{false: "save failure", true: "shutdown after save"}[shutdown], func(t *testing.T) {
 			file := v3HandlerFixtureFile(t)
-			handler := NewPlaybackHandler(playback.NewSessionManager(0, 0), testPlaybackFileResolver{file: file})
+			handler := newKeyedPlaybackHandler(playback.NewSessionManager(0, 0), testPlaybackFileResolver{file: file})
 			handler.ItemAccess = allowAllPlaybackItemAccess{}
 			handler.PlaybackConfig = playbackTestConfig(writePlaybackTestFFmpeg(t), t.TempDir())
 			presetLocalRegistryV3(handler, playback.NewTransformationRegistryV3([]playback.TransformationSpecV3{{Name: "audio_to_aac", RecipeVersion: "2", Available: true}, {Name: "video_to_h264", RecipeVersion: "2", Available: true}}))

@@ -14210,6 +14210,10 @@
             "minLength": 1,
             "type": "string"
           },
+          "key_issued": {
+            "description": "A key has been issued to this transcode node. The key itself is shown only when it is issued. Always false for a proxy.",
+            "type": "boolean"
+          },
           "last_health_check": {
             "description": "RFC 3339 instant in UTC with millisecond precision, or null",
             "format": "date-time",
@@ -14284,7 +14288,8 @@
           "last_health_check",
           "created_at",
           "drain_requested",
-          "drain_state"
+          "drain_state",
+          "key_issued"
         ],
         "type": "object"
       },
@@ -14297,6 +14302,10 @@
           },
           "drain": {
             "description": "Transcode nodes can drain: the drain and resume operations, and drain_requested and drain_state on node rows.",
+            "type": "boolean"
+          },
+          "node_keys": {
+            "description": "Transcode nodes can be issued their own key: POST /admin/nodes/{id}/key, and key_issued on node rows.",
             "type": "boolean"
           },
           "revision": {
@@ -14321,6 +14330,7 @@
         "required": [
           "drain",
           "summary",
+          "node_keys",
           "revision",
           "state",
           "allowed"
@@ -14448,6 +14458,19 @@
           "active_jobs",
           "egress_kbps",
           "health_persisted"
+        ],
+        "type": "object"
+      },
+      "AdminNodeKey": {
+        "additionalProperties": false,
+        "properties": {
+          "node_key": {
+            "description": "The transcode node's new key, for its SILO_NODE_KEY setting. Shown only in this response; it is never returned again.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "node_key"
         ],
         "type": "object"
       },
@@ -104752,6 +104775,177 @@
           }
         ],
         "summary": "Synchronously request force reload from one stored node, including a disabled node. May tear down sessions. Ten-second timeout, no redirects or automatic replay; per-node status is acknowledgement or uncertainty, not a durable receipt.",
+        "tags": [
+          "admin-nodes"
+        ],
+        "x-silo-class": "acting_admin",
+        "x-silo-demo-restricted": true,
+        "x-silo-retry-safety": "non_retryable",
+        "x-silo-service-backed": true
+      }
+    },
+    "/api/v2/admin/nodes/{id}/key": {
+      "post": {
+        "operationId": "issueAdminNodeKey",
+        "parameters": [
+          {
+            "description": "Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted.",
+            "in": "header",
+            "name": "X-Profile-Id",
+            "schema": {
+              "examples": [
+                "1"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked",
+            "in": "header",
+            "name": "X-Profile-Token",
+            "schema": {
+              "examples": [
+                "pvt_5f3a9c1e7b2d4e8fa0c6"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "maxLength": 10,
+              "pattern": "^[1-9][0-9]*$",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminNodeKey"
+                }
+              }
+            },
+            "description": "Created",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Acceptable"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Issue a new key for a transcode node and return it once. Each call rotates: the previous key stops working on this server at once and on other servers and proxies within seconds. The node's running streams fail until it restarts with the new key; drain the node first to avoid that. A disabled node can take a key. Never replay an uncertain issue; issue again instead.",
         "tags": [
           "admin-nodes"
         ],
@@ -239873,7 +240067,7 @@
         }
       },
       {
-        "description": "Reload configuration and tear down active sessions and delivery authority. Failure can follow partial effects.",
+        "description": "Reread configuration from the core, ask the core to revoke this node's recipes (POST /api/internal/nodes/self/revoke-recipes), and tear down active sessions. A failed revocation fails the command after the teardown. Failure can follow partial effects.",
         "retry_safety": "non_retryable",
         "listener": "transcode_node",
         "method": "POST",
@@ -239903,21 +240097,11 @@
               }
             },
             "description": "Internal Server Error"
-          },
-          "503": {
-            "content": {
-              "text/plain": {
-                "schema": {
-                  "type": "string"
-                }
-              }
-            },
-            "description": "Service Unavailable"
           }
         }
       },
       {
-        "description": "Reload configuration without tearing down active sessions. No durable replay receipt.",
+        "description": "Reread configuration from the core without tearing down active sessions; the core calls it after an admin change to this node. No durable replay receipt.",
         "retry_safety": "non_retryable",
         "listener": "transcode_node",
         "method": "POST",
@@ -239947,16 +240131,6 @@
               }
             },
             "description": "Internal Server Error"
-          },
-          "503": {
-            "content": {
-              "text/plain": {
-                "schema": {
-                  "type": "string"
-                }
-              }
-            },
-            "description": "Service Unavailable"
           }
         }
       },
@@ -240022,7 +240196,7 @@
           },
           "required": true
         },
-        "description": "Extract a JPEG frame from an approved input path under the worker GPU admission gate. No durable replay receipt; decoder ignores unknown JSON keys and uses zero values for omitted options.",
+        "description": "Extract a JPEG frame from the granted source under the worker GPU admission gate. No durable replay receipt; decoder ignores unknown JSON keys and uses zero values for omitted options. source_grant is required: the node exchanges it at the core (POST /api/internal/nodes/self/sources/open) and reads only the path the core approves, never the input path the request names, for the job's life; a source the core withdraws ends the job. A missing or refused grant returns 400, a node mount that does not show the approved revision 409, a core the node cannot reach 503.",
         "retry_safety": "non_retryable",
         "listener": "transcode_node",
         "method": "POST",
@@ -240055,7 +240229,7 @@
                 }
               }
             },
-            "description": "Invalid request or unapproved input path"
+            "description": "Invalid request, or a missing or refused source grant"
           },
           "401": {
             "content": {
@@ -240066,6 +240240,16 @@
               }
             },
             "description": "Unauthorized"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/x-silo-worker-protocols/schemas/chapterthumbs_RemoteExtractErrorResponse"
+                }
+              }
+            },
+            "description": "This node's mount does not show the approved source revision"
           },
           "422": {
             "content": {
@@ -240090,7 +240274,7 @@
                 }
               }
             },
-            "description": "Node, input authority or GPU admission unavailable"
+            "description": "Node, the core's source authority or GPU admission unavailable"
           }
         }
       },
@@ -240105,7 +240289,7 @@
           },
           "required": true
         },
-        "description": "Make trickplay sprite sheets for a mediasample Sheets request of samples on an approved input path, up to the node's configured number of runs at once, at idle priority, on the node's own hardware. No durable replay receipt; the API server keeps the lease and retries elsewhere.",
+        "description": "Make trickplay sprite sheets for a mediasample Sheets request of samples on the granted source, up to the node's configured number of runs at once, at idle priority, on the node's own hardware. No durable replay receipt; the API server keeps the lease and retries elsewhere. source_grant is required: the node exchanges it at the core (POST /api/internal/nodes/self/sources/open) and reads only the path the core approves, never the input path the request names, for the job's life; a source the core withdraws ends the job. A missing or refused grant returns 400, a node mount that does not show the approved revision 409, a core the node cannot reach 503.",
         "retry_safety": "non_retryable",
         "listener": "transcode_node",
         "method": "POST",
@@ -240136,7 +240320,7 @@
                 }
               }
             },
-            "description": "Invalid request or unapproved input path"
+            "description": "Invalid request, or a missing or refused source grant"
           },
           "401": {
             "content": {
@@ -240147,6 +240331,16 @@
               }
             },
             "description": "Unauthorized"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/x-silo-worker-protocols/schemas/trickplay_ExtractError"
+                }
+              }
+            },
+            "description": "This node's mount does not show the approved source revision"
           },
           "422": {
             "content": {
@@ -240171,7 +240365,7 @@
                 }
               }
             },
-            "description": "Node at its trickplay run capacity, re-probing, or unconfigured"
+            "description": "Node at its trickplay run capacity, re-probing, unconfigured, or unable to reach the core's source authority"
           }
         }
       },
@@ -240186,7 +240380,7 @@
           },
           "required": true
         },
-        "description": "Run one software media sampling request on an approved input path with the node's ffmpeg and return its result. Read-only analysis; a repeated request decodes the file again.",
+        "description": "Run one software media sampling request on the granted source with the node's ffmpeg and return its result. Read-only analysis; a repeated request decodes the file again. source_grant is required: the node exchanges it at the core (POST /api/internal/nodes/self/sources/open) and reads only the path the core approves, never the input path the request names, for the job's life; a source the core withdraws ends the job. A missing or refused grant returns 400, a node mount that does not show the approved revision 409, a core the node cannot reach 503.",
         "retry_safety": "natural_idempotent",
         "listener": "transcode_node",
         "method": "POST",
@@ -240217,7 +240411,7 @@
                 }
               }
             },
-            "description": "Invalid request, hardware attempt, or unapproved input path"
+            "description": "Invalid request, hardware attempt, or a missing or refused source grant"
           },
           "401": {
             "content": {
@@ -240228,6 +240422,16 @@
               }
             },
             "description": "Unauthorized"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/x-silo-worker-protocols/schemas/mediasample_RemoteFailure"
+                }
+              }
+            },
+            "description": "This node's mount does not show the approved source revision"
           },
           "422": {
             "content": {
@@ -240252,7 +240456,7 @@
                 }
               }
             },
-            "description": "Node or input authority unavailable"
+            "description": "Node or the core's source authority unavailable"
           }
         }
       },
@@ -241261,7 +241465,7 @@
           },
           "required": true
         },
-        "description": "Synchronously prepare or reuse a node-local MP4 under an artifact lifecycle lock. The JSON decoder reads at most 64 KiB, ignores unknown keys and uses zero values for omitted options. Input path authority and GPU admission apply. Ordinary nonempty artifacts can be reused by ID alone; requested execution attestations require a matching receipt. Missing/mismatched receipts may cause replacement. Request cancellation is not proof that no artifact was published; there is no durable job admission or automatic replay guarantee.",
+        "description": "Synchronously prepare or reuse a node-local MP4 under an artifact lifecycle lock. The JSON decoder reads at most 64 KiB, ignores unknown keys and uses zero values for omitted options. Source grant and GPU admission apply. Ordinary nonempty artifacts can be reused by ID alone; requested execution attestations require a matching receipt. Missing/mismatched receipts may cause replacement. Request cancellation is not proof that no artifact was published; there is no durable job admission or automatic replay guarantee. source_grant is required: the node exchanges it at the core (POST /api/internal/nodes/self/sources/open) and reads only the path the core approves, never the input path the request names, for the job's life; a source the core withdraws ends the job. A missing or refused grant returns 400, a node mount that does not show the approved revision 409, a core the node cannot reach 503. The execution fingerprint excludes source_grant.",
         "retry_safety": "non_retryable",
         "listener": "transcode_node",
         "method": "POST",
@@ -241298,6 +241502,16 @@
               }
             },
             "description": "Unauthorized"
+          },
+          "409": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Conflict"
           },
           "422": {
             "content": {
@@ -242584,7 +242798,7 @@
             }
           }
         ],
-        "description": "Stop a transport under its lifecycle lock. Every stop installs a process-local token-lifetime fence that refuses token reconstruction (410) until a fresh start reuses the ID, unless fence=0 marks it a release of a transport moving to another node; stored recipe deletion is required when configured. Local teardown may precede a 503 authority-deletion or shutdown failure. A missing session/recipe returns 404 after cleanup attempts. This ID-addressed command has no durable replay identity and must not be automatically repeated against a possible successor.",
+        "description": "Stop a transport under its lifecycle lock. Every stop installs a process-local token-lifetime fence that refuses token reconstruction (410) until a fresh start reuses the ID, unless fence=0 marks it a release of a transport moving to another node; a fenced stop also fences a progressive remux under the ID. The core deletes the stored recipe itself before it calls; the node closes the session's source. Local teardown may precede a 503 progressive-remux shutdown failure. A transport that runs nothing here returns 404 after cleanup attempts. This ID-addressed command has no durable replay identity and must not be automatically repeated against a possible successor.",
         "retry_safety": "non_retryable",
         "listener": "transcode_node",
         "method": "DELETE",
@@ -242593,7 +242807,7 @@
         "auth_class": "node_bearer",
         "responses": {
           "204": {
-            "description": "Legacy teardown and configured authority deletion completed; no body. Local file/session close errors are logged rather than changing this status."
+            "description": "Teardown completed; no body. Local file/session close errors are logged rather than changing this status."
           },
           "401": {
             "content": {
@@ -242638,7 +242852,7 @@
           },
           "required": true
         },
-        "description": "Start a process-local HLS session after input, recipe, GPU and configuration guards. Ordinary JSON decoding ignores unknown keys and defaults omitted fields; there is no decoder body limit. A same-ID start can tear down and replace an earlier session before failing, and RequireReady may move an early hardware startup failure to a safer path: under hw_accel=auto CPU decode with GPU encode, then software; otherwise the VideoToolbox software retry. Monitoring runs asynchronously. No durable admission/replay receipt or automatic caller retry is implied.",
+        "description": "Start a process-local HLS session after input, recipe, GPU and configuration guards. Ordinary JSON decoding ignores unknown keys and defaults omitted fields; there is no decoder body limit. A same-ID start can tear down and replace an earlier session before failing, and RequireReady may move an early hardware startup failure to a safer path: under hw_accel=auto CPU decode with GPU encode, then software; otherwise the VideoToolbox software retry. No durable admission/replay receipt or automatic caller retry is implied. source_grant is required: the node exchanges it at the core (POST /api/internal/nodes/self/sources/open), runs FFmpeg on the path the core approves, never on input_path, and keeps the source open for the session's life; a source the core withdraws ends the session. A missing or refused grant returns 400, a node mount that does not show the approved revision 409, a core the node cannot reach 503. playback_session_id, user_id, profile_id and media_file_id name the playback session the node files its session record and stream telemetry under.",
         "retry_safety": "non_retryable",
         "listener": "transcode_node",
         "method": "POST",
@@ -242679,6 +242893,16 @@
               }
             },
             "description": "Unauthorized"
+          },
+          "409": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Conflict"
           },
           "422": {
             "content": {
@@ -245119,7 +245343,7 @@
             }
           },
           {
-            "description": "Signed recipe reference for node-side validation and deny-marker lookup; not a native user access token.",
+            "description": "Stream token a relay forwards; the node passes it unread to the core's resolve, which verifies it. Not a native user access token.",
             "in": "header",
             "name": "X-Silo-Stream-Token",
             "required": true,
@@ -245128,7 +245352,7 @@
             }
           },
           {
-            "description": "Parsed float; parse errors and negative values return400. No byte-range resume contract.",
+            "description": "Parsed float; parse errors and negative values return 400. No byte-range resume contract.",
             "in": "query",
             "name": "seek",
             "schema": {
@@ -245136,7 +245360,7 @@
             }
           }
         ],
-        "description": "Node bearer plus independently verified playback recipe token must bind exact transport and this node's remux-execution/proxy-egress route. Audio-downmix recipes require the exact stereo shape. A theme_aac_v1 recipe converts one detail-page theme to AAC; the theme authority approves its id, path, size and modification time in place of the media-file catalog. Input authority and current configuration are checked. A session carrying the deny marker, or revoked/stopped authority, returns410 and a concurrent GET returns409. GET starts request-scoped MP4 remux with cancellation/stop/reload tracking; committed200 can truncate on encoder/read failure. HEAD validates authority but does not check actual file existence or start an encoder. Process-local fences are not durable across node replacement.",
+        "description": "Every GET and HEAD resolves the transport at the core (POST /api/internal/nodes/self/resolve, purpose remux), passing the stream token unread; a transport this process stopped is refused with 410 first, and a GET for a transport that already has a request running (409) or on a node that has reported itself drained (503) is refused before the core is asked. The core's refusals map to the node's answers: invalid_token 401, wrong_route 503, denied and stopped 410, source_changed 400, not_found 404, anything else (the core unavailable, or its per-node budget answering 429) 503. The token must bind the exact transport and this node's remux-execution/proxy-egress route; audio-downmix recipes require the exact stereo shape; a theme_aac_v1 recipe converts one detail-page theme to AAC. A GET opens the source the resolution grants (a refused grant 400, a mount that does not show the approved revision 409, the core unreachable 503) and reads only that path; a concurrent GET returns 409. GET starts request-scoped MP4 remux with cancellation/stop/reload tracking; a committed 200 can truncate on encoder/read failure, and a source the core withdraws ends it. HEAD validates authority but opens no source and starts no encoder. Process-local fences are not durable across node replacement.",
         "listener": "transcode_node",
         "method": "GET",
         "path": "/remux/{session_id}",
@@ -245245,7 +245469,7 @@
             }
           },
           {
-            "description": "Signed recipe reference for node-side validation and deny-marker lookup; not a native user access token.",
+            "description": "Stream token a relay forwards; the node passes it unread to the core's resolve, which verifies it. Not a native user access token.",
             "in": "header",
             "name": "X-Silo-Stream-Token",
             "required": true,
@@ -245254,7 +245478,7 @@
             }
           },
           {
-            "description": "Parsed float; parse errors and negative values return400. No byte-range resume contract.",
+            "description": "Parsed float; parse errors and negative values return 400. No byte-range resume contract.",
             "in": "query",
             "name": "seek",
             "schema": {
@@ -245262,7 +245486,7 @@
             }
           }
         ],
-        "description": "Node bearer plus independently verified playback recipe token must bind exact transport and this node's remux-execution/proxy-egress route. Audio-downmix recipes require the exact stereo shape. A theme_aac_v1 recipe converts one detail-page theme to AAC; the theme authority approves its id, path, size and modification time in place of the media-file catalog. Input authority and current configuration are checked. A session carrying the deny marker, or revoked/stopped authority, returns410 and a concurrent GET returns409. GET starts request-scoped MP4 remux with cancellation/stop/reload tracking; committed200 can truncate on encoder/read failure. HEAD validates authority but does not check actual file existence or start an encoder. Process-local fences are not durable across node replacement.",
+        "description": "Every GET and HEAD resolves the transport at the core (POST /api/internal/nodes/self/resolve, purpose remux), passing the stream token unread; a transport this process stopped is refused with 410 first, and a GET for a transport that already has a request running (409) or on a node that has reported itself drained (503) is refused before the core is asked. The core's refusals map to the node's answers: invalid_token 401, wrong_route 503, denied and stopped 410, source_changed 400, not_found 404, anything else (the core unavailable, or its per-node budget answering 429) 503. The token must bind the exact transport and this node's remux-execution/proxy-egress route; audio-downmix recipes require the exact stereo shape; a theme_aac_v1 recipe converts one detail-page theme to AAC. A GET opens the source the resolution grants (a refused grant 400, a mount that does not show the approved revision 409, the core unreachable 503) and reads only that path; a concurrent GET returns 409. GET starts request-scoped MP4 remux with cancellation/stop/reload tracking; a committed 200 can truncate on encoder/read failure, and a source the core withdraws ends it. HEAD validates authority but opens no source and starts no encoder. Process-local fences are not durable across node replacement.",
         "listener": "transcode_node",
         "method": "HEAD",
         "path": "/remux/{session_id}",
@@ -245306,7 +245530,7 @@
             }
           },
           {
-            "description": "Signed recipe reference for node-side validation and deny-marker lookup; not a native user access token.",
+            "description": "Stream token a relay forwards; the node passes it unread to the core's resolve, which verifies it. Not a native user access token.",
             "in": "header",
             "name": "X-Silo-Stream-Token",
             "schema": {
@@ -245314,7 +245538,7 @@
             }
           },
           {
-            "description": "Value1 requests source-aligned manifest; raw query is preserved in segment links.",
+            "description": "Value 1 requests a source-aligned manifest; raw query is preserved in segment links.",
             "in": "query",
             "name": "source_timeline",
             "schema": {
@@ -245322,7 +245546,7 @@
             }
           }
         ],
-        "description": "Node bearer protects the worker listener. A session carrying the deny marker returns410 and is neither served nor reconstructed. Missing process-local sessions may reconstruct through existing signed-token/stored-recipe, input and execution authority guards; a missing/refused reconstruction can return404. Reads refresh liveness; no durable session availability, unscoped reconstruction or native route is promised. Build the playback manifest; unavailable manifest returns503. No-store response contains relative segment links.",
+        "description": "Node bearer protects the worker listener. A live process-local session is served without asking the core; the relays check the deny marker before forwarding. A missing session is rebuilt from the recipe the core resolves (POST /api/internal/nodes/self/resolve, purpose hls, the stream token passed unread) and the source it grants, unless this process stopped the transport, which returns 410 before the core is asked. The core denying the session returns 410, any other refusal 404, a core the node cannot reach 503. Reads refresh liveness; no durable session availability, unscoped reconstruction or native route is promised. Build the playback manifest; an unavailable manifest returns 503. No-store response contains relative segment links.",
         "listener": "transcode_node",
         "method": "GET",
         "path": "/transcode/{session_id}/master.m3u8",
@@ -245418,7 +245642,7 @@
             }
           },
           {
-            "description": "Signed recipe reference for node-side validation and deny-marker lookup; not a native user access token.",
+            "description": "Stream token a relay forwards; the node passes it unread to the core's resolve, which verifies it. Not a native user access token.",
             "in": "header",
             "name": "X-Silo-Stream-Token",
             "schema": {
@@ -245434,7 +245658,7 @@
             }
           },
           {
-            "description": "Value1 defers completion accounting to downstream acknowledgment and returns private generation metadata.",
+            "description": "Value 1 defers completion accounting to downstream acknowledgment and returns private generation metadata.",
             "in": "header",
             "name": "X-Silo-Transcode-Proxy",
             "schema": {
@@ -245484,7 +245708,7 @@
             }
           }
         ],
-        "description": "Node bearer protects the worker listener. A session carrying the deny marker returns410 and is neither served nor reconstructed. Missing process-local sessions may reconstruct through existing signed-token/stored-recipe, input and execution authority guards; a missing/refused reconstruction can return404. Reads refresh liveness; no durable session availability, unscoped reconstruction or native route is promised. Open an exact segment lease; missing media can wait or trigger guarded seek/restart recovery. Non-numbered init data can also wait. ServeContent supplies extension/sniffed media, conditions and ranges. Private generation is emitted only on a marked proxy hop. Direct complete GET reports generation-bound completion; proxied reads await separate acknowledgment. Partial/failed responses do not advance completion and may truncate after headers.",
+        "description": "Node bearer protects the worker listener. A live process-local session is served without asking the core; the relays check the deny marker before forwarding. A missing session is rebuilt from the recipe the core resolves (POST /api/internal/nodes/self/resolve, purpose hls, the stream token passed unread) and the source it grants, unless this process stopped the transport, which returns 410 before the core is asked. The core denying the session returns 410, any other refusal 404, a core the node cannot reach 503. Reads refresh liveness; no durable session availability, unscoped reconstruction or native route is promised. Open an exact segment lease; missing media can wait or trigger guarded seek/restart recovery. Non-numbered init data can also wait. ServeContent supplies extension/sniffed media, conditions and ranges. Private generation is emitted only on a marked proxy hop. Direct complete GET reports generation-bound completion; proxied reads await separate acknowledgment. Partial/failed responses do not advance completion and may truncate after headers.",
         "listener": "transcode_node",
         "method": "GET",
         "path": "/transcode/{session_id}/segment/{name}",
@@ -245889,6 +246113,526 @@
             "description": "Service Unavailable"
           }
         }
+      },
+      {
+        "parameters": [
+          {
+            "in": "header",
+            "name": "If-None-Match",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "description": "The calling node's configuration document: the server settings it runs with, its own acceleration and download overrides applied. Revision, also the strong ETag, is the SHA-256 of the rest of the document. If-None-Match naming it answers 304. 404: the node row is gone. 503 is transient.",
+        "listener": "api",
+        "method": "GET",
+        "path": "/api/internal/nodes/self/config",
+        "handler": "(*internal/nodecontrol.Server).HandleConfig",
+        "auth_class": "node_signed",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/x-silo-worker-protocols/schemas/nodecontrol_NodeConfig"
+                }
+              }
+            },
+            "description": "Configuration document."
+          },
+          "304": {
+            "description": "Revision unchanged."
+          },
+          "401": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "404": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "503": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        }
+      },
+      {
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/x-silo-worker-protocols/schemas/nodecontrol_Report"
+              }
+            }
+          },
+          "required": true
+        },
+        "description": "The node's sessions and stream telemetry, posted every second. Fenced on (boot_id, seq): an older or repeated pair gets 409 and writes nothing. The core files the report under the authenticated node, with its own clock, and replaces the node's session records and telemetry snapshot as a whole. 413: more than 2,000 sessions or transfers. 429: the node exceeded its request budget on this server.",
+        "retry_safety": "non_retryable",
+        "listener": "api",
+        "method": "POST",
+        "path": "/api/internal/nodes/self/report",
+        "handler": "(*internal/nodecontrol.Server).HandleReport",
+        "auth_class": "node_signed",
+        "responses": {
+          "204": {
+            "description": "Accepted, or dropped by a core without Redis."
+          },
+          "400": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "404": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "413": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Request Entity Too Large"
+          },
+          "429": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "503": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        }
+      },
+      {
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/x-silo-worker-protocols/schemas/nodecontrol_LogBatch"
+              }
+            }
+          },
+          "required": true
+        },
+        "description": "A batch of the node's operational and FFmpeg log entries. The core stamps them with the authenticated node (\u003cname\u003e#\u003cid\u003e), ignoring any node in the entries, clamps their timestamps to the last 24 hours and the next 30 seconds, and stores them for the admin log viewer and its live tail. A replayed batch can duplicate entries. 413: more than 100 entries. 429: the node exceeded its request budget, or its log byte budget (128 KiB a second, bursts of 4 MiB), on this server.",
+        "retry_safety": "non_retryable",
+        "listener": "api",
+        "method": "POST",
+        "path": "/api/internal/nodes/self/logs",
+        "handler": "(*internal/nodecontrol.Server).HandleLogs",
+        "auth_class": "node_signed",
+        "responses": {
+          "204": {
+            "description": "Stored."
+          },
+          "400": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "404": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "413": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Request Entity Too Large"
+          },
+          "429": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "503": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        }
+      },
+      {
+        "description": "The node's drain state changed (an admin drain request, SIGTERM, or drained). The core publishes node_drain_changed so every API server health-checks the node at once. 429: the node exceeded its request budget on this server.",
+        "retry_safety": "natural_idempotent",
+        "listener": "api",
+        "method": "POST",
+        "path": "/api/internal/nodes/self/health-changed",
+        "handler": "(*internal/nodecontrol.Server).HandleHealthChanged",
+        "auth_class": "node_signed",
+        "responses": {
+          "204": {
+            "description": "Published."
+          },
+          "401": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "429": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "503": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        }
+      },
+      {
+        "description": "The node, tearing its sessions down for a force reload, withdraws every recipe bound to it. The core revokes by the authenticated node id and then by the node's registered URL, never by anything in the body. 204 also from a core without Redis, which holds no recipes. 404: the node row is gone. 429: the node exceeded its request budget on this server. 503 is transient; the node retries the teardown.",
+        "retry_safety": "natural_idempotent",
+        "listener": "api",
+        "method": "POST",
+        "path": "/api/internal/nodes/self/revoke-recipes",
+        "handler": "(*internal/nodecontrol.Server).HandleRevokeRecipes",
+        "auth_class": "node_signed",
+        "responses": {
+          "204": {
+            "description": "Revoked."
+          },
+          "401": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "404": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "429": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "503": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        }
+      },
+      {
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/x-silo-worker-protocols/schemas/nodecontrol_ResolveRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "description": "The recipe and playback identity of one transport the calling node serves, for rebuilding a lost HLS transcode (purpose hls) or serving one progressive remux request (purpose remux). stream_token is the token a relay forwarded, passed through unread. The core checks the deny markers of the transport and its playback session, verifies the token, picks the recipe (a complete stored card over a complete token card, for hls) and requires it to be bound to the calling node by execution node id or, without one, by canonical node URL. It then requires the catalog to still have the recipe's exact media file (by id, not missing, at exactly the recipe's path, a regular file) or its theme in an enabled library, and returns a fresh source_grant for it naming the calling node. A refusal carries its reason as JSON: 404 not_found, 410 denied, stopped or source_changed, 403 invalid_token or wrong_route. 503 is transient: the core cannot verify tokens, mint grants, or read the recipe store, the catalog or the node's registration right now.",
+        "retry_safety": "natural_idempotent",
+        "listener": "api",
+        "method": "POST",
+        "path": "/api/internal/nodes/self/resolve",
+        "handler": "(*internal/nodecontrol.Server).HandleResolve",
+        "auth_class": "node_signed",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/x-silo-worker-protocols/schemas/nodecontrol_Resolution"
+                }
+              }
+            },
+            "description": "Resolution."
+          },
+          "400": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/x-silo-worker-protocols/schemas/nodecontrol_ResolveRefusal"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/x-silo-worker-protocols/schemas/nodecontrol_ResolveRefusal"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "410": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/x-silo-worker-protocols/schemas/nodecontrol_ResolveRefusal"
+                }
+              }
+            },
+            "description": "Gone"
+          },
+          "503": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        }
+      },
+      {
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/x-silo-worker-protocols/schemas/nodesource_OpenRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "description": "Exchange a source grant for the source it approves, when a job's input opens and at every 20-minute renewal. The grant must verify, be unexpired and name the calling node (403). The catalog must still have the source: a media file by id, not missing, at exactly the granted path, or a theme by id at exactly that path in an enabled library (410). The core stats the path through fspath, following symlinks: gone or not a regular file is 410, another size or modification time (compared at microseconds) is 412. 200 returns the same claims as a grant valid for another hour, with the approved path, size, mtime_ns and etag, Cache-Control no-store. 400: no grant in the body. 503 is transient: no grant key, or the catalog cannot be read.",
+        "retry_safety": "natural_idempotent",
+        "listener": "api",
+        "method": "POST",
+        "path": "/api/internal/nodes/self/sources/open",
+        "handler": "(*internal/nodecontrol.Server).HandleSourceOpen",
+        "auth_class": "node_signed",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/x-silo-worker-protocols/schemas/nodesource_OpenResponse"
+                }
+              }
+            },
+            "description": "Approved source and renewed grant."
+          },
+          "400": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "410": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Gone"
+          },
+          "412": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Precondition Failed"
+          },
+          "503": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        }
       }
     ],
     "schemas": {
@@ -245920,12 +246664,15 @@
             "format": "double",
             "type": "number"
           },
+          "source_grant": {
+            "type": "string"
+          },
           "tone_map": {
             "type": "boolean"
           }
         },
         "required": [
-          "input_path"
+          "source_grant"
         ],
         "type": "object"
       },
@@ -246000,6 +246747,9 @@
             "format": "double",
             "type": "number"
           },
+          "source_grant": {
+            "type": "string"
+          },
           "source_video_bit_depth": {
             "format": "int64",
             "type": "integer"
@@ -246071,7 +246821,7 @@
         },
         "required": [
           "artifact_id",
-          "input_path"
+          "source_grant"
         ],
         "type": "object"
       },
@@ -246414,6 +247164,9 @@
           "sheets": {
             "$ref": "#/x-silo-worker-protocols/schemas/mediasample_SheetsOutput"
           },
+          "source_grant": {
+            "type": "string"
+          },
           "stats": {
             "$ref": "#/x-silo-worker-protocols/schemas/mediasample_StatsOutput"
           },
@@ -246430,7 +247183,8 @@
           }
         },
         "required": [
-          "input"
+          "input",
+          "source_grant"
         ],
         "type": "object"
       },
@@ -246794,6 +247548,295 @@
           "installation_id",
           "provider",
           "state"
+        ],
+        "type": "object"
+      },
+      "nodecontrol_DownloadConfig": {
+        "additionalProperties": false,
+        "properties": {
+          "artifact_dir": {
+            "type": "string"
+          },
+          "artifact_max_bytes": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "artifact_dir",
+          "artifact_max_bytes"
+        ],
+        "type": "object"
+      },
+      "nodecontrol_LogBatch": {
+        "additionalProperties": false,
+        "properties": {
+          "entries": {
+            "items": {
+              "$ref": "#/x-silo-worker-protocols/schemas/opslog_Entry"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "entries"
+        ],
+        "type": "object"
+      },
+      "nodecontrol_LoggingConfig": {
+        "additionalProperties": false,
+        "properties": {
+          "capture_level": {
+            "type": "string"
+          },
+          "format": {
+            "type": "string"
+          },
+          "level": {
+            "type": "string"
+          },
+          "quiet": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "level",
+          "format",
+          "quiet",
+          "capture_level"
+        ],
+        "type": "object"
+      },
+      "nodecontrol_NodeConfig": {
+        "additionalProperties": false,
+        "properties": {
+          "download": {
+            "$ref": "#/x-silo-worker-protocols/schemas/nodecontrol_DownloadConfig"
+          },
+          "drain_requested": {
+            "type": "boolean"
+          },
+          "logging": {
+            "$ref": "#/x-silo-worker-protocols/schemas/nodecontrol_LoggingConfig"
+          },
+          "node": {
+            "$ref": "#/x-silo-worker-protocols/schemas/nodecontrol_NodeIdentity"
+          },
+          "playback": {
+            "$ref": "#/x-silo-worker-protocols/schemas/nodecontrol_PlaybackConfig"
+          },
+          "revision": {
+            "type": "string"
+          },
+          "subtitles": {
+            "$ref": "#/x-silo-worker-protocols/schemas/nodecontrol_SubtitlesConfig"
+          }
+        },
+        "required": [
+          "revision",
+          "node",
+          "drain_requested",
+          "playback",
+          "download",
+          "subtitles",
+          "logging"
+        ],
+        "type": "object"
+      },
+      "nodecontrol_NodeIdentity": {
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "name": {
+            "type": "string"
+          },
+          "url": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "url"
+        ],
+        "type": "object"
+      },
+      "nodecontrol_PlaybackConfig": {
+        "additionalProperties": false,
+        "properties": {
+          "ffmpeg_path": {
+            "type": "string"
+          },
+          "hw_accel": {
+            "type": "string"
+          },
+          "hw_device": {
+            "type": "string"
+          },
+          "segment_retention_seconds": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "transcode_dir": {
+            "type": "string"
+          },
+          "trickplay_node_capacity": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "ffmpeg_path",
+          "hw_accel",
+          "hw_device",
+          "transcode_dir",
+          "segment_retention_seconds",
+          "trickplay_node_capacity"
+        ],
+        "type": "object"
+      },
+      "nodecontrol_Report": {
+        "additionalProperties": false,
+        "properties": {
+          "boot_id": {
+            "type": "string"
+          },
+          "seq": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "sessions": {
+            "items": {
+              "$ref": "#/x-silo-worker-protocols/schemas/nodesessions_SessionInfo"
+            },
+            "type": "array"
+          },
+          "telemetry": {
+            "$ref": "#/x-silo-worker-protocols/schemas/streamtelemetry_NodeSnapshot"
+          },
+          "truncated": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "boot_id",
+          "seq",
+          "sessions"
+        ],
+        "type": "object"
+      },
+      "nodecontrol_Resolution": {
+        "additionalProperties": false,
+        "properties": {
+          "media_file_id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "playback_session_id": {
+            "type": "string"
+          },
+          "profile_id": {
+            "type": "string"
+          },
+          "recipe": {
+            "$ref": "#/x-silo-worker-protocols/schemas/playback_RecipeCard"
+          },
+          "source_grant": {
+            "type": "string"
+          },
+          "started_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "started_at_source": {
+            "type": "string"
+          },
+          "theme": {
+            "$ref": "#/x-silo-worker-protocols/schemas/nodecontrol_ResolvedTheme"
+          },
+          "user_id": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "recipe",
+          "playback_session_id",
+          "user_id",
+          "profile_id",
+          "media_file_id",
+          "source_grant"
+        ],
+        "type": "object"
+      },
+      "nodecontrol_ResolveRefusal": {
+        "additionalProperties": false,
+        "properties": {
+          "reason": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "reason"
+        ],
+        "type": "object"
+      },
+      "nodecontrol_ResolveRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "purpose": {
+            "type": "string"
+          },
+          "stream_token": {
+            "type": "string"
+          },
+          "transport_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "transport_id",
+          "purpose"
+        ],
+        "type": "object"
+      },
+      "nodecontrol_ResolvedTheme": {
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "modified_unix_nano": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "size": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "size",
+          "modified_unix_nano"
+        ],
+        "type": "object"
+      },
+      "nodecontrol_SubtitlesConfig": {
+        "additionalProperties": false,
+        "properties": {
+          "sync_node_capacity": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "sync_node_capacity"
         ],
         "type": "object"
       },
@@ -247230,6 +248273,166 @@
         ],
         "type": "object"
       },
+      "nodesessions_SessionInfo": {
+        "additionalProperties": false,
+        "properties": {
+          "auth_user_id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "codec_audio": {
+            "type": "string"
+          },
+          "codec_video": {
+            "type": "string"
+          },
+          "hw_accel": {
+            "type": "string"
+          },
+          "media_file_id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "media_item_id": {
+            "type": "string"
+          },
+          "media_title": {
+            "type": "string"
+          },
+          "node_name": {
+            "type": "string"
+          },
+          "node_url": {
+            "type": "string"
+          },
+          "profile_id": {
+            "type": "string"
+          },
+          "resolution": {
+            "type": "string"
+          },
+          "session_id": {
+            "type": "string"
+          },
+          "started_at": {
+            "type": "string"
+          },
+          "started_at_source": {
+            "type": "string"
+          },
+          "started_at_unix_nano": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "tone_map_mode": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string"
+          },
+          "user_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "session_id",
+          "node_url",
+          "node_name",
+          "type",
+          "started_at"
+        ],
+        "type": "object"
+      },
+      "nodesource_OpenRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "grant": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "grant"
+        ],
+        "type": "object"
+      },
+      "nodesource_OpenResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "etag": {
+            "type": "string"
+          },
+          "grant": {
+            "type": "string"
+          },
+          "mtime_ns": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "path": {
+            "type": "string"
+          },
+          "size": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "grant",
+          "path",
+          "size",
+          "mtime_ns",
+          "etag"
+        ],
+        "type": "object"
+      },
+      "opslog_Entry": {
+        "additionalProperties": false,
+        "properties": {
+          "attrs": {
+            "additionalProperties": {},
+            "type": "object"
+          },
+          "client_ip": {
+            "type": "string"
+          },
+          "component": {
+            "type": "string"
+          },
+          "level": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          },
+          "node_id": {
+            "type": "string"
+          },
+          "playback_session_id": {
+            "type": "string"
+          },
+          "request_id": {
+            "type": "string"
+          },
+          "session_id": {
+            "type": "string"
+          },
+          "timestamp": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "user_id": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "timestamp",
+          "level",
+          "component",
+          "message"
+        ],
+        "type": "object"
+      },
       "playback_DetectedBackend": {
         "additionalProperties": false,
         "properties": {
@@ -247417,6 +248620,303 @@
         ],
         "type": "object"
       },
+      "playback_RecipeCard": {
+        "additionalProperties": false,
+        "properties": {
+          "adaptation_reasons": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "audio_only": {
+            "type": "boolean"
+          },
+          "audio_track_index": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "client_build": {
+            "type": "string"
+          },
+          "client_channel": {
+            "type": "string"
+          },
+          "client_name": {
+            "type": "string"
+          },
+          "client_user_agent": {
+            "type": "string"
+          },
+          "client_version": {
+            "type": "string"
+          },
+          "copy_audio_codec": {
+            "type": "string"
+          },
+          "copy_fmp4_recipe_version": {
+            "type": "string"
+          },
+          "copy_seek_anchor_resolved": {
+            "type": "boolean"
+          },
+          "copy_video_mpegts": {
+            "type": "boolean"
+          },
+          "device_id": {
+            "type": "string"
+          },
+          "device_platform": {
+            "type": "string"
+          },
+          "disable_progress_persistence": {
+            "type": "boolean"
+          },
+          "dv_profile": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "encoder_hw_accel": {
+            "type": "string"
+          },
+          "fast_start": {
+            "type": "boolean"
+          },
+          "hls_variable_substitution": {
+            "type": "boolean"
+          },
+          "hw_accel": {
+            "type": "string"
+          },
+          "hw_device": {
+            "type": "string"
+          },
+          "input_path": {
+            "type": "string"
+          },
+          "is_jellyfin_compat": {
+            "type": "boolean"
+          },
+          "keyframe_playlist": {
+            "type": "boolean"
+          },
+          "media_file_id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "original_started_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "output_subdir": {
+            "type": "string"
+          },
+          "plan_id": {
+            "type": "string"
+          },
+          "play_method": {
+            "type": "string"
+          },
+          "profile_id": {
+            "type": "string"
+          },
+          "remux_dv_mode": {
+            "type": "string"
+          },
+          "remux_resume_leading_picture_drop": {
+            "type": "boolean"
+          },
+          "requested_media_file_id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "require_audio_track": {
+            "type": "boolean"
+          },
+          "require_media_authorization": {
+            "type": "boolean"
+          },
+          "routing_egress": {
+            "type": "string"
+          },
+          "routing_egress_node_id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "routing_execution": {
+            "type": "string"
+          },
+          "routing_execution_node_id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "routing_network_provider": {
+            "type": "string"
+          },
+          "routing_workload": {
+            "type": "string"
+          },
+          "seek_seconds": {
+            "format": "double",
+            "type": "number"
+          },
+          "segment_duration": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "session_id": {
+            "type": "string"
+          },
+          "software_video_decode": {
+            "type": "boolean"
+          },
+          "source_audio_channels": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "source_video_bit_depth": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "source_video_codec": {
+            "type": "string"
+          },
+          "source_video_profile": {
+            "type": "string"
+          },
+          "start_segment_number": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "stream_location": {
+            "type": "string"
+          },
+          "stream_origin_seconds": {
+            "format": "double",
+            "type": "number"
+          },
+          "subtitle_burn_in": {
+            "type": "boolean"
+          },
+          "subtitle_codec": {
+            "type": "string"
+          },
+          "subtitle_rendition": {
+            "type": "boolean"
+          },
+          "subtitle_rendition_source": {
+            "$ref": "#/x-silo-worker-protocols/schemas/playback_SubtitleRenditionSource"
+          },
+          "subtitle_rendition_tracks": {
+            "items": {
+              "$ref": "#/x-silo-worker-protocols/schemas/playback_SubtitleRenditionTrack"
+            },
+            "type": "array"
+          },
+          "subtitle_track_index": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "target_audio_bitrate_kbps": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "target_audio_channels": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "target_bitrate_kbps": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "target_codec_audio": {
+            "type": "string"
+          },
+          "target_codec_video": {
+            "type": "string"
+          },
+          "target_resolution": {
+            "type": "string"
+          },
+          "throttle_seconds": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "tone_map_dv_bl_compat_id_present": {
+            "type": "boolean"
+          },
+          "tone_map_dv_bl_present": {
+            "type": "boolean"
+          },
+          "tone_map_dv_config_present": {
+            "type": "boolean"
+          },
+          "tone_map_dv_rpu_present": {
+            "type": "boolean"
+          },
+          "tone_map_filter": {
+            "type": "string"
+          },
+          "tone_map_mode": {
+            "type": "string"
+          },
+          "tone_map_policy": {
+            "type": "string"
+          },
+          "tone_map_preflight_required": {
+            "type": "boolean"
+          },
+          "tone_map_recipe_version": {
+            "type": "string"
+          },
+          "tone_map_source_kind": {
+            "type": "string"
+          },
+          "tone_map_source_revision": {
+            "$ref": "#/x-silo-worker-protocols/schemas/tonemap_SourceRevision"
+          },
+          "total_duration": {
+            "format": "double",
+            "type": "number"
+          },
+          "transcode_audio": {
+            "type": "boolean"
+          },
+          "transcode_node_url": {
+            "type": "string"
+          },
+          "transcode_transport_id": {
+            "type": "string"
+          },
+          "user_id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "video_bitstream_filter": {
+            "type": "string"
+          },
+          "video_range": {
+            "type": "string"
+          },
+          "video_sample_entry": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "session_id",
+          "user_id",
+          "profile_id",
+          "media_file_id",
+          "input_path",
+          "seek_seconds",
+          "segment_duration",
+          "start_segment_number",
+          "subtitle_track_index",
+          "audio_track_index",
+          "total_duration"
+        ],
+        "type": "object"
+      },
       "playback_RenderDeviceInfo": {
         "additionalProperties": false,
         "properties": {
@@ -247580,6 +249080,39 @@
         ],
         "type": "object"
       },
+      "streamtelemetry_NodeSnapshot": {
+        "additionalProperties": false,
+        "properties": {
+          "dropped_bytes": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "dropped_observations": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "sessions": {
+            "items": {},
+            "type": "array"
+          },
+          "transfers": {
+            "items": {},
+            "type": "array"
+          },
+          "truncated": {
+            "type": "boolean"
+          },
+          "unattributed_bytes": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "unattributed_observations": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
       "tonemap_Capability": {
         "additionalProperties": false,
         "properties": {
@@ -247738,6 +249271,16 @@
           "keyframe_playlist": {
             "type": "boolean"
           },
+          "media_file_id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "playback_session_id": {
+            "type": "string"
+          },
+          "profile_id": {
+            "type": "string"
+          },
           "require_audio_track": {
             "type": "boolean"
           },
@@ -247761,6 +249304,9 @@
           "source_audio_channels": {
             "format": "int64",
             "type": "integer"
+          },
+          "source_grant": {
+            "type": "string"
           },
           "source_video_bit_depth": {
             "format": "int64",
@@ -247861,6 +249407,10 @@
             "format": "double",
             "type": "number"
           },
+          "user_id": {
+            "format": "int64",
+            "type": "integer"
+          },
           "video_bitstream_filter": {
             "type": "string"
           },
@@ -247873,7 +249423,7 @@
         },
         "required": [
           "session_id",
-          "input_path"
+          "source_grant"
         ],
         "type": "object"
       },

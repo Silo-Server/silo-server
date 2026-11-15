@@ -12,7 +12,6 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/nodeauth/nodeauthtest"
-	"github.com/Silo-Server/silo-server/internal/nodeconfig"
 	"github.com/Silo-Server/silo-server/internal/playback"
 )
 
@@ -28,13 +27,10 @@ func newCapabilityTestServer(t *testing.T) (*Server, string) {
 		t.Fatalf("write fake ffmpeg: %v", err)
 	}
 
-	watcher := nodeconfig.NewWatcher(nil, nil, nil, nodeconfig.BootstrapOverrides{})
 	cfg := &config.Config{}
-	cfg.Auth.JWTSecret = testSecret
 	cfg.Playback.TranscodeDir = t.TempDir()
 	cfg.Playback.FFmpegPath = ffmpegPath
-	watcher.SetConfigForTest(cfg)
-	return &Server{watcher: watcher, sessions: make(map[string]*playback.TranscodeSession)}, logPath
+	return &Server{watcher: newTestRuntime(cfg), nodeKey: testNodeKey, sessions: make(map[string]*playback.TranscodeSession)}, logPath
 }
 
 // newProbingTestServer builds a node whose configured ffmpeg answers every
@@ -93,9 +89,10 @@ func TestHealthPublishesStoredCapabilityHashWithoutProbing(t *testing.T) {
 func TestHWCapabilitiesPublishesCapabilityHash(t *testing.T) {
 	server := newProbingTestServer(t)
 	server.nodeRowID = func() (int, bool) { return 42, true }
+	coreOf(server)
 
 	request := httptest.NewRequest(http.MethodGet, "/hw-capabilities", nil)
-	nodeauthtest.Sign(t, request, testSecret)
+	nodeauthtest.Sign(t, request, testNodeKey)
 	recorder := httptest.NewRecorder()
 	server.Handler().ServeHTTP(recorder, request)
 
@@ -134,7 +131,7 @@ func TestHWCapabilitiesWithholdsProgressiveRemuxWithoutNodeIdentity(t *testing.T
 	server := newProbingTestServer(t)
 
 	request := httptest.NewRequest(http.MethodGet, "/hw-capabilities", nil)
-	nodeauthtest.Sign(t, request, testSecret)
+	nodeauthtest.Sign(t, request, testNodeKey)
 	recorder := httptest.NewRecorder()
 	server.Handler().ServeHTTP(recorder, request)
 

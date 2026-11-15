@@ -46,7 +46,7 @@ func (h *PlaybackHandler) startRemotePlaybackTransport(ctx context.Context, node
 		return transcodenode.TranscodeStartResponse{}, 0, logredact.SanitizeURLError(err)
 	}
 	httpRequest.Header.Set("Content-Type", "application/json")
-	if err := nodeauth.Sign(httpRequest, nodeURL, h.JWTSecret); err != nil {
+	if err := nodeauth.SignTranscode(httpRequest, nodeURL, h.NodeKeys); err != nil {
 		return transcodenode.TranscodeStartResponse{}, 0, err
 	}
 	response, err := transcodeproxy.DoNode(transcodeproxy.NodeClient(), httpRequest, nodeURL, "transcode_start")
@@ -123,8 +123,11 @@ func remoteHardwareRetryPossibleV3(request transcodenode.TranscodeStartRequest) 
 		!strings.EqualFold(strings.TrimSpace(request.TargetCodecVideo), "copy")
 }
 
-func fetchRemoteTranscodeCapabilities(ctx context.Context, nodeURL, jwtSecret string) (playback.HWAccelInfo, error) {
-	info, status, err := transcodenode.FetchHWCapabilities(ctx, transcodeproxy.NodeClient(), nodeURL, jwtSecret)
+// fetchRemoteNodeCapabilities reads the capability report of the worker of
+// kind target at nodeURL. Proxies serve the same route as transcode nodes, so
+// the caller names the kind it holds the URL as, never inferred from the URL.
+func fetchRemoteNodeCapabilities(ctx context.Context, target nodeauth.Target, nodeURL string, nodeKeys nodeauth.Keyring) (playback.HWAccelInfo, error) {
+	info, status, err := transcodenode.FetchHWCapabilities(ctx, transcodeproxy.NodeClient(), nodeURL, target, nodeKeys)
 	if err != nil {
 		return playback.HWAccelInfo{}, err
 	}

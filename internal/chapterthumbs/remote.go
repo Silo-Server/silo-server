@@ -4,10 +4,10 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
-	"strings"
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/nodeauth"
@@ -22,17 +22,25 @@ const (
 	chapterThumbnailExecutionPreferTranscode    = "prefer_transcode_nodes"
 	chapterThumbnailExecutionTranscodeOnly      = "transcode_nodes_only"
 	chapterThumbnailNodeCapacitySetting         = "playback.chapter_thumbnail_node_capacity"
-	chapterThumbnailNodeUnavailableReason       = "transcode_node_unavailable"
+	chapterThumbnailNodeUnavailableReason       = RemoteNodeUnavailableReason
 	chapterThumbnailNodeCapacityExhaustedReason = "transcode_node_capacity_exhausted"
-	authJWTSecretSetting                        = "auth.jwt_secret"
 )
+
+// RemoteNodeUnavailableReason is the reason a transcode node answers a chapter
+// extraction it cannot run now (draining, re-probing its hardware, or unable to
+// open the granted source). prefer_transcode_nodes answers it by extracting
+// locally (IsInfrastructureRemoteFailure).
+const RemoteNodeUnavailableReason = "transcode_node_unavailable"
 
 // remoteExtractOverheadBuffer covers HTTP transport and node-side scheduling
 // overhead on top of the extraction attempt deadlines.
 const remoteExtractOverheadBuffer = 3 * time.Second
 
 type RemoteExtractRequest struct {
-	InputPath            string  `json:"input_path"`
+	InputPath string `json:"input_path"`
+	// SourceGrant is the core's source grant for InputPath, naming the node
+	// the request is sent to.
+	SourceGrant          string  `json:"source_grant,omitempty" required:"true"`
 	SeekSeconds          float64 `json:"seek_seconds"`
 	ToneMap              bool    `json:"tone_map"`
 	AllowSoftwareToneMap bool    `json:"allow_software_tone_map"`
@@ -44,7 +52,7 @@ type RemoteExtractErrorResponse struct {
 }
 
 type remoteFrameExtractor interface {
-	ExtractFrame(ctx context.Context, node *nodepool.Node, jwtSecret string, req RemoteExtractRequest) ([]byte, string, error)
+	ExtractFrame(ctx context.Context, node *nodepool.Node, keys nodeauth.Keyring, req RemoteExtractRequest) ([]byte, string, error)
 }
 
 type httpRemoteFrameExtractor struct {
@@ -54,14 +62,14 @@ type httpRemoteFrameExtractor struct {
 func (e *httpRemoteFrameExtractor) ExtractFrame(
 	ctx context.Context,
 	node *nodepool.Node,
-	jwtSecret string,
+	keys nodeauth.Keyring,
 	req RemoteExtractRequest,
 ) ([]byte, string, error) {
 	if node == nil {
 		return nil, chapterThumbnailNodeUnavailableReason, fmt.Errorf("chapter thumbnail remote extract: missing node")
 	}
-	if strings.TrimSpace(jwtSecret) == "" {
-		return nil, chapterThumbnailNodeUnavailableReason, fmt.Errorf("chapter thumbnail remote extract: missing jwt secret")
+	if keys == nil {
+		return nil, chapterThumbnailNodeUnavailableReason, errors.New("chapter thumbnail remote extract: missing node keyring")
 	}
 
 	body, err := json.Marshal(req)
@@ -78,13 +86,13 @@ func (e *httpRemoteFrameExtractor) ExtractFrame(
 		return nil, chapterThumbnailNodeUnavailableReason, fmt.Errorf("chapter thumbnail remote extract: build request: %w", err)
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
-	if err := nodeauth.Sign(httpReq, node.URL, jwtSecret); err != nil {
+	if err := nodeauth.SignTranscode(httpReq, node.URL, keys); err != nil {
 		return nil, chapterThumbnailNodeUnavailableReason, fmt.Errorf("chapter thumbnail remote extract: sign request: %w", err)
 	}
 
 	client := e.client
 	if client == nil {
-		client = &http.Client{Timeout: timeout}
+		client = &http.Client{Timeout: timeout, CheckRedirect: nodepool.RefuseRedirects}
 	}
 
 	resp, err := telemetry.DoTrustedNode(client, httpReq, "chapter_extract")
@@ -129,7 +137,10 @@ func remoteExtractTimeout(toneMap bool, allowSoftwareToneMap bool) time.Duration
 	return timeout
 }
 
-func isInfrastructureRemoteFailure(reason string) bool {
+// IsInfrastructureRemoteFailure reports whether a remote extraction's reason
+// is the node's failure rather than the source's, which prefer_transcode_nodes
+// answers by extracting locally.
+func IsInfrastructureRemoteFailure(reason string) bool {
 	switch reason {
 	case chapterThumbnailNodeUnavailableReason, chapterThumbnailNodeCapacityExhaustedReason, reasonFFmpegProbeFailed:
 		return true

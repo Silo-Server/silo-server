@@ -60,9 +60,12 @@ import (
 	"github.com/Silo-Server/silo-server/internal/metadata/tmdb"
 	metadatatranslation "github.com/Silo-Server/silo-server/internal/metadata/translation"
 	"github.com/Silo-Server/silo-server/internal/netaccess"
+	"github.com/Silo-Server/silo-server/internal/nodeauth"
+	"github.com/Silo-Server/silo-server/internal/nodecontrol"
 	"github.com/Silo-Server/silo-server/internal/nodemetrics"
 	"github.com/Silo-Server/silo-server/internal/nodepool"
 	"github.com/Silo-Server/silo-server/internal/noderecipe"
+	"github.com/Silo-Server/silo-server/internal/nodesource"
 	"github.com/Silo-Server/silo-server/internal/notifications"
 	"github.com/Silo-Server/silo-server/internal/onboarding"
 	"github.com/Silo-Server/silo-server/internal/opslog"
@@ -186,6 +189,16 @@ type Dependencies struct {
 	TranscodePool            *nodepool.TranscodePool         // transcode node pool (may be nil)
 	NodePlanner              *nodepool.Planner               // group/cap-aware node selection (may be nil)
 	NodeHealthChecker        *nodepool.HealthChecker         // periodic node health/capability sweep (may be nil)
+	NodeKeyRegistry          *nodepool.KeyRegistry           // every stream node's credential, enabled or not (may be nil)
+	// NodeKeys signs every call to a stream node: a transcode node's own key,
+	// and the shared secret for a URL registered as a proxy. Nil leaves calls
+	// to nodes unsigned-for, so they fail rather than fall back.
+	NodeKeys nodeauth.Keyring
+	// SourceGrants mints the source grant every piece of transcode-node work
+	// carries, and verifies and renews it at sources/open (may be nil: work
+	// is then dispatched without one, and resolve and sources/open answer
+	// 503).
+	SourceGrants *nodesource.Grants
 	// NodeCapabilityInvalidator drops one node's cached capability inventory
 	// outside the playback handler — the prepared-download preparer holds its
 	// own. nil where downloads are not wired; set before NewRouter runs.
@@ -1517,6 +1530,10 @@ func newChiRouter(deps Dependencies) chi.Router {
 		// Wire the optional node planner and JWT secret for node-aware stream URLs.
 		if deps.NodePlanner != nil {
 			playbackHandler.NodePlanner = deps.NodePlanner
+		}
+		playbackHandler.NodeKeys = deps.NodeKeys
+		if deps.SourceGrants != nil {
+			playbackHandler.SourceGrants = deps.SourceGrants
 		}
 		if deps.Config != nil && deps.Config.Auth.JWTSecret != "" {
 			playbackHandler.JWTSecret = deps.Config.Auth.JWTSecret
@@ -3097,11 +3114,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 		v2deps.AdminCatalogSources = catalogSeedHandler
 		v2deps.AdminCatalogTransfer = catalogSeedHandler
 	}
-	systemJWTSecret := ""
-	if deps.Config != nil {
-		systemJWTSecret = deps.Config.Auth.JWTSecret
-	}
-	v2deps.AdminHardwareAcceleration = handlers.NewSystemHandler(deps.TranscodePool, systemJWTSecret, func() (string, string, string) {
+	v2deps.AdminHardwareAcceleration = handlers.NewSystemHandler(deps.TranscodePool, deps.NodeKeys, func() (string, string, string) {
 		cfg := deps.CurrentConfig()
 		if cfg == nil {
 			return "", "", ""
@@ -3124,11 +3137,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 	v2deps.AdminServerRestart = serverControlHandler
 	var nodeHandler *handlers.NodeHandler
 	if deps.NodeRepo != nil {
-		jwtSecret := ""
-		if deps.Config != nil {
-			jwtSecret = deps.Config.Auth.JWTSecret
-		}
-		nodeHandler = handlers.NewNodeHandler(deps.NodeRepo, deps.ProxyPool, deps.TranscodePool, deps.NodeRepo, deps.EventBus, deps.RedisClient, jwtSecret)
+		nodeHandler = handlers.NewNodeHandler(deps.NodeRepo, deps.ProxyPool, deps.TranscodePool, deps.NodeRepo, deps.EventBus, deps.RedisClient, deps.NodeKeys)
 		// A re-probe stores the node's new inventory through the sweep's own
 		// refresh, so the drift and persist rules have one implementation.
 		// Without a health checker the node still re-probes and the row
@@ -3156,6 +3165,14 @@ func newChiRouter(deps Dependencies) chi.Router {
 		if deps.DB != nil {
 			nodeHandler.SetConfigurationStore(nodepool.NewAdminConfigurationStore(deps.DB))
 			v2deps.AdminNodeConfiguration = nodeHandler
+		}
+		nodeHandler.SetNodeKeyRegistry(deps.NodeKeyRegistry)
+		if deps.SecretCipher != nil {
+			nodeRepo, cipher := deps.NodeRepo, deps.SecretCipher
+			nodeHandler.SetNodeKeyIssuance(func(ctx context.Context, id int) (string, error) {
+				return nodeRepo.IssueNodeKey(ctx, cipher, id)
+			})
+			v2deps.AdminNodeKeys = nodeHandler
 		}
 	}
 	var rateLimitHandler *handlers.RateLimitHandler
@@ -3432,6 +3449,58 @@ func newChiRouter(deps Dependencies) chi.Router {
 	r.Handle("/api/v1/invitations/{token}", v1Tombstone)
 	r.Handle("/api/v1/invitations/{token}/*", v1Tombstone)
 
+	// Transcode nodes call these with their own key, never with a user
+	// credential, so they sit outside every auth group and the user-facing
+	// rate limits. Any API replica serves any node: nothing a later request
+	// depends on stays in this process.
+	if deps.NodeKeyRegistry != nil && deps.NodeRepo != nil && settingsRepo != nil {
+		nodeControlOptions := nodecontrol.Options{
+			Nodes:      deps.NodeRepo,
+			Identities: deps.NodeKeyRegistry,
+			Settings:   nodeConfigSettings(settingsRepo),
+			Redis:      deps.RedisClient,
+			Telemetry:  streamtelemetry.NodeSnapshotStore(deps.StreamTelemetry),
+			Events:     deps.EventBus,
+			Deny:       playback.NewStreamDeny(deps.RedisClient),
+			StreamSecret: func() string {
+				if cfg := deps.CurrentConfig(); cfg != nil {
+					return cfg.Auth.JWTSecret
+				}
+				return ""
+			},
+		}
+		if deps.DB != nil {
+			nodeControlOptions.Logs = opslog.NewConsumer(deps.DB, deps.LogStreamHub)
+		}
+		// One store answers resolve and revoke-recipes. Without Redis it holds
+		// nothing and revokes nothing.
+		nodeRecipes := noderecipe.NewStore(deps.RedisClient, 0)
+		nodeControlOptions.Recipes, nodeControlOptions.Revocations = nodeRecipes, nodeRecipes
+		deps.wireNodeSources(&nodeControlOptions)
+		nodeControl := nodecontrol.NewServer(nodeControlOptions)
+		r.Route("/api/internal/nodes/self", func(r chi.Router) {
+			r.Use(nodecontrol.RequireNode(deps.NodeKeyRegistry))
+			// Resolve is on a viewer's request path (a rebuild after a node
+			// restart, or each progressive remux request), and open and
+			// renewal sit on a job's start path, so they have their own
+			// budget: a burst of rebuilds must not be throttled with the
+			// background routes, nor starve them.
+			r.Group(func(r chi.Router) {
+				r.Use(nodeControl.LimitNodePlayback)
+				r.Post("/resolve", nodeControl.HandleResolve)
+				r.Post("/sources/open", nodeControl.HandleSourceOpen)
+			})
+			r.Group(func(r chi.Router) {
+				r.Use(nodeControl.LimitNode)
+				r.Get("/config", nodeControl.HandleConfig)
+				r.Post("/report", nodeControl.HandleReport)
+				r.Post("/logs", nodeControl.HandleLogs)
+				r.Post("/health-changed", nodeControl.HandleHealthChanged)
+				r.Post("/revoke-recipes", nodeControl.HandleRevokeRecipes)
+			})
+		})
+	}
+
 	if nodeHandler != nil {
 		nodeHandler.StartConfigurationReconciliation(deps.AppContext)
 	}
@@ -3439,6 +3508,21 @@ func newChiRouter(deps Dependencies) chi.Router {
 	// once every route above has finished wiring them.
 	playbackHandler.StartLifecycleSweep(deps.AppContext, deps.DB)
 	return r
+}
+
+// wireNodeSources gives the node control routes the source grants and the
+// catalog that resolve and sources/open check a grant against. Typed nils stay
+// out of the interfaces, so a missing piece answers 503 instead of panicking.
+func (d Dependencies) wireNodeSources(opts *nodecontrol.Options) {
+	if d.SourceGrants != nil {
+		opts.Grants = d.SourceGrants
+	}
+	if d.FileRepo != nil {
+		opts.Files = d.FileRepo
+	}
+	if d.DB != nil {
+		opts.Themes = themesongs.NewRepository(d.DB)
+	}
 }
 
 // overlayOrigins returns the source of connected overlay origins the
@@ -3490,7 +3574,28 @@ func useBaseMiddleware(r chi.Router, deps Dependencies) {
 	}
 }
 
+// nodeConfigSettings reads the server settings a transcode node's
+// configuration is built from, as an API server's configuration watcher reads
+// them: the staged storage transition belongs to storage recovery, not to
+// Config.
+func nodeConfigSettings(settings catalog.SettingsStore) func(context.Context) (map[string]string, error) {
+	return func(ctx context.Context) (map[string]string, error) {
+		all, err := settings.GetAll(ctx)
+		if err != nil {
+			return nil, err
+		}
+		delete(all, config.StorageTransitionTargetKey)
+		return all, nil
+	}
+}
+
 func skipNativeMediaCompression(r *http.Request) bool {
+	// The node control routes stay identity-encoded: the configuration
+	// response carries a strong ETag that names exactly one representation,
+	// and nodes are machine clients on the cluster network.
+	if strings.HasPrefix(r.URL.Path, nodecontrol.PathPrefix) {
+		return true
+	}
 	if r.Method != http.MethodGet && r.Method != http.MethodHead {
 		return false
 	}

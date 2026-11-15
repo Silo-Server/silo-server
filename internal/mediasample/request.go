@@ -19,6 +19,9 @@ import (
 type Request struct {
 	// Input is the media file to decode.
 	Input string `json:"input"`
+	// SourceGrant is the core's source grant for Input when the request runs
+	// on a transcode node, naming that node. A local run ignores it.
+	SourceGrant string `json:"source_grant,omitempty" required:"true"`
 	// Window samples a contiguous span of the file.
 	Window *Window `json:"window,omitempty"`
 	// Samples decodes one video keyframe for each of a list of times.

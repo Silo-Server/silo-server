@@ -88,6 +88,9 @@ func adminNodeConfigurationProblem(err error) error {
 	if errors.Is(err, nodepool.ErrNodeConfigurationConflict) {
 		return NewProblem(TypeConflict, "Node URL already has a different configuration.")
 	}
+	if errors.Is(err, nodepool.ErrTranscodeNodeURLTaken) {
+		return NewProblem(TypeConflict, "Another transcode node already has this URL.")
+	}
 	if p, ok := errors.AsType[*pgconn.PgError](err); ok && p.Code == "23505" && p.ConstraintName == "stream_nodes_url_key" {
 		return NewProblem(TypeConflict, "Node URL is already configured.")
 	}

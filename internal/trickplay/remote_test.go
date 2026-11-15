@@ -12,6 +12,8 @@ import (
 	"github.com/Silo-Server/silo-server/internal/mediasample"
 	"github.com/Silo-Server/silo-server/internal/nodeauth/nodeauthtest"
 	"github.com/Silo-Server/silo-server/internal/nodepool"
+	"github.com/Silo-Server/silo-server/internal/nodesource"
+	"github.com/Silo-Server/silo-server/internal/nodesource/nodesourcetest"
 )
 
 type fixedNodes []*nodepool.Node
@@ -64,13 +66,13 @@ func nodeRequest() mediasample.Request {
 func TestNodeExtractorModes(t *testing.T) {
 	ok := mediasample.Result{Decoder: "hardware:vaapi", SheetTileHeight: 284, Sheets: []mediasample.Sheet{{Index: 0, Thumbnails: 1, JPEG: []byte("jpeg")}}}
 	settings := func(mode string) fakeSettings {
-		return fakeSettings{ExecutionSetting: mode, jwtSecretSetting: "secret"}
+		return fakeSettings{ExecutionSetting: mode}
 	}
 
 	t.Run("local", func(t *testing.T) {
 		node, calls := fakeNode(t, http.StatusOK, ok)
 		local := &countingExtractor{}
-		result, err := NewNodeExtractor(local, fixedNodes{node}, settings(ExecutionLocal)).Extract(t.Context(), nil, nodeRequest())
+		result, err := NewNodeExtractor(local, fixedNodes{node}, settings(ExecutionLocal), nodeauthtest.NodeKey("secret")).Extract(t.Context(), nil, nodeRequest())
 		if err != nil || result.Decoder != "local" || calls.Load() != 0 {
 			t.Fatalf("%+v %v calls %d", result, err, calls.Load())
 		}
@@ -80,7 +82,7 @@ func TestNodeExtractorModes(t *testing.T) {
 		busy, busyCalls := fakeNode(t, http.StatusServiceUnavailable, ExtractError{Reason: NodeBusyReason})
 		free, freeCalls := fakeNode(t, http.StatusOK, ok)
 		local := &countingExtractor{}
-		result, err := NewNodeExtractor(local, fixedNodes{busy, free}, settings(ExecutionTranscodeNodesOnly)).Extract(t.Context(), nil, nodeRequest())
+		result, err := NewNodeExtractor(local, fixedNodes{busy, free}, settings(ExecutionTranscodeNodesOnly), nodeauthtest.NodeKey("secret")).Extract(t.Context(), nil, nodeRequest())
 		if err != nil || result.Decoder != "hardware:vaapi" || result.SheetTileHeight != 284 || string(result.Sheets[0].JPEG) != "jpeg" || freeCalls.Load() != 1 || busyCalls.Load() > 1 || local.calls != 0 {
 			t.Fatalf("%+v %v", result, err)
 		}
@@ -90,7 +92,7 @@ func TestNodeExtractorModes(t *testing.T) {
 		busy, _ := fakeNode(t, http.StatusServiceUnavailable, ExtractError{Reason: NodeBusyReason})
 		dead := &nodepool.Node{Name: "dead", URL: "http://127.0.0.1:1", Enabled: true, Healthy: true, Capabilities: trickplayCapabilities}
 		local := &countingExtractor{}
-		result, err := NewNodeExtractor(local, fixedNodes{busy, dead}, settings(ExecutionPreferTranscodeNodes)).Extract(t.Context(), nil, nodeRequest())
+		result, err := NewNodeExtractor(local, fixedNodes{busy, dead}, settings(ExecutionPreferTranscodeNodes), nodeauthtest.NodeKey("secret")).Extract(t.Context(), nil, nodeRequest())
 		if err != nil || result.Decoder != "local" || local.calls != 1 {
 			t.Fatalf("%+v %v", result, err)
 		}
@@ -101,7 +103,7 @@ func TestNodeExtractorModes(t *testing.T) {
 		sick := &nodepool.Node{Name: "sick", URL: "http://127.0.0.1:1", Enabled: true, Healthy: false, Capabilities: trickplayCapabilities}
 		off := &nodepool.Node{Name: "off", URL: "http://127.0.0.1:1", Enabled: false, Healthy: true, Capabilities: trickplayCapabilities}
 		local := &countingExtractor{}
-		_, err := NewNodeExtractor(local, fixedNodes{old, sick, off}, settings(ExecutionTranscodeNodesOnly)).Extract(t.Context(), nil, nodeRequest())
+		_, err := NewNodeExtractor(local, fixedNodes{old, sick, off}, settings(ExecutionTranscodeNodesOnly), nodeauthtest.NodeKey("secret")).Extract(t.Context(), nil, nodeRequest())
 		if !errors.Is(err, errNoNode) || local.calls != 0 {
 			t.Fatalf("err %v local %d", err, local.calls)
 		}
@@ -110,7 +112,7 @@ func TestNodeExtractorModes(t *testing.T) {
 	t.Run("a failure on a node is final", func(t *testing.T) {
 		broken, _ := fakeNode(t, http.StatusUnprocessableEntity, ExtractError{Reason: "invalid_data", Permanent: true, Message: "moov atom not found"})
 		other, otherCalls := fakeNode(t, http.StatusOK, ok)
-		_, err := NewNodeExtractor(&countingExtractor{}, fixedNodes{broken, other}, settings(ExecutionTranscodeNodesOnly)).Extract(t.Context(), nil, nodeRequest())
+		_, err := NewNodeExtractor(&countingExtractor{}, fixedNodes{broken, other}, settings(ExecutionTranscodeNodesOnly), nodeauthtest.NodeKey("secret")).Extract(t.Context(), nil, nodeRequest())
 		failure, isNode := errors.AsType[*ExtractError](err)
 		if !isNode || !failure.Permanent || failure.Reason != "invalid_data" || otherCalls.Load() != 0 {
 			t.Fatalf("err %v", err)
@@ -146,8 +148,8 @@ func TestNodeExtractorRetriesWorkersWithoutDisplayGeometry(t *testing.T) {
 			local := &countingExtractor{}
 			req := nodeRequest()
 			req.Sheets.UseInputAspect = true
-			settings := fakeSettings{ExecutionSetting: mode, jwtSecretSetting: "secret"}
-			result, err := NewNodeExtractor(local, fixedNodes{node}, settings).Extract(t.Context(), nil, req)
+			settings := fakeSettings{ExecutionSetting: mode}
+			result, err := NewNodeExtractor(local, fixedNodes{node}, settings, nodeauthtest.NodeKey("secret")).Extract(t.Context(), nil, req)
 			if calls.Load() != 1 {
 				t.Fatalf("node calls %d", calls.Load())
 			}
@@ -159,5 +161,39 @@ func TestNodeExtractorRetriesWorkersWithoutDisplayGeometry(t *testing.T) {
 				t.Fatalf("nodes only = %v; local calls %d", err, local.calls)
 			}
 		})
+	}
+}
+
+// A run sent to a node carries a source grant naming that node; a node its
+// source cannot be granted to is unavailable for the run.
+func TestNodeExtractorGrantsTheNodeItsSource(t *testing.T) {
+	ok := mediasample.Result{Decoder: "hardware:vaapi", SheetTileHeight: 284, Sheets: []mediasample.Sheet{{Index: 0, Thumbnails: 1, JPEG: []byte("jpeg")}}}
+	var grant atomic.Value
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req mediasample.Request
+		_ = json.NewDecoder(r.Body).Decode(&req)
+		grant.Store(req.SourceGrant)
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(ok)
+	}))
+	t.Cleanup(server.Close)
+	node := &nodepool.Node{ID: 9, Name: "gpu", URL: server.URL, Enabled: true, Healthy: true, Capabilities: trickplayCapabilities}
+	job := &Job{FileID: 42, FilePath: "/m.mkv"}
+
+	extractor := NewNodeExtractor(&countingExtractor{}, fixedNodes{node}, fakeSettings{ExecutionSetting: ExecutionTranscodeNodesOnly}, nodeauthtest.NodeKey("secret"))
+	extractor.SetSourceGrants(nodesourcetest.Granter{})
+	if _, err := extractor.Extract(t.Context(), job, nodeRequest()); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := grant.Load(), nodesourcetest.Grant(9, 42, "/m.mkv"); got != want {
+		t.Fatalf("source grant = %v, want %q", got, want)
+	}
+
+	grant.Store("")
+	local := &countingExtractor{}
+	extractor = NewNodeExtractor(local, fixedNodes{node}, fakeSettings{ExecutionSetting: ExecutionPreferTranscodeNodes}, nodeauthtest.NodeKey("secret"))
+	extractor.SetSourceGrants(nodesourcetest.Granter{Err: nodesource.ErrSourceGone})
+	if result, err := extractor.Extract(t.Context(), job, nodeRequest()); err != nil || result.Decoder != "local" || local.calls != 1 || grant.Load() != "" {
+		t.Fatalf("%+v %v local %d; want the run made here without asking the node", result, err, local.calls)
 	}
 }

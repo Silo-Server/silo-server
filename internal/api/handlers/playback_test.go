@@ -23,6 +23,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/mediaprobe"
 	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/nodeauth/nodeauthtest"
 	"github.com/Silo-Server/silo-server/internal/noderouting"
 	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/settingscontract"
@@ -116,8 +117,9 @@ func TestNativeTranscodeHandlersRejectProxyRecipeBeforeReconstruction(t *testing
 				t.Fatal(err)
 			}
 			manager := playback.NewSessionManager(0, 0)
-			handler := NewPlaybackHandler(manager)
+			handler := newKeyedPlaybackHandler(manager)
 			handler.JWTSecret = secret
+			handler.NodeKeys = nodeauthtest.SameKey(secret)
 			recorder := httptest.NewRecorder()
 			test.handle(handler, recorder, playbackTestRequest(http.MethodGet, test.path+"?st="+token, nil, test.params))
 
@@ -339,7 +341,7 @@ func TestHeaderAuthenticatedMediaEnforcesHLSOwnerOnEveryRequest(t *testing.T) {
 		UserID:     1,
 		PlayMethod: playback.PlayTranscode,
 	})
-	handler := NewPlaybackHandler(manager)
+	handler := newKeyedPlaybackHandler(manager)
 
 	type endpoint struct {
 		name   string
@@ -436,7 +438,7 @@ func TestGetTranscodeSegment_StopsWaitingWhenRequestEnds(t *testing.T) {
 
 	sessions := playback.NewSessionManager(0, 0)
 	sessions.RegisterReconstructed(&playback.Session{ID: sessionID, UserID: 1, PlayMethod: playback.PlayTranscode})
-	handler := NewPlaybackHandler(sessions)
+	handler := newKeyedPlaybackHandler(sessions)
 	handler.TranscodeManager().RegisterTranscodeSession(sessionID, transcodeSession)
 
 	// No playlist yet, so the first segment would wait for FFmpeg's startup.
@@ -689,7 +691,7 @@ func TestFinalizeSessionStop_UsesProviderLifecycleSemantics(t *testing.T) {
 				Duration:  3600,
 			}
 			scrobbler := &recordingPlaybackWatchScrobbler{}
-			handler := NewPlaybackHandler(playback.NewSessionManager(0, 0), testPlaybackFileResolver{file: file})
+			handler := newKeyedPlaybackHandler(playback.NewSessionManager(0, 0), testPlaybackFileResolver{file: file})
 			handler.StoreProvider = testUserStoreProvider{store: store}
 			handler.WatchScrobbler = scrobbler
 
@@ -757,7 +759,7 @@ func TestRetiredSessionsReportEndedPause(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			file := &models.MediaFile{ID: 42, ContentID: "movie-1", Duration: 3600}
 			scrobbler := &recordingPlaybackWatchScrobbler{}
-			handler := NewPlaybackHandler(playback.NewSessionManager(0, 0), testPlaybackFileResolver{file: file})
+			handler := newKeyedPlaybackHandler(playback.NewSessionManager(0, 0), testPlaybackFileResolver{file: file})
 			handler.StoreProvider = testUserStoreProvider{store: newPlaybackTestStore(t)}
 			handler.WatchScrobbler = scrobbler
 
@@ -785,7 +787,7 @@ func TestRetiredSessionsReportEndedPause(t *testing.T) {
 }
 
 func TestBuildAdminHistoryEntry_UsesRequestedMediaFileID(t *testing.T) {
-	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0), mapPlaybackFileResolver{
+	handler := newKeyedPlaybackHandler(playback.NewSessionManager(0, 0), mapPlaybackFileResolver{
 		files: map[int]*models.MediaFile{
 			42: {
 				ID:         42,
@@ -839,7 +841,7 @@ func TestBuildAdminHistoryEntry_RecordsViewerIP(t *testing.T) {
 		"expiry":          context.Background(),
 	} {
 		t.Run(name, func(t *testing.T) {
-			handler := NewPlaybackHandler(playback.NewSessionManager(0, 0), testPlaybackFileResolver{
+			handler := newKeyedPlaybackHandler(playback.NewSessionManager(0, 0), testPlaybackFileResolver{
 				file: &models.MediaFile{ID: 42, ContentID: "movie-1", Duration: 3600},
 			})
 			handler.AdminStore = noopPlaybackAdminStore{}
@@ -904,7 +906,7 @@ func TestPersistStopAndHistory_SkipsZeroProgressStops(t *testing.T) {
 		Resolution: "1080p",
 		Duration:   3600,
 	}
-	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0), testPlaybackFileResolver{file: file})
+	handler := newKeyedPlaybackHandler(playback.NewSessionManager(0, 0), testPlaybackFileResolver{file: file})
 	handler.StoreProvider = testUserStoreProvider{store: store}
 
 	handler.persistStopAndHistory(context.Background(), &playback.Session{
@@ -1049,7 +1051,7 @@ func TestNativeTranscodeHandlersRejectCommittedProxyEgress(t *testing.T) {
 		RoutingWorkload: string(noderouting.WorkloadVideoTranscode), RoutingExecution: string(noderouting.ExecutionTranscode),
 		RoutingEgress: string(noderouting.EgressProxy), TranscodeNodeURL: "http://worker.invalid",
 	})
-	handler := NewPlaybackHandler(manager)
+	handler := newKeyedPlaybackHandler(manager)
 	for _, test := range []struct {
 		name   string
 		path   string
@@ -1097,7 +1099,7 @@ func TestStartPlaybackV2RemembersVersionButNotAudioTrack(t *testing.T) {
 				{Language: "eng", Codec: "aac", Channels: 6, Layout: "5.1"},
 			}
 
-			handler := NewPlaybackHandler(playback.NewSessionManager(0, 0), testPlaybackFileResolver{file: file})
+			handler := newKeyedPlaybackHandler(playback.NewSessionManager(0, 0), testPlaybackFileResolver{file: file})
 			handler.SettingsRepo = &mutablePlaybackSettingsV3{values: map[string]string{}}
 			handler.StoreProvider = testUserStoreProvider{store: store}
 			handler.ItemAccess = allowAllPlaybackItemAccess{}
@@ -1143,7 +1145,7 @@ func TestStartPlaybackV2DoesNotPersistSeriesPlaybackPreferenceOnFailure(t *testi
 	file := v3HandlerFixtureFile(t)
 	file.EpisodeID = "episode-1"
 
-	handler := NewPlaybackHandler(failingSessionManager{}, testPlaybackFileResolver{file: file})
+	handler := newKeyedPlaybackHandler(failingSessionManager{}, testPlaybackFileResolver{file: file})
 	handler.SettingsRepo = &mutablePlaybackSettingsV3{values: map[string]string{}}
 	handler.StoreProvider = testUserStoreProvider{store: store}
 	handler.ItemAccess = allowAllPlaybackItemAccess{}
@@ -1215,7 +1217,7 @@ func TestStartPlaybackV2AudioLanguageResolvesCanonically(t *testing.T) { //nolin
 	) int {
 		t.Helper()
 		manager := playback.NewSessionManager(0, 0)
-		handler := NewPlaybackHandler(manager, testPlaybackFileResolver{file: file})
+		handler := newKeyedPlaybackHandler(manager, testPlaybackFileResolver{file: file})
 		handler.SettingsRepo = &mutablePlaybackSettingsV3{values: map[string]string{}}
 		handler.StoreProvider = testUserStoreProvider{store: store}
 		handler.ItemAccess = allowAllPlaybackItemAccess{}
@@ -1372,7 +1374,7 @@ func TestStartPlaybackV2ResumePolicyAppliesOnlyToAnOmittedStartPosition(t *testi
 			}
 
 			manager := playback.NewSessionManager(0, 0)
-			handler := NewPlaybackHandler(manager, testPlaybackFileResolver{file: file})
+			handler := newKeyedPlaybackHandler(manager, testPlaybackFileResolver{file: file})
 			handler.SettingsRepo = &mutablePlaybackSettingsV3{values: map[string]string{}}
 			handler.StoreProvider = testUserStoreProvider{store: store}
 			handler.ItemAccess = allowAllPlaybackItemAccess{}
@@ -1406,7 +1408,7 @@ func TestStartPlaybackV2MarksMissingFileAndSkipsSessionCreation(t *testing.T) {
 	file := v3HandlerFixtureFile(t)
 	file.FilePath = filepath.Join(t.TempDir(), "missing.mkv")
 
-	handler := NewPlaybackHandler(sessionMgr, testPlaybackFileResolver{file: file})
+	handler := newKeyedPlaybackHandler(sessionMgr, testPlaybackFileResolver{file: file})
 	handler.SettingsRepo = &mutablePlaybackSettingsV3{values: map[string]string{}}
 	handler.ItemAccess = allowAllPlaybackItemAccess{}
 	handler.MissingMarker = marker
@@ -1454,7 +1456,7 @@ func TestPersistStopAndHistory_MarksSpannedEpisodesWatched(t *testing.T) {
 	episode := func(number int) *models.Episode {
 		return &models.Episode{ContentID: "episode-" + strconv.Itoa(number), SeriesID: "series-1", SeasonNumber: 1, EpisodeNumber: number}
 	}
-	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0), testPlaybackFileResolver{file: file})
+	handler := newKeyedPlaybackHandler(playback.NewSessionManager(0, 0), testPlaybackFileResolver{file: file})
 	handler.StoreProvider = testUserStoreProvider{store: store}
 	season := make([]*models.Episode, 0, 12)
 	for number := 1; number <= 12; number++ {

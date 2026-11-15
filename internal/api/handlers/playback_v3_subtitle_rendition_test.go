@@ -162,7 +162,7 @@ func TestSubtitleRenditionRoutableRequiresOneNodeForTheWholeRecipe(t *testing.T)
 		Transformations:   []playback.TransformationV3{aac},
 	})
 
-	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0))
+	handler := newKeyedPlaybackHandler(playback.NewSessionManager(0, 0))
 	policy := config.DefaultPlaybackRoutingPolicy()
 	policy.VideoTranscodeExecution = config.PlaybackExecutionWorkerOnly
 	handler.PlaybackConfig = func() config.PlaybackConfig { return config.PlaybackConfig{Routing: policy} }
@@ -195,7 +195,7 @@ func TestRemuxSubtitleRenditionNeedsTheRemuxTransportFeature(t *testing.T) {
 	transcodeOnly := node(playback.TransportFeatureHLSSubtitleRenditionV1)
 	remux := node(playback.TransportFeatureHLSSubtitleRenditionV1, playback.TransportFeatureHLSRemuxSubtitleRenditionV1)
 
-	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0))
+	handler := newKeyedPlaybackHandler(playback.NewSessionManager(0, 0))
 	policy := config.DefaultPlaybackRoutingPolicy()
 	policy.RemuxExecution = config.PlaybackExecutionWorkerOnly
 	policy.VideoTranscodeExecution = config.PlaybackExecutionWorkerOnly
@@ -298,7 +298,7 @@ func TestOnDemandSubtitleRenditionsNeedTheOnDemandTransportFeature(t *testing.T)
 	onDemand := node(playback.TransportFeatureHLSSubtitleRenditionV1, playback.TransportFeatureHLSRemuxSubtitleRenditionV1,
 		playback.TransportFeatureHLSOnDemandSubtitleRenditionsV1)
 
-	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0))
+	handler := newKeyedPlaybackHandler(playback.NewSessionManager(0, 0))
 	policy := config.DefaultPlaybackRoutingPolicy()
 	policy.RemuxExecution = config.PlaybackExecutionWorkerOnly
 	policy.VideoTranscodeExecution = config.PlaybackExecutionWorkerOnly
@@ -373,7 +373,7 @@ func onDemandRenditionStartV3(t *testing.T, media string, numbers []uint64) (*Pl
 		{Index: 1, ContainerTrackID: strconv.FormatUint(numbers[0], 10), Codec: "subrip", Language: "eng", Title: "English"},
 		{Index: 2, ContainerTrackID: strconv.FormatUint(numbers[1], 10), Codec: "subrip", Language: "spa", Title: "Español"},
 	}
-	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0), testPlaybackFileResolver{file: file})
+	handler := newKeyedPlaybackHandler(playback.NewSessionManager(0, 0), testPlaybackFileResolver{file: file})
 	handler.PlaybackConfig = playbackTestConfig(writePlaybackTestFFmpeg(t), t.TempDir())
 	presetLocalRegistryV3(handler, playback.NewTransformationRegistryV3(nil))
 	handler.SettingsRepo = &mutablePlaybackSettingsV3{values: map[string]string{"allow_4k_transcode": "true"}}
@@ -541,7 +541,7 @@ func TestHandleReplanPlaybackV3TurnsOffThePipelineRenditionOnTheRunningStream(t 
 // number. Moving the transport gets their names, languages and FORCED back
 // from the attempt's frozen recipe; a token for other tracks keeps numbers.
 func TestRehomeRestoresOnDemandRenditionNamesFromTheRecord(t *testing.T) {
-	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0))
+	handler := newKeyedPlaybackHandler(playback.NewSessionManager(0, 0))
 	source := playback.SubtitleRenditionSource{Size: 4096, ModTimeUnixNano: 1_800_000_000_000_000_000}
 	frozen := []playback.SubtitleRenditionTrack{
 		{StreamIndex: 2, TrackNumber: 3, Name: "English", Language: "eng"},

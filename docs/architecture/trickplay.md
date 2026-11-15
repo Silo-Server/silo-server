@@ -239,7 +239,7 @@ the lease, and the uploads; a node only decodes and tiles
   queueing it. Each run counts in the node's reported active jobs, so it
   takes one of the node's `max_jobs` slots from playback while it runs. `node_busy`, `node_unavailable`, a
   refused request, or a connection that drops moves the run to the next
-  node. A node whose ffmpeg cannot open an input that passed its path check
+  node. A node whose ffmpeg cannot open an input its source grant approved
   (such as a file its user may not read) answers `input_unreadable`, which
   does not count against the file: it moves on like `node_unavailable`.
   `unsupported` (the node's ffmpeg lacks a filter, decoder, or device the run
@@ -250,8 +250,10 @@ the lease, and the uploads; a node only decodes and tiles
   extraction in `prefer_transcode_nodes` mode. In `transcode_nodes_only` mode
   it counts against the file when no node makes the sheets. Only a
   `permanent` sampling failure marks the file unusable, as it would locally.
-- Remote extraction checks the media path on the node. It does not require
-  the API server's media mount to be readable.
+- Remote extraction opens the file through a
+  [source grant](transcode-nodes.md#source-grants). Minting the grant stats the
+  file on the API server, so the API server's media mount must be readable;
+  when it is not, the node counts as unavailable.
 - The request carries a hardware attempt and a software attempt; a node
   whose accelerator cannot decode drops the hardware attempt.
 

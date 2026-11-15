@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/netaccess"
+	"github.com/Silo-Server/silo-server/internal/nodeauth/nodeauthtest"
 	"github.com/Silo-Server/silo-server/internal/nodepool"
 )
 
@@ -27,11 +28,11 @@ func TestAdminNodeCheckView(t *testing.T) {
 		if r.URL.Path != "/api/v1/health" || r.Method != "GET" {
 			t.Error("wrong worker request", r.Method, r.URL.Path)
 		}
-		_, _ = w.Write([]byte(`{"active_jobs":2,"egress_kbps":8,"capabilities_hash":"observed"}`))
+		_, _ = w.Write([]byte(`{"active_jobs":2,"egress_kbps":8,"capabilities_hash":"observed","node_control_version":1}`))
 	}))
 	defer server.Close()
 	repo := &commandNodeRepo{stubNodeRepository: stubNodeRepository{node: &nodepool.Node{ID: 1, URL: server.URL, Type: nodepool.NodeTypeTranscode}}}
-	h := NewNodeHandler(repo, nil, nil, nil, nil, nil, "")
+	h := NewNodeHandler(repo, nil, nil, nil, nil, nil, nil)
 	out, err := h.CheckAdminNode(t.Context(), 1)
 	if err != nil || !out.Healthy || out.ActiveJobs != 2 || out.EgressKbps != 8 || !out.HealthPersisted || repo.persistedURL != server.URL {
 		t.Fatal(out, err, repo.persistedURL)
@@ -59,7 +60,7 @@ func TestAdminNodeReprobeView(t *testing.T) {
 			url, signedWith := fakeNodeServer(t, tc.status, `{"resolved":"qsv","capability_hash":"new"}`)
 			repo := &stubNodeRepository{node: &nodepool.Node{ID: 1, Name: "Synthetic", URL: url, Type: nodepool.NodeTypeTranscode}}
 			refresh := &stubCapabilityRefresher{err: tc.refreshErr}
-			h := NewNodeHandler(repo, nil, nil, nil, nil, nil, "synthetic-secret")
+			h := NewNodeHandler(repo, nil, nil, nil, nil, nil, nodeauthtest.SameKey("synthetic-secret"))
 			h.SetCapabilityRefresher(refresh)
 			writer := &deadlineRecorder{ResponseRecorder: httptest.NewRecorder()}
 			before := time.Now()

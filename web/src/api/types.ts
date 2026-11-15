@@ -4482,6 +4482,11 @@ export interface StreamNode {
    * no new work, drained once it has none left. Absent on older servers.
    */
   drain_state?: "none" | "draining" | "drained";
+  /**
+   * A key has been issued to this transcode node. A transcode node without
+   * one takes no work. Always false for a proxy; absent on older servers.
+   */
+  key_issued?: boolean;
 }
 
 export interface CreateNodeRequest {

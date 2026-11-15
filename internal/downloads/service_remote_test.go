@@ -9,6 +9,7 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/downloadprepare"
+	"github.com/Silo-Server/silo-server/internal/nodeauth"
 	"github.com/Silo-Server/silo-server/internal/nodeauth/nodeauthtest"
 )
 
@@ -36,7 +37,7 @@ func TestServiceRelaysRemoteArtifactOnEstablishedRoute(t *testing.T) {
 	defer origin.Close()
 	cfg := &config.Config{}
 	cfg.Auth.JWTSecret = secret
-	svc := &Service{artifacts: &ArtifactManager{liveCfg: func() *config.Config { return cfg }}}
+	svc := &Service{artifacts: &ArtifactManager{liveCfg: func() *config.Config { return cfg }, nodeKeys: nodeauthtest.NodeKey(secret)}}
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/downloads/dl/file", nil)
 	req.Header.Set("Range", "bytes=1-3")
 	rr := httptest.NewRecorder()
@@ -66,7 +67,7 @@ func TestServiceDoesNotAppendAPIErrorAfterRemoteBodyIsCommitted(t *testing.T) {
 	defer origin.Close()
 	cfg := &config.Config{}
 	cfg.Auth.JWTSecret = secret
-	svc := &Service{artifacts: &ArtifactManager{liveCfg: func() *config.Config { return cfg }}}
+	svc := &Service{artifacts: &ArtifactManager{liveCfg: func() *config.Config { return cfg }, nodeKeys: nodeauthtest.NodeKey(secret)}}
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/downloads/dl/file", nil)
 	rr := httptest.NewRecorder()
 	err := svc.serveFileTarget(req.Context(), rr, req, &FileTarget{
@@ -95,7 +96,7 @@ func TestServiceRelaysRemotePreconditionFailure(t *testing.T) {
 	defer origin.Close()
 	cfg := &config.Config{}
 	cfg.Auth.JWTSecret = secret
-	svc := &Service{artifacts: &ArtifactManager{liveCfg: func() *config.Config { return cfg }}}
+	svc := &Service{artifacts: &ArtifactManager{liveCfg: func() *config.Config { return cfg }, nodeKeys: nodeauthtest.NodeKey(secret)}}
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/downloads/dl/file", nil)
 	req.Header.Set("If-Match", `"old-etag"`)
 	rr := httptest.NewRecorder()
@@ -107,5 +108,37 @@ func TestServiceRelaysRemotePreconditionFailure(t *testing.T) {
 	}
 	if rr.Code != http.StatusPreconditionFailed || rr.Header().Get("ETag") != `"new-etag"` {
 		t.Fatalf("response status=%d etag=%q body=%q", rr.Code, rr.Header().Get("ETag"), rr.Body.String())
+	}
+}
+
+// keylessKeyring has no key for any transcode node.
+type keylessKeyring struct{}
+
+func (keylessKeyring) KeyFor(nodeauth.Target, string) (string, error) {
+	return "", nodeauth.ErrNoNodeKey
+}
+
+// The client authenticated with this server, so a node's 401 refuses this
+// server's signature, and a node it cannot sign for is unavailable: both are
+// the asset being temporarily unavailable, never a 401 or an internal error.
+func TestServiceAnswersAnArtifactNodeItCannotUseAsUnavailable(t *testing.T) {
+	origin := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+	}))
+	defer origin.Close()
+	target := &FileTarget{OriginNodeURL: origin.URL, OriginArtifactID: "artifact-1"}
+	for name, keys := range map[string]nodeauth.Keyring{
+		"node 401":     nodeauthtest.NodeKey("artifact-secret"),
+		"keyless node": keylessKeyring{},
+	} {
+		svc := &Service{artifacts: &ArtifactManager{nodeKeys: keys}}
+		req := httptest.NewRequest(http.MethodGet, "/api/v2/downloads/dl/file", nil)
+		rr := httptest.NewRecorder()
+		if err := svc.serveFileTarget(req.Context(), rr, req, target, 7); !errors.Is(err, ErrAssetUnavailable) {
+			t.Fatalf("%s: serveFileTarget error = %v, want ErrAssetUnavailable", name, err)
+		}
+		if rr.Code != http.StatusOK || rr.Body.Len() != 0 {
+			t.Fatalf("%s: wrote %d %q before the error", name, rr.Code, rr.Body.String())
+		}
 	}
 }

@@ -26,7 +26,7 @@ type finishHistoryReplica struct {
 // user store and admin log every replica shares.
 func newFinishHistoryReplica(store userstore.UserStore, admin PlaybackAdminStore, file *models.MediaFile) finishHistoryReplica {
 	mgr := playback.NewSessionManager(0, 0)
-	handler := NewPlaybackHandler(mgr, testPlaybackFileResolver{file: file})
+	handler := newKeyedPlaybackHandler(mgr, testPlaybackFileResolver{file: file})
 	handler.StoreProvider = testUserStoreProvider{store: store}
 	handler.AdminStore = admin
 	return finishHistoryReplica{mgr: mgr, handler: handler}
@@ -543,7 +543,7 @@ func TestReconstructedSessionRestoresItsClient(t *testing.T) {
 		"another account's row": {rowOwner: 8},
 	} {
 		t.Run(name, func(t *testing.T) {
-			h := NewPlaybackHandler(playback.NewSessionManager(0, 0))
+			h := newKeyedPlaybackHandler(playback.NewSessionManager(0, 0))
 			h.AdminStore = &liveRowAdminStore{live: &playback.Session{
 				ID: "token-session", UserID: tc.rowOwner, ProfileID: "profile",
 				ClientName: "Silo Android", DeviceID: "device-1",
@@ -771,7 +771,7 @@ func (missingFileResolver) GetByID(context.Context, int) (*models.MediaFile, err
 // still gets its row, without the item and duration only the file gave.
 func TestEndRecordsAPlayWhoseFileLeftTheCatalog(t *testing.T) {
 	admin := &recordingPlaybackAdminStore{}
-	h := NewPlaybackHandler(playback.NewSessionManager(0, 0), missingFileResolver{})
+	h := newKeyedPlaybackHandler(playback.NewSessionManager(0, 0), missingFileResolver{})
 	h.AdminStore = admin
 	session := compatFinishSession()
 	session.IsJellyfinCompat, session.Position = false, 900

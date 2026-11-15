@@ -63,6 +63,19 @@ func TestPlaybackDeliveryV2BytesErrorsAndAuthorization(t *testing.T) {
 	requireProblem(t, do(t, newTestHandler(t, deps), http.MethodGet, path, "", viewerHeaders()), TypeDependencyUnavailable)
 }
 
+// A relay answers 502 when its transcode node is unreachable, keyless, or
+// refused the relay's signature: the node is unavailable, which v2 reports as
+// a retryable dependency failure rather than an internal error.
+func TestPlaybackDeliveryNodeUnavailableIsDependencyUnavailable(t *testing.T) {
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, Prefix+"/stream/"+deliveryTestSession, nil)
+	writer := &playbackDeliveryWriter{ResponseWriter: w, request: r}
+	http.Error(writer, "transcode node unavailable", http.StatusBadGateway)
+	if w.Code != http.StatusServiceUnavailable || !strings.Contains(w.Body.String(), TypeDependencyUnavailable.ID) {
+		t.Fatalf("node unavailable = %d %s, want 503 %s", w.Code, w.Body.String(), TypeDependencyUnavailable.ID)
+	}
+}
+
 func TestPlaybackDeliveryProblemDropsLegacyBodyAndHeaders(t *testing.T) {
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodGet, Prefix+"/stream/"+deliveryTestSession, nil)

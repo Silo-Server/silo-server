@@ -14,7 +14,10 @@ import (
 	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/downloadprepare"
 	"github.com/Silo-Server/silo-server/internal/logredact"
+	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/nodeauth"
 	"github.com/Silo-Server/silo-server/internal/nodepool"
+	"github.com/Silo-Server/silo-server/internal/nodesource"
 	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/tonemap"
 	"github.com/Silo-Server/silo-server/internal/transcodenode"
@@ -26,10 +29,13 @@ import (
 // The node retains completed bytes behind an authenticated opaque-id endpoint;
 // integrated installations and unavailable pools fall back to local work.
 type NodeAwarePreparer struct {
-	local            EncodePreparer
-	planner          nodepool.TranscodeWorkPlanner
-	liveCfg          func() *config.Config
-	remote           downloadprepare.RemotePreparer
+	local   EncodePreparer
+	planner nodepool.TranscodeWorkPlanner
+	liveCfg func() *config.Config
+	remote  downloadprepare.RemotePreparer
+	// nodeKeys signs every request to a node; without it every job runs
+	// locally and remote artifacts are unreachable.
+	nodeKeys         nodeauth.Keyring
 	originLookup     artifactOriginLookup
 	settings         SettingsReader
 	probeClient      *http.Client
@@ -45,6 +51,18 @@ type NodeAwarePreparer struct {
 	// storageFull reports a node over its prepared-file budget or disk
 	// ceiling with nothing left to free; such a node gets no new jobs.
 	storageFull func(nodeID int) bool
+	// sourceGrants grants a node each job's source; nil sends none.
+	sourceGrants nodesource.FileGranter
+}
+
+// SetNodeKeys wires the keyring that signs requests to transcode nodes.
+func (p *NodeAwarePreparer) SetNodeKeys(keys nodeauth.Keyring) {
+	p.nodeKeys = keys
+}
+
+// SetSourceGrants wires the grants every remote job's source is sent with.
+func (p *NodeAwarePreparer) SetSourceGrants(grants nodesource.FileGranter) {
+	p.sourceGrants = grants
 }
 
 // SetStorageGate wires the storage check placement applies to every job.
@@ -149,11 +167,8 @@ func (p *NodeAwarePreparer) prepareLocally(ctx context.Context, artifactID strin
 // PrepareFile routes an artifact job to a compatible node or allowed local fallback.
 func (p *NodeAwarePreparer) PrepareFile(ctx context.Context, artifactID string, opts playback.TranscodeOpts, outputPath string) (PreparedArtifact, error) {
 	cfg := p.config()
-	jwtSecret := ""
-	if cfg != nil {
-		jwtSecret = strings.TrimSpace(cfg.Auth.JWTSecret)
-	}
-	if cfg == nil || jwtSecret == "" || p.remote == nil || p.planner == nil || !downloadprepare.ValidArtifactID(artifactID) {
+	keys := p.nodeKeys
+	if cfg == nil || keys == nil || p.remote == nil || p.planner == nil || !downloadprepare.ValidArtifactID(artifactID) {
 		return p.prepareLocally(ctx, artifactID, opts, outputPath)
 	}
 	request := downloadprepare.NewRequest(artifactID, opts)
@@ -221,12 +236,19 @@ func (p *NodeAwarePreparer) PrepareFile(ctx context.Context, artifactID string, 
 		return p.prepareLocally(ctx, artifactID, opts, outputPath)
 	}
 
+	grant, err := nodesource.GrantFile(ctx, p.sourceGrants, node.ID, &models.MediaFile{ID: opts.MediaFileID, FilePath: opts.InputPath})
+	if err != nil {
+		release()
+		slog.WarnContext(ctx, "remote download artifact prepare cannot grant its source; falling back to local", "component", "downloads", "artifact_id", artifactID, "node", node.URL, "error", err)
+		return p.prepareLocally(ctx, artifactID, opts, outputPath)
+	}
+	request.SourceGrant = grant
 	slog.InfoContext(ctx, "dispatching download artifact prepare", "component", "downloads", "artifact_id", artifactID, "node", node.URL)
 	observer := prepareObserverFrom(ctx)
 	nodeID := node.ID
 	observer.prepareWorker(&nodeID, node.Name)
-	stopProgress := p.pollRemoteProgress(ctx, node.URL, jwtSecret, artifactID, observer)
-	result, err := p.remote.Prepare(ctx, node.URL, jwtSecret, request)
+	stopProgress := p.pollRemoteProgress(ctx, node.URL, keys, artifactID, observer)
+	result, err := p.remote.Prepare(ctx, node.URL, keys, request)
 	stopProgress()
 	release()
 	prepareReturned := err == nil
@@ -240,7 +262,7 @@ func (p *NodeAwarePreparer) PrepareFile(ctx context.Context, artifactID string, 
 		return remotePreparedArtifact(node, downloadprepare.Result{ArtifactID: artifactID}), ctx.Err()
 	}
 	if prepareReturned {
-		if deleteErr := p.remote.Delete(ctx, node.URL, jwtSecret, artifactID); deleteErr != nil {
+		if deleteErr := p.remote.Delete(ctx, node.URL, keys, artifactID); deleteErr != nil {
 			return remotePreparedArtifact(node, downloadprepare.Result{ArtifactID: artifactID}),
 				errors.Join(err, fmt.Errorf("delete rejected remote download artifact: %w", deleteErr))
 		}
@@ -249,13 +271,13 @@ func (p *NodeAwarePreparer) PrepareFile(ctx context.Context, artifactID string, 
 	}
 	// A completed encode can outlive a lost HTTP response. Probe the same opaque
 	// id before falling back so retry/recovery does not duplicate expensive work.
-	if recovered, statErr := p.remote.Stat(ctx, node.URL, jwtSecret, artifactID); statErr == nil {
+	if recovered, statErr := p.remote.Stat(ctx, node.URL, keys, artifactID); statErr == nil {
 		if remotePrepareResultMatches(recovered, artifactID, request) {
 			slog.InfoContext(ctx, "recovered completed download artifact after lost response", "component", "downloads", "artifact_id", artifactID, "node", node.URL)
 			return remotePreparedArtifact(node, recovered), nil
 		}
 		recoveryErr := rejectedRemotePrepareResultError("recovery", recovered, artifactID)
-		if deleteErr := p.remote.Delete(ctx, node.URL, jwtSecret, artifactID); deleteErr != nil {
+		if deleteErr := p.remote.Delete(ctx, node.URL, keys, artifactID); deleteErr != nil {
 			return remotePreparedArtifact(node, downloadprepare.Result{ArtifactID: artifactID}),
 				errors.Join(err, recoveryErr, fmt.Errorf("delete rejected remote download artifact: %w", deleteErr))
 		}
@@ -277,7 +299,7 @@ func (p *NodeAwarePreparer) PrepareFile(ctx context.Context, artifactID string, 
 // remoteProgressReader is implemented by remote preparers that can read a
 // node's live progress for an attempt in flight.
 type remoteProgressReader interface {
-	Progress(ctx context.Context, nodeURL, jwtSecret, artifactID string) (downloadprepare.Progress, error)
+	Progress(ctx context.Context, nodeURL string, keys nodeauth.Keyring, artifactID string) (downloadprepare.Progress, error)
 }
 
 // remoteProgressPollInterval matches the attempt observer's flush interval, so
@@ -287,7 +309,7 @@ var remoteProgressPollInterval = progressFlushInterval
 // pollRemoteProgress relays a node's progress for one attempt to observer
 // until the returned stop function is called. A node that predates the
 // progress endpoint is reported once as unable to report progress.
-func (p *NodeAwarePreparer) pollRemoteProgress(ctx context.Context, nodeURL, jwtSecret, artifactID string, observer prepareObserver) func() {
+func (p *NodeAwarePreparer) pollRemoteProgress(ctx context.Context, nodeURL string, keys nodeauth.Keyring, artifactID string, observer prepareObserver) func() {
 	reader, ok := p.remote.(remoteProgressReader)
 	if !ok {
 		observer.prepareProgressUnavailable()
@@ -305,7 +327,7 @@ func (p *NodeAwarePreparer) pollRemoteProgress(ctx context.Context, nodeURL, jwt
 				return
 			case <-ticker.C:
 			}
-			progress, err := reader.Progress(pollCtx, nodeURL, jwtSecret, artifactID)
+			progress, err := reader.Progress(pollCtx, nodeURL, keys, artifactID)
 			switch {
 			case errors.Is(err, downloadprepare.ErrProgressUnsupported):
 				observer.prepareProgressUnavailable()
@@ -571,15 +593,14 @@ func (p *NodeAwarePreparer) fetchToneMapCapabilitiesForNode(ctx context.Context,
 	// Snapshotted before the node is asked anything, so an invalidation landing
 	// during the request is visible at install time.
 	generation := p.capabilityInvalidationsFor(nodeURL)
-	cfg := p.config()
-	if cfg == nil || strings.TrimSpace(cfg.Auth.JWTSecret) == "" {
+	if p.nodeKeys == nil {
 		err := errors.New("transcode node credentials unavailable")
 		p.cacheToneMapCapabilityFailure(nodeURL, generation, err)
 		return nil, err
 	}
 	requestCtx, cancel := context.WithTimeout(ctx, p.remoteToneMapProbeTimeout(nodeURL))
 	defer cancel()
-	info, status, err := transcodenode.FetchHWCapabilities(requestCtx, p.probeClient, nodeURL, cfg.Auth.JWTSecret)
+	info, status, err := transcodenode.FetchHWCapabilities(requestCtx, p.probeClient, nodeURL, nodeauth.TargetTranscode, p.nodeKeys)
 	if err != nil {
 		p.cacheToneMapCapabilityFailure(nodeURL, generation, err)
 		return nil, err
@@ -794,11 +815,11 @@ func (p *NodeAwarePreparer) StatArtifact(ctx context.Context, artifact *Artifact
 	if err := p.ResolveArtifact(ctx, artifact); err != nil {
 		return downloadprepare.Result{}, err
 	}
-	secret, err := p.remoteCredentials(artifact)
+	keys, err := p.remoteCredentials(artifact)
 	if err != nil {
 		return downloadprepare.Result{}, err
 	}
-	return p.remote.Stat(ctx, artifact.OriginNodeURL, secret, artifact.OriginArtifactID)
+	return p.remote.Stat(ctx, artifact.OriginNodeURL, keys, artifact.OriginArtifactID)
 }
 
 func (p *NodeAwarePreparer) DeleteArtifact(ctx context.Context, artifact *Artifact) error {
@@ -806,22 +827,21 @@ func (p *NodeAwarePreparer) DeleteArtifact(ctx context.Context, artifact *Artifa
 	// deleted node has no newer record, so retain the last persisted URL as the
 	// best-effort cleanup target.
 	_ = p.ResolveArtifact(ctx, artifact)
-	secret, err := p.remoteCredentials(artifact)
+	keys, err := p.remoteCredentials(artifact)
 	if err != nil {
 		return err
 	}
-	return p.remote.Delete(ctx, artifact.OriginNodeURL, secret, artifact.OriginArtifactID)
+	return p.remote.Delete(ctx, artifact.OriginNodeURL, keys, artifact.OriginArtifactID)
 }
 
-func (p *NodeAwarePreparer) remoteCredentials(artifact *Artifact) (string, error) {
+func (p *NodeAwarePreparer) remoteCredentials(artifact *Artifact) (nodeauth.Keyring, error) {
 	if artifact == nil || strings.TrimSpace(artifact.OriginNodeURL) == "" || !downloadprepare.ValidArtifactID(artifact.OriginArtifactID) {
-		return "", errors.New("remote artifact locator is incomplete")
+		return nil, errors.New("remote artifact locator is incomplete")
 	}
-	cfg := p.config()
-	if cfg == nil || strings.TrimSpace(cfg.Auth.JWTSecret) == "" || p.remote == nil {
-		return "", errors.New("remote artifact credentials are unavailable")
+	if p.nodeKeys == nil || p.remote == nil {
+		return nil, errors.New("remote artifact credentials are unavailable")
 	}
-	return strings.TrimSpace(cfg.Auth.JWTSecret), nil
+	return p.nodeKeys, nil
 }
 
 func (p *NodeAwarePreparer) config() *config.Config {

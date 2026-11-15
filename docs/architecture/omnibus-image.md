@@ -7,8 +7,10 @@ optional Redis and Meilisearch, in one container supervised by
 installs that want one container instead of the Compose stack: a main server
 with its own PostgreSQL, and proxy and transcode nodes that use it (see
 [Nodes](#nodes)). Its source is `omnibus/`; `docker-compose.yml` runs a
-main server, or a node when `.env` sets `MODE`, `DATABASE_URL`, `REDIS_URL`,
-and `NODE_URL`. Hardware transcoding and node access are commented out in it.
+main server, a transcode node when `.env` sets `MODE`, `SILO_CORE_URL` and
+`SILO_NODE_KEY`, or a proxy node when it sets `MODE`, `DATABASE_URL`,
+`REDIS_URL`, and `NODE_URL`. Hardware transcoding and node access are commented
+out in it.
 `docker-compose.advanced.yml` is the earlier multi-container file, kept for
 installs that stay on that layout; it runs the same image, whose bundled
 services stay off because `DATABASE_URL` and `REDIS_URL` name its own.
@@ -79,7 +81,8 @@ order:
    `REDIS_URL` turns the matching bundled service off. With the bundled
    PostgreSQL it defaults `POSTGRES_TUNE` to `auto` with a 50% memory budget;
    a deployment's own database keeps Silo's default, tuning off. A proxy or
-   transcode `MODE` turns them all off and requires both URLs.
+   transcode `MODE` turns them all off; a proxy `MODE` also requires both
+   URLs.
 4. `init-postgres` creates the cluster on first start and writes the image's
    settings and `pg_hba.conf` on every start; `svc-postgres` runs it;
    `init-postgres-db` creates the `silo` database and rebuilds
@@ -256,18 +259,30 @@ working.
 
 ## Nodes
 
-The same image runs a proxy or transcode node. With `MODE=proxy` or
-`MODE=transcode`, `init-config` requires `DATABASE_URL` and `REDIS_URL`,
-starts none of the bundled services, and ignores `ENABLE_REDIS`, `ENABLE_MEILISEARCH`,
-and `ENABLE_NODE_ACCESS` with a warning. Silo already keeps migrations and
-`POSTGRES_TUNE` to the primary modes (`integrated`, `api`), so a node never
-changes the shared database's schema or settings. `/config` holds the node's
-own state. Silo itself refuses to start either mode without `NODE_URL`, the
-node's identity. An administrator registers the node's URL on the main server,
-which checks the node's health at that registered URL; it can differ from
-`NODE_URL` (see [Proxy origins by access path](../admin-api.md#proxy-origins-by-access-path)).
+The same image runs a proxy or transcode node. With either `MODE`,
+`init-config` starts none of the bundled services and ignores `ENABLE_REDIS`,
+`ENABLE_MEILISEARCH`, and `ENABLE_NODE_ACCESS` with a warning. `/config` holds
+the node's own state.
 
-A main server shares its bundled services with nodes when `.env` sets
+With `MODE=transcode`, Silo branches before it loads the bootstrap: the node
+needs only `SILO_CORE_URL`, the main server's URL, and `SILO_NODE_KEY`, the key
+an administrator issued it, and Silo refuses to start without a well-formed
+key. It opens no database or Redis and holds no `SECRET_KEY`: it reads its
+configuration from the main server and ignores `DATABASE_URL`, `REDIS_URL`,
+`SECRET_KEY`, `NODE_URL` and `NODE_NAME` with one warning, so a `.env` copied
+from the main server keeps working. `init-config` requires nothing of it.
+[Transcode nodes](transcode-nodes.md) describes what the node takes from the
+main server and what it needs from the network.
+
+With `MODE=proxy`, `init-config` requires `DATABASE_URL` and `REDIS_URL`. Silo
+already keeps migrations and `POSTGRES_TUNE` to the primary modes
+(`integrated`, `api`), so a proxy never changes the shared database's schema or
+settings. Silo itself refuses to start a proxy without `NODE_URL`, its
+identity. An administrator registers the proxy's URL on the main server, which
+checks its health at that registered URL; it can differ from `NODE_URL` (see
+[Proxy origins by access path](../admin-api.md#proxy-origins-by-access-path)).
+
+A main server shares its bundled services with proxies when `.env` sets
 `ENABLE_NODE_ACCESS=true` and the two commented port lines in
 `docker-compose.yml` are uncommented to publish 5432 and 6379 on
 `NODE_ACCESS_HOST`:
@@ -276,20 +291,20 @@ A main server shares its bundled services with nodes when `.env` sets
   and `pg_hba.conf` gains `host silo silo all scram-sha-256`.
   `init-postgres-db` sets the `silo` role's password to `POSTGRES_PASSWORD` on
   every start, passing it to `psql` through the environment.
-- Redis starts even without `ENABLE_REDIS`, since nodes need the Redis the main
-  server uses. It binds every interface and requires `REDIS_PASSWORD`, which
+- Redis starts even without `ENABLE_REDIS`, since proxies need the Redis the
+  main server uses. It binds every interface and requires `REDIS_PASSWORD`, which
   `init-config` writes to a file only the `redis` account and root read; the
   readiness check signs in from it. The password is limited to characters that
   need no escaping in a URL, because Silo's own `REDIS_URL` carries it.
 - Silo on the main server still uses the socket and loopback.
 
 Turning node access off removes the listener and the network rule, clears the
-role's password, and puts Redis back on loopback. Nodes sign in as `silo`, the
-cluster's superuser, as they did with the multi-container stack, and neither
-connection is encrypted, so the ports belong on a trusted network only.
+role's password, and puts Redis back on loopback. Proxies sign in as `silo`,
+the cluster's superuser, as they did with the multi-container stack, and
+neither connection is encrypted, so the ports belong on a trusted network only.
 Reusing `POSTGRES_PASSWORD` means a main server moved from that stack keeps the
-`DATABASE_URL` its nodes already have, as long as that stack ran with the
-default `POSTGRES_USER=silo`; nodes that sign in as another user are refused
+`DATABASE_URL` its proxies already have, as long as that stack ran with the
+default `POSTGRES_USER=silo`; proxies that sign in as another user are refused
 until their `DATABASE_URL` names `silo`. Their `REDIS_URL` gains the password.
 
 ## Moving from the multi-container stack
@@ -389,8 +404,8 @@ here. It refuses, before anything is moved into place, when:
   its largest collation-dependent index twice over (the index and its WAL) plus
   1 GiB, or for copying a Silo directory that cannot be hard-linked while
   keeping that room for the database's first start.
-- The copy has enabled proxy or transcode nodes and node access is off: they
-  reached the old services on published ports.
+- The copy has enabled proxy nodes and node access is off: they reached the
+  old services on published ports.
 
 How it stays safe to repeat and to roll back:
 

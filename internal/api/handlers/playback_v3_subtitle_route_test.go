@@ -204,7 +204,7 @@ func TestSeekReanchorKeepsTheFrozenSRTRepresentation(t *testing.T) {
 			file := v3HandlerFixtureFile(t)
 			file.ExternalSubtitles = []models.ExternalSubtitle{{Path: "/media/movie.ar.srt", Language: "ar", Format: "srt"}}
 			manager := playback.NewSessionManager(0, 0)
-			handler := NewPlaybackHandler(manager, testPlaybackFileResolver{file: file})
+			handler := newKeyedPlaybackHandler(manager, testPlaybackFileResolver{file: file})
 			handler.SettingsRepo = &mutablePlaybackSettingsV3{values: map[string]string{"allow_4k_transcode": "false"}}
 			handler.ItemAccess = allowAllPlaybackItemAccess{}
 			startRequest := v3HandlerStartRequest()
@@ -280,7 +280,7 @@ func TestSeekReanchorKeepsTheFrozenSRTRepresentation(t *testing.T) {
 // through /api/v2 replays it instead of failing the surface check.
 func TestV2RetryReplaysATerminalStartWithSubripSidecar(t *testing.T) {
 	file := v3HandlerFixtureFile(t)
-	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0), testPlaybackFileResolver{file: file})
+	handler := newKeyedPlaybackHandler(playback.NewSessionManager(0, 0), testPlaybackFileResolver{file: file})
 	handler.SettingsRepo = &mutablePlaybackSettingsV3{values: map[string]string{"allow_4k_transcode": "false"}}
 	handler.ItemAccess = allowAllPlaybackItemAccess{}
 	startRequest := v3HandlerStartRequest()

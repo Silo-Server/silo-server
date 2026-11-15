@@ -18,6 +18,7 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/nodeauth/nodeauthtest"
 	"github.com/Silo-Server/silo-server/internal/playback"
 )
 
@@ -639,6 +640,7 @@ func TestCrashCleanupKeepsSessionOfRebuiltPlay(t *testing.T) {
 	t.Run("a transcode node takes the play", func(t *testing.T) {
 		handler, sessions, scrobbler, crash := crashedPlay(t)
 		handler.JWTSecret, handler.RecipeNodeStore = "test-secret", &stubRecipeNodeStore{}
+		handler.NodeKeys = nodeauthtest.SameKey("test-secret")
 		node := fakeTranscodeNode(t, nil)
 		crash(func() {
 			file := &models.MediaFile{ID: 42, FilePath: "/media/movie.mkv"}

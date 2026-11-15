@@ -13,6 +13,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/nodeauth"
+	"github.com/Silo-Server/silo-server/internal/nodepool/nodepooltest"
+	"github.com/Silo-Server/silo-server/internal/nodesource"
+	"github.com/Silo-Server/silo-server/internal/nodesource/nodesourcetest"
+
 	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/downloadprepare"
 	"github.com/Silo-Server/silo-server/internal/models"
@@ -82,16 +87,17 @@ func (p *nonReservingCapacityPlanner) TranscodeNodeURLs() []string {
 	return []string{p.node.URL}
 }
 
-func (p *recordingRemotePreparer) Prepare(_ context.Context, nodeURL, secret string, req downloadprepare.Request) (downloadprepare.Result, error) {
-	p.nodeURL, p.secret, p.request = nodeURL, secret, req
+func (p *recordingRemotePreparer) Prepare(_ context.Context, nodeURL string, keys nodeauth.Keyring, req downloadprepare.Request) (downloadprepare.Result, error) {
+	p.nodeURL, p.request = nodeURL, req
+	p.secret, _ = keys.KeyFor(nodeauth.TargetTranscode, nodeURL)
 	return downloadprepare.Result{ArtifactID: req.ArtifactID, FileSize: 1234, ExecutionFingerprint: req.ExecutionFingerprint()}, nil
 }
 
-func (p *recordingRemotePreparer) Stat(_ context.Context, _, _ string, artifactID string) (downloadprepare.Result, error) {
+func (p *recordingRemotePreparer) Stat(_ context.Context, _ string, _ nodeauth.Keyring, artifactID string) (downloadprepare.Result, error) {
 	return downloadprepare.Result{ArtifactID: artifactID, FileSize: 1234}, nil
 }
 
-func (p *recordingRemotePreparer) Delete(_ context.Context, nodeURL, _ string, artifactID string) error {
+func (p *recordingRemotePreparer) Delete(_ context.Context, nodeURL string, _ nodeauth.Keyring, artifactID string) error {
 	p.deleted = artifactID
 	p.deleteURL = nodeURL
 	return nil
@@ -108,23 +114,27 @@ func (l staticArtifactOriginLookup) GetByID(context.Context, int) (*nodepool.Nod
 
 type unavailableRemotePreparer struct{}
 
-func (unavailableRemotePreparer) Prepare(context.Context, string, string, downloadprepare.Request) (downloadprepare.Result, error) {
+func (unavailableRemotePreparer) Prepare(context.Context, string, nodeauth.Keyring, downloadprepare.Request) (downloadprepare.Result, error) {
 	return downloadprepare.Result{}, os.ErrNotExist
 }
-func (unavailableRemotePreparer) Stat(context.Context, string, string, string) (downloadprepare.Result, error) {
+func (unavailableRemotePreparer) Stat(context.Context, string, nodeauth.Keyring, string) (downloadprepare.Result, error) {
 	return downloadprepare.Result{}, downloadprepare.ErrArtifactNotFound
 }
-func (unavailableRemotePreparer) Delete(context.Context, string, string, string) error { return nil }
+func (unavailableRemotePreparer) Delete(context.Context, string, nodeauth.Keyring, string) error {
+	return nil
+}
 
 type indeterminateRemotePreparer struct{}
 
-func (indeterminateRemotePreparer) Prepare(context.Context, string, string, downloadprepare.Request) (downloadprepare.Result, error) {
+func (indeterminateRemotePreparer) Prepare(context.Context, string, nodeauth.Keyring, downloadprepare.Request) (downloadprepare.Result, error) {
 	return downloadprepare.Result{}, context.DeadlineExceeded
 }
-func (indeterminateRemotePreparer) Stat(context.Context, string, string, string) (downloadprepare.Result, error) {
+func (indeterminateRemotePreparer) Stat(context.Context, string, nodeauth.Keyring, string) (downloadprepare.Result, error) {
 	return downloadprepare.Result{}, os.ErrDeadlineExceeded
 }
-func (indeterminateRemotePreparer) Delete(context.Context, string, string, string) error { return nil }
+func (indeterminateRemotePreparer) Delete(context.Context, string, nodeauth.Keyring, string) error {
+	return nil
+}
 
 type attestationRemotePreparer struct {
 	prepareResult downloadprepare.Result
@@ -135,15 +145,15 @@ type attestationRemotePreparer struct {
 	deletes       int
 }
 
-func (p *attestationRemotePreparer) Prepare(context.Context, string, string, downloadprepare.Request) (downloadprepare.Result, error) {
+func (p *attestationRemotePreparer) Prepare(context.Context, string, nodeauth.Keyring, downloadprepare.Request) (downloadprepare.Result, error) {
 	return p.prepareResult, p.prepareErr
 }
 
-func (p *attestationRemotePreparer) Stat(context.Context, string, string, string) (downloadprepare.Result, error) {
+func (p *attestationRemotePreparer) Stat(context.Context, string, nodeauth.Keyring, string) (downloadprepare.Result, error) {
 	return p.statResult, p.statErr
 }
 
-func (p *attestationRemotePreparer) Delete(context.Context, string, string, string) error {
+func (p *attestationRemotePreparer) Delete(context.Context, string, nodeauth.Keyring, string) error {
 	p.deletes++
 	return p.deleteErr
 }
@@ -151,11 +161,13 @@ func (p *attestationRemotePreparer) Delete(context.Context, string, string, stri
 // newPoolPreparer builds a preparer that plans over a transcode pool of nodes
 // and signs node requests with the JWT secret "secret".
 func newPoolPreparer(local EncodePreparer, nodes ...*nodepool.Node) *NodeAwarePreparer {
-	pool := nodepool.NewTranscodePool()
+	pool := nodepooltest.NewTranscodePool()
 	pool.SetNodes(nodes)
 	cfg := &config.Config{}
 	cfg.Auth.JWTSecret = "secret"
-	return NewNodeAwarePreparer(local, nodepool.NewPlanner(nodepool.NewProxyPool(), pool), func() *config.Config { return cfg })
+	preparer := NewNodeAwarePreparer(local, nodepool.NewPlanner(nodepool.NewProxyPool(), pool), func() *config.Config { return cfg })
+	preparer.SetNodeKeys(nodeauthtest.NodeKey(cfg.Auth.JWTSecret))
+	return preparer
 }
 
 // softwarePQToneMap is a software BT.2390 tone map for PQ sources.
@@ -463,7 +475,7 @@ func TestNodeAwarePreparerPreservesIndeterminateToneMapResultWhenCleanupFails(t 
 
 func TestNodeAwarePreparerResolvesCurrentArtifactNodeURL(t *testing.T) {
 	group := "host-new"
-	pool := nodepool.NewTranscodePool()
+	pool := nodepooltest.NewTranscodePool()
 	pool.SetNodes([]*nodepool.Node{{ID: 17, URL: "http://new-url", Group: &group, Enabled: true, Healthy: true}})
 	p := NewNodeAwarePreparer(nil, nodepool.NewPlanner(nodepool.NewProxyPool(), pool), nil)
 	artifact := &Artifact{OriginNodeID: 17, OriginNodeURL: "http://old-url", OriginNodeGroup: "host-old", OriginArtifactID: "artifact-1"}
@@ -500,7 +512,7 @@ func TestNodeAwarePreparerUsesCurrentDisabledNodeURLForCleanup(t *testing.T) {
 
 func TestNodeAwarePreparerRecoversEnabledOriginMissingFromPool(t *testing.T) {
 	group := "host-new"
-	pool := nodepool.NewTranscodePool()
+	pool := nodepooltest.NewTranscodePool()
 	p := NewNodeAwarePreparer(nil, nodepool.NewPlanner(nodepool.NewProxyPool(), pool), nil)
 	p.SetOriginLookup(staticArtifactOriginLookup{node: &nodepool.Node{
 		ID: 17, Type: nodepool.NodeTypeTranscode, URL: "http://new-url", Group: &group, Enabled: true,
@@ -516,7 +528,7 @@ func TestNodeAwarePreparerRecoversEnabledOriginMissingFromPool(t *testing.T) {
 
 func TestNodeAwarePreparerReportsSoftwareCapacityWhenHardwareIsFull(t *testing.T) {
 	limit := 1
-	pool := nodepool.NewTranscodePool()
+	pool := nodepooltest.NewTranscodePool()
 	pool.SetNodes([]*nodepool.Node{
 		{URL: "http://hardware", Enabled: true, Healthy: true, ActiveJobs: 1, MaxJobs: &limit},
 		{URL: "http://software", Enabled: true, Healthy: true, MaxJobs: &limit},
@@ -644,6 +656,7 @@ func TestNodeAwarePreparerUsesTargetNodeProbeBudget(t *testing.T) {
 	cfg.Playback.HWAccel = tonemap.BackendQSV
 	cfg.Playback.HWDevice = "/central/device"
 	preparer := NewNodeAwarePreparer(nil, nil, func() *config.Config { return cfg })
+	preparer.SetNodeKeys(nodeauthtest.NodeKey(cfg.Auth.JWTSecret))
 	preparer.probeClient = &http.Client{Transport: transport}
 
 	if got, want := preparer.remoteToneMapProbeTimeout(remote.URL), playback.CapabilityRequestTimeout(tonemap.BackendQSV, "/central/device"); got != want {
@@ -712,6 +725,7 @@ func TestNodeAwarePreparerCachesCapabilityFailuresBriefly(t *testing.T) {
 	cfg := &config.Config{}
 	cfg.Auth.JWTSecret = "secret"
 	preparer := NewNodeAwarePreparer(nil, nil, func() *config.Config { return cfg })
+	preparer.SetNodeKeys(nodeauthtest.NodeKey(cfg.Auth.JWTSecret))
 	if _, err := preparer.toneMapCapabilitiesForNode(context.Background(), remote.URL); err == nil {
 		t.Fatal("initial failed capability request returned no error")
 	}
@@ -747,6 +761,7 @@ func TestNodeAwarePreparerCapabilityErrorsRedactNodeURLSecrets(t *testing.T) {
 	cfg := &config.Config{}
 	cfg.Auth.JWTSecret = "jwt-secret"
 	preparer := NewNodeAwarePreparer(nil, planner, func() *config.Config { return cfg })
+	preparer.SetNodeKeys(nodeauthtest.NodeKey(cfg.Auth.JWTSecret))
 	preparer.probeClient = &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
 		return nil, errors.New("connection refused")
 	})}
@@ -800,6 +815,7 @@ func TestNodeAwarePreparerColdProbeBudgetFollowsTheNodeOverride(t *testing.T) {
 	cfg.Playback.HWAccel = tonemap.BackendQSV
 	cfg.Playback.HWDevice = "/dev/dri/renderD128"
 	preparer := NewNodeAwarePreparer(nil, planner, func() *config.Config { return cfg })
+	preparer.SetNodeKeys(nodeauthtest.NodeKey(cfg.Auth.JWTSecret))
 
 	want := playback.CapabilityRequestTimeout(backend, devices)
 	if got := preparer.remoteToneMapProbeTimeout(nodeURL); got != want {
@@ -825,6 +841,7 @@ func TestNodeAwarePreparerRepricesALearnedBudgetAfterTheDeviceSetGrows(t *testin
 	cfg.Playback.HWAccel = tonemap.BackendQSV
 	cfg.Playback.HWDevice = "/dev/dri/renderD128"
 	preparer := NewNodeAwarePreparer(nil, planner, func() *config.Config { return cfg })
+	preparer.SetNodeKeys(nodeauthtest.NodeKey(cfg.Auth.JWTSecret))
 	// What the node advertised while it was still on one device.
 	learned := playback.CapabilityRequestTimeout(backend, "/dev/dri/renderD128")
 	preparer.capabilities[nodeURL] = remoteToneMapCapabilities{
@@ -890,6 +907,7 @@ func TestNodeAwarePreparerDoesNotCacheAnOvertakenCapabilityFetch(t *testing.T) {
 	cfg := &config.Config{}
 	cfg.Auth.JWTSecret = "secret"
 	preparer := NewNodeAwarePreparer(nil, nil, func() *config.Config { return cfg })
+	preparer.SetNodeKeys(nodeauthtest.NodeKey(cfg.Auth.JWTSecret))
 
 	fetched := make(chan error, 1)
 	go func() {
@@ -941,6 +959,7 @@ func TestNodeAwarePreparerDoesNotCacheAnOvertakenCapabilityFailure(t *testing.T)
 	cfg := &config.Config{}
 	cfg.Auth.JWTSecret = "secret"
 	preparer := NewNodeAwarePreparer(nil, nil, func() *config.Config { return cfg })
+	preparer.SetNodeKeys(nodeauthtest.NodeKey(cfg.Auth.JWTSecret))
 
 	failed := make(chan error, 1)
 	go func() {
@@ -1062,5 +1081,34 @@ func TestNodeAwarePreparerLocalFallback(t *testing.T) {
 				t.Fatalf("local calls = %d, want 0", local.calls)
 			}
 		})
+	}
+}
+
+// A job dispatched to a node carries a source grant naming that node; a
+// source that cannot be granted is prepared here instead.
+func TestNodeAwarePreparerGrantsTheChosenNodeItsSource(t *testing.T) {
+	opts := playback.TranscodeOpts{InputPath: "/media/movie.mkv", MediaFileID: 42, TargetCodecVideo: "h264", TargetCodecAudio: "aac"}
+
+	local := &recordingEncodePreparer{}
+	remote := &recordingRemotePreparer{}
+	p := newPoolPreparer(local, &nodepool.Node{ID: 17, URL: "http://idle", Enabled: true, Healthy: true})
+	p.remote = remote
+	p.SetSourceGrants(nodesourcetest.Granter{})
+	if _, err := p.PrepareFile(context.Background(), "artifact-1", opts, "/local/artifact-1.mp4"); err != nil {
+		t.Fatal(err)
+	}
+	if want := nodesourcetest.Grant(17, 42, "/media/movie.mkv"); remote.request.SourceGrant != want || local.calls != 0 {
+		t.Fatalf("remote grant = %q (local calls %d), want %q", remote.request.SourceGrant, local.calls, want)
+	}
+
+	local, remote = &recordingEncodePreparer{}, &recordingRemotePreparer{}
+	p = newPoolPreparer(local, &nodepool.Node{ID: 17, URL: "http://idle", Enabled: true, Healthy: true})
+	p.remote = remote
+	p.SetSourceGrants(nodesourcetest.Granter{Err: nodesource.ErrSourceGone})
+	if _, err := p.PrepareFile(context.Background(), "artifact-2", opts, "/local/artifact-2.mp4"); err != nil {
+		t.Fatal(err)
+	}
+	if local.calls != 1 || remote.request.ArtifactID != "" {
+		t.Fatalf("local calls = %d, remote request = %+v; want the job prepared here", local.calls, remote.request)
 	}
 }

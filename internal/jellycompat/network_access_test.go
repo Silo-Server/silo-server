@@ -7,6 +7,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/nodeauth/nodeauthtest"
+	"github.com/Silo-Server/silo-server/internal/nodepool/nodepooltest"
+
 	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/netaccess"
@@ -28,7 +31,7 @@ func compatTailnetContext() context.Context {
 // The Jellyfin-compatible redirect is built on the same accessor as the
 // native API: a provider-path client is never redirected to a LAN origin.
 func TestBuildProxyRedirectURLUsesTheAccessPathOrigin(t *testing.T) {
-	h := &PlaybackHandler{JWTSecret: "test-secret"}
+	h := &PlaybackHandler{JWTSecret: "test-secret", NodeKeys: nodeauthtest.SameKey("test-secret")}
 	file := &models.MediaFile{FilePath: "/media/movie.mkv"}
 	tailnet := netaccess.Path{Provider: "tailscale"}
 	lanOnly := &nodepool.Node{ID: 41, URL: compatLANProxyURL}
@@ -79,7 +82,7 @@ func TestBuildProxyRedirectURLUsesTheAccessPathOrigin(t *testing.T) {
 func TestResolveCompatIdentityRouteExcludesProxiesUnreachableOnTheAccessPath(t *testing.T) {
 	proxies := nodepool.NewProxyPool()
 	proxies.SetNodes([]*nodepool.Node{{ID: 41, URL: compatLANProxyURL, Enabled: true, Healthy: true}})
-	handler := &PlaybackHandler{JWTSecret: "secret", NodePlanner: nodepool.NewPlanner(proxies, nodepool.NewTranscodePool())}
+	handler := &PlaybackHandler{JWTSecret: "secret", NodeKeys: nodeauthtest.SameKey("secret"), NodePlanner: nodepool.NewPlanner(proxies, nodepooltest.NewTranscodePool())}
 	policy := config.DefaultPlaybackRoutingPolicy()
 
 	decision := handler.resolveCompatIdentityRouteWithPolicy(compatTailnetContext(), "compat-tailnet-direct", string(playback.PlayDirect), 8_000, false, policy)

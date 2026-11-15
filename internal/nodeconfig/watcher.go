@@ -28,7 +28,7 @@ type BootstrapOverrides struct {
 	ABSListen   string // from ABS_PORT env
 	RedisURL    string // from REDIS_URL env
 	// NodeURL is this process's own stream_nodes identity (from NODE_URL env),
-	// set only in proxy/transcode mode. It is what lets a node find its own row
+	// set only in proxy mode. It is what lets a proxy find its own row
 	// and overlay that row's acceleration overrides onto the cluster-wide
 	// playback settings. Empty on an API host, which has no stream_nodes row.
 	NodeURL string

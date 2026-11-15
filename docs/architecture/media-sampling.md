@@ -156,7 +156,8 @@ is held as PCM. Subtitle sync is its consumer.
 `POST /media-samples/run` on the transcode-node listener runs one `Request`
 with the node's ffmpeg and returns its `Result` as JSON
 (`mediasample.RemoteClient` is the caller). The node requires a
-[signed request](worker-http-protocol.md#authentication) and an input path it is allowed to read, accepts software attempts
+[signed request](worker-http-protocol.md#authentication) and a
+[source grant](transcode-nodes.md#source-grants) for the input, accepts software attempts
 only, and answers a failed run with `422` and a `RemoteFailure` whose reason is
 the run's `Classify` cause. `RemoteError.Infrastructure` tells a caller
 whether running the request elsewhere may succeed: an unreachable node, a 5xx,

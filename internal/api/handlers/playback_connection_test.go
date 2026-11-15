@@ -17,6 +17,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/clientip"
 	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/nodeauth/nodeauthtest"
 	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/playback/connectionstore"
 )
@@ -244,7 +245,7 @@ func TestBufferedAutoPrefersCopyVersion(t *testing.T) {
 	alternate.Bitrate = 31600
 	alternate.VideoTracks = append([]models.VideoTrack(nil), source.VideoTracks...)
 	alternate.VideoTracks[0].Bitrate = 31600
-	h := NewPlaybackHandler(playback.NewSessionManager(0, 0), mapPlaybackFileResolver{files: map[int]*models.MediaFile{source.ID: source, alternate.ID: alternate}})
+	h := newKeyedPlaybackHandler(playback.NewSessionManager(0, 0), mapPlaybackFileResolver{files: map[int]*models.MediaFile{source.ID: source, alternate.ID: alternate}})
 	h.FileVersionFetcher = testPlaybackFileVersionFetcher{byContent: map[string][]*models.MediaFile{source.ContentID: {source, alternate}}}
 	req := v3HandlerStartRequest()
 	req.Capabilities.VideoDecode[0].MaxBitrateKbps = 100_000
@@ -302,7 +303,7 @@ func TestBufferedAutoRefinesAudioOnTheLowerVersion(t *testing.T) {
 		{Language: "en", Codec: "truehd", Channels: 8, Layout: "7.1", Default: true},
 		{Language: "en", Codec: "aac", Channels: 2, Layout: "stereo"},
 	}
-	h := NewPlaybackHandler(playback.NewSessionManager(0, 0), mapPlaybackFileResolver{files: map[int]*models.MediaFile{source.ID: source, alternate.ID: alternate}})
+	h := newKeyedPlaybackHandler(playback.NewSessionManager(0, 0), mapPlaybackFileResolver{files: map[int]*models.MediaFile{source.ID: source, alternate.ID: alternate}})
 	h.FileVersionFetcher = testPlaybackFileVersionFetcher{byContent: map[string][]*models.MediaFile{source.ContentID: {source, alternate}}}
 	h.SettingsRepo = &mutablePlaybackSettingsV3{values: map[string]string{"transcode_enabled": "true"}}
 	h.PlaybackConfig = playbackTestConfig(writePlaybackTestFFmpeg(t), t.TempDir())
@@ -485,6 +486,7 @@ func TestLearnedLimitCarriesThroughReplansDB(t *testing.T) {
 	handler, _, alternate, startRequest := subtitleBlockedHDRFixtureV3(t)
 	handler.InstallationID = serviceInstallation
 	handler.JWTSecret = "learned-limit-replans-secret"
+	handler.NodeKeys = nodeauthtest.SameKey("learned-limit-replans-secret")
 	handler.Connections = &connectionstore.Store{Pool: pool}
 	startRequest.ClientFeatures = append(startRequest.ClientFeatures, playback.FeatureBufferingQualityV1)
 	startRequest.Capabilities.VideoDecode = append(startRequest.Capabilities.VideoDecode, v3HandlerStartRequest().Capabilities.VideoDecode[0])
@@ -554,6 +556,7 @@ func TestLearnedLimitMarksOnlyAStartItLoweredDB(t *testing.T) {
 			handler, source, alternate, startRequest := subtitleBlockedHDRFixtureV3(t)
 			handler.InstallationID = serviceInstallation
 			handler.JWTSecret = "learned-limit-starts-secret"
+			handler.NodeKeys = nodeauthtest.SameKey("learned-limit-starts-secret")
 			handler.Connections = &connectionstore.Store{Pool: pool}
 			startRequest.ClientFeatures = append(startRequest.ClientFeatures, playback.FeatureBufferingQualityV1)
 			h264 := v3HandlerStartRequest().Capabilities.VideoDecode[0]
@@ -629,6 +632,7 @@ func TestLearnedLimitMarksOnlyAReplanItLoweredDB(t *testing.T) {
 			handler, source, alternate, startRequest := subtitleBlockedHDRFixtureV3(t)
 			handler.InstallationID = serviceInstallation
 			handler.JWTSecret = "learned-limit-replan-marks-secret"
+			handler.NodeKeys = nodeauthtest.SameKey("learned-limit-replan-marks-secret")
 			handler.Connections = &connectionstore.Store{Pool: pool}
 			startRequest.ClientFeatures = append(startRequest.ClientFeatures, playback.FeatureBufferingQualityV1)
 			h264 := v3HandlerStartRequest().Capabilities.VideoDecode[0]
@@ -709,7 +713,7 @@ func TestConnectionReadingsDB(t *testing.T) {
 	t.Cleanup(func() { _, _ = pool.Exec(context.WithoutCancel(ctx), `DELETE FROM users WHERE id = $1`, user) })
 
 	connections := &connectionstore.Store{Pool: pool}
-	h := &PlaybackHandler{Connections: connections, JWTSecret: "connection-readings-secret"}
+	h := &PlaybackHandler{Connections: connections, JWTSecret: "connection-readings-secret", NodeKeys: nodeauthtest.SameKey("connection-readings-secret")}
 	remote := clientip.SetContext(apimw.SetClaims(ctx, &auth.Claims{UserID: user, Role: "user", TokenType: auth.TokenTypeAccess}), "203.0.113.7")
 	key, _ := connectionstore.Key(remote, h.JWTSecret)
 	if err := h.ReportPlaybackProbe(remote, "tv-1", connectionstore.ProbeResult{Kbps: 48000, Bytes: 3000000, DurationMS: 500, Transport: "ethernet", LowerBound: true}); err != nil {

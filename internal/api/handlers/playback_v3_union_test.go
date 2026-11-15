@@ -13,6 +13,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/nodeauth"
+	"github.com/Silo-Server/silo-server/internal/nodeauth/nodeauthtest"
+	"github.com/Silo-Server/silo-server/internal/nodepool/nodepooltest"
+
 	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/nodepool"
@@ -39,7 +43,7 @@ func presetLocalRegistryV3(h *PlaybackHandler, registry *playback.Transformation
 }
 
 func TestTransformationRegistryV3RetriesIncompleteProbe(t *testing.T) {
-	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0))
+	handler := newKeyedPlaybackHandler(playback.NewSessionManager(0, 0))
 	failed := playback.NewTransformationRegistryV3([]playback.TransformationSpecV3{{Name: "partial", Available: true}})
 	succeeded := playback.NewTransformationRegistryV3([]playback.TransformationSpecV3{{Name: "complete", Available: true}})
 	var calls int
@@ -119,7 +123,7 @@ func writePlaybackArgsRecordingFFmpegV3(t *testing.T, argsPath string) string {
 // verifies that, with tone mapping enabled, a recipe without a tone-map step
 // neither waits on nor fails with the local tone-map probe.
 func TestValidateLocalTransportCapabilitiesV3ProbesToneMapOnlyForToneMappedRecipes(t *testing.T) {
-	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0))
+	handler := newKeyedPlaybackHandler(playback.NewSessionManager(0, 0))
 	handler.PlaybackConfig = func() config.PlaybackConfig {
 		return config.PlaybackConfig{HWAccel: playback.HWAccelNone, TranscodeEnabled: true}
 	}
@@ -157,7 +161,7 @@ func TestValidateLocalTransportCapabilitiesV3ProbesToneMapOnlyForToneMappedRecip
 // TestLocalToneMapCapabilitiesV3DoesNotSerializeCallers verifies that a
 // canceled request is not trapped behind another request's slow probe.
 func TestLocalToneMapCapabilitiesV3DoesNotSerializeCallers(t *testing.T) {
-	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0))
+	handler := newKeyedPlaybackHandler(playback.NewSessionManager(0, 0))
 	started := make(chan struct{})
 	release := make(chan struct{})
 	var calls atomic.Int32
@@ -216,7 +220,7 @@ func TestProgressivePlanningCapabilitiesV3UseOnlyEligibleProxyExecutors(t *testi
 		{Name: playback.TransformationAudioToAACV3, RecipeVersion: playback.TransformationAudioToAACRecipeVersionV3},
 		{Name: playback.TransformationVideoToH264V3, RecipeVersion: playback.TransformationVideoToH264RecipeVersionV3, Available: true},
 	})
-	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0))
+	handler := newKeyedPlaybackHandler(playback.NewSessionManager(0, 0))
 	handler.NodePlanner = enumeratingNodePlannerV3{proxyURLs: []string{remote.URL}}
 	policy := config.DefaultPlaybackRoutingPolicy()
 	policy.RemuxExecution = config.PlaybackExecutionWorkerOnly
@@ -260,7 +264,7 @@ func TestProgressivePlanningCapabilitiesV3RequireAddressableProxy(t *testing.T) 
 	local := playback.NewTransformationRegistryV3([]playback.TransformationSpecV3{{
 		Name: playback.TransformationAudioToAACV3, RecipeVersion: playback.TransformationAudioToAACRecipeVersionV3,
 	}})
-	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0))
+	handler := newKeyedPlaybackHandler(playback.NewSessionManager(0, 0))
 	handler.NodePlanner = enumeratingNodePlannerV3{proxyURLs: []string{remote.URL}}
 
 	registry := handler.progressiveRemuxPlanningRegistryWithInputsV3(t.Context(), local, false)
@@ -287,7 +291,7 @@ func TestProgressivePlanningCapabilitiesV3RequireRelayAndAuthorityForTranscodeEx
 	local := playback.NewTransformationRegistryV3([]playback.TransformationSpecV3{{
 		Name: playback.TransformationAudioToAACV3, RecipeVersion: playback.TransformationAudioToAACRecipeVersionV3,
 	}})
-	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0))
+	handler := newKeyedPlaybackHandler(playback.NewSessionManager(0, 0))
 	handler.NodePlanner = enumeratingNodePlannerV3{urls: []string{transcode.URL}}
 	policy := config.DefaultPlaybackRoutingPolicy()
 	policy.RemuxExecution = config.PlaybackExecutionWorkerOnly
@@ -361,7 +365,7 @@ func TestIncompletePlaybackSettingsMakePolicyTerminalsRetryable(t *testing.T) {
 }
 
 func TestUnusedToneMapPlanningSnapshotDoesNotInventCapabilityFailure(t *testing.T) {
-	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0))
+	handler := newKeyedPlaybackHandler(playback.NewSessionManager(0, 0))
 	var probes atomic.Int32
 	handler.v3ToneMapProbe = func(context.Context, string, string, string) (tonemap.Capabilities, error) {
 		probes.Add(1)
@@ -396,12 +400,13 @@ func TestRemoteTransformationsV3FailureCacheSplit(t *testing.T) {
 	}))
 	defer remote.Close()
 
-	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0))
+	handler := newKeyedPlaybackHandler(playback.NewSessionManager(0, 0))
 	handler.JWTSecret = "test-secret"
-	if _, err := handler.remoteTransformationsPlanningV3(context.Background(), remote.URL); err == nil {
+	handler.NodeKeys = nodeauthtest.SameKey("test-secret")
+	if _, err := handler.remoteTransformationsPlanningV3(context.Background(), nodeauth.TargetTranscode, remote.URL); err == nil {
 		t.Fatal("fetch against a failing node must error")
 	}
-	if _, err := handler.remoteTransformationsPlanningV3(context.Background(), remote.URL); err == nil {
+	if _, err := handler.remoteTransformationsPlanningV3(context.Background(), nodeauth.TargetTranscode, remote.URL); err == nil {
 		t.Fatal("planning lookups must surface the memoized failure")
 	}
 	if hits != 1 {
@@ -413,7 +418,7 @@ func TestRemoteTransformationsV3FailureCacheSplit(t *testing.T) {
 	// path's budget, and rejecting the already-selected node on it would
 	// fail a start a fresh fetch could still validate.
 	fail = false
-	transformations, err := handler.remoteTransformationsV3(context.Background(), remote.URL)
+	transformations, err := handler.remoteTransformationsV3(context.Background(), nodeauth.TargetTranscode, remote.URL)
 	if err != nil || len(transformations) != 1 {
 		t.Fatalf("transport lookup must refetch through a memoized failure: %v %#v", err, transformations)
 	}
@@ -421,7 +426,7 @@ func TestRemoteTransformationsV3FailureCacheSplit(t *testing.T) {
 		t.Fatalf("transport lookup fetched %d times, want 2", hits)
 	}
 	// The refetched success replaces the failure for planning too.
-	if _, err := handler.remoteTransformationsPlanningV3(context.Background(), remote.URL); err != nil {
+	if _, err := handler.remoteTransformationsPlanningV3(context.Background(), nodeauth.TargetTranscode, remote.URL); err != nil {
 		t.Fatalf("planning lookup after transport success: %v", err)
 	}
 	if hits != 2 {
@@ -442,17 +447,18 @@ func TestRemoteTransformationsPlanningV3ServesStaleSuccessWhileRefreshing(t *tes
 	}))
 	defer remote.Close()
 
-	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0))
+	handler := newKeyedPlaybackHandler(playback.NewSessionManager(0, 0))
 	handler.JWTSecret = "test-secret"
-	handler.v3NodeCapabilities = map[string]v3NodeCapabilityCache{
-		remote.URL: {
+	handler.NodeKeys = nodeauthtest.SameKey("test-secret")
+	handler.v3NodeCapabilities = map[v3NodeCapabilityKey]v3NodeCapabilityCache{
+		transcodeCapabilityKey(remote.URL): {
 			transformations: []playback.TransformationV3{{Name: playback.TransformationAudioToAACV3, Executor: playback.ExecutorServerV3, RecipeVersion: "1"}},
 			expiresAt:       time.Now().Add(-time.Second),
 		},
 	}
 	result := make(chan []playback.TransformationV3, 1)
 	go func() {
-		transformations, _ := handler.remoteTransformationsPlanningV3(context.Background(), remote.URL)
+		transformations, _ := handler.remoteTransformationsPlanningV3(context.Background(), nodeauth.TargetTranscode, remote.URL)
 		result <- transformations
 	}()
 	select {
@@ -470,7 +476,7 @@ func TestRemoteTransformationsPlanningV3ServesStaleSuccessWhileRefreshing(t *tes
 		close(releaseRequest)
 		t.Fatal("background capability refresh did not start")
 	}
-	if _, err := handler.remoteTransformationsPlanningV3(context.Background(), remote.URL); err != nil {
+	if _, err := handler.remoteTransformationsPlanningV3(context.Background(), nodeauth.TargetTranscode, remote.URL); err != nil {
 		close(releaseRequest)
 		t.Fatalf("second stale planning lookup: %v", err)
 	}
@@ -491,10 +497,11 @@ func TestLookupRemoteCapabilitiesV3PreservesConcurrentFreshSuccessOnRefetchFailu
 	}))
 	defer remote.Close()
 
-	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0))
+	handler := newKeyedPlaybackHandler(playback.NewSessionManager(0, 0))
 	handler.JWTSecret = "test-secret"
-	handler.v3NodeCapabilities = make(map[string]v3NodeCapabilityCache)
-	handler.v3NodeCapabilities[remote.URL] = v3NodeCapabilityCache{
+	handler.NodeKeys = nodeauthtest.SameKey("test-secret")
+	handler.v3NodeCapabilities = make(map[v3NodeCapabilityKey]v3NodeCapabilityCache)
+	handler.v3NodeCapabilities[transcodeCapabilityKey(remote.URL)] = v3NodeCapabilityCache{
 		expiresAt: time.Now().Add(-time.Second),
 	}
 	handler.v3NodeProbeBudgets = map[string]time.Duration{remote.URL: time.Second}
@@ -504,7 +511,7 @@ func TestLookupRemoteCapabilitiesV3PreservesConcurrentFreshSuccessOnRefetchFailu
 	}
 	resultCh := make(chan lookupResult, 1)
 	go func() {
-		entry, err := handler.lookupRemoteCapabilitiesV3(context.Background(), remote.URL, false)
+		entry, err := handler.lookupRemoteCapabilitiesV3(context.Background(), nodeauth.TargetTranscode, remote.URL, false)
 		resultCh <- lookupResult{entry: entry, err: err}
 	}()
 	<-requestStarted
@@ -514,7 +521,7 @@ func TestLookupRemoteCapabilitiesV3PreservesConcurrentFreshSuccessOnRefetchFailu
 		expiresAt:       time.Now().Add(time.Minute),
 	}
 	handler.v3NodeCapabilitiesMu.Lock()
-	handler.v3NodeCapabilities[remote.URL] = fresh
+	handler.v3NodeCapabilities[transcodeCapabilityKey(remote.URL)] = fresh
 	handler.v3NodeCapabilitiesMu.Unlock()
 	close(releaseRequest)
 
@@ -543,13 +550,14 @@ func TestPlanNodeSessionV3PrefersCapabilityMatchingNode(t *testing.T) {
 	}))
 	defer incapable.Close()
 
-	transcodes := nodepool.NewTranscodePool()
+	transcodes := nodepooltest.NewTranscodePool()
 	transcodes.SetNodes([]*nodepool.Node{
 		{ID: 1, Name: "incapable", Type: nodepool.NodeTypeTranscode, URL: incapable.URL, Enabled: true, Healthy: true, ActiveJobs: 0},
 		{ID: 2, Name: "capable", Type: nodepool.NodeTypeTranscode, URL: capable.URL, Enabled: true, Healthy: true, ActiveJobs: 5},
 	})
-	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0))
+	handler := newKeyedPlaybackHandler(playback.NewSessionManager(0, 0))
 	handler.JWTSecret = "test-secret"
+	handler.NodeKeys = nodeauthtest.SameKey("test-secret")
 	handler.NodePlanner = nodepool.NewPlanner(nodepool.NewProxyPool(), transcodes)
 
 	plan := &playback.PlanV3{
@@ -573,7 +581,7 @@ func TestPlanNodeSessionV3PrefersCapabilityMatchingNode(t *testing.T) {
 }
 
 func TestPrepareTransportV3LocalFallbackRejectsUnavailableTransformations(t *testing.T) {
-	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0))
+	handler := newKeyedPlaybackHandler(playback.NewSessionManager(0, 0))
 	presetLocalRegistryV3(handler, playback.NewTransformationRegistryV3([]playback.TransformationSpecV3{
 		{Name: "video_to_h264", RecipeVersion: "2"},
 		{Name: "audio_to_aac", RecipeVersion: "2"},
@@ -614,7 +622,7 @@ func TestPrepareTransportV3AcceptsEveryValidatedLocalToneMapExecutor(t *testing.
 		t.Run(test.name, func(t *testing.T) {
 			file := stableToneMapTransportFileV3(t)
 			manager := playback.NewSessionManager(0, 0)
-			handler := NewPlaybackHandler(manager)
+			handler := newKeyedPlaybackHandler(manager)
 			ffmpegPath := writePlaybackTestFFmpeg(t)
 			writePlaybackToneMapFFprobe(t, ffmpegPath, file.VideoTracks[0])
 			transcodeDir := t.TempDir()
@@ -700,7 +708,7 @@ func TestNVENCSDRBaseInitialAndThawedRecipeUseIdenticalFFmpegArgs(t *testing.T) 
 	file.VideoTracks[0].ColorSpace = "bt709"
 
 	manager := playback.NewSessionManager(0, 0)
-	handler := NewPlaybackHandler(manager)
+	handler := newKeyedPlaybackHandler(manager)
 	handler.SettingsRepo = &mutablePlaybackSettingsV3{values: map[string]string{
 		config.PlaybackTranscodeHardwareToneMapSettingKey: "true",
 	}}
@@ -790,7 +798,7 @@ func TestPrepareTransportV3PrefersLocalHardwareBeforeSoftwareFallback(t *testing
 	file := stableToneMapTransportFileV3(t)
 	writePlaybackToneMapFFprobe(t, ffmpegPath, file.VideoTracks[0])
 	manager := playback.NewSessionManager(0, 0)
-	handler := NewPlaybackHandler(manager)
+	handler := newKeyedPlaybackHandler(manager)
 	handler.NodePlanner = staticNodePlannerV3{}
 	transcodeDir := t.TempDir()
 	handler.PlaybackConfig = func() config.PlaybackConfig {
@@ -857,7 +865,7 @@ func TestPrepareTransportV3ReportsSoftwareToneMapFallback(t *testing.T) {
 	file := stableToneMapTransportFileV3(t)
 	writePlaybackToneMapFFprobe(t, ffmpegPath, file.VideoTracks[0])
 	manager := playback.NewSessionManager(0, 0)
-	handler := NewPlaybackHandler(manager)
+	handler := newKeyedPlaybackHandler(manager)
 	transcodeDir := t.TempDir()
 	handler.PlaybackConfig = func() config.PlaybackConfig {
 		return config.PlaybackConfig{FFmpegPath: ffmpegPath, TranscodeDir: transcodeDir, TranscodeEnabled: true, HWAccel: tonemap.BackendQSV, HWDevice: "/dev/dri/renderD128"}
@@ -959,13 +967,14 @@ func TestPrepareTransportV3FallsBackToSoftwareCapacity(t *testing.T) {
 	defer software.Close()
 
 	limit := 1
-	transcodes := nodepool.NewTranscodePool()
+	transcodes := nodepooltest.NewTranscodePool()
 	transcodes.SetNodes([]*nodepool.Node{
 		{URL: hardware.URL, Enabled: true, Healthy: true, ActiveJobs: 1, MaxJobs: &limit},
 		{URL: software.URL, Enabled: true, Healthy: true},
 	})
-	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0))
+	handler := newKeyedPlaybackHandler(playback.NewSessionManager(0, 0))
 	handler.JWTSecret = "test-secret"
+	handler.NodeKeys = nodeauthtest.SameKey("test-secret")
 	handler.NodePlanner = nodepool.NewPlanner(nodepool.NewProxyPool(), transcodes)
 	requireWorkerRoutingV3(handler)
 	file := stableToneMapTransportFileV3(t)
@@ -1029,14 +1038,15 @@ func TestPrepareTransportV3TriesNextSoftwareNodeAfterStartFailure(t *testing.T) 
 	healthySoftware := newNode(tonemap.Capability{Mode: tonemap.ModeSoftware, Backend: tonemap.BackendSoftware, Filter: tonemap.SoftwareFilterBT2390, SourceKinds: []tonemap.SourceKind{tonemap.SourcePQ}}, http.StatusAccepted)
 	defer healthySoftware.Close()
 
-	transcodes := nodepool.NewTranscodePool()
+	transcodes := nodepooltest.NewTranscodePool()
 	transcodes.SetNodes([]*nodepool.Node{
 		{URL: hardware.URL, Enabled: true, Healthy: true},
 		{URL: failedSoftware.URL, Enabled: true, Healthy: true},
 		{URL: healthySoftware.URL, Enabled: true, Healthy: true},
 	})
-	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0))
+	handler := newKeyedPlaybackHandler(playback.NewSessionManager(0, 0))
 	handler.JWTSecret = "test-secret"
+	handler.NodeKeys = nodeauthtest.SameKey("test-secret")
 	handler.NodePlanner = nodepool.NewPlanner(nodepool.NewProxyPool(), transcodes)
 	requireWorkerRoutingV3(handler)
 	file := stableToneMapTransportFileV3(t)
@@ -1095,10 +1105,11 @@ func TestPrepareTransportV3ClassifiesExhaustedRemoteLiveValidation(t *testing.T)
 			}))
 			defer node.Close()
 
-			transcodes := nodepool.NewTranscodePool()
+			transcodes := nodepooltest.NewTranscodePool()
 			transcodes.SetNodes([]*nodepool.Node{{URL: node.URL, Enabled: true, Healthy: true}})
-			handler := NewPlaybackHandler(playback.NewSessionManager(0, 0))
+			handler := newKeyedPlaybackHandler(playback.NewSessionManager(0, 0))
 			handler.JWTSecret = "test-secret"
+			handler.NodeKeys = nodeauthtest.SameKey("test-secret")
 			handler.NodePlanner = nodepool.NewPlanner(nodepool.NewProxyPool(), transcodes)
 			requireWorkerRoutingV3(handler)
 			file := stableToneMapTransportFileV3(t)

@@ -6,7 +6,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
-	"time"
 
 	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/tonemap"
@@ -20,9 +19,8 @@ func TestHEVCNodeReportsCPUEncoderWithHardwareToneMapping(t *testing.T) {
 		}
 		t.Run(name, func(t *testing.T) {
 			server := newTestServer(t)
-			tracker := newBlockingSessionTracker()
+			tracker := &recordingSessionTracker{}
 			server.tracker = tracker
-			defer close(tracker.trackRelease)
 			ffmpeg := useFakeFFmpeg(t, server, "#!/bin/sh\ncase \" $* \" in\n*' -c:v hevc_vaapi '*) exit 1 ;;\n*' -f null '*) exit 0 ;;\nesac\nexec sleep 30\n")
 			server.watcher.Config().Playback.HWAccel = tonemap.BackendVAAPI
 			server.resolveToneMapRecipeFn = func(_ context.Context, opts *playback.TranscodeOpts) error {
@@ -46,7 +44,7 @@ func TestHEVCNodeReportsCPUEncoderWithHardwareToneMapping(t *testing.T) {
 					ToneMapSourceKind: request.ToneMapSourceKind, ToneMapRecipeVersion: request.ToneMapRecipeVersion, ToneMapSourceRevision: revision,
 					FastStart: true,
 				})
-				session, _ = server.spawnReconstruct(httptest.NewRequest(http.MethodGet, "/", nil), request.SessionID, -1, card)
+				session, _ = server.spawnReconstruct(httptest.NewRequest(http.MethodGet, "/", nil), request.SessionID, -1, resolutionOf(card))
 				if session == nil {
 					t.Fatal("reconstruction failed")
 				}
@@ -73,14 +71,12 @@ func TestHEVCNodeReportsCPUEncoderWithHardwareToneMapping(t *testing.T) {
 				t.Fatal("session was not registered")
 			}
 			defer func() { _ = session.CloseProcess() }()
-			select {
-			case <-tracker.trackStarted:
-			case <-time.After(3 * time.Second):
-				t.Fatal("session tracking did not start")
-			}
 			tracker.mu.Lock()
-			tracked := tracker.tracked
-			tracker.mu.Unlock()
+			defer tracker.mu.Unlock()
+			if len(tracker.tracked) != 1 {
+				t.Fatalf("tracked %d records, want 1", len(tracker.tracked))
+			}
+			tracked := tracker.tracked[0]
 			if tracked.HWAccel != playback.HWAccelNone || tracked.ToneMapMode != string(tonemap.ModeHardware) {
 				t.Fatalf("node activity misreported encoder: %#v", tracked)
 			}

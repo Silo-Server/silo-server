@@ -22,7 +22,7 @@ type plannerFixture struct {
 func newFixture(proxies, transcodes []*Node) *plannerFixture {
 	pp := NewProxyPool()
 	pp.SetNodes(proxies)
-	tp := NewTranscodePool()
+	tp := newKeyedTranscodePool()
 	tp.SetNodes(transcodes)
 	f := &plannerFixture{
 		planner:    NewPlanner(pp, tp),
@@ -623,7 +623,7 @@ func TestUnknownBitrateAdmittedBelowCap(t *testing.T) {
 
 func TestReserveTranscodeWorkSharesCapacityReservations(t *testing.T) {
 	capOne := 1
-	transcodes := NewTranscodePool()
+	transcodes := newKeyedTranscodePool()
 	transcodes.SetNodes([]*Node{
 		{URL: "http://transcode-a", Enabled: true, Healthy: true, MaxJobs: &capOne},
 		{URL: "http://transcode-b", Enabled: true, Healthy: true, MaxJobs: &capOne},
@@ -653,7 +653,7 @@ func TestReserveTranscodeWorkSharesCapacityReservations(t *testing.T) {
 
 func TestReserveTranscodeWorkOverlappingAttemptsReleaseOnlyTheirOwnReservation(t *testing.T) {
 	capTwo := 2
-	transcodes := NewTranscodePool()
+	transcodes := newKeyedTranscodePool()
 	transcodes.SetNodes([]*Node{{URL: "http://transcode-a", Enabled: true, Healthy: true, MaxJobs: &capTwo}})
 	planner := NewPlanner(NewProxyPool(), transcodes)
 
@@ -687,7 +687,7 @@ func TestPlanDownloadSkipsBandwidthCappedProxiesAndReservesJobCapacity(t *testin
 		{URL: "http://bandwidth-capped", Enabled: true, Healthy: true, MaxBandwidthKbps: &bandwidthCap},
 		{URL: "http://uncapped", Enabled: true, Healthy: true, MaxJobs: &jobCap},
 	})
-	planner := NewPlanner(proxies, NewTranscodePool())
+	planner := NewPlanner(proxies, newKeyedTranscodePool())
 
 	first := planner.PlanDownload("download-1")
 	if first.ProxyNode == nil || first.ProxyNode.URL != "http://uncapped" {
@@ -709,7 +709,7 @@ func TestPlanDownloadPrefersArtifactOriginGroup(t *testing.T) {
 		{URL: "http://proxy-a", Group: &groupA, Enabled: true, Healthy: true},
 		{URL: "http://proxy-b", Group: &groupB, Enabled: true, Healthy: true},
 	})
-	planner := NewPlanner(proxies, NewTranscodePool())
+	planner := NewPlanner(proxies, newKeyedTranscodePool())
 	plan := planner.PlanDownload("download-grouped", groupB)
 	if plan.ProxyNode == nil || plan.ProxyNode.URL != "http://proxy-b" {
 		t.Fatalf("plan = %+v, want proxy-b", plan)
@@ -720,7 +720,7 @@ func TestPlanDownloadFallsBackWhenOriginGroupHasNoProxy(t *testing.T) {
 	group := "host-a"
 	proxies := NewProxyPool()
 	proxies.SetNodes([]*Node{{URL: "http://proxy-a", Group: &group, Enabled: true, Healthy: true}})
-	planner := NewPlanner(proxies, NewTranscodePool())
+	planner := NewPlanner(proxies, newKeyedTranscodePool())
 	plan := planner.PlanDownload("download-fallback", "host-missing")
 	if plan.ProxyNode == nil || plan.ProxyNode.URL != "http://proxy-a" {
 		t.Fatalf("plan = %+v, want proxy-a fallback", plan)
@@ -736,7 +736,7 @@ func TestPlanSessionWithFiltersProxiesForProxyOnlyPlans(t *testing.T) {
 		{ID: 1, URL: "http://proxy-old", Enabled: true, Healthy: true},
 		{ID: 2, URL: "http://proxy-new", Enabled: true, Healthy: true},
 	})
-	planner := NewPlanner(proxies, NewTranscodePool())
+	planner := NewPlanner(proxies, newKeyedTranscodePool())
 
 	// Only the upgraded proxy can run the recipe; every selection must land
 	// there regardless of where the round-robin cursor happens to be.
@@ -753,7 +753,7 @@ func TestPlanSessionWithFiltersProxiesForProxyOnlyPlans(t *testing.T) {
 func TestPlanSessionWithReturnsNoProxyWhenNoneAreCapable(t *testing.T) {
 	proxies := NewProxyPool()
 	proxies.SetNodes([]*Node{{ID: 1, URL: "http://proxy-old", Enabled: true, Healthy: true}})
-	planner := NewPlanner(proxies, NewTranscodePool())
+	planner := NewPlanner(proxies, newKeyedTranscodePool())
 
 	plan := planner.PlanSessionWith("session-none", "", false, 0, func(*Node) bool { return false })
 	if plan.ProxyNode != nil {
@@ -769,7 +769,7 @@ func TestPlanRouteReservesExactlyRequestedTopology(t *testing.T) {
 	group := "rack-a"
 	proxies := NewProxyPool()
 	proxies.SetNodes([]*Node{{ID: 1, URL: "http://proxy", Group: &group, Enabled: true, Healthy: true}})
-	transcodes := NewTranscodePool()
+	transcodes := newKeyedTranscodePool()
 	transcodes.SetNodes([]*Node{{ID: 2, URL: "http://transcode", Group: &group, Enabled: true, Healthy: true}})
 	planner := NewPlanner(proxies, transcodes)
 
@@ -808,7 +808,7 @@ func TestPlanRouteTranscodeAPIIgnoresUnhealthyProxyGroupMember(t *testing.T) {
 	group := "rack-a"
 	proxies := NewProxyPool()
 	proxies.SetNodes([]*Node{{ID: 1, URL: "http://proxy", Group: &group, Enabled: true, Healthy: false}})
-	transcodes := NewTranscodePool()
+	transcodes := newKeyedTranscodePool()
 	transcodes.SetNodes([]*Node{{ID: 2, URL: "http://transcode", Group: &group, Enabled: true, Healthy: true}})
 	planner := NewPlanner(proxies, transcodes)
 
@@ -828,7 +828,7 @@ func TestPlanRouteUsesIndependentCapabilityPredicates(t *testing.T) {
 		{ID: 1, URL: "http://proxy-old", Enabled: true, Healthy: true},
 		{ID: 2, URL: "http://proxy-new", Enabled: true, Healthy: true},
 	})
-	transcodes := NewTranscodePool()
+	transcodes := newKeyedTranscodePool()
 	transcodes.SetNodes([]*Node{
 		{ID: 3, URL: "http://transcode-old", Enabled: true, Healthy: true},
 		{ID: 4, URL: "http://transcode-new", Enabled: true, Healthy: true},
@@ -969,7 +969,7 @@ func TestSharedGPUDoesNotAffectProxySelection(t *testing.T) {
 func TestProxyNodeByURLNormalizesStoredAndLookupURLs(t *testing.T) {
 	proxies := NewProxyPool()
 	proxies.SetNodes([]*Node{{ID: 1, Name: "p1", URL: "https://proxy.example.com/", Enabled: true, Healthy: true}})
-	planner := NewPlanner(proxies, NewTranscodePool())
+	planner := NewPlanner(proxies, newKeyedTranscodePool())
 
 	for _, lookup := range []string{"https://proxy.example.com", "https://proxy.example.com/"} {
 		node, ok := planner.ProxyNodeByURL(lookup)
@@ -1053,5 +1053,55 @@ func TestPlanRouteUnreachableNodeDegradesItsGroup(t *testing.T) {
 	})
 	if plan.TranscodeNode == nil || plan.TranscodeNode.URL != "http://tc-1" {
 		t.Fatalf("plan = %+v, want ungrouped tc-1 while rack-a is degraded", plan.TranscodeNode)
+	}
+}
+
+// newKeyedTranscodePool is a transcode pool in which every node has a key, so
+// a fixture need not issue one before the node can take work.
+func newKeyedTranscodePool() *TranscodePool {
+	pool := NewTranscodePool()
+	pool.SetKeyCheck(func(int) bool { return true })
+	return pool
+}
+
+// A transcode node nothing can sign for stays pooled and listed but takes no
+// work: not a session, not background work, and not a move off a dead node,
+// even as the least loaded node. Without a key check the pool falls back to
+// the row's KeyIssued.
+func TestPlannerSkipsTranscodeNodesWithoutAKey(t *testing.T) {
+	keyless := transcodeNode(1, "http://keyless", nil, 0)
+	keyed := transcodeNode(2, "http://keyed", nil, 3)
+	f := newFixture(nil, []*Node{keyless, keyed})
+	f.transcodes.SetKeyCheck(func(id int) bool { return id == keyed.ID })
+
+	if plan := f.planner.PlanRoute(RouteRequest{SessionID: "s1", NeedsTranscode: true}); plan.TranscodeNode == nil || plan.TranscodeNode.ID != keyed.ID {
+		t.Fatalf("PlanRoute picked %+v, want the keyed node", plan.TranscodeNode)
+	}
+	// A move off the keyed node, reported unreachable, has nowhere to go.
+	if plan := f.planner.PlanRoute(RouteRequest{SessionID: "s2", NeedsTranscode: true, Unreachable: map[string]struct{}{keyed.URL: {}}}); plan.TranscodeNode != nil {
+		t.Fatalf("a move off the keyed node landed on %s", plan.TranscodeNode.URL)
+	}
+	if node, release := f.planner.ReserveTranscodeWork("job"); node == nil || node.ID != keyed.ID {
+		t.Fatalf("ReserveTranscodeWork = %+v, want the keyed node", node)
+	} else {
+		release()
+	}
+	if f.planner.TranscodeNodeHealthy(keyless.URL) {
+		t.Fatal("a keyless node reports as serving")
+	}
+	if got := f.planner.TranscodeNodeURLsForNewWork(); len(got) != 1 || got[0] != keyed.URL {
+		t.Fatalf("TranscodeNodeURLsForNewWork = %v, want only the keyed node", got)
+	}
+	if got := f.transcodes.Acquire(); got == nil || got.ID != keyed.ID {
+		t.Fatalf("Acquire = %+v, want the keyed node", got)
+	}
+	if len(f.transcodes.Nodes()) != 2 {
+		t.Fatal("the keyless node left the pool")
+	}
+
+	unchecked := NewTranscodePool()
+	unchecked.SetNodes([]*Node{transcodeNode(3, "http://unissued", nil, 0)})
+	if unchecked.Acquire() != nil {
+		t.Fatal("a pool without a key check placed work on a node with no issued key")
 	}
 }

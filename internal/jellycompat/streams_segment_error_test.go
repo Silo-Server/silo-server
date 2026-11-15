@@ -293,7 +293,7 @@ func TestHandleAudioV2HLSSegmentRejectsLiveRuntimeForDifferentAudioFacts(t *test
 		TranscodeDir:  t.TempDir(),
 		FFmpegPath:    writeCompatTestFFmpeg(t),
 		HWAccel:       playback.HWAccelNone,
-		tm:            playback.NewTranscodeManager(),
+		tm:            keyedTranscodeManager(),
 	}
 	handler.tm.Sessions = sessions
 	live, err := handler.ensureTranscodeSession(t.Context(), "play-v2", "upstream-1", stereo)

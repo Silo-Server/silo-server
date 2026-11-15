@@ -3,6 +3,8 @@ package noderouting
 import (
 	"testing"
 
+	"github.com/Silo-Server/silo-server/internal/nodepool/nodepooltest"
+
 	dto "github.com/prometheus/client_model/go"
 
 	"github.com/Silo-Server/silo-server/internal/config"
@@ -44,7 +46,7 @@ func TestResolveDoesNotCrossHardExecutionConstraint(t *testing.T) {
 }
 
 func TestResolveUsesExactWorkerAPIRoute(t *testing.T) {
-	transcodes := nodepool.NewTranscodePool()
+	transcodes := nodepooltest.NewTranscodePool()
 	transcodes.SetNodes([]*nodepool.Node{{ID: 1, URL: "http://worker", Enabled: true, Healthy: true}})
 	planner := nodepool.NewPlanner(nodepool.NewProxyPool(), transcodes)
 	policy := config.DefaultPlaybackRoutingPolicy()
@@ -67,7 +69,7 @@ func TestResolveUsesExactWorkerAPIRoute(t *testing.T) {
 func TestResolveUsesTranscodeExecutorWithRelayOnlyProxy(t *testing.T) {
 	proxies := nodepool.NewProxyPool()
 	proxies.SetNodes([]*nodepool.Node{{ID: 2, URL: "http://proxy", Enabled: true, Healthy: true}})
-	transcodes := nodepool.NewTranscodePool()
+	transcodes := nodepooltest.NewTranscodePool()
 	transcodes.SetNodes([]*nodepool.Node{{ID: 1, URL: "http://transcode", Enabled: true, Healthy: true}})
 	planner := nodepool.NewPlanner(proxies, transcodes)
 	policy := config.DefaultPlaybackRoutingPolicy()
@@ -91,7 +93,7 @@ func TestResolveUsesTranscodeExecutorWithRelayOnlyProxy(t *testing.T) {
 func TestResolveProxyExecutorDoesNotRequireRelayCapability(t *testing.T) {
 	proxies := nodepool.NewProxyPool()
 	proxies.SetNodes([]*nodepool.Node{{ID: 2, URL: "http://proxy", Enabled: true, Healthy: true}})
-	planner := nodepool.NewPlanner(proxies, nodepool.NewTranscodePool())
+	planner := nodepool.NewPlanner(proxies, nodepooltest.NewTranscodePool())
 	policy := config.DefaultPlaybackRoutingPolicy()
 	policy.RemuxExecution = config.PlaybackExecutionWorkerOnly
 

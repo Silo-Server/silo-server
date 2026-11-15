@@ -28,7 +28,7 @@ func realtimeResultMessage(t *testing.T, sessionID, commandID string, status pla
 // so the rejection itself has to stop the session.
 func TestRealtimeRejectedPlanInvalidationStopsSession(t *testing.T) {
 	sessionMgr := playback.NewSessionManager(0, 0)
-	handler := NewPlaybackHandler(sessionMgr)
+	handler := newKeyedPlaybackHandler(sessionMgr)
 	handler.CommandTracker = playback.NewCommandTracker()
 	defer handler.CommandTracker.Close()
 
@@ -52,7 +52,7 @@ func TestRealtimeRejectedPlanInvalidationStopsSession(t *testing.T) {
 // stay alive on its replacement plan.
 func TestRealtimeCompletedPlanInvalidationKeepsSession(t *testing.T) {
 	sessionMgr := playback.NewSessionManager(0, 0)
-	handler := NewPlaybackHandler(sessionMgr)
+	handler := newKeyedPlaybackHandler(sessionMgr)
 	handler.CommandTracker = playback.NewCommandTracker()
 	defer handler.CommandTracker.Close()
 
@@ -77,7 +77,7 @@ func TestRealtimeCompletedPlanInvalidationKeepsSession(t *testing.T) {
 // drop its record, or one session could silently disarm another's recovery.
 func TestRealtimeResultForOtherSessionCommandLeavesTrackerArmed(t *testing.T) {
 	sessionMgr := playback.NewSessionManager(0, 0)
-	handler := NewPlaybackHandler(sessionMgr)
+	handler := newKeyedPlaybackHandler(sessionMgr)
 	handler.CommandTracker = playback.NewCommandTracker()
 	defer handler.CommandTracker.Close()
 

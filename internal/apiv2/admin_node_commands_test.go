@@ -78,3 +78,55 @@ func TestAdminNodeCommands(t *testing.T) {
 		})
 	}
 }
+
+type fakeNodeKeys struct {
+	ids []int
+	key string
+	err error
+}
+
+func (f *fakeNodeKeys) IssueAdminNodeKey(_ context.Context, id int) (string, error) {
+	f.ids = append(f.ids, id)
+	return f.key, f.err
+}
+
+// The one response that carries a node key is uncacheable, holds nothing but
+// the key, and no failure leaks one.
+func TestAdminNodeKeyIssue(t *testing.T) {
+	f := &fakeNodeKeys{key: "snk1_17_synthetic-node-key"}
+	deps := pilotDeps(nil, nil)
+	deps.AdminNodeKeys = f
+	h := NewHandler(deps)
+	path := Prefix + "/admin/nodes/17/key"
+
+	requireProblem(t, do(t, h, "POST", path, "", bearer(memberToken)), TypePermissionDenied)
+	if len(f.ids) != 0 {
+		t.Fatal("an unauthorized issue reached the service")
+	}
+	rec := do(t, h, "POST", path, "", bearer(adminToken))
+	if rec.Code != http.StatusCreated || len(f.ids) != 1 || f.ids[0] != 17 {
+		t.Fatal(rec.Code, rec.Body.String(), f.ids)
+	}
+	if got := rec.Header().Get("Cache-Control"); got != "no-store" {
+		t.Fatalf("Cache-Control = %q, want no-store for a credential", got)
+	}
+	if body := strings.TrimSpace(rec.Body.String()); body != `{"node_key":"snk1_17_synthetic-node-key"}` {
+		t.Fatalf("body = %s", body)
+	}
+
+	for _, tc := range []struct {
+		err    error
+		status int
+	}{
+		{nodepool.ErrNodeKeyNotIssuable, http.StatusConflict},
+		{nodepool.ErrNodeNotFound, http.StatusNotFound},
+		{handlers.ErrAdminNodesUnavailable, http.StatusServiceUnavailable},
+		{errors.New("private-store"), http.StatusInternalServerError},
+	} {
+		f.err = tc.err
+		rec = do(t, h, "POST", path, "", bearer(adminToken))
+		if rec.Code != tc.status || strings.Contains(rec.Body.String(), "private-store") || strings.Contains(rec.Body.String(), f.key) {
+			t.Fatal(tc.err, rec.Code, rec.Body.String())
+		}
+	}
+}
