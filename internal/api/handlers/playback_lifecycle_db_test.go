@@ -495,15 +495,17 @@ func TestLifecycleSweepEndsReportedPlaysDB(t *testing.T) {
 	}
 	h.sweepLifecycle(ctx, pool, time.Now())
 	var closed bool
-	var watched, played float64
+	var watched, played, start float64
 	var reason string
-	if err := pool.QueryRow(ctx, `SELECT s.closed_at IS NOT NULL, h.watched_seconds, h.played_seconds, h.end_reason
+	if err := pool.QueryRow(ctx, `SELECT s.closed_at IS NOT NULL, h.watched_seconds, h.played_seconds, h.start_position_seconds, h.end_reason
 		FROM abs_playback_sessions s JOIN admin_playback_history h ON h.session_id = s.id WHERE s.id = $1`, silent).
-		Scan(&closed, &watched, &played, &reason); err != nil {
+		Scan(&closed, &watched, &played, &start, &reason); err != nil {
 		t.Fatalf("ended reported play has no history row: %v", err)
 	}
-	if !closed || watched != 600 || played != 300 || reason != string(PlaybackEndExpired) {
-		t.Fatalf("ended play: closed %v, watched %v, played %v, reason %q; want closed, 600, 300, expired", closed, watched, played, reason)
+	// It began at 100 s and seeked: the start is not 600 less 300 listened.
+	if !closed || watched != 600 || played != 300 || start != 100 || reason != string(PlaybackEndExpired) {
+		t.Fatalf("ended play: closed %v, watched %v, played %v, start %v, reason %q; want closed, 600, 300, 100, expired",
+			closed, watched, played, start, reason)
 	}
 	got := listed()
 	if _, ok := got[silent]; ok {
@@ -529,6 +531,7 @@ func insertReportedPlay(t *testing.T, ctx context.Context, pool *pgxpool.Pool, a
 	facts, _ := json.Marshal(map[string]any{
 		"session_id": id, "user_id": account, "profile_id": "p-1", "media_file_id": file,
 		"play_method": "direct_play", "started_at": time.Now().Add(-10 * time.Minute).UTC(), "client_name": "Plappa",
+		"position_seconds": 100,
 	})
 	if _, err := pool.Exec(ctx, `INSERT INTO playback_session_lifecycle
 		(session_id, frontend, state, seq, user_id, profile_id, media_file_id, requested_media_file_id, started_at, updated_at, start_facts)

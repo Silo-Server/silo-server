@@ -352,8 +352,12 @@ func (h *PlaybackHandler) endReportedPlay(ctx context.Context, pool *pgxpool.Poo
 		}
 	}
 	h.endLifecycleWith(ctx, pool, c.sessionID, PlaybackEndExpired, now, func(session *playback.Session) {
+		// The start row holds the position the play began at; a seek since
+		// would make it differ from the end position less the listening.
+		start := session.Position
 		session.Position = c.reportedPosition
 		session.Watch.Credit(c.reportedPosition, c.reportedListening, c.reportedStartedAt, c.reportedLastSync)
+		session.Watch.StartPosition = start
 	})
 }
 
