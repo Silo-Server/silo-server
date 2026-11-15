@@ -58,6 +58,7 @@ export function TagInput({ value, onChange, placeholder, className }: TagInputPr
               e.stopPropagation();
               removeTag(i);
             }}
+            aria-label={t("web.settings.interface.remove", { label: tag })}
             className="hover:bg-primary/20 rounded-full p-0.5 transition-colors"
           >
             <X className="size-3" />

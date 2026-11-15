@@ -217,7 +217,13 @@ export default function FolderBrowser({
                   <ArrowUp className="me-1 h-3.5 w-3.5" />
                   {t("web.admin.common.folderBrowser.up")}
                 </Button>
-                <Button type="button" variant="ghost" size="icon" onClick={() => refetch()}>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  aria-label={t("web.admin.activity.page.refresh")}
+                  onClick={() => refetch()}
+                >
                   <RefreshCw className={`h-3.5 w-3.5 ${isFetching ? "animate-spin" : ""}`} />
                 </Button>
               </div>

@@ -1329,6 +1329,7 @@ export default function WebhookSyncSettings() {
                         disabled={eventPageClamped <= 0}
                         onClick={() => setEventPage(0)}
                         title={t("web.settings.webhooks.deliveries.firstPage")}
+                        aria-label={t("web.settings.webhooks.deliveries.firstPage")}
                       >
                         <ChevronsLeft className="h-3.5 w-3.5" />
                       </Button>
@@ -1339,6 +1340,7 @@ export default function WebhookSyncSettings() {
                         disabled={eventPageClamped <= 0}
                         onClick={() => setEventPage((p) => Math.max(0, p - 1))}
                         title={t("web.settings.webhooks.deliveries.previousPage")}
+                        aria-label={t("web.settings.webhooks.deliveries.previousPage")}
                       >
                         <ChevronLeft className="h-3.5 w-3.5" />
                       </Button>
@@ -1349,6 +1351,7 @@ export default function WebhookSyncSettings() {
                         disabled={eventPageClamped >= eventTotalPages - 1}
                         onClick={() => setEventPage((p) => Math.min(eventTotalPages - 1, p + 1))}
                         title={t("web.settings.webhooks.deliveries.nextPage")}
+                        aria-label={t("web.settings.webhooks.deliveries.nextPage")}
                       >
                         <ChevronRight className="h-3.5 w-3.5" />
                       </Button>
@@ -1359,6 +1362,7 @@ export default function WebhookSyncSettings() {
                         disabled={eventPageClamped >= eventTotalPages - 1}
                         onClick={() => setEventPage(eventTotalPages - 1)}
                         title={t("web.settings.webhooks.deliveries.lastPage")}
+                        aria-label={t("web.settings.webhooks.deliveries.lastPage")}
                       >
                         <ChevronsRight className="h-3.5 w-3.5" />
                       </Button>

@@ -1424,6 +1424,7 @@ export function WatchPlaybackBar() {
               onClick={() => transport?.skipBack()}
               disabled={!transport}
               title={t("web.player.bar.skipBackTitle", { count: seekPreferences.skipBack })}
+              aria-label={t("web.player.bar.skipBackTitle", { count: seekPreferences.skipBack })}
             >
               <SkipBack className="h-4 w-4" />
             </Button>
@@ -1446,6 +1447,9 @@ export function WatchPlaybackBar() {
               onClick={() => transport?.skipForward()}
               disabled={!transport}
               title={t("web.player.bar.skipForwardTitle", { count: seekPreferences.skipForward })}
+              aria-label={t("web.player.bar.skipForwardTitle", {
+                count: seekPreferences.skipForward,
+              })}
             >
               <SkipForward className="h-4 w-4" />
             </Button>
@@ -1464,6 +1468,7 @@ export function WatchPlaybackBar() {
               className="h-10 w-10 rounded-full"
               onClick={stopPlayback}
               title={t("web.player.bar.stopTitle")}
+              aria-label={t("web.player.bar.stopTitle")}
             >
               <X className="h-4 w-4" />
             </Button>

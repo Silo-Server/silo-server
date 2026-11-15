@@ -1,5 +1,5 @@
 import { JobPageControls } from "@/components/admin/JobPageControls";
-import { Fragment, useState, useEffect, useMemo, type ComponentProps } from "react";
+import { Fragment, useId, useState, useEffect, useMemo, type ComponentProps } from "react";
 import { useSortableAccessibility } from "@/hooks/useSortableAccessibility";
 import { useEventChannel } from "@/components/realtimeEventsContext";
 import type { Library, LibraryRealtimeMonitoringEntry, ScanRun } from "@/api/types";
@@ -416,6 +416,7 @@ function LibraryTable({
   onDragCancel: () => void;
 }) {
   const t = useT();
+  const nameIdBase = useId();
   return (
     <DndContext
       sensors={sensors}
@@ -445,10 +446,13 @@ function LibraryTable({
             <TableBody>
               {rows.map((row) => {
                 const { library: lib, scan, refresh, mountCheck, cleanup } = row;
+                const nameId = `${nameIdBase}-${lib.id}`;
                 return (
                   <Fragment key={lib.id}>
                     <SortableLibraryRow id={lib.id}>
-                      <TableCell className="font-medium">{lib.name}</TableCell>
+                      <TableCell id={nameId} className="font-medium">
+                        {lib.name}
+                      </TableCell>
                       <TableCell className="text-xs">
                         {lib.paths.length === 1 ? (
                           <span dir="ltr" className="text-muted-foreground font-mono">
@@ -555,6 +559,8 @@ function LibraryTable({
                               size="icon"
                               className="text-destructive h-7 w-7"
                               title={t("web.admin.libraries.list.confirmCleanupTitle")}
+                              aria-label={t("web.admin.libraries.list.confirmCleanupTitle")}
+                              aria-describedby={nameId}
                               disabled={cleanup.pending}
                               onClick={cleanup.run}
                             >
