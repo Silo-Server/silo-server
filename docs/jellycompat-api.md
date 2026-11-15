@@ -595,8 +595,10 @@ A video stream's `DisplayTitle` follows Jellyfin's: resolution, upper-cased
 codec, then the Dolby Vision profile or the video range ("4K HEVC Dolby Vision
 Profile 8.1 (HDR10)", "1080p H264 SDR"). Silo also names HDR10+ ("4K HEVC
 HDR10+", "Dolby Vision Profile 8.1 (HDR10+)"), where Jellyfin writes `HDR` and
-`(HDR10)`, and leaves out the stream title, which Silo cannot tell apart from
-ffprobe's codec name.
+`(HDR10)`, writes "Dolby Vision" for a track whose range type names Dolby
+Vision but whose profile was never recorded, where Jellyfin writes `HDR`, and
+leaves out the stream title, which Silo cannot tell apart from ffprobe's codec
+name.
 
 HEVC Dolby Vision Profile 8 with a proven HDR10 base layer and no enhancement
 layer can use HLS fMP4 remux when a positive video-range condition names both

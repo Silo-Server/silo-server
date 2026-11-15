@@ -3801,7 +3801,9 @@ func videoTrackDisplayTitle(track models.VideoTrack, versionHDR bool) string {
 	hdr10Plus := strings.HasSuffix(rangeType, compatRangeHDR10Plus)
 	dolbyVision := ""
 	if strings.HasPrefix(rangeType, compatRangeDOVI) {
-		dolbyVision = compatDolbyVisionTitle(track, hdr10Plus)
+		// The range type has no HDR10+ form for profiles other than 7 and 8,
+		// so read the track's own flag as well.
+		dolbyVision = compatDolbyVisionTitle(track, hdr10Plus || track.HDR10Plus)
 	}
 	switch {
 	case dolbyVision != "":
@@ -3858,17 +3860,20 @@ func compatVideoResolutionLabel(width, height int, interlaced bool) string {
 
 // compatDolbyVisionTitle follows Jellyfin's MediaStream.VideoDoViTitle
 // ("Dolby Vision Profile 8.1 (HDR10)"), naming an HDR10+ base layer as
-// "(HDR10+)". It is empty for profiles Jellyfin does not label.
+// "(HDR10+)". A track with no recorded profile, which older probes and seeded
+// rows name Dolby Vision only through the range type, is "Dolby Vision". It
+// is empty for profiles Jellyfin does not label.
 func compatDolbyVisionTitle(track models.VideoTrack, hdr10Plus bool) string {
-	profile := compatDolbyVisionProfile(track)
-	switch profile {
+	title := "Dolby Vision"
+	switch profile := compatDolbyVisionProfile(track); profile {
+	case 0:
 	case 4, 5, 7, 8, 9, 10:
+		title += " Profile " + strconv.Itoa(profile)
+		if track.DVBLCompatID > 0 {
+			title += "." + strconv.Itoa(track.DVBLCompatID)
+		}
 	default:
 		return ""
-	}
-	title := "Dolby Vision Profile " + strconv.Itoa(profile)
-	if track.DVBLCompatID > 0 {
-		title += "." + strconv.Itoa(track.DVBLCompatID)
 	}
 	if hdr10Plus {
 		return title + " (HDR10+)"
