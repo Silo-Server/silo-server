@@ -91,6 +91,7 @@ export function SubtitleMenu({
   const [onlineSearchEnabled, setOnlineSearchEnabled] = useState(true);
   const [appearanceOpen, setAppearanceOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
 
   const [pendingDownload, setPendingDownload] = useState<{
     id: string;
@@ -206,6 +207,15 @@ export function SubtitleMenu({
     }
   }, []);
 
+  // A modal dialog hands focus back to whatever held it when it opened. A
+  // pointer press leaves focus on the menu item, which closing the menu removes,
+  // so focus moves to the subtitles button first.
+  const openTool = (setToolOpen: (open: boolean) => void) => {
+    triggerRef.current?.focus({ preventScroll: true });
+    setToolOpen(true);
+    setOpen(false);
+  };
+
   if (tracks.length === 0 && !mediaFileId) return null;
 
   const canAddSubtitles = Boolean(mediaFileId && playerConfig);
@@ -223,6 +233,7 @@ export function SubtitleMenu({
   return (
     <div ref={menuRef} className="relative" onBlur={handleBlur}>
       <button
+        ref={triggerRef}
         type="button"
         className="hud-icon-btn hud-rail-btn"
         data-active={activeIndex !== null ? "true" : "false"}
@@ -373,10 +384,7 @@ export function SubtitleMenu({
                 role="menuitem"
                 type="button"
                 className="hud-item"
-                onClick={() => {
-                  setSearchOpen(true);
-                  setOpen(false);
-                }}
+                onClick={() => openTool(setSearchOpen)}
               >
                 <span aria-hidden="true" className="hud-item-icon">
                   <Plus />
@@ -389,10 +397,7 @@ export function SubtitleMenu({
                 role="menuitem"
                 type="button"
                 className="hud-item"
-                onClick={() => {
-                  setTranslateOpen(true);
-                  setOpen(false);
-                }}
+                onClick={() => openTool(setTranslateOpen)}
               >
                 <span aria-hidden="true" className="hud-item-icon">
                   <Languages />
@@ -421,34 +426,34 @@ export function SubtitleMenu({
       <SubtitleAppearancePanel open={appearanceOpen} onClose={() => setAppearanceOpen(false)} />
 
       {searchOpen && mediaFileId && playerConfig && (
-          <SubtitleSearchModal
-            key={sessionId}
-            mediaFileId={mediaFileId}
-            playerConfig={playerConfig}
-            isOpen={searchOpen}
-            onlineSearchEnabled={onlineSearchEnabled}
-            onClose={() => setSearchOpen(false)}
-            onDownloadStarted={() => {
-              downloadSelectionGeneration.current = downloadGeneration.current;
-            }}
-            onSubtitleDownloaded={(subtitle, source) => {
-              setSearchOpen(false);
-              if (subtitle) {
-                subtitleSync?.remember(subtitle);
-                if (
-                  source === "download" &&
-                  downloadSelectionGeneration.current === downloadGeneration.current
-                ) {
-                  setPendingDownload({
-                    id: subtitle.id,
-                    generation: downloadSelectionGeneration.current,
-                  });
-                }
+        <SubtitleSearchModal
+          key={sessionId}
+          mediaFileId={mediaFileId}
+          playerConfig={playerConfig}
+          isOpen={searchOpen}
+          onlineSearchEnabled={onlineSearchEnabled}
+          onClose={() => setSearchOpen(false)}
+          onDownloadStarted={() => {
+            downloadSelectionGeneration.current = downloadGeneration.current;
+          }}
+          onSubtitleDownloaded={(subtitle, source) => {
+            setSearchOpen(false);
+            if (subtitle) {
+              subtitleSync?.remember(subtitle);
+              if (
+                source === "download" &&
+                downloadSelectionGeneration.current === downloadGeneration.current
+              ) {
+                setPendingDownload({
+                  id: subtitle.id,
+                  generation: downloadSelectionGeneration.current,
+                });
               }
-              onRefreshSubtitles?.();
-            }}
-          />
-        )}
+            }
+            onRefreshSubtitles?.();
+          }}
+        />
+      )}
 
       {translateOpen && mediaFileId && playerConfig && (
         <SubtitleTranslateModal

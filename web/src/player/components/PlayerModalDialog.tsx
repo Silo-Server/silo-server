@@ -1,7 +1,8 @@
 import { useEffect, useEffectEvent, useLayoutEffect, useRef, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 
-const supportsClosedBy = typeof HTMLDialogElement !== "undefined" && "closedBy" in HTMLDialogElement.prototype;
+const supportsClosedBy =
+  typeof HTMLDialogElement !== "undefined" && "closedBy" in HTMLDialogElement.prototype;
 
 function outsideDialog(event: React.PointerEvent<HTMLDialogElement>): boolean {
   // The backdrop's events target the dialog itself, as do its own padding and
@@ -35,8 +36,8 @@ export function PlayerModalDialog({ label, className, onClose, children }: Playe
   const unmounting = useRef(false);
   const close = useEffectEvent(onClose);
 
-  // Opens after the menu that launched it has returned focus to its trigger, so
-  // closing returns focus there.
+  // The browser hands focus back to whatever held it at showModal(), so the
+  // caller puts focus on the opening control before mounting this.
   useEffect(() => {
     const dialog = ref.current;
     if (!dialog) return;
