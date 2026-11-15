@@ -229,7 +229,8 @@ function isInert(markup: string, type: DOMParserSupportedType, requirePolicy: bo
 }
 
 // Elements inside which an HTML parser does not read a <style> start tag as
-// the start of raw-text CSS.
+// the start of raw-text CSS. An HTML parser lowercases tag names, so an XHTML
+// <TITLE> is a title there.
 const NON_STYLE_CONTEXT = new Set([
   "frameset",
   "iframe",
@@ -249,7 +250,9 @@ const NON_STYLE_CONTEXT = new Set([
 
 function isRawTextStyle(el: Element): boolean {
   for (let parent = el.parentElement; parent; parent = parent.parentElement) {
-    if (parent.namespaceURI !== XHTML_NS || NON_STYLE_CONTEXT.has(parent.localName)) return false;
+    if (parent.namespaceURI !== XHTML_NS || NON_STYLE_CONTEXT.has(parent.localName.toLowerCase())) {
+      return false;
+    }
   }
   return true;
 }

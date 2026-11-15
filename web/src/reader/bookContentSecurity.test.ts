@@ -192,6 +192,15 @@ describe("book content security", () => {
     if (type !== "text/html") expect(inlineCSS(result, "application/xhtml+xml")).toEqual(expected);
   });
 
+  it("keeps a style's CSS inside an uppercase raw-text ancestor", () => {
+    const markup = `<html xmlns="http://www.w3.org/1999/xhtml"><head><title>t</title></head><body><TEXTAREA><style>p::after { content: "&lt;/textarea&gt;&lt;p id=out&gt;" }</style></TEXTAREA><p>x</p></body></html>`;
+    const result = sanitizeBookDocument(markup, "application/xhtml+xml");
+    expectInertFrame(result);
+    const frame = new DOMParser().parseFromString(result, "text/html");
+    expect(frame.querySelector("p")?.textContent).toBe("x");
+    expect(frame.getElementById("out")).toBeNull();
+  });
+
   // Each payload is XHTML that the sanitizer reads as XML but a srcdoc frame
   // reads as HTML; none may come out active.
   it.each([
