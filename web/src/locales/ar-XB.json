@@ -88725,20 +88725,6 @@
       "value": "number"
     }
   ],
-  "web.audiobooks.chapters.count": [
-    {
-      "type": 0,
-      "value": "\u200F\u202E(\u202C"
-    },
-    {
-      "type": 1,
-      "value": "count"
-    },
-    {
-      "type": 0,
-      "value": "\u202E)\u202C"
-    }
-  ],
   "web.audiobooks.chapters.duration": [
     {
       "type": 0,
@@ -88767,34 +88753,76 @@
       "value": "\u200F\u202EChapters\u202C"
     }
   ],
-  "web.audiobooks.chapters.listening": [
+  "web.audiobooks.chapters.leftInChapter": [
     {
       "type": 0,
-      "value": "\u200F\u202Elistening\u202C"
+      "value": "\u200F"
+    },
+    {
+      "type": 1,
+      "value": "time"
+    },
+    {
+      "type": 0,
+      "value": "\u202E left in this chapter\u202C"
     }
   ],
-  "web.audiobooks.chapters.sort": [
+  "web.audiobooks.chapters.showAll": [
     {
       "type": 0,
-      "value": "\u200F\u202ESort\u202C"
+      "value": "\u200F\u202EShow all \u202C"
+    },
+    {
+      "type": 1,
+      "value": "count"
     }
   ],
-  "web.audiobooks.chapters.sortAria": [
+  "web.audiobooks.chapters.showFewer": [
     {
       "type": 0,
-      "value": "\u200F\u202ESort chapters\u202C"
+      "value": "\u200F\u202EShow fewer\u202C"
     }
   ],
-  "web.audiobooks.chapters.sortLongest": [
+  "web.audiobooks.detail.finished": [
     {
       "type": 0,
-      "value": "\u200F\u202ELongest first\u202C"
+      "value": "\u200F\u202EFinished\u202C"
     }
   ],
-  "web.audiobooks.chapters.sortPosition": [
+  "web.audiobooks.detail.length": [
     {
       "type": 0,
-      "value": "\u200F\u202EBy position\u202C"
+      "value": "\u200F\u202ELength\u202C"
+    }
+  ],
+  "web.audiobooks.detail.publisher": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EPublisher\u202C"
+    }
+  ],
+  "web.audiobooks.detail.released": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EReleased\u202C"
+    }
+  ],
+  "web.audiobooks.detail.seriesBook": [
+    {
+      "type": 0,
+      "value": "\u200F"
+    },
+    {
+      "type": 1,
+      "value": "series"
+    },
+    {
+      "type": 0,
+      "value": "\u202E, book \u202C"
+    },
+    {
+      "type": 1,
+      "value": "number"
     }
   ],
   "web.audiobooks.duration.hours": [
@@ -89587,6 +89615,12 @@
       "pluralType": "cardinal"
     }
   ],
+  "web.audiobooks.hero.alsoListening": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EAlso listening\u202C"
+    }
+  ],
   "web.audiobooks.hero.ariaLabel": [
     {
       "type": 0,
@@ -89629,38 +89663,6 @@
       "value": "total"
     }
   ],
-  "web.audiobooks.hero.chapterPositionTitled": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EChapter \u202C"
-    },
-    {
-      "type": 1,
-      "value": "index"
-    },
-    {
-      "type": 0,
-      "value": "\u202E of \u202C"
-    },
-    {
-      "type": 1,
-      "value": "total"
-    },
-    {
-      "type": 0,
-      "value": "\u202E · \u202C"
-    },
-    {
-      "type": 1,
-      "value": "chapter"
-    }
-  ],
-  "web.audiobooks.hero.eyebrow": [
-    {
-      "type": 0,
-      "value": "\u200F\u202ENow Listening\u202C"
-    }
-  ],
   "web.audiobooks.hero.listen": [
     {
       "type": 0,
@@ -89693,12 +89695,6 @@
     {
       "type": 0,
       "value": "\u200F\u202EResume\u202C"
-    }
-  ],
-  "web.audiobooks.narrator.heading": [
-    {
-      "type": 0,
-      "value": "\u200F\u202ENarrator\u202C"
     }
   ],
   "web.audiobooks.narrator.narrationCount": [
@@ -89753,20 +89749,16 @@
       "value": "\u200F\u202EBack to player\u202C"
     }
   ],
-  "web.audiobooks.player.chapterNumber": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EChapter \u202C"
-    },
-    {
-      "type": 1,
-      "value": "number"
-    }
-  ],
   "web.audiobooks.player.close": [
     {
       "type": 0,
       "value": "\u200F\u202EClose player\u202C"
+    }
+  ],
+  "web.audiobooks.player.comingUp": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EComing up\u202C"
     }
   ],
   "web.audiobooks.player.faster": [

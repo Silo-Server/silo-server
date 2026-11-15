@@ -91733,20 +91733,6 @@
       "value": "~~~~⟧"
     }
   ],
-  "web.audiobooks.chapters.count": [
-    {
-      "type": 0,
-      "value": "⟦("
-    },
-    {
-      "type": 1,
-      "value": "count"
-    },
-    {
-      "type": 0,
-      "value": ")~⟧"
-    }
-  ],
   "web.audiobooks.chapters.duration": [
     {
       "type": 0,
@@ -91775,34 +91761,84 @@
       "value": "⟦Çĥåþţéŕš~~~~⟧"
     }
   ],
-  "web.audiobooks.chapters.listening": [
+  "web.audiobooks.chapters.leftInChapter": [
     {
       "type": 0,
-      "value": "⟦ļîšţéñîñĝ~~~~⟧"
+      "value": "⟦"
+    },
+    {
+      "type": 1,
+      "value": "time"
+    },
+    {
+      "type": 0,
+      "value": " ļéƒţ îñ ţĥîš çĥåþţéŕ~~~~~~~~~⟧"
     }
   ],
-  "web.audiobooks.chapters.sort": [
+  "web.audiobooks.chapters.showAll": [
     {
       "type": 0,
-      "value": "⟦Šöŕţ~~⟧"
+      "value": "⟦Šĥöŵ åļļ "
+    },
+    {
+      "type": 1,
+      "value": "count"
+    },
+    {
+      "type": 0,
+      "value": "~~~~⟧"
     }
   ],
-  "web.audiobooks.chapters.sortAria": [
+  "web.audiobooks.chapters.showFewer": [
     {
       "type": 0,
-      "value": "⟦Šöŕţ çĥåþţéŕš~~~~~~⟧"
+      "value": "⟦Šĥöŵ ƒéŵéŕ~~~~⟧"
     }
   ],
-  "web.audiobooks.chapters.sortLongest": [
+  "web.audiobooks.detail.finished": [
     {
       "type": 0,
-      "value": "⟦Ļöñĝéšţ ƒîŕšţ~~~~~~⟧"
+      "value": "⟦Ƒîñîšĥéđ~~~~⟧"
     }
   ],
-  "web.audiobooks.chapters.sortPosition": [
+  "web.audiobooks.detail.length": [
     {
       "type": 0,
-      "value": "⟦Ɓý þöšîţîöñ~~~~~⟧"
+      "value": "⟦Ļéñĝţĥ~~~⟧"
+    }
+  ],
+  "web.audiobooks.detail.publisher": [
+    {
+      "type": 0,
+      "value": "⟦Þûƀļîšĥéŕ~~~~⟧"
+    }
+  ],
+  "web.audiobooks.detail.released": [
+    {
+      "type": 0,
+      "value": "⟦Ŕéļéåšéđ~~~~⟧"
+    }
+  ],
+  "web.audiobooks.detail.seriesBook": [
+    {
+      "type": 0,
+      "value": "⟦"
+    },
+    {
+      "type": 1,
+      "value": "series"
+    },
+    {
+      "type": 0,
+      "value": ", ƀööķ "
+    },
+    {
+      "type": 1,
+      "value": "number"
+    },
+    {
+      "type": 0,
+      "value": "~~~⟧"
     }
   ],
   "web.audiobooks.duration.hours": [
@@ -92623,6 +92659,12 @@
       "pluralType": "cardinal"
     }
   ],
+  "web.audiobooks.hero.alsoListening": [
+    {
+      "type": 0,
+      "value": "⟦Åļšö ļîšţéñîñĝ~~~~~~⟧"
+    }
+  ],
   "web.audiobooks.hero.ariaLabel": [
     {
       "type": 0,
@@ -92673,42 +92715,6 @@
       "value": "~~~~~⟧"
     }
   ],
-  "web.audiobooks.hero.chapterPositionTitled": [
-    {
-      "type": 0,
-      "value": "⟦Çĥåþţéŕ "
-    },
-    {
-      "type": 1,
-      "value": "index"
-    },
-    {
-      "type": 0,
-      "value": " öƒ "
-    },
-    {
-      "type": 1,
-      "value": "total"
-    },
-    {
-      "type": 0,
-      "value": " · "
-    },
-    {
-      "type": 1,
-      "value": "chapter"
-    },
-    {
-      "type": 0,
-      "value": "~~~~~~⟧"
-    }
-  ],
-  "web.audiobooks.hero.eyebrow": [
-    {
-      "type": 0,
-      "value": "⟦Ñöŵ Ļîšţéñîñĝ~~~~~~⟧"
-    }
-  ],
   "web.audiobooks.hero.listen": [
     {
       "type": 0,
@@ -92745,12 +92751,6 @@
     {
       "type": 0,
       "value": "⟦Ŕéšûɱé~~~⟧"
-    }
-  ],
-  "web.audiobooks.narrator.heading": [
-    {
-      "type": 0,
-      "value": "⟦Ñåŕŕåţöŕ~~~~⟧"
     }
   ],
   "web.audiobooks.narrator.narrationCount": [
@@ -92805,24 +92805,16 @@
       "value": "⟦Ɓåçķ ţö þļåýéŕ~~~~~~⟧"
     }
   ],
-  "web.audiobooks.player.chapterNumber": [
-    {
-      "type": 0,
-      "value": "⟦Çĥåþţéŕ "
-    },
-    {
-      "type": 1,
-      "value": "number"
-    },
-    {
-      "type": 0,
-      "value": "~~~~⟧"
-    }
-  ],
   "web.audiobooks.player.close": [
     {
       "type": 0,
       "value": "⟦Çļöšé þļåýéŕ~~~~~⟧"
+    }
+  ],
+  "web.audiobooks.player.comingUp": [
+    {
+      "type": 0,
+      "value": "⟦Çöɱîñĝ ûþ~~~~⟧"
     }
   ],
   "web.audiobooks.player.faster": [

@@ -115,6 +115,10 @@
 # A failed play-target read returns its error and the pool reuses its connection.
 ./internal/catalog TestPlayableTargetQueryFailureKeepsConnection
 
+# A book page's related rows carry the viewing profile's own finished or
+# partway state, never another profile's; browse cards name authors in credit order.
+./internal/catalog TestBookPageRelatedStateAndCardAuthorsPostgres
+
 # Series air-date sort keys advance when a known episode airs. The latest
 # available episode air date counts only episodes with a file in a library:
 # files the bulk episode link attaches count, also when an air-date correction
