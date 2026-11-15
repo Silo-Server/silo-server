@@ -292,11 +292,19 @@ it("reports an edit made before the first read as unsaved on return when the ser
   );
   unmount();
   await settle();
-  const { result } = await mountLoaded();
+  const { result, unmount: leave } = await mountLoaded();
   await debounce();
   expect(writes).toHaveLength(0);
   expect(result.current.entries[0]?.span).toBe(7);
   expect(result.current.serverSaveBlocked).toBe(true);
+  // Leaving without reloading keeps reporting the edit rather than dropping it.
+  leave();
+  await settle();
+  const again = await mountLoaded();
+  await debounce();
+  expect(writes).toHaveLength(0);
+  expect(again.result.current.entries[0]?.span).toBe(7);
+  expect(again.result.current.serverSaveBlocked).toBe(true);
 });
 it("keeps an earlier visit's edit unsaved under a different profile", async () => {
   const { unmount, writes } = await mountWithReadHeld();

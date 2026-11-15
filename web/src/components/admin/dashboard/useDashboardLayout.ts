@@ -320,10 +320,12 @@ export function useDashboardLayout(): DashboardLayout {
   // still holds that arrangement. It is kept in the cache too, so an edit
   // whose visit ended before the response arrived is reconciled by the next.
   const draftRef = useRef<DashboardLayoutDraft | null>(null);
-  // Another profile's unsaved edit, shown here but not ours to save. The cache
-  // keeps marking it pending, through this profile's own edits, until the
-  // admin reloads or resets the layout.
-  const foreignDraftRef = useRef<DashboardLayoutDraft | null>(null);
+  // A draft that settling left unsaved: another profile's, one made under a
+  // profile or PIN no longer active, or one the server layout has moved on
+  // from. The cache keeps marking it pending, through later edits here, so a
+  // later visit still reports it instead of adopting the server layout over
+  // it, until the admin reloads or resets the layout.
+  const heldDraftRef = useRef<DashboardLayoutDraft | null>(null);
   const pendingRef = useRef<DashboardLayoutSaveIntent | null>(null);
   const baselineRef = useRef<string | null>(null);
   const inFlightRef = useRef<DashboardLayoutSaveIntent | null>(null);
@@ -400,7 +402,7 @@ export function useDashboardLayout(): DashboardLayout {
     }
     pendingRef.current = null;
     draftRef.current = null;
-    foreignDraftRef.current = null;
+    heldDraftRef.current = null;
   }, []);
 
   // Send a queued write before this page goes away rather than dropping it.
@@ -460,9 +462,10 @@ export function useDashboardLayout(): DashboardLayout {
     settledRef.current = true;
     baselineRef.current = remoteData?.etag ?? null;
     // A draft made in this page under a profile or PIN that is no longer
-    // active stays unsaved: scheduleSave refuses an inactive baseline
-    // authority. One from an earlier visit is saved under its profile's
-    // current authority, or not at all under another profile.
+    // active stays unsaved, and the baseline keeps that inactive authority so
+    // later edits here are refused too. One from an earlier visit is saved
+    // under its profile's current authority, or not at all under another
+    // profile.
     baselineAuthorityRef.current = draft?.authority ?? editAuthority;
     const serverEntries = sanitizeLayoutDocument(remoteData?.layout);
     // An edit made while the query was in flight is newer than the response,
@@ -470,19 +473,19 @@ export function useDashboardLayout(): DashboardLayout {
     // browser's copy, so it is saved against the version just read only when
     // the server still holds that copy, or none (as the migration below would
     // upload it). A different server copy, saved from another browser, is not
-    // overwritten: saving stays blocked until the admin reloads it. Once
-    // settled here the cache stops marking the edit pending, unless another
-    // profile's edit is being shown: that one stays for its own profile.
+    // overwritten: saving stays blocked until the admin reloads it. The cache
+    // stops marking the edit pending only once it goes to the save queue.
     if (draft) {
       if (restored) {
         setEntries(edited);
       }
-      foreignDraftRef.current = draft.authority ? null : draft;
-      persistLayout(userId, edited, foreignDraftRef.current ?? undefined);
-      if (
+      const unsaved =
         !draft.authority ||
-        (serverEntries && JSON.stringify(serverEntries) !== JSON.stringify(draft.base))
-      ) {
+        !isCapturedProfileAuthorityActive(draft.authority) ||
+        (serverEntries !== null && JSON.stringify(serverEntries) !== JSON.stringify(draft.base));
+      heldDraftRef.current = unsaved ? draft : null;
+      persistLayout(userId, edited, heldDraftRef.current ?? undefined);
+      if (unsaved) {
         blockedRef.current = true;
         setServerSaveBlocked(true);
         return;
@@ -531,7 +534,7 @@ export function useDashboardLayout(): DashboardLayout {
         }
         editSequenceRef.current++;
         if (settledRef.current) {
-          persistLayout(userId, next, foreignDraftRef.current ?? undefined);
+          persistLayout(userId, next, heldDraftRef.current ?? undefined);
           scheduleSave(next);
         } else {
           // An unsaved edit left by an earlier visit keeps its base: the server
