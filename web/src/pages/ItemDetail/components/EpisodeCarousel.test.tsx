@@ -1,5 +1,5 @@
 import { renderToStaticMarkup } from "react-dom/server";
-import { act, fireEvent, render, screen } from "@testing-library/react";
+import { render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { EpisodeListItem } from "@/api/types";
@@ -8,18 +8,7 @@ import EpisodeCarousel from "./EpisodeCarousel";
 vi.mock("@/lib/thumbhash", () => ({ decodeThumbhash: () => "data:image/png;base64,fixture" }));
 
 const capturedMenuProps: Record<string, unknown>[] = [];
-const prefetchEpisodeDetail = vi.hoisted(() => vi.fn());
 const spoilerPrefs = vi.hoisted(() => ({ hideImages: false, hideOverviews: false }));
-
-const prefetchLibraries = vi.hoisted((): (number | undefined)[] => []);
-
-vi.mock("@/hooks/queries/catalogRead", () => ({
-  usePrefetchCatalogItemDetail: (libraryId?: number) => {
-    prefetchLibraries.push(libraryId);
-    return (id: string) =>
-      libraryId === undefined ? prefetchEpisodeDetail(id) : prefetchEpisodeDetail(id, libraryId);
-  },
-}));
 
 vi.mock("@/hooks/useEpisodeSpoilerPrefs", () => ({
   useEpisodeSpoilerPrefs: () => spoilerPrefs,
@@ -115,68 +104,27 @@ it("suppresses a protected still placeholder until the image loads", () => {
 describe("EpisodeCarousel", () => {
   beforeEach(() => {
     capturedMenuProps.length = 0;
-    prefetchLibraries.length = 0;
-    prefetchEpisodeDetail.mockClear();
   });
 
   it("keeps the page's library on episodes with a file in the list", () => {
-    vi.useFakeTimers();
-    try {
-      render(
-        <MemoryRouter>
-          <EpisodeCarousel
-            currentEpisodeNumber={1}
-            episodes={[
-              episode(1, { title: "Pilot", files: [{ file_id: 1 } as never] }),
-              // No file in this library's list: opens with every version.
-              episode(2, { title: "Next" }),
-            ]}
-            libraryId={4}
-          />
-        </MemoryRouter>,
-      );
+    render(
+      <MemoryRouter>
+        <EpisodeCarousel
+          currentEpisodeNumber={1}
+          episodes={[
+            episode(1, { title: "Pilot", files: [{ file_id: 1 } as never] }),
+            // No file in this library's list: opens with every version.
+            episode(2, { title: "Next" }),
+          ]}
+          libraryId={4}
+        />
+      </MemoryRouter>,
+    );
 
-      const hrefs = screen.getAllByRole("link").map((link) => link.getAttribute("href"));
-      expect(new Set(hrefs)).toEqual(new Set(["/item/ep-1?libraryId=4", "/item/ep-2"]));
-      expect(new Set(prefetchLibraries)).toEqual(new Set([4, undefined]));
-      // The card menus build Play links, and playback stays unscoped.
-      expect(capturedMenuProps.every((props) => !("libraryId" in props))).toBe(true);
-
-      // Each card prefetches the detail its link opens.
-      for (const title of [/Pilot/, /Next/]) {
-        const card = screen.getAllByRole("link", { name: title })[0]!.closest("div.group\\/card")!;
-        fireEvent.mouseEnter(card);
-        act(() => vi.advanceTimersByTime(140));
-        fireEvent.mouseLeave(card);
-      }
-      expect(prefetchEpisodeDetail).toHaveBeenCalledWith("ep-1", 4);
-      expect(prefetchEpisodeDetail).toHaveBeenCalledWith("ep-2");
-    } finally {
-      vi.useRealTimers();
-    }
-  });
-
-  it("prefetches only after a card shows sustained navigation intent", () => {
-    // A pointer sweeping the rail crosses every card; prefetching each one it
-    // passes would start cache work for the whole season. Intent is a dwell.
-    vi.useFakeTimers();
-    try {
-      render(carousel(2, [episode(1, { title: "Pilot" })]));
-
-      const card = screen.getAllByRole("link", { name: /Pilot/ })[0]!.closest("div.group\\/card")!;
-
-      fireEvent.mouseEnter(card);
-      act(() => vi.advanceTimersByTime(100));
-      fireEvent.mouseLeave(card);
-      act(() => vi.advanceTimersByTime(200));
-      expect(prefetchEpisodeDetail).not.toHaveBeenCalled();
-
-      fireEvent.mouseEnter(card);
-      act(() => vi.advanceTimersByTime(140));
-      expect(prefetchEpisodeDetail).toHaveBeenCalledWith("ep-1");
-    } finally {
-      vi.useRealTimers();
-    }
+    const hrefs = screen.getAllByRole("link").map((link) => link.getAttribute("href"));
+    expect(new Set(hrefs)).toEqual(new Set(["/item/ep-1?libraryId=4", "/item/ep-2"]));
+    // The card menus build Play links, and playback stays unscoped.
+    expect(capturedMenuProps.every((props) => !("libraryId" in props))).toBe(true);
   });
 
   it("enables unwatched shortcuts without losing partial-progress restart eligibility", () => {

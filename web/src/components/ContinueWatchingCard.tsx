@@ -256,7 +256,7 @@ function ContinueWatchingCardView({ spoilerPrefs, ...props }: ContinueWatchingCa
   return (
     <div ref={cardRef} className={`media-card-longpress group/card ${containerWidth}`}>
       <div className="group/media relative">
-        <ViewTransitionLink to={detailHref} className="block">
+        <ViewTransitionLink to={detailHref} prefetchOn="intent" className="block">
           <div className={`media-card-image relative ${imageAspect} overflow-hidden rounded-xl`}>
             {imageSrc ? (
               <img
