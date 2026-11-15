@@ -113,10 +113,15 @@ func (t WatchlistTitle) IDs() []string {
 }
 
 // keptTitleIDs returns the IDs a title row knows its title by: the ones it
-// kept, and its provider key, which names one of them when it is an IMDb,
-// TMDB, or TVDB ID.
+// kept, the TMDB ID it is named for (a row from before title IDs were kept
+// may have no others), and its provider key, which names one of them when it
+// is an IMDb, TMDB, or TVDB ID.
 func (state ListItemState) keptTitleIDs() []string {
-	return append(slices.Clone(state.TitleIDs), state.ProviderItemKey)
+	ids := append(slices.Clone(state.TitleIDs), state.ProviderItemKey)
+	if title, ok := watchlistTitleFromListItemID(state.MediaItemID); ok {
+		ids = append(ids, title.IDs()...)
+	}
+	return ids
 }
 
 // watchlistTitleFromRow returns the title a provider row names when it is a

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"reflect"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -554,6 +555,28 @@ func TestServiceWatchlistPromotedItemAdoptsTheListedKey(t *testing.T) {
 	}
 	if show := listItemStateOf(repo, "show-121361"); show.ProviderItemKey != "tmdb:1399" || !show.RemotePresent {
 		t.Fatalf("show row = %#v, want the listed title row's key", show)
+	}
+}
+
+// A row from before title IDs were kept knows its title only by the TMDB ID
+// it is named for and its provider key. The library show it hands over to
+// keeps that TMDB ID too, so a complete read listing only it keeps the show.
+func TestServiceWatchlistPromotedItemKeepsTheRowsTMDBID(t *testing.T) {
+	store, repo, conn := favoriteImportFixture(t)
+	conn.ImportWatchlistEnabled, conn.SyncWatchlistRemovalsEnabled = true, true
+	repo.listItemStates = append(repo.listItemStates, ListItemState{
+		ConnectionID: conn.ID, ListKind: ListKindWatchlist, MediaItemID: "watchlist-title:series:1399", Kind: "series",
+		ProviderItemKey: "tvdb:121361", LocalPresent: true, RemotePresent: true,
+	})
+	titles := &titlesStub{entries: map[int]time.Time{}, promotedTVDB: map[int]bool{121361: true}}
+	service := NewService(repo, NewRegistry()).WithUserStoreProvider(staticStoreProvider{store: store})
+	service.SetWatchlistTitles(titles)
+
+	if err := service.reconcileLocalListTitles(context.Background(), conn, service.watchlistBinding()); err != nil {
+		t.Fatal(err)
+	}
+	if show := listItemStateOf(repo, "show-121361"); show == nil || !slices.Contains(show.TitleIDs, "tmdb:1399") {
+		t.Fatalf("show row = %#v, want it to keep tmdb:1399", show)
 	}
 }
 
