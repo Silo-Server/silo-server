@@ -300,7 +300,14 @@ export default function LibraryRecommended({
           return null;
         }
         if (slot.state === "ready" && slot.section) {
-          return <SectionRow key={slot.layout.id} section={slot.section} libraryId={libraryId} />;
+          return (
+            <SectionRow
+              key={slot.layout.id}
+              section={slot.section}
+              libraryId={libraryId}
+              pinLabel={slot.layout.title}
+            />
+          );
         }
         if (slot.state === "error") {
           return (

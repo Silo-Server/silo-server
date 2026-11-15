@@ -8,7 +8,7 @@ import { useT, type Translate } from "@/i18n";
 import { formatDateTime } from "@/lib/datetime";
 
 import { SettingFieldStatus } from "./SettingField";
-import { formatLocale } from "@/lib/appLocale";
+import { formatLocale, joinList } from "@/lib/appLocale";
 import { formatDecimal } from "@/lib/numberFormat";
 
 /**
@@ -141,7 +141,7 @@ export function SearchStatusPanel() {
           />
           <StatusRow
             label={t("web.admin.settings.search.status.vectorCoverage")}
-            value={formatPercent(status.semantic.vector_coverage_ratio)}
+            value={formatPercent(t, status.semantic.vector_coverage_ratio)}
           />
           <StatusRow
             label={t("web.admin.settings.search.status.coverageUpdated")}
@@ -173,7 +173,7 @@ export function SearchStatusPanel() {
                         type: entry.type,
                         vectorized: entry.vectorized,
                         eligible: entry.eligible,
-                        percent: formatPercent(entry.vector_coverage_ratio),
+                        percent: formatPercent(t, entry.vector_coverage_ratio),
                       })}
                     </span>
                     <Badge variant={entry.ready ? "secondary" : "outline"}>
@@ -279,7 +279,7 @@ function formatStatusDate(value?: string) {
 
 function formatIndexedTypes(t: Translate, value?: string[]) {
   if (!value || value.length === 0) return t("web.admin.settings.search.status.allTypes");
-  return value.join(", ");
+  return joinList(value);
 }
 
 function formatSemanticRatio(value?: number) {
@@ -287,7 +287,7 @@ function formatSemanticRatio(value?: number) {
   return formatDecimal(value, 2);
 }
 
-function formatPercent(value?: number) {
-  if (typeof value !== "number" || Number.isNaN(value)) return "0%";
-  return `${Math.round(value * 100)}%`;
+function formatPercent(t: Translate, value?: number) {
+  const percent = typeof value !== "number" || Number.isNaN(value) ? 0 : Math.round(value * 100);
+  return t("web.common.format.percent", { percent });
 }

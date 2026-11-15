@@ -65,7 +65,7 @@ import {
 } from "lucide-react";
 import { formatDateTime, formatTime } from "@/lib/datetime";
 import { formatLocale } from "@/lib/appLocale";
-import { englishText, numberText, type TextValues, type Translate, useT } from "@/i18n";
+import { codeNumber, englishText, numberText, type TextValues, type Translate, useT } from "@/i18n";
 import type { MessageKey } from "@/locales/keys";
 
 type SortField = "username" | "media" | "method" | "node" | "started";
@@ -480,7 +480,7 @@ export default function AdminActivity() {
                       className={`inline-block h-2 w-2 rounded-full ${activityMethodMeta(method).swatchClass}`}
                     />
                     <span className="font-medium">{activityMethodMeta(method).label}</span>
-                    <span className="text-muted-foreground tabular-nums">{count}</span>
+                    <span className="text-muted-foreground tabular-nums">{numberText(count)}</span>
                   </button>
                 ))}
             </div>
@@ -510,7 +510,7 @@ export default function AdminActivity() {
                       <span className="text-muted-foreground me-1">{node.label}</span>
                       {node.name}
                       <span className="text-muted-foreground ms-1.5 tabular-nums">
-                        {node.count}
+                        {numberText(node.count)}
                       </span>
                     </button>
                   ))}
@@ -1491,7 +1491,13 @@ function getDisplayTitle(
   t: (id: MessageKey, values?: TextValues) => string,
 ): string {
   if (session.series_name && session.season_number != null && session.episode_number != null) {
-    return session.episode_name || `S${session.season_number}E${session.episode_number}`;
+    return (
+      session.episode_name ||
+      t("web.detail.episodeCode", {
+        season: codeNumber(session.season_number),
+        episode: codeNumber(session.episode_number),
+      })
+    );
   }
   return session.media_title || t("web.common.activity.title.file", { id: session.media_file_id });
 }

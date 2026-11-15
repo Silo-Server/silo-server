@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { joinList } from "@/lib/appLocale";
 import { ArrowRight } from "lucide-react";
 import { Link } from "react-router";
 import { useSettingsForm } from "@/hooks/useSettingsForm";
@@ -229,7 +230,7 @@ export default function PlaybackSettings() {
           <SettingField
             label={t("web.admin.settings.playback.watch.markWatched")}
             type="number"
-            unit="%"
+            unit={t("web.admin.common.units.percent")}
             value={form.getValue("playback.watched_threshold")}
             onChange={(v) => form.setValue("playback.watched_threshold", v)}
             restartRequired={restartKeys.has("playback.watched_threshold")}
@@ -237,7 +238,7 @@ export default function PlaybackSettings() {
           <SettingField
             label={t("web.admin.settings.playback.watch.minResume")}
             type="number"
-            unit="%"
+            unit={t("web.admin.common.units.percent")}
             description={t("web.admin.settings.playback.watch.minResumeDescription")}
             value={form.getValue("playback.min_resume_threshold")}
             onChange={(v) => form.setValue("playback.min_resume_threshold", v)}
@@ -395,7 +396,7 @@ export default function PlaybackSettings() {
                         {row.missingOnNodes.length > 0 && (
                           <span className="mt-0.5 block text-amber-500">
                             {t("web.admin.settings.playback.devices.missingOnNodes", {
-                              nodes: row.missingOnNodes.join(", "),
+                              nodes: joinList(row.missingOnNodes),
                             })}
                           </span>
                         )}
@@ -490,7 +491,7 @@ export default function PlaybackSettings() {
               <SettingField
                 label={t("web.admin.settings.playback.previews.width")}
                 type="number"
-                unit="px"
+                unit={t("web.admin.common.units.pixels")}
                 description={t("web.admin.settings.playback.previews.widthDescription")}
                 value={form.getValue("playback.preview_image_width")}
                 onChange={(v) => form.setValue("playback.preview_image_width", v)}

@@ -1,4 +1,5 @@
 import { RotateCcw, RotateCw } from "lucide-react";
+import { numberText } from "@/i18n";
 
 /**
  * Rotate-arrow glyph with the skip interval inset, shared by the mini bar and
@@ -28,7 +29,7 @@ export function SkipIcon({
       <span
         className={`absolute inset-0 flex items-center justify-center pb-[1px] font-semibold tracking-tight tabular-nums ${label}`}
       >
-        {seconds}
+        {numberText(seconds)}
       </span>
     </span>
   );

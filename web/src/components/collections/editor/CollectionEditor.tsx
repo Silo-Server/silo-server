@@ -89,6 +89,7 @@ import type {
   WireCollection,
 } from "@/lib/collections/scope";
 import { savedListProblem, type SyncedDraft, type SyncedTab } from "@/lib/collections/synced";
+import { joinList } from "@/lib/appLocale";
 import { syncedSourceLabel } from "@/lib/collections/types";
 import type { AddedRowState } from "@/lib/homeRows/rowLinks";
 import type { PageRef } from "@/lib/homeRows/types";
@@ -173,7 +174,7 @@ function useUntickWarning(
   if (onlyRemoved.size === 0) return null;
   const names = removed.map((id) => libraries.find((library) => library.id === id)?.name ?? "");
   const titles = [...onlyRemoved.values()];
-  const shown = titles.slice(0, 3).join(", ") + (titles.length > 3 ? "…" : "");
+  const shown = joinList(titles.slice(0, 3)) + (titles.length > 3 ? "…" : "");
   return t("web.collections.editor.untickWarning", {
     count: titles.length,
     count_text: titles.length,

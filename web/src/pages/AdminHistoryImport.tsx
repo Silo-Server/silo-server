@@ -90,7 +90,7 @@ import type {
 } from "@/api/types";
 import { cn } from "@/lib/utils";
 import { formatDateTime as formatPreferredDateTime } from "@/lib/datetime";
-import { useT, type MessageKey } from "@/i18n";
+import { numberText, useT, type MessageKey } from "@/i18n";
 
 // ---------------------------------------------------------------------------
 // Shared helpers
@@ -1524,49 +1524,49 @@ function RunsSection({ sourceId }: { sourceId: number }) {
                           <p className="font-medium">
                             {t("web.admin.historyImport.runs.stat.fetched")}
                           </p>
-                          <p>{run.fetched}</p>
+                          <p>{numberText(run.fetched)}</p>
                         </div>
                         <div>
                           <p className="font-medium">
                             {t("web.admin.historyImport.runs.stat.matched")}
                           </p>
-                          <p>{run.matched}</p>
+                          <p>{numberText(run.matched)}</p>
                         </div>
                         <div>
                           <p className="font-medium">
                             {t("web.admin.historyImport.runs.stat.unmatched")}
                           </p>
-                          <p>{run.unmatched}</p>
+                          <p>{numberText(run.unmatched)}</p>
                         </div>
                         <div>
                           <p className="font-medium">
                             {t("web.admin.historyImport.runs.stat.updated")}
                           </p>
-                          <p>{run.progress_updated}</p>
+                          <p>{numberText(run.progress_updated)}</p>
                         </div>
                         <div>
                           <p className="font-medium">
                             {t("web.admin.historyImport.runs.stat.history")}
                           </p>
-                          <p>{run.history_created}</p>
+                          <p>{numberText(run.history_created)}</p>
                         </div>
                         <div>
                           <p className="font-medium">
                             {t("web.admin.historyImport.runs.stat.favorites")}
                           </p>
-                          <p>{run.favorites_imported}</p>
+                          <p>{numberText(run.favorites_imported)}</p>
                         </div>
                         <div>
                           <p className="font-medium">
                             {t("web.admin.historyImport.runs.stat.watchlist")}
                           </p>
-                          <p>{run.watchlist_added}</p>
+                          <p>{numberText(run.watchlist_added)}</p>
                         </div>
                         <div>
                           <p className="font-medium">
                             {t("web.admin.historyImport.runs.stat.skipped")}
                           </p>
-                          <p>{run.skipped}</p>
+                          <p>{numberText(run.skipped)}</p>
                         </div>
                       </div>
                       {run.warnings.length > 0 && (

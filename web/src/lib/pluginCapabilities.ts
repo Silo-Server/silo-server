@@ -17,7 +17,7 @@ import {
 
 import type { PluginCapability } from "@/api/types";
 import { englishText, t, type MessageKey } from "@/i18n";
-import { appLanguage } from "@/lib/appLocale";
+import { joinList } from "@/lib/appLocale";
 
 export interface CapabilityKind {
   /** Stable key for the catalog's job filter (`catalog_job`). */
@@ -195,12 +195,7 @@ export function pluginCapabilityKinds(capabilities: PluginCapability[]): Capabil
 }
 
 export function capabilityListLabel(capabilities: PluginCapability[]): string {
-  return joinCommaList(pluginCapabilityKinds(capabilities).map((kind) => kind.label));
-}
-
-/** "a, b, c" in English; other interface languages use their own list separator. */
-export function joinCommaList(items: string[]): string {
-  return new Intl.ListFormat(appLanguage(), { type: "unit", style: "short" }).format(items);
+  return joinList(pluginCapabilityKinds(capabilities).map((kind) => kind.label));
 }
 
 /** The jobs present among `capabilitySets`, in display order, for the catalog filter. */

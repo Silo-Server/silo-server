@@ -1042,6 +1042,19 @@ completed watch. `order=asc` puts the oldest latest watch first, and `desc`
 puts the newest first. Library/media-scope/search overlays retain this order
 before pagination. History does not currently support saved sort preferences.
 
+## Season order
+
+`GET /api/v2/catalog/series/{id}/seasons` returns seasons by ascending
+`season_number`. Specials are season `0` (`is_specials` is `true`), so they come
+first, ahead of season 1. Clients list seasons in this order and label season `0`
+"Specials". The Jellyfin compatibility surface lists a series' seasons the same way.
+
+List order is not selection order. A client that opens a series on a season picks
+it from `play_season_number` (see [Play target season](#play-target-season)) or the
+viewer's progress, and otherwise the first numbered season: a series with specials
+does not open on them just because they are listed first. Play targets, Next Up and
+Continue Watching apply their own rules for specials and do not follow list order.
+
 ## Season-list artwork
 
 `GET /api/v2/images/capabilities` advertises

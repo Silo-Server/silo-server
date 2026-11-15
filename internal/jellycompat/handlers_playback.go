@@ -2226,9 +2226,10 @@ func (h *PlaybackHandler) startRemoteTranscodeWithToneMapMode(
 // the only way a node or central restart can rebuild ffmpeg.
 //
 // The caller owns rolling back its transcode when either durable write fails.
-// A missing upstream
-// session (a start/build race, or no session manager in tests) is logged and the
-// live transcode is left serving — only restart resilience is forfeited.
+// A missing upstream session (no session manager in tests) is logged and the
+// live transcode is left serving — only restart resilience is forfeited. A
+// local start closes its transcode before this when the session went away
+// while it was starting.
 func (h *PlaybackHandler) persistTranscodeRecipe(
 	ctx context.Context,
 	playSessionID, upstreamSessionID string,

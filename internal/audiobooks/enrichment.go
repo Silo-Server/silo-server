@@ -117,7 +117,7 @@ type audiobookProviderIDRepository interface {
 type audiobookItemRepository interface {
 	UpdateMetadata(ctx context.Context, contentID string, upd *catalog.MetadataUpdate) error
 	UpdateMetadataTx(ctx context.Context, tx pgx.Tx, contentID string, upd *catalog.MetadataUpdate) error
-	ReplacePeople(ctx context.Context, contentID string, people []models.ItemPerson) error
+	ReplacePeopleKindsTx(ctx context.Context, tx pgx.Tx, contentID string, kinds []models.PersonKind, people []models.ItemPerson) error
 }
 
 // Enricher drives the audiobook metadata enrichment sweep.
@@ -1036,30 +1036,19 @@ func (e *Enricher) cacheRemotePoster(ctx context.Context, contentID string, resu
 }
 
 // persist writes the enriched metadata back to the database. With a database
-// wired, it first clears the fields an admin has locked from result, so the
-// credits and remote artwork written from result afterwards skip them too.
+// wired, it first clears from result the fields an admin has locked and a
+// cover the book already has, so the remote artwork queued from result
+// afterwards skips them too. Credits commit with the rest of the match: a
+// failure leaves the item unmatched and retryable, never half written.
 func (e *Enricher) persist(ctx context.Context, item enrichmentItemRow, providerIDs map[string]string, result *metadata.MetadataResult) error {
-	contentID := item.ContentID
-	persistMetadata := e.persistMetadataAndProviderIDsTx
 	if e.pool == nil || e.itemRepo == nil {
-		persistMetadata = e.persistMetadataWithoutTx
+		return e.persistMetadataWithoutTx(ctx, item, providerIDs, result)
 	}
-	if err := persistMetadata(ctx, item, providerIDs, result); err != nil {
+	people, err := e.resolvePeople(ctx, result.People)
+	if err != nil {
 		return err
 	}
-
-	// Write people (authors / narrators).
-	if len(result.People) > 0 && e.personRepo != nil && e.itemRepo != nil {
-		if err := e.persistPeople(ctx, contentID, result.People); err != nil {
-			// Non-fatal: log and continue so at least scalar metadata is saved.
-			slog.WarnContext(ctx, "audiobook enrichment: failed to persist people", "component", "audiobooks",
-				"content_id", contentID,
-				"error", err,
-			)
-		}
-	}
-
-	return nil
+	return e.persistMetadataAndProviderIDsTx(ctx, item, providerIDs, result, people)
 }
 
 // clearLockedAudiobookFields drops the provider values for every field an
@@ -1105,8 +1094,8 @@ func audiobookMetadataUpdate(result *metadata.MetadataResult) *catalog.MetadataU
 		if isRemoteHTTPImage(result.PosterPath) {
 			upd.PosterSourcePath = &result.PosterPath
 		}
-	}
-	if result.PosterThumbhash != "" {
+		// Written even when empty, so a thumbhash never describes a cover
+		// that is no longer stored. Image caching fills it in later.
 		upd.PosterThumbhash = &result.PosterThumbhash
 	}
 	if result.BackdropPath != "" {
@@ -1174,6 +1163,7 @@ func (e *Enricher) persistMetadataAndProviderIDsTx(
 	item enrichmentItemRow,
 	providerIDs map[string]string,
 	result *metadata.MetadataResult,
+	people []models.ItemPerson,
 ) error {
 	tx, err := e.pool.Begin(ctx)
 	if err != nil {
@@ -1187,15 +1177,21 @@ func (e *Enricher) persistMetadataAndProviderIDsTx(
 	// Read the locks under the row lock, after the provider calls: an admin
 	// who locks a field while the providers answer must still win.
 	var locked []int
+	var posterPath string
 	if err := tx.QueryRow(ctx, `
-		SELECT COALESCE(locked_fields, '{}'::integer[])
+		SELECT COALESCE(locked_fields, '{}'::integer[]), COALESCE(poster_path, '')
 		FROM media_items
 		WHERE content_id = $1
 		FOR UPDATE
-	`, item.ContentID).Scan(&locked); err != nil {
+	`, item.ContentID).Scan(&locked, &posterPath); err != nil {
 		return fmt.Errorf("reading audiobook field locks: %w", err)
 	}
 	clearLockedAudiobookFields(result, locked)
+	if strings.TrimSpace(posterPath) != "" {
+		// The book's own cover (a folder image or embedded art) stays; a
+		// provider poster only fills a missing one.
+		result.PosterPath, result.PosterThumbhash = "", ""
+	}
 	upd := audiobookMetadataUpdate(result)
 	if e.providerIDs != nil && len(providerIDs) > 0 {
 		if err := e.providerIDs.ReplaceByContentIDTx(ctx, tx, item.ContentID, "audiobook", providerIDs); err != nil {
@@ -1204,6 +1200,14 @@ func (e *Enricher) persistMetadataAndProviderIDsTx(
 	}
 	if err := e.itemRepo.UpdateMetadataTx(ctx, tx, item.ContentID, upd); err != nil {
 		return fmt.Errorf("updating audiobook metadata: %w", err)
+	}
+	// The crew lock cleared result.People. Otherwise replace only the credit
+	// kinds the provider supplied, so a narrator read from the file's tags
+	// stays when the provider names none.
+	if len(result.People) > 0 && len(people) > 0 {
+		if err := e.itemRepo.ReplacePeopleKindsTx(ctx, tx, item.ContentID, catalog.PersonKindsOf(people), people); err != nil {
+			return fmt.Errorf("persisting audiobook credits: %w", err)
+		}
 	}
 	now := time.Now().UTC()
 	if _, err := tx.Exec(ctx, `
@@ -1330,8 +1334,13 @@ func (e *Enricher) stampLastRefreshed(ctx context.Context, contentID string) err
 	return err
 }
 
-// persistPeople upserts author/narrator records into people + item_people.
-func (e *Enricher) persistPeople(ctx context.Context, contentID string, people []models.ItemPerson) error {
+// resolvePeople finds or creates the provider's people and returns their
+// credits with person IDs. A person row nobody is credited with is harmless,
+// so this runs before the match transaction.
+func (e *Enricher) resolvePeople(ctx context.Context, people []models.ItemPerson) ([]models.ItemPerson, error) {
+	if len(people) == 0 || e.personRepo == nil {
+		return nil, nil
+	}
 	persons := make([]models.Person, len(people))
 	for i := range people {
 		persons[i] = people[i].Person
@@ -1339,7 +1348,7 @@ func (e *Enricher) persistPeople(ctx context.Context, contentID string, people [
 
 	personIDs, err := e.personRepo.BatchFindOrCreate(ctx, persons)
 	if err != nil {
-		return fmt.Errorf("BatchFindOrCreate people: %w", err)
+		return nil, fmt.Errorf("BatchFindOrCreate people: %w", err)
 	}
 
 	linked := make([]models.ItemPerson, 0, len(people))
@@ -1351,11 +1360,7 @@ func (e *Enricher) persistPeople(ctx context.Context, contentID string, people [
 		ip.Person.ID = personIDs[i]
 		linked = append(linked, ip)
 	}
-
-	if len(linked) == 0 {
-		return nil
-	}
-	return e.itemRepo.ReplacePeople(ctx, contentID, linked)
+	return linked, nil
 }
 
 // applyLocalCoverFallback reads the embedded cover from the audiobook's

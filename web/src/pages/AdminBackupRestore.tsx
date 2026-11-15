@@ -25,6 +25,7 @@ import {
 } from "@/hooks/queries/admin/backupRestore";
 import { adminKeys } from "@/hooks/queries/keys";
 import { useT, type MessageKey, type Translate } from "@/i18n";
+import { joinList } from "@/lib/appLocale";
 import { formatTime, preferredDateLocale } from "@/lib/datetime";
 import { cn } from "@/lib/utils";
 import { RestoreChoose } from "@/pages/admin-backups/RestoreChoose";
@@ -123,7 +124,9 @@ function restoreHeading(
       ? t("web.admin.backups.restore.heading.serverId", { id: shortServerId(set.server_id) })
       : null;
   const sentence = (parts: (string | null)[]) =>
-    t("web.admin.backups.restore.heading.subtitle", { parts: parts.filter(Boolean).join(", ") });
+    t("web.admin.backups.restore.heading.subtitle", {
+      parts: joinList(parts.filter((part): part is string => Boolean(part))),
+    });
   const time = formatTime(taken);
   const withVersion = known
     ? t("web.admin.backups.restore.heading.withVersion", { version: known })

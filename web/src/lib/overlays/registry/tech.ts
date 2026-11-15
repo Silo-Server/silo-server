@@ -262,6 +262,6 @@ export const TECH_OVERLAYS: readonly OverlayDef[] = [
     defaultEnabled: false,
     iconId: "subtitles",
     iconCapable: true,
-    getValue: (d) => (d.multi_sub ? "CC" : null),
+    getValue: (d) => (d.multi_sub ? t("web.settings.overlays.badge.multiSub.value") : null),
   },
 ];

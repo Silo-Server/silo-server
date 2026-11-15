@@ -1,5 +1,6 @@
 import type { BrandingAssetKind } from "@/hooks/queries/admin/branding";
 import { t, type MessageKey } from "@/i18n";
+import { formatLocale } from "@/lib/appLocale";
 
 /** How the server treats one uploaded branding asset, and what it serves without one. */
 export interface BrandingAssetSpec {
@@ -24,7 +25,8 @@ const MARK_MAX_BYTES = 8 * MB;
 const FAVICON_MAX_BYTES = 1 * MB;
 const LOGIN_BG_MAX_BYTES = 12 * MB;
 
-const megabytes = (bytes: number) => `${Math.round(bytes / MB)} MB`;
+const megabytes = (bytes: number) =>
+  t("web.common.format.size.mb", { size: Math.round(bytes / MB).toLocaleString(formatLocale()) });
 
 /**
  * What actually happens to each uploaded asset, mirrored from
