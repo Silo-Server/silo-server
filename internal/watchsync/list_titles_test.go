@@ -442,7 +442,8 @@ func TestServiceWatchlistNewerListingSupersedesEveryPendingRow(t *testing.T) {
 }
 
 // A complete read that lists a removed title under a new TMDB ID still lists
-// it: the removal waits for the provider instead of being taken as done.
+// it: the removal waits for the provider instead of being taken as done, and
+// goes out under the key the provider lists the title by now.
 func TestServiceWatchlistTitleRemovalWaitsForAListingUnderANewTMDBID(t *testing.T) {
 	store, repo, conn := favoriteImportFixture(t)
 	conn.ImportWatchlistEnabled, conn.SyncWatchlistRemovalsEnabled = true, true
@@ -464,8 +465,8 @@ func TestServiceWatchlistTitleRemovalWaitsForAListingUnderANewTMDBID(t *testing.
 	if _, err := service.importList(context.Background(), conn, ServerConfig{}, provider, service.watchlistBinding()); err != nil {
 		t.Fatal(err)
 	}
-	if state := listItemStateOf(repo, row); state.LocalPresent || !state.RemotePresent {
-		t.Fatalf("state = %#v, want the removal still pending", state)
+	if state := listItemStateOf(repo, row); state.LocalPresent || !state.RemotePresent || state.ProviderItemKey != "tmdb:551" {
+		t.Fatalf("state = %#v, want the removal still pending under tmdb:551", state)
 	}
 	if len(titles.entries) != 0 {
 		t.Fatalf("entries = %v, want the removed title kept off", titles.entries)
@@ -505,7 +506,8 @@ func TestServiceWatchlistPromotedItemTakesTheListedRowsKey(t *testing.T) {
 
 // Both title rows of a series are listed when promotion hands one of them to
 // the library show; the provider then lists only the other one, which matches
-// no library item. A complete read still finds the title, so the show stays.
+// no library item. A complete read still finds the title, so the show stays
+// and takes the key the provider lists it by, where a removal reaches it.
 func TestServiceWatchlistPromotedItemStaysWhileTheTitleIsListedUnderAnotherKey(t *testing.T) {
 	ctx := context.Background()
 	store, repo, conn := favoriteImportFixture(t)
@@ -535,6 +537,9 @@ func TestServiceWatchlistPromotedItemStaysWhileTheTitleIsListedUnderAnotherKey(t
 	}
 	if entry, err := store.GetWatchlistEntry(ctx, conn.ProfileID, "show-121361"); err != nil || entry == nil {
 		t.Fatalf("library watchlist entry = %v, %v; want the show kept", entry, err)
+	}
+	if show := listItemStateOf(repo, "show-121361"); show == nil || show.ProviderItemKey != "tmdb:1400" || !show.RemotePresent {
+		t.Fatalf("show row = %#v, want it listed under tmdb:1400", show)
 	}
 }
 
