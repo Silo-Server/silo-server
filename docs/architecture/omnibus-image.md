@@ -201,6 +201,17 @@ those settings, such as `shared_buffers`, only at start. So while
 restart-only settings Silo sizes from memory and CPUs, read from the same
 environment and `/config/silo/.env`. A new cluster then starts with them, and
 Silo's later `ALTER SYSTEM` writes the same values, so no restart is pending.
+An existing cluster whose `postgresql.auto.conf` holds an older value runs
+with that value until the restart after Silo rewrites it. Of the settings in
+this file, `shared_buffers` is a quarter of the memory budget, up to a fixed
+2GB when the budget is detected, and `max_worker_processes` follows a
+detected CPU count of at most 16. `POSTGRES_TUNE_MEMORY` and
+`POSTGRES_TUNE_CPUS` are used as given, so an explicit
+`POSTGRES_TUNE_MEMORY` is the way to a larger `shared_buffers`: the tuner's
+`postgresql.auto.conf` loads after `conf.d`, so a local file cannot raise it.
+The ceiling is fixed, not sized from the database, because this file is
+written before the database has content and a value that grew with it would
+need a restart each time.
 `max_connections` and `io_method` stay out: the first is sized from
 `database.max_connections`, which lives in the database, and an `io_method`
 PostgreSQL rejects would drop the whole file (below). Both apply at the next
@@ -218,11 +229,12 @@ PostgreSQL image, whose file trusts every local connection.
 
 ## Search settings
 
-Meilisearch search keeps its paging sessions in Redis, and without Redis the
-v2 search capabilities and paged searches answer 503
-`search_continuation_unavailable`. So `ENABLE_MEILISEARCH=true`, or a
-deployment's own `SILO_SEARCH_PROVIDER=meilisearch`, also starts the bundled
-Redis unless `REDIS_URL` points elsewhere.
+Meilisearch search keeps its paging sessions in process for a single-node
+deployment without Redis. Redis provides shared paging sessions for multi-node
+deployments and keeps them available across Silo restarts. The omnibus image
+therefore still starts bundled Redis when `ENABLE_MEILISEARCH=true`, or when a
+deployment sets `SILO_SEARCH_PROVIDER=meilisearch`, unless `REDIS_URL` points
+elsewhere.
 
 With `ENABLE_MEILISEARCH=true`, `init-config` exports `SILO_SEARCH_PROVIDER`,
 `SILO_MEILISEARCH_URL`, and `SILO_MEILISEARCH_API_KEY` for the bundled instance,
@@ -377,10 +389,6 @@ here. It refuses, before anything is moved into place, when:
   its largest collation-dependent index twice over (the index and its WAL) plus
   1 GiB, or for copying a Silo directory that cannot be hard-linked while
   keeping that room for the database's first start.
-- The copy's search uses a Meilisearch chosen in the admin UI, `.env` sets no
-  `SILO_SEARCH_PROVIDER`, and nothing turns Redis on (`ENABLE_REDIS`,
-  `ENABLE_MEILISEARCH`, node access, or a `REDIS_URL`): its paging sessions need
-  the Redis the earlier stack always ran.
 - The copy has enabled proxy or transcode nodes and node access is off: they
   reached the old services on published ports.
 

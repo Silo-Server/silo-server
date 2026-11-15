@@ -1,6 +1,6 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router";
-import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, beforeEach, expect, it, vi } from "vitest";
 import { setAccessToken, setProfileId } from "@/api/client";
 import { OnboardingGate } from "./OnboardingGate";
 
@@ -31,6 +31,13 @@ vi.mock("@/hooks/queries/onboarding", () => ({
     isError: false,
   }),
 }));
+
+// The gate lazy-loads TourHost. Evaluating its module graph in a fresh test
+// worker takes about as long as findByRole's 1 s default, so load it up front
+// and let the lazy import resolve from the module cache.
+beforeAll(async () => {
+  await import("./TourHost");
+});
 
 beforeEach(() => {
   localStorage.clear();

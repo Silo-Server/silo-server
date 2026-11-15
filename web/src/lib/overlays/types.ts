@@ -187,6 +187,8 @@ export interface OverlayDef {
   id: OverlayId;
   category: OverlayCategory;
   label: string;
+  // The label without a "(combined)" qualifier, for use inside a sentence.
+  shortLabel?: string;
   description: string;
   defaultPosition: OverlayPosition;
   defaultEnabled: boolean;

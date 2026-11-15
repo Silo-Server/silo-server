@@ -8,6 +8,7 @@ import {
 import { useAccessGroups } from "@/hooks/queries/admin/accessGroups";
 import { useAdminLibraries } from "@/hooks/queries/admin/libraries";
 import { useAdminPolicyDefaults } from "@/hooks/queries/admin/users";
+import { useT } from "@/i18n";
 
 import { DownloadsPolicyCard } from "./DownloadsPolicyCard";
 import type { AccessCardProps } from "./EditableCard";
@@ -35,6 +36,7 @@ export function AccessTab({
   policyManageable: boolean;
   available: boolean;
 }) {
+  const t = useT();
   const groups = useAccessGroups().data ?? [];
   const libraries = useAdminLibraries().data ?? [];
   const defaults = useAdminPolicyDefaults().data;
@@ -60,7 +62,7 @@ export function AccessTab({
     <div className="space-y-4">
       {manageable && !policyManageable ? (
         <p role="note" className="text-muted-foreground text-sm">
-          Only the server owner can change an admin&apos;s access and limits.
+          {t("web.admin.users.detail.access.tab.ownerOnlyNote")}
         </p>
       ) : null}
       <div className="grid items-start gap-4 lg:grid-cols-2">

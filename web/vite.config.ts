@@ -151,6 +151,36 @@ function themeBootScript(): Plugin {
   };
 }
 
+/** Messages the admin area shows; src/i18n/catalog.ts loads them only when it asks. */
+const ADMIN_MESSAGE_PREFIX = "web.admin.";
+const CATALOG_PART = /[\\/]src[\\/]locales[\\/][^\\/]+\.json\?part=(app|admin)$/;
+
+/**
+ * Serves one part of a generated catalog: `locales/<tag>.json?part=admin` holds
+ * the `web.admin.*` messages and `?part=app` the rest, so admin text never
+ * rides in the launch bundle. The part is still JSON, so Vite's JSON plugin
+ * turns it into a module as it does the whole file.
+ */
+// Exported for vite.config.test.ts.
+export function catalogParts(): Plugin {
+  return {
+    name: "silo-catalog-parts",
+    enforce: "pre",
+    async load(id) {
+      const match = CATALOG_PART.exec(id);
+      if (!match) return null;
+      const file = id.slice(0, id.indexOf("?"));
+      this.addWatchFile(file);
+      const admin = match[1] === "admin";
+      const messages = JSON.parse(await readFile(file, "utf8")) as Record<string, unknown>;
+      const part = Object.fromEntries(
+        Object.entries(messages).filter(([key]) => key.startsWith(ADMIN_MESSAGE_PREFIX) === admin),
+      );
+      return JSON.stringify(part);
+    },
+  };
+}
+
 // The server embeds dist and serves every file in it, and nothing in the app
 // reads the Vite manifest. Only scripts/check-bundle-budget.mjs does, so the
 // manifest moves next to dist instead of shipping.
@@ -202,12 +232,23 @@ export default defineConfig(({ mode }) => {
 
   return {
     plugins: [
+      catalogParts(),
       react(),
       tailwindcss(),
       themeBootScript(),
       precompressStaticAssets(),
       moveManifestOutOfDist(),
     ],
+    json: {
+      // With named exports on, Vite turns every top-level key of a JSON file
+      // into JavaScript source, so each precompiled message in src/locales
+      // (about 30 MB) becomes object and array AST nodes that Rollup keeps for
+      // the whole build. That alone roughly doubles the heap `vite build`
+      // needs. Off, any file over 10 kB becomes one `JSON.parse("...")` string,
+      // which also parses faster in the browser. Nothing imports named exports
+      // from JSON.
+      namedExports: false,
+    },
     define: {
       // Reported in X-Silo-Client-Version on every v2 request (src/api/v2/request.ts).
       __SILO_WEB_VERSION__: JSON.stringify(webVersion),
@@ -238,10 +279,16 @@ export default defineConfig(({ mode }) => {
       include: ["jassub > throughput", "jassub > rvfc-polyfill"],
     },
     resolve: {
-      alias: {
-        "@": path.resolve(__dirname, "./src"),
-        "@pdfjs": path.resolve(__dirname, "./public/vendor/pdfjs"),
-      },
+      alias: [
+        { find: "@", replacement: path.resolve(__dirname, "./src") },
+        { find: "@pdfjs", replacement: path.resolve(__dirname, "./public/vendor/pdfjs") },
+        // Catalog messages arrive precompiled (src/locales), so the ICU parser
+        // never runs; its no-parser build keeps it out of the bundle.
+        {
+          find: /^@formatjs\/icu-messageformat-parser$/,
+          replacement: "@formatjs/icu-messageformat-parser/no-parser.js",
+        },
+      ],
     },
     server: {
       host: "0.0.0.0",

@@ -13,6 +13,7 @@ import {
   type NetworkAccessHostStatus,
   type NetworkAccessProviderSummary,
 } from "@/hooks/queries/admin/networkAccess";
+import { useT, type MessageKey, type Translate } from "@/i18n";
 import { formatDateTime } from "@/lib/datetime";
 import { cn } from "@/lib/utils";
 
@@ -20,13 +21,13 @@ import { FieldGroup } from "./FieldGroup";
 
 // `state` is the provider's own vocabulary plus the host-side `unavailable`;
 // admins get plain wording.
-const STATE_LABELS: Record<NetworkAccessHostState, string> = {
-  disconnected: "Disconnected",
-  awaiting_authorization: "Waiting for authorization",
-  connecting: "Connecting",
-  connected: "Connected",
-  error: "Error",
-  unavailable: "Plugin not running",
+const STATE_LABELS: Record<NetworkAccessHostState, MessageKey> = {
+  disconnected: "web.admin.settings.network.state.disconnected",
+  awaiting_authorization: "web.admin.settings.network.state.awaitingAuthorization",
+  connecting: "web.admin.settings.network.state.connecting",
+  connected: "web.admin.settings.network.state.connected",
+  error: "web.admin.settings.network.state.error",
+  unavailable: "web.admin.settings.network.state.unavailable",
 };
 
 const STATE_DOT: Record<NetworkAccessHostState, string> = {
@@ -38,11 +39,13 @@ const STATE_DOT: Record<NetworkAccessHostState, string> = {
   unavailable: "bg-muted-foreground/40",
 };
 
-function stateLabel(state: string): string {
-  return STATE_LABELS[state as NetworkAccessHostState] ?? state;
+function stateLabel(state: string, t: Translate): string {
+  const key = STATE_LABELS[state as NetworkAccessHostState];
+  return key ? t(key) : state;
 }
 
 function StatePill({ state }: { state: string }) {
+  const t = useT();
   return (
     <span className="inline-flex items-center gap-1.5 text-sm" data-state={state}>
       <span
@@ -52,14 +55,19 @@ function StatePill({ state }: { state: string }) {
           STATE_DOT[state as NetworkAccessHostState] ?? "bg-muted-foreground/40",
         )}
       />
-      {stateLabel(state)}
+      {stateLabel(state, t)}
     </span>
   );
 }
 
-function hostLabel(host: NetworkAccessHostStatus["host"]): string {
-  const role = host.role === "api" ? "API server" : "Proxy node";
-  return host.name ? `${host.name} · ${role}` : role;
+function hostLabel(host: NetworkAccessHostStatus["host"], t: Translate): string {
+  const role =
+    host.role === "api"
+      ? t("web.admin.settings.network.host.apiServer")
+      : t("web.admin.settings.network.host.proxyNode");
+  return host.name
+    ? t("web.admin.settings.network.host.namedRole", { name: host.name, role })
+    : role;
 }
 
 /**
@@ -69,6 +77,7 @@ function hostLabel(host: NetworkAccessHostStatus["host"]): string {
  * beside the state rather than behind a disclosure.
  */
 function HostRow({ provider, host }: { provider: string; host: NetworkAccessHostStatus }) {
+  const t = useT();
   const connect = useConnectNetworkAccess();
   const disconnect = useDisconnectNetworkAccess();
   const busy = connect.isPending || disconnect.isPending;
@@ -84,7 +93,7 @@ function HostRow({ provider, host }: { provider: string; host: NetworkAccessHost
     >
       <div className="min-w-0 flex-1 space-y-1.5">
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-          <span className="font-medium">{hostLabel(host.host)}</span>
+          <span className="font-medium">{hostLabel(host.host, t)}</span>
           <StatePill state={host.state} />
           {host.provider_version ? (
             <Badge variant="outline" className="font-normal">
@@ -94,16 +103,25 @@ function HostRow({ provider, host }: { provider: string; host: NetworkAccessHost
         </div>
         {host.origin ? (
           <p className="text-muted-foreground text-sm">
-            Clients reach this host at{" "}
-            <a
-              href={host.origin}
-              target="_blank"
-              rel="noreferrer"
-              className="text-foreground underline underline-offset-4"
-            >
-              {host.origin}
-            </a>
-            {host.hostname && host.hostname !== host.origin ? ` (${host.hostname})` : ""}
+            {t(
+              host.hostname && host.hostname !== host.origin
+                ? "web.admin.settings.network.host.reachAtWithHostname"
+                : "web.admin.settings.network.host.reachAt",
+              {
+                origin: host.origin,
+                hostname: host.hostname ?? "",
+                link: (chunks) => (
+                  <a
+                    href={host.origin}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="text-foreground underline underline-offset-4"
+                  >
+                    {chunks}
+                  </a>
+                ),
+              },
+            )}
           </p>
         ) : host.hostname ? (
           <p className="text-muted-foreground text-sm">{host.hostname}</p>
@@ -113,16 +131,20 @@ function HostRow({ provider, host }: { provider: string; host: NetworkAccessHost
         ) : null}
         {host.state === "awaiting_authorization" && host.auth_url ? (
           <p className="text-sm">
-            <a
-              href={host.auth_url}
-              target="_blank"
-              rel="noreferrer"
-              className="inline-flex items-center gap-1 font-medium underline underline-offset-4"
-            >
-              Open the authorization page
-              <ExternalLink className="size-3.5" aria-hidden="true" />
-            </a>
-            <span className="text-muted-foreground"> to finish enrolling this host.</span>
+            {t("web.admin.settings.network.host.authorize", {
+              link: (chunks) => (
+                <a
+                  href={host.auth_url}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex items-center gap-1 font-medium underline underline-offset-4"
+                >
+                  {chunks}
+                  <ExternalLink className="size-3.5" aria-hidden="true" />
+                </a>
+              ),
+              muted: (chunks) => <span className="text-muted-foreground">{chunks}</span>,
+            })}
           </p>
         ) : null}
         {host.error ? (
@@ -132,7 +154,9 @@ function HostRow({ provider, host }: { provider: string; host: NetworkAccessHost
         ) : null}
         {host.updated_at ? (
           <p className="text-muted-foreground text-xs">
-            Last heard from {formatDateTime(host.updated_at, { seconds: false })}
+            {t("web.admin.settings.network.host.lastHeard", {
+              time: formatDateTime(host.updated_at, { seconds: false }),
+            })}
           </p>
         ) : null}
       </div>
@@ -146,18 +170,18 @@ function HostRow({ provider, host }: { provider: string; host: NetworkAccessHost
             onClick={() => disconnect.mutate({ provider, hosts: [host.host.id] })}
           >
             {busy ? <Loader2 className="size-4 animate-spin" aria-hidden="true" /> : null}
-            Disconnect
+            {t("web.admin.settings.network.host.disconnect")}
           </Button>
         ) : (
           <Button
             type="button"
             size="sm"
             disabled={busy || unavailable}
-            title={unavailable ? "Start the plugin from the Plugins page first." : undefined}
+            title={unavailable ? t("web.admin.settings.network.host.startPluginFirst") : undefined}
             onClick={() => connect.mutate({ provider, hosts: [host.host.id] })}
           >
             {busy ? <Loader2 className="size-4 animate-spin" aria-hidden="true" /> : null}
-            Connect
+            {t("web.admin.settings.network.host.connect")}
           </Button>
         )}
       </div>
@@ -166,13 +190,16 @@ function HostRow({ provider, host }: { provider: string; host: NetworkAccessHost
 }
 
 function ProviderGroup({ provider }: { provider: NetworkAccessProviderSummary }) {
+  const t = useT();
   const status = useAdminNetworkAccessStatus(provider.provider);
   const hosts = status.data?.hosts ?? [];
 
   return (
     <FieldGroup
       label={provider.display_name}
-      description={`Access Silo through your ${provider.display_name} network without port forwarding.`}
+      description={t("web.admin.settings.network.provider.description", {
+        name: provider.display_name,
+      })}
     >
       {status.isLoading ? (
         <div className="space-y-3" aria-busy="true">
@@ -181,10 +208,14 @@ function ProviderGroup({ provider }: { provider: NetworkAccessProviderSummary })
         </div>
       ) : status.isError ? (
         <p className="text-destructive text-sm" role="alert">
-          {status.error instanceof Error ? status.error.message : "Could not read provider status."}
+          {status.error instanceof Error
+            ? status.error.message
+            : t("web.admin.settings.network.provider.statusFailed")}
         </p>
       ) : hosts.length === 0 ? (
-        <p className="text-muted-foreground text-sm">No host runs this provider yet.</p>
+        <p className="text-muted-foreground text-sm">
+          {t("web.admin.settings.network.provider.noHosts")}
+        </p>
       ) : (
         <ul className="divide-border divide-y">
           {hosts.map((host) => (
@@ -203,16 +234,15 @@ function ProviderGroup({ provider }: { provider: NetworkAccessProviderSummary })
  * page, so this page only reads them and drives connect/disconnect.
  */
 export default function NetworkAccessSettings() {
+  const t = useT();
   const capabilities = useNetworkAccessCapabilities();
   const providers = capabilities.data?.providers ?? [];
 
   return (
     <div className="space-y-6">
-      <SettingsPageHeader title="Network Access" />
+      <SettingsPageHeader title={t("web.admin.settings.network.page.title")} />
       <p className="text-muted-foreground max-w-prose text-sm">
-        Network access providers give this server an identity on an overlay network such as
-        Tailscale, so clients can reach it without port forwarding or a public reverse proxy.
-        Providers are plugins: install one from the Plugins page and it appears here.
+        {t("web.admin.settings.network.page.intro")}
       </p>
       {capabilities.isLoading ? (
         <div className="space-y-3" aria-busy="true">
@@ -223,13 +253,12 @@ export default function NetworkAccessSettings() {
         <p className="text-destructive text-sm" role="alert">
           {capabilities.error instanceof Error
             ? capabilities.error.message
-            : "Could not read network access providers."}
+            : t("web.admin.settings.network.page.providersFailed")}
         </p>
       ) : providers.length === 0 ? (
-        <FieldGroup label="No providers installed">
+        <FieldGroup label={t("web.admin.settings.network.page.noProvidersTitle")}>
           <p className="text-muted-foreground text-sm">
-            No installed plugin provides network access. Install a network access provider from the
-            Plugins page to connect this server to an overlay network.
+            {t("web.admin.settings.network.page.noProvidersBody")}
           </p>
         </FieldGroup>
       ) : (

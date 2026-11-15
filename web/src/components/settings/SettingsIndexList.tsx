@@ -2,6 +2,8 @@ import { ChevronRight } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { Link } from "react-router";
 
+import { useT } from "@/i18n";
+
 export interface SettingsIndexItem {
   id: string;
   label: string;
@@ -22,7 +24,8 @@ interface SettingsIndexListProps {
 }
 
 function groupSectionId(idPrefix: string, label: string) {
-  return `${idPrefix}-${label.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`;
+  // Any script's letters, so translated group labels still give distinct ids.
+  return `${idPrefix}-${label.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, "-")}`;
 }
 
 /**
@@ -30,12 +33,13 @@ function groupSectionId(idPrefix: string, label: string) {
  * settings root, where desktop has the settings sidebar instead.
  */
 export function SettingsIndexList({ groups, ariaLabel, idPrefix }: SettingsIndexListProps) {
+  const t = useT();
   if (groups.length === 0) {
     return (
       <div className="surface-panel-subtle rounded-2xl px-5 py-8 text-center">
-        <p className="font-medium">No matching settings</p>
+        <p className="font-medium">{t("web.settings.search.noMatches")}</p>
         <p className="text-muted-foreground mt-1 text-sm">
-          Try a category, feature, or setting name.
+          {t("web.settings.index.noMatchesHint")}
         </p>
       </div>
     );

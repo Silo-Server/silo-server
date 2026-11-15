@@ -19,9 +19,11 @@ import (
 // later is not complete before its first episode airs, even if one arrived
 // early.
 //
-// Once the download server reports a request done, the rule relaxes to the
-// old one per season (see seasonDelivered): an episode the server could not
-// find would otherwise hold the request, and its notification, open for good.
+// Once a request is completed, the rule relaxes to the old one per season
+// (see seasonDelivered): an episode the server could not find would otherwise
+// hold its notification open for good. A request router's report alone does
+// not complete a season request (see pluginCompletionStands); the library
+// does.
 
 // SeasonCounts is one season's episodes: aired, dated to air later, and
 // present in a library.
@@ -96,22 +98,87 @@ func seasonProgress(seasons []int, counts map[int]SeasonCounts) []SeasonProgress
 }
 
 // seasonDelivered reports whether a requested season counts as in the
-// library. A complete season always does; once the download server reports
-// the request done, so does a season with any episode present. A season with
-// no episode in the library never does: it may not have aired yet, and the
-// server's word alone does not make it watchable.
-func seasonDelivered(c SeasonCounts, serverDone bool) bool {
-	return c.Complete() || (serverDone && c.Have > 0)
+// library. A complete season always does; once the request is completed, so
+// does a season with any episode present. A season with no episode in the
+// library never does: it may not have aired yet.
+func seasonDelivered(c SeasonCounts, completed bool) bool {
+	return c.Complete() || (completed && c.Have > 0)
 }
 
 // seasonsDelivered reports whether every season in progress is delivered.
-func seasonsDelivered(progress []SeasonProgress, serverDone bool) bool {
+func seasonsDelivered(progress []SeasonProgress, completed bool) bool {
 	for _, p := range progress {
-		if !seasonDelivered(p.SeasonCounts, serverDone) {
+		if !seasonDelivered(p.SeasonCounts, completed) {
 			return false
 		}
 	}
 	return len(progress) > 0
+}
+
+// pluginCompletionStands reports whether a request router's word that a
+// target completed is enough to complete it. It is for a movie or a
+// whole-series request. A season request completes only once every requested
+// season is complete in the library: a router may answer for the whole series
+// (Seerr's AVAILABLE does), so its word says nothing about the seasons this
+// request asked for. The request is still in flight here, so the relaxed rule
+// a finished request gets (seasonDelivered) does not apply. A series that is
+// not in the library, or a library that cannot report seasons, holds the
+// target open.
+func (s *Service) pluginCompletionStands(ctx context.Context, req Request) (bool, error) {
+	if !isSeasonRequest(req) {
+		return true, nil
+	}
+	matches, err := s.lookupPresence(ctx, req.MediaType, []PresenceCandidate{requestPresenceCandidate(req)})
+	if err != nil {
+		return false, err
+	}
+	counts, err := s.seasonCounts(ctx, matches[req.TMDBID])
+	if err != nil || counts == nil {
+		return false, err
+	}
+	return seasonsDelivered(seasonProgress(req.Seasons, counts), false), nil
+}
+
+// completionCheck answers pluginCompletionStands for one request while its
+// targets' statuses are applied, reading the library at most once.
+type completionCheck struct {
+	req    Request
+	known  bool
+	stands bool
+	err    error
+}
+
+// newCompletionCheck starts a check for req. present, when set, is the
+// reconcile pass's batched answer for req (presentRequests). For an in-flight
+// season request that answer is the same full-rule check, so it is used
+// instead of a second library read.
+func newCompletionCheck(req Request, present *bool) *completionCheck {
+	c := &completionCheck{req: req}
+	if present != nil && isSeasonRequest(req) && req.Status != StatusCompleted {
+		c.known, c.stands = true, *present
+	}
+	return c
+}
+
+// reported returns the status a router's report moves a target to: the one
+// reported, except that a completion that does not stand, or that could not be
+// checked, keeps the target's status. The check's error is kept for the caller.
+func (c *completionCheck) reported(ctx context.Context, s *Service, current, reported Status) Status {
+	if reported != StatusCompleted || current == StatusCompleted {
+		return reported
+	}
+	if !c.known {
+		c.stands, c.err = s.pluginCompletionStands(ctx, c.req)
+		c.known = true
+	}
+	if c.err != nil || !c.stands {
+		return current
+	}
+	return reported
+}
+
+func isSeasonRequest(req Request) bool {
+	return req.MediaType == MediaTypeSeries && len(req.Seasons) > 0
 }
 
 // requestFulfilled reports whether a request's media is in the library: a

@@ -8,6 +8,7 @@ import {
 import type { RateLimitConfig } from "@/api/types";
 import { adminKeys } from "../keys";
 import { toast } from "sonner";
+import { t } from "@/i18n";
 
 import { v2, V2ProblemError } from "@/api/v2/request";
 
@@ -48,7 +49,7 @@ export function useRateLimitConfig() {
       ]);
       if (!isCapturedProfileAuthorityActive(context)) throw new StaleApiRequestContextError();
       if (!etag || etag.startsWith("W/"))
-        throw new Error("Reload rate limit settings before editing.");
+        throw new Error(t("web.admin.common.rateLimits.reloadBeforeEditing"));
       return { ...config, ...status, etag, profileContext: context };
     },
     staleTime: ADMIN_STALE_TIME,
@@ -62,7 +63,7 @@ export function useUpdateRateLimitConfig() {
       if (!isCapturedProfileAuthorityActive(intent.profileContext))
         throw new StaleApiRequestContextError();
       if (!intent.etag || intent.etag === "*" || intent.etag.startsWith("W/"))
-        throw new Error("Reload rate limit settings before editing.");
+        throw new Error(t("web.admin.common.rateLimits.reloadBeforeEditing"));
       return v2("PATCH /api/v2/admin/rate-limits/config", {
         body: intent.config,
         profileContext: intent.profileContext,
@@ -74,9 +75,9 @@ export function useUpdateRateLimitConfig() {
     onSuccess: async (data, intent) => {
       if (!isCapturedProfileAuthorityActive(intent.profileContext)) return;
       if (data.restart_required) {
-        toast.success("Rate limit settings saved — restart the server to apply them");
+        toast.success(t("web.admin.common.rateLimits.savedRestartRequired"));
       } else {
-        toast.success("Rate limit settings saved");
+        toast.success(t("web.admin.common.rateLimits.saved"));
       }
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: adminKeys.rateLimitConfig() }),
@@ -87,10 +88,10 @@ export function useUpdateRateLimitConfig() {
       if (!isCapturedProfileAuthorityActive(intent.profileContext)) return;
       toast.error(
         err instanceof V2ProblemError && err.status === 412
-          ? "Rate limit settings changed. Reload and review them before saving again."
+          ? t("web.admin.common.rateLimits.changedElsewhere")
           : err instanceof Error
             ? err.message
-            : "Failed to save rate limit settings",
+            : t("web.admin.common.rateLimits.saveFailed"),
       );
     },
   });

@@ -10,6 +10,8 @@ export interface SubtitleLayout {
   fontScale: number;
   /** Portion of the video hidden past each edge by Fill; zero in Fit. */
   coverCrop: CoverCrop;
+  /** The video's intrinsic width / height, 0 until its metadata loads. */
+  videoAspect: number;
 }
 
 /**
@@ -71,6 +73,7 @@ export function useSubtitleLayout(
         videoFit === "cover"
           ? computeCoverCrop(playerSize.w, playerSize.h, videoAspect)
           : NO_COVER_CROP,
+      videoAspect,
     }),
     [position, playerSize.w, playerSize.h, videoAspect, videoFit],
   );

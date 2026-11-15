@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { t } from "@/i18n";
 
 export type TTSState = "idle" | "speaking" | "paused";
 
@@ -107,7 +108,7 @@ export function useTTS() {
       };
 
       setState("speaking");
-      installMediaSession({ title: "Read aloud" }, { pause, resume, stop });
+      installMediaSession({ title: t("web.reader.settings.readAloud") }, { pause, resume, stop });
       speakNext();
     },
     [cancelSpeech, pause, resume, stop],
@@ -131,7 +132,7 @@ function installMediaSession(
 ) {
   if (typeof navigator === "undefined" || !("mediaSession" in navigator)) return;
   navigator.mediaSession.metadata = new window.MediaMetadata({
-    title: meta.title ?? "Read aloud",
+    title: meta.title ?? t("web.reader.settings.readAloud"),
   });
   navigator.mediaSession.playbackState = "playing";
   navigator.mediaSession.setActionHandler("play", handlers.resume);

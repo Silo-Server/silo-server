@@ -13,6 +13,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { deleteShelfDescription, deleteShelfTitle } from "@/lib/collections/copy";
+import { useT } from "@/i18n";
 
 /**
  * Names a new shelf, or renames one. Save stays off until the name has text
@@ -31,6 +32,7 @@ export function ShelfNameDialog({
   onSave: (name: string) => Promise<void>;
   onClose: () => void;
 }) {
+  const t = useT();
   const [name, setName] = useState(initialName);
   const [saving, setSaving] = useState(false);
   const trimmed = name.trim();
@@ -54,13 +56,17 @@ export function ShelfNameDialog({
       <DialogContent className="sm:max-w-md">
         <form onSubmit={(event) => void submit(event)} className="grid gap-4">
           <DialogHeader>
-            <DialogTitle>{mode === "create" ? "New shelf" : "Rename shelf"}</DialogTitle>
+            <DialogTitle>
+              {mode === "create"
+                ? t("web.collections.shelfDialogs.newShelf")
+                : t("web.collections.shelfDialogs.renameShelf")}
+            </DialogTitle>
             <DialogDescription>
-              A heading on {libraryName} › Collections. Only {libraryName} changes.
+              {t("web.collections.shelfDialogs.description", { library: libraryName })}
             </DialogDescription>
           </DialogHeader>
           <div className="grid gap-2">
-            <Label htmlFor="shelf-name">Name</Label>
+            <Label htmlFor="shelf-name">{t("web.collections.shelfDialogs.nameLabel")}</Label>
             <Input
               id="shelf-name"
               value={name}
@@ -70,10 +76,10 @@ export function ShelfNameDialog({
           </div>
           <DialogFooter>
             <Button type="button" variant="outline" onClick={onClose}>
-              Cancel
+              {t("common.cancel")}
             </Button>
             <Button type="submit" disabled={!trimmed || unchanged || saving}>
-              {mode === "create" ? "Add shelf" : "Save"}
+              {mode === "create" ? t("web.collections.shelfDialogs.addShelf") : t("common.save")}
             </Button>
           </DialogFooter>
         </form>
@@ -99,13 +105,14 @@ export function DeleteShelfDialog({
   onConfirm: () => void;
   onClose: () => void;
 }) {
+  const t = useT();
   return (
     <ConfirmDialog
       open
       onOpenChange={(open) => !open && onClose()}
       title={deleteShelfTitle(name)}
       description={deleteShelfDescription(collectionCount, libraryName)}
-      confirmLabel="Delete shelf"
+      confirmLabel={t("web.collections.shelfDialogs.deleteShelf")}
       variant="destructive"
       onConfirm={onConfirm}
     />

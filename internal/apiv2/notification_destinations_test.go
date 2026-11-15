@@ -18,6 +18,8 @@ type fakeNotificationDestinations struct {
 	user    int
 	profile string
 	limit   int
+	// loginSession is the login session the last subscribe recorded.
+	loginSession string
 }
 
 func (f *fakeNotificationDestinations) ListNotificationWebPushPage(_ context.Context, user int, profile string, limit int, after *notifications.Cursor) ([]notifications.WebPushSubscription, error) {
@@ -170,7 +172,8 @@ func TestNotificationWebPushUnsubscribe(t *testing.T) {
 	requireProblem(t, do(t, NewHandler(deps), http.MethodPost, path, `{"endpoint":"opaque"}`, profileOwner()), TypeDependencyUnavailable)
 }
 
-func (f *fakeNotificationDestinations) SubscribeNotificationWebPush(_ context.Context, _ int, profile, endpoint, p256dh, auth, _ string) (*notifications.WebPushSubscription, error) {
+func (f *fakeNotificationDestinations) SubscribeNotificationWebPush(_ context.Context, _ int, profile, endpoint, p256dh, auth, _, loginSessionID string) (*notifications.WebPushSubscription, error) {
+	f.loginSession = loginSessionID
 	f.calls++
 	f.profile, f.deleted = profile, endpoint
 	if endpoint == "invalid" {
@@ -186,7 +189,7 @@ func TestNotificationWebPushSubscribe(t *testing.T) {
 	path := Prefix + "/notifications/web-push/subscriptions"
 	body := `{"endpoint":"https://push.example.test/opaque","keys":{"p256dh":"secret-key","auth":"secret-auth"}}`
 	rec := do(t, h, http.MethodPost, path, body, profileOwner())
-	if rec.Code != 201 || f.calls != 1 || f.profile != "p-owner" || f.deleted != "https://push.example.test/opaque" {
+	if rec.Code != 201 || f.calls != 1 || f.profile != "p-owner" || f.deleted != "https://push.example.test/opaque" || f.loginSession != "s1" {
 		t.Fatalf("%d %s %+v", rec.Code, rec.Body.String(), f)
 	}
 	if strings.Contains(rec.Body.String(), "secret-") {

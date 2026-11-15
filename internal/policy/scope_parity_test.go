@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"reflect"
 	"testing"
+	"time"
 
 	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/models"
@@ -52,7 +53,7 @@ func parityPreferenceValues(profile *userstore.Profile, disabled []int) []userst
 
 func TestResolveViewerScopeParity(t *testing.T) {
 	ctx := context.Background()
-	engine, err := NewEngine(ctx)
+	engine, err := NewEngine(ctx, WithEvalTimeout(time.Minute))
 	if err != nil {
 		t.Fatalf("NewEngine() error: %v", err)
 	}
@@ -249,8 +250,9 @@ func scopeInputFromParity(user *models.User, profile *userstore.Profile, disable
 		input.ProfileMaxRating = profile.MaxContentRating
 		input.ProfileMaxAdvisoryAge = profile.MaxAdvisoryAge
 		input.ProfileMaxQuality = profile.MaxPlaybackQuality
-		input.ProfileLibraryLimited = profile.LibraryRestrictionsEnabled
-		input.ProfileLibraryIDs = cloneParityInts(profile.AllowedLibraryIDs)
+		libraryIDs, libraryLimited := access.ProfileLibraryLimit(profile)
+		input.ProfileLibraryLimited = libraryLimited
+		input.ProfileLibraryIDs = cloneParityInts(libraryIDs)
 		input.ProfileHasPIN = profile.PINHash != ""
 		input.ProfileVerified = verified
 		// Hidden libraries are a profile-scoped row; without a profile there

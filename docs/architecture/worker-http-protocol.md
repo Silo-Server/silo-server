@@ -84,8 +84,9 @@ extraction can acquire the GPU admission gate. There is no native API alias.
 the run's `mediasample.Result` as JSON, sheets base64-encoded. A request with
 `sheets.use_input_aspect` uses the execution probe's display geometry and
 returns its actual cell height as `sheet_tile_height`. It passes node
-bearer authentication and approved-input-path authority first, runs one
-request at a time (a second answers `503` with reason `node_busy`), runs at
+bearer authentication and approved-input-path authority first, runs up to
+`playback.trickplay_node_capacity` requests at once (default 1; the next
+answers `503` with reason `node_busy`), runs at
 idle priority, and decodes on the node's own hardware: it drops hardware
 attempts its accelerator cannot run. It takes the GPU admission gate before
 resolving the hardware backend, which can run probes, and holds it for the
@@ -202,11 +203,18 @@ The request's optional `log_session_id` (`download-prepare-<artifact id>`) label
 the node's FFmpeg log lines with the durable job, so every attempt of one artifact
 reads as one stream in the operational logs. The node accepts only that shape and
 otherwise logs nothing; the field never affects bytes, so the execution fingerprint
-excludes it.
+excludes it. The optional `source_frame_rate` is the source video's frame rate,
+which the prepared file keeps. It also never affects bytes and is excluded from the
+fingerprint, and older nodes ignore it.
 
 `GET /downloads/prepare/{artifact_id}/progress` reads the in-memory progress of a
 prepare attempt running on the node: `encoded_seconds`, `duration_seconds`, and
-`speed` from FFmpeg's `-progress` stream. It requires node bearer authorization.
+`speed` from FFmpeg's `-progress` stream. FFmpeg's output time waits for every
+stream, so a subtitle track with no cue yet holds it back while the encode runs.
+With `source_frame_rate`, a reading is the frames encoded at that rate when that is
+further, and `speed` is FFmpeg's encode rate in frames per second over it. A remux
+that copies the video reads output time alone, since copied video keeps the source's
+own timing. It requires node bearer authorization.
 An id with no encode in flight answers `running: false`, never 404, so the API
 treats 404 as a node that predates the operation and reports the attempt as unable
 to report progress. Readings are not durable and say nothing about a completed
@@ -287,14 +295,24 @@ for that textual payload rather than claiming application/json on the wire.
 `hw_accel=auto` (a video transcode without tone mapping that resolves to a
 hardware backend), the node tries CPU decode with GPU encode, then software;
 otherwise it keeps the limited software retry for an early VideoToolbox failure.
+Outside `auto`, when the GPU decoder rejects the source (FFmpeg's
+`Hardware is lacking required capabilities`) of a video transcode that decoded
+on the GPU without tone mapping, the node walks the same CPU decode with GPU
+encode, then software, instead of failing the start.
 `auto_fallback_ready` asks for that wait only when the node's own `hw_accel=auto`
 pipeline is enabled for the start, judged from its live hardware; otherwise the
 start is not waited on. The Jellyfin-compatible surface sends it for `auto` video
-transcodes instead of `RequireReady`, and older nodes ignore it. Each attempt
-gets its own manifest wait, so callers size the start deadline of an `auto`
+transcodes instead of `RequireReady`, and older nodes ignore it. For a video
+transcode under an explicit hardware backend that decodes on the GPU without
+tone mapping it sends `RequireReady`, so the node can take the decoder-rejection
+retry above. Each attempt gets its own manifest wait, so callers size the start
+deadline of an `auto`
 video transcode that sets either field to `TranscodeStartReadyMaxDuration` (one
-wait per path); every other start keeps the single-wait deadline. Readiness is
-judged only on a manifest the current FFmpeg process wrote; an earlier
+wait per path). A `RequireReady` video transcode under an explicit hardware
+backend gets the same deadline, because a decoder rejection can lead to the
+CPU-decode and software attempts. Every other start keeps the single-wait
+deadline. Readiness is judged only on a manifest the current FFmpeg process
+wrote; an earlier
 generation's `stream.m3u8` in a reused directory does not count. A process still
 running at the deadline is closed, never duplicated. The response reports `software_video_decode`
 when the executed recipe decodes on the CPU; older nodes omit it, so callers OR
@@ -387,6 +405,27 @@ rolling one worker back alone leaves it refusing every upgraded sender.
 The next release removes the legacy bearer from `nodeauth.Verify`. Its release
 notes must name this release as a required step for rolling upgrades, because
 its workers refuse senders from before this release.
+
+## Media paths in stream tokens
+
+Stream, download and theme tokens name the file they serve, and clients hold
+them: they travel in worker URLs, and anyone holding a JWT can read its claims.
+So `streamtoken.Sign` never writes the media path in the clear. It seals it
+with AES-256-GCM under a key derived from `auth.jwt_secret` with HKDF-SHA256
+(no salt, info `silo/stream-token-media-path/v1`, 32 bytes) into the `spath`
+claim, and `streamtoken.Verify` opens it back into `MediaPath`. Every server
+and worker that verifies tokens already holds the secret, so none needs new
+configuration.
+
+A token signed by an earlier release carries the path in `path` and still
+verifies, so tokens issued before an upgrade keep working on upgraded workers.
+An earlier worker finds no `path` in a new token and fails the request, so a
+rolling upgrade follows the order above: transcode nodes, then proxies, then
+API servers.
+
+A proxy names a source download by the token's `dfn` claim when the API sent
+one, which keeps the file's own name on the server for a viewer who may not
+see it.
 
 ## Remaining progressive and HLS delivery chain
 

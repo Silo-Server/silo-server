@@ -3,6 +3,7 @@ import { Search } from "lucide-react";
 import { VisuallyHidden } from "radix-ui";
 import { useNavigate } from "react-router";
 
+import { useAppLanguage, useT } from "@/i18n";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import {
   countSettingsSearchItems,
@@ -12,6 +13,9 @@ import {
 import { navigateToPluginRoute } from "@/lib/buildPluginHref";
 import type { AdminNavGroup, AdminNavItem } from "@/lib/adminNavigation";
 import { cn } from "@/lib/utils";
+
+/** The key that closes the dialog, as printed on the keyboard. */
+const ESCAPE_KEY_LABEL = "ESC";
 
 interface AdminSectionCommandDialogProps {
   sections: readonly AdminNavGroup[];
@@ -25,6 +29,7 @@ export function AdminSectionCommandDialog({
   open: openProp,
   onOpenChange,
 }: AdminSectionCommandDialogProps) {
+  const t = useT();
   const [uncontrolledOpen, setUncontrolledOpen] = useState(false);
   const open = openProp ?? uncontrolledOpen;
   const isControlled = openProp !== undefined;
@@ -40,9 +45,12 @@ export function AdminSectionCommandDialog({
   const inputRef = useRef<HTMLInputElement>(null);
   const navigate = useNavigate();
 
+  // Group labels are read when filtering: refilter on a language change.
+  const language = useAppLanguage();
   const filteredSections = useMemo(
     () => filterSettingsSearchGroups(sections, query),
-    [query, sections],
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- labels are resolved while filtering
+    [query, sections, language],
   );
   const results = useMemo(
     () => filteredSections.flatMap((section) => section.items),
@@ -141,11 +149,11 @@ export function AdminSectionCommandDialog({
         showCloseButton={false}
       >
         <VisuallyHidden.Root>
-          <DialogTitle>Search admin sections</DialogTitle>
-          <DialogDescription>Search and open admin sections.</DialogDescription>
+          <DialogTitle>{t("web.admin.homeRows.commandDialog.title")}</DialogTitle>
+          <DialogDescription>{t("web.admin.homeRows.commandDialog.description")}</DialogDescription>
         </VisuallyHidden.Root>
         <div className="border-border flex h-12 shrink-0 items-center border-b px-4">
-          <Search className="text-muted-foreground mr-3 h-4 w-4 shrink-0" aria-hidden="true" />
+          <Search className="text-muted-foreground me-3 h-4 w-4 shrink-0" aria-hidden="true" />
           <input
             ref={inputRef}
             type="search"
@@ -155,21 +163,25 @@ export function AdminSectionCommandDialog({
               setSelectedIndex(0);
             }}
             onKeyDown={handleInputKeyDown}
-            placeholder="Search admin sections..."
-            aria-label="Search admin sections"
+            placeholder={t("web.admin.homeRows.commandDialog.searchPlaceholder")}
+            aria-label={t("web.admin.homeRows.commandDialog.searchLabel")}
             aria-activedescendant={selectedResult ? resultId(selectedResult.href) : undefined}
             className="placeholder:text-muted-foreground h-full min-w-0 flex-1 bg-transparent text-sm outline-none"
             autoComplete="off"
             autoFocus
           />
-          <kbd className="bg-muted text-muted-foreground pointer-events-none ml-3 hidden rounded border px-1.5 py-0.5 text-[10px] font-medium select-none sm:inline-flex">
-            ESC
+          <kbd className="bg-muted text-muted-foreground pointer-events-none ms-3 hidden rounded border px-1.5 py-0.5 text-[10px] font-medium select-none sm:inline-flex">
+            {ESCAPE_KEY_LABEL}
           </kbd>
         </div>
 
         <div className="overlay-scroll min-h-0 flex-1 overflow-y-auto overscroll-contain p-2">
           {filteredSections.length > 0 ? (
-            <div role="listbox" aria-label="Admin sections" className="space-y-3">
+            <div
+              role="listbox"
+              aria-label={t("web.admin.homeRows.commandDialog.resultsLabel")}
+              className="space-y-3"
+            >
               {filteredSections.map((section) => (
                 <div key={section.label}>
                   <div className="text-muted-foreground px-2 pb-1 text-xs font-medium">
@@ -195,15 +207,15 @@ export function AdminSectionCommandDialog({
             </div>
           ) : (
             <p className="text-muted-foreground px-3 py-6 text-center text-sm">
-              No matching admin sections
+              {t("web.admin.homeRows.commandDialog.noMatches")}
             </p>
           )}
         </div>
 
         <div className="text-muted-foreground border-border shrink-0 border-t px-4 py-2 text-xs">
           {query.trim()
-            ? `${resultCount} ${resultCount === 1 ? "match" : "matches"}`
-            : `${totalCount} admin sections`}
+            ? t("web.admin.homeRows.commandDialog.matchCount", { count: resultCount })
+            : t("web.admin.homeRows.commandDialog.sectionCount", { count: totalCount })}
         </div>
       </DialogContent>
     </Dialog>
@@ -236,7 +248,7 @@ function AdminCommandResultRow({
       onMouseEnter={onMouseEnter}
       onClick={onPick}
       className={cn(
-        "focus-visible:ring-ring/50 flex w-full items-start gap-3 rounded-md px-3 py-2 text-left transition-colors focus-visible:ring-[3px] focus-visible:outline-none",
+        "focus-visible:ring-ring/50 flex w-full items-start gap-3 rounded-md px-3 py-2 text-start transition-colors focus-visible:ring-[3px] focus-visible:outline-none",
         selected ? "bg-accent text-accent-foreground" : "hover:bg-accent/70",
       )}
     >

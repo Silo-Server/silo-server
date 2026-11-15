@@ -1,5 +1,7 @@
 import type React from "react";
 
+import { t, type MessageKey } from "@/i18n";
+
 export type WidgetId =
   | "stat-active-streams"
   | "stat-egress-now"
@@ -46,6 +48,16 @@ export interface WidgetRangeOptions {
 }
 
 /**
+ * The alternative presentations a widget offers (for example Egress's
+ * Total/Nodes switch), and the one it starts on. Stored per placement like the
+ * window, so the admin finds the chart the way they left it.
+ */
+export interface WidgetViewOptions {
+  allowed: readonly string[];
+  default: string;
+}
+
+/**
  * A widget's identity and the box it is allowed to occupy.
  *
  * Columns and rows are independent axes: `minSpan === maxSpan` pins the width,
@@ -58,8 +70,14 @@ export interface WidgetRangeOptions {
  */
 export interface DashboardWidgetDefinition {
   id: WidgetId;
-  title: string;
-  description: string;
+  /** Catalog key of the widget's name; the layout stores `id`, never this text. */
+  titleKey: MessageKey;
+  /** Catalog key of the one-line summary in the Add-widget sheet. */
+  descriptionKey: MessageKey;
+  /** `titleKey` in the current interface language, read when accessed. */
+  readonly title: string;
+  /** `descriptionKey` in the current interface language, read when accessed. */
+  readonly description: string;
   minSpan: number;
   maxSpan: number;
   defaultSpan: number;
@@ -76,7 +94,27 @@ export interface DashboardWidgetDefinition {
    */
   collapsedRows?: number;
   ranges?: WidgetRangeOptions;
+  views?: WidgetViewOptions;
   Component: React.ComponentType;
+}
+
+/** A registry entry as written: the text fields are derived from the keys. */
+export type DashboardWidgetSpec = Omit<DashboardWidgetDefinition, "title" | "description">;
+
+/**
+ * Adds `title` and `description` to a registry entry as getters, so the text
+ * follows the interface language instead of being frozen when the module loads.
+ */
+export function defineDashboardWidget(spec: DashboardWidgetSpec): DashboardWidgetDefinition {
+  return {
+    ...spec,
+    get title() {
+      return t(spec.titleKey);
+    },
+    get description() {
+      return t(spec.descriptionKey);
+    },
+  };
 }
 
 export interface DashboardLayoutEntry {
@@ -85,4 +123,9 @@ export interface DashboardLayoutEntry {
   rows: number;
   /** Absent for widgets without `ranges`; otherwise one of that widget's allowed values. */
   range?: WidgetRange;
+  /**
+   * Present only once the admin has picked a view; otherwise the grid hands the
+   * widget its `views.default`. Always one of that widget's allowed values.
+   */
+  view?: string;
 }

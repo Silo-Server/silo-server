@@ -7,6 +7,7 @@ import { useCatalogItemDetail } from "@/hooks/queries/catalogRead";
 import MachineTranslatedLabel from "@/pages/ItemDetail/components/MachineTranslatedLabel";
 import { hasMachineTranslation } from "@/pages/ItemDetail/components/machineTranslation";
 import { useEpisodeSpoilerPrefs } from "@/hooks/useEpisodeSpoilerPrefs";
+import { codeNumber, useT, type Translate } from "@/i18n";
 import { isEpisodeStill, isEpisodeUnwatched, SPOILER_IMAGE_CLASS } from "@/lib/episodeSpoilers";
 import { decodeThumbhash } from "@/lib/thumbhash";
 import { cn } from "@/lib/utils";
@@ -80,15 +81,21 @@ export function spoilerRisk(
 }
 
 /** The current profile's progress, separate from the room's episode dots. */
-function seasonProgressLabel(season: Season) {
+function seasonProgressLabel(season: Season, t: Translate) {
   const u = season.user_data;
   if (!u) return null;
   const seen = u.watched_count;
   const total = seen + u.unplayed_count;
   if (total === 0) return null;
-  if (seen === 0 && u.in_progress_count === 0) return "unwatched";
-  if (seen === total) return "all watched";
-  return `${seen} of ${total} watched`;
+  if (seen === 0 && u.in_progress_count === 0) return t("web.watchTogether.series.unwatched");
+  if (seen === total) return t("web.watchTogether.series.allWatched");
+  return t("web.watchTogether.series.watchedOf", { seen: seen, total: total });
+}
+
+function seasonName(season: Season, t: Translate) {
+  return season.is_specials
+    ? t("web.watchTogether.common.specials")
+    : t("web.watchTogether.common.season", { number: season.season_number });
 }
 
 function EpisodeStill({ episode, hidden }: { episode: EpisodeListItem; hidden: boolean }) {
@@ -154,6 +161,7 @@ export function SeriesDrilldown({
   onConfirm?: () => void;
   onClose: () => void;
 }) {
+  const t = useT();
   const detail = useCatalogItemDetail(series.content_id, series.library_id);
   const item = detail.data;
   const seasons = useSeasons(series.content_id);
@@ -217,10 +225,22 @@ export function SeriesDrilldown({
   if (item?.year ?? series.year) meta.push(String(item?.year ?? series.year));
   if (item?.content_rating) meta.push(item.content_rating);
   if (item?.genres?.length) meta.push(item.genres.slice(0, 2).join(", "));
-  meta.push(`${seasonList.length} ${seasonList.length === 1 ? "season" : "seasons"}`);
+  meta.push(
+    t("web.watchTogether.series.seasonCount", {
+      count: seasonList.length,
+      count_text: seasonList.length,
+    }),
+  );
   const currentSeason = seasonList.find((s) => s.season_number === season);
   const pickLabel = (episode: EpisodeListItem) =>
-    `${actionLabel} S${season ?? episode.season_number} E${episode.episode_number}`;
+    t("web.watchTogether.series.pickLabel", {
+      action: actionLabel,
+      season: season ?? episode.season_number,
+      episode: episode.episode_number,
+    });
+  const seasonHeading = currentSeason
+    ? seasonName(currentSeason, t)
+    : t("web.watchTogether.series.episodes");
 
   return (
     <div className="surface-panel-subtle @container relative flex max-h-[min(78vh,56rem)] min-h-0 flex-col overflow-hidden rounded-xl">
@@ -256,7 +276,7 @@ export function SeriesDrilldown({
           </div>
           <div className="min-w-0 flex-1 pb-0.5">
             <p className="text-muted-foreground text-[11px] font-semibold tracking-[0.18em] uppercase">
-              Candidate · series
+              {t("web.watchTogether.series.eyebrow")}
             </p>
             <h3 className="line-clamp-2 text-base leading-tight font-semibold">{series.title}</h3>
             <p className="text-muted-foreground mt-1 text-xs">{meta.join(" · ")}</p>
@@ -264,7 +284,7 @@ export function SeriesDrilldown({
               <p className="text-muted-foreground mt-1 line-clamp-2 max-w-3xl text-xs leading-relaxed">
                 {item.overview}
                 {hasMachineTranslation(item.machine_translated_fields) && (
-                  <MachineTranslatedLabel compact className="ml-1.5 align-middle" />
+                  <MachineTranslatedLabel compact className="ms-1.5 align-middle" />
                 )}
               </p>
             ) : detail.isLoading ? (
@@ -277,8 +297,8 @@ export function SeriesDrilldown({
           variant="ghost"
           size="icon-sm"
           onClick={onClose}
-          aria-label="Close series"
-          className="absolute top-2 right-2 bg-black/30 hover:bg-black/50"
+          aria-label={t("web.watchTogether.series.close")}
+          className="absolute end-2 top-2 bg-black/30 hover:bg-black/50"
         >
           <X className="size-4" />
         </Button>
@@ -287,30 +307,28 @@ export function SeriesDrilldown({
       <div className="flex min-h-0 flex-1 flex-col @2xl:flex-row">
         {/* Seasons: a vertical list on wide screens, chips on narrow ones. */}
         <nav
-          aria-label="Seasons"
-          className="border-border/60 overlay-scroll flex shrink-0 gap-1.5 overflow-x-auto border-b px-3 py-2 @2xl:w-44 @2xl:flex-col @2xl:overflow-y-auto @2xl:border-r @2xl:border-b-0 @2xl:px-2 @2xl:py-3"
+          aria-label={t("web.watchTogether.series.seasons")}
+          className="border-border/60 overlay-scroll flex shrink-0 gap-1.5 overflow-x-auto border-b px-3 py-2 @2xl:w-44 @2xl:flex-col @2xl:overflow-y-auto @2xl:border-e @2xl:border-b-0 @2xl:px-2 @2xl:py-3"
         >
           {seasonList.map((s) => {
             const active = season === s.season_number;
-            const progress = seasonProgressLabel(s);
+            const progress = seasonProgressLabel(s, t);
             return (
               <button
                 key={s.season_number}
                 type="button"
                 onClick={() => setSeason(s.season_number)}
                 aria-pressed={active}
-                className={`flex shrink-0 flex-col rounded-lg px-3 py-1.5 text-left transition-colors @2xl:w-full ${
+                className={`flex shrink-0 flex-col rounded-lg px-3 py-1.5 text-start transition-colors @2xl:w-full ${
                   active
                     ? "bg-foreground text-background"
                     : "text-muted-foreground hover:text-foreground hover:bg-white/[0.05]"
                 }`}
               >
-                <span className="text-xs font-semibold whitespace-nowrap">
-                  {s.is_specials ? "Specials" : `Season ${s.season_number}`}
-                </span>
+                <span className="text-xs font-semibold whitespace-nowrap">{seasonName(s, t)}</span>
                 {progress ? (
                   <span className={`text-[10px] ${active ? "text-background/70" : ""}`}>
-                    You · {progress}
+                    {t("web.watchTogether.series.youProgress", { progress })}
                   </span>
                 ) : null}
               </button>
@@ -321,12 +339,13 @@ export function SeriesDrilldown({
         <div className="flex min-h-0 min-w-0 flex-1 flex-col">
           <div className="border-border/60 flex shrink-0 items-center justify-between gap-3 border-b px-4 py-2">
             <span className="text-muted-foreground text-[11px] font-semibold tracking-[0.18em] uppercase">
-              {currentSeason
-                ? currentSeason.is_specials
-                  ? "Specials"
-                  : `Season ${currentSeason.season_number}`
-                : "Episodes"}
-              {!loadingEpisodes && episodes.length > 0 ? ` · ${episodes.length} episodes` : ""}
+              {!loadingEpisodes && episodes.length > 0
+                ? t("web.watchTogether.series.seasonEpisodes", {
+                    season: seasonHeading,
+                    count: episodes.length,
+                    count_text: episodes.length,
+                  })
+                : seasonHeading}
             </span>
             {members.length > 0 ? (
               <span className="hidden @xl:block">
@@ -364,7 +383,7 @@ export function SeriesDrilldown({
                         type="button"
                         onClick={pick}
                         aria-label={pickLabel(episode)}
-                        className="flex min-w-0 flex-1 items-start gap-3 text-left"
+                        className="flex min-w-0 flex-1 items-start gap-3 text-start"
                       >
                         <EpisodeStill
                           episode={episode}
@@ -377,16 +396,25 @@ export function SeriesDrilldown({
                         <span className="min-w-0 flex-1">
                           {isNext && nextUp ? (
                             <span className="block text-[10px] font-semibold tracking-[0.16em] text-emerald-300/90 uppercase">
-                              Next up for {nextUp.count} of you
+                              {t("web.watchTogether.series.nextUp", {
+                                count: nextUp.count,
+                                count_text: nextUp.count,
+                              })}
                             </span>
                           ) : null}
                           <span className="flex items-baseline gap-2">
                             <span className="text-muted-foreground shrink-0 text-xs font-semibold tabular-nums">
-                              E{episode.episode_number}
+                              {t("web.watchTogether.common.episodeNumber", {
+                                number: codeNumber(episode.episode_number),
+                              })}
                             </span>
                             <span className="truncate text-sm font-medium">{episode.title}</span>
                             <span className="text-muted-foreground shrink-0 text-xs">
-                              {episode.runtime ? `${episode.runtime}m` : ""}
+                              {episode.runtime
+                                ? t("web.watchTogether.series.runtime", {
+                                    minutes: episode.runtime,
+                                  })
+                                : ""}
                             </span>
                             {episode.overview &&
                               !(spoilerPrefs.hideOverviews && unwatched) &&
@@ -423,7 +451,7 @@ export function SeriesDrilldown({
                 })}
             {!loadingEpisodes && episodes.length === 0 ? (
               <li className="text-muted-foreground px-2 py-8 text-center text-sm">
-                No playable episodes in this season.
+                {t("web.watchTogether.series.noEpisodes")}
               </li>
             ) : null}
           </ul>
@@ -434,25 +462,36 @@ export function SeriesDrilldown({
         <div className="border-border/60 flex shrink-0 flex-wrap items-center gap-x-3 gap-y-2 border-t px-4 py-3">
           <div className="min-w-0 flex-1">
             <p className="text-muted-foreground text-[11px] font-semibold tracking-[0.18em] uppercase">
-              Your pick
+              {t("web.watchTogether.series.yourPick")}
             </p>
             <p className="truncate text-sm font-semibold">
-              S{picked.seasonNumber} E{picked.episode.episode_number} “{picked.episode.title}”
+              {t("web.watchTogether.series.pickedEpisode", {
+                season: picked.seasonNumber,
+                episode: picked.episode.episode_number,
+                title: picked.episode.title,
+              })}
             </p>
             {risk ? (
               <p className="text-xs text-amber-300">
-                {risk.names.join(" and ")} {risk.names.length === 1 ? "hasn't" : "haven't"} seen E
-                {risk.episodeNumber}. Heads up.
+                {t("web.watchTogether.series.spoilerRisk", {
+                  count: risk.names.length,
+                  names: risk.names.reduce((joined, name) =>
+                    t("web.watchTogether.common.nameAnd", { first: joined, second: name }),
+                  ),
+                  episode: risk.episodeNumber,
+                })}
               </p>
             ) : replaces ? (
-              <p className="text-muted-foreground text-xs">Replaces {replaces}</p>
+              <p className="text-muted-foreground text-xs">
+                {t("web.watchTogether.common.replaces", { title: replaces })}
+              </p>
             ) : null}
           </div>
           <Button type="button" variant="ghost" onClick={onClose} disabled={busy}>
-            Cancel
+            {t("common.cancel")}
           </Button>
           <Button type="button" onClick={onConfirm} disabled={busy}>
-            {busy ? "Working…" : (confirmLabel ?? actionLabel)}
+            {busy ? t("web.watchTogether.common.working") : (confirmLabel ?? actionLabel)}
           </Button>
         </div>
       ) : null}

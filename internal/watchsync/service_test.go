@@ -294,9 +294,73 @@ func (r *serviceFakeRepo) ListConnectionsDueForSync(
 	return out, nil
 }
 
+func (r *serviceFakeRepo) AdmitSyncRun(ctx context.Context, expected Connection, run SyncRun) (syncRunAdmission, error) {
+	r.syncRunMu.Lock()
+	defer r.syncRunMu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return syncRunAdmission{}, err
+	}
+	conn, ok := r.connections[connectionKey(expected.Provider, expected.UserID, expected.ProfileID)]
+	if !ok || (expected.ID != "" && expected.ID != conn.ID) {
+		return syncRunAdmission{}, ErrConnectionNotFound
+	}
+	admitted := syncRunAdmission{Connection: cloneConnectionForTest(conn)}
+	now := run.StartedAt
+	if now.IsZero() {
+		now = time.Now().UTC()
+	}
+	if conn.RateLimitedUntil != nil && conn.RateLimitedUntil.After(now) {
+		admitted.RetryAfterSeconds = ceilSeconds(conn.RateLimitedUntil.Sub(now))
+		return admitted, nil
+	}
+	for i := len(r.syncRuns) - 1; i >= 0; i-- {
+		active := &r.syncRuns[i]
+		if active.ConnectionID != conn.ID ||
+			(active.Status != string(SyncRunStatusQueued) && active.Status != string(SyncRunStatusRunning)) ||
+			(run.Trigger != "manual" && active.Trigger != "manual") {
+			continue
+		}
+		if !active.StartedAt.IsZero() && now.Sub(active.StartedAt) <= manualSyncTimeout {
+			admitted.Run = *active
+			return admitted, nil
+		}
+		if run.Trigger == "manual" {
+			active.Status = string(SyncRunStatusFailed)
+			active.Error = "watch provider sync timed out before completion"
+			active.CompletedAt = new(now)
+		}
+	}
+	if run.Trigger == "manual" {
+		for i := len(r.syncRuns) - 1; i >= 0; i-- {
+			latest := r.syncRuns[i]
+			if latest.ConnectionID != conn.ID {
+				continue
+			}
+			reference := latest.StartedAt
+			if latest.CompletedAt != nil {
+				reference = *latest.CompletedAt
+			}
+			admitted.RetryAfterSeconds = retryAfterSeconds(now, reference, manualSyncCooldown)
+			if admitted.RetryAfterSeconds > 0 {
+				return admitted, nil
+			}
+			break
+		}
+	}
+	run.ConnectionID, run.Provider, run.StartedAt = conn.ID, conn.Provider, now
+	admitted.Run = r.createSyncRunLocked(run)
+	admitted.Created = true
+	return admitted, nil
+}
+
+// CreateSyncRun is retained only for synthetic fixtures in tests.
 func (r *serviceFakeRepo) CreateSyncRun(_ context.Context, run SyncRun) (SyncRun, error) {
 	r.syncRunMu.Lock()
 	defer r.syncRunMu.Unlock()
+	return r.createSyncRunLocked(run), nil
+}
+
+func (r *serviceFakeRepo) createSyncRunLocked(run SyncRun) SyncRun {
 	if run.ID == "" {
 		run.ID = "run-" + strconv.Itoa(len(r.syncRuns)+1)
 	}
@@ -310,7 +374,7 @@ func (r *serviceFakeRepo) CreateSyncRun(_ context.Context, run SyncRun) (SyncRun
 		run.CreatedAt = run.StartedAt
 	}
 	r.syncRuns = append(r.syncRuns, run)
-	return run, nil
+	return run
 }
 
 func (r *serviceFakeRepo) CompleteSyncRun(_ context.Context, run SyncRun) (SyncRun, error) {
@@ -342,19 +406,6 @@ func (r *serviceFakeRepo) GetLatestSyncRun(_ context.Context, connectionID strin
 	return SyncRun{}, false, nil
 }
 
-func (r *serviceFakeRepo) GetActiveSyncRun(_ context.Context, connectionID string) (SyncRun, bool, error) {
-	r.syncRunMu.Lock()
-	defer r.syncRunMu.Unlock()
-	for i := len(r.syncRuns) - 1; i >= 0; i-- {
-		run := r.syncRuns[i]
-		if run.ConnectionID == connectionID &&
-			(run.Status == string(SyncRunStatusQueued) || run.Status == string(SyncRunStatusRunning)) {
-			return run, true, nil
-		}
-	}
-	return SyncRun{}, false, nil
-}
-
 func (r *serviceFakeRepo) ListSyncRuns(_ context.Context, connectionID string, limit int) ([]SyncRun, error) {
 	r.syncRunMu.Lock()
 	defer r.syncRunMu.Unlock()
@@ -368,6 +419,12 @@ func (r *serviceFakeRepo) ListSyncRuns(_ context.Context, connectionID string, l
 		}
 	}
 	return runs, nil
+}
+
+func (r *serviceFakeRepo) syncRunsSnapshot() []SyncRun {
+	r.syncRunMu.Lock()
+	defer r.syncRunMu.Unlock()
+	return append([]SyncRun(nil), r.syncRuns...)
 }
 
 func (r *serviceFakeRepo) ListLocalWatchEventConnections(_ context.Context, userID int, profileID string, kind LocalWatchEventKind) ([]Connection, error) {
@@ -969,6 +1026,19 @@ func (r *serviceFakeRepo) ListOpenScrobbleSessions(_ context.Context) ([]Scrobbl
 	r.scrobbleMu.Lock()
 	defer r.scrobbleMu.Unlock()
 	return append([]ScrobbleSession(nil), r.scrobbleSessions...), nil
+}
+
+func (r *serviceFakeRepo) ListScrobbleStops(_ context.Context, connectionID string, mediaItemIDs []string) (map[string][]time.Time, error) {
+	r.scrobbleMu.Lock()
+	defer r.scrobbleMu.Unlock()
+	stops := make(map[string][]time.Time)
+	for _, session := range r.scrobbleSessions {
+		if session.ConnectionID == connectionID && session.StopSentAt != nil && session.HistoryID != "" &&
+			slices.Contains(mediaItemIDs, session.MediaItemID) {
+			stops[session.MediaItemID] = append(stops[session.MediaItemID], *session.StopSentAt)
+		}
+	}
+	return stops, nil
 }
 
 func (r *serviceFakeRepo) ListPendingScrobbleReconciliations(_ context.Context) ([]ScrobbleSession, error) {
@@ -2061,6 +2131,82 @@ func TestServiceImportWatchedDeduplicatesResolvedLeavesAtNewestTimestamp(t *test
 	}
 }
 
+// A scrobbled play comes back from the provider stamped when the stop arrived,
+// a second or so after Silo's own row (#3433). The import treats a watch within
+// two minutes of a stop this connection sent as that play, and records a watch
+// with no such stop: a later play of a short item, a play Silo didn't scrobble
+// to this provider, or one another connection scrobbled.
+func TestServiceImportWatchedSkipsProviderCopyOfScrobbledPlay(t *testing.T) {
+	localPlay := time.Date(2026, 11, 3, 1, 8, 27, 0, time.UTC)
+	stopSent := localPlay.Add(time.Second)
+	tests := []struct {
+		name         string
+		connectionID string // of the scrobble session; "" for none
+		remote       time.Time
+		wantRecorded bool
+	}{
+		{name: "provider stamp at the stop", connectionID: "conn-1", remote: stopSent},
+		{name: "provider stamp two minutes before the stop", connectionID: "conn-1", remote: stopSent.Add(-2 * time.Minute)},
+		{name: "provider stamp a minute after the stop", connectionID: "conn-1", remote: stopSent.Add(time.Minute)},
+		{name: "a second play of a short item", connectionID: "conn-1", remote: stopSent.Add(3 * time.Minute), wantRecorded: true},
+		{name: "a play this connection didn't scrobble", remote: stopSent, wantRecorded: true},
+		{name: "a play another connection scrobbled", connectionID: "conn-2", remote: stopSent, wantRecorded: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			db := openUserDB(t)
+			store := userdb.NewSQLiteUserStore(db)
+			if err := userdb.AddHistory(db, userstore.WatchHistoryEntry{
+				ID: "history-1", ProfileID: "profile-1", MediaItemID: testMovieMediaID,
+				WatchedAt: localPlay.Format(time.RFC3339), DurationSeconds: 7200, Completed: true,
+				Source: userstore.WatchHistorySourcePlayback,
+			}); err != nil {
+				t.Fatalf("AddHistory: %v", err)
+			}
+			repo := newServiceFakeRepo()
+			if tt.connectionID != "" {
+				repo.scrobbleSessions = []ScrobbleSession{{
+					PlaybackSessionID: "play-1", ConnectionID: tt.connectionID, MediaItemID: testMovieMediaID,
+					HistoryID: "history-1", LastAction: "stop", StopSentAt: &stopSent,
+				}}
+			}
+			remote := tt.remote
+			provider := watchedImporterStub{
+				historyStubBase: historyStubBase{key: "simkl", source: userstore.WatchHistorySourceSimkl},
+				rows: []RemoteWatch{{
+					Provider: "simkl", Kind: historyimport.KindMovie, Title: "Inception", LastWatchedAt: &remote,
+				}},
+			}
+			watchState := &recordingWatchState{}
+			service := NewService(repo, NewRegistry()).
+				WithMatcher(matchedMatcherStub{mediaItemID: testMovieMediaID}).
+				WithWatchState(watchState).
+				WithUserStoreProvider(staticStoreProvider{store: store})
+
+			result, err := service.ImportWatched(context.Background(), Connection{
+				ID: "conn-1", Provider: "simkl", UserID: 7, ProfileID: "profile-1",
+			}, ServerConfig{}, provider)
+			if err != nil {
+				t.Fatalf("ImportWatched: %v", err)
+			}
+			if recorded := len(watchState.targetIDs) == 1; recorded != tt.wantRecorded || result.Imported != len(watchState.targetIDs) {
+				t.Fatalf("recorded %v (result %+v), want recorded = %v", watchState.targetIDs, result, tt.wantRecorded)
+			}
+			if tt.wantRecorded {
+				return
+			}
+			// A skipped copy still marks the item completed at the provider's time.
+			progress, err := store.GetProgress(context.Background(), "profile-1", testMovieMediaID)
+			if err != nil {
+				t.Fatalf("GetProgress: %v", err)
+			}
+			if progress == nil || !progress.Completed || result.ProgressUpdated != 1 {
+				t.Fatalf("progress = %+v, result %+v; want completed and counted, so the sync refreshes signals", progress, result)
+			}
+		})
+	}
+}
+
 func TestServiceSyncConnectionPreservesConnectionUpdatesAcrossFlows(t *testing.T) {
 	db := openUserDB(t)
 	if err := userdb.AddHistory(db, userstore.WatchHistoryEntry{
@@ -2214,6 +2360,8 @@ func TestServiceSyncConnectionMarksRunFailedWhenExportTransportFails(t *testing.
 		AccessToken:          testAccessToken,
 		ExportWatchedEnabled: true,
 	}
+
+	repo.connections[connectionKey(conn.Provider, conn.UserID, conn.ProfileID)] = conn
 
 	err := service.SyncConnection(context.Background(), conn, "scheduled")
 	if err == nil {
@@ -2842,8 +2990,8 @@ func TestServiceConfirmedStopSerializesConcurrentConfirmation(t *testing.T) {
 }
 
 func TestConfirmedStopLeaseExceedsDispatchTimeout(t *testing.T) {
-	if confirmedStopLease <= confirmedStopDispatchTimeout {
-		t.Fatalf("confirmed stop lease %s must exceed dispatch timeout %s", confirmedStopLease, confirmedStopDispatchTimeout)
+	if confirmedStopLease <= ConfirmedStopDispatchTimeout {
+		t.Fatalf("confirmed stop lease %s must exceed dispatch timeout %s", confirmedStopLease, ConfirmedStopDispatchTimeout)
 	}
 }
 

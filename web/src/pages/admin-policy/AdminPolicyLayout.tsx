@@ -5,6 +5,7 @@ import { PageHeader } from "@/components/page/PageHeader";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { usePolicyCapability } from "@/hooks/queries/admin/policy";
 import { useDocumentTitle } from "@/hooks/useDocumentTitle";
+import { useT } from "@/i18n";
 
 import { PolicyDecisionLogTable } from "./PolicyDecisionLogTable";
 import { PolicyDocumentList } from "./PolicyDocumentList";
@@ -20,22 +21,23 @@ function resolveTab(value: string | null) {
 const PIPELINE_STEPS = [
   {
     icon: PackageCheck,
-    title: "Silo decides the baseline",
-    detail: "Built-in rules ship with every release: profile restrictions, ratings, limits.",
+    title: "web.admin.access.policy.pipeline.baseline.title",
+    detail: "web.admin.access.policy.pipeline.baseline.detail",
   },
   {
     icon: PenLine,
-    title: "Your overrides narrow it",
-    detail: "Custom rules can tighten the baseline — never grant more than it allows.",
+    title: "web.admin.access.policy.pipeline.overrides.title",
+    detail: "web.admin.access.policy.pipeline.overrides.detail",
   },
   {
     icon: ScrollText,
-    title: "Every decision is logged",
-    detail: "Denials are always recorded; allowed requests are sampled.",
+    title: "web.admin.access.policy.pipeline.log.title",
+    detail: "web.admin.access.policy.pipeline.log.detail",
   },
 ] as const;
 
 function PolicyPipelineStrip() {
+  const t = useT();
   return (
     <div className="surface-panel-subtle rounded-2xl p-4">
       <ol className="grid gap-4 md:grid-cols-3">
@@ -43,13 +45,15 @@ function PolicyPipelineStrip() {
           <li key={step.title} className="relative flex items-start gap-3">
             <step.icon aria-hidden className="text-muted-foreground mt-0.5 size-4 shrink-0" />
             <div className="min-w-0">
-              <p className="text-sm font-medium">{step.title}</p>
-              <p className="text-muted-foreground mt-0.5 text-xs leading-relaxed">{step.detail}</p>
+              <p className="text-sm font-medium">{t(step.title)}</p>
+              <p className="text-muted-foreground mt-0.5 text-xs leading-relaxed">
+                {t(step.detail)}
+              </p>
             </div>
             {index < PIPELINE_STEPS.length - 1 && (
               <ArrowRight
                 aria-hidden
-                className="text-muted-foreground/50 absolute top-1 -right-3 hidden size-4 md:block"
+                className="text-muted-foreground/50 absolute -end-3 top-1 hidden size-4 md:block"
               />
             )}
           </li>
@@ -60,7 +64,8 @@ function PolicyPipelineStrip() {
 }
 
 export default function AdminPolicyLayout() {
-  useDocumentTitle("Policy");
+  const t = useT();
+  useDocumentTitle(t("web.admin.access.policy.title"));
   const [searchParams, setSearchParams] = useSearchParams();
   const tab = resolveTab(searchParams.get("tab"));
   const capability = usePolicyCapability();
@@ -84,19 +89,23 @@ export default function AdminPolicyLayout() {
   return (
     <div className="space-y-6 pb-4 sm:pb-6">
       <PageHeader
-        title="Policy"
-        subtitle="Household access rules: what Silo allows by default, and where you tighten it."
+        title={t("web.admin.access.policy.title")}
+        subtitle={t("web.admin.access.policy.subtitle")}
       />
 
       {capability.isLoading && (
-        <p className="text-muted-foreground text-sm">Loading policy capability...</p>
+        <p className="text-muted-foreground text-sm">
+          {t("web.admin.access.policy.loadingCapability")}
+        </p>
       )}
 
       {unavailable && (
         <div className="surface-panel-subtle rounded-2xl p-6">
-          <h2 className="text-lg font-semibold">Policy workspace unavailable</h2>
+          <h2 className="text-lg font-semibold">
+            {t("web.admin.access.policy.unavailable.title")}
+          </h2>
           <p className="text-muted-foreground mt-2 text-sm">
-            The policy engine or editor API is not available from this server process.
+            {t("web.admin.access.policy.unavailable.body")}
           </p>
         </div>
       )}
@@ -107,9 +116,13 @@ export default function AdminPolicyLayout() {
 
           <Tabs value={tab} onValueChange={setTab}>
             <TabsList>
-              <TabsTrigger value="documents">Overrides</TabsTrigger>
-              <TabsTrigger value="vendor">Baseline</TabsTrigger>
-              <TabsTrigger value="decisions">Decision Log</TabsTrigger>
+              <TabsTrigger value="documents">
+                {t("web.admin.access.policy.tab.overrides")}
+              </TabsTrigger>
+              <TabsTrigger value="vendor">{t("web.admin.access.policy.tab.baseline")}</TabsTrigger>
+              <TabsTrigger value="decisions">
+                {t("web.admin.access.policy.tab.decisions")}
+              </TabsTrigger>
             </TabsList>
 
             <TabsContent value="documents" className="space-y-5">
