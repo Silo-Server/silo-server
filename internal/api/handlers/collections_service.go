@@ -421,8 +421,7 @@ func (h *CollectionHandler) PersonalCollectionFeatures(ctx context.Context, user
 	// server collections report it.
 	features.Artwork = features.Artwork && h.ArtworkStore != nil
 	// Append reports what the append operation will find: the store itself.
-	_, appends := store.(userstore.CollectionItemAppender)
-	features.ItemAppend = features.ItemAppend && appends
+	features.ItemAppend = features.ItemAppend && userstore.CanAppendCollectionItems(store)
 	return features, nil
 }
 

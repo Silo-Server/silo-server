@@ -205,6 +205,30 @@ func (h *LibraryCollectionHandler) CreateAdminCollection(ctx context.Context, re
 	return h.createAdminCollection(ctx, req, h.adminArtworkSources(ctx))
 }
 
+// adminUpdateQueryBudget checks the libraries and definition an update leaves
+// in place. Only a smart collection runs its stored definition; a manual or
+// synced one keeps it dormant, so it never blocks a scope or type change.
+func adminUpdateQueryBudget(existing *models.LibraryCollection, req AdminCollectionUpdate) error {
+	if req.LibraryIDs == nil && len(req.QueryDefinition) == 0 && req.CollectionType == nil {
+		return nil
+	}
+	libraryID, libraryIDs, definition := existing.LibraryID, existing.LibraryIDs, existing.QueryDefinition
+	collectionType := existing.CollectionType
+	if req.CollectionType != nil {
+		collectionType = *req.CollectionType
+	}
+	if !catalog.IsLiveQueryType(collectionType) {
+		definition = nil
+	}
+	if req.LibraryIDs != nil {
+		libraryID, libraryIDs = 0, *req.LibraryIDs
+	}
+	if len(req.QueryDefinition) > 0 {
+		definition = req.QueryDefinition
+	}
+	return catalog.ValidateLibraryCollectionQueryBudget(libraryID, libraryIDs, definition)
+}
+
 func (h *LibraryCollectionHandler) updateAdminCollection(ctx context.Context, collectionID string, req AdminCollectionUpdate, artwork adminCollectionArtwork) (AdminCollection, error) {
 	var none AdminCollection
 	if req.CollectionType != nil {
@@ -236,26 +260,8 @@ func (h *LibraryCollectionHandler) updateAdminCollection(ctx context.Context, co
 	if err := validateAdminCollectionSourceUpdate(existing, req); err != nil {
 		return none, err
 	}
-	if req.LibraryIDs != nil || len(req.QueryDefinition) > 0 || req.CollectionType != nil {
-		libraryID, libraryIDs, definition := existing.LibraryID, existing.LibraryIDs, existing.QueryDefinition
-		collectionType := existing.CollectionType
-		if req.CollectionType != nil {
-			collectionType = *req.CollectionType
-		}
-		// Only a smart collection runs its stored definition; a manual or synced
-		// one keeps it dormant, so it never blocks a scope or type change.
-		if !catalog.IsLiveQueryType(collectionType) {
-			definition = nil
-		}
-		if req.LibraryIDs != nil {
-			libraryID, libraryIDs = 0, *req.LibraryIDs
-		}
-		if len(req.QueryDefinition) > 0 {
-			definition = req.QueryDefinition
-		}
-		if err := catalog.ValidateLibraryCollectionQueryBudget(libraryID, libraryIDs, definition); err != nil {
-			return none, fieldError("query_definition", err.Error())
-		}
+	if err := adminUpdateQueryBudget(existing, req); err != nil {
+		return none, fieldError("query_definition", err.Error())
 	}
 	queryDefinition := req.QueryDefinition
 	if len(req.QueryDefinition) > 0 {

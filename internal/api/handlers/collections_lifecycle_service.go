@@ -23,6 +23,23 @@ type PersonalCollectionUpdateCommand struct {
 	Request      PersonalCollectionUpdateRequest
 }
 
+// personalUpdateQueryBudget checks the definition and Show only filter an
+// update leaves in place. The request's sides stay raw, since normalization
+// can discard groups, rules and duplicate library IDs. A manual collection's
+// stored definition is dormant, so it's left out.
+func personalUpdateQueryBudget(live bool, source, display string, req PersonalCollectionUpdateRequest) error {
+	if !live {
+		source = ""
+	}
+	if len(req.QueryDefinition) > 0 {
+		source = string(req.QueryDefinition)
+	}
+	if req.DisplayQueryDefinition != nil {
+		display = string(req.DisplayQueryDefinition)
+	}
+	return catalog.ValidatePersonalCollectionQueryBudget(source, display)
+}
+
 func (h *CollectionHandler) UpdatePersonalCollection(ctx context.Context, cmd PersonalCollectionUpdateCommand) (PersonalCollectionView, error) {
 	var none PersonalCollectionView
 	userID, profileID, collectionID, req := cmd.UserID, cmd.ProfileID, cmd.CollectionID, cmd.Request
@@ -68,17 +85,7 @@ func (h *CollectionHandler) UpdatePersonalCollection(ctx context.Context, cmd Pe
 	// it never blocks an edit. A definition the request sends is always checked.
 	live := catalog.IsLiveQueryType(existing.CollectionType)
 	if len(req.QueryDefinition) > 0 || req.DisplayQueryDefinition != nil {
-		source, display := existing.QueryDefinition, existing.DisplayQueryDefinition
-		if !live {
-			source = ""
-		}
-		if len(req.QueryDefinition) > 0 {
-			source = string(req.QueryDefinition)
-		}
-		if req.DisplayQueryDefinition != nil {
-			display = string(req.DisplayQueryDefinition)
-		}
-		if err := catalog.ValidatePersonalCollectionQueryBudget(source, display); err != nil {
+		if err := personalUpdateQueryBudget(live, existing.QueryDefinition, existing.DisplayQueryDefinition, req); err != nil {
 			return none, fieldError("query_definition", err.Error())
 		}
 	}
@@ -182,19 +189,9 @@ func (h *CollectionHandler) UpdatePersonalCollection(ctx context.Context, cmd Pe
 	}
 
 	if input.QueryDefinition != nil || input.DisplayQueryDefinition != nil {
+		// The store supplies the locked merged state.
 		input.ValidateQueryComposition = func(source, display string) error {
-			// The store supplies the locked merged state. Keep requested sides raw:
-			// normalization can discard groups, rules and duplicate library IDs.
-			if !live {
-				source = ""
-			}
-			if len(req.QueryDefinition) > 0 {
-				source = string(req.QueryDefinition)
-			}
-			if req.DisplayQueryDefinition != nil {
-				display = string(req.DisplayQueryDefinition)
-			}
-			if err := catalog.ValidatePersonalCollectionQueryBudget(source, display); err != nil {
+			if err := personalUpdateQueryBudget(live, source, display, req); err != nil {
 				return fieldError("query_definition", err.Error()).WithCause(err)
 			}
 			return nil

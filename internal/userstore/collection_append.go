@@ -18,3 +18,10 @@ var (
 type CollectionItemAppender interface {
 	AppendCollectionItem(ctx context.Context, collectionID, mediaItemID string) error
 }
+
+// CanAppendCollectionItems reports whether store implements
+// CollectionItemAppender, the check the append operation itself makes.
+func CanAppendCollectionItems(store UserStore) bool {
+	_, ok := store.(CollectionItemAppender)
+	return ok
+}
