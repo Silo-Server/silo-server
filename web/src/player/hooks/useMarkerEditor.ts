@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { t, type MessageKey } from "@/i18n";
 import { usePlayerConfig } from "../context/PlayerConfigContext";
 import { playerV2 } from "../player-v2";
@@ -115,6 +115,12 @@ export function useMarkerEditor({
     setError(null);
   }
 
+  // The file playing now, for a save that resolves after a version switch.
+  const currentFileIdRef = useRef(fileId);
+  useEffect(() => {
+    currentFileIdRef.current = fileId;
+  }, [fileId]);
+
   const canEdit = canEditParam && fileId != null && duration > 0;
 
   const begin = useCallback(() => {
@@ -202,14 +208,22 @@ export function useMarkerEditor({
         body: markerUpdateToV2(body),
       });
     } catch (e) {
-      setError(e instanceof Error ? e.message : t("web.markers.saveFailed"));
+      if (currentFileIdRef.current === fileId) {
+        setError(e instanceof Error ? e.message : t("web.markers.saveFailed"));
+      } else {
+        console.error("Marker save failed after a version switch:", e);
+      }
       return;
     } finally {
       setSaving(false);
     }
-    originalRef.current = draft;
-    setDraft(draft);
-    setEditing(false);
+    // A version switch during the request closed this draft, and the editor may
+    // since hold a draft of the new file. Leave that one alone.
+    if (currentFileIdRef.current === fileId) {
+      originalRef.current = draft;
+      setDraft(draft);
+      setEditing(false);
+    }
     try {
       onSaved?.(body);
     } catch (e) {
