@@ -350,6 +350,10 @@ start or end a run, and a start never moves back over them.
    lie within 20 seconds. If the first such run starts up to 60 seconds after
    the match and only story or mostly black keyframes lie between, the
    credits start there: the match often begins on music over the last shot.
+   True-black keyframes directly before the run's first text count as its
+   start when they all lie within 10 seconds of that text, since credits
+   usually cut to black before the first name; a longer stretch of black
+   keeps the match's start.
    Credits that video moved rate 0.05 higher, up to 0.95
    (`credits-audio:video:v1`); otherwise the match keeps its rating
    (`credits-audio:v1`: 0.90 when the season agrees on its duration, 0.65
@@ -399,9 +403,11 @@ Credits versions and caches:
   state. It covers the fingerprint key and, when the analysis ran tail
   passes, the tail key, so a group settled while ffmpeg could not run tail
   passes is analyzed again once it can. A run without tail passes also skips
-  a group a tail-capable run settled, so it cannot replace that run's audio
-  and video credits with audio-only ones. Bump `CreditsBehaviorVersion` to
-  re-run every credits comparison over cached fingerprints and tails.
+  a group a tail-capable run settled, under this or any earlier
+  `CreditsBehaviorVersion`, so it cannot replace that run's audio and video
+  credits with audio-only ones. Bump `CreditsBehaviorVersion` to re-run every
+  credits comparison over cached fingerprints and tails; runs without tail
+  passes keep off groups a tail-capable run settled before the bump.
 - Credits algorithms rank in `markers.scannerAlgorithmPriority` as
   `credits-chapter:v1` (30), `credits-version-copy:v1` (24),
   `credits-audio:video:v1` (22), `credits-audio:v1` (21), and

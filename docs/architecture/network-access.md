@@ -39,8 +39,9 @@ them:
   from the boot-time lifecycle hooks, so a plugin cannot proxy to a listener
   that does not exist yet.
 - Reconciled on every `OnLifecycleChange` (install, enable, disable, config
-  save, auto-update, uninstall). A config save or auto-update stops the
-  process; the next reconcile starts it again.
+  save, auto-update, uninstall). A config save, or an update whose new
+  package passed its checks, stops the process; the next reconcile starts it
+  again.
 - Restarted after a crash with exponential backoff from 1 s to 60 s plus
   jitter, reset after five minutes of stable running; parked as `failed`
   after ten consecutive failures until an admin restarts or reconfigures it.

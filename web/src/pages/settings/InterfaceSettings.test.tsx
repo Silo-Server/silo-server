@@ -1,7 +1,10 @@
 // @vitest-environment jsdom
 
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+import { libraryCollectionTitleKeys, sectionKeys } from "@/hooks/queries/keys";
 
 import { SETTING_KEYS } from "@/lib/settingsContract";
 import {
@@ -65,6 +68,16 @@ function customization(overrides: Record<string, unknown> = {}) {
   };
 }
 
+function renderSettings(queryClient = new QueryClient()) {
+  const ui = () => (
+    <QueryClientProvider client={queryClient}>
+      <InterfaceSettings />
+    </QueryClientProvider>
+  );
+  const view = render(ui());
+  return { rerender: () => view.rerender(ui()) };
+}
+
 describe("InterfaceSettings", () => {
   let clearMutateAsync: ReturnType<typeof vi.fn>;
   let setMutateAsync: ReturnType<typeof vi.fn>;
@@ -92,7 +105,7 @@ describe("InterfaceSettings", () => {
       }),
     );
 
-    render(<InterfaceSettings />);
+    renderSettings();
 
     expect(screen.queryByRole("button", { name: "Reset poster settings" })).not.toBeInTheDocument();
     expect(screen.getByRole("radio", { name: "Large" })).toBeDisabled();
@@ -107,7 +120,7 @@ describe("InterfaceSettings", () => {
   });
 
   it("saves a poster size with the caption the schema still requires", async () => {
-    render(<InterfaceSettings />);
+    renderSettings();
 
     fireEvent.click(screen.getByRole("radio", { name: "Compact" }));
 
@@ -126,17 +139,17 @@ describe("InterfaceSettings", () => {
       customization({ primaryMenu: effectiveMenu }),
     );
 
-    const view = render(<InterfaceSettings />);
+    const view = renderSettings();
     fireEvent.click(screen.getByRole("button", { name: "Move Calendar up" }));
     await waitFor(() => expect(setMutateAsync).toHaveBeenCalledTimes(1));
 
     // The save resolved but the effective menu has not refetched yet.
-    view.rerender(<InterfaceSettings />);
+    view.rerender();
     let labels = screen.getAllByRole("listitem").map((item) => item.textContent);
     expect(labels).toEqual(["Home", "Calendar", "Movies · Library"]);
 
     effectiveMenu = { items: [HOME, CALENDAR, MOVIES] };
-    view.rerender(<InterfaceSettings />);
+    view.rerender();
     labels = screen.getAllByRole("listitem").map((item) => item.textContent);
     expect(labels).toEqual(["Home", "Calendar", "Movies · Library"]);
   });
@@ -145,7 +158,7 @@ describe("InterfaceSettings", () => {
     mocks.useUICustomization.mockReturnValue(customization({ primaryMenu: MOVIES_MENU }));
     setMutateAsync.mockRejectedValueOnce(new Error("nope"));
 
-    render(<InterfaceSettings />);
+    renderSettings();
     fireEvent.click(screen.getByRole("button", { name: "Remove Movies · Library" }));
 
     expect(await screen.findByText("Movies · Library")).toBeInTheDocument();
@@ -156,7 +169,7 @@ describe("InterfaceSettings", () => {
       customization({ primaryMenu: MOVIES_MENU, primaryMenuSource: "profile" }),
     );
 
-    render(<InterfaceSettings />);
+    renderSettings();
     expect(screen.queryByRole("button", { name: "Reset menu" })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Remove Movies · Library" }));
     await waitFor(() => expect(setMutateAsync).toHaveBeenCalledTimes(1));
@@ -172,6 +185,39 @@ describe("InterfaceSettings", () => {
     expect(await screen.findByText("Movies · Library")).toBeInTheDocument();
   });
 
+  it("lists pinned rows and collections under their current titles", () => {
+    const section: PrimaryMenuItem = {
+      type: "section",
+      library_id: 7,
+      section_id: "s1",
+      label: "Random Picks",
+    };
+    const collection: PrimaryMenuItem = {
+      type: "collection",
+      library_id: 7,
+      collection_id: "c1",
+      label: "Rainy Days",
+    };
+    mocks.useUICustomization.mockReturnValue(
+      customization({ primaryMenu: { items: [HOME, section, collection] } }),
+    );
+    mocks.useUserLibraries.mockReturnValue({ data: [{ id: 7, name: "Movies", type: "movies" }] });
+    const queryClient = new QueryClient();
+    queryClient.setQueryData(sectionKeys.libraryLayout(7), {
+      sections: [{ id: "s1", title: "Weekend Picks" }],
+    });
+    queryClient.setQueryData(
+      libraryCollectionTitleKeys.library(7),
+      new Map([["c1", "Stormy Nights"]]),
+    );
+
+    renderSettings(queryClient);
+
+    const menu = screen.getByRole("list", { name: "Menu links" });
+    expect(within(menu).getByText("Weekend Picks · Section")).toBeVisible();
+    expect(within(menu).getByText("Stormy Nights · Collection")).toBeVisible();
+  });
+
   it("keeps editors closed when effective customization could not be loaded", () => {
     mocks.useUICustomization.mockReturnValue(
       customization({
@@ -182,7 +228,7 @@ describe("InterfaceSettings", () => {
       }),
     );
 
-    render(<InterfaceSettings />);
+    renderSettings();
 
     expect(screen.getByRole("alert")).toHaveTextContent("Editing is off until they load");
     expect(screen.queryByRole("radiogroup", { name: "Size" })).not.toBeInTheDocument();

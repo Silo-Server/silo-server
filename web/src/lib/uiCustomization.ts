@@ -272,6 +272,20 @@ export function carouselCardWidthClasses(size: PosterSize): string {
   }
 }
 
+/**
+ * The poster size a row of square (audiobook) covers is drawn at: one step
+ * under the profile's choice, because a square cover at a poster's width
+ * covers half again its area and crowds the row.
+ */
+export function squarePosterSize(size: PosterSize): PosterSize {
+  return size === "large" ? "standard" : "compact";
+}
+
+/** Width classes of square (audiobook cover) carousel cards. */
+export function squareCarouselCardWidthClasses(size: PosterSize): string {
+  return carouselCardWidthClasses(squarePosterSize(size));
+}
+
 /** Width classes of wide (16:9) carousel cards such as Continue Watching episodes. */
 export const WIDE_CAROUSEL_CARD_WIDTH_CLASSES = "w-[260px] shrink-0 sm:w-[315px]";
 

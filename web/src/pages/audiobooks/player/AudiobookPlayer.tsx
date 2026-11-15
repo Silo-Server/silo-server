@@ -24,6 +24,7 @@ export interface AudiobookPlayerProps {
   author?: string;
   narrator?: string;
   posterUrl?: string;
+  posterThumbhash?: string;
   files: AudiobookFile[];
   initialPositionSeconds?: number;
   autoPlay?: boolean;
@@ -38,6 +39,7 @@ export default function AudiobookPlayer({
   author,
   narrator,
   posterUrl,
+  posterThumbhash,
   files,
   initialPositionSeconds = 0,
   autoPlay = true,
@@ -174,6 +176,7 @@ export default function AudiobookPlayer({
           author={author}
           narrator={narrator}
           posterUrl={posterUrl ?? ""}
+          posterThumbhash={posterThumbhash}
           playback={playback}
           prefs={prefs}
           onCollapse={() => setMode("mini")}

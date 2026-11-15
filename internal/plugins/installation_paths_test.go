@@ -12,6 +12,8 @@ import (
 	"testing"
 
 	"google.golang.org/protobuf/encoding/protojson"
+
+	pluginv1 "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginproto/silo/plugin/v1"
 )
 
 func TestPluginPathIdentityComponents(t *testing.T) {
@@ -127,9 +129,19 @@ func TestPluginPathReplacementRejectsDifferentPlugin(t *testing.T) {
 	store := newRecordingInstallationStore()
 	installer := NewInstaller(store, InstallerOptions{BaseDir: t.TempDir()})
 	existing := &Installation{ID: 7, PluginID: "silo.example", Version: "1.2.2", InstallPath: "unused/plugin"}
-	_, binaryErr := installer.replaceBinary(t.Context(), existing, data, manifest.Checksum, manifest, nil, nil, unsignedSignature)
-	_, archiveErr := installer.replaceArchive(t.Context(), existing, archive, InstallArchiveRequest{})
-	for _, err := range []error{binaryErr, archiveErr} {
+	_, binaryErr := installer.prepareBinary(existing, data, manifest.Checksum, manifest, nil, nil, unsignedSignature)
+	_, archiveErr := installer.prepareArchive(existing, archive, InstallArchiveRequest{})
+	// The identity is checked before any asset is decompressed, so an archive
+	// for another plugin is refused without reading its assets.
+	assetArchivePath := filepath.Join(t.TempDir(), "plugin.zip")
+	writeTestPluginZip(t, assetArchivePath, []*pluginv1.PackagedAsset{{Path: "web/app.js"}}, testBinaryEntry,
+		testZipEntry{name: "web/app.js", data: []byte("not lzma"), lzma: true})
+	assetArchive, err := os.ReadFile(assetArchivePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, assetArchiveErr := installer.prepareArchive(existing, assetArchive, InstallArchiveRequest{})
+	for _, err := range []error{binaryErr, archiveErr, assetArchiveErr} {
 		if _, ok := AsPackageError(err); !ok || !strings.Contains(err.Error(), "does not match installation") {
 			t.Fatalf("replacement mismatch = %v, want a package error", err)
 		}

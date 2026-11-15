@@ -1,4 +1,3 @@
-import type { ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -56,15 +55,8 @@ vi.mock("@/components/AddToCollectionDialog", () => ({
   default: () => null,
 }));
 vi.mock("@/pages/audiobooks/components/ChaptersSection", () => ({ ChaptersSection: () => null }));
-vi.mock("@/pages/audiobooks/components/NarratorCard", () => ({ NarratorCard: () => null }));
 vi.mock("@/pages/audiobooks/components/NarratorPicker", () => ({ NarratorPicker: () => null }));
 vi.mock("@/pages/audiobooks/components/RelatedRail", () => ({ RelatedRail: () => null }));
-vi.mock("@/pages/ItemDetail/DetailHero", () => ({
-  default: ({ actions }: { actions?: ReactNode }) => <div>{actions}</div>,
-}));
-vi.mock("@/pages/ItemDetail/components/MetadataBadges", () => ({
-  default: () => null,
-}));
 
 import { makeItemDetail } from "./itemDetail.test-support";
 import AudiobookContent from "./AudiobookContent";

@@ -23,6 +23,7 @@ const mockUseLibraryCollectionItems = vi.fn();
 const mockUseLibraryHasItems = vi.fn();
 const mockUseIsActingAdmin = vi.fn();
 const mockFetchRecipeCatalog = vi.fn();
+let mockPinTitles: Record<string, string> = {};
 
 vi.mock("@/lib/recipes", () => ({
   fetchRecipeCatalog: () => mockFetchRecipeCatalog(),
@@ -50,6 +51,10 @@ vi.mock("@/hooks/queries/sections", () => ({
 
 vi.mock("@/hooks/queries/sidebarPins", () => ({
   useSidebarPins: (...args: unknown[]) => mockUseSidebarPins(...args),
+}));
+
+vi.mock("@/hooks/queries/pinLabels", () => ({
+  usePinLabel: () => (pin: { id: string; label: string }) => mockPinTitles[pin.id] ?? pin.label,
 }));
 
 vi.mock("@/hooks/queries/libraryCollections", () => ({
@@ -211,6 +216,7 @@ describe("LibraryRecommended", () => {
       }),
     );
     mockUseSidebarPins.mockReturnValue({ pins: {} });
+    mockPinTitles = {};
     mockUseLibraryCollectionItems.mockReturnValue(collectionItemsResult([]));
     mockUseLibraryHasItems.mockReset();
     mockUseLibraryHasItems.mockReturnValue({ data: undefined });
@@ -355,9 +361,13 @@ describe("LibraryRecommended", () => {
       return collectionItemsResult([]);
     });
 
+    // The collection was renamed after it was pinned.
+    mockPinTitles = { "col-1": "Horror Night" };
+
     await render(<LibraryRecommended libraryId={42} />);
 
-    expect(container.textContent).toContain("Pinned Horror");
+    expect(container.textContent).toContain("Horror Night");
+    expect(container.textContent).not.toContain("Pinned Horror");
     expect(container.textContent).toContain("Scream");
     expect(container.textContent).not.toContain("Other Library Collection");
     expect(container.querySelector('[data-testid="pinned-collection-load-more"]')).toBeNull();
