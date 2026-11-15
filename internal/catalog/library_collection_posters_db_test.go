@@ -320,15 +320,16 @@ func TestSmartCollageRecordsRetireWhenUnrefreshedDB(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			recorded := func(access AccessFilter) bool {
+			record := func(access AccessFilter) (smartCollage, bool) {
 				t.Helper()
 				got, err := tc.records.getSmartCollages(ctx, []string{tc.collectionID}, tc.accessKey(access))
 				if err != nil {
 					t.Fatalf("load recorded collages: %v", err)
 				}
-				_, ok := got[tc.collectionID]
-				return ok
+				r, ok := got[tc.collectionID]
+				return r, ok
 			}
+			recorded := func(access AccessFilter) bool { _, ok := record(access); return ok }
 			// Simulates a record last refreshed age ago.
 			backdate := func(access AccessFilter, age time.Duration) {
 				t.Helper()
@@ -356,6 +357,13 @@ func TestSmartCollageRecordsRetireWhenUnrefreshedDB(t *testing.T) {
 				if !recorded(access) {
 					t.Fatalf("refresh recorded nothing for %+v", access)
 				}
+			}
+			currentRecord, _ := record(current)
+			if r, _ := record(sharesCollage); currentRecord.collage.Key == "" || r.collage.Key != currentRecord.collage.Key {
+				t.Fatalf("records name collages %q and %q, want one shared collage", currentRecord.collage.Key, r.collage.Key)
+			}
+			if r, _ := record(seesNothing); r.collage.Key != "" {
+				t.Fatalf("record of an access that sees no match names collage %q, want none", r.collage.Key)
 			}
 			backdate(sharesCollage, collectionCollageUnusedAfter+time.Hour)
 			backdate(seesNothing, collectionCollageUnusedAfter+time.Hour)
