@@ -271,11 +271,32 @@ func TestFindMatchRequiresANarratorForANarratorTaggedItem(t *testing.T) {
 	plain, plainRec := bare("1492084861")
 	tagged, taggedRec := bare("B00B5HZGUG")
 
+	// The tagged-ASIN lookup answered with the provider's own ID only and
+	// no narrators.
+	ownIDOnly := &metadata.MetadataResult{
+		HasMetadata: true, Title: "The Martian",
+		ProviderIDs: map[string]string{"lookup": "L1"},
+		People:      []models.ItemPerson{{Person: models.Person{Name: "Andy Weir"}, Kind: models.PersonKindAuthor}},
+	}
+	// A search-only provider supplies the ID, a metadata-only provider's
+	// record with the right narrator establishes the match during the merge,
+	// and a later metadata-only provider lists no narrators.
+	_, brayRec := edition("The Martian", "Z0BRAY0001", "Andy Weir", "R. C. Bray")
+	brayRec.ProviderIDs = map[string]string{"finder": "F1"}
+	plainMerged := &metadata.MetadataResult{
+		HasMetadata: true, Title: "The Martian", Overview: "from a source without narrators",
+		ProviderIDs: map[string]string{"finder": "F1"},
+	}
+	finder := &searchOnly{&fixedProvider{slug: "finder", results: []metadata.SearchResult{
+		{Name: "The Martian", ProviderIDs: map[string]string{"finder": "F1"}},
+	}}}
+
 	tests := []struct {
 		name      string
 		item      enrichmentItemRow
 		results   []metadata.SearchResult
 		records   map[string]*metadata.MetadataResult
+		providers []metadata.Provider // overrides results and records
 		wantMatch bool
 	}{
 		{
@@ -295,6 +316,25 @@ func TestFindMatchRequiresANarratorForANarratorTaggedItem(t *testing.T) {
 			wantMatch: true,
 		},
 		{
+			name: "narrator tag, tagged-ASIN lookup answers with its own ID and no narrators: match",
+			item: enrichmentItemRow{
+				Title: "The Martian", Author: "Andy Weir", Narrators: []string{"R. C. Bray"},
+				ProviderIDs: map[string]string{"asin": "B00B5HZGUG"},
+			},
+			providers: []metadata.Provider{&lookupOnly{&fixedProvider{slug: "lookup", answers: []*metadata.MetadataResult{ownIDOnly}}}},
+			wantMatch: true,
+		},
+		{
+			name: "narrator tag, a record merged after the match lists none: match kept",
+			item: enrichmentItemRow{Title: "The Martian", Author: "Andy Weir", Narrators: []string{"R. C. Bray"}},
+			providers: []metadata.Provider{
+				finder,
+				&lookupOnly{&fixedProvider{slug: "establishes", answers: []*metadata.MetadataResult{brayRec}}},
+				&lookupOnly{&fixedProvider{slug: "adds", answers: []*metadata.MetadataResult{plainMerged}}},
+			},
+			wantMatch: true,
+		},
+		{
 			name:      "no narrator tag, record lists none: match",
 			item:      enrichmentItemRow{Title: "The Martian", Author: "Andy Weir"},
 			results:   []metadata.SearchResult{plain},
@@ -305,8 +345,11 @@ func TestFindMatchRequiresANarratorForANarratorTaggedItem(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			tt.item.ContentID = "item"
-			m := (&Enricher{}).findMatch(context.Background(), tt.item,
-				[]metadata.Provider{&editionProvider{results: tt.results, records: tt.records}})
+			providers := tt.providers
+			if providers == nil {
+				providers = []metadata.Provider{&editionProvider{results: tt.results, records: tt.records}}
+			}
+			m := (&Enricher{}).findMatch(context.Background(), tt.item, providers)
 			if m.metadata.HasMetadata != tt.wantMatch {
 				t.Fatalf("matched = %v (ids %v), want %v", m.metadata.HasMetadata, m.ids, tt.wantMatch)
 			}
@@ -364,4 +407,14 @@ func (p *throttleSecondFetch) GetMetadata(ctx context.Context, req metadata.Meta
 		return nil, status.Error(codes.ResourceExhausted, "slow down")
 	}
 	return p.editionProvider.GetMetadata(ctx, req)
+}
+
+// searchOnly hides fixedProvider's GetMetadata, as a search-only provider.
+type searchOnly struct{ p *fixedProvider }
+
+func (s *searchOnly) Slug() string       { return s.p.slug }
+func (s *searchOnly) Name() string       { return s.p.slug }
+func (s *searchOnly) ForTypes() []string { return []string{"audiobook"} }
+func (s *searchOnly) Search(ctx context.Context, q metadata.SearchQuery) ([]metadata.SearchResult, error) {
+	return s.p.Search(ctx, q)
 }
