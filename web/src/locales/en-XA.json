@@ -52800,6 +52800,30 @@
       "value": "⟦Šåṽîñĝ...~~~~⟧"
     }
   ],
+  "web.admin.nodes.form.sourceAccess": [
+    {
+      "type": 0,
+      "value": "⟦Šöûŕçé åççéšš~~~~~~⟧"
+    }
+  ],
+  "web.admin.nodes.form.sourceAccessCore": [
+    {
+      "type": 0,
+      "value": "⟦Ţĥŕöûĝĥ ţĥé ÅÞÎ šéŕṽéŕš~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.nodes.form.sourceAccessHelp": [
+    {
+      "type": 0,
+      "value": "⟦Ţĥŕöûĝĥ ţĥé ÅÞÎ šéŕṽéŕš, ţĥé ñöđé ñééđš ñö ļîƀŕåŕý ɱöûñţ, ƀûţ éṽéŕý ƀýţé îţ ŕéåđš þåššéš ţĥŕöûĝĥ ţĥé ÅÞÎ šéŕṽéŕš, šö ţĥéý ñééđ ţĥé ƀåñđŵîđţĥ ƒöŕ îţ.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.nodes.form.sourceAccessLocal": [
+    {
+      "type": 0,
+      "value": "⟦Ļîƀŕåŕý ɱöûñţ öñ ţĥé ñöđé~~~~~~~~~~⟧"
+    }
+  ],
   "web.admin.nodes.form.type": [
     {
       "type": 0,
@@ -53438,6 +53462,216 @@
     {
       "type": 0,
       "value": "⟦Šöƒţŵåŕé~~~~⟧"
+    }
+  ],
+  "web.admin.nodes.key.close": [
+    {
+      "type": 0,
+      "value": "⟦Çļöšé~~⟧"
+    }
+  ],
+  "web.admin.nodes.key.copied": [
+    {
+      "type": 0,
+      "value": "⟦Çöþîéđ~~~⟧"
+    }
+  ],
+  "web.admin.nodes.key.copyFailed": [
+    {
+      "type": 0,
+      "value": "⟦Çöûļđ ñöţ çöþý. Šéļéçţ ţĥé ţéẋţ åñđ çöþý îţ ƀý ĥåñđ.~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.nodes.key.copyKey": [
+    {
+      "type": 0,
+      "value": "⟦Çöþý ķéý~~~~⟧"
+    }
+  ],
+  "web.admin.nodes.key.copySettings": [
+    {
+      "type": 0,
+      "value": "⟦Çöþý šéţţîñĝš~~~~~~⟧"
+    }
+  ],
+  "web.admin.nodes.key.coreUrlHelp": [
+    {
+      "type": 0,
+      "value": "⟦Ţĥé åđđŕéšš ţĥé ñöđé çåļļš ţö ŕéåçĥ ţĥîš šéŕṽéŕ. Ŵîţĥ šéṽéŕåļ ÅÞÎ šéŕṽéŕš, ûšé ţĥéîŕ ļöåđ-ƀåļåñçéđ åđđŕéšš.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.nodes.key.coreUrlLabel": [
+    {
+      "type": 0,
+      "value": "⟦Šéŕṽéŕ åđđŕéšš ƒöŕ ţĥé ñöđé~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.nodes.key.coreUrlMissing": [
+    {
+      "type": 0,
+      "value": "⟦Éñţéŕ ţĥé šéŕṽéŕ åđđŕéšš ţö çöɱþļéţé ţĥé šéţţîñĝš.~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.nodes.key.dialogTitle": [
+    {
+      "type": 0,
+      "value": "⟦Ķéý ƒöŕ "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "~~~~⟧"
+    }
+  ],
+  "web.admin.nodes.key.issue": [
+    {
+      "type": 0,
+      "value": "⟦Îššûé ķéý~~~~⟧"
+    }
+  ],
+  "web.admin.nodes.key.issueFor": [
+    {
+      "type": 0,
+      "value": "⟦Îššûé å ķéý ƒöŕ "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "~~~~~~~⟧"
+    }
+  ],
+  "web.admin.nodes.key.issued": [
+    {
+      "type": 0,
+      "value": "⟦Ķéý îššûéđ~~~~⟧"
+    }
+  ],
+  "web.admin.nodes.key.issuing": [
+    {
+      "type": 0,
+      "value": "⟦Îššûîñĝ å ķéý…~~~~~~⟧"
+    }
+  ],
+  "web.admin.nodes.key.keyLabel": [
+    {
+      "type": 0,
+      "value": "⟦Ñöđé ķéý~~~~⟧"
+    }
+  ],
+  "web.admin.nodes.key.later": [
+    {
+      "type": 0,
+      "value": "⟦Ñöţ ñöŵ~~~⟧"
+    }
+  ],
+  "web.admin.nodes.key.missing": [
+    {
+      "type": 0,
+      "value": "⟦Ñö ķéý: ţĥîš ñöđé ţåķéš ñö ŵöŕķ ûñţîļ å ķéý îš îššûéđ~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.nodes.key.notShownAgain": [
+    {
+      "type": 0,
+      "value": "⟦Çöþý ţĥé ķéý ñöŵ. Îţ îš ñöţ šĥöŵñ åĝåîñ; îƒ ýöû ļöšé îţ, ŕöţåţé ţĥé ķéý åñđ ŕéšţåŕţ ţĥé ñöđé ŵîţĥ ţĥé ñéŵ öñé.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.nodes.key.offer": [
+    {
+      "type": 0,
+      "value": "⟦"
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " ţåķéš ñö ŵöŕķ ûñţîļ îţ ĥåš å ķéý. Îššûé öñé ñöŵ ţö ĝéţ ţĥé šéţţîñĝš ţĥé ñöđé šţåŕţš ŵîţĥ.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.nodes.key.rotate": [
+    {
+      "type": 0,
+      "value": "⟦Ŕöţåţé ķéý~~~~⟧"
+    }
+  ],
+  "web.admin.nodes.key.rotateDescription": [
+    {
+      "type": 0,
+      "value": "⟦Ţĥé çûŕŕéñţ ķéý šţöþš ŵöŕķîñĝ îɱɱéđîåţéļý. Ţĥé ñöđé ļöšéš îţš çöññéçţîöñ ţö ţĥîš šéŕṽéŕ: îţš ŕûññîñĝ šţŕéåɱš ƒåîļ, åñđ îţ ţåķéš ñö ŵöŕķ ûñţîļ ýöû ŕéšţåŕţ îţ ŵîţĥ ţĥé ñéŵ ķéý.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.nodes.key.rotateDrainHint": [
+    {
+      "type": 0,
+      "value": "⟦Ţö åṽöîđ çûţţîñĝ šţŕéåɱš, đŕåîñ ţĥé ñöđé ƒîŕšţ åñđ ŕöţåţé ţĥé ķéý öñçé îţ šĥöŵš Đŕåîñéđ.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.nodes.key.rotateFor": [
+    {
+      "type": 0,
+      "value": "⟦Ŕöţåţé ţĥé ķéý ƒöŕ "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.nodes.key.rotateTitle": [
+    {
+      "type": 0,
+      "value": "⟦Ŕöţåţé ţĥé ķéý ƒöŕ "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "?~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.nodes.key.saved": [
+    {
+      "type": 0,
+      "value": "⟦Î šåṽéđ ţĥé ķéý~~~~~~⟧"
+    }
+  ],
+  "web.admin.nodes.key.settingsHelp": [
+    {
+      "type": 0,
+      "value": "⟦Šţåŕţ ţĥé ñöđé ŵîţĥ ţĥéšé ţŵö šéţţîñĝš. Å ñöđé ţĥåţ îš åļŕéåđý ŕûññîñĝ ķééþš îţš öļđ ķéý ûñţîļ ýöû ŕéšţåŕţ îţ.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.nodes.key.settingsLabel": [
+    {
+      "type": 0,
+      "value": "⟦Ñöđé šéţţîñĝš~~~~~~⟧"
+    }
+  ],
+  "web.admin.nodes.key.unconfirmed": [
+    {
+      "type": 0,
+      "value": "⟦Çöûļđ ñöţ çöñƒîŕɱ å ñéŵ ķéý ƒöŕ "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": ". Ŕéƒŕéšĥ ţĥé þåĝé ƀéƒöŕé ţŕýîñĝ åĝåîñ: îƒ å ķéý ŵåš îššûéđ, ţĥé þŕéṽîöûš öñé ĥåš åļŕéåđý šţöþþéđ ŵöŕķîñĝ.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
     }
   ],
   "web.admin.nodes.memory.noReading": [
