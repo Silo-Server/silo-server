@@ -63,6 +63,10 @@ type SubtitleCache struct {
 	// NewSubtitleCache installs the production bound; tests override it on
 	// their own cache.
 	fillWaitTimeout time.Duration
+	// windowElapsedBudget overrides subtitleTextWindowElapsedBudget for this
+	// cache's request-path text window extracts. Zero means the production
+	// bound; tests set a short one (see SetWindowExtractBudgetForTest).
+	windowElapsedBudget time.Duration
 
 	mu       sync.Mutex
 	inflight map[string]*SubtitleCacheFill
@@ -332,6 +336,12 @@ func subtitleExtractRetryDelays() []time.Duration {
 // ServeExtractWithResult while a per-identity backoff is active.
 type SubtitleExtractionRetryError struct {
 	RetryAfter time.Duration
+	// WindowBudgetExceeded reports that the retryable answer came from a
+	// request-path text window killed at its elapsed budget rather than from a
+	// provider failure. The source is reachable; this page just costs more
+	// than one request may spend on it, so a caller may start the detached
+	// warm and have the retry served from a committed slice.
+	WindowBudgetExceeded bool
 }
 
 func (e *SubtitleExtractionRetryError) Error() string {
@@ -653,9 +663,16 @@ func (c *SubtitleCache) ServeExtractWithResult(w http.ResponseWriter, r *http.Re
 		if !result.ServedCommittedArtifact {
 			// No last-good copy: suppress a provider retry that is known to be
 			// inside its backoff window. An artifact-backed extraction reads a
-			// local file, so a previous source failure does not apply to it.
-			if retryAfter, cooling := c.extractionCoolingDownFor(opts, format); cooling {
-				return result, &SubtitleExtractionRetryError{RetryAfter: retryAfter}
+			// local file, so a previous source failure does not apply to it. A
+			// detached prefetch is not a client retry and is not paced by this
+			// backoff: it is what fills the window cache that the client's next
+			// attempt reads, so blocking it here would leave the page
+			// unservable — notably after a budget breach, which arms this same
+			// backoff on the identity the prefetch needs.
+			if !opts.DetachedRelayDemux {
+				if retryAfter, cooling := c.extractionCoolingDownFor(opts, format); cooling {
+					return result, &SubtitleExtractionRetryError{RetryAfter: retryAfter}
+				}
 			}
 			if !opts.DisableBackgroundWarm {
 				c.WarmTrackInBackground(opts, extract, subtitleTraceRequestID(r.Context()))
@@ -682,7 +699,7 @@ func (c *SubtitleCache) ServeExtractWithResult(w http.ResponseWriter, r *http.Re
 				if served {
 					return result, nil
 				}
-				if !result.ServedCommittedArtifact {
+				if !result.ServedCommittedArtifact && !opts.DetachedRelayDemux {
 					if retryAfter, cooling := c.extractionCoolingDownFor(opts, format); cooling {
 						return result, &SubtitleExtractionRetryError{RetryAfter: retryAfter}
 					}
@@ -742,15 +759,8 @@ func (c *SubtitleCache) ServeExtractWithResult(w http.ResponseWriter, r *http.Re
 	// can still consume from the last-good cache. The window capture already
 	// swallows write failures, so the detached extract keeps producing after
 	// the response writer goes away.
-	extractCtx := admittedCtx
-	if windowLeader {
-		var cancel context.CancelFunc
-		extractCtx, cancel = context.WithTimeout(
-			context.WithoutCancel(admittedCtx),
-			subtitleWindowExtractTimeout,
-		)
-		defer cancel()
-	}
+	extractCtx, cancelExtract, windowBudget := c.windowExtractContext(admittedCtx, opts, windowLeader)
+	defer cancelExtract()
 	warmOverlap := c.warmInFlight(opts, format)
 	overlapStart := time.Now()
 	recordSubtitleServeSource(subtitleServeSourceExtract)
@@ -759,7 +769,10 @@ func (c *SubtitleCache) ServeExtractWithResult(w http.ResponseWriter, r *http.Re
 		recordSubtitleWarmPageOverlap(format, time.Since(overlapStart))
 	}
 	if err != nil {
-		if r.Context().Err() == nil && IsSubtitleUpstreamError(err) {
+		switch {
+		case windowBudget > 0 && windowExtractBounded(extractCtx):
+			err = c.windowBudgetBreachError(r.Context(), opts, format, windowBudget, counter.bytes, time.Since(start), err)
+		case r.Context().Err() == nil && IsSubtitleUpstreamError(err):
 			c.noteExtractionFailure(opts, format)
 		}
 	} else {
@@ -776,6 +789,57 @@ func (c *SubtitleCache) ServeExtractWithResult(w http.ResponseWriter, r *http.Re
 			counter.bytes, outcome, time.Since(start),
 			"track", opts.TrackIndex, "format", format)...)
 	return result, err
+}
+
+// windowExtractContext bounds one window extract. A coalesced leader is
+// detached from its request, because its result is still useful to the waiters
+// that joined it, and bounded by the coalesced-window timeout. A request-path
+// text window the viewer is waiting on is bounded by the request-path budget
+// instead, which is shorter. The returned budget is 0 unless this extract is
+// bounded by the request-path budget.
+func (c *SubtitleCache) windowExtractContext(admittedCtx context.Context, opts StreamExtractOpts, leader bool) (context.Context, context.CancelFunc, time.Duration) {
+	budget := c.textWindowExtractBudget(opts)
+	if !leader && budget <= 0 {
+		return admittedCtx, func() {}, 0
+	}
+	base := admittedCtx
+	if leader {
+		base = context.WithoutCancel(admittedCtx)
+	}
+	if budget > 0 && budget < subtitleWindowExtractTimeout {
+		ctx, cancel := context.WithTimeoutCause(base, budget, errSubtitleWindowBudget)
+		return ctx, cancel, budget
+	}
+	ctx, cancel := context.WithTimeout(base, subtitleWindowExtractTimeout)
+	return ctx, cancel, 0
+}
+
+// windowBudgetBreachError turns a text window killed at its budget into the
+// retryable shape the client already backs off from: the existing
+// per-identity cooldown is armed so a retry does not repeat the read, and the
+// caller answers 503 with Retry-After. A breach after bytes reached the client
+// keeps the extract's own error instead: the response is committed, so the
+// caller must abort it rather than complete a partial slice as a 200.
+func (c *SubtitleCache) windowBudgetBreachError(ctx context.Context, opts StreamExtractOpts, format string, budget time.Duration, written int64, elapsed time.Duration, extractErr error) error {
+	recordSubtitleWindowBudgetKill(format)
+	c.noteExtractionFailure(opts, format)
+	if written > 0 {
+		slog.WarnContext(ctx, "subtitle window extract killed at its budget after writing bytes",
+			"component", "playback", "input", opts.InputPath, "track", opts.TrackIndex,
+			"format", format, "budget", budget, "bytes", written, "elapsed", elapsed)
+		return extractErr
+	}
+	retryAfter := subtitleExtractionFailureBaseCooldown
+	if remaining, cooling := c.extractionCoolingDownFor(opts, format); cooling {
+		retryAfter = remaining
+	}
+	slog.WarnContext(ctx, "subtitle window extract killed at its budget",
+		"component", "playback", "input", opts.InputPath, "track", opts.TrackIndex,
+		"format", format, "budget", budget, "elapsed", elapsed)
+	return &SubtitleExtractionRetryError{
+		RetryAfter:           retryAfter,
+		WindowBudgetExceeded: true,
+	}
 }
 
 // runExtract invokes the extractor, retrying a bounded number of times when an

@@ -4087,6 +4087,16 @@ func (h *StreamHandler) streamEmbeddedSubtitle(w http.ResponseWriter, r *http.Re
 			if response.Status() != 0 {
 				panic(http.ErrAbortHandler)
 			}
+			if extractionRetry.WindowBudgetExceeded {
+				// The window read its source for its whole budget instead of
+				// failing, so the source is reachable and only this page is
+				// too costly for one request. Start the detached warm here:
+				// the cache's own warm is disabled for virtual inputs, and the
+				// retry this 503 asks for should read a committed slice or a
+				// window prefix rather than repeat the read that just timed
+				// out.
+				h.warmVirtualSubtitleAfterWindowMiss(file, track, session, opts, inheritedLayout, virtualActive, middleware.GetReqID(r.Context()))
+			}
 			writeSubtitleSourceUnavailableRetry(w, extractionRetry.RetryAfter)
 			return
 		}

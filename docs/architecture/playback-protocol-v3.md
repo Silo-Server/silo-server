@@ -2337,6 +2337,19 @@ the requested range. A failed extraction returns an error response before
 output begins, or aborts an already-started stream so clients can distinguish
 failure from a complete track and retry.
 
+A text or ASS window the client is waiting on is bounded: an extract started for
+a relay input that has not finished after 20 s is killed. If it produced
+nothing, the answer is `503` with `Retry-After` and the identity enters its usual
+extraction cooldown so a retry does not repeat the read; if part of the slice had
+already streamed, the response is aborted rather than completed. The budget
+never applies to a whole-track extract, to a window read from a committed
+artifact, to a bitmap page (PGS keeps its own page path and bounds), or to the
+detached prefetch — that prefetch is what eventually fills the window cache, so
+it may run to the window timeout. 20 s sits under the web player's 30 s subtitle fetch
+stall deadline, so the server answers before the client gives up. An opening
+window is attempted like any other rather than refused up front, so a relay too
+slow to deliver a page still gets the retryable answer instead of silence.
+
 ---
 
 ## 9. Plan identity
