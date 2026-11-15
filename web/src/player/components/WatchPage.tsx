@@ -1,5 +1,6 @@
 import { CircleAlert } from "lucide-react";
 import "@/styles/player-hud.css";
+import { isTransientV2Error } from "@/api/v2/request";
 import { isSourceFallbackReason } from "@/api/v2/watchTogetherSourceFallback";
 import { playbackCapabilitiesV2 } from "../start-v2";
 import { playerV2Origin } from "../player-v2";
@@ -15,7 +16,7 @@ import { patchVersionMarkers, resolveActiveVersionMarkers } from "../utils/watch
 import { VideoPlayer } from "./VideoPlayer";
 import { PlayerLoadingCover } from "./PlayerLoadingCover";
 import { fetchWatchDetail } from "@/hooks/queries/items";
-import { transientTrickplayError, useWatchTrickplay } from "@/hooks/queries/trickplay";
+import { useWatchTrickplay } from "@/hooks/queries/trickplay";
 import { itemKeys } from "@/hooks/queries/keys";
 import { useWatchPlaybackController } from "@/playback/watchPlaybackContext";
 import { useWatchTogetherRoomConnection } from "../hooks/useWatchTogetherRoomConnection";
@@ -332,7 +333,7 @@ function WatchPagePlayer({
   // A failed refresh retains query data. A terminal response withdraws the
   // cached previews; transient failures keep them until the query recovers.
   const trickplay =
-    trickplayAvailable && (!trickplayQuery.isError || transientTrickplayError(trickplayQuery.error))
+    trickplayAvailable && (!trickplayQuery.isError || isTransientV2Error(trickplayQuery.error))
       ? (trickplayQuery.data ?? null)
       : null;
   const refetchTrickplay = trickplayQuery.refetch;

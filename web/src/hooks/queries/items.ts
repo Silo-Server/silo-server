@@ -27,6 +27,7 @@ import {
   v2,
   type V2Result,
 } from "@/api/v2/request";
+import { StaleApiRequestContextError } from "@/api/client";
 import { adminTaskJobFromV2 } from "@/api/v2/adminTasks";
 import { catalogItemDetailFromV2 } from "@/api/v2/catalog";
 import { watchDetailFromV2 } from "@/api/v2/watch";
@@ -239,6 +240,11 @@ export function useRefreshItemMetadata() {
       }
     },
     onError: (err, _variables, context) => {
+      // Signed out or switched account while it ran: nothing failed, so say nothing.
+      if (err instanceof StaleApiRequestContextError) {
+        toast.dismiss(context?.toastID);
+        return;
+      }
       toast.error(err instanceof Error ? err.message : t("web.item.toast.refreshFailed"), {
         id: context?.toastID,
       });
