@@ -32,6 +32,8 @@ import {
   formatSourceContainerSummary,
   formatToneMapSummary,
   formatTranscodeModeSummary,
+  getAdaptationReasons,
+  type AdaptationReason,
   getPlaybackSessionSubtitle,
   getSessionClientLabel,
   getSessionClientLabelFull,
@@ -693,6 +695,7 @@ function StreamRow({
   const playbackPosition = formatPlaybackPosition(session);
   const transcodeMode = formatTranscodeModeSummary(session);
   const toneMap = formatToneMapSummary(session);
+  const adaptationReasons = getAdaptationReasons(session);
   const activityMethod = classifyActivityMethod(session);
   const containerDecision = normalizeContainerDecision(session.play_method);
   const videoDecision = normalizeStreamDecision(session.video_decision || session.play_method);
@@ -849,6 +852,7 @@ function StreamRow({
               decision={audioDecision}
               value={formatDeliveredAudioSummary(session)}
             />
+            <AdaptationReasonsLine reasons={adaptationReasons} />
           </div>
         </div>
 
@@ -1045,6 +1049,7 @@ function StreamRow({
                 decision={audioDecision}
                 value={formatDeliveredAudioSummary(session)}
               />
+              <AdaptationReasonsLine reasons={adaptationReasons} />
             </div>
           </div>
           <div className="mt-2 flex items-center justify-end">
@@ -1096,6 +1101,7 @@ function StreamRow({
           audioDecision={audioDecision}
           transcodeMode={transcodeMode}
           toneMapping={toneMap?.detail ?? null}
+          adaptationReasons={adaptationReasons}
           showFFmpeg={ffmpegOpen}
           rows={ffmpegRows}
           isLoading={ffmpegLogs.isLoading}
@@ -1131,6 +1137,28 @@ function PlaybackSummaryLine({
   );
 }
 
+// The reasons a session adapts, as short tags; the full sentences are the
+// tooltip here and a list in the expanded panel.
+function AdaptationReasonsLine({ reasons }: { reasons: AdaptationReason[] }) {
+  const t = useT();
+  if (reasons.length === 0) {
+    return null;
+  }
+  return (
+    <div
+      className="flex min-w-0 items-center gap-1.5 text-[11px] leading-tight"
+      title={reasons.map((reason) => reason.description).join("\n")}
+    >
+      <span className="text-muted-foreground w-14 shrink-0 text-[9px] font-semibold tracking-wide uppercase">
+        {t("web.admin.activity.row.why")}
+      </span>
+      <span className="text-muted-foreground truncate">
+        {reasons.map((reason) => reason.label).join(` ${MIDDLE_DOT} `)}
+      </span>
+    </div>
+  );
+}
+
 function ActivityMethodBadge({ method }: { method: string }) {
   const t = useT();
   const meta = activityMethodMeta(method);
@@ -1153,6 +1181,7 @@ function PlaybackExpandedPanel({
   audioDecision,
   transcodeMode,
   toneMapping,
+  adaptationReasons,
   showFFmpeg,
   rows,
   isLoading,
@@ -1166,6 +1195,7 @@ function PlaybackExpandedPanel({
   audioDecision: string;
   transcodeMode: string | null;
   toneMapping: string | null;
+  adaptationReasons: AdaptationReason[];
   showFFmpeg: boolean;
   rows: OperationalLogEntry[];
   isLoading: boolean;
@@ -1225,6 +1255,23 @@ function PlaybackExpandedPanel({
         />
         <PlaybackClientCard session={session} />
       </div>
+
+      {adaptationReasons.length > 0 ? (
+        <div className="border-border/50 bg-background/40 mb-3 rounded-lg border px-3 py-2">
+          <div className="text-muted-foreground mb-1.5 text-[10px] font-semibold tracking-wide uppercase">
+            {t("web.admin.activity.panel.reasonsHeading")}
+          </div>
+          <ul className="space-y-1">
+            {adaptationReasons.map((reason) => (
+              <li key={reason.code} className="flex gap-1.5 text-[11px] leading-snug">
+                <span className="shrink-0 font-medium">{reason.label}</span>
+                <span className="text-muted-foreground shrink-0">{MIDDLE_DOT}</span>
+                <span className="text-muted-foreground">{reason.description}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
 
       {showFFmpeg ? (
         <div className="space-y-2">

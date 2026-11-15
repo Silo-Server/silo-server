@@ -67,6 +67,9 @@ type RecipeCard struct {
 	DeviceID         string `json:"device_id,omitempty"`
 	DevicePlatform   string `json:"device_platform,omitempty"`
 	IsJellyfinCompat bool   `json:"is_jellyfin_compat,omitempty"`
+	// AdaptationReasons is the admin views' account of why the route adapts,
+	// kept like the client metadata above and never projected into claims.
+	AdaptationReasons []string `json:"adaptation_reasons,omitempty"`
 
 	// Header-authenticated recovery. A session that negotiated
 	// header_authenticated_media_v1 publishes no stream token, so the API keeps

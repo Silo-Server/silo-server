@@ -7063,6 +7063,12 @@
       "value": "Open full FFmpeg logs"
     }
   ],
+  "web.admin.activity.panel.reasonsHeading": [
+    {
+      "type": 0,
+      "value": "Why it isn't direct play"
+    }
+  ],
   "web.admin.activity.panel.refreshing": [
     {
       "type": 0,
@@ -7119,6 +7125,210 @@
     {
       "type": 0,
       "value": "Live"
+    }
+  ],
+  "web.admin.activity.reason.audioChannelsUnsupported.description": [
+    {
+      "type": 0,
+      "value": "The audio has more channels than the device's output supports."
+    }
+  ],
+  "web.admin.activity.reason.audioChannelsUnsupported.label": [
+    {
+      "type": 0,
+      "value": "Too many audio channels"
+    }
+  ],
+  "web.admin.activity.reason.audioCodecUnsupported.description": [
+    {
+      "type": 0,
+      "value": "The device, or the stream format it needs, can't play this audio codec."
+    }
+  ],
+  "web.admin.activity.reason.audioCodecUnsupported.label": [
+    {
+      "type": 0,
+      "value": "Audio codec not supported"
+    }
+  ],
+  "web.admin.activity.reason.audioTrackSelection.description": [
+    {
+      "type": 0,
+      "value": "The selected audio track can't be played from the original file directly."
+    }
+  ],
+  "web.admin.activity.reason.audioTrackSelection.label": [
+    {
+      "type": 0,
+      "value": "Audio track selection"
+    }
+  ],
+  "web.admin.activity.reason.bandwidthCap.description": [
+    {
+      "type": 0,
+      "value": "A bandwidth limit set in the app or for this user is below the original bitrate."
+    }
+  ],
+  "web.admin.activity.reason.bandwidthCap.label": [
+    {
+      "type": 0,
+      "value": "Bandwidth limit"
+    }
+  ],
+  "web.admin.activity.reason.bandwidthLimit.description": [
+    {
+      "type": 0,
+      "value": "The connection is too slow for the original bitrate."
+    }
+  ],
+  "web.admin.activity.reason.bandwidthLimit.label": [
+    {
+      "type": 0,
+      "value": "Bandwidth too low"
+    }
+  ],
+  "web.admin.activity.reason.buffering.description": [
+    {
+      "type": 0,
+      "value": "Playback buffered on this connection, so the server lowered the quality."
+    }
+  ],
+  "web.admin.activity.reason.buffering.label": [
+    {
+      "type": 0,
+      "value": "Buffering"
+    }
+  ],
+  "web.admin.activity.reason.containerUnsupported.description": [
+    {
+      "type": 0,
+      "value": "The device can't open this file's container."
+    }
+  ],
+  "web.admin.activity.reason.containerUnsupported.label": [
+    {
+      "type": 0,
+      "value": "Container not supported"
+    }
+  ],
+  "web.admin.activity.reason.deviceWorkaround.description": [
+    {
+      "type": 0,
+      "value": "The audio is converted to avoid a known playback bug on this device."
+    }
+  ],
+  "web.admin.activity.reason.deviceWorkaround.label": [
+    {
+      "type": 0,
+      "value": "Device workaround"
+    }
+  ],
+  "web.admin.activity.reason.directPlayFailed.description": [
+    {
+      "type": 0,
+      "value": "The original stream failed to play on the device, so the server converts it."
+    }
+  ],
+  "web.admin.activity.reason.directPlayFailed.label": [
+    {
+      "type": 0,
+      "value": "Direct play failed"
+    }
+  ],
+  "web.admin.activity.reason.dynamicRangeUnsupported.description": [
+    {
+      "type": 0,
+      "value": "The display can't show this HDR or Dolby Vision video as it is."
+    }
+  ],
+  "web.admin.activity.reason.dynamicRangeUnsupported.label": [
+    {
+      "type": 0,
+      "value": "HDR not supported"
+    }
+  ],
+  "web.admin.activity.reason.qualitySelected.description": [
+    {
+      "type": 0,
+      "value": "The viewer picked a quality lower than the original."
+    }
+  ],
+  "web.admin.activity.reason.qualitySelected.label": [
+    {
+      "type": 0,
+      "value": "Quality chosen by viewer"
+    }
+  ],
+  "web.admin.activity.reason.resolutionLimit.description": [
+    {
+      "type": 0,
+      "value": "The video's resolution is higher than the device supports."
+    }
+  ],
+  "web.admin.activity.reason.resolutionLimit.label": [
+    {
+      "type": 0,
+      "value": "Above device resolution"
+    }
+  ],
+  "web.admin.activity.reason.serverBitrateLimit.description": [
+    {
+      "type": 0,
+      "value": "The server's streaming bitrate limit is below the original bitrate."
+    }
+  ],
+  "web.admin.activity.reason.serverBitrateLimit.label": [
+    {
+      "type": 0,
+      "value": "Server bitrate limit"
+    }
+  ],
+  "web.admin.activity.reason.subtitleBurnIn.description": [
+    {
+      "type": 0,
+      "value": "The selected subtitles are drawn into the video because the device can't show them."
+    }
+  ],
+  "web.admin.activity.reason.subtitleBurnIn.label": [
+    {
+      "type": 0,
+      "value": "Subtitles burned in"
+    }
+  ],
+  "web.admin.activity.reason.subtitleUnsupported.description": [
+    {
+      "type": 0,
+      "value": "The selected subtitles can't be delivered with the original file."
+    }
+  ],
+  "web.admin.activity.reason.subtitleUnsupported.label": [
+    {
+      "type": 0,
+      "value": "Subtitles not supported"
+    }
+  ],
+  "web.admin.activity.reason.videoCapabilityUnconfirmed.description": [
+    {
+      "type": 0,
+      "value": "The app couldn't confirm the device decodes this video, so the server converts it to be safe."
+    }
+  ],
+  "web.admin.activity.reason.videoCapabilityUnconfirmed.label": [
+    {
+      "type": 0,
+      "value": "Video support unconfirmed"
+    }
+  ],
+  "web.admin.activity.reason.videoCodecUnsupported.description": [
+    {
+      "type": 0,
+      "value": "The device can't decode this video's codec, profile or bit depth."
+    }
+  ],
+  "web.admin.activity.reason.videoCodecUnsupported.label": [
+    {
+      "type": 0,
+      "value": "Video codec not supported"
     }
   ],
   "web.admin.activity.route.localServer": [
@@ -7251,6 +7461,12 @@
     {
       "type": 0,
       "value": "View Logs"
+    }
+  ],
+  "web.admin.activity.row.why": [
+    {
+      "type": 0,
+      "value": "Why"
     }
   ],
   "web.admin.activity.sort.group": [

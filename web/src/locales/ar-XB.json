@@ -7167,6 +7167,12 @@
       "value": "\u200F\u202EOpen full FFmpeg logs\u202C"
     }
   ],
+  "web.admin.activity.panel.reasonsHeading": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EWhy it isn't direct play\u202C"
+    }
+  ],
   "web.admin.activity.panel.refreshing": [
     {
       "type": 0,
@@ -7223,6 +7229,210 @@
     {
       "type": 0,
       "value": "\u200F\u202ELive\u202C"
+    }
+  ],
+  "web.admin.activity.reason.audioChannelsUnsupported.description": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EThe audio has more channels than the device's output supports.\u202C"
+    }
+  ],
+  "web.admin.activity.reason.audioChannelsUnsupported.label": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EToo many audio channels\u202C"
+    }
+  ],
+  "web.admin.activity.reason.audioCodecUnsupported.description": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EThe device, or the stream format it needs, can't play this audio codec.\u202C"
+    }
+  ],
+  "web.admin.activity.reason.audioCodecUnsupported.label": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EAudio codec not supported\u202C"
+    }
+  ],
+  "web.admin.activity.reason.audioTrackSelection.description": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EThe selected audio track can't be played from the original file directly.\u202C"
+    }
+  ],
+  "web.admin.activity.reason.audioTrackSelection.label": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EAudio track selection\u202C"
+    }
+  ],
+  "web.admin.activity.reason.bandwidthCap.description": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EA bandwidth limit set in the app or for this user is below the original bitrate.\u202C"
+    }
+  ],
+  "web.admin.activity.reason.bandwidthCap.label": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EBandwidth limit\u202C"
+    }
+  ],
+  "web.admin.activity.reason.bandwidthLimit.description": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EThe connection is too slow for the original bitrate.\u202C"
+    }
+  ],
+  "web.admin.activity.reason.bandwidthLimit.label": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EBandwidth too low\u202C"
+    }
+  ],
+  "web.admin.activity.reason.buffering.description": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EPlayback buffered on this connection, so the server lowered the quality.\u202C"
+    }
+  ],
+  "web.admin.activity.reason.buffering.label": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EBuffering\u202C"
+    }
+  ],
+  "web.admin.activity.reason.containerUnsupported.description": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EThe device can't open this file's container.\u202C"
+    }
+  ],
+  "web.admin.activity.reason.containerUnsupported.label": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EContainer not supported\u202C"
+    }
+  ],
+  "web.admin.activity.reason.deviceWorkaround.description": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EThe audio is converted to avoid a known playback bug on this device.\u202C"
+    }
+  ],
+  "web.admin.activity.reason.deviceWorkaround.label": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EDevice workaround\u202C"
+    }
+  ],
+  "web.admin.activity.reason.directPlayFailed.description": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EThe original stream failed to play on the device, so the server converts it.\u202C"
+    }
+  ],
+  "web.admin.activity.reason.directPlayFailed.label": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EDirect play failed\u202C"
+    }
+  ],
+  "web.admin.activity.reason.dynamicRangeUnsupported.description": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EThe display can't show this HDR or Dolby Vision video as it is.\u202C"
+    }
+  ],
+  "web.admin.activity.reason.dynamicRangeUnsupported.label": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EHDR not supported\u202C"
+    }
+  ],
+  "web.admin.activity.reason.qualitySelected.description": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EThe viewer picked a quality lower than the original.\u202C"
+    }
+  ],
+  "web.admin.activity.reason.qualitySelected.label": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EQuality chosen by viewer\u202C"
+    }
+  ],
+  "web.admin.activity.reason.resolutionLimit.description": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EThe video's resolution is higher than the device supports.\u202C"
+    }
+  ],
+  "web.admin.activity.reason.resolutionLimit.label": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EAbove device resolution\u202C"
+    }
+  ],
+  "web.admin.activity.reason.serverBitrateLimit.description": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EThe server's streaming bitrate limit is below the original bitrate.\u202C"
+    }
+  ],
+  "web.admin.activity.reason.serverBitrateLimit.label": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EServer bitrate limit\u202C"
+    }
+  ],
+  "web.admin.activity.reason.subtitleBurnIn.description": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EThe selected subtitles are drawn into the video because the device can't show them.\u202C"
+    }
+  ],
+  "web.admin.activity.reason.subtitleBurnIn.label": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ESubtitles burned in\u202C"
+    }
+  ],
+  "web.admin.activity.reason.subtitleUnsupported.description": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EThe selected subtitles can't be delivered with the original file.\u202C"
+    }
+  ],
+  "web.admin.activity.reason.subtitleUnsupported.label": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ESubtitles not supported\u202C"
+    }
+  ],
+  "web.admin.activity.reason.videoCapabilityUnconfirmed.description": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EThe app couldn't confirm the device decodes this video, so the server converts it to be safe.\u202C"
+    }
+  ],
+  "web.admin.activity.reason.videoCapabilityUnconfirmed.label": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EVideo support unconfirmed\u202C"
+    }
+  ],
+  "web.admin.activity.reason.videoCodecUnsupported.description": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EThe device can't decode this video's codec, profile or bit depth.\u202C"
+    }
+  ],
+  "web.admin.activity.reason.videoCodecUnsupported.label": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EVideo codec not supported\u202C"
     }
   ],
   "web.admin.activity.route.localServer": [
@@ -7355,6 +7565,12 @@
     {
       "type": 0,
       "value": "\u200F\u202EView Logs\u202C"
+    }
+  ],
+  "web.admin.activity.row.why": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EWhy\u202C"
     }
   ],
   "web.admin.activity.sort.group": [

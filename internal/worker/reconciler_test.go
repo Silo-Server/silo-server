@@ -57,16 +57,29 @@ func TestSyncNowSerializesSnapshotCapture(t *testing.T) {
 	}
 }
 
-// TestSessionSnapshotsEqualDetectsToneMapChanges verifies execution-mode changes trigger reconciliation.
-func TestSessionSnapshotsEqualDetectsToneMapChanges(t *testing.T) {
-	base := SessionSync{SessionID: "session-1", ToneMapMode: "hardware"}
+// TestSessionSnapshotsEqualDetectsAdminFactChanges verifies that a change
+// only the admin views show, such as the tone-map executor or the reasons a
+// replan gives (buffering), still triggers reconciliation.
+func TestSessionSnapshotsEqualDetectsAdminFactChanges(t *testing.T) {
+	base := SessionSync{SessionID: "session-1", ToneMapMode: "hardware", AdaptationReasons: []string{"video_codec_unsupported"}}
 	if !sessionSnapshotsEqual([]SessionSync{base}, []SessionSync{base}) {
-		t.Fatal("identical tone-map facts must compare equal")
+		t.Fatal("identical facts must compare equal")
 	}
-	changed := base
-	changed.ToneMapMode = "software"
-	if sessionSnapshotsEqual([]SessionSync{base}, []SessionSync{changed}) {
-		t.Fatal("tone-map mode change must invalidate the session snapshot")
+	// The stored row reads an empty list back as empty, not nil.
+	direct, stored := base, base
+	direct.AdaptationReasons, stored.AdaptationReasons = nil, []string{}
+	if !sessionSnapshotsEqual([]SessionSync{direct}, []SessionSync{stored}) {
+		t.Fatal("no reasons must compare equal however the list is held")
+	}
+	for name, change := range map[string]func(*SessionSync){
+		"tone-map mode":      func(s *SessionSync) { s.ToneMapMode = "software" },
+		"adaptation reasons": func(s *SessionSync) { s.AdaptationReasons = []string{"video_codec_unsupported", "buffering"} },
+	} {
+		changed := base
+		change(&changed)
+		if sessionSnapshotsEqual([]SessionSync{base}, []SessionSync{changed}) {
+			t.Fatalf("a %s change must invalidate the session snapshot", name)
+		}
 	}
 }
 

@@ -261,6 +261,45 @@ container), `direct_stream` (copied video with converted audio), or `transcode`
 Per-stream Copy means no re-encoding; it does not promise byte-identical packets
 after a permitted bitstream transformation.
 
+`adaptation_reasons: true` on the capability response advertises an optional
+`adaptation_reasons` list on v2 session rows: why the route converts or
+repackages the file instead of playing it as it is. The playback planner derives
+the list from the facts it chose the route by and stores it with the live
+session. The plan's own `decision_reason` can't stand in for it: that field names
+only the last step that shaped the recipe, so a video the device can't decode
+reports its quality step. The list follows the order of
+`adaptation_reason_values`, video causes first:
+
+| Value | Meaning |
+| --- | --- |
+| `video_codec_unsupported` | The device can't decode the video codec, profile, level or bit depth. |
+| `video_capability_unconfirmed` | The client's capability evidence can't confirm it decodes the video. |
+| `dynamic_range_unsupported` | The output can't show the source's HDR or Dolby Vision as it is (tone mapping or a Dolby Vision conversion). |
+| `resolution_limit` | The source is taller than the device's maximum resolution. |
+| `bandwidth_limit` | The client's bandwidth estimate can't carry the source. |
+| `buffering` | Buffering, reported now or remembered for this connection as a learned limit, lowered the estimate. |
+| `bandwidth_cap` | The request's or profile's bandwidth cap is below the source. |
+| `server_bitrate_limit` | The server's stream bitrate limit binds, being lower than any request cap. |
+| `quality_selected` | The viewer chose a quality below the source. |
+| `subtitle_burn_in` | The selected subtitle is rendered into the video. |
+| `direct_play_failed` | The client already tried the original file, or every copy route, and it failed; nothing else forced the change. |
+| `audio_codec_unsupported` | The device, or the delivery it needs, can't carry the audio codec. |
+| `audio_channels_unsupported` | The audio has more channels than the output allows. |
+| `device_workaround` | A known device quirk needs the audio converted. |
+| `audio_track_selection` | The selected audio track is not the one the original file plays. |
+| `container_unsupported` | The device can't open the container, or offers no original-file delivery. |
+| `subtitle_unsupported` | The selected subtitle can't be delivered with the original file. |
+
+A video transcode lists audio reasons only when the audio alone couldn't have
+been copied, because every encode also converts the audio. The field is absent
+for Direct Play, for a session planned before the server recorded reasons, and
+for Jellyfin-protocol sessions, whose route decision doesn't come from this
+planner. Reasons survive a seek reanchor (they ride on the executable recipe)
+and a rebuild after a restart (from the recovery card, or from the live row for
+a session rebuilt from a stream token). Values are additive; clients ignore
+values they don't know, and the server drops stored values it doesn't know. The
+frozen v1 row never carries the field.
+
 `output_format: true` on the same capability response advertises optional
 `output_container` and `output_protocol` fields on v2 session rows. The serving
 transport reports the container (`fmp4`, `mpegts`, or the source container for

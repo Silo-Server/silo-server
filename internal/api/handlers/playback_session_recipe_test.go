@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -305,6 +306,17 @@ func TestHeaderAuthenticatedTranscodeRecoversAfterAnAPIRestart(t *testing.T) {
 			}
 			if body := rr.Body.String(); body != "served-by "+f.startedOn {
 				t.Fatalf("manifest body = %q, want the relay from the node the transcode runs on", body)
+			}
+			// The card is written while the transport is prepared, before the
+			// started plan reaches the session; it must still carry that plan's
+			// reasons, so the admin views keep them after the restart.
+			stored := f.recipes.cards[f.started.SessionID].AdaptationReasons
+			rebuilt, err := restarted.sessionMgr.GetSession(f.started.SessionID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(stored) == 0 || !slices.Equal(rebuilt.AdaptationReasons, stored) {
+				t.Fatalf("adaptation reasons: card %v, rebuilt session %v; want the started plan's on both", stored, rebuilt.AdaptationReasons)
 			}
 			rr = httptest.NewRecorder()
 			restarted.HandleGetTranscodeSegment(rr, transcodeServeRequestV3(owner(), f.started.SessionID, "seg_00004.ts"))

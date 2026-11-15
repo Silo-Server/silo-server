@@ -1723,6 +1723,9 @@ func (h *PlaybackHandler) restoreReconstructedClient(ctx context.Context, card *
 	fill(&card.ClientUserAgent, live.ClientUserAgent)
 	fill(&card.DeviceID, live.DeviceID)
 	fill(&card.DevicePlatform, live.DevicePlatform)
+	if len(card.AdaptationReasons) == 0 {
+		card.AdaptationReasons = live.AdaptationReasons
+	}
 }
 
 // compatCopyWithoutProgress reports a Jellyfin session copy that never saw

@@ -78,35 +78,38 @@ type playbackSessionRow struct {
 	// the target codec with no channel layout rather than reusing
 	// SourceAudioChannels, which is what made a 7.1 source downmixed to AAC 5.1
 	// read as "AAC 7.1".
-	TargetAudioChannels      *int    `json:"target_audio_channels,omitempty"`
-	TargetBitrateKbps        *int    `json:"target_bitrate_kbps"`
-	TranscodeHWAccel         string  `json:"transcode_hw_accel,omitempty"`
-	ToneMapMode              string  `json:"tone_map_mode,omitempty"`
-	SourceContainer          string  `json:"source_container,omitempty"`
-	SourceBitrateKbps        *int    `json:"source_bitrate_kbps"`
-	SourceVideoCodec         string  `json:"source_video_codec,omitempty"`
-	SourceVideoResolution    string  `json:"source_video_resolution,omitempty"`
-	SourceVideoHeight        int     `json:"-"`
-	SourceAudioCodec         string  `json:"source_audio_codec,omitempty"`
-	SourceAudioChannels      *int    `json:"source_audio_channels"`
-	SourceAudioLanguage      string  `json:"source_audio_language,omitempty"`
-	SourceAudioTitle         string  `json:"source_audio_title,omitempty"`
-	SourceAudioLayout        string  `json:"source_audio_layout,omitempty"`
-	RequestedVideoCodec      string  `json:"requested_video_codec,omitempty"`
-	RequestedVideoResolution string  `json:"requested_video_resolution,omitempty"`
-	VideoDecision            string  `json:"video_decision,omitempty"`
-	AudioDecision            string  `json:"audio_decision,omitempty"`
-	EffectivePlayMethod      string  `json:"effective_play_method,omitempty"`
-	IsJellyfinClient         bool    `json:"is_jellyfin_client,omitempty"`
-	RoutingNetworkProvider   *string `json:"-"`
-	RoutingWorkload          string  `json:"routing_workload,omitempty"`
-	RoutingExecution         string  `json:"routing_execution,omitempty"`
-	RoutingExecutionNodeID   *int    `json:"routing_execution_node_id,omitempty"`
-	RoutingExecutionNodeName string  `json:"routing_execution_node_name,omitempty"`
-	RoutingEgress            string  `json:"routing_egress,omitempty"`
-	RoutingEgressNodeID      *int    `json:"routing_egress_node_id,omitempty"`
-	RoutingEgressNodeName    string  `json:"routing_egress_node_name,omitempty"`
-	CompatOrigin             bool    `json:"-"`
+	TargetAudioChannels      *int   `json:"target_audio_channels,omitempty"`
+	TargetBitrateKbps        *int   `json:"target_bitrate_kbps"`
+	TranscodeHWAccel         string `json:"transcode_hw_accel,omitempty"`
+	ToneMapMode              string `json:"tone_map_mode,omitempty"`
+	SourceContainer          string `json:"source_container,omitempty"`
+	SourceBitrateKbps        *int   `json:"source_bitrate_kbps"`
+	SourceVideoCodec         string `json:"source_video_codec,omitempty"`
+	SourceVideoResolution    string `json:"source_video_resolution,omitempty"`
+	SourceVideoHeight        int    `json:"-"`
+	SourceAudioCodec         string `json:"source_audio_codec,omitempty"`
+	SourceAudioChannels      *int   `json:"source_audio_channels"`
+	SourceAudioLanguage      string `json:"source_audio_language,omitempty"`
+	SourceAudioTitle         string `json:"source_audio_title,omitempty"`
+	SourceAudioLayout        string `json:"source_audio_layout,omitempty"`
+	RequestedVideoCodec      string `json:"requested_video_codec,omitempty"`
+	RequestedVideoResolution string `json:"requested_video_resolution,omitempty"`
+	VideoDecision            string `json:"video_decision,omitempty"`
+	AudioDecision            string `json:"audio_decision,omitempty"`
+	EffectivePlayMethod      string `json:"effective_play_method,omitempty"`
+	// AdaptationReasons is native-only: the frozen v1 projection does not
+	// carry it.
+	AdaptationReasons        []string `json:"-"`
+	IsJellyfinClient         bool     `json:"is_jellyfin_client,omitempty"`
+	RoutingNetworkProvider   *string  `json:"-"`
+	RoutingWorkload          string   `json:"routing_workload,omitempty"`
+	RoutingExecution         string   `json:"routing_execution,omitempty"`
+	RoutingExecutionNodeID   *int     `json:"routing_execution_node_id,omitempty"`
+	RoutingExecutionNodeName string   `json:"routing_execution_node_name,omitempty"`
+	RoutingEgress            string   `json:"routing_egress,omitempty"`
+	RoutingEgressNodeID      *int     `json:"routing_egress_node_id,omitempty"`
+	RoutingEgressNodeName    string   `json:"routing_egress_node_name,omitempty"`
+	CompatOrigin             bool     `json:"-"`
 	// TimelineDuration is the length the position is measured against when
 	// that is more than the file, such as a whole multi-file audiobook. The
 	// row's own file_duration stays the file's duration; v2 reads
@@ -392,6 +395,7 @@ func (l *PlaybackSessionsLoader) load(ctx context.Context, query PlaybackSession
 			COALESCE(s.stream_location, ''),
 			COALESCE(s.device_id, ''),
 			COALESCE(s.device_platform, ''),
+			COALESCE(s.adaptation_reasons, '{}'),
 			` + lifecycleColumns + `
 		 FROM ` + source + ` s
 		 LEFT JOIN users u ON u.id = s.user_id
@@ -470,7 +474,7 @@ func (l *PlaybackSessionsLoader) load(ctx context.Context, query PlaybackSession
 			&s.CompatOrigin, &s.RoutingWorkload, &s.RoutingExecution, &s.RoutingExecutionNodeID,
 			&s.RoutingExecutionNodeName, &s.RoutingEgress, &s.RoutingEgressNodeID, &s.RoutingEgressNodeName, &s.RoutingNetworkProvider,
 			&s.OutputContainer, &s.OutputProtocol, &s.StreamLocation,
-			&s.DeviceID, &s.DevicePlatform, &s.LifecycleSeq,
+			&s.DeviceID, &s.DevicePlatform, &s.AdaptationReasons, &s.LifecycleSeq,
 		); err != nil {
 			return nil, 0, fmt.Errorf("scanning playback session: %w", err)
 		}
@@ -517,6 +521,13 @@ func enrichPlaybackSessionRow(row *playbackSessionRow, audioTracksJSON []byte) {
 
 	row.VideoDecision, row.AudioDecision = sessionComponentDecision(row.PlayMethod, row.TranscodeAudio, row.TargetVideoCodec)
 	row.EffectivePlayMethod = effectivePlayMethod(row.VideoDecision, row.AudioDecision)
+	// Direct play changes nothing; a stored value a newer server wrote is
+	// dropped rather than shown raw.
+	if row.PlayMethod == string(playback.PlayDirect) {
+		row.AdaptationReasons = nil
+	} else {
+		row.AdaptationReasons = playback.NormalizeAdaptationReasons(row.AdaptationReasons)
+	}
 	if row.PlayMethod == string(playback.PlayDirect) {
 		row.OutputContainer = row.SourceContainer
 		row.OutputProtocol = playback.OutputProtocolHTTP

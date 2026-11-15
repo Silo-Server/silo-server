@@ -19631,6 +19631,8 @@ export interface components {
       workloads: string[];
     };
     AdminPlaybackSession: {
+      /** @description Why the route changes the file instead of playing it as it is, video causes first, from the vocabulary in the capabilities' adaptation_reason_values. Absent for direct play, for a session planned before the server recorded reasons, and for Jellyfin-protocol sessions. Clients ignore values they do not know. */
+      adaptation_reasons?: string[];
       audio_decision?: string;
       /** Format: int64 */
       audio_track_index: number;
@@ -19766,6 +19768,10 @@ export interface components {
       video_decision?: string;
     };
     AdminPlaybackSessionCapabilitiesOutputBody: {
+      /** @description Every adaptation_reasons value this server emits, in the order it reports them. A later server may add values. */
+      adaptation_reason_values: string[];
+      /** @description Rows may carry adaptation_reasons */
+      adaptation_reasons: boolean;
       /** @description Whether the current principal may use the capability */
       allowed: boolean;
       available: boolean;
