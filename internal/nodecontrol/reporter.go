@@ -9,6 +9,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/logthrottle"
 	"github.com/Silo-Server/silo-server/internal/nodesessions"
 	"github.com/Silo-Server/silo-server/internal/streamtelemetry"
 )
@@ -46,7 +47,7 @@ type Reporter struct {
 
 	// warnings spaces the failure and conflict warnings, keyed by kind. Run
 	// alone touches it and the counters below.
-	warnings  *logThrottle[string]
+	warnings  *logthrottle.Throttle[string]
 	failures  int
 	conflicts int
 }
@@ -61,7 +62,7 @@ func NewReporter(client ReportPoster, sessions func() []nodesessions.SessionInfo
 		sessions:  sessions,
 		telemetry: telemetry,
 		maxBody:   MaxBodyBytes,
-		warnings:  newLogThrottle[string](reportFailureLogInterval),
+		warnings:  logthrottle.New[string](reportFailureLogInterval),
 	}
 }
 
@@ -96,7 +97,7 @@ func (r *Reporter) reportOnce(ctx context.Context) {
 	if Status(err) == http.StatusConflict {
 		r.failures = 0
 		r.conflicts++
-		if r.conflicts < conflictWarnAfter || !r.warnings.allow("conflict") {
+		if r.conflicts < conflictWarnAfter || !r.warnings.Allow("conflict") {
 			return
 		}
 		slog.WarnContext(ctx, "the core keeps refusing this node's reports as not newer than one it accepted; "+
@@ -106,7 +107,7 @@ func (r *Reporter) reportOnce(ctx context.Context) {
 	}
 	r.conflicts = 0
 	r.failures++
-	if r.warnings.allow("failure") {
+	if r.warnings.Allow("failure") {
 		slog.WarnContext(ctx, "report to the core failed; the admin views miss this node's sessions until a report succeeds",
 			"component", "nodecontrol", "consecutive_failures", r.failures, "error", err)
 	}

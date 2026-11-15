@@ -405,3 +405,68 @@ func TestNodeWriteBudget(t *testing.T) {
 		t.Fatalf("the flooding node a second later: %d", code)
 	}
 }
+
+// resolve and sources/open have their own budget: a node at its busiest never
+// meets it, a flood does, and neither budget spends the other's.
+func TestNodePlaybackBudget(t *testing.T) {
+	f := newControlFixture(t)
+	key := f.addNode(7, "gpu-7")
+	clock := time.Unix(1_800_000_000, 0)
+	f.server.now = func() time.Time { return clock }
+	call := func(path string) int {
+		method := http.MethodPost
+		if path == PathConfig {
+			method = http.MethodGet
+		}
+		return f.serve(7, key, method, path, map[string]string{}, nil).Code
+	}
+
+	// A restarted node's 64 sessions rebuild at once while their players
+	// seek: a resolve, an open and four range requests each.
+	for i := range 64 * 6 {
+		path := PathResolve
+		if i%6 == 1 {
+			path = PathSourcesOpen
+		}
+		if code := call(path); code == http.StatusTooManyRequests {
+			t.Fatalf("rebuild burst: call %d refused", i)
+		}
+	}
+	// A minute of 64 progressive remuxes at two range requests a second.
+	for second := range 60 {
+		clock = clock.Add(time.Second)
+		for range 128 {
+			if code := call(PathResolve); code == http.StatusTooManyRequests {
+				t.Fatalf("second %d: resolve refused at a busy node's rate", second)
+			}
+		}
+	}
+
+	refused := 0
+	for range 2000 {
+		if call(PathSourcesOpen) == http.StatusTooManyRequests {
+			refused++
+		}
+	}
+	if refused < 1300 {
+		t.Fatalf("a flood of 2000 opens in an instant had %d refused", refused)
+	}
+	rec := f.serve(7, key, http.MethodPost, PathResolve, map[string]string{}, nil)
+	if rec.Code != http.StatusTooManyRequests || rec.Header().Get("Retry-After") == "" {
+		t.Fatalf("resolve during the flood = %d, Retry-After %q", rec.Code, rec.Header().Get("Retry-After"))
+	}
+	if code := call(PathConfig); code != http.StatusOK {
+		t.Fatalf("config during a resolve flood = %d: the budgets are not separate", code)
+	}
+
+	// config shares the background budget.
+	refused = 0
+	for range 1000 {
+		if call(PathConfig) == http.StatusTooManyRequests {
+			refused++
+		}
+	}
+	if refused < 900 {
+		t.Fatalf("a flood of 1000 config reads had %d refused", refused)
+	}
+}

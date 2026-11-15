@@ -2466,7 +2466,7 @@ func (h *PlaybackHandler) relayToTranscodeNode(w http.ResponseWriter, r *http.Re
 	if transcodeproxy.NodeRefusedRelay(resp.StatusCode) {
 		// The client authenticated with this server; the node refused this
 		// server's signature or the token it forwarded.
-		transcodeproxy.WarnNodeRefusedRelay(r.Context(), "api", transcodeNodeURL, resp.StatusCode)
+		transcodeproxy.WarnNodeRefusedRelay(r.Context(), "api", transcodeNodeURL, resp.StatusCode, h.NodeKeys)
 		writeTranscodeNodeUnavailable(w)
 		return nil
 	}

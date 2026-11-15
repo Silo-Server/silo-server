@@ -1625,11 +1625,18 @@ func (s *Server) handleChapterThumbnailExtract(w http.ResponseWriter, r *http.Re
 }
 
 // chapterNodeUnavailable is the reason of a chapter extraction this node
-// cannot run now, which sends the extraction elsewhere.
-const chapterNodeUnavailable = "node_unavailable"
+// cannot run now. It is the reason the core's chapter client treats as the
+// node's failure (chapterthumbs.IsInfrastructureRemoteFailure), so under
+// prefer_transcode_nodes the core extracts the frame itself instead of
+// recording the chapter as failed. Trickplay and media sampling use their own
+// "node_unavailable" reason, which their core clients expect.
+const chapterNodeUnavailable = chapterthumbs.RemoteNodeUnavailableReason
 
 // chapterSourceReason is the reason a chapter extraction's source failure
-// carries, by its status.
+// carries, by its status: a mount mismatch (409) or a core this node could not
+// ask (503) is this node unavailable, which the core answers by extracting
+// locally; a missing or refused grant (400) is an invalid request, which it
+// records against the chapter.
 func chapterSourceReason(status int) string {
 	if status == http.StatusServiceUnavailable || status == http.StatusConflict {
 		return chapterNodeUnavailable
@@ -2349,6 +2356,13 @@ func (s *Server) handleRemux(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "session stopped", http.StatusGone)
 		return
 	}
+	// So are the local refusals admission below would make anyway, so a
+	// request this node cannot serve costs the core no resolve or source
+	// open. Admission checks them again under its locks.
+	if status, message, refused := s.remuxRefusedLocally(r.Method, transportID); refused {
+		http.Error(w, message, status)
+		return
+	}
 	resolution, err := s.resolve(r, transportID, nodecontrol.ResolvePurposeRemux)
 	if err != nil {
 		writeRemuxRefusal(w, r, transportID, err)
@@ -2496,6 +2510,33 @@ func (s *Server) handleRemux(w http.ResponseWriter, r *http.Request) {
 		slog.WarnContext(ctx, "progressive remux ended with an error", "component", "transcodenode", "error", err,
 			"session", transportID, "playback_session_id", playbackSessionID)
 	}
+}
+
+// remuxRefusedLocally reports the refusal handleRemux's admission would give
+// a request for transportID from this node's own state: a node shutting down,
+// a GET on a node that has reported itself drained, or a GET for a transport
+// that already has a request running. It reads that state without holding it,
+// so admission's check stays the authoritative one.
+func (s *Server) remuxRefusedLocally(method, transportID string) (status int, message string, refused bool) {
+	s.reloadMu.RLock()
+	shuttingDown := s.shuttingDown
+	s.reloadMu.RUnlock()
+	if shuttingDown {
+		return http.StatusServiceUnavailable, "node is shutting down", true
+	}
+	if method == http.MethodHead {
+		return 0, "", false
+	}
+	if s.reportedDrained() {
+		return http.StatusServiceUnavailable, errNodeDraining, true
+	}
+	s.mu.RLock()
+	_, active := s.progressiveRemuxes[transportID]
+	s.mu.RUnlock()
+	if active {
+		return http.StatusConflict, "session already active", true
+	}
+	return 0, "", false
 }
 
 // stopFencePruneInterval bounds how often a stop or remux registration sweeps

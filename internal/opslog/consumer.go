@@ -5,12 +5,16 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"math"
+	"net/netip"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Silo-Server/silo-server/internal/logstream"
+	"github.com/Silo-Server/silo-server/internal/logthrottle"
 )
 
 // Consumer batch-inserts one node's operational log entries into Postgres and
@@ -20,6 +24,8 @@ type Consumer struct {
 	batchSize int
 	interval  time.Duration
 	streamHub *logstream.Hub
+	// rejectedWarnings spaces InsertNodeBatch's warning per node.
+	rejectedWarnings *logthrottle.Throttle[string]
 }
 
 func NewConsumer(pool *pgxpool.Pool, streamHub *logstream.Hub) *Consumer {
@@ -28,6 +34,8 @@ func NewConsumer(pool *pgxpool.Pool, streamHub *logstream.Hub) *Consumer {
 		batchSize: 100,
 		interval:  2 * time.Second,
 		streamHub: streamHub,
+
+		rejectedWarnings: logthrottle.New[string](rejectedWarnInterval),
 	}
 }
 
@@ -75,26 +83,92 @@ const (
 	nodeEntryMaxAge   = 24 * time.Hour
 )
 
+// Bounds on the short text fields of an entry a transcode node shipped. The
+// columns are unbounded text, but these fields are labels the viewer filters
+// and groups by: a level is a slog level name, a component a package name,
+// and the ids are request, session and playback session ids. A longer value
+// is cut at the bound. Message and attrs are left to the batch's byte bound.
+const (
+	nodeEntryMaxLevel     = 16
+	nodeEntryMaxComponent = 64
+	nodeEntryMaxID        = 256
+)
+
+// NormalizeNodeEntry makes an entry a transcode node shipped storable as the
+// core's own handler would have built it: it files the entry under nodeID,
+// whatever node id it carried, keeps its timestamp within nodeEntryMaxAge
+// before and nodeEntryMaxAhead after now, cuts its short text fields to their
+// bounds, clears a client_ip that is not an IP address (an address with a
+// port keeps the address) and a user_id outside the column's integer range.
+// What is left are values Postgres accepts, so one bad field does not cost
+// the batch its single insert.
+func NormalizeNodeEntry(entry Entry, nodeID string, now time.Time) Entry {
+	entry.NodeID = nodeID
+	if latest := now.Add(nodeEntryMaxAhead); entry.Timestamp.After(latest) {
+		entry.Timestamp = latest
+	} else if earliest := now.Add(-nodeEntryMaxAge); entry.Timestamp.Before(earliest) {
+		entry.Timestamp = earliest
+	}
+	entry.Level = truncateText(entry.Level, nodeEntryMaxLevel)
+	entry.Component = truncateText(entry.Component, nodeEntryMaxComponent)
+	entry.RequestID = truncateText(entry.RequestID, nodeEntryMaxID)
+	entry.SessionID = truncateText(entry.SessionID, nodeEntryMaxID)
+	entry.PlaybackSessionID = truncateText(entry.PlaybackSessionID, nodeEntryMaxID)
+	entry.ClientIP = normalizeClientIP(entry.ClientIP)
+	if entry.UserID != nil && (*entry.UserID < math.MinInt32 || *entry.UserID > math.MaxInt32) {
+		entry.UserID = nil
+	}
+	return entry
+}
+
+// normalizeClientIP is raw as an inet value, or "" when it is not an IP
+// address. A zone, which inet does not accept, is dropped.
+func normalizeClientIP(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return ""
+	}
+	addr, err := netip.ParseAddr(raw)
+	if err != nil {
+		addrPort, portErr := netip.ParseAddrPort(raw)
+		if portErr != nil {
+			return ""
+		}
+		addr = addrPort.Addr()
+	}
+	return addr.WithZone("").String()
+}
+
+// truncateText cuts s to at most limit bytes without splitting a UTF-8
+// sequence.
+func truncateText(s string, limit int) string {
+	if len(s) <= limit {
+		return s
+	}
+	cut := limit
+	for cut > 0 && !utf8.RuneStart(s[cut]) {
+		cut--
+	}
+	return s[:cut]
+}
+
+// rejectedWarnInterval spaces the warning about one node's rejected entries:
+// a node retries nothing it was told was stored, but every batch it sends
+// with the same bad value would log again.
+const rejectedWarnInterval = time.Minute
+
 // InsertNodeBatch stores a batch a transcode node shipped, in the shape the
-// node's own consumer stored it: every entry gets nodeID, whatever node id it
-// carried, its timestamp is kept within nodeEntryMaxAge before and
-// nodeEntryMaxAhead after the core's clock, and the rows go to the admin live
-// tail. When Postgres rejects a value in the batch, the rows are inserted one
+// node's own consumer stored it: every entry is normalized by
+// NormalizeNodeEntry, and the rows go to the admin live tail in one insert.
+// When Postgres still rejects a value in the batch, the rows are inserted one
 // at a time so only the rejected ones are lost, as logstream.Drain does for a
-// local batch.
+// local batch; the warning about them is logged at most once a minute per
+// node.
 func (c *Consumer) InsertNodeBatch(ctx context.Context, nodeID string, entries []Entry) error {
 	now := time.Now().UTC()
-	earliest, latest := now.Add(-nodeEntryMaxAge), now.Add(nodeEntryMaxAhead)
 	stamped := make([]Entry, len(entries))
 	for i, entry := range entries {
-		entry.NodeID = nodeID
-		switch {
-		case entry.Timestamp.After(latest):
-			entry.Timestamp = latest
-		case entry.Timestamp.Before(earliest):
-			entry.Timestamp = earliest
-		}
-		stamped[i] = entry
+		stamped[i] = NormalizeNodeEntry(entry, nodeID, now)
 	}
 	err := c.insertBatch(ctx, stamped)
 	if err == nil || len(stamped) < 2 || !logstream.ValueRejected(err) {
@@ -109,7 +183,7 @@ func (c *Consumer) InsertNodeBatch(ctx context.Context, nodeID string, entries [
 			rejected++
 		}
 	}
-	if rejected > 0 {
+	if rejected > 0 && c.rejectedWarnings.Allow(nodeID) {
 		slog.WarnContext(withoutCapture(ctx), "opslog: dropped node log entries Postgres rejected", "component", "opslog",
 			"node_id", nodeID, "rejected", rejected, "entries", len(stamped))
 	}

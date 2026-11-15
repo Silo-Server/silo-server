@@ -15,6 +15,7 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/cache"
 	"github.com/Silo-Server/silo-server/internal/config"
+	"github.com/Silo-Server/silo-server/internal/logthrottle"
 	"github.com/Silo-Server/silo-server/internal/nodepool"
 	"github.com/Silo-Server/silo-server/internal/nodesessions"
 	"github.com/Silo-Server/silo-server/internal/opslog"
@@ -88,10 +89,12 @@ type Server struct {
 	opts    Options
 	now     func() time.Time
 	limiter *nodeLimiter
+	// playbackLimiter is the separate budget of resolve and sources/open.
+	playbackLimiter *nodeLimiter
 	// warnings throttles the per-node report warnings: a node reports every
 	// second, and during a Redis outage each report would log, and this
 	// server's warnings are captured into the operational log.
-	warnings *logThrottle[reportWarning]
+	warnings *logthrottle.Throttle[reportWarning]
 }
 
 // reportWarning is one kind of report warning about one node.
@@ -105,10 +108,13 @@ const reportWarnInterval = time.Minute
 
 // NewServer returns the routes' handlers.
 func NewServer(opts Options) *Server {
-	s := &Server{opts: opts, now: time.Now, limiter: newNodeLimiter(nodeWriteRate, nodeWriteBurst),
-		warnings: newLogThrottle[reportWarning](reportWarnInterval)}
-	s.warnings.now = func() time.Time { return s.now() }
+	s := &Server{opts: opts, now: time.Now,
+		limiter:         newNodeLimiter(nodeWriteRate, nodeWriteBurst),
+		playbackLimiter: newNodeLimiter(nodePlaybackRate, nodePlaybackBurst),
+		warnings:        logthrottle.New[reportWarning](reportWarnInterval)}
+	s.warnings.SetClock(func() time.Time { return s.now() })
 	s.limiter.now = func() time.Time { return s.now() }
+	s.playbackLimiter.now = func() time.Time { return s.now() }
 	return s
 }
 
@@ -351,7 +357,7 @@ func (s *Server) reportFailed(w http.ResponseWriter, r *http.Request, id int, er
 // at most once per reportWarnInterval each, so a failure every report hits
 // stays one line a minute.
 func (s *Server) shouldWarn(id int, kind string) bool {
-	return s.warnings.allow(reportWarning{nodeID: id, kind: kind})
+	return s.warnings.Allow(reportWarning{nodeID: id, kind: kind})
 }
 
 // HandleLogs serves POST /api/internal/nodes/self/logs: it stores one batch of

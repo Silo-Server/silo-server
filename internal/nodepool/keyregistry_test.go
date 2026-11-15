@@ -405,3 +405,39 @@ func TestKeyringKeepsTranscodeNodesOffTheSharedSecret(t *testing.T) {
 		t.Fatalf("NodeKey(2) = %v, want nodeauth.ErrNoNodeKey", err)
 	}
 }
+
+// A relay whose signature a transcode node refused asks the keyring to
+// reload: the registry picks up a key rotated on another server at once,
+// without the relay waiting, and a stream of refusals reloads at most once a
+// second.
+func TestKeyringReloadsAfterANodeRefusesItsSignature(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		old, _ := keyedRow(t, 8, "http://gpu-8")
+		rows := &fakeCredentialRows{}
+		rows.set(old)
+		registry, clock := newTestKeyRegistry(t, rows)
+		keys := registry.Keyring(func() string { return "shared" })
+		before := rows.loads.Load()
+
+		rotated, key := keyedRow(t, 8, "http://gpu-8")
+		rows.set(rotated)
+		clock.Advance(keyRegistryMissInterval)
+		for range 20 {
+			nodeauth.ReloadAfterRefusal(keys)
+		}
+		synctest.Wait()
+		if got, err := keys.KeyFor(nodeauth.TargetTranscode, "http://gpu-8"); err != nil || got != key {
+			t.Fatalf("KeyFor after a refusal = %q, %v; want the rotated key", got, err)
+		}
+		if got := rows.loads.Load() - before; got != 1 {
+			t.Fatalf("20 refusals loaded %d times, want 1", got)
+		}
+		for range 20 {
+			nodeauth.ReloadAfterRefusal(keys)
+		}
+		synctest.Wait()
+		if got := rows.loads.Load() - before; got != 1 {
+			t.Fatalf("refusals inside the interval loaded %d more times", got-1)
+		}
+	})
+}

@@ -27,7 +27,7 @@ type AdminNodeKeyOutput struct {
 }
 
 func registerAdminNodeKey(reg *Registry) {
-	op := Operation{Operation: humaOp("POST", Prefix+"/admin/nodes/{id}/key", "issueAdminNodeKey", "admin-nodes", "Issue a new key for a transcode node and return it once. Each call rotates: the previous key stops working on this server at once and on other servers and proxies within seconds. A disabled node can take a key. Never replay an uncertain issue; issue again instead."), Class: ClassActingAdmin, DemoRestricted: true, ServiceBacked: true, RetrySafety: RetrySafetyNonRetryable}
+	op := Operation{Operation: humaOp("POST", Prefix+"/admin/nodes/{id}/key", "issueAdminNodeKey", "admin-nodes", "Issue a new key for a transcode node and return it once. Each call rotates: the previous key stops working on this server at once and on other servers and proxies within seconds. The node's running streams fail until it restarts with the new key; drain the node first to avoid that. A disabled node can take a key. Never replay an uncertain issue; issue again instead."), Class: ClassActingAdmin, DemoRestricted: true, ServiceBacked: true, RetrySafety: RetrySafetyNonRetryable}
 	op.DefaultStatus = http.StatusCreated
 	// A proxy node signs with the shared secret and takes no key.
 	op.Errors = []int{http.StatusConflict}

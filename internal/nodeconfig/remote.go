@@ -175,7 +175,8 @@ func (r *Remote) warnPollFailed(ctx context.Context, err error) {
 			return
 		}
 		r.rejectedPollWarnedAt = now
-		slog.WarnContext(ctx, "node configuration poll failed; the core still refuses this node's key",
+		slog.WarnContext(ctx, "node configuration poll failed; the core still refuses this node's signed requests "+
+			"(a replaced key or deleted node, or a clock more than 30 seconds off)",
 			"component", "nodeconfig", "error", err)
 		return
 	}
@@ -223,8 +224,9 @@ func (r *Remote) refresh(ctx context.Context) error {
 		}
 		r.rejectedReadAt.Store(time.Now().UnixNano())
 		if !r.keyRejected.Swap(true) {
-			slog.ErrorContext(ctx, "the core refuses this node's key; reporting unhealthy until it accepts it. "+
-				"A rotated key needs a restart with the new SILO_NODE_KEY",
+			slog.ErrorContext(ctx, "the core refuses this node's signed requests; reporting unhealthy until it accepts them. "+
+				"Either the key was replaced or the node deleted (restart with the current SILO_NODE_KEY), "+
+				"or this host's clock differs from the server's by more than 30 seconds (fix its time sync)",
 				"component", "nodeconfig")
 		}
 		return err
@@ -242,7 +244,8 @@ func (r *Remote) refresh(ctx context.Context) error {
 }
 
 // KeyRejected reports whether the core refused the node's key on the last
-// configuration read: 401, after a key rotation or the node's deletion.
+// configuration read: 401, after a key rotation or the node's deletion, or
+// when this host's clock is more than 30 seconds off the core's.
 func (r *Remote) KeyRejected() bool {
 	return r.keyRejected.Load()
 }

@@ -122,6 +122,21 @@ type Keyring interface {
 	KeyFor(target Target, nodeURL string) (string, error)
 }
 
+// KeyReloader is a Keyring that can reload its keys without waiting. A relay
+// asks it to when a transcode node answers a request signed with one of them
+// with 401: the node may hold a key issued after the keyring last loaded.
+type KeyReloader interface {
+	ReloadKeysSoon()
+}
+
+// ReloadAfterRefusal asks keys to reload when it is a KeyReloader, and does
+// nothing otherwise.
+func ReloadAfterRefusal(keys Keyring) {
+	if reloader, ok := keys.(KeyReloader); ok {
+		reloader.ReloadKeysSoon()
+	}
+}
+
 // SignTranscode authenticates req for the transcode node registered at
 // nodeURL with that node's own key. See SignWith.
 func SignTranscode(req *http.Request, nodeURL string, keys Keyring) error {

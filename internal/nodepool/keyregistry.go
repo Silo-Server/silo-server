@@ -171,6 +171,22 @@ func (r *KeyRegistry) refreshAfterMiss() {
 	}
 }
 
+// ReloadSoon starts a reload in the background unless one is running or one
+// finished within keyRegistryMissInterval, and never waits. A relay calls it
+// (through its keyring's ReloadKeysSoon) when a transcode node refuses a
+// signature made with the key this registry holds, so a key rotated on
+// another server is picked up within seconds rather than at the next periodic
+// reload. The refusals that prompt it are answers to this server's own
+// requests, but one node can send many, so it is bounded like a lookup miss.
+func (r *KeyRegistry) ReloadSoon() {
+	r.reloadMu.Lock()
+	defer r.reloadMu.Unlock()
+	if r.inflight != nil || (!r.lastDone.IsZero() && r.now().Sub(r.lastDone) < keyRegistryMissInterval) {
+		return
+	}
+	r.startReloadLocked(context.Background())
+}
+
 // startReloadLocked starts a reload in the background and records it as the
 // one in flight. The caller holds reloadMu. The reload keeps ctx's values but
 // not its cancellation: other callers may join it.
@@ -392,6 +408,9 @@ func (k registryKeyring) KeyFor(target nodeauth.Target, nodeURL string) (string,
 	}
 	return "", errors.New("node auth: unsupported signing target")
 }
+
+// ReloadKeysSoon implements nodeauth.KeyReloader.
+func (k registryKeyring) ReloadKeysSoon() { k.registry.ReloadSoon() }
 
 // CanonicalNodeURL is the one form node URLs are compared in, for the
 // registry's keys and its lookups alike, so that two spellings of one

@@ -3457,16 +3457,19 @@ func newChiRouter(deps Dependencies) chi.Router {
 		nodeControl := nodecontrol.NewServer(nodeControlOptions)
 		r.Route("/api/internal/nodes/self", func(r chi.Router) {
 			r.Use(nodecontrol.RequireNode(deps.NodeKeyRegistry))
-			r.Get("/config", nodeControl.HandleConfig)
 			// Resolve is on a viewer's request path (a rebuild after a node
-			// restart, or each progressive remux request), so a burst of
-			// rebuilds must not be throttled with the background routes.
-			r.Post("/resolve", nodeControl.HandleResolve)
-			// Open and renewal sit on a job's start path too: a viewer waits
-			// for the first one.
-			r.Post("/sources/open", nodeControl.HandleSourceOpen)
+			// restart, or each progressive remux request), and open and
+			// renewal sit on a job's start path, so they have their own
+			// budget: a burst of rebuilds must not be throttled with the
+			// background routes, nor starve them.
+			r.Group(func(r chi.Router) {
+				r.Use(nodeControl.LimitNodePlayback)
+				r.Post("/resolve", nodeControl.HandleResolve)
+				r.Post("/sources/open", nodeControl.HandleSourceOpen)
+			})
 			r.Group(func(r chi.Router) {
 				r.Use(nodeControl.LimitNode)
+				r.Get("/config", nodeControl.HandleConfig)
 				r.Post("/report", nodeControl.HandleReport)
 				r.Post("/logs", nodeControl.HandleLogs)
 				r.Post("/health-changed", nodeControl.HandleHealthChanged)

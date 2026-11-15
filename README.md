@@ -77,8 +77,9 @@ Existing library data is preserved when upgrading.
     </td>
     <td width="33%" valign="top">
       <strong>Scale</strong><br><br>
-      Start with one integrated server; split proxy and transcode roles across
-      shared PostgreSQL and Redis when you need to.
+      Start with one integrated server; add transcode nodes that need only its
+      URL and a key, or proxy nodes that share its PostgreSQL and Redis, when
+      you need to.
     </td>
   </tr>
 </table>
@@ -105,9 +106,9 @@ docker compose up -d
 
 Open <http://localhost:8090> and complete onboarding.
 
-Hardware transcoding (VA-API or NVIDIA) and access for proxy or transcode
-nodes on other hosts are commented out in `docker-compose.yml`; uncomment the
-lines you need.
+Hardware transcoding (VA-API or NVIDIA) and PostgreSQL and Redis access for
+proxy nodes on other hosts are commented out in `docker-compose.yml`; uncomment
+the lines you need. Transcode nodes reach the server on its web port.
 
 ### Updating an install from before the omnibus image
 

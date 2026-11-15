@@ -45,9 +45,11 @@ func (h *NodeHandler) IssueAdminNodeKey(ctx context.Context, id int) (string, er
 		}
 		cancel()
 	}
-	// The pools carry key_issued, and the event moves every other replica's
-	// registry along with its pools. When the pool reload fails the event is
-	// not published, and the others adopt the key on their periodic reload.
-	h.reloadPools(ctx)
+	// The pools carry key_issued. The event is published whether or not this
+	// server's pool reload worked: it is what moves every other replica's and
+	// proxy's registry to the new key, which a failed read here says nothing
+	// about.
+	h.reloadLocalPools(ctx)
+	h.publishPoolChanged(ctx)
 	return key, nil
 }

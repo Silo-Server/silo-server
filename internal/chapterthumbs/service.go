@@ -791,7 +791,7 @@ func (s *Service) extractFrame(
 		return data, "", nil
 	}
 
-	if mode == chapterThumbnailExecutionPreferTranscode && isInfrastructureRemoteFailure(reason) {
+	if mode == chapterThumbnailExecutionPreferTranscode && IsInfrastructureRemoteFailure(reason) {
 		slog.WarnContext(ctx,
 			"chapter thumbnail remote extraction failed; falling back to local", "component", "chapterthumbs",
 			"file_path",

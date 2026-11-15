@@ -55,9 +55,10 @@ type healthResponse struct {
 	// before nodes took their configuration and playback authority from the
 	// core: it answers health but can serve nothing the core sends it now.
 	NodeControlVersion int `json:"node_control_version"`
-	// KeyRejected is a transcode node saying the core refuses its key: it was
-	// rotated or the node deleted, so every call the node makes to the core
-	// fails until it restarts with the current key.
+	// KeyRejected is a transcode node saying the core refuses its signed
+	// calls: its key was replaced or the node deleted, so every call fails
+	// until it restarts with the current key, or its clock differs from the
+	// core's by more than the 30-second signature window.
 	KeyRejected bool `json:"key_rejected"`
 }
 
@@ -73,7 +74,9 @@ const (
 	// UnhealthyUnreachable is a node that did not answer 200 with a
 	// readable health body.
 	UnhealthyUnreachable = "unreachable"
-	// UnhealthyKeyRejected is a transcode node the core refuses the key of.
+	// UnhealthyKeyRejected is a transcode node whose signed calls the core
+	// refuses: a replaced key, a deleted node, or a clock more than 30
+	// seconds off.
 	UnhealthyKeyRejected = "key_rejected"
 	// UnhealthyNodeControlMissing is a transcode node whose binary predates
 	// the node control protocol.
@@ -198,7 +201,8 @@ func CheckNodeReport(ctx context.Context, n *Node) HealthReport {
 func unhealthyDetail(reason string) string {
 	switch reason {
 	case UnhealthyKeyRejected:
-		return "the node reports that this server refuses its key; restart it with its current key, or issue it a new one"
+		return "the node reports that this server refuses its signed requests: either its key was replaced or the node deleted " +
+			"(restart it with its current key), or its clock differs from this server's by more than 30 seconds (fix its time sync)"
 	case UnhealthyNodeControlMissing:
 		return "the node runs a build older than this server; upgrade it to take work again"
 	default:

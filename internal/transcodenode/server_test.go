@@ -1486,11 +1486,16 @@ func TestHandleProgressiveRemuxRejectsConcurrentRequest(t *testing.T) {
 		t.Fatal("first remux did not reach its response")
 	}
 
+	resolvesBefore, opensBefore := len(coreOf(server).resolveCalls()), len(sourcesOf(server).opened)
 	recorder := httptest.NewRecorder()
 	server.handleRemux(recorder, request.Clone(request.Context()))
 
 	if recorder.Code != http.StatusConflict {
 		t.Fatalf("status = %d, body = %s", recorder.Code, recorder.Body.String())
+	}
+	// The node refuses from its own state before it asks the core anything.
+	if resolves, opens := len(coreOf(server).resolveCalls())-resolvesBefore, len(sourcesOf(server).opened)-opensBefore; resolves != 0 || opens != 0 {
+		t.Fatalf("the refused request made %d resolve calls and %d source opens, want none", resolves, opens)
 	}
 	if got := server.activeJobs.Load(); got != 1 {
 		t.Fatalf("active jobs = %d, want only the first remux", got)

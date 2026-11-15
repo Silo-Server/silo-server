@@ -279,7 +279,7 @@ func TestDrainingNodeRefusesNewJobs(t *testing.T) {
 		reason string
 	}{
 		{name: "download prepare", path: "/downloads/prepare", body: string(prepare), reason: "draining"},
-		{name: "chapter thumbnail", path: "/chapter-thumbnails/extract", body: string(chapter), reason: "node_unavailable"},
+		{name: "chapter thumbnail", path: "/chapter-thumbnails/extract", body: string(chapter), reason: chapterthumbs.RemoteNodeUnavailableReason},
 		{name: "media sample", path: mediasample.RemotePath, body: string(speechRequestBody(t, nil)), reason: string(mediasample.ReasonNodeUnavailable)},
 		{name: "trickplay", path: "/trickplay/extract", body: sheetsRequestJSON(t, "/media/movie.mkv"), reason: "node_unavailable"},
 	} {
@@ -288,6 +288,9 @@ func TestDrainingNodeRefusesNewJobs(t *testing.T) {
 			handler.ServeHTTP(rr, signed(t, httptest.NewRequest(http.MethodPost, test.path, strings.NewReader(test.body))))
 			if rr.Code != http.StatusServiceUnavailable || !strings.Contains(rr.Body.String(), test.reason) {
 				t.Fatalf("status %d body %q, want 503 carrying %q", rr.Code, rr.Body.String(), test.reason)
+			}
+			if test.path == "/chapter-thumbnails/extract" {
+				assertChapterFallsBackToLocal(t, rr.Body.Bytes())
 			}
 		})
 	}
@@ -377,5 +380,20 @@ func TestDrainedNodeRefusesFreshRemux(t *testing.T) {
 	}
 	if got := server.activeJobs.Load(); got != 0 {
 		t.Fatalf("active jobs = %d after a refused remux", got)
+	}
+}
+
+// assertChapterFallsBackToLocal checks a chapter extraction refusal carries a
+// reason the core's chapter client treats as the node's failure, so under
+// prefer_transcode_nodes it extracts locally instead of recording the chapter
+// as failed.
+func assertChapterFallsBackToLocal(t *testing.T, body []byte) {
+	t.Helper()
+	var refusal chapterthumbs.RemoteExtractErrorResponse
+	if err := json.Unmarshal(body, &refusal); err != nil {
+		t.Fatalf("chapter refusal %q: %v", body, err)
+	}
+	if !chapterthumbs.IsInfrastructureRemoteFailure(refusal.Reason) {
+		t.Fatalf("chapter refusal reason %q: the core would record the chapter as failed instead of extracting locally", refusal.Reason)
 	}
 }

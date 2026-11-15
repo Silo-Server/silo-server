@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -20,6 +21,7 @@ import (
 	"github.com/redis/go-redis/v9"
 
 	"github.com/Silo-Server/silo-server/internal/cache"
+	"github.com/Silo-Server/silo-server/internal/chapterthumbs"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/nodeauth/nodeauthtest"
 	"github.com/Silo-Server/silo-server/internal/nodeconfig"
@@ -152,6 +154,10 @@ type thinCluster struct {
 	grants    *nodesource.Grants
 	nodeKey   string
 	media     string
+	// throttled makes the core answer every node call 429, as its per-node
+	// budget does; throttledCalls counts those answers.
+	throttled      atomic.Bool
+	throttledCalls atomic.Int64
 
 	remote   *nodeconfig.Remote
 	client   *nodecontrol.Client
@@ -211,13 +217,25 @@ func newThinCluster(t *testing.T) *thinCluster {
 		Recipes:      recipes, Deny: c.deny, Revocations: c.revoker,
 		Grants: c.grants, Files: c.catalog, Themes: c.catalog,
 	})
+	// The budgets as internal/api's router applies them.
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET "+nodecontrol.PathConfig, core.HandleConfig)
-	mux.HandleFunc("POST "+nodecontrol.PathReport, core.HandleReport)
-	mux.HandleFunc("POST "+nodecontrol.PathResolve, core.HandleResolve)
-	mux.HandleFunc("POST "+nodecontrol.PathSourcesOpen, core.HandleSourceOpen)
-	mux.HandleFunc("POST "+nodecontrol.PathRevokeRecipes, core.HandleRevokeRecipes)
-	coreHTTP := httptest.NewServer(nodecontrol.RequireNode(c.nodes)(mux))
+	mux.Handle("GET "+nodecontrol.PathConfig, core.LimitNode(http.HandlerFunc(core.HandleConfig)))
+	mux.Handle("POST "+nodecontrol.PathReport, core.LimitNode(http.HandlerFunc(core.HandleReport)))
+	mux.Handle("POST "+nodecontrol.PathResolve, core.LimitNodePlayback(http.HandlerFunc(core.HandleResolve)))
+	mux.Handle("POST "+nodecontrol.PathSourcesOpen, core.LimitNodePlayback(http.HandlerFunc(core.HandleSourceOpen)))
+	mux.Handle("POST "+nodecontrol.PathRevokeRecipes, core.LimitNode(http.HandlerFunc(core.HandleRevokeRecipes)))
+	throttle := func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if c.throttled.Load() {
+				c.throttledCalls.Add(1)
+				w.Header().Set("Retry-After", "1")
+				http.Error(w, "too many requests", http.StatusTooManyRequests)
+				return
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
+	coreHTTP := httptest.NewServer(nodecontrol.RequireNode(c.nodes)(throttle(mux)))
 	t.Cleanup(coreHTTP.Close)
 
 	// The node, wired as runTranscodeNode wires it.
@@ -352,6 +370,7 @@ func TestThinNodeAgainstTheCore(t *testing.T) {
 		{"a source the core withdraws stops its session", testThinNodeWithdrawnSource},
 		{"a force reload revokes through the core first", testThinNodeForceReload},
 		{"a rejected key shows in health until a read succeeds", testThinNodeRejectedKey},
+		{"a throttled core is a transient failure on every route", testThinNodeThrottledCore},
 		{"the configuration pointer changes only with the configuration", testThinNodeConfigPointer},
 	} {
 		t.Run(step.name, func(t *testing.T) { step.run(t, c) })
@@ -526,5 +545,80 @@ func testThinNodeConfigPointer(t *testing.T, c *thinCluster) {
 	}
 	if after := c.remote.Config(); after == before || after.Playback.HWDevice != "/dev/dri/renderD129" {
 		t.Fatalf("a changed setting did not reach the node: %q", after.Playback.HWDevice)
+	}
+}
+
+// The core's per-node budgets answer 429. On every route the node calls that
+// is a failure a retry heals: the relay gets a retryable 503, a running
+// source keeps renewing, a configuration read keeps the configuration, and
+// nothing reads as a rejected key.
+func testThinNodeThrottledCore(t *testing.T, c *thinCluster) {
+	ctx := t.Context()
+	start := TranscodeStartRequest{
+		SessionID: "throttled-renewal", SourceGrant: c.grant(thinNodeID),
+		TargetCodecVideo: "h264", TargetCodecAudio: "aac", SegmentDuration: 2,
+	}
+	if status, body := c.call(http.MethodPost, "/transcode/start", start, nil); status != http.StatusAccepted {
+		t.Fatalf("start = %d %s", status, body)
+	}
+	c.storeRecipe("throttled-rebuild", thinNodeID)
+	claims := streamtoken.Claims{
+		SessionID: "viewer-throttled-remux", UserID: 3, ProfileID: "profile-3", MediaFileID: thinMediaFileID, MediaPath: c.media,
+		PlayMethod: string(playback.PlayRemux), TranscodeNode: "http://gpu-7:8080", TranscodeTransportID: "throttled-remux",
+		RoutingWorkload: string(noderouting.WorkloadRemux), RoutingExecution: string(noderouting.ExecutionTranscode),
+		RoutingExecutionNodeID: thinNodeID, RoutingEgress: string(noderouting.EgressProxy), RoutingEgressNodeID: 2,
+	}
+	token, err := streamtoken.Sign(claims, thinStreamSecret, time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := c.recipes.Put(ctx, "throttled-remux", playback.RecipeCardFromClaims(&claims)); err != nil {
+		t.Fatal(err)
+	}
+	before := c.remote.Config()
+
+	c.throttled.Store(true)
+	defer c.throttled.Store(false)
+
+	// resolve, on a progressive remux and on a lost session's rebuild.
+	if status, _ := c.call(http.MethodGet, "/remux/throttled-remux", nil, http.Header{streamTokenHeader: {token}}); status != http.StatusServiceUnavailable {
+		t.Fatalf("remux while throttled = %d, want 503", status)
+	}
+	if status, _ := c.call(http.MethodGet, "/transcode/throttled-rebuild/master.m3u8", nil, nil); status != http.StatusServiceUnavailable ||
+		c.node.hostsSession("throttled-rebuild") {
+		t.Fatalf("rebuild while throttled = %d, want 503 and nothing rebuilt", status)
+	}
+	// sources/open, on a job start and on renewal.
+	next := start
+	next.SessionID, next.SourceGrant = "throttled-start", c.grant(thinNodeID)
+	if status, _ := c.call(http.MethodPost, "/transcode/start", next, nil); status != http.StatusServiceUnavailable {
+		t.Fatalf("start while throttled = %d, want 503", status)
+	}
+	answered := c.throttledCalls.Load()
+	c.waitFor("several throttled renewals", func() bool { return c.throttledCalls.Load() >= answered+3 })
+	if !c.node.hostsSession("throttled-renewal") {
+		t.Fatal("a throttled renewal ended the running session")
+	}
+	// sources/open, on a chapter extraction: the core extracts locally.
+	chapter := chapterthumbs.RemoteExtractRequest{SourceGrant: c.grant(thinNodeID)}
+	if status, body := c.call(http.MethodPost, "/chapter-thumbnails/extract", chapter, nil); status != http.StatusServiceUnavailable {
+		t.Fatalf("chapter extraction while throttled = %d %s, want 503", status, body)
+	} else {
+		assertChapterFallsBackToLocal(t, body)
+	}
+	// config.
+	if err := c.remote.ForceReload(ctx); nodecontrol.Status(err) != http.StatusTooManyRequests {
+		t.Fatalf("read while throttled = %v, want 429", err)
+	}
+	if c.remote.Config() != before || c.remote.KeyRejected() || c.health().KeyRejected {
+		t.Fatal("a throttled read changed the configuration or reported the key rejected")
+	}
+
+	c.throttled.Store(false)
+	if status, body := c.call(http.MethodGet, "/remux/throttled-remux", nil, http.Header{streamTokenHeader: {token}}); status != http.StatusOK || string(body) != "node-remux-bytes" {
+		t.Fatalf("remux after the budget refilled = %d %q", status, body)
+	}
+	if status, _ := c.call(http.MethodDelete, "/transcode/throttled-renewal", nil, nil); status != http.StatusNoContent {
+		t.Fatalf("stop = %d", status)
 	}
 }

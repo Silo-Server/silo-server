@@ -873,7 +873,7 @@ func (s *Server) relayDownloadArtifact(w http.ResponseWriter, r *http.Request, c
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if transcodeproxy.NodeRefusedRelay(resp.StatusCode) {
-		transcodeproxy.WarnNodeRefusedRelay(r.Context(), "proxy", claims.TranscodeNode, resp.StatusCode)
+		transcodeproxy.WarnNodeRefusedRelay(r.Context(), "proxy", claims.TranscodeNode, resp.StatusCode, s.nodeKeys)
 		http.Error(w, "download unavailable", http.StatusBadGateway)
 		return
 	}
@@ -1303,7 +1303,7 @@ func (s *Server) proxyToTranscodeNode(w http.ResponseWriter, r *http.Request, cl
 	if transcodeproxy.NodeRefusedRelay(resp.StatusCode) {
 		// The client's token or grant was verified here; the node refused
 		// this proxy's signature or the token it forwarded.
-		transcodeproxy.WarnNodeRefusedRelay(r.Context(), "proxy", nodeURL, resp.StatusCode)
+		transcodeproxy.WarnNodeRefusedRelay(r.Context(), "proxy", nodeURL, resp.StatusCode, s.nodeKeys)
 		http.Error(w, "transcode node unavailable", http.StatusBadGateway)
 		return
 	}

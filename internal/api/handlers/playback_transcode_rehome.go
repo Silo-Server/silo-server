@@ -271,11 +271,11 @@ func (h *PlaybackHandler) moveTranscodeOffNodeV3(
 		if _, skip := excludedNodes[nodepool.NormalizeNodeURL(node.URL)]; skip {
 			return false
 		}
-		// The move keeps the transport id, and a node tells its own card from
-		// another's by row id and URL. A row repointed at a replacement process
-		// keeps the dead node's row id, so the old process could still delete
-		// the replacement's card: a replan, which mints a new transport id,
-		// reaches that row instead.
+		// The move keeps the transport id, and the core binds a card to its
+		// node's row id. A row repointed at a replacement process keeps the
+		// dead node's row id and key, so the old process could still resolve
+		// and rebuild the replacement's card: a replan, which mints a new
+		// transport id, reaches that row instead.
 		if node.ID > 0 && node.ID == session.RoutingExecutionNodeID {
 			return false
 		}
@@ -483,7 +483,7 @@ func (h *PlaybackHandler) moveTranscodeToLocalV3(
 	if fromStore {
 		h.followSessionRecipeMoveV3(ctx, session.ID, local)
 	}
-	h.retireUnreachableTransportV3(ctx, dead.NodeURL, remoteTransportID(session), nil)
+	h.retireUnreachableTransportV3(ctx, dead.NodeURL, remoteTransportID(session))
 	slog.WarnContext(ctx, "moved a transcode off an unreachable node", "component", "api",
 		"from_node", logredact.SanitizeURL(dead.NodeURL), "executor", "api",
 		"playback_session_id", session.ID, "requested_segment", requestedSegment)
@@ -566,7 +566,7 @@ func (h *PlaybackHandler) moveTranscodeToNodeV3(
 	if err != nil {
 		// A start that timed out may still have begun; stopping is harmless when
 		// it did not.
-		h.rollBackMovedStartV3(ctx, session.ID, dead.NodeURL, transportID, node.URL, card, fromStore)
+		h.rollBackMovedStartV3(ctx, transportID, node.URL)
 		return err
 	}
 
@@ -613,13 +613,15 @@ func (h *PlaybackHandler) moveTranscodeToNodeV3(
 	next.EncoderHWAccel = strings.TrimSpace(response.EncoderHWAccel)
 	next.SoftwareVideoDecode = req.SoftwareVideoDecode || response.SoftwareVideoDecode
 	next.ToneMapFilter = toneMapFilter
-	// The old node deletes this transport's stored recipe when the retire
-	// reaches it, so the new card is written only after that. A hung node
-	// that resumes and runs the retire later finds the new node's card and
-	// leaves it, because the card names another row and URL.
-	h.retireUnreachableTransportV3(ctx, dead.NodeURL, transportID, func(ctx context.Context) {
-		h.putNodeRecipeIfRouteV3(ctx, session.ID, playback.TranscodeRoute{NodeURL: node.URL, TransportID: transportID}, next)
-	})
+	// The card is written as soon as the move commits, so a session whose
+	// URLs carry a token can rebuild on the new node if it restarts while the
+	// old node's retire is still waiting on a hung host. Nodes never touch the
+	// stored recipe, and the retire is a release, which leaves it alone; a
+	// core stop of the old route keeps the card because it names another node
+	// (noderecipe.Store.DeleteUnlessIssuedElsewhere). The write is detached:
+	// the move has committed whether or not the client is still there.
+	h.putNodeRecipeIfRouteV3(context.WithoutCancel(ctx), session.ID, playback.TranscodeRoute{NodeURL: node.URL, TransportID: transportID}, next)
+	h.retireUnreachableTransportV3(ctx, dead.NodeURL, transportID)
 	if fromStore {
 		h.followSessionRecipeMoveV3(ctx, session.ID, next)
 	}
@@ -734,19 +736,13 @@ func rehomeStartRequestV3(card playback.RecipeCard, transportID, hwAccel string,
 	return req
 }
 
-// rollBackMovedStartV3 stops a start a candidate node refused or failed to
-// confirm. The stop makes the node delete the transport's stored recipe, which
-// a move for a tokenless session read its card from, so that card is written
-// back before the next candidate is tried. Without a stored card the stop is
-// not waited on. transportID is the resolved transport id (remoteTransportID),
+// rollBackMovedStartV3 releases a start a candidate node refused or failed to
+// confirm, in the background so the next candidate is tried at once. The
+// release leaves the stored recipe alone, so a tokenless session keeps the card
+// its move read. transportID is the resolved transport id (remoteTransportID),
 // which a legacy session's empty route field does not name.
-func (h *PlaybackHandler) rollBackMovedStartV3(ctx context.Context, sessionID, deadNodeURL, transportID, nodeURL string, card playback.RecipeCard, fromStore bool) {
-	if !fromStore {
-		go h.releaseMovedTransportV3(context.WithoutCancel(ctx), transportID, nodeURL)
-		return
-	}
-	h.releaseMovedTransportV3(ctx, transportID, nodeURL)
-	h.putNodeRecipeIfRouteV3(context.WithoutCancel(ctx), sessionID, playback.TranscodeRoute{NodeURL: deadNodeURL, TransportID: transportID}, card)
+func (h *PlaybackHandler) rollBackMovedStartV3(ctx context.Context, transportID, nodeURL string) {
+	go h.releaseMovedTransportV3(context.WithoutCancel(ctx), transportID, nodeURL)
 }
 
 // releaseMovedTransportV3 stops a move's job on nodeURL without fencing the
@@ -832,9 +828,8 @@ func (h *PlaybackHandler) releaseMoveReservationV3(sessionID string, held nodepo
 
 // retireUnreachableTransportV3 asks the node the transport left to drop it, in
 // case the node is only unreachable from here and still running FFmpeg. A dead
-// node refuses the connection at once; the answer is not waited on. after, when
-// set, runs once the request has finished either way.
-func (h *PlaybackHandler) retireUnreachableTransportV3(ctx context.Context, nodeURL, transportID string, after func(context.Context)) {
+// node refuses the connection at once; the answer is not waited on.
+func (h *PlaybackHandler) retireUnreachableTransportV3(ctx context.Context, nodeURL, transportID string) {
 	detached := context.WithoutCancel(ctx)
 	go func() {
 		if err := h.tm.ReleaseRemoteTranscode(detached, transportID, nodeURL); err != nil {
@@ -842,9 +837,6 @@ func (h *PlaybackHandler) retireUnreachableTransportV3(ctx context.Context, node
 			// here, its FFmpeg keeps running until the node's idle reaper ends it.
 			slog.WarnContext(detached, "could not stop the transcode on the node it moved off; the node's idle reaper will end it if it still runs",
 				"component", "api", "node", logredact.SanitizeURL(nodeURL), "transport", transportID, "error", logredact.SanitizeText(err.Error()))
-		}
-		if after != nil {
-			after(detached)
 		}
 	}()
 }

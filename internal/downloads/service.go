@@ -1742,7 +1742,7 @@ func (s *Service) serveFileTarget(ctx context.Context, w http.ResponseWriter, r 
 	if transcodeproxy.NodeRefusedRelay(resp.StatusCode) {
 		// The client authenticated with this server; the node refused this
 		// server's signature.
-		transcodeproxy.WarnNodeRefusedRelay(ctx, "downloads", target.OriginNodeURL, resp.StatusCode)
+		transcodeproxy.WarnNodeRefusedRelay(ctx, "downloads", target.OriginNodeURL, resp.StatusCode, keys)
 		return fmt.Errorf("%w: remote artifact node refused the relay", ErrAssetUnavailable)
 	}
 	if resp.StatusCode == http.StatusNotFound {

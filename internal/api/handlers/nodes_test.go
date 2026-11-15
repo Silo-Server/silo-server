@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"sync"
@@ -175,5 +176,31 @@ func TestReadAdminNodesDoesNotMutateRepositoryRows(t *testing.T) {
 	rows, err := NewNodeHandler(repo, pool, nil, nil, nil, nil, nil).ReadAdminNodes(t.Context())
 	if err != nil || len(rows) != 1 || rows[0] == stored || stored.AdvertisedCapabilitiesHash != nil || rows[0].AdvertisedCapabilitiesHash == nil || *rows[0].AdvertisedCapabilitiesHash != "advertised" {
 		t.Fatal(rows, stored, err)
+	}
+}
+
+// failingLister fails every read, as a database outage does.
+type failingLister struct{}
+
+func (failingLister) ListEnabled(context.Context, string) ([]*nodepool.Node, error) {
+	return nil, errors.New("database unavailable")
+}
+
+// A committed key reaches the other replicas and proxies through
+// node_pool_changed even when this server cannot reload its own pools, and
+// even when the request that issued it is gone.
+func TestIssueAdminNodeKeyPublishesWhenThePoolReloadFails(t *testing.T) {
+	bus := &recordingEventBus{}
+	handler := NewNodeHandler(&stubNodeRepository{}, nodepool.NewProxyPool(), nodepooltest.NewTranscodePool(), failingLister{}, bus, nil, nodeauthtest.SameKey("secret"))
+	handler.SetNodeKeyIssuance(func(context.Context, int) (string, error) { return "issued", nil }, nil)
+
+	canceled, cancel := context.WithCancel(context.Background())
+	cancel()
+	key, err := handler.IssueAdminNodeKey(canceled, 7)
+	if err != nil || key != "issued" {
+		t.Fatalf("IssueAdminNodeKey = %q, %v", key, err)
+	}
+	if got := bus.types(); len(got) != 1 || got[0] != string(cache.EventNodePoolChanged) {
+		t.Fatalf("published %v, want a single %q", got, cache.EventNodePoolChanged)
 	}
 }

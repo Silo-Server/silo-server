@@ -104740,7 +104740,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Issue a new key for a transcode node and return it once. Each call rotates: the previous key stops working on this server at once and on other servers and proxies within seconds. A disabled node can take a key. Never replay an uncertain issue; issue again instead.",
+        "summary": "Issue a new key for a transcode node and return it once. Each call rotates: the previous key stops working on this server at once and on other servers and proxies within seconds. The node's running streams fail until it restarts with the new key; drain the node first to avoid that. A disabled node can take a key. Never replay an uncertain issue; issue again instead.",
         "tags": [
           "admin-nodes"
         ],
@@ -239892,16 +239892,6 @@
               }
             },
             "description": "Internal Server Error"
-          },
-          "503": {
-            "content": {
-              "text/plain": {
-                "schema": {
-                  "type": "string"
-                }
-              }
-            },
-            "description": "Service Unavailable"
           }
         }
       },
@@ -239936,16 +239926,6 @@
               }
             },
             "description": "Internal Server Error"
-          },
-          "503": {
-            "content": {
-              "text/plain": {
-                "schema": {
-                  "type": "string"
-                }
-              }
-            },
-            "description": "Service Unavailable"
           }
         }
       },
@@ -245119,7 +245099,7 @@
             }
           },
           {
-            "description": "Parsed float; parse errors and negative values return400. No byte-range resume contract.",
+            "description": "Parsed float; parse errors and negative values return 400. No byte-range resume contract.",
             "in": "query",
             "name": "seek",
             "schema": {
@@ -245127,7 +245107,7 @@
             }
           }
         ],
-        "description": "Every GET and HEAD resolves the transport at the core (POST /api/internal/nodes/self/resolve, purpose remux), passing the stream token unread; a transport this process stopped is refused with410 first. The core's refusals map to the node's answers: invalid_token401, wrong_route503, denied and stopped410, source_changed400, not_found404, anything else (the core unavailable)503. The token must bind the exact transport and this node's remux-execution/proxy-egress route; audio-downmix recipes require the exact stereo shape; a theme_aac_v1 recipe converts one detail-page theme to AAC. A GET opens the source the resolution grants (a refused grant400, a mount that does not show the approved revision409, the core unreachable503) and reads only that path; a concurrent GET returns409. GET starts request-scoped MP4 remux with cancellation/stop/reload tracking; committed200 can truncate on encoder/read failure, and a source the core withdraws ends it. HEAD validates authority but opens no source and starts no encoder. Process-local fences are not durable across node replacement.",
+        "description": "Every GET and HEAD resolves the transport at the core (POST /api/internal/nodes/self/resolve, purpose remux), passing the stream token unread; a transport this process stopped is refused with 410 first, and a GET for a transport that already has a request running (409) or on a node that has reported itself drained (503) is refused before the core is asked. The core's refusals map to the node's answers: invalid_token 401, wrong_route 503, denied and stopped 410, source_changed 400, not_found 404, anything else (the core unavailable, or its per-node budget answering 429) 503. The token must bind the exact transport and this node's remux-execution/proxy-egress route; audio-downmix recipes require the exact stereo shape; a theme_aac_v1 recipe converts one detail-page theme to AAC. A GET opens the source the resolution grants (a refused grant 400, a mount that does not show the approved revision 409, the core unreachable 503) and reads only that path; a concurrent GET returns 409. GET starts request-scoped MP4 remux with cancellation/stop/reload tracking; a committed 200 can truncate on encoder/read failure, and a source the core withdraws ends it. HEAD validates authority but opens no source and starts no encoder. Process-local fences are not durable across node replacement.",
         "listener": "transcode_node",
         "method": "GET",
         "path": "/remux/{session_id}",
@@ -245245,7 +245225,7 @@
             }
           },
           {
-            "description": "Parsed float; parse errors and negative values return400. No byte-range resume contract.",
+            "description": "Parsed float; parse errors and negative values return 400. No byte-range resume contract.",
             "in": "query",
             "name": "seek",
             "schema": {
@@ -245253,7 +245233,7 @@
             }
           }
         ],
-        "description": "Every GET and HEAD resolves the transport at the core (POST /api/internal/nodes/self/resolve, purpose remux), passing the stream token unread; a transport this process stopped is refused with410 first. The core's refusals map to the node's answers: invalid_token401, wrong_route503, denied and stopped410, source_changed400, not_found404, anything else (the core unavailable)503. The token must bind the exact transport and this node's remux-execution/proxy-egress route; audio-downmix recipes require the exact stereo shape; a theme_aac_v1 recipe converts one detail-page theme to AAC. A GET opens the source the resolution grants (a refused grant400, a mount that does not show the approved revision409, the core unreachable503) and reads only that path; a concurrent GET returns409. GET starts request-scoped MP4 remux with cancellation/stop/reload tracking; committed200 can truncate on encoder/read failure, and a source the core withdraws ends it. HEAD validates authority but opens no source and starts no encoder. Process-local fences are not durable across node replacement.",
+        "description": "Every GET and HEAD resolves the transport at the core (POST /api/internal/nodes/self/resolve, purpose remux), passing the stream token unread; a transport this process stopped is refused with 410 first, and a GET for a transport that already has a request running (409) or on a node that has reported itself drained (503) is refused before the core is asked. The core's refusals map to the node's answers: invalid_token 401, wrong_route 503, denied and stopped 410, source_changed 400, not_found 404, anything else (the core unavailable, or its per-node budget answering 429) 503. The token must bind the exact transport and this node's remux-execution/proxy-egress route; audio-downmix recipes require the exact stereo shape; a theme_aac_v1 recipe converts one detail-page theme to AAC. A GET opens the source the resolution grants (a refused grant 400, a mount that does not show the approved revision 409, the core unreachable 503) and reads only that path; a concurrent GET returns 409. GET starts request-scoped MP4 remux with cancellation/stop/reload tracking; a committed 200 can truncate on encoder/read failure, and a source the core withdraws ends it. HEAD validates authority but opens no source and starts no encoder. Process-local fences are not durable across node replacement.",
         "listener": "transcode_node",
         "method": "HEAD",
         "path": "/remux/{session_id}",
@@ -245305,7 +245285,7 @@
             }
           },
           {
-            "description": "Value1 requests source-aligned manifest; raw query is preserved in segment links.",
+            "description": "Value 1 requests a source-aligned manifest; raw query is preserved in segment links.",
             "in": "query",
             "name": "source_timeline",
             "schema": {
@@ -245313,7 +245293,7 @@
             }
           }
         ],
-        "description": "Node bearer protects the worker listener. A live process-local session is served without asking the core; the relays check the deny marker before forwarding. A missing session is rebuilt from the recipe the core resolves (POST /api/internal/nodes/self/resolve, purpose hls, the stream token passed unread) and the source it grants, unless this process stopped the transport, which returns410 before the core is asked. The core denying the session returns410, any other refusal404, a core the node cannot reach503. Reads refresh liveness; no durable session availability, unscoped reconstruction or native route is promised. Build the playback manifest; unavailable manifest returns503. No-store response contains relative segment links.",
+        "description": "Node bearer protects the worker listener. A live process-local session is served without asking the core; the relays check the deny marker before forwarding. A missing session is rebuilt from the recipe the core resolves (POST /api/internal/nodes/self/resolve, purpose hls, the stream token passed unread) and the source it grants, unless this process stopped the transport, which returns 410 before the core is asked. The core denying the session returns 410, any other refusal 404, a core the node cannot reach 503. Reads refresh liveness; no durable session availability, unscoped reconstruction or native route is promised. Build the playback manifest; an unavailable manifest returns 503. No-store response contains relative segment links.",
         "listener": "transcode_node",
         "method": "GET",
         "path": "/transcode/{session_id}/master.m3u8",
@@ -245425,7 +245405,7 @@
             }
           },
           {
-            "description": "Value1 defers completion accounting to downstream acknowledgment and returns private generation metadata.",
+            "description": "Value 1 defers completion accounting to downstream acknowledgment and returns private generation metadata.",
             "in": "header",
             "name": "X-Silo-Transcode-Proxy",
             "schema": {
@@ -245475,7 +245455,7 @@
             }
           }
         ],
-        "description": "Node bearer protects the worker listener. A live process-local session is served without asking the core; the relays check the deny marker before forwarding. A missing session is rebuilt from the recipe the core resolves (POST /api/internal/nodes/self/resolve, purpose hls, the stream token passed unread) and the source it grants, unless this process stopped the transport, which returns410 before the core is asked. The core denying the session returns410, any other refusal404, a core the node cannot reach503. Reads refresh liveness; no durable session availability, unscoped reconstruction or native route is promised. Open an exact segment lease; missing media can wait or trigger guarded seek/restart recovery. Non-numbered init data can also wait. ServeContent supplies extension/sniffed media, conditions and ranges. Private generation is emitted only on a marked proxy hop. Direct complete GET reports generation-bound completion; proxied reads await separate acknowledgment. Partial/failed responses do not advance completion and may truncate after headers.",
+        "description": "Node bearer protects the worker listener. A live process-local session is served without asking the core; the relays check the deny marker before forwarding. A missing session is rebuilt from the recipe the core resolves (POST /api/internal/nodes/self/resolve, purpose hls, the stream token passed unread) and the source it grants, unless this process stopped the transport, which returns 410 before the core is asked. The core denying the session returns 410, any other refusal 404, a core the node cannot reach 503. Reads refresh liveness; no durable session availability, unscoped reconstruction or native route is promised. Open an exact segment lease; missing media can wait or trigger guarded seek/restart recovery. Non-numbered init data can also wait. ServeContent supplies extension/sniffed media, conditions and ranges. Private generation is emitted only on a marked proxy hop. Direct complete GET reports generation-bound completion; proxied reads await separate acknowledgment. Partial/failed responses do not advance completion and may truncate after headers.",
         "listener": "transcode_node",
         "method": "GET",
         "path": "/transcode/{session_id}/segment/{name}",

@@ -1166,9 +1166,10 @@
 # Transcode node control plane: the core authenticates node calls against the
 # real credential registry (a disabled node keeps its access; a proxy row, a
 # keyless or deleted node is refused), and stores a node's shipped log entries
-# under the authenticated node with timestamps clamped to the core's window.
+# under the authenticated node with timestamps clamped to the core's window and
+# a client_ip that is not an address cleared, so the batch stores in one insert.
 ./internal/nodecontrol TestRequireNodeWithTheCredentialRegistryDB
-./internal/opslog TestInsertNodeBatchStampsTheNodeAndKeepsGoodRowsDB
+./internal/opslog TestInsertNodeBatchStampsTheNodeAndClearsABadAddressDB
 ./internal/opslog TestInsertNodeBatchClampsTimestampsDB
 
 # A transcode node's source grant is honored only while the catalog has its

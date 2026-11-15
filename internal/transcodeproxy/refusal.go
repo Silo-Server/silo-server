@@ -67,8 +67,12 @@ func allowUnavailableLog(node, kind string, now time.Time) bool {
 }
 
 // WarnNodeRefusedRelay logs that the node at nodeURL refused a relay with
-// status, at most once a minute per node.
-func WarnNodeRefusedRelay(ctx context.Context, component, nodeURL string, status int) {
+// status, at most once a minute per node, and asks keys, the keyring the
+// relay signed with, to reload: the node may hold a key issued after this
+// server loaded its keys, and a reload heals that within seconds. It never
+// moves the transcode.
+func WarnNodeRefusedRelay(ctx context.Context, component, nodeURL string, status int, keys nodeauth.Keyring) {
+	nodeauth.ReloadAfterRefusal(keys)
 	node := logredact.SanitizeURL(nodeURL)
 	if !allowUnavailableLog(node, "refused", time.Now()) {
 		return

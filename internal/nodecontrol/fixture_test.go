@@ -193,12 +193,12 @@ func newControlFixture(t *testing.T) *controlFixture {
 // mountForTest mounts the handlers the way internal/api's router does.
 func mountForTest(server *Server, keys KeySource) http.Handler {
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET "+PathConfig, server.HandleConfig)
+	mux.Handle("GET "+PathConfig, server.LimitNode(http.HandlerFunc(server.HandleConfig)))
 	mux.Handle("POST "+PathReport, server.LimitNode(http.HandlerFunc(server.HandleReport)))
 	mux.Handle("POST "+PathLogs, server.LimitNode(http.HandlerFunc(server.HandleLogs)))
 	mux.Handle("POST "+PathHealthChanged, server.LimitNode(http.HandlerFunc(server.HandleHealthChanged)))
-	mux.HandleFunc("POST "+PathResolve, server.HandleResolve)
-	mux.HandleFunc("POST "+PathSourcesOpen, server.HandleSourceOpen)
+	mux.Handle("POST "+PathResolve, server.LimitNodePlayback(http.HandlerFunc(server.HandleResolve)))
+	mux.Handle("POST "+PathSourcesOpen, server.LimitNodePlayback(http.HandlerFunc(server.HandleSourceOpen)))
 	mux.Handle("POST "+PathRevokeRecipes, server.LimitNode(http.HandlerFunc(server.HandleRevokeRecipes)))
 	return RequireNode(keys)(mux)
 }

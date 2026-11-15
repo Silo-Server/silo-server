@@ -1461,7 +1461,7 @@ func (h *PlaybackHandler) fetchRemoteCompatManifest(ctx context.Context, nodeURL
 	if resp.StatusCode != http.StatusOK {
 		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 4096))
 		if transcodeproxy.NodeRefusedRelay(resp.StatusCode) {
-			transcodeproxy.WarnNodeRefusedRelay(ctx, "jellycompat", nodeURL, resp.StatusCode)
+			transcodeproxy.WarnNodeRefusedRelay(ctx, "jellycompat", nodeURL, resp.StatusCode, h.NodeKeys)
 		}
 		return nil, fmt.Errorf("remote manifest status %d", resp.StatusCode)
 	}
@@ -1503,7 +1503,7 @@ func (h *PlaybackHandler) proxyRemoteCompatSegment(w http.ResponseWriter, r *htt
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if transcodeproxy.NodeRefusedRelay(resp.StatusCode) {
-		transcodeproxy.WarnNodeRefusedRelay(r.Context(), "jellycompat", nodeURL, resp.StatusCode)
+		transcodeproxy.WarnNodeRefusedRelay(r.Context(), "jellycompat", nodeURL, resp.StatusCode, h.NodeKeys)
 		writeError(w, http.StatusBadGateway, "TranscodeUnavailable", "Remote transcode segment is unavailable")
 		return nil
 	}

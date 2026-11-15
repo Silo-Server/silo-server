@@ -389,7 +389,7 @@ func TestRelayMovesEachSessionOnceUnderConcurrentRequests(t *testing.T) {
 	}
 }
 
-// sharedRecipeStore is the node recipe store every node and the API share
+// sharedRecipeStore is the node recipe store the API replicas share
 // (Redis in production). It is safe for the move's background retire.
 type sharedRecipeStore struct {
 	mu    sync.Mutex
@@ -565,15 +565,13 @@ func TestRelayMoveKeepsTheKeyframePlaylist(t *testing.T) {
 	}
 }
 
-// TestRelayMoveRestoresStoredRecipeAfterRefusedStart pins that a candidate's
-// rollback stop, which makes the node delete the transport's stored recipe,
-// does not cost a tokenless session the only recipe it has.
-func TestRelayMoveRestoresStoredRecipeAfterRefusedStart(t *testing.T) {
+// TestRelayMoveKeepsStoredRecipeAfterRefusedStart pins that a move that finds
+// no executor leaves a tokenless session the only recipe it has: neither the
+// candidate's rollback release nor anything else in the move removes it.
+func TestRelayMoveKeepsStoredRecipeAfterRefusedStart(t *testing.T) {
 	var store *sharedRecipeStore
 	refusing := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodDelete {
-			// A node's stop drops the transport's stored recipe.
-			_ = store.Delete(r.Context(), strings.TrimPrefix(r.URL.Path, "/transcode/"))
 			w.WriteHeader(http.StatusNoContent)
 			return
 		}
@@ -607,49 +605,19 @@ func TestRelayMoveRestoresStoredRecipeAfterRefusedStart(t *testing.T) {
 	}
 }
 
-// TestRelayMoveRestoresLegacySessionsStoredRecipe covers a session whose route
-// records no transport id: its transport, and its stored recipe's key, is the
-// session id. A refused candidate's stop deletes that recipe, and the rollback
-// must still write it back under the same key.
-func TestRelayMoveRestoresLegacySessionsStoredRecipe(t *testing.T) {
-	var store *sharedRecipeStore
-	refusing := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method == http.MethodDelete {
-			_ = store.Delete(r.Context(), strings.TrimPrefix(r.URL.Path, "/transcode/"))
-			w.WriteHeader(http.StatusNoContent)
-			return
-		}
-		http.Error(w, "no capacity", http.StatusServiceUnavailable)
-	}))
-	t.Cleanup(refusing.Close)
-	f := newRehomeFixture(t, []*nodepool.Node{
-		pooledNode(1, unreachableNodeURL(t)),
-		pooledNode(2, refusing.URL),
-	}, "ffmpeg")
-	if err := f.sessions.SetTranscodeRoute(f.session.ID, playback.TranscodeRoute{NodeURL: f.deadURL}); err != nil {
-		t.Fatal(err)
-	}
-	stored, _ := verifiedStreamCardFromToken(f.token, f.session.ID, f.handler.JWTSecret)
-	stored.TranscodeTransportID = ""
-	store = &sharedRecipeStore{cards: map[string]playback.RecipeCard{f.session.ID: *stored}}
-	f.handler.NodeRecipeStore = store
-
-	f.handler.rollBackMovedStartV3(context.Background(), f.session.ID, f.deadURL, f.session.ID, refusing.URL, *stored, true)
-	if card, ok := store.Get(context.Background(), f.session.ID); !ok || card.TranscodeNodeURL != f.deadURL {
-		t.Fatalf("stored recipe = %+v (present %v), want the original card restored under the session id", card, ok)
-	}
-}
-
-// TestRelayMoveWritesStoredRecipeAfterRetiringOldNode covers a node that was
-// only briefly unreachable: the retire stop reaches it and it deletes the
-// transport's stored recipe. The card naming the new node must be written
-// after that delete, not before it.
-func TestRelayMoveWritesStoredRecipeAfterRetiringOldNode(t *testing.T) {
-	var store *sharedRecipeStore
+// TestRelayMoveWritesStoredRecipeBeforeTheRetireCompletes covers a node that
+// hangs rather than refusing connections: the retire release to it does not
+// finish. The card naming the new node must be stored when the move answers,
+// not when the retire gives up, so a session whose URLs carry a token can
+// rebuild on the new node if that node restarts meanwhile.
+func TestRelayMoveWritesStoredRecipeBeforeTheRetireCompletes(t *testing.T) {
+	retireStarted := make(chan struct{}, 1)
+	releaseRetire := make(chan struct{})
 	var retired atomic.Int32
-	flaky := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	hung := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodDelete {
-			_ = store.Delete(r.Context(), strings.TrimPrefix(r.URL.Path, "/transcode/"))
+			retireStarted <- struct{}{}
+			<-releaseRetire
 			retired.Add(1)
 			w.WriteHeader(http.StatusNoContent)
 			return
@@ -660,17 +628,18 @@ func TestRelayMoveWritesStoredRecipeAfterRetiringOldNode(t *testing.T) {
 			_ = conn.Close()
 		}
 	}))
-	t.Cleanup(flaky.Close)
+	t.Cleanup(hung.Close)
+	t.Cleanup(func() { close(releaseRetire) })
 	healthy := newFakeRehomeNode(t, false)
 	f := newRehomeFixture(t, []*nodepool.Node{
-		pooledNode(1, flaky.URL),
+		pooledNode(1, hung.URL),
 		pooledNode(2, healthy.server.URL),
 	}, "ffmpeg")
 	// The pool already lists the node as unhealthy, so a transport error
 	// counts as unreachable.
-	f.planner.MarkTranscodeNodeUnreachable(flaky.URL)
+	f.planner.MarkTranscodeNodeUnreachable(hung.URL)
 	stored, _ := verifiedStreamCardFromToken(f.token, f.session.ID, f.handler.JWTSecret)
-	store = newSharedRecipeStore(*stored)
+	store := newSharedRecipeStore(*stored)
 	f.handler.NodeRecipeStore = store
 
 	rr := httptest.NewRecorder()
@@ -680,9 +649,13 @@ func TestRelayMoveWritesStoredRecipeAfterRetiringOldNode(t *testing.T) {
 	if rr.Code != http.StatusOK || rr.Body.String() != "moved:seg_00005.ts" {
 		t.Fatalf("status = %d, body = %q", rr.Code, rr.Body.String())
 	}
-	waitForStoredRecipeNode(t, store, healthy.server.URL, 2)
-	if got := retired.Load(); got != 1 {
-		t.Fatalf("retire stops on the old node = %d, want 1", got)
+	<-retireStarted
+	card, ok := store.Get(context.Background(), rehomeTestTransport)
+	if !ok || card.TranscodeNodeURL != healthy.server.URL || card.RoutingExecutionNodeID != 2 {
+		t.Fatalf("stored recipe while the retire hangs = %+v (present %v), want one naming node 2", card, ok)
+	}
+	if got := retired.Load(); got != 0 {
+		t.Fatalf("retire finished %d times before the check, want it still hanging", got)
 	}
 }
 
@@ -749,10 +722,10 @@ func TestRelayMoveEndsOnSourceToneMapRefusal(t *testing.T) {
 }
 
 // TestMovedRecipeWriteRequiresTheLiveRoute pins the guard on the stored
-// recipe writes a move makes late (after the old node's retire stop, or after
-// a candidate's rollback stop): once the session has stopped or left the
-// route, the stop or replan deleted the recipe, and writing it back would let
-// a buffered request rebuild an ended transport after a node restart.
+// recipe write a move makes after it commits: once the session has stopped or
+// left the route, the stop or replan deleted the recipe, and writing it back
+// would let a buffered request rebuild an ended transport after a node
+// restart.
 func TestMovedRecipeWriteRequiresTheLiveRoute(t *testing.T) {
 	healthy := newFakeRehomeNode(t, false)
 	f := newRehomeFixture(t, []*nodepool.Node{pooledNode(1, healthy.server.URL)}, "ffmpeg")

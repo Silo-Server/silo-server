@@ -801,7 +801,8 @@ var authRules = []authRule{
 var traitOnlyRules = []authRule{
 	{marker: "RateLimitMW", trait: traitRateLimited},
 	{marker: "AuthEndpointHandler", trait: traitRateLimited},
-	// The per-node write budget on the node control routes.
+	// The per-node budgets on the node control routes (LimitNode and
+	// LimitNodePlayback, which the marker matches too).
 	{marker: "LimitNode", trait: traitRateLimited},
 	{marker: "demoGuard", trait: "demo_guarded"},
 	{marker: "meterEgress", trait: "egress_metered"},

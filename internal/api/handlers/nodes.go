@@ -492,8 +492,17 @@ const nodePostCommitTimeout = 15 * time.Second
 // column. Detaching from that cancellation, bounded, is what makes the write and
 // its publication one outcome instead of two.
 func (h *NodeHandler) reloadPools(ctx context.Context) {
+	if h.reloadLocalPools(ctx) {
+		h.publishPoolChanged(ctx)
+	}
+}
+
+// reloadLocalPools refreshes this server's proxy and transcode pools from the
+// database, detached from ctx's cancellation as reloadPools explains, and
+// reports whether both reads succeeded.
+func (h *NodeHandler) reloadLocalPools(ctx context.Context) bool {
 	if h.lister == nil {
-		return
+		return false
 	}
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), nodePostCommitTimeout)
 	defer cancel()
@@ -501,7 +510,7 @@ func (h *NodeHandler) reloadPools(ctx context.Context) {
 	transcodeNodes, tcErr := h.lister.ListEnabled(ctx, nodepool.NodeTypeTranscode)
 	if proxyErr != nil || tcErr != nil {
 		slog.WarnContext(ctx, "node pool reload failed", "component", "api", "proxy_err", proxyErr, "transcode_err", tcErr)
-		return
+		return false
 	}
 	if h.proxyPool != nil {
 		h.proxyPool.SetNodes(proxyNodes)
@@ -509,8 +518,20 @@ func (h *NodeHandler) reloadPools(ctx context.Context) {
 	if h.transcodePool != nil {
 		h.transcodePool.SetNodes(transcodeNodes)
 	}
+	return true
+}
 
-	if h.eventBus != nil {
-		_ = h.eventBus.Publish(ctx, cache.ChannelAdmin, cache.Event{Type: cache.EventNodePoolChanged})
+// publishPoolChanged tells every replica and proxy to reload its pools and
+// node credentials, detached from ctx's cancellation like the reload. A
+// failure is logged; the others catch up on their periodic reload.
+func (h *NodeHandler) publishPoolChanged(ctx context.Context) {
+	if h.eventBus == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), nodePostCommitTimeout)
+	defer cancel()
+	if err := h.eventBus.Publish(ctx, cache.ChannelAdmin, cache.Event{Type: cache.EventNodePoolChanged}); err != nil {
+		slog.WarnContext(ctx, "node pool change not published; other servers catch up on their periodic reload",
+			"component", "api", "error", err)
 	}
 }

@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/logthrottle"
 	"github.com/Silo-Server/silo-server/internal/nodeauth"
 	"github.com/Silo-Server/silo-server/internal/nodepool"
 )
@@ -47,13 +48,13 @@ func RequireNode(keys KeySource) func(http.Handler) http.Handler {
 
 // noKeyLog spaces the warnings about one node's keyless requests: a deleted
 // or keyless node that is still running calls every second.
-var noKeyLog = newLogThrottle[int](time.Minute)
+var noKeyLog = logthrottle.New[int](time.Minute)
 
 // warnNoNodeKey logs a request refused because the node it names has no key
 // on this server, which otherwise answers only a bare 401.
 func warnNoNodeKey(r *http.Request, err error) {
 	keyErr, ok := errors.AsType[*nodeauth.NodeKeyError](err)
-	if !ok || !noKeyLog.allow(keyErr.NodeID) {
+	if !ok || !noKeyLog.Allow(keyErr.NodeID) {
 		return
 	}
 	slog.WarnContext(r.Context(), "refused a transcode node's request: this server has no key for the node it names",

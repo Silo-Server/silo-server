@@ -8,9 +8,10 @@ import (
 )
 
 // A shipped node batch is filed under the node the core authenticated,
-// whatever node id an entry carries, and a value Postgres rejects costs only
-// its own row.
-func TestInsertNodeBatchStampsTheNodeAndKeepsGoodRowsDB(t *testing.T) {
+// whatever node id an entry carries, and a client_ip that is not an address
+// is cleared before the insert, so the row is stored with the rest of its
+// batch instead of being rejected.
+func TestInsertNodeBatchStampsTheNodeAndClearsABadAddressDB(t *testing.T) {
 	ctx := t.Context()
 	pool := testPool(t)
 	requestID := fmt.Sprintf("opslog-node-batch-%d", time.Now().UnixNano())
@@ -18,31 +19,31 @@ func TestInsertNodeBatchStampsTheNodeAndKeepsGoodRowsDB(t *testing.T) {
 		_, _ = pool.Exec(context.Background(), `DELETE FROM operational_logs WHERE request_id = $1`, requestID)
 	})
 	entries := []Entry{
-		{Timestamp: time.Now().UTC(), Level: "INFO", Component: "transcodenode", Message: "kept 1", RequestID: requestID, NodeID: "spoofed"},
-		{Timestamp: time.Now().UTC(), Level: "INFO", Component: "transcodenode", Message: "rejected", RequestID: requestID, ClientIP: "not-an-address"},
-		{Timestamp: time.Now().UTC(), Level: "INFO", Component: "ffmpeg", Message: "kept 2", RequestID: requestID},
+		{Timestamp: time.Now().UTC(), Level: "INFO", Component: "transcodenode", Message: "a", RequestID: requestID, NodeID: "spoofed"},
+		{Timestamp: time.Now().UTC(), Level: "INFO", Component: "transcodenode", Message: "b", RequestID: requestID, ClientIP: "not-an-address"},
+		{Timestamp: time.Now().UTC(), Level: "INFO", Component: "ffmpeg", Message: "c", RequestID: requestID, ClientIP: "192.0.2.7:4410"},
 	}
 	if err := NewConsumer(pool, nil).InsertNodeBatch(ctx, "gpu-1#7", entries); err != nil {
 		t.Fatalf("InsertNodeBatch: %v", err)
 	}
-	rows, err := pool.Query(ctx, `SELECT message, node_id FROM operational_logs WHERE request_id = $1 ORDER BY message`, requestID)
+	rows, err := pool.Query(ctx, `SELECT message, node_id, COALESCE(host(client_ip), '-') FROM operational_logs WHERE request_id = $1 ORDER BY message`, requestID)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer rows.Close()
 	var got []string
 	for rows.Next() {
-		var message, nodeID string
-		if err := rows.Scan(&message, &nodeID); err != nil {
+		var message, nodeID, clientIP string
+		if err := rows.Scan(&message, &nodeID, &clientIP); err != nil {
 			t.Fatal(err)
 		}
-		got = append(got, message+"@"+nodeID)
+		got = append(got, message+"@"+nodeID+"/"+clientIP)
 	}
 	if err := rows.Err(); err != nil {
 		t.Fatal(err)
 	}
-	if fmt.Sprint(got) != "[kept 1@gpu-1#7 kept 2@gpu-1#7]" {
-		t.Fatalf("stored %v, want both good rows under gpu-1#7", got)
+	if fmt.Sprint(got) != "[a@gpu-1#7/- b@gpu-1#7/- c@gpu-1#7/192.0.2.7]" {
+		t.Fatalf("stored %v, want every row under gpu-1#7 with the bad address cleared", got)
 	}
 }
 

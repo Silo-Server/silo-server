@@ -22,9 +22,15 @@ const (
 	chapterThumbnailExecutionPreferTranscode    = "prefer_transcode_nodes"
 	chapterThumbnailExecutionTranscodeOnly      = "transcode_nodes_only"
 	chapterThumbnailNodeCapacitySetting         = "playback.chapter_thumbnail_node_capacity"
-	chapterThumbnailNodeUnavailableReason       = "transcode_node_unavailable"
+	chapterThumbnailNodeUnavailableReason       = RemoteNodeUnavailableReason
 	chapterThumbnailNodeCapacityExhaustedReason = "transcode_node_capacity_exhausted"
 )
+
+// RemoteNodeUnavailableReason is the reason a transcode node answers a chapter
+// extraction it cannot run now (draining, re-probing its hardware, or unable to
+// open the granted source). prefer_transcode_nodes answers it by extracting
+// locally (IsInfrastructureRemoteFailure).
+const RemoteNodeUnavailableReason = "transcode_node_unavailable"
 
 // remoteExtractOverheadBuffer covers HTTP transport and node-side scheduling
 // overhead on top of the extraction attempt deadlines.
@@ -131,7 +137,10 @@ func remoteExtractTimeout(toneMap bool, allowSoftwareToneMap bool) time.Duration
 	return timeout
 }
 
-func isInfrastructureRemoteFailure(reason string) bool {
+// IsInfrastructureRemoteFailure reports whether a remote extraction's reason
+// is the node's failure rather than the source's, which prefer_transcode_nodes
+// answers by extracting locally.
+func IsInfrastructureRemoteFailure(reason string) bool {
 	switch reason {
 	case chapterThumbnailNodeUnavailableReason, chapterThumbnailNodeCapacityExhaustedReason, reasonFFmpegProbeFailed:
 		return true
