@@ -214,7 +214,7 @@ func (l *fakeLocs) EpisodeLocalizations(context.Context, []string, string) (map[
 	return l.episodeLocs, nil
 }
 
-func (l *fakeLocs) UpsertItemAI(_ context.Context, contentID, language string, overview, tagline *string) error {
+func (l *fakeLocs) UpsertItemAI(_ context.Context, contentID, language string, overview, tagline *string, _, _ string, _ bool) error {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	if l.failOnUpsert {
@@ -231,7 +231,7 @@ func (l *fakeLocs) UpsertItemAI(_ context.Context, contentID, language string, o
 	return nil
 }
 
-func (l *fakeLocs) UpsertSeasonAI(_ context.Context, contentID, language string, overview string) error {
+func (l *fakeLocs) UpsertSeasonAI(_ context.Context, contentID, language string, overview string, _ string, _ bool) error {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	if l.failOnUpsert {
@@ -241,7 +241,7 @@ func (l *fakeLocs) UpsertSeasonAI(_ context.Context, contentID, language string,
 	return nil
 }
 
-func (l *fakeLocs) UpsertEpisodeAI(_ context.Context, contentID, language string, overview string) error {
+func (l *fakeLocs) UpsertEpisodeAI(_ context.Context, contentID, language string, overview string, _ string, _ bool) error {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	if l.failOnUpsert {

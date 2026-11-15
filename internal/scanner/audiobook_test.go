@@ -866,6 +866,72 @@ func TestAudiobookPeopleCreditsEqual(t *testing.T) {
 // A monitor or webhook scan scoped to a book folder that was deleted is an
 // empty scope, so the book's files can be reconciled. A missing library root,
 // or a missing parent above the book, stays an unreadable path.
+// A duplicate candidate must carry every tagged credit, and may carry more:
+// a provider match stores fuller credits, and renaming that book's folder
+// must keep its item and progress.
+func TestAudiobookCreditsContain(t *testing.T) {
+	person := func(name string, kind models.PersonKind) models.ItemPerson {
+		return models.ItemPerson{Person: models.Person{Name: name}, Kind: kind}
+	}
+	tags := []audiobookCredit{
+		{Name: "Author A", Kind: models.PersonKindAuthor},
+		{Name: "Reader One", Kind: models.PersonKindNarrator},
+		{Name: "Reader Two", Kind: models.PersonKindNarrator},
+	}
+	tests := []struct {
+		name     string
+		existing []models.ItemPerson
+		want     bool
+	}{
+		{"equal sets", []models.ItemPerson{
+			person("author a", models.PersonKindAuthor), person("Reader One", models.PersonKindNarrator), person("Reader Two", models.PersonKindNarrator),
+		}, true},
+		{"provider credits are a superset", []models.ItemPerson{
+			person("Author A", models.PersonKindAuthor), person("Reader One", models.PersonKindNarrator),
+			person("Reader Two", models.PersonKindNarrator), person("Reader Three", models.PersonKindNarrator),
+		}, true},
+		{"shares only the first narrator", []models.ItemPerson{
+			person("Author A", models.PersonKindAuthor), person("Reader One", models.PersonKindNarrator),
+		}, false},
+	}
+	for _, tc := range tests {
+		if got := audiobookCreditsContain(tc.existing, tags); got != tc.want {
+			t.Errorf("%s: audiobookCreditsContain = %v, want %v", tc.name, got, tc.want)
+		}
+	}
+}
+
+// A moved or renamed folder keeps its item; two copies on disk are two items.
+func TestPickAudiobookDuplicate(t *testing.T) {
+	tags := []audiobookCredit{
+		{Name: "Author A", Kind: models.PersonKindAuthor},
+		{Name: "Reader One", Kind: models.PersonKindNarrator},
+	}
+	provider := map[string][]models.ItemPerson{"old": {
+		{Person: models.Person{Name: "Author A"}, Kind: models.PersonKindAuthor},
+		{Person: models.Person{Name: "Reader One"}, Kind: models.PersonKindNarrator},
+		{Person: models.Person{Name: "Reader Two"}, Kind: models.PersonKindNarrator},
+	}}
+	files := map[string][]string{"old": {"/lib/Old Folder/part1.mp3", "/lib/Old Folder/part2.mp3"}}
+	statWith := func(err error) func(string) (os.FileInfo, error) {
+		return func(string) (os.FileInfo, error) { return nil, err }
+	}
+	tests := []struct {
+		name string
+		stat func(string) (os.FileInfo, error)
+		want string
+	}{
+		{"moved folder with provider credits", statWith(os.ErrNotExist), "old"},
+		{"second copy while the first exists", statWith(nil), ""},
+		{"old path cannot be checked", statWith(os.ErrPermission), ""},
+	}
+	for _, tc := range tests {
+		if got := pickAudiobookDuplicate([]string{"old"}, provider, files, tags, tc.stat); got != tc.want {
+			t.Errorf("%s: pickAudiobookDuplicate = %q, want %q", tc.name, got, tc.want)
+		}
+	}
+}
+
 func TestCollectAudiobookRootScansTreatsVanishedBookFolderAsEmpty(t *testing.T) {
 	library := t.TempDir()
 	// The encoded scope must also decode its parent before checking it.
@@ -907,5 +973,245 @@ func TestCollectAudiobookRootScansTreatsVanishedBookFolderAsEmpty(t *testing.T) 
 				t.Fatalf("candidates = %v, want none", scans[0].candidates)
 			}
 		})
+	}
+}
+
+func TestSplitAudiobookCredits(t *testing.T) {
+	cases := []struct {
+		raw  string
+		want []string
+	}{
+		{"Stephen King", []string{"Stephen King"}},
+		{"Reader One; Reader Two", []string{"Reader One", "Reader Two"}},
+		{"First Writer, Second Writer", []string{"First Writer", "Second Writer"}},
+		{"Douglas Preston & Lincoln Child", []string{"Douglas Preston", "Lincoln Child"}},
+		{"Jeff VanderMeer and Ann VanderMeer, Neil Gaiman", []string{"Jeff VanderMeer", "Ann VanderMeer", "Neil Gaiman"}},
+		// One-word pieces mean the separator sits inside one name.
+		{"King, Stephen", []string{"King, Stephen"}},
+		{"Martin Luther King, Jr.", []string{"Martin Luther King, Jr."}},
+		{"Simon & Schuster", []string{"Simon & Schuster"}},
+		{"Reader One; reader one", []string{"Reader One"}},
+		{"", nil},
+	}
+	for _, tc := range cases {
+		if got := splitAudiobookCredits(tc.raw); !reflect.DeepEqual(got, tc.want) {
+			t.Errorf("splitAudiobookCredits(%q) = %q, want %q", tc.raw, got, tc.want)
+		}
+	}
+	// A crafted tag cannot fan out into unbounded person writes.
+	many := make([]string, 50)
+	for i := range many {
+		many[i] = fmt.Sprintf("Reader %d", i)
+	}
+	if got := splitAudiobookCredits(strings.Join(many, ";")); len(got) != maxAudiobookCreditsPerRole {
+		t.Errorf("50 narrators split into %d credits, want the cap of %d", len(got), maxAudiobookCreditsPerRole)
+	}
+}
+
+func TestParseSeriesIndex(t *testing.T) {
+	cases := map[string]float64{
+		"5": 5, "1.5": 1.5, "2 of 8": 2, "Book 3": 3, "#3": 3, "Vol. 3": 3, "Volume 12": 12, "III": 3, "xiv": 14,
+	}
+	for raw, want := range cases {
+		got := parseSeriesIndex(raw)
+		if got == nil || *got != want {
+			t.Errorf("parseSeriesIndex(%q) = %v, want %v", raw, got, want)
+		}
+	}
+	for _, raw := range []string{"", "Prequel", "IIII", "Book"} {
+		if got := parseSeriesIndex(raw); got != nil {
+			t.Errorf("parseSeriesIndex(%q) = %v, want nil", raw, *got)
+		}
+	}
+}
+
+func TestPopulateFromTagsReadsGroupingSeriesAndLongDescription(t *testing.T) {
+	cases := []struct {
+		tags              map[string]string
+		wantName, wantPos string
+	}{
+		{map[string]string{"grouping": "Grouping Saga #2"}, "Grouping Saga", "#2"},
+		{map[string]string{"grouping": "The Expanse, Book 4; Other #1"}, "The Expanse", "Book 4"},
+		// Grouping without a position is not a series: it often holds a store
+		// category or a work name.
+		{map[string]string{"grouping": "Science Fiction"}, "", ""},
+		// An explicit series tag wins; grouping fills its missing position.
+		{map[string]string{"series": "Saga", "grouping": "Saga Vol. 3"}, "Saga", "Vol. 3"},
+		{map[string]string{"series": "Saga", "grouping": "Other #3"}, "Saga", ""},
+	}
+	for _, tc := range cases {
+		b := &parsedAudiobook{}
+		b.populateFromTags(tc.tags)
+		if b.Series != tc.wantName || b.SeriesPosition != tc.wantPos {
+			t.Errorf("tags %v: series %q pos %q, want %q %q", tc.tags, b.Series, b.SeriesPosition, tc.wantName, tc.wantPos)
+		}
+	}
+
+	b := &parsedAudiobook{}
+	b.populateFromTags(map[string]string{"description": "short", "synopsis": "the long one"})
+	if b.Overview != "the long one" {
+		t.Errorf("Overview = %q, want the synopsis", b.Overview)
+	}
+}
+
+func TestParseGenresFromTags(t *testing.T) {
+	cases := []struct {
+		genre string
+		want  []string
+	}{
+		{"Mystery, Thriller & Suspense/Thriller & Suspense", []string{"Mystery, Thriller & Suspense", "Thriller & Suspense"}},
+		{"Fantasy;Sci-Fi", []string{"Fantasy", "Sci-Fi"}},
+		{"Fantasy, Horror", []string{"Fantasy", "Horror"}},
+	}
+	for _, tc := range cases {
+		if got := parseGenresFromTags(map[string]string{"genre": tc.genre}); !reflect.DeepEqual(got, tc.want) {
+			t.Errorf("parseGenresFromTags(%q) = %q, want %q", tc.genre, got, tc.want)
+		}
+	}
+}
+
+func TestAudiobookPartOrder(t *testing.T) {
+	tag := func(disc, track string) map[string]string { return map[string]string{"disc": disc, "track": track} }
+	cases := []struct {
+		name  string
+		tags  []map[string]string
+		want  []int
+		trust bool
+	}{
+		{"tracks", []map[string]string{tag("", "4/4"), tag("", "1/4"), tag("", "3/4"), tag("", "2/4")}, []int{1, 3, 2, 0}, true},
+		{"discs then tracks", []map[string]string{tag("2/2", "1"), tag("1/2", "2"), tag("1/2", "1")}, []int{2, 1, 0}, true},
+		{"missing track", []map[string]string{tag("", "2"), tag("", "")}, nil, false},
+		{"duplicate track", []map[string]string{tag("", "1"), tag("", "1")}, nil, false},
+		{"disc on some parts", []map[string]string{tag("1", "1"), tag("", "2")}, nil, false},
+	}
+	for _, tc := range cases {
+		got, ok := audiobookPartOrder(tc.tags)
+		if ok != tc.trust || !reflect.DeepEqual(got, tc.want) {
+			t.Errorf("%s: order %v ok %v, want %v %v", tc.name, got, ok, tc.want, tc.trust)
+		}
+	}
+}
+
+func TestPartTitlesNameParts(t *testing.T) {
+	if !partTitlesNameParts([]string{"Chapter 01", "Chapter 02"}) {
+		t.Error("differing part titles must name the parts")
+	}
+	if !partTitlesNameParts([]string{"Track 1"}) {
+		t.Error("a track-style title must name the part")
+	}
+	if partTitlesNameParts([]string{"Book Title", "book title"}) {
+		t.Error("one shared title names the book")
+	}
+	if partTitlesNameParts([]string{"Book Title", "", "Book Title"}) {
+		t.Error("a part without a title tag must not make the titles differ")
+	}
+}
+
+// mp4Box builds an MP4 box with a 32-bit size.
+func mp4Box(boxType string, body ...[]byte) []byte {
+	payload := slices.Concat(body...)
+	size := 8 + len(payload)
+	return slices.Concat([]byte{byte(size >> 24), byte(size >> 16), byte(size >> 8), byte(size)}, []byte(boxType), payload)
+}
+
+func mp4Data(dataType byte, value []byte) []byte {
+	return mp4Box("data", []byte{0, 0, 0, dataType, 0, 0, 0, 0}, value)
+}
+
+func TestReadMP4ItemListReadsMovementAtoms(t *testing.T) {
+	ilst := mp4Box("ilst",
+		mp4Box("\xa9nam", mp4Data(1, []byte("Title"))),
+		mp4Box("\xa9mvn", mp4Data(1, []byte("Movement Saga"))),
+		mp4Box("\xa9mvi", mp4Data(21, []byte{0, 4})),
+		mp4Box("\xa9nrt", mp4Data(1, []byte("A Narrator"))),
+	)
+	meta := mp4Box("meta", []byte{0, 0, 0, 0}, mp4Box("hdlr", make([]byte, 25)), ilst)
+	// mdat precedes moov, as in a file not optimized for streaming.
+	file := slices.Concat(mp4Box("ftyp", []byte("M4B ")), mp4Box("mdat", make([]byte, 64)), mp4Box("moov", mp4Box("mvhd", make([]byte, 100)), mp4Box("udta", meta)))
+
+	got := readMP4ItemList(strings.NewReader(string(file)), int64(len(file)))
+	want := map[string]string{"mvnm": "Movement Saga", "mvin": "4", "narrator": "A Narrator"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("readMP4ItemList = %v, want %v", got, want)
+	}
+	// A truncated file yields what it can without failing.
+	if got := readMP4ItemList(strings.NewReader(string(file[:len(file)-10])), int64(len(file)-10)); got != nil {
+		t.Fatalf("truncated moov = %v, want nil", got)
+	}
+}
+
+// Files written into a library cannot grow the rejected-part list without bound.
+func TestRejectedAudiobookPartsAreCapped(t *testing.T) {
+	now := time.Now()
+	t.Cleanup(func() {
+		rejectedAudiobookParts.Lock()
+		for path := range rejectedAudiobookParts.byPath {
+			if strings.HasPrefix(path, "/capped/") {
+				delete(rejectedAudiobookParts.byPath, path)
+			}
+		}
+		rejectedAudiobookParts.Unlock()
+	})
+	for i := range maxRejectedAudiobookParts + 10 {
+		rememberRejectedAudiobookPart(fmt.Sprintf("/capped/%d.mp3", i), 1, now)
+	}
+	rejectedAudiobookParts.Lock()
+	n := len(rejectedAudiobookParts.byPath)
+	rejectedAudiobookParts.Unlock()
+	if n > maxRejectedAudiobookParts {
+		t.Fatalf("remembered %d rejected parts, want at most %d", n, maxRejectedAudiobookParts)
+	}
+	last := fmt.Sprintf("/capped/%d.mp3", maxRejectedAudiobookParts+9)
+	if !audiobookPartRejected(last, 1, now) {
+		t.Fatal("the newest rejected part was not remembered")
+	}
+}
+
+// A damaged part must not keep the rest of the book out of the library.
+func TestParseAudiobookFolderSkipsRejectedPart(t *testing.T) {
+	if _, err := exec.LookPath("ffprobe"); err != nil {
+		t.Skip("ffprobe not available")
+	}
+	dir := t.TempDir()
+	for _, name := range []string{"part1.mp3", "part3.mp3"} {
+		data, err := os.ReadFile(filepath.Join("testdata/audiobook_fixtures/multi_file", name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, name), data, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	bad := filepath.Join(dir, "part2.mp3")
+	if err := os.WriteFile(bad, []byte("not audio at all, just bytes"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := parseAudiobookFolder(t.Context(), "ffprobe", dir, nil)
+	if err != nil {
+		t.Fatalf("parseAudiobookFolder: %v", err)
+	}
+	if len(got.Files) != 2 || !reflect.DeepEqual(got.UnreadableParts, []string{bad}) {
+		t.Fatalf("files %d unreadable %v, want 2 files and %s", len(got.Files), got.UnreadableParts, bad)
+	}
+	info, err := os.Stat(bad)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !audiobookPartRejected(bad, info.Size(), normalizeFileModifiedAt(info.ModTime())) {
+		t.Fatal("the rejected part is not remembered, so every scan would probe it again")
+	}
+	if err := os.Remove(filepath.Join(dir, "part1.mp3")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(filepath.Join(dir, "part3.mp3")); err != nil {
+		t.Fatal(err)
+	}
+	// The caller retires rows indexed for these files, so the error must
+	// carry them.
+	_, err = parseAudiobookFolder(t.Context(), "ffprobe", dir, nil)
+	var unreadable *noReadableAudiobookPartError
+	if !errors.As(err, &unreadable) || !reflect.DeepEqual(unreadable.paths, []string{bad}) {
+		t.Fatalf("book with no readable part: err = %v, want noReadableAudiobookPartError for %s", err, bad)
 	}
 }

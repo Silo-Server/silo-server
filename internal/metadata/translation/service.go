@@ -687,13 +687,13 @@ func (s *Service) persistField(ctx context.Context, job *Job, f field, text stri
 	switch f.kind {
 	case TargetItem:
 		if f.isTagline {
-			return s.locs.UpsertItemAI(ctx, f.contentID, job.TargetLanguage, nil, &text)
+			return s.locs.UpsertItemAI(ctx, f.contentID, job.TargetLanguage, nil, &text, "", f.text, job.Force)
 		}
-		return s.locs.UpsertItemAI(ctx, f.contentID, job.TargetLanguage, &text, nil)
+		return s.locs.UpsertItemAI(ctx, f.contentID, job.TargetLanguage, &text, nil, f.text, "", job.Force)
 	case TargetSeason:
-		return s.locs.UpsertSeasonAI(ctx, f.contentID, job.TargetLanguage, text)
+		return s.locs.UpsertSeasonAI(ctx, f.contentID, job.TargetLanguage, text, f.text, job.Force)
 	case TargetEpisode:
-		return s.locs.UpsertEpisodeAI(ctx, f.contentID, job.TargetLanguage, text)
+		return s.locs.UpsertEpisodeAI(ctx, f.contentID, job.TargetLanguage, text, f.text, job.Force)
 	default:
 		return fmt.Errorf("unknown field kind %q", f.kind)
 	}

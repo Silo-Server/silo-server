@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/historyimport"
@@ -27,6 +28,7 @@ type Service struct {
 	signals        SignalsChangedNotifier
 	dropped        droppedStore
 	profileAccess  ProfileAccessFunc
+	titles         atomic.Pointer[watchlistTitlesRef]
 	locks          sync.Map
 	scrobbleQueues sync.Map
 }

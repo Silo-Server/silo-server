@@ -1206,6 +1206,9 @@ func (h *PlaybackHandler) buildAdminHistoryEntry(
 	completed := false
 	if file != nil {
 		duration := float64(file.Duration)
+		if session.TimelineDuration > 0 {
+			duration = session.TimelineDuration
+		}
 		durationPtr = &duration
 		if duration > 0 && session.Position/duration > userstore.WatchedFraction(h.playbackThresholds(ctx).WatchedPct) {
 			completed = true
@@ -1672,6 +1675,9 @@ func fillEmptySessionFacts(session, live *playback.Session) {
 	}
 	if session.RequestedMediaFileID == 0 {
 		session.RequestedMediaFileID = live.RequestedMediaFileID
+	}
+	if session.TimelineDuration <= 0 {
+		session.TimelineDuration = live.TimelineDuration
 	}
 }
 

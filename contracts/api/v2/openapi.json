@@ -12550,6 +12550,7 @@
             ]
           },
           "imdb_id": {
+            "description": "IMDb title ID, stored trimmed and in lowercase; an empty string clears it",
             "type": [
               "string",
               "null"
@@ -12687,12 +12688,14 @@
             ]
           },
           "tmdb_id": {
+            "description": "TMDB ID, stored trimmed and without a TMDB URL slug (550-fight-club saves as 550); an empty string clears it",
             "type": [
               "string",
               "null"
             ]
           },
           "tvdb_id": {
+            "description": "TheTVDB ID, stored trimmed; an empty string clears it",
             "type": [
               "string",
               "null"
@@ -15831,6 +15834,7 @@
             "type": "integer"
           },
           "file_duration": {
+            "description": "Length in seconds of what position_seconds is measured against: the file, or the whole book for a multi-file audiobook; null when unknown",
             "format": "int64",
             "type": [
               "integer",
@@ -45267,7 +45271,7 @@
             ]
           },
           "file_duration": {
-            "description": "Seconds; null when unknown",
+            "description": "Length in seconds of what position_seconds is measured against: the file, or the whole book for a multi-file audiobook; null when unknown",
             "examples": [
               8520
             ],

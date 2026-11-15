@@ -8,8 +8,10 @@ book folder containing audio. Loose audio in a configured library root does
 not stop it, and a configured root inside a book is still walked as its own
 root. A subtree or audiobook file scan applies these rules from its scoped
 folder down: a scoped folder that holds audio is one book unless it is a
-configured library root. The scan doesn't look at folders above the scope,
-so a scope inside a book folder still becomes a book of its own, and an
+configured library root. An audiobook scope inside a book folder (a folder
+below the innermost configured root that holds audio the ignore files keep)
+rebuilds that book instead, as a library scan would, unless the library walk
+never reaches the scope through it (a symlink back to a folder above). An
 admin's request for an excluded file walks below its folder (see below).
 
 Every ignore file must be a regular file in the directory it applies to. A
