@@ -145,9 +145,10 @@ func combineAudio(audio *creditsAudio, keyframes []creditsKeyframe, runs *[]cred
 				first = run
 			}
 		}
-		if first.Start >= audio.Start+creditsRefineMinimumSeconds && first.Start <= audio.Start+creditsRefineWindowSeconds &&
-			onlyContentBetween(keyframes, audio.Start, first.Start) {
-			start, refined = first.Start, true
+		lead := blackLeadIn(keyframes, first)
+		if lead >= audio.Start+creditsRefineMinimumSeconds && first.Start <= audio.Start+creditsRefineWindowSeconds &&
+			onlyContentBetween(keyframes, audio.Start, lead) {
+			start, refined = lead, true
 		}
 	}
 
@@ -178,6 +179,23 @@ func combineAudio(audio *creditsAudio, keyframes []creditsKeyframe, runs *[]cred
 		segment.Algorithm = CreditsAudioVideoAlgorithm
 	}
 	return segment, true
+}
+
+// blackLeadIn returns where run's credits begin: the first of the true-black
+// keyframes directly before its first text, when they all lie within
+// creditsVideoBlackLeadSeconds of it, or else the run's start. Credits
+// usually cut from the story to black before the first name appears; a
+// longer stretch of black may be a dark scene, so the run starts at its
+// text.
+func blackLeadIn(keyframes []creditsKeyframe, run creditsRun) float64 {
+	lead := run.Start
+	for i := run.First - 1; i >= 0 && keyframes[i].Class == keyframeBlack; i-- {
+		if run.Start-keyframes[i].Seconds > creditsVideoBlackLeadSeconds {
+			return run.Start
+		}
+		lead = keyframes[i].Seconds
+	}
+	return lead
 }
 
 // onlyContentBetween reports whether keyframes in [from, to) exist and all

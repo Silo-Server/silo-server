@@ -30,7 +30,7 @@ const (
 	// Credits algorithm identifiers. Credits season comparisons are keyed by
 	// CreditsAnalysisConfigHash; bump CreditsBehaviorVersion to re-run them
 	// over cached credits fingerprints.
-	CreditsBehaviorVersion      = 2
+	CreditsBehaviorVersion      = 3
 	CreditsChapterAlgorithm     = "credits-chapter:v1"
 	CreditsVersionCopyAlgorithm = "credits-version-copy:v1"
 	CreditsAudioAlgorithm       = "credits-audio:v1"
