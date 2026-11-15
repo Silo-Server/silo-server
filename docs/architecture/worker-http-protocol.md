@@ -38,8 +38,8 @@ worker. They consume no request DTO and retain the existing paths:
 
 | POST path | Success | Failure statuses | Behavior |
 | --- | --- | --- | --- |
-| `/admin/reload-config` | Empty 204 | 401, 500 | Reload configuration without tearing down sessions. |
-| `/admin/force-reload` | Empty 204 | 401, 500 | Proxy reloads configuration; transcode node also tears down sessions and delivery authority. |
+| `/admin/reload-config` | Empty 204 | 401, 500 | Reload configuration without tearing down sessions. A transcode node rereads it from the API. |
+| `/admin/force-reload` | Empty 204 | 401, 500 | Proxy reloads configuration; transcode node also asks the API to revoke its recipes and tears down its sessions. |
 | `/admin/reprobe-capabilities` | JSON 200: `resolved`, `capability_hash` | 401, 409, 503 | Rebuild the capability snapshot; an incomplete rebuild retains the prior published hash. |
 
 The proxy listener additionally carries the network access provider routes the
@@ -54,8 +54,9 @@ instance on that proxy. Connect and disconnect are `natural_idempotent`: repeati
 disconnected. A proxy that hosts no plugins answers plain-text 503. See
 [network-access.md](network-access.md).
 
-An unconfigured transcode listener also returns plain-text 503 from its bearer
-middleware, including for both reload commands. All six require node bearer authentication. Reprobe refuses active probes;
+A transcode node opens its listener only after it has read its configuration
+from the API, and its bearer middleware answers plain-text 401 to any request
+not signed with the node's own key. All six require node bearer authentication. Reprobe refuses active probes;
 the transcode node also refuses active jobs while holding its GPU admission gate.
 These commands have no durable replay receipt. Their descriptions classify them
 as `non_retryable`: a lost reply does not establish that the command had no effect,
@@ -85,7 +86,7 @@ admission gate. There is no native API alias.
 the run's `mediasample.Result` as JSON, sheets base64-encoded. A request with
 `sheets.use_input_aspect` uses the execution probe's display geometry and
 returns its actual cell height as `sheet_tile_height`. It passes node
-bearer authentication and approved-input-path authority first, runs up to
+bearer authentication and opens its [source grant](#source-grants) first, runs up to
 `playback.trickplay_node_capacity` requests at once (default 1; the next
 answers `503` with reason `node_busy`), runs at
 idle priority, and decodes on the node's own hardware: it drops hardware
@@ -107,9 +108,12 @@ When display geometry is requested, a response without `sheet_tile_height`
 is treated as an unavailable worker. This lets an API server try another
 node or its configured local fallback while an earlier worker is updated.
 
-The extractor's 400, 422 and 503 failures use `RemoteExtractErrorResponse` JSON.
-Bearer refusal uses plain-text 401; input-path refusal can instead use plain-text
-400, and unavailable worker configuration or input authority uses plain-text 503.
+The extractor's 400, 409, 422 and 503 failures use `RemoteExtractErrorResponse`
+JSON. Bearer refusal uses plain-text 401. A missing or refused source grant is
+400 with reason `invalid_request`; a node mount that does not match the grant
+(409), an API the node cannot reach (503), a draining node and a hardware
+re-probe (503) carry reason `transcode_node_unavailable`, which the API's
+chapter client answers by extracting locally under `prefer_transcode_nodes`.
 The description retains both media types for the shared statuses. Extraction
 has no durable request identity or replay receipt and is classified
 `non_retryable`; no new retry behavior is added to the existing worker client.
@@ -117,7 +121,7 @@ has no durable request identity or replay receipt and is classified
 `POST /media-samples/run` on the transcode listener takes a
 `mediasample.Request` and returns its `mediasample.Result` as JSON (see
 [media sampling](media-sampling.md#remote-runs)). It requires the node bearer
-and approved-input-path authority, refuses hardware attempts with `400`, and
+and a [source grant](#source-grants), refuses hardware attempts with `400`, and
 reports a failed run as `422` with a `mediasample.RemoteFailure`. Sampling only
 reads the file, so the operation is classified `natural_idempotent`; a repeated
 request decodes again. Subtitle sync is its caller.
@@ -282,8 +286,10 @@ when it releases a transport it is moving to another node, since the ID lives
 on and a replica whose copy still names the old node may rebuild it there.
 Progressive remux keeps its own fence against a new `/remux` request, which
 every fenced stop installs too, since a stop can reach a remux between its GETs.
-The API deletes the transport's stored recipe before it stops a node; the node
-closes the session's source. Progressive shutdown must finish before 204 and
+The API deletes the transport's stored recipe before it stops a node, unless
+the recipe names another node URL, and deletes nothing on a release (see
+[recipe lifecycle](transcode-nodes.md#recipe-lifecycle)); the node closes the
+session's source. Progressive shutdown must finish before 204 and
 can return 503 after local teardown has already occurred. Session-close and
 file-removal errors are logged. A transport that runs nothing on the node
 returns 404 after cleanup attempts.
@@ -421,165 +427,6 @@ Every HTTP client that calls a worker refuses redirects: a signed request names
 one worker, and following a redirect would send it, and its answer, somewhere
 nobody registered.
 
-### Node to core
-
-A transcode node will also call the API, signing with its own key
-(`nodeauth.SignToCore`, verified by `nodeauth.VerifyFromNode`). The
-construction is the same with three differences: the HKDF label is
-`silo/node-to-core-auth/v1`, the canonical string opens with
-`silo-node-to-core-v1`, and the header carries `n=<node id>` so the API can find
-the key. The canonical string also ends with the value of the
-`X-Silo-Source-Grant` request header (`nodeauth.SourceGrantHeader`, empty when
-absent), so a captured request cannot be replayed with another grant, and a
-request carrying that header twice is refused. Because the label and version
-differ, a request captured in one direction never verifies in the other, even
-though both use the node's key. When a signature fails against the loaded key,
-the API reloads the registry once (rate-limited) and checks again, so a freshly
-rotated key is accepted before the next periodic refresh.
-
-The API serves the node control routes in this direction under
-`/api/internal/nodes/self/` (`internal/nodecontrol`), on the API listener but
-outside user auth, user rate limits, response compression, and the request and
-activity logs. They are mounted only where the node credential registry is
-loaded; proxies do not serve them. `nodecontrol.RequireNode` answers a
-plain-text `401` to anything unsigned or badly signed and to a deleted, keyless
-or proxy row, and accepts a disabled node, which keeps serving its streams.
-Handlers take the node's identity only from the verified signature. The
-`x-silo-worker-protocols` extension lists them under listener `api` with
-authorization class `node_signed`.
-
-| Route | Behavior |
-| --- | --- |
-| `GET config` | The calling node's configuration (`nodecontrol.NodeConfig`): server settings with its own acceleration and download overrides applied, and its drain request. Strong `ETag` equal to `revision`; `If-None-Match` answers `304`; `404` when the row is gone. |
-| `POST report` | Session records and the stream telemetry snapshot, fenced on `(boot_id, seq)` in Redis (`409` for an older or equal pair, which writes nothing). Sessions replace the node's set under `silo:sessions:n<id>:`, telemetry replaces publisher `node:<id>`, both with the registered row's URL and name and the API's clock. `413` past 2,000 sessions or transfers; `204` without Redis. |
-| `POST logs` | Up to 100 operational log entries, stored in `operational_logs` and the live tail under `<name>#<id>`, with timestamps clamped to the last 24 hours and the next 30 seconds. |
-| `POST health-changed` | Publishes `node_drain_changed` so every API server health-checks the node at once ([node drain](node-drain.md)). The node calls it, with a five-second timeout, whenever its drain state changes. |
-| `POST revoke-recipes` | The node, tearing its sessions down for a force reload, withdraws every recipe bound to it: the API revokes in the node recipe store by the node's authenticated id and then by its registered URL (from the key registry, else the row), never by anything in the body. `204`, also without Redis; `503` when the store cannot be written, which the node retries; `404` when the row is gone. |
-| `POST resolve` | The recipe and playback identity (`nodecontrol.Resolution`) of one transport the node serves, for rebuilding a lost HLS transcode (`purpose: hls`) or serving one progressive remux request (`purpose: remux`), with a source grant for its input. See below. |
-| `POST sources/open` | Exchanges a source grant for the source it approves and a renewed grant. See [Source grants](#source-grants). |
-
-Each API server gives each node an in-memory budget of 20 writes a second with
-bursts of 60 across report, logs, health-changed and revoke-recipes, and answers
-`429` past it.
-Resolve and sources/open are outside that budget: they are on a viewer's
-request path, and a node restart sends one burst of rebuilds. The node side is
-`nodecontrol.Client`: the node reads its configuration at startup, retrying from
-one second to 30 seconds, then every 30 seconds with `If-None-Match` and at
-once on `/admin/reload-config` or `/admin/force-reload`; it reports every
-second (`nodecontrol.Reporter`); it ships its operational logs in batches of
-up to 100 every two seconds; and a `401` on any call makes it reread its
-configuration, at most once per poll interval while the key stays rejected.
-
-Resolve (`nodecontrol.Server.HandleResolve`) takes
-`{"transport_id", "purpose", "stream_token"}`, where `stream_token` is the
-`X-Silo-Stream-Token` a relay forwarded, passed through unread. For `hls` the
-API checks the deny markers of the transport and, from a token or the stored
-card, of its playback session; verifies the token, which must describe the
-transport; and picks the recipe: a complete card in the node recipe store
-(`internal/noderecipe`) over a complete token card, else the token card. A
-stored card is never older than a token for the same transport (a native
-replan mints a new transport id; jellycompat rewrites its card in place but
-hands out identity-only tokens), and after a move it is the card that names
-the node the transport runs on now. The subtitle rendition selection
-(`Default`) still comes from the token when both describe the same tracks.
-For `remux` a valid token is required, its route must be transcode execution
-with proxy egress on the calling node, and the stored authority must still
-match it field by field; a theme conversion's file must be unchanged. Either
-recipe must be bound to the calling node, by execution node id or, for a card
-without one, by `nodepool.CanonicalNodeURL` against the node's registered URL.
-Last, the catalog must still have the recipe's source, as strictly as the node's
-own input approval: the media file by id, not missing, at exactly the recipe's
-path and a regular file, or for a theme conversion the theme by id at exactly
-that path in an enabled library. The resolution then carries `source_grant`, a
-fresh grant for that source naming the calling node.
-
-| Status | Reason | Meaning |
-| --- | --- | --- |
-| `404` | `not_found` | No recipe for the transport, or a token that does not describe it. |
-| `410` | `denied` | A deny marker is set. |
-| `410` | `stopped` | The remux authority is gone or no longer matches the token. |
-| `410` | `source_changed` | The theme file changed, or the catalog no longer has the recipe's exact source, or the file is gone. |
-| `403` | `invalid_token` | A remux request without a valid token. |
-| `403` | `wrong_route` | The recipe is bound to another node, or to none. |
-| `503` | none | Transient: no stream secret or grant key, or the recipe store, the catalog or the node's registration cannot be read. |
-
-A recipe store read error is `503`, never `404`. A stored card that a force
-reload revoked counts as gone. The revocation runs only inside the node's own
-force-reload teardown, through revoke-recipes, so a force reload the node never
-ran revokes nothing. Once the card is gone, a complete token still resolves on
-the node it names.
-
-The node asks only for what it lost: a request for a live in-process HLS
-session is served from the URL's transport id without a call. A lost session
-calls resolve (`hls`) once per wave of requests, after the node's own stop
-fence; a denied session answers `410`, any other refusal `404`, an API the node
-cannot reach `503`. Every `/remux` GET and HEAD calls resolve (`remux`); the
-node answers `invalid_token` with `401`, `wrong_route` with `503`, `denied` and
-`stopped` with `410`, `source_changed` with `400`, `not_found` with `404`, and
-anything else with `503`. The node files a rebuilt session and a remux request
-under the resolution's playback identity and `started_at`.
-
-### Source grants
-
-A source grant (`internal/nodesource`) is a stateless capability the API signs
-for one revision of one catalog file, or detail-page theme file, and one node.
-It is `base64url(JSON payload) + "." + base64url(HMAC-SHA256)`, at most 8 KiB,
-keyed by `HKDF-SHA256(auth.jwt_secret, info "silo/node-source-grant/v1")`. The
-payload is `{"v": 1, "node", "kind": "file" | "theme", "id", "path", "size",
-"mtime_ns", "exp"}`. `path` is the exact fspath-encoded catalog path, so a name
-that is not valid UTF-8 survives JSON unchanged. `mtime_ns` is the modification
-time the API's stat returned, in Unix nanoseconds; revisions compare it at
-microseconds, the catalog's precision (`models.NormalizeFileModifiedAt`), and
-the entity tag is `"<kind>-<id>-<size>-<mtime in Unix microseconds>"`. A grant
-lives one hour; a node renews it every 20 minutes while the input is open, and
-renewal keeps the revision.
-
-Every job an API server sends a transcode node carries `source_grant` next to
-its existing input path field: `POST /transcode/start` (native starts, moves
-off a dead node, which grant the replacement node, and Jellyfin-compatible
-starts), `POST /downloads/prepare`, `POST /trickplay/extract`,
-`POST /chapter-thumbnails/extract` and `POST /media-samples/run`. Resolve adds
-one for rebuilds, progressive remux and theme conversion. Minting costs one
-stat of the path through `internal/fspath` and no catalog read where the caller
-holds the row; a move rereads its file by id. When a grant cannot be minted (the
-file is gone or not a regular file, or there is no secret), a native or
-Jellyfin-compatible start fails over as any failed start does, download
-preparation and subtitle-sync sampling run on the API server where local work is
-allowed, and trickplay and chapter thumbnails treat the node as unavailable.
-The field is required on the node: it runs FFmpeg, and reads in Go, only the
-path the API approves for the grant, never the job's input path field. Each
-job holds its source for its life (a transcode session across FFmpeg restarts
-and seeks, one remux request, one preparation, one trickplay, chapter or sample
-run), derives its context from the source, so a source the API ends stops the
-job, and closes it at stop, idle reap and teardown.
-
-`POST sources/open` (`nodecontrol.Server.HandleSourceOpen`) takes
-`{"grant": "..."}`, for a job's input opening and for each renewal with the
-current grant:
-
-| Status | Meaning |
-| --- | --- |
-| `200` | `{"grant", "path", "size", "mtime_ns", "etag"}`: the same claims with a new hour, and the approved revision. `Cache-Control: no-store`. |
-| `400` | No grant in the body. |
-| `403` | The grant does not verify, has expired, or names another node. |
-| `410` | The catalog no longer has the source at exactly the granted path (a media file by id and not missing, a theme in an enabled library), or the file is gone or not a regular file. |
-| `412` | The file's size or modification time differs from the grant's revision. |
-| `503` | Transient: no grant key, or the catalog cannot be read. |
-
-Each open and renewal reads the catalog once. The node side is
-`nodecontrol.Client.OpenSource` and `nodesource.Opener`: it stats the approved
-path on its own mount, requires a regular file of the same size and
-modification time to the microsecond (a `nodesource.MountMismatchError`
-otherwise, which names both sides), and renews until the job closes the source.
-Transient renewal failures retry from one second to one minute until the
-current grant expires; a `400`, `403`, `404`, `410` or `412`, an answer about
-another revision, or expiry while the API is unreachable ends the input.
-
-Every API server and every transcode node must see a library file with the
-same size and the same modification time, to the microsecond, at the same
-path. This is the same assumption as identical library paths. A mismatch fails
-closed: the API answers `412`, and a node refuses the job.
-
 What this requires and allows:
 
 - Worker clocks stay within 30 seconds of the API servers and proxies.
@@ -594,6 +441,57 @@ What this requires and allows:
   encrypt: worker links that cross untrusted networks still need TLS to keep
   media and requests private.
 
+### Node to core
+
+A transcode node also calls the API, signing with its own key
+(`nodeauth.SignToCore`, verified by `nodeauth.VerifyFromNode`). The
+construction is the same with three differences: the HKDF label is
+`silo/node-to-core-auth/v1`, the canonical string opens with
+`silo-node-to-core-v1`, and the header carries `n=<node id>` so the API can find
+the key. The canonical string also ends with the value of the
+`X-Silo-Source-Grant` request header (`nodeauth.SourceGrantHeader`, empty when
+absent), and a request carrying that header twice is refused. Because the label
+and version differ, a request captured in one direction never verifies in the
+other, even though both use the node's key.
+
+The API serves these routes under `/api/internal/nodes/self/`
+(`internal/nodecontrol`), on the API listener but outside user auth, user rate
+limits, response compression, and the request and activity logs. Proxies do not
+serve them. The `x-silo-worker-protocols` extension lists them under listener
+`api` with authorization class `node_signed`:
+
+| Route | Purpose |
+| --- | --- |
+| `GET config` | The calling node's configuration document, with a strong `ETag`. |
+| `POST report` | Session records and stream telemetry, every second, fenced on `(boot_id, seq)`. |
+| `POST logs` | A batch of up to 100 operational log entries. |
+| `POST health-changed` | The node's drain state changed; the API publishes `node_drain_changed`. |
+| `POST revoke-recipes` | The node, in its force-reload teardown, withdraws the recipes bound to it. |
+| `POST resolve` | The recipe, playback identity and source grant of a transport the node lost or serves as a progressive remux. |
+| `POST sources/open` | Exchanges a source grant for the approved path and a renewed grant. |
+
+[Transcode nodes](transcode-nodes.md) is the authority for what each route
+checks, its statuses, the two per-node request budgets (one for config, report,
+logs, health-changed and revoke-recipes, one for resolve and sources/open, both
+answering `429` with `Retry-After`), and how the node calls them.
+
+### Source grants
+
+Every job an API server sends a transcode node carries `source_grant`, a
+stateless grant the API signs for one revision of one catalog file, or
+detail-page theme file, and one node: `POST /transcode/start`,
+`POST /downloads/prepare`, `POST /trickplay/extract`,
+`POST /chapter-thumbnails/extract` and `POST /media-samples/run`, and the
+resolve answer for rebuilds, progressive remux and theme conversion. The node
+exchanges it at `sources/open`, runs FFmpeg only on the path the API approves,
+never on the job's input path field, and renews it while the job runs; a source
+the API stops renewing ends the job. A missing or refused grant answers `400`,
+a node mount that does not show the approved revision `409`, and an API the
+node cannot reach `503`. Every API server and transcode node must see each
+library file at the same path with the same size and modification time, to the
+microsecond. See [source grants](transcode-nodes.md#source-grants) for the
+grant format, minting, renewal and the open route.
+
 ### Upgrade order
 
 Release notes certify which component versions may run together
@@ -602,9 +500,10 @@ Release notes certify which component versions may run together
 Transcode nodes have no rolling upgrade across the change to node keys. An
 older API server or proxy signs for a transcode node with the shared secret,
 which a current node refuses, and a current API server signs for an older node
-with its node key, which that node cannot verify. Upgrade the API servers and
-proxies, issue each transcode node a key, then upgrade the nodes and start them
-with `SILO_CORE_URL` and `SILO_NODE_KEY`. Until a node has a key, placement
+with its node key, which that node cannot verify. Stop the transcode nodes,
+upgrade the API servers and proxies, issue each transcode node a key, then
+start the upgraded nodes with `SILO_CORE_URL` and `SILO_NODE_KEY` (see
+[transcode nodes](transcode-nodes.md#failure-behavior)). Until a node has a key, placement
 gives it no work, and a node still running an older binary answers health
 without `node_control_version`, which the health check treats as unhealthy.
 
@@ -631,9 +530,8 @@ the API's resolve unread.
 
 A token signed by an earlier release carries the path in `path` and still
 verifies, so tokens issued before an upgrade keep working on upgraded workers.
-An earlier worker finds no `path` in a new token and fails the request, so a
-rolling upgrade follows the order above: transcode nodes, then proxies, then
-API servers.
+An earlier proxy finds no `path` in a new token and fails the request, so
+proxies are upgraded no later than the API servers.
 
 A proxy names a source download by the token's `dfn` claim when the API sent
 one, which keeps the file's own name on the server for a viewer who may not

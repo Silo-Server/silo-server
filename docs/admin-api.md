@@ -3278,7 +3278,8 @@ with `Cache-Control: no-store`. The key is never returned again; the node row
 only reports `key_issued`. Every call rotates: the previous key is gone from
 this server's credential registry before the response, and from the other API
 servers and proxies once `node_pool_changed` reaches them (within a minute
-without it). A disabled node can take a key. The operation requires an acting
+without it). The node's running streams fail until it restarts with the new
+key, so drain it first. A disabled node can take a key. The operation requires an acting
 administrator, rejects demo mode, takes no body and is non_retryable: after a
 lost response, issue again rather than replaying. A proxy node returns 409 (a
 proxy takes no key), a missing node 404, a server without the data cipher 503,
@@ -3288,7 +3289,8 @@ The key is stored encrypted in `stream_nodes.node_key_ciphertext` (see
 [secret encryption](architecture/secret-encryption.md)). It is a credential, not
 configuration: issuing it advances neither `config_etag` nor the pool
 generation. `GET /api/v2/admin/nodes/capabilities` advertises `node_keys: true`
-when this server can issue keys.
+when this server can issue keys. The node starts with this key and the API's
+URL; see [transcode nodes](architecture/transcode-nodes.md).
 
 ### Force reload nodes (v2)
 

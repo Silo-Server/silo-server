@@ -28,7 +28,8 @@ A node drains for either of two reasons:
 The node is `draining` when it received SIGTERM or when its own
 `stream_nodes` row carries a drain request. The request reaches the node as
 `drain_requested` in its configuration document from the API
-(`GET /api/internal/nodes/self/config`, read by `nodeconfig.Remote`): at every
+(`GET /api/internal/nodes/self/config`, read by `nodeconfig.Remote`; see
+[transcode nodes](transcode-nodes.md#configuration)): at every
 30-second poll, and at once when the API that recorded a drain or resume calls
 the node's `/admin/reload-config`, best effort. A document whose only change is
 the drain request keeps the node's config pointer, since a new pointer makes

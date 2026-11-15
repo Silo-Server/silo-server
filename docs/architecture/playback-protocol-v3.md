@@ -858,8 +858,9 @@ origin. The proxy refuses before it relays, so a transcode node needs no marker
 for it.
 The transcode-executed shape also requires the shared node-recipe store. The API
 writes the plan-scoped transport record before publishing the proxy URL; the
-transcode node validates it before starting each progressive response, and stop
-or force reload deletes it. This durable authority prevents a signed URL whose
+API's resolve checks it before the transcode node starts each progressive
+response, and a stop deletes it or a force reload revokes it
+([transcode nodes](transcode-nodes.md#resolve)). This durable authority prevents a signed URL whose
 token remains valid after a node replacement from resurrecting stopped FFmpeg
 work. When the store is unavailable, route selection excludes only this shape.
 

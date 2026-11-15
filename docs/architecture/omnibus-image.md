@@ -271,6 +271,8 @@ key. It opens no database or Redis and holds no `SECRET_KEY`: it reads its
 configuration from the main server and ignores `DATABASE_URL`, `REDIS_URL`,
 `SECRET_KEY`, `NODE_URL` and `NODE_NAME` with one warning, so a `.env` copied
 from the main server keeps working. `init-config` requires nothing of it.
+[Transcode nodes](transcode-nodes.md) describes what the node takes from the
+main server and what it needs from the network.
 
 With `MODE=proxy`, `init-config` requires `DATABASE_URL` and `REDIS_URL`. Silo
 already keeps migrations and `POSTGRES_TUNE` to the primary modes

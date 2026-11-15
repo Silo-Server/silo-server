@@ -174,7 +174,8 @@ the absolute session age until the person signs in again. A transcode node's
 request-signing key (`stream_nodes.node_key_ciphertext`, AAD
 `stream_nodes:node_key_ciphertext:<id>`) is written encrypted when it is issued
 and has no plaintext backfill; after a `SECRET_KEY` change it no longer decrypts
-and the node counts as keyless until an admin issues it a new key. Plugin runtime configuration is encrypted as one opaque
+and the node counts as keyless until an admin issues it a new key (see
+[transcode nodes](transcode-nodes.md#node-keys)). Plugin runtime configuration is encrypted as one opaque
 row-bound envelope rather than by manifest field. Consequently, runtime code
 must use `RuntimeConfigStore`; database JSON-member queries and indexes are not
 supported for `plugin_runtime_configs.config_value`.

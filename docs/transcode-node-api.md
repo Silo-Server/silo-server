@@ -160,7 +160,7 @@ source the core stops renewing ends the job. A missing or refused grant answers
 `400`, a node mount that does not show the approved revision `409`, and a core
 the node cannot reach `503`. The download execution fingerprint leaves
 `source_grant` out. See
-[worker HTTP contracts](architecture/worker-http-protocol.md#source-grants).
+[source grants](architecture/transcode-nodes.md#source-grants).
 
 A start also names the playback session it serves: `playback_session_id`,
 `user_id`, `profile_id` and `media_file_id`. The node files its session record

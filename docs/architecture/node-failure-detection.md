@@ -124,7 +124,7 @@ that answers again by then still drops the job. The stop first deletes the
 transport's node recipe, but keeps one that names another node URL, so a
 background stop that lands after the next candidate wrote its card under the
 same Jellyfin-compatible transport id leaves that card in place
-([recipe deletion on stop](restart-resilient-playback.md#transcode-node-lost-under-the-api-relay)).
+([recipe lifecycle](transcode-nodes.md#recipe-lifecycle)).
 
 A relay that cannot sign a request to a node (no key issued, or no node
 registered at the URL any more) answers its client as the node being
@@ -142,7 +142,7 @@ as unreachable for the stop, but never marks the node.
 
 A transcode node's health answer carries `node_control_version` and, while the
 API refuses its key, `key_rejected: true` (see
-[worker HTTP protocol](worker-http-protocol.md)). The health check
+[transcode nodes](transcode-nodes.md#drain-and-health)). The health check
 (`nodepool.CheckNodeReport`) treats a transcode node whose answer lacks the
 version, a binary from before nodes took their configuration and authority
 from the API, or that reports `key_rejected`, as unhealthy: placement skips it
