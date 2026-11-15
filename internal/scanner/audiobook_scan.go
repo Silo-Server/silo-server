@@ -650,11 +650,9 @@ func (s *Scanner) scanAudiobookPaths(ctx context.Context, folder *models.MediaFo
 	// Another scan can index a book's new parts while this one runs. This walk
 	// never listed them, so rows written after this time are left to that
 	// scan: this one neither marks them missing nor overwrites their book.
-	var inventoryAt time.Time
-	if s.fileRepo != nil {
-		if err := s.fileRepo.Pool().QueryRow(ctx, `SELECT now()`).Scan(&inventoryAt); err != nil {
-			return fmt.Errorf("audiobook scan: reading database time: %w", err)
-		}
+	inventoryAt, err := s.scanInventoryTime(ctx)
+	if err != nil {
+		return fmt.Errorf("audiobook scan: %w", err)
 	}
 
 	// Phase 1: walk the tree to collect candidate book folders. This is

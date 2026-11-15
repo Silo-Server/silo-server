@@ -89,9 +89,14 @@ func (f *concurrentBookFixture) copyPart(name string) error {
 	return os.WriteFile(filepath.Join(f.bookDir, name), []byte(name), 0o644)
 }
 
-// hookedScanner returns a scanner on its own pool that runs fn before its
-// first query containing match. It stands in for a scan on any node.
 func (f *concurrentBookFixture) hookedScanner(t *testing.T, match string, fn func()) *Scanner {
+	t.Helper()
+	return newHookedScanner(t, f.ffprobe, match, fn)
+}
+
+// newHookedScanner returns a scanner on its own pool that runs fn before its
+// first query containing match. It stands in for a scan on any node.
+func newHookedScanner(t *testing.T, ffprobe, match string, fn func()) *Scanner {
 	t.Helper()
 	cfg, err := pgxpool.ParseConfig(os.Getenv("SILO_TEST_DATABASE_URL"))
 	if err != nil {
@@ -103,7 +108,7 @@ func (f *concurrentBookFixture) hookedScanner(t *testing.T, match string, fn fun
 		t.Fatalf("connect hooked pool: %v", err)
 	}
 	t.Cleanup(pool.Close)
-	return NewScanner(NewFileRepository(pool), f.ffprobe, nil, 2, false, time.Hour)
+	return NewScanner(NewFileRepository(pool), ffprobe, nil, 2, false, time.Hour)
 }
 
 // requireParts compares the library's present files, relative to its root,
