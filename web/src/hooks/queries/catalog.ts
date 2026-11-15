@@ -648,8 +648,9 @@ export function useCatalogLetters(state: CatalogSearchState, options: { enabled?
  * its filters. Order never changes which titles match, so the count is keyed
  * without the sort and read in title order, the order every executor counts
  * cheaply: a re-sort reuses it. A `query_limit` caps it the way it caps the
- * browse. Undefined while it loads, when it fails, or when the server could
- * only estimate it.
+ * browse. Undefined while it loads, when its latest read failed (a failed
+ * refresh drops the cached count rather than show a stale one), or when the
+ * server could only estimate it.
  */
 export function useCatalogCount(state: CatalogSearchState, options: { enabled?: boolean } = {}) {
   const scope = catalogScopeQuery(state);
@@ -677,7 +678,7 @@ export function useCatalogCount(state: CatalogSearchState, options: { enabled?: 
     enabled: (options.enabled ?? true) && state.source === "query" && !state.q,
     staleTime: 10 * 60 * 1000,
   });
-  const total = query.data ?? undefined;
+  const total = query.isError ? undefined : (query.data ?? undefined);
   return {
     count:
       total !== undefined && queryLimit !== undefined && queryLimit > 0
