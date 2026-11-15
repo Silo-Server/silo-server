@@ -522,9 +522,13 @@ const (
 	// BecauseYouWatchedAnchors is how many anchors a profile's Because You
 	// Watched rows are read for, and how many each library gets built.
 	BecauseYouWatchedAnchors = 3
-	// anchorCandidateLimit is how many of the latest completions the anchors
-	// are chosen from, so disliked ones can be passed over and a library
-	// keeps anchors while the profile watches another library.
+	// recentAnchorLimit is how many of the latest completions the anchors
+	// of a read that limits no library are chosen from, so disliked ones can
+	// be passed over.
+	recentAnchorLimit = 10
+	// anchorCandidateLimit is how many of the latest completions a read
+	// limited to some libraries, and the worker, choose anchors from, so a
+	// library keeps anchors while the profile watches another library.
 	anchorCandidateLimit = 50
 )
 
@@ -535,12 +539,13 @@ type itemRatingReader interface {
 }
 
 // anchorItemIDs returns up to n Because You Watched anchors for the profile:
-// the first n of anchorCandidates.
+// the first n of its anchorCandidates among the latest recentAnchorLimit
+// completions. They are the first n of the worker's deeper candidates too.
 func anchorItemIDs(ctx context.Context, signals *SignalReader, ratings itemRatingReader, userID int, profileID string, n int) ([]string, error) {
 	if n <= 0 {
 		return []string{}, nil
 	}
-	candidates, err := anchorCandidates(ctx, signals, ratings, userID, profileID)
+	candidates, err := anchorCandidates(ctx, signals, ratings, userID, profileID, max(n, recentAnchorLimit))
 	if err != nil {
 		return nil, err
 	}
@@ -549,14 +554,13 @@ func anchorItemIDs(ctx context.Context, signals *SignalReader, ratings itemRatin
 
 // anchorCandidates returns the titles Because You Watched rows may anchor on:
 // the profile's most recently completed titles of recommendableMediaTypes
-// still in the catalog, newest first, of the latest anchorCandidateLimit,
-// leaving out those it marked Not interested or rated DislikedRatingMax or
+// still in the catalog, newest first, of the latest limit, leaving out those it marked Not interested or rated DislikedRatingMax or
 // lower. A row headed "Because You Watched" a title the profile disliked
 // contradicts its taste. With no ratings reader rated titles stay. The
 // worker, the Reader and Watch Tonight all choose anchors from these, since a
 // read can only use an anchor whose row the worker cached.
-func anchorCandidates(ctx context.Context, signals *SignalReader, ratings itemRatingReader, userID int, profileID string) ([]string, error) {
-	recent, err := signals.RecentCompletedItemIDs(ctx, userID, profileID, anchorCandidateLimit)
+func anchorCandidates(ctx context.Context, signals *SignalReader, ratings itemRatingReader, userID int, profileID string, limit int) ([]string, error) {
+	recent, err := signals.RecentCompletedItemIDs(ctx, userID, profileID, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -593,15 +597,22 @@ func anchorCandidates(ctx context.Context, signals *SignalReader, ratings itemRa
 
 // libraryAnchorItemIDs returns the candidates, newest first as given, that
 // are among the first n overall or among the first n of a library they are
-// in (libraries maps a candidate to its libraries). The worker builds rows
-// for these, so a section scoped to any set of libraries finds a row for
-// each of its first n anchors: a title among the first n in a scope is among
-// the first n of its own library in that scope.
-func libraryAnchorItemIDs(candidates []string, libraries map[string][]int, n int) []string {
+// in (libraries maps a candidate to its libraries). A candidate in one of
+// disabled is hidden from every read, so it takes no library's place. The
+// worker builds rows for these, so a section scoped to any set of libraries
+// finds a row for each of its first n anchors: a title among the first n in a
+// scope is among the first n of its own library in that scope.
+func libraryAnchorItemIDs(candidates []string, libraries map[string][]int, disabled []int, n int) []string {
 	perLibrary := make(map[int]int)
 	anchors := make([]string, 0, min(n, len(candidates)))
 	for i, id := range candidates {
 		keep := i < n
+		if slices.ContainsFunc(libraries[id], func(library int) bool { return slices.Contains(disabled, library) }) {
+			if keep {
+				anchors = append(anchors, id)
+			}
+			continue
+		}
 		for _, library := range libraries[id] {
 			if perLibrary[library] < n {
 				keep = true

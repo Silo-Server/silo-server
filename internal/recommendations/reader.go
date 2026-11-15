@@ -398,7 +398,7 @@ func (r *Reader) scopedAnchorItemIDs(ctx context.Context, userID int, profileID 
 	if filter.AllowedLibraryIDs == nil && len(filter.DisabledLibraryIDs) == 0 {
 		return anchorItemIDs(ctx, r.signalReader(), r.ratingsRepo, userID, profileID, BecauseYouWatchedAnchors)
 	}
-	candidates, err := anchorCandidates(ctx, r.signalReader(), r.ratingsRepo, userID, profileID)
+	candidates, err := anchorCandidates(ctx, r.signalReader(), r.ratingsRepo, userID, profileID, anchorCandidateLimit)
 	if err != nil || len(candidates) == 0 {
 		return candidates, err
 	}

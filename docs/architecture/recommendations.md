@@ -516,15 +516,17 @@ finds a profile's rows missing asks for a refresh at most once per profile per
 15 minutes on each server; a profile with signals but no taste-profile row yet
 asks too, so a lost first refresh recovers. Because You Watched anchors are the
 profile's three most recent completed titles of `recommendableMediaTypes` that
-still exist in the catalog, taken from its latest fifty such completions and
+still exist in the catalog, taken from its latest ten such completions and
 passing over those it rated 2 stars or lower or marked Not interested. A read
 whose filter limits the libraries (a library section, a Jellyfin `ParentId`, a
-viewer limited to some libraries) takes the three most recent of those in its
-libraries instead, so watching one library does not take another library's row
-away. The worker builds rows for the three most recent overall and for each
-library's three most recent, which covers every such read; Watch Tonight and a
-library's For You fill use the three most recent overall. A read asks for a
-refresh only when there are anchors and none has a cached row.
+viewer limited to some libraries, a disabled library) takes the three most
+recent in its libraries from the latest fifty completions instead, so watching
+one library does not take another library's row away until fifty newer titles
+were finished elsewhere. The worker builds rows for the three most recent
+overall and for each library's three most recent of the latest fifty, not
+counting titles in a disabled library, which covers every such read; Watch
+Tonight and a library's For You fill use the three most recent overall. A read
+asks for a refresh only when there are anchors and none has a cached row.
 
 List reads return at most 50 items per row (default 20), and section "see all"
 reads return up to 60, a whole cached row. Home and library sections read the whole cached pool,
