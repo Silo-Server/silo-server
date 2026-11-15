@@ -351,8 +351,11 @@ interface VideoPlayerProps {
   markerSegments?: PlayerMarkerSegment[];
   autoPlayNextPreview?: boolean;
   canEditMarkers?: boolean;
-  /** Notified after a successful in-player marker edit so the host can patch local state. */
-  onMarkersEdited?: (fileId: number, markers: MarkerDraft) => void;
+  /**
+   * Notified after a successful in-player marker edit, with only the kinds it
+   * wrote, so the host can patch local state.
+   */
+  onMarkersEdited?: (fileId: number, markers: Partial<MarkerDraft>) => void;
   duration?: number;
   seriesContext?: SeriesContext;
   onNavigateEpisode?: (contentId: string, trigger: PlaybackStartTrigger) => void;

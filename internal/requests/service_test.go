@@ -1496,6 +1496,18 @@ func (f *fakeStore) ListActiveByTMDB(_ context.Context, mediaType MediaType, ids
 	return out, nil
 }
 
+func (f *fakeStore) ListRequestedTMDB(_ context.Context, viewer Viewer, mediaType MediaType, ids []int) (map[int]bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := map[int]bool{}
+	for _, req := range f.requests {
+		if req.MediaType == mediaType && slices.Contains(ids, req.TMDBID) && req.requestedBy(viewer) {
+			out[req.TMDBID] = true
+		}
+	}
+	return out, nil
+}
+
 func (f *fakeStore) ListProfileWatchlistRequests(_ context.Context, userID int, profileID string) ([]*Request, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -1943,14 +1955,14 @@ func (f *fakeStore) MarkReconciled(_ context.Context, id string) error {
 	return nil
 }
 
-func (f *fakeStore) RecomputeStatus(_ context.Context, id string, _ Viewer) (*Request, error) {
+func (f *fakeStore) RecomputeStatus(_ context.Context, id string, leaseUntil time.Time, _ Viewer) (*Request, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	req := f.lookupLocked(id)
 	if req == nil {
 		return nil, ErrNotFound
 	}
-	if req.Status != StatusApproved || req.Outcome != OutcomeActive {
+	if req.Status != StatusApproved || req.Outcome != OutcomeActive || !f.holdsLeaseLocked(req, leaseUntil) {
 		return nil, ErrInvalidState
 	}
 	req.Status, req.Outcome = aggregateStatus(f.targets[id])
@@ -2256,15 +2268,28 @@ func (f *fakeStore) CreateTarget(_ context.Context, t Target) (Target, error) {
 	return t, nil
 }
 
-func (f *fakeStore) DeleteTarget(_ context.Context, id int64) error {
+// holdsLeaseLocked reports whether req is claimed with leaseUntil. A request
+// stored without a lease accepts the zero time, as a test that seeds an
+// approved request and calls the planner directly passes it.
+func (f *fakeStore) holdsLeaseLocked(req *Request, leaseUntil time.Time) bool {
+	if req.SubmitLeaseUntil == nil {
+		return leaseUntil.IsZero()
+	}
+	return req.SubmitLeaseUntil.Equal(leaseUntil)
+}
+
+func (f *fakeStore) DeleteTarget(_ context.Context, requestID string, id int64, leaseUntil time.Time) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	for rid, ts := range f.targets {
-		for i := range ts {
-			if ts[i].ID == id {
-				f.targets[rid] = append(ts[:i], ts[i+1:]...)
-				return nil
-			}
+	req := f.lookupLocked(requestID)
+	if req == nil || req.Status != StatusApproved || req.Outcome != OutcomeActive || !f.holdsLeaseLocked(req, leaseUntil) {
+		return ErrInvalidState
+	}
+	ts := f.targets[requestID]
+	for i := range ts {
+		if ts[i].ID == id {
+			f.targets[requestID] = append(ts[:i], ts[i+1:]...)
+			return nil
 		}
 	}
 	return ErrNotFound

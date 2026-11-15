@@ -111136,6 +111136,31 @@
       "value": "検索を実行"
     }
   ],
+  "web.reader.search.truncated": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "最初の"
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": "件の一致を表示しています。"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.reader.settings.brightness": [
     {
       "type": 0,

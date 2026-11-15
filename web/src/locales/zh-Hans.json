@@ -112276,6 +112276,31 @@
       "value": "搜索"
     }
   ],
+  "web.reader.search.truncated": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "仅显示前"
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": "个匹配项。"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.reader.settings.brightness": [
     {
       "type": 0,

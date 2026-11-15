@@ -1,6 +1,8 @@
 import * as epubcfi from "foliate-js/epubcfi.js";
 import { t } from "@/i18n";
 
+import { protectBookContent } from "@/reader/bookContentSecurity";
+
 export const CFI = epubcfi;
 
 export type BookFormat =
@@ -432,6 +434,7 @@ export class DocumentLoader {
     if (!book) {
       throw new Error(t("web.reader.error.unsupportedFormat"));
     }
+    protectBookContent(book);
     return { book, format };
   }
 }

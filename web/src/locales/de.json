@@ -121573,6 +121573,39 @@
       "value": "Suche starten"
     }
   ],
+  "web.reader.search.truncated": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Der erste Treffer wird angezeigt."
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Die ersten "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " Treffer werden angezeigt."
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.reader.settings.brightness": [
     {
       "type": 0,

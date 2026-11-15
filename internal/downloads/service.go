@@ -550,10 +550,11 @@ func (s *Service) createArtifactDownload(ctx context.Context, userID int, req Cr
 	resolvedTarget := decision.PrepareTarget
 	toneMapPreResolved := preparedTargetRequiresToneMap(file, resolvedTarget)
 	if toneMapPreResolved {
-		// A quick, non-authoritative quota check avoids expensive capability work
-		// for requests that are already over quota. The check is repeated under the
-		// advisory lock below to retain the concurrency guarantee.
-		if err := s.limiter.Check(ctx, userID, 1); err != nil {
+		// A quick, non-authoritative period check avoids expensive capability
+		// work for requests that are already over quota. Whether the entry
+		// takes a concurrent slot depends on the resolved target, so that is
+		// checked under the advisory lock below.
+		if err := s.limiter.CheckCounts(ctx, userID, 0, 1); err != nil {
 			return nil, err
 		}
 		var err error
@@ -569,7 +570,14 @@ func (s *Service) createArtifactDownload(ctx context.Context, userID int, req Cr
 	// creation so a rejected request cannot leave an encode job behind.
 	var d *Download
 	err := s.repo.WithUserQuotaLock(ctx, userID, func(ctx context.Context) error {
-		if err := s.limiter.Check(ctx, userID, 1); err != nil {
+		// The new entry takes a concurrent slot only when it starts
+		// preparing; one whose prepared file is already ready registers
+		// ready and counts only toward the period quota.
+		activating := 1
+		if s.artifacts.readyArtifact(ctx, file, decision.DeliveryFormat, resolvedTarget) {
+			activating = 0
+		}
+		if err := s.limiter.CheckCounts(ctx, userID, activating, 1); err != nil {
 			return err
 		}
 		var artifact *Artifact
@@ -1351,8 +1359,16 @@ func (s *Service) ServeFile(ctx context.Context, w http.ResponseWriter, r *http.
 			slog.WarnContext(ctx, "failed to transition download to downloading", "component", "downloads", "download_id", dl.ID, "error", err)
 		}
 	}
+	if dl.Format == FormatOriginal && dl.Status == StatusDownloading {
+		if err := s.continueTransfer(ctx, dl.ID); err != nil {
+			return err
+		}
+	}
 
-	if err := s.serveDownloadBytes(ctx, w, r, dl, userID, filter); err != nil {
+	stopRenewing := s.renewTransferLease(ctx, dl)
+	err = s.serveDownloadBytes(ctx, w, r, dl, userID, filter)
+	stopRenewing()
+	if err != nil {
 		if dl.Format == FormatOriginal {
 			failureCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
 			updateErr := s.repo.TransitionStatus(failureCtx, dl.ID, StatusDownloading, StatusFailed, 0, nil)
@@ -1369,6 +1385,54 @@ func (s *Service) ServeFile(ctx context.Context, w http.ResponseWriter, r *http.
 		slog.ErrorContext(ctx, "failed to mark download as completed", "component", "downloads", "download_id", dl.ID, "error", err)
 	}
 	return nil
+}
+
+// continueTransfer admits another request for an account-level row that is
+// already transferring only while its lease holds. Renewing the lease is the
+// check, so two requests racing on a lapsed row both see it lapse. A transfer
+// whose lease lapsed died with the process serving it; like a transfer that
+// stops in-process, it fails and isn't served again, and the client starts a
+// new download, which the concurrent limit admits.
+func (s *Service) continueTransfer(ctx context.Context, id string) error {
+	live, err := s.repo.RenewTransferLease(ctx, id)
+	if err != nil || live {
+		return err
+	}
+	if _, err := s.repo.FailLapsedTransfer(ctx, id); err != nil {
+		return err
+	}
+	return fmt.Errorf("download transfer is no longer active: %w", ErrDownloadNotActive)
+}
+
+// renewTransferLease keeps an account-level original row's concurrent slot
+// while this process serves its bytes (see transferLease), and returns the
+// function that stops renewing. A transfer that dies with the process stops
+// renewing with it, so its slot frees on every node without a startup reset.
+func (s *Service) renewTransferLease(ctx context.Context, dl *Download) (stop func()) {
+	if dl.Format != FormatOriginal {
+		return func() {}
+	}
+	ctx, cancel := context.WithCancel(ctx)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		ticker := time.NewTicker(transferLeaseRenewal)
+		defer ticker.Stop()
+		for {
+			if _, err := s.repo.RenewTransferLease(ctx, dl.ID); err != nil && ctx.Err() == nil {
+				slog.WarnContext(ctx, "failed to renew download transfer lease", "component", "downloads", "download_id", dl.ID, "error", err)
+			}
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+			}
+		}
+	}()
+	return func() {
+		cancel()
+		<-done
+	}
 }
 
 // ResolveManagedFile authorizes a managed entry on (user, profile, device),

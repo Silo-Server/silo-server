@@ -132324,6 +132324,61 @@
       "value": "Lancer la recherche"
     }
   ],
+  "web.reader.search.truncated": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Affichage limité à "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " résultat."
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Affichage limité à "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " de résultats."
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Affichage limité à "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " résultats."
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.reader.settings.brightness": [
     {
       "type": 0,
