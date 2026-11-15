@@ -442,34 +442,45 @@ func TestServiceWatchlistNewerListingSupersedesEveryPendingRow(t *testing.T) {
 }
 
 // A complete read that lists a removed title under a new TMDB ID still lists
-// it: the removal waits for the provider instead of being taken as done, and
-// goes out under the key the provider lists the title by now.
+// it: the removal waits for the provider instead of being taken as done. On
+// either kind of read it goes out under the key the provider lists the title
+// by now.
 func TestServiceWatchlistTitleRemovalWaitsForAListingUnderANewTMDBID(t *testing.T) {
-	store, repo, conn := favoriteImportFixture(t)
-	conn.ImportWatchlistEnabled, conn.SyncWatchlistRemovalsEnabled = true, true
-	removedAt := time.Now().Add(-time.Hour)
-	const row = "watchlist-title:movie:550"
-	repo.listItemStates = append(repo.listItemStates, ListItemState{
-		ConnectionID: conn.ID, ListKind: ListKindWatchlist, MediaItemID: row, Kind: "movie",
-		ProviderItemKey: "tmdb:550", RemotePresent: true, LastRemovedLocalAt: &removedAt,
-		TitleIDs: []string{"imdb:tt0137523", "tmdb:550"},
-	})
-	titles := &titlesStub{entries: map[int]time.Time{}}
-	service := NewService(repo, NewRegistry()).
-		WithMatcher(unmatchedMatcherStub{}).
-		WithUserStoreProvider(staticStoreProvider{store: store})
-	service.SetWatchlistTitles(titles)
-	provider := &watchlistBatchProviderStub{rows: []RemoteFavorite{{
+	listing := RemoteFavorite{
 		ProviderItemKey: "tmdb:551", Kind: "movie", Title: "Fight Club", IMDbID: "tt0137523", TMDBID: "551",
-	}}}
-	if _, err := service.importList(context.Background(), conn, ServerConfig{}, provider, service.watchlistBinding()); err != nil {
-		t.Fatal(err)
 	}
-	if state := listItemStateOf(repo, row); state.LocalPresent || !state.RemotePresent || state.ProviderItemKey != "tmdb:551" {
-		t.Fatalf("state = %#v, want the removal still pending under tmdb:551", state)
-	}
-	if len(titles.entries) != 0 {
-		t.Fatalf("entries = %v, want the removed title kept off", titles.entries)
+	for _, tt := range []struct {
+		name     string
+		provider Provider
+	}{
+		{"complete read", &watchlistBatchProviderStub{rows: []RemoteFavorite{listing}}},
+		{"incremental read", &watchlistIncrementalProviderStub{watchlistBatchProviderStub{rows: []RemoteFavorite{listing}}}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			store, repo, conn := favoriteImportFixture(t)
+			conn.ImportWatchlistEnabled, conn.SyncWatchlistRemovalsEnabled = true, true
+			removedAt := time.Now().Add(-time.Hour)
+			const row = "watchlist-title:movie:550"
+			repo.listItemStates = append(repo.listItemStates, ListItemState{
+				ConnectionID: conn.ID, ListKind: ListKindWatchlist, MediaItemID: row, Kind: "movie",
+				ProviderItemKey: "tmdb:550", RemotePresent: true, LastRemovedLocalAt: &removedAt,
+				TitleIDs: []string{"imdb:tt0137523", "tmdb:550"},
+			})
+			titles := &titlesStub{entries: map[int]time.Time{}}
+			service := NewService(repo, NewRegistry()).
+				WithMatcher(unmatchedMatcherStub{}).
+				WithUserStoreProvider(staticStoreProvider{store: store})
+			service.SetWatchlistTitles(titles)
+			if _, err := service.importList(context.Background(), conn, ServerConfig{}, tt.provider, service.watchlistBinding()); err != nil {
+				t.Fatal(err)
+			}
+			if state := listItemStateOf(repo, row); state.LocalPresent || !state.RemotePresent || state.ProviderItemKey != "tmdb:551" {
+				t.Fatalf("state = %#v, want the removal still pending under tmdb:551", state)
+			}
+			if len(titles.entries) != 0 {
+				t.Fatalf("entries = %v, want the removed title kept off", titles.entries)
+			}
+		})
 	}
 }
 

@@ -257,7 +257,7 @@ func (s *Service) trackListTitle(
 // provider listing the title again after every local removal is a newer add,
 // which supersedes the removals waiting under other IDs so they can't take
 // the add off the provider; an older or undated listing is the one the
-// removals will take off.
+// removals will take off, so they go out under its key.
 func (s *Service) waitsForListTitleRemoval(
 	ctx context.Context,
 	conn Connection,
@@ -280,7 +280,7 @@ func (s *Service) waitsForListTitleRemoval(
 		case !ok:
 			continue
 		case row.FavoritedAtGuessed || !row.FavoritedAt.After(removedAt):
-			return true, nil
+			return true, s.moveListTitleRemovals(ctx, conn, b, pending, key, removalsPending)
 		case pendingID != id:
 			superseded = append(superseded, pendingID)
 		}
@@ -292,6 +292,24 @@ func (s *Service) waitsForListTitleRemoval(
 		delete(removalsPending, pendingID)
 	}
 	return false, nil
+}
+
+// moveListTitleRemovals puts the pending removals among rows under key, the
+// key of the listing they will take off. A removal sends the provider only its
+// row's key, which may name an ID the provider no longer lists the title by.
+func (s *Service) moveListTitleRemovals(ctx context.Context, conn Connection, b listBinding, rows []string, key string, removalsPending map[string]time.Time) error {
+	if key == "" {
+		return nil
+	}
+	for _, row := range rows {
+		if _, ok := removalsPending[row]; !ok {
+			continue
+		}
+		if err := s.repo.SetListItemProviderKey(ctx, conn.ID, b.kind, row, key); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // pendingTitleKey keys pendingTitles: a title's kind and one of its prefixed
