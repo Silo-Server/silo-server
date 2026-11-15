@@ -271,6 +271,42 @@ func TestPlaylistRebuildClosesTranscodeOfEndedSession(t *testing.T) {
 	}
 }
 
+// TestTranscodeStartClosesTranscodeOfEndedSession covers issue #4130, the
+// start that #4120's rebuild fix left out: a play with no stored recipe starts
+// its first transcode, and its native session goes away once the transcode is
+// registered and before it is published. Whatever removed the session found no
+// transcode to close, so the start has to close the one it registered and
+// report the session gone, which the playlist route answers with 404 and no
+// teardown of the play.
+func TestTranscodeStartClosesTranscodeOfEndedSession(t *testing.T) {
+	handler, sessions, store, _ := newLostTranscodePlay(t, nil)
+	handler.compatLocalTranscodeReady = func(*playback.TranscodeSession) {
+		if err := sessions.StopSession("upstream-1"); err != nil {
+			t.Error(err)
+		}
+	}
+	play, _ := store.Get("play-1")
+	play.Recipe = nil
+	store.Put(*play)
+	// A start, unlike a rebuild, resolves the source file itself.
+	inputPath := filepath.Join(t.TempDir(), "movie.mkv")
+	if err := os.WriteFile(inputPath, []byte("video"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	handler.fileResolver = testCompatFileResolver{file: &models.MediaFile{ID: 42, FilePath: inputPath}}
+
+	live, err := handler.ensureTranscodeSession(t.Context(), "play-1", "upstream-1", play.MediaSources[0])
+	if live != nil || !errors.Is(err, errCompatUpstreamSessionGone) {
+		t.Fatalf("start = %v, %v; want no transcode and errCompatUpstreamSessionGone", live, err)
+	}
+	if handler.tm.GetTranscodeSession("upstream-1") != nil {
+		t.Error("the started transcode is still registered with no native session to expire it")
+	}
+	if got, ok := store.Get("play-1"); !ok || got.Recipe != nil {
+		t.Errorf("play after the start = %+v, %v; want it kept, with no recipe written for the gone session", got, ok)
+	}
+}
+
 // TestPlaylistRebuildKeepsTranscodeAResumedPlayAdopted: a second playlist
 // request can register the native session again and adopt the rebuilt
 // transcode just after the rebuild found the session gone. The rebuild must
