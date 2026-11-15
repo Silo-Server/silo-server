@@ -128,6 +128,11 @@ type Node struct {
 	// DrainStateDrained once nothing is left. Rewritten by every check, like
 	// Healthy. Off the v1 wire for the same reason as DrainRequested.
 	DrainState DrainState `json:"-"`
+	// KeyIssued reports that this transcode node has a node key stored. The
+	// key itself never leaves the credential registry, so no reader of a Node
+	// can serialize it. Off the v1 wire, which is frozen; v2 maps it
+	// explicitly.
+	KeyIssued bool `json:"-"`
 	// PhysicalGPUKeys identifies the actual GPUs behind this node, derived from
 	// Capabilities rather than stored: it is a pure function of that payload, so
 	// a column would only be a second copy that can disagree with it. Two nodes
@@ -439,7 +444,7 @@ func NewRepository(pool *pgxpool.Pool) *Repository {
 	return &Repository{pool: pool}
 }
 
-const nodeColumns = `id, name, type, url, public_url, enabled, healthy, active_jobs, node_group, max_jobs, max_bandwidth_kbps, egress_kbps, last_health_check, created_at, capabilities, capabilities_hash, capabilities_refreshed_at, last_stats, hw_accel_override, hw_device_override, capability_drift, capability_drift_baseline, network_access, download_artifact_dir_override, download_artifact_max_bytes_override, drain_requested, drain_state`
+const nodeColumns = `id, name, type, url, public_url, enabled, healthy, active_jobs, node_group, max_jobs, max_bandwidth_kbps, egress_kbps, last_health_check, created_at, capabilities, capabilities_hash, capabilities_refreshed_at, last_stats, hw_accel_override, hw_device_override, capability_drift, capability_drift_baseline, network_access, download_artifact_dir_override, download_artifact_max_bytes_override, drain_requested, drain_state, node_key_ciphertext IS NOT NULL`
 
 func scanNode(row pgx.Row) (*Node, error) {
 	var n Node
@@ -459,6 +464,7 @@ func scanNode(row pgx.Row) (*Node, error) {
 		&networkAccessBytes,
 		&n.DownloadArtifactDirOverride, &n.DownloadArtifactMaxBytesOverride,
 		&n.DrainRequested, &n.DrainState,
+		&n.KeyIssued,
 	)
 	if err != nil {
 		return nil, err

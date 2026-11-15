@@ -184,6 +184,7 @@ type Dependencies struct {
 	TranscodePool            *nodepool.TranscodePool         // transcode node pool (may be nil)
 	NodePlanner              *nodepool.Planner               // group/cap-aware node selection (may be nil)
 	NodeHealthChecker        *nodepool.HealthChecker         // periodic node health/capability sweep (may be nil)
+	NodeKeyRegistry          *nodepool.KeyRegistry           // every stream node's credential, enabled or not (may be nil)
 	// NodeCapabilityInvalidator drops one node's cached capability inventory
 	// outside the playback handler — the prepared-download preparer holds its
 	// own. nil where downloads are not wired; set before NewRouter runs.
@@ -3142,6 +3143,13 @@ func newChiRouter(deps Dependencies) chi.Router {
 		if deps.DB != nil {
 			nodeHandler.SetConfigurationStore(nodepool.NewAdminConfigurationStore(deps.DB))
 			v2deps.AdminNodeConfiguration = nodeHandler
+		}
+		if deps.SecretCipher != nil {
+			nodeRepo, cipher := deps.NodeRepo, deps.SecretCipher
+			nodeHandler.SetNodeKeyIssuance(func(ctx context.Context, id int) (string, error) {
+				return nodeRepo.IssueNodeKey(ctx, cipher, id)
+			}, deps.NodeKeyRegistry)
+			v2deps.AdminNodeKeys = nodeHandler
 		}
 	}
 	var rateLimitHandler *handlers.RateLimitHandler

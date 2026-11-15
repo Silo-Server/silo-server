@@ -1291,6 +1291,9 @@ func main() {
 			// and admin terminate before serving media, so a revoked stream
 			// token or grant stops here instead of at its 24h TTL.
 			srv.SetStreamDeny(playback.NewStreamDeny(redisClient))
+			// Proxies relay to transcode nodes, so they keep the same
+			// credential registry the API servers do.
+			startProxyNodeKeyRegistry(appCtx, pool, dataCipher, eventBus)
 			// Follow a Jellyfin-compatible transcode that the API moved off a
 			// transcode node this proxy cannot reach: the shared recipe store
 			// names the node it runs on now, and the event bus carries the
@@ -1646,6 +1649,16 @@ func main() {
 
 		deps.ProxyPool = proxyPool
 		deps.TranscodePool = transcodePool
+
+		// Every stream node's credential, disabled nodes included: they keep
+		// serving the streams they already have.
+		nodeKeys := nodepool.NewKeyRegistry(nodeRepo, dataCipher)
+		if err := nodeKeys.Refresh(appCtx); err != nil {
+			log.Fatalf("load stream node credentials: %v", err)
+		}
+		nodeKeys.Start(appCtx)
+		deps.NodeKeyRegistry = nodeKeys
+
 		planner := nodepool.NewPlanner(proxyPool, transcodePool)
 		deps.NodePlanner = planner
 
@@ -1703,6 +1716,7 @@ func main() {
 				return
 			}
 			if event.Type == cache.EventNodePoolChanged {
+				nodeKeys.Invalidate()
 				pNodes, pErr := nodeRepo.ListEnabled(context.Background(), nodepool.NodeTypeProxy)
 				tNodes, tErr := nodeRepo.ListEnabled(context.Background(), nodepool.NodeTypeTranscode)
 				if pErr != nil || tErr != nil {
