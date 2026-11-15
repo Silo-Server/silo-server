@@ -36,7 +36,10 @@ Admin field locks win over both writers.
 | Runtime | the active files | the active files |
 
 A match replaces credits per kind: only the kinds the provider names. A
-provider without narrators keeps the narrators from the tags. The credits are
+provider without narrators keeps the narrators from the tags. A record
+reached through the book's tagged ASIN is matched even when its narrators
+contradict the narrator tag (taggers often write the author there), so its
+narrators replace the tagged ones like any other match's. The credits are
 written in the same transaction as the rest of the match and its `success`
 outcome. When any part of that write fails, the transaction rolls back and the
 failure is recorded like a provider failure, so the book stays unmatched and

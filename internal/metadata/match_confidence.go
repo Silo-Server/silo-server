@@ -62,9 +62,11 @@ var (
 
 	// A volume marker in any of the shapes providers and rippers use:
 	// "Book 4", "Vol. 2", "#3", "Part 7", "Series 2", or a bare trailing number.
+	// The number may be a decimal ("Book 0.5", "#2.5"): a novella numbered
+	// between two volumes, which is neither of them.
 	volumeMarkerRE = regexp.MustCompile(
-		`(?i)\b(?:books?|bks?|vols?|volumes?|parts?|series|episodes?|eps?)\b\.?\s*#?\s*(\d{1,4})\b`)
-	hashVolumeRE  = regexp.MustCompile(`#\s*(\d{1,4})\b`)
+		`(?i)\b(?:books?|bks?|vols?|volumes?|parts?|series|episodes?|eps?)\b\.?\s*#?\s*(\d{1,4}(?:\.\d{1,2})?)\b`)
+	hashVolumeRE  = regexp.MustCompile(`#\s*(\d{1,4}(?:\.\d{1,2})?)\b`)
 	volumeRangeRE = regexp.MustCompile(
 		`(?i)\b(?:books?|bks?|vols?|volumes?|parts?|episodes?|eps?)\b\.?\s*#?\s*(\d{1,3})\s*[-–—]\s*#?\s*(\d{1,3})\b`)
 	bareVolumeRangeRE = regexp.MustCompile(
@@ -78,6 +80,11 @@ var (
 	// have been a hard regression for non-English content, which previously
 	// matched by accident because nothing was checked at all.
 	nonAlnumRE = regexp.MustCompile(`[^\p{L}\p{N}]+`)
+
+	// decimalRE finds a decimal number standing as its own word ("0.5").
+	// normaliseTitle keeps it whole: split at the point, it would read as the
+	// two volumes 0 and 5.
+	decimalRE = regexp.MustCompile(`\b\d{1,4}\.\d{1,2}\b`)
 )
 
 // numberWords maps spelled-out and Roman numerals onto digits. Providers and
@@ -131,8 +138,24 @@ func normaliseTitle(s string) string {
 	s = norm.NFC.String(s)
 	s = strings.ToLower(strings.TrimSpace(s))
 	s = editionNoiseRE.ReplaceAllString(s, " ")
-	s = nonAlnumRE.ReplaceAllString(s, " ")
+	s = stripPunctuation(s)
 	return foldNumberWords(strings.Join(strings.Fields(s), " "))
+}
+
+// stripPunctuation replaces punctuation with spaces, except the point of a
+// decimal number ("0.5"), which stays one word.
+func stripPunctuation(s string) string {
+	var b strings.Builder
+	last := 0
+	for _, m := range decimalRE.FindAllStringIndex(s, -1) {
+		b.WriteString(nonAlnumRE.ReplaceAllString(s[last:m[0]], " "))
+		b.WriteString(" ")
+		b.WriteString(s[m[0]:m[1]])
+		b.WriteString(" ")
+		last = m[1]
+	}
+	b.WriteString(nonAlnumRE.ReplaceAllString(s[last:], " "))
+	return b.String()
 }
 
 // titleAloneIdentifies reports whether want and candidate name the same work
@@ -220,9 +243,41 @@ func wordSubset(a, b map[string]int) bool {
 	return true
 }
 
+// volumeIdentity is a volume or a range of volumes. point holds the digits
+// after a decimal point ("5" for volume 0.5), so a decimal volume never equals
+// a whole one; ranges are whole numbers only.
 type volumeIdentity struct {
 	first int
 	last  int
+	point string
+}
+
+// word is the volume as a normalised title writes it: "2", or "0.5".
+func (v volumeIdentity) word() string {
+	if v.point != "" {
+		return strconv.Itoa(v.first) + "." + v.point
+	}
+	return strconv.Itoa(v.first)
+}
+
+// parseVolume reads a single volume number, whole ("2") or decimal ("0.5").
+// A whole number must be 1 to 999, so a year never reads as a volume.
+func parseVolume(s string) (volumeIdentity, bool) {
+	whole, point, decimal := strings.Cut(s, ".")
+	n, err := strconv.Atoi(whole)
+	if err != nil || n < 0 || n > 999 {
+		return volumeIdentity{}, false
+	}
+	if decimal {
+		if _, err := strconv.Atoi(point); err != nil {
+			return volumeIdentity{}, false
+		}
+		return volumeIdentity{first: n, last: n, point: point}, true
+	}
+	if n == 0 {
+		return volumeIdentity{}, false
+	}
+	return volumeIdentity{first: n, last: n}, true
 }
 
 // titleVolume extracts a single volume or a complete volume range, preferring
@@ -250,8 +305,8 @@ func titleVolumeKind(s string) (v volumeIdentity, ok, bare bool) {
 	}
 
 	if m := hashVolumeRE.FindStringSubmatch(lower); m != nil {
-		if n, err := strconv.Atoi(m[1]); err == nil {
-			return volumeIdentity{first: n, last: n}, true, false
+		if v, ok := parseMarkedVolume(m[1]); ok {
+			return v, true, false
 		}
 	}
 
@@ -261,23 +316,33 @@ func titleVolumeKind(s string) (v volumeIdentity, ok, bare bool) {
 	folded := normaliseTitle(s)
 
 	if m := volumeMarkerRE.FindStringSubmatch(folded); m != nil {
-		if n, err := strconv.Atoi(m[1]); err == nil {
-			return volumeIdentity{first: n, last: n}, true, false
+		if v, ok := parseMarkedVolume(m[1]); ok {
+			return v, true, false
 		}
 	}
 
-	// A bare number standing as its own word, e.g. "Op-Center 4 - Acts of War"
-	// or "Dungeon In My Closet 2". Years are excluded: they date an edition
-	// rather than number a volume.
-	fields := strings.Fields(folded)
-	for _, f := range fields {
-		n, err := strconv.Atoi(f)
-		if err != nil || n <= 0 || n > 999 {
-			continue
+	// A bare number standing as its own word, e.g. "Op-Center 4 - Acts of War",
+	// "Dungeon In My Closet 2" or "Series Name 0.5". Years are excluded: they
+	// date an edition rather than number a volume.
+	for _, f := range strings.Fields(folded) {
+		if v, ok := parseVolume(f); ok {
+			return v, true, true
 		}
-		return volumeIdentity{first: n, last: n}, true, true
 	}
 	return volumeIdentity{}, false, false
+}
+
+// parseMarkedVolume reads the number after an explicit volume marker, where
+// any whole number counts ("Book 0", "Vol. 1984").
+func parseMarkedVolume(s string) (volumeIdentity, bool) {
+	if strings.Contains(s, ".") {
+		return parseVolume(s)
+	}
+	n, err := strconv.Atoi(s)
+	if err != nil {
+		return volumeIdentity{}, false
+	}
+	return volumeIdentity{first: n, last: n}, true
 }
 
 // titleStopwords carry no identifying signal but are common enough to inflate

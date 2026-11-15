@@ -105,7 +105,9 @@ type enrichmentItemRow struct {
 	Narrators []string
 	// SeriesPosition is the item's whole-number audiobook_series index, or 0.
 	SeriesPosition int
-	ProviderIDs    map[string]string
+	// SeriesName is the item's audiobook_series name, or empty.
+	SeriesName  string
+	ProviderIDs map[string]string
 	// Chain holds the slugs of the providers resolved for this item, so a
 	// failure takes its retry-after from those providers' pauses only.
 	Chain []string
@@ -648,7 +650,10 @@ func (e *Enricher) claimBatch(ctx context.Context) ([]enrichmentItemRow, error) 
 				  AND s.series_index > 0
 				  AND s.series_index < 100000
 				  AND s.series_index = trunc(s.series_index)
-			), 0) AS series_position
+			), 0) AS series_position,
+			COALESCE((
+				SELECT s.series_name FROM audiobook_series s WHERE s.content_id = mi.content_id
+			), '') AS series_name
 		FROM claimed c
 		JOIN media_items mi ON mi.content_id = c.content_id
 		ORDER BY mi.created_at ASC, mi.content_id ASC
@@ -671,6 +676,7 @@ func (e *Enricher) claimBatch(ctx context.Context) ([]enrichmentItemRow, error) 
 			&item.Author,
 			&item.Narrators,
 			&item.SeriesPosition,
+			&item.SeriesName,
 		); err != nil {
 			return nil, fmt.Errorf("scanning audiobook enrichment row: %w", err)
 		}

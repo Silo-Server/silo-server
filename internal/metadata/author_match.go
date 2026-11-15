@@ -61,10 +61,11 @@ func AuthorsAgree(itemAuthor string, people []models.ItemPerson) bool {
 
 // personNamesMatch compares two normalised names allowing for the forms the
 // same person is credited under: "J.R.R. Tolkien" against "J. R. R. Tolkien"
-// (punctuation already gone), "King, Stephen" against "Stephen King", and a
-// middle name present on one side only.
+// (punctuation already gone), "King, Stephen" against "Stephen King", a
+// middle name present on one side only, and spacing ("Mary Van Dyke" against
+// "Mary VanDyke").
 func personNamesMatch(a, b string) bool {
-	if a == b {
+	if a == b || sameLetters(a, b) {
 		return true
 	}
 
@@ -187,7 +188,7 @@ func CreditsAgree(itemNames []string, people []models.ItemPerson, kind models.Pe
 // strictNamesMatch is personNamesMatch without the bare-surname allowance,
 // and with surname-first order ("Bray R C") accepted as the same words.
 func strictNamesMatch(a, b string) bool {
-	if a == b {
+	if a == b || sameLetters(a, b) {
 		return true
 	}
 	aw, bw := strings.Fields(a), strings.Fields(b)
@@ -198,6 +199,13 @@ func strictNamesMatch(a, b string) bool {
 		return true
 	}
 	return personNamesMatch(a, b)
+}
+
+// sameLetters reports whether two normalised names differ only in where
+// their spaces fall: "jo anne smith" and "joanne smith". Every letter must
+// match in order, so it never pairs two different names.
+func sameLetters(a, b string) bool {
+	return strings.ReplaceAll(a, " ", "") == strings.ReplaceAll(b, " ", "")
 }
 
 func sameWords(a, b []string) bool {

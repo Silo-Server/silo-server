@@ -5,7 +5,6 @@ import (
 	"maps"
 	"regexp"
 	"slices"
-	"strconv"
 	"strings"
 )
 
@@ -18,6 +17,12 @@ type BookMatchRules struct {
 	// SeriesPosition is the item's whole-number position in its series, or 0
 	// when unknown. It stands in for a volume the title does not state.
 	SeriesPosition int
+	// BareTitle, when set, is the item's title without a leading series
+	// name and number ("Book Title" for "Series Name 3 - Book Title").
+	// Candidates are scored against it, so a provider title without the
+	// series is not marked down for lacking it; the volume rules still read the
+	// number from the full title.
+	BareTitle string
 }
 
 // editionMarkerRE finds the edition words that name a different product than
@@ -90,7 +95,11 @@ func selectBookMatch(
 	w := bookWant{title: want, year: wantYear, existing: existing, noAuthor: noAuthor, threshold: matchThreshold()}
 	// Volumes are compared per candidate (volumeAgainst), so the score itself
 	// carries no volume rule here.
-	w.prepared = preparedWantedTitle{normalised: normaliseTitle(want)}
+	scored := want
+	if strings.TrimSpace(rules.BareTitle) != "" {
+		scored = rules.BareTitle
+	}
+	w.prepared = preparedWantedTitle{normalised: normaliseTitle(scored)}
 	w.seriesPosition = rules.SeriesPosition
 
 	var credible []bookCandidate
@@ -272,7 +281,7 @@ func boolCompare(a, b bool) int {
 // than its volume number: "Dungeon Crawler Carl" for "Dungeon Crawler Carl 2".
 func coversAllButVolume(want string, volume volumeIdentity, candidate string) bool {
 	words := identityWords(normaliseTitle(want))
-	if n := strconv.Itoa(volume.first); words[n] > 0 {
+	if n := volume.word(); words[n] > 0 {
 		words[n]--
 		if words[n] == 0 {
 			delete(words, n)
@@ -349,23 +358,24 @@ func volumeAgainst(title, other string) (volumeIdentity, bool) {
 	if !ok || !bare {
 		return v, ok
 	}
-	n, found := lastBareNumber(title)
-	if !found || slices.Contains(strings.Fields(normaliseTitle(other)), strconv.Itoa(n)) {
+	v, found := lastBareVolume(title)
+	if !found || slices.Contains(strings.Fields(normaliseTitle(other)), v.word()) {
 		return volumeIdentity{}, false
 	}
-	return volumeIdentity{first: n, last: n}, true
+	return v, true
 }
 
-// lastBareNumber is the last word of title's normalised form that reads as a
-// volume number (1 to 999; years date an edition, not a volume).
-func lastBareNumber(title string) (int, bool) {
+// lastBareVolume is the last word of title's normalised form that reads as a
+// volume number (parseVolume: 1 to 999 or a decimal; years date an edition,
+// not a volume).
+func lastBareVolume(title string) (volumeIdentity, bool) {
 	fields := strings.Fields(normaliseTitle(title))
 	for i := len(fields) - 1; i >= 0; i-- {
-		if n, err := strconv.Atoi(fields[i]); err == nil && n > 0 && n <= 999 {
-			return n, true
+		if v, ok := parseVolume(fields[i]); ok {
+			return v, true
 		}
 	}
-	return 0, false
+	return volumeIdentity{}, false
 }
 
 // TitleContradicts reports whether want and a record's titles share no
