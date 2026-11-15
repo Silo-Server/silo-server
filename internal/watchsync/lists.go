@@ -311,6 +311,11 @@ func (s *Service) importList(ctx context.Context, conn Connection, cfg ServerCon
 		}
 		if match == nil {
 			state, kept, added, err := s.importListTitle(ctx, conn, b, row, key, removalsPending, titlesSince != nil)
+			// Counted first, so a run that fails below still reports that the
+			// local list changed.
+			if added {
+				result.added++
+			}
 			if state != nil {
 				// An entry the add kept is tracked even when the add then
 				// failed, so a later provider removal still finds it.
@@ -318,9 +323,6 @@ func (s *Service) importList(ctx context.Context, conn Connection, cfg ServerCon
 					return result, errors.Join(err, upsertErr)
 				}
 				result.Imported++
-			}
-			if added {
-				result.added++
 			}
 			if err != nil {
 				return result, err
