@@ -180,6 +180,9 @@
 ./internal/scanner TestScanSubtreeAudiobookRenameKeepsBookDB
 # Two copies of one recording on disk are two items; only a moved folder reuses one.
 ./internal/scanner TestScanAudiobookSecondCopyIsItsOwnItemDB
+# An admin's metadata refresh reads an unchanged audiobook's tags again and
+# keeps its item, file, and progress; an ordinary scan still skips it.
+./internal/scanner TestAudiobookTagRereadKeepsItemDB
 
 # Subtree scans of a book folder and of the folder above it keep the book's
 # item, and the folder's own audio becomes a book beside it.
@@ -919,7 +922,8 @@
 
 # An unmatched item an admin ignored stays off the unmatched and scan-retry
 # lists, the matcher queues and library refreshes across a rescan, the matcher
-# and item refreshes skip it, and a match clears the mark.
+# and item refreshes skip it, and a match clears the mark. A full library
+# refresh still lists an ignored audiobook, for a tags-only re-read.
 ./internal/api/handlers TestIgnoredUnmatchedItemStaysIgnoredAcrossRescanDB
 ./internal/metadata TestProcessLeavesIgnoredItemUnmatchedDB
 ./internal/metadata TestMatchQueuesSkipIgnoredItemsDB

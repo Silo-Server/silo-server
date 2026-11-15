@@ -221,6 +221,9 @@ func (s *Scanner) audiobookFolderShouldSkip(ctx context.Context, folder *models.
 			return 0, false, nil
 		}
 	}
+	if audiobookTagRereadRequested(ctx, contentID) {
+		return 0, false, nil
+	}
 	items, err := s.itemRepo.GetByIDs(ctx, []string{contentID})
 	if err != nil {
 		return 0, false, fmt.Errorf("get item for skip check: %w", err)
@@ -1110,6 +1113,7 @@ func (s *Scanner) reconcileAudiobookFolder(ctx context.Context, folder *models.M
 		return fmt.Errorf("upsert audiobook people: %w", err)
 	}
 	s.autoLinkLiteraryWork(ctx, contentID)
+	noteAudiobookTagReread(ctx, contentID)
 	slog.InfoContext(ctx, "audiobook scan: indexed", "component", "scanner",
 		"folder_id", folder.ID,
 		"content_id", contentID,
