@@ -6,6 +6,7 @@ import { Check, ChevronsUpDown } from "lucide-react";
 import { fetchCatalogFacetSearch, type CatalogFacetName } from "@/hooks/queries/catalog";
 import { useDebounce } from "@/hooks/useDebounce";
 import type { CatalogSearchState } from "@/pages/catalogSearchParams";
+import { useT } from "@/i18n";
 import { cn } from "@/lib/utils";
 import { PortalContainerContext } from "./portal-container-context";
 
@@ -41,10 +42,11 @@ export function FacetSearchSelect({
   state,
   value,
   onChange,
-  placeholder = "Search...",
+  placeholder,
   disabled = false,
   limit = 20,
 }: FacetSearchSelectProps) {
+  const t = useT();
   const [open, setOpen] = React.useState(false);
   const [search, setSearch] = React.useState("");
   const [focusedIndex, setFocusedIndex] = React.useState(-1);
@@ -121,8 +123,10 @@ export function FacetSearchSelect({
             !value && "text-muted-foreground",
           )}
         >
-          <span className="truncate">{value || placeholder}</span>
-          <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+          <span className="truncate">
+            {value || (placeholder ?? t("web.ui.select.searchPlaceholder"))}
+          </span>
+          <ChevronsUpDown className="ms-2 h-4 w-4 shrink-0 opacity-50" />
         </button>
       </PopoverPrimitive.Trigger>
 
@@ -142,8 +146,8 @@ export function FacetSearchSelect({
                 setFocusedIndex(-1);
               }}
               onKeyDown={handleSearchKeyDown}
-              placeholder="Type to search..."
-              aria-label="Search"
+              placeholder={t("web.ui.facetSearch.inputPlaceholder")}
+              aria-label={t("web.ui.facetSearch.searchLabel")}
               aria-controls={listboxId}
               aria-activedescendant={
                 focusedIndex >= 0 ? `${listboxId}-opt-${focusedIndex}` : undefined
@@ -159,10 +163,12 @@ export function FacetSearchSelect({
             className="max-h-60 overflow-y-auto overscroll-contain p-1"
           >
             {query.isLoading ? (
-              <p className="text-muted-foreground py-4 text-center text-sm">Loading...</p>
+              <p className="text-muted-foreground py-4 text-center text-sm">
+                {t("web.ui.loading")}
+              </p>
             ) : options.length === 0 ? (
               <p className="text-muted-foreground py-4 text-center text-sm">
-                {debouncedQuery ? "No matches" : "Start typing to search"}
+                {debouncedQuery ? t("web.ui.select.noMatches") : t("web.ui.select.startTyping")}
               </p>
             ) : (
               <>
@@ -182,9 +188,9 @@ export function FacetSearchSelect({
                   }}
                 >
                   <Check
-                    className={cn("mr-2 h-4 w-4 shrink-0", value ? "opacity-0" : "opacity-100")}
+                    className={cn("me-2 h-4 w-4 shrink-0", value ? "opacity-0" : "opacity-100")}
                   />
-                  <span className="text-muted-foreground italic">Any</span>
+                  <span className="text-muted-foreground italic">{t("web.ui.select.any")}</span>
                 </button>
 
                 {options.map((option, index) => (
@@ -206,7 +212,7 @@ export function FacetSearchSelect({
                   >
                     <Check
                       className={cn(
-                        "mr-2 h-4 w-4 shrink-0",
+                        "me-2 h-4 w-4 shrink-0",
                         value === option ? "opacity-100" : "opacity-0",
                       )}
                     />
@@ -215,7 +221,7 @@ export function FacetSearchSelect({
                 ))}
                 {hasMore ? (
                   <p className="text-muted-foreground px-2 py-1.5 text-xs italic">
-                    Keep typing to narrow further...
+                    {t("web.ui.facetSearch.keepTyping")}
                   </p>
                 ) : null}
               </>

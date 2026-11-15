@@ -208,6 +208,10 @@ func TestPlaybackV2ProbeURLOrigin(t *testing.T) {
 		{"lan client on its address", "192.168.1.20:8090", "https://public.example.test", nil, netaccess.Path{}, "http://192.168.1.20:8090"},
 		{"proxy rewrote host to an IP", "203.0.113.5:8090", "https://public.example.test/silo/",
 			map[string]string{"X-Forwarded-For": "198.51.100.7"}, netaccess.Path{}, "https://public.example.test/silo"},
+		{"proxy rewrote host, ambiguous forwarded host", "203.0.113.5:8090", "https://public.example.test",
+			map[string]string{"X-Forwarded-Host": "media.example.test, edge.example.test", "X-Forwarded-For": "198.51.100.7"}, netaccess.Path{}, "https://public.example.test"},
+		{"proxy named the IP host it kept", "192.168.1.20:8090", "https://public.example.test",
+			map[string]string{"X-Forwarded-Host": "192.168.1.20:8090", "X-Forwarded-For": "192.168.1.30"}, netaccess.Path{}, "http://192.168.1.20:8090"},
 		{"proxy rewrote host, no public URL", "203.0.113.5:8090", "",
 			map[string]string{"X-Forwarded-For": "198.51.100.7"}, netaccess.Path{}, "http://203.0.113.5:8090"},
 		{"proxy kept a named host", "media.example.test", "https://public.example.test",
@@ -229,7 +233,7 @@ func TestPlaybackV2ProbeURLOrigin(t *testing.T) {
 				r.Header.Set(k, v)
 			}
 			response := httptest.NewRecorder()
-			newTestHandler(t, deps).ServeHTTP(response, r)
+			behindTrustedProxy(t, newTestHandler(t, deps)).ServeHTTP(response, r)
 			var body PlaybackCapabilities
 			if response.Code != http.StatusOK || json.Unmarshal(response.Body.Bytes(), &body) != nil {
 				t.Fatalf("capabilities: %d %s", response.Code, response.Body.String())

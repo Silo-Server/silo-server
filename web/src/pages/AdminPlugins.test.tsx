@@ -84,6 +84,7 @@ function makeInstallation(index: number, displayName: string): PluginInstallatio
     auth_bindings: [],
     task_bindings: [],
     update_policy: "auto",
+    signature: { state: "unknown" },
   };
 }
 

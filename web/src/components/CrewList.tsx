@@ -1,6 +1,7 @@
 import ViewTransitionLink from "@/components/ViewTransitionLink";
 import type { CrewMember } from "@/api/types";
 import { buildPersonCatalogHref } from "@/pages/catalogSearchParams";
+import { useT, type MessageKey } from "@/i18n";
 
 interface CrewListProps {
   crew: CrewMember[];
@@ -16,12 +17,20 @@ interface CrewEntry {
 /** Jobs to display, in order, when the page doesn't choose its own. */
 const DISPLAY_JOBS = ["Director", "Writer", "Producer"] as const;
 
+/** Row labels for the jobs the client knows; any other job shows its server name. */
+const JOB_LABELS = new Map<string, MessageKey>([
+  ["Director", "web.detail.castCrew.directors"],
+  ["Writer", "web.detail.castCrew.writers"],
+  ["Producer", "web.detail.castCrew.producers"],
+]);
+
 /**
  * Lists a title's crew by job, one row per job in `jobs` order, each person
  * once and linked to their person page. Renders nothing when no listed job has
  * credits.
  */
 export default function CrewList({ crew, jobs = DISPLAY_JOBS }: CrewListProps) {
+  const t = useT();
   if (crew.length === 0) return null;
 
   const grouped = new Map<string, CrewEntry[]>();
@@ -39,16 +48,16 @@ export default function CrewList({ crew, jobs = DISPLAY_JOBS }: CrewListProps) {
 
   const entries = jobs
     .filter((job) => grouped.has(job))
-    .map((job) => ({
-      job: `${job}s`,
-      people: grouped.get(job)!,
-    }));
+    .map((job) => {
+      const label = JOB_LABELS.get(job);
+      return { job: label ? t(label) : `${job}s`, people: grouped.get(job)! };
+    });
 
   if (entries.length === 0) return null;
 
   return (
     <div>
-      <h2 className="mb-4 text-xl font-semibold">Crew</h2>
+      <h2 className="mb-4 text-xl font-semibold">{t("web.detail.castCrew.crew")}</h2>
       <dl className="glass-subtle grid grid-cols-[auto_1fr] gap-x-6 gap-y-3 rounded-xl px-5 py-4 text-sm">
         {entries.map(({ job, people }) => (
           <div key={job} className="contents">
@@ -56,7 +65,7 @@ export default function CrewList({ crew, jobs = DISPLAY_JOBS }: CrewListProps) {
             <dd className="text-foreground/85 truncate">
               {people.map((p, i) => (
                 <span key={p.name}>
-                  {i > 0 && ", "}
+                  {i > 0 && t("web.detail.separator.list")}
                   {p.personId ? (
                     <ViewTransitionLink
                       to={buildPersonCatalogHref(p.personId)}

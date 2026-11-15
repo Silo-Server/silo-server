@@ -1,0 +1,143 @@
+name: Evidence deadline (reusable)
+
+# Every Silo pull request needs evidence. silo-server, silo-apple, silo-android,
+# and silo-roku each call this on a schedule from their own evidence-deadline.yml,
+# so it acts on the calling repository:
+#
+# An open, ready-for-review pull request from someone without triage or write
+# access is closed when its Evidence check still asks for evidence 24 hours
+# after the pull request opened, a maintainer last reopened it, or it was last
+# marked ready.
+#
+# Maintainers (triage access or higher) and bots are exempt; their pull requests
+# keep the failing Evidence check until evidence is up. Drafts are left to the
+# contribution gate, which closes contributors' drafts. A maintainer waives
+# evidence with the `evidence-not-needed` label. The `invited` label does not
+# exempt a pull request from evidence. A maintainer who reopens a closed pull
+# request restarts its 24 hours.
+#
+# This job never checks out or runs code from a pull request. Keep it that way,
+# and never interpolate pull request fields into the script with ${{ }}.
+
+on:
+  workflow_call:
+    inputs:
+      contributing_url:
+        description: Page that explains the evidence policy. Defaults to the calling repository's CONTRIBUTING.md.
+        required: false
+        type: string
+        default: ""
+      dry_run:
+        description: Log the pull requests that would close without closing them.
+        required: false
+        type: boolean
+        default: false
+
+jobs:
+  close:
+    runs-on: ubuntu-latest
+    permissions:
+      checks: read
+      issues: read
+      pull-requests: write
+    steps:
+      - name: Close contributors' pull requests that have no evidence
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        env:
+          CONTRIBUTING_URL: ${{ inputs.contributing_url }}
+          DRY_RUN: ${{ inputs.dry_run }}
+        with:
+          script: |
+            const { owner, repo } = context.repo;
+            const HOURS = 24;
+            const CHECK = "Evidence";
+            const WAIVED = "evidence-not-needed";
+            const dryRun = process.env.DRY_RUN === "true";
+            const contributing = process.env.CONTRIBUTING_URL || `https://github.com/${owner}/${repo}/blob/HEAD/CONTRIBUTING.md`;
+            const deadline = Date.now() - HOURS * 60 * 60 * 1000;
+
+            const roles = new Map();
+            // Triage counts, as in the contribution gate.
+            async function isMaintainer(username) {
+              if (!roles.has(username)) {
+                try {
+                  const { data } = await github.rest.repos.getCollaboratorPermissionLevel({ owner, repo, username });
+                  roles.set(username, ["admin", "maintain", "write", "triage"].includes(data.role_name));
+                } catch (error) {
+                  if (error.status !== 404) throw error;
+                  roles.set(username, false);
+                }
+              }
+              return roles.get(username);
+            }
+
+            // The clock starts when the pull request opened, or later when a
+            // maintainer reopened it or it was marked ready for review. An author's
+            // own close and reopen does not restart it.
+            async function clockStart(pr) {
+              const events = await github.paginate(github.rest.issues.listEvents, { owner, repo, issue_number: pr.number, per_page: 100 });
+              let start = Date.parse(pr.created_at);
+              for (const event of events) {
+                const restarts = event.event === "ready_for_review"
+                  || (event.event === "reopened" && event.actor && (await isMaintainer(event.actor.login)));
+                if (restarts) start = Math.max(start, Date.parse(event.created_at));
+              }
+              return start;
+            }
+
+            // The newest Evidence check on the head commit, or null before the check has run.
+            // Check run IDs increase with creation, unlike started_at, which can be unset.
+            async function evidenceCheck(pr) {
+              const { data } = await github.rest.checks.listForRef({ owner, repo, ref: pr.head.sha, check_name: CHECK, per_page: 100 });
+              const runs = data.check_runs.filter((run) => run.app && run.app.slug === "silo-evidence");
+              runs.sort((a, b) => b.id - a.id);
+              return runs[0] || null;
+            }
+
+            async function closeIfNoEvidence(pr) {
+              const author = pr.user.login;
+              if (pr.user.type === "Bot" || pr.draft) return false;
+              if (pr.labels.some((label) => label.name === WAIVED)) return false;
+              if (Date.parse(pr.created_at) > deadline) return false;
+              if (await isMaintainer(author)) return false;
+              if ((await clockStart(pr)) > deadline) return false;
+
+              const check = await evidenceCheck(pr);
+              if (check === null) {
+                core.warning(`#${pr.number} has no ${CHECK} check on ${pr.head.sha}; leaving it open.`);
+                return false;
+              }
+              if (check.status !== "completed" || check.conclusion !== "action_required") return false;
+
+              if (dryRun) {
+                core.notice(`Would close #${pr.number} by ${author}: no evidence ${HOURS} hours after it opened.`);
+                return false;
+              }
+              core.info(`#${pr.number} by ${author} has no evidence after ${HOURS} hours; closing.`);
+              // Close before commenting, so a failed close cannot repeat the comment next hour.
+              await github.rest.pulls.update({ owner, repo, pull_number: pr.number, state: "closed" });
+              await github.rest.issues.createComment({
+                owner, repo, issue_number: pr.number,
+                body: [
+                  `Thanks for the pull request. Every Silo pull request needs evidence that shows the change working, and this one still has none ${HOURS} hours after it opened, so it is closed without review. That isn't a judgment of the work.`,
+                  "",
+                  `The Evidence check's Details link explains how to publish screenshots, a recording, or test results. Publish them, then open a new pull request or ask a maintainer to reopen this one. [The contributing guide](${contributing}) has the details.`,
+                ].join("\n"),
+              });
+              return true;
+            }
+
+            const pulls = await github.paginate(github.rest.pulls.list, { owner, repo, state: "open", per_page: 100 });
+            let closed = 0;
+            let failed = 0;
+            for (const pr of pulls) {
+              // One pull request's API error must not stop the others; the next hourly run retries it.
+              try {
+                if (await closeIfNoEvidence(pr)) closed += 1;
+              } catch (error) {
+                failed += 1;
+                core.warning(`#${pr.number}: ${error.message}; leaving it for the next run.`);
+              }
+            }
+            core.info(`Checked ${pulls.length} open pull requests; closed ${closed}.`);
+            if (failed) core.setFailed(`${failed} pull request(s) could not be checked; see the warnings above.`);

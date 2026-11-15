@@ -6,6 +6,7 @@ import {
   type ProfileRequestContextSnapshot,
 } from "@/api/client";
 import { decodeV2Response, V2_CLIENT_HEADERS, V2TransportError } from "./request";
+import { t } from "@/i18n";
 
 /** Binary reader boundary: authenticated v2 bytes, never JSON success decoding. */
 export async function readEbookBlob(
@@ -36,7 +37,7 @@ export async function readEbookBlob(
   const contentLength = Number(res.headers.get("Content-Length"));
   if (Number.isFinite(contentLength) && contentLength > API_BLOB_MAX_BYTES) {
     await res.body?.cancel();
-    throw new Error("This file is too large to open in the browser. Download it instead.");
+    throw new Error(t("web.reader.error.tooLarge"));
   }
   const blob = await res.blob();
   if (!isCapturedProfileAuthorityActive(profileContext)) throw new StaleApiRequestContextError();

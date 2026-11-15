@@ -26,6 +26,8 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { formatRelativeTime } from "@/lib/date";
 import { formatDateTime as formatPreferredDateTime } from "@/lib/datetime";
 import type { AdminPlaybackHistoryItem } from "@/api/types";
+import { useT, type Translate } from "@/i18n";
+import type { MessageKey } from "@/locales/keys";
 
 import { episodeCode } from "./admin-users/detail/format";
 import { formatDecisionLabel } from "./adminActivityPresentation";
@@ -35,8 +37,15 @@ const ALL_PROFILES = "all";
 const ALL_COMPLETION = "all";
 const PAGE_SIZE_OPTIONS = ["25", "50", "100"] as const;
 const REFRESH_SPINNER_MIN_VISIBLE_MS = 1_000;
+// Media types the server sends; others print as sent.
+const MEDIA_TYPE_LABELS: Record<string, MessageKey> = {
+  movie: "web.admin.history.mediaType.movie",
+  episode: "web.admin.history.mediaType.episode",
+  series: "web.admin.history.mediaType.series",
+};
 
 export default function AdminPlaybackHistory() {
+  const t = useT();
   const [searchParams, setSearchParams] = useSearchParams();
   const { data: users = [] } = useAdminUsers();
   const [page, setPage] = useState(0);
@@ -122,18 +131,20 @@ export default function AdminPlaybackHistory() {
   const allRows = history.data ?? [];
   const total = allRows.length;
   const paginatedRows = allRows.slice(page * pageSize, (page + 1) * pageSize);
-  const activeMediaItemLabel = allRows[0] ? historyRowLabel(allRows[0]) : selectedMediaItemId;
+  const activeMediaItemLabel = allRows[0] ? historyRowLabel(allRows[0], t) : selectedMediaItemId;
 
   return (
     <div className="space-y-6 pb-4 sm:pb-6">
       <PageHeader
-        title="Playback History"
-        subtitle="Finalized playback attempts across all users and profiles."
+        title={t("web.admin.history.title")}
+        subtitle={t("web.admin.history.subtitle")}
         actions={
           <div className="flex flex-wrap items-center gap-2">
             {selectedMediaItemId && (
               <div className="border-border bg-muted/40 flex items-center gap-2 rounded-md border px-3 py-2 text-xs">
-                <span className="text-muted-foreground font-medium">Item filter active</span>
+                <span className="text-muted-foreground font-medium">
+                  {t("web.admin.history.itemFilterActive")}
+                </span>
                 <Link
                   to={`/item/${encodeURIComponent(selectedMediaItemId)}`}
                   className="hover:text-primary font-semibold transition-colors hover:underline"
@@ -145,10 +156,10 @@ export default function AdminPlaybackHistory() {
 
             <Select value={selectedUser} onValueChange={(value) => updateFilter("user_id", value)}>
               <SelectTrigger className="w-[220px]">
-                <SelectValue placeholder="All users" />
+                <SelectValue placeholder={t("web.admin.history.filter.allUsers")} />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value={ALL_USERS}>All users</SelectItem>
+                <SelectItem value={ALL_USERS}>{t("web.admin.history.filter.allUsers")}</SelectItem>
                 {users.map((user) => (
                   <SelectItem key={user.id} value={String(user.id)}>
                     {user.username}
@@ -164,11 +175,17 @@ export default function AdminPlaybackHistory() {
             >
               <SelectTrigger className="w-[220px]">
                 <SelectValue
-                  placeholder={selectedUser === ALL_USERS ? "Choose a user first" : "All profiles"}
+                  placeholder={
+                    selectedUser === ALL_USERS
+                      ? t("web.admin.history.filter.chooseUserFirst")
+                      : t("web.admin.history.filter.allProfiles")
+                  }
                 />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value={ALL_PROFILES}>All profiles</SelectItem>
+                <SelectItem value={ALL_PROFILES}>
+                  {t("web.admin.history.filter.allProfiles")}
+                </SelectItem>
                 {(profiles.data ?? []).map((profile) => (
                   <SelectItem key={profile.id} value={profile.id}>
                     {profile.name}
@@ -182,17 +199,19 @@ export default function AdminPlaybackHistory() {
               onValueChange={(value) => updateFilter("completed", value)}
             >
               <SelectTrigger className="w-[180px]">
-                <SelectValue placeholder="All attempts" />
+                <SelectValue placeholder={t("web.admin.history.filter.allAttempts")} />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value={ALL_COMPLETION}>All attempts</SelectItem>
-                <SelectItem value="true">Completed</SelectItem>
-                <SelectItem value="false">Partial</SelectItem>
+                <SelectItem value={ALL_COMPLETION}>
+                  {t("web.admin.history.filter.allAttempts")}
+                </SelectItem>
+                <SelectItem value="true">{t("web.admin.history.filter.completed")}</SelectItem>
+                <SelectItem value="false">{t("web.admin.history.filter.partial")}</SelectItem>
               </SelectContent>
             </Select>
 
             <Button variant="outline" size="sm" onClick={resetFilters}>
-              Reset
+              {t("web.admin.history.filter.reset")}
             </Button>
             <Button
               variant="outline"
@@ -207,23 +226,35 @@ export default function AdminPlaybackHistory() {
               <RefreshCw
                 className={`h-3.5 w-3.5 ${isManualRefreshPending ? "animate-spin" : ""}`}
               />
-              {isManualRefreshPending ? "Refreshing..." : "Refresh"}
+              {isManualRefreshPending
+                ? t("web.admin.activity.page.refreshing")
+                : t("web.admin.activity.page.refresh")}
             </Button>
           </div>
         }
       />
 
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-        <InfoCard label="Visible Rows" value={String(allRows.length)} />
-        <InfoCard label="Completed" value={String(allRows.filter((row) => row.completed).length)} />
-        <InfoCard label="Partial" value={String(allRows.filter((row) => !row.completed).length)} />
+        <InfoCard label={t("web.admin.history.stats.visibleRows")} value={String(allRows.length)} />
+        <InfoCard
+          label={t("web.admin.history.stats.completed")}
+          value={String(allRows.filter((row) => row.completed).length)}
+        />
+        <InfoCard
+          label={t("web.admin.history.stats.partial")}
+          value={String(allRows.filter((row) => !row.completed).length)}
+        />
       </div>
 
       <Card className="surface-panel rounded-2xl border-0">
         <CardHeader className="flex flex-row items-center justify-between space-y-0">
-          <CardTitle className="text-sm font-bold">Recent Playback</CardTitle>
+          <CardTitle className="text-sm font-bold">
+            {t("web.admin.history.recent.heading")}
+          </CardTitle>
           <div className="text-muted-foreground text-xs">
-            {history.isFetching ? "Refreshing..." : "Auto-refreshing"}
+            {history.isFetching
+              ? t("web.admin.activity.page.refreshing")
+              : t("web.admin.history.recent.autoRefreshing")}
           </div>
         </CardHeader>
         <CardContent>
@@ -238,16 +269,15 @@ export default function AdminPlaybackHistory() {
             <div className="text-destructive py-8 text-center text-sm">
               {history.error instanceof Error
                 ? history.error.message
-                : "Failed to load playback history"}
+                : t("web.admin.history.loadError")}
             </div>
           ) : allRows.length === 0 ? (
             <div className="flex flex-col items-center justify-center gap-3 py-12 text-center">
               <History className="text-muted-foreground/50 h-10 w-10" />
               <div className="space-y-1">
-                <p className="text-sm font-medium">No playback history</p>
+                <p className="text-sm font-medium">{t("web.admin.history.empty.title")}</p>
                 <p className="text-muted-foreground max-w-sm text-xs">
-                  No playback history matches the current filters. Try adjusting the user, profile,
-                  or completion filters.
+                  {t("web.admin.history.empty.body")}
                 </p>
               </div>
             </div>
@@ -257,20 +287,22 @@ export default function AdminPlaybackHistory() {
                 <Table>
                   <TableHeader>
                     <TableRow>
-                      <TableHead>Media</TableHead>
-                      <TableHead>User</TableHead>
-                      <TableHead>Profile</TableHead>
-                      <TableHead>Method</TableHead>
-                      <TableHead>Watch Time</TableHead>
-                      <TableHead>Status</TableHead>
-                      <TableHead>Ended</TableHead>
-                      <TableHead className="text-right">Logs</TableHead>
+                      <TableHead>{t("web.admin.history.column.media")}</TableHead>
+                      <TableHead>{t("web.admin.history.column.user")}</TableHead>
+                      <TableHead>{t("web.admin.history.column.profile")}</TableHead>
+                      <TableHead>{t("web.admin.history.column.method")}</TableHead>
+                      <TableHead>{t("web.admin.history.column.watchTime")}</TableHead>
+                      <TableHead>{t("web.admin.history.column.status")}</TableHead>
+                      <TableHead>{t("web.admin.history.column.ended")}</TableHead>
+                      <TableHead className="text-end">
+                        {t("web.admin.history.column.logs")}
+                      </TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
                     {paginatedRows.map((row) => {
                       const watch = watchTime(row);
-                      const { title, detail } = historyRowTitle(row);
+                      const { title, detail } = historyRowTitle(row, t);
                       const titleBlock = (
                         <>
                           {title}
@@ -295,7 +327,10 @@ export default function AdminPlaybackHistory() {
                                 <div className="font-medium">{titleBlock}</div>
                               )}
                               <div className="text-muted-foreground text-xs">
-                                {row.media_type || "unknown"} · session {row.session_id.slice(0, 8)}
+                                {t("web.admin.history.row.meta", {
+                                  media_type: mediaTypeLabel(row.media_type, t),
+                                  session: row.session_id.slice(0, 8),
+                                })}
                               </div>
                             </div>
                           </TableCell>
@@ -304,7 +339,8 @@ export default function AdminPlaybackHistory() {
                               to={`/admin/users/${row.user_id}`}
                               className="hover:text-primary font-medium transition-colors hover:underline"
                             >
-                              {row.username || `User #${row.user_id}`}
+                              {row.username ||
+                                t("web.admin.activity.userFallback", { id: row.user_id })}
                             </Link>
                           </TableCell>
                           <TableCell>
@@ -328,44 +364,53 @@ export default function AdminPlaybackHistory() {
                               <div
                                 title={
                                   watch.estimated
-                                    ? "Estimated: recorded before watch time was measured"
+                                    ? t("web.admin.history.row.estimatedTitle")
                                     : undefined
                                 }
                               >
-                                {watch.estimated ? "≈ " : ""}
-                                {formatDuration(watch.seconds)}
+                                {watch.estimated
+                                  ? t("web.admin.history.row.estimatedDuration", {
+                                      duration: formatDuration(watch.seconds, t),
+                                    })
+                                  : formatDuration(watch.seconds, t)}
                               </div>
                               <div className="text-muted-foreground text-xs">
-                                of {formatDuration(row.duration_seconds)}
+                                {t("web.admin.history.row.ofDuration", {
+                                  duration: formatDuration(row.duration_seconds, t),
+                                })}
                               </div>
                             </div>
                           </TableCell>
                           <TableCell>
                             <Badge variant={row.completed ? "default" : "outline"}>
-                              {row.completed ? "Completed" : "Partial"}
+                              {row.completed
+                                ? t("web.admin.history.row.completed")
+                                : t("web.admin.history.row.partial")}
                             </Badge>
                           </TableCell>
                           <TableCell>
                             <div className="space-y-1">
                               <div>{formatDateTime(row.ended_at)}</div>
                               <div className="text-muted-foreground text-xs">
-                                started {formatRelative(row.started_at)}
+                                {t("web.admin.history.row.started", {
+                                  time: formatRelative(row.started_at),
+                                })}
                               </div>
                             </div>
                           </TableCell>
-                          <TableCell className="text-right">
+                          <TableCell className="text-end">
                             <div className="flex justify-end gap-3">
                               <Link
                                 to={`/admin/logs?playback_session_id=${encodeURIComponent(row.session_id)}&focus=playback`}
                                 className="text-primary text-sm font-medium"
                               >
-                                View Logs
+                                {t("web.admin.activity.row.viewLogs")}
                               </Link>
                               <Link
                                 to={`/admin/logs?playback_session_id=${encodeURIComponent(row.session_id)}&focus=playback&component=ffmpeg`}
                                 className="text-primary/80 text-sm font-medium"
                               >
-                                FFmpeg Logs
+                                {t("web.admin.activity.row.ffmpegLogs")}
                               </Link>
                             </div>
                           </TableCell>
@@ -379,8 +424,11 @@ export default function AdminPlaybackHistory() {
                 <div className="flex items-center justify-between px-2 py-4">
                   <div className="flex items-center gap-4">
                     <span className="text-muted-foreground text-sm">
-                      Showing {page * pageSize + 1}-{Math.min((page + 1) * pageSize, total)} of{" "}
-                      {total}
+                      {t("web.admin.history.pagination.range", {
+                        from: page * pageSize + 1,
+                        to: Math.min((page + 1) * pageSize, total),
+                        total: total,
+                      })}
                     </span>
                     <Select
                       value={String(pageSize)}
@@ -389,13 +437,13 @@ export default function AdminPlaybackHistory() {
                         setPage(0);
                       }}
                     >
-                      <SelectTrigger className="h-8 w-[100px]">
+                      <SelectTrigger className="h-8 min-w-[100px]">
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
                         {PAGE_SIZE_OPTIONS.map((size) => (
                           <SelectItem key={size} value={size}>
-                            {size} rows
+                            {t("web.admin.history.pagination.pageSize", { count: Number(size) })}
                           </SelectItem>
                         ))}
                       </SelectContent>
@@ -408,7 +456,7 @@ export default function AdminPlaybackHistory() {
                       onClick={() => setPage((p) => p - 1)}
                       disabled={page === 0}
                     >
-                      Previous
+                      {t("web.admin.history.pagination.previous")}
                     </Button>
                     <Button
                       variant="outline"
@@ -416,7 +464,7 @@ export default function AdminPlaybackHistory() {
                       onClick={() => setPage((p) => p + 1)}
                       disabled={(page + 1) * pageSize >= total}
                     >
-                      Next
+                      {t("web.admin.history.pagination.next")}
                     </Button>
                   </div>
                 </div>
@@ -433,7 +481,10 @@ export default function AdminPlaybackHistory() {
  * An episode leads with its series title, with "S02E04 · Episode title" as the
  * detail line. A row without a series title keeps its own title.
  */
-function historyRowTitle(row: AdminPlaybackHistoryItem): { title: string; detail: string } {
+function historyRowTitle(
+  row: AdminPlaybackHistoryItem,
+  t: Translate,
+): { title: string; detail: string } {
   if (row.series_title) {
     // A pilot named after its show would otherwise repeat the series title.
     const episodeTitle = row.media_title === row.series_title ? "" : row.media_title;
@@ -443,13 +494,16 @@ function historyRowTitle(row: AdminPlaybackHistoryItem): { title: string; detail
     return { title: row.series_title, detail };
   }
   return {
-    title: row.media_title || row.media_item_id || `File #${row.media_file_id}`,
+    title:
+      row.media_title ||
+      row.media_item_id ||
+      t("web.common.activity.title.file", { id: row.media_file_id }),
     detail: "",
   };
 }
 
-function historyRowLabel(row: AdminPlaybackHistoryItem): string {
-  const { title, detail } = historyRowTitle(row);
+function historyRowLabel(row: AdminPlaybackHistoryItem, t: Translate): string {
+  const { title, detail } = historyRowTitle(row, t);
   return detail ? `${title} · ${detail}` : title;
 }
 
@@ -473,16 +527,32 @@ function watchTime(row: AdminPlaybackHistoryItem) {
   return { seconds: Math.max(capped, 0), estimated: true };
 }
 
-function formatDuration(seconds: number | null) {
-  if (!seconds || Number.isNaN(seconds)) return "0m";
+function mediaTypeLabel(mediaType: string, t: Translate): string {
+  if (!mediaType) return t("web.admin.history.mediaType.unknown");
+  const key = MEDIA_TYPE_LABELS[mediaType];
+  return key ? t(key) : mediaType;
+}
+
+function formatDuration(seconds: number | null, t: Translate) {
+  if (!seconds || Number.isNaN(seconds)) return t("web.admin.history.duration.none");
   const rounded = Math.max(0, Math.floor(seconds));
   const hours = Math.floor(rounded / 3600);
   const minutes = Math.floor((rounded % 3600) / 60);
   const secs = rounded % 60;
 
-  if (hours > 0) return `${hours}h ${minutes}m`;
-  if (minutes > 0) return `${minutes}m ${secs}s`;
-  return `${secs}s`;
+  if (hours > 0) {
+    return t("web.admin.history.duration.hoursMinutes", {
+      hours: hours,
+      minutes: minutes,
+    });
+  }
+  if (minutes > 0) {
+    return t("web.admin.history.duration.minutesSeconds", {
+      minutes: minutes,
+      seconds: secs,
+    });
+  }
+  return t("web.admin.history.duration.seconds", { seconds: secs });
 }
 
 function formatDateTime(value: string) {

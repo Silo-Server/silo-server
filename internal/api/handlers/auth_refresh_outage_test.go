@@ -1,11 +1,8 @@
 package handlers
 
 import (
-	"encoding/json"
 	"errors"
 	"net/http"
-	"net/http/httptest"
-	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -32,8 +29,8 @@ func newOutageAuthHandler(t *testing.T) (*AuthHandler, *auth.JWTService) {
 
 // A refresh that could not reach the session store keeps the client signed
 // in: 503 service_unavailable with Retry-After, carrying
-// auth.ErrSessionCheckUnavailable for the v2 listener. A token that does not
-// verify is still 401 invalid_token.
+// auth.ErrSessionCheckUnavailable. A token that does not verify is still 401
+// invalid_token.
 func TestRefreshStoreOutageIsRetryable(t *testing.T) {
 	h, jwt := newOutageAuthHandler(t)
 	refresh, err := jwt.GenerateRefreshToken(42, "user", "sess-1")
@@ -56,18 +53,5 @@ func TestRefreshStoreOutageIsRetryable(t *testing.T) {
 	_, err = h.Refresh(t.Context(), "not-a-jwt")
 	if !errors.As(err, &apiErr) || apiErr.Status != http.StatusUnauthorized || apiErr.Code != "invalid_token" {
 		t.Fatalf("Refresh(garbage) = %v, want 401 invalid_token", err)
-	}
-
-	// The v1 route renders the same decision with its Retry-After header.
-	rec := httptest.NewRecorder()
-	h.HandleRefresh(rec, httptest.NewRequest(http.MethodPost, "/api/v1/auth/refresh", strings.NewReader(`{"refresh_token":"`+refresh+`"}`)))
-	if rec.Code != http.StatusServiceUnavailable || rec.Header().Get("Retry-After") != strconv.Itoa(apimw.CredentialCheckRetryAfterSeconds) {
-		t.Fatalf("v1 refresh = %d Retry-After=%q: %s", rec.Code, rec.Header().Get("Retry-After"), rec.Body.String())
-	}
-	var body struct {
-		Error string `json:"error"`
-	}
-	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil || body.Error != apimw.CodeServiceUnavailable {
-		t.Fatalf("v1 refresh body = %s", rec.Body.String())
 	}
 }

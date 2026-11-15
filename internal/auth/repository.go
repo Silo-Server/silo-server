@@ -81,6 +81,15 @@ func derefString(s *string) string {
 	return *s
 }
 
+// nullIfBlank stores an empty username or email as NULL, so accounts
+// without one never share the empty sign-in identifier.
+func nullIfBlank(s string) *string {
+	if strings.TrimSpace(s) == "" {
+		return nil
+	}
+	return &s
+}
+
 // scanUser scans a single row into a *models.User.
 func scanUser(row pgx.Row) (*models.User, error) {
 	var u models.User
@@ -176,6 +185,19 @@ func (r *UserRepository) Create(ctx context.Context, input models.CreateUserInpu
 	return createUser(ctx, r.pool, input)
 }
 
+// NewUserPermissions is the permissions a new account created from input
+// stores: the requested ones, or DefaultUserPermissions for a non-admin that
+// requests none, normalized. A check of what an account created later would
+// get (a backup restore comparing invitations) uses it too, so the two
+// cannot drift.
+func NewUserPermissions(input models.CreateUserInput) ([]string, error) {
+	permissions := append([]string(nil), input.Permissions...)
+	if input.Permissions == nil && input.Role != models.RoleAdmin {
+		permissions = DefaultUserPermissions()
+	}
+	return NormalizePermissions(permissions)
+}
+
 func createUser(ctx context.Context, db interface {
 	QueryRow(context.Context, string, ...any) pgx.Row
 }, input models.CreateUserInput) (*models.User, error) {
@@ -190,11 +212,7 @@ func createUser(ctx context.Context, db interface {
 		localPasswordLoginEnabled = *input.LocalPasswordLoginEnabled
 	}
 
-	permissions := append([]string(nil), input.Permissions...)
-	if input.Permissions == nil && input.Role != "admin" {
-		permissions = DefaultUserPermissions()
-	}
-	permissions, err = NormalizePermissions(permissions)
+	permissions, err := NewUserPermissions(input)
 	if err != nil {
 		return nil, err
 	}
@@ -279,6 +297,14 @@ func (r *UserRepository) GetByID(ctx context.Context, id int) (*models.User, err
 func UserInTransaction(ctx context.Context, tx pgx.Tx, id int) (*models.User, error) {
 	return userByID(ctx, tx, id)
 }
+
+// UserByID reads an account through db, a pool or a transaction.
+func UserByID(ctx context.Context, db interface {
+	QueryRow(context.Context, string, ...any) pgx.Row
+}, id int) (*models.User, error) {
+	return userByID(ctx, db, id)
+}
+
 func userByID(ctx context.Context, db interface {
 	QueryRow(context.Context, string, ...any) pgx.Row
 }, id int) (*models.User, error) {
@@ -846,6 +872,16 @@ func (r *UserRepository) CreateInvited(ctx context.Context, input models.CreateU
 	if err := EnsureLocalPasswordLoginAllowedInTransaction(ctx, tx); err != nil {
 		return nil, err
 	}
+	// The local-login guard holds the settings mutation lock until commit.
+	// Judge signup policy under that same lock before spending the invite.
+	enabled, err := readServerSetting(ctx, tx, "signup.enabled")
+	if err != nil {
+		return nil, err
+	}
+	const signupEnabledValue = "true"
+	if enabled != signupEnabledValue {
+		return nil, ErrSignupDisabled
+	}
 	if err := redeemCode(ctx, tx, code); err != nil {
 		return nil, err
 	}
@@ -858,6 +894,71 @@ func (r *UserRepository) CreateInvited(ctx context.Context, input models.CreateU
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return nil, fmt.Errorf("committing invited account: %w", err)
+	}
+	return user, nil
+}
+
+// RestoredAccount is an account a backup restore creates: its fields as the
+// backup holds them, with library ids already mapped to this server's.
+type RestoredAccount struct {
+	Email, Username           string
+	PasswordHash              string
+	LocalPasswordLoginEnabled bool
+	PasswordChangeRequired    bool
+	Enabled                   bool
+	Role                      string
+	Permissions               []string
+	// LibraryIDs keeps nil (inherit) distinct from empty (no library).
+	LibraryIDs                 []int
+	MaxPlaybackQuality         *string
+	MaxStreams                 *int
+	MaxTranscodes              *int
+	MaxRemoteStreamBitrateKbps *int
+	MaxLocalStreamBitrateKbps  *int
+	TranscodeAllowed           *bool
+	AudioTranscodeAllowed      *bool
+	MaxProfiles                *int
+	DownloadAllowed            *bool
+	DownloadTranscodeAllowed   *bool
+	RequestsAllowed            *bool
+	// AccessGroupID is the group joined; nil leaves the account ungrouped,
+	// with no default group assigned. An admin is always ungrouped.
+	AccessGroupID *int64
+}
+
+// CreateRestoredAccountInTx inserts an account a restore brings back, in the
+// caller's transaction. It keeps the backup's password hash (so the account
+// signs in with its old password) and never sets the owner or break-glass
+// flags. Unlike Create it assigns no default group: the restore decides the
+// group, after checking it grants nothing the backup's policy did not.
+func CreateRestoredAccountInTx(ctx context.Context, tx pgx.Tx, in RestoredAccount) (*models.User, error) {
+	permissions, err := NormalizePermissions(in.Permissions)
+	if err != nil {
+		return nil, err
+	}
+	if in.Role != models.RoleAdmin && in.Role != models.RoleUser {
+		return nil, fmt.Errorf("role %q is not valid", in.Role)
+	}
+	group := in.AccessGroupID
+	if in.Role == models.RoleAdmin {
+		group = nil
+	}
+	row := tx.QueryRow(ctx, `
+		INSERT INTO users (email, username, password_hash, local_password_login_enabled, password_change_required, enabled, role, permissions,
+			library_ids, max_playback_quality, max_streams, max_transcodes, max_remote_stream_bitrate_kbps, max_local_stream_bitrate_kbps,
+			transcode_allowed, audio_transcode_allowed, max_profiles, download_allowed, download_transcode_allowed, requests_allowed, access_group_id)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21)
+		RETURNING `+allColumns,
+		nullIfBlank(NormalizeEmail(in.Email)), nullIfBlank(NormalizeUsername(in.Username)), in.PasswordHash, in.LocalPasswordLoginEnabled, in.PasswordChangeRequired,
+		in.Enabled, in.Role, permissions, in.LibraryIDs, normalizeQualityOverride(in.MaxPlaybackQuality), in.MaxStreams, in.MaxTranscodes,
+		in.MaxRemoteStreamBitrateKbps, in.MaxLocalStreamBitrateKbps, in.TranscodeAllowed, in.AudioTranscodeAllowed, in.MaxProfiles,
+		in.DownloadAllowed, in.DownloadTranscodeAllowed, in.RequestsAllowed, group)
+	user, err := scanUser(row)
+	if err != nil {
+		if isDuplicateKeyError(err) {
+			return nil, fmt.Errorf("%w: %s", ErrDuplicate, extractConstraint(err))
+		}
+		return nil, fmt.Errorf("creating restored account: %w", err)
 	}
 	return user, nil
 }

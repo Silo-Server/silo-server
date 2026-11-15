@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -22,6 +23,30 @@ const (
 	ModeSubtree = "subtree"
 	ModeFile    = "file"
 )
+
+// Triggers recorded for an admin's scan request that names a path, without
+// and with a library ID.
+const (
+	TriggerPath          = "path"
+	TriggerLibraryIDPath = "library_id_path"
+)
+
+// ExplicitPathTrigger reports whether trigger records an admin's scan request
+// that names a path.
+func ExplicitPathTrigger(trigger string) bool {
+	return trigger == TriggerPath || trigger == TriggerLibraryIDPath
+}
+
+// FileScanContext returns the context for running a file scan recorded with
+// trigger. Only an admin's request for the exact path scans a file that the
+// library's ignore files exclude; a scan Silo starts on its own honors them
+// even if they changed after the request was resolved.
+func FileScanContext(ctx context.Context, trigger string) context.Context {
+	if ExplicitPathTrigger(trigger) {
+		return scanner.WithExplicitFileRequest(ctx)
+	}
+	return ctx
+}
 
 type FolderRepository interface {
 	GetByID(ctx context.Context, id int) (*models.MediaFolder, error)
@@ -90,6 +115,7 @@ const (
 	ReasonPathAmbiguous         Reason = "path_ambiguous"
 	ReasonNoLibraryMatch        Reason = "no_library_match"
 	ReasonUnsupportedExtension  Reason = "unsupported_extension"
+	ReasonPathIgnored           Reason = "path_ignored"
 )
 
 // Error codes and the messages repeated across more than one rejection site.
@@ -199,7 +225,7 @@ func (r *Resolver) matchEnabledFolder(ctx context.Context, cleanPath string) (*m
 
 func normalizeTrigger(trigger string) string {
 	if trigger = strings.TrimSpace(trigger); trigger == "" {
-		return "path"
+		return TriggerPath
 	}
 	return trigger
 }
@@ -347,10 +373,13 @@ func (r *Resolver) resolve(ctx context.Context, req Request, pathFolders []*mode
 	if err != nil {
 		return nil, err
 	}
+	// An admin who names a path asks for that file explicitly, so only the
+	// scans Silo starts on its own honor the library's ignore files here.
+	explicit := trigger == "manual"
 	if trigger == "manual" {
-		trigger = "path"
+		trigger = TriggerPath
 		if req.LibraryID != nil {
-			trigger = "library_id_path"
+			trigger = TriggerLibraryIDPath
 		}
 	}
 
@@ -365,8 +394,36 @@ func (r *Resolver) resolve(ctx context.Context, req Request, pathFolders []*mode
 		if err != nil {
 			return nil, err
 		}
+		if mode == ModeFile && !explicit {
+			if err := requireFileNotIgnored(ctx, cleanPath, folder.Paths); err != nil {
+				return nil, err
+			}
+		}
 	}
 	return &Target{Folder: folder, Mode: mode, Path: targetPath, Trigger: trigger}, nil
+}
+
+// requireFileNotIgnored rejects a file target that the library walk would
+// skip. A file scan reads no ignore files, so a watcher or autoscan event for
+// such a file (one in a flat library root, or any audiobook, ebook, or manga
+// file) would import what the next library scan retires again. Directory
+// targets need no check: a subtree scan applies the rules itself.
+//
+// An ignore file that cannot be read lets the file through, as before the
+// check existed. Rejecting it would lose the change for good, since the
+// monitor and autoscan do not retry a rejected path, and a library walk that
+// meets the same unreadable file protects the rows below it instead of
+// retiring them.
+func requireFileNotIgnored(ctx context.Context, path string, libraryRoots []string) error {
+	ignored, err := scanner.FileIgnored(path, libraryRoots)
+	switch {
+	case err != nil:
+		slog.WarnContext(ctx, "scantrigger: could not read ignore files; scanning the file anyway", "component", "scantrigger",
+			"path", path, "error", err)
+	case ignored:
+		return &RequestError{Status: http.StatusBadRequest, Code: codeBadRequest, Message: "Path is excluded by the library's ignore files", Reason: ReasonPathIgnored}
+	}
+	return nil
 }
 
 // mediaFileTarget widens a video file request to a subtree scan of the file's

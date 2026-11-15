@@ -1,3 +1,5 @@
+import { t } from "@/i18n";
+import { presetLabel } from "@/lib/recipes";
 import type { PickerGroup } from "./catalog";
 import { variantFamily } from "./variants";
 
@@ -32,8 +34,9 @@ function haystack(card: PickerGroup["cards"][number]): string {
   return [
     card.label,
     card.sentence,
-    ...card.def.presets.map((preset) => preset.display_name),
-    ...(family?.options.flatMap((option) => [option.chip, option.label]) ?? []),
+    // Both the shown name and the English one match, so English searches work in any language.
+    ...card.def.presets.flatMap((preset) => [presetLabel(preset), preset.display_name]),
+    ...(family?.options.flatMap((option) => [t(option.chip), t(option.label)]) ?? []),
     ...(ALIASES[card.type] ?? []),
   ]
     .join("\n")

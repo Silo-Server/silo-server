@@ -65,13 +65,23 @@ func TestPlanPlaybackV3ConvertsDecodedSurroundToSinkBitstream(t *testing.T) {
 		sink       []string
 		wantCodec  string
 		wantRecipe string
+		registry   *TransformationRegistryV3
 	}{
 		{name: "TrueHD 7.1 to E-AC-3", codec: "truehd", channels: 8, layout: "7.1", sink: []string{"ac3", "eac3"}, wantCodec: "eac3", wantRecipe: TransformationAudioToEAC3V3},
 		{name: "DTS 5.1 to E-AC-3", codec: "dts", channels: 6, layout: "5.1(side)", sink: []string{"ac3", "eac3"}, wantCodec: "eac3", wantRecipe: TransformationAudioToEAC3V3},
 		{name: "AC-3 only sink", codec: "dts", channels: 6, layout: "5.1(side)", sink: []string{"ac3"}, wantCodec: "ac3", wantRecipe: TransformationAudioToAC3V3},
+		{name: "AC-3 when no executor offers E-AC-3", codec: "dts", channels: 6, layout: "5.1(side)", sink: []string{"ac3", "eac3"}, wantCodec: "ac3", wantRecipe: TransformationAudioToAC3V3,
+			registry: NewTransformationRegistryV3([]TransformationSpecV3{
+				{Name: TransformationAudioToAACV3, RecipeVersion: TransformationAudioToAACRecipeVersionV3, Available: true},
+				{Name: TransformationAudioToAC3V3, RecipeVersion: TransformationAudioToAC3RecipeVersionV3, Available: true},
+			})},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			result := planSurroundV3(surroundRequestV3(test.sink...), surroundSourceFileV3(test.codec, test.channels, test.layout), surroundRegistryV3())
+			registry := test.registry
+			if registry == nil {
+				registry = surroundRegistryV3()
+			}
+			result := planSurroundV3(surroundRequestV3(test.sink...), surroundSourceFileV3(test.codec, test.channels, test.layout), registry)
 			if result.Plan == nil {
 				t.Fatalf("result = %s, want surround conversion", ExplainPlannerResultV3(result))
 			}

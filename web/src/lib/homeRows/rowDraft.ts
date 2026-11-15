@@ -2,7 +2,8 @@ import { queryDefinitionFromSectionConfig, type QueryDefinition } from "@/api/ty
 import type { CollectionOption } from "@/hooks/queries/useAllUserCollections";
 import type { GalleryPreset, RecipeCatalogResponse, RecipeDefinition } from "@/lib/recipes";
 import { FILTER_SECTION_TYPES } from "@/lib/sectionTypes";
-import { rowKindLabel } from "./catalog";
+import { t, type MessageKey } from "@/i18n";
+import { rowKindName } from "./catalog";
 import { collectionIdOf, withPickedCollection, withQueryDefinition } from "./payloads";
 import {
   customHolidayProblem,
@@ -45,6 +46,8 @@ export function findRecipe(
   return undefined;
 }
 
+// The preset's English `display_name`, never its translated label: it becomes
+// the row's saved title, which is data and stays English.
 function presetName(def: RecipeDefinition | undefined, presetKey: string | null) {
   return presetKey
     ? def?.presets.find((preset) => preset.key === presetKey)?.display_name
@@ -61,7 +64,7 @@ export function draftForPreset(def: RecipeDefinition, preset: GalleryPreset | un
   const collection = def.type === "collection";
   return {
     sectionType: def.type,
-    title: collection ? "" : (preset?.display_name ?? rowKindLabel(def.type)),
+    title: collection ? "" : (preset?.display_name ?? rowKindName(def.type)),
     titleFollowsVariant: collection || variantFamily(def.type) !== undefined,
     config: FILTER_SECTION_TYPES.has(def.type)
       ? withQueryDefinition(params, queryDefinitionFromSectionConfig(params))
@@ -148,7 +151,7 @@ export function savedTitle(
   return (
     presetName(def, variant) ??
     (def?.presets.length === 1 ? def.presets[0]?.display_name : undefined) ??
-    rowKindLabel(draft.sectionType)
+    rowKindName(draft.sectionType)
   );
 }
 
@@ -187,19 +190,19 @@ export function canSaveDraft(draft: RowDraft, surface: Surface = "profile"): boo
  */
 export function previewWaitText(draft: RowDraft, surface: Surface = "profile"): string | null {
   if (draft.sectionType === "collection" && collectionIdOf(draft.config, surface) === "")
-    return "Pick a collection to see its titles here.";
+    return t("web.home.rows.draft.pickCollection");
   if (draft.sectionType === "admin_curated_list" && !canSaveDraft(draft))
-    return "Add titles to see them here.";
+    return t("web.home.rows.draft.addTitles");
   return null;
 }
 
 export type DraftField = "title" | "shows" | "itemLimit" | "hero";
 
-export const DRAFT_FIELD_LABELS: Record<DraftField, string> = {
-  title: "Row name",
-  shows: "What it shows",
-  itemLimit: "Number of titles",
-  hero: "Hero banner",
+export const DRAFT_FIELD_LABELS: Record<DraftField, MessageKey> = {
+  title: "web.home.addRow.form.rowName",
+  shows: "web.home.rows.draft.whatItShows",
+  itemLimit: "web.home.addRow.more.itemLimit",
+  hero: "web.home.addRow.more.heroBanner",
 };
 
 const DRAFT_FIELDS: readonly DraftField[] = ["title", "shows", "itemLimit", "hero"];

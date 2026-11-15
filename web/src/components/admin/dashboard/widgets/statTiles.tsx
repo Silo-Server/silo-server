@@ -19,6 +19,9 @@ import {
 import { classifyActivityMethod } from "@/pages/adminActivityPresentation";
 import { formatFileCount, formatMbps } from "../format";
 import { latestFreshPoint } from "./timeseriesSeries";
+import { formatLocale } from "@/lib/appLocale";
+import { useT } from "@/i18n";
+import { formatDecimal } from "@/lib/numberFormat";
 
 function StatTile({
   label,
@@ -35,6 +38,7 @@ function StatTile({
   isLoading: boolean;
   error: unknown;
 }) {
+  const t = useT();
   if (isLoading) {
     return <Skeleton className="h-full min-h-24 rounded-2xl" />;
   }
@@ -49,7 +53,9 @@ function StatTile({
         <div className="text-muted-foreground">{icon}</div>
       </div>
       {error ? (
-        <div className="text-destructive text-sm">Unavailable</div>
+        <div className="text-destructive text-sm">
+          {t("web.admin.dashboard.widgets.statTile.unavailable")}
+        </div>
       ) : (
         <>
           <div className="mb-0.5 text-[28px] leading-none font-extrabold tracking-tight">
@@ -63,13 +69,17 @@ function StatTile({
 }
 
 export function ActiveStreamsStatWidget() {
+  const t = useT();
   const sessionsQuery = useAdminSessions();
   const sessionCount = sessionsQuery.data?.length ?? 0;
   return (
     <StatTile
-      label="Active Streams"
+      label={t("web.admin.dashboard.widgets.activeStreams.label")}
       value={String(sessionCount)}
-      sub={sessionCount === 1 ? "1 session" : `${sessionCount} sessions`}
+      sub={t("web.admin.dashboard.widgets.activeStreams.sessions", {
+        count: sessionCount,
+        count_text: sessionCount,
+      })}
       icon={<Activity className="h-4 w-4" />}
       isLoading={sessionsQuery.isLoading}
       error={sessionsQuery.error}
@@ -83,13 +93,18 @@ export function ActiveStreamsStatWidget() {
 const EGRESS_SAMPLE_MAX_AGE_MS = 2 * 60_000;
 
 export function EgressNowStatWidget() {
+  const t = useT();
   const timeseriesQuery = useAdminTimeseries(1);
   const latest = latestFreshPoint(timeseriesQuery.data, EGRESS_SAMPLE_MAX_AGE_MS);
   return (
     <StatTile
-      label="Egress now"
+      label={t("web.admin.dashboard.widgets.egressNow.label")}
       value={latest ? formatMbps(latest.egress_kbps / 1_000) : "—"}
-      sub={latest ? "node + server egress" : "waiting for a sample"}
+      sub={
+        latest
+          ? t("web.admin.dashboard.widgets.egressNow.source")
+          : t("web.admin.dashboard.widgets.egressNow.waiting")
+      }
       icon={<Gauge className="h-4 w-4" />}
       isLoading={timeseriesQuery.isLoading}
       error={timeseriesQuery.error}
@@ -98,6 +113,7 @@ export function EgressNowStatWidget() {
 }
 
 export function TranscodeShareStatWidget() {
+  const t = useT();
   const sessionsQuery = useAdminSessions();
   const sessions = sessionsQuery.data ?? [];
   // Same reduction the activity page uses: the server-computed
@@ -110,12 +126,16 @@ export function TranscodeShareStatWidget() {
   const share = sessions.length > 0 ? Math.round((transcoding / sessions.length) * 100) : null;
   return (
     <StatTile
-      label="Transcode share"
+      label={t("web.admin.dashboard.widgets.transcodeShare.label")}
       value={share === null ? "—" : `${share}%`}
       sub={
         sessions.length > 0
-          ? `${transcoding.toLocaleString()} of ${sessions.length.toLocaleString()} streams`
-          : "no active streams"
+          ? t("web.admin.dashboard.widgets.transcodeShare.detail", {
+              count: sessions.length,
+              transcoding: transcoding.toLocaleString(formatLocale()),
+              count_text: sessions.length.toLocaleString(formatLocale()),
+            })
+          : t("web.admin.dashboard.widgets.transcodeShare.none")
       }
       icon={<Zap className="h-4 w-4" />}
       isLoading={sessionsQuery.isLoading}
@@ -125,15 +145,16 @@ export function TranscodeShareStatWidget() {
 }
 
 export function ProfilesActiveStatWidget() {
+  const t = useT();
   const activityQuery = useAdminPlaybackActivity(24);
   const profiles = activityQuery.data?.profiles_active_24h;
   return (
     <StatTile
       // A rolling 24h window, not "today": the server has no user timezone, so
       // the label says 24h rather than implying a calendar day.
-      label="Profiles · 24h"
-      value={profiles === undefined ? "—" : profiles.toLocaleString()}
-      sub="watched on this server"
+      label={t("web.admin.dashboard.widgets.profilesActive.label")}
+      value={profiles === undefined ? "—" : profiles.toLocaleString(formatLocale())}
+      sub={t("web.admin.dashboard.widgets.profilesActive.detail")}
       icon={<UserCheck className="h-4 w-4" />}
       isLoading={activityQuery.isLoading}
       error={activityQuery.error}
@@ -142,12 +163,13 @@ export function ProfilesActiveStatWidget() {
 }
 
 export function MoviesStatWidget() {
+  const t = useT();
   const statsQuery = useAdminStats();
   const stats = statsQuery.data;
   return (
     <StatTile
-      label="Total Movies"
-      value={stats ? stats.total_movies.toLocaleString() : "—"}
+      label={t("web.admin.dashboard.widgets.movies.label")}
+      value={stats ? stats.total_movies.toLocaleString(formatLocale()) : "—"}
       sub={formatFileCount(stats?.total_movie_files)}
       icon={<Film className="h-4 w-4" />}
       isLoading={statsQuery.isLoading || (!stats && !statsQuery.error)}
@@ -157,12 +179,13 @@ export function MoviesStatWidget() {
 }
 
 export function ShowsStatWidget() {
+  const t = useT();
   const statsQuery = useAdminStats();
   const stats = statsQuery.data;
   return (
     <StatTile
-      label="Total Shows"
-      value={stats ? stats.total_shows.toLocaleString() : "—"}
+      label={t("web.admin.dashboard.widgets.shows.label")}
+      value={stats ? stats.total_shows.toLocaleString(formatLocale()) : "—"}
       sub={formatFileCount(stats?.total_show_files)}
       icon={<Tv className="h-4 w-4" />}
       isLoading={statsQuery.isLoading || (!stats && !statsQuery.error)}
@@ -177,15 +200,20 @@ export function ShowsStatWidget() {
  * rate limited per day, so this is how an admin sees what the limit acts on.
  */
 export function AdvisoryCoverageStatWidget() {
+  const t = useT();
   const statsQuery = useAdminStats();
   const stats = statsQuery.data;
   const titles = stats ? stats.total_movies + stats.total_shows : 0;
   const covered = stats?.advisory_titles ?? 0;
   return (
     <StatTile
-      label="Advisory ages"
+      label={t("web.admin.dashboard.widgets.advisoryCoverage.label")}
       value={stats ? (titles > 0 ? `${Math.round((covered / titles) * 100)}%` : "—") : "—"}
-      sub={`${covered.toLocaleString()} of ${titles.toLocaleString()} titles`}
+      sub={t("web.admin.dashboard.widgets.advisoryCoverage.detail", {
+        count: titles,
+        covered: covered.toLocaleString(formatLocale()),
+        count_text: titles.toLocaleString(formatLocale()),
+      })}
       icon={<ShieldCheck className="h-4 w-4" />}
       isLoading={statsQuery.isLoading || (!stats && !statsQuery.error)}
       error={statsQuery.error}
@@ -194,13 +222,17 @@ export function AdvisoryCoverageStatWidget() {
 }
 
 export function UsersStatWidget() {
+  const t = useT();
   const statsQuery = useAdminStats();
   const stats = statsQuery.data;
   return (
     <StatTile
-      label="Users"
+      label={t("web.admin.dashboard.widgets.usersStat.label")}
       value={stats ? String(stats.total_users) : "—"}
-      sub={`${stats?.total_users ?? 0} registered`}
+      sub={t("web.admin.dashboard.widgets.usersStat.registered", {
+        count: stats?.total_users ?? 0,
+        count_text: stats?.total_users ?? 0,
+      })}
       icon={<Users className="h-4 w-4" />}
       isLoading={statsQuery.isLoading || (!stats && !statsQuery.error)}
       error={statsQuery.error}
@@ -209,17 +241,19 @@ export function UsersStatWidget() {
 }
 
 export function StorageStatWidget() {
+  const t = useT();
   const statsQuery = useAdminStats();
   const stats = statsQuery.data;
   let storageDisplay = "—";
   if (stats) {
     const storageGB = stats.total_storage_bytes / (1024 * 1024 * 1024);
     const storageTB = storageGB / 1024;
-    storageDisplay = storageTB >= 1 ? `${storageTB.toFixed(1)} TB` : `${storageGB.toFixed(0)} GB`;
+    storageDisplay =
+      storageTB >= 1 ? `${formatDecimal(storageTB, 1)} TB` : `${formatDecimal(storageGB, 0)} GB`;
   }
   return (
     <StatTile
-      label="Storage"
+      label={t("web.admin.dashboard.widgets.storage.label")}
       value={storageDisplay}
       sub={formatFileCount(stats?.total_files)}
       icon={<HardDrive className="h-4 w-4" />}

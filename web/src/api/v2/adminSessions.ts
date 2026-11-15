@@ -2,6 +2,7 @@ import type { ProfileRequestContextSnapshot } from "@/api/client";
 import type { AdminSession } from "@/api/types";
 import { requireAdminAuthority } from "./adminAuthority";
 import { v2, type V2Result } from "./request";
+import { t } from "@/i18n";
 
 type Session = V2Result<"GET /api/v2/admin/sessions">["items"][number];
 function numericID(raw: string) {
@@ -46,5 +47,5 @@ export async function listAdminPlaybackSessions(
     seen.add(next);
     cursor = next;
   }
-  throw new Error("Too many sessions to display. Reload the list.");
+  throw new Error(t("web.admin.errors.sessionsTooMany"));
 }

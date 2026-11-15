@@ -42,6 +42,7 @@ function installation(overrides: Partial<PluginInstallation> = {}): PluginInstal
     auth_bindings: [],
     task_bindings: [],
     update_policy: "auto",
+    signature: { state: "unknown" },
     ...overrides,
   };
 }
@@ -167,6 +168,16 @@ describe("pluginStatus", () => {
       label: "Needs setup",
       attention: true,
       rank: 2,
+    });
+    const refused = installation({
+      update_failure: { version: "2.0.0", reason: "refused", failed_at: "2026-11-01T12:00:00Z" },
+    });
+    expect(pluginStatus(refused)).toMatchObject({ label: "Active", attention: true, rank: 2 });
+    expect(matchesInstalledFilter(refused, "attention")).toBe(true);
+    const badSignature = installation({ signature: { state: "invalid" } });
+    expect(pluginStatus(badSignature)).toMatchObject({ attention: true, rank: 2 });
+    expect(pluginStatus(installation({ signature: { state: "unsigned" } }))).toMatchObject({
+      attention: false,
     });
     expect(pluginStatus(installation())).toMatchObject({ label: "Active", attention: false });
   });

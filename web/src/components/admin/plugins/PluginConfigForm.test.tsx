@@ -171,4 +171,37 @@ describe("PluginConfigForm secrets", () => {
       ["api_key"],
     );
   });
+
+  it("keeps numeric-looking string selections as strings when the schema says so", async () => {
+    const onSave = vi.fn();
+    render(
+      <PluginConfigForm
+        schema={{
+          key: "routing",
+          title: "Routing",
+          json_schema: JSON.stringify({
+            type: "object",
+            properties: { tags: { type: "array", items: { type: "string" } } },
+          }),
+          required: false,
+          admin_form: {
+            fields: [
+              field("tags", "Tags", "MULTI_SELECT", {
+                options: [
+                  { value: "001", label: "Tag 001" },
+                  { value: "123", label: "Tag 123" },
+                ],
+              }),
+            ],
+          },
+        }}
+        onSave={onSave}
+      />,
+    );
+
+    await userEvent.click(screen.getByRole("button", { name: "Tag 001" }));
+    await userEvent.click(screen.getByRole("button", { name: "Tag 123" }));
+    await userEvent.click(screen.getByRole("button", { name: "Save config" }));
+    expect(onSave).toHaveBeenLastCalledWith("routing", { tags: ["001", "123"] }, []);
+  });
 });

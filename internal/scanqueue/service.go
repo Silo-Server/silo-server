@@ -404,7 +404,7 @@ func (s *Service) process(run *models.ScanRun) {
 	case ModeSubtree:
 		result, err = s.ingester.IngestSubtree(ctx, folder, run.Path)
 	case ModeFile:
-		result, err = s.ingester.IngestFile(ctx, folder, run.Path)
+		result, err = s.ingester.IngestFile(scantrigger.FileScanContext(ctx, run.Trigger), folder, run.Path)
 	default:
 		err = fmt.Errorf("unsupported scan mode %q", run.Mode)
 	}

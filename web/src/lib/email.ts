@@ -1,3 +1,5 @@
+import { t } from "@/i18n";
+
 /**
  * Whether `value` looks like one real mailbox: something before a single "@",
  * and a domain with a dot that has text on both sides. This mirrors the
@@ -31,4 +33,6 @@ function isDomainLiteral(domain: string): boolean {
 }
 
 /** The one message every email field shows for a malformed address. */
-export const INVALID_EMAIL_MESSAGE = "Enter a valid email address, like name@example.com";
+export function invalidEmailMessage(): string {
+  return t("web.auth.invalidEmail");
+}

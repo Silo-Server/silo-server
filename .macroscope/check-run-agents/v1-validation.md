@@ -1,7 +1,7 @@
 ---
 title: v1 validation impact
-model: gpt-6-luna
-reasoning: max
+model: gpt-6.1-terra
+reasoning: medium
 input: full_diff
 tools:
   - browse_code

@@ -162,7 +162,7 @@ func (r *Repository) claimDispatchRun(ctx context.Context, includePersonal bool)
 		}
 	}
 	run.Status = RunStatusRunning
-	err = tx.QueryRow(ctx, `UPDATE history_import_runs SET status='running',started_at=now(),last_heartbeat_at=now(),claim_generation=claim_generation+1 WHERE id=$1 RETURNING claim_generation,started_at`, run.ID).Scan(&claim.Generation, &run.StartedAt)
+	err = tx.QueryRow(ctx, `UPDATE history_import_runs SET status='running',started_at=COALESCE(started_at,now()),last_heartbeat_at=now(),claim_generation=claim_generation+1 WHERE id=$1 RETURNING claim_generation,started_at`, run.ID).Scan(&claim.Generation, &run.StartedAt)
 	if err != nil {
 		return nil, RunClaim{}, err
 	}

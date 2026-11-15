@@ -19,7 +19,8 @@ import (
 // to be captured here — never in per-cache copies that can silently drift.
 //
 // Included: AllowedLibraryIDs, DisabledLibraryIDs, every MaturityLimits field
-// (MaxContentRating, AllowUnratedContent, MaxAdvisoryAge, RequireAdvisoryAge),
+// (MaxContentRating, AllowUnratedContent, MaxAdvisoryAge, RequireAdvisoryAge,
+// AllowedTitleIDs),
 // ExcludedMediaTypes,
 // NamePrefix, AllowedContentIDs. AllowedLibraryIDs and
 // AllowedContentIDs preserve the nil (unrestricted) vs empty (restrict to
@@ -59,6 +60,11 @@ func (f AccessFilter) WriteAccessScopeCacheKey(b *strings.Builder) {
 	// without a limit, so the extra split does not arise in practice.
 	b.WriteString("|requireadvisory=")
 	b.WriteString(strconv.FormatBool(f.RequireAdvisoryAge))
+
+	// Hashed like AllowedContentIDs: a profile's allowances can run to a few
+	// hundred titles. Resolvers set it only under active limits.
+	b.WriteString("|allowedtitles=")
+	b.WriteString(hashOptionalStringsKey(f.AllowedTitleIDs))
 
 	b.WriteString("|excludedtypes=")
 	writeSortedStringsKey(b, f.ExcludedMediaTypes)

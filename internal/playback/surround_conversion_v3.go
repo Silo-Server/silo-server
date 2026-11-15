@@ -51,17 +51,28 @@ func surroundBitstreamTransformationV3(codec string) (name, version string) {
 	return TransformationAudioToEAC3V3, TransformationAudioToEAC3RecipeVersionV3
 }
 
-// surroundBitstreamTargetV3 returns the codec a surround conversion should
-// produce for this request, or "" when the rule does not apply. It applies
-// only when the client would decode the source locally, the source has more
-// than two channels, and the client attests with exact evidence that its sink
-// takes E-AC-3 (preferred) or AC-3 as 5.1.
-func surroundBitstreamTargetV3(source SourceDescriptorV3, request StartRequestV3, audioOK, passthrough bool, claim AudioClaimsV3) string {
-	if !audioOK || passthrough || claim.Reason != audioClaimClientDecodeV3 || source.AudioChannels <= 2 {
-		return ""
+// surroundBitstreamCodecs lists, E-AC-3 first, the codecs a surround
+// conversion may produce in place of the route the planner would otherwise
+// choose. It is empty unless the client would decode a track with more than
+// two channels locally and attests with exact evidence that its sink takes the
+// codec as 5.1 but not the source codec, and the route keeps the original
+// picture and subtitle presentation: native range, no Dolby Vision Profile 7
+// handling, no server bitrate cap, and the same subtitle mode and claims as
+// the original file.
+func (p *candidatePlannerV3) surroundBitstreamCodecs() []string {
+	f, in, source := &p.video, p.input, p.source
+	request := in.Request
+	if f.mustAdapt || !f.videoOK || !f.rangeOK || !f.audioOK || f.base.Claims.Audio.Passthrough ||
+		f.audioClaims.Reason != audioClaimClientDecodeV3 || source.AudioChannels <= 2 ||
+		source.DVProfile == 7 || source.VideoCopyUnsafe || !f.quality.PreservesSource || in.ServerBitrateCapKbps > 0 {
+		return nil
 	}
-	if request.Capabilities.AudioEvidence != EvidenceExactV3 || !HasFeatureV3(request.ClientFeatures, FeatureLayoutPassthrough) {
-		return ""
+	if !f.originalSubtitleOK || !f.hlsSubtitleOK || f.hlsSubtitle.Claims != f.subtitle.Claims || f.hlsSubtitle.Decision.Mode != f.subtitle.Decision.Mode {
+		return nil
+	}
+	if request.Capabilities.AudioEvidence != EvidenceExactV3 || !HasFeatureV3(request.ClientFeatures, FeatureLayoutPassthrough) ||
+		!deliveryAvailableV3(request, DeliveryClassHLSV3) {
+		return nil
 	}
 	caps := request.ClientPlaybackContext.Output.AudioPassthrough
 	if caps == nil {
@@ -70,8 +81,9 @@ func surroundBitstreamTargetV3(source SourceDescriptorV3, request StartRequestV3
 	// A sink that lists the source codec takes it as a bitstream; a layout
 	// label the passthrough check did not match is no reason to re-encode.
 	if caps == nil || containsFoldV3(caps.PassthroughCodecs, source.AudioCodec) {
-		return ""
+		return nil
 	}
+	var codecs []string
 	for _, codec := range []string{surroundBitstreamCodecEAC3V3, surroundBitstreamCodecAC3V3} {
 		if !containsFoldV3(caps.PassthroughCodecs, codec) {
 			continue
@@ -80,37 +92,38 @@ func surroundBitstreamTargetV3(source SourceDescriptorV3, request StartRequestV3
 			if strings.EqualFold(entry.Codec, codec) &&
 				containsIntV3(entry.ChannelCounts, surroundBitstreamChannelsV3) &&
 				containsFoldV3(entry.Layouts, audioLayoutSurround51V3) {
-				return codec
+				codecs = append(codecs, codec)
+				break
 			}
 		}
 	}
-	return ""
+	return codecs
 }
 
-// planSurroundBitstreamRemuxV3 builds the copy-video HLS remux that converts
-// the selected audio to target. The caller has already required the original
-// picture; this returns false when the route would change the subtitle
-// presentation, when no HLS executor offers the recipe, or when the client
-// already tried it, and the caller then keeps the route it would have chosen.
-func planSurroundBitstreamRemuxV3(input PlannerInputV3, base PlanV3, source SourceDescriptorV3, target string, original, hls SubtitlePolicyResultV3, high10Quirk *AppliedQuirkV3) (PlannerResultV3, bool) {
-	if !deliveryAvailableV3(input.Request, DeliveryClassHLSV3) || input.ServerBitrateCapKbps > 0 || source.VideoCopyUnsafe {
-		return PlannerResultV3{}, false
+// surroundBitstreamCandidate builds the copy-video HLS remux that converts
+// the selected audio to the first listed codec an HLS executor offers, or nil
+// when none does. It is one candidate whatever the codec, so once it was
+// attempted the planner moves on to the route it improved on.
+func (p *candidatePlannerV3) surroundBitstreamCandidate() *PlannerResultV3 {
+	f, request, source := &p.video, p.input.Request, p.source
+	var target, name, version string
+	for _, codec := range p.surroundBitstreamCodecs() {
+		if name, version = surroundBitstreamTransformationV3(codec); p.input.hlsRemuxRegistry().Available(name) {
+			target = codec
+			break
+		}
 	}
-	if hls.Terminal != nil || hls.RequiresBurn || hls.Claims != original.Claims || hls.Decision.Mode != original.Decision.Mode {
-		return PlannerResultV3{}, false
+	if target == "" {
+		return nil
 	}
-	name, version := surroundBitstreamTransformationV3(target)
-	if !input.hlsRemuxRegistry().Available(name) {
-		return PlannerResultV3{}, false
-	}
-	plan := cloneRemuxPlanCandidateV3(base)
+	plan := p.remuxBase(candidateCopyV3)
 	plan.Delivery = DeliveryRemuxHLSV3
-	plan.Stream = StreamV3{Protocol: StreamHLSV3, Container: containerHLSV3, MIMEType: mimeTypeHLSV3, Headers: map[string]string{}, HeaderRefresh: HeaderRefreshNoneV3}
-	if deliverySupportsFeatureV3(input.Request, DeliveryClassHLSV3, FeatureHLSCopyMPEGTSV3) && HLSCopyFitsMPEGTS(source.VideoCodec, "") {
+	plan.Stream = streamV3(StreamHLSV3, containerHLSV3, mimeHLSV3)
+	if deliverySupportsFeatureV3(request, DeliveryClassHLSV3, FeatureHLSCopyMPEGTSV3) && HLSCopyFitsMPEGTS(source.VideoCodec, target) {
 		// Package it as the client's other copy remuxes are packaged.
 		plan.EffectiveRecipe.SegmentContainer = SegmentContainerMPEGTSV3
 	} else {
-		plan.EffectiveRecipe.VideoSampleEntry = hlsVideoSampleEntryV3(source, input.Request, false)
+		plan.EffectiveRecipe.VideoSampleEntry = hlsVideoSampleEntryV3(source, request, false)
 	}
 	plan.EffectiveRecipe.AudioCodec = target
 	plan.EffectiveRecipe.AudioChannels = intPointerV3(surroundBitstreamChannelsV3)
@@ -119,14 +132,15 @@ func planSurroundBitstreamRemuxV3(input PlannerInputV3, base PlanV3, source Sour
 	plan.Transformations = append(plan.Transformations, TransformationV3{Name: name, Executor: ExecutorServerV3, RecipeVersion: version, ValidatedClaims: []string{ClaimAudioDecodeV3}})
 	plan.DegradationWarnings = append(plan.DegradationWarnings, DegradationWarningV3{Code: degradationAudioConvertedV3, Message: surroundBitstreamWarningV3(source, target)})
 	plan.DecisionReason = decisionReasonSurroundBitstreamV3
-	applyCopiedVideoQuirksV3(&plan, source, input.Request, high10Quirk)
-	applySubtitleDecisionV3(&plan, hls.Decision)
-	plan.Claims.Subtitles = hls.Claims
-	finalizePlanIdentityV3(&plan, input.Request.PlaybackAttemptID, input.Request.ClientPlaybackContext.Output.OutputContextID)
-	if !deliverySupportsPlanV3(input.Request, DeliveryClassHLSV3, plan) || planAttemptedV3(plan, input.Request.ClientPlaybackContext.Output.OutputContextID, input.AttemptedKeys) {
-		return PlannerResultV3{}, false
+	p.remuxQuirks(&plan, candidateCopyV3, false)
+	sub := f.hlsSubtitle
+	applySubtitleDecisionV3(&plan, sub.Decision)
+	plan.Claims.Subtitles = sub.Claims
+	p.finalizeV3(&plan)
+	if !deliverySupportsPlanV3(request, DeliveryClassHLSV3, plan) {
+		return nil
 	}
-	return PlannerResultV3{
+	return &PlannerResultV3{
 		Plan:                        &plan,
 		PlayMethod:                  PlayRemux,
 		TranscodeAudio:              true,
@@ -136,11 +150,11 @@ func planSurroundBitstreamRemuxV3(input PlannerInputV3, base PlanV3, source Sour
 		TargetAudioBitrateKbps:      surroundBitstreamBitrateKbpsV3,
 		TargetResolution:            resolutionLabelV3(source.Height),
 		TargetBitrateKbps:           source.BitrateKbps,
-		SubtitleTrackIndex:          hls.SelectedIndex,
-		SubtitleTransportTrackIndex: hls.TransportIndex,
-		SubtitleCodec:               hls.Codec,
-		DownloadedSubtitleID:        hls.DownloadedSubtitleID,
-	}, true
+		SubtitleTrackIndex:          sub.SelectedIndex,
+		SubtitleTransportTrackIndex: sub.TransportIndex,
+		SubtitleCodec:               sub.Codec,
+		DownloadedSubtitleID:        sub.DownloadedSubtitleID,
+	}
 }
 
 func surroundBitstreamWarningV3(source SourceDescriptorV3, target string) string {

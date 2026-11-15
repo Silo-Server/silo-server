@@ -107,27 +107,21 @@ func TestMerge_ReleaseDatesLockBlocksReplace(t *testing.T) {
 	// takes the providers' current home release dates unless they are locked.
 	filled := *target
 	MergeMetadata(source, &filled, nil, MergeFillEmpty)
-	refreshHomeReleaseDates(&filled, source, nil, false)
+	refreshHomeReleaseDates(&filled, source, nil)
 	if filled.ReleaseDate != "1990-01-01" || filled.DigitalReleaseDate != "1999-10-26" || filled.PhysicalReleaseDate != "1992-03-11" {
 		t.Errorf("fill-empty refresh: %+v", filled)
 	}
 	locked := *target
-	refreshHomeReleaseDates(&locked, source, []MetadataField{FieldReleaseDates}, true)
+	refreshHomeReleaseDates(&locked, source, []MetadataField{FieldReleaseDates})
 	if locked.DigitalReleaseDate != "2001-01-01" || locked.PhysicalReleaseDate != "1995-01-01" {
-		t.Errorf("locked rematch replaced home release dates: %+v", locked)
+		t.Errorf("locked refresh replaced home release dates: %+v", locked)
 	}
-	// A refresh keeps a date the provider stopped sending; a rematch to a
-	// movie with no home release yet clears the wrong match's dates.
+	// A refresh keeps a date the provider stopped sending.
 	undated := &MetadataResult{HasMetadata: true}
 	refreshed := *target
-	refreshHomeReleaseDates(&refreshed, undated, nil, false)
+	refreshHomeReleaseDates(&refreshed, undated, nil)
 	if refreshed.DigitalReleaseDate != "2001-01-01" || refreshed.PhysicalReleaseDate != "1995-01-01" {
 		t.Errorf("refresh dropped stored home release dates: %+v", refreshed)
-	}
-	rematched := *target
-	refreshHomeReleaseDates(&rematched, undated, nil, true)
-	if rematched.DigitalReleaseDate != "" || rematched.PhysicalReleaseDate != "" {
-		t.Errorf("rematch kept the wrong match's home release dates: %+v", rematched)
 	}
 
 	MergeMetadata(source, target, []MetadataField{FieldReleaseDates}, MergeReplaceUnlocked)

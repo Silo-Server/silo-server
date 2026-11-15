@@ -97,6 +97,13 @@ writers never block and never log. Neither Redis nor Postgres is on that path.
   class 22, for example a client address that is not an `inet`), the consumer inserts
   that batch one row at a time, so only the rejected rows are dropped. Any other batch
   the server rejects is dropped at once, so it cannot hold up the stream.
+- Audit User-Agent metadata is an owned prefix of at most 512 UTF-8 bytes, bounded
+  before queue admission and in transactional audit capture. The raw prefix is
+  bounded before invalid-text replacement, and the result is bounded again because
+  replacement can expand it. A valid rune crossing the boundary is omitted. The
+  consumer enforces the same bound for alternate inputs; retained history bounds
+  the returned database projection and normalizes its byte length without changing
+  stored rows. This diagnostic policy does not change request headers or identities.
 - `opslog.Handler` encodes non-scalar attribute values (maps, slices, structs,
   pointers) to JSON when the record is logged. The consumer builds the row on its own
   goroutine later, and a caller may change a map once the log call returns.
@@ -319,7 +326,7 @@ The native API exposes administrator summaries at
 OpenAPI. The resource response identifies the sampled API process with a random
 instance ID, which matters when a load balancer sends successive requests to
 different replicas. Workers attach the same attribution to authenticated health
-transport. Frozen v1 resource fields retain their existing meaning.
+transport.
 
 | Measurement | Population and limits |
 | --- | --- |
@@ -424,6 +431,27 @@ instruments use `silo_`; Go/process collectors retain upstream names. One
 only GC, scheduler, memory classes, CPU classes and synchronization families.
 Audit the emitted families when upgrading Go.
 
+### Aborted responses
+
+A handler that has sent its status and cannot finish the body breaks the
+connection with `panic(http.ErrAbortHandler)`, so the client sees a truncated
+response instead of a clean end. The `/api/v2` and Jellyfin-compatible request
+recorders (the `apiv2 request` and `jellycompat request` lines, their request
+metrics and their spans) run through `httpstream.Serve`, which records the
+request while that panic unwinds and then re-raises it for net/http. While the
+client is still waiting, the request is marked aborted: the
+`jellycompat request` line keeps its `status` field and adds
+`outcome=aborted`, the `apiv2 request` line has `status_class=aborted`, the v2
+and compat `status_class` label is `aborted`, and the v2 and compat spans set
+`http.response.outcome` to `aborted` with an error status. A request whose
+client has gone, including one whose buffered write to the client failed
+(net/http cancels the request context then, a write deadline included), is
+recorded the way a returned request would be. An HTTP/1.1 body sent through
+`ReadFrom` (the sendfile path) is the exception: net/http does not cancel the
+context when that write fails, so a client that stalls there is recorded as
+aborted. The activity log still records only requests that return, so an
+aborted request has no activity row.
+
 ## Jellyfin-compatible listener
 
 The Jellyfin-compatible listener runs on its own `http.Server`, so the native
@@ -442,7 +470,8 @@ fallback, the CORS preflight, or a middleware that refused the request.
   never the raw path or an ID. A request that matched no route is `unmatched`.
 - `method` is a standard method or `other`.
 - `status_class` is `1xx` to `5xx`, `hijacked` when the session socket took
-  over the connection, or `other`.
+  over the connection, `aborted` when the handler broke a response it had
+  started (see [Aborted responses](#aborted-responses)), or `other`.
 - `client` comes from the MediaBrowser `Client` field, then the User-Agent:
   `infuse`, `swiftfin`, `findroid`, `streamyfin`, `wholphin`, `fladder`,
   `moonfin`, `senplayer`, `vidhub`, `kodi`, `jellyfin-web`,
@@ -475,7 +504,8 @@ the per-scrape sample limit in the
 Latency for one client on one route lives on the trace. Each request opens a
 server span named `jellycompat <METHOD> <route>` with `http.request.method`,
 `http.route`, `http.response.status_code` (or `http.response.outcome` set to
-`hijacked`) and `jellycompat.client`. Postgres, Redis and S3 dependency spans
+`hijacked`; `aborted` is set alongside the status code once one was sent) and
+`jellycompat.client`. Postgres, Redis and S3 dependency spans
 started during the request are its children instead of separate root traces.
 The span carries no path, query, header value or body. A `/socket` span stays
 open for the life of the connection, as the native v2 socket spans do. It holds
@@ -586,8 +616,7 @@ or else the `X-Silo-Client` product name that also labels
 `streamapp_apiv2_requests_total{client}`. The first-party clients send only
 `X-Silo-Client`. Only an inserted row counts. A v2 report that
 repeats its `event_id` inserts nothing on any replica, so a retry is not counted
-twice. Legacy v1-bridge reports carry no event id and are counted on every
-report. Events dropped because the in-process write queue is full are never
+twice. Events dropped because the in-process write queue is full are never
 observed. Each replica exports the events it wrote; sum across replicas.
 
 The clients do not time the same interval yet. The web player measures from the

@@ -25,7 +25,7 @@ func TestLocalDownloadBudgetFailureReturnsCommittedError(t *testing.T) {
 	})
 	svc := &Service{bandwidth: bm}
 	w := httptest.NewRecorder()
-	err := svc.serveLocalFile(context.Background(), w, httptest.NewRequest("GET", "/file", nil), path, 2)
+	err := svc.serveLocalFile(context.Background(), w, httptest.NewRequest("GET", "/file", nil), path, "", 2)
 	if !errors.Is(err, ErrResponseCommitted) || w.Body.Len() != 0 {
 		t.Fatalf("error %v; exposed %d bytes", err, w.Body.Len())
 	}

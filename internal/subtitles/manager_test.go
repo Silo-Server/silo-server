@@ -166,7 +166,7 @@ func TestManagerSearchWarningsOmitProviderErrorText(t *testing.T) {
 
 	manager := NewManager(newMockSubtitleRepo(), newMockBlobStore())
 	manager.RegisterProvider(failingSearchProvider{stubProvider{name: "example"}})
-	resp, err := manager.SearchBridge(t.Context(), SearchRequest{Title: "Example"})
+	resp, err := manager.Search(t.Context(), SearchRequest{Title: "Example"})
 	if err != nil {
 		t.Fatal(err)
 	}

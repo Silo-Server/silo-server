@@ -1,6 +1,7 @@
 package transcodenode
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"reflect"
@@ -27,12 +28,46 @@ const (
 	trickplayAutoAccel      = "auto"
 )
 
-// trickplayWork is the node's one trickplay run at a time, and the hardware
-// its runs decode on.
+// trickplayWork counts the node's trickplay runs against
+// playback.trickplay_node_capacity, and holds the hardware they decode on.
 type trickplayWork struct {
-	busy     sync.Mutex
-	once     sync.Once
-	hardware *mediasample.HardwareResolver
+	mu      sync.Mutex
+	running int
+	// resolving pairs each run's Set with its Backend, so concurrent runs
+	// across a settings reload never resolve another run's accelerator.
+	resolving sync.Mutex
+	once      sync.Once
+	hardware  *mediasample.HardwareResolver
+}
+
+// start admits a run when fewer than capacity are running. It never waits: a
+// full node refuses, and the API server moves the run to another node or its
+// own. A lowered capacity lets current runs finish and admits none until the
+// count is under it.
+func (t *trickplayWork) start(capacity int) bool {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.running >= max(1, capacity) {
+		return false
+	}
+	t.running++
+	return true
+}
+
+func (t *trickplayWork) done() {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.running--
+}
+
+// backend resolves the accelerator for accel and device, the node's current
+// playback.hw_accel and playback.hw_device.
+func (t *trickplayWork) backend(ctx context.Context, ffmpeg, accel, device string) (string, string) {
+	hardware := t.resolver()
+	t.resolving.Lock()
+	defer t.resolving.Unlock()
+	hardware.Set(accel, device)
+	return hardware.Backend(ctx, ffmpeg)
 }
 
 func (t *trickplayWork) resolver() *mediasample.HardwareResolver {
@@ -41,9 +76,10 @@ func (t *trickplayWork) resolver() *mediasample.HardwareResolver {
 }
 
 // handleTrickplayExtract runs one mediasample Sheets request for the API
-// server and returns its sheets. The node takes one such run at a time and
-// answers 503 node_busy past that, runs it at idle priority, and decodes on
-// its own hardware: hardware attempts it cannot run are dropped.
+// server and returns its sheets. The node takes up to
+// playback.trickplay_node_capacity such runs at once and answers 503
+// node_busy past that, runs them at idle priority, and decodes on its own
+// hardware: hardware attempts it cannot run are dropped.
 func (s *Server) handleTrickplayExtract(w http.ResponseWriter, r *http.Request) {
 	defer s.trackInFlight()()
 	var req mediasample.Request
@@ -67,11 +103,11 @@ func (s *Server) handleTrickplayExtract(w http.ResponseWriter, r *http.Request) 
 		writeTrickplayError(w, http.StatusServiceUnavailable, trickplay.ExtractError{Reason: trickplay.NodeUnavailableReason, Message: "node not configured"})
 		return
 	}
-	if !s.trickplay.busy.TryLock() {
-		writeTrickplayError(w, http.StatusServiceUnavailable, trickplay.ExtractError{Reason: trickplay.NodeBusyReason, Message: "node is already making trickplay sheets"})
+	if !s.trickplay.start(cfg.Playback.TrickplayNodeCapacity) {
+		writeTrickplayError(w, http.StatusServiceUnavailable, trickplay.ExtractError{Reason: trickplay.NodeBusyReason, Message: "node is at its trickplay run capacity"})
 		return
 	}
-	defer s.trickplay.busy.Unlock()
+	defer s.trickplay.done()
 	s.activeJobs.Add(1)
 	defer s.activeJobs.Add(-1)
 	// Backend resolution can smoke-encode after the shared probe cache is
@@ -88,9 +124,7 @@ func (s *Server) handleTrickplayExtract(w http.ResponseWriter, r *http.Request) 
 	if accel == "" {
 		accel = trickplayAutoAccel
 	}
-	hardware := s.trickplay.resolver()
-	hardware.Set(accel, cfg.Playback.HWDevice)
-	resolved, device := hardware.Backend(r.Context(), ffmpeg)
+	resolved, device := s.trickplay.backend(r.Context(), ffmpeg, accel, cfg.Playback.HWDevice)
 	runner := mediasample.Runner{FFmpegPath: ffmpeg, Workload: processmetrics.Trickplay}
 	if mediasample.SupportsHardwareSheets(resolved) {
 		runner.HWAccel, runner.HWDevice = resolved, device
@@ -153,7 +187,7 @@ func ProtocolTrickplayExtraction(schemas huma.Registry) workerprotocol.Operation
 	return workerprotocol.Operation{
 		Listener: listener, Method: http.MethodPost, Path: "/trickplay/extract",
 		Handler: "(*internal/transcodenode.Server).handleTrickplayExtract", AuthClass: bearerClass,
-		Description: "Make trickplay sprite sheets for a mediasample Sheets request of samples on an approved input path, one run at a time, at idle priority, on the node's own hardware. No durable replay receipt; the API server keeps the lease and retries elsewhere.",
+		Description: "Make trickplay sprite sheets for a mediasample Sheets request of samples on an approved input path, up to the node's configured number of runs at once, at idle priority, on the node's own hardware. No durable replay receipt; the API server keeps the lease and retries elsewhere.",
 		RetrySafety: nonRetryable,
 		RequestBody: &huma.RequestBody{Required: true, Content: map[string]*huma.MediaType{jsonMedia: {Schema: request}}},
 		Responses: map[string]*huma.Response{
@@ -161,7 +195,7 @@ func ProtocolTrickplayExtraction(schemas huma.Registry) workerprotocol.Operation
 			"400": {Description: "Invalid request or unapproved input path", Content: map[string]*huma.MediaType{jsonMedia: problem, textMedia: text}},
 			"401": {Description: http.StatusText(http.StatusUnauthorized), Content: map[string]*huma.MediaType{textMedia: text}},
 			"422": {Description: "Sampling failed; permanent names a cause in the file itself", Content: map[string]*huma.MediaType{jsonMedia: problem}},
-			"503": {Description: "Node busy with another trickplay run, re-probing, or unconfigured", Content: map[string]*huma.MediaType{jsonMedia: problem, textMedia: text}},
+			"503": {Description: "Node at its trickplay run capacity, re-probing, or unconfigured", Content: map[string]*huma.MediaType{jsonMedia: problem, textMedia: text}},
 		},
 	}
 }

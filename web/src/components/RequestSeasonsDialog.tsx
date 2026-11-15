@@ -24,6 +24,7 @@ import {
   upcomingRequestSeasons,
 } from "@/lib/mediaRequests";
 import { cn } from "@/lib/utils";
+import { useT, type Translate } from "@/i18n";
 
 interface RequestSeasonsDialogProps {
   open: boolean;
@@ -49,6 +50,7 @@ export function RequestSeasonsDialog({
   title,
   detail: givenDetail,
 }: RequestSeasonsDialogProps) {
+  const t = useT();
   const loaded = useRequestMediaDetail("series", tmdbID, { enabled: open && !givenDetail });
   const detail = givenDetail ?? loaded.data;
   // A reopened dialog can show the detail from before a request until the
@@ -97,29 +99,29 @@ export function RequestSeasonsDialog({
     <Dialog open={open} onOpenChange={close}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>Request seasons</DialogTitle>
+          <DialogTitle>{t("web.requests.seasons.title")}</DialogTitle>
           <DialogDescription>
             {requestable || !detail
-              ? `Choose the seasons of ${detail?.title ?? title} to request.`
-              : unavailableReason(detail.request.reason)}
+              ? t("web.requests.seasons.choose", { title: detail?.title ?? title })
+              : unavailableReason(t, detail.request.reason)}
           </DialogDescription>
         </DialogHeader>
 
         {!detail ? (
           <div className="text-muted-foreground flex items-center justify-center gap-2 py-10 text-sm">
             {loaded.isError ? (
-              "Could not load the seasons of this series."
+              t("web.requests.seasons.loadFailed")
             ) : (
               <>
                 <Loader2 className="size-4 animate-spin" aria-hidden="true" />
-                Loading seasons…
+                {t("web.requests.seasons.loading")}
               </>
             )}
           </div>
         ) : seasons.length === 0 ? (
           requestable ? (
             <p className="text-muted-foreground py-6 text-center text-sm">
-              TMDB lists no seasons for this series yet; the request covers the whole series.
+              {t("web.requests.seasons.noSeasons")}
             </p>
           ) : null
         ) : (
@@ -127,20 +129,20 @@ export function RequestSeasonsDialog({
             {picked === null && defaults.length === 0 && choices.length > 0 ? (
               <p className="text-muted-foreground text-sm">
                 {inLibrary
-                  ? "Pick the upcoming seasons to request."
-                  : "No season has aired yet, so the request covers the whole series unless you pick seasons."}
+                  ? t("web.requests.seasons.pickUpcoming")
+                  : t("web.requests.seasons.noneAired")}
               </p>
             ) : null}
             {choices.length > 1 && (latest !== null || upcoming.length > 0) ? (
               <div className="flex flex-wrap gap-2">
                 {latest !== null ? (
                   <Button variant="outline" size="sm" onClick={() => setPicked([latest])}>
-                    Latest season
+                    {t("web.requests.seasons.latest")}
                   </Button>
                 ) : null}
                 {upcoming.length > 0 ? (
                   <Button variant="outline" size="sm" onClick={() => setPicked(upcoming)}>
-                    Upcoming seasons
+                    {t("web.requests.seasons.upcoming")}
                   </Button>
                 ) : null}
               </div>
@@ -154,7 +156,7 @@ export function RequestSeasonsDialog({
                       setPicked(on ? choices.map((s) => s.season_number) : [])
                     }
                   />
-                  All seasons
+                  {t("web.requests.seasons.all")}
                 </label>
               ) : null}
               <ul className="divide-border divide-y">
@@ -176,11 +178,15 @@ export function RequestSeasonsDialog({
                           }
                           disabled={!choosable}
                           onCheckedChange={(on) => toggle(season.season_number, on)}
-                          aria-label={`Season ${season.season_number}`}
+                          aria-label={t("web.requests.seasons.season", {
+                            number: season.season_number,
+                          })}
                           aria-describedby={`${metaID} ${statusID}`}
                         />
                         <span className="min-w-0 flex-1">
-                          <span className="block truncate font-medium">{seasonName(season)}</span>
+                          <span className="block truncate font-medium">
+                            {seasonName(t, season)}
+                          </span>
                           <span id={metaID} className="text-muted-foreground block text-xs">
                             {formatRequestSeasonMeta(season)}
                           </span>
@@ -197,7 +203,7 @@ export function RequestSeasonsDialog({
 
         <DialogFooter>
           <Button variant="outline" onClick={() => close(false)}>
-            Cancel
+            {t("common.cancel")}
           </Button>
           <Button
             onClick={submit}
@@ -212,10 +218,10 @@ export function RequestSeasonsDialog({
           >
             {(createRequest.isPending || refreshing) && <Loader2 className="size-4 animate-spin" />}
             {selected.length > 0
-              ? `Request ${formatSeasonList(selected)}`
+              ? t("web.requests.seasons.requestSeasons", { seasons: formatSeasonList(selected) })
               : serverChooses
-                ? "Request series"
-                : "Request"}
+                ? t("web.requests.seasons.requestSeries")
+                : t("web.requests.request")}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -223,20 +229,24 @@ export function RequestSeasonsDialog({
   );
 }
 
-function seasonName(season: RequestMediaSeason): string {
-  const number = `Season ${season.season_number}`;
-  return season.name && season.name !== number ? `${number}: ${season.name}` : number;
+function seasonName(t: Translate, season: RequestMediaSeason): string {
+  const numberText = String(season.season_number);
+  const number = t("web.requests.seasons.season", { number: season.season_number });
+  // TMDB's generic name is English ("Season 2"); compare with that, not the translation.
+  return season.name && season.name !== `Season ${numberText}` && season.name !== number
+    ? t("web.requests.seasons.seasonNamed", { number: season.season_number, name: season.name })
+    : number;
 }
 
 /** Why no season can be picked, for a series the viewer cannot request now. */
-function unavailableReason(reason?: string): string {
+function unavailableReason(t: Translate, reason?: string): string {
   switch (reason) {
     case "already_available":
-      return "Every season is already in the library.";
+      return t("web.requests.seasons.allAvailable");
     case "already_requested":
-      return "This series already has an open request.";
+      return t("web.requests.seasons.alreadyRequested");
     default:
-      return `${formatRequestReason(reason)}.`;
+      return t("web.requests.seasons.reason", { reason: formatRequestReason(reason) });
   }
 }
 
@@ -250,18 +260,19 @@ export function SeasonStatus({
   className?: string;
   id?: string;
 }) {
+  const t = useT();
   const label =
     season.availability === "available"
-      ? "In library"
+      ? t("web.requests.seasons.inLibrary")
       : season.requested
-        ? "Requested"
+        ? t("web.requests.seasons.requested")
         : season.availability === "partial"
-          ? "Partly in library"
+          ? t("web.requests.seasons.partlyInLibrary")
           : seasonHasAired(season)
             ? null
             : season.air_date && season.episode_count > 0
-              ? "Not aired yet"
-              : "Not announced";
+              ? t("web.requests.seasons.notAired")
+              : t("web.requests.seasons.notAnnounced");
   if (!label) return null;
   return (
     <span

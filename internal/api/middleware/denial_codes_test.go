@@ -181,18 +181,9 @@ func TestGateDenialCodesThroughMiddleware(t *testing.T) {
 		r := httptest.NewRequest(http.MethodGet, "/x", nil)
 		r = r.WithContext(SetClaims(r.Context(), &auth.Claims{UserID: 1, Role: "user", SessionID: "s"}))
 		rec := newReasonWriter()
-		RequireActingAdmin(nil, nil)(ok).ServeHTTP(rec, r)
+		RequireActingAdminWith(NewActingAdminDecider(nil, nil))(ok).ServeHTTP(rec, r)
 		got := decodeDenial(t, rec)
 		if rec.Code != http.StatusForbidden || got.Error != "forbidden" {
-			t.Fatalf("%d %q", rec.Code, got.Error)
-		}
-	})
-
-	t.Run("demo restricted", func(t *testing.T) {
-		rec := newReasonWriter()
-		writeDemoBlocked(rec)
-		got := decodeDenial(t, rec)
-		if rec.Code != http.StatusForbidden || got.Error != "demo_restricted" {
 			t.Fatalf("%d %q", rec.Code, got.Error)
 		}
 	})
