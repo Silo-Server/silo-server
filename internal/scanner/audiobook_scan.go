@@ -346,10 +346,72 @@ func cleanAudiobookRoot(root string) string {
 	return clean
 }
 
+// audiobookScope is a scoped walk root with the ignore rules it starts from,
+// read while resolving it (see audiobookScopeRoot).
+type audiobookScope struct {
+	rules   []ignoreRules
+	ignored bool
+	err     error
+}
+
+// audiobookScopeRoot returns the folder a scoped scan of scope walks, with the
+// ignore rules inherited from above that folder and whether they skip it. A
+// library walk stops at the first folder holding audio below the innermost
+// configured root that contains scope, so a scope inside that folder is lifted
+// to it. Ancestors are read once, outermost first, and the pass stops at that
+// book, so an unreadable folder below it cannot fail the scope. An ancestor
+// the walk does not enter, such as a symlink back to a folder above it, keeps
+// the scope as it is.
+func audiobookScopeRoot(scope string, libraryRoots []string) (string, audiobookScope) {
+	inner := scopeLibraryRoot(scope, libraryRoots)
+	root := scope
+	entered := make(map[string]bool)
+	unreachable := false
+	rules, ignored, err := ancestorIgnoreRules(scope, libraryRoots, fspath.ReadDir, false, func(dir string, rules []ignoreRules, entries []os.DirEntry) bool {
+		if unreachable || inner == "" || !pathWithinAnyRoot(dir, []string{inner}) {
+			return false
+		}
+		canonical, err := canonicalWalkPath(dir)
+		if err != nil || entered[canonical] {
+			unreachable = true
+			return false
+		}
+		entered[canonical] = true
+		if dir == inner || !audiobookDirHoldsAudio(dir, rules, entries) {
+			return false
+		}
+		root = dir
+		return true
+	})
+	return root, audiobookScope{rules: rules, ignored: ignored, err: err}
+}
+
+// audiobookDirHoldsAudio reports whether a walk of dir would count one of its
+// entries as audio, so dir is a book.
+func audiobookDirHoldsAudio(dir string, rules []ignoreRules, entries []os.DirEntry) bool {
+	for _, entry := range entries {
+		if entry.IsDir() || !SupportsAudioFile(entry.Name()) {
+			continue
+		}
+		child := filepath.Join(dir, entry.Name())
+		if ignoreRulesMatch(rules, child, false) {
+			continue
+		}
+		if entry.Type()&os.ModeSymlink != 0 {
+			if info, err := fspath.Stat(child); err != nil || info.IsDir() {
+				continue
+			}
+		}
+		return true
+	}
+	return false
+}
+
 // collectAudiobookRootScans walks each root, plus every configured library root
 // inside one, since a library scan walks every configured root. Only a
 // configured root keeps discovery going below its own loose audio; any other
-// walk root holding audio is a book, as a library scan finds it. A walk that
+// walk root holding audio is a book, as a library scan finds it, and a root
+// inside such a book walks the book instead (audiobookScopeRoot). A walk that
 // reads no ignore files also keeps going below its root: it cannot tell whether
 // a library scan would skip that audio and descend.
 func collectAudiobookRootScans(ctx context.Context, folderID int, roots, libraryRoots []string, honorIgnores bool) ([]audiobookRootScan, error) {
@@ -360,10 +422,16 @@ func collectAudiobookRootScans(ctx context.Context, folderID int, roots, library
 		}
 	}
 	walkRoots := make([]string, 0, len(roots))
+	scopes := make(map[string]audiobookScope)
 	for _, root := range roots {
 		cleanRoot := cleanAudiobookRoot(root)
 		if cleanRoot == "" {
 			continue
+		}
+		if honorIgnores && !slices.Contains(configured, cleanRoot) {
+			var scope audiobookScope
+			cleanRoot, scope = audiobookScopeRoot(cleanRoot, libraryRoots)
+			scopes[cleanRoot] = scope
 		}
 		walkRoots = append(walkRoots, cleanRoot)
 		for _, nested := range configured {
@@ -402,7 +470,11 @@ func collectAudiobookRootScans(ctx context.Context, folderID int, roots, library
 		var rules []ignoreRules
 		var ignored bool
 		if scan.rootErr == nil && honorIgnores {
-			rules, ignored, scan.rootErr = scanRootIgnoreRules(cleanRoot, libraryRoots)
+			if scope, ok := scopes[cleanRoot]; ok {
+				rules, ignored, scan.rootErr = scope.rules, scope.ignored, scope.err
+			} else {
+				rules, ignored, scan.rootErr = scanRootIgnoreRules(cleanRoot, libraryRoots)
+			}
 		}
 		if scan.rootErr == nil && !ignored {
 			walkErr := walkAudiobookDirectories(ctx, cleanRoot, &scan, make(map[string]bool), rules, honorIgnores, fspath.ReadDir)
