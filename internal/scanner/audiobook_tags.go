@@ -168,10 +168,10 @@ var (
 	// prefix: nothing, or a position in digits or Roman numerals.
 	audiobookSeriesPositionRE = regexp.MustCompile(`(?i)^(?:[\s,]+(?:(?:book|bk|volume|vol|number|no|part|pt)\b\.?\s*)?#?\s*(\d+(?:\.\d+)?|[ivxlc]+))?$`)
 	// audiobookTrailingPositionRE matches a series position ending a
-	// subtitle: "..., Book 1", "... #3", "Vol. 2", "Book III". A Roman
-	// numeral counts only after a marker word; endsInSeriesPosition checks
-	// that it is a well-formed one.
-	audiobookTrailingPositionRE = regexp.MustCompile(`(?i)(?:#\s*\d+(?:\.\d+)?|\b(?:book|bk|volume|vol|number|no|part|pt)\b\.?\s*#?\s*(?:\d+(?:\.\d+)?|([ivxlc]+)))\s*$`)
+	// subtitle: "..., Book 1", "... #3", "Vol. 2", "Book III", "(Book 1)".
+	// A Roman numeral counts only after a marker word; endsInSeriesPosition
+	// checks that it is a well-formed one.
+	audiobookTrailingPositionRE = regexp.MustCompile(`(?i)(?:#\s*\d+(?:\.\d+)?|\b(?:book|bk|volume|vol|number|no|part|pt)\b\.?\s*#?\s*(?:\d+(?:\.\d+)?|([ivxlc]+)))\s*[)\]]?\s*$`)
 )
 
 // endsInSeriesPosition reports whether text ends in a series position, as
