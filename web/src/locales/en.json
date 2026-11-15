@@ -30379,6 +30379,12 @@
       "value": "Failed to load stream history."
     }
   ],
+  "web.admin.dashboard.widgets.concurrentStreams.otherMethod": [
+    {
+      "type": 0,
+      "value": "Other"
+    }
+  ],
   "web.admin.dashboard.widgets.concurrentStreams.peak": [
     {
       "type": 0,
@@ -30399,6 +30405,42 @@
     {
       "type": 0,
       "value": "Concurrent streams"
+    }
+  ],
+  "web.admin.dashboard.widgets.concurrentStreams.viewLines": [
+    {
+      "type": 0,
+      "value": "Lines"
+    }
+  ],
+  "web.admin.dashboard.widgets.concurrentStreams.viewLinesLabel": [
+    {
+      "type": 0,
+      "value": "Show each playback method as a line"
+    }
+  ],
+  "web.admin.dashboard.widgets.concurrentStreams.viewStacked": [
+    {
+      "type": 0,
+      "value": "Stacked"
+    }
+  ],
+  "web.admin.dashboard.widgets.concurrentStreams.viewStackedLabel": [
+    {
+      "type": 0,
+      "value": "Show playback methods stacked"
+    }
+  ],
+  "web.admin.dashboard.widgets.concurrentStreams.viewTotal": [
+    {
+      "type": 0,
+      "value": "Total"
+    }
+  ],
+  "web.admin.dashboard.widgets.concurrentStreams.viewTotalLabel": [
+    {
+      "type": 0,
+      "value": "Show total streams only"
     }
   ],
   "web.admin.dashboard.widgets.downloads.empty": [

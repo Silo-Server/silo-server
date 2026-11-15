@@ -67,14 +67,11 @@ import {
   useSensors,
 } from "@dnd-kit/core";
 import type { DragStartEvent, DragEndEvent } from "@dnd-kit/core";
-import {
-  SortableContext,
-  verticalListSortingStrategy,
-  useSortable,
-  arrayMove,
-} from "@dnd-kit/sortable";
+import { SortableContext, verticalListSortingStrategy, arrayMove } from "@dnd-kit/sortable";
 import { sortableKeyboardCoordinates } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
+import { useMotionSafeOverlay, useMotionSafeSortable } from "@/hooks/useSortableList";
+import { useMotionScrollBehavior } from "@/hooks/usePrefersReducedMotion";
 
 function sortLibrariesByOrder(libraries: UserLibrary[], ids: number[]) {
   const selected = new Set(ids);
@@ -223,9 +220,10 @@ function LanguageField({
 
 function SortableLibraryCard({ id, children }: { id: number; children: React.ReactNode }) {
   const t = useT();
-  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
-    id,
-  });
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
+    useMotionSafeSortable({
+      id,
+    });
 
   const style: React.CSSProperties = {
     transform: CSS.Transform.toString(transform),
@@ -528,10 +526,15 @@ export default function LibrarySettings() {
   const [disabledLibraryIDs, setDisabledLibraryIDs] = useState<number[]>([]);
   const [orderedLibraries, setOrderedLibraries] = useState<UserLibrary[]>([]);
   const [activeId, setActiveId] = useState<number | null>(null);
+  const scrollBehavior = useMotionScrollBehavior();
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
-    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+    useSensor(KeyboardSensor, {
+      coordinateGetter: sortableKeyboardCoordinates,
+      scrollBehavior,
+    }),
   );
+  const overlayMotion = useMotionSafeOverlay();
 
   useEffect(() => {
     // Keep the editable local order in sync with the latest saved setting.
@@ -742,7 +745,7 @@ export default function LibrarySettings() {
             })}
           </div>
         </SortableContext>
-        <DragOverlay>
+        <DragOverlay {...overlayMotion}>
           {activeLibrary ? (
             <div className="surface-panel flex items-center gap-3 rounded-[1.5rem] px-4 py-4 shadow-lg">
               <GripVertical className="text-muted-foreground h-4 w-4" />

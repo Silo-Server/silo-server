@@ -128,14 +128,15 @@ type parsedAudiobookFile struct {
 // ffprobe binary that cannot be executed) is a real failure and must be
 // reported by the caller.
 // allowedPaths is the inventory accepted by discovery, including ignore rules.
-// A nil inventory allows every audio file in the folder.
-func parseAudiobookFolder(ctx context.Context, ffprobePath string, folderPath string, allowedPaths map[string]bool) (*parsedAudiobook, error) {
-	audioFiles, err := audiobookBookParts(folderPath, allowedPaths)
-	if err != nil {
-		return nil, err
-	}
-
-	return parseAudiobookParts(ctx, ffprobePath, folderPath, audioFiles)
+// A nil inventory allows every audio file in the folder. walked, when set, is
+// what the walk read of the folder (audiobookWalkedBook.partsOrRelist).
+func parseAudiobookFolder(ctx context.Context, ffprobePath string, folderPath string, allowedPaths map[string]bool, walked *audiobookWalkedBook) (*parsedAudiobook, error) {
+	var book *parsedAudiobook
+	err := walked.partsOrRelist(folderPath, allowedPaths, func(parts []string) (err error) {
+		book, err = parseAudiobookParts(ctx, ffprobePath, folderPath, parts)
+		return err
+	})
+	return book, err
 }
 
 // probedAudiobookPart is one readable part of a book with the format tags
@@ -279,9 +280,8 @@ func (e *noReadableAudiobookPartError) Error() string {
 // populateFromTags fills the audiobook's header fields from the ffprobe
 // format tags. Tags are lower-cased by normalizeFormatTags upstream.
 func (b *parsedAudiobook) populateFromTags(tags map[string]string) {
-	b.Title = firstNonEmpty(tags["title"], tags["album"])
 	b.Authors = splitAudiobookCredits(firstNonEmpty(tags["album_artist"], tags["artist"], tags["composer"]))
-	b.Narrators = splitAudiobookCredits(firstNonEmpty(tags["narrator"], tags["performer"], tags["composer"]))
+	b.Narrators = audiobookTagNarrators(tags, b.Authors)
 	b.Author, b.Narrator = "", ""
 	if len(b.Authors) > 0 {
 		b.Author = b.Authors[0]
@@ -304,6 +304,7 @@ func (b *parsedAudiobook) populateFromTags(tags map[string]string) {
 			b.SeriesPosition = groupPosition
 		}
 	}
+	b.Title = audiobookTagTitle(tags["title"], tags["album"], b.Series)
 	b.ASIN = firstNonEmpty(tags["asin"], tags["audible_asin"], tags["com.audible.asin"])
 	// ffprobe reports an M4B's long description (ldes) as "synopsis" and the
 	// short one (desc, at most 255 characters) as "description".

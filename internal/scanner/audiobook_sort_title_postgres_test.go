@@ -53,7 +53,7 @@ VALUES ($1,'audiobook','The Hobbit','','local','{}'::text[],$2)`, id, tc.locked)
 				t.Fatal(err)
 			}
 			defer func() { _ = tx.Rollback(context.Background()) }()
-			if err := s.upsertAudiobookPresentationTx(ctx, tx, folder, id, dir, book, time.Time{}); err != nil {
+			if err := s.upsertAudiobookPresentationTx(ctx, tx, folder, id, dir, canonicalTestPath(t, dir), book, time.Time{}); err != nil {
 				t.Fatal(err)
 			}
 			if err := tx.Commit(ctx); err != nil {

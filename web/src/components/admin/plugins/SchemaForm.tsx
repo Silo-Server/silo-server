@@ -314,7 +314,7 @@ export function SchemaForm({
       return (
         <textarea
           id={id}
-          className="border-border bg-background min-h-24 w-full rounded-md border px-3 py-2 text-sm"
+          className="border-input bg-background min-h-24 w-full rounded-md border px-3 py-2 text-sm"
           rows={field.rows && field.rows > 0 ? field.rows : 4}
           value={String(effectiveValue(field, values) ?? "")}
           placeholder={field.placeholder}

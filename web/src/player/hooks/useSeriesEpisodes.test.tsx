@@ -70,7 +70,10 @@ async function playing(seasonNumber: number, episodeNumber: number) {
         currentEpisode: episodeNumber,
         episodes,
       };
-      const { nextEpisode } = useNextEpisode(null, context, 0, vi.fn());
+      const { nextEpisode } = useNextEpisode(null, context, 0, vi.fn(), {
+        autoPlay: true,
+        playing: true,
+      });
       return { episodes, isLoading, nextEpisode };
     },
     { wrapper },

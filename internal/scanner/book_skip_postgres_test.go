@@ -57,6 +57,17 @@ func (bookQueryTracer) TraceQueryEnd(ctx context.Context, _ *pgx.Conn, _ pgx.Tra
 		counts.literaryElapsed += elapsed
 	}
 }
+
+// canonicalTestPath is path as the scanner resolves a book root.
+func canonicalTestPath(t testing.TB, path string) string {
+	t.Helper()
+	physical, err := canonicalWalkPath(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return physical
+}
+
 func newBookScanTestPool(t testing.TB) *pgxpool.Pool {
 	t.Helper()
 	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
@@ -170,7 +181,7 @@ func TestUnchangedBooksDoNotQueryLiteraryWorks(t *testing.T) {
 			if kind == "ebooks" {
 				err = s.reconcileEbookFile(ctx, folder, paths[0], &skipped, newEbookGroupLocks())
 			} else {
-				err = s.reconcileAudiobookFolder(ctx, folder, paths[0], nil, time.Time{}, &skipped, nil)
+				err = s.reconcileAudiobookFolder(ctx, folder, paths[0], nil, nil, time.Time{}, &skipped, nil)
 			}
 			if err != nil {
 				t.Fatal(err)
@@ -404,7 +415,7 @@ func TestAudiobookRuntimeTakesLongestCopyPostgres(t *testing.T) {
 				t.Fatal(err)
 			}
 			defer func() { _ = tx.Rollback(context.Background()) }()
-			if err := s.upsertAudiobookPresentationTx(ctx, tx, folder, id, dir, book, time.Time{}); err != nil {
+			if err := s.upsertAudiobookPresentationTx(ctx, tx, folder, id, dir, canonicalTestPath(t, dir), book, time.Time{}); err != nil {
 				t.Fatal(err)
 			}
 			if err := tx.Commit(ctx); err != nil {
@@ -566,7 +577,7 @@ VALUES ($1,$2,$3,$4,$4,4,$5)`, id, folder.ID, path, root, seconds); err != nil {
 		t.Fatal(err)
 	}
 	defer func() { _ = first.Rollback(context.Background()) }()
-	if err := s.upsertAudiobookPresentationTx(ctx, first, folder, id, roots[0], books[0], time.Time{}); err != nil {
+	if err := s.upsertAudiobookPresentationTx(ctx, first, folder, id, roots[0], canonicalTestPath(t, roots[0]), books[0], time.Time{}); err != nil {
 		t.Fatal(err)
 	}
 	second, err := pool.Begin(ctx)
@@ -575,8 +586,9 @@ VALUES ($1,$2,$3,$4,$4,4,$5)`, id, folder.ID, path, root, seconds); err != nil {
 	}
 	defer func() { _ = second.Rollback(context.Background()) }()
 	done := make(chan error, 1)
+	secondRoot := canonicalTestPath(t, roots[1])
 	go func() {
-		err := s.upsertAudiobookPresentationTx(ctx, second, folder, id, roots[1], books[1], time.Time{})
+		err := s.upsertAudiobookPresentationTx(ctx, second, folder, id, roots[1], secondRoot, books[1], time.Time{})
 		if err == nil {
 			err = second.Commit(ctx)
 		}

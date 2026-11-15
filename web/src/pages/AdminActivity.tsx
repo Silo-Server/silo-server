@@ -67,6 +67,7 @@ import { formatDateTime, formatTime } from "@/lib/datetime";
 import { formatLocale } from "@/lib/appLocale";
 import { codeNumber, englishText, numberText, type TextValues, type Translate, useT } from "@/i18n";
 import type { MessageKey } from "@/locales/keys";
+import { motionScrollBehavior } from "@/hooks/usePrefersReducedMotion";
 
 type SortField = "username" | "media" | "method" | "node" | "started";
 type SortDir = "asc" | "desc";
@@ -265,7 +266,7 @@ export default function AdminActivity() {
     setActiveIP(trimmed);
     setIPLookupOpen(true);
     window.requestAnimationFrame(() => {
-      ipLookupRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+      ipLookupRef.current?.scrollIntoView({ behavior: motionScrollBehavior(), block: "nearest" });
     });
   }, []);
 
@@ -533,6 +534,7 @@ export default function AdminActivity() {
           {search && (
             <button
               onClick={() => setSearch("")}
+              aria-label={t("web.admin.users.list.clearSearch")}
               className="text-muted-foreground hover:text-foreground absolute end-2.5 top-1/2 -translate-y-1/2"
             >
               <X className="h-3.5 w-3.5" />

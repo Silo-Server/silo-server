@@ -66,6 +66,12 @@ export interface LineChartProps {
   fill?: boolean;
   /** Categorical slot for the series color; single-series charts stay on slot 0. */
   seriesIndex?: number;
+  /**
+   * A color for the primary series that is not a categorical slot, such as a
+   * neutral token for a total drawn under overlays that take the slots.
+   * Overrides `seriesIndex`.
+   */
+  color?: string;
   /** Series name for the hover readout. */
   seriesLabel?: string;
   formatValue?: (value: number) => string;
@@ -121,6 +127,7 @@ export function LineChart({
   height = 160,
   fill = false,
   seriesIndex = 0,
+  color: colorProp,
   seriesLabel: seriesLabelProp,
   formatValue = defaultFormatValue,
   formatTick,
@@ -135,7 +142,7 @@ export function LineChart({
   const t = useT();
   const seriesLabel = seriesLabelProp ?? t("web.admin.dashboard.chart.value");
   const [activeIndex, setActiveIndex] = useState<number | null>(null);
-  const color = chartSeriesColor(seriesIndex);
+  const color = colorProp ?? chartSeriesColor(seriesIndex);
   const { ref: plotRef, size: plotSize } = useMeasuredSize<HTMLDivElement>();
   const viewWidth = plotSize && plotSize.width > 0 ? plotSize.width : VIEW_WIDTH;
   const viewHeight = plotSize && plotSize.height > 0 ? plotSize.height : VIEW_HEIGHT;

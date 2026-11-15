@@ -146,3 +146,82 @@ it("lets a refetch's 404 replace a task that was already cached", async () => {
   ).toBeInTheDocument();
   expect(screen.queryByText("Retired task")).not.toBeInTheDocument();
 });
+
+function renderScheduleEditor(triggers: Array<{ type: "interval"; interval_ms: number }>) {
+  const writes: unknown[] = [];
+  vi.stubGlobal(
+    "fetch",
+    vi.fn<typeof fetch>(async (url, init) => {
+      const path = String(url);
+      if (path.endsWith("/triggers")) {
+        if (init?.method === "PUT") {
+          writes.push(JSON.parse(String(init.body)));
+          return jsonResponse({ task_key: "fixture", triggers: [] });
+        }
+        return new Response(JSON.stringify({ task_key: "fixture", triggers }), {
+          status: 200,
+          headers: { "Content-Type": "application/json", ETag: '"revision-1"' },
+        });
+      }
+      if (path.includes("/history")) return jsonResponse({ items: [], page: { has_more: false } });
+      return jsonResponse({
+        key: "fixture",
+        name: "Fixture task",
+        description: "Task description",
+        category: "system",
+        state: "idle",
+        progress: 0,
+        manual_only: false,
+        triggers: [],
+        execution_scope: "process",
+      });
+    }),
+  );
+  render(
+    <QueryClientProvider
+      client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}
+    >
+      <MemoryRouter initialEntries={["/admin/tasks/fixture"]}>
+        <Routes>
+          <Route path="/admin/tasks/:key" element={<AdminTaskDetail />} />
+        </Routes>
+      </MemoryRouter>
+    </QueryClientProvider>,
+  );
+  return writes;
+}
+
+it("keeps a typed interval in the unit the admin picked, and an emptied box empty", async () => {
+  const writes = renderScheduleEditor([{ type: "interval", interval_ms: 120_000 }]);
+  fireEvent.click(await screen.findByRole("button", { name: "Edit Schedule" }));
+  // Each row has an interval box and a max runtime box.
+  const input = (await screen.findAllByRole("spinbutton"))[0] as HTMLInputElement;
+  const save = screen.getByRole("button", { name: "Save" }) as HTMLButtonElement;
+
+  fireEvent.change(input, { target: { value: "60" } });
+  expect(input.value).toBe("60");
+  expect(screen.getAllByRole("combobox")[1]).toHaveTextContent("Minutes");
+
+  fireEvent.change(input, { target: { value: "" } });
+  expect(input.value).toBe("");
+  expect(save.disabled).toBe(true);
+
+  fireEvent.change(input, { target: { value: "90" } });
+  fireEvent.click(save);
+  await waitFor(() => expect(writes).toHaveLength(1));
+  expect(writes[0]).toEqual({ triggers: [{ type: "interval", interval_ms: 5_400_000 }] });
+});
+
+it("keeps each row's unit when a row above it is removed", async () => {
+  renderScheduleEditor([
+    { type: "interval", interval_ms: 120_000 },
+    { type: "interval", interval_ms: 7_200_000 },
+  ]);
+  fireEvent.click(await screen.findByRole("button", { name: "Edit Schedule" }));
+  await screen.findAllByRole("spinbutton");
+  // The row's remove button is icon-only, so it has no accessible name.
+  fireEvent.click(screen.getAllByRole("button", { name: "" })[0]!);
+
+  expect((screen.getAllByRole("spinbutton")[0] as HTMLInputElement).value).toBe("2");
+  expect(screen.getAllByRole("combobox")[1]).toHaveTextContent("Hours");
+});

@@ -1,4 +1,10 @@
 @import "tailwindcss";
+/* animate-in/animate-out and their fade-/zoom-/slide- modifiers, used by the
+   radix overlay primitives in components/ui. Radix keeps a closing overlay
+   mounted until its exit animation ends. The enter/exit keyframes are
+   replaced in @theme below, which only works while this import stays above
+   it. */
+@import "tw-animate-css";
 
 /* Tailwind v4 wraps every `hover:` and `group-hover:` utility in
    `@media (hover: hover)`. That feature is false on Windows machines whose
@@ -107,6 +113,36 @@
   --animate-slide-up: slide-up 0.3s ease-out;
   --animate-scale-in: scale-in 0.2s cubic-bezier(0.34, 1.56, 0.64, 1);
   --animate-ken-burns-a: ken-burns-a 14s linear infinite;
+
+  /* tw-animate-css's enter/exit keyframes, minus its `filter: blur()` step:
+     nothing here uses the blur modifiers, and animating filter isn't
+     compositor-only. They come after the package's keyframes of the same
+     name, so they are the ones that apply (the production build drops the
+     earlier copy). `--overlay-motion` is unset except under
+     reduced motion, where it is `none`, so overlays fade without sliding or
+     zooming. overlayAnimationCss.test.ts checks the compiled result. */
+  @keyframes enter {
+    from {
+      opacity: var(--tw-enter-opacity, 1);
+      transform: var(
+        --overlay-motion,
+        translate3d(var(--tw-enter-translate-x, 0), var(--tw-enter-translate-y, 0), 0)
+          scale3d(var(--tw-enter-scale, 1), var(--tw-enter-scale, 1), var(--tw-enter-scale, 1))
+          rotate(var(--tw-enter-rotate, 0))
+      );
+    }
+  }
+  @keyframes exit {
+    to {
+      opacity: var(--tw-exit-opacity, 1);
+      transform: var(
+        --overlay-motion,
+        translate3d(var(--tw-exit-translate-x, 0), var(--tw-exit-translate-y, 0), 0)
+          scale3d(var(--tw-exit-scale, 1), var(--tw-exit-scale, 1), var(--tw-exit-scale, 1))
+          rotate(var(--tw-exit-rotate, 0))
+      );
+    }
+  }
 
   /* ── Motion: Duration ──────────────────────────────────────── */
   --duration-instant: 0ms;
@@ -414,6 +450,10 @@ html[data-navigation-direction]::view-transition-new(main-content) {
     --duration-sidebar-entry: 0ms;
     --duration-sidebar-return: 0ms;
     --animate-ken-burns-a: none;
+    /* Overlays (dialogs, sheets, menus, popovers, tooltips) keep their fade
+       but stop sliding and zooming; see the enter/exit keyframes in @theme.
+       The exit animation still runs, so radix unmounts once the fade ends. */
+    --overlay-motion: none;
   }
   .ambient-glow {
     transition: none;
@@ -435,9 +475,62 @@ html[data-navigation-direction]::view-transition-new(main-content) {
   }
 }
 
+/* Forced colors (Windows High Contrast) drops box-shadows and background
+   images and replaces author colours with the user's palette, but keeps the
+   system colours an author sets. These rules are unlayered so they beat the
+   Tailwind utilities. */
 @media (forced-colors: active) {
-  * {
-    forced-color-adjust: auto;
+  /* The shared controls draw focus as a box-shadow ring under `outline-none`,
+     which leaves nothing in forced colors. */
+  :focus-visible {
+    outline: 2px solid Highlight;
+    outline-offset: 2px;
+  }
+
+  /* These controls show their value only with a background colour, which
+     forced colors paints over. */
+  [data-slot="switch"] {
+    border-color: CanvasText;
+  }
+  [data-slot="switch-thumb"],
+  [data-slot="radio-group-indicator"] {
+    background-color: CanvasText;
+  }
+  [data-slot="switch"][data-state="checked"],
+  [data-slot="slider-range"],
+  [data-slot="progress-indicator"] {
+    border-color: Highlight;
+    background-color: Highlight;
+  }
+  [data-slot="switch"][data-state="checked"] [data-slot="switch-thumb"] {
+    background-color: HighlightText;
+  }
+  [data-slot="switch"]:disabled {
+    border-color: GrayText;
+  }
+  [data-slot="switch"]:disabled [data-slot="switch-thumb"] {
+    background-color: GrayText;
+  }
+
+  /* The current page in a navigation list, the selected tab, and the chosen
+     option in a row of radio buttons are marked only by a background colour.
+     Give them the system selection pair. Forced colors draws a Canvas backplate
+     behind text, which would hide HighlightText, so these opt out of forcing
+     and set a system colour on everything inside them. */
+  nav :is(a, button):is([aria-current="page"], [aria-current="true"]),
+  [role="tab"][aria-selected="true"],
+  [role="radio"][aria-checked="true"]:not([data-slot^="radio"]) {
+    forced-color-adjust: none;
+    border-color: Highlight;
+    background-color: Highlight;
+    color: HighlightText;
+  }
+  nav :is(a, button):is([aria-current="page"], [aria-current="true"]) *,
+  [role="tab"][aria-selected="true"] *,
+  [role="radio"][aria-checked="true"]:not([data-slot^="radio"]) * {
+    border-color: currentColor;
+    background-color: transparent;
+    color: inherit;
   }
 }
 
@@ -506,6 +599,10 @@ html[data-navigation-direction]::view-transition-new(main-content) {
      content-focused. White primary creates an elegant, theater-like
      atmosphere where media artwork is the star.                    */
   [data-theme="midnight-cinema"] {
+    /* Browser-drawn UI (page scrollbar, date pickers, select popups, unchecked
+       checkboxes, autofill) follows this, not the tokens below. index.html
+       declares the same scheme so the canvas is dark before CSS loads. */
+    color-scheme: dark;
     --radius: 0.75rem;
     --font-body: "Plus Jakarta Sans", sans-serif;
     --font-display: "Plus Jakarta Sans", sans-serif;
@@ -540,7 +637,10 @@ html[data-navigation-direction]::view-transition-new(main-content) {
 
     /* Borders: barely visible, just enough structure */
     --border-base: #28282e;
-    --input-base: #1c1c20;
+    /* Form-control boundary (text fields, selects, unchecked switch track and
+       checkbox). It is the only edge a field has, so it holds 3:1 (WCAG 1.4.11)
+       against the page, popover and card surfaces; --border stays a hairline. */
+    --input-base: #6a6a74;
     --ring: #e8e8ec;
 
     /* Charts: categorical set validated on this theme's card surface —
@@ -761,6 +861,9 @@ html[data-navigation-direction]::view-transition-new(main-content) {
     font-size: calc(32px * var(--ui-text-scale-factor)) !important;
   }
   html[data-text-scale="large"] .text-\[38px\],
+  html[data-text-scale="x-large"] .text-\[38px\] {
+    font-size: calc(38px * var(--ui-text-scale-factor)) !important;
+  }
   /* Buttons are activatable, so they get the activatable cursor. Declared in
      `base` rather than as a utility, so an explicit `cursor-*` class — a
      disabled player control, a non-interactive tooltip target — still wins. */
@@ -771,9 +874,6 @@ html[data-navigation-direction]::view-transition-new(main-content) {
   button:disabled,
   [role="button"][aria-disabled="true"] {
     cursor: not-allowed;
-  }
-  html[data-text-scale="x-large"] .text-\[38px\] {
-    font-size: calc(38px * var(--ui-text-scale-factor)) !important;
   }
   body {
     background-color: var(--background);
@@ -1938,9 +2038,13 @@ html[data-navigation-direction]::view-transition-new(main-content) {
     }
   }
   @media (prefers-reduced-motion: reduce) {
+    /* No growing bar: full while the slideshow runs, empty while it is stopped. */
     .hero-progress-rail > span {
       animation: none;
       transform: scaleX(1);
+    }
+    .hero-progress-rail[data-paused="true"] > span {
+      transform: scaleX(0);
     }
   }
 
@@ -2147,6 +2251,11 @@ html[data-navigation-direction]::view-transition-new(main-content) {
     animation: scan-accent-sweep 4s ease-in-out infinite;
     opacity: 0.6;
   }
+  @media (prefers-reduced-motion: reduce) {
+    .scan-queue-accent {
+      animation: none;
+    }
+  }
   @keyframes scan-accent-sweep {
     0% {
       background-position: 200% 0;
@@ -2347,6 +2456,11 @@ html[data-navigation-direction]::view-transition-new(main-content) {
     color: #f87171;
     border: 1px solid rgba(255, 60, 60, 0.2);
     animation: pulse-opacity 2s ease-in-out infinite;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .live-badge {
+      animation: none;
+    }
   }
 
   /* ── Progress Bar ────────────────────────────────────────── */

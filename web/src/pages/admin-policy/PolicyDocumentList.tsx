@@ -146,13 +146,16 @@ function PolicyDomainCard({ domain, documents, onSelect }: PolicyDomainCardProps
       </div>
 
       {creating && (
-        <div className="border-border mt-4 flex flex-wrap items-center gap-2 border-t pt-4">
+        <form
+          className="border-border mt-4 flex flex-wrap items-center gap-2 border-t pt-4"
+          onSubmit={(event) => {
+            event.preventDefault();
+            void create();
+          }}
+        >
           <Input
             value={name}
             onChange={(event) => setName(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === "Enter") void create();
-            }}
             placeholder={
               meta.example
                 ? t("web.admin.access.policy.overrides.namePlaceholderExample", {
@@ -164,7 +167,7 @@ function PolicyDomainCard({ domain, documents, onSelect }: PolicyDomainCardProps
             className="max-w-sm"
             autoFocus
           />
-          <Button type="button" size="sm" onClick={create} disabled={createDocument.isPending}>
+          <Button type="submit" size="sm" disabled={createDocument.isPending}>
             {t("web.admin.access.policy.overrides.create")}
           </Button>
           <Button
@@ -179,7 +182,7 @@ function PolicyDomainCard({ domain, documents, onSelect }: PolicyDomainCardProps
           >
             {t("common.cancel")}
           </Button>
-        </div>
+        </form>
       )}
 
       {error && <p className="text-destructive mt-3 text-sm">{error}</p>}

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Direction } from "radix-ui";
+import { motionScrollBehavior } from "@/hooks/usePrefersReducedMotion";
 
 /** Which physical sides of a strip have more past them, in either direction. */
 export interface ScrollEdges {
@@ -89,10 +90,9 @@ export function useScrollStrip<T extends HTMLElement>(
   const page = useCallback((side: "left" | "right") => {
     const el = ref.current;
     if (!el) return;
-    const reduce = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
     el.scrollBy?.({
       left: (side === "left" ? -1 : 1) * el.clientWidth * 0.75,
-      behavior: reduce ? "auto" : "smooth",
+      behavior: motionScrollBehavior(),
     });
   }, []);
 

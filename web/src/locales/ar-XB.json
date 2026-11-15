@@ -32007,6 +32007,12 @@
       "value": "\u200F\u202EFailed to load stream history.\u202C"
     }
   ],
+  "web.admin.dashboard.widgets.concurrentStreams.otherMethod": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EOther\u202C"
+    }
+  ],
   "web.admin.dashboard.widgets.concurrentStreams.peak": [
     {
       "type": 0,
@@ -32027,6 +32033,42 @@
     {
       "type": 0,
       "value": "\u200F\u202EConcurrent streams\u202C"
+    }
+  ],
+  "web.admin.dashboard.widgets.concurrentStreams.viewLines": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ELines\u202C"
+    }
+  ],
+  "web.admin.dashboard.widgets.concurrentStreams.viewLinesLabel": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EShow each playback method as a line\u202C"
+    }
+  ],
+  "web.admin.dashboard.widgets.concurrentStreams.viewStacked": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EStacked\u202C"
+    }
+  ],
+  "web.admin.dashboard.widgets.concurrentStreams.viewStackedLabel": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EShow playback methods stacked\u202C"
+    }
+  ],
+  "web.admin.dashboard.widgets.concurrentStreams.viewTotal": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ETotal\u202C"
+    }
+  ],
+  "web.admin.dashboard.widgets.concurrentStreams.viewTotalLabel": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EShow total streams only\u202C"
     }
   ],
   "web.admin.dashboard.widgets.downloads.empty": [
