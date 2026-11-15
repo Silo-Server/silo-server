@@ -76,6 +76,13 @@ func TestACutReadIsNotAShortFile(t *testing.T) {
 	if _, err := readPlanIndex(cut, 1<<20); err == nil || !transient(err) {
 		t.Fatalf("err = %v, want the read error", err)
 	}
+	// The same for a read that delivered part of a header before it failed.
+	partial := readerAtFunc(func(p []byte, _ int64) (int, error) {
+		return copy(p, []byte{0x1A, 0x45}), &fs.PathError{Op: "read", Path: "source", Err: io.EOF}
+	})
+	if _, err := readPlanIndex(partial, 1<<20); err == nil || !transient(err) {
+		t.Fatalf("partial read err = %v, want the read error", err)
+	}
 }
 
 // The first Load returns the index, video end included, so the first
