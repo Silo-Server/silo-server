@@ -610,10 +610,11 @@ func (e *ItemRefreshExecutor) Execute(ctx context.Context, req ItemRefreshReques
 	if req.Mode == ItemRefreshModeComplete && isSeriesTarget(req.RequestedType) {
 		ingest = e.ingester.IngestUnlinkedSubtree
 	}
-	// A quick or reset refresh reads an audiobook's tags again in place. A
-	// complete refresh has already cleared the scope's content links.
-	if req.Mode != ItemRefreshModeComplete {
-		scanCtx = scanner.WithAudiobookTagReread(scanCtx)
+	// A quick refresh reads the item's tags again in place when it is an
+	// audiobook. A complete refresh has already cleared the scope's content
+	// links, and a reset refresh leaves the tags to the next change.
+	if req.Mode == ItemRefreshModeQuick {
+		scanCtx = scanner.WithAudiobookTagReread(scanCtx, req.RefreshContentID)
 	}
 	ingestResult, err := ingest(scanCtx, folder, req.ScanPath)
 	stopScanHeartbeat()

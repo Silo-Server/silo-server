@@ -63,21 +63,25 @@ Metadata or Match Item.
 
 A scan skips a book whose files match their stored size and modification
 time (`audiobookFolderShouldSkip`), so a change to how tags are read reaches
-an unchanged book only when an admin asks for it. An admin's metadata refresh
-marks its scan with `scanner.WithAudiobookTagReread`, and the scan then
-parses every book it reaches as if its files had changed:
+an unchanged book only when someone asks for it. A metadata refresh marks its
+scan with `scanner.WithAudiobookTagReread` and the content ID it refreshes;
+the scan then parses that book as if its files had changed and skips every
+other unchanged book it reaches, such as loose books beside it at the library
+root. The mark is set by:
 
-- the library Refresh Metadata job (`library_refresh`) in `full` mode, and the
-  manual Refresh All Library Metadata task, which runs that mode for each
-  library;
-- an item's Refresh Metadata in `quick` or `reset` mode.
+- the library Refresh Metadata job (`library_refresh`) in `full` mode, for
+  each item it refreshes, and the manual Refresh All Library Metadata task,
+  which runs that mode for each library;
+- an item's Refresh Metadata in `quick` mode, which an admin or a metadata
+  curator can start.
 
 The book keeps its item: the scan finds it by the root path of its stored
 files, so the content ID, file rows, series row, progress, and favorites
 stay, and the ownership rules above decide which fields the tags write.
 Scheduled and library scans, real-time monitoring, and autoscan never set
-the mark. An item's `complete` refresh clears the files' content links before
-it scans, so the book gets a new item. Ebook scans ignore the mark.
+the mark, and neither do `reset` and `complete` item refreshes. A `complete`
+refresh clears the files' content links before it scans, so the book gets a
+new item. Ebook scans ignore the mark.
 
 ## Unmatched audiobooks and `status`
 

@@ -476,9 +476,9 @@ func (e *LibraryRefreshExecutor) refreshUnmatchedItem(ctx context.Context, libra
 		return fmt.Errorf("ingest subtree: %w", err)
 	}
 	stopScanHeartbeat := startDirectScanHeartbeat(e.scanRuns, scanRun, directScanHeartbeatEvery)
-	// A full refresh is an explicit admin action, so audiobooks are read from
-	// their tags again even when their files are unchanged.
-	ingestResult, err := e.ingester.IngestSubtree(scanner.WithAudiobookTagReread(scanCtx), folder, req.ScanPath)
+	// A full refresh is an explicit admin action, so the item, when it is an
+	// audiobook, is read from its tags again even when its files are unchanged.
+	ingestResult, err := e.ingester.IngestSubtree(scanner.WithAudiobookTagReread(scanCtx, req.RefreshContentID), folder, req.ScanPath)
 	stopScanHeartbeat()
 	if err != nil {
 		return fmt.Errorf("ingest subtree: %w", failDirectScan(ctx, e.scanRuns, scanRun, err))
