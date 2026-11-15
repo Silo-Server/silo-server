@@ -73,6 +73,29 @@ it("opens Edit Metadata on a fresh read of the item, not the cached one", async 
   expect(await screen.findByText("Edit 10")).toBeInTheDocument();
 });
 
+// A save from an earlier opening invalidates the item when it lands, and stays
+// pending until the item is refetched; the dialog must wait for that refetch.
+it("opens Edit Metadata on the read after an invalidation, not the one before", async () => {
+  const before = deferred<ItemDetail>();
+  const after = deferred<ItemDetail>();
+  mocks.v2.mockReturnValueOnce(before.promise).mockReturnValueOnce(after.promise);
+
+  const queryClient = renderHost(movie([]));
+  expect(await screen.findByText("Loading the latest item details…")).toBeInTheDocument();
+  await act(async () => {
+    void queryClient.invalidateQueries({ queryKey: catalogKeys.itemDetail("movie-1") });
+    before.resolve(movie([]));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
+
+  expect(screen.getByText("Loading the latest item details…")).toBeInTheDocument();
+  expect(mocks.editItem).not.toHaveBeenCalled();
+
+  await act(async () => after.resolve(movie([10])));
+
+  expect(await screen.findByText("Edit 10")).toBeInTheDocument();
+});
+
 it("keeps an open Edit Metadata when a later refetch fails", async () => {
   mocks.v2.mockResolvedValueOnce(movie([10]));
 

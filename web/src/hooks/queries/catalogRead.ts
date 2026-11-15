@@ -1,4 +1,4 @@
-import { useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
+import { hashKey, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useState } from "react";
 
 import type {
@@ -127,38 +127,42 @@ export function useCatalogItemDetail(id: string | undefined, libraryId?: number)
  */
 export function useFreshCatalogItemDetail(id: string, libraryId?: number) {
   const queryClient = useQueryClient();
-  const readKey = `${id}:${libraryId ?? ""}`;
-  const [read, setRead] = useState<{ key: string; error: unknown }>();
-  const [attempt, setAttempt] = useState(0);
+  const queryHash = hashKey(catalogKeys.itemDetail(id, libraryId));
+  const [read, setRead] = useState<{ queryHash: string; error: unknown }>();
+  const current = read?.queryHash === queryHash ? read : undefined;
+  const { data, fetchStatus, refetch } = useCatalogItemDetail(id, libraryId);
 
+  // Only a server response counts: a cache update is a manual success, and a
+  // cancelled fetch reverts without one. Once the item is shown it stays.
+  useEffect(
+    () =>
+      queryClient.getQueryCache().subscribe((event) => {
+        if (event.type !== "updated" || event.query.queryHash !== queryHash) return;
+        const { action } = event;
+        if (action.type === "success" && !action.manual) {
+          setRead({ queryHash, error: null });
+        } else if (action.type === "error") {
+          setRead((prev) =>
+            prev?.queryHash === queryHash && prev.error === null
+              ? prev
+              : { queryHash, error: action.error },
+          );
+        }
+      }),
+    [queryClient, queryHash],
+  );
+
+  // Read when opening on a cache that looks fresh, and again when another
+  // caller cancels the read before it lands.
+  const waiting = current === undefined;
   useEffect(() => {
-    const controller = new AbortController();
-    const queryKey = catalogKeys.itemDetail(id, libraryId);
-    // An older read still running would otherwise land after this one.
-    void queryClient
-      .cancelQueries({ queryKey, exact: true })
-      .then(() => fetchCatalogItemDetail(id, libraryId, { signal: controller.signal }))
-      .then(
-        (detail) => {
-          queryClient.setQueryData(queryKey, detail);
-          setRead({ key: readKey, error: null });
-        },
-        (error: unknown) => {
-          if (!controller.signal.aborted) setRead({ key: readKey, error });
-        },
-      );
-    return () => controller.abort();
-  }, [queryClient, id, libraryId, readKey, attempt]);
+    if (waiting && fetchStatus === "idle") void refetch();
+  }, [waiting, fetchStatus, refetch]);
 
-  const current = read?.key === readKey ? read : undefined;
-  const { data: item } = useCatalogItemDetail(current?.error === null ? id : undefined, libraryId);
   return {
-    item,
+    item: current?.error === null ? data : undefined,
     error: current?.error ?? null,
-    retry: () => {
-      setRead(undefined);
-      setAttempt((n) => n + 1);
-    },
+    retry: () => setRead(undefined),
   };
 }
 
