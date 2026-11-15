@@ -177,11 +177,14 @@ describe("book content security", () => {
   });
 
   it.each([
-    ["XHTML", "application/xhtml+xml", "&gt;", "&amp;"],
-    ["XHTML in CDATA", "application/xhtml+xml", "<![CDATA[>", "&]]>"],
-    ["HTML", "text/html", ">", "&"],
-  ])("keeps %s inline style rules that contain > and &", (_name, type, gt, amp) => {
-    const markup = `<html xmlns="http://www.w3.org/1999/xhtml"><head><title>t</title><style>body ${gt} p { margin: 0 } p::after { content: "${amp}" }</style></head><body><p>x</p></body></html>`;
+    ["XHTML", "application/xhtml+xml", "&gt;", "&amp;", ""],
+    ["XHTML in CDATA", "application/xhtml+xml", "<![CDATA[>", "&]]>", ""],
+    ["HTML", "text/html", ">", "&", ""],
+    // A prefixed style's rules apply too. jsdom drops the prefix on its own,
+    // so the Firefox case (the prefix kept) is not reproducible here.
+    ["prefixed XHTML", "application/xhtml+xml", "&gt;", "&amp;", "h:"],
+  ])("keeps %s inline style rules that contain > and &", (_name, type, gt, amp, prefix) => {
+    const markup = `<html xmlns="http://www.w3.org/1999/xhtml"><head xmlns:h="http://www.w3.org/1999/xhtml"><title>t</title><${prefix}style>body ${gt} p { margin: 0 } p::after { content: "${amp}" }</${prefix}style></head><body><p>x</p></body></html>`;
     const result = sanitizeBookDocument(markup, type);
     expectInertFrame(result);
     const expected = ['body > p { margin: 0 } p::after { content: "&" }'];

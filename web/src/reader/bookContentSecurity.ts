@@ -248,7 +248,6 @@ const NON_STYLE_CONTEXT = new Set([
 ]);
 
 function isRawTextStyle(el: Element): boolean {
-  if (el.localName !== "style" || el.namespaceURI !== XHTML_NS) return false;
   for (let parent = el.parentElement; parent; parent = parent.parentElement) {
     if (parent.namespaceURI !== XHTML_NS || NON_STYLE_CONTEXT.has(parent.localName)) return false;
   }
@@ -261,20 +260,32 @@ function isRawTextStyle(el: Element): boolean {
 // markup as HTML (srcdoc) or XML (a blob), so each style's CSS is written
 // unescaped inside `/*<![CDATA[*/ … /*]]>*/`, which both parsers read as the
 // same CSS. CSS that could end either the CDATA section or the HTML raw text
-// early keeps the escaped form.
+// early keeps the escaped form. An HTML parser reads a prefixed `<h:style>`
+// as an unknown element, and some serializers keep the prefix, so such a
+// style is first replaced by an unprefixed one.
 function serializeDocument(doc: Document): string | null {
   const bytes = crypto.getRandomValues(new Uint8Array(16));
   const token = `silo-style-${Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("")}`;
   const styles: string[] = [];
-  for (const el of Array.from(doc.getElementsByTagNameNS(XHTML_NS, "style"))) {
+  for (let el of Array.from(doc.getElementsByTagNameNS(XHTML_NS, "style"))) {
     const css = el.textContent ?? "";
     if (!isRawTextStyle(el) || /\]\]>|<\/style/i.test(css)) continue;
+    if (el.prefix) {
+      const style = doc.createElementNS(XHTML_NS, "style");
+      for (const attr of Array.from(el.attributes)) {
+        style.setAttributeNS(attr.namespaceURI, attr.name, attr.value);
+      }
+      el.replaceWith(style);
+      el = style;
+    }
     el.textContent = `${token}-${styles.length}-`;
     styles.push(`/*<![CDATA[*/${css}\n/*]]>*/`);
   }
   const markup = new XMLSerializer().serializeToString(doc);
-  const pieces = markup.split(new RegExp(`${token}-(\\d+)-`));
-  // Every placeholder must appear once, in order, or the markup is not used.
+  // Each placeholder must close an unprefixed <style> (a serializer may write
+  // a prefix the DOM does not report) and appear once, in order, or the
+  // markup is not used.
+  const pieces = markup.split(new RegExp(`${token}-(\\d+)-(?=</style>)`));
   if (pieces.length !== styles.length * 2 + 1) return null;
   let result = "";
   for (const [i, piece] of pieces.entries()) {
