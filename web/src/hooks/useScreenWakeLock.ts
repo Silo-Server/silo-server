@@ -25,9 +25,12 @@ export function useScreenWakeLock(active: boolean) {
         }
         sentinelRef.current = sentinel;
         // The browser releases the lock whenever the page is hidden. Forget it
-        // then, so the visibility handler requests a new one on return.
+        // then, so the visibility handler requests a new one on return. If the
+        // release arrives after the page is visible again, request one here.
         sentinel.addEventListener("release", () => {
-          if (sentinelRef.current === sentinel) sentinelRef.current = null;
+          if (sentinelRef.current !== sentinel) return;
+          sentinelRef.current = null;
+          if (!cancelled && document.visibilityState === "visible") void acquire();
         });
       } catch {
         // Unsupported or denied; reading still works without it.

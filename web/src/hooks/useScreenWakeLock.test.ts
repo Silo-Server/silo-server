@@ -22,8 +22,12 @@ afterEach(() => {
   Reflect.deleteProperty(document, "visibilityState");
 });
 
-// Browsers release a screen wake lock whenever the page is hidden.
-it("requests a new lock when the page becomes visible after the browser released it", async () => {
+// Browsers release a screen wake lock whenever the page is hidden, and the
+// release event can arrive before or after the page is visible again.
+it.each([
+  ["before", false],
+  ["after", true],
+])("requests a new lock when the release arrives %s the page is shown", async (_, late) => {
   const sentinels: FakeSentinel[] = [];
   const request = vi.fn(async () => {
     const sentinel = new FakeSentinel();
@@ -37,8 +41,9 @@ it("requests a new lock when the page becomes visible after the browser released
 
   await act(async () => {
     setVisibility("hidden");
+    if (late) setVisibility("visible");
     await sentinels[0]?.release();
-    setVisibility("visible");
+    if (!late) setVisibility("visible");
   });
 
   await waitFor(() => expect(request).toHaveBeenCalledTimes(2));
