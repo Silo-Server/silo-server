@@ -3,7 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { MarkerKind, MarkerRegionView, PlayerChapter } from "../types";
 import { trickplayTile, type PlayerTrickplay } from "../trickplay";
 import { formatTime } from "../utils/formatTime";
-import { MARKER_LABEL_KEYS } from "../hooks/useMarkerEditor";
+import { MARKER_DOT_COLORS, MARKER_LABEL_KEYS } from "../hooks/useMarkerEditor";
 import { useT, type Translate } from "@/i18n";
 
 interface SeekBarProps {
@@ -48,28 +48,22 @@ const NO_SHEET_STATE: SheetState = { source: null, loaded: NO_SHEETS, failed: NO
 /**
  * Region tint in normal playback: one colour per kind, so intro, recap, credits
  * and preview can be told apart at a glance. The hover preview names the
- * region with the same colour as its dot.
+ * region with the same colour as its dot (`MARKER_DOT_COLORS`), at 45%
+ * opacity.
  */
 const REGION_COLORS: Record<MarkerKind, string> = {
-  intro: "bg-sky-300/45",
-  recap: "bg-violet-300/45",
-  credits: "bg-rose-300/45",
-  preview: "bg-emerald-300/45",
+  intro: "bg-blue-400/45",
+  recap: "bg-orange-400/45",
+  credits: "bg-purple-400/45",
+  preview: "bg-cyan-400/45",
 };
 
 /** Brighter tint used while editing so regions stand out against the track. */
 const REGION_COLORS_EDIT: Record<MarkerKind, string> = {
-  intro: "bg-sky-300/75",
-  recap: "bg-violet-300/75",
-  credits: "bg-rose-300/75",
-  preview: "bg-emerald-300/75",
-};
-
-const REGION_DOT_COLORS: Record<MarkerKind, string> = {
-  intro: "bg-sky-300",
-  recap: "bg-violet-300",
-  credits: "bg-rose-300",
-  preview: "bg-emerald-300",
+  intro: "bg-blue-400/75",
+  recap: "bg-orange-400/75",
+  credits: "bg-purple-400/75",
+  preview: "bg-cyan-400/75",
 };
 
 function markerLabel(t: Translate, kind: MarkerKind): string {
@@ -446,7 +440,7 @@ export function SeekBar({
                 <div className="mb-1 flex items-center gap-1.5 text-xs leading-tight font-semibold">
                   <span
                     aria-hidden="true"
-                    className={["h-2 w-2 rounded-full", REGION_DOT_COLORS[hoverRegion.kind]].join(
+                    className={["h-2 w-2 rounded-full", MARKER_DOT_COLORS[hoverRegion.kind]].join(
                       " ",
                     )}
                   />
@@ -537,6 +531,10 @@ export function SeekBar({
                 active segment is a touch taller and gets a ring. */}
             {duration > 0 &&
               regions.map((region) => {
+                // A range can run past a probed duration; keep it on the track.
+                const startPercent = Math.max(0, Math.min(100, (region.start / duration) * 100));
+                const endPercent = Math.max(0, Math.min(100, (region.end / duration) * 100));
+                if (endPercent <= startPercent) return null;
                 const isActive = editing && region.kind === activeEditKind;
                 const isHovered = hoverRegion === region && !dragging && edgeDrag === null;
                 return (
@@ -550,8 +548,8 @@ export function SeekBar({
                       isActive || isHovered ? "z-[2] ring-1 ring-white/80" : "z-[1]",
                     ].join(" ")}
                     style={{
-                      left: `${(region.start / duration) * 100}%`,
-                      width: `${((region.end - region.start) / duration) * 100}%`,
+                      left: `${startPercent}%`,
+                      width: `${endPercent - startPercent}%`,
                     }}
                   />
                 );
