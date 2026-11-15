@@ -1,5 +1,10 @@
 import type { QueryClient } from "@tanstack/react-query";
-import { catalogKeys, collectionKeys, libraryCollectionKeys } from "./keys";
+import {
+  catalogKeys,
+  collectionKeys,
+  libraryCollectionKeys,
+  libraryCollectionTitleKeys,
+} from "./keys";
 
 export async function invalidateUserCollectionQueries(
   queryClient: QueryClient,
@@ -17,6 +22,8 @@ export async function invalidateUserCollectionQueries(
 export async function invalidateLibraryCollectionQueries(queryClient: QueryClient) {
   await Promise.all([
     queryClient.invalidateQueries({ queryKey: libraryCollectionKeys.all }),
+    // After the lists, so a pinned-title read joins an open tab's refetch.
+    queryClient.invalidateQueries({ queryKey: libraryCollectionTitleKeys.all }),
     // The Collections page's Server collections list, which the grid there
     // reads beside each library's list.
     queryClient.invalidateQueries({ queryKey: collectionKeys.server() }),
