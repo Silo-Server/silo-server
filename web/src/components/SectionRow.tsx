@@ -20,6 +20,11 @@ interface SectionRowProps {
   /** Library ID this section belongs to (enables pin-to-sidebar) */
   libraryId?: number;
   /**
+   * The row's stored name from the layout, saved as a pin's label. The fetched
+   * title can name this fetch's anchor, genre or subject, which goes stale.
+   */
+  pinLabel?: string;
+  /**
    * The row is on screen at first paint (the first Home row): its visible
    * cards load their artwork eagerly at high fetch priority.
    */
@@ -33,11 +38,11 @@ interface SectionRowProps {
 
 function SectionPinButton({
   sectionId,
-  sectionTitle,
+  label,
   libraryId,
 }: {
   sectionId: string;
-  sectionTitle: string;
+  label: string;
   libraryId: number;
 }) {
   const t = useT();
@@ -48,7 +53,7 @@ function SectionPinButton({
 
   return (
     <button
-      onClick={() => togglePin(libraryId, { type: "section", id: sectionId, label: sectionTitle })}
+      onClick={() => togglePin(libraryId, { type: "section", id: sectionId, label })}
       className={`rounded-full p-1.5 transition-colors ${
         pinned
           ? "text-primary hover:text-primary/80"
@@ -64,12 +69,13 @@ function SectionPinButton({
 export default memo(function SectionRow({
   section,
   libraryId,
+  pinLabel,
   priority = false,
   onNearEnd,
 }: SectionRowProps) {
   const sectionTitle = useSectionTitle();
   // The catalog page heads itself with the link's title, so it gets the shown
-  // (translated) title. A pin stores its label, so it keeps the server's title.
+  // (translated) title. A pin stores its label, so it gets `pinLabel`.
   const shownTitle = sectionTitle(section);
   const browseHref = useMemo(
     () =>
@@ -120,7 +126,11 @@ export default memo(function SectionRow({
   if (section.items.length === 0) return null;
 
   const headerActions = libraryId ? (
-    <SectionPinButton sectionId={section.id} sectionTitle={section.title} libraryId={libraryId} />
+    <SectionPinButton
+      sectionId={section.id}
+      label={pinLabel ?? section.title}
+      libraryId={libraryId}
+    />
   ) : undefined;
   // The browse page of a row that shows its whole list holds the same cards.
   const rowHref = sectionShowsWholeList(section) ? undefined : browseHref;
