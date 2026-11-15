@@ -3093,8 +3093,8 @@ func (h *PlaybackHandler) ensureTranscodeManifestWithToneMapMode(
 
 var compatManifestStartupTimeout = playback.ManifestStartupTimeout
 
-// errCompatUpstreamSessionGone means a rebuilt transcode was closed because the
-// play's native session went away while the rebuild was starting.
+// errCompatUpstreamSessionGone means a rebuilt or newly started transcode was
+// closed because the play's native session went away while it was starting.
 var errCompatUpstreamSessionGone = errors.New("upstream session ended during the transcode rebuild")
 
 func compatTranscodeSessionUsesToneMapMode(session *playback.TranscodeSession, required tonemap.Mode) bool {
@@ -3376,6 +3376,16 @@ func (h *PlaybackHandler) ensureTranscodeSessionWithToneMapMode(
 			return nil, errHDRTranscodeUnsupported
 		}
 		return nil, playback.ErrSessionSuperseded
+	}
+	// As for a rebuild: a stop, an expiry or an administrator's end that ran
+	// while this start was registering found no transcode to close, and with
+	// the native session gone nothing else would close it (#4130).
+	if h.sessionMgr != nil && h.tm.CloseTranscodeSessionIfSessionGoneLocked(upstreamSessionID, transcodeSession, func() bool {
+		_, err := h.sessionMgr.GetSession(upstreamSessionID)
+		return !errors.Is(err, playback.ErrSessionNotFound)
+	}) {
+		publishUnlock()
+		return nil, errCompatUpstreamSessionGone
 	}
 	effectiveOpts := transcodeSession.Opts()
 
