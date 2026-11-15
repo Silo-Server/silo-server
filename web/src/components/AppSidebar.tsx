@@ -305,12 +305,7 @@ export default function AppSidebar({ onNavigate, collapsed = false, swap }: AppS
       }
       if (item.type === "section") {
         if (!libraries?.some((candidate) => candidate.id === item.library_id)) return [];
-        const label = pinLabel({
-          type: "section",
-          id: item.section_id,
-          libraryId: item.library_id,
-          label: item.label,
-        });
+        const label = pinLabel(menuItemPinRef(item));
         return [
           {
             key,
@@ -332,12 +327,7 @@ export default function AppSidebar({ onNavigate, collapsed = false, swap }: AppS
         ) {
           return [];
         }
-        const label = pinLabel({
-          type: "collection",
-          id: item.collection_id,
-          libraryId: item.library_id,
-          label: item.label,
-        });
+        const label = pinLabel(menuItemPinRef(item));
         return [
           {
             key,

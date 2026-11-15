@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 
 import type { ReactNode } from "react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { MemoryRouter, Route, Routes } from "react-router";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -165,15 +166,9 @@ vi.mock("@/components/ui/dropdown-menu", () => ({
   DropdownMenuSeparator: () => <hr />,
 }));
 
-function renderSidebar(
-  entry: string,
-  {
-    collapsed = false,
-    queryClient = new QueryClient(),
-  }: { collapsed?: boolean; queryClient?: QueryClient } = {},
-) {
+function renderSidebar(entry: string, { collapsed = false }: { collapsed?: boolean } = {}) {
   return renderToStaticMarkup(
-    <QueryClientProvider client={queryClient}>
+    <QueryClientProvider client={new QueryClient()}>
       <MemoryRouter initialEntries={[entry]}>
         <Routes>
           <Route path="*" element={<AppSidebar collapsed={collapsed} />} />
@@ -397,24 +392,32 @@ describe("AppSidebar", () => {
     expect(findCustomLink(otherLibrary)?.hasAttribute("aria-current")).toBe(false);
   });
 
-  it("names a pinned collection link by the collection's current title", () => {
+  it("names a pinned collection by its current title, under its library and in the menu", () => {
+    mockPins = { "7": [{ type: "collection", id: "c1", label: "Rainy Days" }] };
     mockPrimaryMenu = {
       items: [{ type: "collection", library_id: 7, collection_id: "c1", label: "Rainy Days" }],
     };
     const queryClient = new QueryClient();
-    queryClient.setQueryData(libraryCollectionKeys.list(7), {
-      library_id: 7,
-      collections: [{ id: "c1", title: "Stormy Nights" }],
-      groups: [],
-    });
-
-    const document = parseMarkup(renderSidebar("/", { queryClient }));
-    const pin = document.querySelector('a[href*="collection_id=c1"]');
-
-    expect(pin?.textContent).toBe("Stormy Nights");
-    expect(new URL(pin!.getAttribute("href")!, "http://silo").searchParams.get("title")).toBe(
-      "Stormy Nights",
+    queryClient.setQueryData(libraryCollectionKeys.titles(7), new Map([["c1", "Stormy Nights"]]));
+    render(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter initialEntries={["/"]}>
+          <AppSidebar />
+        </MemoryRouter>
+      </QueryClientProvider>,
     );
+
+    const libraryToggle = screen.getByRole("button", { name: /Movies/, expanded: false });
+    fireEvent.click(libraryToggle);
+    const links = screen.getAllByRole("link", { name: "Stormy Nights" });
+
+    // The library pin and the menu link, each opening a catalog headed with the current title.
+    expect(
+      links.map((link) =>
+        new URL(link.getAttribute("href")!, "http://silo").searchParams.get("title"),
+      ),
+    ).toEqual(["Stormy Nights", "Stormy Nights"]);
+    cleanup();
   });
 
   it("preserves the current library query when linking to the active library", () => {

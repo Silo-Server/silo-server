@@ -2,11 +2,11 @@ import { useCallback, useMemo } from "react";
 import { useQueries } from "@tanstack/react-query";
 
 import { useUserLibraries } from "@/hooks/queries/libraries";
-import { libraryCollectionsQueryOptions } from "@/hooks/queries/libraryCollections";
+import { libraryCollectionTitlesQuery } from "@/hooks/queries/libraryCollections";
 import { libraryLayoutQuery } from "@/hooks/queries/sections";
 import { useSectionTitle } from "@/lib/sectionTitle";
 import { useCriticalContentLoaded } from "@/lib/startupPriority";
-import type { PrimaryMenuItem } from "@/lib/uiCustomization";
+import type { CollectionMenuItem, PrimaryMenuItem, SectionMenuItem } from "@/lib/uiCustomization";
 
 /** A pinned library row or collection, with the label saved when it was pinned. */
 export interface PinRef {
@@ -18,6 +18,8 @@ export interface PinRef {
 }
 
 /** The pin a menu link or shortcut points at, or null for a library or built-in link. */
+export function menuItemPinRef(item: SectionMenuItem | CollectionMenuItem): PinRef;
+export function menuItemPinRef(item: PrimaryMenuItem): PinRef | null;
 export function menuItemPinRef(item: PrimaryMenuItem): PinRef | null {
   if (item.type === "section") {
     return { type: "section", id: item.section_id, libraryId: item.library_id, label: item.label };
@@ -49,8 +51,8 @@ function visiblePinLibraryIds(
  * Collections tab. The saved label shows until those load, when a read fails,
  * when the row or collection is gone, and for a personal collection.
  *
- * The reads share the library page's queries and wait for the page's first
- * content (see startupPriority).
+ * The layout read shares the library page's query. Both wait for the page's
+ * first content (see startupPriority), and media changes refetch neither.
  */
 export function usePinLabel(pins: readonly PinRef[]): (pin: PinRef) => string {
   const { data: libraries } = useUserLibraries();
@@ -71,9 +73,9 @@ export function usePinLabel(pins: readonly PinRef[]): (pin: PinRef) => string {
     })),
     combine: (results) => results.map((result) => result.data),
   });
-  const collectionLists = useQueries({
+  const collectionTitles = useQueries({
     queries: collectionLibraryIds.map((libraryId) => ({
-      ...libraryCollectionsQueryOptions(libraryId),
+      ...libraryCollectionTitlesQuery(libraryId),
       enabled: criticalContentLoaded,
     })),
     combine: (results) => results.map((result) => result.data),
@@ -87,9 +89,9 @@ export function usePinLabel(pins: readonly PinRef[]): (pin: PinRef) => string {
         const section = layout?.sections.find((entry) => entry.id === pin.id);
         return section ? sectionTitle(section) : pin.label;
       }
-      const list = collectionLists[collectionLibraryIds.indexOf(pin.libraryId)];
-      return list?.collections?.find((entry) => entry.id === pin.id)?.title || pin.label;
+      const titles = collectionTitles[collectionLibraryIds.indexOf(pin.libraryId)];
+      return titles?.get(pin.id) || pin.label;
     },
-    [collectionLibraryIds, collectionLists, layouts, sectionLibraryIds, sectionTitle],
+    [collectionLibraryIds, collectionTitles, layouts, sectionLibraryIds, sectionTitle],
   );
 }

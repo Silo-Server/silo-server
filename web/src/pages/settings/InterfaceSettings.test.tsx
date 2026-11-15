@@ -206,11 +206,7 @@ describe("InterfaceSettings", () => {
     queryClient.setQueryData(sectionKeys.libraryLayout(7), {
       sections: [{ id: "s1", title: "Weekend Picks" }],
     });
-    queryClient.setQueryData(libraryCollectionKeys.list(7), {
-      library_id: 7,
-      collections: [{ id: "c1", title: "Stormy Nights" }],
-      groups: [],
-    });
+    queryClient.setQueryData(libraryCollectionKeys.titles(7), new Map([["c1", "Stormy Nights"]]));
 
     renderSettings(queryClient);
 

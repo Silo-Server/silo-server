@@ -15,6 +15,28 @@ export function libraryCollectionsQueryOptions(libraryId: number) {
   };
 }
 
+/**
+ * The titles of a library's collections by ID, for naming pinned collections.
+ * A media change never renames a collection, so media invalidations leave this
+ * query alone (see mediaSurfaceRefresh); collection edits invalidate it with
+ * the rest of `libraryCollectionKeys`.
+ */
+export function libraryCollectionTitlesQuery(libraryId: number) {
+  return {
+    queryKey: libraryCollectionKeys.titles(libraryId),
+    queryFn: ({ signal }: { signal?: AbortSignal }): Promise<ReadonlyMap<string, string>> =>
+      libraryCollectionsQueryOptions(libraryId)
+        .queryFn({ signal })
+        .then(
+          (tab) =>
+            new Map(
+              getLibraryCollectionList(tab).map((collection) => [collection.id, collection.title]),
+            ),
+        ),
+    staleTime: 5 * 60 * 1000,
+  };
+}
+
 export function useLibraryCollections(libraryId: number) {
   return useQuery(libraryCollectionsQueryOptions(libraryId));
 }

@@ -173,6 +173,7 @@ export const requestKeys = {
 export const libraryCollectionKeys = {
   all: ["libraryCollections"] as const,
   list: (libraryId: number) => ["libraryCollections", "list", libraryId] as const,
+  titles: (libraryId: number) => ["libraryCollections", "titles", libraryId] as const,
   items: (libraryId: number, collectionId: string) =>
     ["libraryCollections", "items", libraryId, collectionId] as const,
   userContributed: (libraryId: number) =>
