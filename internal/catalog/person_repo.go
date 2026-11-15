@@ -665,8 +665,8 @@ func (r *PersonRepository) SearchAlphabetical(ctx context.Context, query string,
 	return r.search(ctx, query, limit, "", filter, false)
 }
 
-// SearchScoped ranks exact names first, then the people with the most credits,
-// and restricts people to credits in the selected media scope and viewer
+// SearchScoped ranks exact names first, then the people with the most credits
+// the viewer can see in the media scope, and restricts people to credits in the selected media scope and viewer
 // access before applying the limit. A query that matches more than
 // maxRankedPersonMatches names keeps name order after the exact names. Empty
 // scope includes accessible credits across all media types. Every query word must
@@ -696,7 +696,8 @@ func (r *PersonRepository) search(ctx context.Context, query string, limit int, 
 		argIdx++
 	}
 	nameMatch := strings.Join(conditions, " AND ")
-	visible := personCreditVisibleSQL("people.id", MediaScopeItemTypes(mediaScope), personCreditScope{Listed: true}, filter, &args, &argIdx)
+	visibleCredits := personVisibleCreditsSQL("people.id", MediaScopeItemTypes(mediaScope), personCreditScope{Listed: true}, filter, &args, &argIdx)
+	visible := "EXISTS (SELECT 1 " + visibleCredits + ")"
 	conditions = append(conditions, visible)
 	where := strings.Join(conditions, " AND ")
 	const columns = `id, name, sort_name, bio, birth_date, death_date, birthplace, homepage,
@@ -708,22 +709,22 @@ func (r *PersonRepository) search(ctx context.Context, query string, limit int, 
 		args = append(args, query, strings.Join(strings.Fields(query), " "))
 		// A query few enough names match is ranked by credits, so "rudolph"
 		// leads with the Rudolph the library holds most of instead of the
-		// first one in the alphabet. Counting reads only the credit index,
-		// and the sorted names are then checked for a visible credit in rank
-		// order, stopping at the limit. A broader query answers no rows here
+		// first one in the alphabet. Only credits the viewer can see in the
+		// media scope count, so the order says nothing about titles hidden
+		// from them. The inner SELECT reads matched as people, the name
+		// visibleCredits correlates on. A broader query answers no rows here
 		// and falls through to name order below.
 		tooMany := strconv.Itoa(maxRankedPersonMatches + 1)
 		rankedSQL := `WITH matched AS MATERIALIZED (
 				SELECT id, name FROM people WHERE ` + nameMatch + ` LIMIT ` + tooMany + `
 			)
 			SELECT ` + columns + ` FROM (
-				SELECT id AS ranked_id, name AS ranked_name, ` + exact + ` AS exact,
-					(SELECT count(*) FROM item_people counted WHERE counted.person_id = matched.id) AS credits
-				FROM matched WHERE (SELECT count(*) FROM matched) < ` + tooMany + `
-				ORDER BY exact DESC, credits DESC, ranked_name ASC, ranked_id ASC OFFSET 0
+				SELECT people.id AS ranked_id, ` + exact + ` AS exact,
+					(SELECT count(*) ` + visibleCredits + `) AS credits
+				FROM matched people WHERE (SELECT count(*) FROM matched) < ` + tooMany + `
 			) ranked JOIN people ON people.id = ranked.ranked_id
-			WHERE ` + visible + `
-			ORDER BY ranked.exact DESC, ranked.credits DESC, ranked.ranked_name ASC, ranked.ranked_id ASC LIMIT $1`
+			WHERE ranked.credits > 0
+			ORDER BY ranked.exact DESC, ranked.credits DESC, name ASC, id ASC LIMIT $1`
 		people, err := r.queryPeople(ctx, rankedSQL, args)
 		if err != nil || len(people) > 0 {
 			return people, err
@@ -744,9 +745,9 @@ func (r *PersonRepository) search(ctx context.Context, query string, limit int, 
 }
 
 // maxRankedPersonMatches is the most name matches people search ranks by
-// credits. Ranking reads every match and counts its credits, where name order
-// stops at the limit, so its cost grows with the number of matches.
-const maxRankedPersonMatches = 2000
+// credits. Ranking counts the visible credits of every match, where name
+// order stops at the limit, so its cost grows with the number of matches.
+const maxRankedPersonMatches = 1000
 
 // queryPeople runs a people search and scans its rows. How many names a query
 // matches ranges from a handful to most of the table, so each search is
@@ -813,11 +814,17 @@ func personNameWordStartConditions(query string, args *[]any, argIdx *int) []str
 }
 
 // personCreditVisibleSQL renders an EXISTS predicate that holds when the person
-// at personIDExpr has at least one credit the viewer can see, limited to
-// credits on items of the given types when types is non-empty and to credits
-// inside scope. People search, person detail and the Jellyfin person reads
+// at personIDExpr has at least one credit personVisibleCreditsSQL selects. People search, person detail and the Jellyfin person reads
 // share it so a person found by one opens in the others.
 func personCreditVisibleSQL(personIDExpr string, types []string, scope personCreditScope, filter AccessFilter, args *[]any, argIdx *int) string {
+	return "EXISTS (SELECT 1 " + personVisibleCreditsSQL(personIDExpr, types, scope, filter, args, argIdx) + ")"
+}
+
+// personVisibleCreditsSQL renders the FROM and WHERE of a query over the
+// credits of the person at personIDExpr that the viewer can see, limited to
+// credits on items of the given types when types is non-empty and to credits
+// inside scope.
+func personVisibleCreditsSQL(personIDExpr string, types []string, scope personCreditScope, filter AccessFilter, args *[]any, argIdx *int) string {
 	conditions := []string{"ip.person_id = " + personIDExpr}
 	if len(types) > 0 {
 		conditions = append(conditions, fmt.Sprintf("mi.type = ANY($%d::text[])", *argIdx))
@@ -847,13 +854,12 @@ func personCreditVisibleSQL(personIDExpr string, types []string, scope personCre
 		*args = append(*args, scope.ContentID)
 		*argIdx = *argIdx + 1
 	}
-	return `EXISTS (
-			SELECT 1 FROM item_people ip
+	return `FROM item_people ip
 			JOIN media_items mi ON mi.content_id = ip.content_id
 			JOIN media_items access_item ON access_item.content_id = CASE
 				WHEN mi.type = 'episode' THEN ` + episodeParentSeriesIDExpr("mi.content_id") + `
 				ELSE mi.content_id END
-			WHERE ` + strings.Join(conditions, " AND ") + ")"
+			WHERE ` + strings.Join(conditions, " AND ")
 }
 
 // personCreditScope narrows the credits personCreditVisibleSQL counts to one

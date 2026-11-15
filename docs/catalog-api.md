@@ -115,8 +115,10 @@ A partial last word still matches, which keeps typeahead working. A name
 written without separators, as many Chinese, Japanese, and Korean names are,
 matches only from its start. Only the first eight distinct words count, and a
 word repeated exactly, with the same case, counts once. `%` and `_` are literal. Case-insensitive exact name
-matches come first;
-other matches sort by name, with person ID breaking ties. Ranking happens before
+matches come first. Other matches sort by how many credits the person has that
+the viewer can see within `media_scope`, most first, then by name, with person
+ID breaking ties. A query that matches more names than the server ranks, such as
+a single letter, sorts its other matches by name only. Ranking happens before
 applying the limit.
 
 The optional `media_scope` parameter limits results to people credited on items
