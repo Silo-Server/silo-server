@@ -159,7 +159,7 @@ func TestSectionBecauseYouWatchedPicksAnAnchorWithItemsInScope(t *testing.T) {
 			libraries: libraries,
 		},
 		refresh: refresher,
-		signals: NewSignalReader(&fakeSignalRepo{}, fakeSignalProvider{store: anchorStore("latest-series", "older-movie")}),
+		signals: NewSignalReader(&fakeSignalRepo{}, fakeSignalProvider{store: anchorStore("latest-series", "older-movie")}).WithUserStoreOutsidePostgres(true),
 	}
 	ctx := t.Context()
 

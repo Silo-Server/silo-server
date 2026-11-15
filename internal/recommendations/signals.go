@@ -439,9 +439,19 @@ func (s *SignalReader) WatchProgressForUser(ctx context.Context, userID int, pro
 // recommendableMediaTypes, newest first. Completions of deleted items and of
 // other types, such as a finished audiobook, are skipped, so they never
 // become anchors.
+//
+// When the store keeps progress in the Postgres tables this is one query,
+// as for readWatchedItemIDSet: walking the store there re-sorts the whole
+// history for every page, and a profile whose latest completions are many
+// episodes of few series reads every page before it finds limit titles.
+// Every caller takes the same path, so the reads and the worker choose
+// anchors from the same list.
 func (s *SignalReader) RecentCompletedItemIDs(ctx context.Context, userID int, profileID string, limit int) ([]string, error) {
 	if limit <= 0 {
 		return []string{}, nil
+	}
+	if !s.storeIsSeparate() {
+		return s.repo.GetRecentCompletedItemIDs(ctx, userID, profileID, limit)
 	}
 
 	store, ok, err := s.storeForUser(ctx, userID)

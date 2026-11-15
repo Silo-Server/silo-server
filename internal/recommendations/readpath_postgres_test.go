@@ -54,7 +54,8 @@ func TestRecentCompletedItemIDsSkipDeletedItemsPostgres(t *testing.T) {
 	seedCompletion(t, pool, userID, profile, movieA, base.Add(-4*time.Minute))
 
 	repo := NewRepo(pool)
-	storePath := NewSignalReader(repo, pgstore.NewPostgresProvider(pool))
+	// The walk the SQLite store takes, run over the same rows.
+	storePath := NewSignalReader(repo, pgstore.NewPostgresProvider(pool)).WithUserStoreOutsidePostgres(true)
 	before, err := storePath.RecentCompletedItemIDs(ctx, userID, profile, 3)
 	if err != nil {
 		t.Fatal(err)

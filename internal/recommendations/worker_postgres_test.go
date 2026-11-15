@@ -863,25 +863,43 @@ func TestBecauseYouWatchedAnchorsEachLibraryOnItsOwnWatchesPostgres(t *testing.T
 	engine := NewEngine(pool, ratings, catalog.NewItemRepository(pool), nil, pgstore.NewPostgresProvider(pool), config.RecommendationsConfig{DiversityLambda: 0.7})
 	w := newJobTestWorker(&fakeLocker{}, nil)
 	w.engine = engine
-	if built := w.cacheUserRows(ctx, engine.repo, userID, profile, cacheExpiry(time.Now())); built.failed != 0 {
-		t.Fatalf("cache build = %+v, want no failures", built)
-	}
-
 	reader := NewReader(repo, ratings, nil, pgstore.NewPostgresProvider(pool))
-	for _, tc := range []struct {
-		name       string
-		libraryIDs []int
-		want       string
-	}{
-		{"home", nil, movies[len(movies)-1]},
-		{"movie library", []int{movieLib}, movies[len(movies)-1]},
-		{"TV library", []int{tvLib}, series},
-	} {
-		items, source, err := reader.SectionBecauseYouWatched(ctx, userID, profile, "", tc.libraryIDs, catalog.AccessFilter{})
-		if err != nil || source != tc.want || len(items) == 0 {
-			t.Errorf("%s: anchor = %q with %d items, %v; want %q with items", tc.name, source, len(items), err, tc.want)
+	check := func(stage, home string) {
+		t.Helper()
+		if built := w.cacheUserRows(ctx, engine.repo, userID, profile, cacheExpiry(time.Now())); built.failed != 0 {
+			t.Fatalf("%s: cache build = %+v, want no failures", stage, built)
+		}
+		for _, tc := range []struct {
+			name       string
+			libraryIDs []int
+			want       string
+		}{
+			{"home", nil, home},
+			{"movie library", []int{movieLib}, movies[len(movies)-1]},
+			{"TV library", []int{tvLib}, series},
+		} {
+			items, source, err := reader.SectionBecauseYouWatched(ctx, userID, profile, "", tc.libraryIDs, catalog.AccessFilter{})
+			if err != nil || source != tc.want || len(items) == 0 {
+				t.Errorf("%s, %s: anchor = %q with %d items, %v; want %q with items", stage, tc.name, source, len(items), err, tc.want)
+			}
 		}
 	}
+	check("movies after the series", movies[len(movies)-1])
+
+	// A binge of more episodes than a store page holds, all newer than the
+	// movies, is one title: the movie library keeps its anchor.
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO episodes(content_id, series_id, season_number, episode_number, title)
+		SELECT $1 || '-e' || n, $1, 1, n, 'Episode' FROM generate_series(1, $2) n`, series, signalPageSize+1); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO user_watch_progress(user_id, profile_id, media_item_id, completed, updated_at)
+		SELECT $1, $2, $3 || '-e' || n, true, NOW() - make_interval(secs => n) FROM generate_series(1, $4) n`,
+		userID, profile, series, signalPageSize+1); err != nil {
+		t.Fatal(err)
+	}
+	check("a binge after the movies", series)
 }
 
 // A job whose lock session dies stops instead of failing every remaining
