@@ -85,7 +85,7 @@ func ValidateSourceWithRunner(ctx context.Context, request SourcePreflightReques
 	if request.Kind == "" || request.Mode == "" || strings.TrimSpace(request.InputPath) == "" {
 		return fmt.Errorf("%w: incomplete tone-map source preflight", ErrSourcePreflightRejected)
 	}
-	if err := request.SourceRevision.ValidatePath(request.InputPath); err != nil {
+	if err := request.SourceRevision.ValidatePath(ctx, request.InputPath); err != nil {
 		return err
 	}
 	if strings.TrimSpace(request.FFmpegPath) == "" {
