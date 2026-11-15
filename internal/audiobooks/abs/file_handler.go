@@ -237,8 +237,11 @@ func (h *Handler) handlePublicTrack(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// A reported play's id is no capability: the server serves nothing for
+	// a play it only hears about, which also keeps such plays, outside
+	// stream limits, from becoming a way around them.
 	sess, err := h.deps.PlaybackSessionStore.GetPlaybackSession(r.Context(), sid)
-	if err != nil {
+	if err != nil || sess.ReportOnly {
 		http.Error(w, "session not found", http.StatusNotFound)
 		return
 	}

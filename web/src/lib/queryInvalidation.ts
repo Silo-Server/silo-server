@@ -24,3 +24,13 @@ export function activeSectionQueryMatchesLibrary(queryKey: unknown, libraryId?: 
   const queryLibraryId = queryKey[2];
   return queryLibraryId == null || queryLibraryId === libraryId;
 }
+
+/**
+ * Whether a query is a library's section layout (`sectionKeys.libraryLayout`).
+ * A layout lists the library's rows from their configuration alone, so media,
+ * watch-state and playback changes never alter it and shouldn't refetch it.
+ * Section and section-setting edits invalidate it directly.
+ */
+export function isLibraryLayoutQueryKey(queryKey: readonly unknown[]) {
+  return queryKey[0] === "sections" && queryKey[1] === "library" && queryKey[3] === "layout";
+}

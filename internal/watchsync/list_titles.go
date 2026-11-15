@@ -1,9 +1,12 @@
 package watchsync
 
 import (
+	"cmp"
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -56,16 +59,15 @@ type WatchlistTitles interface {
 	RequestQueuedWatchlistTitles(ctx context.Context, userID int, profileID string, titles []WatchlistTitle) error
 	// ListWatchlistTitles returns every entry of the profile.
 	ListWatchlistTitles(ctx context.Context, userID int, profileID string) ([]WatchlistTitle, error)
-	// WatchlistTitlesListed reports which of the titles the profile has an
-	// entry for, by any TMDB ID the entry's title has held.
-	WatchlistTitlesListed(ctx context.Context, userID int, profileID string, titles []WatchlistTitle) (map[WatchlistTitle]bool, error)
-	// WatchlistTitleTMDBIDs returns every TMDB ID the profile's entries for
-	// the titles have held. A title without an entry has none.
-	WatchlistTitleTMDBIDs(ctx context.Context, userID int, profileID string, titles []WatchlistTitle) (map[WatchlistTitle][]int, error)
-	// WatchlistTitlePromoted reports whether a library item with the title's
-	// IDs is on the profile's library watchlist, where promotion moves an
-	// entry once the library has its title.
-	WatchlistTitlePromoted(ctx context.Context, userID int, profileID string, title WatchlistTitle) (bool, error)
+	// WatchlistTitleIDs returns the prefixed IDs ("tmdb:550",
+	// "imdb:tt0137523", "tvdb:121361") the profile's entries for the titles
+	// have held, current and former, reached through any TMDB ID the entry's
+	// title has held. A title without an entry has none.
+	WatchlistTitleIDs(ctx context.Context, userID int, profileID string, titles []WatchlistTitle) (map[WatchlistTitle][]string, error)
+	// PromotedWatchlistItems returns the library items on the profile's
+	// library watchlist that carry the title's IDs or any of ids, where
+	// promotion moves an entry once the library has its title.
+	PromotedWatchlistItems(ctx context.Context, userID int, profileID string, title WatchlistTitle, ids []string) ([]string, error)
 }
 
 type watchlistTitlesRef struct{ WatchlistTitles }
@@ -96,6 +98,30 @@ func (s *Service) watchlistTitles(b listBinding) WatchlistTitles {
 
 func (t WatchlistTitle) listItemID() string {
 	return listTitlePrefix + t.Kind + ":" + strconv.Itoa(t.TMDBID)
+}
+
+// IDs returns the title's prefixed IDs, the form ListItemState.TitleIDs keeps.
+func (t WatchlistTitle) IDs() []string {
+	ids := []string{prefixedID("tmdb", strconv.Itoa(t.TMDBID))}
+	if t.IMDbID != "" {
+		ids = append(ids, prefixedID("imdb", t.IMDbID))
+	}
+	if t.TVDBID > 0 {
+		ids = append(ids, prefixedID("tvdb", strconv.Itoa(t.TVDBID)))
+	}
+	return ids
+}
+
+// keptTitleIDs returns the IDs a title row knows its title by: the ones it
+// kept, the TMDB ID it is named for (a row from before title IDs were kept
+// may have no others), and its provider key, which names one of them when it
+// is an IMDb, TMDB, or TVDB ID.
+func (state ListItemState) keptTitleIDs() []string {
+	ids := append(slices.Clone(state.TitleIDs), state.ProviderItemKey)
+	if title, ok := watchlistTitleFromListItemID(state.MediaItemID); ok {
+		ids = append(ids, title.IDs()...)
+	}
+	return ids
 }
 
 // watchlistTitleFromRow returns the title a provider row names when it is a
@@ -151,6 +177,7 @@ func (s *Service) importListTitle(
 	row RemoteFavorite,
 	key string,
 	removalsPending map[string]time.Time,
+	pendingTitles map[string][]string,
 	request bool,
 ) (state *ListItemState, kept, added bool, err error) {
 	titles := s.watchlistTitles(b)
@@ -165,14 +192,11 @@ func (s *Service) importListTitle(
 	if err != nil || inLibrary {
 		return nil, false, false, err
 	}
-	id := title.listItemID()
-	// As for library items: the provider listing the title again after the
-	// local removal is a newer add; an older or undated listing is the one
-	// the removal will take off.
-	if removedAt, pending := removalsPending[id]; pending &&
-		(row.FavoritedAtGuessed || !row.FavoritedAt.After(removedAt)) {
-		return nil, true, false, nil
+	waits, err := s.waitsForListTitleRemoval(ctx, conn, b, title, row, key, removalsPending, pendingTitles)
+	if err != nil || waits {
+		return nil, waits, false, err
 	}
+	id := title.listItemID()
 	added, err = titles.AddWatchlistTitle(ctx, conn.UserID, conn.ProfileID, title, row.FavoritedAt, request)
 	if err != nil && !added {
 		return nil, false, false, err
@@ -190,7 +214,120 @@ func (s *Service) importListTitle(
 		LocalPresent:     true,
 		LastSeenRemoteAt: &listedAt,
 		LastSeenLocalAt:  &listedAt,
+		TitleIDs:         title.IDs(),
 	}, true, added, err
+}
+
+// trackListTitle imports a row that matched no library item through
+// importListTitle, writes its shadow state right away, and counts it in
+// result. It reports whether the row was kept.
+func (s *Service) trackListTitle(
+	ctx context.Context,
+	conn Connection,
+	b listBinding,
+	row RemoteFavorite,
+	key string,
+	removalsPending map[string]time.Time,
+	pendingTitles map[string][]string,
+	request bool,
+	result *ImportListResult,
+) (bool, error) {
+	state, kept, added, err := s.importListTitle(ctx, conn, b, row, key, removalsPending, pendingTitles, request)
+	// Counted first: the entry is saved, so a run that fails below still
+	// reports it.
+	if added {
+		result.added++
+	}
+	if state != nil {
+		result.Imported++
+		// An entry the add kept is tracked even when the add then failed, so
+		// a later provider removal still finds it.
+		if upsertErr := s.repo.UpsertListItemStates(ctx, []ListItemState{*state}); upsertErr != nil {
+			return kept, errors.Join(err, upsertErr)
+		}
+	}
+	return kept, err
+}
+
+// waitsForListTitleRemoval reports whether the listing waits for a local
+// removal of its title to reach the provider. The removal can wait under
+// another TMDB ID when the provider moved the title to a new one, and under
+// several when the title had more than one row; an ID or provider key a
+// removed row shares names the same title. As for library items, the
+// provider listing the title again after every local removal is a newer add,
+// which supersedes the removals waiting under other IDs so they can't take
+// the add off the provider; an older or undated listing is the one the
+// removals will take off.
+func (s *Service) waitsForListTitleRemoval(
+	ctx context.Context,
+	conn Connection,
+	b listBinding,
+	title WatchlistTitle,
+	row RemoteFavorite,
+	key string,
+	removalsPending map[string]time.Time,
+	pendingTitles map[string][]string,
+) (bool, error) {
+	id := title.listItemID()
+	pending := pendingTitleRows(pendingTitles, title.Kind, append(title.IDs(), key))
+	if !slices.Contains(pending, id) {
+		pending = append(pending, id)
+	}
+	var superseded []string
+	for _, pendingID := range pending {
+		removedAt, ok := removalsPending[pendingID]
+		switch {
+		case !ok:
+			continue
+		case row.FavoritedAtGuessed || !row.FavoritedAt.After(removedAt):
+			return true, nil
+		case pendingID != id:
+			superseded = append(superseded, pendingID)
+		}
+	}
+	for _, pendingID := range superseded {
+		if err := s.repo.MarkListItemRemoteRemoved(ctx, conn.ID, b.kind, pendingID, s.now()); err != nil {
+			return false, err
+		}
+		delete(removalsPending, pendingID)
+	}
+	return false, nil
+}
+
+// pendingTitleKey keys pendingTitles: a title's kind and one of its prefixed
+// IDs or provider keys.
+func pendingTitleKey(kind, id string) string { return kind + "|" + id }
+
+// indexPendingTitle adds a pending-removal row, when it is a watchlist title
+// row, to pendingTitles under each ID and the provider key it knows.
+func indexPendingTitle(pendingTitles map[string][]string, state ListItemState) {
+	title, ok := watchlistTitleFromListItemID(state.MediaItemID)
+	if !ok {
+		return
+	}
+	for _, id := range append(append(title.IDs(), state.TitleIDs...), state.ProviderItemKey) {
+		key := pendingTitleKey(title.Kind, id)
+		if !slices.Contains(pendingTitles[key], state.MediaItemID) {
+			pendingTitles[key] = append(pendingTitles[key], state.MediaItemID)
+		}
+	}
+}
+
+// pendingTitleRows returns the media item IDs of the pending-removal title
+// rows of this kind that know any of the IDs.
+func pendingTitleRows(pendingTitles map[string][]string, kind string, ids []string) []string {
+	var rows []string
+	for _, id := range ids {
+		if id == "" {
+			continue
+		}
+		for _, row := range pendingTitles[pendingTitleKey(kind, id)] {
+			if !slices.Contains(rows, row) {
+				rows = append(rows, row)
+			}
+		}
+	}
+	return rows
 }
 
 // listTitlesSince returns when the connection's first watchlist import that
@@ -212,21 +349,41 @@ func (s *Service) listTitlesSince(ctx context.Context, conn Connection, b listBi
 // while the server boots), a title's entry can't be removed, so the run
 // fails and the next one retries rather than recording a removal that didn't
 // happen.
-func (s *Service) removeLocalListItem(ctx context.Context, store userstore.UserStore, conn Connection, b listBinding, mediaItemID string) error {
-	if title, ok := watchlistTitleFromListItemID(mediaItemID); ok {
-		titles := s.watchlistTitles(b)
-		if titles == nil {
-			return fmt.Errorf("watchlist titles are not available yet to remove %s", mediaItemID)
-		}
-		return titles.RemoveWatchlistTitle(ctx, conn.UserID, conn.ProfileID, title)
+func (s *Service) removeLocalListItem(ctx context.Context, store userstore.UserStore, conn Connection, b listBinding, state ListItemState) error {
+	title, ok := watchlistTitleFromListItemID(state.MediaItemID)
+	if !ok {
+		return b.localRemove(ctx, store, conn.ProfileID, state.MediaItemID)
 	}
-	return b.localRemove(ctx, store, conn.ProfileID, mediaItemID)
+	titles := s.watchlistTitles(b)
+	if titles == nil {
+		return fmt.Errorf("watchlist titles are not available yet to remove %s", state.MediaItemID)
+	}
+	if err := titles.RemoveWatchlistTitle(ctx, conn.UserID, conn.ProfileID, title); err != nil {
+		return err
+	}
+	// Promotion may have moved the entry onto the library watchlist since
+	// the run read it; the title leaves in that form too.
+	_, err := s.removePromotedListTitle(ctx, store, conn, b, titles, title, state)
+	return err
 }
 
-// heldTitleTMDBIDs returns every TMDB ID the titles behind the shadow rows
-// have held. TMDB can repoint a title while the provider keeps listing it
-// under the other ID, and a row's key names only one of them.
-func (s *Service) heldTitleTMDBIDs(ctx context.Context, conn Connection, b listBinding, states []ListItemState) (map[WatchlistTitle][]int, error) {
+// removePromotedListTitle takes the one library item with the title's IDs off
+// the library watchlist, where promotion moves the entry. The row's IDs find
+// it after promotion deleted the title's own. Several items are left alone,
+// as promotion leaves them. It reports whether it removed one.
+func (s *Service) removePromotedListTitle(ctx context.Context, store userstore.UserStore, conn Connection, b listBinding, titles WatchlistTitles, title WatchlistTitle, state ListItemState) (bool, error) {
+	promoted, err := titles.PromotedWatchlistItems(ctx, conn.UserID, conn.ProfileID, title, state.keptTitleIDs())
+	if err != nil || len(promoted) != 1 {
+		return false, err
+	}
+	return true, b.localRemove(ctx, store, conn.ProfileID, promoted[0])
+}
+
+// heldTitleIDs returns every ID ("tmdb:550", "imdb:tt0137523") the titles
+// behind the shadow rows have held, from their entries and from what the rows
+// kept. TMDB can repoint a title while the provider keeps listing it under
+// the other ID, and a row's key names only one of them.
+func (s *Service) heldTitleIDs(ctx context.Context, conn Connection, b listBinding, states []ListItemState) (map[WatchlistTitle][]string, error) {
 	titles := s.watchlistTitles(b)
 	if titles == nil {
 		return nil, nil
@@ -240,15 +397,32 @@ func (s *Service) heldTitleTMDBIDs(ctx context.Context, conn Connection, b listB
 	if len(keys) == 0 {
 		return nil, nil
 	}
-	return titles.WatchlistTitleTMDBIDs(ctx, conn.UserID, conn.ProfileID, keys)
+	held, err := titles.WatchlistTitleIDs(ctx, conn.UserID, conn.ProfileID, keys)
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[WatchlistTitle][]string, len(keys))
+	for _, state := range states {
+		title, ok := watchlistTitleFromListItemID(state.MediaItemID)
+		if !ok {
+			continue
+		}
+		for _, id := range append(slices.Clone(held[title]), state.TitleIDs...) {
+			if !slices.Contains(out[title], id) {
+				out[title] = append(out[title], id)
+			}
+		}
+	}
+	return out, nil
 }
 
 // reconcileLocalListTitles records which imported watchlist entries outside
 // the library left the profile's watchlist. One the profile removed is a
 // local removal, which goes to the provider when removals sync. One that
 // promotion moved onto the library watchlist is still on the watchlist; its
-// row retires without a removal, and the library item's own row takes over at
-// the next import.
+// row retires without a removal and hands its place on the provider's list
+// to the library item's row. While an entry stays, its row keeps every ID
+// its title holds, since promotion deletes them with the title.
 func (s *Service) reconcileLocalListTitles(ctx context.Context, conn Connection, b listBinding) error {
 	titles := s.watchlistTitles(b)
 	if titles == nil {
@@ -258,42 +432,114 @@ func (s *Service) reconcileLocalListTitles(ctx context.Context, conn Connection,
 	if err != nil {
 		return err
 	}
-	rows := map[WatchlistTitle]string{}
+	rows := map[WatchlistTitle]ListItemState{}
+	tracked := make(map[string]ListItemState, len(states))
 	keys := make([]WatchlistTitle, 0, len(states))
 	for _, state := range states {
+		tracked[state.MediaItemID] = state
 		if title, ok := watchlistTitleFromListItemID(state.MediaItemID); ok && state.LocalPresent {
-			rows[title] = state.MediaItemID
+			rows[title] = state
 			keys = append(keys, title)
 		}
 	}
 	if len(keys) == 0 {
 		return nil
 	}
-	listed, err := titles.WatchlistTitlesListed(ctx, conn.UserID, conn.ProfileID, keys)
+	// Rows the provider lists go first, so when several title rows promote to
+	// one library item, the item takes a provider key the provider lists.
+	slices.SortStableFunc(keys, func(a, b WatchlistTitle) int {
+		return cmp.Compare(boolRank(rows[b].RemotePresent), boolRank(rows[a].RemotePresent))
+	})
+	// A title has IDs exactly while the profile has an entry for it.
+	held, err := titles.WatchlistTitleIDs(ctx, conn.UserID, conn.ProfileID, keys)
 	if err != nil {
+		return err
+	}
+	if err := s.keepListTitleIDs(ctx, conn, b, held, rows); err != nil {
 		return err
 	}
 	now := s.now()
 	for _, title := range keys {
-		if listed[title] {
+		if len(held[title]) > 0 {
 			continue
 		}
-		promoted, err := titles.WatchlistTitlePromoted(ctx, conn.UserID, conn.ProfileID, title)
+		state := rows[title]
+		promoted, err := titles.PromotedWatchlistItems(ctx, conn.UserID, conn.ProfileID, title, state.keptTitleIDs())
 		if err != nil {
 			return err
 		}
+		if len(promoted) == 1 {
+			existing, ok := tracked[promoted[0]]
+			item, err := s.handOverListTitle(ctx, b, state, promoted[0], existing, ok)
+			if err != nil {
+				return err
+			}
+			tracked[promoted[0]] = item
+		}
 		// The remote side goes first: a row left local-removed but remote
 		// present would send the provider a removal.
-		if promoted {
-			if err := s.repo.MarkListItemRemoteRemoved(ctx, conn.ID, b.kind, rows[title], now); err != nil {
+		if len(promoted) > 0 {
+			if err := s.repo.MarkListItemRemoteRemoved(ctx, conn.ID, b.kind, state.MediaItemID, now); err != nil {
 				return err
 			}
 		}
-		if err := s.repo.MarkListItemLocalRemoved(ctx, conn.ID, b.kind, rows[title], now); err != nil {
+		if err := s.repo.MarkListItemLocalRemoved(ctx, conn.ID, b.kind, state.MediaItemID, now); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+// boolRank orders false before true.
+func boolRank(b bool) int {
+	if b {
+		return 1
+	}
+	return 0
+}
+
+// keepListTitleIDs adds to the rows of the titles still listed the IDs their
+// titles hold, current and former.
+func (s *Service) keepListTitleIDs(ctx context.Context, conn Connection, b listBinding, held map[WatchlistTitle][]string, rows map[WatchlistTitle]ListItemState) error {
+	for title, ids := range held {
+		state := rows[title]
+		unkept := func(id string) bool { return !slices.Contains(state.TitleIDs, id) }
+		if !slices.ContainsFunc(ids, unkept) {
+			continue
+		}
+		if err := s.repo.AddListItemTitleIDs(ctx, conn.ID, b.kind, state.MediaItemID, ids); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// handOverListTitle gives the library item promotion moved a title onto the
+// title row's place on the provider's list, so a provider removal before the
+// next import still takes the item off and export doesn't send it again. The
+// item keeps the title's IDs, so a complete read listing the title under any
+// of them keeps it. It takes the title row's provider key unless it has a row
+// whose key the provider lists, or that this row can't improve on. It returns
+// the item's row as stored.
+func (s *Service) handOverListTitle(ctx context.Context, b listBinding, state ListItemState, contentID string, existing ListItemState, tracked bool) (ListItemState, error) {
+	item := ListItemState{
+		ConnectionID:  state.ConnectionID,
+		ListKind:      b.kind,
+		MediaItemID:   contentID,
+		Kind:          state.Kind,
+		RemotePresent: state.RemotePresent,
+		LocalPresent:  true,
+		TitleIDs:      state.keptTitleIDs(),
+	}
+	if !tracked || (!existing.RemotePresent && state.RemotePresent) {
+		item.ProviderItemKey, item.Title, item.Year = state.ProviderItemKey, state.Title, state.Year
+	}
+	if err := s.repo.UpsertListItemStates(ctx, []ListItemState{item}); err != nil {
+		return ListItemState{}, err
+	}
+	item.RemotePresent = item.RemotePresent || existing.RemotePresent
+	item.ProviderItemKey = cmp.Or(item.ProviderItemKey, existing.ProviderItemKey)
+	return item, nil
 }
 
 // localListTitles returns the profile's watchlist entries outside the library
@@ -339,6 +585,7 @@ func (s *Service) localListTitles(ctx context.Context, conn Connection, b listBi
 			Year:            item.Year,
 			LocalPresent:    true,
 			LastSeenLocalAt: &listedAt,
+			TitleIDs:        title.IDs(),
 		})
 	}
 	return items, states, nil
