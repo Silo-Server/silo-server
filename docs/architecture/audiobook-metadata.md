@@ -30,21 +30,25 @@ Admin field locks win over both writers.
 | --- | --- | --- |
 | Title, original title, series | tags | tags (the enricher never writes them) |
 | Year, genres, studios | tags; year follows the tag even when the tag is empty, genres and studios merge | provider; tags fill only an empty field |
-| Authors, narrators | tags replace the stored credits when they differ | provider; tags add only a kind (author or narrator) the book has no credit for |
+| Authors, narrators | every tagged author and narrator (multi-value tags are split) replaces the stored credits when they differ | provider; tagged credits are added only for a kind (author or narrator) the book has no credit for |
 | Overview, release date, language | tags fill an empty field | provider; tags fill an empty field |
 | Cover | the folder image or embedded art | unchanged; a provider poster fills only a missing cover |
 | Runtime | the active files | the active files |
 
 A match replaces credits per kind: only the kinds the provider names. A
-provider without narrators keeps the narrator from the tags. The credits are
+provider without narrators keeps the narrators from the tags. The credits are
 written in the same transaction as the rest of the match and its `success`
-outcome, so a failure leaves the book unmatched and retryable. When the
+outcome. When any part of that write fails, the transaction rolls back and the
+failure is recorded like a provider failure, so the book stays unmatched and
+is retried under the enrichment backoff. When the
 enricher writes a poster it also writes that poster's thumbhash, empty for an
 uncached remote URL, which image caching fills in later.
 
 When a folder is renamed or moved, the scanner looks for the same recording
-under another path. That check compares the tag year stored on the files
-(`media_files.base_year`), not `media_items.year`, which a match owns.
+under another path. It reuses an item only when the item's credits contain
+every tagged credit and the item's indexed files are gone from disk. The year
+it compares is the tag year stored on the files (`media_files.base_year`), not
+`media_items.year`, which a match owns.
 Files indexed before `base_year` existed hold 0 until their folder is
 rewritten; for those the check falls back to `media_items.year`.
 Rename detection still depends on the stored author and narrator matching
@@ -62,8 +66,9 @@ Audiobooks keep `media_items.status` empty. Several consumers read
 check re-probes such a folder on every scan, orphan cleanup deletes
 provisional rows, and the movie and series match queues pick them up. The
 admin unmatched-items list instead uses `catalog.AudiobookUnmatchedWhere`: a
-book with no provider identity whose last enrichment outcome was `no_match`,
-or which was stamped before `audiobook_enrichment_state` existed and has no
+book that is not matched by the predicate above and whose last enrichment
+outcome was `no_match` or `failed` (its providers kept failing until the retry
+limit), or which was stamped before `audiobook_enrichment_state` existed and has no
 state row. A book in a library with no provider chain (`skipped`) or still
 waiting for its first attempt is not listed. Rows from before the state table
 recorded no outcome, so a book skipped back then is listed too: it has no

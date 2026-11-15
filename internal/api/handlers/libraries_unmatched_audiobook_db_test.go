@@ -11,7 +11,7 @@ import (
 )
 
 // Audiobooks keep media_items.status empty. One whose enrichment found no
-// provider match lists as unmatched, one still waiting for enrichment does
+// provider match, or whose providers kept failing, lists as unmatched, one still waiting for enrichment does
 // not, and a match takes it off the list: one that stores a provider ID, an
 // automatic match that only records a successful outcome for its tagged ASIN,
 // or an admin's Match Item.
@@ -28,16 +28,16 @@ func TestUnmatchedItemsListsAudiobooksWithoutProviderMatchDB(t *testing.T) {
 	t.Cleanup(pool.Close)
 
 	tag := fmt.Sprintf("abunmatched-%d", time.Now().UnixNano())
-	noMatchID, waitingID := tag+"-nomatch", tag+"-waiting"
+	noMatchID, waitingID, failedID := tag+"-nomatch", tag+"-waiting", tag+"-failed"
 	var folderID int
 	if err := pool.QueryRow(ctx, `INSERT INTO media_folders (type, name, enabled) VALUES ('audiobooks', $1, true) RETURNING id`, tag).Scan(&folderID); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {
-		_, _ = pool.Exec(ctx, `DELETE FROM media_items WHERE content_id IN ($1, $2)`, noMatchID, waitingID)
+		_, _ = pool.Exec(ctx, `DELETE FROM media_items WHERE content_id IN ($1, $2, $3)`, noMatchID, waitingID, failedID)
 		_, _ = pool.Exec(ctx, `DELETE FROM media_folders WHERE id = $1`, folderID)
 	})
-	for _, id := range []string{noMatchID, waitingID} {
+	for _, id := range []string{noMatchID, waitingID, failedID} {
 		if _, err := pool.Exec(ctx, `INSERT INTO media_items (content_id, type, title, status, genres) VALUES ($1, 'audiobook', $1, '', '{}'::text[])`, id); err != nil {
 			t.Fatal(err)
 		}
@@ -50,6 +50,9 @@ func TestUnmatchedItemsListsAudiobooksWithoutProviderMatchDB(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, err := pool.Exec(ctx, `INSERT INTO audiobook_enrichment_state (content_id, attempts, outcome) VALUES ($1, 1, 'no_match')`, noMatchID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO audiobook_enrichment_state (content_id, attempts, outcome) VALUES ($1, 5, 'failed')`, failedID); err != nil {
 		t.Fatal(err)
 	}
 
@@ -67,8 +70,12 @@ func TestUnmatchedItemsListsAudiobooksWithoutProviderMatchDB(t *testing.T) {
 		return got
 	}
 	got := list()
-	if len(got) != 1 || got[noMatchID] != "unmatched" {
-		t.Fatalf("listed = %v, want only %s as unmatched", got, noMatchID)
+	if len(got) != 2 || got[noMatchID] != "unmatched" || got[failedID] != "unmatched" {
+		t.Fatalf("listed = %v, want %s and %s as unmatched", got, noMatchID, failedID)
+	}
+	// The rest of the test follows the no-match book alone.
+	if _, err := pool.Exec(ctx, `UPDATE audiobook_enrichment_state SET outcome = 'success' WHERE content_id = $1`, failedID); err != nil {
+		t.Fatal(err)
 	}
 
 	// A match through the tagged ASIN stores no other provider ID.

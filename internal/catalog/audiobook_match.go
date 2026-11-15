@@ -31,7 +31,7 @@ func AudiobookProviderMatchedWhere(contentIDExpr string) string {
 
 // AudiobookUnmatchedWhere is true for an audiobook that has no provider
 // identity after enrichment finished without one: its last outcome was
-// no_match, or it was stamped before audiobook_enrichment_state existed and
+// no_match or failed (providers kept failing), or it was stamped before audiobook_enrichment_state existed and
 // has no state row. Such old rows recorded no outcome, so a book skipped for
 // want of a provider chain back then is listed too. Audiobooks keep
 // media_items.status empty, because the scanner's skip check, orphan cleanup
@@ -44,7 +44,7 @@ func AudiobookUnmatchedWhere(alias string) string {
 			EXISTS (
 				SELECT 1 FROM audiobook_enrichment_state abs_state
 				WHERE abs_state.content_id = ` + alias + `.content_id
-				  AND abs_state.outcome = 'no_match'
+				  AND abs_state.outcome IN ('no_match', 'failed')
 			)
 			OR (
 				` + alias + `.last_refreshed IS NOT NULL
