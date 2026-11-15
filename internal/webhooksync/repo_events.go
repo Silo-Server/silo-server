@@ -70,43 +70,6 @@ func (r *Repository) CreateEventLog(ctx context.Context, entry WebhookEventLog) 
 	return created, nil
 }
 
-func (r *Repository) ListEventLogs(ctx context.Context, connectionID string, limit int) ([]WebhookEventLog, error) {
-	if limit <= 0 {
-		limit = defaultWebhookEventLogLimit
-	}
-	if limit > maxWebhookEventLogLimit {
-		limit = maxWebhookEventLogLimit
-	}
-
-	rows, err := r.pool.Query(ctx, `
-		SELECT id, connection_id, received_at, COALESCE(request_id, ''), http_status, outcome,
-		       summary, COALESCE(error_message, ''), COALESCE(body_excerpt, ''), attrs
-		FROM webhook_sync_event_logs
-		WHERE connection_id = $1
-		ORDER BY received_at DESC, id DESC
-		LIMIT $2`,
-		connectionID,
-		limit,
-	)
-	if err != nil {
-		return nil, fmt.Errorf("list webhook event logs: %w", err)
-	}
-	defer rows.Close()
-
-	var out []WebhookEventLog
-	for rows.Next() {
-		entry, err := scanWebhookEventLog(rows)
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, *entry)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterate webhook event logs: %w", err)
-	}
-	return out, nil
-}
-
 func scanWebhookEventLog(row interface {
 	Scan(dest ...any) error
 }) (*WebhookEventLog, error) {

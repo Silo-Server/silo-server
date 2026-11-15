@@ -62,7 +62,10 @@ export default function LibraryRecommended({
     error,
     refetch,
     isFetching: layoutFetching,
-  } = useLibraryLayout(libraryId);
+    // The library page owns this read and starts it on its own mount (see
+    // LibraryPage). A failure that landed while the page waited for its saved
+    // state is shown as it is, rather than starting a second deadline here.
+  } = useLibraryLayout(libraryId, { retryOnMount: false });
   const { data: sectionRefreshSignal = 0 } = useSectionRefreshSignal();
   const sectionTitle = useSectionTitle();
   const [loadedSections, setLoadedSections] = useState<Map<string, ResolvedSection>>(new Map());
@@ -297,7 +300,14 @@ export default function LibraryRecommended({
           return null;
         }
         if (slot.state === "ready" && slot.section) {
-          return <SectionRow key={slot.layout.id} section={slot.section} libraryId={libraryId} />;
+          return (
+            <SectionRow
+              key={slot.layout.id}
+              section={slot.section}
+              libraryId={libraryId}
+              pinLabel={slot.layout.title}
+            />
+          );
         }
         if (slot.state === "error") {
           return (

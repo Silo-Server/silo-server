@@ -1,6 +1,6 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router";
-import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, beforeEach, expect, it, vi } from "vitest";
 import { setAccessToken, setProfileId } from "@/api/client";
 import { OnboardingGate } from "./OnboardingGate";
 
@@ -32,6 +32,13 @@ vi.mock("@/hooks/queries/onboarding", () => ({
   }),
 }));
 
+// The gate lazy-loads TourHost. Evaluating its module graph in a fresh test
+// worker takes about as long as findByRole's 1 s default, so load it up front
+// and let the lazy import resolve from the module cache.
+beforeAll(async () => {
+  await import("./TourHost");
+});
+
 beforeEach(() => {
   localStorage.clear();
   sessionStorage.clear();
@@ -58,7 +65,8 @@ it("keeps Home mounted while loading the tour and after dismissal", async () => 
   renderGate();
   const home = screen.getByRole("heading", { name: "Home" });
   await screen.findByRole("dialog", { name: "Feature tour" });
-  expect(screen.getByRole("heading", { name: "Home" })).toBe(home);
+  // The tour hides the page behind it from assistive tech; Home stays mounted.
+  expect(screen.getByRole("heading", { name: "Home", hidden: true })).toBe(home);
 
   fireEvent.click(screen.getByRole("button", { name: "Skip tour" }));
   await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());

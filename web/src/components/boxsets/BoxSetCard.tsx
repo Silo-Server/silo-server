@@ -8,6 +8,7 @@ import type { BoxSetSummary } from "@/api/types";
 import { boxSetFilmCount, boxSetYears } from "@/lib/boxSets";
 import { buildBoxSetHref } from "@/lib/mediaNavigation";
 import { useAppLanguage, useT } from "@/i18n";
+import WatchProgressBar from "@/components/WatchProgressBar";
 
 /**
  * The card of a movie box set: one poster for the movies TMDB lists in one
@@ -64,19 +65,15 @@ export default function BoxSetCard({ boxSet }: { boxSet: BoxSetSummary }) {
               {boxSetFilmCount(boxSet.movie_count)}
             </span>
             {progress > 0 ? (
-              <div
+              <WatchProgressBar
                 role="progressbar"
                 aria-label={t("web.detail.boxSet.filmsWatched")}
                 aria-valuemin={0}
                 aria-valuemax={boxSet.movie_count}
                 aria-valuenow={boxSet.played_count}
-                className="absolute inset-x-2.5 bottom-1 h-[3px] overflow-hidden rounded-full bg-black/40"
-              >
-                <div
-                  className="bg-primary h-full rounded-full"
-                  style={{ width: `${Math.round(Math.min(1, progress) * 100)}%` }}
-                />
-              </div>
+                belowCornerLabel
+                percent={progress * 100}
+              />
             ) : null}
           </MediaCardArtwork>
         </ViewTransitionLink>

@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { joinList } from "@/lib/appLocale";
 import { Search } from "lucide-react";
 import { VisuallyHidden } from "radix-ui";
 import { useNavigate } from "react-router";
 
 import { useAppLanguage, useT } from "@/i18n";
+
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import {
   countSettingsSearchItems,
@@ -13,6 +15,7 @@ import {
 import { navigateToPluginRoute } from "@/lib/buildPluginHref";
 import type { AdminNavGroup, AdminNavItem } from "@/lib/adminNavigation";
 import { cn } from "@/lib/utils";
+import { isImeComposing } from "@/lib/imeComposition";
 
 /** The key that closes the dialog, as printed on the keyboard. */
 const ESCAPE_KEY_LABEL = "ESC";
@@ -115,6 +118,7 @@ export function AdminSectionCommandDialog({
   );
 
   function handleInputKeyDown(event: React.KeyboardEvent<HTMLInputElement>) {
+    if (isImeComposing(event)) return;
     if (event.key === "ArrowDown") {
       event.preventDefault();
       setSelectedIndex((current) => (resultCount === 0 ? -1 : (current + 1) % resultCount));
@@ -264,7 +268,7 @@ function AdminCommandResultRow({
         ) : null}
         {matchingSettings.length > 0 ? (
           <span className="text-muted-foreground mt-1 block text-xs">
-            {matchingSettings.map((setting) => setting.label).join(", ")}
+            {joinList(matchingSettings.map((setting) => setting.label))}
           </span>
         ) : null}
       </span>

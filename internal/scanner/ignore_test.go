@@ -227,6 +227,20 @@ func TestLibraryRootSkipped(t *testing.T) {
 	}
 }
 
+// A file that vanishes after the resolver saw it must still be matched as a
+// file, or autoscan records it as ignored and never reconciles its row.
+func TestFileIgnoredMatchesAVanishedFileAsAFile(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	writeTestFile(t, filepath.Join(root, ".ignore"), "Movie.mkv/\n")
+	for _, name := range []string{"Movie.mkv", ".Hidden.mkv"} {
+		ignored, err := FileIgnored(filepath.Join(root, name), []string{root})
+		if err != nil || ignored {
+			t.Errorf("FileIgnored(%s) = %v, %v; want false, nil", name, ignored, err)
+		}
+	}
+}
+
 func TestSiloIgnoreSkipsMatchedFilesAndDirs(t *testing.T) {
 	t.Parallel()
 
@@ -345,7 +359,7 @@ func TestAudiobookScanHonorsIgnoreFiles(t *testing.T) {
 	writeTestFile(t, filepath.Join(root, "junk", "Ignore Me.mp3"), "test")
 	writeTestFile(t, filepath.Join(root, ".siloignore"), "junk/*\nsample\n")
 
-	scans, err := collectAudiobookRootScans(t.Context(), 1, []string{root}, nil, true)
+	scans, err := collectAudiobookRootScans(t.Context(), 1, []string{root}, []string{root}, true, "")
 	if err != nil {
 		t.Fatalf("collect audiobook root scans: %v", err)
 	}
@@ -452,5 +466,60 @@ func TestHiddenDirectoriesAreSkipped(t *testing.T) {
 	}
 	if len(files) != 0 || len(walkFailures) != 0 {
 		t.Fatalf("scope inside a hidden directory: files = %v, walkFailures = %v, want none", files, walkFailures)
+	}
+}
+
+// A library root nested inside another is walked by a full scan as an
+// ordinary folder of the outer root, so the outer root's ignore files apply
+// below it. Scoped walks, which subtree and Autoscan scans use, and the
+// ebook full scan, which walks every configured root, must agree, or a
+// folder the outer ignore file excludes is imported and then retired again.
+func TestOuterRootIgnoreRulesApplyBelowANestedRoot(t *testing.T) {
+	t.Parallel()
+
+	lib := t.TempDir()
+	nested := filepath.Join(lib, "nested")
+	writeTestFile(t, filepath.Join(lib, ".siloignore"), "nested/Excluded*\n")
+	writeTestFile(t, filepath.Join(nested, "Excluded Movie (2024)", "Excluded Movie (2024).mkv"), "test")
+	writeTestFile(t, filepath.Join(nested, "Kept (2024)", "Kept (2024).mkv"), "test")
+	writeTestFile(t, filepath.Join(nested, "Excluded Book.epub"), "test")
+	writeTestFile(t, filepath.Join(nested, "Kept Book.epub"), "test")
+	roots := []string{nested, lib}
+
+	full, failures, err := collectLogicalFilePaths(t.Context(), compactScanRoots(roots), "movies", roots)
+	if err != nil || len(failures) != 0 {
+		t.Fatalf("full walk: %v, failures: %v", err, failures)
+	}
+	sort.Strings(full)
+	assertFilePaths(t, full, lib, []string{"nested/Kept (2024)/Kept (2024).mkv"})
+
+	for scope, want := range map[string][]string{
+		nested: {"nested/Kept (2024)/Kept (2024).mkv"},
+		filepath.Join(nested, "Excluded Movie (2024)"): nil,
+	} {
+		files, failures, err := collectLogicalFilePaths(t.Context(), []string{scope}, "movies", roots)
+		if err != nil || len(failures) != 0 {
+			t.Fatalf("scoped walk of %s: %v, failures: %v", scope, err, failures)
+		}
+		sort.Strings(files)
+		assertFilePaths(t, files, lib, want)
+	}
+
+	scans, err := collectEbookRootScans(t.Context(), 1, roots, roots)
+	if err != nil {
+		t.Fatalf("ebook scan: %v", err)
+	}
+	var books []string
+	for _, scan := range scans {
+		books = append(books, scan.files...)
+	}
+	sort.Strings(books)
+	assertFilePaths(t, books, lib, []string{"nested/Kept Book.epub"})
+
+	// An explicit single-file scan (ScanFile) still ignores ignore files.
+	excludedBook := filepath.Join(nested, "Excluded Book.epub")
+	scans, err = collectEbookRootScans(t.Context(), 1, []string{excludedBook}, roots)
+	if err != nil || len(scans) != 1 || len(scans[0].files) != 1 || scans[0].files[0] != excludedBook {
+		t.Fatalf("explicit ebook file scan = %+v, %v; want %s", scans, err, excludedBook)
 	}
 }

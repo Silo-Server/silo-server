@@ -87,8 +87,7 @@ function StarRating({ value, onChange, size = 20, verticalArrows = true }: StarR
             role="radio"
             aria-label={t("web.item.rating.stars", { count: star })}
             aria-checked={current}
-            // eslint-disable-next-line formatjs/no-literal-string-in-jsx -- new on main; its catalog key is a follow-up
-            title={current ? "Remove rating" : undefined}
+            title={current ? t("web.item.rating.remove") : undefined}
             tabIndex={star === tabbableStar ? 0 : -1}
             data-filled={filled}
             data-rating={star}

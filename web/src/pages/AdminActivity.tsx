@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { Link, Navigate, useSearchParams } from "react-router";
 import { AdminSessionActions } from "@/components/AdminSessionActions";
 import { JellyfinSessionPill } from "@/components/JellyfinSessionPill";
@@ -11,6 +11,7 @@ import { usePageActivity } from "@/hooks/usePageActivity";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { DropdownMenuItem } from "@/components/ui/dropdown-menu";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import type { AdminSession, OperationalLogEntry, IPUserEntry } from "@/api/types";
 import { useIPUsers } from "@/hooks/queries/admin/ips";
 import { useAdminSessions } from "@/hooks/queries/admin/stats";
@@ -19,27 +20,33 @@ import {
   classifyActivityMethod,
   compareActivityMethods,
   decisionBadgeClass,
-  isJellyfinSession,
-  formatAudioDetail,
-  formatContainerDetail,
+  formatAudioSummary,
+  formatDecisionLabel,
   formatDeliveredAudioSummary,
   formatDeliveredContainerSummary,
   formatDeliveredVideoSummary,
-  formatAudioSummary,
-  formatDecisionLabel,
+  formatPlaybackPosition,
+  formatRequestedSourceSwitch,
   formatSessionBitrate,
   formatSourceContainerSummary,
   formatToneMapSummary,
   formatTranscodeModeSummary,
+  formatVideoSummary,
+  getAudioConversion,
+  getPlaybackProgress,
+  getPlaybackSessionSubtitle,
   getSessionClientLabel,
   getSessionClientLabelFull,
   getSessionRouteNodes,
-  formatVideoDetail,
-  formatVideoSummary,
+  getVideoConversion,
   normalizeContainerDecision,
   normalizeStreamDecision,
+  sessionRoutesVary,
+  summarizeActivity,
   type ActivityRouteNode,
+  type StreamConversion,
 } from "@/pages/adminActivityPresentation";
+import { getAdaptationReasons, type AdaptationReason } from "@/pages/adminActivityReasons";
 import {
   Table,
   TableBody,
@@ -49,38 +56,61 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import {
+  AudioLines,
+  ChevronRight,
+  Clock,
+  FileText,
+  Film,
+  Filter,
+  Globe,
+  Pause,
+  Play,
   RefreshCw,
   Search,
-  Radio,
-  Filter,
-  X,
-  Play,
-  Pause,
   Terminal,
-  FileText,
-  ChevronDown,
-  ChevronUp,
+  X,
 } from "lucide-react";
 import { formatDateTime, formatTime } from "@/lib/datetime";
-import { formatLocale } from "@/lib/appLocale";
-import { englishText, numberText, type TextValues, type Translate, useT } from "@/i18n";
+import { formatLocale, joinList } from "@/lib/appLocale";
+import { codeNumber, englishText, numberText, type TextValues, type Translate, useT } from "@/i18n";
 import type { MessageKey } from "@/locales/keys";
 
 type SortField = "username" | "media" | "method" | "node" | "started";
 type SortDir = "asc" | "desc";
 
 const REFRESH_SPINNER_MIN_VISIBLE_MS = 1_000;
-// Punctuation and symbols, the same in every language.
+
 const MIDDLE_DOT = "·";
 const SORT_ASC_MARK = "▲";
 const SORT_DESC_MARK = "▼";
 
-// The stream table's header and rows share one column template, whose minimums
-// add up to 977px plus 4rem of gaps and padding (1041px at a 16px root font,
-// 1057px at 20px). Keep the spacing in rem in the container breakpoint so larger
-// fonts show stacked rows until the columns fit, regardless of sidebar width.
-const STREAM_TABLE_COLUMNS =
-  "grid-cols-[minmax(120px,1.1fr)_minmax(190px,1.7fr)_minmax(220px,1.9fr)_minmax(90px,0.8fr)_minmax(125px,0.9fr)_minmax(232px,1.4fr)]";
+/**
+ * The stream table's two layouts. Rows and the header share one column
+ * template; the route column only exists when routes differ between sessions
+ * (see sessionRoutesVary). Below the container width the columns need, rows
+ * become stacked cards. Widths are in rem so larger fonts stack sooner.
+ */
+interface TableLayout {
+  columns: string;
+  /** Classes that show an element only in the table layout. */
+  table: string;
+  /** Classes that show an element only in the stacked layout. */
+  stacked: string;
+}
+
+const TABLE_LAYOUT: TableLayout = {
+  columns:
+    "grid-cols-[1.75rem_minmax(13rem,1.5fr)_minmax(9.5rem,1fr)_minmax(17rem,2.3fr)_5.5rem_auto]",
+  table: "hidden @min-[58rem]:grid",
+  stacked: "@min-[58rem]:hidden",
+};
+
+const TABLE_LAYOUT_WITH_ROUTE: TableLayout = {
+  columns:
+    "grid-cols-[1.75rem_minmax(13rem,1.5fr)_minmax(9.5rem,1fr)_minmax(17rem,2.3fr)_minmax(7rem,1fr)_5.5rem_auto]",
+  table: "hidden @min-[66rem]:grid",
+  stacked: "@min-[66rem]:hidden",
+};
 
 const STACKED_SORT_FIELDS: [SortField, MessageKey][] = [
   ["username", "web.admin.activity.column.user"],
@@ -104,9 +134,7 @@ export default function AdminActivity() {
   const [searchParams] = useSearchParams();
   const { connectionState } = useRealtimeEvents();
   const pageActivity = usePageActivity();
-  const error = undefined;
   const manualRefreshStartedAtRef = useRef<number | null>(null);
-  const ipLookupRef = useRef<HTMLDetailsElement | null>(null);
   const wasRealtimePausedRef = useRef(!pageActivity.canApplyRealtimeUpdates);
   const [isManualRefreshPending, setIsManualRefreshPending] = useState(false);
   const [search, setSearch] = useState("");
@@ -115,11 +143,8 @@ export default function AdminActivity() {
   const [typeFilter, setTypeFilter] = useState<string | null>(null);
   const [sortField, setSortField] = useState<SortField>("started");
   const [sortDir, setSortDir] = useState<SortDir>("desc");
-  const [ipSearch, setIPSearch] = useState("");
-  const [activeIP, setActiveIP] = useState("");
   const [ipLookupOpen, setIPLookupOpen] = useState(false);
-  const ipHistory = useIPUsers(activeIP);
-  const { data: ipUsers = [], isLoading: ipLoading } = ipHistory;
+  const [ipLookupSeed, setIPLookupSeed] = useState("");
 
   const refreshActivity = useCallback(
     async ({ manual }: { manual: boolean }) => {
@@ -186,6 +211,13 @@ export default function AdminActivity() {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- rebuild on a language change
   }, [sessions, t]);
 
+  const totals = useMemo(() => summarizeActivity(sessions), [sessions]);
+  const layout = useMemo(
+    () => (sessionRoutesVary(sessions) ? TABLE_LAYOUT_WITH_ROUTE : TABLE_LAYOUT),
+    [sessions],
+  );
+  const showRoute = layout === TABLE_LAYOUT_WITH_ROUTE;
+
   // Filter + sort
   const filtered = useMemo(() => {
     let result = sessions;
@@ -194,6 +226,7 @@ export default function AdminActivity() {
       result = result.filter(
         (s) =>
           s.username?.toLowerCase().includes(q) ||
+          s.profile_name?.toLowerCase().includes(q) ||
           s.media_title?.toLowerCase().includes(q) ||
           s.series_name?.toLowerCase().includes(q) ||
           s.episode_name?.toLowerCase().includes(q) ||
@@ -258,20 +291,9 @@ export default function AdminActivity() {
     if (!trimmed) {
       return;
     }
-
-    setIPSearch(trimmed);
-    setActiveIP(trimmed);
+    setIPLookupSeed(trimmed);
     setIPLookupOpen(true);
-    window.requestAnimationFrame(() => {
-      ipLookupRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
-    });
   }, []);
-
-  const reloadHistoryButton = (
-    <Button onClick={() => void ipHistory.restart()}>
-      {t("web.admin.activity.ipLookup.reload")}
-    </Button>
-  );
 
   // Download preparation moved to the Downloads page; keep old links working.
   if (searchParams.get("view") === "preparations") {
@@ -280,35 +302,51 @@ export default function AdminActivity() {
   if (isLoading)
     return <div className="text-muted-foreground pb-8">{t("web.admin.activity.page.loading")}</div>;
 
+  const summary =
+    sessions.length === 0
+      ? t("web.admin.activity.page.noStreams")
+      : [
+          t("web.admin.activity.page.subtitle", {
+            count: sessions.length,
+            count_text: sessions.length,
+            nodes: routeNodes.length,
+            nodes_text: routeNodes.length,
+          }),
+          totals.videoTranscodes > 0 &&
+            t("web.admin.activity.summary.videoTranscodes", {
+              count: totals.videoTranscodes,
+              count_text: totals.videoTranscodes,
+            }),
+          totals.bitrateKbps > 0 &&
+            t("web.admin.activity.summary.bandwidth", {
+              rate: formatSessionBitrate(totals.bitrateKbps) ?? "",
+            }),
+          totals.remote > 0 &&
+            t("web.admin.activity.summary.remote", { count_text: totals.remote }),
+          totals.paused > 0 &&
+            t("web.admin.activity.summary.paused", { count_text: totals.paused }),
+        ]
+          .filter(Boolean)
+          .join(` ${MIDDLE_DOT} `);
+
+  const chipClass = (active: boolean, dimmed: boolean) =>
+    `inline-flex h-8 items-center gap-1.5 rounded-md border px-2.5 text-[12px] font-medium transition-colors ${
+      active
+        ? "border-primary/40 bg-primary/10 text-foreground"
+        : "border-border bg-surface text-muted-foreground hover:text-foreground"
+    } ${dimmed ? "opacity-50" : ""}`;
+
   return (
-    <div className="space-y-5 lg:space-y-6">
+    <div className="space-y-4">
       <PageHeader
         title={t("web.admin.activity.page.title")}
-        subtitle={
-          sessions.length === 0
-            ? t("web.admin.activity.page.noStreams")
-            : t("web.admin.activity.page.subtitle", {
-                count: sessions.length,
-                count_text: sessions.length,
-                nodes: routeNodes.length,
-                nodes_text: routeNodes.length,
-              })
-        }
+        subtitle={summary}
         actions={
           <>
-            {sessions.length > 0 && (
-              <span className="live-badge flex items-center gap-1.5">
-                <Radio className="h-3 w-3" />
-                {t("web.admin.activity.page.liveCount", {
-                  count: sessions.length,
-                  count_text: sessions.length,
-                })}
-              </span>
-            )}
+            <RealtimeStatus state={connectionState} />
             <Button
               variant="outline"
               size="sm"
-              className="min-w-[8.25rem] justify-center"
               onClick={() => void refreshActivity({ manual: true })}
               disabled={isManualRefreshPending}
               aria-busy={isManualRefreshPending}
@@ -320,203 +358,9 @@ export default function AdminActivity() {
                 ? t("web.admin.activity.page.refreshing")
                 : t("web.admin.activity.page.refresh")}
             </Button>
-            <div className="min-w-[8.75rem] px-1 text-end">
-              <div className="text-muted-foreground text-[10px] font-semibold tracking-wider uppercase">
-                {t("web.admin.activity.realtime.heading")}
-              </div>
-              <div className="text-[12px]">{formatConnectionState(connectionState, t)}</div>
-              {error && <div className="text-muted-foreground text-[11px]">{error}</div>}
-            </div>
           </>
         }
       />
-
-      {/* IP Lookup */}
-      <details
-        ref={ipLookupRef}
-        open={ipLookupOpen}
-        onToggle={(event) => setIPLookupOpen(event.currentTarget.open)}
-        className="surface-panel rounded-2xl border-0"
-      >
-        <summary className="cursor-pointer px-4 py-3 text-sm font-medium select-none">
-          {t("web.admin.activity.ipLookup.heading")}
-        </summary>
-        <div className="px-4 pb-4">
-          <form
-            onSubmit={(e) => {
-              e.preventDefault();
-              setActiveIP(ipSearch.trim());
-            }}
-            className="flex items-center gap-2"
-          >
-            <Input
-              type="text"
-              placeholder={t("web.admin.activity.ipLookup.placeholder")}
-              value={ipSearch}
-              onChange={(e) => setIPSearch(e.target.value)}
-              className="max-w-xs font-mono text-sm"
-            />
-            <Button type="submit" variant="outline" size="sm" disabled={!ipSearch.trim()}>
-              <Search className="me-1 h-3.5 w-3.5" />
-              {t("web.admin.activity.ipLookup.submit")}
-            </Button>
-          </form>
-          {activeIP && (
-            <div className="mt-3">
-              {ipLoading ? (
-                <p className="text-muted-foreground text-sm">
-                  {t("web.admin.activity.ipLookup.searching")}
-                </p>
-              ) : ipHistory.isError && ipUsers.length === 0 ? (
-                <p role="alert">
-                  {t("web.admin.activity.ipLookup.loadError")} {reloadHistoryButton}
-                </p>
-              ) : ipUsers.length === 0 ? (
-                <p className="text-muted-foreground text-sm">
-                  {t("web.admin.activity.ipLookup.empty", { ip: activeIP })}
-                </p>
-              ) : (
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>{t("web.admin.activity.ipLookup.column.user")}</TableHead>
-                      <TableHead>{t("web.admin.activity.ipLookup.column.firstSeen")}</TableHead>
-                      <TableHead>{t("web.admin.activity.ipLookup.column.lastSeen")}</TableHead>
-                      <TableHead className="text-end">
-                        {t("web.admin.activity.ipLookup.column.requests")}
-                      </TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {ipUsers.map((entry: IPUserEntry) => (
-                      <TableRow key={entry.user_id}>
-                        <TableCell>
-                          <Link
-                            to={`/admin/users/${entry.user_id}`}
-                            className="text-primary font-medium hover:underline"
-                          >
-                            {entry.username ||
-                              t("web.admin.activity.userFallback", { id: entry.user_id })}
-                          </Link>
-                        </TableCell>
-                        <TableCell className="text-sm">
-                          {formatDateTime(entry.first_seen)}
-                        </TableCell>
-                        <TableCell className="text-sm">{formatDateTime(entry.last_seen)}</TableCell>
-                        <TableCell className="text-end">
-                          {entry.request_count.toLocaleString(formatLocale())}
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              )}
-              {ipHistory.isError && ipUsers.length > 0 && (
-                <p role="alert">
-                  {t("web.admin.activity.ipLookup.loadMoreError")} {reloadHistoryButton}
-                </p>
-              )}
-              {ipHistory.hasNextPage && (
-                <Button
-                  disabled={ipHistory.isFetchingNextPage}
-                  onClick={() => void ipHistory.fetchNextPage()}
-                >
-                  {t("web.admin.activity.ipLookup.loadMore")}
-                </Button>
-              )}
-            </div>
-          )}
-        </div>
-      </details>
-
-      {/* Summary strip */}
-      {sessions.length > 0 && (
-        <div className="surface-panel rounded-2xl border-0 p-4">
-          {/* Method distribution bar */}
-          <div className="mb-3">
-            <div className="text-muted-foreground mb-2 text-[10px] font-semibold tracking-wider uppercase">
-              {t("web.admin.activity.summary.methodHeading")}
-            </div>
-            <div
-              role="img"
-              aria-label={t("web.admin.activity.summary.methodDistribution")}
-              className="flex h-1.5 overflow-hidden rounded-full"
-            >
-              {Object.entries(methods)
-                .sort(([a], [b]) => compareActivityMethods(a, b))
-                .map(([method, count]) => (
-                  <div
-                    key={method}
-                    title={t("web.admin.activity.summary.methodSegment", {
-                      method: activityMethodMeta(method).label,
-                      count: count,
-                    })}
-                    className={`transition-all duration-500 ${activityMethodMeta(method).swatchClass}`}
-                    style={{ width: `${(count / sessions.length) * 100}%` }}
-                  />
-                ))}
-            </div>
-            <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1">
-              {Object.entries(methods)
-                .sort(([a], [b]) => compareActivityMethods(a, b))
-                .map(([method, count]) => (
-                  <button
-                    key={method}
-                    type="button"
-                    title={activityMethodMeta(method).description}
-                    aria-label={t("web.admin.activity.summary.methodFilter", {
-                      method: activityMethodMeta(method).label,
-                      count: count,
-                    })}
-                    aria-pressed={methodFilter === method}
-                    onClick={() => setMethodFilter(methodFilter === method ? null : method)}
-                    className={`flex items-center gap-1.5 text-[11px] transition-opacity ${
-                      methodFilter && methodFilter !== method ? "opacity-30" : ""
-                    }`}
-                  >
-                    <span
-                      className={`inline-block h-2 w-2 rounded-full ${activityMethodMeta(method).swatchClass}`}
-                    />
-                    <span className="font-medium">{activityMethodMeta(method).label}</span>
-                    <span className="text-muted-foreground tabular-nums">{count}</span>
-                  </button>
-                ))}
-            </div>
-          </div>
-
-          {/* Node breakdown */}
-          {routeNodes.length > 1 && (
-            <div className="border-border border-t pt-3">
-              <div className="text-muted-foreground mb-2 text-[10px] font-semibold tracking-wider uppercase">
-                {t("web.admin.activity.summary.byNode")}
-              </div>
-              <div className="flex flex-wrap gap-1.5">
-                {[...routeNodes]
-                  .sort((a, b) => b.count - a.count)
-                  .map((node) => (
-                    <button
-                      key={node.key}
-                      onClick={() => setNodeFilter(nodeFilter === node.key ? null : node.key)}
-                      className={`bg-surface border-border hover:border-primary/20 rounded-md border px-2.5 py-1 text-[11px] font-medium transition-all ${
-                        nodeFilter === node.key
-                          ? "border-primary/40 bg-primary/10 text-primary"
-                          : nodeFilter
-                            ? "opacity-30"
-                            : ""
-                      }`}
-                    >
-                      <span className="text-muted-foreground me-1">{node.label}</span>
-                      {node.name}
-                      <span className="text-muted-foreground ms-1.5 tabular-nums">
-                        {node.count}
-                      </span>
-                    </button>
-                  ))}
-              </div>
-            </div>
-          )}
-        </div>
-      )}
 
       {/* Search + filters */}
       <div className="flex flex-wrap items-center gap-2">
@@ -524,29 +368,67 @@ export default function AdminActivity() {
           <Search className="text-muted-foreground pointer-events-none absolute start-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2" />
           <Input
             placeholder={t("web.admin.activity.filter.placeholder")}
+            aria-label={t("web.admin.activity.filter.placeholder")}
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             className="h-8 ps-9 text-[13px]"
           />
           {search && (
             <button
+              type="button"
               onClick={() => setSearch("")}
+              aria-label={t("web.admin.users.list.clearSearch")}
               className="text-muted-foreground hover:text-foreground absolute end-2.5 top-1/2 -translate-y-1/2"
             >
               <X className="h-3.5 w-3.5" />
             </button>
           )}
         </div>
+        {sessions.length > 0 && (
+          <div
+            role="group"
+            aria-label={t("web.admin.activity.summary.methodHeading")}
+            className="flex flex-wrap gap-1"
+          >
+            {Object.entries(methods)
+              .sort(([a], [b]) => compareActivityMethods(a, b))
+              .map(([method, count]) => {
+                const meta = activityMethodMeta(method);
+                return (
+                  <button
+                    key={method}
+                    type="button"
+                    title={meta.description}
+                    aria-label={t("web.admin.activity.summary.methodFilter", {
+                      method: meta.label,
+                      count: count,
+                    })}
+                    aria-pressed={methodFilter === method}
+                    onClick={() => setMethodFilter(methodFilter === method ? null : method)}
+                    className={chipClass(
+                      methodFilter === method,
+                      methodFilter !== null && methodFilter !== method,
+                    )}
+                  >
+                    <span
+                      aria-hidden="true"
+                      className={`inline-block h-2 w-2 rounded-full ${meta.swatchClass}`}
+                    />
+                    {meta.label}
+                    <span className="text-muted-foreground tabular-nums">{numberText(count)}</span>
+                  </button>
+                );
+              })}
+          </div>
+        )}
         <div className="flex gap-1">
           {(["movie", "series"] as const).map((type) => (
             <button
               key={type}
+              type="button"
+              aria-pressed={typeFilter === type}
               onClick={() => setTypeFilter(typeFilter === type ? null : type)}
-              className={`rounded-md border px-2.5 py-1.5 text-[11px] font-medium capitalize transition-all ${
-                typeFilter === type
-                  ? "border-primary/40 bg-primary/10 text-primary"
-                  : "border-border bg-surface text-muted-foreground hover:text-foreground"
-              }`}
+              className={chipClass(typeFilter === type, false)}
             >
               {type === "movie"
                 ? t("web.admin.activity.filter.movies")
@@ -554,24 +436,65 @@ export default function AdminActivity() {
             </button>
           ))}
         </div>
+        {routeNodes.length > 1 && (
+          <div
+            role="group"
+            aria-label={t("web.admin.activity.summary.byNode")}
+            className="flex flex-wrap gap-1"
+          >
+            {[...routeNodes]
+              .sort((a, b) => b.count - a.count)
+              .map((node) => (
+                <button
+                  key={node.key}
+                  type="button"
+                  aria-pressed={nodeFilter === node.key}
+                  onClick={() => setNodeFilter(nodeFilter === node.key ? null : node.key)}
+                  className={chipClass(
+                    nodeFilter === node.key,
+                    nodeFilter !== null && nodeFilter !== node.key,
+                  )}
+                >
+                  <span className="text-muted-foreground">{node.label}</span>
+                  {node.name}
+                  <span className="text-muted-foreground tabular-nums">
+                    {numberText(node.count)}
+                  </span>
+                </button>
+              ))}
+          </div>
+        )}
         {activeFilters > 0 && (
           <button
+            type="button"
             onClick={() => {
               setMethodFilter(null);
               setNodeFilter(null);
               setTypeFilter(null);
             }}
-            className="text-muted-foreground hover:text-foreground flex items-center gap-1 text-[11px]"
+            className="text-muted-foreground hover:text-foreground flex items-center gap-1 text-[12px]"
           >
             <X className="h-3 w-3" />
             {t("web.admin.activity.filter.clear")}
           </button>
         )}
+        <Button
+          variant="outline"
+          size="sm"
+          className="ms-auto"
+          onClick={() => {
+            setIPLookupSeed("");
+            setIPLookupOpen(true);
+          }}
+        >
+          <Globe className="h-3.5 w-3.5" />
+          {t("web.admin.activity.ipLookup.heading")}
+        </Button>
       </div>
 
       {/* Filter status */}
       {(search || activeFilters > 0) && (
-        <div className="text-muted-foreground text-[11px]">
+        <div className="text-muted-foreground text-[12px]">
           {t("web.admin.activity.filter.showing", {
             total: sessions.length,
             shown: filtered.length,
@@ -584,45 +507,50 @@ export default function AdminActivity() {
       {filtered.length === 0 ? (
         <EmptyState hasData={sessions.length > 0} />
       ) : (
-        <div className="bg-card border-border @container overflow-hidden rounded-lg border">
+        <div className="bg-card border-border @container overflow-clip rounded-lg border">
           {/* Sort controls for the stacked rows, which have no column headers */}
           <div
             role="group"
             aria-label={t("web.admin.activity.sort.group")}
-            className="border-border bg-surface/50 flex flex-wrap items-center gap-x-4 gap-y-1.5 border-b px-4 py-2.5 @min-[calc(977px+4rem)]:hidden"
+            className={`border-border bg-surface/50 flex flex-wrap items-center gap-x-4 gap-y-1.5 border-b px-4 py-2.5 ${layout.stacked}`}
           >
-            <span className="text-muted-foreground/70 text-[10px] font-semibold tracking-wider uppercase">
+            <span className="text-muted-foreground text-[12px]">
               {t("web.admin.activity.sort.heading")}
             </span>
-            {STACKED_SORT_FIELDS.map(([field, label]) => (
-              <SortHeader
-                key={field}
-                field={field}
-                current={sortField}
-                dir={sortDir}
-                onClick={toggleSort}
-              >
-                {t(label)}
-              </SortHeader>
-            ))}
+            {STACKED_SORT_FIELDS.filter(([field]) => showRoute || field !== "node").map(
+              ([field, label]) => (
+                <SortHeader
+                  key={field}
+                  field={field}
+                  current={sortField}
+                  dir={sortDir}
+                  onClick={toggleSort}
+                >
+                  {t(label)}
+                </SortHeader>
+              ),
+            )}
           </div>
 
-          {/* Table header */}
+          {/* Table header, which stays in view while the page scrolls */}
           <div
-            className={`border-border bg-surface/50 hidden ${STREAM_TABLE_COLUMNS} items-center gap-2 border-b px-3 py-2.5 @min-[calc(977px+4rem)]:grid`}
+            className={`border-border bg-card/95 sticky top-0 z-10 ${layout.table} ${layout.columns} items-center gap-3 border-b px-3 py-2 backdrop-blur`}
           >
-            <SortHeader field="username" current={sortField} dir={sortDir} onClick={toggleSort}>
-              {t("web.admin.activity.column.user")}
-            </SortHeader>
+            <span />
             <SortHeader field="media" current={sortField} dir={sortDir} onClick={toggleSort}>
               {t("web.admin.activity.column.stream")}
+            </SortHeader>
+            <SortHeader field="username" current={sortField} dir={sortDir} onClick={toggleSort}>
+              {t("web.admin.activity.column.user")}
             </SortHeader>
             <SortHeader field="method" current={sortField} dir={sortDir} onClick={toggleSort}>
               {t("web.admin.activity.column.playback")}
             </SortHeader>
-            <SortHeader field="node" current={sortField} dir={sortDir} onClick={toggleSort}>
-              {t("web.admin.activity.column.route")}
-            </SortHeader>
+            {showRoute && (
+              <SortHeader field="node" current={sortField} dir={sortDir} onClick={toggleSort}>
+                {t("web.admin.activity.column.route")}
+              </SortHeader>
+            )}
             <SortHeader
               field="started"
               current={sortField}
@@ -632,71 +560,68 @@ export default function AdminActivity() {
             >
               {t("web.admin.activity.column.time")}
             </SortHeader>
-            <div className="text-muted-foreground text-end text-[10px] font-semibold tracking-wider uppercase">
-              {t("web.admin.activity.column.actions")}
-            </div>
+            <span className="sr-only">{t("web.admin.activity.column.actions")}</span>
           </div>
 
           {/* Rows */}
-          <div className="max-h-[calc(100vh-420px)] overflow-y-auto">
-            {filtered.map((session, i) => (
+          <div>
+            {filtered.map((session) => (
               <StreamRow
                 key={session.session_id}
                 session={session}
-                even={i % 2 === 0}
+                layout={layout}
+                showRoute={showRoute}
                 onIPLookup={runIPLookup}
               />
             ))}
           </div>
         </div>
       )}
+
+      <IPLookupDialog open={ipLookupOpen} onOpenChange={setIPLookupOpen} seed={ipLookupSeed} />
     </div>
   );
 }
 
 // --- Sub-components ---
 
+/** One quiet status line; it only draws attention when updates aren't live. */
+function RealtimeStatus({ state }: { state: "connecting" | "live" | "disconnected" }) {
+  const t = useT();
+  return (
+    <span
+      role="status"
+      title={t("web.admin.activity.realtime.heading")}
+      className={`inline-flex items-center gap-1.5 px-1 text-[12px] ${
+        state === "live" ? "text-muted-foreground" : "text-warning font-medium"
+      }`}
+    >
+      <span
+        aria-hidden="true"
+        className={`h-1.5 w-1.5 rounded-full ${
+          state === "live" ? "bg-success" : state === "connecting" ? "bg-warning" : "bg-destructive"
+        }`}
+      />
+      {formatConnectionState(state, t)}
+    </span>
+  );
+}
+
 function StreamRow({
   session,
-  even,
+  layout,
+  showRoute,
   onIPLookup,
 }: {
   session: AdminSession;
-  even: boolean;
+  layout: TableLayout;
+  showRoute: boolean;
   onIPLookup: (ip: string) => void;
 }) {
   const t = useT();
+  const panelId = useId();
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [ffmpegOpen, setFFmpegOpen] = useState(false);
-  const title = getDisplayTitle(session, t);
-  const subtitle = getDisplaySubtitle(session, t);
-  const username =
-    session.username || t("web.admin.activity.userFallback", { id: session.user_id });
-  const elapsed = getElapsed(session.started_at);
-  const profileDisplay = session.profile_name || session.profile_id || "";
-  const userHref = `/admin/users/${session.user_id}`;
-  const itemHref = session.content_id ? `/item/${session.content_id}` : "";
-  const sourceContainer = session.source_container?.trim().toUpperCase();
-  const streamBitrate = formatSessionBitrate(session.stream_bitrate_kbps);
-  const streamMeta = [sourceContainer, streamBitrate].filter(Boolean).join(" · ");
-  const clientIP = session.client_ip?.trim() || "";
-  const clientLabel = getSessionClientLabel(session);
-  // The row stays compact; the exact version, build, and channel live in the
-  // tooltip and in the expanded panel's Client card.
-  const clientLabelFull = getSessionClientLabelFull(session);
-  const clientUserAgent = session.client_user_agent?.trim() || "";
-  const clientTitle = clientUserAgent
-    ? `${clientLabelFull || clientLabel} — ${clientUserAgent}`
-    : clientLabelFull || clientLabel;
-  const playbackPosition = formatPlaybackPosition(session);
-  const transcodeMode = formatTranscodeModeSummary(session);
-  const toneMap = formatToneMapSummary(session);
-  const activityMethod = classifyActivityMethod(session);
-  const containerDecision = normalizeContainerDecision(session.play_method);
-  const videoDecision = normalizeStreamDecision(session.video_decision || session.play_method);
-  const audioDecision = normalizeStreamDecision(
-    session.audio_decision || (session.transcode_audio ? "transcode" : session.play_method),
-  );
   const logsHref = `/admin/logs?playback_session_id=${encodeURIComponent(session.session_id)}&focus=playback`;
   const ffmpegLogsHref = `${logsHref}&component=ffmpeg`;
   const ffmpegLogs = useOperationalLogs(
@@ -709,6 +634,8 @@ function StreamRow({
   );
   const ffmpegRows = ffmpegLogs.data?.entries ?? [];
   const expandedOpen = detailsOpen || ffmpegOpen;
+  const reasons = getAdaptationReasons(session);
+  const activityMethod = classifyActivityMethod(session);
 
   const toggleDetails = () => {
     setDetailsOpen((open) => {
@@ -719,7 +646,7 @@ function StreamRow({
       return nextOpen;
     });
   };
-
+  const openDetails = () => setDetailsOpen(true);
   const toggleFFmpeg = () => {
     setFFmpegOpen((open) => {
       const nextOpen = !open;
@@ -730,401 +657,428 @@ function StreamRow({
     });
   };
 
-  return (
-    <div
-      className={`border-border/30 hover:bg-surface/60 border-b transition-colors duration-100 ${
-        even ? "" : "bg-surface/20"
-      }`}
+  const actions = (
+    <AdminSessionActions
+      session={session}
+      compact
+      layout="inline"
+      extraMenuItems={
+        <>
+          <DropdownMenuItem asChild>
+            <Link to={logsHref}>
+              <FileText className="h-4 w-4" />
+              {t("web.admin.activity.row.viewLogs")}
+            </Link>
+          </DropdownMenuItem>
+          <DropdownMenuItem asChild>
+            <Link to={ffmpegLogsHref}>
+              <Terminal className="h-4 w-4" />
+              {t("web.admin.activity.row.ffmpegLogs")}
+            </Link>
+          </DropdownMenuItem>
+        </>
+      }
+    />
+  );
+  const expandButton = (
+    <button
+      type="button"
+      onClick={toggleDetails}
+      aria-expanded={expandedOpen}
+      aria-controls={expandedOpen ? panelId : undefined}
+      aria-label={t("web.admin.activity.row.details")}
+      title={t("web.admin.activity.row.details")}
+      className="text-muted-foreground hover:text-foreground hover:bg-surface flex h-7 w-7 shrink-0 items-center justify-center rounded-md transition-colors"
     >
-      {/* Desktop row */}
+      <ChevronRight
+        aria-hidden="true"
+        className={`h-4 w-4 transition-transform rtl:-scale-x-100 ${expandedOpen ? "rotate-90 rtl:-rotate-90" : ""}`}
+      />
+    </button>
+  );
+
+  return (
+    <div className="border-border/40 border-b last:border-b-0">
+      {/* Table row */}
       <div
-        className={`hidden ${STREAM_TABLE_COLUMNS} items-center gap-2 px-3 py-2.5 @min-[calc(977px+4rem)]:grid`}
+        className={`${layout.table} ${layout.columns} hover:bg-surface/40 items-center gap-3 px-3 py-2 transition-colors`}
       >
-        {/* User */}
-        <div className="flex min-w-0 items-center gap-2">
-          <Link to={userHref} className="hover:text-primary shrink-0 transition-colors">
-            <div
-              className="text-primary-foreground flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-full text-[9px] font-bold"
-              style={{ background: "var(--primary)" }}
-            >
-              {username.charAt(0).toUpperCase()}
-            </div>
-          </Link>
-          <div className="min-w-0">
-            <Link to={userHref} className="hover:text-primary block truncate transition-colors">
-              <span className="text-[13px] font-medium">{username}</span>
-            </Link>
-            {profileDisplay ? (
-              <div className="mt-0.5 flex min-w-0 items-center gap-1.5">
-                <span className="border-primary/30 bg-primary/15 text-primary max-w-full truncate rounded border px-1.5 py-0.5 text-[10px] leading-none">
-                  {profileDisplay}
-                </span>
-              </div>
-            ) : null}
-            {(clientLabel || clientIP || isJellyfinSession(session)) && (
-              <div className="text-muted-foreground mt-1 flex min-w-0 items-center gap-1.5 text-[10px]">
-                <JellyfinSessionPill session={session} />
-                {clientLabel ? (
-                  <span title={clientTitle} className="max-w-[8rem] min-w-0 truncate">
-                    {clientLabel}
-                  </span>
-                ) : null}
-                {clientLabel && clientIP ? <span className="shrink-0">{MIDDLE_DOT}</span> : null}
-                {clientIP ? (
-                  <button
-                    type="button"
-                    onClick={() => onIPLookup(clientIP)}
-                    className="hover:text-primary min-w-0 cursor-pointer truncate transition-colors"
-                  >
-                    {clientIP}
-                  </button>
-                ) : null}
-              </div>
-            )}
-          </div>
-        </div>
-
-        {/* Stream */}
-        <div className="min-w-0">
-          {itemHref ? (
-            <Link to={itemHref} className="hover:text-primary block min-w-0 transition-colors">
-              <div className="truncate text-[13px] font-medium">{title}</div>
-              {subtitle && (
-                <div className="text-muted-foreground hover:text-primary truncate text-[10px] transition-colors">
-                  {subtitle}
-                </div>
-              )}
-              {streamMeta && (
-                <div className="text-muted-foreground hover:text-primary truncate text-[10px] transition-colors">
-                  {streamMeta}
-                </div>
-              )}
-            </Link>
-          ) : (
-            <>
-              <div className="truncate text-[13px] font-medium">{title}</div>
-              {subtitle && (
-                <div className="text-muted-foreground truncate text-[10px]">{subtitle}</div>
-              )}
-              {streamMeta && (
-                <div className="text-muted-foreground truncate text-[10px]">{streamMeta}</div>
-              )}
-            </>
-          )}
-        </div>
-
-        {/* Playback */}
-        <div className="min-w-0">
-          <div className="flex min-w-0 flex-wrap items-center gap-1.5">
-            <ActivityMethodBadge method={activityMethod} />
-            <button
-              type="button"
-              onClick={toggleDetails}
-              aria-expanded={expandedOpen}
-              className="text-muted-foreground hover:text-primary inline-flex items-center gap-0.5 text-[10px] font-medium transition-colors"
-            >
-              {t("web.admin.activity.row.details")}
-              {expandedOpen ? (
-                <ChevronUp className="h-3 w-3" />
-              ) : (
-                <ChevronDown className="h-3 w-3" />
-              )}
-            </button>
-          </div>
-          <div className="mt-1.5 space-y-1">
-            <PlaybackSummaryLine
-              label={t("web.admin.activity.row.container")}
-              decision={containerDecision}
-              value={formatDeliveredContainerSummary(session)}
-            />
-            <PlaybackSummaryLine
-              label={t("web.admin.activity.row.video")}
-              decision={videoDecision}
-              value={formatDeliveredVideoSummary(session)}
-            />
-            <PlaybackSummaryLine
-              label={t("web.admin.activity.row.audio")}
-              decision={audioDecision}
-              value={formatDeliveredAudioSummary(session)}
-            />
-          </div>
-        </div>
-
-        {/* Node */}
-        <div className="min-w-0">
-          <div className="flex min-w-0 flex-wrap gap-1">
-            <PlaybackRouteBadges session={session} />
-          </div>
-        </div>
-
-        {/* Duration */}
-        <div className="min-w-0 text-end">
-          <div className="flex items-center justify-end">
-            <span
-              className={`inline-flex min-w-[4.75rem] items-center justify-center gap-1 rounded border px-1.5 py-0.5 text-[9px] font-semibold ${
-                session.is_paused
-                  ? "border-amber-400/35 bg-amber-400/10 text-amber-300"
-                  : "border-emerald-400/35 bg-emerald-400/10 text-emerald-300"
-              }`}
-            >
-              {session.is_paused ? (
-                <Pause className="h-2.5 w-2.5" />
-              ) : (
-                <Play className="h-2.5 w-2.5" />
-              )}
-              {session.is_paused
-                ? t("web.admin.activity.row.paused")
-                : t("web.admin.activity.row.playing")}
-            </span>
-          </div>
-          <div className="text-foreground mt-1 font-mono text-[12px] leading-tight tabular-nums">
-            {playbackPosition}
-          </div>
-          <div className="text-muted-foreground mt-0.5 text-[10px] leading-tight tabular-nums">
-            {t("web.admin.activity.row.sessionActive", { elapsed })}
-          </div>
-        </div>
-
-        {/* Actions */}
-        <div className="min-w-0">
-          <AdminSessionActions
-            session={session}
-            compact
-            layout="inline"
-            showInlineTerminate
-            inlinePrefixActions={
-              <Button
-                variant="outline"
-                size="sm"
-                className="h-7 gap-1.5 px-2 text-[11px]"
-                onClick={toggleFFmpeg}
-              >
-                <Terminal className="h-3.5 w-3.5" />
-                {ffmpegOpen
-                  ? t("web.admin.activity.row.hideFfmpeg")
-                  : t("web.admin.activity.row.ffmpeg")}
-              </Button>
-            }
-            extraMenuItems={
-              <>
-                <DropdownMenuItem asChild>
-                  <Link to={logsHref}>
-                    <FileText className="h-4 w-4" />
-                    {t("web.admin.activity.row.viewLogs")}
-                  </Link>
-                </DropdownMenuItem>
-                <DropdownMenuItem asChild>
-                  <Link to={ffmpegLogsHref}>
-                    <Terminal className="h-4 w-4" />
-                    {t("web.admin.activity.row.ffmpegLogs")}
-                  </Link>
-                </DropdownMenuItem>
-              </>
-            }
+        {expandButton}
+        <MediaCell session={session} />
+        <ViewerCell session={session} onIPLookup={onIPLookup} />
+        <div className="min-w-0 space-y-0.5">
+          <MethodLine
+            method={activityMethod}
+            reasons={reasons}
+            expanded={expandedOpen}
+            panelId={panelId}
+            onMore={openDetails}
           />
+          <ConversionLine kind="video" session={session} />
+          <ConversionLine kind="audio" session={session} />
+        </div>
+        {showRoute && (
+          <div className="flex min-w-0 flex-wrap gap-1">
+            <PlaybackRouteBadges session={session} showLocation={false} />
+          </div>
+        )}
+        <SessionCell session={session} />
+        <div className="flex items-center justify-end gap-0.5">
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-7 w-7"
+            onClick={toggleFFmpeg}
+            aria-label={
+              ffmpegOpen
+                ? t("web.admin.activity.row.hideFfmpeg")
+                : t("web.admin.activity.row.ffmpeg")
+            }
+            title={
+              ffmpegOpen
+                ? t("web.admin.activity.row.hideFfmpeg")
+                : t("web.admin.activity.row.ffmpeg")
+            }
+          >
+            <Terminal className="h-3.5 w-3.5" />
+          </Button>
+          {actions}
         </div>
       </div>
 
-      {/* Mobile row */}
-      <div className="flex gap-3 px-4 py-3 @min-[calc(977px+4rem)]:hidden">
-        <Link
-          to={userHref}
-          className="text-primary-foreground flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full text-[10px] font-bold"
-          style={{ background: "var(--primary)" }}
-        >
-          {username.charAt(0).toUpperCase()}
-        </Link>
-        <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-2">
-            <Link to={userHref} className="hover:text-primary truncate transition-colors">
-              <span className="text-[13px] font-semibold">{username}</span>
-              {profileDisplay ? (
-                <span className="border-primary/30 bg-primary/15 text-primary ms-1.5 rounded border px-1.5 py-0.5 text-[10px] leading-none">
-                  {profileDisplay}
-                </span>
+      {/* Stacked card */}
+      <div className={`${layout.stacked} flex gap-3 px-3 py-3`}>
+        <Poster session={session} size="stacked" />
+        <div className="min-w-0 flex-1 space-y-1">
+          <div className="flex items-start gap-2">
+            <div className="min-w-0 flex-1">
+              <TitleLink session={session} />
+              {session.series_name ? (
+                // An episode's own title doesn't say which show it is.
+                <div className="text-muted-foreground truncate text-[12px]">
+                  {getPlaybackSessionSubtitle(session)}
+                </div>
               ) : null}
-            </Link>
-            <JellyfinSessionPill session={session} />
-          </div>
-          <div className="text-muted-foreground mt-0.5 flex items-center gap-1.5 text-[11px]">
-            {itemHref ? (
-              <Link to={itemHref} className="hover:text-primary truncate transition-colors">
-                {title}
-              </Link>
-            ) : (
-              <span className="truncate">{title}</span>
-            )}
-            <span className="flex-shrink-0">{MIDDLE_DOT}</span>
-            <span className="flex-shrink-0 font-mono tabular-nums">{elapsed}</span>
-          </div>
-          {(clientLabel || clientIP || streamMeta) && (
-            <div className="text-muted-foreground mt-1 flex min-w-0 gap-1.5 text-[10px]">
-              {clientLabel ? (
-                <span title={clientTitle} className="max-w-[9rem] shrink-0 truncate">
-                  {clientLabel}
-                </span>
-              ) : null}
-              {clientLabel && (clientIP || streamMeta) ? (
-                <span className="shrink-0">{MIDDLE_DOT}</span>
-              ) : null}
-              {clientIP ? (
-                <button
-                  type="button"
-                  onClick={() => onIPLookup(clientIP)}
-                  className="hover:text-primary shrink-0 cursor-pointer transition-colors"
+              <div className="text-muted-foreground flex min-w-0 items-center gap-1.5 text-[12px]">
+                <Link
+                  to={`/admin/users/${session.user_id}`}
+                  className="hover:text-primary shrink-0 transition-colors"
                 >
-                  {clientIP}
-                </button>
-              ) : null}
-              {clientIP && streamMeta ? <span className="shrink-0">{MIDDLE_DOT}</span> : null}
-              {streamMeta ? (
-                itemHref ? (
-                  <Link to={itemHref} className="hover:text-primary min-w-0 truncate">
-                    {streamMeta}
-                  </Link>
-                ) : (
-                  <span className="min-w-0 truncate">{streamMeta}</span>
-                )
-              ) : null}
+                  {session.username ||
+                    t("web.admin.activity.userFallback", { id: session.user_id })}
+                </Link>
+                <ProfilePill session={session} />
+                <JellyfinSessionPill session={session} />
+                {getSessionClientLabel(session) ? (
+                  <>
+                    <span aria-hidden="true" className="shrink-0">
+                      {MIDDLE_DOT}
+                    </span>
+                    <span className="truncate">{getSessionClientLabel(session)}</span>
+                  </>
+                ) : null}
+              </div>
             </div>
-          )}
-          <div className="text-muted-foreground mt-1 flex items-center gap-2 text-[10px]">
-            <span
-              className={`inline-flex items-center gap-1 rounded border px-1.5 py-0.5 text-[9px] font-semibold ${
-                session.is_paused
-                  ? "border-amber-400/35 bg-amber-400/10 text-amber-300"
-                  : "border-emerald-400/35 bg-emerald-400/10 text-emerald-300"
-              }`}
-            >
-              {session.is_paused ? (
-                <Pause className="h-2.5 w-2.5" />
-              ) : (
-                <Play className="h-2.5 w-2.5" />
-              )}
-              {session.is_paused
-                ? t("web.admin.activity.row.paused")
-                : t("web.admin.activity.row.playing")}
-            </span>
-            <span className="font-mono tabular-nums">{playbackPosition}</span>
+            <div className="-me-1 shrink-0">{actions}</div>
           </div>
-          <div className="mt-1.5 flex min-w-0 flex-wrap gap-1">
-            <PlaybackRouteBadges session={session} />
-          </div>
-          <div className="mt-2 rounded-md border border-white/6 bg-white/[0.03] px-2 py-1.5">
-            <div className="flex min-w-0 flex-wrap items-center gap-1.5">
-              <ActivityMethodBadge method={activityMethod} />
-              <button
-                type="button"
-                onClick={toggleDetails}
-                aria-expanded={expandedOpen}
-                className="text-muted-foreground hover:text-primary inline-flex items-center gap-0.5 text-[10px] font-medium transition-colors"
-              >
-                {t("web.admin.activity.row.details")}
-                {expandedOpen ? (
-                  <ChevronUp className="h-3 w-3" />
-                ) : (
-                  <ChevronDown className="h-3 w-3" />
-                )}
-              </button>
-            </div>
-            <div className="mt-1.5 space-y-1">
-              <PlaybackSummaryLine
-                label={t("web.admin.activity.row.container")}
-                decision={containerDecision}
-                value={formatDeliveredContainerSummary(session)}
-              />
-              <PlaybackSummaryLine
-                label={t("web.admin.activity.row.video")}
-                decision={videoDecision}
-                value={formatDeliveredVideoSummary(session)}
-              />
-              <PlaybackSummaryLine
-                label={t("web.admin.activity.row.audio")}
-                decision={audioDecision}
-                value={formatDeliveredAudioSummary(session)}
+          <div className="flex items-center gap-1">
+            <div className="min-w-0 flex-1">
+              <MethodLine
+                method={activityMethod}
+                reasons={reasons}
+                expanded={expandedOpen}
+                panelId={panelId}
+                onMore={openDetails}
               />
             </div>
+            {expandButton}
           </div>
-          <div className="mt-2 flex items-center justify-end">
-            <AdminSessionActions
-              session={session}
-              compact
-              layout="inline"
-              showInlineTerminate
-              inlinePrefixActions={
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="h-7 gap-1.5 px-2 text-[11px]"
-                  onClick={toggleFFmpeg}
-                >
-                  <Terminal className="h-3.5 w-3.5" />
-                  {ffmpegOpen
-                    ? t("web.admin.activity.row.hideFfmpeg")
-                    : t("web.admin.activity.row.ffmpeg")}
-                </Button>
-              }
-              extraMenuItems={
-                <>
-                  <DropdownMenuItem asChild>
-                    <Link to={logsHref}>
-                      <FileText className="h-4 w-4" />
-                      {t("web.admin.activity.row.viewLogs")}
-                    </Link>
-                  </DropdownMenuItem>
-                  <DropdownMenuItem asChild>
-                    <Link to={ffmpegLogsHref}>
-                      <Terminal className="h-4 w-4" />
-                      {t("web.admin.activity.row.ffmpegLogs")}
-                    </Link>
-                  </DropdownMenuItem>
-                </>
-              }
-            />
-          </div>
+          <ProgressLine session={session} />
         </div>
       </div>
 
       {expandedOpen && (
         <PlaybackExpandedPanel
+          id={panelId}
           session={session}
-          sessionID={session.session_id}
-          containerDecision={containerDecision}
-          videoDecision={videoDecision}
-          audioDecision={audioDecision}
-          transcodeMode={transcodeMode}
-          toneMapping={toneMap?.detail ?? null}
-          showFFmpeg={ffmpegOpen}
+          reasons={reasons}
+          stackedOnly={layout.stacked}
+          onIPLookup={onIPLookup}
+          ffmpegOpen={ffmpegOpen}
+          onToggleFFmpeg={toggleFFmpeg}
           rows={ffmpegRows}
           isLoading={ffmpegLogs.isLoading}
           isFetching={ffmpegLogs.isFetching}
-          logsHref={`${logsHref}&component=ffmpeg`}
+          logsHref={ffmpegLogsHref}
         />
       )}
     </div>
   );
 }
 
-function PlaybackSummaryLine({
-  label,
-  decision,
-  value,
-}: {
-  label: string;
-  decision: string;
-  value: string;
-}) {
+function Poster({ session, size }: { session: AdminSession; size: "table" | "stacked" }) {
+  const box = size === "table" ? "h-12 w-8" : "h-[60px] w-10";
+  return session.poster_url ? (
+    <img
+      src={session.poster_url}
+      alt=""
+      loading="lazy"
+      decoding="async"
+      className={`${box} bg-surface shrink-0 rounded-sm object-cover`}
+    />
+  ) : (
+    <div aria-hidden="true" className={`${box} bg-surface shrink-0 rounded-sm`} />
+  );
+}
+
+function TitleLink({ session }: { session: AdminSession }) {
+  const t = useT();
+  const title = getDisplayTitle(session, t);
+  const itemHref = session.content_id ? `/item/${session.content_id}` : "";
+  return itemHref ? (
+    <Link
+      to={itemHref}
+      title={title}
+      className="hover:text-primary block truncate text-[13px] font-medium transition-colors"
+    >
+      {title}
+    </Link>
+  ) : (
+    <div title={title} className="truncate text-[13px] font-medium">
+      {title}
+    </div>
+  );
+}
+
+function MediaCell({ session }: { session: AdminSession }) {
+  const subtitle = getPlaybackSessionSubtitle(session);
   return (
-    <div className="flex min-w-0 items-center gap-1.5 text-[11px] leading-tight">
-      <span className="text-muted-foreground w-14 shrink-0 text-[9px] font-semibold tracking-wide uppercase">
-        {label}
+    <div className="flex min-w-0 items-center gap-2.5">
+      <Poster session={session} size="table" />
+      <div className="min-w-0 flex-1">
+        <TitleLink session={session} />
+        {subtitle ? (
+          <div className="text-muted-foreground truncate text-[12px]">{subtitle}</div>
+        ) : null}
+        <ProgressLine session={session} />
+      </div>
+    </div>
+  );
+}
+
+/** Position through the title, with a bar, and whether the viewer paused. */
+function ProgressLine({ session }: { session: AdminSession }) {
+  const t = useT();
+  const progress = getPlaybackProgress(session);
+  return (
+    <div className="text-muted-foreground flex min-w-0 items-center gap-2 text-[11px]">
+      {progress !== null ? (
+        <span
+          aria-hidden="true"
+          className="bg-border h-1 w-14 shrink-0 overflow-hidden rounded-full"
+        >
+          <span
+            className={`block h-full rounded-full ${session.is_paused ? "bg-warning" : "bg-primary"}`}
+            style={{ width: `${progress * 100}%` }}
+          />
+        </span>
+      ) : null}
+      <span className="shrink-0 tabular-nums">{formatPlaybackPosition(session)}</span>
+      {session.is_paused ? (
+        <span className="text-warning inline-flex shrink-0 items-center gap-1 font-medium">
+          <Pause aria-hidden="true" className="h-3 w-3" />
+          {t("web.admin.activity.row.paused")}
+        </span>
+      ) : (
+        <span className="inline-flex shrink-0 items-center">
+          <Play aria-hidden="true" className="h-3 w-3" />
+          <span className="sr-only">{t("web.admin.activity.row.playing")}</span>
+        </span>
+      )}
+    </div>
+  );
+}
+
+/** The household profile playing, which can differ from the account's name. */
+function ProfilePill({ session }: { session: AdminSession }) {
+  const profile = session.profile_name?.trim() || session.profile_id?.trim();
+  return profile ? (
+    <span
+      title={profile}
+      className="border-primary/30 bg-primary/10 text-primary max-w-[7rem] shrink-0 truncate rounded border px-1.5 py-0.5 text-[10px] leading-none"
+    >
+      {profile}
+    </span>
+  ) : null;
+}
+
+function ViewerCell({
+  session,
+  onIPLookup,
+}: {
+  session: AdminSession;
+  onIPLookup: (ip: string) => void;
+}) {
+  const t = useT();
+  const username =
+    session.username || t("web.admin.activity.userFallback", { id: session.user_id });
+  const clientLabel = getSessionClientLabel(session);
+  // The row stays compact; the exact version, build, and channel live in the
+  // tooltip and in the expanded panel.
+  const clientLabelFull = getSessionClientLabelFull(session);
+  const clientUserAgent = session.client_user_agent?.trim() || "";
+  const clientTitle = clientUserAgent
+    ? `${clientLabelFull || clientLabel} — ${clientUserAgent}`
+    : clientLabelFull || clientLabel;
+  const clientIP = session.client_ip?.trim() || "";
+  const location =
+    session.stream_location === "local"
+      ? t("web.player.routeBadge.local")
+      : session.stream_location === "remote"
+        ? t("web.player.routeBadge.remote")
+        : "";
+  return (
+    <div className="min-w-0">
+      <div className="flex min-w-0 items-center gap-1.5">
+        <Link
+          to={`/admin/users/${session.user_id}`}
+          className="hover:text-primary truncate text-[13px] font-medium transition-colors"
+        >
+          {username}
+        </Link>
+        <ProfilePill session={session} />
+      </div>
+      <div className="text-muted-foreground flex min-w-0 items-center gap-1.5 text-[12px]">
+        <JellyfinSessionPill session={session} />
+        {clientLabel ? (
+          <span title={clientTitle} className="truncate">
+            {clientLabel}
+          </span>
+        ) : null}
+      </div>
+      {(location || clientIP) && (
+        <div className="text-muted-foreground flex min-w-0 items-center gap-1.5 text-[11px]">
+          {location ? <span className="shrink-0">{location}</span> : null}
+          {location && clientIP ? (
+            <span aria-hidden="true" className="shrink-0">
+              {MIDDLE_DOT}
+            </span>
+          ) : null}
+          {clientIP ? (
+            <button
+              type="button"
+              onClick={() => onIPLookup(clientIP)}
+              title={t("web.admin.activity.ipLookup.heading")}
+              className="hover:text-primary shrink-0 tabular-nums transition-colors"
+            >
+              {clientIP}
+            </button>
+          ) : null}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * The whole-session method, the first reason it isn't direct play, and a
+ * button for the rest, which the expanded details list with explanations.
+ */
+function MethodLine({
+  method,
+  reasons,
+  expanded,
+  panelId,
+  onMore,
+}: {
+  method: string;
+  reasons: AdaptationReason[];
+  expanded: boolean;
+  panelId: string;
+  onMore: () => void;
+}) {
+  const t = useT();
+  const [first, ...rest] = reasons;
+  return (
+    <div className="flex min-w-0 items-center gap-2">
+      <ActivityMethodBadge method={method} />
+      {first ? (
+        <span title={first.description} className="min-w-0 truncate text-[12px]">
+          {first.label}
+        </span>
+      ) : null}
+      {rest.length > 0 ? (
+        <button
+          type="button"
+          onClick={onMore}
+          aria-expanded={expanded}
+          aria-controls={expanded ? panelId : undefined}
+          aria-label={t("web.admin.activity.row.moreReasonsLabel", {
+            count: rest.length,
+            count_text: rest.length,
+          })}
+          title={joinList(rest.map((reason) => reason.label))}
+          className="text-muted-foreground hover:text-foreground border-border shrink-0 rounded border px-1 text-[11px] leading-4 tabular-nums transition-colors"
+        >
+          {t("web.admin.activity.row.moreReasons", { count_text: rest.length })}
+        </button>
+      ) : null}
+    </div>
+  );
+}
+
+/**
+ * One stream as "source → delivered" when the server converts it, or just the
+ * source, muted, when it reaches the viewer untouched. The encoder (hardware
+ * or software) follows a video transcode.
+ */
+function ConversionLine({ kind, session }: { kind: "video" | "audio"; session: AdminSession }) {
+  const t = useT();
+  const conversion: StreamConversion =
+    kind === "video" ? getVideoConversion(session) : getAudioConversion(session);
+  const Icon = kind === "video" ? Film : AudioLines;
+  const mode =
+    kind === "video" && conversion.delivered ? formatTranscodeModeSummary(session) : null;
+  return (
+    <div className="flex min-w-0 items-center gap-1.5 text-[12px]">
+      <Icon aria-hidden="true" className="text-muted-foreground h-3 w-3 shrink-0" />
+      <span className="sr-only">
+        {kind === "video" ? t("web.admin.activity.row.video") : t("web.admin.activity.row.audio")}
       </span>
-      <span
-        className={`inline-flex shrink-0 rounded border px-1.5 py-0.5 text-[8px] leading-none font-semibold ${decisionBadgeClass(decision)}`}
+      <span className={`min-w-0 truncate ${conversion.delivered ? "" : "text-muted-foreground"}`}>
+        {conversion.delivered
+          ? t("web.admin.activity.detail.conversion", {
+              source: conversion.source,
+              output: conversion.delivered,
+            })
+          : conversion.source}
+      </span>
+      {mode ? (
+        <span className="border-border text-muted-foreground shrink-0 rounded border px-1 text-[10px] leading-4">
+          {mode}
+        </span>
+      ) : null}
+    </div>
+  );
+}
+
+function SessionCell({ session }: { session: AdminSession }) {
+  const t = useT();
+  const bitrate = formatSessionBitrate(session.stream_bitrate_kbps);
+  const elapsed = getElapsed(session.started_at);
+  return (
+    <div className="min-w-0 text-end">
+      <div
+        title={t("web.admin.activity.row.sessionActive", { elapsed })}
+        className="inline-flex items-center gap-1 text-[12px] tabular-nums"
       >
-        {formatDecisionLabel(decision)}
-      </span>
-      <span className="truncate font-medium">{value}</span>
+        <Clock aria-hidden="true" className="text-muted-foreground h-3 w-3" />
+        <span className="sr-only">{t("web.admin.activity.row.sessionActive", { elapsed })}</span>
+        <span aria-hidden="true">{elapsed}</span>
+      </div>
+      {bitrate ? (
+        <div className="text-muted-foreground text-[11px] tabular-nums">{bitrate}</div>
+      ) : null}
     </div>
   );
 }
@@ -1136,7 +1090,7 @@ function ActivityMethodBadge({ method }: { method: string }) {
     <span
       aria-label={t("web.admin.activity.row.methodBadge", { method: meta.label })}
       title={meta.description}
-      className={`inline-flex shrink-0 rounded border px-1.5 py-0.5 text-[9px] font-semibold ${meta.badgeClass}`}
+      className={`inline-flex shrink-0 rounded border px-1.5 py-0.5 text-[10px] leading-none font-semibold ${meta.badgeClass}`}
     >
       {meta.label}
     </span>
@@ -1144,27 +1098,221 @@ function ActivityMethodBadge({ method }: { method: string }) {
 }
 
 function PlaybackExpandedPanel({
+  id,
   session,
-  sessionID,
-  containerDecision,
-  videoDecision,
-  audioDecision,
-  transcodeMode,
-  toneMapping,
-  showFFmpeg,
+  reasons,
+  stackedOnly,
+  onIPLookup,
+  ffmpegOpen,
+  onToggleFFmpeg,
   rows,
   isLoading,
   isFetching,
   logsHref,
 }: {
+  id: string;
   session: AdminSession;
-  sessionID: string;
-  containerDecision: string;
-  videoDecision: string;
-  audioDecision: string;
-  transcodeMode: string | null;
-  toneMapping: string | null;
-  showFFmpeg: boolean;
+  reasons: AdaptationReason[];
+  /** Classes that show an element only in the stacked layout. */
+  stackedOnly: string;
+  onIPLookup: (ip: string) => void;
+  ffmpegOpen: boolean;
+  onToggleFFmpeg: () => void;
+  rows: OperationalLogEntry[];
+  isLoading: boolean;
+  isFetching: boolean;
+  logsHref: string;
+}) {
+  const t = useT();
+  const videoDecision = normalizeStreamDecision(session.video_decision || session.play_method);
+  const audioDecision = normalizeStreamDecision(
+    session.audio_decision || (session.transcode_audio ? "transcode" : session.play_method),
+  );
+  const method = classifyActivityMethod(session);
+  const transcodeMode = formatTranscodeModeSummary(session);
+  const toneMap = formatToneMapSummary(session);
+  const clientIP = session.client_ip?.trim() || "";
+  const bitrate = formatSessionBitrate(session.stream_bitrate_kbps);
+  const clientLabel = getSessionClientLabelFull(session) || t("web.admin.activity.client.unknown");
+  const userAgent = session.client_user_agent?.trim() || "";
+
+  return (
+    <div id={id} className="border-border/40 bg-surface/30 space-y-4 border-t px-4 py-3">
+      <dl className={FACT_LIST_CLASS}>
+        <dt className="text-muted-foreground">{t("web.admin.activity.panel.decision")}</dt>
+        <dd className="min-w-0">
+          <span className="inline-flex flex-wrap items-center gap-x-2 gap-y-0.5">
+            <ActivityMethodBadge method={method} />
+            <span>{activityMethodMeta(method).description}</span>
+          </span>
+        </dd>
+        {reasons.length > 0 ? (
+          <>
+            <dt className="text-muted-foreground">{t("web.admin.activity.panel.reasons")}</dt>
+            <dd className="min-w-0">
+              <ul className="space-y-0.5">
+                {reasons.map((reason) => (
+                  <li key={reason.code} className="flex flex-col leading-snug sm:block">
+                    <span className="font-medium">{reason.label}</span>
+                    <span className="text-muted-foreground sm:ms-2">{reason.description}</span>
+                  </li>
+                ))}
+              </ul>
+            </dd>
+          </>
+        ) : null}
+      </dl>
+
+      <table className="w-full max-w-3xl text-start text-[12px]">
+        <thead>
+          <tr className="text-muted-foreground">
+            <th scope="col" className="pb-1 text-start font-normal sm:w-36">
+              <span className="sr-only">{t("web.admin.activity.panel.streamDetails")}</span>
+            </th>
+            <th scope="col" className="pb-1 text-start font-normal">
+              {t("web.admin.activity.detail.source")}
+            </th>
+            <th scope="col" className="pb-1 text-start font-normal">
+              {t("web.admin.activity.detail.delivered")}
+            </th>
+          </tr>
+        </thead>
+        <tbody className="align-top">
+          <StreamDetailRow
+            label={t("web.admin.activity.row.video")}
+            decision={videoDecision}
+            source={formatVideoSummary(session)}
+            delivered={formatDeliveredVideoSummary(session)}
+            tags={[
+              ...(videoDecision === "transcode" ? [transcodeMode, toneMap?.badge] : []),
+              formatRequestedSourceSwitch(session),
+            ]}
+          />
+          <StreamDetailRow
+            label={t("web.admin.activity.row.audio")}
+            decision={audioDecision}
+            source={formatAudioSummary(session)}
+            delivered={formatDeliveredAudioSummary(session)}
+            tags={
+              audioDecision === "transcode" && videoDecision !== "transcode" ? [transcodeMode] : []
+            }
+          />
+          <StreamDetailRow
+            label={t("web.admin.activity.row.container")}
+            decision={normalizeContainerDecision(session.play_method)}
+            source={formatSourceContainerSummary(session)}
+            delivered={formatDeliveredContainerSummary(session)}
+            tags={[]}
+          />
+        </tbody>
+      </table>
+
+      <dl className={FACT_LIST_CLASS}>
+        <dt className="text-muted-foreground">{t("web.admin.activity.client.heading")}</dt>
+        <dd className="min-w-0">
+          <div className="break-words">{clientLabel}</div>
+          {userAgent ? (
+            <div className="text-muted-foreground text-[11px] break-words">{userAgent}</div>
+          ) : null}
+        </dd>
+        <dt className="text-muted-foreground">{t("web.admin.activity.column.route")}</dt>
+        <dd className="flex min-w-0 flex-wrap items-center gap-1">
+          <PlaybackRouteBadges session={session} />
+          {clientIP ? (
+            <button
+              type="button"
+              onClick={() => onIPLookup(clientIP)}
+              className="hover:text-primary ms-1 tabular-nums transition-colors"
+            >
+              {clientIP}
+            </button>
+          ) : null}
+          {bitrate ? (
+            <span className="text-muted-foreground ms-1 tabular-nums">{bitrate}</span>
+          ) : null}
+        </dd>
+        <dt className="text-muted-foreground">{t("web.admin.activity.panel.heading")}</dt>
+        <dd className="min-w-0">
+          <div>
+            {t("web.admin.activity.row.sessionActive", { elapsed: getElapsed(session.started_at) })}
+          </div>
+          <div className="text-muted-foreground font-mono text-[11px] break-all">
+            {session.session_id}
+          </div>
+        </dd>
+      </dl>
+
+      <div className={`${stackedOnly} flex flex-wrap gap-2`}>
+        <Button variant="outline" size="sm" onClick={onToggleFFmpeg}>
+          <Terminal className="h-3.5 w-3.5" />
+          {ffmpegOpen ? t("web.admin.activity.row.hideFfmpeg") : t("web.admin.activity.row.ffmpeg")}
+        </Button>
+      </div>
+
+      {ffmpegOpen ? (
+        <FFmpegConsole
+          rows={rows}
+          isLoading={isLoading}
+          isFetching={isFetching}
+          logsHref={logsHref}
+        />
+      ) : null}
+    </div>
+  );
+}
+
+// The expanded details' label/value lists share one label column, so the
+// decision, the stream table and the client facts line up.
+const FACT_LIST_CLASS =
+  "grid max-w-3xl grid-cols-[6rem_1fr] gap-y-1 text-[12px] sm:grid-cols-[9rem_1fr] [&>dt]:pe-3";
+
+function StreamDetailRow({
+  label,
+  decision,
+  source,
+  delivered,
+  tags,
+}: {
+  label: string;
+  decision: string;
+  source: string;
+  delivered: string;
+  tags: (string | null | undefined)[];
+}) {
+  return (
+    <tr>
+      <th scope="row" className="py-0.5 pe-3 text-start font-normal">
+        <span className="inline-flex items-center gap-1.5">
+          <span>{label}</span>
+          <span
+            className={`inline-flex rounded border px-1 py-0.5 text-[10px] leading-none font-semibold ${decisionBadgeClass(decision)}`}
+          >
+            {formatDecisionLabel(decision)}
+          </span>
+        </span>
+      </th>
+      <td className="text-muted-foreground py-0.5 pe-3 break-words">{source}</td>
+      <td className="py-0.5 break-words">
+        {delivered}
+        {tags.filter(Boolean).map((tag) => (
+          <span
+            key={tag}
+            className="border-border text-muted-foreground ms-1.5 inline-block rounded border px-1 text-[10px] leading-4"
+          >
+            {tag}
+          </span>
+        ))}
+      </td>
+    </tr>
+  );
+}
+
+function FFmpegConsole({
+  rows,
+  isLoading,
+  isFetching,
+  logsHref,
+}: {
   rows: OperationalLogEntry[];
   isLoading: boolean;
   isFetching: boolean;
@@ -1172,232 +1320,198 @@ function PlaybackExpandedPanel({
 }) {
   const t = useT();
   return (
-    <div className="terminal-surface border-border/50 bg-card border-t px-4 py-3">
-      <div className="mb-2 flex items-center justify-between gap-3">
-        <div>
-          <div className="flex items-center gap-2">
-            <div className="rounded-full border border-[var(--terminal-border)] bg-[var(--terminal-bg)] px-2 py-0.5 text-[10px] font-semibold tracking-[0.2em] text-[var(--terminal-fg)] uppercase">
-              {t("web.admin.activity.panel.heading")}
-            </div>
-            <div className="text-foreground/85 text-[11px] font-medium">
-              {showFFmpeg
-                ? t("web.admin.activity.panel.streamDetailsWithConsole")
-                : t("web.admin.activity.panel.streamDetails")}
-            </div>
-          </div>
-          <div className="text-muted-foreground mt-1 font-mono text-[10px]">{sessionID}</div>
-        </div>
-        {showFFmpeg && isFetching ? (
-          <div className="text-muted-foreground text-[10px]">
-            {t("web.admin.activity.panel.refreshing")}
-          </div>
-        ) : null}
-      </div>
-
-      <div className="mb-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-        <PlaybackDetailCard
-          label={t("web.admin.activity.row.container")}
-          decision={containerDecision}
-          source={formatSourceContainerSummary(session)}
-          delivered={formatDeliveredContainerSummary(session)}
-          detail={formatContainerDetail(session)}
-        />
-        <PlaybackDetailCard
-          label={t("web.admin.activity.row.video")}
-          decision={videoDecision}
-          source={formatVideoSummary(session)}
-          delivered={formatDeliveredVideoSummary(session)}
-          detail={formatVideoDetail(session)}
-          mode={videoDecision === "transcode" ? transcodeMode : null}
-          toneMapping={videoDecision === "transcode" ? toneMapping : null}
-        />
-        <PlaybackDetailCard
-          label={t("web.admin.activity.row.audio")}
-          decision={audioDecision}
-          source={formatAudioSummary(session)}
-          delivered={formatDeliveredAudioSummary(session)}
-          detail={formatAudioDetail(session)}
-          mode={
-            audioDecision === "transcode" && videoDecision !== "transcode" ? transcodeMode : null
-          }
-        />
-        <PlaybackClientCard session={session} />
-      </div>
-
-      {showFFmpeg ? (
-        <div className="space-y-2">
-          <div className="flex justify-end">
-            <Link
-              to={logsHref}
-              className="text-[11px] font-medium text-[var(--terminal-fg)] hover:text-[var(--terminal-fg)]/80"
-            >
-              {t("web.admin.activity.panel.openFfmpegLogs")}
-            </Link>
-          </div>
-          <div className="overflow-hidden rounded-xl border border-[var(--terminal-border)] bg-[var(--terminal-bg)] shadow-[0_18px_60px_rgba(0,0,0,0.35)]">
-            {isLoading ? (
-              <div className="px-4 py-6 font-mono text-[11px] text-[var(--terminal-muted)]">
-                {t("web.admin.activity.panel.loadingFfmpeg")}
-              </div>
-            ) : rows.length === 0 ? (
-              <div className="px-4 py-6 font-mono text-[11px] text-[var(--terminal-muted)]">
-                {t("web.admin.activity.panel.noFfmpegRows")}
-              </div>
-            ) : (
-              <div className="max-h-64 overflow-y-auto">
-                {rows.map((row) => (
-                  <div
-                    key={row.id}
-                    className="grid grid-cols-[120px_1fr] gap-3 border-b border-[var(--terminal-border)]/30 px-4 py-2.5 last:border-b-0"
-                  >
-                    <div className="space-y-1">
-                      <div className="font-mono text-[10px] text-[var(--terminal-muted)]">
-                        {formatTimeOnly(row.timestamp)}
-                      </div>
-                      <div className="text-[10px] tracking-[0.18em] text-[var(--terminal-muted)]/60 uppercase">
-                        {row.message.includes("stderr")
-                          ? t("web.admin.activity.panel.stderr")
-                          : t("web.admin.activity.panel.event")}
-                      </div>
-                    </div>
-                    <div className="min-w-0">
-                      <div className="font-mono text-[11px] leading-5 break-words text-[var(--terminal-fg)]">
-                        {ffmpegRowText(row)}
-                      </div>
-                      <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-[10px] text-[var(--terminal-muted)]/60">
-                        {row.node_id && <span>{row.node_id}</span>}
-                        {stringAttr(row, "target_resolution") !== "-" && (
-                          <span>{stringAttr(row, "target_resolution")}</span>
-                        )}
-                        {stringAttr(row, "hw_accel") !== "-" && (
-                          <span>{stringAttr(row, "hw_accel")}</span>
-                        )}
-                        {stringAttr(row, "restart_count") !== "-" && (
-                          <span>
-                            {t("web.admin.activity.panel.restart", {
-                              count: stringAttr(row, "restart_count"),
-                            })}
-                          </span>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        </div>
-      ) : null}
-    </div>
-  );
-}
-
-function PlaybackDetailCard({
-  label,
-  decision,
-  source,
-  delivered,
-  detail,
-  mode,
-  toneMapping,
-}: {
-  label: string;
-  decision: string;
-  source: string;
-  delivered: string;
-  detail: string;
-  mode?: string | null;
-  toneMapping?: string | null;
-}) {
-  const t = useT();
-  return (
-    <PlaybackDetailCardShell
-      label={label}
-      badge={
-        <span
-          className={`inline-flex rounded border px-1.5 py-0.5 text-[9px] font-semibold ${decisionBadgeClass(decision)}`}
-        >
-          {formatDecisionLabel(decision)}
+    <div className="terminal-surface space-y-2">
+      <div className="flex items-center justify-between gap-3">
+        <span className="text-muted-foreground text-[11px]">
+          {isFetching ? t("web.admin.activity.panel.refreshing") : null}
         </span>
-      }
-    >
-      <PlaybackDetailLine label={t("web.admin.activity.detail.source")} value={source} />
-      <PlaybackDetailLine label={t("web.admin.activity.detail.delivered")} value={delivered} />
-      {mode ? (
-        <PlaybackDetailLine label={t("web.admin.activity.detail.mode")} value={mode} />
-      ) : null}
-      {toneMapping ? (
-        <PlaybackDetailLine
-          label={t("web.admin.activity.detail.toneMapping")}
-          value={toneMapping}
-        />
-      ) : null}
-      <PlaybackDetailLine label={t("web.admin.activity.detail.detail")} value={detail} muted />
-    </PlaybackDetailCardShell>
+        <Link
+          to={logsHref}
+          className="text-[11px] font-medium text-[var(--terminal-fg)] hover:text-[var(--terminal-fg)]/80"
+        >
+          {t("web.admin.activity.panel.openFfmpegLogs")}
+        </Link>
+      </div>
+      <div className="overflow-hidden rounded-xl border border-[var(--terminal-border)] bg-[var(--terminal-bg)]">
+        {isLoading ? (
+          <div className="px-4 py-6 font-mono text-[11px] text-[var(--terminal-muted)]">
+            {t("web.admin.activity.panel.loadingFfmpeg")}
+          </div>
+        ) : rows.length === 0 ? (
+          <div className="px-4 py-6 font-mono text-[11px] text-[var(--terminal-muted)]">
+            {t("web.admin.activity.panel.noFfmpegRows")}
+          </div>
+        ) : (
+          <div className="max-h-64 overflow-y-auto">
+            {rows.map((row) => (
+              <div
+                key={row.id}
+                className="grid grid-cols-[120px_1fr] gap-3 border-b border-[var(--terminal-border)]/30 px-4 py-2.5 last:border-b-0"
+              >
+                <div className="space-y-1">
+                  <div className="font-mono text-[10px] text-[var(--terminal-muted)]">
+                    {formatTimeOnly(row.timestamp)}
+                  </div>
+                  <div className="text-[10px] text-[var(--terminal-muted)]/60">
+                    {row.message.includes("stderr")
+                      ? t("web.admin.activity.panel.stderr")
+                      : t("web.admin.activity.panel.event")}
+                  </div>
+                </div>
+                <div className="min-w-0">
+                  <div className="font-mono text-[11px] leading-5 break-words text-[var(--terminal-fg)]">
+                    {ffmpegRowText(row)}
+                  </div>
+                  <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-[10px] text-[var(--terminal-muted)]/60">
+                    {row.node_id && <span>{row.node_id}</span>}
+                    {stringAttr(row, "target_resolution") !== "-" && (
+                      <span>{stringAttr(row, "target_resolution")}</span>
+                    )}
+                    {stringAttr(row, "hw_accel") !== "-" && (
+                      <span>{stringAttr(row, "hw_accel")}</span>
+                    )}
+                    {stringAttr(row, "restart_count") !== "-" && (
+                      <span>
+                        {t("web.admin.activity.panel.restart", {
+                          count: stringAttr(row, "restart_count"),
+                        })}
+                      </span>
+                    )}
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
   );
 }
 
 /**
- * The exact streaming client: app name, version, build, and channel, with the
- * raw user agent underneath. This is the surface that answers "which build is
- * this?" — the session rows only have room for the compact label.
+ * Who has used an address recently. Opened from the toolbar or from a session's
+ * address, which it looks up straight away.
  */
-function PlaybackClientCard({ session }: { session: AdminSession }) {
+function IPLookupDialog({
+  open,
+  onOpenChange,
+  seed,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  seed: string;
+}) {
   const t = useT();
-  const label = getSessionClientLabelFull(session) || t("web.admin.activity.client.unknown");
-  const userAgent = session.client_user_agent?.trim() || "";
-  return (
-    <PlaybackDetailCardShell label={t("web.admin.activity.client.heading")}>
-      <PlaybackDetailLine label={t("web.admin.activity.client.app")} value={label} />
-      {userAgent ? (
-        <PlaybackDetailLine label={t("web.admin.activity.client.agent")} value={userAgent} muted />
-      ) : null}
-    </PlaybackDetailCardShell>
+  const [ipSearch, setIPSearch] = useState(seed);
+  const [activeIP, setActiveIP] = useState(seed);
+  const [seen, setSeen] = useState({ open, seed });
+  if (seen.open !== open || seen.seed !== seed) {
+    // A new opening starts from the address it was opened for.
+    setSeen({ open, seed });
+    if (open) {
+      setIPSearch(seed);
+      setActiveIP(seed);
+    }
+  }
+  const ipHistory = useIPUsers(activeIP);
+  const { data: ipUsers = [], isLoading: ipLoading } = ipHistory;
+  const reloadHistoryButton = (
+    <Button onClick={() => void ipHistory.restart()}>
+      {t("web.admin.activity.ipLookup.reload")}
+    </Button>
   );
-}
 
-function PlaybackDetailCardShell({
-  label,
-  badge,
-  children,
-}: {
-  label: string;
-  badge?: ReactNode;
-  children: ReactNode;
-}) {
   return (
-    <div className="rounded-lg border border-[var(--terminal-border)]/60 bg-[var(--terminal-bg)]/60 px-3 py-2">
-      <div className="mb-2 flex items-center gap-2">
-        <span className="text-[10px] font-semibold tracking-[0.18em] text-[var(--terminal-muted)] uppercase">
-          {label}
-        </span>
-        {badge}
-      </div>
-      <div className="grid gap-1 text-[11px]">{children}</div>
-    </div>
-  );
-}
-
-function PlaybackDetailLine({
-  label,
-  value,
-  muted = false,
-}: {
-  label: string;
-  value: string;
-  muted?: boolean;
-}) {
-  return (
-    <div className="grid min-w-0 grid-cols-[4.25rem_1fr] gap-2">
-      <span className="text-[10px] text-[var(--terminal-muted)]">{label}</span>
-      <span
-        className={`min-w-0 font-medium break-words ${
-          muted ? "text-[var(--terminal-muted)]" : "text-[var(--terminal-fg)]"
-        }`}
-      >
-        {value}
-      </span>
-    </div>
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-2xl">
+        <DialogHeader>
+          <DialogTitle>{t("web.admin.activity.ipLookup.heading")}</DialogTitle>
+        </DialogHeader>
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            setActiveIP(ipSearch.trim());
+          }}
+          className="flex items-center gap-2"
+        >
+          <Input
+            type="text"
+            placeholder={t("web.admin.activity.ipLookup.placeholder")}
+            aria-label={t("web.admin.activity.ipLookup.placeholder")}
+            value={ipSearch}
+            onChange={(e) => setIPSearch(e.target.value)}
+            className="max-w-xs font-mono text-sm"
+          />
+          <Button type="submit" variant="outline" size="sm" disabled={!ipSearch.trim()}>
+            <Search className="me-1 h-3.5 w-3.5" />
+            {t("web.admin.activity.ipLookup.submit")}
+          </Button>
+        </form>
+        {activeIP && (
+          <div className="max-h-[60vh] overflow-y-auto">
+            {ipLoading ? (
+              <p className="text-muted-foreground text-sm">
+                {t("web.admin.activity.ipLookup.searching")}
+              </p>
+            ) : ipHistory.isError && ipUsers.length === 0 ? (
+              <p role="alert">
+                {t("web.admin.activity.ipLookup.loadError")} {reloadHistoryButton}
+              </p>
+            ) : ipUsers.length === 0 ? (
+              <p className="text-muted-foreground text-sm">
+                {t("web.admin.activity.ipLookup.empty", { ip: activeIP })}
+              </p>
+            ) : (
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>{t("web.admin.activity.ipLookup.column.user")}</TableHead>
+                    <TableHead>{t("web.admin.activity.ipLookup.column.firstSeen")}</TableHead>
+                    <TableHead>{t("web.admin.activity.ipLookup.column.lastSeen")}</TableHead>
+                    <TableHead className="text-end">
+                      {t("web.admin.activity.ipLookup.column.requests")}
+                    </TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {ipUsers.map((entry: IPUserEntry) => (
+                    <TableRow key={entry.user_id}>
+                      <TableCell>
+                        <Link
+                          to={`/admin/users/${entry.user_id}`}
+                          className="text-primary font-medium hover:underline"
+                        >
+                          {entry.username ||
+                            t("web.admin.activity.userFallback", { id: entry.user_id })}
+                        </Link>
+                      </TableCell>
+                      <TableCell className="text-sm">{formatDateTime(entry.first_seen)}</TableCell>
+                      <TableCell className="text-sm">{formatDateTime(entry.last_seen)}</TableCell>
+                      <TableCell className="text-end">
+                        {entry.request_count.toLocaleString(formatLocale())}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            )}
+            {ipHistory.isError && ipUsers.length > 0 && (
+              <p role="alert">
+                {t("web.admin.activity.ipLookup.loadMoreError")} {reloadHistoryButton}
+              </p>
+            )}
+            {ipHistory.hasNextPage && (
+              <Button
+                disabled={ipHistory.isFetchingNextPage}
+                onClick={() => void ipHistory.fetchNextPage()}
+              >
+                {t("web.admin.activity.ipLookup.loadMore")}
+              </Button>
+            )}
+          </div>
+        )}
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -1419,14 +1533,17 @@ function SortHeader({
   const active = current === field;
   return (
     <button
+      type="button"
       onClick={() => onClick(field)}
-      className={`text-muted-foreground flex items-center gap-1 text-[10px] font-semibold tracking-wider uppercase transition-colors ${
+      className={`text-muted-foreground flex items-center gap-1 text-[12px] font-medium transition-colors ${
         active ? "text-foreground" : "hover:text-foreground"
       } ${className}`}
     >
       {children}
       {active && (
-        <span className="text-[8px]">{dir === "asc" ? SORT_ASC_MARK : SORT_DESC_MARK}</span>
+        <span aria-hidden="true" className="text-[9px]">
+          {dir === "asc" ? SORT_ASC_MARK : SORT_DESC_MARK}
+        </span>
       )}
     </button>
   );
@@ -1489,19 +1606,15 @@ function getDisplayTitle(
   t: (id: MessageKey, values?: TextValues) => string,
 ): string {
   if (session.series_name && session.season_number != null && session.episode_number != null) {
-    return session.episode_name || `S${session.season_number}E${session.episode_number}`;
+    return (
+      session.episode_name ||
+      t("web.detail.episodeCode", {
+        season: codeNumber(session.season_number),
+        episode: codeNumber(session.episode_number),
+      })
+    );
   }
   return session.media_title || t("web.common.activity.title.file", { id: session.media_file_id });
-}
-
-function getDisplaySubtitle(session: AdminSession, t: Translate): string | null {
-  if (session.series_name && session.season_number != null && session.episode_number != null) {
-    const ep = `S${session.season_number}E${session.episode_number}`;
-    return session.series_name ? `${ep} · ${session.series_name}` : ep;
-  }
-  if (session.media_type === "movie") return t("web.common.activity.subtitle.movie");
-  if (session.media_type === "series") return t("web.common.activity.subtitle.series");
-  return null;
 }
 
 function getElapsed(dateStr: string): string {
@@ -1511,25 +1624,6 @@ function getElapsed(dateStr: string): string {
   const m = Math.floor((totalSec % 3600) / 60);
   const s = totalSec % 60;
   if (h > 0) return numberText(`${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`);
-  return numberText(`${m}:${String(s).padStart(2, "0")}`);
-}
-
-function formatPlaybackPosition(session: AdminSession): string {
-  const position = formatClockTime(session.position_seconds);
-  if (session.file_duration == null || session.file_duration <= 0) {
-    return position;
-  }
-  return `${position} / ${formatClockTime(session.file_duration)}`;
-}
-
-function formatClockTime(seconds: number): string {
-  const safeSeconds = Math.max(0, Math.floor(Number.isFinite(seconds) ? seconds : 0));
-  const h = Math.floor(safeSeconds / 3600);
-  const m = Math.floor((safeSeconds % 3600) / 60);
-  const s = safeSeconds % 60;
-  if (h > 0) {
-    return numberText(`${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`);
-  }
   return numberText(`${m}:${String(s).padStart(2, "0")}`);
 }
 

@@ -20,6 +20,7 @@ import {
   PlayerFetchError,
 } from "./player-fetch";
 import { playerV2Origin } from "./player-v2";
+import { t } from "@/i18n";
 import { randomUUID } from "@/lib/uuid";
 
 export type ProgressSample = { position: number; is_paused: boolean };
@@ -103,7 +104,7 @@ async function mutationFetch(
     signal: AbortSignal.timeout(timeout),
   });
   if (!response.ok) {
-    let message = `Playback update failed (${response.status})`;
+    let message = t("web.player.error.updateFailed", { status: response.status });
     let code: string | undefined;
     const text = await response.text().catch(() => "");
     try {
@@ -169,11 +170,16 @@ export function sendSessionProgress(
  * retries the exact body until a `stopped` or `replayed` receipt arrives or
  * its own 30s budget runs out. The two budgets are separate so a slow drain
  * cannot leave the stop with no time to be delivered.
+ *
+ * `immediate` skips the wait, for a page that is unloading: it may be gone
+ * before prior progress settles, and the stop already carries the newest
+ * sequence, so the server refuses any older sample that lands after it.
  */
 export function stopSequencedSession(
   config: PlayerConfig,
   sessionId: string,
   keepalive = false,
+  immediate = false,
 ): Promise<void> {
   const state = sessions.get(sessionId);
   if (!state) return Promise.reject(new Error("Playback session authority is unavailable."));
@@ -191,7 +197,8 @@ export function stopSequencedSession(
   }
   const body = state.stopBody;
   const stopId = (JSON.parse(body) as { stop_id: string }).stop_id;
-  const stopping = waitForProgress(state.tail).then(async () => {
+  const prior = immediate ? Promise.resolve() : waitForProgress(state.tail);
+  const stopping = prior.then(async () => {
     const deadline = Date.now() + 30_000;
     for (;;) {
       try {

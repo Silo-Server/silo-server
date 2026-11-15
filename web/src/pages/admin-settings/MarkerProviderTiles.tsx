@@ -31,7 +31,7 @@ import { SETTINGS_NUMBER_WIDTH, SettingField, SettingFieldRow } from "./SettingF
 import { MARKER_SHARING_DISCLOSURE_KEY } from "@/lib/markers";
 import { providerMonogram } from "@/lib/monogram";
 import { pluginPagePath } from "@/lib/pluginPresentation";
-import { useT } from "@/i18n";
+import { useT, type Translate } from "@/i18n";
 
 const INTEGER_INPUT_PATTERN = /^[+-]?\d+$/;
 const CONFIDENCE_PERCENT_FORMAT = new Intl.NumberFormat("en-US", {
@@ -45,8 +45,8 @@ function markerTileID(provider: string): string {
   return `marker:${provider}`;
 }
 
-function formatRate(value: number) {
-  return `${Math.round(value * 100)}%`;
+function formatRate(t: Translate, value: number) {
+  return t("web.common.format.percent", { percent: Math.round(value * 100) });
 }
 
 /**
@@ -399,7 +399,7 @@ function MarkerProviderTile({
           label={t("web.admin.settings.markers.provider.fetchMinConfidence")}
           htmlFor={fetchMinConfidenceID}
           description={t("web.admin.settings.markers.provider.fetchMinConfidenceDescription")}
-          unit="%"
+          unit={t("web.admin.common.units.percent")}
         >
           <Input
             id={fetchMinConfidenceID}
@@ -417,7 +417,7 @@ function MarkerProviderTile({
           label={t("web.admin.settings.markers.provider.contributeMinConfidence")}
           htmlFor={minConfidenceID}
           description={t("web.admin.settings.markers.provider.contributeMinConfidenceDescription")}
-          unit="%"
+          unit={t("web.admin.common.units.percent")}
         >
           <Input
             id={minConfidenceID}
@@ -465,7 +465,7 @@ function MarkerProviderTile({
               <dt className="text-muted-foreground">
                 {t("web.admin.settings.markers.provider.statsAcceptanceRate")}
               </dt>
-              <dd className="font-medium">{formatRate(stats.acceptance_rate)}</dd>
+              <dd className="font-medium">{formatRate(t, stats.acceptance_rate)}</dd>
             </div>
             <div className="flex justify-between gap-3">
               <dt className="text-muted-foreground">

@@ -62,6 +62,10 @@ func TestAdminItemMetadataTransport(t *testing.T) {
 	if rec.Code != 200 || f.update.Status != nil {
 		t.Fatalf("null status: %d %s %#v", rec.Code, rec.Body, f.update)
 	}
+	rec = do(t, h, "POST", path+"/refresh-metadata", `{"mode":"reset"}`, bearer(memberToken))
+	if rec.Code != 202 || f.mode != adminjob.ItemRefreshModeReset {
+		t.Fatalf("reset: %d %s %#v", rec.Code, rec.Body, f)
+	}
 	before := f.calls
 	rec = do(t, h, "POST", path+"/refresh-metadata", `{"mode":"wrong"}`, bearer(memberToken))
 	if rec.Code != 422 || f.calls != before {
@@ -103,6 +107,36 @@ func TestAdminItemMetadataRejectsMalformedDates(t *testing.T) {
 	rec := do(t, h, "PATCH", path, `{"release_date":"2024-02-29","air_date":null}`, bearer(memberToken))
 	if rec.Code != 200 || f.calls != 1 || !slices.Equal(f.clear, []string{"air_date"}) {
 		t.Fatalf("valid date: %d %s clear=%v", rec.Code, rec.Body, f.clear)
+	}
+}
+func TestAdminItemMetadataNormalizesProviderIDs(t *testing.T) {
+	deps := pilotDeps(nil, nil)
+	f := &fakeAdminItemMetadata{}
+	deps.AdminItemMetadata = f
+	deps.PermissionGates[policy.PermissionMetadataCuration] = adminTranslationGate
+	h := newTestHandler(t, deps)
+	path := Prefix + "/admin/items/item-1/metadata"
+	// Lookups compare provider IDs exactly, so each is stored the way a
+	// refresh stores it: trimmed, IMDb in lowercase, TMDB without a URL slug.
+	rec := do(t, h, "PATCH", path, `{"tmdb_id":" 550-fight-club ","imdb_id":"TT0137523 ","tvdb_id":" 81189"}`, bearer(memberToken))
+	if rec.Code != 200 || f.update.TmdbID == nil || *f.update.TmdbID != "550" || f.update.ImdbID == nil || *f.update.ImdbID != "tt0137523" || f.update.TvdbID == nil || *f.update.TvdbID != "81189" {
+		t.Fatalf("normalize: %d %s %#v", rec.Code, rec.Body, f.update)
+	}
+	// Blank still clears.
+	rec = do(t, h, "PATCH", path, `{"tmdb_id":"  "}`, bearer(memberToken))
+	if rec.Code != 200 || f.update.TmdbID == nil || *f.update.TmdbID != "" {
+		t.Fatalf("clear: %d %s %#v", rec.Code, rec.Body, f.update)
+	}
+	// A value that is no ID of its provider is named with any bad date, and
+	// nothing is written: a refresh would drop it and restore the old ID.
+	before := f.calls
+	p := requireProblem(t, do(t, h, "PATCH", path, `{"tmdb_id":"fight club","imdb_id":"0137523","tvdb_id":"0","release_date":"soon"}`, bearer(memberToken)), TypeValidationFailed)
+	var locations []string
+	for _, e := range p.Errors {
+		locations = append(locations, e.Location)
+	}
+	if !slices.Equal(locations, []string{"body.release_date", "body.imdb_id", "body.tmdb_id", "body.tvdb_id"}) || f.calls != before {
+		t.Fatalf("errors = %+v calls=%d", p.Errors, f.calls)
 	}
 }
 func adminCatalogItemMetadataFixtureCases() []fixtureCase {

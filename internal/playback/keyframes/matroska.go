@@ -35,10 +35,14 @@ type Index struct {
 	// Duration is the container's duration in seconds, or 0 when unknown.
 	Duration float64
 	// VideoEnd is when the video track's last frame ends, in seconds on the
-	// same timeline as Keyframes, or 0 when unknown. Only VerifyMatroska,
-	// which reads every block, sets it. Other tracks can run longer, so it
-	// can be earlier than Duration.
+	// same timeline as Keyframes, or 0 when unknown; only Load sets it.
+	// Other tracks can run longer, so it can be earlier than Duration.
 	VideoEnd float64
+	// File is the version of the file Load read the index from, or zero.
+	File Version
+	// hevc locates the keyframe blocks of an HEVC video track, or is nil
+	// (see HEVCKeyframeIsIDR).
+	hevc *hevcLayout
 }
 
 // Matroska element IDs, from the Matroska specification.
@@ -84,23 +88,44 @@ const (
 )
 
 // ReadMatroska returns the keyframe index of a Matroska or WebM file from its
-// Cues element. It reads the header, the seek head, segment info, tracks and
-// cues, following the seek head to Cues stored after the clusters. As a quick
-// check it reads the block headers of a few clusters (checkCueCoverage);
-// VerifyMatroska checks them all.
+// Cues element, without VideoEnd. It reads the header, the seek head, segment
+// info, tracks and cues, following the seek head to Cues stored after the
+// clusters, and checks the Cues against the block headers of a few clusters
+// spread through the file (checkCueCoverage). It never reads the frames, nor
+// most of the clusters, so it costs a few reads however large the file is.
 func ReadMatroska(r io.ReaderAt, size int64) (Index, error) {
 	m, err := readMatroska(r, size)
 	return m.Index, err
 }
 
-// matroskaIndex is an Index with what checking it against the clusters
-// needs (VerifyMatroska).
+// readPlanIndex is ReadMatroska that also reads the clusters after the last
+// cue (tailVideoEnd), which give VideoEnd and check the end of the Cues. A
+// copy plan needs both; other callers, such as trickplay's keyframe lookup,
+// don't, and a file whose tail fails that walk still has usable keyframes for
+// them.
+func readPlanIndex(r io.ReaderAt, size int64) (Index, error) {
+	m, err := readMatroska(r, size)
+	if err != nil {
+		return Index{}, err
+	}
+	end, err := tailVideoEnd(r, m.segStart, m.segEnd, m.video, m.ticks, m.clusters)
+	if err != nil {
+		return Index{}, err
+	}
+	m.VideoEnd = end.seconds(m.timescale, m.frameSeconds)
+	return m.Index, nil
+}
+
+// matroskaIndex is an Index with what reading the clusters after the last
+// cue needs (readPlanIndex).
 type matroskaIndex struct {
 	Index
 	segStart, segEnd int64
 	video            uint64
-	// ticks holds the video cue times, sorted and without duplicates.
+	// ticks holds the video cue times, sorted and without duplicates, and
+	// clusters the positions of their clusters.
 	ticks     []uint64
+	clusters  []int64
 	timescale int64
 	// frameSeconds is the video track's default frame duration, or 0.
 	frameSeconds float64
@@ -147,6 +172,7 @@ func readMatroska(r io.ReaderAt, size int64) (matroskaIndex, error) {
 		cues      []byte
 		haveInfo  bool
 		haveTrack bool
+		videoData []byte
 	)
 	for at := segStart; at < segEnd; {
 		id, dataSize, headerLen, err := matroska.ReadElementHeader(r, at)
@@ -188,7 +214,7 @@ func readMatroska(r io.ReaderAt, size int64) (matroskaIndex, error) {
 				return matroskaIndex{}, err
 			}
 			var scaled bool
-			video, frameNS, scaled, haveTrack = firstVideoTrack(data)
+			video, frameNS, scaled, haveTrack, videoData = firstVideoTrack(data)
 			if scaled {
 				// The track's timestamps are scaled again, a deprecated
 				// feature the times here don't apply; don't plan from them.
@@ -244,7 +270,7 @@ func readMatroska(r io.ReaderAt, size int64) (matroskaIndex, error) {
 			return matroskaIndex{}, err
 		}
 		var scaled bool
-		video, frameNS, scaled, haveTrack = firstVideoTrack(data)
+		video, frameNS, scaled, haveTrack, videoData = firstVideoTrack(data)
 		if scaled {
 			return matroskaIndex{}, ErrNoIndex
 		}
@@ -270,8 +296,9 @@ func readMatroska(r io.ReaderAt, size int64) (matroskaIndex, error) {
 	if duration > 0 {
 		idx.Duration = duration * float64(timescale) / 1e9
 	}
+	idx.hevc = newHEVCLayout(videoData, cues, video, ticks, segStart)
 	return matroskaIndex{
-		Index: idx, segStart: segStart, segEnd: segEnd, video: video, ticks: ticks,
+		Index: idx, segStart: segStart, segEnd: segEnd, video: video, ticks: ticks, clusters: clusters,
 		timescale: timescale, frameSeconds: float64(frameNS) / 1e9,
 	}, nil
 }
@@ -308,7 +335,9 @@ func parseInfo(info []byte) (timescale int64, duration float64, ok bool) {
 	return timescale, duration, complete && ok
 }
 
-func firstVideoTrack(tracks []byte) (number, frameNS uint64, scaled, found bool) {
+// firstVideoTrack returns the first video track's number, default frame
+// duration, whether it scales its timestamps again, and its TrackEntry data.
+func firstVideoTrack(tracks []byte) (number, frameNS uint64, scaled, found bool, entryData []byte) {
 	matroska.Children(tracks, func(id uint64, entry []byte) {
 		if id != idTrackEntry || found {
 			return
@@ -328,10 +357,10 @@ func firstVideoTrack(tracks []byte) (number, frameNS uint64, scaled, found bool)
 			}
 		})
 		if kind == trackTypeVideo && n > 0 {
-			number, frameNS, scaled, found = n, frame, trackScale != 1, true
+			number, frameNS, scaled, found, entryData = n, frame, trackScale != 1, true, entry
 		}
 	})
-	return number, frameNS, scaled, found
+	return number, frameNS, scaled, found, entryData
 }
 
 // cuePoints returns the times, in ticks, of the cue points that index the

@@ -3,6 +3,7 @@
 import type { ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { MemoryRouter, Route, Routes } from "react-router";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { PluginSettingsInstallation } from "@/hooks/queries/pluginSettings";
@@ -29,6 +30,9 @@ let mockPrimaryMenu: {
   >;
 } | null = null;
 let mockLibraries = [{ id: 7, name: "Movies", type: "movies" }];
+let mockRequestsEnabled = false;
+let mockProfileRequestsAllowed = true;
+let mockMyRequests: Array<{ id: string }> = [];
 
 vi.mock("@/hooks/useAuth", () => {
   const useAuth = () => ({
@@ -41,7 +45,7 @@ vi.mock("@/hooks/useAuth", () => {
 
 vi.mock("@/hooks/useCurrentProfile", () => ({
   useCurrentProfile: () => ({
-    profile: { name: "Alex" },
+    profile: { name: "Alex", requests_allowed: mockProfileRequestsAllowed },
   }),
 }));
 
@@ -112,11 +116,12 @@ function pluginInstallation(
   };
 }
 
-let mockRequestsEnabled = false;
-
 vi.mock("@/hooks/queries/useRequests", () => ({
   useRequestFeatureStatus: () => ({
     data: { requests_enabled: mockRequestsEnabled },
+  }),
+  useMyMediaRequests: (_params: unknown, options: { enabled?: boolean }) => ({
+    data: options.enabled ? mockMyRequests : undefined,
   }),
 }));
 
@@ -159,11 +164,13 @@ vi.mock("@/components/ui/dropdown-menu", () => ({
 
 function renderSidebar(entry: string, { collapsed = false }: { collapsed?: boolean } = {}) {
   return renderToStaticMarkup(
-    <MemoryRouter initialEntries={[entry]}>
-      <Routes>
-        <Route path="*" element={<AppSidebar collapsed={collapsed} />} />
-      </Routes>
-    </MemoryRouter>,
+    <QueryClientProvider client={new QueryClient()}>
+      <MemoryRouter initialEntries={[entry]}>
+        <Routes>
+          <Route path="*" element={<AppSidebar collapsed={collapsed} />} />
+        </Routes>
+      </MemoryRouter>
+    </QueryClientProvider>,
   );
 }
 
@@ -200,6 +207,24 @@ describe("AppSidebar", () => {
     mockLibraries = [{ id: 7, name: "Movies", type: "movies" }];
     mockNotificationsEnabled = true;
     mockRequestsEnabled = false;
+    mockProfileRequestsAllowed = true;
+    mockMyRequests = [];
+  });
+
+  it("links Requests for a blocked profile only while it has requests to manage", () => {
+    const hasRequestsLink = () =>
+      parseMarkup(renderSidebar("/")).querySelector('a[href="/requests"]') !== null;
+    mockRequestsEnabled = true;
+    expect(hasRequestsLink()).toBe(true);
+
+    mockProfileRequestsAllowed = false;
+    expect(hasRequestsLink()).toBe(false);
+
+    mockMyRequests = [{ id: "r1" }];
+    expect(hasRequestsLink()).toBe(true);
+
+    mockRequestsEnabled = false;
+    expect(hasRequestsLink()).toBe(false);
   });
 
   it("puts Search directly under Home, above the libraries", () => {

@@ -177,24 +177,200 @@ func TestServeExtractReadsWholeTracksThroughTheSource(t *testing.T) {
 	}
 }
 
-// A node with no room for another whole read answers the request busy
-// before writing anything, instead of demuxing the source.
+// A node with no room for another whole read, or another demux of a source,
+// answers the request busy before writing anything, instead of demuxing the
+// source.
 func TestServeExtractAnswersBusyWithoutADemux(t *testing.T) {
-	for _, codec := range []string{"subrip", "hdmv_pgs_subtitle"} {
-		t.Run(codec, func(t *testing.T) {
+	readsBusy := &fakeEmbeddedSource{whole: ErrSubtitleReadsBusy, format: "matroska"}
+	for _, tc := range []struct {
+		name   string
+		source *fakeEmbeddedSource
+		opts   StreamExtractOpts
+		// demuxesBusy takes every demux slot first.
+		demuxesBusy bool
+	}{
+		{name: "whole text track, no room to read", source: readsBusy, opts: StreamExtractOpts{SourceCodec: "subrip"}},
+		{name: "whole PGS track, no room to read", source: readsBusy, opts: StreamExtractOpts{SourceCodec: "hdmv_pgs_subtitle"}},
+		{name: "whole track without a source, no room to demux", opts: StreamExtractOpts{SourceCodec: "hdmv_pgs_subtitle"}, demuxesBusy: true},
+		{name: "text window, no room to demux", source: &fakeEmbeddedSource{window: embeddedsub.ErrNoCues},
+			opts: StreamExtractOpts{SourceCodec: "subrip", SeekSeconds: 60, DurationSeconds: 60}, demuxesBusy: true},
+		{name: "PGS window, no room to demux", source: &fakeEmbeddedSource{window: embeddedsub.ErrNoCues},
+			opts: StreamExtractOpts{SourceCodec: "hdmv_pgs_subtitle", AllowWindow: true, SeekSeconds: 60, DurationSeconds: 60}, demuxesBusy: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if tc.demuxesBusy {
+				occupyDemuxSlots(t)
+			}
 			c, source := newTestCache(t)
-			c.SetEmbeddedSource(&fakeEmbeddedSource{whole: ErrSubtitleReadsBusy, format: "matroska"})
+			if tc.source != nil {
+				c.SetEmbeddedSource(tc.source)
+			}
 			var mu sync.Mutex
 			var calls []StreamExtractOpts
 			rec := httptest.NewRecorder()
 			response := middleware.NewWrapResponseWriter(rec, 1)
-			err := c.ServeExtract(response, httptest.NewRequest(http.MethodGet, "/subtitle", nil),
-				StreamExtractOpts{InputPath: source, SourceCodec: codec, Embedded: testEmbeddedRef}, fakeConvert(&calls, &mu, false))
-			if !errors.Is(err, ErrSubtitleReadsBusy) || len(calls) != 0 || rec.Body.Len() != 0 || response.Status() != 0 {
-				t.Fatalf("err %v, %d extracts, status %d, body %q", err, len(calls), response.Status(), rec.Body.String())
+			opts := tc.opts
+			opts.InputPath, opts.Embedded = source, testEmbeddedRef
+			err := c.ServeExtract(response, httptest.NewRequest(http.MethodGet, "/subtitle", nil), opts, fakeConvert(&calls, &mu, false))
+			// An uncached PGS window still warms the track, in its warm slot.
+			waitForCondition(t, func() bool { return len(c.warmSem) == 0 }, func() {})
+			mu.Lock()
+			defer mu.Unlock()
+			demuxes := 0
+			for _, call := range calls {
+				if call.Packets == nil {
+					demuxes++
+				}
+			}
+			if !errors.Is(err, ErrSubtitleReadsBusy) || demuxes != 0 || rec.Body.Len() != 0 || response.Status() != 0 {
+				t.Fatalf("err %v, %d demuxes, status %d, body %q", err, demuxes, response.Status(), rec.Body.String())
 			}
 		})
 	}
+}
+
+// Every request's demux of a source counts against one bound shared by the
+// process's subtitle caches: past it a request for another track is
+// answered busy before anything is written, while one for a track already
+// being demuxed joins that demux, and a finished demux frees its slot.
+func TestSourceDemuxesShareOneBound(t *testing.T) {
+	native, source := newTestCache(t)
+	compat, compatSource := newTestCache(t)
+	for _, c := range []*SubtitleCache{native, compat} {
+		c.SetEmbeddedSource(&fakeEmbeddedSource{whole: embeddedsub.ErrNoCues})
+	}
+	b := newDemuxBlocker(t)
+	running := b.fillDemuxSlots(t, native, source)
+
+	if r := serveWholeTrack(t.Context(), compat, compatSource, 0, b.extract); !errors.Is(r.err, ErrSubtitleReadsBusy) || r.status != 0 {
+		t.Fatalf("another cache demuxed past the bound: %+v", r)
+	}
+	joined := make(chan trackResult, 1)
+	go func() { joined <- serveWholeTrack(t.Context(), native, source, 0, b.extract) }()
+	waitForCondition(t, func() bool { return fillViewers(native, 0) == 2 }, func() {})
+
+	b.finish()
+	for ordinal, done := range running {
+		if r := <-done; r.err != nil || r.body != fmt.Sprintf("demuxed %d", ordinal) {
+			t.Fatalf("admitted track %d: %+v", ordinal, r)
+		}
+	}
+	if r := <-joined; r.err != nil || r.body != "demuxed 0" {
+		t.Fatalf("joined track: %+v", r)
+	}
+	if r := serveWholeTrack(t.Context(), compat, compatSource, 0, b.extract); r.err != nil || r.body != "demuxed 0" {
+		t.Fatalf("finished demuxes kept their slots: %+v", r)
+	}
+}
+
+// demuxBlocker is an extract whose demuxes of the source wait to be
+// released, for holding the node's demux slots.
+type demuxBlocker struct {
+	started chan struct{}
+	release chan struct{}
+	once    sync.Once
+	running sync.WaitGroup
+}
+
+// maxDemuxesHeld is more demuxes than the node runs at once.
+const maxDemuxesHeld = 64
+
+// newDemuxBlocker returns a blocker its test releases by its end.
+func newDemuxBlocker(t *testing.T) *demuxBlocker {
+	b := &demuxBlocker{started: make(chan struct{}, maxDemuxesHeld), release: make(chan struct{})}
+	t.Cleanup(b.finish)
+	return b
+}
+
+// occupyDemuxSlots holds every demux slot of the process until the test ends.
+func occupyDemuxSlots(t *testing.T) {
+	t.Helper()
+	c, source := newTestCache(t)
+	c.SetEmbeddedSource(&fakeEmbeddedSource{whole: embeddedsub.ErrNoCues})
+	newDemuxBlocker(t).fillDemuxSlots(t, c, source)
+}
+
+func (b *demuxBlocker) extract(ctx context.Context, opts StreamExtractOpts) error {
+	if opts.Packets != nil {
+		return errors.New("demuxBlocker converts no packets")
+	}
+	b.started <- struct{}{}
+	select {
+	case <-b.release:
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+	_, err := fmt.Fprintf(opts.Writer, "demuxed %d", opts.TrackIndex)
+	return err
+}
+
+// finish releases the demuxes and waits for their requests.
+func (b *demuxBlocker) finish() {
+	b.once.Do(func() { close(b.release) })
+	b.running.Wait()
+}
+
+// fillDemuxSlots requests whole tracks of source from c, from ordinal 0 on,
+// each demuxed by b, until the node refuses one; the admitted requests wait
+// in their demuxes for b.finish. It returns their results in order.
+func (b *demuxBlocker) fillDemuxSlots(t *testing.T, c *SubtitleCache, source string) []chan trackResult {
+	t.Helper()
+	var running []chan trackResult
+	for ordinal := range maxDemuxesHeld {
+		done := make(chan trackResult, 1)
+		b.running.Add(1)
+		go func() {
+			defer b.running.Done()
+			done <- serveWholeTrack(context.Background(), c, source, ordinal, b.extract)
+		}()
+		select {
+		case <-b.started:
+			running = append(running, done)
+		case r := <-done:
+			if !errors.Is(r.err, ErrSubtitleReadsBusy) || r.status != 0 || len(running) == 0 {
+				t.Fatalf("track %d after %d demuxes: %+v, want a busy refusal", ordinal, len(running), r)
+			}
+			return running
+		}
+	}
+	t.Fatalf("%d demuxes ran at once; none was refused", len(running))
+	return nil
+}
+
+type trackResult struct {
+	body   string
+	status int
+	err    error
+}
+
+// serveWholeTrack requests the whole PGS track at ordinal of source from c,
+// demuxing it with extract when c's source can't read it.
+func serveWholeTrack(ctx context.Context, c *SubtitleCache, source string, ordinal int, extract SUPExtractFunc) trackResult {
+	rec := httptest.NewRecorder()
+	response := middleware.NewWrapResponseWriter(rec, 1)
+	ref := EmbeddedSubtitleRef{MediaFileID: 7, StreamIndex: ordinal, Codec: "hdmv_pgs_subtitle"}
+	err := c.ServeExtract(response, httptest.NewRequest(http.MethodGet, "/subtitle.sup", nil).WithContext(ctx),
+		StreamExtractOpts{InputPath: source, TrackIndex: ordinal, SourceCodec: "hdmv_pgs_subtitle", Embedded: &ref}, extract)
+	return trackResult{body: rec.Body.String(), status: response.Status(), err: err}
+}
+
+// fillViewers counts the requests watching c's fill of the whole PGS track
+// at ordinal.
+func fillViewers(c *SubtitleCache, ordinal int) int {
+	var fill *SubtitleCacheFill
+	c.mu.Lock()
+	for _, f := range c.inflight {
+		if f.trackIndex == ordinal {
+			fill = f
+		}
+	}
+	c.mu.Unlock()
+	if fill == nil {
+		return 0
+	}
+	fill.mu.Lock()
+	defer fill.mu.Unlock()
+	return fill.viewers
 }
 
 // FFmpeg can't demux an index-only track from the source, so a failed index
@@ -749,6 +925,77 @@ func TestServeSUPWindowOrder(t *testing.T) {
 				// it frees its slot once it has finished.
 				waitForCondition(t, func() bool { return len(c.warmSem) == 0 }, func() {})
 			}
+		})
+	}
+}
+
+// slowWindowSource reads a window in delay, as storage with slow random
+// reads does: the reporter's took 88 seconds.
+type slowWindowSource struct {
+	*fakeEmbeddedSource
+	delay time.Duration
+}
+
+func (s *slowWindowSource) Window(ctx context.Context, path string, ref EmbeddedSubtitleRef, from, to time.Duration) (*SubtitlePacketInput, error) {
+	select {
+	case <-time.After(s.delay):
+		return s.fakeEmbeddedSource.Window(ctx, path, ref, from, to)
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
+
+// A window the source reads too slowly is demuxed while the web player,
+// which gives up on a silent window after 30 seconds, still waits for it,
+// and the warm it starts demuxes too instead of reading the whole track
+// the same slow way (#4199), as does a window open to the end whose whole
+// read gave way to slow reads. A track only the index can read waits for it.
+func TestSlowWindowReadGivesWayToTheDemux(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		opts   StreamExtractOpts
+		ref    EmbeddedSubtitleRef
+		delay  time.Duration
+		window error
+		want   string
+	}{
+		{name: "PGS window", opts: StreamExtractOpts{SourceCodec: "hdmv_pgs_subtitle", AllowWindow: true, DurationSeconds: 600}, ref: *testEmbeddedRef, delay: 88 * time.Second, want: "demuxed"},
+		{name: "text window", opts: StreamExtractOpts{SourceCodec: "subrip", SeekSeconds: 600, DurationSeconds: 600}, ref: *testEmbeddedRef, delay: 88 * time.Second, want: "demuxed"},
+		{name: "index-only text window", opts: StreamExtractOpts{SourceCodec: "webvtt", SeekSeconds: 600, DurationSeconds: 600},
+			ref: EmbeddedSubtitleRef{MediaFileID: 7, StreamIndex: 2, ContainerTrackID: "3", Codec: "webvtt", IndexOnly: true}, delay: 20 * time.Second, want: "converted:window"},
+		{name: "PGS window open to the end", opts: StreamExtractOpts{SourceCodec: "hdmv_pgs_subtitle", AllowWindow: true, SeekSeconds: 600}, ref: *testEmbeddedRef,
+			window: fmt.Errorf("%w: the last 16 took 1s on average", embeddedsub.ErrSlowReads), want: "demuxed"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				c, source := newTestCache(t)
+				src := &fakeEmbeddedSource{window: tc.window}
+				c.SetEmbeddedSource(&slowWindowSource{fakeEmbeddedSource: src, delay: tc.delay})
+				var mu sync.Mutex
+				var calls []StreamExtractOpts
+				convert := fakeConvert(&calls, &mu, false)
+				extract := func(ctx context.Context, opts StreamExtractOpts) error {
+					if err := ctx.Err(); err != nil {
+						return err
+					}
+					return convert(ctx, opts)
+				}
+				ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
+				defer cancel()
+				opts := tc.opts
+				opts.InputPath, opts.Embedded = source, &tc.ref
+				rec := httptest.NewRecorder()
+				req := httptest.NewRequest(http.MethodGet, "/subtitle", nil).WithContext(ctx)
+				if err := c.ServeExtract(rec, req, opts, extract); err != nil || rec.Body.String() != tc.want {
+					t.Fatalf("body %q, err %v", rec.Body.String(), err)
+				}
+				synctest.Wait()
+				src.mu.Lock()
+				defer src.mu.Unlock()
+				if src.wholeCalls != 0 {
+					t.Fatalf("read the whole track from the source %d times after a slow window", src.wholeCalls)
+				}
+			})
 		})
 	}
 }

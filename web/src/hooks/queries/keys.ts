@@ -67,6 +67,9 @@ export const catalogKeys = {
   allLetters: ["catalog", "letters"] as const,
   letters: (params: Pick<CatalogParams, "library_id" | "type" | "query_fingerprint">) =>
     ["catalog", "letters", params] as const,
+  allCounts: ["catalog", "count"] as const,
+  count: (params: Pick<CatalogParams, "library_id" | "type" | "query_fingerprint">) =>
+    ["catalog", "count", params] as const,
   itemDetail: (id: string, libraryId?: number) =>
     ["catalog", "items", id, "detail", libraryId ?? "default"] as const,
   itemVersions: (id: string) => ["catalog", "items", id, "versions"] as const,

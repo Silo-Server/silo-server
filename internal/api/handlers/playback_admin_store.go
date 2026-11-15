@@ -217,7 +217,8 @@ func (s *PGPlaybackAdminStore) LiveSession(ctx context.Context, sessionID string
 			COALESCE(client_channel, ''), COALESCE(client_user_agent, ''),
 			COALESCE(device_id, ''), COALESCE(device_platform, ''),
 			COALESCE(transcode_audio, FALSE), COALESCE(target_video_codec, ''),
-			COALESCE(position_seconds, 0), COALESCE(compat_origin, FALSE)
+			COALESCE(position_seconds, 0), COALESCE(compat_origin, FALSE),
+			COALESCE(timeline_duration_seconds, 0), adaptation_reasons
 		FROM (
 			SELECT 0 AS source, live.* FROM playback_sessions_sync live WHERE live.session_id = $1
 			UNION ALL
@@ -235,6 +236,7 @@ func (s *PGPlaybackAdminStore) LiveSession(ctx context.Context, sessionID string
 		&live.DeviceID, &live.DevicePlatform,
 		&live.TranscodeAudio, &live.TargetVideoCodec,
 		&live.Position, &live.IsJellyfinCompat,
+		&live.TimelineDuration, &live.AdaptationReasons,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, playback.ErrSessionNotFound

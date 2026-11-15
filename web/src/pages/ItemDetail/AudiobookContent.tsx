@@ -1,9 +1,24 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useSearchParams } from "react-router";
+import { joinList } from "@/lib/appLocale";
+import { useLocation, useNavigate, useSearchParams } from "react-router";
 import type { ItemDetail, LeafItemUserData } from "@/api/types";
 import { Button } from "@/components/ui/button";
-import { FolderPlus, Pause, Play } from "lucide-react";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { FolderPlus, MoreVertical, Pause, Play } from "lucide-react";
 import AddToCollectionDialog from "@/components/AddToCollectionDialog";
+import EditMetadataDialog from "@/components/EditMetadataDialog";
+import MatchItemDialog from "@/components/MatchItemDialog";
+import RefreshMetadataDialog from "@/components/RefreshMetadataDialog";
+import { MediaActionIcon } from "@/components/mediaActionIcons";
+import { useRefreshItemMetadata } from "@/hooks/queries/items";
+import { useAuth } from "@/hooks/useAuth";
+import { useCurrentProfile } from "@/hooks/useCurrentProfile";
+import { canCurateMetadata as canCurateMetadataForUser } from "@/lib/permissions";
 import { ChaptersSection } from "@/pages/audiobooks/components/ChaptersSection";
 import { NarratorCard } from "@/pages/audiobooks/components/NarratorCard";
 import { NarratorPicker } from "@/pages/audiobooks/components/NarratorPicker";
@@ -45,18 +60,18 @@ function leafUserData(userData: ItemDetail["user_data"]): LeafItemUserData | und
 }
 
 function namesFromPeople(people: Array<{ name?: string }> | undefined): string {
-  return (people ?? [])
-    .map((person) => person.name?.trim())
-    .filter(Boolean)
-    .join(", ");
+  return joinList(
+    (people ?? []).map((person) => person.name?.trim()).filter((name): name is string => !!name),
+  );
 }
 
 function namesFromCrew(item: ItemDetail, job: string): string {
-  return (item.crew ?? [])
-    .filter((credit) => credit.job.toLowerCase() === job)
-    .map((credit) => credit.name?.trim())
-    .filter(Boolean)
-    .join(", ");
+  return joinList(
+    (item.crew ?? [])
+      .filter((credit) => credit.job.toLowerCase() === job)
+      .map((credit) => credit.name?.trim())
+      .filter((name): name is string => !!name),
+  );
 }
 
 function genreHref(genre: string, libraryId?: number): string {
@@ -83,7 +98,35 @@ export default function AudiobookContent({
   const [searchParams] = useSearchParams();
   const handledPlayParamRef = useRef(false);
   const [addToCollectionOpen, setAddToCollectionOpen] = useState(false);
+  const [editOpen, setEditOpen] = useState(false);
+  const [matchOpen, setMatchOpen] = useState(false);
+  const [refreshOpen, setRefreshOpen] = useState(false);
+  const refreshMetadataMutation = useRefreshItemMetadata();
   const audiobookPlayback = useAudiobookPlaybackController();
+  const navigate = useNavigate();
+  const { search } = useLocation();
+  // Follow a match or refresh that gives the book a new content ID. Keep the
+  // page context but not a request to start playback.
+  const followReplacedItem = (contentID: string) => {
+    const params = new URLSearchParams(search);
+    params.delete("play");
+    params.delete("restart");
+    const query = params.toString();
+    navigate(
+      { pathname: `/item/${contentID}`, search: query ? `?${query}` : "" },
+      { replace: true },
+    );
+  };
+  const { user } = useAuth();
+  const { profile: currentProfile, hasSelectedProfile } = useCurrentProfile();
+  // Until a stored profile resolves, the null profile would read as "no
+  // profile selected" and grant an admin's curation rights to any profile.
+  const profileIsResolved = !hasSelectedProfile || Boolean(currentProfile);
+  const canCurateMetadata = profileIsResolved && canCurateMetadataForUser(user, currentProfile);
+  const scopedItem = useMemo(
+    () => (libraryId === undefined ? item : { ...item, library_id: libraryId }),
+    [item, libraryId],
+  );
 
   const files = useMemo<AudiobookFile[]>(
     () => audiobookFilesFromVersions(item.versions),
@@ -178,6 +221,29 @@ export default function AudiobookContent({
         mediaItemId={item.content_id}
         itemTitle={item.title}
       />
+      {canCurateMetadata && (
+        <>
+          {/* Mounted per open: the form takes its values from the item when it
+              mounts, so a dialog kept open across a match would save stale fields. */}
+          {editOpen && <EditMetadataDialog item={item} open onOpenChange={setEditOpen} />}
+          <MatchItemDialog
+            key={item.content_id}
+            item={scopedItem}
+            open={matchOpen}
+            onOpenChange={setMatchOpen}
+            onReplaced={followReplacedItem}
+          />
+          <RefreshMetadataDialog
+            open={refreshOpen}
+            onOpenChange={setRefreshOpen}
+            onConfirm={(mode) => {
+              setRefreshOpen(false);
+              refreshMetadataMutation.mutate({ item, mode, onReplaced: followReplacedItem });
+            }}
+            isPending={refreshMetadataMutation.isPending}
+          />
+        </>
+      )}
 
       <DetailHero
         overviewMachineTranslated={hasMachineTranslation(item.machine_translated_fields)}
@@ -231,9 +297,9 @@ export default function AudiobookContent({
         genres={item.genres}
         genreHref={(genre) => genreHref(genre, libraryId)}
         actions={
-          files.length > 0 && (
+          (files.length > 0 || canCurateMetadata) && (
             <div className="flex max-w-md flex-col gap-3">
-              {hasProgress && durationTotal > 0 && (
+              {files.length > 0 && hasProgress && durationTotal > 0 && (
                 <div>
                   <div className="bg-muted h-1.5 w-full overflow-hidden rounded-full">
                     <div
@@ -250,28 +316,66 @@ export default function AudiobookContent({
                 </div>
               )}
               <div className="flex flex-wrap items-center gap-3">
-                <Button onClick={handlePlayResume} size="lg" className="gap-2">
-                  {activePlayback?.playing ? (
-                    <Pause className="h-4 w-4 fill-current" />
-                  ) : (
-                    <Play className="h-4 w-4 fill-current" />
-                  )}
-                  {primaryPlaybackLabel()}
-                </Button>
-                <Button
-                  variant="outline"
-                  size="lg"
-                  onClick={() => setAddToCollectionOpen(true)}
-                  className="gap-2"
-                  title={t("web.detail.audiobook.addToCollectionHint")}
-                >
-                  <FolderPlus className="h-4 w-4" />
-                  {t("web.detail.actions.addToCollection")}
-                </Button>
-                {hasProgress && (
-                  <Button variant="outline" size="lg" onClick={() => openPlayer(0)}>
-                    {t("web.detail.audiobook.listenFromStart")}
-                  </Button>
+                {files.length > 0 && (
+                  <>
+                    <Button onClick={handlePlayResume} size="lg" className="gap-2">
+                      {activePlayback?.playing ? (
+                        <Pause className="h-4 w-4 fill-current" />
+                      ) : (
+                        <Play className="h-4 w-4 fill-current" />
+                      )}
+                      {primaryPlaybackLabel()}
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="lg"
+                      onClick={() => setAddToCollectionOpen(true)}
+                      className="gap-2"
+                      title={t("web.detail.audiobook.addToCollectionHint")}
+                    >
+                      <FolderPlus className="h-4 w-4" />
+                      {t("web.detail.actions.addToCollection")}
+                    </Button>
+                    {hasProgress && (
+                      <Button variant="outline" size="lg" onClick={() => openPlayer(0)}>
+                        {t("web.detail.audiobook.listenFromStart")}
+                      </Button>
+                    )}
+                  </>
+                )}
+                {canCurateMetadata && (
+                  <DropdownMenu modal={false}>
+                    <DropdownMenuTrigger asChild>
+                      <Button
+                        variant="outline"
+                        size="icon-lg"
+                        title={t("web.detail.actions.more")}
+                        aria-label={t("web.detail.actions.moreActions")}
+                      >
+                        <MoreVertical className="h-4 w-4" />
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="start" className="w-56">
+                      <DropdownMenuItem onSelect={() => setEditOpen(true)}>
+                        <MediaActionIcon action="editMetadata" />
+                        {t("web.detail.actions.editMetadata")}
+                      </DropdownMenuItem>
+                      <DropdownMenuItem onSelect={() => setMatchOpen(true)}>
+                        <MediaActionIcon action="matchItem" />
+                        {t("web.detail.actions.matchItem")}
+                      </DropdownMenuItem>
+                      <DropdownMenuItem
+                        disabled={refreshMetadataMutation.isPending}
+                        onSelect={() => setRefreshOpen(true)}
+                      >
+                        <MediaActionIcon
+                          action="refreshMetadata"
+                          isPending={refreshMetadataMutation.isPending}
+                        />
+                        {t("web.detail.actions.refreshMetadata")}
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
                 )}
               </div>
             </div>

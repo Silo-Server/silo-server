@@ -12,7 +12,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { useT, type MessageKey, type Translate } from "@/i18n";
-import { optionsFor } from "@/lib/settingsDisplay";
+import { formatWithUnit, optionsFor } from "@/lib/settingsDisplay";
 import { settingDescription, settingLabel } from "@/lib/settingsText";
 import { SETTING_DEFINITIONS, SETTING_KEYS, type SettingKey } from "@/lib/settingsContract";
 import { bitrateSelectChoices } from "@/lib/bitrateOptions";
@@ -26,6 +26,11 @@ import { useSeekPreferences } from "@/hooks/queries/seekPreferences";
 import type { SeekDirection } from "@/lib/seekIntervals";
 import { useProfileDefaultWriter } from "@/hooks/queries/profileDefaults";
 import { isBrowserDecodingEnabled, setBrowserDecodingEnabled } from "@/player/engine/settings";
+import {
+  getStillWatchingThreshold,
+  setStillWatchingThreshold,
+  STILL_WATCHING_MAX,
+} from "@/player/stillWatching";
 import { normalizeQualityPreferenceV3 } from "@/player/protocol-v3";
 import { toast } from "sonner";
 import { LearnedLimitRow, PlaybackConnection } from "./PlaybackConnection";
@@ -192,6 +197,43 @@ function AutoPlayNextSetting() {
             setEnabled(checked).catch(() => toast.error(t("web.settings.playback.saveFailed")));
           }}
         />
+      )}
+    />
+  );
+}
+
+/** Stored in this browser: the contract classes the limit as client-local. */
+function StillWatchingSetting() {
+  const t = useT();
+  const [threshold, setThreshold] = useState(getStillWatchingThreshold);
+  const definition = SETTING_DEFINITIONS[SETTING_KEYS.PLAYER_PASSOUT_THRESHOLD];
+
+  return (
+    <SettingRow
+      label={settingLabel(definition)}
+      description={settingDescription(definition)}
+      control={(id) => (
+        <Select
+          value={String(threshold)}
+          onValueChange={(value) => {
+            const next = Number(value);
+            setStillWatchingThreshold(next);
+            setThreshold(next);
+          }}
+        >
+          <SelectTrigger id={id} className="w-full sm:w-[220px]">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {Array.from({ length: STILL_WATCHING_MAX + 1 }, (_, count) => (
+              <SelectItem key={count} value={String(count)}>
+                {count === 0
+                  ? t("web.settings.value.disabled")
+                  : formatWithUnit(String(count), "episodes")}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
       )}
     />
   );
@@ -715,6 +757,8 @@ export default function PlaybackSettings() {
         />
 
         <AutoPlayNextSetting />
+
+        <StillWatchingSetting />
       </SettingsGroup>
 
       <SeekControls />

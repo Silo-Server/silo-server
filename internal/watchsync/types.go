@@ -710,31 +710,6 @@ type HistoryExport struct {
 	UpdatedAt       time.Time
 }
 
-// ListItemState is the per-connection, per-list shadow record tracking whether
-// an item is present locally and/or remotely, used to drive incremental
-// export/removal reconciliation. It serves both the favorites and watchlist
-// lists, discriminated by ListKind.
-type ListItemState struct {
-	ID                  string
-	ConnectionID        string
-	ListKind            ListKind
-	MediaItemID         string
-	ProviderItemKey     string
-	Kind                string
-	Title               string
-	Year                int
-	RemotePresent       bool
-	LocalPresent        bool
-	LastSeenRemoteAt    *time.Time
-	LastSeenLocalAt     *time.Time
-	LastExportedAt      *time.Time
-	LastRemovedRemoteAt *time.Time
-	LastRemovedLocalAt  *time.Time
-	LastError           string
-	CreatedAt           time.Time
-	UpdatedAt           time.Time
-}
-
 type ScrobbleSession struct {
 	PlaybackSessionID   string
 	ConnectionID        string
@@ -953,6 +928,9 @@ var (
 	ErrAuthSessionMismatch  = errors.New("auth session does not match active profile")
 	ErrAuthSessionCompleted = errors.New("auth session is already completed")
 	ErrAuthSessionExpired   = errors.New("auth session has expired")
+	// ErrDeviceAuthDenied reports that the person declined the authorization
+	// on the provider's site.
+	ErrDeviceAuthDenied = errors.New("device authorization was denied")
 	// ErrInvalidCredential reports a provider's rejection of the credential the
 	// profile supplied. Built-in providers wrap it so the listeners classify an
 	// API-key rejection as a client problem; plugin providers signal the same

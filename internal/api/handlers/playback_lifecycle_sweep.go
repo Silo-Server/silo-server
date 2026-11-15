@@ -32,6 +32,10 @@ const (
 	// An Audiobookshelf (beta) session nobody holds ends after the ABS
 	// abandoned-session window.
 	lifecycleABSGrace = 24 * time.Hour
+	// An Audiobookshelf play a client only reports through its local
+	// session ends this long after its last report. Such clients send no
+	// stop, so silence is the only end there is.
+	lifecycleReportedGrace = 90 * time.Second
 	// Stopped rows are kept this long so a late start or pause for the
 	// same session announces nothing: longer than an attempt's life.
 	lifecycleTombstoneRetention = 25 * time.Hour
@@ -50,6 +54,14 @@ type lifecycleCandidate struct {
 	attemptLive  bool
 	finalized    bool
 	stopID       string
+	// reported is an Audiobookshelf play a client only reports; the rest is
+	// its row, which the end records.
+	reported          bool
+	reportedOpen      bool
+	reportedPosition  float64
+	reportedListening float64
+	reportedStartedAt time.Time
+	reportedLastSync  time.Time
 }
 
 // StartLifecycleSweep runs the sweep on every API server until ctx ends.
@@ -115,33 +127,42 @@ func loadLifecycleCandidates(ctx context.Context, pool *pgxpool.Pool, now time.T
 	rows, err := pool.Query(ctx, `
 		WITH live AS (
 			SELECT lc.session_id, lc.frontend, lc.user_id, lc.profile_id, lc.state = 'paused' AS paused,
-				GREATEST(lc.updated_at, COALESCE(lc.activity_at, lc.updated_at), COALESCE(a.updated_at, lc.updated_at)) AS activity,
+				GREATEST(lc.updated_at, COALESCE(lc.activity_at, lc.updated_at), COALESCE(a.updated_at, lc.updated_at),
+					COALESCE(r.last_sync_at, lc.updated_at)) AS activity,
 				a.session_id IS NOT NULL AS attempt_found, a.session_id IS NOT NULL AND a.stopped_at IS NULL AS attempt_live,
-				COALESCE((a.stop_receipt->>'finalized')::boolean, FALSE) AS finalized, COALESCE(a.stop_receipt->>'stop_id', '') AS stop_id
+				COALESCE((a.stop_receipt->>'finalized')::boolean, FALSE) AS finalized, COALESCE(a.stop_receipt->>'stop_id', '') AS stop_id,
+				r.id IS NOT NULL AS reported, r.id IS NOT NULL AND r.closed_at IS NULL AS reported_open,
+				COALESCE(r.current_position_seconds, 0) AS reported_position, COALESCE(r.time_listening_seconds, 0)::double precision AS reported_listening,
+				COALESCE(r.started_at, lc.started_at) AS reported_started_at, COALESCE(r.last_sync_at, lc.updated_at) AS reported_last_sync
 			FROM playback_session_lifecycle lc
 			LEFT JOIN playback_v3_attempts a ON a.session_id = lc.session_id AND a.expires_at > $1
+			LEFT JOIN abs_playback_sessions r ON lc.frontend = 'abs' AND r.id = lc.session_id::text AND r.client_session_id IS NOT NULL
 			WHERE lc.state <> 'stopped' AND lc.updated_at < $2
 			  AND NOT EXISTS (SELECT 1 FROM playback_sessions_sync s
 				WHERE s.session_id = lc.session_id::text AND s.last_sync_at > $2)
 		)
 		-- Only rows the sweep can act on now: an attempt someone stopped, or a
 		-- session idle past its grace. Rows still active never fill the batch.
-		SELECT session_id::text, frontend, user_id, profile_id, paused, activity, attempt_found, attempt_live, finalized, stop_id
+		SELECT session_id::text, frontend, user_id, profile_id, paused, activity, attempt_found, attempt_live, finalized, stop_id,
+			reported, reported_open, reported_position, reported_listening, reported_started_at, reported_last_sync
 		FROM live
 		WHERE (attempt_found AND NOT attempt_live)
 		   OR activity < $1 - CASE
+				WHEN reported THEN $7::interval
 				WHEN frontend = 'abs' THEN $3::interval
 				WHEN paused THEN $4::interval
 				ELSE $5::interval END
 		ORDER BY activity
-		LIMIT $6`, now, now.Add(-lifecycleHeldGrace), lifecycleABSGrace, lifecyclePausedGrace, lifecyclePlayingGrace, lifecycleSweepBatch)
+		LIMIT $6`, now, now.Add(-lifecycleHeldGrace), lifecycleABSGrace, lifecyclePausedGrace, lifecyclePlayingGrace, lifecycleSweepBatch,
+		lifecycleReportedGrace)
 	if err != nil {
 		return nil, err
 	}
 	return pgx.CollectRows(rows, func(row pgx.CollectableRow) (lifecycleCandidate, error) {
 		var c lifecycleCandidate
 		err := row.Scan(&c.sessionID, &c.frontend, &c.userID, &c.profileID, &c.paused, &c.activity,
-			&c.attemptFound, &c.attemptLive, &c.finalized, &c.stopID)
+			&c.attemptFound, &c.attemptLive, &c.finalized, &c.stopID,
+			&c.reported, &c.reportedOpen, &c.reportedPosition, &c.reportedListening, &c.reportedStartedAt, &c.reportedLastSync)
 		return c, err
 	})
 }
@@ -160,16 +181,20 @@ func (h *PlaybackHandler) sweepLifecycleCandidate(ctx context.Context, pool *pgx
 	case c.attemptFound:
 		// The attempt's end was finalized without stopping the lifecycle
 		// (its writer failed, or ended before the upgrade): record it now.
-		h.endLifecycleFromFacts(ctx, c.sessionID, endReasonForStop(c.sessionID, c.stopID))
+		h.endLifecycleFromFacts(ctx, pool, c.sessionID, endReasonForStop(c.sessionID, c.stopID), now)
 	case c.frontend == LifecycleFrontendJellyfin:
-		h.expireIdleJellyfinSession(ctx, pool, c, idleBefore)
+		h.expireIdleJellyfinSession(ctx, pool, c, idleBefore, now)
+	case c.reported:
+		if c.activity.Before(now.Add(-lifecycleReportedGrace)) {
+			h.endReportedPlay(ctx, pool, c, now)
+		}
 	case c.frontend == LifecycleFrontendABS:
 		if c.activity.Before(now.Add(-lifecycleABSGrace)) {
-			h.endLifecycleFromFacts(ctx, c.sessionID, PlaybackEndExpired)
+			h.endLifecycleFromFacts(ctx, pool, c.sessionID, PlaybackEndExpired, now)
 		}
 	case c.activity.Before(idleBefore):
 		// A native session whose attempt is gone (expired and cleaned up).
-		h.endLifecycleFromFacts(ctx, c.sessionID, PlaybackEndExpired)
+		h.endLifecycleFromFacts(ctx, pool, c.sessionID, PlaybackEndExpired, now)
 	}
 }
 
@@ -260,7 +285,7 @@ func (h *PlaybackHandler) finishInterruptedNativeEnd(ctx context.Context, sessio
 // expireIdleJellyfinSession ends a Jellyfin play no server holds through the
 // shared compatibility expiry claim, which marks its play row terminal so no
 // report revives it.
-func (h *PlaybackHandler) expireIdleJellyfinSession(ctx context.Context, pool *pgxpool.Pool, c lifecycleCandidate, idleBefore time.Time) {
+func (h *PlaybackHandler) expireIdleJellyfinSession(ctx context.Context, pool *pgxpool.Pool, c lifecycleCandidate, idleBefore, now time.Time) {
 	if c.activity.After(idleBefore) {
 		return
 	}
@@ -285,13 +310,60 @@ func (h *PlaybackHandler) expireIdleJellyfinSession(ctx context.Context, pool *p
 		recordLifecycleActivity(ctx, pool, c.sessionID, idleBefore)
 		return
 	}
-	h.endLifecycleFromFacts(ctx, c.sessionID, PlaybackEndExpired)
+	h.endLifecycleFromFacts(ctx, pool, c.sessionID, PlaybackEndExpired, now)
 }
 
 // endLifecycleFromFacts records the end of a session nothing richer is left
 // for: the row it recorded when it started, at the last position the shared
 // state knows.
-func (h *PlaybackHandler) endLifecycleFromFacts(ctx context.Context, sessionID string, reason PlaybackEndReason) {
+//
+// A history write that fails leaves the session live, so a later sweep
+// retries it and keeps the row once the cause is fixed. The failure counts
+// as activity at now, so a session the sweep selects by idleness waits a
+// full grace before the next try instead of failing every sweep, and moves
+// behind sessions idle for longer, so rows that keep failing never fill the
+// sweep's batch. (A session whose attempt is stopped is selected regardless
+// of activity until the attempt row expires.)
+func (h *PlaybackHandler) endLifecycleFromFacts(ctx context.Context, pool *pgxpool.Pool, sessionID string, reason PlaybackEndReason, now time.Time) {
+	h.endLifecycleWith(ctx, pool, sessionID, reason, now, nil)
+}
+
+// endReportedPlay ends an Audiobookshelf play a client only reported, once
+// no report arrived for lifecycleReportedGrace. Closing its row is the claim
+// to end it, made only while the row still has no later report, so a play
+// whose report lands after the sweep looked goes on; its next report after
+// the close starts a new play. A row already closed (by an end whose history
+// write failed, a sign-out, or the stale-row cleaner) ends from what it holds.
+// The history row records the play's position and the listening its reports
+// credited.
+func (h *PlaybackHandler) endReportedPlay(ctx context.Context, pool *pgxpool.Pool, c lifecycleCandidate, now time.Time) {
+	if c.reportedOpen {
+		// The row's report times are the database's, so the claim's cutoff is
+		// too: an API server whose clock runs ahead must not end a live play.
+		tag, err := pool.Exec(ctx, `UPDATE abs_playback_sessions SET closed_at = now()
+			WHERE id = $1 AND closed_at IS NULL AND last_sync_at < now() - make_interval(secs => $2)`,
+			c.sessionID, lifecycleReportedGrace.Seconds())
+		if err != nil {
+			slog.WarnContext(ctx, "lifecycle sweep could not close a reported Audiobookshelf play", "component", "api", "session", c.sessionID, "error", err)
+			return
+		}
+		if tag.RowsAffected() == 0 {
+			return
+		}
+	}
+	h.endLifecycleWith(ctx, pool, c.sessionID, PlaybackEndExpired, now, func(session *playback.Session) {
+		// The start row holds the position the play began at; a seek since
+		// would make it differ from the end position less the listening.
+		start := session.Position
+		session.Position = c.reportedPosition
+		session.Watch.Credit(c.reportedPosition, c.reportedListening, c.reportedStartedAt, c.reportedLastSync)
+		session.Watch.StartPosition = start
+	})
+}
+
+// endLifecycleWith is endLifecycleFromFacts with the session's facts
+// completed by fill, when it is not nil.
+func (h *PlaybackHandler) endLifecycleWith(ctx context.Context, pool *pgxpool.Pool, sessionID string, reason PlaybackEndReason, now time.Time, fill func(*playback.Session)) {
 	reader, ok := h.AdminStore.(liveSessionReader)
 	if !ok {
 		return
@@ -308,5 +380,10 @@ func (h *PlaybackHandler) endLifecycleFromFacts(ctx context.Context, sessionID s
 	if record, err := h.PlanStoreV3.GetAttempt(ctx, sessionID); err == nil && record.LastSample != nil {
 		session.Position = record.LastSample.Position
 	}
-	h.recordAdminStopHistory(ctx, session, reason)
+	if fill != nil {
+		fill(session)
+	}
+	if err := h.recordAdminStopHistory(ctx, session, reason); err != nil {
+		recordLifecycleActivity(ctx, pool, sessionID, now)
+	}
 }

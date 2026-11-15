@@ -284,3 +284,25 @@ func TestStatContextPrefersCancellationToCompletedStat(t *testing.T) {
 		}
 	}
 }
+
+func TestFFConcatFileURLQuotesForFFconcat(t *testing.T) {
+	tests := map[string]string{
+		"/media/Movie (2020)/movie.mkv": `'file:/media/Movie (2020)/movie.mkv'`,
+		"/media/It's/it's.mkv":          `'file:/media/It'\''s/it'\''s.mkv'`,
+		`/media/a\b\'c.mkv`:             `'file:/media/a\b\'\''c.mkv'`,
+		"/media/#1: what?.mkv":          `'file:/media/#1: what?.mkv'`,
+		// An fspath-encoded name is written as its real bytes.
+		Encode("/media/B\xe5rd.mkv"): "'file:/media/B\xe5rd.mkv'",
+	}
+	for input, want := range tests {
+		got, err := FFConcatFileURL(input)
+		if err != nil || got != want {
+			t.Errorf("FFConcatFileURL(%q) = %q, %v; want %q", input, got, err, want)
+		}
+	}
+	for _, input := range []string{"/media/a\nfile '/etc/passwd'.mkv", "/media/a\r.mkv", "/media/a\x00.mkv"} {
+		if got, err := FFConcatFileURL(input); err == nil {
+			t.Errorf("FFConcatFileURL(%q) = %q, want an error", input, got)
+		}
+	}
+}

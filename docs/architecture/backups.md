@@ -562,8 +562,11 @@ whenever migrations are pending:
 6. Release the subsystem lock, then the wrapper, then build the audit-detail
    indexes.
 
-Other servers block on the wrapper and, once they get it, find nothing
-pending. If the session of the wrapper or of the subsystem lock ends at any
+Other servers wait for the wrapper and, once they get it, find nothing
+pending. They wait by retrying `pg_try_advisory_lock`, never by blocking in
+`pg_advisory_lock`: a statement waiting for a lock holds a snapshot, and a
+concurrent index build in the holder's migrations waits for every older
+snapshot, so the two servers would wait for each other. If the session of the wrapper or of the subsystem lock ends at any
 point, the backup or migration in flight is canceled and startup fails.
 goose runs each migration in a transaction unless it is marked
 `-- +goose NO TRANSACTION`, so a canceled transactional migration rolls
@@ -703,7 +706,7 @@ collections in `collections.json`, and an omitted item's `cause` and
 `error`; version 4 a home section's `web_only`; version 5 no new field, but a
 server smart collection's rules now draw from their own `library_ids`, so a
 restore pins an older set's smart collection rules to the collection's
-libraries), the source
+libraries; version 6 a home section's `title_key` and `title_args`), the source
 server id and name, Silo version, creation time, `SECRET_KEY` check value, and
 a section index: for each section its item count, each of its files with
 size and SHA-256, and the blob keys its documents reference. Plugin archive
@@ -725,9 +728,15 @@ format version: an older reader refuses a newer set as "from a newer Silo"
 instead of failing on what it does not know, and a set that claims an older
 version while holding something added later (`users` in version 1,
 `home_sections` or template collections in version 2, a `web_only` section
-in version 3) is refused. A set without `web_only` reads it as false, the
-column's default. Readers accept versions 1 to 4; version 4 is always
-written.
+in version 3, a `title_key` section in version 5) is refused. A set without
+`web_only` reads it as false, the column's default. A set without `title_key`
+reads every title as typed text, so a restored title never gains a key; a
+keyed title keeps its key and arguments when a restore creates or replaces the
+section. A restore never takes a key away: replacing a section with a title
+that has no key leaves the key the section already has when the title is the
+same text, because the two then show the same English, and a set written
+before version 6 cannot say whether its title was typed. The restore preview
+reports a section that differs only by its key as changed. Readers accept versions 1 to 6; version 6 is always written.
 
 | Section | Holds | Blob prefixes |
 |---|---|---|
@@ -1305,7 +1314,7 @@ backup. `is_owner` and `break_glass` are never carried.
 **Profile fields:** name, avatar, `is_primary`, PIN hash, and every field the
 access resolver (`internal/access/resolver.go`) reads to decide access:
 `is_child`, `max_content_rating`, `max_advisory_age`, `require_advisory_age`,
-`library_restrictions_enabled`, the allowed libraries
+`requests_blocked`, `library_restrictions_enabled`, the allowed libraries
 (`user_profile_allowed_libraries`), and `max_playback_quality`. The PIN
 revision is not carried; a restored profile starts its own. A profile restored
 as the account's primary drops its library limit, since the primary profile
@@ -2021,7 +2030,9 @@ neither list.
   stays linked; the others are deleted. Accepted and revoked invitations
   are the restored history and stay. A live credential whose account,
   profile, access group, item, autoscan source, or connection is not in the
-  restored data is dropped, and so is one whose account (owner, inviter, or
+  restored data is dropped (a profile counts only under the credential's own
+  account, since a profile id is unique only within one), and so is one whose
+  account (owner, inviter, or
   creator) has more authority in the restored data than on the live server:
   a higher role (the Owner over admin over user), enabled where it is
   disabled now, break-glass access, an effective account policy wider in
@@ -2032,8 +2043,9 @@ neither list.
   since, which the credential's holder could select), or, for a profile
   both sides have, a
   protection or restriction lifted or loosened (its PIN, becoming the
-  primary profile, child profile, rating or advisory-age ceiling, library
-  restriction, playback-quality ceiling), or a looser request policy
+  primary profile, child profile, rating or advisory-age ceiling, block
+  from requests, library restriction, playback-quality ceiling), or a
+  looser request policy
   (requests at all, without limit, more titles or over a shorter window,
   or with automatic approval, as `requests.LayeredPolicy` resolves it from
   the server's, the access group's, and the account's limits). The PIN
@@ -2076,7 +2088,8 @@ neither list.
   settings (requests, auto-approval, watchlist requests); subtitle
   providers; marker sharing; per-account and per-group download,
   transcode, and request permissions; a profile's child flag, library
-  restriction, and advisory-age requirement (on wins); a personal
+  restriction, advisory-age requirement, and block from requests (on
+  wins); a personal
   collection's sharing; a profile's notification preferences; a
   watch-provider connection's sync switches; an account's `enabled`,
   `break_glass`, and `local_password_login_enabled` (off wins) and
@@ -2093,7 +2106,12 @@ neither list.
   plugin task binding, an access group's permissions, a profile's
   notifications. Only account switches roll back as they were
   (`rollsBack`), since accounts roll back whole. Nothing
-  a full restore does turns a plugin on; the admin does. These switches are
+  a full restore does turns a plugin on; the admin does. A backup taken
+  before a switch's column existed keeps nothing for it, and the restored
+  server adds the column with its default when it migrates, except for a
+  restriction that sets `addMissing` (a profile's block from requests): the
+  restore adds that column itself when a live row is restricted, so the
+  restriction is kept. These switches are
   set before the credential carry compares authority, so it compares the
   restored server as it will start; the carry also counts an account with
   every library as seeing each enabled library of its server, and drops a

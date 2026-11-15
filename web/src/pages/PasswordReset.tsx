@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { FormEvent } from "react";
-import { Link, useParams } from "react-router";
+import { Link, Navigate } from "react-router";
 import { captureSessionIdentity, getAccessToken, isSessionIdentityCurrent } from "@/api/client";
 import {
   completePasswordReset,
@@ -11,6 +11,7 @@ import { sessionFromTokenPair } from "@/api/v2/account";
 import { V2ProblemError } from "@/api/v2/request";
 import { useAuth } from "@/hooks/useAuth";
 import { useDocumentTitle } from "@/hooks/useDocumentTitle";
+import { useLinkToken } from "@/hooks/useLinkToken";
 import { usePostSignInNavigation } from "@/hooks/usePostSignInNavigation";
 import { usePasswordResetAvailable } from "@/hooks/queries/passwordReset";
 import { formatDateTime } from "@/lib/datetime";
@@ -22,7 +23,10 @@ import { AuthCard, SignInHint } from "@/components/auth/AuthCard";
 import { useT } from "@/i18n";
 
 export default function PasswordReset() {
-  const { token = "" } = useParams();
+  const token = useLinkToken();
+  // Opened without its token, as when something on the way dropped the
+  // link's fragment: the forgot-password page is where to get a new link.
+  if (!token) return <Navigate to="/forgot-password" replace />;
   return <ResetForm key={token} token={token} />;
 }
 

@@ -29,6 +29,8 @@ import {
   useSetSettingValue,
 } from "@/hooks/queries/settingValues";
 import type { SettingIdentity } from "@/hooks/queries/settingValues";
+import { libraryTypeLabel } from "@/components/admin/libraries/libraryTypes";
+import { useSortableAccessibility } from "@/hooks/useSortableAccessibility";
 import { useT } from "@/i18n";
 import { SETTING_DEFINITIONS, SETTING_KEYS, type SettingKey } from "@/lib/settingsContract";
 import { settingUnsetLabel } from "@/lib/settingsText";
@@ -65,14 +67,11 @@ import {
   useSensors,
 } from "@dnd-kit/core";
 import type { DragStartEvent, DragEndEvent } from "@dnd-kit/core";
-import {
-  SortableContext,
-  verticalListSortingStrategy,
-  useSortable,
-  arrayMove,
-} from "@dnd-kit/sortable";
+import { SortableContext, verticalListSortingStrategy, arrayMove } from "@dnd-kit/sortable";
 import { sortableKeyboardCoordinates } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
+import { useMotionSafeOverlay, useMotionSafeSortable } from "@/hooks/useSortableList";
+import { useMotionScrollBehavior } from "@/hooks/usePrefersReducedMotion";
 
 function sortLibrariesByOrder(libraries: UserLibrary[], ids: number[]) {
   const selected = new Set(ids);
@@ -221,9 +220,10 @@ function LanguageField({
 
 function SortableLibraryCard({ id, children }: { id: number; children: React.ReactNode }) {
   const t = useT();
-  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
-    id,
-  });
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
+    useMotionSafeSortable({
+      id,
+    });
 
   const style: React.CSSProperties = {
     transform: CSS.Transform.toString(transform),
@@ -371,7 +371,7 @@ function LibraryCard({
           <div className="flex flex-wrap items-center gap-2">
             <span className="truncate text-sm font-medium">{library.name}</span>
             <Badge variant="outline" className="shrink-0 capitalize">
-              {library.type}
+              {libraryTypeLabel(library.type)}
             </Badge>
             {hasOverride && (
               <Badge variant="secondary" className="shrink-0">
@@ -526,10 +526,15 @@ export default function LibrarySettings() {
   const [disabledLibraryIDs, setDisabledLibraryIDs] = useState<number[]>([]);
   const [orderedLibraries, setOrderedLibraries] = useState<UserLibrary[]>([]);
   const [activeId, setActiveId] = useState<number | null>(null);
+  const scrollBehavior = useMotionScrollBehavior();
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
-    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+    useSensor(KeyboardSensor, {
+      coordinateGetter: sortableKeyboardCoordinates,
+      scrollBehavior,
+    }),
   );
+  const overlayMotion = useMotionSafeOverlay();
 
   useEffect(() => {
     // Keep the editable local order in sync with the latest saved setting.
@@ -624,6 +629,12 @@ export default function LibrarySettings() {
   }
 
   const activeLibrary = activeId != null ? orderedLibraries.find((l) => l.id === activeId) : null;
+  const sortableAccessibility = useSortableAccessibility(
+    (orderedLibraries.length > 0 ? orderedLibraries : (libraries ?? [])).map((library) => ({
+      id: library.id,
+      name: library.name,
+    })),
+  );
 
   if (librariesLoading || libraryPrefsLoading || profileLoading || playbackPrefsLoading) {
     return <div className="text-muted-foreground pt-4">{t("web.settings.library.loading")}</div>;
@@ -708,6 +719,7 @@ export default function LibrarySettings() {
       <DndContext
         sensors={sensors}
         collisionDetection={closestCenter}
+        accessibility={sortableAccessibility}
         onDragStart={handleDragStart}
         onDragEnd={handleDragEnd}
         onDragCancel={handleDragCancel}
@@ -733,13 +745,13 @@ export default function LibrarySettings() {
             })}
           </div>
         </SortableContext>
-        <DragOverlay>
+        <DragOverlay {...overlayMotion}>
           {activeLibrary ? (
             <div className="surface-panel flex items-center gap-3 rounded-[1.5rem] px-4 py-4 shadow-lg">
               <GripVertical className="text-muted-foreground h-4 w-4" />
               <span className="text-sm font-medium">{activeLibrary.name}</span>
               <Badge variant="outline" className="capitalize">
-                {activeLibrary.type}
+                {libraryTypeLabel(activeLibrary.type)}
               </Badge>
             </div>
           ) : null}

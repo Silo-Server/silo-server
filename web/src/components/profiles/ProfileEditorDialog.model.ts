@@ -26,6 +26,8 @@ export interface ProfileEditorDialogProps {
   advisoryAgeSupported?: boolean;
   /** The server accepts `require_advisory_age`; hides the switch when false. */
   requireAdvisoryAgeSupported?: boolean;
+  /** The server accepts `requests_allowed`; hides the switch when false. */
+  requestsAllowedSupported?: boolean;
   /**
    * Creates the profile and uploads its avatar as this profile instead of the
    * active one, as Who's watching does for the verified primary profile.
@@ -37,6 +39,8 @@ export interface ProfileEditorDialogProps {
    */
   save?: ProfileEditorSave;
   onOpenChange: (open: boolean) => void;
+  /** Extra classes for the dialog's content, e.g. a page's touch-target sizing. */
+  className?: string;
   onSaveSuccess?: (
     profile: Profile,
     context: {

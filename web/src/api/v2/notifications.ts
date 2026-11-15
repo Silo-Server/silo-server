@@ -1,3 +1,4 @@
+import { t } from "@/i18n";
 import {
   captureAdminAuthority,
   adminAuthorityScope,
@@ -17,7 +18,7 @@ function notification(
 ): AppNotification {
   const libraryID = row.library_id === undefined ? undefined : Number(row.library_id);
   if (libraryID !== undefined && (!Number.isSafeInteger(libraryID) || libraryID <= 0))
-    throw new Error("Unsupported library ID in notification.");
+    throw new Error(t("web.common.errors.notificationLibraryIdUnsupported"));
   const reasonFlags: NotificationReasonFlags = {};
   const value = row.reason_flags;
   if (value && typeof value === "object") {
@@ -60,7 +61,7 @@ export async function listNotifications(
     typeof body.read_cutoff !== "string" ||
     !body.read_cutoff
   )
-    throw new Error("Invalid notification page. Reload notifications.");
+    throw new Error(t("web.common.errors.notificationPageInvalid"));
   return {
     notifications: body.items.map(notification),
     next_cursor: body.page.has_more ? body.page.next_cursor : undefined,
@@ -105,7 +106,7 @@ export async function listNotificationSeries(
         !body.page.next_cursor ||
         body.page.next_cursor === cursor))
   )
-    throw new Error("Invalid series page. Reload notifications.");
+    throw new Error(t("web.common.errors.notificationSeriesPageInvalid"));
   return {
     series: body.items,
     next_cursor: body.page.has_more ? body.page.next_cursor : undefined,
@@ -180,7 +181,7 @@ export async function markAllNotificationsRead(
   profileContext = captureNotificationAuthority(),
 ) {
   requireNotificationAuthority(profileContext);
-  if (!through) throw new Error("Reload notifications before marking them read.");
+  if (!through) throw new Error(t("web.common.errors.notificationsReloadBeforeMarkingRead"));
   await v2("POST /api/v2/notifications/read-all", {
     body: { through },
     profileContext,

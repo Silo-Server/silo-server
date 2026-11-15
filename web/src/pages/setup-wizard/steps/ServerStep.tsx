@@ -57,6 +57,7 @@ export function ServerStep() {
         <SettingField
           label={t("web.setup.server.nameLabel")}
           description={t("web.setup.server.nameDescription")}
+          // eslint-disable-next-line formatjs/no-literal-string-in-jsx -- an example value, not text
           hint="Silo"
           value={serverName}
           onChange={(v) => form.setValue("branding.server_name", v)}
@@ -64,6 +65,7 @@ export function ServerStep() {
         <SettingField
           label={t("web.setup.server.publicUrlLabel")}
           description={t("web.setup.server.publicUrlDescription")}
+          // eslint-disable-next-line formatjs/no-literal-string-in-jsx -- an example value, not text
           hint="https://silo.example.com"
           value={form.getValue("server.public_url")}
           onChange={(v) => form.setValue("server.public_url", v)}
@@ -81,6 +83,7 @@ export function ServerStep() {
                 ? t("web.setup.server.trustedProxiesManaged")
                 : t("web.setup.server.trustedProxiesDescription")
             }
+            // eslint-disable-next-line formatjs/no-literal-string-in-jsx -- an example value, not text
             hint="172.16.0.0/12, 203.0.113.7/32"
             value={form.getValue("clientip.trusted_proxies")}
             onChange={(v) => form.setValue("clientip.trusted_proxies", v)}

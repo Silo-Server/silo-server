@@ -1,10 +1,11 @@
-import type { ReactNode } from "react";
+import { useId, type ReactNode } from "react";
 import { useImageLoaded } from "@/hooks/useImageLoaded";
 import { Pin, PinOff, User } from "lucide-react";
 import type { LibraryTabCollection } from "@/api/types";
 import ViewTransitionLink from "@/components/ViewTransitionLink";
 import { useToggleSidebarPin } from "@/hooks/queries/sidebarPins";
 import { useT } from "@/i18n";
+import { formatLocale } from "@/lib/appLocale";
 import {
   buildLibraryCollectionCatalogHref,
   buildUserCollectionCatalogHref,
@@ -88,7 +89,7 @@ export function CollectionPosterCard({
           )}
           {meta === undefined ? (
             <span className="bg-background/60 text-foreground absolute end-2 bottom-2 rounded-md px-2 py-0.5 text-[0.6875rem] font-bold backdrop-blur-sm">
-              {collection.item_count}
+              {collection.item_count.toLocaleString(formatLocale())}
             </span>
           ) : null}
         </div>
@@ -118,31 +119,38 @@ function SidebarPinButton({
 }) {
   const t = useT();
   const { togglePin, isPinned, canToggle } = useToggleSidebarPin();
+  const titleId = useId();
   if (!canToggle) return null;
   const pinned = isPinned(libraryId, "collection", collection.id);
+  const pinLabel = pinned
+    ? t("web.collections.posterCard.unpinFromSidebar")
+    : t("web.collections.posterCard.pinToSidebar");
   return (
-    <button
-      type="button"
-      onClick={(e) => {
-        e.stopPropagation();
-        togglePin(libraryId, {
-          type: "collection",
-          id: collection.id,
-          label: collection.title,
-        });
-      }}
-      className={`absolute start-2 top-2 rounded-lg p-1.5 backdrop-blur-sm transition-all ${
-        pinned
-          ? "bg-primary/90 text-primary-foreground"
-          : "bg-background/50 text-foreground opacity-0 group-hover/card:opacity-100"
-      }`}
-      title={
-        pinned
-          ? t("web.collections.posterCard.unpinFromSidebar")
-          : t("web.collections.posterCard.pinToSidebar")
-      }
-    >
-      {pinned ? <PinOff className="h-3.5 w-3.5" /> : <Pin className="h-3.5 w-3.5" />}
-    </button>
+    <>
+      <span id={titleId} hidden>
+        {collection.title}
+      </span>
+      <button
+        type="button"
+        onClick={(e) => {
+          e.stopPropagation();
+          togglePin(libraryId, {
+            type: "collection",
+            id: collection.id,
+            label: collection.title,
+          });
+        }}
+        className={`absolute start-2 top-2 rounded-lg p-1.5 backdrop-blur-sm transition-all ${
+          pinned
+            ? "bg-primary/90 text-primary-foreground"
+            : "bg-background/50 text-foreground opacity-0 group-hover/card:opacity-100"
+        }`}
+        title={pinLabel}
+        aria-label={pinLabel}
+        aria-describedby={titleId}
+      >
+        {pinned ? <PinOff className="h-3.5 w-3.5" /> : <Pin className="h-3.5 w-3.5" />}
+      </button>
+    </>
   );
 }

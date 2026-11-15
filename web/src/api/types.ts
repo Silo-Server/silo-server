@@ -173,11 +173,18 @@ export interface CompatConnectInfo {
   };
   account: {
     /**
-     * False when the account's local password can't sign in: SSO/plugin-provisioned
-     * accounts, and accounts that aren't break-glass while the server turns
-     * password sign-in off.
+     * False when the account's own Silo password can't sign in: SSO/plugin-provisioned
+     * accounts, accounts that aren't break-glass while the server turns
+     * password sign-in off, and accounts a network provider refuses.
      */
     password_login_available: boolean;
+    /**
+     * True when a password sign-in without a provider (a Jellyfin app's) goes
+     * to the server's directory (LDAP) for this account. Absent on older servers.
+     */
+    directory_login_available?: boolean;
+    /** The account's username at that directory, when one is linked. */
+    directory_username?: string;
   };
 }
 
@@ -245,6 +252,11 @@ export interface Profile {
    * max_advisory_age are shown. No effect without a limit.
    */
   require_advisory_age?: boolean;
+  /**
+   * Whether the profile may use requests and request discovery. Absent on a
+   * server that predates the switch, which allows every profile.
+   */
+  requests_allowed?: boolean;
   quality_preference: string;
   language: string;
   preferred_metadata_language?: string;
@@ -760,6 +772,7 @@ export interface Season {
   poster_url: string;
   poster_thumbhash: string;
   user_data?: SeasonUserData;
+  availability?: { have: number; total: number } | null;
   /** Localized fields whose text was machine-translated by AI. */
   machine_translated_fields?: string[];
 }
@@ -876,6 +889,7 @@ export interface BrowseItem {
   release_date?: string | null;
   last_air_date?: string | null;
   overlay_summary?: OverlaySummary | null;
+  availability?: { have: number; total: number } | null;
   sort_metrics?: BrowseItemSortMetrics | null;
   user_state?: MediaItemUserState;
   // Manga-only count chips. The host populates these only for type='manga'
@@ -1346,6 +1360,9 @@ export interface WatchDetail {
   effective_version_hdr?: boolean;
   effective_version_codec_video?: string;
   effective_version_edition_key?: string;
+  /** The item's backdrop (an episode's series backdrop), for loading screens. */
+  backdrop_url?: string;
+  backdrop_thumbhash?: string;
 }
 
 // Episodes
@@ -2029,7 +2046,7 @@ export interface RequestSeasonProgress {
   episodes_available: number;
 }
 
-export interface RequestDiscoverySection extends RequestMediaPage {
+export interface RequestDiscoverySection extends RequestMediaPage, SectionTitleKey {
   key: string;
   title: string;
   /**
@@ -2041,7 +2058,7 @@ export interface RequestDiscoverySection extends RequestMediaPage {
 }
 
 /** One row of the Discover layout, in page order. */
-export interface RequestDiscoverRowRef {
+export interface RequestDiscoverRowRef extends SectionTitleKey {
   key: string;
   /**
    * tmdb_chart, tmdb_discover, tmdb_list or mdblist for a row of titles;
@@ -2854,6 +2871,9 @@ export interface AdminSession {
   /** Server-computed activity bucket: direct | remux | direct_stream | transcode.
    * Absent when the per-stream decisions are unknown. */
   effective_play_method?: string;
+  /** Why the route converts or repackages the file, video causes first.
+   * Absent for direct play, older servers, and Jellyfin-protocol sessions. */
+  adaptation_reasons?: string[];
   /** Server-side identification of Jellyfin-ecosystem clients (the JF pill). */
   is_jellyfin_client?: boolean;
   /** Resolved playback workload and route. Node IDs/names are omitted when
@@ -4092,6 +4112,8 @@ export interface PluginUpdateFailure {
   failed_at: string;
 }
 
+export type PluginSignature = V2Components["schemas"]["AdminPluginSignature"];
+
 export interface PluginInstallation {
   id: number;
   repository_id?: number | null;
@@ -4118,6 +4140,8 @@ export interface PluginInstallation {
   updates_paused: boolean;
   /** The last automatic update that failed; absent when the last check did not fail. */
   update_failure?: PluginUpdateFailure | null;
+  /** The release signature check of the installed package. */
+  signature: PluginSignature;
   legacy_metadata_import_types?: string[];
   created_at?: string;
   updated_at?: string;
@@ -4584,6 +4608,7 @@ export interface SectionItem {
   backdrop_thumbhash: string;
   logo_url: string;
   overlay_summary?: OverlaySummary | null;
+  availability?: { have: number; total: number } | null;
   badges?: string[];
   user_state?: MediaItemUserState;
   upcoming_event?: SectionItemUpcomingEvent | null;
@@ -4614,6 +4639,11 @@ export interface ResolvedSection extends SectionTitleKey {
   is_custom: boolean;
   customized: boolean;
   items: SectionItem[];
+  /**
+   * The row was read with an item_limit and holds more cards than `items`
+   * (see homeRowLimit). Absent when false.
+   */
+  has_more?: boolean;
 }
 
 export interface SectionsResponse {
@@ -5168,6 +5198,18 @@ export interface AdminTimeseriesPoint {
   // `egress_kbps`; the remainder is egress no source accounts for. v2 only
   // (the `egress_by_source` dashboard capability).
   egress_by_source?: Record<string, number>;
+  // `streams` split by play method, read from the bucket's peak-streams minute
+  // so the parts add up to no more than `streams` and can be stacked. The
+  // point's own `direct`/`remux`/`transcode` are each their own peak and may
+  // come from different minutes. Sessions with any other play method are the
+  // remainder. v2 only (the `streams_by_method` dashboard capability).
+  streams_by_method?: AdminTimeseriesStreamsByMethod;
+}
+
+export interface AdminTimeseriesStreamsByMethod {
+  direct: number;
+  remux: number;
+  transcode: number;
 }
 
 // One key of `AdminTimeseriesPoint.egress_by_source`: every API process

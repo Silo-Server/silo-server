@@ -29,10 +29,13 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"golang.org/x/sync/singleflight"
+	"golang.org/x/text/language"
+	"golang.org/x/text/language/display"
 
 	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/config"
+	"github.com/Silo-Server/silo-server/internal/lang"
 	"github.com/Silo-Server/silo-server/internal/logredact"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/netaccess"
@@ -364,6 +367,10 @@ type PlaybackHandler struct {
 	tm            *playback.TranscodeManager
 	SubtitleRepo  subtitles.Repository // optional; enables downloaded subtitles
 	SubtitleBlobs subtitles.BlobStore  // optional; backs downloaded subtitle reads
+	// AudioPreferences and SubtitlePreferences save the tracks Jellyfin
+	// clients report as the series' remembered tracks; nil saves none.
+	AudioPreferences    AudioPreferenceWriter
+	SubtitlePreferences SubtitlePreferenceWriter
 	// ExternalTimings finds sidecar timing corrections; nil serves sidecars
 	// as they are on disk.
 	ExternalTimings subtitles.ExternalTimingLookup
@@ -407,6 +414,9 @@ type PlaybackHandler struct {
 	// compatMoves single-flights moving a transcode off a node that stopped
 	// answering, so every request that finds the node dead waits on one move.
 	compatMoves singleflight.Group
+	// ratings decides which external ratings the /Sessions NowPlayingItem
+	// carries; nil shows only IMDb and TMDB.
+	ratings *shownRatings
 }
 
 func (h *PlaybackHandler) serverBitrateCap(ctx context.Context, session *Session) (int, error) {
@@ -1321,23 +1331,63 @@ func NewPlaybackHandler(
 		// is still the crashed one. We must NOT stop the upstream session before this
 		// check — if a successor reconstructed under the same id between ffmpeg's exit
 		// and here, an early StopSession would orphan its ffmpeg (live transcode, no
-		// session). Only stop the upstream session when the compare-and-delete matched
-		// the dead transcode. The recipe stays in the compat store either way so a
-		// resume reconstructs.
-		if h.sessionMgr != nil && h.tm.CloseTranscodeSessionIf(sessionID, dead, nodeURL) {
-			if h.playbackStore != nil {
-				if playSession, ok := h.playbackStore.FindByUpstreamSessionID(sessionID); ok {
-					h.dispatchCompatScrobble(ctx, compatScrobblePause, playSession, upstreamSession, nil)
-				}
-			}
-			_ = h.sessionMgr.StopSession(sessionID)
+		// session). The recipe stays in the compat store either way so a resume
+		// reconstructs.
+		if h.sessionMgr == nil || !h.tm.CloseTranscodeSessionIf(sessionID, dead, nodeURL) {
+			return
 		}
+		var playSession *PlaybackSession
+		if h.playbackStore != nil {
+			if found, ok := h.playbackStore.FindByUpstreamSessionID(sessionID); ok {
+				playSession = found
+			}
+		}
+		// With the dead transcode out of the map, a request can already have
+		// rebuilt the play: as a local transcode, which registers under the
+		// lifecycle lock, or on a transcode node, bound as the session's route.
+		// That play keeps its session, which is all that would expire its
+		// transcode. Under the lock, nothing registers between the check and
+		// the stop. A session that has already ended has nothing left to pause
+		// or stop.
+		unlock := h.tm.LockSessionLifecycle(sessionID)
+		defer unlock()
+		if h.tm.GetTranscodeSession(sessionID) != nil {
+			return
+		}
+		if current, err := h.sessionMgr.GetSession(sessionID); err != nil || current == nil || !sameCompatNode(current.TranscodeNodeURL, nodeURL) {
+			return
+		}
+		if playSession != nil {
+			_ = h.dispatchCompatScrobble(ctx, compatScrobblePause, playSession, upstreamSession, nil)
+		}
+		_ = h.sessionMgr.StopSession(sessionID)
 	}
 	if adder, ok := sessionMgr.(sessionExpirationHookAdder); ok {
 		adder.AddExpirationHook(h.handleExpiredSession)
 	}
+	if registrar, ok := sessionMgr.(compatAdminEndRegistrar); ok {
+		registrar.SetCompatAdminEnd(h.endUpstreamSessionAsAdmin)
+	}
 	return h
 }
+
+// compatAdminEndRegistrar and transportStopWatcher are probed for on the
+// session manager at run time, so a manager without them would switch an
+// administrator's end, or the abort of a progressive remux, off without a
+// sign. The assertions below fail the build if the production manager stops
+// providing either.
+type compatAdminEndRegistrar interface {
+	SetCompatAdminEnd(playback.CompatAdminEnd)
+}
+
+type transportStopWatcher interface {
+	WatchTransportStop(sessionID string) (<-chan struct{}, func())
+}
+
+var (
+	_ compatAdminEndRegistrar = (*playback.SessionManager)(nil)
+	_ transportStopWatcher    = (*playback.SessionManager)(nil)
+)
 
 func (h *PlaybackHandler) handleExpiredSession(session *playback.Session) {
 	if h == nil || h.tm == nil || session == nil {
@@ -1345,6 +1395,86 @@ func (h *PlaybackHandler) handleExpiredSession(session *playback.Session) {
 	}
 	sessionCopy := *session
 	go h.tm.CloseTranscodeSession(sessionCopy.ID, sessionCopy.TranscodeNodeURL)
+}
+
+// endUpstreamSessionAsAdmin ends the play attached to an upstream session an
+// administrator stopped or terminated, and reports whether it found one.
+// Stopping the native session does not end a Jellyfin play: the client's next
+// segment, manifest or progress request would rebuild the session from the
+// play's row and adopt the transcode, which runs in this handler's manager.
+// The row is retired first, so those requests answer not found on every
+// server sharing the store, and then the local transcode is closed.
+//
+// Only a play whose stream the server produces is ended this way. A
+// direct-play play keeps its row (adminEndRetiresPlay) and is not reported
+// as found.
+//
+// The native session is left to the administrator path that called this,
+// which stops it and records the play. A request already past its row lookup
+// can still rebuild what this ends, and no later request reaches what it
+// rebuilt. After the session stop, it registers the session and a transcode
+// again, and the idle sweep reaps the session and closes the transcode.
+// Between the close below and the session stop, it restarts the transcode
+// under a session that is then stopped, which no expiry hook reaches; the
+// second close, once the session has stopped, is for that transcode.
+func (h *PlaybackHandler) endUpstreamSessionAsAdmin(ctx context.Context, upstreamSessionID string) bool {
+	if h == nil || h.playbackStore == nil || upstreamSessionID == "" {
+		return false
+	}
+	retired, err := h.playbackStore.RetireUpstreamSession(upstreamSessionID)
+	if err != nil {
+		slog.WarnContext(ctx, "jellycompat could not retire a play an administrator ended; retrying", "component", "jellycompat",
+			"upstream_session_id", upstreamSessionID, "error", err)
+		h.scheduleCompatAdminEndRetry(upstreamSessionID, time.Now().Add(playback.MaxTokenTTL), 1)
+	}
+	if h.tm != nil {
+		h.tm.CloseTranscodeSession(upstreamSessionID, "")
+		if retired {
+			h.closeTranscodeOnceSessionStops(upstreamSessionID)
+		}
+	}
+	return retired
+}
+
+// compatAdminEndStopWait bounds the wait for the administrator path to stop
+// the native session of a play this handler retired. The stop follows the
+// retirement at once; the bound only ends the wait if it never comes.
+const compatAdminEndStopWait = 30 * time.Second
+
+// closeTranscodeOnceSessionStops closes the play's transcode again once its
+// native session has stopped, so a transcode a request started in between is
+// not left without a session to expire it. A session this server does not
+// hold counts as stopped, and closing an absent transcode does nothing.
+func (h *PlaybackHandler) closeTranscodeOnceSessionStops(upstreamSessionID string) {
+	watcher, ok := h.sessionMgr.(transportStopWatcher)
+	if !ok {
+		return
+	}
+	stopped, release := watcher.WatchTransportStop(upstreamSessionID)
+	go func() {
+		defer release()
+		select {
+		case <-stopped:
+		case <-time.After(compatAdminEndStopWait):
+		}
+		h.tm.CloseTranscodeSession(upstreamSessionID, "")
+	}()
+}
+
+// scheduleCompatAdminEndRetry repeats a retirement whose write failed until
+// the store accepts it, as scheduleCompatTerminalHide does for a client's
+// stop, so the other servers do not keep routing the play. It retries by
+// upstream session, not by play: a server that does not hold the play never
+// learned its id. deadline is the default lifetime of a play's row.
+func (h *PlaybackHandler) scheduleCompatAdminEndRetry(upstreamSessionID string, deadline time.Time, attempt int) {
+	time.AfterFunc(compatTerminalRetryDelay(attempt), func() {
+		if !time.Now().Before(deadline) {
+			return
+		}
+		if _, err := h.playbackStore.RetireUpstreamSession(upstreamSessionID); err != nil {
+			h.scheduleCompatAdminEndRetry(upstreamSessionID, deadline, attempt+1)
+		}
+	})
 }
 
 func (h *PlaybackHandler) segmentRetentionSeconds() int {
@@ -1814,6 +1944,19 @@ func (h *PlaybackHandler) startRemoteTranscodeWithToneMapMode(
 	// Jellyfin-compat remote starts are not otherwise waited on. Let the node
 	// wait only when its live auto pipeline can fall back.
 	reqBody.AutoFallbackReady = compatRemoteAutoFallbackEligible(reqBody)
+	// An explicit hardware backend has no pipeline, but the node's decoder can
+	// still reject the source, and the node moves to CPU decoding only for a
+	// start it waits on.
+	if playback.HardwareDecodeRetryEligible(playback.TranscodeOpts{
+		HWAccel:             reqBody.HWAccel,
+		ToneMapMode:         reqBody.ToneMapMode,
+		TargetCodecVideo:    reqBody.TargetCodecVideo,
+		SourceVideoCodec:    reqBody.SourceVideoCodec,
+		SourceVideoProfile:  reqBody.SourceVideoProfile,
+		SourceVideoBitDepth: reqBody.SourceVideoBitDepth,
+	}) {
+		reqBody.RequireReady = true
+	}
 
 	dispatch := func(request transcodenode.TranscodeStartRequest) (transcodenode.TranscodeStartResponse, int, bool, error) {
 		body, err := json.Marshal(request)
@@ -2083,9 +2226,10 @@ func (h *PlaybackHandler) startRemoteTranscodeWithToneMapMode(
 // the only way a node or central restart can rebuild ffmpeg.
 //
 // The caller owns rolling back its transcode when either durable write fails.
-// A missing upstream
-// session (a start/build race, or no session manager in tests) is logged and the
-// live transcode is left serving — only restart resilience is forfeited.
+// A missing upstream session (no session manager in tests) is logged and the
+// live transcode is left serving — only restart resilience is forfeited. A
+// local start closes its transcode before this when the session went away
+// while it was starting.
 func (h *PlaybackHandler) persistTranscodeRecipe(
 	ctx context.Context,
 	playSessionID, upstreamSessionID string,
@@ -2386,6 +2530,9 @@ func (h *PlaybackHandler) HandlePlaybackInfo(w http.ResponseWriter, r *http.Requ
 			}
 		}
 		downloadedByFile[source.Version.FileID] = downloaded
+		for _, dl := range downloaded {
+			source.DownloadedSubtitleIDs = append(source.DownloadedSubtitleIDs, dl.ID)
+		}
 		source.DefaultSubtitleStreamIndex = compatDetailSubtitleStreamIndex(detail, source.Version, downloaded, savedSubtitleMode, effectiveCompatAudioStreamIndex(source))
 		var requestedSubtitleIndex *int
 		if index, ok := req.SubtitleStreamIndex.get(); ok {
@@ -2492,7 +2639,7 @@ func (h *PlaybackHandler) HandlePlaybackInfo(w http.ResponseWriter, r *http.Requ
 					IsHearingImpaired:      dl.HearingImpaired,
 					IsTextSubtitleStream:   true,
 					SupportsExternalStream: true,
-					DeliveryURL:            subtitleDeliveryURL(routeItemID, source.ID, streamIndex, format, playSessionID),
+					DeliveryURL:            storedSubtitleDeliveryURL(routeItemID, source.ID, streamIndex, format, playSessionID, dl.ID),
 					DeliveryMethod:         "External",
 					Path:                   downloadedSubtitlePath(source.Version, dl),
 					IsExternalURL:          boolPtr(false),
@@ -2625,7 +2772,7 @@ func (h *PlaybackHandler) HandlePlaybackInfo(w http.ResponseWriter, r *http.Requ
 		Name:    firstMediaBrowserAuthorizationValue(r, "Client"),
 		Version: firstMediaBrowserAuthorizationValue(r, "Version"),
 	}.Normalized()
-	h.playbackStore.PutNegotiated(PlaybackSession{
+	if err := h.playbackStore.PutNegotiated(PlaybackSession{
 		ID:                 playSessionID,
 		CompatToken:        session.Token,
 		ClientDeviceID:     clientDeviceID,
@@ -2635,11 +2782,17 @@ func (h *PlaybackHandler) HandlePlaybackInfo(w http.ResponseWriter, r *http.Requ
 		ClientPeer:         requestPeerHost(r),
 		ItemID:             detail.ContentID,
 		RouteItemID:        routeItemID,
+		PreferenceKey:      compatTrackPreferenceKey(detail),
 		NegotiationVariant: compatNegotiationVariant(sources),
 		UserID:             session.PseudoUserID.String(),
 		InitialSeekSeconds: clampSeekSeconds(float64(req.StartTimeTicks)/10_000_000, sources),
 		MediaSources:       sources,
-	})
+	}); err != nil {
+		// Other replicas could not resolve this PlaySessionId; let the client
+		// retry the negotiation instead.
+		writeSessionCheckUnavailable(w)
+		return
+	}
 
 	writeJSON(w, http.StatusOK, playbackInfoResponseDTO{
 		PlaySessionID: playSessionID,
@@ -3133,7 +3286,7 @@ func buildMediaStreamsWithSelection(routeItemID, mediaSourceID string, version c
 			Type:                   "Video",
 			Codec:                  strings.ToLower(track.Codec),
 			TimeBase:               "1/1000",
-			DisplayTitle:           firstNonEmpty(track.Title, track.Codec),
+			DisplayTitle:           videoTrackDisplayTitle(track, version.HDR),
 			Title:                  firstNonEmpty(track.Title, track.Codec),
 			IsDefault:              index == 0,
 			IsExternal:             false,
@@ -3639,6 +3792,113 @@ func compatAudioSpatialFormat(profile string) string {
 	}
 }
 
+// videoTrackDisplayTitle builds the label Jellyfin's MediaStream.DisplayTitle
+// gives a video stream: resolution, upper-cased codec, then the Dolby Vision
+// profile or the video range ("4K HEVC Dolby Vision Profile 8.1 (HDR10)",
+// "1080p H264 SDR"). Silo also names HDR10+, which Jellyfin reports as "HDR".
+// The track title is left out: when the file has none, the scanner stores
+// ffprobe's codec long name there, which would only repeat the codec.
+func videoTrackDisplayTitle(track models.VideoTrack, versionHDR bool) string {
+	parts := make([]string, 0, 3)
+	if resolution := compatVideoResolutionLabel(track.Width, track.Height, track.Interlaced); resolution != "" {
+		parts = append(parts, resolution)
+	}
+	if codec := strings.TrimSpace(track.Codec); codec != "" {
+		parts = append(parts, strings.ToUpper(codec))
+	}
+	rangeType := compatVideoRangeType(track, versionHDR)
+	hdr10Plus := strings.HasSuffix(rangeType, compatRangeHDR10Plus)
+	dolbyVision := ""
+	if strings.HasPrefix(rangeType, compatRangeDOVI) {
+		// The range type has no HDR10+ form for profiles other than 7 and 8,
+		// so read the track's own flag as well.
+		dolbyVision = compatDolbyVisionTitle(track, hdr10Plus || track.HDR10Plus)
+	}
+	switch {
+	case dolbyVision != "":
+		parts = append(parts, dolbyVision)
+	case hdr10Plus:
+		parts = append(parts, "HDR10+")
+	default:
+		if videoRange := compatVideoRange(track, versionHDR); videoRange != compatRangeUnknown {
+			parts = append(parts, videoRange)
+		}
+	}
+	return strings.Join(parts, " ")
+}
+
+// compatVideoResolutionLabel follows Jellyfin's MediaStream.GetResolutionText:
+// each label covers frames up to its 16:9 size, with room for ultrawide and
+// 4:3 frames, so 2560x1080 is 1080p and 3840x1600 is 4K.
+func compatVideoResolutionLabel(width, height int, interlaced bool) string {
+	if width <= 0 || height <= 0 {
+		return ""
+	}
+	scan := "p"
+	if interlaced {
+		scan = "i"
+	}
+	for _, step := range []struct {
+		maxWidth, maxHeight int
+		lines               string
+	}{
+		{256, 144, "144"},
+		{426, 240, "240"},
+		{640, 360, "360"},
+		{682, 384, "384"},
+		{720, 404, "404"},
+		{854, 480, "480"},
+		{960, 544, "540"},
+		{1024, 576, "576"},
+		{1280, 962, "720"},
+		{2560, 1440, "1080"},
+	} {
+		if width <= step.maxWidth && height <= step.maxHeight {
+			return step.lines + scan
+		}
+	}
+	switch {
+	case width <= 4096 && height <= 3072:
+		return "4K"
+	case width <= 8192 && height <= 6144:
+		return "8K"
+	default:
+		return ""
+	}
+}
+
+// compatDolbyVisionTitle follows Jellyfin's MediaStream.VideoDoViTitle
+// ("Dolby Vision Profile 8.1 (HDR10)"), naming an HDR10+ base layer as
+// "(HDR10+)". A track with no recorded profile, which older probes and seeded
+// rows name Dolby Vision only through the range type, is "Dolby Vision". It
+// is empty for profiles Jellyfin does not label.
+func compatDolbyVisionTitle(track models.VideoTrack, hdr10Plus bool) string {
+	title := "Dolby Vision"
+	switch profile := compatDolbyVisionProfile(track); profile {
+	case 0:
+	case 4, 5, 7, 8, 9, 10:
+		title += " Profile " + strconv.Itoa(profile)
+		if track.DVBLCompatID > 0 {
+			title += "." + strconv.Itoa(track.DVBLCompatID)
+		}
+	default:
+		return ""
+	}
+	if hdr10Plus {
+		return title + " (HDR10+)"
+	}
+	switch track.DVBLCompatID {
+	case 1, 6: // 6 is Blu-ray, which in practice is HDR10.
+		return title + " (HDR10)"
+	case 2:
+		return title + " (SDR)"
+	case 4:
+		return title + " (HLG)"
+	default:
+		return title
+	}
+}
+
 func audioTrackDisplayTitle(track models.AudioTrack) string {
 	lang := compatLanguageName(track.Language)
 	// Jellyfin prefers the ffprobe profile over the codec name in audio display
@@ -3782,10 +4042,57 @@ func compatLanguageName(code string) string {
 	if name, ok := compatLanguageNames[normalized]; ok {
 		return name
 	}
+	if name := compatRegionalLanguageName(trimmed); name != "" {
+		return name
+	}
 	if len(normalized) > 3 {
 		return titleCaseWords(trimmed)
 	}
 	return strings.ToUpper(normalized)
+}
+
+// compatRegionalLanguageName names a tag with a script or region the way the
+// web app does, using CLDR: "Brazilian Portuguese", "Traditional Chinese",
+// "Portuguese (Angola)". Bare, undefined, private-use and malformed tags
+// return "", and so do tags with any other subtag: CLDR names drop variants
+// and extensions, so "ca-ES-valencia" and "ca-ES" would share a label.
+func compatRegionalLanguageName(code string) string {
+	canonical := lang.CanonicalTag(code)
+	if !strings.Contains(canonical, "-") || lang.PrimaryLanguage(canonical) == "" {
+		return ""
+	}
+	tag, err := language.Parse(canonical)
+	// CanonicalTag keeps a three-letter second subtag as written, but Parse
+	// reads it as an extended language and names that one instead: "es-lat"
+	// would become "Latin" and "en-sdh" "Southern Kurdish".
+	if err != nil || tag.String() != canonical || len(tag.Variants()) > 0 || len(tag.Extensions()) > 0 {
+		return ""
+	}
+	base, _ := tag.Base()
+	script, scriptConfidence := tag.Script()
+	region, regionConfidence := tag.Region()
+	scriptName, regionName := "", ""
+	if scriptConfidence == language.Exact {
+		scriptName = display.English.Scripts().Name(script)
+	}
+	if regionConfidence == language.Exact {
+		regionName = display.English.Regions().Name(region)
+	}
+	// A subtag CLDR can't name would vanish from the label, so "ur-Aran-PK"
+	// would read the same as "ur-PK" and "sr-Latn-CS" the same as "sr-Latn".
+	if (scriptConfidence == language.Exact && scriptName == "") || (regionConfidence == language.Exact && regionName == "") {
+		return ""
+	}
+	if base.String() == "sr" && script.String() == "Latn" && scriptConfidence == language.Exact {
+		// CLDR names sr-Latn through its "sh" alias, "Serbo-Croatian",
+		// which hides both the language and the script.
+		qualifiers := []string{scriptName}
+		if regionName != "" {
+			qualifiers = append(qualifiers, regionName)
+		}
+		return display.English.Languages().Name(base) + " (" + strings.Join(qualifiers, ", ") + ")"
+	}
+	return display.English.Tags().Name(tag)
 }
 
 func subtitleFormatLabel(codec string) string {
@@ -3977,6 +4284,17 @@ func subtitleDeliveryURL(routeItemID, mediaSourceID string, streamIndex int, for
 		return base
 	}
 	return base + "?" + url.Values{"PlaySessionId": {playSessionID}}.Encode()
+}
+
+// storedSubtitleDeliveryURL is subtitleDeliveryURL for a stored subtitle. It
+// also names the subtitle by ID, because its stream index is its position among
+// the file's stored subtitles and moves when an earlier one is deleted.
+func storedSubtitleDeliveryURL(routeItemID, mediaSourceID string, streamIndex int, format, playSessionID string, storedID int) string {
+	query := url.Values{storedSubtitleIDQuery: {strconv.Itoa(storedID)}}
+	if playSessionID != "" {
+		query.Set("PlaySessionId", playSessionID)
+	}
+	return fmt.Sprintf("/Videos/%s/%s/Subtitles/%d/stream.%s?%s", routeItemID, mediaSourceID, streamIndex, format, query.Encode())
 }
 
 func subtitlePath(track catalog.VersionSubtitleTrack, routeItemID, mediaSourceID string, streamIndex int, format string) string {

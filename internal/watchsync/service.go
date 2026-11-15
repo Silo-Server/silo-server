@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/historyimport"
@@ -27,6 +28,7 @@ type Service struct {
 	signals        SignalsChangedNotifier
 	dropped        droppedStore
 	profileAccess  ProfileAccessFunc
+	titles         atomic.Pointer[watchlistTitlesRef]
 	locks          sync.Map
 	scrobbleQueues sync.Map
 }
@@ -592,7 +594,10 @@ func (s *Service) PollDeviceAuth(
 			updated.VerificationURL = session.VerificationURL
 			updated.CompletedAt = session.CompletedAt
 			if _, persistErr := s.repo.UpsertAuthSession(ctx, updated); persistErr != nil {
-				return Connection{}, errors.Join(err, fmt.Errorf("persist pending auth session: %w", persistErr))
+				// A storage failure, not a pending answer: the provider's
+				// updated challenge was lost, so the poll must not read as
+				// "approve the code and try again".
+				return Connection{}, fmt.Errorf("persist pending auth session: %w", persistErr)
 			}
 		}
 		return Connection{}, err
@@ -957,11 +962,13 @@ func (s *Service) executeSyncRun(ctx context.Context, conn Connection, run SyncR
 			break
 		}
 		caps := provider.Capabilities()
+		importFailed := false
 		if b.importEnabled(conn) && b.capImport(caps) {
 			result, err := s.importList(ctx, conn, cfg, provider, b)
 			b.setImportCounts(&run, result.Found, result.Imported)
 			signalsChanged = signalsChanged || result.changedLocalList()
 			run.Warning = appendWarning(run.Warning, result.Warnings)
+			importFailed = err != nil
 			afterFlow(string(b.kind)+" import", err)
 		}
 		if !halted() && b.exportEnabled(conn) && b.capExport(caps) {
@@ -970,7 +977,10 @@ func (s *Service) executeSyncRun(ctx context.Context, conn Connection, run SyncR
 			run.Warning = appendWarning(run.Warning, result.Warnings)
 			afterFlow(string(b.kind)+" export", err)
 		}
-		if !halted() && b.removalsEnabled(conn) && b.capRemove(caps) {
+		// The import decides which pending removals a newer provider listing
+		// supersedes. One that failed partway may not have reached that
+		// listing, so the removals wait for a run whose import completes.
+		if !halted() && !importFailed && b.removalsEnabled(conn) && b.capRemove(caps) {
 			removed, err := s.removePendingListItems(ctx, conn, cfg, provider, b)
 			b.setRemovalCount(&run, removed)
 			if err != nil {

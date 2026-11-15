@@ -5,6 +5,9 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
+	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -54,6 +57,17 @@ func (bookQueryTracer) TraceQueryEnd(ctx context.Context, _ *pgx.Conn, _ pgx.Tra
 		counts.literaryElapsed += elapsed
 	}
 }
+
+// canonicalTestPath is path as the scanner resolves a book root.
+func canonicalTestPath(t testing.TB, path string) string {
+	t.Helper()
+	physical, err := canonicalWalkPath(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return physical
+}
+
 func newBookScanTestPool(t testing.TB) *pgxpool.Pool {
 	t.Helper()
 	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
@@ -167,7 +181,7 @@ func TestUnchangedBooksDoNotQueryLiteraryWorks(t *testing.T) {
 			if kind == "ebooks" {
 				err = s.reconcileEbookFile(ctx, folder, paths[0], &skipped, newEbookGroupLocks())
 			} else {
-				err = s.reconcileAudiobookFolder(ctx, folder, paths[0], nil, &skipped)
+				err = s.reconcileAudiobookFolder(ctx, folder, paths[0], nil, nil, time.Time{}, &skipped, nil)
 			}
 			if err != nil {
 				t.Fatal(err)
@@ -243,6 +257,8 @@ func TestEbookSkipPreloadPreservesEligibility(t *testing.T) {
 		{"group version changed", "UPDATE media_files SET group_key_version=0 WHERE media_folder_id=$1", false},
 		{"unmatched", "UPDATE media_items SET status=' UnMaTcHeD ' WHERE content_id IN (SELECT content_id FROM media_item_libraries WHERE media_folder_id=$1)", false},
 		{"no content", "UPDATE media_files SET content_id=NULL WHERE media_folder_id=$1", false},
+		{"no library membership", "DELETE FROM media_item_libraries WHERE media_folder_id=$1", false},
+		{"item deleted", "DELETE FROM media_items WHERE content_id IN (SELECT content_id FROM media_files WHERE media_folder_id=$1)", false},
 		{"different file path", "UPDATE media_files SET file_path=file_path||'.other' WHERE media_folder_id=$1", false},
 		{"missing file", "UPDATE media_files SET missing_since=now() WHERE media_folder_id=$1", false},
 		{"no file row", "DELETE FROM media_files WHERE media_folder_id=$1", false},
@@ -399,7 +415,7 @@ func TestAudiobookRuntimeTakesLongestCopyPostgres(t *testing.T) {
 				t.Fatal(err)
 			}
 			defer func() { _ = tx.Rollback(context.Background()) }()
-			if err := s.upsertAudiobookPresentationTx(ctx, tx, folder, id, dir, book); err != nil {
+			if err := s.upsertAudiobookPresentationTx(ctx, tx, folder, id, dir, canonicalTestPath(t, dir), book, time.Time{}); err != nil {
 				t.Fatal(err)
 			}
 			if err := tx.Commit(ctx); err != nil {
@@ -561,7 +577,7 @@ VALUES ($1,$2,$3,$4,$4,4,$5)`, id, folder.ID, path, root, seconds); err != nil {
 		t.Fatal(err)
 	}
 	defer func() { _ = first.Rollback(context.Background()) }()
-	if err := s.upsertAudiobookPresentationTx(ctx, first, folder, id, roots[0], books[0]); err != nil {
+	if err := s.upsertAudiobookPresentationTx(ctx, first, folder, id, roots[0], canonicalTestPath(t, roots[0]), books[0], time.Time{}); err != nil {
 		t.Fatal(err)
 	}
 	second, err := pool.Begin(ctx)
@@ -570,8 +586,9 @@ VALUES ($1,$2,$3,$4,$4,4,$5)`, id, folder.ID, path, root, seconds); err != nil {
 	}
 	defer func() { _ = second.Rollback(context.Background()) }()
 	done := make(chan error, 1)
+	secondRoot := canonicalTestPath(t, roots[1])
 	go func() {
-		err := s.upsertAudiobookPresentationTx(ctx, second, folder, id, roots[1], books[1])
+		err := s.upsertAudiobookPresentationTx(ctx, second, folder, id, roots[1], secondRoot, books[1], time.Time{})
 		if err == nil {
 			err = second.Commit(ctx)
 		}
@@ -678,4 +695,334 @@ VALUES ($1,'audiobook','Book','local','{}',600)`, id); err != nil {
 		t.Fatal(err)
 	}
 	assertBookRuntime(t, pool, id, 480)
+}
+
+// A rescan of a retagged book keeps the authors and narrators an admin locked
+// with the crew lock, and replaces them when the lock is off.
+func TestAudiobookRescanKeepsCrewLockedCreditsDB(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		locked string
+		want   []string
+	}{
+		{"crew locked", "{5}", []string{"Stored Author", "Stored Narrator"}},
+		{"unlocked", "{}", []string{"Tagged Author", "Tagged Narrator"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			pool := newBookScanTestPool(t)
+			folder := newBookScanTestFolder(t, pool, "audiobooks")
+			ctx := t.Context()
+			id := fmt.Sprintf("credit-lock-%d", folder.ID)
+			for _, stmt := range []struct {
+				sql  string
+				args []any
+			}{
+				{`INSERT INTO media_items (content_id,type,title,status,genres,locked_fields) VALUES ($1,'audiobook','Book','local','{}'::text[],$2::integer[])`, []any{id, tc.locked}},
+				{`INSERT INTO media_item_libraries (content_id,media_folder_id) VALUES ($1,$2)`, []any{id, folder.ID}},
+			} {
+				if _, err := pool.Exec(ctx, stmt.sql, stmt.args...); err != nil {
+					t.Fatal(err)
+				}
+			}
+			s := NewScanner(NewFileRepository(pool), "ffprobe", nil, 1, false, 0)
+			var stored []models.ItemPerson
+			for i, c := range []struct {
+				name string
+				kind models.PersonKind
+			}{{"Stored Author", models.PersonKindAuthor}, {"Stored Narrator", models.PersonKindNarrator}} {
+				personID, err := s.personRepo.FindOrCreate(ctx, models.Person{Name: c.name})
+				if err != nil {
+					t.Fatal(err)
+				}
+				stored = append(stored, models.ItemPerson{Person: models.Person{ID: personID}, Kind: c.kind, SortOrder: i})
+			}
+			if err := s.itemRepo.ReplacePeople(ctx, id, stored); err != nil {
+				t.Fatal(err)
+			}
+
+			if err := s.upsertAudiobookPeople(ctx, id, &parsedAudiobook{Author: "Tagged Author", Narrator: "Tagged Narrator"}); err != nil {
+				t.Fatal(err)
+			}
+			people, err := s.itemRepo.GetPeople(ctx, id)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var got []string
+			for _, p := range people {
+				got = append(got, p.Name)
+			}
+			if !slices.Equal(got, tc.want) {
+				t.Fatalf("credits = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+// A library indexed when each disc folder was a book, and loose files in the
+// library root merged into one book, converges on one book per disc set and
+// one per root file, keeping the content IDs both groupings share: a folder's
+// own book keeps its item and parts, and the next scan skips every book.
+func TestAudiobookRegroupKeepsContentIDsDB(t *testing.T) {
+	pool := newBookScanTestPool(t)
+	files := []string{"Author/Book/Disc 1/01.mp3", "Author/Book/Disc 2/01.mp3", "Author/Loose One.mp3", "Author/Loose Two.mp3", "Author/Proper/01.mp3", "Root A.mp3", "Root B.mp3"}
+	// On a case-sensitive filesystem: two root files whose names differ only
+	// in case were parts 1 and 2 of one item, and only the first may keep it;
+	// a file beside the indexed one that differs only in case is another file;
+	// and a case-only rename keeps its item.
+	caseSensitive := caseSensitiveTempDir(t)
+	if caseSensitive {
+		files = append(files, "Part.mp3", "part.mp3", "Song.mp3", "song.mp3", "track.mp3")
+	}
+	folder, root, path := newAudiobookLibraryWithFiles(t, pool, files...)
+	ctx := t.Context()
+	disc1, disc2, loose, rootLoose := seedEarlierAudiobookGrouping(t, pool, folder.ID, path)
+	mixed := fmt.Sprintf("regroup-mixed-%d", folder.ID)
+	diff, renamed := fmt.Sprintf("regroup-diff-%d", folder.ID), fmt.Sprintf("regroup-renamed-%d", folder.ID)
+	if caseSensitive {
+		seedAudiobookItem(t, pool, folder.ID, path, mixed, ".", "Part.mp3", "part.mp3")
+		seedAudiobookItem(t, pool, folder.ID, path, diff, ".", "Song.mp3")
+		seedAudiobookItem(t, pool, folder.ID, path, renamed, ".", "Track.mp3")
+	}
+
+	s := NewScanner(NewFileRepository(pool), fakeAudiobookFFprobe(t), nil, 1, false, 0)
+	type book struct {
+		id    string
+		files int
+	}
+	snapshot := func() (map[string]book, map[string]string) {
+		t.Helper()
+		if err := s.ScanAudiobookFolder(ctx, folder, true); err != nil {
+			t.Fatal(err)
+		}
+		rows, err := pool.Query(ctx, `SELECT mf.observed_root_path, mf.content_id, count(*), max(mf.probe_updated_at)::text
+			FROM media_files mf JOIN media_item_libraries ml ON ml.content_id = mf.content_id AND ml.media_folder_id = mf.media_folder_id
+			WHERE mf.media_folder_id = $1 AND mf.missing_since IS NULL GROUP BY 1, 2`, folder.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		books, probed := map[string]book{}, map[string]string{}
+		for rows.Next() {
+			var rootPath, id, probedAt string
+			var files int
+			if err := rows.Scan(&rootPath, &id, &files, &probedAt); err != nil {
+				t.Fatal(err)
+			}
+			rel, _ := filepath.Rel(root, rootPath)
+			if _, dup := books[rel]; dup {
+				t.Fatalf("book %s has files in two items", rel)
+			}
+			books[rel], probed[rel] = book{id, files}, probedAt
+		}
+		if err := rows.Err(); err != nil {
+			t.Fatal(err)
+		}
+		return books, probed
+	}
+
+	books, probed := snapshot()
+	wantBooks := 5
+	if caseSensitive {
+		wantBooks = 10
+		upper, lower := books["Part.mp3"], books["part.mp3"]
+		if upper.id != mixed || lower.id == "" || lower.id == mixed {
+			t.Errorf("Part.mp3 = %+v and part.mp3 = %+v, want only Part.mp3 to keep %s", upper, lower, mixed)
+		}
+		if song, other := books["Song.mp3"], books["song.mp3"]; song.id != diff || other.id == "" || other.id == diff {
+			t.Errorf("Song.mp3 = %+v and song.mp3 = %+v, want the second file to get its own item", song, other)
+		}
+		if got := books["track.mp3"]; got.id != renamed {
+			t.Errorf("case-only rename = %+v, want it to keep %s", got, renamed)
+		}
+	}
+	if len(books) != wantBooks {
+		t.Fatalf("books = %v, want Author/Book, Author, Author/Proper, and one book per root file", books)
+	}
+	if got := books["Author/Book"]; got != (book{disc1, 2}) {
+		t.Errorf("disc book = %+v, want disc 1's item with both discs", got)
+	}
+	if got := books["Author"]; got != (book{loose, 2}) {
+		t.Errorf("author folder book = %+v, want its item %s with both loose files", got, loose)
+	}
+	if got := books["Root A.mp3"]; got != (book{rootLoose, 1}) {
+		t.Errorf("first root file = %+v, want the merged item %s", got, rootLoose)
+	}
+	second, proper := books["Root B.mp3"], books["Author/Proper"]
+	if second.id == "" || second.id == rootLoose || proper.id == "" || proper.id == second.id {
+		t.Errorf("the second root file and the sibling book need items of their own: %v", books)
+	}
+	var disc2Libraries int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM media_item_libraries WHERE content_id = $1`, disc2).Scan(&disc2Libraries); err != nil {
+		t.Fatal(err)
+	}
+	if disc2Libraries != 0 {
+		t.Errorf("disc 2's emptied item is still in the library")
+	}
+
+	again, probedAgain := snapshot()
+	if !reflect.DeepEqual(again, books) || !reflect.DeepEqual(probedAgain, probed) {
+		t.Errorf("rescan changed or re-probed books:\n first %v %v\nsecond %v %v", books, probed, again, probedAgain)
+	}
+}
+
+// seedEarlierAudiobookGrouping stores the earlier grouping: one item per disc,
+// both loose author files as parts of one item rooted at the author folder,
+// and both loose root files as parts of one item rooted at the library root.
+func seedEarlierAudiobookGrouping(t *testing.T, pool *pgxpool.Pool, folderID int, path func(string) string) (disc1, disc2, loose, rootLoose string) {
+	t.Helper()
+	disc1, disc2 = fmt.Sprintf("regroup-d1-%d", folderID), fmt.Sprintf("regroup-d2-%d", folderID)
+	loose, rootLoose = fmt.Sprintf("regroup-loose-%d", folderID), fmt.Sprintf("regroup-root-%d", folderID)
+	seedAudiobookItem(t, pool, folderID, path, disc1, "Author/Book/Disc 1", "Author/Book/Disc 1/01.mp3")
+	seedAudiobookItem(t, pool, folderID, path, disc2, "Author/Book/Disc 2", "Author/Book/Disc 2/01.mp3")
+	seedAudiobookItem(t, pool, folderID, path, loose, "Author", "Author/Loose One.mp3", "Author/Loose Two.mp3")
+	seedAudiobookItem(t, pool, folderID, path, rootLoose, ".", "Root A.mp3", "Root B.mp3")
+	return disc1, disc2, loose, rootLoose
+}
+
+// seedAudiobookItem stores one indexed audiobook item rooted at root, with
+// its files as parts in the order given.
+func seedAudiobookItem(t *testing.T, pool *pgxpool.Pool, folderID int, path func(string) string, id, root string, files ...string) {
+	t.Helper()
+	ctx := t.Context()
+	for _, stmt := range []struct {
+		sql  string
+		args []any
+	}{
+		{`INSERT INTO media_items (content_id,type,title,status,genres) VALUES ($1,'audiobook',$1,'local','{}'::text[])`, []any{id}},
+		{`INSERT INTO media_item_libraries (content_id,media_folder_id) VALUES ($1,$2)`, []any{id, folderID}},
+		// Earlier scans could leave several items under one root; the first keeps the claim.
+		{`INSERT INTO media_item_roots (media_folder_id,canonical_root_path,content_id) VALUES ($1,$2,$3) ON CONFLICT DO NOTHING`, []any{folderID, path(root), id}},
+	} {
+		if _, err := pool.Exec(ctx, stmt.sql, stmt.args...); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for i, rel := range files {
+		var part any
+		if len(files) > 1 {
+			part = i + 1
+		}
+		if _, err := pool.Exec(ctx, `INSERT INTO media_files (content_id,media_folder_id,file_path,observed_root_path,canonical_root_path,file_size,presentation_part_index)
+			VALUES ($1,$2,$3,$4,$4,1,$5)`, id, folderID, path(rel), path(root), part); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+// caseSensitiveTempDir reports whether files under a temp directory whose
+// names differ only in case are distinct.
+func caseSensitiveTempDir(t *testing.T) bool {
+	t.Helper()
+	dir := t.TempDir()
+	writeTestFile(t, filepath.Join(dir, "x"), "x")
+	_, err := os.Stat(filepath.Join(dir, "X"))
+	return err != nil
+}
+
+// newAudiobookLibraryWithFiles creates an audiobook library rooted at a temp
+// directory holding a copy of a real mp3 at each relative path. path maps a
+// relative path to its absolute one.
+func newAudiobookLibraryWithFiles(t *testing.T, pool *pgxpool.Pool, files ...string) (folder *models.MediaFolder, root string, path func(string) string) {
+	t.Helper()
+	folder = newBookScanTestFolder(t, pool, "audiobooks")
+	root = t.TempDir()
+	folder.Paths = []string{root}
+	if _, err := pool.Exec(t.Context(), `INSERT INTO media_folder_paths (media_folder_id,path) VALUES ($1,$2)`, folder.ID, root); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM media_folder_paths WHERE media_folder_id=$1`, folder.ID)
+	})
+	src, err := os.ReadFile("testdata/audiobook_fixtures/multi_file/part1.mp3")
+	if err != nil {
+		t.Fatal(err)
+	}
+	path = func(rel string) string { return filepath.Join(root, rel) }
+	for _, rel := range files {
+		if err := os.MkdirAll(filepath.Dir(path(rel)), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path(rel), src, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return folder, root, path
+}
+
+// A folder whose contents cannot all be read is held: its indexed books stay
+// as they are, through the missing-file sweep, until it reads cleanly. Here
+// one book has an unreadable disc, and an extras-named folder is indexed as a
+// book of its own beside a disc-named folder that holds no audio and then
+// cannot be read either.
+func TestAudiobookUnreadableDiscKeepsIndexedBookDB(t *testing.T) {
+	pool := newBookScanTestPool(t)
+	folder, _, path := newAudiobookLibraryWithFiles(t, pool,
+		"Author/Book/CD1/01.mp3", "Author/Book/CD2/01.mp3",
+		"Author/Other/CD1/cover.jpg", "Author/Other/Extras/e.mp3")
+	ctx := t.Context()
+	// Empty the trash on every scan, with no grace period, so a file wrongly
+	// marked missing would be deleted at once.
+	s := NewScanner(NewFileRepository(pool), fakeAudiobookFFprobe(t), nil, 1, true, 0)
+	snapshot := func() []string {
+		t.Helper()
+		// A walk failure leaves the scan's warning set; only the rows matter here.
+		_ = s.ScanAudiobookFolder(ctx, folder, true)
+		rows, err := pool.Query(ctx, `SELECT mf.file_path || ' ' || mf.content_id || ' ' || COALESCE(mf.presentation_part_index, 0) || '/' ||
+			COALESCE(mf.presentation_part_total, 0) || ' ' || (mf.missing_since IS NULL) || ' ' || mf.probe_updated_at::text ||
+			' member=' || EXISTS (SELECT 1 FROM media_item_libraries ml WHERE ml.content_id = mf.content_id AND ml.media_folder_id = mf.media_folder_id)
+			FROM media_files mf WHERE mf.media_folder_id = $1 ORDER BY mf.file_path`, folder.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got, err := pgx.CollectRows(rows, pgx.RowTo[string])
+		if err != nil {
+			t.Fatal(err)
+		}
+		return got
+	}
+
+	indexed := snapshot()
+	if len(indexed) != 3 || !strings.Contains(indexed[0], " 1/2 true ") || !strings.Contains(indexed[1], " 2/2 true ") ||
+		!strings.Contains(indexed[2], "Extras/e.mp3") || !strings.Contains(indexed[2], " 0/0 true ") {
+		t.Fatalf("indexed rows = %q, want both discs as parts 1/2 and 2/2, and the extras folder as a book", indexed)
+	}
+	// Replace each folder with a symlink to a missing target, a read failure
+	// that holds even when the test runs as root, where a chmod would not.
+	locked := []string{path("Author/Book/CD2"), path("Author/Other/CD1")}
+	parked := t.TempDir()
+	for i, dir := range locked {
+		aside := filepath.Join(parked, strconv.Itoa(i))
+		if err := os.Rename(dir, aside); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink(filepath.Join(parked, "missing"), dir); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got := snapshot(); !slices.Equal(got, indexed) {
+		t.Errorf("with folders unreadable the indexed books changed:\n got %q\nwant %q", got, indexed)
+	}
+	for i, dir := range locked {
+		if err := os.Remove(dir); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Rename(filepath.Join(parked, strconv.Itoa(i)), dir); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got := snapshot(); !slices.Equal(got, indexed) {
+		t.Errorf("once the folders read again the unchanged books changed:\n got %q\nwant %q", got, indexed)
+	}
+}
+
+// fakeAudiobookFFprobe writes an ffprobe stand-in that reports every file as
+// a one-minute mp3, so a scan runs where no ffprobe is installed.
+func fakeAudiobookFFprobe(t *testing.T) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "ffprobe")
+	writeFakeTool(t, path, `#!/bin/sh
+cat <<'JSON'
+{"format":{"format_name":"mp3","duration":"60.0","size":"1","bit_rate":"64000","tags":{"artist":"Author"}},"streams":[{"index":0,"codec_type":"audio","codec_name":"mp3","channels":2}],"chapters":[]}
+JSON
+`)
+	return path
 }

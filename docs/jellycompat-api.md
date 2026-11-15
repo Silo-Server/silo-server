@@ -31,7 +31,7 @@ serves as External. The key matches case-insensitively; any other key returns
 built from configuration alone, so routes that need further dependencies, such
 as `GET /Persons/{name}` and `POST /Library/Media/Updated`, are not in it.
 `internal/jellycompat/router.go`
-owns registration; the native `/api/v1` contract is separate.
+owns registration; the native `/api/v2` contract is separate.
 
 ## Users and avatars
 
@@ -152,9 +152,10 @@ each item's original-language audio, as native clients do.
 
 Movie and episode detail responses select `DefaultSubtitleStreamIndex` from the
 viewer's effective subtitle mode and language, including downloaded subtitles.
-In `Always` mode, a track the viewer picked for the series in a Silo client
-(its source, language, codec, label, forced and hearing-impaired traits) wins
-when the file has one that matches; otherwise the language rules apply.
+In `Always` mode, a track the viewer picked for the series in a Silo or
+Jellyfin client (its source, language, codec, label, forced and
+hearing-impaired traits) wins when the file has one that matches; otherwise the
+language rules apply.
 The detail-page selection therefore carries into playback instead of sending
 an unintended Off choice. Explicit playback choices, including Off, still win.
 If playback negotiates a different audio language, clients must omit
@@ -179,6 +180,35 @@ files. A file's default-flagged track therefore beats an external file in
 flagged. An unset subtitle language matches any language.
 In `Always` mode, Silo's per-series remembered subtitle track is applied first,
 as on item details. An explicit `SubtitleStreamIndex` in the request still wins.
+
+Playback reports save the viewer's track choices for the next episode. For a
+play negotiated through `PlaybackInfo`, an `AudioStreamIndex` or
+`SubtitleStreamIndex` in `/Sessions/Playing`, `/Sessions/Playing/Progress`, or
+`/Sessions/Playing/Stopped` that differs from the default `PlaybackInfo`
+offered, or from the track last saved for that play, becomes the series'
+remembered track (a movie's is kept under the movie). Silo writes it the way
+`PUT /api/v2/audio-prefs/{series_id}` and `PUT /api/v2/subtitle-prefs/{series_id}`
+do: the audio track's language and signature; a subtitle track's language,
+signature and v3 combined index in mode `always`; or mode `off` with no track
+for `SubtitleStreamIndex: -1`, which later plays offer as `OnlyForced` or
+`None` depending on the forced-subtitle setting. Reports cannot tell a pick
+from a client's automatic choice, so a report of the offered defaults saves
+nothing; neither does the audio track the viewer's preferences select when
+`PlaybackInfo` offered a device fallback in its place (AC3 for TrueHD). A
+client that plays a different track from the one offered has it saved. Plays
+that skip `PlaybackInfo` (static direct play), an audio switch the server
+refused, and repeated or late Stopped reports for a finished play save
+nothing. A failed write is logged and not retried. `RememberAudioSelections`
+or `RememberSubtitleSelections` set to `false` in the user configuration turns
+either half off. Jellyfin remembers choices per item; Silo remembers them per
+series, as its own clients do.
+
+Each change is claimed on the play before it is written. After writing, the
+report reads the play's latest claim back and writes it again until the two
+match, so overlapping reports leave the newest choice. Known gap: a write that
+stalls until after a later Stopped report has finished the play and its record
+is removed has nothing to read back, so the older choice can remain. Closing it
+would need ordering on the stored preference itself.
 
 ## Browse and response fields
 
@@ -284,6 +314,17 @@ Silo's Home does: by when the profile finished the previous episode, the order
 Jellyfin uses. A profile that turns on `ui.next_up_new_releases_first` instead
 gets a caught-up series back at the front when its next episode is released to
 the server. `nextUpDateCutoff` still filters on last played.
+
+`CommunityRating` is the IMDb rating (0-10). `CriticRating` is the stored
+Rotten Tomatoes critic score (0-100), present only while an enabled metadata
+plugin declares the `rt_critic` rating source and an administrator shows it under
+`catalog.extra_rating_sources`, the setting native item ratings follow (see
+`GET /api/v2/capabilities/ratings`). `SortBy=CriticRating` and `MinCriticRating`
+follow the same rule: while the source is shown they sort and filter on that
+score, unrated items last and episodes matching no minimum. While it is hidden,
+`CriticRating` sorts as an unknown key (the next `SortBy` key and its
+`SortOrder` entry apply) and `MinCriticRating` is ignored, so neither the order
+nor the filter reveals the score.
 
 Items carry Jellyfin 12's `OriginalLanguage` (movies and series). Episodes set
 `ParentPrimaryImageItemId` and `ParentPrimaryImageTag` to their season's poster,
@@ -423,6 +464,13 @@ to the route's version, and a route version the item no longer has answers
 `404`. The negotiated session keeps the client's id as its route item id, so the
 stream URLs it hands out and later session reports can carry that id.
 
+Every compat user is a non-administrator, and only a viewer who may curate
+metadata sees where a file lives or what it is called (see
+[File paths and names](catalog-api.md#file-paths-and-names)). So an item's
+`Path` and `MediaSources[i].Path` are a stand-in, `/silo/{file id}.{container}`,
+and `MediaSources[i].Name` is the version's edition and quality, such as
+`Extended - 2160p HEVC HDR`.
+
 `GET` and `HEAD /Items/{id}/Download` serve the original file through the
 native direct download, the same service as `/api/v2/direct-download`, so they
 follow its rules. Both answer `403` when **Allow downloads** is off, the
@@ -545,6 +593,15 @@ Media URLs that Silo builds (`DirectStreamUrl`, `TranscodingUrl`, subtitle
 log grants that media only until the play session ends. A client that fetches
 one after the play session expired or stopped, or after a newer negotiation
 from the same device replaced an unstarted one, must send its own token.
+A `PlaySessionId` grant that cannot be read because the database is
+unavailable answers a retryable `503`, not `401`, unless the API server that
+answers still holds the play session. HLS master playlist, playlist and
+segment requests that carry a token answer the same retryable `503` when their
+play session cannot be read, and so do progressive stream, subtitle and
+attachment requests; a play session that is absent or belongs to another token
+answers `404`. `PlaybackInfo` answers `503` instead of
+returning a `PlaySessionId` it could not store, since other API servers could
+not resolve it.
 
 Copied-video HLS master playlists name copied audio as Jellyfin 12 does:
 HE-AAC as `mp4a.40.5`, TrueHD as `mlpa`, and DTS as `dtsc`, `dtsh` (DTS-HD HRA
@@ -564,7 +621,19 @@ base layer (HEVC profile 5, AV1 profile 10), a client whose device profile lists
 variant, listed before the fallback variant, unless the copied audio has no
 entry. MPEG-TS remuxes keep the single variant. Audio and subtitle streams
 carry `LocalizedLanguage`, and audio streams carry `LocalizedOriginal`, in
-English.
+English. `LocalizedLanguage` and `DisplayTitle` name a tag with a region or
+script by its CLDR name, such as "Brazilian Portuguese" for `pt-BR` or
+"Portuguese (Angola)" for `pt-AO`; `Language` keeps the stored tag. A tag
+with any other subtag, or a script or region CLDR has no name for, keeps the
+title-cased tag ("Ca ES Valencia"), so distinct tags never share a label.
+A video stream's `DisplayTitle` follows Jellyfin's: resolution, upper-cased
+codec, then the Dolby Vision profile or the video range ("4K HEVC Dolby Vision
+Profile 8.1 (HDR10)", "1080p H264 SDR"). Silo also names HDR10+ ("4K HEVC
+HDR10+", "Dolby Vision Profile 8.1 (HDR10+)"), where Jellyfin writes `HDR` and
+`(HDR10)`, writes "Dolby Vision" for a track whose range type names Dolby
+Vision but whose profile was never recorded, where Jellyfin writes `HDR`, and
+leaves out the stream title, which Silo cannot tell apart from ffprobe's codec
+name.
 
 HEVC Dolby Vision Profile 8 with a proven HDR10 base layer and no enhancement
 layer can use HLS fMP4 remux when a positive video-range condition names both
@@ -611,6 +680,15 @@ return 406. There is no fallback-font service, external/downloaded subtitle
 burn-in, or subtitle HLS playlist implementation. Changing a subtitle filter
 requires fresh playback negotiation.
 
+Stored (downloaded) subtitles take the stream indexes after the file's own
+tracks, in the order they are listed, so deleting one moves the later ones down.
+Their `DeliveryUrl` therefore also carries `StoredSubtitleId`, as the native
+stream route's issued URLs carry `downloaded_subtitle_id`. When the query names
+an ID, the route serves that stored subtitle of the media source's file
+whatever `{index}` says, and answers 404 once it is deleted, for an ID that is
+not one of that file's, or for a malformed ID. A URL without it, as a client
+builds from the index, resolves the index against the current list.
+
 Extracting an embedded text subtitle reads the whole source file, which can
 take minutes for a large remux on network storage. As in Jellyfin, the first
 request for an embedded text track extracts every text track of the file in
@@ -646,6 +724,15 @@ session up, two indexed reads, on whichever node answers. A revoked or expired
 login session ends the compat session with `401`; a lookup that fails is a
 retryable `503` and keeps it. `sa_` API keys have no login session and are checked
 as keys instead.
+
+With the Postgres user store, deleting a profile deletes the compatibility sessions
+signed in as it in the same transaction, so their next request gets `401` on every
+node. With the SQLite user store they are deleted after the profile; if that fails,
+the profile stays deleted, the error is logged, and the sessions keep working until
+they expire or the account is signed out. The account's other profiles keep their
+sessions.
+As with token logout below, an open socket closes at its next re-check and signed
+node stream URLs already issued keep their lifetime.
 
 Once token logout deletes the stored compatibility row, later checks through the
 session store refuse it on every node, including media requests and playback-grant
@@ -690,7 +777,9 @@ per-address budgets are listed under [Rate limiting](#rate-limiting).
 
 `GET /Sessions` lists started playback mappings owned by the caller's token,
 including mappings persisted by another API process. Device and activity filters
-apply to the returned list. Current native play state is included when locally
+apply to the returned list. Each entry's `Id` is 32 lowercase hex characters
+that stay the same for the life of the play; it is derived from the
+`PlaySessionId`, is not accepted in its place, and authorizes nothing. Current native play state is included when locally
 available and its account/profile ownership matches; unavailable remote state
 is omitted.
 
@@ -750,9 +839,9 @@ connection's shared budget, as described in
 [Sign-in rate limits](auth-api.md#sign-in-rate-limits).
 
 - `POST /Users/AuthenticateByName` spends the per-IP and `login` budgets before
-  the global budget, like native sign-in (`POST /api/v2/auth/login`, and
-  `POST /api/v1/auth/login` during the bridge). It shares the per-IP `login`
-  counter with every native operation that spends that budget. The account name also spends its
+  the global budget, like native sign-in (`POST /api/v2/auth/login`). It shares
+  the per-IP `login` counter with every native operation that spends that
+  budget. The account name also spends its
   sign-in attempt budget, shared with native sign-in on every node
   ([Sign-in attempts per name](auth-api.md#sign-in-attempts-per-name)); a
   locked name answers 429 `TooManyRequests` with `Retry-After`. It reads at
@@ -812,7 +901,7 @@ probed `original` disposition in the native track model), the
 `VideoRotation` profile condition and `VideoRotationNotSupported` reason
 (rotation is not probed), external delivery of PGS and VobSub tracks during
 direct play or remux (they burn in), `excludeActiveSessions` on resume lists,
-remembered per-item subtitle selections, and `Accept-Language` localization.
+and `Accept-Language` localization.
 `/Devices`, `/Playlists`, and SyncPlay group operations are not served.
 `/SyncPlay/List` only provides the empty discovery response described above.
 

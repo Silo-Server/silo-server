@@ -340,12 +340,24 @@ func driverFingerprint(backend, device string) string {
 // runSourcePreflight validates representative source frames, converts each one,
 // and inspects every result before accepting the recipe.
 func runSourcePreflight(ctx context.Context, request SourcePreflightRequest, run CommandRunner) error {
-	positions := sourcePreflightPositions(request.DurationSeconds)
-	for _, position := range positions {
-		frame, err := inspectSourceFrame(ctx, request, position, run)
+	start, err := sourceStartTime(ctx, request, run)
+	if err != nil {
+		return err
+	}
+	previous := 0.0
+	for _, offset := range sourcePreflightPositions(request.DurationSeconds) {
+		// The first sample reads from the start of the file: the opening
+		// keyframe can be decoded before the first presentation time that
+		// start_time reports.
+		position := 0.0
+		if offset > 0 {
+			position = start + offset
+		}
+		frame, position, err := inspectSourceFrame(ctx, request, previous, position, run)
 		if err != nil {
 			return err
 		}
+		previous = position
 		if !frameMatchesSourceKind(frame, request.Kind) {
 			return fmt.Errorf("%w: decoded frame metadata does not match %s fallback", ErrSourcePreflightRejected, request.Kind)
 		}
@@ -370,6 +382,36 @@ func runSourcePreflight(ctx context.Context, request SourcePreflightRequest, run
 		_ = os.Remove(outputPath)
 	}
 	return nil
+}
+
+// sourceStartTime returns the timestamp the source starts at, so sample
+// positions fall inside it. ffprobe's -read_intervals and ffmpeg's -ss with
+// -seek_timestamp both take the stream's own timestamps, and an MPEG-TS
+// rarely starts at 0. A negative or unknown start counts as 0.
+func sourceStartTime(ctx context.Context, request SourcePreflightRequest, run CommandRunner) (float64, error) {
+	args := []string{"-v", ffmpegErrorLogLevel, "-show_entries", "format=start_time", "-of", "json", request.InputPath}
+	output, err := runBounded(ctx, run, request.FFprobePath, args...)
+	if err != nil {
+		return 0, fmt.Errorf("%w: read tone-map source start time: %w (%s)", ErrSourcePreflightUnavailable, err, boundedCommandFailure(err, output))
+	}
+	return parseSourceStartTime(output), nil
+}
+
+// parseSourceStartTime reads format.start_time from ffprobe JSON, or 0.
+func parseSourceStartTime(output []byte) float64 {
+	var payload struct {
+		Format struct {
+			StartTime string `json:"start_time"`
+		} `json:"format"`
+	}
+	if decodeCommandJSON(output, &payload) != nil {
+		return 0
+	}
+	start, err := strconv.ParseFloat(payload.Format.StartTime, 64)
+	if err != nil || start < 0 {
+		return 0
+	}
+	return start
 }
 
 // sourcePreflightPositions samples the beginning, middle, and near-end of a
@@ -417,26 +459,207 @@ func (frame preflightFrame) hasDolbyVisionMetadata() bool {
 	})
 }
 
-// inspectSourceFrame reads color metadata from one decoded frame at position.
-func inspectSourceFrame(ctx context.Context, request SourcePreflightRequest, position float64, run CommandRunner) (preflightFrame, error) {
-	interval := strconv.FormatFloat(position, 'f', 3, 64) + "%+#1"
-	args := []string{
-		"-v", ffmpegErrorLogLevel, "-read_intervals", interval, "-select_streams", "v:0",
-		"-show_frames",
-		"-show_entries", "frame=color_range,color_space,color_transfer,color_primaries:frame_side_data=side_data_type",
-		"-of", "json", request.InputPath,
+// sourceKeyframeSearchPackets bounds the packet scan for the first keyframe
+// after a seek. It covers the longest default keyframe interval of common
+// encoders (x264 and x265 use 250 frames).
+const sourceKeyframeSearchPackets = 300
+
+// inspectSourceFrame reads color metadata from one decoded frame at position
+// and returns the position the frame was read from, which the conversion must
+// sample too.
+//
+// The seek lands on a keyframe in an indexed container, so one packet decodes.
+// In MPEG-TS it lands on whatever packet has that timestamp, which rarely
+// decodes alone. Then a demux-only scan from the same seek finds the next
+// keyframe, and the read is repeated through that packet. The packets before
+// it lack their references, so the decoder drops them cheaply and the read
+// costs about one frame's decode.
+//
+// When the scan reaches the end of the stream without a keyframe, position
+// lies in the last keyframe interval and nothing after it decodes. The sample
+// then moves back to that interval's keyframe, found by a scan from the
+// previous sample, which lies before it.
+//
+// previous and position are in the stream's own timestamps.
+func inspectSourceFrame(ctx context.Context, request SourcePreflightRequest, previous, position float64, run CommandRunner) (preflightFrame, float64, error) {
+	frame, found, endOfStream, err := readFrameFrom(ctx, request, position, run)
+	if err == nil && !found && endOfStream && previous < position {
+		frame, position, found, err = readLastKeyframeBefore(ctx, request, previous, position, run)
 	}
+	if err != nil {
+		return preflightFrame{}, 0, err
+	}
+	if !found {
+		return preflightFrame{}, 0, fmt.Errorf("%w: tone-map source frame metadata unavailable", ErrSourcePreflightRejected)
+	}
+	return frame, position, nil
+}
+
+// readLastKeyframeBefore reads the stream's last keyframe, found by a scan from
+// previous, and returns the position it was read from.
+func readLastKeyframeBefore(ctx context.Context, request SourcePreflightRequest, previous, position float64, run CommandRunner) (preflightFrame, float64, bool, error) {
+	keyframe, ok, err := lastKeyframeFrom(ctx, request, previous, run)
+	if err != nil || !ok {
+		return preflightFrame{}, position, false, err
+	}
+	// Seek to just before the keyframe in decode order, so the read starts
+	// ahead of it and the scan finds it.
+	position = max(0, keyframe-0.001)
+	frame, found, _, err := readFrameFrom(ctx, request, position, run)
+	return frame, position, found, err
+}
+
+// readFrameFrom reads the first frame that decodes from position on, through
+// the next keyframe when the first packet decodes nothing. endOfStream reports
+// that no keyframe follows before the stream ends.
+func readFrameFrom(ctx context.Context, request SourcePreflightRequest, position float64, run CommandRunner) (frame preflightFrame, found, endOfStream bool, err error) {
+	frames, err := readSourceFrames(ctx, request, position, 1, run)
+	if err != nil || len(frames) > 0 {
+		return firstFrame(frames), len(frames) > 0, false, err
+	}
+	packets, endOfStream, err := packetsThroughNextKeyframe(ctx, request, position, run)
+	if err != nil || packets == 0 {
+		return preflightFrame{}, false, endOfStream, err
+	}
+	if frames, err = readSourceFrames(ctx, request, position, packets, run); err != nil {
+		return preflightFrame{}, false, false, err
+	}
+	return firstFrame(frames), len(frames) > 0, false, nil
+}
+
+func firstFrame(frames []preflightFrame) preflightFrame {
+	if len(frames) == 0 {
+		return preflightFrame{}
+	}
+	return frames[0]
+}
+
+// sourceProbeArgs builds an ffprobe command that reads interval of the primary
+// video stream.
+func sourceProbeArgs(request SourcePreflightRequest, logLevel, interval string, show ...string) []string {
+	args := append([]string{"-v", logLevel, "-read_intervals", interval, "-select_streams", "v:0"}, show...)
+	return append(args, "-of", "json", request.InputPath)
+}
+
+// formatPreflightPosition formats a sample position, in seconds of the
+// stream's own timestamps, for ffprobe's -read_intervals and ffmpeg's -ss.
+func formatPreflightPosition(position float64) string {
+	return strconv.FormatFloat(position, 'f', 3, 64)
+}
+
+// readSourceFrames decodes the first packets video packets at position and
+// returns the frames they produced.
+func readSourceFrames(ctx context.Context, request SourcePreflightRequest, position float64, packets int, run CommandRunner) ([]preflightFrame, error) {
+	interval := formatPreflightPosition(position) + "%+#" + strconv.Itoa(packets)
+	args := sourceProbeArgs(request, ffmpegErrorLogLevel, interval,
+		"-show_frames",
+		"-show_entries", "frame=color_range,color_space,color_transfer,color_primaries:frame_side_data=side_data_type")
 	output, err := runBounded(ctx, run, request.FFprobePath, args...)
 	if err != nil {
-		return preflightFrame{}, fmt.Errorf("%w: inspect tone-map source frame: %w (%s)", ErrSourcePreflightUnavailable, err, boundedCommandFailure(err, output))
+		return nil, fmt.Errorf("%w: inspect tone-map source frame: %w (%s)", ErrSourcePreflightUnavailable, err, boundedCommandFailure(err, output))
 	}
 	var payload struct {
 		Frames []preflightFrame `json:"frames"`
 	}
-	if err := decodeCommandJSON(output, &payload); err != nil || len(payload.Frames) == 0 {
-		return preflightFrame{}, fmt.Errorf("%w: tone-map source frame metadata unavailable", ErrSourcePreflightRejected)
+	if err := decodeCommandJSON(output, &payload); err != nil {
+		return nil, fmt.Errorf("%w: tone-map source frame metadata unavailable", ErrSourcePreflightRejected)
 	}
-	return payload.Frames[0], nil
+	return payload.Frames, nil
+}
+
+// packetsThroughNextKeyframe returns how many packets from position reach the
+// first keyframe after the first packet, which the one-packet read already
+// failed to decode, or 0 when none lies within sourceKeyframeSearchPackets.
+// endOfStream reports that the stream ended within that bound. The scan reads
+// one packet past the bound, so a stream that ends exactly there still counts.
+// It only demuxes, so it costs no decoding.
+func packetsThroughNextKeyframe(ctx context.Context, request SourcePreflightRequest, position float64, run CommandRunner) (packets int, endOfStream bool, err error) {
+	interval := formatPreflightPosition(position) + "%+#" + strconv.Itoa(sourceKeyframeSearchPackets+1)
+	scanned, err := scanSourcePackets(ctx, request, interval, "flags", run)
+	if err != nil {
+		return 0, false, err
+	}
+	for index := 1; index < min(len(scanned), sourceKeyframeSearchPackets); index++ {
+		if strings.HasPrefix(scanned[index].Flags, "K") {
+			return index + 1, false, nil
+		}
+	}
+	return 0, len(scanned) <= sourceKeyframeSearchPackets, nil
+}
+
+// sourceFinalKeyframeSearchPackets is how many packets each scan for the last
+// keyframe reads. A sample in the last keyframe interval lies within
+// sourceKeyframeSearchPackets of the end, and at least 10% of the duration
+// lies after it, so at a steady frame rate one scan from the previous sample
+// reaches the end. A variable frame rate can need more.
+const sourceFinalKeyframeSearchPackets = 10 * sourceKeyframeSearchPackets
+
+// lastKeyframeFrom returns the decode timestamp of the last keyframe the stream
+// holds from position on. It only demuxes, sourceFinalKeyframeSearchPackets
+// packets at a time, each scan going on from the last packet of the one
+// before, until a scan ends short. The scans are bounded by packets, not by an
+// end time: ffprobe ends a timed read at the first packet presented at or
+// after it, which can come before a keyframe decoded earlier than it is
+// presented.
+func lastKeyframeFrom(ctx context.Context, request SourcePreflightRequest, position float64, run CommandRunner) (float64, bool, error) {
+	keyframe, found := 0.0, false
+	for {
+		interval := formatPreflightPosition(position) + "%+#" + strconv.Itoa(sourceFinalKeyframeSearchPackets)
+		scanned, err := scanSourcePackets(ctx, request, interval, "flags,dts_time", run)
+		if err != nil {
+			return 0, false, err
+		}
+		for _, packet := range scanned {
+			if dts, ok := packet.dts(); ok && strings.HasPrefix(packet.Flags, "K") {
+				keyframe, found = dts, true
+			}
+		}
+		if len(scanned) < sourceFinalKeyframeSearchPackets {
+			return keyframe, found, nil
+		}
+		// The scan stopped at its bound, so the stream goes on. A packet
+		// without a later timestamp to resume from ends the search with what
+		// it found.
+		next, ok := scanned[len(scanned)-1].dts()
+		if !ok || next <= position {
+			return keyframe, found, nil
+		}
+		position = next
+	}
+}
+
+// sourcePacket is one demuxed packet of the primary video stream.
+type sourcePacket struct {
+	Flags   string `json:"flags"`
+	DTSTime string `json:"dts_time"`
+}
+
+// dts returns the packet's decode timestamp in seconds, or false when ffprobe
+// reported none.
+func (packet sourcePacket) dts() (float64, bool) {
+	dts, err := strconv.ParseFloat(packet.DTSTime, 64)
+	return dts, err == nil
+}
+
+// scanSourcePackets lists the primary video stream's packets in interval
+// without decoding them.
+//
+// ffprobe writes each packet's JSON as it reads it, and the runner shares one
+// pipe between stdout and stderr, so a parser diagnostic about a damaged
+// header would land inside the JSON. The scan therefore logs nothing.
+func scanSourcePackets(ctx context.Context, request SourcePreflightRequest, interval, entries string, run CommandRunner) ([]sourcePacket, error) {
+	args := sourceProbeArgs(request, "quiet", interval, "-show_packets", "-show_entries", "packet="+entries)
+	output, err := runBounded(ctx, run, request.FFprobePath, args...)
+	if err != nil {
+		return nil, fmt.Errorf("%w: find tone-map source keyframe: %w (%s)", ErrSourcePreflightUnavailable, err, boundedCommandFailure(err, output))
+	}
+	var payload struct {
+		Packets []sourcePacket `json:"packets"`
+	}
+	if err := decodeCommandJSON(output, &payload); err != nil {
+		return nil, fmt.Errorf("%w: tone-map source packet metadata unavailable", ErrSourcePreflightRejected)
+	}
+	return payload.Packets, nil
 }
 
 // frameMatchesSourceKind requires complete decoded-frame metadata compatible
@@ -493,7 +716,11 @@ func sourceConversionPreflightArgs(request SourcePreflightRequest, position floa
 			}
 		}
 	}
-	args = append(args, "-ss", strconv.FormatFloat(position, 'f', 3, 64), "-i", request.InputPath, "-map", "0:v:0", "-frames:v", "1", "-an", "-sn", "-dn", "-map_metadata", "-1", "-map_chapters", "-1")
+	// position is in the stream's own timestamps, as ffprobe's -read_intervals
+	// takes them. -ss alone is relative to the file's start time (about 1.4 s
+	// into a typical MPEG-TS); -seek_timestamp makes it match, so the
+	// conversion samples the frame the inspection read.
+	args = append(args, "-seek_timestamp", "1", "-ss", formatPreflightPosition(position), "-i", request.InputPath, "-map", "0:v:0", "-frames:v", "1", "-an", "-sn", "-dn", "-map_metadata", "-1", "-map_chapters", "-1")
 	filter := sourceConversionPreflightFilter(request)
 	args = append(args, "-vf", filter, "-c:v", sourcePreflightEncoder(request), "-color_range", "tv", "-color_primaries", colorBT709, "-color_trc", colorBT709)
 	// VAAPI/QSV/CUDA filters stamp the BT.709 matrix on hardware frames; an

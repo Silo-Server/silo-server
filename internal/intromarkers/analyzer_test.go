@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
 	"sync"
 	"testing"
 	"time"
@@ -45,10 +46,39 @@ func (f *fakeIntroRepository) CountEnabledLibraries(context.Context) (int, error
 	return f.enabledLibraries, nil
 }
 
-func (f *fakeIntroRepository) ListEligibleCandidates(context.Context) ([]Candidate, error) {
+func (f *fakeIntroRepository) CountEligibleCandidates(context.Context) (int, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	return append([]Candidate(nil), f.eligibleCandidates...), nil
+	return len(f.eligibleCandidates), nil
+}
+
+// ListEligibleCandidatePage pages eligibleCandidates by season ID, keeping
+// their order within a page. Unlike the query, it keeps an empty season ID,
+// on the first page.
+func (f *fakeIntroRepository) ListEligibleCandidatePage(_ context.Context, after *episodeCandidateCursor, seasons int) ([]Candidate, *episodeCandidateCursor, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var seasonIDs []string
+	for _, candidate := range f.eligibleCandidates {
+		if !slices.Contains(seasonIDs, candidate.SeasonID) && (after == nil || candidate.SeasonID > after.seasonID) {
+			seasonIDs = append(seasonIDs, candidate.SeasonID)
+		}
+	}
+	slices.Sort(seasonIDs)
+	if len(seasonIDs) > seasons {
+		seasonIDs = seasonIDs[:seasons]
+	}
+	var page []Candidate
+	for _, candidate := range f.eligibleCandidates {
+		if slices.Contains(seasonIDs, candidate.SeasonID) {
+			page = append(page, candidate)
+		}
+	}
+	var next *episodeCandidateCursor
+	if len(seasonIDs) == seasons {
+		next = &episodeCandidateCursor{seasonID: seasonIDs[len(seasonIDs)-1]}
+	}
+	return page, next, nil
 }
 
 func (f *fakeIntroRepository) ListCandidatesForEpisode(_ context.Context, episodeID string) ([]Candidate, error) {

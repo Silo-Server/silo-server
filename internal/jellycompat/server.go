@@ -20,6 +20,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/nodepool"
 	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/ratelimit"
+	"github.com/Silo-Server/silo-server/internal/ratingsources"
 	"github.com/Silo-Server/silo-server/internal/recommendations"
 	"github.com/Silo-Server/silo-server/internal/scantrigger"
 	"github.com/Silo-Server/silo-server/internal/secret"
@@ -177,12 +178,21 @@ type Dependencies struct {
 	// Settings (optional; reads server_settings for watched threshold, etc.)
 	SettingsRepo SettingsReader
 
+	// RatingSources is the administrator's choice of external ratings, the
+	// native API's. Items carry CriticRating only when it shows the Rotten
+	// Tomatoes critic score. Nil shows only IMDb and TMDB.
+	RatingSources *ratingsources.Policy
+
 	// Subtitle support (optional)
 	SubtitleRepo  subtitles.Repository // optional; downloaded subtitle support
 	SubtitleBlobs subtitles.BlobStore  // optional; backs downloaded subtitle reads
 	// KeptSubtitles reads embedded tracks from kept copies or through the
 	// file's index before the subtitle cache demuxes a source; nil demuxes.
 	KeptSubtitles playback.EmbeddedSubtitleSource
+	// AudioPreferences and SubtitlePreferences save the tracks Jellyfin
+	// clients play as the series' remembered tracks (optional).
+	AudioPreferences    AudioPreferenceWriter
+	SubtitlePreferences SubtitlePreferenceWriter
 	// SubtitlePlaySync aligns a subtitle the first time a client is served
 	// it, when it was never synced; nil leaves that to a request.
 	SubtitlePlaySync subtitles.PlaySyncer

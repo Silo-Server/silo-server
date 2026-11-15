@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"testing"
 	"time"
@@ -10,6 +11,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/playback"
 )
 
@@ -350,6 +352,61 @@ func TestLifecycleSweepPassesLiveJellyfinPlaysDB(t *testing.T) {
 	}
 }
 
+// TestLifecycleSweepBacksOffFailedEndsDB pins what the sweep does when a
+// session's history write fails: the session stays live so a later sweep
+// can still record it, but waits a grace before the next try and moves
+// behind sessions idle for longer, so a hundred ends that keep failing
+// neither retry every sweep nor keep the abandoned session behind them from
+// being ended.
+func TestLifecycleSweepBacksOffFailedEndsDB(t *testing.T) {
+	ctx, pool, account := lifecycleTestDB(t)
+	file := lifecycleTestFile(t, ctx, pool)
+	insert := func(idle time.Duration) string {
+		t.Helper()
+		id := uuid.NewString()
+		if _, err := pool.Exec(ctx, `INSERT INTO playback_session_lifecycle
+			(session_id, frontend, state, seq, user_id, profile_id, media_file_id, requested_media_file_id, started_at, updated_at)
+			VALUES ($1, 'native', 'playing', nextval('playback_session_lifecycle_seq'), $2, 'p-1', $3, $3, NOW() - interval '3 hours', $4)`,
+			id, account, file, time.Now().Add(-idle)); err != nil {
+			t.Fatal(err)
+		}
+		return id
+	}
+	failing := map[string]bool{}
+	for range lifecycleSweepBatch {
+		failing[insert(2*time.Hour)] = true
+	}
+	abandoned := insert(time.Hour)
+	h := NewPlaybackHandler(playback.NewSessionManager(0, 0))
+	h.AdminStore = failingEndAdminStore{NewPGPlaybackAdminStore(pool, nil)}
+	h.fileResolver = testPlaybackFileResolver{file: &models.MediaFile{ID: file, Duration: 3600}}
+	now := time.Now()
+	h.sweepLifecycle(ctx, pool, now)
+	candidates, err := loadLifecycleCandidates(ctx, pool, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(candidates) == 0 || candidates[0].sessionID != abandoned || failing[candidates[0].sessionID] {
+		t.Fatalf("first candidate after the sweep = %+v, want the abandoned session %s", candidates, abandoned)
+	}
+	var live int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM playback_session_lifecycle WHERE user_id = $1 AND state = 'playing'`,
+		account).Scan(&live); err != nil {
+		t.Fatal(err)
+	}
+	if live != len(failing)+1 {
+		t.Fatalf("%d sessions still live, want all %d kept for a later retry", live, len(failing)+1)
+	}
+}
+
+// failingEndAdminStore is the Postgres admin store whose end write always
+// fails, as a NOT NULL violation does.
+type failingEndAdminStore struct{ *PGPlaybackAdminStore }
+
+func (failingEndAdminStore) RecordEnd(context.Context, AdminPlaybackHistoryEntry, string) (LifecycleTransition, bool, error) {
+	return LifecycleTransition{}, false, errors.New("null value in column violates not-null constraint")
+}
+
 func lifecycleTestFile(t *testing.T, ctx context.Context, pool *pgxpool.Pool) int {
 	t.Helper()
 	var folder, file int
@@ -361,4 +418,126 @@ func lifecycleTestFile(t *testing.T, ctx context.Context, pool *pgxpool.Pool) in
 		t.Fatal(err)
 	}
 	return file
+}
+
+// TestLifecycleSweepEndsReportedPlaysDB pins how an Audiobookshelf play a
+// client only reports through its local session is listed and ended, with
+// no server holding it: Activity lists it from its start row at the row's
+// position; once reports stop for the reported grace the sweep closes its
+// row and records history with its position and the listening its reports
+// credited; a report landing after the sweep looked keeps the play going.
+func TestLifecycleSweepEndsReportedPlaysDB(t *testing.T) {
+	ctx, pool, account := lifecycleTestDB(t)
+	file := lifecycleTestFile(t, ctx, pool)
+	book := "lc-book-" + uuid.NewString()
+	if _, err := pool.Exec(ctx, `INSERT INTO media_items(content_id,type,title) VALUES($1,'audiobook','Book')`, book); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM admin_playback_history WHERE user_id=$1`, account)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM abs_playback_sessions WHERE user_id=$1`, account)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM playback_session_lifecycle WHERE user_id=$1`, account)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM media_items WHERE content_id=$1`, book)
+	})
+	silent := insertReportedPlay(t, ctx, pool, account, file, book, 2*time.Minute)
+	live := insertReportedPlay(t, ctx, pool, account, file, book, 10*time.Second)
+
+	admin := &AdminHandler{pool: pool}
+	listed := func() map[string]AdminPlaybackSessionView {
+		t.Helper()
+		rows, err := admin.ReadAdminPlaybackSessions(ctx, PlaybackSessionsQuery{UserID: account}, "", 50)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got := map[string]AdminPlaybackSessionView{}
+		for _, row := range rows {
+			got[row.SessionID] = row
+		}
+		return got
+	}
+	if row, ok := listed()[live]; !ok || row.PositionSeconds != 600 || row.ClientName != "Plappa" {
+		t.Fatalf("live reported play = %+v (listed %v), want its start row at 600 s", row, ok)
+	}
+
+	h := NewPlaybackHandler(playback.NewSessionManager(0, 0))
+	h.AdminStore = NewPGPlaybackAdminStore(pool, nil)
+	h.fileResolver = testPlaybackFileResolver{file: &models.MediaFile{ID: file, Duration: 3600}}
+
+	// A report that lands after the sweep read the silent play keeps it.
+	candidates, err := loadLifecycleCandidates(ctx, pool, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var stale *lifecycleCandidate
+	for i := range candidates {
+		if candidates[i].sessionID == live {
+			t.Fatal("a reported play still reporting was selected")
+		}
+		if candidates[i].sessionID == silent {
+			stale = &candidates[i]
+		}
+	}
+	if stale == nil || !stale.reported || !stale.reportedOpen {
+		t.Fatalf("silent reported play not selected as one: %+v", candidates)
+	}
+	if _, err := pool.Exec(ctx, `UPDATE abs_playback_sessions SET last_sync_at = NOW() WHERE id = $1`, silent); err != nil {
+		t.Fatal(err)
+	}
+	h.endReportedPlay(ctx, pool, *stale, time.Now())
+	var state string
+	if err := pool.QueryRow(ctx, `SELECT state FROM playback_session_lifecycle WHERE session_id = $1`, silent).Scan(&state); err != nil || state != LifecyclePlaying {
+		t.Fatalf("play with a late report: state %q, %v; want still playing", state, err)
+	}
+
+	// Silent past the grace: the sweep ends it.
+	if _, err := pool.Exec(ctx, `UPDATE abs_playback_sessions SET last_sync_at = NOW() - interval '2 minutes' WHERE id = $1`, silent); err != nil {
+		t.Fatal(err)
+	}
+	h.sweepLifecycle(ctx, pool, time.Now())
+	var closed bool
+	var watched, played, start float64
+	var reason string
+	if err := pool.QueryRow(ctx, `SELECT s.closed_at IS NOT NULL, h.watched_seconds, h.played_seconds, h.start_position_seconds, h.end_reason
+		FROM abs_playback_sessions s JOIN admin_playback_history h ON h.session_id = s.id WHERE s.id = $1`, silent).
+		Scan(&closed, &watched, &played, &start, &reason); err != nil {
+		t.Fatalf("ended reported play has no history row: %v", err)
+	}
+	// It began at 100 s and seeked: the start is not 600 less 300 listened.
+	if !closed || watched != 600 || played != 300 || start != 100 || reason != string(PlaybackEndExpired) {
+		t.Fatalf("ended play: closed %v, watched %v, played %v, start %v, reason %q; want closed, 600, 300, 100, expired",
+			closed, watched, played, start, reason)
+	}
+	got := listed()
+	if _, ok := got[silent]; ok {
+		t.Error("an ended reported play is still listed")
+	}
+	if _, ok := got[live]; !ok {
+		t.Error("the sweep ended a reported play still reporting")
+	}
+}
+
+// insertReportedPlay stores an open Audiobookshelf reported play that began
+// ten minutes ago, last reported lastReport ago, and its lifecycle start.
+func insertReportedPlay(t *testing.T, ctx context.Context, pool *pgxpool.Pool, account, file int, book string, lastReport time.Duration) string {
+	t.Helper()
+	id := uuid.NewString()
+	if _, err := pool.Exec(ctx, `INSERT INTO abs_playback_sessions
+		(id, user_id, profile_id, content_id, media_file_id, started_at, last_sync_at,
+		 time_listening_seconds, current_position_seconds, client_session_id)
+		VALUES ($1, $2, 'p-1', $3, $4, NOW() - interval '10 minutes', $5, 300, 600, $6)`,
+		id, account, book, file, time.Now().Add(-lastReport), "local-"+id); err != nil {
+		t.Fatal(err)
+	}
+	facts, _ := json.Marshal(map[string]any{
+		"session_id": id, "user_id": account, "profile_id": "p-1", "media_file_id": file,
+		"play_method": "direct_play", "started_at": time.Now().Add(-10 * time.Minute).UTC(), "client_name": "Plappa",
+		"position_seconds": 100,
+	})
+	if _, err := pool.Exec(ctx, `INSERT INTO playback_session_lifecycle
+		(session_id, frontend, state, seq, user_id, profile_id, media_file_id, requested_media_file_id, started_at, updated_at, start_facts)
+		VALUES ($1, 'abs', 'playing', nextval('playback_session_lifecycle_seq'), $2, 'p-1', $3, $3,
+		 NOW() - interval '10 minutes', NOW() - interval '10 minutes', $4::jsonb)`, id, account, file, string(facts)); err != nil {
+		t.Fatal(err)
+	}
+	return id
 }

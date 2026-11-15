@@ -86,13 +86,16 @@ export function EditorErrors({
   fieldErrors: Record<string, string>;
 }) {
   const unplaced = Object.entries(fieldErrors).filter(([key]) => !isPlacedError(key));
-  if (!message && unplaced.length === 0) return null;
+  // A refusal with one field error carries that error as its message too; skip
+  // the message when this box already shows the same text.
+  const summary = message && !unplaced.some(([, detail]) => detail === message) ? message : null;
+  if (!summary && unplaced.length === 0) return null;
   return (
     <div
       role="alert"
       className="border-destructive/40 bg-destructive/10 text-destructive space-y-1 rounded-md border px-3 py-2 text-sm"
     >
-      {message ? <p>{message}</p> : null}
+      {summary ? <p>{summary}</p> : null}
       {unplaced.map(([key, detail]) => (
         <p key={key}>{detail}</p>
       ))}

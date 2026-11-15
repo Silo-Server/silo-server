@@ -249,7 +249,7 @@ func (s *Service) RequesterOptions(ctx context.Context, viewer Viewer, mediaType
 	if err := s.ensureRequestsEnabled(ctx); err != nil {
 		return nil, err
 	}
-	if err := s.ensureViewerRequestsAllowed(ctx, viewer.UserID); err != nil {
+	if err := s.ensureViewerRequestsAllowed(ctx, viewer); err != nil {
 		return nil, err
 	}
 	mediaType, err := normalizeMediaType(mediaType)

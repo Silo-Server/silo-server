@@ -54,6 +54,7 @@ export function ConnectStep() {
           <SettingField
             label={t("web.setup.connect.addressLabel")}
             description={t("web.setup.connect.addressDescription")}
+            // eslint-disable-next-line formatjs/no-literal-string-in-jsx -- an example value, not text
             hint="http://your-server:8096"
             value={form.getValue("jellyfin_compat.public_url")}
             onChange={(v) => form.setValue("jellyfin_compat.public_url", v)}

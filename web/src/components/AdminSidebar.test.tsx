@@ -1,6 +1,6 @@
 import type { SettingsHealthItem } from "@/hooks/admin/useSettingsHealth";
 import type { BuildInfo } from "@/hooks/queries/admin/system";
-import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { MemoryRouter } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -160,39 +160,32 @@ describe("AdminSidebar", () => {
     );
   });
 
-  it("opens and closes a topic on click and remembers the choice", () => {
-    const view = renderLiveSidebar("/admin");
+  it("folds other topics away on arriving in a new one and starts fresh on the next visit", () => {
+    const view = renderLiveSidebar("/admin/libraries");
     const integrations = screen.getByRole("button", { name: "Integrations" });
-
     fireEvent.click(integrations);
     expect(integrations).toHaveAttribute("aria-expanded", "true");
-    expect(
-      within(screen.getByRole("list", { name: "Integrations" })).getByRole("link", {
-        name: "AI Services",
-      }),
-    ).toHaveAttribute("href", "/admin/settings/ai");
-
-    view.unmount();
-    renderLiveSidebar("/admin/users");
-    expect(screen.getByRole("button", { name: "Integrations" })).toHaveAttribute(
+    expect(screen.getByRole("button", { name: "Libraries" })).toHaveAttribute(
       "aria-expanded",
       "true",
     );
-  });
 
-  it("reopens the current page's topic even after it was closed there", () => {
-    renderLiveSidebar("/admin/libraries");
-    fireEvent.click(screen.getByRole("button", { name: "Libraries" }));
+    fireEvent.click(
+      within(screen.getByRole("list", { name: "Integrations" })).getByRole("link", {
+        name: "AI Services",
+      }),
+    );
+    expect(integrations).toHaveAttribute("aria-expanded", "true");
     expect(screen.getByRole("button", { name: "Libraries" })).toHaveAttribute(
       "aria-expanded",
       "false",
     );
-    cleanup();
 
-    renderLiveSidebar("/admin/collections");
-    expect(screen.getByRole("button", { name: "Libraries" })).toHaveAttribute(
+    view.unmount();
+    renderLiveSidebar("/admin/libraries");
+    expect(screen.getByRole("button", { name: "Integrations" })).toHaveAttribute(
       "aria-expanded",
-      "true",
+      "false",
     );
   });
 

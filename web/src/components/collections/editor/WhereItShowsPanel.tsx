@@ -10,7 +10,7 @@ import { adminKeys } from "@/hooks/queries/keys";
 import {
   librariesNotPicked,
   noHeading,
-  SMART_LIBRARIES_HELP,
+  smartLibrariesHelp,
   personalTabHelp,
   shelfAfterCreate,
   showOnTabLabel,
@@ -18,6 +18,7 @@ import {
   unshareWarning,
 } from "@/lib/collections/copy";
 import { SERVER_SCOPE, type CollectionDraft } from "@/lib/collections/scope";
+import { joinList } from "@/lib/appLocale";
 
 import { HideCollectionDialog } from "../HideCollectionDialog";
 import { focusLibrariesLine } from "../fields/librariesLineFocus";
@@ -97,7 +98,7 @@ function ServerFacts({
       {picker ? (
         <SettingRow
           label={t("web.collections.copy.fieldLibraries")}
-          value={SMART_LIBRARIES_HELP}
+          value={smartLibrariesHelp()}
           action={
             <LibraryMultiSelect
               libraries={picker.options}
@@ -105,7 +106,7 @@ function ServerFacts({
               onChange={picker.onChange}
               hideAllOption
               emptyLabel={t("web.collections.fields.chooseLibraries")}
-              triggerLabel="Show in libraries"
+              triggerLabel={t("web.collections.whereItShows.librariesTrigger")}
               triggerClassName="h-8 max-w-[14rem] justify-between gap-1 rounded-[10px] px-3"
             />
           }
@@ -115,7 +116,7 @@ function ServerFacts({
           label={t("web.collections.copy.fieldLibraries")}
           value={
             libraries.length > 0 ? (
-              <Value>{libraries.map((library) => library.name).join(", ")}</Value>
+              <Value>{joinList(libraries.map((library) => library.name))}</Value>
             ) : (
               librariesNotPicked()
             )
@@ -137,7 +138,7 @@ function ServerFacts({
         label={t("web.collections.whereItShows.shelf")}
         value={
           collectionId ? (
-            <Value>{shelves.join(", ")}</Value>
+            <Value>{joinList(shelves)}</Value>
           ) : (
             <>
               <Value>{noHeading()}</Value> {DOT} {shelfAfterCreate()}

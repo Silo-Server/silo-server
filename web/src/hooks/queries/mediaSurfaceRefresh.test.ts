@@ -14,6 +14,8 @@ import {
   sectionKeys,
   watchlistKeys,
 } from "./keys";
+import type { HomeSectionItemsResponse } from "@/api/types";
+import { sectionShowsWholeList } from "./homeRowLimit";
 import {
   cancelItemDetailQueries,
   dropInactiveWatchDetail,
@@ -309,17 +311,32 @@ describe("invalidateMediaSurfaceQueries", () => {
     const queryClient = new QueryClient();
     const moviesLayoutKey = sectionKeys.libraryLayout(1);
     const moviesSectionKey = sectionKeys.libraryItems(1, "recently-added");
-    const internationalLayoutKey = sectionKeys.libraryLayout(3);
+    const internationalSectionKey = sectionKeys.libraryItems(3, "recently-added");
 
     queryClient.setQueryData(moviesLayoutKey, { sections: [] });
     queryClient.setQueryData(moviesSectionKey, { section: { id: "recently-added", items: [] } });
-    queryClient.setQueryData(internationalLayoutKey, { sections: [] });
+    queryClient.setQueryData(internationalSectionKey, {
+      section: { id: "recently-added", items: [] },
+    });
 
     await invalidateMediaSurfaceQueries(queryClient, { libraryId: 3 });
 
     expect(queryClient.getQueryState(moviesLayoutKey)?.isInvalidated).toBe(false);
     expect(queryClient.getQueryState(moviesSectionKey)?.isInvalidated).toBe(false);
-    expect(queryClient.getQueryState(internationalLayoutKey)?.isInvalidated).toBe(true);
+    expect(queryClient.getQueryState(internationalSectionKey)?.isInvalidated).toBe(true);
+  });
+
+  it("leaves library layouts alone, scoped or not", async () => {
+    // The sidebar observes every pinned library's layout on every page, so a
+    // media change that refetched layouts would read each one per event.
+    const queryClient = new QueryClient();
+    const layoutKey = sectionKeys.libraryLayout(3);
+    queryClient.setQueryData(layoutKey, { sections: [] });
+
+    await invalidateMediaSurfaceQueries(queryClient, { libraryId: 3 });
+    await invalidateMediaSurfaceQueries(queryClient);
+
+    expect(queryClient.getQueryState(layoutKey)?.isInvalidated).toBe(false);
   });
 
   it("leaves home section queries alone for a library-scoped change", async () => {
@@ -385,6 +402,30 @@ describe("invalidateMediaSurfaceQueries", () => {
         items: [{ content_id: "item-2" }],
       },
     });
+  });
+
+  it("keeps a row filled to its limit from reading as its whole list after a removal", () => {
+    const queryClient = new QueryClient();
+    const items = Array.from({ length: 20 }, (_, index) => ({ content_id: `item-${index}` }));
+    queryClient.setQueryData(sectionKeys.homeItems("continue"), {
+      section: {
+        id: "continue",
+        section_type: "continue_watching",
+        item_limit: 20,
+        total_count: 20,
+        items,
+      },
+    });
+
+    removeItemFromHomeSectionCaches(queryClient, "item-0", "continue_watching");
+
+    const row = queryClient.getQueryData<HomeSectionItemsResponse>(
+      sectionKeys.homeItems("continue"),
+    );
+    expect(row?.section.items).toHaveLength(19);
+    // The server cut the row at 20, so its list may hold a card to take the
+    // removed one's place.
+    expect(row && sectionShowsWholeList(row.section)).toBe(false);
   });
 
   it("does not invalidate detail queries for a different item ID when itemId is specified", async () => {

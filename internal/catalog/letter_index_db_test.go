@@ -44,28 +44,32 @@ func lettersOfList(keys []string) LetterIndex {
 	return index
 }
 
-// orderedTitleKeys pages the whole query through the cursor pager and returns
-// each item's title sort key in list order.
+// orderedTitleKeys pages the whole query through the cursor pager, a few
+// items a page, and returns each item's title sort key in list order.
 func orderedTitleKeys(t *testing.T, resolver *CatalogResolver, req CatalogRequest, access AccessFilter) []string {
 	t.Helper()
 	req.CursorPaging = true
-	req.Limit = 200
-	result, err := resolver.Resolve(t.Context(), req, access)
-	if err != nil {
-		t.Fatalf("resolve: %v", err)
-	}
-	if result.HasMore {
-		t.Fatal("seeded list should fit one page")
-	}
-	keys := make([]string, 0, len(result.Items))
-	for _, item := range result.Items {
-		key := strings.Trim(item.SortTitle, " ")
-		if key == "" {
-			key = item.Title
+	req.Limit = 3
+	var keys []string
+	for range 100 {
+		result, err := resolver.Resolve(t.Context(), req, access)
+		if err != nil {
+			t.Fatalf("resolve: %v", err)
 		}
-		keys = append(keys, key)
+		for _, item := range result.Items {
+			key := strings.Trim(item.SortTitle, " ")
+			if key == "" {
+				key = item.Title
+			}
+			keys = append(keys, key)
+		}
+		if !result.HasMore {
+			return keys
+		}
+		req.After = result.Next
 	}
-	return keys
+	t.Fatal("pager did not reach the end of the seeded list")
+	return nil
 }
 
 // TestLetterIndexMatchesCursorPagesPostgres checks the letter index against
@@ -73,8 +77,10 @@ func orderedTitleKeys(t *testing.T, resolver *CatalogResolver, req CatalogReques
 // away, accents folded, anything else under #), every letter's position is
 // where the cursor pager lists its first title, in both directions and when a
 // seek jumps there, and the runs match the pager's order whatever the
-// database collation does with accented and non-Latin initials. Set SILO_TEST_DATABASE_URL to a migrated
-// disposable database; every inserted row is removed on completion.
+// database collation does with accented, punctuated, and non-Latin initials:
+// a linguistic collation sorts "Élite" among the E titles and "'Allo 'Allo!"
+// among the A titles, C sorts both apart. Set SILO_TEST_DATABASE_URL to a
+// migrated disposable database; every inserted row is removed on completion.
 func TestLetterIndexMatchesCursorPagesPostgres(t *testing.T) {
 	pool := collectionSortTestPool(t)
 	ctx := t.Context()
@@ -100,6 +106,8 @@ func TestLetterIndexMatchesCursorPagesPostgres(t *testing.T) {
 		{"Titanic", ""},
 		{"Élite", ""},
 		{"Eagle Eye", ""},
+		{"Ève", ""},
+		{"'Allo 'Allo!", ""},
 		{"2001: A Space Odyssey", ""},
 		{"(500) Days of Summer", ""},
 		{"alien", ""},
@@ -126,7 +134,7 @@ func TestLetterIndexMatchesCursorPagesPostgres(t *testing.T) {
 
 	resolver := NewCatalogResolver(NewBrowseRepository(pool), NewItemRepository(pool))
 	access := AccessFilter{AllowedLibraryIDs: []int{libraryID}}
-	wantCounts := map[string]int{"#": 3, "A": 2, "E": 2, "H": 2, "O": 1, "S": 1, "T": 1, "Z": 1}
+	wantCounts := map[string]int{"#": 4, "A": 2, "E": 3, "H": 2, "O": 1, "S": 1, "T": 1, "Z": 1}
 
 	for _, order := range []string{"asc", "desc"} {
 		t.Run(order, func(t *testing.T) {
@@ -278,5 +286,105 @@ func TestLetterIndexEpisodesMatchCursorPagesPostgres(t *testing.T) {
 	}
 	if got.Letters[0].Position != 0 || got.Runs[0].Position != 0 {
 		t.Fatalf("first letter starts at %d and first run at %d, want 0", got.Letters[0].Position, got.Runs[0].Position)
+	}
+}
+
+// TestEpisodeSortTitleFilesEpisodeBrowsePostgres checks that a Sort Title set
+// through the metadata editor decides where an episode sorts and which letter
+// it files under in an episode library browse, and that clearing it falls back
+// to the title. Set SILO_TEST_DATABASE_URL to a migrated disposable database;
+// every inserted row is removed on completion.
+func TestEpisodeSortTitleFilesEpisodeBrowsePostgres(t *testing.T) {
+	pool := collectionSortTestPool(t)
+	ctx := t.Context()
+	prefix := fmt.Sprintf("episode-sort-title-%d", time.Now().UnixNano())
+	seriesID, seasonID := prefix+"-series", prefix+"-season"
+	var library int
+	if err := pool.QueryRow(ctx, `INSERT INTO media_folders (type,name,enabled) VALUES ('series',$1,true) RETURNING id`, prefix).Scan(&library); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM media_items WHERE content_id=$1`, seriesID)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM media_folders WHERE id=$1`, library)
+	})
+	batchEquivExec(t, pool, `INSERT INTO media_items (content_id,type,title,genres) VALUES ($1,'series','Sort fixture','{}')`, seriesID)
+	batchEquivExec(t, pool, `INSERT INTO media_item_libraries (content_id, media_folder_id) VALUES ($1, $2)`, seriesID, library)
+	batchEquivExec(t, pool, `INSERT INTO seasons (content_id,series_id,season_number) VALUES ($1,$2,1)`, seasonID, seriesID)
+	batchEquivExec(t, pool, `INSERT INTO episodes (content_id,series_id,season_id,season_number,episode_number,title)
+		SELECT $1 || '-' || n, $2, $3, 1, n, (ARRAY['Alpha','Bravo','Charlie'])[n] FROM generate_series(1,3) n`, prefix, seriesID, seasonID)
+	batchEquivExec(t, pool, `INSERT INTO media_files (content_id,episode_id,media_folder_id,file_path)
+		SELECT $1, content_id, $2, content_id || '.mkv' FROM episodes WHERE series_id=$1`, seriesID, library)
+	batchEquivExec(t, pool, `INSERT INTO episode_libraries (episode_id,media_folder_id)
+		SELECT content_id, $2 FROM episodes WHERE series_id=$1`, seriesID, library)
+
+	episodes := NewEpisodeRepository(pool)
+	setSortTitle := func(n int, sortTitle string) {
+		t.Helper()
+		if err := episodes.UpdateMetadata(ctx, fmt.Sprintf("%s-%d", prefix, n), &MetadataUpdate{SortTitle: &sortTitle}); err != nil {
+			t.Fatalf("update sort title: %v", err)
+		}
+	}
+	resolver := NewCatalogResolver(NewBrowseRepository(pool), NewItemRepository(pool))
+	access := AccessFilter{AllowedLibraryIDs: []int{library}}
+	request := func(order, namePrefix string) CatalogRequest {
+		return CatalogRequest{
+			Source:     CatalogSourceQuery,
+			NamePrefix: namePrefix,
+			Limit:      50,
+			Query: QueryDefinition{
+				MediaScope: "episode",
+				LibraryIDs: []int{library},
+				Sort:       QuerySort{Field: querySortTitle, Order: order},
+			},
+		}
+	}
+	titles := func(order, namePrefix string) []string {
+		t.Helper()
+		result, err := resolver.Resolve(ctx, request(order, namePrefix), access)
+		if err != nil {
+			t.Fatalf("resolve: %v", err)
+		}
+		got := []string{}
+		for _, item := range result.Items {
+			got = append(got, item.Title)
+		}
+		return got
+	}
+	letters := func() []string {
+		t.Helper()
+		index, err := resolver.LetterIndex(ctx, request("asc", ""), access)
+		if err != nil {
+			t.Fatalf("letter index: %v", err)
+		}
+		got := []string{}
+		for _, bucket := range index.Letters {
+			got = append(got, fmt.Sprintf("%s:%d@%d", bucket.Letter, bucket.Count, bucket.Position))
+		}
+		return got
+	}
+
+	setSortTitle(1, "Zulu")
+	setSortTitle(3, "  Able  ")
+	for _, tc := range []struct {
+		name, order, namePrefix string
+		want                    []string
+	}{
+		{"ascending", "asc", "", []string{"Charlie", "Bravo", "Alpha"}},
+		{"descending", "desc", "", []string{"Alpha", "Bravo", "Charlie"}},
+		{"letter A", "asc", "a", []string{"Charlie"}},
+		{"letter Z", "asc", "z", []string{"Alpha"}},
+	} {
+		if got := titles(tc.order, tc.namePrefix); !slices.Equal(got, tc.want) {
+			t.Errorf("%s: got %v, want %v", tc.name, got, tc.want)
+		}
+	}
+	if got, want := letters(), []string{"A:1@0", "B:1@1", "Z:1@2"}; !slices.Equal(got, want) {
+		t.Errorf("letters: got %v, want %v", got, want)
+	}
+
+	// A cleared Sort Title files the episode under its title again.
+	setSortTitle(3, "")
+	if got, want := titles("asc", ""), []string{"Bravo", "Charlie", "Alpha"}; !slices.Equal(got, want) {
+		t.Errorf("after clearing: got %v, want %v", got, want)
 	}
 }

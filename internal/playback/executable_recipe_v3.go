@@ -19,33 +19,37 @@ type ExecutableRecipeV3 struct {
 	TranscodeAudio bool       `json:"transcode_audio"`
 	// RemuxResumeLeadingPictureDrop is best effort, so a binary that predates
 	// it may ignore it without a recipe version change.
-	RemuxResumeLeadingPictureDrop bool                   `json:"remux_resume_leading_picture_drop,omitempty"`
-	TargetVideoCodec              string                 `json:"target_video_codec,omitempty"`
-	TargetAudioCodec              string                 `json:"target_audio_codec,omitempty"`
-	TargetAudioChannels           int                    `json:"target_audio_channels,omitempty"`
-	TargetAudioBitrateKbps        int                    `json:"target_audio_bitrate_kbps,omitempty"`
-	TargetResolution              string                 `json:"target_resolution,omitempty"`
-	TargetBitrateKbps             int                    `json:"target_bitrate_kbps,omitempty"`
-	SourceVideoCodec              string                 `json:"source_video_codec,omitempty"`
-	SourceVideoProfile            string                 `json:"source_video_profile,omitempty"`
-	SourceVideoBitDepth           int                    `json:"source_video_bit_depth,omitempty"`
-	SourceAudioChannels           int                    `json:"source_audio_channels,omitempty"`
-	SoftwareVideoDecode           bool                   `json:"software_video_decode,omitempty"`
-	SourceDurationSeconds         float64                `json:"source_duration_seconds,omitempty"`
-	ToneMapPolicy                 tonemap.Policy         `json:"tone_map_policy,omitempty"`
-	ToneMapMode                   tonemap.Mode           `json:"tone_map_mode,omitempty"`
-	ToneMapSourceKind             tonemap.SourceKind     `json:"tone_map_source_kind,omitempty"`
-	ToneMapRecipeVersion          string                 `json:"tone_map_recipe_version,omitempty"`
-	ToneMapPreflightRequired      bool                   `json:"tone_map_preflight_required,omitempty"`
-	ToneMapSourceRevision         tonemap.SourceRevision `json:"tone_map_source_revision,omitzero"`
-	ToneMapDVConfigPresent        bool                   `json:"tone_map_dv_config_present,omitempty"`
-	ToneMapDVBLCompatIDPresent    bool                   `json:"tone_map_dv_bl_compat_id_present,omitempty"`
-	ToneMapDVBLPresent            bool                   `json:"tone_map_dv_bl_present,omitempty"`
-	ToneMapDVRPUPresent           bool                   `json:"tone_map_dv_rpu_present,omitempty"`
-	SubtitleTrackIndex            int                    `json:"subtitle_track_index"`
-	SubtitleTransportTrackIndex   int                    `json:"subtitle_transport_track_index"`
-	SubtitleBurnIn                bool                   `json:"subtitle_burn_in"`
-	SubtitleCodec                 string                 `json:"subtitle_codec,omitempty"`
+	RemuxResumeLeadingPictureDrop bool `json:"remux_resume_leading_picture_drop,omitempty"`
+	// AdaptationReasons affects no bytes. It rides on the recipe so a seek
+	// reanchor, which rebuilds the session from it, keeps reporting why the
+	// route adapts; a binary that predates it ignores it.
+	AdaptationReasons           []string               `json:"adaptation_reasons,omitempty"`
+	TargetVideoCodec            string                 `json:"target_video_codec,omitempty"`
+	TargetAudioCodec            string                 `json:"target_audio_codec,omitempty"`
+	TargetAudioChannels         int                    `json:"target_audio_channels,omitempty"`
+	TargetAudioBitrateKbps      int                    `json:"target_audio_bitrate_kbps,omitempty"`
+	TargetResolution            string                 `json:"target_resolution,omitempty"`
+	TargetBitrateKbps           int                    `json:"target_bitrate_kbps,omitempty"`
+	SourceVideoCodec            string                 `json:"source_video_codec,omitempty"`
+	SourceVideoProfile          string                 `json:"source_video_profile,omitempty"`
+	SourceVideoBitDepth         int                    `json:"source_video_bit_depth,omitempty"`
+	SourceAudioChannels         int                    `json:"source_audio_channels,omitempty"`
+	SoftwareVideoDecode         bool                   `json:"software_video_decode,omitempty"`
+	SourceDurationSeconds       float64                `json:"source_duration_seconds,omitempty"`
+	ToneMapPolicy               tonemap.Policy         `json:"tone_map_policy,omitempty"`
+	ToneMapMode                 tonemap.Mode           `json:"tone_map_mode,omitempty"`
+	ToneMapSourceKind           tonemap.SourceKind     `json:"tone_map_source_kind,omitempty"`
+	ToneMapRecipeVersion        string                 `json:"tone_map_recipe_version,omitempty"`
+	ToneMapPreflightRequired    bool                   `json:"tone_map_preflight_required,omitempty"`
+	ToneMapSourceRevision       tonemap.SourceRevision `json:"tone_map_source_revision,omitzero"`
+	ToneMapDVConfigPresent      bool                   `json:"tone_map_dv_config_present,omitempty"`
+	ToneMapDVBLCompatIDPresent  bool                   `json:"tone_map_dv_bl_compat_id_present,omitempty"`
+	ToneMapDVBLPresent          bool                   `json:"tone_map_dv_bl_present,omitempty"`
+	ToneMapDVRPUPresent         bool                   `json:"tone_map_dv_rpu_present,omitempty"`
+	SubtitleTrackIndex          int                    `json:"subtitle_track_index"`
+	SubtitleTransportTrackIndex int                    `json:"subtitle_transport_track_index"`
+	SubtitleBurnIn              bool                   `json:"subtitle_burn_in"`
+	SubtitleCodec               string                 `json:"subtitle_codec,omitempty"`
 	// SubtitleSource pins which sidecar inventory segment SubtitleTrackIndex
 	// pointed into when the plan was accepted, and the identity fields below
 	// pin the exact entry. The combined index space (externals, then embedded,
@@ -104,6 +108,7 @@ func FreezeExecutableRecipeV3(result PlannerResultV3) ExecutableRecipeV3 {
 		PlayMethod:                    result.PlayMethod,
 		TranscodeAudio:                result.TranscodeAudio,
 		RemuxResumeLeadingPictureDrop: result.RemuxResumeLeadingPictureDrop,
+		AdaptationReasons:             result.AdaptationReasons,
 		TargetVideoCodec:              result.TargetVideoCodec,
 		TargetAudioCodec:              result.TargetAudioCodec,
 		TargetAudioChannels:           result.TargetAudioChannels,
@@ -234,6 +239,7 @@ func (r ExecutableRecipeV3) PlannerResult(plan *PlanV3) PlannerResultV3 {
 		PlayMethod:                    r.PlayMethod,
 		TranscodeAudio:                r.TranscodeAudio,
 		RemuxResumeLeadingPictureDrop: r.RemuxResumeLeadingPictureDrop,
+		AdaptationReasons:             NormalizeAdaptationReasons(r.AdaptationReasons),
 		TargetVideoCodec:              r.TargetVideoCodec,
 		TargetAudioCodec:              r.TargetAudioCodec,
 		SourceAudioChannels:           r.SourceAudioChannels,

@@ -200,7 +200,8 @@ func (p *MeilisearchSearchProvider) createRankingSession(ctx context.Context, re
 	}
 	request.Offset, request.Limit = 0, window
 	var response meilisearchSearchResponse
-	if request.Hybrid != nil && searchRequestMixesEpisodeAndMedia(req.ItemTypes) && !p.isFederationUnsupported() {
+	// Hybrid searches always federate: see buildFederatedSearchRequest.
+	if request.Hybrid != nil && !p.isFederationUnsupported() {
 		response, err = p.client.FederatedSearch(ctx, p.buildFederatedSearchRequest(state.ActiveIndexUID, req, request, 0, window))
 		if err != nil && isMeilisearchFederationUnsupported(err) {
 			p.markFederationUnsupported()
@@ -209,7 +210,7 @@ func (p *MeilisearchSearchProvider) createRankingSession(ctx context.Context, re
 			response, err = p.client.Search(ctx, state.ActiveIndexUID, request)
 		}
 	} else {
-		if request.Hybrid != nil && searchRequestMixesEpisodeAndMedia(req.ItemTypes) {
+		if request.Hybrid != nil {
 			request.Hybrid, request.Vector = nil, nil
 			fallback = "Meilisearch federation unsupported; using keyword search"
 		}

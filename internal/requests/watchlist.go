@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
 	"strings"
 
 	"github.com/Silo-Server/silo-server/internal/access"
@@ -112,14 +113,16 @@ func (s *Service) WatchlistRequestsEnabled(ctx context.Context, viewer Viewer) (
 
 // WatchlistCeiling gates the watchlist-title operations, which live on the
 // requests surface: it answers ErrRequestsDisabled while requests are off,
-// and otherwise the viewer's parental rating ceiling ("" = unrestricted).
+// ErrForbidden for a profile blocked from requests (the titles come from
+// TMDB, like discovery), and otherwise the viewer's parental rating ceiling
+// ("" = unrestricted).
 // A title above the ceiling is hidden from the viewer's watchlist the way
 // Discover hides it.
 func (s *Service) WatchlistCeiling(ctx context.Context, viewer Viewer) (string, error) {
 	if err := validateViewer(viewer); err != nil {
 		return "", err
 	}
-	if err := s.ensureRequestsEnabled(ctx); err != nil {
+	if err := s.ensureDiscoveryAllowed(ctx, viewer); err != nil {
 		return "", err
 	}
 	return s.viewerContentCeiling(ctx, viewer)
@@ -241,7 +244,8 @@ func (s *Service) RequestFromWatchlist(ctx context.Context, viewer Viewer, title
 	}
 	refusal := ""
 	if enabled {
-		refusal = s.applyWatchlistRequest(ctx, viewer, title)
+		// A failure is logged and leaves the state as computed.
+		refusal, _ = s.applyWatchlistRequest(ctx, viewer, title)
 	}
 	states, err := s.WatchlistRequestStates(ctx, viewer, []WatchlistTitle{title})
 	if err != nil {
@@ -255,17 +259,83 @@ func (s *Service) RequestFromWatchlist(ctx context.Context, viewer Viewer, title
 	return state, nil
 }
 
-// applyWatchlistRequest creates or follows the title's request and returns
-// the reason a refused request gives, if any.
-func (s *Service) applyWatchlistRequest(ctx context.Context, viewer Viewer, title WatchlistTitle) string {
+// RequestQueuedWatchlistTitles applies watchlist requests, in order, to
+// titles watch provider sync keeps on the viewer's watchlist, so a title the
+// quota refused when it was imported is requested on a later run, once the
+// window has room. It only ever requests: a title with an open request is
+// left alone, since a follow the profile dropped must stay dropped, and a
+// title the profile requested before, whatever became of that request, is
+// skipped, so a decline or a withdrawal is never undone. The queue stops at
+// the first title the quota or a block refuses, so a later title never takes
+// an earlier one's place. A title whose request fails otherwise is skipped
+// until the next run, so one title that keeps failing can't hold up the rest.
+// It makes no call while watchlist requests don't apply to the viewer.
+func (s *Service) RequestQueuedWatchlistTitles(ctx context.Context, viewer Viewer, titles []WatchlistTitle) error {
+	if err := validateViewer(viewer); err != nil || len(titles) == 0 {
+		return err
+	}
+	enabled, err := s.WatchlistRequestsEnabled(withPolicyCache(ctx), viewer)
+	if err != nil || !enabled {
+		return err
+	}
+	byType := map[MediaType][]int{}
+	for i := range titles {
+		mediaType, err := normalizeMediaType(titles[i].MediaType)
+		if err != nil {
+			continue
+		}
+		titles[i].MediaType = mediaType
+		byType[mediaType] = append(byType[mediaType], titles[i].tmdbIDs()...)
+	}
+	active := map[MediaType]map[int]*Request{}
+	requested := map[MediaType]map[int]bool{}
+	for mediaType, ids := range byType {
+		if active[mediaType], err = s.store.ListActiveByTMDB(ctx, mediaType, ids); err != nil {
+			return err
+		}
+		if requested[mediaType], err = s.store.ListRequestedTMDB(ctx, viewer, mediaType, ids); err != nil {
+			return err
+		}
+	}
+	for _, title := range titles {
+		if byType[title.MediaType] == nil || title.TMDBID <= 0 {
+			continue
+		}
+		if title.requestOf(active[title.MediaType]) != nil {
+			continue
+		}
+		if slices.ContainsFunc(title.tmdbIDs(), func(id int) bool { return requested[title.MediaType][id] }) {
+			continue
+		}
+		// A fresh policy read per title: each request uses up the quota.
+		policy, err := s.EffectivePolicy(ctx, viewer.UserID)
+		if err != nil {
+			return err
+		}
+		if policy.Blocked || (!policy.Unlimited && policy.Remaining <= 0) {
+			return nil
+		}
+		// applyWatchlistRequest logs a failure; the title waits for the next run.
+		refusal, _ := s.applyWatchlistRequest(ctx, viewer, title)
+		if refusal == reasonQuotaExceeded || refusal == reasonBlocked {
+			return nil
+		}
+	}
+	return nil
+}
+
+// applyWatchlistRequest creates or follows the title's request. It returns the
+// reason a refused request gives, if any, and the error of a request that
+// failed for another reason; both are logged here.
+func (s *Service) applyWatchlistRequest(ctx context.Context, viewer Viewer, title WatchlistTitle) (string, error) {
 	active, err := s.store.ListActiveByTMDB(ctx, title.MediaType, title.tmdbIDs())
 	if err != nil {
 		s.logWatchlistRequest(ctx, "reading the title's request failed", viewer, title, err)
-		return ""
+		return "", err
 	}
 	if req := title.requestOf(active); req != nil {
 		s.followFromWatchlist(ctx, viewer, title, req)
-		return ""
+		return "", nil
 	}
 	input := CreateRequestInput{
 		MediaType:    title.MediaType,
@@ -288,21 +358,25 @@ func (s *Service) applyWatchlistRequest(ctx context.Context, viewer Viewer, titl
 	_, err = s.CreateRequest(ctx, viewer, input)
 	switch {
 	case err == nil:
-		return ""
+		return "", nil
 	case errors.Is(err, ErrAlreadyRequested):
 		// Another request landed between the read and the create.
 		active, err := s.store.ListActiveByTMDB(ctx, title.MediaType, title.tmdbIDs())
 		if err != nil {
 			s.logWatchlistRequest(ctx, "reading the title's request failed", viewer, title, err)
-			return ""
+			return "", err
 		}
 		if req := title.requestOf(active); req != nil {
 			s.followFromWatchlist(ctx, viewer, title, req)
 		}
-		return ""
+		return "", nil
 	}
 	s.logWatchlistRequest(ctx, "watchlist request refused", viewer, title, err)
-	return watchlistRefusalReason(err)
+	refusal := watchlistRefusalReason(err)
+	if refusal == "" {
+		return "", err
+	}
+	return refusal, nil
 }
 
 func (s *Service) followFromWatchlist(ctx context.Context, viewer Viewer, title WatchlistTitle, req *Request) {
@@ -411,6 +485,13 @@ func (s *Service) WatchlistRequestStates(ctx context.Context, viewer Viewer, tit
 	if err != nil {
 		return nil, err
 	}
+	// The policy is the account's; a profile blocked from requests cannot
+	// request a title from its watchlist either.
+	blocked, err := s.profileRequestsBlocked(ctx, viewer)
+	if err != nil {
+		return nil, err
+	}
+	policy.Blocked = policy.Blocked || blocked
 	byType := map[MediaType][]WatchlistTitle{}
 	for _, t := range titles {
 		mediaType, err := normalizeMediaType(t.MediaType)

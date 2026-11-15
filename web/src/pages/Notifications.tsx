@@ -1,6 +1,6 @@
 import { useAuth } from "@/hooks/useAuth";
 import { notificationScope } from "@/api/v2/notifications";
-import { Fragment, useState, useRef } from "react";
+import { Fragment, useId, useState, useRef } from "react";
 import { useSearchParams } from "react-router";
 import { Bell, BellOff, Check, CheckCheck, Loader2, Settings2 } from "lucide-react";
 import type { AppNotification } from "@/api/types";
@@ -136,6 +136,7 @@ function NotificationRow({
   const unread = !notification.read_at;
   const detailHref = notificationHref(notification);
   const reasons = reasonLabels(t, notification);
+  const titleId = useId();
 
   const body = (
     <>
@@ -149,7 +150,10 @@ function NotificationRow({
               aria-label={t("web.notifications.inbox.unread")}
             />
           )}
-          <span className={`truncate text-sm ${unread ? "font-semibold" : "font-medium"}`}>
+          <span
+            id={titleId}
+            className={`truncate text-sm ${unread ? "font-semibold" : "font-medium"}`}
+          >
             {notificationTitle(t, notification)}
           </span>
           <span className="text-muted-foreground ms-auto shrink-0 text-xs">
@@ -200,6 +204,8 @@ function NotificationRow({
           size="icon"
           className="absolute end-2 bottom-2 h-7 w-7 opacity-0 transition-opacity group-hover:opacity-100"
           title={t("web.notifications.inbox.markRead")}
+          aria-label={t("web.notifications.inbox.markRead")}
+          aria-describedby={titleId}
           onClick={(event) => {
             event.preventDefault();
             onMarkRead(notification.id);

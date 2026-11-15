@@ -65,23 +65,25 @@ func TestCollectAudiobookRootScansSymlinks(t *testing.T) {
 				link(root, filepath.Join(target, "Back to library"))
 			case "multipart book":
 				link(target, filepath.Join(root, "Author"))
-				part := filepath.Join(book, "Part Two")
+				part := filepath.Join(book, "Disc 2")
 				mkdir(part)
 				if err := os.WriteFile(filepath.Join(part, "chapter.mp3"), []byte("audio"), 0o644); err != nil {
 					t.Fatal(err)
 				}
+				wantSeen[filepath.Join(root, "Author", "Book", "Disc 2", "chapter.mp3")] = true
+				wantSeen[filepath.Join(root, "Author", "Book", "Disc 2")] = true
 			case "loose root audio":
 				link(target, filepath.Join(root, "Author"))
 				if err := os.WriteFile(filepath.Join(root, "loose.m4b"), []byte("audio"), 0o644); err != nil {
 					t.Fatal(err)
 				}
-				wantCandidates = append([]string{root}, wantCandidates...)
+				wantCandidates = append(wantCandidates, filepath.Join(root, "loose.m4b"))
 				wantSeen[filepath.Join(root, "loose.m4b")] = true
 			}
 
 			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 			defer cancel()
-			scans, err := collectAudiobookRootScans(ctx, 11, []string{root}, nil, true)
+			scans, err := collectAudiobookRootScans(ctx, 11, []string{root}, []string{root}, true, "")
 			if err != nil {
 				t.Fatalf("collectAudiobookRootScans: %v", err)
 			}
@@ -112,14 +114,14 @@ func TestCollectAudiobookRootScansBrokenSymlinkProtectsReconciliation(t *testing
 			if err := os.Symlink(filepath.Join(root, "missing-target"), filepath.Join(root, name)); err != nil {
 				t.Fatal(err)
 			}
-			scans, err := collectAudiobookRootScans(t.Context(), 11, []string{root}, nil, true)
+			scans, err := collectAudiobookRootScans(t.Context(), 11, []string{root}, []string{root}, true, "")
 			if err != nil {
 				t.Fatal(err)
 			}
 			if len(scans) != 1 || !scans[0].failed() {
 				t.Fatalf("broken symlink must mark root incomplete: %+v", scans)
 			}
-			if !reflect.DeepEqual(scans[0].candidates, []string{root}) {
+			if !reflect.DeepEqual(scans[0].candidates, []string{filepath.Join(root, "available.mp3")}) {
 				t.Errorf("readable audio should remain a candidate: %v", scans[0].candidates)
 			}
 			if !reflect.DeepEqual(scans[0].seenPaths, map[string]bool{filepath.Join(root, "available.mp3"): true}) {

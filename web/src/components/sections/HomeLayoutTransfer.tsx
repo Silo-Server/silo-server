@@ -23,7 +23,7 @@ import { sectionKeys } from "@/hooks/queries/keys";
 import { invalidateSettingValueQueries } from "@/hooks/queries/settingValues";
 import { useOptionalAuth } from "@/hooks/useAuth";
 import { useAppLanguage, useT } from "@/i18n";
-import { appLanguage } from "@/lib/appLocale";
+import { joinList } from "@/lib/appLocale";
 import { fetchRecipeCatalog } from "@/lib/recipes";
 import { SETTING_KEYS } from "@/lib/settingsContract";
 import { randomUUID } from "@/lib/uuid";
@@ -43,7 +43,7 @@ const NO_REFERENCES: HomeLayoutReferences = { personalCollections: false, profil
 
 /** Page or library names as a list: "Home, Movies" in English. */
 function listNames(names: string[]): string {
-  return new Intl.ListFormat(appLanguage(), { type: "unit", style: "short" }).format(names);
+  return joinList(names);
 }
 
 interface HomeLayoutImportDialogProps {
@@ -238,7 +238,7 @@ export function HomeLayoutImportDialog({ onClose, libraries }: HomeLayoutImportD
       toast.success(t("web.home.layout.imported"));
       onClose();
     } else {
-      toast.error(t("web.home.layout.partlyFailed", { failures: failures.join("; ") }));
+      toast.error(t("web.home.layout.partlyFailed", { failures: listNames(failures) }));
     }
   }
 

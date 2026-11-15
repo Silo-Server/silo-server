@@ -214,7 +214,7 @@ func (l *fakeLocs) EpisodeLocalizations(context.Context, []string, string) (map[
 	return l.episodeLocs, nil
 }
 
-func (l *fakeLocs) UpsertItemAI(_ context.Context, contentID, language string, overview, tagline *string) error {
+func (l *fakeLocs) UpsertItemAI(_ context.Context, contentID, language string, overview, tagline *string, _, _ string, _ bool) error {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	if l.failOnUpsert {
@@ -231,7 +231,7 @@ func (l *fakeLocs) UpsertItemAI(_ context.Context, contentID, language string, o
 	return nil
 }
 
-func (l *fakeLocs) UpsertSeasonAI(_ context.Context, contentID, language string, overview string) error {
+func (l *fakeLocs) UpsertSeasonAI(_ context.Context, contentID, language string, overview string, _ string, _ bool) error {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	if l.failOnUpsert {
@@ -241,7 +241,7 @@ func (l *fakeLocs) UpsertSeasonAI(_ context.Context, contentID, language string,
 	return nil
 }
 
-func (l *fakeLocs) UpsertEpisodeAI(_ context.Context, contentID, language string, overview string) error {
+func (l *fakeLocs) UpsertEpisodeAI(_ context.Context, contentID, language string, overview string, _ string, _ bool) error {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	if l.failOnUpsert {
@@ -966,5 +966,64 @@ func TestTranslatableField(t *testing.T) {
 		if got := translatableField(tc.base, tc.value, tc.source, tc.force); got != tc.want {
 			t.Errorf("%s: got %t, want %t", tc.name, got, tc.want)
 		}
+	}
+}
+
+// Each description is sent under its own source language: a Spanish episode in
+// an English series is translated from Spanish, and a child with no language
+// of its own keeps the series' language.
+func TestJobSendsEachDescriptionFromItsOwnLanguage(t *testing.T) {
+	for _, target := range []struct {
+		kind      TargetKind
+		contentID string
+	}{{TargetItem, "series1"}, {TargetSeason, "sea1"}} {
+		t.Run(string(target.kind), func(t *testing.T) {
+			repo, content, locs := newFakeRepo(), seriesContent(), &fakeLocs{}
+			content.episodes[1].DefaultLanguage = "es"
+			var mu sync.Mutex
+			sourceOf := map[string]string{}
+			upper := &upperChat{}
+			chat := func(ctx context.Context, system, user string) (string, error) {
+				var batch map[string]string
+				if err := json.Unmarshal([]byte(user[strings.IndexByte(user, '{'):]), &batch); err != nil {
+					return "", err
+				}
+				_, rest, _ := strings.Cut(system, " from ")
+				from, _, _ := strings.Cut(rest, " into ")
+				mu.Lock()
+				for _, text := range batch {
+					sourceOf[text] = from
+				}
+				mu.Unlock()
+				return upper.fn(ctx, system, user)
+			}
+			svc := newService(t, repo, content, locs, chat, jobrunner.NewSemaphore(1))
+
+			if _, err := svc.Enqueue(context.Background(), JobRequest{
+				TargetKind: target.kind, ContentID: target.contentID, TargetLanguage: "fr", IncludeChildren: true,
+			}); err != nil {
+				t.Fatalf("Enqueue: %v", err)
+			}
+			waitDone(t, repo)
+
+			want := map[string]string{
+				"Season one.":     "English",
+				"Pilot episode.":  "English",
+				"Second episode.": "Spanish",
+			}
+			if target.kind == TargetItem {
+				want["A show."], want["Watch it."] = "English", "English"
+			}
+			mu.Lock()
+			defer mu.Unlock()
+			if len(sourceOf) != len(want) {
+				t.Fatalf("sent %v, want %v", sourceOf, want)
+			}
+			for text, lang := range want {
+				if sourceOf[text] != lang {
+					t.Errorf("%q sent from %q, want %q", text, sourceOf[text], lang)
+				}
+			}
+		})
 	}
 }

@@ -1,4 +1,5 @@
 import type { QueryClient } from "@tanstack/react-query";
+import { isLibraryLayoutQueryKey } from "@/lib/queryInvalidation";
 import { catalogKeys, historyKeys, personKeys, progressKeys, recKeys, sectionKeys } from "./keys";
 
 /**
@@ -13,6 +14,9 @@ export async function invalidatePlaybackSurfaceQueries(queryClient: QueryClient)
     queryClient.invalidateQueries({ queryKey: recKeys.all }),
     queryClient.invalidateQueries({ queryKey: personKeys.all }),
     queryClient.invalidateQueries({ queryKey: sectionKeys.homeItemsRoot() }),
-    queryClient.invalidateQueries({ queryKey: sectionKeys.libraryRoot() }),
+    queryClient.invalidateQueries({
+      queryKey: sectionKeys.libraryRoot(),
+      predicate: (query) => !isLibraryLayoutQueryKey(query.queryKey),
+    }),
   ]);
 }

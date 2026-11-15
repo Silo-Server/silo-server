@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { TOUCH_TARGETS } from "@/lib/touchTargets";
 import { copyTextToClipboard } from "@/lib/clipboard";
 import { randomUUID } from "@/lib/uuid";
 import type { FormEvent } from "react";
@@ -14,16 +15,6 @@ import { useAdminServerSettings } from "@/hooks/queries/admin/settings";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Badge } from "@/components/ui/badge";
-import { Switch } from "@/components/ui/switch";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
 import {
   Dialog,
   DialogContent,
@@ -32,27 +23,19 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
-import { AlertTriangle, ArrowRight, Copy, Plus, PlusCircle, Trash2 } from "lucide-react";
+import { AlertTriangle, Plus } from "lucide-react";
 import { toast } from "sonner";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
-import { formatDate } from "@/lib/datetime";
-import { Link } from "react-router";
 import { useT } from "@/i18n";
+import { cn } from "@/lib/utils";
 
-/** Shown in the Label column for a code without a label. */
-const NO_LABEL = "-";
-
-function SignupsSettingLink({ children }: { children: React.ReactNode }) {
-  return (
-    <Link
-      to="/admin/settings/sign-in"
-      className="text-foreground inline-flex items-center gap-1 font-medium hover:underline"
-    >
-      {children}
-      <ArrowRight className="h-3 w-3" aria-hidden="true" />
-    </Link>
-  );
-}
+import { InviteCodeList } from "./InviteCodeList";
+import {
+  TOUCH_DIALOG_CLOSE_CLASS,
+  TOUCH_FIELD_CLASS,
+  TOUCH_PRIMARY_ACTION_CLASS,
+} from "./touchClasses";
+import { SettingsLink } from "./TouchLayoutParts";
 
 export default function InviteCodesTab() {
   const t = useT();
@@ -105,6 +88,7 @@ export default function InviteCodesTab() {
         })}
         confirmLabel={t("web.admin.settings.inviteCodes.delete.confirm")}
         variant="destructive"
+        className={TOUCH_TARGETS}
         onConfirm={() => {
           if (confirmDeleteCode) deleteCode.mutate(confirmDeleteCode.id);
           setConfirmDeleteCode(null);
@@ -117,10 +101,10 @@ export default function InviteCodesTab() {
           if (!open) setTopUpCode(null);
         }}
       >
-        <DialogContent>
+        <DialogContent className={TOUCH_DIALOG_CLOSE_CLASS}>
           <DialogHeader>
             <DialogTitle>{t("web.admin.settings.inviteCodes.topUp.title")}</DialogTitle>
-            <DialogDescription>
+            <DialogDescription className="break-words">
               {t("web.admin.settings.inviteCodes.topUp.description", {
                 code: topUpCode?.code ?? "",
                 used: topUpCode ? String(topUpCode.use_count) : "",
@@ -135,11 +119,11 @@ export default function InviteCodesTab() {
       <div className="flex justify-end">
         <Dialog open={createOpen} onOpenChange={setCreateOpen}>
           <DialogTrigger asChild>
-            <Button size="sm">
+            <Button size="sm" className={TOUCH_PRIMARY_ACTION_CLASS}>
               <Plus className="me-1 h-4 w-4" /> {t("web.admin.settings.inviteCodes.create.button")}
             </Button>
           </DialogTrigger>
-          <DialogContent>
+          <DialogContent className={TOUCH_DIALOG_CLOSE_CLASS}>
             <DialogHeader>
               <DialogTitle>{t("web.admin.settings.inviteCodes.create.title")}</DialogTitle>
             </DialogHeader>
@@ -152,7 +136,7 @@ export default function InviteCodesTab() {
         (signupsEnabled ? (
           <p className="text-muted-foreground text-sm">
             {t("web.admin.settings.inviteCodes.signupsOn", {
-              link: (chunks) => <SignupsSettingLink>{chunks}</SignupsSettingLink>,
+              link: (chunks) => <SettingsLink to="/admin/settings/sign-in">{chunks}</SettingsLink>,
             })}
           </p>
         ) : (
@@ -161,7 +145,9 @@ export default function InviteCodesTab() {
             <p className="text-[13px] leading-relaxed">
               {t("web.admin.settings.inviteCodes.signupsOff", {
                 b: (chunks) => <span className="font-medium text-amber-500">{chunks}</span>,
-                link: (chunks) => <SignupsSettingLink>{chunks}</SignupsSettingLink>,
+                link: (chunks) => (
+                  <SettingsLink to="/admin/settings/sign-in">{chunks}</SettingsLink>
+                ),
               })}
             </p>
           </div>
@@ -170,102 +156,27 @@ export default function InviteCodesTab() {
       {isError && (
         <div role="alert">
           {t("web.admin.settings.inviteCodes.loadFailed", {
-            button: (chunks) => <Button onClick={() => void refetch()}>{chunks}</Button>,
+            button: (chunks) => (
+              <Button className={TOUCH_FIELD_CLASS} onClick={() => void refetch()}>
+                {chunks}
+              </Button>
+            ),
           })}
         </div>
       )}
-      <Table>
-        <TableHeader>
-          <TableRow>
-            <TableHead>{t("web.admin.settings.inviteCodes.table.code")}</TableHead>
-            <TableHead>{t("web.admin.settings.inviteCodes.table.label")}</TableHead>
-            <TableHead>{t("web.admin.settings.inviteCodes.table.usage")}</TableHead>
-            <TableHead>{t("web.admin.settings.inviteCodes.table.status")}</TableHead>
-            <TableHead>{t("web.admin.settings.inviteCodes.table.created")}</TableHead>
-            <TableHead className="w-32">
-              {t("web.admin.settings.inviteCodes.table.actions")}
-            </TableHead>
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {codes.length === 0 && (
-            <TableRow>
-              <TableCell colSpan={6} className="text-muted-foreground text-center">
-                {t("web.admin.settings.inviteCodes.empty")}
-              </TableCell>
-            </TableRow>
-          )}
-          {codes.map((code) => (
-            <TableRow key={code.id}>
-              <TableCell>
-                <div className="flex items-center gap-1.5">
-                  <code className="bg-muted rounded px-1.5 py-0.5 font-mono text-xs">
-                    {code.code}
-                  </code>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-6 w-6"
-                    onClick={() => void handleCopy(code.code)}
-                  >
-                    <Copy className="h-3 w-3" />
-                  </Button>
-                </div>
-              </TableCell>
-              <TableCell>
-                {code.label || <span className="text-muted-foreground">{NO_LABEL}</span>}
-              </TableCell>
-              <TableCell>
-                <span className={code.use_count >= code.max_uses ? "text-destructive" : ""}>
-                  {t("web.admin.settings.inviteCodes.usageCount", {
-                    used: code.use_count,
-                    max: code.max_uses,
-                  })}
-                </span>
-              </TableCell>
-              <TableCell>
-                <div className="flex items-center gap-2">
-                  <Switch checked={code.enabled} onCheckedChange={() => handleToggleCode(code)} />
-                  <Badge variant={code.enabled ? "outline" : "secondary"}>
-                    {code.enabled
-                      ? t("web.admin.settings.inviteCodes.status.active")
-                      : t("web.admin.settings.inviteCodes.status.disabled")}
-                  </Badge>
-                </div>
-              </TableCell>
-              <TableCell className="text-muted-foreground text-xs">
-                {formatDate(code.created_at)}
-              </TableCell>
-              <TableCell>
-                <div className="flex items-center gap-1">
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-7 w-7"
-                    onClick={() => setTopUpCode(code)}
-                    aria-label={t("web.admin.settings.inviteCodes.topUpLabel", { code: code.code })}
-                  >
-                    <PlusCircle className="h-3 w-3" />
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-7 w-7"
-                    onClick={() => handleDelete(code)}
-                    aria-label={t("web.admin.settings.inviteCodes.deleteLabel", {
-                      code: code.code,
-                    })}
-                  >
-                    <Trash2 className="h-3 w-3" />
-                  </Button>
-                </div>
-              </TableCell>
-            </TableRow>
-          ))}
-        </TableBody>
-      </Table>
+      <InviteCodeList
+        codes={codes}
+        onCopy={(code) => void handleCopy(code.code)}
+        onToggle={handleToggleCode}
+        onTopUp={setTopUpCode}
+        onDelete={handleDelete}
+      />
       {hasNextPage && (
-        <Button disabled={isFetchingNextPage} onClick={() => void fetchNextPage()}>
+        <Button
+          className={TOUCH_PRIMARY_ACTION_CLASS}
+          disabled={isFetchingNextPage}
+          onClick={() => void fetchNextPage()}
+        >
           {t("web.admin.settings.inviteCodes.loadMore")}
         </Button>
       )}
@@ -295,6 +206,7 @@ function CreateInviteCodeForm({ onClose }: { onClose: () => void }) {
       <div className="space-y-2">
         <Label>{t("web.admin.settings.inviteCodes.form.code")}</Label>
         <Input
+          className={TOUCH_FIELD_CLASS}
           value={code}
           required
           onChange={(e) => setCode(e.target.value.toUpperCase())}
@@ -304,6 +216,7 @@ function CreateInviteCodeForm({ onClose }: { onClose: () => void }) {
       <div className="space-y-2">
         <Label>{t("web.admin.settings.inviteCodes.form.label")}</Label>
         <Input
+          className={TOUCH_FIELD_CLASS}
           value={label}
           onChange={(e) => setLabel(e.target.value)}
           placeholder={t("web.admin.settings.inviteCodes.form.labelPlaceholder")}
@@ -312,6 +225,7 @@ function CreateInviteCodeForm({ onClose }: { onClose: () => void }) {
       <div className="space-y-2">
         <Label>{t("web.admin.settings.inviteCodes.form.maxUses")}</Label>
         <Input
+          className={TOUCH_FIELD_CLASS}
           type="number"
           min="1"
           value={maxUses}
@@ -319,7 +233,11 @@ function CreateInviteCodeForm({ onClose }: { onClose: () => void }) {
           required
         />
       </div>
-      <Button type="submit" className="w-full" disabled={createMutation.isPending}>
+      <Button
+        type="submit"
+        className={cn("w-full", TOUCH_FIELD_CLASS)}
+        disabled={createMutation.isPending}
+      >
         {createMutation.isPending
           ? t("web.admin.settings.inviteCodes.form.creating")
           : t("web.admin.settings.inviteCodes.form.create")}
@@ -352,6 +270,7 @@ function TopUpInviteCodeForm({ code, onClose }: { code: InviteCode; onClose: () 
       <div className="space-y-2">
         <Label>{t("web.admin.settings.inviteCodes.topUpForm.additionalUses")}</Label>
         <Input
+          className={TOUCH_FIELD_CLASS}
           type="number"
           min="1"
           value={additionalUses}
@@ -359,7 +278,11 @@ function TopUpInviteCodeForm({ code, onClose }: { code: InviteCode; onClose: () 
           required
         />
       </div>
-      <Button type="submit" className="w-full" disabled={topUpMutation.isPending}>
+      <Button
+        type="submit"
+        className={cn("w-full", TOUCH_FIELD_CLASS)}
+        disabled={topUpMutation.isPending}
+      >
         {topUpMutation.isPending
           ? t("web.admin.settings.inviteCodes.topUpForm.adding")
           : t("web.admin.settings.inviteCodes.topUpForm.submit")}

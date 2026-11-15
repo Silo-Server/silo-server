@@ -1,14 +1,54 @@
 import { useEffect, useRef } from "react";
 import { useMutation, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
-import { captureProfileRequestContext } from "@/api/client";
-import { v2, V2ProblemError } from "@/api/v2/request";
+import { captureProfileRequestContext, SessionRefreshUnavailableError } from "@/api/client";
+import { v2, V2ProblemError, V2TimeoutError, V2TransportError } from "@/api/v2/request";
 import { favoriteKeys, watchlistKeys, watchProviderKeys } from "./keys";
 import { invalidateAllRatingSurfaceQueries } from "./ratingsSurfaceRefresh";
 import { bumpHomeRefreshSignal } from "@/pages/homeSurfaceRefresh";
 import { toast } from "sonner";
-import { t } from "@/i18n";
+import { t, type MessageKey } from "@/i18n";
 import { storage } from "@/utils/storage";
 import type { PluginConfigSchema } from "@/api/types";
+
+/** A settings change attempted before the connection's settings were read. */
+class ReloadBeforeSavingError extends Error {}
+
+/**
+ * Why a watch-provider request failed, in the interface language, for the line
+ * under the toast that names the action. A problem's text is already in that
+ * language; errors whose message is English developer text get a translated
+ * line instead, or none.
+ */
+function failureReason(err: unknown): string | undefined {
+  if (err instanceof V2ProblemError || err instanceof ReloadBeforeSavingError) return err.message;
+  // A body that isn't a problem document: a proxy's error page, for example.
+  if (err instanceof V2TransportError) return t("error.internal_error");
+  // No answer: the deadline, a failed fetch, or a sign-in refresh that got none.
+  if (
+    err instanceof V2TimeoutError ||
+    err instanceof SessionRefreshUnavailableError ||
+    err instanceof TypeError
+  ) {
+    return t("web.common.ui.loadError.timeout");
+  }
+  return undefined;
+}
+
+/**
+ * Device-authorization outcomes whose shared problem text, written for other
+ * flows, would mislead here: a code not approved yet answers conflict, and a
+ * declined one not_permitted.
+ */
+function pollFailureReason(err: unknown): string | undefined {
+  if (!(err instanceof V2ProblemError)) return undefined;
+  if (err.problemType === "conflict") return t("web.common.toast.watchProviders.authNotApproved");
+  if (err.problemType === "not_permitted") return t("web.common.toast.watchProviders.authDeclined");
+  return undefined;
+}
+
+function toastFailure(action: MessageKey, err: unknown, reason?: string) {
+  toast.error(t(action), { description: reason ?? failureReason(err) });
+}
 
 export type WatchProviderConnectionConfig = Record<string, Record<string, unknown>>;
 
@@ -324,10 +364,7 @@ export function useStartWatchProviderDeviceAuth(provider: string) {
   return useMutation({
     retry: false,
     mutationFn: () => startWatchProviderDeviceAuth(provider),
-    onError: (err) =>
-      toast.error(
-        err instanceof Error ? err.message : t("web.common.toast.watchProviders.startAuthFailed"),
-      ),
+    onError: (err) => toastFailure("web.common.toast.watchProviders.startAuthFailed", err),
   });
 }
 
@@ -345,9 +382,7 @@ export function usePollWatchProviderDeviceAuth(provider: string) {
       toast.success(t("web.common.toast.watchProviders.connected"));
     },
     onError: (err) =>
-      toast.error(
-        err instanceof Error ? err.message : t("web.common.toast.watchProviders.finishAuthFailed"),
-      ),
+      toastFailure("web.common.toast.watchProviders.finishAuthFailed", err, pollFailureReason(err)),
   });
 }
 
@@ -370,10 +405,7 @@ export function useConnectWatchProviderAPIKey(provider: string) {
       });
       toast.success(t("web.common.toast.watchProviders.connected"));
     },
-    onError: (err) =>
-      toast.error(
-        err instanceof Error ? err.message : t("web.common.toast.watchProviders.connectFailed"),
-      ),
+    onError: (err) => toastFailure("web.common.toast.watchProviders.connectFailed", err),
   });
 }
 
@@ -386,7 +418,9 @@ export function useUpdateWatchProviderConnection(provider: string) {
       const current = queryClient.getQueryData<WatchProviderConnection>(
         watchProviderKeys.connection(getActiveProfileId(), provider),
       );
-      if (!current?.etag) throw new Error(t("web.common.toast.watchProviders.reloadBeforeSaving"));
+      if (!current?.etag) {
+        throw new ReloadBeforeSavingError(t("web.common.toast.watchProviders.reloadBeforeSaving"));
+      }
       return updateWatchProviderConnection(provider, body, current.etag);
     },
     onSuccess: (settings, _variables, context) => {
@@ -402,9 +436,7 @@ export function useUpdateWatchProviderConnection(provider: string) {
         });
         return;
       }
-      toast.error(
-        err instanceof Error ? err.message : t("web.common.toast.watchProviders.updateFailed"),
-      );
+      toastFailure("web.common.toast.watchProviders.updateFailed", err);
     },
   });
 }
@@ -421,10 +453,7 @@ export function useDeleteWatchProviderConnection(provider: string) {
       });
       toast.success(t("web.common.toast.watchProviders.disconnected"));
     },
-    onError: (err) =>
-      toast.error(
-        err instanceof Error ? err.message : t("web.common.toast.watchProviders.disconnectFailed"),
-      ),
+    onError: (err) => toastFailure("web.common.toast.watchProviders.disconnectFailed", err),
   });
 }
 
@@ -456,9 +485,7 @@ export function useTriggerWatchProviderSync(provider: string) {
         );
         return;
       }
-      toast.error(
-        err instanceof Error ? err.message : t("web.common.toast.watchProviders.syncFailed"),
-      );
+      toastFailure("web.common.toast.watchProviders.syncFailed", err);
     },
   });
 }

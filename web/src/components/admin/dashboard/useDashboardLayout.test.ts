@@ -238,6 +238,40 @@ describe("useDashboardLayout", () => {
     expect(readStored().entries).toEqual([{ id: "egress-24h", span: 6, rows: 3, range: "week" }]);
   });
 
+  // The Egress Total/Nodes switch is a viewing choice like the window, so it
+  // must come back after a reload; a value this build does not know is dropped.
+  it("setWidgetView persists a view the widget offers and drops one it does not", () => {
+    writeStored([
+      { id: "egress-24h", span: 6, rows: 3, range: "day", view: "sideways" },
+      { id: "users", span: 5, rows: 4, view: "nodes" },
+    ]);
+    const { result } = renderHook(() => useDashboardLayout());
+    expect(result.current.entries).toEqual([
+      { id: "egress-24h", span: 6, rows: 3, range: "day" },
+      { id: "users", span: 5, rows: 4 },
+    ]);
+
+    // Picking the view already on screen is not an edit, so nothing is saved.
+    const unpicked = result.current.entries;
+    act(() => result.current.setWidgetView("egress-24h", "total"));
+    expect(result.current.entries).toBe(unpicked);
+
+    act(() => {
+      result.current.setWidgetView("egress-24h", "nodes");
+      result.current.setWidgetView("users", "nodes");
+    });
+
+    const expected = [
+      { id: "egress-24h", span: 6, rows: 3, range: "day", view: "nodes" },
+      { id: "users", span: 5, rows: 4 },
+    ];
+    expect(result.current.entries).toEqual(expected);
+    expect(readStored().entries).toEqual(expected);
+
+    const { result: reloaded } = renderHook(() => useDashboardLayout());
+    expect(reloaded.current.entries).toEqual(expected);
+  });
+
   // Picking a window is an everyday viewing action, not an arrangement one.
 
   it("setWidgetRange ignores a window the widget does not offer", () => {
@@ -319,7 +353,7 @@ describe("useDashboardLayout", () => {
     });
 
     expect(result.current.entries).toEqual(expected);
-    expect(readStored()).toEqual({ version: 1, entries: expected });
+    expect(readStored().entries).toEqual(expected);
   });
 
   // The drop anchor may have been removed between the drag starting and the
@@ -476,7 +510,7 @@ describe("useDashboardLayout server persistence", () => {
       { id: "now-playing", span: 12, rows: 2 },
     ];
     expect(result.current.entries).toEqual(expected);
-    expect(readStored()).toEqual({ version: 1, entries: expected });
+    expect(readStored().entries).toEqual(expected);
     expect(mocks.save).not.toHaveBeenCalled();
   });
 
@@ -575,6 +609,32 @@ describe("useDashboardLayout server persistence", () => {
       version: 1,
       entries: [{ id: "users", span: 6, rows: 3 }],
     });
+  });
+
+  // A reload inside the debounce window must not drop the queued save.
+  it("sends a queued save immediately when the page is hidden", () => {
+    vi.useFakeTimers();
+    writeStored([{ id: "egress-24h", span: 6, rows: 3, range: "day" }]);
+    serverLayout(readStored().entries);
+    const { result } = renderHook(() => useDashboardLayout());
+
+    act(() => {
+      result.current.setWidgetRange("egress-24h", "week");
+    });
+    act(() => {
+      window.dispatchEvent(new Event("pagehide"));
+    });
+
+    expect(mocks.save).toHaveBeenCalledTimes(1);
+    expect(mocks.save).toHaveBeenCalledWith({
+      version: 1,
+      entries: [{ id: "egress-24h", span: 6, rows: 3, range: "week" }],
+    });
+
+    act(() => {
+      vi.advanceTimersByTime(DASHBOARD_LAYOUT_SAVE_DEBOUNCE_MS);
+    });
+    expect(mocks.save).toHaveBeenCalledTimes(1);
   });
 
   it("resetLayout refuses an obsolete authority callback before local reset", () => {

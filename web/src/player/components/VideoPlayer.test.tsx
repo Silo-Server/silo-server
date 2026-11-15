@@ -3761,6 +3761,117 @@ describe("VideoPlayer plan failure recovery", () => {
     expect(onSubtitleTrackChange).not.toHaveBeenCalled();
   });
 
+  // Deleting a stored subtitle moves the later ones down an ordinal. A pick
+  // still waiting for its replan names the old ordinal, which the next plan
+  // gives another track.
+  it("moves a pending stored-subtitle pick to its ordinal in the next plan", async () => {
+    const onSubtitleTrackChange = vi.fn();
+    const stored = (index: number, id: number, language: string): PlayerSubtitleInfo => ({
+      index,
+      media_file_id: 7,
+      track_id: `file:7:subtitle:${index}`,
+      language,
+      codec: "srt",
+      label: language,
+      source: "downloaded",
+      stored_subtitle_id: id,
+      sync_key: `stored-${id}`,
+      url: `/stream/session-1/subtitles/${index}.vtt`,
+    });
+    const { rerenderPlayer } = renderPlayer({
+      subtitleUrls: [stored(0, 71, "en"), stored(1, 72, "es")],
+      onSubtitleTrackChange,
+    });
+    act(() =>
+      (controls.current as unknown as { onSubtitleSelect: (i: number) => void }).onSubtitleSelect(
+        1,
+      ),
+    );
+    await waitFor(() =>
+      expect(onSubtitleTrackChange).toHaveBeenCalledWith(1, expect.any(Number), 72),
+    );
+    const callsBefore = onSubtitleTrackChange.mock.calls.length;
+
+    // English was deleted and French added before the pick's replan ran.
+    rerenderPlayer({
+      plan: fixturePlanV3({ ...directPlan, plan_id: "plan:after-delete" }),
+      planRevision: 2,
+      subtitleUrls: [stored(0, 72, "es"), stored(1, 73, "fr")],
+    });
+
+    await waitFor(() => expect(controls.current?.activeSubtitleIndex).toBe(0));
+    await act(async () => Promise.resolve());
+    const sentAfter = onSubtitleTrackChange.mock.calls
+      .slice(callsBefore)
+      .map(([index, , storedId]) => [index, storedId]);
+    expect(sentAfter).toEqual([[0, 72]]);
+  });
+
+  // A finished translation is selected at the ordinal the server gave it,
+  // while the track list may still show another stored subtitle there until
+  // the refetch lands. The pick keeps the translation's identity.
+  it("keeps a translation handed off at a server ordinal the track list still gives another track", async () => {
+    const onSubtitleTrackChange = vi.fn();
+    const stored = (index: number, id: number, language: string): PlayerSubtitleInfo => ({
+      index,
+      media_file_id: 7,
+      track_id: `file:7:subtitle:${index}`,
+      language,
+      codec: "srt",
+      label: language,
+      source: "downloaded",
+      stored_subtitle_id: id,
+      sync_key: `stored-${id}`,
+      url: `/stream/session-1/subtitles/${index}.vtt`,
+    });
+    const { rerenderPlayer } = renderPlayer({
+      subtitleUrls: [stored(0, 71, "en"), stored(1, 72, "es")],
+      onSubtitleTrackChange,
+      onApplySubtitleTrack: vi.fn(),
+    });
+    const base = { session_id: "session-1", file_id: 7, job_id: 1, track_key: "ai-1" };
+    act(() => {
+      realtimeOptions.current?.onEvent?.({
+        type: "event",
+        session_id: "session-1",
+        name: "subtitle_translation_started",
+        payload: { ...base, language: "hr", total_cues: 2 },
+      });
+    });
+    // English was deleted, so Spanish is at 0 on the server and the
+    // translation (stored 73) takes 1.
+    act(() => {
+      realtimeOptions.current?.onEvent?.({
+        type: "event",
+        session_id: "session-1",
+        name: "subtitle_translation_completed",
+        payload: {
+          ...base,
+          subtitle_id: 73,
+          language: "hr",
+          track: fixtureSubtitleInventoryItemV3({
+            combined_index: 1,
+            source: "downloaded",
+            language: "hr",
+            stored_subtitle_id: 73,
+          }),
+        },
+      });
+    });
+    await waitFor(() =>
+      expect(onSubtitleTrackChange).toHaveBeenLastCalledWith(1, expect.any(Number), 73),
+    );
+
+    rerenderPlayer({
+      plan: fixturePlanV3({ ...directPlan, plan_id: "plan:refetched" }),
+      planRevision: 2,
+      subtitleUrls: [stored(0, 72, "es"), stored(1, 73, "hr")],
+    });
+    await act(async () => Promise.resolve());
+    expect(controls.current?.activeSubtitleIndex).toBe(1);
+    expect(onSubtitleTrackChange).toHaveBeenLastCalledWith(1, expect.any(Number), 73);
+  });
+
   // The rollback is otherwise silent: the refusal only renders inside the
   // quality menu, which a user who just picked a subtitle never opens.
   it("toasts the server's refusal when a subtitle change is rolled back", async () => {
@@ -4108,6 +4219,117 @@ describe("VideoPlayer source timeline", () => {
     fireEvent.loadedMetadata(video);
 
     expect(video.currentTime).toBe(300);
+  });
+
+  describe("a seek made while a quality change is fetched", () => {
+    // The plan starts the new stream where the quality change was asked for.
+    const plan = fixturePlanV3({
+      delivery: "server_transcode_hls",
+      stream: {
+        url: "/playback/transcode/session-1/master.m3u8",
+        protocol: "hls",
+        headers: {},
+        header_refresh: "none",
+      },
+      timeline: {
+        source_start_seconds: 120,
+        player_start_seconds: 120,
+        stream_origin_seconds: 0,
+        timeline_offset_seconds: 0,
+        can_seek_anywhere: true,
+        seek_restoration: "player_position",
+      },
+    });
+
+    // Plays the first transport, asks for a quality change, and seeks back
+    // to 30 s while the replan is in flight. The old stream completes the seek.
+    async function seekDuringReplan() {
+      const rendered = renderPlayer({ plan });
+      const video = rendered.container.querySelector("video")!;
+      await waitFor(() =>
+        expect(video.src !== "" || hlsJS.constructed.mock.calls.length > 0).toBe(true),
+      );
+      fireEvent.loadedMetadata(video);
+      fireFrameTimeUpdate(video);
+      fireEvent.playing(video);
+      rendered.rerenderPlayer({ plan, replanning: true });
+      act(() => {
+        controls.current!.onSeek(30);
+      });
+      expect(video.currentTime).toBe(30);
+      fireEvent.seeked(video);
+      fireFrameTimeUpdate(video);
+      return { ...rendered, video };
+    }
+
+    function newStream(rerenderPlayer: (next: Partial<Parameters<typeof VideoPlayer>[0]>) => void) {
+      rerenderPlayer({
+        plan,
+        replanning: false,
+        planRevision: 2,
+        streamUrl: "/api/v1/stream/session-1?revision=2",
+      });
+    }
+
+    it("starts the hls.js stream at the seek", async () => {
+      hlsJS.supported = true;
+      const { rerenderPlayer } = await seekDuringReplan();
+      hlsJS.constructed.mockClear();
+
+      newStream(rerenderPlayer);
+
+      await waitFor(() => expect(hlsJS.constructed).toHaveBeenCalledOnce());
+      expect(hlsJS.constructed).toHaveBeenCalledWith(
+        expect.objectContaining({ startPosition: 30 }),
+      );
+    });
+
+    it("starts the native HLS stream at the seek", async () => {
+      const { video, rerenderPlayer } = await seekDuringReplan();
+
+      newStream(rerenderPlayer);
+      await waitFor(() => expect(video.src).toContain("revision=2"));
+      fireEvent.loadedMetadata(video);
+
+      expect(video.currentTime).toBe(30);
+    });
+
+    it("resumes another quality change at the seek before the new stream plays", async () => {
+      hlsJS.supported = true;
+      const onQualitySelect = vi.fn();
+      const { rerenderPlayer } = await seekDuringReplan();
+      rerenderPlayer({
+        plan,
+        replanning: false,
+        planRevision: 2,
+        streamUrl: "/api/v1/stream/session-1?revision=2",
+        onQualitySelect,
+      });
+      await waitFor(() => expect(hlsJS.constructed).toHaveBeenCalled());
+
+      const selectQuality = (
+        controls.current as unknown as { onQualitySelect: (id: string) => void }
+      ).onQualitySelect;
+      act(() => selectQuality("480p"));
+
+      expect(onQualitySelect).toHaveBeenCalledWith("480p", 30, undefined, expect.any(Function));
+    });
+
+    it("forgets the seek when the replan settles without a new stream", async () => {
+      hlsJS.supported = true;
+      const { rerenderPlayer } = await seekDuringReplan();
+      rerenderPlayer({ plan, replanning: false, replanError: "Replan refused." });
+      hlsJS.constructed.mockClear();
+
+      // A later quality change starts where it was asked for.
+      rerenderPlayer({ plan, replanning: true });
+      newStream(rerenderPlayer);
+
+      await waitFor(() => expect(hlsJS.constructed).toHaveBeenCalledOnce());
+      expect(hlsJS.constructed).toHaveBeenCalledWith(
+        expect.objectContaining({ startPosition: 120 }),
+      );
+    });
   });
 
   // Chrome keeps a Matroska file's container start time on its clock, so a

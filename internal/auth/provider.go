@@ -110,26 +110,38 @@ func (p *LocalProvider) Authenticate(ctx context.Context, creds Credentials) (*m
 
 	// The server-wide switch and a network provider's refusal are checked
 	// after the password, so a refusal does not tell a stranger which names
-	// have accounts. Break-glass admins are exempt so the server can always
-	// be recovered.
-	if !user.BreakGlass {
-		allowed, err := p.users.LocalPasswordLoginAllowed(ctx)
-		if err != nil {
-			return nil, err
-		}
-		if !allowed {
-			return nil, ErrLocalLoginDisabled
-		}
-		refused, err := networkRefused(ctx, p.users.pool, user.ID)
-		if err != nil {
-			return nil, err
-		}
-		if refused {
-			return nil, ErrNotPermitted
-		}
+	// have accounts.
+	if err := localPasswordPolicy(ctx, p.users.pool, user); err != nil {
+		return nil, err
 	}
 
 	return user, nil
+}
+
+// localPasswordPolicy is what refuses an enabled account's correct local
+// password: ErrLocalLoginDisabled while the server-wide switch is off, and
+// ErrNotPermitted while a network identity provider refuses the account's
+// person (networkRefused). Break-glass accounts are exempt so the server can
+// always be recovered.
+func localPasswordPolicy(ctx context.Context, db rowQuerier, user *models.User) error {
+	if user.BreakGlass {
+		return nil
+	}
+	allowed, err := localPasswordLoginAllowed(ctx, db)
+	if err != nil {
+		return err
+	}
+	if !allowed {
+		return ErrLocalLoginDisabled
+	}
+	refused, err := networkRefused(ctx, db, user.ID)
+	if err != nil {
+		return err
+	}
+	if refused {
+		return ErrNotPermitted
+	}
+	return nil
 }
 
 // checkLocalPassword resolves the sign-in name (see LookupLogin) and checks

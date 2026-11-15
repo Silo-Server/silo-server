@@ -141,6 +141,17 @@ func tableExists(ctx context.Context, q queryer, table string) (bool, error) {
 	return present, nil
 }
 
+// columnExists reports whether table has column, in a database that may be
+// an older backup's.
+func columnExists(ctx context.Context, q queryer, table, column string) (bool, error) {
+	var present bool
+	if err := q.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM pg_attribute
+		WHERE attrelid = to_regclass($1) AND attname = $2 AND attnum > 0 AND NOT attisdropped)`, table, column).Scan(&present); err != nil {
+		return false, fmt.Errorf("checking for column %s.%s: %w", table, column, err)
+	}
+	return present, nil
+}
+
 func tableInventory(ctx context.Context, q queryer) ([]TableCount, error) {
 	out := make([]TableCount, 0, len(inventoryTables))
 	for _, table := range inventoryTables {

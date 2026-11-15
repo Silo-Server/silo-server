@@ -311,12 +311,12 @@ function describeKind(row: HomeRow, context: DescribeContext): DescriptionPart[]
         }),
       ];
     case "trending_discover": {
-      // The movies-only and TV-only wording is new; its catalog keys are a follow-up,
-      // so those two stay English until the catalog has them.
       if (config.filter_type === "movie" || config.filter_type === "series") {
-        const what = config.filter_type === "movie" ? "Movies trending" : "TV shows trending";
         return [
-          `${what} on TMDB ${config.window === "day" ? "today" : "this week"}, from what you have`,
+          t("web.home.rows.describe.trendingDiscoverFiltered", {
+            media: config.filter_type,
+            window: config.window === "day" ? "day" : "week",
+          }),
         ];
       }
       return [
@@ -409,12 +409,11 @@ export function profilePageKind(page: PageRef, label: string): PageRef["kind"] {
   return page.kind === "home" || label === "Home" ? "home" : "library";
 }
 
-/**
- * "Home" or "Movies page", after "my" or "your", for Settings > Home Screen's
- * menu items, which are not translated yet: English only, so they read whole.
- */
+/** "Home" or "Movies page", after "my" or "your", for Settings > Home Screen's menu items. */
 export function profilePageName(page: PageRef, label: string): string {
-  return profilePageKind(page, label) === "home" ? "Home" : `${label} page`;
+  return profilePageKind(page, label) === "home"
+    ? t("web.home.rows.pages.home")
+    : t("web.home.rows.describe.pageNameLibrary", { label });
 }
 
 /** The switch's accessible name says what it does, not just "Enabled". */

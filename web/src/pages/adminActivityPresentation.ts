@@ -1,8 +1,9 @@
 import type { AdminSession } from "@/api/types";
-import { t, type TextValues } from "@/i18n";
+import { codeNumber, englishText, t, type TextValues } from "@/i18n";
 import type { MessageKey } from "@/locales/keys";
 import { formatCodecLabel } from "@/lib/mediaFormat";
 import { formatDecimal } from "@/lib/numberFormat";
+import { formatClock } from "@/pages/adminDownloadPreparationPresentation";
 
 export function formatDecisionLabel(decision?: string): string {
   switch (decision) {
@@ -464,25 +465,6 @@ export function formatDeliveredContainerSummary(session: AdminSession): string {
     : unknown;
 }
 
-export function formatContainerDetail(session: AdminSession): string {
-  const source = formatSourceContainerSummary(session);
-  if (session.output_container && normalizeContainerDecision(session.play_method) !== "direct") {
-    return t("web.admin.activity.detail.conversion", {
-      source,
-      output: formatDeliveredContainerSummary(session),
-    });
-  }
-  switch (normalizeContainerDecision(session.play_method)) {
-    case "direct":
-      return t("web.admin.activity.detail.originalContainer");
-    case "remux":
-    case "hls":
-      return t("web.admin.activity.detail.repackaged");
-    default:
-      return "—";
-  }
-}
-
 export function formatVideoSummary(session: AdminSession): string {
   return (
     [formatCodec(session.source_video_codec), session.source_video_resolution?.trim()]
@@ -518,37 +500,6 @@ export function formatDeliveredVideoSummary(session: AdminSession): string {
       .filter(Boolean)
       .join(" · ") || t("web.admin.activity.detail.transcoding")
   );
-}
-
-export function formatVideoDetail(session: AdminSession): string {
-  const decision = normalizeStreamDecision(session.video_decision || session.play_method);
-  const requestedSource = formatRequestedVideoSource(session);
-  const target = [formatCodec(session.target_video_codec), deliveredResolutionLabel(session)]
-    .filter(Boolean)
-    .join(" · ");
-
-  if (hasRequestedSourceSwitch(session) && requestedSource) {
-    const parts = [t("web.admin.activity.detail.autoSwitched", { source: requestedSource })];
-    if (target) {
-      parts.push(t("web.admin.activity.detail.output", { output: target }));
-    } else if (decision === "transcode") {
-      parts.push(t("web.admin.activity.detail.transcoding"));
-    }
-    return parts.join(" · ");
-  }
-
-  if (decision === "transcode") {
-    return target
-      ? t("web.admin.activity.detail.output", { output: target })
-      : t("web.admin.activity.detail.transcoding");
-  }
-  if (decision === "copy") {
-    return t("web.admin.activity.detail.copied");
-  }
-  if (decision === "direct") {
-    return t("web.admin.activity.detail.noVideoConversion");
-  }
-  return "—";
 }
 
 export function formatAudioSummary(session: AdminSession): string {
@@ -590,23 +541,115 @@ export function formatDeliveredAudioSummary(session: AdminSession): string {
   return formatTargetAudio(session) || t("web.admin.activity.transcodeMode.audioTranscode");
 }
 
-export function formatAudioDetail(session: AdminSession): string {
+/** One stream's source format and, when the server converts it, what it delivers. */
+export interface StreamConversion {
+  /** The source format, compact: "HEVC 2160p", "TrueHD 7.1". */
+  source: string;
+  /** The delivered format; null when the stream reaches the viewer untouched. */
+  delivered: string | null;
+}
+
+function compactFormat(parts: (string | null | undefined)[]): string {
+  return parts.filter(Boolean).join(" ");
+}
+
+/** The video's source format and, for a video transcode, its output. */
+export function getVideoConversion(session: AdminSession): StreamConversion {
+  const source =
+    compactFormat([
+      formatCodec(session.source_video_codec),
+      session.source_video_resolution?.trim(),
+    ]) || t("web.admin.activity.summary.unknownSource");
+  if (normalizeStreamDecision(session.video_decision || session.play_method) !== "transcode") {
+    return { source, delivered: null };
+  }
+  return {
+    source,
+    delivered:
+      compactFormat([formatCodec(session.target_video_codec), deliveredResolutionLabel(session)]) ||
+      t("web.admin.activity.detail.transcoding"),
+  };
+}
+
+/** The audio's source format and, when the audio is re-encoded, its output. */
+export function getAudioConversion(session: AdminSession): StreamConversion {
+  const source =
+    compactFormat([
+      formatCodec(session.source_audio_codec),
+      formatChannelLayout(session.source_audio_channels),
+    ]) || t("web.admin.activity.summary.unknownSource");
   const decision = normalizeStreamDecision(
     session.audio_decision || (session.transcode_audio ? "transcode" : session.play_method),
   );
-  if (decision === "transcode") {
-    const target = formatTargetAudio(session);
-    return target
-      ? t("web.admin.activity.detail.audioOutput", { output: target })
-      : t("web.admin.activity.transcodeMode.audioTranscode");
+  if (decision !== "transcode") {
+    return { source, delivered: null };
   }
-  if (decision === "copy") {
-    return t("web.admin.activity.detail.copied");
+  return {
+    source,
+    delivered: formatTargetAudio(session) || t("web.admin.activity.transcodeMode.audioTranscode"),
+  };
+}
+
+/** How far through the title playback is, 0 to 1; null when the length is unknown. */
+export function getPlaybackProgress(session: AdminSession): number | null {
+  if (session.file_duration == null || session.file_duration <= 0) {
+    return null;
   }
-  if (decision === "direct") {
-    return t("web.admin.activity.detail.noAudioConversion");
+  return Math.min(1, Math.max(0, session.position_seconds / session.file_duration));
+}
+
+export interface ActivityTotals {
+  /** Sessions whose video is re-encoded. */
+  videoTranscodes: number;
+  /** The summed delivered bitrate of the sessions that report one. */
+  bitrateKbps: number;
+  remote: number;
+  paused: number;
+}
+
+/** The counts the page summary line reports. */
+export function summarizeActivity(sessions: AdminSession[]): ActivityTotals {
+  const totals: ActivityTotals = { videoTranscodes: 0, bitrateKbps: 0, remote: 0, paused: 0 };
+  for (const session of sessions) {
+    if (classifyActivityMethod(session) === "transcode") totals.videoTranscodes++;
+    if (session.stream_bitrate_kbps && session.stream_bitrate_kbps > 0) {
+      totals.bitrateKbps += session.stream_bitrate_kbps;
+    }
+    if (session.stream_location === "remote") totals.remote++;
+    if (session.is_paused) totals.paused++;
   }
-  return "—";
+  return totals;
+}
+
+/**
+ * Whether the route column says anything a row's location doesn't: some
+ * session uses a non-default network, or the sessions take different routes.
+ * On a single server every row's route is the same, so the column is hidden.
+ */
+export function sessionRoutesVary(sessions: AdminSession[]): boolean {
+  const routes = new Set<string>();
+  for (const session of sessions) {
+    if (session.routing_network_provider) {
+      return true;
+    }
+    routes.add(
+      getSessionRouteNodes(session, englishText)
+        .map((node) => node.key)
+        .join(","),
+    );
+  }
+  return routes.size > 1;
+}
+
+/**
+ * "Auto-switched from HEVC · 2160p" when the server plays another version of
+ * the title than the one the viewer picked; null otherwise.
+ */
+export function formatRequestedSourceSwitch(session: AdminSession): string | null {
+  const source = formatRequestedVideoSource(session);
+  return hasRequestedSourceSwitch(session) && source
+    ? t("web.admin.activity.detail.autoSwitched", { source })
+    : null;
 }
 
 function hasRequestedSourceSwitch(session: AdminSession): boolean {
@@ -643,8 +686,14 @@ export function getPlaybackSessionTitle(session: AdminSession): string {
 
 export function getPlaybackSessionSubtitle(session: AdminSession): string | null {
   if (session.series_name && session.season_number != null && session.episode_number != null) {
-    const episode = `S${session.season_number}E${session.episode_number}`;
-    return session.series_name ? `${episode} · ${session.series_name}` : episode;
+    const code = t("web.detail.episodeCode", {
+      season: codeNumber(session.season_number),
+      episode: codeNumber(session.episode_number),
+    });
+    return t("web.common.activity.subtitle.episode", {
+      code,
+      series: session.series_name,
+    });
   }
   if (session.media_type === "movie") {
     return t("web.common.activity.subtitle.movie");
@@ -672,4 +721,13 @@ function formatChannelLayout(channels?: number | null): string | null {
     return "7.1";
   }
   return `${channels}ch`;
+}
+
+/** Playback position as "47:12 / 2:29:40", or the position alone when the duration is unknown. */
+export function formatPlaybackPosition(session: AdminSession): string {
+  const position = formatClock(session.position_seconds);
+  if (session.file_duration == null || session.file_duration <= 0) {
+    return position;
+  }
+  return `${position} / ${formatClock(session.file_duration)}`;
 }

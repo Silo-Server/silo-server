@@ -825,7 +825,11 @@ func (s *Server) handleDownloadFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	filename := fspath.Display(filepath.Base(claims.MediaPath))
+	// The API names the download for the caller; an older API sends no name.
+	filename := filepath.Base(strings.TrimSpace(claims.DownloadFilename))
+	if filename == "" || filename == "." {
+		filename = fspath.Display(filepath.Base(claims.MediaPath))
+	}
 	if disposition := mime.FormatMediaType("attachment", map[string]string{"filename": filename}); disposition != "" {
 		w.Header().Set("Content-Disposition", disposition)
 	}
@@ -1049,6 +1053,7 @@ func (s *Server) serveRemuxClaims(w http.ResponseWriter, r *http.Request, claims
 		DVMode:                    playback.RemuxDVMode(claims.RemuxDVMode),
 		FFmpegPath:                s.watcher.Config().Playback.FFmpegPath,
 		DropResumeLeadingPictures: claims.RemuxResumeLeadingPictureDrop,
+		StreamOriginSeconds:       playback.RemuxStreamOrigin(r.URL.Query()),
 		ContentType:               playback.RemuxContentType(claims.AudioOnly),
 		AudioOnly:                 claims.AudioOnly,
 		SourceAudioChannels:       claims.SourceAudioChannels,

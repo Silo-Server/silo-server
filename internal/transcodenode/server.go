@@ -624,6 +624,7 @@ func (s *Server) restartSegmentLocked(
 	sessionID string,
 	session *playback.TranscodeSession,
 	segNum int,
+	seenGeneration time.Time,
 ) (playback.SegmentRecoveryTarget, bool, error) {
 	unlock := s.lockSessionLifecycle(sessionID)
 	defer unlock()
@@ -633,7 +634,7 @@ func (s *Server) restartSegmentLocked(
 	if !ok || live != session {
 		return playback.SegmentRecoveryTarget{}, false, playback.ErrSessionSuperseded
 	}
-	return session.RestartSegment(ctx, segNum)
+	return session.RestartSegmentSince(ctx, segNum, seenGeneration)
 }
 
 // NewServer creates a new transcode server.
@@ -2275,6 +2276,9 @@ func (s *Server) spawnReconstruct(r *http.Request, sessionID string, requestedSe
 		return nil, r.Context().Err()
 	}
 	defer release()
+	// Past admission the rebuild serves every request waiting on it, so its
+	// probes and its start must not end with the request that triggered it.
+	rebuildCtx := context.WithoutCancel(r.Context())
 
 	// Resume near the segment the client is actually requesting. The card records
 	// the original start; if the client has played past it, spawning at the old
@@ -2296,14 +2300,21 @@ func (s *Server) spawnReconstruct(r *http.Request, sessionID string, requestedSe
 
 	// Under hw_accel=auto the reconstruct walks the same safer paths as a
 	// fresh start in this output directory, keeping a slow process rather than
-	// duplicating it.
-	pipeline := s.autoTranscodePipeline(r.Context(), opts)
-	adaptive := pipeline.Enabled()
+	// duplicating it. Under an explicit backend it starts once, and when the
+	// GPU decoder rejects the source (a card minted where the GPU decodes it)
+	// it moves to CPU decoding. An accel StartupRetryHWAccel would change
+	// (VideoToolbox, or QSV/VAAPI without a render device) is not waited on
+	// here: it keeps the software-encode retry below, which has its own wait.
+	pipeline := s.autoTranscodePipeline(rebuildCtx, opts)
+	retryAccel := opts.HWAccel
+	if !pipeline.Enabled() {
+		retryAccel = playback.StartupRetryHWAccel(opts)
+	}
 	var session *playback.TranscodeSession
-	if adaptive {
-		session, err = playback.StartReconstructTranscode(r.Context(), pipeline, playback.TranscodeStartup{Timeout: playback.ManifestStartupTimeout})
+	if retryAccel != opts.HWAccel {
+		session, err = playback.StartTranscode(rebuildCtx, opts)
 	} else {
-		session, err = playback.StartTranscode(r.Context(), opts)
+		session, err = playback.StartReconstructTranscode(rebuildCtx, pipeline, playback.TranscodeStartup{Timeout: playback.ManifestStartupTimeout})
 	}
 	if err != nil {
 		slog.ErrorContext(r.Context(), "transcode node reconstruct start failed", "component", "transcodenode", "error", err,
@@ -2316,13 +2327,11 @@ func (s *Server) spawnReconstruct(r *http.Request, sessionID string, requestedSe
 	// these dimensions), and registering the dead session would serve this
 	// media as permanently missing. Outside the automatic pipeline, mirror
 	// handleStart's software retry for the accel StartupRetryHWAccel would
-	// change; other accels keep the existing register-immediately behavior.
-	retryAccel := opts.HWAccel
-	if !adaptive {
-		retryAccel = playback.StartupRetryHWAccel(opts)
-	}
+	// change. The rebuild reuses the lost session's output directory, so wait
+	// for a manifest this process wrote: the previous one would report a
+	// process that died at startup as ready and skip the retry (#4099).
 	if retryAccel != opts.HWAccel {
-		if _, waitErr := session.WaitForManifest(playback.ManifestStartupTimeout); waitErr != nil {
+		if _, waitErr := session.WaitForGenerationManifest(playback.ManifestStartupTimeout); waitErr != nil {
 			if session.IsRunning() {
 				slog.WarnContext(r.Context(), "reconstructed transcode slow to produce a manifest", "component", "transcodenode",
 					"error", waitErr, "session", sessionID, "playback_session_id", sessionID)
@@ -2333,13 +2342,13 @@ func (s *Server) spawnReconstruct(r *http.Request, sessionID string, requestedSe
 					"component", "transcodenode", "error", waitErr, "session", sessionID, "playback_session_id", sessionID)
 				retryOpts := opts
 				retryOpts.HWAccel = retryAccel
-				session, err = playback.StartTranscode(context.WithoutCancel(r.Context()), retryOpts)
+				session, err = playback.StartTranscode(rebuildCtx, retryOpts)
 				if err != nil {
 					slog.ErrorContext(r.Context(), "transcode node reconstruct retry failed", "component", "transcodenode", "error", err,
 						"session", sessionID, "playback_session_id", sessionID)
 					return nil, err
 				}
-				if _, retryErr := session.WaitForManifest(playback.ManifestStartupTimeout); retryErr != nil {
+				if _, retryErr := session.WaitForGenerationManifest(playback.ManifestStartupTimeout); retryErr != nil {
 					_ = session.Close()
 					slog.ErrorContext(r.Context(), "reconstructed software retry failed readiness check", "component", "transcodenode", "error", retryErr,
 						"session", sessionID, "playback_session_id", sessionID)
@@ -2639,6 +2648,7 @@ func (s *Server) handleRemux(w http.ResponseWriter, r *http.Request) {
 	if err := playback.ServeRemuxWithOptions(w, request, claims.MediaPath, "mp4", seekSeconds, claims.TranscodeAudio, claims.AudioTrackIndex, claims.DVProfile, playback.RemuxServeOptions{
 		DVMode: playback.RemuxDVMode(claims.RemuxDVMode), FFmpegPath: cfg.Playback.FFmpegPath,
 		DropResumeLeadingPictures: claims.RemuxResumeLeadingPictureDrop,
+		StreamOriginSeconds:       playback.RemuxStreamOrigin(r.URL.Query()),
 		ContentType:               playback.RemuxContentType(claims.AudioOnly), AudioOnly: claims.AudioOnly,
 		SourceAudioChannels: claims.SourceAudioChannels, TargetAudioChannels: claims.TargetAudioChannels,
 		TargetAudioBitrateKbps: claims.TargetAudioBitrateKbps, CopyAudioCodec: claims.CopyAudioCodec,
@@ -3074,6 +3084,7 @@ func (s *Server) handleSegment(w http.ResponseWriter, r *http.Request) {
 					sessionID,
 					session,
 					segNum,
+					decision.Progress.GenerationStartedAt,
 				)
 				// A restart skipped because the request ended is not a failure.
 				if restartErr != nil && !errors.Is(restartErr, playback.ErrManifestNotReady) && !errors.Is(restartErr, r.Context().Err()) {

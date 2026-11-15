@@ -5,6 +5,11 @@ import { t } from "@/i18n";
  * server's limits: at least 8 characters, at most 72 UTF-8 bytes. */
 export function newPasswordProblem(password: string, confirmation: string): string | null {
   if (password !== confirmation) return t("web.auth.newPassword.mismatch");
+  return newPasswordLengthProblem(password);
+}
+
+/** The reason a new password is outside the server's length limits, or null. */
+export function newPasswordLengthProblem(password: string): string | null {
   if ([...password].length < 8) return t("web.auth.newPassword.tooShort");
   if (new TextEncoder().encode(password).length > 72) return t("web.auth.newPassword.tooLong");
   return null;

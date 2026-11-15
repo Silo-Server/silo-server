@@ -84,8 +84,10 @@ export const RATINGS_OVERLAYS: readonly OverlayDef[] = [
     defaultAccent: "#fa6400",
     iconCapable: false,
     ratingSource: "rt_audience",
-    getValue: (d) => ratingLabel("RT Audience", d.rating_rt_audience, 100),
-    sourceMark: "RT Audience",
+    getValue: (d) => ratingLabel(t("web.item.card.rtAudience"), d.rating_rt_audience, 100),
+    get sourceMark() {
+      return t("web.item.card.rtAudience");
+    },
     getScore: (d) => ratingScore(d.rating_rt_audience, 100),
   },
   {
@@ -118,6 +120,9 @@ export const RATINGS_OVERLAYS: readonly OverlayDef[] = [
     iconId: "users",
     iconCapable: true,
     introducedInManifest: 13,
-    getValue: (d) => (d.advisory_age != null && d.advisory_age > 0 ? `${d.advisory_age}+` : null),
+    getValue: (d) =>
+      d.advisory_age != null && d.advisory_age > 0
+        ? t("web.detail.badges.advisory", { age: d.advisory_age })
+        : null,
   },
 ];

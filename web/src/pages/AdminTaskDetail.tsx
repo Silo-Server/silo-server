@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
+import { joinList } from "@/lib/appLocale";
 import { useParams, Link } from "react-router";
 import { Play, Square, Plus, ChevronRight, ChevronDown } from "lucide-react";
 import { isNotFoundProblem } from "@/api/v2/request";
@@ -21,10 +22,12 @@ import {
   type TaskSchedule,
 } from "@/hooks/queries/admin/tasks";
 import type { ExecutionResult, TriggerConfig } from "@/api/types";
+
 import { describeTrigger } from "@/lib/taskTrigger";
 import { formatDateTime as formatPreferredDateTime } from "@/lib/datetime";
 import { clampTaskProgress, formatTaskProgress } from "@/lib/taskProgress";
-import { useT, type MessageKey, type Translate } from "@/i18n";
+import { useServerText, useT, type MessageKey, type Translate } from "@/i18n";
+import { taskText } from "@/lib/taskText";
 import { TriggerFormRow } from "./AdminTaskTriggerForm";
 
 const EM_DASH = "—";
@@ -32,6 +35,7 @@ const EM_DASH = "—";
 const REFRESH_REASON_LABELS: Record<string, MessageKey> = {
   episode_incomplete: "web.admin.tasks.refreshReason.episodeIncomplete",
   stale_provider_id: "web.admin.tasks.refreshReason.staleProviderId",
+  provider_id_incomplete: "web.admin.tasks.refreshReason.providerIdIncomplete",
   refresh_failure: "web.admin.tasks.refreshReason.refreshFailure",
   core_metadata_incomplete: "web.admin.tasks.refreshReason.coreMetadataIncomplete",
   trailers_requested: "web.admin.tasks.refreshReason.trailersRequested",
@@ -239,6 +243,10 @@ function TaskSchedulePanel({
   const update = useUpdateTriggers();
   const [snapshot, setSnapshot] = useState<TaskSchedule | null>(null);
   const [draft, setDraft] = useState<TriggerConfig[]>([]);
+  // One stable React key per draft row, so removing a row doesn't hand its
+  // local state (such as the interval unit) to the row below.
+  const [draftKeys, setDraftKeys] = useState<number[]>([]);
+  const nextDraftKey = useRef(0);
   const [candidate, setCandidate] = useState<TaskSchedule | null>(null);
   const [busy, setBusy] = useState(false);
   const [needsReview, setNeedsReview] = useState(false);
@@ -250,6 +258,7 @@ function TaskSchedulePanel({
       const value = await fetchTaskSchedule(taskKey);
       setSnapshot(value);
       setDraft(value.triggers);
+      setDraftKeys(value.triggers.map(() => nextDraftKey.current++));
       setNeedsReview(false);
     } catch (error) {
       setError(taskMutationMessage(error));
@@ -269,6 +278,10 @@ function TaskSchedulePanel({
       setBusy(false);
     }
   };
+  // An interval box left empty or at 0 has no interval_ms to save.
+  const intervalsValid = draft.every(
+    (trigger) => trigger.type !== "interval" || (trigger.interval_ms ?? 0) >= 1,
+  );
   const save = async () => {
     if (!snapshot) return;
     setError("");
@@ -313,18 +326,24 @@ function TaskSchedulePanel({
           <fieldset disabled={update.isPending || busy} className="space-y-3">
             {draft.map((trigger, i) => (
               <TriggerFormRow
-                key={i}
+                key={draftKeys[i]}
                 trigger={trigger}
                 onChange={(value) =>
                   setDraft(draft.map((old, index) => (index === i ? value : old)))
                 }
-                onRemove={() => setDraft(draft.filter((_, index) => index !== i))}
+                onRemove={() => {
+                  setDraft(draft.filter((_, index) => index !== i));
+                  setDraftKeys(draftKeys.filter((_, index) => index !== i));
+                }}
               />
             ))}
             <Button
               variant="outline"
               size="sm"
-              onClick={() => setDraft([...draft, { type: "interval", interval_ms: 3_600_000 }])}
+              onClick={() => {
+                setDraft([...draft, { type: "interval", interval_ms: 3_600_000 }]);
+                setDraftKeys([...draftKeys, nextDraftKey.current++]);
+              }}
             >
               <Plus className="me-1.5 h-3.5 w-3.5" />
               {t("web.admin.tasks.detail.addTrigger")}
@@ -368,7 +387,7 @@ function TaskSchedulePanel({
             <Button
               size="sm"
               onClick={() => void save()}
-              disabled={needsReview || busy || update.isPending}
+              disabled={needsReview || busy || update.isPending || !intervalsValid}
             >
               {t("common.save")}
             </Button>
@@ -409,7 +428,7 @@ function HistoryRow({
     .map((step) => step.name);
   const errorText =
     failedSteps.length > 0
-      ? t("web.admin.tasks.detail.history.failedSteps", { steps: failedSteps.join(", ") })
+      ? t("web.admin.tasks.detail.history.failedSteps", { steps: joinList(failedSteps) })
       : result.error_message || EM_DASH;
 
   return (
@@ -456,6 +475,7 @@ function HistoryRow({
 
 export default function AdminTaskDetail() {
   const t = useT();
+  const serverText = useServerText();
   const { key } = useParams<{ key: string }>();
   const { data: cachedTask, isLoading, isFetching, error, refetch } = useTask(key!);
   // A 404 outranks a cached task: a refetch that finds it gone must not leave
@@ -528,11 +548,13 @@ export default function AdminTaskDetail() {
               {t("web.admin.tasks.detail.breadcrumb.tasks")}
             </Link>
             <ChevronRight className="h-3.5 w-3.5" />
-            <span className="text-foreground font-medium">{task.name}</span>
+            <span className="text-foreground font-medium">
+              {taskText(serverText, task, "name")}
+            </span>
           </nav>
         }
-        title={task.name}
-        subtitle={task.description}
+        title={taskText(serverText, task, "name")}
+        subtitle={taskText(serverText, task, "description")}
         actions={
           <>
             <Badge variant="outline">{task.category}</Badge>

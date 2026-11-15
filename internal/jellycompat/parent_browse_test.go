@@ -88,7 +88,7 @@ func (f *fakeSeasonEpisodeRepo) ListIDsBySeasonIDs(context.Context, []string) (m
 	return nil, nil
 }
 
-func (f *fakeSeasonEpisodeRepo) ListAdjacentInSeries(ctx context.Context, seriesID string, seasonNumber, episodeNumber int) ([]*models.Episode, error) {
+func (f *fakeSeasonEpisodeRepo) ListAdjacentInSeriesFor(ctx context.Context, seriesID string, seasonNumber, episodeNumber int, _ catalog.AccessFilter) ([]*models.Episode, error) {
 	all, _ := f.ListBySeries(ctx, seriesID)
 	sort.SliceStable(all, func(i, j int) bool {
 		if all[i].SeasonNumber == all[j].SeasonNumber {

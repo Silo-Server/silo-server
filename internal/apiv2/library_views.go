@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 
+	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
 	"github.com/Silo-Server/silo-server/internal/imagesize"
 	"github.com/Silo-Server/silo-server/internal/ratingsources"
@@ -74,7 +75,7 @@ type LibrarySectionItemsInput struct {
 // is the English of. Both fields are absent when the title is text an
 // administrator or the profile typed.
 type SectionTitleKey struct {
-	TitleKey  string            `json:"title_key,omitempty" doc:"Key of the shared translation catalog message whose English is title, present only while title is the server's own text: a built-in or generated section or recommendation row name. A client that has the key shows its translation, filling title_args, and otherwise shows title. Absent when an administrator or the profile typed the title, except that upgrading keyed existing titles identical to a built-in name, and a profile title equal to the administrator's keeps the key. A client acts on title_key whenever it is present" example:"home.section.recentlyAddedIn"`
+	TitleKey  string            `json:"title_key,omitempty" doc:"Key of the shared translation catalog message whose English is title, present only while title is the server's own text: a built-in or generated section, recommendation row or request Discover row name, or a seasonal row's built-in in-season title. A client that has the key shows its translation, filling title_args, and otherwise shows title. Absent when an administrator or the profile typed the title, except that upgrading keyed existing titles identical to a built-in name, and a profile title equal to the administrator's keeps the key. A client acts on title_key whenever it is present" example:"home.section.recentlyAddedIn"`
 	TitleArgs map[string]string `json:"title_args,omitempty" doc:"Values of the title_key message's placeholders by name, such as library for a generated library row; present only with title_key, and absent when the message has none" example:"{\"library\":\"Movies\"}"`
 }
 
@@ -271,11 +272,26 @@ func viewerIdentity(ctx context.Context) (int, string, *Problem) {
 	return claims.UserID, profileID, nil
 }
 
+// cardAvailabilityWanted reports whether the acting profile draws the
+// availability poster badge. Card reads count seasons and episodes only then:
+// the badge is off by default, and the count is the one card lookup whose
+// cost grows with the number of episodes behind a page.
+func cardAvailabilityWanted(ctx context.Context) bool {
+	scope, ok := access.GetScope(ctx)
+	return ok && scope.CardAvailability
+}
+
 // sectionViewer is what the section seams need beyond the context. The v2
 // listener does not read a device header, so the access filter carries no
 // device id.
 func sectionViewer(ctx context.Context, art imagesize.Request, client SectionClient) handlers.SectionViewer {
-	return handlers.SectionViewer{Access: handlers.AccessFilterFromContext(ctx, ""), ImageSize: art.Size, ImageWidths: art.Widths, Web: client.web()}
+	return handlers.SectionViewer{
+		Access:                  handlers.AccessFilterFromContext(ctx, ""),
+		ImageSize:               art.Size,
+		ImageWidths:             art.Widths,
+		IncludeCardAvailability: cardAvailabilityWanted(ctx),
+		Web:                     client.web(),
+	}
 }
 
 func (reg *Registry) librarySections() (LibrarySectionService, *Problem) {

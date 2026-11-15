@@ -6,6 +6,7 @@ import { useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { Link } from "react-router";
 import { LayoutDashboard } from "lucide-react";
 import HeroBanner from "@/components/HeroBanner";
+import { loadErrorDescription } from "@/components/loadErrorDescription";
 import SectionRow from "@/components/SectionRow";
 import TasteSeedBanner from "@/components/TasteSeedBanner";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -27,11 +28,8 @@ import { useDedupedSections } from "./sectionDedupe";
 import { useSectionRefreshSignal } from "./homeSurfaceRefresh";
 import { useUICustomization } from "@/hooks/useUICustomization";
 import { carouselIntrinsicHeight } from "@/lib/uiCustomization";
-import {
-  isFirefoxEngine,
-  isWebKitEngine,
-  prefersReducedMotion,
-} from "@/hooks/useImmediateSidebarCollapse";
+import { isFirefoxEngine, isWebKitEngine } from "@/hooks/useImmediateSidebarCollapse";
+import { prefersReducedMotion } from "@/hooks/usePrefersReducedMotion";
 import { SIDEBAR_DETAILS_REVEAL_DEADLINE_MS } from "@/components/sidebarItemNavigation";
 import { markCriticalContentLoaded } from "@/lib/startupPriority";
 
@@ -46,7 +44,7 @@ const DESKTOP_SIDEBAR_QUERY = "(min-width: 64rem)";
 
 export default function Home() {
   const queryClient = useQueryClient();
-  const { data, isLoading, isError, refetch } = useHomeLayout();
+  const { data, isLoading, isError, error, refetch } = useHomeLayout();
   const { data: homeRefreshSignal = 0 } = useSectionRefreshSignal();
   const { cardPresentation } = useUICustomization();
   const sectionTitle = useSectionTitle();
@@ -357,7 +355,9 @@ export default function Home() {
       <div className="page-shell flex min-h-[50vh] items-center justify-center py-12">
         <div className="surface-panel max-w-md rounded-[1.8rem] border-0 p-6 text-center shadow-none">
           <p className="text-lg font-semibold">{t("web.home.page.loadFailedTitle")}</p>
-          <p className="text-muted-foreground mt-2 text-sm">{t("web.home.page.loadFailedBody")}</p>
+          <p className="text-muted-foreground mt-2 text-sm">
+            {loadErrorDescription(error, t("web.home.page.loadFailedBody"))}
+          </p>
           <button
             type="button"
             onClick={() => void refetch()}
@@ -629,10 +629,10 @@ function renderHeroSlot(
   if (hero.state === "error") {
     return (
       <div
-        className={`bg-muted relative ${HERO_BANNER_SIZE} w-full overflow-hidden rounded-[1.8rem]`}
+        className={`bg-muted relative flex flex-col ${HERO_BANNER_SIZE} w-full overflow-hidden rounded-[1.8rem]`}
       >
         <div className="from-background via-background/70 absolute inset-0 bg-gradient-to-t to-transparent" />
-        <div className="relative flex h-full items-end px-4 pb-10 sm:px-6 sm:pb-12 lg:px-12 lg:pb-16">
+        <div className="relative flex flex-1 items-end px-4 pb-10 sm:px-6 sm:pb-12 lg:px-12 lg:pb-16">
           <div className="max-w-xl space-y-3">
             <p className="text-3xl font-bold">{sectionTitle(hero.layout)}</p>
             <p className="text-muted-foreground text-sm">{t("web.home.page.heroFailed")}</p>
