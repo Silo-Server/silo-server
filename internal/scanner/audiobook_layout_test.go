@@ -199,34 +199,45 @@ func TestAudiobookFolderGrouping(t *testing.T) {
 // A part deleted after the walk listed its book is left out, as a fresh read
 // would leave it out, instead of failing the book.
 func TestAudiobookPartGoneSinceTheWalkIsLeftOut(t *testing.T) {
-	root := t.TempDir()
-	book := filepath.Join(root, "Book")
-	for _, name := range []string{"01.mp3", "02.mp3"} {
-		writeTestFile(t, filepath.Join(book, name), "audio")
-	}
-	scans, err := collectAudiobookRootScans(t.Context(), 1, []string{root}, []string{root}, true, "")
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, seen, _ := splitAudiobookReconcileRoots(scans)
-	walked := walkedAudiobookBooks(scans)[book]
-	if walked == nil || walked.listings == nil {
-		t.Fatal("the walk kept no listing of the book")
-	}
-	if err := os.Remove(filepath.Join(book, "02.mp3")); err != nil {
-		t.Fatal(err)
-	}
-	var got []string
-	err = walked.partsOrRelist(book, seen, func(parts []string) error {
-		onDisk, _, err := statAudiobookDiskFiles(parts)
-		got = nil
-		for _, f := range onDisk {
-			got = append(got, filepath.Base(f.Path))
-		}
-		return err
-	})
-	if err != nil || !slices.Equal(got, []string{"01.mp3"}) {
-		t.Fatalf("parts = %v, %v; want [01.mp3]", got, err)
+	for _, tc := range []struct {
+		name, gone  string
+		files, want []string
+	}{
+		{"in the book folder", "02.mp3", []string{"01.mp3", "02.mp3"}, []string{"01.mp3"}},
+		{"in a disc folder", "CD2/01.mp3", []string{"CD1/01.mp3", "CD2/01.mp3"}, []string{"CD1/01.mp3"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root := t.TempDir()
+			book := filepath.Join(root, "Book")
+			for _, name := range tc.files {
+				writeTestFile(t, filepath.Join(book, name), "audio")
+			}
+			scans, err := collectAudiobookRootScans(t.Context(), 1, []string{root}, []string{root}, true, "")
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, seen, _ := splitAudiobookReconcileRoots(scans)
+			walked := walkedAudiobookBooks(scans)[book]
+			if walked == nil || walked.listings == nil {
+				t.Fatal("the walk kept no listing of the book")
+			}
+			if err := os.Remove(filepath.Join(book, tc.gone)); err != nil {
+				t.Fatal(err)
+			}
+			var got []string
+			err = walked.partsOrRelist(book, seen, func(parts []string) error {
+				onDisk, _, err := statAudiobookDiskFiles(parts)
+				got = nil
+				for _, f := range onDisk {
+					rel, _ := filepath.Rel(book, f.Path)
+					got = append(got, rel)
+				}
+				return err
+			})
+			if err != nil || !slices.Equal(got, tc.want) {
+				t.Fatalf("parts = %v, %v; want %v", got, err, tc.want)
+			}
+		})
 	}
 }
 

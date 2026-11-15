@@ -313,8 +313,7 @@ func walkAudiobookDirectories(ctx context.Context, path string, scan *audiobookR
 
 	hasDiscs := false
 	var others []string
-	book := &audiobookWalkedBook{canonical: dir.canonical, listings: map[string]audiobookDirFiles{}}
-	book.record(path, dir.files)
+	discs := map[string]*audiobookDirFiles{}
 	for _, directory := range dir.directories {
 		outcome := audiobookNotDisc
 		if !inLibraryRoot && !scan.libraryRoots[directory] && isAudiobookDiscDirName(filepath.Base(directory)) {
@@ -324,7 +323,7 @@ func walkAudiobookDirectories(ctx context.Context, path string, scan *audiobookR
 				return err
 			}
 			if outcome == audiobookDiscTaken {
-				book.record(directory, disc)
+				discs[directory] = disc
 			}
 		}
 		switch outcome {
@@ -358,7 +357,7 @@ func walkAudiobookDirectories(ctx context.Context, path string, scan *audiobookR
 		if scan.books == nil {
 			scan.books = make(map[string]*audiobookWalkedBook)
 		}
-		scan.books[path] = book
+		scan.books[path] = newAudiobookWalkedBook(dir.canonical, path, dir.files, discs)
 	case inLibraryRoot:
 		scan.candidates = append(scan.candidates, dir.audio...)
 	}
@@ -417,7 +416,8 @@ type audiobookDirListing struct {
 	// on the way to the admitted file.
 	admittedOnly map[string]bool
 	// files is the directory as audiobookBookParts reads it, ignored entries
-	// included; nil when an ignored symlink was never resolved.
+	// included; nil when an ignored link that could be a part or a disc folder
+	// was never resolved.
 	files *audiobookDirFiles
 }
 
@@ -474,8 +474,12 @@ func readAudiobookDirectory(ctx context.Context, path string, scan *audiobookRoo
 		child := filepath.Join(path, entry.Name())
 		excluded := onlyAdmitted || ignoreRulesMatch(dir.childRules, child, entry.IsDir())
 		if excluded && !scan.admits(child) {
+			// An unresolved link could be a part or a disc folder; any
+			// other name is never read for parts.
 			if entry.Type()&os.ModeSymlink != 0 {
-				dir.files = nil
+				if SupportsAudioFile(entry.Name()) || isAudiobookDiscDirName(entry.Name()) {
+					dir.files = nil
+				}
 			} else {
 				dir.files.add(child, entry.IsDir())
 			}

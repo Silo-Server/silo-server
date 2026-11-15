@@ -73,7 +73,7 @@ func audiobookBookParts(root string, allowedPaths map[string]bool) ([]string, er
 // audiobookWalkedBook is what the walk already read of a book folder: its
 // canonical path and the listings of the folder and of the disc folders it
 // took. Parts are listed from it instead of reading the folders again. When
-// the walk could not take a listing whole (an ignored symlink it never
+// the walk could not take a listing whole (an ignored link it never
 // resolved), listings is nil and the folders are read from disk as before.
 type audiobookWalkedBook struct {
 	canonical string
@@ -107,15 +107,24 @@ type audiobookDirFiles struct {
 	files, dirs []string
 }
 
-// record keeps dir's listing; a listing the walk could not take whole drops
-// them all, so every folder of the book is read from disk.
-func (b *audiobookWalkedBook) record(dir string, files *audiobookDirFiles) {
-	switch {
-	case files == nil:
-		b.listings = nil
-	case b.listings != nil:
-		b.listings[dir] = *files
+// newAudiobookWalkedBook records the book folder root with the listings of
+// root and of the disc folders the walk took. A listing the walk could not
+// take whole (nil) leaves listings nil, so every folder of the book is read
+// from disk.
+func newAudiobookWalkedBook(canonical, root string, files *audiobookDirFiles, discs map[string]*audiobookDirFiles) *audiobookWalkedBook {
+	book := &audiobookWalkedBook{canonical: canonical}
+	if files == nil {
+		return book
 	}
+	listings := map[string]audiobookDirFiles{root: *files}
+	for dir, disc := range discs {
+		if disc == nil {
+			return book
+		}
+		listings[dir] = *disc
+	}
+	book.listings = listings
+	return book
 }
 
 // add records one entry that parts can use: an audio file or a disc folder.
