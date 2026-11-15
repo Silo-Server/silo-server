@@ -237,7 +237,7 @@
   },
   "src/pages/ItemDetail/components/ActionBar.tsx": {
     "formatjs/no-literal-string-in-jsx": {
-      "count": 48
+      "count": 46
     },
     "silo/no-physical-direction": {
       "count": 3
