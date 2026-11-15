@@ -44,3 +44,16 @@ func DeriveDefaultSortTitle(title string) string {
 		return ""
 	}
 }
+
+// IsDefaultSortTitle reports whether sortTitle has the form
+// DeriveDefaultSortTitle writes: text followed by ", The", ", A" or ", An".
+// Such a sort title was derived from some title; any other value was set by
+// someone.
+func IsDefaultSortTitle(sortTitle string) bool {
+	for _, suffix := range []string{", The", ", A", ", An"} {
+		if rest, ok := strings.CutSuffix(sortTitle, suffix); ok && strings.TrimSpace(rest) != "" {
+			return true
+		}
+	}
+	return false
+}
