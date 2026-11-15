@@ -665,9 +665,11 @@ func (r *PersonRepository) SearchAlphabetical(ctx context.Context, query string,
 	return r.search(ctx, query, limit, "", filter, false)
 }
 
-// SearchScoped ranks exact names first and restricts people to credits in the
-// selected media scope and viewer access before applying the limit. Empty scope
-// includes accessible credits across all media types. Every query word must
+// SearchScoped ranks exact names first, then the people with the most credits,
+// and restricts people to credits in the selected media scope and viewer
+// access before applying the limit. A query that matches more than
+// maxRankedPersonMatches names keeps name order after the exact names. Empty
+// scope includes accessible credits across all media types. Every query word must
 // start a word of the name, so "hacks" finds "Lark Hackshaw" but not
 // "Chad Thackston", while a partial last word still serves typeahead.
 func (r *PersonRepository) SearchScoped(ctx context.Context, query string, limit int, mediaScope string, filter AccessFilter) ([]models.Person, error) {
@@ -675,7 +677,7 @@ func (r *PersonRepository) SearchScoped(ctx context.Context, query string, limit
 }
 
 // search runs a name search over the people the viewer can see. scoped
-// selects the v2 rules: word-start matching with exact names first. Without
+// selects the v2 rules: word-start matching, ranked as SearchScoped describes. Without
 // it the query matches anywhere in the name, as the v1 bridge search does.
 func (r *PersonRepository) search(ctx context.Context, query string, limit int, mediaScope string, filter AccessFilter, scoped bool) ([]models.Person, error) {
 	if limit <= 0 {
@@ -693,29 +695,63 @@ func (r *PersonRepository) search(ctx context.Context, query string, limit int, 
 		args = append(args, query)
 		argIdx++
 	}
-	conditions = append(conditions, personCreditVisibleSQL("people.id", MediaScopeItemTypes(mediaScope), personCreditScope{Listed: true}, filter, &args, &argIdx))
+	nameMatch := strings.Join(conditions, " AND ")
+	visible := personCreditVisibleSQL("people.id", MediaScopeItemTypes(mediaScope), personCreditScope{Listed: true}, filter, &args, &argIdx)
+	conditions = append(conditions, visible)
 	where := strings.Join(conditions, " AND ")
 	const columns = `id, name, sort_name, bio, birth_date, death_date, birthplace, homepage,
 		photo_path, photo_source_path, photo_thumbhash, tmdb_id, imdb_id, tvdb_id, plex_guid, created_at, updated_at,
 		metadata_refresh_attempted_at`
 	sql := `SELECT ` + columns + ` FROM people WHERE ` + where + ` ORDER BY name ASC, id ASC LIMIT $1`
 	if scoped && query != "" {
+		exact := fmt.Sprintf("(LOWER(name) IN (LOWER($%d), LOWER($%d)))", argIdx, argIdx+1)
+		args = append(args, query, strings.Join(strings.Fields(query), " "))
+		// A query few enough names match is ranked by credits, so "rudolph"
+		// leads with the Rudolph the library holds most of instead of the
+		// first one in the alphabet. Counting reads only the credit index,
+		// and the sorted names are then checked for a visible credit in rank
+		// order, stopping at the limit. A broader query answers no rows here
+		// and falls through to name order below.
+		tooMany := strconv.Itoa(maxRankedPersonMatches + 1)
+		rankedSQL := `WITH matched AS MATERIALIZED (
+				SELECT id, name FROM people WHERE ` + nameMatch + ` LIMIT ` + tooMany + `
+			)
+			SELECT ` + columns + ` FROM (
+				SELECT id AS ranked_id, name AS ranked_name, ` + exact + ` AS exact,
+					(SELECT count(*) FROM item_people counted WHERE counted.person_id = matched.id) AS credits
+				FROM matched WHERE (SELECT count(*) FROM matched) < ` + tooMany + `
+				ORDER BY exact DESC, credits DESC, ranked_name ASC, ranked_id ASC OFFSET 0
+			) ranked JOIN people ON people.id = ranked.ranked_id
+			WHERE ` + visible + `
+			ORDER BY ranked.exact DESC, ranked.credits DESC, ranked.ranked_name ASC, ranked.ranked_id ASC LIMIT $1`
+		people, err := r.queryPeople(ctx, rankedSQL, args)
+		if err != nil || len(people) > 0 {
+			return people, err
+		}
 		// Words match however they are spaced, so a name equal to the query
 		// as typed or with its whitespace collapsed counts as exact. Exact
 		// names and the rest are separate branches, each in name order, so
 		// the second can read idx_people_name in order and stop at the limit:
 		// one ORDER BY that ranks exact names first must sort every match,
 		// thousands of rows for a one-letter query.
-		exact := fmt.Sprintf("(LOWER(name) IN (LOWER($%d), LOWER($%d)))", argIdx, argIdx+1)
-		args = append(args, query, strings.Join(strings.Fields(query), " "))
 		sql = `SELECT ` + columns + ` FROM (
 			(SELECT ` + columns + `, true AS exact FROM people WHERE ` + where + ` AND ` + exact + ` ORDER BY name, id LIMIT $1)
 			UNION ALL
 			(SELECT ` + columns + `, false FROM people WHERE ` + where + ` AND NOT ` + exact + ` ORDER BY name, id LIMIT $1)
 		) ranked ORDER BY exact DESC, name ASC, id ASC LIMIT $1`
 	}
-	// How many names a query matches ranges from a handful to most of the
-	// table, so each search is planned for its own words (searchPlanArgs).
+	return r.queryPeople(ctx, sql, args)
+}
+
+// maxRankedPersonMatches is the most name matches people search ranks by
+// credits. Ranking reads every match and counts its credits, where name order
+// stops at the limit, so its cost grows with the number of matches.
+const maxRankedPersonMatches = 2000
+
+// queryPeople runs a people search and scans its rows. How many names a query
+// matches ranges from a handful to most of the table, so each search is
+// planned for its own words (searchPlanArgs).
+func (r *PersonRepository) queryPeople(ctx context.Context, sql string, args []any) ([]models.Person, error) {
 	rows, err := r.pool.Query(ctx, sql, searchPlanArgs(args)...)
 	if err != nil {
 		return nil, fmt.Errorf("search people: %w", err)
