@@ -244,6 +244,8 @@ func TestEbookSkipPreloadPreservesEligibility(t *testing.T) {
 		{"group version changed", "UPDATE media_files SET group_key_version=0 WHERE media_folder_id=$1", false},
 		{"unmatched", "UPDATE media_items SET status=' UnMaTcHeD ' WHERE content_id IN (SELECT content_id FROM media_item_libraries WHERE media_folder_id=$1)", false},
 		{"no content", "UPDATE media_files SET content_id=NULL WHERE media_folder_id=$1", false},
+		{"no library membership", "DELETE FROM media_item_libraries WHERE media_folder_id=$1", false},
+		{"item deleted", "DELETE FROM media_items WHERE content_id IN (SELECT content_id FROM media_files WHERE media_folder_id=$1)", false},
 		{"different file path", "UPDATE media_files SET file_path=file_path||'.other' WHERE media_folder_id=$1", false},
 		{"missing file", "UPDATE media_files SET missing_since=now() WHERE media_folder_id=$1", false},
 		{"no file row", "DELETE FROM media_files WHERE media_folder_id=$1", false},

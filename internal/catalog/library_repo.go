@@ -646,10 +646,10 @@ func (r *LibraryItemRepository) reconcileMembershipsOnce(ctx context.Context, fo
 // A present file spares the item because scanners publish a new item in
 // separate statements: item, then file row, then membership. Between the last
 // two, a concurrent scan of the folder sees an item with a present file and
-// no membership. Deleting it would leave the file row pointing at nothing, and
-// the book scanners skip an unchanged file, so the title would never come
-// back. Items that are really gone (held, or under a root that was
-// unreachable) have only missing file rows.
+// no membership; deleting it would fail the publishing scan and leave its file
+// row pointing at nothing. If that scan stopped instead, the next scan of the
+// file restores the membership. Items that are really gone (held, or under a
+// root that was unreachable) have only missing file rows.
 //
 // The directories are filtered after the DELETE, against the IDs it actually
 // removed. orphanIDs was read earlier in the transaction, and a concurrent scan

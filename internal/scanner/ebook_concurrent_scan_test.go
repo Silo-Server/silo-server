@@ -15,13 +15,12 @@ import (
 // write that publishes a new book.
 const ebookMembershipInsertSQL = "INSERT INTO media_item_libraries (content_id, media_folder_id, first_seen_at)"
 
-// A library scan that runs while another scan is publishing a new ebook must
-// not delete it. The publishing scan writes the item and its file row before
-// the library membership, so the library scan finds an unchanged file whose
-// item has no membership yet, and its membership sweep took that item for an
-// orphan. The book then stayed gone: its file row survived, so later scans
-// skipped it as unchanged.
-func TestScanFileEbookKeepsBookPublishedDuringLibraryScanDB(t *testing.T) {
+// A scan elsewhere in an ebook library must not delete a book another scan is
+// still publishing. The publishing scan writes the item and its file row
+// before the library membership. A scan of a sibling folder reconciles
+// memberships across the whole library, and took the item, which had a file
+// row and no membership yet, for an orphan.
+func TestScanFileEbookKeepsBookPublishedDuringSiblingScanDB(t *testing.T) {
 	pool := newScannerTestPool(t)
 	folderID := seedDeadRootTestFolder(t, pool, "ebooks", fmt.Sprintf("concurrent-ebook-%d", time.Now().UnixNano()))
 	t.Cleanup(func() {
@@ -31,33 +30,42 @@ func TestScanFileEbookKeepsBookPublishedDuringLibraryScanDB(t *testing.T) {
 	})
 	root := t.TempDir()
 	folder := &models.MediaFolder{ID: folderID, Type: "ebooks", Paths: []string{root}}
-	book := filepath.Join(root, "book.epub")
-	if err := os.Rename(writeTestEPUBWithOPFBytes(t, []byte(`<?xml version="1.0" encoding="UTF-8"?>
+	writeBook := func(dir, title string) string {
+		t.Helper()
+		if err := os.MkdirAll(filepath.Join(root, dir), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		path := filepath.Join(root, dir, "book.epub")
+		if err := os.Rename(writeTestEPUBWithOPFBytes(t, []byte(`<?xml version="1.0" encoding="UTF-8"?>
 <package xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:opf="http://www.idpf.org/2007/opf">
   <metadata>
-    <dc:title>Concurrent Title</dc:title>
+    <dc:title>`+title+`</dc:title>
     <dc:creator>Concurrent Author</dc:creator>
   </metadata>
-</package>`)), book); err != nil {
-		t.Fatal(err)
+</package>`)), path); err != nil {
+			t.Fatal(err)
+		}
+		return path
 	}
+	book := writeBook("Published", "Published Title")
+	sibling := filepath.Dir(writeBook("Sibling", "Sibling Title"))
 
-	library := NewScanner(NewFileRepository(pool), "ffprobe", nil, 1, false, time.Hour)
-	var libraryErr error
+	other := NewScanner(NewFileRepository(pool), "ffprobe", nil, 1, false, time.Hour)
+	var otherErr error
 	ran := false
 	publisher := NewScanner(NewFileRepository(hookedPool(t, ebookMembershipInsertSQL, func() {
 		ran = true
-		libraryErr = library.ScanEbookFolder(context.Background(), folder)
+		_, otherErr = other.ScanSubtree(context.Background(), folder, sibling)
 	})), "ffprobe", nil, 1, false, time.Hour)
 
 	if err := publisher.ScanFile(t.Context(), book, folder); err != nil {
 		t.Fatalf("ScanFile: %v", err)
 	}
 	if !ran {
-		t.Fatal("the library scan never ran; the membership insert was not traced")
+		t.Fatal("the sibling scan never ran; the membership insert was not traced")
 	}
-	if libraryErr != nil {
-		t.Fatalf("library scan: %v", libraryErr)
+	if otherErr != nil {
+		t.Fatalf("sibling scan: %v", otherErr)
 	}
 
 	var item, membership bool
