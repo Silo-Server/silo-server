@@ -1,7 +1,6 @@
 package nodesource
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"errors"
@@ -9,7 +8,6 @@ import (
 	"io"
 	"io/fs"
 	"log/slog"
-	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -525,42 +523,59 @@ func TestReaderDeduplicatesConcurrentPageFetches(t *testing.T) {
 	}
 }
 
+// stalledResponse is a relay response whose reader stopped reading: it takes
+// one write, then holds the next until a write deadline is set, as a socket
+// under back pressure does.
+type stalledResponse struct {
+	header      http.Header
+	writes      atomic.Int32
+	held        chan struct{}
+	holdOnce    sync.Once
+	deadline    chan struct{}
+	deadlineSet sync.Once
+}
+
+func (w *stalledResponse) Header() http.Header { return w.header }
+func (w *stalledResponse) WriteHeader(int)     {}
+func (w *stalledResponse) Flush()              {}
+
+func (w *stalledResponse) Write(p []byte) (int, error) {
+	if w.writes.Add(1) == 1 {
+		return len(p), nil
+	}
+	w.holdOnce.Do(func() { close(w.held) })
+	<-w.deadline
+	return 0, os.ErrDeadlineExceeded
+}
+
+func (w *stalledResponse) SetWriteDeadline(time.Time) error {
+	w.deadlineSet.Do(func() { close(w.deadline) })
+	return nil
+}
+
 // Closing the last source interrupts a relay response FFmpeg has stopped
 // reading, which back pressure holds in a write.
 func TestCloseInterruptsABlockedRelayRead(t *testing.T) {
-	content := testContent(32 << 20)
-	core := newBytesCore(t, content)
+	core := newBytesCore(t, testContent(1<<20))
 	opener := coreOpener(t, core)
-	source, _ := opener.Open(t.Context(), "a")
-	addr := strings.TrimPrefix(source.Input(), "http://")
-	host, path, _ := strings.Cut(addr, "/")
-	conn, err := net.Dial("tcp", host)
+	source, err := opener.Open(t.Context(), "a")
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer func() { _ = conn.Close() }()
-	_, _ = fmt.Fprintf(conn, "GET /%s HTTP/1.1\r\nHost: %s\r\n\r\n", path, host)
-	resp, err := http.ReadResponse(bufio.NewReader(conn), nil)
-	if err != nil || resp.StatusCode != http.StatusOK {
-		t.Fatalf("relay answer: %v %v", resp, err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-	// Read a little, then stop reading so the relay blocks in a write.
-	if _, err := io.ReadFull(resp.Body, make([]byte, 1000)); err != nil {
-		t.Fatal(err)
-	}
-	time.Sleep(200 * time.Millisecond) //nolint:forbidigo // lets the relay fill the socket and block in a write, which nothing signals
-	_ = source.Close()
-	done := make(chan error, 1)
+	response := &stalledResponse{header: http.Header{}, held: make(chan struct{}), deadline: make(chan struct{})}
+	served := make(chan struct{})
 	go func() {
-		_, err := io.Copy(io.Discard, resp.Body)
-		done <- err
+		defer close(served)
+		opener.serve(response, httptest.NewRequest(http.MethodGet, source.Input(), nil))
 	}()
 	select {
-	case err := <-done:
-		if err == nil {
-			t.Fatal("the interrupted body ended as if complete")
-		}
+	case <-response.held:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the relay never reached a second write")
+	}
+	_ = source.Close()
+	select {
+	case <-served:
 	case <-time.After(5 * time.Second):
 		t.Fatal("closing the source did not interrupt the blocked response")
 	}

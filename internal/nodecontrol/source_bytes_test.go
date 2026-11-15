@@ -151,6 +151,14 @@ func TestSourceBytesRefusals(t *testing.T) {
 	if status, _, header := f.read(nodeA, f.keyA, grant, nil); status != http.StatusGone || header.Get("ETag") != "" {
 		t.Fatalf("removed = %d, want 410 without an ETag", status)
 	}
+	// A file that cannot be opened is not gone: a 410 ends the node's job,
+	// a 503 is retried. A symlink loop stands in for an I/O error.
+	if err := os.Symlink(filepath.Base(path), path); err != nil {
+		t.Fatal(err)
+	}
+	if status, _, _ := f.read(nodeA, f.keyA, grant, nil); status != http.StatusServiceUnavailable {
+		t.Fatalf("unopenable = %d, want 503", status)
+	}
 
 	f.server.opts.Grants = nodesource.NewGrants(func() string { return "" })
 	if status, _, _ := f.read(nodeA, f.keyA, grant, nil); status != http.StatusServiceUnavailable {

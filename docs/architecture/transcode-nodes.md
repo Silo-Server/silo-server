@@ -690,7 +690,8 @@ the way never record it.
 2. The core opens the granted path through `internal/fspath` without blocking
    on a FIFO, `fstat`s the descriptor, and compares the size and the
    modification time at microseconds with the grant: `410` when gone or not a
-   regular file, `412` when changed.
+   regular file, `412` when changed, and `503` when the file could not be
+   opened or examined (an I/O error, a stale mount), which the node retries.
 3. It serves from that descriptor with `http.ServeContent`, so a file replaced
    after the check is never served. Single and suffix ranges and `If-Match` on
    the grant's entity tag are honored; several ranges answer `416`.

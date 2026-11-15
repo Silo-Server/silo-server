@@ -2,7 +2,6 @@ package nodecontrol
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -125,12 +124,15 @@ func (s *Server) HandleSource(w http.ResponseWriter, r *http.Request) {
 	}
 	f, info, err := openGrantedSource(claims)
 	if err != nil {
-		if errors.Is(err, nodesource.ErrSourceChanged) {
-			refuseSource(w, http.StatusPreconditionFailed)
-		} else {
+		status := sourceStatus(err)
+		switch status {
+		case http.StatusPreconditionFailed:
+		case http.StatusGone:
 			slog.DebugContext(r.Context(), "granted source unavailable", "component", "nodecontrol", "node_id", id, "source", claims.ETag(), "error", err)
-			refuseSource(w, http.StatusGone)
+		default:
+			slog.WarnContext(r.Context(), "granted source could not be opened", "component", "nodecontrol", "node_id", id, "source", claims.ETag(), "error", err)
 		}
+		refuseSource(w, status)
 		return
 	}
 	defer func() { _ = f.Close() }()
@@ -203,18 +205,18 @@ func refuseSource(w http.ResponseWriter, status int) {
 
 // openGrantedSource opens the grant's path read-only through fspath, without
 // hanging on a file raced into a FIFO, and checks the descriptor is a regular
-// file of the granted revision: ErrSourceGone or ErrSourceChanged otherwise.
-// What it returns is what is served, so a file replaced after the check
-// cannot be.
+// file of the granted revision: ErrSourceGone or ErrSourceChanged otherwise,
+// or the open's own error when the file could not be examined. What it
+// returns is what is served, so a file replaced after the check cannot be.
 func openGrantedSource(claims nodesource.Grant) (*os.File, os.FileInfo, error) {
 	f, err := fspath.OpenFile(claims.Path, os.O_RDONLY|syscall.O_NONBLOCK, 0)
 	if err != nil {
-		return nil, nil, fmt.Errorf("%w: %w", nodesource.ErrSourceGone, err)
+		return nil, nil, nodesource.SourceError(err)
 	}
 	info, err := f.Stat()
 	switch {
 	case err != nil:
-		err = fmt.Errorf("%w: %w", nodesource.ErrSourceGone, err)
+		err = nodesource.SourceError(err)
 	case !info.Mode().IsRegular():
 		err = fmt.Errorf("%w: not a regular file", nodesource.ErrSourceGone)
 	case !claims.Matches(info):

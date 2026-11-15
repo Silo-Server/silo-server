@@ -459,6 +459,11 @@ func (l *lease) renew() error {
 		if statusErr, ok := errors.AsType[*StatusError](err); ok && statusErr.Fatal() {
 			return err
 		}
+		// Another job on this source may have brought a longer grant while
+		// the attempt was out: judge by the one held now.
+		if _, held := l.currentGrant(); held.After(expires) {
+			expires = held
+		}
 		if !time.Now().Add(delay).Before(expires) {
 			return fmt.Errorf("%w while the core was unreachable: %w", ErrGrantExpired, err)
 		}

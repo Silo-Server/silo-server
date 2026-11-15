@@ -238,8 +238,9 @@ const relayedConcatCheckInput = "http://127.0.0.1:9/src/000000000000000000000000
 // a Samples list (see concat.go): the option directives that restrict each
 // entry, and the http protocol. As checkConcatSamples does, it names an input
 // that cannot be opened: an ffmpeg that parses the list reports "Impossible
-// to open" that URL, one that lacks the option directive or http fails
-// before.
+// to open" that URL, and one that lacks the option directive fails before.
+// An ffmpeg built without the http protocol reports the same line, followed
+// by "Protocol not found", so that ends the check too.
 func checkRelayedConcatSamples(run func(stdin []byte, args ...string) ([]byte, error)) bool {
 	var list bytes.Buffer
 	list.WriteString("ffconcat version 1.0\n")
@@ -249,7 +250,9 @@ func checkRelayedConcatSamples(run func(stdin []byte, args ...string) ([]byte, e
 	args = append(args, relayedConcatDemuxerArgs...)
 	args = append(args, "-i", concatListInput, "-f", "null", "-")
 	output, _ := run(list.Bytes(), args...)
-	return bytes.Contains(bytes.ToLower(output), []byte("impossible to open '"+relayedConcatCheckInput+"'"))
+	output = bytes.ToLower(output)
+	return bytes.Contains(output, []byte("impossible to open '"+relayedConcatCheckInput+"'")) &&
+		!bytes.Contains(output, []byte("protocol not found"))
 }
 
 // concatCheckInput is the input the concat check names. It must not exist.
