@@ -74,8 +74,7 @@ function menuItemLabel(
   }
   if (item.type === "library") return t("web.settings.interface.menuLibrary", { name: item.label });
   // Named like the sidebar names the link: by the row's or collection's current title.
-  const pin = menuItemPinRef(item);
-  const name = pin ? pinLabel(pin) : item.label;
+  const name = pinLabel(menuItemPinRef(item));
   if (item.type === "section") return t("web.settings.interface.menuSection", { name });
   return t("web.settings.interface.menuCollection", { name });
 }

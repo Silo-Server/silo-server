@@ -2,33 +2,54 @@ import { isCancelledError, useQuery, type QueryClient } from "@tanstack/react-qu
 import type { BrowseResponse, LibraryCollection, LibraryTabResponse } from "@/api/types";
 import { catalogItemFromV2, libraryCollectionTabFromV2 } from "@/api/v2/catalog";
 import { v2 } from "@/api/v2/request";
-import { libraryCollectionKeys } from "./keys";
+import { libraryCollectionKeys, libraryCollectionTitleKeys } from "./keys";
 
 export function libraryCollectionsQueryOptions(libraryId: number) {
   return {
     queryKey: libraryCollectionKeys.list(libraryId),
-    queryFn: ({ signal }: { signal?: AbortSignal }): Promise<LibraryTabResponse> =>
-      v2("GET /api/v2/library/{id}/collections", { path: { id: String(libraryId) }, signal }).then(
-        libraryCollectionTabFromV2,
-      ),
+    queryFn: ({
+      client,
+      signal,
+    }: {
+      client?: QueryClient;
+      signal?: AbortSignal;
+    }): Promise<LibraryTabResponse> =>
+      v2("GET /api/v2/library/{id}/collections", { path: { id: String(libraryId) }, signal })
+        .then(libraryCollectionTabFromV2)
+        .then((tab) => {
+          // Every tab read also refreshes the titles that name pinned
+          // collections, so the sidebar never lags the tab it sits beside.
+          if (!signal?.aborted) {
+            client?.setQueryData(
+              libraryCollectionTitleKeys.library(libraryId),
+              collectionTitles(tab),
+            );
+          }
+          return tab;
+        }),
     enabled: Number.isFinite(libraryId) && libraryId > 0,
   };
+}
+
+function collectionTitles(tab: LibraryTabResponse): ReadonlyMap<string, string> {
+  return new Map(
+    getLibraryCollectionList(tab).map((collection) => [collection.id, collection.title]),
+  );
 }
 
 const COLLECTION_TITLES_STALE_MS = 5 * 60 * 1000;
 
 /**
  * The titles of a library's collections by ID, for naming pinned collections.
- * A media change never renames a collection, so media invalidations leave this
- * query alone (see mediaSurfaceRefresh); collection edits invalidate it with
- * the rest of `libraryCollectionKeys`. It reads through the Collections tab's
+ * Every Collections tab read refreshes it, and only server-collection edits
+ * invalidate it (see libraryCollectionTitleKeys). It reads through the tab's
  * query, so a tab read already in flight answers it without a second request.
  * A finished tab response is not reused: its age would add to this query's
  * stale time and keep a renamed collection's old title longer.
  */
 export function libraryCollectionTitlesQuery(libraryId: number) {
   return {
-    queryKey: libraryCollectionKeys.titles(libraryId),
+    queryKey: libraryCollectionTitleKeys.library(libraryId),
     queryFn: ({
       client,
       signal,
@@ -37,22 +58,26 @@ export function libraryCollectionTitlesQuery(libraryId: number) {
       signal: AbortSignal;
     }): Promise<ReadonlyMap<string, string>> => {
       const tabQuery = libraryCollectionsQueryOptions(libraryId);
+      const readAlone = () => tabQuery.queryFn({ signal });
+      const tabUpdates = () => client.getQueryState(tabQuery.queryKey)?.dataUpdateCount ?? 0;
+      const updatesBefore = tabUpdates();
+      // The tab's request is cancelled when the tab closes before it lands.
+      // That either rejects or, over an older cached response, hands that
+      // response back; either way the titles read on their own.
       return client
         .fetchQuery({ ...tabQuery, staleTime: 0 })
-        .catch((error: unknown) => {
-          // The tab's request is cancelled when the tab closes before it lands;
-          // the titles still need an answer, so read them on their own.
-          if (isCancelledError(error)) return tabQuery.queryFn({ signal });
-          throw error;
-        })
         .then(
-          (tab) =>
-            new Map(
-              getLibraryCollectionList(tab).map((collection) => [collection.id, collection.title]),
-            ),
-        );
+          (tab) => (tabUpdates() > updatesBefore ? tab : readAlone()),
+          (error: unknown) => {
+            if (isCancelledError(error)) return readAlone();
+            throw error;
+          },
+        )
+        .then(collectionTitles);
     },
     staleTime: COLLECTION_TITLES_STALE_MS,
+    // The tab read retries on its own; retrying here as well would repeat it.
+    retry: false,
   };
 }
 

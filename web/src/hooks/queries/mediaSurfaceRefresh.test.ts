@@ -6,6 +6,7 @@ import {
   historyKeys,
   itemKeys,
   libraryCollectionKeys,
+  libraryCollectionTitleKeys,
   mediaSurfaceKeys,
   personKeys,
   progressKeys,
@@ -332,7 +333,7 @@ describe("invalidateMediaSurfaceQueries", () => {
     // per event.
     const queryClient = new QueryClient();
     const layoutKey = sectionKeys.libraryLayout(3);
-    const titlesKey = libraryCollectionKeys.titles(3);
+    const titlesKey = libraryCollectionTitleKeys.library(3);
     queryClient.setQueryData(layoutKey, { sections: [] });
     queryClient.setQueryData(titlesKey, new Map());
 

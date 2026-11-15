@@ -12,7 +12,8 @@ import {
   useReorderCollections,
   useSetCollectionSortPreference,
 } from "./collections";
-import { collectionKeys, libraryCollectionKeys } from "./keys";
+import { invalidateLibraryCollectionQueries } from "./collectionSurfaceRefresh";
+import { collectionKeys, libraryCollectionKeys, libraryCollectionTitleKeys } from "./keys";
 import { libraryCollectionsQueryOptions, libraryCollectionTitlesQuery } from "./libraryCollections";
 
 const apiMock = vi.hoisted(() => vi.fn());
@@ -284,6 +285,10 @@ describe("personal collection writes refresh library Collections tabs", () => {
     });
     const libraryTab = [...libraryCollectionKeys.all, 7];
     queryClient.setQueryData(libraryTab, []);
+    // A personal collection never names a library pin, so the always-mounted
+    // sidebar's titles must not refetch each library's whole tab.
+    const pinnedTitles = libraryCollectionTitleKeys.library(7);
+    queryClient.setQueryData(pinnedTitles, new Map());
     const wrapper = ({ children }: { children: ReactNode }) => (
       <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
     );
@@ -294,6 +299,7 @@ describe("personal collection writes refresh library Collections tabs", () => {
     });
 
     await waitFor(() => expect(queryClient.getQueryState(libraryTab)?.isInvalidated).toBe(true));
+    expect(queryClient.getQueryState(pinnedTitles)?.isInvalidated).toBe(false);
   });
 });
 
@@ -318,7 +324,7 @@ describe("libraryCollectionTitlesQuery", () => {
     expect(apiWithProfileRequestContextMock).toHaveBeenCalledOnce();
     // A later titles read fetches anew rather than taking the cached tab
     // response, so a title is never older than the titles' own stale time.
-    await queryClient.invalidateQueries({ queryKey: libraryCollectionKeys.titles(7) });
+    await queryClient.invalidateQueries({ queryKey: libraryCollectionTitleKeys.library(7) });
     apiWithProfileRequestContextMock.mockResolvedValueOnce({
       library_id: "7",
       collections: [{ id: "c1", library_id: "7", library_ids: ["7"], title: "Stormy Nights" }],
@@ -327,35 +333,70 @@ describe("libraryCollectionTitlesQuery", () => {
     await queryClient.fetchQuery(libraryCollectionTitlesQuery(7));
     expect(apiWithProfileRequestContextMock).toHaveBeenCalledTimes(2);
 
-    // A collection edit invalidates both, and the titles read the renamed collection.
+    // A server-collection edit invalidates both, and the titles read the renamed collection.
     apiWithProfileRequestContextMock.mockResolvedValue({
       library_id: "7",
       collections: [{ id: "c1", library_id: "7", library_ids: ["7"], title: "Clear Skies" }],
       groups: [],
     });
-    await queryClient.invalidateQueries({ queryKey: libraryCollectionKeys.all });
+    await invalidateLibraryCollectionQueries(queryClient);
     expect(await queryClient.fetchQuery(libraryCollectionTitlesQuery(7))).toEqual(
       new Map([["c1", "Clear Skies"]]),
     );
   });
 
-  it("reads the titles itself when the Collections tab it waited on closes mid-request", async () => {
-    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-    apiWithProfileRequestContextMock
-      .mockReturnValueOnce(new Promise(() => {}))
-      .mockResolvedValueOnce({
-        library_id: "7",
-        collections: [{ id: "c1", library_id: "7", library_ids: ["7"], title: "Stormy Nights" }],
-        groups: [],
+  it.each([
+    ["with nothing cached", undefined],
+    ["over an older cached response", "Rainy Days"],
+  ])(
+    "reads the titles itself when the Collections tab it waited on closes mid-request, %s",
+    async (_name, cachedTitle) => {
+      const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+      if (cachedTitle) {
+        queryClient.setQueryData(libraryCollectionKeys.list(7), {
+          library_id: 7,
+          collections: [{ id: "c1", title: cachedTitle }],
+          groups: [],
+        });
+      }
+      apiWithProfileRequestContextMock
+        .mockReturnValueOnce(new Promise(() => {}))
+        .mockResolvedValueOnce({
+          library_id: "7",
+          collections: [{ id: "c1", library_id: "7", library_ids: ["7"], title: "Stormy Nights" }],
+          groups: [],
+        });
+      const tab = new QueryObserver(queryClient, {
+        ...libraryCollectionsQueryOptions(7),
+        staleTime: Infinity,
       });
-    const tab = new QueryObserver(queryClient, libraryCollectionsQueryOptions(7));
-    const closeTab = tab.subscribe(() => {});
+      const closeTab = tab.subscribe(() => {});
 
-    const titles = queryClient.fetchQuery(libraryCollectionTitlesQuery(7));
-    await waitFor(() => expect(apiWithProfileRequestContextMock).toHaveBeenCalledOnce());
-    // Leaving the tab cancels the request both were waiting on.
-    closeTab();
+      const titles = queryClient.fetchQuery(libraryCollectionTitlesQuery(7));
+      await waitFor(() => expect(apiWithProfileRequestContextMock).toHaveBeenCalledOnce());
+      // Leaving the tab cancels the request both were waiting on.
+      closeTab();
 
-    expect(await titles).toEqual(new Map([["c1", "Stormy Nights"]]));
+      expect(await titles).toEqual(new Map([["c1", "Stormy Nights"]]));
+    },
+  );
+
+  it("takes the titles from every Collections tab read", async () => {
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const tab = (title: string) => ({
+      library_id: "7",
+      collections: [{ id: "c1", library_id: "7", library_ids: ["7"], title }],
+      groups: [],
+    });
+    apiWithProfileRequestContextMock.mockResolvedValueOnce(tab("Rainy Days"));
+    await queryClient.fetchQuery(libraryCollectionTitlesQuery(7));
+
+    // Renamed in another session; opening the tab here shows the new name.
+    apiWithProfileRequestContextMock.mockResolvedValueOnce(tab("Stormy Nights"));
+    await queryClient.fetchQuery(libraryCollectionsQueryOptions(7));
+
+    expect(queryClient.getQueryData(libraryCollectionTitleKeys.library(7))).toEqual(
+      new Map([["c1", "Stormy Nights"]]),
+    );
   });
 });

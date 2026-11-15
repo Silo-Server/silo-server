@@ -440,9 +440,6 @@ function shouldInvalidateMediaSurfaceQuery(
     return !(options.skipSimilarItems && queryKey[1] === "similar");
   }
   if (queryKeyStartsWith(queryKey, libraryCollectionKeys.all)) {
-    // Collection titles come from collection settings alone; see
-    // libraryCollectionTitlesQuery.
-    if (queryKey[1] === "titles") return false;
     return options.libraryId === undefined || queryKey[2] === options.libraryId;
   }
 

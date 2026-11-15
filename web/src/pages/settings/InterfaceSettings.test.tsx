@@ -4,7 +4,7 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-li
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { libraryCollectionKeys, sectionKeys } from "@/hooks/queries/keys";
+import { libraryCollectionTitleKeys, sectionKeys } from "@/hooks/queries/keys";
 
 import { SETTING_KEYS } from "@/lib/settingsContract";
 import {
@@ -206,7 +206,10 @@ describe("InterfaceSettings", () => {
     queryClient.setQueryData(sectionKeys.libraryLayout(7), {
       sections: [{ id: "s1", title: "Weekend Picks" }],
     });
-    queryClient.setQueryData(libraryCollectionKeys.titles(7), new Map([["c1", "Stormy Nights"]]));
+    queryClient.setQueryData(
+      libraryCollectionTitleKeys.library(7),
+      new Map([["c1", "Stormy Nights"]]),
+    );
 
     renderSettings(queryClient);
 
