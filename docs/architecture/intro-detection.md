@@ -62,6 +62,19 @@ agreed with TheIntroDB less often than the unrefined start, so
 `chromaprint:dialogue:v4` markers under the same-version rule in
 `markers.CanWriteMarkerUpdate`.
 
+A season comparison that no longer finds an intro for a file withdraws the
+Chromaprint intro an earlier comparison stored for it (any `chromaprint:`
+identifier), as after a stricter matching rule or a change to the season's
+files. `WithdrawMarker` clears it only while the file still holds that
+scanner result, so chapter, version-copy, manual, and online intros stay.
+Only a comparison over the whole season group withdraws: a group with a
+failed or deferred fingerprint, or with a file left out because a manual or
+online marker holds its intro, withdraws nothing, since the missing file
+could be the partner that confirms an intro. A group with a held-out file
+stores a distinct input signature, so it is compared again in full once no
+file is held out, as after the held-out file is deleted. A failed marker
+write leaves the group `failed`, so the next run analyzes it again.
+
 Chromaprint points summarize a window that starts at the point's timestamp,
 so raw matches start and end early. Fixed leads measured against authored
 intro chapters move both boundaries later.
