@@ -16378,6 +16378,7 @@ export interface components {
        * @enum {string}
        */
       state: "available" | "disabled" | "not_configured" | "unsupported";
+      streams_by_method: boolean;
       timeseries: boolean;
       top_activity: boolean;
       watch_providers: boolean;
@@ -16505,6 +16506,14 @@ export interface components {
       total_users: number;
       watch_providers: components["schemas"]["AdminDashboardWatchProviderStats"][];
     };
+    AdminDashboardStreamsByMethod: {
+      /** Format: int64 */
+      direct: number;
+      /** Format: int64 */
+      remux: number;
+      /** Format: int64 */
+      transcode: number;
+    };
     AdminDashboardTimeseries: {
       /** Format: int64 */
       download_egress_bytes: number;
@@ -16546,6 +16555,8 @@ export interface components {
       remux: number;
       /** Format: int64 */
       streams: number;
+      /** @description streams split by play method, from the bucket's peak-streams minute, so the parts add up to no more than streams and can be stacked. direct, remux and transcode on the point are each their own peak and may come from different minutes. Sessions with any other play method are streams minus the sum of these values. */
+      streams_by_method: components["schemas"]["AdminDashboardStreamsByMethod"];
       /**
        * Format: date-time
        * @description RFC 3339 instant in UTC with millisecond precision

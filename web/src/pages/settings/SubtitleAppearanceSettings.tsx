@@ -43,6 +43,7 @@ import type { SubtitleAppearance } from "@/lib/subtitleAppearance";
 import { toast } from "sonner";
 
 import { ResetButton } from "./ResetButton";
+import { isImeComposing } from "@/lib/imeComposition";
 
 /* Languages, subtitle behavior and subtitle appearance are profile preferences. */
 
@@ -136,7 +137,7 @@ function PercentInput({
         onChange={(e) => setDraft(e.target.value)}
         onBlur={(e) => commit(e.target.value)}
         onKeyDown={(e) => {
-          if (e.key === "Enter") e.currentTarget.blur();
+          if (e.key === "Enter" && !isImeComposing(e)) e.currentTarget.blur();
         }}
         className="w-20 [appearance:textfield] text-end [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
       />

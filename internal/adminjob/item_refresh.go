@@ -480,6 +480,9 @@ type ItemRefreshExecutor struct {
 	// evictRails drops this node's cached home rails that list the given
 	// content IDs; tests replace it.
 	evictRails func(contentIDs ...string)
+	// audiobookTagRereadDone is scanner.AudiobookTagRereadDone; tests
+	// replace it.
+	audiobookTagRereadDone func(context.Context) bool
 	// relinkWait bounds how long a complete refresh waits for its scope's
 	// files to be linked again; zero means completeRefreshRelinkWait.
 	relinkWait time.Duration
@@ -552,7 +555,9 @@ func NewItemRefreshExecutor(
 		refresher:       refresher,
 		eventBus:        eventBus,
 		evictRails:      sections.EvictResolvedListItems,
-		realtimeHub:     realtimeHub,
+
+		audiobookTagRereadDone: scanner.AudiobookTagRereadDone,
+		realtimeHub:            realtimeHub,
 	}
 }
 
@@ -610,6 +615,12 @@ func (e *ItemRefreshExecutor) Execute(ctx context.Context, req ItemRefreshReques
 	if req.Mode == ItemRefreshModeComplete && isSeriesTarget(req.RequestedType) {
 		ingest = e.ingester.IngestUnlinkedSubtree
 	}
+	// A quick refresh reads the item's tags again in place when it is an
+	// audiobook. A complete refresh has already cleared the scope's content
+	// links, and a reset refresh reads them after the reset (below).
+	if req.Mode == ItemRefreshModeQuick {
+		scanCtx = scanner.WithAudiobookTagReread(scanCtx, req.RefreshContentID)
+	}
 	ingestResult, err := ingest(scanCtx, folder, req.ScanPath)
 	stopScanHeartbeat()
 	if err != nil {
@@ -664,6 +675,17 @@ func (e *ItemRefreshExecutor) Execute(ctx context.Context, req ItemRefreshReques
 	}
 	if err := refreshTarget(refreshCtx, refreshTargetType, refreshContentID, req.ScanFolderID); err != nil {
 		return nil, fmt.Errorf("refresh metadata: %w", err)
+	}
+	// A reset writes the provider's values and clears the fields and credits
+	// the provider leaves out, some of which only an audiobook's tags supply.
+	// Reading the tags again afterwards lets them fill what is still empty,
+	// as any scan of a matched book does.
+	// The reset is committed by then, so the cache invalidation and events
+	// below run even when the read fails; the job then fails with the read's
+	// error, and running the reset again reads the tags.
+	var tagRereadErr error
+	if req.Mode == ItemRefreshModeReset && req.RequestedType == itemTypeAudiobook {
+		tagRereadErr = e.rereadAudiobookTags(ctx, folder, req.ScanPath, refreshContentID)
 	}
 	artworkWarning := ""
 	if cacheArtwork {
@@ -722,6 +744,9 @@ func (e *ItemRefreshExecutor) Execute(ctx context.Context, req ItemRefreshReques
 		})
 	}
 
+	if tagRereadErr != nil {
+		return nil, fmt.Errorf("refresh metadata: read audiobook tags after the reset: %w", tagRereadErr)
+	}
 	return &ItemRefreshResult{
 		RequestedContentID:  req.RequestedContentID,
 		RefreshContentID:    refreshContentID,
@@ -731,6 +756,34 @@ func (e *ItemRefreshExecutor) Execute(ctx context.Context, req ItemRefreshReques
 		MatchedFiles:        matched,
 		ArtworkCacheWarning: artworkWarning,
 	}, nil
+}
+
+// itemTypeAudiobook is media_items.type for an audiobook.
+const itemTypeAudiobook = "audiobook"
+
+// rereadAudiobookTags scans scanPath again, reading the audiobook contentID
+// from its files even though they are unchanged.
+func (e *ItemRefreshExecutor) rereadAudiobookTags(ctx context.Context, folder *models.MediaFolder, scanPath, contentID string) error {
+	scanCtx, scanRun, err := beginDirectSubtreeScan(ctx, e.scanRuns, folder.ID, scanPath, itemRefreshScanTrigger)
+	if err != nil {
+		return err
+	}
+	stopScanHeartbeat := startDirectScanHeartbeat(e.scanRuns, scanRun, directScanHeartbeatEvery)
+	markedCtx := scanner.WithAudiobookTagReread(scanCtx, contentID)
+	result, err := e.ingester.IngestSubtree(markedCtx, folder, scanPath)
+	stopScanHeartbeat()
+	if err != nil {
+		return failDirectScan(ctx, e.scanRuns, scanRun, err)
+	}
+	if err := completeDirectScan(ctx, e.scanRuns, scanRun, result); err != nil {
+		return err
+	}
+	// A scan of a path shared with other books succeeds when only this one
+	// failed, so check that this one was read.
+	if !e.audiobookTagRereadDone(markedCtx) {
+		return fmt.Errorf("the scan did not read audiobook %s", contentID)
+	}
+	return nil
 }
 
 func (e *ItemRefreshExecutor) prepareCompleteRefresh(ctx context.Context, folder *models.MediaFolder, req ItemRefreshRequest) error {

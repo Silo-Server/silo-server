@@ -5177,6 +5177,18 @@ export interface AdminTimeseriesPoint {
   // `egress_kbps`; the remainder is egress no source accounts for. v2 only
   // (the `egress_by_source` dashboard capability).
   egress_by_source?: Record<string, number>;
+  // `streams` split by play method, read from the bucket's peak-streams minute
+  // so the parts add up to no more than `streams` and can be stacked. The
+  // point's own `direct`/`remux`/`transcode` are each their own peak and may
+  // come from different minutes. Sessions with any other play method are the
+  // remainder. v2 only (the `streams_by_method` dashboard capability).
+  streams_by_method?: AdminTimeseriesStreamsByMethod;
+}
+
+export interface AdminTimeseriesStreamsByMethod {
+  direct: number;
+  remux: number;
+  transcode: number;
 }
 
 // One key of `AdminTimeseriesPoint.egress_by_source`: every API process

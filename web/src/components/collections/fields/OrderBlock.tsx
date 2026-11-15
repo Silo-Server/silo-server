@@ -29,6 +29,7 @@ import {
   QUERY_SORT_OPTIONS,
   type QuerySortOrder,
 } from "@/lib/querySortOptions";
+import { isImeComposing } from "@/lib/imeComposition";
 
 const ALPHABETICAL = new Set(["title", "author", "narrator", "series"]);
 const BY_DATE = new Set([
@@ -248,7 +249,7 @@ function MaxTitlesInput({
 }) {
   const t = useT();
   return (
-    <label className="border-border bg-background focus-within:border-ring focus-within:ring-ring/50 flex h-11 items-center gap-3 rounded-md border px-3 text-sm shadow-xs transition-[color,box-shadow] focus-within:ring-[3px]">
+    <label className="border-input bg-background focus-within:border-ring focus-within:ring-ring/50 flex h-11 items-center gap-3 rounded-md border px-3 text-sm shadow-xs transition-[color,box-shadow] focus-within:ring-[3px]">
       <Input
         key={limit ?? ""}
         type="number"
@@ -260,7 +261,7 @@ function MaxTitlesInput({
         className="h-full min-w-0 flex-1 rounded-none border-0 bg-transparent p-0 shadow-none focus-visible:ring-0"
         onBlur={(event) => onCommit(event.currentTarget)}
         onKeyDown={(event) => {
-          if (event.key === "Enter") event.currentTarget.blur();
+          if (event.key === "Enter" && !isImeComposing(event)) event.currentTarget.blur();
         }}
       />
       <span

@@ -39,6 +39,7 @@ import { deviceSettingKeysForRevision } from "@/lib/settingsDisplay";
 import { SETTING_DEFINITIONS, SETTING_KEYS, type SettingKey } from "@/lib/settingsContract";
 import { parseSubtitleAppearance, type SubtitleAppearance } from "@/lib/subtitleAppearance";
 import { cn } from "@/lib/utils";
+import { isImeComposing } from "@/lib/imeComposition";
 
 /**
  * "Your devices" — see and change how Silo behaves on each device you watch on.
@@ -686,7 +687,7 @@ function DeviceNameEditor({
         onChange={(event) => setValue(Array.from(event.target.value).slice(0, 120).join(""))}
         onKeyDown={(event) => {
           // Closing mid-save would drop the result, error included.
-          if (event.key === "Escape" && !rename.isPending) onDone();
+          if (event.key === "Escape" && !rename.isPending && !isImeComposing(event)) onDone();
         }}
         className="h-11 sm:h-8 sm:max-w-xs"
       />

@@ -4,6 +4,7 @@ import type { LucideIcon } from "lucide-react";
 import { useEffect, useId, useRef, type MouseEvent, type ReactNode } from "react";
 import { useT } from "@/i18n";
 import { cn } from "@/lib/utils";
+import { motionScrollBehavior } from "@/hooks/usePrefersReducedMotion";
 
 // Shared building blocks for the grouped vertical navigation rails used by the
 // admin sidebar and the user settings sidebar. Keeping the markup here means
@@ -129,11 +130,8 @@ interface SideNavTopicProps {
  */
 /** Scroll an element just far enough to show it, without motion when asked. */
 function revealInNav(element: HTMLElement | null) {
-  const reduceMotion =
-    typeof window.matchMedia === "function" &&
-    window.matchMedia("(prefers-reduced-motion: reduce)").matches;
   // jsdom has no scrollIntoView.
-  element?.scrollIntoView?.({ block: "nearest", behavior: reduceMotion ? "auto" : "smooth" });
+  element?.scrollIntoView?.({ block: "nearest", behavior: motionScrollBehavior() });
 }
 
 export function SideNavTopic({

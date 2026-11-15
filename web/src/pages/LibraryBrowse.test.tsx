@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({
   useCatalogWindow: vi.fn(),
   useLibraryHasItems: vi.fn(),
   useCatalogLetters: vi.fn(),
+  useCatalogCount: vi.fn(),
   itemGridEmptyState: undefined as ReactNode,
   itemGridTotalItems: undefined as number | undefined,
 }));
@@ -16,6 +17,7 @@ vi.mock("@/hooks/queries/catalog", () => ({
   useCatalogWindow: (...args: unknown[]) => mocks.useCatalogWindow(...args),
   useLibraryHasItems: (...args: unknown[]) => mocks.useLibraryHasItems(...args),
   useCatalogLetters: (...args: unknown[]) => mocks.useCatalogLetters(...args),
+  useCatalogCount: (...args: unknown[]) => mocks.useCatalogCount(...args),
 }));
 
 vi.mock("@/components/ItemGrid", () => ({
@@ -105,6 +107,8 @@ describe("LibraryBrowse", () => {
     mocks.useLibraryHasItems.mockReturnValue({ data: undefined, isLoading: false });
     mocks.useCatalogLetters.mockReset();
     mocks.useCatalogLetters.mockReturnValue({ data: undefined });
+    mocks.useCatalogCount.mockReset();
+    mocks.useCatalogCount.mockReturnValue({ count: undefined, isLoading: false });
     mocks.itemGridEmptyState = undefined;
     mocks.itemGridTotalItems = undefined;
   });
@@ -194,31 +198,70 @@ describe("LibraryBrowse", () => {
     });
   });
 
-  it("does not show the estimated item count as an exact result count", () => {
-    mocks.useCatalogWindow.mockReturnValue({
-      data: {
-        totalItems: 1234,
-        pages: new Map(),
-      },
-      isLoading: false,
+  describe("item count", () => {
+    const byTitle: QueryDefinition["sort"] = { field: "title", order: "asc" };
+    const byAdded: QueryDefinition["sort"] = { field: "added_at", order: "desc" };
+    const windowOf = (totalItems: number, knownItems: number, firstPageComplete: boolean) =>
+      mocks.useCatalogWindow.mockReturnValue({
+        data: {
+          totalItems,
+          knownItems,
+          firstPageComplete,
+          pages: new Map([[0, [{ content_id: "movie-1", title: "Heat", type: "movie" }]]]),
+        },
+        isLoading: false,
+      });
+    const render = (sort: QueryDefinition["sort"], props: Partial<BrowseProps> = {}) =>
+      renderBrowse({
+        queryDefinition: { library_ids: [], match: "all", groups: [], sort },
+        ...props,
+      });
+
+    it("never shows the pager's estimated runway as the count", () => {
+      windowOf(1234, 60, false);
+      mocks.useCatalogCount.mockReturnValue({ count: undefined, isLoading: true });
+
+      const markup = render(byAdded);
+
+      expect(markup).toContain("Loading item count");
+      expect(markup).not.toContain("1,234");
     });
 
-    const markup = renderBrowse({
-      libraryType: "mixed",
-      queryDefinition: {
-        library_ids: [],
-        media_scope: "movie",
-        match: "all",
-        groups: [],
-        sort: { field: "title", order: "asc" },
-      },
+    it("reads its own count once the first page shows there is more", () => {
+      windowOf(1234, 60, false);
+      mocks.useCatalogCount.mockReturnValue({ count: 5321, isLoading: false });
+
+      // Libraries report the movie kind as "movies".
+      const markup = render(byAdded, { libraryType: "movies" });
+
+      expect(mocks.useCatalogCount).toHaveBeenCalledWith(expect.anything(), { enabled: true });
+      expect(markup).toContain("5,321 movies");
     });
 
-    expect(markup).toContain("Filters");
-    expect(markup).toContain("Grid");
-    expect(mocks.useLibraryHasItems).toHaveBeenCalledWith(7, { enabled: false });
-    expect(mocks.itemGridEmptyState).toBeUndefined();
-    expect(markup).not.toContain("1,234 items");
+    it("counts a first page that holds the whole result without another read", () => {
+      windowOf(12, 12, true);
+
+      const markup = render(byAdded, { libraryType: "series", browseType: "episode" });
+
+      expect(mocks.useCatalogCount).toHaveBeenCalledWith(expect.anything(), { enabled: false });
+      expect(markup).toContain("12 episodes");
+    });
+
+    it("takes the letter index's exact total in title order", () => {
+      windowOf(1234, 60, false);
+      mocks.useCatalogLetters.mockReturnValue({
+        data: {
+          total: 640,
+          letters: [{ letter: "H", count: 640, position: 0 }],
+          runs: [{ letter: "H", position: 0 }],
+        },
+      });
+
+      const markup = render(byTitle, { libraryType: "audiobooks", browseType: "books" });
+
+      expect(mocks.useCatalogCount).toHaveBeenCalledWith(expect.anything(), { enabled: false });
+      expect(markup).toContain("640 books");
+    });
   });
 
   it("requests episode browse mode through a type override and normalizes series-only sorts", () => {

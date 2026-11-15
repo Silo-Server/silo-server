@@ -19,6 +19,8 @@ var audiobookRuleCases = []struct {
 	want     string
 	noAuthor bool
 	position int
+	bare     string
+	volume   string // the VolumeTitle a series prefix gives
 	existing map[string]string
 	results  []SearchResult
 	wantID   string // "" means no match
@@ -204,6 +206,71 @@ var audiobookRuleCases = []struct {
 		wantID: "B002V1O7UG",
 	},
 	{
+		name: "a decimal volume is neither of its digits",
+		want: "Series Name 0.5",
+		results: []SearchResult{
+			bookResult("Other Title: Series Name, Book 5", "S5", 2020),
+			bookResult("Prequel Title: Series Name, Book 0.5", "S05", 2020),
+		},
+		wantID: "S05",
+	},
+	{
+		name:    "a decimal volume is no match for the whole volume",
+		want:    "Series Name 0.5",
+		results: []SearchResult{bookResult("Other Title: Series Name, Book 5", "S5", 2020)},
+	},
+	{
+		name:     "a series-prefixed title is scored by its bare title",
+		want:     "Series Name 3 - Gone",
+		bare:     "Gone",
+		volume:   "Gone, Book 3",
+		position: 3,
+		results:  []SearchResult{bookResult("Gone", "G3", 2020)},
+		wantID:   "G3",
+	},
+	{
+		name:     "a series-prefixed title keeps its volume",
+		want:     "Series Name 3 - Gone",
+		bare:     "Gone",
+		volume:   "Gone, Book 3",
+		position: 3,
+		results:  []SearchResult{bookResult("Gone: Series Name, Book 4", "G4", 2020)},
+	},
+	{
+		name:     "a series-prefixed title still matches a provider title that keeps the prefix",
+		want:     "Series Name 3 - Gone",
+		bare:     "Gone",
+		volume:   "Gone, Book 3",
+		position: 3,
+		results:  []SearchResult{bookResult("Series Name 3 - Gone", "GP", 2020)},
+		wantID:   "GP",
+	},
+	{
+		name:     "a number in the bare title does not replace the series prefix's volume",
+		want:     "Series Name 3 - Room 101",
+		bare:     "Room 101",
+		volume:   "Room 101, Book 3",
+		position: 3,
+		results: []SearchResult{
+			bookResult("Room 101: Series Name, Book 4", "R4", 2020),
+			bookResult("Room 101: Series Name, Book 3", "R3", 2020),
+		},
+		wantID: "R3",
+	},
+	{
+		name:     "a number in the bare title does not let another volume through",
+		want:     "Series Name 3 - Room 101",
+		bare:     "Room 101",
+		volume:   "Room 101, Book 3",
+		position: 3,
+		results:  []SearchResult{bookResult("Room 101: Series Name, Book 4", "R4", 2020)},
+	},
+	{
+		name:    "a series name holding the volume's number is no match for that volume",
+		want:    "Zone 3, Book 3",
+		results: []SearchResult{bookResult("Zone 3", "Z0", 2020)},
+	},
+	{
 		name:     "tagged ASIN beats a higher title score",
 		want:     "Project Hail Mary",
 		existing: map[string]string{"asin": "P2"},
@@ -231,7 +298,7 @@ func TestAdmitSearchMatchAudiobookRules(t *testing.T) {
 				ItemType:            "audiobook",
 				ContentID:           "item",
 				NoAuthor:            tt.noAuthor,
-				Rules:               &BookMatchRules{SeriesPosition: tt.position},
+				Rules:               &BookMatchRules{SeriesPosition: tt.position, BareTitle: tt.bare, VolumeTitle: tt.volume},
 			})
 			if err != nil {
 				t.Fatal(err)
@@ -299,6 +366,12 @@ func TestCreditsAgree(t *testing.T) {
 		{"bare surname is not any author of that name", []string{"King"}, people(models.PersonKindAuthor, "Owen King"), models.PersonKindAuthor, false},
 		{"single name matches itself", []string{"Homer"}, people(models.PersonKindAuthor, "Homer"), models.PersonKindAuthor, true},
 		{"middle initial", []string{"Iain Banks"}, people(models.PersonKindAuthor, "Iain M. Banks"), models.PersonKindAuthor, true},
+		{"given name spaced differently", []string{"Jo Anne Smith"}, people(models.PersonKindAuthor, "JoAnne Smith"), models.PersonKindAuthor, true},
+		{"surname spaced differently", []string{"Mary Van Dyke"}, people(models.PersonKindAuthor, "Mary VanDyke"), models.PersonKindAuthor, true},
+		{"one-word tag spaced differently", []string{"JoAnne"}, people(models.PersonKindAuthor, "Jo Anne"), models.PersonKindAuthor, true},
+		{"initials with and without spaces", []string{"J.R. Smith"}, people(models.PersonKindAuthor, "J. R. Smith"), models.PersonKindAuthor, true},
+		{"initials run together", []string{"JR Smith"}, people(models.PersonKindAuthor, "J. R. Smith"), models.PersonKindAuthor, true},
+		{"different given names, same surname", []string{"Jo Smith"}, people(models.PersonKindAuthor, "Anne Smith"), models.PersonKindAuthor, false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -323,6 +396,14 @@ func TestVolumesContradict(t *testing.T) {
 		{"1984", "1984, Book 1", false},
 		{"The 39 Clues 2", "The 39 Clues, Book 1", true},
 		{"Area 51 2", "Area 51, Book 1", true},
+		{"Series Name 0.5", "Other Title: Series Name, Book 5", true},
+		{"Series Name 0.5", "Other Title: Series Name, Book 0", true},
+		{"Series Name 0.5", "Prequel Title: Series Name, Book 0.5", false},
+		{"Series Name 2.5", "Other Title: Series Name, Book 2", true},
+		{"Series Name, Book 0.50", "Series Name, Book 0.5", false},
+		{"Series Name, Book 0.5", "Series Name, Book 5", true},
+		{"Series Name #1.5", "Series Name, Book 1", true},
+		{"Engine 3.0", "Engine 3.0: A Novel", false},
 	}
 	for _, tt := range tests {
 		if got := VolumesContradict(tt.want, tt.record); got != tt.contradicts {

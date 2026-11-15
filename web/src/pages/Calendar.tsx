@@ -18,6 +18,7 @@ import DayGroup from "@/components/calendar/DayGroup";
 import { useAppLanguage, useT, type MessageKey } from "@/i18n";
 import { addWeeks, formatDayHeading, getWeekDays, getWeekStart } from "@/lib/calendarWeek";
 import { storage } from "@/utils/storage";
+import { motionScrollBehavior } from "@/hooks/usePrefersReducedMotion";
 
 type CalendarFilter = "following" | "popular" | "trending" | "everything";
 
@@ -116,7 +117,7 @@ export default function Calendar() {
     // Defer to next frame so the highlighted state renders before we scroll.
     requestAnimationFrame(() => {
       const el = document.getElementById(`day-${date}`);
-      if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
+      if (el) el.scrollIntoView({ behavior: motionScrollBehavior(), block: "start" });
     });
   };
 

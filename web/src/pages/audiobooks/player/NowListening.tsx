@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ChevronDown, Pause, Play, SkipBack, SkipForward } from "lucide-react";
 import { useT } from "@/i18n";
 import { SeekBar } from "@/player/components/SeekBar";
@@ -38,6 +38,22 @@ export function NowListening({
 }: NowListeningProps) {
   const t = useT();
   const [timeMode, setTimeMode] = useState<TimeMode>("total");
+  const rootRef = useRef<HTMLDivElement>(null);
+  const collapseRef = useRef<HTMLButtonElement>(null);
+
+  // The view covers the whole app, so take the app out of the tab order and
+  // the accessibility tree while it is open, and start keyboard focus here.
+  useEffect(() => {
+    const root = rootRef.current;
+    const covered = Array.from(root?.parentElement?.children ?? []).filter(
+      (el): el is HTMLElement => el !== root && el instanceof HTMLElement && !el.inert,
+    );
+    for (const el of covered) el.inert = true;
+    collapseRef.current?.focus();
+    return () => {
+      for (const el of covered) el.inert = false;
+    };
+  }, []);
 
   const remaining = Math.max(0, playback.duration - playback.currentTime);
   // "At current speed" only exists as a distinct reading when rate ≠ 1.
@@ -68,9 +84,10 @@ export function NowListening({
     playback.currentChapter != null && playback.currentChapter.index + 1 < playback.chapters.length;
 
   return (
-    <div className="bg-background fixed inset-0 z-50 flex flex-col overflow-y-auto">
+    <div ref={rootRef} className="bg-background fixed inset-0 z-50 flex flex-col overflow-y-auto">
       <div className="bg-background/95 sticky top-0 z-10 flex items-center justify-between px-6 py-4 backdrop-blur">
         <button
+          ref={collapseRef}
           type="button"
           onClick={onCollapse}
           className="text-muted-foreground hover:bg-muted hover:text-foreground -ms-2 inline-flex items-center gap-1 rounded-full px-3 py-1.5 text-sm font-medium transition-colors"

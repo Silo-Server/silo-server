@@ -310,25 +310,28 @@ function EmailDestinationRow({ prefs }: { prefs: NotificationEmailPreferences })
         )}
       </div>
       {editing && (
-        <div className="flex items-center gap-2">
+        <form
+          className="flex items-center gap-2"
+          // submit() reports a bad address in its own toast.
+          noValidate
+          onSubmit={(event) => {
+            event.preventDefault();
+            submit();
+          }}
+        >
           <Input
             type="email"
             disabled={requestAddress.isPending}
             placeholder={t("web.settings.notifications.email.addressPlaceholder")}
             value={address}
             onChange={(event) => setAddress(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === "Enter") {
-                submit();
-              }
-            }}
             className="max-w-xs"
           />
-          <Button size="sm" disabled={requestAddress.isPending || !address.trim()} onClick={submit}>
+          <Button type="submit" size="sm" disabled={requestAddress.isPending || !address.trim()}>
             {requestAddress.isPending && <Loader2 className="me-1 h-3 w-3 animate-spin" />}
             {t("web.settings.notifications.email.requestVerification")}
           </Button>
-        </div>
+        </form>
       )}
       {prefs.pending_email !== "" && (
         <div className="text-xs text-amber-500">

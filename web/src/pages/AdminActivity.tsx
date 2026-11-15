@@ -32,7 +32,6 @@ import {
   formatToneMapSummary,
   formatTranscodeModeSummary,
   formatVideoSummary,
-  getAdaptationReasons,
   getAudioConversion,
   getPlaybackProgress,
   getPlaybackSessionSubtitle,
@@ -45,9 +44,9 @@ import {
   sessionRoutesVary,
   summarizeActivity,
   type ActivityRouteNode,
-  type AdaptationReason,
   type StreamConversion,
 } from "@/pages/adminActivityPresentation";
+import { getAdaptationReasons, type AdaptationReason } from "@/pages/adminActivityReasons";
 import {
   Table,
   TableBody,
@@ -378,7 +377,7 @@ export default function AdminActivity() {
             <button
               type="button"
               onClick={() => setSearch("")}
-              aria-label={t("web.admin.activity.filter.clear")}
+              aria-label={t("web.admin.users.list.clearSearch")}
               className="text-muted-foreground hover:text-foreground absolute end-2.5 top-1/2 -translate-y-1/2"
             >
               <X className="h-3.5 w-3.5" />

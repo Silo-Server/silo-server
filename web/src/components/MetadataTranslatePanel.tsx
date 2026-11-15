@@ -107,7 +107,7 @@ export function MetadataTranslatePanel({ item }: { item: ItemDetail }) {
           </Label>
           <select
             id="translate-target"
-            className="border-border bg-background text-foreground h-9 rounded-md border px-2 text-sm"
+            className="border-input bg-background text-foreground h-9 rounded-md border px-2 text-sm"
             value={targetLang}
             onChange={(e) => setTargetLang(e.target.value)}
             disabled={busy}
