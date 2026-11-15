@@ -135,6 +135,52 @@ func TestValidateSourceReadsToKeyframeAfterUnindexedSeek(t *testing.T) {
 	}
 }
 
+// TestPacketsThroughNextKeyframeSeesEndWhenBoundPacketsRemain verifies a scan
+// that reads every remaining packet reports the end of the stream, even when
+// exactly sourceKeyframeSearchPackets of them remain.
+func TestPacketsThroughNextKeyframeSeesEndWhenBoundPacketsRemain(t *testing.T) {
+	request := sourcePreflightTestRequest(t)
+	runner := func(_ context.Context, _ string, args ...string) ([]byte, error) {
+		_, requested, _ := strings.Cut(args[slices.Index(args, "-read_intervals")+1], "%+#")
+		count, _ := strconv.Atoi(requested)
+		packets := slices.Repeat([]string{`{"flags":"__"}`}, min(count, sourceKeyframeSearchPackets))
+		return []byte(`{"packets":[` + strings.Join(packets, ",") + `]}`), nil
+	}
+	packets, endOfStream, err := packetsThroughNextKeyframe(context.Background(), request, 20, runner)
+	if err != nil || packets != 0 || !endOfStream {
+		t.Fatalf("packetsThroughNextKeyframe() = %d, %t, %v; want 0, true, nil", packets, endOfStream, err)
+	}
+}
+
+// TestLastKeyframeFromScansPastPacketBound verifies the scan for the last
+// keyframe goes on to the end of the stream when more packets than its bound
+// lie ahead, as in a variable-frame-rate stream, instead of returning the last
+// keyframe of the first chunk.
+func TestLastKeyframeFromScansPastPacketBound(t *testing.T) {
+	request := sourcePreflightTestRequest(t)
+	const packetCount = 2*sourceFinalKeyframeSearchPackets + 500
+	dts := func(index int) float64 { return float64(index) / 100 }
+	runner := func(_ context.Context, _ string, args ...string) ([]byte, error) {
+		start, requested, _ := strings.Cut(args[slices.Index(args, "-read_intervals")+1], "%+#")
+		target, _ := strconv.ParseFloat(start, 64)
+		count, _ := strconv.Atoi(requested)
+		first := int(math.Round(target * 100))
+		packets := []string{}
+		for index := first; index < min(first+count, packetCount); index++ {
+			flags := "__"
+			if index%250 == 0 {
+				flags = "K_"
+			}
+			packets = append(packets, `{"flags":"`+flags+`","dts_time":"`+strconv.FormatFloat(dts(index), 'f', 6, 64)+`"}`)
+		}
+		return []byte(`{"packets":[` + strings.Join(packets, ",") + `]}`), nil
+	}
+	keyframe, ok, err := lastKeyframeFrom(context.Background(), request, 0, runner)
+	if want := dts((packetCount - 1) / 250 * 250); err != nil || !ok || keyframe != want {
+		t.Fatalf("lastKeyframeFrom() = %v, %t, %v; want %v, true, nil", keyframe, ok, err, want)
+	}
+}
+
 // TestValidateSourceSamplesLastKeyframeNearEndOfUnindexedSource verifies a
 // short MPEG-TS whose last sample falls after its final keyframe is accepted:
 // the frame read and the conversion both sample that keyframe instead.

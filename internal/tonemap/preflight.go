@@ -570,48 +570,62 @@ func readSourceFrames(ctx context.Context, request SourcePreflightRequest, posit
 // packetsThroughNextKeyframe returns how many packets from position reach the
 // first keyframe after the first packet, which the one-packet read already
 // failed to decode, or 0 when none lies within sourceKeyframeSearchPackets.
-// endOfStream reports that the scan ran out of packets before that bound.
+// endOfStream reports that the stream ended within that bound. The scan reads
+// one packet past the bound, so a stream that ends exactly there still counts.
 // It only demuxes, so it costs no decoding.
 func packetsThroughNextKeyframe(ctx context.Context, request SourcePreflightRequest, position float64, run CommandRunner) (packets int, endOfStream bool, err error) {
-	interval := formatPreflightPosition(position) + "%+#" + strconv.Itoa(sourceKeyframeSearchPackets)
+	interval := formatPreflightPosition(position) + "%+#" + strconv.Itoa(sourceKeyframeSearchPackets+1)
 	scanned, err := scanSourcePackets(ctx, request, interval, "flags", run)
 	if err != nil {
 		return 0, false, err
 	}
-	for index := 1; index < len(scanned); index++ {
+	for index := 1; index < min(len(scanned), sourceKeyframeSearchPackets); index++ {
 		if strings.HasPrefix(scanned[index].Flags, "K") {
 			return index + 1, false, nil
 		}
 	}
-	return 0, len(scanned) < sourceKeyframeSearchPackets, nil
+	return 0, len(scanned) <= sourceKeyframeSearchPackets, nil
 }
 
-// sourceFinalKeyframeSearchPackets bounds the scan for the last keyframe
-// before a sample that lies in the last keyframe interval. That sample is
-// within sourceKeyframeSearchPackets of the end, and at least 10% of the
-// duration lies after it, so the file holds at most ten times that.
+// sourceFinalKeyframeSearchPackets is how many packets each scan for the last
+// keyframe reads. A sample in the last keyframe interval lies within
+// sourceKeyframeSearchPackets of the end, and at least 10% of the duration
+// lies after it, so at a steady frame rate one scan from the previous sample
+// reaches the end. A variable frame rate can need more.
 const sourceFinalKeyframeSearchPackets = 10 * sourceKeyframeSearchPackets
 
 // lastKeyframeFrom returns the decode timestamp of the last keyframe the stream
-// holds from position on. It only demuxes. The scan is bounded by packets, not
-// by an end time: ffprobe ends a timed read at the first packet presented at
-// or after it, which can come before a keyframe decoded earlier than it is
+// holds from position on. It only demuxes, sourceFinalKeyframeSearchPackets
+// packets at a time, each scan going on from the last packet of the one
+// before, until a scan ends short. The scans are bounded by packets, not by an
+// end time: ffprobe ends a timed read at the first packet presented at or
+// after it, which can come before a keyframe decoded earlier than it is
 // presented.
 func lastKeyframeFrom(ctx context.Context, request SourcePreflightRequest, position float64, run CommandRunner) (float64, bool, error) {
-	interval := formatPreflightPosition(position) + "%+#" + strconv.Itoa(sourceFinalKeyframeSearchPackets)
-	scanned, err := scanSourcePackets(ctx, request, interval, "flags,dts_time", run)
-	if err != nil {
-		return 0, false, err
-	}
-	for index := len(scanned) - 1; index >= 0; index-- {
-		if !strings.HasPrefix(scanned[index].Flags, "K") {
-			continue
+	keyframe, found := 0.0, false
+	for {
+		interval := formatPreflightPosition(position) + "%+#" + strconv.Itoa(sourceFinalKeyframeSearchPackets)
+		scanned, err := scanSourcePackets(ctx, request, interval, "flags,dts_time", run)
+		if err != nil {
+			return 0, false, err
 		}
-		if dts, err := strconv.ParseFloat(scanned[index].DTSTime, 64); err == nil {
-			return dts, true, nil
+		for _, packet := range scanned {
+			if dts, err := strconv.ParseFloat(packet.DTSTime, 64); err == nil && strings.HasPrefix(packet.Flags, "K") {
+				keyframe, found = dts, true
+			}
 		}
+		if len(scanned) < sourceFinalKeyframeSearchPackets {
+			return keyframe, found, nil
+		}
+		// The scan stopped at its bound, so the stream goes on. A packet
+		// without a later timestamp to resume from ends the search with what
+		// it found.
+		next, err := strconv.ParseFloat(scanned[len(scanned)-1].DTSTime, 64)
+		if err != nil || next <= position {
+			return keyframe, found, nil
+		}
+		position = next
 	}
-	return 0, false, nil
 }
 
 // sourcePacket is one demuxed packet of the primary video stream.
