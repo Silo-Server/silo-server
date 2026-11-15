@@ -239,13 +239,7 @@ func (s *Scanner) reconcileMangaFile(ctx context.Context, folder *models.MediaFo
 	size := info.Size()
 	modifiedAt := normalizeFileModifiedAt(info.ModTime())
 
-	unchangedID, isUnchanged, skipErr := s.ebookFileShouldSkip(ctx, folder, filePath, size, modifiedAt)
-	if skipErr == nil && isUnchanged {
-		// An unchanged chapter still needs its series: a scan that stopped or
-		// lost its series to a concurrent scan's orphan delete after writing the
-		// file row must not leave the chapter skipped without one.
-		isUnchanged, skipErr = s.mangaChapterHasSeries(ctx, unchangedID)
-	}
+	isUnchanged, skipErr := s.mangaFileShouldSkip(ctx, folder, filePath, size, modifiedAt)
 	if skipErr != nil {
 		slog.WarnContext(ctx, "manga scan: skip-check failed, falling through", "component", "scanner",
 			"folder_id", folder.ID,
@@ -443,23 +437,27 @@ func (s *Scanner) findOrCreateMangaSeries(ctx context.Context, folderID int, ser
 	return id, nil
 }
 
-// mangaChapterHasSeries reports whether the chapter is linked to a series item
-// that has a library membership. Any library counts: a chapter item shared by
-// two manga libraries over one path has one link, and requiring this folder's
-// series would relink it on every scan of either library.
-func (s *Scanner) mangaChapterHasSeries(ctx context.Context, chapterID string) (bool, error) {
-	var linked bool
-	err := s.fileRepo.Pool().QueryRow(ctx, `
-		SELECT EXISTS (
-			SELECT 1 FROM manga_chapters mc
-			JOIN media_item_libraries mil ON mil.content_id = mc.series_content_id
-			WHERE mc.chapter_content_id = $1
-		)
-	`, chapterID).Scan(&linked)
-	if err != nil {
-		return false, fmt.Errorf("check manga chapter series: %w", err)
+// mangaFileShouldSkip reports whether the chapter file is unchanged since its
+// last scan and still linked to a series that has a library membership. A scan
+// that stopped, or lost its series to a concurrent scan's orphan delete, after
+// writing the file row must not leave the chapter skipped without a series. Any
+// library counts: a chapter item shared by two manga libraries over one path has
+// one link, and requiring this folder's series would relink it on every scan of
+// either library.
+func (s *Scanner) mangaFileShouldSkip(ctx context.Context, folder *models.MediaFolder, filePath string, size int64, modifiedAt time.Time) (bool, error) {
+	if s.fileRepo == nil || s.itemRepo == nil {
+		return false, nil
 	}
-	return linked, nil
+	state, err := s.fileRepo.loadEbookSkipState(ctx, folder.ID, []string{filePath})
+	if err != nil {
+		return false, err
+	}
+	files := state[filePath]
+	if _, unchanged := unchangedEbookFile(files, filePath, size, modifiedAt); !unchanged {
+		return false, nil
+	}
+	// unchangedEbookFile only reports unchanged for exactly one file row.
+	return files[0].mangaSeriesLinked, nil
 }
 
 // lookupMangaSeries returns the content_id of the type='manga' series item
