@@ -1,6 +1,7 @@
 package watchsync
 
 import (
+	"cmp"
 	"context"
 	"database/sql"
 	"errors"
@@ -44,6 +45,7 @@ const (
 
 type serviceFakeRepo struct {
 	connections            map[string]Connection
+	watchlistTitlesSince   map[string]time.Time
 	dueConnections         []Connection
 	sessions               map[string]DeviceAuthSession
 	settings               map[string]string
@@ -69,6 +71,7 @@ type serviceFakeRepo struct {
 	confirmingScrobbles    map[string]time.Time
 	markSatisfiedErr       error
 	markLocalRemovedErr    error
+	upsertListItemErr      error
 	markHistoryStatusErr   error
 	syncRunMu              sync.Mutex
 	scrobbleMu             sync.Mutex
@@ -565,6 +568,9 @@ func (r *serviceFakeRepo) MarkHistoryExportSatisfiedByScrobble(_ context.Context
 }
 
 func (r *serviceFakeRepo) UpsertListItemStates(_ context.Context, states []ListItemState) error {
+	if r.upsertListItemErr != nil {
+		return r.upsertListItemErr
+	}
 	for _, state := range states {
 		if state.ListKind == "" {
 			state.ListKind = ListKindFavorites
@@ -577,6 +583,16 @@ func (r *serviceFakeRepo) UpsertListItemStates(_ context.Context, states []ListI
 				if state.ID == "" {
 					state.ID = r.listItemStates[i].ID
 				}
+				state.CreatedAt = r.listItemStates[i].CreatedAt
+				// Mirror Postgres: empty identity fields keep the stored ones,
+				// and title IDs add up.
+				old := r.listItemStates[i]
+				state.ProviderItemKey = cmp.Or(state.ProviderItemKey, old.ProviderItemKey)
+				state.Kind = cmp.Or(state.Kind, old.Kind)
+				state.Title = cmp.Or(state.Title, old.Title)
+				state.Year = cmp.Or(state.Year, old.Year)
+				state.TitleIDs = mergeTitleIDsForTest(old.TitleIDs, state.TitleIDs)
+				state.RemotePresent = state.RemotePresent || old.RemotePresent
 				r.listItemStates[i] = state
 				replaced = true
 				break
@@ -586,10 +602,49 @@ func (r *serviceFakeRepo) UpsertListItemStates(_ context.Context, states []ListI
 			if state.ID == "" {
 				state.ID = "list-item-" + strconv.Itoa(len(r.listItemStates)+1)
 			}
+			if state.CreatedAt.IsZero() {
+				state.CreatedAt = time.Now()
+			}
 			r.listItemStates = append(r.listItemStates, state)
 		}
 	}
 	return nil
+}
+
+func (r *serviceFakeRepo) WatchlistTitlesSince(_ context.Context, connectionID string) (*time.Time, error) {
+	if since, ok := r.watchlistTitlesSince[connectionID]; ok {
+		return &since, nil
+	}
+	return nil, nil
+}
+
+func (r *serviceFakeRepo) MarkWatchlistTitlesSince(_ context.Context, connectionID string) error {
+	if _, ok := r.watchlistTitlesSince[connectionID]; ok {
+		return nil
+	}
+	if r.watchlistTitlesSince == nil {
+		r.watchlistTitlesSince = map[string]time.Time{}
+	}
+	r.watchlistTitlesSince[connectionID] = time.Now()
+	return nil
+}
+
+func (r *serviceFakeRepo) AddListItemTitleIDs(_ context.Context, connectionID string, kind ListKind, mediaItemID string, ids []string) error {
+	r.markListItem(connectionID, kind, mediaItemID, func(s *ListItemState) {
+		s.TitleIDs = mergeTitleIDsForTest(s.TitleIDs, ids)
+	})
+	return nil
+}
+
+func mergeTitleIDsForTest(a, b []string) []string {
+	out := slices.Clone(a)
+	for _, id := range b {
+		if !slices.Contains(out, id) {
+			out = append(out, id)
+		}
+	}
+	slices.Sort(out)
+	return out
 }
 
 func (r *serviceFakeRepo) ListListItemStates(_ context.Context, connectionID string, kind ListKind) ([]ListItemState, error) {
@@ -651,6 +706,11 @@ func (r *serviceFakeRepo) listItemKeyHeldElsewhere(state ListItemState) bool {
 		}
 	}
 	return false
+}
+
+func (r *serviceFakeRepo) SetListItemProviderKey(_ context.Context, connectionID string, kind ListKind, mediaItemID, key string) error {
+	r.markListItem(connectionID, kind, mediaItemID, func(state *ListItemState) { state.ProviderItemKey = key })
+	return nil
 }
 
 func (r *serviceFakeRepo) markListItem(connectionID string, kind ListKind, mediaItemID string, apply func(*ListItemState)) {
@@ -3794,8 +3854,12 @@ func TestServiceFavoriteImportAndPendingLocalRemoval(t *testing.T) {
 		listedAt  time.Time
 		guessed   bool
 		wantAdded bool
+		// storedKey is movie-a's key when the provider has since listed it
+		// under another one.
+		storedKey string
 	}{
 		{name: "listing older than the removal", listedAt: removedAt.Add(-24 * time.Hour)},
+		{name: "older listing under another key", listedAt: removedAt.Add(-24 * time.Hour), storedKey: "tmdb:549"},
 		{name: "listing newer than the removal", listedAt: removedAt.Add(time.Hour), wantAdded: true},
 		// A provider that sends no listing time gets the import time.
 		{name: "undated listing", listedAt: removedAt.Add(time.Hour), guessed: true},
@@ -3810,7 +3874,7 @@ func TestServiceFavoriteImportAndPendingLocalRemoval(t *testing.T) {
 			repo.listItemStates = []ListItemState{
 				{
 					ConnectionID: conn.ID, ListKind: ListKindFavorites, MediaItemID: "movie-a", Kind: "movie",
-					ProviderItemKey: "imdb:tt0137523", RemotePresent: true, LastRemovedLocalAt: &removedAt,
+					ProviderItemKey: cmp.Or(tt.storedKey, "imdb:tt0137523"), RemotePresent: true, LastRemovedLocalAt: &removedAt,
 				},
 				{
 					ConnectionID: conn.ID, ListKind: ListKindFavorites, MediaItemID: "movie-b", Kind: "movie",
@@ -3842,8 +3906,8 @@ func TestServiceFavoriteImportAndPendingLocalRemoval(t *testing.T) {
 			if result.Removed != 0 || len(favorites) != wantFavorites {
 				t.Fatalf("result=%#v favorites=%#v", result, favorites)
 			}
-			if a := repo.listItemStates[0]; a.LocalPresent != tt.wantAdded || !a.RemotePresent {
-				t.Fatalf("movie-a state = %#v, want local %v", a, tt.wantAdded)
+			if a := repo.listItemStates[0]; a.LocalPresent != tt.wantAdded || !a.RemotePresent || a.ProviderItemKey != "imdb:tt0137523" {
+				t.Fatalf("movie-a state = %#v, want local %v under the listed key", a, tt.wantAdded)
 			}
 		})
 	}
@@ -4078,5 +4142,89 @@ func TestExportItemOutcomeDecidesByMediaItemIDBeforeKey(t *testing.T) {
 	}
 	if sent, _ := exportItemOutcome(ExportResult{Failed: map[string]string{"movie-3": "x"}, Sent: []string{"imdb:tt3"}}, "movie-3", "imdb:tt3"); sent {
 		t.Fatal("a failed media item must not be confirmed through its key")
+	}
+}
+
+// favoriteImportRemoverStub serves a favorites batch and records every removal it
+// is asked to send.
+type favoriteImportRemoverStub struct {
+	favoriteBatchProviderStub
+	removed *[]string
+}
+
+func (favoriteImportRemoverStub) AuthMethod() string { return AuthMethodAPIKey }
+func (favoriteImportRemoverStub) Capabilities() Capabilities {
+	return Capabilities{ImportFavorites: true, RemoveFavorites: true}
+}
+
+func (p favoriteImportRemoverStub) RemoveFavorites(_ context.Context, _ ServerConfig, _ Connection, favorites []LocalFavorite) (ExportResult, error) {
+	result := ExportResult{}
+	for _, favorite := range favorites {
+		*p.removed = append(*p.removed, favorite.MediaItemID)
+		result.Sent = append(result.Sent, favorite.MediaItemID)
+	}
+	return result, nil
+}
+
+// failFirstMatcher fails its first call, then matches each row by title.
+type failFirstMatcher struct {
+	calls   *int
+	byTitle map[string]string
+}
+
+func (m failFirstMatcher) Match(_ context.Context, record historyimport.Record) (*historyimport.Match, string, error) {
+	*m.calls++
+	if *m.calls == 1 {
+		return nil, "", errors.New("matcher unavailable")
+	}
+	return &historyimport.Match{MediaItemID: m.byTitle[record.Title]}, "", nil
+}
+
+// A list import that fails before it reaches a newer listing of a title
+// removed locally must not let the run send that stale removal: it would take
+// the provider's newer add off, and the import never added the title back.
+func TestSyncConnectionSkipsListRemovalsAfterFailedImport(t *testing.T) {
+	store, repo, conn := favoriteImportFixture(t)
+	ctx := context.Background()
+	conn.AccessToken = testAccessToken
+	repo.connections[connectionKey(conn.Provider, conn.UserID, conn.ProfileID)] = conn
+	removedAt := time.Date(2026, 7, 1, 12, 0, 0, 0, time.UTC)
+	repo.listItemStates = []ListItemState{{
+		ConnectionID: conn.ID, ListKind: ListKindFavorites, MediaItemID: testMovieMediaID,
+		ProviderItemKey: testMovieProviderItemKey, Kind: "movie",
+		RemotePresent: true, LocalPresent: false, LastRemovedLocalAt: &removedAt,
+	}}
+	var removed []string
+	provider := favoriteImportRemoverStub{
+		favoriteBatchProviderStub: favoriteBatchProviderStub{batch: FavoriteImportBatch{Rows: []RemoteFavorite{
+			{ProviderItemKey: "movie:tmdb:1", Kind: "movie", Title: "Other", FavoritedAt: removedAt.Add(-time.Hour)},
+			{ProviderItemKey: testMovieProviderItemKey, Kind: "movie", Title: "Readded", FavoritedAt: removedAt.Add(time.Hour)},
+		}}},
+		removed: &removed,
+	}
+	calls := 0
+	service := NewService(repo, registryWith(t, provider)).
+		WithMatcher(failFirstMatcher{calls: &calls, byTitle: map[string]string{"Other": "movie-2", "Readded": testMovieMediaID}}).
+		WithUserStoreProvider(staticStoreProvider{store: store})
+
+	if err := service.SyncConnection(ctx, conn, "scheduled"); err == nil {
+		t.Fatal("first sync succeeded, want the import failure")
+	}
+	if len(removed) != 0 {
+		t.Fatalf("removals sent after failed import = %v, want none", removed)
+	}
+
+	if err := service.SyncConnection(ctx, conn, "scheduled"); err != nil {
+		t.Fatalf("retry sync: %v", err)
+	}
+	if len(removed) != 0 {
+		t.Fatalf("removals sent after the newer listing = %v, want none", removed)
+	}
+	favorites, err := store.ListFavorites(ctx, conn.ProfileID, 10, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.ContainsFunc(favorites, func(f userstore.Favorite) bool { return f.MediaItemID == testMovieMediaID }) {
+		t.Fatalf("favorites = %#v, want the re-added title", favorites)
 	}
 }

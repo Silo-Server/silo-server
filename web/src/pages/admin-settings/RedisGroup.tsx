@@ -22,7 +22,7 @@ const REDIS_URL_EXAMPLE = "redis://host:6379";
 
 export interface RedisUrlEditors {
   keepSaved: (key: string) => void;
-  setSecret: (key: string, value: string) => void;
+  setSecret: (key: string, value: string, options?: { stage?: boolean }) => void;
   disabled: boolean;
 }
 

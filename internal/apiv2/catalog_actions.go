@@ -278,7 +278,7 @@ func registerCatalogActions(reg *Registry) {
 	Register(reg, translateOperation, reg.translateCatalogItemDescription)
 
 	Register(reg, viewerOperation(humaOp(http.MethodGet, Prefix+"/catalog/people", "listPeople", "catalog",
-		"Search people by name, with exact matches first and optional media scope.")), reg.listPeople)
+		"Search people by name, with exact matches first, then the most credited for a specific query, and optional media scope.")), reg.listPeople)
 	Register(reg, viewerOperation(humaOp(http.MethodGet, Prefix+"/catalog/people/{id}", "getPerson", "catalog",
 		"One person; viewing queues a provider refresh when one is due, unless the read is a prefetch.")), reg.getPerson)
 	refreshPerson := humaOp(http.MethodPost, Prefix+"/catalog/people/{id}/refresh", "refreshPerson", "catalog",

@@ -1146,7 +1146,7 @@ export default function NotificationsAdminSettings() {
                 <SettingField
                   label={t("web.admin.settings.notifications.digestHour")}
                   description={t("web.admin.settings.notifications.digestHourDescription")}
-                  unit="0-23"
+                  unit={t("web.admin.common.units.hourRange")}
                   type="number"
                   value={numberValue("notifications.email.digest_hour", "8")}
                   onChange={(v) => form.setValue("notifications.email.digest_hour", v)}
@@ -1222,7 +1222,7 @@ export default function NotificationsAdminSettings() {
                 <SettingField
                   label={t("web.admin.settings.notifications.digestHour")}
                   description={t("web.admin.settings.notifications.digestHourDescription")}
-                  unit="0-23"
+                  unit={t("web.admin.common.units.hourRange")}
                   type="number"
                   value={numberValue("notifications.discord.digest_hour", "8")}
                   onChange={(v) => form.setValue("notifications.discord.digest_hour", v)}

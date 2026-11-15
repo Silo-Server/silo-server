@@ -2,6 +2,7 @@ package fspath
 
 import (
 	"context"
+	"errors"
 	"io/fs"
 	"os"
 	"os/exec"
@@ -179,6 +180,29 @@ func withoutProxy(env []string) []string {
 		}
 		return false
 	})
+}
+
+// FFConcatFileURL returns path as a quoted file: URL for an ffmpeg ffconcat
+// list. Inside single quotes ffconcat takes every character literally,
+// backslashes included, so a single quote is written by closing the quotes,
+// escaping it, and reopening them. A list is read line by line and ffmpeg URLs
+// end at a NUL, so paths holding a line break or NUL are rejected. A list
+// usually reaches ffmpeg on stdin, not as an argument that CommandContext
+// decodes, so an encoded path is decoded here to name the real file.
+//
+// A relayed input is refused (ErrRelayed): a list, not the argv, names it, so
+// CommandContext cannot restrict it, and only a list that holds each entry to
+// the relay's protocols and demuxers itself may name one (mediasample's
+// relayed Samples list).
+func FFConcatFileURL(path string) (string, error) {
+	if IsRelayed(path) {
+		return "", relayedOpenError("name in an ffconcat list")
+	}
+	path = Decode(path)
+	if strings.ContainsAny(path, "\n\r\x00") {
+		return "", errors.New("an ffconcat path must not contain a line break or NUL")
+	}
+	return "'file:" + strings.ReplaceAll(path, "'", `'\''`) + "'", nil
 }
 
 // DecodeAll decodes each string in args. It returns args itself when no

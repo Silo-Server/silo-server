@@ -153,6 +153,38 @@ describe("parseLibraryPageState", () => {
     ]);
   });
 
+  it("types grouped rule values by their field", () => {
+    const rule = (index: number, field: string, op: string, value: string) =>
+      `groups[0][rules][${index}][value]=${value}&groups[0][rules][${index}][field]=${field}&groups[0][rules][${index}][op]=${op}`;
+    const state = parseLibraryPageState(
+      params(
+        [
+          "tab=library&groups[0][match]=all",
+          rule(0, "content_rating", "is", "15"),
+          rule(1, "title", "contains", "1917"),
+          rule(2, "year", "gte", "2005"),
+          rule(3, "watched", "is", "true"),
+          "groups[0][rules][4][field]=rating_imdb&groups[0][rules][4][op]=between",
+          "groups[0][rules][4][value][0]=6&groups[0][rules][4][value][1]=8",
+        ].join("&"),
+      ),
+      "mixed",
+    );
+
+    expect(state.queryDefinition.groups).toEqual([
+      {
+        match: "all",
+        rules: [
+          { field: "content_rating", op: "is", value: "15" },
+          { field: "title", op: "contains", value: "1917" },
+          { field: "year", op: "gte", value: 2005 },
+          { field: "watched", op: "is", value: true },
+          { field: "rating_imdb", op: "between", value: [6, 8] },
+        ],
+      },
+    ]);
+  });
+
   it.each([
     ["parses series-library browse mode from the type param", "tab=library&type=episode"],
     [

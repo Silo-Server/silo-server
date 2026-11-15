@@ -58,6 +58,10 @@ var (
 	// ErrFileChanged means the file's size or modification time differs
 	// from when the index was read.
 	ErrFileChanged = errors.New("embeddedsub: file changed since it was indexed")
+	// ErrSlowReads means the file's storage answers random reads too slowly
+	// for reading the track through the index (ReadOptions.SlowRead). The
+	// caller falls back to FFmpeg, which reads the file in order.
+	ErrSlowReads = errors.New("embeddedsub: the file's random reads are too slow")
 	// ErrDamaged means some packets the index points at couldn't be read: the
 	// data there isn't the track's block, is cut off, or doesn't decode.
 	// ReadPackets returns it, wrapped in a *DamagedError, together with the

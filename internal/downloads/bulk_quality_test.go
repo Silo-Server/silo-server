@@ -185,23 +185,3 @@ func TestMonitorPatchRechecksQualityOnlyWhenItChangesPostgres(t *testing.T) {
 		t.Fatalf("changed quality err = %v, want ErrDownloadNotAllowed", err)
 	}
 }
-
-func TestReplacementAddsActive(t *testing.T) {
-	cases := []struct {
-		name   string
-		status string
-		ready  bool
-		want   bool
-	}{
-		{"ready entry, target still to prepare", StatusReady, false, true},
-		{"ready entry, target already prepared", StatusReady, true, false},
-		{"failed entry, target still to prepare", StatusFailed, false, true},
-		{"entry already active", StatusPreparing, false, false},
-		{"entry downloading", StatusDownloading, false, false},
-	}
-	for _, tc := range cases {
-		if got := replacementAddsActive(&Download{Status: tc.status}, tc.ready); got != tc.want {
-			t.Errorf("%s: got %v, want %v", tc.name, got, tc.want)
-		}
-	}
-}

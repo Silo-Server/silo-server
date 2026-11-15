@@ -289,6 +289,7 @@ func (h *StreamHandler) HandleStream(w http.ResponseWriter, r *http.Request) {
 			DVMode:                    session.RemuxDVMode,
 			FFmpegPath:                h.ffmpegPath(),
 			DropResumeLeadingPictures: session.RemuxResumeLeadingPictureDrop,
+			StreamOriginSeconds:       playback.RemuxStreamOrigin(r.URL.Query()),
 			ContentType:               playback.RemuxContentType(file.IsAudioOnly()),
 			AudioOnly:                 file.IsAudioOnly(),
 			SourceAudioChannels:       session.SourceAudioChannels,

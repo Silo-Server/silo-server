@@ -50,6 +50,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/artworkkey"
 	"github.com/Silo-Server/silo-server/internal/artworkurl"
 	"github.com/Silo-Server/silo-server/internal/audiobooks"
+	"github.com/Silo-Server/silo-server/internal/audiobooks/abs"
 	"github.com/Silo-Server/silo-server/internal/audiobooks/podcastfeed"
 	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/autoscan"
@@ -2547,6 +2548,9 @@ func main() {
 				deps.RealtimeHub,
 			)
 			libraryRefreshExecutor.SetLibraryLockPool(deps.DB)
+			if audiobookEnricher != nil {
+				libraryRefreshExecutor.SetAudiobookEnricher(audiobookEnricher)
+			}
 		}
 		if metadataService != nil && deps.FileRepo != nil {
 			itemRefreshExecutor = adminjob.NewItemRefreshExecutor(
@@ -2568,6 +2572,9 @@ func main() {
 			}
 			if itemRepo != nil {
 				itemRefreshExecutor.SetItemStatusReader(itemRepo)
+			}
+			if audiobookEnricher != nil {
+				itemRefreshExecutor.SetAudiobookEnricher(audiobookEnricher)
 			}
 		}
 	}
@@ -3749,6 +3756,7 @@ func main() {
 	// available. Routes are mounted at the root level by NewRouter (not under
 	// /api/v1/) so ABS clients resolve /login, /api/*, /abs/api/*, and
 	// /abs/socket.io/* without path prefix hacks.
+	var absH *abs.Handler
 	if absCompatEnabled && deps.DB != nil {
 		absUserRepo := auth.NewUserRepository(deps.DB)
 		absSessionRepo := auth.NewSessionRepository(deps.DB)
@@ -3808,7 +3816,7 @@ func main() {
 			SessionMgr:     sessionMgr,
 			SessionSyncer:  deps.SessionSyncer,
 		}
-		absH := audiobooksService.BuildABSHandler(absHDeps)
+		absH = audiobooksService.BuildABSHandler(absHDeps)
 		// Must precede Mount: Mount is what registers the observed handlers.
 		absH.SetStreamTelemetry(streamTelemetryRegistry)
 		deps.ABSHandler = absH
@@ -3843,11 +3851,16 @@ func main() {
 			slog.WarnContext(ctx, "publish session revocation failed", "user_id", userID, "error", err)
 		}
 	}
-	// Jellyfin-compatible downloads go through the router's download service,
-	// so they meet the same policy and share its bandwidth limiters. It stays
-	// a nil interface when the router builds no service, which refuses them.
+	// Jellyfin- and Audiobookshelf-compatible downloads go through the
+	// router's download service, so they meet the same policy and share its
+	// bandwidth limiters. Without a service both refuse them.
 	var compatDownloads jellycompat.DownloadServer
-	deps.OnDownloadService = func(svc *downloads.Service) { compatDownloads = svc }
+	deps.OnDownloadService = func(svc *downloads.Service) {
+		compatDownloads = svc
+		if absH != nil {
+			absH.SetDownloads(svc)
+		}
+	}
 
 	distFS, fsErr := fs.Sub(siloweb.DistFS, "dist")
 	if fsErr != nil {
@@ -4107,6 +4120,16 @@ func main() {
 			compatDeps.WatchCompletionObserver = deps.WatchCompletionObserver
 			if eventsHub != nil {
 				compatDeps.UserStateEvents = eventsHub
+			}
+			if userStoreProvider != nil {
+				// Tracks Jellyfin clients play are saved through the same writes
+				// as PUT /api/v2/audio-prefs and /api/v2/subtitle-prefs.
+				compatAudioPrefs := handlers.NewAudioPrefHandler(userStoreProvider)
+				compatAudioPrefs.EventsHub = eventsHub
+				compatSubtitlePrefs := handlers.NewSubtitlePrefHandler(userStoreProvider)
+				compatSubtitlePrefs.EventsHub = eventsHub
+				compatDeps.AudioPreferences = compatAudioPrefs
+				compatDeps.SubtitlePreferences = compatSubtitlePrefs
 			}
 			compatDeps.SettingsRepo = settingsRepo
 			// The administrator's rating-source choice, read as the native

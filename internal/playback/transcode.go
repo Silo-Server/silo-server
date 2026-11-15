@@ -4083,11 +4083,19 @@ func (s *TranscodeSession) restart(
 		if errors.Is(hookCtx.Err(), context.DeadlineExceeded) {
 			// A hook that gave up before it started a throttler leaves the new
 			// process unthrottled. Keep the threshold this session had instead.
+			// A first start that finished during this restart armed its
+			// throttler on the replaced process's pipe after StopThrottler
+			// ran, so its threshold is the newer one; re-arming also stops it.
 			s.mu.Lock()
-			unthrottled := s.throttler == nil
+			armed := s.throttler
+			current := armed != nil && armed.stdinPipe == s.stdinPipe
 			s.mu.Unlock()
-			if unthrottled {
-				s.StartThrottler(previousThrottleSeconds)
+			if !current {
+				threshold := previousThrottleSeconds
+				if armed != nil {
+					threshold = armed.thresholdSeconds
+				}
+				s.StartThrottler(threshold)
 			}
 			slog.WarnContext(ctx, "transcode restart hook timed out; the transcode throttle may not match its settings until the next restart",
 				"component", "playback",
@@ -4661,17 +4669,23 @@ func (s *TranscodeSession) LastRequestedSegment() int {
 	return s.lastRequestedSegment
 }
 
-// StartThrottler creates and starts a throttler for this session.
-// No-op if thresholdSeconds <= 0, stdinPipe is nil, or the session is closing.
+// StartThrottler creates and starts a throttler for this session, replacing
+// one already running: a first start can finish after a restart hook armed its
+// own. No-op if thresholdSeconds <= 0, stdinPipe is nil, or the session is
+// closing.
 func (s *TranscodeSession) StartThrottler(thresholdSeconds int) {
 	s.mu.Lock()
 	if s.stdinPipe == nil || thresholdSeconds <= 0 || s.closing {
 		s.mu.Unlock()
 		return
 	}
+	replaced := s.throttler
 	t := NewTranscodeThrottler(s, s.stdinPipe, thresholdSeconds, s.opts.SegmentDuration)
 	s.throttler = t
 	s.mu.Unlock()
+	if replaced != nil {
+		replaced.Stop()
+	}
 	t.Start()
 }
 

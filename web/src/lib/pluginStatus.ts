@@ -1,6 +1,6 @@
 import type { PluginInstallation, PluginPresentation } from "@/api/types";
+import { joinList } from "@/lib/appLocale";
 import { t } from "@/i18n";
-import { joinCommaList } from "@/lib/pluginCapabilities";
 import { missingRequiredConfig } from "@/lib/pluginConfigReady";
 import { pendingUpdateVersion, pluginDisplayName } from "@/lib/pluginPresentation";
 import { pluginStatusIndicator } from "@/lib/pluginStatusIndicator";
@@ -44,7 +44,7 @@ export function pluginStatus(installation: PluginInstallation): PluginStatus {
       dotClass: "bg-warning",
       textClass: "text-warning",
       title: t("web.admin.plugins.status.missing", {
-        settings: joinCommaList(missing.map((entry) => entry.title || entry.key)),
+        settings: joinList(missing.map((entry) => entry.title || entry.key)),
       }),
       attention: true,
       rank: 2,

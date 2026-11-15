@@ -842,6 +842,13 @@ demuxers, which replace what the entry inherits from the list.
 sample run as `unsupported`, which is not permanent, so the caller moves the
 work.
 
+No other ffconcat list may name a relayed input: `fspath.FFConcatFileURL`
+refuses one with `fspath.ErrRelayed`, and the Samples list names it itself
+(`mediasample.concatPath`). The progressive remux's IDR primer for macOS
+Firefox HEVC resumes (see [playback protocol v3](playback-protocol-v3.md))
+takes its video from such a list, so a relayed input gets the plain seeked
+copy without the primer.
+
 ### Text subtitle burn-in
 
 A text burn-in stages its track from the file's index

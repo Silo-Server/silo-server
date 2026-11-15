@@ -22,7 +22,11 @@ appears in it exactly once.
 A topic that holds both tools and settings lists its own settings page last,
 as plain "Settings"; the topic already says whose. A topic's heading only
 opens and closes it (`SideNavTopic`); the topic holding the current page opens
-by itself, and the rest stay as the admin left them (`useAdminNavTopics`).
+by itself. The admin can open others beside it, but arriving in a different
+topic, or on another page outside every topic, folds the rest away. The
+desktop sidebar and the phone drawer share these choices for the life of the
+admin shell, and nothing persists across reloads or visits
+(`useAdminNavTopics`).
 
 Settings pages keep their own routes, `/admin/settings/:page`, and
 `ADMIN_SETTINGS_NAV` (`web/src/lib/adminSettingsSearch.ts`) remains their

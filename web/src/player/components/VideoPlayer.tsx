@@ -149,6 +149,7 @@ import {
 } from "@/lib/watchTogetherActions";
 import { toast } from "sonner";
 import { codeNumber, numberText, useT, type Translate } from "@/i18n";
+import { joinList } from "@/lib/appLocale";
 import { MediaDataMeter } from "../media-data-meter";
 import { mediaElementReleased, sourceLoadStarted } from "../bandwidth-probe";
 import { networkInformation, type NetworkInformationLike } from "../network-information";
@@ -164,7 +165,7 @@ function pillKey(
   const isEditingOrInMenu =
     !targetInPrompt &&
     target?.closest(
-      'input, textarea, select, [contenteditable="true"], [role="dialog"], [role="menu"], [role="listbox"]',
+      'input, textarea, select, [contenteditable="true"], dialog, [role="dialog"], [role="menu"], [role="listbox"]',
     ) != null;
   if (isEditingOrInMenu) return null;
 
@@ -349,9 +350,14 @@ interface VideoPlayerProps {
   preview?: PlayerTimeRange | null;
   markerSegments?: PlayerMarkerSegment[];
   autoPlayNextPreview?: boolean;
+  /** The viewer's Auto-play next episode setting; off, the Up next card does not count down. */
+  autoPlayNext?: boolean;
   canEditMarkers?: boolean;
-  /** Notified after a successful in-player marker edit so the host can patch local state. */
-  onMarkersEdited?: (fileId: number, markers: MarkerDraft) => void;
+  /**
+   * Notified after a successful in-player marker edit, with only the kinds it
+   * wrote, so the host can patch local state.
+   */
+  onMarkersEdited?: (fileId: number, markers: Partial<MarkerDraft>) => void;
   duration?: number;
   seriesContext?: SeriesContext;
   onNavigateEpisode?: (contentId: string, trigger: PlaybackStartTrigger) => void;
@@ -564,6 +570,7 @@ export function VideoPlayer({
   preview = null,
   markerSegments,
   autoPlayNextPreview = false,
+  autoPlayNext = true,
   canEditMarkers = true,
   onMarkersEdited,
   duration: propDuration,
@@ -2507,6 +2514,7 @@ export function VideoPlayer({
     roomPlaybackActive ? undefined : seriesContext,
     currentTime,
     handleNavigate,
+    { autoPlay: autoPlayNext, playing },
   );
 
   // Previous-episode lookup (mirrors the helper in useNextEpisode). Auto-play
@@ -3446,7 +3454,11 @@ export function VideoPlayer({
         if (video.error.code === MEDIA_ERR_NETWORK && reportConnectionLost()) return;
         const message = video.error.message || "Unknown media element error";
         if (!reportCurrentPlanFailure({ classification: "decoder_error", message })) {
-          setError(tRef.current("web.player.error.playbackError", { message }));
+          setError(
+            tRef.current("web.player.error.playbackError", {
+              message: video.error.message || tRef.current("web.player.error.unknownMediaError"),
+            }),
+          );
         }
       }
     };
@@ -3667,7 +3679,7 @@ export function VideoPlayer({
     const active = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     const interactionInProgress =
       active?.closest(
-        'input, textarea, select, [contenteditable="true"], [role="dialog"], [role="menu"], [role="listbox"], [role="slider"]',
+        'input, textarea, select, [contenteditable="true"], dialog, [role="dialog"], [role="menu"], [role="listbox"], [role="slider"]',
       ) !== null ||
       containerRef.current?.querySelector('[role="dialog"], [role="menu"], [role="listbox"]') !=
         null;
@@ -5092,7 +5104,7 @@ export function VideoPlayer({
     const leftBehind = roomMembersLeftBehind(previous, watchTogether.room);
     if (leftBehind.length > 0) {
       showWatchTogetherNotice(
-        tRef.current("web.player.room.continuingWithout", { names: leftBehind.join(", ") }),
+        tRef.current("web.player.room.continuingWithout", { names: joinList(leftBehind) }),
         "info",
       );
     }
@@ -5528,12 +5540,13 @@ export function VideoPlayer({
             <div className="mt-1 text-xs text-[var(--hud-ash)]">
               {watchTogether.room?.members?.some((member) => member.is_syncing)
                 ? t("web.player.room.waitingFor", {
-                    names: watchTogether.room.members
-                      .filter((member) => member.is_syncing)
-                      .map((member) =>
-                        member.is_self ? t("web.player.room.waitingForYou") : member.display_name,
-                      )
-                      .join(", "),
+                    names: joinList(
+                      watchTogether.room.members
+                        .filter((member) => member.is_syncing)
+                        .map((member) =>
+                          member.is_self ? t("web.player.room.waitingForYou") : member.display_name,
+                        ),
+                    ),
                   })
                 : t("web.player.room.waitingForEveryone")}
             </div>

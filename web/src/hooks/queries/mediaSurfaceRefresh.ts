@@ -28,6 +28,7 @@ import { sectionShowsWholeList } from "./homeRowLimit";
 import {
   activeCatalogQueryMatchesLibrary,
   activeSectionQueryMatchesLibrary,
+  isLibraryLayoutQueryKey,
 } from "@/lib/queryInvalidation";
 import { bumpHomeRefreshSignal } from "@/pages/homeSurfaceRefresh";
 
@@ -430,7 +431,10 @@ function shouldInvalidateMediaSurfaceQuery(
     return activeCatalogQueryMatchesLibrary(queryKey, options.libraryId);
   }
   if (queryKeyStartsWith(queryKey, sectionKeys.all)) {
-    return activeSectionQueryMatchesLibrary(queryKey, options.libraryId);
+    return (
+      !isLibraryLayoutQueryKey(queryKey) &&
+      activeSectionQueryMatchesLibrary(queryKey, options.libraryId)
+    );
   }
   if (queryKeyStartsWith(queryKey, recKeys.all)) {
     return !(options.skipSimilarItems && queryKey[1] === "similar");
@@ -654,20 +658,19 @@ export async function refreshLocalizedMediaQueries(queryClient: QueryClient) {
   bumpHomeRefreshSignal(queryClient);
 }
 
-// A letter index sorts the whole result, which on a large library can outlast
-// a scan's invalidation window, so cancelling and restarting it on every sweep
-// would keep it from ever finishing. A running read finishes instead, and one
-// more read follows it so changes made while it ran still land. Returns the
-// running reads, for the sweep to leave alone.
+// A letter index sorts the whole result and a browse count counts it, either
+// of which on a large library can outlast a scan's invalidation window, so
+// cancelling and restarting them on every sweep would keep them from ever
+// finishing. A running read finishes instead, and one more read follows it so
+// changes made while it ran still land. Returns the running reads, for the
+// sweep to leave alone.
 function refetchLetterIndexesWhenDone(
   queryClient: QueryClient,
   matches: (query: Query) => boolean,
 ): Set<Query> {
-  const running = queryClient.getQueryCache().findAll({
-    queryKey: catalogKeys.allLetters,
-    fetchStatus: "fetching",
-    predicate: matches,
-  });
+  const running = [catalogKeys.allLetters, catalogKeys.allCounts].flatMap((queryKey) =>
+    queryClient.getQueryCache().findAll({ queryKey, fetchStatus: "fetching", predicate: matches }),
+  );
   for (const query of running) {
     const refetchAfter = () =>
       queryClient.invalidateQueries(

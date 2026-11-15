@@ -10,6 +10,8 @@ interface GridLayout {
 interface UseGridLayoutOptions {
   gap: number;
   textAreaHeight: number;
+  /** Poster height over width: 1.5 for 2:3 posters, 1 for square covers. */
+  posterRatio?: number;
   /** Re-measure when the grid's responsive class set changes at the same width. */
   layoutKey?: string;
 }
@@ -19,7 +21,12 @@ function countColumns(el: HTMLElement): number {
   return getComputedStyle(el).gridTemplateColumns.split(" ").length;
 }
 
-export function useGridLayout({ gap, textAreaHeight, layoutKey = "" }: UseGridLayoutOptions) {
+export function useGridLayout({
+  gap,
+  textAreaHeight,
+  posterRatio = 1.5,
+  layoutKey = "",
+}: UseGridLayoutOptions) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const resizeTimerRef = useRef<number | null>(null);
   const columnCountRef = useRef<number | null>(null);
@@ -37,11 +44,11 @@ export function useGridLayout({ gap, textAreaHeight, layoutKey = "" }: UseGridLa
     const containerWidth = el.clientWidth;
     const totalGap = gap * (columns - 1);
     const cardWidth = (containerWidth - totalGap) / columns;
-    const posterHeight = cardWidth * 1.5;
+    const posterHeight = cardWidth * posterRatio;
     const rowHeight = posterHeight + textAreaHeight + gap;
 
     setLayout({ columnCount: columns, rowHeight });
-  }, [gap, textAreaHeight]);
+  }, [gap, textAreaHeight, posterRatio]);
 
   useEffect(() => {
     const el = containerRef.current;

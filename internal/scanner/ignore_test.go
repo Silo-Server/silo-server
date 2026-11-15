@@ -359,7 +359,7 @@ func TestAudiobookScanHonorsIgnoreFiles(t *testing.T) {
 	writeTestFile(t, filepath.Join(root, "junk", "Ignore Me.mp3"), "test")
 	writeTestFile(t, filepath.Join(root, ".siloignore"), "junk/*\nsample\n")
 
-	scans, err := collectAudiobookRootScans(t.Context(), 1, []string{root}, []string{root}, true)
+	scans, err := collectAudiobookRootScans(t.Context(), 1, []string{root}, []string{root}, true, "")
 	if err != nil {
 		t.Fatalf("collect audiobook root scans: %v", err)
 	}

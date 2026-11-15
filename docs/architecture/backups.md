@@ -562,8 +562,11 @@ whenever migrations are pending:
 6. Release the subsystem lock, then the wrapper, then build the audit-detail
    indexes.
 
-Other servers block on the wrapper and, once they get it, find nothing
-pending. If the session of the wrapper or of the subsystem lock ends at any
+Other servers wait for the wrapper and, once they get it, find nothing
+pending. They wait by retrying `pg_try_advisory_lock`, never by blocking in
+`pg_advisory_lock`: a statement waiting for a lock holds a snapshot, and a
+concurrent index build in the holder's migrations waits for every older
+snapshot, so the two servers would wait for each other. If the session of the wrapper or of the subsystem lock ends at any
 point, the backup or migration in flight is canceled and startup fails.
 goose runs each migration in a transaction unless it is marked
 `-- +goose NO TRANSACTION`, so a canceled transactional migration rolls

@@ -7505,6 +7505,9 @@
             ],
             "type": "string"
           },
+          "streams_by_method": {
+            "type": "boolean"
+          },
           "timeseries": {
             "type": "boolean"
           },
@@ -7526,6 +7529,7 @@
           "downloads_stats",
           "egress_totals",
           "egress_by_source",
+          "streams_by_method",
           "api_clients",
           "revision",
           "state",
@@ -7840,6 +7844,29 @@
         ],
         "type": "object"
       },
+      "AdminDashboardStreamsByMethod": {
+        "additionalProperties": false,
+        "properties": {
+          "direct": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "remux": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "transcode": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "direct",
+          "remux",
+          "transcode"
+        ],
+        "type": "object"
+      },
       "AdminDashboardTimeseries": {
         "additionalProperties": false,
         "properties": {
@@ -7936,6 +7963,10 @@
             "format": "int64",
             "type": "integer"
           },
+          "streams_by_method": {
+            "$ref": "#/components/schemas/AdminDashboardStreamsByMethod",
+            "description": "streams split by play method, from the bucket's peak-streams minute, so the parts add up to no more than streams and can be stacked. direct, remux and transcode on the point are each their own peak and may come from different minutes. Sessions with any other play method are streams minus the sum of these values."
+          },
           "t": {
             "description": "RFC 3339 instant in UTC with millisecond precision",
             "format": "date-time",
@@ -7956,7 +7987,8 @@
           "transcode",
           "egress_kbps",
           "download_egress_kbps",
-          "egress_by_source"
+          "egress_by_source",
+          "streams_by_method"
         ],
         "type": "object"
       },
@@ -12550,6 +12582,7 @@
             ]
           },
           "imdb_id": {
+            "description": "IMDb title ID, stored trimmed and in lowercase; an empty string clears it",
             "type": [
               "string",
               "null"
@@ -12687,12 +12720,14 @@
             ]
           },
           "tmdb_id": {
+            "description": "TMDB ID, stored trimmed and without a TMDB URL slug (550-fight-club saves as 550); an empty string clears it",
             "type": [
               "string",
               "null"
             ]
           },
           "tvdb_id": {
+            "description": "TheTVDB ID, stored trimmed; an empty string clears it",
             "type": [
               "string",
               "null"
@@ -15829,6 +15864,13 @@
       "AdminPlaybackSession": {
         "additionalProperties": false,
         "properties": {
+          "adaptation_reasons": {
+            "description": "Why the route changes the file instead of playing it as it is, video causes first, from the vocabulary in the capabilities' adaptation_reason_values. Absent for direct play, for a session planned before the server recorded reasons, and for Jellyfin-protocol sessions. Clients ignore values they do not know.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
           "audio_decision": {
             "type": "string"
           },
@@ -15883,6 +15925,7 @@
             "type": "integer"
           },
           "file_duration": {
+            "description": "Length in seconds of what position_seconds is measured against: the file, or the whole book for a multi-file audiobook; null when unknown",
             "format": "int64",
             "type": [
               "integer",
@@ -16151,6 +16194,17 @@
       "AdminPlaybackSessionCapabilitiesOutputBody": {
         "additionalProperties": false,
         "properties": {
+          "adaptation_reason_values": {
+            "description": "Every adaptation_reasons value this server emits, in the order it reports them. A later server may add values.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "adaptation_reasons": {
+            "description": "Rows may carry adaptation_reasons",
+            "type": "boolean"
+          },
           "allowed": {
             "description": "Whether the current principal may use the capability",
             "type": "boolean"
@@ -16261,6 +16315,8 @@
           "source_video_height",
           "device_identity",
           "lifecycle_events",
+          "adaptation_reasons",
+          "adaptation_reason_values",
           "revision",
           "state",
           "allowed"
@@ -26745,6 +26801,32 @@
         ],
         "type": "object"
       },
+      "CatalogAvailability": {
+        "additionalProperties": false,
+        "properties": {
+          "have": {
+            "description": "Complete seasons, or episodes in the library",
+            "examples": [
+              2
+            ],
+            "format": "int64",
+            "type": "integer"
+          },
+          "total": {
+            "description": "Seasons that have aired, or known episodes",
+            "examples": [
+              3
+            ],
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "have",
+          "total"
+        ],
+        "type": "object"
+      },
       "CatalogBoxSet": {
         "additionalProperties": false,
         "properties": {
@@ -27196,6 +27278,10 @@
             ],
             "type": "string"
           },
+          "availability": {
+            "$ref": "#/components/schemas/CatalogAvailability",
+            "description": "On a series, complete seasons out of seasons that have aired. On a season, episodes in the library out of the episodes the season lists. Sent only while the acting profile's poster badges are on and include the availability badge. Absent for other types, for specials, and when episode metadata is incomplete."
+          },
           "backdrop_is_episode_still": {
             "description": "Whether backdrop_url is an episode still. False for series artwork; absent when provenance is unavailable.",
             "type": "boolean"
@@ -27573,6 +27659,10 @@
           },
           "audiobook": {
             "$ref": "#/components/schemas/AudiobookDetailExtension"
+          },
+          "availability": {
+            "$ref": "#/components/schemas/CatalogAvailability",
+            "description": "On a series, complete seasons out of seasons that have aired. On a season, episodes in the library out of the episodes the season lists. Sent only while the acting profile's poster badges are on and include the availability badge. Absent for other types, for specials, and when episode metadata is incomplete."
           },
           "backdrop_is_episode_still": {
             "description": "Whether backdrop_url is an episode still. False for series artwork; absent when provenance is unavailable.",
@@ -35888,6 +35978,10 @@
               "commonsense"
             ],
             "type": "string"
+          },
+          "availability": {
+            "$ref": "#/components/schemas/CatalogAvailability",
+            "description": "On a series, complete seasons out of seasons that have aired. On a season, episodes in the library out of the episodes the season lists. Sent only while the acting profile's poster badges are on and include the availability badge. Absent for other types, for specials, and when episode metadata is incomplete."
           },
           "backdrop_is_episode_still": {
             "description": "Whether backdrop_url is an episode still. False for series artwork; absent when provenance is unavailable.",
@@ -45319,7 +45413,7 @@
             ]
           },
           "file_duration": {
-            "description": "Seconds; null when unknown",
+            "description": "Length in seconds of what position_seconds is measured against: the file, or the whole book for a multi-file audiobook; null when unknown",
             "examples": [
               8520
             ],
@@ -50205,6 +50299,10 @@
             "format": "date",
             "type": "string"
           },
+          "availability": {
+            "$ref": "#/components/schemas/CatalogAvailability",
+            "description": "Episodes in the library out of the episodes this season lists. Sent only while the acting profile's poster badges are on and include the availability badge. Absent for specials and when episode metadata is incomplete."
+          },
           "content_id": {
             "examples": [
               "series:severance-S01"
@@ -54866,7 +54964,7 @@
             "type": "string"
           },
           "status": {
-            "description": "unmatched, pending or ambiguous",
+            "description": "unmatched, pending or ambiguous. An audiobook without a provider match is unmatched",
             "examples": [
               "unmatched"
             ],
@@ -57678,6 +57776,10 @@
             ],
             "type": "string"
           },
+          "availability": {
+            "$ref": "#/components/schemas/CatalogAvailability",
+            "description": "On a series, complete seasons out of seasons that have aired. On a season, episodes in the library out of the episodes the season lists. Sent only while the acting profile's poster badges are on and include the availability badge. Absent for other types, for specials, and when episode metadata is incomplete."
+          },
           "backdrop_is_episode_still": {
             "description": "Whether backdrop_url is an episode still. False for series artwork; absent when provenance is unavailable.",
             "type": "boolean"
@@ -58098,6 +58200,10 @@
               "commonsense"
             ],
             "type": "string"
+          },
+          "availability": {
+            "$ref": "#/components/schemas/CatalogAvailability",
+            "description": "On a series, complete seasons out of seasons that have aired. On a season, episodes in the library out of the episodes the season lists. Sent only while the acting profile's poster badges are on and include the availability badge. Absent for other types, for specials, and when episode metadata is incomplete."
           },
           "backdrop_is_episode_still": {
             "description": "Whether backdrop_url is an episode still. False for series artwork; absent when provenance is unavailable.",
@@ -155945,7 +156051,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Search people by name, with exact matches first and optional media scope.",
+        "summary": "Search people by name, with exact matches first, then the most credited for a specific query, and optional media scope.",
         "tags": [
           "catalog"
         ],
@@ -225008,7 +225114,7 @@
     },
     "/api/v2/subtitles/detect-language": {
       "post": {
-        "description": "Detect a subtitle language from filename, metadata or content with an optional manual fallback. Does not store the file.",
+        "description": "Detect a subtitle language from filename, metadata or content with an optional manual fallback. Does not store the file. A server runs at most 4 detections at once and an account may run two of them; beyond either limit the request gets 429 with Retry-After.",
         "operationId": "detectSubtitleLanguage",
         "parameters": [
           {
@@ -243695,6 +243801,14 @@
             }
           },
           {
+            "description": "Set by the server beside seek when the plan asked for the macOS Firefox HEVC resume workaround: the plan's stream origin in seconds, the keyframe the copy starts on. Without it the remux serves the plain seeked copy.",
+            "in": "query",
+            "name": "origin",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
             "description": "Set by the server when the attempt negotiated progressive_range_refusal_v1: a GET whose Range starts past byte 0, or is a suffix range, answers 409 instead of streaming from the origin.",
             "in": "query",
             "name": "remux_range",
@@ -243842,6 +243956,14 @@
             }
           },
           {
+            "description": "Set by the server beside seek when the plan asked for the macOS Firefox HEVC resume workaround: the plan's stream origin in seconds, the keyframe the copy starts on. Without it the remux serves the plain seeked copy.",
+            "in": "query",
+            "name": "origin",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
             "description": "Set by the server when the attempt negotiated progressive_range_refusal_v1: a GET whose Range starts past byte 0, or is a suffix range, answers 409 instead of streaming from the origin.",
             "in": "query",
             "name": "remux_range",
@@ -243903,6 +244025,14 @@
             "description": "Existing progressive seek interpretation; proxy-local and remote-node validation differ.",
             "in": "query",
             "name": "seek",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Set by the server beside seek when the plan asked for the macOS Firefox HEVC resume workaround: the plan's stream origin in seconds, the keyframe the copy starts on. Without it the remux serves the plain seeked copy.",
+            "in": "query",
+            "name": "origin",
             "schema": {
               "type": "string"
             }
@@ -244050,6 +244180,14 @@
             "description": "Existing progressive seek interpretation; proxy-local and remote-node validation differ.",
             "in": "query",
             "name": "seek",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Set by the server beside seek when the plan asked for the macOS Firefox HEVC resume workaround: the plan's stream origin in seconds, the keyframe the copy starts on. Without it the remux serves the plain seeked copy.",
+            "in": "query",
+            "name": "origin",
             "schema": {
               "type": "string"
             }
@@ -244483,6 +244621,14 @@
             }
           },
           {
+            "description": "Set by the server beside seek when the plan asked for the macOS Firefox HEVC resume workaround: the plan's stream origin in seconds, the keyframe the copy starts on. Without it the remux serves the plain seeked copy.",
+            "in": "query",
+            "name": "origin",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
             "description": "Set by the server when the attempt negotiated progressive_range_refusal_v1: a GET whose Range starts past byte 0, or is a suffix range, answers 409 instead of streaming from the origin.",
             "in": "query",
             "name": "remux_range",
@@ -244646,6 +244792,14 @@
             "description": "Existing progressive seek interpretation; proxy-local and remote-node validation differ.",
             "in": "query",
             "name": "seek",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Set by the server beside seek when the plan asked for the macOS Firefox HEVC resume workaround: the plan's stream origin in seconds, the keyframe the copy starts on. Without it the remux serves the plain seeked copy.",
+            "in": "query",
+            "name": "origin",
             "schema": {
               "type": "string"
             }
@@ -248636,6 +248790,12 @@
       "playback_RecipeCard": {
         "additionalProperties": false,
         "properties": {
+          "adaptation_reasons": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
           "audio_only": {
             "type": "boolean"
           },

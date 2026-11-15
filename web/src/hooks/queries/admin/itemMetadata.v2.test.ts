@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { setAccessToken, setRefreshToken } from "@/api/client";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { QueryClient, QueryClientProvider, useQuery, useQueryClient } from "@tanstack/react-query";
 import { act, renderHook } from "@testing-library/react";
 import { createElement, type ReactNode } from "react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
@@ -8,6 +8,7 @@ import { installPolicyStorageMocks, jsonResponse } from "@/pages/admin-policy/po
 import queued from "../../../../../contracts/api/v2/fixtures/admin_item_refresh_queued.json";
 import updated from "../../../../../contracts/api/v2/fixtures/admin_item_metadata_updated.json";
 import { useRefreshItemMetadata, useUpdateItemMetadata } from "../items";
+import { itemKeys } from "../keys";
 const { awaitAdminJob } = vi.hoisted(() => ({
   awaitAdminJob: vi.fn(async (id: string) => ({ id, status: "completed", result_payload: {} })),
 }));
@@ -99,4 +100,40 @@ it("preserves explicit clears and adapts canonical detail", async () => {
     );
   });
   expect(JSON.parse(String(calls[0]?.init?.body))).toEqual({ overview: "", genres: [], year: 0 });
+});
+
+// Edit Metadata closes when a save succeeds and builds a reopened form from the
+// item, so the item must be refetched by then (#4241).
+it("finishes a save only after the item has refetched", async () => {
+  const { wrapper } = setup(() => jsonResponse(updated));
+  let reads = 0;
+  const { result } = renderHook(
+    () => ({
+      client: useQueryClient(),
+      detail: useQuery({
+        queryKey: itemKeys.detail("item-1"),
+        queryFn: async () => {
+          const read = ++reads;
+          // A refetch slower than the save's own callbacks.
+          if (read > 1) await new Promise((resolve) => setTimeout(resolve, 20));
+          return { read };
+        },
+      }),
+      update: useUpdateItemMetadata("item-1"),
+    }),
+    { wrapper },
+  );
+  await vi.waitFor(() => expect(result.current.detail.data?.read).toBe(1));
+  let readOnSuccess: unknown;
+  await act(async () => {
+    await result.current.update.mutateAsync(
+      { title: "After" },
+      {
+        onSuccess: () => {
+          readOnSuccess = result.current.client.getQueryData(itemKeys.detail("item-1"));
+        },
+      },
+    );
+  });
+  expect(readOnSuccess).toEqual({ read: 2 });
 });

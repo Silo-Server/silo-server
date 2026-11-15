@@ -17,7 +17,7 @@ import {
   useAdminTimeseries,
 } from "@/hooks/queries/admin/dashboardInsights";
 import { classifyActivityMethod } from "@/pages/adminActivityPresentation";
-import { formatFileCount, formatMbps } from "../format";
+import { formatFileCount, formatMbps, formatPercentLabel } from "../format";
 import { latestFreshPoint } from "./timeseriesSeries";
 import { formatLocale } from "@/lib/appLocale";
 import { useT } from "@/i18n";
@@ -127,7 +127,7 @@ export function TranscodeShareStatWidget() {
   return (
     <StatTile
       label={t("web.admin.dashboard.widgets.transcodeShare.label")}
-      value={share === null ? "—" : `${share}%`}
+      value={share === null ? "—" : formatPercentLabel(formatDecimal(share, 0))}
       sub={
         sessions.length > 0
           ? t("web.admin.dashboard.widgets.transcodeShare.detail", {
@@ -208,7 +208,7 @@ export function AdvisoryCoverageStatWidget() {
   return (
     <StatTile
       label={t("web.admin.dashboard.widgets.advisoryCoverage.label")}
-      value={stats ? (titles > 0 ? `${Math.round((covered / titles) * 100)}%` : "—") : "—"}
+      value={titles > 0 ? formatPercentLabel(formatDecimal((covered / titles) * 100, 0)) : "—"}
       sub={t("web.admin.dashboard.widgets.advisoryCoverage.detail", {
         count: titles,
         covered: covered.toLocaleString(formatLocale()),
@@ -249,7 +249,9 @@ export function StorageStatWidget() {
     const storageGB = stats.total_storage_bytes / (1024 * 1024 * 1024);
     const storageTB = storageGB / 1024;
     storageDisplay =
-      storageTB >= 1 ? `${formatDecimal(storageTB, 1)} TB` : `${formatDecimal(storageGB, 0)} GB`;
+      storageTB >= 1
+        ? t("web.common.format.size.tb", { size: formatDecimal(storageTB, 1) })
+        : t("web.common.format.size.gb", { size: formatDecimal(storageGB, 0) });
   }
   return (
     <StatTile

@@ -16,11 +16,13 @@ Commands below assume the repository root is the cwd.
 2. Sync: `scripts/sync-translations --local <silo-translations checkout>` (or
    `--version <release>` once releases exist). Commit `web/src/locales/` and
    `.silo-translations` with the change. Never edit generated files.
-3. Replace the literals (below), then add the area's files or directory to
-   `I18N_CONVERTED` in `web/eslint.config.js`, one glob per line, sorted. From then on
-   ESLint rejects literal JSX text, literal text in visible props (`label`, `title`,
-   `description`, `help`, `placeholder`, …, `aria-*`) and literal toast messages there.
-   It can't see strings a plain helper returns; the pseudo-locale pass below does.
+3. Replace the literals (below). ESLint (`I18N_CONVERTED` in `web/eslint.config.js`
+   covers all of `src/` except `src/i18n`, generated locales and tests) rejects literal
+   JSX text, literal text in visible props (`label`, `title`, `description`, `help`,
+   `placeholder`, `unit`, …, `aria-*`) and literal toast messages. It can't see strings
+   a plain helper returns, object-literal labels, units built in template literals or
+   lists joined with `join(", ")` (use `joinList()` from `@/lib/appLocale`); the
+   pseudo-locale pass below does.
 4. Check the area under the pseudo-locale (below). Anything still plain English is
    unconverted.
 

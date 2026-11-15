@@ -262,7 +262,7 @@ describe("StorageStep", () => {
     });
 
     expect(setValue).toHaveBeenCalledWith("redis.url", "redis://new.example.invalid:6379/7");
-    expect(setValue).toHaveBeenCalledWith("redis.db", "3");
+    expect(setValue).toHaveBeenCalledWith("redis.db", "3", { stage: true });
   });
 
   it("keeps the Redis database number through a URL that is emptied and typed again", async () => {
@@ -275,7 +275,7 @@ describe("StorageStep", () => {
     }
 
     expect(setValue).not.toHaveBeenCalledWith("redis.db", "");
-    expect(setValue).toHaveBeenLastCalledWith("redis.db", "3");
+    expect(setValue).toHaveBeenLastCalledWith("redis.db", "3", { stage: true });
     expect(screen.getByLabelText("Database number")).toHaveValue(3);
   });
 });

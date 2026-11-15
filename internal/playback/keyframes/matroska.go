@@ -40,6 +40,9 @@ type Index struct {
 	VideoEnd float64
 	// File is the version of the file Load read the index from, or zero.
 	File Version
+	// hevc locates the keyframe blocks of an HEVC video track, or is nil
+	// (see HEVCKeyframeIsIDR).
+	hevc *hevcLayout
 }
 
 // Matroska element IDs, from the Matroska specification.
@@ -169,6 +172,7 @@ func readMatroska(r io.ReaderAt, size int64) (matroskaIndex, error) {
 		cues      []byte
 		haveInfo  bool
 		haveTrack bool
+		videoData []byte
 	)
 	for at := segStart; at < segEnd; {
 		id, dataSize, headerLen, err := matroska.ReadElementHeader(r, at)
@@ -210,7 +214,7 @@ func readMatroska(r io.ReaderAt, size int64) (matroskaIndex, error) {
 				return matroskaIndex{}, err
 			}
 			var scaled bool
-			video, frameNS, scaled, haveTrack = firstVideoTrack(data)
+			video, frameNS, scaled, haveTrack, videoData = firstVideoTrack(data)
 			if scaled {
 				// The track's timestamps are scaled again, a deprecated
 				// feature the times here don't apply; don't plan from them.
@@ -266,7 +270,7 @@ func readMatroska(r io.ReaderAt, size int64) (matroskaIndex, error) {
 			return matroskaIndex{}, err
 		}
 		var scaled bool
-		video, frameNS, scaled, haveTrack = firstVideoTrack(data)
+		video, frameNS, scaled, haveTrack, videoData = firstVideoTrack(data)
 		if scaled {
 			return matroskaIndex{}, ErrNoIndex
 		}
@@ -292,6 +296,7 @@ func readMatroska(r io.ReaderAt, size int64) (matroskaIndex, error) {
 	if duration > 0 {
 		idx.Duration = duration * float64(timescale) / 1e9
 	}
+	idx.hevc = newHEVCLayout(videoData, cues, video, ticks, segStart)
 	return matroskaIndex{
 		Index: idx, segStart: segStart, segEnd: segEnd, video: video, ticks: ticks, clusters: clusters,
 		timescale: timescale, frameSeconds: float64(frameNS) / 1e9,
@@ -330,7 +335,9 @@ func parseInfo(info []byte) (timescale int64, duration float64, ok bool) {
 	return timescale, duration, complete && ok
 }
 
-func firstVideoTrack(tracks []byte) (number, frameNS uint64, scaled, found bool) {
+// firstVideoTrack returns the first video track's number, default frame
+// duration, whether it scales its timestamps again, and its TrackEntry data.
+func firstVideoTrack(tracks []byte) (number, frameNS uint64, scaled, found bool, entryData []byte) {
 	matroska.Children(tracks, func(id uint64, entry []byte) {
 		if id != idTrackEntry || found {
 			return
@@ -350,10 +357,10 @@ func firstVideoTrack(tracks []byte) (number, frameNS uint64, scaled, found bool)
 			}
 		})
 		if kind == trackTypeVideo && n > 0 {
-			number, frameNS, scaled, found = n, frame, trackScale != 1, true
+			number, frameNS, scaled, found, entryData = n, frame, trackScale != 1, true, entry
 		}
 	})
-	return number, frameNS, scaled, found
+	return number, frameNS, scaled, found, entryData
 }
 
 // cuePoints returns the times, in ticks, of the cue points that index the

@@ -225,7 +225,7 @@ func (r Request) Validate() error {
 			return errors.New("samples take only a stats or sheets output")
 		}
 		if _, err := concatPath(r.Input); err != nil {
-			return err
+			return fmt.Errorf("sampled input: %w", err)
 		}
 	}
 	if r.At != nil {

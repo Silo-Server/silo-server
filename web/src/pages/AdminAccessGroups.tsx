@@ -183,24 +183,22 @@ function AccessGroupsPage() {
         </div>
       )}
       {creating && available && (
-        <div className="surface-panel-subtle flex flex-wrap items-center gap-2 rounded-2xl p-4">
+        <form
+          className="surface-panel-subtle flex flex-wrap items-center gap-2 rounded-2xl p-4"
+          onSubmit={(event) => {
+            event.preventDefault();
+            void create();
+          }}
+        >
           <Input
             value={newName}
             onChange={(event) => setNewName(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === "Enter") void create();
-            }}
             placeholder={t("web.admin.access.groups.create.placeholder")}
             aria-label={t("web.admin.access.groups.create.nameLabel")}
             className="max-lg:basis-full lg:max-w-xs"
             autoFocus
           />
-          <Button
-            type="button"
-            className="max-lg:flex-1"
-            onClick={create}
-            disabled={createGroup.isPending}
-          >
+          <Button type="submit" className="max-lg:flex-1" disabled={createGroup.isPending}>
             {t("web.admin.access.groups.create.submit")}
           </Button>
           <Button
@@ -214,7 +212,7 @@ function AccessGroupsPage() {
           >
             {t("common.cancel")}
           </Button>
-        </div>
+        </form>
       )}
 
       {groups.isLoading && (

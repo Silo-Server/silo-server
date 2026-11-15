@@ -121,7 +121,7 @@ export function LibraryTranslatePanel({ libraryId }: { libraryId: number }) {
           </Label>
           <select
             id={`library-translate-target-${libraryId}`}
-            className="border-border bg-background text-foreground h-11 w-full max-w-full rounded-md border px-2 text-sm sm:h-9 sm:w-auto"
+            className="border-input bg-background text-foreground h-11 w-full max-w-full rounded-md border px-2 text-sm sm:h-9 sm:w-auto"
             value={targetLang}
             onChange={(event) => setTargetLang(event.target.value)}
             disabled={busy}

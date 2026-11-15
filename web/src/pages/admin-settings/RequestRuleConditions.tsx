@@ -47,6 +47,7 @@ import {
   type ListConditionRow,
   type RoutingNames,
 } from "./requestRoutingModel";
+import { isImeComposing } from "@/lib/imeComposition";
 
 export interface ConditionLookups {
   users: readonly { id: number; username: string }[];
@@ -130,7 +131,7 @@ export function IdAdder({ label, onAdd }: { label: string; onAdd: (id: string) =
         value={text}
         onChange={(event) => setText(event.target.value)}
         onKeyDown={(event) => {
-          if (event.key === "Enter") {
+          if (event.key === "Enter" && !isImeComposing(event)) {
             event.preventDefault();
             add();
           }

@@ -1,6 +1,7 @@
 package abs
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"io"
@@ -55,8 +56,10 @@ type ABSPlaybackSessionStore interface {
 	GetPlaybackSession(ctx context.Context, id string) (ABSPlaybackSession, error)
 	// SyncPlaybackSession updates position + accumulated listening time.
 	SyncPlaybackSession(ctx context.Context, id string, currentPositionSeconds float64, timeListeningSeconds int) error
-	// ClosePlaybackSession sets closed_at to now().
-	ClosePlaybackSession(ctx context.Context, id string) error
+	// ClosePlaybackSession sets closed_at to now(), applying final first when
+	// it is not nil, atomically. It reports whether this call closed the
+	// session; a session already closed is left as it is.
+	ClosePlaybackSession(ctx context.Context, id string, final *FinalSync) (bool, error)
 	// CloseOpenSessionsForPrincipal closes all active sessions for a user
 	// profile, used when logout revokes that profile's tokens.
 	CloseOpenSessionsForPrincipal(ctx context.Context, userID, profileID string) error
@@ -65,6 +68,42 @@ type ABSPlaybackSessionStore interface {
 	// ListClosedSessions returns paginated closed sessions for (user, profile)
 	// ordered by started_at DESC. Returns (rows, totalRowCount, error).
 	ListClosedSessions(ctx context.Context, userID, profileID string, limit, offset int) ([]ABSPlaybackSession, int, error)
+	// UpdateReportedPlay applies a live report of a play a client reports
+	// only through /session/local to the client session's open play, in one
+	// statement. found is false when the client session has none.
+	UpdateReportedPlay(ctx context.Context, p ReportedPlay) (state ReportedPlayState, found bool, err error)
+	// StartReportedPlay applies the report to the client session's open
+	// play, or starts one under newID unless the account already has maxOpen
+	// open (the state's ID is empty then).
+	StartReportedPlay(ctx context.Context, p ReportedPlay, newID string, maxOpen int) (ReportedPlayState, error)
+}
+
+// ReportedPlay is one live report of a play that a client reports only
+// through /session/local.
+type ReportedPlay struct {
+	UserID          string
+	ProfileID       string
+	ClientSessionID string
+	ContentID       string
+	MediaFileID     *int
+	PositionSeconds float64
+	// ListeningSeconds is the client's running listening total for its
+	// session.
+	ListeningSeconds float64
+}
+
+// ReportedPlayState is a reported play after a report.
+type ReportedPlayState struct {
+	ID        string
+	StartedAt time.Time
+	// Announced is false while the play's lifecycle start is not recorded.
+	Announced bool
+}
+
+// FinalSync is the last position and listening time a close carries.
+type FinalSync struct {
+	PositionSeconds  float64
+	ListeningSeconds int
 }
 
 // Stats is the aggregated /me/listening-stats response shape.
@@ -112,6 +151,10 @@ type ABSPlaybackSession struct {
 	StartedAt              time.Time
 	LastSyncAt             time.Time
 	ClosedAt               *time.Time
+	// ReportOnly marks a play a client reports only through /session/local.
+	// The server serves nothing for it, so its id opens no media and takes
+	// no /play session's syncs or close.
+	ReportOnly bool
 }
 
 // ---------------------------------------------------------------------------
@@ -304,13 +347,20 @@ type syncPayload struct {
 }
 
 // timeDelta returns the accumulated listening time from whichever spelling
-// the client used. Both fields are tried; non-zero wins.
+// the client used. Both fields are tried; non-zero wins. It is bounded to
+// [0, maxSyncListeningSeconds], so a client cannot lower the stored total or
+// overflow it.
 func (p syncPayload) timeDelta() float64 {
+	delta := p.TimeListened
 	if p.TimeListening != 0 {
-		return p.TimeListening
+		delta = p.TimeListening
 	}
-	return p.TimeListened
+	return min(max(delta, 0), maxSyncListeningSeconds)
 }
+
+// maxSyncListeningSeconds bounds the listening time one sync can report: a
+// day, far beyond any interval between syncs.
+const maxSyncListeningSeconds = 24 * 60 * 60
 
 // handleSessionSync — PATCH /abs/api/session/{sid}/sync
 // Heartbeat endpoint the ABS mobile client calls every ~10 s during playback.
@@ -342,9 +392,10 @@ func (h *Handler) handleSessionSync(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Ownership gate.
+	// Ownership gate. A reported play is not a /play session: its listening
+	// and its end come from the client's local-session reports.
 	sess, err := h.deps.PlaybackSessionStore.GetPlaybackSession(r.Context(), sid)
-	if err != nil || !sameABSPrincipal(a, sess.UserID, sess.ProfileID) {
+	if err != nil || sess.ReportOnly || !sameABSPrincipal(a, sess.UserID, sess.ProfileID) {
 		http.Error(w, "session not found", http.StatusNotFound)
 		return
 	}
@@ -359,46 +410,71 @@ func (h *Handler) handleSessionSync(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Accumulate listening time and update position in abs_playback_sessions.
-	if err := h.deps.PlaybackSessionStore.SyncPlaybackSession(
-		r.Context(), sid, p.CurrentTime, int(p.timeDelta()),
-	); err != nil {
+	if err := h.applySessionSync(r.Context(), a, sess, p); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
 
+// applySessionSync records one sync of an open session: listening time and
+// position on the session row, then the rest mirrorSessionSync writes.
+func (h *Handler) applySessionSync(ctx context.Context, a ctxAuth, sess ABSPlaybackSession, p syncPayload) error {
+	// Accumulate listening time and update position in abs_playback_sessions.
+	// When this fails the client gets an error and syncs again, so nothing
+	// else is written: the retry would count the same listening twice.
+	if err := h.deps.PlaybackSessionStore.SyncPlaybackSession(
+		ctx, sess.ID, p.CurrentTime, int(p.timeDelta()),
+	); err != nil {
+		return err
+	}
+	h.mirrorSessionSync(ctx, a, sess, p)
+	return nil
+}
+
+// mirrorSessionSync writes a sync beyond the session row: the resume
+// position, the mirrored native playback session's position and listening,
+// and the realtime events other clients follow.
+func (h *Handler) mirrorSessionSync(ctx context.Context, a ctxAuth, sess ABSPlaybackSession, p syncPayload) {
 	// Update position in user_watch_progress. Must NOT be a full upsert —
 	// see comment in handleSetItemProgress re: not overwriting is_finished.
 	if h.deps.ProgressStore != nil {
 		if err := h.deps.ProgressStore.UpdateProgressPosition(
-			r.Context(), a.UserID, a.ProfileID, sess.ContentID, p.CurrentTime,
+			ctx, a.UserID, a.ProfileID, sess.ContentID, p.CurrentTime,
 		); err != nil {
-			slog.WarnContext(r.Context(), "abs session sync: update progress position failed", "component", "audiobooks",
-				"session_id", sid, "content_id", sess.ContentID, "error", err)
+			slog.WarnContext(ctx, "abs session sync: update progress position failed", "component", "audiobooks",
+				"session_id", sess.ID, "content_id", sess.ContentID, "error", err)
 		}
 	}
-	h.updateNativePlaybackProgress(r.Context(), sid, p.CurrentTime)
+	// The row's listening total after this sync. The native session credits
+	// how far it rose since the last total it saw, so a sync another replica
+	// handled still counts here.
+	total := float64(sess.TimeListeningSeconds + int(p.timeDelta()))
+	h.updateNativePlaybackProgress(ctx, sess.ID, p.CurrentTime, total)
 
 	// Realtime push to other connected clients.
 	h.publish(a.UserID, "user_item_progress_updated", map[string]any{
 		"data": map[string]any{
 			"libraryItemId": sess.ContentID,
 			"currentTime":   p.CurrentTime,
-			"sessionId":     sid,
+			"sessionId":     sess.ID,
 		},
 	})
 	h.publish(a.UserID, "user_session_updated", map[string]any{
-		"id":            sid,
+		"id":            sess.ID,
 		"libraryItemId": sess.ContentID,
 		"currentTime":   p.CurrentTime,
 		"timeListening": p.timeDelta(),
 	})
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
 // handleSessionClose — POST /abs/api/session/{sid}/close
 // Finalises a play session. Sets closed_at on the abs_playback_sessions row.
 // Only the owning user may close their session (IDOR guard).
+//
+// A body is the client's final sync, as in ABS SessionController.close: it is
+// applied like a PATCH /session/{sid} before the session closes, so playback
+// since the last periodic sync is kept. An empty body closes without a sync.
 func (h *Handler) handleSessionClose(w http.ResponseWriter, r *http.Request) {
 	a, ok := absAuthFrom(r)
 	if !ok {
@@ -406,22 +482,41 @@ func (h *Handler) handleSessionClose(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	sid := chi.URLParam(r, "sid")
+	final := readFinalSync(r, sid)
 	if h.deps.PlaybackSessionStore == nil {
 		// No store wired — accept close gracefully.
 		w.WriteHeader(http.StatusNoContent)
 		return
 	}
 
-	// Ownership gate.
+	// Ownership gate. A reported play is not a /play session: its listening
+	// and its end come from the client's local-session reports.
 	sess, err := h.deps.PlaybackSessionStore.GetPlaybackSession(r.Context(), sid)
-	if err != nil || !sameABSPrincipal(a, sess.UserID, sess.ProfileID) {
+	if err != nil || sess.ReportOnly || !sameABSPrincipal(a, sess.UserID, sess.ProfileID) {
 		http.Error(w, "session not found", http.StatusNotFound)
 		return
 	}
 
-	if err := h.deps.PlaybackSessionStore.ClosePlaybackSession(r.Context(), sid); err != nil {
+	// The final sync needs the same item access a periodic one does.
+	var closeSync *FinalSync
+	if final != nil && h.audiobookVisible(r.Context(), a, sess.ContentID) {
+		closeSync = &FinalSync{PositionSeconds: final.CurrentTime, ListeningSeconds: int(final.timeDelta())}
+	}
+	// The final sync and the close are one statement. Of concurrent or
+	// repeated closes only the one that closes the session applies its final
+	// sync, so a stale one never reaches the resume position, the native
+	// session or the user's other clients.
+	closed, err := h.deps.PlaybackSessionStore.ClosePlaybackSession(r.Context(), sid, closeSync)
+	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
+	}
+	if closed && closeSync != nil {
+		h.mirrorSessionSync(r.Context(), a, sess, *final)
+		// A close on a replica without the native copy records the play from
+		// this row (absDetachedSession), which must include the final sync.
+		sess.CurrentPositionSeconds = closeSync.PositionSeconds
+		sess.TimeListeningSeconds += closeSync.ListeningSeconds
 	}
 	h.stopNativePlaybackSession(r.Context(), &sess)
 
@@ -430,6 +525,40 @@ func (h *Handler) handleSessionClose(w http.ResponseWriter, r *http.Request) {
 		"libraryItemId": sess.ContentID,
 	})
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// readFinalSync reads the final sync a close may carry. It is best effort: a
+// body that cannot be read, or one without a currentTime ({}, null), is no
+// final sync, and the session closes at its last synced position.
+func readFinalSync(r *http.Request, sid string) *syncPayload {
+	raw, err := io.ReadAll(io.LimitReader(r.Body, 1<<20))
+	if err != nil || len(bytes.TrimSpace(raw)) == 0 {
+		return nil
+	}
+	var p struct {
+		syncPayload
+		CurrentTime *float64 `json:"currentTime"`
+	}
+	if err := json.Unmarshal(raw, &p); err != nil {
+		slog.WarnContext(r.Context(), "abs session close: ignoring unreadable final sync", "component", "audiobooks",
+			"session_id", sid, "error", err)
+		return nil
+	}
+	if p.CurrentTime == nil {
+		return nil
+	}
+	p.syncPayload.CurrentTime = *p.CurrentTime
+	return &p.syncPayload
+}
+
+// audiobookVisible reports whether the caller can see the audiobook.
+func (h *Handler) audiobookVisible(ctx context.Context, a ctxAuth, contentID string) bool {
+	access, err := h.accessFilterForAuth(ctx, a)
+	if err != nil {
+		return false
+	}
+	item, err := h.deps.MediaStore.GetAudiobookByID(ctx, contentID, access)
+	return err == nil && item != nil
 }
 
 // ---------------------------------------------------------------------------
