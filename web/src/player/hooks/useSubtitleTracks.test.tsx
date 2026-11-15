@@ -271,6 +271,138 @@ describe("useSubtitleTracks", () => {
     await waitFor(() => expect(createdTracks[0]?.cues.map((c) => c.text)).toEqual(["burst"]));
   });
 
+  it("asks for one window per grid cell across the anchor and the element clock", async () => {
+    let finish!: (value: unknown) => void;
+    fetchMock.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+    );
+
+    // Before the element has media, the intended start position is 812.4 s.
+    const { videoRef } = renderTracks({
+      origin: 0,
+      durationRef: { current: 7200 },
+      anchorRef: { current: 812.4 },
+      readyState: 0,
+    });
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    expect(String(fetchMock.mock.calls[0]![0])).toContain("position=810&duration=120");
+
+    // The element then reports its own clock, 838 s. Both readings sit in the
+    // same cell, so this must not ask for a second, shifted window.
+    Object.defineProperty(videoRef.current!, "readyState", { value: 1, configurable: true });
+    videoRef.current!.currentTime = 838;
+    videoRef.current!.dispatchEvent(new Event("timeupdate"));
+    await act(async () => {});
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0]![1].signal.aborted).toBe(false);
+
+    finish(vttResponse("WEBVTT\n\n14:00.000 --> 14:02.000\ncell\n\n"));
+    await waitFor(() => expect(createdTracks[0]!.cues.map((c) => c.text)).toEqual(["cell"]));
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("queues the next window behind an in-flight one instead of aborting it", async () => {
+    let finish!: (value: unknown) => void;
+    fetchMock.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+    );
+
+    const { videoRef } = renderTracks({ origin: 0, durationRef: { current: 7200 } });
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+
+    // A timeupdate far outside the requested range is not a seek: the extract
+    // already running must finish and land in the server's window cache.
+    videoRef.current!.currentTime = 400;
+    videoRef.current!.dispatchEvent(new Event("timeupdate"));
+    await act(async () => {});
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0]![1].signal.aborted).toBe(false);
+
+    finish(vttResponse("WEBVTT\n\n00:00:10.000 --> 00:00:12.000\nfirst\n\n"));
+    // Once it settles the playhead's own window is requested, aligned to the
+    // grid (floor((400 - 2) / 30) * 30).
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    expect(String(fetchMock.mock.calls[1]![0])).toContain("position=390&duration=120");
+  });
+
+  it("advances past an empty first window instead of treating it as a failure", async () => {
+    const state = vi.fn();
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    // A valid VTT document with no cues: a dialogue gap where the playhead
+    // starts, or a track whose first cue begins later.
+    fetchMock
+      .mockResolvedValueOnce(vttResponse("WEBVTT\n\n"))
+      .mockResolvedValueOnce(vttResponse("WEBVTT\n\n00:01:50.000 --> 00:01:52.000\nlater\n\n"));
+
+    renderTracks({ origin: 0, durationRef: { current: 7200 }, onLoadState: state });
+
+    // The next slice is asked for as soon as the empty one commits, without
+    // waiting for a timeupdate or for the prefetch lead to come due.
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    expect(String(fetchMock.mock.calls[0]![0])).toContain("position=0&duration=120");
+    expect(String(fetchMock.mock.calls[1]![0])).toContain("position=90&duration=120");
+    await waitFor(() => expect(createdTracks[0]!.cues.map((c) => c.text)).toEqual(["later"]));
+    expect(state).not.toHaveBeenCalledWith("error");
+    expect(error).not.toHaveBeenCalled();
+    error.mockRestore();
+  });
+
+  it("builds the track when the media element arrives after the mount", async () => {
+    fetchMock.mockResolvedValue(vttResponse("WEBVTT\n\n00:00:10.000 --> 00:00:12.000\nlate\n\n"));
+    // A stream reload replaces the <video> element, so the rebuilt track lands
+    // in the gap where the ref is still empty.
+    const videoRef: RefObject<HTMLVideoElement | null> = { current: null };
+
+    renderHook(() =>
+      useSubtitleTracks(videoRef, [srtTrack], 1, 0, 0, { current: 7200 }, { current: 0 }),
+    );
+
+    await act(async () => {});
+    expect(fetchMock).not.toHaveBeenCalled();
+
+    // The replacement element appears and no revision changes: the hook has to
+    // notice the element itself, or the track never fetches and never loads.
+    videoRef.current = makeVideoRef().current;
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    expect(String(fetchMock.mock.calls[0]![0])).toContain("position=0&duration=120");
+    await waitFor(() => expect(createdTracks.at(-1)!.cues.map((c) => c.text)).toEqual(["late"]));
+  });
+
+  it("still aborts the in-flight window when the track changes", async () => {
+    let finish!: (value: unknown) => void;
+    fetchMock.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+    );
+    fetchMock.mockResolvedValue(vttResponse("WEBVTT\n\n00:00:10.000 --> 00:00:12.000\nother\n\n"));
+
+    const { rerender } = renderTracks({ origin: 0, durationRef: { current: 7200 } });
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+
+    rerender({
+      origin: 0,
+      durationRef: { current: 7200 },
+      track: { ...srtTrack, url: "/api/v1/stream/x/subtitles/2?token=abc" },
+    });
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    expect(fetchMock.mock.calls[0]![1].signal.aborted).toBe(true);
+    expect(String(fetchMock.mock.calls[1]![0])).toContain("subtitles/2");
+    finish(vttResponse("WEBVTT\n\n00:00:10.000 --> 00:00:12.000\nstale\n\n"));
+    // The rebuilt track holds the new track's cues; the aborted window's late
+    // bytes are dropped.
+    await waitFor(() => expect(createdTracks.at(-1)!.cues.map((c) => c.text)).toEqual(["other"]));
+    expect(createdTracks.flatMap((t) => t.cues.map((c) => c.text))).not.toContain("stale");
+  });
+
   it("resets and refetches on a forward seek past the covered window", async () => {
     fetchMock
       .mockResolvedValueOnce(vttResponse("WEBVTT\n\n00:00:10.000 --> 00:00:12.000\nearly\n\n"))

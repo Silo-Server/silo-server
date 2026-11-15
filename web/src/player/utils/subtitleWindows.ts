@@ -31,6 +31,16 @@ export const BITMAP_SUBTITLE_PAGE_SECONDS = 120;
 // Start fetching the next window this many seconds before the current one's
 // requested end, so the new cues are already on hand when playback crosses in.
 export const SUBTITLE_PREFETCH_LEAD_SECONDS = 30;
+// Source-time grid a text window starts on. The playhead moves every
+// timeupdate, but the server keys a window on its exact `position`, so a fresh
+// fetch re-derived from the raw playhead would ask for a new 120 s window every
+// second and demux almost the whole slice again. Every position inside one cell
+// asks for the same window, and the server can answer a later request from the
+// window it already produced.
+export const SUBTITLE_WINDOW_ALIGN_SECONDS = 30;
+// Pull the anchor back this much before snapping it to the grid, so a small
+// scrub back still lands inside the window instead of in the previous cell.
+export const SUBTITLE_WINDOW_SEEK_BACKOFF_SECONDS = 2;
 // Overlap consecutive windows by a few seconds so ffmpeg boundary rounding
 // can't drop a cue that straddles the join.
 export const SUBTITLE_WINDOW_OVERLAP_SECONDS = 5;
@@ -186,6 +196,27 @@ export function alignSubtitleWindowStart(
   if (!(cellSeconds > 0)) return Math.max(0, position);
   const anchored = Math.max(0, position - backoffSeconds);
   return Math.floor(anchored / cellSeconds) * cellSeconds;
+}
+
+/**
+ * The one window start a text track asks for at `playhead`, in source seconds.
+ *
+ * This is the canonical base: every consumer of the same track (the first
+ * fetch, a seek, and the next-window prefetch) derives its start here, so they
+ * cannot disagree about which window the playhead is in. Passing an already
+ * aligned start back in is not supported — the argument is a playhead, and the
+ * seek backoff is applied once, here.
+ *
+ * Bitmap pages deliberately keep their own grid (BITMAP_SUBTITLE_PAGE_SECONDS):
+ * the server stores exactly one page span, so the client must ask for whole
+ * pages rather than this text grid.
+ */
+export function subtitleWindowStartForPlayhead(playhead: number): number {
+  return alignSubtitleWindowStart(
+    playhead,
+    SUBTITLE_WINDOW_ALIGN_SECONDS,
+    SUBTITLE_WINDOW_SEEK_BACKOFF_SECONDS,
+  );
 }
 
 /**

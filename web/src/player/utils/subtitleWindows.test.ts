@@ -7,6 +7,7 @@ import {
   SUBTITLE_COVERAGE_HEADER,
   SUBTITLE_FETCH_RETRY_MAX_BACKOFF_MS,
   subtitleCoverageEnd,
+  subtitleWindowStartForPlayhead,
   subtitleWindowUrl,
   type SubtitleWindowFetcherOptions,
   type SubtitleWindowState,
@@ -70,6 +71,32 @@ describe("subtitleWindowUrl", () => {
     expect(
       subtitleWindowUrl("https://example.test/sub", 10, "", BITMAP_SUBTITLE_PAGE_SECONDS),
     ).toBe("https://example.test/sub?position=10&duration=120");
+  });
+});
+
+describe("subtitleWindowStartForPlayhead", () => {
+  it("maps every playhead inside one grid cell to the same start", () => {
+    // The playhead reported by the anchor and the one the element's clock
+    // settles on can differ; inside one cell they must still name one window,
+    // or the second request re-demuxes a range the first already covered.
+    expect(subtitleWindowStartForPlayhead(812)).toBe(810);
+    expect(subtitleWindowStartForPlayhead(820.4)).toBe(810);
+    expect(subtitleWindowStartForPlayhead(838)).toBe(810);
+    expect(subtitleWindowStartForPlayhead(841.9)).toBe(810);
+  });
+
+  it("moves to the next cell only when the playhead crosses its boundary", () => {
+    expect(subtitleWindowStartForPlayhead(842)).toBe(840);
+    expect(subtitleWindowStartForPlayhead(872)).toBe(870);
+  });
+
+  it("keeps the seek backoff and never returns a negative start", () => {
+    // 810 sits exactly on a grid boundary; the 2 s backoff keeps the cue on
+    // screen inside the window by starting the previous cell.
+    expect(subtitleWindowStartForPlayhead(810)).toBe(780);
+    expect(subtitleWindowStartForPlayhead(2)).toBe(0);
+    expect(subtitleWindowStartForPlayhead(0)).toBe(0);
+    expect(subtitleWindowStartForPlayhead(-5)).toBe(0);
   });
 });
 

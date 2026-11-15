@@ -8,8 +8,7 @@ import {
 } from "../utils/parseVTT";
 import type { PlayerSubtitleInfo } from "../types";
 import { isASSCodec, isBitmapCodec } from "../utils/subtitleCodecs";
-import { alignSubtitleWindowStart } from "../utils/subtitleWindows";
-import { toMediaTime } from "../utils/mediaTimeline";
+import { subtitlePlayheadSeconds, subtitleWindowStartForPlayhead } from "../utils/subtitleWindows";
 import { isSubtitleSourceChanged } from "../utils/subtitleSourceChanged";
 import { isPlaybackSessionGoneResponse } from "../playback-errors";
 
@@ -29,15 +28,8 @@ const PREFETCH_LEAD = 30;
 // Overlap consecutive windows by a few seconds so ffmpeg boundary
 // rounding can't drop a cue that straddles the join.
 const WINDOW_OVERLAP = 5;
-// Pull back this many seconds from the current position when starting
-// a fresh fetch, so a quick scrub back still lands inside the window.
-const SEEK_BACKOFF = 2;
-// Start windows on a coarse source-time grid instead of at the exact
-// playhead. Repeated polls while the playhead advances would otherwise ask
-// for a new 120 s window every second and re-demux almost the whole slice;
-// every position inside one grid cell asks for the same window, and the
-// server can answer a shifted request from a covering cached window.
-const WINDOW_ALIGN_SECONDS = 30;
+// The window grid (cell length and seek backoff) lives in subtitleWindows so
+// every consumer of a track snaps to the same start.
 // Abort a window fetch when the response goes this long without delivering
 // a chunk. Extraction streams cues progressively, so a healthy-but-slow
 // ffmpeg keeps resetting the clock; only a genuinely hung one trips it.
@@ -208,13 +200,14 @@ function wholeSecondPosition(position: number): number {
 }
 
 /**
- * Snap a fetch anchor to the window grid. The request starts up to one grid
- * cell behind the playhead, so the current cue stays covered while every
- * position in that cell shares one server window. The math is shared with the
- * bitmap page fetcher so the two grids cannot drift apart.
+ * Snap a fetch anchor to the window grid (see subtitleWindowStartForPlayhead).
+ * The request starts up to one grid cell behind the playhead, so the current
+ * cue stays covered while every position in that cell shares one server
+ * window. The math is shared with the bitmap page fetcher so the two grids
+ * cannot drift apart.
  */
 function alignWindowStart(position: number): number {
-  return alignSubtitleWindowStart(position, WINDOW_ALIGN_SECONDS, SEEK_BACKOFF);
+  return subtitleWindowStartForPlayhead(position);
 }
 
 /** Request the same bounded interval used by the coverage tracker. */
@@ -380,6 +373,30 @@ export function useSubtitleTracks(
   // new URL — clears the latch as a deliberate fresh attempt.
   const parkedTrackUrlRef = useRef<string | null>(null);
 
+  // A stream reload replaces the <video> element, so a build can land in the
+  // gap where the ref is null. `videoRef` is stable, so nothing re-runs the
+  // effect when the element arrives, and a build that returned early installed
+  // no timeupdate listener either: the track would fetch nothing and never
+  // load. Watch for the element while it is missing, then rebuild once.
+  const [elementEpoch, setElementEpoch] = useState(0);
+  useEffect(() => {
+    if (videoRef.current) return;
+    let frame = 0;
+    let attempts = 0;
+    const look = () => {
+      if (videoRef.current) {
+        setElementEpoch((epoch) => epoch + 1);
+        return;
+      }
+      // Bound the wait to about five seconds of frames: a player that goes
+      // away for good must not leave a frame loop running.
+      if (++attempts > 300) return;
+      frame = requestAnimationFrame(look);
+    };
+    frame = requestAnimationFrame(look);
+    return () => cancelAnimationFrame(frame);
+  }, [videoRef, elementEpoch]);
+
   useEffect(() => {
     const video = videoRef.current;
     if (!video) return;
@@ -503,6 +520,15 @@ export function useSubtitleTracks(
     let inflight: AbortController | null = null;
     let inflightStart = 0;
     let inflightURL: string | null = null;
+    // Set when the playhead moved into a different window while one was still
+    // on the wire. Extraction is the expensive part of a subtitle slice, so a
+    // request that was already streaming is never cancelled to chase the
+    // playhead: it runs to completion, lands in the server's window cache, and
+    // the planner runs again afterwards. A deliberate seek still supersedes
+    // (see fetchWindow). Re-planning rather than replaying a remembered start
+    // is what keeps the retry on the playhead's own window: a position that is
+    // now covered issues no request at all.
+    let windowRequestedWhileBusy = false;
     let retryTimer: ReturnType<typeof setTimeout> | null = null;
     if (restored?.hasFetched) onLoadStateRef.current?.("ready");
     // Set on a failed (errored or stalled) window fetch; maybeFetch waits out
@@ -622,9 +648,16 @@ export function useSubtitleTracks(
     /**
      * Fetch one slice. `seekStart === null` requests the whole track (sidecar
      * and downloaded text), which has no position/duration parameters and
-     * covers the entire media.
+     * covers the entire media. `supersede` is set only by a deliberate seek:
+     * a position the viewer jumped to must not wait behind an extraction,
+     * while a playhead that merely drifted is re-planned once the window on the
+     * wire settles.
      */
-    async function fetchWindow(seekStart: number | null, resetExisting: boolean) {
+    async function fetchWindow(
+      seekStart: number | null,
+      resetExisting: boolean,
+      supersede = false,
+    ) {
       if (!activeUrl) return;
 
       // A player event burst can ask for the same window two or three times
@@ -633,6 +666,7 @@ export function useSubtitleTracks(
       // bytes, so coalesce onto the identical in-flight request.
       const url = seekStart === null ? activeUrl : appendPosition(activeUrl, seekStart);
       if (inflight && inflightURL === url) {
+        windowRequestedWhileBusy = false;
         if (resetExisting) {
           // Preserve the caller's reset intent without replacing the fetch:
           // the in-flight window already covers this range.
@@ -646,9 +680,18 @@ export function useSubtitleTracks(
         return;
       }
 
-      // Only one window on the wire at a time: each fetch keeps an
-      // ffmpeg process alive, double-fetching wastes that.
+      // Only one window on the wire at a time: each fetch keeps an ffmpeg
+      // process alive, and a cancelled one throws away the extraction the
+      // server had already done. A playhead that moved into a different window
+      // is remembered and re-planned once this one settles; only a seek
+      // cancels an in-flight window.
+      if (inflight && !supersede) {
+        windowRequestedWhileBusy = true;
+        return;
+      }
+
       inflight?.abort();
+      windowRequestedWhileBusy = false;
       const controller = new AbortController();
       inflight = controller;
       inflightStart = seekStart ?? 0;
@@ -675,6 +718,9 @@ export function useSubtitleTracks(
 
       let succeeded = false;
       lastResponseStatus = 0;
+      // Cues this window actually delivered. A window that streams in whole
+      // and carries none is a valid empty window, not a failure.
+      let producedCues = 0;
       try {
         armStallTimer();
         const resp = await fetch(url, { signal: controller.signal });
@@ -739,6 +785,7 @@ export function useSubtitleTracks(
             buf = buf.slice(split + 2);
             const cues = parseVTT(safe);
             if (cues.length > 0) {
+              producedCues += cues.length;
               addParsedCues(cues);
               onLoadStateRef.current?.("ready");
             }
@@ -749,6 +796,7 @@ export function useSubtitleTracks(
           if (buf.trim()) {
             const cues = parseVTT(buf);
             if (cues.length > 0) {
+              producedCues += cues.length;
               addParsedCues(cues);
               onLoadStateRef.current?.("ready");
             }
@@ -796,6 +844,22 @@ export function useSubtitleTracks(
               atEOF = true;
             }
           }
+          // A window that streamed in whole with no cues is valid — a
+          // dialogue gap, or a track whose first cue starts later. It must not
+          // read as a failure (it does not) and must not leave the rest of the
+          // slot unevaluated, so the next window is asked for now instead of
+          // when the prefetch lead comes due. Only a fresh window chains:
+          // an extend that is empty too leaves the normal lead in charge, so a
+          // silent track cannot turn into a fetch loop.
+          if (seekStart !== null && !atEOF && producedCues === 0) {
+            void fetchWindow(alignWindowStart(requestedEnd - WINDOW_OVERLAP), false);
+          } else if (windowRequestedWhileBusy) {
+            // Something asked for a different window while this one was on the
+            // wire. Plan again against where the playhead is now: if this
+            // window covers it, no request is made.
+            windowRequestedWhileBusy = false;
+            maybeFetch();
+          }
         } else if (!succeeded && !superseded && !cancelled) {
           // Genuine failure (error, stall, or non-ok response) rather than a
           // seek superseding this fetch — back off before retrying. A signaled
@@ -804,6 +868,9 @@ export function useSubtitleTracks(
           // 404 proved the track missing, so no retry can succeed. Guarded
           // inline rather than with a `return` — this block runs inside a
           // finally.
+          // A queued window is dropped: the backoff retry re-plans from the
+          // playhead, so replaying the old request would only add a request.
+          windowRequestedWhileBusy = false;
           if (!sourceChangedSignaled && !sessionGoneSignaled && !isParked()) {
             lastFetchFailureAt = Date.now();
             onLoadStateRef.current?.("error");
@@ -847,19 +914,18 @@ export function useSubtitleTracks(
     //     the next window, overlapping slightly with the previous
     // `seeked` marks the calls made from a seeking/seeked event: a seek that
     // leaves the fetched range is a new window request, not a retry of a failed
-    // one, so it is allowed to reset the failure budget.
+    // one, so it is allowed to reset the failure budget. It is also the only
+    // trigger allowed to cancel a window that is already extracting.
     function maybeFetch(seeked = false) {
       if (sourceChangedSignaled) return; // stale URL; waiting for replan
       if (sessionGoneSignaled) return; // the session is gone; offer a restart
       if (isParked()) return; // the track is missing for this file; stay parked
       if (cancelled) return;
-      // Until the element has media loaded, currentTime reads 0 rather than
-      // the position playback will actually start at (resume target, or a
-      // seek that restarted the stream) — use the intended position instead.
-      const mediaTime =
-        videoEl.readyState > 0
-          ? toMediaTime(videoEl.currentTime, streamOriginRef.current ?? 0)
-          : (fetchAnchorRef.current ?? 0);
+      const mediaTime = subtitlePlayheadSeconds(
+        videoEl,
+        streamOriginRef.current ?? 0,
+        fetchAnchorRef.current,
+      );
       // Sidecar/downloaded text is one complete artifact. Fetch it whole once
       // and hold every cue; seeks inside it need no request. A refresh or
       // stream rebuild is a fresh mount and fetches once more. A failed whole
@@ -877,8 +943,10 @@ export function useSubtitleTracks(
           mediaTime <= inflightStart + WINDOW_DURATION + 1
         )
           return;
-        // A seek outside the requested range must not wait for extraction.
-        fetchWindow(alignWindowStart(mediaTime), true);
+        // A seek outside the requested range must not wait for extraction; a
+        // playhead that merely drifted is queued behind it instead, because
+        // cancelling would throw away the extraction already in progress.
+        fetchWindow(alignWindowStart(mediaTime), true, seeked);
         return;
       }
       // Ahead of the backoff and terminal gates: a deliberate seek deserves a
@@ -895,7 +963,7 @@ export function useSubtitleTracks(
         if (seekNeedsFreshWindow) {
           resetFailureBudget();
           atEOF = false;
-          fetchWindow(alignWindowStart(mediaTime), true);
+          fetchWindow(alignWindowStart(mediaTime), true, true);
           return;
         }
       }
@@ -1025,6 +1093,7 @@ export function useSubtitleTracks(
     transportRevision,
     replayRevision,
     videoRef,
+    elementEpoch,
   ]);
 
   // Re-base already-loaded cues when the media timeline remaps — e.g. a
