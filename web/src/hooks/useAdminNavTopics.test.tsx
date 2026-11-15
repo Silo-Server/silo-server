@@ -3,8 +3,9 @@ import { expect, it } from "vitest";
 
 import { AdminNavTopicsProvider, useAdminNavTopics } from "./useAdminNavTopics";
 
-function Sidebar({ topic }: { topic: string }) {
-  const topics = useAdminNavTopics(topic);
+// `place` is the active topic's id, or the page path outside every topic.
+function Sidebar({ place }: { place: string }) {
+  const topics = useAdminNavTopics(null, place);
   return (
     <button type="button" onClick={() => topics.toggle("integrations")}>
       {topics.isOpen("integrations") ? "open" : "closed"}
@@ -13,22 +14,28 @@ function Sidebar({ topic }: { topic: string }) {
 }
 
 // The phone drawer remounts its sidebar each time it opens.
-function Shell({ topic, drawerOpen }: { topic: string; drawerOpen: boolean }) {
+function Shell({ place, drawerOpen = true }: { place: string; drawerOpen?: boolean }) {
   return (
-    <AdminNavTopicsProvider>{drawerOpen ? <Sidebar topic={topic} /> : null}</AdminNavTopicsProvider>
+    <AdminNavTopicsProvider>{drawerOpen ? <Sidebar place={place} /> : null}</AdminNavTopicsProvider>
   );
 }
 
-it("keeps a choice when the drawer's sidebar remounts, and drops it on arriving in another topic", () => {
-  const { rerender } = render(<Shell topic="libraries" drawerOpen />);
+it("keeps a choice when the drawer's sidebar remounts, and drops it on moving elsewhere", () => {
+  const { rerender } = render(<Shell place="libraries" />);
   fireEvent.click(screen.getByRole("button"));
 
-  rerender(<Shell topic="libraries" drawerOpen={false} />);
-  rerender(<Shell topic="libraries" drawerOpen />);
+  rerender(<Shell place="libraries" drawerOpen={false} />);
+  rerender(<Shell place="libraries" />);
   expect(screen.getByRole("button")).toHaveTextContent("open");
 
-  rerender(<Shell topic="server" drawerOpen />);
+  rerender(<Shell place="server" />);
   expect(screen.getByRole("button")).toHaveTextContent("closed");
-  rerender(<Shell topic="libraries" drawerOpen />);
+  rerender(<Shell place="libraries" />);
+  expect(screen.getByRole("button")).toHaveTextContent("closed");
+
+  // Two pages outside every topic, such as Dashboard and Activity.
+  rerender(<Shell place="/admin" />);
+  fireEvent.click(screen.getByRole("button"));
+  rerender(<Shell place="/admin/activity" />);
   expect(screen.getByRole("button")).toHaveTextContent("closed");
 });
