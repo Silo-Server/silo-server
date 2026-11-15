@@ -540,7 +540,10 @@ html[data-navigation-direction]::view-transition-new(main-content) {
 
     /* Borders: barely visible, just enough structure */
     --border-base: #28282e;
-    --input-base: #1c1c20;
+    /* Form-control boundary (text fields, selects, unchecked switch track and
+       checkbox). It is the only edge a field has, so it holds 3:1 (WCAG 1.4.11)
+       against the page, popover and card surfaces; --border stays a hairline. */
+    --input-base: #6a6a74;
     --ring: #e8e8ec;
 
     /* Charts: categorical set validated on this theme's card surface —

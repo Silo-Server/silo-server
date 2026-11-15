@@ -248,7 +248,7 @@ function MaxTitlesInput({
 }) {
   const t = useT();
   return (
-    <label className="border-border bg-background focus-within:border-ring focus-within:ring-ring/50 flex h-11 items-center gap-3 rounded-md border px-3 text-sm shadow-xs transition-[color,box-shadow] focus-within:ring-[3px]">
+    <label className="border-input bg-background focus-within:border-ring focus-within:ring-ring/50 flex h-11 items-center gap-3 rounded-md border px-3 text-sm shadow-xs transition-[color,box-shadow] focus-within:ring-[3px]">
       <Input
         key={limit ?? ""}
         type="number"

@@ -227,7 +227,7 @@ function TitleSearch({
 
   return (
     <div className="relative grid gap-2">
-      <div className="border-border bg-background/40 focus-within:ring-ring/50 flex h-11 items-center gap-2.5 rounded-xl border px-3 focus-within:ring-[3px]">
+      <div className="border-input bg-background/40 focus-within:ring-ring/50 flex h-11 items-center gap-2.5 rounded-xl border px-3 focus-within:ring-[3px]">
         <Search aria-hidden className="text-muted-foreground size-4 shrink-0" />
         <input
           role="combobox"

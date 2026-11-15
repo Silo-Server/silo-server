@@ -106,6 +106,34 @@ describe("themeBoot", () => {
     );
   }
 
+  describe("with the system set to increase contrast", () => {
+    beforeEach(() => {
+      vi.stubGlobal(
+        "matchMedia",
+        (query: string) => ({ matches: query === "(prefers-contrast: more)" }) as MediaQueryList,
+      );
+    });
+    afterEach(() => {
+      vi.unstubAllGlobals();
+    });
+
+    it.each([
+      [null, "true"],
+      ["false", "false"],
+      ["true", "true"],
+    ])("stored high contrast %s paints %s, the same as ThemeProvider", (stored, expected) => {
+      const values = {
+        [KEYS.UI_CACHE_OWNER]: "7:p1",
+        [`${KEYS.UI_HIGH_CONTRAST}:7:p1`]: stored,
+      };
+      seed(values);
+      const boot = bootAttributes();
+      seed(values);
+      expect(boot).toEqual(providerAttributes());
+      expect(boot["data-high-contrast"]).toBe(expected);
+    });
+  });
+
   it("reads only the last identity's namespace", () => {
     seed({
       [KEYS.UI_CACHE_OWNER]: "7:p2",
