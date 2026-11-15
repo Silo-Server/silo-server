@@ -610,7 +610,7 @@ func lastKeyframeFrom(ctx context.Context, request SourcePreflightRequest, posit
 			return 0, false, err
 		}
 		for _, packet := range scanned {
-			if dts, err := strconv.ParseFloat(packet.DTSTime, 64); err == nil && strings.HasPrefix(packet.Flags, "K") {
+			if dts, ok := packet.dts(); ok && strings.HasPrefix(packet.Flags, "K") {
 				keyframe, found = dts, true
 			}
 		}
@@ -620,8 +620,8 @@ func lastKeyframeFrom(ctx context.Context, request SourcePreflightRequest, posit
 		// The scan stopped at its bound, so the stream goes on. A packet
 		// without a later timestamp to resume from ends the search with what
 		// it found.
-		next, err := strconv.ParseFloat(scanned[len(scanned)-1].DTSTime, 64)
-		if err != nil || next <= position {
+		next, ok := scanned[len(scanned)-1].dts()
+		if !ok || next <= position {
 			return keyframe, found, nil
 		}
 		position = next
@@ -632,6 +632,13 @@ func lastKeyframeFrom(ctx context.Context, request SourcePreflightRequest, posit
 type sourcePacket struct {
 	Flags   string `json:"flags"`
 	DTSTime string `json:"dts_time"`
+}
+
+// dts returns the packet's decode timestamp in seconds, or false when ffprobe
+// reported none.
+func (packet sourcePacket) dts() (float64, bool) {
+	dts, err := strconv.ParseFloat(packet.DTSTime, 64)
+	return dts, err == nil
 }
 
 // scanSourcePackets lists the primary video stream's packets in interval
