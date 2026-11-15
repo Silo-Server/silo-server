@@ -161811,6 +161811,92 @@
       "value": "تنفيذ البحث"
     }
   ],
+  "web.reader.search.truncated": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "zero": {
+          "value": [
+            {
+              "type": 0,
+              "value": "يتم عرض أول "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " تطابق."
+            }
+          ]
+        },
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "يتم عرض التطابق الأول."
+            }
+          ]
+        },
+        "two": {
+          "value": [
+            {
+              "type": 0,
+              "value": "يتم عرض أول تطابقين."
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 0,
+              "value": "يتم عرض أول "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " تطابقات."
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 0,
+              "value": "يتم عرض أول "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " تطابقًا."
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "يتم عرض أول "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " تطابق."
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.reader.settings.brightness": [
     {
       "type": 0,
