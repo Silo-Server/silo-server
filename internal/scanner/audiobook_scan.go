@@ -1032,6 +1032,24 @@ func (s *Scanner) audiobookFolderUnchangedOnDisk(ctx context.Context, folder *mo
 	return rejected, unchanged && err == nil
 }
 
+// audiobookRootUnmoved checks, after the parse, that folderPath still resolves
+// to physical, the root resolved before it. The parse read the files through
+// folderPath; a link that moved while it ran pointed them at another book, and
+// writing them under physical would give that book's metadata to this one, so
+// this scan leaves the book alone.
+func audiobookRootUnmoved(folderPath, physical string, physicalErr error) error {
+	if physicalErr == nil {
+		var now string
+		if now, physicalErr = canonicalWalkPath(folderPath); physicalErr == nil && now != physical {
+			return fmt.Errorf("audiobook root %s moved from %s to %s while it was read; will rescan", folderPath, physical, now)
+		}
+	}
+	if physicalErr != nil {
+		return fmt.Errorf("upsert audiobook item: resolve audiobook root: %w", physicalErr)
+	}
+	return nil
+}
+
 // unreadable, when set, counts audio files ffprobe rejected that the book was
 // indexed without.
 func (s *Scanner) reconcileAudiobookFolder(ctx context.Context, folder *models.MediaFolder, folderPath string, allowedPaths map[string]bool, walked *audiobookWalkedBook, inventoryAt time.Time, skipped, unreadable *int64) error {
@@ -1058,8 +1076,8 @@ func (s *Scanner) reconcileAudiobookFolder(ctx context.Context, folder *models.M
 		}
 		return fmt.Errorf("parse audiobook folder %s: %w", folderPath, err)
 	}
-	if physicalErr != nil {
-		return fmt.Errorf("upsert audiobook item: resolve audiobook root: %w", physicalErr)
+	if err := audiobookRootUnmoved(folderPath, physical, physicalErr); err != nil {
+		return err
 	}
 	if unreadable != nil {
 		atomic.AddInt64(unreadable, int64(len(parsed.UnreadableParts)))
