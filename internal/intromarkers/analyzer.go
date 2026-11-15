@@ -1321,7 +1321,7 @@ func (a *Analyzer) analyzeGroup(ctx context.Context, group candidateGroup, opts 
 		SeasonID:         group.SeasonID,
 		MediaFolderID:    group.MediaFolderID,
 		AnalysisGroupKey: group.AnalysisGroupKey,
-		InputSignature:   InputSignature(group.Candidates),
+		InputSignature:   groupInputSignature(group),
 		EpisodeCount:     distinctEpisodeCount(group.Candidates),
 		FileCount:        len(group.Candidates),
 	}
@@ -1421,6 +1421,18 @@ func (a *Analyzer) analyzeGroup(ctx context.Context, group candidateGroup, opts 
 		}
 	}
 	return summary, nil
+}
+
+// groupInputSignature is the signature of what an intro analysis of group
+// reads. A group with held-out files withdraws nothing, so its signature
+// differs from the same files' signature without them: once none is held out,
+// as after the held-out file is deleted, the group is compared again in full.
+func groupInputSignature(group candidateGroup) string {
+	signature := InputSignature(group.Candidates)
+	if group.HeldOut {
+		signature += ":held-out"
+	}
+	return signature
 }
 
 // withdrawChromaprintIntro clears a file's intro when an earlier Chromaprint

@@ -1046,6 +1046,19 @@ func TestAnalyzeGroupKeepsChromaprintIntrosWhenPartnersAreHeldOut(t *testing.T) 
 	if len(repo.withdrawals) != 0 {
 		t.Fatalf("withdrawals %+v, want none while a partner is held out", repo.withdrawals)
 	}
+
+	// Once file 3 is gone, the season settled while it was held out is
+	// compared again and the intros nothing confirms are withdrawn.
+	settled := repo.upsertedStates[len(repo.upsertedStates)-1]
+	repo.seasonState = &settled
+	remaining := groupCandidates(season[:2], kindIntro, 2)
+	summary, err := analyzer.analyzeGroup(context.Background(), remaining[0], analyzeGroupOptions{persistState: true})
+	if err != nil {
+		t.Fatalf("analyzeGroup after the held-out file is gone: %v", err)
+	}
+	if summary.GroupsSkipped != 0 || len(repo.withdrawals) != 2 {
+		t.Fatalf("skipped %d, withdrawals %+v; want the group compared again and both intros withdrawn", summary.GroupsSkipped, repo.withdrawals)
+	}
 }
 
 func TestAnalyzeEpisodeComparesOnlyOwnDetectionFiles(t *testing.T) {
