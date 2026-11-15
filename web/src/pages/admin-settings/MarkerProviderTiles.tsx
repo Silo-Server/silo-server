@@ -488,7 +488,10 @@ function MarkerProviderTile({
             ? t("web.admin.settings.markers.provider.saving")
             : t("common.save")}
         </Button>
-        {provider.is_submitter && (
+        {/* The test checks the provider account, which needs the plugin's
+            key. Reading markers can work without one, so a keyless plugin
+            gets no test that would call a working provider broken. */}
+        {provider.is_submitter && credentialsReady !== false && (
           <Button
             type="button"
             size="sm"
