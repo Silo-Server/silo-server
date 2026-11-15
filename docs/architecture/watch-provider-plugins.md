@@ -120,7 +120,8 @@ Several items with one key follow these rules:
   the one stored at export (a provider may key shows by TVDB id first). A row or stored
   item without a kind matches any kind.
 - A remote tombstone removes every row with its key, and with its kind when it
-  names one. Plugin tombstones carry only the key, so one whose rows name more
+  names one. A library item that took over watchlist title rows at promotion
+  also matches the keys and IDs those rows knew. Plugin tombstones carry only the key, so one whose rows name more
   than one kind of title changes nothing and adds a warning.
 
 A watchlist title the library doesn't have

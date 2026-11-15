@@ -441,11 +441,18 @@ func (s *Service) listItemStatesByRemoteKey(
 		return nil, err
 	}
 	// Several library items can share a key, such as two items for one title
-	// with the same IMDb id.
+	// with the same IMDb id. A library item that took over title rows at
+	// promotion also answers to the keys and IDs those rows knew.
 	byRemoteKey := make(map[string][]ListItemState, len(states))
 	for _, state := range states {
-		if key := strings.TrimSpace(state.ProviderItemKey); key != "" {
-			byRemoteKey[key] = append(byRemoteKey[key], state)
+		keys := []string{strings.TrimSpace(state.ProviderItemKey)}
+		if _, title := watchlistTitleFromListItemID(state.MediaItemID); !title {
+			keys = append(keys, state.TitleIDs...)
+		}
+		for i, key := range keys {
+			if key != "" && !slices.Contains(keys[:i], key) {
+				byRemoteKey[key] = append(byRemoteKey[key], state)
+			}
 		}
 	}
 	return byRemoteKey, nil
@@ -497,10 +504,6 @@ func (s *Service) applyRemoteListTombstone(
 				return nil, err
 			}
 			state.LocalPresent = false
-		} else if removed, err := s.removeRetiredListTitle(ctx, store, conn, b, *state); err != nil {
-			return nil, err
-		} else if removed {
-			result.Removed++
 		}
 		if err := s.repo.MarkListItemRemoteRemoved(ctx, conn.ID, b.kind, state.MediaItemID, now); err != nil {
 			return nil, err

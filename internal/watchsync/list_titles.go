@@ -367,19 +367,6 @@ func (s *Service) removeLocalListItem(ctx context.Context, store userstore.UserS
 	return err
 }
 
-// removeRetiredListTitle applies a provider removal of a title row that
-// already left the local list, such as one retired at promotion while
-// another of the title's rows handed the library item its key: the title
-// leaves the library watchlist too. It reports whether it removed an item.
-func (s *Service) removeRetiredListTitle(ctx context.Context, store userstore.UserStore, conn Connection, b listBinding, state ListItemState) (bool, error) {
-	title, ok := watchlistTitleFromListItemID(state.MediaItemID)
-	titles := s.watchlistTitles(b)
-	if !ok || titles == nil || !b.removalsEnabled(conn) {
-		return false, nil
-	}
-	return s.removePromotedListTitle(ctx, store, conn, b, titles, title, state)
-}
-
 // removePromotedListTitle takes the one library item with the title's IDs off
 // the library watchlist, where promotion moves the entry. The row's IDs find
 // it after promotion deleted the title's own. Several items are left alone,
