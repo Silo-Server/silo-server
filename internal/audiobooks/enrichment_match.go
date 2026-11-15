@@ -167,7 +167,7 @@ func (r *matchRun) lookupTaggedASIN(ctx context.Context) error {
 		r.state[i].record = admitted
 		maps.Copy(r.ids, admitted.ProviderIDs)
 		if r.agreedTitle == "" {
-			r.agreedTitle = admitted.Title
+			r.agreedTitle = agreeingTitle(r.item.Title, admitted)
 		}
 	}
 	return nil
@@ -199,7 +199,6 @@ func (r *matchRun) searchProvider(ctx context.Context, i int) error {
 	rules := &metadata.BookMatchRules{SeriesPosition: r.item.SeriesPosition}
 
 	remaining := results
-	var fallback *heldMatch
 	for fetches := 0; fetches < maxCandidateFetches && len(remaining) > 0; {
 		admission, err := metadata.AdmitSearchMatch(ctx, metadata.SearchMatchAdmissionRequest{
 			WantTitle:           r.item.Title,
@@ -264,22 +263,8 @@ func (r *matchRun) searchProvider(ctx context.Context, i int) error {
 			remaining = dropResult(remaining, admission.Selected)
 			continue
 		}
-		match := heldMatch{record: admitted, ids: candidateIDs, agreedTitle: admission.AgreedTitle}
-		// A record that lists no narrators does not contradict a narrator
-		// tag, but one whose narrators agree is the better evidence: keep
-		// the first narrator-less record and look on for an agreeing one.
-		if !byTaggedID && r.wantsNarrator() && !listsNarrator(admitted) {
-			if fallback == nil {
-				fallback = &match
-			}
-			remaining = dropResult(remaining, admission.Selected)
-			continue
-		}
-		r.accept(ctx, i, match)
+		r.accept(ctx, i, admitted, candidateIDs, admission.AgreedTitle)
 		return nil
-	}
-	if fallback != nil {
-		r.accept(ctx, i, *fallback)
 	}
 	return nil
 }
@@ -359,6 +344,23 @@ func (r *matchRun) fetchForMerge(ctx context.Context, i int, ids map[string]stri
 	return admitted, nil
 }
 
+// agreeingTitle is the record title or alias that best matches want, the
+// baseline later providers must agree with: a translated primary title
+// ("El marciano") must not make a later provider's "The Martian" read as a
+// disagreement.
+func agreeingTitle(want string, record *metadata.MetadataResult) string {
+	best, bestScore := record.Title, -1.0
+	for _, t := range recordTitles(record) {
+		if strings.TrimSpace(t) == "" {
+			continue
+		}
+		if score := metadata.TitleScore(want, t); score > bestScore {
+			best, bestScore = t, score
+		}
+	}
+	return best
+}
+
 // recordTitles lists every title a record goes by: primary, original and
 // aliases.
 func recordTitles(result *metadata.MetadataResult) []string {
@@ -369,33 +371,14 @@ func recordTitles(result *metadata.MetadataResult) []string {
 	return titles
 }
 
-// heldMatch is a search candidate whose record passed every check.
-type heldMatch struct {
-	record      *metadata.MetadataResult
-	ids         map[string]string
-	agreedTitle string
-}
-
-// accept makes m provider i's match.
-func (r *matchRun) accept(ctx context.Context, i int, m heldMatch) {
-	r.state[i].record = m.record
-	r.ids = m.ids
-	maps.Copy(r.ids, m.record.ProviderIDs)
-	r.agreedTitle = m.agreedTitle
+// accept makes record, fetched with ids, provider i's match.
+func (r *matchRun) accept(ctx context.Context, i int, record *metadata.MetadataResult, ids map[string]string, agreedTitle string) {
+	r.state[i].record = record
+	r.ids = ids
+	maps.Copy(r.ids, record.ProviderIDs)
+	r.agreedTitle = agreedTitle
 	slog.DebugContext(ctx, "audiobook enrichment: search result", "component", "audiobooks",
 		"provider", r.providers[i].Slug(), "content_id", r.item.ContentID, "matched_ids", r.ids)
-}
-
-// wantsNarrator reports whether the item carries a narrator tag.
-func (r *matchRun) wantsNarrator() bool {
-	return slices.ContainsFunc(r.item.Narrators, func(n string) bool { return strings.TrimSpace(n) != "" })
-}
-
-// listsNarrator reports whether a record names any narrator.
-func listsNarrator(result *metadata.MetadataResult) bool {
-	return slices.ContainsFunc(result.People, func(p models.ItemPerson) bool {
-		return p.Kind == models.PersonKindNarrator && strings.TrimSpace(p.Name) != ""
-	})
 }
 
 func (r *matchRun) anyRecord() bool {

@@ -315,8 +315,7 @@ func narratorRuleCases() []narratorRuleCase {
 		return r, rec
 	}
 	plain, plainRec := bare("1492084861")
-	// Both sort after the narrator-less "1492084861", so the preference, not
-	// the tiebreak, picks Bray.
+	// Both sort after the narrator-less "1492084861".
 	bray, brayRec2 := edition("The Martian", "Z0BRAY0001", "Andy Weir", "R. C. Bray")
 	wheaton, wheatonRec := edition("The Martian", "A0WHEATON1", "Andy Weir", "Wil Wheaton")
 	tagged, taggedRec := bare("B00B5HZGUG")
@@ -351,12 +350,13 @@ func narratorRuleCases() []narratorRuleCase {
 			wantID:    "1492084861",
 		},
 		{
-			name:      "narrator tag, an agreeing record is preferred over a narrator-less one ranked first",
+			// No further fetches are made hoping for a record with narrators.
+			name:      "narrator tag, a narrator-less record ranked first is taken as it is",
 			item:      enrichmentItemRow{Title: "The Martian", Author: "Andy Weir", Narrators: []string{"R. C. Bray"}},
 			results:   []metadata.SearchResult{plain, bray},
 			records:   map[string]*metadata.MetadataResult{"1492084861": plainRec, "Z0BRAY0001": brayRec2},
 			wantMatch: true,
-			wantID:    "Z0BRAY0001",
+			wantID:    "1492084861",
 		},
 		{
 			name:    "narrator tag, narrators that disagree: no match",
@@ -412,9 +412,9 @@ func narratorRuleCases() []narratorRuleCase {
 	}
 }
 
-// For a narrator-tagged item, a record that lists no narrators is no
-// contradiction and may establish the match, but a record whose narrators
-// agree is preferred; narrators that disagree reject the record.
+// For a narrator-tagged item, a record whose narrators disagree is rejected
+// and the next candidate tried; a record that lists no narrators is no
+// contradiction and is accepted as it is.
 func TestFindMatchNarratorRules(t *testing.T) {
 	for _, tt := range narratorRuleCases() {
 		t.Run(tt.name, func(t *testing.T) {
@@ -494,4 +494,53 @@ func (s *searchOnly) Name() string       { return s.p.slug }
 func (s *searchOnly) ForTypes() []string { return []string{"audiobook"} }
 func (s *searchOnly) Search(ctx context.Context, q metadata.SearchQuery) ([]metadata.SearchResult, error) {
 	return s.p.Search(ctx, q)
+}
+
+// A tagged-ASIN record whose primary title is a translation sets the
+// agreement baseline from the title that matched the item, so a later
+// provider's "The Martian" still merges.
+func TestFindMatchAgreementBaselineUsesTheMatchingTitle(t *testing.T) {
+	spanish := &metadata.MetadataResult{
+		HasMetadata: true, Title: "El marciano",
+		TitleAliases: []metadata.TitleAlias{{Title: "The Martian"}},
+		ProviderIDs:  map[string]string{"asin": "B079YDJ18Z", "lookup": "B079YDJ18Z"},
+	}
+	english := &metadata.MetadataResult{
+		HasMetadata: true, Title: "The Martian", Overview: "from the second provider",
+		ProviderIDs: map[string]string{"second": "S1"},
+	}
+	m := (&Enricher{}).findMatch(context.Background(), enrichmentItemRow{
+		ContentID: "item", Title: "The Martian", Author: "Andy Weir",
+		ProviderIDs: map[string]string{"asin": "B079YDJ18Z"},
+	}, []metadata.Provider{
+		&lookupOnly{&fixedProvider{slug: "lookup", answers: []*metadata.MetadataResult{spanish}}},
+		&keyedProvider{slug: "second",
+			results: []metadata.SearchResult{{Name: "The Martian", ProviderIDs: map[string]string{"second": "S1"}}},
+			rec:     english},
+	})
+	if !m.metadata.HasMetadata || m.metadata.Overview != "from the second provider" || m.ids["second"] != "S1" {
+		t.Fatalf("ids %v overview %q, want the second provider merged", m.ids, m.metadata.Overview)
+	}
+}
+
+// keyedProvider answers GetMetadata only when asked with its own ID, as the
+// plugin adapter does.
+type keyedProvider struct {
+	slug    string
+	results []metadata.SearchResult
+	rec     *metadata.MetadataResult
+}
+
+func (p *keyedProvider) Slug() string       { return p.slug }
+func (p *keyedProvider) Name() string       { return p.slug }
+func (p *keyedProvider) ForTypes() []string { return []string{"audiobook"} }
+func (p *keyedProvider) Search(context.Context, metadata.SearchQuery) ([]metadata.SearchResult, error) {
+	return p.results, nil
+}
+
+func (p *keyedProvider) GetMetadata(_ context.Context, req metadata.MetadataRequest) (*metadata.MetadataResult, error) {
+	if req.ProviderIDs[p.slug] == "" {
+		return nil, nil
+	}
+	return p.rec, nil
 }
