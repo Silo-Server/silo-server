@@ -2,22 +2,13 @@ import { useEffect, useRef, useState } from "react";
 import { Check, GripHorizontal, RotateCcw, Trash2, X } from "lucide-react";
 import { useT } from "@/i18n";
 import type { MarkerEditor } from "../hooks/useMarkerEditor";
-import { MARKER_KINDS, MARKER_LABEL_KEYS } from "../hooks/useMarkerEditor";
-import type { MarkerKind } from "../types";
+import { MARKER_DOT_COLORS, MARKER_KINDS, MARKER_LABEL_KEYS } from "../hooks/useMarkerEditor";
 import { formatTime } from "../utils/formatTime";
 
 interface MarkerEditPanelProps {
   editor: MarkerEditor;
   currentTime: number;
 }
-
-/** Solid accent per kind, matching the seek-bar region tints. */
-const DOT_COLORS: Record<MarkerKind, string> = {
-  intro: "bg-sky-400",
-  recap: "bg-violet-400",
-  credits: "bg-amber-400",
-  preview: "bg-emerald-400",
-};
 
 /**
  * Floating panel for editing intro/recap/credits/preview markers from the
@@ -133,7 +124,7 @@ export function MarkerEditPanel({ editor, currentTime }: MarkerEditPanelProps) {
                 <span
                   className={[
                     "shrink-0 rounded-full transition-all",
-                    DOT_COLORS[kind],
+                    MARKER_DOT_COLORS[kind],
                     isActive ? "h-2.5 w-2.5 ring-2 ring-white/25" : "h-2 w-2 opacity-50",
                   ].join(" ")}
                 />
