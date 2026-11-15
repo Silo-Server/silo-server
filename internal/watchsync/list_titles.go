@@ -259,6 +259,21 @@ func (s *Service) waitsForListTitleRemoval(
 // IDs or provider keys.
 func pendingTitleKey(kind, id string) string { return kind + "|" + id }
 
+// indexPendingTitle adds a pending-removal row, when it is a watchlist title
+// row, to pendingTitles under each ID and the provider key it knows.
+func indexPendingTitle(pendingTitles map[string][]string, state ListItemState) {
+	title, ok := watchlistTitleFromListItemID(state.MediaItemID)
+	if !ok {
+		return
+	}
+	for _, id := range append(append(title.IDs(), state.TitleIDs...), state.ProviderItemKey) {
+		key := pendingTitleKey(title.Kind, id)
+		if !slices.Contains(pendingTitles[key], state.MediaItemID) {
+			pendingTitles[key] = append(pendingTitles[key], state.MediaItemID)
+		}
+	}
+}
+
 // pendingTitleRows returns the media item IDs of the pending-removal title
 // rows of this kind that know any of the IDs.
 func pendingTitleRows(pendingTitles map[string][]string, kind string, ids []string) []string {

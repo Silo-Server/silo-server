@@ -421,14 +421,7 @@ func (s *Service) listItemsPendingRemoval(ctx context.Context, conn Connection, 
 				removedAt = *state.LastRemovedLocalAt
 			}
 			pending[state.MediaItemID] = removedAt
-			if title, ok := watchlistTitleFromListItemID(state.MediaItemID); ok {
-				for _, id := range append(append(title.IDs(), state.TitleIDs...), state.ProviderItemKey) {
-					key := pendingTitleKey(title.Kind, id)
-					if !slices.Contains(titles[key], state.MediaItemID) {
-						titles[key] = append(titles[key], state.MediaItemID)
-					}
-				}
-			}
+			indexPendingTitle(titles, state)
 		}
 	}
 	return pending, titles, nil
