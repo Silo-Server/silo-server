@@ -190,6 +190,7 @@ export function FolderFields({ form }: { form: LibraryFormController }) {
                 className="text-muted-foreground hover:text-destructive size-11 shrink-0 sm:size-9"
                 onClick={() => form.removePath(i)}
                 title={t("web.admin.common.libraryEditor.folders.remove")}
+                aria-label={t("web.admin.common.libraryEditor.folders.remove")}
               >
                 <Trash2 className="size-3.5" />
               </Button>
@@ -310,6 +311,7 @@ function ProviderLevelSection({
 }) {
   // contentLevelLabel reads the interface language.
   useAppLanguage();
+  const t = useT();
   const [collapsed, setCollapsed] = useState(false);
 
   const moveItem = (index: number, direction: -1 | 1) => {
@@ -325,6 +327,7 @@ function ProviderLevelSection({
       <button
         type="button"
         onClick={() => setCollapsed(!collapsed)}
+        aria-expanded={!collapsed}
         className="text-primary hover:text-primary/80 mb-1.5 flex min-h-11 items-center gap-1.5 text-start text-xs font-semibold tracking-wider uppercase sm:min-h-0"
       >
         {collapsed ? <ChevronRight className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
@@ -360,6 +363,7 @@ function ProviderLevelSection({
                   className="size-11 sm:size-5"
                   disabled={i === 0}
                   onClick={() => moveItem(i, -1)}
+                  aria-label={t("web.settings.interface.moveUp", { label: item.provider_slug })}
                 >
                   <ArrowUp className="size-4 sm:size-2.5" />
                 </Button>
@@ -370,6 +374,7 @@ function ProviderLevelSection({
                   className="size-11 sm:size-5"
                   disabled={i === items.length - 1}
                   onClick={() => moveItem(i, 1)}
+                  aria-label={t("web.settings.interface.moveDown", { label: item.provider_slug })}
                 >
                   <ArrowDown className="size-4 sm:size-2.5" />
                 </Button>

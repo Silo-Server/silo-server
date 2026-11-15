@@ -445,6 +445,7 @@ export default function Layout({ children }: LayoutProps) {
               to={buildQueryCatalogHref()}
               onPointerDown={prefetchCatalog}
               onFocus={prefetchCatalog}
+              aria-label={t("web.shell.sidebar.search")}
               className="text-muted-foreground hover:text-foreground hover:bg-accent/60 flex h-10 w-10 items-center justify-center rounded-xl transition-all active:scale-[0.98]"
             >
               <Search className="h-5 w-5" />

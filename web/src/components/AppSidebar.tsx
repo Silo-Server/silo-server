@@ -762,6 +762,7 @@ export default function AppSidebar({ onNavigate, collapsed = false, swap }: AppS
                                       }
                                       className="text-muted-foreground hover:text-destructive absolute end-1 rounded p-1 opacity-0 transition-opacity group-hover/pin:opacity-100"
                                       title={t("web.shell.sidebar.unpin")}
+                                      aria-label={t("web.shell.sidebar.unpin")}
                                     >
                                       <PinOff className="h-3 w-3" />
                                     </button>

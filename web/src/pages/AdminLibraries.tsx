@@ -555,6 +555,7 @@ function LibraryTable({
                               size="icon"
                               className="text-destructive h-7 w-7"
                               title={t("web.admin.libraries.list.confirmCleanupTitle")}
+                              aria-label={t("web.admin.libraries.list.confirmCleanupTitle")}
                               disabled={cleanup.pending}
                               onClick={cleanup.run}
                             >

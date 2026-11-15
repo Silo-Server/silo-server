@@ -1054,6 +1054,7 @@ function SourceBar({
                 variant="ghost"
                 onClick={() => onSetToken(selected)}
                 title={t("web.admin.historyImport.sourceBar.setApiKey")}
+                aria-label={t("web.admin.historyImport.sourceBar.setApiKey")}
               >
                 <KeyRound className="h-3.5 w-3.5" />
               </Button>
@@ -1062,6 +1063,7 @@ function SourceBar({
                 variant="ghost"
                 onClick={() => onEdit(selected)}
                 title={t("web.admin.historyImport.sourceBar.editServer")}
+                aria-label={t("web.admin.historyImport.sourceBar.editServer")}
               >
                 <Pencil className="h-3.5 w-3.5" />
               </Button>
@@ -1070,6 +1072,7 @@ function SourceBar({
                 variant="ghost"
                 onClick={() => onDelete(selected)}
                 title={t("web.admin.historyImport.sourceBar.deleteServer")}
+                aria-label={t("web.admin.historyImport.sourceBar.deleteServer")}
               >
                 <Trash2 className="text-destructive h-3.5 w-3.5" />
               </Button>
@@ -1148,6 +1151,12 @@ function MappingsSection({
       : [];
   const lookbackChoice = lookbackChoices.find((choice) => choice.value === lookback);
   const lookbackHours = lookbackChoice?.hours;
+  const runImportLabel =
+    lookbackHours && lookbackChoice
+      ? t("web.admin.historyImport.mappings.runImportWithLookback", {
+          lookback: t(lookbackChoice.label),
+        })
+      : t("web.admin.historyImport.mappings.runImport");
 
   if (!source.has_admin_token || source.needs_reconfiguration) return null;
 
@@ -1280,13 +1289,8 @@ function MappingsSection({
                         variant="ghost"
                         onClick={() => createRun.mutate({ id: m.id, lookbackHours })}
                         disabled={createRun.isPending}
-                        title={
-                          lookbackHours && lookbackChoice
-                            ? t("web.admin.historyImport.mappings.runImportWithLookback", {
-                                lookback: t(lookbackChoice.label),
-                              })
-                            : t("web.admin.historyImport.mappings.runImport")
-                        }
+                        title={runImportLabel}
+                        aria-label={runImportLabel}
                       >
                         <Play className="h-3.5 w-3.5" />
                       </Button>
@@ -1298,6 +1302,7 @@ function MappingsSection({
                           setDeleteConflict(false);
                         }}
                         title={t("web.admin.historyImport.mappings.removeMapping")}
+                        aria-label={t("web.admin.historyImport.mappings.removeMapping")}
                       >
                         <Trash2 className="text-destructive h-3.5 w-3.5" />
                       </Button>
@@ -1426,6 +1431,7 @@ function RunsSection({ sourceId }: { sourceId: number }) {
           <div className="divide-y">
             {runs.map((run) => {
               const expanded = expandedId === run.id;
+              const runMetaId = `history-import-run-${run.id}-meta`;
               const runUser =
                 userMap.get(run.user_id) ??
                 t("web.admin.historyImport.userFallback", { id: run.user_id });
@@ -1433,7 +1439,11 @@ function RunsSection({ sourceId }: { sourceId: number }) {
                 <div key={run.id}>
                   <div className="flex items-center gap-3 px-4 py-3">
                     <button
+                      type="button"
                       onClick={() => setExpandedId(expanded ? null : run.id)}
+                      aria-label={t("web.admin.activity.row.details")}
+                      aria-expanded={expanded}
+                      aria-describedby={runMetaId}
                       className="text-muted-foreground hover:text-foreground shrink-0"
                     >
                       {expanded ? (
@@ -1460,7 +1470,7 @@ function RunsSection({ sourceId }: { sourceId: number }) {
                           </Badge>
                         )}
                       </div>
-                      <p className="text-muted-foreground text-xs">
+                      <p id={runMetaId} className="text-muted-foreground text-xs">
                         {run.played_since
                           ? t("web.admin.historyImport.runs.metaWithPlayedSince", {
                               user: runUser,

@@ -200,6 +200,7 @@ function NotificationRow({
           size="icon"
           className="absolute end-2 bottom-2 h-7 w-7 opacity-0 transition-opacity group-hover:opacity-100"
           title={t("web.notifications.inbox.markRead")}
+          aria-label={t("web.notifications.inbox.markRead")}
           onClick={(event) => {
             event.preventDefault();
             onMarkRead(notification.id);

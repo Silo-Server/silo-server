@@ -121,6 +121,9 @@ function SidebarPinButton({
   const { togglePin, isPinned, canToggle } = useToggleSidebarPin();
   if (!canToggle) return null;
   const pinned = isPinned(libraryId, "collection", collection.id);
+  const pinLabel = pinned
+    ? t("web.collections.posterCard.unpinFromSidebar")
+    : t("web.collections.posterCard.pinToSidebar");
   return (
     <button
       type="button"
@@ -137,11 +140,8 @@ function SidebarPinButton({
           ? "bg-primary/90 text-primary-foreground"
           : "bg-background/50 text-foreground opacity-0 group-hover/card:opacity-100"
       }`}
-      title={
-        pinned
-          ? t("web.collections.posterCard.unpinFromSidebar")
-          : t("web.collections.posterCard.pinToSidebar")
-      }
+      title={pinLabel}
+      aria-label={pinLabel}
     >
       {pinned ? <PinOff className="h-3.5 w-3.5" /> : <Pin className="h-3.5 w-3.5" />}
     </button>

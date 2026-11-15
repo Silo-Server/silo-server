@@ -64,6 +64,7 @@ function SectionPinButton({
           : "text-muted-foreground/40 hover:bg-accent/60 hover:text-muted-foreground opacity-0 group-hover/carousel:opacity-100"
       }`}
       title={pinned ? t("web.home.sectionRow.unpin") : t("web.home.sectionRow.pin")}
+      aria-label={pinned ? t("web.home.sectionRow.unpin") : t("web.home.sectionRow.pin")}
     >
       {pinned ? <PinOff className="h-4 w-4" /> : <Pin className="h-4 w-4" />}
     </button>
