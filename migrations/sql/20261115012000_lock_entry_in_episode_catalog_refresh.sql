@@ -15,6 +15,7 @@ LANGUAGE plpgsql
 AS $$
 DECLARE
     src record;
+    locked boolean;
 BEGIN
     IF p_episode_id IS NULL OR p_media_folder_id IS NULL THEN
         RETURN;
@@ -32,6 +33,7 @@ BEGIN
         WHERE media_folder_id = p_media_folder_id
           AND episode_id = p_episode_id
         FOR NO KEY UPDATE;
+        locked := FOUND;
 
         SELECT
             e.series_id,
@@ -120,10 +122,14 @@ BEGIN
         WHERE el.episode_id = p_episode_id
           AND el.media_folder_id = p_media_folder_id;
 
+        -- Delete only the entry locked above. One that appeared since belongs
+        -- to a membership this pass's read was too early to see.
         IF NOT FOUND THEN
-            DELETE FROM public.episode_catalog_entries
-            WHERE episode_id = p_episode_id
-              AND media_folder_id = p_media_folder_id;
+            IF locked THEN
+                DELETE FROM public.episode_catalog_entries
+                WHERE episode_id = p_episode_id
+                  AND media_folder_id = p_media_folder_id;
+            END IF;
             RETURN;
         END IF;
 
