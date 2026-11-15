@@ -168,7 +168,7 @@ func TestUnchangedBooksDoNotQueryLiteraryWorks(t *testing.T) {
 			if kind == "ebooks" {
 				err = s.reconcileEbookFile(ctx, folder, paths[0], &skipped, newEbookGroupLocks())
 			} else {
-				err = s.reconcileAudiobookFolder(ctx, folder, paths[0], nil, &skipped)
+				err = s.reconcileAudiobookFolder(ctx, folder, paths[0], nil, &skipped, nil)
 			}
 			if err != nil {
 				t.Fatal(err)

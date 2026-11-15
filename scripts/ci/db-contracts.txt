@@ -168,6 +168,8 @@
 # A monitored rename of a book folder keeps the book: the old path is
 # reconciled first, and the removal grace holds the book for the new path.
 ./internal/scanner TestScanSubtreeAudiobookRenameKeepsBookDB
+# Two copies of one recording on disk are two items; only a moved folder reuses one.
+./internal/scanner TestScanAudiobookSecondCopyIsItsOwnItemDB
 
 # A subtree scan inside a book folder rebuilds that book and marks missing the
 # files of a subfolder an earlier scoped scan imported as a book of its own.
