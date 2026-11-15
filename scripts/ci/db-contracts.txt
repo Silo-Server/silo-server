@@ -530,6 +530,7 @@
 ./internal/downloads TestPreparedSeasonReplacementCountsTowardConcurrentLimitDB
 ./internal/downloads TestPreparedReplacementQuotaAccountingDB
 ./internal/downloads TestReadyArtifactSingleCreateTakesNoConcurrentSlotDB
+./internal/downloads TestPreparedSingleReplacementCountsTowardConcurrentLimitDB
 ./internal/downloads TestPreparedReplacementCountsTheEntryStatusUnderTheLockDB
 ./internal/downloads TestPreparedReplacementRefusesAStaleGuardUnderTheLockDB
 ./internal/downloads TestManagedBatchOverConcurrentCapDB
