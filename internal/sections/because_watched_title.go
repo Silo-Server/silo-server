@@ -74,7 +74,9 @@ func becauseWatchedTitle(fallback, sourceID string, sources []*models.MediaItem)
 		if item != nil && item.ContentID == sourceID && strings.TrimSpace(item.Title) != "" {
 			anchor = strings.TrimSpace(item.Title)
 			if !hasDefaultBecauseWatchedTitle(fallback) {
-				return strings.TrimSpace(fallback) + ": " + anchor, anchor
+				// A name typed as "More Like:" gets one colon, not two.
+				name := strings.TrimSpace(strings.TrimSuffix(strings.TrimSpace(fallback), ":"))
+				return name + ": " + anchor, anchor
 			}
 			return defaultBecauseWatchedTitle + " " + anchor, anchor
 		}
