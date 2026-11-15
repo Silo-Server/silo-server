@@ -2721,7 +2721,7 @@ func (s *Server) handleStop(w http.ResponseWriter, r *http.Request) {
 	// or rebuild of the same transport id. Note the job it found on arrival:
 	// one published while it waits for the lifecycle lock is newer than it.
 	var arrived *playback.TranscodeSession
-	if !fenced {
+	if !fenced && startID == "" {
 		s.mu.RLock()
 		arrived = s.sessions[sessionID]
 		s.mu.RUnlock()
@@ -2732,7 +2732,9 @@ func (s *Server) handleStop(w http.ResponseWriter, r *http.Request) {
 	// that wait (the API rolling back a timed-out start) would otherwise miss
 	// the map and 404, orphaning the just-spawned ffmpeg until the idle
 	// reaper finds it. Blocking here until the start registers turns that
-	// miss into a normal teardown.
+	// miss into a normal teardown. A release does the same only for the start
+	// it names: one without a start id leaves the job such a start publishes,
+	// as it leaves any job newer than its arrival.
 	unlock := s.lockSessionLifecycle(sessionID)
 	defer unlock()
 
