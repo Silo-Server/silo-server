@@ -227,7 +227,7 @@ function LibraryEditorBody({
             <TabsContent
               key={id}
               value={id}
-              className="animate-in fade-in-0 slide-in-from-right-1 px-4 py-5 duration-200 sm:px-6"
+              className="animate-in fade-in-0 slide-in-from-end-1 px-4 py-5 duration-200 sm:px-6"
             >
               <div className="mb-5 space-y-1">
                 <h3 className="text-sm font-semibold">{t(title)}</h3>

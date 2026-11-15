@@ -1,4 +1,10 @@
 @import "tailwindcss";
+/* animate-in/animate-out and their fade-/zoom-/slide- modifiers, used by the
+   radix overlay primitives in components/ui. Radix keeps a closing overlay
+   mounted until its exit animation ends. The enter/exit keyframes are
+   replaced in @theme below, which only works while this import stays above
+   it. */
+@import "tw-animate-css";
 
 /* Tailwind v4 wraps every `hover:` and `group-hover:` utility in
    `@media (hover: hover)`. That feature is false on Windows machines whose
@@ -107,6 +113,36 @@
   --animate-slide-up: slide-up 0.3s ease-out;
   --animate-scale-in: scale-in 0.2s cubic-bezier(0.34, 1.56, 0.64, 1);
   --animate-ken-burns-a: ken-burns-a 14s linear infinite;
+
+  /* tw-animate-css's enter/exit keyframes, minus its `filter: blur()` step:
+     nothing here uses the blur modifiers, and animating filter isn't
+     compositor-only. They come after the package's keyframes of the same
+     name, so they are the ones that apply (the production build drops the
+     earlier copy). `--overlay-motion` is unset except under
+     reduced motion, where it is `none`, so overlays fade without sliding or
+     zooming. overlayAnimationCss.test.ts checks the compiled result. */
+  @keyframes enter {
+    from {
+      opacity: var(--tw-enter-opacity, 1);
+      transform: var(
+        --overlay-motion,
+        translate3d(var(--tw-enter-translate-x, 0), var(--tw-enter-translate-y, 0), 0)
+          scale3d(var(--tw-enter-scale, 1), var(--tw-enter-scale, 1), var(--tw-enter-scale, 1))
+          rotate(var(--tw-enter-rotate, 0))
+      );
+    }
+  }
+  @keyframes exit {
+    to {
+      opacity: var(--tw-exit-opacity, 1);
+      transform: var(
+        --overlay-motion,
+        translate3d(var(--tw-exit-translate-x, 0), var(--tw-exit-translate-y, 0), 0)
+          scale3d(var(--tw-exit-scale, 1), var(--tw-exit-scale, 1), var(--tw-exit-scale, 1))
+          rotate(var(--tw-exit-rotate, 0))
+      );
+    }
+  }
 
   /* ── Motion: Duration ──────────────────────────────────────── */
   --duration-instant: 0ms;
@@ -414,6 +450,10 @@ html[data-navigation-direction]::view-transition-new(main-content) {
     --duration-sidebar-entry: 0ms;
     --duration-sidebar-return: 0ms;
     --animate-ken-burns-a: none;
+    /* Overlays (dialogs, sheets, menus, popovers, tooltips) keep their fade
+       but stop sliding and zooming; see the enter/exit keyframes in @theme.
+       The exit animation still runs, so radix unmounts once the fade ends. */
+    --overlay-motion: none;
   }
   .ambient-glow {
     transition: none;
