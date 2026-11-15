@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useId, useState } from "react";
 import type { ReactNode } from "react";
 import {
   ArrowDown,
@@ -165,6 +165,7 @@ export function GeneralFields({
 
 export function FolderFields({ form }: { form: LibraryFormController }) {
   const t = useT();
+  const pathIdBase = useId();
   const [browserOpen, setBrowserOpen] = useState(false);
   const browseLabel = t("web.admin.common.libraryEditor.folders.browse");
   const addPathLabel = t("web.admin.common.libraryEditor.folders.addPath");
@@ -176,6 +177,7 @@ export function FolderFields({ form }: { form: LibraryFormController }) {
           <div key={i} className="flex items-center gap-1.5">
             <FolderOpen className="text-muted-foreground/60 size-4 shrink-0" />
             <PathAutocompleteInput
+              id={`${pathIdBase}-${i}`}
               value={path}
               onValueChange={(value) => form.updatePath(i, value)}
               placeholder={FOLDER_PATH_PLACEHOLDER}
@@ -191,6 +193,7 @@ export function FolderFields({ form }: { form: LibraryFormController }) {
                 onClick={() => form.removePath(i)}
                 title={t("web.admin.common.libraryEditor.folders.remove")}
                 aria-label={t("web.admin.common.libraryEditor.folders.remove")}
+                aria-describedby={`${pathIdBase}-${i}`}
               >
                 <Trash2 className="size-3.5" />
               </Button>

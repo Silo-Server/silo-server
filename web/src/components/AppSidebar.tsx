@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, useMemo, useRef } from "react";
+import { useState, useCallback, useEffect, useId, useMemo, useRef } from "react";
 import type { ReactNode } from "react";
 import { Link, useLocation, useParams } from "react-router";
 import ViewTransitionLink from "@/components/ViewTransitionLink";
@@ -201,6 +201,7 @@ interface ResolvedPrimaryMenuLink {
 
 export default function AppSidebar({ onNavigate, collapsed = false, swap }: AppSidebarProps) {
   const t = useT();
+  const pinLabelIdBase = useId();
   const dir = Direction.useDirection();
   const entrance = useSidebarEntrance(swap);
   const location = useLocation();
@@ -728,6 +729,7 @@ export default function AppSidebar({ onNavigate, collapsed = false, swap }: AppS
                                       title: pin.label,
                                     });
                               const pinActive = isPinnedCatalogActive(lib.id, pin);
+                              const pinLabelId = `${pinLabelIdBase}-${lib.id}-${pin.type}-${pin.id}`;
 
                               return (
                                 <div
@@ -748,7 +750,9 @@ export default function AppSidebar({ onNavigate, collapsed = false, swap }: AppS
                                     ) : (
                                       <LayoutGrid className="h-3.5 w-3.5 opacity-60" />
                                     )}
-                                    <span className="truncate">{pin.label}</span>
+                                    <span id={pinLabelId} className="truncate">
+                                      {pin.label}
+                                    </span>
                                   </ViewTransitionLink>
                                   {canToggle ? (
                                     <button
@@ -763,6 +767,7 @@ export default function AppSidebar({ onNavigate, collapsed = false, swap }: AppS
                                       className="text-muted-foreground hover:text-destructive absolute end-1 rounded p-1 opacity-0 transition-opacity group-hover/pin:opacity-100"
                                       title={t("web.shell.sidebar.unpin")}
                                       aria-label={t("web.shell.sidebar.unpin")}
+                                      aria-describedby={pinLabelId}
                                     >
                                       <PinOff className="h-3 w-3" />
                                     </button>

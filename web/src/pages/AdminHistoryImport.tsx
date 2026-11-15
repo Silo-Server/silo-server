@@ -1133,6 +1133,7 @@ function MappingsSection({
   mappings: HistoryImportUserMapping[];
 }) {
   const t = useT();
+  const userIdBase = useId();
   const [discoverOpen, setDiscoverOpen] = useState(false);
   const deleteMapping = useDeleteAdminMapping();
   const createRun = useCreateAdminRunForMapping();
@@ -1265,7 +1266,7 @@ function MappingsSection({
               {mappings.map((m) => (
                 <TableRow key={m.id}>
                   <TableCell>
-                    <p className="text-sm font-medium">
+                    <p id={`${userIdBase}-${m.id}`} className="text-sm font-medium">
                       {m.external_user_name || m.external_user_id}
                     </p>
                   </TableCell>
@@ -1291,6 +1292,7 @@ function MappingsSection({
                         disabled={createRun.isPending}
                         title={runImportLabel}
                         aria-label={runImportLabel}
+                        aria-describedby={`${userIdBase}-${m.id}`}
                       >
                         <Play className="h-3.5 w-3.5" />
                       </Button>
@@ -1303,6 +1305,7 @@ function MappingsSection({
                         }}
                         title={t("web.admin.historyImport.mappings.removeMapping")}
                         aria-label={t("web.admin.historyImport.mappings.removeMapping")}
+                        aria-describedby={`${userIdBase}-${m.id}`}
                       >
                         <Trash2 className="text-destructive h-3.5 w-3.5" />
                       </Button>
