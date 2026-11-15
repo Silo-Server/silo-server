@@ -166,15 +166,16 @@ type AdminRequestActionInput struct {
 	Body struct {
 		Reason string `json:"reason,omitempty"`
 		// Options are the approving admin's picks from listAdminRequestOptions.
-		Options map[string]string `json:"options,omitempty" maxProperties:"16" doc:"Approve only: the admin's picks from listAdminRequestOptions, as option key to chosen value. A pick replaces the requester's for that option. A key or value that is not offered is refused with validation_failed. Omitted: the requester's picks and the download server's own settings apply"`
+		Options      map[string]string `json:"options,omitempty" maxProperties:"16" doc:"Approve only: the admin's picks from listAdminRequestOptions, as option key to chosen value. A pick replaces the requester's for that option. A key or value that is not offered is refused with validation_failed. Omitted: the requester's picks and the download server's own settings apply"`
+		OptionsOffer string            `json:"options_offer,omitempty" maxLength:"64" doc:"Approve only: the offer of the listAdminRequestOptions response the picks were made from; required with options. When the request's download server or its choices have changed since, the approval is refused with validation_failed: list the options again"`
 	}
 }
 
 // adminRequestApprover is a request service that lets the approving admin
 // choose download server settings.
 type adminRequestApprover interface {
-	ApproverOptions(ctx context.Context, viewer mediarequests.Viewer, id string) ([]mediarequests.RequesterOption, error)
-	ApproveWithOptions(ctx context.Context, viewer mediarequests.Viewer, id string, picks map[string]string) (*mediarequests.Request, error)
+	ApproverOptions(ctx context.Context, viewer mediarequests.Viewer, id string) (mediarequests.RequesterOffer, error)
+	ApproveWithOptions(ctx context.Context, viewer mediarequests.Viewer, id, offer string, picks map[string]string) (*mediarequests.Request, error)
 }
 type AdminRequestCapabilitiesOutput struct {
 	Status       int
@@ -255,7 +256,7 @@ func registerAdminRequests(reg *Registry) {
 			switch action {
 			case adminActionApprove:
 				if approver, ok := s.(adminRequestApprover); ok && len(in.Body.Options) > 0 {
-					r, err = approver.ApproveWithOptions(ctx, v, string(in.ID), in.Body.Options)
+					r, err = approver.ApproveWithOptions(ctx, v, string(in.ID), in.Body.OptionsOffer, in.Body.Options)
 				} else {
 					r, err = s.Approve(ctx, v, string(in.ID))
 				}
@@ -281,7 +282,7 @@ func registerAdminRequests(reg *Registry) {
 		if p != nil {
 			return nil, p
 		}
-		var options []mediarequests.RequesterOption
+		var options mediarequests.RequesterOffer
 		if approver, ok := s.(adminRequestApprover); ok {
 			var err error
 			if options, err = approver.ApproverOptions(ctx, adminRequestViewer(ctx), string(in.ID)); err != nil {

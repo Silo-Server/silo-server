@@ -13,7 +13,7 @@ import {
   Plus,
   X,
 } from "lucide-react";
-import type { MediaRequest, RequestMediaDetail, RequestOption } from "@/api/types";
+import type { MediaRequest, RequestMediaDetail, RequestOptionOffer } from "@/api/types";
 import { CancelRequestDialog } from "@/components/CancelRequestDialog";
 import { RequestDownloadProgress } from "@/components/RequestDownloadProgress";
 import { RequestOptionsDialog } from "@/components/RequestOptionsDialog";
@@ -89,14 +89,14 @@ export default function RequestActionBar({ item, libraryHref }: RequestActionBar
   const requestOptions = useLoadRequestOptions();
   const [loadingOptions, setLoadingOptions] = useState(false);
   // Set while the viewer chooses the download server settings on offer.
-  const [chooseOptions, setChooseOptions] = useState<RequestOption[] | null>(null);
+  const [chooseOptions, setChooseOptions] = useState<RequestOptionOffer | null>(null);
   // A title with nothing to choose is requested on the click, as before.
   const requestNow = () => createRequest.mutate(requestInputFromMediaResult(item));
   const requestOrChoose = async () => {
     setLoadingOptions(true);
-    const options = await requestOptions.load(item.media_type, item.tmdb_id);
+    const offer = await requestOptions.load(item.media_type, item.tmdb_id);
     setLoadingOptions(false);
-    if (options.length > 0) setChooseOptions(options);
+    if (offer.options.length > 0) setChooseOptions(offer);
     else requestNow();
   };
   // A series TMDB lists seasons for is requested season by season.
@@ -247,7 +247,7 @@ export default function RequestActionBar({ item, libraryHref }: RequestActionBar
           if (!open) setChooseOptions(null);
         }}
         item={item}
-        options={chooseOptions ?? []}
+        offer={chooseOptions ?? { offer: "", options: [] }}
       />
       {seasonPicker ? (
         <RequestSeasonsDialog

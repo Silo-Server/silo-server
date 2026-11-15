@@ -538,6 +538,9 @@ type CreateRequestInput struct {
 	// Options are the requester's picks, keyed by option key, from the ones
 	// RequesterOptions offers for the title. v2 only.
 	Options map[string]string `json:"-"`
+	// OptionsOffer is the token RequesterOptions gave with the list Options
+	// were picked from.
+	OptionsOffer string `json:"-"`
 }
 
 // RequestPageKey identifies the last emitted request in descending creation order.

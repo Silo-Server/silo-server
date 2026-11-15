@@ -2,12 +2,15 @@ package requests
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
 	"maps"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -48,6 +51,49 @@ type RequesterOption struct {
 	// the choices and Default is only what a form shows first.
 	DefaultIsSaved bool
 	Choices        []RouterOption
+}
+
+// RequesterOffer is what may be chosen for a request right now. Token names
+// the server and the exact choices; picks come back with it, so a pick is
+// only taken for the list its sender was shown.
+type RequesterOffer struct {
+	Token   string
+	Options []RequesterOption
+}
+
+// requesterOfferToken is the token of an offer: a digest of the server and of
+// every option's key, label and choices. An option's default is left out, as
+// an approving admin's list presets the requester's pick there.
+func requesterOfferToken(integrationID string, options []RequesterOption) string {
+	if len(options) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	write := func(parts ...string) {
+		for _, part := range parts {
+			// Length-prefixed, so two lists cannot spell the same bytes.
+			b.WriteString(strconv.Itoa(len(part)))
+			b.WriteByte(':')
+			b.WriteString(part)
+		}
+	}
+	write(integrationID, strconv.Itoa(len(options)))
+	for _, option := range options {
+		// The counts fix where each list ends, so a choice cannot be read
+		// as the start of the next option.
+		write(option.Key, option.Label, strconv.Itoa(len(option.Choices)))
+		for _, choice := range option.Choices {
+			write(choice.Value, choice.Label)
+		}
+	}
+	sum := sha256.Sum256([]byte(b.String()))
+	return hex.EncodeToString(sum[:16])
+}
+
+// errStaleRequesterOffer refuses picks made from a list that is no longer
+// what the server offers: another server, or other choices.
+func errStaleRequesterOffer() error {
+	return errRequesterOptions("The download server's choices have changed. Reload and try again.")
 }
 
 // RequesterChoice is one pick, with the words it was offered in so it can be
@@ -239,43 +285,43 @@ func requestProbe(viewer Viewer, mediaType MediaType, tmdbID int, facts RoutingF
 // when requesting a title. It is empty when the server the title would go to
 // offers none, and also when its choices cannot be read: the request can
 // still be made without a pick.
-func (s *Service) RequesterOptions(ctx context.Context, viewer Viewer, mediaType MediaType, tmdbID int) ([]RequesterOption, error) {
+func (s *Service) RequesterOptions(ctx context.Context, viewer Viewer, mediaType MediaType, tmdbID int) (RequesterOffer, error) {
 	if err := validateViewer(viewer); err != nil {
-		return nil, err
+		return RequesterOffer{}, err
 	}
 	if s == nil || s.store == nil {
-		return nil, errors.New("request service is not configured")
+		return RequesterOffer{}, errors.New("request service is not configured")
 	}
 	if err := s.ensureRequestsEnabled(ctx); err != nil {
-		return nil, err
+		return RequesterOffer{}, err
 	}
 	if err := s.ensureViewerRequestsAllowed(ctx, viewer); err != nil {
-		return nil, err
+		return RequesterOffer{}, err
 	}
 	mediaType, err := normalizeMediaType(mediaType)
 	if err != nil {
-		return nil, err
+		return RequesterOffer{}, err
 	}
 	if tmdbID <= 0 {
-		return nil, fmt.Errorf("%w: tmdb_id is required", ErrInvalidInput)
+		return RequesterOffer{}, fmt.Errorf("%w: tmdb_id is required", ErrInvalidInput)
 	}
 	// The same access check as creating a request: someone who may not
 	// request must not read the server's choices, which can be folder paths.
 	policy, err := s.EffectivePolicy(ctx, viewer.UserID)
 	if err != nil {
-		return nil, err
+		return RequesterOffer{}, err
 	}
 	if err := validateCreateAccess(policy); err != nil {
-		return nil, err
+		return RequesterOffer{}, err
 	}
 	facts := s.routingFacts(ctx, s.requestDetail(ctx, mediaType, tmdbID))
-	_, options, err := s.requesterOffer(ctx, requestProbe(viewer, mediaType, tmdbID, facts), false)
+	integrationID, options, err := s.requesterOffer(ctx, requestProbe(viewer, mediaType, tmdbID, facts), false)
 	if err != nil {
 		slog.WarnContext(ctx, "requests: could not list requester options", "component", "requests",
 			"media_type", string(mediaType), "tmdb_id", tmdbID, "err", logredact.SanitizeText(err.Error()))
-		return nil, nil
+		return RequesterOffer{}, nil
 	}
-	return options, nil
+	return RequesterOffer{Token: requesterOfferToken(integrationID, options), Options: options}, nil
 }
 
 // errRequesterOptions refuses a request whose picks cannot be honored.
@@ -288,13 +334,16 @@ func errRequesterOptions(message string) error {
 // offered, or a value that is not one of its choices, refuses the request:
 // the value reaches the download server as a setting, so only listed values
 // may pass.
-func (s *Service) resolveRequesterChoices(ctx context.Context, probe Request, picks map[string]string) (RequesterChoices, error) {
-	return s.resolveChoices(ctx, probe, picks, false)
+func (s *Service) resolveRequesterChoices(ctx context.Context, probe Request, offer string, picks map[string]string) (RequesterChoices, error) {
+	return s.resolveChoices(ctx, probe, offer, picks, false)
 }
 
 // resolveChoices checks picks against the requester's offer, or the approving
-// admin's, and returns them in the words they were offered in.
-func (s *Service) resolveChoices(ctx context.Context, probe Request, picks map[string]string, approver bool) (RequesterChoices, error) {
+// admin's, and returns them in the words they were offered in. offer is the
+// token of the list the picks were made from: when routing has since moved
+// the title to another server, or the server's choices changed, the same
+// value can mean something else, so the picks are refused.
+func (s *Service) resolveChoices(ctx context.Context, probe Request, offer string, picks map[string]string, approver bool) (RequesterChoices, error) {
 	if len(picks) == 0 {
 		return RequesterChoices{}, nil
 	}
@@ -306,6 +355,9 @@ func (s *Service) resolveChoices(ctx context.Context, probe Request, picks map[s
 		slog.WarnContext(ctx, "requests: could not check requester options", "component", "requests",
 			"media_type", string(probe.MediaType), "tmdb_id", probe.TMDBID, "err", logredact.SanitizeText(err.Error()))
 		return RequesterChoices{}, errRequesterOptions("The download server's choices could not be read. Try again, or continue without choosing.")
+	}
+	if offer != requesterOfferToken(integrationID, options) {
+		return RequesterChoices{}, errStaleRequesterOffer()
 	}
 	out := RequesterChoices{IntegrationID: integrationID}
 	for _, key := range slices.Sorted(maps.Keys(picks)) {
@@ -336,22 +388,23 @@ func (s *Service) resolveChoices(ctx context.Context, probe Request, picks map[s
 // the requester's pick, when there is one. It is empty when there is nothing
 // to choose, and also when the server's choices cannot be read: the request
 // can still be approved without a pick.
-func (s *Service) ApproverOptions(ctx context.Context, viewer Viewer, id string) ([]RequesterOption, error) {
+func (s *Service) ApproverOptions(ctx context.Context, viewer Viewer, id string) (RequesterOffer, error) {
 	if !viewer.IsAdmin {
-		return nil, ErrForbidden
+		return RequesterOffer{}, ErrForbidden
 	}
 	req, err := s.store.GetRequest(ctx, strings.TrimSpace(id))
 	if err != nil {
-		return nil, err
+		return RequesterOffer{}, err
 	}
 	integrationID, options, err := s.requesterOffer(ctx, *req, true)
 	if err != nil {
 		slog.WarnContext(ctx, "requests: could not list approver options", "component", "requests",
 			"request_id", req.ID, "err", logredact.SanitizeText(err.Error()))
-		return nil, nil
+		return RequesterOffer{}, nil
 	}
+	offer := RequesterOffer{Token: requesterOfferToken(integrationID, options), Options: options}
 	if req.RequesterChoices.IntegrationID != integrationID {
-		return options, nil
+		return offer, nil
 	}
 	for i := range options {
 		for _, pick := range req.RequesterChoices.Choices {
@@ -360,13 +413,14 @@ func (s *Service) ApproverOptions(ctx context.Context, viewer Viewer, id string)
 			}
 		}
 	}
-	return options, nil
+	return offer, nil
 }
 
 // ApproveWithOptions approves a pending request with the admin's picks from
 // ApproverOptions. A pick replaces the requester's for the same option; the
-// requester's other picks stay. No picks is Approve.
-func (s *Service) ApproveWithOptions(ctx context.Context, viewer Viewer, id string, picks map[string]string) (*Request, error) {
+// requester's other picks stay. offer is the token ApproverOptions gave with
+// the list the picks were made from. No picks is Approve.
+func (s *Service) ApproveWithOptions(ctx context.Context, viewer Viewer, id, offer string, picks map[string]string) (*Request, error) {
 	if !viewer.IsAdmin {
 		return nil, ErrForbidden
 	}
@@ -378,7 +432,7 @@ func (s *Service) ApproveWithOptions(ctx context.Context, viewer Viewer, id stri
 	if err != nil {
 		return nil, err
 	}
-	chosen, err := s.resolveChoices(ctx, *req, picks, true)
+	chosen, err := s.resolveChoices(ctx, *req, offer, picks, true)
 	if err != nil {
 		return nil, err
 	}

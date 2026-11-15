@@ -1,5 +1,5 @@
 import { useState } from "react";
-import type { MediaRequest, RequestOption } from "@/api/types";
+import type { MediaRequest, RequestOptionOffer, RequestOptionsToSend } from "@/api/types";
 import { RequestOptionFields } from "@/components/RequestOptionFields";
 import { Button } from "@/components/ui/button";
 import {
@@ -16,13 +16,13 @@ import { useT } from "@/i18n";
 /** A request an admin is approving, and the settings they may choose for it. */
 export interface ApprovePrompt {
   request: MediaRequest;
-  options: readonly RequestOption[];
+  offer: RequestOptionOffer;
 }
 
 interface ApproveOptionsDialogProps {
   prompt: ApprovePrompt | null;
   /** Approves with the value selected for each option. */
-  onConfirm: (request: MediaRequest, options?: Record<string, string>) => void;
+  onConfirm: (request: MediaRequest, chosen?: RequestOptionsToSend) => void;
   onOpenChange: (open: boolean) => void;
 }
 
@@ -55,7 +55,11 @@ export function ApproveOptionsDialog({
           <DialogTitle>{t("web.admin.requests.action.approve")}</DialogTitle>
           <DialogDescription>{prompt?.request.title}</DialogDescription>
         </DialogHeader>
-        <RequestOptionFields options={prompt?.options ?? []} picks={picks} onChange={setPicks} />
+        <RequestOptionFields
+          options={prompt?.offer.options ?? []}
+          picks={picks}
+          onChange={setPicks}
+        />
         <DialogFooter>
           <Button variant="outline" onClick={() => close(false)}>
             {t("common.cancel")}
@@ -63,7 +67,7 @@ export function ApproveOptionsDialog({
           <Button
             onClick={() => {
               if (!prompt) return;
-              onConfirm(prompt.request, requestOptionsToSend(prompt.options, picks));
+              onConfirm(prompt.request, requestOptionsToSend(prompt.offer, picks));
               close(false);
             }}
           >

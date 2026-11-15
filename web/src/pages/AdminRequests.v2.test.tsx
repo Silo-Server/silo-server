@@ -451,6 +451,7 @@ describe("request administration", () => {
     serve({
       ...queue({ needs_approval: [request("r1", "Waiting Title")] }),
       "GET /api/v2/admin/requests/{id}/options": () => ({
+        offer: "offer-1",
         options: [
           {
             key: "radarr_profile_id",
@@ -479,6 +480,7 @@ describe("request administration", () => {
     // The selected value is sent as shown; the server leaves out its own setting.
     expect(calls("POST /api/v2/admin/requests/{id}/approve")[0]?.body).toEqual({
       options: { radarr_profile_id: "default" },
+      options_offer: "offer-1",
     });
   });
 

@@ -270,7 +270,8 @@ type MediaRequestCreate struct {
 	BackdropPath string `json:"backdrop_path,omitempty" doc:"TMDB image path"`
 	Seasons      []int  `json:"seasons,omitempty" maxItems:"200" doc:"Series only: the season numbers to request, starting at 1 (a season below 1 is refused). Omitted: every aired season not yet complete in the library" example:"[2,3]"`
 	// Options are the requester's picks from listRequestOptions.
-	Options map[string]string `json:"options,omitempty" maxProperties:"16" doc:"The requester's picks from listRequestOptions for this title, as option key to chosen value. A key or value that is not offered is refused with validation_failed. Omitted: the download server's own settings apply"`
+	Options      map[string]string `json:"options,omitempty" maxProperties:"16" doc:"The requester's picks from listRequestOptions for this title, as option key to chosen value. A key or value that is not offered is refused with validation_failed. Omitted: the download server's own settings apply"`
+	OptionsOffer string            `json:"options_offer,omitempty" maxLength:"64" doc:"The offer of the listRequestOptions response the picks were made from; required with options. When the title's download server or its choices have changed since, the request is refused with validation_failed: list the options again"`
 }
 
 // MediaRequestCreateInput is the createRequest request.
@@ -537,7 +538,7 @@ func (reg *Registry) createRequest(ctx context.Context, in *MediaRequestCreateIn
 		PosterPath:   in.Body.PosterPath,
 		BackdropPath: in.Body.BackdropPath,
 		Seasons:      in.Body.Seasons,
-		Options:      in.Body.Options,
+		Options:      in.Body.Options, OptionsOffer: in.Body.OptionsOffer,
 	})
 	if err != nil {
 		return nil, requestProblem(err)

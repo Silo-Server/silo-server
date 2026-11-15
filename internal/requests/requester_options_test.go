@@ -31,9 +31,30 @@ func optionsService(config map[string]any) (*Service, *fakeStore, *fakeRouterPro
 	return service, store, router
 }
 
+// movieOffer is the token of the list a requester is shown for Fight Club.
+func movieOffer(t *testing.T, service *Service) string {
+	t.Helper()
+	offer, err := service.RequesterOptions(context.Background(), testViewer(1), MediaTypeMovie, 550)
+	if err != nil {
+		t.Fatalf("RequesterOptions: %v", err)
+	}
+	return offer.Token
+}
+
+// approverOffer is the token of the list an approving admin is shown.
+func approverOffer(t *testing.T, service *Service, id string) string {
+	t.Helper()
+	offer, err := service.ApproverOptions(context.Background(), Viewer{UserID: 9, ProfileID: "9", IsAdmin: true}, id)
+	if err != nil {
+		t.Fatalf("ApproverOptions: %v", err)
+	}
+	return offer.Token
+}
+
 func TestRequesterOptionsOffersOnlyWhatTheServerAllows(t *testing.T) {
 	service, _, _ := optionsService(map[string]any{"profile_chosen_by": "requester", "radarr_profile_id": "default"})
-	options, err := service.RequesterOptions(context.Background(), testViewer(1), MediaTypeMovie, 550)
+	offer, err := service.RequesterOptions(context.Background(), testViewer(1), MediaTypeMovie, 550)
+	options := offer.Options
 	if err != nil {
 		t.Fatalf("RequesterOptions: %v", err)
 	}
@@ -46,7 +67,8 @@ func TestRequesterOptionsOffersOnlyWhatTheServerAllows(t *testing.T) {
 	// plugin is not asked.
 	service, _, router := optionsService(map[string]any{"profile_chosen_by": "admin"})
 	router.optionsErr = errors.New("must not be called")
-	options, err = service.RequesterOptions(context.Background(), testViewer(1), MediaTypeMovie, 550)
+	offer, err = service.RequesterOptions(context.Background(), testViewer(1), MediaTypeMovie, 550)
+	options = offer.Options
 	if err != nil || len(options) != 0 {
 		t.Fatalf("options = %+v, err = %v; want none", options, err)
 	}
@@ -55,7 +77,8 @@ func TestRequesterOptionsOffersOnlyWhatTheServerAllows(t *testing.T) {
 	// than failing the request dialog.
 	service, _, router = optionsService(map[string]any{"profile_chosen_by": "requester"})
 	router.optionsErr = errors.New("seerr is down")
-	options, err = service.RequesterOptions(context.Background(), testViewer(1), MediaTypeMovie, 550)
+	offer, err = service.RequesterOptions(context.Background(), testViewer(1), MediaTypeMovie, 550)
+	options = offer.Options
 	if err != nil || len(options) != 0 {
 		t.Fatalf("options = %+v, err = %v; want none", options, err)
 	}
@@ -65,6 +88,7 @@ func TestCreateRequestSendsTheRequestersPick(t *testing.T) {
 	service, store, router := optionsService(map[string]any{"profile_chosen_by": "requester", "radarr_profile_id": "default"})
 	input := fightClubInput
 	input.Options = map[string]string{"radarr_profile_id": "4"}
+	input.OptionsOffer = movieOffer(t, service)
 	req, err := service.CreateRequest(context.Background(), testViewer(1), input)
 	if err != nil {
 		t.Fatalf("CreateRequest: %v", err)
@@ -154,7 +178,7 @@ func TestApproveWithOptionsAppliesTheAdminsPick(t *testing.T) {
 	// Requesters are not offered the choice; the approving admin still is.
 	service, store, router := optionsService(map[string]any{"profile_chosen_by": "approver", "radarr_profile_id": "default"})
 	store.settings.GlobalAutoApprovalEnabled = false
-	if options, err := service.RequesterOptions(context.Background(), testViewer(1), MediaTypeMovie, 550); err != nil || len(options) != 0 {
+	if options, err := service.RequesterOptions(context.Background(), testViewer(1), MediaTypeMovie, 550); err != nil || len(options.Options) != 0 {
 		t.Fatalf("RequesterOptions = %+v, err = %v; want none for a requester", options, err)
 	}
 	req, err := service.CreateRequest(context.Background(), testViewer(1), fightClubInput)
@@ -166,20 +190,21 @@ func TestApproveWithOptionsAppliesTheAdminsPick(t *testing.T) {
 	if _, err := service.ApproverOptions(context.Background(), testViewer(1), req.ID); !errors.Is(err, ErrForbidden) {
 		t.Fatalf("ApproverOptions as a requester: err = %v, want ErrForbidden", err)
 	}
-	options, err := service.ApproverOptions(context.Background(), admin, req.ID)
+	offer, err := service.ApproverOptions(context.Background(), admin, req.ID)
+	options := offer.Options
 	if err != nil || len(options) != 1 || options[0].Key != "radarr_profile_id" || options[0].Default != "default" {
 		t.Fatalf("ApproverOptions = %+v, err = %v; want the movie quality profile", options, err)
 	}
 
 	var invalid *ValidationError
-	if _, err := service.ApproveWithOptions(context.Background(), admin, req.ID, map[string]string{"radarr_profile_id": "77"}); !errors.As(err, &invalid) {
+	if _, err := service.ApproveWithOptions(context.Background(), admin, req.ID, approverOffer(t, service, req.ID), map[string]string{"radarr_profile_id": "77"}); !errors.As(err, &invalid) {
 		t.Fatalf("ApproveWithOptions with an unlisted value: err = %v, want a validation error", err)
 	}
 	if len(router.gotConns) != 0 {
 		t.Fatalf("a refused approval submitted the request: %+v", router.gotConns)
 	}
 
-	if _, err := service.ApproveWithOptions(context.Background(), admin, req.ID, map[string]string{"radarr_profile_id": "4"}); err != nil {
+	if _, err := service.ApproveWithOptions(context.Background(), admin, req.ID, approverOffer(t, service, req.ID), map[string]string{"radarr_profile_id": "4"}); err != nil {
 		t.Fatalf("ApproveWithOptions: %v", err)
 	}
 	want := RequesterChoice{Key: "radarr_profile_id", Label: "Quality", Value: "4", ValueLabel: "Ultra-HD", ByAdmin: true}
@@ -197,11 +222,13 @@ func TestApproverOptionsDefaultToTheRequestersPick(t *testing.T) {
 	store.settings.GlobalAutoApprovalEnabled = false
 	input := fightClubInput
 	input.Options = map[string]string{"radarr_profile_id": "4"}
+	input.OptionsOffer = movieOffer(t, service)
 	req, err := service.CreateRequest(context.Background(), testViewer(1), input)
 	if err != nil {
 		t.Fatalf("CreateRequest: %v", err)
 	}
-	options, err := service.ApproverOptions(context.Background(), Viewer{UserID: 9, ProfileID: "9", IsAdmin: true}, req.ID)
+	offer, err := service.ApproverOptions(context.Background(), Viewer{UserID: 9, ProfileID: "9", IsAdmin: true}, req.ID)
+	options := offer.Options
 	if err != nil || len(options) != 1 || options[0].Default != "4" {
 		t.Fatalf("ApproverOptions = %+v, err = %v; want the requester's pick as the default", options, err)
 	}
@@ -215,11 +242,11 @@ func TestApproverOptionsLeaveOutWhatTheAdminFixed(t *testing.T) {
 		t.Fatalf("CreateRequest: %v", err)
 	}
 	admin := Viewer{UserID: 9, ProfileID: "9", IsAdmin: true}
-	if options, err := service.ApproverOptions(context.Background(), admin, req.ID); err != nil || len(options) != 0 {
+	if options, err := service.ApproverOptions(context.Background(), admin, req.ID); err != nil || len(options.Options) != 0 {
 		t.Fatalf("ApproverOptions = %+v, err = %v; want none", options, err)
 	}
 	var invalid *ValidationError
-	if _, err := service.ApproveWithOptions(context.Background(), admin, req.ID, map[string]string{"radarr_profile_id": "4"}); !errors.As(err, &invalid) {
+	if _, err := service.ApproveWithOptions(context.Background(), admin, req.ID, approverOffer(t, service, req.ID), map[string]string{"radarr_profile_id": "4"}); !errors.As(err, &invalid) {
 		t.Fatalf("ApproveWithOptions for a fixed option: err = %v, want a validation error", err)
 	}
 	if len(router.gotConns) != 0 {
@@ -231,12 +258,14 @@ func TestRequesterPickOfTheShownDefaultIsKeptWhenItIsNotTheSavedSetting(t *testi
 	// The saved profile is gone from the server, so the form shows the first
 	// choice. Sending that choice must apply it, not the stale saved value.
 	service, store, router := optionsService(map[string]any{"profile_chosen_by": "requester", "radarr_profile_id": "12"})
-	options, err := service.RequesterOptions(context.Background(), testViewer(1), MediaTypeMovie, 550)
+	offer, err := service.RequesterOptions(context.Background(), testViewer(1), MediaTypeMovie, 550)
+	options := offer.Options
 	if err != nil || len(options) != 1 || options[0].Default != "default" || options[0].DefaultIsSaved {
 		t.Fatalf("options = %+v, err = %v; want the first choice shown, not as the saved setting", options, err)
 	}
 	input := fightClubInput
 	input.Options = map[string]string{"radarr_profile_id": "default"}
+	input.OptionsOffer = movieOffer(t, service)
 	req, err := service.CreateRequest(context.Background(), testViewer(1), input)
 	if err != nil {
 		t.Fatalf("CreateRequest: %v", err)
@@ -253,6 +282,7 @@ func TestRequesterPickOfTheSavedSettingIsNotStored(t *testing.T) {
 	service, store, _ := optionsService(map[string]any{"profile_chosen_by": "requester", "radarr_profile_id": "default"})
 	input := fightClubInput
 	input.Options = map[string]string{"radarr_profile_id": "default"}
+	input.OptionsOffer = movieOffer(t, service)
 	req, err := service.CreateRequest(context.Background(), testViewer(1), input)
 	if err != nil {
 		t.Fatalf("CreateRequest: %v", err)
@@ -277,6 +307,7 @@ func TestApproveWithOptionsStoresAConfirmedPickAsTheAdmins(t *testing.T) {
 	store.settings.GlobalAutoApprovalEnabled = false
 	input := fightClubInput
 	input.Options = map[string]string{"radarr_profile_id": "4"}
+	input.OptionsOffer = movieOffer(t, service)
 	req, err := service.CreateRequest(context.Background(), testViewer(1), input)
 	if err != nil {
 		t.Fatalf("CreateRequest: %v", err)
@@ -285,7 +316,7 @@ func TestApproveWithOptionsStoresAConfirmedPickAsTheAdmins(t *testing.T) {
 	config["profile_chosen_by"] = "approver"
 	admin := Viewer{UserID: 9, ProfileID: "9", IsAdmin: true}
 	// The approval form sends what it shows: the requester's pick, unchanged.
-	if _, err := service.ApproveWithOptions(context.Background(), admin, req.ID, map[string]string{"radarr_profile_id": "4"}); err != nil {
+	if _, err := service.ApproveWithOptions(context.Background(), admin, req.ID, approverOffer(t, service, req.ID), map[string]string{"radarr_profile_id": "4"}); err != nil {
 		t.Fatalf("ApproveWithOptions: %v", err)
 	}
 	stored := store.requests[req.ID].RequesterChoices
@@ -303,6 +334,7 @@ func TestApproveLeavesOutARequestersPickTheServerTookBack(t *testing.T) {
 	store.settings.GlobalAutoApprovalEnabled = false
 	input := fightClubInput
 	input.Options = map[string]string{"radarr_profile_id": "4"}
+	input.OptionsOffer = movieOffer(t, service)
 	req, err := service.CreateRequest(context.Background(), testViewer(1), input)
 	if err != nil {
 		t.Fatalf("CreateRequest: %v", err)
@@ -314,5 +346,61 @@ func TestApproveLeavesOutARequestersPickTheServerTookBack(t *testing.T) {
 	}
 	if len(router.gotConns) != 1 || router.gotConns[0].Config["radarr_profile_id"] != "default" {
 		t.Fatalf("fulfill connections = %+v, want the saved radarr_profile_id", router.gotConns)
+	}
+}
+
+func TestCreateRequestRefusesPicksFromAnotherOffer(t *testing.T) {
+	// The value "4" stays on offer in every case, so only the offer token
+	// can tell that it is no longer the choice the requester was shown.
+	for name, change := range map[string]func(store *fakeStore, router *fakeRouterProvider, input *CreateRequestInput){
+		"no offer sent": func(_ *fakeStore, _ *fakeRouterProvider, input *CreateRequestInput) {
+			input.OptionsOffer = ""
+		},
+		"the title now goes to another server": func(store *fakeStore, _ *fakeRouterProvider, _ *CreateRequestInput) {
+			store.integrations[0].ID = "seerr-b"
+		},
+		"the value now names another choice": func(_ *fakeStore, router *fakeRouterProvider, _ *CreateRequestInput) {
+			router.options["radarr_profile_id"] = []RouterOption{{Value: "default", Label: "Seerr default (HD-1080p)"}, {Value: "4", Label: "SD"}}
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			service, store, router := optionsService(map[string]any{"profile_chosen_by": "requester", "radarr_profile_id": "default"})
+			input := fightClubInput
+			input.Options = map[string]string{"radarr_profile_id": "4"}
+			input.OptionsOffer = movieOffer(t, service)
+			change(store, router, &input)
+			var invalid *ValidationError
+			if _, err := service.CreateRequest(context.Background(), testViewer(1), input); !errors.As(err, &invalid) || invalid.FieldErrors["options"] == "" {
+				t.Fatalf("CreateRequest: err = %v, want the picks refused", err)
+			}
+			if len(store.requests) != 0 || len(router.gotConns) != 0 {
+				t.Fatalf("a refused request was stored or submitted: %+v, %+v", store.requests, router.gotConns)
+			}
+		})
+	}
+}
+
+func TestApproveWithOptionsRefusesPicksFromAnotherOffer(t *testing.T) {
+	service, store, router := optionsService(map[string]any{"profile_chosen_by": "approver", "radarr_profile_id": "default"})
+	store.settings.GlobalAutoApprovalEnabled = false
+	req, err := service.CreateRequest(context.Background(), testViewer(1), fightClubInput)
+	if err != nil {
+		t.Fatalf("CreateRequest: %v", err)
+	}
+	admin := Viewer{UserID: 9, ProfileID: "9", IsAdmin: true}
+	offer := approverOffer(t, service, req.ID)
+	// The server's list changes while the approval form is open.
+	router.options["radarr_profile_id"] = []RouterOption{{Value: "default", Label: "Seerr default (HD-1080p)"}, {Value: "4", Label: "SD"}}
+	var invalid *ValidationError
+	for _, sent := range []string{offer, ""} {
+		if _, err := service.ApproveWithOptions(context.Background(), admin, req.ID, sent, map[string]string{"radarr_profile_id": "4"}); !errors.As(err, &invalid) {
+			t.Fatalf("ApproveWithOptions with offer %q: err = %v, want the picks refused", sent, err)
+		}
+	}
+	if store.requests[req.ID].Status != StatusPending || len(router.gotConns) != 0 {
+		t.Fatalf("a refused approval went through: %+v, %+v", store.requests[req.ID], router.gotConns)
+	}
+	if _, err := service.ApproveWithOptions(context.Background(), admin, req.ID, approverOffer(t, service, req.ID), map[string]string{"radarr_profile_id": "4"}); err != nil {
+		t.Fatalf("ApproveWithOptions with the current offer: %v", err)
 	}
 }

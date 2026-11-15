@@ -2,7 +2,7 @@ import type { ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router";
-import type { MediaRequest, RequestMediaDetail, RequestOption } from "@/api/types";
+import type { MediaRequest, RequestMediaDetail, RequestOptionOffer } from "@/api/types";
 import { V2ProblemError } from "@/api/v2/request";
 
 const mocks = vi.hoisted(() => ({
@@ -19,7 +19,7 @@ const mocks = vi.hoisted(() => ({
   toggleFollow: vi.fn(),
   refetch: vi.fn(),
   // The request options the title's download server offers; none by default.
-  requestOptions: [] as RequestOption[],
+  requestOptions: { offer: "", options: [] } as RequestOptionOffer,
 }));
 
 vi.mock("@/hooks/queries/useRequests", () => ({
@@ -217,7 +217,7 @@ describe("TitleDetail", () => {
     mocks.useCatalogItemDetail.mockReset();
     mocks.useMyMediaRequests.mockReset();
     mocks.create.mockReset();
-    mocks.requestOptions = [];
+    mocks.requestOptions = { offer: "", options: [] };
     mocks.cancel.mockReset();
     mocks.toggleFollow.mockReset();
     mocks.refetch.mockReset();
@@ -248,17 +248,20 @@ describe("TitleDetail", () => {
     });
 
     it("asks for the download server settings on offer before requesting a movie", async () => {
-      mocks.requestOptions = [
-        {
-          key: "radarr_profile_id",
-          label: "Quality",
-          default: "default",
-          choices: [
-            { value: "default", label: "Server default" },
-            { value: "4", label: "Ultra-HD" },
-          ],
-        },
-      ];
+      mocks.requestOptions = {
+        offer: "offer-1",
+        options: [
+          {
+            key: "radarr_profile_id",
+            label: "Quality",
+            default: "default",
+            choices: [
+              { value: "default", label: "Server default" },
+              { value: "4", label: "Ultra-HD" },
+            ],
+          },
+        ],
+      };
       renderDetail({ ...baseDetail, media_type: "movie", request: { requestable: true } });
 
       fireEvent.click(primaryButton("Request movie"));
@@ -272,6 +275,7 @@ describe("TitleDetail", () => {
       // The selected value is sent as shown; the server leaves out its own setting.
       expect(mocks.create.mock.calls[0]![0]).toMatchObject({
         options: { radarr_profile_id: "default" },
+        options_offer: "offer-1",
       });
     });
 

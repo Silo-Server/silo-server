@@ -20818,6 +20818,8 @@ export interface components {
       options?: {
         [key: string]: string;
       };
+      /** @description Approve only: the offer of the listAdminRequestOptions response the picks were made from; required with options. When the request's download server or its choices have changed since, the approval is refused with validation_failed: list the options again */
+      options_offer?: string;
       reason?: string;
     };
     AdminRequestCapabilitiesOutputBody: {
@@ -29552,6 +29554,8 @@ export interface components {
       options?: {
         [key: string]: string;
       };
+      /** @description The offer of the listRequestOptions response the picks were made from; required with options. When the title's download server or its choices have changed since, the request is refused with validation_failed: list the options again */
+      options_offer?: string;
       overview?: string;
       /** @description TMDB image path */
       poster_path?: string;
@@ -33643,6 +33647,11 @@ export interface components {
       value_label: string;
     };
     RequestOptionList: {
+      /**
+       * @description Names this list: the download server and its choices. Send it back as options_offer with the picks made from the list. Empty when options is empty
+       * @example 3f2a9c1d5b7e4a60918273645a6b7c8d
+       */
+      offer: string;
       /** @description Empty, never null, when the title's download server offers no choice, or its choices cannot be read right now */
       options: components["schemas"]["RequestOption"][];
     };

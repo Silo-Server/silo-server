@@ -43,6 +43,7 @@ import type {
   LoadRequestIntegrationOptionsRequest,
   MediaRequest,
   RequestIntegration,
+  RequestOptionsToSend,
 } from "@/api/types";
 import { adminKeys, requestKeys } from "../keys";
 
@@ -176,8 +177,8 @@ export function useApproveMediaRequest() {
   const queryClient = useQueryClient();
   return useMutation({
     retry: false,
-    mutationFn: ({ id, options }: { id: string; options?: Record<string, string> }) =>
-      approveAdminRequestV2(id, options),
+    mutationFn: ({ id, chosen }: { id: string; chosen?: RequestOptionsToSend }) =>
+      approveAdminRequestV2(id, chosen),
     onSuccess: () => {
       toast.success(t("web.admin.requests.toast.approved"));
     },

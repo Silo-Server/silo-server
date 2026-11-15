@@ -168,12 +168,12 @@ export function RequestQueue() {
    */
   function approveRequest(request: MediaRequest) {
     track(request, "approve", async () => {
-      const options = await listAdminRequestOptionsV2(request.id).catch(() => []);
-      if (!options || options.length === 0) return approve.mutateAsync({ id: request.id });
+      const offer = await listAdminRequestOptionsV2(request.id).catch(() => null);
+      if (!offer || offer.options.length === 0) return approve.mutateAsync({ id: request.id });
       // A prompt already open keeps the dialog: replacing it would put this
       // request under settings chosen for the other. Approve is pressed
       // again once that dialog closes.
-      setApprovePrompt((open) => open ?? { request, options });
+      setApprovePrompt((open) => open ?? { request, offer });
       return request;
     });
   }
@@ -331,8 +331,8 @@ export function RequestQueue() {
       />
       <ApproveOptionsDialog
         prompt={approvePrompt}
-        onConfirm={(request, options) =>
-          track(request, "approve", () => approve.mutateAsync({ id: request.id, options }))
+        onConfirm={(request, chosen) =>
+          track(request, "approve", () => approve.mutateAsync({ id: request.id, chosen }))
         }
         onOpenChange={(open) => {
           if (!open) setApprovePrompt(null);

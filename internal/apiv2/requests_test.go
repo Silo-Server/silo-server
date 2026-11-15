@@ -101,11 +101,11 @@ func (f *fakeRequests) GetDetail(_ context.Context, viewer mediarequests.Viewer,
 	}, nil
 }
 
-func (f *fakeRequests) RequesterOptions(_ context.Context, viewer mediarequests.Viewer, mediaType mediarequests.MediaType, tmdbID int) ([]mediarequests.RequesterOption, error) {
+func (f *fakeRequests) RequesterOptions(_ context.Context, viewer mediarequests.Viewer, mediaType mediarequests.MediaType, tmdbID int) (mediarequests.RequesterOffer, error) {
 	if err := f.record(viewer, "options", mediaType, tmdbID); err != nil {
-		return nil, err
+		return mediarequests.RequesterOffer{}, err
 	}
-	return f.options, nil
+	return mediarequests.RequesterOffer{Token: "offer-1", Options: f.options}, nil
 }
 
 func (f *fakeRequests) CreateRequest(_ context.Context, viewer mediarequests.Viewer, input mediarequests.CreateRequestInput) (*mediarequests.Request, error) {

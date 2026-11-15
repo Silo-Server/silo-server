@@ -37,7 +37,7 @@ import type {
   RequestDiscoverySection,
   RequestListParams,
   RequestMediaPage,
-  RequestOption,
+  RequestOptionOffer,
   RequestSearchMediaType,
   RequestMediaType,
 } from "@/api/types";
@@ -296,8 +296,15 @@ export function useCreateMediaRequest() {
       toast.success(t("web.common.requests.toast.submitted"));
       invalidateRequestSurfaces(queryClient);
     },
-    onError: (err) => {
+    onError: (err, body) => {
       toast.error(err instanceof Error ? err.message : t("requests.error.create"));
+      // The server may have refused picks from a list it no longer offers:
+      // the next attempt reads the choices again.
+      if (body.options) {
+        void queryClient.invalidateQueries({
+          queryKey: requestKeys.options(body.media_type, body.tmdb_id),
+        });
+      }
     },
   });
 }
@@ -346,13 +353,13 @@ export function useRequestOptions(
 export function useLoadRequestOptions() {
   const queryClient = useQueryClient();
   const load = useCallback(
-    async (mediaType: RequestMediaType, tmdbID: number): Promise<RequestOption[]> => {
+    async (mediaType: RequestMediaType, tmdbID: number): Promise<RequestOptionOffer> => {
       try {
         const status = await queryClient.ensureQueryData(requestStatusQuery);
-        if (status.request_options_supported !== true) return [];
+        if (status.request_options_supported !== true) return { offer: "", options: [] };
         return await queryClient.fetchQuery(requestOptionsQuery(mediaType, tmdbID));
       } catch {
-        return [];
+        return { offer: "", options: [] };
       }
     },
     [queryClient],

@@ -400,6 +400,14 @@ listed for that server passes, and a plugin cannot offer a config key routing
 sets itself. The picks are stored on the request (`requester_choices`) with the
 labels they were offered under and the server they were offered on.
 
+Each list comes with an `offer`: a digest of the server and of every option's
+key, label and choices. A client sends it back as `options_offer` with the
+picks. When it is missing, or is not the offer the title has now, the picks
+are refused the same way. Routing can move a title to another server, and a
+server can change its lists, while a dialog is open; the same value can then
+name another choice, and checking the value alone would let it through.
+`listAdminRequestOptions` and `adminApproveRequest` use the same pair.
+
 An option's `default` is the value a form preselects. It is the server's own
 setting when that is one of the choices, and the first choice otherwise (a
 saved profile that was since deleted, say). A client therefore sends the

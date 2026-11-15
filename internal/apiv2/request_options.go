@@ -43,6 +43,7 @@ type RequestOptionValue struct {
 
 // RequestOptionList is the listRequestOptions response body.
 type RequestOptionList struct {
+	Offer   string          `json:"offer" doc:"Names this list: the download server and its choices. Send it back as options_offer with the picks made from the list. Empty when options is empty" example:"3f2a9c1d5b7e4a60918273645a6b7c8d"`
 	Options []RequestOption `json:"options" doc:"Empty, never null, when the title's download server offers no choice, or its choices cannot be read right now"`
 }
 
@@ -59,16 +60,16 @@ func (reg *Registry) listRequestOptions(ctx context.Context, in *RequestMediaDet
 	if p != nil {
 		return nil, p
 	}
-	options, err := svc.RequesterOptions(ctx, viewer, mediarequests.MediaType(in.MediaType), in.TMDBID)
+	offer, err := svc.RequesterOptions(ctx, viewer, mediarequests.MediaType(in.MediaType), in.TMDBID)
 	if err != nil {
 		return nil, requestProblem(err)
 	}
-	return &RequestOptionListOutput{Body: requestOptionListOf(options)}, nil
+	return &RequestOptionListOutput{Body: requestOptionListOf(offer)}, nil
 }
 
-func requestOptionListOf(options []mediarequests.RequesterOption) RequestOptionList {
-	out := RequestOptionList{Options: make([]RequestOption, 0, len(options))}
-	for _, option := range options {
+func requestOptionListOf(offer mediarequests.RequesterOffer) RequestOptionList {
+	out := RequestOptionList{Offer: offer.Token, Options: make([]RequestOption, 0, len(offer.Options))}
+	for _, option := range offer.Options {
 		values := make([]RequestOptionValue, 0, len(option.Choices))
 		for _, choice := range option.Choices {
 			values = append(values, RequestOptionValue{Value: choice.Value, Label: choice.Label})

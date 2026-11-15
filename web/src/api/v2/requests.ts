@@ -12,7 +12,7 @@ import type {
   RequestMediaPage,
   RequestMediaResult,
   RequestMediaType,
-  RequestOption,
+  RequestOptionOffer,
   RequestSearchMediaType,
   RequestTarget,
   RequestUserState,
@@ -140,10 +140,10 @@ export function getRequestMediaDetailV2(
 export function listRequestOptionsV2(
   mediaType: RequestMediaType,
   tmdbID: number,
-): Promise<RequestOption[]> {
+): Promise<RequestOptionOffer> {
   return v2("GET /api/v2/requests/options/{media_type}/{tmdb_id}", {
     path: { media_type: mediaType, tmdb_id: tmdbID },
-  }).then((list) => list.options);
+  });
 }
 
 function discoverSectionFromV2(s: Schemas["DiscoverSection"]): RequestDiscoverySection {

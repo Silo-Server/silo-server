@@ -203,28 +203,32 @@ describe("season requests", () => {
 });
 
 describe("requestOptionsToSend", () => {
-  const options = [
-    {
-      key: "profile",
-      label: "Quality",
-      default: "default",
-      choices: [
-        { value: "default", label: "Server default" },
-        { value: "4", label: "Ultra-HD" },
-      ],
-    },
-  ];
+  const sent = (options: Record<string, string>) => ({ options, options_offer: "offer-1" });
+  const options = {
+    offer: "offer-1",
+    options: [
+      {
+        key: "profile",
+        label: "Quality",
+        default: "default",
+        choices: [
+          { value: "default", label: "Server default" },
+          { value: "4", label: "Ultra-HD" },
+        ],
+      },
+    ],
+  };
 
-  it("sends the selected value of every option", () => {
-    expect(requestOptionsToSend(options, { profile: "4" })).toEqual({ profile: "4" });
+  it("sends the selected value of every option, with the offer it is from", () => {
+    expect(requestOptionsToSend(options, { profile: "4" })).toEqual(sent({ profile: "4" }));
     // The default is what the form shows, so it is sent too.
-    expect(requestOptionsToSend(options, {})).toEqual({ profile: "default" });
+    expect(requestOptionsToSend(options, {})).toEqual(sent({ profile: "default" }));
   });
 
   it("falls back to the default for a stale value and ignores an unknown option", () => {
-    expect(requestOptionsToSend(options, { profile: "7", folder: "/x" })).toEqual({
-      profile: "default",
-    });
+    expect(requestOptionsToSend(options, { profile: "7", folder: "/x" })).toEqual(
+      sent({ profile: "default" }),
+    );
     expect(requestOptionsToSend(undefined, { profile: "4" })).toBeUndefined();
   });
 });

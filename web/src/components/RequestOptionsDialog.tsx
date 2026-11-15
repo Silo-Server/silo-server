@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Loader2 } from "lucide-react";
-import type { RequestMediaResult, RequestOption } from "@/api/types";
+import type { RequestMediaResult, RequestOptionOffer } from "@/api/types";
 import { RequestOptionFields } from "@/components/RequestOptionFields";
 import { Button } from "@/components/ui/button";
 import {
@@ -24,7 +24,7 @@ interface RequestOptionsDialogProps {
   onOpenChange: (open: boolean) => void;
   item: RequestMediaResult;
   /** What the viewer may choose; the caller opens the dialog only when there is something. */
-  options: readonly RequestOption[];
+  offer: RequestOptionOffer;
 }
 
 /**
@@ -36,7 +36,7 @@ export function RequestOptionsDialog({
   open,
   onOpenChange,
   item,
-  options,
+  offer,
 }: RequestOptionsDialogProps) {
   const t = useT();
   const createRequest = useCreateMediaRequest();
@@ -47,10 +47,11 @@ export function RequestOptionsDialog({
     onOpenChange(next);
   };
   const submit = () => {
-    const chosen = requestOptionsToSend(options, picks);
     createRequest.mutate(
-      { ...requestInputFromMediaResult(item), ...(chosen && { options: chosen }) },
-      { onSuccess: () => close(false) },
+      { ...requestInputFromMediaResult(item), ...requestOptionsToSend(offer, picks) },
+      // A refusal closes the dialog too: its choices may be the stale ones
+      // the server refused, and the next attempt reads them again.
+      { onSettled: () => close(false) },
     );
   };
 
@@ -66,7 +67,7 @@ export function RequestOptionsDialog({
           <DialogDescription>{item.title}</DialogDescription>
         </DialogHeader>
         <RequestOptionFields
-          options={options}
+          options={offer.options}
           picks={picks}
           onChange={setPicks}
           disabled={createRequest.isPending}

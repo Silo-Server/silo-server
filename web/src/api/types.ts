@@ -2124,6 +2124,24 @@ export interface CreateMediaRequestInput {
   seasons?: number[];
   /** The requester's picks from the title's request options, as option key to value. */
   options?: Record<string, string>;
+  /** The offer the picks were made from; required with options. */
+  options_offer?: string;
+}
+
+/**
+ * What may be chosen for a request right now. `offer` names the download
+ * server and its choices, and goes back with the picks: the server refuses
+ * picks made from a list it no longer offers.
+ */
+export interface RequestOptionOffer {
+  offer: string;
+  options: RequestOption[];
+}
+
+/** The picks to send with a request or an approval, and the offer they are from. */
+export interface RequestOptionsToSend {
+  options: Record<string, string>;
+  options_offer: string;
 }
 
 /** A download server setting the viewer may choose when requesting a title. */

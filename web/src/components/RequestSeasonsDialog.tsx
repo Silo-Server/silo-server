@@ -74,6 +74,14 @@ export function RequestSeasonsDialog({
   // profile. Nothing on offer, or a failed read, shows no fields.
   const requestOptions = useRequestOptions("series", tmdbID, { enabled: open && requestable });
   const [optionPicks, setOptionPicks] = useState<RequestOptionPicks>({});
+  // Picks belong to the list they were made from: a reloaded list starts
+  // without them, as the same value can name another choice there.
+  const offerToken = requestOptions.data?.offer;
+  const [pickedFrom, setPickedFrom] = useState(offerToken);
+  if (pickedFrom !== offerToken) {
+    setPickedFrom(offerToken);
+    setOptionPicks({});
+  }
   const choices = requestable ? seasons.filter(seasonRequestable) : [];
   const defaults = defaultRequestSeasons(choices);
   const selected = (picked ?? defaults).filter((number) =>
@@ -103,12 +111,11 @@ export function RequestSeasonsDialog({
     );
   const submit = () => {
     if (!detail) return;
-    const options = requestOptionsToSend(requestOptions.data, optionPicks);
     createRequest.mutate(
       {
         ...requestInputFromMediaResult(detail),
         ...(!serverChooses && { seasons: selected }),
-        ...(options && { options }),
+        ...requestOptionsToSend(requestOptions.data, optionPicks),
       },
       { onSuccess: () => close(false) },
     );
@@ -222,7 +229,7 @@ export function RequestSeasonsDialog({
 
         {requestable && requestOptions.data ? (
           <RequestOptionFields
-            options={requestOptions.data}
+            options={requestOptions.data.options}
             picks={optionPicks}
             onChange={setOptionPicks}
             disabled={createRequest.isPending}

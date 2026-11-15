@@ -858,7 +858,7 @@ func (s *Service) CreateRequest(ctx context.Context, viewer Viewer, input Create
 		return nil, err
 	}
 	// Last of the checks: it asks the download server for its choices.
-	choices, err := s.resolveRequesterChoices(ctx, requestProbe(viewer, normalized.MediaType, normalized.TMDBID, facts), normalized.Options)
+	choices, err := s.resolveRequesterChoices(ctx, requestProbe(viewer, normalized.MediaType, normalized.TMDBID, facts), normalized.OptionsOffer, normalized.Options)
 	if err != nil {
 		return nil, err
 	}
