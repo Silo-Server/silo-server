@@ -1,6 +1,9 @@
 export function activeCatalogQueryMatchesLibrary(queryKey: unknown, libraryId?: number) {
   if (!libraryId || !Array.isArray(queryKey)) return true;
-  if (queryKey[0] !== "catalog" || (queryKey[1] !== "list" && queryKey[1] !== "letters")) {
+  if (
+    queryKey[0] !== "catalog" ||
+    (queryKey[1] !== "list" && queryKey[1] !== "letters" && queryKey[1] !== "count")
+  ) {
     return true;
   }
   const params = queryKey[2] as { library_id?: number } | undefined;
