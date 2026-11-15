@@ -772,9 +772,9 @@ export interface Season {
   poster_url: string;
   poster_thumbhash: string;
   user_data?: SeasonUserData;
-	availability?: { have: number; total: number } | null;
-	/** Localized fields whose text was machine-translated by AI. */
-	machine_translated_fields?: string[];
+  availability?: { have: number; total: number } | null;
+  /** Localized fields whose text was machine-translated by AI. */
+  machine_translated_fields?: string[];
 }
 
 export interface SeasonsResponse {

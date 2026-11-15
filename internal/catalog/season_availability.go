@@ -30,9 +30,11 @@ type Availability struct {
 // specials (season 0) excluded. An episode has a file when a present file in
 // an enabled library the viewer can access is linked to it and fits the
 // playback-quality ceiling, or when a present multi-episode file of its
-// season spans it: such a file links to its first episode only. filter's
-// library allow/deny and playback-quality ceiling narrow both presence
-// branches so a badge never counts holdings the viewer cannot reach.
+// season spans it the way playback serves it (spannedEpisodeJoinSQL, at most
+// MaxEpisodeSpan episodes after the one it links to). filter's
+// library allow/deny, playback-quality ceiling and, on a library-scoped read
+// (ScopeFilesToLibrary), presentation library narrow both presence branches
+// so a badge never counts holdings the viewer cannot reach there.
 func (r *ItemRepository) SeriesSeasonAvailability(ctx context.Context, seriesContentIDs []string, filter AccessFilter) (map[string]map[int]SeasonAvailability, error) {
 	out := map[string]map[int]SeasonAvailability{}
 	if r == nil || r.pool == nil || len(seriesContentIDs) == 0 {
@@ -47,36 +49,21 @@ func (r *ItemRepository) SeriesSeasonAvailability(ctx context.Context, seriesCon
 		args = append(args, value)
 		return len(args)
 	}
-	elLibrary := make([]string, 0, 3)
-	mfLibrary := make([]string, 0, 3)
-	if filter.AllowedLibraryIDs != nil {
-		idx := bind(filter.AllowedLibraryIDs)
-		elLibrary = append(elLibrary, fmt.Sprintf("el.media_folder_id = ANY($%d)", idx))
-		mfLibrary = append(mfLibrary, fmt.Sprintf("mf.media_folder_id = ANY($%d)", idx))
-	}
-	if len(filter.DisabledLibraryIDs) > 0 {
-		idx := bind(filter.DisabledLibraryIDs)
-		elLibrary = append(elLibrary, fmt.Sprintf("NOT (el.media_folder_id = ANY($%d))", idx))
-		mfLibrary = append(mfLibrary, fmt.Sprintf("NOT (mf.media_folder_id = ANY($%d))", idx))
-	}
-	if ceiling := MediaFileQualityCeilingSQL("mf", filter.MaxPlaybackQuality); ceiling != "" {
-		mfLibrary = append(mfLibrary, ceiling)
-	}
-	// episode_libraries records membership, not a playable file. A 2160p-only
-	// episode would otherwise count for a 1080p viewer.
-	held := []string{
+	// episode_libraries records membership, not a playable file: the held
+	// file must pass the same access rules, or a 2160p-only episode would
+	// count for a 1080p viewer.
+	held := append([]string{
 		"held.episode_id = el.episode_id",
 		"held.media_folder_id = el.media_folder_id",
 		"held.missing_since IS NULL",
+	}, mediaFileAccessConditions("held", filter, bind)...)
+	mfLibrary := mediaFileAccessConditions("mf", filter, bind)
+	if filter.ScopeFilesToLibrary && filter.PresentationLibraryID != nil {
+		idx := bind(*filter.PresentationLibraryID)
+		held = append(held, fmt.Sprintf("held.media_folder_id = $%d", idx))
+		mfLibrary = append(mfLibrary, fmt.Sprintf("mf.media_folder_id = $%d", idx))
 	}
-	if ceiling := MediaFileQualityCeilingSQL("held", filter.MaxPlaybackQuality); ceiling != "" {
-		held = append(held, ceiling)
-	}
-	elLibrary = append(elLibrary, "EXISTS (SELECT 1 FROM media_files held WHERE "+strings.Join(held, " AND ")+")")
-	elExtra := ""
-	if len(elLibrary) > 0 {
-		elExtra = " AND " + strings.Join(elLibrary, " AND ")
-	}
+	elExtra := " AND EXISTS (SELECT 1 FROM media_files held WHERE " + strings.Join(held, " AND ") + ")"
 	mfExtra := ""
 	if len(mfLibrary) > 0 {
 		mfExtra = " AND " + strings.Join(mfLibrary, " AND ")
@@ -91,15 +78,9 @@ func (r *ItemRepository) SeriesSeasonAvailability(ctx context.Context, seriesCon
 			WHERE e.series_id = ANY($1) AND e.season_number > 0%s
 			UNION
 			SELECT covered.content_id
-			FROM episodes first
-			JOIN media_files mf ON mf.episode_id = first.content_id
-			     AND mf.missing_since IS NULL
-			     AND mf.multi_episode_end > mf.multi_episode_start
+			FROM episodes covered`+spannedEpisodeJoinSQL+`
 			JOIN media_folders f ON f.id = mf.media_folder_id AND f.enabled
-			JOIN episodes covered ON covered.series_id = first.series_id
-			     AND covered.season_number = first.season_number
-			     AND covered.episode_number BETWEEN mf.multi_episode_start AND mf.multi_episode_end
-			WHERE first.series_id = ANY($1) AND first.season_number > 0%s
+			WHERE covered.series_id = ANY($1) AND covered.season_number > 0%s
 		)
 		SELECT e.series_id, e.season_number,
 		       count(*) FILTER (WHERE e.air_date <= current_date),
@@ -136,11 +117,14 @@ func (r *ItemRepository) SeriesSeasonAvailability(ctx context.Context, seriesCon
 // from that list would call a partial season complete.
 //
 // A series is incomplete when media_items.episode_metadata_incomplete is set
-// (episode rows still carry refresh debt), or when a regular season row has
-// no episode rows. The second case covers a GetEpisodes failure that left the
-// flag false because refreshSeriesEpisodeMetadataState only inspects existing
+// (episode rows still carry refresh debt), or when a regular season row that
+// should list episodes has none: its own air date has passed, or a later
+// season has episodes. That covers a GetEpisodes failure that left the flag
+// false because refreshSeriesEpisodeMetadataState only inspects existing
 // episode rows — without this gate SeriesBadge would treat the loaded seasons
-// as the full set and could show Complete.
+// as the full set and could show Complete. A trailing season with no air
+// date or a future one is how a provider lists a renewal before its episodes
+// are known, so it does not hide the badge.
 func (r *ItemRepository) EpisodeMetadataIncomplete(ctx context.Context, seriesContentIDs []string) (map[string]bool, error) {
 	out := map[string]bool{}
 	if r == nil || r.pool == nil || len(seriesContentIDs) == 0 {
@@ -158,6 +142,10 @@ func (r *ItemRepository) EpisodeMetadataIncomplete(ctx context.Context, seriesCo
 			SELECT 1 FROM episodes e
 			WHERE e.series_id = s.series_id AND e.season_number = s.season_number
 		  )
+		  AND (s.air_date <= current_date OR EXISTS (
+			SELECT 1 FROM episodes later
+			WHERE later.series_id = s.series_id AND later.season_number > s.season_number
+		  ))
 	`, seriesContentIDs)
 	if err != nil {
 		return nil, fmt.Errorf("episode metadata incomplete: %w", err)
@@ -180,21 +168,21 @@ func SeasonBadge(a SeasonAvailability) (Availability, bool) {
 	if a.Total <= 0 || (a.Aired == 0 && a.Have == 0) {
 		return Availability{}, false
 	}
-	have := a.Have
-	if have > a.Total {
-		have = a.Total
-	}
-	return Availability{Have: have, Total: a.Total}, true
+	return Availability{Have: a.Have, Total: a.Total}, true
 }
 
 // SeriesBadge is complete released seasons over released seasons. A season
-// counts as released once an episode has aired, and complete when every
-// known episode of it is in an enabled library. Specials are already absent
-// from the map.
+// counts as released once an episode has aired, or, when none of its
+// episodes carries an air date, once one is in the library: its own poster
+// badges then, so the series must count it. A season dated to air later
+// stays out even with an early file. A season is complete when every known
+// episode of it is in an enabled library. Specials are already absent from
+// the map.
 func SeriesBadge(seasons map[int]SeasonAvailability) (Availability, bool) {
 	released, complete := 0, 0
 	for number, season := range seasons {
-		if number <= 0 || season.Aired <= 0 {
+		undatedWithFiles := season.Aired == 0 && season.Upcoming == 0 && season.Have > 0
+		if number <= 0 || (season.Aired <= 0 && !undatedWithFiles) {
 			continue
 		}
 		released++

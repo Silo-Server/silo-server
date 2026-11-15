@@ -1198,18 +1198,7 @@ func (h *SectionHandler) buildSectionsWithUserStates(ctx context.Context, withIt
 		})
 	}
 	if includeAvailability {
-		flat := make([]sectionItemResponse, 0)
-		for _, section := range resp.Sections {
-			flat = append(flat, section.Items...)
-		}
-		fillSectionAvailability(ctx, h.fetcher, viewerAccess, flat)
-		n := 0
-		for si := range resp.Sections {
-			for ii := range resp.Sections[si].Items {
-				resp.Sections[si].Items[ii].Availability = flat[n].Availability
-				n++
-			}
-		}
+		attachSectionAvailability(ctx, h.fetcher, viewerAccess, resp.Sections)
 	}
 	return resp
 }

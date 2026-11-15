@@ -396,8 +396,8 @@ export function seasonFromV2(season: SeasonV2): Season {
     poster_url: season.poster_url ?? "",
     poster_thumbhash: season.poster_thumbhash ?? "",
     user_data: season.user_data ? watchRollupFromV2(season.user_data) : undefined,
-		availability: season.availability,
-		machine_translated_fields: season.machine_translated_fields,
+    availability: season.availability,
+    machine_translated_fields: season.machine_translated_fields,
   };
 }
 

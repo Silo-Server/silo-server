@@ -47,4 +47,25 @@ func TestSeriesBadge(t *testing.T) {
 	if !ok || all != (Availability{Have: 1, Total: 1}) {
 		t.Fatalf("complete series = %+v, %v", all, ok)
 	}
+
+	// A season with no air dates badges once something is in the library, so
+	// the series must count it too: its own poster says 3/10.
+	undated := map[int]SeasonAvailability{
+		1: {Total: 10, Have: 3},
+		2: {Aired: 10, Total: 10, Have: 10},
+	}
+	if _, ok := SeasonBadge(undated[1]); !ok {
+		t.Fatal("an undated season with files should badge")
+	}
+	if got, ok := SeriesBadge(undated); !ok || got != (Availability{Have: 1, Total: 2}) {
+		t.Fatalf("series with a partial undated season = %+v, %v; want 1/2", got, ok)
+	}
+	// A season dated to air later stays out even with an early file.
+	early := map[int]SeasonAvailability{
+		1: {Aired: 10, Total: 10, Have: 10},
+		2: {Upcoming: 2, Total: 2, Have: 1},
+	}
+	if got, ok := SeriesBadge(early); !ok || got != (Availability{Have: 1, Total: 1}) {
+		t.Fatalf("series with an early file in an unaired season = %+v, %v; want 1/1", got, ok)
+	}
 }

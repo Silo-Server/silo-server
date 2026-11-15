@@ -2,8 +2,8 @@ package catalog
 
 import (
 	"context"
-	"fmt"
 	"os"
+	"strconv"
 	"testing"
 	"time"
 
@@ -21,9 +21,114 @@ func TestSeriesSeasonAvailabilityDatabase(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(pool.Close)
-	suffix := fmt.Sprint(time.Now().UnixNano())
-	series := "series-season-test-" + suffix
-	enabled, disabled := 880000+int(time.Now().UnixNano()%9000), 0
+	series, disabled, other := seedSeasonAvailabilityFixture(t, pool)
+	repo := NewItemRepository(pool)
+	bySeries, err := repo.SeriesSeasonAvailability(ctx, []string{series, series + "-absent"}, AccessFilter{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(bySeries) != 1 {
+		t.Fatalf("series = %d, want only the one with episodes", len(bySeries))
+	}
+	got := bySeries[series]
+	want := map[int]SeasonAvailability{
+		1: {Aired: 2, Total: 2, Have: 2, HaveAired: 2},              // complete
+		2: {Aired: 1, Upcoming: 1, Total: 2, Have: 0, HaveAired: 0}, // its file is in a disabled library; e2 has not aired
+		3: {Aired: 0, Total: 1, Have: 1, HaveAired: 0},              // no air dates yet
+		4: {Aired: 3, Upcoming: 1, Total: 4, Have: 3, HaveAired: 2}, // e2 through the multi-episode file; e3 missing
+		5: {Aired: 0, Upcoming: 2, Total: 2, Have: 1, HaveAired: 0}, // dated, not aired yet
+		6: {Aired: 2, Total: 2, Have: 2, HaveAired: 2},              // 1080p and 2160p, both present
+		7: {Aired: 2, Total: 2, Have: 2, HaveAired: 2},              // 2160p file spans both episodes
+		8: {Aired: 12, Total: 12, Have: 11, HaveAired: 11},          // an E01-E12 file serves E01-E11 only (MaxEpisodeSpan)
+	}
+	if len(got) != len(want) {
+		t.Fatalf("seasons = %+v, want %+v (specials excluded)", got, want)
+	}
+	for season, w := range want {
+		if got[season] != w {
+			t.Errorf("season %d = %+v, want %+v", season, got[season], w)
+		}
+	}
+
+	// A viewer allowed only the disabled library must not count the enabled
+	// holdings that made season 1 complete for an unrestricted query.
+	scoped, err := repo.SeriesSeasonAvailability(ctx, []string{series}, AccessFilter{AllowedLibraryIDs: []int{disabled}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for season := range want {
+		if _, ok := scoped[series][season]; !ok {
+			t.Fatalf("allowlist missing season %d", season)
+		}
+	}
+	if scoped[series][1].Total != 2 {
+		t.Fatalf("allowlist: season 1 total = %d, want 2", scoped[series][1].Total)
+	}
+	if scoped[series][1].Have != 0 {
+		t.Fatalf("allowlist excluding enabled library: season 1 have = %d, want 0", scoped[series][1].Have)
+	}
+	if scoped[series][2].Have != 0 {
+		// Season 2's only file is in the disabled (and allowed) folder, but
+		// that folder is not enabled, so presence stays empty.
+		t.Fatalf("disabled folder in allowlist: season 2 have = %d, want 0", scoped[series][2].Have)
+	}
+
+	// A library-scoped read (catalog.scope_versions_to_library) counts only
+	// files in the presentation library, as the scoped season list does.
+	// Without ScopeFilesToLibrary the presentation library narrows nothing.
+	for _, tc := range []struct {
+		scope bool
+		have  int
+	}{{scope: true, have: 0}, {scope: false, have: 2}} {
+		got, err := repo.SeriesSeasonAvailability(ctx, []string{series}, AccessFilter{PresentationLibraryID: &other, ScopeFilesToLibrary: tc.scope})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got[series][1].Have != tc.have || got[series][4].Have != tc.have/2*3 {
+			t.Errorf("scoped=%v: season 1 have %d, season 4 have %d; want %d and %d",
+				tc.scope, got[series][1].Have, got[series][4].Have, tc.have, tc.have/2*3)
+		}
+	}
+
+	// A 1080p ceiling keeps the 1080p episode and drops the 2160p-only episode
+	// and the 2160p multi-episode file. A 2160p ceiling still counts both.
+	cappedWant := map[int]SeasonAvailability{}
+	for season, availability := range want {
+		cappedWant[season] = availability
+	}
+	cappedWant[6] = SeasonAvailability{Aired: 2, Total: 2, Have: 1, HaveAired: 1}
+	cappedWant[7] = SeasonAvailability{Aired: 2, Total: 2, Have: 0, HaveAired: 0}
+	for _, tc := range []struct {
+		ceiling string
+		want    map[int]SeasonAvailability
+	}{
+		{ceiling: "1080p", want: cappedWant},
+		{ceiling: "2160p", want: want},
+	} {
+		got, err := repo.SeriesSeasonAvailability(ctx, []string{series}, AccessFilter{MaxPlaybackQuality: tc.ceiling})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(got[series]) != len(tc.want) {
+			t.Fatalf("%s seasons = %+v, want %+v", tc.ceiling, got[series], tc.want)
+		}
+		for season, w := range tc.want {
+			if got[series][season] != w {
+				t.Errorf("%s season %d = %+v, want %+v", tc.ceiling, season, got[series][season], w)
+			}
+		}
+	}
+}
+
+// seedSeasonAvailabilityFixture stores one series whose seasons cover each
+// presence rule TestSeriesSeasonAvailabilityDatabase checks, and returns it
+// with a disabled library and an enabled library that holds none of its files.
+func seedSeasonAvailabilityFixture(t *testing.T, pool *pgxpool.Pool) (series string, disabled, other int) {
+	t.Helper()
+	ctx := t.Context()
+	suffix := strconv.FormatInt(time.Now().UnixNano(), 10)
+	series = "series-season-test-" + suffix
+	enabled := 880000 + int(time.Now().UnixNano()%9000)
 	disabled = enabled + 1
 	seed := func(stmt string, args ...any) {
 		t.Helper()
@@ -31,7 +136,8 @@ func TestSeriesSeasonAvailabilityDatabase(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	seed(`INSERT INTO media_folders (id, type, name, enabled) VALUES ($1, 'tvshows', 'Season test', true), ($2, 'tvshows', 'Season test off', false)`, enabled, disabled)
+	other = enabled + 2
+	seed(`INSERT INTO media_folders (id, type, name, enabled) VALUES ($1, 'tvshows', 'Season test', true), ($2, 'tvshows', 'Season test off', false), ($3, 'tvshows', 'Season test other', true)`, enabled, disabled, other)
 	seed(`INSERT INTO media_items (content_id, type, title) VALUES ($1, 'series', 'Season test')`, series)
 	seed(`INSERT INTO episodes (content_id, series_id, season_number, episode_number, air_date)
 		SELECT $1::text || v.suffix, $1::text, v.season, v.episode, v.aired
@@ -78,93 +184,24 @@ func TestSeriesSeasonAvailabilityDatabase(t *testing.T) {
 		suffix, enabled, series)
 	seed(`INSERT INTO media_files (media_folder_id, file_path, episode_id, resolution, multi_episode_start, multi_episode_end)
 		VALUES ($1, $2, $3, '2160p', 1, 2)`, enabled, "/season-test/"+suffix+"/S07E01-E02.mkv", series+"-s7e1")
+	// Season 8: one file claims E01-E12. Playback serves an episode from a
+	// spanning file at most MaxEpisodeSpan episodes after the linked one, so
+	// E12 has no playable file.
+	seed(`INSERT INTO episodes (content_id, series_id, season_number, episode_number, air_date)
+		SELECT $1::text || '-s8e' || n, $1::text, 8, n, DATE '2023-06-01' FROM generate_series(1, 12) n`, series)
+	seed(`INSERT INTO episode_libraries (episode_id, media_folder_id) VALUES ($1::text || '-s8e1', $2)`, series, enabled)
+	seed(`INSERT INTO media_files (media_folder_id, file_path, episode_id, resolution, multi_episode_start, multi_episode_end)
+		VALUES ($1, $2, $3, '1080p', 1, 12)`, enabled, "/season-test/"+suffix+"/S08E01-E12.mkv", series+"-s8e1")
 	seed(`INSERT INTO media_files (media_folder_id, file_path, episode_id, resolution)
 		VALUES ($1, $2, $3, '1080p')`, disabled, "/season-test/"+suffix+"/S02E01.mkv", series+"-s2e1")
 	t.Cleanup(func() {
 		_, _ = pool.Exec(context.Background(), `DELETE FROM media_files WHERE file_path LIKE $1 OR id = $2`, "/season-test/"+suffix+"/%", fileID)
 		_, _ = pool.Exec(context.Background(), `DELETE FROM episodes WHERE series_id = $1`, series)
 		_, _ = pool.Exec(context.Background(), `DELETE FROM media_items WHERE content_id = $1`, series)
-		_, _ = pool.Exec(context.Background(), `DELETE FROM media_folders WHERE id IN ($1, $2)`, enabled, disabled)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM media_folders WHERE id IN ($1, $2, $3)`, enabled, disabled, other)
 	})
 
-	repo := NewItemRepository(pool)
-	bySeries, err := repo.SeriesSeasonAvailability(ctx, []string{series, "series-season-test-absent-" + suffix}, AccessFilter{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(bySeries) != 1 {
-		t.Fatalf("series = %d, want only the one with episodes", len(bySeries))
-	}
-	got := bySeries[series]
-	want := map[int]SeasonAvailability{
-		1: {Aired: 2, Total: 2, Have: 2, HaveAired: 2},              // complete
-		2: {Aired: 1, Upcoming: 1, Total: 2, Have: 0, HaveAired: 0}, // its file is in a disabled library; e2 has not aired
-		3: {Aired: 0, Total: 1, Have: 1, HaveAired: 0},              // no air dates yet
-		4: {Aired: 3, Upcoming: 1, Total: 4, Have: 3, HaveAired: 2}, // e2 through the multi-episode file; e3 missing
-		5: {Aired: 0, Upcoming: 2, Total: 2, Have: 1, HaveAired: 0}, // dated, not aired yet
-		6: {Aired: 2, Total: 2, Have: 2, HaveAired: 2},              // 1080p and 2160p, both present
-		7: {Aired: 2, Total: 2, Have: 2, HaveAired: 2},              // 2160p file spans both episodes
-	}
-	if len(got) != len(want) {
-		t.Fatalf("seasons = %+v, want %+v (specials excluded)", got, want)
-	}
-	for season, w := range want {
-		if got[season] != w {
-			t.Errorf("season %d = %+v, want %+v", season, got[season], w)
-		}
-	}
-
-	// A viewer allowed only the disabled library must not count the enabled
-	// holdings that made season 1 complete for an unrestricted query.
-	scoped, err := repo.SeriesSeasonAvailability(ctx, []string{series}, AccessFilter{AllowedLibraryIDs: []int{disabled}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	for season := range want {
-		if _, ok := scoped[series][season]; !ok {
-			t.Fatalf("allowlist missing season %d", season)
-		}
-	}
-	if scoped[series][1].Total != 2 {
-		t.Fatalf("allowlist: season 1 total = %d, want 2", scoped[series][1].Total)
-	}
-	if scoped[series][1].Have != 0 {
-		t.Fatalf("allowlist excluding enabled library: season 1 have = %d, want 0", scoped[series][1].Have)
-	}
-	if scoped[series][2].Have != 0 {
-		// Season 2's only file is in the disabled (and allowed) folder, but
-		// that folder is not enabled, so presence stays empty.
-		t.Fatalf("disabled folder in allowlist: season 2 have = %d, want 0", scoped[series][2].Have)
-	}
-
-	// A 1080p ceiling keeps the 1080p episode and drops the 2160p-only episode
-	// and the 2160p multi-episode file. A 2160p ceiling still counts both.
-	cappedWant := map[int]SeasonAvailability{}
-	for season, availability := range want {
-		cappedWant[season] = availability
-	}
-	cappedWant[6] = SeasonAvailability{Aired: 2, Total: 2, Have: 1, HaveAired: 1}
-	cappedWant[7] = SeasonAvailability{Aired: 2, Total: 2, Have: 0, HaveAired: 0}
-	for _, tc := range []struct {
-		ceiling string
-		want    map[int]SeasonAvailability
-	}{
-		{ceiling: "1080p", want: cappedWant},
-		{ceiling: "2160p", want: want},
-	} {
-		got, err := repo.SeriesSeasonAvailability(ctx, []string{series}, AccessFilter{MaxPlaybackQuality: tc.ceiling})
-		if err != nil {
-			t.Fatal(err)
-		}
-		if len(got[series]) != len(tc.want) {
-			t.Fatalf("%s seasons = %+v, want %+v", tc.ceiling, got[series], tc.want)
-		}
-		for season, w := range tc.want {
-			if got[series][season] != w {
-				t.Errorf("%s season %d = %+v, want %+v", tc.ceiling, season, got[series][season], w)
-			}
-		}
-	}
+	return series, disabled, other
 }
 
 func TestEpisodeMetadataIncompleteSeasonsWithoutEpisodes(t *testing.T) {
@@ -178,37 +215,49 @@ func TestEpisodeMetadataIncompleteSeasonsWithoutEpisodes(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(pool.Close)
-	suffix := fmt.Sprint(time.Now().UnixNano())
+	suffix := strconv.FormatInt(time.Now().UnixNano(), 10)
 	complete := "series-ep-list-complete-" + suffix
 	gapped := "series-ep-list-gap-" + suffix
+	airedEmpty := "series-ep-list-aired-empty-" + suffix
+	announced := "series-ep-list-announced-" + suffix
+	ids := []string{complete, gapped, airedEmpty, announced}
 	seed := func(stmt string, args ...any) {
 		t.Helper()
 		if _, err := pool.Exec(ctx, stmt, args...); err != nil {
 			t.Fatal(err)
 		}
 	}
-	seed(`INSERT INTO media_items (content_id, type, title) VALUES ($1, 'series', 'complete'), ($2, 'series', 'gapped')`, complete, gapped)
-	seed(`INSERT INTO seasons (content_id, series_id, season_number) VALUES
-		($1 || '-s1', $1, 1),
-		($2 || '-s1', $2, 1),
-		($2 || '-s2', $2, 2)`, complete, gapped)
+	seed(`INSERT INTO media_items (content_id, type, title)
+		SELECT id, 'series', id FROM unnest($1::text[]) AS id`, ids)
+	// gapped: season 2 has no episodes although season 3 has some, so its
+	// episode fetch failed. airedEmpty: the last season aired and lists no
+	// episodes. announced: the provider lists a next season with no date
+	// and no episodes yet, which is how a renewal looks.
+	seed(`INSERT INTO seasons (content_id, series_id, season_number, air_date) VALUES
+		($1 || '-s1', $1, 1, NULL),
+		($2 || '-s1', $2, 1, NULL), ($2 || '-s2', $2, 2, NULL), ($2 || '-s3', $2, 3, NULL),
+		($3 || '-s1', $3, 1, NULL), ($3 || '-s2', $3, 2, DATE '2021-01-01'),
+		($4 || '-s1', $4, 1, NULL), ($4 || '-s2', $4, 2, NULL), ($4 || '-s3', $4, 3, DATE '2999-01-01')`,
+		complete, gapped, airedEmpty, announced)
 	seed(`INSERT INTO episodes (content_id, series_id, season_number, episode_number, air_date) VALUES
 		($1 || '-s1e1', $1, 1, 1, DATE '2020-01-01'),
-		($2 || '-s1e1', $2, 1, 1, DATE '2020-01-01')`, complete, gapped)
+		($2 || '-s1e1', $2, 1, 1, DATE '2020-01-01'), ($2 || '-s3e1', $2, 3, 1, DATE '2022-01-01'),
+		($3 || '-s1e1', $3, 1, 1, DATE '2020-01-01'),
+		($4 || '-s1e1', $4, 1, 1, DATE '2020-01-01')`, complete, gapped, airedEmpty, announced)
 	t.Cleanup(func() {
-		_, _ = pool.Exec(context.Background(), `DELETE FROM episodes WHERE series_id IN ($1, $2)`, complete, gapped)
-		_, _ = pool.Exec(context.Background(), `DELETE FROM seasons WHERE series_id IN ($1, $2)`, complete, gapped)
-		_, _ = pool.Exec(context.Background(), `DELETE FROM media_items WHERE content_id IN ($1, $2)`, complete, gapped)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM episodes WHERE series_id = ANY($1)`, ids)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM seasons WHERE series_id = ANY($1)`, ids)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM media_items WHERE content_id = ANY($1)`, ids)
 	})
 
-	got, err := NewItemRepository(pool).EpisodeMetadataIncomplete(ctx, []string{complete, gapped})
+	got, err := NewItemRepository(pool).EpisodeMetadataIncomplete(ctx, ids)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got[complete] {
-		t.Fatalf("series with every season listed = incomplete, want ready")
-	}
-	if !got[gapped] {
-		t.Fatalf("series with season 2 and no episodes = ready, want incomplete")
+	want := map[string]bool{complete: false, gapped: true, airedEmpty: true, announced: false}
+	for id, w := range want {
+		if got[id] != w {
+			t.Errorf("%s incomplete = %v, want %v", id, got[id], w)
+		}
 	}
 }

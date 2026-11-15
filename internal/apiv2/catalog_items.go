@@ -584,19 +584,19 @@ type EpisodeCollectionOutput struct {
 
 // Season is one season row.
 type Season struct {
-	ContentID               string       `json:"content_id" example:"series:severance-S01"`
-	PlayContentID           string       `json:"play_content_id,omitempty" doc:"The episode to play next"`
-	SeasonNumber            int          `json:"season_number"`
-	IsSpecials              bool         `json:"is_specials,omitempty"`
-	Title                   string       `json:"title" example:"Season 1"`
-	Overview                string       `json:"overview,omitempty"`
-	AirDate                 *string      `json:"air_date,omitempty" format:"date" doc:"Calendar date, YYYY-MM-DD"`
-	EpisodeCount            int          `json:"episode_count"`
-	PosterURL               string       `json:"poster_url,omitempty" format:"uri-reference" doc:"Presigned, short-lived"`
-	PosterThumbhash         string       `json:"poster_thumbhash,omitempty"`
-	UserData                *WatchRollup `json:"user_data,omitempty"`
+	ContentID               string               `json:"content_id" example:"series:severance-S01"`
+	PlayContentID           string               `json:"play_content_id,omitempty" doc:"The episode to play next"`
+	SeasonNumber            int                  `json:"season_number"`
+	IsSpecials              bool                 `json:"is_specials,omitempty"`
+	Title                   string               `json:"title" example:"Season 1"`
+	Overview                string               `json:"overview,omitempty"`
+	AirDate                 *string              `json:"air_date,omitempty" format:"date" doc:"Calendar date, YYYY-MM-DD"`
+	EpisodeCount            int                  `json:"episode_count"`
+	PosterURL               string               `json:"poster_url,omitempty" format:"uri-reference" doc:"Presigned, short-lived"`
+	PosterThumbhash         string               `json:"poster_thumbhash,omitempty"`
+	UserData                *WatchRollup         `json:"user_data,omitempty"`
 	Availability            *CatalogAvailability `json:"availability,omitempty" doc:"Episodes in the library out of the episodes this season lists. Absent for specials and when episode metadata is incomplete."`
-	MachineTranslatedFields []string     `json:"machine_translated_fields,omitempty" enum:"overview" doc:"Localized fields whose text was machine-translated by AI; absent when none were"`
+	MachineTranslatedFields []string             `json:"machine_translated_fields,omitempty" enum:"overview" doc:"Localized fields whose text was machine-translated by AI; absent when none were"`
 }
 
 // SeasonCollection is the seasons of a series.
