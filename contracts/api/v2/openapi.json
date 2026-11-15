@@ -245980,7 +245980,7 @@
             }
           }
         ],
-        "description": "The bytes of the source a grant approves, for a node that reads its sources through the core (source_access core). The grant must verify, be unexpired, be younger than its 24-hour whole life and name the calling node (403). No catalog read: the catalog is checked at open and every renewal. The core opens the granted path through fspath, fstats the descriptor and serves from it: gone or not a regular file is 410, another size or modification time (compared at microseconds) is 412, so a file replaced after the check is never served. Identity encoding, Accept-Ranges bytes, the grant's ETag, Cache-Control no-store; 206 with Content-Range for a range, 416 with Content-Range bytes */size past the end. Exempt from the per-node request budgets and from the request and activity logs; the write deadline rolls with progress. 503: no grant key.",
+        "description": "The bytes of the source a grant approves, for a node that reads its sources through the core (source_access core). The grant must verify, be unexpired, be younger than its 24-hour whole life and name the calling node (403). No catalog read: the catalog is checked at open and every renewal. The core opens the granted path through fspath, fstats the descriptor and serves from it: gone or not a regular file is 410, another size or modification time (compared at microseconds) is 412, so a file replaced after the check is never served. Identity encoding, Accept-Ranges bytes, the grant's ETag; 206 with Content-Range for a range, 416 with Content-Range bytes */size and the ETag past the end. Every answer is Cache-Control no-store. Exempt from the per-node request budgets and from the request and activity logs; the write deadline rolls with progress. 429 with Retry-After: the node has 512 source responses in flight on this server. Responses in flight are cut when the server begins a graceful shutdown; the node resumes from its offset. 503: no grant key, or the server is shutting down.",
         "retry_safety": "natural_idempotent",
         "listener": "api",
         "method": "GET",
@@ -246062,6 +246062,16 @@
             },
             "description": "Requested Range Not Satisfiable"
           },
+          "429": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
           "503": {
             "content": {
               "text/plain": {
@@ -246102,7 +246112,7 @@
             }
           }
         ],
-        "description": "The bytes of the source a grant approves, for a node that reads its sources through the core (source_access core). The grant must verify, be unexpired, be younger than its 24-hour whole life and name the calling node (403). No catalog read: the catalog is checked at open and every renewal. The core opens the granted path through fspath, fstats the descriptor and serves from it: gone or not a regular file is 410, another size or modification time (compared at microseconds) is 412, so a file replaced after the check is never served. Identity encoding, Accept-Ranges bytes, the grant's ETag, Cache-Control no-store; 206 with Content-Range for a range, 416 with Content-Range bytes */size past the end. Exempt from the per-node request budgets and from the request and activity logs; the write deadline rolls with progress. 503: no grant key.",
+        "description": "The bytes of the source a grant approves, for a node that reads its sources through the core (source_access core). The grant must verify, be unexpired, be younger than its 24-hour whole life and name the calling node (403). No catalog read: the catalog is checked at open and every renewal. The core opens the granted path through fspath, fstats the descriptor and serves from it: gone or not a regular file is 410, another size or modification time (compared at microseconds) is 412, so a file replaced after the check is never served. Identity encoding, Accept-Ranges bytes, the grant's ETag; 206 with Content-Range for a range, 416 with Content-Range bytes */size and the ETag past the end. Every answer is Cache-Control no-store. Exempt from the per-node request budgets and from the request and activity logs; the write deadline rolls with progress. 429 with Retry-After: the node has 512 source responses in flight on this server. Responses in flight are cut when the server begins a graceful shutdown; the node resumes from its offset. 503: no grant key, or the server is shutting down.",
         "retry_safety": "natural_idempotent",
         "listener": "api",
         "method": "HEAD",
@@ -246152,6 +246162,16 @@
               }
             },
             "description": "Precondition Failed"
+          },
+          "429": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Too Many Requests"
           },
           "503": {
             "content": {

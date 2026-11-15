@@ -37,9 +37,9 @@ import (
 // a loopback http URL, which fspath.CommandContext cannot guard here because
 // the list, not the argv, names it. Its list opens with a protocol whitelist
 // of http, tcp and pipe and a format whitelist of concat alone, and each entry
-// names the bare URL followed by "option protocol_whitelist http,tcp" and
-// "option format_whitelist" of the admitted demuxers, which replace what the
-// entry inherits from the list. An ffmpeg that cannot read that list is found
+// names the bare URL followed by "option protocol_whitelist http,tcp",
+// "option http_proxy direct" and "option format_whitelist" of the admitted
+// demuxers, which replace what the entry inherits from the list. An ffmpeg that cannot read that list is found
 // by the capability check (checkRelayedConcatSamples), so a relayed run it
 // cannot do is refused as unsupported, which is not permanent: the caller
 // moves the work.
@@ -67,8 +67,12 @@ var (
 var relayedConcatDemuxerArgs = []string{"-protocol_whitelist", "http,tcp,pipe", "-format_whitelist", "concat", "-f", "concat", "-safe", "0"}
 
 // relayedEntryOptions hold each entry of a relayed list to the relay's
-// protocols and the admitted demuxers.
-var relayedEntryOptions = "option protocol_whitelist http,tcp\noption format_whitelist " + strings.Join(mediacontainer.Demuxers(), ",") + "\n"
+// protocols and the admitted demuxers, and make it bypass the proxy in the
+// http_proxy environment variable, which FFmpeg otherwise uses for loopback
+// URLs too (see nodesource's inputRestrictions). FFmpeg uses a proxy only
+// when the value starts with http://, and an ffconcat option cannot be empty,
+// so the value is "direct".
+var relayedEntryOptions = "option protocol_whitelist http,tcp\noption http_proxy direct\noption format_whitelist " + strings.Join(mediacontainer.Demuxers(), ",") + "\n"
 
 // listDemuxerArgs are the options that open input's list: the relayed form
 // for a relayed input.

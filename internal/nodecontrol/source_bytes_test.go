@@ -60,17 +60,20 @@ func TestSourceBytesServeTheGrantedRevision(t *testing.T) {
 		t.Errorf("bytes counted %v, want %d", got, len(content)+11)
 	}
 
-	// Past the end, and several ranges at once, are 416 with the size.
+	// Past the end, and several ranges at once, are 416 with the size and
+	// the revision, no-store like every answer (ServeContent's own error
+	// path drops both headers).
 	for _, rangeHeader := range []string{"bytes=16-", "bytes=0-1,4-5"} {
 		if status, _, header := f.read(nodeA, f.keyA, grant, http.Header{"Range": {rangeHeader}}); status != http.StatusRequestedRangeNotSatisfiable ||
-			header.Get("Content-Range") != "bytes */16" {
-			t.Errorf("%s: %d %q, want 416 bytes */16", rangeHeader, status, header.Get("Content-Range"))
+			header.Get("Content-Range") != "bytes */16" || header.Get("Cache-Control") != "no-store" || header.Get("ETag") != etag {
+			t.Errorf("%s: %d %v, want 416 bytes */16, no-store and the ETag", rangeHeader, status, header)
 		}
 	}
 	// If-Match on another revision fails; the conditions that could widen
 	// or empty the answer are ignored.
-	if status, _, _ := f.read(nodeA, f.keyA, grant, http.Header{"If-Match": {`"file-42-1-1"`}}); status != http.StatusPreconditionFailed {
-		t.Errorf("If-Match another revision = %d, want 412", status)
+	if status, _, header := f.read(nodeA, f.keyA, grant, http.Header{"If-Match": {`"file-42-1-1"`}}); status != http.StatusPreconditionFailed ||
+		header.Get("Cache-Control") != "no-store" || header.Get("ETag") != "" {
+		t.Errorf("If-Match another revision = %d %v, want 412, no-store, no ETag", status, header)
 	}
 	for name, value := range map[string]string{
 		"If-None-Match":       etag,

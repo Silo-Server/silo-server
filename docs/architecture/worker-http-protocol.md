@@ -476,7 +476,9 @@ A node with core source access also reads source bytes from
 `X-Silo-Source-Grant` header, a single byte range, `If-Match` on the grant's
 entity tag. The API serves it from the descriptor it checked against the grant,
 identity-encoded, with a rolling write deadline, outside both per-node request
-budgets.
+budgets but under a per-node cap on concurrent responses (`429` with
+`Retry-After` past it), and cuts the responses in flight when it begins a
+graceful shutdown.
 
 [Transcode nodes](transcode-nodes.md) is the authority for what each route
 checks, its statuses, the two per-node request budgets (one for config, report,

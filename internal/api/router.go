@@ -3440,6 +3440,9 @@ func newChiRouter(deps Dependencies) chi.Router {
 			Telemetry:  streamtelemetry.NodeSnapshotStore(deps.StreamTelemetry),
 			Events:     deps.EventBus,
 			Deny:       playback.NewStreamDeny(deps.RedisClient),
+			// Main cancels the app context before it shuts the listener
+			// down, which cuts source byte streams instead of waiting on them.
+			Lifetime: deps.AppContext,
 			StreamSecret: func() string {
 				if cfg := deps.CurrentConfig(); cfg != nil {
 					return cfg.Auth.JWTSecret

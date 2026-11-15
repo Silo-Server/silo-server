@@ -6,6 +6,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
+	"strings"
 	"sync"
 
 	"github.com/Silo-Server/silo-server/internal/procgroup"
@@ -153,8 +155,30 @@ func Readlink(name string) (string, error) {
 // (RelayedSources.GuardArgs), in ffprobe's form when name is ffprobe, so
 // FFmpeg reads nothing but the relayed source's own bytes. Launch FFmpeg and
 // ffprobe on media only through here.
+//
+// A launch with a relayed input also runs without the HTTP proxy variables
+// of this process, as a second guard behind the -http_proxy the restriction
+// sets: a relay URL is a loopback capability that must not reach a proxy.
+// Every other launch inherits the environment as before.
 func CommandContext(ctx context.Context, name string, args ...string) *exec.Cmd {
-	return procgroup.CommandContext(ctx, name, DecodeAll(guardArgs(name, args))...)
+	guarded := guardArgs(name, args)
+	cmd := procgroup.CommandContext(ctx, name, DecodeAll(guarded)...)
+	if len(guarded) != len(args) {
+		cmd.Env = withoutProxy(os.Environ())
+	}
+	return cmd
+}
+
+// withoutProxy returns env without the variables FFmpeg reads a proxy from.
+func withoutProxy(env []string) []string {
+	return slices.DeleteFunc(env, func(kv string) bool {
+		name, _, _ := strings.Cut(kv, "=")
+		switch strings.ToLower(name) {
+		case "http_proxy", "https_proxy", "all_proxy", "no_proxy":
+			return true
+		}
+		return false
+	})
 }
 
 // DecodeAll decodes each string in args. It returns args itself when no

@@ -211,6 +211,10 @@ Each transcode node has a source access setting, on the nodes page or as `source
   each API server shows what each node costs. The node applies a change to the jobs it starts
   afterwards; running jobs keep their mode.
 
+A node host with `http_proxy` set needs nothing special for `core`: the node reads source bytes
+from the API servers without a proxy, and FFmpeg reads from the node's own loopback relay without
+one.
+
 Choose `core` when mounting the library on the node is impractical, and `local` when it is easy
 or the API servers' network is the bottleneck. A text subtitle burn-in that cannot be staged from
 the file's index does not run on a `core` node; the start moves to a `local` node or the main
@@ -219,7 +223,8 @@ server.
 A reverse proxy in front of the API must not buffer `/api/internal/nodes/sources` responses and
 needs long read and send timeouts on that location: a response streams for as long as FFmpeg
 reads, and the node resumes a cut one. It must pass `Range` and `If-Match` through and must not
-compress the response. For nginx:
+compress the response. Each API server serves one node at most 512 of these streams at once and
+answers `429` past that, which the node retries. For nginx:
 
 ```nginx
 location /api/internal/nodes/sources {

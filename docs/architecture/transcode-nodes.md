@@ -403,7 +403,11 @@ What the core checks:
 - **Remux** (`resolveRemux`). A progressive remux runs on a transcode node
   only on a route whose egress is a proxy: `noderouting.legalShapes` has no
   transcode-executed progressive remux with API egress, so a route with API
-  egress runs the remux on the API server. A valid token is required. Deny checks on the
+  egress runs the remux on the API server. Of the execution preferences, only
+  `playback.routing.remux_execution=prefer_transcode` (the default) ranks the
+  transcode node above the proxy itself; `prefer_worker` and `worker_only`
+  rank both as workers, and the proxy's own execution wins on fewer hops
+  (`noderouting.rank`), which a proxy without the library mount cannot run. A valid token is required. Deny checks on the
   transport and session; the route must be remux workload, transcode execution
   and proxy egress, with execution node id equal to the calling node (a token
   without the id fails closed); downmix and theme shape checks, and a theme
@@ -511,6 +515,22 @@ resolve and never deletes from it.
 
 Known limits:
 
+- A rebuild does not notice a file replaced in place. A stored recipe carries
+  no file revision, and resolve mints the rebuild's grant for whatever file the
+  catalog row's path holds now (`grantResolution`), so when a file is replaced
+  under the same catalog row, a rebuild of an existing session (after a node
+  restart, a withdrawn source, or a move) opens the new file with the recipe
+  made for the old one: its track indexes, durations and keyframe plan. This
+  applies to both source modes.
+- A Jellyfin-compatible audio track switch on a remote session restarts the
+  transcode on the node it already runs on (`restartCompatTranscodeForAudioSelection`'s call to
+  `startRemoteTranscode`). When that node has core source access and the
+  session burns in a text subtitle whose track cannot be staged, the node
+  refuses the start with `409` (`playback.ErrRelayedSubtitleBurnIn`) and the
+  switch fails with an error; it does not move to a `local` node or the API
+  server as a fresh start would. The dead-node move
+  (`moveCompatTranscodeOffNode`) cannot take it over, because it rebuilds from
+  the stored recipe, which still names the previous audio track.
 - HLS resolve has no durable stop check for a transport stopped without a deny
   marker (a native replan retiring its old transport). After a node restart
   loses the in-memory fence, a complete token for that transport can rebuild
@@ -682,14 +702,34 @@ the way never record it.
    rolls with progress (`httpstream.RollingDeadlineWriter`) instead of the
    server's absolute write timeout.
 4. It sits outside both per-node request budgets and outside the request and
-   activity logs. There is no per-replica concurrency cap.
+   activity logs. Each API replica serves one node at most 512 of these
+   responses at once (`maxSourceStreamsPerNode`), counted from the request's
+   arrival to the end of its response; past that it answers `429` with
+   `Retry-After: 1`, which the node's fetch loop backs off from and retries.
+   Legitimate use stays well below it: a node keeps at most 128 reader fetches
+   in flight, and each FFmpeg process holds one relayed read, two while it
+   seeks, so 32 jobs and 16 trickplay, chapter and sampling runs hold about
+   224. The cap bounds the descriptors and goroutines one node key can hold on
+   a replica.
+5. Every answer, refusals and `416` included, carries `Cache-Control:
+   no-store`. A `416` carries the grant's `ETag` and `Content-Range: bytes
+   */size`; other refusals carry no `ETag`.
+6. When graceful shutdown begins (main cancels the app context, which the
+   route receives as `nodecontrol.Options.Lifetime`, before it shuts the
+   listener down), every response in flight is cut and a request arriving
+   after that answers `503`. The node's relay resumes the read from its offset
+   against another replica or after the restart, so a long read does not hold
+   the shutdown.
 
 **Metrics.** `silo_node_source_streams_active{node}`,
 `silo_node_source_bytes_sent_total{node}` and
 `silo_node_source_stream_ends_total{outcome}` (`completed`, `client_gone`,
-`stalled_reap`, `forbidden`, `gone`, `changed`, `range_not_satisfiable`,
-`unavailable`), in the style of the direct-play metrics. The bytes counter by
-node is how an operator sizes API bandwidth before moving nodes to `core`.
+`stalled_reap`, `shutdown`, `forbidden`, `gone`, `changed`,
+`range_not_satisfiable`, `throttled`, `unavailable`), in the style of the
+direct-play metrics. The bytes counter advances as the body is sent, at most
+4 MiB at a time (each sendfile slice), so its rate is the bandwidth in use
+during a long transcode. It is how an operator sizes API bandwidth before
+moving nodes to `core`.
 
 ### Loopback relay
 
@@ -751,7 +791,11 @@ that layer: `nodesource` registers itself (`fspath.RegisterRelayedSources`) and
 - `fspath.OpenReader` returns a `Reader` (`ReadAt`, `Close`, `Stat`) for a
   library path (the file) or a relay URL. The tone-map OpenSubtitles hash,
   `keyframes.Load`, `internal/embeddedsub` (indexes, packet reads, burn-in
-  staging, rendition windows) and the trickplay Cues read use it.
+  staging, rendition windows) and the trickplay Cues read use it. Through
+  `keyframes.Load`, a video copy into fMP4 segments gets its keyframe-planned
+  VOD playlist on a mountless node as it does locally; a copy into MPEG-TS
+  segments keeps FFmpeg's growing playlist in either mode
+  (`planCopySegments`).
   `fspath.Open` of a relay URL is `fspath.ErrRelayed`.
 - **Reader.** Each revision's entry has a cache of 64 KiB pages, 64 of them
   (4 MiB), shared by every reader of the revision. Reads fetch outside any lock
@@ -767,9 +811,15 @@ that layer: `nodesource` registers itself (`fspath.RegisterRelayedSources`) and
 ### FFmpeg argument guard
 
 `fspath.CommandContext`, which every FFmpeg and ffprobe launch on media goes
-through, puts `-protocol_whitelist http,tcp` and `-format_whitelist` of the
-admitted demuxers before every relayed input: before its `-i`, or for ffprobe
-before a positional URL too. The admitted demuxers are those of the containers
+through, puts `-protocol_whitelist http,tcp`, `-format_whitelist` of the
+admitted demuxers and an empty `-http_proxy` before every relayed input: before
+its `-i`, or for ffprobe before a positional URL too. FFmpeg's `http` protocol
+otherwise sends loopback requests through the proxy in `http_proxy` as well,
+and the protocol whitelist does not stop it, so on a host with a proxy set
+every relayed read would fail and leave its URL in the proxy's logs. A launch
+with a relayed input also runs without the `http_proxy`, `https_proxy`,
+`all_proxy` and `no_proxy` variables (either case); every other launch
+inherits the environment unchanged. The admitted demuxers are those of the containers
 the scanner catalogs (`internal/mediacontainer`, which the scanner's extension
 lists come from), `m4v` included; playlist, concat, image-sequence, HLS and DASH
 demuxers, which open further URLs or files, are not. A relay URL is restricted
@@ -783,8 +833,10 @@ Trickplay sampling reads its input through an ffconcat list on stdin
 ([media sampling](media-sampling.md)), which the argv guard cannot see. With a
 relayed input the list opens with `-protocol_whitelist http,tcp,pipe
 -format_whitelist concat -f concat -safe 0`, and each entry names the bare URL
-followed by `option protocol_whitelist http,tcp` and `option format_whitelist`
-of the admitted demuxers, which replace what the entry inherits from the list.
+followed by `option protocol_whitelist http,tcp`, `option http_proxy direct`
+(an ffconcat option cannot be empty, and FFmpeg uses a proxy only for a value
+starting with `http://`) and `option format_whitelist` of the admitted
+demuxers, which replace what the entry inherits from the list.
 `mediasample.Capabilities` checks that form against a URL nothing listens on
 (`checkRelayedConcatSamples`). An FFmpeg that cannot read it refuses a relayed
 sample run as `unsupported`, which is not permanent, so the caller moves the
@@ -830,9 +882,10 @@ the trickplay, media sample and chapter routes.
 | Node deleted | Its key stops working at once, as a rotated key does: the API server that takes the delete drops the node from its registry before it answers, and every other API server and proxy drops it when `node_pool_changed` reaches it. Relays for its sessions cannot sign and answer "node unavailable" (`502`, or `503` through `/api/v2`) without moving them; clients recover by starting playback again. Its calls get `401`, so it reports `key_rejected` and SIGTERM stops it at once. |
 | Mount mismatch | The node refuses the job with `409` instead of reading other bytes, and the caller runs it elsewhere. A file that changed on the API server between minting and opening gets `412` from the core. |
 | Core unreachable under 30 seconds, core access | Source reads retry and resume; FFmpeg waits. Renewal retries. |
-| Core unreachable 30 seconds or more, core access | The active read fails and that job fails, as with a lost network mount; a local-access job keeps reading its mount. Renewal still survives about 40 minutes. |
-| Rolling API restart, or reads spread over replicas, core access | Grants and revisions do not depend on the replica; the relay resumes from its offset against any replica. |
-| File replaced or removed, core access | The next read, open or renewal answers `412` or `410`, and every job on that revision ends. |
+| Core unreachable 30 seconds or more, core access | The active read fails and FFmpeg exits, as with a lost network mount; the source stays open, and a local-access job keeps reading its mount. A viewer's next request for a segment FFmpeg did not write waits, then restarts FFmpeg at that segment on the same source (`restartSegmentLocked`): once the core answers again, the player's retry recovers; until then the request answers `404`. Renewal still survives about 40 minutes. |
+| Rolling API restart, or reads spread over replicas, core access | Grants and revisions do not depend on the replica. A stopping API server cuts its source responses when graceful shutdown begins, and the relay resumes each from its offset against any replica. |
+| File replaced or removed, core access | The next read, open or renewal answers `412` or `410`, and every job on that revision ends: the node forgets its sessions (`watchSessionSource`). The viewer's next request rebuilds through resolve. For a removed file, or one the catalog dropped, resolve answers `source_changed`, which the node answers `404` (`writeReconstructFailure`); retries get the same, and the client must start playback again. For a file replaced under the same catalog row, the rebuild opens the new file with the old recipe (see the known limit under [Recipe lifecycle](#recipe-lifecycle)). |
+| Node dies, proxy egress | The proxy cannot reach the node and answers `502`. A native client's transcode moves on the client's recovery replan; see [node failure detection](node-failure-detection.md). A Jellyfin-compatible transcode moves on the proxy's move request ([transcode node lost mid-stream](restart-resilient-playback.md#transcode-node-lost-mid-stream)). |
 | Grant reaches `MaxGrantAge` | Renewal and reads answer `403`; the job fails like any refused renewal. |
 | Relayed text burn-in cannot be staged | The node answers the start `409` and the start runs elsewhere. |
 | Node binary from before this design | Health has no `node_control_version`, so the node is unhealthy and never placed; it could not verify the core's signatures anyway. |

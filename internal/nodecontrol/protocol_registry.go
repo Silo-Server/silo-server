@@ -58,16 +58,16 @@ func Protocol(schemas huma.Registry) []workerprotocol.Operation {
 		{Name: headerRange, In: inHeader, Description: "One byte range or suffix range. Several ranges are refused with 416.", Schema: &huma.Schema{Type: huma.TypeString}},
 		{Name: headerIfMatch, In: inHeader, Description: "The grant's entity tag; another answers 412. If-None-Match, If-Modified-Since, If-Unmodified-Since and If-Range are ignored.", Schema: &huma.Schema{Type: huma.TypeString}},
 	}
-	sourceBytesDescription := "The bytes of the source a grant approves, for a node that reads its sources through the core (source_access core). The grant must verify, be unexpired, be younger than its 24-hour whole life and name the calling node (403). No catalog read: the catalog is checked at open and every renewal. The core opens the granted path through fspath, fstats the descriptor and serves from it: gone or not a regular file is 410, another size or modification time (compared at microseconds) is 412, so a file replaced after the check is never served. Identity encoding, Accept-Ranges bytes, the grant's ETag, Cache-Control no-store; 206 with Content-Range for a range, 416 with Content-Range bytes */size past the end. Exempt from the per-node request budgets and from the request and activity logs; the write deadline rolls with progress. 503: no grant key."
+	sourceBytesDescription := "The bytes of the source a grant approves, for a node that reads its sources through the core (source_access core). The grant must verify, be unexpired, be younger than its 24-hour whole life and name the calling node (403). No catalog read: the catalog is checked at open and every renewal. The core opens the granted path through fspath, fstats the descriptor and serves from it: gone or not a regular file is 410, another size or modification time (compared at microseconds) is 412, so a file replaced after the check is never served. Identity encoding, Accept-Ranges bytes, the grant's ETag; 206 with Content-Range for a range, 416 with Content-Range bytes */size and the ETag past the end. Every answer is Cache-Control no-store. Exempt from the per-node request budgets and from the request and activity logs; the write deadline rolls with progress. 429 with Retry-After: the node has 512 source responses in flight on this server. Responses in flight are cut when the server begins a graceful shutdown; the node resumes from its offset. 503: no grant key, or the server is shutting down."
 	sourceBytes := op(http.MethodGet, PathSources, "HandleSource", "natural_idempotent", sourceBytesDescription, nil,
 		map[string]*huma.Response{
 			"200": {Description: "The whole source.", Content: map[string]*huma.MediaType{"application/octet-stream": {Schema: &huma.Schema{Type: huma.TypeString, Format: "binary"}}}},
 			"206": {Description: "One range of the source.", Content: map[string]*huma.MediaType{"application/octet-stream": {Schema: &huma.Schema{Type: huma.TypeString, Format: "binary"}}}},
-		}, http.StatusForbidden, http.StatusGone, http.StatusPreconditionFailed, http.StatusRequestedRangeNotSatisfiable, http.StatusServiceUnavailable)
+		}, http.StatusForbidden, http.StatusGone, http.StatusPreconditionFailed, http.StatusRequestedRangeNotSatisfiable, http.StatusTooManyRequests, http.StatusServiceUnavailable)
 	sourceBytes.Parameters = sourceParams
 	sourceHead := op(http.MethodHead, PathSources, "HandleSource", "natural_idempotent", sourceBytesDescription, nil,
 		map[string]*huma.Response{"200": {Description: "The source's length and ETag, without a body."}},
-		http.StatusForbidden, http.StatusGone, http.StatusPreconditionFailed, http.StatusServiceUnavailable)
+		http.StatusForbidden, http.StatusGone, http.StatusPreconditionFailed, http.StatusTooManyRequests, http.StatusServiceUnavailable)
 	sourceHead.Parameters = sourceParams
 	return []workerprotocol.Operation{
 		config,

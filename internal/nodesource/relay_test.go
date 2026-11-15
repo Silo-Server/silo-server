@@ -568,7 +568,7 @@ func TestCloseInterruptsABlockedRelayRead(t *testing.T) {
 
 func TestGuardRestrictsRelayedInputs(t *testing.T) {
 	url := "http://127.0.0.1:41234/src/0123456789abcdef0123456789abcdef"
-	restrictions := []string{"-protocol_whitelist", "http,tcp", "-format_whitelist", AdmittedFormats}
+	restrictions := []string{"-protocol_whitelist", "http,tcp", "-format_whitelist", AdmittedFormats, "-http_proxy", ""}
 	got := restrict([]string{"-hide_banner", "-ss", "10", "-i", url, "-c", "copy", "out.mp4"}, false)
 	want := append(append([]string{"-hide_banner", "-ss", "10"}, restrictions...), "-i", url, "-c", "copy", "out.mp4")
 	if strings.Join(got, " ") != strings.Join(want, " ") {
@@ -589,13 +589,26 @@ func TestGuardRestrictsRelayedInputs(t *testing.T) {
 	}
 	// fspath applies it to every launch, choosing the probe form for
 	// ffprobe.
+	// The argv is compared element by element: the empty -http_proxy value
+	// does not survive a join.
 	cmd := fspath.CommandContext(t.Context(), "/usr/bin/ffprobe", "-v", "error", url)
-	if !strings.Contains(strings.Join(cmd.Args, " "), "-protocol_whitelist http,tcp -format_whitelist "+AdmittedFormats+" "+url) {
-		t.Fatalf("fspath launch of ffprobe: %v", cmd.Args)
+	if !slices.Equal(cmd.Args[1:], append(append([]string{"-v", "error"}, restrictions...), url)) {
+		t.Fatalf("fspath launch of ffprobe: %q", cmd.Args)
 	}
 	cmd = fspath.CommandContext(t.Context(), "/usr/bin/ffmpeg", "-i", url, "-f", "null", "-")
-	if !strings.Contains(strings.Join(cmd.Args, " "), "-protocol_whitelist http,tcp -format_whitelist "+AdmittedFormats+" -i "+url) {
-		t.Fatalf("fspath launch of ffmpeg: %v", cmd.Args)
+	if !slices.Equal(cmd.Args[1:], append(slices.Clone(restrictions), "-i", url, "-f", "null", "-")) {
+		t.Fatalf("fspath launch of ffmpeg: %q", cmd.Args)
+	}
+	// A relayed launch runs without the proxy variables; a local one keeps
+	// the environment it inherits.
+	t.Setenv("http_proxy", "http://proxy.invalid:3128")
+	t.Setenv("HTTPS_PROXY", "http://proxy.invalid:3128")
+	if env := fspath.CommandContext(t.Context(), "/usr/bin/ffmpeg", "-i", url).Env; env == nil ||
+		slices.ContainsFunc(env, func(kv string) bool { return strings.Contains(kv, "proxy.invalid") }) {
+		t.Fatal("a relayed launch kept the proxy variables")
+	}
+	if env := fspath.CommandContext(t.Context(), "/usr/bin/ffmpeg", "-i", "/library/movie.mkv").Env; env != nil {
+		t.Fatal("a local launch got a rewritten environment")
 	}
 }
 

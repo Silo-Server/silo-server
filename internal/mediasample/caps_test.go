@@ -413,7 +413,7 @@ func TestRelayedSamplesNeedTheRelayedConcatForm(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(list), "file '"+relayedTestInput+"'\noption protocol_whitelist http,tcp\noption format_whitelist ") ||
+	if !strings.Contains(string(list), "file '"+relayedTestInput+"'\noption protocol_whitelist http,tcp\noption http_proxy direct\noption format_whitelist ") ||
 		strings.Contains(string(list), "file:") {
 		t.Fatalf("relayed list:\n%s", list)
 	}
