@@ -564,8 +564,17 @@ func TestCloseInterruptsABlockedRelayRead(t *testing.T) {
 	}
 	response := &stalledResponse{header: http.Header{}, held: make(chan struct{}), deadline: make(chan struct{})}
 	served := make(chan struct{})
+	var aborted atomic.Bool
 	go func() {
 		defer close(served)
+		defer func() {
+			if r := recover(); r != nil {
+				if r != http.ErrAbortHandler { //nolint:errorlint // the sentinel a handler panics with
+					panic(r)
+				}
+				aborted.Store(true)
+			}
+		}()
 		opener.serve(response, httptest.NewRequest(http.MethodGet, source.Input(), nil))
 	}()
 	select {
@@ -578,6 +587,9 @@ func TestCloseInterruptsABlockedRelayRead(t *testing.T) {
 	case <-served:
 	case <-time.After(5 * time.Second):
 		t.Fatal("closing the source did not interrupt the blocked response")
+	}
+	if !aborted.Load() {
+		t.Fatal("the cut response was finished as if it were whole")
 	}
 }
 

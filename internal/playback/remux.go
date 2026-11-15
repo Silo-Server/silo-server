@@ -372,7 +372,7 @@ func findRemuxIDRPrimer(filePath string, origin float64) *remuxIDRPrimer {
 	if err != nil {
 		return nil
 	}
-	idx, err := keyframes.Load(filePath)
+	idx, err := keyframes.Load(context.Background(), filePath)
 	if err != nil || len(idx.Keyframes) < 2 || idx.Keyframes[0] > remuxIDRPrimerMaxFirstKeyframe {
 		return nil
 	}

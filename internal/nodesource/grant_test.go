@@ -210,3 +210,44 @@ func TestGrantCheck(t *testing.T) {
 		t.Fatalf("mint for an unexaminable file: %v, want the stat's own error", err)
 	}
 }
+
+// A grant from a build before the issue time existed still verifies and
+// renews, so a job that holds one survives the update.
+func TestALegacyGrantVerifiesAndRenews(t *testing.T) {
+	grants := NewGrants(func() string { return testSecret })
+	path := writeSource(t, "movie.mkv", "movie")
+	current, err := grants.Verify(mintFile(t, grants, 7, path))
+	if err != nil {
+		t.Fatal(err)
+	}
+	legacy := current
+	legacy.V, legacy.Iat = legacyGrantVersion, 0
+	payload, _ := json.Marshal(legacy)
+	key, _ := grants.key()
+	token := base64.RawURLEncoding.EncodeToString(payload) + "." + base64.RawURLEncoding.EncodeToString(grantMAC(key, payload))
+
+	claims, err := grants.Verify(token)
+	if err != nil {
+		t.Fatalf("legacy grant: %v", err)
+	}
+	if claims.V != grantVersion || claims.Iat != legacy.Exp-int64(GrantLifetime/time.Second) || claims.Revision() != current.Revision() {
+		t.Fatalf("legacy grant read as %+v", claims)
+	}
+	renewed, err := grants.Renew(claims)
+	if err != nil {
+		t.Fatalf("renew a legacy grant: %v", err)
+	}
+	if again, err := grants.Verify(renewed); err != nil || again.V != grantVersion {
+		t.Fatalf("renewed legacy grant: %+v %v", again, err)
+	}
+	// Another version, or a current one without its issue time, is refused.
+	for _, bad := range []Grant{{V: 3}, {V: grantVersion}} {
+		forged := current
+		forged.V, forged.Iat = bad.V, 0
+		payload, _ := json.Marshal(forged)
+		token := base64.RawURLEncoding.EncodeToString(payload) + "." + base64.RawURLEncoding.EncodeToString(grantMAC(key, payload))
+		if _, err := grants.Verify(token); !errors.Is(err, ErrInvalidGrant) {
+			t.Errorf("version %d without an issue time: %v, want ErrInvalidGrant", forged.V, err)
+		}
+	}
+}

@@ -595,6 +595,11 @@ path the core approves for it, never a path the job request names.
   renewal keeps it. `path` is the exact fspath-encoded catalog path,
   so no catalog read is needed to use it, and every stat goes through
   `internal/fspath`. The node can read the payload; it is given the path anyway.
+  A version 1 payload, which has no `iat` and which builds between the two
+  transcode node changes minted, still verifies: it is read as version 2 with
+  `iat` one lifetime before its expiry, so a job holding one survives the
+  update.
+
 - **Revision** is `(kind, id, size, modification time)`, without device, inode
   or change time, so every host computes the same revision of a shared file.
   `mtime_ns` is what the minting stat returned; revisions compare it at

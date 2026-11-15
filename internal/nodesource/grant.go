@@ -67,6 +67,12 @@ const RenewInterval = 20 * time.Minute
 // issue time (iat).
 const grantVersion = 2
 
+// legacyGrantVersion is the payload without an issue time, which builds
+// between the two transcode node changes minted. One still held by a running
+// job is read as the current version, its whole life counted from one
+// lifetime before its expiry, so an update does not end that job.
+const legacyGrantVersion = 1
+
 // grantKeyLabel is the HKDF info string of the grant MAC key. Changing it, or
 // reusing it for another purpose, breaks the key separation from every other
 // key derived from the same secret.
@@ -380,8 +386,15 @@ func splitGrant(token string) (payload, mac []byte, err error) {
 
 func decodeGrant(payload []byte) (Grant, error) {
 	var claims Grant
-	if err := json.Unmarshal(payload, &claims); err != nil || claims.V != grantVersion || !claims.wellFormed() ||
-		claims.Size < 0 || claims.Iat <= 0 || claims.Exp <= 0 {
+	if err := json.Unmarshal(payload, &claims); err != nil || !claims.wellFormed() || claims.Size < 0 || claims.Exp <= 0 {
+		return Grant{}, ErrInvalidGrant
+	}
+	switch {
+	case claims.V == grantVersion && claims.Iat > 0:
+	case claims.V == legacyGrantVersion && claims.Iat == 0:
+		claims.V = grantVersion
+		claims.Iat = claims.Exp - int64(GrantLifetime/time.Second)
+	default:
 		return Grant{}, ErrInvalidGrant
 	}
 	return claims, nil

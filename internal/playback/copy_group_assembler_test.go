@@ -292,7 +292,7 @@ func TestCopyGroupAssemblerRejectsTheFileWhenGroupsMismatchThePlan(t *testing.T)
 				}
 			}
 			err = a.scan(false)
-			_, loadErr := keyframes.Load(source)
+			_, loadErr := keyframes.Load(t.Context(), source)
 			if rejected := errors.Is(loadErr, keyframes.ErrIncompleteIndex); rejected != tc.reject || (err != nil) != tc.reject {
 				t.Fatalf("scan err %v, rejected %v (Load err %v); want rejected %v", err, rejected, loadErr, tc.reject)
 			}

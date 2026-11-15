@@ -23,7 +23,7 @@ func TestLoadCachesUntilTheFileChanges(t *testing.T) {
 	if err := os.Chtimes(path, stamp, stamp); err != nil {
 		t.Fatal(err)
 	}
-	got, err := Load(path)
+	got, err := Load(t.Context(), path)
 	wantIndex(t, got, err)
 
 	// Same size and time with different bytes: still the cached index.
@@ -37,7 +37,7 @@ func TestLoadCachesUntilTheFileChanges(t *testing.T) {
 	if err := os.Chtimes(path, stamp, stamp); err != nil {
 		t.Fatal(err)
 	}
-	got, err = Load(path)
+	got, err = Load(t.Context(), path)
 	wantIndex(t, got, err)
 
 	// A new modification time reads the file again.
@@ -45,7 +45,7 @@ func TestLoadCachesUntilTheFileChanges(t *testing.T) {
 	if err := os.Chtimes(path, later, later); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Load(path); !errors.Is(err, ErrNoIndex) {
+	if _, err := Load(t.Context(), path); !errors.Is(err, ErrNoIndex) {
 		t.Fatalf("err = %v, want ErrNoIndex for the changed file", err)
 	}
 }
@@ -55,10 +55,10 @@ func TestLoadReportsOtherFilesAsUnindexed(t *testing.T) {
 	if err := os.WriteFile(path, []byte("\x00\x00\x00\x18ftypisom\x00\x00\x02\x00isomiso2"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Load(path); !errors.Is(err, ErrNoIndex) {
+	if _, err := Load(t.Context(), path); !errors.Is(err, ErrNoIndex) {
 		t.Fatalf("err = %v, want ErrNoIndex", err)
 	}
-	if _, err := Load(filepath.Join(t.TempDir(), "missing.mkv")); err == nil || errors.Is(err, ErrNoIndex) {
+	if _, err := Load(t.Context(), filepath.Join(t.TempDir(), "missing.mkv")); err == nil || errors.Is(err, ErrNoIndex) {
 		t.Fatalf("missing file err = %v, want a read error", err)
 	}
 }
@@ -105,7 +105,7 @@ func TestLoadReturnsTheIndexTheFirstTime(t *testing.T) {
 	if err := os.WriteFile(path, file(layout{}), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	got, err := Load(path)
+	got, err := Load(t.Context(), path)
 	wantIndex(t, got, err)
 	if got.VideoEnd <= got.Keyframes[len(got.Keyframes)-1] {
 		t.Fatalf("VideoEnd = %v, want it after the last keyframe", got.VideoEnd)
@@ -122,11 +122,11 @@ func TestRejectHoldsUntilTheFileChanges(t *testing.T) {
 	if err := os.Chtimes(path, stamp, stamp); err != nil {
 		t.Fatal(err)
 	}
-	got, err := Load(path)
+	got, err := Load(t.Context(), path)
 	wantIndex(t, got, err)
 
 	Reject(got.File)
-	if _, err := Load(path); !errors.Is(err, ErrIncompleteIndex) || !errors.Is(err, ErrNoIndex) {
+	if _, err := Load(t.Context(), path); !errors.Is(err, ErrIncompleteIndex) || !errors.Is(err, ErrNoIndex) {
 		t.Fatalf("after Reject err = %v, want ErrIncompleteIndex (an ErrNoIndex)", err)
 	}
 
@@ -145,7 +145,7 @@ func TestRejectHoldsUntilTheFileChanges(t *testing.T) {
 	for i := range maxCachedFiles + 1 {
 		storeFirst(Version{Path: filepath.Join("evict", strconv.Itoa(i))}, Index{}, ErrNoIndex)
 	}
-	if _, err := Load(path); !errors.Is(err, ErrIncompleteIndex) {
+	if _, err := Load(t.Context(), path); !errors.Is(err, ErrIncompleteIndex) {
 		t.Fatalf("after evictions err = %v, want the rejection kept", err)
 	}
 
@@ -154,12 +154,12 @@ func TestRejectHoldsUntilTheFileChanges(t *testing.T) {
 		t.Fatal(err)
 	}
 	rejected := got.File
-	got, err = Load(path)
+	got, err = Load(t.Context(), path)
 	wantIndex(t, got, err)
 
 	// A late rejection of the old version, from a playback that read the
 	// file before it changed, leaves the new version alone.
 	Reject(rejected)
-	got, err = Load(path)
+	got, err = Load(t.Context(), path)
 	wantIndex(t, got, err)
 }

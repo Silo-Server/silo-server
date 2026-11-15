@@ -457,6 +457,11 @@ func (l *lease) renew() error {
 			return context.Cause(l.ctx)
 		}
 		if statusErr, ok := errors.AsType[*StatusError](err); ok && statusErr.Fatal() {
+			// The refusal answers the grant this attempt carried. Another
+			// job may have brought a newer one meanwhile: that one decides.
+			if held, _ := l.currentGrant(); held != grant {
+				continue
+			}
 			return err
 		}
 		// Another job on this source may have brought a longer grant while

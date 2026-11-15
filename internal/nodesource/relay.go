@@ -327,7 +327,13 @@ func (o *Opener) serve(w http.ResponseWriter, req *http.Request) {
 		n, readErr := body.Read(buffer)
 		if n > 0 {
 			if _, err := w.Write(buffer[:n]); err != nil {
-				return
+				if req.Context().Err() != nil {
+					return
+				}
+				// The write failed while FFmpeg's request lives (the entry
+				// ended, for one). Abort, so the cut body is not finished
+				// as if it were whole.
+				panic(http.ErrAbortHandler)
 			}
 			_ = controller.Flush()
 			written += int64(n)

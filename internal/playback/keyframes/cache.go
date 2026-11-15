@@ -54,9 +54,10 @@ var indexCache = struct {
 // is malformed, gets ErrNoIndex, as does a version Reject marked.
 //
 // path may be a relayed input (fspath.IsRelayed): its index reads go over
-// HTTP to the core and its version is the granted revision.
-func Load(path string) (Index, error) {
-	f, err := fspath.OpenReader(context.Background(), path)
+// HTTP to the core, end when ctx does, and its version is the granted
+// revision.
+func Load(ctx context.Context, path string) (Index, error) {
+	f, err := fspath.OpenReader(ctx, path)
 	if err != nil {
 		return Index{}, err
 	}
