@@ -369,11 +369,14 @@ export function useUpdateItemMetadata(contentId: string) {
           retryAuthentication: false,
         }),
       ),
+    // Returning the refetch keeps the save pending until the item is
+    // refetched. A reopened Edit Metadata seeds its form, and the whole lock
+    // list it sends, from the item, so it must not see the pre-save item.
     onSuccess: () => {
-      void invalidateMediaSurfaceQueries(queryClient, { itemId: contentId }).then(() => {
+      toast.success(t("web.item.toast.metadataSaved"));
+      return invalidateMediaSurfaceQueries(queryClient, { itemId: contentId }).then(() => {
         bumpHomeRefreshSignal(queryClient);
       });
-      toast.success(t("web.item.toast.metadataSaved"));
     },
     onError: (err) => {
       toast.error(err instanceof Error ? err.message : t("web.item.toast.saveMetadataFailed"));
