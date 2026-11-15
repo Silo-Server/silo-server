@@ -91,6 +91,7 @@
         "studio",
         "network",
         "show_status",
+        "availability",
         "imdb_top_250",
         "rt_certified_fresh"
       ]

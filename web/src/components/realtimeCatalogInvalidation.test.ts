@@ -52,14 +52,15 @@ describe("createCatalogInvalidationScheduler", () => {
   it("invalidates the first event immediately", async () => {
     const queryClient = new QueryClient();
     seedLibraries(queryClient, [1, 3]);
-    queryClient.setQueryData(sectionKeys.libraryLayout(3), { sections: [] });
+    const sectionKey = sectionKeys.libraryItems(3, "recently-added");
+    queryClient.setQueryData(sectionKey, { section: { id: "recently-added", items: [] } });
     const scheduler = createCatalogInvalidationScheduler(queryClient, WINDOW_MS);
 
     scheduler.schedule({ libraryId: 3, allowDashboardRefetch: false });
     await vi.advanceTimersByTimeAsync(0);
 
     expect(invalidatedLibraries(queryClient, [1, 3])).toEqual([3]);
-    expect(queryClient.getQueryState(sectionKeys.libraryLayout(3))?.isInvalidated).toBe(true);
+    expect(queryClient.getQueryState(sectionKey)?.isInvalidated).toBe(true);
   });
 
   it("coalesces a burst into a single trailing sweep", async () => {

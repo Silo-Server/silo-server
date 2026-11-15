@@ -68,6 +68,36 @@ type ABSPlaybackSessionStore interface {
 	// ListClosedSessions returns paginated closed sessions for (user, profile)
 	// ordered by started_at DESC. Returns (rows, totalRowCount, error).
 	ListClosedSessions(ctx context.Context, userID, profileID string, limit, offset int) ([]ABSPlaybackSession, int, error)
+	// UpdateReportedPlay applies a live report of a play a client reports
+	// only through /session/local to the client session's open play, in one
+	// statement. found is false when the client session has none.
+	UpdateReportedPlay(ctx context.Context, p ReportedPlay) (state ReportedPlayState, found bool, err error)
+	// StartReportedPlay applies the report to the client session's open
+	// play, or starts one under newID unless the account already has maxOpen
+	// open (the state's ID is empty then).
+	StartReportedPlay(ctx context.Context, p ReportedPlay, newID string, maxOpen int) (ReportedPlayState, error)
+}
+
+// ReportedPlay is one live report of a play that a client reports only
+// through /session/local.
+type ReportedPlay struct {
+	UserID          string
+	ProfileID       string
+	ClientSessionID string
+	ContentID       string
+	MediaFileID     *int
+	PositionSeconds float64
+	// ListeningSeconds is the client's running listening total for its
+	// session.
+	ListeningSeconds float64
+}
+
+// ReportedPlayState is a reported play after a report.
+type ReportedPlayState struct {
+	ID        string
+	StartedAt time.Time
+	// Announced is false while the play's lifecycle start is not recorded.
+	Announced bool
 }
 
 // FinalSync is the last position and listening time a close carries.
@@ -121,6 +151,10 @@ type ABSPlaybackSession struct {
 	StartedAt              time.Time
 	LastSyncAt             time.Time
 	ClosedAt               *time.Time
+	// ReportOnly marks a play a client reports only through /session/local.
+	// The server serves nothing for it, so its id opens no media and takes
+	// no /play session's syncs or close.
+	ReportOnly bool
 }
 
 // ---------------------------------------------------------------------------
@@ -358,9 +392,10 @@ func (h *Handler) handleSessionSync(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Ownership gate.
+	// Ownership gate. A reported play is not a /play session: its listening
+	// and its end come from the client's local-session reports.
 	sess, err := h.deps.PlaybackSessionStore.GetPlaybackSession(r.Context(), sid)
-	if err != nil || !sameABSPrincipal(a, sess.UserID, sess.ProfileID) {
+	if err != nil || sess.ReportOnly || !sameABSPrincipal(a, sess.UserID, sess.ProfileID) {
 		http.Error(w, "session not found", http.StatusNotFound)
 		return
 	}
@@ -454,9 +489,10 @@ func (h *Handler) handleSessionClose(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Ownership gate.
+	// Ownership gate. A reported play is not a /play session: its listening
+	// and its end come from the client's local-session reports.
 	sess, err := h.deps.PlaybackSessionStore.GetPlaybackSession(r.Context(), sid)
-	if err != nil || !sameABSPrincipal(a, sess.UserID, sess.ProfileID) {
+	if err != nil || sess.ReportOnly || !sameABSPrincipal(a, sess.UserID, sess.ProfileID) {
 		http.Error(w, "session not found", http.StatusNotFound)
 		return
 	}

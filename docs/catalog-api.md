@@ -1042,6 +1042,42 @@ completed watch. `order=asc` puts the oldest latest watch first, and `desc`
 puts the newest first. Library/media-scope/search overlays retain this order
 before pagination. History does not currently support saved sort preferences.
 
+## Series and season completion
+
+A v2 catalog item and a v2 season can carry `availability`, with `have` and
+`total`. On a series, `have` is released seasons whose known episodes are all
+playable for this viewer, and `total` is released seasons: those with an aired
+episode, and those with no air dates at all once an episode is in the library.
+On a season, `have` is episodes with a playable file and `total` is known
+episodes. A file counts when it is present in an enabled library the viewer
+can access and within the playback-quality ceiling; on a library-scoped read
+with `catalog.scope_versions_to_library` on, only files in that library count.
+A multi-episode file covers each episode it spans; it is linked only to the
+first. The field is absent for other item types, for specials, for a season
+with nothing aired and nothing in the library, and when the episode list is
+incomplete: episode metadata still owes a refresh, or a season that has aired,
+or that precedes a season with episodes, lists none. A trailing season with no
+air date or a future one and no episodes yet, as a provider lists a renewal,
+does not count as incomplete. `/api/v1` does not send it.
+
+Home and library section cards, catalog listings and search, box sets, and the
+season list and season detail carry the field. Item detail, favorites,
+watchlist, collections, history, and Watch Tonight cards do not.
+
+The server counts seasons and episodes, and sends the field, only while the
+acting profile draws the Availability card overlay: poster badges are on
+(`ui.card_overlays_enabled`, or the server-wide default from
+`GET /api/v2/settings/overlay-config` when the profile has not chosen) and the
+profile's `ui.card_overlays` document, or the server-wide default document
+when the profile has none, enables `availability`. The badge is off by
+default, so most reads skip the count and carry no `availability`. A client
+that turns the badge on reads its cards again after saving the setting; the
+next read carries the field. The count's cost follows the episodes of the
+series on the page, not the size of the library.
+
+The web client draws these counts as the Availability card overlay. Apple and
+Android clients can ignore the field until they draw it.
+
 ## Season order
 
 `GET /api/v2/catalog/series/{id}/seasons` returns seasons by ascending

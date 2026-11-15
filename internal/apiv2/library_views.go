@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 
+	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
 	"github.com/Silo-Server/silo-server/internal/imagesize"
 	"github.com/Silo-Server/silo-server/internal/ratingsources"
@@ -271,11 +272,26 @@ func viewerIdentity(ctx context.Context) (int, string, *Problem) {
 	return claims.UserID, profileID, nil
 }
 
+// cardAvailabilityWanted reports whether the acting profile draws the
+// availability poster badge. Card reads count seasons and episodes only then:
+// the badge is off by default, and the count is the one card lookup whose
+// cost grows with the number of episodes behind a page.
+func cardAvailabilityWanted(ctx context.Context) bool {
+	scope, ok := access.GetScope(ctx)
+	return ok && scope.CardAvailability
+}
+
 // sectionViewer is what the section seams need beyond the context. The v2
 // listener does not read a device header, so the access filter carries no
 // device id.
 func sectionViewer(ctx context.Context, art imagesize.Request, client SectionClient) handlers.SectionViewer {
-	return handlers.SectionViewer{Access: handlers.AccessFilterFromContext(ctx, ""), ImageSize: art.Size, ImageWidths: art.Widths, Web: client.web()}
+	return handlers.SectionViewer{
+		Access:                  handlers.AccessFilterFromContext(ctx, ""),
+		ImageSize:               art.Size,
+		ImageWidths:             art.Widths,
+		IncludeCardAvailability: cardAvailabilityWanted(ctx),
+		Web:                     client.web(),
+	}
 }
 
 func (reg *Registry) librarySections() (LibrarySectionService, *Problem) {
