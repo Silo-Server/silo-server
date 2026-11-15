@@ -6251,6 +6251,84 @@ describe("VideoPlayer lost connection", () => {
   });
 });
 
+describe("VideoPlayer blocked autoplay", () => {
+  beforeEach(() => {
+    hlsJS.supported = false;
+    hlsJS.latest = null;
+    vi.spyOn(HTMLMediaElement.prototype, "play").mockResolvedValue(undefined);
+    vi.spyOn(HTMLMediaElement.prototype, "pause").mockImplementation(() => {});
+    vi.spyOn(HTMLMediaElement.prototype, "load").mockImplementation(() => {});
+    Object.defineProperty(navigator, "userActivation", {
+      configurable: true,
+      value: { hasBeenActive: false },
+    });
+  });
+
+  afterEach(() => {
+    cleanup();
+    Reflect.deleteProperty(navigator, "userActivation");
+    vi.restoreAllMocks();
+  });
+
+  function bufferedAhead(video: HTMLVideoElement, seconds: number) {
+    Object.defineProperty(video, "buffered", {
+      configurable: true,
+      value: { length: 1, start: () => 0, end: () => seconds },
+    });
+  }
+
+  it("offers a tap to play when the browser refuses the start", async () => {
+    const play = vi.mocked(HTMLMediaElement.prototype.play);
+    play.mockRejectedValueOnce(new DOMException("Autoplay blocked", "NotAllowedError"));
+    const { container } = renderPlayer();
+    const video = container.querySelector("video");
+    if (!video) throw new Error("expected video element");
+    await waitFor(() => expect(video.src).toContain("/api/v1/stream/session-1"));
+
+    Object.defineProperty(video, "readyState", {
+      configurable: true,
+      value: HTMLMediaElement.HAVE_FUTURE_DATA,
+    });
+    bufferedAhead(video, 121);
+    await act(async () => fireEvent.canPlay(video));
+
+    expect(play).toHaveBeenCalledOnce();
+    const tapToPlay = screen.getByRole("button", { name: "Tap to play" });
+    // The loading cover is gone: the player waits for the viewer, not data.
+    expect(screen.queryByRole("status", { name: "Loading video" })).not.toBeInTheDocument();
+
+    play.mockResolvedValue(undefined);
+    await act(async () => fireEvent.click(tapToPlay));
+
+    expect(play).toHaveBeenCalledTimes(2);
+    expect(screen.queryByRole("button", { name: "Tap to play" })).not.toBeInTheDocument();
+  });
+
+  it("offers a tap when a ready player never ran autoplay at all", async () => {
+    // The measured dead end: readyState 4 with 121 s buffered, no gesture in
+    // the page's history, and nothing ever called play().
+    const play = vi.mocked(HTMLMediaElement.prototype.play);
+    const { container } = renderPlayer();
+    const video = container.querySelector("video");
+    if (!video) throw new Error("expected video element");
+    await waitFor(() => expect(video.src).toContain("/api/v1/stream/session-1"));
+
+    Object.defineProperty(video, "readyState", {
+      configurable: true,
+      value: HTMLMediaElement.HAVE_ENOUGH_DATA,
+    });
+    bufferedAhead(video, 121);
+    await act(async () => fireEvent.progress(video));
+
+    expect(play).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: "Tap to play" })).toBeInTheDocument();
+    expect(screen.queryByRole("status", { name: "Loading video" })).not.toBeInTheDocument();
+
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Tap to play" })));
+    expect(play).toHaveBeenCalledOnce();
+  });
+});
+
 describe("VideoPlayer when the server ended the session", () => {
   it("leaves the player and says why instead of showing a lost connection", async () => {
     toastInfo.mockClear();
