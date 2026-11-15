@@ -62,6 +62,7 @@ function makeInstallation(index: number, displayName: string): PluginInstallatio
     source_kind: "silo",
     repository_name: "Silo plugins",
     updates_paused: false,
+    connection_check_supported: false,
     presentation: {
       display_name: displayName,
       summary: `Installed summary ${suffix}.`,

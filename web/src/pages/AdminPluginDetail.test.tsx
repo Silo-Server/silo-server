@@ -140,6 +140,7 @@ function makeInstallation(overrides: Partial<PluginInstallation> = {}): PluginIn
     source_kind: "silo",
     repository_name: "Silo plugins",
     updates_paused: false,
+    connection_check_supported: true,
     presentation: PRESENTATION,
     capabilities: [{ type: "metadata_provider.v1", id: "mdblist", display_name: "MDBList" }],
     global_config_schema: [

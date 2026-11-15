@@ -4140,6 +4140,8 @@ export interface PluginInstallation {
   update_failure?: PluginUpdateFailure | null;
   /** The release signature check of the installed package. */
   signature: PluginSignature;
+  /** Whether the config test endpoint has a connection check to run for this plugin. */
+  connection_check_supported: boolean;
   legacy_metadata_import_types?: string[];
   created_at?: string;
   updated_at?: string;

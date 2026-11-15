@@ -495,6 +495,15 @@ func cloneConfigMap(value map[string]any) map[string]any {
 	return cloned
 }
 
+// SupportsConnectionCheck reports whether a plugin has a connection check for
+// TestGlobalConfig to run, so clients offer the check only where it exists.
+// A marker provider that does not implement account statistics still answers
+// the check as unsupported when it runs.
+func SupportsConnectionCheck(manifest *pluginv1.PluginManifest) bool {
+	_, err := connectionCheckCapability(manifest)
+	return err == nil
+}
+
 // connectionCheckCapability picks the capability a connection check probes: the
 // plugin's first metadata provider, or else its first marker provider.
 func connectionCheckCapability(manifest *pluginv1.PluginManifest) (*pluginv1.CapabilityDescriptor, error) {

@@ -20095,6 +20095,8 @@ export interface components {
       auth_bindings: components["schemas"]["AdminPluginAuthBinding"][];
       available_version?: string;
       capabilities: components["schemas"]["AdminPluginCapability"][];
+      /** @description True when POST config/test has a connection check to run for this plugin (a metadata or marker provider). Offer that check only when this is true; for other plugins it answers that connection checks are not supported. A marker provider that does not implement account statistics can still answer that way. */
+      connection_check_supported: boolean;
       /**
        * Format: date-time
        * @description RFC 3339 instant in UTC with millisecond precision

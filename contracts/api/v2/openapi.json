@@ -17135,6 +17135,10 @@
             },
             "type": "array"
           },
+          "connection_check_supported": {
+            "description": "True when POST config/test has a connection check to run for this plugin (a metadata or marker provider). Offer that check only when this is true; for other plugins it answers that connection checks are not supported. A marker provider that does not implement account statistics can still answer that way.",
+            "type": "boolean"
+          },
           "created_at": {
             "description": "RFC 3339 instant in UTC with millisecond precision",
             "format": "date-time",
@@ -17274,7 +17278,8 @@
           "task_bindings",
           "runtime",
           "created_at",
-          "updated_at"
+          "updated_at",
+          "connection_check_supported"
         ],
         "type": "object"
       },

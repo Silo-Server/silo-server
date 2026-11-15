@@ -911,6 +911,33 @@ func TestServiceTestGlobalConfigReturnsUnsupportedWithoutStartingPlugin(t *testi
 	}
 }
 
+func TestSupportsConnectionCheck(t *testing.T) {
+	for _, tt := range []struct {
+		name         string
+		capabilities []string
+		want         bool
+	}{
+		{name: "metadata provider", capabilities: []string{"metadata_provider.v1", "image_resolver.v1"}, want: true},
+		{name: "marker provider", capabilities: []string{"marker_provider.v1"}, want: true},
+		{name: "sign-in provider", capabilities: []string{"auth_provider.v1", "http_routes.v1"}},
+		{name: "scan source", capabilities: []string{"scan_source.v1"}},
+		{name: "no capabilities"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			manifest := &pluginv1.PluginManifest{}
+			for _, capabilityType := range tt.capabilities {
+				manifest.Capabilities = append(manifest.Capabilities, &pluginv1.CapabilityDescriptor{Type: capabilityType, Id: capabilityType})
+			}
+			if got := SupportsConnectionCheck(manifest); got != tt.want {
+				t.Fatalf("SupportsConnectionCheck(%v) = %v, want %v", tt.capabilities, got, tt.want)
+			}
+		})
+	}
+	if SupportsConnectionCheck(nil) {
+		t.Fatal("SupportsConnectionCheck(nil) = true, want false")
+	}
+}
+
 // fakeMarkerStats answers GetMarkerProviderStats for marker connection checks.
 type fakeMarkerStats struct {
 	pluginv1.MarkerProviderClient

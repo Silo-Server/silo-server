@@ -33,6 +33,7 @@ function installation(overrides: Partial<PluginInstallation> = {}): PluginInstal
     runtime: { resident: false, state: "stopped", restart_count: 0 },
     source_kind: "silo",
     updates_paused: false,
+    connection_check_supported: false,
     capabilities: [],
     global_config_schema: [],
     user_config_schema: [],
