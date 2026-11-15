@@ -44,6 +44,7 @@ import {
   scheduleMediaSurfaceInvalidation,
   updateCatalogItemDetail,
 } from "./mediaSurfaceRefresh";
+import { PERSONAL_STATE_WRITE_KEY } from "./personalStateWrites";
 import { bumpHomeRefreshSignal } from "@/pages/homeSurfaceRefresh";
 
 /** Device pixels across the screen, capped at 1080p width, for the loading backdrop. */
@@ -433,6 +434,7 @@ export function useWatchedStateMutation(item: WatchedMutationItem) {
   const queryClient = useQueryClient();
 
   return useMutation({
+    mutationKey: PERSONAL_STATE_WRITE_KEY,
     mutationFn: (nextPlayed: boolean) =>
       // Marking a series expands to every episode server-side. keepalive
       // lets the browser finish the request after a navigation or tab close,
