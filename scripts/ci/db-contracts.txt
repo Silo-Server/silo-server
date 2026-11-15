@@ -176,17 +176,23 @@
 # Two copies of one recording on disk are two items; only a moved folder reuses one.
 ./internal/scanner TestScanAudiobookSecondCopyIsItsOwnItemDB
 
-# A subtree scan inside a book folder rebuilds that book and marks missing the
-# files of a subfolder an earlier scoped scan imported as a book of its own.
-./internal/scanner TestScanSubtreeAudiobookInsideBookRetiresSubfolderBookDB
+# Subtree scans of a book folder and of the folder above it keep the book's
+# item, and the folder's own audio becomes a book beside it.
+./internal/scanner TestScanSubtreeAudiobookKeepsSubfolderBookBesideFolderBookDB
 
 # Two audiobook scans of one book at once: a scan that walked the book before
 # another scan indexed a part neither marks that part missing nor rewrites the
-# book without it; a newer scan still replaces an older alias scan's parts; and
-# a part indexed again while a scan is marking it missing stays present.
+# book without it; a newer scan still replaces an older alias scan's parts;
+# a part indexed again while a scan is marking it missing stays present; and
+# a disc book's parts are named by their path in the book, not their file name.
 ./internal/scanner TestScanFileAudiobookKeepsPartsIndexedByConcurrentScanDB
 ./internal/scanner TestScanFileAudiobookNewerAliasInventoryWinsDB
 ./internal/scanner TestScanFileAudiobookKeepsPartRestoredWhileMarkingDB
+./internal/scanner TestScanFileAudiobookDiscPartsAgainstConcurrentRowDB
+
+# An ebook or manga library scan does not mark missing a book that a scan of
+# that file indexed after the library scan's walk or while it marked the book.
+./internal/scanner TestScanBookFolderKeepsBookIndexedByConcurrentScanDB
 
 # A rescan of a retagged, unmatched ebook keeps the fields and author credits an
 # admin locked, including locked fields left empty.
@@ -196,6 +202,12 @@
 # ebook keeps the book: its membership sweep spares an item that still has a
 # present file.
 ./internal/scanner TestScanFileEbookKeepsBookPublishedDuringSiblingScanDB
+
+# A manga scan's orphaned-series delete spares a series another scan just
+# created for its first chapter, and a rescan of an unchanged chapter restores
+# a series that is gone from the library.
+./internal/scanner TestScanFileMangaKeepsNewSeriesDuringConcurrentScanDB
+./internal/scanner TestScanFileMangaRelinksUnchangedChapterWithoutSeriesDB
 
 # A full scan that holds a few files at a time catalogs a library like one that
 # holds them all: groups and roots spanning batches, a deleted top-level
@@ -545,6 +557,7 @@
 ./internal/downloads TestPreparedSeasonReplacementCountsTowardConcurrentLimitDB
 ./internal/downloads TestPreparedReplacementQuotaAccountingDB
 ./internal/downloads TestReadyArtifactSingleCreateTakesNoConcurrentSlotDB
+./internal/downloads TestPreparedSingleReplacementCountsTowardConcurrentLimitDB
 ./internal/downloads TestPreparedReplacementCountsTheEntryStatusUnderTheLockDB
 ./internal/downloads TestPreparedReplacementRefusesAStaleGuardUnderTheLockDB
 ./internal/downloads TestManagedBatchOverConcurrentCapDB
@@ -1043,6 +1056,8 @@
 # An audiobook rescan keeps the authors and narrators an admin locked with the
 # crew lock.
 ./internal/scanner TestAudiobookRescanKeepsCrewLockedCreditsDB
+./internal/scanner TestAudiobookRegroupKeepsContentIDsDB
+./internal/scanner TestAudiobookUnreadableDiscKeepsIndexedBookDB
 
 # A provider match owns an audiobook's year, genres and credits: a rescan only
 # fills what is empty, and the match keeps the tag narrator and the book's own

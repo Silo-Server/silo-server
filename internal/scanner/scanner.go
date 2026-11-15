@@ -400,11 +400,17 @@ func (s *Scanner) ScanSubtree(ctx context.Context, folder *models.MediaFolder, s
 	watchCtx, stopWatch := s.watchFolderContext(ctx, folder.ID)
 	defer stopWatch()
 	if librarykind.IsAudiobook(folder.Type) {
-		scanRoot, err := cleanScopedAudiobookScanRoot(subtreePath)
+		// collectAudiobookRootScans widens the scope (audiobookScopeRoot); a
+		// file is scanned through its folder.
+		scope := filepath.Clean(subtreePath)
+		if info, statErr := fspath.Stat(scope); statErr == nil && !info.IsDir() {
+			scope = filepath.Dir(scope)
+		}
+		scanRoot, err := cleanScopedAudiobookScanRoot(scope)
 		if err != nil {
 			return nil, err
 		}
-		if err := s.scanAudiobookPaths(watchCtx, folder, []string{scanRoot}, false, true); err != nil {
+		if err := s.scanAudiobookPaths(watchCtx, folder, []string{scanRoot}, false, true, ""); err != nil {
 			return nil, err
 		}
 		if err := s.syncFolderScopedAudioLibraryState(watchCtx, folder.ID); err != nil {
@@ -2677,17 +2683,25 @@ func WithExplicitFileRequest(ctx context.Context) context.Context {
 	return context.WithValue(ctx, explicitFileRequestKey{}, true)
 }
 
-// audiobookFileScanHonorsIgnores reports whether an audiobook file scan
-// applies the library's ignore files to the books it rebuilds. It does unless
-// an admin named this file explicitly and the ignore files exclude it, or one
-// of them cannot be read: as when the request is resolved, the admin's file is
-// scanned rather than refused.
-func audiobookFileScanHonorsIgnores(ctx context.Context, file string, libraryRoots []string) bool {
+// audiobookFileScanIgnores reports how an audiobook file scan applies the
+// library's ignore files to the books it rebuilds. A scan Silo starts on its
+// own applies them. When an admin named this file explicitly, the admin's
+// file is scanned rather than refused, as when the request is resolved: if
+// the ignore files exclude it, it is admitted past them and nothing else they
+// exclude is (admit); if one of them cannot be read, the rules are unknown and
+// the rebuild reads no ignore files (honor is false).
+func audiobookFileScanIgnores(ctx context.Context, file string, libraryRoots []string) (honor bool, admit string) {
 	if explicit, _ := ctx.Value(explicitFileRequestKey{}).(bool); !explicit {
-		return true
+		return true, ""
 	}
 	ignored, err := FileIgnored(file, libraryRoots)
-	return err == nil && !ignored
+	switch {
+	case err != nil:
+		return false, ""
+	case ignored:
+		return true, file
+	}
+	return true, ""
 }
 
 // ScanFile scans a single file and upserts it into the database. filePath
@@ -2708,17 +2722,20 @@ func (s *Scanner) ScanFile(ctx context.Context, filePath string, folder *models.
 		if !SupportsAudioFile(cleanFile) {
 			return fmt.Errorf("unrecognized audio extension: %s", strings.ToLower(filepath.Ext(cleanFile)))
 		}
-		scanRoot, err := cleanScopedAudiobookScanRoot(filepath.Dir(cleanFile))
+		// Widen before checking the folder exists, so a file in a deleted
+		// disc folder still rebuilds its book.
+		widened, _ := audiobookScopeRoot(filepath.Dir(cleanFile), folder.Paths)
+		scanRoot, err := cleanScopedAudiobookScanRoot(widened)
 		if err != nil {
 			return err
 		}
-		honorIgnores := audiobookFileScanHonorsIgnores(ctx, cleanFile, folder.Paths)
+		honorIgnores, admit := audiobookFileScanIgnores(ctx, cleanFile, folder.Paths)
 		if handled, err := s.reconcileVanishedFileIfNeeded(ctx, folder, cleanFile); handled {
 			if err != nil {
 				return err
 			}
 			if info, statErr := fspath.Stat(scanRoot); statErr == nil && info.IsDir() {
-				if err := s.scanAudiobookPaths(ctx, folder, []string{scanRoot}, false, honorIgnores); err != nil {
+				if err := s.scanAudiobookPaths(ctx, folder, []string{scanRoot}, false, honorIgnores, admit); err != nil {
 					return err
 				}
 			} else if statErr != nil && !errors.Is(statErr, os.ErrNotExist) {
@@ -2726,7 +2743,7 @@ func (s *Scanner) ScanFile(ctx context.Context, filePath string, folder *models.
 			}
 			return s.syncFolderScopedAudioLibraryState(ctx, folder.ID)
 		}
-		if err := s.scanAudiobookPaths(ctx, folder, []string{scanRoot}, false, honorIgnores); err != nil {
+		if err := s.scanAudiobookPaths(ctx, folder, []string{scanRoot}, false, honorIgnores, admit); err != nil {
 			return err
 		}
 		return s.syncFolderScopedAudioLibraryState(ctx, folder.ID)

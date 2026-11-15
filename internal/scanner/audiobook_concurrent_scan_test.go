@@ -89,16 +89,15 @@ func (f *concurrentBookFixture) copyPart(name string) error {
 	return os.WriteFile(filepath.Join(f.bookDir, name), []byte(name), 0o644)
 }
 
-// hookedScanner returns a scanner on its own pool that runs fn before its
-// first query containing match. It stands in for a scan on any node.
+// hookedScanner is newHookedScanner with the fixture's fake ffprobe.
 func (f *concurrentBookFixture) hookedScanner(t *testing.T, match string, fn func()) *Scanner {
 	t.Helper()
-	return NewScanner(NewFileRepository(hookedPool(t, match, fn)), f.ffprobe, nil, 2, false, time.Hour)
+	return newHookedScanner(t, f.ffprobe, match, fn)
 }
 
-// hookedPool returns a pool of its own that runs fn before its first query
-// containing match.
-func hookedPool(t *testing.T, match string, fn func()) *pgxpool.Pool {
+// newHookedScanner returns a scanner on its own pool that runs fn before its
+// first query containing match. It stands in for a scan on any node.
+func newHookedScanner(t *testing.T, ffprobe, match string, fn func()) *Scanner {
 	t.Helper()
 	cfg, err := pgxpool.ParseConfig(os.Getenv("SILO_TEST_DATABASE_URL"))
 	if err != nil {
@@ -110,7 +109,7 @@ func hookedPool(t *testing.T, match string, fn func()) *pgxpool.Pool {
 		t.Fatalf("connect hooked pool: %v", err)
 	}
 	t.Cleanup(pool.Close)
-	return pool
+	return NewScanner(NewFileRepository(pool), ffprobe, nil, 2, false, time.Hour)
 }
 
 // requireParts compares the library's present files, relative to its root,
@@ -285,5 +284,61 @@ func TestScanFileAudiobookKeepsPartRestoredWhileMarkingDB(t *testing.T) {
 	f.requireParts(t,
 		"Copied Author/01.mp3 "+audiobookMultipartKind+" 1/2",
 		"Copied Author/02.mp3 "+audiobookMultipartKind+" 2/2",
+	)
+}
+
+// TestScanFileAudiobookDiscPartsAgainstConcurrentRowDB covers a book whose
+// parts sit in disc folders, so two parts share a file name. A row another
+// scan wrote for CD1/01.mp3 after this scan's walk names a part this scan also
+// holds, and must not read as one it lacks: the scan still writes the book,
+// and CD2 is indexed.
+func TestScanFileAudiobookDiscPartsAgainstConcurrentRowDB(t *testing.T) {
+	f := newConcurrentBookFixture(t)
+	for _, rel := range []string{"CD1/01.mp3", "CD2/01.mp3"} {
+		path := filepath.Join(f.bookDir, rel)
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(rel), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	physical, err := canonicalWalkPath(f.bookDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	contentID := fmt.Sprintf("concurrent-disc-%d", f.folder.ID)
+	var hookErr error
+	ran := false
+	s := f.hookedScanner(t, audiobookSkipCheckSQL, func() {
+		ran = true
+		bg := context.Background()
+		for _, stmt := range []struct {
+			sql  string
+			args []any
+		}{
+			{`INSERT INTO media_items (content_id, type, title, status, genres) VALUES ($1, 'audiobook', 'Copied Book', 'local', '{}'::text[])`, []any{contentID}},
+			{`INSERT INTO media_item_libraries (content_id, media_folder_id) VALUES ($1, $2)`, []any{contentID, f.folder.ID}},
+			{`INSERT INTO media_files (content_id, media_folder_id, file_path, observed_root_path, canonical_root_path, file_size, file_modified_at)
+			  VALUES ($1, $2, $3, $4, $5, 1, now())`, []any{contentID, f.folder.ID, filepath.Join(f.bookDir, "CD1", "01.mp3"), f.bookDir, physical}},
+		} {
+			if _, err := f.pool.Exec(bg, stmt.sql, stmt.args...); err != nil && hookErr == nil {
+				hookErr = err
+			}
+		}
+	})
+
+	if err := s.ScanFile(t.Context(), filepath.Join(f.bookDir, "CD2", "01.mp3"), f.folder); err != nil {
+		t.Fatalf("ScanFile: %v", err)
+	}
+	if !ran {
+		t.Fatal("the concurrent row was never written; the skip-check query was not traced")
+	}
+	if hookErr != nil {
+		t.Fatalf("write concurrent row: %v", hookErr)
+	}
+	f.requireParts(t,
+		"Copied Author/CD1/01.mp3 "+audiobookMultipartKind+" 1/2",
+		"Copied Author/CD2/01.mp3 "+audiobookMultipartKind+" 2/2",
 	)
 }
