@@ -127,6 +127,7 @@ func TestLiveLocalSessionReportsAPlayThatIsNeverServed(t *testing.T) {
 	report("local-1", time.Now(), 100)
 	report("local-1", time.Now(), 110)
 	report("local-late", time.Now().Add(-10*time.Minute), 50)
+	report("local-ahead", time.Now().Add(45*time.Second), 50)
 
 	if len(started) != 1 || started[0].ClientName != "Plappa" || started[0].MediaFileID != 42 || started[0].TimelineDuration != 3600 {
 		t.Fatalf("lifecycle starts = %+v, want one for the live play", started)

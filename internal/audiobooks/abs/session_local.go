@@ -74,10 +74,13 @@ func (m *unixMillis) UnmarshalJSON(data []byte) error {
 }
 
 // isLive reports whether the client updated the session within
-// liveReportWindow of now, by the device's clock: playback happening now
-// rather than a late sync.
+// liveReportWindow before now, by the device's clock, or at most
+// liveReportFutureSkew after it: playback happening now rather than a late
+// sync. Both together stay inside the sweep's idle window for reported
+// plays, so a late copy of a play's last report cannot start it again.
 func (s localPlaybackSession) isLive(now time.Time) bool {
-	return s.UpdatedAt > 0 && now.Sub(time.UnixMilli(int64(s.UpdatedAt))).Abs() <= liveReportWindow
+	age := now.Sub(time.UnixMilli(int64(s.UpdatedAt)))
+	return s.UpdatedAt > 0 && age <= liveReportWindow && age >= -liveReportFutureSkew
 }
 
 // localSyncResult mirrors the per-session object ABS returns from

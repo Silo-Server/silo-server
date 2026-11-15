@@ -151,10 +151,12 @@ func (h *Handler) updateNativePlaybackProgress(ctx context.Context, sessionID st
 const (
 	// liveReportWindow separates a live play from catch-up: a local session
 	// the client updated longer ago than this is offline listening synced
-	// late, or a report sent again. It is shorter than the lifecycle sweep's
-	// idle window for reported plays, so a late copy of a play's last report
-	// cannot start the play again after it ended.
-	liveReportWindow = time.Minute
+	// late, or a report sent again. With liveReportFutureSkew, the device
+	// clock's allowance ahead of the server's, it stays within the lifecycle
+	// sweep's 90-second idle window for reported plays, so a late copy of a
+	// play's last report cannot start the play again after it ended.
+	liveReportWindow     = time.Minute
+	liveReportFutureSkew = 30 * time.Second
 	// maxReportedPlaysPerAccount bounds the reported plays one account can
 	// have open at once across the cluster. They are outside stream limits,
 	// so without it an account could post any number of fresh session IDs.

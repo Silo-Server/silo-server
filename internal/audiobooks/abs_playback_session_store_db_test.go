@@ -99,6 +99,12 @@ func TestReportPlayKeepsOnePlayPerClientSessionDB(t *testing.T) {
 	if err != nil || !got.ReportOnly || got.CurrentPositionSeconds != 110 || got.TimeListeningSeconds != 10 {
 		t.Fatalf("play = %+v, %v; want report-only at 110 s with 10 s listened", got, err)
 	}
+	// Totals that round to the same credited second still order the reports.
+	report("local-1", 112, 310.9)
+	report("local-1", 108, 310.5)
+	if got, err := store.GetPlaybackSession(ctx, first); err != nil || got.CurrentPositionSeconds != 112 {
+		t.Fatalf("play = %+v, %v; want the newer position 112 s", got, err)
+	}
 
 	// The cap counts every open reported play of the account.
 	if id, _ := report("local-2", 0, 0); id == "" {

@@ -91,14 +91,15 @@ const reportedPlayIdleSeconds = 90
 // session. Listening is the client's running total less the total the row
 // began at, never negative, never more than the row's age allows, and never
 // decreasing. The client's total only rises within its session, so a report
-// whose total is behind the play's is an older one arriving late: it keeps
-// the play alive but leaves the newer position. It returns the play and
+// whose total is below the highest one seen is an older one arriving late: it
+// keeps the play alive but leaves the newer position. It returns the play and
 // whether its lifecycle start was recorded.
 const updateReportedPlaySQL = `
 	UPDATE abs_playback_sessions s
 	SET current_position_seconds = CASE
-	        WHEN $5::double precision - s.reported_listening_base >= s.time_listening_seconds THEN $4
+	        WHEN $5::double precision >= s.reported_listening_total THEN $4
 	        ELSE s.current_position_seconds END,
+	    reported_listening_total = GREATEST(s.reported_listening_total, $5::double precision),
 	    time_listening_seconds   = GREATEST(s.time_listening_seconds,
 	        GREATEST(LEAST(FLOOR($5::double precision - s.reported_listening_base),
 	                       EXTRACT(EPOCH FROM now() - s.started_at) + $6), 0)::integer),
@@ -189,8 +190,9 @@ func startReportedPlayTx(ctx context.Context, tx pgx.Tx, uid int, p abs.Reported
 	err := tx.QueryRow(ctx, `
 		INSERT INTO abs_playback_sessions
 		  (id, user_id, profile_id, content_id, media_file_id, started_at, last_sync_at,
-		   time_listening_seconds, current_position_seconds, client_session_id, reported_listening_base)
-		VALUES ($1, $2, $3, $4, $5, now(), now(), 0, $6, $7, GREATEST($8::double precision, 0))
+		   time_listening_seconds, current_position_seconds, client_session_id,
+		   reported_listening_base, reported_listening_total)
+		VALUES ($1, $2, $3, $4, $5, now(), now(), 0, $6, $7, GREATEST($8::double precision, 0), $8)
 		RETURNING started_at`,
 		newID, uid, p.ProfileID, p.ContentID, p.MediaFileID, p.PositionSeconds, p.ClientSessionID, p.ListeningSeconds).Scan(&st.StartedAt)
 	return st, err
