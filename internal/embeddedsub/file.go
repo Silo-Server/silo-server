@@ -3,10 +3,12 @@ package embeddedsub
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/Silo-Server/silo-server/internal/fspath"
 )
@@ -121,11 +123,57 @@ type fileReader struct {
 	prio  *Priority
 	reads atomic.Int64
 	bytes atomic.Int64
+	// slow, when set, refuses reads once recent ones were slow.
+	slow *slowReads
 }
 
 // background bounds the reads to n in flight while prio isn't raised.
 func (fr *fileReader) background(prio *Priority, n int) {
 	fr.prio, fr.bg = prio, make(chan struct{}, n)
+}
+
+// giveWayWhenSlow refuses reads, with ErrSlowReads, once the last
+// slowReadSample of them took longer than limit on average
+// (ReadOptions.SlowRead). Zero never refuses.
+func (fr *fileReader) giveWayWhenSlow(limit time.Duration) {
+	if limit > 0 {
+		fr.slow = &slowReads{limit: limit}
+	}
+}
+
+// slowReads keeps the latency of a read's latest reads.
+type slowReads struct {
+	limit  time.Duration
+	mu     sync.Mutex
+	recent [slowReadSample]time.Duration
+	n      int
+	sum    time.Duration
+	// err is set once the reads were slow.
+	err error
+}
+
+// record adds a read that started at start and just ended.
+func (s *slowReads) record(start time.Time) {
+	d := time.Since(start)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	i := s.n % len(s.recent)
+	s.sum += d - s.recent[i]
+	s.recent[i] = d
+	s.n++
+	if s.err != nil || s.n < len(s.recent) {
+		return
+	}
+	if mean := s.sum / time.Duration(len(s.recent)); mean > s.limit {
+		s.err = fmt.Errorf("%w: the last %d took %v on average", ErrSlowReads, len(s.recent), mean.Round(time.Millisecond))
+	}
+}
+
+// refused is the error a read starting now gets, if any.
+func (s *slowReads) refused() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.err
 }
 
 func newFileReader(ctx context.Context, r io.ReaderAt, concurrency int) *fileReader {
@@ -156,6 +204,12 @@ func (fr *fileReader) ReadAt(p []byte, off int64) (int, error) {
 			return 0, fr.ctxErr()
 		}
 		defer func() { <-fr.sem }()
+	}
+	if fr.slow != nil {
+		if err := fr.slow.refused(); err != nil {
+			return 0, err
+		}
+		defer fr.slow.record(time.Now())
 	}
 	n, err := fr.r.ReadAt(p, off)
 	fr.reads.Add(1)

@@ -43,13 +43,33 @@ type audiobookPosterPathReader interface {
 
 const audiobookMultipartKind = "multipart"
 
+// audiobookDuplicateCandidateSQL runs once per new book, so its plan must not
+// depend on planner statistics. On a server with a large catalog, the first
+// audiobook scan runs while the statistics still say there are no audiobooks
+// and no author or narrator credits; a freely reordered join then compares
+// every author credit with every audiobook, and each lookup gets slower as
+// the library fills. So the names are resolved first, the items credited to
+// both are materialized, and media_items is read by primary key. The type is
+// tested on the materialized rows: tested on media_items itself, it lets the
+// planner scan the partial books index once per candidate.
 const audiobookDuplicateCandidateSQL = `
+	WITH cand AS MATERIALIZED (
+		SELECT ipa.content_id
+		FROM item_people ipa
+		WHERE ipa.kind = 7
+		  AND ipa.person_id = ANY (ARRAY(SELECT id FROM people WHERE LOWER(name) = LOWER($1)))
+		INTERSECT
+		SELECT ipn.content_id
+		FROM item_people ipn
+		WHERE ipn.kind = 8
+		  AND ipn.person_id = ANY (ARRAY(SELECT id FROM people WHERE LOWER(name) = LOWER($2)))
+	), items AS MATERIALIZED (
+		SELECT i.content_id, i.title, i.type, i.year
+		FROM cand
+		JOIN media_items i ON i.content_id = cand.content_id
+	)
 	SELECT mi.content_id, mi.title
-	FROM media_items mi
-	JOIN item_people ipa ON ipa.content_id = mi.content_id AND ipa.kind = 7
-	JOIN people pa ON pa.id = ipa.person_id AND LOWER(pa.name) = LOWER($1)
-	JOIN item_people ipn ON ipn.content_id = mi.content_id AND ipn.kind = 8
-	JOIN people pn ON pn.id = ipn.person_id AND LOWER(pn.name) = LOWER($2)
+	FROM items mi
 	JOIN LATERAL (
 		SELECT COALESCE(SUM(mf.duration), 0) AS dur
 		FROM media_files mf WHERE mf.content_id = mi.content_id
@@ -204,6 +224,9 @@ func (s *Scanner) audiobookFolderShouldSkip(ctx context.Context, folder *models.
 			return 0, false, nil
 		}
 	}
+	if audiobookTagRereadRequested(ctx, contentID) {
+		return 0, false, nil
+	}
 	items, err := s.itemRepo.GetByIDs(ctx, []string{contentID})
 	if err != nil {
 		return 0, false, fmt.Errorf("get item for skip check: %w", err)
@@ -238,6 +261,10 @@ func statAudiobookDiskFiles(parts []string) (onDisk []audiobookDiskFile, unreada
 	}
 	return onDisk, unreadable, nil
 }
+
+// audiobookScanProgressInterval is how often an audiobook scan reports how
+// many books it has finished.
+const audiobookScanProgressInterval = 3 * time.Second
 
 // audiobookScanWorkers returns the configured number of parallel workers
 // for audiobook reconciliation. Defaults to 8 — high enough to keep all
@@ -780,7 +807,7 @@ func (s *Scanner) scanAudiobookPaths(ctx context.Context, folder *models.MediaFo
 	candidates := groupAudiobookCandidates(scans)
 	reconcileRoots, seenPaths, protectedPaths := splitAudiobookReconcileRoots(scans)
 	inventory := audiobookInventory{seen: seenPaths, books: walkedAudiobookBooks(scans)}
-	reportAudiobookScanProgress(ctx, folder.ID, len(candidates), 0, 0, 0)
+	reportProgress(ctx, audiobookScanProgress(folder.ID, len(candidates), 0, 0, 0))
 
 	if len(candidates) == 0 {
 		// No books on disk. Still reconcile (guarded) so a legitimately-emptied
@@ -872,23 +899,19 @@ func (s *Scanner) reconcileAudiobookCandidates(ctx context.Context, folder *mode
 						"error", err,
 					)
 				}
-				n := atomic.AddInt64(&processed, 1)
-				if n%500 == 0 || n == int64(len(candidates)) {
-					failedCount := atomic.LoadInt64(&failed)
-					skippedCount := atomic.LoadInt64(&skipped)
-					slog.InfoContext(ctx, "audiobook scan: progress", "component", "scanner",
-						"folder_id", folder.ID,
-						"processed", n,
-						"failed", failedCount,
-						"skipped", skippedCount,
-						"total", len(candidates),
-						"elapsed_sec", int(time.Since(start).Seconds()),
-					)
-					reportAudiobookScanProgress(ctx, folder.ID, len(candidates), int(n), int(failedCount), int(skippedCount))
-				}
+				atomic.AddInt64(&processed, 1)
 			}
 		})
 	}
+	// Books can each take seconds, so progress follows the clock: workers
+	// only count, and one goroutine writes the counts every interval. The
+	// last counts are written however the pool ends.
+	progress := audiobookProgress(ctx, folder.ID, len(candidates), start, &processed, &failed, &skipped)
+	stopProgress := reportProgressEvery(ctx, audiobookScanProgressInterval, progress)
+	defer func() {
+		stopProgress()
+		reportProgress(ctx, progress())
+	}()
 
 	for _, p := range candidates {
 		select {
@@ -1001,8 +1024,30 @@ func (s *Scanner) reconcileAudiobookMissingFiles(ctx context.Context, folder *mo
 	return nil
 }
 
-func reportAudiobookScanProgress(ctx context.Context, folderID int, total, processed, failed, skipped int) {
-	reportProgress(ctx, ProgressUpdate{
+// audiobookProgress returns the counts of an audiobook scan as a progress
+// update, logging them when the processed count moved since the last call.
+// Calls must not overlap.
+func audiobookProgress(ctx context.Context, folderID, total int, start time.Time, processed, failed, skipped *int64) func() ProgressUpdate {
+	logged := int64(-1)
+	return func() ProgressUpdate {
+		n, failedCount, skippedCount := atomic.LoadInt64(processed), atomic.LoadInt64(failed), atomic.LoadInt64(skipped)
+		if n != logged {
+			logged = n
+			slog.InfoContext(ctx, "audiobook scan: progress", "component", "scanner",
+				"folder_id", folderID,
+				"processed", n,
+				"failed", failedCount,
+				"skipped", skippedCount,
+				"total", total,
+				"elapsed_sec", int(time.Since(start).Seconds()),
+			)
+		}
+		return audiobookScanProgress(folderID, total, int(n), int(failedCount), int(skippedCount))
+	}
+}
+
+func audiobookScanProgress(folderID int, total, processed, failed, skipped int) ProgressUpdate {
+	return ProgressUpdate{
 		Phase:           "audiobook_scan",
 		Message:         fmt.Sprintf("Scanning audiobooks in folder %d", folderID),
 		CurrentScope:    strconv.Itoa(folderID),
@@ -1011,7 +1056,7 @@ func reportAudiobookScanProgress(ctx context.Context, folderID int, total, proce
 		FilesProcessed:  processed,
 		Errors:          failed,
 		Unchanged:       skipped,
-	})
+	}
 }
 
 // audiobookFolderUnchangedOnDisk runs audiobookFolderShouldSkip for the book
@@ -1126,33 +1171,12 @@ func (s *Scanner) reconcileAudiobookFolder(ctx context.Context, folder *models.M
 	if err := tx.Commit(ctx); err != nil {
 		return fmt.Errorf("commit audiobook folder transaction: %w", err)
 	}
-	// A loose single-file book shares its directory, and so any cover image
-	// there, with other books; only a book folder's cover belongs to the book.
-	rootedAtFile := len(parsed.Files) == 1 && parsed.Files[0].Path == folderPath
-	if !rootedAtFile {
-		if err := applyAudiobookSidecarCover(ctx, s.itemRepo, s.imageCacher, contentID, folderPath); err != nil {
-			slog.WarnContext(ctx, "audiobook scan: sidecar cover upload failed", "component", "scanner",
-				"folder_id", folder.ID,
-				"content_id", contentID,
-				"path", folderPath,
-				"error", err,
-			)
-		}
-	}
-	if len(parsed.Files) > 0 && s.fileRepo != nil {
-		if _, err := applyAudiobookEmbeddedCover(ctx, s.itemRepo, s.fileRepo.Pool(), FFmpegPathFromFFprobe(s.ffprobePath), s.imageCacher, parsed.Files[0].Path, contentID); err != nil {
-			slog.WarnContext(ctx, "audiobook scan: embedded cover failed", "component", "scanner",
-				"folder_id", folder.ID,
-				"content_id", contentID,
-				"path", parsed.Files[0].Path,
-				"error", err,
-			)
-		}
-	}
+	s.applyAudiobookCovers(ctx, folder.ID, contentID, folderPath, parsed)
 	if err := s.upsertAudiobookPeople(ctx, contentID, parsed); err != nil {
 		return fmt.Errorf("upsert audiobook people: %w", err)
 	}
 	s.autoLinkLiteraryWork(ctx, contentID)
+	noteAudiobookTagReread(ctx, contentID)
 	slog.InfoContext(ctx, "audiobook scan: indexed", "component", "scanner",
 		"folder_id", folder.ID,
 		"content_id", contentID,
@@ -1162,6 +1186,34 @@ func (s *Scanner) reconcileAudiobookFolder(ctx context.Context, folder *models.M
 		"unreadable_files", len(parsed.UnreadableParts),
 	)
 	return nil
+}
+
+// applyAudiobookCovers sets a book's poster from a sidecar image in its folder
+// or from the art embedded in its first file. Failures are logged.
+func (s *Scanner) applyAudiobookCovers(ctx context.Context, folderID int, contentID, folderPath string, parsed *parsedAudiobook) {
+	// A loose single-file book shares its directory, and so any cover image
+	// there, with other books; only a book folder's cover belongs to the book.
+	rootedAtFile := len(parsed.Files) == 1 && parsed.Files[0].Path == folderPath
+	if !rootedAtFile {
+		if err := applyAudiobookSidecarCover(ctx, s.itemRepo, s.imageCacher, contentID, folderPath); err != nil {
+			slog.WarnContext(ctx, "audiobook scan: sidecar cover upload failed", "component", "scanner",
+				"folder_id", folderID,
+				"content_id", contentID,
+				"path", folderPath,
+				"error", err,
+			)
+		}
+	}
+	if len(parsed.Files) > 0 && s.fileRepo != nil {
+		if _, err := applyAudiobookEmbeddedCover(ctx, s.itemRepo, s.fileRepo.Pool(), FFmpegPathFromFFprobe(s.ffprobePath), s.imageCacher, parsed.Files[0].Path, contentID); err != nil {
+			slog.WarnContext(ctx, "audiobook scan: embedded cover failed", "component", "scanner",
+				"folder_id", folderID,
+				"content_id", contentID,
+				"path", parsed.Files[0].Path,
+				"error", err,
+			)
+		}
+	}
 }
 
 // retireUnreadableAudiobookFiles marks missing the rows of a book whose every

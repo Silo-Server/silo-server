@@ -141,6 +141,12 @@ library item through them and the row's provider key:
   before the title row retires. A provider removal before the next import then
   still reaches it, and a complete read listing the title under another of its
   IDs keeps it. Listed title rows hand over first.
+- A complete read that keeps a title row, or the library item that took one
+  over, through another of the title's IDs moves the row to the provider key
+  that listing carried, as does a listing a pending local removal waits on. A
+  removal sends only the row's key, and plugins send the provider the one ID
+  in it, so a removal under an old key could leave the provider's entry
+  listed.
 - A provider removal of the title also takes that one library item off the
   library watchlist, for a promotion that ran after the pass read the entry.
 - A pending local removal of a title also holds a listing under another TMDB

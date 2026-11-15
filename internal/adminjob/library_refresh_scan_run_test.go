@@ -59,7 +59,7 @@ func TestLibraryRefreshUnmatchedItemCarriesDirectScanRun(t *testing.T) {
 		refresher: refresher,
 	}
 
-	if err := executor.refreshUnmatchedItem(context.Background(), 9, "series-1"); err != nil {
+	if err := executor.refreshUnmatchedItem(context.Background(), 9, "series-1", false); err != nil {
 		t.Fatalf("refreshUnmatchedItem: %v", err)
 	}
 	if ingester.runID != "admin-refresh-run" || scanRuns.completedID != "admin-refresh-run" {
@@ -88,7 +88,7 @@ func TestLibraryRefreshWithholdsScanCompleteWhenMetadataFails(t *testing.T) {
 		eventBus:  eventBus,
 	}
 
-	err := executor.refreshUnmatchedItem(context.Background(), 9, "series-1")
+	err := executor.refreshUnmatchedItem(context.Background(), 9, "series-1", false)
 	if err == nil || !strings.Contains(err.Error(), "metadata failed") {
 		t.Fatalf("refreshUnmatchedItem() error = %v, want metadata failure", err)
 	}
@@ -139,4 +139,30 @@ func TestLibraryRefreshPublishesScanCompleteAfterDirectIngest(t *testing.T) {
 		}
 	}
 	t.Fatalf("events = %#v, want scan_complete for library 9", eventBus.events)
+}
+
+// An audiobook an admin left unmatched on purpose has its folder scanned but
+// is not sent to the metadata refresh.
+func TestLibraryRefreshTagsOnlyItemSkipsMetadataRefresh(t *testing.T) {
+	t.Parallel()
+
+	scanRuns := &itemRefreshTestScanRuns{}
+	executor := &LibraryRefreshExecutor{
+		folderRepo: &itemRefreshTestFolderRepo{folder: &models.MediaFolder{ID: 9, Enabled: true}},
+		resolver: &libraryRefreshTestResolver{req: &ItemRefreshRequest{
+			ScanFolderID:     9,
+			ScanPath:         "/media/books/ignored-book",
+			RefreshContentID: "book-1",
+		}},
+		ingester:  &itemRefreshTestIngester{},
+		scanRuns:  scanRuns,
+		refresher: &itemRefreshTestRefresher{err: errors.New("metadata refresh must not run")},
+	}
+
+	if err := executor.refreshUnmatchedItem(context.Background(), 9, "book-1", true); err != nil {
+		t.Fatalf("refreshUnmatchedItem: %v", err)
+	}
+	if scanRuns.completedID != "admin-refresh-run" {
+		t.Fatalf("completed scan run = %q, want admin-refresh-run", scanRuns.completedID)
+	}
 }

@@ -196,7 +196,7 @@ func (s *Service) importListTitle(
 	// A pending library row counts too: the library lost the item, and the
 	// listing now names its title outside the library.
 	pending := pendingTitleRows(pendingTitles, title.Kind, append(title.IDs(), key))
-	waits, err := s.waitsForListRemoval(ctx, conn, b, id, pending, row, removalsPending)
+	waits, err := s.waitsForListRemoval(ctx, conn, b, id, pending, row, key, removalsPending)
 	if err != nil || waits {
 		return nil, waits, false, err
 	}
@@ -285,7 +285,8 @@ func (s *Service) waitsForMatchedListRemoval(
 			pending = nil
 		}
 	}
-	return s.waitsForListRemoval(ctx, conn, b, mediaItemID, pending, row, removalsPending)
+	// ids starts with the listing's provider key.
+	return s.waitsForListRemoval(ctx, conn, b, mediaItemID, pending, row, ids[0], removalsPending)
 }
 
 // waitsForListRemoval reports whether a listing the import would keep as id
@@ -297,7 +298,7 @@ func (s *Service) waitsForMatchedListRemoval(
 // items, the provider listing the title again after every local removal is a
 // newer add, which supersedes the removals waiting on the other rows so they
 // can't take the add off the provider; an older or undated listing is the one
-// the removals will take off.
+// the removals will take off, so they go out under key, the listing's.
 func (s *Service) waitsForListRemoval(
 	ctx context.Context,
 	conn Connection,
@@ -305,6 +306,7 @@ func (s *Service) waitsForListRemoval(
 	id string,
 	pending []string,
 	row RemoteFavorite,
+	key string,
 	removalsPending map[string]time.Time,
 ) (bool, error) {
 	if !slices.Contains(pending, id) {
@@ -317,7 +319,7 @@ func (s *Service) waitsForListRemoval(
 		case !ok:
 			continue
 		case row.FavoritedAtGuessed || !row.FavoritedAt.After(removedAt):
-			return true, nil
+			return true, s.moveListRemovals(ctx, conn, b, pending, key, removalsPending)
 		case pendingID != id:
 			superseded = append(superseded, pendingID)
 		}
@@ -332,6 +334,24 @@ func (s *Service) waitsForListRemoval(
 	// in this batch doesn't take it for a removal still waiting.
 	delete(removalsPending, id)
 	return false, nil
+}
+
+// moveListRemovals puts the pending removals among rows under key, the key of
+// the listing they will take off. A removal sends the provider only its row's
+// key, which may name an ID the provider no longer lists the title by.
+func (s *Service) moveListRemovals(ctx context.Context, conn Connection, b listBinding, rows []string, key string, removalsPending map[string]time.Time) error {
+	if key == "" {
+		return nil
+	}
+	for _, row := range rows {
+		if _, ok := removalsPending[row]; !ok {
+			continue
+		}
+		if err := s.repo.SetListItemProviderKey(ctx, conn.ID, b.kind, row, key); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // pendingTitleKey keys pendingTitles: a title's kind and one of its prefixed

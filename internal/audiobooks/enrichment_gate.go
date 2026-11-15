@@ -29,8 +29,8 @@ const (
 )
 
 // providerGate pauses a provider for the whole enricher once it answers
-// rate-limited or looks down, so the rest of a 250-item sweep does not keep
-// calling into a closed window. The zero value is ready to use.
+// rate-limited or looks down, so the rest of the sweep does not keep calling
+// into a closed window. The zero value is ready to use.
 //
 // The gate is per process. That is enough because only one node sweeps at a
 // time (see Enricher.Run). When the next sweep lands on another node, that
