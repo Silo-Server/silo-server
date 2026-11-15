@@ -16,6 +16,7 @@ import {
 import { Skeleton } from "@/components/ui/skeleton";
 import PathAutocompleteInput from "@/components/PathAutocompleteInput";
 import { useT, type MessageKey } from "@/i18n";
+import { isImeComposing } from "@/lib/imeComposition";
 
 interface FolderBrowserProps {
   open: boolean;
@@ -174,6 +175,7 @@ export default function FolderBrowser({
               }}
               placeholder={PATH_PLACEHOLDER}
               onKeyDown={(event) => {
+                if (isImeComposing(event)) return;
                 if (event.key === "Enter") {
                   event.preventDefault();
                   void handleBrowseSubmit();

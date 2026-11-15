@@ -15,6 +15,7 @@ import {
 import { navigateToPluginRoute } from "@/lib/buildPluginHref";
 import type { AdminNavGroup, AdminNavItem } from "@/lib/adminNavigation";
 import { cn } from "@/lib/utils";
+import { isImeComposing } from "@/lib/imeComposition";
 
 /** The key that closes the dialog, as printed on the keyboard. */
 const ESCAPE_KEY_LABEL = "ESC";
@@ -117,6 +118,7 @@ export function AdminSectionCommandDialog({
   );
 
   function handleInputKeyDown(event: React.KeyboardEvent<HTMLInputElement>) {
+    if (isImeComposing(event)) return;
     if (event.key === "ArrowDown") {
       event.preventDefault();
       setSelectedIndex((current) => (resultCount === 0 ? -1 : (current + 1) % resultCount));

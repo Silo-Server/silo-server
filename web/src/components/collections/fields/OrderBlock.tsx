@@ -29,6 +29,7 @@ import {
   QUERY_SORT_OPTIONS,
   type QuerySortOrder,
 } from "@/lib/querySortOptions";
+import { isImeComposing } from "@/lib/imeComposition";
 
 const ALPHABETICAL = new Set(["title", "author", "narrator", "series"]);
 const BY_DATE = new Set([
@@ -260,7 +261,7 @@ function MaxTitlesInput({
         className="h-full min-w-0 flex-1 rounded-none border-0 bg-transparent p-0 shadow-none focus-visible:ring-0"
         onBlur={(event) => onCommit(event.currentTarget)}
         onKeyDown={(event) => {
-          if (event.key === "Enter") event.currentTarget.blur();
+          if (event.key === "Enter" && !isImeComposing(event)) event.currentTarget.blur();
         }}
       />
       <span
