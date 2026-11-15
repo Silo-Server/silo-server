@@ -49,9 +49,9 @@ const audiobookMultipartKind = "multipart"
 // and no author or narrator credits; a freely reordered join then compares
 // every author credit with every audiobook, and each lookup gets slower as
 // the library fills. So the names are resolved first, the items credited to
-// both are materialized, and media_items is read by primary key. The caller
-// checks the type: with type = 'audiobook' in the query, the planner scans
-// the partial books index once per candidate.
+// both are materialized, and media_items is read by primary key. The type is
+// tested on the materialized rows: tested on media_items itself, it lets the
+// planner scan the partial books index once per candidate.
 const audiobookDuplicateCandidateSQL = `
 	WITH cand AS MATERIALIZED (
 		SELECT ipa.content_id
@@ -63,10 +63,13 @@ const audiobookDuplicateCandidateSQL = `
 		FROM item_people ipn
 		WHERE ipn.kind = 8
 		  AND ipn.person_id = ANY (ARRAY(SELECT id FROM people WHERE LOWER(name) = LOWER($2)))
+	), items AS MATERIALIZED (
+		SELECT i.content_id, i.title, i.type, i.year
+		FROM cand
+		JOIN media_items i ON i.content_id = cand.content_id
 	)
-	SELECT mi.content_id, mi.title, mi.type
-	FROM cand
-	JOIN media_items mi ON mi.content_id = cand.content_id
+	SELECT mi.content_id, mi.title
+	FROM items mi
 	JOIN LATERAL (
 		SELECT COALESCE(SUM(mf.duration), 0) AS dur
 		FROM media_files mf WHERE mf.content_id = mi.content_id
@@ -77,11 +80,12 @@ const audiobookDuplicateCandidateSQL = `
 			'[[:space:]]+', ' ', 'g'
 		)) AS normalized_title
 	) t ON TRUE
-	-- Compare the tag year the files were scanned with: a provider match
-	-- owns mi.year, and a renamed folder of a matched book must still find
-	-- its item. Files from before base_year existed (migration 078) hold 0
-	-- until their folder is rewritten; for those, fall back to mi.year.
-	WHERE (
+	WHERE mi.type = 'audiobook'
+	  -- Compare the tag year the files were scanned with: a provider match
+	  -- owns mi.year, and a renamed folder of a matched book must still find
+	  -- its item. Files from before base_year existed (migration 078) hold 0
+	  -- until their folder is rewritten; for those, fall back to mi.year.
+	  AND (
 		  EXISTS (
 			  SELECT 1 FROM media_files yf
 			  WHERE yf.content_id = mi.content_id AND yf.base_year = $3
@@ -1395,11 +1399,11 @@ func (s *Scanner) findAudiobookDuplicate(ctx context.Context, folderID int, book
 	var existingID string
 	var candidates []string
 	for rows.Next() {
-		var candidateID, candidateTitle, candidateType string
-		if err := rows.Scan(&candidateID, &candidateTitle, &candidateType); err != nil {
+		var candidateID, candidateTitle string
+		if err := rows.Scan(&candidateID, &candidateTitle); err != nil {
 			return nil
 		}
-		if candidateType == "audiobook" && audiobookDedupeTitlesMatch(candidateTitle, cleanTitle) {
+		if audiobookDedupeTitlesMatch(candidateTitle, cleanTitle) {
 			candidates = append(candidates, candidateID)
 		}
 	}
