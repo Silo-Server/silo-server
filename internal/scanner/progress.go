@@ -44,9 +44,10 @@ func reportProgress(ctx context.Context, update ProgressUpdate) {
 }
 
 // reportProgressEvery reports progress() every interval until stop is called
-// or ctx ends. A scan's workers only bump counters; this goroutine owns the
-// writes, so their rate follows the clock rather than the number of items.
-// stop waits for a report already in flight.
+// or ctx ends, skipping a report identical to the one before it. A scan's
+// workers only bump counters; this goroutine owns the writes, so their rate
+// follows the clock rather than the number of items. stop waits for a report
+// already in flight.
 func reportProgressEvery(ctx context.Context, interval time.Duration, progress func() ProgressUpdate) (stop func()) {
 	stopCh := make(chan struct{})
 	done := make(chan struct{})
@@ -54,6 +55,7 @@ func reportProgressEvery(ctx context.Context, interval time.Duration, progress f
 		ticker := time.NewTicker(interval)
 		defer ticker.Stop()
 		defer close(done)
+		var last ProgressUpdate
 		for {
 			select {
 			case <-ctx.Done():
@@ -61,7 +63,10 @@ func reportProgressEvery(ctx context.Context, interval time.Duration, progress f
 			case <-stopCh:
 				return
 			case <-ticker.C:
-				reportProgress(ctx, progress())
+				if update := progress(); update != last {
+					reportProgress(ctx, update)
+					last = update
+				}
 			}
 		}
 	}()

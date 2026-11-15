@@ -853,21 +853,29 @@ func (s *Scanner) reconcileAudiobookCandidates(ctx context.Context, folder *mode
 		})
 	}
 	// Books can each take seconds, so progress follows the clock: workers
-	// only count, and one goroutine writes the counts every interval.
+	// only count, and one goroutine writes the counts every interval. The
+	// last counts are written however the pool ends.
+	logged := int64(-1)
 	progress := func() ProgressUpdate {
 		n, failedCount, skippedCount := atomic.LoadInt64(&processed), atomic.LoadInt64(&failed), atomic.LoadInt64(&skipped)
-		slog.InfoContext(ctx, "audiobook scan: progress", "component", "scanner",
-			"folder_id", folder.ID,
-			"processed", n,
-			"failed", failedCount,
-			"skipped", skippedCount,
-			"total", len(candidates),
-			"elapsed_sec", int(time.Since(start).Seconds()),
-		)
+		if n != logged {
+			logged = n
+			slog.InfoContext(ctx, "audiobook scan: progress", "component", "scanner",
+				"folder_id", folder.ID,
+				"processed", n,
+				"failed", failedCount,
+				"skipped", skippedCount,
+				"total", len(candidates),
+				"elapsed_sec", int(time.Since(start).Seconds()),
+			)
+		}
 		return audiobookScanProgress(folder.ID, len(candidates), int(n), int(failedCount), int(skippedCount))
 	}
 	stopProgress := reportProgressEvery(ctx, audiobookScanProgressInterval, progress)
-	defer stopProgress()
+	defer func() {
+		stopProgress()
+		reportProgress(ctx, progress())
+	}()
 
 	for _, p := range candidates {
 		select {
@@ -886,8 +894,6 @@ func (s *Scanner) reconcileAudiobookCandidates(ctx context.Context, folder *mode
 	if cancelErr != nil {
 		return cancelErr
 	}
-	stopProgress()
-	reportProgress(ctx, progress())
 
 	slog.InfoContext(ctx, "audiobook scan: completed", "component", "scanner",
 		"folder_id", folder.ID,
