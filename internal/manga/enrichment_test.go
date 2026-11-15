@@ -244,13 +244,18 @@ func TestPersistReturnsProviderIDFailure(t *testing.T) {
 // title match alone must not give it another book's metadata (#4154).
 func TestMangaWithoutAnAuthorNeedsTheWholeTitle(t *testing.T) {
 	for _, tc := range []struct {
-		name, author, candidate string
-		matched                 bool
+		name, title, author, candidate string
+		matched                        bool
 	}{
 		{name: "a one-word prefix", candidate: "Raw"},
 		{name: "the same title", candidate: "Raw Stream", matched: true},
 		{name: "a one-word prefix with an author", author: "Someone", candidate: "Raw", matched: true},
+		{name: "a release tag in the folder name", title: "Naruto [Digital]", candidate: "Naruto", matched: true},
+		{name: "a longer title behind a release tag", title: "Naruto [Digital]", candidate: "Naruto Gaiden"},
 	} {
+		if tc.title == "" {
+			tc.title = "Raw Stream"
+		}
 		t.Run(tc.name, func(t *testing.T) {
 			providers := []metadata.Provider{&fakeMangaMetadataProvider{
 				slug:    "mangadex",
@@ -258,10 +263,10 @@ func TestMangaWithoutAnAuthorNeedsTheWholeTitle(t *testing.T) {
 			}}
 			// The admitted provider IDs are what GetMetadata fetches by.
 			_, ids, _, _ := collectMangaMetadata(context.Background(), enrichmentItemRow{
-				ContentID: "c1", Title: "Raw Stream", Author: tc.author,
+				ContentID: "c1", Title: tc.title, Author: tc.author,
 			}, providers, nil)
 			if matched := ids["mangadex"] == "1"; matched != tc.matched {
-				t.Fatalf("%q for \"Raw Stream\" (author %q): matched = %v, want %v", tc.candidate, tc.author, matched, tc.matched)
+				t.Fatalf("%q for %q (author %q): matched = %v, want %v", tc.candidate, tc.title, tc.author, matched, tc.matched)
 			}
 		})
 	}
