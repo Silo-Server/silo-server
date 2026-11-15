@@ -3469,6 +3469,16 @@
       "value": "Тут немає нічого, що можна відтворити."
     }
   ],
+  "signIn.withProvider": [
+    {
+      "type": 0,
+      "value": "Увійти через "
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    }
+  ],
   "subtitleSearch.hearingImpaired": [
     {
       "type": 0,

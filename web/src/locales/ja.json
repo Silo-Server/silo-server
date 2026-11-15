@@ -3432,6 +3432,16 @@
       "value": "再生できる項目がありません。"
     }
   ],
+  "signIn.withProvider": [
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": "でサインイン"
+    }
+  ],
   "subtitleSearch.hearingImpaired": [
     {
       "type": 0,

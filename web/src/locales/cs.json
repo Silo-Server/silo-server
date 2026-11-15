@@ -3465,6 +3465,16 @@
       "value": "Nic zde nelze přehrát."
     }
   ],
+  "signIn.withProvider": [
+    {
+      "type": 0,
+      "value": "Přihlásit se přes "
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    }
+  ],
   "subtitleSearch.hearingImpaired": [
     {
       "type": 0,

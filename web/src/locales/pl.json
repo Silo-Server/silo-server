@@ -3465,6 +3465,16 @@
       "value": "Nic tutaj nie da się odtworzyć."
     }
   ],
+  "signIn.withProvider": [
+    {
+      "type": 0,
+      "value": "Zaloguj się przez usługę "
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    }
+  ],
   "subtitleSearch.hearingImpaired": [
     {
       "type": 0,

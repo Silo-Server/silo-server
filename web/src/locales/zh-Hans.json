@@ -3432,6 +3432,20 @@
       "value": "这里没有可播放的内容。"
     }
   ],
+  "signIn.withProvider": [
+    {
+      "type": 0,
+      "value": "使用"
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": "登录"
+    }
+  ],
   "subtitleSearch.hearingImpaired": [
     {
       "type": 0,

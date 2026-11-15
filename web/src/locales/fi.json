@@ -3443,6 +3443,16 @@
       "value": "Täällä ei ole mitään toistettavaa."
     }
   ],
+  "signIn.withProvider": [
+    {
+      "type": 0,
+      "value": "Kirjaudu sisään palvelulla "
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    }
+  ],
   "subtitleSearch.hearingImpaired": [
     {
       "type": 0,

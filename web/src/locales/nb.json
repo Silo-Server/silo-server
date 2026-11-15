@@ -3443,6 +3443,16 @@
       "value": "Ingenting her kan spilles av."
     }
   ],
+  "signIn.withProvider": [
+    {
+      "type": 0,
+      "value": "Logg på med "
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    }
+  ],
   "subtitleSearch.hearingImpaired": [
     {
       "type": 0,

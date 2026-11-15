@@ -599,7 +599,7 @@ export default function Login() {
                 <Button key={entry.id} asChild variant="outline" className="w-full gap-3">
                   <a href={startHref(entry.installation_id ?? "")} onClick={() => clearSignedOut()}>
                     {entry.icon_url && <img src={entry.icon_url} alt="" className="h-5 w-5" />}
-                    <span>{entry.display_name}</span>
+                    <span>{t("signIn.withProvider", { provider: entry.display_name })}</span>
                   </a>
                 </Button>
               ))}

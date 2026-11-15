@@ -3447,6 +3447,16 @@
       "value": "Burada oynatılabilecek bir şey yok."
     }
   ],
+  "signIn.withProvider": [
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": " ile oturum aç"
+    }
+  ],
   "subtitleSearch.hearingImpaired": [
     {
       "type": 0,

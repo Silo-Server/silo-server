@@ -3443,6 +3443,16 @@
       "value": "Intet her kan afspilles."
     }
   ],
+  "signIn.withProvider": [
+    {
+      "type": 0,
+      "value": "Log ind med "
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    }
+  ],
   "subtitleSearch.hearingImpaired": [
     {
       "type": 0,

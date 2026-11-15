@@ -3479,6 +3479,20 @@
       "value": "⟦Ñöţĥîñĝ ĥéŕé çåñ ƀé þļåýéđ.~~~~~~~~~~~⟧"
     }
   ],
+  "signIn.withProvider": [
+    {
+      "type": 0,
+      "value": "⟦Šîĝñ îñ ŵîţĥ "
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": "~~~~~~⟧"
+    }
+  ],
   "subtitleSearch.hearingImpaired": [
     {
       "type": 0,

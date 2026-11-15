@@ -3432,6 +3432,16 @@
       "value": "재생할 수 있는 항목이 없어요."
     }
   ],
+  "signIn.withProvider": [
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": " 계정으로 로그인"
+    }
+  ],
   "subtitleSearch.hearingImpaired": [
     {
       "type": 0,

@@ -3454,6 +3454,16 @@
       "value": "Aucun élément lisible ici."
     }
   ],
+  "signIn.withProvider": [
+    {
+      "type": 0,
+      "value": "Se connecter avec "
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    }
+  ],
   "subtitleSearch.hearingImpaired": [
     {
       "type": 0,

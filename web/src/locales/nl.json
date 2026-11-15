@@ -3451,6 +3451,16 @@
       "value": "Hier kan niets worden afgespeeld."
     }
   ],
+  "signIn.withProvider": [
+    {
+      "type": 0,
+      "value": "Inloggen met "
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    }
+  ],
   "subtitleSearch.hearingImpaired": [
     {
       "type": 0,

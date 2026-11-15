@@ -3443,6 +3443,16 @@
       "value": "Nothing here can be played."
     }
   ],
+  "signIn.withProvider": [
+    {
+      "type": 0,
+      "value": "Sign in with "
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    }
+  ],
   "subtitleSearch.hearingImpaired": [
     {
       "type": 0,
