@@ -367,6 +367,10 @@ type PlaybackHandler struct {
 	tm            *playback.TranscodeManager
 	SubtitleRepo  subtitles.Repository // optional; enables downloaded subtitles
 	SubtitleBlobs subtitles.BlobStore  // optional; backs downloaded subtitle reads
+	// AudioPreferences and SubtitlePreferences save the tracks Jellyfin
+	// clients report as the series' remembered tracks; nil saves none.
+	AudioPreferences    AudioPreferenceWriter
+	SubtitlePreferences SubtitlePreferenceWriter
 	// ExternalTimings finds sidecar timing corrections; nil serves sidecars
 	// as they are on disk.
 	ExternalTimings subtitles.ExternalTimingLookup
@@ -2525,6 +2529,9 @@ func (h *PlaybackHandler) HandlePlaybackInfo(w http.ResponseWriter, r *http.Requ
 			}
 		}
 		downloadedByFile[source.Version.FileID] = downloaded
+		for _, dl := range downloaded {
+			source.DownloadedSubtitleIDs = append(source.DownloadedSubtitleIDs, dl.ID)
+		}
 		source.DefaultSubtitleStreamIndex = compatDetailSubtitleStreamIndex(detail, source.Version, downloaded, savedSubtitleMode, effectiveCompatAudioStreamIndex(source))
 		var requestedSubtitleIndex *int
 		if index, ok := req.SubtitleStreamIndex.get(); ok {
@@ -2774,6 +2781,7 @@ func (h *PlaybackHandler) HandlePlaybackInfo(w http.ResponseWriter, r *http.Requ
 		ClientPeer:         requestPeerHost(r),
 		ItemID:             detail.ContentID,
 		RouteItemID:        routeItemID,
+		PreferenceKey:      compatTrackPreferenceKey(detail),
 		NegotiationVariant: compatNegotiationVariant(sources),
 		UserID:             session.PseudoUserID.String(),
 		InitialSeekSeconds: clampSeekSeconds(float64(req.StartTimeTicks)/10_000_000, sources),
