@@ -38,7 +38,7 @@ func TestSourceRevisionRoundTripAndPathValidation(t *testing.T) {
 	if err != nil || decoded != revision {
 		t.Fatalf("round trip = %#v, %v; want %#v", decoded, err, revision)
 	}
-	if err := revision.ValidatePath(path); err != nil {
+	if err := revision.ValidatePath(t.Context(), path); err != nil {
 		t.Fatalf("ValidatePath(original) = %v", err)
 	}
 	if err := os.WriteFile(path, []byte("replaced"), 0o600); err != nil {
@@ -47,7 +47,7 @@ func TestSourceRevisionRoundTripAndPathValidation(t *testing.T) {
 	if err := os.Chtimes(path, info.ModTime().Add(time.Second), info.ModTime().Add(time.Second)); err != nil {
 		t.Fatal(err)
 	}
-	if err := revision.ValidatePath(path); err == nil {
+	if err := revision.ValidatePath(t.Context(), path); err == nil {
 		t.Fatal("ValidatePath accepted replacement bytes")
 	}
 }
@@ -79,7 +79,7 @@ func TestValidatePathRejectsReplacementWithPreservedSizeAndModTime(t *testing.T)
 		t.Fatal(err)
 	}
 
-	if err := revision.ValidatePath(path); err == nil {
+	if err := revision.ValidatePath(t.Context(), path); err == nil {
 		t.Fatal("ValidatePath accepted replacement bytes with preserved size and modification time")
 	}
 }
@@ -95,7 +95,7 @@ func TestRevisionForFileNormalizesProbeTimestamp(t *testing.T) {
 
 func TestValidatePathClassifiesMissingSourceAsChanged(t *testing.T) {
 	revision := SourceRevision{MediaFileID: 1, FileSize: 1}
-	err := revision.ValidatePath(filepath.Join(t.TempDir(), "missing.mkv"))
+	err := revision.ValidatePath(t.Context(), filepath.Join(t.TempDir(), "missing.mkv"))
 	if !errors.Is(err, ErrSourceRevisionChanged) {
 		t.Fatalf("ValidatePath(missing) = %v, want ErrSourceRevisionChanged", err)
 	}

@@ -32,6 +32,9 @@ type Client struct {
 	nodeID  int
 	key     string
 	http    *http.Client
+	// sources reads source bytes (ReadSource): no overall timeout, since a
+	// read streams for as long as FFmpeg consumes it.
+	sources *http.Client
 	// onUnauthorized runs when the core answers a call other than the
 	// configuration read with 401. See SetOnUnauthorized.
 	onUnauthorized func()
@@ -51,12 +54,30 @@ func NewClient(coreURL, nodeKey string) (*Client, error) {
 	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" {
 		return nil, errors.New("core URL must be an absolute http or https URL")
 	}
+	noRedirect := func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
 	return &Client{coreURL: coreURL, nodeID: nodeID, key: nodeKey, http: &http.Client{
 		Timeout: requestTimeout,
 		// A redirect would send the signed request somewhere it was not
 		// signed for.
-		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
-	}}, nil
+		CheckRedirect: noRedirect,
+	}, sources: &http.Client{Transport: sourceTransport(), CheckRedirect: noRedirect}}, nil
+}
+
+// sourceTransport is the transport of source byte reads: straight to the
+// core, never through a proxy, asking for no compression, with an answer due
+// within requestTimeout and enough pooled connections for the reads a busy
+// node keeps open (every FFmpeg input, and up to 128 reader fetches).
+func sourceTransport() http.RoundTripper {
+	base, ok := http.DefaultTransport.(*http.Transport)
+	if !ok {
+		return http.DefaultTransport
+	}
+	t := base.Clone()
+	t.Proxy = nil
+	t.DisableCompression = true
+	t.ResponseHeaderTimeout = requestTimeout
+	t.MaxIdleConnsPerHost = 64
+	return t
 }
 
 // NodeID is the node's id, as its key names it.
@@ -233,6 +254,30 @@ func (c *Client) OpenSource(ctx context.Context, grant string) (*nodesource.Open
 		return nil, fmt.Errorf("decode source open answer: %w", err)
 	}
 	return &opened, nil
+}
+
+// ReadSource sends one ranged read of a source's bytes to the core's sources
+// route, signed as the node, with the grant in its header (which the
+// signature covers), If-Match on the revision and Accept-Encoding identity.
+// It returns the answer whatever its status; nodesource checks it and closes
+// its body. It is the nodesource.FetchFunc of the node's opener.
+func (c *Client) ReadSource(ctx context.Context, read nodesource.ReadRequest) (*http.Response, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.coreURL+PathSources, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set(nodesource.HeaderSourceGrant, read.Grant)
+	req.Header.Set(headerRange, fmt.Sprintf("bytes=%d-%d", read.Offset, read.Offset+read.Length-1))
+	req.Header.Set(headerIfMatch, read.ETag)
+	req.Header.Set("Accept-Encoding", "identity")
+	if err := nodeauth.SignToCore(req, c.coreURL, c.nodeID, c.key); err != nil {
+		return nil, err
+	}
+	resp, err := c.sources.Do(req)
+	if err == nil && resp.StatusCode == http.StatusUnauthorized && c.onUnauthorized != nil {
+		c.onUnauthorized()
+	}
+	return resp, err
 }
 
 // RevokeRecipes asks the core to withdraw every recipe bound to this node, as

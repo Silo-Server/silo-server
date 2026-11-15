@@ -19074,6 +19074,11 @@ export interface components {
       physical_gpu_keys?: string[];
       /** @description Client-facing node address as configured; not validated as a URI */
       public_url?: string;
+      /**
+       * @description How this transcode node reads source media: local through its own library mount, core over HTTP from the API servers. Absent on proxies.
+       * @enum {string}
+       */
+      source_access?: "local" | "core";
       /** @enum {string} */
       type: "proxy" | "transcode";
       /** @description Node address as configured; not validated as a URI */
@@ -19088,6 +19093,8 @@ export interface components {
       node_keys: boolean;
       /** @description Opaque revision of this document */
       revision: string;
+      /** @description Transcode nodes can read source media through the API servers instead of a library mount: source_access on node rows and in the create and update bodies. */
+      source_access: boolean;
       /**
        * @description Support and configuration state, not health
        * @enum {string}
@@ -19105,6 +19112,11 @@ export interface components {
       name: string;
       /** Format: uri-reference */
       public_url?: string;
+      /**
+       * @description How a transcode node reads source media: local through its own library mount at the API servers' paths, or core over HTTP from the API servers, so the node needs no library mount. Absent means local. A proxy accepts only local. Requires the source_access node capability.
+       * @enum {string}
+       */
+      source_access?: "local" | "core";
       /** @enum {string} */
       type: "proxy" | "transcode";
       /** Format: uri-reference */
@@ -19307,6 +19319,11 @@ export interface components {
       name?: string;
       /** Format: uri-reference */
       public_url?: string | null;
+      /**
+       * @description How this transcode node reads source media: local or core (see the create body). Applies to jobs the node starts after the change; running jobs keep their mode. A proxy accepts only local. Requires the source_access node capability.
+       * @enum {string}
+       */
+      source_access?: "local" | "core";
       /** Format: uri-reference */
       url?: string;
     };

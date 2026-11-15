@@ -194,6 +194,60 @@ func TestOpenerRenewalEnds(t *testing.T) {
 			}
 		})
 	})
+	t.Run("a longer grant arrives while a renewal is out", func(t *testing.T) {
+		synctest.Test(t, func(t *testing.T) {
+			core := approvedCore(t, path)
+			opener := quietOpener(core.open)
+			defer func() { _ = opener.Close() }()
+			source, err := opener.Open(t.Context(), "dispatched")
+			if err != nil {
+				t.Fatal(err)
+			}
+			// The first renewal hangs until just before the grant expires,
+			// and fails only after another job has brought a fresh grant.
+			release := make(chan struct{})
+			core.then(func() (*OpenResponse, error) {
+				<-release
+				return unreachable()
+			})
+			time.Sleep(GrantLifetime - time.Second) //nolint:forbidigo // synctest: advances the bubble's fake clock
+			synctest.Wait()
+			source.(*handle).offerGrant("fresher")
+			close(release)
+			time.Sleep(time.Minute) //nolint:forbidigo // synctest: advances the bubble's fake clock
+			synctest.Wait()
+			if source.Err() != nil {
+				t.Fatalf("err %v, want the source kept on the fresher grant", source.Err())
+			}
+		})
+	})
+	t.Run("a refusal of a grant another job has replaced", func(t *testing.T) {
+		synctest.Test(t, func(t *testing.T) {
+			core := approvedCore(t, path)
+			opener := quietOpener(core.open)
+			defer func() { _ = opener.Close() }()
+			source, err := opener.Open(t.Context(), "dispatched")
+			if err != nil {
+				t.Fatal(err)
+			}
+			// The first renewal is refused for good, but only after
+			// another job has brought a newer grant.
+			release := make(chan struct{})
+			core.then(func() (*OpenResponse, error) {
+				<-release
+				return refuse(http.StatusForbidden)()
+			})
+			time.Sleep(RenewInterval + time.Second) //nolint:forbidigo // synctest: advances the bubble's fake clock
+			synctest.Wait()
+			source.(*handle).offerGrant("fresher")
+			close(release)
+			time.Sleep(time.Minute) //nolint:forbidigo // synctest: advances the bubble's fake clock
+			synctest.Wait()
+			if source.Err() != nil {
+				t.Fatalf("err %v, want the source kept on the newer grant", source.Err())
+			}
+		})
+	})
 	t.Run("the opener closes", func(t *testing.T) {
 		synctest.Test(t, func(t *testing.T) {
 			core := approvedCore(t, path)

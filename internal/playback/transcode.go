@@ -528,6 +528,10 @@ func StartTranscode(ctx context.Context, opts TranscodeOpts) (*TranscodeSession,
 	}
 	if err := prepareSubtitleFilterInput(ctx, &opts); err != nil {
 		releaseHWDevice()
+		// A start refused here wrote nothing. Drop the directory it made,
+		// which a node that hands the start back would otherwise keep until
+		// the orphan sweep; a directory that holds anything stays.
+		_ = os.Remove(opts.OutputDir)
 		return nil, err
 	}
 	copyPlan, err := resolveCopyPlan(ctx, opts)
@@ -582,7 +586,7 @@ func StartTranscode(ctx context.Context, opts TranscodeOpts) (*TranscodeSession,
 		bin = ffmpegBinary()
 	}
 
-	log.Printf("playback: ffmpeg cmd: %s %s", bin, strings.Join(args, " "))
+	log.Printf("playback: ffmpeg cmd: %s %s", bin, fspath.RedactRelayed(strings.Join(args, " ")))
 	s.logFFmpegEvent(ctx, "ffmpeg process starting", "")
 
 	cmd := fspath.CommandContext(ctx, bin, args...)
@@ -884,7 +888,7 @@ func validateToneMapSource(ctx context.Context, opts TranscodeOpts) error {
 	if opts.ToneMapMode == "" {
 		return nil
 	}
-	if err := opts.ToneMapSourceRevision.ValidatePath(opts.InputPath); err != nil {
+	if err := opts.ToneMapSourceRevision.ValidatePath(ctx, opts.InputPath); err != nil {
 		if errors.Is(err, tonemap.ErrSourceRevisionChanged) {
 			return err
 		}
@@ -2257,6 +2261,13 @@ func escapeFilterPath(path string) string {
 
 const subtitleFilterAliasName = "subtitle-source.media"
 
+// ErrRelayedSubtitleBurnIn refuses a text burn-in whose track could not be
+// staged when the input is relayed from the core (fspath.IsRelayed): the
+// libass fallback, which reads the whole media file, is not taken over the
+// relay. A transcode node answers it as work it cannot do, so the start runs
+// on a node that reads the file locally, or on the API server.
+var ErrRelayedSubtitleBurnIn = errors.New("subtitle burn-in: the track cannot be staged and a source read through the core cannot be handed to libass")
+
 // textSubtitleFilter is the libass subtitles filter of a text burn-in: the
 // staged track, the only stream of its file, with its fonts, or else the
 // track's index in the media file.
@@ -2294,6 +2305,15 @@ func prepareSubtitleFilterInput(ctx context.Context, opts *TranscodeOpts) error 
 	}
 	if ctx.Err() != nil {
 		return ctx.Err()
+	}
+	if fspath.IsRelayed(opts.InputPath) {
+		// libass opens its file with no protocol whitelist and reads all of
+		// it: over the relay that is the whole source through the core, past
+		// any startup budget. The start fails so it runs where the file is
+		// local.
+		slog.InfoContext(ctx, "burn-in subtitle not staged; a relayed source cannot be handed to libass",
+			"component", "playback", "playback_session_id", opts.SessionID, "subtitle_track", opts.SubtitleTrackIndex, "error", err)
+		return fmt.Errorf("%w: %w", ErrRelayedSubtitleBurnIn, err)
 	}
 	slog.InfoContext(ctx, "burn-in subtitle not staged; libass reads the media file",
 		"component", "playback", "playback_session_id", opts.SessionID, "subtitle_track", opts.SubtitleTrackIndex, "error", err)
@@ -3970,7 +3990,7 @@ func (s *TranscodeSession) restart(
 		bin = ffmpegBinary()
 	}
 
-	log.Printf("playback: ffmpeg restart cmd: %s %s", bin, strings.Join(args, " "))
+	log.Printf("playback: ffmpeg restart cmd: %s %s", bin, fspath.RedactRelayed(strings.Join(args, " ")))
 	if decodeOnCPU {
 		slog.WarnContext(ctx, "transcode could not configure its filter graph on GPU-decoded frames; restarting with CPU decoding",
 			"component", "playback",

@@ -4487,7 +4487,16 @@ export interface StreamNode {
    * one takes no work. Always false for a proxy; absent on older servers.
    */
   key_issued?: boolean;
+  /**
+   * How this transcode node reads source media: through its own library
+   * mount, or over HTTP from the API servers. Absent on proxies and on older
+   * servers.
+   */
+  source_access?: NodeSourceAccess;
 }
+
+/** How a transcode node reads source media. */
+export type NodeSourceAccess = "local" | "core";
 
 export interface CreateNodeRequest {
   name: string;
@@ -4498,6 +4507,8 @@ export interface CreateNodeRequest {
   group?: string;
   max_jobs?: number;
   max_bandwidth_kbps?: number;
+  // Transcode nodes only, with the source_access node capability; absent is local.
+  source_access?: NodeSourceAccess;
 }
 
 export interface UpdateNodeRequest {
@@ -4519,6 +4530,8 @@ export interface UpdateNodeRequest {
   // directory applies when the node restarts.
   download_artifact_dir_override?: string | null;
   download_artifact_max_bytes_override?: number | null;
+  // Transcode nodes only; applies to jobs the node starts after the change.
+  source_access?: NodeSourceAccess;
 }
 
 export interface CheckNodeResponse {

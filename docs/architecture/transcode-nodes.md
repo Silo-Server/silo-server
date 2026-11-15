@@ -32,9 +32,10 @@ they can sign their relays to transcode nodes.
    │ API servers and proxies   │ ─────────────────────────────────────────▶ │ transcode node   │
    │ Postgres, Redis,          │                                            │ SILO_CORE_URL,   │
    │ SECRET_KEY, jwt_secret,   │ ◀───────────────────────────────────────── │ SILO_NODE_KEY,   │
-   │ node credential registry  │  node → API: same key, another label       │ library mount    │
-   └───────────────────────────┘  (config, report, logs, health-changed,    └──────────────────┘
-                                   resolve, revoke-recipes, sources/open)
+   │ node credential registry  │  node → API: same key, another label       │ library mount or │
+   └───────────────────────────┘  (config, report, logs, health-changed,    │ core access      │
+                                   resolve, revoke-recipes, sources/open,   └──────────────────┘
+                                   source bytes)
 ```
 
 "The core" below means the API servers. Only they serve the node control
@@ -215,6 +216,7 @@ returns the calling node's document, `nodecontrol.NodeConfig`:
   "revision": "<sha256 of the rest of the document>",
   "node": {"id": 7, "name": "gpu-1", "url": "http://gpu-1:8080"},
   "drain_requested": false,
+  "source_access": "local",
   "playback": {"ffmpeg_path": "", "hw_accel": "", "hw_device": "", "transcode_dir": "",
                "segment_retention_seconds": 0, "trickplay_node_capacity": 0},
   "download": {"artifact_dir": "", "artifact_max_bytes": 0},
@@ -243,13 +245,16 @@ On the node, `nodeconfig.Remote` serves the configuration through the
   document whose only change is the drain request, name or URL keeps the
   pointer. Drain callbacks fire when `drain_requested` changes.
 - The FFmpeg path, acceleration, segment retention, both capacities, log level
-  and quiet filter apply to new work without a restart. The transcode and
+  and quiet filter apply to new work without a restart. `source_access` is not
+  part of the `Config`: the source opener reads it at every open
+  (`Remote.SourceAccess`), so it applies to jobs opened after the change, and a
+  change to it alone keeps the configuration pointer. The transcode and
   artifact directories, log format and capture level apply when the node
   restarts.
 
 The core pushes `/admin/reload-config` (never `/admin/force-reload`), best
 effort, after a drain request or resume and after an admin change to the node's
-URL, acceleration overrides or download overrides
+URL, acceleration overrides, download overrides or source access
 (`NodeHandler.reloadNodeConfig`). Server-wide settings reach nodes within one
 poll.
 
@@ -360,6 +365,11 @@ Each API replica gives each node three in-memory token buckets and answers
   A node's log lines come to a few kilobytes a second per session; the burst
   takes the backlog a node ships after the core was unreachable.
 
+The source bytes route (see [Core source access](#core-source-access)) is under
+neither budget: each request streams for as long as FFmpeg reads, and a node
+keeps several open per job. The node's signature, the grant and the grant's
+whole life bound it instead.
+
 The node treats a `429` from any route as transient: a remux or rebuild
 answers its relay `503`, a start answers `503` and runs elsewhere, a renewal
 retries until the grant expires, a configuration read keeps the last
@@ -398,7 +408,11 @@ What the core checks:
 - **Remux** (`resolveRemux`). A progressive remux runs on a transcode node
   only on a route whose egress is a proxy: `noderouting.legalShapes` has no
   transcode-executed progressive remux with API egress, so a route with API
-  egress runs the remux on the API server. A valid token is required. Deny checks on the
+  egress runs the remux on the API server. Of the execution preferences, only
+  `playback.routing.remux_execution=prefer_transcode` (the default) ranks the
+  transcode node above the proxy itself; `prefer_worker` and `worker_only`
+  rank both as workers, and the proxy's own execution wins on fewer hops
+  (`noderouting.rank`), which a proxy without the library mount cannot run. A valid token is required. Deny checks on the
   transport and session; the route must be remux workload, transcode execution
   and proxy egress, with execution node id equal to the calling node (a token
   without the id fails closed); downmix and theme shape checks, and a theme
@@ -506,6 +520,22 @@ resolve and never deletes from it.
 
 Known limits:
 
+- A rebuild does not notice a file replaced in place. A stored recipe carries
+  no file revision, and resolve mints the rebuild's grant for whatever file the
+  catalog row's path holds now (`grantResolution`), so when a file is replaced
+  under the same catalog row, a rebuild of an existing session (after a node
+  restart, a withdrawn source, or a move) opens the new file with the recipe
+  made for the old one: its track indexes, durations and keyframe plan. This
+  applies to both source modes.
+- A Jellyfin-compatible audio track switch on a remote session restarts the
+  transcode on the node it already runs on (`restartCompatTranscodeForAudioSelection`'s call to
+  `startRemoteTranscode`). When that node has core source access and the
+  session burns in a text subtitle whose track cannot be staged, the node
+  refuses the start with `409` (`playback.ErrRelayedSubtitleBurnIn`) and the
+  switch fails with an error; it does not move to a `local` node or the API
+  server as a fresh start would. The dead-node move
+  (`moveCompatTranscodeOffNode`) cannot take it over, because it rebuilds from
+  the stored recipe, which still names the previous audio track.
 - HLS resolve has no durable stop check for a transport stopped without a deny
   marker (a native replan retiring its old transport). After a node restart
   loses the in-memory fence, a complete token for that transport can rebuild
@@ -560,10 +590,15 @@ path the core approves for it, never a path the job request names.
 - **Encoding.** `base64url(JSON payload) + "." + base64url(HMAC-SHA256)`, at most
   8 KiB, keyed by `HKDF-SHA256(auth.jwt_secret, info "silo/node-source-grant/v1")`.
   Only API servers mint grants (`nodesource.Grants`).
-- **Payload.** `{"v": 1, "node", "kind": "file" | "theme", "id", "path",
-  "size", "mtime_ns", "exp"}`. `path` is the exact fspath-encoded catalog path,
+- **Payload.** `{"v": 2, "node", "kind": "file" | "theme", "id", "path",
+  "size", "mtime_ns", "iat", "exp"}`. `iat` is when the grant was first minted;
+  renewal keeps it. `path` is the exact fspath-encoded catalog path,
   so no catalog read is needed to use it, and every stat goes through
   `internal/fspath`. The node can read the payload; it is given the path anyway.
+  A version 1 payload, which has no `iat` and which builds between the two
+  transcode node changes minted, still verifies: it is read as version 2 with
+  `iat` one lifetime before its expiry, so a job holding one survives the
+  update.
 - **Revision** is `(kind, id, size, modification time)`, without device, inode
   or change time, so every host computes the same revision of a shared file.
   `mtime_ns` is what the minting stat returned; revisions compare it at
@@ -572,7 +607,16 @@ path the core approves for it, never a path the job request names.
   `"<kind>-<id>-<size>-<mtime in Unix microseconds>"`.
 - **Life.** One hour (`GrantLifetime`). The node renews every 20 minutes
   (`RenewInterval`) while the input is open; renewal keeps the revision, so a
-  job never moves to another version of its source.
+  job never moves to another version of its source. A grant's whole life is
+  capped at 24 hours from `iat` (`MaxGrantAge`): renewal never signs an expiry
+  past it, and `Verify` refuses a grant that old, so open, renewal and byte
+  reads answer `403` and the job fails like any job whose renewal is refused.
+  24 hours is the longest a job legitimately holds one source: a paused player
+  loses its session to the ten-minute idle reap and the rebuild gets a fresh
+  grant, a continuous playback session cannot outlive its stream token's
+  absolute life (`playback.MaxTokenTTL`), and the slowest job, a software
+  re-encode of a four-hour film for download preparation at a quarter of real
+  time, takes 16 hours.
 - **Minting** costs one stat on the API server: native and Jellyfin-compatible
   transcode starts, dead-node moves (granting the replacement node), download
   preparation, trickplay, chapter thumbnails and subtitle-sync samples carry
@@ -591,7 +635,7 @@ path the core approves for it, never a path the job request names.
 |---|---|
 | `200` | `{"grant", "path", "size", "mtime_ns", "etag"}`: the same claims valid for another hour, and the approved revision. `Cache-Control: no-store`. |
 | `400` | No grant in the body. |
-| `403` | The grant does not verify, has expired, or names another node. |
+| `403` | The grant does not verify, has expired or reached its whole life (`MaxGrantAge`), or names another node. |
 | `410` | The catalog no longer has the source at exactly the granted path (a media file by id and not missing, or a theme in an enabled library), or the file is gone or not a regular file. |
 | `412` | The file's size or modification time differs from the grant's revision. |
 | `503` | Transient: no grant key, the catalog cannot be read, or the file could not be examined (an I/O error, a stale mount). |
@@ -600,10 +644,11 @@ Each open and renewal reads the catalog once and stats the file once, so the
 catalog check is never more than one renewal interval stale.
 
 On the node, `nodesource.Opener` exchanges the grant through
-`nodecontrol.Client.OpenSource`, stats the approved path on its own mount, and
-requires a regular file of the same size and modification time to the
-microsecond. A mismatch is a `nodesource.MountMismatchError` naming both sides.
-A job route answers a missing or refused grant with `400`, a mismatch with
+`nodecontrol.Client.OpenSource`. With local source access it stats the approved
+path on its own mount and requires a regular file of the same size and
+modification time to the microsecond; with core access it serves the source on
+the loopback relay instead (see [Core source access](#core-source-access)). A
+mismatch is a `nodesource.MountMismatchError` naming both sides. A job route answers a missing or refused grant with `400`, a mismatch with
 `409`, and a core it cannot reach with `503` (`transcodenode.sourceFailure`);
 the caller runs the job elsewhere. A chapter thumbnail job refused for those
 two reasons, or because the node is draining or re-probing its hardware,
@@ -619,11 +664,228 @@ one minute until the current grant expires. A `400`, `403`, `404`, `410` or
 unreachable ends the source; a `401` is retried, since the core reloads keys
 when a signature fails.
 
-**Operator requirement.** Every API server and every transcode node must see
-each library file at the same path with the same size and the same
-modification time to the microsecond, as the shipped Compose file arranges by
-mounting the library at the same container path. A mismatch fails closed: the
-core answers `412`, and a node refuses the job with `409`.
+**Operator requirement.** Every API server, and every transcode node with local
+source access, must see each library file at the same path with the same size
+and the same modification time to the microsecond, as the shipped Compose file
+arranges by mounting the library at the same container path. A mismatch fails
+closed: the core answers `412`, and a node refuses the job with `409`. A node
+with core source access needs no library mount.
+
+## Core source access
+
+`source_access` is a per-node admin setting, `local` (the default) or `core`,
+stored in `stream_nodes.source_access` (a check constraint keeps a proxy at
+`local`), compared by the configuration trigger, and delivered in the
+configuration document. Dispatch never branches on it: the core mints the same
+grant either way. The node's `Opener` reads the mode at each open
+(`Opener.EnableCoreAccess`, `nodeconfig.Remote.SourceAccess`), so jobs opened
+after a change use the new mode and running jobs keep theirs.
+
+- **local** reads the approved catalog path through the node's library mount.
+- **core** reads the bytes over HTTP from the core through a loopback relay on
+  the node. The node needs no library mount; every byte it reads passes
+  through the API servers.
+
+### Source bytes route
+
+`GET` and `HEAD /api/internal/nodes/sources` (`nodecontrol.Server.HandleSource`),
+node-signed, with the grant in the `X-Silo-Source-Grant` header, which the
+node-to-core signature covers. A header, not a path segment, so access logs on
+the way never record it.
+
+1. The grant must verify, be unexpired, be younger than `MaxGrantAge` and name
+   the calling node (`403`). There is no catalog query: the catalog is checked
+   at open and at every renewal, so it is at most one renewal interval stale.
+2. The core opens the granted path through `internal/fspath` without blocking
+   on a FIFO, `fstat`s the descriptor, and compares the size and the
+   modification time at microseconds with the grant: `410` when gone or not a
+   regular file, `412` when changed, and `503` when the file could not be
+   opened or examined (an I/O error, a stale mount), which the node retries.
+3. It serves from that descriptor with `http.ServeContent`, so a file replaced
+   after the check is never served. Single and suffix ranges and `If-Match` on
+   the grant's entity tag are honored; several ranges answer `416`.
+   `If-None-Match`, `If-Modified-Since`, `If-Unmodified-Since` and `If-Range`
+   are dropped: a condition may only narrow the answer to the granted
+   revision. The answer is identity-encoded (the node control prefix is outside
+   compression), carries `Accept-Ranges: bytes`, the grant's `ETag` and
+   `Cache-Control: no-store`, and keeps the sendfile path. Its write deadline
+   rolls with progress (`httpstream.RollingDeadlineWriter`) instead of the
+   server's absolute write timeout.
+4. It sits outside both per-node request budgets and outside the request and
+   activity logs. Each API replica serves one node at most 512 of these
+   responses at once (`maxSourceStreamsPerNode`), counted from the request's
+   arrival to the end of its response; past that it answers `429` with
+   `Retry-After: 1`, which the node's fetch loop backs off from and retries.
+   Legitimate use stays well below it: a node keeps at most 128 reader fetches
+   in flight, and each FFmpeg process holds one relayed read, two while it
+   seeks, so 32 jobs and 16 trickplay, chapter and sampling runs hold about
+   224. The cap bounds the descriptors and goroutines one node key can hold on
+   a replica.
+5. Every answer, refusals and `416` included, carries `Cache-Control:
+   no-store`. A `416` carries the grant's `ETag` and `Content-Range: bytes
+   */size`; other refusals carry no `ETag`.
+6. When graceful shutdown begins (main cancels the app context, which the
+   route receives as `nodecontrol.Options.Lifetime`, before it shuts the
+   listener down), every response in flight is cut and a request arriving
+   after that answers `503`. The node's relay resumes the read from its offset
+   against another replica or after the restart, so a long read does not hold
+   the shutdown.
+
+**Metrics.** `silo_node_source_streams_active{node}`,
+`silo_node_source_bytes_sent_total{node}` and
+`silo_node_source_stream_ends_total{outcome}` (`completed`, `client_gone`,
+`stalled_reap`, `shutdown`, `forbidden`, `gone`, `changed`,
+`range_not_satisfiable`, `throttled`, `unavailable`), in the style of the
+direct-play metrics. The bytes counter advances as the body is sent, at most
+4 MiB at a time (each sendfile slice), so its rate is the bandwidth in use
+during a long transcode. It is how an operator sizes API bandwidth before
+moving nodes to `core`.
+
+A copy remux reads far ahead of the player. FFmpeg copies as fast as its input
+allows and nothing paces it, so a copy session pulls the rest of the file from
+the API server within seconds of each start or seek. A throttled transcode
+reads about as far ahead as its throttle allows. Size API bandwidth for those
+bursts, not for the media bitrate.
+
+### Loopback relay
+
+`internal/nodesource` (`relay.go`, `fetch.go`) serves core-access sources to
+FFmpeg and to the node's Go readers.
+
+- **One URL per source revision.** The listener is `127.0.0.1:0`, started by
+  the first core-access source and kept for the process. A source's URL is
+  `http://127.0.0.1:<port>/src/<32 hex>`, the token an HMAC of the path and the
+  entity tag under a key drawn at process start. It is the job's input path, so
+  every job on one revision gets the same URL, and the caches keyed by input
+  path (keyframe indexes and their rejections, subtitle indexes and cue
+  windows, staged burn-in reads, the DV RPU probe, copy-seek anchors, the
+  automatic transcode fallback) hit across sessions as they do on a library
+  path. The jobs share one reference-counted relay entry with one renewal loop;
+  a job that opens the revision offers its fresher grant to the entry, so jobs
+  that share a revision run on the newest grant the node holds for it, and the
+  whole-life cap applies to that grant rather than to each job. The URL
+  resolves while at least one job holds it; after the last releases it, it
+  answers `404` until a job opens the revision again.
+- **Serving FFmpeg.** `Range` is forwarded on `GET` only. The relay always sends
+  `Accept-Ranges: bytes` and an exact `Content-Length`, `Content-Range` on
+  `206`, and `Content-Range: bytes */size` on `416`. `HEAD` is answered from
+  the revision.
+- **Upstream.** One primitive (`fetchRange`) serves FFmpeg and the readers.
+  Each request goes through `nodecontrol.Client.ReadSource`: signed, carrying
+  `If-Match` and `Accept-Encoding: identity`, over a client with no proxy, no
+  compression, no redirects, a ten-second response-header timeout and pooled
+  connections. Each answer must be `206` with the revision's `ETag`, identity
+  encoding, and exactly the requested `Content-Range` and length.
+- **Close.** The last job's release ends the entry: renewal stops, the URL
+  stops resolving, reads in flight end, and a response FFmpeg's back pressure
+  holds in a write is interrupted (`SetWriteDeadline(now)`).
+
+### Resume, stall and idle
+
+| Upstream answer | Effect |
+|---|---|
+| Network error, invalid answer, `401`, `429`, `5xx` | Transient: back off from 250 ms, doubling to 4 seconds, and give up after 30 seconds spent waiting on the core without a byte. Time the caller spends not reading does not count. |
+| `400`, `403`, `404`, `410`, `412` | Fatal: the read fails and the entry ends, so every job reading that revision ends. |
+| `416` | Only that read fails; FFmpeg gets `416`. |
+| A body that delivers nothing for 10 seconds | The attempt is cancelled and resumed from its offset. |
+| A body the caller left unread for over 10 seconds | Dropped; the next read starts a fresh request. |
+
+A cut body resumes from where it stopped. When the relay cannot complete a body
+it aborts the loopback connection instead of ending it cleanly, so FFmpeg sees
+a short read, not a short file.
+
+### Go readers and fspath
+
+Main reaches source files through `internal/fspath`, so relayed inputs work at
+that layer: `nodesource` registers itself (`fspath.RegisterRelayedSources`) and
+`internal/fspath` does not depend on it.
+
+- `fspath.Stat`, `StatContext` and `Lstat` describe a relay URL as a read-only
+  regular file of the granted size and modification time, the nanoseconds the
+  core's stat returned, so a version the core recorded from its own stat
+  matches. A released URL is a read error, never a missing file.
+- `fspath.OpenReader` returns a `Reader` (`ReadAt`, `Close`, `Stat`) for a
+  library path (the file) or a relay URL. The tone-map OpenSubtitles hash,
+  `keyframes.Load`, `internal/embeddedsub` (indexes, packet reads, burn-in
+  staging, rendition windows) and the trickplay Cues read use it. Through
+  `keyframes.Load`, a video copy into fMP4 segments gets its keyframe-planned
+  VOD playlist on a mountless node as it does locally; a copy into MPEG-TS
+  segments keeps FFmpeg's growing playlist in either mode
+  (`planCopySegments`).
+  `fspath.Open` of a relay URL is `fspath.ErrRelayed`.
+- **Reader.** Each revision's entry has a cache of 64 KiB pages, 64 of them
+  (4 MiB), shared by every reader of the revision. Reads fetch outside any lock
+  and a page another reader is fetching is shared, not fetched twice. A read
+  larger than a page fetches directly in ranges of at most 1 MiB, uncached. One
+  reader fetches at most twice the source's size (64 GiB at most). The process
+  keeps at most 128 reader fetches in flight: burn-in staging keeps 64, a
+  rendition window up to 16, and tone-map hashing, keyframe index loads and
+  concurrent trickplay Cues reads a few each, so a playback start is not queued
+  behind background work. Every read failure is an `*fs.PathError` naming
+  `source <etag>`.
+
+### FFmpeg argument guard
+
+`fspath.CommandContext`, which every FFmpeg and ffprobe launch on media goes
+through, puts `-protocol_whitelist http,tcp`, `-format_whitelist` of the
+admitted demuxers and an empty `-http_proxy` before every relayed input: before
+its `-i`, or for ffprobe before a positional URL too. FFmpeg's `http` protocol
+otherwise sends loopback requests through the proxy in `http_proxy` as well,
+and the protocol whitelist does not stop it, so on a host with a proxy set
+every relayed read would fail and leave its URL in the proxy's logs. A launch
+with a relayed input also runs without the `http_proxy`, `https_proxy`,
+`all_proxy` and `no_proxy` variables (either case); every other launch
+inherits the environment unchanged. The admitted demuxers are those of the containers
+the scanner catalogs (`internal/mediacontainer`, which the scanner's extension
+lists come from), `m4v` included; playlist, concat, image-sequence, HLS and DASH
+demuxers, which open further URLs or files, are not. A relay URL is restricted
+whether or not its source is still open. `TestEveryMediaLaunchGoesThroughCommandContext`
+(`internal/fspath`) fails when a new process launch bypasses it without a
+recorded reason.
+
+### Relayed concat
+
+Trickplay sampling reads its input through an ffconcat list on stdin
+([media sampling](media-sampling.md)), which the argv guard cannot see. With a
+relayed input the list opens with `-protocol_whitelist http,tcp,pipe
+-format_whitelist concat -f concat -safe 0`, and each entry names the bare URL
+followed by `option protocol_whitelist http,tcp`, `option http_proxy direct`
+(an ffconcat option cannot be empty, and FFmpeg uses a proxy only for a value
+starting with `http://`) and `option format_whitelist` of the admitted
+demuxers, which replace what the entry inherits from the list.
+`mediasample.Capabilities` checks that form against a URL nothing listens on
+(`checkRelayedConcatSamples`). An FFmpeg that cannot read it refuses a relayed
+sample run as `unsupported`, which is not permanent, so the caller moves the
+work.
+
+No other ffconcat list may name a relayed input: `fspath.FFConcatFileURL`
+refuses one with `fspath.ErrRelayed`, and the Samples list names it itself
+(`mediasample.concatPath`). The progressive remux's IDR primer for macOS
+Firefox HEVC resumes (see [playback protocol v3](playback-protocol-v3.md))
+takes its video from such a list, so a relayed input gets the plain seeked
+copy without the primer.
+
+### Text subtitle burn-in
+
+A text burn-in stages its track from the file's index
+(`stageBurnInSubtitle`), which works through the reader and the guarded FFmpeg
+and ffprobe calls. When staging is not possible, a local input falls back to
+handing libass the media file through an alias. That fallback is refused for a
+relayed input (`playback.ErrRelayedSubtitleBurnIn`): FFmpeg's `subtitles=`
+filter opens its file with no protocol whitelist and reads all of it, which
+over the relay would pull the whole source through the core. The node answers
+the start `409`, so it runs on a node that reads the file locally or on the API
+server. Bitmap burn-in is unaffected.
+
+### Redaction
+
+A relay URL is a bearer capability on the node host and never reaches a log.
+`nodesource.RedactRelayURLs` replaces each with `source <etag>`, or
+`source (released)`, and is applied by the node's slog handler
+(`nodesource.RedactingHandler`, installed outermost, so stderr, telemetry and
+the operational log shipped to the core through `opslog.Ship` all see redacted
+records), the FFmpeg argv logs, the FFmpeg log sink, and the error bodies of
+the trickplay, media sample and chapter routes.
 
 ## Failure behavior
 
@@ -643,6 +905,13 @@ core answers `412`, and a node refuses the job with `409`.
 | Node clock more than 30 seconds off | Every signed request in either direction falls outside the signature window and gets `401`. The node reports `key_rejected` as for a rotated key; the logs name both causes. Fixing the clock heals it without a restart. |
 | Node deleted | Its key stops working at once, as a rotated key does: the API server that takes the delete drops the node from its registry before it answers, and every other API server and proxy drops it when `node_pool_changed` reaches it. Relays for its sessions cannot sign and answer "node unavailable" (`502`, or `503` through `/api/v2`) without moving them; clients recover by starting playback again. Its calls get `401`, so it reports `key_rejected` and SIGTERM stops it at once. |
 | Mount mismatch | The node refuses the job with `409` instead of reading other bytes, and the caller runs it elsewhere. A file that changed on the API server between minting and opening gets `412` from the core. |
+| Core unreachable under 30 seconds, core access | Source reads retry and resume; FFmpeg waits. Renewal retries. |
+| Core unreachable 30 seconds or more, core access | The active read fails and FFmpeg exits, as with a lost network mount; the source stays open, and a local-access job keeps reading its mount. A viewer's next request for a segment FFmpeg did not write waits, then restarts FFmpeg at that segment on the same source (`restartSegmentLocked`): once the core answers again, the player's retry recovers; until then the request answers `404`. Renewal still survives about 40 minutes. |
+| Rolling API restart, or reads spread over replicas, core access | Grants and revisions do not depend on the replica. A stopping API server cuts its source responses when graceful shutdown begins, and the relay resumes each from its offset against any replica. |
+| File replaced or removed, core access | The next read, open or renewal answers `412` or `410`, and every job on that revision ends: the node forgets its sessions (`watchSessionSource`). The viewer's next request rebuilds through resolve. For a removed file, or one the catalog dropped, resolve answers `source_changed`, which the node answers `404` (`writeReconstructFailure`); retries get the same, and the client must start playback again. For a file replaced under the same catalog row, the rebuild opens the new file with the old recipe (see the known limit under [Recipe lifecycle](#recipe-lifecycle)). |
+| Node dies, proxy egress | The proxy cannot reach the node and answers `502`. A native client's transcode moves on the client's recovery replan; see [node failure detection](node-failure-detection.md). A Jellyfin-compatible transcode moves on the proxy's move request ([transcode node lost mid-stream](restart-resilient-playback.md#transcode-node-lost-mid-stream)). |
+| Grant reaches `MaxGrantAge` | Renewal and reads answer `403`; the job fails like any refused renewal. |
+| Relayed text burn-in cannot be staged | The node answers the start `409` and the start runs elsewhere. |
 | Node binary from before this design | Health has no `node_control_version`, so the node is unhealthy and never placed; it could not verify the core's signatures anyway. |
 | Current node, core from before this design | The node's first configuration read never succeeds, so it never opens its listener and the core sees it as unreachable. |
 
@@ -652,7 +921,8 @@ core answers `412`, and a node refuses the job with `409`.
   source grants, and no database or Redis credential.
 - A stolen node key lets its holder act as that node towards the core (read
   its configuration, post reports and logs under its id, resolve transports
-  bound to it, open and renew grants issued to it, revoke its recipes) and as
+  bound to it, open and renew grants issued to it, read the bytes those grants
+  name, revoke its recipes) and as
   the core towards that node (start work with grants issued to it, read its
   segments and artifacts, stop its sessions). It cannot sign for another node,
   mint a grant, verify or mint a token, or make the node read a path the core
@@ -673,6 +943,16 @@ core answers `412`, and a node refuses the job with `409`.
   budgets under [Rate limit](#rate-limit) cap catalog reads and stats through
   resolve and sources/open, and log batches store in one statement because
   values Postgres would reject are cleared first.
+- **Core source access.** A stolen node key plus a grant issued to that node
+  reads that one file revision's bytes from the core, without a catalog check,
+  until the grant expires (one hour after its last renewal) and never past 24
+  hours after it was first minted; a read that started before expiry can run
+  past it. Renewal re-checks the catalog, so a file removed from the catalog
+  stops renewing. The key alone reads nothing: no grant, no bytes.
+- **Loopback relay URLs** are bearer capabilities on the node host: anyone who
+  can reach `127.0.0.1` there can read an open source by its URL, and FFmpeg's
+  argv in `/proc/<pid>/cmdline` shows it. The design assumes the node host runs
+  no untrusted local users or processes. The URLs are never logged.
 - **The network.** Signing authenticates requests; it does not encrypt them and
   it does not authenticate responses. A node takes its FFmpeg path, its
   directories and its input paths from the core's answers, so anyone who can
@@ -684,7 +964,5 @@ core answers `412`, and a node refuses the job with `409`.
 
 ## Not in this design
 
-- Core source access: a node that reads source bytes through the core instead
-  of a library mount. Planned as follow-up work.
 - TLS on the node listener.
 - Enrollment flows or node owners other than the cluster administrator.

@@ -175,7 +175,8 @@ func matchesCreation(node *Node, input CreateNodeInput) bool {
 		reflect.DeepEqual(node.MaxJobs, normalizeCap(input.MaxJobs)) &&
 		reflect.DeepEqual(node.MaxBandwidthKbps, normalizeCap(input.MaxBandwidthKbps)) &&
 		node.HWAccelOverride == nil && node.HWDeviceOverride == nil &&
-		node.DownloadArtifactDirOverride == nil && node.DownloadArtifactMaxBytesOverride == nil
+		node.DownloadArtifactDirOverride == nil && node.DownloadArtifactMaxBytesOverride == nil &&
+		node.SourceAccess == sourceAccessOrDefault(input.SourceAccess)
 }
 
 // Update evaluates the original-version guard while holding the row lock. The
@@ -211,6 +212,9 @@ func (s *AdminConfigurationStore) Update(ctx context.Context, id int, input Upda
 		return nil, nil, err
 	}
 	previous.AdminRevision = revision
+	if err = input.ValidateFor(previous); err != nil {
+		return nil, nil, err
+	}
 	// Only a change of address is checked, so a row that already shared its
 	// address before this check existed can still be edited otherwise.
 	if input.URL != nil && previous.Type == NodeTypeTranscode && CanonicalNodeURL(*input.URL) != CanonicalNodeURL(previous.URL) {

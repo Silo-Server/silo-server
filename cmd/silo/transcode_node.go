@@ -179,8 +179,11 @@ func runTranscodeNode() {
 		"node_id", client.NodeID(), "node_name", nodeName)
 
 	// Every job's input opens through the core with the grant the job
-	// carries, at the approved path on this node's own mount.
+	// carries: at the approved path on this node's own mount, or with core
+	// source access over HTTP from the core through a loopback relay. The
+	// mode is read at each open, so a change applies to new jobs.
 	opener := nodesource.NewOpener(client.OpenSource, nil)
+	opener.EnableCoreAccess(nodesource.CoreAccess{Fetch: client.ReadSource, Mode: remote.SourceAccess})
 	defer func() { _ = opener.Close() }()
 
 	tracker := nodesessions.NewLocalTracker()
@@ -276,7 +279,10 @@ func configureTranscodeNodeLogging(ctx context.Context, cfg *config.Config, remo
 	stopShipping := startLogDrain(func(ctx context.Context) {
 		opslog.Ship(ctx, buffer.Chan(), nodecontrol.MaxLogBatchEntries, transcodeNodeLogInterval, client.ShipLogs)
 	})
-	slog.SetDefault(slog.New(opslog.NewHandler(quietFilter, buffer, parseLogLevel(remote.CaptureLevel()), nodeName)))
+	// Outermost, so stderr, telemetry and the log shipped to the core all see
+	// relay URLs, which are capabilities on this host, replaced by the name
+	// of their source.
+	slog.SetDefault(slog.New(nodesource.RedactingHandler(opslog.NewHandler(quietFilter, buffer, parseLogLevel(remote.CaptureLevel()), nodeName))))
 	return func() {
 		stopShipping()
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)

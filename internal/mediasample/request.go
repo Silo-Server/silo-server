@@ -5,8 +5,6 @@ import (
 	"fmt"
 	"math"
 	"strings"
-
-	"github.com/Silo-Server/silo-server/internal/fspath"
 )
 
 // Request describes one analysis decode. It is plain data so that it can be
@@ -226,7 +224,7 @@ func (r Request) Validate() error {
 		if r.Audio != nil || r.Images != nil {
 			return errors.New("samples take only a stats or sheets output")
 		}
-		if _, err := fspath.FFConcatFileURL(r.Input); err != nil {
+		if _, err := concatPath(r.Input); err != nil {
 			return fmt.Errorf("sampled input: %w", err)
 		}
 	}

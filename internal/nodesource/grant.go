@@ -40,15 +40,38 @@ const (
 )
 
 // GrantLifetime is how long a minted or renewed grant stays valid. A node
-// renews well before that while its job runs, so a job has no lifetime limit.
+// renews well before that while its job runs; MaxGrantAge bounds how long it
+// can go on renewing.
 const GrantLifetime = time.Hour
+
+// MaxGrantAge bounds a grant's whole life, from minting across every
+// renewal: the core refuses to renew a grant, or to serve its bytes, once it
+// is this old. A job that needs its source longer fails like any job whose
+// renewal is refused.
+//
+// It is the longest any job can legitimately hold one source. A transcode
+// session is reaped after ten idle minutes (a paused player) and its rebuild
+// gets a fresh grant, so only continuous playback holds a grant, and a
+// playback session cannot outlive its stream token's absolute life
+// (playback.MaxTokenTTL, 24 hours). The slowest job is a download
+// preparation that re-encodes a long film in software: a four-hour film at a
+// quarter of real time takes 16 hours. 24 hours covers both, and bounds what
+// a stolen node key and one captured grant can read to a day.
+const MaxGrantAge = 24 * time.Hour
 
 // RenewInterval is how often a node renews an open source's grant: a third of
 // GrantLifetime, so renewal survives a core outage of about 40 minutes.
 const RenewInterval = 20 * time.Minute
 
-// grantVersion is the payload version a grant carries.
-const grantVersion = 1
+// grantVersion is the payload version a grant carries. Version 2 added the
+// issue time (iat).
+const grantVersion = 2
+
+// legacyGrantVersion is the payload without an issue time, which builds
+// between the two transcode node changes minted. One still held by a running
+// job is read as the current version, its whole life counted from one
+// lifetime before its expiry, so an update does not end that job.
+const legacyGrantVersion = 1
 
 // grantKeyLabel is the HKDF info string of the grant MAC key. Changing it, or
 // reusing it for another purpose, breaks the key separation from every other
@@ -63,7 +86,7 @@ var (
 	// ErrInvalidGrant is a grant that does not verify: malformed, signed with
 	// another key, of an unknown version, or naming nothing usable.
 	ErrInvalidGrant = errors.New("nodesource: invalid source grant")
-	// ErrGrantExpired is a grant past its expiry.
+	// ErrGrantExpired is a grant past its expiry, or older than MaxGrantAge.
 	ErrGrantExpired = errors.New("nodesource: source grant expired")
 	// ErrNoGrantKey is a core without the secret grants are signed with.
 	ErrNoGrantKey = errors.New("nodesource: no source grant key is configured")
@@ -88,7 +111,10 @@ type Grant struct {
 	// ModTimeUnixNano is the modification time the core's stat returned, in
 	// Unix nanoseconds. Revisions compare it at microseconds (SameModTime).
 	ModTimeUnixNano int64 `json:"mtime_ns"`
-	Exp             int64 `json:"exp"`
+	// Iat is when the grant was first minted, in Unix seconds. Renewal keeps
+	// it, so it bounds the grant's whole life (MaxGrantAge).
+	Iat int64 `json:"iat"`
+	Exp int64 `json:"exp"`
 }
 
 // Revision identifies one version of a source independently of where it is
@@ -135,8 +161,14 @@ func (g Grant) Revision() Revision {
 // ETag is the protocol entity tag of the grant's revision.
 func (g Grant) ETag() string { return g.Revision().ETag() }
 
-// Expires is when the grant stops being valid.
-func (g Grant) Expires() time.Time { return time.Unix(g.Exp, 0) }
+// Expires is when the grant stops being valid: its expiry, or the end of its
+// whole life (MaxGrantAge) when that comes first.
+func (g Grant) Expires() time.Time {
+	return time.Unix(min(g.Exp, g.Iat+int64(MaxGrantAge/time.Second)), 0)
+}
+
+// IssuedAt is when the grant was first minted.
+func (g Grant) IssuedAt() time.Time { return time.Unix(g.Iat, 0) }
 
 // Matches reports whether info describes the grant's revision: a regular file
 // of its size and modification time, to the microsecond.
@@ -200,7 +232,13 @@ type Grants struct {
 // NewGrants returns the grants keyed by the secret secret returns, read on
 // every use so a rotated secret applies at once.
 func NewGrants(secret func() string) *Grants {
-	return &Grants{secret: secret, now: time.Now, lifetime: GrantLifetime}
+	return NewGrantsWithClock(secret, time.Now)
+}
+
+// NewGrantsWithClock is NewGrants reading the time from now, so a test can
+// age grants past their expiry or MaxGrantAge.
+func NewGrantsWithClock(secret func() string, now func() time.Time) *Grants {
+	return &Grants{secret: secret, now: now, lifetime: GrantLifetime}
 }
 
 // ForFile mints a grant for node nodeID to use media file file, at the
@@ -233,13 +271,18 @@ func (g *Grants) mint(ctx context.Context, nodeID int, kind string, id int64, pa
 		return "", err
 	}
 	claims.Size, claims.ModTimeUnixNano = info.Size(), info.ModTime().UnixNano()
+	claims.Iat = g.now().Unix()
 	return g.sign(claims)
 }
 
-// Renew returns claims as a grant valid for another lifetime from now. It
-// keeps the revision: renewal never moves a job to another version of its
-// source.
+// Renew returns claims as a grant valid for another lifetime from now, but
+// never past MaxGrantAge after it was first minted. It keeps the revision and
+// the issue time: renewal never moves a job to another version of its source,
+// and never extends a grant's whole life.
 func (g *Grants) Renew(claims Grant) (string, error) {
+	if !g.now().Before(claims.IssuedAt().Add(MaxGrantAge)) {
+		return "", ErrGrantExpired
+	}
 	return g.sign(claims)
 }
 
@@ -248,7 +291,7 @@ func (g *Grants) sign(claims Grant) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	claims.Exp = g.now().Add(g.lifetime).Unix()
+	claims.Exp = min(g.now().Add(g.lifetime).Unix(), claims.IssuedAt().Add(MaxGrantAge).Unix())
 	payload, _ := json.Marshal(claims) // strings and integers only
 	token := base64.RawURLEncoding.EncodeToString(payload) + "." + base64.RawURLEncoding.EncodeToString(grantMAC(key, payload))
 	// Verify refuses anything longer, so never hand out a grant that could
@@ -259,8 +302,9 @@ func (g *Grants) sign(claims Grant) (string, error) {
 	return token, nil
 }
 
-// Verify checks token's MAC and expiry and returns its claims. A token that
-// does not verify is ErrInvalidGrant; one that has expired, ErrGrantExpired.
+// Verify checks token's MAC, expiry and whole life (MaxGrantAge) and returns
+// its claims. A token that does not verify is ErrInvalidGrant; one that has
+// expired or is too old, ErrGrantExpired.
 func (g *Grants) Verify(token string) (Grant, error) {
 	key, err := g.key()
 	if err != nil {
@@ -342,8 +386,15 @@ func splitGrant(token string) (payload, mac []byte, err error) {
 
 func decodeGrant(payload []byte) (Grant, error) {
 	var claims Grant
-	if err := json.Unmarshal(payload, &claims); err != nil || claims.V != grantVersion || !claims.wellFormed() ||
-		claims.Size < 0 || claims.Exp <= 0 {
+	if err := json.Unmarshal(payload, &claims); err != nil || !claims.wellFormed() || claims.Size < 0 || claims.Exp <= 0 {
+		return Grant{}, ErrInvalidGrant
+	}
+	switch {
+	case claims.V == grantVersion && claims.Iat > 0:
+	case claims.V == legacyGrantVersion && claims.Iat == 0:
+		claims.V = grantVersion
+		claims.Iat = claims.Exp - int64(GrantLifetime/time.Second)
+	default:
 		return Grant{}, ErrInvalidGrant
 	}
 	return claims, nil

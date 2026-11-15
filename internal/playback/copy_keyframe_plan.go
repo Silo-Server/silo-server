@@ -82,7 +82,7 @@ func planCopySegments(ctx context.Context, opts TranscodeOpts) (*copySegmentPlan
 // index, or returns nil when the index can't give a plan. It fails when the
 // source's start can't be probed.
 func planFromKeyframeIndex(ctx context.Context, opts TranscodeOpts) (*copySegmentPlan, error) {
-	idx, err := loadKeyframeIndex(opts.InputPath)
+	idx, err := loadKeyframeIndex(ctx, opts.InputPath)
 	if err != nil {
 		if !errors.Is(err, keyframes.ErrNoIndex) {
 			log.Printf("playback: read keyframe index for %s: %v; using FFmpeg's playlist", opts.SessionID, err)

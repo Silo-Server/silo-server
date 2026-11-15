@@ -3462,6 +3462,9 @@ func newChiRouter(deps Dependencies) chi.Router {
 			Telemetry:  streamtelemetry.NodeSnapshotStore(deps.StreamTelemetry),
 			Events:     deps.EventBus,
 			Deny:       playback.NewStreamDeny(deps.RedisClient),
+			// Main cancels the app context before it shuts the listener
+			// down, which cuts source byte streams instead of waiting on them.
+			Lifetime: deps.AppContext,
 			StreamSecret: func() string {
 				if cfg := deps.CurrentConfig(); cfg != nil {
 					return cfg.Auth.JWTSecret
@@ -3499,6 +3502,14 @@ func newChiRouter(deps Dependencies) chi.Router {
 				r.Post("/revoke-recipes", nodeControl.HandleRevokeRecipes)
 			})
 		})
+		// Source bytes for core-access nodes. Each request streams for as
+		// long as FFmpeg reads, and a node keeps several open per job, so they
+		// sit outside both per-node request budgets; the signature, the grant
+		// and the grant's whole life bound them instead. Like every node
+		// route they are outside the request and activity logs and response
+		// compression (skipNativeMediaCompression).
+		r.With(nodecontrol.RequireNode(deps.NodeKeyRegistry)).Get("/api/internal/nodes/sources", nodeControl.HandleSource)
+		r.With(nodecontrol.RequireNode(deps.NodeKeyRegistry)).Head("/api/internal/nodes/sources", nodeControl.HandleSource)
 	}
 
 	if nodeHandler != nil {

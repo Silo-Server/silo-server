@@ -168,6 +168,15 @@ func TestUpdateAdminNodeNudgesWorkerOnlyOnPolicyTargetChange(t *testing.T) {
 			t.Fatalf("reloads=%d invalidations=%d, want 0 and 0", r, i)
 		}
 	})
+	// Source access reaches the node in its configuration document, so a
+	// change is pushed; it changes no capability.
+	t.Run("source access change nudges without invalidating", func(t *testing.T) {
+		before, after := base, base
+		before.SourceAccess, after.SourceAccess = nodepool.SourceAccessLocal, nodepool.SourceAccessCore
+		if r, i := run(t, before, after, nodepool.UpdateNodeInput{SourceAccess: &after.SourceAccess}); r != 1 || i != 0 {
+			t.Fatalf("reloads=%d invalidations=%d, want 1 and 0", r, i)
+		}
+	})
 	// A repoint moves the policy to a different worker even when the overrides
 	// are unchanged, so the replacement must be nudged.
 	t.Run("url-only repoint nudges the replacement", func(t *testing.T) {

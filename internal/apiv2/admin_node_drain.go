@@ -30,6 +30,9 @@ type AdminNodeCapabilities struct {
 	// NodeKeys follows whether this server can issue keys, which needs the
 	// data cipher.
 	NodeKeys bool `json:"node_keys" doc:"Transcode nodes can be issued their own key: POST /admin/nodes/{id}/key, and key_issued on node rows."`
+	// SourceAccess is always true on a server that has the column: the mode
+	// is stored configuration and needs nothing else to be set.
+	SourceAccess bool `json:"source_access" doc:"Transcode nodes can read source media through the API servers instead of a library mount: source_access on node rows and in the create and update bodies."`
 }
 type AdminNodeCapabilitiesOutput struct {
 	Status       int
@@ -59,7 +62,7 @@ func registerAdminNodeDrain(reg *Registry) {
 		if reg.deps.AdminNodeDrain == nil {
 			state = StateNotConfigured
 		}
-		return &AdminNodeCapabilitiesOutput{Body: AdminNodeCapabilities{Capability: Capability{State: state}, Drain: true, Summary: reg.deps.AdminNodesRead != nil, NodeKeys: reg.deps.AdminNodeKeys != nil}}, nil
+		return &AdminNodeCapabilitiesOutput{Body: AdminNodeCapabilities{Capability: Capability{State: state}, Drain: true, Summary: reg.deps.AdminNodesRead != nil, NodeKeys: reg.deps.AdminNodeKeys != nil, SourceAccess: reg.deps.AdminNodeConfiguration != nil}}, nil
 	})
 
 	op := func(suffix, id, summary string) Operation {

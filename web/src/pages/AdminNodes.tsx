@@ -5,7 +5,12 @@ import { useT, type Translate } from "@/i18n";
 import type { NodeDeleteIntent } from "@/hooks/queries/admin/nodes";
 import { useAdminServerSettings } from "@/hooks/queries/admin/settings";
 import type { FormEvent, ReactNode } from "react";
-import type { StreamNode, CreateNodeRequest, UpdateNodeRequest } from "@/api/types";
+import type {
+  StreamNode,
+  CreateNodeRequest,
+  NodeSourceAccess,
+  UpdateNodeRequest,
+} from "@/api/types";
 import {
   useAdminNodeCapabilities,
   useAdminNodes,
@@ -967,11 +972,14 @@ function NodeForm({
   node,
   nodeType,
   defaultGroup,
+  canSetSourceAccess,
   onClose,
   onCreated,
 }: {
   node: StreamNode | null;
   nodeType: NodeType;
+  /** The server stores a transcode node's source access (the source_access capability). */
+  canSetSourceAccess: boolean;
   /**
    * Group to start a new node in: the one the list is filtered to, so a node
    * added from a filtered view lands in the group being looked at rather than
@@ -996,6 +1004,12 @@ function NodeForm({
     node?.hw_accel_override?.trim() || HW_ACCEL_INHERIT,
   );
   const [hwDeviceOverride, setHwDeviceOverride] = useState(node?.hw_device_override ?? "");
+  const [sourceAccess, setSourceAccess] = useState<NodeSourceAccess>(
+    node?.source_access ?? "local",
+  );
+  // Only a transcode node reads sources, and only a server that stores the
+  // setting takes it; anything else leaves the field out of the request.
+  const showSourceAccess = nodeType === "transcode" && canSetSourceAccess;
   // The picker is driven by the node's own reported inventory; a node that has
   // never reported one keeps the free-text field, since the override still has
   // to be settable on a node this server has not heard from yet.
@@ -1065,11 +1079,17 @@ function NodeForm({
         body.hw_accel_override = hwAccelOverride === HW_ACCEL_INHERIT ? null : hwAccelOverride;
         body.hw_device_override = overrideDevices.length > 0 ? overrideDevices.join(",") : null;
       }
+      if (showSourceAccess) {
+        body.source_access = sourceAccess;
+      }
       updateMutation.mutate({ node, body }, { onSuccess: onClose });
     } else {
       const body: CreateNodeRequest = { type: nodeType, ...fields };
       if (nodeType === "proxy" && publicUrl.trim() !== "") {
         body.public_url = publicUrl.trim();
+      }
+      if (showSourceAccess && sourceAccess !== "local") {
+        body.source_access = sourceAccess;
       }
       createMutation.mutate(body, {
         onSuccess: (saved) => {
@@ -1178,6 +1198,27 @@ function NodeForm({
             />
             <p className="text-muted-foreground text-sm">
               {t("web.admin.nodes.form.maxEgressHelp")}
+            </p>
+          </div>
+        )}
+
+        {showSourceAccess && (
+          <div className="space-y-2">
+            <Label htmlFor="node-source-access">{t("web.admin.nodes.form.sourceAccess")}</Label>
+            <Select
+              value={sourceAccess}
+              onValueChange={(value) => setSourceAccess(value as NodeSourceAccess)}
+            >
+              <SelectTrigger id="node-source-access" className="w-full">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="local">{t("web.admin.nodes.form.sourceAccessLocal")}</SelectItem>
+                <SelectItem value="core">{t("web.admin.nodes.form.sourceAccessCore")}</SelectItem>
+              </SelectContent>
+            </Select>
+            <p className="text-muted-foreground text-sm">
+              {t("web.admin.nodes.form.sourceAccessHelp")}
             </p>
           </div>
         )}
@@ -1681,6 +1722,7 @@ export default function AdminNodes() {
             node={editingNode}
             nodeType={resolvedNodeType}
             defaultGroup={activeGroup ?? ""}
+            canSetSourceAccess={nodeCapabilities?.source_access === true}
             onClose={() => handleDialogChange(false)}
             // A new transcode node takes no work until it has a key, so offer
             // one straight away.

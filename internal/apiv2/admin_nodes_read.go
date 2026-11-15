@@ -40,6 +40,7 @@ type AdminNode struct {
 	HWAccelOverride                  *string         `json:"hw_accel_override,omitempty"`
 	HWDeviceOverride                 *string         `json:"hw_device_override,omitempty"`
 	DownloadArtifactDirOverride      *string         `json:"download_artifact_dir_override,omitempty" doc:"This node's own prepared-download directory; absent when inherited."`
+	SourceAccess                     string          `json:"source_access,omitempty" enum:"local,core" doc:"How this transcode node reads source media: local through its own library mount, core over HTTP from the API servers. Absent on proxies."`
 	DownloadArtifactMaxBytesOverride *int64          `json:"download_artifact_max_bytes_override,omitempty" doc:"This node's own prepared-download budget in bytes (0 for none); absent when inherited."`
 	CapabilityDrift                  *string         `json:"capability_drift,omitempty"`
 	CapabilityDriftBaseline          json.RawMessage `json:"capability_drift_baseline,omitempty"`
@@ -81,6 +82,9 @@ func compareNodePosition(a, b adminNodePosition) int {
 }
 func adminNodeOf(n *nodepool.Node) AdminNode {
 	out := AdminNode{ID: IDFromInt(int64(n.ID)), Name: n.Name, Type: n.Type, URL: n.URL, Enabled: n.Enabled, PublicURL: n.PublicURL, Healthy: n.Healthy, ActiveJobs: n.ActiveJobs, Group: n.Group, MaxJobs: n.MaxJobs, MaxBandwidthKbps: n.MaxBandwidthKbps, EgressKbps: n.EgressKbps, CreatedAt: NewInstant(n.CreatedAt), Capabilities: n.Capabilities, CapabilitiesHash: n.CapabilitiesHash, LastStats: n.LastStats, HWAccelOverride: n.HWAccelOverride, HWDeviceOverride: n.HWDeviceOverride, DownloadArtifactDirOverride: n.DownloadArtifactDirOverride, DownloadArtifactMaxBytesOverride: n.DownloadArtifactMaxBytesOverride, CapabilityDrift: n.CapabilityDrift, CapabilityDriftBaseline: n.CapabilityDriftBaseline, AdvertisedCapabilitiesHash: n.AdvertisedCapabilitiesHash, PhysicalGPUKeys: n.PhysicalGPUKeys, DrainRequested: n.DrainRequested, DrainState: adminNodeDrainState(n), KeyIssued: n.Type == nodepool.NodeTypeTranscode && n.KeyIssued}
+	if n.Type == nodepool.NodeTypeTranscode {
+		out.SourceAccess = n.SourceAccess
+	}
 	if n.LastHealthCheck != nil {
 		out.LastHealthCheck = NullableInstant{Valid: true, Time: NewInstant(*n.LastHealthCheck)}
 	}

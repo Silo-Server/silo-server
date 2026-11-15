@@ -22,7 +22,7 @@ import (
 func stubKeyframeIndex(t *testing.T, idx keyframes.Index, err error) {
 	t.Helper()
 	previous := loadKeyframeIndex
-	loadKeyframeIndex = func(string) (keyframes.Index, error) { return idx, err }
+	loadKeyframeIndex = func(context.Context, string) (keyframes.Index, error) { return idx, err }
 	t.Cleanup(func() { loadKeyframeIndex = previous })
 	// The source starts with its first keyframe unless a test says otherwise.
 	start := 0.0
@@ -707,7 +707,7 @@ func TestPlannedCopySessionMatchesFFmpeg(t *testing.T) {
 //nolint:funlen,gocyclo // One end-to-end walk through a planned session; its steps share the running FFmpeg's state.
 func checkPlannedCopySession(t *testing.T, ctx context.Context, ffmpeg, source string) {
 	dir := t.TempDir()
-	if _, err := keyframes.Load(source); err != nil {
+	if _, err := keyframes.Load(t.Context(), source); err != nil {
 		t.Fatal(err)
 	}
 
@@ -930,7 +930,7 @@ func checkPlannedAudioSwitchAtTheStart(t *testing.T, ctx context.Context, ffmpeg
 	if out, err := exec.CommandContext(ctx, ffmpeg, args...).CombinedOutput(); err != nil {
 		t.Skipf("ffmpeg can't make the test file (%v): %s", err, out)
 	}
-	if _, err := keyframes.Load(source); err != nil {
+	if _, err := keyframes.Load(t.Context(), source); err != nil {
 		t.Fatal(err)
 	}
 	opts := TranscodeOpts{
@@ -1074,7 +1074,7 @@ func TestPlannedRestartKeepsTheFromStartTimeline(t *testing.T) {
 		"-c:a", "aac", source).CombinedOutput(); err != nil {
 		t.Skipf("ffmpeg can't make the test file (%v): %s", err, out)
 	}
-	if _, err := keyframes.Load(source); err != nil {
+	if _, err := keyframes.Load(t.Context(), source); err != nil {
 		t.Fatal(err)
 	}
 	start := func(label string, restartAt int) float64 {

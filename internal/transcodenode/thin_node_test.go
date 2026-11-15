@@ -168,20 +168,51 @@ type thinCluster struct {
 	nodeHTTP *httptest.Server
 }
 
+// thinClusterOptions vary the cluster newThinClusterWith builds.
+type thinClusterOptions struct {
+	// media is the library file the catalog lists; a few bytes by default.
+	media string
+	// ffmpeg is the node's FFmpeg; a script by default.
+	ffmpeg string
+	// sourceAccess is the node row's source access; local by default.
+	sourceAccess string
+	// wrapSources wraps the core's source bytes route.
+	wrapSources func(http.Handler) http.Handler
+}
+
 func newThinCluster(t *testing.T) *thinCluster {
+	return newThinClusterWith(t, thinClusterOptions{})
+}
+
+//nolint:funlen // Wires a core and a node as production does, in one place.
+func newThinClusterWith(t *testing.T, opts thinClusterOptions) *thinCluster {
 	t.Helper()
 	rdb := redis.NewClient(&redis.Options{Addr: miniredis.RunT(t).Addr()})
 	t.Cleanup(func() { _ = rdb.Close() })
 	dir := t.TempDir()
-	media := filepath.Join(dir, "movie.mkv")
-	if err := os.WriteFile(media, []byte("source bytes"), 0o600); err != nil {
-		t.Fatal(err)
+	media := opts.media
+	if media == "" {
+		media = filepath.Join(dir, "movie.mkv")
+		if err := os.WriteFile(media, []byte("source bytes"), 0o600); err != nil {
+			t.Fatal(err)
+		}
 	}
-	ffmpeg := filepath.Join(dir, "ffmpeg")
-	// A remux writes to pipe:1, an HLS transcode to a playlist; probes exit.
-	script := "#!/bin/sh\ncase \" $* \" in\n*' pipe:1 '*) printf node-remux-bytes ;;\n*.m3u8*) while :; do sleep 0.1; done ;;\nesac\n"
-	if err := os.WriteFile(ffmpeg, []byte(script), 0o755); err != nil {
-		t.Fatal(err)
+	ffmpeg := opts.ffmpeg
+	if ffmpeg == "" {
+		ffmpeg = filepath.Join(dir, "ffmpeg")
+		// A remux writes to pipe:1, an HLS transcode to a playlist; probes exit.
+		script := "#!/bin/sh\ncase \" $* \" in\n*' pipe:1 '*) printf node-remux-bytes ;;\n*.m3u8*) while :; do sleep 0.1; done ;;\nesac\n"
+		if err := os.WriteFile(ffmpeg, []byte(script), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	sourceAccess := opts.sourceAccess
+	if sourceAccess == "" {
+		sourceAccess = nodepool.SourceAccessLocal
+	}
+	wrapSources := opts.wrapSources
+	if wrapSources == nil {
+		wrapSources = func(next http.Handler) http.Handler { return next }
 	}
 	nodeKey, err := nodepool.GenerateNodeKey(thinNodeID)
 	if err != nil {
@@ -191,7 +222,7 @@ func newThinCluster(t *testing.T) *thinCluster {
 	c := &thinCluster{
 		t: t, redis: rdb, nodeKey: nodeKey, media: media, recipes: recipes,
 		nodes: &thinCoreNodes{
-			rows: map[int]*nodepool.Node{thinNodeID: {ID: thinNodeID, Name: "gpu-7", Type: nodepool.NodeTypeTranscode, URL: "http://gpu-7:8080", Enabled: true}},
+			rows: map[int]*nodepool.Node{thinNodeID: {ID: thinNodeID, Name: "gpu-7", Type: nodepool.NodeTypeTranscode, URL: "http://gpu-7:8080", Enabled: true, SourceAccess: sourceAccess}},
 			keys: map[int]string{thinNodeID: nodeKey},
 		},
 		catalog: &thinCatalog{files: map[int]string{thinMediaFileID: media}},
@@ -224,6 +255,7 @@ func newThinCluster(t *testing.T) *thinCluster {
 	mux.Handle("POST "+nodecontrol.PathResolve, core.LimitNodePlayback(http.HandlerFunc(core.HandleResolve)))
 	mux.Handle("POST "+nodecontrol.PathSourcesOpen, core.LimitNodePlayback(http.HandlerFunc(core.HandleSourceOpen)))
 	mux.Handle("POST "+nodecontrol.PathRevokeRecipes, core.LimitNode(http.HandlerFunc(core.HandleRevokeRecipes)))
+	mux.Handle("GET "+nodecontrol.PathSources, wrapSources(http.HandlerFunc(core.HandleSource)))
 	throttle := func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if c.throttled.Load() {
@@ -249,6 +281,7 @@ func newThinCluster(t *testing.T) *thinCluster {
 		t.Fatal(err)
 	}
 	c.opener = nodesource.NewOpener(c.client.OpenSource, slog.New(slog.DiscardHandler))
+	c.opener.EnableCoreAccess(nodesource.CoreAccess{Fetch: c.client.ReadSource, Mode: c.remote.SourceAccess})
 	c.opener.SetRenewInterval(20 * time.Millisecond)
 	c.tracker = nodesessions.NewLocalTracker()
 	c.node = NewServer(c.remote, c.tracker)

@@ -19,6 +19,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/logthrottle"
 	"github.com/Silo-Server/silo-server/internal/nodepool"
 	"github.com/Silo-Server/silo-server/internal/nodesessions"
+	"github.com/Silo-Server/silo-server/internal/nodesource"
 	"github.com/Silo-Server/silo-server/internal/opslog"
 	"github.com/Silo-Server/silo-server/internal/streamtelemetry"
 )
@@ -80,12 +81,17 @@ type Options struct {
 	// granted source against; a nil one answers 503 for its kind.
 	Files  FileCatalog
 	Themes ThemeCatalog
+	// Lifetime is the API server's lifetime: when it ends, as graceful
+	// shutdown begins, every source byte response in flight is cut, so a
+	// long read does not hold the shutdown. Nil never cuts them.
+	Lifetime context.Context //nolint:containedctx // the server's lifetime, read by long-running responses
 }
 
 // Server serves the core's node control routes. Every handler is stateless
 // with respect to other requests, so any API replica serves any node; the
-// only process state is the per-node rate limit and log throttles. It must
-// run behind RequireNode, which supplies the node's identity.
+// only process state is the per-node rate limits, source stream counts and
+// log throttles. It must run behind RequireNode, which supplies the node's
+// identity.
 type Server struct {
 	opts    Options
 	now     func() time.Time
@@ -98,6 +104,13 @@ type Server struct {
 	// second, and during a Redis outage each report would log, and this
 	// server's warnings are captured into the operational log.
 	warnings *logthrottle.Throttle[reportWarning]
+	// afterSourceOpen runs once a source read has opened and checked its
+	// descriptor, before it serves; tests replace the file there.
+	afterSourceOpen func()
+	// sourceStreams counts the source byte responses in flight per node,
+	// capped at sourceStreamLimit.
+	sourceStreams     nodeStreams
+	sourceStreamLimit int
 }
 
 // reportWarning is one kind of report warning about one node.
@@ -112,10 +125,11 @@ const reportWarnInterval = time.Minute
 // NewServer returns the routes' handlers.
 func NewServer(opts Options) *Server {
 	s := &Server{opts: opts, now: time.Now,
-		limiter:         newNodeLimiter(nodeWriteRate, nodeWriteBurst),
-		playbackLimiter: newNodeLimiter(nodePlaybackRate, nodePlaybackBurst),
-		logBytes:        newNodeLimiter(nodeLogBytesRate, nodeLogBytesBurst),
-		warnings:        logthrottle.New[reportWarning](reportWarnInterval)}
+		limiter:           newNodeLimiter(nodeWriteRate, nodeWriteBurst),
+		playbackLimiter:   newNodeLimiter(nodePlaybackRate, nodePlaybackBurst),
+		logBytes:          newNodeLimiter(nodeLogBytesRate, nodeLogBytesBurst),
+		warnings:          logthrottle.New[reportWarning](reportWarnInterval),
+		sourceStreamLimit: maxSourceStreamsPerNode}
 	s.warnings.SetClock(func() time.Time { return s.now() })
 	s.limiter.now = func() time.Time { return s.now() }
 	s.playbackLimiter.now = func() time.Time { return s.now() }
@@ -177,6 +191,15 @@ func (s *Server) nodeConfig(ctx context.Context, id int) (NodeConfig, error) {
 	return buildNodeConfig(node, cfg, settings), nil
 }
 
+// nodeSourceAccess is the source access mode a node's document names: the
+// row's, with anything but core read as local.
+func nodeSourceAccess(node *nodepool.Node) string {
+	if node.SourceAccess == nodepool.SourceAccessCore {
+		return nodesource.ModeCore
+	}
+	return nodesource.ModeLocal
+}
+
 func buildNodeConfig(node *nodepool.Node, cfg *config.Config, settings map[string]string) NodeConfig {
 	artifactDir := cfg.Download.ArtifactDir
 	if node.DownloadArtifactDirOverride != nil {
@@ -197,6 +220,7 @@ func buildNodeConfig(node *nodepool.Node, cfg *config.Config, settings map[strin
 	return newNodeConfig(NodeConfigBody{
 		Node:           NodeIdentity{ID: node.ID, Name: node.Name, URL: node.URL},
 		DrainRequested: node.DrainRequested,
+		SourceAccess:   nodeSourceAccess(node),
 		Playback: PlaybackConfig{
 			FFmpegPath: cfg.Playback.FFmpegPath,
 			// The same resolution dispatch names in a start request, so the

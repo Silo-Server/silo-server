@@ -11,6 +11,7 @@ import (
 
 	"github.com/danielgtaylor/huma/v2"
 
+	"github.com/Silo-Server/silo-server/internal/fspath"
 	"github.com/Silo-Server/silo-server/internal/mediasample"
 	"github.com/Silo-Server/silo-server/internal/nodesource"
 	"github.com/Silo-Server/silo-server/internal/playback"
@@ -182,6 +183,8 @@ func softwareAttempts(attempts []mediasample.Attempt) []mediasample.Attempt {
 }
 
 func writeTrickplayError(w http.ResponseWriter, status int, failure trickplay.ExtractError) {
+	// FFmpeg's log can name a relayed input, a capability on this host.
+	failure.Message = fspath.RedactRelayed(failure.Message)
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(failure)

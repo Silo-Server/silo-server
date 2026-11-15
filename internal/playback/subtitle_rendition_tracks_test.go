@@ -990,8 +990,9 @@ func TestOnDemandSegmentFailures(t *testing.T) {
 		t.Fatalf("failed conversion = %d %q, want 404", rr.Code, rr.Body.String())
 	}
 
+	// Versions compare at microseconds, as every check across hosts does.
 	replaced := planned
-	replaced.ModTimeUnixNano++
+	replaced.ModTimeUnixNano += int64(time.Microsecond)
 	body, err := session(ffmpeg, replaced).subtitleTrackSegmentVTT(ctx, numbers[0], 0)
 	if err != nil || strings.Contains(string(body), " --> ") || !strings.HasPrefix(string(body), "WEBVTT\n") {
 		t.Fatalf("segment of a replaced source = %q, %v", body, err)

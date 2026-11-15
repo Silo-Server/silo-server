@@ -4,9 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net/http"
 	"reflect"
 
+	"github.com/Silo-Server/silo-server/internal/fspath"
 	"github.com/Silo-Server/silo-server/internal/mediasample"
 	"github.com/Silo-Server/silo-server/internal/nodesource"
 	"github.com/Silo-Server/silo-server/internal/processmetrics"
@@ -106,7 +108,10 @@ func (s *Server) mediaSampleLimiter(capacity int) *mediasample.Limiter {
 func writeMediaSampleError(w http.ResponseWriter, status int, reason mediasample.Reason, message string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(mediasample.RemoteFailure{Reason: reason, Error: message})
+	// FFmpeg's log can name a relayed input, a capability on this host.
+	if err := json.NewEncoder(w).Encode(mediasample.RemoteFailure{Reason: reason, Error: fspath.RedactRelayed(message)}); err != nil {
+		slog.Debug("write media sample failure", "component", "transcodenode", "error", err)
+	}
 }
 
 // ProtocolMediaSample describes the media sampling route.

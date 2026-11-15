@@ -200,6 +200,8 @@ func mountForTest(server *Server, keys KeySource) http.Handler {
 	mux.Handle("POST "+PathResolve, server.LimitNodePlayback(http.HandlerFunc(server.HandleResolve)))
 	mux.Handle("POST "+PathSourcesOpen, server.LimitNodePlayback(http.HandlerFunc(server.HandleSourceOpen)))
 	mux.Handle("POST "+PathRevokeRecipes, server.LimitNode(http.HandlerFunc(server.HandleRevokeRecipes)))
+	// No budget: source reads stream.
+	mux.Handle("GET "+PathSources, http.HandlerFunc(server.HandleSource))
 	return RequireNode(keys)(mux)
 }
 
