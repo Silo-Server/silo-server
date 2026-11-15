@@ -2797,7 +2797,7 @@
   "settingsManifest.player.seek_cache_enabled.label": [
     {
       "type": 0,
-      "value": "Cache di ricerca"
+      "value": "Cache di spostamento"
     }
   ],
   "settingsManifest.player.sleep_timer_default_minutes.description": [
@@ -71334,7 +71334,7 @@
   "web.admin.settings.playback.transcoding.copyKeyframePlaylistDescription": [
     {
       "type": 0,
-      "value": "Sperimentale. Quando Silo copia il video di un file, elenca ogni segmento dall’inizio usando i fotogrammi chiave del file, invece di una playlist che cresce man mano che Silo copia. Evita che Safari si blocchi a metà. Una ricerca molto oltre il punto copiato da Silo fa ripartire la copia da lì."
+      "value": "Sperimentale. Quando Silo copia il video di un file, elenca ogni segmento dall’inizio usando i fotogrammi chiave del file, invece di una playlist che cresce man mano che Silo copia. Evita che Safari si blocchi a metà. Uno spostamento molto oltre il punto copiato da Silo fa ripartire la copia da lì."
     }
   ],
   "web.admin.settings.playback.transcoding.dir": [
@@ -83884,7 +83884,7 @@
   "web.admin.tasks.task.sweep_orphaned_media_images.description": [
     {
       "type": 0,
-      "value": "Trova le miniature dei capitoli e le anteprime di ricerca archiviate a cui nulla fa più riferimento e ne pianifica l’eliminazione."
+      "value": "Trova le miniature dei capitoli e le anteprime di scorrimento archiviate a cui nulla fa più riferimento e ne pianifica l’eliminazione."
     }
   ],
   "web.admin.tasks.task.sweep_orphaned_media_images.name": [
@@ -148684,7 +148684,7 @@
   "web.setup.server.footnote": [
     {
       "type": 0,
-      "value": "Trovi tutto questo in Admin › Server › Generale."
+      "value": "Trovi tutto questo in Admin › Server › Generali."
     }
   ],
   "web.setup.server.lede": [
@@ -148834,7 +148834,7 @@
   "web.setup.storage.footnote": [
     {
       "type": 0,
-      "value": "Le impostazioni di archiviazione si trovano in Amministrazione › Server › Archiviazione; quelle di Redis e del database in Amministrazione › Server › Generale."
+      "value": "Le impostazioni di archiviazione si trovano in Admin › Server › Archiviazione; quelle di Redis e del database in Admin › Server › Generali."
     }
   ],
   "web.setup.storage.hide": [

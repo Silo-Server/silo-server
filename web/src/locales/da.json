@@ -70680,7 +70680,7 @@
   "web.admin.settings.search.playback.description": [
     {
       "type": 0,
-      "value": "Grænser for set, transkodning, kapitelminiaturer og søgeeksempler samt springmarkører."
+      "value": "Grænser for set, transkodning, kapitelminiaturer og spoleforhåndsvisninger samt springmarkører."
     }
   ],
   "web.admin.settings.search.playback.label": [
@@ -70770,7 +70770,7 @@
   "web.admin.settings.search.playback.setting.generateSeekPreviewsOn": [
     {
       "type": 0,
-      "value": "Generer søgeeksempler på"
+      "value": "Generer spoleforhåndsvisninger på"
     }
   ],
   "web.admin.settings.search.playback.setting.gpuDevices": [
@@ -70830,13 +70830,13 @@
   "web.admin.settings.search.playback.setting.seekPreviewInterval": [
     {
       "type": 0,
-      "value": "Interval for søgeeksempler"
+      "value": "Interval for spoleforhåndsvisninger"
     }
   ],
   "web.admin.settings.search.playback.setting.seekPreviewWorkers": [
     {
       "type": 0,
-      "value": "Workers til søgeeksempler"
+      "value": "Workers til spoleforhåndsvisninger"
     }
   ],
   "web.admin.settings.search.playback.setting.shareDetectedMarkers": [
@@ -76698,7 +76698,7 @@
   "web.admin.tasks.task.cleanup_removed_media_images.description": [
     {
       "type": 0,
-      "value": "Sletter efter en frist kapitelminiaturer og søgeeksempler for mediefiler, der er fjernet fra kataloget, samt søgeeksempler, der er blevet erstattet."
+      "value": "Sletter efter en frist kapitelminiaturer og spoleforhåndsvisninger for mediefiler, der er fjernet fra kataloget, samt spoleforhåndsvisninger, der er blevet erstattet."
     }
   ],
   "web.admin.tasks.task.cleanup_removed_media_images.name": [
@@ -76806,13 +76806,13 @@
   "web.admin.tasks.task.queue_seek_previews.description": [
     {
       "type": 0,
-      "value": "Sætter søgebjælkeeksempler i kø for videofilerne i biblioteker, hvor de er slået til, og sætter eksempler, der ikke længere passer til deres fil eller indstillinger, i kø igen."
+      "value": "Sætter spoleforhåndsvisninger i kø for videofilerne i biblioteker, hvor de er slået til, og sætter forhåndsvisninger, der ikke længere passer til deres fil eller indstillinger, i kø igen."
     }
   ],
   "web.admin.tasks.task.queue_seek_previews.name": [
     {
       "type": 0,
-      "value": "Sæt søgeeksempler i kø"
+      "value": "Sæt spoleforhåndsvisninger i kø"
     }
   ],
   "web.admin.tasks.task.rebuild_catalog_search_index.description": [
@@ -77070,7 +77070,7 @@
   "web.admin.tasks.task.sweep_orphaned_media_images.description": [
     {
       "type": 0,
-      "value": "Finder gemte kapitelminiaturer og søgeforhåndsvisninger, som intet længere henviser til, og planlægger dem til sletning."
+      "value": "Finder gemte kapitelminiaturer og spoleforhåndsvisninger, som intet længere henviser til, og planlægger dem til sletning."
     }
   ],
   "web.admin.tasks.task.sweep_orphaned_media_images.name": [
@@ -137514,7 +137514,7 @@
   "web.setup.storage.backendLocked": [
     {
       "type": 0,
-      "value": "Låst: der er allerede gemt filer på denne backend. Skift den under Admin › Server › Lagring – så flyttes filerne."
+      "value": "Låst: der er allerede gemt filer på denne backend. Skift den under Admin › Server › Lager – så flyttes filerne."
     }
   ],
   "web.setup.storage.bucketLabel": [
@@ -137544,7 +137544,7 @@
   "web.setup.storage.footnote": [
     {
       "type": 0,
-      "value": "Lagringsindstillinger findes under Admin › Server › Lagring; Redis- og databaseindstillinger findes under Admin › Server › Generelt."
+      "value": "Lagerindstillinger findes under Admin › Server › Lager; Redis- og databaseindstillinger findes under Admin › Server › Generelt."
     }
   ],
   "web.setup.storage.hide": [
@@ -137652,7 +137652,7 @@
   "web.setup.storage.privateLocked": [
     {
       "type": 0,
-      "value": "Låst: Silo registrerer en konfigureret privat bucket ved opstart, også når den er tom. Gemte biblioteksfiler låser også denne placering. Skift den under Admin › Server › Lagring."
+      "value": "Låst: Silo registrerer en konfigureret privat bucket ved opstart, også når den er tom. Gemte biblioteksfiler låser også denne placering. Skift den under Admin › Server › Lager."
     }
   ],
   "web.setup.storage.privateTitle": [
@@ -137670,13 +137670,13 @@
   "web.setup.storage.publicLockedLocal": [
     {
       "type": 0,
-      "value": "Låst: filerne ligger på lokal disk, og hvis du tilføjer en offentlig bucket, skifter lagringen Automatisk til S3. Skift det under Admin › Server › Lagring – så flyttes filerne."
+      "value": "Låst: filerne ligger på lokal disk, og hvis du tilføjer en offentlig bucket, skifter lagringen Automatisk til S3. Skift det under Admin › Server › Lager – så flyttes filerne."
     }
   ],
   "web.setup.storage.publicLockedS3": [
     {
       "type": 0,
-      "value": "Låst: filerne er gemt her. Skift det under Admin › Server › Lagring – så flyttes filerne."
+      "value": "Låst: filerne er gemt her. Skift det under Admin › Server › Lager – så flyttes filerne."
     }
   ],
   "web.setup.storage.publicTitle": [
