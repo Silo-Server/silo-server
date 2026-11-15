@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -189,50 +190,66 @@ func TestLocalSessionMalformedOptionalFieldsStillSync(t *testing.T) {
 	}
 }
 
-// One request tracks at most the account cap's worth of live sessions, and
-// none after the cap refuses a play.
+// One request tracks at most the account cap's worth of distinct live
+// sessions. Once the cap refuses a play it starts no other, while plays
+// already open still take their reports.
 func TestLocalSessionBatchTracksABoundedNumberOfPlays(t *testing.T) {
 	media := &playStartMediaStore{
 		item:  &models.MediaItem{ContentID: "book-1", Type: "audiobook", Title: "Book"},
 		files: []*models.MediaFile{{ID: 42, ContentID: "book-1", Duration: 3600}},
 	}
-	store := &countingReportStore{}
+	store := &countingReportStore{open: map[string]bool{}}
 	h := New(Dependencies{MediaStore: media, ProgressStore: &positionRecordingProgressFake{}, PlaybackSessionStore: store})
-	var sessionsJSON []string
+	batch := func(ids ...string) {
+		t.Helper()
+		var sessionsJSON []string
+		for _, id := range ids {
+			sessionsJSON = append(sessionsJSON, fmt.Sprintf(`{"id":%q,"libraryItemId":"book-1","currentTime":10,"updatedAt":%d}`, id, time.Now().UnixMilli()))
+		}
+		body := `{"sessions":[` + strings.Join(sessionsJSON, ",") + `]}`
+		if rec := dispatchABSWithParams(http.MethodPost, "/api/session/local-all", nil, []byte(body), "1", "p-1", h.handleSyncLocalSessions); rec.Code != http.StatusOK {
+			t.Fatalf("status = %d", rec.Code)
+		}
+	}
+	var ids []string
 	for i := range 3 * maxReportedPlaysPerAccount {
-		sessionsJSON = append(sessionsJSON, fmt.Sprintf(`{"id":"local-%d","libraryItemId":"book-1","currentTime":10,"updatedAt":%d}`, i, time.Now().UnixMilli()))
+		ids = append(ids, fmt.Sprintf("local-%d", i), fmt.Sprintf("local-%d", i))
 	}
-	body := `{"sessions":[` + strings.Join(sessionsJSON, ",") + `]}`
-	if rec := dispatchABSWithParams(http.MethodPost, "/api/session/local-all", nil, []byte(body), "1", "p-1", h.handleSyncLocalSessions); rec.Code != http.StatusOK {
-		t.Fatalf("status = %d", rec.Code)
-	}
-	if store.updates != maxReportedPlaysPerAccount {
-		t.Fatalf("%d sessions tracked, want %d", store.updates, maxReportedPlaysPerAccount)
+	batch(ids...)
+	if distinct := slices.Compact(slices.Sorted(slices.Values(store.updated))); len(store.updated) != maxReportedPlaysPerAccount || len(distinct) != len(store.updated) {
+		t.Fatalf("tracked %v, want %d distinct sessions", store.updated, maxReportedPlaysPerAccount)
 	}
 
-	store.refuse, store.updates = true, 0
-	if rec := dispatchABSWithParams(http.MethodPost, "/api/session/local-all", nil, []byte(body), "1", "p-1", h.handleSyncLocalSessions); rec.Code != http.StatusOK {
-		t.Fatalf("status = %d", rec.Code)
-	}
-	if store.updates != 1 {
-		t.Fatalf("%d sessions tracked after the cap refused one, want 1", store.updates)
+	// At the cap: a new session is refused, and an open play after it in the
+	// same request still takes its report.
+	store.refuse, store.updated, store.starts, store.open["open-1"] = true, nil, 0, true
+	batch("new-1", "new-2", "open-1")
+	if store.starts != 1 || !slices.Contains(store.updated, "open-1") {
+		t.Fatalf("after a refusal: %d starts, updated %v; want one start and open-1 updated", store.starts, store.updated)
 	}
 }
 
-// countingReportStore counts reported-play updates and starts no play, or
-// refuses every start as the account cap would.
+// countingReportStore records reported-play updates and starts. Sessions in
+// open have a play; every other start succeeds, or with refuse is refused as
+// the account cap would.
 type countingReportStore struct {
 	fakePlaybackSessionStore
-	updates int
+	open    map[string]bool
+	updated []string
+	starts  int
 	refuse  bool
 }
 
-func (s *countingReportStore) UpdateReportedPlay(context.Context, ReportedPlay) (ReportedPlayState, bool, error) {
-	s.updates++
+func (s *countingReportStore) UpdateReportedPlay(_ context.Context, p ReportedPlay) (ReportedPlayState, bool, error) {
+	s.updated = append(s.updated, p.ClientSessionID)
+	if s.open[p.ClientSessionID] {
+		return ReportedPlayState{ID: "p", Announced: true}, true, nil
+	}
 	return ReportedPlayState{}, false, nil
 }
 
 func (s *countingReportStore) StartReportedPlay(context.Context, ReportedPlay, string, int) (ReportedPlayState, error) {
+	s.starts++
 	if s.refuse {
 		return ReportedPlayState{}, nil
 	}

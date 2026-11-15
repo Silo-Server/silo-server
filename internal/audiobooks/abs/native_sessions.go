@@ -164,9 +164,28 @@ const (
 
 // reportBudget bounds the live sessions one request tracks as reported
 // plays. A client has one live session at a time, so a request carrying more
-// gains nothing from the rest, and once the account's cap refuses a new play
-// the request stops trying.
-type reportBudget struct{ left int }
+// gains nothing from the rest. A session the request already tracked is not
+// tracked twice, and once the account's cap refuses a new play the request
+// starts no other, while its plays already open still take their reports.
+type reportBudget struct {
+	left    int
+	refused bool
+	tracked map[string]bool
+}
+
+// take reports whether the request may track the client session, spending
+// budget for it.
+func (b *reportBudget) take(clientSessionID string) bool {
+	if b.left <= 0 || b.tracked[clientSessionID] {
+		return false
+	}
+	if b.tracked == nil {
+		b.tracked = map[string]bool{}
+	}
+	b.tracked[clientSessionID] = true
+	b.left--
+	return true
+}
 
 // trackReportedPlay records a live play that a client reports only through
 // /session/local or /session/local-all. The play lives in its
@@ -177,10 +196,9 @@ type reportBudget struct{ left int }
 // a new play with its own id and history row. A report never fails because
 // of this: the client is playing whether or not Silo shows it.
 func (h *Handler) trackReportedPlay(r *http.Request, a ctxAuth, access catalog.AccessFilter, sess localPlaybackSession, budget *reportBudget) {
-	if h == nil || h.deps.PlaybackSessionStore == nil || sess.ID == "" || budget.left <= 0 || !sess.isLive(time.Now()) {
+	if h == nil || h.deps.PlaybackSessionStore == nil || sess.ID == "" || !sess.isLive(time.Now()) || !budget.take(sess.ID) {
 		return
 	}
-	budget.left--
 	ctx := r.Context()
 	report := ReportedPlay{
 		UserID:           a.UserID,
@@ -197,6 +215,9 @@ func (h *Handler) trackReportedPlay(r *http.Request, a ctxAuth, access catalog.A
 			slog.WarnContext(ctx, "abs local session sync: record reported play failed", "component", "audiobooks",
 				"library_item_id", sess.LibraryItemID, "error", err)
 		}
+		return
+	}
+	if !found && budget.refused {
 		return
 	}
 	files, err := h.deps.MediaStore.GetMediaFiles(ctx, sess.LibraryItemID, access)
@@ -216,7 +237,7 @@ func (h *Handler) trackReportedPlay(r *http.Request, a ctxAuth, access catalog.A
 			return
 		}
 		if state.ID == "" {
-			budget.left = 0
+			budget.refused = true
 			// Every report from such a device lands here, every few seconds.
 			slog.DebugContext(ctx, "abs local session sync: too many reported plays for the account; not tracking this one", "component", "audiobooks",
 				"user_id", a.UserID, "limit", maxReportedPlaysPerAccount)
