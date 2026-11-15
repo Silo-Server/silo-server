@@ -298,16 +298,27 @@ func (l *lookupOnly) GetMetadata(ctx context.Context, req metadata.MetadataReque
 	return l.p.GetMetadata(ctx, req)
 }
 
-// A narrator-tagged item takes no record that lists no narrators, unless the
-// record carries the item's own tagged ASIN, which names the edition. An item
-// with no narrator tag is unaffected.
-func TestFindMatchRequiresANarratorForANarratorTaggedItem(t *testing.T) {
+type narratorRuleCase struct {
+	name      string
+	item      enrichmentItemRow
+	results   []metadata.SearchResult
+	records   map[string]*metadata.MetadataResult
+	providers []metadata.Provider // overrides results and records
+	wantMatch bool
+	wantID    string // the audiobook-metadata ID matched, when set
+}
+
+func narratorRuleCases() []narratorRuleCase {
 	bare := func(asin string) (metadata.SearchResult, *metadata.MetadataResult) {
 		r, rec := edition("The Martian (Unabridged)", asin, "Andy Weir", "")
 		rec.People = rec.People[:1] // author only
 		return r, rec
 	}
 	plain, plainRec := bare("1492084861")
+	// Both sort after the narrator-less "1492084861", so the preference, not
+	// the tiebreak, picks Bray.
+	bray, brayRec2 := edition("The Martian", "Z0BRAY0001", "Andy Weir", "R. C. Bray")
+	wheaton, wheatonRec := edition("The Martian", "A0WHEATON1", "Andy Weir", "Wil Wheaton")
 	tagged, taggedRec := bare("B00B5HZGUG")
 
 	// The tagged-ASIN lookup answered with the provider's own ID only and
@@ -330,19 +341,28 @@ func TestFindMatchRequiresANarratorForANarratorTaggedItem(t *testing.T) {
 		{Name: "The Martian", ProviderIDs: map[string]string{"finder": "F1"}},
 	}}}
 
-	tests := []struct {
-		name      string
-		item      enrichmentItemRow
-		results   []metadata.SearchResult
-		records   map[string]*metadata.MetadataResult
-		providers []metadata.Provider // overrides results and records
-		wantMatch bool
-	}{
+	return []narratorRuleCase{
 		{
-			name:    "narrator tag, record lists none: no match",
+			name:      "narrator tag, record lists none: match",
+			item:      enrichmentItemRow{Title: "The Martian", Author: "Andy Weir", Narrators: []string{"R. C. Bray"}},
+			results:   []metadata.SearchResult{plain},
+			records:   map[string]*metadata.MetadataResult{"1492084861": plainRec},
+			wantMatch: true,
+			wantID:    "1492084861",
+		},
+		{
+			name:      "narrator tag, an agreeing record is preferred over a narrator-less one ranked first",
+			item:      enrichmentItemRow{Title: "The Martian", Author: "Andy Weir", Narrators: []string{"R. C. Bray"}},
+			results:   []metadata.SearchResult{plain, bray},
+			records:   map[string]*metadata.MetadataResult{"1492084861": plainRec, "Z0BRAY0001": brayRec2},
+			wantMatch: true,
+			wantID:    "Z0BRAY0001",
+		},
+		{
+			name:    "narrator tag, narrators that disagree: no match",
 			item:    enrichmentItemRow{Title: "The Martian", Author: "Andy Weir", Narrators: []string{"R. C. Bray"}},
-			results: []metadata.SearchResult{plain},
-			records: map[string]*metadata.MetadataResult{"1492084861": plainRec},
+			results: []metadata.SearchResult{wheaton},
+			records: map[string]*metadata.MetadataResult{"A0WHEATON1": wheatonRec},
 		},
 		{
 			name: "narrator tag, record carries the tagged ASIN: match",
@@ -390,7 +410,13 @@ func TestFindMatchRequiresANarratorForANarratorTaggedItem(t *testing.T) {
 			wantMatch: true,
 		},
 	}
-	for _, tt := range tests {
+}
+
+// For a narrator-tagged item, a record that lists no narrators is no
+// contradiction and may establish the match, but a record whose narrators
+// agree is preferred; narrators that disagree reject the record.
+func TestFindMatchNarratorRules(t *testing.T) {
+	for _, tt := range narratorRuleCases() {
 		t.Run(tt.name, func(t *testing.T) {
 			tt.item.ContentID = "item"
 			providers := tt.providers
@@ -400,6 +426,9 @@ func TestFindMatchRequiresANarratorForANarratorTaggedItem(t *testing.T) {
 			m := (&Enricher{}).findMatch(context.Background(), tt.item, providers)
 			if m.metadata.HasMetadata != tt.wantMatch {
 				t.Fatalf("matched = %v (ids %v), want %v", m.metadata.HasMetadata, m.ids, tt.wantMatch)
+			}
+			if tt.wantID != "" && m.ids["audiobook-metadata"] != tt.wantID {
+				t.Fatalf("matched %v, want %s", m.ids, tt.wantID)
 			}
 		})
 	}

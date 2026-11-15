@@ -67,7 +67,7 @@ type providerState struct {
 	// narrator check.
 	rejectedCredits bool
 	// lookupFailed marks a tagged-ASIN lookup that errored. The merge's retry
-	// with the same tag-only IDs is that lookup again and is admitted as one.
+	// with the same tag-only IDs is that lookup again and gets its title check.
 	lookupFailed bool
 }
 
@@ -199,6 +199,7 @@ func (r *matchRun) searchProvider(ctx context.Context, i int) error {
 	rules := &metadata.BookMatchRules{SeriesPosition: r.item.SeriesPosition}
 
 	remaining := results
+	var fallback *heldMatch
 	for fetches := 0; fetches < maxCandidateFetches && len(remaining) > 0; {
 		admission, err := metadata.AdmitSearchMatch(ctx, metadata.SearchMatchAdmissionRequest{
 			WantTitle:           r.item.Title,
@@ -214,7 +215,7 @@ func (r *matchRun) searchProvider(ctx context.Context, i int) error {
 		})
 		if err != nil {
 			r.errs = append(r.errs, fmt.Errorf("%s candidate admission: %w", p.Slug(), err))
-			return nil
+			break
 		}
 		r.logOwnedConflicts(ctx, admission.Conflicts)
 		if admission.Status == metadata.SearchMatchProviderIDConflict {
@@ -223,7 +224,7 @@ func (r *matchRun) searchProvider(ctx context.Context, i int) error {
 		}
 		if admission.Status != metadata.SearchMatchAccepted {
 			r.logUnaccepted(ctx, p, admission, len(results))
-			return nil
+			break
 		}
 
 		candidateIDs := maps.Clone(r.ids)
@@ -236,7 +237,7 @@ func (r *matchRun) searchProvider(ctx context.Context, i int) error {
 		result, err := mp.GetMetadata(ctx, r.metadataRequest(candidateIDs))
 		if err != nil {
 			r.logGetMetadataError(ctx, p, err)
-			return nil
+			break
 		}
 		if result == nil || !result.HasMetadata {
 			// Nothing to check the candidate against: try the next one, and
@@ -252,7 +253,7 @@ func (r *matchRun) searchProvider(ctx context.Context, i int) error {
 		r.answered(i, candidateIDs, rejection)
 		if err != nil {
 			r.errs = append(r.errs, fmt.Errorf("%s metadata identity admission: %w", p.Slug(), err))
-			return nil
+			break
 		}
 		if rejection != "" {
 			if metadata.SharesProviderID(r.item.ProviderIDs, admission.Selected.ProviderIDs) {
@@ -263,13 +264,22 @@ func (r *matchRun) searchProvider(ctx context.Context, i int) error {
 			remaining = dropResult(remaining, admission.Selected)
 			continue
 		}
-		r.state[i].record = admitted
-		r.ids = candidateIDs
-		maps.Copy(r.ids, admitted.ProviderIDs)
-		r.agreedTitle = admission.AgreedTitle
-		slog.DebugContext(ctx, "audiobook enrichment: search result", "component", "audiobooks",
-			"provider", p.Slug(), "content_id", r.item.ContentID, "matched_ids", r.ids)
+		match := heldMatch{record: admitted, ids: candidateIDs, agreedTitle: admission.AgreedTitle}
+		// A record that lists no narrators does not contradict a narrator
+		// tag, but one whose narrators agree is the better evidence: keep
+		// the first narrator-less record and look on for an agreeing one.
+		if !byTaggedID && r.wantsNarrator() && !listsNarrator(admitted) {
+			if fallback == nil {
+				fallback = &match
+			}
+			remaining = dropResult(remaining, admission.Selected)
+			continue
+		}
+		r.accept(ctx, i, match)
 		return nil
+	}
+	if fallback != nil {
+		r.accept(ctx, i, *fallback)
 	}
 	return nil
 }
@@ -346,26 +356,7 @@ func (r *matchRun) fetchForMerge(ctx context.Context, i int, ids map[string]stri
 		r.logRejected(ctx, p, rejection, "leave unmatched: metadata contradicts the item")
 		return nil, errMatchRejected
 	}
-	r.state[i].record = admitted
 	return admitted, nil
-}
-
-// missingNarrator applies the narrator rule to the record that would
-// establish the match: for a narrator-tagged item it must list a narrator, or
-// the tagged edition is unconfirmed. A record reached through the item's own
-// tagged ID is exempt, since the tag names that edition. A record merged after
-// the match is established is held only to CreditsAgree, which rejects listed
-// narrators that disagree but never an empty list.
-func (r *matchRun) missingNarrator(result *metadata.MetadataResult, byTaggedID bool) bool {
-	if byTaggedID || r.anyRecord() {
-		return false
-	}
-	if !slices.ContainsFunc(r.item.Narrators, func(n string) bool { return strings.TrimSpace(n) != "" }) {
-		return false
-	}
-	return !slices.ContainsFunc(result.People, func(p models.ItemPerson) bool {
-		return p.Kind == models.PersonKindNarrator && strings.TrimSpace(p.Name) != ""
-	})
 }
 
 // recordTitles lists every title a record goes by: primary, original and
@@ -378,6 +369,35 @@ func recordTitles(result *metadata.MetadataResult) []string {
 	return titles
 }
 
+// heldMatch is a search candidate whose record passed every check.
+type heldMatch struct {
+	record      *metadata.MetadataResult
+	ids         map[string]string
+	agreedTitle string
+}
+
+// accept makes m provider i's match.
+func (r *matchRun) accept(ctx context.Context, i int, m heldMatch) {
+	r.state[i].record = m.record
+	r.ids = m.ids
+	maps.Copy(r.ids, m.record.ProviderIDs)
+	r.agreedTitle = m.agreedTitle
+	slog.DebugContext(ctx, "audiobook enrichment: search result", "component", "audiobooks",
+		"provider", r.providers[i].Slug(), "content_id", r.item.ContentID, "matched_ids", r.ids)
+}
+
+// wantsNarrator reports whether the item carries a narrator tag.
+func (r *matchRun) wantsNarrator() bool {
+	return slices.ContainsFunc(r.item.Narrators, func(n string) bool { return strings.TrimSpace(n) != "" })
+}
+
+// listsNarrator reports whether a record names any narrator.
+func listsNarrator(result *metadata.MetadataResult) bool {
+	return slices.ContainsFunc(result.People, func(p models.ItemPerson) bool {
+		return p.Kind == models.PersonKindNarrator && strings.TrimSpace(p.Name) != ""
+	})
+}
+
 func (r *matchRun) anyRecord() bool {
 	return slices.ContainsFunc(r.state, func(s providerState) bool { return s.record != nil })
 }
@@ -387,10 +407,11 @@ func (r *matchRun) metadataRequest(ids map[string]string) metadata.MetadataReque
 }
 
 // admitFetched checks a fetched record against the item before any of it is
-// merged: credited author and narrator, then provider IDs. byTaggedID marks a
-// record reached through the item's own tagged ID; it is exempt from needing a
-// narrator, and is rejected when the item names an author and the two titles
-// share no word.
+// merged: credited author and narrator (listed narrators must agree; none
+// listed is no contradiction), stated volume, then provider IDs. byTaggedID
+// marks a record reached through the item's own tagged ID; it is also rejected
+// when the item names an author and none of its titles shares a word with the
+// item's.
 func (r *matchRun) admitFetched(
 	ctx context.Context,
 	existing map[string]string,
@@ -402,9 +423,6 @@ func (r *matchRun) admitFetched(
 		return nil, rejectAuthor, nil
 	}
 	if !metadata.CreditsAgree(item.Narrators, result.People, models.PersonKindNarrator) {
-		return nil, rejectNarrator, nil
-	}
-	if r.missingNarrator(result, byTaggedID) {
 		return nil, rejectNarrator, nil
 	}
 	// A volume the item's title states that the record's title or any alias
