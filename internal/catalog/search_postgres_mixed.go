@@ -323,7 +323,7 @@ func (r *ItemRepository) buildMixedSearchCursorSQL(parsed parsedSearchQuery, ite
 	}
 	if cursor != nil && cursor.request.GroupByWork {
 		if namePrefix || cursor.request.Definition.Limit != nil {
-			// Like the combined path: prefix, then work representative, then cap.
+			// Like the combined path: prefix, then cap, then work representative.
 			scoredBody = "SELECT * FROM (" + scoredBody + ") source_scored"
 			if namePrefix {
 				scoredBody += " WHERE " + searchNamePrefixCondition("source_scored", prefixIdx)
@@ -347,7 +347,8 @@ func (r *ItemRepository) buildMixedSearchCursorSQL(parsed parsedSearchQuery, ite
 		// one-time filter without widening either indexed title lookup.
 		postFilter += ` WHERE $1::text IS NOT NULL`
 	}
-	if namePrefix {
+	if namePrefix && (cursor == nil || !cursor.request.GroupByWork) {
+		// Grouped rows already passed the prefix in source_scored.
 		condition := searchNamePrefixCondition("scored", prefixIdx)
 		if strings.Contains(postFilter, " WHERE ") {
 			postFilter += " AND " + condition

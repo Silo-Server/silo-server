@@ -100,17 +100,21 @@ func (r *ItemRepository) searchCursorPage(ctx context.Context, query string, ite
 	if after == nil && eligibleForFuzzy(parsed) {
 		probeLimit = max(probeLimit, fuzzyFallbackThreshold)
 	}
-	// Grouping and the alphabetical jump both shrink the page, so probe the
-	// raw match family to decide whether it is sparse enough for fuzzy.
-	if after == nil && (searchOptions(request).GroupByWork || strings.TrimSpace(filter.NamePrefix) != "") && eligibleForFuzzy(parsed) {
+	// Grouping and the alphabetical jump both shrink the page, so the raw
+	// match family decides whether it is sparse enough for fuzzy.
+	rawProbe := func() (*searchFTSBlock, error) {
 		probeOptions := searchOptions(request)
 		probeOptions.GroupByWork = false
 		probe, probeKeys, _, err := r.searchFTSCursorRows(ctx, parsed, itemTypes, fuzzyFallbackThreshold, nil, withoutNamePrefix(filter), false, false, 0, probeOptions)
+		return &searchFTSBlock{items: probe, keys: probeKeys}, err
+	}
+	if after == nil && searchOptions(request).GroupByWork && eligibleForFuzzy(parsed) {
+		probe, err := rawProbe()
 		if err != nil {
 			return SearchCursorPage{}, err
 		}
-		if len(probe) < fuzzyFallbackThreshold {
-			return r.searchCombinedCursorPageWithFTS(ctx, parsed, itemTypes, limit, nil, filter, includeTotal, &searchFTSBlock{items: probe, keys: probeKeys}, request...)
+		if len(probe.items) < fuzzyFallbackThreshold {
+			return r.searchCombinedCursorPageWithFTS(ctx, parsed, itemTypes, limit, nil, filter, includeTotal, probe, request...)
 		}
 		after = &SearchCursor{Mode: searchCursorFTS}
 	}
@@ -119,7 +123,17 @@ func (r *ItemRepository) searchCursorPage(ctx context.Context, query string, ite
 		return SearchCursorPage{}, err
 	}
 	if after == nil && eligibleForFuzzy(parsed) && len(items) < fuzzyFallbackThreshold {
-		return r.searchCombinedCursorPageWithFTS(ctx, parsed, itemTypes, limit, nil, filter, includeTotal, &searchFTSBlock{items: items, keys: keys}, request...)
+		block := &searchFTSBlock{items: items, keys: keys}
+		if strings.TrimSpace(filter.NamePrefix) != "" {
+			// A full prefixed page already proves the raw family is not
+			// sparse, so the probe runs only when the prefix left a short one.
+			if block, err = rawProbe(); err != nil {
+				return SearchCursorPage{}, err
+			}
+		}
+		if len(block.items) < fuzzyFallbackThreshold {
+			return r.searchCombinedCursorPageWithFTS(ctx, parsed, itemTypes, limit, nil, filter, includeTotal, block, request...)
+		}
 	}
 	page := SearchCursorPage{Items: items, Total: total, TotalExact: includeTotal, HasMore: len(items) > limit, Scope: &SearchCursor{Mode: searchCursorFTS}}
 	if page.HasMore {

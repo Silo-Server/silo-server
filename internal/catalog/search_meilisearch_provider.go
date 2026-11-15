@@ -62,6 +62,10 @@ const (
 	meilisearchSemanticMinCosine = 0.3
 )
 
+// meilisearchNamePrefixFallbackReason explains in search diagnostics why a
+// name_prefix search ran on PostgreSQL.
+const meilisearchNamePrefixFallbackReason = "name_prefix searches run on PostgreSQL"
+
 var meilisearchTitleSearchAttributes = []string{
 	"title",
 	"original_title",
@@ -191,7 +195,13 @@ func (p *MeilisearchSearchProvider) Search(ctx context.Context, req CatalogSearc
 		// The index has no sort-title key to filter on, and its ranking window
 		// is capped, so a prefix applied afterwards would drop matches ranked
 		// past the window. PostgreSQL applies it before ranking and limits.
-		return p.fallback.Search(ctx, req)
+		// This is routing, not an outage, so it leaves the provider's health
+		// alone and only tells the response why PostgreSQL answered.
+		result, err := p.fallback.Search(ctx, req)
+		if result != nil {
+			result.FallbackReason = meilisearchNamePrefixFallbackReason
+		}
+		return result, err
 	}
 	if req.CursorPaging {
 		return p.searchCursorPage(ctx, req)

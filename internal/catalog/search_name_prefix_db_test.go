@@ -44,8 +44,12 @@ func seedNamePrefixSearchFixture(t *testing.T, pool *pgxpool.Pool) namePrefixSea
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {
-		_, _ = pool.Exec(context.Background(), `DELETE FROM media_items WHERE content_id LIKE $1`, token+"%")
-		_, _ = pool.Exec(context.Background(), `DELETE FROM media_folders WHERE id=$1`, f.folder)
+		if _, err := pool.Exec(context.Background(), `DELETE FROM media_items WHERE content_id LIKE $1`, token+"%"); err != nil {
+			t.Errorf("deleting fixture items: %v", err)
+		}
+		if _, err := pool.Exec(context.Background(), `DELETE FROM media_folders WHERE id=$1`, f.folder); err != nil {
+			t.Errorf("deleting fixture folder: %v", err)
+		}
 	})
 	exec(`INSERT INTO media_items(content_id,type,title,status,genres,year) VALUES($1,'movie',$2,'matched','{Drama}',2001)`, f.movie, token+" Arrival")
 	// The series files under its sort title, so "<token> c" must not match it.
@@ -156,7 +160,8 @@ func TestSearchNamePrefixNarrowsTextSearchDB(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer pool.Close()
+	// Registered first so it runs last, after the fixture cleanup's deletes.
+	t.Cleanup(pool.Close)
 	f := seedNamePrefixSearchFixture(t, pool)
 
 	// A library restriction moves episode admission inside a planning fence.
