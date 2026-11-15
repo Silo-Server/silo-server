@@ -838,6 +838,10 @@
 ./internal/catalog TestLetterIndexMatchesCursorPagesPostgres
 ./internal/catalog TestLetterIndexEpisodesMatchCursorPagesPostgres
 
+# An episode's Sort Title decides its browse order and A–Z letter, falling back
+# to its title.
+./internal/catalog TestEpisodeSortTitleFilesEpisodeBrowsePostgres
+
 # Deleting a library removes its ID from access groups, account overrides and
 # invitations, without widening an emptied list; a write keeps only existing
 # libraries, even racing the delete; the migration repairs earlier deletes.
