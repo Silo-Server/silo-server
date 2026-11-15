@@ -12361,7 +12361,7 @@ export interface paths {
     put?: never;
     /**
      * Submit a bounded subtitle multipart form.
-     * @description Detect a subtitle language from filename, metadata or content with an optional manual fallback. Does not store the file.
+     * @description Detect a subtitle language from filename, metadata or content with an optional manual fallback. Does not store the file. A server runs at most 4 detections at once and an account may run two of them; beyond either limit the request gets 429 with Retry-After.
      */
     post: operations["detectSubtitleLanguage"];
     delete?: never;

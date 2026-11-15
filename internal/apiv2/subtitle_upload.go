@@ -10,6 +10,7 @@ import (
 	catalogpkg "github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/subtitles"
 	"github.com/danielgtaylor/huma/v2"
+	"github.com/danielgtaylor/huma/v2/adapters/humachi"
 )
 
 type SubtitleUploadService interface {
@@ -99,7 +100,25 @@ func registerSubtitleUploads(reg *Registry) {
 	})
 	detect := op("/subtitles/detect-language", "detectSubtitleLanguage")
 	detect.RetrySafety = RetrySafetyNaturalIdempotent
-	detect.Description = "Detect a subtitle language from filename, metadata or content with an optional manual fallback. Does not store the file."
+	detect.Description = "Detect a subtitle language from filename, metadata or content with an optional manual fallback. Does not store the file. A server runs at most 4 detections at once and an account may run two of them; beyond either limit the request gets 429 with Retry-After."
+	// The slot is taken before Huma reads the body, so a detection the server
+	// is too busy for is refused without buffering or parsing its upload.
+	limiter := subtitles.NewDetectionLimiter()
+	detect.Middlewares = huma.Middlewares{func(ctx huma.Context, next func(huma.Context)) {
+		claims := claimsFrom(ctx.Context())
+		if claims == nil {
+			next(ctx)
+			return
+		}
+		release, ok := limiter.Acquire(claims.UserID)
+		if !ok {
+			r, w := humachi.Unwrap(ctx)
+			writeProblem(w, r, NewProblem(TypeRateLimited, "Too many subtitle language detections are running. Try again in a moment.").WithRetryAfter(1))
+			return
+		}
+		defer release()
+		next(ctx)
+	}}
 	Register(reg, detect, func(_ context.Context, in *SubtitleDetectInput) (*SubtitleDetectOutput, error) {
 		form := in.RawBody.Data()
 		if form == nil {
