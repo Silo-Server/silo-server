@@ -14,6 +14,12 @@ whose library access is unrestricted. The scanner marks a vanished file
 `missing_since`; membership reconciliation then removes the memberships left
 without a present file, in the same pass.
 
+Reconciliation deletes an item only when it has no membership and no present
+file. Scanners publish a new title in separate statements, the file row
+before the membership, so a scan of the same library that runs in between
+sees a present file with no membership. That item is being published, not
+orphaned.
+
 The scanner's file removal grace (`scanner.file_removal_grace`, 24 hours by
 default) is how long a removal stays reversible. A replacement file, or the
 same file returning, within the grace restores the title as it was:

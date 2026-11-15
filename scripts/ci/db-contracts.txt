@@ -192,6 +192,10 @@
 # admin locked, including locked fields left empty.
 ./internal/scanner TestEbookRescanKeepsLockedFieldsDB
 
+# A library scan that runs while another scan is publishing a new ebook keeps
+# the book: its membership sweep spares an item that still has a present file.
+./internal/scanner TestScanFileEbookKeepsBookPublishedDuringLibraryScanDB
+
 # A full scan that holds a few files at a time catalogs a library like one that
 # holds them all: groups and roots spanning batches, a deleted top-level
 # folder, an unreadable folder and a dropped mount.
