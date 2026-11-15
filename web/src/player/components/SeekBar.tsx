@@ -66,6 +66,14 @@ const REGION_COLORS_EDIT: Record<MarkerKind, string> = {
   preview: "bg-cyan-400/75",
 };
 
+/**
+ * Where a marker time sits on the track, in percent. Stored ranges can run past
+ * the probed duration, so bands and their edit handles stay on the track.
+ */
+function trackPercent(seconds: number, duration: number): number {
+  return Math.max(0, Math.min(100, (seconds / duration) * 100));
+}
+
 function markerLabel(t: Translate, kind: MarkerKind): string {
   return t(MARKER_LABEL_KEYS[kind]);
 }
@@ -531,9 +539,8 @@ export function SeekBar({
                 active segment is a touch taller and gets a ring. */}
             {duration > 0 &&
               regions.map((region) => {
-                // A range can run past a probed duration; keep it on the track.
-                const startPercent = Math.max(0, Math.min(100, (region.start / duration) * 100));
-                const endPercent = Math.max(0, Math.min(100, (region.end / duration) * 100));
+                const startPercent = trackPercent(region.start, duration);
+                const endPercent = trackPercent(region.end, duration);
                 if (endPercent <= startPercent) return null;
                 const isActive = editing && region.kind === activeEditKind;
                 const isHovered = hoverRegion === region && !dragging && edgeDrag === null;
@@ -579,12 +586,12 @@ export function SeekBar({
           {activeRegion && duration > 0 && (
             <>
               <MarkerHandle
-                percent={(activeRegion.start / duration) * 100}
+                percent={trackPercent(activeRegion.start, duration)}
                 label={t("web.player.seekBar.dragMarkerStart")}
                 onPointerDown={handleEdgePointerDown(activeRegion.kind, "start")}
               />
               <MarkerHandle
-                percent={(activeRegion.end / duration) * 100}
+                percent={trackPercent(activeRegion.end, duration)}
                 label={t("web.player.seekBar.dragMarkerEnd")}
                 onPointerDown={handleEdgePointerDown(activeRegion.kind, "end")}
               />
