@@ -26075,9 +26075,38 @@
           "content_id": {
             "type": "string"
           },
+          "duration_seconds": {
+            "description": "Audiobooks only: total listening time, summed over the book's files the viewer can play, as the book's own total_duration_seconds is. Absent for ebooks and when no file reports a duration",
+            "examples": [
+              41520
+            ],
+            "format": "int64",
+            "type": "integer"
+          },
+          "played": {
+            "description": "The profile finished this book, by the rule a catalog card's user_state.played follows: an audiobook's visible progress or a visible completed history row, an ebook's reading progress. Absent when false and without a profile",
+            "examples": [
+              true
+            ],
+            "type": "boolean"
+          },
+          "poster_thumbhash": {
+            "description": "The poster's ThumbHash, for a blurred preview while poster_url loads",
+            "type": "string"
+          },
           "poster_url": {
             "format": "uri-reference",
             "type": "string"
+          },
+          "progress_ratio": {
+            "description": "How far the profile is into the book, 0-1: listening position over the progress row's duration for an audiobook, reading progress for an ebook. Present only while the book is started and not played",
+            "examples": [
+              0.42
+            ],
+            "format": "double",
+            "maximum": 1,
+            "minimum": 0,
+            "type": "number"
           },
           "series_index": {
             "format": "int64",
@@ -27226,6 +27255,19 @@
             ],
             "type": "string"
           },
+          "authors": {
+            "description": "On an audiobook or ebook card in a catalog browse listing: up to three author names in credit order, the names the book's detail page lists under authors. Absent for other types, on other listings, and when the book credits no author",
+            "examples": [
+              [
+                "Frank Herbert"
+              ]
+            ],
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 3,
+            "type": "array"
+          },
           "availability": {
             "$ref": "#/components/schemas/CatalogAvailability",
             "description": "On a series, complete seasons out of seasons that have aired. On a season, episodes in the library out of the episodes the season lists. Sent only while the acting profile's poster badges are on and include the availability badge. Absent for other types, for specials, and when episode metadata is incomplete."
@@ -27263,6 +27305,7 @@
             "type": "string"
           },
           "duration_seconds": {
+            "description": "The length position_seconds is measured against, in seconds, as the progress record holds it. Present with position_seconds; a card draws its progress bar and time left from the pair",
             "format": "double",
             "type": "number"
           },
@@ -27353,7 +27396,7 @@
             "type": "string"
           },
           "position_seconds": {
-            "description": "Resume position on a continue-watching card",
+            "description": "The profile's resume position, in seconds. On a Continue Watching card, and on a catalog browse or box set card for a title the profile has started and not finished (absent while user_state.played is true); other listings leave it absent. Series, seasons, and ebooks never carry it on a browse card",
             "format": "double",
             "type": "number"
           },
@@ -27608,6 +27651,19 @@
           "audiobook": {
             "$ref": "#/components/schemas/AudiobookDetailExtension"
           },
+          "authors": {
+            "description": "On an audiobook or ebook card in a catalog browse listing: up to three author names in credit order, the names the book's detail page lists under authors. Absent for other types, on other listings, and when the book credits no author",
+            "examples": [
+              [
+                "Frank Herbert"
+              ]
+            ],
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 3,
+            "type": "array"
+          },
           "availability": {
             "$ref": "#/components/schemas/CatalogAvailability",
             "description": "On a series, complete seasons out of seasons that have aired. On a season, episodes in the library out of the episodes the season lists. Sent only while the acting profile's poster badges are on and include the availability badge. Absent for other types, for specials, and when episode metadata is incomplete."
@@ -27695,6 +27751,7 @@
             "type": "string"
           },
           "duration_seconds": {
+            "description": "The length position_seconds is measured against, in seconds, as the progress record holds it. Present with position_seconds; a card draws its progress bar and time left from the pair",
             "format": "double",
             "type": "number"
           },
@@ -27869,7 +27926,7 @@
             "type": "array"
           },
           "position_seconds": {
-            "description": "Resume position on a continue-watching card",
+            "description": "The profile's resume position, in seconds. On a Continue Watching card, and on a catalog browse or box set card for a title the profile has started and not finished (absent while user_state.played is true); other listings leave it absent. Series, seasons, and ebooks never carry it on a browse card",
             "format": "double",
             "type": "number"
           },
@@ -35927,6 +35984,19 @@
             ],
             "type": "string"
           },
+          "authors": {
+            "description": "On an audiobook or ebook card in a catalog browse listing: up to three author names in credit order, the names the book's detail page lists under authors. Absent for other types, on other listings, and when the book credits no author",
+            "examples": [
+              [
+                "Frank Herbert"
+              ]
+            ],
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 3,
+            "type": "array"
+          },
           "availability": {
             "$ref": "#/components/schemas/CatalogAvailability",
             "description": "On a series, complete seasons out of seasons that have aired. On a season, episodes in the library out of the episodes the season lists. Sent only while the acting profile's poster badges are on and include the availability badge. Absent for other types, for specials, and when episode metadata is incomplete."
@@ -35964,6 +36034,7 @@
             "type": "string"
           },
           "duration_seconds": {
+            "description": "The length position_seconds is measured against, in seconds, as the progress record holds it. Present with position_seconds; a card draws its progress bar and time left from the pair",
             "format": "double",
             "type": "number"
           },
@@ -36054,7 +36125,7 @@
             "type": "string"
           },
           "position_seconds": {
-            "description": "Resume position on a continue-watching card",
+            "description": "The profile's resume position, in seconds. On a Continue Watching card, and on a catalog browse or box set card for a title the profile has started and not finished (absent while user_state.played is true); other listings leave it absent. Series, seasons, and ebooks never carry it on a browse card",
             "format": "double",
             "type": "number"
           },
@@ -57724,6 +57795,19 @@
             ],
             "type": "string"
           },
+          "authors": {
+            "description": "On an audiobook or ebook card in a catalog browse listing: up to three author names in credit order, the names the book's detail page lists under authors. Absent for other types, on other listings, and when the book credits no author",
+            "examples": [
+              [
+                "Frank Herbert"
+              ]
+            ],
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 3,
+            "type": "array"
+          },
           "availability": {
             "$ref": "#/components/schemas/CatalogAvailability",
             "description": "On a series, complete seasons out of seasons that have aired. On a season, episodes in the library out of the episodes the season lists. Sent only while the acting profile's poster badges are on and include the availability badge. Absent for other types, for specials, and when episode metadata is incomplete."
@@ -57768,6 +57852,7 @@
             "type": "string"
           },
           "duration_seconds": {
+            "description": "The length position_seconds is measured against, in seconds, as the progress record holds it. Present with position_seconds; a card draws its progress bar and time left from the pair",
             "format": "double",
             "type": "number"
           },
@@ -57858,7 +57943,7 @@
             "type": "string"
           },
           "position_seconds": {
-            "description": "Resume position on a continue-watching card",
+            "description": "The profile's resume position, in seconds. On a Continue Watching card, and on a catalog browse or box set card for a title the profile has started and not finished (absent while user_state.played is true); other listings leave it absent. Series, seasons, and ebooks never carry it on a browse card",
             "format": "double",
             "type": "number"
           },
@@ -58149,6 +58234,19 @@
             ],
             "type": "string"
           },
+          "authors": {
+            "description": "On an audiobook or ebook card in a catalog browse listing: up to three author names in credit order, the names the book's detail page lists under authors. Absent for other types, on other listings, and when the book credits no author",
+            "examples": [
+              [
+                "Frank Herbert"
+              ]
+            ],
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 3,
+            "type": "array"
+          },
           "availability": {
             "$ref": "#/components/schemas/CatalogAvailability",
             "description": "On a series, complete seasons out of seasons that have aired. On a season, episodes in the library out of the episodes the season lists. Sent only while the acting profile's poster badges are on and include the availability badge. Absent for other types, for specials, and when episode metadata is incomplete."
@@ -58186,6 +58284,7 @@
             "type": "string"
           },
           "duration_seconds": {
+            "description": "The length position_seconds is measured against, in seconds, as the progress record holds it. Present with position_seconds; a card draws its progress bar and time left from the pair",
             "format": "double",
             "type": "number"
           },
@@ -58276,7 +58375,7 @@
             "type": "string"
           },
           "position_seconds": {
-            "description": "Resume position on a continue-watching card",
+            "description": "The profile's resume position, in seconds. On a Continue Watching card, and on a catalog browse or box set card for a title the profile has started and not finished (absent while user_state.played is true); other listings leave it absent. Series, seasons, and ebooks never carry it on a browse card",
             "format": "double",
             "type": "number"
           },

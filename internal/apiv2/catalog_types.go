@@ -49,8 +49,8 @@ type CatalogItem struct {
 	ReleaseDate            *string                   `json:"release_date,omitempty" format:"date" doc:"Calendar date, YYYY-MM-DD" example:"1995-12-15"`
 	LastAirDate            *string                   `json:"last_air_date,omitempty" format:"date" doc:"Calendar date, YYYY-MM-DD"`
 	AddedAt                *Instant                  `json:"added_at,omitempty"`
-	PositionSeconds        *float64                  `json:"position_seconds,omitempty" doc:"Resume position on a continue-watching card"`
-	DurationSeconds        *float64                  `json:"duration_seconds,omitempty"`
+	PositionSeconds        *float64                  `json:"position_seconds,omitempty" doc:"The profile's resume position, in seconds. On a Continue Watching card, and on a catalog browse or box set card for a title the profile has started and not finished (absent while user_state.played is true); other listings leave it absent. Series, seasons, and ebooks never carry it on a browse card"`
+	DurationSeconds        *float64                  `json:"duration_seconds,omitempty" doc:"The length position_seconds is measured against, in seconds, as the progress record holds it. Present with position_seconds; a card draws its progress bar and time left from the pair"`
 	ProgressUpdatedAt      *Instant                  `json:"progress_updated_at,omitempty"`
 	PosterIsEpisodeStill   *bool                     `json:"poster_is_episode_still,omitempty" doc:"Whether poster_url is an episode still. False for series or season artwork; absent when provenance is unavailable."`
 	BackdropIsEpisodeStill *bool                     `json:"backdrop_is_episode_still,omitempty" doc:"Whether backdrop_url is an episode still. False for series artwork; absent when provenance is unavailable."`
@@ -76,6 +76,7 @@ type CatalogItem struct {
 	WorkID                     string              `json:"work_id,omitempty" doc:"The work (book) an audiobook or ebook edition belongs to"`
 	WorkTitle                  string              `json:"work_title,omitempty"`
 	WorkFormats                []CatalogWorkFormat `json:"work_formats,omitempty" doc:"Sibling editions of the same work"`
+	Authors                    []string            `json:"authors,omitempty" maxItems:"3" doc:"On an audiobook or ebook card in a catalog browse listing: up to three author names in credit order, the names the book's detail page lists under authors. Absent for other types, on other listings, and when the book credits no author" example:"[\"Frank Herbert\"]"`
 	// An episode card's parent artwork, so a client can draw a hero from the
 	// series backdrop without fetching the episode's detail. There is no
 	// season backdrop member; Continue Watching and Next Up rows carry it as
@@ -277,7 +278,8 @@ func catalogItemOfListing(v handlers.CollectionItemView, sel ratingsources.Selec
 		SeasonPosterURL: v.ParentArtwork.SeasonPosterURL, SeasonPosterThumbhash: v.ParentArtwork.SeasonPosterThumbhash,
 		MangaChapterCount: v.MangaChapterCount, MangaVolumeCount: v.MangaVolumeCount,
 		OverlaySummary: catalogOverlayOf(v.OverlaySummary), Availability: catalogAvailabilityOf(v.Availability), UserState: catalogUserStateOf(v.UserState),
-		WorkID: v.WorkID, WorkTitle: v.WorkTitle,
+		WorkID: v.WorkID, WorkTitle: v.WorkTitle, Authors: v.Authors,
+		PositionSeconds: v.PositionSeconds, DurationSeconds: v.DurationSeconds,
 		ProgressUpdatedAt: instantOfRFC3339(v.ProgressUpdatedAt), ItemSource: v.ItemSource,
 	}
 	if m := v.SortMetrics; m != nil {
