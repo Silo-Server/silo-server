@@ -129,7 +129,18 @@ const (
 	subtitleSpillBytes = 16 << 20
 	// keepDemuxedTimeout bounds keeping what a demux copied.
 	keepDemuxedTimeout = 2 * time.Minute
+	// subtitleWindowIndexWait is how long a window with a duration waits on
+	// the EmbeddedSubtitleSource before the source is demuxed instead,
+	// which streams cues as it goes. Where random reads are fast a window
+	// reads in under a second; where each one costs about a second (a FUSE
+	// mount of remote storage) a window takes minutes, and the web player
+	// gives up on one that sends nothing for 30 seconds.
+	subtitleWindowIndexWait = 10 * time.Second
 )
+
+// errSlowWindowRead is the cause of a window read that ran past
+// subtitleWindowIndexWait.
+var errSlowWindowRead = errors.New("subtitle window read took too long")
 
 // sourced wraps a whole-track extract so it reads the track from the
 // cache's EmbeddedSubtitleSource first, and demuxes the source, keeping a
@@ -174,27 +185,42 @@ func (c *SubtitleCache) sourced(extract SUPExtractFunc) SUPExtractFunc {
 }
 
 // window reads an explicit window of opts' track through the cache's
-// EmbeddedSubtitleSource, or returns nil when the source must be demuxed.
-func (c *SubtitleCache) window(ctx context.Context, opts StreamExtractOpts) *SubtitlePacketInput {
+// EmbeddedSubtitleSource. It returns nil when the source must be demuxed,
+// with the source's error, wrapped in errSlowWindowRead for a read that ran
+// past subtitleWindowIndexWait; none when the caller has gone.
+func (c *SubtitleCache) window(ctx context.Context, opts StreamExtractOpts) (*SubtitlePacketInput, error) {
 	if c == nil || c.source == nil || opts.Embedded == nil {
-		return nil
+		return nil, nil
 	}
 	from, to := embeddedsub.WholeFrom, embeddedsub.WholeTo
 	if opts.SeekSeconds > 0 {
 		from = secondsDuration(opts.SeekSeconds)
 	}
+	readCtx := ctx
 	if opts.DurationSeconds > 0 {
 		to = secondsDuration(opts.SeekSeconds + opts.DurationSeconds)
-	}
-	in, err := c.source.Window(ctx, opts.InputPath, *opts.Embedded, from, to)
-	if err != nil {
-		if ctx.Err() == nil {
-			slog.DebugContext(ctx, "subtitle window demuxed from the source", "component", "playback",
-				"file_id", opts.Embedded.MediaFileID, "stream_index", opts.Embedded.StreamIndex, "reason", err)
+		// A window open to the end reads the track whole, which has a wait
+		// of its own, and a track only the index can read has no demux to
+		// give way to.
+		if !opts.Embedded.IndexOnly {
+			var cancel context.CancelFunc
+			readCtx, cancel = context.WithTimeoutCause(ctx, subtitleWindowIndexWait, errSlowWindowRead)
+			defer cancel()
 		}
-		return nil
 	}
-	return in
+	in, err := c.source.Window(readCtx, opts.InputPath, *opts.Embedded, from, to)
+	if err != nil {
+		if ctx.Err() != nil {
+			return nil, nil
+		}
+		if errors.Is(context.Cause(readCtx), errSlowWindowRead) {
+			err = fmt.Errorf("%w: %w", errSlowWindowRead, err)
+		}
+		slog.DebugContext(ctx, "subtitle window demuxed from the source", "component", "playback",
+			"file_id", opts.Embedded.MediaFileID, "stream_index", opts.Embedded.StreamIndex, "reason", err)
+		return nil, err
+	}
+	return in, nil
 }
 
 func secondsDuration(s float64) time.Duration {
@@ -203,11 +229,12 @@ func secondsDuration(s float64) time.Duration {
 
 // serveWindowFromSource answers a window request from the cache's
 // EmbeddedSubtitleSource. It reports false, having written nothing, when
-// the caller should demux the source instead.
+// the caller should demux the source instead, with the reason the source
+// gave, if any (wrapping errSlowWindowRead for a read that took too long).
 func (c *SubtitleCache) serveWindowFromSource(ctx context.Context, w io.Writer, opts StreamExtractOpts, extract SUPExtractFunc) (bool, error) {
-	in := c.window(ctx, opts)
+	in, err := c.window(ctx, opts)
 	if in == nil {
-		return false, nil
+		return false, err
 	}
 	wrote, err := convertPackets(ctx, w, opts, in, extract)
 	if err != nil && !wrote && ctx.Err() == nil {
