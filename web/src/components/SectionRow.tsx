@@ -12,7 +12,11 @@ import { useUICustomization } from "@/hooks/useUICustomization";
 import { useEpisodeSpoilerPrefs } from "@/hooks/useEpisodeSpoilerPrefs";
 import { useSectionTitle } from "@/lib/sectionTitle";
 import { useT } from "@/i18n";
-import { carouselCardWidthClasses, WIDE_CAROUSEL_CARD_WIDTH_CLASSES } from "@/lib/uiCustomization";
+import {
+  carouselCardWidthClasses,
+  shortcutLabel,
+  WIDE_CAROUSEL_CARD_WIDTH_CLASSES,
+} from "@/lib/uiCustomization";
 import { initialCarouselSlideCount, visibleCarouselSlideCount } from "@/lib/carouselWindow";
 
 interface SectionRowProps {
@@ -128,7 +132,7 @@ export default memo(function SectionRow({
   const headerActions = libraryId ? (
     <SectionPinButton
       sectionId={section.id}
-      label={pinLabel ?? section.title}
+      label={shortcutLabel(pinLabel ?? section.title)}
       libraryId={libraryId}
     />
   ) : undefined;
