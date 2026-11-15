@@ -334,8 +334,8 @@ func (r *AudiobookGroupStatsRefresher) Run(ctx context.Context) {
 	var due <-chan time.Time
 	// retry is set when another server held the refresh a scan asked for.
 	retry := false
-	// heldUntil pauses the periodic check for an interval after a failed
-	// refresh, so one that keeps failing does not run every poll.
+	// heldUntil pauses refreshes for an interval after one fails, so a
+	// refresh that keeps failing does not run every poll or every scan.
 	var heldUntil time.Time
 	for {
 		select {
@@ -355,13 +355,16 @@ func (r *AudiobookGroupStatsRefresher) Run(ctx context.Context) {
 			}
 		case <-due:
 			due = nil
+			if wait := time.Until(heldUntil); wait > 0 {
+				// The scan's libraries stay pending until the pause ends.
+				due = time.After(wait)
+				continue
+			}
 			if !r.changedAudiobooks(ctx) && !retry {
 				continue
 			}
 			// The refresh must start after the scan, so a recent one does
 			// not count; and one running now may have started before it.
-			// A failed refresh is left to the periodic check, after its
-			// pause, so one that keeps failing does not run every delay.
 			var failed bool
 			retry, failed = r.run(ctx, 0)
 			if failed {

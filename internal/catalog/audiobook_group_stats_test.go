@@ -62,7 +62,7 @@ func TestAudiobookGroupStatsRefresherRefreshesAfterAudiobookScans(t *testing.T) 
 
 // Each server checks every poll whether any server refreshed within the
 // interval, so the view is never older than the interval plus one poll. After
-// a failed refresh the check pauses for an interval.
+// a failed refresh both the check and a scan's refresh wait an interval.
 func TestAudiobookGroupStatsRefresherChecksTheRefreshAgeEachPoll(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		var refreshes []time.Duration
@@ -75,7 +75,9 @@ func TestAudiobookGroupStatsRefresherChecksTheRefreshAgeEachPoll(t *testing.T) {
 				}
 				return false, nil
 			},
-			func(context.Context, []int) (bool, error) { return false, nil })
+			func(_ context.Context, libraryIDs []int) (bool, error) {
+				return slices.Contains(libraryIDs, 7), nil
+			})
 		ctx, cancel := context.WithCancel(t.Context())
 		defer cancel()
 		go r.Run(ctx)
@@ -91,13 +93,15 @@ func TestAudiobookGroupStatsRefresherChecksTheRefreshAgeEachPoll(t *testing.T) {
 
 		fail = true
 		advance(time.Minute)
+		r.LibraryChanged(7)
 		advance(9 * time.Minute)
 		if len(refreshes) != 3 {
-			t.Fatalf("%d refreshes, want none for an interval after the failed third", len(refreshes))
+			t.Fatalf("%d refreshes, want none, checked or scanned, for an interval after the failed third", len(refreshes))
 		}
+		fail = false
 		advance(time.Minute)
-		if len(refreshes) != 4 {
-			t.Fatalf("%d refreshes, want the check to resume after the pause", len(refreshes))
+		if len(refreshes) != 5 || !slices.Contains(refreshes[3:], 0) {
+			t.Fatalf("refreshes %v, want the check and the scan's refresh once the pause ends", refreshes)
 		}
 	})
 }
