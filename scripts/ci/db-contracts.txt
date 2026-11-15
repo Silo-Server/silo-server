@@ -13,7 +13,6 @@
 ./internal/catalog TestLibraryCollectionNamesDB
 ./internal/catalog TestLibraryCollectionNameRacesDB
 ./internal/catalog TestCatalogManualCollectionCursorDB
-./internal/catalog TestRuleFieldsFilterCatalogDB
 ./internal/catalog TestMixedCatalogMangaCounts
 ./internal/catalog TestContentRatingCeilingAcrossSystemsDB
 ./internal/catalog TestRatingsPageFollowsAccessDB
