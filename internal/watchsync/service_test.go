@@ -708,6 +708,11 @@ func (r *serviceFakeRepo) listItemKeyHeldElsewhere(state ListItemState) bool {
 	return false
 }
 
+func (r *serviceFakeRepo) SetListItemProviderKey(_ context.Context, connectionID string, kind ListKind, mediaItemID, key string) error {
+	r.markListItem(connectionID, kind, mediaItemID, func(state *ListItemState) { state.ProviderItemKey = key })
+	return nil
+}
+
 func (r *serviceFakeRepo) markListItem(connectionID string, kind ListKind, mediaItemID string, apply func(*ListItemState)) {
 	for i := range r.listItemStates {
 		if r.listItemStates[i].ConnectionID == connectionID && r.listItemStates[i].ListKind == kind && r.listItemStates[i].MediaItemID == mediaItemID {
@@ -3849,8 +3854,12 @@ func TestServiceFavoriteImportAndPendingLocalRemoval(t *testing.T) {
 		listedAt  time.Time
 		guessed   bool
 		wantAdded bool
+		// storedKey is movie-a's key when the provider has since listed it
+		// under another one.
+		storedKey string
 	}{
 		{name: "listing older than the removal", listedAt: removedAt.Add(-24 * time.Hour)},
+		{name: "older listing under another key", listedAt: removedAt.Add(-24 * time.Hour), storedKey: "tmdb:549"},
 		{name: "listing newer than the removal", listedAt: removedAt.Add(time.Hour), wantAdded: true},
 		// A provider that sends no listing time gets the import time.
 		{name: "undated listing", listedAt: removedAt.Add(time.Hour), guessed: true},
@@ -3865,7 +3874,7 @@ func TestServiceFavoriteImportAndPendingLocalRemoval(t *testing.T) {
 			repo.listItemStates = []ListItemState{
 				{
 					ConnectionID: conn.ID, ListKind: ListKindFavorites, MediaItemID: "movie-a", Kind: "movie",
-					ProviderItemKey: "imdb:tt0137523", RemotePresent: true, LastRemovedLocalAt: &removedAt,
+					ProviderItemKey: cmp.Or(tt.storedKey, "imdb:tt0137523"), RemotePresent: true, LastRemovedLocalAt: &removedAt,
 				},
 				{
 					ConnectionID: conn.ID, ListKind: ListKindFavorites, MediaItemID: "movie-b", Kind: "movie",
@@ -3897,8 +3906,8 @@ func TestServiceFavoriteImportAndPendingLocalRemoval(t *testing.T) {
 			if result.Removed != 0 || len(favorites) != wantFavorites {
 				t.Fatalf("result=%#v favorites=%#v", result, favorites)
 			}
-			if a := repo.listItemStates[0]; a.LocalPresent != tt.wantAdded || !a.RemotePresent {
-				t.Fatalf("movie-a state = %#v, want local %v", a, tt.wantAdded)
+			if a := repo.listItemStates[0]; a.LocalPresent != tt.wantAdded || !a.RemotePresent || a.ProviderItemKey != "imdb:tt0137523" {
+				t.Fatalf("movie-a state = %#v, want local %v under the listed key", a, tt.wantAdded)
 			}
 		})
 	}
