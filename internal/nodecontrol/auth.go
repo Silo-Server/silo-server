@@ -1,7 +1,8 @@
 // Package nodecontrol owns the transcode node control plane: the
 // /api/internal/nodes/ routes a transcode node calls with its own key, the
 // authentication in front of them on the core, and the node's client for them
-// (configuration, reports, logs and health changes).
+// (configuration, reports, logs, health changes, and resolving the recipe and
+// playback identity of a transport it serves).
 package nodecontrol
 
 import (

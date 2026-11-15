@@ -826,7 +826,9 @@ working (`internal/jellycompat/transcode_failover.go`):
   refused, unroutable, dial timeout, failed name lookup; through a proxy also a
   hung node, `nodepool.ErrNodeNotAnswering` from `transcodeproxy.DoNode`). A
   node that answers, even with an error, is alive; its answer is relayed and
-  nothing moves.
+  nothing moves, except that a `401` is answered as the node being
+  unavailable. A node the relay cannot sign for moves nothing either (see
+  **Node refusals** below).
 - **Move.** Central resolves a new executor with the session's frozen recipe
   requirements (the tone-map mode it runs, audio and HEVC capabilities; this
   process only when it can run that tone-map mode and audio downmix), the dead node and any node
@@ -879,6 +881,10 @@ working (`internal/jellycompat/transcode_failover.go`):
   transport back on the released node: the release ends the rebuilt job and
   the node deletes the record, and the rewrite lets the next request rebuild
   it there.
+- **Card binding.** The record binds the node it names by its row id, the one
+  the core's resolve checks. A start writes the id of the node it started on,
+  not the play's routing assignment, which is recorded only after the start
+  succeeds and can still name the previous executor or none.
 
 Limits: the moved route lives in the owning API process, like any compat
 session; a proxy-egress transcode whose proxy has no other usable transcode node
@@ -1030,9 +1036,14 @@ API egress) and cannot reach the session's node, it moves the transcode itself:
   `internal/noderecipe` card stored under the transport id for tokenless
   (header-authenticated) sessions. The API's own session recipe never stands
   in for a token here; a move of a header-authenticated session points the
-  session recipe at the new executor at once and writes the node recipe after
-  the old node's stop returns (see **Commit and accounting**); a move to this
-  API process deletes the node recipe instead. With
+  session recipe at the new executor at once. Every move to another node,
+  whether or not the session's URLs carry a token, writes the node recipe
+  naming the new node after the old node's stop returns (see **Commit and
+  accounting**): the client keeps presenting the token minted for the node it
+  left, and the core's resolve (`nodecontrol.Server.HandleResolve`) binds a
+  token to that node only, so the stored card is what lets the new node
+  rebuild the transport after its own restart. A move to this API process
+  deletes the node recipe instead. With
   neither, nothing moves and the relay answers `502` as before. A stream-copy recipe answers to the persisted
   copy-safety verdict first, like any other revival.
 - **Executor.** `noderouting.Resolve` with the current policy, restricted to
@@ -1089,7 +1100,45 @@ API egress) and cannot reach the session's node, it moves the transcode itself:
   after writing. That stop sets the marker before it deletes the card: a write
   that finds the marker skips, and one that finds it only afterwards deletes
   the card itself, because the stop's delete already ran. A marker that cannot
-  be read skips a write but never undoes one.
+  be read skips a write but never undoes one. The move also reads the session's
+  and the transport's deny markers just before it commits and again before it
+  serves from the new executor: a stop that lands while the new node starts
+  makes the move stop what it started and answer `410`.
+- **Recipe deletion on stop.** The API's own remote stop
+  (`TranscodeManager.StopRemoteTranscode`, which native and Jellyfin
+  compatibility stops use) deletes the transport's node recipe before it sends
+  the node its `DELETE`, with a five-second bound, so a request relayed while
+  the stop is in flight cannot rebuild the session. It keeps a card that names
+  another node URL than the one it stops
+  (`noderecipe.Store.DeleteUnlessIssuedElsewhere`,
+  `playback.RecipeExecutor.IssuedForAnotherRoute`): the API knows the URL it
+  dialed, so a late stop on one node, or on one Jellyfin compatibility start
+  candidate after the next candidate wrote its card under the same transport
+  id, never removes the card of the node that runs the transport now, whatever
+  row id that card carries. A failed deletion is logged and the node is still
+  told to stop. A release (`ReleaseRemoteTranscode`, used by moves) deletes
+  nothing, and a cancel (`CancelRemoteTranscode`) leaves the card to its
+  caller. Nodes still delete on their own stop too (`DeleteUnlessMoved`); both
+  deletions keep a moved card.
+- **Relay deny checks.** Every relay that signs a request to a transcode node
+  checks the deny marker first: the API relay checks the transport id (the
+  session's own serve lookup checks the playback session), the proxy token and
+  grant routes check the playback session and the transport, and the
+  Jellyfin-compatible master manifest, playlist and segment relays check the
+  upstream session and the recipe's session when it differs. A denied session
+  gets `410` even when a failed stop left its node runtime alive.
+- **Node refusals.** Every relay authenticates its client before it signs a
+  request to a node, so a node's `401` refuses the relay, not the client: the
+  relays answer it as the node being unavailable (`502`, or `503`
+  `dependency_unavailable` through the `/api/v2` delivery routes and download
+  relay) and log the node at most once a minute
+  (`transcodeproxy.NodeRefusedRelay`). A node the relay cannot sign for
+  (`nodeauth.ErrNoNodeKey`, `ErrUnknownNode`, `transcodeproxy.NodeUnsignable`)
+  is answered the same way and moves nothing, and a proxy publishes no move
+  request for it: a proxy or API replica whose key registry is empty or stale
+  signs for no node at all, so a move would restart a healthy transcode on
+  every hop. A start that cannot sign for a candidate goes on to the next
+  candidate like any failed start.
 - **Pacing.** Moves are single-flighted per session
   (`TranscodeManager.RehomeTranscode`), so every request that finds the node
   dead waits on one move, and each remote start holds a `reconstructSem` slot

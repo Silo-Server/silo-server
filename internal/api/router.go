@@ -3429,19 +3429,35 @@ func newChiRouter(deps Dependencies) chi.Router {
 			Redis:      deps.RedisClient,
 			Telemetry:  streamtelemetry.NodeSnapshotStore(deps.StreamTelemetry),
 			Events:     deps.EventBus,
+			Deny:       playback.NewStreamDeny(deps.RedisClient),
+			StreamSecret: func() string {
+				if cfg := deps.CurrentConfig(); cfg != nil {
+					return cfg.Auth.JWTSecret
+				}
+				return ""
+			},
 		}
 		if deps.DB != nil {
 			nodeControlOptions.Logs = opslog.NewConsumer(deps.DB, deps.LogStreamHub)
 		}
+		// One store answers resolve and revoke-recipes. Without Redis it holds
+		// nothing and revokes nothing.
+		nodeRecipes := noderecipe.NewStore(deps.RedisClient, 0)
+		nodeControlOptions.Recipes, nodeControlOptions.Revocations = nodeRecipes, nodeRecipes
 		nodeControl := nodecontrol.NewServer(nodeControlOptions)
 		r.Route("/api/internal/nodes/self", func(r chi.Router) {
 			r.Use(nodecontrol.RequireNode(deps.NodeKeyRegistry))
 			r.Get("/config", nodeControl.HandleConfig)
+			// Resolve is on a viewer's request path (a rebuild after a node
+			// restart, or each progressive remux request), so a burst of
+			// rebuilds must not be throttled with the background routes.
+			r.Post("/resolve", nodeControl.HandleResolve)
 			r.Group(func(r chi.Router) {
 				r.Use(nodeControl.LimitNode)
 				r.Post("/report", nodeControl.HandleReport)
 				r.Post("/logs", nodeControl.HandleLogs)
 				r.Post("/health-changed", nodeControl.HandleHealthChanged)
+				r.Post("/revoke-recipes", nodeControl.HandleRevokeRecipes)
 			})
 		})
 	}

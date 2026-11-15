@@ -4096,7 +4096,10 @@ func main() {
 			AvatarStore:          handlers.NewProfileAvatarStore(deps.Blobs),
 			// Hand remote-transcode recipes to the shared recipe store so a dedicated
 			// transcode node that restarts can rebuild a jellycompat session.
-			RecipeNodeStore:  noderecipe.NewStore(apiRedisClient, 0),
+			RecipeNodeStore: noderecipe.NewStore(apiRedisClient, 0),
+			// The relays to transcode nodes check the same deny markers the
+			// native API's stops write.
+			StreamDeny:       playback.NewStreamDeny(apiRedisClient),
 			SessionSyncer:    deps.SessionSyncer,
 			SubtitlePlaySync: subtitlePlaySync,
 			// One PIN budget per profile across the native and Jellyfin logins.

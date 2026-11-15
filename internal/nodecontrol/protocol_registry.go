@@ -29,6 +29,9 @@ func Protocol(schemas huma.Registry) []workerprotocol.Operation {
 	text := func(status int) *huma.Response {
 		return &huma.Response{Description: http.StatusText(status), Content: map[string]*huma.MediaType{textMedia: {Schema: &huma.Schema{Type: huma.TypeString}}}}
 	}
+	refusal := func(status int) *huma.Response {
+		return &huma.Response{Description: http.StatusText(status), Content: map[string]*huma.MediaType{jsonMedia: {Schema: schemas.Schema(reflect.TypeFor[ResolveRefusal](), true, "")}}}
+	}
 	op := func(method, path, name, retry, description string, body *huma.RequestBody, ok map[string]*huma.Response, failures ...int) workerprotocol.Operation {
 		responses := map[string]*huma.Response{}
 		maps.Copy(responses, ok)
@@ -61,5 +64,14 @@ func Protocol(schemas huma.Registry) []workerprotocol.Operation {
 		op(http.MethodPost, PathHealthChanged, "HandleHealthChanged", "natural_idempotent",
 			"The node's drain state changed (an admin drain request, SIGTERM, or drained). The core publishes node_drain_changed so every API server health-checks the node at once. 429: the node exceeded its request budget on this server.",
 			nil, map[string]*huma.Response{"204": {Description: "Published."}}, http.StatusTooManyRequests, http.StatusServiceUnavailable),
+		op(http.MethodPost, PathRevokeRecipes, "HandleRevokeRecipes", "natural_idempotent",
+			"The node, tearing its sessions down for a force reload, withdraws every recipe bound to it. The core revokes by the authenticated node id and then by the node's registered URL, never by anything in the body. 204 also from a core without Redis, which holds no recipes. 404: the node row is gone. 429: the node exceeded its request budget on this server. 503 is transient; the node retries the teardown.",
+			nil, map[string]*huma.Response{"204": {Description: "Revoked."}}, http.StatusNotFound, http.StatusTooManyRequests, http.StatusServiceUnavailable),
+		op(http.MethodPost, PathResolve, "HandleResolve", "natural_idempotent",
+			"The recipe and playback identity of one transport the calling node serves, for rebuilding a lost HLS transcode (purpose hls) or serving one progressive remux request (purpose remux). stream_token is the token a relay forwarded, passed through unread. The core checks the deny markers of the transport and its playback session, verifies the token, picks the recipe (a complete stored card over a complete token card, for hls) and requires it to be bound to the calling node by execution node id or, without one, by canonical node URL. A refusal carries its reason as JSON: 404 not_found, 410 denied, stopped or source_changed, 403 invalid_token or wrong_route. 503 is transient: the core cannot verify tokens or read the recipe store or the node's registration right now.",
+			jsonBody(reflect.TypeFor[ResolveRequest]()), map[string]*huma.Response{
+				"200": {Description: "Resolution.", Content: map[string]*huma.MediaType{jsonMedia: {Schema: schemas.Schema(reflect.TypeFor[Resolution](), true, "")}}},
+				"403": refusal(http.StatusForbidden), "404": refusal(http.StatusNotFound), "410": refusal(http.StatusGone),
+			}, http.StatusBadRequest, http.StatusServiceUnavailable),
 	}
 }

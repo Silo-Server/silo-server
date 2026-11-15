@@ -389,7 +389,10 @@ type PlaybackHandler struct {
 	// driven to refresh a stale token, so the node reconstructs from this
 	// server-authoritative store instead (see internal/noderecipe). Optional
 	// (nil disables it — integrated/no-node deployments need no handoff).
-	RecipeNodeStore    recipeNodePutter
+	RecipeNodeStore recipeNodePutter
+	// StreamDeny is the playback deny marker store every relay to a transcode
+	// node checks before it signs the request. Nil denies nothing.
+	StreamDeny         *playback.StreamDeny
 	compatToneMapProbe func(context.Context, string, string, string) (tonemap.Capabilities, error)
 	// Test hooks for the Dolby Vision strip: the per-file RPU probe and the
 	// API host's dovi_rpu filter check.
@@ -1299,6 +1302,10 @@ func NewPlaybackHandler(
 	// Wire the shared transcode manager with closures so it reads the handler's
 	// (late-set) JWTSecret lazily, matching the native handler.
 	h.tm.NodeKeysFn = func() nodeauth.Keyring { return h.NodeKeys }
+	h.tm.NodeRecipesFn = func() playback.NodeRecipeDeleter {
+		deleter, _ := h.RecipeNodeStore.(playback.NodeRecipeDeleter)
+		return deleter
+	}
 	h.tm.Config = func() playback.TranscodeRuntimeConfig {
 		return playback.TranscodeRuntimeConfig{
 			TranscodeDir:            h.TranscodeDir,
@@ -2261,6 +2268,14 @@ func (h *PlaybackHandler) persistTranscodeRecipe(
 					card.RoutingEgress = assignment.Egress
 					card.RoutingEgressNodeID = assignment.EgressNodeID
 				}
+			}
+			// The play records its routing assignment only after a start
+			// succeeds, so while a start runs it can name the previous
+			// executor or none. The node card binds the node it was started
+			// on, by the row id of the node its URL names.
+			if card.TranscodeNodeURL != "" && (playSession == nil || playSession.RoutingAssignment == nil ||
+				!sameCompatNode(playSession.RoutingAssignment.ExecutionNodeURL, card.TranscodeNodeURL)) {
+				card.RoutingExecutionNodeID = h.compatTranscodeNodeID(card.TranscodeNodeURL, nil)
 			}
 			recipe = &card
 		}

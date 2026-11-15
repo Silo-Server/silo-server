@@ -363,6 +363,10 @@ func NewPlaybackHandler(sessionMgr SessionManagerInterface, opts ...FilePathReso
 	// (often late-set) config/store/secret fields lazily at call time, avoiding a
 	// field-ordering hazard during router setup.
 	h.tm.NodeKeysFn = func() nodeauth.Keyring { return h.NodeKeys }
+	h.tm.NodeRecipesFn = func() playback.NodeRecipeDeleter {
+		deleter, _ := h.NodeRecipeStore.(playback.NodeRecipeDeleter)
+		return deleter
+	}
 	h.tm.LogSinkFn = func() playback.FFmpegLogSink { return h.FFmpegLogSink }
 	h.tm.Config = func() playback.TranscodeRuntimeConfig {
 		c := h.playbackConfig()
@@ -2395,6 +2399,15 @@ func (h *PlaybackHandler) relayToTranscodeNode(w http.ResponseWriter, r *http.Re
 		return nil
 	}
 	if err := nodeauth.SignTranscode(req, transcodeNodeURL, h.NodeKeys); err != nil {
+		if transcodeproxy.NodeUnsignable(err) {
+			// A node without a key, or no longer registered at the URL, is
+			// unavailable to this server. It is not moved off: a registry
+			// that is empty or stale here could sign for no node at all, and
+			// moving would restart a healthy transcode on every hop.
+			transcodeproxy.WarnNodeUnsignable(r.Context(), "api", transcodeNodeURL, err)
+			writeTranscodeNodeUnavailable(w)
+			return nil
+		}
 		slog.WarnContext(r.Context(), "cannot sign the relay to a transcode node", "component", "playback",
 			"node", logredact.SanitizeURL(transcodeNodeURL), "error", err)
 		http.Error(w, "internal error", http.StatusInternalServerError)
@@ -2443,6 +2456,13 @@ func (h *PlaybackHandler) relayToTranscodeNode(w http.ResponseWriter, r *http.Re
 	if isRedirectStatus(resp.StatusCode) && refusesRelayRedirects(r.Context()) {
 		// The Location is not logged: it may carry a signed token.
 		slog.WarnContext(r.Context(), "transcode node answered a redirect; not relayed", "component", "api", "status", resp.StatusCode, "playback_session_id", sessionID)
+		writeTranscodeNodeUnavailable(w)
+		return nil
+	}
+	if transcodeproxy.NodeRefusedRelay(resp.StatusCode) {
+		// The client authenticated with this server; the node refused this
+		// server's signature or the token it forwarded.
+		transcodeproxy.WarnNodeRefusedRelay(r.Context(), "api", transcodeNodeURL, resp.StatusCode)
 		writeTranscodeNodeUnavailable(w)
 		return nil
 	}

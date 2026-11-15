@@ -73,6 +73,9 @@ type Dependencies struct {
 	// control-plane recipe store (Redis) so a restarted transcode node can rebuild
 	// a jellycompat session. Optional; nil disables the handoff.
 	RecipeNodeStore recipeNodePutter
+	// StreamDeny is the shared playback deny marker store the relays to
+	// transcode nodes check. Nil denies nothing.
+	StreamDeny *playback.StreamDeny
 	// EventBus carries cluster events. The playback handler subscribes to
 	// proxies' requests to move a transcode off a node they cannot reach. Nil
 	// leaves proxy-egress transcodes without that failover.

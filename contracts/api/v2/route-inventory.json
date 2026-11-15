@@ -38,7 +38,7 @@
       "id": "api",
       "entrypoint": "internal/api.NewRouter",
       "description": "Main Silo API listener: the /api/v2 handler, the retained /api/v1 probes and tombstone, and the routes mounted beside them.",
-      "route_count": 86
+      "route_count": 88
     },
     {
       "id": "api_v2",
@@ -60,8 +60,8 @@
     }
   ],
   "totals": {
-    "routes": 271,
-    "conditional_routes": 4,
+    "routes": 273,
+    "conditional_routes": 6,
     "streaming_routes": 27,
     "websocket_routes": 0
   },
@@ -3519,6 +3519,65 @@
       "route_group": "/api/internal/nodes/self",
       "handler": "(*internal/nodecontrol.Server).HandleReport",
       "handler_expr": "nodeControl.HandleReport",
+      "handler_kind": "method",
+      "handler_resolved": true,
+      "middleware_chain": 6,
+      "auth_class": "node_signed",
+      "auth_traits": [
+        "node_signed",
+        "rate_limited"
+      ],
+      "conditions": [
+        "deps.NodeKeyRegistry != nil && deps.NodeRepo != nil && settingsRepo != nil"
+      ],
+      "conditional": true,
+      "request_kind": "unknown",
+      "response_media_kind": "unknown",
+      "delegates_to": "",
+      "streams": false,
+      "upgrades_websocket": false,
+      "method_origin": "explicit",
+      "success_statuses": null,
+      "error_codes": null,
+      "source_file": "internal/api/router.go"
+    },
+    {
+      "listener": "api",
+      "namespace": "legacy_unversioned",
+      "method": "POST",
+      "path": "/api/internal/nodes/self/resolve",
+      "route_group": "/api/internal/nodes/self",
+      "handler": "(*internal/nodecontrol.Server).HandleResolve",
+      "handler_expr": "nodeControl.HandleResolve",
+      "handler_kind": "method",
+      "handler_resolved": true,
+      "middleware_chain": 5,
+      "auth_class": "node_signed",
+      "auth_traits": [
+        "node_signed"
+      ],
+      "conditions": [
+        "deps.NodeKeyRegistry != nil && deps.NodeRepo != nil && settingsRepo != nil"
+      ],
+      "conditional": true,
+      "request_kind": "unknown",
+      "response_media_kind": "unknown",
+      "delegates_to": "",
+      "streams": false,
+      "upgrades_websocket": false,
+      "method_origin": "explicit",
+      "success_statuses": null,
+      "error_codes": null,
+      "source_file": "internal/api/router.go"
+    },
+    {
+      "listener": "api",
+      "namespace": "legacy_unversioned",
+      "method": "POST",
+      "path": "/api/internal/nodes/self/revoke-recipes",
+      "route_group": "/api/internal/nodes/self",
+      "handler": "(*internal/nodecontrol.Server).HandleRevokeRecipes",
+      "handler_expr": "nodeControl.HandleRevokeRecipes",
       "handler_kind": "method",
       "handler_resolved": true,
       "middleware_chain": 6,

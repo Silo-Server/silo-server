@@ -59,6 +59,18 @@ type Options struct {
 	Logs LogSink
 	// Events carries health-changed to every API server; nil answers 503.
 	Events cache.EventBus
+	// StreamSecret returns the secret stream tokens are signed with; resolve
+	// answers 503 to a request that needs a token verified while it is nil or
+	// returns "".
+	StreamSecret func() string
+	// Recipes is the transport recipe store resolve reads; nil holds none.
+	Recipes RecipeSource
+	// Deny is the playback deny marker store resolve checks; nil denies
+	// nothing.
+	Deny DenySource
+	// Revocations withdraws the recipes bound to a node for revoke-recipes;
+	// nil, like a core without Redis, revokes nothing and answers 204.
+	Revocations RecipeRevoker
 }
 
 // Server serves the core's node control routes. Every handler is stateless

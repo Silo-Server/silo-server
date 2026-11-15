@@ -120,7 +120,20 @@ After a failed start, or a Jellyfin-compatible start whose first manifest fetch
 fails, the start paths send the node a stop request in case it started the job.
 When the node could not be reached, that includes a failed name lookup, the stop
 runs in the background instead, so the next candidate is tried at once and a node
-that answers again by then still drops the job.
+that answers again by then still drops the job. The stop first deletes the
+transport's node recipe, but keeps one that names another node URL, so a
+background stop that lands after the next candidate wrote its card under the
+same Jellyfin-compatible transport id leaves that card in place
+([recipe deletion on stop](restart-resilient-playback.md#transcode-node-lost-under-the-api-relay)).
+
+A relay that cannot sign a request to a node (no key issued, or no node
+registered at the URL any more) answers its client as the node being
+unavailable, moves nothing, does not mark the node, and publishes no move
+request: a replica whose key registry is empty or stale signs for no node, and
+treating that as a dead node would move healthy transcodes from node to node.
+A start that cannot sign for a candidate goes on to the next one, as any failed
+start does. A node that answers a relay with `401` is alive; the relay answers
+its client as the node being unavailable and moves nothing.
 
 Name lookups are the one difference between the two rules: a failed lookup counts
 as unreachable for the stop, but never marks the node.

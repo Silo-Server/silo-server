@@ -75,9 +75,14 @@ func (c *Client) SetOnUnauthorized(fn func()) {
 type StatusError struct {
 	Path   string
 	Status int
+	// Reason is a refused resolve's Resolve* reason, or "".
+	Reason string
 }
 
 func (e *StatusError) Error() string {
+	if e.Reason != "" {
+		return fmt.Sprintf("core answered %s with status %d (%s)", e.Path, e.Status, e.Reason)
+	}
 	return fmt.Sprintf("core answered %s with status %d", e.Path, e.Status)
 }
 
@@ -87,6 +92,14 @@ func Status(err error) int {
 		return statusErr.Status
 	}
 	return 0
+}
+
+// Reason is the Resolve* reason of a StatusError in err, or "".
+func Reason(err error) string {
+	if statusErr, ok := errors.AsType[*StatusError](err); ok {
+		return statusErr.Reason
+	}
+	return ""
 }
 
 func (c *Client) do(ctx context.Context, method, path string, body []byte, header http.Header) (*http.Response, error) {
@@ -166,6 +179,39 @@ func (c *Client) FetchConfig(ctx context.Context, etag string) (doc *NodeConfig,
 // core already has a newer one for is a StatusError with status 409.
 func (c *Client) PostReport(ctx context.Context, report []byte) error {
 	return c.post(ctx, PathReport, report)
+}
+
+// maxResolutionBytes bounds the resolve answer a node reads.
+const maxResolutionBytes = 1 << 20
+
+// Resolve asks the core for the recipe and playback identity of a transport
+// this node serves. A refusal is a StatusError whose Reason is one of the
+// Resolve* reasons; any other failure, the core's or the network's, is
+// retryable by the node's caller.
+func (c *Client) Resolve(ctx context.Context, req ResolveRequest) (*Resolution, error) {
+	body, _ := json.Marshal(req) // strings only
+	resp, err := c.do(ctx, http.MethodPost, PathResolve, body, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		var refusal ResolveRefusal
+		_ = json.NewDecoder(io.LimitReader(resp.Body, 4096)).Decode(&refusal)
+		return nil, &StatusError{Path: PathResolve, Status: resp.StatusCode, Reason: refusal.Reason}
+	}
+	var resolution Resolution
+	if err := json.NewDecoder(io.LimitReader(resp.Body, maxResolutionBytes)).Decode(&resolution); err != nil {
+		return nil, fmt.Errorf("decode resolution: %w", err)
+	}
+	return &resolution, nil
+}
+
+// RevokeRecipes asks the core to withdraw every recipe bound to this node, as
+// part of a force reload's teardown. A refusal is a StatusError; 503 and no
+// answer are retryable.
+func (c *Client) RevokeRecipes(ctx context.Context) error {
+	return c.post(ctx, PathRevokeRecipes, []byte("{}"))
 }
 
 // NotifyHealthChanged tells the core the node started or stopped draining,

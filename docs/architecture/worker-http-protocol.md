@@ -435,10 +435,50 @@ authorization class `node_signed`.
 | `POST report` | Session records and the stream telemetry snapshot, fenced on `(boot_id, seq)` in Redis (`409` for an older or equal pair, which writes nothing). Sessions replace the node's set under `silo:sessions:n<id>:`, telemetry replaces publisher `node:<id>`, both with the registered row's URL and name and the API's clock. `413` past 2,000 sessions or transfers; `204` without Redis. |
 | `POST logs` | Up to 100 operational log entries, stored in `operational_logs` and the live tail under `<name>#<id>`, with timestamps clamped to the last 24 hours and the next 30 seconds. |
 | `POST health-changed` | Publishes `node_drain_changed` so every API server health-checks the node at once ([node drain](node-drain.md)). |
+| `POST revoke-recipes` | The node, tearing its sessions down for a force reload, withdraws every recipe bound to it: the API revokes in the node recipe store by the node's authenticated id and then by its registered URL (from the key registry, else the row), never by anything in the body. `204`, also without Redis; `503` when the store cannot be written, which the node retries; `404` when the row is gone. |
+| `POST resolve` | The recipe and playback identity (`nodecontrol.Resolution`) of one transport the node serves, for rebuilding a lost HLS transcode (`purpose: hls`) or serving one progressive remux request (`purpose: remux`). See below. |
 
 Each API server gives each node an in-memory budget of 20 writes a second with
-bursts of 60 across report, logs and health-changed, and answers `429` past it.
-The node side is `nodecontrol.Client`. Nodes do not call these routes yet.
+bursts of 60 across report, logs, health-changed and revoke-recipes, and answers
+`429` past it.
+Resolve is outside that budget: it is on a viewer's request path, and a node
+restart sends one burst of rebuilds. The node side is `nodecontrol.Client`.
+Nodes do not call these routes yet.
+
+Resolve (`nodecontrol.Server.HandleResolve`) takes
+`{"transport_id", "purpose", "stream_token"}`, where `stream_token` is the
+`X-Silo-Stream-Token` a relay forwarded, passed through unread. For `hls` the
+API checks the deny markers of the transport and, from a token or the stored
+card, of its playback session; verifies the token, which must describe the
+transport; and picks the recipe: a complete card in the node recipe store
+(`internal/noderecipe`) over a complete token card, else the token card. A
+stored card is never older than a token for the same transport (a native
+replan mints a new transport id; jellycompat rewrites its card in place but
+hands out identity-only tokens), and after a move it is the card that names
+the node the transport runs on now. The subtitle rendition selection
+(`Default`) still comes from the token when both describe the same tracks.
+For `remux` a valid token is required, its route must be transcode execution
+with proxy egress on the calling node, and the stored authority must still
+match it field by field; a theme conversion's file must be unchanged. Either
+recipe must be bound to the calling node, by execution node id or, for a card
+without one, by `nodepool.CanonicalNodeURL` against the node's registered URL.
+
+| Status | Reason | Meaning |
+| --- | --- | --- |
+| `404` | `not_found` | No recipe for the transport, or a token that does not describe it. |
+| `410` | `denied` | A deny marker is set. |
+| `410` | `stopped` | The remux authority is gone or no longer matches the token. |
+| `410` | `source_changed` | The theme file changed. |
+| `403` | `invalid_token` | A remux request without a valid token. |
+| `403` | `wrong_route` | The recipe is bound to another node, or to none. |
+| `503` | none | Transient: no stream secret, or the recipe store or the node's registration cannot be read. |
+
+A recipe store read error is `503`, never `404`. A stored card that a force
+reload revoked counts as gone. The revocation runs only inside the node's own
+force-reload teardown (today in Redis directly, later through revoke-recipes),
+so a force reload the node never ran revokes nothing. Once the card is gone, a
+complete token still resolves on the node it names, as on a node that verifies
+tokens itself.
 
 What this requires and allows:
 

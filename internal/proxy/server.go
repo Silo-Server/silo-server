@@ -872,6 +872,11 @@ func (s *Server) relayDownloadArtifact(w http.ResponseWriter, r *http.Request, c
 		return
 	}
 	defer func() { _ = resp.Body.Close() }()
+	if transcodeproxy.NodeRefusedRelay(resp.StatusCode) {
+		transcodeproxy.WarnNodeRefusedRelay(r.Context(), "proxy", claims.TranscodeNode, resp.StatusCode)
+		http.Error(w, "download unavailable", http.StatusBadGateway)
+		return
+	}
 	if resp.StatusCode == http.StatusNotFound {
 		if s.artifactMissReporter != nil && strings.TrimSpace(claims.DownloadArtifactRowID) != "" {
 			reportCtx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), 5*time.Second)
@@ -1268,6 +1273,14 @@ func (s *Server) proxyToTranscodeNode(w http.ResponseWriter, r *http.Request, cl
 		if err == nil {
 			break
 		}
+		if transcodeproxy.NodeUnsignable(err) {
+			// No key for the node, or no node at the URL any more: the node is
+			// unavailable to this proxy. No move is requested: a registry that
+			// is empty or stale here could sign for no node at all.
+			transcodeproxy.WarnNodeUnsignable(r.Context(), "proxy", nodeURL, err)
+			http.Error(w, "transcode node unavailable", http.StatusBadGateway)
+			return
+		}
 		if errors.Is(err, errBuildNodeRequest) {
 			http.Error(w, "internal error", http.StatusInternalServerError)
 			return
@@ -1287,6 +1300,13 @@ func (s *Server) proxyToTranscodeNode(w http.ResponseWriter, r *http.Request, cl
 		return
 	}
 	defer func() { _ = resp.Body.Close() }()
+	if transcodeproxy.NodeRefusedRelay(resp.StatusCode) {
+		// The client's token or grant was verified here; the node refused
+		// this proxy's signature or the token it forwarded.
+		transcodeproxy.WarnNodeRefusedRelay(r.Context(), "proxy", nodeURL, resp.StatusCode)
+		http.Error(w, "transcode node unavailable", http.StatusBadGateway)
+		return
+	}
 
 	generation := resp.Header.Get(transcodeproxy.GenerationHeader)
 	transcodeproxy.CopyResponseHeaders(w.Header(), resp.Header)

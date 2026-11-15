@@ -9,6 +9,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/nodesessions"
 	"github.com/Silo-Server/silo-server/internal/opslog"
+	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/streamtelemetry"
 )
 
@@ -23,6 +24,8 @@ const (
 	PathReport        = "/api/internal/nodes/self/report"
 	PathLogs          = "/api/internal/nodes/self/logs"
 	PathHealthChanged = "/api/internal/nodes/self/health-changed"
+	PathResolve       = "/api/internal/nodes/self/resolve"
+	PathRevokeRecipes = "/api/internal/nodes/self/revoke-recipes"
 )
 
 // headerIfNoneMatch is the conditional header a node's configuration poll
@@ -164,4 +167,73 @@ type Report struct {
 // LogBatch is one batch of a node's operational log entries.
 type LogBatch struct {
 	Entries []opslog.Entry `json:"entries"`
+}
+
+// Purposes of a resolve request: rebuilding an HLS transcode the node lost,
+// or serving one progressive remux request.
+const (
+	ResolvePurposeHLS   = "hls"
+	ResolvePurposeRemux = "remux"
+)
+
+// ResolveRequest asks the core for the recipe of one transport the calling
+// node serves. StreamToken is the X-Silo-Stream-Token header a relay forwarded
+// with the request, passed through unread.
+type ResolveRequest struct {
+	TransportID string `json:"transport_id"`
+	Purpose     string `json:"purpose"`
+	StreamToken string `json:"stream_token,omitempty"`
+}
+
+// Resolution is the core's answer to a ResolveRequest: the recipe to run and
+// the playback identity the node files its session and telemetry under.
+type Resolution struct {
+	Recipe            playback.RecipeCard `json:"recipe"`
+	PlaybackSessionID string              `json:"playback_session_id"`
+	UserID            int                 `json:"user_id"`
+	ProfileID         string              `json:"profile_id"`
+	MediaFileID       int                 `json:"media_file_id"`
+	// StartedAt is when the playback session started, as the token or the
+	// stored recipe names it; StartedAtSource says where that came from
+	// (streamtoken.StartedAtSource). Both are empty when neither names one.
+	StartedAt       time.Time `json:"started_at,omitzero"`
+	StartedAtSource string    `json:"started_at_source,omitempty"`
+	// Theme identifies the theme file of a theme conversion, which the
+	// recipe card has no fields for.
+	Theme *ResolvedTheme `json:"theme,omitempty"`
+}
+
+// ResolvedTheme is the theme file a theme conversion token names.
+type ResolvedTheme struct {
+	ID               int64 `json:"id"`
+	Size             int64 `json:"size"`
+	ModifiedUnixNano int64 `json:"modified_unix_nano"`
+}
+
+// Reasons a resolve request is refused, in the body of a 403, 404 or 410.
+// They let the node answer its relay as it does when it checks the token
+// itself.
+const (
+	// ResolveNotFound (404): no recipe for the transport, or a token that does
+	// not describe it.
+	ResolveNotFound = "not_found"
+	// ResolveDenied (410): the session's deny marker is set.
+	ResolveDenied = "denied"
+	// ResolveStopped (410): a remux whose stored authority is gone or no
+	// longer matches the token.
+	ResolveStopped = "stopped"
+	// ResolveSourceChanged (410): the theme file is not the one the token
+	// describes, or the recipe's source is gone.
+	ResolveSourceChanged = "source_changed"
+	// ResolveInvalidToken (403): a remux request without a valid token.
+	ResolveInvalidToken = "invalid_token"
+	// ResolveWrongRoute (403): a remux token routed to another node or not
+	// to transcode execution at all, or an HLS recipe bound to another node
+	// or to none.
+	ResolveWrongRoute = "wrong_route"
+)
+
+// ResolveRefusal is the JSON body of a refused resolve request.
+type ResolveRefusal struct {
+	Reason string `json:"reason"`
 }
