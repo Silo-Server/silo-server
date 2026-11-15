@@ -629,7 +629,7 @@ path the core approves for it, never a path the job request names.
 | `403` | The grant does not verify, has expired or reached its whole life (`MaxGrantAge`), or names another node. |
 | `410` | The catalog no longer has the source at exactly the granted path (a media file by id and not missing, or a theme in an enabled library), or the file is gone or not a regular file. |
 | `412` | The file's size or modification time differs from the grant's revision. |
-| `503` | Transient: no grant key, or the catalog cannot be read. |
+| `503` | Transient: no grant key, the catalog cannot be read, or the file could not be examined (an I/O error, a stale mount). |
 
 Each open and renewal reads the catalog once and stats the file once, so the
 catalog check is never more than one renewal interval stale.
