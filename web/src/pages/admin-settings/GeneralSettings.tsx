@@ -62,9 +62,9 @@ export default function GeneralSettings() {
       if (saveInProgressRef.current) return;
       form.resetValue(key);
     },
-    setSecret: (key, value) => {
+    setSecret: (key, value, options) => {
       if (saveInProgressRef.current) return;
-      form.setValue(key, value);
+      form.setValue(key, value, options);
     },
     disabled: form.isSaving || saveInProgress,
   };
