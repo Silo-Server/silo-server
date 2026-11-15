@@ -62,6 +62,39 @@ The enricher does not run again on a matched book. A book whose fields were
 mixed before this rule existed stays that way until an admin runs Refresh
 Metadata or Match Item.
 
+## Reading the tags
+
+`parsedAudiobook.populateFromTags` (`internal/scanner/audiobook.go`) reads a
+book's tags from its first part; the rules for tags that Audible export tools
+write are in `internal/scanner/audiobook_tags.go`:
+
+- Title: the `title` tag, unless `album` is the cleaner name. `album` wins
+  when `title` is `album` behind a series prefix (`Saga Name 2 - Book Title`),
+  or when `album` is `title` plus a subtitle (`Book Title: The Long Subtitle`).
+  The prefix, followed by `-` or `:`, is the book's series tag with an
+  optional position; a book without a series tag accepts any text ending in a
+  number. A "subtitle" that names the series or ends in a position is not
+  one. Otherwise `title` stays, because a single file's `album` may name its
+  series or a collection. A multi-file book whose part titles name the parts
+  uses `album`.
+- Narrators: an explicit narrator tag (`narrator`, the MP4 `©nrt` atom, or
+  `narratedby`) when present. Otherwise the first of `performer` and
+  `composer` that names someone other than the tagged authors: some files put
+  the author in `performer` and the narrator in `composer`. When both name
+  only authors, the book is read by its author and `performer` is used.
+- Genres: when any `tmp_genreN` tag is present, those tags are the genres, one
+  each, with a trailing `;` or `,` dropped. Otherwise `genre` splits on `/` and
+  `;` when it holds either, and on `,` when not. The comma split keeps the
+  Audible names `Mystery, Thriller & Suspense` and
+  `Relationships, Parenting & Personal Development` whole.
+
+These rules decide what the tags say. The table above still decides whether
+the tags or a provider's record fills each field.
+
+An unchanged book is skipped on rescan, so a change to these rules reaches a
+book only when its files change or a metadata refresh reads its tags again in
+place, as the next section describes.
+
 ## Reading the tags again
 
 A scan skips a book whose files match their stored size and modification
