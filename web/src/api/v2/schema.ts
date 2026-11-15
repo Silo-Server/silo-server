@@ -7443,7 +7443,7 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** Search people by name, with exact matches first and optional media scope. */
+    /** Search people by name, with exact matches first, then the most credited for a specific query, and optional media scope. */
     get: operations["listPeople"];
     put?: never;
     post?: never;

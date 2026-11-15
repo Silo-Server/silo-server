@@ -222,7 +222,7 @@ func TestJellyfinPersonReadsMatchNativeVisibilityPostgres(t *testing.T) {
 }
 
 // TestPersonSearchRanksExactNamesFirstWithCustomPlansPostgres pins v2 people
-// search to exact names first, then name and ID order, with viewer access
+// search to exact names first, then most visible credits, then name and ID order, with viewer access
 // applied in both groups before the limit, and the v1 bridge search to plain
 // name order. It also pins every people search to a plan for its own words:
 // no named statement is left for PostgreSQL to switch to a generic plan, which
@@ -258,6 +258,18 @@ func TestPersonSearchRanksExactNamesFirstWithCustomPlansPostgres(t *testing.T) {
 		alice:        "A " + token,
 		bob:          "B " + token,
 	}, exactHidden, firstHidden)
+	// Visible credits rank the names after the exact one: bob's second puts
+	// him ahead of alice, whose extra credits are on a title the viewer
+	// cannot see and so count for nothing.
+	for i, credit := range []struct {
+		person  int
+		content string
+	}{{bob, "-0"}, {alice, "-1"}, {alice, "-1"}} {
+		if _, err := pool.Exec(ctx, `INSERT INTO item_people(id,content_id,person_id,kind) VALUES($1,$2,$3,$4)`,
+			ids[bob]+int64(i)+1, token+credit.content, ids[credit.person], 2+i); err != nil {
+			t.Fatal(err)
+		}
+	}
 	// A generic plan must still answer correctly; the statement check below
 	// shows that the server never asks for one.
 	if _, err := pool.Exec(ctx, "SET plan_cache_mode = force_generic_plan"); err != nil {
@@ -273,8 +285,8 @@ func TestPersonSearchRanksExactNamesFirstWithCustomPlansPostgres(t *testing.T) {
 	}{
 		{"scoped, limit 2", func() ([]models.Person, error) {
 			return repo.SearchScoped(ctx, " "+token+" ", 2, MediaScopeVideo, filter)
-		}, []int{exactVisible, alice}},
-		{"scoped", func() ([]models.Person, error) { return repo.SearchScoped(ctx, token, 20, "", filter) }, []int{exactVisible, alice, bob}},
+		}, []int{exactVisible, bob}},
+		{"scoped", func() ([]models.Person, error) { return repo.SearchScoped(ctx, token, 20, "", filter) }, []int{exactVisible, bob, alice}},
 		{"v1 bridge", func() ([]models.Person, error) { return repo.SearchAlphabetical(ctx, token, 20, filter) }, []int{alice, bob, exactVisible}},
 	} {
 		want := make([]int64, len(tc.want))

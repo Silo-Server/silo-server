@@ -155726,7 +155726,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Search people by name, with exact matches first and optional media scope.",
+        "summary": "Search people by name, with exact matches first, then the most credited for a specific query, and optional media scope.",
         "tags": [
           "catalog"
         ],
