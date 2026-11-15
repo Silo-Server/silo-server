@@ -131,8 +131,10 @@ func TestInstallerReplaceBinaryPreservesInstallationID(t *testing.T) {
 	if update.InstallPath == nil || *update.InstallPath != result.BinaryPath {
 		t.Fatalf("update install_path = %v, want %q", update.InstallPath, result.BinaryPath)
 	}
-	if update.Enabled == nil || !*update.Enabled {
-		t.Fatalf("update enabled = %v, want true", update.Enabled)
+	// The enabled flag is the admin's, and may have changed while the
+	// package was prepared, so the replacement leaves it alone.
+	if update.Enabled != nil {
+		t.Fatalf("update enabled = %v, want unchanged", *update.Enabled)
 	}
 	if len(update.Capabilities) != 1 || update.Capabilities[0].ID != "metadb" {
 		t.Fatalf("update capabilities = %#v, want metadata_provider.v1/metadb", update.Capabilities)

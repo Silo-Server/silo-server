@@ -456,8 +456,11 @@ func (s *Service) existingInstallationByPluginID(ctx context.Context, pluginID s
 	return existing[0], nil
 }
 
+// stopInstallationIfRunning stops the installation's process whatever its
+// enabled flag said when it was loaded: an admin may have turned it on since,
+// and a process left running would keep serving the replaced release.
 func (s *Service) stopInstallationIfRunning(existing *Installation) error {
-	if existing == nil || !existing.Enabled || s.host == nil {
+	if existing == nil || s.host == nil {
 		return nil
 	}
 	if err := s.host.Stop(existing.ID); err != nil && !errors.Is(err, pluginhost.ErrClientNotFound) {
@@ -472,7 +475,9 @@ func (s *Service) stopInstallationIfRunning(existing *Installation) error {
 // old release but its process is gone: a lazily started plugin comes back on
 // its next RPC, while a resident only restarts on a lifecycle reconcile, so
 // the hooks run before the error is returned. On success the caller runs them
-// after the row has changed.
+// after the row has changed. The replacement leaves the row's enabled flag
+// alone, so an admin's switch made while the package downloaded stands, and
+// the result reports the flag as stored.
 func (s *Service) replaceStopped(ctx context.Context, existing *Installation, replace func() (*InstallResult, error)) (*InstallResult, error) {
 	if err := s.stopInstallationIfRunning(existing); err != nil {
 		return nil, err
@@ -481,6 +486,16 @@ func (s *Service) replaceStopped(ctx context.Context, existing *Installation, re
 	if err != nil {
 		s.OnLifecycleChange(ctx)
 		return nil, err
+	}
+	if result.Installation != nil && s.installations != nil {
+		// The replacement is already written; a failed read only leaves the
+		// reported flag as loaded before the update.
+		if current, err := s.installations.GetByID(ctx, result.Installation.ID); err != nil {
+			slog.WarnContext(ctx, "reload replaced plugin installation", "component", "plugins",
+				"installation_id", result.Installation.ID, "error", err)
+		} else {
+			result.Installation.Enabled = current.Enabled
+		}
 	}
 	return result, nil
 }

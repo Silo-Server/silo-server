@@ -378,13 +378,11 @@ func (i *Installer) writeBinaryReplacement(ctx context.Context, r *binaryReplace
 	}
 
 	version := manifest.GetVersion()
-	enabled := existing.Enabled
 	availableVersion := ""
 	signature := r.signature
 	if err := i.installations.Update(ctx, existing.ID, UpdateInstallationInput{
 		Version:          &version,
 		InstallPath:      &binaryPath,
-		Enabled:          &enabled,
 		AvailableVersion: &availableVersion,
 		Capabilities:     capabilities,
 		SetRepository:    true,
@@ -403,7 +401,6 @@ func (i *Installer) writeBinaryReplacement(ctx context.Context, r *binaryReplace
 	updated := *existing
 	updated.Version = version
 	updated.InstallPath = binaryPath
-	updated.Enabled = enabled
 	updated.RepositoryID = repositoryID
 	updated.Signature = signature
 	// Changing the version cleared the stored refused update.
@@ -508,14 +505,12 @@ func (i *Installer) writeArchiveReplacement(ctx context.Context, r *archiveRepla
 	}
 
 	version := manifest.GetVersion()
-	enabled := existing.Enabled
 	availableVersion := ""
 	// An archive, uploaded or downloaded, carries no release signature.
 	unsigned := unsignedSignature
 	if err := i.installations.Update(ctx, existing.ID, UpdateInstallationInput{
 		Version:          &version,
 		InstallPath:      &binaryPath,
-		Enabled:          &enabled,
 		AvailableVersion: &availableVersion,
 		Capabilities:     capabilities,
 		SetRepository:    true,
@@ -534,7 +529,6 @@ func (i *Installer) writeArchiveReplacement(ctx context.Context, r *archiveRepla
 	updated := *existing
 	updated.Version = version
 	updated.InstallPath = binaryPath
-	updated.Enabled = enabled
 	updated.RepositoryID = repositoryID
 	updated.Signature = unsigned
 	// Changing the version cleared the stored refused update.
