@@ -142,7 +142,7 @@ func anchorStore(itemIDs ...string) *fakeSignalStore {
 func TestSectionBecauseYouWatchedPicksAnAnchorWithItemsInScope(t *testing.T) {
 	const tvLibrary, movieLibrary = 1, 2
 	seriesRow, movieRow := scoredRun("series", 5), scoredRun("movie", 5)
-	libraries := map[string]int{}
+	libraries := map[string]int{"latest-series": tvLibrary, "older-movie": movieLibrary}
 	for _, item := range seriesRow {
 		libraries[item.MediaItemID] = tvLibrary
 	}

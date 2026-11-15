@@ -343,7 +343,7 @@ func (r *Reader) becauseYouWatchedRows(ctx context.Context, userID int, profileI
 	if sourceItemID != "" {
 		sourceIDs = append(sourceIDs, sourceItemID)
 	} else {
-		anchors, err := anchorItemIDs(ctx, r.signalReader(), r.ratingsRepo, userID, profileID, BecauseYouWatchedAnchors)
+		anchors, err := r.scopedAnchorItemIDs(ctx, userID, profileID, filter)
 		if err != nil {
 			return nil, err
 		}
@@ -386,6 +386,39 @@ func (r *Reader) becauseYouWatchedRows(ctx context.Context, userID int, profileI
 		r.requestRefresh(ctx, userID, profileID)
 	}
 	return rows, nil
+}
+
+// scopedAnchorItemIDs returns the profile's first BecauseYouWatchedAnchors
+// anchor candidates in the libraries filter allows, so a library's row
+// anchors on what the profile watched there rather than on its latest
+// watches elsewhere. The worker builds rows for each library's first anchors
+// (see libraryAnchorItemIDs). A filter that limits no library takes the
+// anchors as they are.
+func (r *Reader) scopedAnchorItemIDs(ctx context.Context, userID int, profileID string, filter catalog.AccessFilter) ([]string, error) {
+	if filter.AllowedLibraryIDs == nil && len(filter.DisabledLibraryIDs) == 0 {
+		return anchorItemIDs(ctx, r.signalReader(), r.ratingsRepo, userID, profileID, BecauseYouWatchedAnchors)
+	}
+	candidates, err := anchorCandidates(ctx, r.signalReader(), r.ratingsRepo, userID, profileID)
+	if err != nil || len(candidates) == 0 {
+		return candidates, err
+	}
+	// Only the library scope: the anchor's other access is checked where it
+	// is shown, and a narrower choice could pick anchors the worker did not
+	// build rows for.
+	inScope, err := r.repo.FilterRecommendableItemIDs(ctx, candidates, catalog.AccessFilter{
+		AllowedLibraryIDs:  filter.AllowedLibraryIDs,
+		DisabledLibraryIDs: filter.DisabledLibraryIDs,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("scope anchors to libraries: %w", err)
+	}
+	anchors := make([]string, 0, BecauseYouWatchedAnchors)
+	for _, id := range candidates {
+		if _, ok := inScope[id]; ok && len(anchors) < BecauseYouWatchedAnchors {
+			anchors = append(anchors, id)
+		}
+	}
+	return anchors, nil
 }
 
 // scopeToLibraries narrows filter so an item must also be in one of

@@ -520,11 +520,12 @@ func (s *SignalReader) RecentCompletedItemIDs(ctx context.Context, userID int, p
 // Because You Watched anchors on the profile's latest completions.
 const (
 	// BecauseYouWatchedAnchors is how many anchors a profile's Because You
-	// Watched rows are built and read for.
+	// Watched rows are read for, and how many each library gets built.
 	BecauseYouWatchedAnchors = 3
 	// anchorCandidateLimit is how many of the latest completions the anchors
-	// are chosen from, so disliked ones can be passed over.
-	anchorCandidateLimit = 10
+	// are chosen from, so disliked ones can be passed over and a library
+	// keeps anchors while the profile watches another library.
+	anchorCandidateLimit = 50
 )
 
 // itemRatingReader reads a profile's star ratings of the given items, keyed
@@ -534,18 +535,28 @@ type itemRatingReader interface {
 }
 
 // anchorItemIDs returns up to n Because You Watched anchors for the profile:
-// its most recently completed titles of recommendableMediaTypes still in the
-// catalog, newest first, of the latest anchorCandidateLimit, leaving out
-// those it marked Not interested or rated DislikedRatingMax or lower. A row
-// headed "Because You Watched" a title the profile disliked contradicts its
-// taste. With no ratings reader rated titles stay. The worker, the Reader and Watch
-// Tonight all choose anchors here, since a read can only use an anchor whose
-// row the worker cached.
+// the first n of anchorCandidates.
 func anchorItemIDs(ctx context.Context, signals *SignalReader, ratings itemRatingReader, userID int, profileID string, n int) ([]string, error) {
 	if n <= 0 {
 		return []string{}, nil
 	}
-	recent, err := signals.RecentCompletedItemIDs(ctx, userID, profileID, max(n, anchorCandidateLimit))
+	candidates, err := anchorCandidates(ctx, signals, ratings, userID, profileID)
+	if err != nil {
+		return nil, err
+	}
+	return candidates[:min(n, len(candidates))], nil
+}
+
+// anchorCandidates returns the titles Because You Watched rows may anchor on:
+// the profile's most recently completed titles of recommendableMediaTypes
+// still in the catalog, newest first, of the latest anchorCandidateLimit,
+// leaving out those it marked Not interested or rated DislikedRatingMax or
+// lower. A row headed "Because You Watched" a title the profile disliked
+// contradicts its taste. With no ratings reader rated titles stay. The
+// worker, the Reader and Watch Tonight all choose anchors from these, since a
+// read can only use an anchor whose row the worker cached.
+func anchorCandidates(ctx context.Context, signals *SignalReader, ratings itemRatingReader, userID int, profileID string) ([]string, error) {
+	recent, err := signals.RecentCompletedItemIDs(ctx, userID, profileID, anchorCandidateLimit)
 	if err != nil {
 		return nil, err
 	}
@@ -577,7 +588,31 @@ func anchorItemIDs(ctx context.Context, signals *SignalReader, ratings itemRatin
 		}
 		recent = liked
 	}
-	return recent[:min(n, len(recent))], nil
+	return recent, nil
+}
+
+// libraryAnchorItemIDs returns the candidates, newest first as given, that
+// are among the first n overall or among the first n of a library they are
+// in (libraries maps a candidate to its libraries). The worker builds rows
+// for these, so a section scoped to any set of libraries finds a row for
+// each of its first n anchors: a title among the first n in a scope is among
+// the first n of its own library in that scope.
+func libraryAnchorItemIDs(candidates []string, libraries map[string][]int, n int) []string {
+	perLibrary := make(map[int]int)
+	anchors := make([]string, 0, min(n, len(candidates)))
+	for i, id := range candidates {
+		keep := i < n
+		for _, library := range libraries[id] {
+			if perLibrary[library] < n {
+				keep = true
+			}
+			perLibrary[library]++
+		}
+		if keep {
+			anchors = append(anchors, id)
+		}
+	}
+	return anchors
 }
 
 func canonicalizeCompletedRows(ctx context.Context, repo signalRepo, rows []WatchProgressRow) error {
