@@ -1,4 +1,4 @@
-import { useQueries } from "@tanstack/react-query";
+import { useQueries, type QueryClient } from "@tanstack/react-query";
 import { useMemo } from "react";
 
 import type { VersionLivenessResponse, VersionLivenessResult } from "@/api/types";
@@ -55,6 +55,29 @@ export const VERSION_LIVENESS_BATCH_SIZE = 40;
 export const VERSION_LIVENESS_STALE_MS = 5 * 60 * 1000;
 
 /**
+ * A check slower than this is a slow provider resolution, not a hiccup. Its
+ * answer is held for longer so a slow server is asked less, not more: the check
+ * is advisory menu health, and re-probing a struggling provider only adds load.
+ */
+export const VERSION_LIVENESS_SLOW_MS = 1_000;
+
+/** Ceiling on the window a slow check earns (10x its own latency). */
+export const VERSION_LIVENESS_MAX_WINDOW_MS = 15 * 60 * 1000;
+
+/**
+ * Floor between two checks of one row set when a catalog `versions_updated`
+ * event asks for one. The event says a row was stamped or rewritten, not which
+ * rows, and a refresh announces its burst one row at a time.
+ */
+export const VERSION_LIVENESS_FORCED_MIN_INTERVAL_MS = 30 * 1000;
+
+/** Coalescing window for a burst of `versions_updated` events. */
+export const VERSION_LIVENESS_REFRESH_DELAY_MS = 750;
+
+/** Upper bound on how long coalescing may postpone a refresh. */
+export const VERSION_LIVENESS_REFRESH_MAX_WAIT_MS = 3 * 1000;
+
+/**
  * Reads one v2 check result into the numeric file ids the item page and player
  * menus key on. The v2 contract renders ids as opaque strings; a value that is
  * not a positive safe integer names no catalog row, so it is dropped rather
@@ -94,6 +117,149 @@ export async function fetchVersionLiveness(
       return mapped ? [mapped] : [];
     }),
   };
+}
+
+/**
+ * The checks one server has already answered, one entry per row set, and the
+ * one in flight for it. A row set is the batch a single request names, so the
+ * key is the sorted id list: two callers asking about the same rows share an
+ * answer, and a caller asking about different rows gets its own.
+ */
+interface LivenessCheckRecord {
+  at: number;
+  durationMs: number;
+  response: VersionLivenessResponse;
+}
+
+const checkedRowSets = new Map<string, LivenessCheckRecord>();
+const inFlightRowSets = new Map<string, Promise<VersionLivenessResponse>>();
+/** Row sets a catalog event asked to re-check, waiting for the next request. */
+const forcedRowSets = new Set<string>();
+
+function rowSetKey(fileIds: number[]): string {
+  return [...fileIds].sort((a, b) => a - b).join(",");
+}
+
+/** How long this row set's answer stays authoritative. */
+function reuseWindowMs(record: LivenessCheckRecord): number {
+  if (record.durationMs < VERSION_LIVENESS_SLOW_MS) {
+    return VERSION_LIVENESS_STALE_MS;
+  }
+  return Math.min(
+    VERSION_LIVENESS_MAX_WINDOW_MS,
+    Math.max(VERSION_LIVENESS_STALE_MS, record.durationMs * 10),
+  );
+}
+
+/**
+ * Checks a row set at most as often as its own cost justifies.
+ *
+ * A liveness check resolves the provider per row, so a re-check is not free:
+ * it is the most expensive read a version list makes. Three rules keep one row
+ * set from being asked about more than it can answer:
+ *
+ * - One request in flight per row set; a second caller waits on the first.
+ * - An answer stands for VERSION_LIVENESS_STALE_MS, and longer when the check
+ *   was slow (10x its own latency, capped at VERSION_LIVENESS_MAX_WINDOW_MS).
+ * - A catalog `versions_updated` event may force an earlier check, but not
+ *   more often than VERSION_LIVENESS_FORCED_MIN_INTERVAL_MS. The event names no
+ *   rows, so every known row set is marked; the floor is what stops a refresh
+ *   that announces hundreds of stamped rows from re-probing them per event.
+ *
+ * A row set that actually changed is a new key and is checked at once. Nothing
+ * here polls: a re-render, a remount, a re-enable, or an unchanged list reuses
+ * the answer it already has.
+ */
+export function checkVersionLiveness(fileIds: number[]): Promise<VersionLivenessResponse> {
+  const key = rowSetKey(fileIds);
+  const running = inFlightRowSets.get(key);
+  if (running) return running;
+
+  const record = checkedRowSets.get(key);
+  const now = Date.now();
+  if (record) {
+    const age = now - record.at;
+    const forced = forcedRowSets.has(key);
+    const window = forced ? VERSION_LIVENESS_FORCED_MIN_INTERVAL_MS : reuseWindowMs(record);
+    if (age < window) {
+      forcedRowSets.delete(key);
+      return Promise.resolve(record.response);
+    }
+  }
+  forcedRowSets.delete(key);
+
+  const startedAt = now;
+  const request = fetchVersionLiveness(fileIds)
+    .then((response) => {
+      checkedRowSets.set(key, {
+        at: Date.now(),
+        durationMs: Date.now() - startedAt,
+        response,
+      });
+      return response;
+    })
+    .catch((error: unknown) => {
+      // A failed check teaches nothing about the rows. Drop the record so the
+      // next caller retries instead of reusing a stale verdict as if it were
+      // an answer.
+      checkedRowSets.delete(key);
+      throw error;
+    })
+    .finally(() => {
+      inFlightRowSets.delete(key);
+    });
+  inFlightRowSets.set(key, request);
+  return request;
+}
+
+/**
+ * Marks every known row set for one re-check: a catalog event said a row was
+ * stamped or its versions rewritten, and the event names no rows. The floor in
+ * `checkVersionLiveness` turns any number of these into one check per row set.
+ */
+export function markVersionLivenessStale() {
+  for (const key of checkedRowSets.keys()) {
+    forcedRowSets.add(key);
+  }
+}
+
+/** Drops every cached answer. Tests only; production never needs a reset. */
+export function resetVersionLivenessCache() {
+  checkedRowSets.clear();
+  inFlightRowSets.clear();
+  forcedRowSets.clear();
+}
+
+const pendingRefreshes = new WeakMap<
+  QueryClient,
+  { timer: ReturnType<typeof setTimeout>; deadline: number }
+>();
+
+/**
+ * Re-checks the mounted version lists after a catalog `versions_updated` event.
+ *
+ * A refresh stamping rows emits one event per row, and each used to invalidate
+ * every mounted check at once. The invalidation is therefore coalesced: one
+ * lands per refresh burst, and the check itself is rate-limited per row set by
+ * `markVersionLivenessStale`.
+ */
+export function scheduleVersionLivenessRefresh(queryClient: QueryClient) {
+  const existing = pendingRefreshes.get(queryClient);
+  if (existing) clearTimeout(existing.timer);
+  const now = Date.now();
+  const deadline = existing?.deadline ?? now + VERSION_LIVENESS_REFRESH_MAX_WAIT_MS;
+  const timer = setTimeout(
+    () => {
+      pendingRefreshes.delete(queryClient);
+      markVersionLivenessStale();
+      void queryClient.invalidateQueries(
+        { queryKey: catalogKeys.versionLiveness },
+        { cancelRefetch: false },
+      );
+    },
+    Math.max(0, Math.min(VERSION_LIVENESS_REFRESH_DELAY_MS, deadline - now)),
+  );
+  pendingRefreshes.set(queryClient, { timer, deadline });
 }
 
 /**
@@ -179,7 +345,10 @@ export function useVersionLiveness(
   const queryResults = useQueries({
     queries: chunks.map((fileIds) => ({
       queryKey: [...catalogKeys.versionLiveness, fileIds],
-      queryFn: () => fetchVersionLiveness(fileIds),
+      // Through the gate, not straight to the network: re-renders, remounts and
+      // event-driven invalidations of an unchanged row set reuse its answer
+      // instead of resolving the provider again.
+      queryFn: () => checkVersionLiveness(fileIds),
       enabled: enabled && fileIds.length > 0,
       staleTime: VERSION_LIVENESS_STALE_MS,
     })),

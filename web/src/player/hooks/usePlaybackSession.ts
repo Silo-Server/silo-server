@@ -1587,6 +1587,21 @@ export function usePlaybackSession(
 
   const sessionIdRef = useRef<string | null>(null);
   const planRef = useRef<PlanV3 | null>(null);
+  // The version list moves on every catalog projection of the title: the
+  // inventory poll's merged rows, a restamp, the version-liveness check's
+  // verdicts. Every callback below reads it through this ref so a new list
+  // never changes their identity — the player's transport effect depends on
+  // `onPlanFailure`, which is built from them, and a versions-only change must
+  // not tear the media element down mid-play.
+  const versionsRef = useRef(versions);
+  versionsRef.current = versions;
+  // The same goes for the other two file-selection inputs. A caller that
+  // rebuilds them per render (WatchPage falls back to fresh arrays) would
+  // otherwise churn `selectFileId`, and with it every start and replan path.
+  const playbackVariantsRef = useRef(playbackVariants);
+  playbackVariantsRef.current = playbackVariants;
+  const resumeHintsRef = useRef(resumeHints);
+  resumeHintsRef.current = resumeHints;
   const planRevisionRef = useRef(0);
   const transportRevisionRef = useRef(0);
   const replayRevisionRef = useRef(0);
@@ -2395,6 +2410,9 @@ export function usePlaybackSession(
       // resolves it and the choice is not ours to second-guess.
       if (preferredFileId) return preferredFileId;
 
+      const versions = versionsRef.current;
+      const playbackVariants = playbackVariantsRef.current;
+      const resumeHints = resumeHintsRef.current;
       const mode = normalizeSubtitleMode(subtitleMode);
       const lastFileId = resumeHints?.lastFileId;
       const lastVersion =
@@ -2450,7 +2468,7 @@ export function usePlaybackSession(
       if (subtitleCandidate) return subtitleCandidate.file_id;
       return variantFileId ?? versions[0]?.file_id ?? null;
     },
-    [playbackVariants, resumeHints, subtitleMode, versions],
+    [subtitleMode],
   );
 
   const loadSession = useCallback(
@@ -2663,7 +2681,9 @@ export function usePlaybackSession(
 
         let decisionToAdopt = decision;
         let initialSubtitleFailure: PlaybackSessionErrorState | null = null;
-        const targetVersion = versions.find((v) => v.file_id === selectedFileId);
+        // The list as it stands when the answer lands, not when the start was
+        // requested: a projection that arrived meanwhile names the rows better.
+        const targetVersion = versionsRef.current.find((v) => v.file_id === selectedFileId);
         // Shared ordinal derivation; `targetSubtitleIndex` is the server's
         // published index, so look it up on the same mapping. See
         // subtitleInventory.ts.
@@ -2808,7 +2828,6 @@ export function usePlaybackSession(
       selectFileId,
       stopSession,
       transitionSourceIdentity,
-      versions,
     ],
   );
   const loadSessionRef = useRef(loadSession);
@@ -5011,7 +5030,7 @@ export function usePlaybackSession(
             carriedSubtitleTrackIndex: resolveCarriedSubtitleIndexAcrossVersions(
               planRef.current,
               newFileId,
-              versions,
+              versionsRef.current,
             ),
             // A version switch is always an explicit user action: the server
             // must not silently substitute yet another version.
@@ -5058,7 +5077,7 @@ export function usePlaybackSession(
         }
       })();
     },
-    [allowAlternateVersions, loadSession, setAutoFallback, versions],
+    [allowAlternateVersions, loadSession, setAutoFallback],
   );
 
   /**

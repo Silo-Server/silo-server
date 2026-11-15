@@ -21,10 +21,14 @@ vi.mock("@/api/client", () => ({
 
 import {
   VERSION_LIVENESS_BATCH_SIZE,
+  VERSION_LIVENESS_FORCED_MIN_INTERVAL_MS,
   applyVersionAvailability,
+  checkVersionLiveness,
   chunkVirtualFileIds,
   fetchVersionLiveness,
+  markVersionLivenessStale,
   mergeVersionLiveness,
+  resetVersionLivenessCache,
   useVersionLiveness,
 } from "./versionLiveness";
 
@@ -58,12 +62,17 @@ function createWrapper(queryClient: QueryClient) {
   };
 }
 
+// The check gate is module state, shared by every mounted list: each test
+// starts from an empty one.
+beforeEach(() => {
+  resetVersionLivenessCache();
+});
+
 describe("fetchVersionLiveness", () => {
   beforeEach(() => {
     mocks.v2.mockReset();
     mocks.apiV1.mockReset();
   });
-
   it("POSTs the file_ids to the v2 check operation and never the retired v1 route", async () => {
     mocks.v2.mockResolvedValue({ results: [] });
     await fetchVersionLiveness([1, 2, 3]);
@@ -96,6 +105,99 @@ describe("fetchVersionLiveness", () => {
         },
       ],
     });
+  });
+});
+
+describe("checkVersionLiveness", () => {
+  beforeEach(() => {
+    mocks.v2.mockReset();
+    mocks.apiV1.mockReset();
+    resetVersionLivenessCache();
+  });
+
+  it("coalesces duplicate requests for the same row set", async () => {
+    mocks.v2.mockResolvedValue({ results: [{ file_id: "1", available: true }] });
+
+    const [first, second] = await Promise.all([
+      checkVersionLiveness([1, 2]),
+      checkVersionLiveness([2, 1]),
+    ]);
+
+    expect(mocks.v2).toHaveBeenCalledTimes(1);
+    expect(second).toBe(first);
+  });
+
+  it("reuses an answer inside the freshness window instead of re-probing", async () => {
+    mocks.v2.mockResolvedValue({ results: [{ file_id: "1", available: true }] });
+
+    await checkVersionLiveness([1]);
+    const again = await checkVersionLiveness([1]);
+
+    expect(mocks.v2).toHaveBeenCalledTimes(1);
+    expect(again.results[0]?.available).toBe(true);
+  });
+
+  it("checks a changed row set at once", async () => {
+    mocks.v2.mockResolvedValue({ results: [{ file_id: "1", available: true }] });
+
+    await checkVersionLiveness([1]);
+    await checkVersionLiveness([1, 2]);
+
+    expect(mocks.v2).toHaveBeenCalledTimes(2);
+  });
+
+  it("holds a slow probe's answer for ten times its own latency", async () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date("2026-01-01T00:00:00Z"));
+      mocks.v2.mockImplementation(async () => {
+        // A provider resolution that took 40 s: 10x is 400 s, past the 5 min
+        // base window, so the slow answer is the one that governs.
+        vi.setSystemTime(new Date(Date.now() + 40_000));
+        return { results: [{ file_id: "1", available: true }] };
+      });
+
+      await checkVersionLiveness([1]);
+      expect(mocks.v2).toHaveBeenCalledTimes(1);
+
+      // Six minutes on: past the base window, inside the slow probe's.
+      vi.setSystemTime(new Date(Date.now() + 6 * 60_000));
+      await checkVersionLiveness([1]);
+      expect(mocks.v2).toHaveBeenCalledTimes(1);
+
+      // Past 400 s the answer is spent and the row set is checked again.
+      vi.setSystemTime(new Date(Date.now() + 2 * 60_000));
+      await checkVersionLiveness([1]);
+      expect(mocks.v2).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("a catalog event forces one re-check per row set, then the floor holds", async () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date("2026-01-01T00:00:00Z"));
+      mocks.v2.mockResolvedValue({ results: [{ file_id: "1", available: true }] });
+
+      await checkVersionLiveness([1]);
+      expect(mocks.v2).toHaveBeenCalledTimes(1);
+
+      // A refresh announces a burst of stamped rows, one event at a time. The
+      // floor turns the burst into one new check.
+      vi.setSystemTime(new Date(Date.now() + VERSION_LIVENESS_FORCED_MIN_INTERVAL_MS));
+      for (let i = 0; i < 12; i += 1) markVersionLivenessStale();
+      await checkVersionLiveness([1]);
+      await checkVersionLiveness([1]);
+      expect(mocks.v2).toHaveBeenCalledTimes(2);
+
+      // Another event inside the floor is answered from the check just made.
+      markVersionLivenessStale();
+      await checkVersionLiveness([1]);
+      expect(mocks.v2).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 
