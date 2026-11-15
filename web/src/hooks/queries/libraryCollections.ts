@@ -22,7 +22,9 @@ const COLLECTION_TITLES_STALE_MS = 5 * 60 * 1000;
  * A media change never renames a collection, so media invalidations leave this
  * query alone (see mediaSurfaceRefresh); collection edits invalidate it with
  * the rest of `libraryCollectionKeys`. It reads through the Collections tab's
- * query, so a tab read in flight or still fresh answers it without a request.
+ * query, so a tab read already in flight answers it without a second request.
+ * A finished tab response is not reused: its age would add to this query's
+ * stale time and keep a renamed collection's old title longer.
  */
 export function libraryCollectionTitlesQuery(libraryId: number) {
   return {
@@ -36,7 +38,7 @@ export function libraryCollectionTitlesQuery(libraryId: number) {
     }): Promise<ReadonlyMap<string, string>> => {
       const tabQuery = libraryCollectionsQueryOptions(libraryId);
       return client
-        .fetchQuery({ ...tabQuery, staleTime: COLLECTION_TITLES_STALE_MS })
+        .fetchQuery({ ...tabQuery, staleTime: 0 })
         .catch((error: unknown) => {
           // The tab's request is cancelled when the tab closes before it lands;
           // the titles still need an answer, so read them on their own.

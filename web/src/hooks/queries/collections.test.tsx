@@ -315,10 +315,17 @@ describe("libraryCollectionTitlesQuery", () => {
 
     await list;
     expect(await titles).toEqual(new Map([["c1", "Stormy Nights"]]));
-    // A Collections tab read that is still fresh answers a later titles read too.
-    await queryClient.invalidateQueries({ queryKey: libraryCollectionKeys.titles(7) });
-    await queryClient.fetchQuery(libraryCollectionTitlesQuery(7));
     expect(apiWithProfileRequestContextMock).toHaveBeenCalledOnce();
+    // A later titles read fetches anew rather than taking the cached tab
+    // response, so a title is never older than the titles' own stale time.
+    await queryClient.invalidateQueries({ queryKey: libraryCollectionKeys.titles(7) });
+    apiWithProfileRequestContextMock.mockResolvedValueOnce({
+      library_id: "7",
+      collections: [{ id: "c1", library_id: "7", library_ids: ["7"], title: "Stormy Nights" }],
+      groups: [],
+    });
+    await queryClient.fetchQuery(libraryCollectionTitlesQuery(7));
+    expect(apiWithProfileRequestContextMock).toHaveBeenCalledTimes(2);
 
     // A collection edit invalidates both, and the titles read the renamed collection.
     apiWithProfileRequestContextMock.mockResolvedValue({
