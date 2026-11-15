@@ -30,8 +30,8 @@ type Availability struct {
 // specials (season 0) excluded. An episode has a file when a present file in
 // an enabled library the viewer can access is linked to it and fits the
 // playback-quality ceiling, or when a present multi-episode file of its
-// season spans it the way playback serves it (spannedEpisodeJoinSQL, at most
-// MaxEpisodeSpan episodes after the one it links to). filter's
+// season spans it the way playback serves it (as spannedEpisodeJoinSQL does,
+// at most MaxEpisodeSpan episodes after the one it links to). filter's
 // library allow/deny, playback-quality ceiling and, on a library-scoped read
 // (ScopeFilesToLibrary), presentation library narrow both presence branches
 // so a badge never counts holdings the viewer cannot reach there.
@@ -49,38 +49,56 @@ func (r *ItemRepository) SeriesSeasonAvailability(ctx context.Context, seriesCon
 		args = append(args, value)
 		return len(args)
 	}
-	// episode_libraries records membership, not a playable file: the held
-	// file must pass the same access rules, or a 2160p-only episode would
-	// count for a 1080p viewer.
-	held := append([]string{
-		"held.episode_id = el.episode_id",
-		"held.media_folder_id = el.media_folder_id",
-		"held.missing_since IS NULL",
-	}, mediaFileAccessConditions("held", filter, bind)...)
-	mfLibrary := mediaFileAccessConditions("mf", filter, bind)
+	// episode_libraries records membership, not a playable file: the file
+	// must pass the same access rules, or a 2160p-only episode would count
+	// for a 1080p viewer.
+	fileConditions := mediaFileAccessConditions("mf", filter, bind)
 	if filter.ScopeFilesToLibrary && filter.PresentationLibraryID != nil {
-		idx := bind(*filter.PresentationLibraryID)
-		held = append(held, fmt.Sprintf("held.media_folder_id = $%d", idx))
-		mfLibrary = append(mfLibrary, fmt.Sprintf("mf.media_folder_id = $%d", idx))
+		fileConditions = append(fileConditions, fmt.Sprintf("mf.media_folder_id = $%d", bind(*filter.PresentationLibraryID)))
 	}
-	elExtra := " AND EXISTS (SELECT 1 FROM media_files held WHERE " + strings.Join(held, " AND ") + ")"
-	mfExtra := ""
-	if len(mfLibrary) > 0 {
-		mfExtra = " AND " + strings.Join(mfLibrary, " AND ")
+	fileExtra := ""
+	if len(fileConditions) > 0 {
+		fileExtra = " AND " + strings.Join(fileConditions, " AND ")
 	}
 
+	// The cost follows the episodes of the requested series, not the size of
+	// the library. files reads each of those episodes' present files by index:
+	// OFFSET 0 keeps the planner from flattening the lateral into hash joins
+	// over all of media_files and episode_libraries, and the enabled folders
+	// are read once as an array rather than joined per file. One pass feeds both
+	// presence branches: linked is the file's own episode (with its folder
+	// membership), and a multi-episode file also covers the later episodes of
+	// its range, as spannedEpisodeJoinSQL joins them.
 	rows, err := r.pool.Query(ctx, fmt.Sprintf(`
-		WITH present AS (
-			SELECT el.episode_id AS content_id
-			FROM episode_libraries el
-			JOIN episodes e ON e.content_id = el.episode_id
-			JOIN media_folders f ON f.id = el.media_folder_id AND f.enabled
-			WHERE e.series_id = ANY($1) AND e.season_number > 0%s
+		WITH eps AS MATERIALIZED (
+			SELECT content_id, series_id, season_number, episode_number, air_date
+			FROM episodes
+			WHERE series_id = ANY($1) AND season_number > 0
+		), files AS MATERIALIZED (
+			SELECT e.content_id, e.series_id, e.season_number, e.episode_number,
+			       mf.linked, mf.multi_episode_start, mf.multi_episode_end
+			FROM eps e
+			CROSS JOIN LATERAL (
+				SELECT mf.multi_episode_start, mf.multi_episode_end,
+				       EXISTS (
+				           SELECT 1 FROM episode_libraries el
+				           WHERE el.episode_id = mf.episode_id AND el.media_folder_id = mf.media_folder_id
+				       ) AS linked
+				FROM media_files mf
+				WHERE mf.episode_id = e.content_id AND mf.missing_since IS NULL
+				  AND mf.media_folder_id = ANY(ARRAY(SELECT id FROM media_folders WHERE enabled))%s
+				OFFSET 0
+			) mf
+		), present AS (
+			SELECT fl.content_id FROM files fl WHERE fl.linked
 			UNION
 			SELECT covered.content_id
-			FROM episodes covered`+spannedEpisodeJoinSQL+`
-			JOIN media_folders f ON f.id = mf.media_folder_id AND f.enabled
-			WHERE covered.series_id = ANY($1) AND covered.season_number > 0%s
+			FROM files fl
+			JOIN eps covered ON covered.series_id = fl.series_id
+			     AND covered.season_number = fl.season_number
+			     AND covered.episode_number BETWEEN fl.episode_number + 1 AND fl.episode_number + %d
+			     AND covered.episode_number BETWEEN fl.multi_episode_start AND fl.multi_episode_end
+			WHERE fl.multi_episode_end > fl.multi_episode_start
 		)
 		SELECT e.series_id, e.season_number,
 		       count(*) FILTER (WHERE e.air_date <= current_date),
@@ -88,11 +106,10 @@ func (r *ItemRepository) SeriesSeasonAvailability(ctx context.Context, seriesCon
 		       count(*),
 		       count(p.content_id),
 		       count(p.content_id) FILTER (WHERE e.air_date <= current_date)
-		FROM episodes e
+		FROM eps e
 		LEFT JOIN present p ON p.content_id = e.content_id
-		WHERE e.series_id = ANY($1) AND e.season_number > 0
 		GROUP BY e.series_id, e.season_number
-	`, elExtra, mfExtra), args...)
+	`, fileExtra, MaxEpisodeSpan), args...)
 	if err != nil {
 		return nil, fmt.Errorf("series season availability: %w", err)
 	}
