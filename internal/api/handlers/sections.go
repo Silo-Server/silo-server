@@ -1161,6 +1161,7 @@ func (h *SectionHandler) buildSectionsWithUserStates(ctx context.Context, withIt
 	goSectionLookup(ctx, &wg, "image_urls", func() { imageURLs = h.resolveSectionItemImageURLs(ctx, withItems, art) })
 	goSectionLookup(ctx, &wg, "episode_meta", func() { episodeMeta = h.listSectionEpisodeItemMeta(ctx, withItems, viewerAccess) })
 	goSectionLookup(ctx, &wg, "manga_chapter_meta", func() { mangaChapterMeta = h.listSectionMangaChapterItemMeta(ctx, allItems) })
+	availability := h.startSectionAvailability(ctx, &wg, includeAvailability, viewerAccess, allItems)
 
 	wg.Wait()
 	h.resolveFallbackParentArtwork(ctx, withItems, episodeMeta, art, imageURLs)
@@ -1197,9 +1198,7 @@ func (h *SectionHandler) buildSectionsWithUserStates(ctx context.Context, withIt
 			TitleArgs:   s.TitleArgs,
 		})
 	}
-	if includeAvailability {
-		attachSectionAvailability(ctx, h.fetcher, viewerAccess, resp.Sections)
-	}
+	availability.attach(ctx, resp.Sections)
 	return resp
 }
 
