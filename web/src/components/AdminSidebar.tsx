@@ -147,8 +147,16 @@ export default function AdminSidebar({
   const activeTopic = sections
     .flatMap((section) => section.entries)
     .find((entry) => isAdminNavTopic(entry) && entry.items.some(isActive));
+  const activeTopicId = activeTopic && isAdminNavTopic(activeTopic) ? activeTopic.id : null;
+  // Outside every topic, the sidebar item the page sits under (Dashboard,
+  // Activity) marks where the admin is, so a page beneath it counts as it.
+  const activePage = sections
+    .flatMap((section) => section.entries)
+    .find((entry) => !isAdminNavTopic(entry) && isActive(entry));
   const topics = useAdminNavTopics(
-    activeTopic && isAdminNavTopic(activeTopic) ? activeTopic.id : null,
+    activeTopicId,
+    activeTopicId ??
+      (activePage && !isAdminNavTopic(activePage) ? activePage.href : location.pathname),
   );
 
   function renderPluginItem(item: AdminNavItem) {
