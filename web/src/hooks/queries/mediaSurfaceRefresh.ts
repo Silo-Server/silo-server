@@ -97,9 +97,7 @@ const owedDetailRefreshes = new WeakMap<QueryClient, Set<string>>();
 
 // Writing data marks a query fresh. A detail that was already invalidated,
 // such as by another device's metadata save while no page showed it, still
-// owes a refetch. Refetching before the write behind this patch lands could
-// read the item without it, so the refresh that follows the write refetches
-// the detail even when it would skip it (takeOwedDetailRefresh).
+// owes a refetch (refetchDetailWhenWritesSettle).
 export function updateCatalogItemDetail(
   queryClient: QueryClient,
   itemId: string,
@@ -112,22 +110,36 @@ export function updateCatalogItemDetail(
       .findAll(filters)
       .some((query) => query.state.isInvalidated)
   ) {
-    let owed = owedDetailRefreshes.get(queryClient);
-    if (!owed) {
-      owed = new Set();
-      owedDetailRefreshes.set(queryClient, owed);
-    }
-    owed.add(itemId);
+    refetchDetailWhenWritesSettle(queryClient, itemId);
   }
   queryClient.setQueriesData<ItemDetail>(filters, (current) =>
     current ? updater(current) : current,
   );
 }
 
-// takeOwedDetailRefresh reports whether a patch put off the refetch of
-// itemId's detail, and clears it.
-export function takeOwedDetailRefresh(queryClient: QueryClient, itemId: string): boolean {
-  return owedDetailRefreshes.get(queryClient)?.delete(itemId) ?? false;
+// A read made while a write is pending can miss it and replace the write's
+// patch, and the toggles' own refreshes skip the item's detail. So an owed
+// detail is invalidated once no mutation is pending: overlapping writes to an
+// item share one refetch after the last of them, and a patch with no write
+// behind it, such as a realtime event's, refetches at once.
+function refetchDetailWhenWritesSettle(queryClient: QueryClient, itemId: string) {
+  const waiting = owedDetailRefreshes.get(queryClient);
+  if (waiting) {
+    waiting.add(itemId);
+    return;
+  }
+  const owed = new Set([itemId]);
+  owedDetailRefreshes.set(queryClient, owed);
+  const refetchOnceSettled = () => {
+    if (queryClient.isMutating() > 0) return;
+    unsubscribe();
+    owedDetailRefreshes.delete(queryClient);
+    void queryClient.invalidateQueries({
+      predicate: (query) => [...owed].some((id) => isItemDetailQueryKey(query.queryKey, id)),
+    });
+  };
+  const unsubscribe = queryClient.getMutationCache().subscribe(refetchOnceSettled);
+  refetchOnceSettled();
 }
 
 // Callers must await this before writing optimistic state. The default
@@ -499,14 +511,8 @@ function isWatchedKey(queryKey: readonly unknown[], options: InvalidateMediaSurf
 
 export async function invalidateMediaSurfaceQueries(
   queryClient: QueryClient,
-  requested: InvalidateMediaSurfaceOptions = {},
+  options: InvalidateMediaSurfaceOptions = {},
 ) {
-  const options =
-    requested.skipItemDetail &&
-    requested.itemId &&
-    takeOwedDetailRefresh(queryClient, requested.itemId)
-      ? { ...requested, skipItemDetail: false }
-      : requested;
   // Duplicate refetches are held down by the coalescing scheduler below, not by
   // `cancelRefetch: false` — reusing an in-flight request would let a response
   // that predates the mutation satisfy the invalidation and land in the cache
