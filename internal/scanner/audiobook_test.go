@@ -685,7 +685,7 @@ func TestAudiobookLookupPathsIncludeCaseFoldedVariants(t *testing.T) {
 
 func TestApplyBookToMediaItemDoesNotBlankAllNarratorSuffixTitle(t *testing.T) {
 	item := &models.MediaItem{}
-	applyBookToMediaItem(item, &parsedAudiobook{Title: "Read by Jim Dale"})
+	applyBookToMediaItem(item, &parsedAudiobook{Title: "Read by Jim Dale"}, false)
 	if item.Title != "Read by Jim Dale" {
 		t.Fatalf("Title = %q, want raw title fallback", item.Title)
 	}
@@ -718,21 +718,25 @@ func TestApplyBookToMediaItemKeepsLockedFields(t *testing.T) {
 	for _, tc := range []struct {
 		name         string
 		locked       []int
+		matched      bool
 		wantTitle    string
 		wantYear     int
 		wantGenres   []string
 		wantStudios  []string
 		wantOverview string
 	}{
-		{"nothing locked", nil, "Tagged Title", 2001, []string{"Admin Genre", "Tagged Genre"}, []string{"Admin Studio", "Tagged Press"}, "Tagged overview"},
-		{"title locked", []int{lockedFieldName}, "Admin Title", 2001, []string{"Admin Genre", "Tagged Genre"}, []string{"Admin Studio", "Tagged Press"}, "Tagged overview"},
-		{"release dates locked", []int{lockedFieldReleaseDates}, "Tagged Title", 2020, []string{"Admin Genre", "Tagged Genre"}, []string{"Admin Studio", "Tagged Press"}, "Tagged overview"},
-		{"genres and studios locked", []int{lockedFieldGenres, lockedFieldStudios}, "Tagged Title", 2001, []string{"Admin Genre"}, []string{"Admin Studio"}, "Tagged overview"},
-		{"overview locked", []int{lockedFieldOverview}, "Tagged Title", 2001, []string{"Admin Genre", "Tagged Genre"}, []string{"Admin Studio", "Tagged Press"}, ""},
+		{"nothing locked", nil, false, "Tagged Title", 2001, []string{"Admin Genre", "Tagged Genre"}, []string{"Admin Studio", "Tagged Press"}, "Tagged overview"},
+		{"title locked", []int{lockedFieldName}, false, "Admin Title", 2001, []string{"Admin Genre", "Tagged Genre"}, []string{"Admin Studio", "Tagged Press"}, "Tagged overview"},
+		{"release dates locked", []int{lockedFieldReleaseDates}, false, "Tagged Title", 2020, []string{"Admin Genre", "Tagged Genre"}, []string{"Admin Studio", "Tagged Press"}, "Tagged overview"},
+		{"genres and studios locked", []int{lockedFieldGenres, lockedFieldStudios}, false, "Tagged Title", 2001, []string{"Admin Genre"}, []string{"Admin Studio"}, "Tagged overview"},
+		{"overview locked", []int{lockedFieldOverview}, false, "Tagged Title", 2001, []string{"Admin Genre", "Tagged Genre"}, []string{"Admin Studio", "Tagged Press"}, ""},
+		// A provider match owns year, genres and studios; tags keep the title
+		// and only fill what is empty.
+		{"provider matched", nil, true, "Tagged Title", 2020, []string{"Admin Genre"}, []string{"Admin Studio"}, "Tagged overview"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			item := newItem(tc.locked...)
-			applyBookToMediaItem(item, book)
+			applyBookToMediaItem(item, book, tc.matched)
 			if item.Title != tc.wantTitle {
 				t.Errorf("Title = %q, want %q", item.Title, tc.wantTitle)
 			}
