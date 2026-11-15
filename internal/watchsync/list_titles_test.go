@@ -472,6 +472,109 @@ func TestServiceWatchlistTitleRemovalWaitsForAListingUnderANewTMDBID(t *testing.
 	}
 }
 
+// A removal waiting for the provider holds the title in its other form too:
+// a removed entry outside the library holds the library item the listing now
+// matches, and a removed library item holds the entry outside the library the
+// listing becomes once the library loses the item. A listing newer than the
+// removal is a new add, and the removal no longer goes out.
+func TestServiceWatchlistRemovalHoldsTheTitlesOtherForm(t *testing.T) {
+	const titleRow = "watchlist-title:movie:550"
+	removedAt := time.Now().Add(-time.Hour)
+	for _, tt := range []struct {
+		name     string
+		pending  ListItemState
+		matcher  mediaMatcher
+		listedAt time.Time
+		wantAdd  bool
+	}{
+		{
+			name:    "title row holds a library match",
+			pending: ListItemState{MediaItemID: titleRow, ProviderItemKey: "tmdb:550", TitleIDs: []string{"tmdb:550", "imdb:tt0137523"}},
+			matcher: matchedMatcherStub{mediaItemID: testMovieMediaID},
+		},
+		{
+			name:     "newer listing of a library match",
+			pending:  ListItemState{MediaItemID: titleRow, ProviderItemKey: "tmdb:550", TitleIDs: []string{"tmdb:550", "imdb:tt0137523"}},
+			matcher:  matchedMatcherStub{mediaItemID: testMovieMediaID},
+			listedAt: time.Now(), wantAdd: true,
+		},
+		{
+			name:    "library row holds a title outside the library",
+			pending: ListItemState{MediaItemID: testMovieMediaID, ProviderItemKey: "imdb:tt0137523"},
+			matcher: unmatchedMatcherStub{},
+		},
+		{
+			name:     "newer listing of a title outside the library",
+			pending:  ListItemState{MediaItemID: testMovieMediaID, ProviderItemKey: "imdb:tt0137523"},
+			matcher:  unmatchedMatcherStub{},
+			listedAt: time.Now(), wantAdd: true,
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			store, repo, conn := favoriteImportFixture(t)
+			conn.ImportWatchlistEnabled, conn.SyncWatchlistRemovalsEnabled = true, true
+			pending := tt.pending
+			pending.ConnectionID, pending.ListKind, pending.Kind = conn.ID, ListKindWatchlist, "movie"
+			pending.RemotePresent, pending.LastRemovedLocalAt = true, &removedAt
+			repo.listItemStates = append(repo.listItemStates, pending)
+			titles := &titlesStub{entries: map[int]time.Time{}}
+			service := NewService(repo, NewRegistry()).
+				WithMatcher(tt.matcher).
+				WithUserStoreProvider(staticStoreProvider{store: store})
+			service.SetWatchlistTitles(titles)
+			provider := &watchlistBatchProviderStub{rows: []RemoteFavorite{{
+				ProviderItemKey: "imdb:tt0137523", Kind: "movie", Title: "Fight Club",
+				IMDbID: "tt0137523", TMDBID: "550", FavoritedAt: tt.listedAt, FavoritedAtGuessed: tt.listedAt.IsZero(),
+			}}}
+			if _, err := service.importList(context.Background(), conn, ServerConfig{}, provider, service.watchlistBinding()); err != nil {
+				t.Fatal(err)
+			}
+			onLibraryList, err := store.InWatchlist(context.Background(), conn.ProfileID, testMovieMediaID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, titleKept := titles.entries[550]
+			if added := onLibraryList || titleKept; added != tt.wantAdd {
+				t.Fatalf("library item listed %v, title kept %v, want added %v", onLibraryList, titleKept, tt.wantAdd)
+			}
+			state := listItemStateOf(repo, pending.MediaItemID)
+			if stillPending := !state.LocalPresent && state.RemotePresent; stillPending == tt.wantAdd {
+				t.Fatalf("pending row = %#v, want its removal pending %v", state, !tt.wantAdd)
+			}
+		})
+	}
+}
+
+// A library item already on the watchlist isn't held behind its title's
+// earlier removal: the import still tracks it, so its row keeps holding a
+// removal under the same key from taking the listing off the provider.
+func TestServiceWatchlistTitleRemovalLeavesAListedLibraryItemTracked(t *testing.T) {
+	store, repo, conn := favoriteImportFixture(t)
+	conn.ImportWatchlistEnabled, conn.SyncWatchlistRemovalsEnabled = true, true
+	removedAt := time.Now().Add(-time.Hour)
+	repo.listItemStates = append(repo.listItemStates, ListItemState{
+		ConnectionID: conn.ID, ListKind: ListKindWatchlist, MediaItemID: "watchlist-title:movie:550", Kind: "movie",
+		ProviderItemKey: "imdb:tt0137523", RemotePresent: true, LastRemovedLocalAt: &removedAt,
+	})
+	if _, err := store.AddToWatchlist(context.Background(), conn.ProfileID, testMovieMediaID); err != nil {
+		t.Fatal(err)
+	}
+	service := NewService(repo, NewRegistry()).
+		WithMatcher(matchedMatcherStub{mediaItemID: testMovieMediaID}).
+		WithUserStoreProvider(staticStoreProvider{store: store})
+	service.SetWatchlistTitles(&titlesStub{entries: map[int]time.Time{}})
+	provider := &watchlistBatchProviderStub{rows: []RemoteFavorite{{
+		ProviderItemKey: "imdb:tt0137523", Kind: "movie", Title: "Fight Club",
+		IMDbID: "tt0137523", TMDBID: "550", FavoritedAtGuessed: true,
+	}}}
+	if _, err := service.importList(context.Background(), conn, ServerConfig{}, provider, service.watchlistBinding()); err != nil {
+		t.Fatal(err)
+	}
+	if state := listItemStateOf(repo, testMovieMediaID); state == nil || !state.LocalPresent || !state.RemotePresent {
+		t.Fatalf("library item row = %#v, want it tracked on both sides", state)
+	}
+}
+
 // Two title rows for one series, under two TMDB IDs, promote to one library
 // show. The show's row takes the provider key of the row the provider lists,
 // whichever row comes first.
