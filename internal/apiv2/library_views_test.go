@@ -9,8 +9,10 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/adminjob"
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
+	"github.com/Silo-Server/silo-server/internal/imagesize"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/usercollections"
 )
@@ -510,4 +512,19 @@ func TestLibraryCollections(t *testing.T) {
 	deps := libraryViewDeps(t)
 	deps.LibraryCollections = &fakeLibraryViews{err: &handlers.APIError{Status: http.StatusNotFound, Code: "not_found", Message: "Library not found"}}
 	requireProblem(t, do(t, newTestHandler(t, deps), http.MethodGet, "/api/v2/library/1/collections", "", viewerHeaders()), TypeNotFound)
+}
+
+// Counting seasons and episodes for the availability badge is the one card
+// lookup whose cost grows with the episodes behind a page, so a section read
+// asks for it only when the acting profile draws the badge.
+func TestSectionViewerCountsAvailabilityOnlyForProfilesDrawingTheBadge(t *testing.T) {
+	for _, drawsBadge := range []bool{false, true} {
+		ctx := access.SetScope(t.Context(), access.Scope{ProfileID: "profile", CardAvailability: drawsBadge})
+		if got := sectionViewer(ctx, imagesize.Request{}, SectionClient{}).IncludeCardAvailability; got != drawsBadge {
+			t.Fatalf("badge drawn = %v: IncludeCardAvailability = %v", drawsBadge, got)
+		}
+	}
+	if sectionViewer(t.Context(), imagesize.Request{}, SectionClient{}).IncludeCardAvailability {
+		t.Fatal("a request without a resolved scope asked for availability")
+	}
 }

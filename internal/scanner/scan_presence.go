@@ -33,6 +33,21 @@ func (r *FileRepository) ListScanPresenceByFolderAndPathPrefix(ctx context.Conte
 	return scanPresenceRows(rows)
 }
 
+// scanInventoryTime returns the database time for a scan to take before it
+// walks. Its missing-file pass lists only rows written before then
+// (ListScanPresenceWrittenBefore): a row another scan wrote since is a file
+// this walk may have missed, and stays that scan's to reconcile.
+func (s *Scanner) scanInventoryTime(ctx context.Context) (time.Time, error) {
+	var at time.Time
+	if s.fileRepo == nil {
+		return at, nil
+	}
+	if err := s.fileRepo.Pool().QueryRow(ctx, `SELECT now()`).Scan(&at); err != nil {
+		return at, fmt.Errorf("reading database time: %w", err)
+	}
+	return at, nil
+}
+
 // ListScanPresenceWrittenBefore returns the presence rows of a folder subtree
 // that no write has touched at or after before. A scan passes the database
 // time it began walking, so rows another scan wrote since stay that scan's.

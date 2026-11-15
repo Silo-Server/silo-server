@@ -59,7 +59,7 @@ func TestBuildSectionsSurvivesALookupPanic(t *testing.T) {
 	response := handler.buildSections(t.Context(), []sections.SectionWithItems{{
 		ResolvedSection: sections.ResolvedSection{ID: "row", SectionType: sections.SectionRecentlyAdded},
 		Items:           []*models.MediaItem{{ContentID: "episode", Type: "episode", Title: "Episode"}},
-	}}, nil, catalog.AccessFilter{}, imagesize.Request{})
+	}}, nil, catalog.AccessFilter{}, imagesize.Request{}, false)
 	if !resolver.called || len(response.Sections) != 1 || len(response.Sections[0].Items) != 1 {
 		t.Fatalf("resolver called %v, response %+v", resolver.called, response)
 	}
@@ -79,7 +79,7 @@ func TestBuildSectionsEnrichesConcurrentlyForViewer(t *testing.T) {
 	response := handler.buildSections(ctx, []sections.SectionWithItems{{
 		ResolvedSection: sections.ResolvedSection{ID: "row", SectionType: sections.SectionRecentlyAdded},
 		Items:           []*models.MediaItem{{ContentID: "episode", Type: "episode", Title: "Episode"}},
-	}}, new(3), access, imagesize.Request{})
+	}}, new(3), access, imagesize.Request{}, false)
 	if err := ctx.Err(); err != nil {
 		t.Fatalf("enrichment did not finish concurrently: %v", err)
 	}

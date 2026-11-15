@@ -4,8 +4,10 @@ import (
 	"context"
 	"log/slog"
 	"slices"
+	"strconv"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/contentid"
 	"github.com/Silo-Server/silo-server/internal/watchsync"
 )
 
@@ -96,8 +98,8 @@ func (t syncTitles) withdrawIfRemoved(ctx context.Context, userID int, profileID
 	if err != nil || on[key] {
 		return err
 	}
-	promoted, err := t.WatchlistTitlePromoted(ctx, userID, profileID, title)
-	if err != nil || promoted {
+	promoted, err := t.PromotedWatchlistItems(ctx, userID, profileID, title, nil)
+	if err != nil || len(promoted) > 0 {
 		return err
 	}
 	return t.requests.WithdrawWatchlistTitle(ctx, userID, profileID, title.Kind, heldTMDBIDs(title.TMDBID, &stored))
@@ -226,66 +228,60 @@ func (t syncTitles) RemoveWatchlistTitle(ctx context.Context, userID int, profil
 	return t.requests.WithdrawWatchlistTitle(ctx, userID, profileID, title.Kind, ids)
 }
 
-func (t syncTitles) WatchlistTitlesListed(ctx context.Context, userID int, profileID string, titles []watchsync.WatchlistTitle) (map[watchsync.WatchlistTitle]bool, error) {
-	keys := make([]TitleKey, len(titles))
-	for i, title := range titles {
-		keys[i] = TitleKey{MediaType: title.Kind, TMDBID: title.TMDBID}
-	}
-	on, err := t.titles.OnWatchlist(ctx, Viewer{UserID: userID, ProfileID: profileID}, keys)
+// WatchlistTitleIDs reads the profile's entries with their titles' aliases
+// once and returns each title's IDs, current and former, reached through any
+// of its TMDB IDs.
+func (t syncTitles) WatchlistTitleIDs(ctx context.Context, userID int, profileID string, titles []watchsync.WatchlistTitle) (map[watchsync.WatchlistTitle][]string, error) {
+	_, aliases, err := t.titles.repo.profileEntries(ctx, userID, profileID)
 	if err != nil {
 		return nil, err
 	}
-	out := make(map[watchsync.WatchlistTitle]bool, len(titles))
-	for i, title := range titles {
-		out[title] = on[keys[i]]
-	}
-	return out, nil
-}
-
-// WatchlistTitleTMDBIDs reads the profile's entries once and returns each
-// title's current and former TMDB IDs, reached through any of them.
-func (t syncTitles) WatchlistTitleTMDBIDs(ctx context.Context, userID int, profileID string, titles []watchsync.WatchlistTitle) (map[watchsync.WatchlistTitle][]int, error) {
-	entries, err := t.listEntries(ctx, userID, profileID)
-	if err != nil {
-		return nil, err
-	}
-	byKey := make(map[TitleKey][]int, len(entries))
-	for _, e := range entries {
-		held := append([]int{e.Title.TMDBID}, e.Title.FormerTMDBIDs...)
-		for _, id := range held {
-			byKey[TitleKey{MediaType: e.Title.MediaType, TMDBID: id}] = held
+	held := make(map[int64][]string)
+	byTMDB := make(map[TitleKey]int64)
+	for _, a := range aliases {
+		held[a.TitleID] = append(held[a.TitleID], a.Provider+":"+a.ProviderID)
+		if a.Provider != contentid.ProviderTMDB {
+			continue
+		}
+		if id, err := strconv.Atoi(a.ProviderID); err == nil {
+			byTMDB[TitleKey{MediaType: a.MediaType, TMDBID: id}] = a.TitleID
 		}
 	}
-	out := make(map[watchsync.WatchlistTitle][]int, len(titles))
+	out := make(map[watchsync.WatchlistTitle][]string, len(titles))
 	for _, title := range titles {
-		out[title] = byKey[TitleKey{MediaType: title.Kind, TMDBID: title.TMDBID}]
+		if titleID, ok := byTMDB[TitleKey{MediaType: title.Kind, TMDBID: title.TMDBID}]; ok {
+			out[title] = held[titleID]
+		}
 	}
 	return out, nil
 }
 
-// WatchlistTitlePromoted checks the profile's library watchlist for the
-// library items carrying the title's IDs. The library having the title is not
-// enough: the profile may have removed the entry before promotion ran.
-func (t syncTitles) WatchlistTitlePromoted(ctx context.Context, userID int, profileID string, title watchsync.WatchlistTitle) (bool, error) {
+// PromotedWatchlistItems checks the profile's library watchlist for the
+// library items carrying the title's IDs or any of ids, the IDs sync kept
+// for it: once promotion has moved the entry, its title and their aliases
+// may be gone. The library having the title is not enough: the profile may
+// have removed the entry before promotion ran.
+func (t syncTitles) PromotedWatchlistItems(ctx context.Context, userID int, profileID string, title watchsync.WatchlistTitle, ids []string) ([]string, error) {
 	if t.titles.storeFor == nil {
-		return false, nil
+		return nil, nil
 	}
-	matches, err := t.titles.LibraryMatches(ctx, title.Kind, []int{title.TMDBID}, title.IMDbID, title.TVDBID)
+	matches, err := t.titles.libraryMatchesIDs(ctx, title.Kind, append(title.IDs(), ids...))
 	if err != nil || len(matches) == 0 {
-		return false, err
+		return nil, err
 	}
 	store, err := t.titles.storeFor(ctx, userID)
 	if err != nil {
-		return false, err
+		return nil, err
 	}
 	listed, err := store.ListWatchlistByMediaItems(ctx, profileID, matches)
 	if err != nil {
-		return false, err
+		return nil, err
 	}
+	var promoted []string
 	for _, id := range matches {
 		if listed[id] {
-			return true, nil
+			promoted = append(promoted, id)
 		}
 	}
-	return false, nil
+	return promoted, nil
 }

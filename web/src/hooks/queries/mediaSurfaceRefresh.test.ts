@@ -311,17 +311,32 @@ describe("invalidateMediaSurfaceQueries", () => {
     const queryClient = new QueryClient();
     const moviesLayoutKey = sectionKeys.libraryLayout(1);
     const moviesSectionKey = sectionKeys.libraryItems(1, "recently-added");
-    const internationalLayoutKey = sectionKeys.libraryLayout(3);
+    const internationalSectionKey = sectionKeys.libraryItems(3, "recently-added");
 
     queryClient.setQueryData(moviesLayoutKey, { sections: [] });
     queryClient.setQueryData(moviesSectionKey, { section: { id: "recently-added", items: [] } });
-    queryClient.setQueryData(internationalLayoutKey, { sections: [] });
+    queryClient.setQueryData(internationalSectionKey, {
+      section: { id: "recently-added", items: [] },
+    });
 
     await invalidateMediaSurfaceQueries(queryClient, { libraryId: 3 });
 
     expect(queryClient.getQueryState(moviesLayoutKey)?.isInvalidated).toBe(false);
     expect(queryClient.getQueryState(moviesSectionKey)?.isInvalidated).toBe(false);
-    expect(queryClient.getQueryState(internationalLayoutKey)?.isInvalidated).toBe(true);
+    expect(queryClient.getQueryState(internationalSectionKey)?.isInvalidated).toBe(true);
+  });
+
+  it("leaves library layouts alone, scoped or not", async () => {
+    // The sidebar observes every pinned library's layout on every page, so a
+    // media change that refetched layouts would read each one per event.
+    const queryClient = new QueryClient();
+    const layoutKey = sectionKeys.libraryLayout(3);
+    queryClient.setQueryData(layoutKey, { sections: [] });
+
+    await invalidateMediaSurfaceQueries(queryClient, { libraryId: 3 });
+    await invalidateMediaSurfaceQueries(queryClient);
+
+    expect(queryClient.getQueryState(layoutKey)?.isInvalidated).toBe(false);
   });
 
   it("leaves home section queries alone for a library-scoped change", async () => {
