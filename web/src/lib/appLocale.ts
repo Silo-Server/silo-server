@@ -232,6 +232,15 @@ export function appLanguage(): AppLanguage {
   return current.language;
 }
 
+/**
+ * A plain list of values in the interface language's separators ("A, B, C"; a
+ * Japanese or Arabic list uses its own). Use it instead of `join(", ")` for
+ * anything shown. Call it while rendering: it reads the current language.
+ */
+export function joinList(items: readonly string[]): string {
+  return new Intl.ListFormat(appLanguage(), { type: "unit", style: "short" }).format(items);
+}
+
 /** The locale for dates and numbers; pass it where `toLocale*String` took none. */
 export function formatLocale(): string | undefined {
   return current.formatLocale;

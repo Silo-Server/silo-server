@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { joinList } from "@/lib/appLocale";
 import { useLocation, useNavigate, useSearchParams } from "react-router";
 import type { ItemDetail, LeafItemUserData } from "@/api/types";
 import { Button } from "@/components/ui/button";
@@ -59,18 +60,18 @@ function leafUserData(userData: ItemDetail["user_data"]): LeafItemUserData | und
 }
 
 function namesFromPeople(people: Array<{ name?: string }> | undefined): string {
-  return (people ?? [])
-    .map((person) => person.name?.trim())
-    .filter(Boolean)
-    .join(", ");
+  return joinList(
+    (people ?? []).map((person) => person.name?.trim()).filter((name): name is string => !!name),
+  );
 }
 
 function namesFromCrew(item: ItemDetail, job: string): string {
-  return (item.crew ?? [])
-    .filter((credit) => credit.job.toLowerCase() === job)
-    .map((credit) => credit.name?.trim())
-    .filter(Boolean)
-    .join(", ");
+  return joinList(
+    (item.crew ?? [])
+      .filter((credit) => credit.job.toLowerCase() === job)
+      .map((credit) => credit.name?.trim())
+      .filter((name): name is string => !!name),
+  );
 }
 
 function genreHref(genre: string, libraryId?: number): string {

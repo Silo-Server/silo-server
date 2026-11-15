@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { joinList } from "@/lib/appLocale";
 import { Search } from "lucide-react";
 import { VisuallyHidden } from "radix-ui";
 import { useNavigate } from "react-router";
 
 import { useAppLanguage, useT } from "@/i18n";
+
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import {
   countSettingsSearchItems,
@@ -264,7 +266,7 @@ function AdminCommandResultRow({
         ) : null}
         {matchingSettings.length > 0 ? (
           <span className="text-muted-foreground mt-1 block text-xs">
-            {matchingSettings.map((setting) => setting.label).join(", ")}
+            {joinList(matchingSettings.map((setting) => setting.label))}
           </span>
         ) : null}
       </span>

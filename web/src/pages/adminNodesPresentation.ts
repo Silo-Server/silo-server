@@ -1176,7 +1176,10 @@ function describeProcessMemory(attribution: ResourceAttribution, heap: boolean):
   if (value == null) return mutedMetric(label, t("web.admin.nodes.process.unmeasured"));
   return {
     label,
-    value: formatFileSize(value, { iecUnits: true, fallback: "0 B" }),
+    value: formatFileSize(value, {
+      iecUnits: true,
+      fallback: t("web.common.format.size.bytes", { size: 0 }),
+    }),
     detail: heap
       ? t("web.admin.nodes.process.heapDetail")
       : t("web.admin.nodes.process.residentDetail"),
@@ -1632,7 +1635,10 @@ function formatUsedOfTotal(
   if (usedValue == null || totalValue == null || totalValue <= 0) {
     return null;
   }
-  const usedLabel = formatFileSize(toBytes(usedValue), { iecUnits: true, fallback: "0 B" });
+  const usedLabel = formatFileSize(toBytes(usedValue), {
+    iecUnits: true,
+    fallback: t("web.common.format.size.bytes", { size: 0 }),
+  });
   const totalLabel = formatFileSize(toBytes(totalValue), { iecUnits: true });
   return t("web.admin.nodes.resources.usedOfTotal", { used: usedLabel, total: totalLabel });
 }
@@ -1648,15 +1654,15 @@ export function formatBitsPerSecond(bps: number | null | undefined): string | nu
     return null;
   }
   if (value >= 1e9) {
-    return `${formatDecimal(value / 1e9, 1)} Gbps`;
+    return t("web.common.format.bitrate.gbps", { rate: formatDecimal(value / 1e9, 1) });
   }
   if (value >= 1e6) {
-    return `${formatDecimal(value / 1e6, 1)} Mbps`;
+    return t("web.common.format.bitrate.mbps", { rate: formatDecimal(value / 1e6, 1) });
   }
   if (value >= 1e3) {
-    return `${Math.round(value / 1e3)} kbps`;
+    return t("web.common.format.bitrate.kbps", { rate: String(Math.round(value / 1e3)) });
   }
-  return `${Math.round(value)} bps`;
+  return t("web.common.format.bitrate.bps", { rate: String(Math.round(value)) });
 }
 
 function mebibytesToBytes(value: number): number {

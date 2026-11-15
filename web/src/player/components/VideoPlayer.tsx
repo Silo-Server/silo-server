@@ -149,6 +149,7 @@ import {
 } from "@/lib/watchTogetherActions";
 import { toast } from "sonner";
 import { codeNumber, numberText, useT, type Translate } from "@/i18n";
+import { joinList } from "@/lib/appLocale";
 import { MediaDataMeter } from "../media-data-meter";
 import { mediaElementReleased, sourceLoadStarted } from "../bandwidth-probe";
 import { networkInformation, type NetworkInformationLike } from "../network-information";
@@ -3446,7 +3447,11 @@ export function VideoPlayer({
         if (video.error.code === MEDIA_ERR_NETWORK && reportConnectionLost()) return;
         const message = video.error.message || "Unknown media element error";
         if (!reportCurrentPlanFailure({ classification: "decoder_error", message })) {
-          setError(tRef.current("web.player.error.playbackError", { message }));
+          setError(
+            tRef.current("web.player.error.playbackError", {
+              message: video.error.message || tRef.current("web.player.error.unknownMediaError"),
+            }),
+          );
         }
       }
     };
@@ -5092,7 +5097,7 @@ export function VideoPlayer({
     const leftBehind = roomMembersLeftBehind(previous, watchTogether.room);
     if (leftBehind.length > 0) {
       showWatchTogetherNotice(
-        tRef.current("web.player.room.continuingWithout", { names: leftBehind.join(", ") }),
+        tRef.current("web.player.room.continuingWithout", { names: joinList(leftBehind) }),
         "info",
       );
     }
@@ -5528,12 +5533,13 @@ export function VideoPlayer({
             <div className="mt-1 text-xs text-[var(--hud-ash)]">
               {watchTogether.room?.members?.some((member) => member.is_syncing)
                 ? t("web.player.room.waitingFor", {
-                    names: watchTogether.room.members
-                      .filter((member) => member.is_syncing)
-                      .map((member) =>
-                        member.is_self ? t("web.player.room.waitingForYou") : member.display_name,
-                      )
-                      .join(", "),
+                    names: joinList(
+                      watchTogether.room.members
+                        .filter((member) => member.is_syncing)
+                        .map((member) =>
+                          member.is_self ? t("web.player.room.waitingForYou") : member.display_name,
+                        ),
+                    ),
                   })
                 : t("web.player.room.waitingForEveryone")}
             </div>
