@@ -118,6 +118,7 @@ describe("foliate view search", () => {
     addAnnotation: (annotation: { value: string }) => void;
     search: (opts: {
       query: string;
+      index?: number;
       limit?: number;
       signal?: AbortSignal;
     }) => AsyncGenerator<SearchResult>;
@@ -200,13 +201,15 @@ describe("foliate view search", () => {
   });
 
   it.each([
-    // [case, sections, text, clock ms per read, most sections opened]
-    ["a long section", 3, "lorem ipsum ".repeat(1_000), 30, 1],
+    // [case, sections, text, clock ms per read, section searched (whole book
+    // when undefined), most sections opened]
+    // A one-section search pauses only inside its scan.
+    ["a long section", 1, "lorem ipsum ".repeat(1_000), 30, 0, 1],
     // Each section finishes well inside the budget; the book does not.
-    ["many short sections", 200, "lorem ipsum ".repeat(20), 5, 10],
+    ["many short sections", 200, "lorem ipsum ".repeat(20), 5, undefined, 10],
   ])(
     "pauses %s without matches so an abort stops it there",
-    async (_, count, text, step, maxOpened) => {
+    async (_, count, text, step, index, maxOpened) => {
       // Every read of the clock moves it `step` ms, so the scan runs past the
       // search's time budget however fast the runner is.
       let now = 0;
@@ -228,7 +231,7 @@ describe("foliate view search", () => {
       setTimeout(() => controller.abort());
 
       const { subitems } = await collect(
-        view.search({ query: "quixotic", signal: controller.signal }),
+        view.search({ query: "quixotic", index, signal: controller.signal }),
       );
 
       expect(controller.signal.aborted).toBe(true);
