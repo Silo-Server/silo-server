@@ -544,3 +544,52 @@ func (p *keyedProvider) GetMetadata(_ context.Context, req metadata.MetadataRequ
 	}
 	return p.rec, nil
 }
+
+// failFirstFetch answers its first GetMetadata call with err.
+type failFirstFetch struct {
+	editionProvider
+	err     error
+	fetches int
+}
+
+func (p *failFirstFetch) GetMetadata(ctx context.Context, req metadata.MetadataRequest) (*metadata.MetadataResult, error) {
+	p.fetches++
+	if p.fetches == 1 {
+		return nil, p.err
+	}
+	return p.editionProvider.GetMetadata(ctx, req)
+}
+
+// A per-item answer such as NotFound moves on to the next candidate; a rate
+// limit stops the provider for this item, leaving the next call to the gate.
+func TestFindMatchCandidateFetchErrors(t *testing.T) {
+	gone, _ := edition("The Martian", "A0GONE0001", "Andy Weir", "R. C. Bray")
+	bray, brayRec := edition("The Martian", "Z0BRAY0001", "Andy Weir", "R. C. Bray")
+	tests := []struct {
+		name        string
+		err         error
+		wantMatch   bool
+		wantFetches int
+	}{
+		{"NotFound tries the next candidate", status.Error(codes.NotFound, "no such book"), true, 2},
+		{"a rate limit stops the provider", status.Error(codes.ResourceExhausted, "slow down"), false, 1},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			p := &failFirstFetch{err: tt.err, editionProvider: editionProvider{
+				results: []metadata.SearchResult{gone, bray},
+				records: map[string]*metadata.MetadataResult{"Z0BRAY0001": brayRec},
+			}}
+			e := &Enricher{}
+			m := e.findMatch(context.Background(), enrichmentItemRow{
+				ContentID: "item", Title: "The Martian", Author: "Andy Weir",
+			}, e.gate.wrap([]metadata.Provider{p}))
+			if m.metadata.HasMetadata != tt.wantMatch || p.fetches != tt.wantFetches {
+				t.Fatalf("matched %v after %d fetches, want %v after %d", m.metadata.HasMetadata, p.fetches, tt.wantMatch, tt.wantFetches)
+			}
+			if len(m.providerErrs) == 0 {
+				t.Fatal("the fetch error was not kept")
+			}
+		})
+	}
+}

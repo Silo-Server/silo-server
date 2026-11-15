@@ -153,23 +153,8 @@ func (w bookWant) evaluate(r SearchResult) (bookCandidate, bool) {
 		return bookCandidate{}, false
 	}
 
-	sameVolume := false
-	wv, titleVol := volumeAgainst(w.title, name)
-	cv, cok := volumeAgainst(name, w.title)
-	switch {
-	case cok && cv.first != cv.last && (!titleVol || cv != wv):
-		// A volume range ("Books 1-3") is a collection, not this book, unless
-		// the item's title names the same range.
-		return bookCandidate{}, false
-	case titleVol && cok && cv != wv:
-		return bookCandidate{}, false
-	case titleVol && cok:
-		sameVolume = true
-	case !titleVol && cok && w.seriesPosition > 0:
-		// A tagged series position may count in another series' numbering,
-		// so it only breaks ties.
-		sameVolume = cv == volumeIdentity{first: w.seriesPosition, last: w.seriesPosition}
-	case titleVol && !cok && coversAllButVolume(w.title, wv, name):
+	sameVolume, fits := w.volumeFits(r, name)
+	if !fits {
 		return bookCandidate{}, false
 	}
 
@@ -200,6 +185,54 @@ func (w bookWant) evaluate(r SearchResult) (bookCandidate, bool) {
 		yearGap:    yearGap,
 		key:        resultKey(r, name),
 	}, true
+}
+
+// volumeFits applies the volume rules to a result whose primary title is
+// name. fits is false when the result names another volume; sameVolume marks
+// one stating the item's volume, which wins ties.
+func (w bookWant) volumeFits(r SearchResult, name string) (sameVolume, fits bool) {
+	wv, titleVol := volumeAgainst(w.title, name)
+	cv, cok := volumeAgainst(name, w.title)
+	switch {
+	case cok && cv.first != cv.last && (!titleVol || cv != wv):
+		// A volume range ("Books 1-3") is a collection, not this book, unless
+		// the item's title names the same range.
+		return false, false
+	case titleVol && cok && cv != wv && !w.otherTitleAgrees(r):
+		return false, false
+	case titleVol && cok:
+		// Same volume, or another series' numbering in the primary title
+		// with the item's numbering on another of the record's titles.
+		sameVolume = true
+	case !titleVol && cok && w.seriesPosition > 0:
+		// A tagged series position may count in another series' numbering,
+		// so it only breaks ties.
+		sameVolume = cv == volumeIdentity{first: w.seriesPosition, last: w.seriesPosition}
+	case titleVol && !cok && coversAllButVolume(w.title, wv, name):
+		return false, false
+	}
+	return sameVolume, true
+}
+
+// otherTitleAgrees reports whether the result's original title or an alias
+// states the volume the item's title states. A book can sit in two numbered
+// series ("Guards! Guards!" is Discworld 8 and City Watch 1), so a primary
+// title in the other numbering does not rule it out.
+func (w bookWant) otherTitleAgrees(r SearchResult) bool {
+	titles := []string{r.OriginalTitle}
+	for _, alias := range r.TitleAliases {
+		titles = append(titles, alias.Title)
+	}
+	for _, t := range titles {
+		if strings.TrimSpace(t) == "" {
+			continue
+		}
+		wv, wok := volumeAgainst(w.title, t)
+		if tv, tok := volumeAgainst(t, w.title); wok && tok && tv == wv {
+			return true
+		}
+	}
+	return false
 }
 
 // aliasFits reports whether an alias title passes the volume rules a primary

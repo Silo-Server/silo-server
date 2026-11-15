@@ -146,6 +146,22 @@ var audiobookRuleCases = []struct {
 		wantID: "D2",
 	},
 	{
+		name: "a primary title in another series' numbering passes when an alias carries the item's",
+		want: "Guards! Guards!: Discworld, Book 8",
+		results: []SearchResult{{
+			Name: "Guards! Guards!: City Watch, Book 1", ProviderIDs: map[string]string{"asin": "GW"},
+			TitleAliases: []TitleAlias{{Title: "Guards! Guards!: Discworld, Book 8"}},
+		}},
+		wantID: "GW",
+	},
+	{
+		name: "a primary title in another numbering without an agreeing alias is rejected",
+		want: "Guards! Guards!: Discworld, Book 8",
+		results: []SearchResult{{
+			Name: "Guards! Guards!: City Watch, Book 1", ProviderIDs: map[string]string{"asin": "GW"},
+		}},
+	},
+	{
 		name:    "a volume range is a collection",
 		want:    "The Hunger Games",
 		results: []SearchResult{bookResult("The Hunger Games Trilogy: Books 1-3", "T1", 2010)},

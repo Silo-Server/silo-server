@@ -236,7 +236,13 @@ func (r *matchRun) searchProvider(ctx context.Context, i int) error {
 		result, err := mp.GetMetadata(ctx, r.metadataRequest(candidateIDs))
 		if err != nil {
 			r.logGetMetadataError(ctx, p, err)
-			break
+			if !perItemAnswer(err) {
+				// Paused, throttled or failing: the gate decides when this
+				// provider is called again, not the next candidate.
+				break
+			}
+			remaining = dropResult(remaining, admission.Selected)
+			continue
 		}
 		if result == nil || !result.HasMetadata {
 			// Nothing to check the candidate against: try the next one, and
@@ -369,6 +375,14 @@ func recordTitles(result *metadata.MetadataResult) []string {
 		titles = append(titles, alias.Title)
 	}
 	return titles
+}
+
+// perItemAnswer reports an error about the requested record only, such as
+// NotFound, after which the provider can still be asked for the next
+// candidate. A paused provider, a rate limit or a transient failure is not.
+func perItemAnswer(err error) bool {
+	var paused *providerPausedError
+	return !errors.As(err, &paused) && classifyProviderError(err) == EnrichmentErrorPermanent
 }
 
 // accept makes record, fetched with ids, provider i's match.
