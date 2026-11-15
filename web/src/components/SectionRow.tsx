@@ -43,10 +43,14 @@ interface SectionRowProps {
 function SectionPinButton({
   sectionId,
   label,
+  rowTitle,
   libraryId,
 }: {
   sectionId: string;
+  /** Stored with the pin. */
   label: string;
+  /** The row's shown (translated) heading, which describes the button. */
+  rowTitle: string;
   libraryId: number;
 }) {
   const t = useT();
@@ -59,7 +63,7 @@ function SectionPinButton({
   return (
     <>
       <span id={labelId} hidden>
-        {label}
+        {rowTitle}
       </span>
       <button
         onClick={() => togglePin(libraryId, { type: "section", id: sectionId, label })}
@@ -141,6 +145,7 @@ export default memo(function SectionRow({
     <SectionPinButton
       sectionId={section.id}
       label={shortcutLabel(pinLabel ?? section.title)}
+      rowTitle={shownTitle}
       libraryId={libraryId}
     />
   ) : undefined;
