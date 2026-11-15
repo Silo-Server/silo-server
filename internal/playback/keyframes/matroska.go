@@ -180,7 +180,7 @@ func readMatroska(r io.ReaderAt, size int64) (matroskaIndex, error) {
 	for at := segStart; at < segEnd; {
 		id, dataSize, headerLen, err := matroska.ReadElementHeader(r, at)
 		if err != nil {
-			if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
+			if isShortRead(err) {
 				break
 			}
 			return matroskaIndex{}, fmt.Errorf("keyframes: read element at %d: %w", at, err)

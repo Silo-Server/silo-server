@@ -1,6 +1,7 @@
 package keyframes
 
 import (
+	"bytes"
 	"errors"
 	"io"
 	"io/fs"
@@ -82,6 +83,18 @@ func TestACutReadIsNotAShortFile(t *testing.T) {
 	})
 	if _, err := readPlanIndex(partial, 1<<20); err == nil || !transient(err) {
 		t.Fatalf("partial read err = %v, want the read error", err)
+	}
+	// And for a read that fails inside the segment, after both headers.
+	ebml := el(idEBML)
+	data := append(ebml, el(idSegment, make([]byte, 64))...)
+	inSegment := readerAtFunc(func(p []byte, off int64) (int, error) {
+		if off > int64(len(ebml)) {
+			return 0, &fs.PathError{Op: "read", Path: "source", Err: io.EOF}
+		}
+		return bytes.NewReader(data).ReadAt(p, off)
+	})
+	if _, err := readPlanIndex(inSegment, int64(len(data))); err == nil || !transient(err) {
+		t.Fatalf("segment read err = %v, want the read error", err)
 	}
 }
 
