@@ -490,8 +490,10 @@ function MarkerProviderTile({
         </Button>
         {/* The test checks the provider account, which needs the plugin's
             key. Reading markers can work without one, so a keyless plugin
-            gets no test that would call a working provider broken. */}
-        {provider.is_submitter && credentialsReady !== false && (
+            gets no test that would call a working provider broken. Until the
+            plugin's config is known the button stays hidden; a plugin that
+            declares no config reads as ready and keeps it. */}
+        {provider.is_submitter && credentialsReady === true && (
           <Button
             type="button"
             size="sm"
