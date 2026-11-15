@@ -64,29 +64,7 @@ func TestABSPlaybackSessionKeepsItsFileDB(t *testing.T) {
 // total it began at, the account cap counts every open reported play, and a
 // report after the play closed starts a new play with its own id.
 func TestReportPlayKeepsOnePlayPerClientSessionDB(t *testing.T) {
-	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
-	if dsn == "" {
-		t.Skip("SILO_TEST_DATABASE_URL is not set")
-	}
-	ctx := t.Context()
-	pool, err := pgxpool.New(ctx, dsn)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(pool.Close)
-	unique := "abs-report-" + uuid.NewString()
-	var account int
-	if err := pool.QueryRow(ctx, `INSERT INTO users(username,role) VALUES($1,'user') RETURNING id`, unique).Scan(&account); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := pool.Exec(ctx, `INSERT INTO media_items(content_id,type,title) VALUES($1,'audiobook','Book')`, unique); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() {
-		_, _ = pool.Exec(context.Background(), `DELETE FROM abs_playback_sessions WHERE user_id=$1`, account)
-		_, _ = pool.Exec(context.Background(), `DELETE FROM media_items WHERE content_id=$1`, unique)
-		_, _ = pool.Exec(context.Background(), `DELETE FROM users WHERE id=$1`, account)
-	})
+	ctx, pool, account, unique := reportedPlayTestDB(t)
 	store := &ABSPlaybackSessionStore{Pool: pool}
 	report := func(clientSession string, position, listening float64) (string, bool) {
 		t.Helper()
@@ -104,27 +82,7 @@ func TestReportPlayKeepsOnePlayPerClientSessionDB(t *testing.T) {
 		return st.ID, st.Announced
 	}
 	// Concurrent first reports, as two API servers would take them.
-	ids := make(chan string, 4)
-	var wg sync.WaitGroup
-	for range 4 {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			id, _ := report("local-1", 100, 300)
-			ids <- id
-		}()
-	}
-	wg.Wait()
-	close(ids)
-	first := ""
-	for id := range ids {
-		if first == "" {
-			first = id
-		}
-		if id == "" || id != first {
-			t.Fatalf("concurrent first reports started more than one play (%q, %q)", first, id)
-		}
-	}
+	first := concurrentFirstReports(t, func() string { id, _ := report("local-1", 100, 300); return id })
 	// The row began at a client total of 300; 10 more seconds were heard.
 	// Its age caps the credit, so backdate it as if it began a minute ago.
 	if _, err := pool.Exec(ctx, `UPDATE abs_playback_sessions SET started_at = now() - interval '1 minute' WHERE id = $1`, first); err != nil {
@@ -177,4 +135,60 @@ func TestReportPlayKeepsOnePlayPerClientSessionDB(t *testing.T) {
 	if id, announced := report("local-1", 500, 900); id == "" || id == first || announced {
 		t.Fatalf("report after the end = (%q, %v), want a new play", id, announced)
 	}
+}
+
+// concurrentFirstReports runs four reports at once and returns the one play
+// they all landed on, failing when they started more than one.
+func concurrentFirstReports(t *testing.T, report func() string) string {
+	t.Helper()
+	ids := make(chan string, 4)
+	var wg sync.WaitGroup
+	for range 4 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			ids <- report()
+		}()
+	}
+	wg.Wait()
+	close(ids)
+	first := ""
+	for id := range ids {
+		if first == "" {
+			first = id
+		}
+		if id == "" || id != first {
+			t.Errorf("concurrent first reports started more than one play (%q, %q)", first, id)
+		}
+	}
+	return first
+}
+
+// reportedPlayTestDB is an account and an audiobook to report plays of.
+func reportedPlayTestDB(t *testing.T) (context.Context, *pgxpool.Pool, int, string) {
+	t.Helper()
+	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("SILO_TEST_DATABASE_URL is not set")
+	}
+	ctx := t.Context()
+	pool, err := pgxpool.New(ctx, dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(pool.Close)
+	unique := "abs-report-" + uuid.NewString()
+	var account int
+	if err := pool.QueryRow(ctx, `INSERT INTO users(username,role) VALUES($1,'user') RETURNING id`, unique).Scan(&account); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO media_items(content_id,type,title) VALUES($1,'audiobook','Book')`, unique); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM abs_playback_sessions WHERE user_id=$1`, account)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM media_items WHERE content_id=$1`, unique)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM users WHERE id=$1`, account)
+	})
+	return ctx, pool, account, unique
 }
