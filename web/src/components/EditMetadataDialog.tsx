@@ -74,10 +74,17 @@ interface EditMetadataDialogProps {
 
 // The item pages keep this dialog mounted while it is closed, and a page stays
 // mounted when a link opens another title of the same kind ("More Like
-// This"). Keying the form by the item makes another title start from its own
-// values instead of the first title's (#4212).
+// This"). The form is keyed by the item and by each opening, so every opening
+// starts from the item as it is now: another title's values (#4212), the
+// provider's after Reset to Provider, and none of the edits a closed dialog
+// left unsaved (#4235). Closing keeps the form, so the dialog closes on what
+// it showed, and an image applied while it is open updates it in place.
 export default function EditMetadataDialog(props: EditMetadataDialogProps) {
-  return <EditMetadataForm key={props.item.content_id} {...props} />;
+  const [opening, setOpening] = useState({ open: props.open, count: 0 });
+  if (props.open !== opening.open) {
+    setOpening({ open: props.open, count: props.open ? opening.count + 1 : opening.count });
+  }
+  return <EditMetadataForm key={`${props.item.content_id}:${opening.count}`} {...props} />;
 }
 
 function EditMetadataForm({ item, open, onOpenChange }: EditMetadataDialogProps) {

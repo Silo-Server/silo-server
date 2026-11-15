@@ -340,3 +340,63 @@ describe("EditMetadataDialog item change", () => {
     expect(screen.queryByDisplayValue("First Movie")).toBeNull();
   });
 });
+
+describe("EditMetadataDialog reopening", () => {
+  beforeEach(() => {
+    mocks.update.mockReset();
+    mocks.refresh.mockReset();
+  });
+
+  const movie = (title: string) =>
+    ({
+      content_id: "movie-test",
+      type: "movie",
+      title,
+      locked_fields: [],
+    }) as unknown as ItemDetail;
+
+  // The item page keeps the closed dialog mounted, so a reopening must start
+  // from the item as it is now (#4235).
+  it("drops edits that were closed without saving", () => {
+    const onOpenChange = vi.fn();
+    const { rerender } = render(
+      <EditMetadataDialog item={movie("Kept Title")} open onOpenChange={onOpenChange} />,
+    );
+    fireEvent.change(screen.getByDisplayValue("Kept Title"), {
+      target: { value: "Abandoned Title" },
+    });
+    rerender(
+      <EditMetadataDialog item={movie("Kept Title")} open={false} onOpenChange={onOpenChange} />,
+    );
+    rerender(<EditMetadataDialog item={movie("Kept Title")} open onOpenChange={onOpenChange} />);
+
+    expect(screen.getByDisplayValue("Kept Title")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Save Changes" }));
+    expect(mocks.update).not.toHaveBeenCalled();
+  });
+
+  it("shows the provider's values after Reset to Provider, and saving them sends nothing", () => {
+    const onOpenChange = vi.fn();
+    const { rerender } = render(
+      <EditMetadataDialog item={movie("Edited Title")} open onOpenChange={onOpenChange} />,
+    );
+    // Reset closes the dialog, and the item refetches with the provider's title.
+    rerender(
+      <EditMetadataDialog item={movie("Edited Title")} open={false} onOpenChange={onOpenChange} />,
+    );
+    rerender(
+      <EditMetadataDialog
+        item={movie("Provider Title")}
+        open={false}
+        onOpenChange={onOpenChange}
+      />,
+    );
+    rerender(
+      <EditMetadataDialog item={movie("Provider Title")} open onOpenChange={onOpenChange} />,
+    );
+
+    expect(screen.getByDisplayValue("Provider Title")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Save Changes" }));
+    expect(mocks.update).not.toHaveBeenCalled();
+  });
+});
