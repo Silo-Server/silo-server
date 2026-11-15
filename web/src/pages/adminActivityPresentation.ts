@@ -563,25 +563,6 @@ export function formatDeliveredContainerSummary(session: AdminSession): string {
     : unknown;
 }
 
-export function formatContainerDetail(session: AdminSession): string {
-  const source = formatSourceContainerSummary(session);
-  if (session.output_container && normalizeContainerDecision(session.play_method) !== "direct") {
-    return t("web.admin.activity.detail.conversion", {
-      source,
-      output: formatDeliveredContainerSummary(session),
-    });
-  }
-  switch (normalizeContainerDecision(session.play_method)) {
-    case "direct":
-      return t("web.admin.activity.detail.originalContainer");
-    case "remux":
-    case "hls":
-      return t("web.admin.activity.detail.repackaged");
-    default:
-      return "—";
-  }
-}
-
 export function formatVideoSummary(session: AdminSession): string {
   return (
     [formatCodec(session.source_video_codec), session.source_video_resolution?.trim()]
@@ -617,37 +598,6 @@ export function formatDeliveredVideoSummary(session: AdminSession): string {
       .filter(Boolean)
       .join(" · ") || t("web.admin.activity.detail.transcoding")
   );
-}
-
-export function formatVideoDetail(session: AdminSession): string {
-  const decision = normalizeStreamDecision(session.video_decision || session.play_method);
-  const requestedSource = formatRequestedVideoSource(session);
-  const target = [formatCodec(session.target_video_codec), deliveredResolutionLabel(session)]
-    .filter(Boolean)
-    .join(" · ");
-
-  if (hasRequestedSourceSwitch(session) && requestedSource) {
-    const parts = [t("web.admin.activity.detail.autoSwitched", { source: requestedSource })];
-    if (target) {
-      parts.push(t("web.admin.activity.detail.output", { output: target }));
-    } else if (decision === "transcode") {
-      parts.push(t("web.admin.activity.detail.transcoding"));
-    }
-    return parts.join(" · ");
-  }
-
-  if (decision === "transcode") {
-    return target
-      ? t("web.admin.activity.detail.output", { output: target })
-      : t("web.admin.activity.detail.transcoding");
-  }
-  if (decision === "copy") {
-    return t("web.admin.activity.detail.copied");
-  }
-  if (decision === "direct") {
-    return t("web.admin.activity.detail.noVideoConversion");
-  }
-  return "—";
 }
 
 export function formatAudioSummary(session: AdminSession): string {
@@ -687,25 +637,6 @@ export function formatDeliveredAudioSummary(session: AdminSession): string {
   }
 
   return formatTargetAudio(session) || t("web.admin.activity.transcodeMode.audioTranscode");
-}
-
-export function formatAudioDetail(session: AdminSession): string {
-  const decision = normalizeStreamDecision(
-    session.audio_decision || (session.transcode_audio ? "transcode" : session.play_method),
-  );
-  if (decision === "transcode") {
-    const target = formatTargetAudio(session);
-    return target
-      ? t("web.admin.activity.detail.audioOutput", { output: target })
-      : t("web.admin.activity.transcodeMode.audioTranscode");
-  }
-  if (decision === "copy") {
-    return t("web.admin.activity.detail.copied");
-  }
-  if (decision === "direct") {
-    return t("web.admin.activity.detail.noAudioConversion");
-  }
-  return "—";
 }
 
 /** One stream's source format and, when the server converts it, what it delivers. */
@@ -806,6 +737,17 @@ export function sessionRoutesVary(sessions: AdminSession[]): boolean {
     );
   }
   return routes.size > 1;
+}
+
+/**
+ * "Auto-switched from HEVC · 2160p" when the server plays another version of
+ * the title than the one the viewer picked; null otherwise.
+ */
+export function formatRequestedSourceSwitch(session: AdminSession): string | null {
+  const source = formatRequestedVideoSource(session);
+  return hasRequestedSourceSwitch(session) && source
+    ? t("web.admin.activity.detail.autoSwitched", { source })
+    : null;
 }
 
 function hasRequestedSourceSwitch(session: AdminSession): boolean {

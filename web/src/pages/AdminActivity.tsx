@@ -26,6 +26,7 @@ import {
   formatDeliveredContainerSummary,
   formatDeliveredVideoSummary,
   formatPlaybackPosition,
+  formatRequestedSourceSwitch,
   formatSessionBitrate,
   formatSourceContainerSummary,
   formatToneMapSummary,
@@ -71,7 +72,7 @@ import {
   X,
 } from "lucide-react";
 import { formatDateTime, formatTime } from "@/lib/datetime";
-import { formatLocale } from "@/lib/appLocale";
+import { formatLocale, joinList } from "@/lib/appLocale";
 import { codeNumber, englishText, numberText, type TextValues, type Translate, useT } from "@/i18n";
 import type { MessageKey } from "@/locales/keys";
 
@@ -226,6 +227,7 @@ export default function AdminActivity() {
       result = result.filter(
         (s) =>
           s.username?.toLowerCase().includes(q) ||
+          s.profile_name?.toLowerCase().includes(q) ||
           s.media_title?.toLowerCase().includes(q) ||
           s.series_name?.toLowerCase().includes(q) ||
           s.episode_name?.toLowerCase().includes(q) ||
@@ -367,6 +369,7 @@ export default function AdminActivity() {
           <Search className="text-muted-foreground pointer-events-none absolute start-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2" />
           <Input
             placeholder={t("web.admin.activity.filter.placeholder")}
+            aria-label={t("web.admin.activity.filter.placeholder")}
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             className="h-8 ps-9 text-[13px]"
@@ -683,7 +686,7 @@ function StreamRow({
       type="button"
       onClick={toggleDetails}
       aria-expanded={expandedOpen}
-      aria-controls={panelId}
+      aria-controls={expandedOpen ? panelId : undefined}
       aria-label={t("web.admin.activity.row.details")}
       title={t("web.admin.activity.row.details")}
       className="text-muted-foreground hover:text-foreground hover:bg-surface flex h-7 w-7 shrink-0 items-center justify-center rounded-md transition-colors"
@@ -727,7 +730,6 @@ function StreamRow({
             size="icon"
             className="h-7 w-7"
             onClick={toggleFFmpeg}
-            aria-pressed={ffmpegOpen}
             aria-label={
               ffmpegOpen
                 ? t("web.admin.activity.row.hideFfmpeg")
@@ -759,11 +761,15 @@ function StreamRow({
                 </div>
               ) : null}
               <div className="text-muted-foreground flex min-w-0 items-center gap-1.5 text-[12px]">
-                <span className="shrink-0">
+                <Link
+                  to={`/admin/users/${session.user_id}`}
+                  className="hover:text-primary shrink-0 transition-colors"
+                >
                   {session.username ||
                     t("web.admin.activity.userFallback", { id: session.user_id })}
-                </span>
+                </Link>
                 <ProfilePill session={session} />
+                <JellyfinSessionPill session={session} />
                 {getSessionClientLabel(session) ? (
                   <>
                     <span aria-hidden="true" className="shrink-0">
@@ -1007,12 +1013,12 @@ function MethodLine({
           type="button"
           onClick={onMore}
           aria-expanded={expanded}
-          aria-controls={panelId}
+          aria-controls={expanded ? panelId : undefined}
           aria-label={t("web.admin.activity.row.moreReasonsLabel", {
             count: rest.length,
             count_text: rest.length,
           })}
-          title={rest.map((reason) => reason.label).join(", ")}
+          title={joinList(rest.map((reason) => reason.label))}
           className="text-muted-foreground hover:text-foreground border-border shrink-0 rounded border px-1 text-[11px] leading-4 tabular-nums transition-colors"
         >
           {t("web.admin.activity.row.moreReasons", { count_text: rest.length })}
@@ -1178,7 +1184,10 @@ function PlaybackExpandedPanel({
             decision={videoDecision}
             source={formatVideoSummary(session)}
             delivered={formatDeliveredVideoSummary(session)}
-            tags={videoDecision === "transcode" ? [transcodeMode, toneMap?.badge] : []}
+            tags={[
+              ...(videoDecision === "transcode" ? [transcodeMode, toneMap?.badge] : []),
+              formatRequestedSourceSwitch(session),
+            ]}
           />
           <StreamDetailRow
             label={t("web.admin.activity.row.audio")}
@@ -1224,13 +1233,18 @@ function PlaybackExpandedPanel({
           ) : null}
         </dd>
         <dt className="text-muted-foreground">{t("web.admin.activity.panel.heading")}</dt>
-        <dd className="text-muted-foreground min-w-0 font-mono text-[11px] break-all">
-          {session.session_id}
+        <dd className="min-w-0">
+          <div>
+            {t("web.admin.activity.row.sessionActive", { elapsed: getElapsed(session.started_at) })}
+          </div>
+          <div className="text-muted-foreground font-mono text-[11px] break-all">
+            {session.session_id}
+          </div>
         </dd>
       </dl>
 
       <div className={`${stackedOnly} flex flex-wrap gap-2`}>
-        <Button variant="outline" size="sm" onClick={onToggleFFmpeg} aria-pressed={ffmpegOpen}>
+        <Button variant="outline" size="sm" onClick={onToggleFFmpeg}>
           <Terminal className="h-3.5 w-3.5" />
           {ffmpegOpen ? t("web.admin.activity.row.hideFfmpeg") : t("web.admin.activity.row.ffmpeg")}
         </Button>
@@ -1424,6 +1438,7 @@ function IPLookupDialog({
           <Input
             type="text"
             placeholder={t("web.admin.activity.ipLookup.placeholder")}
+            aria-label={t("web.admin.activity.ipLookup.placeholder")}
             value={ipSearch}
             onChange={(e) => setIPSearch(e.target.value)}
             className="max-w-xs font-mono text-sm"
