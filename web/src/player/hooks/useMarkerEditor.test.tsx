@@ -248,3 +248,39 @@ it("keeps a reopened panel's edits when an earlier save finishes late", async ()
     intro: { start_seconds: 10, end_seconds: 70 },
   });
 });
+
+// A save that fails after the panel was closed and reopened still says so on
+// the reopened panel, and leaves its draft alone.
+it("shows an earlier save's failure on a reopened panel", async () => {
+  let finishSave!: (response: Response) => void;
+  vi.stubGlobal(
+    "fetch",
+    vi.fn<typeof fetch>(() => new Promise<Response>((resolve) => (finishSave = resolve))),
+  );
+  const markers: MarkerDraft = { intro: null, recap: null, credits: null, preview: null };
+  const { result } = renderHook(
+    () => useMarkerEditor({ fileId: 142, duration: 1500, markers, onSaved: vi.fn() }),
+    { wrapper },
+  );
+  act(() => result.current.begin());
+  act(() => result.current.setEdge("recap", "start", 0));
+  let saving!: Promise<void>;
+  act(() => {
+    saving = result.current.save();
+  });
+
+  act(() => result.current.cancel());
+  act(() => result.current.begin());
+  act(() => result.current.setEdge("intro", "start", 10));
+  const newDraft = result.current.draft;
+
+  await act(async () => {
+    finishSave(
+      new Response(JSON.stringify({ detail: "Marker editing is disabled" }), { status: 403 }),
+    );
+    await saving;
+  });
+  expect(result.current.error).toBe("Marker editing is disabled");
+  expect(result.current.editing).toBe(true);
+  expect(result.current.draft).toEqual(newDraft);
+});

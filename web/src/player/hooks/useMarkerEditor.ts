@@ -219,10 +219,13 @@ export function useMarkerEditor({
         body: markerUpdateToV2(body),
       });
     } catch (e) {
-      if (stillThisDraft()) {
+      // Show the failure even on a panel reopened on this file since, so the
+      // user learns the earlier edits didn't save. After a version switch the
+      // error would land on another file's panel, so only log it.
+      if (currentFileIdRef.current === fileId) {
         setError(e instanceof Error ? e.message : t("web.markers.saveFailed"));
       } else {
-        console.error("Marker save failed after its draft was closed:", e);
+        console.error("Marker save failed after a version switch:", e);
       }
       return;
     } finally {
