@@ -577,7 +577,7 @@ func TestQueuedMovieOverrideRequiresItemToOwnGroup(t *testing.T) {
 				if f != file {
 					byGroup[f.ContentGroupKey] = append(byGroup[f.ContentGroupKey], f)
 				}
-				if err := h.fileRepo.UpdateContentID(t.Context(), f.ID, f.ContentID); err != nil {
+				if err := h.fileRepo.UpdateContentID(t.Context(), f.ID, f.FilePath, f.ContentID); err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -679,7 +679,7 @@ func TestQueuedMovieDeclinedOverrideStillRequiresRescan(t *testing.T) {
 				})
 			}
 			for _, f := range groupFiles {
-				if err := h.fileRepo.UpdateContentID(t.Context(), f.ID, f.ContentID); err != nil {
+				if err := h.fileRepo.UpdateContentID(t.Context(), f.ID, f.FilePath, f.ContentID); err != nil {
 					t.Fatal(err)
 				}
 			}

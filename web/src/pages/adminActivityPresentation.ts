@@ -1,8 +1,9 @@
 import type { AdminSession } from "@/api/types";
-import { t, type TextValues } from "@/i18n";
+import { codeNumber, t, type TextValues } from "@/i18n";
 import type { MessageKey } from "@/locales/keys";
 import { formatCodecLabel } from "@/lib/mediaFormat";
 import { formatDecimal } from "@/lib/numberFormat";
+import { formatClock } from "@/pages/adminDownloadPreparationPresentation";
 
 export function formatDecisionLabel(decision?: string): string {
   switch (decision) {
@@ -643,8 +644,14 @@ export function getPlaybackSessionTitle(session: AdminSession): string {
 
 export function getPlaybackSessionSubtitle(session: AdminSession): string | null {
   if (session.series_name && session.season_number != null && session.episode_number != null) {
-    const episode = `S${session.season_number}E${session.episode_number}`;
-    return session.series_name ? `${episode} · ${session.series_name}` : episode;
+    const code = t("web.detail.episodeCode", {
+      season: codeNumber(session.season_number),
+      episode: codeNumber(session.episode_number),
+    });
+    return t("web.common.activity.subtitle.episode", {
+      code,
+      series: session.series_name,
+    });
   }
   if (session.media_type === "movie") {
     return t("web.common.activity.subtitle.movie");
@@ -672,4 +679,13 @@ function formatChannelLayout(channels?: number | null): string | null {
     return "7.1";
   }
   return `${channels}ch`;
+}
+
+/** Playback position as "47:12 / 2:29:40", or the position alone when the duration is unknown. */
+export function formatPlaybackPosition(session: AdminSession): string {
+  const position = formatClock(session.position_seconds);
+  if (session.file_duration == null || session.file_duration <= 0) {
+    return position;
+  }
+  return `${position} / ${formatClock(session.file_duration)}`;
 }

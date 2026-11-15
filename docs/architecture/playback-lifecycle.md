@@ -14,7 +14,10 @@ It starts once and ends once; an id never starts again.
 
 - Native (v2 and the v1 bridge): starts when `startPlannedPlaybackV3` commits the
   transport; ends when its attempt row is stopped. A stopped attempt never
-  reconstructs, and reconstruction after a restart announces nothing.
+  reconstructs, and reconstruction after a restart announces nothing. A
+  reconstruction from a stream token, whose recipe card carries no client, takes
+  the client and device from the session's live row, or from its start row once
+  no live row is left.
 - Jellyfin: one upstream native session is one logical session, and the PlaySessionId
   is not exposed. It starts when a new upstream id wins the attach CAS in
   `ensureUpstreamPlayback`. It ends on a Stopped report or ActiveEncodings teardown,

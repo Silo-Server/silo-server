@@ -209,7 +209,8 @@ export function artworkSlotLabel(slot: ArtworkSlot): string {
  * What a slot will show after Save: a chosen image not saved yet, the saved
  * one, the collage the server made of the collection's titles, no collage yet
  * (none of its titles has a poster, or the collage is still being made), or
- * nothing at all (a backdrop, or a server Smart collection's poster).
+ * nothing at all (a backdrop, or a personal collection's poster on a server
+ * that makes no personal collages).
  */
 export type ArtworkState = "none" | "awaiting-collage" | "collage" | "new" | "saved";
 

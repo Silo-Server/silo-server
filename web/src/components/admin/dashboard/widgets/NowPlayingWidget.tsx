@@ -9,6 +9,8 @@ import { useMediaQuery } from "@/hooks/useMediaQuery";
 import {
   activityMethodMeta,
   classifyActivityMethod,
+  formatPlaybackPosition,
+  getPlaybackSessionSubtitle,
   getSessionClientLabel,
 } from "@/pages/adminActivityPresentation";
 import type { AdminSession } from "@/api/types";
@@ -87,10 +89,12 @@ export function NowPlayingWidget() {
         )}
       </div>
       {/* The widget shows as many whole cards as its height allows; the rest
-          are counted in the "+N more" link instead of half-drawn at the edge. */}
-      <div ref={setViewport} className="relative min-h-0 flex-1 overflow-hidden">
+          are counted in the "+N more" link instead of half-drawn at the edge.
+          Cards pair up only when the widget itself is wide enough for two, so a
+          half-width widget shows one full-width card per row. */}
+      <div ref={setViewport} className="@container relative min-h-0 flex-1 overflow-hidden">
         {sessionsQuery.isLoading ? (
-          <div className="grid grid-cols-1 gap-3.5 lg:grid-cols-2">
+          <div className="grid grid-cols-1 gap-3.5 @2xl:grid-cols-2">
             {Array.from({ length: 2 }).map((_, i) => (
               <Skeleton key={i} className="h-[120px] rounded-2xl" />
             ))}
@@ -105,7 +109,7 @@ export function NowPlayingWidget() {
                 height. Rows stay sized to their own cards: auto-rows-fr would
                 size every row to the tallest card, hidden ones included, and
                 one wrapped hidden card would push rows out of the fit. */}
-            <div ref={setGrid} className="grid grid-cols-1 gap-3.5 lg:grid-cols-2">
+            <div ref={setGrid} className="grid grid-cols-1 gap-3.5 @2xl:grid-cols-2">
               {rendered.map((session, index) => {
                 // Cards past the fit stay laid out, so a taller widget can
                 // measure them, but are hidden from sight, focus, and readers.
@@ -149,7 +153,7 @@ export function NowPlayingWidget() {
  * How many grid cards fit whole inside the viewport.
  *
  * Card height depends on how its tags wrap and the column count on the
- * breakpoint, so the fit is measured from the laid-out cards rather than
+ * widget's width, so the fit is measured from the laid-out cards rather than
  * derived. Every card stays laid out (hidden ones are only invisible), so the
  * count can grow again when the widget is resized taller.
  *
@@ -256,12 +260,13 @@ function StreamCard({ session, showPoster }: { session: AdminSession; showPoster
     rounding: "floor",
     justNowLabel: t("web.admin.dashboard.widgets.nowPlaying.justNow"),
   });
+  const position = formatPlaybackPosition(session);
   const clientLabel = getSessionClientLabel(session);
   const method = classifyActivityMethod(session);
   const methodMeta = activityMethodMeta(method);
 
   return (
-    <div className="surface-panel flex flex-1 gap-3.5 rounded-2xl border-0 p-3.5 transition-colors duration-150">
+    <div className="surface-panel flex min-w-0 flex-1 gap-3.5 rounded-2xl border-0 p-3.5 transition-colors duration-150">
       {/* Poster */}
       <div
         className="bg-surface border-border relative flex w-[60px] flex-shrink-0 items-center justify-center self-start overflow-hidden rounded-lg border"
@@ -300,17 +305,9 @@ function StreamCard({ session, showPoster }: { session: AdminSession; showPoster
             ) : (
               <div className="truncate text-sm font-bold">{title}</div>
             )}
+            {/* Same episode line as the Activity page's Stream column. */}
             <div className="text-muted-foreground mb-1.5 truncate text-xs">
-              {session.series_name
-                ? t("web.admin.dashboard.widgets.nowPlaying.episodeLineWithSeries", {
-                    season: String(session.season_number),
-                    episode: String(session.episode_number),
-                    series: session.series_name,
-                  })
-                : t("web.admin.dashboard.widgets.nowPlaying.episodeLine", {
-                    season: String(session.season_number),
-                    episode: String(session.episode_number),
-                  })}
+              {getPlaybackSessionSubtitle(session)}
             </div>
           </>
         ) : (
@@ -357,7 +354,8 @@ function StreamCard({ session, showPoster }: { session: AdminSession; showPoster
           )}
         </div>
 
-        {/* User */}
+        {/* User. One line at every width, so the card never grows taller:
+            the name truncates and the times keep their full width. */}
         <div className="mt-auto flex items-center gap-1.5">
           <div
             className="text-primary-foreground flex h-[22px] w-[22px] shrink-0 items-center justify-center rounded-full text-[9px] font-bold"
@@ -366,7 +364,11 @@ function StreamCard({ session, showPoster }: { session: AdminSession; showPoster
             {username.charAt(0).toUpperCase()}
           </div>
           <span className="min-w-0 truncate text-xs font-medium">{username}</span>
-          <span className="text-muted-foreground ms-auto shrink-0 text-[10px]">{elapsed}</span>
+          <span className="text-muted-foreground ms-auto shrink-0 text-[10px] whitespace-nowrap">
+            <span className="tabular-nums">{position}</span>
+            {/* eslint-disable-next-line formatjs/no-literal-string-in-jsx -- punctuation separating two already-formatted times */}
+            <span> · {elapsed}</span>
+          </span>
         </div>
       </div>
     </div>

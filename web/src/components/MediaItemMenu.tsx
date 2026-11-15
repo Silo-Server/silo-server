@@ -304,7 +304,7 @@ export function buildMediaItemMenuModel({
         label: t("web.item.menu.refreshMetadata"),
       });
 
-      if (mediaType === "movie" || mediaType === "series") {
+      if (mediaType === "movie" || mediaType === "series" || mediaType === "audiobook") {
         entries.push(
           {
             kind: "action",

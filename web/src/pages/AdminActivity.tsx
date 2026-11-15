@@ -27,10 +27,12 @@ import {
   formatDeliveredVideoSummary,
   formatAudioSummary,
   formatDecisionLabel,
+  formatPlaybackPosition,
   formatSessionBitrate,
   formatSourceContainerSummary,
   formatToneMapSummary,
   formatTranscodeModeSummary,
+  getPlaybackSessionSubtitle,
   getSessionClientLabel,
   getSessionClientLabelFull,
   getSessionRouteNodes,
@@ -669,7 +671,7 @@ function StreamRow({
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [ffmpegOpen, setFFmpegOpen] = useState(false);
   const title = getDisplayTitle(session, t);
-  const subtitle = getDisplaySubtitle(session, t);
+  const subtitle = getPlaybackSessionSubtitle(session);
   const username =
     session.username || t("web.admin.activity.userFallback", { id: session.user_id });
   const elapsed = getElapsed(session.started_at);
@@ -1494,16 +1496,6 @@ function getDisplayTitle(
   return session.media_title || t("web.common.activity.title.file", { id: session.media_file_id });
 }
 
-function getDisplaySubtitle(session: AdminSession, t: Translate): string | null {
-  if (session.series_name && session.season_number != null && session.episode_number != null) {
-    const ep = `S${session.season_number}E${session.episode_number}`;
-    return session.series_name ? `${ep} · ${session.series_name}` : ep;
-  }
-  if (session.media_type === "movie") return t("web.common.activity.subtitle.movie");
-  if (session.media_type === "series") return t("web.common.activity.subtitle.series");
-  return null;
-}
-
 function getElapsed(dateStr: string): string {
   const diff = Math.max(0, Date.now() - new Date(dateStr).getTime());
   const totalSec = Math.floor(diff / 1000);
@@ -1511,25 +1503,6 @@ function getElapsed(dateStr: string): string {
   const m = Math.floor((totalSec % 3600) / 60);
   const s = totalSec % 60;
   if (h > 0) return numberText(`${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`);
-  return numberText(`${m}:${String(s).padStart(2, "0")}`);
-}
-
-function formatPlaybackPosition(session: AdminSession): string {
-  const position = formatClockTime(session.position_seconds);
-  if (session.file_duration == null || session.file_duration <= 0) {
-    return position;
-  }
-  return `${position} / ${formatClockTime(session.file_duration)}`;
-}
-
-function formatClockTime(seconds: number): string {
-  const safeSeconds = Math.max(0, Math.floor(Number.isFinite(seconds) ? seconds : 0));
-  const h = Math.floor(safeSeconds / 3600);
-  const m = Math.floor((safeSeconds % 3600) / 60);
-  const s = safeSeconds % 60;
-  if (h > 0) {
-    return numberText(`${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`);
-  }
   return numberText(`${m}:${String(s).padStart(2, "0")}`);
 }
 

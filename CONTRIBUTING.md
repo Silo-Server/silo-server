@@ -6,8 +6,9 @@
 > [Discussions → Ideas](https://github.com/Silo-Server/silo-server/discussions/categories/ideas),
 > not issues. Pull requests are welcome from contributors who've had one merged
 > in a Silo repository, or when a maintainer asks for one; a feature pull request
-> also needs an issue a maintainer has labeled `accepted`. Other pull requests
-> are closed automatically without review.
+> also needs an issue a maintainer has labeled `accepted`. Every pull request
+> needs evidence. Other pull requests, drafts, and pull requests still without
+> evidence a day after they open are closed automatically without review.
 
 ## Why we're asking for issues
 
@@ -76,6 +77,16 @@ a new pull request, or ask a maintainer to reopen the closed one. If a
 maintainer asked you for a pull request and you haven't had one merged yet, the
 workflow still closes it when it opens; the maintainer reopens it, and the
 check leaves it alone from then on.
+
+Two more rules apply to pull requests from anyone without triage or write
+access, including invited ones:
+
+- Open the pull request ready for review. The workflow closes drafts, both when
+  they open and when they are converted to drafts.
+- Every pull request needs evidence, as [Show visible changes](#show-visible-changes)
+  describes. A pull request whose `Evidence` check still asks for evidence 24
+  hours after it opens, or after a maintainer reopens it, is closed without
+  review. Publish or attach evidence soon after you open it.
 
 ## Before you start
 
@@ -409,9 +420,8 @@ changes. Either way, the Problem section has to stand on its own. Keep the
 commit history intentional and the diff limited to the stated problem. Keep the
 description proportional to the change; omit session history, full logs, and
 private report links other than an `Evidence:` line. Follow the
-[public-content and media rules](AGENTS.md#pull-requests), and include evidence
-for every change users can see, as [Show visible changes](#show-visible-changes)
-describes.
+[public-content and media rules](AGENTS.md#pull-requests), and include
+evidence, as [Show visible changes](#show-visible-changes) describes.
 
 Until 1.0 ships, maintainers check each 1.0 feature by hand on the
 [Silo v1.0.0 board](https://github.com/orgs/Silo-Server/projects/5). A
@@ -423,6 +433,16 @@ change could reach, and list the affected tasks and cases on the
 Breaking a passed case unintentionally is a regression and blocks merge. A
 deliberate change to validated behavior must say why and still meet the
 published criterion; changing the criterion itself needs a maintainer decision.
+
+A change users can notice in the web app, or a server change that clients show,
+is not done until each client the pull request leaves out (Apple, Android, Roku,
+and Web) has been handled or ruled out. For each one that needs the same change,
+open an issue in its repository at minimum, linking your pull request; search
+first and add to an existing issue when there is one. Open a pull request there
+too if you can build and verify that client and its contribution rules let you.
+List the outcome on the `Other clients:` line, or write `Other clients: N/A (no
+client-visible change)`. [Cross-client parity](AGENTS.md#cross-client-parity)
+has the details.
 
 ### Write the description
 
@@ -449,10 +469,15 @@ change does; the rest should help them decide how closely to review.
 
 ### Show visible changes
 
+Every pull request shows evidence that the change works, so reviewers can see it
+without building the branch. A change users can see shows the change itself. A
+change users can't see shows how you checked it: the steps you ran, the build or
+commit, and trimmed test or API results.
+
 A pull request that changes what a user sees must show the change in its
-Evidence section, so reviewers can see it without building the branch. In this
-repository that means the web app and web admin, and every client that renders
-server data. A change is visible when it alters any of these:
+Evidence section. In this repository that means the web app and web admin, and
+every client that renders server data. A change is visible when it alters any of
+these:
 
 - layout, styling, copy, navigation, focus, empty and error states;
 - which items a screen shows, or in what order: search results, home sections,
@@ -476,6 +501,9 @@ Provide evidence that fits the change:
 - **Server changes no client shows yet:** before-and-after excerpts of the API
   response for the same request, trimmed to the fields that changed, such as the
   ordered list of result titles.
+- **Changes nothing shows**, such as internal refactors, CI, or performance
+  work: the steps you ran, the build or commit, and trimmed test, benchmark, or
+  API results that show the change does what the description says.
 - Name the surface and the build or commit each capture came from.
 
 Capture against a test library or public-domain media where you can, and keep
@@ -498,15 +526,17 @@ one of two places:
   the folder. Then write
   `Evidence: https://evidence.siloserver.org/r/silo-server/pr-<number>/` under
   the Evidence heading. Until a pull request of yours has merged here, a
-  maintainer approves you once before your first upload.
+  maintainer approves you once before your first upload. If that approval
+  hasn't come through, attach the evidence on GitHub instead.
 
-The pull request's `Evidence` check passes once evidence is published or
-attached. It asks for evidence when the change touches the web app, the native
-API, or jellycompat, or when a maintainer adds the `evidence-required` label; a
-maintainer adds `evidence-not-needed` when nothing visible changed. Changes
-users cannot see write `Evidence: none, no user-visible change`. If you could
-not capture evidence, say why; the reviewer decides whether the pull request
-can merge without it.
+The pull request's `Evidence` check asks for evidence on every pull request and
+passes once evidence is published or attached. A maintainer can waive it with
+the `evidence-not-needed` label, for example for an automated dependency
+update. A pull request from someone without triage or write access whose check
+still asks for evidence 24 hours after it opens is closed without review; a
+maintainer can reopen it once evidence is up. If you could not capture part of
+the evidence, say why; the reviewer decides whether the pull request can merge
+without it.
 
 ## Review expectations
 

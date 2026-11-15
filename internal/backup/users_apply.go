@@ -552,7 +552,7 @@ func (a *applier) createProfile(ctx context.Context, tx pgx.Tx, doc *UserDocumen
 	primary, err := pgstore.CreateRestoredProfileInTx(ctx, tx, plan.localID, pgstore.RestoredProfile{
 		ID: id, Name: e.Name, Avatar: avatar, IsPrimary: e.IsPrimary, PINHash: e.PINHash, IsChild: e.IsChild,
 		MaxContentRating: e.MaxContentRating, MaxAdvisoryAge: e.MaxAdvisoryAge, RequireAdvisoryAge: e.RequireAdvisoryAge,
-		LibraryRestrictionsEnabled: e.LibraryRestrictionsEnabled, AllowedLibraryIDs: pp.allowed, MaxPlaybackQuality: e.MaxPlaybackQuality,
+		RequestsBlocked: e.RequestsBlocked, LibraryRestrictionsEnabled: e.LibraryRestrictionsEnabled, AllowedLibraryIDs: pp.allowed, MaxPlaybackQuality: e.MaxPlaybackQuality,
 	})
 	if err != nil {
 		return false, err

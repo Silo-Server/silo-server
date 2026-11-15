@@ -9,6 +9,7 @@ import {
   ExternalLink,
   Info,
   RotateCw,
+  ShieldAlert,
   Trash2,
 } from "lucide-react";
 
@@ -525,6 +526,15 @@ function InstalledPluginPage({
               date: formatDateTime(installation.update_failure.failed_at),
             })}
           </p>
+        </Banner>
+      ) : null}
+
+      {installation.signature.state === "invalid" ? (
+        <Banner
+          tone="warning"
+          icon={<ShieldAlert aria-hidden="true" className="text-warning mt-0.5 size-4 shrink-0" />}
+        >
+          <p>{t("web.admin.plugins.signature.invalidBanner", { name, b: bold })}</p>
         </Banner>
       ) : null}
 

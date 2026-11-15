@@ -139,6 +139,9 @@ type PluginInstallationView struct {
 	// UpdateFailure is the last refused automatic update, exposed by v2 as
 	// `update_failure`. The frozen v1 bridge does not carry it.
 	UpdateFailure *plugins.UpdateFailure `json:"-"`
+	// Signature is the release signature check recorded at install, exposed
+	// by v2 as `signature`. The frozen v1 bridge does not carry it.
+	Signature plugins.Signature `json:"-"`
 }
 
 // PluginRuntimeView is one installation's process state. Resident marks a
@@ -905,6 +908,7 @@ func (h *PluginHandler) buildInstallationResponseWithBindings(
 		UpdatedAt:          installation.UpdatedAt,
 		Runtime:            runtime,
 		UpdateFailure:      installation.UpdateFailure,
+		Signature:          installation.Signature,
 	}, nil
 }
 

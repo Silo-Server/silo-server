@@ -4,9 +4,9 @@ import (
 	"context"
 
 	"github.com/Silo-Server/silo-server/internal/api/middleware"
+	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/jellycompat"
-	"github.com/Silo-Server/silo-server/internal/models"
 )
 
 // compatConnectInfoKeys are the only settings this endpoint consults. They are
@@ -28,32 +28,40 @@ var compatConnectInfoKeys = []string{
 type CompatConnectInfoHandler struct {
 	Config       *config.Config
 	SettingsRepo ServerSettingsStore
-	Users        CompatConnectUsers
+	SignIn       CompatPasswordSignIn
 }
 
-// CompatConnectUsers looks up the requesting account and reads the server-wide
-// local password switch; *auth.UserRepository serves both.
-type CompatConnectUsers interface {
-	GetByID(ctx context.Context, id int) (*models.User, error)
-	LocalPasswordLoginAllowed(ctx context.Context) (bool, error)
+// CompatPasswordSignIn answers how the requesting account's password
+// sign-in goes; *auth.Service serves it with the decision the
+// compatibility sign-ins make.
+type CompatPasswordSignIn interface {
+	PasswordSignInFor(ctx context.Context, userID int) (auth.PasswordSignIn, error)
 }
 
 func NewCompatConnectInfoHandler(
 	cfg *config.Config,
 	settings ServerSettingsStore,
-	users CompatConnectUsers,
+	signIn CompatPasswordSignIn,
 ) *CompatConnectInfoHandler {
-	return &CompatConnectInfoHandler{Config: cfg, SettingsRepo: settings, Users: users}
+	return &CompatConnectInfoHandler{Config: cfg, SettingsRepo: settings, SignIn: signIn}
 }
 
 type CompatConnectAccountInfo struct {
-	// PasswordLoginAvailable reports whether this account can authenticate
-	// with its local password at all: it has a password, its own password
-	// sign-in is on, and the server's switch is on or the account is
-	// break-glass. Compat login is
-	// hardwired to the local provider, so SSO/plugin-provisioned accounts
-	// cannot sign in to a Jellyfin client no matter what they type.
+	// PasswordLoginAvailable reports whether this account's own Silo
+	// password signs in: it has one, its own password sign-in is on, the
+	// server's switch is on or the account is break-glass, and no network
+	// provider refuses the person. Neither flag is set while the account
+	// must change a temporary password.
 	PasswordLoginAvailable bool `json:"password_login_available"`
+	// DirectoryLoginAvailable reports whether, the account's own password
+	// not signing in, a password sign-in that names no provider, as a
+	// Jellyfin client's does, goes to the server's directory (LDAP) under
+	// the username of the identity this account has linked there: the
+	// directory username and password sign in.
+	DirectoryLoginAvailable bool `json:"directory_login_available"`
+	// DirectoryUsername is the username of that identity, set when
+	// DirectoryLoginAvailable is.
+	DirectoryUsername string `json:"directory_username,omitempty"`
 }
 
 type CompatConnectInfoResponse struct {
@@ -65,9 +73,7 @@ type CompatConnectInfoResponse struct {
 func (h *CompatConnectInfoHandler) GetConnectInfo(ctx context.Context) CompatConnectInfoResponse {
 	return CompatConnectInfoResponse{
 		Jellyfin: jellycompat.ConnectInfoForConfig(h.Config, h.compatSettings(ctx)),
-		Account: CompatConnectAccountInfo{
-			PasswordLoginAvailable: h.passwordLoginAvailable(ctx),
-		},
+		Account:  h.accountInfo(ctx),
 	}
 }
 
@@ -90,31 +96,27 @@ func (h *CompatConnectInfoHandler) compatSettings(ctx context.Context) map[strin
 	return settings
 }
 
-// passwordLoginAvailable reports whether the requesting account's local
-// password passes the account and server-wide switches LocalProvider.Authenticate
-// checks (a network provider's refusal is not consulted). It defaults
-// to true when the user or the server switch cannot be read: the page then
-// shows its normal instructions rather than telling someone their working
-// login is unsupported because of a lookup blip.
-func (h *CompatConnectInfoHandler) passwordLoginAvailable(ctx context.Context) bool {
-	if h.Users == nil {
-		return true
+// accountInfo reports how the requesting account signs in with a password.
+// It shows the password instructions when the account or its sign-in
+// cannot be read: the page then shows its normal instructions rather than
+// telling someone their working login is unsupported because of a lookup
+// blip.
+func (h *CompatConnectInfoHandler) accountInfo(ctx context.Context) CompatConnectAccountInfo {
+	fallback := CompatConnectAccountInfo{PasswordLoginAvailable: true}
+	if h.SignIn == nil {
+		return fallback
 	}
 	userID := middleware.GetUserID(ctx)
 	if userID == 0 {
-		return true
+		return fallback
 	}
-	user, err := h.Users.GetByID(ctx, userID)
-	if err != nil || user == nil {
-		return true
+	signIn, err := h.SignIn.PasswordSignInFor(ctx, userID)
+	if err != nil {
+		return fallback
 	}
-	if !user.LocalPasswordLoginEnabled || user.PasswordHash == "" {
-		return false
+	return CompatConnectAccountInfo{
+		PasswordLoginAvailable:  signIn.Local,
+		DirectoryLoginAvailable: signIn.Directory,
+		DirectoryUsername:       signIn.DirectoryUsername,
 	}
-	// Break-glass admins keep their password while the server switch is off.
-	if user.BreakGlass {
-		return true
-	}
-	allowed, err := h.Users.LocalPasswordLoginAllowed(ctx)
-	return err != nil || allowed
 }

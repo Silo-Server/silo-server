@@ -207,6 +207,21 @@ track it asked for, so another viewer's current subtitle never changes. The
 event is also sent when deduplication returned an existing row. API servers
 that predate the event ignore it on the cluster bus.
 
+No event announces a deleted subtitle, and deleting one moves every later
+stored subtitle down an ordinal, so `track.combined_index` can name a
+different track in the player's plan. A player folds `track` in only when its
+ordinal is the next free one in the plan's inventory or holds the same
+`stored_subtitle_id`; otherwise it refetches the plan with a `track_change`
+replan that carries its current selection over. The server keeps that
+selection on the same stored subtitle at its new ordinal, or turns subtitles
+off when that stored subtitle was deleted and reports it with the
+`subtitle_track_unavailable` degradation warning. The server reads a replan
+whose subtitle ordinal equals the playing plan's as carrying that selection
+over, so a player picks an announced track only once its plan lists it at
+that ordinal. A pick queued behind a replan in flight names an ordinal in the
+older inventory; the player moves it to the ordinal its stored subtitle holds
+in the newer plan before sending it.
+
 This operation does not change Jellyfin subtitle delivery. Multipart uploads
 and AI job creation and cancellation have their own v2 operations, described
 below.
@@ -260,6 +275,9 @@ the same byte limits. It returns `language` and `source` (`filename`, `metadata`
 `content`, or `manual`) and never stores the file. It requires account/profile
 authority but works without subtitle storage. This read-only POST is naturally
 idempotent. Detection uses the supplied language only as fallback, not override.
+Each server runs at most four detections at once, and an account at most two of
+them. A request beyond either limit gets `429 rate_limited` with `Retry-After`
+before its body is read, so a client can send it again.
 
 Web detail and player callers use these forms with captured authority and suppress
 stale completions. Jellyfin subtitle delivery is unchanged.

@@ -166,6 +166,37 @@ func TestResolveSourceClassifiesPQByRange(t *testing.T) {
 	}
 }
 
+// TestResolveSourceTakesPQRangeFromTheDecodedFrame classifies a stored track
+// by the range its first decoded frame reported, which is the range a
+// tone-map graph sees, rather than a container tag that contradicts it.
+func TestResolveSourceTakesPQRangeFromTheDecodedFrame(t *testing.T) {
+	tests := []struct {
+		name          string
+		streamRange   string
+		frameRange    string
+		want          SourceKind
+		wantPreflight bool
+	}{
+		{name: "full-range frames tagged limited", streamRange: "tv", frameRange: "pc", want: SourcePQFullRange, wantPreflight: true},
+		{name: "limited frames tagged full", streamRange: "pc", frameRange: "tv", want: SourcePQ},
+		{name: "frame without a range keeps the tag", streamRange: "pc", frameRange: "unknown", want: SourcePQFullRange, wantPreflight: true},
+		{name: "frame not read keeps the tag", streamRange: "tv", want: SourcePQ},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			file := &models.MediaFile{HDR: true, VideoTracks: []models.VideoTrack{{
+				Codec: "hevc", VideoRange: "HDR", VideoRangeType: "HDR10",
+				ColorRange: tt.streamRange, FrameColorRange: tt.frameRange,
+				ColorPrimaries: "bt2020", ColorTransfer: ColorTransferPQ, ColorSpace: "bt2020nc",
+			}}}
+			got := ResolveSource(MetadataForFile(file))
+			if got.Kind != tt.want || got.PreflightRequired != tt.wantPreflight {
+				t.Fatalf("ResolveSource() = %#v, want kind %q preflight %t", got, tt.want, tt.wantPreflight)
+			}
+		})
+	}
+}
+
 // TestSoftwareToneMapReadsFullRangePQAtItsOwnLevels encodes one PQ BT.2020
 // picture at limited and at full range, classifies each from its stream tag,
 // and requires both software graphs to convert them to the same SDR picture.
@@ -369,8 +400,9 @@ func TestSoftwareAndIntelToneMapsPinTheSourcePeak(t *testing.T) {
 }
 
 // TestDolbyVisionGraphsApplyTheRPU pins RPU application to the Dolby Vision
-// kind: standard bases keep their validated graphs, and only filters that can
-// apply an RPU may carry the kind.
+// kind: a standard base converts as declared on every executor, so the GPU
+// filters that would otherwise reshape it turn the RPU off, and only filters
+// that can apply an RPU may carry the kind.
 func TestDolbyVisionGraphsApplyTheRPU(t *testing.T) {
 	for name, filter := range map[string]string{
 		"software": SoftwareFilter(SourceDolbyVision, SoftwareFilterBT2390),
@@ -381,16 +413,16 @@ func TestDolbyVisionGraphsApplyTheRPU(t *testing.T) {
 			t.Errorf("%s Dolby Vision filter %q does not apply the RPU", name, filter)
 		}
 	}
-	for name, filter := range map[string]string{
-		"software": SoftwareFilter(SourcePQ, SoftwareFilterBT2390),
-		"qsv":      IntelFilter(SourcePQ, 0),
-	} {
-		if strings.Contains(filter, "apply_dovi") {
-			t.Errorf("%s PQ filter %q changed its Dolby Vision handling", name, filter)
-		}
+	if got := SoftwareFilter(SourcePQ, SoftwareFilterBT2390); strings.Contains(got, "apply_dovi") {
+		t.Errorf("software PQ filter %q changed its Dolby Vision handling", got)
 	}
-	if got := CUDAFilter(SourcePQ); !strings.Contains(got, "apply_dovi=0") {
-		t.Errorf("CUDA PQ filter %q must keep Dolby Vision processing off", got)
+	for name, filter := range map[string]string{
+		"intel": IntelFilter(SourcePQ, 0),
+		"cuda":  CUDAFilter(SourcePQ),
+	} {
+		if !strings.Contains(filter, "apply_dovi=0") {
+			t.Errorf("%s PQ filter %q must keep Dolby Vision processing off", name, filter)
+		}
 	}
 	for _, filter := range []string{SoftwareFilterBT2390, HardwareFilterOpenCL, HardwareFilterCUDA} {
 		if !FilterAppliesDolbyVision(filter) {

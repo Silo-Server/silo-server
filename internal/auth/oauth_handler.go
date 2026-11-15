@@ -34,9 +34,13 @@ type OAuthClient interface {
 // answers the identity it came through, without opening a session;
 // OpenOAuthSession opens the session when the completion code is redeemed;
 // LinkOAuthIdentity links the identity to the signed-in account a linking
-// flow started from, without opening a session. Defined as an interface so
-// tests can avoid spinning up the full auth.Service.
+// flow started from, without opening a session. ProviderAnswerFence is taken
+// before ExchangeCode and passed back in OAuthLoginInput.AnswerFence, so a
+// sign-in whose answer a provider re-check has since superseded is refused.
+// Defined as an interface so tests can avoid spinning up the full
+// auth.Service.
 type OAuthLoginCompleter interface {
+	ProviderAnswerFence(ctx context.Context) (int64, error)
 	ResolveOAuthLogin(ctx context.Context, in OAuthLoginInput) (*models.User, int64, error)
 	OpenOAuthSession(ctx context.Context, db OAuthSessionDB, c OAuthCompletion) (*TokenPair, error)
 	LinkOAuthIdentity(ctx context.Context, in OAuthLoginInput) (*models.User, error)
@@ -52,6 +56,9 @@ type OAuthLoginInput struct {
 	LinkingUserID  int // 0 = not linking
 	DeviceName     string
 	IP             string
+	// AnswerFence is ProviderAnswerFence's value from before ExchangeCode; 0
+	// for a linking flow.
+	AnswerFence int64
 }
 
 // OAuthUserReader loads the account a link ticket is issued to.
@@ -822,6 +829,13 @@ func (h *OAuthHandler) Callback(ctx context.Context, in OAuthCallbackInput) stri
 	_ = json.Unmarshal(sess.ProviderState, &ps)
 	psStruct, _ := structpb.NewStruct(ps)
 
+	var answerFence int64
+	if sess.LinkingUserID == "" {
+		if answerFence, err = h.deps.LoginCompleter.ProviderAnswerFence(ctx); err != nil {
+			slog.WarnContext(ctx, "oauth answer fence unavailable", "component", "auth", "installation_id", installID, "error", err)
+			return fail(OAuthReasonProviderUnavailable)
+		}
+	}
 	resp, err := client.ExchangeCode(ctx, &pluginv1.ExchangeCodeRequest{
 		Code:          in.Code,
 		State:         state,
@@ -842,6 +856,7 @@ func (h *OAuthHandler) Callback(ctx context.Context, in OAuthCallbackInput) stri
 		Response:       resp,
 		DeviceName:     in.UserAgent,
 		IP:             in.IP,
+		AnswerFence:    answerFence,
 	}
 	if sess.LinkingUserID != "" {
 		uid, err := strconv.Atoi(sess.LinkingUserID)

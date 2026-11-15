@@ -13,10 +13,11 @@ import (
 
 // pluginReleaseColumns are what the launcher reads of an installation
 // besides its id, plugin, and switch: which release it runs and where. The
-// refused-update record goes with them, since it names an update from the
-// release the row runs.
+// refused-update record and the release signature check go with them, since
+// both describe the release the row runs.
 var pluginReleaseColumns = []string{"repository_id", "version", "install_path", "update_policy", "available_version", "kind", "runtime_generation",
-	"update_failed_version", "update_failure_reason", "update_failed_at"}
+	"update_failed_version", "update_failure_reason", "update_failed_at",
+	"signature_state", "signature_source_repo", "signature_verified_at"}
 
 // CarryPluginReleases gives each plugin installation of the restored
 // database (dbURL) that the live server (liveURL) has, by id and plugin,

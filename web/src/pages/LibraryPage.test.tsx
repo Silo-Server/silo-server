@@ -11,6 +11,8 @@ const mocks = vi.hoisted(() => ({
   saveLibrarySearch: vi.fn<(libraryId: number, search: string) => Promise<void>>(),
   renderOnlyActiveTab: false,
   recommendedMounts: 0,
+  librariesLoading: false,
+  useLibraryLayout: vi.fn((_id: number, _options?: { enabled?: boolean }) => ({})),
 }));
 
 vi.mock("@/hooks/queries/shuffles", () => ({
@@ -18,8 +20,10 @@ vi.mock("@/hooks/queries/shuffles", () => ({
 }));
 vi.mock("@/hooks/queries/libraries", () => ({
   useUserLibraries: () => ({
-    data: [{ id: 7, name: "Movies", type: "movie", sort_order: 0 }],
-    isLoading: false,
+    data: mocks.librariesLoading
+      ? undefined
+      : [{ id: 7, name: "Movies", type: "movie", sort_order: 0 }],
+    isLoading: mocks.librariesLoading,
   }),
 }));
 
@@ -35,6 +39,11 @@ vi.mock("@/hooks/queries/libraryPageState", async (importOriginal) => ({
     rememberEnabled: mocks.rememberEnabled,
     saveLibrarySearch: mocks.saveLibrarySearch,
   }),
+}));
+
+// The page starts the Recommended tab's layout read; the tab itself is a stand-in here.
+vi.mock("@/hooks/queries/sections", () => ({
+  useLibraryLayout: mocks.useLibraryLayout,
 }));
 
 vi.mock("@/hooks/useDocumentTitle", () => ({
@@ -111,6 +120,19 @@ function page(initialEntry = "/libraries/7?tab=library&sort=year&order=desc") {
 function renderPage(initialEntry?: string) {
   return render(page(initialEntry));
 }
+
+// The layout read must not queue behind a slow library list, or a stalled
+// server fails the tab two deadlines after the click instead of one.
+it("starts the Recommended layout read while the library list loads", () => {
+  mocks.librariesLoading = true;
+  mocks.useLibraryLayout.mockClear();
+  try {
+    renderPage("/libraries/7");
+    expect(mocks.useLibraryLayout).toHaveBeenCalledWith(7, { enabled: true });
+  } finally {
+    mocks.librariesLoading = false;
+  }
+});
 
 describe("LibraryPage saved state", () => {
   beforeEach(() => {

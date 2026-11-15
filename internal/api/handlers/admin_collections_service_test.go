@@ -5,7 +5,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
+	"time"
+
+	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/models"
@@ -24,6 +28,35 @@ func TestAdminCollectionServiceRejectsArtworkInDefinition(t *testing.T) {
 		if e, ok := errors.AsType[*APIError](err); !ok || e.Status != 400 {
 			t.Fatalf("invalid artwork: %v", err)
 		}
+	}
+}
+
+func TestAdminCollectionServiceRejectsUnknownCollectionType(t *testing.T) {
+	h := &LibraryCollectionHandler{}
+	// Trakt collections were retired, so trakt is an unknown type too.
+	for _, v := range []string{"bogus", "trakt"} {
+		_, err := h.CreateAdminCollection(t.Context(), AdminCollectionCreate{LibraryID: 1, Title: "repro", CollectionType: v})
+		if e, ok := errors.AsType[*APIError](err); !ok || e.Status != 400 || e.Field != "collection_type" {
+			t.Fatalf("create %q: expected collection_type field error, got %v", v, err)
+		}
+	}
+	var err error
+	for _, v := range []string{"bogus", "trakt", ""} {
+		_, err = h.UpdateAdminCollection(t.Context(), "collection", AdminCollectionUpdate{CollectionType: new(v)})
+		if e, ok := errors.AsType[*APIError](err); !ok || e.Status != 400 || e.Field != "collection_type" {
+			t.Fatalf("update %q: expected collection_type field error, got %v", v, err)
+		}
+	}
+	for _, v := range []string{"manual", "smart", "mdblist", "tmdb"} {
+		if err := validateCollectionType(v); err != nil {
+			t.Fatalf("%q rejected: %v", v, err)
+		}
+	}
+	// An omitted type defaults to manual on create, so it must get past the
+	// type check; the missing title is what stops this request.
+	_, err = h.CreateAdminCollection(t.Context(), AdminCollectionCreate{LibraryID: 1})
+	if e, ok := errors.AsType[*APIError](err); !ok || e.Field == "collection_type" || e.Code != "bad_request" {
+		t.Fatalf("create without a type: expected the title error, got %v", err)
 	}
 }
 
@@ -49,6 +82,34 @@ func TestAdminCollectionServiceRejectsUnknownVisibility(t *testing.T) {
 		got, err := normalizeCollectionVisibilityUpdate(new(in))
 		if err != nil || got == nil || *got != want {
 			t.Fatalf("%q: got %v, %v, want %q", in, got, err, want)
+		}
+	}
+}
+
+// TestCollectionNameErrorNamesTheField: a taken name or slug is a field
+// error, which v2 answers as 422 validation_failed at body.title or
+// body.slug, never a 500.
+func TestCollectionNameErrorNamesTheField(t *testing.T) {
+	slugConflict := &pgconn.PgError{Code: "23505", ConstraintName: "library_collections_library_slug_unique"}
+	for _, tc := range []struct {
+		err       error
+		wantField string
+		wantMsg   string
+	}{
+		{err: fmt.Errorf("updating: %w", &catalog.LibraryCollectionTitleTakenError{LibraryName: "Movies"}), wantField: "title", wantMsg: "Another collection in Movies already has this name"},
+		{err: fmt.Errorf("updating library collection: %w", slugConflict), wantField: "slug"},
+		{err: &pgconn.PgError{Code: "23505", ConstraintName: "some_other_unique"}},
+		{err: errors.New("connection reset")},
+	} {
+		got := collectionNameError(tc.err)
+		if tc.wantField == "" {
+			if got != nil {
+				t.Fatalf("%v: got %v, want no field error", tc.err, got)
+			}
+			continue
+		}
+		if got == nil || got.Status != 400 || got.Field != tc.wantField || (tc.wantMsg != "" && got.Message != tc.wantMsg) {
+			t.Fatalf("%v: got %+v, want a 400 at %s", tc.err, got, tc.wantField)
 		}
 	}
 }
@@ -87,6 +148,134 @@ func TestAdminCollectionSourceUpdateAcceptsFranchiseID(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatalf("validateAdminCollectionSourceUpdate: %v", err)
+	}
+}
+
+// TestAdminCollectionUpdateNameRuleDB: the editor sends its whole draft on
+// Save, so an update checks the title only when it changes it or adds a
+// library. A collection that already shares its title (made by an import)
+// still saves its other fields; a rename into a taken name, or adding a
+// library that has the name, is refused at title.
+func TestAdminCollectionUpdateNameRuleDB(t *testing.T) {
+	f := newPagingIntegrationFixture(t)
+	repo := catalog.NewLibraryCollectionRepository(f.pool)
+	h := NewLibraryCollectionHandler(repo, nil, catalog.NewItemRepository(f.pool), nil)
+	title := fmt.Sprintf("Staff Picks %d", f.account)
+	create := func(name string, library int, unique bool) string {
+		t.Helper()
+		var id string
+		if unique {
+			created, err := h.CreateAdminCollection(t.Context(), AdminCollectionCreate{LibraryIDs: []int{library}, Title: name, CollectionType: "manual"})
+			if err != nil {
+				t.Fatalf("create %q: %v", name, err)
+			}
+			id = created.ID
+		} else {
+			created, err := repo.Create(t.Context(), catalog.CreateLibraryCollectionInput{LibraryIDs: []int{library}, Slug: "staff-picks", Title: name})
+			if err != nil {
+				t.Fatalf("import %q: %v", name, err)
+			}
+			id = created.ID
+		}
+		t.Cleanup(func() { _, _ = f.pool.Exec(context.Background(), `DELETE FROM library_collections WHERE id = $1`, id) })
+		return id
+	}
+	create(title, f.library, true)
+	imported := create(title, f.library, false)
+	other := create(title+" too", f.library, true)
+	create(title, f.hidden, true)
+
+	for _, tc := range []struct {
+		name      string
+		id        string
+		update    AdminCollectionUpdate
+		wantTaken bool
+	}{
+		{name: "full draft of an existing duplicate", id: imported, update: AdminCollectionUpdate{Title: new(title), Description: new("Edited"), LibraryIDs: &[]int{f.library}}},
+		{name: "case and spaces only", id: imported, update: AdminCollectionUpdate{Title: new("  " + strings.ToUpper(title) + " ")}},
+		{name: "rename into a taken name", id: other, update: AdminCollectionUpdate{Title: new(title)}, wantTaken: true},
+		{name: "add a library that has the name", id: imported, update: AdminCollectionUpdate{Title: new(title), LibraryIDs: &[]int{f.library, f.hidden}}, wantTaken: true},
+	} {
+		_, err := h.UpdateAdminCollection(t.Context(), tc.id, tc.update)
+		apiErr, isField := errors.AsType[*APIError](err)
+		taken := isField && apiErr.Field == "title"
+		if taken != tc.wantTaken || (!tc.wantTaken && err != nil) {
+			t.Fatalf("%s: err = %v, want title taken %v", tc.name, err, tc.wantTaken)
+		}
+	}
+
+	// Without a library the collection would leave every library's list.
+	_, err := h.UpdateAdminCollection(t.Context(), other, AdminCollectionUpdate{LibraryIDs: &[]int{}})
+	if apiErr, ok := errors.AsType[*APIError](err); !ok || apiErr.Field != "library_ids" {
+		t.Fatalf("update to no libraries: err = %v, want a field error at library_ids", err)
+	}
+}
+
+// TestAdminCollectionUpdateNameRuleReadsTheLockedRowDB: an If-Match: * update
+// skips the revision check, so whether it renames is decided from the row its
+// transaction locks, not the read the handler took first. Here another
+// request renames the collection and moves it next to a same-named one while
+// the update, which echoes the old name, waits on the row; the echo is then a
+// rename into a taken name.
+func TestAdminCollectionUpdateNameRuleReadsTheLockedRowDB(t *testing.T) {
+	f := newPagingIntegrationFixture(t)
+	repo := catalog.NewLibraryCollectionRepository(f.pool)
+	h := NewLibraryCollectionHandler(repo, nil, catalog.NewItemRepository(f.pool), nil)
+	title := fmt.Sprintf("Staff Picks %d", f.account)
+	var id string
+	for _, library := range []int{f.hidden, f.library} {
+		created, err := h.CreateAdminCollection(t.Context(), AdminCollectionCreate{LibraryIDs: []int{library}, Title: title, CollectionType: "manual"})
+		if err != nil {
+			t.Fatalf("create in %d: %v", library, err)
+		}
+		id = created.ID
+		t.Cleanup(func() {
+			_, _ = f.pool.Exec(context.Background(), `DELETE FROM library_collections WHERE id = $1`, created.ID)
+		})
+	}
+
+	other, err := f.pool.Begin(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = other.Rollback(context.Background()) }()
+	var otherPID int
+	if err := other.QueryRow(t.Context(), `SELECT pg_backend_pid()`).Scan(&otherPID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := other.Exec(t.Context(), `UPDATE library_collections SET title = title || ' too', slug = slug || '-moved', library_id = $2 WHERE id = $1`, id, f.hidden); err != nil {
+		t.Fatalf("rename and move: %v", err)
+	}
+	if _, err := other.Exec(t.Context(), `UPDATE library_collection_libraries SET library_id = $2 WHERE collection_id = $1`, id, f.hidden); err != nil {
+		t.Fatalf("move scope: %v", err)
+	}
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := h.UpdateAdminCollection(WithAdminCollectionExpectedRevision(t.Context(), -1), id, AdminCollectionUpdate{Title: new(title), Description: new("Edited")})
+		done <- err
+	}()
+	// Commit only once the update waits on the row the other request holds.
+	for blocked := false; !blocked; {
+		select {
+		case err := <-done:
+			t.Fatalf("update finished before the other request committed: %v", err)
+		default:
+		}
+		if err := f.pool.QueryRow(t.Context(), `SELECT EXISTS (SELECT 1 FROM pg_stat_activity WHERE $1 = ANY(pg_blocking_pids(pid)))`, otherPID).Scan(&blocked); err != nil {
+			t.Fatal(err)
+		}
+		if !blocked {
+			time.Sleep(10 * time.Millisecond) //nolint:forbidigo // the poll interval; the wait is on pg_blocking_pids, an observable lock wait
+		}
+	}
+	if err := other.Commit(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+
+	err = <-done
+	if apiErr, ok := errors.AsType[*APIError](err); !ok || apiErr.Field != "title" {
+		t.Fatalf("echoed old name after a rename and move: err = %v, want a field error at title", err)
 	}
 }
 

@@ -224,12 +224,16 @@ the target aggregate: a target change always recomputes the request's status fro
 its targets, because after submission the targets are the source of truth.
 
 Decline and cancel apply to requests nothing has been sent for: `pending` ones,
-and `approved` ones with no target and no live submission lease (waiting for the
-library, or backing off after a failed send). Once a submission is in flight or
-a target exists, the request stays in the pipeline until it completes or fails,
+and `approved` ones with no live submission lease and no target other than a
+failed one (waiting for the library, or backing off after a failed send). Once a
+submission is in flight or any other target exists, the request stays in the
+pipeline until it completes or fails,
 because withdrawing it could leave the downstream service's state diverged from
 Silo's. Retry reopens a `failed` request to `approved` + `active` in one guarded
-write.
+write. When the request had delivered one quality, it keeps that target and
+resends only the failed tiers. The library never completes such a retry: the
+title is present because of the delivered copy, which says nothing about the
+tiers being resent. Only the resend or its final failure ends the retry.
 
 Remove (`removeFailedRequest`, `DELETE /api/v2/requests/{id}`) deletes a
 `failed` request for its owner or an admin, with its targets, events and
@@ -274,8 +278,11 @@ A submission converges the request's targets to the qualities it currently
 wants. A failed target for a quality it no longer wants is deleted, but only
 when that quality set was resolved without error. A failed entitlement lookup
 or a connection skipped for a missing key makes the set look smaller than it
-is, so in either case every failed target is kept for an admin to see. If
-nothing is left to send, the remaining targets decide the status.
+is, so in either case every failed target is kept for an admin to see. A
+failed target for a quality being resent stays until the attempt records its
+result, which replaces it in the same transaction, so a resend that errors
+keeps the failure through the backoff. If nothing is left to send, the
+remaining targets decide the status.
 
 ## Season requests
 
@@ -320,6 +327,11 @@ library when it is approved is not sent; the reconcile pass completes it. If rou
 claim choose a server that cannot, that tier is not sent and the attempt fails
 with a message naming the server.
 
+A Retry of a season request that delivered one quality skips both checks. The
+library holds the delivered copy, so its seasons say nothing about the tier
+that failed. The request is claimed and resends only its failed tiers, and only
+the servers those tiers go to must take seasons.
+
 A season is complete when every aired episode of it has a file in an enabled
 library, judged by the library's own provider metadata, so no external service
 is involved. An episode has a file when one is linked to it
@@ -358,8 +370,8 @@ A profile that finds a title someone else already requested can follow it
 instead of requesting it again (`PUT`/`DELETE
 /api/v2/requests/follows/{media_type}/{tmdb_id}`). Following needs the same
 access as requesting: requests enabled, the account allowed to request and not
-blocked by its request limit, and the title within the profile's rating
-ceiling. It is refused for a title with no open request (request it instead);
+blocked by its request limit, the profile not blocked from requests, and the
+title within the profile's rating ceiling. It is refused for a title with no open request (request it instead);
 the insert itself checks for the open request and holds a share lock on its
 row until the follow commits, so a follow cannot land just after the request
 was declined, cancelled or completed, and miss that transition's follow
@@ -436,6 +448,9 @@ connection that exists but cannot be used (no API key, not bound to a plugin
 installation) is a setup problem instead: the submission retries with backoff
 and records the reason in `last_error`, so fixing the connection lets the
 request through.
+A Retry of a request that delivered one quality is handled the same way, since
+the library cannot complete it. With no router to resend the failed tier, it
+backs off with the reason and then fails again.
 
 A connection needs an API key unless its plugin declares
 `request_router.api_key_optional` in its manifest. The host reads the
@@ -471,7 +486,9 @@ Every five minutes the reconcile pass submits approved requests, asks the router
 for target status, and completes open and failed requests whose media is present
 in the library.
 Completing from the library skips an approved request while its submission lease
-is live, so it cannot race a router call that is creating targets.
+is live, so it cannot race a router call that is creating targets. It also
+skips an approved request with a `completed` target, which is a Retry
+resending its failed tiers, and the pass submits that request instead.
 Every API process runs the task manager, so an advisory lock lets one server run
 each pass. A pass has two rotations. In-flight requests (`approved`, `queued`,
 `downloading`) get router calls. Requests only the library can complete
@@ -480,6 +497,20 @@ else, so a backlog of them cannot slow the router polling. Each rotation takes
 candidates in `last_reconciled_at` order, stamps each one when checked, even if
 it errors, and looks presence up in one batch per media type. The 30-day bound
 keeps an upgrade from completing, and notifying, a backlog of old failures.
+
+An in-flight request whose media is in the library still completes through its
+targets, so a download under way is not orphaned. The stalled-target backstop
+covers a router that never reports completion: once presence confirms the
+media, it completes a target with `external_status` `presence_confirmed` when
+the target has gone without a status change for 24 hours while `queued`, or
+72 hours while `downloading`. Seerr, for one, can leave a movie in PROCESSING
+for good after the file is imported. Because presence matches the title only,
+a `downloading` target is kept while it has download progress on record (only a
+plugin that reports progress keeps any, and an unanswered check clears it), on a
+whole-series request, and on a request that also has a target at another
+quality, unless that target failed or was itself completed by presence. As
+everywhere else, a season request counts as present only once every requested
+season is complete.
 
 A second task, `refresh_request_downloads`, runs every minute between reconcile
 passes (see [Download progress](#download-progress)). It asks only about
@@ -643,6 +674,26 @@ off server-wide, or the requests switch on the account or its access group
 account are still honored when an API client writes them, but the migration
 that added group limits moved existing ones onto the account's switch and no
 editor offers them.
+
+A household manager can also block one profile from requests while the account
+and its other profiles keep them (`requests_allowed` on the v2 profile, stored
+as `user_profiles.requests_blocked` so existing profiles stay allowed). The
+block layers on the account's switch: a request is allowed only when both
+allow it. It also closes request discovery (search, the discover rails, title
+detail, and the studio, network and genre browse), because discovery browses
+TMDB and the library's parental controls reach it only as a US certification
+filter, and the advisory-age limit not at all. An account denied requests keeps
+discovery, as before; clients hide the feature on the capability's `allowed`.
+For a blocked profile `getRequestStatus` reports `allowed: false` and
+`watchlist_titles_supported: false`: the watchlist's titles outside the library
+come from TMDB, so their operations answer 403 like discovery, and its
+watchlist adds request nothing. The onboarding tour leaves out its requests
+step, as it does for a child profile. It can still list, read and cancel the
+requests it made before the block, and only those: `listMyRequests` leaves
+out the account's other profiles' requests before paging, and `getRequest`
+and cancel answer 403 for them, because their titles come from TMDB too. Like the other profile
+access fields, only the household manager can change it, and changing it bumps
+the account's access policy revision.
 
 The quota counts the requests an account made in the window, except those
 declined or failed: those give their slot back. A cancelled request keeps

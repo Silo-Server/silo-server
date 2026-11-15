@@ -375,6 +375,7 @@ func NewPlaybackHandler(sessionMgr SessionManagerInterface, opts ...FilePathReso
 	h.tm.StartThrottler = func(ctx context.Context, ts *playback.TranscodeSession) {
 		h.maybeStartThrottler(ctx, ts)
 	}
+	h.tm.RestoreReconstructedClient = h.restoreReconstructedClient
 	h.tm.OnFFmpegCrash = func(ctx context.Context, sessionID string, dead *playback.TranscodeSession) {
 		// ffmpeg crash — tear the session down; a client holding a valid stream
 		// token can reconstruct it on the next request.
@@ -655,7 +656,12 @@ func (h *PlaybackHandler) loadTranscodeServeSession(r *http.Request, sessionID s
 	if videoCopyReconstructRefused(r.Context(), h.fileResolver, h.CopySafetyRacer, card) {
 		return nil, playback.SessionMissing, nil, nil, nil
 	}
-	if card != nil && card.ToneMapMode != "" {
+	// A tone-mapped or keyframe-planned rebuild can fail for a reason the
+	// player has to hear (a terminal tone-map verdict, a playlist that can no
+	// longer be rebuilt). The atomic path rebuilds the runtime with the
+	// session and removes the session again when it can't, so a failed
+	// rebuild doesn't hold a stream slot and its error reaches the client.
+	if card != nil && (card.ToneMapMode != "" || card.KeyframePlaylist) {
 		session, _, status, reconstructErr := h.tm.LoadOrReconstructTranscodeWithError(r.Context(), h.sessionMgr.GetSession, sessionID, requestUserID, requestedSegment, card)
 		return session, status, card, claims, reconstructErr
 	}
@@ -1669,6 +1675,50 @@ func fillEmptySessionFacts(session, live *playback.Session) {
 	}
 }
 
+// reconstructedClientTimeout bounds the live-row read a rebuild makes, so a
+// stalled database delays a recovering stream by at most this much.
+const reconstructedClientTimeout = 2 * time.Second
+
+// restoreReconstructedClient fills the client of a session rebuilt from a
+// stream token, whose recipe card leaves client metadata out to keep stream
+// URLs short. The client comes from the session's shared live row, or from
+// its start row once no live row is left, and only from a row of the card's
+// own account and profile. A failed read costs the session its client label,
+// never its playback.
+func (h *PlaybackHandler) restoreReconstructedClient(ctx context.Context, card *playback.RecipeCard) {
+	reader, ok := h.AdminStore.(liveSessionReader)
+	if !ok || card == nil {
+		return
+	}
+	// The rebuild registers the session even when the player abandons the
+	// request that started it, so the read must not end with that request.
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), reconstructedClientTimeout)
+	defer cancel()
+	live, err := reader.LiveSession(ctx, card.SessionID)
+	if err != nil {
+		if !errors.Is(err, playback.ErrSessionNotFound) {
+			slog.WarnContext(ctx, "failed to restore the client of a rebuilt playback session", "component", "api",
+				"session", card.SessionID, "playback_session_id", card.SessionID, "error", err)
+		}
+		return
+	}
+	if live.UserID != card.UserID || live.ProfileID != card.ProfileID {
+		return
+	}
+	fill := func(dst *string, src string) {
+		if *dst == "" {
+			*dst = src
+		}
+	}
+	fill(&card.ClientName, live.ClientName)
+	fill(&card.ClientVersion, live.ClientVersion)
+	fill(&card.ClientBuild, live.ClientBuild)
+	fill(&card.ClientChannel, live.ClientChannel)
+	fill(&card.ClientUserAgent, live.ClientUserAgent)
+	fill(&card.DeviceID, live.DeviceID)
+	fill(&card.DevicePlatform, live.DevicePlatform)
+}
+
 // compatCopyWithoutProgress reports a Jellyfin session copy that never saw
 // the play's progress: a start that failed to route, or a replica that only
 // served media while another replica took the reports. It must not record
@@ -2192,6 +2242,7 @@ func (h *PlaybackHandler) HandleGetTranscodeSegment(w http.ResponseWriter, r *ht
 					sessionID,
 					transcodeSession,
 					segNum,
+					decision.Progress.GenerationStartedAt,
 				)
 				// A restart skipped because the request ended is not a failure.
 				if restartErr != nil && !errors.Is(restartErr, playback.ErrManifestNotReady) && !errors.Is(restartErr, r.Context().Err()) {
