@@ -314,8 +314,10 @@ func TestDeleteProfile_PrimaryDeletesOthersButNotItself(t *testing.T) {
 	handler := NewProfileHandler(testUserStoreProvider{store: store})
 	purger := &recordingProfilePurger{}
 	withdrawer := &recordingWatchlistRequestWithdrawer{}
+	sessions := &recordingProfilePurger{}
 	handler.WatchlistTitlesPurger = purger
 	handler.WatchlistRequestWithdrawer = withdrawer
+	handler.JellyfinSessionPurger = sessions
 	remove := func(profileID string) error {
 		return handler.DeleteProfile(profileServiceContext("profile-1"), ProfileDeleteCommand{
 			UserID: 1, ProfileID: profileID, ActiveProfileID: "profile-1", VerifyProfile: noProfileVerification,
@@ -340,6 +342,9 @@ func TestDeleteProfile_PrimaryDeletesOthersButNotItself(t *testing.T) {
 	}
 	if len(withdrawer.calls) != 1 || withdrawer.calls[0] != "1/profile-2" {
 		t.Fatalf("withdraw calls = %v, want [1/profile-2]", withdrawer.calls)
+	}
+	if len(sessions.calls) != 1 || sessions.calls[0] != "1/profile-2" {
+		t.Fatalf("Jellyfin session purge calls = %v, want [1/profile-2]", sessions.calls)
 	}
 }
 
