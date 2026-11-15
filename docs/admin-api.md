@@ -3478,7 +3478,8 @@ names a different `plugin_id` or `version` than the catalog entry, or a catalog 
 longer lists the requested version. A catalog, checksum or download host that cannot be
 reached, answers 429 or 5xx, or cuts the response short is 503 `dependency_unavailable`
 with `Retry-After: 30`. Nothing is written in either case; an update leaves the installed
-version in place.
+version in place and running, because the installed plugin is stopped only after the new
+package passed these checks.
 
 `POST /api/v2/admin/plugins/installations/{id}/restart` stops the installation's process
 and, for a resident plugin, starts it again with a fresh failure budget; a non-resident plugin

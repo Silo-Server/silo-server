@@ -142,17 +142,6 @@ func (i *Installer) InstallRemote(ctx context.Context, req InstallArchiveRequest
 	return i.installArchive(ctx, data, req)
 }
 
-func (i *Installer) ReplaceRemote(ctx context.Context, existing *Installation, req InstallArchiveRequest) (*InstallResult, error) {
-	if req.ArchiveURL == "" {
-		return nil, fmt.Errorf("archive url is required")
-	}
-	data, err := i.downloadArchive(ctx, req.ArchiveURL)
-	if err != nil {
-		return nil, err
-	}
-	return i.replaceArchive(ctx, existing, data, req)
-}
-
 func (i *Installer) downloadArchive(ctx context.Context, archiveURL string) ([]byte, error) {
 	return fetchPackageResource(ctx, i.httpClient, archiveURL, "the plugin")
 }
@@ -171,18 +160,71 @@ func (i *Installer) InstallBinary(ctx context.Context, req InstallBinaryRequest)
 	return i.installBinary(ctx, pkg.data, pkg.checksum, pkg.manifest, pkg.manifestJSON, req.RepositoryID, pkg.signature)
 }
 
-func (i *Installer) ReplaceBinary(ctx context.Context, existing *Installation, req InstallBinaryRequest) (*InstallResult, error) {
+// PreparedReplacement is a downloaded package that passed the checks an
+// installer runs before it writes anything. Apply replaces the installation
+// it was prepared for.
+type PreparedReplacement struct {
+	apply func(ctx context.Context) (*InstallResult, error)
+}
+
+// Apply replaces the installation with the prepared package.
+func (p *PreparedReplacement) Apply(ctx context.Context) (*InstallResult, error) {
+	return p.apply(ctx)
+}
+
+// PrepareCatalogReplacement downloads and checks target's package as a
+// replacement for existing, leaving the installation and its process alone.
+// A package refused here never needs the running plugin stopped.
+func (i *Installer) PrepareCatalogReplacement(ctx context.Context, existing *Installation, target *ResolvedCatalogInstall) (*PreparedReplacement, error) {
+	if existing == nil {
+		return nil, errors.New("existing installation is required")
+	}
+	if target == nil {
+		return nil, errors.New("catalog install target is required")
+	}
+	if target.LegacyArchive {
+		return i.prepareArchiveReplacement(ctx, existing, target.ArchiveRequest())
+	}
+	return i.prepareBinaryReplacement(ctx, existing, target.BinaryRequest())
+}
+
+func (i *Installer) prepareArchiveReplacement(ctx context.Context, existing *Installation, req InstallArchiveRequest) (*PreparedReplacement, error) {
+	if req.ArchiveURL == "" {
+		return nil, errors.New("archive url is required")
+	}
+	data, err := i.downloadArchive(ctx, req.ArchiveURL)
+	if err != nil {
+		return nil, err
+	}
+	_, _, manifest, err := openInstallArchive(data, req)
+	if err != nil {
+		return nil, err
+	}
+	if err := checkReplacementIdentity(manifest, existing); err != nil {
+		return nil, err
+	}
+	return &PreparedReplacement{apply: func(ctx context.Context) (*InstallResult, error) {
+		return i.replaceArchive(ctx, existing, data, req)
+	}}, nil
+}
+
+func (i *Installer) prepareBinaryReplacement(ctx context.Context, existing *Installation, req InstallBinaryRequest) (*PreparedReplacement, error) {
 	if req.BinaryURL == "" {
-		return nil, fmt.Errorf("binary url is required")
+		return nil, errors.New("binary url is required")
 	}
 	if req.Checksum == "" {
-		return nil, fmt.Errorf("binary checksum is required")
+		return nil, errors.New("binary checksum is required")
 	}
 	pkg, err := i.downloadBinary(ctx, req)
 	if err != nil {
 		return nil, err
 	}
-	return i.replaceBinary(ctx, existing, pkg.data, pkg.checksum, pkg.manifest, pkg.manifestJSON, req.RepositoryID, pkg.signature)
+	if err := checkReplacementIdentity(pkg.manifest, existing); err != nil {
+		return nil, err
+	}
+	return &PreparedReplacement{apply: func(ctx context.Context) (*InstallResult, error) {
+		return i.replaceBinary(ctx, existing, pkg.data, pkg.checksum, pkg.manifest, pkg.manifestJSON, req.RepositoryID, pkg.signature)
+	}}, nil
 }
 
 // downloadedBinary is a catalog binary that passed every check before

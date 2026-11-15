@@ -320,24 +320,21 @@ func (s *Service) InstallCatalog(ctx context.Context, req InstallCatalogRequest)
 		return nil, err
 	}
 	var result *InstallResult
-	if target.LegacyArchive {
-		archiveReq := target.ArchiveRequest()
-		if existing == nil {
-			result, err = s.installer.InstallRemote(ctx, archiveReq)
-		} else {
+	switch {
+	case existing != nil:
+		// Download and check the package while the installed copy keeps
+		// running; only a package that passed replaces it.
+		var prepared *PreparedReplacement
+		prepared, err = s.installer.PrepareCatalogReplacement(ctx, existing, target)
+		if err == nil {
 			result, err = s.replaceStopped(ctx, existing, func() (*InstallResult, error) {
-				return s.installer.ReplaceRemote(ctx, existing, archiveReq)
+				return prepared.Apply(ctx)
 			})
 		}
-	} else {
-		binaryReq := target.BinaryRequest()
-		if existing == nil {
-			result, err = s.installer.InstallBinary(ctx, binaryReq)
-		} else {
-			result, err = s.replaceStopped(ctx, existing, func() (*InstallResult, error) {
-				return s.installer.ReplaceBinary(ctx, existing, binaryReq)
-			})
-		}
+	case target.LegacyArchive:
+		result, err = s.installer.InstallRemote(ctx, target.ArchiveRequest())
+	default:
+		result, err = s.installer.InstallBinary(ctx, target.BinaryRequest())
 	}
 	if err != nil {
 		return nil, err
@@ -463,7 +460,8 @@ func (s *Service) stopInstallationIfRunning(existing *Installation) error {
 }
 
 // replaceStopped stops the existing installation's process and runs replace.
-// When replace fails the row still names the old release but its process is
+// Callers check the new package before calling it, so a refused package never
+// stops the running plugin. When replace fails the row still names the old release but its process is
 // gone: a lazily started plugin comes back on its next RPC, while a resident
 // only restarts on a lifecycle reconcile, so the hooks run before the error
 // is returned. On success the caller runs them after the row has changed.
