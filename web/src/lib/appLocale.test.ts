@@ -17,10 +17,15 @@ describe("matchShippedLanguage", () => {
     ["zh-CN", "zh-Hans"],
     ["zh-SG", "zh-Hans"],
     ["zh-Hans-HK", "zh-Hans"],
-    ["zh-TW", null],
-    ["zh-Hant", null],
+    ["zh-TW", "zh-Hant"],
+    ["zh-HK", "zh-Hant"],
+    ["zh-Hant", "zh-Hant"],
     ["ar-EG", "ar"],
-    ["it", null],
+    ["no", "nb"],
+    ["nb-NO", "nb"],
+    ["nn", null],
+    ["sr", null],
+    ["el", null],
     ["not a tag", null],
     ["", null],
   ])("%s selects %s", (tag, expected) => {
@@ -57,12 +62,12 @@ describe("resolveAppLocale", () => {
     {
       name: "null follows the first browser language that ships",
       stored: null,
-      ...browser(["it-IT", "fr-CA", "de"], "it-IT"),
+      ...browser(["el-GR", "fr-CA", "de"], "el-GR"),
       expected: { language: "fr", formatLocale: undefined, localizedFormats: false, dir: "ltr" },
     },
     {
       name: "a stored tag the web does not ship falls through to the browser",
-      stored: "it",
+      stored: "el",
       ...browser(["ja-JP"]),
       expected: { language: "ja", formatLocale: undefined, localizedFormats: false, dir: "ltr" },
     },
@@ -75,7 +80,7 @@ describe("resolveAppLocale", () => {
     {
       name: "nothing that ships falls back to English, formatted as the browser formats",
       stored: null,
-      ...browser(["it-IT"], "it-IT"),
+      ...browser(["el-GR"], "el-GR"),
       expected: { language: "en", formatLocale: undefined, localizedFormats: false, dir: "ltr" },
     },
     {
