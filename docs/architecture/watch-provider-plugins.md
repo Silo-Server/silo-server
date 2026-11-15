@@ -139,8 +139,9 @@ stands. Sync finds the library item through them and the row's provider key:
 - A provider removal of the title also takes that one library item off the
   library watchlist, for a promotion that ran after the pass read the entry.
 - A pending local removal of a title also holds a listing under another TMDB
-  ID that shares one of the row's IDs or its provider key. A listing dated
-  after the removal is a new add and drops that removal.
+  ID that shares one of the row's IDs or its provider key. A title can have
+  several such rows, one per TMDB ID it was listed under; a listing dated after
+  all of their removals is a new add and drops every one of them.
 
 ## Sync-run admission
 

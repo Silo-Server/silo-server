@@ -385,6 +385,42 @@ func TestServiceWatchlistTitleRemovalHoldsAcrossATMDBIDChange(t *testing.T) {
 	}
 }
 
+// A title the profile removed while it had two rows, one per TMDB ID it was
+// listed under, comes back with a listing under a third TMDB ID dated after
+// the removal. Neither old row's removal may take the new add off the
+// provider.
+func TestServiceWatchlistNewerListingSupersedesEveryPendingRow(t *testing.T) {
+	store, repo, conn := favoriteImportFixture(t)
+	conn.ImportWatchlistEnabled, conn.SyncWatchlistRemovalsEnabled = true, true
+	removedAt := time.Now().Add(-time.Hour)
+	for _, id := range []string{"watchlist-title:movie:550", "watchlist-title:movie:600"} {
+		repo.listItemStates = append(repo.listItemStates, ListItemState{
+			ConnectionID: conn.ID, ListKind: ListKindWatchlist, MediaItemID: id, Kind: "movie",
+			ProviderItemKey: "imdb:tt0137523", RemotePresent: true, LastRemovedLocalAt: &removedAt,
+		})
+	}
+	titles := &titlesStub{entries: map[int]time.Time{}}
+	service := NewService(repo, NewRegistry()).
+		WithMatcher(unmatchedMatcherStub{}).
+		WithUserStoreProvider(staticStoreProvider{store: store})
+	service.SetWatchlistTitles(titles)
+	provider := &watchlistBatchProviderStub{rows: []RemoteFavorite{{
+		ProviderItemKey: "imdb:tt0137523", Kind: "movie", Title: "Fight Club",
+		IMDbID: "tt0137523", TMDBID: "551", FavoritedAt: time.Now(),
+	}}}
+	if _, err := service.importList(context.Background(), conn, ServerConfig{}, provider, service.watchlistBinding()); err != nil {
+		t.Fatal(err)
+	}
+	if _, added := titles.entries[551]; !added {
+		t.Fatal("the newer listing wasn't added")
+	}
+	for _, id := range []string{"watchlist-title:movie:550", "watchlist-title:movie:600"} {
+		if old := listItemStateOf(repo, id); !old.LocalPresent && old.RemotePresent {
+			t.Fatalf("%s removal still pending: %#v", id, old)
+		}
+	}
+}
+
 // A provider removal takes a series off the watchlist in whichever form it is
 // in, after promotion moved its entry onto a library show that shares only
 // its TVDB ID: during the run (the entry was still there when the run read

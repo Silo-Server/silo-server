@@ -169,7 +169,7 @@ func (s *Service) importListTitle(
 	row RemoteFavorite,
 	key string,
 	removalsPending map[string]time.Time,
-	pendingTitles map[string]string,
+	pendingTitles map[string][]string,
 	request bool,
 ) (state *ListItemState, kept, added bool, err error) {
 	titles := s.watchlistTitles(b)
@@ -212,12 +212,13 @@ func (s *Service) importListTitle(
 
 // waitsForListTitleRemoval reports whether the listing waits for a local
 // removal of its title to reach the provider. The removal can wait under
-// another TMDB ID when the provider moved the title to a new one; an ID or
-// provider key the removed row shares names the same title. As for library
-// items, the provider listing the title again after the local removal is a
-// newer add, which supersedes a removal waiting under another ID so it can't
-// take the add off the provider; an older or undated listing is the one the
-// removal will take off.
+// another TMDB ID when the provider moved the title to a new one, and under
+// several when the title had more than one row; an ID or provider key a
+// removed row shares names the same title. As for library items, the
+// provider listing the title again after every local removal is a newer add,
+// which supersedes the removals waiting under other IDs so they can't take
+// the add off the provider; an older or undated listing is the one the
+// removals will take off.
 func (s *Service) waitsForListTitleRemoval(
 	ctx context.Context,
 	conn Connection,
@@ -226,26 +227,31 @@ func (s *Service) waitsForListTitleRemoval(
 	row RemoteFavorite,
 	key string,
 	removalsPending map[string]time.Time,
-	pendingTitles map[string]string,
+	pendingTitles map[string][]string,
 ) (bool, error) {
 	id := title.listItemID()
-	pendingID := id
-	if _, pending := removalsPending[id]; !pending {
-		pendingID = pendingTitleRow(pendingTitles, title.Kind, append(title.IDs(), key))
+	pending := pendingTitleRows(pendingTitles, title.Kind, append(title.IDs(), key))
+	if !slices.Contains(pending, id) {
+		pending = append(pending, id)
 	}
-	removedAt, pending := removalsPending[pendingID]
-	switch {
-	case !pending:
-		return false, nil
-	case row.FavoritedAtGuessed || !row.FavoritedAt.After(removedAt):
-		return true, nil
-	case pendingID == id:
-		return false, nil
+	var superseded []string
+	for _, pendingID := range pending {
+		removedAt, ok := removalsPending[pendingID]
+		switch {
+		case !ok:
+			continue
+		case row.FavoritedAtGuessed || !row.FavoritedAt.After(removedAt):
+			return true, nil
+		case pendingID != id:
+			superseded = append(superseded, pendingID)
+		}
 	}
-	if err := s.repo.MarkListItemRemoteRemoved(ctx, conn.ID, b.kind, pendingID, s.now()); err != nil {
-		return false, err
+	for _, pendingID := range superseded {
+		if err := s.repo.MarkListItemRemoteRemoved(ctx, conn.ID, b.kind, pendingID, s.now()); err != nil {
+			return false, err
+		}
+		delete(removalsPending, pendingID)
 	}
-	delete(removalsPending, pendingID)
 	return false, nil
 }
 
@@ -253,18 +259,21 @@ func (s *Service) waitsForListTitleRemoval(
 // IDs or provider keys.
 func pendingTitleKey(kind, id string) string { return kind + "|" + id }
 
-// pendingTitleRow returns the media item ID of the pending-removal title row
-// of this kind that knows any of the IDs, or "".
-func pendingTitleRow(pendingTitles map[string]string, kind string, ids []string) string {
+// pendingTitleRows returns the media item IDs of the pending-removal title
+// rows of this kind that know any of the IDs.
+func pendingTitleRows(pendingTitles map[string][]string, kind string, ids []string) []string {
+	var rows []string
 	for _, id := range ids {
 		if id == "" {
 			continue
 		}
-		if row, ok := pendingTitles[pendingTitleKey(kind, id)]; ok {
-			return row
+		for _, row := range pendingTitles[pendingTitleKey(kind, id)] {
+			if !slices.Contains(rows, row) {
+				rows = append(rows, row)
+			}
 		}
 	}
-	return ""
+	return rows
 }
 
 // listTitlesSince returns when the connection's first watchlist import that

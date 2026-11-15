@@ -401,9 +401,10 @@ func (s *Service) importList(ctx context.Context, conn Connection, cfg ServerCon
 // that listing: a failed removal retries later in the run, and a removal held
 // because another library item shares the key stays until that item leaves
 // too. titles maps each ID and provider key a pending watchlist title row
-// knows to its media item ID (see pendingTitleKey), for a provider that lists
-// the title under another TMDB ID.
-func (s *Service) listItemsPendingRemoval(ctx context.Context, conn Connection, b listBinding) (pending map[string]time.Time, titles map[string]string, err error) {
+// knows to the media item IDs of the rows that know it (see pendingTitleKey),
+// for a provider that lists the title under another TMDB ID. One title can
+// have several rows, one per TMDB ID it was listed under.
+func (s *Service) listItemsPendingRemoval(ctx context.Context, conn Connection, b listBinding) (pending map[string]time.Time, titles map[string][]string, err error) {
 	if !b.removalsEnabled(conn) {
 		return nil, nil, nil
 	}
@@ -412,7 +413,7 @@ func (s *Service) listItemsPendingRemoval(ctx context.Context, conn Connection, 
 		return nil, nil, err
 	}
 	pending = make(map[string]time.Time)
-	titles = make(map[string]string)
+	titles = make(map[string][]string)
 	for _, state := range states {
 		if !state.LocalPresent && state.RemotePresent {
 			var removedAt time.Time
@@ -422,7 +423,10 @@ func (s *Service) listItemsPendingRemoval(ctx context.Context, conn Connection, 
 			pending[state.MediaItemID] = removedAt
 			if title, ok := watchlistTitleFromListItemID(state.MediaItemID); ok {
 				for _, id := range append(append(title.IDs(), state.TitleIDs...), state.ProviderItemKey) {
-					titles[pendingTitleKey(title.Kind, id)] = state.MediaItemID
+					key := pendingTitleKey(title.Kind, id)
+					if !slices.Contains(titles[key], state.MediaItemID) {
+						titles[key] = append(titles[key], state.MediaItemID)
+					}
 				}
 			}
 		}
