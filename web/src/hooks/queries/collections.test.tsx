@@ -1,4 +1,4 @@
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { QueryClient, QueryClientProvider, QueryObserver } from "@tanstack/react-query";
 import { act, renderHook, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -13,6 +13,7 @@ import {
   useSetCollectionSortPreference,
 } from "./collections";
 import { collectionKeys, libraryCollectionKeys } from "./keys";
+import { libraryCollectionsQueryOptions, libraryCollectionTitlesQuery } from "./libraryCollections";
 
 const apiMock = vi.hoisted(() => vi.fn());
 const apiWithProfileRequestContextMock = vi.hoisted(() => vi.fn());
@@ -293,5 +294,61 @@ describe("personal collection writes refresh library Collections tabs", () => {
     });
 
     await waitFor(() => expect(queryClient.getQueryState(libraryTab)?.isInvalidated).toBe(true));
+  });
+});
+
+describe("libraryCollectionTitlesQuery", () => {
+  afterEach(() => apiWithProfileRequestContextMock.mockReset());
+
+  it("shares the Collections tab's request instead of repeating it", async () => {
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const tab = deferred<unknown>();
+    apiWithProfileRequestContextMock.mockReturnValue(tab.promise);
+
+    const list = queryClient.fetchQuery(libraryCollectionsQueryOptions(7));
+    const titles = queryClient.fetchQuery(libraryCollectionTitlesQuery(7));
+    tab.resolve({
+      library_id: "7",
+      collections: [{ id: "c1", library_id: "7", library_ids: ["7"], title: "Stormy Nights" }],
+      groups: [],
+    });
+
+    await list;
+    expect(await titles).toEqual(new Map([["c1", "Stormy Nights"]]));
+    // A Collections tab read that is still fresh answers a later titles read too.
+    await queryClient.invalidateQueries({ queryKey: libraryCollectionKeys.titles(7) });
+    await queryClient.fetchQuery(libraryCollectionTitlesQuery(7));
+    expect(apiWithProfileRequestContextMock).toHaveBeenCalledOnce();
+
+    // A collection edit invalidates both, and the titles read the renamed collection.
+    apiWithProfileRequestContextMock.mockResolvedValue({
+      library_id: "7",
+      collections: [{ id: "c1", library_id: "7", library_ids: ["7"], title: "Clear Skies" }],
+      groups: [],
+    });
+    await queryClient.invalidateQueries({ queryKey: libraryCollectionKeys.all });
+    expect(await queryClient.fetchQuery(libraryCollectionTitlesQuery(7))).toEqual(
+      new Map([["c1", "Clear Skies"]]),
+    );
+  });
+
+  it("reads the titles itself when the Collections tab it waited on closes mid-request", async () => {
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    apiWithProfileRequestContextMock
+      .mockReturnValueOnce(new Promise(() => {}))
+      .mockResolvedValueOnce({
+        library_id: "7",
+        collections: [{ id: "c1", library_id: "7", library_ids: ["7"], title: "Stormy Nights" }],
+        groups: [],
+      });
+    const tab = new QueryObserver(queryClient, libraryCollectionsQueryOptions(7));
+    const closeTab = tab.subscribe(() => {});
+
+    const titles = queryClient.fetchQuery(libraryCollectionTitlesQuery(7));
+    await waitFor(() => expect(apiWithProfileRequestContextMock).toHaveBeenCalledOnce());
+    // Leaving the tab cancels the request both were waiting on.
+    closeTab();
+
+    expect(await titles).toEqual(new Map([["c1", "Stormy Nights"]]));
   });
 });

@@ -1,4 +1,4 @@
-import { useQuery } from "@tanstack/react-query";
+import { isCancelledError, useQuery, type QueryClient } from "@tanstack/react-query";
 import type { BrowseResponse, LibraryCollection, LibraryTabResponse } from "@/api/types";
 import { catalogItemFromV2, libraryCollectionTabFromV2 } from "@/api/v2/catalog";
 import { v2 } from "@/api/v2/request";
@@ -15,25 +15,42 @@ export function libraryCollectionsQueryOptions(libraryId: number) {
   };
 }
 
+const COLLECTION_TITLES_STALE_MS = 5 * 60 * 1000;
+
 /**
  * The titles of a library's collections by ID, for naming pinned collections.
  * A media change never renames a collection, so media invalidations leave this
  * query alone (see mediaSurfaceRefresh); collection edits invalidate it with
- * the rest of `libraryCollectionKeys`.
+ * the rest of `libraryCollectionKeys`. It reads through the Collections tab's
+ * query, so a tab read in flight or still fresh answers it without a request.
  */
 export function libraryCollectionTitlesQuery(libraryId: number) {
   return {
     queryKey: libraryCollectionKeys.titles(libraryId),
-    queryFn: ({ signal }: { signal?: AbortSignal }): Promise<ReadonlyMap<string, string>> =>
-      libraryCollectionsQueryOptions(libraryId)
-        .queryFn({ signal })
+    queryFn: ({
+      client,
+      signal,
+    }: {
+      client: QueryClient;
+      signal: AbortSignal;
+    }): Promise<ReadonlyMap<string, string>> => {
+      const tabQuery = libraryCollectionsQueryOptions(libraryId);
+      return client
+        .fetchQuery({ ...tabQuery, staleTime: COLLECTION_TITLES_STALE_MS })
+        .catch((error: unknown) => {
+          // The tab's request is cancelled when the tab closes before it lands;
+          // the titles still need an answer, so read them on their own.
+          if (isCancelledError(error)) return tabQuery.queryFn({ signal });
+          throw error;
+        })
         .then(
           (tab) =>
             new Map(
               getLibraryCollectionList(tab).map((collection) => [collection.id, collection.title]),
             ),
-        ),
-    staleTime: 5 * 60 * 1000,
+        );
+    },
+    staleTime: COLLECTION_TITLES_STALE_MS,
   };
 }
 
