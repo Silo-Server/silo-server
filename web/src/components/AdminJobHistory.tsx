@@ -1,4 +1,5 @@
 import { JobPageControls } from "@/components/admin/JobPageControls";
+import { joinList } from "@/lib/appLocale";
 import type { AdminJob } from "@/api/types";
 import { useAllAdminJobs } from "@/hooks/queries/admin/libraries";
 import { Badge } from "@/components/ui/badge";
@@ -6,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { RefreshCw } from "lucide-react";
 import { formatJobProgress } from "./adminCatalogMaintenanceFormatters";
 import { formatDateTime } from "@/lib/datetime";
-import { useT, type MessageKey, type Translate } from "@/i18n";
+import { numberText, useT, type MessageKey, type Translate } from "@/i18n";
 
 const JOB_TYPE_LABELS: Record<string, MessageKey> = {
   delete_library: "web.admin.common.jobHistory.jobType.deleteLibrary",
@@ -147,7 +148,7 @@ function jobResult(job: AdminJob, t: Translate) {
         parts.push(t("web.admin.common.jobHistory.result.cleanupQueued", countValues(cleanupDirs)));
       }
       return parts.length > 0
-        ? t("web.admin.common.jobHistory.result.deleted", { parts: parts.join(", ") })
+        ? t("web.admin.common.jobHistory.result.deleted", { parts: joinList(parts) })
         : t("web.admin.common.jobHistory.result.deletedEmpty");
     }
     case "image_cache_cleanup":
@@ -201,7 +202,7 @@ export default function AdminJobHistory() {
           {jobsQuery.isFetching ? (
             <Badge variant="outline">{t("web.admin.common.jobHistory.refreshing")}</Badge>
           ) : (
-            <Badge variant="secondary">{jobs.length}</Badge>
+            <Badge variant="secondary">{numberText(jobs.length)}</Badge>
           )}
           <Button
             variant="ghost"

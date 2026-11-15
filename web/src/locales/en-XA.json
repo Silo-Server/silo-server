@@ -5777,6 +5777,12 @@
       "value": "⟦Ŵĥåţ çĥåñĝéđ? (öþţîöñåļ, šĥöŵñ îñ ĥîšţöŕý)~~~~~~~~~~~~~~~~~⟧"
     }
   ],
+  "web.admin.access.policy.editor.compileIssueFallback": [
+    {
+      "type": 0,
+      "value": "⟦Þöļîçý çöɱþîļé éŕŕöŕ~~~~~~~~⟧"
+    }
+  ],
   "web.admin.access.policy.editor.compileIssues": [
     {
       "type": 0,
@@ -30869,6 +30875,54 @@
       "value": "⟦Ƒåîļéđ~~~⟧"
     }
   ],
+  "web.admin.common.units.gigabytes": [
+    {
+      "type": 0,
+      "value": "⟦ĜƁ~⟧"
+    }
+  ],
+  "web.admin.common.units.hourRange": [
+    {
+      "type": 0,
+      "value": "⟦0-23~~⟧"
+    }
+  ],
+  "web.admin.common.units.kilobytes": [
+    {
+      "type": 0,
+      "value": "⟦ĶƁ~⟧"
+    }
+  ],
+  "web.admin.common.units.megabitsPerSecond": [
+    {
+      "type": 0,
+      "value": "⟦Ṁƀþš~~⟧"
+    }
+  ],
+  "web.admin.common.units.megabytes": [
+    {
+      "type": 0,
+      "value": "⟦ṀƁ~⟧"
+    }
+  ],
+  "web.admin.common.units.milliseconds": [
+    {
+      "type": 0,
+      "value": "⟦ɱš~⟧"
+    }
+  ],
+  "web.admin.common.units.percent": [
+    {
+      "type": 0,
+      "value": "⟦%~⟧"
+    }
+  ],
+  "web.admin.common.units.pixels": [
+    {
+      "type": 0,
+      "value": "⟦þẋ~⟧"
+    }
+  ],
   "web.admin.common.userProfiles.createFailed": [
     {
       "type": 0,
@@ -31161,6 +31215,128 @@
       "value": "⟦Ŕéšéţ ţö đéƒåûļţ ļåýöûţ~~~~~~~~~~⟧"
     }
   ],
+  "web.admin.dashboard.format.duration.days": [
+    {
+      "type": 0,
+      "value": "⟦"
+    },
+    {
+      "type": 1,
+      "value": "days"
+    },
+    {
+      "type": 0,
+      "value": "đ~⟧"
+    }
+  ],
+  "web.admin.dashboard.format.duration.daysHours": [
+    {
+      "type": 0,
+      "value": "⟦"
+    },
+    {
+      "type": 1,
+      "value": "days"
+    },
+    {
+      "type": 0,
+      "value": "đ "
+    },
+    {
+      "type": 1,
+      "value": "hours"
+    },
+    {
+      "type": 0,
+      "value": "ĥ~~⟧"
+    }
+  ],
+  "web.admin.dashboard.format.duration.hours": [
+    {
+      "type": 0,
+      "value": "⟦"
+    },
+    {
+      "type": 1,
+      "value": "hours"
+    },
+    {
+      "type": 0,
+      "value": "ĥ~⟧"
+    }
+  ],
+  "web.admin.dashboard.format.duration.hoursMinutes": [
+    {
+      "type": 0,
+      "value": "⟦"
+    },
+    {
+      "type": 1,
+      "value": "hours"
+    },
+    {
+      "type": 0,
+      "value": "ĥ "
+    },
+    {
+      "type": 1,
+      "value": "minutes"
+    },
+    {
+      "type": 0,
+      "value": "ɱ~~⟧"
+    }
+  ],
+  "web.admin.dashboard.format.duration.minutes": [
+    {
+      "type": 0,
+      "value": "⟦"
+    },
+    {
+      "type": 1,
+      "value": "minutes"
+    },
+    {
+      "type": 0,
+      "value": "ɱ~⟧"
+    }
+  ],
+  "web.admin.dashboard.format.duration.minutesSeconds": [
+    {
+      "type": 0,
+      "value": "⟦"
+    },
+    {
+      "type": 1,
+      "value": "minutes"
+    },
+    {
+      "type": 0,
+      "value": "ɱ "
+    },
+    {
+      "type": 1,
+      "value": "seconds"
+    },
+    {
+      "type": 0,
+      "value": "š~~⟧"
+    }
+  ],
+  "web.admin.dashboard.format.duration.seconds": [
+    {
+      "type": 0,
+      "value": "⟦"
+    },
+    {
+      "type": 1,
+      "value": "seconds"
+    },
+    {
+      "type": 0,
+      "value": "š~⟧"
+    }
+  ],
   "web.admin.dashboard.format.fileCount": [
     {
       "type": 6,
@@ -31201,6 +31377,20 @@
       },
       "offset": 0,
       "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.dashboard.format.latencyMs": [
+    {
+      "type": 0,
+      "value": "⟦"
+    },
+    {
+      "type": 1,
+      "value": "value"
+    },
+    {
+      "type": 0,
+      "value": " ɱš~~⟧"
     }
   ],
   "web.admin.dashboard.format.scanQueued": [
@@ -31351,6 +31541,20 @@
     {
       "type": 0,
       "value": "⟦Ŵåîţîñĝ ƒöŕ çåþåçîţý~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.dashboard.format.watchTimeHours": [
+    {
+      "type": 0,
+      "value": "⟦"
+    },
+    {
+      "type": 1,
+      "value": "hours"
+    },
+    {
+      "type": 0,
+      "value": "ĥ~⟧"
     }
   ],
   "web.admin.dashboard.grid.added": [
@@ -107708,6 +107912,12 @@
       "value": "⟦Ţĥéšé ŕûļéš ûšé öþţîöñš ţĥé Ĝûîđéđ ṽîéŵ çåñ'ţ šĥöŵ.~~~~~~~~~~~~~~~~~~~~~⟧"
     }
   ],
+  "web.common.collections.posterUpdateFailed": [
+    {
+      "type": 0,
+      "value": "⟦Þöšţéŕ ûþđåţé ƒåîļéđ~~~~~~~~⟧"
+    }
+  ],
   "web.common.date.daysAgo": [
     {
       "type": 6,
@@ -107876,6 +108086,278 @@
       "value": "⟦Ûñķñöŵñ þļåţƒöŕɱ~~~~~~~⟧"
     }
   ],
+  "web.common.errors.accessGroupIdUnsupported": [
+    {
+      "type": 0,
+      "value": "⟦Ţĥîš ĝŕöûþ çöñţåîñš åñ ûñšûþþöŕţéđ ÎĐ.~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.common.errors.accessGroupPaginationInvalid": [
+    {
+      "type": 0,
+      "value": "⟦Îñṽåļîđ ĝŕöûþ þåĝîñåţîöñ. Ŕéļöåđ ţĥé ļîšţ.~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.common.errors.accessGroupReloadBeforeSaving": [
+    {
+      "type": 0,
+      "value": "⟦Ŕéļöåđ ţĥîš ĝŕöûþ ƀéƒöŕé šåṽîñĝ: å šţŕöñĝ ÉŢåĝ îš ŕéǫûîŕéđ.~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.common.errors.collectionVersionUnavailable": [
+    {
+      "type": 0,
+      "value": "⟦Ŕéļöåđ ţĥîš çöļļéçţîöñ ƀéƒöŕé éđîţîñĝ; îţš ṽéŕšîöñ îš ûñåṽåîļåƀļé.~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.common.errors.downloadUnavailable": [
+    {
+      "type": 0,
+      "value": "⟦Đöŵñļöåđ ûñåṽåîļåƀļé ("
+    },
+    {
+      "type": 1,
+      "value": "status"
+    },
+    {
+      "type": 0,
+      "value": ").~~~~~~~~~~⟧"
+    }
+  ],
+  "web.common.errors.fileIdInvalid": [
+    {
+      "type": 0,
+      "value": "⟦Îñṽåļîđ ƒîļé ÎĐ.~~~~~~~⟧"
+    }
+  ],
+  "web.common.errors.invitationAcceptanceUnavailable": [
+    {
+      "type": 0,
+      "value": "⟦Îñṽîţåţîöñ åççéþţåñçé îš ûñåṽåîļåƀļé.~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.common.errors.invitationPaginationInvalid": [
+    {
+      "type": 0,
+      "value": "⟦Îñṽåļîđ îñṽîţåţîöñ þåĝîñåţîöñ. Ŕéļöåđ ţĥé ļîšţ.~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.common.errors.invitationResponseIncomplete": [
+    {
+      "type": 0,
+      "value": "⟦Îñṽîţåţîöñ ɱåý ĥåṽé ƀééñ çŕéåţéđ, ƀûţ îţš ŕéšþöñšé ŵåš îñçöɱþļéţé. Ŕéļöåđ ĥîšţöŕý ƀéƒöŕé çöñţîñûîñĝ.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.common.errors.joinedRoomIdentityInvalid": [
+    {
+      "type": 0,
+      "value": "⟦Îñṽåļîđ ĵöîñéđ ŕööɱ îđéñţîţý.~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.common.errors.memberIdentityInvalid": [
+    {
+      "type": 0,
+      "value": "⟦Îñṽåļîđ ɱéɱƀéŕ îđéñţîţý.~~~~~~~~~~⟧"
+    }
+  ],
+  "web.common.errors.memberStateLimit": [
+    {
+      "type": 0,
+      "value": "⟦Ṁéɱƀéŕ šţåţé ŕéåđš åŕé ļîɱîţéđ ţö "
+    },
+    {
+      "type": 1,
+      "value": "max"
+    },
+    {
+      "type": 0,
+      "value": " îţéɱš.~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.common.errors.notificationDestinationContinuationInvalid": [
+    {
+      "type": 0,
+      "value": "⟦Îñṽåļîđ ñöţîƒîçåţîöñ đéšţîñåţîöñ çöñţîñûåţîöñ.~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.common.errors.notificationDestinationPageInvalid": [
+    {
+      "type": 0,
+      "value": "⟦Îñṽåļîđ ñöţîƒîçåţîöñ đéšţîñåţîöñ þåĝé.~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.common.errors.notificationDestinationsTooMany": [
+    {
+      "type": 0,
+      "value": "⟦Ţöö ɱåñý ñöţîƒîçåţîöñ đéšţîñåţîöñš ţö đîšþļåý. Ŕéļöåđ ţĥé ļîšţ.~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.common.errors.notificationLibraryIdUnsupported": [
+    {
+      "type": 0,
+      "value": "⟦Ûñšûþþöŕţéđ ļîƀŕåŕý ÎĐ îñ ñöţîƒîçåţîöñ.~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.common.errors.notificationPageInvalid": [
+    {
+      "type": 0,
+      "value": "⟦Îñṽåļîđ ñöţîƒîçåţîöñ þåĝé. Ŕéļöåđ ñöţîƒîçåţîöñš.~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.common.errors.notificationSeriesPageInvalid": [
+    {
+      "type": 0,
+      "value": "⟦Îñṽåļîđ šéŕîéš þåĝé. Ŕéļöåđ ñöţîƒîçåţîöñš.~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.common.errors.notificationsReloadBeforeMarkingRead": [
+    {
+      "type": 0,
+      "value": "⟦Ŕéļöåđ ñöţîƒîçåţîöñš ƀéƒöŕé ɱåŕķîñĝ ţĥéɱ ŕéåđ.~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.common.errors.onboardingProgressNoRevision": [
+    {
+      "type": 0,
+      "value": "⟦Öñƀöåŕđîñĝ þŕöĝŕéšš ĥåš ñö ŕéṽîšîöñ. Ŕéļöåđ ţö çöñţîñûé.~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.common.errors.onboardingReloadTour": [
+    {
+      "type": 0,
+      "value": "⟦Ŕéļöåđ ţĥé ţöûŕ ƀéƒöŕé çöñţîñûîñĝ.~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.common.errors.onboardingStateNoRevision": [
+    {
+      "type": 0,
+      "value": "⟦Öñƀöåŕđîñĝ šţåţé ĥåš ñö ŕéṽîšîöñ. Ŕéļöåđ ţö çöñţîñûé.~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.common.errors.onboardingStillSaving": [
+    {
+      "type": 0,
+      "value": "⟦Öñƀöåŕđîñĝ þŕöĝŕéšš îš šţîļļ ƀéîñĝ šåṽéđ.~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.common.errors.playbackControlCredentialInvalid": [
+    {
+      "type": 0,
+      "value": "⟦Îñṽåļîđ þļåýƀåçķ çöñţŕöļ çŕéđéñţîåļ.~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.common.errors.realtimeCredentialInvalid": [
+    {
+      "type": 0,
+      "value": "⟦Îñṽåļîđ ŕéåļţîɱé ĥåñđšĥåķé çŕéđéñţîåļ.~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.common.errors.roomIdentityInvalid": [
+    {
+      "type": 0,
+      "value": "⟦Îñṽåļîđ ŕööɱ îđéñţîţý.~~~~~~~~~⟧"
+    }
+  ],
+  "web.common.errors.roomSelectionIdentityInvalid": [
+    {
+      "type": 0,
+      "value": "⟦Îñṽåļîđ ŕööɱ šéļéçţîöñ îđéñţîţý.~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.common.errors.roomSnapshotInvalid": [
+    {
+      "type": 0,
+      "value": "⟦Îñṽåļîđ ŕööɱ šñåþšĥöţ.~~~~~~~~~⟧"
+    }
+  ],
+  "web.common.errors.roomSocketCredentialInvalid": [
+    {
+      "type": 0,
+      "value": "⟦Îñṽåļîđ ŕööɱ šöçķéţ çŕéđéñţîåļ.~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.common.errors.roomSuggestionInvalid": [
+    {
+      "type": 0,
+      "value": "⟦Îñṽåļîđ ŕööɱ šûĝĝéšţîöñ.~~~~~~~~~~⟧"
+    }
+  ],
+  "web.common.errors.roomSuggestionsTooMany": [
+    {
+      "type": 0,
+      "value": "⟦Ţöö ɱåñý ŕööɱ šûĝĝéšţîöñš. Ŕéļöåđ ţĥé ŕööɱ.~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.common.errors.sessionRefreshUnavailable": [
+    {
+      "type": 0,
+      "value": "⟦Ţĥé šéššîöñ çöûļđ ñöţ ƀé ŕéƒŕéšĥéđ ƀéçåûšé ţĥé šéŕṽéŕ đîđ ñöţ åñšŵéŕ.~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.common.errors.sourceFallbackIdentityInvalid": [
+    {
+      "type": 0,
+      "value": "⟦Îñṽåļîđ šöûŕçé ƒåļļƀåçķ îđéñţîţý.~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.common.errors.suggestionContinuationInvalid": [
+    {
+      "type": 0,
+      "value": "⟦Îñṽåļîđ šûĝĝéšţîöñ çöñţîñûåţîöñ.~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.common.errors.suggestionContinuationMissing": [
+    {
+      "type": 0,
+      "value": "⟦Ṁîššîñĝ šûĝĝéšţîöñ çöñţîñûåţîöñ.~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.common.errors.suggestionReceiptInvalid": [
+    {
+      "type": 0,
+      "value": "⟦Îñṽåļîđ šûĝĝéšţîöñ ŕéçéîþţ.~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.common.errors.verificationReceiptMismatch": [
+    {
+      "type": 0,
+      "value": "⟦Ṽéŕîƒîçåţîöñ ŕéçéîþţ đöéš ñöţ ɱåţçĥ ţĥé šûƀɱîţţéđ ŕéǫûéšţ.~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.common.errors.watchlistPageRepeated": [
+    {
+      "type": 0,
+      "value": "⟦Ţĥé ŵåţçĥļîšţ ţîţļéš ļîšţ ŕéþéåţéđ å þåĝé çûŕšöŕ.~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.common.format.bitrate.bps": [
+    {
+      "type": 0,
+      "value": "⟦"
+    },
+    {
+      "type": 1,
+      "value": "rate"
+    },
+    {
+      "type": 0,
+      "value": " ƀþš~~⟧"
+    }
+  ],
+  "web.common.format.bitrate.gbps": [
+    {
+      "type": 0,
+      "value": "⟦"
+    },
+    {
+      "type": 1,
+      "value": "rate"
+    },
+    {
+      "type": 0,
+      "value": " Ĝƀþš~~⟧"
+    }
+  ],
   "web.common.format.bitrate.kbps": [
     {
       "type": 0,
@@ -108006,6 +108488,20 @@
     {
       "type": 0,
       "value": "~~⟧"
+    }
+  ],
+  "web.common.format.percent": [
+    {
+      "type": 0,
+      "value": "⟦"
+    },
+    {
+      "type": 1,
+      "value": "percent"
+    },
+    {
+      "type": 0,
+      "value": "%~⟧"
     }
   ],
   "web.common.format.runtime.hoursMinutes": [
@@ -108184,6 +108680,48 @@
       "value": " ṀîƁ~~⟧"
     }
   ],
+  "web.common.format.size.pb": [
+    {
+      "type": 0,
+      "value": "⟦"
+    },
+    {
+      "type": 1,
+      "value": "size"
+    },
+    {
+      "type": 0,
+      "value": " ÞƁ~~⟧"
+    }
+  ],
+  "web.common.format.size.tb": [
+    {
+      "type": 0,
+      "value": "⟦"
+    },
+    {
+      "type": 1,
+      "value": "size"
+    },
+    {
+      "type": 0,
+      "value": " ŢƁ~~⟧"
+    }
+  ],
+  "web.common.format.size.tib": [
+    {
+      "type": 0,
+      "value": "⟦"
+    },
+    {
+      "type": 1,
+      "value": "size"
+    },
+    {
+      "type": 0,
+      "value": " ŢîƁ~~⟧"
+    }
+  ],
   "web.common.genres.action": [
     {
       "type": 0,
@@ -108358,6 +108896,12 @@
     {
       "type": 0,
       "value": "⟦Ŵéšţéŕñ~~~⟧"
+    }
+  ],
+  "web.common.job.cancellationRequested": [
+    {
+      "type": 0,
+      "value": "⟦Çåñçéļļåţîöñ ŕéǫûéšţéđ~~~~~~~~~⟧"
     }
   ],
   "web.common.job.cancelled": [
@@ -116922,6 +117466,20 @@
       "value": "⟦Ţĥîš îšñ'ţ å Šîļö ĥöɱé ļåýöûţ éẋþöŕţ.~~~~~~~~~~~~~~~⟧"
     }
   ],
+  "web.home.layout.transfer.pageTooLarge": [
+    {
+      "type": 0,
+      "value": "⟦ţĥîš þåĝé ŵöûļđ ĥåṽé ɱöŕé ţĥåñ "
+    },
+    {
+      "type": 1,
+      "value": "max"
+    },
+    {
+      "type": 0,
+      "value": " šåṽéđ šéçţîöñ çĥåñĝéš~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
   "web.home.layout.transfer.preferencesFailed": [
     {
       "type": 0,
@@ -118023,6 +118581,20 @@
     {
       "type": 0,
       "value": "⟦Ŵĥåţ ýöû šåṽéđ ţö ŵåţçĥ~~~~~~~~~~⟧"
+    }
+  ],
+  "web.home.rows.describe.pageNameLibrary": [
+    {
+      "type": 0,
+      "value": "⟦"
+    },
+    {
+      "type": 1,
+      "value": "label"
+    },
+    {
+      "type": 0,
+      "value": " þåĝé~~⟧"
     }
   ],
   "web.home.rows.describe.randomMix": [
@@ -122443,6 +123015,36 @@
     {
       "type": 0,
       "value": " Çĥ~~⟧"
+    }
+  ],
+  "web.item.card.mangaStatus.cancelled": [
+    {
+      "type": 0,
+      "value": "⟦Çåñçéļļéđ~~~~⟧"
+    }
+  ],
+  "web.item.card.mangaStatus.completed": [
+    {
+      "type": 0,
+      "value": "⟦Çöɱþļéţéđ~~~~⟧"
+    }
+  ],
+  "web.item.card.mangaStatus.hiatus": [
+    {
+      "type": 0,
+      "value": "⟦Ĥîåţûš~~~⟧"
+    }
+  ],
+  "web.item.card.mangaStatus.ongoing": [
+    {
+      "type": 0,
+      "value": "⟦Öñĝöîñĝ~~~⟧"
+    }
+  ],
+  "web.item.card.mangaStatus.upcoming": [
+    {
+      "type": 0,
+      "value": "⟦Ûþçöɱîñĝ~~~~⟧"
     }
   ],
   "web.item.card.mangaVolumes": [
@@ -127851,6 +128453,26 @@
       "value": "⟦Ţŕåñšçöđîñĝ îš đîšåƀļéđ~~~~~~~~~~⟧"
     }
   ],
+  "web.player.error.unknownMediaError": [
+    {
+      "type": 0,
+      "value": "⟦Ûñķñöŵñ ɱéđîå éļéɱéñţ éŕŕöŕ~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.player.error.updateFailed": [
+    {
+      "type": 0,
+      "value": "⟦Þļåýƀåçķ ûþđåţé ƒåîļéđ ("
+    },
+    {
+      "type": 1,
+      "value": "status"
+    },
+    {
+      "type": 0,
+      "value": ")~~~~~~~~~~⟧"
+    }
+  ],
   "web.player.error.upgradeRequired.message": [
     {
       "type": 0,
@@ -131861,6 +132483,12 @@
       "value": "⟦0 = ûñļîɱîţéđ~~~~~~⟧"
     }
   ],
+  "web.reader.document.fallbackTitle": [
+    {
+      "type": 0,
+      "value": "⟦Đöçûɱéñţ~~~~⟧"
+    }
+  ],
   "web.reader.endOfBook.nextChapter": [
     {
       "type": 0,
@@ -131873,6 +132501,12 @@
     {
       "type": 0,
       "value": "~~~⟧"
+    }
+  ],
+  "web.reader.error.fileEmpty": [
+    {
+      "type": 0,
+      "value": "⟦Ƒîļé îš éɱþţý~~~~~~⟧"
     }
   ],
   "web.reader.error.fileIdentifier": [
@@ -131891,6 +132525,18 @@
     {
       "type": 0,
       "value": "⟦Ţĥîš ƒîļé îš ţöö ļåŕĝé ţö öþéñ îñ ţĥé ƀŕöŵšéŕ. Đöŵñļöåđ îţ îñšţéåđ.~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.reader.error.unsupportedFormat": [
+    {
+      "type": 0,
+      "value": "⟦Ûñšûþþöŕţéđ ƀööķ ƒöŕɱåţ~~~~~~~~~~⟧"
+    }
+  ],
+  "web.reader.error.unsupportedOrCorrupted": [
+    {
+      "type": 0,
+      "value": "⟦Ûñšûþþöŕţéđ öŕ çöŕŕûþţéđ ƀööķ ƒîļé~~~~~~~~~~~~~~⟧"
     }
   ],
   "web.reader.fileOption.unnamed": [
@@ -140463,6 +141109,12 @@
       "value": "⟦Šûƀţîţļéš Åṽåîļåƀļé~~~~~~~~⟧"
     }
   ],
+  "web.settings.overlays.badge.multiSub.value": [
+    {
+      "type": 0,
+      "value": "⟦ÇÇ~⟧"
+    }
+  ],
   "web.settings.overlays.badge.network.description": [
     {
       "type": 0,
@@ -142309,6 +142961,12 @@
     {
       "type": 0,
       "value": "⟦Ŵî-Ƒî~~⟧"
+    }
+  ],
+  "web.settings.plexAuth.homeUserFallbackName": [
+    {
+      "type": 0,
+      "value": "⟦Þļéẋ ûšéŕ~~~~⟧"
     }
   ],
   "web.settings.plexAuth.homeUserNoServerAccess": [

@@ -19659,7 +19659,10 @@ export interface components {
       episode_name?: string;
       /** Format: int64 */
       episode_number?: number;
-      /** Format: int64 */
+      /**
+       * Format: int64
+       * @description Length in seconds of what position_seconds is measured against: the file, or the whole book for a multi-file audiobook; null when unknown
+       */
       file_duration: number | null;
       has_playback_control: boolean;
       is_jellyfin_client?: boolean;
@@ -31479,7 +31482,7 @@ export interface components {
       episode_number: number | null;
       /**
        * Format: int64
-       * @description Seconds; null when unknown
+       * @description Length in seconds of what position_seconds is measured against: the file, or the whole book for a multi-file audiobook; null when unknown
        * @example 8520
        */
       file_duration: number | null;
@@ -35706,7 +35709,7 @@ export interface components {
       /** @example Movies */
       library_name: string;
       /**
-       * @description unmatched, pending or ambiguous
+       * @description unmatched, pending or ambiguous. An audiobook without a provider match is unmatched
        * @example unmatched
        */
       status: string;

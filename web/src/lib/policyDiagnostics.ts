@@ -2,6 +2,7 @@ import type { Diagnostic } from "@codemirror/lint";
 import { Text } from "@codemirror/state";
 
 import type { PolicyCompileIssue } from "@/api/adminPolicy";
+import { t } from "@/i18n";
 
 function clamp(value: number, min: number, max: number) {
   return Math.min(Math.max(value, min), max);
@@ -25,7 +26,7 @@ export function mapPolicyIssuesToDiagnostics(
       from,
       to,
       severity: "error",
-      message: issue.message || "Policy compile error",
+      message: issue.message || t("web.admin.access.policy.editor.compileIssueFallback"),
     };
   });
 }

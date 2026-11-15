@@ -1,5 +1,7 @@
 import type { MemberWatchState } from "@/api/v2/watchTogetherMemberState";
+import { joinList } from "@/lib/appLocale";
 import { useT, type MessageKey, type Translate } from "@/i18n";
+
 import type { WatchTogetherRoomMember } from "@/lib/watchTogether";
 import { memberKey, type MemberTint } from "../members";
 
@@ -61,14 +63,14 @@ function describe(
   byMember: Map<string, MemberWatchState["state"]>,
   t: Translate,
 ) {
-  return members
-    .map((member) =>
+  return joinList(
+    members.map((member) =>
       t("web.watchTogether.dots.memberLabel", {
         name: member.display_name,
         state: t(label(byMember.get(memberKey(member)) ?? "unseen")),
       }),
-    )
-    .join(", ");
+    ),
+  );
 }
 
 export function DotsLegend() {

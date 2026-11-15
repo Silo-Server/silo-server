@@ -1,4 +1,5 @@
 import { useState, useMemo, useCallback, useEffect, useRef, type ChangeEvent } from "react";
+import { joinList } from "@/lib/appLocale";
 import { Check, Loader2, AlertCircle, Upload } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -6,7 +7,8 @@ import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import type { ItemDetail, RemoteImage } from "@/api/types";
 import { useItemImages, useApplyItemImage, useUploadItemImage } from "@/hooks/queries/items";
-import { useT, type MessageKey } from "@/i18n";
+import { numberText, useT, type MessageKey } from "@/i18n";
+
 import { cn } from "@/lib/utils";
 
 type ImageTab = "poster" | "backdrop" | "logo";
@@ -300,7 +302,7 @@ export default function ImageSelectorTab({
               )}
             >
               {p.id === null ? t("web.item.images.allProviders") : p.id.toUpperCase()}
-              <span className="tabular-nums opacity-60">{p.count}</span>
+              <span className="tabular-nums opacity-60">{numberText(p.count)}</span>
             </button>
           ))}
         </div>
@@ -312,9 +314,7 @@ export default function ImageSelectorTab({
           <AlertCircle className="size-3.5 shrink-0" />
           <span>
             {t("web.item.images.providerErrors", {
-              providers: Object.keys(providerErrors)
-                .map((k) => k.toUpperCase())
-                .join(", "),
+              providers: joinList(Object.keys(providerErrors).map((k) => k.toUpperCase())),
             })}
           </span>
         </div>

@@ -978,6 +978,10 @@ func (h *LibraryHandler) ListUnmatchedItems(ctx context.Context, search string, 
 		return nil, 0, apiError(http.StatusInternalServerError, "internal_error", "Database not configured")
 	}
 	search = strings.TrimSpace(search)
+	// Audiobooks keep media_items.status empty; one with no provider match
+	// after enrichment lists as unmatched.
+	unmatchedWhere := `(mi.status IN ('unmatched', 'pending', 'ambiguous') OR (` + catalog.AudiobookUnmatchedWhere("mi") + `))`
+	const unmatchedStatusSQL = `CASE WHEN mi.status IN ('unmatched', 'pending', 'ambiguous') THEN mi.status ELSE 'unmatched' END`
 	filter := ""
 	filterArgs := []any{}
 	if search != "" {
@@ -985,7 +989,7 @@ func (h *LibraryHandler) ListUnmatchedItems(ctx context.Context, search string, 
 		filter = ` AND (
 			mi.title ILIKE $1
 			OR mi.type ILIKE $1
-			OR mi.status ILIKE $1
+			OR ` + unmatchedStatusSQL + ` ILIKE $1
 			OR EXISTS (
 				SELECT 1
 				FROM media_item_libraries search_mil
@@ -1007,7 +1011,7 @@ func (h *LibraryHandler) ListUnmatchedItems(ctx context.Context, search string, 
 	countSQL := `
 		SELECT COUNT(*)
 		FROM media_items mi
-		WHERE mi.status IN ('unmatched', 'pending', 'ambiguous')` + guards
+		WHERE ` + unmatchedWhere + guards
 	countSQL += filter
 
 	var total int
@@ -1018,7 +1022,7 @@ func (h *LibraryHandler) ListUnmatchedItems(ctx context.Context, search string, 
 
 	listArgs := append(append([]any{}, filterArgs...), limit, offset)
 	listSQL := fmt.Sprintf(`
-		SELECT mi.content_id, mi.title, mi.year, mi.type, mi.status,
+		SELECT mi.content_id, mi.title, mi.year, mi.type, %s,
 		       COALESCE(lib.folder_id, 0),
 		       COALESCE(lib.folder_name, ''),
 		       mi.match_ignored_at
@@ -1030,10 +1034,10 @@ func (h *LibraryHandler) ListUnmatchedItems(ctx context.Context, search string, 
 			WHERE mil.content_id = mi.content_id
 			LIMIT 1
 		) lib ON true
-		WHERE mi.status IN ('unmatched', 'pending', 'ambiguous')%s%s
+		WHERE %s%s%s
 		ORDER BY mi.title ASC, mi.content_id ASC
 		LIMIT $%d OFFSET $%d
-	`, guards, filter, len(filterArgs)+1, len(filterArgs)+2)
+	`, unmatchedStatusSQL, unmatchedWhere, guards, filter, len(filterArgs)+1, len(filterArgs)+2)
 
 	rows, err := h.pool.Query(ctx, listSQL, listArgs...)
 	if err != nil {

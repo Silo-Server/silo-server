@@ -62,10 +62,11 @@ import {
   removedTitle,
 } from "@/lib/collections/copy";
 import type { CollectionScope } from "@/lib/collections/scope";
+import { joinList } from "@/lib/appLocale";
 import { cn } from "@/lib/utils";
 
 import { OrderBlock } from "../fields/OrderBlock";
-import { useT, type Translate } from "@/i18n";
+import { numberText, useT, type Translate } from "@/i18n";
 
 const SEARCH_LIMIT = 12;
 const DEBOUNCE_MS = 250;
@@ -188,7 +189,7 @@ function TitleSearch({
   const debounced = useDebounce(query.trim(), DEBOUNCE_MS);
   const libraryIds = useMemo(() => libraries.map((library) => library.id), [libraries]);
   const scopeText =
-    libraries.length > 0 ? libraries.map((library) => library.name).join(", ") : allYourLibraries();
+    libraries.length > 0 ? joinList(libraries.map((library) => library.name)) : allYourLibraries();
 
   const results = useQuery({
     queryKey: [...catalogKeys.all, "collectionTitleSearch", libraryIds, debounced],
@@ -382,7 +383,9 @@ function TitleRow({
       ) : (
         <span />
       )}
-      <span className="text-muted-foreground text-end text-[13px] tabular-nums">{index + 1}</span>
+      <span className="text-muted-foreground text-end text-[13px] tabular-nums">
+        {numberText(index + 1)}
+      </span>
       <Poster url={row.info?.posterUrl} />
       <span className="min-w-0">
         <span className="block truncate text-[14.5px] font-semibold">{label}</span>

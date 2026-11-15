@@ -1,4 +1,5 @@
 import { useRef } from "react";
+import { joinList } from "@/lib/appLocale";
 import type { MouseEvent } from "react";
 import { Film, RefreshCw, Tv } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -21,7 +22,7 @@ import { EnterKeyHint } from "@/components/ui/kbd";
 import ViewTransitionLink from "./ViewTransitionLink";
 import { RequestStatusBadge } from "./RequestStatusBadge";
 import RequestResultsGrid, { RequestResultsPager } from "./RequestResultsGrid";
-import { useT, type Translate } from "@/i18n";
+import { numberText, useT, type Translate } from "@/i18n";
 
 function cardKey(item: Pick<RequestMediaResult, "media_type" | "tmdb_id">): string {
   return `${item.media_type}-${item.tmdb_id}`;
@@ -247,14 +248,14 @@ function DialogRow({
       id={optionId}
       role="option"
       aria-selected={isSelected}
-      aria-label={[
-        item.title,
-        item.year ? String(item.year) : null,
-        formatMediaType(item.media_type),
-        state ? formatRequestDisplayState(state) : reasonLabel,
-      ]
-        .filter(Boolean)
-        .join(", ")}
+      aria-label={joinList(
+        [
+          item.title,
+          item.year ? numberText(item.year) : null,
+          formatMediaType(item.media_type),
+          state ? formatRequestDisplayState(state) : reasonLabel,
+        ].filter((part): part is string => Boolean(part)),
+      )}
       data-selected={isSelected || undefined}
       onMouseMove={isSelected ? undefined : onSelect}
       tabIndex={-1}

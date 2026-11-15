@@ -77,8 +77,19 @@ function isPositiveInteger(value: unknown): value is number {
   return typeof value === "number" && Number.isInteger(value) && value > 0;
 }
 
+const MAX_LABEL_CODE_POINTS = 256;
+
 function isLabel(value: unknown): value is string {
-  return typeof value === "string" && value.trim().length > 0 && [...value].length <= 256;
+  return (
+    typeof value === "string" &&
+    value.trim().length > 0 &&
+    [...value].length <= MAX_LABEL_CODE_POINTS
+  );
+}
+
+/** `text` trimmed and cut to the length a shortcut label may have. */
+export function shortcutLabel(text: string): string {
+  return [...text.trim()].slice(0, MAX_LABEL_CODE_POINTS).join("");
 }
 
 function isTargetId(value: unknown): value is string {

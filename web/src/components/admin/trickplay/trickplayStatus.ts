@@ -31,7 +31,11 @@ export function libraryTrickplayDetail(library: AdminTrickplayLibrary): string {
     parts.push(t("web.admin.common.trickplay.badge.runningCount", countValues(library.running)));
   if (library.unusable > 0)
     parts.push(t("web.admin.common.trickplay.badge.failedCount", countValues(library.unusable)));
-  parts.push(formatFileSize(library.sheet_bytes, { fallback: "0 B" }));
+  parts.push(
+    formatFileSize(library.sheet_bytes, {
+      fallback: t("web.common.format.size.bytes", { size: 0 }),
+    }),
+  );
   return t("web.admin.common.trickplay.badge.detail", { details: parts.join(" · ") });
 }
 

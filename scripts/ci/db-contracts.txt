@@ -37,6 +37,9 @@
 ./internal/audiobooks TestABSListsLeaveOutBooksInNoLibraryDB
 ./internal/audiobooks TestABSLibraryItemsFiltersAndSortDB
 ./internal/audiobooks TestABSSeriesIdentityAndContinueListeningDB
+./internal/audiobooks TestABSCollapsedPagesAndNarrowLookupsDB
+./internal/audiobooks TestABSAuthorCountsRefreshOnOneConnectionPoolDB
+./internal/audiobooks TestABSAuthorsLeaveOutABookJustAddedToADisabledLibraryDB
 ./internal/api/handlers TestAdminStatsLeaveOutFilesAndItemsHeldByRemovalGraceDB
 ./internal/sections TestRuleRowsReadTheViewersWatchStatePostgres
 ./internal/sections TestSmartCollectionRowWithDisplayFilterReadsTheViewersWatchStatePostgres
@@ -118,6 +121,8 @@
 
 # Episode collection counts name exactly the episodes their cursor pages list, under every rule and access limit.
 ./internal/catalog TestEpisodeCatalogCountsMatchCursorPagesPostgres
+./internal/catalog TestEpisodeCatalogRefreshWaitsForAnEpisodeEditPostgres
+./internal/catalog TestEpisodeCatalogRefreshSerializesFileChangesPostgres
 
 # PostgreSQL search keeps typo matches that contain every query word and ranks
 # titles starting with the query first, on the cursor and offset paths. Search
@@ -168,6 +173,12 @@
 # A monitored rename of a book folder keeps the book: the old path is
 # reconciled first, and the removal grace holds the book for the new path.
 ./internal/scanner TestScanSubtreeAudiobookRenameKeepsBookDB
+# Two copies of one recording on disk are two items; only a moved folder reuses one.
+./internal/scanner TestScanAudiobookSecondCopyIsItsOwnItemDB
+
+# A subtree scan inside a book folder rebuilds that book and marks missing the
+# files of a subfolder an earlier scoped scan imported as a book of its own.
+./internal/scanner TestScanSubtreeAudiobookInsideBookRetiresSubfolderBookDB
 
 # A rescan of a retagged, unmatched ebook keeps the fields and author credits an
 # admin locked, including locked fields left empty.
@@ -524,6 +535,7 @@
 ./internal/downloads TestPreparedReplacementCountsTheEntryStatusUnderTheLockDB
 ./internal/downloads TestPreparedReplacementRefusesAStaleGuardUnderTheLockDB
 ./internal/downloads TestManagedBatchOverConcurrentCapDB
+./internal/downloads TestDeviceReportedTransfersHoldNoConcurrentSlotDB
 ./internal/downloads TestAttachPreparationsPostgres
 ./internal/downloads TestFailedPreparationRefreshIsSharedPostgres
 ./internal/downloads TestPreparationControlsPauseResumeAndCancel
@@ -858,6 +870,7 @@
 # AI metadata translations never replace provider or manual localized text.
 ./internal/catalog TestAITranslationNeverOverwritesProviderOrManualText
 ./internal/catalog TestPlainAITranslationFillsOnlyEmptyFields
+./internal/catalog TestAITranslationOfChangedSourceIsDropped
 
 # A provider refresh with no translation clears only a copy of the base item's text.
 ./internal/catalog TestProviderUpsertClearsCopiedBaseTextOnly
@@ -1013,6 +1026,15 @@
 # An audiobook rescan keeps the authors and narrators an admin locked with the
 # crew lock.
 ./internal/scanner TestAudiobookRescanKeepsCrewLockedCreditsDB
+
+# A provider match owns an audiobook's year, genres and credits: a rescan only
+# fills what is empty, and the match keeps the tag narrator and the book's own
+# cover, and a renamed folder of a matched book keeps its item. Audiobooks
+# without a provider match show in the unmatched list.
+./internal/scanner TestAudiobookRescanKeepsProviderMatchDB
+./internal/scanner TestAudiobookRenamedFolderFindsMatchedItemDB
+./internal/audiobooks TestPersistKeepsTagNarratorAndLocalCoverDB
+./internal/api/handlers TestUnmatchedItemsListsAudiobooksWithoutProviderMatchDB
 
 # Dashboard egress splits by stream node and API server without adding the
 # per-node rows to the total, and a wide bucket's split comes from its peak minute.
