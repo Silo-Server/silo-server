@@ -1,4 +1,4 @@
-import { memo, useCallback, useMemo } from "react";
+import { memo, useCallback, useId, useMemo } from "react";
 import { ContinueWatchingRowCard } from "@/components/ContinueWatchingCard";
 import MediaCarousel, { type MediaCarouselWindowing } from "@/components/MediaCarousel";
 import SectionItemCard from "@/components/SectionItemCard";
@@ -52,22 +52,29 @@ function SectionPinButton({
   const t = useT();
   const { togglePin, isPinned, canToggle } = useToggleSidebarPin();
   const pinned = isPinned(libraryId, "section", sectionId);
+  const labelId = useId();
 
   if (!canToggle) return null;
 
   return (
-    <button
-      onClick={() => togglePin(libraryId, { type: "section", id: sectionId, label })}
-      className={`rounded-full p-1.5 transition-colors ${
-        pinned
-          ? "text-primary hover:text-primary/80"
-          : "text-muted-foreground/40 hover:bg-accent/60 hover:text-muted-foreground opacity-0 group-hover/carousel:opacity-100"
-      }`}
-      title={pinned ? t("web.home.sectionRow.unpin") : t("web.home.sectionRow.pin")}
-      aria-label={pinned ? t("web.home.sectionRow.unpin") : t("web.home.sectionRow.pin")}
-    >
-      {pinned ? <PinOff className="h-4 w-4" /> : <Pin className="h-4 w-4" />}
-    </button>
+    <>
+      <span id={labelId} hidden>
+        {label}
+      </span>
+      <button
+        onClick={() => togglePin(libraryId, { type: "section", id: sectionId, label })}
+        className={`rounded-full p-1.5 transition-colors ${
+          pinned
+            ? "text-primary hover:text-primary/80"
+            : "text-muted-foreground/40 hover:bg-accent/60 hover:text-muted-foreground opacity-0 group-hover/carousel:opacity-100"
+        }`}
+        title={pinned ? t("web.home.sectionRow.unpin") : t("web.home.sectionRow.pin")}
+        aria-label={pinned ? t("web.home.sectionRow.unpin") : t("web.home.sectionRow.pin")}
+        aria-describedby={labelId}
+      >
+        {pinned ? <PinOff className="h-4 w-4" /> : <Pin className="h-4 w-4" />}
+      </button>
+    </>
   );
 }
 
