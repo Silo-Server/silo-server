@@ -1093,6 +1093,10 @@ func TestAudiobookTagTitle(t *testing.T) {
 		{"Book Title", "Book Title - Saga Name", "Saga Name", "Book Title"},
 		// The series must appear as whole words, not inside one.
 		{"Book Title", "Book Title: A Little Adventure", "It", "Book Title: A Little Adventure"},
+		// Words in any script count: an album adding a non-Latin series is
+		// not a subtitle, and a non-Latin series prefix is still a prefix.
+		{"星河", "星河 - 远山书系", "远山书系", "星河"},
+		{"远山书系 3 - 星河", "星河", "远山书系", "星河"},
 		// Unrelated tags keep the title: a single file's album may be its
 		// series or a collection.
 		{"Book Title", "Saga Name", "Saga Name", "Book Title"},

@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 )
 
 // maxAudiobookCreditsPerRole and maxAudiobookCreditNameLen bound what one
@@ -172,10 +173,13 @@ var (
 )
 
 // containsTitleWords reports whether phrase appears in text as whole words,
-// ignoring case and punctuation. An empty phrase is never contained.
+// ignoring case and punctuation. Words are runs of letters and digits in any
+// script. An empty phrase is never contained.
 func containsTitleWords(text, phrase string) bool {
 	words := func(v string) string {
-		return " " + strings.ToLower(strings.TrimSpace(collapseSpacesRE.ReplaceAllString(audiobookDedupeTitleTokenRE.ReplaceAllString(v, " "), " "))) + " "
+		return " " + strings.Join(strings.FieldsFunc(strings.ToLower(v), func(r rune) bool {
+			return !unicode.IsLetter(r) && !unicode.IsNumber(r)
+		}), " ") + " "
 	}
 	p := words(phrase)
 	return strings.TrimSpace(p) != "" && strings.Contains(words(text), p)
