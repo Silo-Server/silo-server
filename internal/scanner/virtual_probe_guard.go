@@ -45,14 +45,18 @@ func VirtualDurationProvesIdentity(probedSeconds, expectedRuntimeMinutes int) bo
 }
 
 // VirtualServedSizePlausibilityRatio is the largest served-vs-declared size
-// ratio a measured duration may excuse. A provider's listing rounds release
-// sizes (the observed production band is 12–19% for a 0.1 GB advertisement), so
-// a duration proof must be allowed to excuse gaps well beyond the 5% evidence
-// tolerance. Rounding cannot explain a multiple, though: the production failure
-// this cap exists for served 17.7 GB for a 3.78 GB declaration (4.7x). Twice the
-// advertised size is far outside any rounding band and far below that failure,
-// so a gap beyond it is implausible on its face: the duration may still keep the
-// bytes playable for the request, but it can never establish release identity.
+// ratio a repeated serve may confirm as release identity. A provider's listing
+// rounds release sizes (the observed production band is 12–19% for a 0.1 GB
+// advertisement), so a duration proof serves as the first observation for a gap
+// well beyond the 5% evidence tolerance. Rounding cannot explain a multiple,
+// though: the production failure this cap exists for served 17.7 GB for a
+// 3.78 GB declaration (4.7x). Twice the advertised size is far outside any
+// rounding band and far below that failure, so a gap beyond it can never
+// establish release identity.
+//
+// The cap no longer decides usability. Bytes outside the ratio stay playable,
+// inventoried and reported like any other unverified serve; only their release
+// identity remains unproven. See ClassifyVirtualServedEvidence.
 const VirtualServedSizePlausibilityRatio = 2.0
 
 // VirtualServedSizeImplausible reports whether the served-vs-declared size gap
@@ -79,18 +83,25 @@ const (
 	// may be cached, persisted and used for identity-sensitive decisions.
 	VirtualServedEvidenceAdmitted VirtualServedEvidenceVerdict = iota
 	// VirtualServedEvidenceUnverified means the served size contradicts the
-	// declared release size while the measured duration is plausible for the
-	// item. The bytes are playable for the current request — a release can be
-	// posted short of the indexer's advertised size — but the evidence does not
-	// prove which release was served. It must not enter the probe cache as
-	// authoritative evidence, be persisted as the row's identity, or feed
-	// identity-sensitive decisions such as version death or candidate bounding.
-	// The first served-size observation a duration-proven probe records is also
-	// unverified: one serve cannot distinguish the release from a wrong file of
-	// the same runtime.
+	// declared release size while nothing the probe measured contradicts the
+	// declaration. The bytes are usable: the probe inventory (measured tracks
+	// and duration) may be written to the row and reported to clients, and the
+	// file may be planned and played. A release can be posted short of the
+	// indexer's advertised size, and some deployments serve a materially
+	// different size for a normal release.
+	//
+	// The verdict withholds release identity only. The evidence must not enter
+	// the probe cache as authoritative evidence, stamp the row's probe identity,
+	// or feed identity-sensitive decisions such as version death or candidate
+	// bounding. The first served-size observation a duration-proven probe
+	// records is also unverified: one serve cannot distinguish the release from
+	// a wrong file of the same runtime.
 	VirtualServedEvidenceUnverified
-	// VirtualServedEvidenceMismatch means the served bytes are not the declared
-	// release: the size disagrees and the duration does not prove identity.
+	// VirtualServedEvidenceMismatch means the probe found evidence of a
+	// different file: the measured duration contradicts the declared runtime, or
+	// the measured track layout contradicts the declaration (a declared video
+	// release served with no video stream). Size alone never produces this
+	// verdict; see ClassifyVirtualServedEvidence.
 	VirtualServedEvidenceMismatch
 )
 
@@ -100,34 +111,80 @@ func (v VirtualServedEvidenceVerdict) EstablishesIdentity() bool {
 	return v == VirtualServedEvidenceAdmitted
 }
 
-// ClassifyVirtualServedEvidence classifies probed evidence against the declared
-// release. Size alone is not an identity verdict. A release can be posted short
-// of the indexer's advertised size while still being the right content —
-// production observed a 5.57 GB posting of a release an indexer declared at
-// 6.33 GB — so a size contradiction with a plausible duration stays playable
-// but unverified rather than becoming proof of identity. A genuinely different
-// release (a remux of another title, say) fails the duration check
-// independently of its size, and evidence with no duration on either side
-// keeps the historical rejection.
-func ClassifyVirtualServedEvidence(declaredBytes, servedBytes int64, probedSeconds, expectedRuntimeMinutes int) VirtualServedEvidenceVerdict {
-	if !VirtualServedSizeMismatch(declaredBytes, servedBytes) {
-		return VirtualServedEvidenceAdmitted
+// Usable reports whether the probed bytes may be inventoried, planned and
+// played. Only a positive identity contradiction rejects them; a size gap with
+// nothing contradicting the declaration is usable but unverified.
+func (v VirtualServedEvidenceVerdict) Usable() bool {
+	return v != VirtualServedEvidenceMismatch
+}
+
+// VirtualDurationContradictsDeclaration reports whether both the measured
+// duration and the catalog runtime are known and disagree beyond
+// VirtualRuntimeTolerance. This is a positive identity signal: a different
+// title (a remux, a trailer, an episode from another season) does not land
+// inside the tolerance no matter what size it serves.
+func VirtualDurationContradictsDeclaration(probedSeconds, expectedRuntimeMinutes int) bool {
+	return probedSeconds > 0 && expectedRuntimeMinutes > 0 &&
+		!VirtualRuntimePlausible(probedSeconds, expectedRuntimeMinutes)
+}
+
+// VirtualTrackLayoutContradictsDeclaration reports whether the probe's measured
+// track layout is positive evidence that the bytes are not the declared release.
+// It is deliberately narrow so a legitimate re-encode is never mistaken for a
+// different file:
+//
+//   - the declaration names video (a resolution, a video codec, or video tracks)
+//     and the probed bytes carry no video stream at all;
+//   - otherwise nothing is claimed. Codec, container, HDR, language and quality
+//     differences are normal variants of the same release, and duration remains
+//     the primary identity check.
+func VirtualTrackLayoutContradictsDeclaration(declared, probed *models.MediaFile) bool {
+	if declared == nil || probed == nil || declared.IsAudioOnly() {
+		return false
 	}
-	if VirtualDurationProvesIdentity(probedSeconds, expectedRuntimeMinutes) {
-		// A gap beyond the plausibility ratio is not a rounded listing, so the
-		// duration keeps the bytes playable but never proves which release was
-		// served. See VirtualServedSizePlausibilityRatio.
+	declaresVideo := strings.TrimSpace(declared.Resolution) != "" ||
+		strings.TrimSpace(declared.CodecVideo) != "" ||
+		len(declared.VideoTracks) > 0
+	if !declaresVideo {
+		return false
+	}
+	if len(probed.VideoTracks) > 0 {
+		return false
+	}
+	// "No video track" is a contradiction only when the probe also measured
+	// the container. An empty or thin probe result (a caller-supplied fake, a
+	// cache entry that only carried the audio menu, a partial read) is missing
+	// evidence, not evidence of an audio-only file.
+	return probed.Duration > 0 || probed.ProbedFormatSize > 0
+}
+
+// ClassifyVirtualServedEvidence classifies probed evidence against the declared
+// release. It separates identity from usability: size alone never rejects the
+// bytes. A deployment can serve a materially different size for a normal
+// release (provider listing vs. what the storage layer actually holds), so a
+// size contradiction is Unverified — usable for inventory, planning and
+// playback, but not proof of which release was served.
+//
+// A genuine different-file signal still rejects: the measured duration must be
+// plausible for the item's runtime, and (through
+// ClassifyVirtualServedEvidenceForProbe) the measured track layout must not
+// contradict a declared video release. Those are positive contradictions, not
+// the absence of a size match.
+func ClassifyVirtualServedEvidence(declaredBytes, servedBytes int64, probedSeconds, expectedRuntimeMinutes int) VirtualServedEvidenceVerdict {
+	if VirtualDurationContradictsDeclaration(probedSeconds, expectedRuntimeMinutes) {
+		return VirtualServedEvidenceMismatch
+	}
+	if VirtualServedSizeMismatch(declaredBytes, servedBytes) {
 		return VirtualServedEvidenceUnverified
 	}
-	return VirtualServedEvidenceMismatch
+	return VirtualServedEvidenceAdmitted
 }
 
 // VirtualServedEvidenceRejected reports whether probed evidence must be
-// rejected as a different release than the catalog row declares: the served
-// container size disagrees beyond VirtualServedSizeTolerance and the measured
-// duration does not prove identity. A size contradiction whose duration is
-// plausible is unverified, not rejected: it still plays, but see
-// VirtualServedEvidenceVerdict for what it may not be used for.
+// rejected as a different file than the catalog row declares: the measured
+// duration contradicts the runtime. A size contradiction alone is unverified,
+// not rejected: it still plays, but see VirtualServedEvidenceVerdict for what
+// it may not be used for.
 func VirtualServedEvidenceRejected(declaredBytes, servedBytes int64, probedSeconds, expectedRuntimeMinutes int) bool {
 	return ClassifyVirtualServedEvidence(declaredBytes, servedBytes, probedSeconds, expectedRuntimeMinutes) == VirtualServedEvidenceMismatch
 }
@@ -366,13 +423,14 @@ func VirtualServedSizeSubtitleToken(tracks []models.SubtitleTrack) string {
 // Admitted. After that, the observation is the pin's baseline and the cost is
 // one extra probe per pin lifetime.
 //
-// A mismatch (no duration proof) is returned unchanged and records nothing: a
-// different release must never teach the gate to accept its bytes. A serve that
-// diverges from an existing observation is Unverified as well and leaves the
-// observation untouched, so a later wrong file cannot displace the bytes the pin
-// was proven to serve. A gap beyond VirtualServedSizePlausibilityRatio is
-// unverified at most: a duration proof keeps it playable, but no observation or
-// repeat serve can confirm bytes that far from the advertised size.
+// A mismatch (a duration contradiction) is returned unchanged and records
+// nothing: a different file must never teach the gate to accept its bytes. A
+// serve that diverges from an existing observation is Unverified as well and
+// leaves the observation untouched, so a later wrong file cannot displace the
+// bytes the pin was proven to serve. A gap beyond
+// VirtualServedSizePlausibilityRatio is unverified at most: the bytes stay
+// usable, but no observation or repeat serve can confirm identity that far from
+// the advertised size.
 func ClassifyVirtualServedEvidenceForPinWithSnapshot(pin string, declaredBytes, servedBytes int64, probedSeconds, expectedRuntimeMinutes int, inventoryToken string) VirtualServedEvidenceVerdict {
 	if VirtualServedSizeImplausible(declaredBytes, servedBytes) {
 		return ClassifyVirtualServedEvidence(declaredBytes, servedBytes, probedSeconds, expectedRuntimeMinutes)
@@ -400,4 +458,30 @@ func ClassifyVirtualServedEvidenceForPinWithSnapshot(pin string, declaredBytes, 
 	}
 	RecordVirtualServedSizeSnapshotIfProven(pin, declaredBytes, servedBytes, probedSeconds, expectedRuntimeMinutes, inventoryToken)
 	return VirtualServedEvidenceUnverified
+}
+
+// ClassifyVirtualServedEvidenceForProbe is the one gate every probe acceptance
+// point calls. It applies the positive identity contradictions first — a
+// measured duration or track layout that contradicts the declaration — and then
+// the pin-aware served-size comparison. Composing them here keeps a fresh probe
+// and a probe-cache hit on the same rule: a size gap never rejects the bytes,
+// while a duration or layout contradiction rejects them on every path.
+func ClassifyVirtualServedEvidenceForProbe(
+	pin string,
+	declaredBytes int64,
+	declared, probed *models.MediaFile,
+	expectedRuntimeMinutes int,
+) VirtualServedEvidenceVerdict {
+	if probed == nil {
+		// No probe result is no evidence; callers must not treat it as a
+		// playable inventory.
+		return VirtualServedEvidenceMismatch
+	}
+	if VirtualTrackLayoutContradictsDeclaration(declared, probed) {
+		return VirtualServedEvidenceMismatch
+	}
+	return ClassifyVirtualServedEvidenceForPinWithSnapshot(
+		pin, declaredBytes, probed.ProbedFormatSize, probed.Duration, expectedRuntimeMinutes,
+		VirtualServedSizeSubtitleToken(probed.SubtitleTracks),
+	)
 }

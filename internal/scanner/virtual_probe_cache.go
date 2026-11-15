@@ -25,9 +25,10 @@ const (
 // VirtualServedSizeTolerance is the maximum relative difference between the
 // bytes ffprobe read from a virtual candidate and the size its catalog row
 // declares before the served stream is treated as a release-size discrepancy.
-// A discrepancy is not by itself a rejection: VirtualServedEvidenceRejected
-// accepts it when the measured duration proves the content is the right
-// release, because a posting can be short of the indexer's advertised size.
+// A discrepancy is not a rejection: the bytes stay usable and their measured
+// inventory is written, while release identity remains unverified. A posting
+// can be short of the indexer's advertised size, and some deployments serve a
+// materially different size for a normal release.
 //
 // 0.05 accommodates legitimate variance between what an indexer advertises and
 // what Usenet par2 repair or rounding actually delivers. A different release
@@ -123,15 +124,15 @@ func (c *VirtualProbeCache) Probe(
 		verdict := classifyVirtualProbeEvidence(inputSnapshot, probed)
 		if !verdict.EstablishesIdentity() {
 			// A readable container that does not establish the row's release
-			// identity must not be cached. A mismatch is a different release:
-			// the playback path rejects it, and replaying it for the cache TTL
-			// would keep rejecting without ever contacting the provider again,
-			// so returning it uncached lets the row's short wrong-source
-			// backoff reach fresh provider bytes. An unverified size
-			// contradiction (plausible duration, different bytes) still plays
-			// for this request, but caching it would let unproven evidence
-			// stand as the row's inventory for the whole TTL and feed
-			// identity-sensitive decisions. Both stay uncached.
+			// identity must not be cached as authoritative evidence. A mismatch
+			// is a different file: the playback path rejects it, and replaying
+			// it for the cache TTL would keep rejecting without ever contacting
+			// the provider again, so returning it uncached lets the row's short
+			// wrong-source backoff reach fresh provider bytes. An unverified
+			// size gap is usable and its inventory is written by the caller, but
+			// caching it would let unproven evidence stand as identity for the
+			// whole TTL. Both stay uncached; the next serve re-probes and either
+			// confirms the observation or measures fresh bytes.
 			return cloneVirtualProbeFile(probed), nil
 		}
 		c.store(key, probed, time.Now())
@@ -278,8 +279,7 @@ func classifyVirtualProbeEvidence(inputSnapshot, probed *models.MediaFile) Virtu
 		return VirtualServedEvidenceMismatch
 	}
 	pin := VirtualServedSizePin(inputSnapshot.FilePath, inputSnapshot.VirtualOwnerInstallationID)
-	inventoryToken := VirtualServedSizeSubtitleToken(probed.SubtitleTracks)
-	return ClassifyVirtualServedEvidenceForPinWithSnapshot(
-		pin, inputSnapshot.FileSize, probed.ProbedFormatSize, probed.Duration, inputSnapshot.VirtualExpectedRuntimeMinutes, inventoryToken,
+	return ClassifyVirtualServedEvidenceForProbe(
+		pin, inputSnapshot.FileSize, inputSnapshot, probed, inputSnapshot.VirtualExpectedRuntimeMinutes,
 	)
 }
