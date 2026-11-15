@@ -528,6 +528,10 @@ func StartTranscode(ctx context.Context, opts TranscodeOpts) (*TranscodeSession,
 	}
 	if err := prepareSubtitleFilterInput(ctx, &opts); err != nil {
 		releaseHWDevice()
+		// A start refused here wrote nothing. Drop the directory it made,
+		// which a node that hands the start back would otherwise keep until
+		// the orphan sweep; a directory that holds anything stays.
+		_ = os.Remove(opts.OutputDir)
 		return nil, err
 	}
 	copyPlan, err := resolveCopyPlan(ctx, opts)
