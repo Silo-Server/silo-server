@@ -87,20 +87,7 @@ func TestAITranslationNeverOverwritesProviderOrManualText(t *testing.T) {
 // can't undo a forced re-translation that finished after it read the source
 // (#2472).
 func TestPlainAITranslationFillsOnlyEmptyFields(t *testing.T) {
-	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
-	if dsn == "" {
-		t.Skip("SILO_TEST_DATABASE_URL is not set")
-	}
-	config, err := pgxpool.ParseConfig(dsn)
-	if err != nil {
-		t.Fatal(err)
-	}
-	config.MaxConns = 1
-	pool, err := pgxpool.NewWithConfig(t.Context(), config)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(pool.Close)
+	pool := localizationTestPool(t)
 	if _, err := pool.Exec(t.Context(), `
 		CREATE TEMP TABLE media_item_localizations (LIKE public.media_item_localizations INCLUDING DEFAULTS INCLUDING INDEXES);
 		CREATE TEMP TABLE season_localizations (LIKE public.season_localizations INCLUDING DEFAULTS INCLUDING INDEXES);
