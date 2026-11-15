@@ -211,6 +211,9 @@ export default function HeroBanner({
   const autoplaying = !paused && (!reduceMotion || playRequested);
   const togglePause = useCallback(() => {
     if (autoplaying) {
+      // Dropping the Play request keeps a hover or focus `resume` from
+      // restarting a reduced-motion slideshow the user just paused.
+      setPlayRequested(false);
       setPaused(true);
       return;
     }
