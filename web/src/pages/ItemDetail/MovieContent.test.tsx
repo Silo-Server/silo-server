@@ -239,6 +239,8 @@ function makeFileVersion(overrides: Partial<FileVersion> = {}): FileVersion {
     edition_raw: overrides.edition_raw,
     edition_key: overrides.edition_key,
     audio_tracks: overrides.audio_tracks,
+    available: overrides.available,
+    failed: overrides.failed,
   };
 }
 
@@ -403,7 +405,7 @@ describe("MovieContent", () => {
 
     expect(mocks.capturedActionBarProps.value).toMatchObject({
       selectedVersion: expect.objectContaining({ file_id: requested.file_id }),
-      selectedVersionMissing: false,
+      versionFallback: null,
     });
   });
 
@@ -472,7 +474,11 @@ describe("MovieContent", () => {
     });
   });
 
-  it("asks for a replacement pick when the requested row is gone", () => {
+  // A plan that named an effective row outside the version list leaves
+  // `last_file_id` naming a row the list does not carry. That used to dead-end
+  // the page with Play disabled; the page must keep playing, say why it skipped
+  // the remembered row, and leave the picker one click away.
+  it("plays the best listed version when the remembered row left the list", () => {
     mocks.useCurrentProfile.mockReturnValue({ profile: { id: PROFILE_ID } });
     rememberRequestedFileId("movie-1", 3, PROFILE_ID);
 
@@ -487,8 +493,46 @@ describe("MovieContent", () => {
     );
 
     expect(mocks.capturedActionBarProps.value).toMatchObject({
-      selectedVersion: null,
-      selectedVersionMissing: true,
+      selectedVersion: expect.objectContaining({ file_id: 1 }),
+      versionFallback: expect.objectContaining({ reason: "unlisted", skipped: null }),
+      explicitFileSelection: false,
+    });
+  });
+
+  // A failed row is one release the provider has stopped serving. It must not
+  // disable Play for the whole item while another row is available: the page
+  // selects the available row and names the skipped one.
+  it("skips a failed default row while another version is available", () => {
+    mocks.useCurrentProfile.mockReturnValue({ profile: { id: PROFILE_ID } });
+    const failed = makeFileVersion({ file_id: 1, failed: true, available: false });
+    const available = makeFileVersion({ file_id: 2, resolution: "1080p" });
+
+    renderInQueryClient(
+      <MemoryRouter initialEntries={["/item/movie-1"]}>
+        <MovieContent
+          item={makeMovieItem({
+            versions: [failed, available],
+            user_data: {
+              played: false,
+              position_seconds: 0,
+              duration_seconds: 7200,
+              last_file_id: failed.file_id,
+            },
+          })}
+        />
+      </MemoryRouter>,
+    );
+
+    // `last_file_id` is the server's record of the row that served the bytes, not
+    // a pick the viewer made here, so a failed hint is skipped rather than
+    // replayed. Play starts the available row and says why.
+    expect(mocks.capturedActionBarProps.value).toMatchObject({
+      selectedVersion: expect.objectContaining({ file_id: available.file_id }),
+      versionFallback: expect.objectContaining({
+        reason: "failed",
+        skipped: expect.objectContaining({ file_id: failed.file_id }),
+      }),
+      explicitFileSelection: false,
     });
   });
 

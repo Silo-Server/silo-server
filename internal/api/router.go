@@ -2372,6 +2372,11 @@ func newChiRouter(deps Dependencies) chi.Router {
 		if deps.FileRepo != nil {
 			playbackHandler.FileVersionFetcher = deps.FileRepo
 		}
+		if detailSvc != nil {
+			// A start plan's effective row must be a row the item's version list
+			// carries, judged by that list's own projection.
+			playbackHandler.VersionList = detailSvc
+		}
 		if subtitleRepo != nil {
 			playbackHandler.SubtitleRepo = subtitleRepo
 		}

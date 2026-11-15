@@ -125,6 +125,23 @@ describe("describePlanTerminal", () => {
     });
   });
 
+  it("names a source mismatch and keeps the server's version-list hint", () => {
+    expect(
+      describePlanTerminal({
+        reason: "source_mismatch",
+        message:
+          "The provider served a different release's bytes for this version. Refresh the version list and choose again.",
+        retryable: true,
+      }),
+    ).toEqual({
+      title: "This version's source is wrong",
+      message:
+        "The provider served a different release's bytes for this version. Refresh the version list and choose again.",
+      reason: "source_mismatch",
+      retryable: true,
+    });
+  });
+
   it("falls back to the server's own message for reasons it does not name", () => {
     expect(
       describePlanTerminal({

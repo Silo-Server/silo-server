@@ -1440,6 +1440,7 @@ function WatchPagePlayer({
   const canRetryTerminal =
     !session.plan &&
     (session.errorReason === "virtual_source_unavailable" ||
+    session.errorReason === "source_mismatch" ||
     session.errorReason === "transcode_start_failed"
       ? session.errorRetryable === true
       : isAdaptationUnavailableReason(session.errorReason));

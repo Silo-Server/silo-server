@@ -121,6 +121,12 @@ const (
 	// survive a concurrent stop instead of collapsing to a not-found.
 	virtualSourceUnavailableReasonV3  = "virtual_source_unavailable"
 	replanVirtualInputTimeoutReasonV3 = "replan_virtual_input_timeout"
+	// sourceMismatchReasonV3 is the terminal reason for a selected version whose
+	// provider served another release's bytes. It names the same verdict the
+	// version list reports as `source_mismatch`: the release is alive, its bytes
+	// were wrong. A client that does not recognize the value still gets a
+	// retryable terminal with the version-list hint in its message.
+	sourceMismatchReasonV3 = "source_mismatch"
 	// seekReanchorEvidenceUnavailableReasonV3 is the retryable transport reason
 	// for a seek reanchor whose frozen candidate's own evidence and installation
 	// owner cannot be established from the session. The seek fails closed rather
@@ -2716,6 +2722,7 @@ func (h *PlaybackHandler) startPlaybackApplicationV3(r *http.Request, body []byt
 		// so the stale-pin recovery may re-pin here while a future session-bound
 		// caller reusing the walk keeps its own binding intent and refuses.
 		var resolveErr error
+		walkSourceReq := r.WithContext(withVirtualSessionBindingV3(r.Context(), false))
 		if retained, ok := h.retainedVirtualStartSourceV3(r, userID, profileID, requestedFile, req); ok {
 			// A still-live session already proved this candidate and its
 			// inventory. A start re-entering after a failure serves that
@@ -2723,8 +2730,18 @@ func (h *PlaybackHandler) startPlaybackApplicationV3(r *http.Request, body []byt
 			// round-trip for the same bytes.
 			resolved = retained
 		} else {
-			walkSourceReq := r.WithContext(withVirtualSessionBindingV3(r.Context(), false))
 			resolved, resolveErr = h.resolveVirtualStartWithVersionFallback(walkSourceReq, requestedFile, profileID, req, allowFailedCandidate, intOrZeroHandlerV3(req.BandwidthCapKbps))
+		}
+		if resolveErr == nil {
+			// The plan must name an effective row from the same version list
+			// the client shows. A resolver substitution that lands on any other
+			// row is refused here, before planning, and the walk tries the next
+			// candidate; when none qualifies the start answers the version-list
+			// hint instead of planning a row the client cannot reconcile.
+			resolved, resolveErr = h.confineStartEffectiveVersionV3(
+				r, walkSourceReq, requestedFile, resolved, req, profileID, allowFailedCandidate,
+				intOrZeroHandlerV3(req.BandwidthCapKbps),
+			)
 		}
 		if resolveErr != nil {
 			if r.Context().Err() == context.DeadlineExceeded {
@@ -3436,10 +3453,26 @@ func (h *PlaybackHandler) resolveVirtualStartWithVersionFallback(
 	allowFailedCandidate bool,
 	bandwidthCapKbps int,
 ) (resolvedVirtualPlaybackSource, error) {
+	return h.resolveVirtualStartWithVersionFallbackExcluding(r, file, profileID, req, allowFailedCandidate, bandwidthCapKbps, nil)
+}
+
+// resolveVirtualStartWithVersionFallbackExcluding is the walk with candidates an
+// earlier hop already refused. The exclusion is carried into both the primary
+// resolve and the alternate walk, so a candidate that resolved to a row outside
+// the item's version list cannot be served again by the retry that follows it.
+func (h *PlaybackHandler) resolveVirtualStartWithVersionFallbackExcluding( //nolint:funlen // the walk's stages share one decision budget and are ordered; splitting them would hide that ordering
+	r *http.Request,
+	file *models.MediaFile,
+	profileID string,
+	req playback.StartRequestV3,
+	allowFailedCandidate bool,
+	bandwidthCapKbps int,
+	excludedCandidateIDs []string,
+) (resolvedVirtualPlaybackSource, error) {
 	offeredURI := strings.TrimSpace(req.OfferedVirtualURI)
 	offeredCandidateID := virtualResultCandidateID(offeredURI)
 	resolved, resolveErr := h.resolveVirtualPlaybackSource(
-		r, file, profileID, true, nil, offeredCandidateID, req.QualityPreference, bandwidthCapKbps, req.ForceRelink,
+		r, file, profileID, true, excludedCandidateIDs, offeredCandidateID, req.QualityPreference, bandwidthCapKbps, req.ForceRelink,
 		virtualResolveOptionsV3{
 			allowFailedCandidate: allowFailedCandidate,
 			sessionBound:         false,
@@ -3538,6 +3571,12 @@ func (h *PlaybackHandler) resolveVirtualStartWithVersionFallback(
 			// attempt it, however the primary listing failed.
 			continue
 		}
+		if virtualCandidateIDExcluded(alternate.FilePath, excludedCandidateIDs) {
+			// An earlier hop already proved this candidate resolves to a row
+			// the item's version list does not carry; walking it again would
+			// only reproduce that refusal.
+			continue
+		}
 		candidateRows = append(candidateRows, alternate)
 	}
 	if len(candidateRows) == 0 {
@@ -3565,7 +3604,7 @@ func (h *PlaybackHandler) resolveVirtualStartWithVersionFallback(
 	resolveAlternate := func(listCtx context.Context, alternate *models.MediaFile) (resolvedVirtualPlaybackSource, bool) {
 		listReq := walkReq.WithContext(listCtx)
 		altResolved, altErr := h.resolveVirtualPlaybackSource(
-			listReq, alternate, profileID, true, nil, "", req.QualityPreference, bandwidthCapKbps, false,
+			listReq, alternate, profileID, true, excludedCandidateIDs, "", req.QualityPreference, bandwidthCapKbps, false,
 			virtualResolveOptionsV3{sessionBound: false, bypassProviderFloor: true},
 		)
 		if altErr == nil && altResolved.File != nil {

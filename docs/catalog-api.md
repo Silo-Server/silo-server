@@ -90,14 +90,16 @@ a recent playback probe's wrong-source verdict for that row:
 }
 ```
 
-It means a probe read a different release's bytes than the row declares. It is
-advisory, not a liveness verdict: the release remains `available`, is never
-`failed`, and clients should show it as a distinct "source mismatch — served X
-of declared Y" state rather than the generic unavailable/retry copy. The signal
-is process-local and transient (the short wrong-source backoff window); it is
-absent after a restart, on a node that did not run the probe, and once a later
-probe accepts the served bytes. A row without the field keeps the generic
-unprobed presentation.
+It means a probe read a different release's bytes than the row declares, or a
+playback start refused the row's pin for that reason. It is advisory, not a
+liveness verdict: the release remains `available`, is never `failed`, and
+clients should show it as a distinct "source mismatch — served X of declared Y"
+state rather than the generic unavailable/retry copy. Playback answers the same
+verdict with the retryable `source_mismatch` terminal reason, so a refused play
+and the version list use one vocabulary. The signal is process-local and
+transient (the short wrong-source backoff window); it is absent after a restart,
+on a node that did not run the probe, and once a later probe accepts the served
+bytes. A row without the field keeps the generic unprobed presentation.
 
 ### Single-file inventory mode
 
