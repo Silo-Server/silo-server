@@ -94,7 +94,16 @@ export function TriggerFormRow({ trigger, onChange, onRemove }: TriggerFormRowPr
       <div className="flex-1 space-y-2">
         <Select
           value={trigger.type}
-          onValueChange={(v) => onChange({ ...trigger, type: v as TriggerType })}
+          onValueChange={(v) => {
+            // Store the values the new type's inputs show until edited, so Save
+            // sends them instead of leaving the fields out of the request.
+            const type = v as TriggerType;
+            const next = { ...trigger, type };
+            if (type === "interval") next.interval_ms ??= 60_000;
+            if (type === "daily" || type === "weekly") next.time_of_day ??= "00:00";
+            if (type === "weekly") next.day_of_week ??= 0;
+            onChange(next);
+          }}
         >
           <SelectTrigger className="w-full sm:w-[160px]">
             <SelectValue />
