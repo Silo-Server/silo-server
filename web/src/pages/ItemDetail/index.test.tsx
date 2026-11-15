@@ -31,6 +31,7 @@ vi.mock("@/hooks/queries/catalogRead", () => ({
 
 vi.mock("@/hooks/queries/libraries", () => ({
   useUserLibraries: () => mocks.useUserLibraries(),
+  useAvailableUserLibraries: () => ({ data: undefined }),
 }));
 
 // Mocked like every other data hook in this file: the page renders here
