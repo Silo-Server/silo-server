@@ -192,6 +192,12 @@
 # admin locked, including locked fields left empty.
 ./internal/scanner TestEbookRescanKeepsLockedFieldsDB
 
+# A manga scan's orphaned-series delete spares a series another scan just
+# created for its first chapter, and a rescan of an unchanged chapter restores
+# a series that is gone from the library.
+./internal/scanner TestScanFileMangaKeepsNewSeriesDuringConcurrentScanDB
+./internal/scanner TestScanFileMangaRelinksUnchangedChapterWithoutSeriesDB
+
 # A full scan that holds a few files at a time catalogs a library like one that
 # holds them all: groups and roots spanning batches, a deleted top-level
 # folder, an unreadable folder and a dropped mount.

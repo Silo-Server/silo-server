@@ -239,7 +239,13 @@ func (s *Scanner) reconcileMangaFile(ctx context.Context, folder *models.MediaFo
 	size := info.Size()
 	modifiedAt := normalizeFileModifiedAt(info.ModTime())
 
-	_, isUnchanged, skipErr := s.ebookFileShouldSkip(ctx, folder, filePath, size, modifiedAt)
+	unchangedID, isUnchanged, skipErr := s.ebookFileShouldSkip(ctx, folder, filePath, size, modifiedAt)
+	if skipErr == nil && isUnchanged {
+		// An unchanged chapter still needs its series: a scan that stopped or
+		// lost its series to a concurrent scan's orphan delete after writing the
+		// file row must not leave the chapter skipped without one.
+		isUnchanged, skipErr = s.mangaChapterHasSeries(ctx, unchangedID)
+	}
 	if skipErr != nil {
 		slog.WarnContext(ctx, "manga scan: skip-check failed, falling through", "component", "scanner",
 			"folder_id", folder.ID,
@@ -312,12 +318,25 @@ func (s *Scanner) reconcileMangaFile(ctx context.Context, folder *models.MediaFo
 		// reconcile). Without it the library-scoped catalog browse, which joins
 		// media_item_libraries, would never surface the series card. The insert is
 		// ON CONFLICT DO NOTHING, so re-scans never duplicate the membership.
-		if err := insertEbookLibraryMembership(ctx, s.fileRepo.Pool(), seriesID, folder.ID); err != nil {
-			return fmt.Errorf("upsert manga series library membership: %w", err)
-		}
+		//
+		// The membership and the chapter link commit together. Every manga scan
+		// ends by deleting the folder's series that have a membership and no
+		// chapters (deleteOrphanedMangaSeries); committed apart, another scan's
+		// delete could remove a series this scan just created between the two
+		// writes. An existing series that loses its last chapter to a concurrent
+		// scan can still be deleted under this link; the skip check above
+		// restores it on the chapter's next scan.
 		idxPtr, volOut := mangaChapterWrite(vol, idx, has)
-		if err := upsertMangaChapter(ctx, s.fileRepo.Pool(), chapterID, seriesID, idxPtr, volOut); err != nil {
-			return fmt.Errorf("link manga chapter to series: %w", err)
+		if err := pgx.BeginFunc(ctx, s.fileRepo.Pool(), func(tx pgx.Tx) error {
+			if err := insertEbookLibraryMembership(ctx, tx, seriesID, folder.ID); err != nil {
+				return fmt.Errorf("upsert manga series library membership: %w", err)
+			}
+			if err := upsertMangaChapter(ctx, tx, chapterID, seriesID, idxPtr, volOut); err != nil {
+				return fmt.Errorf("link manga chapter to series: %w", err)
+			}
+			return nil
+		}); err != nil {
+			return err
 		}
 	}
 
@@ -422,6 +441,25 @@ func (s *Scanner) findOrCreateMangaSeries(ctx context.Context, folderID int, ser
 		}
 	}
 	return id, nil
+}
+
+// mangaChapterHasSeries reports whether the chapter is linked to a series item
+// that has a library membership. Any library counts: a chapter item shared by
+// two manga libraries over one path has one link, and requiring this folder's
+// series would relink it on every scan of either library.
+func (s *Scanner) mangaChapterHasSeries(ctx context.Context, chapterID string) (bool, error) {
+	var linked bool
+	err := s.fileRepo.Pool().QueryRow(ctx, `
+		SELECT EXISTS (
+			SELECT 1 FROM manga_chapters mc
+			JOIN media_item_libraries mil ON mil.content_id = mc.series_content_id
+			WHERE mc.chapter_content_id = $1
+		)
+	`, chapterID).Scan(&linked)
+	if err != nil {
+		return false, fmt.Errorf("check manga chapter series: %w", err)
+	}
+	return linked, nil
 }
 
 // lookupMangaSeries returns the content_id of the type='manga' series item
