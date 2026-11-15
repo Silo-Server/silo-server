@@ -523,26 +523,26 @@ func TestStalePinRecoverySlowYieldsToHealthyAlternate(t *testing.T) {
 	alt := &models.MediaFile{ID: 15, ContentID: row.ContentID, FilePath: neutral + "?result=ALT", VirtualOwnerInstallationID: 5}
 
 	// The primary resolve (its listing and the stale-source fallback's re-list)
-	// answers empty so the primary genuinely terminals; the recovery's own
-	// listing (call 3) blocks until its sub-budget expires, simulating a hung
-	// provider; later alternate listings answer empty so the alternate resolves
-	// through the detailed resolver.
-	var listCalls atomic.Int32
+	// answers empty so the primary genuinely terminals. The recovery runs its
+	// own listing under the short recovery sub-budget, so that listing hangs
+	// until the sub-budget expires, simulating a hung provider. Every other
+	// listing (including the alternate's) answers empty, so the alternate
+	// resolves through the detailed resolver once the recovery yields.
 	h := &PlaybackHandler{
 		FileVersionFetcher: testPlaybackFileVersionFetcher{byContent: map[string][]*models.MediaFile{row.ContentID: {row, alt}}},
 		VirtualPlaybackResolver: VirtualPlaybackResolverFunc(func(context.Context, string, int, string, int) (string, error) {
 			return "", errors.New("simple resolver must not be used when the detailed resolver is set")
 		}),
 		VirtualPlaybackStreamLister: VirtualPlaybackStreamListerFunc(func(ctx context.Context, _ string, _ int, _ string, _ int) ([]VirtualPlaybackStream, error) {
-			switch listCalls.Add(1) {
-			case 3:
-				// The recovery's listing: hang until the recovery sub-budget
-				// expires.
+			// Keyed on the recovery's own sub-budget rather than a global call
+			// ordinal: the walk's call sequence is an implementation detail,
+			// while "the recovery listing is the one running under its
+			// sub-budget" is the behavior this test pins.
+			if deadline, ok := ctx.Deadline(); ok && time.Until(deadline) <= 2*virtualStalePinRecoveryBudget {
 				<-ctx.Done()
 				return nil, ctx.Err()
-			default:
-				return nil, nil
 			}
+			return nil, nil
 		}),
 		VirtualMediaDetailedResolver: VirtualMediaDetailedResolverFunc(func(_ context.Context, uri string, _ int, _ int, _ string, _ bool, _ []string, _ string) (ResolvedVirtualMedia, error) {
 			if virtualResultCandidateID(uri) == "ALT" {

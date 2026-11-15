@@ -389,3 +389,164 @@ func TestResolveVirtualPlaybackSourceBypassBudgetClearsOnAnswer(t *testing.T) {
 		t.Fatal("the overflow bypass still re-listed; the fresh window was not bounded")
 	}
 }
+
+// A start whose own budget is nearly spent must not walk the alternate versions.
+// The selected release was never disproven — the resolve simply ran out of the
+// request's time — and every alternate would observe the same expired deadline.
+// Landing on whichever sibling answers from cache is exactly the measured
+// silent swap (requested 613586 played as 1436768), so the walk keeps the
+// selection and surfaces the honest resolve error.
+func TestResolveVirtualStartWithVersionFallbackDoesNotSwapWhenStartBudgetIsSpent(t *testing.T) {
+	const (
+		primaryURI = "virtual://movie/movie-budget?result=A"
+		workingURI = "virtual://movie/movie-budget?result=C"
+	)
+	primary := &models.MediaFile{ID: 1, ContentID: "movie-budget", FilePath: primaryURI, VirtualOwnerInstallationID: 5}
+	working := &models.MediaFile{ID: 3, ContentID: "movie-budget", FilePath: workingURI, VirtualOwnerInstallationID: 5}
+
+	var primaryCalls, alternateCalls int
+	h := &PlaybackHandler{
+		VirtualPlaybackResolver: VirtualPlaybackResolverFunc(func(context.Context, string, int, string, int) (string, error) {
+			return "", errors.New("simple resolver must not be used when the detailed resolver is set")
+		}),
+		VirtualMediaDetailedResolver: VirtualMediaDetailedResolverFunc(func(_ context.Context, uri string, _ int, _ int, _ string, _ bool, _ []string, _ string) (ResolvedVirtualMedia, error) {
+			if strings.Contains(uri, "result=C") {
+				alternateCalls++
+				return ResolvedVirtualMedia{URL: "https://cdn.example/c.mkv", URI: uri, CandidateID: "cand-c", OwnerID: 5}, nil
+			}
+			primaryCalls++
+			return ResolvedVirtualMedia{}, fmt.Errorf("resolve virtual playback: %w", resolver.ErrProviderUnavailable)
+		}),
+	}
+	h.FileVersionFetcher = testPlaybackFileVersionFetcher{byContent: map[string][]*models.MediaFile{
+		"movie-budget": {primary, working},
+	}}
+
+	// The start's own budget is already spent when the walk would begin.
+	spentCtx, budgetCancel := context.WithDeadline(context.Background(), time.Now().Add(-40*time.Millisecond))
+	defer budgetCancel()
+	req := httptest.NewRequest(http.MethodPost, "/api/v2/playback/start", nil).WithContext(spentCtx)
+
+	resolved, err := h.resolveVirtualStartWithVersionFallback(req, primary, "profile-1", playback.StartRequestV3{QualityPreference: "auto"}, false, 0)
+	if err == nil {
+		t.Fatalf("a start with no resolve budget returned %#v; want the honest resolve error", resolved.File)
+	}
+	if alternateCalls != 0 {
+		t.Fatalf("the alternate walk resolved %d substitute(s); it must not run once the start budget is spent", alternateCalls)
+	}
+	if resolved.File != nil && resolved.File.ID != primary.ID {
+		t.Fatalf("substituted file %d for requested %d on an exhausted budget", resolved.File.ID, primary.ID)
+	}
+	if resolved.SubstitutedFromFileID != 0 {
+		t.Fatalf("an exhausted budget reported a substitution from %d", resolved.SubstitutedFromFileID)
+	}
+}
+
+// The cross-version fallback applies the same guard #448 added for rotations: a
+// substitute that would offer fewer audio or subtitle tracks than the selected
+// row is refused, and when no substitute can serve the selection the start
+// terminally names the version list instead of playing different bytes with a
+// poorer menu. This is the measured track-losing swap (3 audio / 4 subtitles
+// played as 1 audio / 0 subtitles).
+func TestResolveVirtualStartWithVersionFallbackRefusesTrackLosingAlternate(t *testing.T) {
+	const (
+		primaryURI = "virtual://movie/movie-tracks?result=A"
+		poorURI    = "virtual://movie/movie-tracks?result=B"
+		goodURI    = "virtual://movie/movie-tracks?result=C"
+	)
+	primaryAudio, primarySubs := rotationTrackFixtureTracks(3, 4)
+	poorAudio, poorSubs := rotationTrackFixtureTracks(1, 0)
+	goodAudio, goodSubs := rotationTrackFixtureTracks(3, 4)
+	primary := &models.MediaFile{
+		ID: 1, ContentID: "movie-tracks", FilePath: primaryURI, VirtualOwnerInstallationID: 5,
+		AudioTracks: primaryAudio, SubtitleTracks: primarySubs,
+	}
+	poor := &models.MediaFile{
+		ID: 2, ContentID: "movie-tracks", FilePath: poorURI, VirtualOwnerInstallationID: 5,
+		AudioTracks: poorAudio, SubtitleTracks: poorSubs, ProviderVideoHash: "hash-b",
+	}
+	good := &models.MediaFile{
+		ID: 3, ContentID: "movie-tracks", FilePath: goodURI, VirtualOwnerInstallationID: 5,
+		AudioTracks: goodAudio, SubtitleTracks: goodSubs, ProviderVideoHash: "hash-c",
+	}
+
+	newHandler := func() *PlaybackHandler {
+		rows := map[string]*models.MediaFile{primaryURI: primary, poorURI: poor, goodURI: good}
+		return &PlaybackHandler{
+			FileVersionFetcher: testPlaybackFileVersionFetcher{byContent: map[string][]*models.MediaFile{
+				"movie-tracks": {primary, poor, good},
+			}},
+			// The catalog owns each candidate URI, so a resolve serves the
+			// row's own inventory instead of a metadata-less transient.
+			VirtualFileLookup: func(_ context.Context, path string) (*models.MediaFile, error) {
+				return rows[path], nil
+			},
+			VirtualPlaybackResolver: VirtualPlaybackResolverFunc(func(context.Context, string, int, string, int) (string, error) {
+				return "", errors.New("simple resolver must not be used when the detailed resolver is set")
+			}),
+			VirtualMediaDetailedResolver: VirtualMediaDetailedResolverFunc(func(_ context.Context, uri string, _ int, _ int, _ string, _ bool, _ []string, _ string) (ResolvedVirtualMedia, error) {
+				switch {
+				case strings.Contains(uri, "result=B"):
+					return ResolvedVirtualMedia{URL: "https://cdn.example/b.mkv", URI: uri, CandidateID: virtualResultCandidateID(uri), OwnerID: 5}, nil
+				case strings.Contains(uri, "result=C"):
+					return ResolvedVirtualMedia{URL: "https://cdn.example/c.mkv", URI: uri, CandidateID: virtualResultCandidateID(uri), OwnerID: 5}, nil
+				default:
+					return ResolvedVirtualMedia{}, errors.New("resolve virtual playback: no streams available from provider")
+				}
+			}),
+		}
+	}
+
+	t.Run("a resolve timeout does not swap to a track-losing substitute", func(t *testing.T) {
+		// The production shape: the provider fetch times out, which reaches the
+		// fallback as a listing outage (the fetch wraps the client error), so the
+		// walk runs. The only sibling it can serve carries 1 audio / 0 subtitles.
+		timedOut := &PlaybackHandler{
+			FileVersionFetcher: testPlaybackFileVersionFetcher{byContent: map[string][]*models.MediaFile{
+				"movie-tracks": {primary, poor},
+			}},
+			VirtualFileLookup: func(_ context.Context, path string) (*models.MediaFile, error) {
+				if path == poorURI {
+					return poor, nil
+				}
+				return primary, nil
+			},
+			VirtualPlaybackResolver: VirtualPlaybackResolverFunc(func(context.Context, string, int, string, int) (string, error) {
+				return "", errors.New("simple resolver must not be used when the detailed resolver is set")
+			}),
+			VirtualMediaDetailedResolver: VirtualMediaDetailedResolverFunc(func(_ context.Context, uri string, _ int, _ int, _ string, _ bool, _ []string, _ string) (ResolvedVirtualMedia, error) {
+				if strings.Contains(uri, "result=B") {
+					return ResolvedVirtualMedia{URL: "https://cdn.example/b.mkv", URI: uri, CandidateID: virtualResultCandidateID(uri), OwnerID: 5}, nil
+				}
+				return ResolvedVirtualMedia{}, fmt.Errorf("request streaming provider failed: %w: %w", resolver.ErrProviderUnavailable, context.DeadlineExceeded)
+			}),
+		}
+		req := httptest.NewRequest(http.MethodPost, "/api/v2/playback/start", nil)
+		resolved, err := timedOut.resolveVirtualStartWithVersionFallback(req, primary, "profile-1", playback.StartRequestV3{QualityPreference: "auto"}, false, 0)
+		if err == nil {
+			t.Fatalf("the walk served the 1-audio/0-subtitle substitute %d; want a refusal", resolved.File.ID)
+		}
+		terminal := virtualStartUnresolvedTerminalV3(err).Terminal
+		if terminal == nil || !strings.Contains(terminal.Message, "version list") {
+			t.Fatalf("terminal = %#v, want the version-list hint when no substitute can serve the selection", terminal)
+		}
+	})
+
+	t.Run("a track-preserving substitute still plays and is reported", func(t *testing.T) {
+		h := newHandler()
+		req := httptest.NewRequest(http.MethodPost, "/api/v2/playback/start", nil)
+		resolved, err := h.resolveVirtualStartWithVersionFallback(req, primary, "profile-1", playback.StartRequestV3{QualityPreference: "auto"}, false, 0)
+		if err != nil {
+			t.Fatalf("track-preserving fallback resolve: %v", err)
+		}
+		if resolved.File == nil || resolved.File.ID != good.ID {
+			t.Fatalf("resolved file = %#v, want the track-preserving alternate %d", resolved.File, good.ID)
+		}
+		if resolved.SubstitutedFromFileID != primary.ID {
+			t.Fatalf("substituted_from_file_id = %d, want the requested row %d", resolved.SubstitutedFromFileID, primary.ID)
+		}
+		if resolved.SubstitutionReason != substitutionReasonListingFailedV3 {
+			t.Fatalf("substitution_reason = %q, want %q", resolved.SubstitutionReason, substitutionReasonListingFailedV3)
+		}
+	})
+}

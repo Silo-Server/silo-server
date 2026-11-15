@@ -53,7 +53,10 @@ func startVirtualResolveWaitLog(ctx context.Context, kind, on, contentID string,
 		started:    time.Now(),
 		extra:      extra,
 	}
-	attrs := wait.attrs("bound_ms", bound.Milliseconds())
+	attrs := wait.attrs("bound_ms", max(0, bound.Milliseconds()))
+	if bound <= 0 {
+		attrs = append(attrs, "bound_exhausted", true)
+	}
 	slog.InfoContext(ctx, "virtual resolve wait started", attrs...)
 	return wait
 }

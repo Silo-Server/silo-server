@@ -436,8 +436,11 @@ func TestVirtualColdPathReservesAttemptBudgetBehindStaging(t *testing.T) {
 }
 
 // TestVirtualColdPathSlowStageDoesNotRestartBudget pins that a listing stage
-// which overruns the single cold-path deadline leaves the resolution stage an
-// already-expired context instead of a fresh virtualStartupBudget.
+// which overruns the single cold-path deadline does not hand the resolution
+// stage a fresh virtualStartupBudget. The stage is refused outright rather than
+// started on an already-spent deadline: an attempt started there is pre-empted
+// before its own wait and reports a negative bound, which callers read as a
+// provider listing failure.
 func TestVirtualColdPathSlowStageDoesNotRestartBudget(t *testing.T) {
 	previousBudget := virtualStartupBudget
 	virtualStartupBudget = 120 * time.Millisecond
@@ -448,7 +451,6 @@ func TestVirtualColdPathSlowStageDoesNotRestartBudget(t *testing.T) {
 		siblingURI = "virtual://movie/tt-cold-slow?result=sib"
 	)
 	var mu sync.Mutex
-	var resolverCtxErr error
 	resolverCalls := 0
 	h := &PlaybackHandler{
 		VirtualPlaybackStreamLister: VirtualPlaybackStreamListerFunc(func(context.Context, string, int, string, int) ([]VirtualPlaybackStream, error) {
@@ -460,9 +462,6 @@ func TestVirtualColdPathSlowStageDoesNotRestartBudget(t *testing.T) {
 		VirtualPlaybackResolver: VirtualPlaybackResolverFunc(func(ctx context.Context, _ string, _ int, _ string, _ int) (string, error) {
 			mu.Lock()
 			resolverCalls++
-			if err := ctx.Err(); err != nil {
-				resolverCtxErr = err
-			}
 			mu.Unlock()
 			if err := ctx.Err(); err != nil {
 				return "", err
@@ -482,10 +481,7 @@ func TestVirtualColdPathSlowStageDoesNotRestartBudget(t *testing.T) {
 	}
 	mu.Lock()
 	defer mu.Unlock()
-	if resolverCalls == 0 {
-		t.Fatal("resolver was never reached")
-	}
-	if resolverCtxErr == nil {
-		t.Fatal("a later stage was handed a live context; the cold path restarted its budget")
+	if resolverCalls != 0 {
+		t.Fatalf("resolver was reached %d time(s) after the cold budget was exhausted, want it refused", resolverCalls)
 	}
 }

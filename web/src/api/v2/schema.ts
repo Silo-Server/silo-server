@@ -31428,6 +31428,13 @@ export interface components {
       session_id?: string;
       source: components["schemas"]["PlaybackSource"];
       stream: components["schemas"]["StreamV3"];
+      /**
+       * @description Opaque identifier
+       * @example 1
+       */
+      substituted_from_file_id?: string;
+      /** @description Machine-readable cause of a version substitution; only present with substituted_from_file_id. A client must treat an unknown value as a generic substitution. */
+      substitution_reason?: string;
       subtitle: components["schemas"]["SubtitleDecisionV3"];
       subtitle_fidelity_policy: string;
       timeline: components["schemas"]["TimelineV3"];
