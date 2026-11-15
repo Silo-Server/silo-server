@@ -1005,7 +1005,7 @@ func TestVirtualPGSFullTrackWarmSkipsActivePlayback(t *testing.T) {
 		SeekSeconds:     100,
 		DurationSeconds: 120,
 		FFmpegPath:      filepath.Join(dir, "ffmpeg"),
-	}, nil, true, "", false)
+	}, nil, true, "", false, false)
 
 	if _, err := os.Stat(argsLog); !os.IsNotExist(err) {
 		t.Fatalf("no full-track PGS warm should run while the session is playing: %v", err)
