@@ -92,6 +92,11 @@
 ./internal/catalog TestMovieBoxSetDB
 ./internal/catalog TestBoxSetCollectionArtworkDB
 
+# Audiobook Series, Authors, and Narrators browse: group counts and durations,
+# cover order, the viewer's own progress, count-sorted cursor pages, the search
+# prefix, and library access.
+./internal/catalog TestAudiobookGroupsDB
+
 # A delegated curator's provider-ID edit can't name a title in another library,
 # which a later refresh would merge the item onto, and the curator's refresh job
 # re-anchors only inside their libraries.
@@ -701,6 +706,7 @@
 ./internal/partman TestDropExpiredPartitionsGivesUpOnABusyParentDB
 
 ./internal/downloads TestLocalDownloadCanceledWritePersistsFailureDB
+./internal/downloads TestEphemeralDownloadCompletesOnlyOnWholeFileDB
 ./internal/downloads TestEphemeralDownloadRechecksProfileAccessDB
 
 # Rating sources keep their merge rules, and a trigger keeps the TMDB vote pair

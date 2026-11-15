@@ -23,6 +23,7 @@ export const SHIPPED_LANGUAGES = [
   { tag: "de", endonym: "Deutsch" },
   { tag: "fr", endonym: "Français" },
   { tag: "pt-BR", endonym: "Português (Brasil)" },
+  { tag: "nl", endonym: "Nederlands" },
   { tag: "ja", endonym: "日本語" },
   { tag: "zh-Hans", endonym: "简体中文" },
   { tag: "ar", endonym: "العربية" },

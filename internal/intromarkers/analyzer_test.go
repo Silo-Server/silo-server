@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/mediaartifact"
+	"github.com/Silo-Server/silo-server/internal/mediasample"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
@@ -38,6 +39,8 @@ type fakeIntroRepository struct {
 	seasonStateHash string
 	// patchErr, when set, fails the patches it returns an error for.
 	patchErr func(MarkerPatch) error
+	// withdrawErr, when set, fails every withdrawal.
+	withdrawErr error
 }
 
 func (f *fakeIntroRepository) CountEnabledLibraries(context.Context) (int, error) {
@@ -181,6 +184,9 @@ func (f *fakeIntroRepository) PatchMarker(_ context.Context, patch MarkerPatch) 
 func (f *fakeIntroRepository) WithdrawMarker(_ context.Context, withdrawal MarkerWithdrawal) (bool, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.withdrawErr != nil {
+		return false, f.withdrawErr
+	}
 	f.withdrawals = append(f.withdrawals, withdrawal)
 	return true, nil
 }
@@ -899,6 +905,160 @@ func sharedIntroPoints(offset uint32) []uint32 {
 		points[i] = uint32(i)
 	}
 	return points
+}
+
+// A Chromaprint intro an earlier comparison wrote is withdrawn when the
+// season's complete comparison no longer finds it, as after a stricter
+// matching rule. Intros from other detectors stay, and a comparison that
+// missed a fingerprint withdraws nothing, since the missing file could be
+// the partner that confirms an intro.
+func TestAnalyzeGroupWithdrawsChromaprintIntrosNoLongerFound(t *testing.T) {
+	cfg := DefaultConfig("ffmpeg")
+	scanner := models.MarkerSourceScanner
+	start, end := 10.0, 24.0
+	introBy := func(algorithm string) func(*Candidate) {
+		return func(c *Candidate) {
+			c.IntroStart, c.IntroEnd, c.IntroMarkersSource, c.IntroMarkersAlgorithm = &start, &end, &scanner, &algorithm
+		}
+	}
+	file := func(id int, intro func(*Candidate)) Candidate {
+		c := Candidate{FileID: id, EpisodeID: fmt.Sprintf("ep%d", id), SeasonID: "season1", MediaFolderID: 7,
+			FileHash: fmt.Sprintf("hash%d", id), FileSize: int64(id), DurationSeconds: 1200}
+		if intro != nil {
+			intro(&c)
+		}
+		return c
+	}
+	// Files 1 and 2 share an intro. Files 3 to 5 match nothing and hold the
+	// intros earlier analysis left them: two Chromaprint versions and a
+	// chapter intro. File 6 has no cached fingerprint.
+	matched := []Candidate{file(1, introBy(ChromaprintAlgorithm)), file(2, nil)}
+	unmatched := []Candidate{
+		file(3, introBy(ChromaprintAlgorithm)),
+		file(4, introBy("chromaprint:dialogue:v4")), //nolint:misspell // Persisted algorithm identifier.
+		file(5, introBy(ChapterAlgorithm)),
+	}
+	unfingerprinted := file(6, nil)
+	fingerprints := map[int]*Fingerprint{
+		1: cachedFingerprint(matched[0], cfg, sharedIntroPoints(1000)),
+		2: cachedFingerprint(matched[1], cfg, sharedIntroPoints(5000)),
+	}
+	for i, c := range unmatched {
+		fingerprints[c.FileID] = cachedFingerprint(c, cfg, randomPoints(400, 4341, uint64(i)))
+	}
+
+	for _, tc := range []struct {
+		name           string
+		candidates     []Candidate
+		withdrawErr    error
+		wantWithdrawn  []int
+		wantStatus     string
+		wantPatchedIDs []int
+	}{
+		{name: "season still finds an intro", candidates: append(slices.Clone(matched), unmatched...),
+			wantWithdrawn: []int{3, 4}, wantStatus: seasonStatusComplete, wantPatchedIDs: []int{1, 2}},
+		{name: "season finds no intro", candidates: append([]Candidate{matched[0]}, unmatched...),
+			wantWithdrawn: []int{1, 3, 4}, wantStatus: seasonStatusNotFound},
+		{name: "a fingerprint failed to extract", candidates: append(append(slices.Clone(matched), unmatched...), unfingerprinted),
+			wantStatus: seasonStatusPartial, wantPatchedIDs: []int{1, 2}},
+		{name: "a withdrawal failed", candidates: append([]Candidate{matched[0]}, unmatched...),
+			withdrawErr: errors.New("database unavailable"), wantStatus: seasonStatusFailed},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			group := candidateGroup{MediaFolderID: 7, SeasonID: "season1", AnalysisGroupKey: tc.candidates[0].AnalysisGroupKey(), Candidates: tc.candidates}
+			repo := &fakeIntroRepository{fingerprints: fingerprints, withdrawErr: tc.withdrawErr}
+			analyzer := &Analyzer{
+				repo: repo, config: cfg, logger: slog.New(slog.DiscardHandler), ffmpegSlots: mediasample.NewLimiter(1),
+				extractor: failingExtractor{errFor: map[int]error{unfingerprinted.FileID: errors.New("ffmpeg timed out")}},
+			}
+
+			if _, err := analyzer.analyzeGroup(context.Background(), group, analyzeGroupOptions{persistState: true}); err != nil {
+				t.Fatalf("analyzeGroup: %v", err)
+			}
+			stored := map[int]string{}
+			for _, c := range tc.candidates {
+				if c.IntroMarkersAlgorithm != nil {
+					stored[c.FileID] = *c.IntroMarkersAlgorithm
+				}
+			}
+			var withdrawn []int
+			for _, w := range repo.withdrawals {
+				if w.Kind != kindIntro || w.ExpectedFile == nil || w.Algorithm != stored[w.FileID] {
+					t.Fatalf("withdrawal %+v, want a guarded intro withdrawal of the stored algorithm", w)
+				}
+				withdrawn = append(withdrawn, w.FileID)
+			}
+			if !slices.Equal(withdrawn, tc.wantWithdrawn) {
+				t.Fatalf("withdrawn %v, want %v", withdrawn, tc.wantWithdrawn)
+			}
+			var patched []int
+			for _, p := range repo.patches {
+				patched = append(patched, p.FileID)
+			}
+			if !slices.Equal(patched, tc.wantPatchedIDs) {
+				t.Fatalf("patched %v, want %v", patched, tc.wantPatchedIDs)
+			}
+			if len(repo.upsertedStates) != 1 || repo.upsertedStates[0].Status != tc.wantStatus {
+				t.Fatalf("season states %+v, want one %s state", repo.upsertedStates, tc.wantStatus)
+			}
+		})
+	}
+}
+
+// A season file whose intro another source holds is left out of the
+// comparison, so it can't confirm the Chromaprint intros it once matched.
+// Those intros stay rather than being withdrawn for want of a partner.
+func TestAnalyzeGroupKeepsChromaprintIntrosWhenPartnersAreHeldOut(t *testing.T) {
+	cfg := DefaultConfig("ffmpeg")
+	scanner, manual := models.MarkerSourceScanner, models.MarkerSourceManual
+	chromaprint, manualAlgorithm := ChromaprintAlgorithm, "manual:v1"
+	start, end := 10.0, 70.0
+	file := func(id int, source, algorithm *string) Candidate {
+		return Candidate{FileID: id, EpisodeID: fmt.Sprintf("ep%d", id), SeasonID: "season1", MediaFolderID: 7,
+			FileHash: fmt.Sprintf("hash%d", id), FileSize: int64(id), DurationSeconds: 1200,
+			IntroStart: &start, IntroEnd: &end, IntroMarkersSource: source, IntroMarkersAlgorithm: algorithm}
+	}
+	// Files 1 and 2 hold Chromaprint intros their audio no longer confirms
+	// between them; file 3, their old partner, now has a manual intro.
+	season := []Candidate{file(1, &scanner, &chromaprint), file(2, &scanner, &chromaprint), file(3, &manual, &manualAlgorithm)}
+	repo := &fakeIntroRepository{
+		fingerprints: map[int]*Fingerprint{
+			1: cachedFingerprint(season[0], cfg, randomPoints(400, 4341, 1)),
+			2: cachedFingerprint(season[1], cfg, randomPoints(400, 4341, 2)),
+		},
+		groupCandidates: map[string][]Candidate{groupKey(7, "season1", season[0].AnalysisGroupKey()): season},
+	}
+	analyzer := &Analyzer{repo: repo, extractor: &fakeFingerprintExtractor{}, config: cfg, logger: slog.New(slog.DiscardHandler)}
+
+	nightly := groupCandidates(season, kindIntro, 2)
+	episode, err := analyzer.episodeGroups(context.Background(), kindIntro, season[:1], map[string][]Candidate{}, 2)
+	if err != nil {
+		t.Fatalf("episodeGroups: %v", err)
+	}
+	for name, groups := range map[string][]candidateGroup{"library run": nightly, "episode run": episode} {
+		if len(groups) != 1 || !groups[0].HeldOut || len(groups[0].Candidates) != 2 {
+			t.Fatalf("%s groups %+v, want one group of files 1 and 2 with file 3 held out", name, groups)
+		}
+		if _, err := analyzer.analyzeGroup(context.Background(), groups[0], analyzeGroupOptions{persistState: true}); err != nil {
+			t.Fatalf("%s analyzeGroup: %v", name, err)
+		}
+	}
+	if len(repo.withdrawals) != 0 {
+		t.Fatalf("withdrawals %+v, want none while a partner is held out", repo.withdrawals)
+	}
+
+	// Once file 3 is gone, the season settled while it was held out is
+	// compared again and the intros nothing confirms are withdrawn.
+	settled := repo.upsertedStates[len(repo.upsertedStates)-1]
+	repo.seasonState = &settled
+	remaining := groupCandidates(season[:2], kindIntro, 2)
+	summary, err := analyzer.analyzeGroup(context.Background(), remaining[0], analyzeGroupOptions{persistState: true})
+	if err != nil {
+		t.Fatalf("analyzeGroup after the held-out file is gone: %v", err)
+	}
+	if summary.GroupsSkipped != 0 || len(repo.withdrawals) != 2 {
+		t.Fatalf("skipped %d, withdrawals %+v; want the group compared again and both intros withdrawn", summary.GroupsSkipped, repo.withdrawals)
+	}
 }
 
 func TestAnalyzeEpisodeComparesOnlyOwnDetectionFiles(t *testing.T) {

@@ -50,7 +50,7 @@ func TestAnalysisConfigHashTracksDurationBounds(t *testing.T) {
 // season comparison. A deliberate change, such as bumping
 // AnalysisBehaviorVersion, updates this value in the same commit.
 func TestAnalysisConfigHashKeepsStoredSeasonStateKey(t *testing.T) {
-	if got := DefaultConfig("ffmpeg").AnalysisConfigHash(); got != "a10115551b1f06dd" {
-		t.Fatalf("AnalysisConfigHash() = %s, want the stored season state key a10115551b1f06dd", got)
+	if got := DefaultConfig("ffmpeg").AnalysisConfigHash(); got != "29b65deb3453cd3b" {
+		t.Fatalf("AnalysisConfigHash() = %s, want the stored season state key 29b65deb3453cd3b", got)
 	}
 }

@@ -435,6 +435,61 @@ func TestCompareFingerprintsRatesShortMatchesLowest(t *testing.T) {
 	}
 }
 
+func TestCompareFingerprintsSkipsShortMatchesOnePartnerSupports(t *testing.T) {
+	// Three different 118-point (about 14.5 s) cues, each shared by one pair of
+	// episodes at unrelated places, as in a season with no intro but a few
+	// repeated music cues. Episode 5 shares a cue with two episodes, but at
+	// two places, so neither place has a second partner.
+	cue := func(stream uint64) []uint32 { return randomPoints(118, 0, stream) }
+	cueA, cueB, cueC := cue(11), cue(12), cue(13)
+	inputs := make([]fingerprintInput, 0, 6)
+	for e := 1; e <= 6; e++ {
+		inputs = append(inputs, fingerprintInput{
+			Candidate: Candidate{FileID: e, EpisodeID: fmt.Sprintf("e%d", e), EpisodeNumber: e, DurationSeconds: 1800},
+			Points:    randomPoints(4900, uint64(e), 9),
+		})
+	}
+	place := func(episode, point int, shared []uint32) { copy(inputs[episode-1].Points[point:], shared) }
+	place(1, 55, cueA)
+	place(6, 2463, cueA)
+	place(2, 4048, cueB)
+	place(5, 242, cueB)
+	place(3, 4515, cueC)
+	place(5, 1586, cueC)
+
+	if segments := CompareFingerprints(inputs, DefaultConfig("ffmpeg")); len(segments) != 0 {
+		t.Fatalf("wrote %d intros from single-partner cues, want none: %+v", len(segments), segments)
+	}
+}
+
+func TestCompareFingerprintsWidensSearchForWeakShortMatches(t *testing.T) {
+	// A 140-point (about 17 s) title card in episodes 1, 2, 12 and 13. Each
+	// file's neighbors hold one partner, so the card is confirmed only once
+	// the wider search reaches the other pair.
+	intro := randomPoints(140, 0, 21)
+	inputs := make([]fingerprintInput, 0, 14)
+	for e := 1; e <= 14; e++ {
+		points := randomPoints(700, uint64(e), 23)
+		if e == 1 || e == 2 || e == 12 || e == 13 {
+			copy(points[100:], intro)
+		}
+		inputs = append(inputs, fingerprintInput{
+			Candidate: Candidate{FileID: e, EpisodeID: fmt.Sprintf("e%d", e), EpisodeNumber: e, DurationSeconds: 1800},
+			Points:    points,
+		})
+	}
+
+	segments := CompareFingerprints(inputs, DefaultConfig("ffmpeg"))
+	for _, fileID := range []int{1, 2, 12, 13} {
+		if _, ok := segments[fileID]; !ok {
+			t.Errorf("file %d lost the short intro its distant partners confirm", fileID)
+		}
+	}
+	if len(segments) != 4 {
+		t.Errorf("wrote %d intros, want 4", len(segments))
+	}
+}
+
 func TestUsualIntroDurationPrefersLargestThenLongestCluster(t *testing.T) {
 	durations := func(values ...float64) []episodeDuration {
 		out := make([]episodeDuration, len(values))

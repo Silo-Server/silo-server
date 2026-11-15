@@ -3130,10 +3130,31 @@ func appendAudiobookItemAccessConditions(
 	args *[]any,
 	argIdx *int,
 ) bool {
-	if filter.AllowedLibraryIDs != nil {
-		if len(filter.AllowedLibraryIDs) == 0 {
-			return false
+	return appendLibraryAudiobookAccessConditions(alias, 0, filter, conditions, args, argIdx)
+}
+
+// appendLibraryAudiobookAccessConditions is appendAudiobookItemAccessConditions
+// for a query whose every row is joined to the item's media_item_libraries row
+// in libraryID (0 when the query joins none). That row already proves the item
+// sits in a library, and in an allowed one when libraryID is allowed, so those
+// EXISTS checks are left out. The disabled-library and rating checks stay.
+func appendLibraryAudiobookAccessConditions(
+	alias string,
+	libraryID int,
+	filter AccessFilter,
+	conditions *[]string,
+	args *[]any,
+	argIdx *int,
+) bool {
+	joined := libraryID > 0
+	switch {
+	case filter.AllowedLibraryIDs == nil:
+		if !joined {
+			*conditions = append(*conditions, InSomeLibraryWhere(alias+".content_id"))
 		}
+	case len(filter.AllowedLibraryIDs) == 0:
+		return false
+	case !joined || !slices.Contains(filter.AllowedLibraryIDs, libraryID):
 		*conditions = append(*conditions, fmt.Sprintf(`
 			EXISTS (
 				SELECT 1 FROM media_item_libraries mil_allowed
@@ -3142,8 +3163,6 @@ func appendAudiobookItemAccessConditions(
 			)`, alias, *argIdx))
 		*args = append(*args, filter.AllowedLibraryIDs)
 		*argIdx = *argIdx + 1
-	} else {
-		*conditions = append(*conditions, InSomeLibraryWhere(alias+".content_id"))
 	}
 	if len(filter.DisabledLibraryIDs) > 0 {
 		*conditions = append(*conditions, fmt.Sprintf(`
