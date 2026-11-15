@@ -5,6 +5,27 @@ import (
 	"net/http"
 )
 
+// Source access modes, the node configuration's source_access
+// (nodepool.SourceAccessLocal and nodepool.SourceAccessCore on the core).
+const (
+	// ModeLocal reads the approved catalog path through the node's own
+	// library mount.
+	ModeLocal = "local"
+	// ModeCore reads the source bytes over HTTP from the core, through the
+	// node's loopback relay.
+	ModeCore = "core"
+)
+
+// PathSources is the core's source bytes route, relative to the core URL a
+// transcode node is given. The grant travels in HeaderSourceGrant.
+const PathSources = "/api/internal/nodes/sources"
+
+// HeaderSourceGrant carries the grant of a PathSources read. It is a header,
+// not part of the URL, so access logs on the way (a reverse proxy in front of
+// the core) never record the grant, whose payload names the media path. The
+// node-to-core signature covers it (nodeauth.SourceGrantHeader).
+const HeaderSourceGrant = "X-Silo-Source-Grant"
+
 // OpenRequest is the body of the core's sources/open route: the grant to
 // exchange, a newly dispatched one or the node's current one when it renews.
 type OpenRequest struct {

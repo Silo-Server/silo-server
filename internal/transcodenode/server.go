@@ -27,6 +27,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/downloadprepare"
 	"github.com/Silo-Server/silo-server/internal/downloadstorage"
+	"github.com/Silo-Server/silo-server/internal/fspath"
 	"github.com/Silo-Server/silo-server/internal/httpstream"
 	"github.com/Silo-Server/silo-server/internal/mediasample"
 	"github.com/Silo-Server/silo-server/internal/nodeauth"
@@ -1649,7 +1650,8 @@ func writeChapterThumbnailError(w http.ResponseWriter, status int, reason string
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(chapterthumbs.RemoteExtractErrorResponse{
 		Reason: reason,
-		Error:  message,
+		// FFmpeg's log can name a relayed input, a capability on this host.
+		Error: fspath.RedactRelayed(message),
 	})
 }
 
@@ -1858,6 +1860,15 @@ func (s *Server) handleStart(w http.ResponseWriter, r *http.Request) {
 		})
 	} else {
 		session, err = playback.StartTranscode(r.Context(), opts)
+	}
+	if errors.Is(err, playback.ErrRelayedSubtitleBurnIn) {
+		unlock()
+		// This node reads the source through the core and cannot burn this
+		// track in; the caller starts it on another node or itself.
+		slog.WarnContext(r.Context(), "transcode start refused: subtitle burn-in needs the media file", "component", "transcodenode",
+			"error", err, "session", req.SessionID, "playback_session_id", req.SessionID)
+		http.Error(w, relayedBurnInRefusal, http.StatusConflict)
+		return
 	}
 	var startupErr *playback.TranscodeStartupError
 	if errors.As(err, &startupErr) {

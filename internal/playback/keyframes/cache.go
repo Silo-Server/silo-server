@@ -2,6 +2,7 @@ package keyframes
 
 import (
 	"container/list"
+	"context"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -51,8 +52,11 @@ var indexCache = struct {
 // from it on its first start, and it reads nothing in the background (#2453).
 // A file without a usable index, including any that isn't Matroska or WebM or
 // is malformed, gets ErrNoIndex, as does a version Reject marked.
+//
+// path may be a relayed input (fspath.IsRelayed): its index reads go over
+// HTTP to the core and its version is the granted revision.
 func Load(path string) (Index, error) {
-	f, err := fspath.Open(path)
+	f, err := fspath.OpenReader(context.Background(), path)
 	if err != nil {
 		return Index{}, err
 	}

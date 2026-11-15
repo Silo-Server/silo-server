@@ -158,9 +158,12 @@ A node exchanges it at the core's `sources/open` route, runs FFmpeg on the path
 the core approves, never on `input_path`, and renews it while the job runs; a
 source the core stops renewing ends the job. A missing or refused grant answers
 `400`, a node mount that does not show the approved revision `409`, and a core
-the node cannot reach `503`. The download execution fingerprint leaves
-`source_grant` out. See
-[source grants](architecture/transcode-nodes.md#source-grants).
+the node cannot reach `503`. A node with core source access reads the approved
+revision from the core through a loopback relay instead of its own mount, and
+answers a start `409` when its text subtitle burn-in cannot be staged. The
+download execution fingerprint leaves `source_grant` out. See
+[source grants](architecture/transcode-nodes.md#source-grants) and
+[core source access](architecture/transcode-nodes.md#core-source-access).
 
 A start also names the playback session it serves: `playback_session_id`,
 `user_id`, `profile_id` and `media_file_id`. The node files its session record

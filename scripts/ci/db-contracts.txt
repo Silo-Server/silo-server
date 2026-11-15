@@ -1163,6 +1163,11 @@
 ./internal/nodepool TestIssueNodeKeyDB
 ./internal/nodepool TestTranscodeNodeURLsAreUniqueDB
 
+# Transcode node source access: local or core is stored configuration that
+# moves the admin revision and pool generation; a proxy can only hold local,
+# refused by the store and by the check constraint.
+./internal/nodepool TestSourceAccessIsTranscodeConfigurationDB
+
 # Admin node writes reach every credential registry: the writing API server's
 # before it answers (a deleted node's key is refused at once, a moved node is
 # signable at its new URL, a disabled one keeps its key), a proxy's through

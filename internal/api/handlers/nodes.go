@@ -217,6 +217,16 @@ func transcodeNodeArtifactOverridesChanged(before, after *nodepool.Node) bool {
 		!sameOptionalInt64(before.DownloadArtifactMaxBytesOverride, after.DownloadArtifactMaxBytesOverride)
 }
 
+// transcodeNodeSourceAccessChanged reports whether an update changed how a
+// transcode node reads its sources. The node applies it to the jobs it starts
+// after its next configuration read.
+func transcodeNodeSourceAccessChanged(before, after *nodepool.Node) bool {
+	if before == nil || after == nil || after.Type != nodepool.NodeTypeTranscode {
+		return false
+	}
+	return before.SourceAccess != after.SourceAccess
+}
+
 func sameOptionalInt64(a, b *int64) bool {
 	if a == nil || b == nil {
 		return a == nil && b == nil

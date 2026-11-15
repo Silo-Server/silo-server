@@ -1,6 +1,7 @@
 package tonemap
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/binary"
@@ -179,7 +180,9 @@ func computeOpenSubtitlesHash(path string, size int64) (string, error) {
 	if size < 2*openSubtitlesHashBlockSize {
 		return "", fmt.Errorf("file is too small for OpenSubtitles hash")
 	}
-	file, err := fspath.Open(path)
+	// A relayed input (a transcode node reading through the core) reads the
+	// two blocks over HTTP; a library path reads its file.
+	file, err := fspath.OpenReader(context.Background(), path)
 	if err != nil {
 		return "", err
 	}

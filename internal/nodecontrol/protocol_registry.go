@@ -23,6 +23,7 @@ func Protocol(schemas huma.Registry) []workerprotocol.Operation {
 		jsonMedia = "application/json"
 		textMedia = "text/plain"
 		handler   = "(*internal/nodecontrol.Server)."
+		inHeader  = "header"
 	)
 	jsonBody := func(t reflect.Type) *huma.RequestBody {
 		return &huma.RequestBody{Required: true, Content: map[string]*huma.MediaType{jsonMedia: {Schema: schemas.Schema(t, true, "")}}}
@@ -51,9 +52,27 @@ func Protocol(schemas huma.Registry) []workerprotocol.Operation {
 			"200": {Description: "Configuration document.", Content: map[string]*huma.MediaType{jsonMedia: {Schema: schemas.Schema(reflect.TypeFor[NodeConfig](), true, "")}}},
 			"304": {Description: "Revision unchanged."},
 		}, http.StatusNotFound, http.StatusServiceUnavailable)
-	config.Parameters = []*huma.Param{{Name: headerIfNoneMatch, In: "header", Schema: &huma.Schema{Type: huma.TypeString}}}
+	config.Parameters = []*huma.Param{{Name: headerIfNoneMatch, In: inHeader, Schema: &huma.Schema{Type: huma.TypeString}}}
+	sourceParams := []*huma.Param{
+		{Name: nodesource.HeaderSourceGrant, In: inHeader, Required: true, Description: "The source grant, as sources/open last returned it. A header, so access logs never record it; the node's signature covers it.", Schema: &huma.Schema{Type: huma.TypeString}},
+		{Name: headerRange, In: inHeader, Description: "One byte range or suffix range. Several ranges are refused with 416.", Schema: &huma.Schema{Type: huma.TypeString}},
+		{Name: headerIfMatch, In: inHeader, Description: "The grant's entity tag; another answers 412. If-None-Match, If-Modified-Since, If-Unmodified-Since and If-Range are ignored.", Schema: &huma.Schema{Type: huma.TypeString}},
+	}
+	sourceBytesDescription := "The bytes of the source a grant approves, for a node that reads its sources through the core (source_access core). The grant must verify, be unexpired, be younger than its 24-hour whole life and name the calling node (403). No catalog read: the catalog is checked at open and every renewal. The core opens the granted path through fspath, fstats the descriptor and serves from it: gone or not a regular file is 410, another size or modification time (compared at microseconds) is 412, so a file replaced after the check is never served. Identity encoding, Accept-Ranges bytes, the grant's ETag, Cache-Control no-store; 206 with Content-Range for a range, 416 with Content-Range bytes */size past the end. Exempt from the per-node request budgets and from the request and activity logs; the write deadline rolls with progress. 503: no grant key."
+	sourceBytes := op(http.MethodGet, PathSources, "HandleSource", "natural_idempotent", sourceBytesDescription, nil,
+		map[string]*huma.Response{
+			"200": {Description: "The whole source.", Content: map[string]*huma.MediaType{"application/octet-stream": {Schema: &huma.Schema{Type: huma.TypeString, Format: "binary"}}}},
+			"206": {Description: "One range of the source.", Content: map[string]*huma.MediaType{"application/octet-stream": {Schema: &huma.Schema{Type: huma.TypeString, Format: "binary"}}}},
+		}, http.StatusForbidden, http.StatusGone, http.StatusPreconditionFailed, http.StatusRequestedRangeNotSatisfiable, http.StatusServiceUnavailable)
+	sourceBytes.Parameters = sourceParams
+	sourceHead := op(http.MethodHead, PathSources, "HandleSource", "natural_idempotent", sourceBytesDescription, nil,
+		map[string]*huma.Response{"200": {Description: "The source's length and ETag, without a body."}},
+		http.StatusForbidden, http.StatusGone, http.StatusPreconditionFailed, http.StatusServiceUnavailable)
+	sourceHead.Parameters = sourceParams
 	return []workerprotocol.Operation{
 		config,
+		sourceBytes,
+		sourceHead,
 		op(http.MethodPost, PathReport, "HandleReport", "non_retryable",
 			"The node's sessions and stream telemetry, posted every second. Fenced on (boot_id, seq): an older or repeated pair gets 409 and writes nothing. The core files the report under the authenticated node, with its own clock, and replaces the node's session records and telemetry snapshot as a whole. 413: more than 2,000 sessions or transfers. 429: the node exceeded its request budget on this server.",
 			jsonBody(reflect.TypeFor[Report]()), map[string]*huma.Response{"204": {Description: "Accepted, or dropped by a core without Redis."}},

@@ -15,6 +15,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/nodeauth/nodeauthtest"
 	"github.com/Silo-Server/silo-server/internal/nodepool"
 	"github.com/Silo-Server/silo-server/internal/nodesessions"
+	"github.com/Silo-Server/silo-server/internal/nodesource"
 	"github.com/Silo-Server/silo-server/internal/opslog"
 	"github.com/Silo-Server/silo-server/internal/streamtelemetry"
 )
@@ -65,7 +66,8 @@ func TestConfigServesTheNodesDocument(t *testing.T) {
 		t.Fatalf("revision %q is not the hash of the body (%q)", doc.Revision, recomputed.Revision)
 	}
 	want := NodeConfigBody{
-		Node: NodeIdentity{ID: 7, Name: "gpu-7", URL: "http://gpu-7:8080"},
+		Node:         NodeIdentity{ID: 7, Name: "gpu-7", URL: "http://gpu-7:8080"},
+		SourceAccess: nodesource.ModeLocal,
 		Playback: PlaybackConfig{FFmpegPath: "/opt/ffmpeg/bin/ffmpeg", HWAccel: "qsv", HWDevice: "/dev/dri/renderD128",
 			TranscodeDir: "/var/silo/transcode", SegmentRetentionSeconds: 900, TrickplayNodeCapacity: 4},
 		Download:  DownloadConfig{ArtifactDir: "/var/silo/artifacts", ArtifactMaxBytes: 1000},
@@ -94,10 +96,12 @@ func TestConfigServesTheNodesDocument(t *testing.T) {
 		n.HWAccelOverride, n.HWDeviceOverride = &accel, &device
 		n.DownloadArtifactDirOverride, n.DownloadArtifactMaxBytesOverride = &dir, &budget
 		n.DrainRequested = true
+		n.SourceAccess = nodepool.SourceAccessCore
 	})
 	overridden, _ := f.config(7, key)
 	if overridden.Playback.HWAccel != accel || overridden.Playback.HWDevice != device ||
-		overridden.Download.ArtifactDir != dir || overridden.Download.ArtifactMaxBytes != budget || !overridden.DrainRequested {
+		overridden.Download.ArtifactDir != dir || overridden.Download.ArtifactMaxBytes != budget || !overridden.DrainRequested ||
+		overridden.SourceAccess != nodesource.ModeCore {
 		t.Fatalf("row not applied: %+v", overridden.NodeConfigBody)
 	}
 	if overridden.Revision == doc.Revision {
@@ -468,5 +472,13 @@ func TestNodePlaybackBudget(t *testing.T) {
 	}
 	if refused < 900 {
 		t.Fatalf("a flood of 1000 config reads had %d refused", refused)
+	}
+}
+
+// The core stores a node's source access as nodepool's value and the node
+// reads it as nodesource's: the two must name the same strings.
+func TestSourceAccessModesAgree(t *testing.T) {
+	if nodepool.SourceAccessLocal != nodesource.ModeLocal || nodepool.SourceAccessCore != nodesource.ModeCore {
+		t.Fatal("nodepool and nodesource name source access modes differently")
 	}
 }

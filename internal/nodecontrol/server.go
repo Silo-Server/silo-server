@@ -18,6 +18,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/logthrottle"
 	"github.com/Silo-Server/silo-server/internal/nodepool"
 	"github.com/Silo-Server/silo-server/internal/nodesessions"
+	"github.com/Silo-Server/silo-server/internal/nodesource"
 	"github.com/Silo-Server/silo-server/internal/opslog"
 	"github.com/Silo-Server/silo-server/internal/streamtelemetry"
 )
@@ -95,6 +96,9 @@ type Server struct {
 	// second, and during a Redis outage each report would log, and this
 	// server's warnings are captured into the operational log.
 	warnings *logthrottle.Throttle[reportWarning]
+	// afterSourceOpen runs once a source read has opened and checked its
+	// descriptor, before it serves; tests replace the file there.
+	afterSourceOpen func()
 }
 
 // reportWarning is one kind of report warning about one node.
@@ -172,6 +176,15 @@ func (s *Server) nodeConfig(ctx context.Context, id int) (NodeConfig, error) {
 	return buildNodeConfig(node, cfg, settings), nil
 }
 
+// nodeSourceAccess is the source access mode a node's document names: the
+// row's, with anything but core read as local.
+func nodeSourceAccess(node *nodepool.Node) string {
+	if node.SourceAccess == nodepool.SourceAccessCore {
+		return nodesource.ModeCore
+	}
+	return nodesource.ModeLocal
+}
+
 func buildNodeConfig(node *nodepool.Node, cfg *config.Config, settings map[string]string) NodeConfig {
 	artifactDir := cfg.Download.ArtifactDir
 	if node.DownloadArtifactDirOverride != nil {
@@ -192,6 +205,7 @@ func buildNodeConfig(node *nodepool.Node, cfg *config.Config, settings map[strin
 	return newNodeConfig(NodeConfigBody{
 		Node:           NodeIdentity{ID: node.ID, Name: node.Name, URL: node.URL},
 		DrainRequested: node.DrainRequested,
+		SourceAccess:   nodeSourceAccess(node),
 		Playback: PlaybackConfig{
 			FFmpegPath: cfg.Playback.FFmpegPath,
 			// The same resolution dispatch names in a start request, so the

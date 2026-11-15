@@ -66,9 +66,11 @@ func (h *NodeHandler) UpdateAdminNode(ctx context.Context, id int, input nodepoo
 	// request goroutine; the response is the committed row and never waits on
 	// or reflects the worker's answer.
 	policyChanged := nodePolicyTargetChanged(previous, node)
-	// A transcode node takes its artifact storage from the core too, so a
-	// change to it is pushed the same way; it moves no capability.
-	configChanged := policyChanged || transcodeNodeArtifactOverridesChanged(previous, node)
+	// A transcode node takes its artifact storage and its source access from
+	// the core too, so a change to either is pushed the same way; neither
+	// moves a capability.
+	configChanged := policyChanged || transcodeNodeArtifactOverridesChanged(previous, node) ||
+		transcodeNodeSourceAccessChanged(previous, node)
 	detached := context.WithoutCancel(ctx)
 	go func() {
 		if configChanged && !h.reloadNodeConfig(detached, node) && policyChanged {

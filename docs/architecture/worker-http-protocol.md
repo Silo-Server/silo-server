@@ -304,7 +304,8 @@ The retained transcode `POST /transcode/start` decodes the owning
 it does not impose a decoder body bound. `session_id` and `source_grant` are
 required: the node opens the grant (a missing or refused one is 400, a mount
 that does not match 409, an API it cannot reach 503) and runs FFmpeg on the
-approved path, never on `input_path`, keeping the source open for the
+approved path, or with core source access its relay URL, never on `input_path`
+(a text burn-in that cannot be staged on a core-access node is 409), keeping the source open for the
 session's life across FFmpeg restarts and seeks. `playback_session_id`,
 `user_id`, `profile_id` and `media_file_id` name the playback session the node
 files its session record and stream telemetry under. Audio/copy/tone-map
@@ -470,6 +471,13 @@ serve them. The `x-silo-worker-protocols` extension lists them under listener
 | `POST resolve` | The recipe, playback identity and source grant of a transport the node lost or serves as a progressive remux. |
 | `POST sources/open` | Exchanges a source grant for the approved path and a renewed grant. |
 
+A node with core source access also reads source bytes from
+`GET /api/internal/nodes/sources` (and `HEAD`), outside `self/`: the grant in the
+`X-Silo-Source-Grant` header, a single byte range, `If-Match` on the grant's
+entity tag. The API serves it from the descriptor it checked against the grant,
+identity-encoded, with a rolling write deadline, outside both per-node request
+budgets.
+
 [Transcode nodes](transcode-nodes.md) is the authority for what each route
 checks, its statuses, the two per-node request budgets (one for config, report,
 logs, health-changed and revoke-recipes, one for resolve and sources/open, both
@@ -487,10 +495,14 @@ exchanges it at `sources/open`, runs FFmpeg only on the path the API approves,
 never on the job's input path field, and renews it while the job runs; a source
 the API stops renewing ends the job. A missing or refused grant answers `400`,
 a node mount that does not show the approved revision `409`, and an API the
-node cannot reach `503`. Every API server and transcode node must see each
-library file at the same path with the same size and modification time, to the
-microsecond. See [source grants](transcode-nodes.md#source-grants) for the
-grant format, minting, renewal and the open route.
+node cannot reach `503`. Every API server, and every transcode node with local
+source access, must see each library file at the same path with the same size
+and modification time, to the microsecond. A node with core source access runs
+FFmpeg on a loopback relay URL instead, which reads the approved revision from
+the API, and refuses a start whose text subtitle burn-in cannot be staged
+(`409`). See [source grants](transcode-nodes.md#source-grants) for the grant
+format, minting, renewal and the open route, and
+[core source access](transcode-nodes.md#core-source-access) for the relay.
 
 ### Upgrade order
 

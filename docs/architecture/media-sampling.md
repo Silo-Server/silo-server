@@ -112,7 +112,10 @@ statistics. Rules:
   explicit `file:` URL, and the input opens with
   `-protocol_whitelist file,pipe`; the concat demuxer otherwise refuses both.
   Paths are single-quoted, with a quote written as `'\''`; a path with a
-  line break or NUL is rejected, since the list is read line by line.
+  line break or NUL is rejected, since the list is read line by line. A
+  relayed input (a transcode node reading through the core) uses another form
+  of the list, which the capability check covers; see
+  [relayed concat](transcode-nodes.md#relayed-concat).
 - Inpoints are container timestamps, while sample times count from the
   start of the file like every other result time, hence the start-time
   offset. Files remuxed with their original timestamps (`copyts`) often

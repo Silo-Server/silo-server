@@ -18,6 +18,12 @@ var errSourceAuthorityUnavailable = errors.New("source authority unavailable")
 // mountMismatchDescription documents a job route's 409 in its protocol entry.
 const mountMismatchDescription = "This node's mount does not show the approved source revision"
 
+// relayedBurnInRefusal is a start's 409 when its text subtitle burn-in
+// cannot be staged and the node reads the source through the core, so libass
+// would read the whole file over the network. The caller runs the start
+// elsewhere.
+const relayedBurnInRefusal = "this node reads its source through the core and cannot burn in this subtitle track"
+
 // sourceGrantRequired is the answer to a job that carries no grant.
 const sourceGrantRequired = "source_grant is required"
 

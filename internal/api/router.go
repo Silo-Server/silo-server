@@ -3477,6 +3477,14 @@ func newChiRouter(deps Dependencies) chi.Router {
 				r.Post("/revoke-recipes", nodeControl.HandleRevokeRecipes)
 			})
 		})
+		// Source bytes for core-access nodes. Each request streams for as
+		// long as FFmpeg reads, and a node keeps several open per job, so they
+		// sit outside both per-node request budgets; the signature, the grant
+		// and the grant's whole life bound them instead. Like every node
+		// route they are outside the request and activity logs and response
+		// compression (skipNativeMediaCompression).
+		r.With(nodecontrol.RequireNode(deps.NodeKeyRegistry)).Get("/api/internal/nodes/sources", nodeControl.HandleSource)
+		r.With(nodecontrol.RequireNode(deps.NodeKeyRegistry)).Head("/api/internal/nodes/sources", nodeControl.HandleSource)
 	}
 
 	if nodeHandler != nil {

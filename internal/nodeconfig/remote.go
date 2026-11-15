@@ -14,6 +14,7 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/nodecontrol"
+	"github.com/Silo-Server/silo-server/internal/nodesource"
 )
 
 // RemotePollInterval is how often a transcode node asks the core whether its
@@ -346,4 +347,16 @@ func (r *Remote) CaptureLevel() string {
 		return doc.Logging.CaptureLevel
 	}
 	return ""
+}
+
+// SourceAccess is how the node reads its job sources, as of the last read:
+// nodesource.ModeCore through the core, otherwise nodesource.ModeLocal. The
+// source opener reads it at each open, so a change applies to jobs started
+// after it while running jobs keep theirs. It is not part of the Config, so
+// a change alone keeps the Config pointer and refuses no work.
+func (r *Remote) SourceAccess() string {
+	if doc := r.document(); doc != nil && doc.SourceAccess == nodesource.ModeCore {
+		return nodesource.ModeCore
+	}
+	return nodesource.ModeLocal
 }

@@ -75,6 +75,11 @@ func (s *Server) HandleSourceOpen(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	renewed, err := s.opts.Grants.Renew(claims)
+	if errors.Is(err, nodesource.ErrGrantExpired) {
+		// It reached MaxGrantAge between Verify and Renew.
+		http.Error(w, http.StatusText(http.StatusForbidden), http.StatusForbidden)
+		return
+	}
 	if err != nil {
 		slog.ErrorContext(r.Context(), "renew source grant", "component", "nodecontrol", "node_id", id, "error", err)
 		http.Error(w, "source grants unavailable", http.StatusServiceUnavailable)

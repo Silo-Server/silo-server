@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/Silo-Server/silo-server/internal/fspath"
+	"github.com/Silo-Server/silo-server/internal/mediacontainer"
 )
 
 // A Samples request reads the input through ffmpeg's concat demuxer: an
@@ -31,6 +32,17 @@ import (
 // the pipe URL: each entry names the input as an explicit file: URL, and the
 // input opens with a protocol whitelist of file and pipe (the concat demuxer
 // otherwise allows neither).
+//
+// A relayed input (a transcode node reading its source through the core) is
+// a loopback http URL, which fspath.CommandContext cannot guard here because
+// the list, not the argv, names it. Its list opens with a protocol whitelist
+// of http, tcp and pipe and a format whitelist of concat alone, and each entry
+// names the bare URL followed by "option protocol_whitelist http,tcp" and
+// "option format_whitelist" of the admitted demuxers, which replace what the
+// entry inherits from the list. An ffmpeg that cannot read that list is found
+// by the capability check (checkRelayedConcatSamples), so a relayed run it
+// cannot do is refused as unsupported, which is not permanent: the caller
+// moves the work.
 
 // sampleSpanSeconds is how long after its inpoint each entry ends. It is
 // short enough that a sample rarely decodes a second keyframe, and long enough
@@ -49,6 +61,28 @@ var (
 	concatDemuxerArgs = []string{"-protocol_whitelist", "file,pipe", "-f", "concat", "-safe", "0"}
 	concatInputArgs   = append([]string{skipFrameOption, keyframeSkipFrame}, concatDemuxerArgs...)
 )
+
+// relayedConcatDemuxerArgs open a list input whose entries are a relayed
+// input.
+var relayedConcatDemuxerArgs = []string{"-protocol_whitelist", "http,tcp,pipe", "-format_whitelist", "concat", "-f", "concat", "-safe", "0"}
+
+// relayedEntryOptions hold each entry of a relayed list to the relay's
+// protocols and the admitted demuxers.
+var relayedEntryOptions = "option protocol_whitelist http,tcp\noption format_whitelist " + strings.Join(mediacontainer.Demuxers(), ",") + "\n"
+
+// listDemuxerArgs are the options that open input's list: the relayed form
+// for a relayed input.
+func listDemuxerArgs(input string) []string {
+	if fspath.IsRelayed(input) {
+		return relayedConcatDemuxerArgs
+	}
+	return concatDemuxerArgs
+}
+
+// listInputArgs are the input options of input's Samples list.
+func listInputArgs(input string) []string {
+	return append([]string{skipFrameOption, keyframeSkipFrame}, listDemuxerArgs(input)...)
+}
 
 // concatListInput is the input a Samples request reads its list from.
 const concatListInput = "pipe:0"
@@ -95,10 +129,14 @@ func buildConcatListSpan(input string, entries []listEntry, span float64) ([]byt
 	if err != nil {
 		return nil, err
 	}
+	options := ""
+	if fspath.IsRelayed(input) {
+		options = relayedEntryOptions
+	}
 	var list bytes.Buffer
 	list.WriteString("ffconcat version 1.0\n")
 	for _, entry := range entries {
-		list.WriteString("file " + quoted + "\n")
+		list.WriteString("file " + quoted + "\n" + options)
 		list.WriteString("file_packet_meta " + sampleMetadataKey + " " + formatSampleSeconds(entry.sample) + "\n")
 		list.WriteString("inpoint " + formatSampleSeconds(entry.inpoint) + "\n")
 		list.WriteString("outpoint " + formatSampleSeconds(entry.inpoint+span) + "\n")
@@ -113,7 +151,12 @@ func buildConcatListSpan(input string, entries []listEntry, span float64) ([]byt
 // NUL, so paths holding a line break or NUL are rejected. The list reaches
 // ffmpeg on stdin, not as an argument, so an fspath-encoded input is decoded
 // here to name the real file.
+//
+// A relayed input is named as its bare URL, which holds no quote.
 func concatPath(input string) (string, error) {
+	if fspath.IsRelayed(input) {
+		return "'" + input + "'", nil
+	}
 	input = fspath.Decode(input)
 	if strings.ContainsAny(input, "\n\r\x00") {
 		return "", errors.New("sampled input path must not contain a line break or NUL")

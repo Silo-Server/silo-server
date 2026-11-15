@@ -29,9 +29,13 @@ const (
 	PathSourcesOpen   = "/api/internal/nodes/self/sources/open"
 )
 
-// headerIfNoneMatch is the conditional header a node's configuration poll
-// sends.
-const headerIfNoneMatch = "If-None-Match"
+// Request headers of the node routes: the conditional header a node's
+// configuration poll sends, and the range and condition of a source read.
+const (
+	headerIfNoneMatch = "If-None-Match"
+	headerRange       = "Range"
+	headerIfMatch     = "If-Match"
+)
 
 // Report and log batch bounds. A node that has more sends the newest and
 // marks the report truncated; the core refuses anything larger.
@@ -71,11 +75,16 @@ type NodeConfigBody struct {
 	Node NodeIdentity `json:"node"`
 	// DrainRequested is an administrator's request that the node take no new
 	// work while its sessions finish.
-	DrainRequested bool            `json:"drain_requested"`
-	Playback       PlaybackConfig  `json:"playback"`
-	Download       DownloadConfig  `json:"download"`
-	Subtitles      SubtitlesConfig `json:"subtitles"`
-	Logging        LoggingConfig   `json:"logging"`
+	DrainRequested bool `json:"drain_requested"`
+	// SourceAccess is how the node reads its job sources: "local" through its
+	// own library mount, "core" over HTTP from the core
+	// (nodesource.ModeLocal, nodesource.ModeCore). The node reads it at each
+	// source open, so it applies to jobs started after a change.
+	SourceAccess string          `json:"source_access"`
+	Playback     PlaybackConfig  `json:"playback"`
+	Download     DownloadConfig  `json:"download"`
+	Subtitles    SubtitlesConfig `json:"subtitles"`
+	Logging      LoggingConfig   `json:"logging"`
 }
 
 // NodeIdentity is the node's registered row.
@@ -131,8 +140,8 @@ func newNodeConfig(body NodeConfigBody) NodeConfig {
 }
 
 // ApplyTo writes the document's settings into cfg, where the node's code reads
-// them. Identity, drain and the capture level have no Config field; the node
-// reads them from the document.
+// them. Identity, drain, source access and the capture level have no Config
+// field; the node reads them from the document.
 func (b *NodeConfigBody) ApplyTo(cfg *config.Config) {
 	cfg.Server.LogLevel = b.Logging.Level
 	cfg.Server.LogFormat = b.Logging.Format
