@@ -148,9 +148,12 @@ func (e *Enricher) runOneBatch(ctx context.Context) (sweepBatch, error) {
 
 	e.runBatch(ctx, items, e.enrichItem)
 
+	// The summary decides whether the sweep goes on, so a failed read ends
+	// the run with its error instead of reading as a batch without outcomes.
+	// What the batch recorded stands either way.
 	summary, err := e.sweepSummary(context.WithoutCancel(ctx), items, started)
 	if err != nil {
-		slog.WarnContext(ctx, "audiobook enrichment: could not summarize batch", "component", "audiobooks", "error", err)
+		return sweepBatch{claimed: len(items)}, fmt.Errorf("audiobook enrichment: summarize batch: %w", err)
 	}
 	slog.InfoContext(ctx, "audiobook enrichment: batch complete", "component", "audiobooks",
 		"claimed", len(items),
