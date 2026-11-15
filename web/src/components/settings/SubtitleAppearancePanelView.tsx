@@ -1,4 +1,4 @@
-import { useMemo, type ReactNode } from "react";
+import { useMemo, useRef, type ReactNode } from "react";
 import { RotateCcw, X } from "lucide-react";
 import { Dialog as DialogPrimitive } from "radix-ui";
 import { usePercentDraft } from "@/hooks/usePercentDraft";
@@ -73,8 +73,12 @@ export function SubtitleAppearancePanelView({
     onClose();
   };
 
-  // Radix Dialog traps focus in the panel, hides the page behind it from
-  // assistive tech, and returns focus to the opener on close. Inside a
+  // Radix returns focus only to a Dialog.Trigger, and the panel opens from
+  // plain buttons, so remember what had focus on open and go back there.
+  const openerRef = useRef<HTMLElement | null>(null);
+
+  // Radix Dialog traps focus in the panel and hides the page behind it from
+  // assistive tech. Inside a
   // fullscreen player only the fullscreen element is painted, so the panel
   // portals there.
   return (
@@ -86,6 +90,14 @@ export function SubtitleAppearancePanelView({
         <DialogPrimitive.Overlay className="player-subtitle-panel fixed inset-0 z-[70] flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm">
           <DialogPrimitive.Content
             aria-describedby={undefined}
+            onOpenAutoFocus={() => {
+              openerRef.current =
+                document.activeElement instanceof HTMLElement ? document.activeElement : null;
+            }}
+            onCloseAutoFocus={(e) => {
+              e.preventDefault();
+              openerRef.current?.focus();
+            }}
             className="relative w-full max-w-[640px] overflow-hidden rounded-2xl border border-white/10 bg-[#111114]/95 text-white shadow-2xl ring-1 ring-black/40 backdrop-blur-xl outline-none"
           >
             {/* Header */}

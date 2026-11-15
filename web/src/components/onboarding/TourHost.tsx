@@ -111,6 +111,15 @@ export function TourHost({ flow, onDone }: TourHostProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- finish is stable enough for this one-shot; re-running on step change is the point
   }, [step]);
 
+  // The buttons are disabled while a step saves, which drops focus to <body>.
+  // Once the next step shows, put it back on the primary button.
+  const pending = progress.isPending;
+  useEffect(() => {
+    if (pending) return;
+    const active = document.activeElement;
+    if (active === null || active === document.body) primaryRef.current?.focus();
+  }, [index, pending]);
+
   if (saveFailed)
     return (
       <div role="alert">
