@@ -364,6 +364,15 @@ func TestFindMatchRequiresANarratorForANarratorTaggedItem(t *testing.T) {
 			wantMatch: true,
 		},
 		{
+			name: "narrator tag, tagged-ASIN lookup fails then the merge's retry answers without narrators: match",
+			item: enrichmentItemRow{
+				Title: "The Martian", Author: "Andy Weir", Narrators: []string{"R. C. Bray"},
+				ProviderIDs: map[string]string{"asin": "B00B5HZGUG"},
+			},
+			providers: []metadata.Provider{&lookupOnly{&fixedProvider{slug: "lookup", failFirst: true, answers: []*metadata.MetadataResult{ownIDOnly}}}},
+			wantMatch: true,
+		},
+		{
 			name:      "no narrator tag, record lists none: match",
 			item:      enrichmentItemRow{Title: "The Martian", Author: "Andy Weir"},
 			results:   []metadata.SearchResult{plain},

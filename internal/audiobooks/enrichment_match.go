@@ -66,6 +66,9 @@ type providerState struct {
 	// rejectedCredits marks that last answer as failing the author or
 	// narrator check.
 	rejectedCredits bool
+	// lookupFailed marks a tagged-ASIN lookup that errored. The merge's retry
+	// with the same tag-only IDs is that lookup again and is admitted as one.
+	lookupFailed bool
 }
 
 // answered records a GetMetadata answer from provider i.
@@ -129,6 +132,7 @@ func (r *matchRun) lookupTaggedASIN(ctx context.Context) error {
 		result, err := mp.GetMetadata(ctx, r.metadataRequest(tagged))
 		if err != nil {
 			// Not recorded as asked: the merge retries a failed lookup.
+			r.state[i].lookupFailed = true
 			r.errs = append(r.errs, fmt.Errorf("%s asin lookup: %w", p.Slug(), err))
 			continue
 		}
@@ -323,7 +327,10 @@ func (r *matchRun) fetchForMerge(ctx context.Context, i int, ids map[string]stri
 	if got == nil || !got.HasMetadata {
 		return nil, nil
 	}
-	admitted, rejection, err := r.admitFetched(ctx, ids, got, false)
+	// A retry of a failed tagged-ASIN lookup, still with only the tag's IDs,
+	// gets the same admission rules the lookup would have applied.
+	byTaggedID := prev.lookupFailed && maps.Equal(ids, r.item.ProviderIDs)
+	admitted, rejection, err := r.admitFetched(ctx, ids, got, byTaggedID)
 	r.answered(i, maps.Clone(ids), rejection)
 	switch {
 	case err != nil:
