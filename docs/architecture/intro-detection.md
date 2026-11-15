@@ -93,11 +93,13 @@ written: a recurring music cue is often shared by a single pair of episodes,
 while a title card recurs across the season. Such a file first gets the wider
 search, as a file with no match does, so a title card shared with episodes
 outside its neighbor window still finds its partners. That search records
-results for the file alone, so it changes no other file's match. Recurring music cues mistaken for
-intros are short and rarely shared by most of a season, so the ones written
-fall in the lower rows. Chapter-based markers keep 0.95,
-and silence-extended chapters 0.98. Contribution to online providers compares
-these values with each provider's minimum confidence.
+results for the file alone, so it changes no other file's match. Music cues
+that several episodes share are still written, and they fall in the lower
+rows because few of them match most of a season.
+
+Chapter-based markers keep 0.95, and silence-extended chapters 0.98.
+Contribution to online providers compares these values with each provider's
+minimum confidence.
 
 ### Chapters and online markers
 
