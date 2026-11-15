@@ -128,14 +128,15 @@ type parsedAudiobookFile struct {
 // ffprobe binary that cannot be executed) is a real failure and must be
 // reported by the caller.
 // allowedPaths is the inventory accepted by discovery, including ignore rules.
-// A nil inventory allows every audio file in the folder.
-func parseAudiobookFolder(ctx context.Context, ffprobePath string, folderPath string, allowedPaths map[string]bool) (*parsedAudiobook, error) {
-	audioFiles, err := audiobookBookParts(folderPath, allowedPaths)
-	if err != nil {
-		return nil, err
-	}
-
-	return parseAudiobookParts(ctx, ffprobePath, folderPath, audioFiles)
+// A nil inventory allows every audio file in the folder. walked, when set, is
+// what the walk read of the folder (audiobookWalkedBook.partsOrRelist).
+func parseAudiobookFolder(ctx context.Context, ffprobePath string, folderPath string, allowedPaths map[string]bool, walked *audiobookWalkedBook) (*parsedAudiobook, error) {
+	var book *parsedAudiobook
+	err := walked.partsOrRelist(folderPath, allowedPaths, func(parts []string) (err error) {
+		book, err = parseAudiobookParts(ctx, ffprobePath, folderPath, parts)
+		return err
+	})
+	return book, err
 }
 
 // probedAudiobookPart is one readable part of a book with the format tags

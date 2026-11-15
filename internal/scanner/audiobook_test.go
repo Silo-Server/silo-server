@@ -190,7 +190,7 @@ func TestParseAudiobookFolderSingleM4B(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	got, err := parseAudiobookFolder(ctx, ffprobePath, "testdata/audiobook_fixtures/single_book", nil)
+	got, err := parseAudiobookFolder(ctx, ffprobePath, "testdata/audiobook_fixtures/single_book", nil, nil)
 	if err != nil {
 		t.Fatalf("parseAudiobookFolder: %v", err)
 	}
@@ -222,7 +222,7 @@ func TestParseAudiobookFolderSingleM4B(t *testing.T) {
 }
 
 func TestParseAudiobookFolderEmptyFolderSignalsNoMedia(t *testing.T) {
-	_, err := parseAudiobookFolder(t.Context(), "ffprobe", t.TempDir(), nil)
+	_, err := parseAudiobookFolder(t.Context(), "ffprobe", t.TempDir(), nil, nil)
 	if !errors.Is(err, errFolderHasNoMedia) {
 		t.Fatalf("empty folder error = %v, want errFolderHasNoMedia", err)
 	}
@@ -238,7 +238,7 @@ func TestParseAudiobookFolderUnusableFFprobeIsNotSkippable(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, err := parseAudiobookFolder(t.Context(), "/nonexistent/bin/ffprobe", dir, nil)
+	_, err := parseAudiobookFolder(t.Context(), "/nonexistent/bin/ffprobe", dir, nil, nil)
 	if err == nil {
 		t.Fatal("parseAudiobookFolder with an unusable ffprobe returned no error")
 	}
@@ -252,7 +252,7 @@ func TestParseAudiobookFolderUnusableFFprobeIsNotSkippable(t *testing.T) {
 func TestParseAudiobookFolderVanishedFolderSignalsNoMedia(t *testing.T) {
 	gone := filepath.Join(t.TempDir(), "renamed-away")
 
-	_, err := parseAudiobookFolder(t.Context(), "ffprobe", gone, nil)
+	_, err := parseAudiobookFolder(t.Context(), "ffprobe", gone, nil, nil)
 	if !errors.Is(err, errFolderHasNoMedia) {
 		t.Fatalf("vanished folder error = %v, want errFolderHasNoMedia", err)
 	}
@@ -268,7 +268,7 @@ func TestParseAudiobookFolderMultiFile(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	got, err := parseAudiobookFolder(ctx, ffprobePath, "testdata/audiobook_fixtures/multi_file", nil)
+	got, err := parseAudiobookFolder(ctx, ffprobePath, "testdata/audiobook_fixtures/multi_file", nil, nil)
 	if err != nil {
 		t.Fatalf("parseAudiobookFolder: %v", err)
 	}
@@ -1267,7 +1267,7 @@ func TestParseAudiobookFolderSkipsRejectedPart(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	got, err := parseAudiobookFolder(t.Context(), "ffprobe", dir, nil)
+	got, err := parseAudiobookFolder(t.Context(), "ffprobe", dir, nil, nil)
 	if err != nil {
 		t.Fatalf("parseAudiobookFolder: %v", err)
 	}
@@ -1289,7 +1289,7 @@ func TestParseAudiobookFolderSkipsRejectedPart(t *testing.T) {
 	}
 	// The caller retires rows indexed for these files, so the error must
 	// carry them.
-	_, err = parseAudiobookFolder(t.Context(), "ffprobe", dir, nil)
+	_, err = parseAudiobookFolder(t.Context(), "ffprobe", dir, nil, nil)
 	var unreadable *noReadableAudiobookPartError
 	if !errors.As(err, &unreadable) || !reflect.DeepEqual(unreadable.paths, []string{bad}) {
 		t.Fatalf("book with no readable part: err = %v, want noReadableAudiobookPartError for %s", err, bad)
