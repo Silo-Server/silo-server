@@ -593,6 +593,38 @@ describe("useSubtitleTracks", () => {
     }
   });
 
+  it("does not re-enter the fetching effect when a failed window renders its error state", async () => {
+    vi.useFakeTimers();
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    fetchMock.mockResolvedValue(new Response(null, { status: 503 }));
+    const initial = { origin: 0, durationRef: { current: 7200 } };
+    const { rerender, unmount } = renderTracks(initial);
+    try {
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(0);
+      });
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+
+      // The failure told the player to render "error"; that render re-runs the
+      // hook with the same inputs. It must not start another extraction: the
+      // scheduled backoff is the only path forward, or a failing track turns
+      // every render into an ffmpeg spawn.
+      rerender(initial);
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(0);
+      });
+      rerender(initial);
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(0);
+      });
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    } finally {
+      unmount();
+      error.mockRestore();
+      vi.useRealTimers();
+    }
+  });
+
   it("keeps retrying explicitly-retryable 503s past the terminal ceiling", async () => {
     vi.useFakeTimers();
     const error = vi.spyOn(console, "error").mockImplementation(() => {});

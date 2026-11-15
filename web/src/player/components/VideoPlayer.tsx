@@ -117,6 +117,7 @@ import type { FailureV3, PlanV3, SubtitleInventoryItemV3 } from "../protocol-v3"
 import {
   mediaDurationSeconds,
   reloadStartSeconds,
+  replacedTransportPlayheadSeconds,
   subtitleChangePositionSeconds,
   subtitleStartPositionSeconds,
   toMediaTime,
@@ -1189,12 +1190,15 @@ export function VideoPlayer({
       transportFailedForPlanRevisionRef.current = planRevision;
       setError(null);
       // A transport that never played, in a playing room, resumes where the
-      // room is now.
+      // room is now. So does one that has played but has no playhead yet: a
+      // transport that failed while it was still at zero has no position worth
+      // rebuilding, and the room's is the one the viewer is actually missing.
       const roomReference = roomReferenceRef.current;
+      const ownPosition = replanPosition();
       const resumeAt =
-        !streamPlayedRef.current && roomReference?.playing
+        roomReference?.playing && (!streamPlayedRef.current || !(ownPosition > 0))
           ? roomPositionAt(roomReference, Date.now(), serverTimeOffsetRef.current)
-          : replanPosition();
+          : ownPosition;
       onPlanFailure(failure, resumeAt);
       return true;
     },
@@ -1204,6 +1208,14 @@ export function VideoPlayer({
   useEffect(() => {
     transportFailedForPlanRevisionRef.current = null;
   }, [planRevision]);
+
+  // The transport effect reads failures through this ref so a new callback
+  // identity (the host rebuilds `onPlanFailure` from its own render inputs)
+  // cannot tear down a transport that is playing. A live transport is rebuilt
+  // only by a new plan or a new stream URL, which is what the effect's own
+  // dependency list names.
+  const reportCurrentPlanFailureRef = useRef(reportCurrentPlanFailure);
+  reportCurrentPlanFailureRef.current = reportCurrentPlanFailure;
 
   /**
    * Hands a network failure to the session's reconnect when the stream has
@@ -3118,10 +3130,11 @@ export function VideoPlayer({
     // segments it produced long ago, and the segment layer answers them with a
     // 412 that ends in a terminal recovery. A transport of a new session keeps
     // the plan's own start. See reloadStartSeconds.
-    const replacedPlayhead =
-      streamPlayedRef.current && transportSessionRef.current === sessionIdRef.current
-        ? toPlayerTime(currentTimeRef.current, timelineOffsetRef.current)
-        : null;
+    const replacedPlayhead = replacedTransportPlayheadSeconds(
+      transportSessionRef.current === sessionIdRef.current,
+      currentTimeRef.current,
+      timelineOffsetRef.current,
+    );
     transportSessionRef.current = sessionIdRef.current;
     // "Played" belongs to one transport. A replacement that has not shown a
     // frame yet may be a route this browser cannot reach, so its network
@@ -3477,7 +3490,7 @@ export function VideoPlayer({
                     },
                   );
                   if (
-                    !reportCurrentPlanFailure({
+                    !reportCurrentPlanFailureRef.current({
                       classification: "network_error",
                       message: `HLS failed repeatedly on ${segmentKey ?? "its playlist"}.`,
                     })
@@ -3529,7 +3542,7 @@ export function VideoPlayer({
                 } else {
                   console.error("[hls.js] Fatal media error, giving up after 3 attempts");
                   if (
-                    !reportCurrentPlanFailure({
+                    !reportCurrentPlanFailureRef.current({
                       classification: "decoder_error",
                       message: "HLS media recovery failed after three attempts.",
                     })
@@ -3543,7 +3556,7 @@ export function VideoPlayer({
               } else {
                 console.error("[hls.js] Unrecoverable error:", data);
                 if (
-                  !reportCurrentPlanFailure({
+                  !reportCurrentPlanFailureRef.current({
                     classification: "decoder_error",
                     message: `HLS reported an unrecoverable ${data.type} error.`,
                   })
@@ -3606,7 +3619,7 @@ export function VideoPlayer({
             hlsRef.current = hls;
           } else {
             if (
-              !reportCurrentPlanFailure({
+              !reportCurrentPlanFailureRef.current({
                 classification: "unsupported_transport",
                 message: "The browser rejected the planned HLS transport.",
               })
@@ -3617,7 +3630,7 @@ export function VideoPlayer({
         } catch (error) {
           if (
             !destroyed &&
-            !reportCurrentPlanFailure({
+            !reportCurrentPlanFailureRef.current({
               classification: "player_initialization_error",
               message:
                 error instanceof Error ? error.message : "Failed to initialize HLS playback.",
@@ -3643,7 +3656,7 @@ export function VideoPlayer({
               })
             : ({ kind: "native" } as const);
         if (route.kind === "unsupported") {
-          if (!reportCurrentPlanFailure(route.failure)) {
+          if (!reportCurrentPlanFailureRef.current(route.failure)) {
             setError("This browser cannot play this file.");
           }
           return;
@@ -3675,7 +3688,7 @@ export function VideoPlayer({
               onFailure: (failure) => {
                 if (destroyed) return;
                 const fail = () => {
-                  if (!reportCurrentPlanFailure(failure)) {
+                  if (!reportCurrentPlanFailureRef.current(failure)) {
                     setError(`Playback error: ${failure.message ?? failure.classification}`);
                   }
                 };
@@ -3702,7 +3715,7 @@ export function VideoPlayer({
           } catch (error) {
             if (
               !destroyed &&
-              !reportCurrentPlanFailure({
+              !reportCurrentPlanFailureRef.current({
                 classification: "player_initialization_error",
                 message:
                   error instanceof Error ? error.message : "Failed to load the browser engine.",
@@ -3793,6 +3806,12 @@ export function VideoPlayer({
     };
     // `planRevision` is the single signal that the transport changed: two plans
     // can share a stream URL and still differ in protocol, timeline, or recipe.
+    // Every other input here is either the plan's own identity (the URL, the
+    // start, the recipe) or a stable callback. In particular no host callback
+    // is listed: a host that rebuilds `onPlanFailure` from its render inputs
+    // used to reload the element on its render cadence, restarting playback at
+    // the plan's origin and leaving a paused viewer with a transport that never
+    // settled.
   }, [
     applyElementDuration,
     effectiveStreamUrl,
@@ -3806,7 +3825,6 @@ export function VideoPlayer({
     plannedDynamicRange,
     rememberPendingSeek,
     releasePendingSeek,
-    reportCurrentPlanFailure,
     shouldAutoPlay,
   ]);
 

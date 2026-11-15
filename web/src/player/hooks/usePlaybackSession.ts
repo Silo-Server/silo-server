@@ -1602,6 +1602,14 @@ export function usePlaybackSession(
   playbackVariantsRef.current = playbackVariants;
   const resumeHintsRef = useRef(resumeHints);
   resumeHintsRef.current = resumeHints;
+  // The pre-play subtitle picks are read the same way. The watch route builds
+  // them fresh on every host render, and as direct `loadSession` dependencies
+  // they ran through `replan` -> `onPlanFailure` into the player's transport
+  // effect, reloading the media element while it was already playing.
+  const initialSubtitleTrackIndexRef = useRef(initialSubtitleTrackIndexByFileId);
+  initialSubtitleTrackIndexRef.current = initialSubtitleTrackIndexByFileId;
+  const initialBitmapSubtitleTrackIndexRef = useRef(initialBitmapSubtitleTrackIndexByFileId);
+  initialBitmapSubtitleTrackIndexRef.current = initialBitmapSubtitleTrackIndexByFileId;
   const planRevisionRef = useRef(0);
   const transportRevisionRef = useRef(0);
   const replayRevisionRef = useRef(0);
@@ -2652,7 +2660,7 @@ export function usePlaybackSession(
         const targetSubtitleIndex =
           carriedSubtitleTrackIndex !== undefined
             ? (carriedSubtitleTrackIndex ?? undefined)
-            : initialSubtitleTrackIndexByFileId?.[selectedFileId];
+            : initialSubtitleTrackIndexRef.current?.[selectedFileId];
 
         const startAudioTrackIndex = tracks ? tracks.audioIndex : explicitAudioTrackIndex;
         const decision = await requestStart(
@@ -2701,12 +2709,12 @@ export function usePlaybackSession(
           ? tracks.subtitleBurnIn
             ? tracks.subtitleIndex
             : undefined
-          : initialBitmapSubtitleTrackIndexByFileId?.[selectedFileId];
+          : initialBitmapSubtitleTrackIndexRef.current?.[selectedFileId];
         const hasBitmapSubtitle =
           requestedIsBitmap ||
           bitmapSubtitleTrackIndex !== undefined ||
           (carriedSubtitleTrackIndex === undefined &&
-            initialBitmapSubtitleTrackIndexByFileId?.[selectedFileId] !== undefined);
+            initialBitmapSubtitleTrackIndexRef.current?.[selectedFileId] !== undefined);
         if (!decision.playback_plan && hasBitmapSubtitle && isBitmapSubtitleRefusal(decision)) {
           initialSubtitleFailure = describeDecisionWithoutPlan(decision);
           if (decision.session_id) {
@@ -2822,8 +2830,6 @@ export function usePlaybackSession(
       endAdoption,
       endReconnect,
       explicitAudioTrackIndex,
-      initialBitmapSubtitleTrackIndexByFileId,
-      initialSubtitleTrackIndexByFileId,
       requestStart,
       selectFileId,
       stopSession,

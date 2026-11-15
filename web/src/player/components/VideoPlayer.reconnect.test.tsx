@@ -216,12 +216,26 @@ function Harness({
   subtitleMode = "auto",
   preferredSubtitleLanguage = null,
   versions = NO_VERSIONS,
+  initialSubtitleTrackIndexByFileId,
 }: {
   subtitleMode?: SubtitleMode;
   preferredSubtitleLanguage?: string | null;
   versions?: PlayerFileVersion[];
+  initialSubtitleTrackIndexByFileId?: Record<number, number>;
 }) {
-  const playback = usePlaybackSession("request-1", versions, [], 7, 0, false, "auto");
+  const playback = usePlaybackSession(
+    "request-1",
+    versions,
+    [],
+    7,
+    0,
+    false,
+    "auto",
+    null,
+    undefined,
+    null,
+    initialSubtitleTrackIndexByFileId,
+  );
   // Published after commit, so the test reads the session the player rendered.
   useEffect(() => {
     sessionRef.current = playback;
@@ -594,5 +608,34 @@ describe("VideoPlayer with the playback session: version projection", () => {
     expect(requests.starts).toHaveLength(1);
     expect(requests.replans).toHaveLength(0);
     expect(sessionRef.current?.planRevision).toBe(1);
+  });
+});
+
+describe("VideoPlayer with the playback session: transport identity", () => {
+  it("initialises one transport per plan when the host re-renders", async () => {
+    const requests = stubServer({
+      start: () => jsonResponse(playable("session-1", directPlan()), 201),
+      replan: () => jsonResponse(playable("session-1", directPlan()), 200),
+    });
+    const view = renderHarness();
+    const video = await startWatching();
+    const src = video.getAttribute("src");
+    const loadCalls = vi.mocked(HTMLMediaElement.prototype.load).mock.calls.length;
+
+    // WatchPlaybackChrome rebuilds the pre-play subtitle index maps on every
+    // host render. As `loadSession` dependencies they re-keyed `onPlanFailure`,
+    // which the transport effect lists, so each render tore the media element
+    // down and reloaded the stream from the plan's origin.
+    view.rerender(createElement(Harness, { initialSubtitleTrackIndexByFileId: { 7: 0 } }));
+    await act(async () => {});
+    view.rerender(createElement(Harness, { initialSubtitleTrackIndexByFileId: { 7: 1 } }));
+    await act(async () => {});
+
+    expect(video.getAttribute("src")).toBe(src);
+    expect(document.querySelector("video")).toBe(video);
+    expect(vi.mocked(HTMLMediaElement.prototype.load).mock.calls.length).toBe(loadCalls);
+    expect(sessionRef.current?.planRevision).toBe(1);
+    expect(requests.starts).toHaveLength(1);
+    expect(requests.replans).toHaveLength(0);
   });
 });

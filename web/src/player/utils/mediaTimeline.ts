@@ -33,6 +33,28 @@ export function reloadStartSeconds(
   return replacedPlayheadSeconds > planStartSeconds ? replacedPlayheadSeconds : planStartSeconds;
 }
 
+/**
+ * The playhead a replacement transport inherits, on its own player clock.
+ *
+ * Reading the element's clock is what makes this independent of whether the
+ * outgoing transport ever reported a played frame: a transport that loaded and
+ * advanced (a start that began in the middle of the file) already has a
+ * position worth keeping, and a `streamPlayedRef` that is still false at the
+ * moment of a rebuild used to send the replacement back to the plan's origin.
+ * A transport of a different session inherits nothing — its clock belongs to
+ * another source — and a zero clock has no position to carry.
+ */
+export function replacedTransportPlayheadSeconds(
+  sameSession: boolean,
+  currentTimeSeconds: number,
+  timelineOffsetSeconds = 0,
+): number | null {
+  if (!sameSession || !Number.isFinite(currentTimeSeconds) || currentTimeSeconds <= 0) {
+    return null;
+  }
+  return toPlayerTime(currentTimeSeconds, timelineOffsetSeconds);
+}
+
 export function subtitleStartPositionSeconds(
   readyState: number,
   currentTimeSeconds: number,

@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   mediaDurationSeconds,
   reloadStartSeconds,
+  replacedTransportPlayheadSeconds,
   subtitleChangePositionSeconds,
   subtitleStartPositionSeconds,
   toMediaTime,
@@ -62,6 +63,26 @@ describe("reloadStartSeconds", () => {
     // The server moved the anchor past the viewer: a target behind it is not
     // producible, so the plan's own start stands.
     expect(reloadStartSeconds(130, 120)).toBe(130);
+  });
+});
+
+describe("replacedTransportPlayheadSeconds", () => {
+  // The start restart loop: the transport was rebuilt three times in two
+  // seconds while the element already sat at segment 739, and each rebuild went
+  // back to the plan's origin because the played flag had been reset by the
+  // previous rebuild. The element's own clock carries the position.
+  it("carries the element's position even when the outgoing transport never reported a played frame", () => {
+    expect(replacedTransportPlayheadSeconds(true, 739, 0)).toBe(739);
+  });
+
+  it("inherits nothing from another session or from a zero clock", () => {
+    expect(replacedTransportPlayheadSeconds(false, 739, 0)).toBeNull();
+    expect(replacedTransportPlayheadSeconds(true, 0, 0)).toBeNull();
+    expect(replacedTransportPlayheadSeconds(true, Number.NaN, 0)).toBeNull();
+  });
+
+  it("moves the position onto the new plan's player clock", () => {
+    expect(replacedTransportPlayheadSeconds(true, 3060, 3000)).toBe(60);
   });
 });
 
