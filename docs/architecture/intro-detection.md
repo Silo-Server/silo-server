@@ -90,7 +90,10 @@ at least 80 percent of the authored intro chapter in replay:
 
 A match shorter than 20 seconds that only one partner episode confirms is not
 written: a recurring music cue is often shared by a single pair of episodes,
-while a title card recurs across the season. Recurring music cues mistaken for
+while a title card recurs across the season. Such a file first gets the wider
+search, as a file with no match does, so a title card shared with episodes
+outside its neighbor window still finds its partners. That search records
+results for the file alone, so it changes no other file's match. Recurring music cues mistaken for
 intros are short and rarely shared by most of a season, so the ones written
 fall in the lower rows. Chapter-based markers keep 0.95,
 and silence-extended chapters 0.98. Contribution to online providers compares
