@@ -442,6 +442,9 @@ func (i *Installer) prepareArchive(existing *Installation, data []byte, req Inst
 	if err != nil {
 		return nil, err
 	}
+	if err := checkReplacementIdentity(manifest, existing); err != nil {
+		return nil, err
+	}
 	for _, file := range reader.File {
 		if file.FileInfo().IsDir() {
 			continue
@@ -449,9 +452,6 @@ func (i *Installer) prepareArchive(existing *Installation, data []byte, req Inst
 		if _, err := readZipFile(file); err != nil {
 			return nil, packageError(err, "The plugin archive couldn't be read.")
 		}
-	}
-	if err := checkReplacementIdentity(manifest, existing); err != nil {
-		return nil, err
 	}
 	installRoot, err := pluginVersionRoot(i.baseDir, manifest.GetPluginId(), manifest.GetVersion())
 	if err != nil {
