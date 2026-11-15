@@ -533,6 +533,7 @@
 ./internal/downloads TestPreparedReplacementCountsTheEntryStatusUnderTheLockDB
 ./internal/downloads TestPreparedReplacementRefusesAStaleGuardUnderTheLockDB
 ./internal/downloads TestManagedBatchOverConcurrentCapDB
+./internal/downloads TestDeviceReportedTransfersHoldNoConcurrentSlotDB
 ./internal/downloads TestAttachPreparationsPostgres
 ./internal/downloads TestFailedPreparationRefreshIsSharedPostgres
 ./internal/downloads TestPreparationControlsPauseResumeAndCancel
