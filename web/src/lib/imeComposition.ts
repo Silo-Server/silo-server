@@ -1,4 +1,4 @@
-import type { KeyboardEvent as ReactKeyboardEvent } from "react";
+import type { KeyboardEvent } from "react";
 
 /**
  * Whether a keydown belongs to an input method editor (IME) rather than to the
@@ -13,7 +13,6 @@ import type { KeyboardEvent as ReactKeyboardEvent } from "react";
  * Native implicit form submission is already IME-safe; this is only for
  * handlers that act on keys themselves.
  */
-export function isImeComposing(event: KeyboardEvent | ReactKeyboardEvent): boolean {
-  const native = "nativeEvent" in event ? event.nativeEvent : event;
-  return native.isComposing || native.keyCode === 229;
+export function isImeComposing(event: KeyboardEvent): boolean {
+  return event.nativeEvent.isComposing || event.keyCode === 229;
 }
