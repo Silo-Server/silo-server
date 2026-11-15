@@ -12,6 +12,9 @@ type Store interface {
 	UpsertUserLimit(ctx context.Context, limit UserLimit) (*UserLimit, error)
 	CountUserRequestsSince(ctx context.Context, userID int, since time.Time) (int, error)
 	ListActiveByTMDB(ctx context.Context, mediaType MediaType, tmdbIDs []int) (map[int]*Request, error)
+	// ListRequestedTMDB reports which of the TMDB IDs the viewer's profile
+	// made a request under for the media type, in any outcome.
+	ListRequestedTMDB(ctx context.Context, viewer Viewer, mediaType MediaType, tmdbIDs []int) (map[int]bool, error)
 	// ListProfileWatchlistRequests returns the active requests a profile's
 	// watchlist made.
 	ListProfileWatchlistRequests(ctx context.Context, userID int, profileID string) ([]*Request, error)
@@ -86,8 +89,9 @@ type Store interface {
 	// that is creating targets.
 	MarkAvailable(ctx context.Context, id string, actor Viewer) (*Request, error)
 	// RecomputeStatus re-derives an approved request's status and outcome from
-	// its targets, for a submission that found nothing left to send.
-	RecomputeStatus(ctx context.Context, id string, actor Viewer) (*Request, error)
+	// its targets, for a submission that found nothing left to send. It
+	// answers ErrInvalidState once the claim no longer holds leaseUntil.
+	RecomputeStatus(ctx context.Context, id string, leaseUntil time.Time, actor Viewer) (*Request, error)
 	// FollowTitle, UnfollowTitle and FollowedRequests manage a profile's
 	// follows, keyed by account, profile and request; ListRequestFollowers and
 	// ClearRequestFollowers serve a request's fulfilled notification. All are
@@ -121,7 +125,10 @@ type Store interface {
 	ListTargets(ctx context.Context, requestID string) ([]Target, error)
 	ListTargetsForRequests(ctx context.Context, requestIDs []string) (map[string][]Target, error)
 	CreateTarget(ctx context.Context, target Target) (Target, error)
-	DeleteTarget(ctx context.Context, id int64) error
+	// DeleteTarget removes a claimed request's target while the claim still
+	// holds leaseUntil. It answers ErrInvalidState when the claim was lost
+	// and ErrNotFound when only the target is gone.
+	DeleteTarget(ctx context.Context, requestID string, id int64, leaseUntil time.Time) error
 	// UpdateTargetStatus writes only a queued or downloading target, and
 	// answers ErrInvalidState for one that already completed or failed. It
 	// also clears the target's download progress when it completes or fails.

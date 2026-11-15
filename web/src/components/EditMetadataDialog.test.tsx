@@ -303,3 +303,40 @@ describe("EditMetadataDialog audiobooks", () => {
     );
   });
 });
+
+describe("EditMetadataDialog item change", () => {
+  // The movie page keeps the closed dialog mounted while a "More Like This"
+  // link opens another movie, then opens the dialog for that one (#4212).
+  it("shows the item it is opened for after the page moves to another", () => {
+    const movie = (id: string, title: string) =>
+      ({ content_id: id, type: "movie", title, locked_fields: [] }) as unknown as ItemDetail;
+    const onOpenChange = vi.fn();
+    const { rerender } = render(
+      <EditMetadataDialog item={movie("first", "First Movie")} open onOpenChange={onOpenChange} />,
+    );
+    rerender(
+      <EditMetadataDialog
+        item={movie("first", "First Movie")}
+        open={false}
+        onOpenChange={onOpenChange}
+      />,
+    );
+    rerender(
+      <EditMetadataDialog
+        item={movie("second", "Second Movie")}
+        open={false}
+        onOpenChange={onOpenChange}
+      />,
+    );
+    rerender(
+      <EditMetadataDialog
+        item={movie("second", "Second Movie")}
+        open
+        onOpenChange={onOpenChange}
+      />,
+    );
+
+    expect(screen.getByDisplayValue("Second Movie")).toBeTruthy();
+    expect(screen.queryByDisplayValue("First Movie")).toBeNull();
+  });
+});
