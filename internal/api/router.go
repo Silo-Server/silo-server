@@ -3152,11 +3152,12 @@ func newChiRouter(deps Dependencies) chi.Router {
 			nodeHandler.SetConfigurationStore(nodepool.NewAdminConfigurationStore(deps.DB))
 			v2deps.AdminNodeConfiguration = nodeHandler
 		}
+		nodeHandler.SetNodeKeyRegistry(deps.NodeKeyRegistry)
 		if deps.SecretCipher != nil {
 			nodeRepo, cipher := deps.NodeRepo, deps.SecretCipher
 			nodeHandler.SetNodeKeyIssuance(func(ctx context.Context, id int) (string, error) {
 				return nodeRepo.IssueNodeKey(ctx, cipher, id)
-			}, deps.NodeKeyRegistry)
+			})
 			v2deps.AdminNodeKeys = nodeHandler
 		}
 	}

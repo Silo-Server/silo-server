@@ -78,9 +78,10 @@ type NodeHandler struct {
 	// snapshotted, because it is hot-reloadable. nil where nothing wired it, and
 	// then a node's own override is all this handler can price from.
 	clusterPlayback func() config.PlaybackConfig
-	// issueNodeKey and nodeKeyRegistry back IssueAdminNodeKey; see
-	// SetNodeKeyIssuance.
-	issueNodeKey    NodeKeyIssuer
+	// issueNodeKey backs IssueAdminNodeKey; see SetNodeKeyIssuance.
+	issueNodeKey NodeKeyIssuer
+	// nodeKeyRegistry is this server's credential registry, kept in step with
+	// node writes; see SetNodeKeyRegistry. nil where nothing wired it.
 	nodeKeyRegistry *nodepool.KeyRegistry
 }
 

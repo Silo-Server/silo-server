@@ -1163,6 +1163,12 @@
 ./internal/nodepool TestIssueNodeKeyDB
 ./internal/nodepool TestTranscodeNodeURLsAreUniqueDB
 
+# Admin node writes reach every credential registry: the writing API server's
+# before it answers (a deleted node's key is refused at once, a moved node is
+# signable at its new URL, a disabled one keeps its key), a proxy's through
+# node_pool_changed, and another API server's through its reconciliation.
+./cmd/silo TestNodeWritesReachEveryCredentialRegistryDB
+
 # Transcode node control plane: the core authenticates node calls against the
 # real credential registry (a disabled node keeps its access; a proxy row, a
 # keyless or deleted node is refused), and stores a node's shipped log entries

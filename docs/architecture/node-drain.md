@@ -19,7 +19,14 @@ A node drains for either of two reasons:
   `SILO_NODE_DRAIN_TIMEOUT` passes (a Go duration or whole seconds, default
   `10m`; `0` turns the drain off), or until a second signal arrives, and then
   runs the ordinary shutdown, which ends whatever is left. A SIGTERM drain
-  cannot be resumed.
+  cannot be resumed. It does not wait at all while the API refuses the node's
+  key (`key_rejected`, after a key rotation, the node's deletion, or a clock
+  more than 30 seconds off): no relay can reach the node's sessions and no stop
+  can reach the node, so the node logs that it is shutting down without
+  waiting and shuts down. The state is read when the drain begins and once a
+  second while it waits, so a key rejected mid-drain also ends the wait. An
+  administrator's drain, the timeout and the second signal behave the same
+  whatever the key state.
 
 `GET /api/v2/admin/nodes/capabilities` advertises `drain: true`.
 

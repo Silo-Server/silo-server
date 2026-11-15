@@ -28,15 +28,28 @@ func (h *NodeHandler) configurationChanged() {
 	}
 }
 
+// nodesChanged follows a committed create, update or delete. This server's
+// credential registry reflects the write before nodesChanged returns, so a
+// deleted node's key neither signs nor verifies here once the response is
+// sent; its pools follow on the reconciliation pass this wakes; and
+// node_pool_changed moves every other API server's pools and registry and
+// every proxy's registry within seconds.
+func (h *NodeHandler) nodesChanged(ctx context.Context, nodeID int) {
+	h.refreshNodeKeys(ctx, nodeID)
+	h.configurationChanged()
+	h.publishPoolChanged(ctx)
+}
+
 func (h *NodeHandler) CreateAdminNode(ctx context.Context, input nodepool.CreateNodeInput) (*nodepool.Node, error) {
 	if h.configuration == nil {
 		return nil, ErrAdminNodesUnavailable
 	}
 	node, err := h.configuration.Create(ctx, input)
-	if err == nil {
-		h.configurationChanged()
+	if err != nil {
+		return nil, err
 	}
-	return node, err
+	h.nodesChanged(ctx, node.ID)
+	return node, nil
 }
 func (h *NodeHandler) UpdateAdminNode(ctx context.Context, id int, input nodepool.UpdateNodeInput, guard func(int64) error) (*nodepool.Node, error) {
 	if h.configuration == nil {
@@ -46,7 +59,7 @@ func (h *NodeHandler) UpdateAdminNode(ctx context.Context, id int, input nodepoo
 	if err != nil {
 		return nil, err
 	}
-	h.configurationChanged()
+	h.nodesChanged(ctx, id)
 	// Same post-commit work as HandleUpdateNode: when the URL or an acceleration
 	// override moved, nudge the worker to re-read its row and drop this server's
 	// cached capabilities before the pool publishes the new policy. Off the
@@ -75,11 +88,11 @@ func (h *NodeHandler) DeleteAdminNode(ctx context.Context, id int, guard func(in
 	if h.configuration == nil {
 		return ErrAdminNodesUnavailable
 	}
-	err := h.configuration.Delete(ctx, id, guard)
-	if err == nil {
-		h.configurationChanged()
+	if err := h.configuration.Delete(ctx, id, guard); err != nil {
+		return err
 	}
-	return err
+	h.nodesChanged(ctx, id)
+	return nil
 }
 
 // StartConfigurationReconciliation runs once per API replica, after dependency
@@ -116,21 +129,31 @@ func (h *NodeHandler) StartConfigurationReconciliation(ctx context.Context) {
 	}()
 }
 
+// applyConfigurationSnapshot applies one reconciliation read. A node that
+// appeared, disappeared or changed its configuration since the previous read
+// (another server's write, or this one's) also reloads this server's
+// credential registry, so the registry follows the pools.
 func (h *NodeHandler) applyConfigurationSnapshot(previous, nodes []*nodepool.Node) {
-	if h.invalidateCapabilityCache != nil {
-		current := make(map[int]*nodepool.Node, len(nodes))
-		for _, node := range nodes {
-			current[node.ID] = node
+	current := make(map[int]*nodepool.Node, len(nodes))
+	for _, node := range nodes {
+		current[node.ID] = node
+	}
+	changed := len(previous) != len(nodes)
+	for _, old := range previous {
+		next := current[old.ID]
+		if next != nil && next.AdminRevision == old.AdminRevision {
+			continue
 		}
-		for _, old := range previous {
-			next := current[old.ID]
-			if next == nil || next.AdminRevision != old.AdminRevision {
-				h.invalidateCapabilityCache(old.URL)
-				if next != nil && next.URL != old.URL {
-					h.invalidateCapabilityCache(next.URL)
-				}
+		changed = true
+		if h.invalidateCapabilityCache != nil {
+			h.invalidateCapabilityCache(old.URL)
+			if next != nil && next.URL != old.URL {
+				h.invalidateCapabilityCache(next.URL)
 			}
 		}
+	}
+	if changed && h.nodeKeyRegistry != nil {
+		h.nodeKeyRegistry.Invalidate()
 	}
 	var proxy, transcode []*nodepool.Node
 	for _, node := range nodes {

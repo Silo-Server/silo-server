@@ -192,7 +192,7 @@ func (failingLister) ListEnabled(context.Context, string) ([]*nodepool.Node, err
 func TestIssueAdminNodeKeyPublishesWhenThePoolReloadFails(t *testing.T) {
 	bus := &recordingEventBus{}
 	handler := NewNodeHandler(&stubNodeRepository{}, nodepool.NewProxyPool(), nodepooltest.NewTranscodePool(), failingLister{}, bus, nil, nodeauthtest.SameKey("secret"))
-	handler.SetNodeKeyIssuance(func(context.Context, int) (string, error) { return "issued", nil }, nil)
+	handler.SetNodeKeyIssuance(func(context.Context, int) (string, error) { return "issued", nil })
 
 	canceled, cancel := context.WithCancel(context.Background())
 	cancel()

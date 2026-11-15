@@ -166,7 +166,9 @@ node cannot work with an earlier main server. Proxy nodes keep their current set
 2. Update the main server, every API replica, and every proxy node, and let the migrations finish.
 3. Issue each transcode node a key: on the nodes page of the administration UI, or with
    `POST /api/v2/admin/nodes/{id}/key`. The key is shown once. Issuing again replaces it, and the
-   previous key stops working at once.
+   previous key stops working at once. A node still running with the replaced key shuts down at
+   once on SIGTERM instead of waiting for its sessions, which the main server can no longer reach,
+   so restarting it with the new key does not wait for the drain timeout.
 4. Update each transcode node and start it with:
    - `MODE=transcode`;
    - `SILO_CORE_URL`, the main server's URL as the node reaches it (the load-balanced address when

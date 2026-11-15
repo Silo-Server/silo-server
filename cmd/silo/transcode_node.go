@@ -241,7 +241,7 @@ func runTranscodeNode() {
 		SendBuffer: tuningCfg.TCPSendBuffer,
 	}
 	startStandaloneServer(serverModeTranscode, cfg.Server.Listen, srv.Handler(), appCancel, shutdown,
-		standaloneServerHooks{drain: newTranscodeNodeDrain(srv)}, opts)
+		standaloneServerHooks{drain: newTranscodeNodeDrain(srv, remote.KeyRejected)}, opts)
 }
 
 // configureTranscodeNodeLogging installs the node's slog default: stderr as on

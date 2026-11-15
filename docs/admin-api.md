@@ -737,8 +737,11 @@ because only the node can say what hardware it has.
 ## `DELETE /api/v2/admin/nodes/{id}`
 
 Removes a node. `204 No Content`, or `404 Not Found` for an unknown id. The
-node pools are reloaded afterwards. Sessions already streaming from the node
-are not torn down by this call. Like PUT, it needs the node's `config_etag` in
+node pools are reloaded afterwards. The node's credential is gone from the
+answering server before the `204`, and from the other API servers and proxies
+once `node_pool_changed` reaches them: nothing signs requests to the node or
+accepts its calls, so its sessions stop serving viewers (relays answer them as
+"node unavailable" and do not move them). The call sends the node nothing. Like PUT, it needs the node's `config_etag` in
 `If-Match`: `428` without one, `412` when it is stale.
 
 ## `POST /api/v2/admin/nodes/{id}/check`

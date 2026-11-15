@@ -75,7 +75,8 @@ bytes, and text that re-encodes to itself.
   worked (a failed publish is logged), so other replicas and proxies drop the
   old key within one reload. Rotation takes effect at once: the node's running
   streams fail at their next signed call until it restarts with the new key, so
-  drain a node before rotating. The admin API is in
+  drain a node before rotating. A node still running with the replaced key
+  shuts down at once on SIGTERM (see [Drain and health](#drain-and-health)). The admin API is in
   [admin API: node keys](../admin-api.md#node-keys-v2).
 - **Rejected key.** When the core answers the node's configuration read with
   `401`, `nodeconfig.Remote` sets `key_rejected`, which the node's
@@ -114,7 +115,22 @@ once a second, and, without waiting, when a transcode node answers a relay's
 signed request with `401` (`KeyRegistry.ReloadSoon`, through
 `nodeauth.ReloadAfterRefusal`), also at most once a second, so a replica that
 missed a rotation catches up within seconds; concurrent reloads share one database read with a
-10-second timeout. A failed reload keeps the credentials already loaded. API
+10-second timeout.
+
+Node writes move it at the same points as the placement pools:
+
+- The API server that takes a key issue, or an admin create, update or delete
+  of a node, reloads its registry before it answers (`NodeHandler.refreshNodeKeys`,
+  called by `IssueAdminNodeKey` and `nodesChanged`) and publishes
+  `node_pool_changed`. After a delete returns, that server neither signs for the
+  node nor accepts its calls.
+- Every other API server and every proxy reloads on that event. An API server
+  that misses it reloads when its configuration reconciliation, which reads the
+  node rows every 5 seconds, sees a node appear, disappear or change its
+  configuration (`NodeHandler.applyConfigurationSnapshot`); a proxy has no
+  reconciliation and falls back to the 60-second reload.
+- A URL change keeps the key, so the node is signable at its new URL as soon as
+  the registry reloads. A disabled node keeps its credential. A failed reload keeps the credentials already loaded. API
 servers load it at startup (`cmd/silo/main.go`) and refuse to start when the
 first load fails; proxies load it in `startProxyNodeKeyRegistry`, keep running
 when the first load fails, and fill it in on a later reload.
@@ -302,6 +318,16 @@ at once (`subscribeNodeDrainChanges`, `HealthChecker.CheckTranscodeNode`). A
 failed call is logged and the next sweep finds the change. See
 [node drain](node-drain.md).
 
+A SIGTERM drain does not wait for active jobs while the core refuses the
+node's key (`key_rejected`, `nodeconfig.Remote.KeyRejected`): no relay can sign
+a request to the node, so its sessions serve no viewer and no stop can reach
+them. The node logs that it is shutting down without waiting and shuts down.
+The drain reads the state when it begins and once a second while it waits
+(`nodeDrain.run` in `cmd/silo/node_drain.go`), so a key rejected mid-drain also
+ends the wait. A rejected key alone, without SIGTERM, ends nothing: the state
+can be transient (a clock briefly off, a replica holding a stale key for a few
+seconds).
+
 The health poll, `GET /api/v1/health` on the node, stays unauthenticated. Its
 answer carries `node_control_version` (`nodepool.NodeControlVersion`, now `1`)
 and `key_rejected`. `nodepool.CheckNodeReport` treats a transcode node whose
@@ -364,7 +390,10 @@ What the core checks:
   rendition selection (`Default`) comes from the token when both cards
   describe the same tracks. A recipe store read error is `503`, never
   `not_found`.
-- **Remux** (`resolveRemux`). A valid token is required. Deny checks on the
+- **Remux** (`resolveRemux`). A progressive remux runs on a transcode node
+  only on a route whose egress is a proxy: `noderouting.legalShapes` has no
+  transcode-executed progressive remux with API egress, so a route with API
+  egress runs the remux on the API server. A valid token is required. Deny checks on the
   transport and session; the route must be remux workload, transcode execution
   and proxy egress, with execution node id equal to the calling node (a token
   without the id fails closed); downmix and theme shape checks, and a theme
@@ -460,7 +489,13 @@ resolve and never deletes from it.
   anything in the body. The node tears down its sessions whether or not that
   succeeds; a failed revocation fails the command, which the operator retries.
   The core does not revoke first, because a revocation followed by a failed
-  call would end the live sessions of a node that never reloaded.
+  call would end the live sessions of a node that never reloaded. Nothing moves
+  the sessions: a viewer whose stream URLs carry no stream token (the native
+  `/api/v2` delivery routes) gets `404` on its next manifest or segment
+  request, because the node no longer holds the session and resolve finds no
+  recipe (`resolveHLS` answers `not_found`), and the client must start playback
+  again. A URL that carries a complete stream token can still rebuild the
+  session from the token's card.
 - **Idle reap.** The node closes a session idle for ten minutes and the card
   stays: an idle reap is not a stop, and a returning client rebuilds.
 
@@ -598,9 +633,9 @@ core answers `412`, and a node refuses the job with `409`.
 | File replaced or removed | The next open or renewal answers `412` or `410` and the job ends. A later rebuild gets a grant for whatever file the catalog still lists at that path. |
 | Session stopped or denied | The stop deletes the card and fences the node; relays answer `410` to a denied session and resolve refuses it. |
 | Node disabled | Its streams continue (the registry keeps disabled nodes); no new placement. |
-| Key rotated | The node's calls get `401` and it reports `key_rejected` after its next configuration read (at once when another call got the `401`, else within 30 seconds); the next health sweep marks it unhealthy. The core's calls fail on the node, the relays answer "node unavailable" and ask their registry to reload, and nothing moves: its streams fail until it restarts with the new key. |
+| Key rotated | The old key stops working at once on the API server that issued the new one, and on every other API server and proxy when `node_pool_changed` reaches it. The node's calls get `401` and it reports `key_rejected` after its next configuration read (at once when another call got the `401`, else within 30 seconds); the next health sweep marks it unhealthy. The core's calls fail on the node, the relays answer "node unavailable" and ask their registry to reload, and nothing moves: its streams fail until it restarts with the new key. SIGTERM stops it at once, without waiting for those streams. |
 | Node clock more than 30 seconds off | Every signed request in either direction falls outside the signature window and gets `401`. The node reports `key_rejected` as for a rotated key; the logs name both causes. Fixing the clock heals it without a restart. |
-| Node deleted | The registry drops it, so relays for its sessions cannot sign and answer "node unavailable" without moving them; clients recover by starting playback again. Its calls get `401`. |
+| Node deleted | Its key stops working at once, as a rotated key does: the API server that takes the delete drops the node from its registry before it answers, and every other API server and proxy drops it when `node_pool_changed` reaches it. Relays for its sessions cannot sign and answer "node unavailable" (`502`, or `503` through `/api/v2`) without moving them; clients recover by starting playback again. Its calls get `401`, so it reports `key_rejected` and SIGTERM stops it at once. |
 | Mount mismatch | The node refuses the job with `409` instead of reading other bytes, and the caller runs it elsewhere. A file that changed on the API server between minting and opening gets `412` from the core. |
 | Node binary from before this design | Health has no `node_control_version`, so the node is unhealthy and never placed; it could not verify the core's signatures anyway. |
 | Current node, core from before this design | The node's first configuration read never succeeds, so it never opens its listener and the core sees it as unreachable. |
@@ -625,7 +660,9 @@ core answers `412`, and a node refuses the job with `409`.
 - Changing a node's URL does not change its key, so a host that still runs
   with that key keeps the node's identity until the key is rotated.
 - Deleting a node ends the sessions it was running, because nothing can sign
-  for it.
+  for it. Its key stops working on the API server that takes the delete before
+  the delete answers, and on every other API server and proxy when
+  `node_pool_changed` reaches it.
 - Each API replica bounds what one node key can make it do: the two per-node
   budgets under [Rate limit](#rate-limit) cap catalog reads and stats through
   resolve and sources/open, and log batches store in one statement because
