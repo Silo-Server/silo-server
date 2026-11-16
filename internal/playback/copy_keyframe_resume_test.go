@@ -119,15 +119,18 @@ func resumeOpts(t *testing.T) TranscodeOpts {
 }
 
 // A resume's plan numbers and cuts segments from its origin, unlike FFmpeg's
-// playlist. A resume whose first start falls back on a failed start probe
-// records that, so its rebuilds keep FFmpeg's playlist.
-func TestResolveCopyPlanRecordsAResumeThatFallsBackOnAFailedProbe(t *testing.T) {
+// playlist. A resume whose first start fell back (here on a failed start
+// probe), or ran on a build that never planned a resume, has a recipe without
+// KeyframePlanResume. A clean shutdown removes its plan record; the rebuild
+// still keeps FFmpeg's playlist.
+func TestResolveCopyPlanKeepsFFmpegPlaylistForARebuiltResumeThatDidNotPlan(t *testing.T) {
 	opts := resumeOpts(t)
 	stubInputStart(t, 0, errors.New("ffprobe failed"))
 	if plan, err := resolveCopyPlan(t.Context(), opts); err != nil || plan != nil {
 		t.Fatalf("first start plan = %v, err = %v; want FFmpeg's playlist", plan != nil, err)
 	}
 	stubInputStart(t, 0, nil)
+	_ = os.Remove(filepath.Join(opts.OutputDir, copyPlanRecordFile))
 	opts.Reconstructed = true
 	if plan, err := resolveCopyPlan(t.Context(), opts); err != nil || plan != nil {
 		t.Fatalf("rebuilt plan = %v, err = %v; want FFmpeg's playlist, as the first start served", plan != nil, err)
@@ -135,7 +138,8 @@ func TestResolveCopyPlanRecordsAResumeThatFallsBackOnAFailedProbe(t *testing.T) 
 }
 
 // A clean shutdown removes a planned resume's record with its output
-// directory. The rebuild plans again and gets the playlist its player has.
+// directory. Its recipe still says it planned, so the rebuild plans again and
+// gets the playlist its player has.
 func TestResolveCopyPlanReplansARebuiltResumeWithoutARecord(t *testing.T) {
 	opts := resumeOpts(t)
 	first, err := resolveCopyPlan(t.Context(), opts)
@@ -145,10 +149,41 @@ func TestResolveCopyPlanReplansARebuiltResumeWithoutARecord(t *testing.T) {
 	if err := os.Remove(filepath.Join(opts.OutputDir, copyPlanRecordFile)); err != nil {
 		t.Fatal(err)
 	}
-	opts.Reconstructed = true
+	opts.Reconstructed, opts.KeyframePlanResume = true, true
 	rebuilt, err := resolveCopyPlan(t.Context(), opts)
 	if err != nil || rebuilt == nil || !rebuilt.resumes() || !sameSegmentDurations(rebuilt.durations, first.durations) {
 		t.Fatalf("rebuilt plan = %+v, err = %v; want the first start's %v", rebuilt, err, first.durations)
+	}
+}
+
+// A resume whose recipe says it planned, rebuilt or moved to another node
+// after its file's index was rejected or lost, can't serve its playlist
+// again, and FFmpeg's can't stand in for it. The start fails.
+func TestResolveCopyPlanFailsAResumeThatMustPlanAndCannot(t *testing.T) {
+	for name, reconstructed := range map[string]bool{"rebuilt": true, "moved to another node": false} {
+		t.Run(name, func(t *testing.T) {
+			opts := resumeOpts(t)
+			stubKeyframeIndex(t, keyframes.Index{}, keyframes.ErrNoIndex)
+			opts.Reconstructed, opts.KeyframePlanResume = reconstructed, true
+			if plan, err := resolveCopyPlan(t.Context(), opts); plan != nil || !errors.Is(err, ErrKeyframePlanChanged) {
+				t.Fatalf("plan = %v, err = %v; want ErrKeyframePlanChanged", plan != nil, err)
+			}
+		})
+	}
+}
+
+// The recipe and the stream token carry KeyframePlanResume, so a rebuild from
+// either knows the resume planned.
+func TestRecipeCardKeepsKeyframePlanResume(t *testing.T) {
+	opts := plannedOpts()
+	opts.KeyframePlanResume = true
+	card := NewRecipeCard(1, "profile", 2, "", opts)
+	if !card.KeyframePlanResume || !card.TranscodeOpts("/out", "", nil).KeyframePlanResume {
+		t.Fatal("the recipe card drops KeyframePlanResume")
+	}
+	claims := card.ToClaims()
+	if !RecipeCardFromClaims(&claims).KeyframePlanResume {
+		t.Fatal("the stream token drops KeyframePlanResume")
 	}
 }
 
@@ -217,6 +252,10 @@ func checkPlannedResume(t *testing.T, ctx context.Context, ffmpeg, source string
 	plan := s.copyPlan
 	if plan == nil {
 		t.Fatalf("resume at %.1fs (origin %.3fs): no plan, the session serves FFmpeg's growing playlist", requested, origin)
+	}
+	// Its options and recipe record that it planned, so a rebuild plans too.
+	if !s.Opts().KeyframePlanResume || !s.RecipeOpts().KeyframePlanResume {
+		t.Fatal("the planned resume's options don't record KeyframePlanResume")
 	}
 
 	manifest, err := s.buildPlaybackManifest("", "")

@@ -72,12 +72,19 @@ type TranscodeOpts struct {
 	// track; empty (older recipes and tokens) keeps the plain copy. It is
 	// durable because reconstruction must write the same segment bytes.
 	CopyAudioCodec string
-	// KeyframePlaylist serves a copy-video stream that starts at the
-	// beginning as one complete VOD playlist planned from the source's
-	// keyframe index, instead of FFmpeg's growing playlist (#1466). It is
-	// durable because a reconstructed session must keep serving the playlist
-	// the player already has.
+	// KeyframePlaylist serves a copy-video stream as one complete VOD
+	// playlist planned from the source's keyframe index, instead of FFmpeg's
+	// growing playlist (#1466): from the beginning, or from a resume's
+	// resolved origin. It is durable because a reconstructed session must
+	// keep serving the playlist the player already has.
 	KeyframePlaylist bool
+	// KeyframePlanResume records that a resume serves a keyframe plan. A
+	// resume's plan numbers and cuts segments differently from FFmpeg's
+	// playlist, so a rebuild follows this rather than deciding afresh: a
+	// rebuilt resume without it keeps FFmpeg's playlist, and one with it that
+	// can no longer plan fails. The session sets it when it starts a resume's
+	// plan, so its recipe and its node's start response carry it.
+	KeyframePlanResume bool
 	// Reconstructed marks a session rebuilt from its recipe after its server
 	// or node lost it. It isn't durable: each rebuild sets it.
 	Reconstructed bool
@@ -554,6 +561,7 @@ func StartTranscode(ctx context.Context, opts TranscodeOpts) (*TranscodeSession,
 			planResumeSeconds = opts.SeekSeconds
 			opts.SeekSeconds = copyPlan.restartSeekSeconds(0)
 			opts.StartSegmentNumber = 0
+			opts.KeyframePlanResume = true
 		}
 		copyGroups = newCopyGroupAssembler(opts.OutputDir, copyPlan)
 		// The session starts at generation 0.

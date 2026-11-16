@@ -83,24 +83,27 @@ type TranscodeStartRequest struct {
 	VideoRange                 string                 `json:"video_range,omitempty"`
 	CopyVideoMPEGTS            bool                   `json:"copy_video_mpegts,omitempty"`
 	KeyframePlaylist           bool                   `json:"keyframe_playlist,omitempty"`
-	SeekSeconds                float64                `json:"seek_seconds"`
-	StreamOriginSeconds        float64                `json:"stream_origin_seconds,omitempty"`
-	CopySeekAnchorResolved     bool                   `json:"copy_seek_anchor_resolved,omitempty"`
-	StartSegmentNumber         int                    `json:"start_segment_number"`
-	TargetResolution           string                 `json:"target_resolution"`
-	TargetCodecVideo           string                 `json:"target_codec_video"`
-	TargetCodecAudio           string                 `json:"target_codec_audio"`
-	CopyAudioCodec             string                 `json:"copy_audio_codec,omitempty"`
-	TargetAudioChannels        int                    `json:"target_audio_channels,omitempty"`
-	TargetAudioBitrateKbps     int                    `json:"target_audio_bitrate_kbps,omitempty"`
-	TargetBitrateKbps          int                    `json:"target_bitrate_kbps"`
-	SegmentDuration            int                    `json:"segment_duration"`
-	HWAccel                    string                 `json:"hw_accel"`
-	AudioTrackIndex            int                    `json:"audio_track_index"`
-	RequireAudioTrack          bool                   `json:"require_audio_track,omitempty"`
-	SubtitleTrackIndex         int                    `json:"subtitle_track_index"`
-	SubtitleBurnIn             bool                   `json:"subtitle_burn_in"`
-	SubtitleCodec              string                 `json:"subtitle_codec,omitempty"`
+	// KeyframePlanResume asks a resume to serve the keyframe plan an
+	// earlier start of its session served (see playback.TranscodeOpts).
+	KeyframePlanResume     bool    `json:"keyframe_plan_resume,omitempty"`
+	SeekSeconds            float64 `json:"seek_seconds"`
+	StreamOriginSeconds    float64 `json:"stream_origin_seconds,omitempty"`
+	CopySeekAnchorResolved bool    `json:"copy_seek_anchor_resolved,omitempty"`
+	StartSegmentNumber     int     `json:"start_segment_number"`
+	TargetResolution       string  `json:"target_resolution"`
+	TargetCodecVideo       string  `json:"target_codec_video"`
+	TargetCodecAudio       string  `json:"target_codec_audio"`
+	CopyAudioCodec         string  `json:"copy_audio_codec,omitempty"`
+	TargetAudioChannels    int     `json:"target_audio_channels,omitempty"`
+	TargetAudioBitrateKbps int     `json:"target_audio_bitrate_kbps,omitempty"`
+	TargetBitrateKbps      int     `json:"target_bitrate_kbps"`
+	SegmentDuration        int     `json:"segment_duration"`
+	HWAccel                string  `json:"hw_accel"`
+	AudioTrackIndex        int     `json:"audio_track_index"`
+	RequireAudioTrack      bool    `json:"require_audio_track,omitempty"`
+	SubtitleTrackIndex     int     `json:"subtitle_track_index"`
+	SubtitleBurnIn         bool    `json:"subtitle_burn_in"`
+	SubtitleCodec          string  `json:"subtitle_codec,omitempty"`
 	// SubtitleRendition asks the executor to emit the selected text track as
 	// the playlist's WebVTT subtitle rendition. Only nodes advertising
 	// playback.HLSSubtitleRenditionTransportFeatureV3 for the video target
@@ -155,6 +158,10 @@ type TranscodeStartResponse struct {
 	// serve FFmpeg's growing playlist under a recipe that records the planned
 	// one.
 	KeyframePlaylist bool `json:"keyframe_playlist,omitempty"`
+	// KeyframePlanResume reports that a resume serves a keyframe plan, which
+	// its recipe must record so a rebuild serves it again. Older nodes omit
+	// it; they never plan a resume.
+	KeyframePlanResume bool `json:"keyframe_plan_resume,omitempty"`
 	// SubtitleRendition attests that the executor emits the requested subtitle
 	// rendition. Older nodes omit it and are rejected before the plan
 	// promises a rendition their playlist does not carry; nodes that predate
@@ -1762,6 +1769,7 @@ func (s *Server) handleStart(w http.ResponseWriter, r *http.Request) {
 		VideoRange:                 req.VideoRange,
 		CopyVideoMPEGTS:            req.CopyVideoMPEGTS,
 		KeyframePlaylist:           req.KeyframePlaylist,
+		KeyframePlanResume:         req.KeyframePlanResume,
 		SeekSeconds:                req.SeekSeconds,
 		StreamOriginSeconds:        req.StreamOriginSeconds,
 		CopySeekAnchorResolved:     req.CopySeekAnchorResolved,
@@ -1957,6 +1965,7 @@ func (s *Server) handleStart(w http.ResponseWriter, r *http.Request) {
 		ThrottleSeconds:       req.ThrottleSeconds,
 		SoftwareVideoDecode:   session.Opts().SoftwareVideoDecode,
 		KeyframePlaylist:      session.Opts().KeyframePlaylist,
+		KeyframePlanResume:    session.Opts().KeyframePlanResume,
 		SubtitleRendition:     session.HasSubtitleRendition(),
 		CopyVideoMPEGTS:       session.Opts().CopyVideoMPEGTS,
 		CopyAudioCodec:        session.Opts().CopyAudioCodec,

@@ -199,12 +199,14 @@ type copyPlanRecord struct {
 // plan: its planned segments are the ones FFmpeg cuts from the beginning, so
 // the segments the player already fetched still match. The reverse, a
 // planned session rebuilt onto FFmpeg's playlist, is what the record
-// prevents. A resume's plan numbers and cuts segments from its origin,
-// unlike FFmpeg's playlist, so a resume that falls back on a failed start
-// probe records that, and its rebuilds keep FFmpeg's playlist. A resume
-// rebuilt without a record, after a clean shutdown, plans again like any
-// other session: its first start most likely planned. If that start had
-// fallen back instead, the rebuilt playlist doesn't match the player's.
+// prevents.
+//
+// A resume's plan numbers and cuts segments from its origin, unlike FFmpeg's
+// playlist, so neither can stand in for the other. Without a record, a
+// resume follows its recipe's KeyframePlanResume, which survives a clean
+// shutdown: a rebuilt resume without it keeps FFmpeg's playlist (its first
+// start fell back, or ran on a build that never planned a resume), and one
+// with it plans again or fails with ErrKeyframePlanChanged.
 //
 // A record written before plans kept their keyframe groups holds only the
 // segment durations. The session plans again from the index and
@@ -237,6 +239,15 @@ func resolveCopyPlan(ctx context.Context, opts TranscodeOpts) (*copySegmentPlan,
 		return nil, nil
 	}
 
+	resume := resumesAtAnchor(opts)
+	// A resume that must serve its earlier plan: a rebuild, or a move to
+	// another node, of one that planned.
+	mustPlan := resume && opts.KeyframePlanResume
+	if resume && opts.Reconstructed && !opts.KeyframePlanResume {
+		log.Printf("playback: rebuilt session %s resumes without a keyframe plan; using FFmpeg's playlist", opts.SessionID)
+		return nil, nil
+	}
+
 	// Record the decision whatever the start's fate: StartTranscode launches
 	// FFmpeg even if its caller has gone, and that session serves this
 	// playlist.
@@ -247,23 +258,26 @@ func resolveCopyPlan(ctx context.Context, opts TranscodeOpts) (*copySegmentPlan,
 		// nothing. A rebuilt session may have served the planned playlist,
 		// which FFmpeg's can't stand in for: StartTranscode abandons it, and
 		// the next rebuild plans. A first start serves FFmpeg's playlist; a
-		// rebuild that plans then still matches the player's segments.
-		if opts.Reconstructed {
+		// rebuild that plans then still matches the player's segments, unless
+		// it is a resume, whose recipe then keeps it off the plan.
+		if opts.Reconstructed || mustPlan {
 			return nil, err
 		}
 		log.Printf("playback: session %s: %v; using FFmpeg's playlist", opts.SessionID, err)
-		if resumesAtAnchor(opts) {
-			// A resume's plan can't stand in for FFmpeg's playlist, which
-			// this start serves, so its rebuilds must not plan.
-			if err := writeCopyPlanRecord(path, nil); err != nil {
-				log.Printf("playback: record keyframe plan decision for %s: %v", opts.SessionID, err)
-			}
-		}
 		return nil, nil
+	}
+	if plan == nil && mustPlan {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		return nil, fmt.Errorf("%w: the resume's keyframe index gives no plan", ErrKeyframePlanChanged)
 	}
 	if err := writeCopyPlanRecord(path, plan); err != nil {
 		// Without a record a rebuilt session can't promise the same
 		// playlist, so don't serve a planned one.
+		if mustPlan {
+			return nil, fmt.Errorf("record keyframe plan: %w", err)
+		}
 		log.Printf("playback: record keyframe plan for %s: %v; using FFmpeg's playlist", opts.SessionID, err)
 		return nil, nil
 	}

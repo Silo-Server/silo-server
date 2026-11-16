@@ -33,11 +33,18 @@ default, adds a keyframe-planned mode. With it on, a fresh copy-video
 `keyframe_playlist: true` in the start response; the API rejects a missing echo
 and stops the transport. The echo confirms the node understood the request, not
 that it planned. A copy serves one complete playlist planned from the source's
-keyframes only when it starts at the beginning of the source, the duration is
-known, the keyframe index exists and records where the video ends, the plan
-fits within the synthetic playlist's 50,000-segment limit, and the node can
-record the plan in the session's output directory. Any other copy keeps
-FFmpeg's playlist. The plan comes from the Cues, which the node checks against
+keyframes only when it starts at the beginning of the source, or resumes at a
+resolved copy seek anchor (`copy_seek_anchor_resolved` with a positive
+`stream_origin_seconds`) that a single keyframe within 0.1 seconds before it
+fits, the duration is known, the keyframe index exists and records where the
+video ends, the plan fits within the synthetic playlist's 50,000-segment limit,
+and the node can record the plan in the session's output directory. Any other
+copy keeps FFmpeg's playlist. A resume's plan starts at its origin, so its
+segment numbers and boundaries differ from FFmpeg's playlist. A node that plans
+a resume answers `keyframe_plan_resume: true`, which the recipe records. A
+start that carries `keyframe_plan_resume: true`, a move of that resume to
+another node, must plan it again or fails. A rebuilt resume whose recipe lacks
+it keeps FFmpeg's playlist. The plan comes from the Cues, which the node checks against
 only a few clusters. A keyframe-planned copy has FFmpeg cut at every keyframe and
 joins those groups into the planned segments, so it can restart anywhere and
 still produce them. A group that starts where the plan has no keyframe, or a
