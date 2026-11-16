@@ -1,6 +1,7 @@
 import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import { createElement } from "react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { V2ProblemError } from "@/api/v2/request";
 import { PlayerConfigProvider, type PlayerConfig } from "../context/PlayerConfigContext";
 import { usePlaybackRealtime } from "./usePlaybackRealtime";
 
@@ -87,6 +88,32 @@ it.each([404, 503, 403])("never opens bridge control after ticket failure %s", a
   expect(Socket.instances).toHaveLength(0);
   expect(result.current.connectionState).toBe("disconnected");
   expect(onCommand).not.toHaveBeenCalled();
+});
+
+// A 410 playback_session_ended says the session is gone for good, so minting
+// again cannot succeed. A 503 says the server is still rebuilding it.
+it.each([
+  [410, "playback_session_ended", 1],
+  [503, "dependency_unavailable", 2],
+])("after a %i %s ticket problem mints %i time(s) in 510 ms", async (status, type, mints) => {
+  vi.useFakeTimers();
+  mocks.mint.mockRejectedValue(
+    new V2ProblemError("createPlaybackControlSocketTicket", {
+      type: `https://siloserver.org/docs/api/v2/problems/${type}`,
+      title: "Refused",
+      status,
+    } as never),
+  );
+  const { result } = renderHook(
+    () => usePlaybackRealtime({ sessionId: "session", onCommand: vi.fn() }),
+    { wrapper },
+  );
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(510);
+  });
+  expect(mocks.mint).toHaveBeenCalledTimes(mints);
+  expect(Socket.instances).toHaveLength(0);
+  expect(result.current.connectionState).toBe("disconnected");
 });
 
 it.each(["stop", "terminate", "server_restarting"])(

@@ -9,6 +9,7 @@ import {
   playbackControlSocketProtocols,
   playbackControlSocketURL,
 } from "@/api/v2/playbackControlSocket";
+import { V2ProblemError } from "@/api/v2/request";
 import { usePlayerConfig } from "../context/PlayerConfigContext";
 import { playerV2Origin } from "../player-v2";
 import { sessionInstallation } from "../session-mutations";
@@ -204,8 +205,16 @@ export function usePlaybackRealtime({
             setConnectionState("disconnected");
             return;
           }
-          // A refused mint (403 non-owner, 409 installation mismatch) is
-          // retried only under the original authority with bounded backoff.
+          if (error instanceof V2ProblemError && error.status === 410) {
+            // The server says this session ended for good and will not be
+            // rebuilt; minting again can only get the same answer.
+            terminated = true;
+            setConnectionState("disconnected");
+            return;
+          }
+          // Any other refusal (403 non-owner, 409 installation mismatch, 404, or
+          // a 503 while the server rebuilds the session) is retried only under
+          // the original authority with bounded backoff.
           setConnectionState("disconnected");
           scheduleReconnect();
         });
