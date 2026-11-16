@@ -8,9 +8,12 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/mediaprobe"
 	"github.com/Silo-Server/silo-server/internal/playback/keyframes"
 )
 
@@ -49,6 +52,66 @@ func TestPlanCopySegmentsForAResume(t *testing.T) {
 			t.Fatalf("plan = %v, want none", plan.durations)
 		}
 	})
+}
+
+// The origin trails its keyframe by up to a B-frame delay and never leads it,
+// so a later keyframe nearer the origin isn't the one the stream starts at.
+func TestPlanCopySegmentsForAResumeTakesTheKeyframeBefore(t *testing.T) {
+	stubKeyframeIndex(t, keyframes.Index{Keyframes: []float64{0, 2, 4, 4.05, 6, 8}, VideoEnd: 10}, nil)
+	opts := plannedOpts()
+	opts.SeekSeconds, opts.StartSegmentNumber = 4.5, 2
+	opts.StreamOriginSeconds, opts.CopySeekAnchorResolved = 4.04, true
+	plan := planOrNil(t, opts)
+	if plan == nil || plan.firstKey[0] != 2 {
+		t.Fatalf("plan = %+v, want one starting at the keyframe at 4s", plan)
+	}
+}
+
+// Audio that starts before the video puts the first keyframe past the
+// source's start, so a resume there has a positive origin. Its plan starts
+// at keyframe 0 and is still a resume's, through its record too.
+func TestPlanCopySegmentsForAResumeAtTheFirstKeyframe(t *testing.T) {
+	stubKeyframeIndex(t, keyframes.Index{Keyframes: []float64{0.5, 2.5, 4.5, 6.5}, VideoEnd: 8}, nil)
+	stubInputStart(t, 0, nil)
+	opts := plannedOpts()
+	opts.SeekSeconds = 1
+	opts.StreamOriginSeconds, opts.CopySeekAnchorResolved = 0.5, true
+	plan := planOrNil(t, opts)
+	if plan == nil || plan.firstKey[0] != 0 || !plan.resumes() {
+		t.Fatalf("plan = %+v, want a resume's plan from keyframe 0", plan)
+	}
+	if got := plan.restartSeekSeconds(0); got != 0 {
+		t.Fatalf("restartSeekSeconds(0) = %v, want 0", got)
+	}
+	path := filepath.Join(t.TempDir(), copyPlanRecordFile)
+	if err := writeCopyPlanRecord(path, plan); err != nil {
+		t.Fatal(err)
+	}
+	opts.OutputDir, opts.Reconstructed = filepath.Dir(path), true
+	rebuilt, err := resolveCopyPlan(t.Context(), opts)
+	if err != nil || rebuilt == nil || !rebuilt.resumes() {
+		t.Fatalf("rebuilt plan = %+v, %v; want the recorded resume's", rebuilt, err)
+	}
+}
+
+// A resume's plan numbers and cuts segments from its origin, unlike FFmpeg's
+// playlist. A rebuilt resume without a plan record, whose first start may
+// have served FFmpeg's playlist (its start probe failed), keeps that
+// playlist.
+func TestResolveCopyPlanKeepsFFmpegPlaylistForARebuiltResumeWithoutARecord(t *testing.T) {
+	stubKeyframeIndex(t, keyframes.Index{Keyframes: []float64{0, 2, 4, 6, 8}, VideoEnd: 10}, nil)
+	opts := plannedOpts()
+	opts.SeekSeconds, opts.StartSegmentNumber = 4.5, 2
+	opts.StreamOriginSeconds, opts.CopySeekAnchorResolved = 4, true
+	opts.OutputDir, opts.Reconstructed = t.TempDir(), true
+	if plan, err := resolveCopyPlan(t.Context(), opts); err != nil || plan != nil {
+		t.Fatalf("plan = %v, err = %v; want FFmpeg's playlist", plan != nil, err)
+	}
+	// A first start still plans and records it.
+	opts.Reconstructed = false
+	if plan, err := resolveCopyPlan(t.Context(), opts); err != nil || plan == nil {
+		t.Fatalf("first start plan = %v, err = %v; want a plan", plan != nil, err)
+	}
 }
 
 // A real FFmpeg session that resumes mid-file, with its anchor resolved the
@@ -263,5 +326,31 @@ func checkPlannedResume(t *testing.T, ctx context.Context, ffmpeg, source string
 	}
 	if out, err := exec.CommandContext(ctx, ffmpeg, "-v", "error", "-xerror", "-i", stream, "-f", "null", "-").CombinedOutput(); err != nil || len(out) > 0 {
 		t.Fatalf("resumed stream doesn't decode cleanly (%v): %s", err, out)
+	}
+
+	// The assembled output's video, measured by ffprobe, runs as long as the
+	// playlist says, in all and in its last segment, which the spacing of
+	// segment starts doesn't cover.
+	probe, err := exec.CommandContext(ctx, mediaprobe.FFprobePathFromFFmpeg(ffmpeg), "-v", "error", "-select_streams", "v:0",
+		"-show_entries", "packet=pts_time,duration_time", "-of", "csv=p=0", stream).Output()
+	if err != nil {
+		t.Fatalf("ffprobe: %v", err)
+	}
+	firstPTS, end := math.Inf(1), math.Inf(-1)
+	for line := range strings.FieldsSeq(string(probe)) {
+		pts, duration, _ := strings.Cut(strings.TrimSuffix(line, ","), ",")
+		p, err1 := strconv.ParseFloat(pts, 64)
+		d, err2 := strconv.ParseFloat(duration, 64)
+		if err1 != nil || err2 != nil {
+			t.Fatalf("ffprobe packet %q", line)
+		}
+		firstPTS, end = min(firstPTS, p), max(end, p+d)
+	}
+	if measured := end - firstPTS; math.Abs(measured-total) > 0.041 {
+		t.Fatalf("the video runs %.3fs, the playlist %.3fs", measured, total)
+	}
+	last := len(starts) - 1
+	if measured := end - firstPTS - (starts[last] - starts[0]); math.Abs(measured-plan.durations[last]) > 0.041 {
+		t.Fatalf("the last segment runs %.3fs, the playlist says %.3fs", measured, plan.durations[last])
 	}
 }
