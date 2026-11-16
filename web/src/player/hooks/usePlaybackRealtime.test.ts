@@ -116,6 +116,32 @@ it.each([
   expect(result.current.connectionState).toBe("disconnected");
 });
 
+it("waits at least the Retry-After a rebuilding session's refusal names", async () => {
+  vi.useFakeTimers();
+  mocks.mint.mockRejectedValue(
+    new V2ProblemError(
+      "createPlaybackControlSocketTicket",
+      {
+        type: "https://example.invalid/problems/dependency_unavailable",
+        title: "Unavailable",
+        status: 503,
+        detail: "Playback session is not active on this replica yet",
+        instance: "test",
+      },
+      5,
+    ),
+  );
+  renderHook(() => usePlaybackRealtime({ sessionId: "session", onCommand: vi.fn() }), { wrapper });
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(4_900);
+  });
+  expect(mocks.mint).toHaveBeenCalledTimes(1);
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(200);
+  });
+  expect(mocks.mint).toHaveBeenCalledTimes(2);
+});
+
 it.each(["stop", "terminate", "server_restarting"])(
   "delivers an explicit %s only for the captured session and acknowledges it once",
   async (name) => {
