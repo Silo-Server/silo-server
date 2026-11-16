@@ -409,8 +409,12 @@ export function NotifiedSeriesList({
   // While a new search, tab, or sort loads, the previous rows stay on screen;
   // they must not be selected or acted on, since they no longer match it.
   const stale = list.isPlaceholderData;
-  // Checkboxes also wait for Select all matching, which would overwrite them.
+  // Checkboxes and the bulk actions also wait for Select all matching, which
+  // would overwrite the selection they change.
   const selectionLocked = stale || selectingAll;
+  // Select all matching and a bulk mute or unmute never overlap, in either
+  // order: the bulk action deselects what Select all matching would re-add.
+  const bulkLocked = selectionLocked || setManyMuted.isPending;
   const allLoadedSelected = rows.length > 0 && selectedRows.length === rows.length;
 
   // Counts selection resets, so a Select all matching still loading when the
@@ -569,7 +573,7 @@ export function NotifiedSeriesList({
                   variant="link"
                   size="sm"
                   className="text-foreground h-auto px-1 underline"
-                  disabled={selectionLocked}
+                  disabled={bulkLocked}
                   onClick={() => void selectAllMatching()}
                 >
                   {t("web.notifications.selection.selectAllMatching")}
@@ -578,21 +582,11 @@ export function NotifiedSeriesList({
             </>
           }
         >
-          <Button
-            variant="ghost"
-            size="sm"
-            disabled={setManyMuted.isPending || stale}
-            onClick={() => runBulk(true)}
-          >
+          <Button variant="ghost" size="sm" disabled={bulkLocked} onClick={() => runBulk(true)}>
             <BellOff className="h-4 w-4" />
             {t("web.notifications.series.mute")}
           </Button>
-          <Button
-            variant="ghost"
-            size="sm"
-            disabled={setManyMuted.isPending || stale}
-            onClick={() => runBulk(false)}
-          >
+          <Button variant="ghost" size="sm" disabled={bulkLocked} onClick={() => runBulk(false)}>
             <Bell className="h-4 w-4" />
             {t("web.notifications.series.unmute")}
           </Button>
