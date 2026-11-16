@@ -902,3 +902,37 @@ func TestCachingOffKeepsStoredArtworkNoProviderFills(t *testing.T) {
 		t.Errorf("logo = %q, want the stored copy kept", got.LogoPath)
 	}
 }
+
+// A poster taken from the movie's video gives way to any provider poster in
+// a fill-empty refresh, unrated included, and stays when none is offered.
+func TestFramePosterGivesWayToAnyProviderPoster(t *testing.T) {
+	const (
+		framePoster  = "local/movies/movie:tmdb:7/0badf00d/poster/original.r1.webp"
+		frameSource  = "frame:42?v=1000-1700000000"
+		remotePoster = "tmdb://remote-poster.jpg"
+	)
+	ctx := context.Background()
+	for _, tc := range []struct {
+		name       string
+		images     []RemoteImage
+		wantSource string
+	}{
+		{"unrated provider poster", []RemoteImage{{Type: ImagePoster, URL: remotePoster, ProviderID: "tmdb", Language: "en"}}, remotePoster},
+		{"no image offered", nil, frameSource},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newTestFilmHarness(ctx, t, models.MediaItem{PosterPath: framePoster, PosterSourcePath: frameSource, PosterThumbhash: "frame-thumb"})
+			h.service.SetImageCacheJobEnqueuer(&recordingImageCacheJobEnqueuer{})
+			h.service.SetAutoCacheImages(true)
+
+			got := mergeTestFilm(ctx, t, h, ModeScheduledRefresh, tc.images)
+			if got.PosterSourcePath != tc.wantSource {
+				t.Errorf("poster source = %q, want %q", got.PosterSourcePath, tc.wantSource)
+			}
+			// The frame serves until the provider poster's copy lands.
+			if got.PosterPath != framePoster {
+				t.Errorf("poster path = %q, want the frame %q", got.PosterPath, framePoster)
+			}
+		})
+	}
+}

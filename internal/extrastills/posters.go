@@ -1,0 +1,188 @@
+package extrastills
+
+import (
+	"context"
+	"errors"
+	"log/slog"
+
+	"github.com/Silo-Server/silo-server/internal/catalog"
+	"github.com/Silo-Server/silo-server/internal/chapterthumbs"
+	"github.com/Silo-Server/silo-server/internal/imageutil"
+	"github.com/Silo-Server/silo-server/internal/mediaartifact"
+	"github.com/Silo-Server/silo-server/internal/models"
+)
+
+// framePosterKind keys a movie file's failed frame posters among the media
+// analysis artifacts. Only failures are stored there; a saved frame lives on
+// the item, marked by catalog.StillSourceFramePrefix in poster_source_path.
+const framePosterKind = "frame_poster"
+
+var framePosterKey = mediaartifact.Key{
+	Kind:             framePosterKind,
+	AlgorithmVersion: 1,
+	ConfigHash:       mediaartifact.ConfigHash(framePosterKind, "frame=tenth;crop=2:3"),
+}
+
+// undecodableDetail is the Detail of a file's unusable verdict.
+const undecodableDetail = "undecodable"
+
+// maxPosterFailuresInARow ends the poster pass once this many movies in a row
+// failed in a way that may pass. A share that is offline fails every file,
+// each after up to most of a minute.
+const maxPosterFailuresInARow = 3
+
+// PosterCacher stores a movie's frame poster; imagecache.Cacher.
+type PosterCacher interface {
+	CacheFramePoster(ctx context.Context, data []byte, contentID string) (storedPath string, thumbhash string, err error)
+}
+
+// FailureStore records a file's failed frame posters; mediaartifact.Store.
+type FailureStore interface {
+	Upsert(ctx context.Context, a mediaartifact.Artifact) error
+	RecordFailure(ctx context.Context, failure mediaartifact.Failure) error
+}
+
+// posterStore lists and saves frame posters; catalog.ItemRepository.
+type posterStore interface {
+	ListPendingFramePosters(ctx context.Context, failures mediaartifact.Key, node string, limit int) ([]catalog.PendingFramePoster, error)
+	SetFramePosterIfSource(ctx context.Context, contentID, expectedSource, path, source, thumbhash string) (bool, error)
+}
+
+// posterPass gives movies with no poster a frame of their own video.
+type posterPass struct {
+	items    posterStore
+	files    FileLoader
+	frames   FrameExtractor
+	cacher   PosterCacher
+	failures FailureStore
+	node     string
+}
+
+// WithPosters adds the poster pass to every Generate run. node names this
+// server in failure records: a failure that may pass backs off only on the
+// server that recorded it.
+func (g *Generator) WithPosters(cacher PosterCacher, failures FailureStore, node string) *Generator {
+	g.posters = &posterPass{
+		items: catalog.NewItemRepository(g.pool), files: g.files, frames: g.frames,
+		cacher: cacher, failures: failures, node: node,
+	}
+	return g
+}
+
+type posterOutcome int
+
+const (
+	posterSaved posterOutcome = iota
+	// posterNotSaved: another image took the slot first, the file cannot be
+	// decoded, or the run is ending. None says the files are out of reach.
+	posterNotSaved
+	// posterFailed: a failure that may pass.
+	posterFailed
+)
+
+// run gives up to limit movies a frame poster and reports how many it saved.
+// It stops early when no transcode node can be reserved, and after
+// maxPosterFailuresInARow failures in a row.
+func (p *posterPass) run(ctx context.Context, limit int) (int, error) {
+	pending, err := p.items.ListPendingFramePosters(ctx, framePosterKey, p.node, limit)
+	if err != nil {
+		return 0, err
+	}
+	saved, failedInARow := 0, 0
+	for _, movie := range pending {
+		if ctx.Err() != nil {
+			return saved, ctx.Err()
+		}
+		outcome, err := p.generate(ctx, movie)
+		if errors.Is(err, chapterthumbs.ErrExtractionUnavailable) {
+			slog.InfoContext(ctx, "frame posters: no transcode node could be reserved; trying again next run",
+				"component", "extrastills", "content_id", movie.ContentID, "error", err)
+			return saved, nil
+		}
+		switch outcome {
+		case posterSaved:
+			saved++
+			failedInARow = 0
+		case posterNotSaved:
+			failedInARow = 0
+		case posterFailed:
+			failedInARow++
+			if failedInARow >= maxPosterFailuresInARow {
+				slog.WarnContext(ctx, "frame posters: several movies in a row failed; trying again next run",
+					"component", "extrastills", "failures", failedInARow)
+				return saved, nil
+			}
+		}
+	}
+	return saved, nil
+}
+
+// generate takes, crops and saves one movie's frame poster. A failed
+// extraction or crop is recorded on the file (recordFailure), except when no
+// transcode node is available: that error is returned and stops the run. A
+// failure to load the file or to store or save the poster is tried again on
+// the next run.
+func (p *posterPass) generate(ctx context.Context, movie catalog.PendingFramePoster) (posterOutcome, error) {
+	attrs := []any{"component", "extrastills", "content_id", movie.ContentID, "file_id", movie.FileID}
+	file, err := p.files.GetByID(ctx, movie.FileID)
+	if err != nil {
+		slog.WarnContext(ctx, "frame posters: loading file failed", append(attrs, "error", err)...)
+		return posterFailed, nil
+	}
+	poster, err := p.frames.ExtractStill(ctx, file, frameSeconds(movie.Duration))
+	if err == nil {
+		poster, err = imageutil.CropToPoster(poster)
+	}
+	if err != nil {
+		return p.recordFailure(ctx, file, err, attrs)
+	}
+	path, thumbhash, err := p.cacher.CacheFramePoster(ctx, poster, movie.ContentID)
+	if err != nil {
+		slog.WarnContext(ctx, "frame posters: storing poster failed", append(attrs, "error", err)...)
+		return posterFailed, nil
+	}
+	saved, err := p.items.SetFramePosterIfSource(ctx, movie.ContentID, movie.PosterSource, path,
+		catalog.StillSourceFramePrefix+movie.FrameKey, thumbhash)
+	if err != nil {
+		slog.WarnContext(ctx, "frame posters: saving poster failed", append(attrs, "error", err)...)
+		return posterFailed, nil
+	}
+	if !saved {
+		// Another image took the slot meanwhile; the artwork revision GC
+		// collects the stored frame.
+		return posterNotSaved, nil
+	}
+	return posterSaved, nil
+}
+
+// recordFailure records a failed extraction or crop on the file. It returns
+// err instead when no transcode node is available or the run was canceled,
+// since neither says anything about the file, and records nothing when the
+// image budget turned the crop away.
+func (p *posterPass) recordFailure(ctx context.Context, file *models.MediaFile, err error, attrs []any) (posterOutcome, error) {
+	if errors.Is(err, chapterthumbs.ErrExtractionUnavailable) || ctx.Err() != nil {
+		return posterNotSaved, err
+	}
+	if errors.Is(err, imageutil.ErrBusy) {
+		slog.WarnContext(ctx, "frame posters: cropping deferred; trying again next run", append(attrs, "error", err)...)
+		return posterFailed, nil
+	}
+	identity := mediaartifact.Identity{FileHash: file.FileHash, FileSize: file.FileSize, DurationSeconds: float64(file.Duration)}
+	if errors.Is(err, chapterthumbs.ErrUndecodableFile) {
+		slog.WarnContext(ctx, "frame posters: file cannot be decoded; skipped until it changes", append(attrs, "error", err)...)
+		if err := p.failures.Upsert(ctx, mediaartifact.Artifact{
+			MediaFileID: file.ID, Key: framePosterKey, Identity: identity,
+			Status: mediaartifact.StatusUnusable, Detail: undecodableDetail, RecordedBy: p.node,
+		}); err != nil {
+			slog.WarnContext(ctx, "frame posters: recording failure failed", append(attrs, "error", err)...)
+		}
+		return posterNotSaved, nil
+	}
+	slog.WarnContext(ctx, "frame posters: taking a frame failed; trying again later", append(attrs, "error", err)...)
+	if err := p.failures.RecordFailure(ctx, mediaartifact.Failure{
+		MediaFileID: file.ID, Key: framePosterKey, Identity: identity, RecordedBy: p.node, Error: err.Error(),
+	}); err != nil {
+		slog.WarnContext(ctx, "frame posters: recording failure failed", append(attrs, "error", err)...)
+	}
+	return posterFailed, nil
+}

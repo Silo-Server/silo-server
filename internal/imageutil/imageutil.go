@@ -336,6 +336,42 @@ func encodeSquare(data []byte, side, squareSize int) ([]byte, error) {
 	})
 }
 
+// CropToPoster returns the centered 2:3 portrait crop of data as a PNG, for a
+// poster taken from a video frame. It trims whichever dimension is in excess,
+// keeping a landscape frame's full height or a narrower frame's full width,
+// and never scales; the poster variants are cut from the crop. PNG keeps the
+// crop lossless until the variants are encoded.
+func CropToPoster(data []byte) ([]byte, error) {
+	size, release, err := reserveSource(data)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
+	width, height := size.Width, size.Height
+	if width*3 > height*2 {
+		width = height * 2 / 3
+	} else {
+		height = width * 3 / 2
+	}
+	if width < 1 || height < 1 {
+		return nil, fmt.Errorf("%w: a %dx%d image has no 2:3 crop", ErrInvalidImage, size.Width, size.Height)
+	}
+	out, err := bimg.NewImage(data).Process(bimg.Options{
+		Type:          bimg.PNG,
+		StripMetadata: true,
+		// The offsets are in the stored orientation, the one Size reports.
+		NoAutoRotate: true,
+		Left:         (size.Width - width) / 2,
+		Top:          (size.Height - height) / 2,
+		AreaWidth:    width,
+		AreaHeight:   height,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("imageutil: crop to poster: %w", err)
+	}
+	return out, nil
+}
+
 // Thumbhash computes a base64-encoded thumbhash from raw image bytes.
 // The image is scaled to max 100x100 before hashing.
 //

@@ -371,6 +371,33 @@ precedence order, each tried with `.jpg`, `.jpeg`, `.png`, `.webp`, `.tbn`,
   replaces a frame with it, and the task never overwrites one. An extra whose
   sidecar cannot be decoded gets no frame either; it shows no image until the
   sidecar is fixed or removed.
+- After the extras, the same task run gives each movie with no poster a frame
+  of its own video (`internal/extrastills/posters.go`): an item of type movie,
+  not pending its first match, with unlocked images, an empty `poster_path`,
+  and a `poster_source_path` that is empty or a lost frame's. A sidecar or
+  provider poster waiting for its copy has a source of its own, so it is never
+  raced. The frame is taken from the lowest-id live, probed file at the extras
+  position, cropped to a centered 2:3 portrait at its own scale
+  (`imageutil.CropToPoster`), and stored under the item's `local/` poster keys
+  with the usual poster variants. `poster_source_path` then holds `frame:` and
+  the file's frame key. The save is a compare-and-set on the empty slot and
+  the source read (`ItemRepository.SetFramePosterIfSource`); a frame that loses
+  is left to the artwork revision GC. Failures are per-file media analysis
+  artifacts (`internal/mediaartifact`, kind `frame_poster`): a file ffmpeg
+  cannot decode is skipped until it changes, other failures back off on the
+  server that recorded them, and the poster pass stops after three failures in
+  a row (an offline share) or when no transcode node can be reserved. Any
+  other image replaces a frame: a sidecar or admin pick as usual, and in a
+  fill-empty refresh (initial match, scheduled refresh) the merge treats an
+  unlocked frame poster as empty, so even an unrated provider poster wins; with
+  no image offered the frame stays. Known limits: only the poster slot is
+  filled, so a detail screen that shows only a backdrop still shows none; a
+  frame saved between a refresh's read and its write can be overwritten by that
+  write and is taken again on the next run; with `metadata.cache_images` off,
+  the stored-artwork releaser queues a matched movie showing a frame for a
+  refresh at most weekly; after an admin picks another image there is no way
+  back to the frame; a replaced file keeps its old frame while the poster slot
+  is filled; and only the lowest-id file of a multi-version movie is tried.
 - Basename names attach to one of the item's own media files and beat generic
   names, as in Kodi. A series has no media file of its own (its request lists
   every episode file), so a series uses generic names only and

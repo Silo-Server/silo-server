@@ -3100,6 +3100,9 @@ func (s *MetadataService) mergeAndPersist(
 			// With caching off a stored copy gives way to any provider image,
 			// rated or not; fill-empty would keep it over an unrated one.
 			stored = clearStoredItemArtwork(item)
+		} else {
+			// So does a poster taken from the video.
+			stored = clearFramePoster(item, existingItem)
 		}
 		applyBestImages(item, images, imageMode, req.Language, fallbackLanguage)
 		stored.restoreUnfilled(item)
@@ -9901,6 +9904,20 @@ func clearStoredItemArtwork(item *models.MediaItem) storedItemArtwork {
 		if isCachedImagePath(*slot[0]) {
 			*slot[1], *slot[0] = *slot[0], ""
 		}
+	}
+	return stored
+}
+
+// clearFramePoster empties a poster slot that serves a frame of the movie's
+// own video (the extras frame task's, marked by catalog.StillSourceFramePrefix
+// on the stored item), so applyBestImages fills it with any provider image.
+// The merged item carries no sources yet, so the stored one decides. A locked
+// slot keeps its frame.
+func clearFramePoster(item, existing *models.MediaItem) storedItemArtwork {
+	var stored storedItemArtwork
+	if existing != nil && !artworkLocked(item) && item.PosterPath != "" && item.PosterPath == existing.PosterPath &&
+		strings.HasPrefix(existing.PosterSourcePath, catalog.StillSourceFramePrefix) {
+		stored.poster, item.PosterPath = item.PosterPath, ""
 	}
 	return stored
 }
