@@ -1,7 +1,7 @@
 import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import { createElement } from "react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { V2ProblemError } from "@/api/v2/request";
+import { V2ProblemError, V2TransportError } from "@/api/v2/request";
 import { PlayerConfigProvider, type PlayerConfig } from "../context/PlayerConfigContext";
 import { usePlaybackRealtime } from "./usePlaybackRealtime";
 
@@ -130,6 +130,22 @@ it("waits at least the Retry-After a rebuilding session's refusal names", async 
       },
       5,
     ),
+  );
+  renderHook(() => usePlaybackRealtime({ sessionId: "session", onCommand: vi.fn() }), { wrapper });
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(4_900);
+  });
+  expect(mocks.mint).toHaveBeenCalledTimes(1);
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(200);
+  });
+  expect(mocks.mint).toHaveBeenCalledTimes(2);
+});
+
+it("waits at least the Retry-After a proxy's refusal names", async () => {
+  vi.useFakeTimers();
+  mocks.mint.mockRejectedValue(
+    new V2TransportError("createPlaybackControlSocketTicket", 503, "service unavailable", 5),
   );
   renderHook(() => usePlaybackRealtime({ sessionId: "session", onCommand: vi.fn() }), { wrapper });
   await act(async () => {

@@ -9,7 +9,7 @@ import {
   playbackControlSocketProtocols,
   playbackControlSocketURL,
 } from "@/api/v2/playbackControlSocket";
-import { V2ProblemError } from "@/api/v2/request";
+import { V2ProblemError, V2TransportError } from "@/api/v2/request";
 import { usePlayerConfig } from "../context/PlayerConfigContext";
 import { playerV2Origin } from "../player-v2";
 import { sessionInstallation } from "../session-mutations";
@@ -222,7 +222,8 @@ export function usePlaybackRealtime({
           // the original authority with bounded backoff.
           setConnectionState("disconnected");
           const retryAfter =
-            error instanceof V2ProblemError && error.retryAfterSeconds !== null
+            (error instanceof V2ProblemError || error instanceof V2TransportError) &&
+            error.retryAfterSeconds !== null
               ? error.retryAfterSeconds * 1_000
               : 0;
           scheduleReconnect(retryAfter);
