@@ -243,13 +243,21 @@ export function useMarkNotificationsRead() {
         );
     },
     retry: false,
-    onMutate: (ids: string[]) => {
+    onMutate: async (ids: string[]) => {
       requireNotificationAuthority(context);
+      // A list or count request already in flight could land after the reads
+      // and bring back the unread state, so cancel it; onSuccess reads again.
+      const scope = notificationScope(context);
+      await Promise.all(
+        [
+          notificationInboxKeys.list("all", scope),
+          notificationInboxKeys.list("unread", scope),
+          notificationInboxKeys.count(scope),
+        ].map((queryKey) => queryClient.cancelQueries({ queryKey })),
+      );
       for (const id of ids)
         applyNotificationRead(queryClient, { profile_id: context.profileId, id });
     },
-    // A list or count request that started before the reads can land after
-    // them and bring back the unread state; read it again.
     onSuccess: () => invalidateInbox(queryClient, notificationScope(context)),
     onError: () => {
       toast.error(t("web.notifications.queries.markReadFailed"));
