@@ -100,14 +100,19 @@ func resumesAtAnchor(opts TranscodeOpts) bool {
 // source's B-frame delay, never lead it.
 const resumeKeyframeTolerance = 0.1
 
-// resumeKeyframe returns the keyframe a resume's plan starts at: the latest
-// one at or before its origin, on the source's timeline less the start
+// resumeKeyframe returns the keyframe a resume's plan starts at: the one at
+// or before its origin, on the source's timeline less the start
 // -start_at_zero subtracts, within resumeKeyframeTolerance. A later keyframe
 // closer to the origin is never it, since the origin can't lead its keyframe.
+// When two keyframes fit, keyframes closer together than the B-frame delay,
+// the origin doesn't say which one the stream starts at, so there is none.
 func resumeKeyframe(keys []float64, origin, inputStart float64) (int, bool) {
 	at := origin + inputStart
 	i := sort.SearchFloat64s(keys, at+groupTimeTolerance) - 1
 	if i < 0 || at-keys[i] > resumeKeyframeTolerance {
+		return 0, false
+	}
+	if i > 0 && at-keys[i-1] <= resumeKeyframeTolerance {
 		return 0, false
 	}
 	return i, true

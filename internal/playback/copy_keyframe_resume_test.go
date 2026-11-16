@@ -68,6 +68,19 @@ func TestPlanCopySegmentsForAResumeTakesTheKeyframeBefore(t *testing.T) {
 	}
 }
 
+// Keyframes closer together than the B-frame delay both fit an origin that
+// trails them, so the origin doesn't say which one the stream starts at. The
+// resume keeps FFmpeg's playlist rather than guess.
+func TestPlanCopySegmentsForAResumeBetweenCloseKeyframes(t *testing.T) {
+	stubKeyframeIndex(t, keyframes.Index{Keyframes: []float64{0, 2, 3.97, 4, 6, 8}, VideoEnd: 10}, nil)
+	opts := plannedOpts()
+	opts.SeekSeconds, opts.StartSegmentNumber = 4.5, 2
+	opts.StreamOriginSeconds, opts.CopySeekAnchorResolved = 4.04, true
+	if plan := planOrNil(t, opts); plan != nil {
+		t.Fatalf("plan = %+v, want none when two keyframes fit the origin", plan)
+	}
+}
+
 // Audio that starts before the video puts the first keyframe past the
 // source's start, so a resume there has a positive origin. Its plan starts
 // at keyframe 0 and is still a resume's, through its record too.
