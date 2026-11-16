@@ -95,7 +95,7 @@ export function usePlaybackRealtime({
     // value cannot park the control lane for longer than the backoff's ceiling.
     const scheduleReconnect = (minDelay = 0) => {
       if (disposed || terminated) return;
-      const backoff = reconnectDelays[Math.min(attempt, reconnectDelays.length - 1)];
+      const backoff = reconnectDelays[Math.min(attempt, reconnectDelays.length - 1)] ?? 0;
       const delay = Math.max(backoff, Math.min(minDelay, maxRetryAfter));
       attempt += 1;
       reconnectTimer = window.setTimeout(connect, delay);
