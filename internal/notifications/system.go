@@ -615,19 +615,16 @@ func (s *System) RebuildInterest(ctx context.Context, progress func(percent int,
 	if err != nil {
 		return err
 	}
-	defer claim.release(ctx)
-	// The checkpoint is read and written on the session that holds the lock,
-	// so a rebuild whose session ended cannot write next to another server's.
-	lockConn := claim.lock.Conn()
+	defer claim.release()
 
-	checkpoint, completedAt, err := loadBackfillCheckpoint(ctx, lockConn, interestRebuildTask)
+	checkpoint, completedAt, err := loadBackfillCheckpoint(ctx, claim.conn, interestRebuildTask)
 	if err != nil {
 		return err
 	}
 	if completedAt != nil {
 		// Start a fresh repair pass.
 		checkpoint = ""
-		if err := resetBackfillCheckpoint(ctx, lockConn, interestRebuildTask); err != nil {
+		if err := resetBackfillCheckpoint(ctx, claim.conn, interestRebuildTask); err != nil {
 			return err
 		}
 	}
@@ -667,7 +664,7 @@ func (s *System) RebuildInterest(ctx context.Context, progress func(percent int,
 				s.logger.WarnContext(ctx, "interest rebuild: profile failed",
 					"user_id", user.ID, "profile_id", profile.ID, "error", err)
 			}
-			if err := saveBackfillCheckpoint(ctx, lockConn, interestRebuildTask, key); err != nil {
+			if err := saveBackfillCheckpoint(ctx, claim.conn, interestRebuildTask, key); err != nil {
 				return err
 			}
 			processed++
@@ -676,7 +673,7 @@ func (s *System) RebuildInterest(ctx context.Context, progress func(percent int,
 			fmt.Sprintf("Rebuilt interest for %d profiles", processed))
 	}
 
-	if err := completeBackfillCheckpoint(ctx, lockConn, interestRebuildTask); err != nil {
+	if err := completeBackfillCheckpoint(ctx, claim.conn, interestRebuildTask); err != nil {
 		return err
 	}
 	s.logger.InfoContext(ctx, "interest rebuild completed", "profiles", processed)

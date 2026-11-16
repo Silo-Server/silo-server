@@ -6,6 +6,9 @@ import (
 	"log/slog"
 	"sync/atomic"
 	"testing"
+	"time"
+
+	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Silo-Server/silo-server/internal/models"
 )
@@ -51,8 +54,9 @@ func TestInterestQueuesAreBounded(t *testing.T) {
 
 // TestInterestRebuildRunsOnOneServerAtATimeDB: while one rebuild holds the
 // cluster lock, another returns ErrInterestRebuildRunning. A rebuild whose
-// lock session ends stops before it completes the checkpoint, and the next
-// rebuild takes the freed lock and completes.
+// lock session ends stops before it completes the checkpoint, the next
+// rebuild takes the freed lock and completes, and a rebuild completes on a
+// pool of one connection.
 func TestInterestRebuildRunsOnOneServerAtATimeDB(t *testing.T) {
 	pool := schemaDB(t, "interest_rebuild_lock_")
 	ctx := t.Context()
@@ -107,6 +111,23 @@ func TestInterestRebuildRunsOnOneServerAtATimeDB(t *testing.T) {
 	}
 	if !completed() {
 		t.Fatal("the rebuild did not complete the checkpoint")
+	}
+
+	// The lock holds no pool connection, so a pool of one still rebuilds.
+	oneCfg := pool.Config()
+	oneCfg.MaxConns = 1
+	onePool, err := pgxpool.NewWithConfig(ctx, oneCfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(onePool.Close)
+	released := make(chan struct{})
+	close(released)
+	single := &System{pool: onePool, users: &gatedUserLister{entered: make(chan struct{}), release: released}, logger: slog.New(slog.DiscardHandler)}
+	singleCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	if err := single.RebuildInterest(singleCtx, nil); err != nil {
+		t.Fatalf("rebuild on a pool of one connection: %v", err)
 	}
 }
 
