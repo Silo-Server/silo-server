@@ -526,24 +526,15 @@ func (u *InterestUpdater) RecomputeSeries(ctx context.Context, userID int, profi
 	// and those episodes must still advance the progression cursor.
 	for start := 0; start < len(episodeIDs); start += interestQueryChunk {
 		end := min(start+interestQueryChunk, len(episodeIDs))
-		chunk := episodeIDs[start:end]
-		for offset := 0; ; {
-			entries, err := store.ListCompletedHistory(ctx, userstore.CompletedHistoryQuery{
-				ProfileID:    profileID,
-				MediaItemIDs: chunk,
-				Limit:        interestQueryChunk,
-				Offset:       offset,
-			})
-			if err != nil {
-				return fmt.Errorf("load completed history: %w", err)
-			}
-			for _, entry := range entries {
-				markCompleted(entry.MediaItemID)
-			}
-			if len(entries) < interestQueryChunk {
-				break
-			}
-			offset += len(entries)
+		items, err := store.ListCompletedHistoryItems(ctx, userstore.CompletedHistoryItemQuery{
+			ProfileID:    profileID,
+			MediaItemIDs: episodeIDs[start:end],
+		})
+		if err != nil {
+			return fmt.Errorf("load completed history: %w", err)
+		}
+		for _, item := range items {
+			markCompleted(item.MediaItemID)
 		}
 	}
 

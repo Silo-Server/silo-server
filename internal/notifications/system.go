@@ -720,21 +720,12 @@ func (s *System) rebuildProfileInterest(ctx context.Context, store userstore.Use
 	// History imports (watch providers, history import runs) may record
 	// watched episodes without any progress row; they are watch relationships
 	// all the same.
-	for offset := 0; ; offset += pageSize {
-		history, err := store.ListCompletedHistory(ctx, userstore.CompletedHistoryQuery{
-			ProfileID: profileID,
-			Limit:     pageSize,
-			Offset:    offset,
-		})
-		if err != nil {
-			return fmt.Errorf("list completed history: %w", err)
-		}
-		for _, entry := range history {
-			itemIDs[entry.MediaItemID] = struct{}{}
-		}
-		if len(history) < pageSize {
-			break
-		}
+	history, err := store.ListCompletedHistoryItems(ctx, userstore.CompletedHistoryItemQuery{ProfileID: profileID})
+	if err != nil {
+		return fmt.Errorf("list completed history: %w", err)
+	}
+	for _, item := range history {
+		itemIDs[item.MediaItemID] = struct{}{}
 	}
 
 	seriesIDs, err := s.batchResolveSeries(ctx, itemIDs)
