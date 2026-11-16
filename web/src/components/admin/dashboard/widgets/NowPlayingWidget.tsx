@@ -89,8 +89,10 @@ export function NowPlayingWidget() {
           half-drawing one at the edge; the header's "View all" link counts
           every stream.
           Cards pair up only when the widget itself is wide enough for two, so a
-          half-width widget shows one full-width card per row. */}
-      <div ref={setViewport} className="@container min-h-0 flex-1 overflow-hidden">
+          half-width widget shows one full-width card per row. The viewport
+          stays positioned so it is the cards' offsetParent: the fit compares
+          their offsetTop with its height. */}
+      <div ref={setViewport} className="@container relative min-h-0 flex-1 overflow-hidden">
         {sessionsQuery.isLoading ? (
           <div className="grid grid-cols-1 gap-3.5 @2xl:grid-cols-2">
             {Array.from({ length: 2 }).map((_, i) => (
