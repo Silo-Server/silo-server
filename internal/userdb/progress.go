@@ -965,6 +965,14 @@ func ListCompletedHistory(db *sql.DB, query userstore.CompletedHistoryQuery) ([]
 		limit = 500
 	}
 	filters, args := completedHistoryFilterSQL(query.ProfileID, query.MediaItemIDs, query.IncludeSources, query.ExcludeSources)
+	// The key is the stored text, compared the way ORDER BY sorts it. The
+	// leading watched_at >= ? lets idx_watch_history_profile_watched bound
+	// the scan; like ListHistoryPage, this avoids row-value syntax.
+	if query.After != nil {
+		filters += `
+		  AND h.watched_at >= ? AND (h.watched_at > ? OR h.id > ?)`
+		args = append(args, query.After.WatchedAt, query.After.WatchedAt, query.After.ID)
+	}
 	args = append(args, limit, query.Offset)
 	rows, err := db.Query(`
 		SELECT h.id, h.profile_id, h.media_item_id, h.watched_at, h.duration_seconds, h.completed, h.source, h.watch_identity

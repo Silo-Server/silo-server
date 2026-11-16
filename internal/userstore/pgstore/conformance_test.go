@@ -129,6 +129,17 @@ func TestPostgresPersonalListPage(t *testing.T) {
 	storetest.RunNotInterested(t, newListStore)
 }
 
+// TestPostgresCompletedHistoryPage runs the completed-history keyset walk
+// against the Postgres backend, whose key must keep watched_at's sub-second
+// precision. Skips unless SILO_TEST_DATABASE_URL is set.
+func TestPostgresCompletedHistoryPage(t *testing.T) {
+	pool := testPool(t)
+	storetest.RunCompletedHistoryPage(t, func(t *testing.T) userstore.UserStore {
+		// Deleting the user cascades to every user-scoped table.
+		return newStore(pool, seedTestUser(t, pool, "conf-completedpage"))
+	})
+}
+
 // TestPostgresDeleteProfileRemovesProfileState runs the profile-deletion
 // conformance test against the Postgres backend. Skips unless
 // SILO_TEST_DATABASE_URL is set.

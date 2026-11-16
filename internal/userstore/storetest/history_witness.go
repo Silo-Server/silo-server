@@ -2,6 +2,7 @@ package storetest
 
 import (
 	"reflect"
+	"slices"
 	"testing"
 	"time"
 
@@ -68,5 +69,53 @@ func RunHistoryWitness(t *testing.T, newStore func(*testing.T) userstore.UserSto
 	}
 	if got[seriesID] != "series-a" {
 		t.Fatalf("hidden witness survived: %v", got)
+	}
+}
+
+// RunCompletedHistoryPage walks ListCompletedHistory by key in pages that
+// split a watched_at tie and two sub-second neighbors. Every completed play
+// comes back exactly once; a whole-second key would repeat or skip one.
+func RunCompletedHistoryPage(t *testing.T, newStore func(*testing.T) userstore.UserStore) {
+	ctx := t.Context()
+	store := newStore(t)
+	if err := store.CreateProfile(ctx, userstore.Profile{ID: "p1", Name: "p1"}); err != nil {
+		t.Fatal(err)
+	}
+	add := func(id string, at time.Time, completed bool) {
+		t.Helper()
+		entry := userstore.WatchHistoryEntry{ID: id, ProfileID: "p1", MediaItemID: "m-" + id, WatchedAt: at.Format(time.RFC3339Nano), Completed: completed}
+		if err := store.AddHistory(ctx, entry); err != nil {
+			t.Fatalf("AddHistory(%s): %v", id, err)
+		}
+	}
+	base := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
+	want := []string{"tie-a", "tie-b", "tie-c", "quarter", "three-quarters", "next-second"}
+	for i, at := range []time.Time{base, base, base, base.Add(250 * time.Millisecond), base.Add(750 * time.Millisecond), base.Add(time.Second)} {
+		add(want[i], at, true)
+	}
+	add("unfinished", base, false)
+
+	query := userstore.CompletedHistoryQuery{ProfileID: "p1", Limit: 2}
+	var got []string
+	for pages := 0; ; pages++ {
+		if pages > len(want) {
+			t.Fatalf("walk did not end; read %v", got)
+		}
+		rows, err := store.ListCompletedHistory(ctx, query)
+		if err != nil {
+			t.Fatalf("ListCompletedHistory(after %+v): %v", query.After, err)
+		}
+		for _, row := range rows {
+			got = append(got, row.ID)
+		}
+		if len(rows) < query.Limit {
+			break
+		}
+		query.After = rows[len(rows)-1].CompletedHistoryKey()
+	}
+	slices.Sort(got)
+	slices.Sort(want)
+	if !slices.Equal(got, want) {
+		t.Fatalf("walk read %v, want each of %v once", got, want)
 	}
 }

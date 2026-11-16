@@ -82,6 +82,10 @@ func TestSQLitePersonalListPage(t *testing.T) {
 	storetest.RunNotInterested(t, newConformanceStore)
 }
 
+func TestSQLiteCompletedHistoryPage(t *testing.T) {
+	storetest.RunCompletedHistoryPage(t, newConformanceStore)
+}
+
 func TestSQLiteHistoryEntryOnce(t *testing.T) {
 	storetest.RunHistoryEntryOnce(t, newConformanceStore(t))
 }
