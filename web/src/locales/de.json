@@ -116451,6 +116451,12 @@
       "value": "Hier wirst du benachrichtigt, wenn neue Folgen von Serien erscheinen, die du favorisiert hast, auf deiner Merkliste hast oder gerade schaust."
     }
   ],
+  "web.notifications.inbox.emptyHintNextUp": [
+    {
+      "type": 0,
+      "value": "Hier wirst du benachrichtigt, wenn eine neue Folge einer Serie erscheint, bei der du auf dem neuesten Stand bist."
+    }
+  ],
   "web.notifications.inbox.emptyUnread": [
     {
       "type": 0,
@@ -117321,6 +117327,12 @@
       "value": "Ausgewählte Serien"
     }
   ],
+  "web.notifications.series.afterCatchUp": [
+    {
+      "type": 0,
+      "value": "Wenn du auf dem neuesten Stand bist"
+    }
+  ],
   "web.notifications.series.allReasons": [
     {
       "type": 0,
@@ -117379,10 +117391,22 @@
       "value": "Serien, die du zu deinen Favoriten oder deiner Merkliste hinzufügst oder zu schauen beginnst, erscheinen hier."
     }
   ],
+  "web.notifications.series.emptyHintNextUp": [
+    {
+      "type": 0,
+      "value": "Serien erscheinen hier, sobald du eine Folge zu Ende geschaut hast. Über eine neue Folge wirst du benachrichtigt, sobald du auf dem neuesten Stand bist."
+    }
+  ],
   "web.notifications.series.filterByReason": [
     {
       "type": 0,
       "value": "Nach Grund filtern"
+    }
+  ],
+  "web.notifications.series.filterLabel": [
+    {
+      "type": 0,
+      "value": "Serien filtern"
     }
   ],
   "web.notifications.series.intro": [
@@ -117493,6 +117517,12 @@
     {
       "type": 0,
       "value": "Keine passenden Serien. Versuche eine andere Suche oder einen anderen Grund."
+    }
+  ],
+  "web.notifications.series.noMatchFilter": [
+    {
+      "type": 0,
+      "value": "Keine passenden Serien. Versuche eine andere Suche oder einen anderen Filter."
     }
   ],
   "web.notifications.series.notificationsOff": [
@@ -129822,6 +129852,12 @@
     {
       "type": 0,
       "value": "Hauptschalter für dieses Profil"
+    }
+  ],
+  "web.settings.notifications.episodes.nextUpDescription": [
+    {
+      "type": 0,
+      "value": "Erhalte eine Benachrichtigung, wenn eine neue Folge einer Serie erscheint, bei der du auf dem neuesten Stand bist."
     }
   ],
   "web.settings.notifications.episodes.seriesLink": [

@@ -138139,6 +138139,12 @@
       "value": "Zde se zobrazí oznámení o nových dílech seriálů, které máte v oblíbených, v seznamu ke zhlédnutí nebo je právě sledujete."
     }
   ],
+  "web.notifications.inbox.emptyHintNextUp": [
+    {
+      "type": 0,
+      "value": "Až u seriálu, který máte dosledovaný, vyjde nový díl, zobrazí se zde oznámení."
+    }
+  ],
   "web.notifications.inbox.emptyUnread": [
     {
       "type": 0,
@@ -139209,6 +139215,12 @@
       "value": "Vybrané seriály"
     }
   ],
+  "web.notifications.series.afterCatchUp": [
+    {
+      "type": 0,
+      "value": "Po dosledování"
+    }
+  ],
   "web.notifications.series.allReasons": [
     {
       "type": 0,
@@ -139267,10 +139279,22 @@
       "value": "Zobrazí se zde seriály, které si přidáte do oblíbených nebo na seznam ke zhlédnutí, nebo které začnete sledovat."
     }
   ],
+  "web.notifications.series.emptyHintNextUp": [
+    {
+      "type": 0,
+      "value": "Seriály se zde zobrazí po dokončení dílu. Jakmile máte seriál dosledovaný, nový díl vás upozorní."
+    }
+  ],
   "web.notifications.series.filterByReason": [
     {
       "type": 0,
       "value": "Filtrovat podle důvodu"
+    }
+  ],
+  "web.notifications.series.filterLabel": [
+    {
+      "type": 0,
+      "value": "Filtrovat seriály"
     }
   ],
   "web.notifications.series.intro": [
@@ -139381,6 +139405,12 @@
     {
       "type": 0,
       "value": "Žádný seriál neodpovídá. Zkuste jiné hledání nebo důvod."
+    }
+  ],
+  "web.notifications.series.noMatchFilter": [
+    {
+      "type": 0,
+      "value": "Žádný seriál neodpovídá. Zkuste jiné hledání nebo filtr."
     }
   ],
   "web.notifications.series.notificationsOff": [
@@ -153403,6 +153433,12 @@
     {
       "type": 0,
       "value": "Hlavní vypínač pro tento profil"
+    }
+  ],
+  "web.settings.notifications.episodes.nextUpDescription": [
+    {
+      "type": 0,
+      "value": "Dostávejte oznámení, když u seriálu, který máte dosledovaný, vyjde nový díl."
     }
   ],
   "web.settings.notifications.episodes.seriesLink": [

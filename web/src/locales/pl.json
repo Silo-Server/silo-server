@@ -138633,6 +138633,12 @@
       "value": "Tutaj pojawią się powiadomienia o nowych odcinkach seriali, które są w ulubionych, na liście do obejrzenia lub które oglądasz."
     }
   ],
+  "web.notifications.inbox.emptyHintNextUp": [
+    {
+      "type": 0,
+      "value": "Tutaj otrzymasz powiadomienie, gdy pojawi się nowy odcinek serialu, który oglądasz na bieżąco."
+    }
+  ],
   "web.notifications.inbox.emptyUnread": [
     {
       "type": 0,
@@ -139711,6 +139717,12 @@
       "value": "Wybrane seriale"
     }
   ],
+  "web.notifications.series.afterCatchUp": [
+    {
+      "type": 0,
+      "value": "Po nadrobieniu zaległości"
+    }
+  ],
   "web.notifications.series.allReasons": [
     {
       "type": 0,
@@ -139769,10 +139781,22 @@
       "value": "Tutaj pojawiają się seriale dodane do ulubionych lub do listy do obejrzenia albo te, które zaczynasz oglądać."
     }
   ],
+  "web.notifications.series.emptyHintNextUp": [
+    {
+      "type": 0,
+      "value": "Seriale pojawiają się tutaj, gdy skończysz oglądać odcinek. Po nadrobieniu zaległości otrzymasz powiadomienie o nowym odcinku."
+    }
+  ],
   "web.notifications.series.filterByReason": [
     {
       "type": 0,
       "value": "Filtruj według powodu"
+    }
+  ],
+  "web.notifications.series.filterLabel": [
+    {
+      "type": 0,
+      "value": "Filtruj seriale"
     }
   ],
   "web.notifications.series.intro": [
@@ -139883,6 +139907,12 @@
     {
       "type": 0,
       "value": "Brak pasujących seriali. Spróbuj innego wyszukiwania lub powodu."
+    }
+  ],
+  "web.notifications.series.noMatchFilter": [
+    {
+      "type": 0,
+      "value": "Brak pasujących seriali. Spróbuj innego wyszukiwania lub filtra."
     }
   ],
   "web.notifications.series.notificationsOff": [
@@ -153793,6 +153823,12 @@
     {
       "type": 0,
       "value": "Główny przełącznik dla tego profilu"
+    }
+  ],
+  "web.settings.notifications.episodes.nextUpDescription": [
+    {
+      "type": 0,
+      "value": "Otrzymuj powiadomienie, gdy pojawi się nowy odcinek serialu, który oglądasz na bieżąco."
     }
   ],
   "web.settings.notifications.episodes.seriesLink": [

@@ -556,9 +556,6 @@ const USER_SETTINGS_GROUPS: UserSettingsNavGroupSource[] = [
         keywords: ["new episodes", "email", "discord", "browser push", "webhooks", "alerts"],
         settings: [
           "web.settings.notifications.episodes.title",
-          "web.settings.notifications.reason.favorites",
-          "web.settings.notifications.reason.watchlist",
-          "web.settings.notifications.reason.continueWatching",
           "web.settings.notifications.reason.nextUp",
           "web.settings.notifications.push.title",
           "web.settings.notifications.email.title",

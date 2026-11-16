@@ -162,10 +162,11 @@ stays external (library or rating limits); one with several waits until the
 catalog merges them. For each title with exactly one visible copy:
 
 1. Lock the title and check the entry still exists (invariant 2).
-2. `AddToWatchlistAt(profileID, contentID, entry.added_at)` through the
-   notification-wrapped user store, so a promoted series queues an interest
-   recompute. When the row already exists, `GetWatchlistEntry` tells whether
-   it is a half-done promotion (invariant 3).
+2. `AddToWatchlistAt(profileID, contentID, entry.added_at)`. When the row
+   already exists, `GetWatchlistEntry` tells whether it is a half-done
+   promotion (invariant 3). Watchlist changes do not affect new-episode
+   notifications, which follow Next Up only (see
+   [Eligibility rules](notifications.md#eligibility-rules)).
 3. Delete the entry, and the title if it is now orphaned, then commit.
 4. If this call removed the entry and the library entry is new (invariant 3),
    run `Effects.WatchlistPromoted`, implemented by

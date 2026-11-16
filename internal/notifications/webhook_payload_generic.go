@@ -17,18 +17,20 @@ import (
 // canonicalization is required on either side. No server URL, no absolute
 // artwork URLs, no library name.
 type genericWebhookBody struct {
-	Event      string                 `json:"event"`
-	DeliveryID string                 `json:"delivery_id"`
-	WebhookID  string                 `json:"webhook_id"`
-	Timestamp  string                 `json:"timestamp"`
-	Version    int                    `json:"version"`
-	Test       bool                   `json:"test"`
-	ProfileID  string                 `json:"profile_id"`
-	LibraryID  *int                   `json:"library_id,omitempty"`
-	Type       string                 `json:"type"`
-	Reasons    ReasonFlags            `json:"reason_flags"`
-	Series     *genericWebhookSeries  `json:"series,omitempty"`
-	Episode    *genericWebhookEpisode `json:"episode,omitempty"`
+	Event      string `json:"event"`
+	DeliveryID string `json:"delivery_id"`
+	WebhookID  string `json:"webhook_id"`
+	Timestamp  string `json:"timestamp"`
+	Version    int    `json:"version"`
+	Test       bool   `json:"test"`
+	ProfileID  string `json:"profile_id"`
+	LibraryID  *int   `json:"library_id,omitempty"`
+	Type       string `json:"type"`
+	// Reasons is {"next_up": bool}; Next Up is the only reason an episode
+	// notifies for.
+	Reasons ReasonFlags            `json:"reason_flags"`
+	Series  *genericWebhookSeries  `json:"series,omitempty"`
+	Episode *genericWebhookEpisode `json:"episode,omitempty"`
 	// Request is present for request.* deliveries. For request.fulfilled the
 	// catalog item is in Series (movies included — the field carries the
 	// matched item); approved/declined have no catalog item yet, so the

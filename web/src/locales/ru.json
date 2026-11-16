@@ -139143,6 +139143,12 @@
       "value": "Здесь будут появляться уведомления о новых сериях сериалов, которые вы добавили в Избранное или список просмотра либо смотрите сейчас."
     }
   ],
+  "web.notifications.inbox.emptyHintNextUp": [
+    {
+      "type": 0,
+      "value": "Здесь вы получите уведомление, когда выйдет новая серия сериала, все вышедшие серии которого вы уже посмотрели."
+    }
+  ],
   "web.notifications.inbox.emptyUnread": [
     {
       "type": 0,
@@ -140205,6 +140211,12 @@
       "value": "Выбранные сериалы"
     }
   ],
+  "web.notifications.series.afterCatchUp": [
+    {
+      "type": 0,
+      "value": "После просмотра вышедших серий"
+    }
+  ],
   "web.notifications.series.allReasons": [
     {
       "type": 0,
@@ -140263,10 +140275,22 @@
       "value": "Здесь появятся сериалы, которые вы добавили в избранное или в список просмотра либо начали смотреть."
     }
   ],
+  "web.notifications.series.emptyHintNextUp": [
+    {
+      "type": 0,
+      "value": "Сериалы появятся здесь, когда вы досмотрите серию. О новой серии вы получите уведомление, когда посмотрите все вышедшие."
+    }
+  ],
   "web.notifications.series.filterByReason": [
     {
       "type": 0,
       "value": "Фильтр по причине"
+    }
+  ],
+  "web.notifications.series.filterLabel": [
+    {
+      "type": 0,
+      "value": "Фильтр сериалов"
     }
   ],
   "web.notifications.series.intro": [
@@ -140381,6 +140405,12 @@
     {
       "type": 0,
       "value": "Нет подходящих сериалов. Измените запрос или причину."
+    }
+  ],
+  "web.notifications.series.noMatchFilter": [
+    {
+      "type": 0,
+      "value": "Нет подходящих сериалов. Измените запрос или фильтр."
     }
   ],
   "web.notifications.series.notificationsOff": [
@@ -154307,6 +154337,12 @@
     {
       "type": 0,
       "value": "Общий переключатель для этого профиля"
+    }
+  ],
+  "web.settings.notifications.episodes.nextUpDescription": [
+    {
+      "type": 0,
+      "value": "Получайте уведомления о новых сериях сериалов, все вышедшие серии которых вы уже посмотрели."
     }
   ],
   "web.settings.notifications.episodes.seriesLink": [

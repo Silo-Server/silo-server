@@ -107898,6 +107898,12 @@
       "value": "當你加入最愛、待看清單或正在觀看的影集有新的一集推出時，你會在這裡收到通知。"
     }
   ],
+  "web.notifications.inbox.emptyHintNextUp": [
+    {
+      "type": 0,
+      "value": "當你已追上進度的影集有新的一集推出時，你會在這裡收到通知。"
+    }
+  ],
   "web.notifications.inbox.emptyUnread": [
     {
       "type": 0,
@@ -108680,6 +108686,12 @@
       "value": "已選取的影集"
     }
   ],
+  "web.notifications.series.afterCatchUp": [
+    {
+      "type": 0,
+      "value": "追上進度後"
+    }
+  ],
   "web.notifications.series.allReasons": [
     {
       "type": 0,
@@ -108738,10 +108750,22 @@
       "value": "你收藏、加入待看清單或開始觀看的影集會顯示在這裡。"
     }
   ],
+  "web.notifications.series.emptyHintNextUp": [
+    {
+      "type": 0,
+      "value": "你看完一集後，影集就會顯示在這裡。追上進度後，有新的一集推出時就會通知你。"
+    }
+  ],
   "web.notifications.series.filterByReason": [
     {
       "type": 0,
       "value": "依原因篩選"
+    }
+  ],
+  "web.notifications.series.filterLabel": [
+    {
+      "type": 0,
+      "value": "篩選影集"
     }
   ],
   "web.notifications.series.intro": [
@@ -108856,6 +108880,12 @@
     {
       "type": 0,
       "value": "沒有符合的影集。請試試其他搜尋字詞或原因。"
+    }
+  ],
+  "web.notifications.series.noMatchFilter": [
+    {
+      "type": 0,
+      "value": "沒有符合的影集。請試試其他搜尋字詞或篩選條件。"
     }
   ],
   "web.notifications.series.notificationsOff": [
@@ -120522,6 +120552,12 @@
     {
       "type": 0,
       "value": "此個人檔案的總開關"
+    }
+  ],
+  "web.settings.notifications.episodes.nextUpDescription": [
+    {
+      "type": 0,
+      "value": "當你已追上進度的影集有新的一集推出時收到通知。"
     }
   ],
   "web.settings.notifications.episodes.seriesLink": [

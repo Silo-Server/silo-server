@@ -3150,9 +3150,6 @@ export interface NotificationUnreadCountResponse {
 export interface NotificationPreferences {
   profile_id: string;
   enabled: boolean;
-  notify_favorites: boolean;
-  notify_watchlist: boolean;
-  notify_continue_watching: boolean;
   notify_next_up: boolean;
 }
 
@@ -3171,9 +3168,6 @@ export interface NotificationWebhook {
   type: NotificationWebhookType;
   url_host: string;
   enabled: boolean;
-  notify_favorites: boolean;
-  notify_watchlist: boolean;
-  notify_continue_watching: boolean;
   notify_next_up: boolean;
   notify_requests: boolean;
   consecutive_failures: number;
@@ -3191,9 +3185,6 @@ export interface NotificationWebhookInput {
   url?: string;
   type?: NotificationWebhookType;
   enabled?: boolean;
-  notify_favorites?: boolean;
-  notify_watchlist?: boolean;
-  notify_continue_watching?: boolean;
   notify_next_up?: boolean;
   notify_requests?: boolean;
 }

@@ -117017,6 +117017,12 @@
       "value": "You will be notified here when new episodes arrive for series you favorite, watchlist, or are watching."
     }
   ],
+  "web.notifications.inbox.emptyHintNextUp": [
+    {
+      "type": 0,
+      "value": "You’ll be notified here when a new episode arrives for a series you’re caught up on."
+    }
+  ],
   "web.notifications.inbox.emptyUnread": [
     {
       "type": 0,
@@ -117887,6 +117893,12 @@
       "value": "Selected series"
     }
   ],
+  "web.notifications.series.afterCatchUp": [
+    {
+      "type": 0,
+      "value": "After you catch up"
+    }
+  ],
   "web.notifications.series.allReasons": [
     {
       "type": 0,
@@ -117945,10 +117957,22 @@
       "value": "Series you favorite, add to your watchlist, or start watching show up here."
     }
   ],
+  "web.notifications.series.emptyHintNextUp": [
+    {
+      "type": 0,
+      "value": "Series show up here after you finish an episode. A new episode notifies you once you’re caught up."
+    }
+  ],
   "web.notifications.series.filterByReason": [
     {
       "type": 0,
       "value": "Filter by reason"
+    }
+  ],
+  "web.notifications.series.filterLabel": [
+    {
+      "type": 0,
+      "value": "Filter series"
     }
   ],
   "web.notifications.series.intro": [
@@ -118059,6 +118083,12 @@
     {
       "type": 0,
       "value": "No series match. Try another search or reason."
+    }
+  ],
+  "web.notifications.series.noMatchFilter": [
+    {
+      "type": 0,
+      "value": "No series match. Try another search or filter."
     }
   ],
   "web.notifications.series.notificationsOff": [
@@ -130403,6 +130433,12 @@
     {
       "type": 0,
       "value": "Master switch for this profile"
+    }
+  ],
+  "web.settings.notifications.episodes.nextUpDescription": [
+    {
+      "type": 0,
+      "value": "Get notified when a new episode arrives for a series you’re caught up on."
     }
   ],
   "web.settings.notifications.episodes.seriesLink": [

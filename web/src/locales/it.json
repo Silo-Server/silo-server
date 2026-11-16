@@ -127134,6 +127134,12 @@
       "value": "Riceverai qui una notifica quando arrivano nuovi episodi delle serie che hai tra i preferiti, in Da guardare o che stai guardando."
     }
   ],
+  "web.notifications.inbox.emptyHintNextUp": [
+    {
+      "type": 0,
+      "value": "Riceverai qui una notifica quando arriva un nuovo episodio di una serie con cui sei in pari."
+    }
+  ],
   "web.notifications.inbox.emptyUnread": [
     {
       "type": 0,
@@ -128076,6 +128082,12 @@
       "value": "Serie selezionate"
     }
   ],
+  "web.notifications.series.afterCatchUp": [
+    {
+      "type": 0,
+      "value": "Quando sarai in pari"
+    }
+  ],
   "web.notifications.series.allReasons": [
     {
       "type": 0,
@@ -128134,10 +128146,22 @@
       "value": "Qui compaiono le serie che aggiungi ai preferiti o a Da guardare, o che inizi a guardare."
     }
   ],
+  "web.notifications.series.emptyHintNextUp": [
+    {
+      "type": 0,
+      "value": "Le serie compaiono qui dopo che finisci un episodio. Ricevi una notifica per un nuovo episodio quando sei in pari."
+    }
+  ],
   "web.notifications.series.filterByReason": [
     {
       "type": 0,
       "value": "Filtra per motivo"
+    }
+  ],
+  "web.notifications.series.filterLabel": [
+    {
+      "type": 0,
+      "value": "Filtra serie"
     }
   ],
   "web.notifications.series.intro": [
@@ -128248,6 +128272,12 @@
     {
       "type": 0,
       "value": "Nessuna serie corrisponde. Prova un’altra ricerca o un altro motivo."
+    }
+  ],
+  "web.notifications.series.noMatchFilter": [
+    {
+      "type": 0,
+      "value": "Nessuna serie corrisponde. Prova un’altra ricerca o un altro filtro."
     }
   ],
   "web.notifications.series.notificationsOff": [
@@ -141340,6 +141370,12 @@
     {
       "type": 0,
       "value": "Interruttore generale per questo profilo"
+    }
+  ],
+  "web.settings.notifications.episodes.nextUpDescription": [
+    {
+      "type": 0,
+      "value": "Ricevi una notifica quando arriva un nuovo episodio di una serie con cui sei in pari."
     }
   ],
   "web.settings.notifications.episodes.seriesLink": [

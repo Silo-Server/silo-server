@@ -137793,6 +137793,12 @@
       "value": "Тут з’являтимуться сповіщення про нові епізоди серіалів, які ви додали в обране чи до списку перегляду або які ви дивитеся."
     }
   ],
+  "web.notifications.inbox.emptyHintNextUp": [
+    {
+      "type": 0,
+      "value": "Тут з’являтимуться сповіщення, коли виходитиме новий епізод серіалу, усі доступні епізоди якого ви вже переглянули."
+    }
+  ],
   "web.notifications.inbox.emptyUnread": [
     {
       "type": 0,
@@ -138859,6 +138865,12 @@
       "value": "Вибрані серіали"
     }
   ],
+  "web.notifications.series.afterCatchUp": [
+    {
+      "type": 0,
+      "value": "Після перегляду доступних епізодів"
+    }
+  ],
   "web.notifications.series.allReasons": [
     {
       "type": 0,
@@ -138917,10 +138929,22 @@
       "value": "Тут з’являються серіали, які ви додали в обране чи до списку перегляду або почали дивитися."
     }
   ],
+  "web.notifications.series.emptyHintNextUp": [
+    {
+      "type": 0,
+      "value": "Серіали з’являються тут, коли ви завершуєте перегляд епізоду. Про новий епізод ви отримаєте сповіщення, щойно переглянете всі доступні."
+    }
+  ],
   "web.notifications.series.filterByReason": [
     {
       "type": 0,
       "value": "Фільтрувати за причиною"
+    }
+  ],
+  "web.notifications.series.filterLabel": [
+    {
+      "type": 0,
+      "value": "Фільтрувати серіали"
     }
   ],
   "web.notifications.series.intro": [
@@ -139031,6 +139055,12 @@
     {
       "type": 0,
       "value": "Немає відповідних серіалів. Спробуйте інший пошуковий запит або причину."
+    }
+  ],
+  "web.notifications.series.noMatchFilter": [
+    {
+      "type": 0,
+      "value": "Немає відповідних серіалів. Спробуйте інший пошуковий запит або фільтр."
     }
   ],
   "web.notifications.series.notificationsOff": [
@@ -152921,6 +152951,12 @@
     {
       "type": 0,
       "value": "Головний перемикач для цього профілю"
+    }
+  ],
+  "web.settings.notifications.episodes.nextUpDescription": [
+    {
+      "type": 0,
+      "value": "Отримуйте сповіщення, коли виходить новий епізод серіалу, усі доступні епізоди якого ви вже переглянули."
     }
   ],
   "web.settings.notifications.episodes.seriesLink": [

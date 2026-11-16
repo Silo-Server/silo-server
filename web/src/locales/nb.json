@@ -117021,6 +117021,12 @@
       "value": "Du får varsler her når det kommer nye episoder av serier som er favoritter, står på huskelisten eller som du ser på."
     }
   ],
+  "web.notifications.inbox.emptyHintNextUp": [
+    {
+      "type": 0,
+      "value": "Du får varsler her når det kommer en ny episode av en serie du har sett alt av."
+    }
+  ],
   "web.notifications.inbox.emptyUnread": [
     {
       "type": 0,
@@ -117883,6 +117889,12 @@
       "value": "Valgte serier"
     }
   ],
+  "web.notifications.series.afterCatchUp": [
+    {
+      "type": 0,
+      "value": "Når du har sett alt"
+    }
+  ],
   "web.notifications.series.allReasons": [
     {
       "type": 0,
@@ -117941,10 +117953,22 @@
       "value": "Serier du markerer som favoritt, legger til i huskelisten eller begynner å se, vises her."
     }
   ],
+  "web.notifications.series.emptyHintNextUp": [
+    {
+      "type": 0,
+      "value": "Serier vises her etter at du har sett ferdig en episode. En ny episode varsler deg når du har sett alt."
+    }
+  ],
   "web.notifications.series.filterByReason": [
     {
       "type": 0,
       "value": "Filtrer etter årsak"
+    }
+  ],
+  "web.notifications.series.filterLabel": [
+    {
+      "type": 0,
+      "value": "Filtrer serier"
     }
   ],
   "web.notifications.series.intro": [
@@ -118055,6 +118079,12 @@
     {
       "type": 0,
       "value": "Ingen serier samsvarer. Prøv et annet søk eller en annen årsak."
+    }
+  ],
+  "web.notifications.series.noMatchFilter": [
+    {
+      "type": 0,
+      "value": "Ingen serier samsvarer. Prøv et annet søk eller filter."
     }
   ],
   "web.notifications.series.notificationsOff": [
@@ -130379,6 +130409,12 @@
     {
       "type": 0,
       "value": "Hovedbryter for denne profilen"
+    }
+  ],
+  "web.settings.notifications.episodes.nextUpDescription": [
+    {
+      "type": 0,
+      "value": "Få varsler når det kommer en ny episode av en serie du har sett alt av."
     }
   ],
   "web.settings.notifications.episodes.seriesLink": [

@@ -156226,6 +156226,12 @@
       "value": "ستصلك هنا إشعارات عند وصول حلقات جديدة من المسلسلات التي في مفضلتك أو قائمة المشاهدة أو التي تشاهدها."
     }
   ],
+  "web.notifications.inbox.emptyHintNextUp": [
+    {
+      "type": 0,
+      "value": "ستصلك هنا إشعارات عند وصول حلقة جديدة من مسلسل شاهدت كل حلقاته المتاحة."
+    }
+  ],
   "web.notifications.inbox.emptyUnread": [
     {
       "type": 0,
@@ -157388,6 +157394,12 @@
       "value": "المسلسلات المحددة"
     }
   ],
+  "web.notifications.series.afterCatchUp": [
+    {
+      "type": 0,
+      "value": "بعد مشاهدة الحلقات المتاحة"
+    }
+  ],
   "web.notifications.series.allReasons": [
     {
       "type": 0,
@@ -157446,10 +157458,22 @@
       "value": "تظهر هنا المسلسلات التي تضيفها إلى المفضلة أو إلى قائمة المشاهدة أو تبدأ مشاهدتها."
     }
   ],
+  "web.notifications.series.emptyHintNextUp": [
+    {
+      "type": 0,
+      "value": "تظهر المسلسلات هنا بعد أن تنهي مشاهدة حلقة. تصلك إشعارات الحلقة الجديدة متى شاهدت كل الحلقات المتاحة."
+    }
+  ],
   "web.notifications.series.filterByReason": [
     {
       "type": 0,
       "value": "التصفية حسب السبب"
+    }
+  ],
+  "web.notifications.series.filterLabel": [
+    {
+      "type": 0,
+      "value": "تصفية المسلسلات"
     }
   ],
   "web.notifications.series.intro": [
@@ -157560,6 +157584,12 @@
     {
       "type": 0,
       "value": "لا توجد مسلسلات مطابقة. جرّب بحثًا أو سببًا آخر."
+    }
+  ],
+  "web.notifications.series.noMatchFilter": [
+    {
+      "type": 0,
+      "value": "لا توجد مسلسلات مطابقة. جرّب بحثًا أو عامل تصفية آخر."
     }
   ],
   "web.notifications.series.notificationsOff": [
@@ -172811,6 +172841,12 @@
     {
       "type": 0,
       "value": "المفتاح الرئيسي لهذا الملف الشخصي"
+    }
+  ],
+  "web.settings.notifications.episodes.nextUpDescription": [
+    {
+      "type": 0,
+      "value": "تلقَّ إشعارًا عند وصول حلقة جديدة من مسلسل شاهدت كل حلقاته المتاحة."
     }
   ],
   "web.settings.notifications.episodes.seriesLink": [

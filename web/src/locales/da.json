@@ -116859,6 +116859,12 @@
       "value": "Du får besked her, når der kommer nye afsnit af serier, du har som favorit, har på din huskeliste eller er i gang med at se."
     }
   ],
+  "web.notifications.inbox.emptyHintNextUp": [
+    {
+      "type": 0,
+      "value": "Du får besked her, når der kommer et nyt afsnit af en serie, du er ajour med."
+    }
+  ],
   "web.notifications.inbox.emptyUnread": [
     {
       "type": 0,
@@ -117729,6 +117735,12 @@
       "value": "Valgte serier"
     }
   ],
+  "web.notifications.series.afterCatchUp": [
+    {
+      "type": 0,
+      "value": "Når du er ajour"
+    }
+  ],
   "web.notifications.series.allReasons": [
     {
       "type": 0,
@@ -117787,10 +117799,22 @@
       "value": "Serier, du markerer som favorit, tilføjer til din huskeliste eller begynder at se, vises her."
     }
   ],
+  "web.notifications.series.emptyHintNextUp": [
+    {
+      "type": 0,
+      "value": "Serier vises her, når du har set et afsnit færdigt. Et nyt afsnit giver dig besked, når du er ajour."
+    }
+  ],
   "web.notifications.series.filterByReason": [
     {
       "type": 0,
       "value": "Filtrer efter årsag"
+    }
+  ],
+  "web.notifications.series.filterLabel": [
+    {
+      "type": 0,
+      "value": "Filtrer serier"
     }
   ],
   "web.notifications.series.intro": [
@@ -117901,6 +117925,12 @@
     {
       "type": 0,
       "value": "Ingen serier matcher. Prøv en anden søgning eller årsag."
+    }
+  ],
+  "web.notifications.series.noMatchFilter": [
+    {
+      "type": 0,
+      "value": "Ingen serier matcher. Prøv en anden søgning eller et andet filter."
     }
   ],
   "web.notifications.series.notificationsOff": [
@@ -130209,6 +130239,12 @@
     {
       "type": 0,
       "value": "Hovedkontakt for denne profil"
+    }
+  ],
+  "web.settings.notifications.episodes.nextUpDescription": [
+    {
+      "type": 0,
+      "value": "Få besked, når der kommer et nyt afsnit af en serie, du er ajour med."
     }
   ],
   "web.settings.notifications.episodes.seriesLink": [

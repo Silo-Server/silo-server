@@ -128,11 +128,11 @@ it("preserves explicit false preferences and omits response-only profile identit
   await updateNotificationPreferences({
     profile_id: "ignored",
     enabled: false,
-    notify_favorites: false,
+    notify_next_up: false,
   });
   expect(JSON.parse(String(fetcher.mock.calls[0]![1]?.body))).toEqual({
     enabled: false,
-    notify_favorites: false,
+    notify_next_up: false,
   });
 });
 it("pages notified series by status and rejects a page that repeats its cursor", async () => {
@@ -145,8 +145,8 @@ it("pages notified series by status and rejects a page that repeats its cursor",
       genres: [],
       keywords: [],
     },
-    reasons: { favorite: true, watchlist: false, continue_watching: false, next_up: false },
-    active_reasons: { favorite: true, watchlist: false, continue_watching: false, next_up: false },
+    reasons: { next_up: true },
+    active_reasons: { next_up: true },
     notifies: true,
   };
   const fetch = vi
@@ -158,7 +158,6 @@ it("pages notified series by status and rejects a page that repeats its cursor",
   vi.stubGlobal("fetch", fetch);
   const page = await listNotificationSeries("inactive", {
     q: "bear",
-    reason: "favorite",
     sort: "-latest_episode_added",
   });
   expect(page).toEqual({ series: [series], next_cursor: "next" });
@@ -167,7 +166,6 @@ it("pages notified series by status and rejects a page that repeats its cursor",
   expect(Object.fromEntries(url.searchParams)).toMatchObject({
     status: "inactive",
     q: "bear",
-    reason: "favorite",
     sort: "-latest_episode_added",
   });
   await expect(listNotificationSeries("inactive", {}, "next")).rejects.toThrow(

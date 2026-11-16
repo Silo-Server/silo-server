@@ -483,7 +483,7 @@ export function NotificationInbox({
             ? t("web.notifications.inbox.emptyUnread")
             : t("web.notifications.inbox.emptyAll")}
         </div>
-        <div className="max-w-sm text-xs">{t("web.notifications.inbox.emptyHint")}</div>
+        <div className="max-w-sm text-xs">{t("web.notifications.inbox.emptyHintNextUp")}</div>
         {onOpenSeries && (
           <Button variant="link" size="sm" onClick={onOpenSeries}>
             {t("web.notifications.inbox.seeSeriesCanNotify")}

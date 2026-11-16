@@ -116245,6 +116245,12 @@
       "value": "Je krijgt hier een melding wanneer er nieuwe afleveringen verschijnen van series die je als favoriet hebt, op je kijklijst hebt staan of aan het kijken bent."
     }
   ],
+  "web.notifications.inbox.emptyHintNextUp": [
+    {
+      "type": 0,
+      "value": "Je krijgt hier een melding wanneer er een nieuwe aflevering verschijnt van een serie waarmee je bij bent."
+    }
+  ],
   "web.notifications.inbox.emptyUnread": [
     {
       "type": 0,
@@ -117107,6 +117113,12 @@
       "value": "Geselecteerde series"
     }
   ],
+  "web.notifications.series.afterCatchUp": [
+    {
+      "type": 0,
+      "value": "Zodra je bij bent"
+    }
+  ],
   "web.notifications.series.allReasons": [
     {
       "type": 0,
@@ -117165,10 +117177,22 @@
       "value": "Series die je als favoriet markeert, aan je kijklijst toevoegt of begint te kijken, verschijnen hier."
     }
   ],
+  "web.notifications.series.emptyHintNextUp": [
+    {
+      "type": 0,
+      "value": "Series verschijnen hier nadat je een aflevering hebt uitgekeken. Je krijgt een melding van een nieuwe aflevering zodra je bij bent."
+    }
+  ],
   "web.notifications.series.filterByReason": [
     {
       "type": 0,
       "value": "Filteren op reden"
+    }
+  ],
+  "web.notifications.series.filterLabel": [
+    {
+      "type": 0,
+      "value": "Series filteren"
     }
   ],
   "web.notifications.series.intro": [
@@ -117279,6 +117303,12 @@
     {
       "type": 0,
       "value": "Geen series gevonden. Probeer een andere zoekopdracht of reden."
+    }
+  ],
+  "web.notifications.series.noMatchFilter": [
+    {
+      "type": 0,
+      "value": "Geen series gevonden. Probeer een andere zoekopdracht of een ander filter."
     }
   ],
   "web.notifications.series.notificationsOff": [
@@ -129555,6 +129585,12 @@
     {
       "type": 0,
       "value": "Hoofdschakelaar voor dit profiel"
+    }
+  ],
+  "web.settings.notifications.episodes.nextUpDescription": [
+    {
+      "type": 0,
+      "value": "Ontvang een melding wanneer er een nieuwe aflevering verschijnt van een serie waarmee je bij bent."
     }
   ],
   "web.settings.notifications.episodes.seriesLink": [

@@ -106344,6 +106344,12 @@
       "value": "お気に入り、ウォッチリストに追加、または視聴中のシリーズに新しいエピソードが追加されると、ここに通知されます。"
     }
   ],
+  "web.notifications.inbox.emptyHintNextUp": [
+    {
+      "type": 0,
+      "value": "視聴が追いついているシリーズに新しいエピソードが追加されると、ここに通知されます。"
+    }
+  ],
   "web.notifications.inbox.emptyUnread": [
     {
       "type": 0,
@@ -107130,6 +107136,12 @@
       "value": "選択したシリーズ"
     }
   ],
+  "web.notifications.series.afterCatchUp": [
+    {
+      "type": 0,
+      "value": "視聴が追いついた後"
+    }
+  ],
   "web.notifications.series.allReasons": [
     {
       "type": 0,
@@ -107188,10 +107200,22 @@
       "value": "お気に入りやウォッチリストに追加したシリーズ、視聴を始めたシリーズがここに表示されます。"
     }
   ],
+  "web.notifications.series.emptyHintNextUp": [
+    {
+      "type": 0,
+      "value": "エピソードを見終わると、そのシリーズがここに表示されます。視聴が追いつくと、新しいエピソードが通知されます。"
+    }
+  ],
   "web.notifications.series.filterByReason": [
     {
       "type": 0,
       "value": "理由で絞り込む"
+    }
+  ],
+  "web.notifications.series.filterLabel": [
+    {
+      "type": 0,
+      "value": "シリーズを絞り込む"
     }
   ],
   "web.notifications.series.intro": [
@@ -107302,6 +107326,12 @@
     {
       "type": 0,
       "value": "一致するシリーズがありません。別の検索語句か理由をお試しください。"
+    }
+  ],
+  "web.notifications.series.noMatchFilter": [
+    {
+      "type": 0,
+      "value": "一致するシリーズがありません。別の検索語句かフィルターをお試しください。"
     }
   ],
   "web.notifications.series.notificationsOff": [
@@ -118780,6 +118810,12 @@
     {
       "type": 0,
       "value": "このプロフィールの通知全体のスイッチ"
+    }
+  ],
+  "web.settings.notifications.episodes.nextUpDescription": [
+    {
+      "type": 0,
+      "value": "視聴が追いついているシリーズに新しいエピソードが追加されると通知されます。"
     }
   ],
   "web.settings.notifications.episodes.seriesLink": [

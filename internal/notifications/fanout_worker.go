@@ -151,7 +151,6 @@ func (w *FanoutWorker) Run(ctx context.Context) {
 func (w *FanoutWorker) processBatch(ctx context.Context) (processed int, runErr error) {
 	started := time.Now()
 	settle := w.settings.SettleDelay(ctx)
-	maxBurst := w.settings.MaxSeriesBurst(ctx)
 
 	tx, err := w.pool.Begin(ctx)
 	if err != nil {
@@ -172,9 +171,8 @@ func (w *FanoutWorker) processBatch(ctx context.Context) (processed int, runErr 
 	defer func() { observation.Finish(telemetry.Outcome(runErr)) }()
 	// Non-episode kinds (movies, audiobooks, ebooks) have no per-profile
 	// interest and never fan out; mark them processed immediately so retention
-	// reclaims them. This must happen before the burst cap: flat item events
-	// have no series_id, and ApplyBurstCap groups by (library_id, series_id). The server-channel
-	// sweep reads events by cursor regardless of processed state.
+	// reclaims them. The server-channel sweep reads events by cursor
+	// regardless of processed state.
 	events, others := PartitionEventsByKind(claimed)
 	if err := w.releases.MarkProcessed(ctx, tx, eventIDs(others), nil); err != nil {
 		return 0, err
@@ -184,27 +182,23 @@ func (w *FanoutWorker) processBatch(ctx context.Context) (processed int, runErr 
 	// could run (fanout disabled for a stretch, extended downtime): users
 	// should not receive a backlog of long-stale "new episode" notifications
 	// when the worker comes back.
+	//
+	// No per-series cap applies to the rest: EvaluateRecipient lets only the
+	// lowest available episode at or after a profile's cursor notify, so a
+	// season pack tells each profile about one episode of the series.
 	staleCutoff := time.Now().Add(-w.settings.MaxEventAge(ctx))
-	fresh := make([]ReleaseEvent, 0, len(events))
+	fanout := make([]ReleaseEvent, 0, len(events))
 	stale := make([]ReleaseEvent, 0)
 	for _, event := range events {
 		if event.CreatedAt.Before(staleCutoff) {
 			stale = append(stale, event)
 		} else {
-			fresh = append(fresh, event)
+			fanout = append(fanout, event)
 		}
 	}
 	if len(stale) > 0 {
 		reason := SuppressedReasonStale
 		if err := w.releases.MarkProcessed(ctx, tx, eventIDs(stale), &reason); err != nil {
-			return 0, err
-		}
-	}
-
-	fanout, suppressed := ApplyBurstCap(fresh, maxBurst)
-	if len(suppressed) > 0 {
-		reason := SuppressedReasonSeriesBurst
-		if err := w.releases.MarkProcessed(ctx, tx, eventIDs(suppressed), &reason); err != nil {
 			return 0, err
 		}
 	}
@@ -227,17 +221,38 @@ func (w *FanoutWorker) processBatch(ctx context.Context) (processed int, runErr 
 	// beside an HD one) is no news to a profile that can open it there, so
 	// that profile is not captured. The delivery dedupe key alone would let
 	// the copy through once retention has removed the first delivery.
+	//
+	// The highest available key below each event's episode is read once per
+	// event, and only for an event with candidates, then reused by the
+	// evaluation under the inbox locks so both passes apply the same rule.
 	earlier, err := w.releases.EarlierEpisodeCopies(ctx, tx, eventIDs(fanout))
 	if err != nil {
 		return 0, err
 	}
 	recipients := newRecipientAccess(w.scopes)
 	candidatesByEvent := make(map[string]map[profileKey]struct{}, len(fanout))
+	highestBelowByEvent := make(map[string]*int, len(fanout))
 	profiles := make(map[string]struct{})
 	for _, event := range fanout {
 		candidates, err := w.interests.ListActiveBySeries(ctx, tx, event.LibraryID, event.SeriesID)
 		if err != nil {
 			return 0, err
+		}
+		if len(candidates) == 0 {
+			continue
+		}
+		highestBelow, err := w.releases.HighestAvailableEpisodeKeyBelow(ctx, tx, event.SeriesID, event.EpisodeKey)
+		if err != nil {
+			return 0, err
+		}
+		highestBelowByEvent[event.ID] = highestBelow
+		// In a bulk import most events match no candidate's cursor; dropping
+		// them here skips their preference read.
+		candidates = slices.DeleteFunc(candidates, func(candidate SeriesInterest) bool {
+			return !nextUpMatches(candidate, event.EpisodeKey, highestBelow)
+		})
+		if len(candidates) == 0 {
+			continue
 		}
 		prefs, err := w.preferences.GetMany(ctx, tx, candidateProfiles(candidates))
 		if err != nil {
@@ -245,7 +260,7 @@ func (w *FanoutWorker) processBatch(ctx context.Context) (processed int, runErr 
 		}
 		captured := make(map[profileKey]struct{}, len(candidates))
 		for _, candidate := range candidates {
-			if _, eligible := EvaluateRecipient(candidate, prefs[candidate.key()], event.EpisodeKey); !eligible {
+			if _, eligible := EvaluateRecipient(candidate, prefs[candidate.key()], event.EpisodeKey, highestBelow); !eligible {
 				continue
 			}
 			allowed, err := recipients.canOpen(ctx, tx, candidate.UserID, candidate.ProfileID, event.EpisodeID, event.LibraryID)
@@ -275,7 +290,7 @@ func (w *FanoutWorker) processBatch(ctx context.Context) (processed int, runErr 
 	totalInserted := 0
 	dispatchRows := make([]DeliveryRow, 0, 32)
 	for _, event := range fanout {
-		rows, recipients, err := w.fanOutEvent(ctx, tx, event, candidatesByEvent[event.ID])
+		rows, recipients, err := w.fanOutEvent(ctx, tx, event, highestBelowByEvent[event.ID], candidatesByEvent[event.ID])
 		if err != nil {
 			return 0, fmt.Errorf("fan out event %s: %w", event.ID, err)
 		}
@@ -303,7 +318,6 @@ func (w *FanoutWorker) processBatch(ctx context.Context) (processed int, runErr 
 		"claimed", len(claimed),
 		"non_episode", len(others),
 		"fanned_out", len(fanout),
-		"suppressed", len(suppressed),
 		"stale", len(stale),
 		"recipient_count", totalRecipients,
 		"inserted_count", totalInserted,
@@ -314,9 +328,13 @@ func (w *FanoutWorker) processBatch(ctx context.Context) (processed int, runErr 
 }
 
 // fanOutEvent resolves recipients for one release event and inserts
-// deliveries. Returns dispatch payloads for the rows actually inserted and
-// the candidate recipient count.
-func (w *FanoutWorker) fanOutEvent(ctx context.Context, tx pgx.Tx, event ReleaseEvent, capturedProfiles map[profileKey]struct{}) ([]DeliveryRow, int, error) {
+// deliveries. highestBelow is the event's HighestAvailableEpisodeKeyBelow,
+// read during capture. Returns dispatch payloads for the rows actually
+// inserted and the candidate recipient count.
+func (w *FanoutWorker) fanOutEvent(ctx context.Context, tx pgx.Tx, event ReleaseEvent, highestBelow *int, capturedProfiles map[profileKey]struct{}) ([]DeliveryRow, int, error) {
+	if len(capturedProfiles) == 0 {
+		return nil, 0, nil
+	}
 	candidates, err := w.interests.ListActiveBySeries(ctx, tx, event.LibraryID, event.SeriesID)
 	if err != nil {
 		return nil, 0, err
@@ -337,7 +355,7 @@ func (w *FanoutWorker) fanOutEvent(ctx context.Context, tx pgx.Tx, event Release
 	pending := make(map[profileKey]pendingDelivery, len(candidates))
 	toInsert := make([]Delivery, 0, len(candidates))
 	for _, candidate := range candidates {
-		flags, eligible := EvaluateRecipient(candidate, prefs[candidate.key()], event.EpisodeKey)
+		flags, eligible := EvaluateRecipient(candidate, prefs[candidate.key()], event.EpisodeKey, highestBelow)
 		if !eligible {
 			continue
 		}
@@ -470,7 +488,7 @@ func (w *FanoutWorker) enqueuePushOutbox(ctx context.Context, tx pgx.Tx, inserte
 // enqueueWebPushOutbox inserts `pending` web push attempt rows for each newly
 // inserted delivery, inside the fanout transaction. Subscriptions have no
 // per-reason filters: profile preferences already gated delivery creation,
-// and push volume is bounded by the per-series burst cap.
+// and the Next Up rule tells a profile about one episode of a season pack.
 func (w *FanoutWorker) enqueueWebPushOutbox(ctx context.Context, tx pgx.Tx, inserted []InsertedDelivery) error {
 	if w.webPush == nil || len(inserted) == 0 || !w.settings.WebPushEnabled(ctx) {
 		return nil

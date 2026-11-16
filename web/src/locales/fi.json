@@ -117139,6 +117139,12 @@
       "value": "Saat täällä ilmoituksen, kun uusia jaksoja ilmestyy sarjoihin, jotka ovat suosikeissasi tai katselulistallasi tai joita katsot parhaillaan."
     }
   ],
+  "web.notifications.inbox.emptyHintNextUp": [
+    {
+      "type": 0,
+      "value": "Saat täällä ilmoituksen, kun uusi jakso ilmestyy sarjaan, jonka kaikki jaksot olet jo katsonut."
+    }
+  ],
   "web.notifications.inbox.emptyUnread": [
     {
       "type": 0,
@@ -118005,6 +118011,12 @@
       "value": "Valitut sarjat"
     }
   ],
+  "web.notifications.series.afterCatchUp": [
+    {
+      "type": 0,
+      "value": "Kun olet ajan tasalla"
+    }
+  ],
   "web.notifications.series.allReasons": [
     {
       "type": 0,
@@ -118067,10 +118079,22 @@
       "value": "Tässä näkyvät sarjat, jotka lisäät suosikkeihin tai katselulistalle tai joiden katselun aloitat."
     }
   ],
+  "web.notifications.series.emptyHintNextUp": [
+    {
+      "type": 0,
+      "value": "Sarjat näkyvät tässä, kun olet katsonut jakson loppuun. Saat ilmoituksen uudesta jaksosta, kun olet katsonut kaikki aiemmat jaksot."
+    }
+  ],
   "web.notifications.series.filterByReason": [
     {
       "type": 0,
       "value": "Suodata syyn mukaan"
+    }
+  ],
+  "web.notifications.series.filterLabel": [
+    {
+      "type": 0,
+      "value": "Suodata sarjoja"
     }
   ],
   "web.notifications.series.intro": [
@@ -118181,6 +118205,12 @@
     {
       "type": 0,
       "value": "Ei vastaavia sarjoja. Kokeile toista hakua tai syytä."
+    }
+  ],
+  "web.notifications.series.noMatchFilter": [
+    {
+      "type": 0,
+      "value": "Ei vastaavia sarjoja. Kokeile toista hakua tai suodatinta."
     }
   ],
   "web.notifications.series.notificationsOff": [
@@ -130545,6 +130575,12 @@
     {
       "type": 0,
       "value": "Tämän profiilin pääkytkin"
+    }
+  ],
+  "web.settings.notifications.episodes.nextUpDescription": [
+    {
+      "type": 0,
+      "value": "Saat ilmoituksen, kun uusi jakso ilmestyy sarjaan, jonka kaikki jaksot olet jo katsonut."
     }
   ],
   "web.settings.notifications.episodes.seriesLink": [

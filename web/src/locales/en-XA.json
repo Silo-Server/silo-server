@@ -127169,6 +127169,12 @@
       "value": "⟦Ýöû ŵîļļ ƀé ñöţîƒîéđ ĥéŕé ŵĥéñ ñéŵ éþîšöđéš åŕŕîṽé ƒöŕ šéŕîéš ýöû ƒåṽöŕîţé, ŵåţçĥļîšţ, öŕ åŕé ŵåţçĥîñĝ.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
     }
   ],
+  "web.notifications.inbox.emptyHintNextUp": [
+    {
+      "type": 0,
+      "value": "⟦Ýöû’ļļ ƀé ñöţîƒîéđ ĥéŕé ŵĥéñ å ñéŵ éþîšöđé åŕŕîṽéš ƒöŕ å šéŕîéš ýöû’ŕé çåûĝĥţ ûþ öñ.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
   "web.notifications.inbox.emptyUnread": [
     {
       "type": 0,
@@ -128115,6 +128121,12 @@
       "value": "⟦Šéļéçţéđ šéŕîéš~~~~~~⟧"
     }
   ],
+  "web.notifications.series.afterCatchUp": [
+    {
+      "type": 0,
+      "value": "⟦Åƒţéŕ ýöû çåţçĥ ûþ~~~~~~~~⟧"
+    }
+  ],
   "web.notifications.series.allReasons": [
     {
       "type": 0,
@@ -128177,10 +128189,22 @@
       "value": "⟦Šéŕîéš ýöû ƒåṽöŕîţé, åđđ ţö ýöûŕ ŵåţçĥļîšţ, öŕ šţåŕţ ŵåţçĥîñĝ šĥöŵ ûþ ĥéŕé.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
     }
   ],
+  "web.notifications.series.emptyHintNextUp": [
+    {
+      "type": 0,
+      "value": "⟦Šéŕîéš šĥöŵ ûþ ĥéŕé åƒţéŕ ýöû ƒîñîšĥ åñ éþîšöđé. Å ñéŵ éþîšöđé ñöţîƒîéš ýöû öñçé ýöû’ŕé çåûĝĥţ ûþ.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
   "web.notifications.series.filterByReason": [
     {
       "type": 0,
       "value": "⟦Ƒîļţéŕ ƀý ŕéåšöñ~~~~~~~⟧"
+    }
+  ],
+  "web.notifications.series.filterLabel": [
+    {
+      "type": 0,
+      "value": "⟦Ƒîļţéŕ šéŕîéš~~~~~~⟧"
     }
   ],
   "web.notifications.series.intro": [
@@ -128307,6 +128331,12 @@
     {
       "type": 0,
       "value": "⟦Ñö šéŕîéš ɱåţçĥ. Ţŕý åñöţĥéŕ šéåŕçĥ öŕ ŕéåšöñ.~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.notifications.series.noMatchFilter": [
+    {
+      "type": 0,
+      "value": "⟦Ñö šéŕîéš ɱåţçĥ. Ţŕý åñöţĥéŕ šéåŕçĥ öŕ ƒîļţéŕ.~~~~~~~~~~~~~~~~~~~⟧"
     }
   ],
   "web.notifications.series.notificationsOff": [
@@ -141551,6 +141581,12 @@
     {
       "type": 0,
       "value": "⟦Ṁåšţéŕ šŵîţçĥ ƒöŕ ţĥîš þŕöƒîļé~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.settings.notifications.episodes.nextUpDescription": [
+    {
+      "type": 0,
+      "value": "⟦Ĝéţ ñöţîƒîéđ ŵĥéñ å ñéŵ éþîšöđé åŕŕîṽéš ƒöŕ å šéŕîéš ýöû’ŕé çåûĝĥţ ûþ öñ.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
     }
   ],
   "web.settings.notifications.episodes.seriesLink": [

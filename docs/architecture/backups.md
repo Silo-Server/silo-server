@@ -1335,7 +1335,7 @@ nothing.
 | `collections` | `usercollections` | `user_personal_collections`, `user_personal_collection_items`, `user_personal_collection_profiles`, `user_collection_groups` | by name among the profile's own collections: none creates it (new id, uploaded poster copied under it, in its shelf group, found by slug or label or created), one gains missing items, sharing, and its group when ungrouped here, several leave it out. The smart query, display filter, and sync source are all remapped to this server's libraries (`userdata.RemapQueryLibraries`); a definition that would lose its whole library scope leaves the collection out, never widened to every library |
 | `dismissals` | `userstore/pgstore` | `user_home_item_dismissals`, `user_not_interested`, `user_dropped_series` | added where missing |
 | `preferences` | `userstore/pgstore` | `user_setting_values` (profile, client-family, library, and series scopes), `user_audio_preferences`, `user_subtitle_preferences`, `user_library_playback_preferences`, `user_series_playback_preferences`, `user_collection_sort_preferences`, the home and library page layout (`user_settings` section overrides), and the preference columns of `user_profiles` | each differing value overwritten, under the account's preference-settings lock; setting keys, scopes, and values checked against this server's settings contract, others left out. A page layout replaces the profile's overrides of that page: the library is mapped, an admin section found by id (on another server only one of the same type, as a restore creates a section with its backup id) or else by type and title with one candidate, and library ids in section configuration remapped, and so are the collections it names (`library_collection_id`, `user_collection_id`, in `config` and `user_config`) through `Target.Collection`: an admin collection as the restore's collections and sections match it (a carried or template collection, a section-managed one through its section, and on the server that wrote the backup any collection still here by its id), a personal one as the account's personal collection import matches it (on the same server the account's collection by its id, else the one native collection with its name of its creator's profile here); an override with no counterpart is left out and counted, never written with a dangling id. Overrides are JSON no schema constrains, so an export leaves out one the reader would refuse, and one naming a section or collection that is gone, rather than make the document unreadable; a comparison leaves the same ones out of the layout here |
-| `notifications` | `notifications` | `notification_preferences`, `profile_series_notification_mutes` | preferences overwritten; mutes added |
+| `notifications` | `notifications` | `notification_preferences`, `profile_series_notification_mutes` | preferences (`enabled`, `notify_next_up`) overwritten; mutes added. An older backup's `notify_favorites`, `notify_watchlist` and `notify_continue_watching` are accepted and ignored, and an export does not write them |
 
 Never carried: login sessions, API keys, push and device registrations,
 device-scoped settings, watch-provider and history-import credentials,
@@ -1445,8 +1445,8 @@ notes that a new one must be set.
 After an account's item or a profile import commits, the restore tells the
 notification system which items each profile's data now names
 (`ItemsChanged`, the interest recompute the user store's own writes
-trigger), so new-episode notifications follow the restored favorites,
-watchlist, and progress without waiting for the nightly repair.
+trigger), so new-episode notifications follow the restored progress and
+watch history without waiting for the nightly repair.
 
 **Access never loosens.** A library id with no library here is dropped from
 an account's library list and from a profile's allowed libraries; a list

@@ -107424,6 +107424,12 @@
       "value": "你收藏、加入待看清单或正在观看的剧集有新的一集时，会在这里通知你。"
     }
   ],
+  "web.notifications.inbox.emptyHintNextUp": [
+    {
+      "type": 0,
+      "value": "你已追上进度的剧集有新的一集时，会在这里通知你。"
+    }
+  ],
   "web.notifications.inbox.emptyUnread": [
     {
       "type": 0,
@@ -108206,6 +108212,12 @@
       "value": "所选剧集"
     }
   ],
+  "web.notifications.series.afterCatchUp": [
+    {
+      "type": 0,
+      "value": "追上进度后"
+    }
+  ],
   "web.notifications.series.allReasons": [
     {
       "type": 0,
@@ -108264,10 +108276,22 @@
       "value": "你收藏、添加到待看清单或开始观看的剧集会显示在这里。"
     }
   ],
+  "web.notifications.series.emptyHintNextUp": [
+    {
+      "type": 0,
+      "value": "看完一集后，剧集会显示在这里。追上进度后，有新的一集时会通知你。"
+    }
+  ],
   "web.notifications.series.filterByReason": [
     {
       "type": 0,
       "value": "按原因筛选"
+    }
+  ],
+  "web.notifications.series.filterLabel": [
+    {
+      "type": 0,
+      "value": "筛选剧集"
     }
   ],
   "web.notifications.series.intro": [
@@ -108378,6 +108402,12 @@
     {
       "type": 0,
       "value": "没有匹配的剧集。请尝试其他搜索词或原因。"
+    }
+  ],
+  "web.notifications.series.noMatchFilter": [
+    {
+      "type": 0,
+      "value": "没有匹配的剧集。请尝试其他搜索词或筛选条件。"
     }
   ],
   "web.notifications.series.notificationsOff": [
@@ -120012,6 +120042,12 @@
     {
       "type": 0,
       "value": "此个人资料的总开关"
+    }
+  ],
+  "web.settings.notifications.episodes.nextUpDescription": [
+    {
+      "type": 0,
+      "value": "你已追上进度的剧集有新的一集时通知你。"
     }
   ],
   "web.settings.notifications.episodes.seriesLink": [

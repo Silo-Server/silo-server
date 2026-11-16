@@ -132,7 +132,7 @@ var excludedUserTables = map[string]string{
 	"recommendation_cache":                     excludedRecommendation,
 	"user_taste_clusters":                      excludedRecommendation,
 	"user_taste_profiles":                      excludedRecommendation,
-	"profile_series_interest":                  "derived from favorites, watchlist, and progress",
+	"profile_series_interest":                  "derived from watch progress and history",
 	"user_personal_collection_poster_variants": excludedCollage,
 	"user_personal_collection_smart_collages":  excludedCollage,
 	"user_collection_revisions":                excludedRevision,

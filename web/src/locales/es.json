@@ -127284,6 +127284,12 @@
       "value": "Aquí recibirás avisos cuando lleguen nuevos episodios de las series que tengas en favoritos, en tu lista para ver o que estés viendo."
     }
   ],
+  "web.notifications.inbox.emptyHintNextUp": [
+    {
+      "type": 0,
+      "value": "Aquí recibirás avisos cuando llegue un episodio nuevo de una serie con la que estés al día."
+    }
+  ],
   "web.notifications.inbox.emptyUnread": [
     {
       "type": 0,
@@ -128258,6 +128264,12 @@
       "value": "Series seleccionadas"
     }
   ],
+  "web.notifications.series.afterCatchUp": [
+    {
+      "type": 0,
+      "value": "Cuando te pongas al día"
+    }
+  ],
   "web.notifications.series.allReasons": [
     {
       "type": 0,
@@ -128316,10 +128328,22 @@
       "value": "Aquí aparecen las series que añades a favoritos o a tu lista para ver, o que empiezas a ver."
     }
   ],
+  "web.notifications.series.emptyHintNextUp": [
+    {
+      "type": 0,
+      "value": "Las series aparecen aquí cuando terminas un episodio. Recibirás una notificación de un episodio nuevo cuando estés al día."
+    }
+  ],
   "web.notifications.series.filterByReason": [
     {
       "type": 0,
       "value": "Filtrar por motivo"
+    }
+  ],
+  "web.notifications.series.filterLabel": [
+    {
+      "type": 0,
+      "value": "Filtrar series"
     }
   ],
   "web.notifications.series.intro": [
@@ -128430,6 +128454,12 @@
     {
       "type": 0,
       "value": "Ninguna serie coincide. Prueba con otra búsqueda u otro motivo."
+    }
+  ],
+  "web.notifications.series.noMatchFilter": [
+    {
+      "type": 0,
+      "value": "Ninguna serie coincide. Prueba con otra búsqueda u otro filtro."
     }
   ],
   "web.notifications.series.notificationsOff": [
@@ -141555,6 +141585,12 @@
     {
       "type": 0,
       "value": "Interruptor general de este perfil"
+    }
+  ],
+  "web.settings.notifications.episodes.nextUpDescription": [
+    {
+      "type": 0,
+      "value": "Recibe notificaciones cuando llegue un episodio nuevo de una serie con la que estés al día."
     }
   ],
   "web.settings.notifications.episodes.seriesLink": [

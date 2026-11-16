@@ -15,7 +15,7 @@ import (
 )
 
 // WrapUserStoreProvider decorates the shared user-store provider so every
-// favorites, watchlist, watch-progress, and watch-history mutation —
+// watch-progress, watch-history, and Next Up removal mutation —
 // regardless of which path performed it (REST handlers, jellycompat, history
 // imports, playback stop, watch sync) — queues an interest recompute. Hooking
 // the lowest shared layer keeps the seven-plus mutation call sites hook-free
@@ -306,9 +306,9 @@ type progressState struct {
 // progressSessionGap separates watch sessions. A progress write that lands
 // more than this long after the stored row's stamp, by its own stamp or by
 // the clock, queues a recompute even without a state transition: resuming
-// playback, or a late import, lifts a Home removal (an active series drop,
-// or a Continue Watching dismissal held for the old progress stamp), while
-// playback ticks within one session stay free.
+// playback, or a late import, lifts an active series drop and can make an
+// episode partly watched since the Next Up anchor, while playback ticks
+// within one session stay free.
 const progressSessionGap = 10 * time.Minute
 
 func (s *interestTrackingStore) currentProgressState(ctx context.Context, profileID, mediaItemID string) progressState {
@@ -349,65 +349,12 @@ func (s *interestTrackingStore) queueOnTransition(profileID, mediaItemID string,
 	}
 }
 
-// --- Favorites & watchlist: a mutation that changed a row queues.
-
-func (s *interestTrackingStore) AddFavorite(ctx context.Context, profileID, mediaItemID string) (bool, error) {
-	changed, err := s.UserStore.AddFavorite(ctx, profileID, mediaItemID)
-	if err == nil && changed {
-		s.updater.QueueItemMutation(s.userID, profileID, mediaItemID)
-	}
-	return changed, err
-}
-
-func (s *interestTrackingStore) AddFavoriteAt(ctx context.Context, profileID, mediaItemID string, addedAt time.Time) (bool, error) {
-	inserted, err := s.UserStore.AddFavoriteAt(ctx, profileID, mediaItemID, addedAt)
-	if err == nil && inserted {
-		s.updater.QueueItemMutation(s.userID, profileID, mediaItemID)
-	}
-	return inserted, err
-}
-
-func (s *interestTrackingStore) RemoveFavorite(ctx context.Context, profileID, mediaItemID string) (bool, error) {
-	changed, err := s.UserStore.RemoveFavorite(ctx, profileID, mediaItemID)
-	if err == nil && changed {
-		s.updater.QueueItemMutation(s.userID, profileID, mediaItemID)
-	}
-	return changed, err
-}
-
-func (s *interestTrackingStore) AddToWatchlist(ctx context.Context, profileID, mediaItemID string) (bool, error) {
-	changed, err := s.UserStore.AddToWatchlist(ctx, profileID, mediaItemID)
-	if err == nil && changed {
-		s.updater.QueueItemMutation(s.userID, profileID, mediaItemID)
-	}
-	return changed, err
-}
-
-// AddToWatchlistAt is the add that keeps an earlier added_at: watch-provider
-// and Plex imports, and promotion of a watchlisted title that has since
-// reached the library, all write through it.
-func (s *interestTrackingStore) AddToWatchlistAt(ctx context.Context, profileID, mediaItemID string, addedAt time.Time) (bool, error) {
-	inserted, err := s.UserStore.AddToWatchlistAt(ctx, profileID, mediaItemID, addedAt)
-	if err == nil && inserted {
-		s.updater.QueueItemMutation(s.userID, profileID, mediaItemID)
-	}
-	return inserted, err
-}
-
-func (s *interestTrackingStore) RemoveFromWatchlist(ctx context.Context, profileID, mediaItemID string) (bool, error) {
-	changed, err := s.UserStore.RemoveFromWatchlist(ctx, profileID, mediaItemID)
-	if err == nil && changed {
-		s.updater.QueueItemMutation(s.userID, profileID, mediaItemID)
-	}
-	return changed, err
-}
-
-// --- Home dismissals: a card removed from Continue Watching or Next Up stops
-// that surface's interest reason (see homeHides).
+// --- Home dismissals: a card removed from Next Up stops the next_up reason
+// (see homeHides). Continue Watching removals change no interest.
 
 func (s *interestTrackingStore) UpsertHomeDismissal(ctx context.Context, dismissal userstore.HomeItemDismissal) error {
 	err := s.UserStore.UpsertHomeDismissal(ctx, dismissal)
-	if err == nil {
+	if err == nil && dismissal.Surface != userstore.HomeSurfaceContinueWatching {
 		s.updater.queueHomeChange(s.userID, dismissal.ProfileID, dismissal.MediaItemID)
 	}
 	return err
@@ -415,7 +362,7 @@ func (s *interestTrackingStore) UpsertHomeDismissal(ctx context.Context, dismiss
 
 func (s *interestTrackingStore) DeleteHomeDismissal(ctx context.Context, profileID, surface, mediaItemID string) error {
 	err := s.UserStore.DeleteHomeDismissal(ctx, profileID, surface, mediaItemID)
-	if err == nil {
+	if err == nil && surface != userstore.HomeSurfaceContinueWatching {
 		s.updater.queueHomeChange(s.userID, profileID, mediaItemID)
 	}
 	return err

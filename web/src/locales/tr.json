@@ -115695,6 +115695,12 @@
       "value": "Favorilerinizdeki, izleme listesindeki veya izlemekte olduğunuz dizilere yeni bölümler geldiğinde burada bildirim alırsınız."
     }
   ],
+  "web.notifications.inbox.emptyHintNextUp": [
+    {
+      "type": 0,
+      "value": "Güncel olarak izlediğiniz bir diziye yeni bölüm geldiğinde burada bildirim alırsınız."
+    }
+  ],
   "web.notifications.inbox.emptyUnread": [
     {
       "type": 0,
@@ -116549,6 +116555,12 @@
       "value": "Seçili diziler"
     }
   ],
+  "web.notifications.series.afterCatchUp": [
+    {
+      "type": 0,
+      "value": "İzlemeyi yetiştirdikten sonra"
+    }
+  ],
   "web.notifications.series.allReasons": [
     {
       "type": 0,
@@ -116607,10 +116619,22 @@
       "value": "Favorilere eklediğiniz, izleme listesine eklediğiniz veya izlemeye başladığınız diziler burada görünür."
     }
   ],
+  "web.notifications.series.emptyHintNextUp": [
+    {
+      "type": 0,
+      "value": "Bir bölümü bitirdiğinizde diziler burada görünür. Diziyi güncel olarak izlediğinizde yeni bölümler için bildirim alırsınız."
+    }
+  ],
   "web.notifications.series.filterByReason": [
     {
       "type": 0,
       "value": "Nedene göre filtrele"
+    }
+  ],
+  "web.notifications.series.filterLabel": [
+    {
+      "type": 0,
+      "value": "Dizileri filtrele"
     }
   ],
   "web.notifications.series.intro": [
@@ -116721,6 +116745,12 @@
     {
       "type": 0,
       "value": "Eşleşen dizi yok. Başka bir arama veya neden deneyin."
+    }
+  ],
+  "web.notifications.series.noMatchFilter": [
+    {
+      "type": 0,
+      "value": "Eşleşen dizi yok. Başka bir arama veya filtre deneyin."
     }
   ],
   "web.notifications.series.notificationsOff": [
@@ -128885,6 +128915,12 @@
     {
       "type": 0,
       "value": "Bu profil için ana anahtar"
+    }
+  ],
+  "web.settings.notifications.episodes.nextUpDescription": [
+    {
+      "type": 0,
+      "value": "Güncel olarak izlediğiniz bir diziye yeni bölüm geldiğinde bildirim alın."
     }
   ],
   "web.settings.notifications.episodes.seriesLink": [
