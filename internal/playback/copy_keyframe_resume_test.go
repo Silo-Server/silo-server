@@ -3,6 +3,7 @@ package playback
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"math"
 	"os"
@@ -94,23 +95,47 @@ func TestPlanCopySegmentsForAResumeAtTheFirstKeyframe(t *testing.T) {
 	}
 }
 
-// A resume's plan numbers and cuts segments from its origin, unlike FFmpeg's
-// playlist. A rebuilt resume without a plan record, whose first start may
-// have served FFmpeg's playlist (its start probe failed), keeps that
-// playlist.
-func TestResolveCopyPlanKeepsFFmpegPlaylistForARebuiltResumeWithoutARecord(t *testing.T) {
+func resumeOpts(t *testing.T) TranscodeOpts {
+	t.Helper()
 	stubKeyframeIndex(t, keyframes.Index{Keyframes: []float64{0, 2, 4, 6, 8}, VideoEnd: 10}, nil)
 	opts := plannedOpts()
 	opts.SeekSeconds, opts.StartSegmentNumber = 4.5, 2
 	opts.StreamOriginSeconds, opts.CopySeekAnchorResolved = 4, true
-	opts.OutputDir, opts.Reconstructed = t.TempDir(), true
+	opts.OutputDir = t.TempDir()
+	return opts
+}
+
+// A resume's plan numbers and cuts segments from its origin, unlike FFmpeg's
+// playlist. A resume whose first start falls back on a failed start probe
+// records that, so its rebuilds keep FFmpeg's playlist.
+func TestResolveCopyPlanRecordsAResumeThatFallsBackOnAFailedProbe(t *testing.T) {
+	opts := resumeOpts(t)
+	stubInputStart(t, 0, errors.New("ffprobe failed"))
 	if plan, err := resolveCopyPlan(t.Context(), opts); err != nil || plan != nil {
-		t.Fatalf("plan = %v, err = %v; want FFmpeg's playlist", plan != nil, err)
+		t.Fatalf("first start plan = %v, err = %v; want FFmpeg's playlist", plan != nil, err)
 	}
-	// A first start still plans and records it.
-	opts.Reconstructed = false
-	if plan, err := resolveCopyPlan(t.Context(), opts); err != nil || plan == nil {
-		t.Fatalf("first start plan = %v, err = %v; want a plan", plan != nil, err)
+	stubInputStart(t, 0, nil)
+	opts.Reconstructed = true
+	if plan, err := resolveCopyPlan(t.Context(), opts); err != nil || plan != nil {
+		t.Fatalf("rebuilt plan = %v, err = %v; want FFmpeg's playlist, as the first start served", plan != nil, err)
+	}
+}
+
+// A clean shutdown removes a planned resume's record with its output
+// directory. The rebuild plans again and gets the playlist its player has.
+func TestResolveCopyPlanReplansARebuiltResumeWithoutARecord(t *testing.T) {
+	opts := resumeOpts(t)
+	first, err := resolveCopyPlan(t.Context(), opts)
+	if err != nil || first == nil {
+		t.Fatalf("first start plan = %v, err = %v; want a plan", first != nil, err)
+	}
+	if err := os.Remove(filepath.Join(opts.OutputDir, copyPlanRecordFile)); err != nil {
+		t.Fatal(err)
+	}
+	opts.Reconstructed = true
+	rebuilt, err := resolveCopyPlan(t.Context(), opts)
+	if err != nil || rebuilt == nil || !rebuilt.resumes() || !sameSegmentDurations(rebuilt.durations, first.durations) {
+		t.Fatalf("rebuilt plan = %+v, err = %v; want the first start's %v", rebuilt, err, first.durations)
 	}
 }
 

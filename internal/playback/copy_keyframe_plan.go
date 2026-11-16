@@ -194,9 +194,12 @@ type copyPlanRecord struct {
 // plan: its planned segments are the ones FFmpeg cuts from the beginning, so
 // the segments the player already fetched still match. The reverse, a
 // planned session rebuilt onto FFmpeg's playlist, is what the record
-// prevents. A resume is different: its plan numbers and cuts segments from
-// its origin, unlike FFmpeg's playlist, so a rebuilt resume without a record
-// keeps FFmpeg's playlist.
+// prevents. A resume's plan numbers and cuts segments from its origin,
+// unlike FFmpeg's playlist, so a resume that falls back on a failed start
+// probe records that, and its rebuilds keep FFmpeg's playlist. A resume
+// rebuilt without a record, after a clean shutdown, plans again like any
+// other session: its first start most likely planned. If that start had
+// fallen back instead, the rebuilt playlist doesn't match the player's.
 //
 // A record written before plans kept their keyframe groups holds only the
 // segment durations. The session plans again from the index and
@@ -228,12 +231,6 @@ func resolveCopyPlan(ctx context.Context, opts TranscodeOpts) (*copySegmentPlan,
 		log.Printf("playback: session %s has an unreadable keyframe plan record; using FFmpeg's playlist", opts.SessionID)
 		return nil, nil
 	}
-	if opts.Reconstructed && resumesAtAnchor(opts) {
-		// The first start recorded no plan, so its player may have FFmpeg's
-		// playlist, which a resume's plan can't stand in for.
-		log.Printf("playback: rebuilt session %s resumes without a keyframe plan record; using FFmpeg's playlist", opts.SessionID)
-		return nil, nil
-	}
 
 	// Record the decision whatever the start's fate: StartTranscode launches
 	// FFmpeg even if its caller has gone, and that session serves this
@@ -250,6 +247,13 @@ func resolveCopyPlan(ctx context.Context, opts TranscodeOpts) (*copySegmentPlan,
 			return nil, err
 		}
 		log.Printf("playback: session %s: %v; using FFmpeg's playlist", opts.SessionID, err)
+		if resumesAtAnchor(opts) {
+			// A resume's plan can't stand in for FFmpeg's playlist, which
+			// this start serves, so its rebuilds must not plan.
+			if err := writeCopyPlanRecord(path, nil); err != nil {
+				log.Printf("playback: record keyframe plan decision for %s: %v", opts.SessionID, err)
+			}
+		}
 		return nil, nil
 	}
 	if err := writeCopyPlanRecord(path, plan); err != nil {
