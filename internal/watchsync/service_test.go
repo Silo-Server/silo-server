@@ -3198,7 +3198,10 @@ type completedHistoryListerStub struct {
 
 func (s *completedHistoryListerStub) ListCompletedHistory(_ context.Context, query userstore.CompletedHistoryQuery) ([]userstore.WatchHistoryEntry, error) {
 	s.queries = append(s.queries, query)
-	start := query.Offset
+	start := 0
+	if query.After != nil {
+		start = slices.IndexFunc(s.rows, func(row userstore.WatchHistoryEntry) bool { return row.ID == query.After.ID }) + 1
+	}
 	if start >= len(s.rows) {
 		return nil, nil
 	}
@@ -3218,6 +3221,7 @@ func TestHasVisibleCompletedHistoryAtOrAfterScopesTargetAndPaginates(t *testing.
 	rows := make([]userstore.WatchHistoryEntry, 501)
 	for i := 0; i < 500; i++ {
 		rows[i] = userstore.WatchHistoryEntry{
+			ID:          "history-" + strconv.Itoa(i),
 			ProfileID:   "profile-1",
 			MediaItemID: testMovieMediaID,
 			WatchedAt:   at.Add(-time.Duration(500-i) * time.Hour).Format(time.RFC3339),
@@ -3225,6 +3229,7 @@ func TestHasVisibleCompletedHistoryAtOrAfterScopesTargetAndPaginates(t *testing.
 		}
 	}
 	rows[500] = userstore.WatchHistoryEntry{
+		ID:          "history-500",
 		ProfileID:   "profile-1",
 		MediaItemID: testMovieMediaID,
 		WatchedAt:   at.Add(time.Minute).Format(time.RFC3339),
@@ -3274,11 +3279,11 @@ func TestListAllCompletedHistoryPaginatesUntilExhausted(t *testing.T) {
 	if len(store.queries) != 2 {
 		t.Fatalf("query count = %d, want 2", len(store.queries))
 	}
-	if store.queries[0].Limit != completedHistoryPageSize || store.queries[0].Offset != 0 {
+	if store.queries[0].Limit != completedHistoryPageSize || store.queries[0].After != nil {
 		t.Fatalf("first query = %+v, want first page", store.queries[0])
 	}
-	if store.queries[1].Limit != completedHistoryPageSize || store.queries[1].Offset != completedHistoryPageSize {
-		t.Fatalf("second query = %+v, want second page", store.queries[1])
+	if store.queries[1].Limit != completedHistoryPageSize || store.queries[1].After == nil || store.queries[1].After.ID != rows[completedHistoryPageSize-1].ID {
+		t.Fatalf("second query = %+v, want the page after the first page's last row", store.queries[1])
 	}
 	for _, query := range store.queries {
 		if query.ProfileID != "profile-1" || len(query.ExcludeSources) != 1 ||
