@@ -939,7 +939,7 @@ type ratingHistoryStore struct {
 }
 
 func (s ratingHistoryStore) ListCompletedHistory(_ context.Context, query userstore.CompletedHistoryQuery) ([]userstore.WatchHistoryEntry, error) {
-	if query.Offset > 0 {
+	if query.After != nil {
 		return nil, nil
 	}
 	var rows []userstore.WatchHistoryEntry
