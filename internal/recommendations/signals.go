@@ -704,7 +704,16 @@ func recentDistinctCompletedRows(rows []WatchProgressRow, limit int) []WatchProg
 	return result
 }
 
+// RewatchCounts returns the items the profile completed at least twice, in
+// media item ID order, counting every visible completed play in its history.
+// When the history lives in the Postgres tables, GetRewatchCounts groups and
+// filters the plays in SQL; a separate store groups them in one read and the
+// single plays are dropped here.
 func (s *SignalReader) RewatchCounts(ctx context.Context, userID int, profileID string) ([]RewatchCount, error) {
+	if !s.storeIsSeparate() {
+		return s.repo.GetRewatchCounts(ctx, userID, profileID)
+	}
+
 	store, ok, err := s.storeForUser(ctx, userID)
 	if err != nil {
 		return nil, err
@@ -713,47 +722,21 @@ func (s *SignalReader) RewatchCounts(ctx context.Context, userID int, profileID 
 		return s.repo.GetRewatchCounts(ctx, userID, profileID)
 	}
 
-	counts := make(map[string]*RewatchCount)
-	offset := 0
-	for {
-		history, err := store.ListCompletedHistory(ctx, userstore.CompletedHistoryQuery{
-			ProfileID: profileID,
-			Limit:     signalPageSize,
-			Offset:    offset,
+	items, err := store.ListCompletedHistoryItems(ctx, userstore.CompletedHistoryItemQuery{ProfileID: profileID})
+	if err != nil {
+		return nil, fmt.Errorf("list completed history items from store: %w", err)
+	}
+	var result []RewatchCount
+	for _, item := range items {
+		if item.PlayCount < 2 {
+			continue
+		}
+		result = append(result, RewatchCount{
+			MediaItemID:   item.MediaItemID,
+			Count:         item.PlayCount,
+			LastWatchedAt: parseSignalTime(item.WatchedAt, time.Time{}),
 		})
-		if err != nil {
-			return nil, fmt.Errorf("list completed history from store: %w", err)
-		}
-		for _, entry := range history {
-			if !entry.Completed {
-				continue
-			}
-			rc := counts[entry.MediaItemID]
-			if rc == nil {
-				rc = &RewatchCount{MediaItemID: entry.MediaItemID}
-				counts[entry.MediaItemID] = rc
-			}
-			rc.Count++
-			watchedAt := parseSignalTime(entry.WatchedAt, time.Time{})
-			if watchedAt.After(rc.LastWatchedAt) {
-				rc.LastWatchedAt = watchedAt
-			}
-		}
-		if len(history) < signalPageSize {
-			break
-		}
-		offset += len(history)
 	}
-
-	result := make([]RewatchCount, 0, len(counts))
-	for _, rc := range counts {
-		if rc.Count >= 2 {
-			result = append(result, *rc)
-		}
-	}
-	sort.Slice(result, func(i, j int) bool {
-		return result[i].MediaItemID < result[j].MediaItemID
-	})
 	return result, nil
 }
 

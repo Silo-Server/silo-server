@@ -1936,7 +1936,8 @@ type RewatchCount struct {
 	LastWatchedAt time.Time
 }
 
-// GetRewatchCounts returns items watched to completion 2+ times by a user/profile.
+// GetRewatchCounts returns items watched to completion 2+ times by a
+// user/profile, in media item ID order.
 func (r *Repo) GetRewatchCounts(ctx context.Context, userID int, profileID string) ([]RewatchCount, error) {
 	rows, err := r.pool.Query(ctx, `
 		SELECT media_item_id, COUNT(*) AS cnt, MAX(watched_at) AS last_watched_at
@@ -1951,7 +1952,8 @@ func (r *Repo) GetRewatchCounts(ctx context.Context, userID int, profileID strin
 			  AND  user_watch_history.watched_at <= hhi.hidden_before
 		  )
 		GROUP  BY media_item_id
-		HAVING COUNT(*) >= 2`,
+		HAVING COUNT(*) >= 2
+		ORDER  BY media_item_id`,
 		userID, profileID)
 	if err != nil {
 		return nil, fmt.Errorf("get rewatch counts: %w", err)

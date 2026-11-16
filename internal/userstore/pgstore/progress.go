@@ -1509,7 +1509,7 @@ func (s *PostgresUserStore) ListCompletedHistory(ctx context.Context, query user
 func (s *PostgresUserStore) ListCompletedHistoryItems(ctx context.Context, query userstore.CompletedHistoryItemQuery) ([]userstore.CompletedHistoryItem, error) {
 	includeSources, excludeSources, mediaItemIDs := completedHistoryFilterArgs(query.MediaItemIDs, query.IncludeSources, query.ExcludeSources)
 	rows, err := s.pool.Query(ctx, `
-		SELECT h.media_item_id, MAX(h.watched_at)
+		SELECT h.media_item_id, MAX(h.watched_at), COUNT(*)
 		FROM user_watch_history h
 		WHERE h.user_id = $1
 		  AND h.profile_id = $2
@@ -1531,7 +1531,7 @@ func (s *PostgresUserStore) ListCompletedHistoryItems(ctx context.Context, query
 	for rows.Next() {
 		var item userstore.CompletedHistoryItem
 		var watchedAt time.Time
-		if err := rows.Scan(&item.MediaItemID, &watchedAt); err != nil {
+		if err := rows.Scan(&item.MediaItemID, &watchedAt, &item.PlayCount); err != nil {
 			return nil, fmt.Errorf("scanning completed history item: %w", err)
 		}
 		item.WatchedAt = timeToString(watchedAt)

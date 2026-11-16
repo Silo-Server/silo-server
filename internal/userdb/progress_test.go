@@ -91,6 +91,14 @@ func TestListCompletedHistoryItemsAppliesScopedFilters(t *testing.T) {
 		{
 			ProfileID:       "profile-1",
 			MediaItemID:     "movie-history-only",
+			WatchedAt:       "2026-04-24T12:00:00Z",
+			DurationSeconds: 7200,
+			Completed:       true,
+			Source:          userstore.WatchHistorySourceTrakt,
+		},
+		{
+			ProfileID:       "profile-1",
+			MediaItemID:     "movie-history-only",
 			WatchedAt:       "2026-04-25T12:00:00Z",
 			DurationSeconds: 7200,
 			Completed:       true,
@@ -163,8 +171,8 @@ func TestListCompletedHistoryItemsAppliesScopedFilters(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListCompletedHistoryItems: %v", err)
 	}
-	if len(items) != 1 || items[0].MediaItemID != "movie-history-only" || items[0].WatchedAt != "2026-04-25T12:00:00Z" {
-		t.Fatalf("ListCompletedHistoryItems = %v, want movie-history-only with latest watched_at", items)
+	if len(items) != 1 || items[0].MediaItemID != "movie-history-only" || items[0].WatchedAt != "2026-04-25T12:00:00Z" || items[0].PlayCount != 2 {
+		t.Fatalf("ListCompletedHistoryItems = %v, want movie-history-only with latest watched_at and both plays", items)
 	}
 
 	if err := AddHistory(db, userstore.WatchHistoryEntry{
@@ -184,8 +192,8 @@ func TestListCompletedHistoryItemsAppliesScopedFilters(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListCompletedHistoryItems(future replacement): %v", err)
 	}
-	if len(items) != 1 || items[0].MediaItemID != "movie-future-hidden" || items[0].WatchedAt != "2026-04-25T12:11:00Z" {
-		t.Fatalf("ListCompletedHistoryItems(future replacement) = %v, want movie-future-hidden with latest watched_at", items)
+	if len(items) != 1 || items[0].MediaItemID != "movie-future-hidden" || items[0].WatchedAt != "2026-04-25T12:11:00Z" || items[0].PlayCount != 1 {
+		t.Fatalf("ListCompletedHistoryItems(future replacement) = %v, want movie-future-hidden with latest watched_at and only its visible play", items)
 	}
 
 	items, err = ListCompletedHistoryItems(db, userstore.CompletedHistoryItemQuery{

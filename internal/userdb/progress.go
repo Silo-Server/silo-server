@@ -1005,7 +1005,7 @@ func ListCompletedHistory(db *sql.DB, query userstore.CompletedHistoryQuery) ([]
 func ListCompletedHistoryItems(db *sql.DB, query userstore.CompletedHistoryItemQuery) ([]userstore.CompletedHistoryItem, error) {
 	filters, args := completedHistoryFilterSQL(query.ProfileID, query.MediaItemIDs, query.IncludeSources, query.ExcludeSources)
 	rows, err := db.Query(`
-		SELECT h.media_item_id, MAX(h.watched_at)
+		SELECT h.media_item_id, MAX(h.watched_at), COUNT(*)
 		FROM watch_history h
 		WHERE h.profile_id = ?
 		  AND h.completed = 1
@@ -1022,7 +1022,7 @@ func ListCompletedHistoryItems(db *sql.DB, query userstore.CompletedHistoryItemQ
 	var results []userstore.CompletedHistoryItem
 	for rows.Next() {
 		var item userstore.CompletedHistoryItem
-		if err := rows.Scan(&item.MediaItemID, &item.WatchedAt); err != nil {
+		if err := rows.Scan(&item.MediaItemID, &item.WatchedAt, &item.PlayCount); err != nil {
 			return nil, fmt.Errorf("scanning completed history item: %w", err)
 		}
 		results = append(results, item)

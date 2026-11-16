@@ -391,3 +391,74 @@ func setDifference(a, b map[string]struct{}) []string {
 	slices.Sort(out)
 	return out
 }
+
+// Rewatch counts take every visible completed play in the profile's history,
+// on the user store path as on the SQL path: rewatches recorded after more
+// plays than one page of completed history holds still count. A play hidden
+// from the history, an unfinished play and another profile's play do not.
+func TestRewatchCountsReadTheWholeHistoryPostgres(t *testing.T) {
+	pool := newEngineTestPool(t)
+	ctx := t.Context()
+	prefix := "trewatch-" + uuid.NewString()[:8] + "-"
+	userID, profile := newTasteTestAccount(t, pool, prefix)
+	sibling := uuid.NewString()
+	if _, err := pool.Exec(ctx, `INSERT INTO user_profiles(id, user_id, name) VALUES ($1, $2, 'sibling')`, sibling, userID); err != nil {
+		t.Fatal(err)
+	}
+	play := func(profile, itemID string, at time.Time, completed bool) {
+		t.Helper()
+		if _, err := pool.Exec(ctx, `
+			INSERT INTO user_watch_history(id, user_id, profile_id, media_item_id, watched_at, duration_seconds, completed)
+			VALUES (gen_random_uuid()::text, $1, $2, $3, $4, 3600, $5)`, userID, profile, itemID, at, completed); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	split, late, hidden, unfinished, shared := prefix+"split", prefix+"late", prefix+"hidden", prefix+"unfinished", prefix+"shared"
+	first := time.Date(2026, 8, 10, 0, 0, 0, 0, time.UTC)
+	play(profile, split, first, true)
+	play(profile, hidden, first, true)
+	// One play each of more titles than a page holds, between the first plays
+	// and the rewatches.
+	const singles = 600
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO user_watch_history(id, user_id, profile_id, media_item_id, watched_at, duration_seconds, completed)
+		SELECT gen_random_uuid()::text, $1, $2, $3 || lpad(i::text, 4, '0'), $4::timestamptz + i * INTERVAL '1 minute', 3600, true
+		FROM generate_series(1, $5) AS i`, userID, profile, prefix+"single-", first, singles); err != nil {
+		t.Fatal(err)
+	}
+	later := first.Add(singles * time.Minute)
+	play(profile, split, later.Add(time.Hour), true)
+	for i := range 3 {
+		play(profile, late, later.Add(time.Duration(i+1)*time.Hour), true)
+	}
+	play(profile, hidden, later.Add(time.Hour), true)
+	if _, err := pool.Exec(ctx, `INSERT INTO user_history_hidden_items(user_id, profile_id, media_item_id, hidden_before) VALUES ($1, $2, $3, $4)`, userID, profile, hidden, first.Add(time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	play(profile, unfinished, later, true)
+	play(profile, unfinished, later.Add(time.Hour), false)
+	play(profile, shared, later, true)
+	play(sibling, shared, later.Add(time.Hour), true)
+
+	want := []RewatchCount{
+		{MediaItemID: late, Count: 3, LastWatchedAt: later.Add(3 * time.Hour)},
+		{MediaItemID: split, Count: 2, LastWatchedAt: later.Add(time.Hour)},
+	}
+	repo := NewRepo(pool)
+	storePath := NewSignalReader(repo, pgstore.NewPostgresProvider(pool)).WithUserStoreOutsidePostgres(true)
+	for name, read := range map[string]func() ([]RewatchCount, error){
+		"SQL":   func() ([]RewatchCount, error) { return repo.GetRewatchCounts(ctx, userID, profile) },
+		"store": func() ([]RewatchCount, error) { return storePath.RewatchCounts(ctx, userID, profile) },
+	} {
+		got, err := read()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !slices.EqualFunc(got, want, func(a, b RewatchCount) bool {
+			return a.MediaItemID == b.MediaItemID && a.Count == b.Count && a.LastWatchedAt.Equal(b.LastWatchedAt)
+		}) {
+			t.Fatalf("%s path rewatch counts = %+v, want %+v", name, got, want)
+		}
+	}
+}
