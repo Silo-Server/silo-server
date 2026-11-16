@@ -680,6 +680,19 @@ contract for sports/mixed libraries (events as movies, weekly shows as series).
 A matched item picks up an edited NFO or sidecar image without a manual
 refresh (`internal/metadata/local_sidecar.go`, `local_reapply.go`).
 
+The checks below skip unmatched items. A pending, unmatched or ambiguous item
+that no provider gives metadata still takes the sidecar poster, backdrop and
+logo beside it on each metadata run, which every library scan repeats for such
+items (`saveProvisionalLocalArtwork`, `internal/metadata/local_artwork_discovery.go`).
+The write touches only those artwork columns, and only while the row is still
+provisional and holds the sources the run read
+(`ItemRepository.UpdateProvisionalArtwork`), so a match, Identify or admin
+artwork choice made meanwhile wins. A slot already on its sidecar is queued
+again until its copy is cached. Remote images are not applied, nor are the
+other item slots, season posters or episode stills. A removed sidecar goes
+unnoticed, so its stored copy keeps serving. An item an admin marked to stay
+unmatched (`match_ignored_at`) is not processed and takes none.
+
 - **Fingerprints.** `local_sidecar_fingerprints` stores, per library and per
   item, season and episode, a SHA-256 of the path, size and modification time
   of the sidecar files the local provider applied. The provider reports those
