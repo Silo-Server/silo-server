@@ -411,13 +411,19 @@ export function NotifiedSeriesList({
   const stale = list.isPlaceholderData;
   const allLoadedSelected = rows.length > 0 && selectedRows.length === rows.length;
 
+  // Counts selection resets, so a Select all matching still loading when the
+  // selection is cleared, or the search, tab, or sort changes, selects nothing.
+  const selectionRun = useRef(0);
+  const clearSelection = () => {
+    selectionRun.current += 1;
+    setSelected(new Set());
+  };
   // A new search, tab, or sort starts a new selection.
   const optionsKey = JSON.stringify([series.status, series.options]);
-  const currentOptions = useRef(optionsKey);
-  useEffect(() => {
-    currentOptions.current = optionsKey;
-    setSelected(new Set());
-  }, [optionsKey]);
+  useEffect(clearSelection, [optionsKey]);
+  /** Drops the series an action finished with, keeping any picked since. */
+  const deselect = (ids: string[]) =>
+    setSelected((set) => new Set([...set].filter((id) => !ids.includes(id))));
 
   const toggle = (id: string) =>
     setSelected((set) => {
@@ -427,15 +433,15 @@ export function NotifiedSeriesList({
     });
 
   /** Loads every remaining page, then selects every series the view matches.
-   * A failed page, or a new search, tab, or sort meanwhile, selects nothing. */
+   * A failed page, or a selection reset meanwhile, selects nothing. */
   async function selectAllMatching() {
-    const started = optionsKey;
+    const run = ++selectionRun.current;
     setSelectingAll(true);
     try {
       let { data, hasNextPage } = list;
-      while (hasNextPage && currentOptions.current === started)
+      while (hasNextPage && selectionRun.current === run)
         ({ data, hasNextPage } = await list.fetchNextPage({ throwOnError: true }));
-      if (currentOptions.current !== started) return;
+      if (selectionRun.current !== run) return;
       const ids = data?.pages.flatMap((page) => page.series.map((row) => row.item.content_id));
       if (ids) setSelected(new Set(ids));
     } catch {
@@ -446,10 +452,8 @@ export function NotifiedSeriesList({
   }
 
   function runBulk(muted: boolean) {
-    setManyMuted.mutate(
-      { seriesIds: [...selected], muted },
-      { onSuccess: () => setSelected(new Set()) },
-    );
+    const seriesIds = [...selected];
+    setManyMuted.mutate({ seriesIds, muted }, { onSuccess: () => deselect(seriesIds) });
   }
 
   let body;
@@ -554,7 +558,7 @@ export function NotifiedSeriesList({
       {selected.size > 0 && (
         <SelectionBar
           label={t("web.notifications.selection.seriesLabel")}
-          onClear={() => setSelected(new Set())}
+          onClear={clearSelection}
           summary={
             <>
               <span className="font-semibold">{t("web.notifications.selection.count", count)}</span>

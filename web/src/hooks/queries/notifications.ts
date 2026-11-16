@@ -248,6 +248,9 @@ export function useMarkNotificationsRead() {
       for (const id of ids)
         applyNotificationRead(queryClient, { profile_id: context.profileId, id });
     },
+    // A list or count request that started before the reads can land after
+    // them and bring back the unread state; read it again.
+    onSuccess: () => invalidateInbox(queryClient, notificationScope(context)),
     onError: () => {
       toast.error(t("web.notifications.queries.markReadFailed"));
       invalidateInbox(queryClient, notificationScope(context));

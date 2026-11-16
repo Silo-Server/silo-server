@@ -622,12 +622,17 @@ export function NotificationInbox({
               variant="ghost"
               size="sm"
               disabled={chosenSeries.length === 0 || muteMany.isPending}
-              onClick={() =>
+              onClick={() => {
+                // Keep rows picked while the request runs.
+                const done = chosen.map((entry) => entry.key);
                 muteMany.mutate(
                   { seriesIds: chosenSeries, muted: true },
-                  { onSuccess: () => setSelected(new Set()) },
-                )
-              }
+                  {
+                    onSuccess: () =>
+                      setSelected((set) => new Set([...set].filter((key) => !done.includes(key)))),
+                  },
+                );
+              }}
             >
               <BellOff className="h-4 w-4" />
               {t("web.notifications.selection.muteSeries")}
