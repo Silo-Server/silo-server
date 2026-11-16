@@ -20,9 +20,11 @@ import (
 // reasons, until it unmutes.
 
 const (
-	opListNotificationSeries   = "listNotificationSeries"
-	opMuteNotificationSeries   = "muteNotificationSeries"
-	opUnmuteNotificationSeries = "unmuteNotificationSeries"
+	opListNotificationSeries       = "listNotificationSeries"
+	opMuteNotificationSeries       = "muteNotificationSeries"
+	opUnmuteNotificationSeries     = "unmuteNotificationSeries"
+	opMuteManyNotificationSeries   = "muteManyNotificationSeries"
+	opUnmuteManyNotificationSeries = "unmuteManyNotificationSeries"
 )
 
 // The listNotificationSeries sort fields besides the default title.
@@ -36,6 +38,7 @@ const (
 const (
 	notificationSeriesActive   = "active"
 	notificationSeriesInactive = "inactive"
+	notificationSeriesMuted    = "muted"
 )
 
 // NotificationSeriesInput is the listNotificationSeries query.
@@ -43,7 +46,7 @@ type NotificationSeriesInput struct {
 	ArtworkQuery
 	LimitParam
 	Cursor string `query:"cursor" doc:"Opaque cursor from page.next_cursor" example:"eyJ0IjoiYmVhciJ9"`
-	Status string `query:"status" default:"all" enum:"all,active,inactive" doc:"active keeps the series that notify; inactive keeps the ones that do not, because the profile's preferences silence every reason or the profile muted the series"`
+	Status string `query:"status" default:"all" enum:"all,active,inactive,muted" doc:"active keeps the series that notify; inactive keeps the ones that do not, because the profile's preferences silence every reason or the profile muted the series; muted keeps only the series the profile muted"`
 	Reason string `query:"reason" enum:"favorite,watchlist,continue_watching,next_up" doc:"Keeps the series with this reason, whether or not the preferences let it notify; absent keeps every reason"`
 	Q      string `query:"q" maxLength:"200" doc:"Keeps the series whose title or sort title contains this text, case-insensitively" example:"bear"`
 	Sort   string `query:"sort" default:"title" enum:"title,-title,year,-year,added_at,-added_at,latest_episode_added,-latest_episode_added" doc:"One field, descending with a leading '-'. added_at is when the series joined the catalog; latest_episode_added when it last gained an episode. A series without a year or an episode sorts last either way; ties order by title."`
@@ -153,7 +156,8 @@ func notificationSeriesMatch(in *NotificationSeriesInput, query string) func(not
 	return func(s notifications.NotifiedSeries) bool {
 		switch {
 		case in.Status == notificationSeriesActive && !s.Notifies(),
-			in.Status == notificationSeriesInactive && s.Notifies():
+			in.Status == notificationSeriesInactive && s.Notifies(),
+			in.Status == notificationSeriesMuted && !s.Muted:
 			return false
 		case in.Reason != "" && !s.Reasons.Has(in.Reason):
 			return false
@@ -182,6 +186,98 @@ func registerNotificationSeries(reg *Registry) {
 	unmute.Summary = "Unmute new-episode notifications for one series."
 	unmute.Description = "The series notifies the acting profile again for its active reasons. The mute applies when notification delivery evaluates a new episode, normally within a minute of it arriving: an episode evaluated while the series was muted is not announced later, and one still waiting to be evaluated when the profile unmutes is announced. Unmuting a series that is not muted succeeds and changes nothing. No access check runs, so a profile can lift a mute on a series it can no longer see."
 	Register(reg, unmute, reg.unmuteNotificationSeries)
+
+	muteMany := notificationOperation(http.MethodPost, "/series/mute", opMuteManyNotificationSeries)
+	muteMany.Summary = "Mute new-episode notifications for many series."
+	muteMany.Description = "Mutes each named series for the acting profile as PUT /series/{series_id}/mute mutes one, in one request, and answers an outcome per distinct series in request order: applied when this call muted it, unchanged when it was already muted, not_found for an ID that names no series or a series the viewer may not see."
+	Register(reg, muteMany, func(ctx context.Context, in *NotificationSeriesManyMuteInput) (*NotificationSeriesManyMuteOutput, error) {
+		return reg.setManyNotificationSeriesMuted(ctx, in, true)
+	})
+
+	unmuteMany := notificationOperation(http.MethodPost, "/series/unmute", opUnmuteManyNotificationSeries)
+	unmuteMany.Summary = "Unmute new-episode notifications for many series."
+	unmuteMany.Description = "Unmutes each named series for the acting profile as DELETE /series/{series_id}/mute unmutes one, in one request, and answers an outcome per distinct series in request order: applied when this call unmuted it, unchanged when it was not muted. No access check runs, so a profile can lift a mute on a series it can no longer see."
+	Register(reg, unmuteMany, func(ctx context.Context, in *NotificationSeriesManyMuteInput) (*NotificationSeriesManyMuteOutput, error) {
+		return reg.setManyNotificationSeriesMuted(ctx, in, false)
+	})
+}
+
+// NotificationSeriesManyMuteInput names the series to mute or unmute.
+type NotificationSeriesManyMuteInput struct {
+	Body NotificationSeriesMuteRequest
+}
+
+// NotificationSeriesMuteRequest is the many-series mute and unmute body.
+type NotificationSeriesMuteRequest struct {
+	SeriesIDs []ID `json:"series_ids" minItems:"1" maxItems:"500" doc:"Catalog item identifiers of the series. A repeated identifier is reported once." example:"[\"series-tvdb-81189\"]"`
+}
+
+// NotificationSeriesMuteResult is what a many-series mute or unmute did to
+// one series.
+type NotificationSeriesMuteResult struct {
+	SeriesID ID     `json:"series_id"`
+	Outcome  string `json:"outcome" enum:"applied,unchanged,not_found" doc:"applied: this call muted or unmuted the series. unchanged: it was already in the requested state. not_found: a mute named no series, or one the viewer may not see; an unmute never answers it."`
+}
+
+// NotificationSeriesManyMuteOutput is the muteManyNotificationSeries and
+// unmuteManyNotificationSeries response.
+type NotificationSeriesManyMuteOutput struct {
+	Body NotificationSeriesMuteResults
+}
+
+// NotificationSeriesMuteResults is the many-series mute and unmute response
+// body.
+type NotificationSeriesMuteResults struct {
+	Results []NotificationSeriesMuteResult `json:"results" maxItems:"500" doc:"One result per distinct requested series, in request order"`
+}
+
+func (reg *Registry) setManyNotificationSeriesMuted(ctx context.Context, in *NotificationSeriesManyMuteInput, muted bool) (*NotificationSeriesManyMuteOutput, error) {
+	svc, p := reg.notificationInbox()
+	if p != nil {
+		return nil, p
+	}
+	if reg.deps.PersonalLists == nil {
+		return nil, unavailable("notification series")
+	}
+	viewer, p := personalListViewer(ctx, imagesize.Request{})
+	if p != nil {
+		return nil, p
+	}
+	ids := make([]string, 0, len(in.Body.SeriesIDs))
+	seen := make(map[string]bool, len(in.Body.SeriesIDs))
+	for _, id := range in.Body.SeriesIDs {
+		if !seen[string(id)] {
+			seen[string(id)] = true
+			ids = append(ids, string(id))
+		}
+	}
+	// A mute writes only series the viewer may see, as the one-series mute
+	// does; an unmute lifts any.
+	write := ids
+	if muted {
+		visible, err := reg.deps.PersonalLists.VisibleItemIDs(ctx, viewer, ids)
+		if err != nil {
+			return nil, serviceProblem(err)
+		}
+		write = slices.DeleteFunc(slices.Clone(ids), func(id string) bool { return !visible[id] })
+	}
+	outcomes := map[string]notifications.SeriesMuteOutcome{}
+	if len(write) > 0 {
+		var err error
+		if outcomes, err = svc.SetNotificationSeriesMuted(ctx, viewer.UserID, viewer.ProfileID, write, muted); err != nil {
+			return nil, serviceProblem(err)
+		}
+	}
+	out := new(NotificationSeriesManyMuteOutput)
+	out.Body.Results = make([]NotificationSeriesMuteResult, len(ids))
+	for i, id := range ids {
+		outcome, ok := outcomes[id]
+		if !ok {
+			outcome = notifications.SeriesMuteNotFound
+		}
+		out.Body.Results[i] = NotificationSeriesMuteResult{SeriesID: ID(id), Outcome: string(outcome)}
+	}
+	return out, nil
 }
 
 // NotificationSeriesMuteInput names the series to mute or unmute.

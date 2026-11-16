@@ -1,5 +1,5 @@
 {
-  "revision": "302a85c2ba6b66ff6c3326888ce8a646db429680e8060081bd639c7c70101ced",
+  "revision": "ee19cf0de47c46f496b48f60009d241538ffd664eaab50325577f56efbaba69e",
   "state": "available",
   "allowed": true,
   "in_app": {
@@ -39,6 +39,7 @@
   },
   "series": {
     "available": true,
-    "mute": true
+    "mute": true,
+    "bulk_mute": true
   }
 }

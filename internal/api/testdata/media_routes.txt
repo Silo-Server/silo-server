@@ -806,6 +806,8 @@ DELETE /api/v2/notifications/push/devices/{device_id}	non-media
 POST /api/v2/notifications/push/devices/{device_id}/retire	non-media
 POST /api/v2/notifications/read-all	non-media
 GET /api/v2/notifications/series	non-media
+POST /api/v2/notifications/series/mute	non-media
+POST /api/v2/notifications/series/unmute	non-media
 DELETE /api/v2/notifications/series/{series_id}/mute	non-media
 PUT /api/v2/notifications/series/{series_id}/mute	non-media
 GET /api/v2/notifications/sync	non-media
@@ -1865,6 +1867,8 @@ DELETE /api/v2/notifications/push/devices/{device_id}	non-media
 POST /api/v2/notifications/push/devices/{device_id}/retire	non-media
 POST /api/v2/notifications/read-all	non-media
 GET /api/v2/notifications/series	non-media
+POST /api/v2/notifications/series/mute	non-media
+POST /api/v2/notifications/series/unmute	non-media
 DELETE /api/v2/notifications/series/{series_id}/mute	non-media
 PUT /api/v2/notifications/series/{series_id}/mute	non-media
 GET /api/v2/notifications/sync	non-media

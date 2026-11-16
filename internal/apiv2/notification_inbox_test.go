@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"strings"
 	"testing"
 	"time"
 
@@ -32,6 +33,9 @@ type fakeNotificationInbox struct {
 	// mutes and unmutes record the series each call named, as
 	// account/profile/series.
 	mutes, unmutes []string
+	// manyMutes records each many-series call as
+	// account/profile/muted/comma-joined series.
+	manyMutes []string
 }
 
 // fixtureNotifiedSeries is a profile's notified-series list in service
@@ -64,6 +68,25 @@ func (f *fakeNotificationInbox) MuteNotificationSeries(_ context.Context, userID
 func (f *fakeNotificationInbox) UnmuteNotificationSeries(_ context.Context, userID int, profile, seriesID string) error {
 	f.unmutes = append(f.unmutes, fmt.Sprintf("%d/%s/%s", userID, profile, seriesID))
 	return nil
+}
+
+// SetNotificationSeriesMuted records each call as account/profile/muted/ids.
+// Of the fixture series only the Wire starts muted, and the movie is no
+// series.
+func (f *fakeNotificationInbox) SetNotificationSeriesMuted(_ context.Context, userID int, profile string, seriesIDs []string, muted bool) (map[string]notifications.SeriesMuteOutcome, error) {
+	f.manyMutes = append(f.manyMutes, fmt.Sprintf("%d/%s/%t/%s", userID, profile, muted, strings.Join(seriesIDs, ",")))
+	out := make(map[string]notifications.SeriesMuteOutcome, len(seriesIDs))
+	for _, id := range seriesIDs {
+		switch {
+		case muted && id == notificationNotASeriesID:
+			out[id] = notifications.SeriesMuteNotFound
+		case muted == (id == "series:wire"):
+			out[id] = notifications.SeriesMuteUnchanged
+		default:
+			out[id] = notifications.SeriesMuteApplied
+		}
+	}
+	return out, nil
 }
 
 func (f *fakeNotificationInbox) ListNotifiedSeries(context.Context, int, string) ([]notifications.NotifiedSeries, error) {

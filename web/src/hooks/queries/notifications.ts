@@ -24,6 +24,7 @@ import {
   listNotifications,
   listNotificationSeries,
   setNotificationSeriesMuted,
+  setManyNotificationSeriesMuted,
   type NotifiedSeriesOptions,
   type NotifiedSeriesStatus,
   unreadNotificationCount,
@@ -65,6 +66,11 @@ export const notificationInboxKeys = {
     scope,
   ],
 };
+/** Reloads every notified-series list: a mute or a preference moves series
+ * between them. */
+function invalidateSeries(queryClient: QueryClient) {
+  void queryClient.invalidateQueries({ queryKey: notificationKeys.seriesAll() });
+}
 function invalidateInbox(queryClient: QueryClient, scope = notificationScope()) {
   for (const status of ["all", "unread"] as const)
     void queryClient.invalidateQueries({ queryKey: notificationInboxKeys.list(status, scope) });
@@ -122,8 +128,8 @@ export function useNotificationSeries(
     retry: false,
   });
 }
-/** Mutes or unmutes one series, then reloads both series lists: the series
- * moves between them. A mute offers Undo, since the row leaves the view. */
+/** Mutes or unmutes one series, then reloads the series lists. A mute offers
+ * Undo. */
 export function useSetNotificationSeriesMuted() {
   const queryClient = useQueryClient();
   const context = captureNotificationAuthority();
@@ -131,13 +137,7 @@ export function useSetNotificationSeriesMuted() {
     mutationFn: ({ seriesId, muted }: { seriesId: string; title: string; muted: boolean }) =>
       setNotificationSeriesMuted(seriesId, muted, context),
     retry: false,
-    onSettled: () => {
-      const scope = notificationScope(context);
-      for (const status of ["active", "inactive"] as const)
-        void queryClient.invalidateQueries({
-          queryKey: notificationInboxKeys.series(status, scope),
-        });
-    },
+    onSettled: () => invalidateSeries(queryClient),
     onSuccess: (_data, variables) => {
       if (!variables.muted) return;
       toast.success(t("web.notifications.queries.muted", { title: variables.title }), {
@@ -153,6 +153,48 @@ export function useSetNotificationSeriesMuted() {
         variables.muted
           ? t("web.notifications.queries.muteFailed")
           : t("web.notifications.queries.unmuteFailed"),
+      );
+    },
+  });
+  return mutation;
+}
+/** Mutes or unmutes many series at once, then reloads the series lists. A
+ * mute offers Undo, which unmutes only the series this call muted. */
+export function useSetManyNotificationSeriesMuted() {
+  const queryClient = useQueryClient();
+  const context = captureNotificationAuthority();
+  const mutation = useMutation({
+    mutationFn: ({ seriesIds, muted }: { seriesIds: string[]; muted: boolean }) =>
+      setManyNotificationSeriesMuted(seriesIds, muted, context),
+    retry: false,
+    onSettled: () => invalidateSeries(queryClient),
+    onSuccess: (results, variables) => {
+      const changed = results
+        .filter((result) => result.outcome === "applied")
+        .map((result) => result.series_id);
+      // Series the viewer may not see, or that no longer exist, changed nothing.
+      const done = results.filter((result) => result.outcome !== "not_found").length;
+      const count = { count: done, count_text: String(done) };
+      if (!variables.muted) {
+        toast.success(t("web.notifications.queries.unmutedMany", count));
+        return;
+      }
+      toast.success(t("web.notifications.queries.mutedMany", count), {
+        action:
+          changed.length > 0
+            ? {
+                label: t("web.notifications.queries.undo"),
+                onClick: () => mutation.mutate({ seriesIds: changed, muted: false }),
+              }
+            : undefined,
+      });
+    },
+    onError: (error, variables) => {
+      if (error instanceof StaleApiRequestContextError) return;
+      toast.error(
+        variables.muted
+          ? t("web.notifications.queries.muteManyFailed")
+          : t("web.notifications.queries.unmuteManyFailed"),
       );
     },
   });
@@ -178,6 +220,45 @@ export function useMarkNotificationRead() {
       requireNotificationAuthority(context);
       applyNotificationRead(queryClient, { profile_id: context.profileId, id });
     },
+    onError: () => {
+      toast.error(t("web.notifications.queries.markReadFailed"));
+      invalidateInbox(queryClient, notificationScope(context));
+    },
+  });
+}
+/** How many read requests a bulk mark-read keeps in flight. */
+const MARK_READ_CONCURRENCY = 6;
+/** Marks several notifications read, each through the one-notification
+ * operation so every other client hears its read event. */
+export function useMarkNotificationsRead() {
+  const queryClient = useQueryClient();
+  const context = captureNotificationAuthority();
+  return useMutation({
+    mutationFn: async (ids: string[]) => {
+      for (let start = 0; start < ids.length; start += MARK_READ_CONCURRENCY)
+        await Promise.all(
+          ids
+            .slice(start, start + MARK_READ_CONCURRENCY)
+            .map((id) => markNotificationRead(id, context)),
+        );
+    },
+    retry: false,
+    onMutate: async (ids: string[]) => {
+      requireNotificationAuthority(context);
+      // A list or count request already in flight could land after the reads
+      // and bring back the unread state, so cancel it; onSuccess reads again.
+      const scope = notificationScope(context);
+      await Promise.all(
+        [
+          notificationInboxKeys.list("all", scope),
+          notificationInboxKeys.list("unread", scope),
+          notificationInboxKeys.count(scope),
+        ].map((queryKey) => queryClient.cancelQueries({ queryKey })),
+      );
+      for (const id of ids)
+        applyNotificationRead(queryClient, { profile_id: context.profileId, id });
+    },
+    onSuccess: () => invalidateInbox(queryClient, notificationScope(context)),
     onError: () => {
       toast.error(t("web.notifications.queries.markReadFailed"));
       invalidateInbox(queryClient, notificationScope(context));
@@ -217,10 +298,7 @@ export function useUpdateNotificationPreferences() {
       const scope = notificationScope(context);
       queryClient.setQueryData(notificationInboxKeys.preferences(scope), prefs);
       // Preferences decide which listed series notify.
-      for (const status of ["active", "inactive"] as const)
-        void queryClient.invalidateQueries({
-          queryKey: notificationInboxKeys.series(status, scope),
-        });
+      invalidateSeries(queryClient);
     },
     onError: () => toast.error(t("web.notifications.queries.savePreferencesFailed")),
   });

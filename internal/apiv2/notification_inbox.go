@@ -29,6 +29,7 @@ type NotificationInboxService interface {
 	ListNotifiedSeries(context.Context, int, string) ([]notifications.NotifiedSeries, error)
 	MuteNotificationSeries(context.Context, int, string, string) error
 	UnmuteNotificationSeries(context.Context, int, string, string) error
+	SetNotificationSeriesMuted(context.Context, int, string, []string, bool) (map[string]notifications.SeriesMuteOutcome, error)
 }
 
 // NotificationItem preserves event-specific reason data while normalizing IDs
@@ -227,6 +228,7 @@ func registerNotificationInbox(reg *Registry) {
 		body := notificationCapabilitiesOf(svc.NotificationCapabilities(ctx))
 		body.Series.Available = reg.deps.PersonalLists != nil
 		body.Series.Mute = body.Series.Available
+		body.Series.BulkMute = body.Series.Available
 		return &NotificationCapabilitiesOutput{Body: body}, nil
 	})
 	Register(reg, notificationOperation(http.MethodGet, "", "listNotifications"), func(ctx context.Context, in *NotificationListInput) (*NotificationListOutput, error) {
@@ -442,6 +444,7 @@ type NotificationCapabilities struct {
 type NotificationSeriesCapability struct {
 	Available bool `json:"available" doc:"GET /notifications/series lists the series whose new episodes can notify the profile"`
 	Mute      bool `json:"mute" doc:"PUT and DELETE /notifications/series/{series_id}/mute mute and unmute one series, and list entries carry muted"`
+	BulkMute  bool `json:"bulk_mute" doc:"POST /notifications/series/mute and /notifications/series/unmute mute and unmute many series at once, and GET /notifications/series accepts status=muted"`
 }
 type NotificationInAppCapability struct {
 	Enabled bool `json:"enabled"`
