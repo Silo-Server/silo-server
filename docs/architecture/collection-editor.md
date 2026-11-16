@@ -243,7 +243,10 @@ show it, from `listAdminCollectionSections`, and offers **Add as a row** (Home, 
 pages of the collection's own libraries, then the other libraries). The same rows give the header
 its "On Home and the _Kids_ page" (turned-off rows left out). Rows profiles add to their own Home
 are not listed, because the route reads the administrator page layouts only. When the collections
-capabilities don't report `section_references`, the list is left out and Add as a row stays.
+capabilities don't report `section_references`, the list is left out and Add as a row stays. A row
+of collections (`collection_posters`, see
+[Rows of collections](../catalog-api.md#rows-of-collections)) that lists the collection is listed
+like a collection row; its `collection_count` says how many collections it lists.
 
 - **Add as a row** goes to admin Sections with `?page=…&add=collection:library:<id>` and, from the
   editor, `?return=` set to the editor's own URL (see Links into the row pages). The List's Add to Home
@@ -264,11 +267,15 @@ capabilities don't report `section_references`, the list is left out and Add as 
   the collection still triggers the question, without naming pages. The switch stays part of the
   draft until Save.
 - **Deleting** a collection rows show lists them, each with Open row, and offers to delete the
-  rows and then the collection. Before any row goes, the editor (and the List) reads the collection
+  rows and then the collection. A row of collections that also lists other collections is not
+  deleted: the delete takes this collection out of its `collections` (`updateAdminSection`) and the
+  row keeps the rest, and the dialog says so under that row ("Removes it from the row …") with the
+  button reading "Delete it and change N rows". A row of collections that lists only this one is
+  deleted like a collection row. Before any row goes, the editor (and the List) reads the collection
   again: when its ETag no longer matches the one the delete would send, nothing is deleted (the
   collection's `DELETE` would answer `412` after its rows were gone) and the new copy is taken,
-  so the next Delete sends the current token. Each row is read again for its ETag right before its `DELETE`; a
-  row that is already gone, or that now shows another collection, is left alone (the list of rows
+  so the next Delete sends the current token. Each row is read again for its ETag right before its `DELETE`
+  or `PATCH`; a row that is already gone, or that no longer shows the collection, is left alone (the list of rows
   can be stale, and the collection's own `DELETE` still refuses while any row uses it). The first
   row that fails stops the run before the collection is touched, and the dialog names the rows
   that still show it. When the rows list fails to load, the delete waits for Retry only if the
