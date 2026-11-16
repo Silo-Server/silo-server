@@ -398,9 +398,12 @@ func TestProtocolV3ConformanceMatrixCoversReleaseTrain(t *testing.T) {
 		}
 	}
 	for name, delivery := range map[string]DeliveryV3{
-		"evidence_exact":                    DeliveryTranscodeHLSV3,
-		"evidence_platform_attested":        DeliveryOriginalHTTPV3,
-		"evidence_declared":                 DeliveryOriginalHTTPV3,
+		"evidence_exact":             DeliveryTranscodeHLSV3,
+		"evidence_platform_attested": DeliveryOriginalHTTPV3,
+		// A declared answer is not evidence the server can lean on for a
+		// container it cannot verify: that client still gets a playable route,
+		// but through a codec-copy remux instead of direct play.
+		"evidence_declared":                 DeliveryRemuxProgressiveV3,
 		"delivery_original":                 DeliveryOriginalHTTPV3,
 		"delivery_progressive":              DeliveryRemuxProgressiveV3,
 		"delivery_hls":                      DeliveryRemuxHLSV3,
