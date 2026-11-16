@@ -50,15 +50,22 @@ func (s *Server) openSource(ctx context.Context, grant string) (nodesource.Sourc
 // its modification time becomes the one this node's mount gave the file at
 // open, so a mount that dates files differently still serves the cues, and a
 // file replaced on this node afterwards still does not. A plan that read
-// another version is left as it is and matches nothing.
+// another version becomes unmatchedRenditionSource: left as it was, its time
+// could happen to be the one this node's mount gives the granted file.
 func renditionSourceOnNode(planned playback.SubtitleRenditionSource, source nodesource.Source) playback.SubtitleRenditionSource {
-	if planned.IsZero() || planned.Size != source.Size() ||
-		!nodesource.SameModTime(time.Unix(0, planned.ModTimeUnixNano), source.ModTime()) {
+	if planned.IsZero() {
 		return planned
+	}
+	if planned.Size != source.Size() || !nodesource.SameModTime(time.Unix(0, planned.ModTimeUnixNano), source.ModTime()) {
+		return unmatchedRenditionSource
 	}
 	planned.ModTimeUnixNano = source.InputModTime().UnixNano()
 	return planned
 }
+
+// unmatchedRenditionSource is a recorded source version no file has, so its
+// on-demand subtitle segments answer empty.
+var unmatchedRenditionSource = playback.SubtitleRenditionSource{Size: -1}
 
 // sourceRefused reports whether err is the core's lasting answer that the
 // job may not use its source, or a job that carried no grant, as opposed to a

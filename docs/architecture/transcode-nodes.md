@@ -655,7 +655,8 @@ it tells two mounts apart more often than two files. A difference is logged,
 as a warning the first time and at debug afterwards, and the source reports
 both times (`ModTime`, `InputModTime`). A session's planned subtitle version,
 which the API server recorded from its own stat, is restated at the node's
-time when it is the granted revision (`transcodenode.renditionSourceOnNode`),
+time when it is the granted revision, and otherwise made to match no file
+(`transcodenode.renditionSourceOnNode`),
 so on-demand subtitle segments still match the node's file. A job route answers a missing or refused grant with `400`, a mismatch with
 `409`, and a core it cannot reach with `503` (`transcodenode.sourceFailure`);
 the caller runs the job elsewhere. A chapter thumbnail job refused for those
