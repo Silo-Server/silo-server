@@ -4230,7 +4230,7 @@ func compatMediaURLToken(compatToken string) string {
 	if compatToken == "" {
 		return ""
 	}
-	return "&" + url.Values{"ApiKey": {compatToken}}.Encode()
+	return "&" + url.Values{compatAPIKeyParam: {compatToken}}.Encode()
 }
 
 // subtitleDeliveryURL is a subtitle stream URL authorized by its

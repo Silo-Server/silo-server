@@ -35,6 +35,15 @@ const (
 
 var mediaBrowserTokenPattern = regexp.MustCompile(`(?i)token="?([^",\s]+)"?`)
 
+// compatAPIKeyParam is Jellyfin's current query-param token spelling. Clients,
+// Jellyfin Web and the Android TV app among them, append it to the media URLs
+// they build, and PlaybackInfo appends it to the ones it hands out.
+const compatAPIKeyParam = "ApiKey"
+
+// compatLegacyAPIKeyParam is Jellyfin's legacy query-param token spelling,
+// honored when EnableLegacyAuthorization is set on a real server.
+const compatLegacyAPIKeyParam = "api_key"
+
 const (
 	tokenRefreshBuffer  = 5 * time.Minute
 	tokenRefreshTimeout = 30 * time.Second
@@ -121,13 +130,14 @@ func ExtractToken(r *http.Request) (string, bool) {
 	if token := strings.TrimSpace(r.Header.Get("X-Mediabrowser-Token")); token != "" {
 		return token, true
 	}
-	// Query-param token. Jellyfin's current spelling is "ApiKey" (PascalCase,
-	// always enabled); "api_key" is the legacy spelling (gated behind
-	// EnableLegacyAuthorization on a real server). Clients vary the casing
-	// further (Api_Key / API_KEY), so match both keys case-insensitively.
+	// Query-param token. Jellyfin's current spelling is compatAPIKeyParam
+	// (PascalCase, always enabled); "api_key" is the legacy spelling (gated
+	// behind EnableLegacyAuthorization on a real server). Clients vary the
+	// casing further (Api_Key / API_KEY), so match both keys
+	// case-insensitively.
 	// Ref: jellyfin Jellyfin.Server.Implementations/Security/AuthorizationContext.cs.
 	query := newCaseInsensitiveQuery(r.URL.Query())
-	for _, key := range []string{"ApiKey", "api_key"} {
+	for _, key := range []string{compatAPIKeyParam, compatLegacyAPIKeyParam} {
 		if token := strings.TrimSpace(query.Get(key)); token != "" {
 			return token, true
 		}

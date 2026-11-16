@@ -96,7 +96,7 @@ func TestMediaSourceDTOMediaURLsAreSelfAuthenticating(t *testing.T) {
 }
 
 // A negotiation without a compat session token (an sa_ API-key stream
-// synthesises one) must not mint an empty ApiKey parameter.
+// synthesizes one) must not mint an empty ApiKey parameter.
 func TestMediaSourceDTOOmitsEmptyCredential(t *testing.T) {
 	source := testCompatSource(NewResourceIDCodec(), testCompatVersion())
 	source.SupportsDirectPlay, source.SupportsDirectStream = false, false
