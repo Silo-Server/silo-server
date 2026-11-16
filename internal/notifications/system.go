@@ -19,6 +19,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/serveridentity"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/redis/go-redis/v9"
 )
@@ -615,15 +616,18 @@ func (s *System) RebuildInterest(ctx context.Context, progress func(percent int,
 		return err
 	}
 	defer claim.release(ctx)
+	// The checkpoint is read and written on the session that holds the lock,
+	// so a rebuild whose session ended cannot write next to another server's.
+	lockConn := claim.lock.Conn()
 
-	checkpoint, completedAt, err := s.loadBackfillCheckpoint(ctx, interestRebuildTask)
+	checkpoint, completedAt, err := loadBackfillCheckpoint(ctx, lockConn, interestRebuildTask)
 	if err != nil {
 		return err
 	}
 	if completedAt != nil {
 		// Start a fresh repair pass.
 		checkpoint = ""
-		if err := s.resetBackfillCheckpoint(ctx, interestRebuildTask); err != nil {
+		if err := resetBackfillCheckpoint(ctx, lockConn, interestRebuildTask); err != nil {
 			return err
 		}
 	}
@@ -663,10 +667,7 @@ func (s *System) RebuildInterest(ctx context.Context, progress func(percent int,
 				s.logger.WarnContext(ctx, "interest rebuild: profile failed",
 					"user_id", user.ID, "profile_id", profile.ID, "error", err)
 			}
-			if err := claim.check(ctx); err != nil {
-				return err
-			}
-			if err := s.saveBackfillCheckpoint(ctx, interestRebuildTask, key); err != nil {
+			if err := saveBackfillCheckpoint(ctx, lockConn, interestRebuildTask, key); err != nil {
 				return err
 			}
 			processed++
@@ -675,10 +676,7 @@ func (s *System) RebuildInterest(ctx context.Context, progress func(percent int,
 			fmt.Sprintf("Rebuilt interest for %d profiles", processed))
 	}
 
-	if err := claim.check(ctx); err != nil {
-		return err
-	}
-	if err := s.completeBackfillCheckpoint(ctx, interestRebuildTask); err != nil {
+	if err := completeBackfillCheckpoint(ctx, lockConn, interestRebuildTask); err != nil {
 		return err
 	}
 	s.logger.InfoContext(ctx, "interest rebuild completed", "profiles", processed)
@@ -925,10 +923,16 @@ func backfillKey(userID int, profileID string) string {
 	return fmt.Sprintf("%010d|%s", userID, profileID)
 }
 
-func (s *System) loadBackfillCheckpoint(ctx context.Context, task string) (string, *time.Time, error) {
+// backfillStateDB runs the notification_backfill_state statements.
+type backfillStateDB interface {
+	Exec(ctx context.Context, sql string, arguments ...any) (pgconn.CommandTag, error)
+	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
+}
+
+func loadBackfillCheckpoint(ctx context.Context, db backfillStateDB, task string) (string, *time.Time, error) {
 	var key *string
 	var completedAt *time.Time
-	err := s.pool.QueryRow(ctx,
+	err := db.QueryRow(ctx,
 		`SELECT last_processed_key, completed_at FROM notification_backfill_state WHERE task = $1`,
 		task,
 	).Scan(&key, &completedAt)
@@ -945,8 +949,8 @@ func (s *System) loadBackfillCheckpoint(ctx context.Context, task string) (strin
 	return checkpoint, completedAt, nil
 }
 
-func (s *System) saveBackfillCheckpoint(ctx context.Context, task, key string) error {
-	_, err := s.pool.Exec(ctx, `
+func saveBackfillCheckpoint(ctx context.Context, db backfillStateDB, task, key string) error {
+	_, err := db.Exec(ctx, `
 		INSERT INTO notification_backfill_state (task, last_processed_key, started_at, updated_at)
 		VALUES ($1, $2, now(), now())
 		ON CONFLICT (task) DO UPDATE SET
@@ -959,8 +963,8 @@ func (s *System) saveBackfillCheckpoint(ctx context.Context, task, key string) e
 	return nil
 }
 
-func (s *System) resetBackfillCheckpoint(ctx context.Context, task string) error {
-	_, err := s.pool.Exec(ctx, `
+func resetBackfillCheckpoint(ctx context.Context, db backfillStateDB, task string) error {
+	_, err := db.Exec(ctx, `
 		INSERT INTO notification_backfill_state (task, last_processed_key, started_at, updated_at, completed_at)
 		VALUES ($1, NULL, now(), now(), NULL)
 		ON CONFLICT (task) DO UPDATE SET
@@ -975,8 +979,8 @@ func (s *System) resetBackfillCheckpoint(ctx context.Context, task string) error
 	return nil
 }
 
-func (s *System) completeBackfillCheckpoint(ctx context.Context, task string) error {
-	_, err := s.pool.Exec(ctx, `
+func completeBackfillCheckpoint(ctx context.Context, db backfillStateDB, task string) error {
+	_, err := db.Exec(ctx, `
 		UPDATE notification_backfill_state SET completed_at = now(), updated_at = now() WHERE task = $1`,
 		task)
 	if err != nil {

@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"time"
 
 	"github.com/Silo-Server/silo-server/internal/database/pglock"
 )
@@ -15,10 +14,6 @@ import (
 // from and advances the same notification_backfill_state checkpoint. It
 // spells "SILONINT".
 const interestRebuildLock int64 = 0x53494C4F4E494E54
-
-// interestRebuildLockCheckTimeout bounds each probe of the lock's session, so
-// a connection that stopped answering fails the run instead of stalling it.
-const interestRebuildLockCheckTimeout = 10 * time.Second
 
 // ErrInterestRebuildRunning reports that another server holds the interest
 // rebuild lock, so the call did no work.
@@ -47,21 +42,6 @@ func (s *System) claimInterestRebuild(ctx context.Context) (*interestRebuildClai
 		return nil, ErrInterestRebuildRunning
 	}
 	return &interestRebuildClaim{lock: lock, logger: s.logger}, nil
-}
-
-// check returns an error once the lock's session has closed, which released
-// the lock. Another server may then start a rebuild, so this one stops before
-// it writes the checkpoint again.
-func (c *interestRebuildClaim) check(ctx context.Context) error {
-	checkCtx, cancel := context.WithTimeout(ctx, interestRebuildLockCheckTimeout)
-	defer cancel()
-	if err := c.lock.Check(checkCtx); err != nil {
-		if ctxErr := ctx.Err(); ctxErr != nil {
-			return ctxErr
-		}
-		return fmt.Errorf("interest rebuild lost its cluster lock: %w", err)
-	}
-	return nil
 }
 
 // release unlocks interestRebuildLock. pglock gives the unlock its own
