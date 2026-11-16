@@ -9,6 +9,11 @@ vi.mock("@/api/v2/request", async () => ({
   v2: request,
 }));
 
+// Changing a row moves the collection's revision; the run reads its new ETag.
+vi.mock("@/api/adminCollections", () => ({
+  fetchAdminCollectionSnapshot: vi.fn(() => Promise.resolve({ etag: '"after-rows"' })),
+}));
+
 function section(
   id: string,
   sectionType: string,
@@ -78,6 +83,7 @@ describe("deleteAdminCollectionRows", () => {
     ]);
 
     expect(result.remaining).toEqual([]);
+    expect(result.etag).toBe('"after-rows"');
     const writes = request.mock.calls
       .filter(([route]) => !String(route).startsWith("GET"))
       .map(([route, options]) => [route, options.path.id, options.body?.config]);

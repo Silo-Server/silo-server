@@ -271,7 +271,10 @@ like a collection row; its `collection_count` says how many collections it lists
   deleted: the delete takes this collection out of its `collections` (`updateAdminSection`) and the
   row keeps the rest, and the dialog says so under that row ("Removes it from the row …") with the
   button reading "Delete it and change N rows". A row of collections that lists only this one is
-  deleted like a collection row. Before any row goes, the editor (and the List) reads the collection
+  deleted like a collection row. Changing a row moves the collection's revision (a section write
+  locks the collections it referenced before and after), which deleting a row does not, so after
+  a run that changed a row the collection is read once more and its `DELETE` sends that ETag
+  (`deleteAdminCollectionRows` returns it). Before any row goes, the editor (and the List) reads the collection
   again: when its ETag no longer matches the one the delete would send, nothing is deleted (the
   collection's `DELETE` would answer `412` after its rows were gone) and the new copy is taken,
   so the next Delete sends the current token. Each row is read again for its ETag right before its `DELETE`

@@ -9,6 +9,7 @@ import {
   libraryCollectionIdsOf,
   withoutLibraryCollection,
 } from "@/lib/homeRows/collectionList";
+import { fetchAdminCollectionSnapshot } from "@/api/adminCollections";
 import { holdsCollections } from "@/lib/sectionTypes";
 import type { components } from "@/api/v2/schema";
 import { v2, V2ProblemError } from "@/api/v2/request";
@@ -88,11 +89,17 @@ function isGone(error: unknown) {
  * collection's own delete still refuses if a row uses it). The first failure
  * stops the run: `remaining` holds that row and every row after it, with the
  * error.
+ *
+ * Changing a row (unlike deleting one) moves the collection's revision, so
+ * the ETag read before the run would answer `412` on the collection's own
+ * `DELETE`. When every row is done and at least one was changed, `etag` is
+ * the collection's ETag read again; send that one.
  */
 export async function deleteAdminCollectionRows(
   collectionId: string,
   rows: readonly CollectionRow[],
-): Promise<{ remaining: CollectionRow[]; error?: unknown }> {
+): Promise<{ remaining: CollectionRow[]; error?: unknown; etag?: string }> {
+  let changedRow = false;
   for (const [index, row] of rows.entries()) {
     try {
       const { section, etag } = await fetchAdminSectionSnapshot(row.id);
@@ -106,6 +113,7 @@ export async function deleteAdminCollectionRows(
             etag,
             config: withoutLibraryCollection(config, collectionId),
           });
+          changedRow = true;
           continue;
         }
       } else if (config.library_collection_id !== collectionId) {
@@ -117,5 +125,12 @@ export async function deleteAdminCollectionRows(
       return { remaining: rows.slice(index), error };
     }
   }
-  return { remaining: [] };
+  if (!changedRow) return { remaining: [] };
+  try {
+    return { remaining: [], etag: (await fetchAdminCollectionSnapshot(collectionId)).etag };
+  } catch (error) {
+    // The rows are done; the collection's delete reports what is wrong.
+    if (isGone(error)) return { remaining: [] };
+    throw error;
+  }
 }
