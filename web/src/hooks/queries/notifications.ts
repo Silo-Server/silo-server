@@ -172,10 +172,9 @@ export function useSetManyNotificationSeriesMuted() {
       const changed = results
         .filter((result) => result.outcome === "applied")
         .map((result) => result.series_id);
-      const count = {
-        count: variables.seriesIds.length,
-        count_text: String(variables.seriesIds.length),
-      };
+      // Series the viewer may not see, or that no longer exist, changed nothing.
+      const done = results.filter((result) => result.outcome !== "not_found").length;
+      const count = { count: done, count_text: String(done) };
       if (!variables.muted) {
         toast.success(t("web.notifications.queries.unmutedMany", count));
         return;

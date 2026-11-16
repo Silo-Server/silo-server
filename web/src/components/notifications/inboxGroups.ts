@@ -4,8 +4,8 @@ import type { AppNotification } from "@/api/types";
 export type InboxDay = "today" | "yesterday" | "week" | "older";
 
 /**
- * One inbox row: a series' new-episode notifications from one day, newest
- * first, or any other notification on its own.
+ * One inbox row: a series' new-episode notifications under one day heading,
+ * newest first, or any other notification on its own.
  */
 export type InboxEntry = {
   key: string;
@@ -33,11 +33,13 @@ export function inboxDay(created: Date, now: Date): InboxDay {
   return "older";
 }
 
+const DAY_ORDER: InboxDay[] = ["today", "yesterday", "week", "older"];
+
 /**
  * Groups a newest-first notification list for the inbox: by day heading, and
- * within a day each series' new episodes into one entry placed where its
- * newest one was. Order is otherwise kept, so pages appended to the list only
- * add to its end.
+ * under each heading each series' new episodes into one entry placed where
+ * its newest one was. Order is otherwise kept, so pages appended to the list
+ * only add to its end.
  */
 export function groupInbox(notifications: AppNotification[], now = new Date()): InboxSection[] {
   const sections: InboxSection[] = [];
@@ -69,5 +71,6 @@ export function groupInbox(notifications: AppNotification[], now = new Date()): 
     bySeries.set(groupKey, entry);
     section.entries.push(entry);
   }
-  return sections;
+  // Headings keep their order even if a bad timestamp puts "older" first.
+  return sections.sort((a, b) => DAY_ORDER.indexOf(a.day) - DAY_ORDER.indexOf(b.day));
 }

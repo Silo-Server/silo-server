@@ -1,6 +1,7 @@
-import { useEffect, useState, type ComponentType, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ComponentType, type ReactNode } from "react";
 import { useSearchParams } from "react-router";
 import { Bell, BellOff, Bookmark, Heart, Play, Search, SkipForward } from "lucide-react";
+import { toast } from "sonner";
 import type { NotificationPreferences } from "@/api/types";
 import type { NotifiedSeries, NotifiedSeriesOptions } from "@/api/v2/notifications";
 import ViewTransitionLink from "@/components/ViewTransitionLink";
@@ -403,7 +404,11 @@ export function NotifiedSeriesList({
 
   // A new search, tab, or sort starts a new selection.
   const optionsKey = JSON.stringify([series.status, series.options]);
-  useEffect(() => setSelected(new Set()), [optionsKey]);
+  const currentOptions = useRef(optionsKey);
+  useEffect(() => {
+    currentOptions.current = optionsKey;
+    setSelected(new Set());
+  }, [optionsKey]);
 
   const toggle = (id: string) =>
     setSelected((set) => {
@@ -412,14 +417,20 @@ export function NotifiedSeriesList({
       return next;
     });
 
-  /** Loads every remaining page, then selects every series the view matches. */
+  /** Loads every remaining page, then selects every series the view matches.
+   * A failed page, or a new search, tab, or sort meanwhile, selects nothing. */
   async function selectAllMatching() {
+    const started = optionsKey;
     setSelectingAll(true);
     try {
       let { data, hasNextPage } = list;
-      while (hasNextPage) ({ data, hasNextPage } = await list.fetchNextPage());
+      while (hasNextPage && currentOptions.current === started)
+        ({ data, hasNextPage } = await list.fetchNextPage({ throwOnError: true }));
+      if (currentOptions.current !== started) return;
       const ids = data?.pages.flatMap((page) => page.series.map((row) => row.item.content_id));
       if (ids) setSelected(new Set(ids));
+    } catch {
+      toast.error(t("web.notifications.series.loadMoreFailed"));
     } finally {
       setSelectingAll(false);
     }

@@ -399,9 +399,9 @@ function InboxEntryRow({
 
 /**
  * The inbox view of the notifications page. Notifications sit under day
- * headings, and a series' new episodes from one day share one row that opens
- * to list them. Select mode picks rows to mark read, or whose series to mute,
- * together.
+ * headings, and a series' new episodes under one heading share one row that
+ * opens to list them. Select mode picks rows to mark read, or whose series to
+ * mute, together.
  */
 export function NotificationInbox({
   switcher,
