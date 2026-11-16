@@ -16,8 +16,9 @@ syncs exactly, with no conversion: a provider change from 7 to 8 is a change.
 
 Ratings were whole stars (1 to 5) before. The migration to scores doubled every stored
 rating and agreed rating, so a provider value that had been rounded into a star (a 7
-kept as 4 stars, now 8) differs from the agreed rating on the provider's side only, and
-the next sync imports it exactly without writing to the provider.
+kept as 4 stars, now 8) differs from the agreed rating on the provider's side only. The
+migration also cleared the rating read cursors, so the next sync reads every provider
+rating and imports such a value exactly without writing to the provider.
 
 ## Agreed rating
 

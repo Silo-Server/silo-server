@@ -18,6 +18,18 @@ ALTER TABLE public.watch_provider_rating_items
 UPDATE public.watch_provider_rating_items SET synced_rating = synced_rating * 2;
 ALTER TABLE public.watch_provider_rating_items
     ADD CONSTRAINT watch_provider_rating_items_synced_rating_check CHECK (synced_rating BETWEEN 1 AND 10);
+
+-- An incremental read only returns ratings that changed since its cursor, so
+-- a provider would never resend an unchanged 7. Dropping the rating read
+-- cursors (every key containing ".ratings", as withoutRatingCursors in
+-- internal/watchsync does) makes the next sync read every provider rating.
+UPDATE public.watch_provider_connections
+SET sync_cursors = (
+    SELECT COALESCE(jsonb_object_agg(key, value), '{}'::jsonb)
+    FROM jsonb_each(sync_cursors)
+    WHERE strpos(key, '.ratings') = 0
+)
+WHERE EXISTS (SELECT 1 FROM jsonb_object_keys(sync_cursors) AS k WHERE strpos(k, '.ratings') > 0);
 -- +goose StatementEnd
 
 -- +goose Down

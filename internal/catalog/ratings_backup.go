@@ -43,7 +43,7 @@ func (e ratingEntry) score() int {
 // valid reports whether the entry carries exactly one rating in range.
 func (e ratingEntry) valid() bool {
 	if e.Rating != 0 {
-		return e.Score == 0 && e.Rating >= 1 && ScoreFromStars(e.Rating) <= MaxRatingScore
+		return e.Score == 0 && e.Rating >= 1 && e.Rating <= MaxRatingScore/2
 	}
 	return e.Score >= 1 && e.Score <= MaxRatingScore
 }
