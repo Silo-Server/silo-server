@@ -20,6 +20,7 @@ import (
 
 const (
 	webpQuality              = 90
+	posterCropQuality        = 95
 	thumbhashSourceDimension = 100
 )
 
@@ -336,11 +337,12 @@ func encodeSquare(data []byte, side, squareSize int) ([]byte, error) {
 	})
 }
 
-// CropToPoster returns the centered 2:3 portrait crop of data as a PNG, for a
-// poster taken from a video frame. It trims whichever dimension is in excess,
-// keeping a landscape frame's full height or a narrower frame's full width,
-// and never scales; the poster variants are cut from the crop. PNG keeps the
-// crop lossless until the variants are encoded.
+// CropToPoster returns the centered 2:3 portrait crop of data as a JPEG, for
+// a poster taken from a video frame. It trims whichever dimension is in
+// excess, keeping a landscape frame's full height or a narrower frame's full
+// width, and never scales; the poster variants are cut from the crop. The
+// frame is already a lossy JPEG, so a high-quality JPEG costs little more,
+// and unlike a PNG it decodes with shrink-on-load for each smaller variant.
 func CropToPoster(data []byte) ([]byte, error) {
 	size, release, err := reserveSource(data)
 	if err != nil {
@@ -357,7 +359,8 @@ func CropToPoster(data []byte) ([]byte, error) {
 		return nil, fmt.Errorf("%w: a %dx%d image has no 2:3 crop", ErrInvalidImage, size.Width, size.Height)
 	}
 	out, err := bimg.NewImage(data).Process(bimg.Options{
-		Type:          bimg.PNG,
+		Type:          bimg.JPEG,
+		Quality:       posterCropQuality,
 		StripMetadata: true,
 		// The offsets are in the stored orientation, the one Size reports.
 		NoAutoRotate: true,

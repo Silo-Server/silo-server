@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"image"
+	"image/jpeg"
 	"image/png"
 	"reflect"
 	"slices"
@@ -187,7 +188,7 @@ func TestCropToPosterCentersA2x3CropWithoutScaling(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			img, err := png.Decode(bytes.NewReader(out))
+			img, err := jpeg.Decode(bytes.NewReader(out))
 			if err != nil {
 				t.Fatalf("decode crop: %v", err)
 			}

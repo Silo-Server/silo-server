@@ -23,8 +23,10 @@ var framePosterKey = mediaartifact.Key{
 	ConfigHash:       mediaartifact.ConfigHash(framePosterKind, "frame=tenth;crop=2:3"),
 }
 
-// undecodableDetail is the Detail of a file's unusable verdict.
-const undecodableDetail = "undecodable"
+// framePosterRecorder records every frame poster failure. One name for every
+// server keeps a failure's backoff, and its growth over repeated failures,
+// the same whichever replica runs the task, also after a restart.
+const framePosterRecorder = "frame-posters"
 
 // maxPosterFailuresInARow ends the poster pass once this many movies in a row
 // failed in a way that may pass. A share that is offline fails every file,
@@ -44,7 +46,7 @@ type FailureStore interface {
 
 // posterStore lists and saves frame posters; catalog.ItemRepository.
 type posterStore interface {
-	ListPendingFramePosters(ctx context.Context, failures mediaartifact.Key, node string, limit int) ([]catalog.PendingFramePoster, error)
+	ListPendingFramePosters(ctx context.Context, failures mediaartifact.Key, limit int) ([]catalog.PendingFramePoster, error)
 	SetFramePosterIfSource(ctx context.Context, contentID, expectedSource, path, source, thumbhash string) (bool, error)
 }
 
@@ -55,16 +57,13 @@ type posterPass struct {
 	frames   FrameExtractor
 	cacher   PosterCacher
 	failures FailureStore
-	node     string
 }
 
-// WithPosters adds the poster pass to every Generate run. node names this
-// server in failure records: a failure that may pass backs off only on the
-// server that recorded it.
-func (g *Generator) WithPosters(cacher PosterCacher, failures FailureStore, node string) *Generator {
+// WithPosters adds the poster pass to every Generate run.
+func (g *Generator) WithPosters(cacher PosterCacher, failures FailureStore) *Generator {
 	g.posters = &posterPass{
 		items: catalog.NewItemRepository(g.pool), files: g.files, frames: g.frames,
-		cacher: cacher, failures: failures, node: node,
+		cacher: cacher, failures: failures,
 	}
 	return g
 }
@@ -84,7 +83,7 @@ const (
 // It stops early when no transcode node can be reserved, and after
 // maxPosterFailuresInARow failures in a row.
 func (p *posterPass) run(ctx context.Context, limit int) (int, error) {
-	pending, err := p.items.ListPendingFramePosters(ctx, framePosterKey, p.node, limit)
+	pending, err := p.items.ListPendingFramePosters(ctx, framePosterKey, limit)
 	if err != nil {
 		return 0, err
 	}
@@ -172,7 +171,7 @@ func (p *posterPass) recordFailure(ctx context.Context, file *models.MediaFile, 
 		slog.WarnContext(ctx, "frame posters: file cannot be decoded; skipped until it changes", append(attrs, "error", err)...)
 		if err := p.failures.Upsert(ctx, mediaartifact.Artifact{
 			MediaFileID: file.ID, Key: framePosterKey, Identity: identity,
-			Status: mediaartifact.StatusUnusable, Detail: undecodableDetail, RecordedBy: p.node,
+			Status: mediaartifact.StatusUnusable, Detail: "undecodable", RecordedBy: framePosterRecorder,
 		}); err != nil {
 			slog.WarnContext(ctx, "frame posters: recording failure failed", append(attrs, "error", err)...)
 		}
@@ -180,7 +179,7 @@ func (p *posterPass) recordFailure(ctx context.Context, file *models.MediaFile, 
 	}
 	slog.WarnContext(ctx, "frame posters: taking a frame failed; trying again later", append(attrs, "error", err)...)
 	if err := p.failures.RecordFailure(ctx, mediaartifact.Failure{
-		MediaFileID: file.ID, Key: framePosterKey, Identity: identity, RecordedBy: p.node, Error: err.Error(),
+		MediaFileID: file.ID, Key: framePosterKey, Identity: identity, RecordedBy: framePosterRecorder, Error: err.Error(),
 	}); err != nil {
 		slog.WarnContext(ctx, "frame posters: recording failure failed", append(attrs, "error", err)...)
 	}

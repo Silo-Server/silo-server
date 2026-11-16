@@ -20,7 +20,7 @@ type fakePosterStore struct {
 	saved   []string
 }
 
-func (s *fakePosterStore) ListPendingFramePosters(context.Context, mediaartifact.Key, string, int) ([]catalog.PendingFramePoster, error) {
+func (s *fakePosterStore) ListPendingFramePosters(context.Context, mediaartifact.Key, int) ([]catalog.PendingFramePoster, error) {
 	return s.pending, nil
 }
 
@@ -83,7 +83,7 @@ func TestPosterPassStopsAfterFailuresInARow(t *testing.T) {
 	// a saves, b fails, c loses its slot, then d, e and f fail in a row.
 	frames := &fakeFrames{ok: map[int]bool{1: true, 3: true, 7: true}, frame: frame.Bytes()}
 	failures := &fakeFailures{}
-	pass := &posterPass{items: store, files: fakeFiles{}, frames: frames, cacher: fakePosterCacher{}, failures: failures, node: "test"}
+	pass := &posterPass{items: store, files: fakeFiles{}, frames: frames, cacher: fakePosterCacher{}, failures: failures}
 
 	saved, err := pass.run(context.Background(), 10)
 	if err != nil {

@@ -3449,7 +3449,7 @@ func main() {
 			stillCacher.SetArtworkRevisionTracker(catalog.NewArtworkRevisionTracker(deps.DB))
 			taskMgr.Register(tasks.NewGenerateExtraStillsTask(
 				extrastills.NewGenerator(deps.DB, deps.FileRepo, chapterBackfiller, stillCacher).
-					WithPosters(stillCacher, mediaartifact.NewStore(deps.DB), resolveNodeIdentity()), 200,
+					WithPosters(stillCacher, mediaartifact.NewStore(deps.DB)), 200,
 			))
 		}
 		maintenanceSteps = append(maintenanceSteps, tasks.NewActivityLogCleanupTask(deps.DB, settingsRepo, activityPM))

@@ -376,28 +376,32 @@ precedence order, each tried with `.jpg`, `.jpeg`, `.png`, `.webp`, `.tbn`,
   not pending its first match, with unlocked images, an empty `poster_path`,
   and a `poster_source_path` that is empty or a lost frame's. A sidecar or
   provider poster waiting for its copy has a source of its own, so it is never
-  raced. The frame is taken from the lowest-id live, probed file at the extras
-  position, cropped to a centered 2:3 portrait at its own scale
-  (`imageutil.CropToPoster`), and stored under the item's `local/` poster keys
-  with the usual poster variants. `poster_source_path` then holds `frame:` and
-  the file's frame key. The save is a compare-and-set on the empty slot and
-  the source read (`ItemRepository.SetFramePosterIfSource`); a frame that loses
-  is left to the artwork revision GC. Failures are per-file media analysis
-  artifacts (`internal/mediaartifact`, kind `frame_poster`): a file ffmpeg
-  cannot decode is skipped until it changes, other failures back off on the
-  server that recorded them, and the poster pass stops after three failures in
-  a row (an offline share) or when no transcode node can be reserved. Any
-  other image replaces a frame: a sidecar or admin pick as usual, and in a
-  fill-empty refresh (initial match, scheduled refresh) the merge treats an
-  unlocked frame poster as empty, so even an unrated provider poster wins; with
-  no image offered the frame stays. Known limits: only the poster slot is
-  filled, so a detail screen that shows only a backdrop still shows none; a
-  frame saved between a refresh's read and its write can be overwritten by that
-  write and is taken again on the next run; with `metadata.cache_images` off,
-  the stored-artwork releaser queues a matched movie showing a frame for a
-  refresh at most weekly; after an admin picks another image there is no way
-  back to the frame; a replaced file keeps its old frame while the poster slot
-  is filled; and only the lowest-id file of a multi-version movie is tried.
+  raced. The frame is taken from the lowest-id live file with a known duration
+  and no blocking failure record, at the extras position, cropped to a
+  centered 2:3 portrait at its own scale (`imageutil.CropToPoster`), and stored
+  under the item's `local/` poster keys with the usual poster variants.
+  `poster_source_path` then holds `frame:` and the file's frame key. The save
+  is a compare-and-set on the empty slot and the source read
+  (`ItemRepository.SetFramePosterIfSource`); a frame that loses is left to the
+  artwork revision GC. Failures are per-file media analysis artifacts
+  (`internal/mediaartifact`, kind `frame_poster`, all recorded under one
+  recorder name): a file ffmpeg cannot decode is skipped until it changes,
+  other failures back off the same on every server, growing with each failure,
+  and the poster pass stops after three failures in a row (an offline share)
+  or when no transcode node can be reserved. Like the extras' stills, a frame
+  poster is stored whatever `metadata.cache_images` is set to, so with caching
+  off, where sidecar files are not read, a movie with a poster file beside it
+  shows a frame. Any other image replaces a frame: a sidecar or admin pick as
+  usual, and in a fill-empty refresh (initial match, scheduled refresh) the
+  merge treats an unlocked frame poster as empty, so even an unrated provider
+  poster wins; with no image offered the frame stays. Known limits: only the
+  poster slot is filled, so a detail screen that shows only a backdrop still
+  shows none; a frame saved between a refresh's read and its write can be
+  overwritten by that write and is taken again on the next run; with
+  `metadata.cache_images` off, the stored-artwork releaser queues a matched
+  movie showing a frame for a refresh at most weekly; after an admin picks
+  another image there is no way back to the frame; and a replaced file keeps
+  its old frame while the poster slot is filled.
 - Basename names attach to one of the item's own media files and beat generic
   names, as in Kodi. A series has no media file of its own (its request lists
   every episode file), so a series uses generic names only and

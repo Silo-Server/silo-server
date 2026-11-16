@@ -75,36 +75,37 @@ func (g *Generator) Generate(ctx context.Context, limit int) (extras, posters in
 		}
 	}()
 
-	extras, available, err := g.generateExtras(ctx, limit)
-	if err != nil || !available || g.posters == nil {
+	extras, err = g.generateExtras(ctx, limit)
+	if err != nil || g.posters == nil {
 		return extras, 0, err
 	}
 	posters, err = g.posters.run(ctx, limit)
 	return extras, posters, err
 }
 
-// generateExtras gives up to limit extras a frame. available is false when
-// no transcode node could be reserved, which ends the run.
-func (g *Generator) generateExtras(ctx context.Context, limit int) (saved int, available bool, err error) {
+// generateExtras gives up to limit extras a frame and reports how many it
+// saved. It stops early when no transcode node can be reserved.
+func (g *Generator) generateExtras(ctx context.Context, limit int) (int, error) {
 	pending, err := g.extras.ListPendingFrameStills(ctx, limit)
 	if err != nil {
-		return 0, true, err
+		return 0, err
 	}
+	saved := 0
 	for _, p := range pending {
 		if ctx.Err() != nil {
-			return saved, true, ctx.Err()
+			return saved, ctx.Err()
 		}
 		ok, err := g.generate(ctx, p)
 		if errors.Is(err, chapterthumbs.ErrExtractionUnavailable) {
 			slog.InfoContext(ctx, "extra stills: no transcode node could be reserved; trying again next run",
 				"component", "extrastills", "extra_id", p.ExtraID, "error", err)
-			return saved, false, nil
+			return saved, nil
 		}
 		if ok {
 			saved++
 		}
 	}
-	return saved, true, nil
+	return saved, nil
 }
 
 // generate takes and saves one extra's frame and reports whether it saved

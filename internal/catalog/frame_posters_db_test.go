@@ -72,6 +72,28 @@ func (f *framePosterFixture) file(contentID, name string, missing bool) int {
 	return id
 }
 
+// fail records a failure under key for fileID, a file the fixture wrote:
+// unusable, or failed with a retry time in the future, as recorder.
+func (f *framePosterFixture) fail(key mediaartifact.Key, fileID int, unusable bool, recorder string) {
+	f.t.Helper()
+	store := mediaartifact.NewStore(f.pool)
+	identity := mediaartifact.Identity{FileSize: 1000, DurationSeconds: 600}
+	var err error
+	if unusable {
+		err = store.Upsert(f.t.Context(), mediaartifact.Artifact{
+			MediaFileID: fileID, Key: key, Identity: identity,
+			Status: mediaartifact.StatusUnusable, Detail: "undecodable", RecordedBy: recorder,
+		})
+	} else {
+		err = store.RecordFailure(f.t.Context(), mediaartifact.Failure{
+			MediaFileID: fileID, Key: key, Identity: identity, RecordedBy: recorder, Error: "timed out",
+		})
+	}
+	if err != nil {
+		f.t.Fatal(err)
+	}
+}
+
 func (f *framePosterFixture) poster(id string) (path, source string) {
 	f.t.Helper()
 	if err := f.pool.QueryRow(f.t.Context(), `SELECT poster_path, poster_source_path FROM media_items WHERE content_id = $1`, id).Scan(&path, &source); err != nil {
@@ -106,16 +128,18 @@ func TestFramePostersListOnlyEmptySlotsAndSaveOnlyOverThemDB(t *testing.T) {
 	} {
 		f.file(f.item(excluded.name, excluded.itemType, excluded.status, excluded.source, excluded.locked), excluded.name, excluded.missing)
 	}
+	// A file with no known duration would give a frame at 0 s.
+	f.exec(`UPDATE media_files SET duration = 0 WHERE id = $1`, f.file(f.item("silent", "movie", "matched", "", false), "silent", false))
 	key := mediaartifact.Key{Kind: "frame_poster_test", AlgorithmVersion: 1, ConfigHash: mediaartifact.ConfigHash("frame_poster_test", f.prefix)}
-	if err := mediaartifact.NewStore(f.pool).Upsert(ctx, mediaartifact.Artifact{
-		MediaFileID: f.file(f.item("undecodable", "movie", "matched", "", false), "undecodable", false), Key: key,
-		Identity: mediaartifact.Identity{FileSize: 1000, DurationSeconds: 600},
-		Status:   mediaartifact.StatusUnusable, Detail: "undecodable", RecordedBy: "test",
-	}); err != nil {
-		t.Fatal(err)
-	}
+	f.fail(key, f.file(f.item("undecodable", "movie", "matched", "", false), "undecodable", false), true, "test")
+	// A failure backs off whichever server recorded it.
+	f.fail(key, f.file(f.item("backoff", "movie", "matched", "", false), "backoff", false), false, "another-server")
+	// A movie whose first version is blocked tries its next one.
+	versions := f.item("versions", "movie", "matched", "", false)
+	f.fail(key, f.file(versions, "versions-a", false), true, "test")
+	versionsFile := f.file(versions, "versions-b", false)
 
-	pending, err := repo.ListPendingFramePosters(ctx, key, "test", 100000)
+	pending, err := repo.ListPendingFramePosters(ctx, key, 100000)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -127,7 +151,7 @@ func TestFramePostersListOnlyEmptySlotsAndSaveOnlyOverThemDB(t *testing.T) {
 			ids = append(ids, movie.ContentID)
 		}
 	}
-	if want := []string{empty, lost}; !slices.Equal(ids, want) {
+	if want := []string{empty, lost, versions}; !slices.Equal(ids, want) {
 		t.Fatalf("pending = %v, want %v", ids, want)
 	}
 	if m := got[empty]; m.FileID != emptyFile || m.PosterSource != "" || m.Duration != 600 || m.FrameKey != fmt.Sprintf("%d?v=1000-0", emptyFile) {
@@ -135,6 +159,9 @@ func TestFramePostersListOnlyEmptySlotsAndSaveOnlyOverThemDB(t *testing.T) {
 	}
 	if m := got[lost]; m.FileID != lostFile || m.PosterSource != lostSource {
 		t.Errorf("cleared frame = %+v, want file %d with its frame source", m, lostFile)
+	}
+	if m := got[versions]; m.FileID != versionsFile {
+		t.Errorf("two versions = %+v, want the unblocked file %d", m, versionsFile)
 	}
 
 	frameSource := StillSourceFramePrefix + got[empty].FrameKey
