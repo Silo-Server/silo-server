@@ -2392,7 +2392,7 @@ func (h *PlaybackHandler) planStartV3(r *http.Request, req playback.StartRequest
 				if capabilityBlocked {
 					break
 				}
-				candidateFile, candidateProvenance, err := h.prepareVirtualAlternateFileV3(r, alternate, profileID)
+				candidateFile, candidateProvenance, err := h.prepareVirtualAlternateFileV3(r, alternate, profileID, true)
 				if err != nil || candidateFile == nil {
 					continue
 				}
@@ -3131,7 +3131,7 @@ func (h *PlaybackHandler) startPlaybackApplicationV3(r *http.Request, body []byt
 				// per alternate; a generic transport failure keeps the full list.
 				if alternates, alternateErr := h.virtualTransportAlternatesV3(r.Context(), requestedFile, requestAccessFilter(r), alternateOrder, playback.IsTransientProviderError(statusErr.cause)); alternateErr == nil && len(alternates) > 0 {
 					for alternateRank, altCandidate := range alternates {
-						alternate, alternateProvenance, err := h.prepareVirtualAlternateFileV3(r, altCandidate, profileID)
+						alternate, alternateProvenance, err := h.prepareVirtualAlternateFileV3(r, altCandidate, profileID, true)
 						if err != nil || alternate == nil {
 							continue
 						}
@@ -3866,14 +3866,21 @@ func retainedVirtualBoundFileV3(effective *models.MediaFile, previous *playback.
 // past the TTL still fetches (a miss, a stale-grace refresh, or the failure
 // path's own rotation), so a moved or dead release is re-listed when that is
 // what the evidence says, not on every sibling.
-func (h *PlaybackHandler) prepareVirtualAlternateFileV3(r *http.Request, alternate *models.MediaFile, profileID string) (*models.MediaFile, ProbeProvenance, error) {
+//
+// startPath marks the walk as start-path work: the alternate hunt inside a
+// start and the start's transport-failure walk both set it, so their synchronous
+// probe is bounded by virtualStartProbeBudget like the primary start probe. The
+// walk still probes synchronously (a substitute's inventory must be verified
+// before the planner remaps a version's tracks), and a replan rehydration
+// leaves it false and keeps virtualProbeBudget.
+func (h *PlaybackHandler) prepareVirtualAlternateFileV3(r *http.Request, alternate *models.MediaFile, profileID string, startPath bool) (*models.MediaFile, ProbeProvenance, error) {
 	if alternate == nil {
 		return nil, "", errors.New("nil alternate file")
 	}
 	if !isVirtualPlaybackFile(alternate) {
 		return h.ensurePlaybackProbe(r.Context(), alternate), "", nil
 	}
-	resolved, err := h.resolveVirtualPlaybackSource(r, alternate, profileID, false, nil, "", "", 0, false, virtualResolveOptionsV3{sessionBound: false})
+	resolved, err := h.resolveVirtualPlaybackSource(r, alternate, profileID, false, nil, "", "", 0, false, virtualResolveOptionsV3{sessionBound: false, startPathProbe: startPath})
 	if err != nil {
 		return nil, "", err
 	}

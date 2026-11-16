@@ -9734,7 +9734,7 @@ func TestPrepareVirtualAlternateFileV3BindsOwnerInstallationAndResolvedURI(t *te
 	}
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/playback/start", nil).WithContext(newAuthorizedPlaybackContext())
-	prepared, _, err := handler.prepareVirtualAlternateFileV3(req, virtualFile, "profile-test-1")
+	prepared, _, err := handler.prepareVirtualAlternateFileV3(req, virtualFile, "profile-test-1", true)
 	if err != nil {
 		t.Fatalf("prepareVirtualAlternateFileV3 failed: %v", err)
 	}

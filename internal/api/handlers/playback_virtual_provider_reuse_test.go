@@ -30,7 +30,7 @@ func TestPrepareVirtualAlternateReusesAFreshResolvedSource(t *testing.T) {
 		}),
 	}
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/playback/replan", nil)
-	prepared, _, err := h.prepareVirtualAlternateFileV3(req, alternate, "profile-1")
+	prepared, _, err := h.prepareVirtualAlternateFileV3(req, alternate, "profile-1", false)
 	if err != nil {
 		t.Fatalf("prepare alternate: %v", err)
 	}

@@ -2,8 +2,11 @@ package handlers
 
 import (
 	"context"
+	"fmt"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -253,5 +256,86 @@ func TestVirtualResolveProbeBudgetSelectsByPath(t *testing.T) {
 	if virtualStartProbeBudget >= virtualProbeBudget {
 		t.Fatalf("start probe budget %s is not shorter than the background budget %s",
 			virtualStartProbeBudget, virtualProbeBudget)
+	}
+}
+
+// A start's alternate-version walk is still start-path work, so the substitute
+// probe it runs must carry virtualStartProbeBudget; only a replan rehydration
+// keeps the longer budget, because its response carries the probed inventory.
+// Regression: the alternate walk re-entered the 15s budget, so a start that
+// substituted a version still waited on a long probe (measured bound_ms=15000).
+func TestVirtualAlternateProbeBudgetSelectsByPath(t *testing.T) {
+	cases := []struct {
+		name      string
+		startPath bool
+		budgetMS  int64
+	}{
+		{name: "start alternate walk", startPath: true, budgetMS: virtualStartProbeBudget.Milliseconds()},
+		{name: "replan rehydration", startPath: false, budgetMS: virtualProbeBudget.Milliseconds()},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			uri := "virtual://movie/tt-alt-budget-" + strings.ReplaceAll(tc.name, " ", "-") + "?result=cand-1"
+			key := virtualProbeFailureKey(uri, 5)
+			virtualProbeFailures.clear(key)
+			t.Cleanup(func() { virtualProbeFailures.clear(key) })
+
+			// The probe's own bound is what the wait log publishes as bound_ms,
+			// which is the signal the incident was diagnosed from.
+			var logs strings.Builder
+			previous := slog.Default()
+			slog.SetDefault(slog.New(slog.NewTextHandler(&logs, nil)))
+			t.Cleanup(func() { slog.SetDefault(previous) })
+
+			stored := &models.MediaFile{
+				ID:                         431,
+				ContentID:                  "movie-alt-budget",
+				FilePath:                   uri,
+				Container:                  "virtual",
+				VirtualOwnerInstallationID: 5,
+			}
+			probed := make(chan struct{}, 1)
+			lister := VirtualPlaybackStreamListerFunc(func(_ context.Context, _ string, _ int, _ string, _ int) ([]VirtualPlaybackStream, error) {
+				// No declared codecs or container: the candidate cannot skip the
+				// probe, so the walk runs the synchronous probe whose bound the
+				// wait log publishes.
+				return []VirtualPlaybackStream{{ID: "cand-1", URI: uri}}, nil
+			})
+			h := virtualProbeGateCandidateHandler(stored, lister,
+				func(_ context.Context, _ string, f *models.MediaFile) (*models.MediaFile, error) {
+					probed <- struct{}{}
+					f.VideoTracks = []models.VideoTrack{{Codec: "h264", Width: 1920, Height: 1080}}
+					f.AudioTracks = []models.AudioTrack{{Codec: "aac", Channels: 2}}
+					f.CodecVideo, f.CodecAudio, f.Resolution, f.Container = "h264", "aac", "1080p", "mkv"
+					return f, nil
+				},
+				func(context.Context, models.VirtualFilePersistArgs) (int64, error) { return 1, nil })
+
+			req := httptest.NewRequest(http.MethodPost, "/api/v1/playback/start", nil)
+			alternate := *stored
+			if _, _, err := h.prepareVirtualAlternateFileV3(req, &alternate, "profile-1", tc.startPath); err != nil {
+				t.Fatalf("prepareVirtualAlternateFileV3 error: %v", err)
+			}
+			select {
+			case <-probed:
+			case <-time.After(4 * time.Second):
+				t.Fatal("alternate resolve never ran its synchronous probe")
+			}
+
+			want := fmt.Sprintf("bound_ms=%d", tc.budgetMS)
+			var probeLine string
+			for _, line := range strings.Split(logs.String(), "\n") {
+				if strings.Contains(line, "virtual resolve wait started") && strings.Contains(line, "wait_on=ffprobe") {
+					probeLine = line
+					break
+				}
+			}
+			if probeLine == "" {
+				t.Fatalf("alternate resolve logged no probe wait:\n%s", logs.String())
+			}
+			if !strings.Contains(probeLine, want) {
+				t.Fatalf("alternate probe wait = %q, want %s", probeLine, want)
+			}
+		})
 	}
 }

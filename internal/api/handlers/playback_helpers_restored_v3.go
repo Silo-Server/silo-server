@@ -721,7 +721,7 @@ func (h *PlaybackHandler) evaluateReplanCandidateV3(
 	if candidateAlternate == nil {
 		return nil, &candidateV3Error{Stage: candidateStageResolve, Message: "nil candidate alternate"}
 	}
-	candidateFile, candidateProvenance, err := h.prepareVirtualAlternateFileV3(r, candidateAlternate, record.ProfileID)
+	candidateFile, candidateProvenance, err := h.prepareVirtualAlternateFileV3(r, candidateAlternate, record.ProfileID, false)
 	if err != nil || candidateFile == nil {
 		if err == nil {
 			err = errors.New("candidate alternate unavailable")

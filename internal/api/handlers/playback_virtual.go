@@ -2040,6 +2040,14 @@ type virtualResolveOptionsV3 struct {
 	// A synchronous replan/rehydration leaves it false so the probed inventory
 	// is available on its response.
 	deferProbePastCommit bool
+	// startPathProbe marks the synchronous probe as start-path work even though
+	// the resolve itself is not the fresh start: the start's alternate-version
+	// walks (the alternate hunt and the transport-failure walk) run inside a
+	// start and must answer as quickly as it does. It narrows the probe bound to
+	// virtualStartProbeBudget only; the deferred-probe lifecycle stays with the
+	// deferProbe path marker, because a substitute's probed inventory is what the
+	// planner remaps a version's tracks from.
+	startPathProbe bool
 }
 
 // virtualCandidateRotationContextKeyV3 carries the rotation intent across the
@@ -2599,15 +2607,15 @@ func (h *PlaybackHandler) resolveVirtualAnchorURIExcludingFailedV3(
 }
 
 // virtualResolveProbeBudget selects the bound for the synchronous probe inside
-// resolveVirtualPlaybackSource. `deferProbe` is the resolve's path marker: the
-// fresh-start resolve (and the start's alternate-version walk) sets it, while a
-// replan rehydration or a serve-layer re-resolve leaves it false. A start must
-// answer quickly — past virtualStartProbeBudget it serves the candidate's
+// resolveVirtualPlaybackSource. startPath is the resolve's path marker: the
+// fresh-start resolve sets it through deferProbe, and the start's
+// alternate-version walks set it through the startPathProbe option. A start
+// must answer quickly — past virtualStartProbeBudget it serves the candidate's
 // declared metadata and the deferred probe owns verification — whereas a
 // synchronous replan has no deferred probe behind it and keeps the longer
 // budget.
-func virtualResolveProbeBudget(deferProbe bool) time.Duration {
-	if deferProbe {
+func virtualResolveProbeBudget(startPath bool) time.Duration {
+	if startPath {
 		return virtualStartProbeBudget
 	}
 	return virtualProbeBudget
@@ -3869,7 +3877,7 @@ func (h *PlaybackHandler) resolveVirtualPlaybackSource(r *http.Request, file *mo
 				}, resolvedIdentity, resolvedRematched), nil
 			}
 		}
-		probeBudget := virtualResolveProbeBudget(deferProbe)
+		probeBudget := virtualResolveProbeBudget(deferProbe || options.startPathProbe)
 		probeCtx, probeCancel := context.WithTimeout(attemptCtx, probeBudget)
 		trace.probeRan = true
 		probeStart := time.Now()
