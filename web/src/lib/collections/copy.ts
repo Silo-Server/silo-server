@@ -16,23 +16,9 @@ export * from "./copyArrange";
  * so call it while rendering, never at module scope.
  */
 
-/** "Movies", "Movies and Kids", "Movies, Kids and 4K Movies", in the interface language. */
-export function joinNames(names: readonly string[]): string {
-  if (names.length <= 1) return names[0] ?? "";
-  const language = appLanguage();
-  let format = listFormats.get(language);
-  if (!format) {
-    // English keeps its list without the serial comma, as en-GB writes it.
-    format = new Intl.ListFormat(language === "en" ? "en-GB" : language, {
-      style: "long",
-      type: "conjunction",
-    });
-    listFormats.set(language, format);
-  }
-  return format.format(names);
-}
+import { joinNames } from "./nameList";
 
-const listFormats = new Map<string, Intl.ListFormat>();
+export { joinNameParts, joinNames } from "./nameList";
 
 /** "Movies › Collections": a library's Collections tab. */
 function collectionsTabOf(libraryName: string): string {

@@ -3,9 +3,12 @@ import { ListRow, MetaDot, type ListRowProps } from "@/components/calm/ListRow";
 import { PosterPeek } from "@/components/calm/PosterPeek";
 import type { PeekRequest } from "@/components/calm/usePeekLimiter";
 import { rowKindGroup } from "@/lib/homeRows/catalog";
+import { collectionRefsOf } from "@/lib/homeRows/collectionList";
+import { holdsCollections } from "@/lib/sectionTypes";
 import {
   collapsedRowText,
   rowSwitchLabel,
+  collectionCount,
   titleCount,
   type DescriptionPart,
 } from "@/lib/homeRows/describe";
@@ -112,7 +115,12 @@ export function RowLine({
             </span>
           ) : null}
           <Description parts={description} />
-          {row.itemLimit > 0 ? (
+          {holdsCollections(row.sectionType) ? (
+            <>
+              <MetaDot />
+              {collectionCount(collectionRefsOf(row.config).length)}
+            </>
+          ) : row.itemLimit > 0 ? (
             <>
               <MetaDot />
               {titleCount(row.itemLimit)}

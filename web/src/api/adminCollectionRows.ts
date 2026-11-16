@@ -2,7 +2,14 @@ import {
   deleteAdminSection,
   fetchAdminSectionOrderSnapshot,
   fetchAdminSectionSnapshot,
+  updateAdminSection,
 } from "@/api/adminSections";
+import {
+  collectionRefsOf,
+  libraryCollectionIdsOf,
+  withoutLibraryCollection,
+} from "@/lib/homeRows/collectionList";
+import { holdsCollections } from "@/lib/sectionTypes";
 import type { components } from "@/api/v2/schema";
 import { v2, V2ProblemError } from "@/api/v2/request";
 import type { CollectionRow } from "@/lib/collections/rows";
@@ -54,6 +61,7 @@ export async function fetchAdminCollectionRows(
       title: item.title,
       enabled: item.enabled,
       ...rowPlace(item, orders.get(pageKey(page)) ?? []),
+      ...(item.collection_count ? { listCount: item.collection_count } : {}),
     };
   });
 }
@@ -72,12 +80,14 @@ function isGone(error: unknown) {
 }
 
 /**
- * Deletes the `rows` that show collection `collectionId`, one at a time, each
- * with the ETag of a fresh read. `rows` can be stale: a row that is already
- * gone, or that now shows another collection, is left alone and counts as
- * done (the collection's own delete still refuses if a row uses it). The
- * first failure stops the run: `remaining` holds that row and every row after
- * it, with the error.
+ * Takes collection `collectionId` off the `rows` that show it, one at a time,
+ * each with the ETag of a fresh read: a row that shows only it is deleted,
+ * and a row of collections that lists others too keeps them and loses only
+ * this one. `rows` can be stale: a row that is already gone, or that no
+ * longer shows the collection, is left alone and counts as done (the
+ * collection's own delete still refuses if a row uses it). The first failure
+ * stops the run: `remaining` holds that row and every row after it, with the
+ * error.
  */
 export async function deleteAdminCollectionRows(
   collectionId: string,
@@ -86,7 +96,21 @@ export async function deleteAdminCollectionRows(
   for (const [index, row] of rows.entries()) {
     try {
       const { section, etag } = await fetchAdminSectionSnapshot(row.id);
-      if (section.config?.library_collection_id !== collectionId) continue;
+      const config = section.config ?? {};
+      if (holdsCollections(section.section_type)) {
+        const listed = libraryCollectionIdsOf(config);
+        if (!listed.includes(collectionId)) continue;
+        if (collectionRefsOf(config).length > 1) {
+          await updateAdminSection({
+            id: row.id,
+            etag,
+            config: withoutLibraryCollection(config, collectionId),
+          });
+          continue;
+        }
+      } else if (config.library_collection_id !== collectionId) {
+        continue;
+      }
       await deleteAdminSection({ id: row.id, etag });
     } catch (error) {
       if (isGone(error)) continue;

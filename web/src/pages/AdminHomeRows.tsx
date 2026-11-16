@@ -46,6 +46,7 @@ import type { HomeRow, LibraryPage, PageRef } from "@/lib/homeRows/types";
 import { updateCheckboxSelection } from "@/lib/checkboxSelection";
 import { useT, type Translate } from "@/i18n";
 import { useHomeRowTitle, useSectionTitle } from "@/lib/sectionTitle";
+import { holdsCollections } from "@/lib/sectionTypes";
 
 type RowTitle = ReturnType<typeof useHomeRowTitle>;
 
@@ -452,7 +453,9 @@ export default function AdminHomeRows() {
   // What Restore replaces, as of the version the dialog read.
   const restoreSections = restoreSnapshot?.sections ?? [];
   const restoreCollectionTitles = restoreSections
-    .filter((section) => section.section_type === "collection")
+    .filter(
+      (section) => section.section_type === "collection" || holdsCollections(section.section_type),
+    )
     .map((section) => section.title);
 
   const moreItems: PageMoreMenuItem[] = [
@@ -494,7 +497,8 @@ export default function AdminHomeRows() {
           ? t("web.admin.homeRows.rowMenu.stopUsingAsHero")
           : t("web.admin.homeRows.rowMenu.useAsHero"),
         icon: row.hero ? StarOff : Star,
-        disabled: !canManageCurrentScope,
+        // A row of collections has no title to show as the hero.
+        disabled: !canManageCurrentScope || (!row.hero && holdsCollections(row.sectionType)),
         onSelect: () => void adapter.setHero(row.id, !row.hero),
       },
       shared.moveToTop,
