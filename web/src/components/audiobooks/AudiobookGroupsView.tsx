@@ -347,7 +347,7 @@ export default function AudiobookGroupsView({
                     {groupTotals(t, group)}
                   </div>
                   {listening && (
-                    <div className="text-foreground truncate px-0.5 text-xs font-medium">
+                    <div className="text-foreground px-0.5 text-xs font-medium text-pretty">
                       {listening}
                     </div>
                   )}
