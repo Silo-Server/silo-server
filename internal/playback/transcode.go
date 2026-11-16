@@ -360,6 +360,10 @@ type TranscodeSession struct {
 	// seek anchor, which RecipeOpts restores for a planned session.
 	planStreamOrigin       float64
 	planSeekAnchorResolved bool
+	// planResumeSeconds is the position a resume's plan was asked for (the
+	// first run's requested seek), or 0 for a plan from the start. The
+	// source-aligned playlist starts the player there.
+	planResumeSeconds float64
 	// subtitleSpans lists each generation's subtitle rendition cue file,
 	// oldest first, including those an earlier session recorded in the same
 	// output directory. Guarded by mu.
@@ -540,8 +544,17 @@ func StartTranscode(ctx context.Context, opts TranscodeOpts) (*TranscodeSession,
 		return nil, fmt.Errorf("plan rebuilt keyframe playlist: %w", err)
 	}
 	var copyGroups *copyGroupAssembler
+	planResumeSeconds := 0.0
 	if copyPlan != nil {
 		log.Printf("playback: session %s serves a %d-segment keyframe playlist", opts.SessionID, len(copyPlan.durations))
+		if copyPlan.resumes() {
+			// A resume's first run starts at the plan's first segment, the
+			// way a restart for it does. Its segments are numbered from the
+			// plan, not from FFmpeg's start number.
+			planResumeSeconds = opts.SeekSeconds
+			opts.SeekSeconds = copyPlan.restartSeekSeconds(0)
+			opts.StartSegmentNumber = 0
+		}
 		copyGroups = newCopyGroupAssembler(opts.OutputDir, copyPlan)
 		// The session starts at generation 0.
 		opts.copyGroupPrefix = copyGroups.startRun(opts.StartSegmentNumber, audioRecipeKey(opts), 0)
@@ -576,6 +589,7 @@ func StartTranscode(ctx context.Context, opts TranscodeOpts) (*TranscodeSession,
 		copyGroups:             copyGroups,
 		planStreamOrigin:       opts.StreamOriginSeconds,
 		planSeekAnchorResolved: opts.CopySeekAnchorResolved,
+		planResumeSeconds:      planResumeSeconds,
 		subtitleSpans:          subtitleSpans,
 		subtitleCueBase:        subtitleCueBase,
 	}
@@ -2661,9 +2675,18 @@ func (s *TranscodeSession) BuildSourceAlignedPlaybackManifest(segPrefix, rawQuer
 		return nil, err
 	}
 	if s.copyPlan != nil {
-		// A planned playlist starts at the source's beginning and doesn't
-		// depend on FFmpeg's progress or restarts.
-		return s.buildPlaybackManifest(segPrefix, rawQuery)
+		// A planned playlist doesn't depend on FFmpeg's progress or
+		// restarts. One from the start is on the source's timeline already;
+		// a resume's starts at its origin, so it gets the gap before it that
+		// a seeked FFmpeg playlist gets.
+		manifest, err := s.buildPlaybackManifest(segPrefix, rawQuery)
+		if err != nil || !s.copyPlan.resumes() {
+			return manifest, err
+		}
+		opts := s.Opts()
+		opts.SeekSeconds, opts.StartSegmentNumber = s.planResumeSeconds, 0
+		opts.StreamOriginSeconds, opts.CopySeekAnchorResolved = s.planStreamOrigin, true
+		return AlignRealManifestToSourceTimeline(manifest, opts, sourceTimelineGapURI(manifest, opts, segPrefix, rawQuery))
 	}
 	s.mu.Lock()
 	opts, generation, restarting := s.opts, s.segmentGeneration, s.restarting != nil
@@ -2681,15 +2704,7 @@ func (s *TranscodeSession) BuildSourceAlignedPlaybackManifest(segPrefix, rawQuer
 		return manifest, nil
 	}
 
-	gapURI := segPrefix + "source_timeline_gap" + hlsSegmentExtension(opts)
-	if rawQuery != "" {
-		// Gap URIs take the query form the real segment URIs got.
-		gapQuery := rawQuery
-		if definition, reference := manifestVariable(manifestQueryVariable, rawQuery, minRewrittenURISavings); definition != "" && bytes.Contains(manifest, []byte(definition)) {
-			gapQuery = reference
-		}
-		gapURI += "?" + gapQuery
-	}
+	gapURI := sourceTimelineGapURI(manifest, opts, segPrefix, rawQuery)
 	if strings.EqualFold(opts.TargetCodecVideo, "copy") && opts.CopySeekAnchorResolved {
 		timeline, err := parseManifestTimeline(manifest)
 		if err != nil {
@@ -2707,6 +2722,20 @@ func (s *TranscodeSession) BuildSourceAlignedPlaybackManifest(segPrefix, rawQuer
 		return manifest, nil
 	}
 	return AlignRealManifestToSourceTimeline(manifest, opts, gapURI)
+}
+
+// sourceTimelineGapURI is the URI of the gap segments a source-aligned
+// playlist prepends. Gap URIs take the query form the real segment URIs got.
+func sourceTimelineGapURI(manifest []byte, opts TranscodeOpts, segPrefix, rawQuery string) string {
+	gapURI := segPrefix + "source_timeline_gap" + hlsSegmentExtension(opts)
+	if rawQuery != "" {
+		gapQuery := rawQuery
+		if definition, reference := manifestVariable(manifestQueryVariable, rawQuery, minRewrittenURISavings); definition != "" && bytes.Contains(manifest, []byte(definition)) {
+			gapQuery = reference
+		}
+		gapURI += "?" + gapQuery
+	}
+	return gapURI
 }
 
 // AlignRealManifestToSourceTimeline prepends bounded EXT-X-GAP segments to a
@@ -3579,6 +3608,10 @@ func (s *TranscodeSession) SegmentAt(positionSeconds float64) int {
 		return 0
 	}
 	if s.copyPlan != nil {
+		// A resume's plan starts at its origin, not at the source's start.
+		if s.copyPlan.resumes() {
+			positionSeconds = max(positionSeconds-s.planStreamOrigin, 0)
+		}
 		return s.copyPlan.segmentAt(positionSeconds)
 	}
 	if d := s.Opts().SegmentDuration; d > 0 {
@@ -3596,16 +3629,15 @@ func (s *TranscodeSession) Opts() TranscodeOpts {
 
 // RecipeOpts returns the opts to persist for rebuilding the session. A
 // keyframe-planned session's timeline is its plan, wherever a restart has
-// moved the current run, so its recipe starts from the beginning like its
-// first run: the rebuild plans the same segments again (the planner takes
-// only a session from the start), and a segment request restarts FFmpeg at
-// the player's position.
+// moved the current run, so its recipe starts where its first run did: from
+// the beginning, or at a resume's origin. The rebuild plans the same segments
+// again, and a segment request restarts FFmpeg at the player's position.
 func (s *TranscodeSession) RecipeOpts() TranscodeOpts {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	opts := s.opts
 	if s.copyPlan != nil {
-		opts.SeekSeconds, opts.StartSegmentNumber = 0, 0
+		opts.SeekSeconds, opts.StartSegmentNumber = s.planResumeSeconds, 0
 		opts.StreamOriginSeconds, opts.CopySeekAnchorResolved = s.planStreamOrigin, s.planSeekAnchorResolved
 	}
 	return opts
@@ -3915,7 +3947,11 @@ func (s *TranscodeSession) restart(
 	if s.copyPlan != nil {
 		startSegment = min(max(startSegment, 0), len(s.copyPlan.durations)-1)
 		seekSeconds = s.copyPlan.restartSeekSeconds(startSegment)
+		// The plan's timeline doesn't move: a resume's stays at its origin.
 		streamOriginSeconds, copySeekAnchorResolved = 0, true
+		if s.copyPlan.resumes() {
+			streamOriginSeconds = s.planStreamOrigin
+		}
 	}
 
 	s.mu.Lock()

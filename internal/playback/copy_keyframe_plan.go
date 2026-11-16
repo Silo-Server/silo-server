@@ -65,17 +65,45 @@ var probeInputStart = func(ctx context.Context, opts TranscodeOpts) (float64, er
 
 // planCopySegments returns the segment plan for a session, or nil when the
 // session keeps FFmpeg's real playlist: the setting is off, the video isn't
-// copied into fMP4, the stream doesn't start at the beginning, or the source
-// has no complete keyframe index. An error reports a failed probe of the
-// source's start, which says nothing about whether the file can be planned.
+// copied into fMP4, the stream starts past the beginning at a position no
+// resolved copy seek anchor places on a keyframe, or the source has no
+// complete keyframe index. An error reports a failed probe of the source's
+// start, which says nothing about whether the file can be planned.
+//
+// A resume starts at its resolved anchor (StreamOriginSeconds), which the
+// player was already given as the stream's origin. Its plan starts at that
+// keyframe and runs to the end, so the player gets a complete playlist from
+// there instead of FFmpeg's growing one (#1466).
 func planCopySegments(ctx context.Context, opts TranscodeOpts) (*copySegmentPlan, error) {
+	resume := opts.CopySeekAnchorResolved && opts.StreamOriginSeconds > 0
 	if !opts.KeyframePlaylist ||
 		!strings.EqualFold(opts.TargetCodecVideo, "copy") || !videoUsesFMP4(opts) ||
-		opts.SeekSeconds > 0 || opts.StartSegmentNumber > 0 ||
+		(!resume && (opts.SeekSeconds > 0 || opts.StartSegmentNumber > 0)) ||
 		!CanGenerateSyntheticManifest(opts.TotalDuration, opts.SegmentDuration) {
 		return nil, nil
 	}
 	return planFromKeyframeIndex(ctx, opts)
+}
+
+// resumeKeyframeTolerance is how far a resume's resolved origin may sit from
+// the keyframe its plan starts at. The resolver reports the first packet
+// FFmpeg emits, which can trail the keyframe's container time by the
+// source's B-frame delay.
+const resumeKeyframeTolerance = 0.1
+
+// resumeKeyframe returns the keyframe a resume's plan starts at: the one
+// nearest its origin, on the source's timeline less the start
+// -start_at_zero subtracts, within resumeKeyframeTolerance.
+func resumeKeyframe(keys []float64, origin, inputStart float64) (int, bool) {
+	at := origin + inputStart
+	i := sort.SearchFloat64s(keys, at)
+	if i > 0 && (i == len(keys) || math.Abs(keys[i-1]-at) < math.Abs(keys[i]-at)) {
+		i--
+	}
+	if i >= len(keys) || math.Abs(keys[i]-at) > resumeKeyframeTolerance {
+		return 0, false
+	}
+	return i, true
 }
 
 // planFromKeyframeIndex plans a session's segments from its source's keyframe
@@ -93,14 +121,6 @@ func planFromKeyframeIndex(ctx context.Context, opts TranscodeOpts) (*copySegmen
 	if segmentSeconds <= 0 {
 		segmentSeconds = defaultSegmentDuration
 	}
-	firstKey := keyframes.PlanSegmentIndices(idx.Keyframes, segmentSeconds)
-	if len(firstKey) == 0 || len(firstKey) > maxSyntheticManifestSegments {
-		return nil, nil
-	}
-	starts := make([]float64, len(firstKey))
-	for i, k := range firstKey {
-		starts[i] = idx.Keyframes[k]
-	}
 	// FFmpeg's last segment ends with the copied video, even when an audio
 	// or subtitle track runs on: the container's duration can be longer.
 	if idx.VideoEnd <= idx.Keyframes[len(idx.Keyframes)-1] {
@@ -108,7 +128,6 @@ func planFromKeyframeIndex(ctx context.Context, opts TranscodeOpts) (*copySegmen
 		// segment.
 		return nil, nil
 	}
-	durations := keyframes.SegmentDurations(starts, idx.VideoEnd)
 	// Without the start FFmpeg subtracts, its groups can't be placed.
 	inputStart, err := probeInputStart(ctx, opts)
 	if err != nil {
@@ -118,6 +137,26 @@ func planFromKeyframeIndex(ctx context.Context, opts TranscodeOpts) (*copySegmen
 		log.Printf("playback: session %s: input start %.3fs is after the first keyframe; using FFmpeg's playlist", opts.SessionID, inputStart)
 		return nil, nil
 	}
+	// The plan keeps every keyframe, so the groups of a run that lands
+	// before the resume keyframe still place; its segments start there.
+	from := 0
+	if opts.CopySeekAnchorResolved && opts.StreamOriginSeconds > 0 {
+		var ok bool
+		if from, ok = resumeKeyframe(idx.Keyframes, opts.StreamOriginSeconds, inputStart); !ok {
+			log.Printf("playback: session %s: resume origin %.3fs is at no keyframe; using FFmpeg's playlist", opts.SessionID, opts.StreamOriginSeconds)
+			return nil, nil
+		}
+	}
+	firstKey := keyframes.PlanSegmentIndices(idx.Keyframes[from:], segmentSeconds)
+	if len(firstKey) == 0 || len(firstKey) > maxSyntheticManifestSegments {
+		return nil, nil
+	}
+	starts := make([]float64, len(firstKey))
+	for i := range firstKey {
+		firstKey[i] += from
+		starts[i] = idx.Keyframes[firstKey[i]]
+	}
+	durations := keyframes.SegmentDurations(starts, idx.VideoEnd)
 	return &copySegmentPlan{durations: durations, keyframes: idx.Keyframes, firstKey: firstKey, inputStart: inputStart, file: idx.File}, nil
 }
 
@@ -308,9 +347,16 @@ func (p *copySegmentPlan) keyframeRange(n int) (first, end int) {
 	return first, end
 }
 
-// segmentOfKeyframe returns the segment holding keyframe k.
+// segmentOfKeyframe returns the segment holding keyframe k, or -1 for a
+// keyframe before a resume's first segment.
 func (p *copySegmentPlan) segmentOfKeyframe(k int) int {
 	return sort.SearchInts(p.firstKey, k+1) - 1
+}
+
+// resumes reports a plan whose segments start past the file's first
+// keyframe: a resume's (planCopySegments).
+func (p *copySegmentPlan) resumes() bool {
+	return len(p.firstKey) > 0 && p.firstKey[0] > 0
 }
 
 // restartSeekSeconds is the -ss that makes FFmpeg start at or before segment
@@ -346,7 +392,7 @@ func (p *copySegmentPlan) cueStart(n int) float64 {
 // at: the one before the segment's first, or the first keyframe for a run
 // from the start. FFmpeg's seek lands there or earlier, never later.
 func (p *copySegmentPlan) restartKeyframe(n int) int {
-	if n <= 0 || n >= len(p.firstKey) {
+	if n < 0 || n >= len(p.firstKey) {
 		return 0
 	}
 	return max(p.firstKey[n]-1, 0)
