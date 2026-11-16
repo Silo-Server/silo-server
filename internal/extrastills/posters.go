@@ -3,6 +3,7 @@ package extrastills
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
@@ -77,11 +78,16 @@ const (
 	posterNotSaved
 	// posterFailed: a failure that may pass.
 	posterFailed
+	// posterSkipped: the file could not be loaded. A deleted file drops out of
+	// the list by itself, and a database error says nothing about the share,
+	// so it neither counts toward the stop nor clears the count.
+	posterSkipped
 )
 
 // run gives up to limit movies a frame poster and reports how many it saved.
-// It stops early when no transcode node can be reserved, and after
-// maxPosterFailuresInARow failures in a row.
+// It stops early when no transcode node can be reserved, after
+// maxPosterFailuresInARow failures in a row, and with an error when a poster
+// cannot be saved.
 func (p *posterPass) run(ctx context.Context, limit int) (int, error) {
 	pending, err := p.items.ListPendingFramePosters(ctx, framePosterKey, limit)
 	if err != nil {
@@ -97,6 +103,9 @@ func (p *posterPass) run(ctx context.Context, limit int) (int, error) {
 			slog.InfoContext(ctx, "frame posters: no transcode node could be reserved; trying again next run",
 				"component", "extrastills", "content_id", movie.ContentID, "error", err)
 			return saved, nil
+		}
+		if err != nil {
+			return saved, err
 		}
 		switch outcome {
 		case posterSaved:
@@ -116,17 +125,19 @@ func (p *posterPass) run(ctx context.Context, limit int) (int, error) {
 	return saved, nil
 }
 
-// generate takes, crops and saves one movie's frame poster. A failed
-// extraction or crop is recorded on the file (recordFailure), except when no
-// transcode node is available: that error is returned and stops the run. A
-// failure to load the file or to store or save the poster is tried again on
-// the next run.
+// generate takes, crops, stores and saves one movie's frame poster. A failed
+// extraction, crop or store is recorded on the file (recordFailure), so the
+// next run moves past the movie, except when no transcode node is available:
+// that error is returned and stops the run. A file that cannot be loaded is
+// skipped. A failed save is a database error, not the movie's: it is
+// returned and ends the pass, rather than spending more extractions on frames
+// that cannot be saved.
 func (p *posterPass) generate(ctx context.Context, movie catalog.PendingFramePoster) (posterOutcome, error) {
 	attrs := []any{"component", "extrastills", "content_id", movie.ContentID, "file_id", movie.FileID}
 	file, err := p.files.GetByID(ctx, movie.FileID)
 	if err != nil {
 		slog.WarnContext(ctx, "frame posters: loading file failed", append(attrs, "error", err)...)
-		return posterFailed, nil
+		return posterSkipped, nil
 	}
 	poster, err := p.frames.ExtractStill(ctx, file, frameSeconds(movie.Duration))
 	if err == nil {
@@ -137,14 +148,12 @@ func (p *posterPass) generate(ctx context.Context, movie catalog.PendingFramePos
 	}
 	path, thumbhash, err := p.cacher.CacheFramePoster(ctx, poster, movie.ContentID)
 	if err != nil {
-		slog.WarnContext(ctx, "frame posters: storing poster failed", append(attrs, "error", err)...)
-		return posterFailed, nil
+		return p.recordFailure(ctx, file, err, attrs)
 	}
 	saved, err := p.items.SetFramePosterIfSource(ctx, movie.ContentID, movie.PosterSource, path,
 		catalog.StillSourceFramePrefix+movie.FrameKey, thumbhash)
 	if err != nil {
-		slog.WarnContext(ctx, "frame posters: saving poster failed", append(attrs, "error", err)...)
-		return posterFailed, nil
+		return posterFailed, fmt.Errorf("saving frame poster for %s: %w", movie.ContentID, err)
 	}
 	if !saved {
 		// Another image took the slot meanwhile; the artwork revision GC
@@ -154,16 +163,16 @@ func (p *posterPass) generate(ctx context.Context, movie catalog.PendingFramePos
 	return posterSaved, nil
 }
 
-// recordFailure records a failed extraction or crop on the file. It returns
-// err instead when no transcode node is available or the run was canceled,
-// since neither says anything about the file, and records nothing when the
-// image budget turned the crop away.
+// recordFailure records a failed extraction, crop or store on the file. It
+// returns err instead when no transcode node is available or the run was
+// canceled, since neither says anything about the file, and records nothing
+// when the image budget turned the image away.
 func (p *posterPass) recordFailure(ctx context.Context, file *models.MediaFile, err error, attrs []any) (posterOutcome, error) {
 	if errors.Is(err, chapterthumbs.ErrExtractionUnavailable) || ctx.Err() != nil {
 		return posterNotSaved, err
 	}
 	if errors.Is(err, imageutil.ErrBusy) {
-		slog.WarnContext(ctx, "frame posters: cropping deferred; trying again next run", append(attrs, "error", err)...)
+		slog.WarnContext(ctx, "frame posters: image processing busy; trying again next run", append(attrs, "error", err)...)
 		return posterFailed, nil
 	}
 	identity := mediaartifact.Identity{FileHash: file.FileHash, FileSize: file.FileSize, DurationSeconds: float64(file.Duration)}
@@ -177,7 +186,7 @@ func (p *posterPass) recordFailure(ctx context.Context, file *models.MediaFile, 
 		}
 		return posterNotSaved, nil
 	}
-	slog.WarnContext(ctx, "frame posters: taking a frame failed; trying again later", append(attrs, "error", err)...)
+	slog.WarnContext(ctx, "frame posters: making a poster failed; trying again later", append(attrs, "error", err)...)
 	if err := p.failures.RecordFailure(ctx, mediaartifact.Failure{
 		MediaFileID: file.ID, Key: framePosterKey, Identity: identity, RecordedBy: framePosterRecorder, Error: err.Error(),
 	}); err != nil {
