@@ -237,3 +237,21 @@ func TestBackgroundProbeBudgetCoversSlowProbe(t *testing.T) {
 		t.Fatal("a successful slow probe left a failure mark")
 	}
 }
+
+// The synchronous probe is bounded by the path that asked for it. A start
+// answers inside virtualStartProbeBudget and lets the deferred probe verify;
+// a synchronous replan keeps the background budget, because no deferred probe
+// follows it. Regression: the start path used the 15s background budget, so an
+// early Play sat on the provider byte source for 15s before planning.
+func TestVirtualResolveProbeBudgetSelectsByPath(t *testing.T) {
+	if got := virtualResolveProbeBudget(true); got != virtualStartProbeBudget {
+		t.Fatalf("start-path probe budget = %s, want %s", got, virtualStartProbeBudget)
+	}
+	if got := virtualResolveProbeBudget(false); got != virtualProbeBudget {
+		t.Fatalf("replan probe budget = %s, want %s", got, virtualProbeBudget)
+	}
+	if virtualStartProbeBudget >= virtualProbeBudget {
+		t.Fatalf("start probe budget %s is not shorter than the background budget %s",
+			virtualStartProbeBudget, virtualProbeBudget)
+	}
+}

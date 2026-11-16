@@ -13072,6 +13072,54 @@ describe("usePlaybackSession mid-stream reconnect", () => {
     unmount();
   });
 
+  // The startup guard fires when a mounted transport shows no frame before its
+  // deadline — the direct-play mkv stall. The guard reports `startup_timeout`,
+  // and the failed plan's attempt key must ride along so the server's planner
+  // cannot hand back the identical unplayable route. Without the key the
+  // recovery replans onto original_http again and the viewer waits out another
+  // deadline.
+  it("rotates a stalled direct play with the failed plan key in its history", async () => {
+    const harness = reconnectHarness({
+      replan: () =>
+        jsonResponse(
+          playable(
+            "session-1",
+            fixturePlanV3({
+              plan_id: "plan:2222222222222222",
+              plan_attempt_key: "v3:2222222222222222",
+            }),
+          ),
+        ),
+    });
+    const { result, unmount } = renderHook(
+      () => usePlaybackSession("request-1", [], [], 7, 0, false, "auto"),
+      { wrapper },
+    );
+    await waitFor(() => expect(result.current.planRevision).toBe(1));
+    const failedPlanId = result.current.plan?.plan_id;
+    const failedKey = result.current.plan?.plan_attempt_key;
+
+    act(() =>
+      result.current.recoverFromFailure(
+        { classification: "startup_timeout", message: "Playback showed no frame before its startup deadline." },
+        0,
+      ),
+    );
+
+    await waitFor(() => expect(harness.replanBodies).toHaveLength(1));
+    expect(harness.replanBodies[0]).toMatchObject({
+      operation: "failure_recovery",
+      failed_plan_id: failedPlanId,
+      attempted_plan_keys: [failedKey],
+      failure: { classification: "startup_timeout" },
+    });
+    // The replacement is adopted, not left as an error: the viewer gets the
+    // packaged route instead of an ended session.
+    await waitFor(() => expect(result.current.plan?.plan_id).toBe("plan:2222222222222222"));
+
+    unmount();
+  });
+
   it("keeps the error for a recovery that fails before the stream ever played", async () => {
     const harness = reconnectHarness({ replan: unreachable });
     const { result, unmount } = renderHook(

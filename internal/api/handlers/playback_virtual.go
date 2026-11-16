@@ -2598,6 +2598,21 @@ func (h *PlaybackHandler) resolveVirtualAnchorURIExcludingFailedV3(
 	return rotated, rotatedCleanup, nil
 }
 
+// virtualResolveProbeBudget selects the bound for the synchronous probe inside
+// resolveVirtualPlaybackSource. `deferProbe` is the resolve's path marker: the
+// fresh-start resolve (and the start's alternate-version walk) sets it, while a
+// replan rehydration or a serve-layer re-resolve leaves it false. A start must
+// answer quickly — past virtualStartProbeBudget it serves the candidate's
+// declared metadata and the deferred probe owns verification — whereas a
+// synchronous replan has no deferred probe behind it and keeps the longer
+// budget.
+func virtualResolveProbeBudget(deferProbe bool) time.Duration {
+	if deferProbe {
+		return virtualStartProbeBudget
+	}
+	return virtualProbeBudget
+}
+
 func (h *PlaybackHandler) resolveVirtualPlaybackSource(r *http.Request, file *models.MediaFile, profileID string, deferProbe bool, excludedCandidateIDs []string, preferredCandidateID string, qualityPreference string, bandwidthCapKbps int, forceRelist bool, opts ...virtualResolveOptionsV3) (resolvedVirtualPlaybackSource, error) {
 	options := virtualResolveOptionsV3{}
 	if len(opts) > 0 {
@@ -3854,13 +3869,14 @@ func (h *PlaybackHandler) resolveVirtualPlaybackSource(r *http.Request, file *mo
 				}, resolvedIdentity, resolvedRematched), nil
 			}
 		}
-		probeCtx, probeCancel := context.WithTimeout(attemptCtx, virtualProbeBudget)
+		probeBudget := virtualResolveProbeBudget(deferProbe)
+		probeCtx, probeCancel := context.WithTimeout(attemptCtx, probeBudget)
 		trace.probeRan = true
 		probeStart := time.Now()
 		forwardVirtualCandidateDeclaredAudio(&syncProbeFile, cand)
 		syncProbeFile.VirtualExpectedRuntimeMinutes = h.virtualExpectedRuntimeMinutes(attemptCtx, file)
 		probeWait := startVirtualResolveWaitLog(probeCtx, "probe", "ffprobe", file.ContentID, file.ID, cand.URI,
-			virtualProbeBudget, virtualStartProbeBudget)
+			probeBudget, virtualStartProbeBudget)
 		probed, probeErr := h.probeVirtualSource(probeCtx, streamURL, &syncProbeFile, cand.RequestHeaders)
 		probeWait.finish(probeErr)
 		trace.probe += time.Since(probeStart)

@@ -287,3 +287,70 @@ func TestDeliveryDemotionSurvivesDisabledAndOmittedEntriesAcrossReplans(t *testi
 		t.Fatalf("final replan re-enabled the demoted delivery: %s (%s)", final.PlaybackPlan.Delivery, final.PlaybackPlan.DecisionReason)
 	}
 }
+
+// A direct play that mounts and never produces a frame is the client startup
+// guard's deadline failure. The guard reports `startup_timeout` with the failed
+// plan's attempt key, and a startup timeout is not evidence about the delivery
+// class on its own (see corroboratedStartupTimeoutV3), so the class stays
+// eligible. The attempt key is what must keep the identical unplayable plan
+// from being planned again: the recovery has to leave original_http and pick a
+// packaged route for the same file.
+func TestStartupTimeoutFailureRecoveryLeavesDirectPlay(t *testing.T) {
+	file := v3HandlerFixtureFile(t)
+	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0), testPlaybackFileResolver{file: file})
+	stubCopySeekAnchorV3(handler)
+	handler.PlaybackConfig = playbackTestConfig(writePlaybackTestFFmpeg(t), t.TempDir())
+	presetLocalRegistryV3(handler, playback.NewTransformationRegistryV3([]playback.TransformationSpecV3{
+		{Name: "audio_to_aac", RecipeVersion: "2", Available: true},
+		{Name: "video_to_h264", RecipeVersion: "2", Available: true},
+	}))
+	handler.ItemAccess = allowAllPlaybackItemAccess{}
+	handler.SettingsRepo = &mutablePlaybackSettingsV3{values: map[string]string{"allow_4k_transcode": "true"}}
+
+	start := v3HandlerStartRequest()
+	start.ClientPlaybackContext.Deliveries[playback.DeliveryClassOriginalHTTPV3] = playback.DeliveryCapabilityV3{
+		Enabled: true, SupportedOnDevice: true,
+		VideoCodecs: []string{"h264"},
+	}
+	start.ClientPlaybackContext.Deliveries[playback.DeliveryClassHLSV3] = playback.DeliveryCapabilityV3{
+		Enabled: true, SupportedOnDevice: true,
+		Containers:        []string{"hls"},
+		VideoCodecs:       []string{"h264"},
+		AudioDecodeCodecs: []string{"aac"},
+		Subtitles:         playback.DeliverySubtitleCapabilitiesV3{EmbeddedText: true, SidecarText: true},
+	}
+	rr := httptest.NewRecorder()
+	handler.HandleStartPlayback(rr, httptest.NewRequest(http.MethodPost, "/api/v1/playback/start", strings.NewReader(marshalV3StartRequest(t, start))).WithContext(newAuthorizedPlaybackContext()))
+	var started playback.DecisionResponseV3
+	if rr.Code != http.StatusCreated || json.Unmarshal(rr.Body.Bytes(), &started) != nil || started.PlaybackPlan == nil {
+		t.Fatalf("start: %d %s", rr.Code, rr.Body.String())
+	}
+	plan := started.PlaybackPlan
+	if plan.Delivery != playback.DeliveryOriginalHTTPV3 {
+		t.Fatalf("fixture expected a direct-play start, got %s (%s)", plan.Delivery, plan.DecisionReason)
+	}
+
+	// The guard's report: no frame before the deadline, and the route it was
+	// waiting on is in the attempted-key history.
+	recoveryReq := playback.ReplanRequestV3{
+		ProtocolVersion: playback.ProtocolV3, ClientFeatures: start.ClientFeatures,
+		Operation: playback.ReplanOperationFailureRecoveryV3, PlaybackAttemptID: start.PlaybackAttemptID,
+		ReplanRequestID: "startup-timeout-recovery-0001", FailedPlanID: plan.PlanID, PlanAttemptID: "startup-timeout-attempt-0001",
+		PlanAttemptKey: plan.PlanAttemptKey, AttemptedPlanKeys: []string{plan.PlanAttemptKey}, AttemptCount: 1,
+		PositionSeconds: 0, SelectedTracks: plan.SelectedTracks,
+		Failure:               playback.FailureV3{Classification: "startup_timeout"},
+		Capabilities:          start.Capabilities,
+		ClientPlaybackContext: start.ClientPlaybackContext,
+	}
+	recovered := postPlaybackReplanV3(t, handler, started.SessionID, recoveryReq)
+	if recovered.Terminal != nil {
+		t.Fatalf("startup-timeout recovery returned a terminal: %#v", recovered.Terminal)
+	}
+	if recovered.PlaybackPlan == nil {
+		t.Fatal("startup-timeout recovery returned no plan")
+	}
+	if playback.DeliveryClassV3(recovered.PlaybackPlan.Delivery) == playback.DeliveryClassOriginalHTTPV3 {
+		t.Fatalf("startup-timeout recovery re-planned the identical direct-play route: %s (%s)",
+			recovered.PlaybackPlan.Delivery, recovered.PlaybackPlan.DecisionReason)
+	}
+}
