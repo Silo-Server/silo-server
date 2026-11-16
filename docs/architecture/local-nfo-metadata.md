@@ -376,7 +376,10 @@ precedence order, each tried with `.jpg`, `.jpeg`, `.png`, `.webp`, `.tbn`,
   not pending its first match, with unlocked images, an empty `poster_path`,
   and a `poster_source_path` that is empty or a lost frame's. A sidecar or
   provider poster waiting for its copy has a source of its own, so it is never
-  raced. The frame is taken from the lowest-id live file with a known duration
+  raced. A movie with live main files in more than one library gets no frame,
+  since the poster is shared by every library the item is in and a frame from
+  one library's file would show viewers of another a file they may not see.
+  The frame is taken from the lowest-id live file with a known duration
   and no blocking failure record, at the extras position, cropped to a
   centered 2:3 portrait at its own scale (`imageutil.CropToPoster`), and stored
   under the item's `local/` poster keys with the usual poster variants.

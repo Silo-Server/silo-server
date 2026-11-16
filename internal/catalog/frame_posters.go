@@ -26,13 +26,17 @@ type PendingFramePoster struct {
 // artwork reconciler cleared keeps its frame source, so it is listed again. A
 // movie waits while it is pending its first match, while its images are
 // locked, and while none of its files in an enabled library qualifies. A
-// failure blocks a file while the file is unchanged: for good when it cannot
+// movie with live main files in more than one library is never listed,
+// whatever state those files are in: its poster is shown in every library
+// the movie is in, and a frame from one library's file would show a viewer
+// of another library a file they may not see. A failure blocks a file while the file is unchanged: for good when it cannot
 // be decoded, otherwise until its retry time, whichever server recorded it.
 //
 // The empty poster_path is an equality probe on idx_media_items_poster_path_gc,
 // so the scan reads only the items with no poster, and each of them joins its
 // files through the content_id index and their artifacts through the primary
-// key.
+// key. The other-library check probes idx_media_files_active_content_folder
+// (content_id, media_folder_id WHERE missing_since IS NULL).
 func (r *ItemRepository) ListPendingFramePosters(ctx context.Context, failures mediaartifact.Key, limit int) ([]PendingFramePoster, error) {
 	rows, err := r.pool.Query(ctx, `
 		SELECT DISTINCT ON (mi.content_id)
@@ -52,6 +56,13 @@ func (r *ItemRepository) ListPendingFramePosters(ctx context.Context, failures m
 			AND (mi.poster_source_path = '' OR starts_with(mi.poster_source_path, $1))
 			AND mi.status IS DISTINCT FROM 'pending'
 			AND NOT (`+imagesLockedSQL("mi.locked_fields")+`)
+			AND NOT EXISTS (
+				SELECT 1 FROM media_files other
+				WHERE other.content_id = mi.content_id
+					AND other.missing_since IS NULL
+					AND other.episode_id IS NULL AND other.extra_id IS NULL
+					AND other.media_folder_id IS DISTINCT FROM f.media_folder_id
+			)
 			AND NOT COALESCE(
 				art.file_hash = COALESCE(f.file_hash, '')
 				AND art.file_size = f.file_size

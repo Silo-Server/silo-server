@@ -56,8 +56,29 @@ func (f *framePosterFixture) item(name, itemType, status, posterSource string, l
 	return id
 }
 
-// file writes a probed main file of contentID and returns its id.
+// library writes another movie library and returns its id.
+func (f *framePosterFixture) library(name string, enabled bool) int {
+	f.t.Helper()
+	var id int
+	if err := f.pool.QueryRow(f.t.Context(), `INSERT INTO media_folders (type,name,enabled) VALUES ('movies',$1,$2) RETURNING id`, f.prefix+"-"+name, enabled).Scan(&id); err != nil {
+		f.t.Fatal(err)
+	}
+	f.t.Cleanup(func() {
+		ctx := context.Background()
+		_, _ = f.pool.Exec(ctx, `DELETE FROM media_files WHERE media_folder_id = $1`, id)
+		_, _ = f.pool.Exec(ctx, `DELETE FROM media_folders WHERE id = $1`, id)
+	})
+	return id
+}
+
+// file writes a probed main file of contentID in the fixture's library and
+// returns its id.
 func (f *framePosterFixture) file(contentID, name string, missing bool) int {
+	f.t.Helper()
+	return f.fileIn(f.folder, contentID, name, missing)
+}
+
+func (f *framePosterFixture) fileIn(folder int, contentID, name string, missing bool) int {
 	f.t.Helper()
 	var missingSince *time.Time
 	if missing {
@@ -66,7 +87,7 @@ func (f *framePosterFixture) file(contentID, name string, missing bool) int {
 	}
 	var id int
 	if err := f.pool.QueryRow(f.t.Context(), `INSERT INTO media_files (content_id,media_folder_id,file_path,duration,file_size,missing_since)
-		VALUES ($1,$2,$3,600,1000,$4) RETURNING id`, contentID, f.folder, "/"+f.prefix+"/"+name+".mkv", missingSince).Scan(&id); err != nil {
+		VALUES ($1,$2,$3,600,1000,$4) RETURNING id`, contentID, folder, "/"+f.prefix+"/"+name+".mkv", missingSince).Scan(&id); err != nil {
 		f.t.Fatal(err)
 	}
 	return id
@@ -138,6 +159,16 @@ func TestFramePostersListOnlyEmptySlotsAndSaveOnlyOverThemDB(t *testing.T) {
 	versions := f.item("versions", "movie", "matched", "", false)
 	f.fail(key, f.file(versions, "versions-a", false), true, "test")
 	versionsFile := f.file(versions, "versions-b", false)
+	// The poster is shared by every library the movie is in, so a movie with
+	// files in two libraries gets no frame, also when the other is disabled.
+	for _, other := range []struct {
+		name    string
+		enabled bool
+	}{{"two-libraries", true}, {"disabled-library", false}} {
+		movie := f.item(other.name, "movie", "matched", "", false)
+		f.file(movie, other.name+"-a", false)
+		f.fileIn(f.library(other.name, other.enabled), movie, other.name+"-b", false)
+	}
 
 	pending, err := repo.ListPendingFramePosters(ctx, key, 100000)
 	if err != nil {
