@@ -3454,6 +3454,16 @@
       "value": "Ovdje se ništa ne može reproducirati."
     }
   ],
+  "signIn.withProvider": [
+    {
+      "type": 0,
+      "value": "Prijavi se putem usluge "
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    }
+  ],
   "subtitleSearch.hearingImpaired": [
     {
       "type": 0,

@@ -3443,6 +3443,16 @@
       "value": "Inget här kan spelas upp."
     }
   ],
+  "signIn.withProvider": [
+    {
+      "type": 0,
+      "value": "Logga in med "
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    }
+  ],
   "subtitleSearch.hearingImpaired": [
     {
       "type": 0,

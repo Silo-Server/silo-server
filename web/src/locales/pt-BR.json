@@ -3454,6 +3454,16 @@
       "value": "Nada aqui pode ser reproduzido."
     }
   ],
+  "signIn.withProvider": [
+    {
+      "type": 0,
+      "value": "Entrar com "
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    }
+  ],
   "subtitleSearch.hearingImpaired": [
     {
       "type": 0,

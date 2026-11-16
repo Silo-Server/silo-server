@@ -3451,6 +3451,16 @@
       "value": "\u200F\u202ENothing here can be played.\u202C"
     }
   ],
+  "signIn.withProvider": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ESign in with \u202C"
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    }
+  ],
   "subtitleSearch.hearingImpaired": [
     {
       "type": 0,

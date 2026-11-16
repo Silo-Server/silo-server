@@ -3451,6 +3451,20 @@
       "value": "Hier kann nichts abgespielt werden."
     }
   ],
+  "signIn.withProvider": [
+    {
+      "type": 0,
+      "value": "Mit "
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": " anmelden"
+    }
+  ],
   "subtitleSearch.hearingImpaired": [
     {
       "type": 0,

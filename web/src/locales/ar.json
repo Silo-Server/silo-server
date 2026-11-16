@@ -3481,6 +3481,16 @@
       "value": "لا يوجد هنا ما يمكن تشغيله."
     }
   ],
+  "signIn.withProvider": [
+    {
+      "type": 0,
+      "value": "تسجيل الدخول عبر "
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    }
+  ],
   "subtitleSearch.hearingImpaired": [
     {
       "type": 0,

@@ -3454,6 +3454,16 @@
       "value": "Qui non c’è nulla da riprodurre."
     }
   ],
+  "signIn.withProvider": [
+    {
+      "type": 0,
+      "value": "Accedi con "
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    }
+  ],
   "subtitleSearch.hearingImpaired": [
     {
       "type": 0,
