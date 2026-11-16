@@ -10702,7 +10702,6 @@ func (h *PlaybackHandler) executeReplanV3(r *http.Request, record *playback.Atte
 				forceSoftwareDecode = h.softwareFallbackAllowedV3() && softwareDecodeVariantPendingV3(record, req)
 				if forceSoftwareDecode {
 					decodeFailureSample, decodeFailureCount = ts.DecodeFailureEvidence()
-					decodeVideoFrames, decodeOutTimeUS = ts.VideoFrameProgress()
 				}
 			}
 		}
@@ -10714,6 +10713,19 @@ func (h *PlaybackHandler) executeReplanV3(r *http.Request, record *playback.Atte
 		// modes are exhausted. Name them on the terminal detail so it is not
 		// empty when the planner returns adaptation_exhausted.
 		decodeAttemptDetail = fmt.Sprintf("hardware and software video decode both attempted for %s (hw_accel=%s)", record.CurrentPlan.Delivery, strings.TrimSpace(session.TranscodeHWAccel))
+	}
+	// Read the frame counter for every video encode, not only the software
+	// retry. The counter is the only evidence that separates a decoder
+	// producing pictures from one muxing audio alone, and reading it only
+	// inside the forceSoftwareDecode branch logged video_frames=0
+	// out_time_us=0 for ordinary hardware encodes whose segments each carried
+	// frames. A zero here has to mean zero decoded pictures.
+	if !forceSoftwareDecode &&
+		record.CurrentPlan.Delivery == playback.DeliveryTranscodeHLSV3 &&
+		planHasVideoEncodeV3(record.CurrentPlan) {
+		if ts := h.tm.GetTranscodeSession(record.SessionID); ts != nil {
+			decodeVideoFrames, decodeOutTimeUS = ts.VideoFrameProgress()
+		}
 	}
 	// Rotation is candidate substitution, never a decode-mode change: an
 	// explicit pin is not substituted, and for a virtual non-explicit decode
