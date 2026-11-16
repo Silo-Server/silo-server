@@ -116248,7 +116248,7 @@
   "web.notifications.inbox.emptyHintNextUp": [
     {
       "type": 0,
-      "value": "Je krijgt hier een melding wanneer er een nieuwe aflevering verschijnt van een serie waarmee je bij bent."
+      "value": "Je krijgt hier een melding wanneer er een nieuwe aflevering verschijnt van een serie waarmee je bij bent, of wanneer een titel binnenkomt die je op je kijklijst hebt gezet of hebt aangevraagd."
     }
   ],
   "web.notifications.inbox.emptyUnread": [
@@ -116641,6 +116641,30 @@
     {
       "type": 0,
       "value": "Meldingsweergaven"
+    }
+  ],
+  "web.notifications.inbox.watchlistAvailable": [
+    {
+      "type": 0,
+      "value": "Titel op kijklijst beschikbaar"
+    }
+  ],
+  "web.notifications.inbox.watchlistMovieAvailable": [
+    {
+      "type": 0,
+      "value": "Een film op je kijklijst is nu beschikbaar"
+    }
+  ],
+  "web.notifications.inbox.watchlistSeriesAvailable": [
+    {
+      "type": 0,
+      "value": "Een serie op je kijklijst is nu beschikbaar"
+    }
+  ],
+  "web.notifications.inbox.watchlistTitleAvailable": [
+    {
+      "type": 0,
+      "value": "Een titel op je kijklijst is nu beschikbaar"
     }
   ],
   "web.notifications.preferences.continueWatching": [
@@ -117180,7 +117204,7 @@
   "web.notifications.series.emptyHintNextUp": [
     {
       "type": 0,
-      "value": "Series verschijnen hier nadat je een aflevering hebt uitgekeken. Je krijgt een melding van een nieuwe aflevering zodra je bij bent."
+      "value": "Series verschijnen hier nadat je een aflevering hebt uitgekeken. Ben je bij met een serie, dan krijg je een melding zodra de volgende aflevering verschijnt."
     }
   ],
   "web.notifications.series.filterByReason": [
@@ -117493,6 +117517,12 @@
     {
       "type": 0,
       "value": " is nu beschikbaar"
+    }
+  ],
+  "web.notifications.toast.watchlistArrived": [
+    {
+      "type": 0,
+      "value": "Een titel op je kijklijst staat nu in de bibliotheek."
     }
   ],
   "web.onboarding.gate.progressFailed": [
@@ -129590,7 +129620,7 @@
   "web.settings.notifications.episodes.nextUpDescription": [
     {
       "type": 0,
-      "value": "Ontvang een melding wanneer er een nieuwe aflevering verschijnt van een serie waarmee je bij bent."
+      "value": "Ontvang een melding wanneer er een nieuwe aflevering verschijnt van een serie waarmee je bij bent, of wanneer een titel binnenkomt die je op je kijklijst hebt gezet of hebt aangevraagd."
     }
   ],
   "web.settings.notifications.episodes.seriesLink": [
@@ -129882,7 +129912,7 @@
   "web.settings.notifications.reason.requests": [
     {
       "type": 0,
-      "value": "Aanvragen"
+      "value": "Aanvragen en kijklijst"
     }
   ],
   "web.settings.notifications.reason.watchlist": [

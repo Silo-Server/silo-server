@@ -39,8 +39,6 @@ const schemeHTTPS = "https"
 
 // Webhook is a profile-scoped outbound destination. URL and signing secret
 // are stored as enc:v1: envelopes and never leave the server.
-// notification_webhooks keeps retired notify_favorites, notify_watchlist and
-// notify_continue_watching columns that nothing reads or writes.
 type Webhook struct {
 	Revision                int64
 	ID                      string

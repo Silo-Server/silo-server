@@ -59,10 +59,8 @@ func (r *InterestRepository) ListActiveBySeries(ctx context.Context, tx pgx.Tx, 
 }
 
 // UpsertRows writes recomputed interest rows. last_notified_episode_key is
-// deliberately not touched: it is owned by the fanout worker. The retired
-// favorite, watchlist and continue_watching columns are not written either; a
-// new row takes their defaults. The DO UPDATE WHERE clause skips no-op writes
-// so hot recompute paths do not churn rows.
+// deliberately not touched: it is owned by the fanout worker. The DO UPDATE
+// WHERE clause skips no-op writes so hot recompute paths do not churn rows.
 func (r *InterestRepository) UpsertRows(ctx context.Context, interests []SeriesInterest) error {
 	if len(interests) == 0 {
 		return nil
@@ -175,8 +173,7 @@ func (r *InterestRepository) DeleteAllForProfile(ctx context.Context, userID int
 }
 
 // PruneInert removes rows that are no Next Up candidate and have no
-// progression cursors; they can never produce a notification. The retired
-// favorite, watchlist and continue_watching columns do not keep a row.
+// progression cursors; they can never produce a notification.
 func (r *InterestRepository) PruneInert(ctx context.Context) (int64, error) {
 	tag, err := r.pool.Exec(ctx, `
 		DELETE FROM profile_series_interest

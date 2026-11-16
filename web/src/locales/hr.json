@@ -127566,7 +127566,7 @@
   "web.notifications.inbox.emptyHintNextUp": [
     {
       "type": 0,
-      "value": "Ovdje ćete dobiti obavijest kad stigne nova epizoda serije čije ste sve dostupne epizode pogledali."
+      "value": "Ovdje ćete dobiti obavijest kad stigne nova epizoda serije čije ste sve dostupne epizode pogledali ili kad stigne naslov koji ste dodali na popis za gledanje ili zatražili."
     }
   ],
   "web.notifications.inbox.emptyUnread": [
@@ -128003,6 +128003,30 @@
     {
       "type": 0,
       "value": "Prikazi obavijesti"
+    }
+  ],
+  "web.notifications.inbox.watchlistAvailable": [
+    {
+      "type": 0,
+      "value": "Dostupan je naslov s popisa za gledanje"
+    }
+  ],
+  "web.notifications.inbox.watchlistMovieAvailable": [
+    {
+      "type": 0,
+      "value": "Film s vašeg popisa za gledanje sada je dostupan"
+    }
+  ],
+  "web.notifications.inbox.watchlistSeriesAvailable": [
+    {
+      "type": 0,
+      "value": "Serija s vašeg popisa za gledanje sada je dostupna"
+    }
+  ],
+  "web.notifications.inbox.watchlistTitleAvailable": [
+    {
+      "type": 0,
+      "value": "Naslov s vašeg popisa za gledanje sada je dostupan"
     }
   ],
   "web.notifications.preferences.continueWatching": [
@@ -128610,7 +128634,7 @@
   "web.notifications.series.emptyHintNextUp": [
     {
       "type": 0,
-      "value": "Serije se ovdje prikazuju nakon što pogledate epizodu. Kad pogledate sve dostupne epizode, dobit ćete obavijest o novoj epizodi."
+      "value": "Serije se ovdje prikazuju nakon što pogledate epizodu do kraja. Kad pogledate sve dostupne epizode serije, dobit ćete obavijest kad stigne njezina sljedeća epizoda."
     }
   ],
   "web.notifications.series.filterByReason": [
@@ -128919,6 +128943,12 @@
     {
       "type": 0,
       "value": " sada je dostupna"
+    }
+  ],
+  "web.notifications.toast.watchlistArrived": [
+    {
+      "type": 0,
+      "value": "Naslov s vašeg popisa za gledanje stigao je u medijateku."
     }
   ],
   "web.onboarding.gate.progressFailed": [
@@ -141864,7 +141894,7 @@
   "web.settings.notifications.episodes.nextUpDescription": [
     {
       "type": 0,
-      "value": "Primajte obavijest kad stigne nova epizoda serije čije ste sve dostupne epizode pogledali."
+      "value": "Primajte obavijest kad stigne nova epizoda serije čije ste sve dostupne epizode pogledali ili kad stigne naslov koji ste dodali na popis za gledanje ili zatražili."
     }
   ],
   "web.settings.notifications.episodes.seriesLink": [
@@ -142156,7 +142186,7 @@
   "web.settings.notifications.reason.requests": [
     {
       "type": 0,
-      "value": "Zahtjevi"
+      "value": "Zahtjevi i popis za gledanje"
     }
   ],
   "web.settings.notifications.reason.watchlist": [

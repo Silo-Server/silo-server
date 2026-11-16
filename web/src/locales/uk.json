@@ -137796,7 +137796,7 @@
   "web.notifications.inbox.emptyHintNextUp": [
     {
       "type": 0,
-      "value": "Тут з’являтимуться сповіщення, коли виходитиме новий епізод серіалу, усі доступні епізоди якого ви вже переглянули."
+      "value": "Тут з’являтимуться сповіщення, коли виходитиме новий епізод серіалу, усі доступні епізоди якого ви вже переглянули, або коли з’являтиметься вміст, який ви додали до списку перегляду чи запитали."
     }
   ],
   "web.notifications.inbox.emptyUnread": [
@@ -138261,6 +138261,30 @@
     {
       "type": 0,
       "value": "Режими перегляду сповіщень"
+    }
+  ],
+  "web.notifications.inbox.watchlistAvailable": [
+    {
+      "type": 0,
+      "value": "Доступний вміст зі списку перегляду"
+    }
+  ],
+  "web.notifications.inbox.watchlistMovieAvailable": [
+    {
+      "type": 0,
+      "value": "Фільм із вашого списку перегляду тепер доступний"
+    }
+  ],
+  "web.notifications.inbox.watchlistSeriesAvailable": [
+    {
+      "type": 0,
+      "value": "Серіал із вашого списку перегляду тепер доступний"
+    }
+  ],
+  "web.notifications.inbox.watchlistTitleAvailable": [
+    {
+      "type": 0,
+      "value": "Вміст із вашого списку перегляду тепер доступний"
     }
   ],
   "web.notifications.preferences.continueWatching": [
@@ -138932,7 +138956,7 @@
   "web.notifications.series.emptyHintNextUp": [
     {
       "type": 0,
-      "value": "Серіали з’являються тут, коли ви завершуєте перегляд епізоду. Про новий епізод ви отримаєте сповіщення, щойно переглянете всі доступні."
+      "value": "Серіали з’являються тут після того, як ви додивитеся епізод. Коли ви переглянете всі доступні епізоди серіалу, то отримаєте сповіщення, щойно вийде його наступний епізод."
     }
   ],
   "web.notifications.series.filterByReason": [
@@ -139241,6 +139265,12 @@
     {
       "type": 0,
       "value": " тепер доступний"
+    }
+  ],
+  "web.notifications.toast.watchlistArrived": [
+    {
+      "type": 0,
+      "value": "Вміст із вашого списку перегляду з’явився в бібліотеці."
     }
   ],
   "web.onboarding.gate.progressFailed": [
@@ -152956,7 +152986,7 @@
   "web.settings.notifications.episodes.nextUpDescription": [
     {
       "type": 0,
-      "value": "Отримуйте сповіщення, коли виходить новий епізод серіалу, усі доступні епізоди якого ви вже переглянули."
+      "value": "Отримуйте сповіщення, коли виходить новий епізод серіалу, усі доступні епізоди якого ви вже переглянули, або коли з’являється вміст, який ви додали до списку перегляду чи запитали."
     }
   ],
   "web.settings.notifications.episodes.seriesLink": [
@@ -153248,7 +153278,7 @@
   "web.settings.notifications.reason.requests": [
     {
       "type": 0,
-      "value": "Запити"
+      "value": "Запити та список перегляду"
     }
   ],
   "web.settings.notifications.reason.watchlist": [

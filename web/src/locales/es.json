@@ -127287,7 +127287,7 @@
   "web.notifications.inbox.emptyHintNextUp": [
     {
       "type": 0,
-      "value": "Aquí recibirás avisos cuando llegue un episodio nuevo de una serie con la que estés al día."
+      "value": "Aquí recibirás avisos cuando llegue un episodio nuevo de una serie con la que estés al día, o cuando llegue un título que añadiste a tu lista para ver o que solicitaste."
     }
   ],
   "web.notifications.inbox.emptyUnread": [
@@ -127724,6 +127724,30 @@
     {
       "type": 0,
       "value": "Vistas de notificaciones"
+    }
+  ],
+  "web.notifications.inbox.watchlistAvailable": [
+    {
+      "type": 0,
+      "value": "Título de tu lista para ver disponible"
+    }
+  ],
+  "web.notifications.inbox.watchlistMovieAvailable": [
+    {
+      "type": 0,
+      "value": "Una película de tu lista para ver ya está disponible"
+    }
+  ],
+  "web.notifications.inbox.watchlistSeriesAvailable": [
+    {
+      "type": 0,
+      "value": "Una serie de tu lista para ver ya está disponible"
+    }
+  ],
+  "web.notifications.inbox.watchlistTitleAvailable": [
+    {
+      "type": 0,
+      "value": "Un título de tu lista para ver ya está disponible"
     }
   ],
   "web.notifications.preferences.continueWatching": [
@@ -128331,7 +128355,7 @@
   "web.notifications.series.emptyHintNextUp": [
     {
       "type": 0,
-      "value": "Las series aparecen aquí cuando terminas un episodio. Recibirás una notificación de un episodio nuevo cuando estés al día."
+      "value": "Las series aparecen aquí cuando terminas un episodio. Una vez que estés al día con una serie, recibirás una notificación cuando llegue su siguiente episodio."
     }
   ],
   "web.notifications.series.filterByReason": [
@@ -128640,6 +128664,12 @@
     {
       "type": 0,
       "value": " ya está disponible"
+    }
+  ],
+  "web.notifications.toast.watchlistArrived": [
+    {
+      "type": 0,
+      "value": "Llegó a la biblioteca un título de tu lista para ver."
     }
   ],
   "web.onboarding.gate.progressFailed": [
@@ -141590,7 +141620,7 @@
   "web.settings.notifications.episodes.nextUpDescription": [
     {
       "type": 0,
-      "value": "Recibe notificaciones cuando llegue un episodio nuevo de una serie con la que estés al día."
+      "value": "Recibe notificaciones cuando llegue un episodio nuevo de una serie con la que estés al día, o cuando llegue un título que añadiste a tu lista para ver o que solicitaste."
     }
   ],
   "web.settings.notifications.episodes.seriesLink": [
@@ -141882,7 +141912,7 @@
   "web.settings.notifications.reason.requests": [
     {
       "type": 0,
-      "value": "Solicitudes"
+      "value": "Solicitudes y lista para ver"
     }
   ],
   "web.settings.notifications.reason.watchlist": [

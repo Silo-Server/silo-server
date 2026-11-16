@@ -106347,7 +106347,7 @@
   "web.notifications.inbox.emptyHintNextUp": [
     {
       "type": 0,
-      "value": "視聴が追いついているシリーズに新しいエピソードが追加されると、ここに通知されます。"
+      "value": "視聴が追いついているシリーズに新しいエピソードが追加されたとき、またはウォッチリストに追加したタイトルやリクエストしたタイトルがライブラリに追加されたときに、ここに通知されます。"
     }
   ],
   "web.notifications.inbox.emptyUnread": [
@@ -106716,6 +106716,30 @@
     {
       "type": 0,
       "value": "通知の表示"
+    }
+  ],
+  "web.notifications.inbox.watchlistAvailable": [
+    {
+      "type": 0,
+      "value": "ウォッチリストのタイトルが視聴可能"
+    }
+  ],
+  "web.notifications.inbox.watchlistMovieAvailable": [
+    {
+      "type": 0,
+      "value": "ウォッチリストの映画が視聴可能になりました"
+    }
+  ],
+  "web.notifications.inbox.watchlistSeriesAvailable": [
+    {
+      "type": 0,
+      "value": "ウォッチリストのシリーズが視聴可能になりました"
+    }
+  ],
+  "web.notifications.inbox.watchlistTitleAvailable": [
+    {
+      "type": 0,
+      "value": "ウォッチリストのタイトルが視聴可能になりました"
     }
   ],
   "web.notifications.preferences.continueWatching": [
@@ -107203,7 +107227,7 @@
   "web.notifications.series.emptyHintNextUp": [
     {
       "type": 0,
-      "value": "エピソードを見終わると、そのシリーズがここに表示されます。視聴が追いつくと、新しいエピソードが通知されます。"
+      "value": "エピソードを見終わると、そのシリーズがここに表示されます。シリーズの視聴が追いつくと、次のエピソードが追加されたときに通知されます。"
     }
   ],
   "web.notifications.series.filterByReason": [
@@ -107508,6 +107532,12 @@
     {
       "type": 0,
       "value": "が視聴可能になりました"
+    }
+  ],
+  "web.notifications.toast.watchlistArrived": [
+    {
+      "type": 0,
+      "value": "ウォッチリストのタイトルがライブラリに追加されました。"
     }
   ],
   "web.onboarding.gate.progressFailed": [
@@ -118815,7 +118845,7 @@
   "web.settings.notifications.episodes.nextUpDescription": [
     {
       "type": 0,
-      "value": "視聴が追いついているシリーズに新しいエピソードが追加されると通知されます。"
+      "value": "視聴が追いついているシリーズに新しいエピソードが追加されたとき、またはウォッチリストに追加したタイトルやリクエストしたタイトルがライブラリに追加されたときに通知されます。"
     }
   ],
   "web.settings.notifications.episodes.seriesLink": [
@@ -119103,7 +119133,7 @@
   "web.settings.notifications.reason.requests": [
     {
       "type": 0,
-      "value": "リクエスト"
+      "value": "リクエストとウォッチリスト"
     }
   ],
   "web.settings.notifications.reason.watchlist": [

@@ -123,6 +123,7 @@ var excludedUserTables = map[string]string{
 	"client_diagnostic_reports":          excludedLogs,
 	"notification_deliveries":            "notification delivery log",
 	"notification_inbox_clocks":          "notification delivery state",
+	"watchlist_title_promotions":         "notification delivery state: recent watchlist promotions",
 	"watch_together_suggestion_receipts": "watch-together receipts",
 	// Derived state rebuilt from the data that is carried.
 	"user_aggregates":                          "derived; rebuilt by the reconciler",

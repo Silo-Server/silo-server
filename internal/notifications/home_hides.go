@@ -98,23 +98,72 @@ func partlyWatchedSinceAnchor(anchor *nextUpAnchor, inProgress []userstore.Watch
 	return false
 }
 
-// walkPastStarted places the Next Up cursor after anchor. Walking the series
-// in key order from anchor + 1, the cursor moves past each started episode
-// (startedKeys, any order) and stops at next, the first available episode the
-// profile has not started (nextUpEpisode; nil when there is none). An episode
-// without a present file neither stops the walk nor moves the cursor, since
-// Home's lookup skips it too. The lowest available episode at or after the
-// cursor is therefore always Home's Next Up card, which is what lets a
-// rewatcher be told about a new season: caught up through S05 and rewatching
-// S01E01, the cursor still lands after S05.
-func walkPastStarted(anchor int, startedKeys []int, next *int) int {
+// nextUpCursor places the Next Up cursor after anchor. Walking the episodes
+// the catalog lists for the series in key order from anchor + 1, the cursor
+// moves past each one the profile has started and stops at the first it has
+// not, whether or not that episode's file is in the library yet. The first
+// listed episode at or after the cursor is therefore the one the profile
+// waits for: a listed episode whose file has not arrived holds that place, so
+// a later episode landing first does not notify. When every listed episode
+// after the anchor is started, the cursor sits after the last of them and the
+// first episode to arrive there is the next. That is what lets a rewatcher be
+// told about a new season: caught up through S05 and rewatching S01E01, the
+// cursor still lands after S05.
+//
+// episodeKeys maps every listed episode to its key and started lists the
+// episodes the profile has started. A key counts as started when any episode
+// with that key is.
+func nextUpCursor(anchor int, episodeKeys map[string]int, started []string) int {
+	startedKeys := make(map[int]struct{}, len(started))
+	for _, id := range started {
+		if key, ok := episodeKeys[id]; ok && key > anchor {
+			startedKeys[key] = struct{}{}
+		}
+	}
+	// waiting is the first listed episode after the anchor the profile has
+	// not started; the walk stops there.
+	waiting, found := 0, false
+	for _, key := range episodeKeys {
+		if key <= anchor {
+			continue
+		}
+		if _, ok := startedKeys[key]; ok {
+			continue
+		}
+		if !found || key < waiting {
+			waiting, found = key, true
+		}
+	}
 	cursor := anchor + 1
-	for _, key := range startedKeys {
-		if key > anchor && (next == nil || key < *next) {
+	for key := range startedKeys {
+		if !found || key < waiting {
 			cursor = max(cursor, key+1)
 		}
 	}
 	return cursor
+}
+
+// postgresStartedEpisodes returns the series' episodes the profile has a
+// Postgres progress row for that is completed or has a position, including
+// rows a history hide covers. That is Home's test for a started episode
+// (catalog.buildListNextUpQuery's next_ep lateral), and the profile's store
+// leaves hidden rows out of its own listing, so the cursor walk adds these to
+// what the store reports. It is empty for a store that keeps progress outside
+// Postgres.
+func (u *InterestUpdater) postgresStartedEpisodes(ctx context.Context, userID int, profileID, seriesID string) ([]string, error) {
+	rows, err := u.pool.Query(ctx, `
+		SELECT uwp.media_item_id FROM user_watch_progress uwp
+		JOIN episodes e ON e.content_id = uwp.media_item_id
+		WHERE uwp.user_id = $1 AND uwp.profile_id = $2 AND e.series_id = $3
+		  AND (uwp.completed = TRUE OR uwp.position_seconds > 0)`, userID, profileID, seriesID)
+	if err != nil {
+		return nil, fmt.Errorf("list started episodes: %w", err)
+	}
+	ids, err := pgx.CollectRows(rows, pgx.RowTo[string])
+	if err != nil {
+		return nil, fmt.Errorf("scan started episodes: %w", err)
+	}
+	return ids, nil
 }
 
 // nextUpEpisode returns the episode Home's Next Up shows after its anchor:

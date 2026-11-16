@@ -218,9 +218,11 @@ func TestFanoutSkipsSecondLibraryCopy(t *testing.T) {
 // TestFanoutNotifiesOnlyTheNextUpEpisode runs the Next Up rule through fanout
 // with real file availability. E01 to E05 are in the library when E06, E07
 // and E08 land in one batch: a profile caught up through E05 is told about
-// E06 only, a profile that stopped at E02 is told nothing, and a favorite
-// with no Next Up cursor is told nothing. S02E01 then lands: the profile that
+// E06 only, a profile that stopped at E02 is told nothing, and a row with no
+// Next Up cursor is told nothing. S02E01 then lands: the profile that
 // finished the season is told, and the one that has not watched E06 is not.
+// The catalog then lists S02E02 before its file arrives: S02E03 landing first
+// tells nobody, and S02E02 tells the profile waiting for it when it lands.
 func TestFanoutNotifiesOnlyTheNextUpEpisode(t *testing.T) {
 	pool := inboxPageDB(t)
 	ctx := t.Context()
@@ -241,15 +243,21 @@ func TestFanoutNotifiesOnlyTheNextUpEpisode(t *testing.T) {
 		}
 		return fmt.Sprintf("%s-s%02de%02d", c.series, season, number)
 	}
+	// listEpisode adds the episode to the catalog without a file.
+	listEpisode := func(season, number int) {
+		t.Helper()
+		if _, err := pool.Exec(ctx, `
+			INSERT INTO episodes (content_id, series_id, season_number, episode_number, title)
+			VALUES ($1, $2, $3, $4, $1) ON CONFLICT (content_id) DO NOTHING`,
+			episodeID(season, number), c.series, season, number); err != nil {
+			t.Fatalf("seed episode: %v", err)
+		}
+	}
 	addEpisode := func(season, number int) {
 		t.Helper()
 		id := episodeID(season, number)
 		if id != c.episode {
-			if _, err := pool.Exec(ctx, `
-				INSERT INTO episodes (content_id, series_id, season_number, episode_number, title)
-				VALUES ($1, $2, $3, $4, $1)`, id, c.series, season, number); err != nil {
-				t.Fatalf("seed episode: %v", err)
-			}
+			listEpisode(season, number)
 		}
 		if _, err := pool.Exec(ctx, `INSERT INTO media_files (media_folder_id, file_path, episode_id) VALUES ($1, '/' || $2, $2)`,
 			c.library, id); err != nil {
@@ -273,13 +281,14 @@ func TestFanoutNotifiesOnlyTheNextUpEpisode(t *testing.T) {
 		addEpisode(1, n)
 	}
 	if _, err := pool.Exec(ctx, `
-		INSERT INTO profile_series_interest (user_id, profile_id, library_id, series_id, favorite, next_up_candidate, next_expected_episode_key)
-		VALUES (1, 'caught-up', $1, $2, false, true, $3), (1, 'behind', $1, $2, false, true, $4),
-		       (1, 'favorite', $1, $2, true, false, NULL), (1, 'finished', $1, $2, false, true, $5)`,
-		c.library, c.series, EpisodeKey(1, 6), EpisodeKey(1, 3), EpisodeKey(1, 9)); err != nil {
+		INSERT INTO profile_series_interest (user_id, profile_id, library_id, series_id, next_up_candidate, next_expected_episode_key)
+		VALUES (1, 'caught-up', $1, $2, true, $3), (1, 'behind', $1, $2, true, $4),
+		       (1, 'no-cursor', $1, $2, false, NULL), (1, 'finished', $1, $2, true, $5),
+		       (1, 'ahead', $1, $2, true, $6)`,
+		c.library, c.series, EpisodeKey(1, 6), EpisodeKey(1, 3), EpisodeKey(1, 9), EpisodeKey(2, 2)); err != nil {
 		t.Fatalf("seed interest: %v", err)
 	}
-	worker := newAccessFanoutWorker(pool, scopeByProfile{"caught-up": {}, "behind": {}, "favorite": {}, "finished": {}})
+	worker := newAccessFanoutWorker(pool, scopeByProfile{"caught-up": {}, "behind": {}, "no-cursor": {}, "finished": {}, "ahead": {}})
 
 	for n := 6; n <= 8; n++ {
 		land(1, n)
@@ -300,6 +309,22 @@ func TestFanoutNotifiesOnlyTheNextUpEpisode(t *testing.T) {
 	}
 	if got := deliveryRecipients(t, pool, `release_event_id = 'event-2-1'`); !slices.Equal(got, []string{"finished"}) {
 		t.Errorf("S02E01 recipients = %v, want [finished]", got)
+	}
+
+	listEpisode(2, 2)
+	land(2, 3)
+	if processed, err := worker.processBatch(ctx); err != nil || processed != 1 {
+		t.Fatalf("processBatch = %d, %v; want 1 event", processed, err)
+	}
+	if got := deliveryRecipients(t, pool, `release_event_id = 'event-2-3'`); len(got) != 0 {
+		t.Errorf("S02E03 recipients = %v, want none while S02E02 is listed without a file", got)
+	}
+	land(2, 2)
+	if processed, err := worker.processBatch(ctx); err != nil || processed != 1 {
+		t.Fatalf("processBatch = %d, %v; want 1 event", processed, err)
+	}
+	if got := deliveryRecipients(t, pool, `release_event_id = 'event-2-2'`); !slices.Equal(got, []string{"ahead"}) {
+		t.Errorf("S02E02 recipients = %v, want [ahead]", got)
 	}
 }
 

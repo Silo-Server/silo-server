@@ -117020,7 +117020,7 @@
   "web.notifications.inbox.emptyHintNextUp": [
     {
       "type": 0,
-      "value": "You’ll be notified here when a new episode arrives for a series you’re caught up on."
+      "value": "You’ll be notified here when a new episode arrives for a series you’re caught up on, or when a title you watchlisted or requested arrives."
     }
   ],
   "web.notifications.inbox.emptyUnread": [
@@ -117413,6 +117413,30 @@
     {
       "type": 0,
       "value": "Notification views"
+    }
+  ],
+  "web.notifications.inbox.watchlistAvailable": [
+    {
+      "type": 0,
+      "value": "Watchlist title available"
+    }
+  ],
+  "web.notifications.inbox.watchlistMovieAvailable": [
+    {
+      "type": 0,
+      "value": "A movie on your watchlist is now available"
+    }
+  ],
+  "web.notifications.inbox.watchlistSeriesAvailable": [
+    {
+      "type": 0,
+      "value": "A series on your watchlist is now available"
+    }
+  ],
+  "web.notifications.inbox.watchlistTitleAvailable": [
+    {
+      "type": 0,
+      "value": "A title on your watchlist is now available"
     }
   ],
   "web.notifications.preferences.continueWatching": [
@@ -117960,7 +117984,7 @@
   "web.notifications.series.emptyHintNextUp": [
     {
       "type": 0,
-      "value": "Series show up here after you finish an episode. A new episode notifies you once you’re caught up."
+      "value": "Series show up here after you finish an episode. Once you’re caught up on a series, you’re notified when its next episode arrives."
     }
   ],
   "web.notifications.series.filterByReason": [
@@ -118265,6 +118289,12 @@
     {
       "type": 0,
       "value": " is now available"
+    }
+  ],
+  "web.notifications.toast.watchlistArrived": [
+    {
+      "type": 0,
+      "value": "A title on your watchlist has arrived in the library."
     }
   ],
   "web.onboarding.gate.progressFailed": [
@@ -130438,7 +130468,7 @@
   "web.settings.notifications.episodes.nextUpDescription": [
     {
       "type": 0,
-      "value": "Get notified when a new episode arrives for a series you’re caught up on."
+      "value": "Get notified when a new episode arrives for a series you’re caught up on, or when a title you watchlisted or requested arrives."
     }
   ],
   "web.settings.notifications.episodes.seriesLink": [
@@ -130730,7 +130760,7 @@
   "web.settings.notifications.reason.requests": [
     {
       "type": 0,
-      "value": "Requests"
+      "value": "Requests and watchlist"
     }
   ],
   "web.settings.notifications.reason.watchlist": [

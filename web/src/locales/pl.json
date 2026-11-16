@@ -138636,7 +138636,7 @@
   "web.notifications.inbox.emptyHintNextUp": [
     {
       "type": 0,
-      "value": "Tutaj otrzymasz powiadomienie, gdy pojawi się nowy odcinek serialu, który oglądasz na bieżąco."
+      "value": "Tutaj otrzymasz powiadomienie o nowym odcinku serialu, który oglądasz na bieżąco, oraz o pojawieniu się tytułu z twojej listy do obejrzenia lub z twojej prośby."
     }
   ],
   "web.notifications.inbox.emptyUnread": [
@@ -139101,6 +139101,30 @@
     {
       "type": 0,
       "value": "Widoki powiadomień"
+    }
+  ],
+  "web.notifications.inbox.watchlistAvailable": [
+    {
+      "type": 0,
+      "value": "Dostępny tytuł z listy do obejrzenia"
+    }
+  ],
+  "web.notifications.inbox.watchlistMovieAvailable": [
+    {
+      "type": 0,
+      "value": "Film z twojej listy do obejrzenia jest już dostępny"
+    }
+  ],
+  "web.notifications.inbox.watchlistSeriesAvailable": [
+    {
+      "type": 0,
+      "value": "Serial z twojej listy do obejrzenia jest już dostępny"
+    }
+  ],
+  "web.notifications.inbox.watchlistTitleAvailable": [
+    {
+      "type": 0,
+      "value": "Tytuł z twojej listy do obejrzenia jest już dostępny"
     }
   ],
   "web.notifications.preferences.continueWatching": [
@@ -139784,7 +139808,7 @@
   "web.notifications.series.emptyHintNextUp": [
     {
       "type": 0,
-      "value": "Seriale pojawiają się tutaj, gdy skończysz oglądać odcinek. Po nadrobieniu zaległości otrzymasz powiadomienie o nowym odcinku."
+      "value": "Seriale pojawiają się tutaj, gdy skończysz oglądać odcinek. Gdy nadrobisz zaległości w serialu, otrzymasz powiadomienie, kiedy pojawi się jego następny odcinek."
     }
   ],
   "web.notifications.series.filterByReason": [
@@ -140093,6 +140117,12 @@
     {
       "type": 0,
       "value": " jest już dostępny"
+    }
+  ],
+  "web.notifications.toast.watchlistArrived": [
+    {
+      "type": 0,
+      "value": "Tytuł z twojej listy do obejrzenia jest już w bibliotece."
     }
   ],
   "web.onboarding.gate.progressFailed": [
@@ -153828,7 +153858,7 @@
   "web.settings.notifications.episodes.nextUpDescription": [
     {
       "type": 0,
-      "value": "Otrzymuj powiadomienie, gdy pojawi się nowy odcinek serialu, który oglądasz na bieżąco."
+      "value": "Otrzymuj powiadomienia o nowym odcinku serialu, który oglądasz na bieżąco, oraz o pojawieniu się tytułu z twojej listy do obejrzenia lub z twojej prośby."
     }
   ],
   "web.settings.notifications.episodes.seriesLink": [
@@ -154120,7 +154150,7 @@
   "web.settings.notifications.reason.requests": [
     {
       "type": 0,
-      "value": "Prośby"
+      "value": "Prośby i lista do obejrzenia"
     }
   ],
   "web.settings.notifications.reason.watchlist": [

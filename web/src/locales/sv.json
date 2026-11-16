@@ -116908,7 +116908,7 @@
   "web.notifications.inbox.emptyHintNextUp": [
     {
       "type": 0,
-      "value": "Här får du en avisering när ett nytt avsnitt kommer i en serie som du har kommit ikapp i."
+      "value": "Här får du en avisering när ett nytt avsnitt kommer i en serie som du har kommit ikapp i, eller när en titel som du har lagt på bevakningslistan eller begärt kommer."
     }
   ],
   "web.notifications.inbox.emptyUnread": [
@@ -117309,6 +117309,30 @@
     {
       "type": 0,
       "value": "Aviseringsvyer"
+    }
+  ],
+  "web.notifications.inbox.watchlistAvailable": [
+    {
+      "type": 0,
+      "value": "Titel på bevakningslistan tillgänglig"
+    }
+  ],
+  "web.notifications.inbox.watchlistMovieAvailable": [
+    {
+      "type": 0,
+      "value": "En film på din bevakningslista är nu tillgänglig"
+    }
+  ],
+  "web.notifications.inbox.watchlistSeriesAvailable": [
+    {
+      "type": 0,
+      "value": "En serie på din bevakningslista är nu tillgänglig"
+    }
+  ],
+  "web.notifications.inbox.watchlistTitleAvailable": [
+    {
+      "type": 0,
+      "value": "En titel på din bevakningslista är nu tillgänglig"
     }
   ],
   "web.notifications.preferences.continueWatching": [
@@ -117856,7 +117880,7 @@
   "web.notifications.series.emptyHintNextUp": [
     {
       "type": 0,
-      "value": "Serier visas här när du har tittat klart på ett avsnitt. Ett nytt avsnitt ger dig en avisering när du har kommit ikapp."
+      "value": "Serier visas här när du har tittat klart på ett avsnitt. När du har kommit ikapp med en serie får du en avisering när nästa avsnitt kommer."
     }
   ],
   "web.notifications.series.filterByReason": [
@@ -118165,6 +118189,12 @@
     {
       "type": 0,
       "value": " är nu tillgänglig"
+    }
+  ],
+  "web.notifications.toast.watchlistArrived": [
+    {
+      "type": 0,
+      "value": "En titel på din bevakningslista har kommit till biblioteket."
     }
   ],
   "web.onboarding.gate.progressFailed": [
@@ -130330,7 +130360,7 @@
   "web.settings.notifications.episodes.nextUpDescription": [
     {
       "type": 0,
-      "value": "Få en avisering när ett nytt avsnitt kommer i en serie som du har kommit ikapp i."
+      "value": "Få en avisering när ett nytt avsnitt kommer i en serie som du har kommit ikapp i, eller när en titel som du har lagt på bevakningslistan eller begärt kommer."
     }
   ],
   "web.settings.notifications.episodes.seriesLink": [
@@ -130622,7 +130652,7 @@
   "web.settings.notifications.reason.requests": [
     {
       "type": 0,
-      "value": "Förfrågningar"
+      "value": "Förfrågningar och bevakningslista"
     }
   ],
   "web.settings.notifications.reason.watchlist": [

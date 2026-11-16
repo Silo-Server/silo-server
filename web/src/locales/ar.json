@@ -156229,7 +156229,7 @@
   "web.notifications.inbox.emptyHintNextUp": [
     {
       "type": 0,
-      "value": "ستصلك هنا إشعارات عند وصول حلقة جديدة من مسلسل شاهدت كل حلقاته المتاحة."
+      "value": "ستصلك هنا إشعارات عند وصول حلقة جديدة من مسلسل شاهدت كل حلقاته المتاحة، أو عند وصول عنوان أضفته إلى قائمة المشاهدة أو طلبته."
     }
   ],
   "web.notifications.inbox.emptyUnread": [
@@ -156758,6 +156758,30 @@
     {
       "type": 0,
       "value": "طرق عرض الإشعارات"
+    }
+  ],
+  "web.notifications.inbox.watchlistAvailable": [
+    {
+      "type": 0,
+      "value": "عنوان من قائمة المشاهدة متاح"
+    }
+  ],
+  "web.notifications.inbox.watchlistMovieAvailable": [
+    {
+      "type": 0,
+      "value": "أصبح فيلم في قائمة المشاهدة الخاصة بك متاحًا الآن"
+    }
+  ],
+  "web.notifications.inbox.watchlistSeriesAvailable": [
+    {
+      "type": 0,
+      "value": "أصبح مسلسل في قائمة المشاهدة الخاصة بك متاحًا الآن"
+    }
+  ],
+  "web.notifications.inbox.watchlistTitleAvailable": [
+    {
+      "type": 0,
+      "value": "أصبح عنوان في قائمة المشاهدة الخاصة بك متاحًا الآن"
     }
   ],
   "web.notifications.preferences.continueWatching": [
@@ -157461,7 +157485,7 @@
   "web.notifications.series.emptyHintNextUp": [
     {
       "type": 0,
-      "value": "تظهر المسلسلات هنا بعد أن تنهي مشاهدة حلقة. تصلك إشعارات الحلقة الجديدة متى شاهدت كل الحلقات المتاحة."
+      "value": "تظهر المسلسلات هنا بعد أن تنهي مشاهدة حلقة. بعد أن تشاهد كل الحلقات المتاحة من مسلسل، يصلك إشعار عند وصول الحلقة التالية منه."
     }
   ],
   "web.notifications.series.filterByReason": [
@@ -157770,6 +157794,12 @@
     {
       "type": 0,
       "value": " متاح الآن"
+    }
+  ],
+  "web.notifications.toast.watchlistArrived": [
+    {
+      "type": 0,
+      "value": "وصل إلى المكتبة عنوان من قائمة المشاهدة الخاصة بك."
     }
   ],
   "web.onboarding.gate.progressFailed": [
@@ -172846,7 +172876,7 @@
   "web.settings.notifications.episodes.nextUpDescription": [
     {
       "type": 0,
-      "value": "تلقَّ إشعارًا عند وصول حلقة جديدة من مسلسل شاهدت كل حلقاته المتاحة."
+      "value": "تلقَّ إشعارًا عند وصول حلقة جديدة من مسلسل شاهدت كل حلقاته المتاحة، أو عند وصول عنوان أضفته إلى قائمة المشاهدة أو طلبته."
     }
   ],
   "web.settings.notifications.episodes.seriesLink": [
@@ -173138,7 +173168,7 @@
   "web.settings.notifications.reason.requests": [
     {
       "type": 0,
-      "value": "الطلبات"
+      "value": "الطلبات وقائمة المشاهدة"
     }
   ],
   "web.settings.notifications.reason.watchlist": [

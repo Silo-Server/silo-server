@@ -30249,7 +30249,7 @@ export interface components {
       muted: boolean;
       /** @description With an active Next Up reason, the last episode the profile finished: on that reason alone, only a new episode after it notifies */
       next_up_after?: components["schemas"]["NotificationEpisodeRef"];
-      /** @description True when the next new episode of the series would notify: next_up is active, the profile has not muted the series, and it is caught up, with no available episode at or after the one Next Up waits for. False while such an episode is available: the profile is told about a new episode only once it is the profile's Next Up. */
+      /** @description True when the episode the profile waits for would notify on arrival: next_up is active, the profile has not muted the series, and it is caught up, meaning the first episode the catalog lists at or after the one Next Up waits for has not arrived, or none is listed. False while that episode is already available: the profile has an episode to watch first, and nothing notifies until it watches on. */
       notifies: boolean;
       /** @description The profile's relationships to the series */
       reasons: components["schemas"]["NotificationSeriesReasons"];

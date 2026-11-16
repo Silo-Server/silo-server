@@ -127169,7 +127169,7 @@
   "web.notifications.inbox.emptyHintNextUp": [
     {
       "type": 0,
-      "value": "As notificações aparecerão aqui quando chegar um novo episódio de uma série com a qual você está em dia."
+      "value": "As notificações aparecerão aqui quando chegar um novo episódio de uma série com a qual você está em dia, ou quando chegar um título que você adicionou à lista para assistir ou solicitou."
     }
   ],
   "web.notifications.inbox.emptyUnread": [
@@ -127606,6 +127606,30 @@
     {
       "type": 0,
       "value": "Visualizações de notificações"
+    }
+  ],
+  "web.notifications.inbox.watchlistAvailable": [
+    {
+      "type": 0,
+      "value": "Título da lista para assistir disponível"
+    }
+  ],
+  "web.notifications.inbox.watchlistMovieAvailable": [
+    {
+      "type": 0,
+      "value": "Um filme da sua lista para assistir já está disponível"
+    }
+  ],
+  "web.notifications.inbox.watchlistSeriesAvailable": [
+    {
+      "type": 0,
+      "value": "Uma série da sua lista para assistir já está disponível"
+    }
+  ],
+  "web.notifications.inbox.watchlistTitleAvailable": [
+    {
+      "type": 0,
+      "value": "Um título da sua lista para assistir já está disponível"
     }
   ],
   "web.notifications.preferences.continueWatching": [
@@ -128189,7 +128213,7 @@
   "web.notifications.series.emptyHintNextUp": [
     {
       "type": 0,
-      "value": "As séries aparecem aqui depois que você termina um episódio. Você recebe notificações de novos episódios quando estiver em dia."
+      "value": "As séries aparecem aqui depois que você termina um episódio. Quando estiver em dia com uma série, você recebe uma notificação assim que o próximo episódio dela chegar."
     }
   ],
   "web.notifications.series.filterByReason": [
@@ -128498,6 +128522,12 @@
     {
       "type": 0,
       "value": " já está disponível"
+    }
+  ],
+  "web.notifications.toast.watchlistArrived": [
+    {
+      "type": 0,
+      "value": "Um título da sua lista para assistir chegou à biblioteca."
     }
   ],
   "web.onboarding.gate.progressFailed": [
@@ -141443,7 +141473,7 @@
   "web.settings.notifications.episodes.nextUpDescription": [
     {
       "type": 0,
-      "value": "Receba notificações quando chegar um novo episódio de uma série com a qual você está em dia."
+      "value": "Receba notificações quando chegar um novo episódio de uma série com a qual você está em dia, ou quando chegar um título que você adicionou à lista para assistir ou solicitou."
     }
   ],
   "web.settings.notifications.episodes.seriesLink": [
@@ -141735,7 +141765,7 @@
   "web.settings.notifications.reason.requests": [
     {
       "type": 0,
-      "value": "Solicitações"
+      "value": "Solicitações e lista para assistir"
     }
   ],
   "web.settings.notifications.reason.watchlist": [

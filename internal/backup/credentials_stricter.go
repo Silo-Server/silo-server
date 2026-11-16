@@ -186,9 +186,6 @@ const (
 	whyDerived    = "derived, and recomputed"
 	whyMigration  = "a migration's record"
 	whyRouting    = "routing between request apps the integration switches gate"
-	// whyRetired is a column a later release drops: nothing reads or writes
-	// it, so its value changes nothing.
-	whyRetired = "retired: nothing reads it"
 )
 
 // restoredFlagColumns are the boolean columns of restored tables that are
@@ -238,16 +235,10 @@ var restoredFlagColumns = map[string]string{
 	"media_requests.is_anime":                                 whyFacts,
 	"movie_match_queue.lease_forced_rerun":                    whyQueue,
 	"movie_match_queue.rerun_requested":                       whyQueue,
-	"notification_preferences.notify_continue_watching":       whyRetired,
-	"notification_preferences.notify_favorites":               whyRetired,
-	"notification_preferences.notify_watchlist":               whyRetired,
 	"page_sections.enabled":                                   whyShown,
 	"page_sections.featured":                                  whyShown,
 	"page_sections.web_only":                                  whyShown,
-	"profile_series_interest.continue_watching":               whyRetired,
-	"profile_series_interest.favorite":                        whyRetired,
 	"profile_series_interest.next_up_candidate":               whyDerived,
-	"profile_series_interest.watchlist":                       whyRetired,
 	"request_routes.is_fallback":                              whyRouting,
 	"request_routes.skip_uhd":                                 whyRouting,
 	"request_routing.id":                                      whyKey,

@@ -40,7 +40,8 @@ Event kinds:
   profiles. An unset kind is normalized to `episode` (the column defaults to
   it; only in-memory events can be empty).
 - Flat item kinds (`movie`, `audiobook`, `ebook`) — carry an item ID only and
-  feed the server-channel broadcast feed; they do not fan out per profile.
+  feed the server-channel broadcast feed; they do not fan out per profile
+  except as watchlist arrivals (see [Watchlist arrivals](#watchlist-arrivals)).
 
 An event can be suppressed instead of fanned out, with the reason recorded on
 the row. Fanout writes one reason, `stale`: the event aged past the fanout
@@ -71,10 +72,13 @@ types with a generic fallback.
 
 ## Eligibility rules
 
-A profile gets an `episode.available` delivery for one thing: a new episode
-becomes the profile's Next Up, the card Home's Next Up row would show for the
-series. Continue Watching, favorites and the watchlist do not notify on their
-own; a favorited or watchlisted series notifies only through Next Up. The rule
+A profile gets an `episode.available` delivery for one thing: the next
+episode after what it has watched arrives. That is the card Home's Next Up row
+shows for the series, with one difference: an episode the catalog lists but
+the library has no file for yet holds its place, so a later episode arriving
+first does not notify. Continue Watching, favorites and the watchlist do not
+notify on their own; a favorited or watchlisted series notifies only through
+Next Up. The rule
 covers every per-profile channel (inbox, realtime, web push, mobile push,
 email, Discord DM, per-profile webhooks). Server channels are outside it: they
 read release events directly, with no profile and no reason flags. Request
@@ -86,43 +90,46 @@ delivery for event E (series S, episode key K) only when all of these hold:
 - The profile's master toggle (`enabled`) and `notify_next_up` are on.
 - The profile's interest row for S has `next_up_candidate` set and a cursor,
   `next_expected_episode_key`.
-- E is the lowest available episode at or after the cursor: `cursor <= K`,
-  and no episode of S with a present file has a key in `[cursor, K)`. This is
-  how Home picks the Next Up card (`internal/catalog/nextup_repo.go`, the
-  `next_ep` lateral). It cannot be key equality: a key is
+- E is the first listed episode at or after the cursor: `cursor <= K`, and
+  the catalog lists no episode of S, with or without a file, with a key in
+  `[cursor, K)`. It cannot be key equality: a key is
   `season * 1_000_000 + episode`, so a season premiere never equals the
   finale's key + 1, and skipped episode numbers would never match either.
 - `last_notified_episode_key` is unset or below K.
 - The series is not muted and the profile can open the episode (both
   below).
 
-"Available" means the episode has a `media_files` row with `missing_since`
-unset, in any library: `presentEpisodeFileSQL` in `release_repo.go`, the test
-Home's lookup and `nextUpEpisode` use. The fanout worker reads
-`HighestAvailableEpisodeKeyBelow` once per event, and only for an event that
-has candidates, so the third condition is `cursor > highestBelow`. Candidates
-that fail the row-only part (`nextUpMatches`) are dropped before their
-preferences are read, so a bulk import costs one lookup per event, not per
-candidate. Both fanout passes (capture, then evaluation under the inbox
-locks) reuse the same value.
+"Listed" means an `episodes` row of the series in any library, whether or not
+it has a file. Metadata lists a season's episodes before their files arrive,
+and those rows are what hold a place. The fanout worker reads
+`HighestListedEpisodeKeyBelow` (`release_repo.go`) once per event, and only for
+an event that has candidates, so the third condition is
+`cursor > highestBelow`. Candidates that fail the row-only part
+(`nextUpMatches`) are dropped before their preferences are read, so a bulk
+import costs one lookup per event, not per candidate. Both fanout passes
+(capture, then evaluation under the inbox locks) reuse the same value.
 
 What follows from the rule:
 
 - A profile caught up through E05 gets one delivery when E06, E07 and E08
   arrive together: E06. E07 and E08 fail the third condition because E06 is
-  available. A season pack therefore needs no per-series cap.
+  listed below them. A season pack therefore needs no per-series cap.
 - If the profile does not watch E06, E09 arriving a week later does not
-  notify. Home's Next Up is still E06.
+  notify. Nothing notifies until the profile watches on.
 - After finishing S01E10, the finale, the profile is told about S02E01.
-- Out-of-order arrival follows Home. When E07 arrives days before E06, E07
-  notifies, because it is the profile's Next Up at that moment. E06 arriving
-  later does not notify: `last_notified_episode_key` is already E07. This is
-  a deliberate tradeoff.
-- Episodes from one scan are judged together because of the release settle
-  delay (`notifications.fanout.settle_seconds`, 30 seconds by default): an
-  event is claimed only after it has aged that long, by which time the
-  scan's other episodes have their files. The rule depends on that delay;
-  with none, E07 linked a moment before E06 in the same scan would notify.
+- Out-of-order arrival waits for the listed episode. When the catalog lists
+  E06 and E07 arrives days before E06's file, E07 stays silent although Home
+  shows it as Next Up, and E06 notifies when it lands. A listed episode that
+  never arrives keeps the series silent until the profile watches past it.
+- When the catalog lists nothing at or after the cursor (a finale before next
+  season's metadata exists, or metadata that trails the files), the first
+  episode to arrive there notifies. If E07 arrives before E06 is listed at
+  all, E07 notifies, and E06 arriving later does not:
+  `last_notified_episode_key` is already E07.
+- The rule reads the catalog when fanout runs, after the release settle delay
+  (`notifications.fanout.settle_seconds`, 30 seconds by default), so episodes
+  linked by one scan are all listed by the time any of them is evaluated,
+  whatever order the scan linked them in.
 
 Fanout never moves the cursor. It changes only when the interest recompute
 runs, which profile activity queues (see "Next Up cursor" below).
@@ -197,11 +204,13 @@ cursor, plus the series it muted. A series in several libraries is one entry;
 its cursor is the lowest among the rows that are Next Up candidates.
 `ActiveReasons` is the event-independent half of these rules, shared by
 fanout and the list, so the two cannot disagree about whether preferences
-silence Next Up. The list also says whether the profile is caught up: no
-episode at or after the cursor has a present file, the availability test
-fanout uses. A series notifies (`NotifiedSeries.Notifies`) when it is not
-muted, Next Up is active, and the profile is caught up; otherwise the profile
-has an episode to watch first, and a new one would not be its Next Up. A muted
+silence Next Up. The list also says whether the profile is caught up: the
+episode it waits for has not arrived, meaning the first listed episode at or
+after the cursor has no present file (a `media_files` row with `missing_since`
+unset, `presentEpisodeFileSQL`), or none is listed. A series notifies
+(`NotifiedSeries.Notifies`) when it is not muted, Next Up is active, and the
+profile is caught up; otherwise the episode it waits for is already in the
+library and nothing notifies until it watches on. A muted
 series keeps its active reasons on the list but does not notify. The list
 filters series through the catalog's card access check rather than fanout's
 per-library one, and it leaves out the already-notified cursor, which depends
@@ -224,19 +233,18 @@ series:
    shows no Next Up card for such a series, but notifications still follow
    it. This departure from Home is deliberate.
 2. **Walk past started episodes.** The cursor starts at anchor + 1 and moves
-   past every episode the profile has started, up to Home's Next Up card
-   (`walkPastStarted` in `home_hides.go`). "Started" is a progress row that
-   is completed or has a position, or a completed history entry. An episode
-   without a present file neither stops the walk nor moves the cursor, since
-   Home's lookup skips it too. The lowest available episode at or after the
-   cursor is therefore Home's card when the recompute runs. A skipped
-   episode that gets its file later sits behind the cursor and does not
-   notify: file arrival queues no recompute, so only a daily rebuild that
-   happens to run inside the settle delay would move the cursor back in
-   time. Without the walk, a rewatcher would never
-   hear about a new season: caught up through S05 and rewatching S01E01, the
-   anchor is S01E01, and a cursor of S01E02 would wait on an episode that is
-   already available.
+   past every listed episode the profile has started, stopping at the first
+   listed episode it has not started, whether or not that episode has a file
+   (`nextUpCursor` in `home_hides.go`). "Started" is a progress row that is
+   completed or has a position, or a completed history entry. A Postgres
+   progress row counts even when a history hide covers it, as on Home, and an
+   episode key counts as started when any row with that key is. The first listed episode
+   at or after the cursor is therefore the one the profile waits for. When
+   every listed episode after the anchor is started, the cursor sits after
+   the last of them. Without the walk, a rewatcher would never hear about a
+   new season: caught up through S05 and rewatching S01E01, the anchor is
+   S01E01, and a cursor of S01E02 would wait on an episode that is already
+   available.
 3. **Partly watched.** `next_up_candidate` is false while the series has an
    episode in progress (a position, not completed) whose progress is newer
    than the anchor completion. This is Home's Next Up test
@@ -280,17 +288,29 @@ the daily interest rebuild. A release fanned out in that window is judged on
 the stale interest. Evaluating Home removals at fanout time would close the
 gap.
 
-### Retired columns
+### Upgrade
 
+Migration `20261116231355_drop_retired_notification_reasons` drops
 `profile_series_interest.favorite`, `watchlist` and `continue_watching`,
 `notification_preferences.notify_favorites`, `notify_watchlist` and
 `notify_continue_watching`, and the same three `notify_*` columns on
-`notification_webhooks` are still in the schema. Nothing reads or writes them:
-a new row takes the column defaults. They stay so a replica of the earlier
-release keeps working during a rolling deploy. A later release drops them in a
-migration that needs a maintenance window. Until then, the interest prune
-(`PruneInert`) and the recompute's delete ignore them, so a row that only a
-retired flag kept is removed.
+`notification_webhooks`. It also deletes the interest rows only a removed
+reason kept, rebuilds `profile_series_interest_active_idx` on
+`next_up_candidate`, and deletes the `notifications.fanout.max_series_burst`
+setting.
+
+This migration requires a maintenance window. Binaries from before it read and
+write the dropped columns, so stop every API replica and its background jobs
+before a new replica starts migrations, and do not restart an old replica
+against the migrated database. A rolling deployment is unsafe. Release notes
+for a build containing this migration must carry the requirement. This follows
+the [backup and rollback policy](../release-versioning.md#backups-and-rollback)
+and the [cluster cutover policy](api-contract.md#cluster-cutover-policy).
+
+Interest rows written before the upgrade keep their old cursor (last completed
+episode + 1) until the daily interest rebuild or the profile's next activity
+recomputes them. Under the new rule that cursor behaves like a current one for
+a profile that is caught up.
 
 ## Release-event retention
 
@@ -346,12 +366,67 @@ a `requests.ApprovalOrigin`, and the requester notice requires
 unrecognized one is logged, so a new policy-driven path cannot reintroduce the
 notice by omission.
 
+## Watchlist arrivals
+
+A profile that watchlisted a movie or series before the library had it is told
+when it arrives, whether or not anyone requested it: a profile that turned off
+watchlist requests, or a server without requests, still hears. Fanout handles
+it from release events, in the same transaction as episode deliveries
+(`watchlist_arrival.go`). A fresh movie event names the movie; a fresh episode
+event names its series. The item counts as arrived only when its
+`media_items.created_at` is within the fanout staleness horizon, so a series
+arrives with its first episodes and its later episodes are no arrival.
+
+For each arrived item, `watchlist.Arrivals.WaitingFor` finds two kinds of
+waiting profile:
+
+- An unpromoted `user_watchlist_titles` entry, added before the item's
+  `created_at`, whose title resolves to the item the way promotion resolves it
+  (`catalog.ResolveProviderAliases`: any provider ID the title holds or once
+  held, an ID set that does not contradict the item's, an item in an enabled
+  library).
+- An entry promotion already moved onto the library watchlist. A profile that
+  reads its watchlist between the arrival and the fanout (the settle delay)
+  promotes its entry first. The library watchlist can live in the per-user
+  SQLite store, which fanout cannot query, so promotion records the move in
+  `watchlist_title_promotions` in its own transaction, keeping the entry's
+  `added_at`. A record counts when that `added_at` predates the item's
+  `created_at`. Notification retention deletes records promoted before the
+  staleness horizon, which can no longer match; deleting a profile deletes
+  its records.
+
+The lookups run on the fanout transaction, and each item's waiters are checked
+in one batch. Each is told unless:
+
+- its notifications are off (the master switch; there is no per-type switch),
+- it may not open the item (the access check episodes use, against any
+  library),
+- a request of the title will tell it: it requested or follows an active
+  request whose fulfilled notice has not gone out, under any TMDB ID the
+  title held (`requests.Repository.AwaitingFulfillment`), or
+- a `request.fulfilled` for the title already reached it.
+
+So a profile that both requested and watchlisted a title hears once, from the
+request. The delivery is `watchlist.available`, with the arrived item in
+`series_id` (as `request.fulfilled` names it) and the title's TMDB ID and
+media type (`movie` or `series`) in `reason_flags`. The partial unique index
+`notification_deliveries_account_profile_watchlist_key` keeps one per
+`(account, profile, item)`. Webhooks carry it under `notify_requests`; web
+push, mobile push, email and Discord messages carry it like any delivery.
+
+Arrival rides on release events, so it inherits their gaps: a library's silent
+seeding scan and events past the staleness horizon tell nobody. If an
+administrator sets delivery retention shorter than the staleness horizon, an
+entry still unpromoted can be told again about the same item, by a later
+episode inside the horizon, once retention has removed the first notice.
+
 ## Outbound webhooks
 
 Each profile can register up to a capped number of webhook destinations
 (Discord or generic). Each has two event switches: `notify_next_up` for
 `episode.available` deliveries (`Webhook.MatchesReasons`) and
-`notify_requests` for request notices. The profile chose the
+`notify_requests` for request notices and watchlist arrivals. The profile
+chose the
 URL, so notification content — titles, season/episode numbers — is included;
 the guardrails below are the ones the profile cannot opt out of.
 
@@ -428,7 +503,8 @@ Generic webhooks receive canonical Silo JSON: event name, delivery and
 webhook IDs, timestamp, `version`, `test` flag, profile ID, delivery type,
 `reason_flags`, and the series/episode (or request) content blocks.
 `reason_flags` is `{"next_up": <bool>}`; Next Up is the only reason an
-episode notifies for.
+episode notifies for. A `watchlist.available` payload names the arrived item
+in the series block, and its `reason_flags` read `{"next_up": false}`.
 
 Each request is signed with the webhook's per-destination 32-byte secret:
 

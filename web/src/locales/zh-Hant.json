@@ -107901,7 +107901,7 @@
   "web.notifications.inbox.emptyHintNextUp": [
     {
       "type": 0,
-      "value": "當你已追上進度的影集有新的一集推出時，你會在這裡收到通知。"
+      "value": "當你已追上進度的影集有新的一集推出，或你加入待看清單或請求的作品上架時，你會在這裡收到通知。"
     }
   ],
   "web.notifications.inbox.emptyUnread": [
@@ -108258,6 +108258,30 @@
     {
       "type": 0,
       "value": "通知檢視"
+    }
+  ],
+  "web.notifications.inbox.watchlistAvailable": [
+    {
+      "type": 0,
+      "value": "待看清單中的作品已上架"
+    }
+  ],
+  "web.notifications.inbox.watchlistMovieAvailable": [
+    {
+      "type": 0,
+      "value": "你待看清單中的電影現已上架"
+    }
+  ],
+  "web.notifications.inbox.watchlistSeriesAvailable": [
+    {
+      "type": 0,
+      "value": "你待看清單中的影集現已上架"
+    }
+  ],
+  "web.notifications.inbox.watchlistTitleAvailable": [
+    {
+      "type": 0,
+      "value": "你待看清單中的作品現已上架"
     }
   ],
   "web.notifications.preferences.continueWatching": [
@@ -108753,7 +108777,7 @@
   "web.notifications.series.emptyHintNextUp": [
     {
       "type": 0,
-      "value": "你看完一集後，影集就會顯示在這裡。追上進度後，有新的一集推出時就會通知你。"
+      "value": "你看完一集後，影集就會顯示在這裡。追上某部影集的進度後，該影集的下一集推出時就會通知你。"
     }
   ],
   "web.notifications.series.filterByReason": [
@@ -109070,6 +109094,12 @@
     {
       "type": 0,
       "value": " 現已上架"
+    }
+  ],
+  "web.notifications.toast.watchlistArrived": [
+    {
+      "type": 0,
+      "value": "你待看清單中的作品已加入媒體庫。"
     }
   ],
   "web.onboarding.gate.progressFailed": [
@@ -120557,7 +120587,7 @@
   "web.settings.notifications.episodes.nextUpDescription": [
     {
       "type": 0,
-      "value": "當你已追上進度的影集有新的一集推出時收到通知。"
+      "value": "當你已追上進度的影集有新的一集推出，或你加入待看清單或請求的作品上架時收到通知。"
     }
   ],
   "web.settings.notifications.episodes.seriesLink": [
@@ -120845,7 +120875,7 @@
   "web.settings.notifications.reason.requests": [
     {
       "type": 0,
-      "value": "請求"
+      "value": "請求和待看清單"
     }
   ],
   "web.settings.notifications.reason.watchlist": [

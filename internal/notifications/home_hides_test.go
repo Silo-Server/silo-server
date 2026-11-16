@@ -205,38 +205,68 @@ func TestInterestTrackingStoreQueuesFirstWriteAfterHomeChange(t *testing.T) {
 	}
 }
 
-func TestWalkPastStarted(t *testing.T) {
+func TestNextUpCursor(t *testing.T) {
 	s1 := func(n int) int { return EpisodeKey(1, n) }
+	// listed builds the catalog's episodes of season 1, keyed by ordinal.
+	listed := func(keys ...int) map[string]int {
+		out := make(map[string]int, len(keys))
+		for _, key := range keys {
+			out[fmt.Sprintf("ep-%d", key)] = key
+		}
+		return out
+	}
+	ids := func(keys ...int) []string {
+		out := make([]string, 0, len(keys))
+		for _, key := range keys {
+			out = append(out, fmt.Sprintf("ep-%d", key))
+		}
+		return out
+	}
 	for _, tc := range []struct {
-		name    string
-		anchor  int
-		started []int
-		next    *int
-		want    int
+		name     string
+		anchor   int
+		episodes map[string]int
+		started  []string
+		want     int
 	}{
-		{name: "caught up", anchor: s1(5), started: []int{s1(1), s1(5)}, want: s1(6)},
+		{
+			name: "caught up", anchor: s1(5),
+			episodes: listed(s1(1), s1(5)), started: ids(s1(1), s1(5)), want: s1(6),
+		},
+		{
+			// E06 is listed without a file yet. The cursor stops on it, so E07
+			// landing first is past a listed episode and stays silent.
+			name: "listed episode not started", anchor: s1(5),
+			episodes: listed(s1(5), s1(6), s1(7)), started: ids(s1(5)), want: s1(6),
+		},
 		{
 			// Caught up through S05 and rewatching S01E01: the cursor lands
 			// after S05, so S06E01 can notify.
 			name: "rewatch", anchor: s1(1),
-			started: []int{EpisodeKey(5, 10), s1(1), s1(2), EpisodeKey(3, 4)},
-			want:    EpisodeKey(5, 10) + 1,
+			episodes: listed(s1(1), s1(2), EpisodeKey(3, 4), EpisodeKey(5, 10)),
+			started:  ids(EpisodeKey(5, 10), s1(1), s1(2), EpisodeKey(3, 4)),
+			want:     EpisodeKey(5, 10) + 1,
 		},
 		{
-			// The walk stops at the first available episode not started.
+			// The walk stops at the first listed episode not started.
 			name: "rewatch with an unwatched episode", anchor: s1(1),
-			started: []int{s1(2), s1(4), EpisodeKey(5, 10)}, next: intPtr(s1(3)),
-			want: s1(3),
+			episodes: listed(s1(1), s1(2), s1(3), s1(4), EpisodeKey(5, 10)),
+			started:  ids(s1(2), s1(4), EpisodeKey(5, 10)),
+			want:     s1(3),
 		},
 		{
-			// E03 has no file, so Home skips it and so does the walk.
-			name: "episode without a file", anchor: s1(1),
-			started: []int{s1(2), s1(4)}, next: intPtr(s1(5)),
-			want: s1(5),
+			name: "started episodes before the anchor", anchor: s1(5),
+			episodes: listed(s1(3), s1(5)), started: ids(s1(3), s1(5)), want: s1(6),
 		},
-		{name: "started episodes before the anchor", anchor: s1(5), started: []int{s1(3)}, want: s1(6)},
+		{
+			// Two rows share S01E06 and one is started: the key is started.
+			name: "duplicate rows of one episode", anchor: s1(5),
+			episodes: map[string]int{"a": s1(5), "b": s1(6), "b-copy": s1(6)},
+			started:  []string{"a", "b"},
+			want:     s1(7),
+		},
 	} {
-		if got := walkPastStarted(tc.anchor, tc.started, tc.next); got != tc.want {
+		if got := nextUpCursor(tc.anchor, tc.episodes, tc.started); got != tc.want {
 			t.Errorf("%s: cursor = %d, want %d", tc.name, got, tc.want)
 		}
 	}
@@ -390,21 +420,21 @@ func TestRecomputeSeriesFollowsHomeRemovalsPostgres(t *testing.T) {
 	updater := NewInterestUpdater(pool, NewInterestRepository(pool), provider, allLibrariesScope{})
 	system.Interest = updater
 
-	// A favorite gives no interest of its own: a row an earlier release kept
-	// for it alone is deleted by the next recompute.
+	// A favorite gives no interest of its own: a row with no Next Up
+	// candidate and no completed episode is deleted by the next recompute.
 	if _, err := store.AddFavorite(ctx, profileID, seriesID); err != nil {
 		t.Fatalf("AddFavorite: %v", err)
 	}
-	if _, err := pool.Exec(ctx, `INSERT INTO profile_series_interest (user_id, profile_id, library_id, series_id, favorite) VALUES ($1, $2, $3, $4, true)`,
+	if _, err := pool.Exec(ctx, `INSERT INTO profile_series_interest (user_id, profile_id, library_id, series_id) VALUES ($1, $2, $3, $4)`,
 		userID, profileID, libraryID, seriesID); err != nil {
-		t.Fatalf("seed favorite-only interest: %v", err)
+		t.Fatalf("seed inert interest: %v", err)
 	}
 	if err := updater.RecomputeSeries(ctx, userID, profileID, seriesID); err != nil {
 		t.Fatalf("RecomputeSeries: %v", err)
 	}
 	var left int
 	if err := pool.QueryRow(ctx, `SELECT count(*) FROM profile_series_interest WHERE series_id = $1`, seriesID).Scan(&left); err != nil || left != 0 {
-		t.Fatalf("favorite-only interest rows = %d, %v; want the row deleted", left, err)
+		t.Fatalf("inert interest rows = %d, %v; want the row deleted", left, err)
 	}
 
 	setProgress(episodes[0], true, watchedAt)
@@ -585,7 +615,7 @@ func TestRecomputeSeriesNextUpCursorPostgres(t *testing.T) {
 	}{
 		{
 			// The finale's key + 1 matches no episode; fanout lets S02E01
-			// through because nothing available lies between.
+			// through because nothing listed lies between.
 			name: "finished season",
 			c: recomputeCase{
 				episodes: [][2]int{{1, 1}, {1, 2}, {1, 3}},
@@ -607,7 +637,18 @@ func TestRecomputeSeriesNextUpCursorPostgres(t *testing.T) {
 			wantCursor: EpisodeKey(2, 3), wantNextUp: true,
 		},
 		{
-			// The walk stops at the first available episode not started.
+			// S01E02 is listed without a file. The walk stops on it although
+			// S01E03 after it is started, so S01E02 notifies when it lands.
+			name: "listed episode without a file",
+			c: recomputeCase{
+				episodes: [][2]int{{1, 1}, {1, 3}},
+				fileless: [][2]int{{1, 2}},
+				progress: []progressAt{{season: 1, number: 3, at: at(0)}, {season: 1, number: 1, at: at(1)}},
+			},
+			wantCursor: EpisodeKey(1, 2), wantNextUp: true,
+		},
+		{
+			// The walk stops at the first listed episode not started.
 			name: "rewatch with an unwatched episode",
 			c: recomputeCase{
 				episodes: [][2]int{{1, 1}, {1, 2}, {1, 3}, {1, 4}},

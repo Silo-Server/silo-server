@@ -1,0 +1,272 @@
+package watchlist
+
+import (
+	"context"
+	"fmt"
+	"slices"
+	"strconv"
+	"time"
+
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
+
+	"github.com/Silo-Server/silo-server/internal/catalog"
+	"github.com/Silo-Server/silo-server/internal/contentid"
+)
+
+// Waiter is a profile whose watchlist held a title the library did not have
+// when the profile added it, and which a catalog item now matches.
+type Waiter struct {
+	UserID    int
+	ProfileID string
+	// MediaType and TMDBIDs name the title: its current TMDB ID first, then
+	// the ones TMDB replaced. TMDBIDs is empty when neither the title nor the
+	// item carries a TMDB ID.
+	MediaType string
+	TMDBIDs   []int
+}
+
+// Querier is the subset of pgx.Tx / pgxpool.Pool the arrival reads need, so
+// the notification fanout can run them inside its transaction.
+type Querier interface {
+	Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
+	Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error)
+}
+
+// Arrivals finds the profiles waiting for a catalog item. The notification
+// system tells them the title arrived. It holds no state: its reads run on
+// the caller's querier.
+type Arrivals struct{}
+
+// WaitingFor returns, for each of the catalog items, the profiles waiting for
+// it. Items no profile waits for are absent. Only an item created at or after
+// arrivedSince has arrived: a later episode of a series the library has had
+// for longer is no arrival, so it cannot repeat the notice once delivery
+// retention removed the first one. A profile waits for an arrived item when
+// either:
+//
+//   - a watchlist title entry resolves to the item the way promotion resolves
+//     it (catalog.ResolveProviderAliases: any provider ID the title holds or
+//     once held, an ID set that does not contradict the item's, an item in an
+//     enabled library); or
+//   - promotion already moved such an entry onto the library watchlist,
+//     recorded in watchlist_title_promotions with the entry's added_at, which
+//     predates the item.
+//
+// The second rule keeps a profile that reads its watchlist between the item's
+// arrival and the notification fanout from losing the notice. It reads the
+// promotion record rather than the library watchlist, which may live in a
+// per-user SQLite store this query cannot reach.
+func (a *Arrivals) WaitingFor(ctx context.Context, q Querier, contentIDs []string, arrivedSince time.Time) (map[string][]Waiter, error) {
+	out := make(map[string][]Waiter)
+	if a == nil || len(contentIDs) == 0 {
+		return out, nil
+	}
+	for _, contentID := range contentIDs {
+		waiters, err := waitingFor(ctx, q, contentID, arrivedSince)
+		if err != nil {
+			return nil, err
+		}
+		if len(waiters) > 0 {
+			out[contentID] = waiters
+		}
+	}
+	return out, nil
+}
+
+// PrunePromotions deletes promotion records older than before. The arrival
+// read only counts an item created at or after its horizon, and a promotion
+// happens after its item exists, so a record promoted before the horizon can
+// no longer match. The notification retention pass calls it with the fanout
+// staleness horizon.
+func (a *Arrivals) PrunePromotions(ctx context.Context, q Querier, before time.Time) (int64, error) {
+	tag, err := q.Exec(ctx, `DELETE FROM watchlist_title_promotions WHERE promoted_at < $1`, before)
+	if err != nil {
+		return 0, fmt.Errorf("pruning watchlist title promotions: %w", err)
+	}
+	return tag.RowsAffected(), nil
+}
+
+func waitingFor(ctx context.Context, q Querier, contentID string, arrivedSince time.Time) ([]Waiter, error) {
+	var arrived bool
+	rows, err := q.Query(ctx, `SELECT created_at >= $2 FROM media_items WHERE content_id = $1`, contentID, arrivedSince)
+	if err != nil {
+		return nil, fmt.Errorf("reading arrival time of %s: %w", contentID, err)
+	}
+	for rows.Next() {
+		if err := rows.Scan(&arrived); err != nil {
+			rows.Close()
+			return nil, fmt.Errorf("reading arrival time of %s: %w", contentID, err)
+		}
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("reading arrival time of %s: %w", contentID, err)
+	}
+	if !arrived {
+		return nil, nil
+	}
+	mediaType, itemAliases, err := catalog.ItemProviderAliasesOn(ctx, q, contentID)
+	if err != nil || len(itemAliases) == 0 {
+		return nil, err
+	}
+	waiters, err := unpromotedWaiters(ctx, q, contentID, mediaType, itemAliases)
+	if err != nil {
+		return nil, err
+	}
+	promoted, err := promotedWaiters(ctx, q, contentID, mediaType, itemAliases)
+	if err != nil {
+		return nil, err
+	}
+	return append(waiters, promoted...), nil
+}
+
+// unpromotedWaiters returns the profiles with a title entry, added before the
+// item existed, that resolves to the item. It finds the entries whose title shares any provider ID with the
+// item, then keeps the titles that promotion's resolution would move onto
+// this item.
+func unpromotedWaiters(ctx context.Context, q Querier, contentID, mediaType string, itemAliases []catalog.ProviderAlias) ([]Waiter, error) {
+	providers := make([]string, len(itemAliases))
+	providerIDs := make([]string, len(itemAliases))
+	for i, alias := range itemAliases {
+		providers[i], providerIDs[i] = alias.Provider, alias.ProviderID
+	}
+	rows, err := q.Query(ctx, `
+		WITH matched AS (
+			SELECT DISTINCT a.title_id
+			FROM unnest($2::text[], $3::text[]) AS v(provider, provider_id)
+			JOIN watchlist_title_aliases a
+			  ON a.media_type = $1 AND a.provider = v.provider AND a.provider_id = v.provider_id
+		)
+		SELECT m.title_id, t.tmdb_id,
+		       array_agg(ta.provider ORDER BY ta.provider, ta.provider_id),
+		       array_agg(ta.provider_id ORDER BY ta.provider, ta.provider_id)
+		FROM matched m
+		JOIN watchlist_titles t ON t.id = m.title_id
+		JOIN watchlist_title_aliases ta ON ta.title_id = m.title_id
+		GROUP BY m.title_id, t.tmdb_id
+		ORDER BY m.title_id`,
+		mediaType, providers, providerIDs)
+	if err != nil {
+		return nil, fmt.Errorf("matching watchlist titles to %s: %w", contentID, err)
+	}
+	// titleTMDBIDs holds each matched title's TMDB IDs, its current one first.
+	titleTMDBIDs := make(map[int64][]int)
+	var requested []catalog.ProviderAlias
+	for rows.Next() {
+		var titleID int64
+		var currentTMDB int
+		var aliasProviders, aliasIDs []string
+		if err := rows.Scan(&titleID, &currentTMDB, &aliasProviders, &aliasIDs); err != nil {
+			rows.Close()
+			return nil, fmt.Errorf("scanning matched watchlist title: %w", err)
+		}
+		tmdbIDs := []int{currentTMDB}
+		for i, provider := range aliasProviders {
+			requested = append(requested, catalog.ProviderAlias{Key: titleID, MediaType: mediaType, Provider: provider, ProviderID: aliasIDs[i]})
+			if provider != contentid.ProviderTMDB {
+				continue
+			}
+			if id, err := strconv.Atoi(aliasIDs[i]); err == nil && !slices.Contains(tmdbIDs, id) {
+				tmdbIDs = append(tmdbIDs, id)
+			}
+		}
+		titleTMDBIDs[titleID] = tmdbIDs
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("matching watchlist titles to %s: %w", contentID, err)
+	}
+	if len(titleTMDBIDs) == 0 {
+		return nil, nil
+	}
+	resolved, err := catalog.ResolveProviderAliasesOn(ctx, q, requested)
+	if err != nil {
+		return nil, err
+	}
+	var titleIDs []int64
+	for titleID, items := range resolved {
+		if slices.Contains(items, contentID) {
+			titleIDs = append(titleIDs, titleID)
+		}
+	}
+	if len(titleIDs) == 0 {
+		return nil, nil
+	}
+	slices.Sort(titleIDs)
+	// An entry added after the item existed was not waiting for it.
+	rows, err = q.Query(ctx, `
+		SELECT e.title_id, e.user_id, e.profile_id
+		FROM user_watchlist_titles e
+		JOIN media_items i ON i.content_id = $2
+		WHERE e.title_id = ANY($1) AND e.added_at < i.created_at
+		ORDER BY e.user_id, e.profile_id, e.title_id`, titleIDs, contentID)
+	if err != nil {
+		return nil, fmt.Errorf("listing watchlist entries waiting for %s: %w", contentID, err)
+	}
+	defer rows.Close()
+	var waiters []Waiter
+	for rows.Next() {
+		var titleID int64
+		w := Waiter{MediaType: mediaType}
+		if err := rows.Scan(&titleID, &w.UserID, &w.ProfileID); err != nil {
+			return nil, fmt.Errorf("scanning watchlist waiter: %w", err)
+		}
+		w.TMDBIDs = slices.Clone(titleTMDBIDs[titleID])
+		waiters = append(waiters, w)
+	}
+	return waiters, rows.Err()
+}
+
+// promotedWaiters returns the profiles whose entry promotion already moved
+// onto the item, when the entry predates the item. The title row may be gone
+// by then, so the item's TMDB IDs name the title, its current one first.
+func promotedWaiters(ctx context.Context, q Querier, contentID, mediaType string, itemAliases []catalog.ProviderAlias) ([]Waiter, error) {
+	rows, err := q.Query(ctx, `
+		SELECT p.user_id, p.profile_id, i.tmdb_id
+		FROM watchlist_title_promotions p
+		JOIN media_items i ON i.content_id = p.media_item_id
+		WHERE p.media_item_id = $1 AND p.title_added_at < i.created_at
+		ORDER BY p.user_id, p.profile_id`,
+		contentID)
+	if err != nil {
+		return nil, fmt.Errorf("listing promoted watchlist entries for %s: %w", contentID, err)
+	}
+	defer rows.Close()
+	var itemTMDBIDs []int
+	for _, alias := range itemAliases {
+		if alias.Provider != contentid.ProviderTMDB {
+			continue
+		}
+		if id, err := strconv.Atoi(alias.ProviderID); err == nil && !slices.Contains(itemTMDBIDs, id) {
+			itemTMDBIDs = append(itemTMDBIDs, id)
+		}
+	}
+	var waiters []Waiter
+	for rows.Next() {
+		w := Waiter{MediaType: mediaType}
+		var currentTMDB *string
+		if err := rows.Scan(&w.UserID, &w.ProfileID, &currentTMDB); err != nil {
+			return nil, fmt.Errorf("scanning promoted watchlist waiter: %w", err)
+		}
+		w.TMDBIDs = currentFirst(itemTMDBIDs, currentTMDB)
+		waiters = append(waiters, w)
+	}
+	return waiters, rows.Err()
+}
+
+// currentFirst orders an item's TMDB IDs with its current one first.
+func currentFirst(ids []int, current *string) []int {
+	out := slices.Clone(ids)
+	if current == nil {
+		return out
+	}
+	id, err := strconv.Atoi(*current)
+	if err != nil {
+		return out
+	}
+	if i := slices.Index(out, id); i > 0 {
+		out = append([]int{id}, slices.Delete(out, i, i+1)...)
+	}
+	return out
+}

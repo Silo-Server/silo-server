@@ -47,6 +47,11 @@ type FanoutWorker struct {
 	rateLimiter *profileRateLimiter
 	webPush     *WebPushRepository
 	pushDevices *PushDeviceRepository
+
+	// Watchlist arrivals (SetWatchlistArrivals): who waits for an arriving
+	// title, and whether a request of it tells them instead.
+	watchlist watchlistWaiters
+	requests  requestWaiters
 }
 
 // SetWebhookOutbox wires durable webhook attempt enqueueing into the fanout
@@ -170,9 +175,10 @@ func (w *FanoutWorker) processBatch(ctx context.Context) (processed int, runErr 
 	defer workmetrics.Profile(ctx)()
 	defer func() { observation.Finish(telemetry.Outcome(runErr)) }()
 	// Non-episode kinds (movies, audiobooks, ebooks) have no per-profile
-	// interest and never fan out; mark them processed immediately so retention
-	// reclaims them. The server-channel sweep reads events by cursor
-	// regardless of processed state.
+	// interest and never fan out as episodes; mark them processed immediately
+	// so retention reclaims them. A fresh movie still reaches watchlist
+	// arrivals below, in this transaction. The server-channel sweep reads
+	// events by cursor regardless of processed state.
 	events, others := PartitionEventsByKind(claimed)
 	if err := w.releases.MarkProcessed(ctx, tx, eventIDs(others), nil); err != nil {
 		return 0, err
@@ -187,6 +193,13 @@ func (w *FanoutWorker) processBatch(ctx context.Context) (processed int, runErr 
 	// lowest available episode at or after a profile's cursor notify, so a
 	// season pack tells each profile about one episode of the series.
 	staleCutoff := time.Now().Add(-w.settings.MaxEventAge(ctx))
+	// A fresh movie can still tell the profiles whose watchlist waits for it.
+	arrivalEvents := make([]ReleaseEvent, 0, len(others))
+	for _, event := range others {
+		if !event.CreatedAt.Before(staleCutoff) {
+			arrivalEvents = append(arrivalEvents, event)
+		}
+	}
 	fanout := make([]ReleaseEvent, 0, len(events))
 	stale := make([]ReleaseEvent, 0)
 	for _, event := range events {
@@ -241,7 +254,7 @@ func (w *FanoutWorker) processBatch(ctx context.Context) (processed int, runErr 
 		if len(candidates) == 0 {
 			continue
 		}
-		highestBelow, err := w.releases.HighestAvailableEpisodeKeyBelow(ctx, tx, event.SeriesID, event.EpisodeKey)
+		highestBelow, err := w.releases.HighestListedEpisodeKeyBelow(ctx, tx, event.SeriesID, event.EpisodeKey)
 		if err != nil {
 			return 0, err
 		}
@@ -282,6 +295,15 @@ func (w *FanoutWorker) processBatch(ctx context.Context) (processed int, runErr 
 		}
 		candidatesByEvent[event.ID] = captured
 	}
+	// A movie, or a series arriving with its first episodes, tells the
+	// profiles whose watchlist waits for it.
+	arrivals, err := w.captureWatchlistArrivals(ctx, tx, recipients, append(arrivalEvents, fanout...), staleCutoff)
+	if err != nil {
+		return 0, err
+	}
+	for _, arrival := range arrivals {
+		profiles[arrival.waiter.ProfileID] = struct{}{}
+	}
 	if err := w.deliveries.LockInboxProfiles(ctx, tx, slices.Sorted(maps.Keys(profiles))); err != nil {
 		return 0, err
 	}
@@ -298,6 +320,10 @@ func (w *FanoutWorker) processBatch(ctx context.Context) (processed int, runErr 
 		totalInserted += len(rows)
 		dispatchRows = append(dispatchRows, rows...)
 	}
+	arrivalIDs, err := w.deliverWatchlistArrivals(ctx, tx, arrivals)
+	if err != nil {
+		return 0, fmt.Errorf("deliver watchlist arrivals: %w", err)
+	}
 	if err := w.releases.MarkProcessed(ctx, tx, eventIDs(fanout), nil); err != nil {
 		return 0, err
 	}
@@ -313,6 +339,7 @@ func (w *FanoutWorker) processBatch(ctx context.Context) (processed int, runErr 
 				"delivery_id", row.ID, "profile_id", row.ProfileID, "error", err)
 		}
 	}
+	w.dispatchInserted(ctx, arrivalIDs)
 
 	w.logger.InfoContext(ctx, "fanout batch processed",
 		"claimed", len(claimed),
@@ -322,13 +349,14 @@ func (w *FanoutWorker) processBatch(ctx context.Context) (processed int, runErr 
 		"recipient_count", totalRecipients,
 		"inserted_count", totalInserted,
 		"deduped_count", totalRecipients-totalInserted,
+		"watchlist_arrivals", len(arrivalIDs),
 		"duration_ms", time.Since(started).Milliseconds(),
 	)
 	return len(claimed), nil
 }
 
 // fanOutEvent resolves recipients for one release event and inserts
-// deliveries. highestBelow is the event's HighestAvailableEpisodeKeyBelow,
+// deliveries. highestBelow is the event's HighestListedEpisodeKeyBelow,
 // read during capture. Returns dispatch payloads for the rows actually
 // inserted and the candidate recipient count.
 func (w *FanoutWorker) fanOutEvent(ctx context.Context, tx pgx.Tx, event ReleaseEvent, highestBelow *int, capturedProfiles map[profileKey]struct{}) ([]DeliveryRow, int, error) {
@@ -392,7 +420,7 @@ func (w *FanoutWorker) fanOutEvent(ctx context.Context, tx pgx.Tx, event Release
 	// Durable dispatch outbox: enqueue per-target attempt rows in the same
 	// transaction so a crash after commit delays webhooks instead of silently
 	// dropping them. Push channels (specs 02-03) plug in here the same way.
-	if err := w.enqueueWebhookOutbox(ctx, tx, inserted, pending); err != nil {
+	if err := w.enqueueWebhookOutbox(ctx, tx, inserted, pendingReasonsMatch(pending)); err != nil {
 		return nil, 0, err
 	}
 	if err := w.enqueueWebPushOutbox(ctx, tx, inserted); err != nil {
@@ -444,6 +472,15 @@ func (w *FanoutWorker) fanOutEvent(ctx context.Context, tx pgx.Tx, event Release
 type pendingDelivery struct {
 	delivery Delivery
 	flags    ReasonFlags
+}
+
+// pendingReasonsMatch is the webhook switch for episode deliveries: a webhook
+// gets one when its reason switches match the delivery's flags.
+func pendingReasonsMatch(pending map[profileKey]pendingDelivery) func(InsertedDelivery, Webhook) bool {
+	return func(row InsertedDelivery, hook Webhook) bool {
+		entry, ok := pending[row.key()]
+		return ok && hook.MatchesReasons(entry.flags)
+	}
 }
 
 // insertedProfileKeys lists the distinct account/profile pairs of the
@@ -511,10 +548,11 @@ func (w *FanoutWorker) enqueueWebPushOutbox(ctx context.Context, tx pgx.Tx, inse
 }
 
 // enqueueWebhookOutbox inserts `pending` webhook attempt rows for each newly
-// inserted delivery, inside the fanout transaction. Two filters apply:
-// per-webhook reason flags, and the per-profile delivery rate limit
-// (over-limit notifications stay in the inbox; webhooks just don't fire).
-func (w *FanoutWorker) enqueueWebhookOutbox(ctx context.Context, tx pgx.Tx, inserted []InsertedDelivery, pending map[profileKey]pendingDelivery) error {
+// inserted delivery, inside the fanout transaction. Two filters apply: wants,
+// the webhook's switch for the delivery (its reason flags for an episode),
+// and the per-profile delivery rate limit (over-limit notifications stay in
+// the inbox; webhooks just don't fire).
+func (w *FanoutWorker) enqueueWebhookOutbox(ctx context.Context, tx pgx.Tx, inserted []InsertedDelivery, wants func(InsertedDelivery, Webhook) bool) error {
 	if w.webhooks == nil || len(inserted) == 0 || !w.settings.WebhooksEnabled(ctx) {
 		return nil
 	}
@@ -528,12 +566,8 @@ func (w *FanoutWorker) enqueueWebhookOutbox(ctx context.Context, tx pgx.Tx, inse
 	rateLimited := 0
 	for _, row := range inserted {
 		key := row.key()
-		entry, ok := pending[key]
-		if !ok {
-			continue
-		}
 		for _, hook := range hooksByProfile[key] {
-			if !hook.MatchesReasons(entry.flags) {
+			if !wants(row, hook) {
 				continue
 			}
 			if w.rateLimiter != nil && !w.rateLimiter.Allow(key, rateLimit) {

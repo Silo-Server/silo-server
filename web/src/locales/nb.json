@@ -117024,7 +117024,7 @@
   "web.notifications.inbox.emptyHintNextUp": [
     {
       "type": 0,
-      "value": "Du får varsler her når det kommer en ny episode av en serie du har sett alt av."
+      "value": "Du får varsler her når det kommer en ny episode av en serie du har sett alt av, eller når en tittel du har lagt på huskelisten eller forespurt, kommer."
     }
   ],
   "web.notifications.inbox.emptyUnread": [
@@ -117417,6 +117417,30 @@
     {
       "type": 0,
       "value": "Varslingsvisninger"
+    }
+  ],
+  "web.notifications.inbox.watchlistAvailable": [
+    {
+      "type": 0,
+      "value": "Tittel på huskelisten tilgjengelig"
+    }
+  ],
+  "web.notifications.inbox.watchlistMovieAvailable": [
+    {
+      "type": 0,
+      "value": "En film på huskelisten din er nå tilgjengelig"
+    }
+  ],
+  "web.notifications.inbox.watchlistSeriesAvailable": [
+    {
+      "type": 0,
+      "value": "En serie på huskelisten din er nå tilgjengelig"
+    }
+  ],
+  "web.notifications.inbox.watchlistTitleAvailable": [
+    {
+      "type": 0,
+      "value": "En tittel på huskelisten din er nå tilgjengelig"
     }
   ],
   "web.notifications.preferences.continueWatching": [
@@ -117956,7 +117980,7 @@
   "web.notifications.series.emptyHintNextUp": [
     {
       "type": 0,
-      "value": "Serier vises her etter at du har sett ferdig en episode. En ny episode varsler deg når du har sett alt."
+      "value": "Serier vises her etter at du har sett ferdig en episode. Når du har sett alt i en serie, blir du varslet når neste episode kommer."
     }
   ],
   "web.notifications.series.filterByReason": [
@@ -118265,6 +118289,12 @@
     {
       "type": 0,
       "value": " er nå tilgjengelig"
+    }
+  ],
+  "web.notifications.toast.watchlistArrived": [
+    {
+      "type": 0,
+      "value": "En tittel på huskelisten din har kommet til biblioteket."
     }
   ],
   "web.onboarding.gate.progressFailed": [
@@ -130414,7 +130444,7 @@
   "web.settings.notifications.episodes.nextUpDescription": [
     {
       "type": 0,
-      "value": "Få varsler når det kommer en ny episode av en serie du har sett alt av."
+      "value": "Få varsler når det kommer en ny episode av en serie du har sett alt av, eller når en tittel du har lagt på huskelisten eller forespurt, kommer."
     }
   ],
   "web.settings.notifications.episodes.seriesLink": [
@@ -130706,7 +130736,7 @@
   "web.settings.notifications.reason.requests": [
     {
       "type": 0,
-      "value": "Forespørsler"
+      "value": "Forespørsler og huskeliste"
     }
   ],
   "web.settings.notifications.reason.watchlist": [

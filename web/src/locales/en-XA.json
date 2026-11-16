@@ -127172,7 +127172,7 @@
   "web.notifications.inbox.emptyHintNextUp": [
     {
       "type": 0,
-      "value": "⟦Ýöû’ļļ ƀé ñöţîƒîéđ ĥéŕé ŵĥéñ å ñéŵ éþîšöđé åŕŕîṽéš ƒöŕ å šéŕîéš ýöû’ŕé çåûĝĥţ ûþ öñ.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+      "value": "⟦Ýöû’ļļ ƀé ñöţîƒîéđ ĥéŕé ŵĥéñ å ñéŵ éþîšöđé åŕŕîṽéš ƒöŕ å šéŕîéš ýöû’ŕé çåûĝĥţ ûþ öñ, öŕ ŵĥéñ å ţîţļé ýöû ŵåţçĥļîšţéđ öŕ ŕéǫûéšţéđ åŕŕîṽéš.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
     }
   ],
   "web.notifications.inbox.emptyUnread": [
@@ -127625,6 +127625,30 @@
     {
       "type": 0,
       "value": "⟦Ñöţîƒîçåţîöñ ṽîéŵš~~~~~~~~⟧"
+    }
+  ],
+  "web.notifications.inbox.watchlistAvailable": [
+    {
+      "type": 0,
+      "value": "⟦Ŵåţçĥļîšţ ţîţļé åṽåîļåƀļé~~~~~~~~~~⟧"
+    }
+  ],
+  "web.notifications.inbox.watchlistMovieAvailable": [
+    {
+      "type": 0,
+      "value": "⟦Å ɱöṽîé öñ ýöûŕ ŵåţçĥļîšţ îš ñöŵ åṽåîļåƀļé~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.notifications.inbox.watchlistSeriesAvailable": [
+    {
+      "type": 0,
+      "value": "⟦Å šéŕîéš öñ ýöûŕ ŵåţçĥļîšţ îš ñöŵ åṽåîļåƀļé~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.notifications.inbox.watchlistTitleAvailable": [
+    {
+      "type": 0,
+      "value": "⟦Å ţîţļé öñ ýöûŕ ŵåţçĥļîšţ îš ñöŵ åṽåîļåƀļé~~~~~~~~~~~~~~~~~⟧"
     }
   ],
   "web.notifications.preferences.continueWatching": [
@@ -128192,7 +128216,7 @@
   "web.notifications.series.emptyHintNextUp": [
     {
       "type": 0,
-      "value": "⟦Šéŕîéš šĥöŵ ûþ ĥéŕé åƒţéŕ ýöû ƒîñîšĥ åñ éþîšöđé. Å ñéŵ éþîšöđé ñöţîƒîéš ýöû öñçé ýöû’ŕé çåûĝĥţ ûþ.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+      "value": "⟦Šéŕîéš šĥöŵ ûþ ĥéŕé åƒţéŕ ýöû ƒîñîšĥ åñ éþîšöđé. Öñçé ýöû’ŕé çåûĝĥţ ûþ öñ å šéŕîéš, ýöû’ŕé ñöţîƒîéđ ŵĥéñ îţš ñéẋţ éþîšöđé åŕŕîṽéš.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
     }
   ],
   "web.notifications.series.filterByReason": [
@@ -128545,6 +128569,12 @@
     {
       "type": 0,
       "value": " îš ñöŵ åṽåîļåƀļé~~~~~~~⟧"
+    }
+  ],
+  "web.notifications.toast.watchlistArrived": [
+    {
+      "type": 0,
+      "value": "⟦Å ţîţļé öñ ýöûŕ ŵåţçĥļîšţ ĥåš åŕŕîṽéđ îñ ţĥé ļîƀŕåŕý.~~~~~~~~~~~~~~~~~~~~~~⟧"
     }
   ],
   "web.onboarding.gate.progressFailed": [
@@ -141586,7 +141616,7 @@
   "web.settings.notifications.episodes.nextUpDescription": [
     {
       "type": 0,
-      "value": "⟦Ĝéţ ñöţîƒîéđ ŵĥéñ å ñéŵ éþîšöđé åŕŕîṽéš ƒöŕ å šéŕîéš ýöû’ŕé çåûĝĥţ ûþ öñ.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+      "value": "⟦Ĝéţ ñöţîƒîéđ ŵĥéñ å ñéŵ éþîšöđé åŕŕîṽéš ƒöŕ å šéŕîéš ýöû’ŕé çåûĝĥţ ûþ öñ, öŕ ŵĥéñ å ţîţļé ýöû ŵåţçĥļîšţéđ öŕ ŕéǫûéšţéđ åŕŕîṽéš.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
     }
   ],
   "web.settings.notifications.episodes.seriesLink": [
@@ -141898,7 +141928,7 @@
   "web.settings.notifications.reason.requests": [
     {
       "type": 0,
-      "value": "⟦Ŕéǫûéšţš~~~~⟧"
+      "value": "⟦Ŕéǫûéšţš åñđ ŵåţçĥļîšţ~~~~~~~~~⟧"
     }
   ],
   "web.settings.notifications.reason.watchlist": [

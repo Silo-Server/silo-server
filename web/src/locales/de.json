@@ -116454,7 +116454,7 @@
   "web.notifications.inbox.emptyHintNextUp": [
     {
       "type": 0,
-      "value": "Hier wirst du benachrichtigt, wenn eine neue Folge einer Serie erscheint, bei der du auf dem neuesten Stand bist."
+      "value": "Hier wirst du benachrichtigt, wenn eine neue Folge einer Serie erscheint, bei der du auf dem neuesten Stand bist, oder wenn ein Titel verfügbar wird, den du auf deine Merkliste gesetzt oder angefragt hast."
     }
   ],
   "web.notifications.inbox.emptyUnread": [
@@ -116855,6 +116855,30 @@
     {
       "type": 0,
       "value": "Benachrichtigungsansichten"
+    }
+  ],
+  "web.notifications.inbox.watchlistAvailable": [
+    {
+      "type": 0,
+      "value": "Titel von deiner Merkliste verfügbar"
+    }
+  ],
+  "web.notifications.inbox.watchlistMovieAvailable": [
+    {
+      "type": 0,
+      "value": "Ein Film auf deiner Merkliste ist jetzt verfügbar"
+    }
+  ],
+  "web.notifications.inbox.watchlistSeriesAvailable": [
+    {
+      "type": 0,
+      "value": "Eine Serie auf deiner Merkliste ist jetzt verfügbar"
+    }
+  ],
+  "web.notifications.inbox.watchlistTitleAvailable": [
+    {
+      "type": 0,
+      "value": "Ein Titel auf deiner Merkliste ist jetzt verfügbar"
     }
   ],
   "web.notifications.preferences.continueWatching": [
@@ -117394,7 +117418,7 @@
   "web.notifications.series.emptyHintNextUp": [
     {
       "type": 0,
-      "value": "Serien erscheinen hier, sobald du eine Folge zu Ende geschaut hast. Über eine neue Folge wirst du benachrichtigt, sobald du auf dem neuesten Stand bist."
+      "value": "Serien erscheinen hier, sobald du eine Folge zu Ende geschaut hast. Bist du bei einer Serie auf dem neuesten Stand, wirst du benachrichtigt, sobald ihre nächste Folge erscheint."
     }
   ],
   "web.notifications.series.filterByReason": [
@@ -117711,6 +117735,12 @@
     {
       "type": 0,
       "value": " ist jetzt verfügbar"
+    }
+  ],
+  "web.notifications.toast.watchlistArrived": [
+    {
+      "type": 0,
+      "value": "Ein Titel auf deiner Merkliste ist jetzt in der Mediathek."
     }
   ],
   "web.onboarding.gate.progressFailed": [
@@ -129857,7 +129887,7 @@
   "web.settings.notifications.episodes.nextUpDescription": [
     {
       "type": 0,
-      "value": "Erhalte eine Benachrichtigung, wenn eine neue Folge einer Serie erscheint, bei der du auf dem neuesten Stand bist."
+      "value": "Erhalte eine Benachrichtigung, wenn eine neue Folge einer Serie erscheint, bei der du auf dem neuesten Stand bist, oder wenn ein Titel verfügbar wird, den du auf deine Merkliste gesetzt oder angefragt hast."
     }
   ],
   "web.settings.notifications.episodes.seriesLink": [
@@ -130157,7 +130187,7 @@
   "web.settings.notifications.reason.requests": [
     {
       "type": 0,
-      "value": "Anfragen"
+      "value": "Anfragen und Merkliste"
     }
   ],
   "web.settings.notifications.reason.watchlist": [

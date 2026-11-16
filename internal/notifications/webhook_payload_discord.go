@@ -132,6 +132,8 @@ func discordEmbedAuthorLine(row DeliveryRow) string {
 			return "Now available on Silo"
 		}
 		return "Your request is now available on Silo"
+	case DeliveryTypeWatchlistAvailable:
+		return "Now available on Silo"
 	case DeliveryTypeRequestApproved:
 		return "Your request was approved on Silo"
 	case DeliveryTypeRequestDeclined:
@@ -242,6 +244,11 @@ func discordEmbedTitle(row DeliveryRow) string {
 			return titleWithYear(row.SeriesTitle, row.Year)
 		}
 		return "Request fulfilled"
+	case DeliveryTypeWatchlistAvailable:
+		if row.SeriesTitle != "" {
+			return titleWithYear(row.SeriesTitle, row.Year)
+		}
+		return "Watchlist title available"
 	case DeliveryTypeRequestApproved, DeliveryTypeRequestDeclined:
 		// No catalog join exists for an unfulfilled request; the title rides
 		// in the reason flags.

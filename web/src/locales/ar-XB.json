@@ -122812,7 +122812,7 @@
   "web.notifications.inbox.emptyHintNextUp": [
     {
       "type": 0,
-      "value": "\u200F\u202EYou’ll be notified here when a new episode arrives for a series you’re caught up on.\u202C"
+      "value": "\u200F\u202EYou’ll be notified here when a new episode arrives for a series you’re caught up on, or when a title you watchlisted or requested arrives.\u202C"
     }
   ],
   "web.notifications.inbox.emptyUnread": [
@@ -123249,6 +123249,30 @@
     {
       "type": 0,
       "value": "\u200F\u202ENotification views\u202C"
+    }
+  ],
+  "web.notifications.inbox.watchlistAvailable": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EWatchlist title available\u202C"
+    }
+  ],
+  "web.notifications.inbox.watchlistMovieAvailable": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EA movie on your watchlist is now available\u202C"
+    }
+  ],
+  "web.notifications.inbox.watchlistSeriesAvailable": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EA series on your watchlist is now available\u202C"
+    }
+  ],
+  "web.notifications.inbox.watchlistTitleAvailable": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EA title on your watchlist is now available\u202C"
     }
   ],
   "web.notifications.preferences.continueWatching": [
@@ -123804,7 +123828,7 @@
   "web.notifications.series.emptyHintNextUp": [
     {
       "type": 0,
-      "value": "\u200F\u202ESeries show up here after you finish an episode. A new episode notifies you once you’re caught up.\u202C"
+      "value": "\u200F\u202ESeries show up here after you finish an episode. Once you’re caught up on a series, you’re notified when its next episode arrives.\u202C"
     }
   ],
   "web.notifications.series.filterByReason": [
@@ -124121,6 +124145,12 @@
     {
       "type": 0,
       "value": "\u202E is now available\u202C"
+    }
+  ],
+  "web.notifications.toast.watchlistArrived": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EA title on your watchlist has arrived in the library.\u202C"
     }
   ],
   "web.onboarding.gate.progressFailed": [
@@ -136790,7 +136820,7 @@
   "web.settings.notifications.episodes.nextUpDescription": [
     {
       "type": 0,
-      "value": "\u200F\u202EGet notified when a new episode arrives for a series you’re caught up on.\u202C"
+      "value": "\u200F\u202EGet notified when a new episode arrives for a series you’re caught up on, or when a title you watchlisted or requested arrives.\u202C"
     }
   ],
   "web.settings.notifications.episodes.seriesLink": [
@@ -137086,7 +137116,7 @@
   "web.settings.notifications.reason.requests": [
     {
       "type": 0,
-      "value": "\u200F\u202ERequests\u202C"
+      "value": "\u200F\u202ERequests and watchlist\u202C"
     }
   ],
   "web.settings.notifications.reason.watchlist": [

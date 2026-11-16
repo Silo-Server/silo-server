@@ -117142,7 +117142,7 @@
   "web.notifications.inbox.emptyHintNextUp": [
     {
       "type": 0,
-      "value": "Saat täällä ilmoituksen, kun uusi jakso ilmestyy sarjaan, jonka kaikki jaksot olet jo katsonut."
+      "value": "Saat täällä ilmoituksen, kun uusi jakso ilmestyy sarjaan, jonka kaikki jaksot olet jo katsonut, tai kun katselulistallesi lisäämäsi tai pyytämäsi nimike saapuu."
     }
   ],
   "web.notifications.inbox.emptyUnread": [
@@ -117535,6 +117535,30 @@
     {
       "type": 0,
       "value": "Ilmoitusnäkymät"
+    }
+  ],
+  "web.notifications.inbox.watchlistAvailable": [
+    {
+      "type": 0,
+      "value": "Katselulistan nimike saatavilla"
+    }
+  ],
+  "web.notifications.inbox.watchlistMovieAvailable": [
+    {
+      "type": 0,
+      "value": "Katselulistallasi oleva elokuva on nyt saatavilla"
+    }
+  ],
+  "web.notifications.inbox.watchlistSeriesAvailable": [
+    {
+      "type": 0,
+      "value": "Katselulistallasi oleva sarja on nyt saatavilla"
+    }
+  ],
+  "web.notifications.inbox.watchlistTitleAvailable": [
+    {
+      "type": 0,
+      "value": "Katselulistallasi oleva nimike on nyt saatavilla"
     }
   ],
   "web.notifications.preferences.continueWatching": [
@@ -118082,7 +118106,7 @@
   "web.notifications.series.emptyHintNextUp": [
     {
       "type": 0,
-      "value": "Sarjat näkyvät tässä, kun olet katsonut jakson loppuun. Saat ilmoituksen uudesta jaksosta, kun olet katsonut kaikki aiemmat jaksot."
+      "value": "Sarjat näkyvät tässä, kun olet katsonut jakson loppuun. Kun olet katsonut sarjan kaikki jaksot, saat ilmoituksen, kun sen seuraava jakso ilmestyy."
     }
   ],
   "web.notifications.series.filterByReason": [
@@ -118399,6 +118423,12 @@
     {
       "type": 0,
       "value": " on nyt saatavilla"
+    }
+  ],
+  "web.notifications.toast.watchlistArrived": [
+    {
+      "type": 0,
+      "value": "Katselulistallasi oleva nimike on saapunut kirjastoon."
     }
   ],
   "web.onboarding.gate.progressFailed": [
@@ -130580,7 +130610,7 @@
   "web.settings.notifications.episodes.nextUpDescription": [
     {
       "type": 0,
-      "value": "Saat ilmoituksen, kun uusi jakso ilmestyy sarjaan, jonka kaikki jaksot olet jo katsonut."
+      "value": "Saat ilmoituksen, kun uusi jakso ilmestyy sarjaan, jonka kaikki jaksot olet jo katsonut, tai kun katselulistallesi lisäämäsi tai pyytämäsi nimike saapuu."
     }
   ],
   "web.settings.notifications.episodes.seriesLink": [
@@ -130872,7 +130902,7 @@
   "web.settings.notifications.reason.requests": [
     {
       "type": 0,
-      "value": "Pyynnöt"
+      "value": "Pyynnöt ja katselulista"
     }
   ],
   "web.settings.notifications.reason.watchlist": [

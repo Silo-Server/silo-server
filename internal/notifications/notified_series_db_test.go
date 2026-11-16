@@ -7,11 +7,11 @@ import (
 
 // TestListNotifiedSeriesMergesLibrariesAndAppliesPreferences covers the
 // notified-series list over the fanout index: a series in two libraries is one
-// entry waiting on the earliest cursor, a row without a cursor (a retired
-// favorite, an inert row) and a series the catalog no longer has are left
-// out, a series that is no Next Up candidate stays listed but inactive, a
-// series notifies only once no episode with a present file is at or after its
-// cursor, and turning Next Up off keeps every series listed but silent.
+// entry waiting on the earliest cursor, a row without a cursor and a series
+// the catalog no longer has are left out, a series that is no Next Up
+// candidate stays listed but inactive, a series notifies only while the first
+// listed episode at or after its cursor has no present file, and turning Next
+// Up off keeps every series listed but silent.
 func TestListNotifiedSeriesMergesLibrariesAndAppliesPreferences(t *testing.T) {
 	pool := schemaDB(t, "notified_series_")
 	ctx := t.Context()
@@ -33,26 +33,27 @@ func TestListNotifiedSeriesMergesLibrariesAndAppliesPreferences(t *testing.T) {
 			('series:bear', 'series', 'The Bear', 'Bear', '{}', 2022, '2026-03-04T05:06:07Z'),
 			('series:andor', 'series', 'Andor', '', '{}', 0, NULL),
 			('series:dropped', 'series', 'Dropped', '', '{}', 0, NULL),
-			('series:favorite', 'series', 'Favorite', '', '{}', 0, NULL),
 			('series:inert', 'series', 'Inert', '', '{}', 0, NULL)`, nil},
-		// The Bear's S02E03 lost its file, so nothing is available at or
-		// after the cursor; Andor's S01E02 is there to watch.
+		// The Bear's S02E03 lost its file, so the episode the profile waits
+		// for has not arrived, although S02E04 after it has; Andor's S01E02
+		// is there to watch.
 		{`INSERT INTO episodes (content_id, series_id, season_number, episode_number, title) VALUES
 			('bear-s2e2', 'series:bear', 2, 2, 'E2'), ('bear-s2e3', 'series:bear', 2, 3, 'E3'),
+			('bear-s2e4', 'series:bear', 2, 4, 'E4'),
 			('andor-s1e2', 'series:andor', 1, 2, 'E2')`, nil},
 		{`INSERT INTO media_files (media_folder_id, file_path, episode_id, missing_since) VALUES
 			(1, '/bear/e2.mkv', 'bear-s2e2', NULL), (1, '/bear/e3.mkv', 'bear-s2e3', now()),
+			(1, '/bear/e4.mkv', 'bear-s2e4', NULL),
 			(1, '/andor/e2.mkv', 'andor-s1e2', NULL)`, nil},
-		{`INSERT INTO profile_series_interest (user_id, profile_id, library_id, series_id, favorite, next_up_candidate, next_expected_episode_key) VALUES
-			(1, 'p1', 1, 'series:bear', true, false, NULL),
-			(1, 'p1', 2, 'series:bear', false, true, $1),
-			(1, 'p1', 3, 'series:bear', false, true, $2),
-			(1, 'p1', 1, 'series:andor', false, true, $3),
-			(1, 'p1', 1, 'series:dropped', false, false, $1),
-			(1, 'p1', 1, 'series:favorite', true, false, NULL),
-			(1, 'p1', 1, 'series:inert', false, false, NULL),
-			(1, 'p1', 1, 'series:gone', false, true, $1),
-			(1, 'p2', 1, 'series:inert', false, true, $1)`, []any{bearCursor, laterCursor, andorCursor}},
+		{`INSERT INTO profile_series_interest (user_id, profile_id, library_id, series_id, next_up_candidate, next_expected_episode_key) VALUES
+			(1, 'p1', 1, 'series:bear', false, NULL),
+			(1, 'p1', 2, 'series:bear', true, $1),
+			(1, 'p1', 3, 'series:bear', true, $2),
+			(1, 'p1', 1, 'series:andor', true, $3),
+			(1, 'p1', 1, 'series:dropped', false, $1),
+			(1, 'p1', 1, 'series:inert', false, NULL),
+			(1, 'p1', 1, 'series:gone', true, $1),
+			(1, 'p2', 1, 'series:inert', true, $1)`, []any{bearCursor, laterCursor, andorCursor}},
 		{`INSERT INTO notification_preferences (user_id, profile_id, enabled, notify_next_up) VALUES (1, 'p1', true, true)`, nil},
 	} {
 		if _, err := pool.Exec(ctx, stmt.sql, stmt.args...); err != nil {

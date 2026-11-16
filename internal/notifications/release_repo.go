@@ -653,23 +653,24 @@ func (r *ReleaseRepository) RepeatedFromOtherLibraries(ctx context.Context, tx p
 	return repeated, nil
 }
 
-// HighestAvailableEpisodeKeyBelow returns the highest key below episodeKey
-// among the series' episodes with a present file, or nil when there is none.
-// EvaluateRecipient takes it as highestBelow: an event's episode is a
-// profile's Next Up only when the profile's cursor is above it. It reads
-// every library, as Home's Next Up lookup does. Must run inside the caller's
-// transaction.
-func (r *ReleaseRepository) HighestAvailableEpisodeKeyBelow(ctx context.Context, tx pgx.Tx, seriesID string, episodeKey int) (*int, error) {
+// HighestListedEpisodeKeyBelow returns the highest key below episodeKey among
+// the episodes the catalog lists for the series, with or without a file, or
+// nil when there is none. EvaluateRecipient takes it as highestBelow: an
+// event's episode is the one a profile waits for only when the profile's
+// cursor is above it. A listed episode whose file has not arrived therefore
+// holds its place, and a later episode landing first does not notify. It
+// reads every library, as Home's Next Up lookup does. Must run inside the
+// caller's transaction.
+func (r *ReleaseRepository) HighestListedEpisodeKeyBelow(ctx context.Context, tx pgx.Tx, seriesID string, episodeKey int) (*int, error) {
 	var highest *int
 	err := tx.QueryRow(ctx, `
 		SELECT MAX(`+availabilityKeyExpr+`) FROM episodes e
 		WHERE e.series_id = $1
 		  AND `+availabilityOrdinalGuard+`
-		  AND `+availabilityKeyExpr+` < $2
-		  AND `+presentEpisodeFileSQL,
+		  AND `+availabilityKeyExpr+` < $2`,
 		seriesID, episodeKey).Scan(&highest)
 	if err != nil {
-		return nil, fmt.Errorf("find highest available episode below %d: %w", episodeKey, err)
+		return nil, fmt.Errorf("find highest listed episode below %d: %w", episodeKey, err)
 	}
 	return highest, nil
 }

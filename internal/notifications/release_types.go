@@ -70,11 +70,6 @@ type ReleaseEvent struct {
 }
 
 // SeriesInterest is the compact recipient-index row used by fanout.
-//
-// profile_series_interest still has favorite, watchlist and continue_watching
-// columns from before Next Up became the only reason; nothing reads or writes
-// them, so a replica of the earlier release keeps working during a rolling
-// deploy until a later release drops them.
 type SeriesInterest struct {
 	UserID                  int
 	ProfileID               string
@@ -98,9 +93,7 @@ type ReasonFlags struct {
 }
 
 // Preferences are the per-profile notification controls. Missing rows default
-// to all-enabled. notification_preferences keeps retired notify_favorites,
-// notify_watchlist and notify_continue_watching columns that nothing reads or
-// writes (see SeriesInterest).
+// to all-enabled.
 type Preferences struct {
 	UserID       int       `json:"-"`
 	ProfileID    string    `json:"profile_id"`

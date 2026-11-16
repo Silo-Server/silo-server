@@ -73,7 +73,7 @@ type NotificationSeries struct {
 	Item          CatalogItem               `json:"item" doc:"The series as a catalog card"`
 	Reasons       NotificationSeriesReasons `json:"reasons" doc:"The profile's relationships to the series"`
 	ActiveReasons NotificationSeriesReasons `json:"active_reasons" doc:"The reasons the profile's notification preferences let notify; all false when they silence the series"`
-	Notifies      bool                      `json:"notifies" doc:"True when the next new episode of the series would notify: next_up is active, the profile has not muted the series, and it is caught up, with no available episode at or after the one Next Up waits for. False while such an episode is available: the profile is told about a new episode only once it is the profile's Next Up."`
+	Notifies      bool                      `json:"notifies" doc:"True when the episode the profile waits for would notify on arrival: next_up is active, the profile has not muted the series, and it is caught up, meaning the first episode the catalog lists at or after the one Next Up waits for has not arrived, or none is listed. False while that episode is already available: the profile has an episode to watch first, and nothing notifies until it watches on."`
 	Muted         bool                      `json:"muted" doc:"The profile muted the series: it gets no new-episode notification for it, whatever the reasons, until it unmutes. active_reasons still names the reasons that would notify once unmuted."`
 	NextUpAfter   *NotificationEpisodeRef   `json:"next_up_after,omitempty" doc:"With an active Next Up reason, the last episode the profile finished: on that reason alone, only a new episode after it notifies"`
 }

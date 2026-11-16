@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"slices"
 	"strconv"
 	"sync"
 	"time"
@@ -526,50 +527,22 @@ func (u *InterestUpdater) RecomputeSeries(ctx context.Context, userID int, profi
 	// (an import, a watch-provider sync) has no Home anchor; it anchors on
 	// the highest completed episode instead, so notifications still follow
 	// it although Home shows no Next Up card. From there the cursor walks past
-	// the episodes the profile has started (walkPastStarted).
-	//
-	// next is Home's Next Up card, the first available episode after the
-	// anchor that the profile has not started. The walk ends at it, so it is
-	// also the first available episode at or after the cursor; it is read
-	// once, only when the walk or the dismissal check below needs it.
+	// the listed episodes the profile has started (nextUpCursor).
 	var lastCompleted, nextExpected *int
 	cursorAnchor := lastCompletedKey
 	if anchor != nil {
 		cursorAnchor = anchor.key
 	}
-	var next *string
-	findNext := func() (string, error) {
-		if next == nil {
-			id, err := u.nextUpEpisode(ctx, userID, profileID, seriesID, cursorAnchor+1, started)
-			if err != nil {
-				return "", err
-			}
-			next = &id
-		}
-		return *next, nil
-	}
 	if hasCompleted {
 		completed := lastCompletedKey
 		lastCompleted = &completed
-		startedKeys := make([]int, 0, len(started))
-		walks := false
-		for _, id := range started {
-			if key, ok := episodeKeys[id]; ok {
-				startedKeys = append(startedKeys, key)
-				walks = walks || key > cursorAnchor
-			}
+		// Home counts a progress row a history hide covers as started; the
+		// store's listing above leaves those out.
+		postgresStarted, err := u.postgresStartedEpisodes(ctx, userID, profileID, seriesID)
+		if err != nil {
+			return err
 		}
-		var nextKey *int
-		if walks {
-			id, err := findNext()
-			if err != nil {
-				return err
-			}
-			if key, ok := episodeKeys[id]; ok {
-				nextKey = &key
-			}
-		}
-		cursor := walkPastStarted(cursorAnchor, startedKeys, nextKey)
+		cursor := nextUpCursor(cursorAnchor, episodeKeys, slices.Concat(started, postgresStarted))
 		nextExpected = &cursor
 	}
 
@@ -589,7 +562,9 @@ func (u *InterestUpdater) RecomputeSeries(ctx context.Context, userID int, profi
 		}
 		nextUpCandidate = !hides.dropped && !partlyWatched
 		if nextUpCandidate && len(hides.nextUp) > 0 {
-			card, err := findNext()
+			// A dismissal hides the card only while its episode is the one
+			// Home shows, so read Home's Next Up card for the series.
+			card, err := u.nextUpEpisode(ctx, userID, profileID, seriesID, cursorAnchor+1, started)
 			if err != nil {
 				return err
 			}
@@ -607,8 +582,7 @@ func (u *InterestUpdater) RecomputeSeries(ctx context.Context, userID int, profi
 	}
 
 	if !nextUpCandidate && lastCompleted == nil {
-		// Nothing can ever notify: drop all rows for the pair, including one
-		// kept only by a retired favorite, watchlist or continue_watching flag.
+		// Nothing can ever notify: drop all rows for the pair.
 		return u.interests.DeleteStaleForProfileSeries(ctx, userID, profileID, seriesID, []int{})
 	}
 

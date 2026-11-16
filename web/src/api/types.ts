@@ -3102,7 +3102,8 @@ export interface NotificationReasonFlags {
   continue_watching?: boolean;
   next_up?: boolean;
   // request.* operational payload (title/year/reason ride on
-  // request.approved / request.declined, which have no catalog item yet)
+  // request.approved / request.declined, which have no catalog item yet).
+  // watchlist.available carries tmdb_id and media_type ("movie" | "series").
   request_id?: string;
   tmdb_id?: number;
   media_type?: string;

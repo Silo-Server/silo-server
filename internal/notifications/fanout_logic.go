@@ -5,19 +5,21 @@ package notifications
 // delivery should be created.
 //
 // Rules (docs/architecture/notifications.md, "Eligibility rules"): a profile
-// is told about an episode only when it becomes the profile's Next Up, the
-// way Home picks the Next Up card.
+// is told about an episode only when it is the next one after what the
+// profile has watched.
 //   - the master toggle and notify_next_up are on
 //   - the interest row is a Next Up candidate with a cursor
 //     (next_expected_episode_key), which InterestUpdater.RecomputeSeries
 //     keeps; fanout never moves it
-//   - the episode is the lowest available one at or after the cursor:
-//     cursor <= episodeKey, and no episode of the series with a present file
-//     has a key in [cursor, episodeKey). highestBelow is the highest key
-//     below episodeKey that has a present file, nil for none, so the second
-//     half is cursor > highestBelow. Keys are season * 1_000_000 + episode,
-//     so a season premiere never equals the finale's key + 1 and the test
-//     cannot be key equality.
+//   - the episode is the first listed one at or after the cursor:
+//     cursor <= episodeKey, and the catalog lists no episode of the series,
+//     with or without a file, with a key in [cursor, episodeKey).
+//     highestBelow is the highest listed key below episodeKey, nil for none,
+//     so the second half is cursor > highestBelow. A listed episode whose
+//     file has not arrived holds its place: E07 landing before E06 stays
+//     silent and E06 notifies when it lands. Keys are
+//     season * 1_000_000 + episode, so a season premiere never equals the
+//     finale's key + 1 and the test cannot be key equality.
 //   - last_notified_episode_key is unset or below episodeKey
 //
 // Mutes are left out by ListActiveBySeries, a series drop or Next Up

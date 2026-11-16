@@ -24,21 +24,30 @@ func TestEpisodeKey(t *testing.T) {
 	}
 }
 
+// following is a Next Up candidate row waiting at cursor.
+func following(cursor int) SeriesInterest {
+	return SeriesInterest{NextUpCandidate: true, NextExpectedEpisodeKey: intPtr(cursor)}
+}
+
+// recipientNotified runs EvaluateRecipient and checks its flags: only
+// next_up, set exactly when a delivery is created.
+func recipientNotified(t *testing.T, interest SeriesInterest, prefs Preferences, key int, highestBelow *int) bool {
+	t.Helper()
+	flags, ok := EvaluateRecipient(interest, prefs, key, highestBelow)
+	if flags != (ReasonFlags{NextUp: ok}) {
+		t.Fatalf("flags %+v with ok=%v; want only next_up, set exactly when ok", flags, ok)
+	}
+	return ok
+}
+
 // TestEvaluateRecipient pins the Next Up rule: an episode notifies only when
-// it is the lowest available episode at or after the profile's cursor.
-// highestBelow is the highest key below the event's with a present file.
+// it is the first listed episode at or after the profile's cursor.
+// highestBelow is the highest key the catalog lists below the event's.
 func TestEvaluateRecipient(t *testing.T) {
 	prefs := DefaultPreferences(1, "p1")
-	following := func(cursor int) SeriesInterest {
-		return SeriesInterest{NextUpCandidate: true, NextExpectedEpisodeKey: intPtr(cursor)}
-	}
 	notifies := func(interest SeriesInterest, prefs Preferences, key int, highestBelow *int) bool {
 		t.Helper()
-		flags, ok := EvaluateRecipient(interest, prefs, key, highestBelow)
-		if flags != (ReasonFlags{NextUp: ok}) {
-			t.Fatalf("flags %+v with ok=%v; want only next_up, set exactly when ok", flags, ok)
-		}
-		return ok
+		return recipientNotified(t, interest, prefs, key, highestBelow)
 	}
 
 	t.Run("season premiere after a finished finale", func(t *testing.T) {
@@ -51,33 +60,20 @@ func TestEvaluateRecipient(t *testing.T) {
 
 	t.Run("of several episodes landing together only the lowest notifies", func(t *testing.T) {
 		// Caught up through E05; E06, E07 and E08 land in one batch, so each
-		// one's highest available episode below is the one before it.
+		// one's highest listed episode below is the one before it.
 		interest := following(EpisodeKey(1, 6))
 		if !notifies(interest, prefs, EpisodeKey(1, 6), intPtr(EpisodeKey(1, 5))) {
 			t.Fatal("E06 must notify")
 		}
 		for _, n := range []int{7, 8} {
 			if notifies(interest, prefs, EpisodeKey(1, n), intPtr(EpisodeKey(1, n-1))) {
-				t.Fatalf("E%02d must not notify while E06 is available", n)
+				t.Fatalf("E%02d must not notify while E06 is listed", n)
 			}
 		}
 	})
 
-	t.Run("out of order: a later episode that is Next Up notifies", func(t *testing.T) {
-		// E07 lands before E06: E05 is the highest available below it.
-		if !notifies(following(EpisodeKey(1, 6)), prefs, EpisodeKey(1, 7), intPtr(EpisodeKey(1, 5))) {
-			t.Fatal("E07 is Home's Next Up while E06 is missing and must notify")
-		}
-		// E06 arrives after E07 notified.
-		late := following(EpisodeKey(1, 6))
-		late.LastNotifiedEpisodeKey = intPtr(EpisodeKey(1, 7))
-		if notifies(late, prefs, EpisodeKey(1, 6), intPtr(EpisodeKey(1, 5))) {
-			t.Fatal("E06 arriving after E07 notified must not notify")
-		}
-	})
-
 	t.Run("a profile that is behind gets nothing", func(t *testing.T) {
-		// Stopped at S01E02; E03 through E05 are available.
+		// Stopped at S01E02; E03 through E05 are listed.
 		if notifies(following(EpisodeKey(1, 3)), prefs, EpisodeKey(1, 6), intPtr(EpisodeKey(1, 5))) {
 			t.Fatal("E06 is not the profile's Next Up and must not notify")
 		}
@@ -89,7 +85,7 @@ func TestEvaluateRecipient(t *testing.T) {
 		}
 	})
 
-	t.Run("no available episode below", func(t *testing.T) {
+	t.Run("no listed episode below", func(t *testing.T) {
 		if !notifies(following(EpisodeKey(1, 1)), prefs, EpisodeKey(1, 1), nil) {
 			t.Fatal("the cursor's own episode with nothing below must notify")
 		}
@@ -123,6 +119,42 @@ func TestEvaluateRecipient(t *testing.T) {
 		killSwitch.Enabled = false
 		if notifies(following(EpisodeKey(1, 1)), killSwitch, EpisodeKey(1, 1), nil) {
 			t.Fatal("master toggle must suppress everything")
+		}
+	})
+}
+
+// TestEvaluateRecipientOutOfOrder pins what happens when a later episode
+// lands before an earlier one: an episode the catalog lists holds its place
+// before its file arrives.
+func TestEvaluateRecipientOutOfOrder(t *testing.T) {
+	prefs := DefaultPreferences(1, "p1")
+	notifies := func(interest SeriesInterest, prefs Preferences, key int, highestBelow *int) bool {
+		t.Helper()
+		return recipientNotified(t, interest, prefs, key, highestBelow)
+	}
+
+	t.Run("a listed episode without a file holds its place", func(t *testing.T) {
+		// The catalog lists E06 before its file arrives, and E07 lands first.
+		interest := following(EpisodeKey(1, 6))
+		if notifies(interest, prefs, EpisodeKey(1, 7), intPtr(EpisodeKey(1, 6))) {
+			t.Fatal("E07 must not notify while the catalog lists E06 ahead of it")
+		}
+		if !notifies(interest, prefs, EpisodeKey(1, 6), intPtr(EpisodeKey(1, 5))) {
+			t.Fatal("E06 must notify when it lands, although E07 landed first")
+		}
+	})
+
+	t.Run("an episode the catalog did not list arrives late", func(t *testing.T) {
+		// Nothing is listed after E05, so E07 is the first listed episode at
+		// the cursor when it lands.
+		if !notifies(following(EpisodeKey(1, 6)), prefs, EpisodeKey(1, 7), intPtr(EpisodeKey(1, 5))) {
+			t.Fatal("E07 is the first listed episode after the cursor and must notify")
+		}
+		// E06 then appears and lands after E07 notified.
+		late := following(EpisodeKey(1, 6))
+		late.LastNotifiedEpisodeKey = intPtr(EpisodeKey(1, 7))
+		if notifies(late, prefs, EpisodeKey(1, 6), intPtr(EpisodeKey(1, 5))) {
+			t.Fatal("E06 arriving after E07 notified must not notify")
 		}
 	})
 }

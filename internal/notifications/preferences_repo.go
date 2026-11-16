@@ -70,8 +70,7 @@ func (r *PreferencesRepository) GetMany(ctx context.Context, tx pgx.Tx, profiles
 }
 
 // Upsert writes the preferences of the profile on prefs.UserID's account.
-// Idempotent. The retired notify_favorites, notify_watchlist and
-// notify_continue_watching columns are left as they are.
+// Idempotent.
 func (r *PreferencesRepository) Upsert(ctx context.Context, prefs Preferences) error {
 	_, err := r.pool.Exec(ctx, `
 		INSERT INTO notification_preferences

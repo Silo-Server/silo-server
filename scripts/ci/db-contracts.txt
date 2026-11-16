@@ -539,6 +539,7 @@
 ./internal/notifications TestNotifyFulfilledRetryResolvesOnlyUntoldRecipients
 ./internal/notifications TestDispatchOperationalResolvesBeforeHoldingConnection
 ./internal/notifications TestListNotifiedSeriesMergesLibrariesAndAppliesPreferences
+./internal/notifications TestWatchlistArrivalTellsEachWatcherOnce
 ./internal/notifications TestFanoutSkipsProfilesThatMutedTheSeries
 ./internal/notifications TestSeriesMutesList
 ./internal/notifications TestSeriesMutesUnmuteAndPurge
@@ -1311,6 +1312,11 @@
 # item with the new ID, sync still finds that item through the IDs its row
 # kept, which the title's deleted aliases no longer give.
 ./internal/watchlist TestWatchSyncFindsThePromotedItemByKeptIDsDB
+
+# A watchlist read that promoted an entry before the notification fanout ran,
+# on a user store outside PostgreSQL, still leaves the profile for the arrival
+# notice through the promotion record; past the horizon it no longer counts.
+./internal/watchlist TestArrivalFindsAnEntryPromotedOutsidePostgresDB
 
 # Smart collection collage records: a refresh deletes the collection's records
 # nobody refreshed for a week, with or without a collage, and keeps the rest.

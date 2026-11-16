@@ -116862,7 +116862,7 @@
   "web.notifications.inbox.emptyHintNextUp": [
     {
       "type": 0,
-      "value": "Du får besked her, når der kommer et nyt afsnit af en serie, du er ajour med."
+      "value": "Du får besked her, når der kommer et nyt afsnit af en serie, du er ajour med, eller når en titel, du har sat på din huskeliste eller anmodet om, kommer."
     }
   ],
   "web.notifications.inbox.emptyUnread": [
@@ -117255,6 +117255,30 @@
     {
       "type": 0,
       "value": "Notifikationsvisninger"
+    }
+  ],
+  "web.notifications.inbox.watchlistAvailable": [
+    {
+      "type": 0,
+      "value": "Titel fra huskelisten tilgængelig"
+    }
+  ],
+  "web.notifications.inbox.watchlistMovieAvailable": [
+    {
+      "type": 0,
+      "value": "En film på din huskeliste er nu tilgængelig"
+    }
+  ],
+  "web.notifications.inbox.watchlistSeriesAvailable": [
+    {
+      "type": 0,
+      "value": "En serie på din huskeliste er nu tilgængelig"
+    }
+  ],
+  "web.notifications.inbox.watchlistTitleAvailable": [
+    {
+      "type": 0,
+      "value": "En titel på din huskeliste er nu tilgængelig"
     }
   ],
   "web.notifications.preferences.continueWatching": [
@@ -117802,7 +117826,7 @@
   "web.notifications.series.emptyHintNextUp": [
     {
       "type": 0,
-      "value": "Serier vises her, når du har set et afsnit færdigt. Et nyt afsnit giver dig besked, når du er ajour."
+      "value": "Serier vises her, når du har set et afsnit færdigt. Når du er ajour med en serie, får du besked, når dens næste afsnit kommer."
     }
   ],
   "web.notifications.series.filterByReason": [
@@ -118111,6 +118135,12 @@
     {
       "type": 0,
       "value": " er nu tilgængelig"
+    }
+  ],
+  "web.notifications.toast.watchlistArrived": [
+    {
+      "type": 0,
+      "value": "En titel på din huskeliste er kommet i biblioteket."
     }
   ],
   "web.onboarding.gate.progressFailed": [
@@ -130244,7 +130274,7 @@
   "web.settings.notifications.episodes.nextUpDescription": [
     {
       "type": 0,
-      "value": "Få besked, når der kommer et nyt afsnit af en serie, du er ajour med."
+      "value": "Få besked, når der kommer et nyt afsnit af en serie, du er ajour med, eller når en titel, du har sat på din huskeliste eller anmodet om, kommer."
     }
   ],
   "web.settings.notifications.episodes.seriesLink": [
@@ -130536,7 +130566,7 @@
   "web.settings.notifications.reason.requests": [
     {
       "type": 0,
-      "value": "Anmodninger"
+      "value": "Anmodninger og huskeliste"
     }
   ],
   "web.settings.notifications.reason.watchlist": [

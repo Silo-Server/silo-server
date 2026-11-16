@@ -38,7 +38,13 @@ milliseconds; the signed cursors retain the database timestamp precision. The
 `reason_flags` object is returned as stored, and its keys depend on the
 delivery type. An `episode.available` delivery carries `{"next_up": true}`;
 older ones can also carry `favorite`, `watchlist` and `continue_watching`,
-which clients ignore. Request notices carry request identifiers instead.
+which clients ignore. Request notices carry request identifiers instead. A
+`watchlist.available` delivery tells a profile that a title on its watchlist
+from before the library had it has arrived, unless a request of the title
+tells it. It names the arrived movie or series in `series_id`, carries
+`{"tmdb_id", "media_type"}` (`movie` or `series`) in `reason_flags`, and goes
+out once per account, profile and item. See
+[Watchlist arrivals](architecture/notifications.md#watchlist-arrivals).
 
 Delivery insertion serializes each profile's timestamp allocation through a
 database row lock held until commit. A trigger assigns `created_at` strictly
@@ -57,8 +63,10 @@ every series it muted. It reads the same interest index and mutes episode
 fanout reads, so it names exactly the series a new episode is evaluated for. A
 series in several libraries is one entry.
 
-A profile is told about a new episode only when that episode becomes its Next
-Up: the lowest available episode at or after the one it waits for. Favorites,
+A profile is told about a new episode only when it is the next one after what
+the profile has watched: the first episode the catalog lists at or after the
+one it waits for. A listed episode whose file has not arrived holds its place,
+so a later episode arriving first does not notify. Favorites,
 the watchlist and Continue Watching do not notify on their own. See
 [Eligibility rules](architecture/notifications.md#eligibility-rules).
 
@@ -68,11 +76,12 @@ it is true when Next Up is on for the series: the profile has not dropped it,
 has not removed its Next Up card, and has no episode partly watched since its
 last completion. In `active_reasons` it is also false when the profile's
 preferences (`enabled`, `notify_next_up`) silence it. `muted` is true when the
-profile muted the series. `notifies` is true when the next new episode would
-notify: `next_up` is active, the series is not muted, and the profile is caught
-up, meaning no episode with a file is available at or after the one Next Up
-waits for. While such an episode is available, the profile has something to
-watch first and `notifies` is false. A muted series keeps its
+profile muted the series. `notifies` is true when the episode the profile waits for
+would notify on arrival: `next_up` is active, the series is not muted, and the
+profile is caught up, meaning the first episode the catalog lists at or after
+the one Next Up waits for has not arrived, or none is listed. While that
+episode is already available, the profile has something to watch first and
+`notifies` is false. A muted series keeps its
 `active_reasons`, so a client can say what would notify after an unmute, and it
 is listed even without an active reason, so the profile can still unmute it.
 

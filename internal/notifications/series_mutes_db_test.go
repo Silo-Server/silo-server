@@ -56,8 +56,11 @@ func TestFanoutSkipsProfilesThatMutedTheSeries(t *testing.T) {
 	if err := s.UnmuteSeries(ctx, 1, "muted", c.series); err != nil {
 		t.Fatalf("UnmuteSeries: %v", err)
 	}
-	// E2 has no file, so E3 is next for every profile whose cursor is at E2.
+	// Every profile watches E2, which moves its cursor to E3.
 	nextKey := EpisodeKey(1, 3)
+	if _, err := pool.Exec(ctx, `UPDATE profile_series_interest SET next_expected_episode_key = $1`, nextKey); err != nil {
+		t.Fatalf("move cursors: %v", err)
+	}
 	for _, stmt := range []struct {
 		sql  string
 		args []any

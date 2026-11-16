@@ -25,10 +25,10 @@ type NotifiedSeries struct {
 	// NextExpectedEpisodeKey is the episode an active Next Up reason waits
 	// for; nil without one.
 	NextExpectedEpisodeKey *int
-	// CaughtUp is set when no episode of the series with a present file is at
-	// or after the Next Up cursor, so the next new episode is the profile's
-	// Next Up. Otherwise the profile has an episode to watch first, and a new
-	// one would not notify (EvaluateRecipient).
+	// CaughtUp is set when the episode Next Up waits for has not arrived: the
+	// first listed episode at or after the cursor has no present file, or
+	// none is listed. Otherwise that episode is already in the library, and
+	// nothing notifies until the profile watches on (EvaluateRecipient).
 	CaughtUp bool
 	// Muted is set when the profile muted the series: it notifies nobody
 	// whatever its Active reasons, which still say what would notify once
@@ -36,8 +36,8 @@ type NotifiedSeries struct {
 	Muted bool
 }
 
-// Notifies reports whether the next new episode of the series would notify
-// the profile: Next Up is active, the profile is caught up, and the series is
+// Notifies reports whether the episode the profile waits for would notify it
+// on arrival: Next Up is active, the profile is caught up, and the series is
 // not muted.
 func (s NotifiedSeries) Notifies() bool {
 	return !s.Muted && s.Active.NextUp && s.CaughtUp
@@ -106,13 +106,13 @@ type mergedInterest struct {
 // cursor, one per series, and its muted series: a series in several libraries
 // has a row in each, and any row's Next Up counts. Next Up waits for the
 // earliest expected episode among the rows that carry it, and the profile is
-// caught up when no episode at or after that cursor has a present file, the
-// availability test fanout applies (HighestAvailableEpisodeKeyBelow). A muted
+// caught up when the episode it waits for has not arrived: the first listed
+// episode at or after that cursor has no present file, or none is listed.
+// Fanout notifies for exactly that episode (HighestListedEpisodeKeyBelow). A muted
 // series without a cursor has a row with no reason. Series the catalog no
 // longer has are skipped. Rows are read for the profile on userID's account
 // only, since profile IDs such as the legacy "default" repeat across
-// accounts. The retired favorite, watchlist and continue_watching columns are
-// not read.
+// accounts.
 func (r *InterestRepository) listMergedForProfile(ctx context.Context, userID int, profileID string) ([]mergedInterest, error) {
 	rows, err := r.pool.Query(ctx, `
 		WITH interest AS (
@@ -127,12 +127,13 @@ func (r *InterestRepository) listMergedForProfile(ctx context.Context, userID in
 			SELECT series_id FROM profile_series_notification_mutes WHERE user_id = $2 AND profile_id = $1
 		)
 		SELECT mi.content_id, COALESCE(i.next_up_candidate, false), i.next_expected_episode_key,
-		       i.next_expected_episode_key IS NOT NULL AND NOT EXISTS (
-				SELECT 1 FROM episodes e
+		       i.next_expected_episode_key IS NOT NULL AND NOT COALESCE((
+				SELECT `+presentEpisodeFileSQL+` AS present FROM episodes e
 				WHERE e.series_id = i.series_id
 				  AND `+availabilityOrdinalGuard+`
 				  AND `+availabilityKeyExpr+` >= i.next_expected_episode_key
-				  AND `+presentEpisodeFileSQL+`),
+				ORDER BY `+availabilityKeyExpr+`, present DESC
+				LIMIT 1), false),
 		       m.series_id IS NOT NULL,
 		       lower(COALESCE(NULLIF(mi.sort_title, ''), mi.title)), mi.title,
 		       COALESCE(mi.year, 0), mi.created_at, mi.latest_episode_added_at

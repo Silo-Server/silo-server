@@ -107427,7 +107427,7 @@
   "web.notifications.inbox.emptyHintNextUp": [
     {
       "type": 0,
-      "value": "你已追上进度的剧集有新的一集时，会在这里通知你。"
+      "value": "你已追上进度的剧集有新的一集，或你加入待看清单或请求的内容进入媒体库时，会在这里通知你。"
     }
   ],
   "web.notifications.inbox.emptyUnread": [
@@ -107788,6 +107788,30 @@
     {
       "type": 0,
       "value": "通知视图"
+    }
+  ],
+  "web.notifications.inbox.watchlistAvailable": [
+    {
+      "type": 0,
+      "value": "待看清单中的内容可看了"
+    }
+  ],
+  "web.notifications.inbox.watchlistMovieAvailable": [
+    {
+      "type": 0,
+      "value": "你待看清单中的电影现已可看"
+    }
+  ],
+  "web.notifications.inbox.watchlistSeriesAvailable": [
+    {
+      "type": 0,
+      "value": "你待看清单中的剧集现已可看"
+    }
+  ],
+  "web.notifications.inbox.watchlistTitleAvailable": [
+    {
+      "type": 0,
+      "value": "你待看清单中的内容现已可看"
     }
   ],
   "web.notifications.preferences.continueWatching": [
@@ -108279,7 +108303,7 @@
   "web.notifications.series.emptyHintNextUp": [
     {
       "type": 0,
-      "value": "看完一集后，剧集会显示在这里。追上进度后，有新的一集时会通知你。"
+      "value": "看完一集后，剧集会显示在这里。追上某部剧集的进度后，它的下一集上线时会通知你。"
     }
   ],
   "web.notifications.series.filterByReason": [
@@ -108584,6 +108608,12 @@
     {
       "type": 0,
       "value": "现已可看"
+    }
+  ],
+  "web.notifications.toast.watchlistArrived": [
+    {
+      "type": 0,
+      "value": "你待看清单中的一部作品已进入媒体库。"
     }
   ],
   "web.onboarding.gate.progressFailed": [
@@ -120047,7 +120077,7 @@
   "web.settings.notifications.episodes.nextUpDescription": [
     {
       "type": 0,
-      "value": "你已追上进度的剧集有新的一集时通知你。"
+      "value": "你已追上进度的剧集有新的一集，或你加入待看清单或请求的内容进入媒体库时通知你。"
     }
   ],
   "web.settings.notifications.episodes.seriesLink": [
@@ -120339,7 +120369,7 @@
   "web.settings.notifications.reason.requests": [
     {
       "type": 0,
-      "value": "请求"
+      "value": "请求和待看清单"
     }
   ],
   "web.settings.notifications.reason.watchlist": [
