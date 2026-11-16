@@ -216,6 +216,17 @@ func validateSectionConfig(sectionType sections.SectionType, config json.RawMess
 			return "library_collection_id is required for collection sections", false
 		}
 	}
+	// An admin page row of collections shows server collections only, and
+	// its list is checked on every write: a bad entry would block deleting
+	// the collections it names.
+	if sectionType == sections.SectionCollectionPosters {
+		if msg, ok := validateRecipeConfig(sectionType, config); !ok {
+			return msg, false
+		}
+		if err := sections.ValidateAdminCollectionPosters(sectionType, config); err != nil {
+			return err.Error(), false
+		}
+	}
 
 	cfg := sections.ParseConfigFilters(config)
 	if cfg.FilterType != "" && cfg.FilterType != "movie" && cfg.FilterType != "series" && cfg.FilterType != "audiobook" {
@@ -391,6 +402,9 @@ type resolvedSectionResponse struct {
 	IsCustom    bool                  `json:"is_custom"`
 	Customized  bool                  `json:"customized"`
 	Items       []sectionItemResponse `json:"items"`
+	// Collections are a row of collections' cards. Only the v2 API carries
+	// them.
+	Collections []sections.CollectionCard `json:"-"`
 	// TitleKey and TitleArgs are the section's; see
 	// sections.ResolvedSection. Only the v2 API carries them.
 	TitleKey  string            `json:"-"`
@@ -792,6 +806,10 @@ func (h *SectionHandler) saveProfileOverrides(ctx context.Context, q SectionOver
 		if err := rec.Validate(cfg); err != nil {
 			return apiError(http.StatusBadRequest, "invalid_config", err.Error())
 		}
+		// A row of collections has no title to show as the hero.
+		if !sections.CanBeHero(sections.SectionType(recipeType)) {
+			o.Featured = nil
+		}
 		if recipeType == string(sections.SectionTrendingDiscover) && !o.Hidden && !o.Removed {
 			refreshCandidates = append(refreshCandidates, trendingCandidate{id: o.ID, config: append(json.RawMessage(nil), cfg...)})
 		}
@@ -1054,7 +1072,7 @@ func dropEmptySeasonalSections(withItems []sections.SectionWithItems) []sections
 func dropEmptySections(withItems []sections.SectionWithItems) []sections.SectionWithItems {
 	out := withItems[:0]
 	for _, w := range withItems {
-		if len(w.Items) == 0 {
+		if !w.HasCards() {
 			continue
 		}
 		out = append(out, w)
@@ -1194,6 +1212,7 @@ func (h *SectionHandler) buildSectionsWithUserStates(ctx context.Context, withIt
 			IsCustom:    s.IsCustom,
 			Customized:  s.Customized,
 			Items:       items,
+			Collections: s.Collections,
 			TitleKey:    s.TitleKey,
 			TitleArgs:   s.TitleArgs,
 		})

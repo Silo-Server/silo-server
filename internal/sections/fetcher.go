@@ -35,6 +35,9 @@ type SectionWithItems struct {
 	Items      []*models.MediaItem `json:"items"`
 	TotalCount int                 `json:"total_count"`
 	ItemMeta   map[string]SectionItemMeta
+	// Collections are the cards of a row of collections
+	// (SectionCollectionPosters), which has no Items.
+	Collections []CollectionCard `json:"-"`
 }
 
 // SectionItemMeta carries optional per-item metadata for richer section UIs.
@@ -137,6 +140,10 @@ type Fetcher struct {
 	// CollectionOwners limits a row of another profile's shared personal
 	// collection to its owner's access. Without it such a row fails.
 	CollectionOwners catalog.PersonalCollectionAccess
+
+	// CollectionCards builds the cards of a row of collections. Nil shows
+	// such rows empty.
+	CollectionCards CollectionCardSource
 
 	candidateCacheMu sync.Mutex
 	candidateCache   *editorialCandidateCache
@@ -370,6 +377,10 @@ func (f *Fetcher) fetchOne(ctx context.Context, resolved ResolvedSection, librar
 			result, err = f.fetchRecommendationRowWithTitle(ctx, resolved, libraryID, libraryIDs, userID, profileID, filter, f.RecommendationReader)
 			return result, err
 		}
+	}
+	if HoldsCollections(resolved.SectionType) {
+		result, err = f.fetchCollectionPosters(ctx, resolved, libraryID, userID, profileID, filter)
+		return result, err
 	}
 	if resolved.SectionType == SectionContinueWatching {
 		result, err = f.fetchContinueWatchingSection(ctx, resolved, libraryID, libraryIDs, userID, profileID, filter)
