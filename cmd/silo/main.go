@@ -667,6 +667,24 @@ func convertLegacyAIProviders(ctx context.Context, settings *catalog.EncryptedSe
 	}
 }
 
+// settingsLoadError formats a startup settings read failure. A SECRET_KEY
+// mismatch gets the fix and this key's check value, which the GCM error alone
+// does not point to.
+func settingsLoadError(err error, secretKey []byte) string {
+	if !errors.Is(err, catalog.ErrSecretKeyMismatch) {
+		return fmt.Sprintf("loading settings: %v", err)
+	}
+	check, cerr := secret.KeyCheckValue(secretKey)
+	if cerr != nil {
+		check = "unavailable"
+	}
+	return fmt.Sprintf("loading settings: %v\n"+
+		"This server's SECRET_KEY has check value %s. "+
+		"Every API server and proxy node that uses this database needs the SECRET_KEY it was encrypted with; "+
+		"a transcode node's node key is a different credential. Restore the original key and restart. "+
+		"To compare keys, run: printf %%s \"$SECRET_KEY\" | silo secret check", err, check)
+}
+
 func runCredentialBackfills(ctx context.Context, pool *pgxpool.Pool, cipher *secret.Cipher, settings *catalog.EncryptedSettingsRepo) {
 	settingsN, err := settings.BackfillSensitiveSettings(ctx)
 	if err != nil {
@@ -961,12 +979,18 @@ func main() {
 	// (run after migrations, before this GetAll) is wired further below.
 	settingsRepo := catalog.NewEncryptedSettingsRepo(catalog.NewServerSettingsRepo(pool), dataCipher)
 	if isPrimaryNode {
+		// Read once before the backfills: under a wrong SECRET_KEY they would
+		// encrypt plaintext credentials with that key, leaving rows the right
+		// key can no longer read.
+		if _, err := settingsRepo.GetAll(ctx); err != nil {
+			log.Fatal(settingsLoadError(err, bc.SecretKey))
+		}
 		runCredentialBackfills(ctx, pool, dataCipher, settingsRepo)
 		convertLegacyAIProviders(ctx, settingsRepo)
 	}
 	settings, err := settingsRepo.GetAll(ctx)
 	if err != nil {
-		log.Fatalf("loading settings: %v", err)
+		log.Fatal(settingsLoadError(err, bc.SecretKey))
 	}
 
 	// Step 4: YAML import (one-time)
