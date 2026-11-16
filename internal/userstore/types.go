@@ -268,9 +268,13 @@ type CompletedHistoryItemQuery struct {
 	ExcludeSources []WatchHistorySource
 }
 
+// CompletedHistoryItem is one item's visible completed plays:
+// ListCompletedHistoryItems sets WatchedAt to the latest play and PlayCount to
+// how many plays it has.
 type CompletedHistoryItem struct {
 	MediaItemID string
 	WatchedAt   string
+	PlayCount   int
 }
 
 // Favorite represents a favorited media item.

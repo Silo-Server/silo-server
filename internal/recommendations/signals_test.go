@@ -118,7 +118,6 @@ type fakeSignalStore struct {
 	userstore.UserStore
 
 	progress  []userstore.WatchProgress
-	history   []userstore.WatchHistoryEntry
 	profile   *userstore.Profile
 	favorites []userstore.Favorite
 	watchlist []userstore.WatchlistEntry
@@ -277,51 +276,6 @@ func (s *fakeSignalStore) ListProgressPage(ctx context.Context, profileID, statu
 	return result, nil
 }
 
-func (s *fakeSignalStore) ListCompletedHistory(_ context.Context, query userstore.CompletedHistoryQuery) ([]userstore.WatchHistoryEntry, error) {
-	filtered := make([]userstore.WatchHistoryEntry, 0, len(s.history))
-	for _, entry := range s.history {
-		if entry.ProfileID == query.ProfileID && entry.Completed {
-			filtered = append(filtered, entry)
-		}
-	}
-	if query.Offset >= len(filtered) {
-		return []userstore.WatchHistoryEntry{}, nil
-	}
-	end := query.Offset + query.Limit
-	if end > len(filtered) {
-		end = len(filtered)
-	}
-	return filtered[query.Offset:end], nil
-}
-
-func (s *fakeSignalStore) ListCompletedHistoryItems(_ context.Context, query userstore.CompletedHistoryItemQuery) ([]userstore.CompletedHistoryItem, error) {
-	latest := map[string]userstore.CompletedHistoryItem{}
-	for _, entry := range s.history {
-		if entry.ProfileID != query.ProfileID || !entry.Completed {
-			continue
-		}
-		if len(query.MediaItemIDs) > 0 && !slices.Contains(query.MediaItemIDs, entry.MediaItemID) {
-			continue
-		}
-		if len(query.IncludeSources) > 0 && !slices.Contains(query.IncludeSources, entry.Source) {
-			continue
-		}
-		if slices.Contains(query.ExcludeSources, entry.Source) {
-			continue
-		}
-		current := latest[entry.MediaItemID]
-		if current.MediaItemID != "" && current.WatchedAt >= entry.WatchedAt {
-			continue
-		}
-		latest[entry.MediaItemID] = userstore.CompletedHistoryItem{MediaItemID: entry.MediaItemID, WatchedAt: entry.WatchedAt}
-	}
-	items := make([]userstore.CompletedHistoryItem, 0, len(latest))
-	for _, item := range latest {
-		items = append(items, item)
-	}
-	return items, nil
-}
-
 func (s *fakeSignalStore) GetProfile(context.Context, string) (*userstore.Profile, error) {
 	return s.profile, nil
 }
@@ -428,31 +382,6 @@ func TestSignalReaderRecentCompletedPagesUntilDistinctLimitIsFilled(t *testing.T
 	}
 	if want := []string{"series-a", "movie-b", "movie-c"}; !slices.Equal(ids, want) {
 		t.Fatalf("recent completed = %#v, want %#v", ids, want)
-	}
-}
-
-func TestSignalReaderRewatchCountsAggregatesCompletedHistory(t *testing.T) {
-	store := &fakeSignalStore{history: []userstore.WatchHistoryEntry{
-		{ProfileID: "p1", MediaItemID: "rewatched", Completed: true, WatchedAt: "2026-05-01T10:00:00Z"},
-		{ProfileID: "p1", MediaItemID: "rewatched", Completed: true, WatchedAt: "2026-05-03T10:00:00Z"},
-		{ProfileID: "p1", MediaItemID: "once", Completed: true, WatchedAt: "2026-05-02T10:00:00Z"},
-		{ProfileID: "p1", MediaItemID: "unfinished", Completed: false, WatchedAt: "2026-05-04T10:00:00Z"},
-	}}
-	reader := NewSignalReader(&fakeSignalRepo{}, fakeSignalProvider{store: store})
-
-	counts, err := reader.RewatchCounts(context.Background(), 7, "p1")
-	if err != nil {
-		t.Fatalf("RewatchCounts returned error: %v", err)
-	}
-	if len(counts) != 1 {
-		t.Fatalf("got %#v, want exactly one rewatch count", counts)
-	}
-	if counts[0].MediaItemID != "rewatched" || counts[0].Count != 2 {
-		t.Fatalf("unexpected rewatch count: %#v", counts[0])
-	}
-	wantTime := time.Date(2026, 5, 3, 10, 0, 0, 0, time.UTC)
-	if !counts[0].LastWatchedAt.Equal(wantTime) {
-		t.Fatalf("last watched = %s, want %s", counts[0].LastWatchedAt, wantTime)
 	}
 }
 
