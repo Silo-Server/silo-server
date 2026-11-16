@@ -2625,7 +2625,7 @@ func (h *PlaybackHandler) HandlePlaybackInfo(w http.ResponseWriter, r *http.Requ
 		}
 		source.SiloSeekReanchor = req.SiloSeekReanchor && compatHLSCopiesVideo(source) && source.SupportsTranscoding
 		sources = append(sources, source)
-		dto := h.mediaSourceDTO(routeItemID, playSessionID, source)
+		dto := h.mediaSourceDTO(routeItemID, playSessionID, session.Token, source)
 		// Jellyfin Web stops retrying a failed stream with copy refused once the
 		// stream URL names both refusals; append them the way Jellyfin does.
 		if dto.TranscodingURL != "" {
@@ -3180,7 +3180,7 @@ func supportedHLSRemuxAudioStreamIndexes(version catalog.FileVersion, profile De
 	return indexes
 }
 
-func (h *PlaybackHandler) mediaSourceDTO(routeItemID, playSessionID string, source PlaybackMediaSource) mediaSourceDTO {
+func (h *PlaybackHandler) mediaSourceDTO(routeItemID, playSessionID, compatToken string, source PlaybackMediaSource) mediaSourceDTO {
 	selectedAudioStreamIndex := effectiveCompatAudioStreamIndex(source)
 	dto := mediaSourceDTO{
 		SiloSeekReanchor:                    source.SiloSeekReanchor,
@@ -3252,13 +3252,16 @@ func (h *PlaybackHandler) mediaSourceDTO(routeItemID, playSessionID string, sour
 	}
 	if source.SupportsDirectPlay || source.SupportsDirectStream {
 		// Only direct play serves the original file; direct stream executes remux.
-		// PlaySessionId authorizes the URL, as for subtitleDeliveryURL.
+		// The PlaySessionId grants the URL while the negotiation is live; the
+		// session's own token is what lets a player that sends no auth header
+		// fetch it at all.
 		basePath := compatVideoPath(routeItemID, false)
 		dto.DirectStreamURL = fmt.Sprintf(
-			"%s/stream?static=%t&mediaSourceId=%s&PlaySessionId=%s",
+			"%s/stream?static=%t&mediaSourceId=%s&PlaySessionId=%s%s",
 			basePath, source.SupportsDirectPlay,
 			url.QueryEscape(source.ID),
 			url.QueryEscape(playSessionID),
+			compatMediaURLToken(compatToken),
 		)
 	}
 	// Jellyfin Web and jellyfin-android play the direct URL whenever either
@@ -3277,7 +3280,7 @@ func (h *PlaybackHandler) mediaSourceDTO(routeItemID, playSessionID string, sour
 		if routePathSegment := compatHLSRoutePathSegment(source); routePathSegment != "" {
 			basePath += "/" + routePathSegment
 		}
-		dto.TranscodingURL = fmt.Sprintf("%s/master.m3u8?PlaySessionId=%s&MediaSourceId=%s&TranscodeReasons=%s", basePath, playSessionID, source.ID, strings.Join(compatTranscodeReasons(source), ","))
+		dto.TranscodingURL = fmt.Sprintf("%s/master.m3u8?PlaySessionId=%s&MediaSourceId=%s&TranscodeReasons=%s%s", basePath, playSessionID, source.ID, strings.Join(compatTranscodeReasons(source), ","), compatMediaURLToken(compatToken))
 		dto.TranscodingContainer = compatTranscodingContainer(source)
 	}
 	return dto
@@ -4203,6 +4206,31 @@ func compatVideoPath(routeItemID string, audioV2 bool) string {
 		base += "/" + compatAudioV2PathSegment
 	}
 	return base
+}
+
+// compatMediaURLToken returns the query fragment that makes a media URL we
+// hand a compat client self-authenticating: the negotiating session's own
+// token under Jellyfin's ApiKey spelling, which ExtractToken reads.
+//
+// Some clients, Wholphin's jellyfin-sdk-kotlin among them, fetch the
+// TranscodingUrl and DirectStreamUrl from PlaybackInfo verbatim and hand them
+// to their player, which sends no Authorization header of its own. Such a URL
+// carries only a PlaySessionId, so it 401s as soon as that grant is gone (a
+// failed transcode marks it terminal, an idle negotiation expires, another
+// replica served the negotiation) and the user sees "source error". Jellyfin
+// puts api_key in the same URLs for the same reason.
+//
+// The token appended is the caller's own credential, and the URL is returned
+// only to the caller that negotiated it, so this hands a session nothing it
+// did not already hold. It is deliberately not added to subtitle delivery URLs:
+// those are logged and shared more freely, and a PlaySessionId grants at most
+// this play's media (see subtitleDeliveryURL).
+func compatMediaURLToken(compatToken string) string {
+	compatToken = strings.TrimSpace(compatToken)
+	if compatToken == "" {
+		return ""
+	}
+	return "&" + url.Values{"ApiKey": {compatToken}}.Encode()
 }
 
 // subtitleDeliveryURL is a subtitle stream URL authorized by its

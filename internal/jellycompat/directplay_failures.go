@@ -74,6 +74,31 @@ func (s *DeviceProfileStore) RecordDirectPlayFailure(ctx context.Context, token,
 	return err
 }
 
+// ClearDirectPlayFailure forgets a recorded failed direct-play route, so the
+// next PlaybackInfo for this device and file offers direct play again. It is
+// how the downgrade is undone: either the packaged route it forced also
+// failed to start (holding the device there would leave no working route at
+// all), or compatDirectPlayFailureTTL expired the record on its own. A nil or
+// empty scope clears nothing.
+func (s *DeviceProfileStore) ClearDirectPlayFailure(ctx context.Context, token, deviceID string, fileID int) error {
+	if s == nil || strings.TrimSpace(token) == "" || fileID <= 0 {
+		return nil
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	deviceID = deviceProfileStorageID(deviceID)
+	if s.pool == nil {
+		s.mu.Lock()
+		delete(s.directPlayFailures, directPlayFailureKey(token, deviceID, fileID))
+		s.mu.Unlock()
+		return nil
+	}
+	_, err := s.pool.Exec(ctx, `DELETE FROM jellycompat_direct_play_failures WHERE token_hash=$1 AND device_id=$2 AND file_id=$3`,
+		deviceProfileTokenHash(token), deviceID, fileID)
+	return err
+}
+
 // DirectPlayFailures returns the files whose direct-play route this device
 // reported failing inside compatDirectPlayFailureTTL. A store or database
 // error returns an empty set: a negotiation must not fail because this hint
@@ -193,11 +218,36 @@ func (h *PlaybackHandler) recordCompatDirectPlayFailure(
 	if h == nil || h.deviceProfiles == nil || playSession == nil || source == nil {
 		return
 	}
-	if !compatSourceIsDirectPlay(playSession, source) {
-		return
-	}
 	neverRendered := positionSeconds <= 0 && priorPosition <= 0 &&
 		time.Since(playSession.CreatedAt) <= compatDirectPlayStartupWindow
+	if !compatSourceIsDirectPlay(playSession, source) {
+		// This device is already on the packaged route the downgrade forced.
+		// If that route failed to start too, the downgrade has not bought the
+		// viewer anything and leaving it in place would hold the device on a
+		// route that does not work: forget it, so the next negotiation tries
+		// direct play again. A packaged play that did not fail leaves the
+		// record alone; it keeps the device off a direct route already known
+		// to fail until compatDirectPlayFailureTTL expires it.
+		if !failed && !neverRendered {
+			return
+		}
+		if err := h.deviceProfiles.ClearDirectPlayFailure(ctx, playSession.CompatToken, playSession.ClientDeviceID, source.Version.FileID); err != nil {
+			slog.WarnContext(ctx, "jellycompat failed packaged route could not clear the direct play downgrade", compatLogComponentKey, compatLogComponentValue,
+				"play_session_id", playSessionFingerprint(playSession.ID),
+				"media_source_id", source.ID,
+				"error", err,
+			)
+			return
+		}
+		slog.InfoContext(ctx, "jellycompat direct play downgrade cleared", compatLogComponentKey, compatLogComponentValue,
+			"route_downgrade", compatRouteDowngradeDirectPlayFailed,
+			"reason", "packaged_route_failed",
+			"play_session_id", playSessionFingerprint(playSession.ID),
+			"media_source_id", source.ID,
+			"file_id", source.Version.FileID,
+		)
+		return
+	}
 	if !failed && !neverRendered {
 		return
 	}

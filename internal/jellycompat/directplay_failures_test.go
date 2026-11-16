@@ -182,3 +182,54 @@ func TestRecordCompatDirectPlayFailureNeedsFailureEvidence(t *testing.T) {
 		t.Fatal("a transcoded play was recorded as a failed direct play")
 	}
 }
+
+// TestFailedPackagedRouteClearsTheDirectPlayDowngrade covers the way out of the
+// downgrade. A record is not a permanent verdict on the device: the packaged
+// route replaces direct play for at most compatDirectPlayFailureTTL, and when
+// that replacement itself fails to start the record is dropped so the next
+// negotiation offers direct play again instead of holding the viewer on a
+// route that does not work. A packaged play that delivered frames leaves the
+// record alone, which is what keeps a device with a genuinely unplayable direct
+// route from retrying it on every play.
+func TestFailedPackagedRouteClearsTheDirectPlayDowngrade(t *testing.T) {
+	now := time.Now()
+	newHandler := func() *PlaybackHandler {
+		h := &PlaybackHandler{deviceProfiles: NewDeviceProfileStore(6*time.Hour, func() time.Time { return now })}
+		if err := h.deviceProfiles.RecordDirectPlayFailure(context.Background(), "token", "device", 42); err != nil {
+			t.Fatal(err)
+		}
+		return h
+	}
+	packaged := &PlaybackMediaSource{Version: directPlayFailureVersion(), HLSRemux: true, SupportsTranscoding: true}
+	session := func() *PlaybackSession {
+		return &PlaybackSession{
+			ID:                 "play-1",
+			CompatToken:        "token",
+			ClientDeviceID:     "device",
+			CreatedAt:          now.Add(-5 * time.Second),
+			UpstreamPlayMethod: string(playback.PlayTranscode),
+		}
+	}
+	recorded := func(h *PlaybackHandler) bool {
+		_, ok := h.deviceProfiles.DirectPlayFailures(context.Background(), "token", "device")[42]
+		return ok
+	}
+
+	h := newHandler()
+	h.recordCompatDirectPlayFailure(context.Background(), session(), packaged, true, 0, playback.PositionUnknown)
+	if recorded(h) {
+		t.Fatal("a packaged route that failed still holds the device off direct play")
+	}
+
+	h = newHandler()
+	h.recordCompatDirectPlayFailure(context.Background(), session(), packaged, false, 0, playback.PositionUnknown)
+	if recorded(h) {
+		t.Fatal("a packaged route that never started still holds the device off direct play")
+	}
+
+	h = newHandler()
+	h.recordCompatDirectPlayFailure(context.Background(), session(), packaged, false, 120, 60)
+	if !recorded(h) {
+		t.Fatal("a packaged play that delivered frames cleared a downgrade it still needs")
+	}
+}
