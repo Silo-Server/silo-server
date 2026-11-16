@@ -383,6 +383,10 @@
 ./internal/notifications TestEmailPrefsStayOnTheAccountDB
 ./internal/notifications TestEmailPrefsAccountKeyMigrationResetsSharedRowsDB
 
+# One server runs the notification interest rebuild at a time, and a rebuild
+# that loses its lock session stops before it completes the checkpoint.
+./internal/notifications TestInterestRebuildRunsOnOneServerAtATimeDB
+
 # Legacy mobile registration protects account ownership under the installation lock.
 ./internal/notifications TestLegacyMobilePushRefusesForeignAccountDB
 ./internal/notifications TestLegacyMobilePushProfileSwitchRollbackDB
