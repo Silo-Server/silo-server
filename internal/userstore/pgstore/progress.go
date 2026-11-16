@@ -1485,7 +1485,7 @@ func (s *PostgresUserStore) ListCompletedHistory(ctx context.Context, query user
 		`+completedHistoryVisibleSQL+`
 		ORDER BY h.watched_at ASC, h.id ASC
 		LIMIT $6 OFFSET $7`,
-		s.userID, query.ProfileID, includeSources, excludeSources, mediaItemIDs, limit, query.Offset,
+		profilePlanArgs(s.userID, query.ProfileID, includeSources, excludeSources, mediaItemIDs, limit, query.Offset)...,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("listing completed history: %w", err)
