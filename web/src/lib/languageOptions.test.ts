@@ -20,6 +20,14 @@ describe("languageOptions", () => {
     expect(options.map((option) => option.value)).toContain("pt");
   });
 
+  it("offers every shipped app language, not just the contract floor", () => {
+    const values = namedLanguageOptionsFor(SETTING_KEYS.UI_APP_LANGUAGE).map(
+      (option) => option.value,
+    );
+
+    expect(values).toEqual(expect.arrayContaining(["en", "nl", "ko", "zh-Hant"]));
+  });
+
   it("keeps an exact current ISO alias without showing its semantic duplicate", () => {
     const options = withCurrentLanguageOption(
       [
