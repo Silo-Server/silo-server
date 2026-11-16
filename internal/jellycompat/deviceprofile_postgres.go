@@ -117,7 +117,9 @@ const deviceProfileExpiryBatchSize = 1000
 
 // DeleteExpired removes at most 1,000 expired registrations per call.
 // SKIP LOCKED lets API nodes share the work without contending
-// with one another or a client refreshing its registration.
+// with one another or a client refreshing its registration. Expired
+// direct-play failure records are pruned in the same pass, so a device that
+// never retries does not leave a row behind.
 func (s *DeviceProfileStore) DeleteExpired(ctx context.Context) (int64, error) {
 	now := s.now()
 	if s.pool == nil {
@@ -126,6 +128,12 @@ func (s *DeviceProfileStore) DeleteExpired(ctx context.Context) (int64, error) {
 		}
 		s.mu.Lock()
 		defer s.mu.Unlock()
+		cutoff := now.Add(-compatDirectPlayFailureTTL)
+		for key, failedAt := range s.directPlayFailures {
+			if !failedAt.After(cutoff) {
+				delete(s.directPlayFailures, key)
+			}
+		}
 		var deleted int64
 		for key, profile := range s.profiles {
 			if !profile.expiresAt.After(now) {
@@ -147,5 +155,7 @@ func (s *DeviceProfileStore) DeleteExpired(ctx context.Context) (int64, error) {
 	if err != nil {
 		return 0, fmt.Errorf("expire device profiles: %w", err)
 	}
+	// Best effort: a failed prune must not fail the device-profile sweep.
+	_, _ = s.pool.Exec(ctx, `DELETE FROM jellycompat_direct_play_failures WHERE failed_at <= $1`, now.Add(-compatDirectPlayFailureTTL))
 	return tag.RowsAffected(), nil
 }

@@ -4282,6 +4282,7 @@ func (h *PlaybackHandler) startPlannedPlaybackV3(r *http.Request, userID int, pr
 		requestIDLogKeyV3, chimw.GetReqID(r.Context()),
 		"outcome", "plan",
 		"decision_reason", result.Plan.DecisionReason,
+		routeDowngradeLogKeyV3, result.RouteDowngrade,
 		"delivery", result.Plan.Delivery,
 		"play_method", string(result.PlayMethod),
 		"requested_file_id", requestedFile.ID,
@@ -10230,6 +10231,38 @@ func (h *PlaybackHandler) executeReplanV3(r *http.Request, record *playback.Atte
 		!virtualDecodeRotation &&
 		connectivityFailureClassificationV3(req.Failure.Classification) &&
 		currentTransportRendered
+	// A direct-play plan is disqualified by any recognized client-reported
+	// playback failure, not only the decode classes that indict a
+	// server-produced recipe. original_http ships the source container
+	// untouched, so unlike a packaged route there is no server-side executor
+	// that can transform the bytes around what the device could not render:
+	// the client has just told us it cannot play this file, and handing the
+	// same bytes back is what stalled the browser that over-claimed mkv.
+	// Demoting the class on both copies of the request keeps every later replan
+	// in this attempt off direct play, exactly as a decode failure retires the
+	// class that produced it. The packaged ladder (codec-copy remux, then
+	// transcode) and the existing attempt-key/attempt-count guards bound the
+	// chain; no classification here can re-enable direct play for the attempt.
+	routeDowngrade := ""
+	if failureRecoveryOperationV3(operation) &&
+		record.CurrentPlan.Delivery == playback.DeliveryOriginalHTTPV3 &&
+		!nodeRecovery &&
+		!progressReissue &&
+		!audioShapeRetry &&
+		directPlayFailureClassificationV3(req.Failure.Classification) {
+		demoteDeliveryCapabilityV3(&record.NormalizedRequest, playback.DeliveryClassOriginalHTTPV3)
+		demoteDeliveryCapabilityV3(&start, playback.DeliveryClassOriginalHTTPV3)
+		routeDowngrade = routeDowngradeDirectPlayFailedV3
+		slog.InfoContext(r.Context(), "playback direct route retired after a client-reported failure",
+			logComponentKey, playbackLogValueV3,
+			routeDowngradeLogKeyV3, routeDowngrade,
+			"session_id", record.SessionID,
+			"operation", string(operation),
+			"failed_delivery", record.CurrentPlan.Delivery,
+			"failure_classification", req.Failure.Classification,
+			"attempt_count", req.AttemptCount,
+		)
+	}
 	requestedFallbackID := record.EffectiveMediaFileID
 	effectiveFallbackID := record.RequestedMediaFileID
 	if seekScopedRecovery {
@@ -10596,7 +10629,7 @@ func (h *PlaybackHandler) executeReplanV3(r *http.Request, record *playback.Atte
 		// provisional pass never knew a software-decode variant of the same
 		// delivery is untried, so its terminal must wait for the authoritative
 		// plan built with that variant forced.
-		return playback.NewTerminalResponseFromTerminalV3(result.Terminal), *record, nil, nil
+		return playback.NewTerminalResponseFromTerminalV3(retryableAfterDirectPlayV3(result.Terminal, directPlayRetiredByServerV3(record))), *record, nil, nil
 	}
 	// Replans degrade the same two ways starts do, and clients read the same
 	// contract: silently swapping audio to the default or turning subtitles
@@ -12010,6 +12043,7 @@ func (h *PlaybackHandler) executeReplanV3(r *http.Request, record *playback.Atte
 			"reason", result.Terminal.Reason,
 			"detail", result.Terminal.Detail,
 			"operation", string(operation),
+			routeDowngradeLogKeyV3, routeDowngradeV3(routeDowngrade, result.RouteDowngrade),
 			"session_id", record.SessionID,
 			"requested_file_id", record.RequestedMediaFileID,
 			"effective_file_id", effectiveFile.ID,
@@ -12020,7 +12054,7 @@ func (h *PlaybackHandler) executeReplanV3(r *http.Request, record *playback.Atte
 			outTimeUSLogKeyV3, decodeOutTimeUS,
 		}, clientInfo.LogAttrs()...)...)
 		markReplanDecisionLoggedV3(r.Context())
-		return playback.NewTerminalResponseFromTerminalV3(result.Terminal), *record, nil, nil
+		return playback.NewTerminalResponseFromTerminalV3(retryableAfterDirectPlayV3(result.Terminal, directPlayRetiredByServerV3(record))), *record, nil, nil
 	}
 	// Surface the warnings from the merged start request's single
 	// normalization on the selected plan. A seek reanchor replays the durable
@@ -12077,6 +12111,7 @@ func (h *PlaybackHandler) executeReplanV3(r *http.Request, record *playback.Atte
 		logComponentKey, "playback",
 		"outcome", "plan",
 		"decision_reason", result.Plan.DecisionReason,
+		routeDowngradeLogKeyV3, routeDowngradeV3(routeDowngrade, result.RouteDowngrade),
 		"delivery", result.Plan.Delivery,
 		"play_method", string(result.PlayMethod),
 		"operation", string(operation),
@@ -15091,6 +15126,102 @@ func decodeFailureClassificationV3(classification string) bool {
 // only explicit decode classes passed the old gate.
 func corroboratedStartupTimeoutV3(classification string) bool {
 	return failureClassificationKeyV3(classification) == "startup_timeout"
+}
+
+// routeDowngradeDirectPlayFailedV3 attributes a packaged plan to a direct-play
+// route the client reported failing. Logged as route_downgrade beside
+// decision_reason so an incident is diagnosable from logs alone.
+const routeDowngradeDirectPlayFailedV3 = "direct_play_failed"
+
+// routeDowngradeLogKeyV3 is the log attribute naming which rule declined a
+// route the client's own claims allowed. The planner sets the same value on
+// PlannerResultV3.RouteDowngrade.
+const routeDowngradeLogKeyV3 = "route_downgrade"
+
+// routeDowngradeV3 prefers this replan's own recovery attribution over the
+// planner's, so a line that retired a route names why even when the planner
+// also declined another route.
+func routeDowngradeV3(recovery, planned string) string {
+	if recovery != "" {
+		return recovery
+	}
+	return planned
+}
+
+// directPlayRetiredByServerV3 reports whether this attempt's durable request
+// carries a server-side original_http demotion. Every replan after the one that
+// retired it reads that marker, so a chain that started with a failed direct
+// route is attributable to the end of the ladder, not only on its first hop.
+func directPlayRetiredByServerV3(record *playback.AttemptRecordV3) bool {
+	if record == nil {
+		return false
+	}
+	capability, ok := record.NormalizedRequest.ClientPlaybackContext.Deliveries[playback.DeliveryClassOriginalHTTPV3]
+	return ok && !capability.Enabled && capability.FailureReason == demoteDeliveryReasonV3
+}
+
+// retryableAfterDirectPlayV3 turns the planner's non-retryable exhaustion into
+// the retryable routes_exhausted verdict when this attempt retired a
+// client-failed direct route. Retiring direct play is per-attempt server
+// evidence, not a verdict on the file or the device: the client has now tried
+// every route the server could build for it, and a fresh start re-negotiates
+// from its current capabilities, so trying again can help. A terminal that
+// names its own cause (an unreadable source, a codec refusal) is left alone.
+func retryableAfterDirectPlayV3(terminal *playback.TerminalV3, directPlayRetired bool) *playback.TerminalV3 {
+	if terminal == nil || !directPlayRetired {
+		return terminal
+	}
+	// transcoding_disabled names a first plan whose source needs an encode.
+	// Here the attempt already had a playable direct route, and the client
+	// reported it failing, so the routes were tried; the reason is exhaustion.
+	switch terminal.Reason {
+	case "adaptation_exhausted", "transcoding_disabled":
+	default:
+		return terminal
+	}
+	return &playback.TerminalV3{
+		Reason:    playback.TerminalRoutesExhaustedV3,
+		Message:   "Every playback route the server could build for this attempt was already tried. Starting playback again negotiates a fresh route.",
+		Retryable: true,
+		Detail:    terminal.Detail,
+	}
+}
+
+// directPlayFailureClassificationsV3 are the client-reported playback failures
+// that disqualify a direct-play plan. A failure_recovery operation already
+// asserts the plan failed on the device; for original_http that is evidence
+// about the exact bytes a packaged route would replace, so every recognized
+// playback class indicts it, not just the decode classes that indict a
+// server-produced recipe.
+//
+// Connectivity classes are included: pre-first-frame a lost connection is
+// equally a route this client could not reach (the packaged route may use
+// another egress), and post-first-frame the documented one-reissue path keeps
+// the route by skipping this demotion (see progressReissue in
+// executeReplanV3). Classes that mean a user intent or a client-local audio
+// hiccup are deliberately absent: they say nothing about the video route.
+var directPlayFailureClassificationsV3 = map[string]bool{
+	"decoder_failure":            true,
+	"decode_error":               true,
+	"player_failure":             true,
+	"http_failure":               true,
+	"parser_failure":             true,
+	"startup_timeout":            true,
+	connectivityTransportStallV3: true,
+	connectivityNetworkErrorV3:   true,
+	connectivityNetworkFailureV3: true,
+}
+
+// directPlayFailureClassificationV3 reports whether a client-reported failure
+// indicts the original-file route. An unsupported_* classification (for
+// example an engine refusing the source container) counts as well: it names a
+// property of the bytes a packaged route changes.
+func directPlayFailureClassificationV3(classification string) bool {
+	key := failureClassificationKeyV3(classification)
+	if directPlayFailureClassificationsV3[key] {
+		return true
+	}
+	return strings.Contains(key, "unsupported")
 }
 
 // softwareDecodeVariantPendingV3 reports whether the failed plan still has an

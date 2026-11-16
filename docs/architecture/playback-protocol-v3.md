@@ -497,6 +497,22 @@ client advertising a strict tier must populate `video_decode[]`; the flat lists
 alone earn it nothing. On `declared` the flat lists grant eligibility and any
 `video_decode[]` entry only restricts it, so that tier never produces this signal.
 
+**A declared container claim does not earn direct play for Matroska.** A
+`containers` list says the player accepted the container *type*, not that it can
+render the particular bytes: one mkv file can carry any video or audio codec and
+arbitrary track layouts. When the route would be `original_http` on an mkv or
+matroska source and `video_evidence` is `declared`, the planner re-plans with
+direct play excluded and prefers a codec-copy MP4 remux (or the transcode that
+follows it), and logs the rule as `route_downgrade: unverified_container` beside
+`decision_reason`. A probed tier (`exact`, `platform_attested`) keeps direct
+play for containers it genuinely supports, which is what the ExoPlayer-class
+clients that play Matroska report; the Apple AVPlayer Matroska mis-advertisement
+is corrected separately by its device quirk. If no packaged route exists — a
+source only the original bytes can carry, such as a client-managed Dolby Vision
+Profile 7 file — the direct plan is kept rather than turning a playable file into
+a terminal. This is a server-side rule precisely because the clients that
+over-claim cannot all be updated.
+
 Note the precise trigger: the signal fires only when *no* entry named the codec.
 If an entry matched the codec but the source exceeded one of its bounds — a
 4K file against a `max_height: 1080` decoder — that is a real device limit, and
@@ -1518,6 +1534,24 @@ An audio-output initialization failure is a verdict on the audio shape the
 recipe delivered (§6.2.1); once its one stereo retry is spent, the class retires
 as it always did.
 
+**A failed direct play retires direct play for the attempt.** `original_http`
+ships the source container untouched, so it has no server-side executor that can
+transform the bytes around what a device could not render. Any recognized
+client-reported failure — decode, parser, `player_failure`, `http_failure`,
+`startup_timeout`, a connectivity loss before the transport's first frame, or an
+`unsupported_*` engine refusal — therefore disqualifies the direct class, not
+just the failed recipe. The next plan is a packaged route (a codec-copy remux or
+a transcode). This is stricter than the class-vs-recipe rule above on purpose:
+for a packaged class an abort cannot prove the class unusable, but for the
+original bytes it is the only route that can ever carry them, so handing the
+same file back is the loop that stalled a browser claiming Matroska. The
+documented connectivity reissue after a rendered first frame is unchanged, and
+the audio-shape retry keeps direct play while its one stereo retry is untried.
+The retirement is durable attempt evidence: every later replan in the attempt
+reads it, and a fresh start negotiates normally. When the packaged ladder is
+also spent, the terminal is the retryable `routes_exhausted` (a new start
+negotiates again) rather than a non-retryable exhaustion.
+
 The server applies one more distinction from its own evidence: whether the
 client ever read from the stream it is indicting. A `failure_recovery` that
 arrives after the server answered this attempt's playlist but before a single
@@ -1738,7 +1772,10 @@ help. Delivered inside a `201` (start) or `200` (replan), never a 4xx.
 `video_conversion_unsupported`,
 `dv_conversion_unsupported`, `transcoding_disabled`,
 `subtitle_conversion_unsupported`, `bitrate_policy_unavailable` (no route fits
-the administrator's local or remote per-stream bitrate limit). `audio_conversion_unsupported` is not
+the administrator's local or remote per-stream bitrate limit), `routes_exhausted`
+(retryable: attempt history already retired the source-preserving routes — or the
+client reported the direct route failing — and the remaining route needs video
+adaptation; a fresh start negotiates again). `audio_conversion_unsupported` is not
 retryable when the selected audio track has no codec FFmpeg can name, and so
 no decoder: the planner refuses it before any route is tried, and choosing
 another track is the remedy. `audio_output_unsupported` is the audio-output

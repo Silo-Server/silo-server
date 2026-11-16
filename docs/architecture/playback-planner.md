@@ -53,6 +53,13 @@ Each one is commented where it is implemented.
 - **Server cap.** When the source must be encoded to fit the cap, only
   encoding candidates exist, and a refusal is renamed
   `bitrate_policy_unavailable`, keeping `retryable`.
+- **Declared container claim on Matroska.** When the selected plan would be
+  `original_http` on an mkv/matroska source and the client's `video_evidence` is
+  `declared`, the planner re-plans with direct play excluded and takes the
+  packaged candidate instead (`route_downgrade: unverified_container`). If no
+  packaged candidate exists the direct plan is kept, because the re-plan is a
+  preference, not a prohibition. Probed evidence (`exact`,
+  `platform_attested`) is unaffected.
 
 When nothing is selected, a video file's refusal is the last route's: the
 encode's `adaptation_exhausted`, or `adaptation_unavailable` when no encode was

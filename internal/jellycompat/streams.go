@@ -575,11 +575,16 @@ func (h *PlaybackHandler) localAudioTransformationRegistry(ctx context.Context) 
 const maxSessionReportBodyBytes = 1 << 20
 
 type sessionReportRequest struct {
-	ItemID              string          `json:"ItemId"`
-	MediaSourceID       string          `json:"MediaSourceId"`
-	PlaySessionID       string          `json:"PlaySessionId"`
-	PositionTicks       *int64          `json:"PositionTicks,omitempty"`
-	IsPaused            bool            `json:"IsPaused"`
+	ItemID        string `json:"ItemId"`
+	MediaSourceID string `json:"MediaSourceId"`
+	PlaySessionID string `json:"PlaySessionId"`
+	PositionTicks *int64 `json:"PositionTicks,omitempty"`
+	IsPaused      bool   `json:"IsPaused"`
+	// Failed is Jellyfin's PlaybackStopInfo.Failed: the client stopped because
+	// playback failed rather than because the viewer left. It is the strongest
+	// evidence a compat client can give about a route, and it is recorded so a
+	// retry is negotiated onto a packaged route. See directplay_failures.go.
+	Failed              bool            `json:"Failed,omitempty"`
 	AudioStreamIndex    *compatIntValue `json:"AudioStreamIndex,omitempty"`
 	SubtitleStreamIndex *compatIntValue `json:"SubtitleStreamIndex,omitempty"`
 }
@@ -2801,6 +2806,15 @@ func (h *PlaybackHandler) handlePlaybackReport(w http.ResponseWriter, r *http.Re
 			)
 		}
 	}
+	// A failed direct play is recorded before this stop report overwrites the
+	// upstream position with its own value: the comparison below needs the
+	// last position the server accepted while the route was playing.
+	priorPosition := float64(playback.PositionUnknown)
+	if stop && playSession.UpstreamSessionID != "" && h.sessionMgr != nil {
+		if live, err := h.sessionMgr.GetSession(playSession.UpstreamSessionID); err == nil && live != nil {
+			priorPosition = live.Position
+		}
+	}
 	if positionReported && h.sessionMgr != nil {
 		err := h.applyCompatReport(
 			r.Context(), playSession, findMediaSource(playSession, req.MediaSourceID),
@@ -2821,6 +2835,14 @@ func (h *PlaybackHandler) handlePlaybackReport(w http.ResponseWriter, r *http.Re
 				)
 			}
 		}
+	}
+	// A Stopped report is the compat client's only failure signal: it does not
+	// replan, so the failure is recorded here and the next PlaybackInfo for
+	// this device and file negotiates a packaged route (see
+	// directplay_failures.go). An ID-less stop is skipped: it may describe an
+	// earlier play of the same item.
+	if stop && !unidentified {
+		h.recordCompatDirectPlayFailure(r.Context(), playSession, findMediaSource(playSession, req.MediaSourceID), req.Failed, positionSeconds, priorPosition)
 	}
 	// An ID-less Stopped report can't end the play (see below): it may be a
 	// stale stop from an earlier play of the same item. It must not touch the

@@ -63,8 +63,13 @@ const (
 )
 
 type playbackInfoRequest struct {
-	serverBitrateCapKbps                int
-	streamLocation                      string
+	serverBitrateCapKbps int
+	streamLocation       string
+	// directPlayFailedFiles are the item's files whose direct-play route this
+	// device already reported failing. They are negotiated onto a packaged
+	// route even when the posted profile still claims the source container;
+	// see directplay_failures.go.
+	directPlayFailedFiles               map[int]struct{}
 	SiloSeekReanchor                    bool            `json:"SiloSeekReanchor"`
 	UserID                              string          `json:"UserId"`
 	MediaSourceID                       string          `json:"MediaSourceId"`
@@ -2392,6 +2397,11 @@ func (h *PlaybackHandler) HandlePlaybackInfo(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	req.streamLocation = string(streamlocation.FromContext(r.Context()))
+	// A direct route this device already reported failing is retired for that
+	// file before the version loop builds any source: the client's stored
+	// profile can still claim the container, but the bytes it would receive are
+	// the ones that just failed. See directplay_failures.go.
+	req.directPlayFailedFiles = h.deviceProfiles.DirectPlayFailures(r.Context(), session.Token, compatRequestDeviceID(r))
 	// PlaybackInfo is authorized by the token-derived session. Some clients
 	// retain a previous UserId in their request body while moving to the next
 	// item; that advisory value must not turn an otherwise authorized playback
@@ -2504,6 +2514,28 @@ func (h *PlaybackHandler) HandlePlaybackInfo(w http.ResponseWriter, r *http.Requ
 			continue
 		}
 		source = h.applyCompatDVStrip(r.Context(), routeItemID, playSessionID, source, profile, req, allow4KTranscode)
+		// Parity note for operators: a negotiation that declines direct play
+		// now says which rule did it, next to the same route_downgrade key the
+		// native planner logs. The first two cases are client-profile facts;
+		// the third is the compat equivalent of a native failure_recovery
+		// retiring a direct route the client reported failing.
+		if downgrade := compatDirectPlayDowngradeReason(profile, source.Version, req); downgrade != "" {
+			attrs := []any{
+				compatLogComponentKey, compatLogComponentValue,
+				"route_downgrade", downgrade,
+				"play_session_id", playSessionFingerprint(playSessionID),
+				"media_source_id", source.ID,
+				"file_id", source.Version.FileID,
+				"container", source.Version.Container,
+				"video_codec", source.Version.CodecVideo,
+				"client_profile", profile.Name,
+				"direct_play_enabled", boolDefault(req.EnableDirectPlay, true),
+			}
+			if downgrade == compatRouteDowngradeDirectPlayFailed {
+				attrs = append(attrs, "parity_note", "same rule as the native failure_recovery: a direct route this device reported failing is not offered again")
+			}
+			slog.InfoContext(r.Context(), "jellycompat direct play declined", attrs...)
+		}
 
 		// Resolve the client's subtitle selection against both the
 		// embedded/external tracks and any downloaded subtitles before
@@ -2880,6 +2912,37 @@ func (h *PlaybackHandler) storeDeviceProfile(r *http.Request, compatToken string
 	return h.deviceProfiles.PutForDevice(r.Context(), compatToken, deviceID, profile)
 }
 
+// compatDirectPlayDowngradeReason names the rule that kept direct play out of
+// a negotiation, for the operator log beside the route decision. Empty means
+// direct play was not declined (or the client itself disabled it).
+func compatDirectPlayDowngradeReason(profile DeviceProfile, version catalog.FileVersion, req playbackInfoRequest) string {
+	if !boolDefault(req.EnableDirectPlay, true) {
+		return ""
+	}
+	if _, failed := req.directPlayFailedFiles[version.FileID]; failed {
+		return compatRouteDowngradeDirectPlayFailed
+	}
+	if profile.refusesDirectPlay() {
+		return compatRouteDowngradeProfileRefuses
+	}
+	if len(profile.DirectPlayProfiles) > 0 && !profile.directPlayContainerListed(version.Container) {
+		return compatRouteDowngradeProfileContainer
+	}
+	return ""
+}
+
+const (
+	compatRouteDowngradeDirectPlayFailed = "direct_play_failed"
+	compatRouteDowngradeProfileContainer = "client_profile_container"
+	compatRouteDowngradeProfileRefuses   = "client_profile_refuses_direct_play"
+
+	// compatLogComponentKey and compatLogComponentValue are the shared slog
+	// attribute this file already logs by literal; naming them keeps the
+	// diagnostics grep-able without repeating the strings.
+	compatLogComponentKey   = "component"
+	compatLogComponentValue = "jellycompat"
+)
+
 func (h *PlaybackHandler) buildPlaybackSource( //nolint:funlen,gocyclo // buildPlaybackSource exceeds Vio's 100-line and complexity-30 limits; refactor tracked separately
 	routeItemID, playSessionID string,
 	version catalog.FileVersion,
@@ -2902,6 +2965,14 @@ func (h *PlaybackHandler) buildPlaybackSource( //nolint:funlen,gocyclo // buildP
 	}
 
 	supportsDirectPlay := enableDirectPlay && profile.SupportsDirectPlayForAudioStream(version, selectedAudioIndex)
+	// Parity with the native failure recovery: a direct route this device
+	// already reported failing is not offered again for that file, even when
+	// the profile still claims the container. The client has proved it cannot
+	// play these bytes; the negotiated alternative is the packaged route below.
+	_, directPlayFailed := req.directPlayFailedFiles[version.FileID]
+	if directPlayFailed {
+		supportsDirectPlay = false
+	}
 	maxBitrate := req.MaxStreamingBitrate
 	if req.serverBitrateCapKbps > 0 {
 		serverMax := int64(req.serverBitrateCapKbps) * 1000

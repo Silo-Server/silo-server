@@ -647,12 +647,19 @@ func TestPlanPlaybackV3EvidenceTiersReachTierAppropriateRoutes(t *testing.T) {
 		t.Fatalf("platform_attested tier = %s", ExplainPlannerResultV3(result))
 	}
 
-	// declared: no decode entries at all; the flat codec list carries the day.
+	// declared: no decode entries at all; the flat codec list carries a copy
+	// route. The source is Matroska and a declared container claim is not
+	// evidence the player can render those bytes, so the copy is packaged
+	// rather than sent as the original container (see
+	// directPlayContainerTrustedV3).
 	declared := base
 	declared.Capabilities.VideoEvidence = EvidenceDeclaredV3
 	result = PlanPlaybackV3(PlannerInputV3{Request: declared, RequestedFile: file, EffectiveFile: file, AudioTrackIndex: 0, Settings: PlannerSettingsV3{TranscodeEnabled: true, Allow4KTranscode: true}, Registry: testTransformationRegistryV3()})
-	if result.Plan == nil || result.Plan.Delivery != DeliveryOriginalHTTPV3 {
+	if result.Plan == nil || result.Plan.Delivery != DeliveryRemuxProgressiveV3 || result.Plan.EffectiveRecipe.VideoCodec != "hevc" {
 		t.Fatalf("declared tier = %s", ExplainPlannerResultV3(result))
+	}
+	if result.RouteDowngrade != RouteDowngradeUnverifiedContainerV3 {
+		t.Fatalf("declared tier downgrade = %q, want %q", result.RouteDowngrade, RouteDowngradeUnverifiedContainerV3)
 	}
 }
 
@@ -680,14 +687,18 @@ func TestPlanPlaybackV3DeclaredDecodeEntryNarrowsFlatClaim(t *testing.T) {
 	}
 
 	file.VideoTracks[0].Profile, file.VideoTracks[0].BitDepth = "High", 8
-	if result = plan(); result.Plan == nil || result.Plan.Delivery != DeliveryOriginalHTTPV3 {
+	// The flat claim passes, so the video is copied. Matroska under a declared
+	// container claim is packaged rather than direct-played (see
+	// directPlayContainerTrustedV3), so the assertion is the copy route, not
+	// the delivery class.
+	if result = plan(); result.Plan == nil || result.Plan.Delivery != DeliveryRemuxProgressiveV3 {
 		t.Fatalf("8-bit source = %s", ExplainPlannerResultV3(result))
 	}
 
 	// An entry for another codec says nothing about H.264.
 	file.VideoTracks[0].Profile, file.VideoTracks[0].BitDepth = "High 10", 10
 	req.Capabilities.VideoDecode = []VideoDecodeCapabilityV3{{Codec: "hevc", BitDepths: []int{8}}}
-	if result = plan(); result.Plan == nil || result.Plan.Delivery != DeliveryOriginalHTTPV3 {
+	if result = plan(); result.Plan == nil || result.Plan.Delivery != DeliveryRemuxProgressiveV3 {
 		t.Fatalf("unrelated entry = %s", ExplainPlannerResultV3(result))
 	}
 }
@@ -4328,7 +4339,12 @@ func TestPlanPlaybackV3MatroskaAACRemuxUsesTimestampNormalizedAudio(t *testing.T
 	}
 }
 
-func TestPlanPlaybackV3NativeMatroskaAACDirectPlayRemainsUnchanged(t *testing.T) {
+// TestPlanPlaybackV3LegacyWebMKVClaimTakesPackagedRoute pins the server-side
+// fallback for a browser build that still lists mkv. The current web client no
+// longer claims it, and the declared-tier claim it used to send is exactly what
+// stalled in production, so the planner packages the file instead of sending
+// the original Matroska bytes.
+func TestPlanPlaybackV3LegacyWebMKVClaimTakesPackagedRoute(t *testing.T) {
 	file := detailedFixtureFileV3()
 	file.VideoTracks[0].VideoRange = "SDR"
 	file.VideoTracks[0].VideoRangeType = "SDR"
@@ -4347,8 +4363,14 @@ func TestPlanPlaybackV3NativeMatroskaAACDirectPlayRemainsUnchanged(t *testing.T)
 		Request: req, RequestedFile: file, EffectiveFile: file, AudioTrackIndex: 0,
 		Settings: PlannerSettingsV3{TranscodeEnabled: true}, Registry: testTransformationRegistryV3(),
 	})
-	if result.Plan == nil || result.Plan.Delivery != DeliveryOriginalHTTPV3 || result.PlayMethod != PlayDirect || result.TranscodeAudio || len(result.Plan.Transformations) != 0 {
-		t.Fatalf("direct play changed = %s", ExplainPlannerResultV3(result))
+	if result.Plan == nil || result.Plan.Delivery != DeliveryRemuxProgressiveV3 {
+		t.Fatalf("legacy web mkv claim = %s", ExplainPlannerResultV3(result))
+	}
+	if result.Plan.Stream.Container != "mp4" || result.RouteDowngrade != RouteDowngradeUnverifiedContainerV3 {
+		t.Fatalf("packaged route = %#v (downgrade %q)", result.Plan.Stream, result.RouteDowngrade)
+	}
+	if result.Plan.EffectiveRecipe.VideoCodec != "hevc" {
+		t.Fatalf("packaged route re-encoded the video: %#v", result.Plan.EffectiveRecipe)
 	}
 }
 
