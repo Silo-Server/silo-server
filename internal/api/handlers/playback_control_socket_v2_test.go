@@ -490,7 +490,16 @@ func TestControlSocketMintReadsTheDurableAttemptOnAMemoryMiss(t *testing.T) {
 	if _, _, err := f.handler.Mint(ctx, f.identity(7, "profile-7"), liveID, ""); !errors.Is(err, ErrPlaybackControlSocketUnavailable) {
 		t.Fatalf("store failure err = %v", err)
 	}
-	if _, _, err := f.handler.Mint(ctx, f.identity(7, "profile-7"), "not-a-uuid", ""); !errors.Is(err, playback.ErrSessionNotFound) {
-		t.Fatalf("malformed id err = %v", err)
+	for _, malformed := range []string{
+		"not-a-uuid",
+		"x" + liveID + "x",
+		"{" + liveID + "}",
+		"urn:uuid:" + liveID,
+		strings.ReplaceAll(liveID, "-", ""),
+		strings.ToUpper(liveID),
+	} {
+		if _, _, err := f.handler.Mint(ctx, f.identity(7, "profile-7"), malformed, ""); !errors.Is(err, playback.ErrSessionNotFound) {
+			t.Fatalf("malformed id %q err = %v", malformed, err)
+		}
 	}
 }

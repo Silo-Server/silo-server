@@ -260,7 +260,10 @@ func (h *PlaybackControlSocketV2) missingSessionError(ctx context.Context, ident
 	store := h.Playback.PlanStoreV3
 	// The store keys attempts by UUID; anything else cannot name one, and a
 	// durable store would answer it with a query error, not a miss.
-	if id, err := uuid.Parse(playbackSessionID); store == nil || err != nil || id == uuid.Nil {
+	// uuid.Parse also accepts braces or any other one-character wrapper, a urn
+	// prefix, no hyphens and upper case, so only the canonical form it prints back
+	// counts as an id the store can be asked about.
+	if id, err := uuid.Parse(playbackSessionID); store == nil || err != nil || id == uuid.Nil || id.String() != playbackSessionID {
 		return playback.ErrSessionNotFound
 	}
 	record, err := store.GetAttempt(ctx, playbackSessionID)
