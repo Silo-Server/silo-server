@@ -661,7 +661,8 @@ otherwise made to match no file (`transcodenode.renditionSourceOnNode`), so
 on-demand subtitle segments still match the node's file. A tone-mapped job's
 catalog revision is restated (`transcodenode.toneMapRevisionOnNode`), so its
 recheck (`tonemap.SourceRevision.ValidatePath`) passes on the node's file; its
-size and content hash are checked either way. A job route answers a missing or refused grant with `400`, a mismatch with
+size and content hash are checked either way, and a catalog revision the core
+did not grant is refused. A job route answers a missing or refused grant with `400`, a mismatch with
 `409`, and a core it cannot reach with `503` (`transcodenode.sourceFailure`);
 the caller runs the job elsewhere. A chapter thumbnail job refused for those
 two reasons, or because the node is draining or re-probing its hardware,

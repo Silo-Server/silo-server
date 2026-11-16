@@ -72,11 +72,17 @@ func renditionSourceOnNode(planned playback.SubtitleRenditionSource, source node
 // (tonemap.SourceRevision.ValidatePath). When it is the revision the core
 // granted, its modification time becomes the one this node's mount gave the
 // file at open, so a mount that dates files differently still runs the job.
-// A revision the core did not grant is left as it is: its size and content
-// hash are still checked against this node's file.
+// A revision the core did not grant gets a size no file has, so the recheck
+// refuses it as it does on the API server, whose own file is the granted
+// one: left as it was, its time could happen to be the one this node's mount
+// gives the granted file. A revision without a modification time has none to
+// compare and is left as it is.
 func toneMapRevisionOnNode(revision tonemap.SourceRevision, source nodesource.Source) tonemap.SourceRevision {
-	if revision.FileModifiedUnixNano <= 0 || revision.FileSize != source.Size() ||
-		!nodesource.SameModTime(time.Unix(0, revision.FileModifiedUnixNano), source.ModTime()) {
+	if revision.FileModifiedUnixNano <= 0 {
+		return revision
+	}
+	if revision.FileSize != source.Size() || !nodesource.SameModTime(time.Unix(0, revision.FileModifiedUnixNano), source.ModTime()) {
+		revision.FileSize = -1
 		return revision
 	}
 	revision.FileModifiedUnixNano = models.NormalizeFileModifiedAt(source.InputModTime()).UnixNano()

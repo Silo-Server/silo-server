@@ -78,10 +78,11 @@ func TestToneMapRevisionOnNodePassesTheNodeFile(t *testing.T) {
 		t.Fatalf("the granted revision on the node = %v, want it accepted", err)
 	}
 
-	// A revision the core did not grant keeps the catalog's time.
+	// A revision the core did not grant is refused, even when its time is the
+	// one this node's mount gives the granted file.
 	stale := catalog
-	stale.FileModifiedUnixNano = granted.Add(time.Second).UnixNano()
-	if got := toneMapRevisionOnNode(stale, source); got != stale {
-		t.Fatalf("another revision = %+v, want it unchanged", got)
+	stale.FileModifiedUnixNano = input.UnixNano()
+	if err := toneMapRevisionOnNode(stale, source).ValidatePath(t.Context(), path); !errors.Is(err, tonemap.ErrSourceRevisionChanged) {
+		t.Fatalf("a revision the core did not grant = %v, want it refused", err)
 	}
 }
