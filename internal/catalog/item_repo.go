@@ -2851,10 +2851,11 @@ func (r *ItemRepository) UpdateMetadata(ctx context.Context, contentID string, u
 }
 
 // UpdateProvisionalArtwork applies upd, an artwork-only update, to the item
-// read describes while that item is still pending, unmatched or ambiguous and
-// each poster, backdrop or logo slot upd writes still has read's source. A
-// match, an Identify or an admin's artwork pick that committed since the read
-// wins: nothing is written and it returns false.
+// read describes while that item is still pending, unmatched or ambiguous,
+// its images lock is as read had it, and each poster, backdrop or logo slot upd
+// writes still has read's source. A match, an Identify, or an admin's artwork
+// pick or lock that committed since the read wins: nothing is written and it
+// returns false.
 func (r *ItemRepository) UpdateProvisionalArtwork(ctx context.Context, read *models.MediaItem, upd *MetadataUpdate) (bool, error) {
 	contentID := read.ContentID
 	tx, err := r.pool.Begin(ctx)
@@ -2878,10 +2879,12 @@ func (r *ItemRepository) UpdateProvisionalArtwork(ctx context.Context, read *mod
 		  AND ($2::text IS NULL OR COALESCE(poster_source_path, '') = $2)
 		  AND ($3::text IS NULL OR COALESCE(backdrop_source_path, '') = $3)
 		  AND ($4::text IS NULL OR COALESCE(logo_source_path, '') = $4)
+		  AND COALESCE(`+imagesLockedSQL("locked_fields")+`, false) = $5
 		FOR UPDATE`, contentID,
 		expected(upd.PosterSourcePath, read.PosterSourcePath),
 		expected(upd.BackdropSourcePath, read.BackdropSourcePath),
 		expected(upd.LogoSourcePath, read.LogoSourcePath),
+		slices.Contains(read.LockedFields, fieldImagesLocked),
 	).Scan(&one)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return false, nil

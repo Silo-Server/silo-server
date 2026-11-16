@@ -685,10 +685,13 @@ that no provider gives metadata still takes the sidecar poster, backdrop and
 logo beside it on each metadata run, which every library scan repeats for such
 items (`saveProvisionalLocalArtwork`, `internal/metadata/local_artwork_discovery.go`).
 The write touches only those artwork columns, and only while the row is still
-provisional and holds the sources the run read
+provisional and holds the sources and images lock the run read
 (`ItemRepository.UpdateProvisionalArtwork`), so a match, Identify or admin
-artwork choice made meanwhile wins. A slot already on its sidecar is queued
-again until its copy is cached. Remote images are not applied, nor are the
+artwork choice or lock made meanwhile wins. A slot taking a new sidecar drops
+the cached copy of its previous one, so a replaced file shows no image until
+its new copy lands. A slot on its sidecar is queued again on each run until it
+holds a cached copy, which can then only be that sidecar's. Remote images are
+not applied, nor are the
 other item slots, season posters or episode stills. A removed sidecar goes
 unnoticed, so its stored copy keeps serving. An item an admin marked to stay
 unmatched (`match_ignored_at`) is not processed and takes none.

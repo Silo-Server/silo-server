@@ -126,14 +126,14 @@ func (r *fakeItemRepo) Upsert(_ context.Context, item *models.MediaItem) error {
 }
 
 // UpdateProvisionalArtwork applies the artwork columns of upd under the
-// repository's condition: the item is still provisional and each slot upd
-// writes still has the source the caller read.
+// repository's condition: the item is still provisional, its images lock is as
+// the caller read it, and each slot upd writes still has the source read.
 func (r *fakeItemRepo) UpdateProvisionalArtwork(_ context.Context, read *models.MediaItem, upd *catalog.MetadataUpdate) (bool, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	contentID := read.ContentID
 	item, ok := r.items[contentID]
-	if !ok || !isProvisionalOwnershipStatus(item.Status) ||
+	if !ok || !isProvisionalOwnershipStatus(item.Status) || artworkLocked(item) != artworkLocked(read) ||
 		(upd.PosterSourcePath != nil && item.PosterSourcePath != read.PosterSourcePath) ||
 		(upd.BackdropSourcePath != nil && item.BackdropSourcePath != read.BackdropSourcePath) ||
 		(upd.LogoSourcePath != nil && item.LogoSourcePath != read.LogoSourcePath) {

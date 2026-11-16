@@ -155,10 +155,12 @@ func applyLocalArtworkFallback(item, existing *models.MediaItem, images []Remote
 // unmatched item must not take art from an unconfirmed ID; only a remote image
 // the slot already serves can stand in while the copy is pending. Otherwise
 // slots follow applyBestImages and the queue preparation, so the artwork lock
-// and cached copies behave as for a matched item. Only the artwork columns of
-// slots taking a new local source are written, and only while the row is still
-// provisional with the sources read here. A slot already on the sidecar is
-// queued again until its copy is cached, then left alone, so a settled item
+// behaves as for a matched item. Only the artwork columns of slots taking a
+// new local source are written, and only while the row is still provisional
+// with the sources and images lock read here. Such a slot drops a cached copy
+// of its previous source, so a replaced sidecar shows no image until its new
+// copy lands, and a slot on its sidecar with a cached copy is settled: it is
+// left alone, any other slot on its sidecar is queued again. A settled item
 // costs one item read per run. A failure is logged; the outcome stands.
 func (s *MetadataService) saveProvisionalLocalArtwork(ctx context.Context, contentID, language string, images []RemoteImage) {
 	images = slices.DeleteFunc(slices.Clone(images), func(img RemoteImage) bool { return !isLocalImageSourcePath(img.URL) })
@@ -194,6 +196,7 @@ func (s *MetadataService) saveProvisionalLocalArtwork(ctx context.Context, conte
 			continue
 		}
 		if *field.source != *stored[i].source {
+			dropPreviousCopy(field)
 			setArtworkUpdate(&upd, field)
 			write = true
 		} else if isCachedImagePath(*stored[i].path) {
@@ -214,6 +217,19 @@ func (s *MetadataService) saveProvisionalLocalArtwork(ctx context.Context, conte
 		}
 	}
 	_ = s.enqueueItemImages(ctx, queued, nil, images) // logged by enqueueImageCacheJobs
+}
+
+// dropPreviousCopy empties a slot taking a new source that still serves a
+// cached copy, which can only be of its previous source: kept, it would make a
+// lost copy job of the new source look settled on every later run.
+func dropPreviousCopy(field itemArtworkField) {
+	if !isCachedImagePath(*field.path) {
+		return
+	}
+	*field.path = ""
+	if field.thumbhash != nil {
+		*field.thumbhash = ""
+	}
 }
 
 // setArtworkUpdate sets field's path, source and thumbhash on upd.

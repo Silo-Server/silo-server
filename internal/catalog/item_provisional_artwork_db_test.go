@@ -10,8 +10,8 @@ import (
 )
 
 // A provisional item's sidecar artwork is written only while the row is still
-// provisional with the sources the writer read: a match or an admin's artwork
-// pick that committed in between is not overwritten.
+// provisional with the sources and images lock the writer read: a match or an
+// admin's artwork pick or lock that committed in between is not overwritten.
 func TestUpdateProvisionalArtworkIsCompareAndSetDB(t *testing.T) {
 	pool := newTestPool(t)
 	ctx := context.Background()
@@ -49,6 +49,20 @@ func TestUpdateProvisionalArtworkIsCompareAndSetDB(t *testing.T) {
 	}
 	if got := read().PosterSourcePath; got != "file:///m/a-poster.jpg?v=1-1" {
 		t.Fatalf("poster source = %q, want the newer value kept", got)
+	}
+
+	// An admin locked the artwork since the read, sources unchanged: nothing
+	// is written.
+	snapshot = read()
+	if _, err := pool.Exec(ctx, `UPDATE media_items SET locked_fields = $2::int[] WHERE content_id = $1`,
+		contentID, []int{fieldImagesLocked}); err != nil {
+		t.Fatal(err)
+	}
+	if ok, err := repo.UpdateProvisionalArtwork(ctx, snapshot, posterUpdate("file:///m/b-poster.jpg?v=1-1")); err != nil || ok {
+		t.Fatalf("write after the images lock was set = %v, %v; want no write", ok, err)
+	}
+	if got := read().PosterSourcePath; got != "file:///m/a-poster.jpg?v=1-1" {
+		t.Fatalf("locked poster source = %q, want it untouched", got)
 	}
 
 	// The item was matched since the read: nothing is written.
