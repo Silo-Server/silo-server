@@ -10,7 +10,15 @@ import { useOperationalLogs } from "@/hooks/queries/admin/logs";
 import { usePageActivity } from "@/hooks/usePageActivity";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-import { DropdownMenuItem } from "@/components/ui/dropdown-menu";
+import {
+  DropdownMenu,
+  DropdownMenuCheckboxItem,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import type { AdminSession, OperationalLogEntry, IPUserEntry } from "@/api/types";
 import { useIPUsers } from "@/hooks/queries/admin/ips";
@@ -58,6 +66,7 @@ import {
 } from "@/components/ui/table";
 import {
   AudioLines,
+  ChevronDown,
   ChevronRight,
   Clock,
   FileText,
@@ -129,6 +138,92 @@ const STACKED_SORT_FIELDS: [SortField, MessageKey][] = [
   ["node", "web.admin.activity.column.route"],
   ["started", "web.admin.activity.column.time"],
 ];
+
+// Filter controls: a segmented group per filter, so one choice per group reads
+// as one control instead of a run of loose chips. The 1px gap shows the group's
+// border color between segments, which keeps the dividers right when a narrow
+// screen wraps a group onto two lines. The active segment's tint sits over it.
+const SEGMENTED_GROUP_CLASS =
+  "border-border bg-border inline-flex max-w-full flex-wrap gap-px overflow-hidden rounded-md border";
+
+function segmentClass(active: boolean): string {
+  return `focus-visible:ring-ring inline-flex h-[30px] grow items-center justify-center gap-1.5 px-2.5 text-[12px] font-medium whitespace-nowrap transition-colors focus-visible:ring-2 focus-visible:outline-none focus-visible:ring-inset ${
+    active
+      ? "bg-primary/10 text-foreground"
+      : "bg-surface text-muted-foreground hover:bg-secondary hover:text-foreground"
+  }`;
+}
+
+const NODE_KIND_ORDER: ActivityRouteNode["kind"][] = ["proxy", "transcode", "server", "legacy"];
+
+/**
+ * The node filter is a menu, not a chip per node: the list grows with the
+ * cluster, and a row of chips would wrap the toolbar on a large deployment.
+ */
+function NodeFilterMenu({
+  nodes,
+  selected,
+  onSelect,
+}: {
+  nodes: (ActivityRouteNode & { count: number })[];
+  selected: string | null;
+  onSelect: (key: string | null) => void;
+}) {
+  const t = useT();
+  const selectedNode = nodes.find((node) => node.key === selected);
+  const groups = NODE_KIND_ORDER.map((kind) =>
+    nodes.filter((node) => node.kind === kind).sort((a, b) => b.count - a.count),
+  ).filter((group) => group.length > 0);
+
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger
+        className={`focus-visible:ring-ring inline-flex h-8 max-w-full items-center gap-1.5 rounded-md border px-2.5 text-[12px] font-medium whitespace-nowrap transition-colors focus-visible:ring-2 focus-visible:outline-none ${
+          selectedNode
+            ? "border-primary/40 bg-primary/10 text-foreground"
+            : "border-border bg-surface text-muted-foreground hover:text-foreground"
+        }`}
+      >
+        {selectedNode ? (
+          <>
+            <span className="text-muted-foreground">{selectedNode.label}</span>
+            <span className="truncate">{selectedNode.name}</span>
+          </>
+        ) : (
+          t("web.admin.activity.route.node")
+        )}
+        <ChevronDown className="h-3.5 w-3.5 opacity-60" aria-hidden="true" />
+      </DropdownMenuTrigger>
+      <DropdownMenuContent
+        align="start"
+        aria-label={t("web.admin.activity.summary.byNode")}
+        className="min-w-56"
+      >
+        {groups.map((group, index) => (
+          <div key={group[0]!.kind} role="group" aria-label={group[0]!.label}>
+            {index > 0 && <DropdownMenuSeparator />}
+            <DropdownMenuLabel className="text-muted-foreground text-[11px] font-medium">
+              {group[0]!.label}
+            </DropdownMenuLabel>
+            {group.map((node) => (
+              <DropdownMenuCheckboxItem
+                key={node.key}
+                checked={node.key === selected}
+                onCheckedChange={(checked) => onSelect(checked ? node.key : null)}
+                className="text-[13px]"
+              >
+                <span className="truncate">{node.name}</span>
+                <span className="text-muted-foreground ms-auto ps-4 tabular-nums">
+                  {numberText(node.count)}
+                </span>
+              </DropdownMenuCheckboxItem>
+            ))}
+          </div>
+        ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
 
 // Sort keys and search compare English text (and the shown text, for search),
 // so a language change neither reorders rows nor loses a typed English query.
@@ -342,13 +437,6 @@ export default function AdminActivity() {
           .filter(Boolean)
           .join(` ${MIDDLE_DOT} `);
 
-  const chipClass = (active: boolean, dimmed: boolean) =>
-    `inline-flex h-8 items-center gap-1.5 rounded-md border px-2.5 text-[12px] font-medium transition-colors ${
-      active
-        ? "border-primary/40 bg-primary/10 text-foreground"
-        : "border-border bg-surface text-muted-foreground hover:text-foreground"
-    } ${dimmed ? "opacity-50" : ""}`;
-
   return (
     <div className="space-y-4">
       <PageHeader
@@ -357,6 +445,17 @@ export default function AdminActivity() {
         actions={
           <>
             <RealtimeStatus state={connectionState} />
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                setIPLookupSeed("");
+                setIPLookupOpen(true);
+              }}
+            >
+              <Globe className="h-3.5 w-3.5" />
+              {t("web.admin.activity.ipLookup.heading")}
+            </Button>
             <Button
               variant="outline"
               size="sm"
@@ -377,14 +476,14 @@ export default function AdminActivity() {
 
       {/* Search + filters */}
       <div className="flex flex-wrap items-center gap-2">
-        <div className="relative min-w-[200px] flex-1">
+        <div className="relative w-full sm:w-80">
           <Search className="text-muted-foreground pointer-events-none absolute start-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2" />
           <Input
             placeholder={t("web.admin.activity.filter.placeholder")}
             aria-label={t("web.admin.activity.filter.placeholder")}
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            className="h-8 ps-9 text-[13px]"
+            className="h-8 ps-9 pe-8 text-[13px]"
           />
           {search && (
             <button
@@ -401,7 +500,7 @@ export default function AdminActivity() {
           <div
             role="group"
             aria-label={t("web.admin.activity.summary.methodHeading")}
-            className="flex flex-wrap gap-1"
+            className={SEGMENTED_GROUP_CLASS}
           >
             {Object.entries(methods)
               .sort(([a], [b]) => compareActivityMethods(a, b))
@@ -418,10 +517,7 @@ export default function AdminActivity() {
                     })}
                     aria-pressed={methodFilter === method}
                     onClick={() => setMethodFilter(methodFilter === method ? null : method)}
-                    className={chipClass(
-                      methodFilter === method,
-                      methodFilter !== null && methodFilter !== method,
-                    )}
+                    className={segmentClass(methodFilter === method)}
                   >
                     <span
                       aria-hidden="true"
@@ -434,14 +530,14 @@ export default function AdminActivity() {
               })}
           </div>
         )}
-        <div className="flex gap-1">
+        <div className={SEGMENTED_GROUP_CLASS}>
           {(["movie", "series"] as const).map((type) => (
             <button
               key={type}
               type="button"
               aria-pressed={typeFilter === type}
               onClick={() => setTypeFilter(typeFilter === type ? null : type)}
-              className={chipClass(typeFilter === type, false)}
+              className={segmentClass(typeFilter === type)}
             >
               {type === "movie"
                 ? t("web.admin.activity.filter.movies")
@@ -450,32 +546,7 @@ export default function AdminActivity() {
           ))}
         </div>
         {routeNodes.length > 1 && (
-          <div
-            role="group"
-            aria-label={t("web.admin.activity.summary.byNode")}
-            className="flex flex-wrap gap-1"
-          >
-            {[...routeNodes]
-              .sort((a, b) => b.count - a.count)
-              .map((node) => (
-                <button
-                  key={node.key}
-                  type="button"
-                  aria-pressed={nodeFilter === node.key}
-                  onClick={() => setNodeFilter(nodeFilter === node.key ? null : node.key)}
-                  className={chipClass(
-                    nodeFilter === node.key,
-                    nodeFilter !== null && nodeFilter !== node.key,
-                  )}
-                >
-                  <span className="text-muted-foreground">{node.label}</span>
-                  {node.name}
-                  <span className="text-muted-foreground tabular-nums">
-                    {numberText(node.count)}
-                  </span>
-                </button>
-              ))}
-          </div>
+          <NodeFilterMenu nodes={routeNodes} selected={nodeFilter} onSelect={setNodeFilter} />
         )}
         {activeFilters > 0 && (
           <button
@@ -491,18 +562,6 @@ export default function AdminActivity() {
             {t("web.admin.activity.filter.clear")}
           </button>
         )}
-        <Button
-          variant="outline"
-          size="sm"
-          className="ms-auto"
-          onClick={() => {
-            setIPLookupSeed("");
-            setIPLookupOpen(true);
-          }}
-        >
-          <Globe className="h-3.5 w-3.5" />
-          {t("web.admin.activity.ipLookup.heading")}
-        </Button>
       </div>
 
       {/* Filter status */}
