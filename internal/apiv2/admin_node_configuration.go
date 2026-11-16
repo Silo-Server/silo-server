@@ -23,6 +23,7 @@ type AdminNodeCreateBody struct {
 	Group            string `json:"group,omitempty" maxLength:"1024"`
 	MaxJobs          *int   `json:"max_jobs,omitempty" nullable:"true" maximum:"2147483647" minimum:"-2147483648"`
 	MaxBandwidthKbps *int   `json:"max_bandwidth_kbps,omitempty" nullable:"true" maximum:"2147483647" minimum:"-2147483648"`
+	SourceAccess     string `json:"source_access,omitempty" enum:"local,core" doc:"How a transcode node reads source media: local through its own library mount at the API servers' paths, or core over HTTP from the API servers, so the node needs no library mount. Absent means local. A proxy accepts only local. Requires the source_access node capability."`
 }
 type AdminNodeUpdateBody struct {
 	Name             *string `json:"name,omitempty" minLength:"1" maxLength:"1024"`
@@ -38,6 +39,8 @@ type AdminNodeUpdateBody struct {
 	// when it restarts.
 	DownloadArtifactDirOverride      *string `json:"download_artifact_dir_override,omitempty" nullable:"true" maxLength:"4096" doc:"Absolute directory for this transcode node's prepared download files. Null or empty restores the inherited directory: download.artifact_dir, or when that is blank, download-artifacts inside the node's transcode directory. Applies when the node restarts."`
 	DownloadArtifactMaxBytesOverride *int64  `json:"download_artifact_max_bytes_override,omitempty" nullable:"true" minimum:"-1" doc:"Storage budget in bytes for this node's prepared download files; 0 means no budget. Null or -1 restores download.artifact_max_bytes."`
+	// Jobs started after a change use the new mode; running jobs keep theirs.
+	SourceAccess *string `json:"source_access,omitempty" enum:"local,core" doc:"How this transcode node reads source media: local or core (see the create body). Applies to jobs the node starts after the change; running jobs keep their mode. A proxy accepts only local. Requires the source_access node capability."`
 }
 
 func (b *AdminNodeUpdateBody) UnmarshalJSON(data []byte) error {
@@ -88,6 +91,12 @@ func adminNodeConfigurationProblem(err error) error {
 	if errors.Is(err, nodepool.ErrNodeConfigurationConflict) {
 		return NewProblem(TypeConflict, "Node URL already has a different configuration.")
 	}
+	if errors.Is(err, nodepool.ErrInvalidNodeInput) {
+		return NewProblem(TypeValidationFailed, "Invalid node configuration.")
+	}
+	if errors.Is(err, nodepool.ErrTranscodeNodeURLTaken) {
+		return NewProblem(TypeConflict, "Another transcode node already has this URL.")
+	}
 	if p, ok := errors.AsType[*pgconn.PgError](err); ok && p.Code == "23505" && p.ConstraintName == "stream_nodes_url_key" {
 		return NewProblem(TypeConflict, "Node URL is already configured.")
 	}
@@ -114,7 +123,7 @@ func registerAdminNodeConfiguration(reg *Registry) {
 			return nil, unavailable("administrator nodes")
 		}
 		b := in.Body
-		node, err := reg.deps.AdminNodeConfiguration.CreateAdminNode(ctx, nodepool.CreateNodeInput{Name: b.Name, Type: b.Type, URL: b.URL, PublicURL: b.PublicURL, Group: b.Group, MaxJobs: b.MaxJobs, MaxBandwidthKbps: b.MaxBandwidthKbps})
+		node, err := reg.deps.AdminNodeConfiguration.CreateAdminNode(ctx, nodepool.CreateNodeInput{Name: b.Name, Type: b.Type, URL: b.URL, PublicURL: b.PublicURL, Group: b.Group, MaxJobs: b.MaxJobs, MaxBandwidthKbps: b.MaxBandwidthKbps, SourceAccess: b.SourceAccess})
 		return adminNodeConfigurationOutput(ctx, node, err)
 	})
 	update := Operation{Operation: humaOp("PUT", Prefix+"/admin/nodes/{id}", "updateAdminNode", "admin-nodes", "Update stored node configuration under the original If-Match revision. Configuration changes advance ETag and persist pool invalidation; a no-change PUT retains ETag. Disabling alone removes new placement and routine health sampling after reconciliation, preserves the last health sample, leaves existing streams serving and does not contact the worker. The response acknowledges stored configuration, not worker reload, replica completion or session teardown."), Class: ClassActingAdmin, DemoRestricted: true, ServiceBacked: true, Guarded: true, RetrySafety: RetrySafetyNaturalIdempotent}

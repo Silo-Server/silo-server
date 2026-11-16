@@ -3,6 +3,7 @@ package transcodenode
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"reflect"
 	"strings"
@@ -10,7 +11,9 @@ import (
 
 	"github.com/danielgtaylor/huma/v2"
 
+	"github.com/Silo-Server/silo-server/internal/fspath"
 	"github.com/Silo-Server/silo-server/internal/mediasample"
+	"github.com/Silo-Server/silo-server/internal/nodesource"
 	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/processmetrics"
 	"github.com/Silo-Server/silo-server/internal/trickplay"
@@ -91,9 +94,6 @@ func (s *Server) handleTrickplayExtract(w http.ResponseWriter, r *http.Request) 
 		writeTrickplayError(w, http.StatusBadRequest, trickplay.ExtractError{Reason: trickplayInvalidRequest, Message: "a sheets request of samples is required"})
 		return
 	}
-	if !s.requireApprovedInputPath(w, r, req.Input) {
-		return
-	}
 	if s.draining() {
 		writeTrickplayError(w, http.StatusServiceUnavailable, trickplay.ExtractError{Reason: trickplay.NodeUnavailableReason, Message: errNodeDraining})
 		return
@@ -108,6 +108,24 @@ func (s *Server) handleTrickplayExtract(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	defer s.trickplay.done()
+	// The run reads the source the core grants, never the path the request
+	// names, and ends if the core withdraws it.
+	source, err := s.openSource(r.Context(), req.SourceGrant)
+	if err != nil {
+		// Only a job without a grant is the request's fault; a refused grant or
+		// a mount that does not match sends the run elsewhere.
+		status, message := sourceFailure(r.Context(), err)
+		reason := trickplay.NodeUnavailableReason
+		if errors.Is(err, nodesource.ErrNoGrant) {
+			reason = trickplayInvalidRequest
+		}
+		writeTrickplayError(w, status, trickplay.ExtractError{Reason: reason, Message: message})
+		return
+	}
+	defer func() { _ = source.Close() }()
+	ctx, cancel := sourceContext(r.Context(), source)
+	defer cancel()
+	req.Input = source.Input()
 	s.activeJobs.Add(1)
 	defer s.activeJobs.Add(-1)
 	// Backend resolution can smoke-encode after the shared probe cache is
@@ -124,7 +142,7 @@ func (s *Server) handleTrickplayExtract(w http.ResponseWriter, r *http.Request) 
 	if accel == "" {
 		accel = trickplayAutoAccel
 	}
-	resolved, device := s.trickplay.backend(r.Context(), ffmpeg, accel, cfg.Playback.HWDevice)
+	resolved, device := s.trickplay.backend(ctx, ffmpeg, accel, cfg.Playback.HWDevice)
 	runner := mediasample.Runner{FFmpegPath: ffmpeg, Workload: processmetrics.Trickplay}
 	if mediasample.SupportsHardwareSheets(resolved) {
 		runner.HWAccel, runner.HWDevice = resolved, device
@@ -132,9 +150,9 @@ func (s *Server) handleTrickplayExtract(w http.ResponseWriter, r *http.Request) 
 		req.Attempts = softwareAttempts(req.Attempts)
 	}
 	req.Background = true
-	result, err := runner.Run(r.Context(), req)
+	result, err := runner.Run(ctx, req)
 	if err != nil {
-		if r.Context().Err() == nil && trickplay.InputUnreadable(err) {
+		if ctx.Err() == nil && trickplay.InputUnreadable(err) {
 			// This node's ffmpeg cannot open a file that passed the path
 			// check, as with a permission problem here: no fault of the
 			// file's content, so the API server does not count a failure.
@@ -165,6 +183,8 @@ func softwareAttempts(attempts []mediasample.Attempt) []mediasample.Attempt {
 }
 
 func writeTrickplayError(w http.ResponseWriter, status int, failure trickplay.ExtractError) {
+	// FFmpeg's log can name a relayed input, a capability on this host.
+	failure.Message = fspath.RedactRelayed(failure.Message)
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(failure)
@@ -187,15 +207,16 @@ func ProtocolTrickplayExtraction(schemas huma.Registry) workerprotocol.Operation
 	return workerprotocol.Operation{
 		Listener: listener, Method: http.MethodPost, Path: "/trickplay/extract",
 		Handler: "(*internal/transcodenode.Server).handleTrickplayExtract", AuthClass: bearerClass,
-		Description: "Make trickplay sprite sheets for a mediasample Sheets request of samples on an approved input path, up to the node's configured number of runs at once, at idle priority, on the node's own hardware. No durable replay receipt; the API server keeps the lease and retries elsewhere.",
+		Description: "Make trickplay sprite sheets for a mediasample Sheets request of samples on the granted source, up to the node's configured number of runs at once, at idle priority, on the node's own hardware. No durable replay receipt; the API server keeps the lease and retries elsewhere. source_grant is required: the node exchanges it at the core (POST /api/internal/nodes/self/sources/open) and reads only the path the core approves, never the input path the request names, for the job's life; a source the core withdraws ends the job. A missing or refused grant returns 400, a node mount that does not show the approved revision 409, a core the node cannot reach 503.",
 		RetrySafety: nonRetryable,
 		RequestBody: &huma.RequestBody{Required: true, Content: map[string]*huma.MediaType{jsonMedia: {Schema: request}}},
 		Responses: map[string]*huma.Response{
 			"200": {Description: "The run's sheets", Content: map[string]*huma.MediaType{jsonMedia: {Schema: result}}},
-			"400": {Description: "Invalid request or unapproved input path", Content: map[string]*huma.MediaType{jsonMedia: problem, textMedia: text}},
+			"400": {Description: "Invalid request, or a missing or refused source grant", Content: map[string]*huma.MediaType{jsonMedia: problem, textMedia: text}},
+			"409": {Description: mountMismatchDescription, Content: map[string]*huma.MediaType{jsonMedia: problem}},
 			"401": {Description: http.StatusText(http.StatusUnauthorized), Content: map[string]*huma.MediaType{textMedia: text}},
 			"422": {Description: "Sampling failed; permanent names a cause in the file itself", Content: map[string]*huma.MediaType{jsonMedia: problem}},
-			"503": {Description: "Node at its trickplay run capacity, re-probing, or unconfigured", Content: map[string]*huma.MediaType{jsonMedia: problem, textMedia: text}},
+			"503": {Description: "Node at its trickplay run capacity, re-probing, unconfigured, or unable to reach the core's source authority", Content: map[string]*huma.MediaType{jsonMedia: problem, textMedia: text}},
 		},
 	}
 }

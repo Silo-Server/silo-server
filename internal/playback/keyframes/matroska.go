@@ -24,8 +24,11 @@ type notMatroskaError struct{}
 
 func (notMatroskaError) Error() string { return "keyframes: not a Matroska file" }
 
+// isShortRead reports a read past the end of the file. A failed read can carry
+// the same end-of-file error, as a relayed source cut mid-transfer does; that
+// is transient and says nothing about the file's length.
 func isShortRead(err error) bool {
-	return errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF)
+	return (errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF)) && !transient(err)
 }
 
 // Index is a file's video keyframe times, in seconds on the container's
@@ -177,7 +180,7 @@ func readMatroska(r io.ReaderAt, size int64) (matroskaIndex, error) {
 	for at := segStart; at < segEnd; {
 		id, dataSize, headerLen, err := matroska.ReadElementHeader(r, at)
 		if err != nil {
-			if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
+			if isShortRead(err) {
 				break
 			}
 			return matroskaIndex{}, fmt.Errorf("keyframes: read element at %d: %w", at, err)

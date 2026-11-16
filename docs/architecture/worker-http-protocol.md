@@ -38,8 +38,8 @@ worker. They consume no request DTO and retain the existing paths:
 
 | POST path | Success | Failure statuses | Behavior |
 | --- | --- | --- | --- |
-| `/admin/reload-config` | Empty 204 | 401, 500 | Reload configuration without tearing down sessions. |
-| `/admin/force-reload` | Empty 204 | 401, 500 | Proxy reloads configuration; transcode node also tears down sessions and delivery authority. |
+| `/admin/reload-config` | Empty 204 | 401, 500 | Reload configuration without tearing down sessions. A transcode node rereads it from the API. |
+| `/admin/force-reload` | Empty 204 | 401, 500 | Proxy reloads configuration; transcode node also asks the API to revoke its recipes and tears down its sessions. |
 | `/admin/reprobe-capabilities` | JSON 200: `resolved`, `capability_hash` | 401, 409, 503 | Rebuild the capability snapshot; an incomplete rebuild retains the prior published hash. |
 
 The proxy listener additionally carries the network access provider routes the
@@ -54,8 +54,9 @@ instance on that proxy. Connect and disconnect are `natural_idempotent`: repeati
 disconnected. A proxy that hosts no plugins answers plain-text 503. See
 [network-access.md](network-access.md).
 
-An unconfigured transcode listener also returns plain-text 503 from its bearer
-middleware, including for both reload commands. All six require node bearer authentication. Reprobe refuses active probes;
+A transcode node opens its listener only after it has read its configuration
+from the API, and its bearer middleware answers plain-text 401 to any request
+not signed with the node's own key. All six require node bearer authentication. Reprobe refuses active probes;
 the transcode node also refuses active jobs while holding its GPU admission gate.
 These commands have no durable replay receipt. Their descriptions classify them
 as `non_retryable`: a lost reply does not establish that the command had no effect,
@@ -74,17 +75,18 @@ running sessions are unaffected. Its health `status` is `draining`, then
 
 `POST /chapter-thumbnails/extract` on the transcode listener takes the existing
 `chapterthumbs.RemoteExtractRequest` JSON shape and returns an `image/jpeg` frame.
-Only a nonempty `input_path` is required by the handler; omitted seek/tone-map
-options keep their zero values and unknown JSON keys are ignored. The request
-must pass node bearer authentication and approved-input-path authority before
-extraction can acquire the GPU admission gate. There is no native API alias.
+Only `source_grant` is required by the handler; omitted seek/tone-map options
+keep their zero values and unknown JSON keys are ignored. The request must pass
+node bearer authentication, and the node must open the granted source (see
+[Source grants](#source-grants)), before extraction can acquire the GPU
+admission gate. There is no native API alias.
 
 `POST /trickplay/extract` on the transcode listener takes a
 `mediasample.Request` whose only output is `Sheets` of `Samples`, and answers
 the run's `mediasample.Result` as JSON, sheets base64-encoded. A request with
 `sheets.use_input_aspect` uses the execution probe's display geometry and
 returns its actual cell height as `sheet_tile_height`. It passes node
-bearer authentication and approved-input-path authority first, runs up to
+bearer authentication and opens its [source grant](#source-grants) first, runs up to
 `playback.trickplay_node_capacity` requests at once (default 1; the next
 answers `503` with reason `node_busy`), runs at
 idle priority, and decodes on the node's own hardware: it drops hardware
@@ -106,9 +108,12 @@ When display geometry is requested, a response without `sheet_tile_height`
 is treated as an unavailable worker. This lets an API server try another
 node or its configured local fallback while an earlier worker is updated.
 
-The extractor's 400, 422 and 503 failures use `RemoteExtractErrorResponse` JSON.
-Bearer refusal uses plain-text 401; input-path refusal can instead use plain-text
-400, and unavailable worker configuration or input authority uses plain-text 503.
+The extractor's 400, 409, 422 and 503 failures use `RemoteExtractErrorResponse`
+JSON. Bearer refusal uses plain-text 401. A missing or refused source grant is
+400 with reason `invalid_request`; a node mount that does not match the grant
+(409), an API the node cannot reach (503), a draining node and a hardware
+re-probe (503) carry reason `transcode_node_unavailable`, which the API's
+chapter client answers by extracting locally under `prefer_transcode_nodes`.
 The description retains both media types for the shared statuses. Extraction
 has no durable request identity or replay receipt and is classified
 `non_retryable`; no new retry behavior is added to the existing worker client.
@@ -116,7 +121,7 @@ has no durable request identity or replay receipt and is classified
 `POST /media-samples/run` on the transcode listener takes a
 `mediasample.Request` and returns its `mediasample.Result` as JSON (see
 [media sampling](media-sampling.md#remote-runs)). It requires the node bearer
-and approved-input-path authority, refuses hardware attempts with `400`, and
+and a [source grant](#source-grants), refuses hardware attempts with `400`, and
 reports a failed run as `422` with a `mediasample.RemoteFailure`. Sampling only
 reads the file, so the operation is classified `natural_idempotent`; a repeated
 request decodes again. Subtitle sync is its caller.
@@ -153,6 +158,14 @@ The node's unauthenticated `/api/v1/health` also carries `artifacts`, the same
 measurement without `dir`, refreshed at most every five minutes. The API stores it in
 the node's `last_stats` (see [admin-api.md](../admin-api.md#last_stats)).
 
+Health also carries `node_control_version`, the node control protocol the node
+speaks (`nodepool.NodeControlVersion`, now `1`), and `key_rejected: true` while
+the API refused the node's key at its last configuration read. The API's health
+check treats a transcode node whose answer lacks the version, a binary from
+before nodes took their configuration and authority from the API, or reports
+`key_rejected`, as unhealthy, and logs the reason with the transition. Both
+answers are still `200`.
+
 Proxy subtitle and attached-font GET routes retain
 `/stream/subtitles/{token}/{track}` and its `/fonts` suffix. The inventory's
 `public` middleware class does not mean anonymous access: the handler verifies
@@ -181,9 +194,11 @@ durable completion receipt and the generation header is never forwarded to the
 end client. Runtime acknowledgement and pruning behavior remain unchanged.
 
 The retained transcode `POST /downloads/prepare` synchronously prepares or reuses
-an MP4 on that node. It requires node bearer authorization and an approved input
-path. The 64 KiB JSON decoder ignores unknown keys and defaults omitted options;
-invalid input and audio recipes return 400. Tone-map refusals use 422 or 503 with
+an MP4 on that node. It requires node bearer authorization and a source grant
+the node opens for the whole preparation. The 64 KiB JSON decoder ignores
+unknown keys and defaults omitted options; a missing or refused grant and
+invalid audio recipes return 400, a node mount that does not match the grant
+409, an API the node cannot reach 503. Tone-map refusals use 422 or 503 with
 the existing optional execution-error header. Other preparation/publication
 failures use plain-text 500. Success is the owning `downloadprepare.Result` JSON,
 not a native job or admission receipt.
@@ -253,26 +268,30 @@ transfers, not playback sessions, and node session reports label them
 `theme_audio`.
 
 A transcode node accepts `theme_aac_v1` on `/remux/{session_id}` under the same
-bearer, token, routing tuple, node identity and stored-recipe checks as a video
-progressive remux. Theme files are not `media_files` rows, so the input is
-approved by the theme authority instead: the token's theme ID must still name
-that exact path in an enabled library, and the file must have the size and
-modification time the token recorded. Video tokens remain limited to the
-media-file catalog.
+bearer and resolve as a video progressive remux. The API checks the token,
+routing tuple, node identity and stored recipe; theme files are not
+`media_files` rows, so the token's theme ID must still name that exact path in
+an enabled library, the file must have the size and modification time the token
+recorded, and the resolution grants the theme file. Video tokens remain limited
+to the media-file catalog.
 
 The transcode listener's legacy `DELETE /transcode/{session_id}` holds the same
 lifecycle lock as start and reconstruction. Every stop installs a
-process-local fence lasting the maximum token lifetime: reconstruction from a
-stream token or stored recipe answers 410 for that ID, so a segment request
-still in flight when the stop lands cannot restart the encode. A fresh
+process-local fence lasting the maximum token lifetime: a request for that lost
+transport answers 410 before the node asks the API to resolve it, so a segment
+request still in flight when the stop lands cannot restart the encode. A fresh
 `POST /transcode/start` for the same ID lifts the HLS fence; the idle reaper
 installs none, and neither does a stop sent with `fence=0`. The API sends that
 when it releases a transport it is moving to another node, since the ID lives
-on and a replica whose copy still names the old node may rebuild it there. Legacy progressive remux keeps its own fence against a new
-`/remux` request.
-Configured recipe deletion must succeed and progressive shutdown must finish
-before 204; either can return 503 after local teardown has already occurred.
-Session-close and file-removal errors are logged. A missing session and recipe
+on and a replica whose copy still names the old node may rebuild it there.
+Progressive remux keeps its own fence against a new `/remux` request, which
+every fenced stop installs too, since a stop can reach a remux between its GETs.
+The API deletes the transport's stored recipe before it stops a node, unless
+the recipe names another node URL, and deletes nothing on a release (see
+[recipe lifecycle](transcode-nodes.md#recipe-lifecycle)); the node closes the
+session's source. Progressive shutdown must finish before 204 and
+can return 503 after local teardown has already occurred. Session-close and
+file-removal errors are logged. A transport that runs nothing on the node
 returns 404 after cleanup attempts.
 
 This ID-addressed operation has no durable stop identity. Repeating it against a
@@ -282,7 +301,14 @@ process-survival guarantee is attached to the local fence.
 
 The retained transcode `POST /transcode/start` decodes the owning
 `TranscodeStartRequest` with ordinary JSON defaults and unknown-key tolerance;
-it does not impose a decoder body bound. Input authority, audio/copy/tone-map
+it does not impose a decoder body bound. `session_id` and `source_grant` are
+required: the node opens the grant (a missing or refused one is 400, a mount
+that does not match 409, an API it cannot reach 503) and runs FFmpeg on the
+approved path, or with core source access its relay URL, never on `input_path`
+(a text burn-in that cannot be staged on a core-access node is 409), keeping the source open for the
+session's life across FFmpeg restarts and seeks. `playback_session_id`,
+`user_id`, `profile_id` and `media_file_id` name the playback session the node
+files its session record and stream telemetry under. Audio/copy/tone-map
 recipe checks, GPU admission and the configuration reload guard run before
 execution. Same-ID replacement may remove the predecessor before a later start
 fails.
@@ -339,15 +365,38 @@ reconstruction or new native route is introduced.
 ## Authentication
 
 API servers and proxies sign every call to a worker's node bearer routes;
-`internal/nodeauth` implements both sides. Senders call `nodeauth.Sign` just
-before sending, and the transcode node and proxy middleware call
-`nodeauth.Verify`. There is no worker-to-API call.
+`internal/nodeauth` implements both sides. Senders call `nodeauth.SignTranscode`
+or `nodeauth.SignProxy` just before sending, with a `nodeauth.Keyring` that
+supplies the input key for the target. A sender names the kind of worker from
+where it got the URL (the transcode pool, the proxy pool, a route's proxy, a
+node row's type), never by inspecting the URL. Proxies and transcode nodes both
+serve `/hw-capabilities`, so a capability read takes the target too, and the
+API's capability cache keys each inventory by target and URL.
 
-A signed request never carries the shared `auth.jwt_secret`. That secret also
-signs login, profile, and stream tokens, so a copy captured from a worker link
-would mint them. Each side instead derives a MAC key from it with HKDF-SHA256 (no salt,
-info `silo/node-request-auth/v1`, 32 bytes). Nothing else uses that label, so
-the key cannot sign or verify any other token. A request carries:
+- **A transcode node** is signed for with its own node key, and only with it.
+  The keyring is the node credential registry (`nodepool.KeyRegistry`), which
+  API servers and proxies both load from the database. A transcode node
+  without a usable key yields `nodeauth.ErrNoNodeKey` (the same sentinel as
+  `nodepool.ErrNoNodeKey`); nothing falls back to the shared secret, and
+  placement gives such a node no work while it stays listed and
+  health-checked. The node reads its key from `SILO_NODE_KEY`, refuses to start
+  without a well-formed one, and verifies with it through
+  `nodeauth.VerifySigned`, which accepts signed requests only.
+- **A proxy** is signed for with the shared `auth.jwt_secret`, and the keyring
+  gives it out only for a URL registered as a proxy. The proxy verifies with
+  `nodeauth.Verify`.
+
+A URL with no registered worker of the requested kind yields
+`nodeauth.ErrUnknownNode`, since it might be a transcode node the registry has
+not loaded yet, and a sender without a keyring or with an empty key gets
+`nodeauth.ErrNoSecret`. In every case the request is not sent.
+
+A signed request never carries the input key. The shared secret also signs
+login, profile, and stream tokens, so a copy captured from a worker link would
+mint them. Each side instead derives a MAC key from the input key with
+HKDF-SHA256 (no salt, info `silo/node-request-auth/v1`, 32 bytes). Nothing else
+uses that label, so the key cannot sign or verify any other token. A request
+carries:
 
 ```text
 Authorization: Silo-Node-HMAC-SHA256 t=<unix seconds>,b=<hex body SHA-256>,sig=<hex HMAC-SHA256>
@@ -363,48 +412,123 @@ strips it, and the worker verifies the path it receives. The worker checks, in
 order:
 
 1. the MAC, recomputed over the request it received and compared with
-   `hmac.Equal`, before reading any body, so a caller without the secret cannot
+   `hmac.Equal`, before reading any body, so a caller without the key cannot
    make the worker buffer one;
 2. the timestamp, refused when more than 30 seconds from the worker's clock in
    either direction;
 3. the body, at most 1 MiB, whose SHA-256 must equal `b`. The worker then hands
    the buffered body to the handler.
 
-Every authentication refusal is a plain-text `401`. A sender with no secret
-configured sends the request unsigned, and the worker refuses it. The worker
-logs an invalid signature, a valid signature outside the window (with the
-clock offset), and a body that does not match its signature. Each kind logs at
-most once every ten minutes and counts the refusals it suppressed.
+Every authentication refusal is a plain-text `401`. The worker logs an invalid
+signature, a valid signature outside the window (with the clock offset), and a
+body that does not match its signature. Each kind logs at most once every ten
+minutes and counts the refusals it suppressed.
+
+Every HTTP client that calls a worker refuses redirects: a signed request names
+one worker, and following a redirect would send it, and its answer, somewhere
+nobody registered.
 
 What this requires and allows:
 
 - Worker clocks stay within 30 seconds of the API servers and proxies.
 - A reverse proxy in front of a worker may strip the path prefix of the
   worker's registered URL, but must otherwise forward the path and query
-  unchanged. Headers, including `Host`, are not signed.
-- A captured signed request can be replayed, to the same or another worker,
-  until its timestamp expires. Its method, path, query, and body cannot be altered; its
-  headers can, since they are not signed. It reveals nothing that signs another
-  request or token. Signing does not encrypt: worker links that cross untrusted
-  networks still need TLS to keep media and requests private.
+  unchanged. Headers, including `Host`, are not signed, except the source
+  grant on a node-to-core request.
+- A captured signed request can be replayed until its timestamp expires: to
+  the same transcode node, or to any proxy, since proxies share the secret. Its
+  method, path, query, and body cannot be altered; its other headers can. It
+  reveals nothing that signs another request or token. Signing does not
+  encrypt: worker links that cross untrusted networks still need TLS to keep
+  media and requests private.
 
-### Upgrading to signed requests
+### Node to core
+
+A transcode node also calls the API, signing with its own key
+(`nodeauth.SignToCore`, verified by `nodeauth.VerifyFromNode`). The
+construction is the same with three differences: the HKDF label is
+`silo/node-to-core-auth/v1`, the canonical string opens with
+`silo-node-to-core-v1`, and the header carries `n=<node id>` so the API can find
+the key. The canonical string also ends with the value of the
+`X-Silo-Source-Grant` request header (`nodeauth.SourceGrantHeader`, empty when
+absent), and a request carrying that header twice is refused. Because the label
+and version differ, a request captured in one direction never verifies in the
+other, even though both use the node's key.
+
+The API serves these routes under `/api/internal/nodes/self/`
+(`internal/nodecontrol`), on the API listener but outside user auth, user rate
+limits, response compression, and the request and activity logs. Proxies do not
+serve them. The `x-silo-worker-protocols` extension lists them under listener
+`api` with authorization class `node_signed`:
+
+| Route | Purpose |
+| --- | --- |
+| `GET config` | The calling node's configuration document, with a strong `ETag`. |
+| `POST report` | Session records and stream telemetry, every second, fenced on `(boot_id, seq)`. |
+| `POST logs` | A batch of up to 100 operational log entries. |
+| `POST health-changed` | The node's drain state changed; the API publishes `node_drain_changed`. |
+| `POST revoke-recipes` | The node, in its force-reload teardown, withdraws the recipes bound to it. |
+| `POST resolve` | The recipe, playback identity and source grant of a transport the node lost or serves as a progressive remux. |
+| `POST sources/open` | Exchanges a source grant for the approved path and a renewed grant. |
+
+A node with core source access also reads source bytes from
+`GET /api/internal/nodes/sources` (and `HEAD`), outside `self/`: the grant in the
+`X-Silo-Source-Grant` header, a single byte range, `If-Match` on the grant's
+entity tag. The API serves it from the descriptor it checked against the grant,
+identity-encoded, with a rolling write deadline, outside both per-node request
+budgets but under a per-node cap on concurrent responses (`429` with
+`Retry-After` past it), and cuts the responses in flight when it begins a
+graceful shutdown.
+
+[Transcode nodes](transcode-nodes.md) is the authority for what each route
+checks, its statuses, the two per-node request budgets (one for config, report,
+logs, health-changed and revoke-recipes, one for resolve and sources/open, both
+answering `429` with `Retry-After`), and how the node calls them.
+
+### Source grants
+
+Every job an API server sends a transcode node carries `source_grant`, a
+stateless grant the API signs for one revision of one catalog file, or
+detail-page theme file, and one node: `POST /transcode/start`,
+`POST /downloads/prepare`, `POST /trickplay/extract`,
+`POST /chapter-thumbnails/extract` and `POST /media-samples/run`, and the
+resolve answer for rebuilds, progressive remux and theme conversion. The node
+exchanges it at `sources/open`, runs FFmpeg only on the path the API approves,
+never on the job's input path field, and renews it while the job runs; a source
+the API stops renewing ends the job. A missing or refused grant answers `400`,
+a node mount that does not show the approved revision `409`, and an API the
+node cannot reach `503`. Every API server, and every transcode node with local
+source access, must see each library file at the same path with the same size
+and modification time, to the microsecond. A node with core source access runs
+FFmpeg on a loopback relay URL instead, which reads the approved revision from
+the API, and refuses a start whose text subtitle burn-in cannot be staged
+(`409`). See [source grants](transcode-nodes.md#source-grants) for the grant
+format, minting, renewal and the open route, and
+[core source access](transcode-nodes.md#core-source-access) for the relay.
+
+### Upgrade order
 
 Release notes certify which component versions may run together
-([release versioning](../release-versioning.md)). Upgrading every component
-together, as a stop-and-replace, has no mixed state. For a rolling upgrade,
-workers also accept the previous release's `Authorization: Bearer <secret>`,
-compared in constant time, and log a warning at most once every ten minutes
-when they do. Senders from this release only sign, which earlier workers
-refuse, so upgrade transcode nodes first, then proxies, then API servers. Until
-the last older sender is upgraded, its requests still carry the secret, so a
-rolling upgrade over links without TLS exposes it for that window; a
-stop-and-replace upgrade does not. Recovery from a failed upgrade is the release-wide backup and redeploy;
-rolling one worker back alone leaves it refusing every upgraded sender.
+([release versioning](../release-versioning.md)).
 
-The next release removes the legacy bearer from `nodeauth.Verify`. Its release
-notes must name this release as a required step for rolling upgrades, because
-its workers refuse senders from before this release.
+Transcode nodes have no rolling upgrade across the change to node keys. An
+older API server or proxy signs for a transcode node with the shared secret,
+which a current node refuses, and a current API server signs for an older node
+with its node key, which that node cannot verify. Stop the transcode nodes,
+upgrade the API servers and proxies, issue each transcode node a key, then
+start the upgraded nodes with `SILO_CORE_URL` and `SILO_NODE_KEY` (see
+[transcode nodes](transcode-nodes.md#failure-behavior)). Until a node has a key, placement
+gives it no work, and a node still running an older binary answers health
+without `node_control_version`, which the health check treats as unhealthy.
+
+Proxies keep the shared secret. During a rolling upgrade a proxy also accepts
+the previous release's `Authorization: Bearer <secret>` from older API servers,
+compared in constant time, and logs a warning at most once every ten minutes
+when it does. Until the last older sender is upgraded, its requests still carry
+the secret, so a rolling upgrade over links without TLS exposes it for that
+window; a stop-and-replace upgrade does not. The next release removes the
+legacy bearer from `nodeauth.Verify`. Recovery from a failed upgrade is the
+release-wide backup and redeploy.
 
 ## Media paths in stream tokens
 
@@ -413,15 +537,15 @@ them: they travel in worker URLs, and anyone holding a JWT can read its claims.
 So `streamtoken.Sign` never writes the media path in the clear. It seals it
 with AES-256-GCM under a key derived from `auth.jwt_secret` with HKDF-SHA256
 (no salt, info `silo/stream-token-media-path/v1`, 32 bytes) into the `spath`
-claim, and `streamtoken.Verify` opens it back into `MediaPath`. Every server
-and worker that verifies tokens already holds the secret, so none needs new
-configuration.
+claim, and `streamtoken.Verify` opens it back into `MediaPath`. Every API
+server and proxy that verifies tokens already holds the secret, so none needs
+new configuration. A transcode node verifies no token: it passes the token to
+the API's resolve unread.
 
 A token signed by an earlier release carries the path in `path` and still
 verifies, so tokens issued before an upgrade keep working on upgraded workers.
-An earlier worker finds no `path` in a new token and fails the request, so a
-rolling upgrade follows the order above: transcode nodes, then proxies, then
-API servers.
+An earlier proxy finds no `path` in a new token and fails the request, so
+proxies are upgraded no later than the API servers.
 
 A proxy names a source download by the token's `dfn` claim when the API sent
 one, which keeps the file's own name on the server for a viewer who may not
@@ -435,10 +559,10 @@ stereo AAC shape. Both enforce signed recipe/egress authority. Local execution
 streams video or audio MP4; query seek parse failures retain the legacy zero
 fallback and there is no byte-range resume promise. Local proxy HEAD checks
 that the file exists and answers with the stream headers without starting
-remux work. A transcode-node remux HEAD validates authority without starting
-an encoder or checking actual file existence. Node
-progressive execution requires its independently verified recipe, exact
-transport/node route and approved input. Stopped authority returns 410 and
+remux work. A transcode-node remux HEAD resolves authority at the API without
+opening a source or starting an encoder. Node progressive execution requires
+the API's resolution of the request (token, exact transport/node route, stored
+authority) and the source it grants. Stopped authority returns 410 and
 concurrent requests return 409. Cancellation and reload fences remain
 process-local, and a committed 200 can truncate on failure.
 
@@ -465,11 +589,12 @@ other accepted non-transcode methods fall through to direct-file serving. Booste
 remux grant compatibility is not established here. Grant relays mint a separate
 node-facing recipe token; viewer credentials are not forwarded to the node.
 
-Node HLS serving verifies the presented stream token and then checks the session
-deny marker (`silo:streamauth:<session_id>`), answering `410` with no bytes when
-the marker is present; existing guarded token/stored-recipe reconstruction
-covers missing process-local state. A 404 can represent unavailable/refused
-reconstruction. Manifests retain source-aligned timeline selection, relative
+Node HLS serving answers a live process-local session from the URL's transport
+id without verifying a token or reading the deny marker; the relays check the
+marker (`silo:streamauth:<session_id>`) before they forward. Missing
+process-local state is rebuilt from the API's resolution: `410` for a denied
+session or a transport this node stopped, `404` for any other refusal, `503`
+when the API cannot be asked. Manifests retain source-aligned timeline selection, relative
 segment links, forwarded query and no-store caching. Segment leases can wait or
 undergo guarded seek/restart recovery; init data also has a bounded wait.
 ServeContent handles conditions/ranges and extension/sniffed media. Private

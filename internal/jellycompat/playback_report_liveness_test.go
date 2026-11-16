@@ -62,7 +62,7 @@ func newReportLivenessHandler(upstreamID string, registerUpstream bool) (*Playba
 		codec:         codec,
 		playbackStore: playbackStore,
 		sessionMgr:    sessionMgr,
-		tm:            playback.NewTranscodeManager(),
+		tm:            keyedTranscodeManager(),
 	}
 	return handler, sessionMgr, encodedItemID, source.ID
 }

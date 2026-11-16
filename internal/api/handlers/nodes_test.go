@@ -2,11 +2,15 @@ package handlers
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/Silo-Server/silo-server/internal/nodeauth/nodeauthtest"
+	"github.com/Silo-Server/silo-server/internal/nodepool/nodepooltest"
 
 	"github.com/Silo-Server/silo-server/internal/cache"
 	"github.com/Silo-Server/silo-server/internal/netaccess"
@@ -68,7 +72,7 @@ func TestReloadNodeConfigAcceptsNoContent(t *testing.T) {
 			}))
 			t.Cleanup(node.Close)
 
-			handler := NewNodeHandler(&stubNodeRepository{}, nil, nil, nil, nil, nil, "secret")
+			handler := NewNodeHandler(&stubNodeRepository{}, nil, nil, nil, nil, nil, nodeauthtest.SameKey("secret"))
 			if !handler.reloadNodeConfig(context.Background(), &nodepool.Node{ID: 1, Name: "gpu-1", URL: node.URL}) {
 				t.Fatalf("HTTP %d was not accepted as a confirmed reload", status)
 			}
@@ -94,7 +98,7 @@ func TestReloadNodeConfigReportsAnUnconfirmedNode(t *testing.T) {
 	}))
 	t.Cleanup(node.Close)
 
-	handler := NewNodeHandler(&stubNodeRepository{}, nil, nil, nil, nil, nil, "secret")
+	handler := NewNodeHandler(&stubNodeRepository{}, nil, nil, nil, nil, nil, nodeauthtest.SameKey("secret"))
 	if handler.reloadNodeConfig(context.Background(), &nodepool.Node{ID: 1, Name: "gpu-1", URL: node.URL}) {
 		t.Fatal("a 500 from the node reported the reload as confirmed")
 	}
@@ -149,7 +153,7 @@ func (l *ctxAwareLister) ListEnabled(ctx context.Context, _ string) ([]*nodepool
 func TestReloadPoolsSurvivesRequestCancellation(t *testing.T) {
 	bus := &recordingEventBus{}
 	lister := &ctxAwareLister{nodes: []*nodepool.Node{{ID: 1, URL: "http://node", Enabled: true}}}
-	handler := NewNodeHandler(&stubNodeRepository{}, nodepool.NewProxyPool(), nodepool.NewTranscodePool(), lister, bus, nil, "secret")
+	handler := NewNodeHandler(&stubNodeRepository{}, nodepool.NewProxyPool(), nodepooltest.NewTranscodePool(), lister, bus, nil, nodeauthtest.SameKey("secret"))
 
 	canceled, cancel := context.WithCancel(context.Background())
 	cancel()
@@ -169,8 +173,34 @@ func TestReadAdminNodesDoesNotMutateRepositoryRows(t *testing.T) {
 	pool := nodepool.NewProxyPool()
 	pool.SetNodes([]*nodepool.Node{stored})
 	pool.ApplyHealth(1, stored.URL, true, 0, 0, "advertised", nil, nil, time.Now())
-	rows, err := NewNodeHandler(repo, pool, nil, nil, nil, nil, "").ReadAdminNodes(t.Context())
+	rows, err := NewNodeHandler(repo, pool, nil, nil, nil, nil, nil).ReadAdminNodes(t.Context())
 	if err != nil || len(rows) != 1 || rows[0] == stored || stored.AdvertisedCapabilitiesHash != nil || rows[0].AdvertisedCapabilitiesHash == nil || *rows[0].AdvertisedCapabilitiesHash != "advertised" {
 		t.Fatal(rows, stored, err)
+	}
+}
+
+// failingLister fails every read, as a database outage does.
+type failingLister struct{}
+
+func (failingLister) ListEnabled(context.Context, string) ([]*nodepool.Node, error) {
+	return nil, errors.New("database unavailable")
+}
+
+// A committed key reaches the other replicas and proxies through
+// node_pool_changed even when this server cannot reload its own pools, and
+// even when the request that issued it is gone.
+func TestIssueAdminNodeKeyPublishesWhenThePoolReloadFails(t *testing.T) {
+	bus := &recordingEventBus{}
+	handler := NewNodeHandler(&stubNodeRepository{}, nodepool.NewProxyPool(), nodepooltest.NewTranscodePool(), failingLister{}, bus, nil, nodeauthtest.SameKey("secret"))
+	handler.SetNodeKeyIssuance(func(context.Context, int) (string, error) { return "issued", nil })
+
+	canceled, cancel := context.WithCancel(context.Background())
+	cancel()
+	key, err := handler.IssueAdminNodeKey(canceled, 7)
+	if err != nil || key != "issued" {
+		t.Fatalf("IssueAdminNodeKey = %q, %v", key, err)
+	}
+	if got := bus.types(); len(got) != 1 || got[0] != string(cache.EventNodePoolChanged) {
+		t.Fatalf("published %v, want a single %q", got, cache.EventNodePoolChanged)
 	}
 }

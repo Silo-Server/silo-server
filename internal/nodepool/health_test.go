@@ -38,7 +38,7 @@ func (f *fakeCapabilityFetcher) callCount() int {
 // newHealthNode starts a stand-in node whose /health advertises capabilitiesHash.
 func newHealthNode(t *testing.T, capabilitiesHash string) string {
 	t.Helper()
-	body, err := json.Marshal(healthResponse{Status: "ok", ActiveJobs: 2, EgressKbps: 17, CapabilitiesHash: capabilitiesHash})
+	body, err := json.Marshal(healthResponse{Status: "ok", ActiveJobs: 2, EgressKbps: 17, CapabilitiesHash: capabilitiesHash, NodeControlVersion: NodeControlVersion})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -60,7 +60,7 @@ type capabilityCheckerFixture struct {
 
 func newCapabilityCheckerFixture(t *testing.T, node *Node, fetcher *fakeCapabilityFetcher) *capabilityCheckerFixture {
 	t.Helper()
-	transcodePool := NewTranscodePool()
+	transcodePool := newKeyedTranscodePool()
 	transcodePool.SetNodes([]*Node{node})
 	fixture := &capabilityCheckerFixture{
 		checker: NewHealthChecker(NewProxyPool(), transcodePool, nil),
@@ -252,7 +252,7 @@ func TestHealthCheckerAppliesCapabilitiesToProxyPool(t *testing.T) {
 	fetcher := &fakeCapabilityFetcher{payload: []byte(testCapabilityPayload), hash: "sha256:new"}
 	proxyPool := NewProxyPool()
 	proxyPool.SetNodes([]*Node{{ID: 9, Name: "proxy-1", URL: url, Enabled: true}})
-	checker := NewHealthChecker(proxyPool, NewTranscodePool(), nil)
+	checker := NewHealthChecker(proxyPool, newKeyedTranscodePool(), nil)
 	checker.SetCapabilityFetcher(fetcher.fetch)
 
 	checker.checkAll(context.Background())
@@ -303,7 +303,7 @@ func TestHealthCheckerSweepDoesNotWaitForCapabilityFetch(t *testing.T) {
 	// The second node advertises no hash, so its own health is all the sweep
 	// has to do for it.
 	steadyURL := newHealthNode(t, "")
-	pool := NewTranscodePool()
+	pool := newKeyedTranscodePool()
 	pool.SetNodes([]*Node{
 		{ID: 1, Name: "slow-gpu", URL: slowURL, Enabled: true},
 		{ID: 2, Name: "steady-gpu", URL: steadyURL, Enabled: true},
@@ -344,7 +344,7 @@ func TestHealthCheckerSweepDoesNotWaitForCapabilityFetch(t *testing.T) {
 // second fetch of the same node on every sweep until the first one answers.
 func TestHealthCheckerDoesNotStackCapabilityFetchesForOneNode(t *testing.T) {
 	url := newHealthNode(t, "sha256:new")
-	pool := NewTranscodePool()
+	pool := newKeyedTranscodePool()
 	pool.SetNodes([]*Node{{ID: 1, Name: "slow-gpu", URL: url, Enabled: true}})
 	checker := NewHealthChecker(NewProxyPool(), pool, nil)
 	fetcher := newBlockingFetcher()
@@ -375,7 +375,7 @@ func TestHealthCheckerDoesNotStackCapabilityFetchesForOneNode(t *testing.T) {
 // inventory never populates. The backstop is derived from the budget the fetcher
 // gave itself so the fetcher's own deadline always fires first.
 func TestCapabilityFetchBackstopSitsAboveTheFetcherBudget(t *testing.T) {
-	checker := NewHealthChecker(NewProxyPool(), NewTranscodePool(), nil)
+	checker := NewHealthChecker(NewProxyPool(), newKeyedTranscodePool(), nil)
 	node := &Node{ID: 1, URL: "http://gpu-1"}
 
 	if got := checker.capabilityFetchBackstop(node); got != capabilityFetchTimeout {
@@ -405,7 +405,7 @@ func TestCapabilityFetchBackstopSitsAboveTheFetcherBudget(t *testing.T) {
 // The health check is the first thing that runs against a node, so a base URL
 // this could not address would leave the node permanently unhealthy.
 func TestCheckNodeReachesATrailingSlashBaseURL(t *testing.T) {
-	url := newStatsHealthNode(t, `{"active_jobs":1,"capabilities_hash":"sha256:x"}`)
+	url := newStatsHealthNode(t, `{"active_jobs":1,"capabilities_hash":"sha256:x","node_control_version":1}`)
 
 	healthy, activeJobs, _, hash, _, _ := CheckNode(context.Background(), &Node{ID: 1, URL: url + "///"})
 	if !healthy {

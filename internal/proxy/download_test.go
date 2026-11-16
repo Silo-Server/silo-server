@@ -33,7 +33,9 @@ func (r *recordingArtifactMissReporter) ReportRemoteArtifactMissing(_ context.Co
 
 func newDownloadProxyServer(t *testing.T, secret string) *Server {
 	t.Helper()
-	return NewServer(testWatcher(secret), nil)
+	srv := NewServer(testWatcher(secret), nil)
+	srv.SetNodeKeys(nodeauthtest.NodeKey(secret))
+	return srv
 }
 
 func TestProxyDownloadServesAuthorizedRange(t *testing.T) {

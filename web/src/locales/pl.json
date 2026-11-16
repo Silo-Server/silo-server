@@ -161394,7 +161394,7 @@
   "web.setup.storage.backendLocked": [
     {
       "type": 0,
-      "value": "Zablokowane: pliki są już zapisane w tym backendzie. Zmień to w Admin › Serwer › Przechowywanie – pliki zostaną wtedy przeniesione."
+      "value": "Zablokowane: pliki są już zapisane w tym backendzie. Zmień to w Administracja › Serwer › Magazyn – pliki zostaną wtedy przeniesione."
     }
   ],
   "web.setup.storage.bucketLabel": [
@@ -161424,7 +161424,7 @@
   "web.setup.storage.footnote": [
     {
       "type": 0,
-      "value": "Ustawienia przechowywania są w Admin › Serwer › Przechowywanie; ustawienia Redis i bazy danych – w Admin › Serwer › Ogólne."
+      "value": "Ustawienia przechowywania są w Administracja › Serwer › Magazyn; ustawienia Redis i bazy danych – w Administracja › Serwer › Ogólne."
     }
   ],
   "web.setup.storage.hide": [
@@ -161532,7 +161532,7 @@
   "web.setup.storage.privateLocked": [
     {
       "type": 0,
-      "value": "Zablokowane: Silo rejestruje skonfigurowany prywatny bucket przy uruchomieniu, nawet jeśli jest pusty. Zapisane zasoby biblioteki również blokują tę lokalizację. Zmień to w Admin › Serwer › Przechowywanie."
+      "value": "Zablokowane: Silo rejestruje skonfigurowany prywatny bucket przy uruchomieniu, nawet jeśli jest pusty. Zapisane zasoby biblioteki również blokują tę lokalizację. Zmień to w Administracja › Serwer › Magazyn."
     }
   ],
   "web.setup.storage.privateTitle": [
@@ -161550,13 +161550,13 @@
   "web.setup.storage.publicLockedLocal": [
     {
       "type": 0,
-      "value": "Zablokowane: pliki są zapisane na dysku lokalnym, a dodanie publicznego bucketu przełączyłoby opcję Automatycznie na S3. Zmień to w Admin › Serwer › Przechowywanie – pliki zostaną wtedy przeniesione."
+      "value": "Zablokowane: pliki są zapisane na dysku lokalnym, a dodanie publicznego bucketu przełączyłoby opcję Automatycznie na S3. Zmień to w Administracja › Serwer › Magazyn – pliki zostaną wtedy przeniesione."
     }
   ],
   "web.setup.storage.publicLockedS3": [
     {
       "type": 0,
-      "value": "Zablokowane: pliki są zapisane tutaj. Zmień to w Admin › Serwer › Przechowywanie – pliki zostaną wtedy przeniesione."
+      "value": "Zablokowane: pliki są zapisane tutaj. Zmień to w Administracja › Serwer › Magazyn – pliki zostaną wtedy przeniesione."
     }
   ],
   "web.setup.storage.publicTitle": [

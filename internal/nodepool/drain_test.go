@@ -95,7 +95,7 @@ func TestCheckNodeReportReadsDrainStatus(t *testing.T) {
 		{"drained", DrainStateDrained},
 		{"something-newer", DrainStateNone},
 	} {
-		url := newStatsHealthNode(t, `{"status":"`+tc.status+`","active_jobs":1}`)
+		url := newStatsHealthNode(t, `{"status":"`+tc.status+`","active_jobs":1,"node_control_version":1}`)
 		report := CheckNodeReport(context.Background(), &Node{URL: url})
 		if !report.Healthy || report.ActiveJobs != 1 || report.DrainState != tc.want {
 			t.Fatalf("status %q: report = %+v, want healthy with drain state %q", tc.status, report, tc.want)
@@ -110,8 +110,8 @@ func TestCheckNodeReportReadsDrainStatus(t *testing.T) {
 // finds it no longer draining clears it.
 func TestHealthSweepAppliesDrainState(t *testing.T) {
 	status := "draining"
-	url := newStatsHealthNodeFunc(t, func() string { return `{"status":"` + status + `","active_jobs":2}` })
-	pool := NewTranscodePool()
+	url := newStatsHealthNodeFunc(t, func() string { return `{"status":"` + status + `","active_jobs":2,"node_control_version":1}` })
+	pool := newKeyedTranscodePool()
 	pool.SetNodes([]*Node{{ID: 7, URL: url, Type: NodeTypeTranscode, Enabled: true}})
 	checker := NewHealthChecker(NewProxyPool(), pool, nil)
 
@@ -142,11 +142,11 @@ func TestHealthChecksOfOneNodeRunInOrder(t *testing.T) {
 		if requests.Add(1) == 1 {
 			close(firstArrived)
 			<-releaseFirst
-			return `{"status":"ok"}`
+			return `{"status":"ok","node_control_version":1}`
 		}
-		return `{"status":"draining"}`
+		return `{"status":"draining","node_control_version":1}`
 	})
-	pool := NewTranscodePool()
+	pool := newKeyedTranscodePool()
 	pool.SetNodes([]*Node{{ID: 7, URL: url, Type: NodeTypeTranscode, Enabled: true}})
 	checker := NewHealthChecker(NewProxyPool(), pool, nil)
 
@@ -171,7 +171,7 @@ func TestHealthChecksOfOneNodeRunInOrder(t *testing.T) {
 // ApplyHealth, the positional writer other callers still use, must not touch a
 // drain state it was not given.
 func TestApplyHealthKeepsDrainState(t *testing.T) {
-	pool := NewTranscodePool()
+	pool := newKeyedTranscodePool()
 	node := transcodeNode(1, "http://tc", nil, 0)
 	node.DrainState = DrainStateDrained
 	pool.SetNodes([]*Node{node})

@@ -31,8 +31,10 @@ import (
 	"github.com/Silo-Server/silo-server/internal/logredact"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/netaccess"
+	"github.com/Silo-Server/silo-server/internal/nodeauth"
 	"github.com/Silo-Server/silo-server/internal/nodepool"
 	"github.com/Silo-Server/silo-server/internal/noderouting"
+	"github.com/Silo-Server/silo-server/internal/nodesource"
 	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/playback/connectionstore"
 	"github.com/Silo-Server/silo-server/internal/settingsresolve"
@@ -121,6 +123,16 @@ var errSubtitleStoreUnavailableV3 = errors.New("subtitle store unavailable")
 // terminalSessionExpiredV3 tells a client its attempt's session has ended and
 // it should mint a new attempt.
 const terminalSessionExpiredV3 = "session_expired"
+
+// v3NodeCapabilityKey names one cached node inventory: the node's canonical
+// URL and the kind of worker it was fetched from. The kind decides how the
+// fetch is signed (a proxy with the shared secret, a transcode node with its
+// own key), so it is part of the key: an inventory read from one kind never
+// answers a lookup for the other, even after a URL moves between them.
+type v3NodeCapabilityKey struct {
+	target nodeauth.Target
+	url    string
+}
 
 type v3NodeCapabilityCache struct {
 	transformations     []playback.TransformationV3
@@ -275,7 +287,7 @@ func (h *PlaybackHandler) egressRefusesRemuxRangeV3(ctx context.Context, servedB
 	if !servedByProxy || proxyNode == nil {
 		return true
 	}
-	capabilities, err := h.lookupRemoteCapabilitiesV3(ctx, proxyNode.URL, true)
+	capabilities, err := h.lookupRemoteCapabilitiesV3(ctx, nodeauth.TargetProxy, proxyNode.URL, true)
 	return err == nil && slices.Contains(capabilities.transportFeatures, playback.TransportFeatureRemuxRangeRefusalV1)
 }
 
@@ -514,24 +526,24 @@ func (h *PlaybackHandler) toneMapPlanningTimeoutV3(localFallbackAllowed bool) ti
 }
 
 // remoteTransformationsV3 is the transport-time capability lookup for a
-// selected node. It never trusts memoized failures: those may be planning
-// deadlines far shorter than this path's fetch budget, and rejecting the
-// already-selected node on a stale planning timeout would fail a start the
-// fetch could still validate.
-func (h *PlaybackHandler) remoteTransformationsV3(ctx context.Context, nodeURL string) ([]playback.TransformationV3, error) {
-	return h.lookupRemoteTransformationsV3(ctx, nodeURL, false)
+// selected node of kind target. It never trusts memoized failures: those may
+// be planning deadlines far shorter than this path's fetch budget, and
+// rejecting the already-selected node on a stale planning timeout would fail a
+// start the fetch could still validate.
+func (h *PlaybackHandler) remoteTransformationsV3(ctx context.Context, target nodeauth.Target, nodeURL string) ([]playback.TransformationV3, error) {
+	return h.lookupRemoteTransformationsV3(ctx, target, nodeURL, false)
 }
 
 // remoteTransformationsPlanningV3 is the planning-time variant: it honors
 // negatively-cached fetch failures so an unreachable node costs one timeout
 // per error-TTL window instead of one per playback start.
-func (h *PlaybackHandler) remoteTransformationsPlanningV3(ctx context.Context, nodeURL string) ([]playback.TransformationV3, error) {
-	return h.lookupRemoteTransformationsV3(ctx, nodeURL, true)
+func (h *PlaybackHandler) remoteTransformationsPlanningV3(ctx context.Context, target nodeauth.Target, nodeURL string) ([]playback.TransformationV3, error) {
+	return h.lookupRemoteTransformationsV3(ctx, target, nodeURL, true)
 }
 
 // lookupRemoteTransformationsV3 returns a node's cached or freshly fetched transformation inventory.
-func (h *PlaybackHandler) lookupRemoteTransformationsV3(ctx context.Context, nodeURL string, honorCachedFailure bool) ([]playback.TransformationV3, error) {
-	entry, err := h.lookupRemoteCapabilitiesV3(ctx, nodeURL, honorCachedFailure)
+func (h *PlaybackHandler) lookupRemoteTransformationsV3(ctx context.Context, target nodeauth.Target, nodeURL string, honorCachedFailure bool) ([]playback.TransformationV3, error) {
+	entry, err := h.lookupRemoteCapabilitiesV3(ctx, target, nodeURL, honorCachedFailure)
 	if err != nil {
 		return nil, err
 	}
@@ -540,14 +552,20 @@ func (h *PlaybackHandler) lookupRemoteTransformationsV3(ctx context.Context, nod
 
 // lookupRemoteCapabilitiesV3 fetches and jointly caches a node's transformation
 // and tone-map inventory, optionally reusing short-lived fetch failures.
-func (h *PlaybackHandler) lookupRemoteCapabilitiesV3(ctx context.Context, nodeURL string, honorCachedFailure bool) (v3NodeCapabilityCache, error) {
+//
+// target is the kind of worker the caller holds nodeURL as: a proxy from the
+// proxy pool or a route's proxy, a transcode node otherwise. It is never
+// derived from the URL, since that is what decides whether the request may
+// carry the shared secret.
+func (h *PlaybackHandler) lookupRemoteCapabilitiesV3(ctx context.Context, target nodeauth.Target, nodeURL string, honorCachedFailure bool) (v3NodeCapabilityCache, error) {
 	// Canonical here and in RefreshNodeCapabilitiesV3, which are the two ways
 	// into these maps; everything below is reached from one of them and so is
 	// already keyed the same way.
 	nodeURL = nodepool.NormalizeNodeURL(nodeURL)
+	key := v3NodeCapabilityKey{target: target, url: nodeURL}
 	now := time.Now()
 	h.v3NodeCapabilitiesMu.Lock()
-	entry, ok := h.v3NodeCapabilities[nodeURL]
+	entry, ok := h.v3NodeCapabilities[key]
 	h.v3NodeCapabilitiesMu.Unlock()
 	if ok && now.Before(entry.expiresAt) {
 		if entry.err == nil {
@@ -562,7 +580,7 @@ func (h *PlaybackHandler) lookupRemoteCapabilitiesV3(ctx context.Context, nodeUR
 		// transport-time validation still refreshes before relying on it, while
 		// planning can use the stale snapshot and refresh behind the request. This
 		// keeps sparse traffic from paying a multi-second node probe every minute.
-		h.refreshRemoteCapabilitiesV3(nodeURL)
+		h.refreshRemoteCapabilitiesV3(key)
 		return entry, nil
 	}
 
@@ -590,7 +608,7 @@ func (h *PlaybackHandler) lookupRemoteCapabilitiesV3(ctx context.Context, nodeUR
 		// learns describes the node as it was when the request left.
 		invalidations := h.nodeCapabilityInvalidationsV3(nodeURL)
 		requestCtx, cancel := context.WithTimeout(ctx, h.remoteToneMapProbeTimeoutV3(nodeURL))
-		info, err = fetchRemoteTranscodeCapabilities(requestCtx, nodeURL, h.JWTSecret)
+		info, err = fetchRemoteNodeCapabilities(requestCtx, target, nodeURL, h.NodeKeys)
 		cancel()
 		nodepool.ReportConnectFailure(h.NodePlanner, nodeURL, err)
 		completedAt = time.Now()
@@ -603,17 +621,17 @@ func (h *PlaybackHandler) lookupRemoteCapabilitiesV3(ctx context.Context, nodeUR
 	if err != nil {
 		h.v3NodeCapabilitiesMu.Lock()
 		if h.v3NodeCapabilities == nil {
-			h.v3NodeCapabilities = make(map[string]v3NodeCapabilityCache)
+			h.v3NodeCapabilities = make(map[v3NodeCapabilityKey]v3NodeCapabilityCache)
 		}
 		if overtaken {
 			h.v3NodeCapabilitiesMu.Unlock()
 			return v3NodeCapabilityCache{}, err
 		}
-		if current, currentOK := h.v3NodeCapabilities[nodeURL]; currentOK && current.err == nil && completedAt.Before(current.expiresAt) {
+		if current, currentOK := h.v3NodeCapabilities[key]; currentOK && current.err == nil && completedAt.Before(current.expiresAt) {
 			h.v3NodeCapabilitiesMu.Unlock()
 			return current, nil
 		}
-		h.v3NodeCapabilities[nodeURL] = v3NodeCapabilityCache{err: err, expiresAt: completedAt.Add(v3NodeCapabilityErrorTTL)}
+		h.v3NodeCapabilities[key] = v3NodeCapabilityCache{err: err, expiresAt: completedAt.Add(v3NodeCapabilityErrorTTL)}
 		h.v3NodeCapabilitiesMu.Unlock()
 		return v3NodeCapabilityCache{}, err
 	}
@@ -637,9 +655,9 @@ func (h *PlaybackHandler) lookupRemoteCapabilitiesV3(ctx context.Context, nodeUR
 		return entry, nil
 	}
 	if h.v3NodeCapabilities == nil {
-		h.v3NodeCapabilities = make(map[string]v3NodeCapabilityCache)
+		h.v3NodeCapabilities = make(map[v3NodeCapabilityKey]v3NodeCapabilityCache)
 	}
-	h.v3NodeCapabilities[nodeURL] = entry
+	h.v3NodeCapabilities[key] = entry
 	h.v3NodeCapabilitiesMu.Unlock()
 	return entry, nil
 }
@@ -659,6 +677,11 @@ func (h *PlaybackHandler) nodeCapabilityInvalidationsV3(nodeURL string) uint64 {
 // learns from a node's advertised capability hash that its hardware changed
 // long before this cache's freshness window would expire — and a cache that
 // outlives the hardware it describes plans transcodes onto a GPU that is gone.
+//
+// The sweep names the node by URL alone, so every inventory cached for that URL
+// is dropped, and each one that was cached or being refreshed is re-probed as
+// the kind of worker it was fetched from. A URL nothing has asked about has no
+// inventory to correct; its first lookup reads it fresh.
 func (h *PlaybackHandler) RefreshNodeCapabilitiesV3(nodeURL string) {
 	if h == nil || nodeURL == "" {
 		return
@@ -669,8 +692,8 @@ func (h *PlaybackHandler) RefreshNodeCapabilitiesV3(nodeURL string) {
 	// the entry this deletes is not the entry planning reads, so a node keeps
 	// serving the backend it was just moved off until the old key expires.
 	nodeURL = nodepool.NormalizeNodeURL(nodeURL)
+	var claimed []v3NodeCapabilityKey
 	h.v3NodeCapabilitiesMu.Lock()
-	delete(h.v3NodeCapabilities, nodeURL)
 	if h.v3NodeCapabilityInvalidations == nil {
 		h.v3NodeCapabilityInvalidations = make(map[string]uint64)
 	}
@@ -679,49 +702,60 @@ func (h *PlaybackHandler) RefreshNodeCapabilitiesV3(nodeURL string) {
 	// re-install its answer over this delete nor be mistaken for the re-probe
 	// this invalidation is owed.
 	h.v3NodeCapabilityInvalidations[nodeURL]++
-	claimed := h.claimCapabilityRefreshLockedV3(nodeURL)
+	for _, target := range []nodeauth.Target{nodeauth.TargetTranscode, nodeauth.TargetProxy} {
+		key := v3NodeCapabilityKey{target: target, url: nodeURL}
+		_, cached := h.v3NodeCapabilities[key]
+		_, refreshing := h.v3NodeCapabilityRefresh[key]
+		delete(h.v3NodeCapabilities, key)
+		// A refresh in flight sees the count move and repeats on its own.
+		if cached && !refreshing && h.claimCapabilityRefreshLockedV3(key) {
+			claimed = append(claimed, key)
+		}
+	}
 	h.v3NodeCapabilitiesMu.Unlock()
-	if claimed {
-		h.runCapabilityRefreshV3(nodeURL)
+	for _, key := range claimed {
+		h.runCapabilityRefreshV3(key)
 	}
 }
 
-func (h *PlaybackHandler) refreshRemoteCapabilitiesV3(nodeURL string) {
-	if h == nil || nodeURL == "" {
+func (h *PlaybackHandler) refreshRemoteCapabilitiesV3(key v3NodeCapabilityKey) {
+	if h == nil || key.url == "" {
 		return
 	}
 	h.v3NodeCapabilitiesMu.Lock()
-	claimed := h.claimCapabilityRefreshLockedV3(nodeURL)
+	claimed := h.claimCapabilityRefreshLockedV3(key)
 	h.v3NodeCapabilitiesMu.Unlock()
 	if claimed {
-		h.runCapabilityRefreshV3(nodeURL)
+		h.runCapabilityRefreshV3(key)
 	}
 }
 
-// claimCapabilityRefreshLockedV3 takes the node's single background-refresh
+// claimCapabilityRefreshLockedV3 takes the inventory's single background-refresh
 // slot. The caller must hold v3NodeCapabilitiesMu: taking the slot under the
 // same lock as the invalidation counter is what guarantees that an invalidation
 // either starts a refresh or is seen by the one already running.
-func (h *PlaybackHandler) claimCapabilityRefreshLockedV3(nodeURL string) bool {
-	if _, inFlight := h.v3NodeCapabilityRefresh[nodeURL]; inFlight {
+func (h *PlaybackHandler) claimCapabilityRefreshLockedV3(key v3NodeCapabilityKey) bool {
+	if _, inFlight := h.v3NodeCapabilityRefresh[key]; inFlight {
 		return false
 	}
 	if h.v3NodeCapabilityRefresh == nil {
-		h.v3NodeCapabilityRefresh = make(map[string]struct{})
+		h.v3NodeCapabilityRefresh = make(map[v3NodeCapabilityKey]struct{})
 	}
-	h.v3NodeCapabilityRefresh[nodeURL] = struct{}{}
+	h.v3NodeCapabilityRefresh[key] = struct{}{}
 	return true
 }
 
-// runCapabilityRefreshV3 probes one node in the background until its result is
-// current: a probe that an invalidation overtook was discarded, so it repeats
-// rather than leave the cache empty until the next viewer pays for a probe.
-func (h *PlaybackHandler) runCapabilityRefreshV3(nodeURL string) {
+// runCapabilityRefreshV3 probes one inventory in the background until its
+// result is current: a probe that an invalidation overtook was discarded, so it
+// repeats rather than leave the cache empty until the next viewer pays for a
+// probe.
+func (h *PlaybackHandler) runCapabilityRefreshV3(key v3NodeCapabilityKey) {
+	nodeURL := key.url
 	go func() {
 		for {
 			invalidations := h.nodeCapabilityInvalidationsV3(nodeURL)
 			ctx, cancel := context.WithTimeout(context.Background(), h.remoteToneMapProbeTimeoutV3(nodeURL))
-			_, err := h.lookupRemoteCapabilitiesV3(ctx, nodeURL, false)
+			_, err := h.lookupRemoteCapabilitiesV3(ctx, key.target, nodeURL, false)
 			cancel()
 			if err != nil {
 				slog.Debug("protocol v3 background node capability refresh failed", "component", "api", "node", logredact.SanitizeURL(nodeURL), "error", err)
@@ -729,7 +763,7 @@ func (h *PlaybackHandler) runCapabilityRefreshV3(nodeURL string) {
 			h.v3NodeCapabilitiesMu.Lock()
 			current := h.v3NodeCapabilityInvalidations[nodeURL] == invalidations
 			if current {
-				delete(h.v3NodeCapabilityRefresh, nodeURL)
+				delete(h.v3NodeCapabilityRefresh, key)
 			}
 			h.v3NodeCapabilitiesMu.Unlock()
 			if current {
@@ -783,7 +817,7 @@ func (h *PlaybackHandler) warmPlaybackCapabilitiesV3(ctx context.Context) {
 		go func() {
 			defer group.Done()
 			for nodeURL := range jobs {
-				if _, err := h.lookupRemoteCapabilitiesV3(ctx, nodeURL, false); err != nil {
+				if _, err := h.lookupRemoteCapabilitiesV3(ctx, nodeauth.TargetTranscode, nodeURL, false); err != nil {
 					slog.DebugContext(ctx, "protocol v3 node capability warmup failed", logComponentKey, "api", "node", logredact.SanitizeURL(nodeURL), "error", err)
 				}
 			}
@@ -802,10 +836,11 @@ func (h *PlaybackHandler) warmPlaybackCapabilitiesV3(ctx context.Context) {
 	group.Wait()
 }
 
-// remoteToneMapCapabilitiesV3 returns a defensive copy of one node's validated
-// tone-map inventory; planning lookups may honor the negative cache.
+// remoteToneMapCapabilitiesV3 returns a defensive copy of one transcode node's
+// validated tone-map inventory; planning lookups may honor the negative cache.
+// Tone mapping runs only on transcode nodes, so every caller holds one.
 func (h *PlaybackHandler) remoteToneMapCapabilitiesV3(ctx context.Context, nodeURL string, planning bool) (tonemap.Capabilities, error) {
-	entry, err := h.lookupRemoteCapabilitiesV3(ctx, nodeURL, planning)
+	entry, err := h.lookupRemoteCapabilitiesV3(ctx, nodeauth.TargetTranscode, nodeURL, planning)
 	if err != nil {
 		return nil, err
 	}
@@ -935,7 +970,7 @@ func (h *PlaybackHandler) progressiveRemuxPlanningRegistryWithInputsV3(
 	var merged []playback.TransformationV3
 	if proxyExecutionAllowed {
 		if enumerator, ok := h.NodePlanner.(proxyNodeEnumeratorV3); ok {
-			for _, transformations := range h.pooledNodeTransformationsV3(ctx, enumerator.ProxyNodeURLs()) {
+			for _, transformations := range h.pooledNodeTransformationsV3(ctx, nodeauth.TargetProxy, enumerator.ProxyNodeURLs()) {
 				merged = append(merged, progressiveRemuxTransformationsV3(transformations)...)
 			}
 		}
@@ -943,7 +978,7 @@ func (h *PlaybackHandler) progressiveRemuxPlanningRegistryWithInputsV3(
 	if transcodeExecutionAllowed && h.NodeRecipeStore != nil && h.NodeRecipeStore.Enabled() &&
 		h.progressiveRemuxRelayAvailableV3(ctx) {
 		if enumerator, ok := h.NodePlanner.(transcodeNodeEnumeratorV3); ok {
-			for _, entry := range h.pooledNodeCapabilitiesV3(ctx, transcodeNodeURLsForNewPlanV3(enumerator)) {
+			for _, entry := range h.pooledNodeCapabilitiesV3(ctx, nodeauth.TargetTranscode, transcodeNodeURLsForNewPlanV3(enumerator)) {
 				if slices.Contains(entry.transportFeatures, playback.TransportFeatureProgressiveRemuxExecutionV1) {
 					merged = append(merged, progressiveRemuxTransformationsV3(entry.transformations)...)
 				}
@@ -961,7 +996,7 @@ func (h *PlaybackHandler) progressiveRemuxRelayAvailableV3(ctx context.Context) 
 	if !ok {
 		return false
 	}
-	for _, entry := range h.pooledNodeCapabilitiesV3(ctx, enumerator.ProxyNodeURLs()) {
+	for _, entry := range h.pooledNodeCapabilitiesV3(ctx, nodeauth.TargetProxy, enumerator.ProxyNodeURLs()) {
 		if slices.Contains(entry.transportFeatures, playback.TransportFeatureProgressiveRemuxRelayV1) {
 			return true
 		}
@@ -1033,7 +1068,7 @@ func (h *PlaybackHandler) hlsPlanningRegistryWithInputsForClientV3(
 		return local
 	}
 	var merged []playback.TransformationV3
-	for _, transformations := range h.pooledNodeTransformationsV3(ctx, nodeURLs) {
+	for _, transformations := range h.pooledNodeTransformationsV3(ctx, nodeauth.TargetTranscode, nodeURLs) {
 		merged = append(merged, transformations...)
 	}
 	if !localAllowed {
@@ -1236,7 +1271,7 @@ func (h *PlaybackHandler) hlsSubtitleRenditionExecutableV3(ctx context.Context, 
 	if !workerAllowed || !ok {
 		return false
 	}
-	for _, entry := range h.pooledNodeCapabilitiesV3(ctx, transcodeNodeURLsForNewPlanV3(enumerator)) {
+	for _, entry := range h.pooledNodeCapabilitiesV3(ctx, nodeauth.TargetTranscode, transcodeNodeURLsForNewPlanV3(enumerator)) {
 		if hasAllStringsV3(entry.transportFeatures, features) {
 			return true
 		}
@@ -1496,12 +1531,12 @@ func (h *PlaybackHandler) planPlaybackWithCapabilitiesV3(ctx context.Context, in
 }
 
 // pooledNodeTransformationsV3 collects the advertised transformations of the
-// given transcode nodes, keyed by node URL. Stale cache entries are refreshed
+// given nodes, all of kind target, keyed by node URL. Stale cache entries are refreshed
 // concurrently under a short planning deadline; nodes that cannot be reached
 // contribute nothing (their failures are negatively cached), so planning
 // degrades toward the local registry instead of blocking the start path.
-func (h *PlaybackHandler) pooledNodeTransformationsV3(ctx context.Context, nodeURLs []string) map[string][]playback.TransformationV3 {
-	capabilities := h.pooledNodeCapabilitiesV3(ctx, nodeURLs)
+func (h *PlaybackHandler) pooledNodeTransformationsV3(ctx context.Context, target nodeauth.Target, nodeURLs []string) map[string][]playback.TransformationV3 {
+	capabilities := h.pooledNodeCapabilitiesV3(ctx, target, nodeURLs)
 	byURL := make(map[string][]playback.TransformationV3, len(capabilities))
 	for nodeURL, entry := range capabilities {
 		byURL[nodeURL] = append([]playback.TransformationV3(nil), entry.transformations...)
@@ -1509,7 +1544,7 @@ func (h *PlaybackHandler) pooledNodeTransformationsV3(ctx context.Context, nodeU
 	return byURL
 }
 
-func (h *PlaybackHandler) pooledNodeCapabilitiesV3(ctx context.Context, nodeURLs []string) map[string]v3NodeCapabilityCache {
+func (h *PlaybackHandler) pooledNodeCapabilitiesV3(ctx context.Context, target nodeauth.Target, nodeURLs []string) map[string]v3NodeCapabilityCache {
 	nodeURLs = withoutUnreachableRouteNodesV3(ctx, nodeURLs)
 	fetchCtx, cancel := context.WithTimeout(ctx, v3NodeCapabilityPlanTimeout)
 	defer cancel()
@@ -1520,7 +1555,7 @@ func (h *PlaybackHandler) pooledNodeCapabilitiesV3(ctx context.Context, nodeURLs
 		wg.Add(1)
 		go func(i int, nodeURL string) {
 			defer wg.Done()
-			entry, err := h.lookupRemoteCapabilitiesV3(fetchCtx, nodeURL, true)
+			entry, err := h.lookupRemoteCapabilitiesV3(fetchCtx, target, nodeURL, true)
 			if err != nil {
 				slog.DebugContext(ctx, "protocol v3 node capability unavailable for planning", "component", "api", "node", logredact.SanitizeURL(nodeURL), "error", err)
 				return
@@ -1670,7 +1705,7 @@ func (h *PlaybackHandler) transcodeEligibilityV3(ctx context.Context, result pla
 	if enumerator, ok := h.NodePlanner.(transcodeNodeEnumeratorV3); ok && (exactPlanner || predicatePlanner) &&
 		(planRequiresServerTransformationsV3(result.Plan) || requiresProgressiveRemux || result.SubtitleRendition) {
 		capable := make(map[string]struct{})
-		for nodeURL, entry := range h.pooledNodeCapabilitiesV3(ctx, transcodeNodeURLsForNewPlanV3(enumerator)) {
+		for nodeURL, entry := range h.pooledNodeCapabilitiesV3(ctx, nodeauth.TargetTranscode, transcodeNodeURLsForNewPlanV3(enumerator)) {
 			if requiresProgressiveRemux && !slices.Contains(entry.transportFeatures, playback.TransportFeatureProgressiveRemuxExecutionV1) {
 				continue
 			}
@@ -2743,7 +2778,7 @@ func (h *PlaybackHandler) prepareTransportWithPolicyAndExclusionsV3(
 
 		plan := decision.Plan
 		nodeURL := plan.TranscodeNode.URL
-		transformations, capabilityErr := h.remoteTransformationsV3(r.Context(), nodeURL)
+		transformations, capabilityErr := h.remoteTransformationsV3(r.Context(), nodeauth.TargetTranscode, nodeURL)
 		// A failed capability read may be transient; only a node whose
 		// advertised capabilities rule the recipe out is ineligible.
 		ineligible := false
@@ -3007,7 +3042,7 @@ func (h *PlaybackHandler) prepareIdentityTransportV3(r *http.Request, session *p
 		return preparedTransportV3{}, combineTransportErrorsV3(routeErr, fallbackErr)
 	}
 	if transcodeNode != nil {
-		transcodeCapabilities, capabilityErr := h.lookupRemoteCapabilitiesV3(r.Context(), transcodeNode.URL, false)
+		transcodeCapabilities, capabilityErr := h.lookupRemoteCapabilitiesV3(r.Context(), nodeauth.TargetTranscode, transcodeNode.URL, false)
 		if capabilityErr != nil || !slices.Contains(transcodeCapabilities.transportFeatures, playback.TransportFeatureProgressiveRemuxExecutionV1) {
 			return fallbackFromSelectedRoute(&transportErrorV3{
 				reason: routeCapabilityUnavailableReasonV3, message: "The selected transcode node cannot execute a progressive remux.",
@@ -3016,7 +3051,7 @@ func (h *PlaybackHandler) prepareIdentityTransportV3(r *http.Request, session *p
 		}
 	}
 	if transcodeNode != nil && proxyNode != nil {
-		proxyCapabilities, capabilityErr := h.lookupRemoteCapabilitiesV3(r.Context(), proxyNode.URL, false)
+		proxyCapabilities, capabilityErr := h.lookupRemoteCapabilitiesV3(r.Context(), nodeauth.TargetProxy, proxyNode.URL, false)
 		if capabilityErr != nil || !slices.Contains(proxyCapabilities.transportFeatures, playback.TransportFeatureProgressiveRemuxRelayV1) {
 			return fallbackFromSelectedRoute(&transportErrorV3{
 				reason: routeCapabilityUnavailableReasonV3, message: "The selected proxy cannot relay a progressive remux from a transcode node.",
@@ -3025,14 +3060,15 @@ func (h *PlaybackHandler) prepareIdentityTransportV3(r *http.Request, session *p
 		}
 	}
 	var executorNode *nodepool.Node
+	var executorTarget nodeauth.Target
 	switch decision.Shape.Execution {
 	case noderouting.ExecutionProxy:
-		executorNode = proxyNode
+		executorNode, executorTarget = proxyNode, nodeauth.TargetProxy
 	case noderouting.ExecutionTranscode:
-		executorNode = transcodeNode
+		executorNode, executorTarget = transcodeNode, nodeauth.TargetTranscode
 	}
 	if executorNode != nil && planRequiresServerTransformationsV3(result.Plan) {
-		advertised, capabilityErr := h.remoteTransformationsV3(r.Context(), executorNode.URL)
+		advertised, capabilityErr := h.remoteTransformationsV3(r.Context(), executorTarget, executorNode.URL)
 		if capabilityErr == nil {
 			capabilityErr = validateAdvertisedTransformationsV3(result.Plan, advertised)
 		}
@@ -3561,7 +3597,7 @@ func (h *PlaybackHandler) proxyTransportFeatureEligibilityV3(ctx context.Context
 	}
 	nodeURLs := enumerator.ProxyNodeURLs()
 	capable := make(map[string]struct{})
-	for nodeURL, entry := range h.pooledNodeCapabilitiesV3(ctx, nodeURLs) {
+	for nodeURL, entry := range h.pooledNodeCapabilitiesV3(ctx, nodeauth.TargetProxy, nodeURLs) {
 		if slices.Contains(entry.transportFeatures, feature) {
 			capable[nodeURL] = struct{}{}
 		}
@@ -3610,7 +3646,7 @@ func (h *PlaybackHandler) identityProxyEligibilityV3(ctx context.Context, result
 	}
 
 	capable := make(map[string]struct{})
-	for nodeURL, advertised := range h.pooledNodeTransformationsV3(ctx, enumerator.ProxyNodeURLs()) {
+	for nodeURL, advertised := range h.pooledNodeTransformationsV3(ctx, nodeauth.TargetProxy, enumerator.ProxyNodeURLs()) {
 		if validateAdvertisedTransformationsV3(result.Plan, advertised) == nil {
 			capable[nodeURL] = struct{}{}
 		}
@@ -4491,11 +4527,16 @@ func (h *PlaybackHandler) prepareRemoteTransportV3(r *http.Request, session *pla
 			hwAccel = playback.HWAccelNone
 		}
 	}
-	req := transcodenode.TranscodeStartRequest{SessionID: transportID, InputPath: file.FilePath, SourceVideoCodec: sourceMetadata.VideoCodec, SourceVideoProfile: sourceProfile, SourceVideoBitDepth: sourceBitDepth, SourceAudioChannels: result.SourceAudioChannels, SoftwareVideoDecode: sourceMetadata.SoftwareVideoDecode, ToneMapPolicy: result.ToneMapPolicy, ToneMapMode: result.ToneMapMode, ToneMapSourceKind: result.ToneMapSourceKind, ToneMapRecipeVersion: result.ToneMapRecipeVersion, ToneMapPreflightRequired: result.ToneMapPreflightRequired, ToneMapSourceRevision: result.ToneMapSourceRevision, VideoBitstreamFilter: videoBitstreamFilterForPlanV3(result.Plan), VideoSampleEntry: videoSampleEntryForPlanV3(result.Plan), VideoRange: copyHLSVideoRangeV3(file, result, videoCodec), SeekSeconds: timeline.seekSeconds, StreamOriginSeconds: timeline.streamOriginSeconds, CopySeekAnchorResolved: timeline.copySeekAnchorResolved, StartSegmentNumber: timeline.startSegmentNumber, TargetResolution: result.TargetResolution, TargetCodecVideo: videoCodec, TargetCodecAudio: result.TargetAudioCodec, TargetAudioChannels: result.TargetAudioChannels, TargetAudioBitrateKbps: result.TargetAudioBitrateKbps, TargetBitrateKbps: result.TargetBitrateKbps, SegmentDuration: playback.DefaultSegmentDuration, KeyframePlaylist: h.playbackConfig().KeyframePlaylist && videoCodec == "copy", HWAccel: hwAccel, AudioTrackIndex: plannedAudioTrackIndexV3(result, session.AudioTrackIndex), SubtitleTrackIndex: result.SubtitleTransportTrackIndex, SubtitleBurnIn: result.SubtitleBurnIn, SubtitleCodec: result.SubtitleCodec, SubtitleRendition: result.SubtitleRendition, SubtitleRenditionTracks: result.SubtitleRenditionTracks, SubtitleRenditionSource: result.SubtitleRenditionSource, TotalDuration: sourceMetadata.DurationSeconds, RequireReady: true}
+	req := transcodenode.TranscodeStartRequest{SessionID: transportID, PlaybackSessionID: session.ID, UserID: session.UserID, ProfileID: session.ProfileID, MediaFileID: file.ID, InputPath: file.FilePath, SourceVideoCodec: sourceMetadata.VideoCodec, SourceVideoProfile: sourceProfile, SourceVideoBitDepth: sourceBitDepth, SourceAudioChannels: result.SourceAudioChannels, SoftwareVideoDecode: sourceMetadata.SoftwareVideoDecode, ToneMapPolicy: result.ToneMapPolicy, ToneMapMode: result.ToneMapMode, ToneMapSourceKind: result.ToneMapSourceKind, ToneMapRecipeVersion: result.ToneMapRecipeVersion, ToneMapPreflightRequired: result.ToneMapPreflightRequired, ToneMapSourceRevision: result.ToneMapSourceRevision, VideoBitstreamFilter: videoBitstreamFilterForPlanV3(result.Plan), VideoSampleEntry: videoSampleEntryForPlanV3(result.Plan), VideoRange: copyHLSVideoRangeV3(file, result, videoCodec), SeekSeconds: timeline.seekSeconds, StreamOriginSeconds: timeline.streamOriginSeconds, CopySeekAnchorResolved: timeline.copySeekAnchorResolved, StartSegmentNumber: timeline.startSegmentNumber, TargetResolution: result.TargetResolution, TargetCodecVideo: videoCodec, TargetCodecAudio: result.TargetAudioCodec, TargetAudioChannels: result.TargetAudioChannels, TargetAudioBitrateKbps: result.TargetAudioBitrateKbps, TargetBitrateKbps: result.TargetBitrateKbps, SegmentDuration: playback.DefaultSegmentDuration, KeyframePlaylist: h.playbackConfig().KeyframePlaylist && videoCodec == "copy", HWAccel: hwAccel, AudioTrackIndex: plannedAudioTrackIndexV3(result, session.AudioTrackIndex), SubtitleTrackIndex: result.SubtitleTransportTrackIndex, SubtitleBurnIn: result.SubtitleBurnIn, SubtitleCodec: result.SubtitleCodec, SubtitleRendition: result.SubtitleRendition, SubtitleRenditionTracks: result.SubtitleRenditionTracks, SubtitleRenditionSource: result.SubtitleRenditionSource, TotalDuration: sourceMetadata.DurationSeconds, RequireReady: true}
 	req.ThrottleSeconds = playback.ConfiguredTranscodeThrottleSeconds(r.Context(), h.SettingsRepo)
 	if strings.EqualFold(videoCodec, "copy") {
 		req.CopyFMP4RecipeVersion = playback.CopyFMP4RecipeVersion
 	}
+	grant, err := nodesource.GrantFile(r.Context(), h.SourceGrants, node.ID, file)
+	if err != nil {
+		return preparedTransportV3{}, &transportErrorV3{reason: "transcode_node_unavailable", message: "The selected transcode node could not be granted the source.", retryable: !errors.Is(err, nodesource.ErrSourceGone), cause: err}
+	}
+	req.SourceGrant = grant
 	req.CopyVideoMPEGTS = playback.PlanCopiesVideoAsMPEGTSV3(*result.Plan)
 	req.CopyAudioCodec = copiedAudioCodecV3(result)
 	if playback.IsAudioToAACStereoDownmixV3(req.SourceAudioChannels, req.TargetCodecAudio, req.TargetAudioChannels) {

@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/nodepool"
 	"github.com/Silo-Server/silo-server/internal/streamtoken"
 	"github.com/Silo-Server/silo-server/internal/tonemap"
 )
@@ -198,6 +199,21 @@ func (e RecipeExecutor) NamesAnotherNode(card RecipeCard) bool {
 	nodeURL, cardURL := normalizeExecutorURL(e.NodeURL), normalizeExecutorURL(card.TranscodeNodeURL)
 	return e.NodeID > 0 && card.RoutingExecutionNodeID > 0 && card.RoutingExecutionNodeID != e.NodeID &&
 		nodeURL != "" && cardURL != "" && cardURL != nodeURL
+}
+
+// IssuedForAnotherRoute is NamesAnotherNode for the core stopping the node at
+// e.NodeURL, the URL it dialed. The core knows that URL exactly, so the card's
+// own node URL decides: a card naming a different node URL was written for
+// another start of the transport id (a move, or the next candidate a
+// Jellyfin-compatible start tried) and is kept, whatever row id it carries,
+// which a candidate's card may lack or carry stale. Only a card without a URL
+// falls back to the row ids, kept when both are known and differ.
+func (e RecipeExecutor) IssuedForAnotherRoute(card RecipeCard) bool {
+	stopped, issued := nodepool.CanonicalNodeURL(e.NodeURL), nodepool.CanonicalNodeURL(card.TranscodeNodeURL)
+	if stopped != "" && issued != "" {
+		return issued != stopped
+	}
+	return e.NodeID > 0 && card.RoutingExecutionNodeID > 0 && card.RoutingExecutionNodeID != e.NodeID
 }
 
 func normalizeExecutorURL(nodeURL string) string {

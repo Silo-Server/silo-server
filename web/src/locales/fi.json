@@ -3446,11 +3446,15 @@
   "signIn.withProvider": [
     {
       "type": 0,
-      "value": "Kirjaudu sisään palvelulla "
+      "value": "Kirjaudu sisään palvelun "
     },
     {
       "type": 1,
       "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": " kautta"
     }
   ],
   "subtitleSearch.hearingImpaired": [

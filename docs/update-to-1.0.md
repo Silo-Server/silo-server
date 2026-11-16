@@ -129,7 +129,8 @@ unavailable.
 2. Stop or drain the entire alpha deployment according to the release-specific instructions,
    including every API replica and remote playback/transcode node.
 3. Deploy the matching Silo 1.0 API, proxy, and worker components and run only the documented
-   database migration procedure. An incompatible node must remain unschedulable.
+   database migration procedure. An incompatible node must remain unschedulable. Remote
+   transcode nodes start with new settings; follow [Transcode nodes](#transcode-nodes).
 4. Keep operational checks on `GET /api/v1/health` and `GET /api/v1/ready` (and node
    `GET /api/v1/health`); these probes are retained unversioned and are not redirected or
    tombstoned.
@@ -151,6 +152,105 @@ the pre-1.0 release that retired `/api/v1` skips them here; otherwise run them n
    own release notes require a version compatible with Silo 1.0.
 10. Restart downloads and playback instead of attempting to resume an alpha-issued URL.
 11. Resend any pre-1.0 tokenized email action that still needs to be completed.
+
+## Transcode nodes
+
+Remote transcode nodes (`MODE=transcode`) no longer connect to PostgreSQL or Redis and no longer
+use the shared `SECRET_KEY`. Each node starts with two settings, `SILO_CORE_URL` and
+`SILO_NODE_KEY`, and takes everything else from the main server. The update is coordinated: a
+transcode node from an earlier release cannot work with an updated main server, and an updated
+node cannot work with an earlier main server. Proxy nodes keep their current settings.
+
+1. Stop every transcode node. Drain it first if it still runs playback (see
+   [node drain](architecture/node-drain.md)).
+2. Update the main server, every API replica, and every proxy node, and let the migrations finish.
+3. Issue each transcode node a key: on the nodes page of the administration UI, or with
+   `POST /api/v2/admin/nodes/{id}/key`. The key is shown once. Issuing again replaces it, and the
+   previous key stops working at once. A node still running with the replaced key shuts down at
+   once on SIGTERM instead of waiting for its sessions, which the main server can no longer reach,
+   so restarting it with the new key does not wait for the drain timeout.
+4. Update each transcode node and start it with:
+   - `MODE=transcode`;
+   - `SILO_CORE_URL`, the main server's URL as the node reaches it (the load-balanced address when
+     there are several API replicas);
+   - `SILO_NODE_KEY`, the key from step 3.
+
+   The node ignores `DATABASE_URL`, `REDIS_URL`, `SECRET_KEY`, `NODE_URL`, and `NODE_NAME`, with
+   one warning at startup, so they can stay in a shared `.env`. The shipped `docker-compose.yml`
+   still asks for a `SECRET_KEY` value; the node does not use it. A node on the bundled image no
+   longer needs the main server's PostgreSQL or Redis ports; turn node access off once no proxy
+   uses them.
+
+The network between the main server and its transcode nodes must allow both directions: the
+node calls the API at `SILO_CORE_URL`, and the API servers and proxies call the node at its
+registered URL. The node takes its FFmpeg path, directories, and input paths from the main
+server's answers, so the link must be a trusted network or `SILO_CORE_URL` must use `https://`; the
+node logs a warning at startup for a plain-HTTP URL that is not loopback. A reverse proxy in front
+of the API must pass `/api/internal/nodes/` with the path, query, body, and `Authorization` and
+`X-Silo-Source-Grant` headers unchanged (it may strip a path prefix that is part of
+`SILO_CORE_URL`). These requests are small JSON documents of at most 1 MiB that complete within 10
+seconds, except `/api/internal/nodes/sources`, which streams source media to nodes that read
+through the main server (below). The clocks of the
+nodes and the API servers must agree within 30 seconds: a node whose clock is further off has every
+request refused and reports its key as rejected, which a new key does not fix.
+
+Every API server, and every transcode node that reads its own library mount, must see each
+library file at the same path with the same size and modification time, as they already had to see
+the same paths. A node whose mount shows a different file refuses the job and logs both sides.
+
+### Source access
+
+Each transcode node has a source access setting, on the nodes page or as `source_access` in
+`PUT /api/v2/admin/nodes/{id}`:
+
+- `local`, the default, reads media from the node's own library mount, as above.
+- `core` reads media over HTTP from the API servers. The node needs no library mount, which suits
+  a GPU machine that cannot mount the library. Every byte the node reads passes through the API
+  servers, so they need that bandwidth on top of what they already serve: a node transcoding a
+  remux reads its full bitrate for every session. `silo_node_source_bytes_sent_total{node}` on
+  each API server shows what each node costs. The node applies a change to the jobs it starts
+  afterwards; running jobs keep their mode.
+
+A node host with `http_proxy` set needs nothing special for `core`: the node reads source bytes
+from the API servers without a proxy, and FFmpeg reads from the node's own loopback relay without
+one.
+
+Choose `core` when mounting the library on the node is impractical, and `local` when it is easy
+or the API servers' network is the bottleneck. A text subtitle burn-in that cannot be staged from
+the file's index does not run on a `core` node; the start moves to a `local` node or the main
+server.
+
+A reverse proxy in front of the API must not buffer `/api/internal/nodes/sources` responses and
+needs long read and send timeouts on that location: a response streams for as long as FFmpeg
+reads, and the node resumes a cut one. It must pass `Range` and `If-Match` through and must not
+compress the response. Each API server serves one node at most 512 of these streams at once and
+answers `429` past that, which the node retries. For nginx:
+
+```nginx
+location /api/internal/nodes/sources {
+    proxy_pass http://silo_api;
+    proxy_buffering off;
+    proxy_request_buffering off;
+    proxy_read_timeout 1h;
+    proxy_send_timeout 1h;
+    gzip off;
+}
+```
+
+A node that cannot reach the API servers for 30 seconds or more fails the reads in progress, and
+those jobs fail as they would on a lost network mount.
+
+Check afterwards:
+
+- [ ] Each transcode node shows as healthy on the nodes page and reports that it has a key.
+- [ ] A transcode node without a key, or running with a key that was replaced, takes no new work:
+  it stays listed, marked keyless or unhealthy, until it is issued a key or restarted with its
+  current one.
+- [ ] A transcode started on each node plays, seeks, and stops.
+- [ ] On a node set to `core`, a transcode plays without a library mount, and
+  `silo_node_source_bytes_sent_total` grows for that node.
+
+[Transcode nodes](architecture/transcode-nodes.md) describes the design.
 
 ## Integration checklist
 
@@ -184,6 +284,7 @@ individually, and a retired one does not answer `410`.
   report progress, stop playback, and sign out.
 - [ ] A new download completes and its offline manifest, artwork, subtitles, integrity checks, and
   playback work.
+- [ ] Every remote transcode node passes the checks under [Transcode nodes](#transcode-nodes).
 - [ ] Every external webhook or callback receives a fresh test event.
 - [ ] OAuth-backed integrations complete a new authorization flow.
 - [ ] Installed plugin pages and static assets load without `/api/v1` requests.

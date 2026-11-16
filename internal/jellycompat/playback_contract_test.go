@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/nodeauth/nodeauthtest"
 	"github.com/Silo-Server/silo-server/internal/playback"
 
 	"context"
@@ -235,7 +236,7 @@ func TestJellyfinAndroidTVRetriesCopyVideo(t *testing.T) {
 		DirectPlayProfiles:  []DirectPlayProfile{{Type: "Video", Container: "mkv,mp4,ts", VideoCodec: "h264,hevc", AudioCodec: "aac,ac3,eac3,flac"}},
 		TranscodingProfiles: []TranscodingProfile{{Type: "Video", Protocol: "hls", Container: "ts", VideoCodec: "hevc,h264", AudioCodec: "aac,ac3,eac3"}},
 	}
-	h := &PlaybackHandler{codec: NewResourceIDCodec(), JWTSecret: "secret"}
+	h := &PlaybackHandler{codec: NewResourceIDCodec(), JWTSecret: "secret", NodeKeys: nodeauthtest.SameKey("secret")}
 	stereoAAC := version
 	stereoAAC.CodecAudio = "aac"
 	stereoAAC.AudioTracks = []models.AudioTrack{{Codec: "aac", Channels: 2, Default: true}}

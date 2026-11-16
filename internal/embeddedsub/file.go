@@ -23,8 +23,10 @@ var (
 )
 
 // openFile returns on cancellation and closes any descriptor that arrives
-// after the caller has gone.
-func openFile(ctx context.Context, path string) (*os.File, os.FileInfo, error) {
+// after the caller has gone. path is a library path or a relayed input (a
+// transcode node reading through the core), which fspath.OpenReader opens
+// alike; ctx bounds a relayed reader's reads.
+func openFile(ctx context.Context, path string) (fspath.Reader, os.FileInfo, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, nil, err
 	}
@@ -61,7 +63,7 @@ func openFile(ctx context.Context, path string) (*os.File, os.FileInfo, error) {
 		return nil, nil, ctx.Err()
 	}
 	type opened struct {
-		file *os.File
+		file fspath.Reader
 		info os.FileInfo
 		err  error
 	}
@@ -69,7 +71,7 @@ func openFile(ctx context.Context, path string) (*os.File, os.FileInfo, error) {
 	go func() {
 		defer finish()
 		defer func() { <-sourceOpens }()
-		f, info, err := openFileSync(path)
+		f, info, err := openFileSync(ctx, path)
 		select {
 		case done <- opened{f, info, err}:
 		case <-ctx.Done():
@@ -92,11 +94,11 @@ func openFile(ctx context.Context, path string) (*os.File, os.FileInfo, error) {
 	}
 }
 
-// openFileSync opens path for reading and advises the kernel that reads are
-// random, so it doesn't read ahead around each one: CephFS otherwise turns
-// every small read into a fetch of the whole 4 MiB object.
-func openFileSync(path string) (*os.File, os.FileInfo, error) {
-	f, err := fspath.Open(path)
+// openFileSync opens path for reading and advises the kernel that reads of
+// a file are random, so it doesn't read ahead around each one: CephFS
+// otherwise turns every small read into a fetch of the whole 4 MiB object.
+func openFileSync(ctx context.Context, path string) (fspath.Reader, os.FileInfo, error) {
+	f, err := fspath.OpenReader(ctx, path)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -105,7 +107,9 @@ func openFileSync(path string) (*os.File, os.FileInfo, error) {
 		_ = f.Close()
 		return nil, nil, err
 	}
-	adviseRandom(f)
+	if file, ok := f.(*os.File); ok {
+		adviseRandom(file)
+	}
 	return f, info, nil
 }
 

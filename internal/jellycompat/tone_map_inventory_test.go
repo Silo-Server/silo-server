@@ -13,6 +13,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/nodeauth/nodeauthtest"
+	"github.com/Silo-Server/silo-server/internal/nodepool/nodepooltest"
+
 	"github.com/go-chi/chi/v5"
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
@@ -71,6 +74,7 @@ func TestCompatToneMapCapabilityInventoryExcludesWorkersForAPIOnlyExecution(t *t
 	t.Cleanup(remote.Close)
 
 	handler := &PlaybackHandler{
+		NodeKeys:    nodeauthtest.SameKey("secret"),
 		NodePlanner: compatToneMapInventoryPlanner{urls: []string{remote.URL}},
 		compatToneMapProbe: func(context.Context, string, string, string) (tonemap.Capabilities, error) {
 			return nil, nil
@@ -112,6 +116,7 @@ func TestCompatToneMapCapabilityInventoryFetchesNodesConcurrently(t *testing.T) 
 	defer second.Close()
 
 	handler := &PlaybackHandler{
+		NodeKeys:    nodeauthtest.SameKey("secret"),
 		NodePlanner: compatToneMapInventoryPlanner{urls: []string{first.URL, second.URL}},
 	}
 	requireCompatWorkerRouting(handler)
@@ -146,6 +151,7 @@ func TestCompatToneMapCapabilityInventoryHonorsSharedDeadline(t *testing.T) {
 	defer fast.Close()
 
 	handler := &PlaybackHandler{
+		NodeKeys:    nodeauthtest.SameKey("secret"),
 		NodePlanner: compatToneMapInventoryPlanner{urls: []string{slow.URL, fast.URL}},
 	}
 	requireCompatWorkerRouting(handler)
@@ -183,13 +189,14 @@ func TestResolveCompatHLSRouteRequiresAudioToAACV2ForSurroundDownmix(t *testing.
 	current := capabilityNode(playback.TransformationAudioToAACRecipeVersionV3)
 	defer current.Close()
 
-	pool := nodepool.NewTranscodePool()
+	pool := nodepooltest.NewTranscodePool()
 	pool.SetNodes([]*nodepool.Node{
 		{ID: 1, URL: legacy.URL, Enabled: true, Healthy: true},
 		{ID: 2, URL: current.URL, Enabled: true, Healthy: true, ActiveJobs: 1},
 	})
 	handler := &PlaybackHandler{
 		JWTSecret:   "secret",
+		NodeKeys:    nodeauthtest.SameKey("secret"),
 		NodePlanner: nodepool.NewPlanner(nodepool.NewProxyPool(), pool),
 	}
 	policy := config.DefaultPlaybackRoutingPolicy()
@@ -231,7 +238,8 @@ func TestResolveCompatIdentityRouteRequiresAudioToAACV2ForSurroundDownmix(t *tes
 	})
 	handler := &PlaybackHandler{
 		JWTSecret:   "secret",
-		NodePlanner: nodepool.NewPlanner(proxies, nodepool.NewTranscodePool()),
+		NodeKeys:    nodeauthtest.SameKey("secret"),
+		NodePlanner: nodepool.NewPlanner(proxies, nodepooltest.NewTranscodePool()),
 	}
 	policy := config.DefaultPlaybackRoutingPolicy()
 	policy.RemuxExecution = config.PlaybackExecutionWorkerOnly
@@ -270,12 +278,13 @@ func TestResolveCompatHLSRouteFallsBackToSoftwareCapacity(t *testing.T) {
 	defer software.Close()
 
 	limit := 1
-	transcodes := nodepool.NewTranscodePool()
+	transcodes := nodepooltest.NewTranscodePool()
 	transcodes.SetNodes([]*nodepool.Node{
 		{URL: hardware.URL, Enabled: true, Healthy: true, ActiveJobs: 1, MaxJobs: &limit},
 		{URL: software.URL, Enabled: true, Healthy: true},
 	})
 	handler := &PlaybackHandler{
+		NodeKeys:    nodeauthtest.SameKey("secret"),
 		NodePlanner: nodepool.NewPlanner(nodepool.NewProxyPool(), transcodes),
 		SettingsRepo: stubSettingsReader{values: map[string]string{
 			config.PlaybackTranscodeHardwareToneMapSettingKey: "true",

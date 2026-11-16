@@ -9,6 +9,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+
+	"github.com/Silo-Server/silo-server/internal/nodesource/nodesourcetest"
 )
 
 // Excerpts of jellyfin-ffmpeg 7.1.4 listings.
@@ -55,6 +57,20 @@ chromaprint muxer AVOptions:
 Error opening input file pipe:0.
 Error opening input files: No such file or directory
 `
+	// relayedConcatCheckFixture is how FFmpeg 6.1 fails the relayed concat
+	// check: it parsed the list and could not reach the URL.
+	relayedConcatCheckFixture = `[tcp @ 0x569d5e867e00] Connection to tcp://127.0.0.1:9 failed: Connection refused
+[concat @ 0x569d5e853f00] Impossible to open 'http://127.0.0.1:9/src/00000000000000000000000000000000'
+[in#0 @ 0x569d5e853e00] Error opening input: Connection refused
+`
+	// relayedConcatNoHTTPFixture is how FFmpeg 6.1 fails the relayed concat
+	// check for a protocol it was built without.
+	relayedConcatNoHTTPFixture = `[concat @ 0x5b7a51208f00] Impossible to open 'http://127.0.0.1:9/src/00000000000000000000000000000000'
+[in#0 @ 0x5b7a51208e00] Error opening input: Protocol not found
+[in#0 @ 0x5b7a51208e00] Did you mean file:pipe:0?
+Error opening input file pipe:0.
+Error opening input files: Protocol not found
+`
 	// concatUnknownKeywordFixture is how an ffmpeg that lacks a list
 	// directive fails it.
 	concatUnknownKeywordFixture = `[concat @ 0x7a82810000] Line 3: unknown keyword 'file_packet_meta'
@@ -71,6 +87,8 @@ type fakeListings struct {
 	muxers  string
 	help    string
 	concat  string
+	// relayedConcat answers the relayed concat check.
+	relayedConcat string
 	// concatList is the list the concat check wrote to stdin.
 	concatList []byte
 	err        error
@@ -96,12 +114,15 @@ func (f *fakeListings) list(_ context.Context, _ string, stdin []byte, args ...s
 	case "-hide_banner -nostdin -loglevel error -skip_frame:v nokey -protocol_whitelist file,pipe -f concat -safe 0 -i pipe:0 -f null -":
 		f.concatList = stdin
 		return []byte(f.concat), errors.New("exit status 254")
+	case "-hide_banner -nostdin -loglevel error -skip_frame:v nokey -protocol_whitelist http,tcp,pipe -format_whitelist concat -f concat -safe 0 -i pipe:0 -f null -":
+		return []byte(f.relayedConcat), errors.New("exit status 254")
 	}
 	return nil, errors.New("unexpected listing " + strings.Join(args, " "))
 }
 
 func newFakeListings() *fakeListings {
-	return &fakeListings{filters: filtersFixture, muxers: muxersFixture, help: chromaprintHelpFixture, concat: concatCheckFixture}
+	return &fakeListings{filters: filtersFixture, muxers: muxersFixture, help: chromaprintHelpFixture, concat: concatCheckFixture,
+		relayedConcat: relayedConcatCheckFixture}
 }
 
 // useListings routes capability loads to f with an empty cache.
@@ -250,8 +271,8 @@ func TestLoadCapabilitiesCachesPerBinaryIdentity(t *testing.T) {
 			t.Fatal("cached inventory lost chromaprint")
 		}
 	}
-	if got := f.calls.Load(); got != 4 {
-		t.Fatalf("%d listing commands after three loads, want one inventory (4 commands)", got)
+	if got := f.calls.Load(); got != 5 {
+		t.Fatalf("%d listing commands after three loads, want one inventory (5 commands, the relayed concat check included)", got)
 	}
 
 	// Replacing the binary in place changes its identity.
@@ -261,7 +282,7 @@ func TestLoadCapabilitiesCachesPerBinaryIdentity(t *testing.T) {
 	if _, err := LoadCapabilities(context.Background(), binary); err != nil {
 		t.Fatal(err)
 	}
-	if got := f.calls.Load(); got != 8 {
+	if got := f.calls.Load(); got != 10 {
 		t.Fatalf("%d listing commands after the binary changed, want a fresh inventory", got)
 	}
 
@@ -269,7 +290,7 @@ func TestLoadCapabilitiesCachesPerBinaryIdentity(t *testing.T) {
 	if _, err := LoadCapabilities(context.Background(), binary); err != nil {
 		t.Fatal(err)
 	}
-	if got := f.calls.Load(); got != 12 {
+	if got := f.calls.Load(); got != 15 {
 		t.Fatalf("%d listing commands after InvalidateCapabilities, want a fresh inventory", got)
 	}
 }
@@ -329,8 +350,8 @@ func TestLoadCapabilitiesSharesOneLoadAcrossConcurrentCallers(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if got := f.calls.Load(); got != 4 {
-		t.Fatalf("%d listing commands for concurrent callers, want one inventory (4 commands)", got)
+	if got := f.calls.Load(); got != 5 {
+		t.Fatalf("%d listing commands for concurrent callers, want one inventory (5 commands, the relayed concat check included)", got)
 	}
 }
 
@@ -363,4 +384,68 @@ func TestLoadCapabilitiesChecksConcatSamples(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestRelayedSamplesNeedTheRelayedConcatForm(t *testing.T) {
+	relayedTestInput := nodesourcetest.NewCore(t, writeTestFile(t, "movie.mkv", "movie")).Open(t).Input()
+	relayed := Request{Input: relayedTestInput, Samples: &Samples{Seconds: []float64{1}}, Stats: &StatsOutput{}}
+	local := relayed
+	local.Input = "/library/movie.mkv"
+
+	f := newFakeListings()
+	useListings(t, f)
+	caps, err := LoadCapabilities(context.Background(), fakeBinary(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := caps.Require(relayed); err != nil {
+		t.Fatalf("relayed samples with the relayed form: %v", err)
+	}
+
+	f = newFakeListings()
+	f.relayedConcat = concatUnknownKeywordFixture
+	useListings(t, f)
+	caps, err = LoadCapabilities(context.Background(), fakeBinary(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := caps.Require(local); err != nil {
+		t.Fatalf("local samples: %v", err)
+	}
+	err = caps.Require(relayed)
+	if !errors.Is(err, ErrUnsupported) || ReasonUnsupported.Permanent() {
+		t.Fatalf("relayed samples without the relayed form: %v, want a non-permanent unsupported refusal", err)
+	}
+
+	f = newFakeListings()
+	f.relayedConcat = relayedConcatNoHTTPFixture
+	useListings(t, f)
+	caps, err = LoadCapabilities(context.Background(), fakeBinary(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := caps.Require(relayed); !errors.Is(err, ErrUnsupported) {
+		t.Fatalf("relayed samples on an ffmpeg without http: %v, want an unsupported refusal", err)
+	}
+
+	list, err := buildConcatList(relayedTestInput, []float64{1}, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(list), "file '"+relayedTestInput+"'\noption protocol_whitelist http,tcp\noption http_proxy direct\noption format_whitelist ") ||
+		strings.Contains(string(list), "file:") {
+		t.Fatalf("relayed list:\n%s", list)
+	}
+	if got := strings.Join(listInputArgs(relayedTestInput), " "); !strings.Contains(got, "-protocol_whitelist http,tcp,pipe -format_whitelist concat") {
+		t.Fatalf("relayed list input args %q", got)
+	}
+}
+
+func writeTestFile(t *testing.T, name, content string) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), name)
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return path
 }

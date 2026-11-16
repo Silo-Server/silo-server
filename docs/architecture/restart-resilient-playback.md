@@ -11,9 +11,12 @@ reconstruction + a server-side session-deny marker for revocation).
 > session expiry and stream abort, and by admin stop and terminate. The
 > API checks it before it serves or reconstructs a session (the
 > `loadTranscodeServeSession` and `LoadOrReconstructSession` callers, which
-> cover the stream and subtitle handlers), and the proxy and the transcode node
-> check it on every token-verified serve. A denied session answers
-> `410 playback_session_ended` and is never reconstructed. When Redis is
+> cover the stream and subtitle handlers), and the proxy checks it on every
+> token-verified serve. A transcode node reads neither Redis nor tokens: every
+> relay that signs a request to it checks the marker first, and the API's
+> resolve checks it before the node rebuilds a lost session or serves a
+> progressive remux. A denied session answers `410 playback_session_ended`
+> and is never reconstructed. When Redis is
 > unavailable the check fails open with a rate-limited warning; lookups are
 > cached in process for about two seconds.
 
@@ -145,9 +148,10 @@ the §8 design note.)
 | G14 | Cleanup correctness (never wipe a live session's segment dir) |
 
 A note on G9 (observability): the *live* "who is streaming now" view does **not**
-depend on the descriptor strategy. Every offload node calls the Redis-backed
-node-session tracker (`internal/nodesessions/tracker.go`) on every serve, tied to
-actual byte-serving (so a non-cooperative client or replayed token still shows
+depend on the descriptor strategy. A proxy calls the Redis-backed node-session
+tracker (`internal/nodesessions/tracker.go`) on every serve, and a transcode node
+keeps the same records in memory and reports them to the API every second
+([transcode nodes](transcode-nodes.md#reports)), tied to actual byte-serving (so a non-cooperative client or replayed token still shows
 up) and surviving a central restart. G9 scores only the *durable, identity-rich*
 (who + what + recipe) slice on top of that.
 
@@ -262,10 +266,12 @@ a periodic re-check of every stream. Every event that ends a session — a user
 stop, session expiry, a stream abort, and an admin stop or terminate
 — writes `silo:streamauth:<session_id> = deny` with a TTL equal to the stream
 token lifetime (`playback.MaxTokenTTL`, 24h). The API reads it before it serves
-or reconstructs a session, and the offload node reads it (a node-local Redis
-GET, sub-ms, cached in process for about two seconds) before serving any bytes,
-answering `410` with no media bytes on a hit. The token routes on the proxy and
-transcode node send a plain-text body; the API and the proxy's media-grant
+or reconstructs a session, and a proxy reads it (a Redis GET, sub-ms, cached in
+process for about two seconds) before serving any bytes, answering `410` with no
+media bytes on a hit. A transcode node reads no Redis: every relay that signs a
+request to it checks the marker first, and the API's resolve checks it before
+the node rebuilds a session ([transcode nodes](transcode-nodes.md#relays)). The
+token routes on the proxy and transcode node send a plain-text body; the API and the proxy's media-grant
 routes send JSON with the `playback_session_ended` code. Enforcement is
 **byte-withholding, not client cooperation** — a revoked client that ignores the
 410 keeps hitting a wall.
@@ -355,12 +361,15 @@ package.
   the stream and subtitle handlers (`HandleStream`, `handleSubtitle`,
   `HandleSubtitleFonts`). A hit is `410 playback_session_ended`, and no
   reconstruct is attempted.
-- The node guards: `internal/proxy/server.go` and
-  `internal/transcodenode/server.go` consult the same marker on every
-  token-verified serve and answer a plain-text `410` with no media bytes.
+- The node guards: `internal/proxy/server.go` consults the same marker on every
+  token-verified serve and answers a plain-text `410` with no media bytes. A
+  transcode node reads no marker: every relay that signs a request to it checks
+  the marker first, and the API's resolve checks it before the node rebuilds a
+  lost session or serves a progressive remux (`internal/nodecontrol`).
 - `nodesessions.SessionInfo` carries the numeric ownership keys
-  (`auth_user_id`/`profile_id`/`media_file_id`), populated by the node from the
-  verified token, to enrich the live admin "active streams" view (who/what, not
+  (`auth_user_id`/`profile_id`/`media_file_id`), populated by the proxy from the
+  verified token and by a transcode node from its start request or the API's
+  resolution, to enrich the live admin "active streams" view (who/what, not
   just session id) — see §10 monitoring.
 - A single integrated box still stops through the producer-kill + session
   removal; the marker additionally stops a still-valid token from reconstructing
@@ -395,9 +404,10 @@ evolution:
   next-play + the ≤24h token; only the session-scoped events write a marker.
 - **Dedicated transcode-node restart (P-3 / tr-10). Fixed for both paths.**
   *Native:* the proxy forwards the verified stream token to the transcode node
-  (`X-Silo-Stream-Token`); on a manifest/segment miss the node re-verifies the
-  token, decodes the recipe, and self-reconstructs ffmpeg seeked to the requested
-  segment — single-flighted and concurrency-capped exactly like the integrated
+  (`X-Silo-Stream-Token`); on a manifest/segment miss the node passes it unread
+  to the API's resolve, which verifies it and answers the recipe and a source
+  grant, and the node self-reconstructs ffmpeg seeked to the requested segment —
+  single-flighted and concurrency-capped exactly like the integrated
   reconstruct. *Jellycompat:* the node-hop token is server-minted and *could* carry the
   recipe like native, but it deliberately does not — the recipe is mutated in
   place under a stable session id (a Jellyfin audio/subtitle switch can arrive as
@@ -406,9 +416,8 @@ evolution:
   refresh a stale token, so a token *snapshot* could reconstruct a stale
   rendition. Central instead writes the recipe to a shared Redis recipe store
   (`internal/noderecipe`) keyed by upstream session id and overwrites it on every
-  switch, and the node (which cannot reach Postgres) reads the *current* recipe on
-  the reconstruct miss — over the same Redis the session tracker and the deny
-  marker already use, so no central URL is needed. A node restart does not wipe
+  switch, and the API's resolve answers the node with the *current* recipe on the
+  reconstruct miss; the node holds no Redis or database. A node restart does not wipe
   segment dirs: the startup and hourly sweeps remove only dirs older than
   `MaxTokenTTL` that no live job owns, so reconstruct serves any surviving
   segments and re-transcodes from the requested segment otherwise. See §10 for the
@@ -480,11 +489,10 @@ evolution:
   peer-forward endpoint, and failover.
 - **Node-side reconstruct (P-3). Done** for native (token-forwarded) and
   jellycompat (Redis recipe handoff via `internal/noderecipe`: central writes the
-  recipe at remote-transcode start, the node reads it on a reconstruct miss).
-  Precondition: central and the nodes share the same Redis (already required for
-  the session tracker and the deny marker). Residual: the recipe store is
-  consulted only for a jellycompat token, so a node restart still depends on the recipe key
-  surviving (24h TTL, ≥ token lifetime).
+  recipe at remote-transcode start, and the API's resolve answers the node with
+  it on a reconstruct miss; the node holds no Redis). Residual: a rebuild that needs
+  the stored recipe (jellycompat, a header-authenticated session, a moved
+  transport) depends on the recipe key surviving (24h TTL, ≥ token lifetime).
   - *Why a server-side store and not the token here (the real rationale).* It is
     tempting to delete `internal/noderecipe` and let the jellycompat node-hop
     token carry the recipe like native — the token is server-minted and opaque to
@@ -645,8 +653,11 @@ sequenceDiagram
     end
 ```
 
-The node copies `uid`/`mfid` from the verified token into the Redis tracker —
+The proxy copies `uid`/`mfid` from the verified token into the Redis tracker —
 that is what enriches the live admin "active streams" view (who/what per node).
+The transcode node holds no Redis: it keeps its sessions in memory, filed under
+the playback identity its start request named, and reports them to the API
+every second, which stores them under `silo:sessions:n<id>:`.
 
 ### 12.5 Restart → reconstruct (native transcode)
 
@@ -668,11 +679,13 @@ sequenceDiagram
 - multi-node restart: the integrated front-end reconstructs only the `Session`
   (to learn `tnode`) and re-proxies; the transcode node keeps serving. If the
   transcode *node* itself reboots, the proxy forwards the stream token
-  (`X-Silo-Stream-Token`) and the node self-reconstructs ffmpeg seeked to the
-  requested segment (native path, P-3). A jellycompat session on a rebooted node
-  reconstructs too: the node fetches the recipe central wrote to the shared Redis
-  recipe store (`internal/noderecipe`) at transcode start, since the Jellyfin
-  client's token cannot carry it. If the node dies and stays down while the API
+  (`X-Silo-Stream-Token`); the node passes it unread to the API's resolve
+  (`POST /api/internal/nodes/self/resolve`), which verifies it, checks the deny
+  markers, picks the recipe and grants the source, and the node respawns ffmpeg
+  seeked to the requested segment (native path, P-3). A jellycompat session on a
+  rebooted node reconstructs too: resolve answers with the recipe central wrote
+  to the recipe store (`internal/noderecipe`) at transcode start, since the
+  Jellyfin client's token cannot carry it. If the node dies and stays down while the API
   relays a native session, the API moves the transcode to another executor
   instead (see
   [Transcode node lost under the API relay](#transcode-node-lost-under-the-api-relay)).
@@ -684,7 +697,8 @@ sequenceDiagram
 
 > **Status: implemented.** Both branches ship: the session-ending event writes
 > the marker and tears down the realtime lane and the producer, and every serve
-> path — API, proxy, and transcode node — checks the marker. User stop, session
+> path checks the marker: the API and proxy themselves, a transcode node through
+> the relay that forwards to it and the API's resolve when it rebuilds. User stop, session
 > expiry, and stream abort write it on the same path as an admin kill.
 
 ```mermaid
@@ -698,7 +712,7 @@ flowchart TD
         K[StreamDeny.Deny] --> WD[SET silo:streamauth:session_id = deny<br/>TTL = MaxTokenTTL 24h]
         K --> WS[realtime WS stop + producer teardown]
     end
-    subgraph Node["API, proxy, transcode node — every serve"]
+    subgraph Node["API, proxy, relay to a transcode node, resolve — every serve"]
         G[verifyToken OK] --> L{GET silo:streamauth:session_id}
         L -- present deny --> F[410, no media bytes]
         L -- absent / redis-err --> SV[serve bytes  fail-open]
@@ -826,7 +840,9 @@ working (`internal/jellycompat/transcode_failover.go`):
   refused, unroutable, dial timeout, failed name lookup; through a proxy also a
   hung node, `nodepool.ErrNodeNotAnswering` from `transcodeproxy.DoNode`). A
   node that answers, even with an error, is alive; its answer is relayed and
-  nothing moves.
+  nothing moves, except that a `401` is answered as the node being
+  unavailable. A node the relay cannot sign for moves nothing either (see
+  **Node refusals** below).
 - **Move.** Central resolves a new executor with the session's frozen recipe
   requirements (the tone-map mode it runs, audio and HEVC capabilities; this
   process only when it can run that tone-map mode and audio downmix), the dead node and any node
@@ -870,15 +886,15 @@ working (`internal/jellycompat/transcode_failover.go`):
   background (a stop with `fence=0`), in case it is only unreachable from the
   relay (for example, a split between the proxy and the node). A release leaves
   the transport id rebuildable on that node, so a later move back to it works.
-  The node leaves the record, which now
-  names the new node (`noderecipe.Store.DeleteUnlessMoved`). A node that cannot
-  tell (an older binary, or a card without node row ids) deletes it anyway; for
-  that case central writes the session's current recipe again after the stop,
-  and the proxy keeps polling through a missing record until its deadline. The
-  same rewrite covers a release that lands after a later move put the
-  transport back on the released node: the release ends the rebuilt job and
-  the node deletes the record, and the rewrite lets the next request rebuild
-  it there.
+  The record naming the new node is written at commit, before this release
+  starts. A release deletes no record, and a node never touches the recipe
+  store, so that record stays. A release that lands after a later move put the
+  transport back on the released node ends the rebuilt job there; the record
+  still names that node, so the next request rebuilds it.
+- **Card binding.** The record binds the node it names by its row id, the one
+  the core's resolve checks. A start writes the id of the node it started on,
+  not the play's routing assignment, which is recorded only after the start
+  succeeds and can still name the previous executor or none.
 
 Limits: the moved route lives in the owning API process, like any compat
 session; a proxy-egress transcode whose proxy has no other usable transcode node
@@ -1030,9 +1046,14 @@ API egress) and cannot reach the session's node, it moves the transcode itself:
   `internal/noderecipe` card stored under the transport id for tokenless
   (header-authenticated) sessions. The API's own session recipe never stands
   in for a token here; a move of a header-authenticated session points the
-  session recipe at the new executor at once and writes the node recipe after
-  the old node's stop returns (see **Commit and accounting**); a move to this
-  API process deletes the node recipe instead. With
+  session recipe at the new executor at once. Every move to another node,
+  whether or not the session's URLs carry a token, writes the node recipe
+  naming the new node as soon as the move commits, before the old node is
+  released (see **Commit and accounting**): the client keeps presenting the token minted for the node it
+  left, and the core's resolve (`nodecontrol.Server.HandleResolve`) binds a
+  token to that node only, so the stored card is what lets the new node
+  rebuild the transport after its own restart. A move to this API process
+  deletes the node recipe instead. With
   neither, nothing moves and the relay answers `502` as before. A stream-copy recipe answers to the persisted
   copy-safety verdict first, like any other revival.
 - **Executor.** `noderouting.Resolve` with the current policy, restricted to
@@ -1066,30 +1087,32 @@ API egress) and cannot reach the session's node, it moves the transcode itself:
   (or is released for a local move), and the dead node's job is asked to stop
   in case it is only unreachable from here; a failed stop is logged as a
   warning, and the node's idle reaper ends a job that still runs. A stored node
-  recipe follows the transport to its new node, written after that stop
-  because a node deletes a transport's stored recipe when it stops it. A node
-  keeps a card whose `stream_nodes` row id and route URL both differ from its
-  own (`playback.RecipeExecutor.NamesAnotherNode`), reading and deleting in one
-  Redis transaction (`noderecipe.Store.DeleteUnlessMoved`). "Its own" is the
-  identity the node had when it registered the job, since its registration
-  can change while the job runs. A hung node that
-  resumes and runs the stop late, or is force-reloaded while it still holds
-  the job, therefore leaves the new node's card in place. A card it cannot
-  tell apart from its own, such as one without a row id or one written before
-  its URL was edited, is deleted as before, so a stop does not leave its own
-  stopped transport reconstructable. The cost is that a moved transport can
-  still lose its card to such a late stop when its card carries no row id (a
-  session that predates node routing) or when the old node never resolved its
-  registration. A move never lands on the dead node's row,
-  which an operator may have repointed at a replacement process. Nodes built
-  before that check delete whatever card they find, so a candidate's rollback
-  still writes the card back after its stop. A user or admin stop on another
+  recipe follows the transport to its new node, written at commit, before that
+  stop starts, so a session whose URLs carry a token can rebuild on the new
+  node while a hung old node delays the stop. A release deletes no card, and a force reload of the old node revokes only the
+  cards bound to that node (by its row id, or by its registered URL for a card
+  without one), so the new node's card stays. A move never lands on the dead node's row, which an operator may have
+  repointed at a replacement process. A candidate that refuses or fails the
+  start is released in the background and the card is left as it was. A user
+  or admin stop on another
   API replica does not touch this replica's copy of the session, so these
   writes also read the session's stream deny marker, uncached, before and
   after writing. That stop sets the marker before it deletes the card: a write
   that finds the marker skips, and one that finds it only afterwards deletes
   the card itself, because the stop's delete already ran. A marker that cannot
-  be read skips a write but never undoes one.
+  be read skips a write but never undoes one. The move also reads the session's
+  and the transport's deny markers just before it commits and again before it
+  serves from the new executor: a stop that lands while the new node starts
+  makes the move stop what it started and answer `410`.
+- **Stops, deny checks and refusals.** The API's remote stop deletes the
+  transport's node recipe before it tells the node, unless the card names
+  another node URL; a release (`ReleaseRemoteTranscode`, used by moves) deletes
+  nothing, and a node deletes nothing itself. Every relay that signs a request
+  to a transcode node checks the deny marker first. A node's `401`, and a node
+  the relay cannot sign for, are answered as the node being unavailable and
+  move nothing. [Transcode nodes](transcode-nodes.md) describes all three:
+  [recipe lifecycle](transcode-nodes.md#recipe-lifecycle) and
+  [relays](transcode-nodes.md#relays).
 - **Pacing.** Moves are single-flighted per session
   (`TranscodeManager.RehomeTranscode`), so every request that finds the node
   dead waits on one move, and each remote start holds a `reconstructSem` slot

@@ -22,6 +22,44 @@ func NewAdminConfigurationStore(pool *pgxpool.Pool) *AdminConfigurationStore {
 
 var ErrNodeConfigurationConflict = errors.New("node URL is already configured differently")
 
+// ErrTranscodeNodeURLTaken refuses a transcode node at an address another
+// transcode node already has, spelled differently ("http://gpu" and
+// "http://GPU:80/"). The credential registry finds nodes by that canonical
+// address, so two of them there would leave one unreachable by its key.
+var ErrTranscodeNodeURLTaken = errors.New("another transcode node already has this URL")
+
+// transcodeURLLock serializes the writes that give a transcode node a URL, so
+// two of them cannot both pass the canonical-URL check before either commits.
+// Taken before any row lock, so it never waits while holding one.
+const transcodeURLLock = "nodepool.stream_nodes.transcode_url"
+
+func lockTranscodeURLs(ctx context.Context, tx pgx.Tx) error {
+	_, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`, transcodeURLLock)
+	return err
+}
+
+// checkTranscodeURLFree returns ErrTranscodeNodeURLTaken when a transcode row
+// other than exceptID has nodeURL's canonical form under another spelling. A
+// row with the identical URL is left to the unique constraint, whose
+// violation the create path resolves as a retry.
+func checkTranscodeURLFree(ctx context.Context, tx pgx.Tx, exceptID int, nodeURL string) error {
+	rows, err := tx.Query(ctx, `SELECT url FROM stream_nodes WHERE type = $1 AND id <> $2`, NodeTypeTranscode, exceptID)
+	if err != nil {
+		return err
+	}
+	urls, err := pgx.CollectRows(rows, pgx.RowTo[string])
+	if err != nil {
+		return err
+	}
+	canonical := CanonicalNodeURL(nodeURL)
+	for _, other := range urls {
+		if other != nodeURL && CanonicalNodeURL(other) == canonical {
+			return ErrTranscodeNodeURLTaken
+		}
+	}
+	return nil
+}
+
 // Snapshot pairs node configurations and revisions in one database snapshot.
 // The generation includes deletions, even when the resulting list is empty.
 func (s *AdminConfigurationStore) Snapshot(ctx context.Context) ([]*Node, int64, error) {
@@ -82,6 +120,14 @@ func (s *AdminConfigurationStore) Create(ctx context.Context, input CreateNodeIn
 		return nil, err
 	}
 	defer func() { _ = tx.Rollback(context.WithoutCancel(ctx)) }()
+	if input.Type == NodeTypeTranscode {
+		if err = lockTranscodeURLs(ctx, tx); err != nil {
+			return nil, err
+		}
+		if err = checkTranscodeURLFree(ctx, tx, 0, input.URL); err != nil {
+			return nil, err
+		}
+	}
 	savepoint, err := tx.Begin(ctx)
 	if err != nil {
 		return nil, err
@@ -129,7 +175,8 @@ func matchesCreation(node *Node, input CreateNodeInput) bool {
 		reflect.DeepEqual(node.MaxJobs, normalizeCap(input.MaxJobs)) &&
 		reflect.DeepEqual(node.MaxBandwidthKbps, normalizeCap(input.MaxBandwidthKbps)) &&
 		node.HWAccelOverride == nil && node.HWDeviceOverride == nil &&
-		node.DownloadArtifactDirOverride == nil && node.DownloadArtifactMaxBytesOverride == nil
+		node.DownloadArtifactDirOverride == nil && node.DownloadArtifactMaxBytesOverride == nil &&
+		node.SourceAccess == sourceAccessOrDefault(input.SourceAccess)
 }
 
 // Update evaluates the original-version guard while holding the row lock. The
@@ -145,6 +192,13 @@ func (s *AdminConfigurationStore) Update(ctx context.Context, id int, input Upda
 		return nil, nil, err
 	}
 	defer func() { _ = tx.Rollback(context.WithoutCancel(ctx)) }()
+	if input.URL != nil {
+		// Before the row lock: the type is not known yet, but the lock must
+		// come first wherever it is taken.
+		if err = lockTranscodeURLs(ctx, tx); err != nil {
+			return nil, nil, err
+		}
+	}
 	revision, err := readConfigurationRevision(ctx, tx, id)
 	if err != nil {
 		return nil, nil, err
@@ -158,6 +212,16 @@ func (s *AdminConfigurationStore) Update(ctx context.Context, id int, input Upda
 		return nil, nil, err
 	}
 	previous.AdminRevision = revision
+	if err = input.ValidateFor(previous); err != nil {
+		return nil, nil, err
+	}
+	// Only a change of address is checked, so a row that already shared its
+	// address before this check existed can still be edited otherwise.
+	if input.URL != nil && previous.Type == NodeTypeTranscode && CanonicalNodeURL(*input.URL) != CanonicalNodeURL(previous.URL) {
+		if err = checkTranscodeURLFree(ctx, tx, id, *input.URL); err != nil {
+			return nil, nil, err
+		}
+	}
 	node, err = repo.Update(ctx, id, input)
 	if err != nil {
 		return nil, nil, err

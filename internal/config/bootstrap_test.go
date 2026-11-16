@@ -20,7 +20,10 @@ func TestLoadDatabaseURLNeedsNoSecretKey(t *testing.T) {
 	}
 }
 
-func TestLoadBootstrapNodeModesNeedNodeURL(t *testing.T) {
+// A proxy needs NODE_URL; a transcode node never loads this bootstrap (it
+// starts from SILO_CORE_URL and SILO_NODE_KEY), so nothing here asks it of
+// one.
+func TestLoadBootstrapProxyNeedsNodeURL(t *testing.T) {
 	t.Setenv("DATABASE_URL", "postgres://example.invalid/silo")
 	t.Setenv("SECRET_KEY", "0123456789abcdef0123456789abcdef")
 	for _, tc := range []struct {
@@ -28,8 +31,8 @@ func TestLoadBootstrapNodeModesNeedNodeURL(t *testing.T) {
 		ok            bool
 	}{
 		{"proxy", "", false},
-		{"transcode", "", false},
-		{"transcode", "http://node-1:8080", true},
+		{"proxy", "http://proxy-1:8080", true},
+		{"transcode", "", true},
 		{"integrated", "", true},
 		{"api", "", true},
 	} {

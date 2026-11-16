@@ -38439,7 +38439,7 @@
   "web.admin.historyImport.plexLimits.outro": [
     {
       "type": 0,
-      "value": "若要匯入這些項目，每個人需在「設定 → 觀看記錄匯入」中從自己的 Plex 帳號匯入。"
+      "value": "若要匯入這些項目，每個人需在「設定 → 觀看紀錄匯入」中從自己的 Plex 帳號匯入。"
     }
   ],
   "web.admin.historyImport.plexLimits.resumePoints": [

@@ -41,6 +41,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/netaccess"
 	"github.com/Silo-Server/silo-server/internal/nodepool"
 	"github.com/Silo-Server/silo-server/internal/noderouting"
+	"github.com/Silo-Server/silo-server/internal/nodesource"
 	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/streamlocation"
 	"github.com/Silo-Server/silo-server/internal/streamtoken"
@@ -339,19 +340,24 @@ type PlaybackWatchStopConfirmer interface {
 
 // PlaybackHandler serves Jellyfin playback negotiation endpoints.
 type PlaybackHandler struct {
-	cfg                     *config.Config
-	content                 ContentService
-	codec                   *ResourceIDCodec
-	deviceProfiles          *DeviceProfileStore
-	playbackStore           CompatPlaybackStore
-	sessionMgr              SessionManagerInterface
-	fileResolver            FilePathResolver
-	downloads               DownloadServer       // nil refuses /Items/{id}/Download
-	accessFilter            AccessFilterResolver // the viewer's scope for downloads
-	storeProvider           userstore.UserStoreProvider
-	ScopeResolver           ScopeResolver
-	NodePlanner             nodepool.SessionPlanner
-	JWTSecret               string
+	cfg            *config.Config
+	content        ContentService
+	codec          *ResourceIDCodec
+	deviceProfiles *DeviceProfileStore
+	playbackStore  CompatPlaybackStore
+	sessionMgr     SessionManagerInterface
+	fileResolver   FilePathResolver
+	downloads      DownloadServer       // nil refuses /Items/{id}/Download
+	accessFilter   AccessFilterResolver // the viewer's scope for downloads
+	storeProvider  userstore.UserStoreProvider
+	ScopeResolver  ScopeResolver
+	NodePlanner    nodepool.SessionPlanner
+	JWTSecret      string
+	// NodeKeys signs calls to transcode nodes with each node's own key.
+	NodeKeys nodeauth.Keyring
+	// SourceGrants grants a transcode node the source of each start; nil
+	// sends none.
+	SourceGrants            nodesource.FileGranter
 	signalsNotifier         signalsChangedNotifier
 	FFmpegPath              string
 	HWAccel                 string
@@ -391,7 +397,10 @@ type PlaybackHandler struct {
 	// driven to refresh a stale token, so the node reconstructs from this
 	// server-authoritative store instead (see internal/noderecipe). Optional
 	// (nil disables it — integrated/no-node deployments need no handoff).
-	RecipeNodeStore    recipeNodePutter
+	RecipeNodeStore recipeNodePutter
+	// StreamDeny is the playback deny marker store every relay to a transcode
+	// node checks before it signs the request. Nil denies nothing.
+	StreamDeny         *playback.StreamDeny
 	compatToneMapProbe func(context.Context, string, string, string) (tonemap.Capabilities, error)
 	// Test hooks for the Dolby Vision strip: the per-file RPU probe and the
 	// API host's dovi_rpu filter check.
@@ -636,12 +645,15 @@ func (h *PlaybackHandler) localToneMapCapabilities(ctx context.Context) (tonemap
 // remoteToneMapCapabilities retrieves one transcode node's authenticated,
 // smoke-tested executor inventory under a bounded request deadline.
 func (h *PlaybackHandler) remoteToneMapCapabilities(ctx context.Context, nodeURL string) (tonemap.Capabilities, error) {
-	info, err := h.remoteToneMapCapabilityInfo(ctx, nodeURL)
+	info, err := h.remoteToneMapCapabilityInfo(ctx, nodeauth.TargetTranscode, nodeURL)
 	return info.ToneMapCapabilities, err
 }
 
-func (h *PlaybackHandler) remoteToneMapCapabilityInfo(ctx context.Context, nodeURL string) (playback.HWAccelInfo, error) {
-	info, status, err := transcodenode.FetchHWCapabilities(ctx, transcodeproxy.NodeClient(), nodeURL, h.JWTSecret)
+// remoteToneMapCapabilityInfo reads the capability report of the worker of
+// kind target at nodeURL. The caller names the kind from where it got the
+// URL (the proxy or the transcode pool); proxies serve the same route.
+func (h *PlaybackHandler) remoteToneMapCapabilityInfo(ctx context.Context, target nodeauth.Target, nodeURL string) (playback.HWAccelInfo, error) {
+	info, status, err := transcodenode.FetchHWCapabilities(ctx, transcodeproxy.NodeClient(), nodeURL, target, h.NodeKeys)
 	if err != nil {
 		nodepool.ReportConnectFailure(h.NodePlanner, nodeURL, err)
 		return playback.HWAccelInfo{}, err
@@ -661,7 +673,7 @@ func (h *PlaybackHandler) compatAudioBoostNodeURLs(ctx context.Context, timeout 
 	if !ok {
 		return map[string]struct{}{}, nil
 	}
-	return h.compatAudioBoostNodeURLsFor(ctx, enumerator.TranscodeNodeURLs(), timeout)
+	return h.compatAudioBoostNodeURLsFor(ctx, nodeauth.TargetTranscode, enumerator.TranscodeNodeURLs(), timeout)
 }
 
 func (h *PlaybackHandler) compatAudioBoostProxyNodeURLs(ctx context.Context, timeout time.Duration) (map[string]struct{}, error) {
@@ -669,10 +681,10 @@ func (h *PlaybackHandler) compatAudioBoostProxyNodeURLs(ctx context.Context, tim
 	if !ok {
 		return map[string]struct{}{}, nil
 	}
-	return h.compatAudioBoostNodeURLsFor(ctx, enumerator.ProxyNodeURLs(), timeout)
+	return h.compatAudioBoostNodeURLsFor(ctx, nodeauth.TargetProxy, enumerator.ProxyNodeURLs(), timeout)
 }
 
-func (h *PlaybackHandler) compatAudioBoostNodeURLsFor(ctx context.Context, nodeURLs []string, timeout time.Duration) (map[string]struct{}, error) {
+func (h *PlaybackHandler) compatAudioBoostNodeURLsFor(ctx context.Context, target nodeauth.Target, nodeURLs []string, timeout time.Duration) (map[string]struct{}, error) {
 	result := make(map[string]struct{})
 	fetchCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
@@ -687,7 +699,7 @@ func (h *PlaybackHandler) compatAudioBoostNodeURLsFor(ctx context.Context, nodeU
 		wg.Add(1)
 		go func(i int, nodeURL string) {
 			defer wg.Done()
-			results[i].info, results[i].err = h.remoteToneMapCapabilityInfo(fetchCtx, nodeURL)
+			results[i].info, results[i].err = h.remoteToneMapCapabilityInfo(fetchCtx, target, nodeURL)
 		}(i, nodeURL)
 	}
 	wg.Wait()
@@ -1297,7 +1309,11 @@ func NewPlaybackHandler(
 	h.SubtitleCache = playback.NewSubtitleCache(func() string { return h.TranscodeDir })
 	// Wire the shared transcode manager with closures so it reads the handler's
 	// (late-set) JWTSecret lazily, matching the native handler.
-	h.tm.JWTSecretFn = func() string { return h.JWTSecret }
+	h.tm.NodeKeysFn = func() nodeauth.Keyring { return h.NodeKeys }
+	h.tm.NodeRecipesFn = func() playback.NodeRecipeDeleter {
+		deleter, _ := h.RecipeNodeStore.(playback.NodeRecipeDeleter)
+		return deleter
+	}
 	h.tm.Config = func() playback.TranscodeRuntimeConfig {
 		return playback.TranscodeRuntimeConfig{
 			TranscodeDir:            h.TranscodeDir,
@@ -1778,7 +1794,7 @@ func (h *PlaybackHandler) startRemoteTranscodeWithToneMapMode(
 	hevcEncoding := compatSourceTargetVideoCodec(source) == compatVideoCodecHEVC
 	if sourceAudioChannels > 0 || hevcEncoding {
 		capabilityCtx, cancelCapabilityFetch := context.WithTimeout(ctx, h.toneMapCapabilityTimeout())
-		info, capabilityErr := h.remoteToneMapCapabilityInfo(capabilityCtx, transcodeNodeURL)
+		info, capabilityErr := h.remoteToneMapCapabilityInfo(capabilityCtx, nodeauth.TargetTranscode, transcodeNodeURL)
 		cancelCapabilityFetch()
 		if capabilityErr != nil {
 			return fmt.Errorf("load transcode node recipe capabilities: %w", capabilityErr)
@@ -1845,7 +1861,7 @@ func (h *PlaybackHandler) startRemoteTranscodeWithToneMapMode(
 			var capabilityErr error
 			capabilityCtx, cancelCapabilityFetch := context.WithTimeout(ctx, h.toneMapCapabilityTimeout())
 			var info playback.HWAccelInfo
-			info, capabilityErr = h.remoteToneMapCapabilityInfo(capabilityCtx, transcodeNodeURL)
+			info, capabilityErr = h.remoteToneMapCapabilityInfo(capabilityCtx, nodeauth.TargetTranscode, transcodeNodeURL)
 			toneMapCapabilities = info.ToneMapCapabilities
 			nodeProbeTimeoutMillis = info.ProbeRequestTimeoutMillis
 			cancelCapabilityFetch()
@@ -1878,8 +1894,11 @@ func (h *PlaybackHandler) startRemoteTranscodeWithToneMapMode(
 		}
 	}
 
+	// A Jellyfin transcode runs under its playback session's own id.
 	reqBody := transcodenode.TranscodeStartRequest{
 		SessionID:              upstreamSessionID,
+		PlaybackSessionID:      upstreamSessionID,
+		MediaFileID:            file.ID,
 		InputPath:              file.FilePath,
 		SourceVideoCodec:       sourceVideoCodec,
 		SourceVideoProfile:     sourceVideoProfile,
@@ -1905,6 +1924,11 @@ func (h *PlaybackHandler) startRemoteTranscodeWithToneMapMode(
 		TotalDuration:          float64(source.Version.Duration),
 		RequireReady:           toneMapRecipe.mode != "",
 		ThrottleSeconds:        playback.ConfiguredTranscodeThrottleSeconds(ctx, h.SettingsRepo),
+	}
+	if h.sessionMgr != nil {
+		if upstream, err := h.sessionMgr.GetSession(upstreamSessionID); err == nil && upstream != nil {
+			reqBody.UserID, reqBody.ProfileID = upstream.UserID, upstream.ProfileID
+		}
 	}
 	if playback.IsAudioToAACStereoDownmixV3(reqBody.SourceAudioChannels, reqBody.TargetCodecAudio, reqBody.TargetAudioChannels) {
 		reqBody.AudioRecipeVersion = playback.TransformationAudioToAACRecipeVersionV3
@@ -1958,6 +1982,20 @@ func (h *PlaybackHandler) startRemoteTranscodeWithToneMapMode(
 		reqBody.RequireReady = true
 	}
 
+	// The grant names the node the start is signed for. Every start, the first
+	// candidate's or a later one's, mints its own.
+	if h.SourceGrants != nil {
+		nodeID, err := nodepool.SignedTranscodeNodeID(h.NodeKeys, transcodeNodeURL)
+		if err != nil {
+			return fmt.Errorf("grant transcode node its source: %w", err)
+		}
+		grant, err := nodesource.GrantFile(ctx, h.SourceGrants, nodeID, file)
+		if err != nil {
+			return fmt.Errorf("grant transcode node its source: %w", err)
+		}
+		reqBody.SourceGrant = grant
+	}
+
 	dispatch := func(request transcodenode.TranscodeStartRequest) (transcodenode.TranscodeStartResponse, int, bool, error) {
 		body, err := json.Marshal(request)
 		if err != nil {
@@ -1970,7 +2008,7 @@ func (h *PlaybackHandler) startRemoteTranscodeWithToneMapMode(
 			return transcodenode.TranscodeStartResponse{}, 0, false, fmt.Errorf("build transcode request: %w", logredact.SanitizeURLError(err))
 		}
 		httpReq.Header.Set("Content-Type", "application/json")
-		if err := nodeauth.Sign(httpReq, transcodeNodeURL, h.JWTSecret); err != nil {
+		if err := nodeauth.SignTranscode(httpReq, transcodeNodeURL, h.NodeKeys); err != nil {
 			return transcodenode.TranscodeStartResponse{}, 0, false, fmt.Errorf("sign transcode request: %w", err)
 		}
 		resp, err := telemetry.DoTrustedNode(transcodeproxy.NodeClient(), httpReq, "transcode_start")
@@ -2261,6 +2299,14 @@ func (h *PlaybackHandler) persistTranscodeRecipe(
 					card.RoutingEgress = assignment.Egress
 					card.RoutingEgressNodeID = assignment.EgressNodeID
 				}
+			}
+			// The play records its routing assignment only after a start
+			// succeeds, so while a start runs it can name the previous
+			// executor or none. The node card binds the node it was started
+			// on, by the row id of the node its URL names.
+			if card.TranscodeNodeURL != "" && (playSession == nil || playSession.RoutingAssignment == nil ||
+				!sameCompatNode(playSession.RoutingAssignment.ExecutionNodeURL, card.TranscodeNodeURL)) {
+				card.RoutingExecutionNodeID = h.compatTranscodeNodeID(card.TranscodeNodeURL, nil)
 			}
 			recipe = &card
 		}

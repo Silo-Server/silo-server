@@ -10,6 +10,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/nodeauth/nodeauthtest"
+	"github.com/Silo-Server/silo-server/internal/nodepool/nodepooltest"
+
 	"github.com/go-chi/chi/v5"
 
 	"github.com/Silo-Server/silo-server/internal/cache"
@@ -87,7 +90,7 @@ func newCompatMoveFixtureOn(t *testing.T, oldNodeURL string, withLiveNode bool, 
 		f.liveURL = live.URL
 		nodes = append(nodes, &nodepool.Node{ID: compatMoveLiveNodeID, URL: live.URL, Enabled: true, Healthy: true})
 	}
-	transcodes := nodepool.NewTranscodePool()
+	transcodes := nodepooltest.NewTranscodePool()
 	transcodes.SetNodes(nodes)
 	proxies := nodepool.NewProxyPool()
 	proxies.SetNodes([]*nodepool.Node{
@@ -133,8 +136,9 @@ func newCompatMoveFixtureOn(t *testing.T, oldNodeURL string, withLiveNode bool, 
 		playbackStore:   f.store,
 		sessionMgr:      f.sessions,
 		fileResolver:    testCompatFileResolver{file: &models.MediaFile{ID: source.FileID, FilePath: "/media/movie.mkv"}},
-		tm:              playback.NewTranscodeManager(),
+		tm:              keyedTranscodeManager(),
 		JWTSecret:       "test-secret",
+		NodeKeys:        nodeauthtest.SameKey("test-secret"),
 		RecipeNodeStore: f.recipes,
 		NodePlanner:     nodepool.NewPlanner(proxies, transcodes),
 	}
@@ -368,73 +372,47 @@ func TestCompatMoveOfMovedTranscodeReturnsCurrentNode(t *testing.T) {
 
 // The proxy lost the old node, but the API can still reach it, so the
 // background stop lands. The stop is a release, which leaves the transport id
-// rebuildable there. A node deletes a transport's record when it stops it; the
-// moved record names the new node and must survive that stop.
-func TestCompatMoveSurvivesOldNodeStop(t *testing.T) {
-	for _, tt := range []struct {
-		name          string
-		keepsMovedRow bool
-	}{
-		// A current node keeps a card that names another node
-		// (noderecipe.Store.DeleteUnlessMoved).
-		{name: "current node", keepsMovedRow: true},
-		// An older node deletes the record anyway; central writes it again
-		// once the stop is done.
-		{name: "node that deletes the record", keepsMovedRow: false},
-	} {
-		t.Run(tt.name, func(t *testing.T) {
-			var f *compatMoveFixture
-			stopped := make(chan struct{}, 1)
-			oldNode := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				if r.Method != http.MethodDelete || r.URL.Path != "/transcode/upstream-1" {
-					http.NotFound(w, r)
-					return
-				}
-				// A fenced stop would make this node refuse the transport id
-				// for the token lifetime, so a later move back here would fail.
-				if fence := r.URL.Query().Get(playback.TranscodeStopFenceQueryParam); fence != "0" {
-					t.Errorf("old node stop fence = %q, want a release (fence=0)", fence)
-				}
-				// What handleStop does with the shared record.
-				self := playback.RecipeExecutor{NodeID: compatMoveDeadNodeID, NodeURL: f.deadURL}
-				card, ok := f.recipes.Get("upstream-1")
-				if !tt.keepsMovedRow || !ok || !self.NamesAnotherNode(card) {
-					_ = f.recipes.Delete(r.Context(), "upstream-1")
-				}
-				w.WriteHeader(http.StatusNoContent)
-				stopped <- struct{}{}
-			}))
-			defer oldNode.Close()
-			f = newCompatMoveFixtureOn(t, oldNode.URL, true, noderouting.EgressProxy)
-			payload, err := noderecipe.EncodeMoveRequest(noderecipe.MoveRequest{TransportID: "upstream-1", NodeURL: oldNode.URL})
-			if err != nil {
-				t.Fatalf("encode: %v", err)
-			}
+// rebuildable there and the shared record alone. The moved record naming the
+// new node is in place before that release finishes, so a node restart while
+// the old node hangs still finds it.
+func TestCompatMoveWritesRecordBeforeOldNodeStop(t *testing.T) {
+	var f *compatMoveFixture
+	stopping := make(chan struct{}, 1)
+	finishStop := make(chan struct{})
+	oldNode := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodDelete || r.URL.Path != "/transcode/upstream-1" {
+			http.NotFound(w, r)
+			return
+		}
+		// A fenced stop would make this node refuse the transport id for the
+		// token lifetime, so a later move back here would fail.
+		if fence := r.URL.Query().Get(playback.TranscodeStopFenceQueryParam); fence != "0" {
+			t.Errorf("old node stop fence = %q, want a release (fence=0)", fence)
+		}
+		stopping <- struct{}{}
+		<-finishStop
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer oldNode.Close()
+	defer close(finishStop)
+	f = newCompatMoveFixtureOn(t, oldNode.URL, true, noderouting.EgressProxy)
+	payload, err := noderecipe.EncodeMoveRequest(noderecipe.MoveRequest{TransportID: "upstream-1", NodeURL: oldNode.URL})
+	if err != nil {
+		t.Fatalf("encode: %v", err)
+	}
 
-			f.handler.HandleTranscodeMoveRequest(t.Context(), cache.Event{Type: cache.EventTranscodeMoveRequested, Payload: payload})
+	f.handler.HandleTranscodeMoveRequest(t.Context(), cache.Event{Type: cache.EventTranscodeMoveRequested, Payload: payload})
 
-			select {
-			case <-stopped:
-			case <-time.After(10 * time.Second):
-				t.Fatal("the old node was never asked to stop the transport")
-			}
-			deadline := time.Now().Add(10 * time.Second)
-			for {
-				card, ok := f.recipes.Get("upstream-1")
-				if ok && card.TranscodeNodeURL == f.liveURL {
-					break
-				}
-				if time.Now().After(deadline) {
-					t.Fatalf("moved record lost after the old node's stop: %+v, %v (operations %v)", card, ok, f.recipes.Operations())
-				}
-				time.Sleep(5 * time.Millisecond) //nolint:forbidigo // polls the recipe store, the observable state
-			}
-			if tt.keepsMovedRow {
-				if got := countOperations(f.recipes.Operations(), "delete:upstream-1"); got != 0 {
-					t.Fatalf("the moved record was deleted %d time(s): %v", got, f.recipes.Operations())
-				}
-			}
-		})
+	select {
+	case <-stopping:
+	case <-time.After(10 * time.Second):
+		t.Fatal("the old node was never asked to stop the transport")
+	}
+	if card, ok := f.recipes.Get("upstream-1"); !ok || card.TranscodeNodeURL != f.liveURL {
+		t.Fatalf("record while the old node's stop is in flight = %+v, %v (operations %v)", card, ok, f.recipes.Operations())
+	}
+	if got := countOperations(f.recipes.Operations(), "delete:upstream-1"); got != 0 {
+		t.Fatalf("the moved record was deleted %d time(s): %v", got, f.recipes.Operations())
 	}
 }
 
@@ -528,7 +506,7 @@ func TestCompatMoveToThisServerRequiresLocalRecipeCapabilities(t *testing.T) {
 func TestCompatMoveSkipsNodesTheRequestFoundUnreachable(t *testing.T) {
 	f := newCompatMoveFixture(t, false, noderouting.EgressAPI)
 	otherDeadURL := closedNodeURL(t)
-	transcodes := nodepool.NewTranscodePool()
+	transcodes := nodepooltest.NewTranscodePool()
 	transcodes.SetNodes([]*nodepool.Node{
 		{ID: compatMoveDeadNodeID, URL: f.deadURL, Enabled: true, Healthy: true},
 		{ID: compatMoveLiveNodeID, URL: otherDeadURL, Enabled: true, Healthy: true},
@@ -564,50 +542,6 @@ func TestCompatMoveRollsBackCompatSessionWhenDurableWriteFails(t *testing.T) {
 	nodeURL, err := f.handler.moveCompatTranscodeOffNode(t.Context(), "upstream-1", f.deadURL)
 	if err != nil || nodeURL != f.liveURL {
 		t.Fatalf("retried move = %q, %v; want %q", nodeURL, err, f.liveURL)
-	}
-}
-
-// An audio switch on the new node can land while the old node's stop is in
-// flight. The record written after the stop is the switched recipe, not the
-// one the move committed.
-func TestCompatMoveRewriteAfterOldNodeStopKeepsNewerRecipe(t *testing.T) {
-	var f *compatMoveFixture
-	const switchedTrack = 5
-	oldNode := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodDelete {
-			http.NotFound(w, r)
-			return
-		}
-		// The switch rewrites the compat recipe and the record on the new node.
-		var switched playback.RecipeCard
-		if err := f.store.Update("play-1", func(current *PlaybackSession) error {
-			current.Recipe.AudioTrackIndex = switchedTrack
-			switched = *current.Recipe
-			return nil
-		}); err != nil {
-			t.Errorf("switch audio: %v", err)
-		}
-		_ = f.recipes.Put(r.Context(), "upstream-1", switched)
-		w.WriteHeader(http.StatusNoContent)
-	}))
-	defer oldNode.Close()
-	f = newCompatMoveFixtureOn(t, oldNode.URL, true, noderouting.EgressAPI)
-
-	if _, err := f.handler.moveCompatTranscodeOffNode(t.Context(), "upstream-1", oldNode.URL); err != nil {
-		t.Fatalf("move: %v", err)
-	}
-
-	// The move, the switch, and the rewrite after the stop.
-	deadline := time.Now().Add(10 * time.Second)
-	for countOperations(f.recipes.Operations(), "put:upstream-1") < 3 {
-		if time.Now().After(deadline) {
-			t.Fatalf("record writes = %v, want the rewrite after the stop", f.recipes.Operations())
-		}
-		time.Sleep(5 * time.Millisecond) //nolint:forbidigo // polls the recipe store, the observable state
-	}
-	if card := f.storedRecipe(t); card.AudioTrackIndex != switchedTrack || card.TranscodeNodeURL != f.liveURL {
-		t.Fatalf("record after the stop = track %d on %q, want track %d on %q",
-			card.AudioTrackIndex, card.TranscodeNodeURL, switchedTrack, f.liveURL)
 	}
 }
 
@@ -761,53 +695,5 @@ func TestCompatMoveThatLosesToAnotherServerLeavesItsRecord(t *testing.T) {
 	// own relays and reconstruction use the new executor.
 	if got := f.sessions.sessions["upstream-1"].TranscodeNodeURL; got != winnerURL {
 		t.Fatalf("upstream session names %q after a lost move, want %q", got, winnerURL)
-	}
-}
-
-// The release of the node a transport left can land after a later move put
-// the transport back on that node. The release ends the rebuilt job there and
-// the node deletes the record, which now names it. The record is written
-// again, so the next request rebuilds the transcode on that node.
-func TestCompatMoveRewritesRecordWhenReleaseLandsAfterMoveBack(t *testing.T) {
-	var f *compatMoveFixture
-	oldNode := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodDelete {
-			http.NotFound(w, r)
-			return
-		}
-		// A later move put the transport back here before the release arrived.
-		var movedBack playback.RecipeCard
-		if err := f.store.Update("play-1", func(current *PlaybackSession) error {
-			recipe := *current.Recipe
-			recipe.TranscodeNodeURL = f.deadURL
-			current.Recipe = &recipe
-			movedBack = recipe
-			return nil
-		}); err != nil {
-			t.Errorf("move back: %v", err)
-		}
-		_ = f.recipes.Put(r.Context(), "upstream-1", movedBack)
-		// The release ends that job, and this node deletes the record that
-		// names it (noderecipe.Store.DeleteUnlessMoved).
-		_ = f.recipes.Delete(r.Context(), "upstream-1")
-		w.WriteHeader(http.StatusNoContent)
-	}))
-	defer oldNode.Close()
-	f = newCompatMoveFixtureOn(t, oldNode.URL, true, noderouting.EgressAPI)
-
-	if _, err := f.handler.moveCompatTranscodeOffNode(t.Context(), "upstream-1", oldNode.URL); err != nil {
-		t.Fatalf("move: %v", err)
-	}
-
-	deadline := time.Now().Add(10 * time.Second)
-	for {
-		card, ok := f.recipes.Get("upstream-1")
-		if ok && card.TranscodeNodeURL == oldNode.URL {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("record after a release that landed after a move back = %+v, %v (operations %v)", card, ok, f.recipes.Operations())
-		}
-		time.Sleep(5 * time.Millisecond) //nolint:forbidigo // polls the recipe store, the observable state
 	}
 }

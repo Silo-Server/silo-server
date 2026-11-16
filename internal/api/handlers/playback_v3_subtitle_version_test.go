@@ -48,7 +48,7 @@ func subtitleBlockedHDRFixtureV3(t *testing.T) (*PlaybackHandler, *models.MediaF
 	alternate.SubtitleTracks = nil
 
 	files := map[int]*models.MediaFile{source.ID: source, alternate.ID: alternate}
-	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0), mapPlaybackFileResolver{files: files})
+	handler := newKeyedPlaybackHandler(playback.NewSessionManager(0, 0), mapPlaybackFileResolver{files: files})
 	handler.FileVersionFetcher = testPlaybackFileVersionFetcher{byContent: map[string][]*models.MediaFile{
 		source.ContentID: {source, alternate},
 	}}

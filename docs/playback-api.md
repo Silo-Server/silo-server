@@ -432,9 +432,10 @@ events never label a sidecar by its file name, for any viewer.
 
 Stop, session expiry or abort, and admin stop or terminate write the
 Redis key `silo:streamauth:<session_id>` with a TTL equal to the stream token
-lifetime. The API checks it before it serves or reconstructs a session, and the
-proxy and transcode nodes check it on every token-verified serve, so a
-still-valid token cannot revive a session on any replica. Lookups are cached in
+lifetime. The API checks it before it serves or reconstructs a session, the
+proxy checks it on every token-verified serve, and every relay to a transcode
+node checks it before forwarding, as the API does before a node rebuilds a
+session, so a still-valid token cannot revive a session on any replica. Lookups are cached in
 process for two seconds. When Redis is unavailable the check fails open with a
 warning: serving never waits on Redis. A deployment without Redis keeps the
 token TTL as its bound.

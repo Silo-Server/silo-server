@@ -133,7 +133,7 @@ func TestCheckNodeRejectsAnOversizedHealthBody(t *testing.T) {
 // An unreachable node reports nothing, and its stats must be cleared rather
 // than left behind: a dead node's five-minute-old CPU number reads as live.
 func TestApplyHealthClearsStatsWhenACheckCarriesNone(t *testing.T) {
-	pool := NewTranscodePool()
+	pool := newKeyedTranscodePool()
 	pool.SetNodes([]*Node{{ID: 1, URL: "http://node", Enabled: true}})
 
 	pool.ApplyHealth(1, "http://node", true, 1, 0, "", []byte(`{"system":{"cpu_pct":41}}`), nil, time.Now())
@@ -169,7 +169,7 @@ func TestApplyHealthClonesStats(t *testing.T) {
 // one worker's health — and the scratch fill transcode admission reads — onto
 // the replacement, and it would stay there until a later sweep.
 func TestApplyHealthIgnoresAResultForAReplacedWorker(t *testing.T) {
-	pool := NewTranscodePool()
+	pool := newKeyedTranscodePool()
 	pool.SetNodes([]*Node{{ID: 1, URL: "http://replacement", Enabled: true}})
 
 	pool.ApplyHealth(1, "http://original", true, 7, 0, "", []byte(`{"system":{"cpu_pct":41}}`), nil, time.Now())
@@ -183,7 +183,7 @@ func TestApplyHealthIgnoresAResultForAReplacedWorker(t *testing.T) {
 // The fence must not reject the ordinary case: the pools normalize URLs and the
 // database column does not, so a trailing slash on one side is the same worker.
 func TestApplyHealthAcceptsATrailingSlashDifference(t *testing.T) {
-	pool := NewTranscodePool()
+	pool := newKeyedTranscodePool()
 	pool.SetNodes([]*Node{{ID: 1, URL: "http://node/", Enabled: true}})
 
 	pool.ApplyHealth(1, "http://node", true, 3, 0, "", nil, nil, time.Now())
@@ -197,7 +197,7 @@ func TestApplyHealthAcceptsATrailingSlashDifference(t *testing.T) {
 // their fetch is bounded at two minutes — an even wider window for the row to
 // be repointed underneath them.
 func TestApplyCapabilitiesIgnoresAReportForAReplacedWorker(t *testing.T) {
-	pool := NewTranscodePool()
+	pool := newKeyedTranscodePool()
 	pool.SetNodes([]*Node{{ID: 1, URL: "http://replacement", Enabled: true}})
 
 	pool.ApplyCapabilities(1, "http://original",
@@ -207,5 +207,28 @@ func TestApplyCapabilitiesIgnoresAReportForAReplacedWorker(t *testing.T) {
 	stored := pool.Nodes()[0]
 	if len(stored.Capabilities) != 0 || stored.CapabilitiesHash != nil || len(stored.PhysicalGPUKeys) != 0 {
 		t.Fatalf("pool took the old worker's capability report: %+v", stored)
+	}
+}
+
+// A transcode node still running a binary from before the node control
+// protocol answers health with 200 and looks alive, but cannot take the work
+// the core sends now; one whose key the core refuses cannot either. Both are
+// unhealthy with their reason. A proxy carries no version and stays healthy.
+func TestCheckNodeReportRefusesTranscodeNodesTheCoreCannotUse(t *testing.T) {
+	for name, test := range map[string]struct {
+		nodeType string
+		body     string
+		healthy  bool
+		reason   string
+	}{
+		"current transcode node": {NodeTypeTranscode, `{"status":"ok","node_control_version":1}`, true, ""},
+		"pre-change binary":      {NodeTypeTranscode, `{"status":"ok","active_jobs":0}`, false, UnhealthyNodeControlMissing},
+		"rejected key":           {NodeTypeTranscode, `{"status":"ok","node_control_version":1,"key_rejected":true}`, false, UnhealthyKeyRejected},
+		"proxy":                  {NodeTypeProxy, `{"status":"ok"}`, true, ""},
+	} {
+		report := CheckNodeReport(t.Context(), &Node{ID: 1, Type: test.nodeType, URL: newStatsHealthNode(t, test.body)})
+		if report.Healthy != test.healthy || report.Reason != test.reason {
+			t.Fatalf("%s: healthy=%v reason=%q, want healthy=%v reason=%q", name, report.Healthy, report.Reason, test.healthy, test.reason)
+		}
 	}
 }

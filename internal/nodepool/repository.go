@@ -79,6 +79,11 @@ type Node struct {
 	// DownloadArtifactMaxBytesOverride is this node's prepared-download storage
 	// budget in bytes; 0 means no budget. nil inherits download.artifact_max_bytes.
 	DownloadArtifactMaxBytesOverride *int64 `json:"download_artifact_max_bytes_override,omitempty"`
+	// SourceAccess is how a transcode node reads its source media:
+	// SourceAccessLocal through its own library mount, SourceAccessCore over
+	// HTTP from the API servers. A proxy always holds SourceAccessLocal. Off
+	// the v1 wire, which is frozen; v2 maps it explicitly.
+	SourceAccess string `json:"-"`
 	// CapabilityDrift is an operator-facing note describing how this node's
 	// hardware got worse at the last capability refetch: a backend that used to
 	// pass its probe and now fails, or a render device that is gone. nil means
@@ -128,6 +133,11 @@ type Node struct {
 	// DrainStateDrained once nothing is left. Rewritten by every check, like
 	// Healthy. Off the v1 wire for the same reason as DrainRequested.
 	DrainState DrainState `json:"-"`
+	// KeyIssued reports that this transcode node has a node key stored. The
+	// key itself never leaves the credential registry, so no reader of a Node
+	// can serialize it. Off the v1 wire, which is frozen; v2 maps it
+	// explicitly.
+	KeyIssued bool `json:"-"`
 	// PhysicalGPUKeys identifies the actual GPUs behind this node, derived from
 	// Capabilities rather than stored: it is a pure function of that payload, so
 	// a column would only be a second copy that can disagree with it. Two nodes
@@ -241,6 +251,38 @@ func (n *Node) EffectiveHWDevice(clusterHWDevice string) string {
 	return clusterHWDevice
 }
 
+// Source access modes of a transcode node (stream_nodes.source_access). The
+// node's configuration document carries the value, and nodesource.ModeLocal
+// and nodesource.ModeCore name the same strings on the node.
+const (
+	// SourceAccessLocal reads the approved catalog path through the node's
+	// own library mount. It is the default, and the only value a proxy holds.
+	SourceAccessLocal = "local"
+	// SourceAccessCore reads source bytes over HTTP from the API servers, so
+	// the node needs no library mount.
+	SourceAccessCore = "core"
+)
+
+// normalizeSourceAccess lowercases and trims a source access value; empty
+// stays empty.
+func normalizeSourceAccess(value string) string {
+	return strings.ToLower(strings.TrimSpace(value))
+}
+
+// validSourceAccess reports whether value, normalized, names a source access
+// mode a node of nodeType may hold: a transcode node either, a proxy only the
+// default. Empty is valid and means the default.
+func validSourceAccess(nodeType, value string) bool {
+	switch normalizeSourceAccess(value) {
+	case "", SourceAccessLocal:
+		return true
+	case SourceAccessCore:
+		return nodeType == NodeTypeTranscode
+	default:
+		return false
+	}
+}
+
 // CreateNodeInput holds the fields for creating a new node.
 type CreateNodeInput struct {
 	Name string `json:"name"`
@@ -253,6 +295,17 @@ type CreateNodeInput struct {
 	Group            string `json:"group"`              // empty = ungrouped
 	MaxJobs          *int   `json:"max_jobs"`           // nil or <= 0 = unlimited
 	MaxBandwidthKbps *int   `json:"max_bandwidth_kbps"` // nil or <= 0 = unlimited
+	// SourceAccess is a transcode node's source access mode; empty means
+	// SourceAccessLocal. A proxy accepts only empty or SourceAccessLocal.
+	SourceAccess string `json:"source_access,omitempty"`
+}
+
+// sourceAccessOrDefault is the stored value of an input's source access.
+func sourceAccessOrDefault(value string) string {
+	if v := normalizeSourceAccess(value); v != "" {
+		return v
+	}
+	return SourceAccessLocal
 }
 
 // Validate checks required fields and allowed values.
@@ -265,6 +318,10 @@ func (i CreateNodeInput) Validate() error {
 	}
 	if i.URL == "" {
 		return errors.New("url is required")
+	}
+	if !validSourceAccess(i.Type, i.SourceAccess) {
+		return fmt.Errorf("%w: source_access must be %q or %q, and a proxy can only be %q", ErrInvalidNodeInput,
+			SourceAccessLocal, SourceAccessCore, SourceAccessLocal)
 	}
 	return nil
 }
@@ -292,6 +349,9 @@ type UpdateNodeInput struct {
 	// DownloadArtifactMaxBytesOverride is a byte budget, 0 for none; a
 	// negative value (or JSON null) restores the inherited budget.
 	DownloadArtifactMaxBytesOverride *int64 `json:"download_artifact_max_bytes_override,omitempty"`
+	// SourceAccess sets a transcode node's source access mode; nil leaves it.
+	// A proxy can only be set to SourceAccessLocal.
+	SourceAccess *string `json:"source_access,omitempty"`
 }
 
 // UnmarshalJSON decodes an update body, mapping an explicit JSON null on the
@@ -338,6 +398,12 @@ func isJSONNull(raw json.RawMessage) bool {
 // has a closed set of values; the database CHECK enforces the same list, and
 // rejecting here turns a constraint violation into an operator-readable error.
 func (i UpdateNodeInput) Validate() error {
+	if i.SourceAccess != nil {
+		// The node's type is checked against the row (ValidateFor).
+		if v := normalizeSourceAccess(*i.SourceAccess); v != SourceAccessLocal && v != SourceAccessCore {
+			return fmt.Errorf("%w: source_access must be %q or %q", ErrInvalidNodeInput, SourceAccessLocal, SourceAccessCore)
+		}
+	}
 	if i.DownloadArtifactDirOverride != nil {
 		if dir := strings.TrimSpace(*i.DownloadArtifactDirOverride); dir != "" && !filepath.IsAbs(dir) {
 			return fmt.Errorf("%w: download_artifact_dir_override must be an absolute path", ErrInvalidNodeInput)
@@ -354,6 +420,15 @@ func (i UpdateNodeInput) Validate() error {
 	if !slices.Contains(hwAccelOverrideValues, *value) {
 		return fmt.Errorf("%w: hw_accel_override must be one of %s", ErrInvalidNodeInput,
 			strings.Join(hwAccelOverrideValues, ", "))
+	}
+	return nil
+}
+
+// ValidateFor checks the parts of an update that depend on the row it
+// changes: only a transcode node can read its sources through the core.
+func (i UpdateNodeInput) ValidateFor(node *Node) error {
+	if i.SourceAccess != nil && node != nil && !validSourceAccess(node.Type, *i.SourceAccess) {
+		return fmt.Errorf("%w: source_access %q is for transcode nodes only", ErrInvalidNodeInput, SourceAccessCore)
 	}
 	return nil
 }
@@ -439,7 +514,7 @@ func NewRepository(pool *pgxpool.Pool) *Repository {
 	return &Repository{pool: pool}
 }
 
-const nodeColumns = `id, name, type, url, public_url, enabled, healthy, active_jobs, node_group, max_jobs, max_bandwidth_kbps, egress_kbps, last_health_check, created_at, capabilities, capabilities_hash, capabilities_refreshed_at, last_stats, hw_accel_override, hw_device_override, capability_drift, capability_drift_baseline, network_access, download_artifact_dir_override, download_artifact_max_bytes_override, drain_requested, drain_state`
+const nodeColumns = `id, name, type, url, public_url, enabled, healthy, active_jobs, node_group, max_jobs, max_bandwidth_kbps, egress_kbps, last_health_check, created_at, capabilities, capabilities_hash, capabilities_refreshed_at, last_stats, hw_accel_override, hw_device_override, capability_drift, capability_drift_baseline, network_access, download_artifact_dir_override, download_artifact_max_bytes_override, drain_requested, drain_state, node_key_ciphertext IS NOT NULL, source_access`
 
 func scanNode(row pgx.Row) (*Node, error) {
 	var n Node
@@ -459,6 +534,8 @@ func scanNode(row pgx.Row) (*Node, error) {
 		&networkAccessBytes,
 		&n.DownloadArtifactDirOverride, &n.DownloadArtifactMaxBytesOverride,
 		&n.DrainRequested, &n.DrainState,
+		&n.KeyIssued,
+		&n.SourceAccess,
 	)
 	if err != nil {
 		return nil, err
@@ -542,11 +619,11 @@ func (r *Repository) Create(ctx context.Context, input CreateNodeInput) (*Node, 
 		return nil, err
 	}
 	row := r.pool.QueryRow(ctx,
-		`INSERT INTO stream_nodes (name, type, url, public_url, node_group, max_jobs, max_bandwidth_kbps)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7)
+		`INSERT INTO stream_nodes (name, type, url, public_url, node_group, max_jobs, max_bandwidth_kbps, source_access)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 		 RETURNING `+nodeColumns,
 		input.Name, input.Type, input.URL, normalizeOverride(input.PublicURL), normalizeGroup(input.Group),
-		normalizeCap(input.MaxJobs), normalizeCap(input.MaxBandwidthKbps))
+		normalizeCap(input.MaxJobs), normalizeCap(input.MaxBandwidthKbps), sourceAccessOrDefault(input.SourceAccess))
 	return scanNode(row)
 }
 
@@ -587,6 +664,10 @@ func (r *Repository) Update(ctx context.Context, id int, input UpdateNodeInput) 
 	if input.DownloadArtifactMaxBytesOverride != nil && *input.DownloadArtifactMaxBytesOverride >= 0 {
 		artifactMaxBytes = input.DownloadArtifactMaxBytesOverride
 	}
+	var sourceAccess *string
+	if input.SourceAccess != nil {
+		sourceAccess = new(sourceAccessOrDefault(*input.SourceAccess))
+	}
 	row := r.pool.QueryRow(ctx,
 		`UPDATE stream_nodes SET
 			name = COALESCE($2, name),
@@ -600,6 +681,7 @@ func (r *Repository) Update(ctx context.Context, id int, input UpdateNodeInput) 
 			public_url = CASE WHEN $15::boolean THEN $16::text ELSE public_url END,
 			download_artifact_dir_override = CASE WHEN $17::boolean THEN $18::text ELSE download_artifact_dir_override END,
 			download_artifact_max_bytes_override = CASE WHEN $19::boolean THEN $20::bigint ELSE download_artifact_max_bytes_override END,
+			source_access = COALESCE($21::text, source_access),
 			-- Everything below describes the worker the old URL addressed, so
 			-- repointing the row at a different machine has to drop it. The
 			-- caller publishes the returned row to the pools immediately, and
@@ -627,7 +709,8 @@ func (r *Repository) Update(ctx context.Context, id int, input UpdateNodeInput) 
 		input.HWDeviceOverride != nil, hwDeviceOverride,
 		input.PublicURL != nil, publicURL,
 		input.DownloadArtifactDirOverride != nil, artifactDir,
-		input.DownloadArtifactMaxBytesOverride != nil, artifactMaxBytes)
+		input.DownloadArtifactMaxBytesOverride != nil, artifactMaxBytes,
+		sourceAccess)
 	n, err := scanNode(row)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrNodeNotFound

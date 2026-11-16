@@ -112,7 +112,10 @@ statistics. Rules:
   explicit `file:` URL, and the input opens with
   `-protocol_whitelist file,pipe`; the concat demuxer otherwise refuses both.
   Paths are single-quoted, with a quote written as `'\''`; a path with a
-  line break or NUL is rejected, since the list is read line by line.
+  line break or NUL is rejected, since the list is read line by line. A
+  relayed input (a transcode node reading through the core) uses another form
+  of the list, which the capability check covers; see
+  [relayed concat](transcode-nodes.md#relayed-concat).
 - Inpoints are container timestamps, while sample times count from the
   start of the file like every other result time, hence the start-time
   offset. Files remuxed with their original timestamps (`copyts`) often
@@ -156,7 +159,8 @@ is held as PCM. Subtitle sync is its consumer.
 `POST /media-samples/run` on the transcode-node listener runs one `Request`
 with the node's ffmpeg and returns its `Result` as JSON
 (`mediasample.RemoteClient` is the caller). The node requires a
-[signed request](worker-http-protocol.md#authentication) and an input path it is allowed to read, accepts software attempts
+[signed request](worker-http-protocol.md#authentication) and a
+[source grant](transcode-nodes.md#source-grants) for the input, accepts software attempts
 only, and answers a failed run with `422` and a `RemoteFailure` whose reason is
 the run's `Classify` cause. `RemoteError.Infrastructure` tells a caller
 whether running the request elsewhere may succeed: an unreachable node, a 5xx,

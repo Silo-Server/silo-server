@@ -48,7 +48,7 @@ func newControlSocketFixture(t *testing.T) *controlSocketFixture {
 	hub := playback.NewRealtimeHub()
 	tracker := playback.NewCommandTracker()
 	t.Cleanup(tracker.Close)
-	pb := NewPlaybackHandler(manager)
+	pb := newKeyedPlaybackHandler(manager)
 	pb.RealtimeHub = hub
 	pb.CommandTracker = tracker
 	pb.CommandDispatcher = playback.NewCommandDispatcher(manager, hub, tracker)

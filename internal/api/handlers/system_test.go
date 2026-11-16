@@ -12,6 +12,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/nodeauth/nodeauthtest"
+	"github.com/Silo-Server/silo-server/internal/nodepool/nodepooltest"
+
 	"github.com/Silo-Server/silo-server/internal/nodepool"
 	"github.com/Silo-Server/silo-server/internal/playback"
 )
@@ -104,9 +107,9 @@ func TestReadHardwareAccelerationAggregatesNodes(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			pool := nodepool.NewTranscodePool()
+			pool := nodepooltest.NewTranscodePool()
 			pool.SetNodes(tc.nodes)
-			handler := &SystemHandler{transcodePool: pool, jwtSecret: "secret"}
+			handler := &SystemHandler{transcodePool: pool, nodeKeys: nodeauthtest.NodeKey("secret")}
 
 			got := handler.ReadHardwareAcceleration(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/", nil))
 
@@ -150,12 +153,12 @@ func TestReadHardwareAccelerationProbeLogRedactsNodeURLSecrets(t *testing.T) {
 	failedNodeURL := strings.Replace(failed.URL, "http://", "http://"+username+":"+password+"@", 1) +
 		"?access_token=" + querySecret + "#" + fragmentSecret
 
-	pool := nodepool.NewTranscodePool()
+	pool := nodepooltest.NewTranscodePool()
 	pool.SetNodes([]*nodepool.Node{
 		{ID: 1, Name: "healthy-node", URL: healthyURL, Enabled: true, Healthy: true},
 		{ID: 2, Name: "failed-node", URL: failedNodeURL, Enabled: true, Healthy: true},
 	})
-	handler := &SystemHandler{transcodePool: pool, jwtSecret: "jwt-secret"}
+	handler := &SystemHandler{transcodePool: pool, nodeKeys: nodeauthtest.NodeKey("jwt-secret")}
 
 	var logs bytes.Buffer
 	previousLogger := slog.Default()

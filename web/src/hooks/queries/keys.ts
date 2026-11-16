@@ -419,6 +419,8 @@ export const adminKeys = {
   libraryProviderDefaults: (libraryType: string) =>
     ["admin", "libraries", "provider-defaults", libraryType] as const,
   nodes: () => ["admin", "nodes"] as const,
+  // Outside "nodes": every node write refreshes the list, not what the build supports.
+  nodeCapabilities: () => ["admin", "nodeCapabilities"] as const,
   stats: () => ["admin", "stats"] as const,
   sessions: () => ["admin", "sessions"] as const,
   downloadPreparations: () => ["admin", "downloadPreparations"] as const,

@@ -3,20 +3,14 @@ package scanner
 import (
 	"path/filepath"
 	"strings"
+
+	"github.com/Silo-Server/silo-server/internal/mediacontainer"
 )
 
 // audioExtensions is the set of file extensions the audiobook and podcast
-// scanner branches recognize. Mirrors videoExtensions for video libraries.
-var audioExtensions = map[string]bool{
-	".m4b":  true,
-	".m4a":  true,
-	".mp3":  true,
-	".flac": true,
-	".opus": true,
-	".ogg":  true,
-	".wav":  true,
-	".aac":  true,
-}
+// scanner branches recognize (mediacontainer.AudioExtensions). Mirrors
+// videoExtensions for video libraries.
+var audioExtensions = mediacontainer.AudioExtensions()
 
 // SupportsAudioFile reports whether the given path uses a recognized audio
 // file extension.

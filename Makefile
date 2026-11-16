@@ -47,9 +47,14 @@ dev-backend:
 dev-proxy:
 	go run ./cmd/silo/ --mode=proxy
 
-# Run a transcode node (HLS transcode worker, no DB required)
+# Run a transcode node against a running main server. It holds no database,
+# Redis or shared secret: it needs only SILO_CORE_URL (the main server's URL)
+# and SILO_NODE_KEY (the key the admin nodes page issued for it). PORT
+# defaults to 8090 so it does not collide with dev-backend on 8080.
 dev-transcode:
-	go run ./cmd/silo/ --mode=transcode
+	@test -n "$$SILO_CORE_URL" || { echo 'dev-transcode: set SILO_CORE_URL to the main server URL, e.g. http://localhost:8080' >&2; exit 1; }
+	@test -n "$$SILO_NODE_KEY" || { echo 'dev-transcode: set SILO_NODE_KEY to the key issued for this node on the admin nodes page' >&2; exit 1; }
+	MODE=transcode PORT=$${PORT:-8090} go run ./cmd/silo/
 
 # Lint Go and frontend code
 lint:

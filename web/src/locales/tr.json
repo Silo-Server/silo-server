@@ -42517,7 +42517,7 @@
   "web.admin.historyImport.plexLimits.outro": [
     {
       "type": 0,
-      "value": "Bunları aktarmak için her kişi kendi Plex hesabından içe aktarma yapmalıdır: Ayarlar → Geçmiş içe aktarma."
+      "value": "Bunları aktarmak için her kişi, Ayarlar → Geçmişi içe aktarma sayfasından kendi Plex hesabıyla içe aktarma yapmalıdır."
     }
   ],
   "web.admin.historyImport.plexLimits.resumePoints": [

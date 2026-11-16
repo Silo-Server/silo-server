@@ -92,7 +92,7 @@ start response. For copied AAC into fMP4, protocol-v3 and jellycompat starts
 and protocol-v3 rehoming reject a missing or different echo and stop the
 transport, so they never start that stream on a node that predates the field.
 The receipt is checked only on `POST /transcode/start`: a jellycompat move and
-a node rebuilding a lost session from its token or stored recipe don't check
+a node rebuilding a lost session from the recipe the core resolves don't check
 it, so an older node reached that way still fails after the first segment. The
 check applies to every copied AAC track, including MKV and MP4 sources whose
 AAC an older node copies correctly without the filter, so update transcode
@@ -145,3 +145,26 @@ and the API stops a node whose count differs. Recipe cards carry the whole
 list; signed reconstruction claims carry only the track numbers, the default
 and the source version, under a method older nodes refuse, so a session
 rebuilt from a token names its renditions `Track <n>`.
+
+## Source grants
+
+Every `POST /transcode/start` request carries `source_grant`, the core's
+source grant for its file, naming the node the request is sent to, and the
+node requires it. Download preparation (`/downloads/prepare`), trickplay
+(`/trickplay/extract`), chapter thumbnails (`/chapter-thumbnails/extract`) and
+media sampling (`/media-samples/run`) carry it the same way, and the core's
+resolve answer adds one for rebuilds, progressive remux and theme conversion.
+A node exchanges it at the core's `sources/open` route, runs FFmpeg on the path
+the core approves, never on `input_path`, and renews it while the job runs; a
+source the core stops renewing ends the job. A missing or refused grant answers
+`400`, a node mount that does not show the approved revision `409`, and a core
+the node cannot reach `503`. A node with core source access reads the approved
+revision from the core through a loopback relay instead of its own mount, and
+answers a start `409` when its text subtitle burn-in cannot be staged. The
+download execution fingerprint leaves `source_grant` out. See
+[source grants](architecture/transcode-nodes.md#source-grants) and
+[core source access](architecture/transcode-nodes.md#core-source-access).
+
+A start also names the playback session it serves: `playback_session_id`,
+`user_id`, `profile_id` and `media_file_id`. The node files its session record
+and stream telemetry under them; it verifies no stream token to learn them.

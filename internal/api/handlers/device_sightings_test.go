@@ -66,7 +66,7 @@ func impersonating(ctx context.Context) context.Context {
 
 func newDeviceSightingsPlaybackHandler(t *testing.T, store userstore.UserStore, sightings *DeviceSightings) *PlaybackHandler {
 	t.Helper()
-	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0), testPlaybackFileResolver{file: v3HandlerFixtureFile(t)})
+	handler := newKeyedPlaybackHandler(playback.NewSessionManager(0, 0), testPlaybackFileResolver{file: v3HandlerFixtureFile(t)})
 	handler.SettingsRepo = &mutablePlaybackSettingsV3{values: map[string]string{}}
 	handler.ItemAccess = allowAllPlaybackItemAccess{}
 	handler.StoreProvider = testUserStoreProvider{store: store}

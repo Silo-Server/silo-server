@@ -3,9 +3,13 @@ package opslog
 import (
 	"context"
 	"log/slog"
+	"math"
 	"net"
+	"strings"
 	"sync"
 	"testing"
+	"time"
+	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/prometheus/client_golang/prometheus"
@@ -140,4 +144,32 @@ func insertFailedDrops(t *testing.T) float64 {
 		}
 	}
 	return 0
+}
+
+// What a node supplies is made storable before the insert, so a bad field
+// costs neither the row nor the batch its single statement.
+func TestNormalizeNodeEntry(t *testing.T) {
+	now := time.Date(2026, 11, 15, 12, 0, 0, 0, time.UTC)
+	tooBig := math.MaxInt32 + 1
+	entry := NormalizeNodeEntry(Entry{
+		Timestamp: now, NodeID: "spoofed",
+		Level: strings.Repeat("l", 100), Component: strings.Repeat("é", 100),
+		RequestID: strings.Repeat("r", 1000), ClientIP: "not-an-address", UserID: &tooBig,
+	}, "gpu-1#7", now)
+	if entry.NodeID != "gpu-1#7" || len(entry.Level) != nodeEntryMaxLevel || entry.ClientIP != "" || entry.UserID != nil ||
+		len(entry.RequestID) != nodeEntryMaxID || len(entry.Component) > nodeEntryMaxComponent || !utf8.ValidString(entry.Component) {
+		t.Fatalf("normalized = %+v", entry)
+	}
+	for raw, want := range map[string]string{
+		"192.0.2.7": "192.0.2.7", " 2001:db8::1 ": "2001:db8::1", "192.0.2.7:4410": "192.0.2.7",
+		"[2001:db8::1]:443": "2001:db8::1", "fe80::1%eth0": "fe80::1", "": "", "192.0.2": "",
+	} {
+		if got := NormalizeNodeEntry(Entry{ClientIP: raw, Timestamp: now}, "n", now).ClientIP; got != want {
+			t.Errorf("client_ip %q = %q, want %q", raw, got, want)
+		}
+	}
+	userID := 42
+	if got := NormalizeNodeEntry(Entry{UserID: &userID, Timestamp: now}, "n", now).UserID; got == nil || *got != 42 {
+		t.Errorf("a valid user_id was changed to %v", got)
+	}
 }

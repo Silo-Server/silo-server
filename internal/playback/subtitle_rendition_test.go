@@ -1673,7 +1673,7 @@ func TestCopyRemuxSubtitleRenditionRealFFmpeg(t *testing.T) {
 	// the assembled segments, from the start and after a restart mid-stream,
 	// whose seek lands on the keyframe before its segment.
 	t.Run("planned", func(t *testing.T) {
-		if _, err := keyframes.Load(base); err != nil {
+		if _, err := keyframes.Load(t.Context(), base); err != nil {
 			t.Fatal(err)
 		}
 		session, err := StartTranscode(ctx, TranscodeOpts{

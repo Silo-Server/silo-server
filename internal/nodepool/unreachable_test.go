@@ -70,7 +70,7 @@ func TestIsConnectFailure(t *testing.T) {
 func TestPlannerSkipsTranscodeNodeMarkedUnreachable(t *testing.T) {
 	dead := &Node{ID: 1, URL: "http://dead:8080", Type: NodeTypeTranscode, Enabled: true, Healthy: true}
 	live := &Node{ID: 2, URL: "http://live:8080", Type: NodeTypeTranscode, Enabled: true, Healthy: true, ActiveJobs: 3}
-	transcodes := NewTranscodePool()
+	transcodes := newKeyedTranscodePool()
 	transcodes.SetNodes([]*Node{dead, live})
 	planner := NewPlanner(NewProxyPool(), transcodes)
 
@@ -109,7 +109,7 @@ func flakyHealthNode(t *testing.T, failures int32) (string, *atomic.Int32) {
 			w.WriteHeader(http.StatusServiceUnavailable)
 			return
 		}
-		_ = json.NewEncoder(w).Encode(healthResponse{Status: "ok", ActiveJobs: 1})
+		_ = json.NewEncoder(w).Encode(healthResponse{Status: "ok", ActiveJobs: 1, NodeControlVersion: NodeControlVersion})
 	}))
 	t.Cleanup(server.Close)
 	return server.URL, &calls
@@ -134,7 +134,7 @@ func peerAnnouncement(t *testing.T, nodeURL string) string {
 
 func newUnreachableFixture(t *testing.T, nodeURL string) *unreachableFixture {
 	t.Helper()
-	pool := NewTranscodePool()
+	pool := newKeyedTranscodePool()
 	pool.SetNodes([]*Node{{ID: 7, Name: "worker", URL: nodeURL, Type: NodeTypeTranscode, Enabled: true, Healthy: true}})
 	f := &unreachableFixture{pool: pool, planner: NewPlanner(NewProxyPool(), pool)}
 	f.checker = NewHealthChecker(NewProxyPool(), pool, nil)
@@ -312,7 +312,7 @@ func TestUnreachableMarkSurvivesPoolReload(t *testing.T) {
 	row := func() []*Node {
 		return []*Node{{ID: 3, URL: "http://node:8080/", Type: NodeTypeTranscode, Enabled: true, Healthy: true}}
 	}
-	pool := NewTranscodePool()
+	pool := newKeyedTranscodePool()
 	pool.SetNodes(row())
 	planner := NewPlanner(NewProxyPool(), pool)
 
@@ -339,7 +339,7 @@ func TestUnreachableMarkSurvivesPoolReload(t *testing.T) {
 }
 
 func TestMarkUnreachableCoversEveryEntryForTheEndpoint(t *testing.T) {
-	pool := NewTranscodePool()
+	pool := newKeyedTranscodePool()
 	pool.SetNodes([]*Node{
 		{ID: 1, URL: "http://worker:8080", Type: NodeTypeTranscode, Enabled: true, Healthy: true},
 		{ID: 2, URL: "http://worker:8080/", Type: NodeTypeTranscode, Enabled: true, Healthy: true},
@@ -358,7 +358,7 @@ func TestHealthResultForAnotherNodeDoesNotClearTheMark(t *testing.T) {
 	row := func() []*Node {
 		return []*Node{{ID: 4, URL: "http://worker:8080", Type: NodeTypeTranscode, Enabled: true, Healthy: true}}
 	}
-	pool := NewTranscodePool()
+	pool := newKeyedTranscodePool()
 	pool.SetNodes(row())
 	pool.MarkUnreachable("http://worker:8080")
 
@@ -372,7 +372,7 @@ func TestHealthResultForAnotherNodeDoesNotClearTheMark(t *testing.T) {
 
 func TestRecheckRestoresEveryEntryForTheEndpoint(t *testing.T) {
 	nodeURL, _ := flakyHealthNode(t, 0)
-	pool := NewTranscodePool()
+	pool := newKeyedTranscodePool()
 	pool.SetNodes([]*Node{
 		{ID: 1, URL: nodeURL, Type: NodeTypeTranscode, Enabled: true, Healthy: true},
 		{ID: 2, URL: nodeURL + "/", Type: NodeTypeTranscode, Enabled: true, Healthy: true},
@@ -393,10 +393,10 @@ func TestRecheckRestoresEveryEntryForTheEndpoint(t *testing.T) {
 // send it new work until the next sweep.
 func TestRecheckPublishesTheDrainStateTheNodeAnsweredWith(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_ = json.NewEncoder(w).Encode(healthResponse{Status: string(DrainStateDraining)})
+		_ = json.NewEncoder(w).Encode(healthResponse{Status: string(DrainStateDraining), NodeControlVersion: NodeControlVersion})
 	}))
 	t.Cleanup(server.Close)
-	pool := NewTranscodePool()
+	pool := newKeyedTranscodePool()
 	pool.SetNodes([]*Node{{ID: 1, URL: server.URL, Type: NodeTypeTranscode, Enabled: true, Healthy: true}})
 	checker := NewHealthChecker(NewProxyPool(), pool, nil)
 	checker.ReportUnreachable(server.URL)

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/downloadprepare"
+	"github.com/Silo-Server/silo-server/internal/nodeauth"
 	"github.com/Silo-Server/silo-server/internal/nodepool"
 	"github.com/Silo-Server/silo-server/internal/playback"
 )
@@ -55,7 +56,7 @@ type progressRemotePreparer struct {
 	polls       int
 }
 
-func (p *progressRemotePreparer) Prepare(ctx context.Context, nodeURL, secret string, req downloadprepare.Request) (downloadprepare.Result, error) {
+func (p *progressRemotePreparer) Prepare(ctx context.Context, nodeURL string, secret nodeauth.Keyring, req downloadprepare.Request) (downloadprepare.Result, error) {
 	select {
 	case <-p.polled:
 	case <-ctx.Done():
@@ -65,7 +66,7 @@ func (p *progressRemotePreparer) Prepare(ctx context.Context, nodeURL, secret st
 	return p.recordingRemotePreparer.Prepare(ctx, nodeURL, secret, req)
 }
 
-func (p *progressRemotePreparer) Progress(_ context.Context, _, _, artifactID string) (downloadprepare.Progress, error) {
+func (p *progressRemotePreparer) Progress(_ context.Context, _ string, _ nodeauth.Keyring, artifactID string) (downloadprepare.Progress, error) {
 	p.mu.Lock()
 	p.polls++
 	polls := p.polls

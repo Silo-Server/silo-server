@@ -117,7 +117,7 @@ the remaining settings in the web interface.
 | `make dev-frontend` | Vite dev server with HMR |
 | `make dev-backend` | Run Go backend (integrated mode) |
 | `make dev-proxy` | Run a standalone proxy node |
-| `make dev-transcode` | Run a standalone transcode node |
+| `make dev-transcode` | Run a transcode node against a running server (needs `SILO_CORE_URL` and `SILO_NODE_KEY`) |
 | `make migrate-create NAME=add_thing` | Create a timestamped Goose SQL migration |
 | `make migrate-validate` | Validate Goose migration files without touching a database |
 | `make migrate-status` | Show Goose migration status using Silo's bootstrapping runner |
@@ -139,8 +139,9 @@ parallel PRs; the `001`-style files are converted legacy migrations that keep
 their original numbers so existing `schema_versions` rows bootstrap into Goose
 without replaying old SQL. Do not renumber them.
 
-Only the integrated/API server applies migrations at runtime. Proxy and
-transcode modes never touch the schema.
+Only the integrated/API server applies migrations at runtime. A proxy node
+reads the database but never changes the schema; a transcode node has no
+database connection at all.
 
 For existing installs, use `make migrate-status` and `make migrate-up` rather
 than the Goose CLI: those targets copy legacy `schema_versions` rows into

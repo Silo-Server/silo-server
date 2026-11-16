@@ -8,6 +8,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/Silo-Server/silo-server/internal/nodeauth/nodeauthtest"
+	"github.com/Silo-Server/silo-server/internal/nodepool/nodepooltest"
+
 	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/nodepool"
 	"github.com/Silo-Server/silo-server/internal/playback"
@@ -28,15 +31,16 @@ func probeProxyStub(t *testing.T, features ...string) *httptest.Server {
 }
 
 func probeHandler(proxies ...*httptest.Server) *PlaybackHandler {
-	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0))
+	handler := newKeyedPlaybackHandler(playback.NewSessionManager(0, 0))
 	handler.JWTSecret = "test-secret"
+	handler.NodeKeys = nodeauthtest.SameKey("test-secret")
 	nodes := make([]*nodepool.Node, 0, len(proxies))
 	for i, proxy := range proxies {
 		nodes = append(nodes, &nodepool.Node{ID: i + 1, URL: proxy.URL, Enabled: true, Healthy: true})
 	}
 	pool := nodepool.NewProxyPool()
 	pool.SetNodes(nodes)
-	handler.NodePlanner = nodepool.NewPlanner(pool, nodepool.NewTranscodePool())
+	handler.NodePlanner = nodepool.NewPlanner(pool, nodepooltest.NewTranscodePool())
 	return handler
 }
 
