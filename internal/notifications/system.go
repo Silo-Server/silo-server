@@ -926,7 +926,13 @@ type backfillStateDB interface {
 	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
 }
 
+// backfillStateTimeout bounds each checkpoint statement, so a lock session
+// that stopped answering fails the rebuild instead of stalling it.
+const backfillStateTimeout = 10 * time.Second
+
 func loadBackfillCheckpoint(ctx context.Context, db backfillStateDB, task string) (string, *time.Time, error) {
+	ctx, cancel := context.WithTimeout(ctx, backfillStateTimeout)
+	defer cancel()
 	var key *string
 	var completedAt *time.Time
 	err := db.QueryRow(ctx,
@@ -947,6 +953,8 @@ func loadBackfillCheckpoint(ctx context.Context, db backfillStateDB, task string
 }
 
 func saveBackfillCheckpoint(ctx context.Context, db backfillStateDB, task, key string) error {
+	ctx, cancel := context.WithTimeout(ctx, backfillStateTimeout)
+	defer cancel()
 	_, err := db.Exec(ctx, `
 		INSERT INTO notification_backfill_state (task, last_processed_key, started_at, updated_at)
 		VALUES ($1, $2, now(), now())
@@ -961,6 +969,8 @@ func saveBackfillCheckpoint(ctx context.Context, db backfillStateDB, task, key s
 }
 
 func resetBackfillCheckpoint(ctx context.Context, db backfillStateDB, task string) error {
+	ctx, cancel := context.WithTimeout(ctx, backfillStateTimeout)
+	defer cancel()
 	_, err := db.Exec(ctx, `
 		INSERT INTO notification_backfill_state (task, last_processed_key, started_at, updated_at, completed_at)
 		VALUES ($1, NULL, now(), now(), NULL)
@@ -977,6 +987,8 @@ func resetBackfillCheckpoint(ctx context.Context, db backfillStateDB, task strin
 }
 
 func completeBackfillCheckpoint(ctx context.Context, db backfillStateDB, task string) error {
+	ctx, cancel := context.WithTimeout(ctx, backfillStateTimeout)
+	defer cancel()
 	_, err := db.Exec(ctx, `
 		UPDATE notification_backfill_state SET completed_at = now(), updated_at = now() WHERE task = $1`,
 		task)
