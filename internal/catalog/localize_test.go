@@ -128,6 +128,19 @@ func TestApplyItemLocalizationKeepsLocalSidecarArtwork(t *testing.T) {
 	}
 }
 
+// A poster taken from the movie's video is stored under the same local keys as
+// a sidecar's copy, but it is no library artwork: a localized poster replaces it.
+func TestApplyItemLocalizationReplacesFramePoster(t *testing.T) {
+	item := baseItem()
+	item.PosterPath = "local/movies/c1/0badf00d/poster/original.webp"
+	item.PosterSourcePath = StillSourceFramePrefix + "42?v=1000-1"
+	loc := &models.MediaItemLocalization{PosterPath: "posters/fr.jpg", PosterSourcePath: "tmdb://fr-poster.jpg", PosterThumbhash: "hash-fr"}
+	got := applyItemLocalization(item, loc)
+	if got.PosterPath != "posters/fr.jpg" || got.PosterSourcePath != "tmdb://fr-poster.jpg" {
+		t.Errorf("poster = %q from %q, want the localized poster over the frame", got.PosterPath, got.PosterSourcePath)
+	}
+}
+
 func TestApplyItemLocalizationDoesNotMutateBase(t *testing.T) {
 	item := baseItem()
 	_ = applyItemLocalization(item, &models.MediaItemLocalization{Title: "Titre"})

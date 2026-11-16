@@ -394,7 +394,9 @@ precedence order, each tried with `.jpg`, `.jpeg`, `.png`, `.webp`, `.tbn`,
   shows a frame. Any other image replaces a frame: a sidecar or admin pick as
   usual, and in a fill-empty refresh (initial match, scheduled refresh) the
   merge treats an unlocked frame poster as empty, so even an unrated provider
-  poster wins; with no image offered the frame stays. Known limits: only the
+  poster wins; with no image offered the frame stays. A localized provider
+  poster also replaces a frame for viewers in its language, although the frame
+  sits under the `local/` keys that otherwise mark library artwork. Known limits: only the
   poster slot is filled, so a detail screen that shows only a backdrop still
   shows none; a frame saved between a refresh's read and its write can be
   overwritten by that write and is taken again on the next run; with
