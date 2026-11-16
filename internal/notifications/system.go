@@ -598,7 +598,9 @@ const interestRebuildTask = "interest_rebuild"
 // favorites, watchlist, and watch progress for every profile. Checkpointed
 // per profile so a crash resumes with at most one profile of repeated work;
 // recomputes are idempotent upserts. Completed runs reset and start over
-// (the task doubles as periodic drift repair).
+// (the task doubles as periodic drift repair). One server rebuilds at a time:
+// a call made while another server's rebuild holds the cluster lock returns
+// ErrInterestRebuildRunning without doing any work.
 func (s *System) RebuildInterest(ctx context.Context, progress func(percent int, message string)) error {
 	report := func(percent int, message string) {
 		if progress != nil {
@@ -608,6 +610,11 @@ func (s *System) RebuildInterest(ctx context.Context, progress func(percent int,
 	if s.users == nil {
 		return fmt.Errorf("interest rebuild requires a user lister")
 	}
+	claim, err := s.claimInterestRebuild(ctx)
+	if err != nil {
+		return err
+	}
+	defer claim.release(ctx)
 
 	checkpoint, completedAt, err := s.loadBackfillCheckpoint(ctx, interestRebuildTask)
 	if err != nil {
@@ -656,6 +663,9 @@ func (s *System) RebuildInterest(ctx context.Context, progress func(percent int,
 				s.logger.WarnContext(ctx, "interest rebuild: profile failed",
 					"user_id", user.ID, "profile_id", profile.ID, "error", err)
 			}
+			if err := claim.check(ctx); err != nil {
+				return err
+			}
 			if err := s.saveBackfillCheckpoint(ctx, interestRebuildTask, key); err != nil {
 				return err
 			}
@@ -665,6 +675,9 @@ func (s *System) RebuildInterest(ctx context.Context, progress func(percent int,
 			fmt.Sprintf("Rebuilt interest for %d profiles", processed))
 	}
 
+	if err := claim.check(ctx); err != nil {
+		return err
+	}
 	if err := s.completeBackfillCheckpoint(ctx, interestRebuildTask); err != nil {
 		return err
 	}
