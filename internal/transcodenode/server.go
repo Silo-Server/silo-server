@@ -1052,6 +1052,7 @@ func (s *Server) handleDownloadPrepare(w http.ResponseWriter, r *http.Request) {
 	defer func() { _ = source.Close() }()
 	opts := req.TranscodeOpts(cfg.Playback.FFmpegPath, cfg.Playback.HWAccel, cfg.Playback.HWDevice, s.ffmpegSink)
 	opts.InputPath = source.Input()
+	opts.ToneMapSourceRevision = toneMapRevisionOnNode(opts.ToneMapSourceRevision, source)
 	artifactRoot := s.artifactRoot
 	if err := os.MkdirAll(artifactRoot, 0o755); err != nil {
 		http.Error(w, "artifact directory unavailable", http.StatusInternalServerError)
@@ -1751,7 +1752,7 @@ func (s *Server) handleStart(w http.ResponseWriter, r *http.Request) {
 		ToneMapSourceKind:          req.ToneMapSourceKind,
 		ToneMapRecipeVersion:       req.ToneMapRecipeVersion,
 		ToneMapPreflightRequired:   req.ToneMapPreflightRequired,
-		ToneMapSourceRevision:      req.ToneMapSourceRevision,
+		ToneMapSourceRevision:      toneMapRevisionOnNode(req.ToneMapSourceRevision, source),
 		ToneMapDVConfigPresent:     req.ToneMapDVConfigPresent,
 		ToneMapDVBLCompatIDPresent: req.ToneMapDVBLCompatIDPresent,
 		ToneMapDVBLPresent:         req.ToneMapDVBLPresent,
@@ -1792,7 +1793,7 @@ func (s *Server) handleStart(w http.ResponseWriter, r *http.Request) {
 		ExecutionMode:      "transcode_node",
 		FFmpegLogSink:      s.ffmpegSink,
 	}
-	opts.SubtitleRenditionTracks, opts.SubtitleRenditionSource = req.SubtitleRenditionTracks, req.SubtitleRenditionSource
+	opts.SubtitleRenditionTracks, opts.SubtitleRenditionSource = req.SubtitleRenditionTracks, renditionSourceOnNode(req.SubtitleRenditionSource, source)
 
 	if opts.HWAccel == "" && cfg.Playback.HWAccel != "" {
 		opts.HWAccel = cfg.Playback.HWAccel
@@ -2197,6 +2198,8 @@ func (s *Server) trackRebuilt(ctx context.Context, sessionID string, session *pl
 func (s *Server) reconstructOpts(sessionID string, card playback.RecipeCard, cfg *config.Config, source nodesource.Source) playback.TranscodeOpts {
 	opts := card.TranscodeOpts(s.sessionOutputDir(sessionID), cfg.Playback.FFmpegPath, s.ffmpegSink)
 	opts.InputPath = source.Input()
+	opts.SubtitleRenditionSource = renditionSourceOnNode(opts.SubtitleRenditionSource, source)
+	opts.ToneMapSourceRevision = toneMapRevisionOnNode(opts.ToneMapSourceRevision, source)
 	opts.SessionID = sessionID
 	opts.Reconstructed = true
 	// Recipe cards preserve the original launch tuning, but reconstruction must

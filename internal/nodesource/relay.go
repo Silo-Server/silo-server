@@ -234,6 +234,7 @@ func (h *coreHandle) Input() string            { return h.e.url }
 func (h *coreHandle) Identity() string         { return h.e.etag }
 func (h *coreHandle) Size() int64              { return h.e.size }
 func (h *coreHandle) ModTime() time.Time       { return h.e.modTime }
+func (h *coreHandle) InputModTime() time.Time  { return h.e.modTime }
 func (h *coreHandle) Context() context.Context { return h.ctx }
 func (h *coreHandle) Err() error               { return context.Cause(h.ctx) }
 
