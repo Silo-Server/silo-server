@@ -13101,7 +13101,10 @@ describe("usePlaybackSession mid-stream reconnect", () => {
 
     act(() =>
       result.current.recoverFromFailure(
-        { classification: "startup_timeout", message: "Playback showed no frame before its startup deadline." },
+        {
+          classification: "startup_timeout",
+          message: "Playback showed no frame before its startup deadline.",
+        },
         0,
       ),
     );
