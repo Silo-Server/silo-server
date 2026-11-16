@@ -135,6 +135,11 @@ func deriveFromMasterKey(masterKey []byte, info string, length int, what string)
 // instead of silently mishandling a newer ciphertext.
 var ErrUnknownVersion = errors.New("secret: unknown ciphertext version")
 
+// ErrAuthFailed is returned by Decrypt when a well-formed ciphertext does not
+// authenticate: it was sealed under another SECRET_KEY, with different
+// associated data (a settings row renamed in SQL), or it was altered.
+var ErrAuthFailed = errors.New("secret: authenticate ciphertext")
+
 // Cipher encrypts and decrypts short credential strings with AES-256-GCM. The
 // data key is derived once in New and the AEAD is built once and reused, so the
 // hot path is a single Seal/Open with no per-call key schedule. A Cipher is
@@ -217,7 +222,7 @@ func (c *Cipher) openV1(encoded, aad string) (string, error) {
 	nonce, body := sealed[:nonceSize], sealed[nonceSize:]
 	plaintext, err := c.gcm.Open(nil, nonce, body, []byte(aad))
 	if err != nil {
-		return "", fmt.Errorf("secret: authenticate ciphertext: %w", err)
+		return "", fmt.Errorf("%w: %w", ErrAuthFailed, err)
 	}
 	return string(plaintext), nil
 }
