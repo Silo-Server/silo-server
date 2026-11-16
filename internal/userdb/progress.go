@@ -965,12 +965,20 @@ func ListCompletedHistory(db *sql.DB, query userstore.CompletedHistoryQuery) ([]
 		limit = 500
 	}
 	filters, args := completedHistoryFilterSQL(query.ProfileID, query.MediaItemIDs, query.IncludeSources, query.ExcludeSources)
+	// With a media filter, idx_watch_history_item_witness finds the rows
+	// directly. The unary plus (a no-op on the value) keeps SQLite from
+	// picking idx_watch_history_profile_watched for the ORDER BY or the key
+	// bound instead, which would walk the whole profile.
+	watchedAt := "h.watched_at"
+	if len(compactText(query.MediaItemIDs)) > 0 {
+		watchedAt = "+h.watched_at"
+	}
 	// The key is the stored text, compared the way ORDER BY sorts it. The
 	// leading watched_at >= ? lets idx_watch_history_profile_watched bound
 	// the scan; like ListHistoryPage, this avoids row-value syntax.
 	if query.After != nil {
 		filters += `
-		  AND h.watched_at >= ? AND (h.watched_at > ? OR h.id > ?)`
+		  AND ` + watchedAt + ` >= ? AND (h.watched_at > ? OR h.id > ?)`
 		args = append(args, query.After.WatchedAt, query.After.WatchedAt, query.After.ID)
 	}
 	args = append(args, limit, query.Offset)
@@ -980,7 +988,7 @@ func ListCompletedHistory(db *sql.DB, query userstore.CompletedHistoryQuery) ([]
 		WHERE h.profile_id = ?
 		  AND h.completed = 1
 		`+filters+completedHistoryVisibleSQL+`
-		ORDER BY h.watched_at ASC, h.id ASC
+		ORDER BY `+watchedAt+` ASC, h.id ASC
 		LIMIT ? OFFSET ?
 	`, args...)
 	if err != nil {

@@ -1633,6 +1633,7 @@ const completedHistoryPageSize = 500
 func listAllCompletedHistory(ctx context.Context, store completedHistoryLister, query userstore.CompletedHistoryQuery) ([]userstore.WatchHistoryEntry, error) {
 	var all []userstore.WatchHistoryEntry
 	query.Limit = completedHistoryPageSize
+	query.Offset = 0 // the cursor pages; an offset would skip rows on every page
 	for {
 		rows, err := store.ListCompletedHistory(ctx, query)
 		if err != nil {
