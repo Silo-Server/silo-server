@@ -77,7 +77,11 @@ import {
 import { resolveVersionAudioLanguage } from "../utils/effectiveAudioLanguage";
 import { resolveEffectiveVersion } from "../utils/resolveEffectiveVersion";
 import { StartupGuard } from "../utils/startupGuard";
-import { SegmentRetryBudget, segmentRetryDelayMs } from "../utils/segmentRetry";
+import {
+  SegmentRetryBudget,
+  StartupSegmentBudget,
+  segmentRetryDelayMs,
+} from "../utils/segmentRetry";
 import { isTimeBuffered } from "../utils/bufferPolicy";
 import { isSafariBrowserV3, resolveHLSEngineV3 } from "../utils/hlsEngine";
 import { isFirefoxUserAgent } from "../utils/browser";
@@ -1312,6 +1316,7 @@ export function VideoPlayer({
 
       const activeHls = hlsRef.current;
       hlsRef.current = null;
+      activeHls?.stopLoad();
       activeHls?.destroy();
 
       const video = videoRef.current;
@@ -3154,6 +3159,9 @@ export function VideoPlayer({
     // Counts this transport's failed loads, so a segment that keeps failing
     // stops being requested and a passing hiccup is still retried.
     const segmentRetry = new SegmentRetryBudget();
+    // Bounds the load a start that has not drawn a frame yet can generate: a
+    // plan that never decodes must not fetch every segment the playlist lists.
+    const startupSegmentBudget = new StartupSegmentBudget();
     let recoveryTimer: ReturnType<typeof setTimeout> | null = null;
     let playbackStarted = false;
     let autoplayInFlight = false;
@@ -3449,6 +3457,57 @@ export function VideoPlayer({
               ) {
                 mediaOutageRef.current = true;
                 outageBufferedEndRef.current = bufferedEndSeconds(video);
+              }
+              // A start that has drawn no frame yet is not replaying a blip:
+              // every failed segment is another request against a plan that may
+              // never produce one. Back the ladder off inside the startup
+              // window and stop the fetches once its budget is spent, so a dead
+              // plan asks for a handful of segments instead of every segment the
+              // playlist lists. hls.js reports these below its fatal threshold
+              // (it retries the fragment and then moves on), so the fatal branch
+              // further down never saw them. Once the transport has shown a
+              // frame the budget reports `ignore` and the recovery below is
+              // untouched: a stall mid-playback is the reconnect's business.
+              if (
+                !data.fatal &&
+                !destroyed &&
+                data.type === Hls.ErrorTypes.NETWORK_ERROR &&
+                !subtitleLoad
+              ) {
+                const verdict = startupSegmentBudget.recordFailure(
+                  !(startupGuardRef.current?.isStarting() ?? false),
+                );
+                if (verdict.kind === "stop") {
+                  console.error(
+                    "[hls.js] Startup produced no frame across its segment budget, giving up",
+                    { details: data.details, url: data.frag?.url ?? data.url },
+                  );
+                  hls?.stopLoad();
+                  hls?.destroy();
+                  hlsRef.current = null;
+                  if (
+                    !reportCurrentPlanFailureRef.current({
+                      classification: "network_error",
+                      message: "HLS could not load a segment before the start produced a frame.",
+                    })
+                  ) {
+                    setError("Playback failed. Please try again.");
+                  }
+                  return;
+                }
+                if (verdict.kind === "hold") {
+                  if (recoveryTimer !== null) return;
+                  console.warn(
+                    `[hls.js] Startup has no frame yet, holding segment loads for ${verdict.delayMs}ms`,
+                  );
+                  hls?.stopLoad();
+                  recoveryTimer = setTimeout(() => {
+                    recoveryTimer = null;
+                    if (destroyed || startupGuardRef.current?.hasFailed()) return;
+                    hls?.startLoad();
+                  }, verdict.delayMs);
+                }
+                return;
               }
               if (!data.fatal || destroyed) return;
 

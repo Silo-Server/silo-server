@@ -74,3 +74,59 @@ export class SegmentRetryBudget {
     this.failures.clear();
   }
 }
+
+/**
+ * Failures allowed while a start has not drawn a single frame.
+ *
+ * A start that never renders is not replaying a blip: every failed segment is
+ * another request against a plan that may never produce one. One deployment
+ * fetched 1 061 segments in 85 s on such a plan before the startup deadline
+ * ended it — server load with no possible success that also buried the real
+ * failure. This budget holds the load ladder back inside the startup window so
+ * the same plan asks for a handful of segments instead of all of them, and
+ * ends the route once the budget is spent.
+ */
+export const MAX_STARTUP_SEGMENT_FAILURES = 10;
+
+const STARTUP_RETRY_BASE_DELAY_MS = 1_000;
+const STARTUP_RETRY_MAX_DELAY_MS = 8_000;
+
+/**
+ * What the caller should do with a failed HLS load while a start is unframed.
+ *
+ * - `ignore`: the transport has shown a frame, so this is not the startup
+ *   window's problem; the caller keeps its ordinary retry cadence.
+ * - `hold`: pause fetching for `delayMs` so the next attempt backs off.
+ * - `stop`: the startup budget is spent; stop fetching and fail the route.
+ */
+export type StartupSegmentVerdict =
+  | { kind: "ignore" }
+  | { kind: "hold"; delayMs: number }
+  | { kind: "stop" };
+
+/**
+ * Counts failed loads for one transport until it shows a frame.
+ *
+ * `recordFailure(framed)` takes the frame state from the caller because the
+ * player's startup guard is the only thing that knows whether a frame reached
+ * the screen. Once framed, every call reports `ignore`, so playback that
+ * stalls after it started keeps the recovery it had.
+ */
+export class StartupSegmentBudget {
+  private failures = 0;
+
+  recordFailure(framed: boolean): StartupSegmentVerdict {
+    if (framed) return { kind: "ignore" };
+
+    this.failures += 1;
+    if (this.failures > MAX_STARTUP_SEGMENT_FAILURES) return { kind: "stop" };
+
+    // 1s, 2s, 4s, then the 8s cap: the startup window's load ladder, not
+    // hls.js's per-fragment one.
+    const delayMs = Math.min(
+      STARTUP_RETRY_BASE_DELAY_MS * 2 ** (this.failures - 1),
+      STARTUP_RETRY_MAX_DELAY_MS,
+    );
+    return { kind: "hold", delayMs };
+  }
+}
