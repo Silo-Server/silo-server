@@ -28176,7 +28176,10 @@
             "$ref": "#/components/schemas/WatchRollup"
           },
           "user_rating": {
+            "description": "The profile's rating, 1 to 10 (see getPersonalRatingCapabilities); absent when unrated",
             "format": "int64",
+            "maximum": 10,
+            "minimum": 1,
             "type": "integer"
           },
           "user_state": {
@@ -44530,6 +44533,44 @@
         ],
         "type": "object"
       },
+      "PersonalRatingCapabilities": {
+        "additionalProperties": false,
+        "properties": {
+          "allowed": {
+            "description": "Whether the current principal may use the capability",
+            "type": "boolean"
+          },
+          "max_score": {
+            "description": "The highest rating setRating accepts; ratings run from 1. A server without this document takes whole stars, 1 to 5",
+            "examples": [
+              10
+            ],
+            "format": "int64",
+            "type": "integer"
+          },
+          "revision": {
+            "description": "Opaque revision of this document",
+            "type": "string"
+          },
+          "state": {
+            "description": "Support and configuration state, not health",
+            "enum": [
+              "available",
+              "disabled",
+              "not_configured",
+              "unsupported"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "max_score",
+          "revision",
+          "state",
+          "allowed"
+        ],
+        "type": "object"
+      },
       "PlaybackAccepted": {
         "additionalProperties": false,
         "properties": {
@@ -48907,11 +48948,13 @@
             "type": "string"
           },
           "rating": {
-            "description": "Stars, 1 to 5",
+            "description": "1 to 10; clients show it as five stars with half stars (7 is 3.5 stars)",
             "examples": [
-              4
+              7
             ],
             "format": "int64",
+            "maximum": 10,
+            "minimum": 1,
             "type": "integer"
           }
         },
@@ -48926,12 +48969,12 @@
         "additionalProperties": false,
         "properties": {
           "rating": {
-            "description": "Stars, 1 to 5",
+            "description": "1 to 10; clients show it as five stars with half stars (7 is 3.5 stars)",
             "examples": [
-              4
+              7
             ],
             "format": "int64",
-            "maximum": 5,
+            "maximum": 10,
             "minimum": 1,
             "type": "integer"
           }
@@ -56543,7 +56586,7 @@
             "type": "boolean"
           },
           "export_ratings_enabled": {
-            "description": "Send the profile's star ratings to the provider (stars times two) and clear removed ones.",
+            "description": "Send the profile's ratings, 1 to 10, to the provider unchanged and clear removed ones.",
             "type": "boolean"
           },
           "export_unwatched_enabled": {
@@ -56563,7 +56606,7 @@
             "type": "boolean"
           },
           "import_ratings_enabled": {
-            "description": "Import the provider's movie and series ratings as stars (1-2 is 1 star, 9-10 is 5 stars).",
+            "description": "Import the provider's movie and series ratings, 1 to 10, unchanged.",
             "type": "boolean"
           },
           "import_watched_enabled": {
@@ -208888,6 +208931,207 @@
           "ratings"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-service-backed": true
+      }
+    },
+    "/api/v2/ratings/capabilities": {
+      "get": {
+        "operationId": "getPersonalRatingCapabilities",
+        "parameters": [
+          {
+            "description": "Optional first precondition, evaluated before If-None-Match: a tag that does not match the current representation is 412 precondition_failed.",
+            "in": "header",
+            "name": "If-Match",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "The household profile acting for this request; it must belong to the authenticated account.",
+            "in": "header",
+            "name": "X-Profile-Id",
+            "required": true,
+            "schema": {
+              "examples": [
+                "1"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked",
+            "in": "header",
+            "name": "X-Profile-Token",
+            "schema": {
+              "examples": [
+                "pvt_5f3a9c1e7b2d4e8fa0c6"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "If-None-Match",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PersonalRatingCapabilities"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "ETag": {
+                "description": "The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "304": {
+            "description": "The representation named by If-None-Match is current; no body.",
+            "headers": {
+              "ETag": {
+                "description": "The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Acceptable"
+          },
+          "412": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Precondition Failed",
+            "headers": {
+              "ETag": {
+                "description": "The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Describe the rating scale: ratings from 1 to max_score.",
+        "tags": [
+          "ratings"
+        ],
+        "x-silo-class": "profile_scoped",
+        "x-silo-conditional": true,
         "x-silo-service-backed": true
       }
     },

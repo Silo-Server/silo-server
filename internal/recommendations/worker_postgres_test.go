@@ -481,8 +481,8 @@ func TestCacheUserRowsLeaveOutWatchedAndFavoritedTitlesPostgres(t *testing.T) {
 		{`INSERT INTO user_watch_progress(user_id, profile_id, media_item_id, completed, updated_at) VALUES($1, $2, $3, true, NOW())`, []any{userID, profile, watched}},
 		{`INSERT INTO user_favorites(user_id, profile_id, media_item_id) VALUES($1, $2, $3), ($1, $2, $4)`, []any{userID, profile, seedPick, episode}},
 		{`INSERT INTO user_watchlist(user_id, profile_id, media_item_id) VALUES($1, $2, $3)`, []any{userID, profile, watchlist}},
-		{`INSERT INTO user_ratings(user_id, profile_id, media_item_id, rating) VALUES($1, $2, $3, 5), ($1, $2, $4, 5)`, []any{peers[0].userID, peers[0].profile, seedPick, plain[0]}},
-		{`INSERT INTO user_ratings(user_id, profile_id, media_item_id, rating) VALUES($1, $2, $3, 5), ($1, $2, $4, 5)`, []any{peers[1].userID, peers[1].profile, seedPick, plain[0]}},
+		{`INSERT INTO user_ratings(user_id, profile_id, media_item_id, rating) VALUES($1, $2, $3, 10), ($1, $2, $4, 10)`, []any{peers[0].userID, peers[0].profile, seedPick, plain[0]}},
+		{`INSERT INTO user_ratings(user_id, profile_id, media_item_id, rating) VALUES($1, $2, $3, 10), ($1, $2, $4, 10)`, []any{peers[1].userID, peers[1].profile, seedPick, plain[0]}},
 	} {
 		if _, err := pool.Exec(ctx, stmt.query, stmt.args...); err != nil {
 			t.Fatalf("seed %q: %v", stmt.query, err)
@@ -798,7 +798,7 @@ func TestCacheUserRowsDoNotAnchorOnDislikedTitlesPostgres(t *testing.T) {
 		args  []any
 	}{
 		{`INSERT INTO user_watch_progress(user_id, profile_id, media_item_id, completed, updated_at) VALUES($1, $2, $3, true, NOW()), ($1, $2, $4, true, NOW() - INTERVAL '1 day')`, []any{userID, profile, disliked, liked}},
-		{`INSERT INTO user_ratings(user_id, profile_id, media_item_id, rating) VALUES($1, $2, $3, 1)`, []any{userID, profile, disliked}},
+		{`INSERT INTO user_ratings(user_id, profile_id, media_item_id, rating) VALUES($1, $2, $3, 2)`, []any{userID, profile, disliked}},
 	} {
 		if _, err := pool.Exec(ctx, stmt.query, stmt.args...); err != nil {
 			t.Fatalf("seed %q: %v", stmt.query, err)

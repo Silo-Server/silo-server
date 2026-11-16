@@ -1086,9 +1086,9 @@ type RatingService interface {
 	// admits; found is false when the profile has not rated it, and an item
 	// outside the filter is a 404 error.
 	GetRating(ctx context.Context, userID int, profileID, itemID string, access mediacatalog.AccessFilter) (rating mediacatalog.UserRating, found bool, err error)
-	// SetRating records a validated rating of an item the access filter
+	// SetRating records a validated score (1 to 10) of an item the access filter
 	// admits; an item outside it is a 404 error.
-	SetRating(ctx context.Context, userID int, profileID, itemID string, access mediacatalog.AccessFilter, rating int) error
+	SetRating(ctx context.Context, userID int, profileID, itemID string, access mediacatalog.AccessFilter, score int) error
 	DeleteRating(ctx context.Context, userID int, profileID, itemID string) error
 }
 

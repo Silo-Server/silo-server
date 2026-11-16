@@ -347,7 +347,7 @@ func TestDeletingAProfilePurgesItsRecommendationRowsPostgres(t *testing.T) {
 				t.Fatal(err)
 			}
 		}
-		if _, err := pool.Exec(ctx, `INSERT INTO user_ratings(user_id, profile_id, media_item_id, rating) VALUES($1, $2, $3, 5)`, userID, profile, prefix+"movie"); err != nil {
+		if _, err := pool.Exec(ctx, `INSERT INTO user_ratings(user_id, profile_id, media_item_id, rating) VALUES($1, $2, $3, 10)`, userID, profile, prefix+"movie"); err != nil {
 			t.Fatal(err)
 		}
 		if err := repo.UpsertTasteProfile(ctx, userID, profile, axisVector(2500, nil), map[string]int{"rated_5": 1}, "", now); err != nil {

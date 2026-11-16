@@ -485,6 +485,7 @@ export const v2Operations = {
   "GET /api/v2/progress": "listProgress",
   "GET /api/v2/progress/capabilities": "getProgressCapabilities",
   "GET /api/v2/ratings": "listRatings",
+  "GET /api/v2/ratings/capabilities": "getPersonalRatingCapabilities",
   "GET /api/v2/ratings/{item_id}": "getRating",
   "GET /api/v2/recommendations/because-watched/{item_id}": "listBecauseWatched",
   "GET /api/v2/recommendations/discover": "getDiscover",
