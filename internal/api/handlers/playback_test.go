@@ -495,6 +495,7 @@ else
   printf recovered > '` + filepath.Join(outputDir, "seg_00010.ts") + `'
   printf ahead > '` + filepath.Join(outputDir, "seg_00011.ts") + `'
 fi
+printf 'frame=48\nout_time_us=4000000\nprogress=continue\n'
 exec sleep 30
 `
 	if err := os.WriteFile(ffmpegPath, []byte(ffmpeg), 0o755); err != nil {
@@ -605,6 +606,12 @@ func playbackTestBoolInt(value bool) int {
 	return 0
 }
 
+// playbackTestFFmpegProgress is the -progress stream a real video encode writes
+// to stdout while it muxes. A fake transport that stands for a playable encode
+// must report decoded frames: the frame counter is what tells a decode that
+// produced pictures from one that only muxed audio.
+const playbackTestFFmpegProgress = "printf 'frame=48\\nout_time_us=4000000\\nprogress=continue\\n';\n"
+
 func writePlaybackTestFFmpegSleep(t *testing.T, sleepSeconds string) string {
 	t.Helper()
 
@@ -628,6 +635,7 @@ func writePlaybackTestFFmpegSleep(t *testing.T, sleepSeconds string) string {
 		"#EXTINF:2.0,\\nseg_0.m4s\\n#EXTINF:2.0,\\nseg_1.m4s\\n" +
 		"#EXTINF:2.0,\\nseg_2.m4s\\n' > \"$playlist\" ;;\n" +
 		"esac\n" +
+		playbackTestFFmpegProgress +
 		"exec sleep " + sleepSeconds + "\n"
 	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
 		t.Fatalf("write fake ffmpeg: %v", err)
@@ -653,6 +661,7 @@ func writePlaybackTestFFmpegFailingAfterFirstStart(t *testing.T) string {
 		"#EXT-X-MEDIA-SEQUENCE:0\\n#EXT-X-MAP:URI=\"init.mp4\"\\n" +
 		"#EXTINF:2.0,\\nseg_0.m4s\\n#EXTINF:2.0,\\nseg_1.m4s\\n" +
 		"#EXTINF:2.0,\\nseg_2.m4s\\n' > \"$last\"\n" +
+		playbackTestFFmpegProgress +
 		"exec sleep 30\n"
 	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
 		t.Fatalf("write fail-after-first fake ffmpeg: %v", err)

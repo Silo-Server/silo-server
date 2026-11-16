@@ -57,6 +57,14 @@ var (
 	// timeout, and restarts refuse with it: rebuilding the same undecodable
 	// bytes can never succeed, so the caller rotates to another candidate.
 	ErrSourceDecodeRejected = errors.New("transcode source rejected by video decoder")
+	// ErrTranscodeNoVideoFrames reports a video encode generation that muxed
+	// playable-looking segments without decoding a single frame. Segment
+	// existence alone cannot tell that apart from healthy output, so a start
+	// used to declare such a plan ready and leave the client waiting for a
+	// first frame that never came. The verdict is per generation: unlike
+	// ErrSourceDecodeRejected it does not indict the source bytes, only this
+	// execution path's decode, so the caller advances to another path.
+	ErrTranscodeNoVideoFrames = errors.New("transcode muxed segments with no video frames")
 	// ErrStaleSegmentGeneration reports a segment or range request carrying a
 	// generation token that names neither the live generation nor a retained
 	// one. The bytes the URL was minted against no longer exist, so serving the

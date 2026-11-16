@@ -6444,6 +6444,7 @@ printf '%b' '` + manifest + `' > '` + filepath.Join(outputDir, "stream.m3u8") + 
 printf a > '` + filepath.Join(outputDir, "seg_00000.m4s") + `'
 printf b > '` + filepath.Join(outputDir, "seg_00001.m4s") + `'
 printf c > '` + filepath.Join(outputDir, "seg_00002.m4s") + `'
+printf 'frame=48\nout_time_us=4000000\nprogress=continue\n'
 exec sleep 30
 `
 	if err := os.WriteFile(ffmpegPath, []byte(script), 0o755); err != nil {
@@ -9029,6 +9030,7 @@ func writePlaybackTestFFmpegFailingForInputPattern(t *testing.T, failPattern str
 		"#EXTINF:2.0,\\nseg_2.m4s\\n' > \"$arg\" ;;\n" +
 		"  esac\n" +
 		"done\n" +
+		playbackTestFFmpegProgress +
 		"exec sleep 30\n"
 	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
 		t.Fatalf("write conditional fake ffmpeg: %v", err)
@@ -10447,6 +10449,7 @@ func writePlaybackTestFFmpegFailingOn(t *testing.T, failPattern string) (ffmpegP
 		"#EXTINF:2.0,\\nseg_0.m4s\\n#EXTINF:2.0,\\nseg_1.m4s\\n" +
 		"#EXTINF:2.0,\\nseg_2.m4s\\n' > \"$last\" ;;\n" +
 		"esac\n" +
+		playbackTestFFmpegProgress +
 		"exec sleep 30\n"
 	if err := os.WriteFile(ffmpegPath, []byte(script), 0o755); err != nil {
 		t.Fatalf("write fake ffmpeg: %v", err)

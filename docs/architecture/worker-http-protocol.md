@@ -296,12 +296,18 @@ gets its own manifest wait, so callers size the start deadline of an `auto`
 video transcode that sets either field to `TranscodeStartReadyMaxDuration` (one
 wait per path); every other start keeps the single-wait deadline. Readiness is
 judged only on a manifest the current FFmpeg process wrote; an earlier
-generation's `stream.m3u8` in a reused directory does not count. A process still
-running at the deadline is closed, never duplicated. The response reports `software_video_decode`
-when the executed recipe decodes on the CPU; older nodes omit it, so callers OR
-it with the requested value. Without
-`RequireReady`, 202 establishes registration, not playable bytes or successful
-encoder completion. Tracking is asynchronous monitoring.
+generation's `stream.m3u8` in a reused directory does not count. For a video
+encode, readiness also requires that the generation decoded video: segments
+prove the muxer wrote bytes, and an audio-only mux from a decoder that produced
+no picture satisfies every file-existence check while never showing a frame.
+Such a generation is reported as a startup failure once a short grace passes,
+so the caller advances to a safer execution path instead of serving a playlist
+no client can play. A process still running at the deadline is closed, never
+duplicated. The response reports `software_video_decode` when the executed
+recipe decodes on the CPU; older nodes omit it, so callers OR it with the
+requested value. Without `RequireReady`, 202 establishes registration, not
+playable bytes or successful encoder completion. Tracking is asynchronous
+monitoring.
 The command is non-retryable and has no durable admission or replay identity;
 it does not alter native startPlayback ownership or release gates.
 

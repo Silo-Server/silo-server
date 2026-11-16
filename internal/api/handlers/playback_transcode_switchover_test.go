@@ -139,6 +139,7 @@ func writeTranscodeAudioSwitchFFmpeg(t *testing.T) string {
 		"printf '#EXTM3U\\n#EXT-X-VERSION:3\\n#EXT-X-TARGETDURATION:2\\n#EXT-X-MEDIA-SEQUENCE:0\\n" +
 		"#EXTINF:2.0,\\nseg_00000.ts\\n#EXTINF:2.0,\\nseg_00001.ts\\n#EXTINF:2.0,\\nseg_00002.ts\\n' > \"$playlist\" ;;\n" +
 		"esac\n" +
+		playbackTestFFmpegProgress +
 		"exec sleep 30\n"
 	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
 		t.Fatalf("write fake ffmpeg: %v", err)

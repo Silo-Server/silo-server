@@ -10680,6 +10680,10 @@ func (h *PlaybackHandler) executeReplanV3(r *http.Request, record *playback.Atte
 	decodeFailureSample := ""
 	decodeFailureCount := 0
 	decodeAttemptDetail := ""
+	// The frame counter is what separates a decoder that is producing pictures
+	// from one that is only muxing audio: the decode counters alone cannot say
+	// whether anything was ever decoded.
+	var decodeVideoFrames, decodeOutTimeUS int64
 	if operation == playback.ReplanOperationFailureRecoveryV3 &&
 		record.CurrentPlan.Delivery == playback.DeliveryTranscodeHLSV3 &&
 		!record.CurrentPlan.EffectiveRecipe.SoftwareVideoDecode &&
@@ -10698,6 +10702,7 @@ func (h *PlaybackHandler) executeReplanV3(r *http.Request, record *playback.Atte
 				forceSoftwareDecode = h.softwareFallbackAllowedV3() && softwareDecodeVariantPendingV3(record, req)
 				if forceSoftwareDecode {
 					decodeFailureSample, decodeFailureCount = ts.DecodeFailureEvidence()
+					decodeVideoFrames, decodeOutTimeUS = ts.VideoFrameProgress()
 				}
 			}
 		}
@@ -11929,6 +11934,8 @@ func (h *PlaybackHandler) executeReplanV3(r *http.Request, record *playback.Atte
 			"source_video_bit_depth", record.CurrentPlan.Source.BitDepth,
 			"decode_failure_sample", decodeFailureSample,
 			"decode_failure_count", decodeFailureCount,
+			videoFramesLogKeyV3, decodeVideoFrames,
+			outTimeUSLogKeyV3, decodeOutTimeUS,
 		)
 	}
 	// Media authentication is attempt-sticky (pinned in HandleReplanPlaybackV3),
@@ -11997,6 +12004,8 @@ func (h *PlaybackHandler) executeReplanV3(r *http.Request, record *playback.Atte
 			"quality_preference", start.QualityPreference,
 			"software_video_decode", forceSoftwareDecode,
 			"decode_failure_count", decodeFailureCount,
+			videoFramesLogKeyV3, decodeVideoFrames,
+			outTimeUSLogKeyV3, decodeOutTimeUS,
 		}, clientInfo.LogAttrs()...)...)
 		markReplanDecisionLoggedV3(r.Context())
 		return playback.NewTerminalResponseFromTerminalV3(result.Terminal), *record, nil, nil
@@ -12071,6 +12080,8 @@ func (h *PlaybackHandler) executeReplanV3(r *http.Request, record *playback.Atte
 		"software_video_decode", forceSoftwareDecode,
 		"decode_failure_count", decodeFailureCount,
 		"decode_failure_sample", decodeFailureSample,
+		videoFramesLogKeyV3, decodeVideoFrames,
+		outTimeUSLogKeyV3, decodeOutTimeUS,
 	}
 	if deliveryChange != nil {
 		replanLogAttrs = append(replanLogAttrs,
@@ -12412,7 +12423,7 @@ func (h *PlaybackHandler) executeReplanV3(r *http.Request, record *playback.Atte
 			event = playback.RouteEventRuntimeCorrectionSucceededV3
 			clientModel = start.ClientPlaybackContext.Device.Model
 		}
-		h.enqueueRouteEventV3(playback.RouteEventRecordV3{RouteEventV3: playback.RouteEventV3{ProtocolVersion: playback.ProtocolV3, PlaybackAttemptID: req.PlaybackAttemptID, SessionID: session.ID, PlanID: result.Plan.PlanID, PlanAttemptID: req.PlanAttemptID, PlanAttemptKey: playback.PlanAttemptKeyV3(*result.Plan, start.ClientPlaybackContext.Output.OutputContextID, nil), Event: event, FallbackReason: req.Failure.Classification, AppliedQuirkIDs: appliedQuirkIDsV3(result.Plan), QuirkRegistryRevision: appliedQuirkRevisionV3(result.Plan), OutputContextID: start.ClientPlaybackContext.Output.OutputContextID, Diagnostics: softwareDecodeRouteDiagnosticsV3(forceSoftwareDecode, session, decodeFailureSample, decodeFailureCount)}, UserID: session.UserID, ProfileID: session.ProfileID, ClientName: session.ClientName, ClientVersion: session.ClientVersion, ClientBuild: session.ClientBuild, ClientChannel: session.ClientChannel, ClientModel: clientModel})
+		h.enqueueRouteEventV3(playback.RouteEventRecordV3{RouteEventV3: playback.RouteEventV3{ProtocolVersion: playback.ProtocolV3, PlaybackAttemptID: req.PlaybackAttemptID, SessionID: session.ID, PlanID: result.Plan.PlanID, PlanAttemptID: req.PlanAttemptID, PlanAttemptKey: playback.PlanAttemptKeyV3(*result.Plan, start.ClientPlaybackContext.Output.OutputContextID, nil), Event: event, FallbackReason: req.Failure.Classification, AppliedQuirkIDs: appliedQuirkIDsV3(result.Plan), QuirkRegistryRevision: appliedQuirkRevisionV3(result.Plan), OutputContextID: start.ClientPlaybackContext.Output.OutputContextID, Diagnostics: softwareDecodeRouteDiagnosticsV3(forceSoftwareDecode, session, decodeFailureSample, decodeFailureCount, decodeVideoFrames, decodeOutTimeUS)}, UserID: session.UserID, ProfileID: session.ProfileID, ClientName: session.ClientName, ClientVersion: session.ClientVersion, ClientBuild: session.ClientBuild, ClientChannel: session.ClientChannel, ClientModel: clientModel})
 	}
 	transport.rollback = func() {
 		originalRollback()
@@ -12504,13 +12515,19 @@ func finalizeReplanPlanIdentityV3(plan *playback.PlanV3, attemptID, replanReques
 // softwareDecodeRouteDiagnosticsV3 records the reactive software-decode
 // fallback and the decoder evidence on the durable plan-selected route event.
 // It returns nil for an ordinary replan so the event shape is unchanged.
-func softwareDecodeRouteDiagnosticsV3(force bool, session *playback.Session, sample string, count int) map[string]string {
+func softwareDecodeRouteDiagnosticsV3(force bool, session *playback.Session, sample string, count int, videoFrames, outTimeUS int64) map[string]string {
 	if !force {
 		return nil
 	}
 	diagnostics := map[string]string{
 		"software_video_decode": "true",
 		"decode_failure_count":  strconv.Itoa(count),
+		// The frame counter is the evidence that distinguishes a decoder that
+		// produced nothing from one that produced pictures: a hardware plan
+		// that muxed segments with zero frames is the case the software retry
+		// exists for.
+		videoFramesLogKeyV3: strconv.FormatInt(videoFrames, 10),
+		outTimeUSLogKeyV3:   strconv.FormatInt(outTimeUS, 10),
 	}
 	if session != nil {
 		if hw := strings.TrimSpace(session.TranscodeHWAccel); hw != "" {
@@ -16120,6 +16137,14 @@ func configureHLSTimelineV3(plan *playback.PlanV3, videoCodec string, segmentDur
 }
 
 const throughputLogKeyV3 = "throughput_kbps"
+
+// The decode evidence a reactive software-decode fallback reports: the frame
+// counter and muxed output time separate a decoder that produced no picture
+// from one that produced pictures before it failed.
+const (
+	videoFramesLogKeyV3 = "video_frames"
+	outTimeUSLogKeyV3   = "out_time_us"
+)
 
 // playbackThroughputKbpsV3 reads a plan summary's throughput_kbps: the rate
 // its media arrived at, kept as a lower bound on the connection's speed. A

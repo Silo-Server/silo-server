@@ -593,12 +593,35 @@ func TestSourceRejectionSuppressedAfterVideoProgress(t *testing.T) {
 		base := time.Unix(7000, 0)
 		clock := stormInPast(t, s, base, dir)
 		// A segment muxed after suspicion proves the decoder recovered. The
-		// file mtime is real time, so anchor suspicion in the past too.
+		// file mtime is real time, so anchor suspicion in the past too, and
+		// report decoded frames: the frame counter is the half of the evidence
+		// a muxed segment cannot supply.
 		writeFile(t, dir, "seg_00000.ts", 188, base.Add(time.Minute))
+		s.mu.Lock()
+		s.videoFrames = 50
+		s.mu.Unlock()
 		clock.Advance(decodeObservationWindow)
 		s.evaluateDecodeVerdict()
 		if s.IsSourceRejected() {
 			t.Fatal("video produced after the storm confirmed the verdict")
+		}
+	})
+
+	t.Run("audio-only segments do not cancel", func(t *testing.T) {
+		// The production shape this guards: an encode muxes a non-empty segment
+		// for every audio packet while its decoder produces no picture at all.
+		// Segment existence must not clear the suspicion the stderr evidence
+		// raised, or the session would certify a stream no client can display.
+		dir := t.TempDir()
+		s := &TranscodeSession{opts: TranscodeOpts{TargetCodecVideo: "hevc"}}
+		base := time.Unix(7050, 0)
+		clock := stormInPast(t, s, base, dir)
+		writeFile(t, dir, "seg_00000.ts", 188, base.Add(time.Minute))
+		writeFile(t, dir, "seg_00001.ts", 188, base.Add(time.Minute))
+		clock.Advance(decodeObservationWindow)
+		s.evaluateDecodeVerdict()
+		if !s.IsSourceRejected() {
+			t.Fatal("segments muxed with zero decoded frames canceled the verdict")
 		}
 	})
 

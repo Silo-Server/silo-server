@@ -157,10 +157,18 @@ func TestDecodeProgressBeforeExpiryCancelsSuspicion(t *testing.T) {
 	if got := decodeStageOf(s); got != decodeStageSuspected {
 		t.Fatalf("storm stage = %d, want suspected", got)
 	}
-	// A segment muxed after suspicion proves recovery.
+	// A segment muxed after suspicion proves recovery only when the generation
+	// also decoded frames: the muxer writes a segment for every audio packet
+	// whether or not a picture was ever produced.
 	writeDecodeSegment(t, dir, "seg_00000.ts", base.Add(10*time.Millisecond))
-	if !videoProgressAfter(dir, base) {
-		t.Fatal("probe did not observe the fresh segment")
+	if videoProgressAfter(dir, base, 0) {
+		t.Fatal("a segment with zero decoded frames counted as video progress")
+	}
+	s.mu.Lock()
+	s.videoFrames = 25
+	s.mu.Unlock()
+	if !videoProgressAfter(dir, base, 25) {
+		t.Fatal("probe did not observe the fresh segment of a decoding generation")
 	}
 	clock.Advance(decodeObservationWindow / 2)
 	s.evaluateDecodeVerdict()
@@ -387,7 +395,7 @@ func TestConcurrentVerdictReadsCoalesceProbe(t *testing.T) {
 	var probeCalls int32
 	s.mu.Lock()
 	s.outputDir = t.TempDir()
-	s.decodeProbe = func(string, time.Time) bool {
+	s.decodeProbe = func(string, time.Time, int64) bool {
 		atomic.AddInt32(&probeCalls, 1)
 		select {
 		case probeStarted <- struct{}{}:
@@ -439,7 +447,7 @@ func TestResetAndCloseStayResponsiveDuringBlockedProbe(t *testing.T) {
 	probeRelease := make(chan struct{})
 	s.mu.Lock()
 	s.outputDir = t.TempDir()
-	s.decodeProbe = func(string, time.Time) bool {
+	s.decodeProbe = func(string, time.Time, int64) bool {
 		select {
 		case probeStarted <- struct{}{}:
 		default:
