@@ -80,7 +80,10 @@ import { StartupGuard } from "../utils/startupGuard";
 import {
   SegmentRetryBudget,
   StartupSegmentBudget,
+  UNBUFFERED_FRAGMENT_LOADS,
+  UnbufferedFragmentLoads,
   segmentRetryDelayMs,
+  type StartupSegmentVerdict,
 } from "../utils/segmentRetry";
 import { isTimeBuffered } from "../utils/bufferPolicy";
 import { isSafariBrowserV3, resolveHLSEngineV3 } from "../utils/hlsEngine";
@@ -475,6 +478,10 @@ const AUTOPLAY_BLOCKED_LABEL = "Tap to play";
 // (fullscreen toggle) before toggling play/pause.
 const DOUBLE_CLICK_WINDOW_MS = 250;
 const MAX_AUTOPLAY_ATTEMPTS = 4;
+// How far a transport's first buffered media may begin after the playhead
+// before the player treats it as a stream that does not contain the requested
+// position at all. Smaller gaps are hls.js's own gap handling.
+const START_HOLE_SECONDS = 0.25;
 // A viewer who reports this many sustained stalls to a room within the window
 // cannot keep up at its current quality and is offered a lower one.
 const ROOM_STALLS_BEFORE_LOWER_QUALITY = 2;
@@ -3162,6 +3169,11 @@ export function VideoPlayer({
     // Bounds the load a start that has not drawn a frame yet can generate: a
     // plan that never decodes must not fetch every segment the playlist lists.
     const startupSegmentBudget = new StartupSegmentBudget();
+    // A fragment fetched again before it buffered is the transport discarding
+    // what it downloaded, which no load *error* reports. Counted against the
+    // same startup budget so a 200-but-unappendable fragment is not invisible.
+    const unbufferedLoads = new UnbufferedFragmentLoads();
+    let startHoleRecovered = false;
     let recoveryTimer: ReturnType<typeof setTimeout> | null = null;
     let playbackStarted = false;
     let autoplayInFlight = false;
@@ -3330,6 +3342,66 @@ export function VideoPlayer({
     video.addEventListener("loadeddata", attemptAutoplayWhenReady);
     video.addEventListener("canplay", attemptAutoplayWhenReady);
 
+    // A transport whose first buffered media begins after the playhead has no
+    // data at the requested position. The element stays at HAVE_METADATA, the
+    // readiness gate above never starts it, and hls.js keeps refetching the
+    // fragments that cannot land there. That shape is real: a source whose
+    // audio track starts before its first video frame leaves the lead-in
+    // audio out of the remuxed timeline, so media only exists from the first
+    // video frame onwards. Move onto it once, as any player that can show the
+    // stream does, instead of waiting for a position that will never arrive.
+    const recoverStartHole = () => {
+      if (destroyed || startHoleRecovered || playbackStarted) return;
+      if (!(startupGuardRef.current?.isStarting() ?? false)) return;
+      if (video.buffered.length === 0) return;
+      const firstBuffered = video.buffered.start(0);
+      if (firstBuffered <= video.currentTime + START_HOLE_SECONDS) return;
+      startHoleRecovered = true;
+      console.warn(
+        `[player] transport starts ${firstBuffered.toFixed(2)}s after the playhead; starting from its first buffered media`,
+      );
+      video.currentTime = firstBuffered;
+      attemptAutoplayWhenReady();
+    };
+
+    // Applies the startup budget's verdict to a fetch that produced no frame.
+    // Holding pauses the ladder so a dead plan asks for a handful of segments
+    // instead of every segment it lists; stopping ends the route instead of
+    // requesting the same bytes again.
+    const applyStartupVerdict = (
+      verdict: Exclude<StartupSegmentVerdict, { kind: "ignore" }>,
+      details: { details?: string; url?: string },
+    ) => {
+      if (verdict.kind === "stop") {
+        console.error(
+          "[hls.js] Startup produced no frame across its segment budget, giving up",
+          details,
+        );
+        hls?.stopLoad();
+        hls?.destroy();
+        hlsRef.current = null;
+        if (
+          !reportCurrentPlanFailureRef.current({
+            classification: "network_error",
+            message: "HLS could not load a segment before the start produced a frame.",
+          })
+        ) {
+          setError("Playback failed. Please try again.");
+        }
+        return;
+      }
+      if (recoveryTimer !== null) return;
+      console.warn(
+        `[hls.js] Startup has no frame yet, holding segment loads for ${verdict.delayMs}ms`,
+      );
+      hls?.stopLoad();
+      recoveryTimer = setTimeout(() => {
+        recoveryTimer = null;
+        if (destroyed || startupGuardRef.current?.hasFailed()) return;
+        hls?.startLoad();
+      }, verdict.delayMs);
+    };
+
     // A seek made while this plan's stream was being fetched is where the
     // stream is heading: the server built it before the viewer moved the
     // playhead, so the plan's own start is behind them. Taken by the first
@@ -3477,35 +3549,11 @@ export function VideoPlayer({
                 const verdict = startupSegmentBudget.recordFailure(
                   !(startupGuardRef.current?.isStarting() ?? false),
                 );
-                if (verdict.kind === "stop") {
-                  console.error(
-                    "[hls.js] Startup produced no frame across its segment budget, giving up",
-                    { details: data.details, url: data.frag?.url ?? data.url },
-                  );
-                  hls?.stopLoad();
-                  hls?.destroy();
-                  hlsRef.current = null;
-                  if (
-                    !reportCurrentPlanFailureRef.current({
-                      classification: "network_error",
-                      message: "HLS could not load a segment before the start produced a frame.",
-                    })
-                  ) {
-                    setError("Playback failed. Please try again.");
-                  }
-                  return;
-                }
-                if (verdict.kind === "hold") {
-                  if (recoveryTimer !== null) return;
-                  console.warn(
-                    `[hls.js] Startup has no frame yet, holding segment loads for ${verdict.delayMs}ms`,
-                  );
-                  hls?.stopLoad();
-                  recoveryTimer = setTimeout(() => {
-                    recoveryTimer = null;
-                    if (destroyed || startupGuardRef.current?.hasFailed()) return;
-                    hls?.startLoad();
-                  }, verdict.delayMs);
+                if (verdict.kind !== "ignore") {
+                  applyStartupVerdict(verdict, {
+                    details: data.details,
+                    url: data.frag?.url ?? data.url,
+                  });
                 }
                 return;
               }
@@ -3655,6 +3703,26 @@ export function VideoPlayer({
               segmentRetry.reset();
               const { loaded, loading } = frag.stats;
               meter.received(frag.stats, loaded, loading.first, loading.end);
+              // A fragment fetched again before it buffered was discarded, not
+              // delivered: hls.js answers an append it cannot complete by
+              // reloading the same fragment, and every one of those loads
+              // answers 200, so the load-failure ladder never sees them. One
+              // deployment fetched `seg_00000.ts` 199 times this way. Count
+              // them against the same no-frame budget so such a plan stops
+              // instead of asking for the same bytes forever.
+              if (!playbackStarted && (startupGuardRef.current?.isStarting() ?? false)) {
+                const key = failedFragmentKey({ frag });
+                if (key !== null && unbufferedLoads.recordLoad(key) >= UNBUFFERED_FRAGMENT_LOADS) {
+                  unbufferedLoads.recordBuffered(key);
+                  const verdict = startupSegmentBudget.recordFailure(false);
+                  if (verdict.kind !== "ignore") {
+                    applyStartupVerdict(verdict, {
+                      details: `fragment ${key} loaded again without buffering`,
+                      url: frag.url,
+                    });
+                  }
+                }
+              }
             });
 
             hls.on(Hls.Events.BUFFER_APPENDED, (_event, data) => {
@@ -3668,9 +3736,17 @@ export function VideoPlayer({
               ) {
                 mediaOutageRef.current = false;
               }
+              recoverStartHole();
               attemptAutoplayWhenReady();
             });
-            hls.on(Hls.Events.FRAG_BUFFERED, endHoldOnceLoaded);
+            hls.on(Hls.Events.FRAG_BUFFERED, (_event, data) => {
+              endHoldOnceLoaded();
+              // A fragment that buffered is no longer the transport
+              // discarding bytes, so it stops counting against the start.
+              const key = failedFragmentKey({ frag: data.frag });
+              if (key !== null) unbufferedLoads.recordBuffered(key);
+              recoverStartHole();
+            });
             hls.on(Hls.Events.BUFFER_EOS, endHoldOnceLoaded);
 
             hls.loadSource(effectiveStreamUrl);

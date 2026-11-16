@@ -3577,6 +3577,83 @@ describe("VideoPlayer plan failure recovery", () => {
     }
   });
 
+  // A fragment that answers 200 and is fetched again without buffering is the
+  // transport discarding bytes, and the load-failure ladder never sees it. One
+  // production plan refetched `seg_00000.ts` 199 times while the start showed no
+  // frame, so those reloads have to spend the same startup budget.
+  it("spends the startup segment budget on a fragment that reloads without buffering", async () => {
+    hlsJS.supported = true;
+    try {
+      const onPlanFailure = vi.fn();
+      const hlsPlan = fixturePlanV3({
+        delivery: "server_transcode_hls",
+        stream: {
+          url: "/playback/transcode/session-1/master.m3u8",
+          protocol: "hls",
+          headers: {},
+          header_refresh: "none",
+        },
+        effective_recipe: { video_codec: "h264", audio_codec: "aac" },
+      });
+      renderPlayer({ plan: hlsPlan, onPlanFailure });
+      await waitFor(() => expect(hlsJS.latest).not.toBeNull());
+      const hls = hlsJS.latest;
+      if (!hls) throw new Error("expected an hls.js instance");
+      const frag = {
+        type: "main",
+        sn: 0,
+        url: "/playback/transcode/session-1/segment/seg_00000.ts",
+        stats: { loaded: 1_103_936, loading: { first: 1, end: 2 } },
+      };
+
+      // Every response is a complete 200 segment; only the buffer never grows.
+      for (let attempt = 0; attempt < 40 && onPlanFailure.mock.calls.length === 0; attempt += 1) {
+        act(() => hls.emit("fragLoaded", { frag }));
+      }
+
+      expect(onPlanFailure).toHaveBeenCalledOnce();
+      expect(onPlanFailure.mock.calls[0]?.[0]).toMatchObject({ classification: "network_error" });
+    } finally {
+      hlsJS.supported = false;
+    }
+  });
+
+  // A transport whose media begins after the playhead has no data at the
+  // requested position. The element stays at HAVE_METADATA, so the readiness
+  // gate never starts it and hls.js refetches fragments that cannot land at 0.
+  // A source whose audio starts before its first video frame produces exactly
+  // that after the remux, so the player has to move onto the media it has.
+  it("starts from the first buffered media when the transport begins after the playhead", async () => {
+    hlsJS.supported = true;
+    try {
+      const hlsPlan = fixturePlanV3({
+        delivery: "server_transcode_hls",
+        stream: {
+          url: "/playback/transcode/session-1/master.m3u8",
+          protocol: "hls",
+          headers: {},
+          header_refresh: "none",
+        },
+      });
+      const { container } = renderPlayer({ plan: hlsPlan });
+      await waitFor(() => expect(hlsJS.latest).not.toBeNull());
+      const hls = hlsJS.latest;
+      if (!hls) throw new Error("expected an hls.js instance");
+      const video = container.querySelector("video");
+      if (!video) throw new Error("expected video element");
+      Object.defineProperty(video, "buffered", {
+        configurable: true,
+        value: { length: 1, start: () => 2.85, end: () => 10.75 },
+      });
+
+      act(() => hls.emit("bufferAppended", { parent: "main" }));
+
+      expect(video.currentTime).toBeCloseTo(2.85);
+    } finally {
+      hlsJS.supported = false;
+    }
+  });
+
   it("fails a direct-play start that shows no frame by the startup deadline", async () => {
     vi.useFakeTimers();
     try {

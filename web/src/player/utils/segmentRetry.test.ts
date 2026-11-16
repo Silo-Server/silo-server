@@ -6,6 +6,8 @@ import {
   MAX_STREAK_FAILURES,
   SegmentRetryBudget,
   StartupSegmentBudget,
+  UNBUFFERED_FRAGMENT_LOADS,
+  UnbufferedFragmentLoads,
   segmentRetryDelayMs,
 } from "./segmentRetry";
 
@@ -83,5 +85,53 @@ describe("StartupSegmentBudget", () => {
     for (let attempt = 0; attempt < MAX_STARTUP_SEGMENT_FAILURES * 3; attempt++) {
       expect(budget.recordFailure(true)).toEqual({ kind: "ignore" });
     }
+  });
+});
+
+describe("UnbufferedFragmentLoads", () => {
+  it("does not count the first load of a fragment", () => {
+    const loads = new UnbufferedFragmentLoads();
+    expect(loads.recordLoad("frag:0")).toBe(1);
+  });
+
+  it("counts a fragment fetched again before it buffered", () => {
+    const loads = new UnbufferedFragmentLoads();
+    loads.recordLoad("frag:0");
+    expect(loads.recordLoad("frag:0")).toBe(UNBUFFERED_FRAGMENT_LOADS);
+  });
+
+  it("forgets a fragment once it buffered", () => {
+    const loads = new UnbufferedFragmentLoads();
+    loads.recordLoad("frag:0");
+    loads.recordLoad("frag:0");
+    loads.recordBuffered("frag:0");
+    expect(loads.recordLoad("frag:0")).toBe(1);
+  });
+
+  it("counts each fragment on its own", () => {
+    const loads = new UnbufferedFragmentLoads();
+    loads.recordLoad("frag:0");
+    loads.recordLoad("frag:1");
+    expect(loads.recordLoad("frag:1")).toBe(UNBUFFERED_FRAGMENT_LOADS);
+    expect(loads.recordLoad("frag:0")).toBe(UNBUFFERED_FRAGMENT_LOADS);
+  });
+
+  it("spends the start's budget on reloads that never buffer", () => {
+    const loads = new UnbufferedFragmentLoads();
+    const budget = new StartupSegmentBudget();
+    const verdicts = Array.from({ length: (MAX_STARTUP_SEGMENT_FAILURES + 1) * 2 }, () =>
+      loads.recordLoad("frag:0"),
+    )
+      .filter((loads) => loads >= UNBUFFERED_FRAGMENT_LOADS)
+      .map(() => {
+        loads.recordBuffered("frag:0");
+        return budget.recordFailure(false);
+      });
+
+    // Every reload after the first spends the same budget a failed load does,
+    // so an unappendable fragment cannot stay invisible and cannot be
+    // refetched forever.
+    expect(verdicts.at(-1)).toEqual({ kind: "stop" });
+    expect(verdicts.length).toBeGreaterThan(MAX_STARTUP_SEGMENT_FAILURES);
   });
 });

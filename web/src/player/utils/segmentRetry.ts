@@ -88,6 +88,46 @@ export class SegmentRetryBudget {
  */
 export const MAX_STARTUP_SEGMENT_FAILURES = 10;
 
+/**
+ * Loads of the same fragment before it counts as an unappendable fragment.
+ *
+ * hls.js reloads a fragment when it cannot buffer it, and every one of those
+ * loads can answer 200 with a perfectly valid segment: one deployment fetched
+ * `seg_00000.ts` 199 times in a minute while the transport never produced a
+ * frame. The load ladder only sees load *failures*, so those reloads were
+ * invisible to it. Two loads of a fragment that buffered nothing in between
+ * is not a prefetch; it is the transport discarding what it fetched.
+ */
+export const UNBUFFERED_FRAGMENT_LOADS = 2;
+
+/**
+ * Counts completed fragment loads that have not produced buffered media.
+ *
+ * A load only counts once the same fragment is fetched again with nothing
+ * appended in between: the first load of a fragment is how every start fills
+ * its buffer, and hls.js may legitimately ask for it once more while it waits
+ * for an append. `recordBuffered` clears the fragment so a fragment that
+ * eventually lands stops counting against the start.
+ */
+export class UnbufferedFragmentLoads {
+  private readonly loads = new Map<string, number>();
+
+  /** Returns how many times `key` has loaded since it last buffered. */
+  recordLoad(key: string): number {
+    const loads = (this.loads.get(key) ?? 0) + 1;
+    this.loads.set(key, loads);
+    return loads;
+  }
+
+  recordBuffered(key: string): void {
+    this.loads.delete(key);
+  }
+
+  reset(): void {
+    this.loads.clear();
+  }
+}
+
 const STARTUP_RETRY_BASE_DELAY_MS = 1_000;
 const STARTUP_RETRY_MAX_DELAY_MS = 8_000;
 
