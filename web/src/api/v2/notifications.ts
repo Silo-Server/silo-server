@@ -69,7 +69,7 @@ export async function listNotifications(
   };
 }
 export type NotifiedSeries = V2Result<"GET /api/v2/notifications/series">["items"][number];
-export type NotifiedSeriesStatus = "active" | "inactive";
+export type NotifiedSeriesStatus = NonNullable<NotifiedSeriesQuery["status"]>;
 type NotifiedSeriesQuery = NonNullable<V2Query<"GET /api/v2/notifications/series">>;
 /** The search, reason filter, and sort the Series view applies to both lists. */
 export type NotifiedSeriesOptions = {
@@ -126,6 +126,33 @@ export async function setNotificationSeriesMuted(
     { path: { series_id: seriesId }, profileContext, retryAuthentication: false },
   );
   requireNotificationAuthority(profileContext);
+}
+/** The most series one many-series mute or unmute request names. */
+const SERIES_MUTE_BATCH = 500;
+export type NotificationSeriesMuteResult =
+  V2Result<"POST /api/v2/notifications/series/mute">["results"][number];
+/** Mutes (or unmutes) many series, in requests of up to 500, and answers
+ * every series' outcome in request order. */
+export async function setManyNotificationSeriesMuted(
+  seriesIds: string[],
+  muted: boolean,
+  profileContext = captureNotificationAuthority(),
+): Promise<NotificationSeriesMuteResult[]> {
+  const results: NotificationSeriesMuteResult[] = [];
+  for (let start = 0; start < seriesIds.length; start += SERIES_MUTE_BATCH) {
+    requireNotificationAuthority(profileContext);
+    const body = await v2(
+      muted ? "POST /api/v2/notifications/series/mute" : "POST /api/v2/notifications/series/unmute",
+      {
+        body: { series_ids: seriesIds.slice(start, start + SERIES_MUTE_BATCH) },
+        profileContext,
+        retryAuthentication: false,
+      },
+    );
+    results.push(...body.results);
+  }
+  requireNotificationAuthority(profileContext);
+  return results;
 }
 export async function unreadNotificationCount(profileContext = captureNotificationAuthority()) {
   requireNotificationAuthority(profileContext);

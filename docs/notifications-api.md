@@ -24,6 +24,8 @@ shape.
 | `GET /series` | The series whose new episodes can notify the profile, as `items` and `page` |
 | `PUT /series/{series_id}/mute` | 204; mutes the series for the profile, already muted succeeds, a series the viewer may not see is 404 |
 | `DELETE /series/{series_id}/mute` | 204; unmutes the series, not muted succeeds |
+| `POST /series/mute` | `results`: an outcome per distinct series in `{ "series_ids": [...] }` (up to 500) |
+| `POST /series/unmute` | `results`: an outcome per distinct series in `{ "series_ids": [...] }` (up to 500) |
 
 The inbox list accepts `status=all|unread`, `limit` up to 200, and `cursor`.
 A cursor binds the acting account/profile, filter, page size, last delivery tuple,
@@ -71,7 +73,8 @@ Filters combine:
 
 - `status=active` keeps the series that notify, `status=inactive` the ones that
   do not (the preferences silence every reason, or the profile muted the
-  series), and the default `all` keeps both.
+  series), `status=muted` only the series the profile muted, and the default
+  `all` keeps every one.
 - `reason=favorite|watchlist|continue_watching|next_up` keeps the series with
   that relationship, whether or not the preferences let it notify.
 - `q` keeps the series whose title or sort title contains the text,
@@ -118,6 +121,24 @@ Notifications already delivered stay in the inbox, and a delivery fanout
 created before the mute committed can still reach its channels. Both writes
 answer 204 with no body. `series.mute` in `GET /capabilities` reports both
 operations and the `muted` field.
+
+### Muting many series
+
+`POST /series/mute` (`muteManyNotificationSeries`) and `POST /series/unmute`
+(`unmuteManyNotificationSeries`) do what the one-series operations do for up to
+500 series in one request, so a client can mute everything it selected or
+everything a filter matched. The body is `{ "series_ids": [...] }`; a repeated
+ID is answered once. The response is 200 with `results`, one
+`{ "series_id", "outcome" }` per distinct ID in request order:
+
+- `applied`: this call muted, or unmuted, the series.
+- `unchanged`: the series was already in the requested state.
+- `not_found`: a mute named no series, or a series the viewer may not see. Such
+  an ID is not written. An unmute never answers it, since unmute runs no access
+  check.
+
+One bad ID does not fail the rest. `series.bulk_mute` in `GET /capabilities`
+reports both operations and the `status=muted` filter.
 
 ## Fixed read cutoff
 

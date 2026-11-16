@@ -12654,6 +12654,28 @@
       "body_file": null
     },
     {
+      "name": "notification_mute_many_notification_series",
+      "operation_id": "muteManyNotificationSeries",
+      "scenario": "The acting profile mutes several series at once; each distinct series gets an outcome in request order, and a series the viewer may not see is not_found.",
+      "request": {
+        "method": "POST",
+        "path": "/api/v2/notifications/series/mute",
+        "headers": {
+          "Authorization": "Bearer tok-member",
+          "X-Profile-Id": "p-owner"
+        },
+        "body": "{\"series_ids\":[\"series:bear\",\"series:wire\",\"series:hidden\"]}"
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/NotificationSeriesMuteResults",
+      "body_file": "notification_mute_many_notification_series.json"
+    },
+    {
       "name": "notification_mute_notification_series",
       "operation_id": "muteNotificationSeries",
       "scenario": "The acting profile mutes one series: no new-episode notification for it on any channel until it unmutes. Repeating the call changes nothing.",
@@ -12815,6 +12837,28 @@
       "response_media_type": "application/json",
       "schema": "#/components/schemas/NotificationSyncOutputBody",
       "body_file": "notification_sync_notifications.json"
+    },
+    {
+      "name": "notification_unmute_many_notification_series",
+      "operation_id": "unmuteManyNotificationSeries",
+      "scenario": "The acting profile unmutes several series at once; a series that was not muted is unchanged.",
+      "request": {
+        "method": "POST",
+        "path": "/api/v2/notifications/series/unmute",
+        "headers": {
+          "Authorization": "Bearer tok-member",
+          "X-Profile-Id": "p-owner"
+        },
+        "body": "{\"series_ids\":[\"series:wire\",\"series:bear\"]}"
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/NotificationSeriesMuteResults",
+      "body_file": "notification_unmute_many_notification_series.json"
     },
     {
       "name": "notification_unmute_notification_series",
