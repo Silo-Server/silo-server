@@ -173,11 +173,7 @@ func (g Grant) IssuedAt() time.Time { return time.Unix(g.Iat, 0) }
 // Matches reports whether info describes the grant's revision: a regular file
 // of its size and modification time, to the microsecond.
 func (g Grant) Matches(info os.FileInfo) bool {
-	return matchesRevision(info, g.Size, g.Revision().ModTime())
-}
-
-func matchesRevision(info os.FileInfo, size int64, modTime time.Time) bool {
-	return info != nil && info.Mode().IsRegular() && info.Size() == size && SameModTime(info.ModTime(), modTime)
+	return info != nil && info.Mode().IsRegular() && info.Size() == g.Size && SameModTime(info.ModTime(), g.Revision().ModTime())
 }
 
 // SourceError classifies a failed stat or open of a source path. The path

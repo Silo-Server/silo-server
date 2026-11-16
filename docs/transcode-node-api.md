@@ -157,7 +157,7 @@ resolve answer adds one for rebuilds, progressive remux and theme conversion.
 A node exchanges it at the core's `sources/open` route, runs FFmpeg on the path
 the core approves, never on `input_path`, and renews it while the job runs; a
 source the core stops renewing ends the job. A missing or refused grant answers
-`400`, a node mount that does not show the approved revision `409`, and a core
+`400`, a node mount that does not show the approved file at its size `409`, and a core
 the node cannot reach `503`. A node with core source access reads the approved
 revision from the core through a loopback relay instead of its own mount, and
 answers a start `409` when its text subtitle burn-in cannot be staged. The

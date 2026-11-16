@@ -194,9 +194,10 @@ through the main server (below). The clocks of the
 nodes and the API servers must agree within 30 seconds: a node whose clock is further off has every
 request refused and reports its key as rejected, which a new key does not fix.
 
-Every API server, and every transcode node that reads its own library mount, must see each
-library file at the same path with the same size and modification time, as they already had to see
-the same paths. A node whose mount shows a different file refuses the job and logs both sides.
+Every API server must see each library file at the same path with the same size and modification
+time, as they already had to see the same paths. A transcode node that reads its own library mount
+must see each file at the same path with the same size; its mount may report other modification
+times. A node whose mount lacks the file or shows another size refuses the job and logs both sides.
 
 ### Source access
 

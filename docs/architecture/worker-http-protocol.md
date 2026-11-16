@@ -496,10 +496,11 @@ resolve answer for rebuilds, progressive remux and theme conversion. The node
 exchanges it at `sources/open`, runs FFmpeg only on the path the API approves,
 never on the job's input path field, and renews it while the job runs; a source
 the API stops renewing ends the job. A missing or refused grant answers `400`,
-a node mount that does not show the approved revision `409`, and an API the
-node cannot reach `503`. Every API server, and every transcode node with local
-source access, must see each library file at the same path with the same size
-and modification time, to the microsecond. A node with core source access runs
+a node mount that does not show the approved file at its size `409`, and an API
+the node cannot reach `503`. Every API server must see each library file at the
+same path with the same size and modification time, to the microsecond; a
+transcode node with local source access must see it at the same path with the
+same size. A node with core source access runs
 FFmpeg on a loopback relay URL instead, which reads the approved revision from
 the API, and refuses a start whose text subtitle burn-in cannot be staged
 (`409`). See [source grants](transcode-nodes.md#source-grants) for the grant

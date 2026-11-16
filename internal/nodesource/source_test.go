@@ -96,8 +96,8 @@ func TestOpenerOpensTheApprovedLocalFile(t *testing.T) {
 	}
 }
 
-// A node whose mount shows another revision refuses the job with an error
-// naming both sides.
+// A node whose mount shows a file of another size, or none, refuses the job
+// with an error naming both sides.
 func TestOpenerRefusesAMountMismatch(t *testing.T) {
 	path := writeSource(t, "movie.mkv", "movie")
 	core := approvedCore(t, path)
@@ -108,17 +108,35 @@ func TestOpenerRefusesAMountMismatch(t *testing.T) {
 		t.Fatalf("open = %v, want a mount mismatch of 6 against 5 bytes", err)
 	}
 
-	// A sub-microsecond difference of the modification time is no mismatch.
-	core = approvedCore(t, path)
-	core.answer.ModTimeUnixNano = time.Unix(0, core.answer.ModTimeUnixNano).Truncate(time.Microsecond).Add(999 * time.Nanosecond).UnixNano()
-	if _, err := quietOpener(core.open).Open(t.Context(), "dispatched"); err != nil {
-		t.Fatalf("sub-microsecond mtime difference: %v", err)
-	}
-
 	core = approvedCore(t, path)
 	core.answer.Path = path + ".missing"
 	if _, err := quietOpener(core.open).Open(t.Context(), "dispatched"); !errors.Is(err, ErrMountMismatch) || !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("missing on the node: %v", err)
+	}
+}
+
+// Mounts of storage that keeps no modification times each report a
+// placeholder of their own, so the core and a node can date one file decades
+// apart. The node opens it by path and size, and reports the time its own
+// mount gives beside the granted one.
+func TestOpenerOpensASourceItsMountDatesDifferently(t *testing.T) {
+	path := writeSource(t, "movie.mkv", "movie")
+	nodeTime := time.Date(2000, 1, 1, 0, 0, 0, 0, time.UTC)
+	if err := os.Chtimes(path, nodeTime, nodeTime); err != nil {
+		t.Fatal(err)
+	}
+	core := approvedCore(t, path)
+	core.answer.ModTimeUnixNano = 0
+	core.answer.ETag = Revision{Kind: KindFile, ID: 42, Size: core.answer.Size}.ETag()
+	opener := quietOpener(core.open)
+	t.Cleanup(func() { _ = opener.Close() })
+
+	source, err := opener.Open(t.Context(), "dispatched")
+	if err != nil {
+		t.Fatalf("open = %v, want the source opened by path and size", err)
+	}
+	if !source.ModTime().Equal(time.Unix(0, 0)) || !source.InputModTime().Equal(nodeTime) {
+		t.Fatalf("granted %s, input %s; want the core's 1970 and the node's 2000", source.ModTime().UTC(), source.InputModTime().UTC())
 	}
 }
 

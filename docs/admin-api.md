@@ -786,7 +786,7 @@ A transcode node reads the source media of its jobs in one of two ways, its
 `source_access`:
 
 - `local` (the default): from its own library mount, which must show every
-  file at the API servers' paths with the same size and modification time.
+  file at the API servers' paths with the same size.
 - `core`: over HTTP from the API servers. The node needs no library mount, and
   every byte it reads passes through the API servers, so they need the
   bandwidth for it. `silo_node_source_bytes_sent_total{node}` on each API

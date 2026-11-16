@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"time"
 
 	"github.com/Silo-Server/silo-server/internal/nodesource"
 	"github.com/Silo-Server/silo-server/internal/playback"
@@ -42,6 +43,23 @@ func (s *Server) openSource(ctx context.Context, grant string) (nodesource.Sourc
 	return source, nil
 }
 
+// renditionSourceOnNode restates planned, the source version a plan read its
+// on-demand subtitle tracks from, as this node's mount shows it. The API
+// server recorded the version from its own stat, and playback compares it
+// with a stat of the input here. When it is the revision the core granted,
+// its modification time becomes the one this node's mount gave the file at
+// open, so a mount that dates files differently still serves the cues, and a
+// file replaced on this node afterwards still does not. A plan that read
+// another version is left as it is and matches nothing.
+func renditionSourceOnNode(planned playback.SubtitleRenditionSource, source nodesource.Source) playback.SubtitleRenditionSource {
+	if planned.IsZero() || planned.Size != source.Size() ||
+		!nodesource.SameModTime(time.Unix(0, planned.ModTimeUnixNano), source.ModTime()) {
+		return planned
+	}
+	planned.ModTimeUnixNano = source.InputModTime().UnixNano()
+	return planned
+}
+
 // sourceRefused reports whether err is the core's lasting answer that the
 // job may not use its source, or a job that carried no grant, as opposed to a
 // core the node could not reach or a mount that does not match.
@@ -55,7 +73,7 @@ func sourceRefused(err error) bool {
 
 // sourceFailure is how a job route answers a source it could not open: 400
 // when the job carries no grant or the core refused it, 409 when this node's
-// mount does not show the approved revision (the node's fault: the caller
+// mount does not show the approved source (the node's fault: the caller
 // runs the job elsewhere), 503 when the core could not be asked.
 func sourceFailure(ctx context.Context, err error) (status int, message string) {
 	switch {
