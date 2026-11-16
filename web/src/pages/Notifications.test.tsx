@@ -194,7 +194,7 @@ it("searches, filters, and sorts the Series view from the URL", async () => {
   );
 });
 it("lists only the muted series under the Muted tab", () => {
-  state.capability = { series: { available: true, mute: true } };
+  state.capability = { series: { available: true, mute: true, bulk_mute: true } };
   const muted = seriesQuery([
     seriesEntry("series:wire", "The Wire", {
       reasons: reasons({ favorite: true }),
@@ -293,6 +293,33 @@ it("mutes the selected series together", () => {
     { seriesIds: ["series:andor", "series:bear"], muted: true },
     expect.anything(),
   );
+});
+
+it("offers no Muted tab and no selection while the previous filter's rows show", () => {
+  state.capability = { series: { available: true, mute: true } };
+  state.series = { all: seriesQuery([]) };
+  renderAt("/notifications?view=series&reason=muted");
+  expect(screen.queryByRole("button", { name: "Muted" })).not.toBeInTheDocument();
+  expect(state.seriesOptions.at(-1)).toEqual({ q: "", reason: undefined, sort: "title" });
+  cleanup();
+
+  state.capability = { series: { available: true, mute: true, bulk_mute: true } };
+  state.series = {
+    all: {
+      ...seriesQuery([
+        seriesEntry("series:andor", "Andor", {
+          reasons: reasons({ next_up: true }),
+          active_reasons: reasons({ next_up: true }),
+          notifies: true,
+          muted: false,
+        }),
+      ]),
+      isPlaceholderData: true,
+    },
+  };
+  renderAt("/notifications?view=series");
+  expect(screen.getByRole("checkbox", { name: "Select Andor" })).toBeDisabled();
+  expect(screen.getByRole("checkbox", { name: "Select all shown series" })).toBeDisabled();
 });
 
 /** An episode notification of a series, unread unless read_at is given. */

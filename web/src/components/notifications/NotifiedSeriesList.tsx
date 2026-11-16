@@ -142,7 +142,7 @@ function NotifiedSeriesRow({
   series: NotifiedSeries;
   prefs: NotificationPreferences | undefined;
   mute: MuteAction | undefined;
-  selection: { selected: boolean; toggle: () => void } | undefined;
+  selection: { selected: boolean; toggle: () => void; disabled: boolean } | undefined;
 }) {
   const t = useT();
   const { item } = series;
@@ -159,6 +159,7 @@ function NotifiedSeriesRow({
       {selection && (
         <Checkbox
           checked={selection.selected}
+          disabled={selection.disabled}
           onCheckedChange={selection.toggle}
           aria-label={t("web.notifications.series.selectSeries", { title: item.title })}
           className="size-[1.125rem] rounded-[5px]"
@@ -263,9 +264,12 @@ function oneOf<T extends string>(
  * The Series view's search, filter tab, and sort, kept in the URL so they
  * survive opening a series and coming back.
  */
-function useSeriesOptions() {
+function useSeriesOptions(canFilterMuted: boolean) {
   const [params, setParams] = useSearchParams();
-  const filter = oneOf(SERIES_FILTERS, params.get("reason"), "all");
+  const filters = canFilterMuted
+    ? SERIES_FILTERS
+    : SERIES_FILTERS.filter((option) => option.value !== "muted");
+  const filter = oneOf(filters, params.get("reason"), "all");
   const sort = oneOf(SORTS, params.get("sort"), "title");
   const q = params.get("q") ?? "";
   const set = (key: string, value: string, fallback: string) =>
@@ -279,6 +283,7 @@ function useSeriesOptions() {
       { replace: true },
     );
   return {
+    filters,
     filter,
     sort,
     q,
@@ -344,7 +349,7 @@ function SeriesToolbar({ series }: { series: ReturnType<typeof useSeriesOptions>
         aria-label={t("web.notifications.series.filterByReason")}
         className="-mx-1 mt-3 flex gap-1 overflow-x-auto px-1 pb-1"
       >
-        {SERIES_FILTERS.map((option) => {
+        {series.filters.map((option) => {
           const Icon = option.icon;
           const active = series.filter === option.value;
           return (
@@ -383,7 +388,8 @@ export function NotifiedSeriesList({
   canBulkMute?: boolean;
 }) {
   const t = useT();
-  const series = useSeriesOptions();
+  // The Muted tab needs status=muted, which comes with bulk mute.
+  const series = useSeriesOptions(canBulkMute);
   const setMuted = useSetNotificationSeriesMuted();
   const setManyMuted = useSetManyNotificationSeriesMuted();
   const [selected, setSelected] = useState<ReadonlySet<string>>(new Set());
@@ -400,6 +406,9 @@ export function NotifiedSeriesList({
   const rows = list.data?.pages.flatMap((page) => page.series) ?? [];
   const filtered = series.options.q !== "" || series.filter !== "all";
   const selectedRows = rows.filter((row) => selected.has(row.item.content_id));
+  // While a new search, tab, or sort loads, the previous rows stay on screen;
+  // they must not be selected or acted on, since they no longer match it.
+  const stale = list.isPlaceholderData;
   const allLoadedSelected = rows.length > 0 && selectedRows.length === rows.length;
 
   // A new search, tab, or sort starts a new selection.
@@ -479,11 +488,12 @@ export function NotifiedSeriesList({
   } else {
     const headCell = "text-muted-foreground text-xs font-semibold";
     body = (
-      <div className={list.isPlaceholderData ? "opacity-60" : undefined}>
+      <div className={stale ? "opacity-60" : undefined}>
         <div className={cn(rowGrid(canBulkMute), "border-border h-10 border-y")}>
           {canBulkMute && (
             <Checkbox
               checked={allLoadedSelected ? true : selectedRows.length > 0 ? "indeterminate" : false}
+              disabled={stale}
               onCheckedChange={() =>
                 setSelected(
                   allLoadedSelected ? new Set() : new Set(rows.map((row) => row.item.content_id)),
@@ -516,6 +526,7 @@ export function NotifiedSeriesList({
                   ? {
                       selected: selected.has(entry.item.content_id),
                       toggle: () => toggle(entry.item.content_id),
+                      disabled: stale,
                     }
                   : undefined
               }
@@ -552,7 +563,7 @@ export function NotifiedSeriesList({
                   variant="link"
                   size="sm"
                   className="text-foreground h-auto px-1 underline"
-                  disabled={selectingAll}
+                  disabled={selectingAll || stale}
                   onClick={() => void selectAllMatching()}
                 >
                   {t("web.notifications.selection.selectAllMatching")}
@@ -564,7 +575,7 @@ export function NotifiedSeriesList({
           <Button
             variant="ghost"
             size="sm"
-            disabled={setManyMuted.isPending}
+            disabled={setManyMuted.isPending || stale}
             onClick={() => runBulk(true)}
           >
             <BellOff className="h-4 w-4" />
@@ -573,7 +584,7 @@ export function NotifiedSeriesList({
           <Button
             variant="ghost"
             size="sm"
-            disabled={setManyMuted.isPending}
+            disabled={setManyMuted.isPending || stale}
             onClick={() => runBulk(false)}
           >
             <Bell className="h-4 w-4" />
