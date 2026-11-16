@@ -8,8 +8,10 @@ import (
 	"os"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/nodesource"
 	"github.com/Silo-Server/silo-server/internal/playback"
+	"github.com/Silo-Server/silo-server/internal/tonemap"
 )
 
 // errSourceAuthorityUnavailable is a node that cannot ask the core about a
@@ -61,6 +63,24 @@ func renditionSourceOnNode(planned playback.SubtitleRenditionSource, source node
 	}
 	planned.ModTimeUnixNano = source.InputModTime().UnixNano()
 	return planned
+}
+
+// toneMapRevisionOnNode restates revision, the catalog's version of a
+// tone-mapped job's source, as this node's mount shows it. The revision
+// carries the modification time the scanner recorded on the API server, and
+// playback rechecks it against a stat of the input here
+// (tonemap.SourceRevision.ValidatePath). When it is the revision the core
+// granted, its modification time becomes the one this node's mount gave the
+// file at open, so a mount that dates files differently still runs the job.
+// A revision the core did not grant is left as it is: its size and content
+// hash are still checked against this node's file.
+func toneMapRevisionOnNode(revision tonemap.SourceRevision, source nodesource.Source) tonemap.SourceRevision {
+	if revision.FileModifiedUnixNano <= 0 || revision.FileSize != source.Size() ||
+		!nodesource.SameModTime(time.Unix(0, revision.FileModifiedUnixNano), source.ModTime()) {
+		return revision
+	}
+	revision.FileModifiedUnixNano = models.NormalizeFileModifiedAt(source.InputModTime()).UnixNano()
+	return revision
 }
 
 // unmatchedRenditionSource is a recorded source version no file has, so its

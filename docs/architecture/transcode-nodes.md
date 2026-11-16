@@ -653,11 +653,15 @@ the modification time: mounts of storage that keeps none each report a
 placeholder of their own, and network filesystems round times differently, so
 it tells two mounts apart more often than two files. A difference is logged,
 as a warning the first time and at debug afterwards, and the source reports
-both times (`ModTime`, `InputModTime`). A session's planned subtitle version,
-which the API server recorded from its own stat, is restated at the node's
-time when it is the granted revision, and otherwise made to match no file
-(`transcodenode.renditionSourceOnNode`),
-so on-demand subtitle segments still match the node's file. A job route answers a missing or refused grant with `400`, a mismatch with
+both times (`ModTime`, `InputModTime`). Two things a job carries hold a file
+time the API server recorded, and playback compares each with a stat of the
+node's input, so the node restates them at its own mount's time when they name
+the granted revision. A session's planned subtitle version is restated, and
+otherwise made to match no file (`transcodenode.renditionSourceOnNode`), so
+on-demand subtitle segments still match the node's file. A tone-mapped job's
+catalog revision is restated (`transcodenode.toneMapRevisionOnNode`), so its
+recheck (`tonemap.SourceRevision.ValidatePath`) passes on the node's file; its
+size and content hash are checked either way. A job route answers a missing or refused grant with `400`, a mismatch with
 `409`, and a core it cannot reach with `503` (`transcodenode.sourceFailure`);
 the caller runs the job elsewhere. A chapter thumbnail job refused for those
 two reasons, or because the node is draining or re-probing its hardware,

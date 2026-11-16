@@ -1,11 +1,15 @@
 package transcodenode
 
 import (
+	"errors"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/nodesource"
 	"github.com/Silo-Server/silo-server/internal/playback"
+	"github.com/Silo-Server/silo-server/internal/tonemap"
 )
 
 // datedSource is an open source the core granted at one modification time
@@ -48,5 +52,36 @@ func TestRenditionSourceOnNode(t *testing.T) {
 	}
 	if got := renditionSourceOnNode(playback.SubtitleRenditionSource{}, source); !got.IsZero() {
 		t.Fatalf("unrecorded version = %+v, want it unrecorded", got)
+	}
+}
+
+// A tone-mapped job carries the catalog's file revision, and playback rechecks
+// its modification time against the node's file. On a node whose mount dates
+// the file differently, the granted revision must pass that check.
+func TestToneMapRevisionOnNodePassesTheNodeFile(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "movie.mkv")
+	if err := os.WriteFile(path, []byte("movie"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	input := time.Date(2000, 1, 1, 0, 0, 0, 0, time.UTC)
+	if err := os.Chtimes(path, input, input); err != nil {
+		t.Fatal(err)
+	}
+	granted := time.Unix(1_700_000_000, 123_456_000)
+	source := datedSource{size: 5, granted: granted, input: input}
+	catalog := tonemap.SourceRevision{MediaFileID: 7, FileSize: 5, FileModifiedUnixNano: granted.UnixNano()}
+
+	if err := catalog.ValidatePath(t.Context(), path); !errors.Is(err, tonemap.ErrSourceRevisionChanged) {
+		t.Fatalf("the catalog's revision against the node's file = %v, want it refused", err)
+	}
+	if err := toneMapRevisionOnNode(catalog, source).ValidatePath(t.Context(), path); err != nil {
+		t.Fatalf("the granted revision on the node = %v, want it accepted", err)
+	}
+
+	// A revision the core did not grant keeps the catalog's time.
+	stale := catalog
+	stale.FileModifiedUnixNano = granted.Add(time.Second).UnixNano()
+	if got := toneMapRevisionOnNode(stale, source); got != stale {
+		t.Fatalf("another revision = %+v, want it unchanged", got)
 	}
 }
