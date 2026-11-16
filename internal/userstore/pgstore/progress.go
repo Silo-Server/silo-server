@@ -722,13 +722,9 @@ func scanProgressRow(row pgx.Row) (*userstore.WatchProgress, error) {
 	return wp, err
 }
 
-// progressListSelect is the projection, profile scope, and hidden-item
-// exclusion every status listing shares ($1 = user_id, $2 = profile_id);
-// callers append the status predicate, any window predicate, ORDER BY, and
-// LIMIT.
-const progressListSelect = `
-		SELECT profile_id, media_item_id, position_seconds, duration_seconds, completed, updated_at,
-		       last_file_id, last_resolution, last_hdr, last_codec_video, last_edition_key
+// progressVisibleFrom is the profile scope and hidden-item exclusion every
+// progress listing shares ($1 = user_id, $2 = profile_id).
+const progressVisibleFrom = `
 		FROM user_watch_progress
 		WHERE user_id = $1 AND profile_id = $2
 		  AND NOT EXISTS (
@@ -739,6 +735,12 @@ const progressListSelect = `
 			  AND hhi.media_item_id = user_watch_progress.media_item_id
 			  AND user_watch_progress.updated_at <= hhi.hidden_before
 		  )`
+
+// progressListSelect is the projection plus progressVisibleFrom; callers
+// append the status predicate, any window predicate, ORDER BY, and LIMIT.
+const progressListSelect = `
+		SELECT profile_id, media_item_id, position_seconds, duration_seconds, completed, updated_at,
+		       last_file_id, last_resolution, last_hdr, last_codec_video, last_edition_key` + progressVisibleFrom
 
 // progressStatusPredicate is the `AND ...` clause for a status filter; empty
 // for the full listing.
@@ -784,6 +786,18 @@ func (s *PostgresUserStore) ListProgress(ctx context.Context, profileID, status 
 		ORDER BY updated_at DESC
 		LIMIT $3 OFFSET $4`
 	return s.queryProgressRows(ctx, query, s.userID, profileID, limit, offset)
+}
+
+func (s *PostgresUserStore) ListProgressItemIDs(ctx context.Context, profileID string) ([]string, error) {
+	rows, err := s.pool.Query(ctx, `SELECT media_item_id`+progressVisibleFrom, s.userID, profileID)
+	if err != nil {
+		return nil, fmt.Errorf("listing progress item ids: %w", err)
+	}
+	ids, err := pgx.CollectRows(rows, pgx.RowTo[string])
+	if err != nil {
+		return nil, fmt.Errorf("scanning progress item ids: %w", err)
+	}
+	return ids, nil
 }
 
 // ListCompletedProgressSince compares on the raw column so

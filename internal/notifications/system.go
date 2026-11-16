@@ -713,17 +713,12 @@ func (s *System) rebuildProfileInterest(ctx context.Context, store userstore.Use
 			break
 		}
 	}
-	for offset := 0; ; offset += pageSize {
-		progress, err := store.ListProgress(ctx, profileID, "", pageSize, offset)
-		if err != nil {
-			return fmt.Errorf("list progress: %w", err)
-		}
-		for _, entry := range progress {
-			itemIDs[entry.MediaItemID] = struct{}{}
-		}
-		if len(progress) < pageSize {
-			break
-		}
+	progress, err := store.ListProgressItemIDs(ctx, profileID)
+	if err != nil {
+		return fmt.Errorf("list progress: %w", err)
+	}
+	for _, id := range progress {
+		itemIDs[id] = struct{}{}
 	}
 	// History imports (watch providers, history import runs) may record
 	// watched episodes without any progress row; they are watch relationships

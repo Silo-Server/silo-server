@@ -561,12 +561,9 @@ func GetProgress(db *sql.DB, profileID, mediaItemID string) (*WatchProgress, err
 	return &wp, nil
 }
 
-// progressListSelect is the projection, profile scope (first ? = profile_id),
-// and hidden-item exclusion every status listing shares; callers append the
-// status predicate, any window predicate, ORDER BY, and LIMIT.
-const progressListSelect = `
-		SELECT profile_id, media_item_id, position_seconds, duration_seconds, completed, updated_at,
-		       last_file_id, last_resolution, last_hdr, last_codec_video, last_edition_key
+// progressVisibleFrom is the profile scope (first ? = profile_id) and
+// hidden-item exclusion every progress listing shares.
+const progressVisibleFrom = `
 		FROM watch_progress
 		WHERE profile_id = ?
 		  AND NOT EXISTS (
@@ -576,6 +573,12 @@ const progressListSelect = `
 			  AND hhi.media_item_id = watch_progress.media_item_id
 			  AND watch_progress.updated_at <= hhi.hidden_before
 		  )`
+
+// progressListSelect is the projection plus progressVisibleFrom; callers
+// append the status predicate, any window predicate, ORDER BY, and LIMIT.
+const progressListSelect = `
+		SELECT profile_id, media_item_id, position_seconds, duration_seconds, completed, updated_at,
+		       last_file_id, last_resolution, last_hdr, last_codec_video, last_edition_key` + progressVisibleFrom
 
 // progressStatusPredicate is the `AND ...` clause for a status filter; empty
 // for "all" or "".
@@ -600,6 +603,27 @@ func ListProgress(db *sql.DB, profileID string, status string, limit, offset int
 		ORDER BY updated_at DESC
 		LIMIT ? OFFSET ?`
 	return queryProgressRows(db, query, profileID, limit, offset)
+}
+
+// ListProgressItemIDs returns the media item of every visible progress row.
+func ListProgressItemIDs(ctx context.Context, db *sql.DB, profileID string) ([]string, error) {
+	rows, err := db.QueryContext(ctx, `SELECT media_item_id`+progressVisibleFrom, profileID)
+	if err != nil {
+		return nil, fmt.Errorf("listing progress item ids: %w", err)
+	}
+	defer rows.Close() //nolint:errcheck // rows.Err reports the failure
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("scanning progress item id: %w", err)
+		}
+		ids = append(ids, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterating progress item ids: %w", err)
+	}
+	return ids, nil
 }
 
 // ListCompletedProgressSince returns completed rows updated after since and,
