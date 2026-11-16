@@ -44,22 +44,27 @@ function groupTotals(t: Translate, group: AudiobookGroup): string {
 
 /** The profile's listening across the group, or nothing before they start it. */
 function groupListening(t: Translate, group: AudiobookGroup): string | undefined {
-  if (group.in_progress_count > 0) {
-    return t("web.audiobooks.groups.statInProgress", {
-      count: group.in_progress_count,
-      count_text: group.in_progress_count,
-    });
-  }
   if (group.finished_count > 0 && group.finished_count === group.item_count) {
     return t("web.audiobooks.groups.statAllFinished");
   }
+  const parts: string[] = [];
   if (group.finished_count > 0) {
-    return t("web.audiobooks.groups.statFinished", {
-      count: group.finished_count,
-      count_text: group.finished_count,
-    });
+    parts.push(
+      t("web.audiobooks.groups.statFinished", {
+        count: group.finished_count,
+        count_text: group.finished_count,
+      }),
+    );
   }
-  return undefined;
+  if (group.in_progress_count > 0) {
+    parts.push(
+      t("web.audiobooks.groups.statInProgress", {
+        count: group.in_progress_count,
+        count_text: group.in_progress_count,
+      }),
+    );
+  }
+  return parts.length > 0 ? parts.join(" · ") : undefined;
 }
 
 function groupInitials(name: string): string {
@@ -105,8 +110,10 @@ function InitialsTile({ name, className }: { name: string; className: string }) 
  * artwork does not blank the whole series, and none loading shows initials.
  */
 function SeriesCover({ group }: { group: AudiobookGroup }) {
-  const [failedCount, setFailedCount] = useState(0);
-  const url = group.poster_urls[failedCount];
+  // Failed URLs, not a count: a refetch with new (re-signed or repaired) URLs
+  // tries every cover again.
+  const [failedUrls, setFailedUrls] = useState<ReadonlySet<string>>(() => new Set());
+  const url = group.poster_urls.find((candidate) => !failedUrls.has(candidate));
   if (!url) {
     return <InitialsTile name={group.name} className="aspect-square w-full rounded-xl text-2xl" />;
   }
@@ -117,7 +124,7 @@ function SeriesCover({ group }: { group: AudiobookGroup }) {
       alt=""
       loading="lazy"
       decoding="async"
-      onError={() => setFailedCount((count) => count + 1)}
+      onError={() => setFailedUrls((failed) => new Set(failed).add(url))}
       className="bg-muted aspect-square w-full rounded-xl object-cover"
     />
   );
@@ -141,7 +148,8 @@ function SeriesRun({ group }: { group: AudiobookGroup }) {
   const fill = "bg-foreground";
   if (total > MAX_RUN_SEGMENTS) {
     const finishedPct = (finished / total) * 100;
-    const inProgressPct = (inProgress / total) * 100;
+    // Half a book each, as in the segmented bar.
+    const inProgressPct = (inProgress / total) * 50;
     return (
       <div aria-hidden="true" className={`relative h-1 overflow-hidden rounded-full ${track}`}>
         <div
@@ -149,7 +157,7 @@ function SeriesRun({ group }: { group: AudiobookGroup }) {
           style={{ width: `${finishedPct}%` }}
         />
         <div
-          className="bg-foreground/55 absolute inset-y-0"
+          className={`absolute inset-y-0 ${fill}`}
           style={{ insetInlineStart: `${finishedPct}%`, width: `${inProgressPct}%` }}
         />
       </div>
