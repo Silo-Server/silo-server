@@ -706,9 +706,14 @@ func recentDistinctCompletedRows(rows []WatchProgressRow, limit int) []WatchProg
 
 // RewatchCounts returns the items the profile completed at least twice, in
 // media item ID order, counting every visible completed play in its history.
-// The store groups the plays in one query, as GetRewatchCounts does when
-// there is no store.
+// When the history lives in the Postgres tables, GetRewatchCounts groups and
+// filters the plays in SQL; a separate store groups them in one read and the
+// single plays are dropped here.
 func (s *SignalReader) RewatchCounts(ctx context.Context, userID int, profileID string) ([]RewatchCount, error) {
+	if !s.storeIsSeparate() {
+		return s.repo.GetRewatchCounts(ctx, userID, profileID)
+	}
+
 	store, ok, err := s.storeForUser(ctx, userID)
 	if err != nil {
 		return nil, err

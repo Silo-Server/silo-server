@@ -446,7 +446,7 @@ func TestRewatchCountsReadTheWholeHistoryPostgres(t *testing.T) {
 		{MediaItemID: split, Count: 2, LastWatchedAt: later.Add(time.Hour)},
 	}
 	repo := NewRepo(pool)
-	storePath := NewSignalReader(repo, pgstore.NewPostgresProvider(pool))
+	storePath := NewSignalReader(repo, pgstore.NewPostgresProvider(pool)).WithUserStoreOutsidePostgres(true)
 	for name, read := range map[string]func() ([]RewatchCount, error){
 		"SQL":   func() ([]RewatchCount, error) { return repo.GetRewatchCounts(ctx, userID, profile) },
 		"store": func() ([]RewatchCount, error) { return storePath.RewatchCounts(ctx, userID, profile) },
