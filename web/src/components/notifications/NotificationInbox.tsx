@@ -623,8 +623,9 @@ export function NotificationInbox({
               size="sm"
               disabled={chosenSeries.length === 0 || muteMany.isPending}
               onClick={() => {
-                // Keep rows picked while the request runs.
-                const done = chosen.map((entry) => entry.key);
+                // Deselect only the series rows this mutes; keep request rows
+                // and rows picked while the request runs.
+                const done = chosen.flatMap((entry) => (entry.seriesId ? [entry.key] : []));
                 muteMany.mutate(
                   { seriesIds: chosenSeries, muted: true },
                   {

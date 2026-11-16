@@ -409,6 +409,8 @@ export function NotifiedSeriesList({
   // While a new search, tab, or sort loads, the previous rows stay on screen;
   // they must not be selected or acted on, since they no longer match it.
   const stale = list.isPlaceholderData;
+  // Checkboxes also wait for Select all matching, which would overwrite them.
+  const selectionLocked = stale || selectingAll;
   const allLoadedSelected = rows.length > 0 && selectedRows.length === rows.length;
 
   // Counts selection resets, so a Select all matching still loading when the
@@ -497,7 +499,7 @@ export function NotifiedSeriesList({
           {canBulkMute && (
             <Checkbox
               checked={allLoadedSelected ? true : selectedRows.length > 0 ? "indeterminate" : false}
-              disabled={stale}
+              disabled={selectionLocked}
               onCheckedChange={() =>
                 setSelected(
                   allLoadedSelected ? new Set() : new Set(rows.map((row) => row.item.content_id)),
@@ -530,7 +532,7 @@ export function NotifiedSeriesList({
                   ? {
                       selected: selected.has(entry.item.content_id),
                       toggle: () => toggle(entry.item.content_id),
-                      disabled: stale,
+                      disabled: selectionLocked,
                     }
                   : undefined
               }
@@ -567,7 +569,7 @@ export function NotifiedSeriesList({
                   variant="link"
                   size="sm"
                   className="text-foreground h-auto px-1 underline"
-                  disabled={selectingAll || stale}
+                  disabled={selectionLocked}
                   onClick={() => void selectAllMatching()}
                 >
                   {t("web.notifications.selection.selectAllMatching")}
