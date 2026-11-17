@@ -1163,24 +1163,6 @@ func TestScheduleDefaultFileProbeSnapshotsAccessFilter(t *testing.T) {
 	}
 }
 
-func TestDefaultProbeChainAdmissionCancelsLiveChain(t *testing.T) {
-	var admission defaultProbeChainAdmission
-	ctx, cancel := context.WithCancel(context.Background())
-	release, refusal := admission.acquireWithCancel("content-1\x000", cancel)
-	if refusal != defaultProbeChainRefusalNone || release == nil {
-		t.Fatalf("acquire refusal=%q, release_nil=%v", refusal, release == nil)
-	}
-	defer release()
-	if !admission.cancelKey("content-1\x000") {
-		t.Fatal("cancelKey reported no live chain")
-	}
-	select {
-	case <-ctx.Done():
-	case <-time.After(time.Second):
-		t.Fatal("chain context was not canceled")
-	}
-}
-
 // TestScheduleSelectedFileProbeProbesTheSelectedRow pins probe-on-select: an
 // explicit selection schedules the shared chain for the row it names, never the
 // resolved default, and a row that already carries probe evidence schedules no

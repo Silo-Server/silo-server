@@ -37,12 +37,17 @@ import (
 // persistence targets the resolved default, and a watch-detail read that names
 // an explicit still-unprobed version targets that row, so a non-default pick
 // no longer shows unknown audio/subtitle menus until its first play. Nothing
-// here gates playback: the play path is untouched and never observes the
+// here gates playback: the play path is untouched and never waits for the
 // chain. A chain may finish its probe before a play attempt resolves the same
 // row — that attempt then reuses the recorded evidence — or play may win
 // first; the queued evidence write follows the ordinary persistence rules
-// either way. Every chain is optional best-effort work: any failure, including
-// an unexpected panic, may never affect the server process serving it.
+// either way. When play wins, the two probes are not duplicated: every probe
+// goes through the shared VirtualProbeCache, whose single-flight makes the
+// second caller join the first one's enumeration. A playback start therefore
+// never cancels a chain: canceling one threw away work the detail page had
+// already paid for, then re-ran it. Every chain is optional best-effort work:
+// any failure, including an unexpected panic, may never affect the server
+// process serving it.
 
 // virtualDefaultProbeChainBudget bounds one admitted chain's whole life: the
 // target-version re-read, the candidate match, and the ffprobe enumeration
@@ -231,7 +236,6 @@ func NewVirtualDefaultProbeTarget(versions VirtualProbeVersionLister, files File
 type defaultProbeChainAdmission struct {
 	mu       sync.Mutex
 	active   map[string]struct{}
-	cancel   map[string]context.CancelFunc
 	admitted int
 }
 
@@ -252,14 +256,6 @@ const (
 // later discovery run still probe normally. The returned func releases the
 // slot and must be called exactly once.
 func (a *defaultProbeChainAdmission) acquire(contentID string) (func(), defaultProbeChainRefusal) {
-	return a.acquireWithCancel(contentID, nil)
-}
-
-// acquireWithCancel admits one chain and registers its cancellation function
-// under the same lock. Registering separately left a window where playback
-// start could observe the live key but find no cancel function, then launch the
-// detached probe concurrently with playback.
-func (a *defaultProbeChainAdmission) acquireWithCancel(contentID string, cancel context.CancelFunc) (func(), defaultProbeChainRefusal) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	if a.active == nil {
@@ -272,29 +268,8 @@ func (a *defaultProbeChainAdmission) acquireWithCancel(contentID string, cancel 
 		return nil, defaultProbeChainRefusalCapacity
 	}
 	a.active[contentID] = struct{}{}
-	if cancel != nil {
-		if a.cancel == nil {
-			a.cancel = make(map[string]context.CancelFunc)
-		}
-		a.cancel[contentID] = cancel
-	}
 	a.admitted++
 	return func() { a.release(contentID) }, defaultProbeChainRefusalNone
-}
-
-// cancelKey cancels a live chain for key and reports whether one was live.
-func (a *defaultProbeChainAdmission) cancelKey(key string) bool {
-	if a == nil || key == "" {
-		return false
-	}
-	a.mu.Lock()
-	cancel := a.cancel[key]
-	a.mu.Unlock()
-	if cancel == nil {
-		return false
-	}
-	cancel()
-	return true
 }
 
 // isLive reports whether a chain for key is currently admitted. It performs no
@@ -318,26 +293,7 @@ func (a *defaultProbeChainAdmission) release(contentID string) {
 		return
 	}
 	delete(a.active, contentID)
-	delete(a.cancel, contentID)
 	a.admitted--
-}
-
-// cancelDefaultFileProbe drops a detached pre-play probe for the content/file
-// a playback start is about to resolve. The start path performs its own resolve
-// and deferred probe; allowing the detached chain to keep a second ffprobe open
-// on the same provider source only adds relay contention and duplicate evidence
-// writes. A missed chain is harmless because the start probe is authoritative.
-func (h *PlaybackHandler) cancelDefaultFileProbe(contentID string, fileID int) {
-	if h == nil || contentID == "" {
-		return
-	}
-	for _, selected := range []int{fileID, 0} {
-		key := contentID + "\x00" + strconv.Itoa(selected)
-		if h.defaultProbeChains.cancelKey(key) {
-			slog.DebugContext(context.Background(), "virtual pre-play probe chain canceled by playback start",
-				"component", "api", "content_id", contentID, "selected_file_id", selected)
-		}
-	}
 }
 
 // ScheduleDefaultFileProbe is the subscription point the discovery services
@@ -446,7 +402,7 @@ func (h *PlaybackHandler) scheduleFileWarm(contentID string, fileID int, filter 
 		return
 	}
 	ctx, cancel := h.virtualDetachedContext(context.Background(), virtualSelectionWarmBudget)
-	release, refusal := h.selectedWarmChains.acquireWithCancel("warm\x00"+contentID+"\x00"+strconv.Itoa(fileID), cancel)
+	release, refusal := h.selectedWarmChains.acquire("warm\x00" + contentID + "\x00" + strconv.Itoa(fileID))
 	if refusal != defaultProbeChainRefusalNone {
 		cancel()
 		logVirtualSelectionWarmSkip(contentID, trigger, string(refusal))
@@ -560,7 +516,7 @@ func (h *PlaybackHandler) scheduleFileProbe(contentID string, source *models.Med
 	// probing the same row instead of opening a second probe.
 	admissionKey := contentID + "\x00" + strconv.Itoa(filter.SelectedFileID)
 	ctx, cancel := h.virtualDetachedContext(context.Background(), virtualDefaultProbeChainBudget)
-	release, refusal := h.defaultProbeChains.acquireWithCancel(admissionKey, cancel)
+	release, refusal := h.defaultProbeChains.acquire(admissionKey)
 	if refusal != defaultProbeChainRefusalNone {
 		cancel()
 		// A chain for this item is already live, or both slots are taken.

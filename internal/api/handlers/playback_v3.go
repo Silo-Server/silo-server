@@ -2705,14 +2705,12 @@ func (h *PlaybackHandler) startPlaybackApplicationV3(r *http.Request, body []byt
 		r = r.WithContext(startPhaseCtx)
 		requestedCatalogFileID := requestedFile.ID
 		// A detail-page read may have scheduled a detached probe for this row.
-		// The start path is about to resolve and probe the same provider bytes;
-		// cancel that duplicate before it races the transport and writes a
-		// second evidence snapshot.
-		playbackContentID := requestedFile.ContentID
-		if requestedFile.EpisodeID != "" {
-			playbackContentID = requestedFile.EpisodeID
-		}
-		h.cancelDefaultFileProbe(playbackContentID, requestedFile.ID)
+		// It is left running: the ffprobe it opened is behind the shared
+		// VirtualProbeCache single-flight, so this start's own probe (deferred
+		// past the transport commit, or synchronous inside a replan) joins that
+		// flight instead of opening a second one, and its durable evidence
+		// stamps the row the next start reuses. Canceling it here would throw
+		// away the work the detail page already paid for and then re-do it.
 		if offered := strings.TrimSpace(req.OfferedVirtualURI); offered != "" {
 			if virtualResultCandidateID(offered) == "" ||
 				virtualPlaybackNeutralKey(offered) != virtualPlaybackNeutralKey(requestedFile.FilePath) {
@@ -3259,47 +3257,59 @@ func (h *PlaybackHandler) startPlaybackApplicationV3(r *http.Request, body []byt
 //
 // The fan-out is a sliding wave, not a single round: a worker that finishes a
 // candidate takes the next index immediately, so only the first
-// virtualStartVersionFallbackWorkers candidates share the per-listing budget
+// virtualStartVersionFallbackWorkers candidates share the per-candidate budget
 // from the start. A candidate in a later wave inherits whatever remains of the
-// decision budget, so four listings that each burn the full 1.5s
-// virtualStartVersionFallbackListingBudget leave a fifth candidate at most
-// ~0.5s before the 2s virtualStartVersionFallbackDecisionBudget terminals the
-// walk. That is the deliberate tradeoff: a slow early wave is allowed to
-// shorten a later candidate's window rather than let the walk stretch toward
-// one full listing budget per candidate. It is pinned by
+// decision budget, so a slow early wave is allowed to shorten a later
+// candidate's window rather than let the walk stretch toward one full
+// candidate budget per candidate: with both waves alive, a fifth candidate gets
+// at most the decision budget minus what the first wave spent. It is pinned by
 // TestRunVirtualVersionFallbackCandidatesLaterWaveSharesDecisionBudget.
 const virtualStartVersionFallbackWorkers = 4
 
-// virtualStartVersionFallbackListingBudget bounds one alternate's resolve in
-// the walk. A dead pin (empty listing, provider outage, absent candidate)
-// answers or times out inside this window, so a walk never pays a full startup
-// budget per dead version. It is a var so tests can pin it.
+// virtualStartVersionFallbackListingBudget bounds the provider listing portion
+// of one alternate's resolve in the walk. A dead pin (empty listing, provider
+// outage, absent candidate) answers or times out inside this window, so a walk
+// never pays a full startup budget per dead version. It is a var so tests can
+// pin it.
 var virtualStartVersionFallbackListingBudget = 1500 * time.Millisecond
+
+// virtualStartVersionFallbackCandidateBudget bounds one alternate's whole
+// resolve: its listing portion above plus the start-path probe the resolve runs
+// after it. The two are bounded separately inside the resolve — the listing by
+// virtualStartVersionFallbackListingBudget (passed as a listing-only deadline)
+// and the probe by virtualStartProbeBudget — so an alternate's probe is never
+// silently "no probe" because an earlier listing spent the candidate's window.
+// The sum is the worst case for one candidate.
+var virtualStartVersionFallbackCandidateBudget = virtualStartVersionFallbackListingBudget + virtualStartProbeBudget
 
 // virtualStartVersionFallbackDecisionBudget bounds the walk as a whole: the
 // first healthy candidate wins; if none does, the terminal is returned once
-// every candidate has failed or this budget elapses, whichever is first. It is
-// larger than one listing budget so a single fan-out wave can finish, and far
-// below the cold-start budget so the walk cannot itself burn the 7-11s window
-// the parallel walk exists to remove.
-var virtualStartVersionFallbackDecisionBudget = 2 * time.Second
+// every candidate has failed or this budget elapses, whichever is first. It
+// contains one candidate budget so the first wave can finish its listing and
+// then its probe, and stays far below the 30s start phase (virtualStartPhaseBudget)
+// the walk runs inside, so the walk cannot itself burn the start.
+var virtualStartVersionFallbackDecisionBudget = virtualStartVersionFallbackCandidateBudget + 500*time.Millisecond
 
 // runVirtualVersionFallbackCandidatesV3 resolves alternate version candidates
 // with bounded parallel fan-out and returns the first healthy candidate. It is
 // the scheduling half of the cold-start version-fallback walk, kept separate
-// from the provider calls so the fan-out (worker bound, per-listing budget,
+// from the provider calls so the fan-out (worker bound, per-candidate budget,
 // first-wins, cancel stragglers, all-failed terminal) is testable without a
 // provider.
 //
 // candidates is in fallback order. Each is resolved by resolve within a
-// per-listing budget derived from ctx. The first success (ok=true) wins: the
-// remaining listings are canceled and this returns at once, without waiting for
-// them to unwind, so a healthy candidate is never delayed behind a straggler.
-// false is returned only after every candidate has failed or the decision
-// context elapses, whichever happens first; on both of those paths the in-flight
-// listings are canceled and the workers are joined before returning, so no
-// resolve mutates handler state after a terminal verdict. The caller keeps the
-// original resolve error in the false case.
+// per-candidate budget derived from ctx. The budget covers the whole resolve
+// (its listing stage and its probe), not just the provider listing: the
+// alternate walk's resolve applies its own shorter listing-only deadline
+// inside this one, so the probe keeps the start-path bound instead of
+// inheriting whatever the listing left. The first success (ok=true) wins: the
+// remaining resolves are canceled and this returns at once, without waiting
+// for them to unwind, so a healthy candidate is never delayed behind a
+// straggler. false is returned only after every candidate has failed or the
+// decision context elapses, whichever happens first; on both of those paths the
+// in-flight resolves are canceled and the workers are joined before returning,
+// so no resolve mutates handler state after a terminal verdict. The caller
+// keeps the original resolve error in the false case.
 //
 // The winner is returned with the index of the candidate that produced it, so
 // the caller never has to correlate the returned source with a side-channel
@@ -3310,7 +3320,7 @@ func runVirtualVersionFallbackCandidatesV3(
 	decisionCtx context.Context,
 	candidates []*models.MediaFile,
 	workers int,
-	listingBudget time.Duration,
+	candidateBudget time.Duration,
 	resolve func(context.Context, *models.MediaFile) (resolvedVirtualPlaybackSource, bool),
 ) (resolvedVirtualPlaybackSource, int, bool) {
 	if len(candidates) == 0 || workers <= 0 {
@@ -3355,12 +3365,12 @@ func runVirtualVersionFallbackCandidatesV3(
 				if ctx.Err() != nil {
 					return
 				}
-				// The per-listing bound comes from what the decision budget has
-				// left, never from a bare WithTimeout on an already-spent
+				// The per-candidate bound comes from what the decision budget
+				// has left, never from a bare WithTimeout on an already-spent
 				// parent: that produced a negative bound and a resolve
 				// pre-empted before it started (see
 				// virtualResolveAttemptBudget).
-				listBudget, listAllowed := virtualResolveAttemptBudget(ctx, listingBudget)
+				listBudget, listAllowed := virtualResolveAttemptBudget(ctx, candidateBudget)
 				if !listAllowed {
 					return
 				}
@@ -3441,13 +3451,14 @@ func runVirtualVersionFallbackCandidatesV3(
 // The alternates are resolved with bounded parallel fan-out rather than one at
 // a time: a cold start whose pin is dead commonly has every alternative dead
 // too, and resolving them serially paid one full upstream listing timeout per
-// dead version before the terminal. Each listing is bounded to
-// virtualStartVersionFallbackListingBudget and the walk as a whole to
-// virtualStartVersionFallbackDecisionBudget, so the walk itself terminals in
-// about two seconds instead of seven to eleven. That two-second figure
-// describes the alternate walk, not the end-to-end start request: when the walk
-// finds no candidate, the caller's synchronous primary stamp
-// (stampStartVirtualCandidateFailed) runs after it and can add up to
+// dead version before the terminal. Each alternate's listing is bounded to
+// virtualStartVersionFallbackListingBudget and its probe to
+// virtualStartProbeBudget, so one candidate resolves within
+// virtualStartVersionFallbackCandidateBudget (~4.5s), and the walk as a whole
+// to virtualStartVersionFallbackDecisionBudget (~5s) instead of seven to
+// eleven. That figure describes the alternate walk, not the end-to-end start
+// request: when the walk finds no candidate, the caller's synchronous primary
+// stamp (stampStartVirtualCandidateFailed) runs after it and can add up to
 // startCandidateFailStampBudget (~3s) of database write before the terminal
 // response. The first healthy candidate wins and cancels the rest. When no
 // version resolves, the original listing failure is returned so the caller
@@ -3613,7 +3624,12 @@ func (h *PlaybackHandler) resolveVirtualStartWithVersionFallbackExcluding( //nol
 		listReq := walkReq.WithContext(listCtx)
 		altResolved, altErr := h.resolveVirtualPlaybackSource(
 			listReq, alternate, profileID, true, excludedCandidateIDs, "", req.QualityPreference, bandwidthCapKbps, false,
-			virtualResolveOptionsV3{sessionBound: false, bypassProviderFloor: true},
+			virtualResolveOptionsV3{
+				sessionBound:        false,
+				startPathProbe:      true,
+				bypassProviderFloor: true,
+				listingBudget:       virtualStartVersionFallbackListingBudget,
+			},
 		)
 		if altErr == nil && altResolved.File != nil {
 			if reason := virtualVersionFallbackSubstitutionRejectionV3(expectedRuntimeMinutes, file, altResolved.File); reason != "" {
@@ -3645,7 +3661,7 @@ func (h *PlaybackHandler) resolveVirtualStartWithVersionFallbackExcluding( //nol
 	}
 
 	winner, winnerIndex, ok := runVirtualVersionFallbackCandidatesV3(
-		walkCtx, candidateRows, virtualStartVersionFallbackWorkers, virtualStartVersionFallbackListingBudget, resolveAlternate,
+		walkCtx, candidateRows, virtualStartVersionFallbackWorkers, virtualStartVersionFallbackCandidateBudget, resolveAlternate,
 	)
 	if !ok {
 		if refusedSubstitutes.Load() > 0 && virtualRequestedRowIsSelection(file) {

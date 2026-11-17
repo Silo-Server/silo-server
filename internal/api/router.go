@@ -1681,6 +1681,12 @@ func newChiRouter(deps Dependencies) chi.Router {
 						virtualCandidatesRefresh.ScheduleDefaultFileWarm = playbackHandler.ScheduleDefaultFileWarm
 						playbackHandler.DefaultProbeTarget = handlers.NewVirtualDefaultProbeTarget(detailSvc, deps.FileRepo)
 					}
+					// Whatever paid for a provider listing — a detail read's
+					// discovery, the explicit refresh job, or the async job —
+					// hands that listing to the playback handler, so the start
+					// that follows resolves from it instead of listing the
+					// provider a second time for the same candidates.
+					virtualCandidatesRefresh.SeedListing = playbackHandler.SeedVirtualListing
 					// The indexer-release read/request surface and the async
 					// refresh executor share the store the service owns.
 					if store := deps.VirtualLibraryService.IndexerReleases(); store != nil {

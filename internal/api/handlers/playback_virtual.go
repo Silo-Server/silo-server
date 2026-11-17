@@ -1217,6 +1217,38 @@ func (h *PlaybackHandler) warmVirtualPlaybackListing(ctx context.Context, file *
 		observeVirtualPrefetchOutcome(virtualPrefetchEmpty)
 		return
 	}
+	if !h.seedVirtualPlaybackListing(file, neutralURI, streams, generation) {
+		observeVirtualPrefetchOutcome(virtualPrefetchFilteredEmpty)
+		return
+	}
+	observeVirtualPrefetchOutcome(virtualPrefetchCompleted)
+}
+
+// SeedVirtualListing stores a listing a detail read already paid for in the
+// best-result cache, so the play that follows the page does not buy the same
+// provider round-trip again. It is called by the discovery service from inside
+// its detached shared work, immediately after the listing was persisted (see
+// VirtualCandidatesRefreshService.SeedListing).
+//
+// It performs no provider work and no catalog write: the candidates are the
+// ones the caller just listed, filtered against the provider-neutral row
+// exactly as a start filters them, and stored under the device-neutral key so
+// any device's first click ranks the same set for itself.
+func (h *PlaybackHandler) SeedVirtualListing(source *models.MediaFile, streams []VirtualPlaybackStream) {
+	if h == nil || source == nil || len(streams) == 0 {
+		return
+	}
+	h.seedVirtualPlaybackListing(source, virtualPlaybackNeutralKey(source.FilePath), streams, nextVirtualCacheGeneration())
+}
+
+// seedVirtualPlaybackListing is the shared store step of the two warm paths:
+// the bounded prefetch (which lists for itself) and discovery persistence
+// (which hands over the listing it just persisted). It reports whether an
+// entry was written.
+func (h *PlaybackHandler) seedVirtualPlaybackListing(file *models.MediaFile, neutralURI string, streams []VirtualPlaybackStream, generation uint64) bool {
+	if h == nil || file == nil || neutralURI == "" || h.BestResultCache == nil || len(streams) == 0 {
+		return false
+	}
 	if len(streams) > maxVirtualPlaybackStreams {
 		streams = streams[:maxVirtualPlaybackStreams]
 	}
@@ -1226,15 +1258,77 @@ func (h *PlaybackHandler) warmVirtualPlaybackListing(ctx context.Context, file *
 	base.FilePath = neutralURI
 	filtered := filterVirtualPlaybackStreams(&base, streams)
 	if len(filtered) == 0 {
-		observeVirtualPrefetchOutcome(virtualPrefetchFilteredEmpty)
-		return
+		return false
 	}
 	h.BestResultCache.setWithDetailsAt(
 		bestResultCacheKey(file.ContentID, neutralURI, file.VirtualOwnerInstallationID),
 		file.ContentID, neutralURI, file.VirtualOwnerInstallationID,
 		filtered, time.Now(), generation,
 	)
-	observeVirtualPrefetchOutcome(virtualPrefetchCompleted)
+	return true
+}
+
+// virtualCachedCandidateListing answers one start's candidate list from the
+// best-result cache: the listing a previous play recorded, or the one a detail
+// read's discovery persisted and handed over (see SeedVirtualListing). A
+// neutral row takes the whole entry. A concrete ?result= row takes it only when
+// the entry names that exact candidate, because a listing that does not carry
+// the requested release is not this row's answer. It returns the ranked
+// candidates to try, and the trace miss cause when the entry does not answer
+// this request.
+func (h *PlaybackHandler) virtualCachedCandidateListing(r *http.Request, file *models.MediaFile, neutral bool, fingerprint, qualityPreference string, bandwidthCapKbps int) ([]VirtualPlaybackStream, string) {
+	if h == nil || h.BestResultCache == nil || file == nil {
+		if neutral {
+			return nil, virtualListingCacheMissDisabled
+		}
+		return nil, virtualListingCacheMissExplicit
+	}
+	neutralURI := virtualPlaybackNeutralKey(file.FilePath)
+	cacheKey := bestResultCacheKey(file.ContentID, neutralURI, file.VirtualOwnerInstallationID, fingerprint)
+	cached, cause := h.BestResultCache.getWithCause(cacheKey, time.Now())
+	if len(cached) == 0 && fingerprint != "" {
+		// A listing warmed without a device fingerprint (the bounded prefetch
+		// path or discovery's hand-off) is still the filtered, device-neutral
+		// candidate set; only the ranking is device-specific, so fall back to
+		// it rather than paying the provider list again on this device's first
+		// click.
+		cached, cause = h.neutralFallbackCacheCause(cached, cause, file, neutralURI)
+	}
+	if neutral {
+		ranked := h.finalizeVirtualCandidateOrder(r, cached, qualityPreference, bandwidthCapKbps)
+		return ranked, cause
+	}
+	requested := virtualStreamByURI(cached, file.FilePath)
+	if requested == nil {
+		return nil, virtualListingCacheMissExplicit
+	}
+	// Keep the requested candidate at index 0, exactly as a fresh listing does
+	// for an explicit pick, and offer the listing's other candidates behind it
+	// for rotation; the requested one is not repeated in the tail.
+	ranked := h.finalizeVirtualCandidateOrder(r, cached, qualityPreference, bandwidthCapKbps)
+	others := make([]VirtualPlaybackStream, 0, len(ranked))
+	for _, stream := range ranked {
+		if strings.TrimSpace(stream.URI) != strings.TrimSpace(requested.URI) {
+			others = append(others, stream)
+		}
+	}
+	return append([]VirtualPlaybackStream{*requested}, others...), ""
+}
+
+// virtualStreamByURI returns the listing entry for one exact candidate URI, or
+// nil when the listing does not carry it. Used to decide whether a cached
+// listing answers a concrete candidate start.
+func virtualStreamByURI(streams []VirtualPlaybackStream, uri string) *VirtualPlaybackStream {
+	target := strings.TrimSpace(uri)
+	if target == "" {
+		return nil
+	}
+	for i := range streams {
+		if strings.TrimSpace(streams[i].URI) == target {
+			return &streams[i]
+		}
+	}
+	return nil
 }
 
 func (h *PlaybackHandler) maxVirtualFailoverAttempts(ctx context.Context) int {
@@ -1276,6 +1370,13 @@ func (h *PlaybackHandler) neutralFallbackCacheCause(cached []VirtualPlaybackStre
 const (
 	defaultBestResultCacheTTL     = 30 * time.Minute
 	defaultBestResultCacheEntries = 512
+)
+
+// Best-result cache miss causes reported by the resolve trace. The trace lines
+// are read as a set, so the two a cache lookup has to name live here.
+const (
+	virtualListingCacheMissDisabled = "cache_disabled"
+	virtualListingCacheMissExplicit = "explicit"
 )
 
 // virtualCacheGeneration is the process-wide monotonic generation source for
@@ -2048,6 +2149,14 @@ type virtualResolveOptionsV3 struct {
 	// deferProbe path marker, because a substitute's probed inventory is what the
 	// planner remaps a version's tracks from.
 	startPathProbe bool
+	// listingBudget, when positive, bounds only the provider listing stage of
+	// this resolve. The attempt loop's probe and the fallback stages keep the
+	// resolve's own deadline. It exists for a caller that must cap the listing
+	// separately from the probe: the start's alternate-version walk gives each
+	// candidate a short listing window and still owes its probe the full
+	// virtualStartProbeBudget, so one deadline for both would silently spend the
+	// probe's budget on the listing.
+	listingBudget time.Duration
 }
 
 // virtualCandidateRotationContextKeyV3 carries the rotation intent across the
@@ -2691,10 +2800,18 @@ func (h *PlaybackHandler) resolveVirtualPlaybackSource(r *http.Request, file *mo
 	// Candidate selection (listing) must not be able to
 	// consume the resolve/probe attempt's budget. It runs under a staging
 	// deadline that stops at half the cold budget, reserving the other half for
-	// the attempt loop below. The attempt still inherits coldCtx, so the single
-	// overall cap and the no-restart property are unchanged; the staging bound
-	// only guarantees that a slow early stage cannot starve a later one.
-	stagingCtx, stagingCancel := context.WithTimeout(coldCtx, virtualStartupBudget/2)
+	// the attempt loop below. A caller that must bound the listing on its own —
+	// the start's alternate-version walk — passes a tighter listingBudget, which
+	// applies to this stage only: the attempt loop keeps coldCtx, so the probe
+	// there still gets its own full start-path bound. The attempt still inherits
+	// coldCtx, so the single overall cap and the no-restart property are
+	// unchanged; staging only guarantees that a slow early stage cannot starve a
+	// later one.
+	stagingBudget := virtualStartupBudget / 2
+	if options.listingBudget > 0 {
+		stagingBudget = min(stagingBudget, options.listingBudget)
+	}
+	stagingCtx, stagingCancel := context.WithTimeout(coldCtx, stagingBudget)
 	defer stagingCancel()
 	userID := apimw.GetUserID(r.Context())
 	parsed, _ := url.Parse(file.FilePath)
@@ -2768,56 +2885,56 @@ func (h *PlaybackHandler) resolveVirtualPlaybackSource(r *http.Request, file *mo
 			}
 		}
 	}
+	// A failed requested row or a pending exclusion requires the provider list
+	// even when the row has complete probe evidence: the fast paths are gated
+	// off for those rows, so without a list the candidate set would contain
+	// only the rejected row and rotation could never find a sibling. Computed
+	// before the cache block because a cached listing must not stand in for
+	// that list.
+	exclusionPending := len(excludedCandidateIDs) > 0
+	requestedRowUnusable := !allowFailed && virtualCandidateVerdictActive(file.FailedAt, time.Now())
 	// Check the best-result cache before listing candidates. A previous
 	// successful play of this content may have a cached result= URI that
-	// lets us skip the entire list+resolve+probe sequence on replay.
+	// lets us skip the entire list+resolve+probe sequence on replay. A
+	// detail read's discovery seeds the same entry with the listing it just
+	// persisted (see PlaybackHandler.SeedVirtualListing), so the first play
+	// after a detail page reuses that listing instead of paying a second
+	// provider round-trip for the answer the server already has.
 	cachedListing := false
 	trace.cacheMissCause = "none" //nolint:goconst // trace cause vocabulary, kept inline for readability.
-	if noResult {
-		if h.BestResultCache == nil {
-			trace.cacheMissCause = "cache_disabled" //nolint:goconst // trace cause vocabulary, kept inline for readability.
-		} else {
-			neutralURI := virtualPlaybackNeutralKey(file.FilePath)
-			cacheKey := bestResultCacheKey(file.ContentID, neutralURI, file.VirtualOwnerInstallationID, fingerprint)
-			cached, cause := h.BestResultCache.getWithCause(cacheKey, time.Now())
-			if len(cached) == 0 && fingerprint != "" {
-				// A listing warmed without a device fingerprint (the bounded
-				// prefetch path) is still the filtered, device-neutral candidate
-				// set; only the ranking below is device-specific, so fall back to
-				// it rather than paying the provider list again on this device's
-				// first click.
-				cached, cause = h.neutralFallbackCacheCause(cached, cause, file, neutralURI)
-			}
-			if len(cached) == 0 && cause != "" {
-				trace.cacheMissCause = cause
-			}
-			if len(cached) > 0 {
-				// Cache holds the filtered, device-neutral candidate list; rank it
-				// for this device so a TV and a phone pick their own best stream
-				// without another provider round-trip, then keep rejected streams
-				// behind accepted ones.
-				candidates = h.finalizeVirtualCandidateOrder(r, cached, qualityPreference, bandwidthCapKbps)
-				noResult = false // treated as if file already had a result=
-				cachedListing = len(candidates) > 0
-				trace.cached = cachedListing
-				trace.cacheMissCause = "none" //nolint:goconst // trace cause vocabulary, kept inline for readability.
-			}
+	// A concrete ?result= row may use the cached listing on an ordinary start
+	// only. A forced relist, a pending exclusion, or a row the catalog indicted
+	// each need the provider's current answer, and a cached set could mask a
+	// vanished release or the rotation sibling those paths are looking for.
+	concreteCacheEligible := !noResult && !forceRelist && !exclusionPending && !requestedRowUnusable
+	switch {
+	case h.BestResultCache == nil:
+		if noResult {
+			trace.cacheMissCause = virtualListingCacheMissDisabled
 		}
-	} else {
-		trace.cacheMissCause = "explicit" //nolint:goconst // trace cause vocabulary, kept inline for readability.
+	case !noResult && !concreteCacheEligible:
+		trace.cacheMissCause = virtualListingCacheMissExplicit
+	default:
+		cached, cause := h.virtualCachedCandidateListing(r, file, noResult, fingerprint, qualityPreference, bandwidthCapKbps)
+		if len(cached) > 0 {
+			// The entry is the filtered candidate list a fresh listing would
+			// return, ranked for this device so a TV and a phone pick their own
+			// best stream without another provider round-trip and rejected
+			// streams stay behind accepted ones. A neutral row is treated as if
+			// it already named a result.
+			candidates = cached
+			noResult = false
+			cachedListing = true
+			trace.cached = true
+			trace.cacheMissCause = "none"
+		} else if cause != "" {
+			trace.cacheMissCause = cause
+		}
 	}
 	// A valid cached listing already carries the candidate metadata the list
 	// call exists to fetch, so it does not need the provider round-trip even
 	// when the stored row has no probe evidence yet. Only a cold cache or an
 	// explicit relist forces the list.
-	//
-	// A failed requested row or a pending exclusion additionally requires the
-	// provider list even when the row has complete probe evidence: the fast
-	// paths are gated off for those rows, so without a list the candidate set
-	// would contain only the rejected row and rotation could never find a
-	// sibling.
-	exclusionPending := len(excludedCandidateIDs) > 0
-	requestedRowUnusable := !allowFailed && virtualCandidateVerdictActive(file.FailedAt, time.Now())
 	// A durable-resume hit suppresses the list the same way a warm best-result
 	// cache does: the row already names the candidate to serve, so there is no
 	// candidate metadata left to fetch. It is only set for a concrete same-row

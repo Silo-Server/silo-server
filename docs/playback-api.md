@@ -377,6 +377,16 @@ items (series, season, lists), and failed lookups leave the field out. It
 appears on `GET /api/v2/catalog/items/{id}`, `GET /api/v2/watch/{id}`, and
 the admin metadata update response, keeping v1 answers byte-identical.
 
+A detail discovery also hands the listing it just persisted to the playback
+handler before its waiters return. The start that follows — the concrete
+candidate row a detail page lists, or the provider-neutral placeholder — reads
+its candidate metadata from that entry instead of listing the provider again,
+so a first play after a detail read costs the one listing the read already paid
+for rather than a second one, and a repeat play within the entry's lifetime
+lists nothing. A forced relist, a decode-rotation exclusion, and a row the
+catalog indicted each still list, because those need the provider's current
+answer rather than the one the detail read saw.
+
 After a detail-page read persists a listing, the server schedules one detached
 pre-play probe chain for the opened item: it re-reads the item's selected
 version when the detail read supplied `file_id`, otherwise its default version.
@@ -391,9 +401,12 @@ candidate, so the play path's own probe handles it. Chains are bounded (two
 concurrent, one per item, a whole-chain deadline, and the shared probe
 gate), never block any API response, and never wait for playback: a chain may
 record evidence before a play attempt resolves the same row, in which case that
-attempt reuses it, and a play attempt that resolves first probes on its own as
-usual. Foreground probing may still be required when the chain has not
-finished, or when it prepared a version the play attempt does not resolve.
+attempt reuses it, and a play attempt that resolves first joins the chain's
+in-flight probe instead of cancelling it. One ffprobe per candidate results:
+the shared probe cache single-flights the enumeration, so the chain's work is
+never discarded and then repeated. Foreground probing may still be required
+when the chain has not finished, or when it prepared a version the play attempt
+does not resolve.
 These bounds are per process: a deployment with several replicas prepares
 independently on each one. The queued evidence write follows the existing
 persistence rules, including their stale-write protections; probing

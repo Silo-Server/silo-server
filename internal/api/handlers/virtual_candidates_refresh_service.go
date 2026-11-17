@@ -164,6 +164,15 @@ type VirtualCandidatesRefreshService struct {
 	// same visible default the discovery response offered.
 	// PlaybackHandler.ScheduleDefaultFileProbe implements this.
 	ScheduleDefaultFileProbe func(contentID string, source *models.MediaFile, streams []VirtualPlaybackStream, filter catalog.AccessFilter)
+	// SeedListing, when non-nil, is called from inside the shared work for
+	// every source group whose provider listing succeeded, with the listing
+	// this run already paid for. The playback start that follows reuses it
+	// instead of listing the provider a second time for the same answer (see
+	// PlaybackHandler.SeedVirtualListing). It runs for discovery, refresh, and
+	// the async job alike: whichever path paid for the listing, the next start
+	// should not pay for it again. It must be cheap and non-blocking — a cache
+	// write, no provider traffic and no catalog write.
+	SeedListing func(source *models.MediaFile, streams []VirtualPlaybackStream)
 	// ScheduleDefaultFileWarm, when non-nil, is called after a detail-page
 	// discovery resolves the item's default version, so the provider-side fetch
 	// for the row a play would use starts before the play press. It is the
@@ -485,6 +494,16 @@ func (s *VirtualCandidatesRefreshService) listSource(ctx context.Context, source
 		// to make visible by reloading the detail in-request; catalog detail no
 		// longer waits, so it is the only notification that path gets.
 		s.publishVersionsUpdated(ctx, chainKey)
+	}
+	if s.SeedListing != nil {
+		// Hand the listing this run just paid for to the playback start. The
+		// persist above committed it, so the entry names the same candidates
+		// the catalog now serves; a start that follows resolves from it without
+		// a second provider round-trip. Pass a copy: the singleflight value must
+		// not be aliased by a cache entry.
+		listed := make([]VirtualPlaybackStream, len(streams))
+		copy(listed, streams)
+		s.SeedListing(source, listed)
 	}
 	if chainKey != "" && s.ScheduleDefaultFileProbe != nil {
 		// Persistence landed: schedule the pre-play probe chain from here —
