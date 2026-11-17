@@ -206,8 +206,11 @@ func (r *APIKeyRepository) CreatePersonal(ctx context.Context, userID int, actin
 	if err := lockServerSettings(ctx, tx); err != nil {
 		return nil, err
 	}
-	// The audit row's accounts join the id order CreateAsActor locks in.
-	if _, err := tx.Exec(ctx, `SELECT id FROM users WHERE id = ANY($1) ORDER BY id FOR SHARE`,
+	// The key and audit rows' accounts, in id order, with the key-share lock
+	// their foreign keys take anyway. Nothing stronger: a profile update
+	// locks its profile row and then bumps the account's policy revision,
+	// and a share lock here would deadlock with it over the acting profile.
+	if _, err := tx.Exec(ctx, `SELECT id FROM users WHERE id = ANY($1) ORDER BY id FOR KEY SHARE`,
 		append([]int{userID}, auditmutation.ActorIDs(ctx)...)); err != nil {
 		return nil, fmt.Errorf("locking api key account: %w", err)
 	}
