@@ -217,7 +217,7 @@ func buildImageArgs(req Request, attempt Attempt, hw hardwareDecode, softwareTon
 		return nil, errors.New("images need a single-frame sampling mode")
 	}
 	toneMap := req.Images.ToneMap != nil
-	args := []string{hideBanner, logLevelOption, errorLogLevel}
+	args := []string{hideBanner, logLevelOption, errorLogLevel, "-max_pixels", strconv.Itoa(decodeMaxPixels)}
 	if req.Threads > 0 {
 		args = append(args, "-threads", strconv.Itoa(req.Threads))
 	}
@@ -266,15 +266,58 @@ func buildImageArgs(req Request, attempt Attempt, hw hardwareDecode, softwareTon
 	), nil
 }
 
+// Bounds on one extracted frame, so a crafted file cannot make ffmpeg or the
+// caller hold an unbounded frame in memory.
+const (
+	// MaxImagePixels is the largest frame, in pixels, an image attempt
+	// decodes. It equals imageutil's source budget (maxSourcePixels), which
+	// every consumer of an extracted frame already enforces, so no frame that
+	// yields a result is refused.
+	MaxImagePixels = 100_000_000
+	// decodeMaxPixels is the -max_pixels ffmpeg gets. ffmpeg compares the
+	// width rounded up to its stride alignment, up to 64 on x86, so a frame
+	// just under MaxImagePixels would be refused at that value. A sixteenth
+	// of headroom covers the rounding for any frame at least 1024 wide.
+	decodeMaxPixels = MaxImagePixels + MaxImagePixels/16
+	// MaxImageBytes is the most one encoded frame may be. The worst case at
+	// MaxImagePixels, noise at ffmpeg's default MJPEG quality, is about 25 MB.
+	MaxImageBytes = 64 << 20
+)
+
+// ErrImageTooLarge means ffmpeg wrote an image over MaxImageBytes.
+var ErrImageTooLarge = errors.New("image too large")
+
 // image runs an image attempt. The output is a single MJPEG frame, so
-// ffmpeg's whole stdout is the image.
+// ffmpeg's whole stdout is the image, up to MaxImageBytes.
 func (a attemptRun) image(req Request, args []string) (Result, *AttemptError) {
-	stdout := &bytes.Buffer{}
-	if failure := a.exec(req, args, nil, stdout); failure != nil {
+	stdout := &cappedBuffer{limit: MaxImageBytes}
+	failure := a.exec(req, args, nil, stdout)
+	// The overflow decides: the refused write closes ffmpeg's stdout, so
+	// ffmpeg exits on a broken pipe and exec reports that exit instead.
+	if stdout.overflowed {
+		return Result{}, &AttemptError{Decoder: a.decoder, Reason: ReasonOutput, Err: fmt.Errorf("%w: ffmpeg wrote more than %d bytes", ErrImageTooLarge, MaxImageBytes)}
+	}
+	if failure != nil {
 		return Result{}, failure
 	}
-	if stdout.Len() == 0 {
+	if stdout.buf.Len() == 0 {
 		return Result{}, &AttemptError{Decoder: a.decoder, Reason: ReasonEmpty, Err: errors.New("ffmpeg wrote no image")}
 	}
-	return Result{Decoder: a.decoder, Images: []Image{{Seconds: req.At.Seconds, JPEG: stdout.Bytes()}}}, nil
+	return Result{Decoder: a.decoder, Images: []Image{{Seconds: req.At.Seconds, JPEG: stdout.buf.Bytes()}}}, nil
+}
+
+// cappedBuffer collects up to limit bytes and refuses the write that would
+// pass it.
+type cappedBuffer struct {
+	buf        bytes.Buffer
+	limit      int
+	overflowed bool
+}
+
+func (b *cappedBuffer) Write(p []byte) (int, error) {
+	if b.overflowed || b.buf.Len()+len(p) > b.limit {
+		b.overflowed = true
+		return 0, ErrImageTooLarge
+	}
+	return b.buf.Write(p)
 }

@@ -40,7 +40,7 @@ func listingCapabilities(calls *atomic.Int32, err error, filters ...string) func
 
 func TestBuildImageArgs(t *testing.T) {
 	tail := []string{"-frames:v", "1", "-f", "image2pipe", "-vcodec", "mjpeg", "-"}
-	head := []string{"-hide_banner", "-loglevel", "error"}
+	head := []string{"-hide_banner", "-loglevel", "error", "-max_pixels", "106250000"}
 	seek := []string{"-ss", "42.500", "-i", "/media/a.mkv"}
 	join := func(parts ...[]string) []string {
 		var args []string
