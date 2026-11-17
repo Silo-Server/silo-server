@@ -99,13 +99,13 @@ func TestBuildMediaStreamsJellyfin12LocalizedLabels(t *testing.T) {
 	if streams[0].LocalizedLanguage != "" || streams[0].LocalizedOriginal != "" {
 		t.Fatalf("video stream carries audio labels: %+v", streams[0])
 	}
-	if streams[1].LocalizedLanguage != compatLanguageName("ja") || streams[1].LocalizedOriginal != "Original" {
+	if streams[1].LocalizedLanguage != "Japanese" || streams[1].LocalizedOriginal != "Original" {
 		t.Fatalf("audio labels = %q/%q", streams[1].LocalizedLanguage, streams[1].LocalizedOriginal)
 	}
 	if streams[2].LocalizedLanguage != "" || streams[2].LocalizedOriginal != "Original" {
 		t.Fatalf("an audio stream without a language has no LocalizedLanguage: %+v", streams[2])
 	}
-	if streams[3].LocalizedLanguage != compatLanguageName("en") || streams[3].LocalizedOriginal != "" {
+	if streams[3].LocalizedLanguage != "English" || streams[3].LocalizedOriginal != "" {
 		t.Fatalf("subtitle labels = %q/%q", streams[3].LocalizedLanguage, streams[3].LocalizedOriginal)
 	}
 }

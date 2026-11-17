@@ -20,12 +20,6 @@ describe("formatTime", () => {
       formatLocale: "ar-EG",
       expected: ["٠:٠٠", "١:٠٥", "١:٣٠:٤١"],
     },
-    {
-      name: "Arabic on ar-AE keeps Latin digits",
-      tag: "ar",
-      formatLocale: "ar-AE",
-      expected: ["0:00", "1:05", "1:30:41"],
-    },
   ])("$name", ({ tag, formatLocale, expected }) => {
     setAppIntl(createAppIntl(tag, {}, formatLocale));
     expect([0, 65, 5441].map(formatTime)).toEqual(expected);

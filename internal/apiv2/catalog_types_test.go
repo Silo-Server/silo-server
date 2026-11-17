@@ -21,9 +21,4 @@ func TestCatalogUserStateEpisodeCounts(t *testing.T) {
 			t.Fatalf("user_state = %s, %v; want %s", got, err, tc.want)
 		}
 	}
-	// v1 shares the view and never carries the counts.
-	v1, err := json.Marshal(&handlers.ItemUserStateView{WatchedCount: &watched, UnplayedCount: &unplayed})
-	if err != nil || string(v1) != `{"played":false,"is_favorite":false,"in_watchlist":false}` {
-		t.Fatalf("v1 user_state = %s, %v", v1, err)
-	}
 }

@@ -2,7 +2,6 @@ import { act, fireEvent, render, renderHook, screen } from "@testing-library/rea
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { Library } from "@/api/types";
-import { libraryCreateToV2 } from "@/api/v2/libraries";
 import { BoxSetFields } from "./LibraryFormSections";
 import { useLibraryForm } from "./useLibraryForm";
 
@@ -67,18 +66,6 @@ describe("box set library settings", () => {
     });
     expect(result.current.settingSupport.boxSets).toBe(false);
     expect(save(result).body).not.toHaveProperty("box_sets_enabled");
-  });
-
-  it("sends the box set settings on create", () => {
-    expect(
-      libraryCreateToV2({
-        name: "Movies",
-        paths: ["/media"],
-        type: "movies",
-        box_sets_enabled: true,
-        box_set_min_movies: 4,
-      }),
-    ).toMatchObject({ box_sets_enabled: true, box_set_min_movies: 4 });
   });
 
   it("shows the size and search controls only while box sets are on", () => {

@@ -1121,8 +1121,9 @@ func TestHWAccelWalkTimeoutScalesWithTheDeviceSet(t *testing.T) {
 	}
 
 	// It covers what it will run: every command the matrix allows, at its own
-	// per-command bound, plus spawn slack.
-	wantThree := time.Duration(3*(3+2))*hwProbeCommandTimeout + hwAccelWalkSlack
+	// per-command bound, plus spawn slack: three QSV and two VAAPI commands on
+	// each of three devices at 3s apiece, plus 5s.
+	const wantThree = 50 * time.Second
 	if threeDevices != wantThree {
 		t.Fatalf("three-device walk = %v, want %v", threeDevices, wantThree)
 	}

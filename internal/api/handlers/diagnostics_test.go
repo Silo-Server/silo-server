@@ -42,10 +42,6 @@ type fakeDiagnosticsService struct {
 	lastBundleBytes int64
 	started         chan struct{}
 	block           chan struct{}
-	listCalls       int
-	listFilters     diagnostics.ListFilters
-	listResult      diagnostics.ListResult
-	listErr         error
 	getReport       *diagnostics.Report
 	getErr          error
 	presignURL      string
@@ -121,15 +117,8 @@ func (f *fakeDiagnosticsService) Ingest(_ context.Context, _ int, _ *string, man
 	}, nil
 }
 
-func (f *fakeDiagnosticsService) ListForAdmin(_ context.Context, filters diagnostics.ListFilters) (diagnostics.ListResult, error) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.listCalls++
-	f.listFilters = filters
-	if f.listErr != nil {
-		return diagnostics.ListResult{}, f.listErr
-	}
-	return f.listResult, nil
+func (f *fakeDiagnosticsService) ListForAdmin(context.Context, diagnostics.ListFilters) (diagnostics.ListResult, error) {
+	return diagnostics.ListResult{}, nil
 }
 
 func (f *fakeDiagnosticsService) GetReport(context.Context, string) (*diagnostics.Report, error) {
@@ -238,22 +227,6 @@ func TestOpenAdminDiagnosticDownloadAlwaysStreams(t *testing.T) {
 	_, err = NewDiagnosticsHandler(service).OpenAdminDiagnosticDownload(t.Context(), "report-1")
 	if !errors.Is(err, diagnostics.ErrReportNotReady) || service.openCalls != 1 {
 		t.Fatal(err, service.openCalls)
-	}
-}
-
-func TestAdminDiagnosticReadServicesReuseStore(t *testing.T) {
-	service := newFakeDiagnosticsService()
-	service.getReport = readyDiagnosticsReport()
-	service.listResult = diagnostics.ListResult{Reports: []diagnostics.Report{*service.getReport}, NextCursor: "next"}
-	handler := NewDiagnosticsHandler(service)
-	filters := diagnostics.ListFilters{UserID: new(7), Limit: 5, Cursor: "position"}
-	page, err := handler.ListAdminDiagnosticReports(t.Context(), filters)
-	if err != nil || len(page.Reports) != 1 || service.listFilters.Cursor != "position" || service.listFilters.Limit != 5 {
-		t.Fatal(page, err, service.listFilters)
-	}
-	report, err := handler.GetAdminDiagnosticReport(t.Context(), "report-1")
-	if err != nil || report != service.getReport {
-		t.Fatal(report, err)
 	}
 }
 

@@ -257,7 +257,6 @@ describe("GlobalSearch", () => {
     expect(screen.getByRole("option", { selected: true })).toHaveAttribute("id", "search-result-0");
     const highlighted = screen.getByRole("option", { selected: true }).closest("[data-selected]");
     expect(highlighted).not.toBeNull();
-    expect(highlighted).toHaveClass("data-[selected]:bg-accent");
     expect(document.querySelectorAll("[data-selected]")).toHaveLength(1);
 
     // Keystrokes after selecting must still reach the input, and a new query
@@ -462,8 +461,6 @@ describe("GlobalSearch box set results", () => {
     ]);
     const boxSets = screen.getByRole("group", { name: "Box sets" });
     expect(boxSets).toContainElement(options[0]!);
-    expect(boxSets).not.toHaveClass("border-t");
-    expect(screen.getByRole("group", { name: "Titles" })).toHaveClass("border-t");
   });
 
   it("hides box sets an audiobook search still holds from before", () => {

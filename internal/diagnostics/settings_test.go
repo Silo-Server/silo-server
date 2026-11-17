@@ -18,9 +18,6 @@ func TestSeedDefaultsPreservesExistingServerInstanceID(t *testing.T) {
 	if got := store.values[KeyServerInstanceID]; got != "existing-instance" {
 		t.Fatalf("server instance id = %q, want existing-instance", got)
 	}
-	if got := store.values[KeyUploadsEnabled]; got != defaultUploadsEnabledStr {
-		t.Fatalf("uploads enabled default = %q, want %q", got, defaultUploadsEnabledStr)
-	}
 }
 
 func TestSeedDefaultsGeneratesDedicatedServerInstanceIDWhenMissing(t *testing.T) {

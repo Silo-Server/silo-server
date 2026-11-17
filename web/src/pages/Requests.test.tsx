@@ -132,12 +132,8 @@ beforeEach(() => {
 });
 
 describe("Requests hub", () => {
-  it("has the app's page header and hands search to the app's search page", () => {
+  it("hands search to the app's search page", () => {
     renderAt("/requests");
-
-    expect(screen.getByRole("heading", { level: 1, name: "Requests" })).toBeInTheDocument();
-    expect(screen.queryByText(/worth waiting for/i)).not.toBeInTheDocument();
-    expect(screen.queryByRole("region", { name: "Status guide" })).not.toBeInTheDocument();
 
     const search = screen.getByRole("textbox", { name: "Search movies and series" });
     fireEvent.change(search, { target: { value: "  the bear " } });

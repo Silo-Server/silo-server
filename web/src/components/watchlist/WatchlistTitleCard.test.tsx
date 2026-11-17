@@ -124,8 +124,6 @@ describe("WatchlistTitleCard", () => {
     expect(withBar.querySelector("[data-request-download-bar] > div")).toHaveStyle({
       width: "43%",
     });
-    // The bottom badge row rises clear of the bar.
-    expect(withBar.querySelector('[data-overlay-edge="bottom"]')).toHaveClass("mb-2");
     cleanup();
 
     expect(renderCard(downloading, null).querySelector("[data-request-download-bar]")).toBeNull();
@@ -138,10 +136,9 @@ describe("WatchlistTitleCard", () => {
     ).toBeNull();
   });
 
-  it("marks a title that needs attention in amber with a way to find it again", () => {
+  it("marks a title that needs attention with a way to find it again", () => {
     renderCard(lost, buildDefaultPrefs());
     const caption = screen.getByTestId("watchlist-title-caption");
-    expect(caption).toHaveClass("text-amber-300");
     expect(caption.textContent).toBe("No longer listed on TMDB · Find it");
     expect(screen.getByRole("link", { name: "Find it" }).getAttribute("href")).toContain(
       "q=Lost+Film",

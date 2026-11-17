@@ -17,12 +17,10 @@ func TestRedisEventBusTakesDatabaseNumberFromURL(t *testing.T) {
 		url  string
 		want int
 	}{
-		{"redis://localhost:6379", 0},
-		{"redis://localhost:6379/7", 7},
+		// Path numbers, bare addresses and redis.db are covered through what
+		// Redis receives in TestRedisEventBusSendsScopedChannelToRedis.
 		{"redis://localhost:6379?db=4", 4},
 		{"redis://sentinel-1:26379/5?master_name=mymaster", 5},
-		// Not a URL: the bus falls back to treating it as an address.
-		{"localhost:6379", 0},
 	} {
 		bus := newRedisEventBus(config.RedisConfig{URL: tc.url})
 		if bus.db != tc.want {

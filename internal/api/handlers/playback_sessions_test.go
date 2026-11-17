@@ -2,7 +2,6 @@ package handlers
 
 import (
 	"context"
-	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -42,15 +41,6 @@ func TestActivityOutputFormatIsIndependentOfSessionScope(t *testing.T) {
 	enrichPlaybackSessionRow(&row, nil)
 	if row.EffectivePlayMethod != "audio" || row.OutputContainer != "fmp4" || row.OutputProtocol != "hls" {
 		t.Fatal("output format changed the session classification")
-	}
-	// The frozen bridge payload keeps its alpha shape; only the native API
-	// exposes the output format.
-	body, err := json.Marshal(row)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if strings.Contains(string(body), "output_container") || strings.Contains(string(body), "output_protocol") {
-		t.Fatalf("bridge payload gained output fields: %s", body)
 	}
 	row.PlayMethod = "direct"
 	enrichPlaybackSessionRow(&row, nil)

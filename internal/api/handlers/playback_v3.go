@@ -534,13 +534,6 @@ func (h *PlaybackHandler) remoteTransformationsV3(ctx context.Context, target no
 	return h.lookupRemoteTransformationsV3(ctx, target, nodeURL, false)
 }
 
-// remoteTransformationsPlanningV3 is the planning-time variant: it honors
-// negatively-cached fetch failures so an unreachable node costs one timeout
-// per error-TTL window instead of one per playback start.
-func (h *PlaybackHandler) remoteTransformationsPlanningV3(ctx context.Context, target nodeauth.Target, nodeURL string) ([]playback.TransformationV3, error) {
-	return h.lookupRemoteTransformationsV3(ctx, target, nodeURL, true)
-}
-
 // lookupRemoteTransformationsV3 returns a node's cached or freshly fetched transformation inventory.
 func (h *PlaybackHandler) lookupRemoteTransformationsV3(ctx context.Context, target nodeauth.Target, nodeURL string, honorCachedFailure bool) ([]playback.TransformationV3, error) {
 	entry, err := h.lookupRemoteCapabilitiesV3(ctx, target, nodeURL, honorCachedFailure)
@@ -1572,36 +1565,6 @@ func (h *PlaybackHandler) pooledNodeCapabilitiesV3(ctx context.Context, target n
 		}
 	}
 	return byURL
-}
-
-// planNodeSessionV3 remains as a focused test seam. Production starts resolve
-// the complete policy in resolveHLSRouteV3 below; this wrapper asks that same
-// resolver for a hard worker route with the requested egress.
-func (h *PlaybackHandler) planNodeSessionV3(ctx context.Context, session *playback.Session, result playback.PlannerResultV3, localEgress bool) nodepool.Plan {
-	return h.planNodeSessionExcludingV3(ctx, session, result, localEgress, nil)
-}
-
-// planNodeSessionExcludingV3 is planNodeSessionV3 with a set of node URLs the
-// caller has already exhausted. The tone-map software fallback uses it so a
-// second attempt cannot land back on the node that just refused the recipe.
-func (h *PlaybackHandler) planNodeSessionExcludingV3(ctx context.Context, session *playback.Session, result playback.PlannerResultV3, localEgress bool, excluded map[string]struct{}) nodepool.Plan {
-	workload, _, ok := routingClassV3(result)
-	if !ok {
-		return nodepool.Plan{}
-	}
-	egress := config.PlaybackEgressPreferProxy
-	if localEgress {
-		egress = config.PlaybackEgressAPIOnly
-	}
-	policy := config.DefaultPlaybackRoutingPolicy()
-	if workload == noderouting.WorkloadRemux {
-		policy.RemuxExecution = config.PlaybackExecutionWorkerOnly
-		policy.RemuxEgress = egress
-	} else {
-		policy.VideoTranscodeExecution = config.PlaybackExecutionWorkerOnly
-		policy.VideoTranscodeEgress = egress
-	}
-	return h.resolveHLSRouteWithPolicyV3(ctx, session, result, policy, true, excluded, nil).Plan
 }
 
 func routingClassV3(result playback.PlannerResultV3) (noderouting.Workload, noderouting.Delivery, bool) {

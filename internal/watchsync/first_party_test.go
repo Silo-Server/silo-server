@@ -14,9 +14,7 @@ func TestPluginProviderKey(t *testing.T) {
 		siloManaged  bool
 		want         string
 	}{
-		{name: "retired Trakt plugin no longer claims the built-in key", pluginID: "silo.watchprovider.trakt", capabilityID: "trakt", siloManaged: true, want: "plugin:3:trakt"},
 		{name: "first-party Simkl keeps the built-in key", pluginID: "silo.watchprovider.simkl", capabilityID: "simkl", siloManaged: true, want: "simkl"},
-		{name: "first-party MDBList keeps the built-in key", pluginID: "silo.watchprovider.mdblist", capabilityID: "mdblist", siloManaged: true, want: "mdblist"},
 		{name: "first-party ID from another repository", pluginID: "silo.watchprovider.simkl", capabilityID: "simkl", want: "plugin:3:simkl"},
 		{name: "unknown capability of a first-party plugin", pluginID: "silo.watchprovider.simkl", capabilityID: "other", siloManaged: true, want: "plugin:3:other"},
 		{name: "third-party plugin", pluginID: "silo.watchprovider.floppy", capabilityID: "floppy", siloManaged: true, want: "plugin:3:floppy"},
@@ -52,8 +50,7 @@ func (f *fakeFirstPartyStore) HasConnections(_ context.Context, providerKey stri
 }
 
 func TestFirstPartyPluginsToInstallUntilMigrated(t *testing.T) {
-	// Trakt connections no longer pull in the retired Trakt plugin.
-	store := &fakeFirstPartyStore{connections: map[string]bool{"simkl": true, "mdblist": true, "trakt": true}}
+	store := &fakeFirstPartyStore{connections: map[string]bool{"simkl": true, "mdblist": true}}
 	got, err := FirstPartyPluginsToInstall(t.Context(), store)
 	if err != nil {
 		t.Fatal(err)

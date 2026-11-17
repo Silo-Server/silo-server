@@ -203,7 +203,7 @@ func TestMatchAudioTrackAcrossVersions(t *testing.T) {
 func TestIsOriginalLanguagePreference(t *testing.T) {
 	for value, want := range map[string]bool{
 		"original": true, "Original": true, "x-silo-original": true, " X-Silo-Original ": true,
-		"": false, "en": false, "ja": false, "x-silo-other": false,
+		"": false, "en": false, "x-silo-other": false,
 	} {
 		if got := playback.IsOriginalLanguagePreference(value); got != want {
 			t.Errorf("IsOriginalLanguagePreference(%q) = %v, want %v", value, got, want)

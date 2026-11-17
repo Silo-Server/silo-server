@@ -2,7 +2,6 @@ import { cleanup, fireEvent, render, screen, within } from "@testing-library/rea
 import { MemoryRouter, Route, Routes, useLocation } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AdminSession } from "@/api/types";
-import { activityMethodMeta } from "./adminActivityPresentation";
 
 const mocks = vi.hoisted(() => ({
   sessions: [] as AdminSession[],
@@ -130,7 +129,7 @@ describe("activity playback scopes", () => {
     mocks.sessions = [makeSession()];
   });
 
-  it("uses the same four labels, counts and colors for the filters and row badges", () => {
+  it("uses the same four labels and counts for the filters and row badges", () => {
     const methods = ["direct", "remux", "direct_stream", "transcode"];
     mocks.sessions = methods.map((method) =>
       makeSession({
@@ -149,13 +148,11 @@ describe("activity playback scopes", () => {
       within(filters)
         .getAllByRole("button")
         .map((chip) => chip.getAttribute("aria-label")),
-    ).toEqual(methods.map((method) => `${activityMethodMeta(method).label} 1`));
-    for (const method of methods) {
-      const meta = activityMethodMeta(method);
-      const chip = within(filters).getByRole("button", { name: `${meta.label} 1` });
+    ).toEqual(["Direct Play 1", "Remux 1", "Direct Stream 1", "Transcode 1"]);
+    for (const label of ["Direct Play", "Remux", "Direct Stream", "Transcode"]) {
+      const chip = within(filters).getByRole("button", { name: `${label} 1` });
       expect(chip).toHaveAttribute("aria-pressed", "false");
-      expect(chip.querySelector(`.${meta.swatchClass}`)).not.toBeNull();
-      expect(screen.getAllByLabelText(`Playback method: ${meta.label}`)).toHaveLength(2);
+      expect(screen.getAllByLabelText(`Playback method: ${label}`)).toHaveLength(2);
     }
     fireEvent.click(screen.getByRole("button", { name: "Direct Stream 1" }));
     expect(screen.getByRole("button", { name: "Direct Stream 1" })).toHaveAttribute(

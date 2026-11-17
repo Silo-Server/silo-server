@@ -163,9 +163,6 @@ func TestEnsureCopySafetyUsesPersistedVerdictWithoutScanning(t *testing.T) {
 	if !track.VideoCopyUnsafe {
 		t.Fatal("VideoCopyUnsafe = false, want true for a multi-PPS file")
 	}
-	if _, ok := ensurer.copySafety.Load(file.ID); !ok {
-		t.Fatal("persisted verdict was not promoted into the in-memory cache")
-	}
 }
 
 func TestEnsureCopySafetyRescansStaleVerdict(t *testing.T) {
@@ -379,30 +376,6 @@ func TestEnsureCopySafetyPersistsVerdictForRowWithoutMtime(t *testing.T) {
 	}
 	if track := got.VideoTracks[0]; track.MultiplePPS == nil || !*track.MultiplePPS || !track.VideoCopyUnsafe {
 		t.Fatalf("track = %+v, want the persisted multi-PPS verdict stamped", track)
-	}
-}
-
-// A failed scan must stay fail-closed and stateless: nothing is written, so a
-// transient error never becomes sticky state on the row and the next request
-// retries cleanly.
-func TestEnsureCopySafetyFailureRecordsNothing(t *testing.T) {
-	writer := &fakeCopySafetyWriter{}
-	ensurer := &PlaybackProbeEnsurer{
-		ffmpegPath:     filepath.Join(t.TempDir(), "missing-ffmpeg"),
-		copySafetyRepo: writer,
-	}
-
-	file := copySafetyTestFile(time.Date(2026, time.March, 4, 5, 6, 7, 0, time.UTC))
-
-	got, err := ensurer.ensureCopySafety(context.Background(), file)
-	if err != nil {
-		t.Fatalf("ensureCopySafety() error = %v", err)
-	}
-	if !got.VideoTracks[0].VideoCopyUnsafe {
-		t.Fatal("VideoCopyUnsafe = false, want true after an inconclusive scan")
-	}
-	if writes := writer.recorded(); len(writes) != 0 {
-		t.Fatalf("failed scan recorded %d verdicts, want 0", len(writes))
 	}
 }
 

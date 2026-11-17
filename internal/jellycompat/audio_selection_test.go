@@ -310,7 +310,6 @@ func TestPlaybackInfoRequest_DecodesLenientStreamIndexes(t *testing.T) {
 		{body: `{"AudioStreamIndex":"1"}`, audio: "1", subtitle: "unset"},
 		{body: `{"AudioStreamIndex":1,"SubtitleStreamIndex":"3"}`, audio: "1", subtitle: "3"},
 		{body: `{"AudioStreamIndex":0,"SubtitleStreamIndex":null}`, audio: "0", subtitle: "unset"},
-		{body: `{"SubtitleStreamIndex":""}`, audio: "unset", subtitle: "unset"},
 		{body: `{"AudioStreamIndex":" ","SubtitleStreamIndex":""}`, audio: "unset", subtitle: "unset"},
 	} {
 		var req playbackInfoRequest

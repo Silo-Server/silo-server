@@ -451,31 +451,6 @@ func TestCompatReportedSourceFollowsTheStreamedVersion(t *testing.T) {
 	}
 }
 
-// TestRememberCompatTracksLeavesTheLatestClaimWhenWritesInterleave covers a
-// later report that claims and saves another track while an earlier report is
-// still writing, so the earlier write lands last: the earlier report reads the
-// play's latest claim back and saves it again.
-func TestRememberCompatTracksLeavesTheLatestClaimWhenWritesInterleave(t *testing.T) {
-	handler, prefs, _, sourceID := newTrackMemoryPlay(t, "series-1")
-	session := &Session{Token: "token-1", StreamAppUserID: 1, ProfileID: "profile-1"}
-	report := func(index int) {
-		current, ok := handler.playbackStore.Get("play-1")
-		if !ok {
-			t.Fatal("play-1 missing")
-		}
-		handler.rememberCompatTracks(t.Context(), session, current,
-			sessionReportRequest{PlaySessionID: "play-1", MediaSourceID: sourceID, SubtitleStreamIndex: compatIntValueOf(index)}, false)
-	}
-	prefs.beforeSubtitleWrite = func() { report(-1) }
-
-	report(trackMemorySDHSubtitle)
-
-	last := prefs.subtitles[len(prefs.subtitles)-1]
-	if last.SubtitleMode != profileSubtitleOff {
-		t.Fatalf("last subtitle write = %+v (all: %d), want the later off choice", last, len(prefs.subtitles))
-	}
-}
-
 // TestRememberCompatTracksJudgesAStopAgainstTheStoredPlay covers a replica
 // whose copy of the play predates a change another replica saved: a Progress
 // report it judges unchanged waits for the next report, but a Stopped report

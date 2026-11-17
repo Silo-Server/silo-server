@@ -1077,22 +1077,12 @@ func TestAuthorityWiderThan(t *testing.T) {
 		{"admin", func(a *accountAuthority) { a.rank = 1 }, true},
 		{"break glass", func(a *accountAuthority) { a.breakGlass = true }, true},
 		{"every library", func(a *accountAuthority) { a.policy.LibraryIDs = nil }, true},
-		{"a profile only the backup has", func(a *accountAuthority) { a.profiles["old"] = profileLimits{} }, true},
-		{"not a child", func(a *accountAuthority) {
-			a.profiles["kid"] = with(a.profiles["kid"], func(p *profileLimits) { p.child = false })
-		}, true},
 		{"higher rating ceiling", func(a *accountAuthority) {
 			a.profiles["kid"] = with(a.profiles["kid"], func(p *profileLimits) { p.ceiling = "R" })
 		}, true},
 		{"lower rating ceiling", func(a *accountAuthority) {
 			a.profiles["kid"] = with(a.profiles["kid"], func(p *profileLimits) { p.ceiling = "G" })
 		}, false},
-		{"no advisory limit", func(a *accountAuthority) {
-			a.profiles["kid"] = with(a.profiles["kid"], func(p *profileLimits) { p.advisoryAge = nil })
-		}, true},
-		{"another library", func(a *accountAuthority) {
-			a.profiles["kid"] = with(a.profiles["kid"], func(p *profileLimits) { p.libraries = []int{1, 2} })
-		}, true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

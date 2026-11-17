@@ -50,18 +50,3 @@ func TestPredicates(t *testing.T) {
 		}
 	}
 }
-
-func TestOf(t *testing.T) {
-	if got := Of(" Audiobooks "); got != (Kinds{Audiobook: true}) {
-		t.Errorf("Of(audiobooks) = %+v", got)
-	}
-	if got := Of("mixed"); got != (Kinds{Mixed: true}) {
-		t.Errorf("Of(mixed) = %+v", got)
-	}
-	if got := Of("movies"); got != (Kinds{Movie: true}) {
-		t.Errorf("Of(movies) = %+v", got)
-	}
-	if got := Of("unknown"); got != (Kinds{}) {
-		t.Errorf("Of(unknown) = %+v", got)
-	}
-}

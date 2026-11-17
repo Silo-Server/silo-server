@@ -1,7 +1,6 @@
 package handlers
 
 import (
-	"context"
 	"testing"
 	"time"
 )
@@ -141,26 +140,5 @@ func TestPlaybackActivityBucketSeconds(t *testing.T) {
 				t.Fatalf("playbackActivityTruncField(%d) = %q, want %q", got, trunc, tt.wantTrunc)
 			}
 		})
-	}
-}
-
-func TestAdminPlaybackActivityProviderInvalidateClearsEveryWindow(t *testing.T) {
-	t.Parallel()
-
-	provider, err := NewAdminPlaybackActivityProvider(context.Background(), nil, nil)
-	if err != nil {
-		t.Fatalf("new provider: %v", err)
-	}
-	t.Cleanup(provider.Close)
-
-	provider.cache.Set(adminPlaybackActivityCachePrefix+"1", &AdminPlaybackActivity{Hours: 1}, time.Minute)
-	provider.cache.Set(adminPlaybackActivityCachePrefix+"24", &AdminPlaybackActivity{Hours: 24}, time.Minute)
-
-	provider.Invalidate()
-
-	for _, key := range []string{adminPlaybackActivityCachePrefix + "1", adminPlaybackActivityCachePrefix + "24"} {
-		if _, ok := provider.cache.Get(key); ok {
-			t.Fatalf("%s survived Invalidate", key)
-		}
 	}
 }

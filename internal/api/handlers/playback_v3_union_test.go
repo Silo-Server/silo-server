@@ -16,6 +16,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/nodeauth"
 	"github.com/Silo-Server/silo-server/internal/nodeauth/nodeauthtest"
 	"github.com/Silo-Server/silo-server/internal/nodepool/nodepooltest"
+	"github.com/Silo-Server/silo-server/internal/noderouting"
 
 	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/models"
@@ -403,10 +404,10 @@ func TestRemoteTransformationsV3FailureCacheSplit(t *testing.T) {
 	handler := newKeyedPlaybackHandler(playback.NewSessionManager(0, 0))
 	handler.JWTSecret = "test-secret"
 	handler.NodeKeys = nodeauthtest.SameKey("test-secret")
-	if _, err := handler.remoteTransformationsPlanningV3(context.Background(), nodeauth.TargetTranscode, remote.URL); err == nil {
+	if _, err := handler.lookupRemoteTransformationsV3(context.Background(), nodeauth.TargetTranscode, remote.URL, true); err == nil {
 		t.Fatal("fetch against a failing node must error")
 	}
-	if _, err := handler.remoteTransformationsPlanningV3(context.Background(), nodeauth.TargetTranscode, remote.URL); err == nil {
+	if _, err := handler.lookupRemoteTransformationsV3(context.Background(), nodeauth.TargetTranscode, remote.URL, true); err == nil {
 		t.Fatal("planning lookups must surface the memoized failure")
 	}
 	if hits != 1 {
@@ -426,7 +427,7 @@ func TestRemoteTransformationsV3FailureCacheSplit(t *testing.T) {
 		t.Fatalf("transport lookup fetched %d times, want 2", hits)
 	}
 	// The refetched success replaces the failure for planning too.
-	if _, err := handler.remoteTransformationsPlanningV3(context.Background(), nodeauth.TargetTranscode, remote.URL); err != nil {
+	if _, err := handler.lookupRemoteTransformationsV3(context.Background(), nodeauth.TargetTranscode, remote.URL, true); err != nil {
 		t.Fatalf("planning lookup after transport success: %v", err)
 	}
 	if hits != 2 {
@@ -458,7 +459,7 @@ func TestRemoteTransformationsPlanningV3ServesStaleSuccessWhileRefreshing(t *tes
 	}
 	result := make(chan []playback.TransformationV3, 1)
 	go func() {
-		transformations, _ := handler.remoteTransformationsPlanningV3(context.Background(), nodeauth.TargetTranscode, remote.URL)
+		transformations, _ := handler.lookupRemoteTransformationsV3(context.Background(), nodeauth.TargetTranscode, remote.URL, true)
 		result <- transformations
 	}()
 	select {
@@ -476,7 +477,7 @@ func TestRemoteTransformationsPlanningV3ServesStaleSuccessWhileRefreshing(t *tes
 		close(releaseRequest)
 		t.Fatal("background capability refresh did not start")
 	}
-	if _, err := handler.remoteTransformationsPlanningV3(context.Background(), nodeauth.TargetTranscode, remote.URL); err != nil {
+	if _, err := handler.lookupRemoteTransformationsV3(context.Background(), nodeauth.TargetTranscode, remote.URL, true); err != nil {
 		close(releaseRequest)
 		t.Fatalf("second stale planning lookup: %v", err)
 	}
@@ -537,7 +538,7 @@ func TestLookupRemoteCapabilitiesV3PreservesConcurrentFreshSuccessOnRefetchFailu
 // In a heterogeneous pool, a plan that needs server transformations must be
 // placed on a node advertising them even when load balancing prefers an
 // incapable node, while transformation-free plans keep load-based selection.
-func TestPlanNodeSessionV3PrefersCapabilityMatchingNode(t *testing.T) {
+func TestWorkerRouteV3PrefersCapabilityMatchingNode(t *testing.T) {
 	capable := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, playback.HWAccelInfo{Transformations: []playback.TransformationV3{
 			{Name: "video_to_h264", Executor: "server", RecipeVersion: "2"},
@@ -568,16 +569,30 @@ func TestPlanNodeSessionV3PrefersCapabilityMatchingNode(t *testing.T) {
 			{Name: "audio_to_aac", Executor: "server", RecipeVersion: "2"},
 		},
 	}
-	selected := handler.planNodeSessionV3(context.Background(), &playback.Session{ID: "session-hetero"}, playback.PlannerResultV3{Plan: plan, PlayMethod: playback.PlayTranscode}, false)
+	selected := workerRouteV3(context.Background(), handler, &playback.Session{ID: "session-hetero"}, playback.PlannerResultV3{Plan: plan, PlayMethod: playback.PlayTranscode})
 	if selected.TranscodeNode == nil || selected.TranscodeNode.URL != capable.URL {
 		t.Fatalf("capability-requiring plan selected %+v, want the capable node", selected.TranscodeNode)
 	}
 
 	free := &playback.PlanV3{PlanID: "plan:copy", Delivery: playback.DeliveryRemuxHLSV3, Transformations: []playback.TransformationV3{}}
-	loadBased := handler.planNodeSessionV3(context.Background(), &playback.Session{ID: "session-copy"}, playback.PlannerResultV3{Plan: free, PlayMethod: playback.PlayRemux}, false)
+	loadBased := workerRouteV3(context.Background(), handler, &playback.Session{ID: "session-copy"}, playback.PlannerResultV3{Plan: free, PlayMethod: playback.PlayRemux})
 	if loadBased.TranscodeNode == nil || loadBased.TranscodeNode.URL != incapable.URL {
 		t.Fatalf("transformation-free plan selected %+v, want load-based selection", loadBased.TranscodeNode)
 	}
+}
+
+// workerRouteV3 resolves the hard worker route a start takes when the routing
+// policy sends this plan's workload to a worker with proxy egress.
+func workerRouteV3(ctx context.Context, h *PlaybackHandler, session *playback.Session, result playback.PlannerResultV3) nodepool.Plan {
+	policy := config.DefaultPlaybackRoutingPolicy()
+	if routingWorkloadV3(result) == noderouting.WorkloadRemux {
+		policy.RemuxExecution = config.PlaybackExecutionWorkerOnly
+		policy.RemuxEgress = config.PlaybackEgressPreferProxy
+	} else {
+		policy.VideoTranscodeExecution = config.PlaybackExecutionWorkerOnly
+		policy.VideoTranscodeEgress = config.PlaybackEgressPreferProxy
+	}
+	return h.resolveHLSRouteWithPolicyV3(ctx, session, result, policy, true, nil, nil).Plan
 }
 
 func TestPrepareTransportV3LocalFallbackRejectsUnavailableTransformations(t *testing.T) {

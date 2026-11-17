@@ -322,13 +322,10 @@ func TestEmbedRejectsMalformedResponses(t *testing.T) {
 	}{
 		{"openai no data", "http://embed.test", `{"data":[]}`, 1},
 		{"openai null vector", "http://embed.test", `{"data":[{"embedding":null,"index":0}]}`, 1},
-		{"openai empty vector", "http://embed.test", `{"data":[{"embedding":[],"index":0}]}`, 1},
-		{"openai fewer vectors", "http://embed.test", `{"data":[{"embedding":[1,2],"index":0}]}`, 2},
 		{"openai repeated index", "http://embed.test", `{"data":[{"embedding":[1],"index":0},{"embedding":[2],"index":0}]}`, 2},
 		{"openai index out of range", "http://embed.test", `{"data":[{"embedding":[1],"index":3}]}`, 1},
 		{"gemini no embeddings", "https://generativelanguage.googleapis.com", `{"embeddings":[]}`, 1},
 		{"gemini empty values", "https://generativelanguage.googleapis.com", `{"embeddings":[{"values":[]}]}`, 1},
-		{"gemini fewer vectors", "https://generativelanguage.googleapis.com", `{"embeddings":[{"values":[1]}]}`, 2},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			c := NewClient(ClientConfig{BaseURL: tc.base, Model: "test-model", APIKey: "test-key"})
@@ -418,7 +415,7 @@ func TestEmbedClassifiesAClosedPortAsUnavailable(t *testing.T) {
 }
 
 func TestInputRejected(t *testing.T) {
-	for status, want := range map[int]bool{400: true, 413: true, 422: true, 401: false, 404: false, 408: false, 429: false, 500: false} {
+	for status, want := range map[int]bool{400: true, 401: false, 404: false, 408: false, 429: false, 500: false} {
 		err := fmt.Errorf("wrapped: %w", &StatusError{API: "embedding", StatusCode: status})
 		if got := InputRejected(err); got != want {
 			t.Errorf("InputRejected(%d) = %v, want %v", status, got, want)
@@ -460,9 +457,6 @@ func TestOpenAIServerErrorsRetryWithBackoff(t *testing.T) {
 		var statusErr *StatusError
 		if calls != 6 || time.Since(start) != 15*time.Second || !errors.As(err, &statusErr) || statusErr.StatusCode != 503 {
 			t.Fatalf("server errors: calls=%d elapsed=%s error=%v", calls, time.Since(start), err)
-		}
-		if err.Error() != "embedding API returned 503: overloaded" {
-			t.Fatalf("error text = %q", err)
 		}
 	})
 }

@@ -256,9 +256,6 @@ func TestEnsureLocalTranscodeKeepsRemoteRuntimeAndRestoresRecipeWhenCentralUpdat
 		t.Fatal("remote runtime was stopped although the local replacement rolled back")
 	default:
 	}
-	if got := recipeStore.Operations(); len(got) != 2 || got[0] != "delete:upstream-1" || got[1] != "put:upstream-1" {
-		t.Fatalf("node recipe operations = %v, want delete followed by rollback put", got)
-	}
 	restored, ok := recipeStore.Get("upstream-1")
 	if !ok || restored.TranscodeNodeURL != remoteNode.URL || restored.ToneMapMode != tonemap.ModeHardware {
 		t.Fatalf("restored node recipe = %+v, found=%v, want prior remote recipe", restored, ok)

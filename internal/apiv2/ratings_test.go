@@ -309,8 +309,6 @@ func TestRatingsDenied(t *testing.T) {
 	requireProblem(t, do(t, newTestHandler(t, deps), http.MethodGet, "/api/v2/ratings", "", viewerHeaders()), TypeDependencyUnavailable)
 }
 
-var _ RatingService = (*handlers.RatingsHandler)(nil)
-
 // A rating runs from 1 to 10, shown as five stars with half stars, and reads
 // back as it was set.
 func TestSetRatingOneToTen(t *testing.T) {

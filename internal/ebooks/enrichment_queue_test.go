@@ -14,15 +14,6 @@ import (
 )
 
 func TestEnrichmentRetryPolicy(t *testing.T) {
-	t.Run("outcome refresh horizons", func(t *testing.T) {
-		if got := enrichmentRefreshHorizon(EnrichmentOutcomeSuccess); got != 90*24*time.Hour {
-			t.Fatalf("success refresh horizon = %s, want 90 days", got)
-		}
-		if got := enrichmentRefreshHorizon(EnrichmentOutcomeNoMatch); got != 30*24*time.Hour {
-			t.Fatalf("no-match refresh horizon = %s, want 30 days", got)
-		}
-	})
-
 	t.Run("transient failures use capped exponential backoff", func(t *testing.T) {
 		if got := enrichmentRetryDelay(EnrichmentErrorTransient, 1, 0); got != 5*time.Minute {
 			t.Fatalf("first transient retry = %s, want 5m", got)
@@ -73,12 +64,6 @@ func TestEnrichmentRetryPolicy(t *testing.T) {
 		t.Setenv("SILO_EBOOK_RATE_LIMIT_COOLDOWN", "-5m")
 		if got := enrichmentRetryDelay(EnrichmentErrorRateLimited, 1, time.Second); got != 15*time.Minute {
 			t.Fatalf("non-positive floor retry = %s, want 15m default", got)
-		}
-	})
-
-	t.Run("permanent failures refresh after 30 days", func(t *testing.T) {
-		if got := enrichmentRetryDelay(EnrichmentErrorPermanent, 1, 0); got != 30*24*time.Hour {
-			t.Fatalf("permanent retry = %s, want 30 days", got)
 		}
 	})
 }

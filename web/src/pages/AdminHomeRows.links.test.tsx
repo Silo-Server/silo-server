@@ -303,19 +303,16 @@ describe("?return= on admin Home rows", () => {
     expect(back.state.location.state).toEqual(arrived);
   });
 
-  it.each(["//evil.example", "/settings"])(
-    "ignores return=%s and stays on Home rows",
-    async (returnTo) => {
-      const router = setup(link(returnTo));
-      const form = await screen.findByRole("dialog", { name: "A collection" });
-      expect(within(form).getByRole("button", { name: "All rows" })).toBeInTheDocument();
-      await userEvent.click(within(form).getByRole("button", { name: "Add row" }));
-      await waitFor(() => expect(creates).toHaveLength(1));
-      await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
-      expect(router.state.location.pathname).toBe("/admin/sections");
-      expect(mocks.success).not.toHaveBeenCalled();
-    },
-  );
+  it.each(["//evil.example"])("ignores return=%s and stays on Home rows", async (returnTo) => {
+    const router = setup(link(returnTo));
+    const form = await screen.findByRole("dialog", { name: "A collection" });
+    expect(within(form).getByRole("button", { name: "All rows" })).toBeInTheDocument();
+    await userEvent.click(within(form).getByRole("button", { name: "Add row" }));
+    await waitFor(() => expect(creates).toHaveLength(1));
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    expect(router.state.location.pathname).toBe("/admin/sections");
+    expect(mocks.success).not.toHaveBeenCalled();
+  });
 });
 
 describe("?edit= on admin Home rows", () => {

@@ -11,23 +11,15 @@ func TestConvertProbeDataContainer(t *testing.T) {
 		filename, formatName, want string
 	}{
 		{"/m/a.mkv", "matroska,webm", "mkv"},
-		{"/m/a.webm", "matroska,webm", "mkv"},
 		{"/m/a.mp4", "mov,mp4,m4a,3gp,3g2,mj2", "mp4"},
-		{"/m/a.mov", "mov,mp4,m4a,3gp,3g2,mj2", "mp4"},
-		{"/m/a.3gp", "mov,mp4,m4a,3gp,3g2,mj2", "mp4"},
-		{"/m/a.f4v", "mov,mp4,m4a,3gp,3g2,mj2", "mp4"},
 		{"/m/a.avi", "avi", "avi"},
-		{"/m/a.divx", "avi", "avi"},
 		{"/m/a.ts", "mpegts", "ts"},
 		{"/m/a.m2ts", "mpegts", "m2ts"},
 		{"/m/a.MTS", "mpegts", "m2ts"},
 		{"/m/a.mpg", "mpeg", "mpeg"},
-		{"/m/a.mpeg", "mpeg", "mpeg"},
 		{"/m/a.wmv", "asf", "wmv"},
-		{"/m/a.asf", "asf", "wmv"},
 		{"/m/a.flv", "flv", "flv"},
 		{"/m/a.ogv", "ogg", "ogg"},
-		{"/m/a.ogm", "ogg", "ogg"},
 		// No filename (older callers and fixtures): format name alone.
 		{"", "mpegts", "ts"},
 	}

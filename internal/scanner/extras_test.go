@@ -265,21 +265,6 @@ func TestClassifyExtraPathScopedProbeSkipsUnwalkedFiles(t *testing.T) {
 	}
 }
 
-func TestPartitionExtraPaths(t *testing.T) {
-	paths := []string{
-		"/movies/Heat (1995)/Heat (1995).mkv",
-		"/movies/Heat (1995)/Trailers/tease.mkv",
-		"/movies/Heat (1995)/Heat (1995)-featurette.mkv",
-	}
-	primary, extras := partitionExtraPaths(paths, "movies", []string{"/movies"}, []string{"/movies"})
-	if len(primary) != 1 || primary[0] != paths[0] {
-		t.Fatalf("primary = %v, want just the main feature", primary)
-	}
-	if len(extras) != 2 {
-		t.Fatalf("extras = %d entries, want 2", len(extras))
-	}
-}
-
 func TestMovieSupplementalDirsNoLongerSkipExtras(t *testing.T) {
 	// The walk must still hard-skip noise dirs...
 	for _, dir := range []string{"/m/Movie/Sample", "/m/Movie/Subs"} {

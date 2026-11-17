@@ -19,7 +19,7 @@ func TestFavoriteBrowseFiltersSupportedBySQL_RejectsUnsupportedSorts(t *testing.
 		{"", true},
 		{"added_at", true},
 
-		// mapSortBy emits these but BrowseFavorites doesn't implement them —
+		// parseSort emits these but BrowseFavorites doesn't implement them —
 		// the SQL path would silently sort by added_at instead.
 		{"rating_imdb", false},
 		{"random", false},

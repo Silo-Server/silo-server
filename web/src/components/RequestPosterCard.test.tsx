@@ -146,7 +146,7 @@ describe("RequestPosterCard (mine variant)", () => {
       </MemoryRouter>,
     );
 
-    expect(screen.getByText("no fulfillment backend configured")).toHaveClass("text-destructive");
+    expect(screen.getByText("no fulfillment backend configured")).toBeInTheDocument();
     expect(screen.queryByText("Automation failed")).not.toBeInTheDocument();
   });
 

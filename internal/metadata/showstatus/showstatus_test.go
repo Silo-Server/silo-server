@@ -21,10 +21,8 @@ func TestNormalize(t *testing.T) {
 		{"Upcoming", "upcoming"},
 		// Already-canonical values are stable
 		{"returning", "returning"},
-		{"ended", "ended"},
 		{"cancelled", "cancelled"}, //nolint:misspell // the catalog's show_status spelling
 		{"in_production", "in_production"},
-		{"upcoming", "upcoming"},
 		// Unknown values pass through lowercased instead of being dropped
 		{"On Hiatus", "on hiatus"},
 	}

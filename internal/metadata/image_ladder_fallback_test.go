@@ -73,7 +73,6 @@ func TestSelectPublishedVariant(t *testing.T) {
 		known bool
 		want  string
 	}{
-		{"legacy", ArtworkAvailability{}, false, medium},
 		{"published", ArtworkAvailability{Published: []string{key, original}}, true, key},
 		{"missing large", ArtworkAvailability{Published: []string{small, original}}, true, small},
 		// A revision cached under an earlier ladder serves its own widest rung

@@ -1,8 +1,6 @@
 package handlers
 
 import (
-	"encoding/json"
-	"strings"
 	"testing"
 
 	"github.com/Silo-Server/silo-server/internal/imagesize"
@@ -48,12 +46,6 @@ func TestEpisodeImageProvenanceBeforeSigning(t *testing.T) {
 			if *listing.PosterIsEpisodeStill != tc.posterStill || *listing.BackdropIsEpisodeStill != tc.backdropStill {
 				t.Fatal("listing provenance disagrees with selected paths")
 			}
-			for _, view := range []any{card, listing} {
-				wire, err := json.Marshal(view)
-				if err != nil || strings.Contains(string(wire), "is_episode_still") || strings.Contains(string(wire), "episode/still") {
-					t.Fatalf("v1 leaks provenance or raw paths: %s (%v)", wire, err)
-				}
-			}
 		})
 	}
 }
@@ -82,8 +74,7 @@ func TestSectionCardKeepsProvenanceOfCachedArtwork(t *testing.T) {
 }
 
 // An episode card takes its parent artwork from the row that loaded it, or
-// from the episode metadata lookup when its row didn't load any, and keeps it
-// off the frozen v1 wire along with its release date.
+// from the episode metadata lookup when its row didn't load any.
 func TestSectionCardCarriesEpisodeParentArtwork(t *testing.T) {
 	parent := &models.EpisodeParentArtwork{SeriesPosterPath: "series/poster", SeriesPosterThumbhash: "sp", SeriesBackdropPath: "series/backdrop", SeriesBackdropThumbhash: "sb", SeasonPosterPath: "season/poster", SeasonPosterThumbhash: "ss", SeasonBackdropPath: "season/backdrop", SeasonBackdropThumbhash: "sbd"}
 	urls := sectionItemImageURLs{parents: episodeParentImageURLs{seriesPosterURL: "https://example.invalid/sp", seriesBackdropURL: "https://example.invalid/sb", seasonPosterURL: "https://example.invalid/ss", seasonBackdropURL: "https://example.invalid/sbd"}}
@@ -102,10 +93,6 @@ func TestSectionCardCarriesEpisodeParentArtwork(t *testing.T) {
 		}
 		if tc.meta.EpisodeAirDate != nil && (card.ReleaseDate == nil || *card.ReleaseDate != "2021-06-11" || card.EpisodeRatingTMDB == nil || *card.EpisodeRatingTMDB != 8.39) {
 			t.Errorf("%s: v2 air date and TMDB rating = %v, %v", name, card.ReleaseDate, card.EpisodeRatingTMDB)
-		}
-		wire, err := json.Marshal(card)
-		if err != nil || strings.Contains(string(wire), "example.invalid") || strings.Contains(string(wire), "series_") || strings.Contains(string(wire), "sbd") || strings.Contains(string(wire), "release_date") || strings.Contains(string(wire), "8.39") {
-			t.Fatalf("%s: v1 leaks parent artwork: %s (%v)", name, wire, err)
 		}
 	}
 	movie := h.toSectionItemResponse(sections.SectionNextUp, &models.MediaItem{ContentID: "movie-1", Type: "movie"}, &sections.SectionItemMeta{ParentArtwork: parent}, nil, nil, urls, "")

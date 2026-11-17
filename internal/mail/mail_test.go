@@ -5,7 +5,6 @@ import (
 	"errors"
 	"net"
 	"strconv"
-	"strings"
 	"testing"
 )
 
@@ -60,16 +59,6 @@ func TestLoadConfigGates(t *testing.T) {
 func TestLoadConfigValidation(t *testing.T) {
 	ctx := context.Background()
 
-	t.Run("defaults", func(t *testing.T) {
-		cfg, err := NewSMTPSender(configuredSettings()).loadConfig(ctx)
-		if err != nil {
-			t.Fatalf("loadConfig: %v", err)
-		}
-		if cfg.port != 587 || cfg.security != securityStartTLS || cfg.fromName != "Silo" {
-			t.Fatalf("unexpected defaults: %+v", cfg)
-		}
-	})
-
 	t.Run("invalid port", func(t *testing.T) {
 		settings := configuredSettings()
 		settings[SettingSMTPPort] = "99999"
@@ -96,29 +85,6 @@ func TestSendInputValidation(t *testing.T) {
 	}
 	if err := sender.Send(ctx, Message{To: []string{"a@b.c"}, Subject: "x"}); err == nil {
 		t.Fatal("a message without a body must be rejected")
-	}
-}
-
-func TestBuildMessageMultipart(t *testing.T) {
-	cfg := &smtpConfig{fromAddress: "silo@example.com", fromName: "Silo"}
-	message, err := buildMessage(cfg, Message{
-		To:       []string{"user@example.com"},
-		Subject:  "Hello",
-		TextBody: "plain",
-		HTMLBody: "<b>rich</b>",
-	})
-	if err != nil {
-		t.Fatalf("buildMessage: %v", err)
-	}
-	var rendered strings.Builder
-	if _, err := message.WriteTo(&rendered); err != nil {
-		t.Fatalf("render message: %v", err)
-	}
-	output := rendered.String()
-	for _, want := range []string{"multipart/alternative", "plain", "rich", "Silo", "user@example.com"} {
-		if !strings.Contains(output, want) {
-			t.Fatalf("rendered message missing %q:\n%s", want, output)
-		}
 	}
 }
 

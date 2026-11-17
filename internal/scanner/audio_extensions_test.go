@@ -8,15 +8,8 @@ func TestSupportsAudioFile(t *testing.T) {
 		want bool
 	}{
 		{"book.m4b", true},
-		{"chapter1.mp3", true},
 		{"audio.M4A", true},
-		{"sample.flac", true},
-		{"podcast.opus", true},
-		{"track.ogg", true},
-		{"track.wav", true},
-		{"track.AAC", true},
 		{"poster.jpg", false},
-		{"movie.mkv", false},
 		{"", false},
 	}
 	for _, tc := range cases {

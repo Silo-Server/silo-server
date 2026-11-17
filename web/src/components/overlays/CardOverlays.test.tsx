@@ -218,26 +218,6 @@ describe("CardOverlays", () => {
     },
   );
 
-  it("keeps the badge layer beneath card actions and non-interactive", () => {
-    // MediaItemMenu renders its quick actions at z-20 in the card wrapper's
-    // stacking context (see MediaItemMenu.test.tsx), so this z-10 layer paints
-    // beneath them; pointer-events-none keeps a covered badge from swallowing
-    // a click aimed at the action on top of it.
-    const prefs = prefsWithOnly("content_rating");
-    prefs.items.content_rating = { ...prefs.items.content_rating, position: "bottom-left" };
-    const { container } = render(<CardOverlays data={SAMPLE_MOVIE_DATA} prefs={prefs} />);
-
-    for (const selector of ['[data-card-overlays="poster"]', '[data-overlay-edge="bottom"]']) {
-      const node = container.querySelector<HTMLElement>(selector);
-      expect(node, selector).toBeTruthy();
-      expect(node?.classList.contains("z-10"), selector).toBe(true);
-      expect(node?.classList.contains("pointer-events-none"), selector).toBe(true);
-    }
-    // Nothing inside the layer may re-enable hit testing.
-    expect(container.querySelectorAll(".pointer-events-auto").length).toBe(0);
-    expect(container.querySelector<HTMLElement>("span.inline-flex")?.style.pointerEvents).toBe("");
-  });
-
   describe("request status", () => {
     const attention: OverlayData = {
       request_status: "Not found yet",

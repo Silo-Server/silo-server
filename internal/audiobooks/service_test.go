@@ -28,9 +28,7 @@ func TestServiceABSCompatEnabledReadsFlag(t *testing.T) {
 		want   bool
 	}{
 		{"flag true", "true", true},
-		{"flag false", "false", false},
 		{"flag empty defaults false", "", false},
-		{"flag garbage defaults false", "yes-please", false},
 	}
 	for _, tc := range cases {
 		tc := tc

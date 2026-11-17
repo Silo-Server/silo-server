@@ -6,11 +6,9 @@ import (
 	"github.com/Silo-Server/silo-server/internal/imagesize"
 )
 
-// The literals below are the variants this package returned before the
-// image_size parameter existed. Routing the size hint through
-// internal/imagesize must not move any of them: an absent parameter, and the
-// "small"/"original" literals the existing call sites already pass, have to
-// keep resolving to exactly the same object keys.
+// An absent size keeps resolving to the variants this package returned before
+// the image_size parameter existed. Named sizes resolve through
+// imagesize.Variant, which TestVariantMatrix covers.
 func TestCachedImageVariantKeyMatchesPreImageSizeBehavior(t *testing.T) {
 	want := map[string]map[string]string{
 		"": {
@@ -20,30 +18,6 @@ func TestCachedImageVariantKeyMatchesPreImageSizeBehavior(t *testing.T) {
 			"still":    "w500",
 			"profile":  "w500",
 			"mystery":  "w500",
-		},
-		"small": {
-			"backdrop": "w300",
-			"logo":     "w500",
-			"poster":   "w300",
-			"still":    "w300",
-			"profile":  "w300",
-			"mystery":  "w300",
-		},
-		"medium": {
-			"backdrop": "w1920",
-			"logo":     "w500",
-			"poster":   "w500",
-			"still":    "w500",
-			"profile":  "w500",
-			"mystery":  "w500",
-		},
-		"original": {
-			"backdrop": "original",
-			"logo":     "original",
-			"poster":   "original",
-			"still":    "original",
-			"profile":  "original",
-			"mystery":  "original",
 		},
 	}
 
@@ -67,10 +41,6 @@ func TestCachedImageVariantKeyUnknownSize(t *testing.T) {
 func TestSizeToVariant(t *testing.T) {
 	want := map[string]string{
 		"":         "featured",
-		"small":    "card",
-		"medium":   "featured",
-		"large":    "large",
-		"original": "original",
 		"nonsense": "featured",
 	}
 	for size, wantVariant := range want {

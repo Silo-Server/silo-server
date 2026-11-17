@@ -34,7 +34,7 @@ func TestEnsureCopySafetyFailureDisablesCopyWithoutCaching(t *testing.T) {
 	if track.MultiplePPS != nil {
 		t.Fatalf("MultiplePPS = %v, want nil when the scan did not produce a result", *track.MultiplePPS)
 	}
-	if _, ok := ensurer.copySafety.Load(file.ID); ok {
+	if !ensurer.NeedsCopySafetyScan(file) {
 		t.Fatal("inconclusive scan result was cached")
 	}
 	if file.VideoTracks[0].VideoCopyUnsafe || file.VideoTracks[0].MultiplePPS != nil {

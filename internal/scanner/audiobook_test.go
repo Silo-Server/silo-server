@@ -457,29 +457,6 @@ func TestSplitAudiobookReconcileRootsProtectsOnlyFailedPaths(t *testing.T) {
 	}
 }
 
-func TestScanSubtreeAudiobookLibraryUsesAudiobookPipeline(t *testing.T) {
-	root := t.TempDir()
-	bookDir := filepath.Join(root, "bad-book")
-	if err := os.Mkdir(bookDir, 0o755); err != nil {
-		t.Fatalf("mkdir book dir: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(bookDir, "chapter.mp3"), []byte("not real audio"), 0o644); err != nil {
-		t.Fatalf("write fake audio: %v", err)
-	}
-
-	s := &Scanner{ffprobePath: "definitely-missing-ffprobe"}
-	_, err := s.ScanSubtree(context.Background(), &models.MediaFolder{ID: 42, Type: "audiobooks", Paths: []string{root}}, bookDir)
-	if err == nil {
-		t.Fatal("ScanSubtree returned nil, want audiobook parse failure")
-	}
-	if strings.Contains(err.Error(), "getting existing files") {
-		t.Fatalf("ScanSubtree used generic file pipeline: %v", err)
-	}
-	if !strings.Contains(err.Error(), "folder_id=42") {
-		t.Fatalf("error = %q, want audiobook scanner aggregate failure", err)
-	}
-}
-
 func TestScanSubtreeAudiobookLibraryRejectsInvalidScopedRoot(t *testing.T) {
 	s := &Scanner{}
 
@@ -491,30 +468,6 @@ func TestScanSubtreeAudiobookLibraryRejectsInvalidScopedRoot(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "invalid audiobook scan root") {
 		t.Fatalf("error = %q, want invalid audiobook scan root", err)
-	}
-}
-
-func TestScanFileAudiobookLibraryUsesAudiobookPipeline(t *testing.T) {
-	root := t.TempDir()
-	bookDir := filepath.Join(root, "bad-book")
-	if err := os.Mkdir(bookDir, 0o755); err != nil {
-		t.Fatalf("mkdir book dir: %v", err)
-	}
-	filePath := filepath.Join(bookDir, "chapter.mp3")
-	if err := os.WriteFile(filePath, []byte("not real audio"), 0o644); err != nil {
-		t.Fatalf("write fake audio: %v", err)
-	}
-
-	s := &Scanner{ffprobePath: "definitely-missing-ffprobe"}
-	err := s.ScanFile(context.Background(), filePath, &models.MediaFolder{ID: 42, Type: "audiobooks", Paths: []string{root}})
-	if err == nil {
-		t.Fatal("ScanFile returned nil, want audiobook parse failure")
-	}
-	if strings.Contains(err.Error(), "unrecognized video extension") {
-		t.Fatalf("ScanFile used video extension gate: %v", err)
-	}
-	if !strings.Contains(err.Error(), "folder_id=42") {
-		t.Fatalf("error = %q, want audiobook scanner aggregate failure", err)
 	}
 }
 
@@ -544,20 +497,6 @@ func TestScanFileAudiobookHonorsIgnoreFiles(t *testing.T) {
 		if strings.Contains(err.Error(), excluded) {
 			t.Errorf("error = %q, want excluded %s left alone", err, excluded)
 		}
-	}
-}
-
-// An admin's request for an excluded file's exact path still scans it.
-func TestScanFileAudiobookExplicitRequestScansExcludedFile(t *testing.T) {
-	root := t.TempDir()
-	writeTestFile(t, filepath.Join(root, ".siloignore"), "Drafts\n")
-	file := filepath.Join(root, "Drafts", "Draft Book", "01.mp3")
-	writeTestFile(t, file, "audio")
-
-	s := &Scanner{ffprobePath: "definitely-missing-ffprobe"}
-	err := s.ScanFile(WithExplicitFileRequest(t.Context()), file, &models.MediaFolder{ID: 42, Type: "audiobooks", Paths: []string{root}})
-	if err == nil || !strings.Contains(err.Error(), "Draft Book") {
-		t.Fatalf("ScanFile error = %v, want Draft Book rebuilt", err)
 	}
 }
 

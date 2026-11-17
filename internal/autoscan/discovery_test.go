@@ -42,35 +42,3 @@ func TestListAvailableScanSourcesEnumeratesInstalled(t *testing.T) {
 		t.Fatalf("expected default poll delivery mode, got %+v", got.Descriptor.DeliveryModes)
 	}
 }
-
-func TestWithBuiltinSourcesAppendsToInner(t *testing.T) {
-	inner := fakeLister{sources: []DiscoveredSource{
-		{PluginID: "sonarr", CapabilityID: "arr-a", DisplayName: "Sonarr"},
-	}}
-	lister := WithBuiltinSources(inner, BuiltinArrWebhookSource())
-
-	discovered, err := lister.ListScanSources(context.Background())
-	if err != nil {
-		t.Fatalf("ListScanSources: %v", err)
-	}
-	if len(discovered) != 2 {
-		t.Fatalf("expected 2 discovered, got %d: %+v", len(discovered), discovered)
-	}
-	if discovered[0].PluginID != "sonarr" {
-		t.Fatalf("plugin entries must pass through first, got %+v", discovered[0])
-	}
-	if !isBuiltinArrWebhookSource(discovered[1]) {
-		t.Fatalf("expected builtin appended, got %+v", discovered[1])
-	}
-}
-
-// isBuiltinArrWebhookSource compares the identifying fields of a discovered
-// source. DiscoveredSource carries slices (delivery modes, connection kinds) so
-// it is no longer comparable with ==, and these tests only care that the
-// builtin identity came through.
-func isBuiltinArrWebhookSource(got DiscoveredSource) bool {
-	want := BuiltinArrWebhookSource()
-	return got.PluginID == want.PluginID &&
-		got.CapabilityID == want.CapabilityID &&
-		got.DisplayName == want.DisplayName
-}

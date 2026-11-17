@@ -59,16 +59,10 @@ describe("EmailSettings", () => {
   });
   afterEach(() => vi.unstubAllGlobals());
 
-  it("shows the saved SMTP password as a masked, editable input", async () => {
+  it("clears the saved SMTP password", async () => {
     const form = makeForm();
     useSettingsFormMock.mockReturnValue(form);
     renderPage();
-
-    // No Replace step: typing stages a replacement, blank keeps the saved one.
-    const input = screen.getByLabelText("Password");
-    expect(input).toHaveAttribute("type", "password");
-    expect(input).toHaveAttribute("placeholder", "••••••••••••");
-    expect(screen.queryByRole("button", { name: /Replace/ })).not.toBeInTheDocument();
 
     // A relay that needs no sign-in has to be able to drop the password too.
     await userEvent.click(screen.getByRole("button", { name: "Clear saved value" }));

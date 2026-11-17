@@ -1,7 +1,6 @@
 package handlers
 
 import (
-	"encoding/json"
 	"reflect"
 	"testing"
 
@@ -66,45 +65,12 @@ func TestToAdminUserResponseReportsOverridesAndEffectivePolicy(t *testing.T) {
 		t.Fatalf("effective_policy = %+v, want %+v", resp.EffectivePolicy, want)
 	}
 
-	// JSON shape: null for inherited overrides, concrete effective block.
-	raw, err := json.Marshal(resp)
-	if err != nil {
-		t.Fatalf("marshal: %v", err)
-	}
-	var decoded map[string]any
-	if err := json.Unmarshal(raw, &decoded); err != nil {
-		t.Fatalf("unmarshal: %v", err)
-	}
-	if decoded["max_transcodes"] != nil || decoded["library_ids"] != nil {
-		t.Fatalf("inherited fields should be JSON null, got %v / %v", decoded["max_transcodes"], decoded["library_ids"])
-	}
-	// The frozen v1 body has no inherit state for the profile limit: it
-	// carries the limit that applies.
-	if decoded["max_profiles"] != float64(3) {
-		t.Fatalf("max_profiles JSON = %v, want the inherited 3", decoded["max_profiles"])
-	}
-	effective, ok := decoded["effective_policy"].(map[string]any)
-	if !ok || effective["max_streams"] != float64(6) || effective["download_allowed"] != true {
-		t.Fatalf("effective_policy JSON = %v", decoded["effective_policy"])
-	}
-
-	// An explicit empty library override must round-trip as [], never null:
-	// null is the wire encoding for inherit, and collapsing it would let an
-	// open+save silently delete a deny-all override.
+	// An explicit empty library override must stay empty, never nil: nil is
+	// inherit, and collapsing it would let an open+save silently delete a
+	// deny-all override.
 	locked := toAdminUserResponse(&models.User{ID: 2, LibraryIDs: []int{}}, group)
 	if locked.LibraryIDs == nil || len(locked.LibraryIDs) != 0 {
 		t.Fatalf("empty library override = %#v, want non-nil empty", locked.LibraryIDs)
-	}
-	lockedJSON, err := json.Marshal(locked)
-	if err != nil {
-		t.Fatalf("marshal: %v", err)
-	}
-	var lockedDecoded map[string]any
-	if err := json.Unmarshal(lockedJSON, &lockedDecoded); err != nil {
-		t.Fatalf("unmarshal: %v", err)
-	}
-	if list, ok := lockedDecoded["library_ids"].([]any); !ok || len(list) != 0 {
-		t.Fatalf("empty library override JSON = %v, want []", lockedDecoded["library_ids"])
 	}
 
 	// Ungrouped: the permissive no-group default fills the gaps.

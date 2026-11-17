@@ -61,9 +61,9 @@ func TestResolveItemUserStatesIncludesCompletedHistory(t *testing.T) {
 		{ContentID: "movie-history-only", Type: "movie", Title: "Imported Movie"},
 	}
 
-	states, err := resolveItemUserStates(ctx, store, "profile-1", nil, items)
+	states, err := resolveItemUserStatesWithOptions(ctx, store, "profile-1", nil, items, itemUserStateOptions{})
 	if err != nil {
-		t.Fatalf("resolveItemUserStates: %v", err)
+		t.Fatalf("resolveItemUserStatesWithOptions: %v", err)
 	}
 	if states["movie-history-only"] == nil || !states["movie-history-only"].Played {
 		t.Fatalf("history-only movie state = %+v, want played", states["movie-history-only"])

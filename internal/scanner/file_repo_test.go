@@ -121,34 +121,6 @@ func TestRecomputeSharedMarkerAttributionUsesLegacyAttributionForUnattributedSeg
 	}
 }
 
-func TestMarkerAuditSegmentForStatePreservesBeforeAfterShape(t *testing.T) {
-	manual := models.MarkerSourceManual
-	algorithm := "manual:v1"
-	confidence := 1.0
-	detectedAt := time.Unix(300, 0).UTC()
-
-	segment := markerAuditSegmentForState(segmentState{
-		start:      floatPtr(5),
-		end:        floatPtr(65),
-		source:     &manual,
-		confidence: &confidence,
-		algorithm:  &algorithm,
-		detectedAt: &detectedAt,
-	})
-	if segment == nil {
-		t.Fatal("expected audit segment")
-	}
-	if segment.Start == nil || *segment.Start != 5 || segment.End == nil || *segment.End != 65 {
-		t.Fatalf("audit segment bounds = %v..%v, want 5..65", segment.Start, segment.End)
-	}
-	if segment.Source == nil || *segment.Source != manual || segment.Algorithm == nil || *segment.Algorithm != algorithm {
-		t.Fatalf("audit provenance = source %v algorithm %v", segment.Source, segment.Algorithm)
-	}
-	if segment.DetectedAt == nil || !segment.DetectedAt.Equal(detectedAt) {
-		t.Fatalf("detected_at = %v, want %v", segment.DetectedAt, detectedAt)
-	}
-}
-
 func TestRecomputeSharedMarkerAttributionDropsClearedManualSegment(t *testing.T) {
 	manual := models.MarkerSourceManual
 	scannerSource := models.MarkerSourceScanner

@@ -1,7 +1,6 @@
 package nfo
 
 import (
-	"reflect"
 	"testing"
 
 	"github.com/Silo-Server/silo-server/internal/metadata"
@@ -28,13 +27,6 @@ func TestProviderDeclaresItsRatingSources(t *testing.T) {
 		if percent != source.Percent {
 			t.Errorf("declaration %+v: only Rotten Tomatoes and Trakt show percentages", source)
 		}
-	}
-	want := []string{
-		models.RatingSourceRTCritic, models.RatingSourceRTAudience,
-		ratingSourceMetacritic, ratingSourceTrakt, ratingSourceTVDB, ratingSourceLetterboxd,
-	}
-	if !reflect.DeepEqual(ids, want) {
-		t.Fatalf("declared %q, want %q", ids, want)
 	}
 	// Every source a <rating name> maps to is one the registry can show.
 	declared := make(map[string]bool)

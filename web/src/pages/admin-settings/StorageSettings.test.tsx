@@ -1228,12 +1228,8 @@ describe("StorageSettings", () => {
 
     render(<StorageSettings />);
 
-    // No Replace step: the saved credential is a masked, always-editable input.
     const publicGroup = within(screen.getByRole("group", { name: "Public storage" }));
     const input = publicGroup.getByLabelText("Access Key");
-    expect(input).toHaveAttribute("type", "password");
-    expect(input).toHaveAttribute("placeholder", "••••••••••••");
-    expect(publicGroup.queryByRole("button", { name: /Replace/ })).not.toBeInTheDocument();
 
     // Deleting the draft means "keep the saved secret", never "clear it".
     await userEvent.clear(input);

@@ -1,7 +1,6 @@
 package handlers
 
 import (
-	"context"
 	"testing"
 	"time"
 )
@@ -182,26 +181,5 @@ func TestTimeseriesBucketSeconds(t *testing.T) {
 					tt.hours, points, got, adminTimeseriesMaxPoints)
 			}
 		})
-	}
-}
-
-func TestAdminTimeseriesProviderInvalidateClearsEveryWindow(t *testing.T) {
-	t.Parallel()
-
-	provider, err := NewAdminTimeseriesProvider(context.Background(), nil, nil)
-	if err != nil {
-		t.Fatalf("new provider: %v", err)
-	}
-	t.Cleanup(provider.Close)
-
-	provider.cache.Set(adminTimeseriesCachePrefix+"1", &AdminTimeseries{}, time.Minute)
-	provider.cache.Set(adminTimeseriesCachePrefix+"24", &AdminTimeseries{}, time.Minute)
-
-	provider.Invalidate()
-
-	for _, key := range []string{adminTimeseriesCachePrefix + "1", adminTimeseriesCachePrefix + "24"} {
-		if _, ok := provider.cache.Get(key); ok {
-			t.Fatalf("%s survived Invalidate", key)
-		}
 	}
 }

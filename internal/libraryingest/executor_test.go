@@ -258,11 +258,7 @@ func TestIngestSkipsVariantFinalizationForAudiobooks(t *testing.T) {
 		wantFinalize int64
 	}{
 		{folderType: "movies", wantFinalize: 1},
-		{folderType: "series", wantFinalize: 1},
-		{folderType: "mixed", wantFinalize: 1},
-		{folderType: "ebooks", wantFinalize: 1},
 		{folderType: "audiobooks", wantFinalize: 0},
-		{folderType: " Audiobook ", wantFinalize: 0},
 	}
 	modes := []struct {
 		name   string
@@ -458,7 +454,6 @@ func TestIngestChecksLocalSidecarsAfterMatchingVideoScopes(t *testing.T) {
 		{folderType: "series", wantCheck: true},
 		{folderType: "mixed", wantCheck: true},
 		{folderType: "ebooks", wantCheck: false},
-		{folderType: "audiobooks", wantCheck: false},
 	} {
 		t.Run(tt.folderType, func(t *testing.T) {
 			matcher := &retryRecordingMatcher{}

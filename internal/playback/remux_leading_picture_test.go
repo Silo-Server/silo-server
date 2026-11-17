@@ -363,19 +363,10 @@ func TestLeadingPictureDropScopeIsHEVCOnly(t *testing.T) {
 	request.ClientPlaybackContext.Device = DeviceContextV3{Platform: "web", PlatformDetails: map[string]string{
 		"user_agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:153.0) Gecko/20100101 Firefox/153.0",
 	}}
-	for codec, want := range map[string]bool{"hevc": true, "h265": true, "h264": false, "av1": false} {
+	for codec, want := range map[string]bool{"hevc": true, "h265": true, "h264": false} {
 		if got := firefoxMacOSHEVCResumeLeadingPictureDropV3(SourceDescriptorV3{VideoCodec: codec}, request); got != want {
 			t.Errorf("codec %s: drop = %v, want %v", codec, got, want)
 		}
-	}
-}
-
-// Pin the exact argv token: Quick104 validated this string against real
-// open-GOP HEVC media, including the escaped comma when it is chained with
-// DV7ToHDR10BitstreamFilter.
-func TestResumeLeadingPictureDropFilterString(t *testing.T) {
-	if ResumeLeadingPictureDropBitstreamFilter != `noise=drop=lt(pts\,startpts)*not(key)` {
-		t.Fatalf("filter = %q", ResumeLeadingPictureDropBitstreamFilter)
 	}
 }
 

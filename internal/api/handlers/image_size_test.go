@@ -13,7 +13,6 @@ import (
 func TestExplicitImageSizeOverridesContextDefaults(t *testing.T) {
 	const poster = "tmdb/movies/550/poster/original.abc123.webp"
 	const backdrop = "tmdb/movies/550/backdrop/original.abc123.webp"
-	const still = "tvdb/series/73141/seasons/22/episodes/9/still/original.webp"
 
 	if got := sizedCardPath(poster, "poster", imagesize.Large); got != "tmdb/movies/550/poster/w1000.abc123.webp" {
 		t.Errorf("card poster at large = %q", got)
@@ -24,19 +23,10 @@ func TestExplicitImageSizeOverridesContextDefaults(t *testing.T) {
 	if got := sizedPosterPath(poster, imagesize.Original); got != poster {
 		t.Errorf("poster at original = %q, want the original key", got)
 	}
-	if got := sizedBackdropPath(backdrop, imagesize.Small); got != "tmdb/movies/550/backdrop/w300.abc123.webp" {
-		t.Errorf("backdrop at small = %q", got)
-	}
 	for _, sectionType := range []sections.SectionType{sections.SectionContinueWatching, sections.SectionNextUp} {
 		if got := sizedSectionBackdropPath(sectionType, backdrop, imagesize.Small); got != "tmdb/movies/550/backdrop/w300.abc123.webp" {
 			t.Errorf("%v backdrop at small = %q, want the requested size to win over w1280", sectionType, got)
 		}
-	}
-
-	// An episode still standing in for a backdrop rides the still ladder, so a
-	// backdrop-only width would name a key that was never generated.
-	if got := sizedBackdropPath(still, imagesize.Large); got != "tvdb/series/73141/seasons/22/episodes/9/still/w1280.webp" {
-		t.Errorf("episode still as backdrop at large = %q", got)
 	}
 }
 

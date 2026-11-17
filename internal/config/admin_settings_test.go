@@ -22,43 +22,11 @@ func TestEffectiveAdminSettingsUsesRuntimeDefaults(t *testing.T) {
 	if got := effective["database.max_connections"]; got != "20" {
 		t.Fatalf("database.max_connections = %q, want 20", got)
 	}
-	if got := effective["s3.public_path_style"]; got != "true" {
-		t.Fatalf("s3.public_path_style = %q, want true", got)
-	}
-	if got := effective["playback.transcode_enabled"]; got != "true" {
-		t.Fatalf("playback.transcode_enabled = %q, want true", got)
-	}
-	if got := effective["theme.catalog_url"]; got != DefaultThemeCatalogURL {
-		t.Fatalf("theme.catalog_url = %q, want %q", got, DefaultThemeCatalogURL)
-	}
 	if got := effective["server.log_level"]; got != "debug" {
 		t.Fatalf("server.log_level = %q, want debug", got)
 	}
 	if got := effective["custom.setting"]; got != "kept" {
 		t.Fatalf("custom.setting = %q, want kept", got)
-	}
-}
-
-func TestEffectiveAdminSettingsMarkerDefaultsPreserveExplicitModes(t *testing.T) {
-	for _, mode := range []string{"", "off", "local", "online", "both"} {
-		t.Run("mode_"+mode, func(t *testing.T) {
-			effective := EffectiveAdminSettings(map[string]string{"markers.mode": mode})
-			want := mode
-			if want == "" {
-				want = "both"
-			}
-			if got := effective["markers.mode"]; got != want {
-				t.Fatalf("markers.mode = %q, want %q", got, want)
-			}
-			if got := effective["markers.online_storage"]; got != "stored" {
-				t.Fatalf("markers.online_storage = %q, want stored", got)
-			}
-			for _, key := range []string{"markers.detect_intros", "markers.detect_credits"} {
-				if got := effective[key]; got != "true" {
-					t.Fatalf("%s = %q, want true", key, got)
-				}
-			}
-		})
 	}
 }
 

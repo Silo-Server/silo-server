@@ -241,7 +241,6 @@ describe("Layout sidebar collapse", () => {
 
       expect(document.documentElement.hasAttribute("data-sidebar-collapsed")).toBe(collapsed);
       expect(screen.getByTestId("sidebar-surface").hasAttribute("data-collapsed")).toBe(collapsed);
-      expect(screen.getByRole("main")).toHaveClass(collapsed ? "lg:ms-16" : "lg:ms-[260px]");
     }
   });
 
@@ -250,29 +249,21 @@ describe("Layout sidebar collapse", () => {
     renderLayout();
 
     expect(screen.getByTestId("sidebar-surface")).toHaveAttribute("data-collapsed", "true");
-    expect(screen.getByRole("main")).toHaveClass("lg:ms-16");
     expect(screen.getByRole("status", { name: "details-ready" })).toHaveTextContent("true");
   });
 });
 
 describe("Layout request routes", () => {
-  // The padded shell wraps the page in one gutter div; unpadded pages render
-  // straight into <main>.
-  const isShellPadded = () =>
-    screen.getByRole("main").firstElementChild?.classList.contains("px-(--page-gutter)") ?? false;
-
   it.each([
-    ["/requests", false, false],
-    ["/requests/movie/603", false, true],
-    ["/title/series/1399", false, true],
-    ["/collections", true, false],
-  ])("renders %s with shell padding %s and a collapsed sidebar %s", (path, padded, collapsed) => {
+    ["/requests", false],
+    ["/requests/movie/603", true],
+    ["/title/series/1399", true],
+    ["/collections", false],
+  ])("renders %s with a collapsed sidebar %s", (path, collapsed) => {
     setRoute(path, "requests");
     renderLayout();
 
-    expect(isShellPadded()).toBe(padded);
     expect(screen.getByTestId("sidebar-surface").hasAttribute("data-collapsed")).toBe(collapsed);
-    expect(screen.getByRole("main")).toHaveClass(collapsed ? "lg:ms-16" : "lg:ms-[260px]");
   });
 });
 

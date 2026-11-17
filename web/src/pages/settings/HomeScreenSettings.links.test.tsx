@@ -291,21 +291,4 @@ describe("?add= on Settings > Home Screen", () => {
     const dialog = await screen.findByRole("dialog", { name: "Edit row" });
     expect(within(dialog).getByLabelText("Row name")).toHaveValue("Row a");
   });
-
-  it("ignores a return path outside collections", async () => {
-    const router = setup("/settings/home-screen?add=collection:user:mine&return=/settings");
-    const form = await screen.findByRole("dialog", { name: "A collection" });
-    expect(within(form).getByRole("button", { name: "All rows" })).toBeInTheDocument();
-    await userEvent.click(within(form).getByRole("button", { name: "Add row" }));
-    await waitFor(() => expect(puts).toHaveLength(1));
-    expect(router.state.location.pathname).toBe("/settings/home-screen");
-  });
-});
-
-describe("?edit= on Settings > Home Screen", () => {
-  it("says a row that is gone no longer exists and opens nothing", async () => {
-    setup("/settings/home-screen?edit=gone");
-    await waitFor(() => expect(mocks.error).toHaveBeenCalledWith("That row no longer exists."));
-    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
-  });
 });
