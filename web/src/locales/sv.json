@@ -122101,6 +122101,12 @@
       "value": "Du kan pausa och återuppta"
     }
   ],
+  "web.player.watchTogether.redisRequired": [
+    {
+      "type": 0,
+      "value": "Watch Party kräver Redis, som inte är konfigurerat på den här servern. Be serveradministratören att konfigurera det."
+    }
+  ],
   "web.player.watchTogether.selfName": [
     {
       "type": 1,

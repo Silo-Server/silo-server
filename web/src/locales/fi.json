@@ -122343,6 +122343,12 @@
       "value": "Voit tauottaa ja jatkaa toistoa"
     }
   ],
+  "web.player.watchTogether.redisRequired": [
+    {
+      "type": 0,
+      "value": "Watch Party vaatii Redisin, jota ei ole määritetty tälle palvelimelle. Pyydä palvelimen ylläpitäjää määrittämään se."
+    }
+  ],
   "web.player.watchTogether.selfName": [
     {
       "type": 1,

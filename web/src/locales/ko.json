@@ -111957,6 +111957,12 @@
       "value": "일시정지 및 재개 가능"
     }
   ],
+  "web.player.watchTogether.redisRequired": [
+    {
+      "type": 0,
+      "value": "Watch Party를 사용하려면 Redis가 필요한데 이 서버에는 설정되어 있지 않아요. 서버 관리자에게 설정을 요청하세요."
+    }
+  ],
   "web.player.watchTogether.selfName": [
     {
       "type": 1,

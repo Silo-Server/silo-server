@@ -122,6 +122,7 @@ type RecipeCard struct {
 	VideoRange                 string                 `json:"video_range,omitempty"`
 	CopyVideoMPEGTS            bool                   `json:"copy_video_mpegts,omitempty"`
 	KeyframePlaylist           bool                   `json:"keyframe_playlist,omitempty"`
+	KeyframePlanned            bool                   `json:"keyframe_planned,omitempty"`
 	KeyframePlanResume         bool                   `json:"keyframe_plan_resume,omitempty"`
 	SeekSeconds                float64                `json:"seek_seconds"`
 	StreamOriginSeconds        float64                `json:"stream_origin_seconds,omitempty"`
@@ -284,6 +285,7 @@ func NewRecipeCard(userID int, profileID string, mediaFileID int, transcodeNodeU
 		VideoRange:                 opts.VideoRange,
 		CopyVideoMPEGTS:            opts.CopyVideoMPEGTS,
 		KeyframePlaylist:           opts.KeyframePlaylist,
+		KeyframePlanned:            opts.KeyframePlanned,
 		KeyframePlanResume:         opts.KeyframePlanResume,
 		SeekSeconds:                opts.SeekSeconds,
 		StreamOriginSeconds:        opts.StreamOriginSeconds,
@@ -396,6 +398,7 @@ func (c RecipeCard) TranscodeOpts(outputDir, ffmpegPath string, logSink FFmpegLo
 		VideoRange:                 c.VideoRange,
 		CopyVideoMPEGTS:            c.CopyVideoMPEGTS,
 		KeyframePlaylist:           c.KeyframePlaylist,
+		KeyframePlanned:            c.KeyframePlanned,
 		KeyframePlanResume:         c.KeyframePlanResume,
 		SeekSeconds:                c.SeekSeconds,
 		StreamOriginSeconds:        c.StreamOriginSeconds,

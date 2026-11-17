@@ -145165,6 +145165,12 @@
       "value": "Вы можете ставить на паузу и продолжать"
     }
   ],
+  "web.player.watchTogether.redisRequired": [
+    {
+      "type": 0,
+      "value": "Для Watch Party нужен Redis, но на этом сервере он не настроен. Попросите администратора сервера настроить его."
+    }
+  ],
   "web.player.watchTogether.selfName": [
     {
       "type": 1,

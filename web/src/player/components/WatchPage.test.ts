@@ -18,7 +18,11 @@ const playbackCapabilitiesMock = vi.hoisted(() => vi.fn());
 const startPlaybackMock = vi.hoisted(() => vi.fn());
 const trickplayRefetchMock = vi.hoisted(() => vi.fn());
 const fetchWatchDetailMock = vi.hoisted(() => vi.fn());
+const watchTogetherCapabilitiesMock = vi.hoisted(() => vi.fn());
 vi.mock("../start-v2", () => ({ playbackCapabilitiesV2: playbackCapabilitiesMock }));
+vi.mock("@/api/v2/watchTogetherCapabilities", () => ({
+  readWatchTogetherCapabilities: watchTogetherCapabilitiesMock,
+}));
 
 vi.mock("../hooks/usePlaybackSession", () => ({
   usePlaybackSession: playbackSessionMock,
@@ -145,6 +149,9 @@ beforeEach(() => {
       "watch_party_source_fallback_v1",
     ],
   });
+  watchTogetherCapabilitiesMock
+    .mockReset()
+    .mockResolvedValue({ state: "available", socket_protocol: "silo.room.v2" });
   startPlaybackMock.mockReset();
   playbackSessionMock.mockReset();
   videoPlayerMock.mockReset();
@@ -170,6 +177,19 @@ describe("WatchPage playback errors", () => {
     expect(
       await screen.findByText("This server needs an update to support Watch Party."),
     ).toBeInTheDocument();
+    expect(videoPlayerMock).not.toHaveBeenCalled();
+  });
+  it("names Redis when a current server has no room socket", async () => {
+    playbackCapabilitiesMock.mockResolvedValue({ features: ["fixed_media_file_v1"] });
+    watchTogetherCapabilitiesMock.mockResolvedValue({ state: "available", socket_protocol: "" });
+    render(
+      createElement(WatchPage, {
+        ...watchPageProps,
+        watchTogetherRoomId: "room-1",
+        watchTogetherRoomToken: "proof",
+      }),
+    );
+    expect(await screen.findByText(/Watch Party needs Redis/)).toBeInTheDocument();
     expect(videoPlayerMock).not.toHaveBeenCalled();
   });
   it("waits for capability confirmation before mounting the room player", async () => {

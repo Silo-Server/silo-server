@@ -128241,6 +128241,12 @@
       "value": "\u200F\u202EYou can pause & resume\u202C"
     }
   ],
+  "web.player.watchTogether.redisRequired": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EWatch Party needs Redis, which this server doesn't have set up. Ask your server administrator to configure it.\u202C"
+    }
+  ],
   "web.player.watchTogether.selfName": [
     {
       "type": 0,

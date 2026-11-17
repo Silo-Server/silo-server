@@ -42,6 +42,30 @@ for a single item does not take the lock.
    extension is capped at five seconds because longer ones mostly overshot into
    the episode. Other files of the same episode with a matching duration copy
    the result (`episode-version-copy:v1`).
+
+   Many anime releases title the cold open `Intro` and the opening song `OP`.
+   So when any file of the season group (below), the file itself included,
+   has an opening song chapter (`OP`, `OP2`, `OP: …`, `Opening`, `Opening 2`,
+   or `Opening: …`, but not `Opening Credits`), an `Intro` or `Introduction`
+   chapter there is read as a cold open and is not the intro. A release that
+   never names an opening song keeps `Intro` as its intro. Two adjacent
+   intro-like chapters, such as `Intro` then `OP`, are still ambiguous and go
+   to Chromaprint. Every pass that reads chapters, including playback, admin
+   re-detection, and the silence backfill, reads them against the whole season
+   group, so a file's result does not depend on how its analysis started.
+
+   When a file's chapters no longer produce the chapter intro stored for it,
+   because they give no intro or one that doesn't overlap it, as after a change
+   to these rules or a remux, local analysis withdraws it (`chapter:v1`,
+   `chapter:silence:v1`, `chapter:silence:v2`) and places the new one if there
+   is one. It withdraws a version copy (`episode-version-copy:v1`) once no
+   version of the episode it could be copied from (a duration within three
+   seconds) produces an intro that overlaps it. These results
+   outrank every Chromaprint result, so left in place they would keep their
+   stale range for good. The file's season group is then compared again even
+   when its stored analysis still stands. The silence backfill withdraws
+   nothing, since it does not compare season groups; it runs right after the
+   nightly episode pass, which has already withdrawn what it would.
 2. **Chromaprint.** Remaining files are grouped by library, season, and
    presentation (edition and audio language). Each file's opening audio
    (25 percent of the runtime, at most ten minutes) is fingerprinted once and
@@ -66,7 +90,8 @@ A season comparison that no longer finds an intro for a file withdraws the
 Chromaprint intro an earlier comparison stored for it (any `chromaprint:`
 identifier), as after a stricter matching rule or a change to the season's
 files. `WithdrawMarker` clears it only while the file still holds that
-scanner result, so chapter, version-copy, manual, and online intros stay.
+scanner result, so manual and online intros stay, and so do chapter and
+version-copy intros, which step 1 withdraws on its own terms.
 Only a comparison over the whole season group withdraws: a group with a
 failed or deferred fingerprint, or with a file left out because a manual or
 online marker holds its intro, withdraws nothing, since the missing file

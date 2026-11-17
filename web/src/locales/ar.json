@@ -162716,6 +162716,12 @@
       "value": "يمكنك الإيقاف المؤقت والاستئناف"
     }
   ],
+  "web.player.watchTogether.redisRequired": [
+    {
+      "type": 0,
+      "value": "يحتاج Watch Party إلى Redis، وهو غير مُعدّ على هذا الخادم. اطلب من مسؤول الخادم إعداده."
+    }
+  ],
   "web.player.watchTogether.selfName": [
     {
       "type": 1,

@@ -122209,6 +122209,12 @@
       "value": "You can pause & resume"
     }
   ],
+  "web.player.watchTogether.redisRequired": [
+    {
+      "type": 0,
+      "value": "Watch Party needs Redis, which this server doesn't have set up. Ask your server administrator to configure it."
+    }
+  ],
   "web.player.watchTogether.selfName": [
     {
       "type": 1,

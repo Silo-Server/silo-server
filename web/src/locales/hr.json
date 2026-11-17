@@ -133126,6 +133126,12 @@
       "value": "Možete pauzirati i nastaviti"
     }
   ],
+  "web.player.watchTogether.redisRequired": [
+    {
+      "type": 0,
+      "value": "Watch Party zahtijeva Redis, koji na ovom poslužitelju nije postavljen. Zamolite administratora poslužitelja da ga konfigurira."
+    }
+  ],
   "web.player.watchTogether.selfName": [
     {
       "type": 1,
