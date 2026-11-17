@@ -866,7 +866,9 @@ func rejectArtworkIdentityChange(recordedAssets, recordedPrivate string, before,
 			assetsUnchanged = false
 		}
 	}
-	if !privateUnchanged && !blobstore.NamesRecordedLocation(recordedPrivate, privateIdentity(afterInputs)) {
+	// Startup accepts only these exact forms: it rewrites a legacy assets row
+	// before serving, and binds the private row by exact match.
+	if !privateUnchanged && privateIdentity(afterInputs) != recordedPrivate {
 		return errArtworkStorageLocked
 	}
 	// Without a recorded assets row only the private bucket is locked; the
@@ -874,7 +876,7 @@ func rejectArtworkIdentityChange(recordedAssets, recordedPrivate string, before,
 	if strings.TrimSpace(recordedAssets) == "" || assetsUnchanged {
 		return nil
 	}
-	if !blobstore.NamesRecordedLocation(recordedAssets, assetsIdentity(afterBackend, afterInputs)) {
+	if identity := assetsIdentity(afterBackend, afterInputs); identity != recordedAssets && !blobstore.SameLocalRoot(recordedAssets, identity) {
 		return errArtworkStorageLocked
 	}
 	return nil

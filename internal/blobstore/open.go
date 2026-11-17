@@ -217,13 +217,6 @@ func openRecorded(ctx context.Context, store Store, settings SettingsStore) (Sto
 	return wrapped, active, nil
 }
 
-// NamesRecordedLocation reports whether identity, as a store or settings would
-// name it, is the location recorded: the same string, the same local root under
-// another path (SameLocalRoot), or the pre-1.0 form of the same S3 location.
-func NamesRecordedLocation(recorded, identity string) bool {
-	return recorded == identity || SameLocalRoot(recorded, identity) || legacyIdentityMatches(recorded, identity)
-}
-
 // legacyIdentityMatches reports whether recorded is the pre-1.0 S3 fingerprint
 // of current. Releases before the single identity row lowercased the entire
 // endpoint, path included, and the migration carries that value over as

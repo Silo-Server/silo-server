@@ -193,6 +193,11 @@ func TestArtworkLockWhenSavedLocationDiffersFromRecorded(t *testing.T) {
 			blobstore.IdentitySettingKey: "s3|https://s3.example|artwork|cache",
 		}
 	}
+	tenantS3 := map[string]string{
+		"s3.public_endpoint":         "https://s3.example/tenant",
+		"s3.public_bucket":           "artwork",
+		blobstore.IdentitySettingKey: "s3|https://s3.example/tenant|artwork|",
+	}
 	for _, tc := range []struct {
 		name   string
 		stored map[string]string
@@ -209,6 +214,9 @@ func TestArtworkLockWhenSavedLocationDiffersFromRecorded(t *testing.T) {
 		{"another private bucket", pendingPrivate(), map[string]string{"s3.private_bucket": "other-private"}, true},
 		{"restore recorded s3 location", movedS3(), map[string]string{"artwork.storage_backend": "s3"}, false},
 		{"restore recorded s3 with equivalent spelling", movedS3(), map[string]string{"artwork.storage_backend": "s3", "s3.public_endpoint": "https://S3.example", "s3.public_key_prefix": "/cache/"}, false},
+		// An endpoint path addresses case-sensitive storage, so its case is a
+		// different location even when the recorded path is lowercase.
+		{"another endpoint path case", tenantS3, map[string]string{"s3.public_endpoint": "https://s3.example/Tenant"}, true},
 	} {
 		_, err := (&AdminHandler{SettingsRepo: &fakeServerSettingsStore{values: tc.stored}}).UpdateAdminSettings(t.Context(), tc.values, nil)
 		requireArtworkLockAnswer(t, tc.name, err, tc.locked)
