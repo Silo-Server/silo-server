@@ -1349,3 +1349,7 @@
 # A transcode node's source grant is honored only while the catalog has its
 # exact media file: the row id, at exactly the granted path, not missing.
 ./internal/scanner TestFileRepositoryIsActiveFileDB
+
+# Frame posters list only movies whose poster slot is empty with nothing on its
+# way, and a frame is saved only while the slot is still empty with the source read.
+./internal/catalog TestFramePostersListOnlyEmptySlotsAndSaveOnlyOverThemDB

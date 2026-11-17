@@ -700,11 +700,20 @@ func TestUnmatchedItemTakesLocalSidecarPoster(t *testing.T) {
 
 // A replaced sidecar drops the cached copy of the old file, so a copy job lost
 // after the write is queued again on the next run instead of the old copy
-// passing for the new file's.
+// passing for the new file's. A sidecar that replaces a poster taken from the
+// video drops the frame the same way: a frame never stands in for another
+// source.
 func TestUnmatchedItemReplacedSidecarDropsOldCopy(t *testing.T) {
+	t.Run("replaced sidecar", func(t *testing.T) {
+		checkUnmatchedSidecarDropsOldCopy(t, "file:///media/home/Birthday 2019-poster.jpg?v=12-1")
+	})
+	t.Run("frame", func(t *testing.T) { checkUnmatchedSidecarDropsOldCopy(t, "frame:42?v=12-1") })
+}
+
+func checkUnmatchedSidecarDropsOldCopy(t *testing.T, oldPoster string) {
+	t.Helper()
 	const (
 		contentID = "movie:local:birthday-2019"
-		oldPoster = "file:///media/home/Birthday 2019-poster.jpg?v=12-1"
 		newPoster = "file:///media/home/Birthday 2019-poster.jpg?v=99-2"
 		oldCopy   = "local/movies/birthday/aa/poster/original.webp"
 	)
