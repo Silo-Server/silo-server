@@ -368,7 +368,7 @@ func (r *titlesRepo) removeByTMDB(ctx context.Context, userID int, profileID, me
 // call removed the entry, the move is recorded in watchlist_title_promotions
 // in the same transaction, so the watchlist arrival notice finds the profile
 // whichever user store holds its library watchlist (see Arrivals).
-func (r *titlesRepo) promoteEntry(ctx context.Context, userID int, profileID string, titleID int64, contentID string, add func(context.Context) (bool, error)) (moved, newToUser bool, err error) {
+func (r *titlesRepo) promoteEntry(ctx context.Context, userID int, profileID string, titleID int64, contentID string, add func(ctx context.Context, entryAddedAt time.Time) (bool, error)) (moved, newToUser bool, err error) {
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
 		return false, false, fmt.Errorf("beginning watchlist title promotion: %w", err)
@@ -379,8 +379,9 @@ func (r *titlesRepo) promoteEntry(ctx context.Context, userID int, profileID str
 		return false, false, err
 	}
 	// The entry is read under the title lock: the profile may have removed
-	// and re-added it since the caller listed it, and the promotion record
-	// must carry the time of the entry that is moved.
+	// and re-added it since the caller listed it, and the library entry
+	// (when add writes it under this lock) and the promotion record must
+	// carry the time of the entry that is moved.
 	var currentAddedAt time.Time
 	err = tx.QueryRow(ctx, `
 		SELECT added_at FROM user_watchlist_titles
@@ -391,7 +392,7 @@ func (r *titlesRepo) promoteEntry(ctx context.Context, userID int, profileID str
 	if err != nil {
 		return false, false, fmt.Errorf("reading promoted watchlist title entry: %w", err)
 	}
-	newToUser, err = add(ctx)
+	newToUser, err = add(ctx, currentAddedAt)
 	if err != nil {
 		return false, false, err
 	}

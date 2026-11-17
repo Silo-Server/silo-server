@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"slices"
 	"strconv"
 	"time"
@@ -121,9 +122,10 @@ func (w *FanoutWorker) captureWatchlistArrivals(ctx context.Context, tx pgx.Tx, 
 		// any of them is found.
 		var waiters []watchlist.Waiter
 		var keys []profileKey
+		index := make(map[profileKey]int, len(waiting[contentID]))
 		for _, waiter := range waiting[contentID] {
 			key := waiterKey(waiter)
-			if i := slices.Index(keys, key); i >= 0 {
+			if i, dup := index[key]; dup {
 				for _, id := range waiter.TMDBIDs {
 					if !slices.Contains(waiters[i].TMDBIDs, id) {
 						waiters[i].TMDBIDs = append(waiters[i].TMDBIDs, id)
@@ -131,6 +133,7 @@ func (w *FanoutWorker) captureWatchlistArrivals(ctx context.Context, tx pgx.Tx, 
 				}
 				continue
 			}
+			index[key] = len(keys)
 			keys = append(keys, key)
 			waiters = append(waiters, waiter)
 		}
@@ -218,13 +221,11 @@ func (w *FanoutWorker) deliverWatchlistArrivals(ctx context.Context, tx pgx.Tx, 
 	// Preferences are read again under the inbox locks, as the episode path
 	// does: a profile that turned notifications off while this batch waited
 	// for its lock is not told.
-	keys := make([]profileKey, 0, len(arrivals))
+	seen := make(map[profileKey]struct{}, len(arrivals))
 	for _, arrival := range arrivals {
-		if key := waiterKey(arrival.waiter); !slices.Contains(keys, key) {
-			keys = append(keys, key)
-		}
+		seen[waiterKey(arrival.waiter)] = struct{}{}
 	}
-	prefs, err := w.preferences.GetMany(ctx, tx, keys)
+	prefs, err := w.preferences.GetMany(ctx, tx, slices.Collect(maps.Keys(seen)))
 	if err != nil {
 		return nil, err
 	}

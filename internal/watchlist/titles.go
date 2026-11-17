@@ -537,8 +537,10 @@ func (s *Titles) promoteOne(ctx context.Context, store promotionStore, v Viewer,
 		return false, false, ctx.Err()
 	}
 	defer func() { <-s.promoteSlots }()
-	addToLibrary := func(ctx context.Context) (bool, error) {
-		inserted, err := store.AddToWatchlistAt(ctx, v.ProfileID, contentID, entryAddedAt)
+	// addedAt is the moved entry's time: the caller's read before the title
+	// lock, or the entry as it is under the lock.
+	addToLibrary := func(ctx context.Context, addedAt time.Time) (bool, error) {
+		inserted, err := store.AddToWatchlistAt(ctx, v.ProfileID, contentID, addedAt)
 		if err != nil {
 			return false, fmt.Errorf("adding promoted watchlist item: %w", err)
 		}
@@ -549,7 +551,7 @@ func (s *Titles) promoteOne(ctx context.Context, store promotionStore, v Viewer,
 		if err != nil {
 			return false, fmt.Errorf("reading promoted watchlist item: %w", err)
 		}
-		return existing != nil && sameStoredTime(existing.AddedAt, entryAddedAt), nil
+		return existing != nil && sameStoredTime(existing.AddedAt, addedAt), nil
 	}
 	if !s.addUnderLock {
 		// Skip an entry a remove already took, so the window in which a
@@ -557,11 +559,11 @@ func (s *Titles) promoteOne(ctx context.Context, store promotionStore, v Viewer,
 		if present, err := s.repo.entryExists(ctx, v.UserID, v.ProfileID, titleID); err != nil || !present {
 			return false, false, err
 		}
-		added, err := addToLibrary(ctx)
+		added, err := addToLibrary(ctx, entryAddedAt)
 		if err != nil {
 			return false, false, err
 		}
-		return s.repo.promoteEntry(ctx, v.UserID, v.ProfileID, titleID, contentID, func(context.Context) (bool, error) { return added, nil })
+		return s.repo.promoteEntry(ctx, v.UserID, v.ProfileID, titleID, contentID, func(context.Context, time.Time) (bool, error) { return added, nil })
 	}
 	return s.repo.promoteEntry(ctx, v.UserID, v.ProfileID, titleID, contentID, addToLibrary)
 }
