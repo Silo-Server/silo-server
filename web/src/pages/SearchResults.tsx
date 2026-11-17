@@ -391,7 +391,7 @@ export default function SearchResults({
         requestGrid
       )
     ) : requestable.length > 0 ? (
-      <section className="bg-card/60 border-border/60 -mx-4 rounded-none border-y py-5 sm:mx-0 sm:rounded-2xl sm:border sm:px-5">
+      <section className="bg-card/60 border-border/60 rounded-2xl border px-4 py-5 sm:px-5">
         <MediaCarousel
           title={t("web.search.results.notInLibrary")}
           onViewAll={() => showView("requests")}
