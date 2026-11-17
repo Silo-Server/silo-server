@@ -8,6 +8,7 @@ import (
 	"io/fs"
 	"log/slog"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -266,7 +267,9 @@ func (b *HDR10PlusBackfiller) loadCandidates(ctx context.Context, afterID int) (
 		  AND jsonb_typeof(mf.video_tracks->0) = 'object'
 		  AND lower(COALESCE(mf.video_tracks->0->>'color_transfer', '')) LIKE '%smpte2084%'
 		  AND (NOT (mf.video_tracks->0 ?& ARRAY['hdr10_plus', 'frame_color_range'])
-		       OR (mf.video_tracks->0->>'dv_el_present' = 'true'
+		       OR ((mf.video_tracks->0->>'dv_el_present' = 'true'
+		            OR (mf.video_tracks->0->>'dv_profile' = '7'
+		                AND lower(COALESCE(mf.video_tracks->0->>'video_range_type', '')) LIKE '%withel%'))
 		           AND COALESCE(mf.video_tracks->0->>'dv_enhancement_layer', 'unknown') = 'unknown'))
 		  AND NOT EXISTS (
 			SELECT 1 FROM hdr10_plus_backfill_no_frame nf
@@ -365,9 +368,13 @@ func (b *HDR10PlusBackfiller) backfillFile(ctx context.Context, c hdr10PlusCandi
 		outcome = hdr10PlusOutcomeHDR10Plus
 	}
 	// An enhancement layer of unknown type takes the one the frame's RPU
-	// tells, if it tells one.
+	// tells, if it tells one. A row from before Silo stored dv_el_present
+	// shows its layer only in a Profile 7 DOVIWithEL range label, as the
+	// planner reads it.
 	layer := ""
-	if c.track.DVELPresent && (c.track.DVEnhancementLayer == "" || c.track.DVEnhancementLayer == "unknown") {
+	hasEL := c.track.DVELPresent ||
+		c.track.DVProfile == 7 && strings.Contains(strings.ToLower(c.track.VideoRangeType), "withel")
+	if hasEL && (c.track.DVEnhancementLayer == "" || c.track.DVEnhancementLayer == "unknown") {
 		layer = mediaprobe.DolbyVisionEnhancementLayer(frame.SideData)
 	}
 	// Set only frame_color_range and, on a track not yet checked for HDR10+,

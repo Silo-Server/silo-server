@@ -665,12 +665,14 @@ always send `output.hdr_details` too, because a server without
 `client_capabilities.hdr_details`; the feature token tells the client whether
 the evidence tier is being honored.
 
-Native Profile 7 also needs the source's enhancement layer to be known
-minimal (`dv_enhancement_layer: mel`). A client's `dolby_vision_profiles` say
+Native Profile 7 also depends on the type of an enhancement layer the source's
+track carries (`dv_enhancement_layer`). A client's `dolby_vision_profiles` say
 it decodes Profile 7, not that it decodes a full enhancement layer, so a `fel`
 source is refused with `dolby_vision_reason: profile_7_full_enhancement_layer`
 and an `unknown` one with `profile_7_enhancement_layer_unknown`; both still
-play through the Profile 8.1 and HDR10 conversions. The scanner reads the type
+play through the Profile 8.1 and HDR10 conversions. A `mel` source, and a
+`none` one whose track carries no enhancement layer, keep the ordinary profile
+and level checks. The scanner reads the type
 from the NLQ coefficients of the first frame's RPU: identity coefficients in
 every component are a minimal layer, anything else a full one.
 

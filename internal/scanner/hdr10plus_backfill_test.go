@@ -164,8 +164,8 @@ func TestHDR10PlusBackfillRecordsFrameStatusDB(t *testing.T) {
 	if err != nil {
 		t.Fatalf("first pass: %v", err)
 	}
-	if result.DolbyVisionMEL != 1 || result.DolbyVisionFEL != 1 {
-		t.Fatalf("first pass = %+v, want one MEL and one FEL recorded", result)
+	if result.DolbyVisionMEL != 1 || result.DolbyVisionFEL != 2 {
+		t.Fatalf("first pass = %+v, want one MEL and two FEL recorded", result)
 	}
 	track := func(name string) map[string]any {
 		t.Helper()
@@ -219,6 +219,9 @@ func hdr10PlusBackfillTestRows(t *testing.T) []hdr10PlusBackfillRow {
 		// A Profile 7 track checked for HDR10+ before Silo read the type of
 		// its enhancement layer.
 		dv7Track = `{"codec":"hevc","color_transfer":"smpte2084","dv_profile":7,"dv_el_present":true,"dv_enhancement_layer":"unknown","hdr10_plus":false,"frame_color_range":"tv"}`
+		// The same from before Silo stored dv_el_present: only the range
+		// label says it has an enhancement layer.
+		legacyDV7Track = `{"codec":"hevc","color_transfer":"smpte2084","dv_profile":7,"video_range_type":"DOVIWithEL","hdr10_plus":false,"frame_color_range":"tv"}`
 	)
 	return []hdr10PlusBackfillRow{
 		{name: "hdr10plus", tracks: "[" + hdr10Track + "]", sideData: hdr10PlusFrame, frameRange: "tv"},
@@ -234,6 +237,7 @@ func hdr10PlusBackfillTestRows(t *testing.T) []hdr10PlusBackfillRow {
 		{name: "changed-on-disk", tracks: "[" + hdr10Track + "]", sideData: hdr10PlusFrame},
 		{name: "dv7-mel", tracks: "[" + dv7Track + "]", sideData: dv7Frame("mel"), frameRange: "tv"},
 		{name: "dv7-fel", tracks: "[" + dv7Track + "]", sideData: dv7Frame("fel"), frameRange: "tv"},
+		{name: "legacy-dv7-fel", tracks: "[" + legacyDV7Track + "]", sideData: dv7Frame("fel"), frameRange: "tv"},
 		// The frame's RPU carries no NLQ coefficients: the type stays unknown.
 		{name: "dv7-no-nlq", tracks: "[" + dv7Track + "]", sideData: dv7Frame(""), frameRange: "tv"},
 	}
@@ -301,7 +305,7 @@ func checkHDR10PlusBackfillFirstPass(t *testing.T, track func(string) map[string
 	if got := track("already-checked"); got["hdr10_plus"] != false {
 		t.Fatalf("already checked file = %v, want it unchanged", got)
 	}
-	for name, want := range map[string]string{"dv7-mel": "mel", "dv7-fel": "fel", "dv7-no-nlq": "unknown"} {
+	for name, want := range map[string]string{"dv7-mel": "mel", "dv7-fel": "fel", "legacy-dv7-fel": "fel", "dv7-no-nlq": "unknown"} {
 		if got := track(name); got["dv_enhancement_layer"] != want || got["hdr10_plus"] != false {
 			t.Fatalf("%s file = %v, want enhancement layer %s and its HDR10+ status kept", name, got, want)
 		}
