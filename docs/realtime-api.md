@@ -384,8 +384,10 @@ connection with `1009` (message too big).
 `GET /api/v2/playback/sessions/control/capabilities` reports `available` and
 `protocol`, an empty string when this server does not serve the handshake. The web
 player mints under captured profile authority for every connection, offers the
-protocol pair, discards frames once that authority changes, and retries a refused
-mint under the same authority with a backoff that grows to one attempt every 30 seconds.
+protocol pair, and discards frames once that authority changes. It stops minting
+after a `410 playback_session_ended`. Any other refused mint is retried under the
+same authority with a backoff that grows to one attempt every 30 seconds, and
+never sooner than the refusal's `Retry-After` (capped at 60 seconds).
 
 
 ### V2 suggestion reads and vote membership
