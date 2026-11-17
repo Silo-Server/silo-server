@@ -4,6 +4,13 @@
       "APIKeyScope": {
         "additionalProperties": false,
         "properties": {
+          "audience": {
+            "enum": [
+              "admin",
+              "user"
+            ],
+            "type": "string"
+          },
           "description": {
             "type": "string"
           },
@@ -13,7 +20,8 @@
         },
         "required": [
           "name",
-          "description"
+          "description",
+          "audience"
         ],
         "type": "object"
       },
@@ -1035,6 +1043,10 @@
           "label": {
             "type": "string"
           },
+          "profile_id": {
+            "description": "The household profile the key is bound to and always acts as. Absent on an account key, which may name any profile on its account",
+            "type": "string"
+          },
           "rate_tier": {
             "enum": [
               "standard",
@@ -1172,6 +1184,10 @@
           "label": {
             "type": "string"
           },
+          "profile_id": {
+            "description": "The household profile the key is bound to. Absent on an account key",
+            "type": "string"
+          },
           "rate_tier": {
             "type": "string"
           },
@@ -1230,6 +1246,10 @@
             "format": "date-time",
             "pattern": "^(?:[1-9][0-9]{3}|0[1-9][0-9]{2}|00[1-9][0-9]|000[2-9])-",
             "patternDescription": "a non-zero RFC 3339 instant",
+            "type": "string"
+          },
+          "profile_id": {
+            "description": "The household profile the key is bound to and always acts as. Absent on an account key, which may name any profile on its account",
             "type": "string"
           },
           "rate_tier": {
@@ -7243,6 +7263,11 @@
       "AdminCollectionSection": {
         "additionalProperties": false,
         "properties": {
+          "collection_count": {
+            "description": "For a row of collections (section_type collection_posters), how many collections it lists, this one included. Absent for every other row.",
+            "format": "int64",
+            "type": "integer"
+          },
           "enabled": {
             "type": "boolean"
           },
@@ -18856,6 +18881,17 @@
             "description": "Why the stored embedding lock rejects the embedding settings this server runs with; empty when it does not.",
             "type": "string"
           },
+          "lock_conflict_args": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Values for lock_conflict_key's placeholders, by name. Absent when lock_conflict is empty.",
+            "type": "object"
+          },
+          "lock_conflict_key": {
+            "description": "Translation catalog key of lock_conflict, which clients show in a non-English interface. Absent when lock_conflict is empty.",
+            "type": "string"
+          },
           "recommendations": {
             "$ref": "#/components/schemas/AdminRecommendationJobStatus"
           },
@@ -21019,6 +21055,13 @@
       "AdminSectionPreviewResult": {
         "additionalProperties": false,
         "properties": {
+          "collections": {
+            "description": "The cards a row of collections (section_type collection_posters) shows the acting admin, in order; items is then empty and total_count is their number. Absent for every other section type",
+            "items": {
+              "$ref": "#/components/schemas/SectionCollectionCard"
+            },
+            "type": "array"
+          },
           "items": {
             "description": "The page's items; empty, never null",
             "items": {
@@ -21339,6 +21382,25 @@
         "additionalProperties": false,
         "properties": {
           "message": {
+            "type": "string"
+          },
+          "message_args": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Values of the message_key message's placeholders by name; present only with message_key, and absent when the message has none",
+            "examples": [
+              {
+                "dimensions": "1024"
+              }
+            ],
+            "type": "object"
+          },
+          "message_key": {
+            "description": "Key of the shared translation catalog message whose English is message. A client that has the key shows its translation, filling message_args, and otherwise shows message. Absent when message has no catalog entry",
+            "examples": [
+              "web.admin.common.connectionCheck.result.redisConnected"
+            ],
             "type": "string"
           },
           "success": {
@@ -28176,7 +28238,10 @@
             "$ref": "#/components/schemas/WatchRollup"
           },
           "user_rating": {
+            "description": "The profile's rating, 1 to 10, which clients show as five stars with half stars; absent when unrated",
             "format": "int64",
+            "maximum": 10,
+            "minimum": 1,
             "type": "integer"
           },
           "user_state": {
@@ -36993,6 +37058,13 @@
             "description": "Whether the current principal may use the capability",
             "type": "boolean"
           },
+          "collection_rows": {
+            "description": "Sections may be rows of collections (section_type collection_posters): such a section answers its cards in collections instead of items, and the section recipe gallery offers the collection_posters recipe. A client that does not show collections leaves the row out, as it leaves out any section with no items. Absent when the home sections service is not configured, and on a server that predates rows of collections",
+            "examples": [
+              true
+            ],
+            "type": "boolean"
+          },
           "include_items_max": {
             "description": "The largest include_items getHomeLayout accepts: the layout then also answers that many first sections with their cards in included_sections. Absent when the home sections service is not configured",
             "examples": [
@@ -41878,16 +41950,7 @@
           "enabled": {
             "type": "boolean"
           },
-          "notify_continue_watching": {
-            "type": "boolean"
-          },
-          "notify_favorites": {
-            "type": "boolean"
-          },
           "notify_next_up": {
-            "type": "boolean"
-          },
-          "notify_watchlist": {
             "type": "boolean"
           },
           "profile_id": {
@@ -41902,9 +41965,6 @@
         "required": [
           "profile_id",
           "enabled",
-          "notify_favorites",
-          "notify_watchlist",
-          "notify_continue_watching",
           "notify_next_up"
         ],
         "type": "object"
@@ -41915,16 +41975,7 @@
           "enabled": {
             "type": "boolean"
           },
-          "notify_continue_watching": {
-            "type": "boolean"
-          },
-          "notify_favorites": {
-            "type": "boolean"
-          },
           "notify_next_up": {
-            "type": "boolean"
-          },
-          "notify_watchlist": {
             "type": "boolean"
           }
         },
@@ -42079,10 +42130,10 @@
           },
           "next_up_after": {
             "$ref": "#/components/schemas/NotificationEpisodeRef",
-            "description": "With an active Next Up reason, the last episode the profile finished: on that reason alone, only a new episode after it notifies"
+            "description": "With an active Next Up reason, the episode just before the one Next Up waits for, normally the last episode the profile finished: only a new episode after it notifies"
           },
           "notifies": {
-            "description": "True when at least one reason is active and the profile has not muted the series",
+            "description": "True when the episode the profile waits for would notify on arrival: next_up is active, the profile has not muted the series, and it is caught up, meaning the first episode the catalog lists at or after the one Next Up waits for has not arrived, or none is listed. False while that episode is already available: the profile has an episode to watch first, and nothing notifies until it watches on.",
             "type": "boolean"
           },
           "reasons": {
@@ -42106,6 +42157,10 @@
             "description": "GET /notifications/series lists the series whose new episodes can notify the profile",
             "type": "boolean"
           },
+          "bulk_mute": {
+            "description": "POST /notifications/series/mute and /notifications/series/unmute mute and unmute many series at once, and GET /notifications/series accepts status=muted",
+            "type": "boolean"
+          },
           "mute": {
             "description": "PUT and DELETE /notifications/series/{series_id}/mute mute and unmute one series, and list entries carry muted",
             "type": "boolean"
@@ -42113,7 +42168,8 @@
         },
         "required": [
           "available",
-          "mute"
+          "mute",
+          "bulk_mute"
         ],
         "type": "object"
       },
@@ -42137,30 +42193,87 @@
         ],
         "type": "object"
       },
+      "NotificationSeriesMuteRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "series_ids": {
+            "description": "Catalog item identifiers of the series. A repeated identifier is reported once.",
+            "examples": [
+              [
+                "series-tvdb-81189"
+              ]
+            ],
+            "items": {
+              "description": "Opaque identifier",
+              "examples": [
+                "1"
+              ],
+              "minLength": 1,
+              "type": "string"
+            },
+            "maxItems": 500,
+            "minItems": 1,
+            "type": "array"
+          }
+        },
+        "required": [
+          "series_ids"
+        ],
+        "type": "object"
+      },
+      "NotificationSeriesMuteResult": {
+        "additionalProperties": false,
+        "properties": {
+          "outcome": {
+            "description": "applied: this call muted or unmuted the series. unchanged: it was already in the requested state. not_found: a mute named no series, or one the viewer may not see; an unmute never answers it.",
+            "enum": [
+              "applied",
+              "unchanged",
+              "not_found"
+            ],
+            "type": "string"
+          },
+          "series_id": {
+            "description": "Opaque identifier",
+            "examples": [
+              "1"
+            ],
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "series_id",
+          "outcome"
+        ],
+        "type": "object"
+      },
+      "NotificationSeriesMuteResults": {
+        "additionalProperties": false,
+        "properties": {
+          "results": {
+            "description": "One result per distinct requested series, in request order",
+            "items": {
+              "$ref": "#/components/schemas/NotificationSeriesMuteResult"
+            },
+            "maxItems": 500,
+            "type": "array"
+          }
+        },
+        "required": [
+          "results"
+        ],
+        "type": "object"
+      },
       "NotificationSeriesReasons": {
         "additionalProperties": false,
         "properties": {
-          "continue_watching": {
-            "description": "The profile is partway through the series",
-            "type": "boolean"
-          },
-          "favorite": {
-            "description": "The series is one of the profile's favorites",
-            "type": "boolean"
-          },
           "next_up": {
-            "description": "The profile finished an episode and waits for the next",
-            "type": "boolean"
-          },
-          "watchlist": {
-            "description": "The series is on the profile's watchlist",
+            "description": "The profile finished an episode and waits for the next: the series is not dropped, its Next Up card is not removed, and no episode is partly watched since",
             "type": "boolean"
           }
         },
         "required": [
-          "favorite",
-          "watchlist",
-          "continue_watching",
           "next_up"
         ],
         "type": "object"
@@ -42561,19 +42674,10 @@
             "minLength": 1,
             "type": "string"
           },
-          "notify_continue_watching": {
-            "type": "boolean"
-          },
-          "notify_favorites": {
-            "type": "boolean"
-          },
           "notify_next_up": {
             "type": "boolean"
           },
           "notify_requests": {
-            "type": "boolean"
-          },
-          "notify_watchlist": {
             "type": "boolean"
           },
           "type": {
@@ -42659,19 +42763,10 @@
           "name": {
             "type": "string"
           },
-          "notify_continue_watching": {
-            "type": "boolean"
-          },
-          "notify_favorites": {
-            "type": "boolean"
-          },
           "notify_next_up": {
             "type": "boolean"
           },
           "notify_requests": {
-            "type": "boolean"
-          },
-          "notify_watchlist": {
             "type": "boolean"
           },
           "type": {
@@ -42692,9 +42787,6 @@
           "type",
           "url_host",
           "enabled",
-          "notify_favorites",
-          "notify_watchlist",
-          "notify_continue_watching",
           "notify_next_up",
           "notify_requests",
           "consecutive_failures",
@@ -42727,19 +42819,10 @@
           "name": {
             "type": "string"
           },
-          "notify_continue_watching": {
-            "type": "boolean"
-          },
-          "notify_favorites": {
-            "type": "boolean"
-          },
           "notify_next_up": {
             "type": "boolean"
           },
           "notify_requests": {
-            "type": "boolean"
-          },
-          "notify_watchlist": {
             "type": "boolean"
           },
           "url": {
@@ -43720,6 +43803,11 @@
             "minLength": 1,
             "type": "string"
           },
+          "profile_id": {
+            "description": "Bind the key to this profile of the account: it always acts as that profile and cannot name another. Requires user_keys_enabled and user scopes",
+            "minLength": 1,
+            "type": "string"
+          },
           "scopes": {
             "items": {
               "type": "string"
@@ -43763,6 +43851,10 @@
             "patternDescription": "a non-zero RFC 3339 instant",
             "type": "string"
           },
+          "profile_id": {
+            "description": "The household profile the key is bound to and always acts as. Absent on an account key, which may name any profile on its account",
+            "type": "string"
+          },
           "rate_tier": {
             "enum": [
               "standard",
@@ -43802,16 +43894,27 @@
           "available": {
             "type": "boolean"
           },
+          "max_user_keys": {
+            "description": "How many keys an account may hold before it can create no more for itself",
+            "format": "int64",
+            "type": "integer"
+          },
           "scopes": {
             "items": {
               "$ref": "#/components/schemas/APIKeyScope"
             },
             "type": "array"
+          },
+          "user_keys_enabled": {
+            "description": "Whether accounts that are not admins, and profiles other than the primary one, may create keys. Such a key, and any key bound to a profile, carries scopes whose audience is user",
+            "type": "boolean"
           }
         },
         "required": [
           "available",
-          "scopes"
+          "scopes",
+          "user_keys_enabled",
+          "max_user_keys"
         ],
         "type": "object"
       },
@@ -47603,7 +47706,7 @@
           "version": {
             "description": "The newest format version this server writes and reads",
             "examples": [
-              1
+              2
             ],
             "format": "int64",
             "type": "integer"
@@ -48830,11 +48933,13 @@
             "type": "string"
           },
           "rating": {
-            "description": "Stars, 1 to 5",
+            "description": "1 to 10; clients show it as five stars with half stars (7 is 3.5 stars)",
             "examples": [
-              4
+              7
             ],
             "format": "int64",
+            "maximum": 10,
+            "minimum": 1,
             "type": "integer"
           }
         },
@@ -48849,12 +48954,12 @@
         "additionalProperties": false,
         "properties": {
           "rating": {
-            "description": "Stars, 1 to 5",
+            "description": "1 to 10; clients show it as five stars with half stars (7 is 3.5 stars)",
             "examples": [
-              4
+              7
             ],
             "format": "int64",
-            "maximum": 5,
+            "maximum": 10,
             "minimum": 1,
             "type": "integer"
           }
@@ -50587,6 +50692,13 @@
       "Section": {
         "additionalProperties": false,
         "properties": {
+          "collections": {
+            "description": "The cards of a row of collections (section_type collection_posters), in the row's order: the collections the viewer can see. Such a section has no items, total_count is the number of collections, and item_limit does not apply. Absent on every other section. See getHomeCapabilities collection_rows",
+            "items": {
+              "$ref": "#/components/schemas/SectionCollectionCard"
+            },
+            "type": "array"
+          },
           "customized": {
             "examples": [
               false
@@ -50698,6 +50810,86 @@
         },
         "required": [
           "sections"
+        ],
+        "type": "object"
+      },
+      "SectionCollectionCard": {
+        "additionalProperties": false,
+        "properties": {
+          "backdrop_thumbhash": {
+            "type": "string"
+          },
+          "backdrop_url": {
+            "description": "Presigned, short-lived backdrop of a server collection that has one, for a hero backdrop while the card is focused: the page-width variant, or the card thumbnail when the backdrop is set to another artwork such as the collection's poster. Absent when none and on personal collections",
+            "format": "uri-reference",
+            "type": "string"
+          },
+          "creator_profile_id": {
+            "description": "Present on a personal collection: the profile that made it",
+            "type": "string"
+          },
+          "id": {
+            "examples": [
+              "01J9Z8C3W4R5T6Y7U8I9O0P1Q2"
+            ],
+            "type": "string"
+          },
+          "item_count": {
+            "description": "The titles the acting profile sees in the collection",
+            "examples": [
+              12
+            ],
+            "format": "int64",
+            "type": "integer"
+          },
+          "library_id": {
+            "description": "Present on a server collection: a library the viewer can open that holds it, for the collection's page link. On a library page, that library",
+            "examples": [
+              "1"
+            ],
+            "minLength": 1,
+            "type": "string"
+          },
+          "poster_is_collage": {
+            "description": "poster_url is the acting profile's collage of the collection's first titles it can see, composed by the server because the collection has no uploaded, template or imported poster. False for an uploaded, template or imported poster and whenever poster_url is empty",
+            "examples": [
+              false
+            ],
+            "type": "boolean"
+          },
+          "poster_thumbhash": {
+            "type": "string"
+          },
+          "poster_url": {
+            "description": "Presigned, short-lived; empty when none",
+            "format": "uri-reference",
+            "type": "string"
+          },
+          "source": {
+            "description": "library for a server collection, user for a personal collection",
+            "enum": [
+              "library",
+              "user"
+            ],
+            "examples": [
+              "library"
+            ],
+            "type": "string"
+          },
+          "title": {
+            "examples": [
+              "Marvel"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "source",
+          "title",
+          "poster_url",
+          "poster_is_collage",
+          "item_count"
         ],
         "type": "object"
       },
@@ -56466,7 +56658,7 @@
             "type": "boolean"
           },
           "export_ratings_enabled": {
-            "description": "Send the profile's star ratings to the provider (stars times two) and clear removed ones.",
+            "description": "Send the profile's ratings, 1 to 10, to the provider unchanged and clear removed ones.",
             "type": "boolean"
           },
           "export_unwatched_enabled": {
@@ -56486,7 +56678,7 @@
             "type": "boolean"
           },
           "import_ratings_enabled": {
-            "description": "Import the provider's movie and series ratings as stars (1-2 is 1 star, 9-10 is 5 stars).",
+            "description": "Import the provider's movie and series ratings, 1 to 10, unchanged.",
             "type": "boolean"
           },
           "import_watched_enabled": {
@@ -59582,7 +59774,7 @@
     },
     "securitySchemes": {
       "bearerAuth": {
-        "description": "A session token or an API key in the Authorization header. The server decides which it holds.",
+        "description": "A session token or an API key in the Authorization header. The server decides which it holds. An API key is sent as `Authorization: Bearer sa_…`. A profile key (created with profile_id) always acts as its profile: the server supplies X-Profile-Id, and a request naming another profile is 403 permission_denied. An account key chooses the profile per request with X-Profile-Id and needs no X-Profile-Token, even for a PIN-protected profile; GET /api/v2/profiles lists the IDs. Most profile operations require the header and answer 422 validation_failed without it. The few that accept its absence, such as GET /api/v2/profiles and GET /api/v2/user/libraries, then answer for the account as a whole. A key carrying scopes reaches only the operations those scopes admit and is 403 permission_denied everywhere else; GET /api/v2/api-keys/scopes lists them.",
         "scheme": "bearer",
         "type": "http"
       }
@@ -143077,8 +143269,31 @@
     },
     "/api/v2/api-keys": {
       "get": {
+        "description": "The account's primary profile lists every key on the account; any other profile lists only the keys bound to it. A request without X-Profile-Id lists them all while no profile on the account is PIN-protected or access-restricted, and is otherwise 422, as on the catalog reads. This is for a login session: an API key cannot list keys and receives 403 permission_denied.",
         "operationId": "listPersonalAPIKeys",
         "parameters": [
+          {
+            "description": "Optional while no profile on the authenticated account is PIN-protected or access-restricted (content-rating, advisory-age or library limits). Otherwise it is required: a request without it, or with an empty value, is refused with 422 validation_failed at header.x-profile-id. An API key, on an operation that admits one, is not held to this: a profile key's binding supplies the header and refuses any other profile, and an account key may name any profile on its account without X-Profile-Token, or send no header and act with the account's own access rather than one profile's limits and state. When present, it must name a profile of the authenticated account.",
+            "in": "header",
+            "name": "X-Profile-Id",
+            "schema": {
+              "examples": [
+                "1"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked",
+            "in": "header",
+            "name": "X-Profile-Token",
+            "schema": {
+              "examples": [
+                "pvt_5f3a9c1e7b2d4e8fa0c6"
+              ],
+              "type": "string"
+            }
+          },
           {
             "description": "Page size; default 50, maximum 200",
             "explode": false,
@@ -143151,6 +143366,16 @@
             },
             "description": "Forbidden"
           },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
           "406": {
             "content": {
               "application/problem+json": {
@@ -143211,11 +143436,11 @@
         "tags": [
           "api-keys"
         ],
-        "x-silo-class": "authenticated",
+        "x-silo-class": "profile_scoped",
         "x-silo-service-backed": true
       },
       "post": {
-        "description": "Only a server admin's login session may create a key, acting through the account's primary profile. X-Profile-Id must name the primary profile, with X-Profile-Token when that profile is PIN-protected (without it the request is 403 profile_verification_required); naming any other profile is 403 permission_denied. A request without X-Profile-Id is accepted only while no profile on the account is PIN-protected or access-restricted (content-rating, advisory-age or library limits); otherwise it is 403 permission_denied.",
+        "description": "A server admin's login session creates an account key (no profile_id) acting through the account's primary profile: X-Profile-Id must name the primary profile, with X-Profile-Token when that profile is PIN-protected (without it the request is 403 profile_verification_required); naming any other profile is 403 permission_denied. A request without X-Profile-Id is accepted only while no profile on the account is PIN-protected or access-restricted (content-rating, advisory-age or library limits); otherwise it is 403 permission_denied. While user_keys_enabled is true (getPersonalAPIKeyScopes), any account may also create keys that carry user scopes only: the primary profile an account key or a key bound to any profile of the account (profile_id), and any other profile a key bound to itself, each with its own X-Profile-Token when PIN-protected. Past max_user_keys the request is 409 conflict.",
         "operationId": "createPersonalAPIKey",
         "parameters": [
           {
@@ -143321,6 +143546,16 @@
               }
             },
             "description": "Request Timeout"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Conflict"
           },
           "413": {
             "content": {
@@ -143498,8 +143733,31 @@
     },
     "/api/v2/api-keys/{id}": {
       "delete": {
+        "description": "Revokes a key the caller can list (listPersonalAPIKeys); any other key is 404. This is for a login session: an API key cannot revoke keys and receives 403 permission_denied.",
         "operationId": "revokePersonalAPIKey",
         "parameters": [
+          {
+            "description": "Optional while no profile on the authenticated account is PIN-protected or access-restricted (content-rating, advisory-age or library limits). Otherwise it is required: a request without it, or with an empty value, is refused with 422 validation_failed at header.x-profile-id. An API key, on an operation that admits one, is not held to this: a profile key's binding supplies the header and refuses any other profile, and an account key may name any profile on its account without X-Profile-Token, or send no header and act with the account's own access rather than one profile's limits and state. When present, it must name a profile of the authenticated account.",
+            "in": "header",
+            "name": "X-Profile-Id",
+            "schema": {
+              "examples": [
+                "1"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked",
+            "in": "header",
+            "name": "X-Profile-Token",
+            "schema": {
+              "examples": [
+                "pvt_5f3a9c1e7b2d4e8fa0c6"
+              ],
+              "type": "string"
+            }
+          },
           {
             "description": "Opaque identifier",
             "in": "path",
@@ -143620,7 +143878,7 @@
         "tags": [
           "api-keys"
         ],
-        "x-silo-class": "authenticated",
+        "x-silo-class": "profile_scoped",
         "x-silo-demo-restricted": true,
         "x-silo-retry-safety": "natural_idempotent",
         "x-silo-service-backed": true
@@ -167000,7 +167258,7 @@
             }
           },
           {
-            "description": "Optional while no profile on the authenticated account is PIN-protected or access-restricted (content-rating, advisory-age or library limits). Otherwise it is required: a request without it, or with an empty value, is refused with 422 validation_failed at header.x-profile-id; API keys are exempt. When present, it must name a profile of the authenticated account.",
+            "description": "Optional while no profile on the authenticated account is PIN-protected or access-restricted (content-rating, advisory-age or library limits). Otherwise it is required: a request without it, or with an empty value, is refused with 422 validation_failed at header.x-profile-id. An API key, on an operation that admits one, is not held to this: a profile key's binding supplies the header and refuses any other profile, and an account key may name any profile on its account without X-Profile-Token, or send no header and act with the account's own access rather than one profile's limits and state. When present, it must name a profile of the authenticated account.",
             "in": "header",
             "name": "X-Profile-Id",
             "schema": {
@@ -167582,7 +167840,7 @@
             }
           },
           {
-            "description": "Optional while no profile on the authenticated account is PIN-protected or access-restricted (content-rating, advisory-age or library limits). Otherwise it is required: a request without it, or with an empty value, is refused with 422 validation_failed at header.x-profile-id; API keys are exempt. When present, it must name a profile of the authenticated account.",
+            "description": "Optional while no profile on the authenticated account is PIN-protected or access-restricted (content-rating, advisory-age or library limits). Otherwise it is required: a request without it, or with an empty value, is refused with 422 validation_failed at header.x-profile-id. An API key, on an operation that admits one, is not held to this: a profile key's binding supplies the header and refuses any other profile, and an account key may name any profile on its account without X-Profile-Token, or send no header and act with the account's own access rather than one profile's limits and state. When present, it must name a profile of the authenticated account.",
             "in": "header",
             "name": "X-Profile-Id",
             "schema": {
@@ -167868,7 +168126,7 @@
             }
           },
           {
-            "description": "Optional while no profile on the authenticated account is PIN-protected or access-restricted (content-rating, advisory-age or library limits). Otherwise it is required: a request without it, or with an empty value, is refused with 422 validation_failed at header.x-profile-id; API keys are exempt. When present, it must name a profile of the authenticated account.",
+            "description": "Optional while no profile on the authenticated account is PIN-protected or access-restricted (content-rating, advisory-age or library limits). Otherwise it is required: a request without it, or with an empty value, is refused with 422 validation_failed at header.x-profile-id. An API key, on an operation that admits one, is not held to this: a profile key's binding supplies the header and refuses any other profile, and an account key may name any profile on its account without X-Profile-Token, or send no header and act with the account's own access rather than one profile's limits and state. When present, it must name a profile of the authenticated account.",
             "in": "header",
             "name": "X-Profile-Id",
             "schema": {
@@ -168460,7 +168718,7 @@
             }
           },
           {
-            "description": "Optional while no profile on the authenticated account is PIN-protected or access-restricted (content-rating, advisory-age or library limits). Otherwise it is required: a request without it, or with an empty value, is refused with 422 validation_failed at header.x-profile-id; API keys are exempt. When present, it must name a profile of the authenticated account.",
+            "description": "Optional while no profile on the authenticated account is PIN-protected or access-restricted (content-rating, advisory-age or library limits). Otherwise it is required: a request without it, or with an empty value, is refused with 422 validation_failed at header.x-profile-id. An API key, on an operation that admits one, is not held to this: a profile key's binding supplies the header and refuses any other profile, and an account key may name any profile on its account without X-Profile-Token, or send no header and act with the account's own access rather than one profile's limits and state. When present, it must name a profile of the authenticated account.",
             "in": "header",
             "name": "X-Profile-Id",
             "schema": {
@@ -177177,7 +177435,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Delegate the current login session, or an admin:monitor:read API key, for one realtime handshake.",
+        "summary": "Delegate the current login session, or an API key holding admin:monitor:read, catalog:read, watch:read or notifications, for one realtime handshake.",
         "tags": [
           "realtime"
         ],
@@ -189420,7 +189678,7 @@
         "operationId": "getFileMarkers",
         "parameters": [
           {
-            "description": "Optional while no profile on the authenticated account is PIN-protected or access-restricted (content-rating, advisory-age or library limits). Otherwise it is required: a request without it, or with an empty value, is refused with 422 validation_failed at header.x-profile-id; API keys are exempt. When present, it must name a profile of the authenticated account.",
+            "description": "Optional while no profile on the authenticated account is PIN-protected or access-restricted (content-rating, advisory-age or library limits). Otherwise it is required: a request without it, or with an empty value, is refused with 422 validation_failed at header.x-profile-id. An API key, on an operation that admits one, is not held to this: a profile key's binding supplies the header and refuses any other profile, and an account key may name any profile on its account without X-Profile-Token, or send no header and act with the account's own access rather than one profile's limits and state. When present, it must name a profile of the authenticated account.",
             "in": "header",
             "name": "X-Profile-Id",
             "schema": {
@@ -189574,7 +189832,7 @@
         "operationId": "setFileMarkers",
         "parameters": [
           {
-            "description": "Optional while no profile on the authenticated account is PIN-protected or access-restricted (content-rating, advisory-age or library limits). Otherwise it is required: a request without it, or with an empty value, is refused with 422 validation_failed at header.x-profile-id; API keys are exempt. When present, it must name a profile of the authenticated account.",
+            "description": "Optional while no profile on the authenticated account is PIN-protected or access-restricted (content-rating, advisory-age or library limits). Otherwise it is required: a request without it, or with an empty value, is refused with 422 validation_failed at header.x-profile-id. An API key, on an operation that admits one, is not held to this: a profile key's binding supplies the header and refuses any other profile, and an account key may name any profile on its account without X-Profile-Token, or send no header and act with the account's own access rather than one profile's limits and state. When present, it must name a profile of the authenticated account.",
             "in": "header",
             "name": "X-Profile-Id",
             "schema": {
@@ -189779,7 +190037,7 @@
         "operationId": "clearFileMarkerSegment",
         "parameters": [
           {
-            "description": "Optional while no profile on the authenticated account is PIN-protected or access-restricted (content-rating, advisory-age or library limits). Otherwise it is required: a request without it, or with an empty value, is refused with 422 validation_failed at header.x-profile-id; API keys are exempt. When present, it must name a profile of the authenticated account.",
+            "description": "Optional while no profile on the authenticated account is PIN-protected or access-restricted (content-rating, advisory-age or library limits). Otherwise it is required: a request without it, or with an empty value, is refused with 422 validation_failed at header.x-profile-id. An API key, on an operation that admits one, is not held to this: a profile key's binding supplies the header and refuses any other profile, and an account key may name any profile on its account without X-Profile-Token, or send no header and act with the account's own access rather than one profile's limits and state. When present, it must name a profile of the authenticated account.",
             "in": "header",
             "name": "X-Profile-Id",
             "schema": {
@@ -189958,7 +190216,7 @@
         "operationId": "getItemMarkers",
         "parameters": [
           {
-            "description": "Optional while no profile on the authenticated account is PIN-protected or access-restricted (content-rating, advisory-age or library limits). Otherwise it is required: a request without it, or with an empty value, is refused with 422 validation_failed at header.x-profile-id; API keys are exempt. When present, it must name a profile of the authenticated account.",
+            "description": "Optional while no profile on the authenticated account is PIN-protected or access-restricted (content-rating, advisory-age or library limits). Otherwise it is required: a request without it, or with an empty value, is refused with 422 validation_failed at header.x-profile-id. An API key, on an operation that admits one, is not held to this: a profile key's binding supplies the header and refuses any other profile, and an account key may name any profile on its account without X-Profile-Token, or send no header and act with the account's own access rather than one profile's limits and state. When present, it must name a profile of the authenticated account.",
             "in": "header",
             "name": "X-Profile-Id",
             "schema": {
@@ -190112,7 +190370,7 @@
         "operationId": "setItemMarkers",
         "parameters": [
           {
-            "description": "Optional while no profile on the authenticated account is PIN-protected or access-restricted (content-rating, advisory-age or library limits). Otherwise it is required: a request without it, or with an empty value, is refused with 422 validation_failed at header.x-profile-id; API keys are exempt. When present, it must name a profile of the authenticated account.",
+            "description": "Optional while no profile on the authenticated account is PIN-protected or access-restricted (content-rating, advisory-age or library limits). Otherwise it is required: a request without it, or with an empty value, is refused with 422 validation_failed at header.x-profile-id. An API key, on an operation that admits one, is not held to this: a profile key's binding supplies the header and refuses any other profile, and an account key may name any profile on its account without X-Profile-Token, or send no header and act with the account's own access rather than one profile's limits and state. When present, it must name a profile of the authenticated account.",
             "in": "header",
             "name": "X-Profile-Id",
             "schema": {
@@ -194908,7 +195166,7 @@
     },
     "/api/v2/notifications/series": {
       "get": {
-        "description": "Every series the profile favorited, put on its watchlist, is partway through, or waits on a next episode of, and every series it muted, filtered and sorted as asked (by title by default). Each carries its reasons, which of them the profile's notification preferences let notify, and whether the profile muted it. Series the viewer may not see are omitted.",
+        "description": "Every series the profile has finished an episode of and waits on a next episode of, and every series it muted, filtered and sorted as asked (by title by default). Each carries its Next Up reason, whether the profile's notification preferences let it notify, whether the next new episode would notify, and whether the profile muted it. Series the viewer may not see are omitted.",
         "operationId": "listNotificationSeries",
         "parameters": [
           {
@@ -195064,33 +195322,18 @@
             }
           },
           {
-            "description": "active keeps the series that notify; inactive keeps the ones that do not, because the profile's preferences silence every reason or the profile muted the series",
+            "description": "active keeps the series whose next new episode would notify (notifies is true); inactive keeps the rest: the profile's preferences silence Next Up, the profile has an available episode to watch first, Next Up is off for the series (dropped, its card removed, an episode partly watched), or the profile muted it; muted keeps only the series the profile muted",
             "explode": false,
             "in": "query",
             "name": "status",
             "schema": {
               "default": "all",
-              "description": "active keeps the series that notify; inactive keeps the ones that do not, because the profile's preferences silence every reason or the profile muted the series",
+              "description": "active keeps the series whose next new episode would notify (notifies is true); inactive keeps the rest: the profile's preferences silence Next Up, the profile has an available episode to watch first, Next Up is off for the series (dropped, its card removed, an episode partly watched), or the profile muted it; muted keeps only the series the profile muted",
               "enum": [
                 "all",
                 "active",
-                "inactive"
-              ],
-              "type": "string"
-            }
-          },
-          {
-            "description": "Keeps the series with this reason, whether or not the preferences let it notify; absent keeps every reason",
-            "explode": false,
-            "in": "query",
-            "name": "reason",
-            "schema": {
-              "description": "Keeps the series with this reason, whether or not the preferences let it notify; absent keeps every reason",
-              "enum": [
-                "favorite",
-                "watchlist",
-                "continue_watching",
-                "next_up"
+                "inactive",
+                "muted"
               ],
               "type": "string"
             }
@@ -195243,6 +195486,378 @@
           "notifications"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-service-backed": true
+      }
+    },
+    "/api/v2/notifications/series/mute": {
+      "post": {
+        "description": "Mutes each named series for the acting profile as PUT /series/{series_id}/mute mutes one, in one request, and answers an outcome per distinct series in request order: applied when this call muted it, unchanged when it was already muted, not_found for an ID that names no series or a series the viewer may not see.",
+        "operationId": "muteManyNotificationSeries",
+        "parameters": [
+          {
+            "description": "The household profile acting for this request; it must belong to the authenticated account.",
+            "in": "header",
+            "name": "X-Profile-Id",
+            "required": true,
+            "schema": {
+              "examples": [
+                "1"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked",
+            "in": "header",
+            "name": "X-Profile-Token",
+            "schema": {
+              "examples": [
+                "pvt_5f3a9c1e7b2d4e8fa0c6"
+              ],
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NotificationSeriesMuteRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotificationSeriesMuteResults"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Acceptable"
+          },
+          "408": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Request Timeout"
+          },
+          "413": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Request Entity Too Large"
+          },
+          "415": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unsupported Media Type"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Mute new-episode notifications for many series.",
+        "tags": [
+          "notifications"
+        ],
+        "x-silo-class": "profile_scoped",
+        "x-silo-demo-restricted": true,
+        "x-silo-retry-safety": "natural_idempotent",
+        "x-silo-service-backed": true
+      }
+    },
+    "/api/v2/notifications/series/unmute": {
+      "post": {
+        "description": "Unmutes each named series for the acting profile as DELETE /series/{series_id}/mute unmutes one, in one request, and answers an outcome per distinct series in request order: applied when this call unmuted it, unchanged when it was not muted. No access check runs, so a profile can lift a mute on a series it can no longer see.",
+        "operationId": "unmuteManyNotificationSeries",
+        "parameters": [
+          {
+            "description": "The household profile acting for this request; it must belong to the authenticated account.",
+            "in": "header",
+            "name": "X-Profile-Id",
+            "required": true,
+            "schema": {
+              "examples": [
+                "1"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked",
+            "in": "header",
+            "name": "X-Profile-Token",
+            "schema": {
+              "examples": [
+                "pvt_5f3a9c1e7b2d4e8fa0c6"
+              ],
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NotificationSeriesMuteRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotificationSeriesMuteResults"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Acceptable"
+          },
+          "408": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Request Timeout"
+          },
+          "413": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Request Entity Too Large"
+          },
+          "415": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unsupported Media Type"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Unmute new-episode notifications for many series.",
+        "tags": [
+          "notifications"
+        ],
+        "x-silo-class": "profile_scoped",
+        "x-silo-demo-restricted": true,
+        "x-silo-retry-safety": "natural_idempotent",
         "x-silo-service-backed": true
       }
     },
@@ -224235,7 +224850,7 @@
         "operationId": "listSubtitleAIJobs",
         "parameters": [
           {
-            "description": "Optional while no profile on the authenticated account is PIN-protected or access-restricted (content-rating, advisory-age or library limits). Otherwise it is required: a request without it, or with an empty value, is refused with 422 validation_failed at header.x-profile-id; API keys are exempt. When present, it must name a profile of the authenticated account.",
+            "description": "Optional while no profile on the authenticated account is PIN-protected or access-restricted (content-rating, advisory-age or library limits). Otherwise it is required: a request without it, or with an empty value, is refused with 422 validation_failed at header.x-profile-id. An API key, on an operation that admits one, is not held to this: a profile key's binding supplies the header and refuses any other profile, and an account key may name any profile on its account without X-Profile-Token, or send no header and act with the account's own access rather than one profile's limits and state. When present, it must name a profile of the authenticated account.",
             "in": "header",
             "name": "X-Profile-Id",
             "schema": {
@@ -224392,7 +225007,7 @@
         "operationId": "getSubtitleAIJob",
         "parameters": [
           {
-            "description": "Optional while no profile on the authenticated account is PIN-protected or access-restricted (content-rating, advisory-age or library limits). Otherwise it is required: a request without it, or with an empty value, is refused with 422 validation_failed at header.x-profile-id; API keys are exempt. When present, it must name a profile of the authenticated account.",
+            "description": "Optional while no profile on the authenticated account is PIN-protected or access-restricted (content-rating, advisory-age or library limits). Otherwise it is required: a request without it, or with an empty value, is refused with 422 validation_failed at header.x-profile-id. An API key, on an operation that admits one, is not held to this: a profile key's binding supplies the header and refuses any other profile, and an account key may name any profile on its account without X-Profile-Token, or send no header and act with the account's own access rather than one profile's limits and state. When present, it must name a profile of the authenticated account.",
             "in": "header",
             "name": "X-Profile-Id",
             "schema": {
@@ -224549,7 +225164,7 @@
         "operationId": "cancelSubtitleAIJob",
         "parameters": [
           {
-            "description": "Optional while no profile on the authenticated account is PIN-protected or access-restricted (content-rating, advisory-age or library limits). Otherwise it is required: a request without it, or with an empty value, is refused with 422 validation_failed at header.x-profile-id; API keys are exempt. When present, it must name a profile of the authenticated account.",
+            "description": "Optional while no profile on the authenticated account is PIN-protected or access-restricted (content-rating, advisory-age or library limits). Otherwise it is required: a request without it, or with an empty value, is refused with 422 validation_failed at header.x-profile-id. An API key, on an operation that admits one, is not held to this: a profile key's binding supplies the header and refuses any other profile, and an account key may name any profile on its account without X-Profile-Token, or send no header and act with the account's own access rather than one profile's limits and state. When present, it must name a profile of the authenticated account.",
             "in": "header",
             "name": "X-Profile-Id",
             "schema": {
@@ -225042,7 +225657,7 @@
         "operationId": "createSubtitleAIJob",
         "parameters": [
           {
-            "description": "Optional while no profile on the authenticated account is PIN-protected or access-restricted (content-rating, advisory-age or library limits). Otherwise it is required: a request without it, or with an empty value, is refused with 422 validation_failed at header.x-profile-id; API keys are exempt. When present, it must name a profile of the authenticated account.",
+            "description": "Optional while no profile on the authenticated account is PIN-protected or access-restricted (content-rating, advisory-age or library limits). Otherwise it is required: a request without it, or with an empty value, is refused with 422 validation_failed at header.x-profile-id. An API key, on an operation that admits one, is not held to this: a profile key's binding supplies the header and refuses any other profile, and an account key may name any profile on its account without X-Profile-Token, or send no header and act with the account's own access rather than one profile's limits and state. When present, it must name a profile of the authenticated account.",
             "in": "header",
             "name": "X-Profile-Id",
             "schema": {
@@ -225417,7 +226032,7 @@
         "operationId": "downloadSubtitle",
         "parameters": [
           {
-            "description": "Optional while no profile on the authenticated account is PIN-protected or access-restricted (content-rating, advisory-age or library limits). Otherwise it is required: a request without it, or with an empty value, is refused with 422 validation_failed at header.x-profile-id; API keys are exempt. When present, it must name a profile of the authenticated account.",
+            "description": "Optional while no profile on the authenticated account is PIN-protected or access-restricted (content-rating, advisory-age or library limits). Otherwise it is required: a request without it, or with an empty value, is refused with 422 validation_failed at header.x-profile-id. An API key, on an operation that admits one, is not held to this: a profile key's binding supplies the header and refuses any other profile, and an account key may name any profile on its account without X-Profile-Token, or send no header and act with the account's own access rather than one profile's limits and state. When present, it must name a profile of the authenticated account.",
             "in": "header",
             "name": "X-Profile-Id",
             "schema": {
@@ -225800,7 +226415,7 @@
         "operationId": "searchSubtitles",
         "parameters": [
           {
-            "description": "Optional while no profile on the authenticated account is PIN-protected or access-restricted (content-rating, advisory-age or library limits). Otherwise it is required: a request without it, or with an empty value, is refused with 422 validation_failed at header.x-profile-id; API keys are exempt. When present, it must name a profile of the authenticated account.",
+            "description": "Optional while no profile on the authenticated account is PIN-protected or access-restricted (content-rating, advisory-age or library limits). Otherwise it is required: a request without it, or with an empty value, is refused with 422 validation_failed at header.x-profile-id. An API key, on an operation that admits one, is not held to this: a profile key's binding supplies the header and refuses any other profile, and an account key may name any profile on its account without X-Profile-Token, or send no header and act with the account's own access rather than one profile's limits and state. When present, it must name a profile of the authenticated account.",
             "in": "header",
             "name": "X-Profile-Id",
             "schema": {
@@ -226000,7 +226615,7 @@
             }
           },
           {
-            "description": "Optional while no profile on the authenticated account is PIN-protected or access-restricted (content-rating, advisory-age or library limits). Otherwise it is required: a request without it, or with an empty value, is refused with 422 validation_failed at header.x-profile-id; API keys are exempt. When present, it must name a profile of the authenticated account.",
+            "description": "Optional while no profile on the authenticated account is PIN-protected or access-restricted (content-rating, advisory-age or library limits). Otherwise it is required: a request without it, or with an empty value, is refused with 422 validation_failed at header.x-profile-id. An API key, on an operation that admits one, is not held to this: a profile key's binding supplies the header and refuses any other profile, and an account key may name any profile on its account without X-Profile-Token, or send no header and act with the account's own access rather than one profile's limits and state. When present, it must name a profile of the authenticated account.",
             "in": "header",
             "name": "X-Profile-Id",
             "schema": {
@@ -226189,7 +226804,7 @@
             }
           },
           {
-            "description": "Optional while no profile on the authenticated account is PIN-protected or access-restricted (content-rating, advisory-age or library limits). Otherwise it is required: a request without it, or with an empty value, is refused with 422 validation_failed at header.x-profile-id; API keys are exempt. When present, it must name a profile of the authenticated account.",
+            "description": "Optional while no profile on the authenticated account is PIN-protected or access-restricted (content-rating, advisory-age or library limits). Otherwise it is required: a request without it, or with an empty value, is refused with 422 validation_failed at header.x-profile-id. An API key, on an operation that admits one, is not held to this: a profile key's binding supplies the header and refuses any other profile, and an account key may name any profile on its account without X-Profile-Token, or send no header and act with the account's own access rather than one profile's limits and state. When present, it must name a profile of the authenticated account.",
             "in": "header",
             "name": "X-Profile-Id",
             "schema": {
@@ -226391,7 +227006,7 @@
         "operationId": "getStoredSubtitleSync",
         "parameters": [
           {
-            "description": "Optional while no profile on the authenticated account is PIN-protected or access-restricted (content-rating, advisory-age or library limits). Otherwise it is required: a request without it, or with an empty value, is refused with 422 validation_failed at header.x-profile-id; API keys are exempt. When present, it must name a profile of the authenticated account.",
+            "description": "Optional while no profile on the authenticated account is PIN-protected or access-restricted (content-rating, advisory-age or library limits). Otherwise it is required: a request without it, or with an empty value, is refused with 422 validation_failed at header.x-profile-id. An API key, on an operation that admits one, is not held to this: a profile key's binding supplies the header and refuses any other profile, and an account key may name any profile on its account without X-Profile-Token, or send no header and act with the account's own access rather than one profile's limits and state. When present, it must name a profile of the authenticated account.",
             "in": "header",
             "name": "X-Profile-Id",
             "schema": {
@@ -226554,7 +227169,7 @@
         "operationId": "syncStoredSubtitle",
         "parameters": [
           {
-            "description": "Optional while no profile on the authenticated account is PIN-protected or access-restricted (content-rating, advisory-age or library limits). Otherwise it is required: a request without it, or with an empty value, is refused with 422 validation_failed at header.x-profile-id; API keys are exempt. When present, it must name a profile of the authenticated account.",
+            "description": "Optional while no profile on the authenticated account is PIN-protected or access-restricted (content-rating, advisory-age or library limits). Otherwise it is required: a request without it, or with an empty value, is refused with 422 validation_failed at header.x-profile-id. An API key, on an operation that admits one, is not held to this: a profile key's binding supplies the header and refuses any other profile, and an account key may name any profile on its account without X-Profile-Token, or send no header and act with the account's own access rather than one profile's limits and state. When present, it must name a profile of the authenticated account.",
             "in": "header",
             "name": "X-Profile-Id",
             "schema": {
@@ -226731,7 +227346,7 @@
             }
           },
           {
-            "description": "Optional while no profile on the authenticated account is PIN-protected or access-restricted (content-rating, advisory-age or library limits). Otherwise it is required: a request without it, or with an empty value, is refused with 422 validation_failed at header.x-profile-id; API keys are exempt. When present, it must name a profile of the authenticated account.",
+            "description": "Optional while no profile on the authenticated account is PIN-protected or access-restricted (content-rating, advisory-age or library limits). Otherwise it is required: a request without it, or with an empty value, is refused with 422 validation_failed at header.x-profile-id. An API key, on an operation that admits one, is not held to this: a profile key's binding supplies the header and refuses any other profile, and an account key may name any profile on its account without X-Profile-Token, or send no header and act with the account's own access rather than one profile's limits and state. When present, it must name a profile of the authenticated account.",
             "in": "header",
             "name": "X-Profile-Id",
             "schema": {
@@ -227167,7 +227782,7 @@
         "operationId": "uploadSubtitle",
         "parameters": [
           {
-            "description": "Optional while no profile on the authenticated account is PIN-protected or access-restricted (content-rating, advisory-age or library limits). Otherwise it is required: a request without it, or with an empty value, is refused with 422 validation_failed at header.x-profile-id; API keys are exempt. When present, it must name a profile of the authenticated account.",
+            "description": "Optional while no profile on the authenticated account is PIN-protected or access-restricted (content-rating, advisory-age or library limits). Otherwise it is required: a request without it, or with an empty value, is refused with 422 validation_failed at header.x-profile-id. An API key, on an operation that admits one, is not held to this: a profile key's binding supplies the header and refuses any other profile, and an account key may name any profile on its account without X-Profile-Token, or send no header and act with the account's own access rather than one profile's limits and state. When present, it must name a profile of the authenticated account.",
             "in": "header",
             "name": "X-Profile-Id",
             "schema": {
@@ -227371,7 +227986,7 @@
         "operationId": "listStoredSubtitles",
         "parameters": [
           {
-            "description": "Optional while no profile on the authenticated account is PIN-protected or access-restricted (content-rating, advisory-age or library limits). Otherwise it is required: a request without it, or with an empty value, is refused with 422 validation_failed at header.x-profile-id; API keys are exempt. When present, it must name a profile of the authenticated account.",
+            "description": "Optional while no profile on the authenticated account is PIN-protected or access-restricted (content-rating, advisory-age or library limits). Otherwise it is required: a request without it, or with an empty value, is refused with 422 validation_failed at header.x-profile-id. An API key, on an operation that admits one, is not held to this: a profile key's binding supplies the header and refuses any other profile, and an account key may name any profile on its account without X-Profile-Token, or send no header and act with the account's own access rather than one profile's limits and state. When present, it must name a profile of the authenticated account.",
             "in": "header",
             "name": "X-Profile-Id",
             "schema": {
@@ -227528,7 +228143,7 @@
         "operationId": "listSubtitleSync",
         "parameters": [
           {
-            "description": "Optional while no profile on the authenticated account is PIN-protected or access-restricted (content-rating, advisory-age or library limits). Otherwise it is required: a request without it, or with an empty value, is refused with 422 validation_failed at header.x-profile-id; API keys are exempt. When present, it must name a profile of the authenticated account.",
+            "description": "Optional while no profile on the authenticated account is PIN-protected or access-restricted (content-rating, advisory-age or library limits). Otherwise it is required: a request without it, or with an empty value, is refused with 422 validation_failed at header.x-profile-id. An API key, on an operation that admits one, is not held to this: a profile key's binding supplies the header and refuses any other profile, and an account key may name any profile on its account without X-Profile-Token, or send no header and act with the account's own access rather than one profile's limits and state. When present, it must name a profile of the authenticated account.",
             "in": "header",
             "name": "X-Profile-Id",
             "schema": {
@@ -227685,7 +228300,7 @@
         "operationId": "getSubtitleSync",
         "parameters": [
           {
-            "description": "Optional while no profile on the authenticated account is PIN-protected or access-restricted (content-rating, advisory-age or library limits). Otherwise it is required: a request without it, or with an empty value, is refused with 422 validation_failed at header.x-profile-id; API keys are exempt. When present, it must name a profile of the authenticated account.",
+            "description": "Optional while no profile on the authenticated account is PIN-protected or access-restricted (content-rating, advisory-age or library limits). Otherwise it is required: a request without it, or with an empty value, is refused with 422 validation_failed at header.x-profile-id. An API key, on an operation that admits one, is not held to this: a profile key's binding supplies the header and refuses any other profile, and an account key may name any profile on its account without X-Profile-Token, or send no header and act with the account's own access rather than one profile's limits and state. When present, it must name a profile of the authenticated account.",
             "in": "header",
             "name": "X-Profile-Id",
             "schema": {
@@ -227858,7 +228473,7 @@
         "operationId": "startSubtitleSync",
         "parameters": [
           {
-            "description": "Optional while no profile on the authenticated account is PIN-protected or access-restricted (content-rating, advisory-age or library limits). Otherwise it is required: a request without it, or with an empty value, is refused with 422 validation_failed at header.x-profile-id; API keys are exempt. When present, it must name a profile of the authenticated account.",
+            "description": "Optional while no profile on the authenticated account is PIN-protected or access-restricted (content-rating, advisory-age or library limits). Otherwise it is required: a request without it, or with an empty value, is refused with 422 validation_failed at header.x-profile-id. An API key, on an operation that admits one, is not held to this: a profile key's binding supplies the header and refuses any other profile, and an account key may name any profile on its account without X-Profile-Token, or send no header and act with the account's own access rather than one profile's limits and state. When present, it must name a profile of the authenticated account.",
             "in": "header",
             "name": "X-Profile-Id",
             "schema": {
@@ -228045,7 +228660,7 @@
             }
           },
           {
-            "description": "Optional while no profile on the authenticated account is PIN-protected or access-restricted (content-rating, advisory-age or library limits). Otherwise it is required: a request without it, or with an empty value, is refused with 422 validation_failed at header.x-profile-id; API keys are exempt. When present, it must name a profile of the authenticated account.",
+            "description": "Optional while no profile on the authenticated account is PIN-protected or access-restricted (content-rating, advisory-age or library limits). Otherwise it is required: a request without it, or with an empty value, is refused with 422 validation_failed at header.x-profile-id. An API key, on an operation that admits one, is not held to this: a profile key's binding supplies the header and refuses any other profile, and an account key may name any profile on its account without X-Profile-Token, or send no header and act with the account's own access rather than one profile's limits and state. When present, it must name a profile of the authenticated account.",
             "in": "header",
             "name": "X-Profile-Id",
             "schema": {
@@ -235868,7 +236483,7 @@
         "operationId": "getWatchState",
         "parameters": [
           {
-            "description": "Optional while no profile on the authenticated account is PIN-protected or access-restricted (content-rating, advisory-age or library limits). Otherwise it is required: a request without it, or with an empty value, is refused with 422 validation_failed at header.x-profile-id; API keys are exempt. When present, it must name a profile of the authenticated account.",
+            "description": "Optional while no profile on the authenticated account is PIN-protected or access-restricted (content-rating, advisory-age or library limits). Otherwise it is required: a request without it, or with an empty value, is refused with 422 validation_failed at header.x-profile-id. An API key, on an operation that admits one, is not held to this: a profile key's binding supplies the header and refuses any other profile, and an account key may name any profile on its account without X-Profile-Token, or send no header and act with the account's own access rather than one profile's limits and state. When present, it must name a profile of the authenticated account.",
             "in": "header",
             "name": "X-Profile-Id",
             "schema": {
@@ -236164,7 +236779,7 @@
         "operationId": "getWatchTrickplay",
         "parameters": [
           {
-            "description": "Optional while no profile on the authenticated account is PIN-protected or access-restricted (content-rating, advisory-age or library limits). Otherwise it is required: a request without it, or with an empty value, is refused with 422 validation_failed at header.x-profile-id; API keys are exempt. When present, it must name a profile of the authenticated account.",
+            "description": "Optional while no profile on the authenticated account is PIN-protected or access-restricted (content-rating, advisory-age or library limits). Otherwise it is required: a request without it, or with an empty value, is refused with 422 validation_failed at header.x-profile-id. An API key, on an operation that admits one, is not held to this: a profile key's binding supplies the header and refuses any other profile, and an account key may name any profile on its account without X-Profile-Token, or send no header and act with the account's own access rather than one profile's limits and state. When present, it must name a profile of the authenticated account.",
             "in": "header",
             "name": "X-Profile-Id",
             "schema": {
@@ -248983,6 +249598,9 @@
           "is_jellyfin_compat": {
             "type": "boolean"
           },
+          "keyframe_plan_resume": {
+            "type": "boolean"
+          },
           "keyframe_playlist": {
             "type": "boolean"
           },
@@ -249554,6 +250172,9 @@
           "input_path": {
             "type": "string"
           },
+          "keyframe_plan_resume": {
+            "type": "boolean"
+          },
           "keyframe_playlist": {
             "type": "boolean"
           },
@@ -249733,6 +250354,9 @@
           },
           "hw_accel": {
             "type": "string"
+          },
+          "keyframe_plan_resume": {
+            "type": "boolean"
           },
           "keyframe_playlist": {
             "type": "boolean"

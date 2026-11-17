@@ -1,7 +1,10 @@
-import { QueryClient } from "@tanstack/react-query";
-import { describe, expect, it } from "vitest";
+import { QueryClient, QueryObserver } from "@tanstack/react-query";
+import { describe, expect, it, vi } from "vitest";
 import { catalogKeys, historyKeys, personKeys, progressKeys, recKeys, sectionKeys } from "./keys";
-import { invalidatePlaybackSurfaceQueries } from "./playbackSurfaceRefresh";
+import {
+  invalidatePlaybackSurfaceQueries,
+  refreshPlaybackSurfaceQueries,
+} from "./playbackSurfaceRefresh";
 
 describe("invalidatePlaybackSurfaceQueries", () => {
   it("marks playback-derived queries as invalidated", async () => {
@@ -55,5 +58,27 @@ describe("invalidatePlaybackSurfaceQueries", () => {
         ?.isInvalidated,
     ).toBe(true);
     expect(queryClient.getQueryState(sectionKeys.homeLayout())?.isInvalidated).not.toBe(true);
+  });
+});
+
+describe("refreshPlaybackSurfaceQueries", () => {
+  it("reads again a first fetch that started before the write landed", async () => {
+    const queryClient = new QueryClient();
+    const responses: Array<(value: string) => void> = [];
+    const observer = new QueryObserver(queryClient, {
+      queryKey: progressKeys.list("in_progress"),
+      queryFn: () => new Promise<string>((resolve) => responses.push(resolve)),
+    });
+    const unsubscribe = observer.subscribe(() => {});
+    await vi.waitFor(() => expect(responses).toHaveLength(1));
+
+    const refresh = refreshPlaybackSurfaceQueries(queryClient);
+    await vi.waitFor(() => expect(responses).toHaveLength(2));
+    responses[0]!("before the write");
+    responses[1]!("after the write");
+    await refresh;
+
+    expect(queryClient.getQueryData(progressKeys.list("in_progress"))).toBe("after the write");
+    unsubscribe();
   });
 });

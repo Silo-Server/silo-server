@@ -29,6 +29,7 @@ type NotificationInboxService interface {
 	ListNotifiedSeries(context.Context, int, string) ([]notifications.NotifiedSeries, error)
 	MuteNotificationSeries(context.Context, int, string, string) error
 	UnmuteNotificationSeries(context.Context, int, string, string) error
+	SetNotificationSeriesMuted(context.Context, int, string, []string, bool) (map[string]notifications.SeriesMuteOutcome, error)
 }
 
 // NotificationItem preserves event-specific reason data while normalizing IDs
@@ -135,25 +136,19 @@ type NotificationCapabilitiesOutput struct {
 	Body         NotificationCapabilities
 }
 type NotificationPreferences struct {
-	ProfileID              ID   `json:"profile_id"`
-	Enabled                bool `json:"enabled"`
-	NotifyFavorites        bool `json:"notify_favorites"`
-	NotifyWatchlist        bool `json:"notify_watchlist"`
-	NotifyContinueWatching bool `json:"notify_continue_watching"`
-	NotifyNextUp           bool `json:"notify_next_up"`
+	ProfileID    ID   `json:"profile_id"`
+	Enabled      bool `json:"enabled"`
+	NotifyNextUp bool `json:"notify_next_up"`
 }
 
 func notificationPreferencesOf(p notifications.Preferences) NotificationPreferences {
-	return NotificationPreferences{ProfileID: ID(p.ProfileID), Enabled: p.Enabled, NotifyFavorites: p.NotifyFavorites, NotifyWatchlist: p.NotifyWatchlist, NotifyContinueWatching: p.NotifyContinueWatching, NotifyNextUp: p.NotifyNextUp}
+	return NotificationPreferences{ProfileID: ID(p.ProfileID), Enabled: p.Enabled, NotifyNextUp: p.NotifyNextUp}
 }
 
 type NotificationPreferencesOutput struct{ Body NotificationPreferences }
 type NotificationPreferencesPatch struct {
-	Enabled                *bool `json:"enabled,omitempty"`
-	NotifyFavorites        *bool `json:"notify_favorites,omitempty"`
-	NotifyWatchlist        *bool `json:"notify_watchlist,omitempty"`
-	NotifyContinueWatching *bool `json:"notify_continue_watching,omitempty"`
-	NotifyNextUp           *bool `json:"notify_next_up,omitempty"`
+	Enabled      *bool `json:"enabled,omitempty"`
+	NotifyNextUp *bool `json:"notify_next_up,omitempty"`
 }
 type NotificationPreferencesInput struct {
 	RawBody []byte
@@ -227,6 +222,7 @@ func registerNotificationInbox(reg *Registry) {
 		body := notificationCapabilitiesOf(svc.NotificationCapabilities(ctx))
 		body.Series.Available = reg.deps.PersonalLists != nil
 		body.Series.Mute = body.Series.Available
+		body.Series.BulkMute = body.Series.Available
 		return &NotificationCapabilitiesOutput{Body: body}, nil
 	})
 	Register(reg, notificationOperation(http.MethodGet, "", "listNotifications"), func(ctx context.Context, in *NotificationListInput) (*NotificationListOutput, error) {
@@ -390,7 +386,7 @@ func registerNotificationInbox(reg *Registry) {
 			}
 		}
 		b := in.Body
-		prefs, err := svc.PatchNotificationPreferences(ctx, claimsFrom(ctx).UserID, profileFrom(ctx), notifications.PreferencePatch{Enabled: b.Enabled, NotifyFavorites: b.NotifyFavorites, NotifyWatchlist: b.NotifyWatchlist, NotifyContinueWatching: b.NotifyContinueWatching, NotifyNextUp: b.NotifyNextUp})
+		prefs, err := svc.PatchNotificationPreferences(ctx, claimsFrom(ctx).UserID, profileFrom(ctx), notifications.PreferencePatch{Enabled: b.Enabled, NotifyNextUp: b.NotifyNextUp})
 		if err != nil {
 			return nil, serviceProblem(err)
 		}
@@ -442,6 +438,7 @@ type NotificationCapabilities struct {
 type NotificationSeriesCapability struct {
 	Available bool `json:"available" doc:"GET /notifications/series lists the series whose new episodes can notify the profile"`
 	Mute      bool `json:"mute" doc:"PUT and DELETE /notifications/series/{series_id}/mute mute and unmute one series, and list entries carry muted"`
+	BulkMute  bool `json:"bulk_mute" doc:"POST /notifications/series/mute and /notifications/series/unmute mute and unmute many series at once, and GET /notifications/series accepts status=muted"`
 }
 type NotificationInAppCapability struct {
 	Enabled bool `json:"enabled"`

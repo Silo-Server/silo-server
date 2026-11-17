@@ -158,6 +158,26 @@ it("waits at least the Retry-After a proxy's refusal names", async () => {
   expect(mocks.mint).toHaveBeenCalledTimes(2);
 });
 
+it("backs off to one mint every 30 seconds while minting keeps failing", async () => {
+  vi.useFakeTimers();
+  mocks.mint.mockRejectedValue(new Error("404"));
+  renderHook(() => usePlaybackRealtime({ sessionId: "session", onCommand: vi.fn() }), {
+    wrapper,
+  });
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(48_500);
+  });
+  expect(mocks.mint).toHaveBeenCalledTimes(7);
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(29_000);
+  });
+  expect(mocks.mint).toHaveBeenCalledTimes(7);
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(1_000);
+  });
+  expect(mocks.mint).toHaveBeenCalledTimes(8);
+});
+
 it.each(["stop", "terminate", "server_restarting"])(
   "delivers an explicit %s only for the captured session and acknowledges it once",
   async (name) => {

@@ -300,6 +300,12 @@ const (
 	// address on a Silo account first is the one matched; the match ends the
 	// account's existing sessions, device approvals and API keys.
 	AuthEmailAutoMatchSettingKey = "auth.email_auto_match"
+	// AuthUserAPIKeysSettingKey lets accounts that are not admins, and
+	// profiles other than the primary one, create API keys for themselves.
+	// Those keys carry user scopes only. Off by default: only a server admin
+	// creates keys. Turning it off stops new keys and leaves existing ones
+	// working until they are revoked.
+	AuthUserAPIKeysSettingKey = "auth.user_api_keys" //nolint:gosec // A setting name, not a credential.
 	// AuthProviderRecheckIntervalSettingKey is how old an identity's last
 	// provider check may be before a session refresh asks the provider again.
 	AuthProviderRecheckIntervalSettingKey = "auth.provider_recheck_interval"
@@ -384,6 +390,7 @@ var adminSettingDefaults = map[string]string{
 	ServerLocalURLSettingKey:                  "",
 	AuthLocalPasswordLoginSettingKey:          "true",
 	AuthEmailAutoMatchSettingKey:              "false",
+	AuthUserAPIKeysSettingKey:                 "false",
 	AuthProviderRecheckIntervalSettingKey:     "12h",
 	AuthProviderRecheckOutagePolicySettingKey: AuthRecheckFailOpen,
 
@@ -528,7 +535,6 @@ var adminSettingDefaults = map[string]string{
 	"notifications.fanout_enabled":                             "true",
 	"notifications.ui_enabled":                                 "true",
 	"notifications.fanout.settle_seconds":                      "30",
-	"notifications.fanout.max_series_burst":                    "3",
 	"notifications.fanout.max_event_age_hours":                 "72",
 	"notifications.retention.read_days":                        "90",
 	"notifications.retention.unread_days":                      "180",
@@ -747,7 +753,7 @@ func NormalizeAdminSetting(key, raw string) (string, error) {
 		"notifications.apple_push_delivery_enabled", "notifications.android_push_delivery_enabled",
 		"catalog.search.meilisearch.semantic_enabled", "catalog.search.meilisearch.binary_quantized",
 		"s3.public_path_style", "s3.private_path_style", "s3.user_db_path_style",
-		AuthLocalPasswordLoginSettingKey, AuthEmailAutoMatchSettingKey, ServerLANDiscoverySettingKey,
+		AuthLocalPasswordLoginSettingKey, AuthEmailAutoMatchSettingKey, AuthUserAPIKeysSettingKey, ServerLANDiscoverySettingKey,
 		BackupEnabledSettingKey, BackupIncludeIntroFingerprintsSettingKey, BackupIncludeSubtitlesSettingKey,
 		BackupS3PathStyleSettingKey:
 		return normalizeAdminBool(key, value)
@@ -873,8 +879,6 @@ func NormalizeAdminSetting(key, raw string) (string, error) {
 		return normalizeAdminInt(key, value, 1, 65535)
 	case "notifications.fanout.settle_seconds":
 		return normalizeAdminInt(key, value, 0, 3600)
-	case "notifications.fanout.max_series_burst":
-		return normalizeAdminInt(key, value, 1, 1000)
 	case "notifications.fanout.max_event_age_hours":
 		return normalizeAdminInt(key, value, 1, 24*365)
 	case "notifications.retention.read_days", "notifications.retention.unread_days",

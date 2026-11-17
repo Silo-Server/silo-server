@@ -11,6 +11,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
 	catalogpkg "github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/imagesize"
+	"github.com/Silo-Server/silo-server/internal/sections"
 	"github.com/Silo-Server/silo-server/internal/sections/recipes"
 )
 
@@ -127,6 +128,13 @@ func (f *fakeHome) HomeSectionItems(_ context.Context, sectionID string, viewer 
 		return row, nil
 	case "next_up":
 		return handlers.SectionView{ID: sectionID, SectionType: "next_up", Title: "Next Up", ItemLimit: 20, TotalCount: 1, Customized: true, Items: []handlers.SectionItemView{fakeCard()}}, nil
+	case "franchises":
+		library, creator := 1, "p-owner"
+		return handlers.SectionView{ID: sectionID, SectionType: "collection_posters", Title: "Franchises", ItemLimit: 20, TotalCount: 2, Items: []handlers.SectionItemView{},
+			Collections: []sections.CollectionCard{
+				{ID: "01J9Z8C3W4R5T6Y7U8I9O0P1Q2", Source: sections.CollectionCardLibrary, Title: "Marvel", PosterURL: "https://s3.example.test/marvel.jpg", BackdropURL: "https://s3.example.test/marvel-backdrop.jpg", BackdropThumbhash: "3OcRJYB4d3h/iIeHeEh3eIhw+j2w", ItemCount: 12, LibraryID: &library},
+				{ID: "c-ghibli", Source: sections.CollectionCardUser, Title: "Ghibli nights", PosterURL: "https://s3.example.test/collage.jpg", PosterIsCollage: true, ItemCount: 5, CreatorProfileID: &creator},
+			}}, nil
 	}
 	return handlers.SectionView{}, &handlers.APIError{Status: http.StatusNotFound, Code: "not_found", Message: "Section not found"}
 }

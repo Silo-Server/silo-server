@@ -28,4 +28,7 @@ type previewRequest struct {
 type previewResponse struct {
 	Items      []*models.MediaItem `json:"items"`
 	TotalCount int                 `json:"total_count"`
+	// collections are a row of collections' cards; the frozen v1 body has
+	// no such member.
+	collections []sections.CollectionCard
 }

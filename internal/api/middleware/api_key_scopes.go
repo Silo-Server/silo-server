@@ -22,11 +22,87 @@ type scopeRoute struct {
 	pattern *regexp.Regexp
 }
 
+// userScopeBaseRoutes are admitted by every user scope: who the key is and
+// which profiles it may name. A profile-bound key lists only its profile.
+var userScopeBaseRoutes = []scopeRoute{
+	{http.MethodGet, regexp.MustCompile(`^/api/v2/account/me$`)},
+	{http.MethodGet, regexp.MustCompile(`^/api/v2/profiles$`)},
+}
+
+func userScope(routes ...scopeRoute) []scopeRoute {
+	return append(append([]scopeRoute{}, userScopeBaseRoutes...), routes...)
+}
+
+// userEventScope is userScope for a scope in auth.APIKeyEventScopes: it also
+// opens the realtime events socket, which then admits only that scope's
+// channel.
+func userEventScope(routes ...scopeRoute) []scopeRoute {
+	return append(userScope(routes...),
+		scopeRoute{http.MethodGet, regexp.MustCompile(`^/api/v2/events/capabilities$`)},
+		scopeRoute{http.MethodPost, regexp.MustCompile(`^/api/v2/events/ws-ticket$`)},
+	)
+}
+
 var apiKeyScopeRoutes = map[string][]scopeRoute{
+	// The user scopes. None lists playback, a stream, a download, a setting,
+	// household management or a credential, and GET /watch/{id} stays out
+	// because it is the playback plan.
+	auth.ScopeCatalogRead: userEventScope(
+		scopeRoute{http.MethodGet, regexp.MustCompile(`^/api/v2/user/libraries(/capabilities)?$`)},
+		scopeRoute{http.MethodGet, regexp.MustCompile(`^/api/v2/home/(capabilities|layout|sections(/[^/]+/items)?)$`)},
+		scopeRoute{http.MethodGet, regexp.MustCompile(`^/api/v2/library/[^/]+/(layout|sections(/[^/]+/items)?|collections(/[^/]+/items)?)$`)},
+		scopeRoute{http.MethodGet, regexp.MustCompile(`^/api/v2/catalog(/(filters(/search)?|search/capabilities|audiobook-groups|people(/[^/]+)?|works/[^/]+|box-sets(/[^/]+)?|items/[^/]+(/(episodes|versions|box-set))?|series/[^/]+/seasons(/[0-9]+(/episodes)?)?))?$`)},
+		scopeRoute{http.MethodPost, regexp.MustCompile(`^/api/v2/catalog/(query|letters)$`)},
+		scopeRoute{http.MethodGet, regexp.MustCompile(`^/api/v2/images/capabilities$`)},
+	),
+	auth.ScopeWatchRead: userEventScope(
+		scopeRoute{http.MethodGet, regexp.MustCompile(`^/api/v2/(history|progress|progress/capabilities)$`)},
+		scopeRoute{http.MethodGet, regexp.MustCompile(`^/api/v2/sync/progress/(capabilities|snapshots/[^/]+)$`)},
+		scopeRoute{http.MethodPost, regexp.MustCompile(`^/api/v2/sync/progress/snapshots$`)},
+		scopeRoute{http.MethodGet, regexp.MustCompile(`^/api/v2/(favorites|ratings|not-interested)(/[^/]+)?$`)},
+		scopeRoute{http.MethodGet, regexp.MustCompile(`^/api/v2/(favorites|watchlist)/[^/]+/membership$`)},
+		scopeRoute{http.MethodGet, regexp.MustCompile(`^/api/v2/watchlist(/[^/]+)?$`)},
+		scopeRoute{http.MethodGet, regexp.MustCompile(`^/api/v2/capabilities/(ratings|not-interested|personal-lists|profile-export)$`)},
+		scopeRoute{http.MethodGet, regexp.MustCompile(`^/api/v2/profile/export$`)},
+	),
+	auth.ScopeWatchWrite: userScope(
+		scopeRoute{http.MethodPost, regexp.MustCompile(`^/api/v2/watched/[^/]+$`)},
+		scopeRoute{http.MethodDelete, regexp.MustCompile(`^/api/v2/watched/[^/]+$`)},
+		// POST /profile/import stays out: it also overwrites the profile's
+		// settings and notification preferences, which no user scope reaches.
+		scopeRoute{http.MethodPost, regexp.MustCompile(`^/api/v2/(sync/progress|history/remove)$`)},
+		scopeRoute{http.MethodGet, regexp.MustCompile(`^/api/v2/(progress/capabilities|sync/progress/capabilities)$`)},
+		scopeRoute{http.MethodDelete, regexp.MustCompile(`^/api/v2/progress/[^/]+/position$`)},
+		scopeRoute{http.MethodPut, regexp.MustCompile(`^/api/v2/(favorites|ratings|watchlist|not-interested)/[^/]+$`)},
+		scopeRoute{http.MethodDelete, regexp.MustCompile(`^/api/v2/(favorites|ratings|watchlist|not-interested)/[^/]+$`)},
+	),
+	// The inbox only. One notification is not read by ID: its path would
+	// also match the delivery-settings reads beside it.
+	auth.ScopeNotifications: userEventScope(
+		scopeRoute{http.MethodGet, regexp.MustCompile(`^/api/v2/notifications(/(sync|unread-count|capabilities))?$`)},
+		scopeRoute{http.MethodPost, regexp.MustCompile(`^/api/v2/notifications/(read-all|[^/]+/read)$`)},
+	),
+	auth.ScopeRequests: userScope(
+		scopeRoute{http.MethodGet, regexp.MustCompile(`^/api/v2/requests/(mine|status|search|[0-9]+)$`)},
+		scopeRoute{http.MethodGet, regexp.MustCompile(`^/api/v2/requests/detail/[^/]+/[^/]+$`)},
+		scopeRoute{http.MethodGet, regexp.MustCompile(`^/api/v2/requests/discover(/(genres|networks|studios|[^/]+|rows/[^/]+|browse/(genre|network|studio)/[^/]+))?$`)},
+		scopeRoute{http.MethodPost, regexp.MustCompile(`^/api/v2/requests(/[0-9]+/cancel)?$`)},
+		scopeRoute{http.MethodDelete, regexp.MustCompile(`^/api/v2/requests/[0-9]+$`)},
+		scopeRoute{http.MethodPut, regexp.MustCompile(`^/api/v2/requests/follows/[^/]+/[^/]+$`)},
+		scopeRoute{http.MethodDelete, regexp.MustCompile(`^/api/v2/requests/follows/[^/]+/[^/]+$`)},
+		// Watchlisting a title that is not in the library can create,
+		// follow or withdraw a media request, so it belongs here and not to
+		// watch:write.
+		scopeRoute{http.MethodPut, regexp.MustCompile(`^/api/v2/watchlist/titles/[^/]+/[^/]+$`)},
+		scopeRoute{http.MethodDelete, regexp.MustCompile(`^/api/v2/watchlist/titles/[^/]+/[^/]+$`)},
+	),
 	auth.ScopeAdminSessionsSummaryRead: {
 		{http.MethodGet, regexp.MustCompile(`^/api/v2/admin/sessions/summary$`)},
 		{http.MethodGet, regexp.MustCompile(`^/api/v2/admin/sessions/capabilities$`)},
 	},
+	// Library discovery only, as it was before the user scopes: keys issued
+	// with it must not gain the account and profile reads the newer user
+	// scopes share.
 	auth.ScopeLibrariesRead: {
 		{http.MethodGet, regexp.MustCompile(`^/api/v2/user/libraries$`)},
 		{http.MethodGet, regexp.MustCompile(`^/api/v2/user/libraries/capabilities$`)},
@@ -117,4 +193,27 @@ func apiKeyScopesAllow(scopes []string, r *http.Request) bool {
 func unambiguousRequestPath(r *http.Request) (p string, ok bool) {
 	p = r.URL.Path
 	return p, r.URL.RawPath == "" && p != "" && path.Clean(p) == p
+}
+
+// bindAPIKeyProfile applies a profile-bound key's binding to the request. It
+// reports false when the request must be refused: the key names a profile
+// other than its own, or it does not carry user scopes only, which the store
+// never writes and is refused rather than trusted. Otherwise the request acts
+// as the bound profile, declared for it when it named none, so the viewer gate
+// resolves that profile's limits. A key with no binding is left alone.
+func bindAPIKeyProfile(r *http.Request, profileID string, scopes []string) bool {
+	if profileID == "" {
+		return true
+	}
+	if !auth.UserAPIKeyScopesOnly(scopes) {
+		return false
+	}
+	switch r.Header.Get("X-Profile-Id") {
+	case "":
+		r.Header.Set("X-Profile-Id", profileID)
+	case profileID:
+	default:
+		return false
+	}
+	return true
 }

@@ -266,7 +266,7 @@ func TestMarkProfilesStaleForItemsPostgres(t *testing.T) {
 	signals := map[string]string{
 		"episode-progress": `INSERT INTO user_watch_progress(user_id, profile_id, media_item_id, completed) VALUES($1, $2, '` + episode + `', true)`,
 		"history":          `INSERT INTO user_watch_history(id, user_id, profile_id, media_item_id, completed) VALUES(gen_random_uuid()::text, $1, $2, '` + movie + `', true)`,
-		"rating":           `INSERT INTO user_ratings(user_id, profile_id, media_item_id, rating) VALUES($1, $2, '` + movie + `', 4)`,
+		"rating":           `INSERT INTO user_ratings(user_id, profile_id, media_item_id, rating) VALUES($1, $2, '` + movie + `', 8)`,
 		"favorite":         `INSERT INTO user_favorites(user_id, profile_id, media_item_id) VALUES($1, $2, '` + series + `')`,
 		"watchlist":        `INSERT INTO user_watchlist(user_id, profile_id, media_item_id) VALUES($1, $2, '` + movie + `')`,
 		"unrelated":        `INSERT INTO user_watch_progress(user_id, profile_id, media_item_id, completed) VALUES($1, $2, '` + other + `', true)`,

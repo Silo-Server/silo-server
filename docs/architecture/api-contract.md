@@ -1342,7 +1342,8 @@ paged with `limit` plus an opaque cursor whose cards are the shared `CatalogItem
 `{item_id, rating, rated_at}` entries instead), a membership read that answers the entry
 (`{item_id, added_at}`, or `{item_id, rating, rated_at}`) or `404`, a bodiless `PUT` add
 (ratings take `{rating}`) answering `204`, and a `DELETE` answering `204` whether or not
-the entry existed. The four favorites and watchlist mutations are `natural_idempotent`: each
+the entry existed. A rating, and an item's `user_rating`, run from 1 to 10, which clients show as
+five stars with half stars (7 is three and a half). The four favorites and watchlist mutations are `natural_idempotent`: each
 store add and remove reports whether it inserted or deleted the row, and the shared seam
 sends the provider list event, the recommendation refresh, and the user-state event only for a
 change, so a repeated add or remove answers `204` and notifies nobody. The notices run detached
@@ -1558,7 +1559,9 @@ and the client reads it from `getHomeSectionItems`. `included_sections` is `[]` 
 `listHomeSections` and `listLibrarySections` answer only rows that have items for the viewer: a row
 whose titles all sit outside the viewer's library access or rating limits, an off-season seasonal
 row, a row whose fetch failed, and a row whose recipe avoids duplicates and whose items all appeared
-in earlier rows are left out, so no client has to hide an empty row itself. The rule applies to the
+in earlier rows are left out, so no client has to hide an empty row itself. A row of collections
+(`collection_posters`) has no items: it counts as having something to show while its `collections`
+holds a card (see [Rows of collections](../catalog-api.md#rows-of-collections)). The rule applies to the
 rows each request resolves, so a web-only hero row or a different `item_limit` can still change
 which rows a client gets. The layout still lists every resolved row, because it is built before any row is fetched. `getHomeSectionItems` answers an
 empty row asked for by ID, and answers a row the duplicate filter emptied with its items, because

@@ -255,3 +255,35 @@ func TestBuildMediaStreamsVideoDisplayTitle(t *testing.T) {
 		})
 	}
 }
+
+// Jellyfin clients list audio tracks by DisplayTitle. For a track with no
+// title tag the scanner stores ffprobe's codec long name as its Title, which
+// must not be appended, and a tag that only repeats the language, codec or
+// channels adds nothing (#4395).
+func TestBuildMediaStreamsAudioDisplayTitle(t *testing.T) {
+	cases := []struct {
+		name  string
+		track models.AudioTrack
+		want  string
+	}{
+		{"untagged", models.AudioTrack{Codec: "eac3", Language: "eng", Channels: 6, Title: "ATSC A/52B (AC-3, E-AC-3)"}, "English - EAC3 5.1"},
+		{"language tag", models.AudioTrack{Codec: "eac3", Language: "eng", Channels: 6, Title: "English", EmbeddedTitle: "English"}, "English - EAC3 5.1"},
+		{"codec and channels tag", models.AudioTrack{Codec: "eac3", Language: "fr", Channels: 6, Title: "FRE E-AC-3 Surround 5.1", EmbeddedTitle: "FRE E-AC-3 Surround 5.1"}, "French - EAC3 5.1"},
+		{"channels that contradict the track", models.AudioTrack{Codec: "ac3", Language: "eng", Channels: 2, Title: "Mono", EmbeddedTitle: "Mono"}, "English - AC3 Stereo - Mono"},
+		{"language tag with another region", models.AudioTrack{Codec: "aac", Language: "de-AT", Channels: 2, Title: "de-DE", EmbeddedTitle: "de-DE"}, "Austrian German - AAC Stereo - de-DE"},
+		{"commentary", models.AudioTrack{Codec: "aac", Language: "eng", Channels: 2, Title: "Commentary", EmbeddedTitle: "Commentary"}, "English - AAC Stereo - Commentary"},
+		{"tag names a language the track lacks", models.AudioTrack{Codec: "aac", Channels: 2, Title: "English", EmbeddedTitle: "English"}, "Unknown - AAC Stereo - English"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			version := catalog.FileVersion{AudioTracks: []models.AudioTrack{tc.track}}
+			streams := buildMediaStreams("item", "source", version)
+			if len(streams) != 1 {
+				t.Fatalf("streams length = %d, want 1", len(streams))
+			}
+			if got := streams[0].DisplayTitle; got != tc.want {
+				t.Fatalf("DisplayTitle = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}

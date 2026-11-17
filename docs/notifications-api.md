@@ -19,11 +19,13 @@ shape.
 | `GET /unread-count` | `{ "count": 0 }` |
 | `POST /{id}/read` | 204; already read succeeds, unknown delivery is 404 |
 | `POST /read-all` | 204; body requires `{ "through": "<read_cutoff>" }` |
-| `GET /preferences` | Profile ID and five preference booleans |
+| `GET /preferences` | Profile ID, `enabled`, and `notify_next_up` |
 | `PUT /preferences` | Updated preferences; omitted fields retain their values |
 | `GET /series` | The series whose new episodes can notify the profile, as `items` and `page` |
 | `PUT /series/{series_id}/mute` | 204; mutes the series for the profile, already muted succeeds, a series the viewer may not see is 404 |
 | `DELETE /series/{series_id}/mute` | 204; unmutes the series, not muted succeeds |
+| `POST /series/mute` | `results`: an outcome per distinct series in `{ "series_ids": [...] }` (up to 500) |
+| `POST /series/unmute` | `results`: an outcome per distinct series in `{ "series_ids": [...] }` (up to 500) |
 
 The inbox list accepts `status=all|unread`, `limit` up to 200, and `cursor`.
 A cursor binds the acting account/profile, filter, page size, last delivery tuple,
@@ -33,7 +35,16 @@ signed cutoff describing an empty set.
 
 Delivery IDs and linked library/item IDs are strings. Public timestamps use UTC
 milliseconds; the signed cursors retain the database timestamp precision. The
-`reason_flags` object retains event-specific data used by existing clients.
+`reason_flags` object is returned as stored, and its keys depend on the
+delivery type. An `episode.available` delivery carries `{"next_up": true}`;
+older ones can also carry `favorite`, `watchlist` and `continue_watching`,
+which clients ignore. Request notices carry request identifiers instead. A
+`watchlist.available` delivery tells a profile that a title on its watchlist
+from before the library had it has arrived, unless a request of the title
+tells it. It names the arrived movie or series in `series_id`, carries
+`{"tmdb_id", "media_type"}` (`movie` or `series`) in `reason_flags`, and goes
+out once per account, profile and item. See
+[Watchlist arrivals](architecture/notifications.md#watchlist-arrivals).
 
 Delivery insertion serializes each profile's timestamp allocation through a
 database row lock held until commit. A trigger assigns `created_at` strictly
@@ -47,33 +58,49 @@ retain their timestamps, and migration seeds the boundary from their maximum.
 ## Notified series
 
 `GET /series` (`listNotificationSeries`) lists every series the acting profile
-favorited, put on its watchlist, is partway through, or waits on a next episode
-of, and every series it muted. It reads the same interest index and mutes
-episode fanout reads, so it names exactly the series a new episode is evaluated
-for. A series in several libraries is one entry carrying every library's
-reasons.
+has a Next Up position in (it finished an episode and waits on the next), and
+every series it muted. It reads the same interest index and mutes episode
+fanout reads, so it names exactly the series a new episode is evaluated for. A
+series in several libraries is one entry.
 
-Each entry has the series as a catalog card in `item`, the profile's
-relationships in `reasons`, and in `active_reasons` the ones the profile's
-preferences let notify. `muted` is true when the profile muted the series.
-`notifies` is true when any reason is active and the series is not muted. A
-muted series keeps its `active_reasons`, so a client can say what would notify
-after an unmute, and it is listed even with no reason left, so the profile can
-still unmute it. With an
-active Next Up reason, `next_up_after` names the last episode the profile
-finished; on that reason alone, only a new episode after it notifies. It names
-the finished episode rather than the next one because the next may not exist
-yet: after a season finale, the following season's first episode notifies.
-The other reasons notify on any new episode. Delivery still skips an episode the profile was
-already notified about and a series the profile can no longer open.
+A profile is told about a new episode only when it is the next one after what
+the profile has watched: the first episode the catalog lists at or after the
+one it waits for. A listed episode whose file has not arrived holds its place,
+so a later episode arriving first does not notify. Favorites,
+the watchlist and Continue Watching do not notify on their own. See
+[Eligibility rules](architecture/notifications.md#eligibility-rules).
+
+Each entry has the series as a catalog card in `item`, `reasons`, and
+`active_reasons`. Both reason objects carry one key, `next_up`. In `reasons`
+it is true when Next Up is on for the series: the profile has not dropped it,
+has not removed its Next Up card, and has no episode partly watched since its
+last completion. In `active_reasons` it is also false when the profile's
+preferences (`enabled`, `notify_next_up`) silence it. `muted` is true when the
+profile muted the series. `notifies` is true when the episode the profile waits for
+would notify on arrival: `next_up` is active, the series is not muted, and the
+profile is caught up, meaning the first episode the catalog lists at or after
+the one Next Up waits for has not arrived, or none is listed. While that
+episode is already available, the profile has something to watch first and
+`notifies` is false. A muted series keeps its
+`active_reasons`, so a client can say what would notify after an unmute, and it
+is listed even without an active reason, so the profile can still unmute it.
+
+With an active Next Up reason, `next_up_after` names the episode just before
+the one Next Up waits for, normally the last episode the profile finished;
+only a new episode after it can notify. It names that episode rather than the
+next one because the next may not exist yet: after a season finale, the
+following season's first episode notifies. Delivery still skips an episode
+the profile was already notified about and a series the profile can no longer
+open.
 
 Filters combine:
 
-- `status=active` keeps the series that notify, `status=inactive` the ones that
-  do not (the preferences silence every reason, or the profile muted the
-  series), and the default `all` keeps both.
-- `reason=favorite|watchlist|continue_watching|next_up` keeps the series with
-  that relationship, whether or not the preferences let it notify.
+- `status=active` keeps the series whose `notifies` is true. `status=inactive`
+  keeps the rest: the preferences silence Next Up, the profile has an
+  available episode to watch first, Next Up is off for the series (dropped,
+  its card removed, an episode partly watched), or the profile muted it.
+  `status=muted` keeps only the series the profile muted, and the default
+  `all` keeps every one.
 - `q` keeps the series whose title or sort title contains the text,
   case-insensitively.
 
@@ -91,8 +118,9 @@ check, so a cursor never names a hidden series. A page can still hold fewer
 than `limit` entries if access changes between that check and card resolution.
 `image_size` selects the card artwork variant.
 
-The interest index follows favorites, watchlist, and progress changes
-asynchronously, so a just-favorited series can take a moment to appear.
+The interest index follows watch progress, watch history, series drops, and
+Next Up card removals asynchronously, so a series can take a moment to appear
+after the profile finishes its first episode.
 `series.available` in `GET /capabilities` reports the operation.
 
 ### Muting one series
@@ -106,7 +134,7 @@ Muting a series already muted succeeds and changes nothing. An ID that names no
 series, or a series the viewer may not see, is 404.
 
 `DELETE /series/{series_id}/mute` (`unmuteNotificationSeries`) lifts the mute.
-The series notifies again for its active reasons. Fanout reads the mute when it
+The series notifies again while Next Up is active for it. Fanout reads the mute when it
 evaluates a new episode, after the release settle delay (30 seconds by
 default): an episode it evaluated while the series was muted is not announced
 later, and one still waiting for fanout when the profile unmutes is announced.
@@ -118,6 +146,24 @@ Notifications already delivered stay in the inbox, and a delivery fanout
 created before the mute committed can still reach its channels. Both writes
 answer 204 with no body. `series.mute` in `GET /capabilities` reports both
 operations and the `muted` field.
+
+### Muting many series
+
+`POST /series/mute` (`muteManyNotificationSeries`) and `POST /series/unmute`
+(`unmuteManyNotificationSeries`) do what the one-series operations do for up to
+500 series in one request, so a client can mute everything it selected or
+everything a filter matched. The body is `{ "series_ids": [...] }`; a repeated
+ID is answered once. The response is 200 with `results`, one
+`{ "series_id", "outcome" }` per distinct ID in request order:
+
+- `applied`: this call muted, or unmuted, the series.
+- `unchanged`: the series was already in the requested state.
+- `not_found`: a mute named no series, or a series the viewer may not see. Such
+  an ID is not written. An unmute never answers it, since unmute runs no access
+  check.
+
+One bad ID does not fail the rest. `series.bulk_mute` in `GET /capabilities`
+reports both operations and the `status=muted` filter.
 
 ## Fixed read cutoff
 
@@ -150,11 +196,13 @@ scope.
 
 ## Preference writes
 
-`enabled`, `notify_favorites`, `notify_watchlist`, `notify_continue_watching`, and
-`notify_next_up` are optional booleans. Explicit false is preserved; v2 rejects
-null. Partial fields apply in one database statement,
-preventing independent concurrent toggles from overwriting each other. Missing
-preference rows retain the existing all-enabled defaults.
+`enabled` (the master toggle) and `notify_next_up` are optional booleans.
+Explicit false is preserved; v2 rejects null and any other field, including
+the retired `notify_favorites`, `notify_watchlist` and
+`notify_continue_watching`, with a 422 `validation_failed` problem. Partial
+fields apply in one database statement, preventing independent concurrent
+toggles from overwriting each other. Missing preference rows default to both
+on.
 
 The web captures account/profile authority for requests and mutations, validates
 pagination, and surfaces initial and partial failures. It does not automatically
@@ -466,8 +514,14 @@ Discord-link callers, and Jellyfin compatibility has no equivalent operation.
 `POST /api/v2/notifications/webhooks` creates a webhook for the active profile.
 `POST /api/v2/admin/notifications/server-channels` creates a server channel for
 an acting administrator. Both require `name` and `url`; optional type and event
-flags retain the existing service defaults. Creation validates and stores the
-destination through the notification service and does not send a message.
+flags retain the existing service defaults. A personal webhook's event flags
+are `notify_next_up` (new-episode notifications) and `notify_requests`
+(request notices), each on when omitted; the destination list returns the
+same two. A generic webhook's payload carries `reason_flags` as
+`{"next_up": <bool>}`; see
+[Generic payload and HMAC signing](architecture/notifications.md#generic-payload-and-hmac-signing).
+Creation validates and stores the destination through the notification
+service and does not send a message.
 
 Destinations require HTTPS without embedded credentials. Registration resolves
 the host with a two-second deadline and rejects failed, empty, or disallowed
@@ -527,7 +581,7 @@ This operation is non-retryable. The existing settings action captures ID and au
 
 ### Update personal webhook configuration
 
-`PUT /api/v2/notifications/webhooks/{id}` (`updateNotificationWebhook`) requires acting-profile authority, the demo guard and the original strong `If-Match` validator supplied with the listed row. Name, URL, enabled state and notification reason flags are optional; omitted fields stay unchanged. Type and signing secret are not configuration fields. Missing/foreign rows return `404`, missing preconditions `428`, stale validators `412`, invalid configuration `422`, and an unavailable service `503`. Success returns `200` with the destination and its new validator in both `etag` and `ETag`.
+`PUT /api/v2/notifications/webhooks/{id}` (`updateNotificationWebhook`) requires acting-profile authority, the demo guard and the original strong `If-Match` validator supplied with the listed row. Name, URL, enabled state, `notify_next_up` and `notify_requests` are optional; omitted fields stay unchanged. Type and signing secret are not configuration fields. Missing/foreign rows return `404`, missing preconditions `428`, stale validators `412`, invalid configuration `422`, and an unavailable service `503`. Success returns `200` with the destination and its new validator in both `etag` and `ETag`.
 
 The repository locks the profile's exact row, checks its current revision, applies existing validation and writes configuration in one transaction. URL replacement preserves type restrictions, destination validation and encrypted URL binding. URL changes and re-enabling retain the existing failure-reset behavior. The write does not copy secret, type or delivery outcome fields from an editor. The server-owned revision trigger remains required and covers provider bookkeeping; those changes can conservatively invalidate an editor. Other writers may still change the row after this operation commits. A successful response is an observation, not a lease.
 

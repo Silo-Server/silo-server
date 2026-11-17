@@ -701,6 +701,18 @@
       "value": "Sammlung"
     }
   ],
+  "home.recipe.collectionPostersPick.description": [
+    {
+      "type": 0,
+      "value": "Zeigt mehrere Sammlungen als Poster. Jedes öffnet seine Sammlung."
+    }
+  ],
+  "home.recipe.collectionPostersPick.name": [
+    {
+      "type": 0,
+      "value": "Eine Reihe mit Sammlungen"
+    }
+  ],
   "home.recipe.continueListeningDefault.description": [
     {
       "type": 0,
@@ -22853,6 +22865,270 @@
     {
       "type": 0,
       "value": "Verbindungsprüfung fehlgeschlagen."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.chatGPTSignInRequired": [
+    {
+      "type": 0,
+      "value": "Melde dich in den Einstellungen unter KI-Dienste mit ChatGPT an."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.embeddingConnected": [
+    {
+      "type": 0,
+      "value": "Embedding-Verbindung erfolgreich. Das Modell liefert "
+    },
+    {
+      "type": 1,
+      "value": "dimensions"
+    },
+    {
+      "type": 0,
+      "value": " Dimensionen."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.embeddingDimensionsMismatch": [
+    {
+      "type": 0,
+      "value": "Die Embeddings wurden mit Vektoren mit "
+    },
+    {
+      "type": 1,
+      "value": "locked"
+    },
+    {
+      "type": 0,
+      "value": " Dimensionen erstellt, aber das Modell liefert jetzt "
+    },
+    {
+      "type": 1,
+      "value": "current"
+    },
+    {
+      "type": 0,
+      "value": ". Setze die Embeddings zurück, bevor du das Modell wechselst."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.embeddingLockOutOfRange": [
+    {
+      "type": 0,
+      "value": "Die Embedding-Sperre verzeichnet Vektoren mit "
+    },
+    {
+      "type": 1,
+      "value": "locked"
+    },
+    {
+      "type": 0,
+      "value": " Dimensionen; Silo speichert 1 bis "
+    },
+    {
+      "type": 1,
+      "value": "max"
+    },
+    {
+      "type": 0,
+      "value": ". Setze die Embeddings zurück und verwende ein Modell, das höchstens "
+    },
+    {
+      "type": 1,
+      "value": "max"
+    },
+    {
+      "type": 0,
+      "value": " Dimensionen liefert."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.embeddingLockUnreadable": [
+    {
+      "type": 0,
+      "value": "Die gespeicherte Embedding-Sperre kann nicht gelesen werden. Setze die Embeddings zurück, um sie zu entfernen."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.embeddingModelMismatch": [
+    {
+      "type": 0,
+      "value": "Die Embeddings wurden mit dem Modell „"
+    },
+    {
+      "type": 1,
+      "value": "locked_model"
+    },
+    {
+      "type": 0,
+      "value": "“ erstellt, nicht mit „"
+    },
+    {
+      "type": 1,
+      "value": "model"
+    },
+    {
+      "type": 0,
+      "value": "“. Setze die Embeddings zurück, bevor du das Modell wechselst."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.embeddingNoVector": [
+    {
+      "type": 0,
+      "value": "Der Embedding-Anbieter hat für den Testtext keinen Vektor geliefert."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.embeddingStorageMismatch": [
+    {
+      "type": 0,
+      "value": "Die Embeddings wurden mit "
+    },
+    {
+      "type": 1,
+      "value": "stored"
+    },
+    {
+      "type": 0,
+      "value": " Dimensionen gespeichert; dieser Server speichert "
+    },
+    {
+      "type": 1,
+      "value": "supported"
+    },
+    {
+      "type": 0,
+      "value": ". Setze die Embeddings zurück."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.embeddingTooManyDimensions": [
+    {
+      "type": 0,
+      "value": "Das Modell liefert "
+    },
+    {
+      "type": 1,
+      "value": "dimensions"
+    },
+    {
+      "type": 0,
+      "value": " Dimensionen; Silo speichert höchstens "
+    },
+    {
+      "type": 1,
+      "value": "max"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.failed": [
+    {
+      "type": 0,
+      "value": "Verbindungsprüfung fehlgeschlagen. Prüfe die gesendeten Einstellungen und die Verfügbarkeit des Anbieters."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.mdblistVerified": [
+    {
+      "type": 0,
+      "value": "MDBList-API-Schlüssel bestätigt."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.meilisearchConnected": [
+    {
+      "type": 0,
+      "value": "Meilisearch-Verbindung erfolgreich"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.meilisearchKeyRejected": [
+    {
+      "type": 0,
+      "value": "Meilisearch hat den API-Schlüssel abgelehnt oder verlangt einen. Gib einen Schlüssel ein, der Indizes und Dokumente verwalten kann, etwa den Default Admin API Key."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.meilisearchRedirected": [
+    {
+      "type": 0,
+      "value": "Meilisearch hat die Prüfung an eine andere Adresse weitergeleitet. Gib die Zieladresse der Weiterleitung ein, etwa die https://-URL, und gib den API-Schlüssel erneut ein."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.redisConnected": [
+    {
+      "type": 0,
+      "value": "Redis-Verbindung erfolgreich."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.s3Verified": [
+    {
+      "type": 0,
+      "value": "S3-Verbindung sowie Lese-, Schreib- und Löschrechte für Objekte bestätigt."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechConnected": [
+    {
+      "type": 0,
+      "value": "Spracherkennungsverbindung erfolgreich: Sprache mit Zeitstempeln empfangen."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechForbidden": [
+    {
+      "type": 0,
+      "value": "Der Zugriff auf die Spracherkennung wurde verweigert. Prüfe die Berechtigungen deines API-Schlüssels und die erlaubten Anbieter."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechNoTimestamps": [
+    {
+      "type": 0,
+      "value": "Das Spracherkennungsmodell liefert keine Segmente mit Zeitstempeln, die Silo zum Erstellen von Untertiteln braucht. Wähle ein Modell, das Zeitstempel für Segmente unterstützt, etwa whisper-1 bei OpenAI."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechNotFound": [
+    {
+      "type": 0,
+      "value": "Endpunkt oder Modell der Spracherkennung ist nicht verfügbar. Prüfe die Basis-URL des Anbieters, das Modell und die erlaubten Anbieter."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechPaymentRequired": [
+    {
+      "type": 0,
+      "value": "Der Spracherkennungsanbieter verlangt eine Zahlung. Prüfe dein Guthaben und dein Ausgabenlimit beim Anbieter."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechQuotaExhausted": [
+    {
+      "type": 0,
+      "value": "Das Kontingent beim Spracherkennungsanbieter ist aufgebraucht. Prüfe dein Guthaben und deine Limits beim Anbieter."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechRateLimited": [
+    {
+      "type": 0,
+      "value": "Der Spracherkennungsanbieter begrenzt die Anzahl der Anfragen. Versuche es später erneut."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechTimedOut": [
+    {
+      "type": 0,
+      "value": "Zeitüberschreitung bei der Verbindungsprüfung der Spracherkennung. Prüfe die Verfügbarkeit des Anbieters und versuche es erneut."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechUnauthorized": [
+    {
+      "type": 0,
+      "value": "Authentifizierung bei der Spracherkennung fehlgeschlagen. Ersetze den API-Schlüssel des Anbieters unter KI-Dienste."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechUnavailable": [
+    {
+      "type": 0,
+      "value": "Der Spracherkennungsanbieter ist vorübergehend nicht verfügbar. Versuche es später erneut."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIConnected": [
+    {
+      "type": 0,
+      "value": "Text-KI-Verbindung erfolgreich."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIFailed": [
+    {
+      "type": 0,
+      "value": "Text-KI-Verbindung fehlgeschlagen. Prüfe das Modell, die Reasoning-Stufe, die Service-Stufe, die Kontoverbindung und die Nutzungslimits des Anbieters."
     }
   ],
   "web.admin.common.deviceConnections.bufferingAction.accepted": [
@@ -52251,6 +52527,20 @@
       "value": "Verbindungsprüfung fehlgeschlagen."
     }
   ],
+  "web.admin.recommendations.embedding.lockConflictNoProvider": [
+    {
+      "type": 0,
+      "value": "Es ist kein Embedding-Anbieter ausgewählt. Wähle einen Anbieter, der „"
+    },
+    {
+      "type": 1,
+      "value": "locked_model"
+    },
+    {
+      "type": 0,
+      "value": "“ bereitstellt, oder setze die Embeddings zurück, um ein anderes Modell zu verwenden."
+    }
+  ],
   "web.admin.recommendations.embedding.model": [
     {
       "type": 0,
@@ -72551,6 +72841,12 @@
       "value": "Anmeldung mit Passwort erlauben"
     }
   ],
+  "web.admin.settings.signIn.page.apiKeysGroup": [
+    {
+      "type": 0,
+      "value": "API-Schlüssel"
+    }
+  ],
   "web.admin.settings.signIn.page.breakGlassAdmins": [
     {
       "type": 6,
@@ -72735,6 +73031,18 @@
     {
       "type": 0,
       "value": "Anmeldung"
+    }
+  ],
+  "web.admin.settings.signIn.page.userApiKeysDescription": [
+    {
+      "type": 0,
+      "value": "Jedes Konto kann unter Einstellungen → API-Schlüssel Schlüssel für seine eigenen Profile erstellen. Diese Schlüssel können Wiedergabeverlauf, Listen und Anfragen lesen und ändern, aber keine Medien abspielen oder herunterladen. Wenn du dies deaktivierst, können keine neuen Schlüssel erstellt werden; vorhandene funktionieren weiter, bis sie widerrufen werden."
+    }
+  ],
+  "web.admin.settings.signIn.page.userApiKeysLabel": [
+    {
+      "type": 0,
+      "value": "Benutzern das Erstellen von API-Schlüsseln erlauben"
     }
   ],
   "web.admin.settings.signIn.provider.accounts.title": [
@@ -91922,6 +92230,48 @@
       "value": "“ löschen?"
     }
   ],
+  "web.collections.copy.deleteWithRowChangesLabel": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Löschen und "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " Reihe ändern"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Löschen und "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " Reihen ändern"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.collections.copy.deleteWithRowsLabel": [
     {
       "type": 6,
@@ -93380,6 +93730,20 @@
     {
       "type": 0,
       "value": " entfernt."
+    }
+  ],
+  "web.collections.copy.removedFromRow": [
+    {
+      "type": 0,
+      "value": "Entfernt sie aus der Reihe „"
+    },
+    {
+      "type": 1,
+      "value": "title"
+    },
+    {
+      "type": 0,
+      "value": "“. Die Reihe behält ihre anderen Sammlungen."
     }
   ],
   "web.collections.copy.removedTitle": [
@@ -101156,6 +101520,12 @@
       "value": "Kontoeinstellungen"
     }
   ],
+  "web.common.title.settings.apiKeys": [
+    {
+      "type": 0,
+      "value": "Einstellungen für API-Schlüssel"
+    }
+  ],
   "web.common.title.settings.connectApps": [
     {
       "type": 0,
@@ -105632,6 +106002,272 @@
       "value": "."
     }
   ],
+  "web.home.addRow.collections.add": [
+    {
+      "type": 0,
+      "value": "Hinzufügen"
+    }
+  ],
+  "web.home.addRow.collections.addLabel": [
+    {
+      "type": 0,
+      "value": "Sammlungen hinzufügen"
+    }
+  ],
+  "web.home.addRow.collections.added": [
+    {
+      "type": 0,
+      "value": "Hinzugefügt"
+    }
+  ],
+  "web.home.addRow.collections.chosenLabel": [
+    {
+      "type": 0,
+      "value": "Sammlungen in dieser Reihe"
+    }
+  ],
+  "web.home.addRow.collections.count": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " Sammlung, in dieser Reihenfolge angezeigt"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " Sammlungen, in dieser Reihenfolge angezeigt"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.home.addRow.collections.drag.canceled": [
+    {
+      "type": 0,
+      "value": "Verschieben von "
+    },
+    {
+      "type": 1,
+      "value": "collection"
+    },
+    {
+      "type": 0,
+      "value": " abgebrochen."
+    }
+  ],
+  "web.home.addRow.collections.drag.dropped": [
+    {
+      "type": 1,
+      "value": "collection"
+    },
+    {
+      "type": 0,
+      "value": " abgelegt."
+    }
+  ],
+  "web.home.addRow.collections.drag.droppedAt": [
+    {
+      "type": 1,
+      "value": "collection"
+    },
+    {
+      "type": 0,
+      "value": " an Position "
+    },
+    {
+      "type": 1,
+      "value": "position"
+    },
+    {
+      "type": 0,
+      "value": " von "
+    },
+    {
+      "type": 1,
+      "value": "total"
+    },
+    {
+      "type": 0,
+      "value": " abgelegt."
+    }
+  ],
+  "web.home.addRow.collections.drag.instructions": [
+    {
+      "type": 0,
+      "value": "Um eine Sammlung zu verschieben, fokussiere ihren Griff und drücke Space oder Enter. Verschiebe sie mit den Pfeiltasten nach oben und unten, drücke Space oder Enter, um sie abzulegen, oder Escape, um abzubrechen."
+    }
+  ],
+  "web.home.addRow.collections.drag.over": [
+    {
+      "type": 1,
+      "value": "collection"
+    },
+    {
+      "type": 0,
+      "value": " ist jetzt an Position "
+    },
+    {
+      "type": 1,
+      "value": "position"
+    },
+    {
+      "type": 0,
+      "value": " von "
+    },
+    {
+      "type": 1,
+      "value": "total"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.home.addRow.collections.drag.pickedUp": [
+    {
+      "type": 1,
+      "value": "collection"
+    },
+    {
+      "type": 0,
+      "value": " aufgenommen, Position "
+    },
+    {
+      "type": 1,
+      "value": "position"
+    },
+    {
+      "type": 0,
+      "value": " von "
+    },
+    {
+      "type": 1,
+      "value": "total"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.home.addRow.collections.dragHandle": [
+    {
+      "type": 1,
+      "value": "collection"
+    },
+    {
+      "type": 0,
+      "value": " verschieben"
+    }
+  ],
+  "web.home.addRow.collections.empty": [
+    {
+      "type": 0,
+      "value": "Füge unten mindestens eine Sammlung hinzu."
+    }
+  ],
+  "web.home.addRow.collections.limit": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Eine Reihe enthält höchstens "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " Sammlung."
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Eine Reihe enthält höchstens "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " Sammlungen."
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.home.addRow.collections.moveDown": [
+    {
+      "type": 1,
+      "value": "collection"
+    },
+    {
+      "type": 0,
+      "value": " nach unten verschieben"
+    }
+  ],
+  "web.home.addRow.collections.moveUp": [
+    {
+      "type": 1,
+      "value": "collection"
+    },
+    {
+      "type": 0,
+      "value": " nach oben verschieben"
+    }
+  ],
+  "web.home.addRow.collections.remove": [
+    {
+      "type": 1,
+      "value": "collection"
+    },
+    {
+      "type": 0,
+      "value": " entfernen"
+    }
+  ],
+  "web.home.addRow.collections.unavailable": [
+    {
+      "type": 0,
+      "value": "Nicht mehr verfügbar"
+    }
+  ],
+  "web.home.addRow.collections.yours": [
+    {
+      "type": 0,
+      "value": "Von dir"
+    }
+  ],
   "web.home.addRow.conflict": [
     {
       "type": 0,
@@ -108771,16 +109407,160 @@
       }
     }
   ],
+  "web.home.rows.describe.collectionCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " Sammlung"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " Sammlungen"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.home.rows.describe.collectionGone": [
     {
       "type": 0,
       "value": "Sammlung nicht mehr verfügbar"
     }
   ],
+  "web.home.rows.describe.collectionList": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " Sammlung: "
+            },
+            {
+              "type": 1,
+              "value": "names"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " Sammlungen: "
+            },
+            {
+              "type": 1,
+              "value": "names"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.home.rows.describe.collectionListMore": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " weitere"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " weitere"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.home.rows.describe.collectionUnknown": [
     {
       "type": 0,
       "value": "Eine Sammlung"
+    }
+  ],
+  "web.home.rows.describe.collectionsGone": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " Sammlung nicht mehr verfügbar"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " Sammlungen nicht mehr verfügbar"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.home.rows.describe.curated": [
@@ -110309,6 +111089,12 @@
       "value": "Was jede Person sich zum Anschauen gemerkt hat"
     }
   ],
+  "web.home.rows.draft.addCollection": [
+    {
+      "type": 0,
+      "value": "Füge eine Sammlung hinzu, um die Reihe zu sehen."
+    }
+  ],
   "web.home.rows.draft.addTitles": [
     {
       "type": 0,
@@ -110565,6 +111351,12 @@
       "value": "Eine deiner Sammlungen anzeigen."
     }
   ],
+  "web.home.rows.kindSentences.collectionPosters": [
+    {
+      "type": 0,
+      "value": "Zeigt mehrere Sammlungen als Poster. Jedes öffnet seine Sammlung."
+    }
+  ],
   "web.home.rows.kindSentences.continueWatching": [
     {
       "type": 0,
@@ -110767,6 +111559,12 @@
     {
       "type": 0,
       "value": "Eine Sammlung"
+    }
+  ],
+  "web.home.rows.kinds.collectionPosters": [
+    {
+      "type": 0,
+      "value": "Eine Reihe mit Sammlungen"
     }
   ],
   "web.home.rows.kinds.continueWatching": [
@@ -116401,6 +117199,30 @@
       "value": "Marker konnten nicht gespeichert werden"
     }
   ],
+  "web.notifications.inbox.dayOlder": [
+    {
+      "type": 0,
+      "value": "Älter"
+    }
+  ],
+  "web.notifications.inbox.dayToday": [
+    {
+      "type": 0,
+      "value": "Heute"
+    }
+  ],
+  "web.notifications.inbox.dayWeek": [
+    {
+      "type": 0,
+      "value": "Letzte 7 Tage"
+    }
+  ],
+  "web.notifications.inbox.dayYesterday": [
+    {
+      "type": 0,
+      "value": "Gestern"
+    }
+  ],
   "web.notifications.inbox.daysAgo": [
     {
       "type": 0,
@@ -116427,10 +117249,50 @@
       "value": "Hier wirst du benachrichtigt, wenn neue Folgen von Serien erscheinen, die du favorisiert hast, auf deiner Merkliste hast oder gerade schaust."
     }
   ],
+  "web.notifications.inbox.emptyHintNextUp": [
+    {
+      "type": 0,
+      "value": "Hier wirst du benachrichtigt, wenn eine neue Folge einer Serie erscheint, bei der du auf dem neuesten Stand bist, oder wenn ein Titel verfügbar wird, den du auf deine Merkliste gesetzt oder angefragt hast."
+    }
+  ],
   "web.notifications.inbox.emptyUnread": [
     {
       "type": 0,
       "value": "Keine ungelesenen Benachrichtigungen"
+    }
+  ],
+  "web.notifications.inbox.episodeCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " neue Folge"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " neue Folgen"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.notifications.inbox.episodeLine": [
@@ -116445,6 +117307,46 @@
     {
       "type": 1,
       "value": "title"
+    }
+  ],
+  "web.notifications.inbox.episodeRange": [
+    {
+      "type": 1,
+      "value": "first"
+    },
+    {
+      "type": 0,
+      "value": " – "
+    },
+    {
+      "type": 1,
+      "value": "last"
+    }
+  ],
+  "web.notifications.inbox.episodeRangeLatest": [
+    {
+      "type": 1,
+      "value": "first"
+    },
+    {
+      "type": 0,
+      "value": " – "
+    },
+    {
+      "type": 1,
+      "value": "last"
+    },
+    {
+      "type": 0,
+      "value": " · zuletzt „"
+    },
+    {
+      "type": 1,
+      "value": "title"
+    },
+    {
+      "type": 0,
+      "value": "“"
     }
   ],
   "web.notifications.inbox.filterAll": [
@@ -116597,6 +117499,40 @@
       "value": " Min."
     }
   ],
+  "web.notifications.inbox.newCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " neu"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " neu"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.notifications.inbox.newEpisode": [
     {
       "type": 0,
@@ -116637,6 +117573,12 @@
       "value": "reason"
     }
   ],
+  "web.notifications.inbox.requestTag": [
+    {
+      "type": 0,
+      "value": "Anfrage"
+    }
+  ],
   "web.notifications.inbox.requestedMovieAvailable": [
     {
       "type": 0,
@@ -116665,6 +117607,76 @@
     {
       "type": 0,
       "value": "Ungelesen"
+    }
+  ],
+  "web.notifications.inbox.unreadBadge": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " ungelesen"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " ungelesen"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.notifications.inbox.viewInbox": [
+    {
+      "type": 0,
+      "value": "Posteingang"
+    }
+  ],
+  "web.notifications.inbox.views": [
+    {
+      "type": 0,
+      "value": "Benachrichtigungsansichten"
+    }
+  ],
+  "web.notifications.inbox.watchlistAvailable": [
+    {
+      "type": 0,
+      "value": "Titel von deiner Merkliste verfügbar"
+    }
+  ],
+  "web.notifications.inbox.watchlistMovieAvailable": [
+    {
+      "type": 0,
+      "value": "Ein Film auf deiner Merkliste ist jetzt verfügbar"
+    }
+  ],
+  "web.notifications.inbox.watchlistSeriesAvailable": [
+    {
+      "type": 0,
+      "value": "Eine Serie auf deiner Merkliste ist jetzt verfügbar"
+    }
+  ],
+  "web.notifications.inbox.watchlistTitleAvailable": [
+    {
+      "type": 0,
+      "value": "Ein Titel auf deiner Merkliste ist jetzt verfügbar"
     }
   ],
   "web.notifications.preferences.continueWatching": [
@@ -116843,6 +117855,12 @@
       "value": "Serie konnte nicht stummgeschaltet werden"
     }
   ],
+  "web.notifications.queries.muteManyFailed": [
+    {
+      "type": 0,
+      "value": "Die ausgewählten Serien konnten nicht stummgeschaltet werden"
+    }
+  ],
   "web.notifications.queries.muted": [
     {
       "type": 1,
@@ -116851,6 +117869,40 @@
     {
       "type": 0,
       "value": " stummgeschaltet"
+    }
+  ],
+  "web.notifications.queries.mutedMany": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " Serie stummgeschaltet"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " Serien stummgeschaltet"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.notifications.queries.removeAddressFailed": [
@@ -116887,6 +117939,54 @@
     {
       "type": 0,
       "value": "Stummschaltung der Serie konnte nicht aufgehoben werden"
+    }
+  ],
+  "web.notifications.queries.unmuteManyFailed": [
+    {
+      "type": 0,
+      "value": "Die Stummschaltung der ausgewählten Serien konnte nicht aufgehoben werden"
+    }
+  ],
+  "web.notifications.queries.unmutedMany": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Stummschaltung für "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " Serie aufgehoben"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Stummschaltung für "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " Serien aufgehoben"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.notifications.queries.verificationFailed": [
@@ -116931,6 +118031,130 @@
       "value": "Merkliste"
     }
   ],
+  "web.notifications.selection.clear": [
+    {
+      "type": 0,
+      "value": "Auswahl aufheben"
+    }
+  ],
+  "web.notifications.selection.count": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " ausgewählt"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " ausgewählt"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.notifications.selection.inboxLabel": [
+    {
+      "type": 0,
+      "value": "Ausgewählte Benachrichtigungen"
+    }
+  ],
+  "web.notifications.selection.markRead": [
+    {
+      "type": 0,
+      "value": "Als gelesen markieren"
+    }
+  ],
+  "web.notifications.selection.muteSeries": [
+    {
+      "type": 0,
+      "value": "Serien stummschalten"
+    }
+  ],
+  "web.notifications.selection.notificationCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "· "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " Benachrichtigung"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "· "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " Benachrichtigungen"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.notifications.selection.select": [
+    {
+      "type": 0,
+      "value": "Auswählen"
+    }
+  ],
+  "web.notifications.selection.selectAllMatching": [
+    {
+      "type": 0,
+      "value": "Alle passenden auswählen"
+    }
+  ],
+  "web.notifications.selection.seriesLabel": [
+    {
+      "type": 0,
+      "value": "Ausgewählte Serien"
+    }
+  ],
+  "web.notifications.series.afterCatchUp": [
+    {
+      "type": 0,
+      "value": "Wenn du auf dem neuesten Stand bist"
+    }
+  ],
   "web.notifications.series.allReasons": [
     {
       "type": 0,
@@ -116953,6 +118177,30 @@
       "value": "Jede neue Folge"
     }
   ],
+  "web.notifications.series.columnNotifiesFor": [
+    {
+      "type": 0,
+      "value": "Benachrichtigt bei"
+    }
+  ],
+  "web.notifications.series.columnNotify": [
+    {
+      "type": 0,
+      "value": "Benachrichtigen"
+    }
+  ],
+  "web.notifications.series.columnReasons": [
+    {
+      "type": 0,
+      "value": "Warum"
+    }
+  ],
+  "web.notifications.series.columnSeries": [
+    {
+      "type": 0,
+      "value": "Serie"
+    }
+  ],
   "web.notifications.series.empty": [
     {
       "type": 0,
@@ -116965,10 +118213,22 @@
       "value": "Serien, die du zu deinen Favoriten oder deiner Merkliste hinzufügst oder zu schauen beginnst, erscheinen hier."
     }
   ],
+  "web.notifications.series.emptyHintNextUp": [
+    {
+      "type": 0,
+      "value": "Serien erscheinen hier, sobald du eine Folge zu Ende geschaut hast. Bist du bei einer Serie auf dem neuesten Stand, wirst du benachrichtigt, sobald ihre nächste Folge erscheint."
+    }
+  ],
   "web.notifications.series.filterByReason": [
     {
       "type": 0,
       "value": "Nach Grund filtern"
+    }
+  ],
+  "web.notifications.series.filterLabel": [
+    {
+      "type": 0,
+      "value": "Serien filtern"
     }
   ],
   "web.notifications.series.intro": [
@@ -117075,16 +118335,52 @@
       "value": "last"
     }
   ],
+  "web.notifications.series.nextEpisodeAfter": [
+    {
+      "type": 0,
+      "value": "Die nächste Folge nach "
+    },
+    {
+      "type": 1,
+      "value": "code"
+    }
+  ],
+  "web.notifications.series.nextNewEpisode": [
+    {
+      "type": 0,
+      "value": "Die nächste neue Folge"
+    }
+  ],
   "web.notifications.series.noMatch": [
     {
       "type": 0,
       "value": "Keine passenden Serien. Versuche eine andere Suche oder einen anderen Grund."
     }
   ],
+  "web.notifications.series.noMatchFilter": [
+    {
+      "type": 0,
+      "value": "Keine passenden Serien. Versuche eine andere Suche oder einen anderen Filter."
+    }
+  ],
   "web.notifications.series.notificationsOff": [
     {
       "type": 0,
       "value": "Benachrichtigungen sind aus"
+    }
+  ],
+  "web.notifications.series.notifySwitch": [
+    {
+      "type": 0,
+      "value": "Über neue Folgen von "
+    },
+    {
+      "type": 1,
+      "value": "title"
+    },
+    {
+      "type": 0,
+      "value": " benachrichtigen"
     }
   ],
   "web.notifications.series.reasonOff": [
@@ -117111,6 +118407,22 @@
     {
       "type": 0,
       "value": "Serien durchsuchen"
+    }
+  ],
+  "web.notifications.series.selectSeries": [
+    {
+      "type": 1,
+      "value": "title"
+    },
+    {
+      "type": 0,
+      "value": " auswählen"
+    }
+  ],
+  "web.notifications.series.selectShown": [
+    {
+      "type": 0,
+      "value": "Alle angezeigten Serien auswählen"
     }
   ],
   "web.notifications.series.sort": [
@@ -117237,6 +118549,12 @@
     {
       "type": 0,
       "value": " ist jetzt verfügbar"
+    }
+  ],
+  "web.notifications.toast.watchlistArrived": [
+    {
+      "type": 0,
+      "value": "Ein Titel auf deiner Merkliste ist jetzt in der Mediathek."
     }
   ],
   "web.onboarding.gate.progressFailed": [
@@ -125364,6 +126682,340 @@
       "value": "Erweitert"
     }
   ],
+  "web.settings.apiKeys.create.access": [
+    {
+      "type": 0,
+      "value": "Zugriff"
+    }
+  ],
+  "web.settings.apiKeys.create.accessHint": [
+    {
+      "type": 0,
+      "value": "Wähle mindestens eine Option. Kein Schlüssel kann Medien abspielen, streamen oder herunterladen."
+    }
+  ],
+  "web.settings.apiKeys.create.actsAs": [
+    {
+      "type": 0,
+      "value": "Handelt als"
+    }
+  ],
+  "web.settings.apiKeys.create.actsAsHint": [
+    {
+      "type": 0,
+      "value": "Ein Schlüssel für ein Profil handelt immer als dieses Profil und behält dessen Einschränkungen. Ein Schlüssel für das ganze Konto kann als jedes Profil deines Kontos handeln."
+    }
+  ],
+  "web.settings.apiKeys.create.copied": [
+    {
+      "type": 0,
+      "value": "In die Zwischenablage kopiert"
+    }
+  ],
+  "web.settings.apiKeys.create.copyAndClose": [
+    {
+      "type": 0,
+      "value": "Kopieren und schließen"
+    }
+  ],
+  "web.settings.apiKeys.create.copyFailed": [
+    {
+      "type": 0,
+      "value": "Kopieren fehlgeschlagen. Markiere den Schlüssel und kopiere ihn manuell."
+    }
+  ],
+  "web.settings.apiKeys.create.creating": [
+    {
+      "type": 0,
+      "value": "Wird erstellt…"
+    }
+  ],
+  "web.settings.apiKeys.create.description": [
+    {
+      "type": 0,
+      "value": "Der vollständige Schlüssel wird nur einmal angezeigt."
+    }
+  ],
+  "web.settings.apiKeys.create.label": [
+    {
+      "type": 0,
+      "value": "Bezeichnung"
+    }
+  ],
+  "web.settings.apiKeys.create.secretNotice": [
+    {
+      "type": 0,
+      "value": "Kopiere deinen API-Schlüssel jetzt. Du kannst ihn später nicht mehr sehen."
+    }
+  ],
+  "web.settings.apiKeys.create.submit": [
+    {
+      "type": 0,
+      "value": "Erstellen"
+    }
+  ],
+  "web.settings.apiKeys.create.title": [
+    {
+      "type": 0,
+      "value": "API-Schlüssel erstellen"
+    }
+  ],
+  "web.settings.apiKeys.create.uncertain": [
+    {
+      "type": 0,
+      "value": "Das Ergebnis ist unklar. Lade die Seite neu, bevor du einen weiteren Schlüssel erstellst."
+    }
+  ],
+  "web.settings.apiKeys.createKey": [
+    {
+      "type": 0,
+      "value": "Schlüssel erstellen"
+    }
+  ],
+  "web.settings.apiKeys.disabled": [
+    {
+      "type": 0,
+      "value": "Dieser Server erlaubt Benutzern nicht, API-Schlüssel zu erstellen. Bitte die Serververwaltung, dies zu aktivieren."
+    }
+  ],
+  "web.settings.apiKeys.empty": [
+    {
+      "type": 0,
+      "value": "Noch keine API-Schlüssel."
+    }
+  ],
+  "web.settings.apiKeys.limitReached": [
+    {
+      "type": 0,
+      "value": "Du hast das Limit von "
+    },
+    {
+      "type": 1,
+      "value": "max"
+    },
+    {
+      "type": 0,
+      "value": " Schlüsseln erreicht. Widerrufe einen, um einen neuen zu erstellen."
+    }
+  ],
+  "web.settings.apiKeys.list.created": [
+    {
+      "type": 0,
+      "value": "Erstellt: "
+    },
+    {
+      "type": 1,
+      "value": "date"
+    }
+  ],
+  "web.settings.apiKeys.list.heading": [
+    {
+      "type": 0,
+      "value": "Deine Schlüssel"
+    }
+  ],
+  "web.settings.apiKeys.list.lastUsed": [
+    {
+      "type": 0,
+      "value": "Zuletzt verwendet: "
+    },
+    {
+      "type": 1,
+      "value": "date"
+    }
+  ],
+  "web.settings.apiKeys.list.loadMore": [
+    {
+      "type": 0,
+      "value": "Mehr laden"
+    }
+  ],
+  "web.settings.apiKeys.list.neverUsed": [
+    {
+      "type": 0,
+      "value": "Nie verwendet"
+    }
+  ],
+  "web.settings.apiKeys.list.profile": [
+    {
+      "type": 0,
+      "value": "Profil: "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    }
+  ],
+  "web.settings.apiKeys.list.revoke": [
+    {
+      "type": 0,
+      "value": "Widerrufen"
+    }
+  ],
+  "web.settings.apiKeys.list.revokeNamed": [
+    {
+      "type": 1,
+      "value": "label"
+    },
+    {
+      "type": 0,
+      "value": " widerrufen"
+    }
+  ],
+  "web.settings.apiKeys.list.wholeAccount": [
+    {
+      "type": 0,
+      "value": "Ganzes Konto"
+    }
+  ],
+  "web.settings.apiKeys.loadFailed": [
+    {
+      "type": 0,
+      "value": "Deine API-Schlüssel konnten nicht geladen werden."
+    }
+  ],
+  "web.settings.apiKeys.loading": [
+    {
+      "type": 0,
+      "value": "API-Schlüssel werden geladen…"
+    }
+  ],
+  "web.settings.apiKeys.revoke.description": [
+    {
+      "type": 1,
+      "value": "label"
+    },
+    {
+      "type": 0,
+      "value": " funktioniert sofort nicht mehr. Dies kann nicht rückgängig gemacht werden."
+    }
+  ],
+  "web.settings.apiKeys.revoke.done": [
+    {
+      "type": 0,
+      "value": "API-Schlüssel widerrufen"
+    }
+  ],
+  "web.settings.apiKeys.revoke.failed": [
+    {
+      "type": 0,
+      "value": "Der Schlüssel konnte nicht widerrufen werden. Lade die Seite neu und versuche es erneut."
+    }
+  ],
+  "web.settings.apiKeys.revoke.title": [
+    {
+      "type": 0,
+      "value": "API-Schlüssel widerrufen"
+    }
+  ],
+  "web.settings.apiKeys.revoke.working": [
+    {
+      "type": 0,
+      "value": "Wird widerrufen…"
+    }
+  ],
+  "web.settings.apiKeys.scope.catalogRead": [
+    {
+      "type": 0,
+      "value": "Alles durchsuchen, was das Profil sehen kann: Mediatheken, Reihen auf der Startseite und in Mediatheken, Titel, Personen und Suche."
+    }
+  ],
+  "web.settings.apiKeys.scope.librariesRead": [
+    {
+      "type": 0,
+      "value": "Sehen, welche Mediatheken das Profil hat."
+    }
+  ],
+  "web.settings.apiKeys.scope.notifications": [
+    {
+      "type": 0,
+      "value": "Benachrichtigungen des Profils beim Eintreffen lesen und als gelesen markieren."
+    }
+  ],
+  "web.settings.apiKeys.scope.requests": [
+    {
+      "type": 0,
+      "value": "Anfragbare Titel durchsuchen sowie Medienanfragen erstellen, verfolgen und abbrechen."
+    }
+  ],
+  "web.settings.apiKeys.scope.watchRead": [
+    {
+      "type": 0,
+      "value": "Wiedergabeverlauf, Fortschritt, Bewertungen, Favoriten, Merkliste und ausgeblendete Titel des Profils lesen und seine Daten exportieren."
+    }
+  ],
+  "web.settings.apiKeys.scope.watchWrite": [
+    {
+      "type": 0,
+      "value": "Titel als gesehen oder ungesehen markieren, Fortschritt synchronisieren, Verlauf entfernen sowie Bewertungen, Favoriten, Merkliste und ausgeblendete Titel bearbeiten."
+    }
+  ],
+  "web.settings.apiKeys.subtitle": [
+    {
+      "type": 0,
+      "value": "Mit Schlüsseln können Skripte und Apps deine Silo-Daten ohne dein Passwort lesen und aktualisieren."
+    }
+  ],
+  "web.settings.apiKeys.title": [
+    {
+      "type": 0,
+      "value": "API-Schlüssel"
+    }
+  ],
+  "web.settings.apiKeys.usage.accountKey": [
+    {
+      "type": 0,
+      "value": "Dieser Schlüssel kann als jedes Profil deines Kontos handeln. Wähle mit diesem Header pro Anfrage eines aus. Das Beispiel verwendet "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": "; "
+    },
+    {
+      "type": 1,
+      "value": "endpoint"
+    },
+    {
+      "type": 0,
+      "value": " listet die IDs aller Profile auf."
+    }
+  ],
+  "web.settings.apiKeys.usage.docs": [
+    {
+      "type": 0,
+      "value": "API-Referenz"
+    }
+  ],
+  "web.settings.apiKeys.usage.header": [
+    {
+      "type": 0,
+      "value": "Sende ihn bei jeder Anfrage in diesem Header mit:"
+    }
+  ],
+  "web.settings.apiKeys.usage.profileKey": [
+    {
+      "type": 0,
+      "value": "Dieser Schlüssel handelt immer als "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": ". Er braucht keinen Profil-Header."
+    }
+  ],
+  "web.settings.apiKeys.usage.title": [
+    {
+      "type": 0,
+      "value": "So verwendest du diesen Schlüssel"
+    }
+  ],
   "web.settings.cardOverlay.adjust": [
     {
       "type": 0,
@@ -128804,6 +130456,12 @@
       "value": "Das Passwort und die Anmelde-Anbieter, die alle Profile im Haushalt teilen."
     }
   ],
+  "web.settings.nav.apiKeys.description": [
+    {
+      "type": 0,
+      "value": "Schlüssel für Skripte und Apps, die mit deinem Wiedergabeverlauf und deinen Listen arbeiten."
+    }
+  ],
   "web.settings.nav.connectApps.description": [
     {
       "type": 0,
@@ -129380,6 +131038,12 @@
       "value": "Hauptschalter für dieses Profil"
     }
   ],
+  "web.settings.notifications.episodes.nextUpDescription": [
+    {
+      "type": 0,
+      "value": "Erhalte eine Benachrichtigung, wenn eine neue Folge einer Serie erscheint, bei der du auf dem neuesten Stand bist, oder wenn ein Titel verfügbar wird, den du auf deine Merkliste gesetzt oder angefragt hast."
+    }
+  ],
   "web.settings.notifications.episodes.seriesLink": [
     {
       "type": 0,
@@ -129677,7 +131341,7 @@
   "web.settings.notifications.reason.requests": [
     {
       "type": 0,
-      "value": "Anfragen"
+      "value": "Anfragen und Merkliste"
     }
   ],
   "web.settings.notifications.reason.watchlist": [
@@ -134655,7 +136319,7 @@
   "web.settings.watchProviders.toggle.exportRatings.description": [
     {
       "type": 0,
-      "value": "Sendet deine Sternebewertungen an "
+      "value": "Sendet deine Bewertungen an "
     },
     {
       "type": 1,
@@ -134663,7 +136327,7 @@
     },
     {
       "type": 0,
-      "value": " und entfernt dort die, die du löschst. 4 Sterne werden zu 8/10."
+      "value": " und entfernt dort die, die du löschst. 3,5 Sterne werden zu 7/10."
     }
   ],
   "web.settings.watchProviders.toggle.exportRatings.label": [
@@ -134747,7 +136411,7 @@
     },
     {
       "type": 0,
-      "value": " als Sterne. Aus 7/10 werden 4 Sterne."
+      "value": ". Aus 7/10 werden 3,5 Sterne."
     }
   ],
   "web.settings.watchProviders.toggle.importRatings.label": [
@@ -137116,6 +138780,18 @@
       "value": "Zugriffsschlüssel"
     }
   ],
+  "web.setup.storage.applyingBody": [
+    {
+      "type": 0,
+      "value": "Silo startet neu, um den neuen Speicher zu verwenden. Die Einrichtung geht weiter, sobald Silo wieder da ist."
+    }
+  ],
+  "web.setup.storage.applyingTitle": [
+    {
+      "type": 0,
+      "value": "Speicher-Einstellungen werden angewendet"
+    }
+  ],
   "web.setup.storage.authCloudflare": [
     {
       "type": 0,
@@ -137396,6 +139072,18 @@
     {
       "type": 0,
       "value": "Verbindungs-URL"
+    }
+  ],
+  "web.setup.storage.restartSlowBody": [
+    {
+      "type": 0,
+      "value": "Silo startet nur dann von selbst neu, wenn Docker, Kubernetes oder systemd so eingerichtet ist, dass es Silo neu startet. Andernfalls starte Silo selbst wieder. Die Einrichtung geht weiter, sobald Silo wieder da ist."
+    }
+  ],
+  "web.setup.storage.restartSlowTitle": [
+    {
+      "type": 0,
+      "value": "Silo wurde noch nicht neu gestartet"
     }
   ],
   "web.setup.storage.saveFailed": [

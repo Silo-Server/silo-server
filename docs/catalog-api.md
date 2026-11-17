@@ -16,7 +16,10 @@ to server rows. Paging uses that effective row's configuration. A row hidden or
 removed by the profile, a row belonging to another profile, or a row in an
 inaccessible library answers `404`, as an unknown section does.
 
-Every section type can be browsed. Query-backed rows (genre, custom filter,
+Every section type can be browsed except a row of collections
+(`collection_posters`), whose cards are collections rather than titles: it answers an empty
+page (`items: []`, `total: 0`), and a client opens each collection's own page instead. See
+[Rows of collections](#rows-of-collections). Query-backed rows (genre, custom filter,
 collection, recently added or released, random, watchlist, favorites) page their
 source. Every other row, such as the recommendation rows, trending, Continue
 Watching and Next Up, is built by its section fetcher, so it is
@@ -44,6 +47,57 @@ source here, so a Home row that hides watched items lists them here, and a rando
 row is drawn again. A client that shows a capped row reporting `has_more` and
 wants the rest of it in place reads the row again at its own limit
 (`getHomeSectionItems` without `item_limit`) and keeps the cards it already shows.
+
+## Rows of collections
+
+A row of collections (`section_type: collection_posters`, recipe `collection_posters`, preset
+`collection_posters_pick`, category `hand_picked`) shows several collections as poster cards;
+each card opens that collection. Its config lists them in order, each entry naming exactly one
+collection:
+
+```json
+{ "collections": [{ "library_collection_id": "01J9…" }, { "user_collection_id": "c-…" }] }
+```
+
+The list holds 1 to 30 entries with no collection twice. An administrator row
+(`createAdminSection`, `updateAdminSection`, `bulkCreateAdminSections`) lists server collections
+only and answers `422` for a `user_collection_id`; a profile's own row may mix its visible personal
+collections with server collections. A row of collections can't be the hero banner: saving one
+with `featured: true` stores it as not featured.
+
+On every read that answers a `Section` (`listHomeSections`, `getHomeLayout`'s
+`included_sections`, `getHomeSectionItems`, `listLibrarySections`, `getLibrarySectionItems`) and
+in the administrator preview (`previewAdminSection`), such a section carries `collections`, the
+cards the viewer may see, in the row's order. `items` is `[]`, `total_count` is the number of
+cards, and `item_limit` does not apply: the row shows every collection it lists. Each
+`SectionCollectionCard` has `id`, `source` (`library` for a server collection, `user` for a
+personal one), `title`, `poster_url` (presigned, card size; the assigned poster, else the
+viewer's collage, else empty), `poster_thumbhash`, `poster_is_collage`, `backdrop_url` and
+`backdrop_thumbhash` on a server collection with a backdrop (presigned at the page-width variant
+a collection page uses, so a client can draw it as the hero backdrop while the card is focused;
+a backdrop set to other artwork, such as the collection's poster, has no wide variant and comes
+at card thumbnail size, as on the collection page; absent otherwise, and always absent on a
+personal collection), `item_count` (the titles
+the viewer sees), `library_id` on a server collection (a library the viewer can open that holds
+it, for the collection page link; on a library page, that library), and `creator_profile_id` on
+a personal collection.
+
+A card is left out, silently, when its collection:
+
+- is a server collection that no longer exists, is hidden, sits in no enabled library the
+  viewer can open (on a library page: is not in that library), or has members the viewer can
+  open none of, as the collection lists leave it out;
+- is a personal collection that no longer exists or is not visible to the acting profile (its
+  own, or shared on the login). Its count and collage follow its owner's access, then the
+  viewer's, as `listCollections` does.
+
+A row left with no cards is dropped from the aggregate reads, like any empty row, and
+`getHomeSectionItems` answers it with no cards rather than an error. Rows of collections are
+not part of the hide-watched filter or the duplicate-title pass.
+
+A client that does not know `collections` sees a row with no `items` and leaves it out, as it
+leaves out any empty row. `getHomeCapabilities` reports `collection_rows: true` on a server
+that serves these rows; `listSectionRecipes` lists the `collection_posters` recipe there too.
 
 ## Section titles
 
@@ -1240,7 +1294,9 @@ The route requires acting administrator access.
 the administrator Home and library pages that show a server collection. Each item carries the
 row's `id`, `scope` (`home` or `library`), `library_id` (the library whose page holds the row;
 `null` for Home), `section_type`, `title`, `featured` (the row is its page's hero banner),
-`enabled`, `position`, and `page_row_count`, the number of rows on that page. Home rows come
+`enabled`, `position`, and `page_row_count`, the number of rows on that page. A row of
+collections that lists the collection is listed too, with `collection_count`, the number of
+collections it lists (this one included); the field is absent on every other row. Home rows come
 first, then library pages by library, each in page order. Rows a template bundle generated as a
 hero are listed like any other row. An unknown collection answers `404`; a collection no row
 shows answers an empty `items` list.
@@ -1252,7 +1308,9 @@ turned-off rows included. One count covers the whole list. Both are absent from
 
 The rows list includes turned-off rows. Both routes read the administrator page layouts only: rows a
 profile added to its own Home are not listed or counted. A collection that `row_count` reports as
-used cannot be deleted (`409`) until those rows stop showing it.
+used cannot be deleted (`409`) until those rows stop showing it. A row of collections counts as
+showing every server collection it lists: to free one, take it out of the row's `collections`
+(`updateAdminSection`), or delete the row when it is the only one the row lists.
 
 Both routes require acting administrator access.
 

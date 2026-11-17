@@ -40,8 +40,10 @@ func listingCapabilities(calls *atomic.Int32, err error, filters ...string) func
 
 func TestBuildImageArgs(t *testing.T) {
 	tail := []string{"-frames:v", "1", "-f", "image2pipe", "-vcodec", "mjpeg", "-"}
-	head := []string{"-hide_banner", "-loglevel", "error"}
+	head := []string{"-hide_banner", "-loglevel", "error", "-max_pixels", "106250000"}
 	seek := []string{"-ss", "42.500", "-i", "/media/a.mkv"}
+	// Spelled out, so the test pins the text ffmpeg is given.
+	const pixelAspect = `scale=if(between(sar\,0.25\,4)\,round(iw*sar)\,iw):ih`
 	join := func(parts ...[]string) []string {
 		var args []string
 		for _, part := range parts {
@@ -59,18 +61,18 @@ func TestBuildImageArgs(t *testing.T) {
 		software string
 		want     []string
 	}{
-		{name: "software", want: join(head, seek, tail)},
-		{name: "software tone map", toneMap: true, software: softwareToneMapHable, want: join(head, seek, []string{"-vf", softwareToneMapHable}, tail)},
-		{name: "scaled", width: 320, want: join(head, seek, []string{"-vf", "scale=320:-2"}, tail)},
-		{name: "threads", threads: 2, want: join(head, []string{"-threads", "2"}, seek, tail)},
+		{name: "software", want: join(head, seek, []string{"-vf", pixelAspect}, tail)},
+		{name: "software tone map", toneMap: true, software: softwareToneMapHable, want: join(head, seek, []string{"-vf", softwareToneMapHable + "," + pixelAspect}, tail)},
+		{name: "scaled", width: 320, want: join(head, seek, []string{"-vf", pixelAspect + ",scale=320:-2"}, tail)},
+		{name: "threads", threads: 2, want: join(head, []string{"-threads", "2"}, seek, []string{"-vf", pixelAspect}, tail)},
 		{
 			name: "vaapi scaled", width: 320, hardware: true, hw: hardwareDecode{Accel: "vaapi", Device: "/dev/dri/renderD128"},
 			want: join(head, []string{"-init_hw_device", "vaapi=hw:/dev/dri/renderD128", "-filter_hw_device", "hw", "-hwaccel", "vaapi", "-hwaccel_output_format", "vaapi"},
-				seek, []string{"-vf", "hwdownload,format=nv12,scale=320:-2"}, tail),
+				seek, []string{"-vf", "hwdownload,format=nv12," + pixelAspect + ",scale=320:-2"}, tail),
 		},
 		{
 			name: "videotoolbox tone map", toneMap: true, hardware: true, hw: hardwareDecode{Accel: "videotoolbox"}, software: softwareToneMapBT2390,
-			want: join(head, []string{"-hwaccel", "videotoolbox"}, seek, []string{"-vf", softwareToneMapBT2390}, tail),
+			want: join(head, []string{"-hwaccel", "videotoolbox"}, seek, []string{"-vf", softwareToneMapBT2390 + "," + pixelAspect}, tail),
 		},
 	}
 	for _, tt := range tests {

@@ -512,7 +512,20 @@ func allowedChannelsForClaims(claims *auth.Claims) []evt.EventChannel {
 		if claims.Role == models.RoleAdmin && slices.Contains(claims.APIKeyScopes, auth.ScopeAdminMonitorRead) {
 			return slices.Clone(monitorKeyChannels)
 		}
-		return nil
+		// A user key gets the channel of each event scope it holds. The
+		// rest stay closed: settings and history imports have no user
+		// scope.
+		var channels []evt.EventChannel
+		if slices.Contains(claims.APIKeyScopes, auth.ScopeCatalogRead) {
+			channels = append(channels, evt.ChannelCatalog)
+		}
+		if slices.Contains(claims.APIKeyScopes, auth.ScopeWatchRead) {
+			channels = append(channels, evt.ChannelUserState)
+		}
+		if slices.Contains(claims.APIKeyScopes, auth.ScopeNotifications) {
+			channels = append(channels, evt.ChannelNotifications)
+		}
+		return channels
 	}
 	return allowedChannelsForRole(claims.Role)
 }

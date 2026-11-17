@@ -2,7 +2,7 @@
   "items": [
     {
       "item_id": "movie:c",
-      "rating": 5,
+      "rating": 10,
       "rated_at": "2026-01-02T03:04:05.678Z"
     }
   ],

@@ -143,7 +143,7 @@ func webhookTestRow() DeliveryRow {
 			SeriesID:    &seriesID,
 			EpisodeID:   &episodeID,
 			Type:        DeliveryTypeEpisodeAvailable,
-			ReasonFlags: []byte(`{"favorite":true,"continue_watching":true}`),
+			ReasonFlags: []byte(`{"favorite":true,"continue_watching":true,"next_up":true}`),
 			CreatedAt:   time.Date(2026, 4, 28, 12, 34, 56, 0, time.UTC),
 		},
 		SeriesTitle:     "Severance",
@@ -183,8 +183,8 @@ func TestBuildDiscordWebhookPayload(t *testing.T) {
 	if embed.Title != "Severance — S2 E1: Hello, Ms. Cobel" {
 		t.Fatalf("unexpected title %q", embed.Title)
 	}
-	if embed.Color != discordColorFavorite {
-		t.Fatalf("favorite reason must pick the favorite color, got %d", embed.Color)
+	if embed.Color != discordColorNextUp {
+		t.Fatalf("next up reason must pick the next up color, got %d", embed.Color)
 	}
 	if embed.Author == nil || embed.Author.Name != "New episode on Silo" {
 		t.Fatalf("unexpected author %+v", embed.Author)
@@ -203,7 +203,7 @@ func TestBuildDiscordWebhookPayload(t *testing.T) {
 		t.Fatalf("unexpected description %q", embed.Description)
 	}
 	if len(embed.Fields) != 3 ||
-		embed.Fields[0].Name != "Reason" || embed.Fields[0].Value != "Favorited & Continue Watching" ||
+		embed.Fields[0].Name != "Reason" || embed.Fields[0].Value != "Next Up" ||
 		embed.Fields[1].Value != "★ 8.7 IMDb" ||
 		embed.Fields[2].Value != "Drama, Sci-Fi & Fantasy" {
 		t.Fatalf("unexpected fields: %+v", embed.Fields)
@@ -331,6 +331,41 @@ func requestFulfilledTestRow() DeliveryRow {
 		SeriesOverview: "Paul Atreides, a brilliant and gifted young man.",
 		RatingTMDB:     7.8,
 		TMDBID:         "438631",
+	}
+}
+
+// TestGenericWebhookPayloadWatchlistAvailable pins that a receiver can tell
+// which title arrived and whether it is a movie or a series.
+func TestGenericWebhookPayloadWatchlistAvailable(t *testing.T) {
+	itemID := "movie:dune-2021"
+	row := DeliveryRow{
+		Delivery: Delivery{
+			ID: "d1", ProfileID: "p1", SeriesID: &itemID, Type: DeliveryTypeWatchlistAvailable,
+			ReasonFlags: []byte(`{"tmdb_id":438631,"media_type":"movie"}`),
+		},
+		SeriesTitle: "Dune",
+	}
+	payload, err := BuildGenericWebhookPayload(row, "hook-1", false)
+	if err != nil {
+		t.Fatalf("build failed: %v", err)
+	}
+	var body struct {
+		Series *struct {
+			ID string `json:"id"`
+		} `json:"series"`
+		Watchlist *struct {
+			TMDBID    int    `json:"tmdb_id"`
+			MediaType string `json:"media_type"`
+		} `json:"watchlist"`
+	}
+	if err := json.Unmarshal(payload, &body); err != nil {
+		t.Fatalf("payload is not JSON: %v", err)
+	}
+	if body.Series == nil || body.Series.ID != itemID {
+		t.Errorf("series = %+v, want the arrived item", body.Series)
+	}
+	if body.Watchlist == nil || body.Watchlist.TMDBID != 438631 || body.Watchlist.MediaType != "movie" {
+		t.Errorf("watchlist = %+v, want tmdb_id 438631 and media_type movie", body.Watchlist)
 	}
 }
 
@@ -749,15 +784,16 @@ func TestRetryableHTTPStatus(t *testing.T) {
 }
 
 func TestWebhookMatchesReasons(t *testing.T) {
-	hook := Webhook{NotifyFavorites: true, NotifyWatchlist: false, NotifyContinueWatching: false, NotifyNextUp: false}
-	if !hook.MatchesReasons(ReasonFlags{Favorite: true, Watchlist: true}) {
-		t.Fatal("favorite reason must match a favorites-enabled webhook")
+	if !(Webhook{NotifyNextUp: true}).MatchesReasons(ReasonFlags{NextUp: true}) {
+		t.Fatal("a next up delivery must match a webhook with notify_next_up on")
 	}
-	if hook.MatchesReasons(ReasonFlags{Watchlist: true}) {
-		t.Fatal("watchlist-only delivery must not match a favorites-only webhook")
+	if (Webhook{}).MatchesReasons(ReasonFlags{NextUp: true}) {
+		t.Fatal("a next up delivery must not match a webhook with notify_next_up off")
 	}
-	if hook.MatchesReasons(ReasonFlags{}) {
-		t.Fatal("no reasons must never match")
+	// An inbox row from before Next Up was the only reason, written for a
+	// retired reason alone, decodes without next_up and matches nothing.
+	if (Webhook{NotifyNextUp: true}).MatchesReasons(parseReasonFlags([]byte(`{"favorite":true,"watchlist":true}`))) {
+		t.Fatal("a delivery for a retired reason alone must not match")
 	}
 }
 

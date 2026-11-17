@@ -367,6 +367,7 @@ func (r *EncryptedSettingsRepo) GetAll(ctx context.Context) (map[string]string, 
 	if err != nil {
 		return nil, err
 	}
+	authenticated := false
 	for key, value := range all {
 		out, derr := r.cipher.DecryptIfEncrypted(value, secret.SettingsAAD(key))
 		if derr != nil {
@@ -374,11 +375,40 @@ func (r *EncryptedSettingsRepo) GetAll(ctx context.Context) (map[string]string, 
 				delete(all, key)
 				continue
 			}
-			return nil, fmt.Errorf("decrypt setting %q: %w", key, derr)
+			return nil, r.decryptAllError(all, key, derr, authenticated)
 		}
+		authenticated = authenticated || secret.IsEncrypted(value)
 		all[key] = out
 	}
 	return all, nil
+}
+
+// ErrSecretKeyMismatch marks a settings read where no encrypted setting
+// authenticates under this server's SECRET_KEY: the key is not the one the
+// database was encrypted with, as opposed to one damaged or renamed row.
+var ErrSecretKeyMismatch = errors.New("SECRET_KEY does not match the key these settings were encrypted with")
+
+// decryptAllError builds GetAll's error for key. When the failure is an
+// authentication failure and no encrypted row authenticates (authenticated
+// covers rows GetAll already decrypted in place), it reports a SECRET_KEY
+// mismatch, which the raw GCM error does not say.
+func (r *EncryptedSettingsRepo) decryptAllError(all map[string]string, key string, derr error, authenticated bool) error {
+	base := fmt.Errorf("decrypt setting %q: %w", key, derr)
+	if authenticated || !errors.Is(derr, secret.ErrAuthFailed) {
+		return base
+	}
+	encrypted := 0
+	for k, v := range all {
+		if !secret.IsEncrypted(v) {
+			continue
+		}
+		encrypted++
+		if _, err := r.cipher.Decrypt(v, secret.SettingsAAD(k)); err == nil {
+			return base
+		}
+	}
+	return fmt.Errorf("%w: none of the %d encrypted settings decrypt under it (first failure: %w)",
+		ErrSecretKeyMismatch, encrypted, base)
 }
 
 // BackfillSensitiveSettings encrypts any plaintext value currently stored under

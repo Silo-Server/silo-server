@@ -574,7 +574,7 @@ func TestRefreshClearsATasteProfileWithNoPositiveSignalPostgres(t *testing.T) {
 		if _, err := pool.Exec(ctx, `
 			INSERT INTO user_ratings(user_id, profile_id, media_item_id, rating) VALUES($1, $2, $3, $4)
 			ON CONFLICT (user_id, profile_id, media_item_id) DO UPDATE SET rating = EXCLUDED.rating, rated_at = NOW()`,
-			userID, profile, movie, stars); err != nil {
+			userID, profile, movie, catalog.ScoreFromStars(stars)); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -700,7 +700,7 @@ func TestRefreshCountsPositiveTitlesForTheLevelPostgres(t *testing.T) {
 		{
 			name: "one title rated, favorited and finished",
 			seed: func(u int, p string) {
-				exec(`INSERT INTO user_ratings(user_id, profile_id, media_item_id, rating) VALUES($1, $2, $3, 5)`, u, p, movies[3])
+				exec(`INSERT INTO user_ratings(user_id, profile_id, media_item_id, rating) VALUES($1, $2, $3, 10)`, u, p, movies[3])
 				favorite(u, p, movies[3])
 				finish(u, p, movies[3])
 			},
@@ -779,7 +779,7 @@ func TestRefreshWeighsAThreeStarCompletionBelowAnUnratedOnePostgres(t *testing.T
 			t.Fatal(err)
 		}
 	}
-	if _, err := pool.Exec(ctx, `INSERT INTO user_ratings(user_id, profile_id, media_item_id, rating) VALUES($1, $2, $3, 3)`, userID, profile, meh); err != nil {
+	if _, err := pool.Exec(ctx, `INSERT INTO user_ratings(user_id, profile_id, media_item_id, rating) VALUES($1, $2, $3, 6)`, userID, profile, meh); err != nil {
 		t.Fatal(err)
 	}
 

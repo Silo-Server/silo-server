@@ -90,6 +90,7 @@ vi.mock("@/hooks/queries/admin/aiProviders", () => ({
   useRefreshAIProviders: () => vi.fn(),
 }));
 
+import { createAppIntl, setAppIntl } from "@/i18n/format";
 import AdminRecommendations from "./AdminRecommendations";
 
 function idleJob(count: number) {
@@ -309,6 +310,37 @@ describe("AdminRecommendations", () => {
     expect(text).toContain("Last stale sweep completed 2m ago");
     expect(container.querySelector('[role="alert"]')?.textContent).toContain(
       'Embeddings were created with model "a", not "b".',
+    );
+  });
+
+  it("shows a keyed lock conflict in the interface language", async () => {
+    mocks.useRecommendationsStatus.mockReturnValue({
+      data: statusWith({
+        lock_conflict:
+          'Embeddings were created with model "a", not "b". Reset embeddings before switching models.',
+        lock_conflict_key: "web.admin.common.connectionCheck.result.embeddingModelMismatch",
+        lock_conflict_args: { locked_model: "a", model: "b" },
+      }),
+    });
+    setAppIntl(
+      createAppIntl("de", {
+        "web.admin.common.connectionCheck.result.embeddingModelMismatch": [
+          { type: 0, value: "Mit Modell " },
+          { type: 1, value: "locked_model" },
+          { type: 0, value: " erstellt, nicht " },
+          { type: 1, value: "model" },
+          { type: 0, value: "." },
+        ],
+      }),
+    );
+    try {
+      await render();
+    } finally {
+      setAppIntl(createAppIntl("en", {}));
+    }
+
+    expect(container.querySelector('[role="alert"]')?.textContent).toBe(
+      "Mit Modell a erstellt, nicht b.",
     );
   });
 

@@ -838,6 +838,8 @@ export const v2Operations = {
   "POST /api/v2/notifications/push/devices": "registerPushDevice",
   "POST /api/v2/notifications/push/devices/{device_id}/retire": "retirePushDevice",
   "POST /api/v2/notifications/read-all": "markNotificationsRead",
+  "POST /api/v2/notifications/series/mute": "muteManyNotificationSeries",
+  "POST /api/v2/notifications/series/unmute": "unmuteManyNotificationSeries",
   "POST /api/v2/notifications/web-push/subscriptions": "subscribeNotificationWebPush",
   "POST /api/v2/notifications/web-push/unsubscribe": "unsubscribeNotificationWebPush",
   "POST /api/v2/notifications/webhooks": "createNotificationWebhook",

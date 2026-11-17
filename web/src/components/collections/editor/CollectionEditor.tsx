@@ -554,6 +554,7 @@ export function CollectionEditor<Raw extends WireCollection>({
   async function deleteServerCollection() {
     if (!view || !editor.etag) return;
     const rows = deletingRows ?? savedRows ?? [];
+    let etag = editor.etag;
     setDeleteError(null);
     if (rows.length > 0) {
       // A deleted row can't come back: check the collection's token first, so
@@ -571,17 +572,19 @@ export function CollectionEditor<Raw extends WireCollection>({
         return;
       }
       setDeletingRows(rows);
-      const { remaining } = await deleteRows
-        .mutateAsync({ collectionId: view.id, rows })
-        .catch(() => ({ remaining: [...rows] }));
-      if (remaining.length > 0) {
-        setDeletingRows(remaining);
-        setDeleteError(rowsLeftMessage(rowLabels(remaining, libraryNames)));
+      const done = await deleteRows
+        .mutateAsync({ collectionId: view.id, rows, etag })
+        .catch(() => ({ remaining: [...rows], etag: undefined }));
+      if (done.remaining.length > 0) {
+        setDeletingRows(done.remaining);
+        setDeleteError(rowsLeftMessage(rowLabels(done.remaining, libraryNames)));
         return;
       }
+      // Writing its rows moved its revision.
+      etag = done.etag ?? etag;
     }
     remove.mutate(
-      { id: view.id, etag: editor.etag },
+      { id: view.id, etag },
       // Read the rows again, so the dialog shows what still stands in the way.
       // refetch() ignores `enabled`, so ask only a server that reports rows.
       {

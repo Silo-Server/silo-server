@@ -1,5 +1,3 @@
-import { useEffect, useRef } from "react";
-
 import type { AdminInvitation as Invitation, InvitationDelivery } from "@/api/v2/invitations";
 import type { MessageKey, Translate } from "@/i18n";
 
@@ -34,15 +32,4 @@ export function deliveryMessage(result: InvitationDelivery, t: Translate) {
 /** A pending link invitation has no address until someone accepts it. */
 export function isLinkInvitation(invitation: Invitation) {
   return invitation.email === "";
-}
-
-export function useMounted() {
-  const mounted = useRef(true);
-  useEffect(() => {
-    mounted.current = true;
-    return () => {
-      mounted.current = false;
-    };
-  }, []);
-  return mounted;
 }

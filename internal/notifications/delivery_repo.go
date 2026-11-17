@@ -422,12 +422,16 @@ func (r *DeliveryRepository) DeleteAllForProfile(ctx context.Context, userID int
 // DeleteOld applies retention: rows read longer ago than readCutoff, unread
 // rows created before unreadCutoff. Read rows age from read_at, not
 // created_at — an old notification read today starts a fresh read window.
-func (r *DeliveryRepository) DeleteOld(ctx context.Context, readCutoff, unreadCutoff time.Time) (int64, error) {
+// A watchlist.available row created at or after arrivalCutoff, the fanout
+// staleness horizon, is kept whatever the retention settings: it is what
+// stops a later episode inside the horizon from telling the profile again.
+func (r *DeliveryRepository) DeleteOld(ctx context.Context, readCutoff, unreadCutoff, arrivalCutoff time.Time) (int64, error) {
 	tag, err := r.pool.Exec(ctx, `
 		DELETE FROM notification_deliveries
-		WHERE (read_at IS NOT NULL AND read_at < $1)
-		   OR (read_at IS NULL AND created_at < $2)`,
-		readCutoff, unreadCutoff)
+		WHERE ((read_at IS NOT NULL AND read_at < $1)
+		       OR (read_at IS NULL AND created_at < $2))
+		  AND NOT (type = '`+DeliveryTypeWatchlistAvailable+`' AND created_at >= $3)`,
+		readCutoff, unreadCutoff, arrivalCutoff)
 	if err != nil {
 		return 0, err
 	}

@@ -152,6 +152,7 @@ func (s *testSource) Input() string            { return s.path }
 func (s *testSource) Identity() string         { return "etag:" + s.path }
 func (s *testSource) Size() int64              { return 0 }
 func (s *testSource) ModTime() time.Time       { return time.Time{} }
+func (s *testSource) InputModTime() time.Time  { return time.Time{} }
 func (s *testSource) Context() context.Context { return s.ctx }
 func (s *testSource) Err() error               { return context.Cause(s.ctx) }
 func (s *testSource) Close() error             { s.cancel(nodesource.ErrClosed); return nil }

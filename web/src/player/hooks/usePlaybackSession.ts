@@ -122,12 +122,20 @@ export function reconnectDelayMs(attempt: number): number {
  * Stops the player's session as it leaves. sendBeacon doesn't support DELETE,
  * so the stop uses fetch keepalive to outlive a closing page. An unloading
  * page sends it at once rather than after any progress still in flight.
+ *
+ * A player that unmounts while the page stays tells its host once the stop
+ * settles: the page it returned to read its watch state while the stop was
+ * still on its way.
  */
 function stopOnPageExit(config: PlayerConfig, sessionId: string | null, unloading = false) {
   if (!sessionId) return;
-  void stopSequencedSession(config, sessionId, true, unloading).catch(() => {
-    // Best effort: the session expires server-side.
-  });
+  void stopSequencedSession(config, sessionId, true, unloading)
+    .catch(() => {
+      // Best effort: the session expires server-side.
+    })
+    .then(() => {
+      if (!unloading) config.onSessionStopped?.();
+    });
 }
 
 /**

@@ -16,6 +16,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/blobstore"
 	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/imageutil"
+	"github.com/Silo-Server/silo-server/internal/mediasample"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/nodeauth"
 	"github.com/Silo-Server/silo-server/internal/nodepool"
@@ -726,8 +727,9 @@ var (
 	// ErrExtractionUnavailable: no transcode node could be reserved, so no
 	// file can be extracted until one can.
 	ErrExtractionUnavailable = errors.New("frame extraction unavailable")
-	// ErrUndecodableFile: ffmpeg could not decode the file's data; trying
-	// again only helps once the file changes.
+	// ErrUndecodableFile: ffmpeg could not decode the file's data, or its
+	// frame is over mediasample's size limits; trying again only helps once
+	// the file changes.
 	ErrUndecodableFile = errors.New("file cannot be decoded")
 )
 
@@ -760,6 +762,9 @@ func (s *Service) extractFrame(
 	seekSeconds float64,
 	hdrPolicy string,
 ) ([]byte, string, error) {
+	if err := checkFrameSize(file); err != nil {
+		return nil, reasonDecodeInvalidData, wrapReason(reasonDecodeInvalidData, err)
+	}
 	if s.extractFrameFunc != nil {
 		return s.extractFrameFunc(ctx, file, seekSeconds, hdrPolicy)
 	}
@@ -807,6 +812,33 @@ func (s *Service) extractFrame(
 	}
 
 	return nil, reason, err
+}
+
+// checkFrameSize refuses a file whose every video track with known
+// dimensions is over mediasample.MaxImagePixels, before a node is reserved or
+// ffmpeg starts. A file with one track under the limit passes: ffmpeg's
+// -max_pixels skips the larger streams and extracts from it. Files without
+// known dimensions pass to that same ffmpeg bound.
+func checkFrameSize(file *models.MediaFile) error {
+	if file == nil {
+		return nil
+	}
+	var over *models.VideoTrack
+	for i, track := range file.VideoTracks {
+		if track.Width <= 0 || track.Height <= 0 {
+			continue
+		}
+		if int64(track.Width)*int64(track.Height) <= mediasample.MaxImagePixels {
+			return nil
+		}
+		if over == nil {
+			over = &file.VideoTracks[i]
+		}
+	}
+	if over == nil {
+		return nil
+	}
+	return fmt.Errorf("video frame %dx%d is over the %d-pixel extraction limit", over.Width, over.Height, mediasample.MaxImagePixels)
 }
 
 // extractFrameRemote grants node file's source and extracts the frame there.

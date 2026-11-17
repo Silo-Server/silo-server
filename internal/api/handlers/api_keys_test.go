@@ -99,37 +99,56 @@ func TestCreateAdminAPIKeyAcceptsFullScopeCatalog(t *testing.T) {
 	}
 }
 
-// Account filtering must survive the transport-to-store boundary: the personal
-// service cannot accidentally call the unfiltered administrator delete.
-type personalAPIKeyStore struct {
+// Account and profile filtering must survive the transport-to-store boundary:
+// the personal service cannot accidentally call the unfiltered administrator
+// delete, or drop the profile a non-primary caller is limited to.
+type personalKeySpy struct {
 	fakeAPIKeyStore
-	userID int
-	keyID  int64
-	limit  int
-	after  *auth.APIKeyPageKey
+	userID  int
+	profile string
+	keyID   int64
+	limit   int
+	after   *auth.APIKeyPageKey
 }
 
-func (s *personalAPIKeyStore) Delete(_ context.Context, id int64, userID int) error {
-	s.keyID, s.userID = id, userID
+func (s *personalKeySpy) UserAPIKeysEnabled(context.Context) (bool, error) { return true, nil }
+func (s *personalKeySpy) CreatePersonal(context.Context, int, auth.APIKeyActingProfile, string, string, []string) (*models.APIKey, error) {
+	panic("unexpected create")
+}
+func (s *personalKeySpy) DeleteForProfile(_ context.Context, id int64, userID int, profileID string) error {
+	s.keyID, s.userID, s.profile = id, userID, profileID
 	return auth.ErrAPIKeyNotFound
 }
-func (s *personalAPIKeyStore) DeleteByAdmin(context.Context, int64) error { panic("unfiltered delete") }
-func (s *personalAPIKeyStore) ListByUserAdminPage(_ context.Context, userID int, after *auth.APIKeyPageKey, limit int) ([]*models.APIKeyMetadataWithUser, bool, error) {
-	s.userID, s.after, s.limit = userID, after, limit
+func (s *personalKeySpy) DeleteByAdmin(context.Context, int64) error { panic("unfiltered delete") }
+func (s *personalKeySpy) ListByUserProfilePage(_ context.Context, userID int, profileID string, after *auth.APIKeyPageKey, limit int) ([]*models.APIKeyMetadataWithUser, bool, error) {
+	s.userID, s.profile, s.after, s.limit = userID, profileID, after, limit
 	return []*models.APIKeyMetadataWithUser{}, false, nil
 }
 func TestPersonalAPIKeyServiceAccountBoundary(t *testing.T) {
-	store := new(personalAPIKeyStore)
+	store := new(personalKeySpy)
 	handler := NewAPIKeyHandler(store)
-	if err := handler.RevokePersonalAPIKey(t.Context(), 42, 7); !errors.Is(err, auth.ErrAPIKeyNotFound) {
+	if err := handler.RevokePersonalAPIKey(t.Context(), 42, "kid", 7); !errors.Is(err, auth.ErrAPIKeyNotFound) {
 		t.Fatal(err)
 	}
-	if store.userID != 42 || store.keyID != 7 {
-		t.Fatal(store.userID, store.keyID)
+	if store.userID != 42 || store.keyID != 7 || store.profile != "kid" {
+		t.Fatal(store.userID, store.keyID, store.profile)
 	}
 	after := &auth.APIKeyPageKey{ID: 9}
-	rows, more, err := handler.ListPersonalAPIKeysPage(t.Context(), 42, after, 25)
-	if err != nil || more || rows == nil || store.userID != 42 || store.after != after || store.limit != 25 {
+	rows, more, err := handler.ListPersonalAPIKeysPage(t.Context(), 42, "kid", after, 25)
+	if err != nil || more || rows == nil || store.userID != 42 || store.profile != "kid" || store.after != after || store.limit != 25 {
 		t.Fatal(rows, more, err, store)
+	}
+}
+
+// User keys read profiles from Postgres, so a server whose profile store is
+// elsewhere keeps them off whatever its setting says.
+func TestUserAPIKeysOffOutsidePostgres(t *testing.T) {
+	h := NewAPIKeyHandler(new(personalKeySpy))
+	if on, err := h.UserAPIKeysEnabled(t.Context()); !on || err != nil {
+		t.Fatalf("postgres profiles: %v, %v", on, err)
+	}
+	h.ProfilesOutsidePostgres = true
+	if on, err := h.UserAPIKeysEnabled(t.Context()); on || err != nil {
+		t.Fatalf("profiles outside postgres: %v, %v", on, err)
 	}
 }

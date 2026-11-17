@@ -92,17 +92,12 @@ import {
 } from "@/lib/webPush";
 
 const REASON_FIELDS = [
-  { key: "notify_favorites", labelKey: "web.settings.notifications.reason.favorites" },
-  { key: "notify_watchlist", labelKey: "web.settings.notifications.reason.watchlist" },
-  {
-    key: "notify_continue_watching",
-    labelKey: "web.settings.notifications.reason.continueWatching",
-  },
   { key: "notify_next_up", labelKey: "web.settings.notifications.reason.nextUp" },
 ] as const satisfies readonly { key: string; labelKey: MessageKey }[];
 
-// Webhooks additionally carry the request.fulfilled toggle; it is not an
-// episode reason, so the profile preferences section keeps REASON_FIELDS.
+// Webhooks additionally carry the request toggle, which also covers
+// watchlist.available; it is not an episode reason, so the profile
+// preferences section keeps REASON_FIELDS.
 const WEBHOOK_NOTIFY_FIELDS = [
   ...REASON_FIELDS,
   { key: "notify_requests", labelKey: "web.settings.notifications.reason.requests" },
@@ -132,7 +127,7 @@ function PreferencesSection() {
       title={t("web.settings.notifications.episodes.title")}
       description={
         <>
-          {t("web.settings.notifications.episodes.description")}
+          {t("web.settings.notifications.episodes.nextUpDescription")}
           {capability?.series?.available && (
             <>
               {" "}
@@ -827,9 +822,6 @@ function WebhookFormDialog({
   const [name, setName] = useState(webhook?.name ?? "");
   const [url, setUrl] = useState("");
   const [reasons, setReasons] = useState<Record<WebhookNotifyKey, boolean>>({
-    notify_favorites: webhook?.notify_favorites ?? true,
-    notify_watchlist: webhook?.notify_watchlist ?? true,
-    notify_continue_watching: webhook?.notify_continue_watching ?? true,
     notify_next_up: webhook?.notify_next_up ?? true,
     notify_requests: webhook?.notify_requests ?? true,
   });

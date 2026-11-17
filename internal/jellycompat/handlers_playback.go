@@ -20,6 +20,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 
 	"github.com/Silo-Server/silo-server/internal/bandwidthprobe"
 	"github.com/Silo-Server/silo-server/internal/clientip"
@@ -2216,6 +2217,7 @@ func (h *PlaybackHandler) startRemoteTranscodeWithToneMapMode(
 		VideoBitstreamFilter:   reqBody.VideoBitstreamFilter,
 		CopyVideoMPEGTS:        reqBody.CopyVideoMPEGTS,
 		KeyframePlaylist:       reqBody.KeyframePlaylist,
+		KeyframePlanResume:     nodeResponse.KeyframePlanResume,
 		SegmentDuration:        reqBody.SegmentDuration,
 		AudioTrackIndex:        reqBody.AudioTrackIndex,
 		RequireAudioTrack:      reqBody.RequireAudioTrack,
@@ -2687,7 +2689,7 @@ func (h *PlaybackHandler) HandlePlaybackInfo(w http.ResponseWriter, r *http.Requ
 					SupportsExternalStream: true,
 					DeliveryURL:            storedSubtitleDeliveryURL(routeItemID, source.ID, streamIndex, format, playSessionID, dl.ID),
 					DeliveryMethod:         "External",
-					Path:                   downloadedSubtitlePath(source.Version, dl),
+					Path:                   subtitleStreamPath(routeItemID, source.ID, streamIndex, format),
 					IsExternalURL:          boolPtr(false),
 				})
 			}
@@ -3219,7 +3221,7 @@ func (h *PlaybackHandler) mediaSourceDTO(routeItemID, playSessionID string, sour
 		if delivery.Format != "" {
 			stream.DeliveryURL = subtitleDeliveryURL(routeItemID, source.ID, stream.Index, delivery.Format, playSessionID)
 			if stream.IsExternal {
-				stream.Path = fmt.Sprintf("/Videos/%s/%s/Subtitles/%d/stream.%s", routeItemID, source.ID, stream.Index, delivery.Format)
+				stream.Path = subtitleStreamPath(routeItemID, source.ID, stream.Index, delivery.Format)
 			}
 		}
 		if !source.SupportsDirectPlay {
@@ -3959,9 +3961,11 @@ func audioTrackDisplayTitle(track models.AudioTrack) string {
 	if lang != "" {
 		title = lang + " - " + title
 	}
-	// Append embedded title only when it adds info beyond codec/channels (e.g. "Commentary").
-	embedded := strings.TrimSpace(firstNonEmpty(track.Title, track.EmbeddedTitle))
-	if !isGenericAudioLabel(embedded) {
+	// Append the file's own title tag only when it adds something, such as
+	// "Commentary". Title is not used: for an untagged track the scanner fills
+	// it with ffprobe's codec long name ("ATSC A/52B (AC-3, E-AC-3)").
+	embedded := strings.TrimSpace(track.EmbeddedTitle)
+	if !audioLabelRepeatsTitle(embedded, title, track) {
 		title += " - " + embedded
 	}
 	return title
@@ -4024,12 +4028,64 @@ func audioChannelsDisplayName(channels int) string {
 	}
 }
 
-func isGenericAudioLabel(s string) bool {
-	switch strings.ToLower(strings.TrimSpace(s)) {
-	case "", "stereo", "mono", "5.1", "7.1", "surround", "5.1 surround", "7.1 surround":
-		return true
+// audioLabelRepeatsTitle reports whether every word of an audio title tag is
+// already in the display title, one of the language's codes or the codec, or
+// is a channel word that fits the track, as with tags such as "English",
+// "ENG 5.1" or "EAC3 Surround 5.1". A channel word that contradicts the track,
+// such as "Mono" on a stereo track, is kept.
+func audioLabelRepeatsTitle(label, displayTitle string, track models.AudioTrack) bool {
+	// A tag that is itself a language tag with a subtag, such as "de-DE" on a
+	// de-AT track, is compared whole: a different region says something new.
+	if strings.Contains(label, "-") {
+		if tag := lang.CanonicalTag(label); tag != "" && lang.PrimaryLanguage(tag) != "" &&
+			lang.PrimaryLanguage(tag) == lang.PrimaryLanguage(track.Language) {
+			return strings.EqualFold(tag, lang.CanonicalTag(track.Language))
+		}
 	}
-	return false
+	known := map[string]bool{}
+	switch {
+	case track.Channels == 1:
+		known["mono"], known["1.0"] = true, true
+	case track.Channels == 2:
+		known["stereo"], known["2.0"] = true, true
+	case track.Channels > 2:
+		known["surround"] = true
+	}
+	sources := []string{displayTitle, track.Language, track.Codec, compatChannelLayout(track.Layout)}
+	sources = append(sources, lang.CodeAliases(lang.PrimaryLanguage(track.Language))...)
+	for _, s := range sources {
+		for _, word := range audioLabelWords(s) {
+			known[word] = true
+		}
+	}
+	for _, word := range audioLabelWords(label) {
+		if !known[word] {
+			return false
+		}
+	}
+	return true
+}
+
+// audioCodecSpellings joins hyphenated codec names so "AC-3" and "E-AC-3"
+// match the stored codecs ac3 and eac3.
+var audioCodecSpellings = strings.NewReplacer("e-ac-3", "eac3", "ac-3", "ac3")
+
+func audioLabelWords(s string) []string {
+	words := strings.FieldsFunc(audioCodecSpellings.Replace(strings.ToLower(s)), func(r rune) bool {
+		switch r {
+		case '-', '_', '/', ',', '(', ')', '[', ']', ':', '|':
+			return true
+		}
+		return unicode.IsSpace(r)
+	})
+	out := words[:0]
+	for _, word := range words {
+		// A trailing full stop ("English.") is punctuation; "5.1" keeps its dot.
+		if word = strings.TrimRight(word, "."); word != "" {
+			out = append(out, word)
+		}
+	}
+	return out
 }
 
 func compatSubtitleDisplayTitle(track catalog.VersionSubtitleTrack) string {
@@ -4298,20 +4354,6 @@ func subtitleDeliveryMethod(external bool) string {
 	return "Embed"
 }
 
-func downloadedSubtitlePath(version catalog.FileVersion, sub subtitles.DownloadedSubtitle) string {
-	name := strings.TrimSpace(downloadedSubtitleDisplayTitle(sub))
-	if name == "" {
-		name = mediaSourceName(version)
-	}
-	if name == "" {
-		name = "subtitle"
-	}
-	name = strings.ReplaceAll(name, "/", "-")
-	name = strings.ReplaceAll(name, "\\", "-")
-	filename := name + "." + subtitleRouteFormat(string(sub.Format))
-	return filepath.ToSlash(filepath.Join("/silo/subtitles", filename))
-}
-
 func compatVideoPath(routeItemID string, audioV2 bool) string {
 	base := "/Videos/" + routeItemID
 	if audioV2 {
@@ -4325,7 +4367,7 @@ func compatVideoPath(routeItemID string, audioV2 bool) string {
 // whole account for as long as the login lasts, and a logged URL must grant at
 // most this play's media.
 func subtitleDeliveryURL(routeItemID, mediaSourceID string, streamIndex int, format, playSessionID string) string {
-	base := fmt.Sprintf("/Videos/%s/%s/Subtitles/%d/stream.%s", routeItemID, mediaSourceID, streamIndex, format)
+	base := subtitleStreamPath(routeItemID, mediaSourceID, streamIndex, format)
 	if playSessionID == "" {
 		return base
 	}
@@ -4340,14 +4382,23 @@ func storedSubtitleDeliveryURL(routeItemID, mediaSourceID string, streamIndex in
 	if playSessionID != "" {
 		query.Set("PlaySessionId", playSessionID)
 	}
-	return fmt.Sprintf("/Videos/%s/%s/Subtitles/%d/stream.%s?%s", routeItemID, mediaSourceID, streamIndex, format, query.Encode())
+	return subtitleStreamPath(routeItemID, mediaSourceID, streamIndex, format) + "?" + query.Encode()
+}
+
+// subtitleStreamPath is the subtitle stream route without a query. An external
+// subtitle's Path is this route, sidecar or stored alike, so a client that
+// fetches by Path gets the subtitle. A stored subtitle's Path resolves by its
+// stream index against the current stored list; only its DeliveryUrl pins it
+// by ID, because a query would hide the route's extension.
+func subtitleStreamPath(routeItemID, mediaSourceID string, streamIndex int, format string) string {
+	return fmt.Sprintf("/Videos/%s/%s/Subtitles/%d/stream.%s", routeItemID, mediaSourceID, streamIndex, format)
 }
 
 func subtitlePath(track catalog.VersionSubtitleTrack, routeItemID, mediaSourceID string, streamIndex int, format string) string {
 	if !track.External {
 		return ""
 	}
-	return fmt.Sprintf("/Videos/%s/%s/Subtitles/%d/stream.%s", routeItemID, mediaSourceID, streamIndex, format)
+	return subtitleStreamPath(routeItemID, mediaSourceID, streamIndex, format)
 }
 
 func subtitleExternalURL(track catalog.VersionSubtitleTrack) *bool {

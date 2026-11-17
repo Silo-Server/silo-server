@@ -128,6 +128,10 @@ type UserStore interface {
 	// past the key between calls are neither repeated nor cause gaps, which the
 	// offset form cannot promise while playback keeps reordering the set.
 	ListProgressPage(ctx context.Context, profileID, status string, after *ProgressKey, limit int) ([]WatchProgress, error)
+	// ListProgressItemIDs returns the media item of every progress row the
+	// full ListProgress listing would return, in no particular order, in one
+	// read instead of one sorted read per page.
+	ListProgressItemIDs(ctx context.Context, profileID string) ([]string, error)
 	// ListCompletedProgressSince returns at most limit completed rows, with the
 	// hidden-item exclusion, whose updated_at at whole-second precision (the
 	// precision WatchProgress.UpdatedAt carries) is after since and, when until

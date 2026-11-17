@@ -21,7 +21,7 @@ env:
   # commit. Built from source below rather than downloaded: a released binary
   # refuses to run against a Go version newer than the one it was built with,
   # and go.mod tracks Go closely enough that this repo is regularly ahead.
-  GOLANGCI_LINT_VERSION: v2.12.2
+  GOLANGCI_LINT_VERSION: v2.15.0
 
 
 jobs:
@@ -224,11 +224,14 @@ jobs:
           sparse-checkout-cone-mode: false
           persist-credentials: false
       # The checker uses only the standard library, so it needs a toolchain
-      # but no module cache.
+      # but no module cache. The version comes from the checkout's go.mod so
+      # that a branch raising the Go version still gets a toolchain: setup-go
+      # turns toolchain switching off, and a range pinned here would come from
+      # main.
       - name: Set up Go
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version: '>=1.26 <1.27'
+          go-version-file: go.mod
           cache: false
       # Equivalent to make verify-case-collisions with main's checker. It
       # lists the files tracked in the PR checkout; .ci-tools is untracked.
@@ -1020,12 +1023,13 @@ jobs:
 
       # The generated web binding is compared after prettier, so this half of
       # the bindings check lives here rather than in a Go job, which has no
-      # pnpm. It needs Go to run the generator.
+      # pnpm. It needs Go to run the generator, at the version the checkout's
+      # go.mod asks for.
       - name: Set up Go
         if: ${{ !cancelled() && steps.install.outcome == 'success' }}
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version: '>=1.26 <1.27'
+          go-version-file: go.mod
           cache: ${{ runner.environment == 'github-hosted' }}
 
       - name: Verify the generated web settings binding is current

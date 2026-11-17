@@ -140,6 +140,17 @@ func TestPostgresCompletedHistoryPage(t *testing.T) {
 	})
 }
 
+// TestPostgresProgressPage runs the progress keyset, completed-since and
+// unpaged item listings against the Postgres backend. Skips unless
+// SILO_TEST_DATABASE_URL is set.
+func TestPostgresProgressPage(t *testing.T) {
+	pool := testPool(t)
+	storetest.RunProgressPage(t, func(t *testing.T) userstore.UserStore {
+		// Deleting the user cascades to every user-scoped table.
+		return newStore(pool, seedTestUser(t, pool, "conf-progresspage"))
+	})
+}
+
 // TestPostgresDeleteProfileRemovesProfileState runs the profile-deletion
 // conformance test against the Postgres backend. Skips unless
 // SILO_TEST_DATABASE_URL is set.

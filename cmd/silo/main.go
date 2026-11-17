@@ -92,6 +92,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/manga"
 	"github.com/Silo-Server/silo-server/internal/markers"
 	"github.com/Silo-Server/silo-server/internal/mdblist"
+	"github.com/Silo-Server/silo-server/internal/mediaartifact"
 	"github.com/Silo-Server/silo-server/internal/metadata"
 	"github.com/Silo-Server/silo-server/internal/metadata/tmdb"
 	"github.com/Silo-Server/silo-server/internal/netaccess"
@@ -667,6 +668,24 @@ func convertLegacyAIProviders(ctx context.Context, settings *catalog.EncryptedSe
 	}
 }
 
+// settingsLoadError formats a startup settings read failure. A SECRET_KEY
+// mismatch gets the fix and this key's check value, which the GCM error alone
+// does not point to.
+func settingsLoadError(err error, secretKey []byte) string {
+	if !errors.Is(err, catalog.ErrSecretKeyMismatch) {
+		return fmt.Sprintf("loading settings: %v", err)
+	}
+	check, cerr := secret.KeyCheckValue(secretKey)
+	if cerr != nil {
+		check = "unavailable"
+	}
+	return fmt.Sprintf("loading settings: %v\n"+
+		"This server's SECRET_KEY has check value %s. "+
+		"Every API server and proxy node that uses this database needs the SECRET_KEY it was encrypted with; "+
+		"a transcode node's node key is a different credential. Restore the original key and restart. "+
+		"To compare keys, run: printf %%s \"$SECRET_KEY\" | silo secret check", err, check)
+}
+
 func runCredentialBackfills(ctx context.Context, pool *pgxpool.Pool, cipher *secret.Cipher, settings *catalog.EncryptedSettingsRepo) {
 	settingsN, err := settings.BackfillSensitiveSettings(ctx)
 	if err != nil {
@@ -961,12 +980,18 @@ func main() {
 	// (run after migrations, before this GetAll) is wired further below.
 	settingsRepo := catalog.NewEncryptedSettingsRepo(catalog.NewServerSettingsRepo(pool), dataCipher)
 	if isPrimaryNode {
+		// Read once before the backfills: under a wrong SECRET_KEY they would
+		// encrypt plaintext credentials with that key, leaving rows the right
+		// key can no longer read.
+		if _, err := settingsRepo.GetAll(ctx); err != nil {
+			log.Fatal(settingsLoadError(err, bc.SecretKey))
+		}
 		runCredentialBackfills(ctx, pool, dataCipher, settingsRepo)
 		convertLegacyAIProviders(ctx, settingsRepo)
 	}
 	settings, err := settingsRepo.GetAll(ctx)
 	if err != nil {
-		log.Fatalf("loading settings: %v", err)
+		log.Fatal(settingsLoadError(err, bc.SecretKey))
 	}
 
 	// Step 4: YAML import (one-time)
@@ -2651,8 +2676,8 @@ func main() {
 
 	// User-facing release notifications. The system reads user state through
 	// the raw store provider; the provider handed to everything downstream is
-	// wrapped so every favorites/watchlist/progress mutation (REST handlers,
-	// jellycompat, imports, playback) feeds the interest index.
+	// wrapped so every progress, history and Home removal mutation (REST
+	// handlers, jellycompat, imports, playback) feeds the interest index.
 	var notificationSystem *notifications.System
 	if deps.DB != nil && userStoreProvider != nil {
 		userRepo := auth.NewUserRepository(deps.DB)
@@ -2675,6 +2700,12 @@ func main() {
 			deps.SecretCipher,
 			mail.NewSMTPSender(settingsRepo),
 			deps.EmailBrand,
+		)
+		// A title arriving tells the profiles whose watchlist waited for it,
+		// unless a request of it tells them.
+		notificationSystem.SetWatchlistArrivals(
+			&watchlist.Arrivals{},
+			mediarequests.NewRepository(deps.DB, deps.SecretCipher),
 		)
 		userStoreProvider = notifications.WrapUserStoreProvider(userStoreProvider, notificationSystem)
 		deps.Notifications = notificationSystem
@@ -3418,12 +3449,13 @@ func main() {
 		}
 		if chapterBackfiller, ok := deps.ChapterThumbnailQueuer.(*chapterthumbs.Service); ok {
 			taskMgr.Register(tasks.NewChapterThumbnailBackfillTask(chapterBackfiller, 25))
-			// Local extras without an image beside them get a frame through the
-			// same extractor, in every library.
+			// Local extras without an image beside them, and then movies with
+			// no poster, get a frame through the same extractor, in every library.
 			stillCacher := imagecache.New(deps.Blobs.Assets)
 			stillCacher.SetArtworkRevisionTracker(catalog.NewArtworkRevisionTracker(deps.DB))
 			taskMgr.Register(tasks.NewGenerateExtraStillsTask(
-				extrastills.NewGenerator(deps.DB, deps.FileRepo, chapterBackfiller, stillCacher), 200,
+				extrastills.NewGenerator(deps.DB, deps.FileRepo, chapterBackfiller, stillCacher).
+					WithPosters(stillCacher, mediaartifact.NewStore(deps.DB)), 200,
 			))
 		}
 		maintenanceSteps = append(maintenanceSteps, tasks.NewActivityLogCleanupTask(deps.DB, settingsRepo, activityPM))

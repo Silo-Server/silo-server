@@ -595,8 +595,8 @@ func (s *System) SeedAvailability(ctx context.Context, progress func(percent int
 
 const interestRebuildTask = "interest_rebuild"
 
-// RebuildInterest incrementally rebuilds profile_series_interest from
-// favorites, watchlist, and watch progress for every profile. Checkpointed
+// RebuildInterest incrementally rebuilds profile_series_interest from watch
+// progress and watch history for every profile. Checkpointed
 // per profile so a crash resumes with at most one profile of repeated work;
 // recomputes are idempotent upserts. Completed runs reset and start over
 // (the task doubles as periodic drift repair). One server rebuilds at a time:
@@ -680,50 +680,20 @@ func (s *System) RebuildInterest(ctx context.Context, progress func(percent int,
 	return nil
 }
 
-// rebuildProfileInterest recomputes every series the profile has any
-// relationship with (favorites, watchlist, progress, completed watch
-// history), plus every series that already has interest rows in Postgres —
-// rows whose sources were all removed must be recomputed too, or the
-// drift-repair pass would keep notifying about unfollowed shows forever.
+// rebuildProfileInterest recomputes every series the profile has watched
+// (progress, completed watch history), plus every series that already has
+// interest rows in Postgres — rows whose sources were all removed must be
+// recomputed too, or the drift-repair pass would keep them forever. Favorites
+// and the watchlist give no interest of their own: only Next Up notifies.
 func (s *System) rebuildProfileInterest(ctx context.Context, store userstore.UserStore, userID int, profileID string) error {
-	const pageSize = 500
 	itemIDs := make(map[string]struct{}, 64)
 
-	for offset := 0; ; offset += pageSize {
-		favorites, err := store.ListFavorites(ctx, profileID, pageSize, offset)
-		if err != nil {
-			return fmt.Errorf("list favorites: %w", err)
-		}
-		for _, favorite := range favorites {
-			itemIDs[favorite.MediaItemID] = struct{}{}
-		}
-		if len(favorites) < pageSize {
-			break
-		}
+	progress, err := store.ListProgressItemIDs(ctx, profileID)
+	if err != nil {
+		return fmt.Errorf("list progress: %w", err)
 	}
-	for offset := 0; ; offset += pageSize {
-		watchlist, err := store.ListWatchlist(ctx, profileID, pageSize, offset)
-		if err != nil {
-			return fmt.Errorf("list watchlist: %w", err)
-		}
-		for _, entry := range watchlist {
-			itemIDs[entry.MediaItemID] = struct{}{}
-		}
-		if len(watchlist) < pageSize {
-			break
-		}
-	}
-	for offset := 0; ; offset += pageSize {
-		progress, err := store.ListProgress(ctx, profileID, "", pageSize, offset)
-		if err != nil {
-			return fmt.Errorf("list progress: %w", err)
-		}
-		for _, entry := range progress {
-			itemIDs[entry.MediaItemID] = struct{}{}
-		}
-		if len(progress) < pageSize {
-			break
-		}
+	for _, id := range progress {
+		itemIDs[id] = struct{}{}
 	}
 	// History imports (watch providers, history import runs) may record
 	// watched episodes without any progress row; they are watch relationships
@@ -800,13 +770,16 @@ func (s *System) batchResolveSeries(ctx context.Context, itemIDs map[string]stru
 
 // RetentionStats reports what a retention pass removed.
 type RetentionStats struct {
-	DeliveriesDeleted      int64
-	EventsDeleted          int64
-	StaleEventsDeleted     int64
-	InterestPruned         int64
-	WebhookAttemptsDeleted int64
-	WebPushAttemptsDeleted int64
-	WebPushSubsDeleted     int64
+	DeliveriesDeleted  int64
+	EventsDeleted      int64
+	StaleEventsDeleted int64
+	InterestPruned     int64
+	// WatchlistPromotionsDeleted counts promotion records past the fanout
+	// staleness horizon.
+	WatchlistPromotionsDeleted int64
+	WebhookAttemptsDeleted     int64
+	WebPushAttemptsDeleted     int64
+	WebPushSubsDeleted         int64
 	// UnboundWebPushSubsDeleted counts subscriptions with no recorded login
 	// whose account has no live login and no API key.
 	UnboundWebPushSubsDeleted int64
@@ -823,8 +796,8 @@ type RetentionStats struct {
 
 // RunRetention applies the retention policy: read deliveries past the read
 // window, unread past the unread window, processed release events past the
-// debug window, unprocessed release events past the fanout staleness horizon,
-// inert interest rows, web push subscriptions whose login session ended or, for
+// debug window, unprocessed release events and watchlist promotion records
+// past the fanout staleness horizon, inert interest rows, web push subscriptions whose login session ended or, for
 // one with no recorded login, whose account has no live one, and push
 // registrations whose login ended or, for one with no recorded login, whose
 // device has no live one.
@@ -835,7 +808,7 @@ func (s *System) RunRetention(ctx context.Context) (RetentionStats, error) {
 	unreadCutoff := now.AddDate(0, 0, -s.Settings.UnreadRetentionDays(ctx))
 	eventCutoff := now.AddDate(0, 0, -s.Settings.EventRetentionDays(ctx))
 
-	deleted, err := s.Deliveries.DeleteOld(ctx, readCutoff, unreadCutoff)
+	deleted, err := s.Deliveries.DeleteOld(ctx, readCutoff, unreadCutoff, now.Add(-s.Settings.MaxEventAge(ctx)))
 	if err != nil {
 		return stats, fmt.Errorf("prune deliveries: %w", err)
 	}
@@ -855,6 +828,16 @@ func (s *System) RunRetention(ctx context.Context) (RetentionStats, error) {
 		return stats, fmt.Errorf("prune stale release events: %w", err)
 	}
 	stats.StaleEventsDeleted = staleEvents
+
+	// Watchlist promotion records past the same horizon can no longer make
+	// an arrival (watchlist.Arrivals.PrunePromotions).
+	if s.Fanout != nil && s.Fanout.watchlist != nil && s.Fanout.pool != nil {
+		promotions, err := s.Fanout.watchlist.PrunePromotions(ctx, s.Fanout.pool, now.Add(-s.Settings.MaxEventAge(ctx)))
+		if err != nil {
+			return stats, fmt.Errorf("prune watchlist promotions: %w", err)
+		}
+		stats.WatchlistPromotionsDeleted = promotions
+	}
 
 	pruned, err := s.Interests.PruneInert(ctx)
 	if err != nil {
