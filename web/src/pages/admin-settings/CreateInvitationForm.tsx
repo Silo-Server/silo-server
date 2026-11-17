@@ -29,9 +29,9 @@ import { useAuth } from "@/hooks/useAuth";
 import { useT } from "@/i18n";
 import { invalidEmailMessage, isValidEmail } from "@/lib/email";
 import { cn } from "@/lib/utils";
+import { useMounted } from "@/hooks/useMounted";
 
 import { ClaimLinkBox } from "./InvitationDisplay";
-import { useMounted } from "@/hooks/useMounted";
 import { deliveryMessage } from "./invitationRules";
 import {
   FULL_SCREEN_BOTTOM_CLASS,
