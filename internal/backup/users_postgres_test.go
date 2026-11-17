@@ -1631,6 +1631,65 @@ type sameItems struct{}
 
 func (sameItems) Resolve(_ context.Context, id string) (string, bool, error) { return id, true, nil }
 
+func (d importerSample) batchDocument(n int) json.RawMessage {
+	entries := make([]string, n)
+	for i := range entries {
+		index := strconv.Itoa(i)
+		e := strings.ReplaceAll(d.entry, `"m1"`, `"m`+index+`"`)
+		e = strings.ReplaceAll(e, `"s1"`, `"s`+index+`"`)
+		e = strings.ReplaceAll(e, `"c1"`, `"c`+index+`"`)
+		e = strings.ReplaceAll(e, `"name":"A"`, `"name":"A`+index+`"`)
+		e = strings.ReplaceAll(e, `"library":1,`, `"library":`+strconv.Itoa(i+1)+",")
+		entries[i] = e
+	}
+	return json.RawMessage(d.head + strings.Join(entries, ",") + d.tail)
+}
+
+func checkBatchImportModes(t *testing.T, pool *pgxpool.Pool, owner userdata.Owner, dt userdata.Type, doc json.RawMessage, n int) {
+	t.Helper()
+	for _, mode := range []string{"mapped", "unknown"} {
+		t.Run(mode, func(t *testing.T) {
+			ctx := t.Context()
+			tx, err := pool.Begin(ctx)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() { _ = tx.Rollback(context.Background()) }()
+			counted := &countingTx{Tx: tx}
+			var items userdata.Items = sameItems{}
+			if mode == "unknown" {
+				resolver, err := newItemResolver(ctx, counted, unknownRefs(n), nil)
+				if err != nil {
+					t.Fatal(err)
+				}
+				items = resolver
+			}
+			target := userdata.Target{Owner: owner, Items: items, Now: time.Now(), Untrusted: true,
+				SameServer: true, Library: func(id int) (int, bool) { return id, true }, Profile: func(string) (string, bool) { return "", false },
+				Collections: func(_ context.Context, _ string, ids []string) (map[string]string, error) {
+					out := map[string]string{}
+					for _, id := range ids {
+						out[id] = id
+					}
+					return out, nil
+				}}
+			res, err := dt.Import(ctx, counted, target, doc)
+			if err != nil {
+				t.Fatal(err)
+			}
+			// Collections are created or merged one at a time, by name,
+			// in a few statements each, up to the import's cap of 1,000.
+			limit := 64
+			if dt.ID() == userdata.Collections {
+				limit += 4 * min(n, 1000)
+			}
+			if counted.n > limit {
+				t.Fatalf("%d entries sent %d statements (%+v)", n, counted.n, res)
+			}
+		})
+	}
+}
+
 // TestImportsReadInBatchesDB: an import of any data type's entries sends a
 // bounded number of statements, not one per entry: reads and writes are
 // set-based. Each branch of each importer (importerSamples, one per list
@@ -1647,52 +1706,13 @@ func TestImportsReadInBatchesDB(t *testing.T) {
 	user := testAccount(t, pool, "batch-"+sfx, "h", nil, nil)
 	profile := "batch-" + sfx
 	testProfile(t, pool, user, profile, "Batch", true, "")
+	owner := userdata.Owner{UserID: user, ProfileID: profile}
 	for name, d := range importerSamples {
-		for _, run := range []struct {
-			n       int
-			unknown bool
-		}{{100_000, false}, {1000, false}, {100_000, true}, {1000, true}} {
-			n := run.n
-			mode := "mapped"
-			if run.unknown {
-				mode = "unknown"
-			}
-			t.Run(fmt.Sprintf("%s %d %s", name, n, mode), func(t *testing.T) {
-				id, _, _ := strings.Cut(name, " ")
-				dt, _ := userDataType(id)
-				entries := make([]string, n)
-				for i := range entries {
-					e := strings.ReplaceAll(d.entry, `"m1"`, fmt.Sprintf(`"m%d"`, i))
-					e = strings.ReplaceAll(e, `"s1"`, fmt.Sprintf(`"s%d"`, i))
-					e = strings.ReplaceAll(e, `"c1"`, fmt.Sprintf(`"c%d"`, i))
-					e = strings.ReplaceAll(e, `"name":"A"`, fmt.Sprintf(`"name":"A%d"`, i))
-					e = strings.ReplaceAll(e, `"library":1,`, fmt.Sprintf(`"library":%d,`, i+1))
-					entries[i] = e
-				}
-				doc := json.RawMessage(d.head + strings.Join(entries, ",") + d.tail)
-				tx, err := pool.Begin(ctx)
-				if err != nil {
-					t.Fatal(err)
-				}
-				defer func() { _ = tx.Rollback(context.Background()) }()
-				counted := &countingTx{Tx: tx}
-				var items userdata.Items = sameItems{}
-				if run.unknown {
-					resolver, err := newItemResolver(ctx, counted, unknownRefs(n), nil)
-					if err != nil {
-						t.Fatal(err)
-					}
-					items = resolver
-				}
-				target := userdata.Target{Owner: userdata.Owner{UserID: user, ProfileID: profile}, Items: items, Now: time.Now(), Untrusted: true,
-					SameServer: true, Library: func(id int) (int, bool) { return id, true }, Profile: func(string) (string, bool) { return "", false },
-					Collections: func(_ context.Context, _ string, ids []string) (map[string]string, error) {
-						out := map[string]string{}
-						for _, id := range ids {
-							out[id] = id
-						}
-						return out, nil
-					}}
+		id, _, _ := strings.Cut(name, " ")
+		dt, _ := userDataType(id)
+		for _, n := range []int{100_000, 1000} {
+			t.Run(fmt.Sprintf("%s %d", name, n), func(t *testing.T) {
+				doc := d.batchDocument(n)
 				// A personal list has one sort, whatever collection id an
 				// entry names, so distinct entries are repeats.
 				personal := strings.HasSuffix(name, "watchlist sort") || strings.HasSuffix(name, "favorites sort")
@@ -1704,19 +1724,8 @@ func TestImportsReadInBatchesDB(t *testing.T) {
 				} else if personal {
 					t.Fatalf("%d sorts of one personal list were accepted", n)
 				}
-				res, err := dt.Import(ctx, counted, target, doc)
-				if err != nil {
-					t.Fatal(err)
-				}
-				// Collections are created or merged one at a time, by name,
-				// in a few statements each, up to the import's cap of 1,000.
-				limit := 64
-				if id == userdata.Collections {
-					limit += 4 * min(n, 1000)
-				}
-				if counted.n > limit {
-					t.Fatalf("%d entries sent %d statements (%+v)", n, counted.n, res)
-				}
+
+				checkBatchImportModes(t, pool, owner, dt, doc, n)
 			})
 		}
 	}
