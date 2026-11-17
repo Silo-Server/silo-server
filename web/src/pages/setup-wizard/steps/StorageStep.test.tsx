@@ -360,6 +360,21 @@ describe("StorageStep", () => {
       await waitFor(() => expect(markDone).toHaveBeenCalledWith("storage"));
     });
 
+    it("keeps the storage choice locked while Silo restarts", async () => {
+      fetchStatusMock.mockResolvedValue(pendingStorage);
+      const { setValue } = setup({ dirtyKeys: ["s3.public_bucket"] });
+      render(<StorageStep />);
+
+      await userEvent.click(screen.getByRole("button", { name: /Continue/ }));
+      await waitFor(() => expect(restartMock).toHaveBeenCalledOnce());
+      // Radix opens its select on pointerdown, which a disabled fieldset does not stop.
+      await userEvent.click(screen.getByRole("combobox", { name: "Storage" }));
+      const s3 = screen.queryByRole("option", { name: "S3" });
+      if (s3) await userEvent.click(s3);
+
+      expect(setValue).not.toHaveBeenCalledWith("artwork.storage_backend", "s3");
+    });
+
     it("applies a pending storage change when the admin skips", async () => {
       fetchStatusMock
         .mockResolvedValueOnce(pendingStorage)

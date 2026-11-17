@@ -248,6 +248,8 @@ function S3Fields({
             value={urlAuth}
             onChange={(v) => form.setValue("s3.public_url_auth", v)}
             options={S3_URL_AUTH_OPTIONS.map((o) => ({ value: o.value, label: t(o.label) }))}
+            // A disabled fieldset does not stop a Radix select from opening.
+            disabled={disabled}
           />
           {urlAuth !== "presigned" ? (
             <SettingField
@@ -460,7 +462,8 @@ export function StorageStep() {
               { value: "local", label: t("web.setup.storage.backendLocal") },
               { value: "s3", label: "S3" },
             ]}
-            disabled={locationStatusUnavailable || artworkLocked}
+            // A disabled fieldset does not stop a Radix select from opening.
+            disabled={busy || locationStatusUnavailable || artworkLocked}
             description={
               locationStatusUnavailable
                 ? t("web.setup.storage.lockUnknownBackend")
