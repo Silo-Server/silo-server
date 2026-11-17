@@ -1167,9 +1167,10 @@ func coldOpenSeason() []Candidate {
 }
 
 // A chapter intro the file's chapters no longer produce is withdrawn, and so
-// is a copy of it on another version of the episode once no version produces
-// one. Results the chapters still produce, other detectors' results, and
-// markers from other sources stay.
+// is a copy of it on another version of the episode once no version it could
+// be copied from produces one. Results the chapters still produce, other
+// detectors' results, and markers from other sources stay. The silence
+// backfill withdraws nothing: it does not compare season groups again.
 func TestChapterIntrosWithdrawStaleChapterResults(t *testing.T) {
 	scanner, manual := models.MarkerSourceScanner, models.MarkerSourceManual
 	season := coldOpenSeason()
@@ -1180,8 +1181,10 @@ func TestChapterIntrosWithdrawStaleChapterResults(t *testing.T) {
 	}
 	noChapters := Candidate{SeasonID: "season1", MediaFolderID: 7, DurationSeconds: 1422}
 	candidates := append(season,
-		withIntro(noChapters, 11, "ep10", EpisodeVersionCopyAlgorithm, &scanner),  // copy of episode 10's cold open
-		withIntro(noChapters, 12, "ep8", EpisodeVersionCopyAlgorithm, &scanner),   // copy of episode 8's OP
+		withIntro(noChapters, 11, "ep10", EpisodeVersionCopyAlgorithm, &scanner), // copy of episode 10's cold open
+		withIntro(noChapters, 12, "ep8", EpisodeVersionCopyAlgorithm, &scanner),  // copy of episode 8's OP
+		withIntro(Candidate{SeasonID: "season1", MediaFolderID: 7, DurationSeconds: 1300},
+			13, "ep8", EpisodeVersionCopyAlgorithm, &scanner), // copy on a version episode 8's OP is too long for
 		withIntro(noChapters, 20, "ep20", ChromaprintAlgorithm, &scanner),         // another detector
 		withIntro(season[2], 21, "ep21", ChapterSilenceAlgorithm, &manual),        // another source
 		withIntro(season[2], 22, "ep22", legacyChapterSilenceAlgorithm, &scanner), // older chapter result
@@ -1189,10 +1192,11 @@ func TestChapterIntrosWithdrawStaleChapterResults(t *testing.T) {
 	for _, tc := range []struct {
 		name          string
 		allowCopy     bool
+		withdraw      bool
 		wantWithdrawn []int
 	}{
-		{name: "episode pass", allowCopy: true, wantWithdrawn: []int{10, 11, 22}},
-		{name: "silence backfill leaves copies", wantWithdrawn: []int{10, 22}},
+		{name: "episode pass", allowCopy: true, withdraw: true, wantWithdrawn: []int{10, 11, 13, 22}},
+		{name: "silence backfill"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			repo := &fakeIntroRepository{}
@@ -1201,6 +1205,7 @@ func TestChapterIntrosWithdrawStaleChapterResults(t *testing.T) {
 			_, summary, withdrawn := analyzer.processChapterCandidates(context.Background(), candidates, chapterProcessingOptions{
 				allowEpisodeCopy: tc.allowCopy,
 				openingNamed:     openingNamedGroups(candidates),
+				withdrawStale:    tc.withdraw,
 			})
 			var got []int
 			for _, w := range repo.withdrawals {

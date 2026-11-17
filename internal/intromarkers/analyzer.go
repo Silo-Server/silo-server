@@ -561,6 +561,7 @@ func (a *Analyzer) checkEpisodePage(ctx context.Context, kinds EpisodeMarkerKind
 		_, chapterSummary, withdrawnIntros = a.processChapterCandidates(ctx, candidates, chapterProcessingOptions{
 			allowEpisodeCopy: true,
 			openingNamed:     openingNamedGroups(candidates),
+			withdrawStale:    true,
 		})
 		mergeRunSummary(&summary, chapterSummary)
 		if ctx.Err() != nil {
@@ -716,6 +717,7 @@ func (a *Analyzer) analyzeEpisode(ctx context.Context, episodeID string, kinds E
 			forceExistingScanner: true,
 			allowEpisodeCopy:     true,
 			openingNamed:         openingNamed,
+			withdrawStale:        true,
 		})
 		mergeRunSummary(&summary, chapterSummary)
 		if err := ctx.Err(); err != nil {
@@ -835,9 +837,14 @@ type chapterProcessingOptions struct {
 	deadline             time.Time
 	// openingNamed holds the season group keys whose files name an opening
 	// song chapter (openingNamedGroups), where an Intro chapter is a cold
-	// open. Every caller passes the whole season groups of its candidates,
-	// so a file's chapters read the same in every pass.
+	// open. The episode passes pass the whole season groups of their
+	// candidates, so a file's chapters read the same in each of them.
 	openingNamed map[string]bool
+	// withdrawStale withdraws intros placed from chapters that no longer
+	// produce one (staleChapterIntro). Only the episode passes set it: they
+	// read chapters against the whole season group and compare the groups of
+	// the files they withdraw again.
+	withdrawStale bool
 }
 
 type chapterSourceMarker struct {
@@ -858,7 +865,7 @@ func (a *Analyzer) processChapterCandidates(ctx context.Context, candidates []Ca
 	directByEpisode := map[string]chapterSourceMarker{}
 	directFileIDs := map[int]struct{}{}
 	withdrawn := map[int]struct{}{}
-	detected, found, episodeHasChapter := detectChapterIntros(candidates, opts.openingNamed)
+	detected, found, chapterSources := detectChapterIntros(candidates, opts.openingNamed)
 
 	for i, candidate := range candidates {
 		if err := ctx.Err(); err != nil {
@@ -869,7 +876,7 @@ func (a *Analyzer) processChapterCandidates(ctx context.Context, candidates []Ca
 			return remaining, summary, withdrawn
 		}
 		segment, ok := detected[i], found[i]
-		copyStale := opts.allowEpisodeCopy && !episodeHasChapter[candidate.EpisodeID]
+		copyStale := opts.allowEpisodeCopy && !hasCompatibleVersion(chapterSources[candidate.EpisodeID], candidate)
 		if !a.chapterMayPlaceIntro(ctx, candidate, segment, ok, copyStale, opts, &summary, withdrawn) {
 			continue
 		}
@@ -915,26 +922,37 @@ func (a *Analyzer) processChapterCandidates(ctx context.Context, candidates []Ca
 }
 
 // detectChapterIntros runs DetectChapterIntro over candidates, each read
-// against its season group's openingNamed entry, and reports which episodes
-// have a file whose chapters produce an intro.
-func detectChapterIntros(candidates []Candidate, openingNamed map[string]bool) ([]Segment, []bool, map[string]bool) {
+// against its season group's openingNamed entry, and returns by episode the
+// files whose chapters produce an intro.
+func detectChapterIntros(candidates []Candidate, openingNamed map[string]bool) ([]Segment, []bool, map[string][]Candidate) {
 	detected := make([]Segment, len(candidates))
 	found := make([]bool, len(candidates))
-	episodeHasChapter := map[string]bool{}
+	sources := map[string][]Candidate{}
 	for i, candidate := range candidates {
 		detected[i], found[i] = DetectChapterIntro(candidate.Chapters, openingNamed[seasonGroupKey(candidate)])
 		if found[i] {
-			episodeHasChapter[candidate.EpisodeID] = true
+			sources[candidate.EpisodeID] = append(sources[candidate.EpisodeID], candidate)
 		}
 	}
-	return detected, found, episodeHasChapter
+	return detected, found, sources
+}
+
+// hasCompatibleVersion reports whether any of sources is a version of
+// target's episode an intro may be copied from (compatibleEpisodeVersionDuration).
+func hasCompatibleVersion(sources []Candidate, target Candidate) bool {
+	for _, source := range sources {
+		if source.FileID != target.FileID && compatibleEpisodeVersionDuration(source, target) {
+			return true
+		}
+	}
+	return false
 }
 
 // chapterMayPlaceIntro reports whether the chapter pass may go on with
 // candidate: place its chapter intro when ok, or hand it on when not. A
 // stored intro its chapters no longer produce is withdrawn first (see
-// staleChapterIntro) and its file added to withdrawn; copyStale extends that
-// to a version copy.
+// staleChapterIntro) when opts.withdrawStale is set, and its file added to
+// withdrawn; copyStale extends that to a version copy.
 func (a *Analyzer) chapterMayPlaceIntro(ctx context.Context, candidate Candidate, segment Segment, ok, copyStale bool, opts chapterProcessingOptions, summary *RunSummary, withdrawn map[int]struct{}) bool {
 	if candidate.hasHigherPriority(kindIntro, models.MarkerSourceScanner) {
 		// Only an online intro rated below the file's own chapter gives
@@ -946,7 +964,7 @@ func (a *Analyzer) chapterMayPlaceIntro(ctx context.Context, candidate Candidate
 	if hasIntro && effectiveSource != "" && effectiveSource != models.MarkerSourceScanner {
 		return false
 	}
-	if hasIntro && !ok && staleChapterIntro(candidate, copyStale) && a.withdrawChapterIntro(ctx, candidate, summary) {
+	if opts.withdrawStale && hasIntro && !ok && staleChapterIntro(candidate, copyStale) && a.withdrawChapterIntro(ctx, candidate, summary) {
 		withdrawn[candidate.FileID] = struct{}{}
 		hasIntro = false
 	}
@@ -1181,16 +1199,15 @@ func (a *Analyzer) runSilenceBackfill(ctx context.Context, kinds EpisodeMarkerKi
 	if len(candidates) == 0 {
 		return summary, nil
 	}
-	openingNamed, err := a.loadOpeningNamedGroups(ctx, candidates, map[string][]Candidate{})
-	if err != nil {
-		return summary, err
-	}
 	// Backfill files are independent: no episode-version copies are made, so
-	// the candidates split across workers.
+	// the candidates split across workers. The episode pass that runs just
+	// before reads each file against its season group and withdraws the
+	// chapter intros its chapters no longer produce, so the backfill lists
+	// only intros that pass kept and needs neither the season groups nor
+	// withdrawals of its own.
 	opts := chapterProcessingOptions{
 		forceExistingScanner: true,
 		deadline:             time.Now().Add(cfg.SilenceBackfillMaxDuration),
-		openingNamed:         openingNamed,
 	}
 	workers := min(len(candidates), a.workerCount())
 	var (
@@ -1572,8 +1589,8 @@ var fileChapterIntroAlgorithms = []string{ChapterAlgorithm, ChapterSilenceAlgori
 
 // staleChapterIntro reports whether a file whose chapters produce no intro
 // holds an intro local analysis placed from chapters: its own, or, when
-// copyStale is set because no version of its episode produces one either, a
-// copy from another version.
+// copyStale is set because no version of its episode it could be copied from
+// produces one either, a copy from another version.
 func staleChapterIntro(candidate Candidate, copyStale bool) bool {
 	stored := candidate.marker(kindIntro)
 	if !stored.present() || stored.Algorithm == nil || candidate.effectiveSource(kindIntro) != models.MarkerSourceScanner {
