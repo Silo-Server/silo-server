@@ -313,9 +313,10 @@ export default defineConfig(({ mode }) => {
       // vmThreads workers are threads in one process, and vitest's default
       // recycle limit is total RAM divided by the worker count, so together
       // they may grow to nearly all of the machine's memory. Four workers, as
-      // CI runs, each recycled at 1.5GB keep a local run near 8GB.
+      // CI runs, each recycled at 512MB keep the full suite under 4GB; a
+      // lower limit recycles so often that the run slows down.
       maxWorkers: 4,
-      vmMemoryLimit: "1.5GB",
+      vmMemoryLimit: "512MB",
       // Each project resets the inherited maxWorkers to 0 (unset). Vitest
       // prefers a project's own value over the root one, and --maxWorkers
       // reaches only the root, so an inherited 4 would silently override it.
