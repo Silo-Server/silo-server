@@ -226,7 +226,9 @@ func (e *permanentError) Unwrap() error { return e.err }
 type HTTPError struct {
 	StatusCode int
 	Code       string
-	message    string
+	// Param is the request field an OpenAI-style error names, if any.
+	Param   string
+	message string
 }
 
 func (e *HTTPError) Error() string { return e.message }
@@ -313,7 +315,8 @@ func (c *Client) doReaderWithRetry(ctx context.Context, httpClient *http.Client,
 			continue
 		case resp.StatusCode != http.StatusOK:
 			// 4xx other than 429: not retryable.
-			return &HTTPError{StatusCode: resp.StatusCode, Code: responseErrorCode(respBody), message: fmt.Sprintf("%s returned %d: %s", label, resp.StatusCode, Truncate(string(respBody), 300))}
+			code, param := responseErrorFields(respBody)
+			return &HTTPError{StatusCode: resp.StatusCode, Code: code, Param: param, message: fmt.Sprintf("%s returned %d: %s", label, resp.StatusCode, Truncate(string(respBody), 300))}
 		}
 	}
 
@@ -323,14 +326,18 @@ func (c *Client) doReaderWithRetry(ctx context.Context, httpClient *http.Client,
 	return lastErr
 }
 
-func responseErrorCode(body []byte) string {
+// responseErrorFields returns the string code and param of an OpenAI-style
+// error body. Some gateways send a numeric code; it reads as empty.
+func responseErrorFields(body []byte) (code, param string) {
 	var response struct {
 		Error struct {
-			Code string `json:"code"`
+			Code  json.RawMessage `json:"code"`
+			Param string          `json:"param"`
 		} `json:"error"`
 	}
 	_ = json.Unmarshal(body, &response)
-	return response.Error.Code
+	_ = json.Unmarshal(response.Error.Code, &code)
+	return code, response.Error.Param
 }
 
 func isExhaustedQuota(body []byte) bool {
