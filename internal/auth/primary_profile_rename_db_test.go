@@ -55,8 +55,9 @@ func TestUserRepositoryUsernameChangeRenamesPrimaryProfileDB(t *testing.T) {
 			primary: "Mum", other: ident("d", "old"), wantPrimary: "Mum",
 		},
 		{
-			name: "taken name keeps primary", key: "e", oldUsername: ident("e", "old"), newUsername: ident("e", "new"),
-			primary: ident("e", "old"), other: strings.ToUpper(ident("e", "new")), wantPrimary: ident("e", "old"),
+			// The profile API counts final sigma and sigma as the same letter.
+			name: "taken name keeps primary", key: "e", oldUsername: ident("e", "old"), newUsername: ident("e", "newσ"),
+			primary: ident("e", "old"), other: strings.ToUpper(ident("e", "new")) + "ς", wantPrimary: ident("e", "old"),
 		},
 		{
 			// A restored email-only account has a NULL username.

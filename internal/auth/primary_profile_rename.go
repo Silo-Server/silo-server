@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -34,25 +35,46 @@ func updatePreviousUsername(ctx context.Context, db interface {
 // before its profile, the order deleting an account takes them in. A primary
 // profile the household renamed keeps its name, and so does one whose new
 // name another profile on the account already uses, which the profile API
-// would refuse. Names compare trimmed and case-insensitively, as that API's
-// conflict check does. Profiles kept in the SQLite user store are not in
+// would refuse. Profiles kept in the SQLite user store are not in
 // user_profiles, so they keep their names.
 func renamePrimaryProfileWithAccount(ctx context.Context, db interface {
 	Exec(context.Context, string, ...any) (pgconn.CommandTag, error)
+	QueryRow(context.Context, string, ...any) pgx.Row
 }, id int, previous, next string) error {
+	var profileID, name string
+	var others []string
+	err := db.QueryRow(ctx, `
+		SELECT p.id, p.name, ARRAY(
+			SELECT o.name FROM user_profiles o WHERE o.user_id = p.user_id AND o.id <> p.id
+		)
+		FROM user_profiles p
+		WHERE p.user_id = $1 AND p.is_primary`, id).Scan(&profileID, &name, &others)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("reading profiles for a username change: %w", err)
+	}
+	if !sameProfileName(name, previous) {
+		return nil
+	}
+	for _, other := range others {
+		if sameProfileName(other, next) {
+			return nil
+		}
+	}
+	// The name in the WHERE keeps a rename the household saved since the read.
 	if _, err := db.Exec(ctx, `
-		UPDATE user_profiles p
-		SET name = $3, updated_at = NOW()
-		WHERE p.user_id = $1
-		  AND p.is_primary
-		  AND lower(btrim(p.name)) = lower(btrim($2))
-		  AND NOT EXISTS (
-			SELECT 1 FROM user_profiles o
-			WHERE o.user_id = p.user_id
-			  AND o.id <> p.id
-			  AND lower(btrim(o.name)) = lower(btrim($3))
-		  )`, id, previous, next); err != nil {
+		UPDATE user_profiles SET name = $3, updated_at = NOW()
+		WHERE user_id = $1 AND id = $2 AND name = $4`, id, profileID, next, name); err != nil {
 		return fmt.Errorf("renaming primary profile after a username change: %w", err)
 	}
 	return nil
+}
+
+// sameProfileName reports whether two profile names count as the same, by the
+// rule of the profile API's name conflict check (profileNameConflicts in
+// internal/api/handlers): trimmed and Unicode case-folded.
+func sameProfileName(a, b string) bool {
+	return strings.EqualFold(strings.TrimSpace(a), strings.TrimSpace(b))
 }
