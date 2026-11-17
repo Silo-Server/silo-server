@@ -8,7 +8,7 @@ pre-submission gate are in [CONTRIBUTING.md](CONTRIBUTING.md).
 
 - Git, Make, and OpenSSL
 - Docker Engine or Docker Desktop with Docker Compose 2.24+ (local services and `make verify-prometheus-rules`)
-- Go 1.26.4+
+- Go 1.27.4+
 - Node.js 24+ with pnpm 10.32.1. The managed Jellyfin Web installer (`make jellyfin-web`,
   `silo compat-web install`, or the admin settings) also needs Node.js 24+ for Jellyfin Web 12.x.
 - PostgreSQL 18 with pgvector, and the PostgreSQL 18 client tools (`pg_dump`, `pg_restore`)
