@@ -48,7 +48,9 @@ type TranscodeStartRequest struct {
 	SessionID string `json:"session_id"`
 	// StartID is an opaque id the core picks for this one start. A release
 	// that names it ends the job only while this start's job still runs, so a
-	// late release cannot end a newer start under the same transport id.
+	// late release cannot end a newer start under the same transport id. A
+	// start that carries one answers 409 instead of replacing a job another
+	// start with a start_id published.
 	StartID string `json:"start_id,omitempty"`
 	// PlaybackSessionID, UserID, ProfileID and MediaFileID are the playback
 	// session the transcode serves. The node files its session record and
@@ -1824,7 +1826,18 @@ func (s *Server) handleStart(w http.ResponseWriter, r *http.Request) {
 	// Start the replacement before touching an existing session. A transient
 	s.mu.Lock()
 	_, hasExisting := s.sessions[req.SessionID]
+	publishedBy := s.identities[req.SessionID].startID
 	s.mu.Unlock()
+	// A move's start (one with a start_id) leaves a job another move's start
+	// published. When two API servers move one transport here at once, the
+	// loser's commit fails and it releases its own start; had that start
+	// replaced the winner's job, the node would run nothing for the transport.
+	// A fresh start or an audio switch names no start and still replaces it.
+	if hasExisting && req.StartID != "" && publishedBy != "" && publishedBy != req.StartID {
+		unlock()
+		http.Error(w, "transport already started here by another move", http.StatusConflict)
+		return
+	}
 	replacementDir := ""
 	published := false
 	defer func() {

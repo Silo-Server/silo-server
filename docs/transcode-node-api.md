@@ -60,7 +60,12 @@ that recipe, `require_ready`, and a start position resumed at the requested
 segment, plus a fresh `start_id`. The response is checked with the same
 attestations as a fresh start, and a node that fails them is released with
 `fence=0&start_id=<that id>` and skipped, so the release cannot end a later
-start of the same transport there. The API then sends a
+start of the same transport there. A start with a `start_id` does not replace
+a job that another start with a different `start_id` published under the same
+`session_id`: the node answers 409 and the API tries the next node. Two API
+servers that move one transport to the same node at once therefore leave the
+first move's job running. A start without `start_id` (a fresh start or an
+audio switch) still replaces any job. The API then sends a
 best-effort release (`DELETE /transcode/{session_id}?fence=0`, no `start_id`)
 to the node it left, which ends only the job running there when the release
 arrives. See

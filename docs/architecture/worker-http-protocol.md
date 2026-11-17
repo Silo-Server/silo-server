@@ -289,6 +289,10 @@ with `start_id`, the job published by the start that carried that
 `start_id` in `POST /transcode/start`; without it, the job running when the
 release arrived, not one a start or rebuild published while it waited for the
 lifecycle lock. A fenced stop ends whatever job runs under the ID.
+A `POST /transcode/start` that carries a `start_id` answers 409 instead of
+replacing a job another start with a different `start_id` published, so a
+move that loses a race to the same node cannot replace and then release the
+winner's job.
 Progressive remux keeps its own fence against a new `/remux` request, which
 every fenced stop installs too, since a stop can reach a remux between its GETs.
 The API deletes the transport's stored recipe before it stops a node, unless
