@@ -2683,6 +2683,14 @@ func (h *PlaybackHandler) startPlaybackApplicationV3(r *http.Request, body []byt
 	// virtual path. It is kept so the post-commit spawn can read the deferred
 	// probe the resolve handed back (see resolved.DeferredProbe).
 	var resolved resolvedVirtualPlaybackSource
+	// persistCtx carries every terminal decision this start has to store. It is
+	// the request context, captured before the start phase below narrows it:
+	// the phase deadline is precisely what expires first when a start runs out
+	// of time, and a terminal saved on that dead context fails deterministically
+	// — no attempt row, so the retry re-walks the whole resolve into the same
+	// wall. The replan path persists its terminal on the request context the
+	// same way.
+	persistCtx := r.Context()
 	// Virtual sources are provider-neutral URIs, not FFmpeg inputs. Resolve and
 	// probe them through the virtual provider before the generic probe repair
 	// path, which only understands local/HTTP media files.
@@ -2769,9 +2777,9 @@ func (h *PlaybackHandler) startPlaybackApplicationV3(r *http.Request, body []byt
 			}
 			req.FileID = termFileID
 			terminal := virtualStartUnresolvedTerminalV3(resolveErr)
-			response, persistErr := h.persistTerminalStartDecisionV3(r.Context(), userID, profileID, req, requestDigests, termFileID, termFileID, terminal)
+			response, persistErr := h.persistTerminalStartDecisionV3(persistCtx, userID, profileID, req, requestDigests, termFileID, termFileID, terminal)
 			if persistErr != nil {
-				return playback.DecisionResponseV3{}, startTerminalPersistOperationErrorV3(r.Context(), persistErr, terminal.Terminal != nil && terminal.Terminal.Retryable, nil)
+				return playback.DecisionResponseV3{}, startTerminalPersistOperationErrorV3(persistCtx, persistErr, terminalStartFailureV3(terminal))
 			}
 			return response, nil
 		}
@@ -2985,9 +2993,9 @@ func (h *PlaybackHandler) startPlaybackApplicationV3(r *http.Request, body []byt
 			"quality_preference", req.QualityPreference,
 		}, clientInfo.LogAttrs()...)...)
 		terminal := playback.NewTerminalResponseFromTerminalV3(result.Terminal)
-		response, persistErr := h.persistTerminalStartDecisionV3(r.Context(), userID, profileID, req, requestDigests, requestedFile.ID, effectiveFile.ID, terminal)
+		response, persistErr := h.persistTerminalStartDecisionV3(persistCtx, userID, profileID, req, requestDigests, requestedFile.ID, effectiveFile.ID, terminal)
 		if persistErr != nil {
-			return playback.DecisionResponseV3{}, startTerminalPersistOperationErrorV3(r.Context(), persistErr, terminal.Terminal != nil && terminal.Terminal.Retryable, nil)
+			return playback.DecisionResponseV3{}, startTerminalPersistOperationErrorV3(persistCtx, persistErr, terminalStartFailureV3(terminal))
 		}
 		if response.Terminal != nil {
 			h.enqueueRouteEventV3(playback.RouteEventRecordV3{RouteEventV3: playback.RouteEventV3{ProtocolVersion: playback.ProtocolV3, PlaybackAttemptID: req.PlaybackAttemptID, Event: playback.RouteEventTerminalV3, FallbackReason: response.Terminal.Reason, OutputContextID: req.ClientPlaybackContext.Output.OutputContextID}, UserID: userID, ProfileID: profileID, ClientName: clientInfo.Name, ClientVersion: clientInfo.Version, ClientBuild: clientInfo.Build, ClientChannel: clientInfo.Channel, ClientModel: req.ClientPlaybackContext.Device.Model})
@@ -3011,9 +3019,9 @@ func (h *PlaybackHandler) startPlaybackApplicationV3(r *http.Request, body []byt
 			return input
 		}, result)
 	if escalateErr != nil {
-		persistedResponse, persistErr := h.startFailureDecisionV3(r.Context(), userID, profileID, req, requestDigests, requestedFile.ID, effectiveFile.ID, escalateErr)
+		persistedResponse, persistErr := h.startFailureDecisionV3(persistCtx, userID, profileID, req, requestDigests, requestedFile.ID, effectiveFile.ID, escalateErr)
 		if persistErr != nil {
-			return playback.DecisionResponseV3{}, startTerminalPersistOperationErrorV3(r.Context(), persistErr, escalateErr.retryable, escalateErr)
+			return playback.DecisionResponseV3{}, startTerminalPersistOperationErrorV3(persistCtx, persistErr, escalateErr)
 		}
 		return persistedResponse, nil
 	}
@@ -3073,9 +3081,9 @@ func (h *PlaybackHandler) startPlaybackApplicationV3(r *http.Request, body []byt
 				}
 			}
 			terminal := sourceDecodeFailedTerminalResponseV3(req.FileSelection)
-			persisted, persistErr := h.persistTerminalStartDecisionV3(r.Context(), userID, profileID, req, requestDigests, requestedFile.ID, effectiveFile.ID, terminal)
+			persisted, persistErr := h.persistTerminalStartDecisionV3(persistCtx, userID, profileID, req, requestDigests, requestedFile.ID, effectiveFile.ID, terminal)
 			if persistErr != nil {
-				return playback.DecisionResponseV3{}, startTerminalPersistOperationErrorV3(r.Context(), persistErr, terminal.Terminal != nil && terminal.Terminal.Retryable, nil)
+				return playback.DecisionResponseV3{}, startTerminalPersistOperationErrorV3(persistCtx, persistErr, terminalStartFailureV3(terminal))
 			}
 			return persisted, nil
 		}
@@ -3226,9 +3234,9 @@ func (h *PlaybackHandler) startPlaybackApplicationV3(r *http.Request, body []byt
 		default:
 			slog.InfoContext(r.Context(), "protocol v3 planned playback failed", failureAttrs...)
 		}
-		persistedResponse, persistErr := h.startFailureDecisionV3(r.Context(), userID, profileID, req, requestDigests, requestedFile.ID, effectiveFile.ID, statusErr)
+		persistedResponse, persistErr := h.startFailureDecisionV3(persistCtx, userID, profileID, req, requestDigests, requestedFile.ID, effectiveFile.ID, statusErr)
 		if persistErr != nil {
-			return playback.DecisionResponseV3{}, startTerminalPersistOperationErrorV3(r.Context(), persistErr, statusErr.retryable, statusErr)
+			return playback.DecisionResponseV3{}, startTerminalPersistOperationErrorV3(persistCtx, persistErr, statusErr)
 		}
 		return persistedResponse, nil
 	}
@@ -15767,9 +15775,29 @@ func (h *PlaybackHandler) persistTerminalStartDecisionV3(ctx context.Context, us
 	return existingResponse, nil
 }
 
+// startFailureDecisionV3 stores the transport failure as the attempt's durable
+// terminal and answers it. A server-side fault is not a verdict: a store, session
+// manager or commit fault says nothing about the request or the release, so
+// publishing it as a terminal would tell the client never to retry a condition
+// that is retryable by definition. Answer the same retryable 503 the failed
+// terminal save maps to instead, and store nothing — there is no decision to
+// replay, and a retry re-derives it from zero either way.
 func (h *PlaybackHandler) startFailureDecisionV3(ctx context.Context, userID int, profileID string, req playback.StartRequestV3, requestDigests playbackStartRequestDigestsV3, requestedFileID, effectiveFileID int, failure *transportErrorV3) (playback.DecisionResponseV3, error) {
+	if failure.reason == policyErrorInternal {
+		return playback.DecisionResponseV3{}, retryableStartOperationErrorV3(failure)
+	}
 	response := playback.NewTerminalResponseV3(failure.reason, failure.message, failure.retryable)
 	return h.persistTerminalStartDecisionV3(ctx, userID, profileID, req, requestDigests, requestedFileID, effectiveFileID, response)
+}
+
+// terminalStartFailureV3 describes the start verdict a terminal response
+// carries, so a failed save of that verdict can answer in its words instead of a
+// generic temporary-unavailable message.
+func terminalStartFailureV3(response playback.DecisionResponseV3) *transportErrorV3 {
+	if response.Terminal == nil {
+		return nil
+	}
+	return &transportErrorV3{reason: response.Terminal.Reason, message: response.Terminal.Message, retryable: response.Terminal.Retryable}
 }
 
 // startTerminalPersistOperationErrorV3 maps a failed terminal-start save to the
@@ -15779,14 +15807,16 @@ func (h *PlaybackHandler) startFailureDecisionV3(ctx context.Context, userID int
 // not the playback verdict. A retryable failure (or a save cut off only by that
 // budget) must stay retryable and advertise Retry-After instead of collapsing
 // into a 500 internal_error; only a genuine store fault on a non-retryable
-// verdict keeps the 500.
-func startTerminalPersistOperationErrorV3(ctx context.Context, persistErr error, retryable bool, failure *transportErrorV3) error {
+// verdict keeps the 500. failure is the verdict that could not be stored, and is
+// nil only when the caller has none to name.
+func startTerminalPersistOperationErrorV3(ctx context.Context, persistErr error, failure *transportErrorV3) error {
 	if e, ok := errors.AsType[*PlaybackOperationError](persistErr); ok {
 		return e
 	}
 	if errors.Is(persistErr, playback.ErrIdempotencyKeyReusedV3) {
 		return playbackPersistenceOperationError(persistErr)
 	}
+	retryable := failure != nil && failure.retryable
 	slog.WarnContext(ctx, "playback start terminal persist failed",
 		"component", "api", "retryable", retryable, "error", persistErr)
 	if !retryable && !errors.Is(persistErr, context.DeadlineExceeded) && !errors.Is(persistErr, context.Canceled) {
@@ -15810,7 +15840,12 @@ func retryableStartOperationErrorV3(failure *transportErrorV3) *PlaybackOperatio
 		}
 	}
 	message := "Playback is temporarily unavailable; retry shortly"
-	if failure != nil && failure.retryable && strings.TrimSpace(failure.message) != "" {
+	// A verdict's own words name the condition a retry would meet again, so they
+	// carry the answer even when the verdict itself was final: the client is
+	// being asked to retry a save, not the verdict. A server fault keeps the
+	// generic text — its message describes our plumbing, not the viewer's next
+	// step.
+	if failure != nil && failure.reason != policyErrorInternal && strings.TrimSpace(failure.message) != "" {
 		message = failure.message
 	}
 	if failure != nil && errors.Is(failure.cause, context.DeadlineExceeded) {

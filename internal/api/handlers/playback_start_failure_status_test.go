@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/noderouting"
@@ -25,6 +26,114 @@ type failingSaveAttemptPlanStoreV3 struct {
 
 func (s *failingSaveAttemptPlanStoreV3) SaveAttempt(context.Context, playback.AttemptRecordV3) error {
 	return s.err
+}
+
+// contextCheckingSaveAttemptPlanStoreV3 fails a save whose context is already
+// done, the way a database round-trip does. The memory store ignores the
+// context, so without this seam a test cannot tell a live persistence context
+// from the expired start phase.
+type contextCheckingSaveAttemptPlanStoreV3 struct {
+	playback.PlanStoreV3
+}
+
+func (s contextCheckingSaveAttemptPlanStoreV3) SaveAttempt(ctx context.Context, record playback.AttemptRecordV3) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	return s.PlanStoreV3.SaveAttempt(ctx, record)
+}
+
+// A start whose own commit fails on the server side — the plan store cannot
+// save the attempt — is a transient server fault, not a verdict about the
+// request or the release. It used to be published as a 201 terminal with
+// retryable:false, telling the client never to retry a condition that is
+// retryable by definition; it must answer the retryable 503 instead.
+func TestHandleStartPlaybackV3ServerFaultAnswersRetryableNotTerminal(t *testing.T) {
+	source := v3HandlerFixtureFile(t)
+	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0), mapPlaybackFileResolver{files: map[int]*models.MediaFile{source.ID: source}})
+	handler.ItemAccess = allowAllPlaybackItemAccess{}
+	handler.PlanStoreV3 = &failingSaveAttemptPlanStoreV3{PlanStoreV3: handler.PlanStoreV3, err: errors.New("database unavailable")}
+
+	rr := httptest.NewRecorder()
+	handler.HandleStartPlayback(rr, httptest.NewRequest(
+		http.MethodPost,
+		"/api/v1/playback/start",
+		strings.NewReader(marshalV3StartRequest(t, v3HandlerStartRequest())),
+	).WithContext(newAuthorizedPlaybackContext()))
+
+	if rr.Code != http.StatusServiceUnavailable {
+		t.Fatalf("start status = %d, want 503, body = %s", rr.Code, rr.Body.String())
+	}
+	if got := rr.Header().Get("Retry-After"); got != "5" {
+		t.Fatalf("Retry-After = %q, want 5", got)
+	}
+	var body struct {
+		Error string `json:"error"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode body: %v", err)
+	}
+	if body.Error != "dependency_unavailable" {
+		t.Fatalf("error code = %q, want dependency_unavailable", body.Error)
+	}
+	if strings.Contains(rr.Body.String(), `"outcome"`) {
+		t.Fatalf("body = %s, want no playback verdict for a server fault", rr.Body.String())
+	}
+}
+
+// A start that runs out of its phase budget must still store the verdict it
+// reached. The save used to run on the expired phase context, fail
+// deterministically, and answer 503 with no attempt row — so the retry re-walked
+// the whole resolve into the same wall. The record must exist after the
+// response.
+func TestHandleStartPlaybackV3PersistsTerminalAfterPhaseBudgetExpires(t *testing.T) {
+	source := v3HandlerFixtureFile(t)
+	source.ID = 900
+	source.ContentID = "movie-phase-budget"
+	source.FilePath = "virtual://movie/movie-phase-budget?result=pin"
+	source.VirtualOwnerInstallationID = 5
+	// No probe stamp, so the start must go through the virtual resolve: that is
+	// the branch that narrows the request onto the start phase.
+	source.ProbeUpdatedAt = nil
+
+	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0), mapPlaybackFileResolver{files: map[int]*models.MediaFile{source.ID: source}})
+	handler.ItemAccess = allowAllPlaybackItemAccess{}
+	handler.PlaybackConfig = playbackTestConfig("", "")
+	handler.VirtualMediaDetailedResolver = VirtualMediaDetailedResolverFunc(func(context.Context, string, int, int, string, bool, []string, string) (ResolvedVirtualMedia, error) {
+		return ResolvedVirtualMedia{}, context.DeadlineExceeded
+	})
+	handler.PlanStoreV3 = contextCheckingSaveAttemptPlanStoreV3{PlanStoreV3: handler.PlanStoreV3}
+
+	previousBudget := virtualStartPhaseBudget
+	virtualStartPhaseBudget = time.Nanosecond
+	t.Cleanup(func() { virtualStartPhaseBudget = previousBudget })
+
+	start := v3HandlerStartRequest()
+	start.FileID = source.ID
+	rr := httptest.NewRecorder()
+	handler.HandleStartPlayback(rr, httptest.NewRequest(
+		http.MethodPost,
+		"/api/v1/playback/start",
+		strings.NewReader(marshalV3StartRequest(t, start)),
+	).WithContext(newAuthorizedPlaybackContext()))
+
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("start status = %d, want the stored terminal, body = %s", rr.Code, rr.Body.String())
+	}
+	var response playback.DecisionResponseV3
+	if err := json.Unmarshal(rr.Body.Bytes(), &response); err != nil {
+		t.Fatalf("decode start response: %v", err)
+	}
+	if response.Terminal == nil {
+		t.Fatalf("response = %s, want a terminal after the exhausted phase", rr.Body.String())
+	}
+	record, err := handler.PlanStoreV3.GetAttemptByPlaybackAttemptID(context.Background(), start.PlaybackAttemptID)
+	if err != nil {
+		t.Fatalf("terminal was not persisted: %v", err)
+	}
+	if record.StartResponse.Terminal == nil || record.StartResponse.Terminal.Reason != response.Terminal.Reason {
+		t.Fatalf("stored attempt = %#v, want the answered terminal", record.StartResponse.Terminal)
+	}
 }
 
 // A start that hits its request budget after a retryable transport failure must
@@ -67,20 +176,54 @@ func TestHandleStartPlaybackV3RetryableStartTimeoutAnswers503(t *testing.T) {
 	}
 }
 
-// A genuine store fault is still a server error: the attempt save fails
-// before any transport commits, and the failed terminal save must keep
-// reporting the store fault rather than disguising it as a retryable refusal.
+// A genuine store fault is still a server error when the verdict itself is real.
+// The start terminal here is the explicit-pick HDR refusal — a plan verdict the
+// server reached on its own, whose first store write is the terminal save. A
+// store fault on that save must keep reporting the fault rather than disguising
+// the verdict as a retryable refusal.
 func TestHandleStartPlaybackV3NonRetryablePersistFaultAnswers500(t *testing.T) {
 	source := v3HandlerFixtureFile(t)
+	source.CodecVideo = "hevc"
+	source.Resolution = "2160p"
+	source.Bitrate = 32_000
+	source.VideoTracks[0] = models.VideoTrack{
+		Codec: "hevc", Profile: "main 10", Level: 150, Width: 3840, Height: 2160,
+		FrameRate: "24000/1001", Bitrate: 32_000, BitDepth: 10,
+		VideoRange: "DolbyVision", VideoRangeType: "DOVIWithHDR10", DVProfile: 8, DVBLCompatID: 1,
+	}
+	alternateValue := *source
+	alternate := &alternateValue
+	alternate.ID = 84
+	alternate.CodecVideo = "h264"
+	alternate.Resolution = "1080p"
+	alternate.Bitrate = 8_000
+	alternate.VideoTracks = []models.VideoTrack{{
+		Codec: "h264", Profile: "high", Level: 41, Width: 1920, Height: 1080,
+		FrameRate: "24000/1001", Bitrate: 8_000, BitDepth: 8, VideoRange: videoRangeSDR, VideoRangeType: videoRangeSDR,
+	}}
+
 	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0), mapPlaybackFileResolver{files: map[int]*models.MediaFile{source.ID: source}})
+	handler.FileVersionFetcher = testPlaybackFileVersionFetcher{byContent: map[string][]*models.MediaFile{
+		source.ContentID: {source, alternate},
+	}}
+	handler.SettingsRepo = &mutablePlaybackSettingsV3{values: map[string]string{"allow_4k_transcode": "false"}}
+	handler.PlaybackConfig = playbackTestConfig("", "")
 	handler.ItemAccess = allowAllPlaybackItemAccess{}
 	handler.PlanStoreV3 = &failingSaveAttemptPlanStoreV3{PlanStoreV3: handler.PlanStoreV3, err: errors.New("database unavailable")}
+
+	start := v3HandlerStartRequest()
+	start.QualityPreference = "auto"
+	start.FileSelection = playback.FileSelectionExplicitV3
+	start.ClientPlaybackContext.Deliveries[playback.DeliveryClassHLSV3] = playback.DeliveryCapabilityV3{
+		Enabled: true, SupportedOnDevice: true, Containers: []string{"hls"},
+		VideoCodecs: []string{"h264"}, AudioDecodeCodecs: []string{"aac"},
+	}
 
 	rr := httptest.NewRecorder()
 	handler.HandleStartPlayback(rr, httptest.NewRequest(
 		http.MethodPost,
 		"/api/v1/playback/start",
-		strings.NewReader(marshalV3StartRequest(t, v3HandlerStartRequest())),
+		strings.NewReader(marshalV3StartRequest(t, start)),
 	).WithContext(newAuthorizedPlaybackContext()))
 
 	if rr.Code != http.StatusInternalServerError {
@@ -101,7 +244,6 @@ func TestStartTerminalPersistOperationErrorV3RouteCapacityIsRetryable(t *testing
 	err := startTerminalPersistOperationErrorV3(
 		context.Background(),
 		errors.New("plan store unavailable"),
-		true,
 		&transportErrorV3{
 			reason:    string(noderouting.OutcomeCapacityUnavailable),
 			message:   "No playback route satisfies the configured policy and current node availability.",
@@ -127,7 +269,7 @@ func TestStartTerminalPersistOperationErrorV3RouteCapacityIsRetryable(t *testing
 // still gets a retryable answer because the save was cut off by the budget, not
 // by a store fault.
 func TestStartTerminalPersistOperationErrorV3ExpiredBudgetIsRetryable(t *testing.T) {
-	err := startTerminalPersistOperationErrorV3(context.Background(), context.DeadlineExceeded, false, nil)
+	err := startTerminalPersistOperationErrorV3(context.Background(), context.DeadlineExceeded, nil)
 	var operation *PlaybackOperationError
 	if !errors.As(err, &operation) {
 		t.Fatalf("err = %v, want *PlaybackOperationError", err)

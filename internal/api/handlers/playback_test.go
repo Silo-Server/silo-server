@@ -919,7 +919,9 @@ func TestHandleStartPlaybackV3_PersistsSeriesPlaybackPreferenceForEpisodes(t *te
 }
 
 // A start that never produced a session played nothing, so it must not teach
-// the series what the viewer prefers.
+// the series what the viewer prefers. The session manager's opaque error is a
+// server-side fault, which is answered as retryable rather than published as a
+// playback verdict, so this failure has no decision body at all.
 func TestHandleStartPlaybackV3_DoesNotPersistSeriesPlaybackPreferenceOnFailure(t *testing.T) {
 	store := newPlaybackTestStore(t)
 	file := v3HandlerFixtureFile(t)
@@ -936,16 +938,11 @@ func TestHandleStartPlaybackV3_DoesNotPersistSeriesPlaybackPreferenceOnFailure(t
 	rr := httptest.NewRecorder()
 	handler.HandleStartPlayback(rr, req)
 
-	// v3 reports playback outcomes in the body; the request itself was fine.
-	if rr.Code != http.StatusCreated {
-		t.Fatalf("status = %d, body = %s", rr.Code, rr.Body.String())
+	if rr.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want the retryable dependency answer, body = %s", rr.Code, rr.Body.String())
 	}
-	var response playback.DecisionResponseV3
-	if err := json.Unmarshal(rr.Body.Bytes(), &response); err != nil {
-		t.Fatal(err)
-	}
-	if response.Terminal == nil || response.PlaybackPlan != nil {
-		t.Fatalf("expected a terminal with no plan, got %#v", response)
+	if got := rr.Header().Get("Retry-After"); got == "" {
+		t.Fatal("a server-side start fault must advertise Retry-After")
 	}
 
 	pref, err := store.GetSeriesPlaybackPreference(context.Background(), "profile-1", "series-1")
