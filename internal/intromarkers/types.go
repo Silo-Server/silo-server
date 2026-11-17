@@ -430,6 +430,7 @@ type RunSummary struct {
 	ChapterMarkersWritten       int      `json:"chapter_markers_written"`
 	ChromaprintMarkersWritten   int      `json:"chromaprint_markers_written"`
 	ChromaprintMarkersWithdrawn int      `json:"chromaprint_markers_withdrawn"`
+	ChapterMarkersWithdrawn     int      `json:"chapter_markers_withdrawn"`
 	GroupsNotFound              int      `json:"groups_not_found"`
 	GroupsSkipped               int      `json:"groups_skipped"`
 	Errors                      []string `json:"errors,omitempty"`
