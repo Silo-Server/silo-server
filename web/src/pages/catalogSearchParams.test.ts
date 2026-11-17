@@ -236,15 +236,34 @@ describe("buildCatalogHref", () => {
   });
 
   // A library browse lists newest first; a search typed there ranks by
-  // relevance, the server's default for search text.
+  // relevance, the server's default for search text. Nobody chose Date Added,
+  // so the URL leaves it out, and a search typed after a filter change does
+  // not inherit it.
   it.each([
     ["browsing", "", "added_at"],
     ["searching", "heat", null],
   ])("leaves the sort to the server when %s a library without a chosen sort", (_case, q, sort) => {
-    const browse = parseCatalogSearchParams(new URLSearchParams("library_id=17"));
-    const built = new URL(`http://example.test${buildCatalogQueryUpdateHref(browse, q)}`);
+    const browse = parseCatalogSearchParams(new URLSearchParams("source=query&library_id=17"));
+    const filtered = parseCatalogSearchParams(
+      buildCatalogFilterSearchParams({
+        ...browse,
+        query_definition: { ...browse.query_definition, media_scope: "movie" },
+      }),
+    );
+    const built = new URL(`http://example.test${buildCatalogQueryUpdateHref(filtered, q)}`);
     expect(built.searchParams.get("library_id")).toBe("17");
-    expect(built.searchParams.get("sort")).toBe(sort);
+    expect(built.searchParams.has("sort")).toBe(false);
+    const requested = buildCatalogApiSearchParams(parseCatalogSearchParams(built.searchParams));
+    expect(requested.get("sort")).toBe(sort);
+  });
+
+  // Clearing a search keeps the rest of its URL. Relevance needs search text,
+  // which the server enforces, so the browse left behind sorts by default.
+  it("drops a relevance sort from a URL without search text", () => {
+    const state = parseCatalogSearchParams(
+      params("source=query&library_id=17&sort=relevance&order=desc"),
+    );
+    expect(buildCatalogApiSearchParams(state).get("sort")).toBe("added_at");
   });
 
   it("builds collection catalog URLs with overlay params", () => {

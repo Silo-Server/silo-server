@@ -155,8 +155,13 @@ export function parseCatalogSearchParams(searchParams: URLSearchParams): Catalog
     });
   }
 
-  const rawSort = readString(searchParams.get("sort"));
-  const rawOrder = readString(searchParams.get("order"));
+  // Relevance ranks search text, and the server rejects it without any. A URL
+  // that kept it after the search was cleared gets the default sort instead.
+  const sortWithoutText =
+    normalizeQuerySortField(readString(searchParams.get("sort"))) === "relevance" &&
+    !baseState.q?.trim();
+  const rawSort = sortWithoutText ? undefined : readString(searchParams.get("sort"));
+  const rawOrder = sortWithoutText ? undefined : readString(searchParams.get("order"));
   const sort = normalizeQuerySortField(rawSort);
   const hasExplicitSort = Boolean(rawSort || rawOrder);
   const queryLimit = parsePositiveInt(searchParams.get("query_limit")) ?? undefined;
@@ -230,6 +235,17 @@ export function buildCatalogFilterSearchParams(state: CatalogSearchState): URLSe
   const params = buildCatalogApiSearchParams(state);
   if (state.source === "query" && !state.type_override && !state.query_definition.media_scope) {
     params.set("type", "all");
+  }
+  // A library browse requests its Date Added default, but nobody chose it:
+  // in the URL it would read back as a choice, and a search typed from the
+  // browse would keep it instead of ranking by relevance.
+  if (
+    state.source === "query" &&
+    !state.explicit_sort &&
+    state.query_definition.sort.field === "added_at"
+  ) {
+    params.delete("sort");
+    params.delete("order");
   }
   return params;
 }

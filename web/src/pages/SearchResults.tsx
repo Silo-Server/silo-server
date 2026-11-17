@@ -280,6 +280,11 @@ export default function SearchResults({
         {t("web.catalog.page.retryPeople")}
       </Button>
     </div>
+  ) : peopleQuery.isLoading && libraryEmpty ? (
+    // With no library titles, people may be the whole answer; say they are coming.
+    <p role="status" className="text-muted-foreground text-sm">
+      {t("web.catalog.page.searchingPeople")}
+    </p>
   ) : people.length > 0 ? (
     <CastCarousel
       cast={people.map((person, index) => ({
@@ -334,11 +339,7 @@ export default function SearchResults({
     </div>
   );
 
-  // The library's first rows: the error, a skeleton, or two rows of titles. A
-  // failed search shows no titles, since what is cached is an earlier query's.
-  const firstRows = catalogQuery.isError ? (
-    errorCard
-  ) : catalogQuery.isLoading ? (
+  const skeletonGrid = (
     <div className={gridClasses} aria-busy>
       {Array.from({ length: 12 }).map((_, index) => (
         <div key={index}>
@@ -347,6 +348,14 @@ export default function SearchResults({
         </div>
       ))}
     </div>
+  );
+
+  // The library's first rows: the error, a skeleton, or two rows of titles. A
+  // failed search shows no titles, since what is cached is an earlier query's.
+  const firstRows = catalogQuery.isError ? (
+    errorCard
+  ) : catalogQuery.isLoading ? (
+    skeletonGrid
   ) : split.best.length > 0 ? (
     <section aria-labelledby="search-first" className="space-y-3">
       <SectionHeader
@@ -404,7 +413,9 @@ export default function SearchResults({
   // Under relevance the rest are "More results"; under another sort they
   // continue the same list without a heading of their own.
   const moreRows = catalogQuery.isError ? null : split.more.length > 0 ? (
-    <section aria-labelledby={byRelevance ? "search-more" : "search-first"} className="space-y-3">
+    // Under another sort these rows continue the first section's list, so they
+    // don't get a second region with the same name.
+    <section aria-labelledby={byRelevance ? "search-more" : undefined} className="space-y-3">
       {byRelevance ? (
         <SectionHeader
           id="search-more"
@@ -423,7 +434,8 @@ export default function SearchResults({
 
   let body: ReactNode;
   if (shownView === "requests") {
-    body = requestGrid;
+    // Until discovery answers, the grid has nothing to draw.
+    body = requestsDeciding ? skeletonGrid : requestGrid;
   } else if (shownView === "library") {
     body = catalogQuery.isError ? (
       errorCard
@@ -458,6 +470,8 @@ export default function SearchResults({
   return (
     <div className="space-y-8 px-4 py-4 sm:px-6 sm:py-6 lg:px-10 xl:px-12">
       <header className="space-y-4">
+        {/* The search field reads as the page's heading; this names the page for assistive tech. */}
+        <h1 className="sr-only">{t("web.catalog.page.resultsFor", { query })}</h1>
         <SearchBar hero initialQuery={query} autoFocus buildSearchHref={buildSearchHref} />
         <div className="flex flex-wrap items-center gap-3">
           <SearchScopeChips
@@ -478,7 +492,7 @@ export default function SearchResults({
                   ? { ...nextState, sort_from_server: false, explicit_sort: true }
                   : nextState;
                 const next = buildCatalogFilterSearchParams(forNavigation);
-                if (view !== "overview") next.set("view", view);
+                if (shownView !== "overview") next.set("view", shownView);
                 if (next.toString() !== searchParams.toString()) setSearchParams(next);
               }}
             />
@@ -495,7 +509,9 @@ export default function SearchResults({
                 key={tab.view}
                 type="button"
                 aria-pressed={active}
-                onClick={() => !active && showView(tab.view)}
+                // A request view that fell back to the overview still names
+                // itself in the URL; pressing Overview clears it.
+                onClick={() => tab.view !== view && showView(tab.view)}
                 className={cn(
                   "inline-flex items-baseline gap-2 rounded-full px-4 py-2 text-sm font-semibold transition-colors",
                   active

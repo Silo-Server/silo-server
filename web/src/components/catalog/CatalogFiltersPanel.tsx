@@ -159,10 +159,14 @@ export default function CatalogFiltersPanel({
   function updateDefinition(nextQd: QueryDefinition) {
     const sortChanged =
       usesSourceOrder && querySortToSelectValue(nextQd.sort) !== querySortToSelectValue(qd.sort);
+    // The sheet's editors don't offer Relevance, so a media type change there
+    // swaps it for their first sort. The search keeps ranking by relevance.
+    const keepRelevance =
+      relevanceSort && qd.sort.field === "relevance" && nextQd.media_scope !== qd.media_scope;
     onStateChange({
       ...state,
       ...(sortChanged ? { uses_source_order: false } : null),
-      query_definition: nextQd,
+      query_definition: keepRelevance ? { ...nextQd, sort: qd.sort } : nextQd,
     });
   }
 

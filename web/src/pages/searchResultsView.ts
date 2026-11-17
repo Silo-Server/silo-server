@@ -1,4 +1,4 @@
-import { CATALOG_REQUEST_PAGE_PARAM } from "./catalogSearchParams";
+import { CATALOG_REQUEST_PAGE_PARAM, readCatalogRequestPage } from "./catalogSearchParams";
 
 /**
  * What a search results page shows: the overview (a few rows of each result
@@ -11,7 +11,10 @@ const VIEW_PARAM = "view";
 
 export function readSearchView(searchParams: URLSearchParams): SearchResultsView {
   const value = searchParams.get(VIEW_PARAM);
-  return value === "library" || value === "requests" ? value : "overview";
+  if (value === "library" || value === "requests") return value;
+  // Search URLs from before these views kept a later request page with no
+  // view; it still opens the request list at that page.
+  return !value && readCatalogRequestPage(searchParams) > 1 ? "requests" : "overview";
 }
 
 const BEST_MATCH_ROWS = 2;

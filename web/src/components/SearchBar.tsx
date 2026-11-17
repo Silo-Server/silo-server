@@ -205,7 +205,7 @@ export default function SearchBar({
     // on a hairline. The plain prominent bar is the empty search page's field.
     const look = hero
       ? {
-          form: "border-border relative flex w-full items-center border-b",
+          form: "border-border focus-within:border-ring relative flex w-full items-center border-b transition-colors",
           icon: "pointer-events-none absolute start-0 h-6 w-6 sm:h-7 sm:w-7",
           input:
             "font-display h-auto rounded-none border-0 bg-transparent py-3 ps-10 pe-12 text-3xl leading-tight font-extrabold tracking-[-0.04em] shadow-none focus-visible:ring-0 sm:ps-12 sm:text-4xl md:text-4xl lg:text-5xl dark:bg-transparent",

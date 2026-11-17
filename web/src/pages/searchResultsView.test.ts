@@ -35,6 +35,7 @@ describe("search results view", () => {
     ["view=library", "library"],
     ["view=requests", "requests"],
     ["view=nonsense", "overview"],
+    ["request_page=2", "requests"],
   ])("reads %j as %s", (query, expected) => {
     expect(readSearchView(new URLSearchParams(query))).toBe(expected);
   });
