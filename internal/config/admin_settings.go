@@ -300,6 +300,12 @@ const (
 	// address on a Silo account first is the one matched; the match ends the
 	// account's existing sessions, device approvals and API keys.
 	AuthEmailAutoMatchSettingKey = "auth.email_auto_match"
+	// AuthUserAPIKeysSettingKey lets accounts that are not admins, and
+	// profiles other than the primary one, create API keys for themselves.
+	// Those keys carry user scopes only. Off by default: only a server admin
+	// creates keys. Turning it off stops new keys and leaves existing ones
+	// working until they are revoked.
+	AuthUserAPIKeysSettingKey = "auth.user_api_keys" //nolint:gosec // A setting name, not a credential.
 	// AuthProviderRecheckIntervalSettingKey is how old an identity's last
 	// provider check may be before a session refresh asks the provider again.
 	AuthProviderRecheckIntervalSettingKey = "auth.provider_recheck_interval"
@@ -384,6 +390,7 @@ var adminSettingDefaults = map[string]string{
 	ServerLocalURLSettingKey:                  "",
 	AuthLocalPasswordLoginSettingKey:          "true",
 	AuthEmailAutoMatchSettingKey:              "false",
+	AuthUserAPIKeysSettingKey:                 "false",
 	AuthProviderRecheckIntervalSettingKey:     "12h",
 	AuthProviderRecheckOutagePolicySettingKey: AuthRecheckFailOpen,
 
@@ -747,7 +754,7 @@ func NormalizeAdminSetting(key, raw string) (string, error) {
 		"notifications.apple_push_delivery_enabled", "notifications.android_push_delivery_enabled",
 		"catalog.search.meilisearch.semantic_enabled", "catalog.search.meilisearch.binary_quantized",
 		"s3.public_path_style", "s3.private_path_style", "s3.user_db_path_style",
-		AuthLocalPasswordLoginSettingKey, AuthEmailAutoMatchSettingKey, ServerLANDiscoverySettingKey,
+		AuthLocalPasswordLoginSettingKey, AuthEmailAutoMatchSettingKey, AuthUserAPIKeysSettingKey, ServerLANDiscoverySettingKey,
 		BackupEnabledSettingKey, BackupIncludeIntroFingerprintsSettingKey, BackupIncludeSubtitlesSettingKey,
 		BackupS3PathStyleSettingKey:
 		return normalizeAdminBool(key, value)

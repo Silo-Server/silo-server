@@ -292,6 +292,7 @@
 ./internal/auth TestUserWithoutEmailOrUsernameDB
 ./internal/auth TestLoginIdentitySpaceDB
 ./internal/auth TestPasswordSignInForDB
+./internal/auth TestCreatePersonalAPIKeyDB
 ./internal/auth TestPasswordSignInForRoutesDB
 ./internal/auth TestLoginSessionActivityAndAdminRevocationDB
 ./internal/auth TestChangePasswordSignOutOtherSessionsDB

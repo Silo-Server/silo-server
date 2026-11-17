@@ -6328,12 +6328,15 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** Manage the login account's API keys. */
+    /**
+     * Manage the login account's API keys.
+     * @description The account's primary profile lists every key on the account; any other profile lists only the keys bound to it. A request without X-Profile-Id lists them all while no profile on the account is PIN-protected or access-restricted, and is otherwise 422, as on the catalog reads.
+     */
     get: operations["listPersonalAPIKeys"];
     put?: never;
     /**
      * Manage the login account's API keys.
-     * @description Only a server admin's login session may create a key, acting through the account's primary profile. X-Profile-Id must name the primary profile, with X-Profile-Token when that profile is PIN-protected (without it the request is 403 profile_verification_required); naming any other profile is 403 permission_denied. A request without X-Profile-Id is accepted only while no profile on the account is PIN-protected or access-restricted (content-rating, advisory-age or library limits); otherwise it is 403 permission_denied.
+     * @description A server admin's login session creates an account key (no profile_id) acting through the account's primary profile: X-Profile-Id must name the primary profile, with X-Profile-Token when that profile is PIN-protected (without it the request is 403 profile_verification_required); naming any other profile is 403 permission_denied. A request without X-Profile-Id is accepted only while no profile on the account is PIN-protected or access-restricted (content-rating, advisory-age or library limits); otherwise it is 403 permission_denied. While user_keys_enabled is true (getPersonalAPIKeyScopes), any account may also create keys that carry user scopes only: the primary profile an account key or a key bound to any profile of the account (profile_id), and any other profile a key bound to itself, each with its own X-Profile-Token when PIN-protected. Past max_user_keys the request is 409 conflict.
      */
     post: operations["createPersonalAPIKey"];
     delete?: never;
@@ -6352,7 +6355,10 @@ export interface paths {
     get?: never;
     put?: never;
     post?: never;
-    /** Manage the login account's API keys. */
+    /**
+     * Manage the login account's API keys.
+     * @description Revokes a key the caller can list (listPersonalAPIKeys); any other key is 404.
+     */
     delete: operations["revokePersonalAPIKey"];
     options?: never;
     head?: never;
@@ -8735,7 +8741,7 @@ export interface paths {
     };
     get?: never;
     put?: never;
-    /** Delegate the current login session, or an admin:monitor:read API key, for one realtime handshake. */
+    /** Delegate the current login session, or an API key holding admin:monitor:read, catalog:read, watch:read or notifications, for one realtime handshake. */
     post: operations["createEventsSocketTicket"];
     delete?: never;
     options?: never;
@@ -14252,6 +14258,8 @@ export interface components {
       id: string;
       key_prefix: string;
       label: string;
+      /** @description The household profile the key is bound to and always acts as. Absent on an account key, which may name any profile on its account */
+      profile_id?: string;
       /** @enum {string} */
       rate_tier: "standard" | "elevated";
       scopes: string[];
@@ -14290,6 +14298,8 @@ export interface components {
       /** @description Credential disclosed only in this creation response. Store it securely. */
       key: string;
       label: string;
+      /** @description The household profile the key is bound to. Absent on an account key */
+      profile_id?: string;
       rate_tier: string;
       scopes: string[];
       /**
@@ -14325,6 +14335,8 @@ export interface components {
        * @description RFC 3339 instant in UTC with millisecond precision
        */
       last_used_at?: string;
+      /** @description The household profile the key is bound to and always acts as. Absent on an account key, which may name any profile on its account */
+      profile_id?: string;
       /** @enum {string} */
       rate_tier: "standard" | "elevated";
       scopes: string[];
@@ -23314,6 +23326,8 @@ export interface components {
       removed: boolean;
     };
     APIKeyScope: {
+      /** @enum {string} */
+      audience: "admin" | "user";
       description: string;
       name: string;
     };
@@ -30889,6 +30903,8 @@ export interface components {
     };
     PersonalAPIKeyCreateInputBody: {
       label: string;
+      /** @description Bind the key to this profile of the account: it always acts as that profile and cannot name another. Requires user_keys_enabled and user scopes */
+      profile_id?: string;
       scopes?: string[];
     };
     PersonalAPIKeyListItem: {
@@ -30909,6 +30925,8 @@ export interface components {
        * @description RFC 3339 instant in UTC with millisecond precision
        */
       last_used_at?: string;
+      /** @description The household profile the key is bound to and always acts as. Absent on an account key, which may name any profile on its account */
+      profile_id?: string;
       /** @enum {string} */
       rate_tier: "standard" | "elevated";
       scopes: string[];
@@ -30920,7 +30938,14 @@ export interface components {
     };
     PersonalAPIKeyScopesOutputBody: {
       available: boolean;
+      /**
+       * Format: int64
+       * @description How many keys an account may hold before it can create no more for itself
+       */
+      max_user_keys: number;
       scopes: components["schemas"]["APIKeyScope"][];
+      /** @description Whether accounts that are not admins, and profiles other than the primary one, may create keys. Such a key, and any key bound to a profile, carries scopes whose audience is user */
+      user_keys_enabled: boolean;
     };
     PersonalCollection: {
       /**
@@ -94793,7 +94818,12 @@ export interface operations {
         /** @description Page size; default 50, maximum 200 */
         limit?: number;
       };
-      header?: never;
+      header?: {
+        /** @description Optional while no profile on the authenticated account is PIN-protected or access-restricted (content-rating, advisory-age or library limits). Otherwise it is required: a request without it, or with an empty value, is refused with 422 validation_failed at header.x-profile-id; API keys are exempt. When present, it must name a profile of the authenticated account. */
+        "X-Profile-Id"?: string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+      };
       path?: never;
       cookie?: never;
     };
@@ -94828,6 +94858,15 @@ export interface operations {
       };
       /** @description Forbidden */
       403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
         headers: {
           [name: string]: unknown;
         };
@@ -94963,6 +95002,15 @@ export interface operations {
           "application/problem+json": components["schemas"]["Problem"];
         };
       };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
       /** @description Request Entity Too Large */
       413: {
         headers: {
@@ -95022,7 +95070,12 @@ export interface operations {
   revokePersonalAPIKey: {
     parameters: {
       query?: never;
-      header?: never;
+      header?: {
+        /** @description Optional while no profile on the authenticated account is PIN-protected or access-restricted (content-rating, advisory-age or library limits). Otherwise it is required: a request without it, or with an empty value, is refused with 422 validation_failed at header.x-profile-id; API keys are exempt. When present, it must name a profile of the authenticated account. */
+        "X-Profile-Id"?: string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+      };
       path: {
         /** @description Opaque identifier */
         id: string;

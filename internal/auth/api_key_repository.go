@@ -11,9 +11,11 @@ import (
 	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Silo-Server/silo-server/internal/auditmutation"
+	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
@@ -22,7 +24,7 @@ var (
 	ErrAPIKeyNotFound = errors.New("api key not found")
 )
 
-const apiKeyColumns = `id, user_id, label, rate_tier, scopes, created_at, last_used_at` //nolint:gosec // SQL column names, not credentials.
+const apiKeyColumns = `id, user_id, label, rate_tier, scopes, COALESCE(profile_id, ''), created_at, last_used_at` //nolint:gosec // SQL column names, not credentials.
 
 // APIKeyRepository provides CRUD operations for the api_keys table.
 type APIKeyRepository struct {
@@ -43,6 +45,7 @@ func scanAPIKey(row pgx.Row) (*models.APIKey, error) {
 		&k.Label,
 		&k.RateTier,
 		&k.Scopes,
+		&k.ProfileID,
 		&k.CreatedAt,
 		&k.LastUsedAt,
 	)
@@ -87,7 +90,7 @@ func (r *APIKeyRepository) Create(ctx context.Context, userID int, label string,
 		defer cancel()
 		_ = tx.Rollback(cleanupCtx)
 	}()
-	return insertAPIKey(ctx, tx, userID, label, scopes)
+	return insertAPIKey(ctx, tx, userID, "", label, scopes)
 }
 
 // CreateAsActor is Create for a key that actorID mints on account userID,
@@ -135,11 +138,84 @@ func (r *APIKeyRepository) CreateAsActor(ctx context.Context, actorID, userID in
 	if err := CheckOwnerTarget(actor, target); err != nil {
 		return nil, err
 	}
-	return insertAPIKey(ctx, tx, userID, label, scopes)
+	return insertAPIKey(ctx, tx, userID, "", label, scopes)
 }
 
-// insertAPIKey inserts the key and its audit row in tx and commits tx.
-func insertAPIKey(ctx context.Context, tx pgx.Tx, userID int, label string, scopes []string) (*models.APIKey, error) {
+// MaxUserAPIKeys bounds the keys one account may hold once it creates them
+// for itself (CreatePersonal). Keys an admin mints are not counted against
+// their own creation, only against the next personal one.
+const MaxUserAPIKeys = 25
+
+var (
+	// ErrUserAPIKeysDisabled refuses a personal key while
+	// config.AuthUserAPIKeysSettingKey is off.
+	ErrUserAPIKeysDisabled = errors.New("user api keys are turned off on this server")
+	// ErrAPIKeyUserScopesRequired refuses a personal key that is unscoped or
+	// names a scope outside the user audience.
+	ErrAPIKeyUserScopesRequired = errors.New("this api key must carry user scopes only")
+	// ErrAPIKeyLimitReached refuses a personal key past MaxUserAPIKeys.
+	ErrAPIKeyLimitReached = errors.New("api key limit reached")
+	// ErrAPIKeyProfileNotFound refuses a key bound to a profile the account
+	// does not have.
+	ErrAPIKeyProfileNotFound = errors.New("api key profile not found")
+)
+
+// UserAPIKeysEnabled reads config.AuthUserAPIKeysSettingKey.
+func (r *APIKeyRepository) UserAPIKeysEnabled(ctx context.Context) (bool, error) {
+	return readBoolSetting(ctx, r.pool, config.AuthUserAPIKeysSettingKey, false)
+}
+
+// CreatePersonal mints a key an account creates for itself that is not an
+// admin's account key: one bound to profileID, or an account key (empty
+// profileID) on an account that is not an admin. Such a key is a profile's
+// credential, so it must carry user scopes only, the server must allow user
+// keys, and the account stays under MaxUserAPIKeys. All three are judged in
+// the inserting transaction with the account share-locked, so a setting
+// change or a demotion that commits first is what the check sees. An admin's
+// own account key is Create's; an empty profileID on an admin account is
+// still held to user scopes here.
+func (r *APIKeyRepository) CreatePersonal(ctx context.Context, userID int, profileID, label string, scopes []string) (*models.APIKey, error) {
+	if !UserAPIKeyScopesOnly(scopes) {
+		return nil, ErrAPIKeyUserScopesRequired
+	}
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("beginning api key creation: %w", err)
+	}
+	defer func() {
+		cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		defer cancel()
+		_ = tx.Rollback(cleanupCtx)
+	}()
+	// The audit row's accounts join the id order CreateAsActor locks in.
+	if _, err := tx.Exec(ctx, `SELECT id FROM users WHERE id = ANY($1) ORDER BY id FOR SHARE`,
+		append([]int{userID}, auditmutation.ActorIDs(ctx)...)); err != nil {
+		return nil, fmt.Errorf("locking api key account: %w", err)
+	}
+	enabled, err := readBoolSetting(ctx, tx, config.AuthUserAPIKeysSettingKey, false)
+	if err != nil {
+		return nil, err
+	}
+	if !enabled {
+		return nil, ErrUserAPIKeysDisabled
+	}
+	var held int
+	if err := tx.QueryRow(ctx, `SELECT count(*) FROM api_keys WHERE user_id = $1`, userID).Scan(&held); err != nil {
+		return nil, fmt.Errorf("counting api keys: %w", err)
+	}
+	if held >= MaxUserAPIKeys {
+		return nil, ErrAPIKeyLimitReached
+	}
+	key, err := insertAPIKey(ctx, tx, userID, profileID, label, scopes)
+	if pgErr, ok := errors.AsType[*pgconn.PgError](err); ok && pgErr.Code == "23503" && pgErr.ConstraintName == "api_keys_profile_fkey" {
+		return nil, ErrAPIKeyProfileNotFound
+	}
+	return key, err
+}
+
+// insertAPIKey inserts the key and its audit row in tx and commits tx. A
+// non-empty profileID binds the key to that profile of userID.
+func insertAPIKey(ctx context.Context, tx pgx.Tx, userID int, profileID, label string, scopes []string) (*models.APIKey, error) {
 	key, err := generateAPIKey()
 	if err != nil {
 		return nil, err
@@ -148,16 +224,16 @@ func insertAPIKey(ctx context.Context, tx pgx.Tx, userID int, label string, scop
 		scopes = []string{}
 	}
 
-	query := `INSERT INTO api_keys (user_id, label, key_hash, key_prefix, scopes)
-		VALUES ($1, $2, $3, $4, $5)
+	query := `INSERT INTO api_keys (user_id, label, key_hash, key_prefix, scopes, profile_id)
+		VALUES ($1, $2, $3, $4, $5, NULLIF($6, ''))
 		RETURNING ` + apiKeyColumns
 
-	created, err := scanAPIKey(tx.QueryRow(ctx, query, userID, label, HashLinkToken(key), key[:11], scopes))
+	created, err := scanAPIKey(tx.QueryRow(ctx, query, userID, label, HashLinkToken(key), key[:11], scopes, profileID))
 	if err != nil {
 		return nil, err
 	}
 	audit, err := recordAPIKeyMutation(ctx, tx, nil, &models.APIKeyMetadata{ID: created.ID, UserID: created.UserID,
-		Label: created.Label, RateTier: created.RateTier, Scopes: created.Scopes})
+		Label: created.Label, RateTier: created.RateTier, Scopes: created.Scopes, ProfileID: created.ProfileID})
 	if err != nil {
 		return nil, err
 	}
@@ -187,6 +263,12 @@ func (r *APIKeyRepository) GetByKey(ctx context.Context, key string) (*models.AP
 
 // Delete removes an API key owned by the given user.
 func (r *APIKeyRepository) Delete(ctx context.Context, id int64, userID int) error {
+	return r.DeleteForProfile(ctx, id, userID, "")
+}
+
+// DeleteForProfile is Delete narrowed, when profileID is set, to a key bound
+// to that profile; any other key answers ErrAPIKeyNotFound.
+func (r *APIKeyRepository) DeleteForProfile(ctx context.Context, id int64, userID int, profileID string) error {
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
 		return fmt.Errorf("beginning api key deletion: %w", err)
@@ -201,7 +283,7 @@ func (r *APIKeyRepository) Delete(ctx context.Context, id int64, userID int) err
 	if err := auditmutation.LockActors(ctx, tx); err != nil {
 		return err
 	}
-	deleted, err := scanAPIKeyMetadata(tx.QueryRow(ctx, `DELETE FROM api_keys ak WHERE ak.id = $1 AND ak.user_id = $2 RETURNING `+apiKeyMetadataColumns, id, userID))
+	deleted, err := scanAPIKeyMetadata(tx.QueryRow(ctx, `DELETE FROM api_keys ak WHERE ak.id = $1 AND ak.user_id = $2 AND ($3 = '' OR ak.profile_id = $3) RETURNING `+apiKeyMetadataColumns, id, userID, profileID))
 	if errors.Is(err, ErrAPIKeyNotFound) {
 		return ErrAPIKeyNotFound
 	}

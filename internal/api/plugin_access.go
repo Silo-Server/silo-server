@@ -194,8 +194,9 @@ func (p *pluginAccessResolver) resolveAPIKey(r *http.Request, token string) plug
 		return pluginAccess{}
 	}
 	// Scoped keys are allowlist credentials for the routes their scopes
-	// name; plugin access is not on any scope's allowlist.
-	if len(apiKey.Scopes) > 0 {
+	// name; plugin access is not on any scope's allowlist. A profile-bound
+	// key is always scoped, and is refused by name in case one is not.
+	if len(apiKey.Scopes) > 0 || apiKey.ProfileID != "" {
 		return pluginAccess{}
 	}
 	user, err := p.users.GetByID(r.Context(), apiKey.UserID)
