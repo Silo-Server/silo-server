@@ -160,6 +160,56 @@ func TestPlaybackV2ProgressAndStop(t *testing.T) {
 	requireProblem(t, do(t, h, http.MethodDelete, Prefix+"/playback/session-1", playbackJSON(t, stopBody), viewerHeaders()), TypeValidationFailed)
 }
 
+// The v2 start body declares five fields the frozen /api/v1 bridge unmarshals
+// straight into the planner, and domain() dropped all of them. file_selection is
+// the sharpest: an explicit version pick silently became auto on /api/v2, which
+// re-armed cross-version substitution, decode rotation and the retry of a
+// candidate the catalog had marked failed. This pins the projection at the wire,
+// where the field can be lost, not just the DTO.
+func TestPlaybackStartV2CarriesEveryDeclaredBodyField(t *testing.T) {
+	deps, _ := catalogDeps(t)
+	fake := &fakePlaybackService{}
+	deps.Playback = fake
+	h := newTestHandler(t, deps)
+
+	body := playbackStartFixture(t)
+	body["file_selection"] = string(playback.FileSelectionExplicitV3)
+	body["force_relink"] = true
+	body["offered_virtual_uri"] = "virtual://movie/tt-w1?result=cand-a"
+	body["previous_playback_attempt_id"] = "previous-attempt-0001"
+	body["carried_audio_track_id"] = "42:audio:1"
+	response := do(t, h, http.MethodPost, Prefix+"/playback/start", playbackJSON(t, body), viewerHeaders())
+	if response.Code != http.StatusCreated {
+		t.Fatalf("start: %d %s", response.Code, response.Body.String())
+	}
+	got := fake.request
+	if got.FileSelection != playback.FileSelectionExplicitV3 {
+		t.Fatalf("file_selection = %q, want explicit: an explicit pick must reach the planner", got.FileSelection)
+	}
+	if !got.ForceRelink {
+		t.Fatal("force_relink did not reach the planner")
+	}
+	if got.OfferedVirtualURI != "virtual://movie/tt-w1?result=cand-a" {
+		t.Fatalf("offered_virtual_uri = %q, want the offered candidate", got.OfferedVirtualURI)
+	}
+	if got.PreviousPlaybackAttemptID != "previous-attempt-0001" {
+		t.Fatalf("previous_playback_attempt_id = %q, want the durable predecessor", got.PreviousPlaybackAttemptID)
+	}
+	if got.CarriedAudioTrackID != "42:audio:1" {
+		t.Fatalf("carried_audio_track_id = %q, want the carried track", got.CarriedAudioTrackID)
+	}
+
+	// A body that names no pick keeps the auto default: the projection must not
+	// manufacture an explicit selection out of an absent field.
+	response = do(t, h, http.MethodPost, Prefix+"/playback/start", playbackJSON(t, playbackStartFixture(t)), viewerHeaders())
+	if response.Code != http.StatusCreated {
+		t.Fatalf("start without a pick: %d %s", response.Code, response.Body.String())
+	}
+	if sel := fake.request.FileSelection; sel == playback.FileSelectionExplicitV3 {
+		t.Fatalf("file_selection = %q for a body without one, want the auto default", sel)
+	}
+}
+
 func TestPlaybackV2ProblemMapping(t *testing.T) {
 	for _, tc := range []struct {
 		err  *handlers.PlaybackOperationError

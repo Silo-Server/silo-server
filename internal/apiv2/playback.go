@@ -686,8 +686,33 @@ func playbackMutation(view handlers.PlaybackMutationView, err error) (*PlaybackM
 	}
 	return &PlaybackMutationOutput{Body: body}, nil
 }
+
+// domain projects the v2 body onto the planner's start request. Every declared
+// field belongs here: the frozen /api/v1 bridge unmarshals the same body
+// straight into the domain type, so a field that survives on v1 but is dropped
+// here makes one surface silently behave differently from the other. Dropping
+// file_selection alone turned every explicit version pick on /api/v2 into auto,
+// which re-arms cross-version substitution, decode rotation and the
+// known-failed-candidate retry.
 func (in PlaybackStartBody) domain(fileID int) playback.StartRequestV3 {
-	return playback.StartRequestV3{ProtocolVersion: in.ProtocolVersion, ClientFeatures: in.ClientFeatures, FileID: fileID, ProfileID: string(in.ProfileID), PlaybackAttemptID: in.PlaybackAttemptID, QualityPreference: in.QualityPreference, AllowAlternateVersions: in.AllowAlternateVersions, SubtitleFidelityPreference: in.SubtitleFidelityPreference, StartPosition: in.StartPosition, ProgressPersistence: in.ProgressPersistence, AudioTrackID: in.AudioTrackID, AudioTrackIndex: in.AudioTrackIndex, SubtitleTrackID: in.SubtitleTrackID, SubtitleTrackIndex: in.SubtitleTrackIndex, Metered: in.Metered, BandwidthEstimateKbps: in.BandwidthEstimateKbps, BandwidthEstimateSource: in.BandwidthEstimateSource, ObservedThroughputKbps: in.ObservedThroughputKbps, LearnedLimit: in.LearnedLimit, BandwidthCapKbps: in.BandwidthCapKbps, Capabilities: in.Capabilities, ClientPlaybackContext: in.ClientPlaybackContext}
+	return playback.StartRequestV3{
+		ProtocolVersion: in.ProtocolVersion, ClientFeatures: in.ClientFeatures, FileID: fileID,
+		ProfileID: string(in.ProfileID), PlaybackAttemptID: in.PlaybackAttemptID,
+		PreviousPlaybackAttemptID: in.PreviousPlaybackAttemptID,
+		QualityPreference:         in.QualityPreference, AllowAlternateVersions: in.AllowAlternateVersions,
+		SubtitleFidelityPreference: in.SubtitleFidelityPreference, StartPosition: in.StartPosition,
+		ProgressPersistence: in.ProgressPersistence,
+		AudioTrackID:        in.AudioTrackID, AudioTrackIndex: in.AudioTrackIndex,
+		CarriedAudioTrackID: in.CarriedAudioTrackID,
+		SubtitleTrackID:     in.SubtitleTrackID, SubtitleTrackIndex: in.SubtitleTrackIndex,
+		FileSelection: in.FileSelection, ForceRelink: in.ForceRelink,
+		OfferedVirtualURI:     in.OfferedVirtualURI,
+		Metered:               in.Metered,
+		BandwidthEstimateKbps: in.BandwidthEstimateKbps, BandwidthEstimateSource: in.BandwidthEstimateSource,
+		ObservedThroughputKbps: in.ObservedThroughputKbps, LearnedLimit: in.LearnedLimit,
+		BandwidthCapKbps: in.BandwidthCapKbps, Capabilities: in.Capabilities,
+		ClientPlaybackContext: in.ClientPlaybackContext,
+	}
 }
 func playbackDecision(in playback.DecisionResponseV3) PlaybackDecision {
 	out := PlaybackDecision{ProtocolVersion: in.ProtocolVersion, ServerFeatures: in.ServerFeatures, Outcome: in.Outcome, SessionID: in.SessionID, Terminal: in.Terminal}
