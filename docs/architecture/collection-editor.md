@@ -275,8 +275,9 @@ like a collection row; its `collection_count` says how many collections it lists
   section write locks the collections it referenced before and after), so after a run that wrote
   a row the collection is read once more and its `DELETE` sends that ETag
   (`deleteAdminCollectionRows` returns it). The run also reads the collection before it touches a
-  row, and returns the new ETag only when that first read still carried the ETag the delete would
-  send and the two reads show the same collection (image URLs aside, which are signed per read).
+  row. When that read fails or no longer carries the ETag the delete would send, the run writes
+  no row. It returns the new ETag only when the two reads show the same collection (image URLs
+  aside, which are signed per read).
   Otherwise someone else changed the collection during the run, the old ETag is sent, and the
   `DELETE` answers `412`. Before any row goes, the editor (and the List) reads the collection
   again: when its ETag no longer matches the one the delete would send, nothing is deleted (the

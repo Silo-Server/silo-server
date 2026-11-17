@@ -98,7 +98,8 @@ function isGone(error: unknown) {
  * at least one was written, the answer's `etag` is the collection's ETag read
  * again; send that one. It is left out when the collection itself changed
  * since `etag` was read, so the `DELETE` still answers `412` to someone
- * else's edit.
+ * else's edit. When it no longer carries `etag` before the run, or can't be
+ * read, no row is written and every row is `remaining`.
  */
 export async function deleteAdminCollectionRows(
   collectionId: string,
@@ -106,8 +107,15 @@ export async function deleteAdminCollectionRows(
   etag: string,
 ): Promise<{ remaining: CollectionRow[]; error?: unknown; etag?: string }> {
   // The collection before any row is touched, to tell this run's own change
-  // of its revision from someone else's edit.
-  const before = await fetchAdminCollectionSnapshot(collectionId).catch(() => undefined);
+  // of its revision from someone else's edit. A row can't come back, so no
+  // row is written unless the collection still carries `etag`.
+  let before: CollectionSnapshot;
+  try {
+    before = await fetchAdminCollectionSnapshot(collectionId);
+  } catch (error) {
+    return { remaining: [...rows], error };
+  }
+  if (before.etag !== etag) return { remaining: [...rows], error: new CollectionChangedError() };
   let wroteRow = false;
   for (const [index, row] of rows.entries()) {
     try {
@@ -138,14 +146,16 @@ export async function deleteAdminCollectionRows(
   if (!wroteRow) return { remaining: [] };
   try {
     const after = await fetchAdminCollectionSnapshot(collectionId);
-    const unchanged = before?.etag === etag && sameCollection(before, after);
-    return unchanged ? { remaining: [], etag: after.etag } : { remaining: [] };
+    return sameCollection(before, after) ? { remaining: [], etag: after.etag } : { remaining: [] };
   } catch (error) {
     // The rows are done; the collection's delete reports what is wrong.
     if (isGone(error)) return { remaining: [] };
     throw error;
   }
 }
+
+/** The collection changed after the delete was confirmed; no row was written. */
+class CollectionChangedError extends Error {}
 
 type CollectionSnapshot = Awaited<ReturnType<typeof fetchAdminCollectionSnapshot>>;
 

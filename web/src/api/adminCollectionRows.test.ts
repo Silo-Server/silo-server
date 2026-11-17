@@ -114,4 +114,15 @@ describe("deleteAdminCollectionRows", () => {
 
     expect(result).toEqual({ remaining: [] });
   });
+
+  it("writes no row when the collection changed before the run", async () => {
+    collectionReads.mockReset();
+    collectionReads.mockReturnValueOnce(read('"edited"'));
+    const rows = [row("shelf", 2)];
+
+    const result = await deleteAdminCollectionRows("marvel", rows, '"before"');
+
+    expect(result.remaining).toEqual(rows);
+    expect(request).not.toHaveBeenCalled();
+  });
 });
