@@ -30,26 +30,32 @@ func TestCreatePersonalAPIKeyDB(t *testing.T) {
 	}
 	kid, foreign := "kid-"+d.suffix, "other-"+d.suffix
 	watch := []string{ScopeWatchRead}
+	acting := APIKeyActingProfile{ID: kid}
 
 	setUserKeys("false")
-	if _, err := d.keys.CreatePersonal(ctx, account, kid, "Sync", watch); !errors.Is(err, ErrUserAPIKeysDisabled) {
+	if _, err := d.keys.CreatePersonal(ctx, account, acting, kid, "Sync", watch); !errors.Is(err, ErrUserAPIKeysDisabled) {
 		t.Fatalf("setting off: %v", err)
 	}
 	setUserKeys("true")
 	for name, scopes := range map[string][]string{"unscoped": nil, "admin scope": {ScopeAdminUsers}, "mixed": {ScopeWatchRead, ScopeAdminMonitorRead}} {
-		if _, err := d.keys.CreatePersonal(ctx, account, kid, "Sync", scopes); !errors.Is(err, ErrAPIKeyUserScopesRequired) {
+		if _, err := d.keys.CreatePersonal(ctx, account, acting, kid, "Sync", scopes); !errors.Is(err, ErrAPIKeyUserScopesRequired) {
 			t.Fatalf("%s: %v", name, err)
 		}
 	}
-	if _, err := d.keys.CreatePersonal(ctx, account, foreign, "Sync", watch); !errors.Is(err, ErrAPIKeyProfileNotFound) {
+	if _, err := d.keys.CreatePersonal(ctx, account, acting, foreign, "Sync", watch); !errors.Is(err, ErrAPIKeyProfileNotFound) {
 		t.Fatalf("another account's profile: %v", err)
 	}
 
-	bound, err := d.keys.CreatePersonal(ctx, account, kid, "Sync", watch)
+	// A PIN change after the profile was verified ends its proof.
+	if _, err := d.keys.CreatePersonal(ctx, account, APIKeyActingProfile{ID: kid, PINRevision: 9}, kid, "Sync", watch); !errors.Is(err, ErrAPIKeyActingProfileChanged) {
+		t.Fatalf("stale PIN revision: %v", err)
+	}
+
+	bound, err := d.keys.CreatePersonal(ctx, account, acting, kid, "Sync", watch)
 	if err != nil {
 		t.Fatal(err)
 	}
-	wide, err := d.keys.CreatePersonal(ctx, account, "", "Everything", watch)
+	wide, err := d.keys.CreatePersonal(ctx, account, acting, "", "Everything", watch)
 	if err != nil {
 		t.Fatal(err)
 	}

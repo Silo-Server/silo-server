@@ -34,11 +34,14 @@ func (f *fakePersonalAPIKeys) PersonalAPIKeyView(context.Context, int, string) (
 func (f *fakePersonalAPIKeys) UserAPIKeysEnabled(context.Context) (bool, error) {
 	return f.userKeys, nil
 }
-func (f *fakePersonalAPIKeys) MayCreateProfileAPIKey(_ context.Context, _ int, acting, target string, _ func(*userstore.Profile) error) (bool, error) {
+func (f *fakePersonalAPIKeys) MayCreateProfileAPIKey(_ context.Context, _ int, acting, target string, _ func(*userstore.Profile) error) (bool, auth.APIKeyActingProfile, error) {
 	f.acting, f.target = acting, target
-	return f.mayCreate, nil
+	return f.mayCreate, auth.APIKeyActingProfile{ID: acting, PINRevision: 3}, nil
 }
-func (f *fakePersonalAPIKeys) CreatePersonalAPIKey(_ context.Context, user int, profile, label string, scopes []string) (*models.APIKey, error) {
+func (f *fakePersonalAPIKeys) CreatePersonalAPIKey(_ context.Context, user int, verified auth.APIKeyActingProfile, profile, label string, scopes []string) (*models.APIKey, error) {
+	if verified.PINRevision != 3 {
+		return nil, auth.ErrAPIKeyActingProfileChanged
+	}
 	f.writes++
 	f.boundTo = &profile
 	if !auth.UserAPIKeyScopesOnly(scopes) {

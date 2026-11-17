@@ -238,9 +238,13 @@ func TestMayCreateProfileAPIKey(t *testing.T) {
 			h := NewAPIKeyHandler(&fakeAPIKeyStore{})
 			h.Stores = testUserStoreProvider{store: actingAdminHousehold(t, "")}
 			ctx := apimw.SetClaims(t.Context(), &auth.Claims{UserID: 1, Role: "user", SessionID: "s1", TokenType: auth.TokenTypeAccess})
-			ok, err := h.MayCreateProfileAPIKey(ctx, 1, tc.acting, tc.target, tc.verify)
+			ok, acting, err := h.MayCreateProfileAPIKey(ctx, 1, tc.acting, tc.target, tc.verify)
 			if ok != tc.want || !errors.Is(err, tc.wantErr) {
 				t.Fatalf("may create = (%v, %v), want (%v, %v)", ok, err, tc.want, tc.wantErr)
+			}
+			// The verified profile travels to the insert, which rechecks it.
+			if ok && acting.ID != tc.acting {
+				t.Fatalf("acting profile = %+v, want %q", acting, tc.acting)
 			}
 		})
 	}
@@ -252,7 +256,7 @@ func TestMayCreateProfileAPIKey(t *testing.T) {
 		"api key": {UserID: 1, Role: "user", TokenType: auth.TokenTypeAPIKey, APIKeyID: 3},
 		"view-as": {UserID: 1, Role: "user", SessionID: "s1", TokenType: auth.TokenTypeAccess, ImpersonatorUserID: &admin},
 	} {
-		if ok, err := h.MayCreateProfileAPIKey(apimw.SetClaims(t.Context(), claims), 1, "profile-1", "kid", verified); ok || err != nil {
+		if ok, _, err := h.MayCreateProfileAPIKey(apimw.SetClaims(t.Context(), claims), 1, "profile-1", "kid", verified); ok || err != nil {
 			t.Fatalf("%s = (%v, %v), want a refusal", name, ok, err)
 		}
 	}

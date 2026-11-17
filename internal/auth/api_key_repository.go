@@ -158,7 +158,18 @@ var (
 	// ErrAPIKeyProfileNotFound refuses a key bound to a profile the account
 	// does not have.
 	ErrAPIKeyProfileNotFound = errors.New("api key profile not found")
+	// ErrAPIKeyActingProfileChanged refuses a personal key when the profile
+	// that asked for it is gone or changed its PIN after it was verified.
+	ErrAPIKeyActingProfileChanged = errors.New("the profile creating the api key changed")
 )
+
+// APIKeyActingProfile is the profile whose PIN proof authorized a personal
+// key, at the PIN revision that proof was checked against. The zero value
+// names no profile: a request that acted without one.
+type APIKeyActingProfile struct {
+	ID          string
+	PINRevision int64
+}
 
 // UserAPIKeysEnabled reads config.AuthUserAPIKeysSettingKey.
 func (r *APIKeyRepository) UserAPIKeysEnabled(ctx context.Context) (bool, error) {
@@ -173,10 +184,12 @@ func (r *APIKeyRepository) UserAPIKeysEnabled(ctx context.Context) (bool, error)
 // limit are judged in the inserting transaction under the server-settings
 // mutation lock, which a setting change also takes: a key is never stored
 // after the setting was turned off, and concurrent creations count each
-// other's keys. An admin's
+// other's keys. The acting profile is rechecked there too, under its row
+// lock: a key skips profile PINs for good, so one must not be stored on a
+// PIN proof that a PIN change has since ended. An admin's
 // own account key is Create's; an empty profileID on an admin account is
 // still held to user scopes here.
-func (r *APIKeyRepository) CreatePersonal(ctx context.Context, userID int, profileID, label string, scopes []string) (*models.APIKey, error) {
+func (r *APIKeyRepository) CreatePersonal(ctx context.Context, userID int, acting APIKeyActingProfile, profileID, label string, scopes []string) (*models.APIKey, error) {
 	if !UserAPIKeyScopesOnly(scopes) {
 		return nil, ErrAPIKeyUserScopesRequired
 	}
@@ -197,6 +210,17 @@ func (r *APIKeyRepository) CreatePersonal(ctx context.Context, userID int, profi
 	if _, err := tx.Exec(ctx, `SELECT id FROM users WHERE id = ANY($1) ORDER BY id FOR SHARE`,
 		append([]int{userID}, auditmutation.ActorIDs(ctx)...)); err != nil {
 		return nil, fmt.Errorf("locking api key account: %w", err)
+	}
+	if acting.ID != "" {
+		var revision int64
+		err := tx.QueryRow(ctx, `SELECT pin_revision FROM user_profiles WHERE user_id = $1 AND id = $2 FOR SHARE`,
+			userID, acting.ID).Scan(&revision)
+		if errors.Is(err, pgx.ErrNoRows) || (err == nil && revision != acting.PINRevision) {
+			return nil, ErrAPIKeyActingProfileChanged
+		}
+		if err != nil {
+			return nil, fmt.Errorf("checking the acting profile: %w", err)
+		}
 	}
 	enabled, err := readBoolSetting(ctx, tx, config.AuthUserAPIKeysSettingKey, false)
 	if err != nil {

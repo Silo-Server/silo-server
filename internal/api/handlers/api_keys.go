@@ -57,7 +57,7 @@ func (h *APIKeyHandler) MayCreatePersonalAPIKey(ctx context.Context, userID int,
 // itself; auth.APIKeyRepository provides it.
 type personalAPIKeyStore interface {
 	UserAPIKeysEnabled(ctx context.Context) (bool, error)
-	CreatePersonal(ctx context.Context, userID int, profileID, label string, scopes []string) (*models.APIKey, error)
+	CreatePersonal(ctx context.Context, userID int, acting auth.APIKeyActingProfile, profileID, label string, scopes []string) (*models.APIKey, error)
 	ListByUserProfilePage(ctx context.Context, userID int, profileID string, after *auth.APIKeyPageKey, limit int) ([]*models.APIKeyMetadataWithUser, bool, error)
 	DeleteForProfile(ctx context.Context, id int64, userID int, profileID string) error
 }
@@ -87,42 +87,50 @@ func (h *APIKeyHandler) UserAPIKeysEnabled(ctx context.Context) (bool, error) {
 // account. Every other profile may mint only a key bound to itself, and only
 // with its own PIN proof: verify returns access.ErrProfileUnverified without
 // it. Only the account's own login session mints these, never a view-as
-// session or a remote-playback handoff.
-func (h *APIKeyHandler) MayCreateProfileAPIKey(ctx context.Context, userID int, activeProfileID, targetProfileID string, verify func(profile *userstore.Profile) error) (bool, error) {
+// session or a remote-playback handoff. The acting profile comes back at the
+// PIN revision it was verified against, for CreatePersonalAPIKey to recheck
+// where the key is stored.
+func (h *APIKeyHandler) MayCreateProfileAPIKey(ctx context.Context, userID int, activeProfileID, targetProfileID string, verify func(profile *userstore.Profile) error) (bool, auth.APIKeyActingProfile, error) {
+	none := auth.APIKeyActingProfile{}
 	if !apimw.GetClaims(ctx).IsOwnLoginSession() || h.Stores == nil {
-		return false, nil
+		return false, none, nil
 	}
 	store, err := h.Stores.ForUser(ctx, userID)
 	if err != nil {
-		return false, fmt.Errorf("opening user store: %w", err)
+		return false, none, fmt.Errorf("opening user store: %w", err)
 	}
 	if store == nil {
-		return false, nil
+		return false, none, nil
 	}
 	if verify == nil {
 		verify = func(*userstore.Profile) error { return access.ErrProfileUnverified }
 	}
-	manager, err := canManageHouseholdAs(ctx, store, activeProfileID, verify)
-	if err != nil || manager {
-		return manager, err
+	manager, active, err := householdManagerAs(ctx, store, activeProfileID, verify)
+	if err != nil {
+		return false, none, err
 	}
-	if activeProfileID == "" || targetProfileID != activeProfileID {
-		return false, nil
+	if !manager {
+		if activeProfileID == "" || targetProfileID != activeProfileID {
+			return false, none, nil
+		}
+		if active, err = store.GetProfile(ctx, activeProfileID); err != nil || active == nil {
+			return false, none, err
+		}
+		if err := verify(active); err != nil {
+			return false, none, err
+		}
 	}
-	active, err := store.GetProfile(ctx, activeProfileID)
-	if err != nil || active == nil {
-		return false, err
+	if active == nil {
+		// A profile-less household manager has no PIN proof to recheck.
+		return true, none, nil
 	}
-	if err := verify(active); err != nil {
-		return false, err
-	}
-	return true, nil
+	return true, auth.APIKeyActingProfile{ID: active.ID, PINRevision: active.PINRevision}, nil
 }
 
 // CreatePersonalAPIKey mints the key MayCreateProfileAPIKey authorized. The
 // store holds it to user scopes, the server setting and the account's key
 // limit in the inserting transaction.
-func (h *APIKeyHandler) CreatePersonalAPIKey(ctx context.Context, userID int, profileID, label string, scopes []string) (*models.APIKey, error) {
+func (h *APIKeyHandler) CreatePersonalAPIKey(ctx context.Context, userID int, acting auth.APIKeyActingProfile, profileID, label string, scopes []string) (*models.APIKey, error) {
 	if userID <= 0 || label == "" {
 		return nil, ErrInvalidAPIKeyCreation
 	}
@@ -134,7 +142,7 @@ func (h *APIKeyHandler) CreatePersonalAPIKey(ctx context.Context, userID int, pr
 	if err != nil {
 		return nil, err
 	}
-	return store.CreatePersonal(ctx, userID, profileID, label, normalized)
+	return store.CreatePersonal(ctx, userID, acting, profileID, label, normalized)
 }
 
 // PersonalAPIKeyView decides which of the account's keys the caller acting as

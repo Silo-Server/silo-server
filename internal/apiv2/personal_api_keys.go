@@ -29,10 +29,12 @@ type PersonalAPIKeyService interface {
 	// UserAPIKeysEnabled reads the server setting behind every other key.
 	UserAPIKeysEnabled(context.Context) (bool, error)
 	// MayCreateProfileAPIKey authorizes such a key: (account, acting
-	// profile, profile to bind or "", PIN verifier).
-	MayCreateProfileAPIKey(context.Context, int, string, string, func(*userstore.Profile) error) (bool, error)
-	// CreatePersonalAPIKey mints it: (account, profile to bind or "", label, scopes).
-	CreatePersonalAPIKey(context.Context, int, string, string, []string) (*models.APIKey, error)
+	// profile, profile to bind or "", PIN verifier). It returns the acting
+	// profile as verified.
+	MayCreateProfileAPIKey(context.Context, int, string, string, func(*userstore.Profile) error) (bool, auth.APIKeyActingProfile, error)
+	// CreatePersonalAPIKey mints it: (account, acting profile as verified,
+	// profile to bind or "", label, scopes).
+	CreatePersonalAPIKey(context.Context, int, auth.APIKeyActingProfile, string, string, []string) (*models.APIKey, error)
 }
 
 type PersonalAPIKeyListItem struct {
@@ -100,6 +102,8 @@ func personalAPIKeyProblem(ctx context.Context, err error) *Problem {
 	case errors.Is(err, auth.ErrAPIKeyProfileNotFound):
 		return NewProblem(TypeValidationFailed, "Invalid API key configuration.").
 			WithErrors(ProblemError{Location: locationBody + ".profile_id", Code: codeInvalid, Detail: "no such profile on this account"})
+	case errors.Is(err, auth.ErrAPIKeyActingProfileChanged):
+		return NewProblem(TypeProfileVerificationRequired, "Creating API keys requires verifying the profile PIN.")
 	case errors.Is(err, auth.ErrAPIKeyLimitReached):
 		return NewProblem(TypeConflict, "This account holds as many API keys as it may; revoke one first.")
 	}
@@ -131,7 +135,7 @@ func (reg *Registry) createUserAPIKey(ctx context.Context, userID int, in *Perso
 	if p := rejectNonNullableNulls(in.RawBody, nil); p != nil {
 		return nil, p
 	}
-	allowed, err := svc.MayCreateProfileAPIKey(ctx, userID, profileFrom(ctx), in.Body.ProfileID, verifyHouseholdProfile(ctx))
+	allowed, acting, err := svc.MayCreateProfileAPIKey(ctx, userID, profileFrom(ctx), in.Body.ProfileID, verifyHouseholdProfile(ctx))
 	if errors.Is(err, access.ErrProfileUnverified) {
 		return nil, NewProblem(TypeProfileVerificationRequired, "Creating API keys requires verifying the profile PIN.")
 	}
@@ -141,7 +145,7 @@ func (reg *Registry) createUserAPIKey(ctx context.Context, userID int, in *Perso
 	if !allowed {
 		return nil, NewProblem(TypePermissionDenied, "A profile can create API keys only for itself; the account's primary profile can create them for any profile.")
 	}
-	row, err := svc.CreatePersonalAPIKey(ctx, userID, in.Body.ProfileID, in.Body.Label, in.Body.Scopes)
+	row, err := svc.CreatePersonalAPIKey(ctx, userID, acting, in.Body.ProfileID, in.Body.Label, in.Body.Scopes)
 	if err != nil {
 		return nil, personalAPIKeyProblem(ctx, err)
 	}

@@ -112,7 +112,7 @@ type personalKeySpy struct {
 }
 
 func (s *personalKeySpy) UserAPIKeysEnabled(context.Context) (bool, error) { return true, nil }
-func (s *personalKeySpy) CreatePersonal(context.Context, int, string, string, []string) (*models.APIKey, error) {
+func (s *personalKeySpy) CreatePersonal(context.Context, int, auth.APIKeyActingProfile, string, string, []string) (*models.APIKey, error) {
 	panic("unexpected create")
 }
 func (s *personalKeySpy) DeleteForProfile(_ context.Context, id int64, userID int, profileID string) error {
