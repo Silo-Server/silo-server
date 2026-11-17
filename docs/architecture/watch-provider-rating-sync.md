@@ -18,7 +18,15 @@ Ratings were whole stars (1 to 5) before. The migration to scores doubled every 
 rating and agreed rating, so a provider value that had been rounded into a star (a 7
 kept as 4 stars, now 8) differs from the agreed rating on the provider's side only. The
 migration also cleared the rating read cursors, so the next sync reads every provider
-rating and imports such a value exactly without writing to the provider.
+rating and imports such a value exactly without writing to the provider. That first
+sync has two other one-time effects:
+
+- When a profile syncs ratings with two providers that held different values of one
+  star (7 on one, 8 on the other), the imported 7 is then a local change for the
+  other connection, whose next sync sends it there.
+- A local removal waits for the scheduled merge. One the first sync after the upgrade
+  has not yet sent comes back when its provider holds an odd value: the merge sees
+  both sides changed, and a rating beats a removal. The profile can remove it again.
 
 ## Agreed rating
 

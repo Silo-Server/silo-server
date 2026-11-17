@@ -106,6 +106,25 @@ describe("StarRating", () => {
     }
   });
 
+  it("keeps holding the hover preview while the pointer crosses into the clicked star's other half", () => {
+    // Each star is two radios, so a pointer that drifts over the middle of the
+    // star it just cleared leaves one half for the other without leaving the
+    // star. The preview must stay off until the pointer leaves the whole star.
+    const { rerender } = render(<StarRating value={8} onChange={vi.fn()} />);
+    const group = screen.getByRole("radiogroup");
+    const halves = screen.getAllByRole("radio");
+
+    fireEvent.click(halves[7]!, { detail: 1 });
+    rerender(<StarRating value={null} onChange={vi.fn()} />);
+    expect(group).toHaveAttribute("data-suppress-preview");
+
+    fireEvent.pointerLeave(halves[7]!, { relatedTarget: halves[6]! });
+    expect(group).toHaveAttribute("data-suppress-preview");
+
+    fireEvent.pointerLeave(halves[6]!, { relatedTarget: halves[5]! });
+    expect(group).not.toHaveAttribute("data-suppress-preview");
+  });
+
   it("drags across the stars to preview a rating and sets it on release", () => {
     const onChange = vi.fn();
     render(<StarRating value={4} onChange={onChange} />);

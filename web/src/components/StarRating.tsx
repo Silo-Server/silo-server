@@ -1,4 +1,4 @@
-import { memo, useCallback, useRef, useState } from "react";
+import { memo, useRef, useState } from "react";
 import { Star } from "lucide-react";
 import { readFinePointer } from "@/lib/pointerCapability";
 import { useT } from "@/i18n";
@@ -43,7 +43,6 @@ function wholeStar(score: number): number {
 function StarRating({ value, onChange, size = 20, verticalArrows = true }: StarRatingProps) {
   const t = useT();
   const [suppressPreview, setSuppressPreview] = useState(false);
-  const clearSuppressPreview = useCallback(() => setSuppressPreview(false), []);
   // The score under a pressed pointer while it drags, null when none is down.
   const [dragScore, setDragScore] = useState<number | null>(null);
   const drag = useRef<{
@@ -101,6 +100,18 @@ function StarRating({ value, onChange, size = 20, verticalArrows = true }: StarR
     }
     if (readFinePointer() !== false) setSuppressPreview(true);
     toggleStar(score);
+  }
+
+  /**
+   * Ends the hold a pointer click puts on the hover preview once the pointer
+   * leaves the star. Moving between a star's two halves leaves one radio but
+   * not the star, so it keeps the hold.
+   */
+  function handleHalfPointerLeave(event: React.PointerEvent<HTMLButtonElement>, score: number) {
+    const half = event.currentTarget;
+    const otherHalf = score % 2 === 0 ? half.previousElementSibling : half.nextElementSibling;
+    if (event.relatedTarget instanceof Node && otherHalf?.contains(event.relatedTarget)) return;
+    setSuppressPreview(false);
   }
 
   function handleKeyDown(e: React.KeyboardEvent) {
@@ -229,7 +240,7 @@ function StarRating({ value, onChange, size = 20, verticalArrows = true }: StarR
             data-clears={clears || undefined}
             className={`star-rating-star focus-visible:ring-ring cursor-pointer rounded-sm border-none bg-transparent py-0.5 leading-none outline-none focus-visible:ring-2 ${rightHalf ? "pe-[3px]" : "ps-[3px]"}`}
             onClick={(event) => handleClick(event, score)}
-            onPointerLeave={clearSuppressPreview}
+            onPointerLeave={(event) => handleHalfPointerLeave(event, score)}
           >
             {/* Each half shows its side of one star icon. */}
             <span className="block overflow-hidden" style={{ width: halfSize }}>
