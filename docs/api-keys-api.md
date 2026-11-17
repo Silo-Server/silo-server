@@ -149,8 +149,9 @@ securely: creation is non-retryable after an uncertain response. List responses
 contain metadata only, with string IDs and optional usage timestamps.
 
 The list accepts `limit` (1–200, default 50) and `cursor`, ordered by creation time
-and ID descending. Cursors bind to the account and page size, independently of the
-selected profile. Revocation checks ownership in the database delete. Missing keys
+and ID descending. Cursors bind to the account, the page size, and the view of the
+keys the acting profile gets (every key, or one profile's own); a change of view
+needs a fresh first page. Revocation checks ownership in the database delete. Missing keys
 and keys belonging to another account both return `404`; retrying revocation has
 no additional effect. This self-service revocation does not require `If-Match`.
 
