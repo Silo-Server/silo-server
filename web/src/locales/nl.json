@@ -72391,6 +72391,12 @@
       "value": "Inloggen met wachtwoord toestaan"
     }
   ],
+  "web.admin.settings.signIn.page.apiKeysGroup": [
+    {
+      "type": 0,
+      "value": "API-sleutels"
+    }
+  ],
   "web.admin.settings.signIn.page.breakGlassAdmins": [
     {
       "type": 6,
@@ -72575,6 +72581,18 @@
     {
       "type": 0,
       "value": "Inloggen"
+    }
+  ],
+  "web.admin.settings.signIn.page.userApiKeysDescription": [
+    {
+      "type": 0,
+      "value": "Elk account kan in Instellingen → API-sleutels sleutels maken voor de eigen profielen. Deze sleutels kunnen kijkgeschiedenis, lijsten en aanvragen lezen en wijzigen, maar geen media afspelen of downloaden. Als je dit uitzet, kunnen er geen nieuwe sleutels worden gemaakt; bestaande sleutels blijven werken totdat ze worden ingetrokken."
+    }
+  ],
+  "web.admin.settings.signIn.page.userApiKeysLabel": [
+    {
+      "type": 0,
+      "value": "Gebruikers API-sleutels laten maken"
     }
   ],
   "web.admin.settings.signIn.provider.accounts.title": [
@@ -101028,6 +101046,12 @@
       "value": "Accountinstellingen"
     }
   ],
+  "web.common.title.settings.apiKeys": [
+    {
+      "type": 0,
+      "value": "Instellingen voor API-sleutels"
+    }
+  ],
   "web.common.title.settings.connectApps": [
     {
       "type": 0,
@@ -126149,6 +126173,340 @@
       "value": "Geavanceerd"
     }
   ],
+  "web.settings.apiKeys.create.access": [
+    {
+      "type": 0,
+      "value": "Toegang"
+    }
+  ],
+  "web.settings.apiKeys.create.accessHint": [
+    {
+      "type": 0,
+      "value": "Kies er minstens één. Geen enkele sleutel kan media afspelen, streamen of downloaden."
+    }
+  ],
+  "web.settings.apiKeys.create.actsAs": [
+    {
+      "type": 0,
+      "value": "Handelt als"
+    }
+  ],
+  "web.settings.apiKeys.create.actsAsHint": [
+    {
+      "type": 0,
+      "value": "Een sleutel voor één profiel handelt altijd als dat profiel en houdt zich aan de limieten daarvan. Een sleutel voor het hele account kan als elk profiel op je account handelen."
+    }
+  ],
+  "web.settings.apiKeys.create.copied": [
+    {
+      "type": 0,
+      "value": "Gekopieerd naar klembord"
+    }
+  ],
+  "web.settings.apiKeys.create.copyAndClose": [
+    {
+      "type": 0,
+      "value": "Kopiëren en sluiten"
+    }
+  ],
+  "web.settings.apiKeys.create.copyFailed": [
+    {
+      "type": 0,
+      "value": "Kan niet kopiëren. Selecteer de sleutel en kopieer hem handmatig."
+    }
+  ],
+  "web.settings.apiKeys.create.creating": [
+    {
+      "type": 0,
+      "value": "Maken…"
+    }
+  ],
+  "web.settings.apiKeys.create.description": [
+    {
+      "type": 0,
+      "value": "De volledige sleutel wordt maar één keer getoond."
+    }
+  ],
+  "web.settings.apiKeys.create.label": [
+    {
+      "type": 0,
+      "value": "Label"
+    }
+  ],
+  "web.settings.apiKeys.create.secretNotice": [
+    {
+      "type": 0,
+      "value": "Kopieer je API-sleutel nu. Je kunt hem hierna niet meer zien."
+    }
+  ],
+  "web.settings.apiKeys.create.submit": [
+    {
+      "type": 0,
+      "value": "Maken"
+    }
+  ],
+  "web.settings.apiKeys.create.title": [
+    {
+      "type": 0,
+      "value": "API-sleutel maken"
+    }
+  ],
+  "web.settings.apiKeys.create.uncertain": [
+    {
+      "type": 0,
+      "value": "Het resultaat is onzeker. Laad de pagina opnieuw voordat je nog een sleutel maakt."
+    }
+  ],
+  "web.settings.apiKeys.createKey": [
+    {
+      "type": 0,
+      "value": "Sleutel maken"
+    }
+  ],
+  "web.settings.apiKeys.disabled": [
+    {
+      "type": 0,
+      "value": "Deze server staat gebruikers niet toe API-sleutels te maken. Vraag de beheerder om dat aan te zetten."
+    }
+  ],
+  "web.settings.apiKeys.empty": [
+    {
+      "type": 0,
+      "value": "Nog geen API-sleutels."
+    }
+  ],
+  "web.settings.apiKeys.limitReached": [
+    {
+      "type": 0,
+      "value": "Je hebt de limiet van "
+    },
+    {
+      "type": 1,
+      "value": "max"
+    },
+    {
+      "type": 0,
+      "value": " sleutels bereikt. Trek er een in om een nieuwe te maken."
+    }
+  ],
+  "web.settings.apiKeys.list.created": [
+    {
+      "type": 0,
+      "value": "Gemaakt op "
+    },
+    {
+      "type": 1,
+      "value": "date"
+    }
+  ],
+  "web.settings.apiKeys.list.heading": [
+    {
+      "type": 0,
+      "value": "Je sleutels"
+    }
+  ],
+  "web.settings.apiKeys.list.lastUsed": [
+    {
+      "type": 0,
+      "value": "Laatst gebruikt op "
+    },
+    {
+      "type": 1,
+      "value": "date"
+    }
+  ],
+  "web.settings.apiKeys.list.loadMore": [
+    {
+      "type": 0,
+      "value": "Meer laden"
+    }
+  ],
+  "web.settings.apiKeys.list.neverUsed": [
+    {
+      "type": 0,
+      "value": "Nooit gebruikt"
+    }
+  ],
+  "web.settings.apiKeys.list.profile": [
+    {
+      "type": 0,
+      "value": "Profiel: "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    }
+  ],
+  "web.settings.apiKeys.list.revoke": [
+    {
+      "type": 0,
+      "value": "Intrekken"
+    }
+  ],
+  "web.settings.apiKeys.list.revokeNamed": [
+    {
+      "type": 1,
+      "value": "label"
+    },
+    {
+      "type": 0,
+      "value": " intrekken"
+    }
+  ],
+  "web.settings.apiKeys.list.wholeAccount": [
+    {
+      "type": 0,
+      "value": "Hele account"
+    }
+  ],
+  "web.settings.apiKeys.loadFailed": [
+    {
+      "type": 0,
+      "value": "Kan je API-sleutels niet laden."
+    }
+  ],
+  "web.settings.apiKeys.loading": [
+    {
+      "type": 0,
+      "value": "API-sleutels laden…"
+    }
+  ],
+  "web.settings.apiKeys.revoke.description": [
+    {
+      "type": 1,
+      "value": "label"
+    },
+    {
+      "type": 0,
+      "value": " werkt meteen niet meer. Dit kan niet ongedaan worden gemaakt."
+    }
+  ],
+  "web.settings.apiKeys.revoke.done": [
+    {
+      "type": 0,
+      "value": "API-sleutel ingetrokken"
+    }
+  ],
+  "web.settings.apiKeys.revoke.failed": [
+    {
+      "type": 0,
+      "value": "Kan de sleutel niet intrekken. Laad de pagina opnieuw en probeer het opnieuw."
+    }
+  ],
+  "web.settings.apiKeys.revoke.title": [
+    {
+      "type": 0,
+      "value": "API-sleutel intrekken"
+    }
+  ],
+  "web.settings.apiKeys.revoke.working": [
+    {
+      "type": 0,
+      "value": "Intrekken…"
+    }
+  ],
+  "web.settings.apiKeys.scope.catalogRead": [
+    {
+      "type": 0,
+      "value": "Bladeren door wat het profiel kan zien: bibliotheken, Home- en bibliotheekrijen, titels, personen en zoeken."
+    }
+  ],
+  "web.settings.apiKeys.scope.librariesRead": [
+    {
+      "type": 0,
+      "value": "Zien welke bibliotheken het profiel heeft."
+    }
+  ],
+  "web.settings.apiKeys.scope.notifications": [
+    {
+      "type": 0,
+      "value": "De meldingen van het profiel lezen zodra ze binnenkomen en ze als gelezen markeren."
+    }
+  ],
+  "web.settings.apiKeys.scope.requests": [
+    {
+      "type": 0,
+      "value": "Bladeren door titels die je kunt aanvragen en media-aanvragen maken, volgen en annuleren."
+    }
+  ],
+  "web.settings.apiKeys.scope.watchRead": [
+    {
+      "type": 0,
+      "value": "De kijkgeschiedenis, voortgang, beoordelingen, favorieten, kijklijst en verborgen titels van het profiel lezen en de gegevens ervan exporteren."
+    }
+  ],
+  "web.settings.apiKeys.scope.watchWrite": [
+    {
+      "type": 0,
+      "value": "Titels als bekeken of niet bekeken markeren, voortgang synchroniseren, geschiedenis verwijderen en beoordelingen, favorieten, kijklijst en verborgen titels bewerken."
+    }
+  ],
+  "web.settings.apiKeys.subtitle": [
+    {
+      "type": 0,
+      "value": "Met sleutels kunnen scripts en apps je Silo-gegevens lezen en bijwerken zonder je wachtwoord."
+    }
+  ],
+  "web.settings.apiKeys.title": [
+    {
+      "type": 0,
+      "value": "API-sleutels"
+    }
+  ],
+  "web.settings.apiKeys.usage.accountKey": [
+    {
+      "type": 0,
+      "value": "Deze sleutel kan als elk profiel op je account handelen. Kies er per verzoek één met deze header. Het voorbeeld gebruikt "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": "; "
+    },
+    {
+      "type": 1,
+      "value": "endpoint"
+    },
+    {
+      "type": 0,
+      "value": " toont de ID van elk profiel."
+    }
+  ],
+  "web.settings.apiKeys.usage.docs": [
+    {
+      "type": 0,
+      "value": "API-referentie"
+    }
+  ],
+  "web.settings.apiKeys.usage.header": [
+    {
+      "type": 0,
+      "value": "Stuur hem bij elk verzoek mee in deze header:"
+    }
+  ],
+  "web.settings.apiKeys.usage.profileKey": [
+    {
+      "type": 0,
+      "value": "Deze sleutel handelt altijd als "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": ". Er is geen profielheader nodig."
+    }
+  ],
+  "web.settings.apiKeys.usage.title": [
+    {
+      "type": 0,
+      "value": "Zo gebruik je deze sleutel"
+    }
+  ],
   "web.settings.cardOverlay.adjust": [
     {
       "type": 0,
@@ -129551,6 +129909,12 @@
     {
       "type": 0,
       "value": "Het wachtwoord en de inlogproviders die alle profielen in het huishouden delen."
+    }
+  ],
+  "web.settings.nav.apiKeys.description": [
+    {
+      "type": 0,
+      "value": "Sleutels voor scripts en apps die met je kijkgeschiedenis en lijsten werken."
     }
   ],
   "web.settings.nav.connectApps.description": [

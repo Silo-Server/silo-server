@@ -72563,6 +72563,12 @@
       "value": "Anmeldung mit Passwort erlauben"
     }
   ],
+  "web.admin.settings.signIn.page.apiKeysGroup": [
+    {
+      "type": 0,
+      "value": "API-Schlüssel"
+    }
+  ],
   "web.admin.settings.signIn.page.breakGlassAdmins": [
     {
       "type": 6,
@@ -72747,6 +72753,18 @@
     {
       "type": 0,
       "value": "Anmeldung"
+    }
+  ],
+  "web.admin.settings.signIn.page.userApiKeysDescription": [
+    {
+      "type": 0,
+      "value": "Jedes Konto kann unter Einstellungen → API-Schlüssel Schlüssel für seine eigenen Profile erstellen. Diese Schlüssel können Wiedergabeverlauf, Listen und Anfragen lesen und ändern, aber keine Medien abspielen oder herunterladen. Wenn du dies deaktivierst, können keine neuen Schlüssel erstellt werden; vorhandene funktionieren weiter, bis sie widerrufen werden."
+    }
+  ],
+  "web.admin.settings.signIn.page.userApiKeysLabel": [
+    {
+      "type": 0,
+      "value": "Benutzern das Erstellen von API-Schlüsseln erlauben"
     }
   ],
   "web.admin.settings.signIn.provider.accounts.title": [
@@ -101224,6 +101242,12 @@
       "value": "Kontoeinstellungen"
     }
   ],
+  "web.common.title.settings.apiKeys": [
+    {
+      "type": 0,
+      "value": "Einstellungen für API-Schlüssel"
+    }
+  ],
   "web.common.title.settings.connectApps": [
     {
       "type": 0,
@@ -126380,6 +126404,340 @@
       "value": "Erweitert"
     }
   ],
+  "web.settings.apiKeys.create.access": [
+    {
+      "type": 0,
+      "value": "Zugriff"
+    }
+  ],
+  "web.settings.apiKeys.create.accessHint": [
+    {
+      "type": 0,
+      "value": "Wähle mindestens eine Option. Kein Schlüssel kann Medien abspielen, streamen oder herunterladen."
+    }
+  ],
+  "web.settings.apiKeys.create.actsAs": [
+    {
+      "type": 0,
+      "value": "Handelt als"
+    }
+  ],
+  "web.settings.apiKeys.create.actsAsHint": [
+    {
+      "type": 0,
+      "value": "Ein Schlüssel für ein Profil handelt immer als dieses Profil und behält dessen Einschränkungen. Ein Schlüssel für das ganze Konto kann als jedes Profil deines Kontos handeln."
+    }
+  ],
+  "web.settings.apiKeys.create.copied": [
+    {
+      "type": 0,
+      "value": "In die Zwischenablage kopiert"
+    }
+  ],
+  "web.settings.apiKeys.create.copyAndClose": [
+    {
+      "type": 0,
+      "value": "Kopieren und schließen"
+    }
+  ],
+  "web.settings.apiKeys.create.copyFailed": [
+    {
+      "type": 0,
+      "value": "Kopieren fehlgeschlagen. Markiere den Schlüssel und kopiere ihn manuell."
+    }
+  ],
+  "web.settings.apiKeys.create.creating": [
+    {
+      "type": 0,
+      "value": "Wird erstellt…"
+    }
+  ],
+  "web.settings.apiKeys.create.description": [
+    {
+      "type": 0,
+      "value": "Der vollständige Schlüssel wird nur einmal angezeigt."
+    }
+  ],
+  "web.settings.apiKeys.create.label": [
+    {
+      "type": 0,
+      "value": "Bezeichnung"
+    }
+  ],
+  "web.settings.apiKeys.create.secretNotice": [
+    {
+      "type": 0,
+      "value": "Kopiere deinen API-Schlüssel jetzt. Du kannst ihn später nicht mehr sehen."
+    }
+  ],
+  "web.settings.apiKeys.create.submit": [
+    {
+      "type": 0,
+      "value": "Erstellen"
+    }
+  ],
+  "web.settings.apiKeys.create.title": [
+    {
+      "type": 0,
+      "value": "API-Schlüssel erstellen"
+    }
+  ],
+  "web.settings.apiKeys.create.uncertain": [
+    {
+      "type": 0,
+      "value": "Das Ergebnis ist unklar. Lade die Seite neu, bevor du einen weiteren Schlüssel erstellst."
+    }
+  ],
+  "web.settings.apiKeys.createKey": [
+    {
+      "type": 0,
+      "value": "Schlüssel erstellen"
+    }
+  ],
+  "web.settings.apiKeys.disabled": [
+    {
+      "type": 0,
+      "value": "Dieser Server erlaubt Benutzern nicht, API-Schlüssel zu erstellen. Bitte die Serververwaltung, dies zu aktivieren."
+    }
+  ],
+  "web.settings.apiKeys.empty": [
+    {
+      "type": 0,
+      "value": "Noch keine API-Schlüssel."
+    }
+  ],
+  "web.settings.apiKeys.limitReached": [
+    {
+      "type": 0,
+      "value": "Du hast das Limit von "
+    },
+    {
+      "type": 1,
+      "value": "max"
+    },
+    {
+      "type": 0,
+      "value": " Schlüsseln erreicht. Widerrufe einen, um einen neuen zu erstellen."
+    }
+  ],
+  "web.settings.apiKeys.list.created": [
+    {
+      "type": 0,
+      "value": "Erstellt: "
+    },
+    {
+      "type": 1,
+      "value": "date"
+    }
+  ],
+  "web.settings.apiKeys.list.heading": [
+    {
+      "type": 0,
+      "value": "Deine Schlüssel"
+    }
+  ],
+  "web.settings.apiKeys.list.lastUsed": [
+    {
+      "type": 0,
+      "value": "Zuletzt verwendet: "
+    },
+    {
+      "type": 1,
+      "value": "date"
+    }
+  ],
+  "web.settings.apiKeys.list.loadMore": [
+    {
+      "type": 0,
+      "value": "Mehr laden"
+    }
+  ],
+  "web.settings.apiKeys.list.neverUsed": [
+    {
+      "type": 0,
+      "value": "Nie verwendet"
+    }
+  ],
+  "web.settings.apiKeys.list.profile": [
+    {
+      "type": 0,
+      "value": "Profil: "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    }
+  ],
+  "web.settings.apiKeys.list.revoke": [
+    {
+      "type": 0,
+      "value": "Widerrufen"
+    }
+  ],
+  "web.settings.apiKeys.list.revokeNamed": [
+    {
+      "type": 1,
+      "value": "label"
+    },
+    {
+      "type": 0,
+      "value": " widerrufen"
+    }
+  ],
+  "web.settings.apiKeys.list.wholeAccount": [
+    {
+      "type": 0,
+      "value": "Ganzes Konto"
+    }
+  ],
+  "web.settings.apiKeys.loadFailed": [
+    {
+      "type": 0,
+      "value": "Deine API-Schlüssel konnten nicht geladen werden."
+    }
+  ],
+  "web.settings.apiKeys.loading": [
+    {
+      "type": 0,
+      "value": "API-Schlüssel werden geladen…"
+    }
+  ],
+  "web.settings.apiKeys.revoke.description": [
+    {
+      "type": 1,
+      "value": "label"
+    },
+    {
+      "type": 0,
+      "value": " funktioniert sofort nicht mehr. Dies kann nicht rückgängig gemacht werden."
+    }
+  ],
+  "web.settings.apiKeys.revoke.done": [
+    {
+      "type": 0,
+      "value": "API-Schlüssel widerrufen"
+    }
+  ],
+  "web.settings.apiKeys.revoke.failed": [
+    {
+      "type": 0,
+      "value": "Der Schlüssel konnte nicht widerrufen werden. Lade die Seite neu und versuche es erneut."
+    }
+  ],
+  "web.settings.apiKeys.revoke.title": [
+    {
+      "type": 0,
+      "value": "API-Schlüssel widerrufen"
+    }
+  ],
+  "web.settings.apiKeys.revoke.working": [
+    {
+      "type": 0,
+      "value": "Wird widerrufen…"
+    }
+  ],
+  "web.settings.apiKeys.scope.catalogRead": [
+    {
+      "type": 0,
+      "value": "Alles durchsuchen, was das Profil sehen kann: Mediatheken, Reihen auf der Startseite und in Mediatheken, Titel, Personen und Suche."
+    }
+  ],
+  "web.settings.apiKeys.scope.librariesRead": [
+    {
+      "type": 0,
+      "value": "Sehen, welche Mediatheken das Profil hat."
+    }
+  ],
+  "web.settings.apiKeys.scope.notifications": [
+    {
+      "type": 0,
+      "value": "Benachrichtigungen des Profils beim Eintreffen lesen und als gelesen markieren."
+    }
+  ],
+  "web.settings.apiKeys.scope.requests": [
+    {
+      "type": 0,
+      "value": "Anfragbare Titel durchsuchen sowie Medienanfragen erstellen, verfolgen und abbrechen."
+    }
+  ],
+  "web.settings.apiKeys.scope.watchRead": [
+    {
+      "type": 0,
+      "value": "Wiedergabeverlauf, Fortschritt, Bewertungen, Favoriten, Merkliste und ausgeblendete Titel des Profils lesen und seine Daten exportieren."
+    }
+  ],
+  "web.settings.apiKeys.scope.watchWrite": [
+    {
+      "type": 0,
+      "value": "Titel als gesehen oder ungesehen markieren, Fortschritt synchronisieren, Verlauf entfernen sowie Bewertungen, Favoriten, Merkliste und ausgeblendete Titel bearbeiten."
+    }
+  ],
+  "web.settings.apiKeys.subtitle": [
+    {
+      "type": 0,
+      "value": "Mit Schlüsseln können Skripte und Apps deine Silo-Daten ohne dein Passwort lesen und aktualisieren."
+    }
+  ],
+  "web.settings.apiKeys.title": [
+    {
+      "type": 0,
+      "value": "API-Schlüssel"
+    }
+  ],
+  "web.settings.apiKeys.usage.accountKey": [
+    {
+      "type": 0,
+      "value": "Dieser Schlüssel kann als jedes Profil deines Kontos handeln. Wähle mit diesem Header pro Anfrage eines aus. Das Beispiel verwendet "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": "; "
+    },
+    {
+      "type": 1,
+      "value": "endpoint"
+    },
+    {
+      "type": 0,
+      "value": " listet die IDs aller Profile auf."
+    }
+  ],
+  "web.settings.apiKeys.usage.docs": [
+    {
+      "type": 0,
+      "value": "API-Referenz"
+    }
+  ],
+  "web.settings.apiKeys.usage.header": [
+    {
+      "type": 0,
+      "value": "Sende ihn bei jeder Anfrage in diesem Header mit:"
+    }
+  ],
+  "web.settings.apiKeys.usage.profileKey": [
+    {
+      "type": 0,
+      "value": "Dieser Schlüssel handelt immer als "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": ". Er braucht keinen Profil-Header."
+    }
+  ],
+  "web.settings.apiKeys.usage.title": [
+    {
+      "type": 0,
+      "value": "So verwendest du diesen Schlüssel"
+    }
+  ],
   "web.settings.cardOverlay.adjust": [
     {
       "type": 0,
@@ -129818,6 +130176,12 @@
     {
       "type": 0,
       "value": "Das Passwort und die Anmelde-Anbieter, die alle Profile im Haushalt teilen."
+    }
+  ],
+  "web.settings.nav.apiKeys.description": [
+    {
+      "type": 0,
+      "value": "Schlüssel für Skripte und Apps, die mit deinem Wiedergabeverlauf und deinen Listen arbeiten."
     }
   ],
   "web.settings.nav.connectApps.description": [

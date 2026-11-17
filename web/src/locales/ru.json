@@ -87318,6 +87318,12 @@
       "value": "Разрешить вход по паролю"
     }
   ],
+  "web.admin.settings.signIn.page.apiKeysGroup": [
+    {
+      "type": 0,
+      "value": "API-ключи"
+    }
+  ],
   "web.admin.settings.signIn.page.breakGlassAdmins": [
     {
       "type": 6,
@@ -87526,6 +87532,18 @@
     {
       "type": 0,
       "value": "Вход"
+    }
+  ],
+  "web.admin.settings.signIn.page.userApiKeysDescription": [
+    {
+      "type": 0,
+      "value": "Любой аккаунт может создавать ключи для своих профилей в разделе «Настройки → API-ключи». Эти ключи могут читать и изменять историю просмотра, списки и запросы, но не могут воспроизводить или скачивать медиа. Если выключить этот параметр, новые ключи создавать будет нельзя; существующие продолжат работать, пока их не отзовут."
+    }
+  ],
+  "web.admin.settings.signIn.page.userApiKeysLabel": [
+    {
+      "type": 0,
+      "value": "Разрешить пользователям создавать API-ключи"
     }
   ],
   "web.admin.settings.signIn.provider.accounts.title": [
@@ -121828,6 +121846,12 @@
       "value": "Настройки аккаунта"
     }
   ],
+  "web.common.title.settings.apiKeys": [
+    {
+      "type": 0,
+      "value": "Настройки API-ключей"
+    }
+  ],
   "web.common.title.settings.connectApps": [
     {
       "type": 0,
@@ -150689,6 +150713,348 @@
       "value": "Дополнительно"
     }
   ],
+  "web.settings.apiKeys.create.access": [
+    {
+      "type": 0,
+      "value": "Доступ"
+    }
+  ],
+  "web.settings.apiKeys.create.accessHint": [
+    {
+      "type": 0,
+      "value": "Выберите хотя бы один вариант. Ни один ключ не может воспроизводить, транслировать или скачивать медиа."
+    }
+  ],
+  "web.settings.apiKeys.create.actsAs": [
+    {
+      "type": 0,
+      "value": "Действует от имени"
+    }
+  ],
+  "web.settings.apiKeys.create.actsAsHint": [
+    {
+      "type": 0,
+      "value": "Ключ для одного профиля всегда действует от имени этого профиля и сохраняет его ограничения. Ключ для всего аккаунта может действовать от имени любого профиля вашего аккаунта."
+    }
+  ],
+  "web.settings.apiKeys.create.copied": [
+    {
+      "type": 0,
+      "value": "Скопировано в буфер обмена"
+    }
+  ],
+  "web.settings.apiKeys.create.copyAndClose": [
+    {
+      "type": 0,
+      "value": "Скопировать и закрыть"
+    }
+  ],
+  "web.settings.apiKeys.create.copyFailed": [
+    {
+      "type": 0,
+      "value": "Не удалось скопировать. Выделите ключ и скопируйте его вручную."
+    }
+  ],
+  "web.settings.apiKeys.create.creating": [
+    {
+      "type": 0,
+      "value": "Создание…"
+    }
+  ],
+  "web.settings.apiKeys.create.description": [
+    {
+      "type": 0,
+      "value": "Полный ключ показывается только один раз."
+    }
+  ],
+  "web.settings.apiKeys.create.label": [
+    {
+      "type": 0,
+      "value": "Название"
+    }
+  ],
+  "web.settings.apiKeys.create.secretNotice": [
+    {
+      "type": 0,
+      "value": "Скопируйте API-ключ сейчас. Больше вы его не увидите."
+    }
+  ],
+  "web.settings.apiKeys.create.submit": [
+    {
+      "type": 0,
+      "value": "Создать"
+    }
+  ],
+  "web.settings.apiKeys.create.title": [
+    {
+      "type": 0,
+      "value": "Создать API-ключ"
+    }
+  ],
+  "web.settings.apiKeys.create.uncertain": [
+    {
+      "type": 0,
+      "value": "Результат неизвестен. Перезагрузите страницу, прежде чем создавать новый ключ."
+    }
+  ],
+  "web.settings.apiKeys.createKey": [
+    {
+      "type": 0,
+      "value": "Создать ключ"
+    }
+  ],
+  "web.settings.apiKeys.disabled": [
+    {
+      "type": 0,
+      "value": "Этот сервер не разрешает пользователям создавать API-ключи. Попросите администратора включить эту возможность."
+    }
+  ],
+  "web.settings.apiKeys.empty": [
+    {
+      "type": 0,
+      "value": "API-ключей пока нет."
+    }
+  ],
+  "web.settings.apiKeys.limitReached": [
+    {
+      "type": 0,
+      "value": "Вы достигли лимита ключей: "
+    },
+    {
+      "type": 1,
+      "value": "max"
+    },
+    {
+      "type": 0,
+      "value": ". Отзовите один из них, чтобы создать новый."
+    }
+  ],
+  "web.settings.apiKeys.list.created": [
+    {
+      "type": 0,
+      "value": "Создан: "
+    },
+    {
+      "type": 1,
+      "value": "date"
+    }
+  ],
+  "web.settings.apiKeys.list.heading": [
+    {
+      "type": 0,
+      "value": "Ваши ключи"
+    }
+  ],
+  "web.settings.apiKeys.list.lastUsed": [
+    {
+      "type": 0,
+      "value": "Последнее использование: "
+    },
+    {
+      "type": 1,
+      "value": "date"
+    }
+  ],
+  "web.settings.apiKeys.list.loadMore": [
+    {
+      "type": 0,
+      "value": "Загрузить ещё"
+    }
+  ],
+  "web.settings.apiKeys.list.neverUsed": [
+    {
+      "type": 0,
+      "value": "Не использовался"
+    }
+  ],
+  "web.settings.apiKeys.list.profile": [
+    {
+      "type": 0,
+      "value": "Профиль: "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    }
+  ],
+  "web.settings.apiKeys.list.revoke": [
+    {
+      "type": 0,
+      "value": "Отозвать"
+    }
+  ],
+  "web.settings.apiKeys.list.revokeNamed": [
+    {
+      "type": 0,
+      "value": "Отозвать ключ «"
+    },
+    {
+      "type": 1,
+      "value": "label"
+    },
+    {
+      "type": 0,
+      "value": "»"
+    }
+  ],
+  "web.settings.apiKeys.list.wholeAccount": [
+    {
+      "type": 0,
+      "value": "Весь аккаунт"
+    }
+  ],
+  "web.settings.apiKeys.loadFailed": [
+    {
+      "type": 0,
+      "value": "Не удалось загрузить ваши API-ключи."
+    }
+  ],
+  "web.settings.apiKeys.loading": [
+    {
+      "type": 0,
+      "value": "Загрузка API-ключей…"
+    }
+  ],
+  "web.settings.apiKeys.revoke.description": [
+    {
+      "type": 0,
+      "value": "Ключ «"
+    },
+    {
+      "type": 1,
+      "value": "label"
+    },
+    {
+      "type": 0,
+      "value": "» сразу перестанет работать. Это действие нельзя отменить."
+    }
+  ],
+  "web.settings.apiKeys.revoke.done": [
+    {
+      "type": 0,
+      "value": "API-ключ отозван"
+    }
+  ],
+  "web.settings.apiKeys.revoke.failed": [
+    {
+      "type": 0,
+      "value": "Не удалось отозвать ключ. Перезагрузите страницу и повторите попытку."
+    }
+  ],
+  "web.settings.apiKeys.revoke.title": [
+    {
+      "type": 0,
+      "value": "Отозвать API-ключ"
+    }
+  ],
+  "web.settings.apiKeys.revoke.working": [
+    {
+      "type": 0,
+      "value": "Отзыв…"
+    }
+  ],
+  "web.settings.apiKeys.scope.catalogRead": [
+    {
+      "type": 0,
+      "value": "Просматривать то, что доступно профилю: медиатеки, ряды на главной и в медиатеках, произведения и персоны, а также пользоваться поиском."
+    }
+  ],
+  "web.settings.apiKeys.scope.librariesRead": [
+    {
+      "type": 0,
+      "value": "Видеть, какие медиатеки есть у профиля."
+    }
+  ],
+  "web.settings.apiKeys.scope.notifications": [
+    {
+      "type": 0,
+      "value": "Читать уведомления профиля по мере поступления и отмечать их прочитанными."
+    }
+  ],
+  "web.settings.apiKeys.scope.requests": [
+    {
+      "type": 0,
+      "value": "Просматривать произведения, доступные для запроса, а также создавать, отслеживать и отменять запросы медиа."
+    }
+  ],
+  "web.settings.apiKeys.scope.watchRead": [
+    {
+      "type": 0,
+      "value": "Читать историю просмотра профиля, прогресс, оценки, избранное, список просмотра и скрытые произведения, а также экспортировать его данные."
+    }
+  ],
+  "web.settings.apiKeys.scope.watchWrite": [
+    {
+      "type": 0,
+      "value": "Отмечать произведения как просмотренные или непросмотренные, синхронизировать прогресс, удалять историю, а также изменять оценки, избранное, список просмотра и скрытые произведения."
+    }
+  ],
+  "web.settings.apiKeys.subtitle": [
+    {
+      "type": 0,
+      "value": "Ключи позволяют скриптам и приложениям читать и обновлять ваши данные в Silo без пароля."
+    }
+  ],
+  "web.settings.apiKeys.title": [
+    {
+      "type": 0,
+      "value": "API-ключи"
+    }
+  ],
+  "web.settings.apiKeys.usage.accountKey": [
+    {
+      "type": 0,
+      "value": "Этот ключ может действовать от имени любого профиля вашего аккаунта. Выбирайте профиль для каждого запроса с помощью этого заголовка. В примере используется профиль «"
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": "»; запрос "
+    },
+    {
+      "type": 1,
+      "value": "endpoint"
+    },
+    {
+      "type": 0,
+      "value": " возвращает ID всех профилей."
+    }
+  ],
+  "web.settings.apiKeys.usage.docs": [
+    {
+      "type": 0,
+      "value": "Справочник API"
+    }
+  ],
+  "web.settings.apiKeys.usage.header": [
+    {
+      "type": 0,
+      "value": "Отправляйте его с каждым запросом в этом заголовке:"
+    }
+  ],
+  "web.settings.apiKeys.usage.profileKey": [
+    {
+      "type": 0,
+      "value": "Этот ключ всегда действует от имени профиля «"
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": "». Заголовок профиля ему не нужен."
+    }
+  ],
+  "web.settings.apiKeys.usage.title": [
+    {
+      "type": 0,
+      "value": "Как использовать этот ключ"
+    }
+  ],
   "web.settings.cardOverlay.adjust": [
     {
       "type": 0,
@@ -154527,6 +154893,12 @@
     {
       "type": 0,
       "value": "Пароль и провайдеры входа, общие для всех профилей семьи."
+    }
+  ],
+  "web.settings.nav.apiKeys.description": [
+    {
+      "type": 0,
+      "value": "Ключи для скриптов и приложений, которые работают с вашей историей просмотра и списками."
     }
   ],
   "web.settings.nav.connectApps.description": [
