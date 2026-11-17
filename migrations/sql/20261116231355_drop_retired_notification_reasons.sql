@@ -12,13 +12,23 @@ WHERE NOT next_up_candidate
   AND last_completed_episode_key IS NULL;
 
 -- The old rules notified every arriving episode at or past the cursor, so a
--- row's last notified episode can be above its cursor. Under the new rule
--- that mark would silence the episode the profile waits for when it arrives
--- after a later one. A mark at the cursor itself stays: it says the profile
--- was told about that episode.
-UPDATE public.profile_series_interest
+-- row's last notified episode can lie beyond the episode the profile waits
+-- for: the catalog lists an episode at or after the cursor and below the
+-- mark. Under the new rule that mark would silence the awaited episode when
+-- it arrives after a later one. A mark on the first listed episode at or
+-- after the cursor stays: it says the profile was told about that episode.
+-- The bounds keep the key expression inside int4, as ValidEpisodeOrdinals
+-- does (internal/notifications/episode_key.go).
+UPDATE public.profile_series_interest psi
 SET last_notified_episode_key = NULL
-WHERE last_notified_episode_key > next_expected_episode_key;
+WHERE psi.last_notified_episode_key > psi.next_expected_episode_key
+  AND EXISTS (
+    SELECT 1 FROM public.episodes e
+    WHERE e.series_id = psi.series_id
+      AND e.season_number BETWEEN 0 AND 2146
+      AND e.episode_number BETWEEN 0 AND 999999
+      AND e.season_number * 1000000 + e.episode_number >= psi.next_expected_episode_key
+      AND e.season_number * 1000000 + e.episode_number < psi.last_notified_episode_key);
 
 -- Dropping the columns drops profile_series_interest_active_idx, whose
 -- predicate reads them. Fanout now reads Next Up candidates only.

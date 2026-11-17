@@ -57,6 +57,9 @@ type Arrivals struct{}
 // arrival and the notification fanout from losing the notice. It reads the
 // promotion record rather than the library watchlist, which may live in a
 // per-user SQLite store this query cannot reach.
+//
+// contentIDs is expected to be one fanout claim's items (at most 100): they
+// go to the database as one array, and each arrived item costs its own reads.
 func (a *Arrivals) WaitingFor(ctx context.Context, q Querier, contentIDs []string, arrivedSince time.Time) (map[string][]Waiter, error) {
 	out := make(map[string][]Waiter)
 	if a == nil || len(contentIDs) == 0 {
