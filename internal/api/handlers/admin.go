@@ -805,6 +805,18 @@ var errArtworkStorageLocked = &APIError{
 	Message: "recorded storage locations cannot be changed directly; use a managed storage transition",
 }
 
+// checkArtworkLocalPath refuses a local artwork root that startup could not
+// open (a file, a symbolic link, or a path inside a file). Startup exits on
+// such a root before the admin UI can fix it. The check runs on the node that
+// takes the save and creates nothing. field names the rejected request member.
+func checkArtworkLocalPath(path, field string) error {
+	if err := blobstore.CheckLocalRoot(path); err != nil {
+		slog.Warn("refused unusable artwork.local_path", "error", err)
+		return fieldError(field, artworkLocalPathKey+" must be a folder Silo can open, not a file, a symbolic link, or a path inside a file")
+	}
+	return nil
+}
+
 // artworkIdentityInputs names the effective settings that decide where public
 // artwork and private operational objects live. The S3 keys are canonical; the
 // effective map already applies the legacy operational aliases. A private
@@ -1634,6 +1646,11 @@ func (h *AdminHandler) updateAdminSettings(ctx context.Context, tx pgx.Tx, value
 		if err != nil {
 			return fail(&APIError{Status: http.StatusBadRequest, Code: code, Message: err.Error()})
 		}
+		if key == artworkLocalPathKey {
+			if err := checkArtworkLocalPath(value, "values."+key); err != nil {
+				return fail(err)
+			}
+		}
 		normalized[key] = value
 	}
 	checkedRedis, err := h.checkRedisSave(ctx, normalized)
@@ -1814,6 +1831,11 @@ func (h *AdminHandler) UpdateAdminSetting(ctx context.Context, key, value string
 		return AdminSettingUpdateResult{}, &APIError{Status: http.StatusBadRequest, Code: "bad_request", Message: err.Error()}
 	} else {
 		req.Value = normalized
+	}
+	if key == artworkLocalPathKey {
+		if err := checkArtworkLocalPath(req.Value, "value"); err != nil {
+			return AdminSettingUpdateResult{}, err
+		}
 	}
 
 	switch key {
