@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
 
 	"github.com/Silo-Server/silo-server/internal/access"
@@ -432,5 +433,73 @@ func TestControlSocketTicketStoreBoundsAndValidation(t *testing.T) {
 	}
 	if _, err := store.Consume(ctx, value); !errors.Is(err, evt.ErrSocketTicket) {
 		t.Fatal("credential consumed twice")
+	}
+}
+
+// failingAttemptStore reads no attempt: the durable store is unreachable.
+type failingAttemptStore struct{ playback.PlanStoreV3 }
+
+func (failingAttemptStore) GetAttemptIdentity(context.Context, string) (*playback.AttemptIdentityV3, error) {
+	return nil, errors.New("store unreachable")
+}
+
+// A restart empties the in-memory session map. A mint that misses there reads
+// the durable attempt, so the client can tell a session that will be rebuilt
+// from one that ended for good, and only the owner is told which.
+func TestControlSocketMintReadsTheDurableAttemptOnAMemoryMiss(t *testing.T) {
+	f := newControlSocketFixture(t)
+	ctx := t.Context()
+	store := playback.NewMemoryPlanStoreV3()
+	f.pb.PlanStoreV3 = store
+	save := func(sessionID string, stop bool) {
+		t.Helper()
+		record := playback.AttemptRecordV3{PlaybackAttemptID: "attempt-" + sessionID, SessionID: sessionID, UserID: 7, ProfileID: "profile-7", ExpiresAt: time.Now().Add(time.Hour)}
+		if err := store.SaveAttempt(ctx, record); err != nil {
+			t.Fatal(err)
+		}
+		if stop {
+			if _, _, err := store.StopAttempt(ctx, sessionID, uuid.NewString(), nil); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	liveID, endedID, absentID := uuid.NewString(), uuid.NewString(), uuid.NewString()
+	save(liveID, false)
+	save(endedID, true)
+
+	for name, tc := range map[string]struct {
+		identity evt.SocketIdentity
+		session  string
+		want     error
+	}{
+		"ended attempt is gone for good":       {f.identity(7, "profile-7"), endedID, ErrPlaybackControlSocketSessionEnded},
+		"live attempt is not rebuilt here yet": {f.identity(7, "profile-7"), liveID, ErrPlaybackControlSocketSessionResuming},
+		"no attempt stays not found":           {f.identity(7, "profile-7"), absentID, playback.ErrSessionNotFound},
+		"other account sees not found":         {f.identity(8, "profile-7"), endedID, playback.ErrSessionNotFound},
+		"other profile sees not found":         {f.identity(7, "profile-8"), liveID, playback.ErrSessionNotFound},
+	} {
+		if _, _, err := f.handler.Mint(ctx, tc.identity, tc.session, controlInstallation); !errors.Is(err, tc.want) {
+			t.Errorf("%s: err = %v, want %v", name, err, tc.want)
+		}
+	}
+
+	// An unreadable store is a retryable outage, not a verdict on the session.
+	// An id that is not a UUID never reaches the store: a durable one would
+	// fail the query instead of missing.
+	f.pb.PlanStoreV3 = failingAttemptStore{store}
+	if _, _, err := f.handler.Mint(ctx, f.identity(7, "profile-7"), liveID, ""); !errors.Is(err, ErrPlaybackControlSocketUnavailable) {
+		t.Fatalf("store failure err = %v", err)
+	}
+	for _, malformed := range []string{
+		"not-a-uuid",
+		"x" + liveID + "x",
+		"{" + liveID + "}",
+		"urn:uuid:" + liveID,
+		strings.ReplaceAll(liveID, "-", ""),
+		strings.ToUpper(liveID),
+	} {
+		if _, _, err := f.handler.Mint(ctx, f.identity(7, "profile-7"), malformed, ""); !errors.Is(err, playback.ErrSessionNotFound) {
+			t.Fatalf("malformed id %q err = %v", malformed, err)
+		}
 	}
 }
