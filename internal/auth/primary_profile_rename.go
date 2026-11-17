@@ -31,12 +31,15 @@ func updatePreviousUsername(ctx context.Context, db interface {
 // renamePrimaryProfileWithAccount gives account id's primary profile the new
 // username while that profile still carries the previous one, which is what
 // password signup, first-run setup and admin account creation name it by
-// default. The account row is already locked, so this takes the account
-// before its profile, the order deleting an account takes them in. A primary
-// profile the household renamed keeps its name, and so does one whose new
-// name another profile on the account already uses, which the profile API
-// would refuse. Profiles kept in the SQLite user store are not in
-// user_profiles, so they keep their names.
+// default. A primary profile the household renamed keeps its name, and so
+// does one whose new name another profile on the account already uses, which
+// the profile API would refuse. Profiles kept in the SQLite user store are not
+// in user_profiles, so they keep their names.
+//
+// The account row is already locked, and a profile save locks the profile row
+// before it touches the account row, so waiting here for a profile a save
+// holds could deadlock. A primary profile being saved at that moment is
+// skipped instead and keeps its name.
 func renamePrimaryProfileWithAccount(ctx context.Context, db interface {
 	Exec(context.Context, string, ...any) (pgconn.CommandTag, error)
 	QueryRow(context.Context, string, ...any) pgx.Row
@@ -48,7 +51,8 @@ func renamePrimaryProfileWithAccount(ctx context.Context, db interface {
 			SELECT o.name FROM user_profiles o WHERE o.user_id = p.user_id AND o.id <> p.id
 		)
 		FROM user_profiles p
-		WHERE p.user_id = $1 AND p.is_primary`, id).Scan(&profileID, &name, &others)
+		WHERE p.user_id = $1 AND p.is_primary
+		FOR NO KEY UPDATE OF p SKIP LOCKED`, id).Scan(&profileID, &name, &others)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil
 	}
@@ -63,10 +67,9 @@ func renamePrimaryProfileWithAccount(ctx context.Context, db interface {
 			return nil
 		}
 	}
-	// The name in the WHERE keeps a rename the household saved since the read.
 	if _, err := db.Exec(ctx, `
 		UPDATE user_profiles SET name = $3, updated_at = NOW()
-		WHERE user_id = $1 AND id = $2 AND name = $4`, id, profileID, next, name); err != nil {
+		WHERE user_id = $1 AND id = $2`, id, profileID, next); err != nil {
 		return fmt.Errorf("renaming primary profile after a username change: %w", err)
 	}
 	return nil

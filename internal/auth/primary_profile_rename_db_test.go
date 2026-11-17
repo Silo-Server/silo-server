@@ -92,6 +92,30 @@ func TestUserRepositoryUsernameChangeRenamesPrimaryProfileDB(t *testing.T) {
 			}
 		})
 	}
+	t.Run("primary profile being saved keeps its name", func(t *testing.T) {
+		id := insertPrimaryProfileRenameUser(t, ctx, pool, ident("g", "old"), ident("g", "mail")+"@example.invalid")
+		insertPrimaryProfileRenameProfile(t, ctx, pool, id, "primary", ident("g", "old"), true)
+		// A profile save holds the row; waiting for it could deadlock.
+		save, err := pool.Begin(ctx)
+		if err != nil {
+			t.Fatalf("begin profile save: %v", err)
+		}
+		t.Cleanup(func() { _ = save.Rollback(context.Background()) })
+		if _, err := save.Exec(ctx, `UPDATE user_profiles SET updated_at = updated_at WHERE user_id = $1 AND is_primary`, id); err != nil {
+			t.Fatalf("hold primary profile: %v", err)
+		}
+
+		renameCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		defer cancel()
+		newUsername := ident("g", "new")
+		if _, err := users.MutateAdminAccount(renameCtx, id, -1, &models.UpdateUserInput{Username: &newUsername},
+			func(*models.User, pgx.Tx) (bool, error) { return false, nil }); err != nil {
+			t.Fatalf("MutateAdminAccount(username) while the profile is saved: %v", err)
+		}
+		if got := primaryProfileRenameName(t, ctx, pool, id, "primary"); got != ident("g", "old") {
+			t.Fatalf("primary profile name = %q, want unchanged %q", got, ident("g", "old"))
+		}
+	})
 	if got := primaryProfileRenameName(t, ctx, pool, bystander, "primary"); got != ident("a", "old") {
 		t.Fatalf("bystander primary profile name = %q, want unchanged %q", got, ident("a", "old"))
 	}
