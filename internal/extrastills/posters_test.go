@@ -18,6 +18,15 @@ type fakePosterStore struct {
 	pending []catalog.PendingFramePoster
 	won     map[string]bool // content ID -> whether the save finds the slot as read
 	saved   []string
+	// cleanups counts ClearFramePostersSpanningLibraries calls, which fail
+	// with cleanupErr.
+	cleanups   int
+	cleanupErr error
+}
+
+func (s *fakePosterStore) ClearFramePostersSpanningLibraries(context.Context) (int64, error) {
+	s.cleanups++
+	return 0, s.cleanupErr
 }
 
 func (s *fakePosterStore) ListPendingFramePosters(context.Context, mediaartifact.Key, int) ([]catalog.PendingFramePoster, error) {
@@ -105,5 +114,14 @@ func TestPosterPassStopsAfterFailuresInARow(t *testing.T) {
 	}
 	if want := []int{1, 3, 5, 6, 7}; !slices.Equal(failures.failed, want) {
 		t.Errorf("recorded failures %v, want %v", failures.failed, want)
+	}
+	if store.cleanups != 1 {
+		t.Errorf("cleanups = %d, want one before listing", store.cleanups)
+	}
+
+	// A pass whose cleanup fails takes no new frames.
+	store.cleanupErr, frames.tried = errors.New("connection lost"), nil
+	if _, err := pass.run(context.Background(), 10); err == nil || len(frames.tried) != 0 {
+		t.Errorf("after a failed cleanup: err %v, tried %v; want the error and no frames", err, frames.tried)
 	}
 }

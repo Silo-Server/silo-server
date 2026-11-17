@@ -379,6 +379,11 @@ precedence order, each tried with `.jpg`, `.jpeg`, `.png`, `.webp`, `.tbn`,
   raced. A movie with live main files in more than one library gets no frame,
   since the poster is shared by every library the item is in and a frame from
   one library's file would show viewers of another a file they may not see.
+  The save checks this again, and each run first removes the frame of a movie
+  that has since gained a file in another library, so the frame goes within
+  one task interval; this outranks the images lock, since a frame was never
+  anyone's choice. The removal finds frame posters through the partial index
+  `idx_media_items_frame_poster` on `poster_source_path LIKE 'frame:%'`.
   The frame is taken from the lowest-id live file with a known duration
   and no blocking failure record, at the extras position, cropped to a
   centered 2:3 portrait at its own scale (`imageutil.CropToPoster`), and stored

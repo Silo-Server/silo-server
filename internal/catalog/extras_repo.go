@@ -99,7 +99,9 @@ const ClearEmptiedExtraStillsCTE = `,
 // extraction records its key too, with still_retry_after set when the failure
 // may pass, or NULL when the file cannot be decoded and waits for it to change.
 // A sidecar copy's source is a file:// URL instead, and a scan replaces a
-// generated still with it.
+// generated still with it. A movie's frame poster uses the same frame prefix
+// in media_items.poster_source_path; frameSourcePatternSQL and the partial
+// index idx_media_items_frame_poster spell it out, so change them with it.
 const (
 	StillSourceFramePrefix       = "frame:"
 	StillSourceFrameFailedPrefix = "frame-failed:"

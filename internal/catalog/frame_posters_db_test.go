@@ -224,4 +224,51 @@ func TestFramePostersListOnlyEmptySlotsAndSaveOnlyOverThemDB(t *testing.T) {
 	if path, source := f.poster(lost); path != "" || source != "file:///m/poster.jpg?v=2-2" {
 		t.Errorf("poster = %q from %q, want the sidecar's pending slot untouched", path, source)
 	}
+	checkFramesLeaveMoviesInSeveralLibraries(t, f, repo, key, versions, StillSourceFramePrefix+got[versions].FrameKey)
+}
+
+// checkFramesLeaveMoviesInSeveralLibraries: a movie that gains a file in a
+// second library loses its frame to the cleanup, also under the images lock,
+// and is not listed again, and
+// a frame read before the movie gained one is not saved. listed is a movie
+// the pending list returned with an empty source, and frameSource its frame's.
+func checkFramesLeaveMoviesInSeveralLibraries(t *testing.T, f *framePosterFixture, repo *ItemRepository, key mediaartifact.Key, listed, frameSource string) {
+	t.Helper()
+	ctx := t.Context()
+	framePath := "local/movies/" + listed + "/d/poster/original.webp"
+	if saved, err := repo.SetFramePosterIfSource(ctx, listed, "", framePath, frameSource, "th"); err != nil || !saved {
+		t.Fatalf("saving a frame = %v, %v; want saved", saved, err)
+	}
+	gained := f.library("gained", true)
+	f.fileIn(gained, listed, "gained-other", false)
+	locked := f.item("locked-frame", "movie", "matched", frameSource, true)
+	f.exec(`UPDATE media_items SET poster_path = $2 WHERE content_id = $1`, locked, "local/movies/"+locked+"/f/poster/original.webp")
+	f.file(locked, "locked-frame", false)
+	f.fileIn(gained, locked, "locked-frame-other", false)
+	if _, err := repo.ClearFramePostersSpanningLibraries(ctx); err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []string{listed, locked} {
+		if path, source := f.poster(id); path != "" || source != "" {
+			t.Errorf("%s poster = %q from %q, want the frame cleared once the movie is in two libraries", id, path, source)
+		}
+	}
+	pending, err := repo.ListPendingFramePosters(ctx, key, 100000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, movie := range pending {
+		if movie.ContentID == listed {
+			t.Errorf("%s is listed again while it is in two libraries", listed)
+		}
+	}
+
+	// Listed while in one library, then a file in another appears before
+	// the save.
+	late := f.item("late", "movie", "matched", "", false)
+	f.file(late, "late", false)
+	f.fileIn(f.library("late-other", true), late, "late-other", false)
+	if saved, err := repo.SetFramePosterIfSource(ctx, late, "", "local/movies/"+late+"/e/poster/original.webp", frameSource, "th"); err != nil || saved {
+		t.Errorf("saving for a movie now in two libraries = %v, %v; want not saved", saved, err)
+	}
 }
