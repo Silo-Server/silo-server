@@ -67,7 +67,9 @@ const STORAGE_LOCATION_KEYS = [
   "s3.private_key_prefix",
 ];
 
-// Every key on this step that the server reads only at startup.
+// The restart reasons the server can report for this step's keys. It reports
+// only keys read at startup (s3., artwork., redis.), so metadata.cache_images,
+// which applies live, never appears.
 const STORAGE_RESTART_REASONS = new Set(ALL_KEYS.map((key) => `setting:${key}`));
 const RESTART_POLL_MS = 1_000;
 // Shutdown waits a few seconds for streams to drain, then startup migrates and
