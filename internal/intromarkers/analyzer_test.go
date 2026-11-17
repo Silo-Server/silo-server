@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
 	"slices"
 	"sync"
 	"testing"
@@ -1221,6 +1222,45 @@ func TestChapterIntrosWithdrawStaleChapterResults(t *testing.T) {
 				t.Fatalf("patches %+v, want episode 8's matching chapter intro left as it is", repo.patches)
 			}
 		})
+	}
+}
+
+// An episode whose cold-open Intro chapter comes before a later OP chapter
+// held the cold open as its chapter intro. The episode pass replaces it with
+// the OP chapter, even from a silence-refined result that outranks a new
+// chapter result, and withdraws the version copy made from it.
+func TestChapterIntrosReplaceAColdOpenBeforeALaterOP(t *testing.T) {
+	scanner := models.MarkerSourceScanner
+	coldOpen := func(id int, algorithm string, chapters []models.MediaChapter) Candidate {
+		return Candidate{FileID: id, EpisodeID: "ep5", SeasonID: "season1", MediaFolderID: 7, DurationSeconds: 1422, Chapters: chapters,
+			IntroStart: floatPtr(0), IntroEnd: floatPtr(60), IntroMarkersSource: &scanner, IntroMarkersAlgorithm: strPtr(algorithm)}
+	}
+	candidates := []Candidate{
+		coldOpen(5, ChapterSilenceAlgorithm, []models.MediaChapter{
+			chapter("Intro", 0, 60), chapter("Part A", 60, 300), chapter("OP", 300, 390), chapter("Part B", 390, 1422)}),
+		coldOpen(6, EpisodeVersionCopyAlgorithm, nil),
+	}
+	repo := &fakeIntroRepository{}
+	analyzer := &Analyzer{repo: repo, config: DefaultConfig("ffmpeg"), logger: slog.New(slog.DiscardHandler)}
+
+	analyzer.processChapterCandidates(context.Background(), candidates, chapterProcessingOptions{
+		allowEpisodeCopy: true,
+		openingNamed:     openingNamedGroups(candidates),
+		withdrawStale:    true,
+	})
+	var withdrawn []int
+	for _, w := range repo.withdrawals {
+		withdrawn = append(withdrawn, w.FileID)
+	}
+	if !slices.Equal(withdrawn, []int{5, 6}) {
+		t.Fatalf("withdrew %v, want the cold open and its version copy", withdrawn)
+	}
+	got := map[int][2]float64{}
+	for _, patch := range repo.patches {
+		got[patch.FileID] = [2]float64{patch.Start, patch.End}
+	}
+	if want := map[int][2]float64{5: {300, 390}, 6: {300, 390}}; !maps.Equal(got, want) {
+		t.Fatalf("patched %v, want the OP chapter on both versions", got)
 	}
 }
 

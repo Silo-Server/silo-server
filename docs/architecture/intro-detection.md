@@ -55,10 +55,12 @@ for a single item does not take the lock.
    group, so a file's result does not depend on how its analysis started.
 
    When a file's chapters no longer produce the chapter intro stored for it,
-   as after a change to these rules or a remux, local analysis withdraws it
-   (`chapter:v1`, `chapter:silence:v1`, `chapter:silence:v2`), and a version
-   copy (`episode-version-copy:v1`) once no version of the episode it could be
-   copied from (a duration within three seconds) produces one. These results
+   because they give no intro or one that doesn't overlap it, as after a change
+   to these rules or a remux, local analysis withdraws it (`chapter:v1`,
+   `chapter:silence:v1`, `chapter:silence:v2`) and places the new one if there
+   is one. It withdraws a version copy (`episode-version-copy:v1`) once no
+   version of the episode it could be copied from (a duration within three
+   seconds) produces an intro that overlaps it. These results
    outrank every Chromaprint result, so left in place they would keep their
    stale range for good. The file's season group is then compared again even
    when its stored analysis still stands. The silence backfill withdraws
