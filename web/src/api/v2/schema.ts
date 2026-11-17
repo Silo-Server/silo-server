@@ -24583,7 +24583,10 @@ export interface components {
       type: string;
       upcoming_event?: components["schemas"]["CatalogItemUpcomingEvent"];
       user_data?: components["schemas"]["WatchRollup"];
-      /** Format: int64 */
+      /**
+       * Format: int64
+       * @description The profile's rating, 1 to 10, which clients show as five stars with half stars; absent when unrated
+       */
       user_rating?: number;
       /** @description The viewer's flags; absent without a profile */
       user_state?: components["schemas"]["CatalogItemUserState"];
@@ -32679,7 +32682,7 @@ export interface components {
       /**
        * Format: int64
        * @description The newest format version this server writes and reads
-       * @example 1
+       * @example 2
        */
       version: number;
     };
@@ -33208,8 +33211,8 @@ export interface components {
       rated_at: string;
       /**
        * Format: int64
-       * @description Stars, 1 to 5
-       * @example 4
+       * @description 1 to 10; clients show it as five stars with half stars (7 is 3.5 stars)
+       * @example 7
        */
       rating: number;
     };
@@ -33241,8 +33244,8 @@ export interface components {
     RatingSet: {
       /**
        * Format: int64
-       * @description Stars, 1 to 5
-       * @example 4
+       * @description 1 to 10; clients show it as five stars with half stars (7 is 3.5 stars)
+       * @example 7
        */
       rating: number;
     };
@@ -36589,7 +36592,7 @@ export interface components {
         [key: string]: unknown;
       };
       export_favorites_enabled: boolean;
-      /** @description Send the profile's star ratings to the provider (stars times two) and clear removed ones. */
+      /** @description Send the profile's ratings, 1 to 10, to the provider unchanged and clear removed ones. */
       export_ratings_enabled: boolean;
       /** @description Has no effect: mark unwatched keeps watch history, so Silo sends providers no history removals. */
       export_unwatched_enabled: boolean;
@@ -36597,7 +36600,7 @@ export interface components {
       export_watchlist_enabled: boolean;
       import_favorites_enabled: boolean;
       import_progress_enabled: boolean;
-      /** @description Import the provider's movie and series ratings as stars (1-2 is 1 star, 9-10 is 5 stars). */
+      /** @description Import the provider's movie and series ratings, 1 to 10, unchanged. */
       import_ratings_enabled: boolean;
       import_watched_enabled: boolean;
       import_watchlist_enabled: boolean;

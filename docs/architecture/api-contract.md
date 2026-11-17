@@ -1342,7 +1342,8 @@ paged with `limit` plus an opaque cursor whose cards are the shared `CatalogItem
 `{item_id, rating, rated_at}` entries instead), a membership read that answers the entry
 (`{item_id, added_at}`, or `{item_id, rating, rated_at}`) or `404`, a bodiless `PUT` add
 (ratings take `{rating}`) answering `204`, and a `DELETE` answering `204` whether or not
-the entry existed. The four favorites and watchlist mutations are `natural_idempotent`: each
+the entry existed. A rating, and an item's `user_rating`, run from 1 to 10, which clients show as
+five stars with half stars (7 is three and a half). The four favorites and watchlist mutations are `natural_idempotent`: each
 store add and remove reports whether it inserted or deleted the row, and the shared seam
 sends the provider list event, the recommendation refresh, and the user-state event only for a
 change, so a repeated add or remove answers `204` and notifies nobody. The notices run detached

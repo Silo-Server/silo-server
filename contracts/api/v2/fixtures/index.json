@@ -14636,7 +14636,7 @@
     {
       "name": "set_rating_out_of_range",
       "operation_id": "setRating",
-      "scenario": "A rating outside 1 to 5 is a validation failure naming the member.",
+      "scenario": "A rating outside 1 to 10 is a validation failure naming the member.",
       "request": {
         "method": "PUT",
         "path": "/api/v2/ratings/movie:new",
@@ -14644,7 +14644,7 @@
           "Authorization": "Bearer tok-member",
           "X-Profile-Id": "p-owner"
         },
-        "body": "{\"rating\":6}"
+        "body": "{\"rating\":11}"
       },
       "expected_status": 422,
       "response_headers": {

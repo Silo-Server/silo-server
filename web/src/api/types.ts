@@ -1318,6 +1318,7 @@ export interface ItemDetail {
   is_specials?: boolean;
   user_data?: ItemUserData;
   user_state?: MediaItemUserState;
+  /** The profile's rating, 1 to 10 (half stars). */
   user_rating?: number | null;
 
   // Root folder paths for series items (admin-only).

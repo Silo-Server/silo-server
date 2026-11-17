@@ -160610,7 +160610,7 @@
   "web.settings.watchProviders.toggle.exportRatings.description": [
     {
       "type": 0,
-      "value": "Wysyłaj swoje oceny w gwiazdkach do serwisu "
+      "value": "Wysyłaj swoje oceny do serwisu "
     },
     {
       "type": 1,
@@ -160618,7 +160618,7 @@
     },
     {
       "type": 0,
-      "value": " i usuwaj tam te, które usuniesz. 4 gwiazdki to 8/10."
+      "value": " i usuwaj tam te, które usuniesz. 3,5 gwiazdki to 7/10."
     }
   ],
   "web.settings.watchProviders.toggle.exportRatings.label": [
@@ -160702,7 +160702,7 @@
     },
     {
       "type": 0,
-      "value": " jako gwiazdki. Ocena 7/10 to 4 gwiazdki."
+      "value": ". Ocena 7/10 to 3,5 gwiazdki."
     }
   ],
   "web.settings.watchProviders.toggle.importRatings.label": [

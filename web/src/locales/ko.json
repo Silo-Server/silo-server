@@ -125512,7 +125512,7 @@
   "web.settings.watchProviders.toggle.exportRatings.description": [
     {
       "type": 0,
-      "value": "별점을 "
+      "value": "평점을 "
     },
     {
       "type": 1,
@@ -125520,7 +125520,7 @@
     },
     {
       "type": 0,
-      "value": "에 보내고, 삭제한 별점은 "
+      "value": "에 보내고, 삭제한 평점은 "
     },
     {
       "type": 1,
@@ -125528,7 +125528,7 @@
     },
     {
       "type": 0,
-      "value": "에서도 지워요. 별 4개는 8/10이 돼요."
+      "value": "에서도 지워요. 별 3.5개는 7/10이 돼요."
     }
   ],
   "web.settings.watchProviders.toggle.exportRatings.label": [
@@ -125604,7 +125604,7 @@
     },
     {
       "type": 0,
-      "value": "의 영화 및 시리즈 평점을 별점으로 가져와요. 7/10은 별 4개가 돼요."
+      "value": "의 영화 및 시리즈 평점을 가져와요. 7/10은 별 3.5개가 돼요."
     }
   ],
   "web.settings.watchProviders.toggle.importRatings.label": [

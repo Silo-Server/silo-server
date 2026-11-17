@@ -136602,7 +136602,7 @@
   "web.settings.watchProviders.toggle.exportRatings.description": [
     {
       "type": 0,
-      "value": "Send your star ratings to "
+      "value": "Send your ratings to "
     },
     {
       "type": 1,
@@ -136610,7 +136610,7 @@
     },
     {
       "type": 0,
-      "value": " and clear ones you remove. 4 stars becomes 8/10."
+      "value": " and clear ones you remove. 3.5 stars becomes 7/10."
     }
   ],
   "web.settings.watchProviders.toggle.exportRatings.label": [
@@ -136694,7 +136694,7 @@
     },
     {
       "type": 0,
-      "value": " movie and show ratings in as stars. A 7/10 becomes 4 stars."
+      "value": " movie and show ratings in. A 7/10 becomes 3.5 stars."
     }
   ],
   "web.settings.watchProviders.toggle.importRatings.label": [

@@ -700,13 +700,14 @@ users/<account id>.json           version 2 and later
 blobs/<object key>
 ```
 
-`restore-set.json` has `format: "silo-restore-set"`, `version` (5: version 2
+`restore-set.json` has `format: "silo-restore-set"`, `version` (7: version 2
 added the users section; version 3 the home sections section, template
 collections in `collections.json`, and an omitted item's `cause` and
 `error`; version 4 a home section's `web_only`; version 5 no new field, but a
 server smart collection's rules now draw from their own `library_ids`, so a
 restore pins an older set's smart collection rules to the collection's
-libraries; version 6 a home section's `title_key` and `title_args`), the source
+libraries; version 6 a home section's `title_key` and `title_args`; version 7
+a rating's `score`, 1 to 10, in place of its whole stars), the source
 server id and name, Silo version, creation time, `SECRET_KEY` check value, and
 a section index: for each section its item count, each of its files with
 size and SHA-256, and the blob keys its documents reference. Plugin archive
@@ -736,7 +737,7 @@ section. A restore never takes a key away: replacing a section with a title
 that has no key leaves the key the section already has when the title is the
 same text, because the two then show the same English, and a set written
 before version 6 cannot say whether its title was typed. The restore preview
-reports a section that differs only by its key as changed. Readers accept versions 1 to 6; version 6 is always written.
+reports a section that differs only by its key as changed. Readers accept versions 1 to 7; version 7 is always written.
 
 | Section | Holds | Blob prefixes |
 |---|---|---|
@@ -1330,7 +1331,7 @@ nothing.
 | Data type | Owner | Tables | Merge rule |
 |---|---|---|---|
 | `watch_history` | `watchstate` | `user_watch_progress`, `user_watch_history`, `user_history_hidden_items` | progress: one upsert takes the backup's row only when it is newer (`updated_at`) than the row as committed, so a playback heartbeat landing meanwhile wins; plays: added unless the profile has a play of the item at the same second, whatever its source; a play's source is a fixed one (`playback`, `import`, …) or a watch-sync plugin's, `plugin:<installation id>:<capability id>` (`userstore.ParsePluginWatchSource`; the capability id a lowercase slug of at most 128 characters), which stays on the server that wrote it, elsewhere names the one installation here of the same plugin (from the restore set's plugins section) with that capability, and otherwise becomes `import`, as does any source the reader would refuse when it is exported; history hides: `hidden_before` and `removed_before` each keep the later cutoff, independently (a legacy NULL `removed_before` reads as its `hidden_before`), and `-infinity`/`infinity` cutoffs round-trip as those strings. Plays and hides merge under the profile's history lock (`userstore.LockImportedHistory`) |
-| `ratings` | `catalog` | `user_ratings` | only where the profile has no rating |
+| `ratings` | `catalog` | `user_ratings` | only where the profile has no rating; an entry's `score` is 1 to 10, and an entry from a restore set before version 7 or a profile export before version 2 carries whole stars as `rating`, restored at twice the stars |
 | `favorites` | `watchlist` | `user_favorites`, `user_watchlist`, `user_watchlist_titles` | added where missing; restored watchlist entries sort as local additions; a watchlisted title outside the library travels by its TMDB, IMDb, and TVDB ids and display snapshot and is attached as the watchlist adds one (`watchlist.AddSnapshotInTx`): to the title here holding its TMDB id, current or former, or a new title the watchlist's TMDB checks then refresh |
 | `collections` | `usercollections` | `user_personal_collections`, `user_personal_collection_items`, `user_personal_collection_profiles`, `user_collection_groups` | by name among the profile's own collections: none creates it (new id, uploaded poster copied under it, in its shelf group, found by slug or label or created), one gains missing items, sharing, and its group when ungrouped here, several leave it out. The smart query, display filter, and sync source are all remapped to this server's libraries (`userdata.RemapQueryLibraries`); a definition that would lose its whole library scope leaves the collection out, never widened to every library |
 | `dismissals` | `userstore/pgstore` | `user_home_item_dismissals`, `user_not_interested`, `user_dropped_series` | added where missing |
@@ -1535,7 +1536,8 @@ the merged data on their next request.
 ### Profile export
 
 A signed-in profile downloads and imports its own data as a
-`silo-profile-export` document, version 1 (`internal/backup/profile_transfer.go`):
+`silo-profile-export` document, version 2 (`internal/backup/profile_transfer.go`;
+version 2 carries a rating's `score` in place of version 1's whole stars):
 `format`, `version`, `server_id`, `exported_at`, `profile_name`, `data` (each
 data type's document, as in a user document), and `items`. It never holds
 account fields, password or PIN hashes, access fields, or allowed libraries.

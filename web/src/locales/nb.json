@@ -136602,7 +136602,7 @@
     },
     {
       "type": 0,
-      "value": ", og fjern dem du sletter. 4 stjerner blir 8/10."
+      "value": ", og fjern dem du sletter. 3,5 stjerner blir 7/10."
     }
   ],
   "web.settings.watchProviders.toggle.exportRatings.label": [
@@ -136686,7 +136686,7 @@
     },
     {
       "type": 0,
-      "value": " som stjerner. 7/10 blir 4 stjerner."
+      "value": " som stjerner. 7/10 blir 3,5 stjerner."
     }
   ],
   "web.settings.watchProviders.toggle.importRatings.label": [

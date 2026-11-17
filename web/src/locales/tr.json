@@ -134996,7 +134996,7 @@
   "web.settings.watchProviders.toggle.exportRatings.description": [
     {
       "type": 0,
-      "value": "Yıldız puanlarınızı "
+      "value": "Puanlarınızı "
     },
     {
       "type": 1,
@@ -135004,7 +135004,7 @@
     },
     {
       "type": 0,
-      "value": " hizmetine gönderin ve kaldırdığınız puanları orada da temizleyin. 4 yıldız 8/10 olur."
+      "value": " hizmetine gönderin ve kaldırdığınız puanları orada da temizleyin. 3,5 yıldız 7/10 olur."
     }
   ],
   "web.settings.watchProviders.toggle.exportRatings.label": [
@@ -135080,7 +135080,7 @@
     },
     {
       "type": 0,
-      "value": " film ve dizi puanlarını yıldız olarak içe aktarın. 7/10, 4 yıldız olur."
+      "value": " film ve dizi puanlarını içe aktarın. 7/10, 3,5 yıldız olur."
     }
   ],
   "web.settings.watchProviders.toggle.importRatings.label": [

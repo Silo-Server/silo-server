@@ -10,16 +10,28 @@ Season and episode ratings are not synced, because Silo rates only movies and se
 
 ## Scale
 
-Silo stores integer stars from 1 to 5. Providers and the plugin contract use integers
-from 1 to 10. Import rounds half up (`stars = (rating + 1) / 2`, so 7 and 8 are both
-4 stars) and export doubles (`rating = stars × 2`). Every sync decision compares stars,
-so a provider change within one star, such as 7 to 8, is not a change, and Silo never
-overwrites a provider's 7 with the 8 its 4 stars map to.
+Silo stores ratings as integer scores from 1 to 10, which clients show as five stars
+with half stars. Providers and the plugin contract use the same integers, so every value
+syncs exactly, with no conversion: a provider change from 7 to 8 is a change.
+
+Ratings were whole stars (1 to 5) before. The migration to scores doubled every stored
+rating and agreed rating, so a provider value that had been rounded into a star (a 7
+kept as 4 stars, now 8) differs from the agreed rating on the provider's side only. The
+migration also cleared the rating read cursors, so the next sync reads every provider
+rating and imports such a value exactly without writing to the provider. That first
+sync has two other one-time effects:
+
+- When a profile syncs ratings with two providers that held different values of one
+  star (7 on one, 8 on the other), the imported 7 is then a local change for the
+  other connection, whose next sync sends it there.
+- A local removal waits for the scheduled merge. One the first sync after the upgrade
+  has not yet sent comes back when its provider holds an odd value: the merge sees
+  both sides changed, and a rating beats a removal. The profile can remove it again.
 
 ## Agreed rating
 
 `watch_provider_rating_items` stores, per connection and item, the last rating both
-sides agreed on, in stars. No row means both sides agreed the item is unrated, so the
+sides agreed on, as a score. No row means both sides agreed the item is unrated, so the
 first sync is a union of both sides. Each item is a three-way merge of the local
 rating, the provider rating, and the agreed rating:
 

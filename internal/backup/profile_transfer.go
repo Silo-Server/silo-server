@@ -28,9 +28,12 @@ import (
 // password or PIN hash, no access fields, and no allowed libraries, and an
 // import refuses a document that carries any of them. The target account
 // and profile always come from the session, never from the document.
+//
+// Version 2 carries a rating's score (1 to 10) in place of its whole stars,
+// so an older server refuses it as too new instead of failing on the field.
 const (
 	ProfileExportFormat  = "silo-profile-export"
-	ProfileExportVersion = 1
+	ProfileExportVersion = 2
 	// MaxProfileImportBytes bounds an import's document.
 	MaxProfileImportBytes = 64 << 20
 	// maxProfileItems bounds the items an export names, its items list and

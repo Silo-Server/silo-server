@@ -32,7 +32,7 @@ func TestParseProfileExportRefusesHostileDocuments(t *testing.T) {
 	}{
 		{"a PIN hash", `{` + head + `,"pin_hash":"x","data":{},"items":[]}`, ErrProfileImportAccessFields},
 		{"access fields in preferences", `{` + head + `,"data":{"preferences":{"profile":{"max_playback_quality":"","library_restrictions_enabled":false}}},"items":[]}`, ErrProfileImportAccessFields},
-		{"a newer version", `{"format":"silo-profile-export","version":2,"data":{}}`, ErrProfileExportTooNew},
+		{"a newer version", fmt.Sprintf(`{"format":"silo-profile-export","version":%d,"data":{}}`, ProfileExportVersion+1), ErrProfileExportTooNew},
 		{"another format", `{"format":"silo-restore-set","version":1}`, nil},
 		{"unknown fields", `{` + head + `,"extra":true,"data":{},"items":[]}`, nil},
 		{"unknown data", `{` + head + `,"data":{"passwords":{}},"items":[]}`, nil},

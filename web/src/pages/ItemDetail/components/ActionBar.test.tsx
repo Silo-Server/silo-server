@@ -84,7 +84,7 @@ it("skips desktop-hidden actions when focusing and navigating the menu", () => {
   }
 });
 
-it.each([null, 3])("focuses the active star in a rating-only menu (rating %s)", (rating) => {
+it.each([null, 6])("focuses the active star in a rating-only menu (rating %s)", (rating) => {
   const rects = vi
     .spyOn(HTMLElement.prototype, "getClientRects")
     .mockReturnValue([new DOMRect(0, 0, 100, 30)] as unknown as DOMRectList);
@@ -94,7 +94,7 @@ it.each([null, 3])("focuses the active star in a rating-only menu (rating %s)", 
     const trigger = screen.getByRole("button", { name: "More actions" });
     fireEvent.click(trigger);
     const menu = screen.getByRole("menu");
-    const star = within(menu).getByRole("radio", { name: rating === 3 ? "3 stars" : "1 star" });
+    const star = within(menu).getByRole("radio", { name: rating === 6 ? "3 stars" : "0.5 stars" });
     expect(star).toHaveFocus();
     for (const key of ["ArrowDown", "ArrowUp", "Home", "End"]) {
       trigger.focus();
@@ -126,7 +126,7 @@ it("moves through the menu with ArrowUp/ArrowDown instead of changing the rating
     });
     fireEvent.click(screen.getByRole("button", { name: "More actions" }));
     const menu = screen.getByRole("menu");
-    const star = within(menu).getByRole("radio", { name: "1 star" });
+    const star = within(menu).getByRole("radio", { name: "0.5 stars" });
     for (const key of ["ArrowDown", "ArrowUp"]) {
       star.focus();
       fireEvent.keyDown(star, { key });
