@@ -200,8 +200,13 @@ func (c *Client) Transcribe(ctx context.Context, req TranscribeRequest) (*Transc
 				return &HTTPError{StatusCode: http.StatusBadGateway, message: "transcription API error: " + parsed.Error.Message}
 			}
 			if parsed.Segments == nil {
-				return &permanentError{err: fmt.Errorf(
-					"transcription endpoint did not return verbose_json segments (model %q); a verbose_json-capable Whisper endpoint is required: %w: %w", cfg.ASRModel, ErrTimedSegmentsUnsupported, ErrUnusableResponse)}
+				// Text without segments is a model answering plain json; an
+				// empty reply may not be a transcription endpoint at all.
+				err := fmt.Errorf("transcription endpoint did not return verbose_json segments (model %q); a verbose_json-capable Whisper endpoint is required: %w", cfg.ASRModel, ErrUnusableResponse)
+				if strings.TrimSpace(parsed.Text) != "" {
+					err = fmt.Errorf("%w: %w", ErrTimedSegmentsUnsupported, err)
+				}
+				return &permanentError{err: err}
 			}
 			out := &Transcription{Language: parsed.Language}
 			for _, s := range *parsed.Segments {

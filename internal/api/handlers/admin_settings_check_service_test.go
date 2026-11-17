@@ -116,6 +116,7 @@ func TestTranscriptionCheckReportsSafeProviderFailure(t *testing.T) {
 		{"verbose_json rejected", http.StatusBadRequest, `{"error":{"message":"response_format 'verbose_json' is not compatible with model 'private-model'. Use 'json' or 'text' instead.","type":"invalid_request_error","param":"response_format","code":"unsupported_value"}}`, untimed},
 		{"timestamps rejected", http.StatusBadRequest, `{"error":{"message":"private","type":"invalid_request_error","param":"timestamp_granularities[]","code":"unsupported_value"}}`, untimed},
 		{"text without segments", http.StatusOK, `{"text":"private transcript"}`, untimed},
+		{"not a transcription reply", http.StatusOK, `{}`, "Connection check failed. Verify the submitted settings and provider availability."},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

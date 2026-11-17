@@ -326,18 +326,16 @@ func (c *Client) doReaderWithRetry(ctx context.Context, httpClient *http.Client,
 	return lastErr
 }
 
-// responseErrorFields returns the string code and param of an OpenAI-style
-// error body. Some gateways send a numeric code; it reads as empty.
+// responseErrorFields returns the code and param of an OpenAI-style error body.
 func responseErrorFields(body []byte) (code, param string) {
 	var response struct {
 		Error struct {
-			Code  json.RawMessage `json:"code"`
-			Param string          `json:"param"`
+			Code  string `json:"code"`
+			Param string `json:"param"`
 		} `json:"error"`
 	}
 	_ = json.Unmarshal(body, &response)
-	_ = json.Unmarshal(response.Error.Code, &code)
-	return code, response.Error.Param
+	return response.Error.Code, response.Error.Param
 }
 
 func isExhaustedQuota(body []byte) bool {
