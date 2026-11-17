@@ -248,11 +248,15 @@ func NewTransport(configure ...func(*http.Transport)) *Transport {
 // explicitly empty one, is kept.
 func (t *Transport) RoundTrip(req *http.Request) (*http.Response, error) {
 	if _, ok := req.Header["User-Agent"]; !ok {
-		req = req.Clone(req.Context())
-		if req.Header == nil {
-			req.Header = make(http.Header)
+		// Copy the request so the caller's stays untouched. req.Clone would
+		// also copy Trailer, which the body may still be filling in.
+		r := *req
+		r.Header = req.Header.Clone()
+		if r.Header == nil {
+			r.Header = make(http.Header)
 		}
-		req.Header.Set("User-Agent", buildinfo.UserAgent())
+		r.Header.Set("User-Agent", buildinfo.UserAgent())
+		req = &r
 	}
 	if PrivateAccess(req.Context()) {
 		return t.private.RoundTrip(req)
