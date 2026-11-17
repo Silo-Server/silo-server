@@ -268,10 +268,9 @@ func TestBuildMediaStreamsAudioDisplayTitle(t *testing.T) {
 	}{
 		{"untagged", models.AudioTrack{Codec: "eac3", Language: "eng", Channels: 6, Title: "ATSC A/52B (AC-3, E-AC-3)"}, "English - EAC3 5.1"},
 		{"language tag", models.AudioTrack{Codec: "eac3", Language: "eng", Channels: 6, Title: "English", EmbeddedTitle: "English"}, "English - EAC3 5.1"},
-		{"codec and channels tag", models.AudioTrack{Codec: "eac3", Language: "eng", Channels: 6, Title: "EAC3 5.1", EmbeddedTitle: "EAC3 5.1"}, "English - EAC3 5.1"},
-		{"surround tag", models.AudioTrack{Codec: "truehd", Language: "eng", Channels: 8, Title: "English (Surround 7.1)", EmbeddedTitle: "English (Surround 7.1)"}, "English - TrueHD 7.1"},
+		{"codec and channels tag", models.AudioTrack{Codec: "eac3", Language: "fr", Channels: 6, Title: "FRE E-AC-3 Surround 5.1", EmbeddedTitle: "FRE E-AC-3 Surround 5.1"}, "French - EAC3 5.1"},
+		{"channels that contradict the track", models.AudioTrack{Codec: "ac3", Language: "eng", Channels: 2, Title: "Mono", EmbeddedTitle: "Mono"}, "English - AC3 Stereo - Mono"},
 		{"commentary", models.AudioTrack{Codec: "aac", Language: "eng", Channels: 2, Title: "Commentary", EmbeddedTitle: "Commentary"}, "English - AAC Stereo - Commentary"},
-		{"commentary with a repeated word", models.AudioTrack{Codec: "ac3", Language: "eng", Channels: 2, Title: "English Commentary", EmbeddedTitle: "English Commentary"}, "English - AC3 Stereo - English Commentary"},
 		{"tag names a language the track lacks", models.AudioTrack{Codec: "aac", Channels: 2, Title: "English", EmbeddedTitle: "English"}, "Unknown - AAC Stereo - English"},
 	}
 	for _, tc := range cases {

@@ -20,6 +20,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 
 	"github.com/Silo-Server/silo-server/internal/bandwidthprobe"
 	"github.com/Silo-Server/silo-server/internal/clientip"
@@ -4027,14 +4028,23 @@ func audioChannelsDisplayName(channels int) string {
 }
 
 // audioLabelRepeatsTitle reports whether every word of an audio title tag is
-// already in the display title or is a generic channel word, as with tags
-// such as "English", "Stereo" or "EAC3 5.1".
+// already in the display title, one of the language's codes or the codec, or
+// is a channel word that fits the track, as with tags such as "English",
+// "ENG 5.1" or "EAC3 Surround 5.1". A channel word that contradicts the track,
+// such as "Mono" on a stereo track, is kept.
 func audioLabelRepeatsTitle(label, displayTitle string, track models.AudioTrack) bool {
-	known := map[string]bool{
-		"surround": true, "stereo": true, "mono": true, "ch": true,
-		"1.0": true, "2.0": true, "5.1": true, "7.1": true,
+	known := map[string]bool{}
+	switch {
+	case track.Channels == 1:
+		known["mono"], known["1.0"] = true, true
+	case track.Channels == 2:
+		known["stereo"], known["2.0"] = true, true
+	case track.Channels > 2:
+		known["surround"] = true
 	}
-	for _, s := range []string{displayTitle, track.Language, track.Codec, compatChannelLayout(track.Layout)} {
+	sources := []string{displayTitle, track.Language, track.Codec, compatChannelLayout(track.Layout)}
+	sources = append(sources, lang.CodeAliases(lang.PrimaryLanguage(track.Language))...)
+	for _, s := range sources {
 		for _, word := range audioLabelWords(s) {
 			known[word] = true
 		}
@@ -4047,14 +4057,26 @@ func audioLabelRepeatsTitle(label, displayTitle string, track models.AudioTrack)
 	return true
 }
 
+// audioCodecSpellings joins hyphenated codec names so "AC-3" and "E-AC-3"
+// match the stored codecs ac3 and eac3.
+var audioCodecSpellings = strings.NewReplacer("e-ac-3", "eac3", "ac-3", "ac3")
+
 func audioLabelWords(s string) []string {
-	return strings.FieldsFunc(strings.ToLower(s), func(r rune) bool {
+	words := strings.FieldsFunc(audioCodecSpellings.Replace(strings.ToLower(s)), func(r rune) bool {
 		switch r {
-		case ' ', '-', '_', '/', ',', '(', ')', '[', ']', ':', '|':
+		case '-', '_', '/', ',', '(', ')', '[', ']', ':', '|':
 			return true
 		}
-		return false
+		return unicode.IsSpace(r)
 	})
+	out := words[:0]
+	for _, word := range words {
+		// A trailing full stop ("English.") is punctuation; "5.1" keeps its dot.
+		if word = strings.TrimRight(word, "."); word != "" {
+			out = append(out, word)
+		}
+	}
+	return out
 }
 
 func compatSubtitleDisplayTitle(track catalog.VersionSubtitleTrack) string {
