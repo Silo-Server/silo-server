@@ -81,6 +81,9 @@ describe("Settings › API Keys", () => {
       }),
     );
     expect(await screen.findByText("sa_shown_once")).toBeTruthy();
+    // A profile key is told it needs no profile header.
+    expect(screen.getByText(/always acts as Kid/)).toBeTruthy();
+    expect(screen.queryByText(/X-Profile-Id/)).toBeNull();
   });
 
   it("offers the primary profile a whole-account key by default", async () => {
@@ -98,6 +101,8 @@ describe("Settings › API Keys", () => {
         profileId: undefined,
       }),
     );
+    // A whole-account key is shown the header that picks its profile.
+    expect(await screen.findByText("X-Profile-Id: parent")).toBeTruthy();
   });
 
   it("reports a failed capability read as a failure, not as keys being turned off", () => {

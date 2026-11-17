@@ -15,7 +15,9 @@ still apply, so an admin-only route needs a key owned by an admin account.
 
 A key is either an **account key** or a **profile key**. An account key may send
 `X-Profile-Id` naming any profile on its account and acts as that profile without
-its PIN. A profile key is bound to one profile when it is created: it always acts
+its PIN. Most profile operations require the header and answer `422` without it;
+the few that accept its absence, such as `GET /api/v2/profiles` and
+`GET /api/v2/user/libraries`, answer for the account as a whole. A profile key is bound to one profile when it is created: it always acts
 as that profile, with that profile's rating, library and quality limits, and a
 request naming another profile is `403 permission_denied`. A profile key holds no
 admin role, even when its profile is the primary one on an admin account.

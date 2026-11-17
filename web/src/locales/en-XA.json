@@ -137709,6 +137709,60 @@
       "value": "⟦ÅÞÎ Ķéýš~~~~⟧"
     }
   ],
+  "web.settings.apiKeys.usage.accountKey": [
+    {
+      "type": 0,
+      "value": "⟦Ţĥîš ķéý çåñ åçţ åš åñý þŕöƒîļé öñ ýöûŕ åççöûñţ. Çĥööšé öñé þéŕ ŕéǫûéšţ ŵîţĥ ţĥîš ĥéåđéŕ. Ţĥé éẋåɱþļé ûšéš "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": "; "
+    },
+    {
+      "type": 1,
+      "value": "endpoint"
+    },
+    {
+      "type": 0,
+      "value": " ļîšţš éṽéŕý þŕöƒîļé'š ÎĐ.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.settings.apiKeys.usage.docs": [
+    {
+      "type": 0,
+      "value": "⟦ÅÞÎ ŕéƒéŕéñçé~~~~~~⟧"
+    }
+  ],
+  "web.settings.apiKeys.usage.header": [
+    {
+      "type": 0,
+      "value": "⟦Šéñđ îţ ŵîţĥ éṽéŕý ŕéǫûéšţ îñ ţĥîš ĥéåđéŕ:~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.settings.apiKeys.usage.profileKey": [
+    {
+      "type": 0,
+      "value": "⟦Ţĥîš ķéý åļŵåýš åçţš åš "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": ". Îţ ñééđš ñö þŕöƒîļé ĥéåđéŕ.~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.settings.apiKeys.usage.title": [
+    {
+      "type": 0,
+      "value": "⟦Ĥöŵ ţö ûšé ţĥîš ķéý~~~~~~~~⟧"
+    }
+  ],
   "web.settings.cardOverlay.adjust": [
     {
       "type": 0,

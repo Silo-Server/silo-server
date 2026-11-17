@@ -272,6 +272,11 @@ function CreateKeyDialog({
           <div className="flex flex-col gap-4">
             <p>{t("web.settings.apiKeys.create.secretNotice")}</p>
             <code className="break-all">{secret}</code>
+            <KeyUsage
+              secret={secret}
+              boundTo={profiles.find((p) => p.id === target)}
+              example={profile}
+            />
             {error ? <p role="alert">{error}</p> : null}
             <Button onClick={() => void copy()}>
               <Copy data-icon="inline-start" />
@@ -367,6 +372,60 @@ function CreateKeyDialog({
         )}
       </DialogContent>
     </Dialog>
+  );
+}
+
+// Request text shown as code: header names and a path, the same in every language.
+const API_DOCS_PATH = "/api/v2/docs";
+const PROFILES_REQUEST = "GET /api/v2/profiles";
+
+/**
+ * How to send the key just created. A key tied to one profile needs nothing
+ * else; a whole-account key also names the profile it acts as, shown with
+ * the acting profile's ID as the example.
+ */
+function KeyUsage({
+  secret,
+  boundTo,
+  example,
+}: {
+  secret: string;
+  boundTo: Profile | undefined;
+  example: Profile;
+}) {
+  const t = useT();
+  // Enough of the key to recognize it; the full key is shown once, above.
+  const authorization = `Authorization: Bearer ${secret.slice(0, 11)}…`;
+  const profileHeader = `X-Profile-Id: ${example.id}`;
+  return (
+    <section className="border-border flex flex-col gap-2 border-t pt-4 text-sm">
+      <h3 className="font-medium">{t("web.settings.apiKeys.usage.title")}</h3>
+      <p className="text-muted-foreground">{t("web.settings.apiKeys.usage.header")}</p>
+      <code className="break-all">{authorization}</code>
+      {boundTo ? (
+        <p className="text-muted-foreground">
+          {t("web.settings.apiKeys.usage.profileKey", { profile: boundTo.name })}
+        </p>
+      ) : (
+        <>
+          <p className="text-muted-foreground">
+            {t("web.settings.apiKeys.usage.accountKey", {
+              profile: example.name,
+              endpoint: PROFILES_REQUEST,
+            })}
+          </p>
+          <code className="break-all">{profileHeader}</code>
+        </>
+      )}
+      <a
+        href={API_DOCS_PATH}
+        target="_blank"
+        rel="noreferrer"
+        className="underline underline-offset-4"
+      >
+        {t("web.settings.apiKeys.usage.docs")}
+      </a>
+    </section>
   );
 }
 

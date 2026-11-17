@@ -132973,6 +132973,60 @@
       "value": "\u200F\u202EAPI Keys\u202C"
     }
   ],
+  "web.settings.apiKeys.usage.accountKey": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EThis key can act as any profile on your account. Choose one per request with this header. The example uses \u202C"
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": "\u202E; \u202C"
+    },
+    {
+      "type": 1,
+      "value": "endpoint"
+    },
+    {
+      "type": 0,
+      "value": "\u202E lists every profile's ID.\u202C"
+    }
+  ],
+  "web.settings.apiKeys.usage.docs": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EAPI reference\u202C"
+    }
+  ],
+  "web.settings.apiKeys.usage.header": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ESend it with every request in this header:\u202C"
+    }
+  ],
+  "web.settings.apiKeys.usage.profileKey": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EThis key always acts as \u202C"
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": "\u202E. It needs no profile header.\u202C"
+    }
+  ],
+  "web.settings.apiKeys.usage.title": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EHow to use this key\u202C"
+    }
+  ],
   "web.settings.cardOverlay.adjust": [
     {
       "type": 0,
