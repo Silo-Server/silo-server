@@ -139233,6 +139233,18 @@
       "value": "Käyttöavain"
     }
   ],
+  "web.setup.storage.applyingBody": [
+    {
+      "type": 0,
+      "value": "Silo käynnistyy uudelleen ottaakseen uuden tallennustilan käyttöön. Määritys jatkuu, kun Silo on taas käytettävissä."
+    }
+  ],
+  "web.setup.storage.applyingTitle": [
+    {
+      "type": 0,
+      "value": "Otetaan tallennusasetuksia käyttöön…"
+    }
+  ],
   "web.setup.storage.authCloudflare": [
     {
       "type": 0,
@@ -139513,6 +139525,18 @@
     {
       "type": 0,
       "value": "Yhteyden URL-osoite"
+    }
+  ],
+  "web.setup.storage.restartSlowBody": [
+    {
+      "type": 0,
+      "value": "Silo käynnistyy uudelleen itsestään, kun sitä hallitsee Docker, Kubernetes tai systemd. Muussa tapauksessa käynnistä Silo itse uudelleen. Määritys jatkuu, kun Silo on taas käytettävissä."
+    }
+  ],
+  "web.setup.storage.restartSlowTitle": [
+    {
+      "type": 0,
+      "value": "Silo ei ole vielä käynnistynyt uudelleen"
     }
   ],
   "web.setup.storage.saveFailed": [

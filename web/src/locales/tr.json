@@ -137417,6 +137417,18 @@
       "value": "Erişim anahtarı"
     }
   ],
+  "web.setup.storage.applyingBody": [
+    {
+      "type": 0,
+      "value": "Silo, yeni depolamayı kullanmak için yeniden başlıyor. Silo yeniden açıldığında kurulum devam eder."
+    }
+  ],
+  "web.setup.storage.applyingTitle": [
+    {
+      "type": 0,
+      "value": "Depolama ayarları uygulanıyor"
+    }
+  ],
   "web.setup.storage.authCloudflare": [
     {
       "type": 0,
@@ -137697,6 +137709,18 @@
     {
       "type": 0,
       "value": "Bağlantı URL’si"
+    }
+  ],
+  "web.setup.storage.restartSlowBody": [
+    {
+      "type": 0,
+      "value": "Silo’yu Docker, Kubernetes veya systemd çalıştırıyorsa Silo kendiliğinden yeniden açılır. Aksi takdirde Silo’yu kendiniz yeniden başlatın. Silo yeniden açıldığında kurulum devam eder."
+    }
+  ],
+  "web.setup.storage.restartSlowTitle": [
+    {
+      "type": 0,
+      "value": "Silo henüz yeniden başlamadı"
     }
   ],
   "web.setup.storage.saveFailed": [

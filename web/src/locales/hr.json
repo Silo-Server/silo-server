@@ -150904,6 +150904,18 @@
       "value": "Pristupni ključ"
     }
   ],
+  "web.setup.storage.applyingBody": [
+    {
+      "type": 0,
+      "value": "Silo se ponovno pokreće kako bi počeo koristiti novu pohranu. Postavljanje će se nastaviti kad Silo ponovno bude dostupan."
+    }
+  ],
+  "web.setup.storage.applyingTitle": [
+    {
+      "type": 0,
+      "value": "Primjena postavki pohrane"
+    }
+  ],
   "web.setup.storage.authCloudflare": [
     {
       "type": 0,
@@ -151184,6 +151196,18 @@
     {
       "type": 0,
       "value": "URL veze"
+    }
+  ],
+  "web.setup.storage.restartSlowBody": [
+    {
+      "type": 0,
+      "value": "Silo se sam ponovno pokreće kad ga izvodi Docker, Kubernetes ili systemd. U suprotnom sami ponovno pokrenite Silo. Postavljanje će se nastaviti kad Silo ponovno bude dostupan."
+    }
+  ],
+  "web.setup.storage.restartSlowTitle": [
+    {
+      "type": 0,
+      "value": "Silo se još nije ponovno pokrenuo"
     }
   ],
   "web.setup.storage.saveFailed": [

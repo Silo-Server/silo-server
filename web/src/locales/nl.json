@@ -138171,6 +138171,18 @@
       "value": "Toegangssleutel"
     }
   ],
+  "web.setup.storage.applyingBody": [
+    {
+      "type": 0,
+      "value": "Silo wordt opnieuw opgestart om de nieuwe opslag te gebruiken. De installatie gaat verder zodra Silo weer actief is."
+    }
+  ],
+  "web.setup.storage.applyingTitle": [
+    {
+      "type": 0,
+      "value": "Opslaginstellingen toepassen"
+    }
+  ],
   "web.setup.storage.authCloudflare": [
     {
       "type": 0,
@@ -138451,6 +138463,18 @@
     {
       "type": 0,
       "value": "Verbindings-URL"
+    }
+  ],
+  "web.setup.storage.restartSlowBody": [
+    {
+      "type": 0,
+      "value": "Silo start vanzelf weer op als Docker, Kubernetes of systemd het uitvoert. Start Silo anders zelf opnieuw. De installatie gaat verder zodra Silo weer actief is."
+    }
+  ],
+  "web.setup.storage.restartSlowTitle": [
+    {
+      "type": 0,
+      "value": "Silo is nog niet opnieuw opgestart"
     }
   ],
   "web.setup.storage.saveFailed": [

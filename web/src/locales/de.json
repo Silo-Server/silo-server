@@ -138502,6 +138502,18 @@
       "value": "Zugriffsschlüssel"
     }
   ],
+  "web.setup.storage.applyingBody": [
+    {
+      "type": 0,
+      "value": "Silo startet neu, um den neuen Speicher zu verwenden. Die Einrichtung geht weiter, sobald Silo wieder da ist."
+    }
+  ],
+  "web.setup.storage.applyingTitle": [
+    {
+      "type": 0,
+      "value": "Speicher-Einstellungen werden angewendet"
+    }
+  ],
   "web.setup.storage.authCloudflare": [
     {
       "type": 0,
@@ -138782,6 +138794,18 @@
     {
       "type": 0,
       "value": "Verbindungs-URL"
+    }
+  ],
+  "web.setup.storage.restartSlowBody": [
+    {
+      "type": 0,
+      "value": "Silo startet von selbst wieder, wenn es über Docker, Kubernetes oder systemd läuft. Andernfalls starte Silo selbst neu. Die Einrichtung geht weiter, sobald Silo wieder da ist."
+    }
+  ],
+  "web.setup.storage.restartSlowTitle": [
+    {
+      "type": 0,
+      "value": "Silo wurde noch nicht neu gestartet"
     }
   ],
   "web.setup.storage.saveFailed": [

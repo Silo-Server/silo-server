@@ -163167,6 +163167,18 @@
       "value": "Klucz dostępu"
     }
   ],
+  "web.setup.storage.applyingBody": [
+    {
+      "type": 0,
+      "value": "Silo uruchamia się ponownie, aby zacząć korzystać z nowego magazynu. Konfiguracja wznowi się, gdy serwer znów będzie dostępny."
+    }
+  ],
+  "web.setup.storage.applyingTitle": [
+    {
+      "type": 0,
+      "value": "Stosowanie ustawień przechowywania"
+    }
+  ],
   "web.setup.storage.authCloudflare": [
     {
       "type": 0,
@@ -163447,6 +163459,18 @@
     {
       "type": 0,
       "value": "URL połączenia"
+    }
+  ],
+  "web.setup.storage.restartSlowBody": [
+    {
+      "type": 0,
+      "value": "Silo uruchomi się ponownie samoczynnie, jeśli zarządza nim Docker, Kubernetes lub systemd. W przeciwnym razie uruchom Silo ponownie samodzielnie. Konfiguracja wznowi się, gdy serwer znów będzie dostępny."
+    }
+  ],
+  "web.setup.storage.restartSlowTitle": [
+    {
+      "type": 0,
+      "value": "Serwer Silo jeszcze nie uruchomił się ponownie"
     }
   ],
   "web.setup.storage.saveFailed": [

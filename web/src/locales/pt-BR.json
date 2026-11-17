@@ -150459,6 +150459,18 @@
       "value": "Chave de acesso"
     }
   ],
+  "web.setup.storage.applyingBody": [
+    {
+      "type": 0,
+      "value": "O Silo está reiniciando para usar o novo armazenamento. A configuração continua quando ele voltar."
+    }
+  ],
+  "web.setup.storage.applyingTitle": [
+    {
+      "type": 0,
+      "value": "Aplicando as configurações de armazenamento"
+    }
+  ],
   "web.setup.storage.authCloudflare": [
     {
       "type": 0,
@@ -150739,6 +150751,18 @@
     {
       "type": 0,
       "value": "URL de conexão"
+    }
+  ],
+  "web.setup.storage.restartSlowBody": [
+    {
+      "type": 0,
+      "value": "O Silo volta sozinho quando é executado pelo Docker, Kubernetes ou systemd. Caso contrário, inicie o Silo novamente você mesmo. A configuração continua quando ele voltar."
+    }
+  ],
+  "web.setup.storage.restartSlowTitle": [
+    {
+      "type": 0,
+      "value": "O Silo ainda não reiniciou"
     }
   ],
   "web.setup.storage.saveFailed": [

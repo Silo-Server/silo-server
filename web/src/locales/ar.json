@@ -182838,6 +182838,18 @@
       "value": "مفتاح الوصول"
     }
   ],
+  "web.setup.storage.applyingBody": [
+    {
+      "type": 0,
+      "value": "تجري إعادة تشغيل Silo لاستخدام التخزين الجديد. سيتابع الإعداد عند عودته."
+    }
+  ],
+  "web.setup.storage.applyingTitle": [
+    {
+      "type": 0,
+      "value": "جارٍ تطبيق إعدادات التخزين"
+    }
+  ],
   "web.setup.storage.authCloudflare": [
     {
       "type": 0,
@@ -183118,6 +183130,18 @@
     {
       "type": 0,
       "value": "عنوان URL للاتصال"
+    }
+  ],
+  "web.setup.storage.restartSlowBody": [
+    {
+      "type": 0,
+      "value": "يعود Silo من تلقاء نفسه عندما يشغّله Docker أو Kubernetes أو systemd. وإلا فشغّل Silo مرة أخرى بنفسك. سيتابع الإعداد عند عودته."
+    }
+  ],
+  "web.setup.storage.restartSlowTitle": [
+    {
+      "type": 0,
+      "value": "لم تتم إعادة تشغيل Silo بعد"
     }
   ],
   "web.setup.storage.saveFailed": [

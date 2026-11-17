@@ -162853,6 +162853,18 @@
       "value": "Přístupový klíč"
     }
   ],
+  "web.setup.storage.applyingBody": [
+    {
+      "type": 0,
+      "value": "Silo se restartuje, aby začalo používat nové úložiště. Nastavení bude pokračovat, jakmile bude Silo znovu dostupné."
+    }
+  ],
+  "web.setup.storage.applyingTitle": [
+    {
+      "type": 0,
+      "value": "Použití nastavení úložiště"
+    }
+  ],
   "web.setup.storage.authCloudflare": [
     {
       "type": 0,
@@ -163133,6 +163145,18 @@
     {
       "type": 0,
       "value": "URL připojení"
+    }
+  ],
+  "web.setup.storage.restartSlowBody": [
+    {
+      "type": 0,
+      "value": "Pokud Silo spouští Docker, Kubernetes nebo systemd, spustí se znovu samo. Jinak Silo spusťte znovu sami. Nastavení bude pokračovat, jakmile bude Silo znovu dostupné."
+    }
+  ],
+  "web.setup.storage.restartSlowTitle": [
+    {
+      "type": 0,
+      "value": "Silo se zatím nerestartovalo"
     }
   ],
   "web.setup.storage.saveFailed": [

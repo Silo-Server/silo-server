@@ -139059,6 +139059,18 @@
       "value": "Tilgangsnøkkel"
     }
   ],
+  "web.setup.storage.applyingBody": [
+    {
+      "type": 0,
+      "value": "Silo starter på nytt for å bruke den nye lagringen. Oppsettet fortsetter når Silo er tilbake."
+    }
+  ],
+  "web.setup.storage.applyingTitle": [
+    {
+      "type": 0,
+      "value": "Tar i bruk lagringsinnstillingene"
+    }
+  ],
   "web.setup.storage.authCloudflare": [
     {
       "type": 0,
@@ -139339,6 +139351,18 @@
     {
       "type": 0,
       "value": "Tilkoblings-URL"
+    }
+  ],
+  "web.setup.storage.restartSlowBody": [
+    {
+      "type": 0,
+      "value": "Silo starter igjen av seg selv når den kjøres av Docker, Kubernetes eller systemd. Ellers må du starte Silo igjen selv. Oppsettet fortsetter når Silo er tilbake."
+    }
+  ],
+  "web.setup.storage.restartSlowTitle": [
+    {
+      "type": 0,
+      "value": "Silo har ikke startet på nytt ennå"
     }
   ],
   "web.setup.storage.saveFailed": [

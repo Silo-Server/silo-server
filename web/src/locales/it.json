@@ -150343,6 +150343,18 @@
       "value": "Chiave di accesso"
     }
   ],
+  "web.setup.storage.applyingBody": [
+    {
+      "type": 0,
+      "value": "Silo si sta riavviando per usare la nuova archiviazione. La configurazione prosegue quando torna disponibile."
+    }
+  ],
+  "web.setup.storage.applyingTitle": [
+    {
+      "type": 0,
+      "value": "Applicazione delle impostazioni di archiviazione"
+    }
+  ],
   "web.setup.storage.authCloudflare": [
     {
       "type": 0,
@@ -150623,6 +150635,18 @@
     {
       "type": 0,
       "value": "URL di connessione"
+    }
+  ],
+  "web.setup.storage.restartSlowBody": [
+    {
+      "type": 0,
+      "value": "Silo torna disponibile da solo se viene eseguito da Docker, Kubernetes o systemd. Altrimenti, avvia di nuovo Silo manualmente. La configurazione prosegue quando torna disponibile."
+    }
+  ],
+  "web.setup.storage.restartSlowTitle": [
+    {
+      "type": 0,
+      "value": "Silo non si è ancora riavviato"
     }
   ],
   "web.setup.storage.saveFailed": [
