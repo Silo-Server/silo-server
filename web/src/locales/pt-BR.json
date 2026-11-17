@@ -150756,7 +150756,7 @@
   "web.setup.storage.restartSlowBody": [
     {
       "type": 0,
-      "value": "O Silo volta sozinho quando é executado pelo Docker, Kubernetes ou systemd. Caso contrário, inicie o Silo novamente você mesmo. A configuração continua quando ele voltar."
+      "value": "O Silo só volta sozinho se o Docker, o Kubernetes ou o systemd estiver configurado para reiniciá-lo. Caso contrário, inicie o Silo novamente. A configuração continua quando ele voltar."
     }
   ],
   "web.setup.storage.restartSlowTitle": [

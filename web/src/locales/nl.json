@@ -138468,7 +138468,7 @@
   "web.setup.storage.restartSlowBody": [
     {
       "type": 0,
-      "value": "Silo start vanzelf weer op als Docker, Kubernetes of systemd het uitvoert. Start Silo anders zelf opnieuw. De installatie gaat verder zodra Silo weer actief is."
+      "value": "Silo komt alleen vanzelf terug als Docker, Kubernetes of systemd is ingesteld om Silo opnieuw op te starten. Start Silo anders zelf opnieuw. De installatie gaat verder zodra Silo weer actief is."
     }
   ],
   "web.setup.storage.restartSlowTitle": [

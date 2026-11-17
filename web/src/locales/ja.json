@@ -127270,7 +127270,7 @@
   "web.setup.storage.restartSlowBody": [
     {
       "type": 0,
-      "value": "Docker、Kubernetes、systemdで実行している場合、Siloは自動的に再起動します。それ以外の場合は、Siloを手動で起動し直してください。再起動が完了すると、セットアップが続行されます。"
+      "value": "Siloが自動的に復帰するのは、Docker、Kubernetes、またはsystemdで再起動するよう設定されている場合のみです。それ以外の場合は、Siloを手動で起動し直してください。再起動が完了すると、セットアップが続行されます。"
     }
   ],
   "web.setup.storage.restartSlowTitle": [

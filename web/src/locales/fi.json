@@ -139530,7 +139530,7 @@
   "web.setup.storage.restartSlowBody": [
     {
       "type": 0,
-      "value": "Silo käynnistyy uudelleen itsestään, kun sitä hallitsee Docker, Kubernetes tai systemd. Muussa tapauksessa käynnistä Silo itse uudelleen. Määritys jatkuu, kun Silo on taas käytettävissä."
+      "value": "Silo käynnistyy uudelleen itsestään vain, jos Docker, Kubernetes tai systemd on määritetty käynnistämään se uudelleen. Muussa tapauksessa käynnistä Silo itse uudelleen. Määritys jatkuu, kun Silo on taas käytettävissä."
     }
   ],
   "web.setup.storage.restartSlowTitle": [

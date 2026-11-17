@@ -309,6 +309,7 @@ export function StorageStep() {
   // instead of recording the old location and locking the new one out (#4418).
   async function applySavedStorage(): Promise<boolean> {
     const before = await fetchAdminServerStatus();
+    if (!mounted.current) return false;
     // The answering process reports these until it restarts, which also covers
     // a save made before a page reload.
     if (!settingsRestartPending(before, STORAGE_RESTART_PREFIXES)) return true;
@@ -446,141 +447,145 @@ export function StorageStep() {
           </p>
         </div>
       ) : null}
-      <StepSection>
-        <SettingField
-          label={t("web.setup.storage.backendLabel")}
-          type="select"
-          value={artworkBackend}
-          options={[
-            { value: "auto", label: t("web.setup.storage.backendAuto") },
-            { value: "local", label: t("web.setup.storage.backendLocal") },
-            { value: "s3", label: "S3" },
-          ]}
-          disabled={locationStatusUnavailable || artworkLocked}
-          description={
-            locationStatusUnavailable
-              ? t("web.setup.storage.lockUnknownBackend")
-              : artworkLocked
-                ? t("web.setup.storage.backendLocked")
-                : t("web.setup.storage.backendDescription")
-          }
-          onChange={(value) => {
-            form.setValue("artwork.storage_backend", value);
-            if (value === "s3") setOpen((o) => ({ ...o, public: true }));
-          }}
-        />
-        <SettingField
-          label={t("web.setup.storage.localPathLabel")}
-          // eslint-disable-next-line formatjs/no-literal-string-in-jsx -- an example value, not text
-          hint="/var/lib/silo/artwork"
-          value={form.getValue("artwork.local_path")}
-          onChange={(value) => form.setValue("artwork.local_path", value)}
-          disabled={locationStatusUnavailable || artworkLocked}
-          description={
-            locationStatusUnavailable
-              ? t("web.setup.storage.lockUnknownPath")
-              : t("web.setup.storage.localPathDescription")
-          }
-        />
-        <SettingFieldRow
-          label={t("web.setup.storage.keepArtworkLabel")}
-          description={t("web.setup.storage.keepArtworkDescription")}
-        >
-          <Switch
-            checked={form.getValue("metadata.cache_images") !== "false"}
-            onCheckedChange={(v) => form.setValue("metadata.cache_images", v ? "true" : "false")}
-            aria-label={t("web.setup.storage.keepArtworkLabel")}
-          />
-        </SettingFieldRow>
-        <Backend
-          // eslint-disable-next-line formatjs/no-literal-string-in-jsx -- product name
-          title="Redis"
-          description={
-            redisManaged
-              ? t("web.setup.storage.redisManagedDescription")
-              : t("web.setup.storage.redisDescription")
-          }
-          configured={redisConfigured}
-          status={
-            redisStatus ? (
-              <SettingFieldStatus tone={redisStatus.tone}>{redisStatus.text}</SettingFieldStatus>
-            ) : undefined
-          }
-          open={open.redis}
-          onToggle={() => setOpen((o) => ({ ...o, redis: !o.redis }))}
-          readOnly={redisManaged}
-        >
+      {/* Locked while Silo restarts: an edit made now could not be saved
+          before the step moves on. */}
+      <fieldset disabled={restartPhase !== "idle"} className="contents">
+        <StepSection>
           <SettingField
-            label={t("web.setup.storage.redisUrlLabel")}
-            type="password"
+            label={t("web.setup.storage.backendLabel")}
+            type="select"
+            value={artworkBackend}
+            options={[
+              { value: "auto", label: t("web.setup.storage.backendAuto") },
+              { value: "local", label: t("web.setup.storage.backendLocal") },
+              { value: "s3", label: "S3" },
+            ]}
+            disabled={locationStatusUnavailable || artworkLocked}
+            description={
+              locationStatusUnavailable
+                ? t("web.setup.storage.lockUnknownBackend")
+                : artworkLocked
+                  ? t("web.setup.storage.backendLocked")
+                  : t("web.setup.storage.backendDescription")
+            }
+            onChange={(value) => {
+              form.setValue("artwork.storage_backend", value);
+              if (value === "s3") setOpen((o) => ({ ...o, public: true }));
+            }}
+          />
+          <SettingField
+            label={t("web.setup.storage.localPathLabel")}
             // eslint-disable-next-line formatjs/no-literal-string-in-jsx -- an example value, not text
-            hint="redis://localhost:6379"
-            value={form.getValue("redis.url")}
-            onChange={(v) => stageRedisUrl(form, v)}
-            sensitiveConfigured={redisSaved && form.getValue("redis.url") === ""}
-            disabled={redisManaged}
+            hint="/var/lib/silo/artwork"
+            value={form.getValue("artwork.local_path")}
+            onChange={(value) => form.setValue("artwork.local_path", value)}
+            disabled={locationStatusUnavailable || artworkLocked}
+            description={
+              locationStatusUnavailable
+                ? t("web.setup.storage.lockUnknownPath")
+                : t("web.setup.storage.localPathDescription")
+            }
           />
-          <SettingField
-            label={t("web.setup.storage.redisDbLabel")}
-            type="number"
+          <SettingFieldRow
+            label={t("web.setup.storage.keepArtworkLabel")}
+            description={t("web.setup.storage.keepArtworkDescription")}
+          >
+            <Switch
+              checked={form.getValue("metadata.cache_images") !== "false"}
+              onCheckedChange={(v) => form.setValue("metadata.cache_images", v ? "true" : "false")}
+              aria-label={t("web.setup.storage.keepArtworkLabel")}
+            />
+          </SettingFieldRow>
+          <Backend
+            // eslint-disable-next-line formatjs/no-literal-string-in-jsx -- product name
+            title="Redis"
             description={
               redisManaged
-                ? t("web.setup.storage.redisDbManaged")
-                : t("web.setup.storage.redisDbDescription")
+                ? t("web.setup.storage.redisManagedDescription")
+                : t("web.setup.storage.redisDescription")
             }
-            value={form.getValue("redis.db")}
-            onChange={(v) => form.setValue("redis.db", v)}
-            disabled={redisManaged}
-          />
-          <ConnectionCheckAction
-            onClick={redisCheck.run}
-            result={redisCheck.result}
-            isPending={redisCheck.isPending}
-            disabled={busy}
-            label={t("web.setup.wizard.checkConnection")}
-          />
-        </Backend>
-        <Backend
-          title={t("web.setup.storage.publicTitle")}
-          description={t("web.setup.storage.publicDescription")}
-          configured={publicConfigured}
-          open={open.public}
-          onToggle={() => setOpen((o) => ({ ...o, public: !o.public }))}
-        >
-          <S3Fields
-            form={form}
-            prefix="public"
-            check={publicCheck}
-            disabled={busy}
-            locationLocked={
-              locationStatusUnavailable || (artworkLocked && artworkBackend !== "local")
+            configured={redisConfigured}
+            status={
+              redisStatus ? (
+                <SettingFieldStatus tone={redisStatus.tone}>{redisStatus.text}</SettingFieldStatus>
+              ) : undefined
             }
-            locationStatusUnavailable={locationStatusUnavailable}
-            lockedDescription={
-              usesS3
-                ? t("web.setup.storage.publicLockedS3")
-                : t("web.setup.storage.publicLockedLocal")
-            }
-          />
-        </Backend>
-        <Backend
-          title={t("web.setup.storage.privateTitle")}
-          description={t("web.setup.storage.privateDescription")}
-          configured={privateConfigured}
-          open={open.private}
-          onToggle={() => setOpen((o) => ({ ...o, private: !o.private }))}
-        >
-          <S3Fields
-            form={form}
-            prefix="private"
-            check={privateCheck}
-            disabled={busy}
-            locationLocked={locationStatusUnavailable || privateLocked}
-            locationStatusUnavailable={locationStatusUnavailable}
-            lockedDescription={t("web.setup.storage.privateLocked")}
-          />
-        </Backend>
-      </StepSection>
+            open={open.redis}
+            onToggle={() => setOpen((o) => ({ ...o, redis: !o.redis }))}
+            readOnly={redisManaged}
+          >
+            <SettingField
+              label={t("web.setup.storage.redisUrlLabel")}
+              type="password"
+              // eslint-disable-next-line formatjs/no-literal-string-in-jsx -- an example value, not text
+              hint="redis://localhost:6379"
+              value={form.getValue("redis.url")}
+              onChange={(v) => stageRedisUrl(form, v)}
+              sensitiveConfigured={redisSaved && form.getValue("redis.url") === ""}
+              disabled={redisManaged}
+            />
+            <SettingField
+              label={t("web.setup.storage.redisDbLabel")}
+              type="number"
+              description={
+                redisManaged
+                  ? t("web.setup.storage.redisDbManaged")
+                  : t("web.setup.storage.redisDbDescription")
+              }
+              value={form.getValue("redis.db")}
+              onChange={(v) => form.setValue("redis.db", v)}
+              disabled={redisManaged}
+            />
+            <ConnectionCheckAction
+              onClick={redisCheck.run}
+              result={redisCheck.result}
+              isPending={redisCheck.isPending}
+              disabled={busy}
+              label={t("web.setup.wizard.checkConnection")}
+            />
+          </Backend>
+          <Backend
+            title={t("web.setup.storage.publicTitle")}
+            description={t("web.setup.storage.publicDescription")}
+            configured={publicConfigured}
+            open={open.public}
+            onToggle={() => setOpen((o) => ({ ...o, public: !o.public }))}
+          >
+            <S3Fields
+              form={form}
+              prefix="public"
+              check={publicCheck}
+              disabled={busy}
+              locationLocked={
+                locationStatusUnavailable || (artworkLocked && artworkBackend !== "local")
+              }
+              locationStatusUnavailable={locationStatusUnavailable}
+              lockedDescription={
+                usesS3
+                  ? t("web.setup.storage.publicLockedS3")
+                  : t("web.setup.storage.publicLockedLocal")
+              }
+            />
+          </Backend>
+          <Backend
+            title={t("web.setup.storage.privateTitle")}
+            description={t("web.setup.storage.privateDescription")}
+            configured={privateConfigured}
+            open={open.private}
+            onToggle={() => setOpen((o) => ({ ...o, private: !o.private }))}
+          >
+            <S3Fields
+              form={form}
+              prefix="private"
+              check={privateCheck}
+              disabled={busy}
+              locationLocked={locationStatusUnavailable || privateLocked}
+              locationStatusUnavailable={locationStatusUnavailable}
+              lockedDescription={t("web.setup.storage.privateLocked")}
+            />
+          </Backend>
+        </StepSection>
+      </fieldset>
     </StepFrame>
   );
 }

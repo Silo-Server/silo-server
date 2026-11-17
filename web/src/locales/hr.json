@@ -151201,7 +151201,7 @@
   "web.setup.storage.restartSlowBody": [
     {
       "type": 0,
-      "value": "Silo se sam ponovno pokreće kad ga izvodi Docker, Kubernetes ili systemd. U suprotnom sami ponovno pokrenite Silo. Postavljanje će se nastaviti kad Silo ponovno bude dostupan."
+      "value": "Silo će se sam ponovno pokrenuti samo ako je Docker, Kubernetes ili systemd postavljen da ga ponovno pokreće. U suprotnom sami ponovno pokrenite Silo. Postavljanje će se nastaviti kad Silo ponovno bude dostupan."
     }
   ],
   "web.setup.storage.restartSlowTitle": [

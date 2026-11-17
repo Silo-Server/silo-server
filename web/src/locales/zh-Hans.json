@@ -128626,7 +128626,7 @@
   "web.setup.storage.restartSlowBody": [
     {
       "type": 0,
-      "value": "如果Silo由Docker、Kubernetes或systemd运行，它会自动恢复。否则，请自行重新启动Silo。Silo恢复后将继续设置。"
+      "value": "只有在Docker、Kubernetes或systemd设置为自动重启Silo时，Silo才会自行恢复。否则，请手动重新启动Silo。Silo恢复后将继续设置。"
     }
   ],
   "web.setup.storage.restartSlowTitle": [

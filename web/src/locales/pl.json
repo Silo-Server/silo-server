@@ -163464,7 +163464,7 @@
   "web.setup.storage.restartSlowBody": [
     {
       "type": 0,
-      "value": "Silo uruchomi się ponownie samoczynnie, jeśli zarządza nim Docker, Kubernetes lub systemd. W przeciwnym razie uruchom Silo ponownie samodzielnie. Konfiguracja wznowi się, gdy serwer znów będzie dostępny."
+      "value": "Silo uruchomi się ponownie samoczynnie tylko wtedy, gdy Docker, Kubernetes lub systemd są skonfigurowane tak, aby je ponownie uruchamiać. W przeciwnym razie uruchom Silo ponownie samodzielnie. Konfiguracja wznowi się, gdy serwer znów będzie dostępny."
     }
   ],
   "web.setup.storage.restartSlowTitle": [

@@ -137714,7 +137714,7 @@
   "web.setup.storage.restartSlowBody": [
     {
       "type": 0,
-      "value": "Silo’yu Docker, Kubernetes veya systemd çalıştırıyorsa Silo kendiliğinden yeniden açılır. Aksi takdirde Silo’yu kendiniz yeniden başlatın. Silo yeniden açıldığında kurulum devam eder."
+      "value": "Silo, yalnızca Docker, Kubernetes veya systemd onu yeniden başlatacak şekilde ayarlanmışsa kendiliğinden yeniden açılır. Aksi takdirde Silo’yu kendiniz yeniden başlatın. Silo yeniden açıldığında kurulum devam eder."
     }
   ],
   "web.setup.storage.restartSlowTitle": [

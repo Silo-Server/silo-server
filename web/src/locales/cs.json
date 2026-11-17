@@ -163150,7 +163150,7 @@
   "web.setup.storage.restartSlowBody": [
     {
       "type": 0,
-      "value": "Pokud Silo spouští Docker, Kubernetes nebo systemd, spustí se znovu samo. Jinak Silo spusťte znovu sami. Nastavení bude pokračovat, jakmile bude Silo znovu dostupné."
+      "value": "Silo se samo znovu spustí, jen pokud je v Dockeru, Kubernetes nebo systemd nastavený jeho restart. Jinak Silo spusťte znovu ručně. Nastavení bude pokračovat, jakmile bude Silo znovu dostupné."
     }
   ],
   "web.setup.storage.restartSlowTitle": [

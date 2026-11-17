@@ -183135,7 +183135,7 @@
   "web.setup.storage.restartSlowBody": [
     {
       "type": 0,
-      "value": "يعود Silo من تلقاء نفسه عندما يشغّله Docker أو Kubernetes أو systemd. وإلا فشغّل Silo مرة أخرى بنفسك. سيتابع الإعداد عند عودته."
+      "value": "لا يعود Silo من تلقاء نفسه إلا إذا كان Docker أو Kubernetes أو systemd مُعدًّا لإعادة تشغيله. وإلا فشغّل Silo مرة أخرى بنفسك. سيتابع الإعداد عند عودته."
     }
   ],
   "web.setup.storage.restartSlowTitle": [

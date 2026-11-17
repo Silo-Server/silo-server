@@ -322,6 +322,9 @@ describe("StorageStep", () => {
       expect(save).toHaveBeenCalledOnce();
       expect(screen.getByText("Applying storage settings")).toBeInTheDocument();
       expect(screen.getByRole("button", { name: "Skip for now" })).toBeDisabled();
+      // An edit made now could not be saved before the step moves on.
+      expect(screen.getByLabelText("Local storage path")).toBeDisabled();
+      expect(screen.getByRole("switch", { name: "Keep provider artwork" })).toBeDisabled();
       expect(markDone).not.toHaveBeenCalled();
 
       await vi.advanceTimersByTimeAsync(5_000);

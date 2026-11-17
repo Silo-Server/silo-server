@@ -129132,7 +129132,7 @@
   "web.setup.storage.restartSlowBody": [
     {
       "type": 0,
-      "value": "如果 Silo 由 Docker、Kubernetes 或 systemd 執行，它會自行重新啟動。否則，請自行再次啟動 Silo。重新啟動完成後，設定會繼續進行。"
+      "value": "只有在 Docker、Kubernetes 或 systemd 設定為自動重新啟動 Silo 時，Silo 才會自行重新啟動。否則，請自行再次啟動 Silo。重新啟動完成後，設定會繼續進行。"
     }
   ],
   "web.setup.storage.restartSlowTitle": [

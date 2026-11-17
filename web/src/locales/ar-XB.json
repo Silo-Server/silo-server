@@ -146008,7 +146008,7 @@
   "web.setup.storage.restartSlowBody": [
     {
       "type": 0,
-      "value": "\u200F\u202ESilo comes back on its own when Docker, Kubernetes or systemd runs it. Otherwise, start Silo again yourself. Setup continues when it’s back.\u202C"
+      "value": "\u200F\u202ESilo comes back on its own only if Docker, Kubernetes or systemd is set to restart it. Otherwise, start Silo again yourself. Setup continues when it’s back.\u202C"
     }
   ],
   "web.setup.storage.restartSlowTitle": [

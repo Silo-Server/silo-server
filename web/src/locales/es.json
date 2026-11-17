@@ -150911,7 +150911,7 @@
   "web.setup.storage.restartSlowBody": [
     {
       "type": 0,
-      "value": "Silo vuelve a iniciarse por sí solo cuando lo ejecutan Docker, Kubernetes o systemd. Si no es así, inicia Silo de nuevo tú mismo. La configuración inicial continuará cuando vuelva a estar disponible."
+      "value": "Silo solo se reinicia automáticamente si Docker, Kubernetes o systemd están configurados para reiniciarlo. Si no, vuelve a iniciar Silo manualmente. La configuración inicial continuará cuando vuelva a estar disponible."
     }
   ],
   "web.setup.storage.restartSlowTitle": [
