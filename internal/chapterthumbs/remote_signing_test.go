@@ -40,7 +40,7 @@ func TestRemoteFrameExtractorRefusesAnOversizedFrame(t *testing.T) {
 
 	data, reason, err := (&httpRemoteFrameExtractor{}).ExtractFrame(t.Context(), &nodepool.Node{URL: node.URL}, nodeauthtest.NodeKey(key),
 		RemoteExtractRequest{InputPath: "/media/movie.mkv", SeekSeconds: 12})
-	if err == nil || data != nil || reason != reasonChapterExtractFailed {
-		t.Fatalf("ExtractFrame = %d bytes, %q, %v; want %q and an error", len(data), reason, err, reasonChapterExtractFailed)
+	if err == nil || data != nil || reason != chapterThumbnailNodeUnavailableReason {
+		t.Fatalf("ExtractFrame = %d bytes, %q, %v; want %q and an error", len(data), reason, err, chapterThumbnailNodeUnavailableReason)
 	}
 }

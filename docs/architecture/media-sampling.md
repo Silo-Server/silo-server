@@ -310,10 +310,13 @@ stride alignment, so it gets the limit plus a sixteenth. `chapterthumbs`
 also refuses a file before extraction when every video track with known
 dimensions is over the pixel limit. Each of these is reported as
 `decode_invalid_data`. A transcode node's response is read with the same
-byte limit; one over it fails as `chapter_extract_failed`, since the fault
-may be the node's. The pixel limit equals the source budget in `imageutil`,
-which rejects any larger frame afterwards anyway, so no frame that yields a
-thumbnail is refused.
+byte limit; one over it fails as the node being unavailable, since a node
+with the limit never sends one, and `prefer_transcode_nodes` then extracts
+locally. The pixel limit equals the source budget in `imageutil`, which
+rejects any larger frame afterwards anyway, so a frame at its decoded size
+or wider that yields a thumbnail is not refused. The limit is on the decoded
+size, which decides the decoder's memory, so a larger source whose sample
+aspect ratio narrows it to under the budget is refused.
 
 ## Sheets
 

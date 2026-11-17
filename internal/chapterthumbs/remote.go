@@ -127,8 +127,10 @@ func (e *httpRemoteFrameExtractor) ExtractFrame(
 	if len(data) == 0 {
 		return nil, reasonChapterExtractFailed, fmt.Errorf("chapter thumbnail remote extract: empty response")
 	}
+	// A node with the same limit never sends this, so the fault is the
+	// node's: prefer_transcode_nodes extracts locally instead.
 	if len(data) > mediasample.MaxImageBytes {
-		return nil, reasonChapterExtractFailed, fmt.Errorf("chapter thumbnail remote extract: frame is over %d bytes", mediasample.MaxImageBytes)
+		return nil, chapterThumbnailNodeUnavailableReason, fmt.Errorf("chapter thumbnail remote extract: frame is over %d bytes", mediasample.MaxImageBytes)
 	}
 	return data, "", nil
 }

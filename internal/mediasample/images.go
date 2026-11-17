@@ -283,8 +283,11 @@ func buildImageArgs(req Request, attempt Attempt, hw hardwareDecode, softwareTon
 const (
 	// MaxImagePixels is the largest frame, in pixels, an image attempt
 	// decodes. It equals imageutil's source budget (maxSourcePixels), which
-	// every consumer of an extracted frame already enforces, so no frame that
-	// yields a result is refused.
+	// every consumer of an extracted frame already enforces, so a frame at
+	// its decoded size or wider that yields a result is not refused. The
+	// limit is on the decoded size, which decides the decoder's memory: a
+	// larger source that pixelAspectFilter would narrow to under the budget
+	// is refused.
 	MaxImagePixels = 100_000_000
 	// decodeMaxPixels is the -max_pixels ffmpeg gets. ffmpeg compares the
 	// width rounded up to its stride alignment, up to 64 on x86, so a frame
