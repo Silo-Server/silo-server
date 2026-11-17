@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/netip"
+	"net/url"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -246,5 +247,16 @@ func TestTransportNamesSiloWhenCallerSetsNoUserAgent(t *testing.T) {
 		if tc.set == "" && req.Header.Get("User-Agent") != "" {
 			t.Errorf("%s: transport modified the caller's request headers", tc.name)
 		}
+	}
+
+	// A RoundTripper may be called directly with no Header map at all.
+	target, _ := url.Parse(server.URL)
+	resp, err := client.Transport.RoundTrip((&http.Request{Method: http.MethodGet, URL: target}).WithContext(WithPrivateAccess(context.Background())))
+	if err != nil {
+		t.Fatalf("nil Header: %v", err)
+	}
+	resp.Body.Close()
+	if ua, _ := got.Load().(string); !strings.HasPrefix(ua, "Silo/") {
+		t.Errorf("nil Header: server saw User-Agent %q", ua)
 	}
 }

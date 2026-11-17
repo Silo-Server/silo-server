@@ -249,6 +249,9 @@ func NewTransport(configure ...func(*http.Transport)) *Transport {
 func (t *Transport) RoundTrip(req *http.Request) (*http.Response, error) {
 	if _, ok := req.Header["User-Agent"]; !ok {
 		req = req.Clone(req.Context())
+		if req.Header == nil {
+			req.Header = make(http.Header)
+		}
 		req.Header.Set("User-Agent", buildinfo.UserAgent())
 	}
 	if PrivateAccess(req.Context()) {
