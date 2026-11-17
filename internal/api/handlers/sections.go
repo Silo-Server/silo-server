@@ -1109,29 +1109,52 @@ type episodeParentImageURLs struct {
 // includeAvailability is only true for native /api/v2 callers: Availability is
 // json:"-" on the frozen v1 card shape.
 func (h *SectionHandler) buildSections(ctx context.Context, withItems []sections.SectionWithItems, libraryID *int, viewerAccess catalog.AccessFilter, art imagesize.Request, includeAvailability bool) homeSectionsResponse {
-	return h.buildSectionsWithUserStates(ctx, withItems, libraryID, viewerAccess, art, nil, includeAvailability)
+	return h.buildSectionsWithUserStates(ctx, withItems, libraryID, viewerAccess, art, nil, includeAvailability, nil)
+}
+
+type sectionLookup int
+
+const (
+	sectionLookupOverlaySummaries sectionLookup = iota
+	sectionLookupPlayTargets
+	sectionLookupLocalization
+	sectionLookupUserStates
+	sectionLookupImageURLs
+	sectionLookupEpisodeMeta
+	sectionLookupMangaChapterMeta
+	sectionLookupAvailability
+	sectionLookupCount
+)
+
+var sectionLookupTimingKeys = [sectionLookupCount]string{
+	sectionLookupOverlaySummaries: "overlay_summaries_ms",
+	sectionLookupPlayTargets:      "play_targets_ms",
+	sectionLookupLocalization:     "localization_ms",
+	sectionLookupUserStates:       "user_states_ms",
+	sectionLookupImageURLs:        "image_urls_ms",
+	sectionLookupEpisodeMeta:      "episode_meta_ms",
+	sectionLookupMangaChapterMeta: "manga_chapter_meta_ms",
+	sectionLookupAvailability:     "availability_ms",
+}
+
+// sectionBuildTimings measures the parallel card lookups. Each duration has
+// one writer and is read after the wait. Skipped lookups leave a zero duration.
+type sectionBuildTimings [sectionLookupCount]time.Duration
+
+func (t *sectionBuildTimings) appendLogAttrs(attrs []slog.Attr) []slog.Attr {
+	for lookup, elapsed := range t {
+		attrs = append(attrs, slog.Int64(sectionLookupTimingKeys[lookup], elapsed.Milliseconds()))
+	}
+	return attrs
 }
 
 // buildSectionsWithUserStates is buildSections reusing user states the caller
 // already loaded for these items (the Home hide-watched filter does); nil
-// loads them as buildSections does.
-func (h *SectionHandler) buildSectionsWithUserStates(ctx context.Context, withItems []sections.SectionWithItems, libraryID *int, viewerAccess catalog.AccessFilter, art imagesize.Request, knownUserStates map[string]*itemUserStateResponse, includeAvailability bool) homeSectionsResponse {
+// loads them as buildSections does. A non-nil timings receives each lookup's
+// duration.
+func (h *SectionHandler) buildSectionsWithUserStates(ctx context.Context, withItems []sections.SectionWithItems, libraryID *int, viewerAccess catalog.AccessFilter, art imagesize.Request, knownUserStates map[string]*itemUserStateResponse, includeAvailability bool, timings *sectionBuildTimings) homeSectionsResponse {
 	deduplicateSectionItems(ctx, withItems)
-
-	contentIDs := make([]string, 0)
-	seen := make(map[string]struct{})
-	for _, section := range withItems {
-		for _, item := range section.Items {
-			if item == nil || item.ContentID == "" {
-				continue
-			}
-			if _, ok := seen[item.ContentID]; ok {
-				continue
-			}
-			seen[item.ContentID] = struct{}{}
-			contentIDs = append(contentIDs, item.ContentID)
-		}
-	}
+	contentIDs := uniqueSectionContentIDs(withItems)
 
 	allItems := make([]*models.MediaItem, 0)
 	for _, s := range withItems {
@@ -1149,7 +1172,7 @@ func (h *SectionHandler) buildSectionsWithUserStates(ctx context.Context, withIt
 
 	var wg sync.WaitGroup
 
-	goSectionLookup(ctx, &wg, "overlay_summaries", func() {
+	goSectionLookup(ctx, &wg, sectionLookupOverlaySummaries, timings, func() {
 		if len(contentIDs) == 0 || h.fetcher == nil {
 			return
 		}
@@ -1161,25 +1184,25 @@ func (h *SectionHandler) buildSectionsWithUserStates(ctx context.Context, withIt
 		overlaySummaries = summaries
 	})
 
-	goSectionLookup(ctx, &wg, "play_targets", func() { playTargets = h.resolveSectionPlayableTargets(ctx, allItems, libraryID, viewerAccess) })
+	goSectionLookup(ctx, &wg, sectionLookupPlayTargets, timings, func() { playTargets = h.resolveSectionPlayableTargets(ctx, allItems, libraryID, viewerAccess) })
 
 	if knownUserStates != nil {
 		userStates = knownUserStates
 	} else {
-		goSectionLookup(ctx, &wg, "user_states", func() { userStates = h.listSectionItemUserStates(ctx, allItems) })
+		goSectionLookup(ctx, &wg, sectionLookupUserStates, timings, func() { userStates = h.listSectionItemUserStates(ctx, allItems) })
 	}
 	// localizedItems lines up with allItems: a content ID can sit in several
 	// rows with different artwork, so each row keeps its own clone.
 	var localizedItems []*models.MediaItem
 	var pendingTranslations map[string]string
 	localizationAccess := sectionLocalizationAccess(viewerAccess, libraryID)
-	goSectionLookup(ctx, &wg, "localization", func() {
+	goSectionLookup(ctx, &wg, sectionLookupLocalization, timings, func() {
 		localizedItems, pendingTranslations = h.localizeSectionItems(ctx, allItems, localizationAccess)
 	})
-	goSectionLookup(ctx, &wg, "image_urls", func() { imageURLs = h.resolveSectionItemImageURLs(ctx, withItems, art) })
-	goSectionLookup(ctx, &wg, "episode_meta", func() { episodeMeta = h.listSectionEpisodeItemMeta(ctx, withItems, viewerAccess) })
-	goSectionLookup(ctx, &wg, "manga_chapter_meta", func() { mangaChapterMeta = h.listSectionMangaChapterItemMeta(ctx, allItems) })
-	availability := h.startSectionAvailability(ctx, &wg, includeAvailability, viewerAccess, allItems)
+	goSectionLookup(ctx, &wg, sectionLookupImageURLs, timings, func() { imageURLs = h.resolveSectionItemImageURLs(ctx, withItems, art) })
+	goSectionLookup(ctx, &wg, sectionLookupEpisodeMeta, timings, func() { episodeMeta = h.listSectionEpisodeItemMeta(ctx, withItems, viewerAccess) })
+	goSectionLookup(ctx, &wg, sectionLookupMangaChapterMeta, timings, func() { mangaChapterMeta = h.listSectionMangaChapterItemMeta(ctx, allItems) })
+	availability := h.startSectionAvailability(ctx, &wg, timings, includeAvailability, viewerAccess, allItems)
 
 	wg.Wait()
 	h.resolveFallbackParentArtwork(ctx, withItems, episodeMeta, art, imageURLs)
@@ -1221,15 +1244,42 @@ func (h *SectionHandler) buildSectionsWithUserStates(ctx context.Context, withIt
 	return resp
 }
 
+// uniqueSectionContentIDs lists each content ID on the rows once, in row order.
+func uniqueSectionContentIDs(withItems []sections.SectionWithItems) []string {
+	contentIDs := make([]string, 0)
+	seen := make(map[string]struct{})
+	for _, section := range withItems {
+		for _, item := range section.Items {
+			if item == nil || item.ContentID == "" {
+				continue
+			}
+			if _, ok := seen[item.ContentID]; ok {
+				continue
+			}
+			seen[item.ContentID] = struct{}{}
+			contentIDs = append(contentIDs, item.ContentID)
+		}
+	}
+	return contentIDs
+}
+
 // goSectionLookup runs one of buildSectionsWithUserStates' card lookups on
 // wg. The lookups run on their own goroutines, out of reach of the request's
 // panic recovery, so a panic is logged and leaves the lookup's result empty,
-// as its errors do.
-func goSectionLookup(ctx context.Context, wg *sync.WaitGroup, lookup string, run func()) {
+// as its errors do. When requested, the duration covers the lookup itself.
+func goSectionLookup(ctx context.Context, wg *sync.WaitGroup, lookup sectionLookup, timings *sectionBuildTimings, run func()) {
 	wg.Go(func() {
+		var start time.Time
+		if timings != nil {
+			start = time.Now()
+		}
 		defer func() {
+			if timings != nil {
+				timings[lookup] = time.Since(start)
+			}
 			if rec := recover(); rec != nil {
-				slog.ErrorContext(ctx, "section card lookup panicked", "component", "api", "lookup", lookup,
+				name := strings.TrimSuffix(sectionLookupTimingKeys[lookup], "_ms")
+				slog.ErrorContext(ctx, "section card lookup panicked", "component", "api", "lookup", name,
 					"panic", logredact.SanitizeText(fmt.Sprint(rec)), "stack", string(debug.Stack()))
 			}
 		}()
