@@ -105788,6 +105788,12 @@
       "value": "Poradie"
     }
   ],
+  "web.catalog.sort.relevance": [
+    {
+      "type": 0,
+      "value": "Relevantnosť"
+    }
+  ],
   "web.catalog.sort.sortBy": [
     {
       "type": 0,
@@ -144459,6 +144465,12 @@
       "value": "Môžete pozastaviť a obnoviť prehrávanie"
     }
   ],
+  "web.player.watchTogether.redisRequired": [
+    {
+      "type": 0,
+      "value": "Watch Party vyžaduje Redis, ktorý tento server nemá nastavený. Požiadajte správcu servera, aby ho nakonfiguroval."
+    }
+  ],
   "web.player.watchTogether.selfName": [
     {
       "type": 1,
@@ -148841,6 +148853,86 @@
     {
       "type": 0,
       "value": "Hľadať v knižnici alebo nájsť tituly na vyžiadanie…"
+    }
+  ],
+  "web.search.results.allInLibrary": [
+    {
+      "type": 0,
+      "value": "Všetky výsledky vo vašej knižnici"
+    }
+  ],
+  "web.search.results.atLeastCount": [
+    {
+      "type": 1,
+      "value": "count"
+    },
+    {
+      "type": 0,
+      "value": "+"
+    }
+  ],
+  "web.search.results.backToRelevance": [
+    {
+      "type": 0,
+      "value": "Späť na relevantnosť"
+    }
+  ],
+  "web.search.results.bestMatches": [
+    {
+      "type": 0,
+      "value": "Najlepšie zhody"
+    }
+  ],
+  "web.search.results.inLibrary": [
+    {
+      "type": 0,
+      "value": "Vo vašej knižnici"
+    }
+  ],
+  "web.search.results.moreResults": [
+    {
+      "type": 0,
+      "value": "Ďalšie výsledky"
+    }
+  ],
+  "web.search.results.notInLibrary": [
+    {
+      "type": 0,
+      "value": "Mimo vašej knižnice"
+    }
+  ],
+  "web.search.results.overview": [
+    {
+      "type": 0,
+      "value": "Prehľad"
+    }
+  ],
+  "web.search.results.requestToAdd": [
+    {
+      "type": 0,
+      "value": "Vyžiadať pridanie"
+    }
+  ],
+  "web.search.results.showAll": [
+    {
+      "type": 0,
+      "value": "Zobraziť všetky výsledky"
+    }
+  ],
+  "web.search.results.sortedBy": [
+    {
+      "type": 0,
+      "value": "Zoradené podľa: "
+    },
+    {
+      "type": 1,
+      "value": "sort"
+    }
+  ],
+  "web.search.results.viewsLabel": [
+    {
+      "type": 0,
+      "value": "Zobrazenia výsledkov"
     }
   ],
   "web.search.resultsLabel": [

@@ -89374,6 +89374,12 @@
       "value": "Sorrend"
     }
   ],
+  "web.catalog.sort.relevance": [
+    {
+      "type": 0,
+      "value": "Relevancia"
+    }
+  ],
   "web.catalog.sort.sortBy": [
     {
       "type": 0,
@@ -121751,6 +121757,12 @@
       "value": "Szüneteltetheti és folytathatja a lejátszást"
     }
   ],
+  "web.player.watchTogether.redisRequired": [
+    {
+      "type": 0,
+      "value": "A Watch Partyhoz Redis szükséges, amely ezen a szerveren nincs beállítva. Kérje meg a szerver rendszergazdáját, hogy konfigurálja."
+    }
+  ],
   "web.player.watchTogether.selfName": [
     {
       "type": 1,
@@ -125657,6 +125669,86 @@
     {
       "type": 0,
       "value": "Keresés a könyvtárban vagy igényelhető címek keresése…"
+    }
+  ],
+  "web.search.results.allInLibrary": [
+    {
+      "type": 0,
+      "value": "Összes találat a könyvtárban"
+    }
+  ],
+  "web.search.results.atLeastCount": [
+    {
+      "type": 1,
+      "value": "count"
+    },
+    {
+      "type": 0,
+      "value": "+"
+    }
+  ],
+  "web.search.results.backToRelevance": [
+    {
+      "type": 0,
+      "value": "Vissza a relevancia szerinti rendezéshez"
+    }
+  ],
+  "web.search.results.bestMatches": [
+    {
+      "type": 0,
+      "value": "Legjobb találatok"
+    }
+  ],
+  "web.search.results.inLibrary": [
+    {
+      "type": 0,
+      "value": "A könyvtárban"
+    }
+  ],
+  "web.search.results.moreResults": [
+    {
+      "type": 0,
+      "value": "További találatok"
+    }
+  ],
+  "web.search.results.notInLibrary": [
+    {
+      "type": 0,
+      "value": "Nincs a könyvtárban"
+    }
+  ],
+  "web.search.results.overview": [
+    {
+      "type": 0,
+      "value": "Áttekintés"
+    }
+  ],
+  "web.search.results.requestToAdd": [
+    {
+      "type": 0,
+      "value": "Hozzáadás kérése"
+    }
+  ],
+  "web.search.results.showAll": [
+    {
+      "type": 0,
+      "value": "Összes találat megjelenítése"
+    }
+  ],
+  "web.search.results.sortedBy": [
+    {
+      "type": 0,
+      "value": "Rendezés: "
+    },
+    {
+      "type": 1,
+      "value": "sort"
+    }
+  ],
+  "web.search.results.viewsLabel": [
+    {
+      "type": 0,
+      "value": "Találatnézetek"
     }
   ],
   "web.search.resultsLabel": [

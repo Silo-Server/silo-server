@@ -81889,6 +81889,12 @@
       "value": "Urutan"
     }
   ],
+  "web.catalog.sort.relevance": [
+    {
+      "type": 0,
+      "value": "Relevansi"
+    }
+  ],
   "web.catalog.sort.sortBy": [
     {
       "type": 0,
@@ -111497,6 +111503,12 @@
       "value": "Anda dapat menjeda & melanjutkan"
     }
   ],
+  "web.player.watchTogether.redisRequired": [
+    {
+      "type": 0,
+      "value": "Watch Party memerlukan Redis, yang belum disiapkan di server ini. Minta administrator server Anda untuk mengonfigurasinya."
+    }
+  ],
   "web.player.watchTogether.selfName": [
     {
       "type": 1,
@@ -115193,6 +115205,86 @@
     {
       "type": 0,
       "value": "Cari di perpustakaan atau temukan judul untuk diminta…"
+    }
+  ],
+  "web.search.results.allInLibrary": [
+    {
+      "type": 0,
+      "value": "Semua hasil di perpustakaan Anda"
+    }
+  ],
+  "web.search.results.atLeastCount": [
+    {
+      "type": 1,
+      "value": "count"
+    },
+    {
+      "type": 0,
+      "value": "+"
+    }
+  ],
+  "web.search.results.backToRelevance": [
+    {
+      "type": 0,
+      "value": "Kembali ke relevansi"
+    }
+  ],
+  "web.search.results.bestMatches": [
+    {
+      "type": 0,
+      "value": "Paling cocok"
+    }
+  ],
+  "web.search.results.inLibrary": [
+    {
+      "type": 0,
+      "value": "Di perpustakaan Anda"
+    }
+  ],
+  "web.search.results.moreResults": [
+    {
+      "type": 0,
+      "value": "Hasil lainnya"
+    }
+  ],
+  "web.search.results.notInLibrary": [
+    {
+      "type": 0,
+      "value": "Tidak ada di perpustakaan Anda"
+    }
+  ],
+  "web.search.results.overview": [
+    {
+      "type": 0,
+      "value": "Ringkasan"
+    }
+  ],
+  "web.search.results.requestToAdd": [
+    {
+      "type": 0,
+      "value": "Minta untuk ditambahkan"
+    }
+  ],
+  "web.search.results.showAll": [
+    {
+      "type": 0,
+      "value": "Tampilkan semua hasil"
+    }
+  ],
+  "web.search.results.sortedBy": [
+    {
+      "type": 0,
+      "value": "Diurutkan menurut "
+    },
+    {
+      "type": 1,
+      "value": "sort"
+    }
+  ],
+  "web.search.results.viewsLabel": [
+    {
+      "type": 0,
+      "value": "Tampilan hasil"
     }
   ],
   "web.search.resultsLabel": [

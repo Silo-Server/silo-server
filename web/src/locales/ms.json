@@ -81791,6 +81791,12 @@
       "value": "Susunan"
     }
   ],
+  "web.catalog.sort.relevance": [
+    {
+      "type": 0,
+      "value": "Kerelevanan"
+    }
+  ],
   "web.catalog.sort.sortBy": [
     {
       "type": 0,
@@ -111383,6 +111389,12 @@
       "value": "Anda boleh jeda & sambung semula"
     }
   ],
+  "web.player.watchTogether.redisRequired": [
+    {
+      "type": 0,
+      "value": "Watch Party memerlukan Redis, yang belum disediakan pada pelayan ini. Minta pentadbir pelayan anda mengkonfigurasikannya."
+    }
+  ],
   "web.player.watchTogether.selfName": [
     {
       "type": 1,
@@ -115079,6 +115091,86 @@
     {
       "type": 0,
       "value": "Cari pustaka atau cari tajuk untuk diminta…"
+    }
+  ],
+  "web.search.results.allInLibrary": [
+    {
+      "type": 0,
+      "value": "Semua hasil dalam pustaka anda"
+    }
+  ],
+  "web.search.results.atLeastCount": [
+    {
+      "type": 1,
+      "value": "count"
+    },
+    {
+      "type": 0,
+      "value": "+"
+    }
+  ],
+  "web.search.results.backToRelevance": [
+    {
+      "type": 0,
+      "value": "Kembali ke kerelevanan"
+    }
+  ],
+  "web.search.results.bestMatches": [
+    {
+      "type": 0,
+      "value": "Padanan terbaik"
+    }
+  ],
+  "web.search.results.inLibrary": [
+    {
+      "type": 0,
+      "value": "Dalam pustaka anda"
+    }
+  ],
+  "web.search.results.moreResults": [
+    {
+      "type": 0,
+      "value": "Lebih banyak hasil"
+    }
+  ],
+  "web.search.results.notInLibrary": [
+    {
+      "type": 0,
+      "value": "Tiada dalam pustaka anda"
+    }
+  ],
+  "web.search.results.overview": [
+    {
+      "type": 0,
+      "value": "Gambaran keseluruhan"
+    }
+  ],
+  "web.search.results.requestToAdd": [
+    {
+      "type": 0,
+      "value": "Minta untuk ditambah"
+    }
+  ],
+  "web.search.results.showAll": [
+    {
+      "type": 0,
+      "value": "Tunjukkan semua hasil"
+    }
+  ],
+  "web.search.results.sortedBy": [
+    {
+      "type": 0,
+      "value": "Diisih mengikut "
+    },
+    {
+      "type": 1,
+      "value": "sort"
+    }
+  ],
+  "web.search.results.viewsLabel": [
+    {
+      "type": 0,
+      "value": "Paparan hasil"
     }
   ],
   "web.search.resultsLabel": [

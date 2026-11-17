@@ -97647,6 +97647,12 @@
       "value": "Ordine"
     }
   ],
+  "web.catalog.sort.relevance": [
+    {
+      "type": 0,
+      "value": "Relevanță"
+    }
+  ],
   "web.catalog.sort.sortBy": [
     {
       "type": 0,
@@ -133267,6 +133273,12 @@
       "value": "Puteți întrerupe și relua redarea"
     }
   ],
+  "web.player.watchTogether.redisRequired": [
+    {
+      "type": 0,
+      "value": "Watch Party necesită Redis, care nu este configurat pe acest server. Solicitați administratorului serverului să îl configureze."
+    }
+  ],
   "web.player.watchTogether.selfName": [
     {
       "type": 1,
@@ -137407,6 +137419,86 @@
     {
       "type": 0,
       "value": "Căutați în bibliotecă sau găsiți titluri de solicitat…"
+    }
+  ],
+  "web.search.results.allInLibrary": [
+    {
+      "type": 0,
+      "value": "Toate rezultatele din biblioteca dvs."
+    }
+  ],
+  "web.search.results.atLeastCount": [
+    {
+      "type": 1,
+      "value": "count"
+    },
+    {
+      "type": 0,
+      "value": "+"
+    }
+  ],
+  "web.search.results.backToRelevance": [
+    {
+      "type": 0,
+      "value": "Înapoi la relevanță"
+    }
+  ],
+  "web.search.results.bestMatches": [
+    {
+      "type": 0,
+      "value": "Cele mai potrivite"
+    }
+  ],
+  "web.search.results.inLibrary": [
+    {
+      "type": 0,
+      "value": "În biblioteca dvs."
+    }
+  ],
+  "web.search.results.moreResults": [
+    {
+      "type": 0,
+      "value": "Mai multe rezultate"
+    }
+  ],
+  "web.search.results.notInLibrary": [
+    {
+      "type": 0,
+      "value": "Nu se află în biblioteca dvs."
+    }
+  ],
+  "web.search.results.overview": [
+    {
+      "type": 0,
+      "value": "Prezentare generală"
+    }
+  ],
+  "web.search.results.requestToAdd": [
+    {
+      "type": 0,
+      "value": "Solicitați adăugarea"
+    }
+  ],
+  "web.search.results.showAll": [
+    {
+      "type": 0,
+      "value": "Afișați toate rezultatele"
+    }
+  ],
+  "web.search.results.sortedBy": [
+    {
+      "type": 0,
+      "value": "Sortare după "
+    },
+    {
+      "type": 1,
+      "value": "sort"
+    }
+  ],
+  "web.search.results.viewsLabel": [
+    {
+      "type": 0,
+      "value": "Moduri de afișare a rezultatelor"
     }
   ],
   "web.search.resultsLabel": [
