@@ -136,7 +136,7 @@ already owns: the primary profile every key on the account, any other profile
 only the keys bound to it. A key outside that view answers `404` to revocation.
 Listing and revocation without `X-Profile-Id` cover the whole account while no
 profile on it has a PIN, a maturity limit, or library restrictions, and are
-otherwise `422`, as on the catalog reads. Scope discovery retains its
+otherwise `422`, as on the catalog reads; both rules are for login sessions, since an API key gets `403` here first. Scope discovery retains its
 availability to unscoped API keys.
 Creation and revocation retain the demo restriction; listing and scope discovery
 do not. An unavailable store reports

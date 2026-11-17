@@ -190,7 +190,7 @@ func registerPersonalAPIKeys(reg *Registry) {
 	list.Class = ClassProfileScoped
 	list.ProfileOptional = true
 	list.HouseholdProfileGate = true
-	list.Description = "The account's primary profile lists every key on the account; any other profile lists only the keys bound to it. A request without X-Profile-Id lists them all while no profile on the account is PIN-protected or access-restricted, and is otherwise 422, as on the catalog reads."
+	list.Description = "The account's primary profile lists every key on the account; any other profile lists only the keys bound to it. A request without X-Profile-Id lists them all while no profile on the account is PIN-protected or access-restricted, and is otherwise 422, as on the catalog reads. This is for a login session: an API key cannot list keys and receives 403 permission_denied."
 	Register(reg, list, func(ctx context.Context, in *CursorListInput) (*PersonalAPIKeyListOutput, error) {
 		userID, p := personalAPIKeyAccount(ctx)
 		if p != nil {
@@ -292,7 +292,7 @@ func registerPersonalAPIKeys(reg *Registry) {
 	revoke.Class = ClassProfileScoped
 	revoke.ProfileOptional = true
 	revoke.HouseholdProfileGate = true
-	revoke.Description = "Revokes a key the caller can list (listPersonalAPIKeys); any other key is 404."
+	revoke.Description = "Revokes a key the caller can list (listPersonalAPIKeys); any other key is 404. This is for a login session: an API key cannot revoke keys and receives 403 permission_denied."
 	Register(reg, revoke, func(ctx context.Context, in *PersonalAPIKeyIDInput) (*struct{}, error) {
 		userID, p := personalAPIKeyAccount(ctx)
 		if p != nil {

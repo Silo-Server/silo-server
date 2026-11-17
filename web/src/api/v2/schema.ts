@@ -6330,7 +6330,7 @@ export interface paths {
     };
     /**
      * Manage the login account's API keys.
-     * @description The account's primary profile lists every key on the account; any other profile lists only the keys bound to it. A request without X-Profile-Id lists them all while no profile on the account is PIN-protected or access-restricted, and is otherwise 422, as on the catalog reads.
+     * @description The account's primary profile lists every key on the account; any other profile lists only the keys bound to it. A request without X-Profile-Id lists them all while no profile on the account is PIN-protected or access-restricted, and is otherwise 422, as on the catalog reads. This is for a login session: an API key cannot list keys and receives 403 permission_denied.
      */
     get: operations["listPersonalAPIKeys"];
     put?: never;
@@ -6357,7 +6357,7 @@ export interface paths {
     post?: never;
     /**
      * Manage the login account's API keys.
-     * @description Revokes a key the caller can list (listPersonalAPIKeys); any other key is 404.
+     * @description Revokes a key the caller can list (listPersonalAPIKeys); any other key is 404. This is for a login session: an API key cannot revoke keys and receives 403 permission_denied.
      */
     delete: operations["revokePersonalAPIKey"];
     options?: never;
