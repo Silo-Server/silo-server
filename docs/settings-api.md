@@ -977,6 +977,15 @@ The server admin settings include `artwork.storage_backend` (`auto`, `local`, or
 `/var/lib/silo/artwork`). Artwork storage settings take effect after a server
 restart.
 
+A write of `artwork.local_path` is refused with a `422` validation problem when
+a local store could not open that folder: the path names an existing file or
+symbolic link, or a path inside a file. The check applies whichever backend is
+selected, since startup and storage transitions refuse such a folder too. The
+field error is at `body.values.artwork.local_path` (batch) or `body.value`
+(single key), with code `invalid`. The check runs on the server that takes the
+write and creates no folders; a folder that does not exist yet is accepted and
+created at startup.
+
 The first write to the assets store records its storage identity; writes to a
 shared local root count too. At startup, Silo records any configured private
 bucket, even if it is empty. A direct settings write that changes a recorded
