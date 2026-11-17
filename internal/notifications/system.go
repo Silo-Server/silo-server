@@ -808,7 +808,7 @@ func (s *System) RunRetention(ctx context.Context) (RetentionStats, error) {
 	unreadCutoff := now.AddDate(0, 0, -s.Settings.UnreadRetentionDays(ctx))
 	eventCutoff := now.AddDate(0, 0, -s.Settings.EventRetentionDays(ctx))
 
-	deleted, err := s.Deliveries.DeleteOld(ctx, readCutoff, unreadCutoff)
+	deleted, err := s.Deliveries.DeleteOld(ctx, readCutoff, unreadCutoff, now.Add(-s.Settings.MaxEventAge(ctx)))
 	if err != nil {
 		return stats, fmt.Errorf("prune deliveries: %w", err)
 	}

@@ -429,10 +429,10 @@ media type (`movie` or `series`) in `reason_flags`. The partial unique index
 push, mobile push, email and Discord messages carry it like any delivery.
 
 Arrival rides on release events, so it inherits their gaps: a library's silent
-seeding scan and events past the staleness horizon tell nobody. If an
-administrator sets delivery retention shorter than the staleness horizon, an
-entry still unpromoted can be told again about the same item, by a later
-episode inside the horizon, once retention has removed the first notice.
+seeding scan and events past the staleness horizon tell nobody. Delivery
+retention keeps a `watchlist.available` row until it is older than the
+staleness horizon, whatever the retention settings, so a later episode
+inside the horizon cannot tell the profile again.
 
 ## Outbound webhooks
 

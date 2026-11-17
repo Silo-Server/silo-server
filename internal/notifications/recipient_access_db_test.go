@@ -198,7 +198,7 @@ func TestFanoutSkipsSecondLibraryCopy(t *testing.T) {
 			}
 			if tc.agedOut {
 				later := time.Now().Add(time.Hour)
-				if _, err := NewDeliveryRepository(pool).DeleteOld(ctx, later, later); err != nil {
+				if _, err := NewDeliveryRepository(pool).DeleteOld(ctx, later, later, later); err != nil {
 					t.Fatalf("DeleteOld: %v", err)
 				}
 			}

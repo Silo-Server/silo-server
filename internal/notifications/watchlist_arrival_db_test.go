@@ -3,6 +3,7 @@ package notifications
 import (
 	"slices"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -99,6 +100,24 @@ func TestWatchlistArrivalTellsEachWatcherOnce(t *testing.T) {
 	nextEvent("event-4", 5)
 	if got := arrivals(); !slices.Equal(got, want) {
 		t.Fatalf("watchlist arrivals for a series past the horizon = %v, want %v", got, want)
+	}
+
+	// Retention keeps a notice younger than the staleness horizon whatever
+	// its settings say, since the notice is what stops a repeat, and removes
+	// it once it is older.
+	future := time.Now().Add(time.Hour)
+	deliveries := NewDeliveryRepository(pool)
+	if _, err := deliveries.DeleteOld(ctx, future, future, time.Now().Add(-72*time.Hour)); err != nil {
+		t.Fatalf("DeleteOld inside the horizon: %v", err)
+	}
+	if got := arrivals(); !slices.Equal(got, want) {
+		t.Fatalf("watchlist arrivals after retention inside the horizon = %v, want %v", got, want)
+	}
+	if _, err := deliveries.DeleteOld(ctx, future, future, future); err != nil {
+		t.Fatalf("DeleteOld past the horizon: %v", err)
+	}
+	if got := arrivals(); len(got) != 0 {
+		t.Fatalf("watchlist arrivals after retention past the horizon = %v, want none", got)
 	}
 }
 
