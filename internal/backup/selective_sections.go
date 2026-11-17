@@ -384,10 +384,17 @@ func (p *planner) resolveCollection(ctx context.Context, backupID string, libMap
 }
 
 // listedCollections is the server collections a row of collections'
-// configuration lists, in order.
+// configuration lists, in order. A backup's configuration is JSON no schema
+// constrains: a list over userdata.MaxCollectionListEntries is not a row's
+// and lists none, as userdata.RemapCollectionList reads it, so planning
+// never resolves more collections than a row holds.
 func listedCollections(config json.RawMessage) []string {
+	refs := sections.ParseCollectionPostersConfig(config)
+	if len(refs) > userdata.MaxCollectionListEntries {
+		return nil
+	}
 	var out []string
-	for _, ref := range sections.ParseCollectionPostersConfig(config) {
+	for _, ref := range refs {
 		if ref.LibraryCollectionID != "" {
 			out = append(out, ref.LibraryCollectionID)
 		}
