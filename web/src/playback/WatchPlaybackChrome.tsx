@@ -743,8 +743,11 @@ function WatchPlaybackHostContent() {
       getDeviceId: () => getOrCreateDeviceId(),
       refreshToken: refreshAuthentication,
       getAuthContext: getAuthContextVersion,
+      // Leaving the player marks these surfaces stale at once (below), but the
+      // stop is still in flight then. Read them again once it lands.
+      onSessionStopped: () => void invalidatePlaybackSurfaceQueries(queryClient),
     }),
-    [],
+    [queryClient],
   );
 
   useEffect(() => {

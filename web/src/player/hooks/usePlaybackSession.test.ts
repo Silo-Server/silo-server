@@ -3470,3 +3470,41 @@ describe("usePlaybackSession page unload", () => {
     unmount();
   });
 });
+
+describe("usePlaybackSession leaving the player", () => {
+  it("tells the host once the unmount stop lands, not when the player unmounts", async () => {
+    let answerStop: (response: Response) => void = () => {};
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith("/playback/start")) {
+        return jsonResponse(playable("session-1"), { status: 201 });
+      }
+      if (url.endsWith("/playback/route-events")) return new Response(null, { status: 202 });
+      if (init?.method === "DELETE") return new Promise<Response>((r) => (answerStop = r));
+      throw new Error(`Unexpected request: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const onSessionStopped = vi.fn();
+    const config: PlayerConfig = { ...playerConfig, onSessionStopped };
+
+    const { result, unmount } = renderHook(
+      () => usePlaybackSession("request-1", [], [], 7, 0, false, "auto"),
+      {
+        wrapper: ({ children }: { children: ReactNode }) =>
+          createElement(PlayerConfigProvider, { config, children }),
+      },
+    );
+    await waitFor(() => expect(result.current.sessionId).toBe("session-1"));
+
+    unmount();
+    await waitFor(() =>
+      expect(fetchMock.mock.calls.some(([, init]) => init?.method === "DELETE")).toBe(true),
+    );
+    // The page the viewer returned to has already read its watch state; the
+    // stop has not written its part yet.
+    expect(onSessionStopped).not.toHaveBeenCalled();
+
+    answerStop(jsonResponse({ outcome: "stopped" }));
+    await waitFor(() => expect(onSessionStopped).toHaveBeenCalledTimes(1));
+  });
+});
