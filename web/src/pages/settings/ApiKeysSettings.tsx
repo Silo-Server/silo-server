@@ -37,11 +37,22 @@ import {
 import { useProfiles } from "@/hooks/queries/profiles";
 import { useAuth } from "@/hooks/useAuth";
 import { useCurrentProfile } from "@/hooks/useCurrentProfile";
-import { useT } from "@/i18n";
+import { useT, type MessageKey } from "@/i18n";
 import { copyTextToClipboard } from "@/lib/clipboard";
 import { formatDate } from "@/lib/datetime";
 
 type Scope = PersonalAPIKeyScopes["scopes"][number];
+
+// What each user scope allows, in the viewer's language. A scope the server
+// adds later shows the server's own English description until it is listed.
+const SCOPE_DESCRIPTIONS: Partial<Record<string, MessageKey>> = {
+  "libraries:read": "web.settings.apiKeys.scope.librariesRead",
+  "catalog:read": "web.settings.apiKeys.scope.catalogRead",
+  "watch:read": "web.settings.apiKeys.scope.watchRead",
+  "watch:write": "web.settings.apiKeys.scope.watchWrite",
+  requests: "web.settings.apiKeys.scope.requests",
+  notifications: "web.settings.apiKeys.scope.notifications",
+};
 
 // The select's value for a key that is not tied to one profile.
 const WHOLE_ACCOUNT = "account";
@@ -70,6 +81,10 @@ export default function ApiKeysSettings() {
   const rows = keys.data?.pages.flatMap((page) => page.items) ?? [];
   const userScopes = (capability.data?.scopes ?? []).filter((scope) => scope.audience === "user");
   const enabled = capability.data?.available === true && capability.data.user_keys_enabled;
+  // Creating needs a loaded list: the list refetches after a create, and a
+  // list with nothing cached would show its loading state in place of the
+  // dialog that holds the new key.
+  const listLoaded = keys.data !== undefined;
   const maxKeys = capability.data?.max_user_keys ?? 0;
   // The primary profile sees the whole account's keys, so its count is the
   // account's; another profile learns the limit from the server's refusal.
@@ -83,7 +98,7 @@ export default function ApiKeysSettings() {
         title={t("web.settings.apiKeys.title")}
         subtitle={t("web.settings.apiKeys.subtitle")}
         actions={
-          enabled && !atLimit && profile ? (
+          enabled && listLoaded && !atLimit && profile ? (
             <Button onClick={() => setCreating(true)}>
               <Plus data-icon="inline-start" />
               {t("web.settings.apiKeys.createKey")}
@@ -91,7 +106,11 @@ export default function ApiKeysSettings() {
           ) : null
         }
       />
-      {!enabled && user?.role !== "admin" ? (
+      {capability.isError ? (
+        <p role="alert" className="text-destructive text-sm">
+          {t("web.settings.apiKeys.loadFailed")}
+        </p>
+      ) : !enabled && user?.role !== "admin" ? (
         <p className="text-muted-foreground text-sm" role="status">
           {t("web.settings.apiKeys.disabled")}
         </p>
@@ -321,7 +340,9 @@ function CreateKeyDialog({
                         {scope.name}
                       </Label>
                       <p id={`${id}-description`} className="text-muted-foreground text-sm">
-                        {scope.description}
+                        {SCOPE_DESCRIPTIONS[scope.name]
+                          ? t(SCOPE_DESCRIPTIONS[scope.name]!)
+                          : scope.description}
                       </p>
                     </div>
                   </div>

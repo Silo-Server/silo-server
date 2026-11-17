@@ -126725,6 +126725,42 @@
       "value": "Revoking…"
     }
   ],
+  "web.settings.apiKeys.scope.catalogRead": [
+    {
+      "type": 0,
+      "value": "Browse what the profile can see: libraries, home and library rows, titles, people and search."
+    }
+  ],
+  "web.settings.apiKeys.scope.librariesRead": [
+    {
+      "type": 0,
+      "value": "See which libraries the profile has."
+    }
+  ],
+  "web.settings.apiKeys.scope.notifications": [
+    {
+      "type": 0,
+      "value": "Read the profile's notifications as they arrive and mark them read."
+    }
+  ],
+  "web.settings.apiKeys.scope.requests": [
+    {
+      "type": 0,
+      "value": "Browse requestable titles and create, follow and cancel media requests."
+    }
+  ],
+  "web.settings.apiKeys.scope.watchRead": [
+    {
+      "type": 0,
+      "value": "Read the profile's watch history, progress, ratings, favorites, watchlist and hidden titles, and export its data."
+    }
+  ],
+  "web.settings.apiKeys.scope.watchWrite": [
+    {
+      "type": 0,
+      "value": "Mark titles watched or unwatched, sync progress, remove history, and edit ratings, favorites, watchlist and hidden titles."
+    }
+  ],
   "web.settings.apiKeys.subtitle": [
     {
       "type": 0,

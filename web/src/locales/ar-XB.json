@@ -132925,6 +132925,42 @@
       "value": "\u200F\u202ERevoking…\u202C"
     }
   ],
+  "web.settings.apiKeys.scope.catalogRead": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EBrowse what the profile can see: libraries, home and library rows, titles, people and search.\u202C"
+    }
+  ],
+  "web.settings.apiKeys.scope.librariesRead": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ESee which libraries the profile has.\u202C"
+    }
+  ],
+  "web.settings.apiKeys.scope.notifications": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ERead the profile's notifications as they arrive and mark them read.\u202C"
+    }
+  ],
+  "web.settings.apiKeys.scope.requests": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EBrowse requestable titles and create, follow and cancel media requests.\u202C"
+    }
+  ],
+  "web.settings.apiKeys.scope.watchRead": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ERead the profile's watch history, progress, ratings, favorites, watchlist and hidden titles, and export its data.\u202C"
+    }
+  ],
+  "web.settings.apiKeys.scope.watchWrite": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EMark titles watched or unwatched, sync progress, remove history, and edit ratings, favorites, watchlist and hidden titles.\u202C"
+    }
+  ],
   "web.settings.apiKeys.subtitle": [
     {
       "type": 0,

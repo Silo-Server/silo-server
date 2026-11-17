@@ -9,7 +9,11 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock("@/hooks/queries/personalApiKeys", () => ({
-  usePersonalApiKeyScopes: () => ({ data: mocks.capability(), isLoading: false }),
+  usePersonalApiKeyScopes: () => ({
+    data: mocks.capability(),
+    isLoading: false,
+    isError: mocks.capability() === undefined,
+  }),
   usePersonalApiKeys: () => ({
     data: { pages: [{ items: [] }] },
     isLoading: false,
@@ -94,6 +98,15 @@ describe("Settings › API Keys", () => {
         profileId: undefined,
       }),
     );
+  });
+
+  it("reports a failed capability read as a failure, not as keys being turned off", () => {
+    mocks.profile.mockReturnValue({ id: "parent", name: "Parent", is_primary: true });
+    mocks.capability.mockReturnValue(undefined);
+    render(<ApiKeysSettings />);
+    expect(screen.queryByRole("button", { name: "Create Key" })).toBeNull();
+    expect(screen.getByRole("alert").textContent).toContain("Couldn't load your API keys");
+    expect(screen.queryByText(/doesn't let users create API keys/)).toBeNull();
   });
 
   it("offers no key while the server keeps user keys off", () => {
