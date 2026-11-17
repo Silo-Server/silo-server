@@ -251,6 +251,16 @@ describe("search results", () => {
     expect(screen.queryByText("Film 0")).toBeNull();
   });
 
+  it("leaves a linked request view for a query too short to search", () => {
+    mockUseCanRequest.mockReturnValue({
+      discoveryEnabled: true,
+      isResolving: false,
+      submitDisabledReason: null,
+    });
+    renderSearch("q=x&view=requests");
+    expect(screen.getByText("Film 0")).toBeInTheDocument();
+  });
+
   it("says nothing was found once the library and discovery both come back empty", () => {
     libraryResults(0);
     discovery([]);

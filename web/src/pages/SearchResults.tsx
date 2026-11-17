@@ -167,9 +167,13 @@ export default function SearchResults({
   // or a search with nothing to request shows the overview instead.
   // While discovery has not answered (feature status loading, or the search
   // still waiting for a profile), a linked request view stays put.
+  // A query shorter than two characters never searches TMDB (useRequestSearch).
   const requestsDeciding =
     canRequest.isResolving ||
-    (requestsEnabled && requestQuery.data === undefined && !requestQuery.isError);
+    (requestsEnabled &&
+      tmdbQ.trim().length > 1 &&
+      requestQuery.data === undefined &&
+      !requestQuery.isError);
   const shownView: SearchResultsView =
     view === "requests" && !requestsDeciding && !(requestsEnabled && hasRequestResults)
       ? "overview"
@@ -462,6 +466,8 @@ export default function SearchResults({
           <div className="w-full min-w-0 sm:w-auto sm:flex-1">
             <CatalogFiltersPanel
               relevanceSort
+              allowPersonalizedFilters
+              allowPersonalizedSorts
               state={effectiveState}
               onStateChange={(nextState) => {
                 const sortChanged =
