@@ -202726,6 +202726,27 @@
             }
           },
           {
+            "description": "Set by the multivariant playlist of a plan with subtitle.hls_rendition: video selects the media playlist, subtitles the WebVTT subtitle playlist. Absent, such a plan's manifest is the multivariant playlist.",
+            "in": "query",
+            "name": "silo_rendition",
+            "schema": {
+              "enum": [
+                "video",
+                "subtitles"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Set with silo_rendition=subtitles by the multivariant playlist of a plan with on-demand renditions (hls_subtitle_renditions_all_v1): the container track number whose WebVTT playlist to answer.",
+            "in": "query",
+            "name": "silo_track",
+            "schema": {
+              "pattern": "^[1-9][0-9]{0,19}$",
+              "type": "string"
+            }
+          },
+          {
             "description": "Optional. When present, it must name a profile of the authenticated account.",
             "in": "header",
             "name": "X-Profile-Id",

@@ -68,6 +68,18 @@ func nativeMediaRoute(method, pattern string) streamtelemetry.MediaRoute {
 	panic("undeclared native media route: " + method + " " + pattern)
 }
 
+// methodHandlers serves HEAD with head and every other method with get, so
+// each is wrapped once when the router is built.
+func methodHandlers(get, head http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodHead {
+			head(w, r)
+			return
+		}
+		get(w, r)
+	}
+}
+
 func observeNative(registry *streamtelemetry.Registry, method, pattern string, handler http.HandlerFunc) http.HandlerFunc {
 	if registry == nil {
 		return handler
