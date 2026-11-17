@@ -77,20 +77,26 @@ func (h *SectionHandler) homeSections(ctx context.Context, viewer SectionViewer,
 	if elapsed >= 500*time.Millisecond {
 		level = slog.LevelWarn
 	}
+	logger := slog.Default()
+	if !logger.Enabled(ctx, level) {
+		return response, nil
+	}
 	// build_response_ms keeps its meaning (everything after fetch_all) so old
 	// and new lines compare; filter_ms and the per-lookup fields split it.
-	attrs := []any{
-		"total_ms", elapsed.Milliseconds(),
-		"resolve_ms", resolvedAt.Sub(start).Milliseconds(),
-		"next_up_ms", nextUpAt.Sub(resolvedAt).Milliseconds(),
-		"fetch_all_ms", fetchedAt.Sub(nextUpAt).Milliseconds(),
-		"build_response_ms", time.Since(fetchedAt).Milliseconds(),
-		"filter_ms", filteredAt.Sub(fetchedAt).Milliseconds(),
-		"hide_watched", hideWatched,
-		"candidate_count", candidateCount,
-		"section_count", len(withItems), "item_count", itemCount,
-	}
-	slog.Log(ctx, level, "home sections timing", append(attrs, timings.logAttrs()...)...)
+	var fields [10 + sectionLookupCount]slog.Attr
+	attrs := append(fields[:0],
+		slog.Int64("total_ms", elapsed.Milliseconds()),
+		slog.Int64("resolve_ms", resolvedAt.Sub(start).Milliseconds()),
+		slog.Int64("next_up_ms", nextUpAt.Sub(resolvedAt).Milliseconds()),
+		slog.Int64("fetch_all_ms", fetchedAt.Sub(nextUpAt).Milliseconds()),
+		slog.Int64("build_response_ms", time.Since(fetchedAt).Milliseconds()),
+		slog.Int64("filter_ms", filteredAt.Sub(fetchedAt).Milliseconds()),
+		slog.Bool("hide_watched", hideWatched),
+		slog.Int("candidate_count", candidateCount),
+		slog.Int("section_count", len(withItems)),
+		slog.Int("item_count", itemCount),
+	)
+	logger.LogAttrs(ctx, level, "home sections timing", timings.appendLogAttrs(attrs)...)
 	return response, nil
 }
 
