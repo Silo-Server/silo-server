@@ -126,15 +126,17 @@ type Section struct {
 
 // SectionCollectionCard is one collection on a row of collections.
 type SectionCollectionCard struct {
-	ID               string  `json:"id" example:"01J9Z8C3W4R5T6Y7U8I9O0P1Q2"`
-	Source           string  `json:"source" enum:"library,user" doc:"library for a server collection, user for a personal collection" example:"library"`
-	Title            string  `json:"title" example:"Marvel"`
-	PosterURL        string  `json:"poster_url" format:"uri-reference" doc:"Presigned, short-lived; empty when none"`
-	PosterThumbhash  string  `json:"poster_thumbhash,omitempty"`
-	PosterIsCollage  bool    `json:"poster_is_collage" doc:"poster_url is the acting profile's collage of the collection's first titles it can see, composed by the server because the collection has no uploaded, template or imported poster. False for an uploaded, template or imported poster and whenever poster_url is empty" example:"false"`
-	ItemCount        int     `json:"item_count" doc:"The titles the acting profile sees in the collection" example:"12"`
-	LibraryID        *ID     `json:"library_id,omitempty" doc:"Present on a server collection: a library the viewer can open that holds it, for the collection's page link. On a library page, that library" example:"1"`
-	CreatorProfileID *string `json:"creator_profile_id,omitempty" doc:"Present on a personal collection: the profile that made it"`
+	ID                string  `json:"id" example:"01J9Z8C3W4R5T6Y7U8I9O0P1Q2"`
+	Source            string  `json:"source" enum:"library,user" doc:"library for a server collection, user for a personal collection" example:"library"`
+	Title             string  `json:"title" example:"Marvel"`
+	PosterURL         string  `json:"poster_url" format:"uri-reference" doc:"Presigned, short-lived; empty when none"`
+	PosterThumbhash   string  `json:"poster_thumbhash,omitempty"`
+	PosterIsCollage   bool    `json:"poster_is_collage" doc:"poster_url is the acting profile's collage of the collection's first titles it can see, composed by the server because the collection has no uploaded, template or imported poster. False for an uploaded, template or imported poster and whenever poster_url is empty" example:"false"`
+	BackdropURL       string  `json:"backdrop_url,omitempty" format:"uri-reference" doc:"Presigned, short-lived, page-width backdrop of a server collection that has one, for a hero backdrop while the card is focused; absent when none and on personal collections"`
+	BackdropThumbhash string  `json:"backdrop_thumbhash,omitempty"`
+	ItemCount         int     `json:"item_count" doc:"The titles the acting profile sees in the collection" example:"12"`
+	LibraryID         *ID     `json:"library_id,omitempty" doc:"Present on a server collection: a library the viewer can open that holds it, for the collection's page link. On a library page, that library" example:"1"`
+	CreatorProfileID  *string `json:"creator_profile_id,omitempty" doc:"Present on a personal collection: the profile that made it"`
 }
 
 // sectionCollectionCardsOf maps a row of collections' cards, or nil when the
@@ -146,7 +148,7 @@ func sectionCollectionCardsOf(cards []sections.CollectionCard) []SectionCollecti
 	out := make([]SectionCollectionCard, 0, len(cards))
 	for _, c := range cards {
 		card := SectionCollectionCard{ID: c.ID, Source: c.Source, Title: c.Title, PosterURL: c.PosterURL, PosterThumbhash: c.PosterThumbhash,
-			PosterIsCollage: c.PosterIsCollage && c.PosterURL != "", ItemCount: c.ItemCount, CreatorProfileID: c.CreatorProfileID}
+			PosterIsCollage: c.PosterIsCollage && c.PosterURL != "", BackdropURL: c.BackdropURL, BackdropThumbhash: c.BackdropThumbhash, ItemCount: c.ItemCount, CreatorProfileID: c.CreatorProfileID}
 		if c.LibraryID != nil {
 			card.LibraryID = new(IDFromInt(int64(*c.LibraryID)))
 		}

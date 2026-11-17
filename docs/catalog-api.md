@@ -72,7 +72,10 @@ cards the viewer may see, in the row's order. `items` is `[]`, `total_count` is 
 cards, and `item_limit` does not apply: the row shows every collection it lists. Each
 `SectionCollectionCard` has `id`, `source` (`library` for a server collection, `user` for a
 personal one), `title`, `poster_url` (presigned, card size; the assigned poster, else the
-viewer's collage, else empty), `poster_thumbhash`, `poster_is_collage`, `item_count` (the titles
+viewer's collage, else empty), `poster_thumbhash`, `poster_is_collage`, `backdrop_url` and
+`backdrop_thumbhash` on a server collection with a backdrop (presigned at the page-width variant
+a collection page uses, so a client can draw it as the hero backdrop while the card is focused;
+absent otherwise, and always absent on a personal collection), `item_count` (the titles
 the viewer sees), `library_id` on a server collection (a library the viewer can open that holds
 it, for the collection page link; on a library page, that library), and `creator_profile_id` on
 a personal collection.

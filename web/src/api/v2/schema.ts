@@ -34054,6 +34054,12 @@ export interface components {
       sections: components["schemas"]["Section"][];
     };
     SectionCollectionCard: {
+      backdrop_thumbhash?: string;
+      /**
+       * Format: uri-reference
+       * @description Presigned, short-lived, page-width backdrop of a server collection that has one, for a hero backdrop while the card is focused; absent when none and on personal collections
+       */
+      backdrop_url?: string;
       /** @description Present on a personal collection: the profile that made it */
       creator_profile_id?: string;
       /** @example 01J9Z8C3W4R5T6Y7U8I9O0P1Q2 */
