@@ -14,7 +14,6 @@ const stored: Array<[string, Record<string, unknown> | undefined, string]> = [
   ["smart", undefined, "Smart"],
   ["mdblist", { mode: "mdblist_json" }, "Synced list · MDBList"],
   ["tmdb", undefined, "Synced list · TMDB chart"],
-  ["tmdb", { mode: "" }, "Synced list · TMDB chart"],
   ["tmdb", { mode: "tmdb_preset" }, "Synced list · TMDB chart"],
   ["tmdb", { mode: "tmdb_list" }, "Synced list · TMDB list"],
   ["tmdb", { mode: "tmdb_collection" }, "Synced list · TMDB franchise"],

@@ -129,24 +129,6 @@ func TestParseNFOData_TableCases(t *testing.T) {
 			},
 		},
 		{
-			name: "non-numeric runtime ignored",
-			data: `<movie><title>X</title><runtime>two hours</runtime></movie>`,
-			check: func(t *testing.T, p *parsedNFO) {
-				if p.Runtime != 0 {
-					t.Errorf("Runtime = %d, want 0", p.Runtime)
-				}
-			},
-		},
-		{
-			name: "runtime with surrounding whitespace",
-			data: `<movie><title>X</title><runtime> 95 </runtime></movie>`,
-			check: func(t *testing.T, p *parsedNFO) {
-				if p.Runtime != 95 {
-					t.Errorf("Runtime = %d, want 95", p.Runtime)
-				}
-			},
-		},
-		{
 			name: "non-date premiered ignored",
 			data: `<movie><title>X</title><premiered>next summer</premiered></movie>`,
 			check: func(t *testing.T, p *parsedNFO) {

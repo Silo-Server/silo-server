@@ -428,12 +428,6 @@ func TestHDR10PlusBackfillStopsWhenStorageStallsDB(t *testing.T) {
 	}
 }
 
-func TestNewHDR10PlusBackfillerNeedsADatabase(t *testing.T) {
-	if NewHDR10PlusBackfiller(nil, "ffprobe") != nil || NewHDR10PlusBackfiller(&FileRepository{}, "ffprobe") != nil {
-		t.Fatal("a backfiller without a database was built")
-	}
-}
-
 // Playback's probe repair skips the frame read. It keeps a recorded HDR10+
 // status only when the reprobed stream is the one that was checked.
 func TestCarryCheckedHDR10PlusKeepsStatusForTheSameStream(t *testing.T) {

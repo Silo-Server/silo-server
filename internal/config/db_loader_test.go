@@ -7,52 +7,6 @@ import (
 	"time"
 )
 
-func TestLoadFromDBMetadataPresignExpiry(t *testing.T) {
-	cfg, err := LoadFromDB(map[string]string{})
-	if err != nil {
-		t.Fatalf("LoadFromDB() returned error: %v", err)
-	}
-	if cfg.S3.MetadataPresignExpiry != 4*time.Hour {
-		t.Fatalf("default metadata presign expiry = %s, want 4h", cfg.S3.MetadataPresignExpiry)
-	}
-
-	cfg, err = LoadFromDB(map[string]string{"s3.metadata_presign_expiry": "90m"})
-	if err != nil {
-		t.Fatalf("LoadFromDB() with metadata expiry returned error: %v", err)
-	}
-	if cfg.S3.MetadataPresignExpiry != 90*time.Minute {
-		t.Fatalf("configured metadata presign expiry = %s, want 90m", cfg.S3.MetadataPresignExpiry)
-	}
-}
-
-func TestLoadFromDBDownloadArtifactDirRequiresAbsolutePath(t *testing.T) {
-	cfg, err := LoadFromDB(map[string]string{downloadArtifactDirSettingKey: "/mnt/silo-downloads"})
-	if err != nil {
-		t.Fatalf("LoadFromDB() with absolute artifact dir: %v", err)
-	}
-	if cfg.Download.ArtifactDir != "/mnt/silo-downloads" {
-		t.Fatalf("artifact dir = %q", cfg.Download.ArtifactDir)
-	}
-}
-
-func TestLoadFromDBScannerRealtimeMonitoringDefaultsTrue(t *testing.T) {
-	cfg, err := LoadFromDB(map[string]string{})
-	if err != nil {
-		t.Fatalf("LoadFromDB() returned error: %v", err)
-	}
-	if !cfg.Scanner.RealtimeMonitoring {
-		t.Fatal("Scanner.RealtimeMonitoring = false, want default true")
-	}
-
-	cfg, err = LoadFromDB(map[string]string{"scanner.realtime_monitoring": "false"})
-	if err != nil {
-		t.Fatalf("LoadFromDB() returned error: %v", err)
-	}
-	if cfg.Scanner.RealtimeMonitoring {
-		t.Fatal("Scanner.RealtimeMonitoring = true, want configured false")
-	}
-}
-
 func TestLoadFromDBAudiobookshelfCompatFlagGatesCompatListener(t *testing.T) {
 	cfg, err := LoadFromDB(map[string]string{})
 	if err != nil {

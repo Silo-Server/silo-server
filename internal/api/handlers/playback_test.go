@@ -704,7 +704,7 @@ func TestFinalizeSessionStop_UsesProviderLifecycleSemantics(t *testing.T) {
 				DisableProgressPersistence: tt.disablePersistence,
 				StartedAt:                  time.Now().Add(-time.Minute),
 			}
-			handler.finalizeSessionStop(context.Background(), session, false, "", tt.reason)
+			handler.finalizeSessionStopWithResult(context.Background(), session, false, "", tt.reason)
 
 			if got := len(scrobbler.pauses); got != tt.wantPauseCalls {
 				t.Fatalf("pause calls = %d, want %d", got, tt.wantPauseCalls)
@@ -970,13 +970,14 @@ func TestFindAlternateFile_DoesNotCrossEdition(t *testing.T) {
 		},
 	}
 
-	alternate, err := handler.findAlternateFile(context.Background(), source, catalog.AccessFilter{})
+	alternates, err := handler.findAlternateFiles(context.Background(), source, catalog.AccessFilter{})
 	if err != nil {
-		t.Fatalf("findAlternateFile: %v", err)
+		t.Fatalf("findAlternateFiles: %v", err)
 	}
-	if alternate == nil {
+	if len(alternates) == 0 {
 		t.Fatal("expected alternate file")
 	}
+	alternate := alternates[0]
 	if alternate.ID != 3 {
 		t.Fatalf("alternate.ID = %d, want 3", alternate.ID)
 	}
@@ -1032,13 +1033,14 @@ func TestFindAlternateFile_PrefersNon4KAcrossLabelsAndDimensions(t *testing.T) {
 		},
 	}
 
-	alternate, err := handler.findAlternateFile(context.Background(), source, catalog.AccessFilter{})
+	alternates, err := handler.findAlternateFiles(context.Background(), source, catalog.AccessFilter{})
 	if err != nil {
-		t.Fatalf("findAlternateFile: %v", err)
+		t.Fatalf("findAlternateFiles: %v", err)
 	}
-	if alternate == nil {
+	if len(alternates) == 0 {
 		t.Fatal("expected alternate file")
 	}
+	alternate := alternates[0]
 	if alternate.ID != 5 {
 		t.Fatalf("alternate.ID = %d (resolution %q), want 5", alternate.ID, alternate.Resolution)
 	}

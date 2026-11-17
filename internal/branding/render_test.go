@@ -23,23 +23,13 @@ func TestRenderIndexHTMLEscapesTitle(t *testing.T) {
 	}
 }
 
-func TestRenderIndexHTMLDoesNotStampADefaultTheme(t *testing.T) {
-	in := []byte(`<!doctype html><html lang="en" data-theme="midnight-cinema"><head></head></html>`)
-	out := string(RenderIndexHTML(in, newSnapshot("X")))
-	if strings.Contains(out, "data-default-theme") {
-		t.Fatalf("the shell has one theme and carries no default-theme attribute: %q", out)
-	}
-	if !strings.Contains(out, `<html lang="en" data-theme="midnight-cinema">`) {
-		t.Fatalf("static data-theme should be left alone: %q", out)
-	}
-}
-
-func TestRenderKeyIncludesWordmarkLight(t *testing.T) {
+// The rendered shell links the favicon, so a new favicon must re-render it.
+func TestRenderKeyChangesWithTheFavicon(t *testing.T) {
 	snap := newSnapshot("Acme")
 	baseline := snap.RenderKey()
-	snap.assets[KindWordmarkLight] = "wordmark-light.webp"
+	snap.assets[KindFavicon] = "f00.png"
 	if got := snap.RenderKey(); got == baseline {
-		t.Fatal("RenderKey did not change when wordmark_light ref changed")
+		t.Fatal("RenderKey did not change when the favicon ref changed")
 	}
 }
 

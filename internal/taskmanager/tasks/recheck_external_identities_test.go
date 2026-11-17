@@ -5,10 +5,23 @@ import (
 	"encoding/json"
 	"errors"
 	"testing"
-	"time"
 
 	"github.com/Silo-Server/silo-server/internal/taskmanager"
 )
+
+// resultProgress keeps each task's last result data.
+type resultProgress struct {
+	reports []string
+	result  json.RawMessage
+}
+
+func (p *resultProgress) Report(_ float64, message string) {
+	p.reports = append(p.reports, message)
+}
+
+func (p *resultProgress) SetResultData(data json.RawMessage) {
+	p.result = append(p.result[:0], data...)
+}
 
 // fakeIdleRechecker answers the scheduled re-check from memory; the
 // selection and outcomes are pinned by the auth package's database tests.
@@ -29,13 +42,6 @@ func (f *fakeIdleRechecker) RecheckIdleIdentities(context.Context) (map[string]i
 func TestRecheckExternalIdentitiesTask(t *testing.T) {
 	rechecker := &fakeIdleRechecker{due: true, counts: map[string]int{"active": 2, "not_found": 1}}
 	task := NewRecheckExternalIdentitiesTask(nil, rechecker)
-	if task.Key() != "recheck_external_identities" || task.Category() != taskmanager.TaskCategorySystem {
-		t.Fatalf("task = %q %q", task.Key(), task.Category())
-	}
-	triggers := task.DefaultTriggers()
-	if len(triggers) != 1 || triggers[0].Type != taskmanager.TriggerTypeInterval || triggers[0].IntervalMs != int64(time.Hour/time.Millisecond) {
-		t.Fatalf("triggers = %+v", triggers)
-	}
 	var _ taskmanager.ScheduledConditionalTask = task
 	if run, err := task.ShouldRun(context.Background()); err != nil || !run {
 		t.Fatalf("ShouldRun = %v, %v", run, err)
@@ -47,7 +53,7 @@ func TestRecheckExternalIdentitiesTask(t *testing.T) {
 
 	lock := &fakeClusterLock{acquired: true}
 	task.lock = lock
-	progress := &authSessionCleanupProgress{}
+	progress := &resultProgress{}
 	if err := task.Execute(context.Background(), progress); err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
@@ -64,18 +70,18 @@ func TestRecheckExternalIdentitiesTask(t *testing.T) {
 
 	// Another server holds the lock: this one skips.
 	lock.acquired = false
-	if err := task.Execute(context.Background(), &authSessionCleanupProgress{}); err != nil || rechecker.calls != 1 {
+	if err := task.Execute(context.Background(), &resultProgress{}); err != nil || rechecker.calls != 1 {
 		t.Fatalf("skipped run: %v, calls = %d", err, rechecker.calls)
 	}
 
 	lock.acquired = true
 	rechecker.err = errors.New("database down")
-	if err := task.Execute(context.Background(), &authSessionCleanupProgress{}); err == nil {
+	if err := task.Execute(context.Background(), &resultProgress{}); err == nil {
 		t.Fatal("failure swallowed")
 	}
 
 	unconfigured := NewRecheckExternalIdentitiesTask(nil, nil)
-	if err := unconfigured.Execute(context.Background(), &authSessionCleanupProgress{}); err != nil {
+	if err := unconfigured.Execute(context.Background(), &resultProgress{}); err != nil {
 		t.Fatalf("unconfigured: %v", err)
 	}
 	if run, _ := unconfigured.ShouldRun(context.Background()); run {

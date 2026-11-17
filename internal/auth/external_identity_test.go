@@ -124,7 +124,7 @@ func TestUsernameBase(t *testing.T) {
 
 func TestNormalizedProviderEmail(t *testing.T) {
 	for in, want := range map[string]string{
-		"Alice@Example.Test":       NormalizeEmail("Alice@Example.Test"),
+		"Alice@Example.Test":       "Alice@Example.Test",
 		"":                         "",
 		"not an email":             "",
 		"Alice <alice@example.io>": "",

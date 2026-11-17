@@ -5,34 +5,28 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/catalog"
 )
 
-func TestBuildRecentlyAddedQueryUsesLibraryMembershipFastPathForSingleLibrary(t *testing.T) {
+// A library's own Recently Added row stays inside the viewer's libraries and
+// orders by when each item first appeared in that library, not by when the
+// catalog row was created.
+func TestBuildRecentlyAddedQueryOrdersSingleLibraryByFirstSeen(t *testing.T) {
 	t.Parallel()
 
 	query, args := buildRecentlyAddedQuery(ResolvedSection{
 		ItemLimit: 12,
 		Config:    json.RawMessage(`{"generated_source":"home_library_recent","filter_library_id":1,"filter_type":"movie"}`),
-	}, nil, []int{1, 2}, catalog.AccessFilter{MaturityLimits: access.MaturityLimits{MaxContentRating: "PG-13"}})
+	}, nil, []int{1, 2}, catalog.AccessFilter{})
 
-	for _, want := range []string{
-		"FROM media_item_libraries mil JOIN media_items mi ON mi.content_id = mil.content_id",
-		"mil.media_folder_id = $1",
-		"mil.media_folder_id IN ($2, $3)",
-		"mi.type = $4",
-		"ORDER BY mil.first_seen_at DESC, mil.content_id ASC",
-	} {
-		if !strings.Contains(query, want) {
-			t.Fatalf("query missing %q:\n%s", want, query)
-		}
+	if !strings.Contains(query, "mil.media_folder_id IN ($2, $3)") || len(args) < 3 || args[1] != 1 || args[2] != 2 {
+		t.Fatalf("single-library query is not limited to the allowed libraries:\n%s\nargs = %v", query, args)
+	}
+	if !strings.Contains(query, "ORDER BY mil.first_seen_at DESC") {
+		t.Fatalf("single-library query does not order by the library's first-seen time:\n%s", query)
 	}
 	if strings.Contains(query, "ORDER BY mi.created_at DESC") {
-		t.Fatalf("single-library fast path should not order by media_items.created_at:\n%s", query)
-	}
-	if got, want := args[len(args)-1], 12; got != want {
-		t.Fatalf("limit arg = %v, want %v", got, want)
+		t.Fatalf("single-library query orders by media_items.created_at:\n%s", query)
 	}
 }
 

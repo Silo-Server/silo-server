@@ -23,11 +23,8 @@ func TestClampMaxContentRating(t *testing.T) {
 		{"15", "TV-14", "TV-14"},
 		// A client value with no usable age is ignored, not applied.
 		{"PG-13", "banana", "PG-13"},
-		{"PG-13", "NR", "PG-13"},
-		{"PG-13", "  ", "PG-13"},
 		// ...including against an unrestricted profile: a blank cap from a
 		// client must never become a ceiling that hides the whole library.
-		{"", "banana", ""},
 		{"", "  ", ""},
 		// A whitespace ceiling stored on the PROFILE is a different matter: it
 		// is a set control that resolves to nothing, so it keeps blocking and

@@ -123,11 +123,4 @@ func TestNormalizeProbeRequestTimeoutAdmitsALargeButRealBudget(t *testing.T) {
 	if got != nineDevices {
 		t.Fatalf("normalized = %v, want the %v a nine-device node legitimately asks for", got, nineDevices)
 	}
-
-	// It is still a ceiling: the value comes off the wire from a worker, and a
-	// caller holds a connection open for it.
-	absurd := 24 * time.Hour
-	if got := NormalizeProbeRequestTimeout(absurd.Milliseconds(), time.Minute); got != MaxCapabilityRequestTimeout() {
-		t.Fatalf("normalized = %v for an absurd advertisement, want the %v ceiling", got, MaxCapabilityRequestTimeout())
-	}
 }

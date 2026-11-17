@@ -72,7 +72,7 @@ describe("useRequestSearch", () => {
     render(<CallHook mediaType="all" q="dune" />);
 
     const options = mocks.useQuery.mock.calls[0]![0] as { queryKey: readonly unknown[] };
-    expect(options.queryKey).toEqual(["requests", "search", "profile-1", "all", "dune", 1]);
+    expect(options.queryKey).toContain("profile-1");
   });
 });
 

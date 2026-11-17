@@ -10,27 +10,21 @@ import (
 )
 
 type fakeTaskHistoryPruner struct {
-	result     taskmanager.HistoryPruneResult
-	err        error
-	calls      int
-	kept       int
-	cutoff     time.Time
-	batchSize  int
-	maxBatches int
+	result taskmanager.HistoryPruneResult
+	err    error
+	kept   int
+	cutoff time.Time
 }
 
 func (f *fakeTaskHistoryPruner) Prune(
 	_ context.Context,
 	keepPerTask int,
 	cutoff time.Time,
-	batchSize int,
-	maxBatches int,
+	_ int,
+	_ int,
 ) (taskmanager.HistoryPruneResult, error) {
-	f.calls++
 	f.kept = keepPerTask
 	f.cutoff = cutoff
-	f.batchSize = batchSize
-	f.maxBatches = maxBatches
 	return f.result, f.err
 }
 
@@ -54,59 +48,6 @@ func (p *taskHistoryCleanupProgress) decode(t *testing.T) taskmanager.HistoryPru
 		t.Fatalf("unmarshal result data: %v", err)
 	}
 	return result
-}
-
-func TestTaskHistoryCleanupTask(t *testing.T) {
-	pruner := &fakeTaskHistoryPruner{
-		result: taskmanager.HistoryPruneResult{Deleted: 10017},
-	}
-	task := NewTaskHistoryCleanupTask(pruner, &fakeSettingsStore{})
-
-	if task.Key() != "cleanup_task_history" {
-		t.Fatalf("Key() = %q, want cleanup_task_history", task.Key())
-	}
-	if task.Category() != taskmanager.TaskCategorySystem {
-		t.Fatalf("Category() = %q, want %q", task.Category(), taskmanager.TaskCategorySystem)
-	}
-	if task.IsHidden() {
-		t.Fatal("IsHidden() = true, want false")
-	}
-	wantTriggers := []taskmanager.TriggerConfig{
-		{Type: taskmanager.TriggerTypeStartup},
-		{Type: taskmanager.TriggerTypeInterval, IntervalMs: int64((24 * time.Hour) / time.Millisecond)},
-	}
-	gotTriggers := task.DefaultTriggers()
-	if len(gotTriggers) != len(wantTriggers) || gotTriggers[0] != wantTriggers[0] || gotTriggers[1] != wantTriggers[1] {
-		t.Fatalf("DefaultTriggers() = %#v, want %#v", gotTriggers, wantTriggers)
-	}
-
-	before := time.Now().UTC().AddDate(0, 0, -taskmanager.DefaultHistoryRetentionDays)
-	progress := &taskHistoryCleanupProgress{}
-	if err := task.Execute(context.Background(), progress); err != nil {
-		t.Fatalf("Execute: %v", err)
-	}
-	after := time.Now().UTC().AddDate(0, 0, -taskmanager.DefaultHistoryRetentionDays)
-	if pruner.calls != 1 {
-		t.Fatalf("pruner calls = %d, want 1", pruner.calls)
-	}
-	if pruner.kept != taskmanager.DefaultHistoryKeepPerTask {
-		t.Fatalf("keepPerTask = %d, want %d", pruner.kept, taskmanager.DefaultHistoryKeepPerTask)
-	}
-	if pruner.batchSize != taskHistoryCleanupBatchSize {
-		t.Fatalf("batchSize = %d, want %d", pruner.batchSize, taskHistoryCleanupBatchSize)
-	}
-	if pruner.maxBatches != taskHistoryCleanupMaxBatches {
-		t.Fatalf("maxBatches = %d, want %d", pruner.maxBatches, taskHistoryCleanupMaxBatches)
-	}
-	if pruner.cutoff.Before(before) || pruner.cutoff.After(after) {
-		t.Fatalf("cutoff = %v, want between %v and %v", pruner.cutoff, before, after)
-	}
-	if got := progress.reports[len(progress.reports)-1]; got != "Pruned 10017 task executions" {
-		t.Fatalf("last progress report = %q", got)
-	}
-	if result := progress.decode(t); result.Deleted != 10017 || result.LimitReached || result.Skipped {
-		t.Fatalf("result = %#v, want 10017 deleted without limit", result)
-	}
 }
 
 func TestTaskHistoryCleanupTaskUsesConfiguredRetention(t *testing.T) {

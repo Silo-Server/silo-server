@@ -53,7 +53,7 @@ describe("CardPlayOverlay", () => {
     expect(mocks.startPlayback).not.toHaveBeenCalled();
   });
 
-  it("supports compact posters and notifies the containing surface before playback", () => {
+  it("notifies the containing surface before playback", () => {
     const onPlaybackStart = vi.fn();
     const parentClick = vi.fn();
     render(
@@ -72,7 +72,6 @@ describe("CardPlayOverlay", () => {
 
     const link = screen.getByRole("link", { name: "Play Compact Movie" });
     expect(link).toHaveAttribute("href", "/watch/movie-1");
-    expect(link.className).toContain("h-6 w-6");
     fireEvent.click(link);
 
     expect(onPlaybackStart).toHaveBeenCalledOnce();

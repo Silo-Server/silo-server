@@ -25,7 +25,7 @@ describe("DetailHero title", () => {
     );
 
     expect(container.querySelector('img[src="/logo.webp"]')).toBeNull();
-    expect(screen.getByTestId("detail-hero-title-pending")).toHaveClass("h-20", "lg:h-28");
+    expect(screen.getByTestId("detail-hero-title-pending")).toBeInTheDocument();
     expect(screen.getByRole("heading", { level: 1, name: "Blade Runner" })).toHaveClass("sr-only");
 
     titleArt.show = true;

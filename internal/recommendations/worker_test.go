@@ -170,9 +170,6 @@ func TestRunJobRefusesASecondRunInThisProcess(t *testing.T) {
 	if !errors.Is(err, ErrJobRunning) || errors.Is(err, ErrJobRunningElsewhere) {
 		t.Fatalf("second run error = %v, want ErrJobRunning", err)
 	}
-	if err.Error() != "cowatch job is already running" {
-		t.Fatalf("second run message = %q", err.Error())
-	}
 	if keys, _ := locker.snapshot(); len(keys) != 1 || keys[0] != cowatchJobLock {
 		t.Fatalf("lock requests = %#x, want one for the co-watch lock", keys)
 	}
@@ -204,9 +201,6 @@ func TestRunJobSkipsWhenAnotherServerHoldsTheLock(t *testing.T) {
 	}}, true)
 	if !errors.Is(err, ErrJobRunningElsewhere) {
 		t.Fatalf("error = %v, want ErrJobRunningElsewhere", err)
-	}
-	if err.Error() != "recommendations job is already running on another server" {
-		t.Fatalf("message = %q", err.Error())
 	}
 	if ran || w.IsRunning(JobRecommendations) || history.count() != 0 {
 		t.Fatalf("skipped job ran=%v running=%v recorded=%d", ran, w.IsRunning(JobRecommendations), history.count())

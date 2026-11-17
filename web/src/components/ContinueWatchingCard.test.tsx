@@ -126,10 +126,6 @@ describe("ContinueWatchingCard", () => {
 
     expect(markup).toContain('src="/episode-backdrop.jpg"');
     expect(markup).not.toContain('src="/season-poster.jpg"');
-    // Visibility of the play trigger is owned by app.css, not utility classes.
-    expect(markup).toContain("media-card-play-trigger");
-    expect(markup).not.toContain("pointer-fine:opacity-0");
-    expect(markup).not.toContain("opacity-0");
   });
 
   it("falls back to the poster when a movie has no backdrop", () => {

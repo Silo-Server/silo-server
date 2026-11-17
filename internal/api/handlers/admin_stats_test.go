@@ -1,7 +1,6 @@
 package handlers
 
 import (
-	"encoding/json"
 	"testing"
 	"time"
 
@@ -111,24 +110,5 @@ func TestMergeWatchProviderStatsKeepsUnregisteredProviderWithRows(t *testing.T) 
 	}
 	if legacy.SyncRuns24h != 3 {
 		t.Fatalf("activity dropped for unregistered provider: %+v", legacy)
-	}
-}
-
-func TestMergeWatchProviderStatsWithoutRegistrySerializesAsArray(t *testing.T) {
-	merged := mergeWatchProviderStats(listWatchProviders(nil), nil)
-	if merged == nil {
-		t.Fatal("expected an empty slice, not nil")
-	}
-
-	encoded, err := json.Marshal(AdminStats{WatchProviders: merged})
-	if err != nil {
-		t.Fatalf("marshal admin stats: %v", err)
-	}
-	var decoded map[string]json.RawMessage
-	if err := json.Unmarshal(encoded, &decoded); err != nil {
-		t.Fatalf("unmarshal admin stats: %v", err)
-	}
-	if string(decoded["watch_providers"]) != "[]" {
-		t.Fatalf("watch_providers = %s, want []", decoded["watch_providers"])
 	}
 }

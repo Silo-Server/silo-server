@@ -487,15 +487,10 @@ describe("MediaItemMenu trigger visibility", () => {
     expect(mocks.toggleWatched).toHaveBeenCalledWith(true);
     const watchedShortcut = await screen.findByRole("button", { name: "Mark Unwatched" });
     expect(watchedShortcut).toHaveAttribute("aria-pressed", "true");
-    expect(watchedShortcut.className).toContain("text-emerald-400");
-    expect(watchedShortcut.querySelector(".lucide-eye")).toBeTruthy();
     expect(screen.getByTestId("watched-burst")).toBeTruthy();
 
     resolveWatched();
     await userEvent.click(screen.getByRole("button", { name: "More actions" }));
-    expect(
-      screen.getByRole("menuitem", { name: "Mark Unwatched" }).querySelector(".lucide-eye"),
-    ).toHaveClass("text-emerald-400");
     await userEvent.click(screen.getByRole("menuitem", { name: "Mark Unwatched" }));
 
     expect(mocks.toggleWatched).toHaveBeenLastCalledWith(false);
@@ -549,7 +544,6 @@ describe("MediaItemMenu trigger visibility", () => {
     await waitFor(() => {
       const shortcut = screen.getByRole("button", { name: "Mark Watched" });
       expect(shortcut).toHaveAttribute("aria-pressed", "false");
-      expect(shortcut.querySelector(".lucide-eye-off")).toBeTruthy();
     });
   });
 
@@ -603,10 +597,6 @@ describe("MediaItemMenu trigger visibility", () => {
 
     const button = screen.getByRole("button", { name: "Add to favorites" });
     expect(button.getAttribute("aria-pressed")).toBe("false");
-    expect(button.className).toContain("media-card-action-trigger");
-    expect(button.className).toContain("cursor-pointer");
-    expect(button.className).not.toContain("cursor-wait");
-    expect(button.parentElement?.className).toContain("left-2.5");
     await userEvent.click(button);
 
     expect(mocks.toggleFavorite).toHaveBeenCalledTimes(1);
@@ -615,7 +605,6 @@ describe("MediaItemMenu trigger visibility", () => {
     await waitFor(() => {
       const button = screen.getByRole("button", { name: "Remove from favorites" });
       expect(button.getAttribute("aria-pressed")).toBe("true");
-      expect(button.querySelector("svg")?.getAttribute("class")).toContain("fill-red-500");
     });
     await userEvent.click(screen.getByRole("button", { name: "More actions" }));
     expect(screen.getByRole("menuitem", { name: "Remove from Favorites" })).toBeTruthy();

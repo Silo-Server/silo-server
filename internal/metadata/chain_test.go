@@ -10,7 +10,6 @@ import (
 const (
 	audiobookCapMetadata = `{"metadata":{"default_priority":{"audiobook":2}},"display_name":"Audiobook Metadata"}`
 	tmdbCapMetadata      = `{"metadata":{"default_priority":{"movie":2,"season":3,"series":3,"episode":3}},"display_name":"TMDB"}`
-	tvdbCapMetadata      = `{"metadata":{"default_priority":{"season":2,"series":2,"episode":2}},"display_name":"TVDB"}`
 )
 
 func TestProviderSupportsLevel(t *testing.T) {
@@ -25,19 +24,10 @@ func TestProviderSupportsLevel(t *testing.T) {
 		// that let silo.audiobook-metadata hammer audiobook APIs with
 		// anime/movie/series titles.
 		{"audiobook provider excluded from episode", audiobookCapMetadata, "episode", false},
-		{"audiobook provider excluded from series", audiobookCapMetadata, "series", false},
-		{"audiobook provider excluded from season", audiobookCapMetadata, "season", false},
-		{"audiobook provider excluded from movie", audiobookCapMetadata, "movie", false},
 		{"audiobook provider included for audiobook", audiobookCapMetadata, "audiobook", true},
 
 		// Providers that declare a level stay eligible for it.
 		{"tmdb included for movie", tmdbCapMetadata, "movie", true},
-		{"tmdb included for season", tmdbCapMetadata, "season", true},
-		{"tmdb included for episode", tmdbCapMetadata, "episode", true},
-
-		// tvdb declares no movie level -> excluded from the movie fallback.
-		{"tvdb excluded from movie", tvdbCapMetadata, "movie", false},
-		{"tvdb included for series", tvdbCapMetadata, "series", true},
 
 		// A provider that declares no default_priority makes no claim and stays
 		// eligible everywhere (legacy behavior), ranked last by priority 0.

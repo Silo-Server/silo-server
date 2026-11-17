@@ -4413,7 +4413,7 @@ func TestPlaybackStartSideEffectsPreserveImmediateStopScrobbleOrder(t *testing.T
 	}
 	stopped := make(chan struct{})
 	go func() {
-		handler.finalizeSessionStop(context.Background(), session, false, "", PlaybackEndStopped)
+		handler.finalizeSessionStopWithResult(context.Background(), session, false, "", PlaybackEndStopped)
 		close(stopped)
 	}()
 	select {

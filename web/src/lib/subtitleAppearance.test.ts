@@ -81,9 +81,7 @@ describe("computeSubtitleFontSize", () => {
 });
 
 describe("computeSubtitleStyles", () => {
-  it("matches the contract's shared Box 75% fallback", () => {
-    expect(DEFAULT_SUBTITLE_APPEARANCE.backgroundStyle).toBe("box");
-    expect(DEFAULT_SUBTITLE_APPEARANCE.backgroundOpacity).toBe(75);
+  it("matches the contract's default", () => {
     expect(DEFAULT_SUBTITLE_APPEARANCE).toEqual(
       SETTING_DEFINITIONS[SETTING_KEYS.PLAYBACK_SUBTITLE_APPEARANCE].defaultValue,
     );

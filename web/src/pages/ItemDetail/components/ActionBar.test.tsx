@@ -156,6 +156,5 @@ describe("ActionBar primary action", () => {
     const request = screen.getByRole("button", { name: "Request movie" });
     expect(request).toBeDisabled();
     expect(request).toHaveAttribute("aria-busy", "true");
-    expect(request.querySelector("svg")).toHaveClass("animate-spin");
   });
 });

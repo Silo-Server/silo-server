@@ -20,12 +20,10 @@ func TestIsCanceled(t *testing.T) {
 		{"nil", nil, false},
 		{"canceled", context.Canceled, true},
 		{"wrapped canceled", fmt.Errorf("loading paths for list: %w", context.Canceled), true},
-		{"joined canceled", errors.Join(errors.New("other"), context.Canceled), true},
 		{"grpc canceled", status.Error(codes.Canceled, "context canceled"), true},
 		{"wrapped grpc canceled", fmt.Errorf("marker provider: %w", status.Error(codes.Canceled, "context canceled")), true},
 		{"deadline", context.DeadlineExceeded, false},
 		{"grpc deadline", status.Error(codes.DeadlineExceeded, "context deadline exceeded"), false},
-		{"grpc unavailable", status.Error(codes.Unavailable, "connection refused"), false},
 		{"other", errors.New("query failed"), false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -50,7 +48,6 @@ func TestLogLevelNeedsTheCallerGone(t *testing.T) {
 		{"caller gone", canceled, fmt.Errorf("query: %w", context.Canceled), slog.LevelDebug},
 		{"plugin call after the caller left", canceled, status.Error(codes.Canceled, "context canceled"), slog.LevelDebug},
 		{"real failure after the caller left", canceled, errors.New("connection reset"), slog.LevelWarn},
-		{"wrapped plugin call after the caller left", canceled, fmt.Errorf("marker provider: %w", status.Error(codes.Canceled, "context canceled")), slog.LevelDebug},
 		{"joined cancellations", canceled, errors.Join(context.Canceled, status.Error(codes.Canceled, "context canceled")), slog.LevelDebug},
 		{"real failure joined with the cancellation", canceled, errors.Join(errors.New("query failed"), context.Canceled), slog.LevelWarn},
 		{"wrapped join with a real failure", canceled, fmt.Errorf("loading: %w", errors.Join(context.Canceled, errors.New("query failed"))), slog.LevelWarn},

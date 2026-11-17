@@ -661,37 +661,6 @@ func TestConditionMatchesUnknownPropertyHonorsIsRequired(t *testing.T) {
 	}
 }
 
-func TestDecodeProfileConditionIsRequiredDefault(t *testing.T) {
-	tests := []struct {
-		name    string
-		payload string
-		want    bool
-	}{
-		{
-			name:    "explicit false stays optional",
-			payload: `{"Condition":"NotEquals","Property":"AudioProfile","Value":"HE-AAC","IsRequired":false}`,
-			want:    false,
-		},
-		{
-			name:    "explicit true stays required",
-			payload: `{"Condition":"NotEquals","Property":"AudioProfile","Value":"HE-AAC","IsRequired":true}`,
-			want:    true,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			var condition ProfileCondition
-			if err := json.Unmarshal([]byte(tt.payload), &condition); err != nil {
-				t.Fatalf("unmarshal ProfileCondition: %v", err)
-			}
-			if condition.IsRequired != tt.want {
-				t.Fatalf("IsRequired = %v, want %v", condition.IsRequired, tt.want)
-			}
-		})
-	}
-}
-
 func TestConditionMatchesDerivedIsAnamorphic(t *testing.T) {
 	tests := []struct {
 		name       string

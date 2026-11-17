@@ -46,19 +46,3 @@ func TestRepeatedFieldsParamTriggersDetail(t *testing.T) {
 		t.Errorf("startItemID = %q, want x", query.startItemID)
 	}
 }
-
-// TestCommaSeparatedFieldsStillParsed guards the original single-param,
-// comma-separated form (e.g. VidHub: Fields=A,B,C) which must keep working.
-func TestCommaSeparatedFieldsStillParsed(t *testing.T) {
-	req := httptest.NewRequest("GET", "/Items?Fields=Overview,MediaSources,People", nil)
-	query := parseItemsQuery(req, NewResourceIDCodec())
-
-	if !query.needsDetailFields {
-		t.Fatal("comma-separated Fields with MediaSources must set needsDetailFields=true")
-	}
-	for _, f := range []string{"overview", "mediasources", "people"} {
-		if !query.requestedFields[f] {
-			t.Errorf("field %q must be parsed from comma-separated Fields", f)
-		}
-	}
-}

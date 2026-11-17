@@ -371,6 +371,3 @@ func TestFavoritesDenied(t *testing.T) {
 	deps.PersonalLists = nil
 	requireProblem(t, do(t, newTestHandler(t, deps), http.MethodGet, "/api/v2/favorites", "", viewerHeaders()), TypeDependencyUnavailable)
 }
-
-// The v1 handler is the service the fake stands in for.
-var _ PersonalListService = (*handlers.PersonalDataHandler)(nil)

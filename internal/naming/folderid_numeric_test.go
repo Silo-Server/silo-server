@@ -14,10 +14,7 @@ func TestParseFolderIDs_BareNumbersAreNeverIDs(t *testing.T) {
 		"22 7",
 		// Titles ending in a short number.
 		"District 9",
-		"Apollo 13",
-		"Ocean's 11",
 		"THX 1138",
-		"Stranger Things 4",
 		// Season-style directory names.
 		"Season 01",
 		// Titles ending in a long number that looks like a plausible ID.

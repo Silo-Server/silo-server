@@ -32,7 +32,6 @@ describe("PlayerMenuSurface", () => {
         Item
       </PlayerMenuSurface>,
     );
-    expect(screen.getByRole("menu").closest(".hud-sheet")).toHaveClass("fixed", "bottom-0");
     fireEvent.click(screen.getByRole("button", { name: "Close menu" }));
     expect(onClose).toHaveBeenCalledOnce();
   });

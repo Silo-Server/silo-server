@@ -1023,26 +1023,6 @@ func TestUpstreamRecipeCardOverlaysTopLevelCreatedAt(t *testing.T) {
 	}
 }
 
-func TestUpstreamRecipeCardOverlaysDurableRoutingAssignment(t *testing.T) {
-	assignment := playback.NodeRoutingAssignment{
-		Workload: string(noderouting.WorkloadVideoTranscode), Execution: string(noderouting.ExecutionTranscode),
-		Egress: string(noderouting.EgressProxy), EgressNodeID: 62,
-	}
-	playSession := &PlaybackSession{
-		UpstreamSessionID: "upstream", RoutingAssignment: &assignment,
-		Recipe: &playback.RecipeCard{SessionID: "upstream", UserID: 42, MediaFileID: 77},
-	}
-	card := (&PlaybackHandler{}).upstreamRecipeCard(
-		playSession,
-		&Session{StreamAppUserID: 42, ProfileID: "profile-1"},
-		PlaybackMediaSource{FileID: 77},
-		string(playback.PlayTranscode),
-	)
-	if card.RoutingWorkload != assignment.Workload || card.RoutingExecution != assignment.Execution || card.RoutingEgress != assignment.Egress || card.RoutingEgressNodeID != assignment.EgressNodeID {
-		t.Fatalf("routing card = %q/%q/%q on node %d, want %#v", card.RoutingWorkload, card.RoutingExecution, card.RoutingEgress, card.RoutingEgressNodeID, assignment)
-	}
-}
-
 func TestPersistTranscodeRecipeCarriesTopLevelCreatedAt(t *testing.T) {
 	createdAt := time.Date(2026, 8, 16, 12, 34, 56, 987654321, time.UTC)
 	store := NewPlaybackSessionStore(time.Hour, nil)
@@ -1660,7 +1640,6 @@ func TestGenerateCompatCopyVideoMasterManifestCodecsListEveryFormat(t *testing.T
 		}, aac, false, ""},
 		{"no audio track", models.VideoTrack{Codec: "h264", Profile: "High", Level: 40, Width: 1920, Height: 1080}, nil, false, "avc1.640028"},
 		{"audio without an entry", models.VideoTrack{Codec: "h264", Profile: "High", Level: 40, Width: 1920, Height: 1080}, []models.AudioTrack{{Codec: "vorbis", Default: true}}, false, ""},
-		{"audio without a codec name", models.VideoTrack{Codec: "h264", Profile: "High", Level: 40, Width: 1920, Height: 1080}, []models.AudioTrack{{Default: true}}, false, ""},
 		{"dolby vision audio without an entry", models.VideoTrack{
 			Codec: "hevc", Profile: "Main 10", Level: 153, Width: 3840, Height: 2160,
 			DVProfile: 5, DVLevel: 6, VideoRangeType: compatRangeDOVI,

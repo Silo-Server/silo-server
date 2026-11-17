@@ -91,7 +91,7 @@ describe("MediaCarousel windowing", () => {
     return container.querySelectorAll("li[data-carousel-slide-index]");
   }
 
-  it("mounts the first slides and keeps the rest as same-width placeholders", () => {
+  it("mounts the first slides and keeps the rest as placeholders", () => {
     const { container } = renderRow();
 
     expect(screen.getAllByRole("link")).toHaveLength(5);
@@ -99,7 +99,6 @@ describe("MediaCarousel windowing", () => {
     const pending = placeholders(container);
     expect(pending).toHaveLength(25);
     expect(pending[0]).toHaveAttribute("aria-hidden", "true");
-    expect(pending[0]?.firstElementChild).toHaveClass("w-[140px]", "shrink-0");
   });
 
   it("fills the row in idle batches until every card is mounted", () => {

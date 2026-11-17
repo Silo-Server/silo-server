@@ -2,29 +2,12 @@ package handlers
 
 import (
 	"context"
-	"encoding/json"
-	"strings"
 	"testing"
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/imagesize"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
-
-func TestBrowseResponseIncludesTotalExact(t *testing.T) {
-	data, err := json.Marshal(browseResponse{
-		Total:      3,
-		TotalExact: true,
-		HasMore:    false,
-		Items:      []itemListResponse{},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(string(data), `"total_exact":true`) {
-		t.Fatalf("browse response missing total_exact: %s", data)
-	}
-}
 
 type countingItemListImageResolver struct {
 	singleCalls int

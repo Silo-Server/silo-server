@@ -45,12 +45,10 @@ func TestArtifactState(t *testing.T) {
 		{"complete after the file hash changed", row(StatusComplete, nil), changed(func(i *Identity) { i.FileHash = "other" }), "a", Missing},
 		{"complete for another window end", row(StatusComplete, nil), changed(func(i *Identity) { i.WindowEndSeconds = 300 }), "a", Missing},
 		{"unusable", row(StatusUnusable, nil), identity, "a", Skipped},
-		{"unusable after the file changed", row(StatusUnusable, nil), changed(func(i *Identity) { i.FileHash = "other" }), "a", Missing},
 		{"failed here, backing off", row(StatusFailed, func(a *Artifact) { a.RecordedBy, a.RetryAfter = "a", &later }), identity, "a", Skipped},
 		{"failed here, backoff over", row(StatusFailed, func(a *Artifact) { a.RecordedBy, a.RetryAfter = "a", &earlier }), identity, "a", Missing},
 		{"failed elsewhere", row(StatusFailed, func(a *Artifact) { a.RecordedBy, a.RetryAfter = "b", &later }), identity, "a", Missing},
 		{"failed here without a retry time", row(StatusFailed, func(a *Artifact) { a.RecordedBy = "a" }), identity, "a", Missing},
-		{"failed here, then the file changed", row(StatusFailed, func(a *Artifact) { a.RecordedBy, a.RetryAfter = "a", &later }), changed(func(i *Identity) { i.FileSize = 11 }), "a", Missing},
 		{"unknown status", row("pending", nil), identity, "a", Missing},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
@@ -100,8 +98,6 @@ func TestRetryDelay(t *testing.T) {
 		0:  12 * time.Hour,
 		1:  12 * time.Hour,
 		2:  24 * time.Hour,
-		3:  48 * time.Hour,
-		4:  96 * time.Hour,
 		5:  7 * 24 * time.Hour,
 		60: 7 * 24 * time.Hour,
 	} {

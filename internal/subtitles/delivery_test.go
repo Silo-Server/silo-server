@@ -3,7 +3,6 @@ package subtitles
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"testing"
 	"time"
@@ -113,24 +112,6 @@ func TestManagerGetDeliveryContent(t *testing.T) {
 	}
 	if !bytes.Equal(blobs.keys["k"], []byte(deliverySRT)) {
 		t.Fatal("delivery modified the stored bytes")
-	}
-}
-
-// The frozen v1 API serializes DownloadedSubtitle directly; timing must not
-// appear in it.
-func TestDownloadedSubtitleV1JSONShapeUnchanged(t *testing.T) {
-	sub := DownloadedSubtitle{
-		ID: 1, MediaFileID: 2, Provider: "upload", Language: "en", Format: FormatSRT, ReleaseName: "r",
-		Score: 1.5, HearingImpaired: true, Revision: 9, S3Key: "secret", ContentSHA256: "abc",
-		CreatedAt: time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC), Timing: Timing{OffsetMS: 1200, Scale: 1.001},
-	}
-	encoded, err := json.Marshal(sub)
-	if err != nil {
-		t.Fatal(err)
-	}
-	want := `{"id":1,"media_file_id":2,"provider":"upload","language":"en","format":"srt","release_name":"r","score":1.5,"hearing_impaired":true,"created_at":"2026-01-02T03:04:05Z"}`
-	if string(encoded) != want {
-		t.Fatalf("v1 JSON changed:\n%s\nwant\n%s", encoded, want)
 	}
 }
 

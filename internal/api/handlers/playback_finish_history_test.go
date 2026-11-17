@@ -49,7 +49,7 @@ func (r finishHistoryReplica) holdCopy(t *testing.T, session playback.Session, p
 
 // expire finalizes this replica's copy the way idle cleanup does.
 func (r finishHistoryReplica) expire(session *playback.Session) {
-	r.handler.finalizeSessionStop(context.Background(), session, false, "", "")
+	r.handler.finalizeSessionStopWithResult(context.Background(), session, false, "", "")
 }
 
 func compatFinishSession() playback.Session {
@@ -297,9 +297,9 @@ func TestNativeSessionKeepsHistoryRowPerStop(t *testing.T) {
 		Position: 1800, StartedAt: time.Now().Add(-time.Hour),
 	}
 
-	replica.handler.finalizeSessionStop(context.Background(), session, false, "", "")
+	replica.handler.finalizeSessionStopWithResult(context.Background(), session, false, "", "")
 	session.Position = 3500
-	replica.handler.finalizeSessionStop(context.Background(), session, false, "", PlaybackEndStopped)
+	replica.handler.finalizeSessionStopWithResult(context.Background(), session, false, "", PlaybackEndStopped)
 
 	if got := len(listFinishHistory(t, store)); got != 2 {
 		t.Fatalf("watch history rows = %d, want 2", got)

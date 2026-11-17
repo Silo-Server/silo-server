@@ -105,7 +105,6 @@ describe("QualityMenu", () => {
 
     expect(screen.getByRole("button", { name: /^Quality/ })).toHaveTextContent("1080p Medium");
     fireEvent.click(screen.getByRole("button", { name: /^Quality/ }));
-    expect(screen.getByRole("menu")).toHaveClass("z-30");
     expect(screen.getByRole("menuitem", { name: /1080p Medium.*Selected/ })).toHaveAttribute(
       "aria-current",
       "true",

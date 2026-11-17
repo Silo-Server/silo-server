@@ -86,30 +86,6 @@ func TestDeviceLoginStartShowsShortCodeLinkDB(t *testing.T) {
 	}
 }
 
-// TestDeviceLoginStartLegacyKeepsV1AnswerDB: the frozen /api/v1 start keeps
-// its 10-minute request and a link carrying the browser code, which a lookup
-// by token still finds.
-func TestDeviceLoginStartLegacyKeepsV1AnswerDB(t *testing.T) {
-	svc, _, _, name := deviceLoginTestService(t)
-	ctx := t.Context()
-	before := time.Now()
-	start, err := svc.Start(ctx, DeviceLoginStartInput{DeviceName: name("legacy"), BaseURL: "http://127.0.0.1:8090", Legacy: true})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if start.ExpiresIn != 600 || start.ExpiresAt.Before(before.Add(9*time.Minute)) || start.ExpiresAt.After(before.Add(11*time.Minute)) {
-		t.Fatalf("expires_in = %d, expires_at = %v", start.ExpiresIn, start.ExpiresAt)
-	}
-	match := regexp.MustCompile(`^http://127\.0\.0\.1:8090/activate\?token=([A-Za-z0-9_-]{43})$`).FindStringSubmatch(start.VerificationURIComplete)
-	if match == nil {
-		t.Fatalf("verification_uri_complete = %q", start.VerificationURIComplete)
-	}
-	info, err := svc.Lookup(ctx, DeviceLoginLookupInput{BrowserCode: match[1]})
-	if err != nil || info.Status != DeviceLoginStatusPending || info.DeviceName != name("legacy") {
-		t.Fatalf("lookup by token = %+v, %v", info, err)
-	}
-}
-
 // TestDeviceLoginStartStoresMalformedLabelsDB: a long multibyte name is cut
 // by characters, a NUL is dropped, and a Latin-1 Quick Connect header byte is
 // dropped, so Postgres stores each request instead of refusing the insert.

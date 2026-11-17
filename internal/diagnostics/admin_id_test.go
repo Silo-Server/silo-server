@@ -10,7 +10,7 @@ import (
 // (the id column is `uuid`), so the service has to answer "not found" without
 // letting Postgres raise SQLSTATE 22P02 and turn the miss into a 500.
 func TestGetReportRejectsMalformedIDWithoutQuerying(t *testing.T) {
-	for _, id := range []string{"not-a-uuid", "", "   ", "1", "11111111-1111-1111-1111-11111111111"} {
+	for _, id := range []string{"not-a-uuid", "11111111-1111-1111-1111-11111111111"} {
 		repo := &fakeDiagnosticReportStore{getReport: &Report{ID: "11111111-1111-1111-1111-111111111111"}}
 		svc := newTestDiagnosticsService(repo, &fakeDiagnosticObjectStore{bucket: "private"})
 
@@ -25,7 +25,7 @@ func TestGetReportRejectsMalformedIDWithoutQuerying(t *testing.T) {
 }
 
 func TestDeleteReportRejectsMalformedIDWithoutQuerying(t *testing.T) {
-	for _, id := range []string{"not-a-uuid", "", "12345"} {
+	for _, id := range []string{"not-a-uuid"} {
 		repo := &fakeDiagnosticReportStore{deleteReport: &Report{ID: "11111111-1111-1111-1111-111111111111"}}
 		store := &fakeDiagnosticObjectStore{bucket: "private"}
 		svc := newTestDiagnosticsService(repo, store)

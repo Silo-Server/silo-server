@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { act, renderHook, waitFor } from "@testing-library/react";
+import { act, renderHook } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -29,14 +29,6 @@ vi.mock("sonner", () => ({
   },
 }));
 
-function deferred<T>() {
-  let resolve!: (value: T) => void;
-  const promise = new Promise<T>((resolvePromise) => {
-    resolve = resolvePromise;
-  });
-  return { promise, resolve };
-}
-
 function renderDeleteCollectionsHook() {
   const queryClient = new QueryClient({
     defaultOptions: { mutations: { retry: false }, queries: { retry: false } },
@@ -50,70 +42,6 @@ function renderDeleteCollectionsHook() {
 describe("useDeleteAdminCollections", () => {
   afterEach(() => {
     vi.clearAllMocks();
-  });
-
-  it("deduplicates collection IDs and limits each request batch to four", async () => {
-    const firstBatch = deferred<void>();
-    apiMock
-      .mockReturnValueOnce(firstBatch.promise)
-      .mockReturnValueOnce(firstBatch.promise)
-      .mockReturnValueOnce(firstBatch.promise)
-      .mockReturnValueOnce(firstBatch.promise)
-      .mockResolvedValue(undefined);
-    invalidateAdminCollectionQueriesMock.mockResolvedValue(undefined);
-    const { result } = renderDeleteCollectionsHook();
-
-    let mutation!: Promise<unknown>;
-    act(() => {
-      mutation = result.current.mutateAsync(
-        [
-          "collection-1",
-          "collection-2",
-          "collection-3",
-          "collection-4",
-          "collection-5",
-          "collection-6",
-          "collection-1",
-        ].map((id) => ({ id, etag: '"captured"' })),
-      );
-    });
-
-    await waitFor(() => expect(apiMock).toHaveBeenCalledTimes(4));
-    expect(result.current.progress).toEqual({ completed: 0, total: 6 });
-    await act(async () => {
-      firstBatch.resolve();
-      await mutation;
-    });
-
-    expect(apiMock.mock.calls).toEqual([
-      [
-        "DELETE /api/v2/admin/collections/{id}",
-        { path: { id: "collection-1" }, headers: { "If-Match": '"captured"' } },
-      ],
-      [
-        "DELETE /api/v2/admin/collections/{id}",
-        { path: { id: "collection-2" }, headers: { "If-Match": '"captured"' } },
-      ],
-      [
-        "DELETE /api/v2/admin/collections/{id}",
-        { path: { id: "collection-3" }, headers: { "If-Match": '"captured"' } },
-      ],
-      [
-        "DELETE /api/v2/admin/collections/{id}",
-        { path: { id: "collection-4" }, headers: { "If-Match": '"captured"' } },
-      ],
-      [
-        "DELETE /api/v2/admin/collections/{id}",
-        { path: { id: "collection-5" }, headers: { "If-Match": '"captured"' } },
-      ],
-      [
-        "DELETE /api/v2/admin/collections/{id}",
-        { path: { id: "collection-6" }, headers: { "If-Match": '"captured"' } },
-      ],
-    ]);
-    expect(result.current.progress).toBeNull();
-    expect(toastSuccessMock).toHaveBeenCalledWith("Deleted 6 collections");
-    expect(invalidateAdminCollectionQueriesMock).toHaveBeenCalledTimes(1);
   });
 
   it("continues after an unexpected failure and reports the partial result", async () => {

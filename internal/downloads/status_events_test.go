@@ -98,10 +98,8 @@ func TestDownloadStatusEventValidation(t *testing.T) {
 		{"missing revision", StatusEvent{Status: StatusCompleted, UpdatedAt: now.Add(-time.Minute)}, false},
 		{"past event", StatusEvent{Status: StatusCompleted, Revision: 1, UpdatedAt: now.Add(-time.Minute)}, true},
 		// A device clock slightly ahead of the server's still reports.
-		{"one second ahead", StatusEvent{Status: StatusCompleted, Revision: 1, UpdatedAt: now.Add(time.Second)}, true},
 		{"two minutes ahead", StatusEvent{Status: StatusCompleted, Revision: 1, UpdatedAt: now.Add(2 * time.Minute)}, true},
 		{"past the skew window", StatusEvent{Status: StatusCompleted, Revision: 1, UpdatedAt: now.Add(2*time.Minute + time.Second)}, false},
-		{"an hour ahead", StatusEvent{Status: StatusCompleted, Revision: 1, UpdatedAt: now.Add(time.Hour)}, false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

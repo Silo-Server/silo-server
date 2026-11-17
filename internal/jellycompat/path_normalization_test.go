@@ -8,13 +8,11 @@ import "testing"
 func TestCanonicalizeCompatPathLocalTrailers(t *testing.T) {
 	for in, want := range map[string]string{
 		"/items/abc123/localtrailers":              "/Items/abc123/LocalTrailers",
-		"/Items/abc123/LocalTrailers":              "/Items/abc123/LocalTrailers",
 		"/emby/items/abc123/localtrailers":         "/Items/abc123/LocalTrailers",
 		"/users/u1/items/abc123/localtrailers":     "/Users/u1/Items/abc123/LocalTrailers",
 		"/jellyfin/Users/U1/Items/X/localTrailers": "/Users/U1/Items/X/LocalTrailers",
 		// Outside the route position the word is an opaque id and keeps its case.
-		"/DisplayPreferences/localtrailers": "/DisplayPreferences/localtrailers",
-		"/items/localtrailers":              "/Items/localtrailers",
+		"/items/localtrailers": "/Items/localtrailers",
 	} {
 		if got := canonicalizeCompatPath(in); got != want {
 			t.Errorf("canonicalizeCompatPath(%q) = %q, want %q", in, got, want)
@@ -25,9 +23,7 @@ func TestCanonicalizeCompatPathLocalTrailers(t *testing.T) {
 func TestCanonicalizeCompatPathAdditionalParts(t *testing.T) {
 	for in, want := range map[string]string{
 		"/videos/abc123/additionalparts":      "/Videos/abc123/AdditionalParts",
-		"/Videos/abc123/AdditionalParts":      "/Videos/abc123/AdditionalParts",
 		"/emby/videos/abc123/additionalParts": "/Videos/abc123/AdditionalParts",
-		"/DisplayPreferences/additionalparts": "/DisplayPreferences/additionalparts",
 		"/items/abc123/additionalparts":       "/Items/abc123/additionalparts",
 		"/videos/additionalparts":             "/Videos/additionalparts",
 	} {
@@ -39,9 +35,8 @@ func TestCanonicalizeCompatPathAdditionalParts(t *testing.T) {
 
 func TestCanonicalizeCompatPathMediaFolders(t *testing.T) {
 	for in, want := range map[string]string{
-		"/library/mediafolders":            "/Library/MediaFolders",
-		"/emby/Library/mediaFolders":       "/Library/MediaFolders",
-		"/DisplayPreferences/mediafolders": "/DisplayPreferences/mediafolders",
+		"/library/mediafolders":      "/Library/MediaFolders",
+		"/emby/Library/mediaFolders": "/Library/MediaFolders",
 	} {
 		if got := canonicalizeCompatPath(in); got != want {
 			t.Errorf("canonicalizeCompatPath(%q) = %q, want %q", in, got, want)

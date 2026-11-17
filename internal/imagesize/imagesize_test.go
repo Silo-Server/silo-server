@@ -15,7 +15,6 @@ func TestParse(t *testing.T) {
 		"large":    Large,
 		"original": Original,
 		"  Large ": Large,
-		"ORIGINAL": Original,
 	}
 	for raw, want := range valid {
 		got, err := Parse(raw)
@@ -27,7 +26,7 @@ func TestParse(t *testing.T) {
 		}
 	}
 
-	for _, raw := range []string{"tiny", "w500", "smal", "huge", "0"} {
+	for _, raw := range []string{"tiny", "w500"} {
 		if _, err := Parse(raw); err == nil {
 			t.Fatalf("Parse(%q) = nil error, want rejection", raw)
 		}

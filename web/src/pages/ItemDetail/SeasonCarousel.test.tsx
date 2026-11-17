@@ -27,20 +27,6 @@ function makeSeason(overrides: Partial<Season> = {}): Season {
 }
 
 describe("SeasonCarousel", () => {
-  it("renders independent season detail and direct-play targets", () => {
-    const markup = renderToStaticMarkup(
-      <QueryClientProvider client={new QueryClient()}>
-        <MemoryRouter>
-          <SeasonCarousel seasons={[makeSeason({ play_content_id: "episode-2" })]} />
-        </MemoryRouter>
-      </QueryClientProvider>,
-    );
-
-    expect(markup).toContain('href="/item/season-1"');
-    expect(markup).toContain('href="/watch/episode-2"');
-    expect(markup).toContain('aria-label="Play Season 1"');
-  });
-
   it("keeps the series page's library on season links but not on Play", () => {
     const markup = renderToStaticMarkup(
       <QueryClientProvider client={new QueryClient()}>

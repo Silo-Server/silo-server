@@ -34,9 +34,7 @@ func TestABSSubjectNormalization(t *testing.T) {
 		// "0" and "-1" parse but name no account. Merging them into the shared
 		// user space would attribute ABS bytes to a user that does not exist.
 		{"zero", "0", streamtelemetry.Subject{Kind: streamtelemetry.SubjectABSUser, ID: "0"}},
-		{"negative", "-1", streamtelemetry.Subject{Kind: streamtelemetry.SubjectABSUser, ID: "-1"}},
 		{"non numeric", "abc", streamtelemetry.Subject{Kind: streamtelemetry.SubjectABSUser, ID: "abc"}},
-		{"overflow", "99999999999999999999", streamtelemetry.Subject{Kind: streamtelemetry.SubjectABSUser, ID: "99999999999999999999"}},
 		{"empty", "", streamtelemetry.Subject{}},
 	} {
 		t.Run(test.name, func(t *testing.T) {

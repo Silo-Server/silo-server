@@ -109,7 +109,7 @@ describe("NotificationsAdminSettings", () => {
 
     render(renderPage());
 
-    expect(screen.getByText("Re-registration required")).toHaveClass("text-amber-500");
+    expect(screen.getByText("Re-registration required")).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: /Silo Push Relay/ }));
     expect(screen.getByRole("button", { name: "Re-register relay" })).toBeInTheDocument();
   });

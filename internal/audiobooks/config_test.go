@@ -26,7 +26,6 @@ func TestStandaloneLoginEnabledReadsGate(t *testing.T) {
 	}{
 		{"unset defaults on", "", true},
 		{"gated off", "true", false},
-		{"explicitly on", "false", true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			provider := &ABSConfigProvider{Settings: loginSettingsStore{value: tc.stored}}

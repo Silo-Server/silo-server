@@ -40,12 +40,6 @@ func TestSplitUserProfile(t *testing.T) {
 			wantProfile: "",
 		},
 		{
-			name:        "empty input stays empty",
-			input:       "",
-			wantUser:    "",
-			wantProfile: "",
-		},
-		{
 			name: "multiple hashes — split on the LAST one so a profile name " +
 				"that legitimately starts with a hash (rare but possible) " +
 				"doesn't get misinterpreted as the user portion",

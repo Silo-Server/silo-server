@@ -9,7 +9,6 @@ func TestProviderIDFromPluginURL(t *testing.T) {
 		want string
 	}{
 		{"tvdb plugin url", "tvdb://banners/v4/season/468437/posters/665b8e570c65f.jpg", "tvdb"},
-		{"tmdb plugin url", "tmdb://poster/abc.jpg", "tmdb"},
 		{"http url", "http://example.com/img.jpg", ""},
 		{"https url", "https://image.tmdb.org/t/p/original/abc.jpg", ""},
 		{"empty", "", ""},

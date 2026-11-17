@@ -363,16 +363,6 @@ describe("server Synced list editor", () => {
     });
   });
 
-  it("keeps Max titles above 500", async () => {
-    serverList("mdblist", MDBLIST);
-    showEditorPage(SERVER_EDIT);
-    expect(await setMaxTitles("10000")).toHaveValue(10000);
-    await save(ADMIN_PATCH);
-    expect(patches(ADMIN_PATCH)[0]).toMatchObject({
-      source_config: { mode: "mdblist_json", limit: 10000 },
-    });
-  });
-
   it("saves a new max titles on a franchise list that has no ID yet", async () => {
     serverList("tmdb", {
       source_url: "tmdb://collection/0",

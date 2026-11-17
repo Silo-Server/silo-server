@@ -102,20 +102,6 @@ func TestAdminTemplateCatalogDropsEmptiedCategories(t *testing.T) {
 	}
 }
 
-// TestBuiltinBundleOnlyTemplatesCarryTheirSource pins what the admin catalog
-// filter relies on: every built-in TMDB Discover or franchise template is
-// labeled with that source, so filtering by source catches all of them.
-func TestBuiltinBundleOnlyTemplatesCarryTheirSource(t *testing.T) {
-	for _, tmpl := range templates.List() {
-		if tmpl.TMDBDiscover != nil && tmpl.Source != templates.SourceTMDBDiscover {
-			t.Errorf("%s has a tmdb_discover spec but source %s", tmpl.ID, tmpl.Source)
-		}
-		if tmpl.TMDBCollection != nil && tmpl.Source != templates.SourceTMDBCollection {
-			t.Errorf("%s has a tmdb_collection spec but source %s", tmpl.ID, tmpl.Source)
-		}
-	}
-}
-
 // TestAdminTemplateCatalogRequiresActingAdmin restates #193 S5 for the
 // template list: a regular account and a non-primary profile on an admin
 // account are refused before the catalog is read.

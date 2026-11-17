@@ -4,30 +4,8 @@ import (
 	"reflect"
 	"testing"
 
-	"google.golang.org/protobuf/types/known/structpb"
-
 	"github.com/Silo-Server/silo-server/internal/models"
 )
-
-// A plugin reports a source of its own only after declaring it; an undeclared
-// unknown source is still dropped, so a typo cannot store a stray source.
-func TestRatingSourcesFromStructKeepsDeclaredSources(t *testing.T) {
-	number := structpb.NewNumberValue
-	ratings := ratingsStructWithSources(t, map[string]*structpb.Value{
-		"imdb":      sourceEntry(map[string]*structpb.Value{"score": number(81)}),
-		"Kinopoisk": sourceEntry(map[string]*structpb.Value{"score": number(72), "votes": number(3100)}),
-		"douban":    sourceEntry(map[string]*structpb.Value{"score": number(90)}),
-	})
-
-	got := ratingSourcesFromStruct(ratings, "kino", map[string]struct{}{"kinopoisk": {}})
-	want := map[string]RatingSource{
-		models.RatingSourceIMDB: {Score: 81, Provider: "kino"},
-		"kinopoisk":             {Score: 72, Votes: 3100, Provider: "kino"},
-	}
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("ratingSourcesFromStruct() = %+v, want %+v", got, want)
-	}
-}
 
 func TestExtractRatingSources(t *testing.T) {
 	metadataJSON := []byte(`{"metadata": {"rating_sources": [

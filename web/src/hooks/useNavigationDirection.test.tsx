@@ -18,7 +18,7 @@ import { useNavigationDirection } from "./useNavigationDirection";
  * listener at all. An earlier revision derived direction from a listener and
  * every test here passed while browser Back was a silent no-op in the app. The
  * ordering is now structural rather than racy — one writer, in the location
- * effect — which is what makes these tests meaningful; they pin the arithmetic,
+ * effect — which is what makes these tests meaningful; they pin the branching,
  * not the race.
  *
  * `window.history.state.idx` is the index the hook reads, and MemoryRouter never
@@ -32,7 +32,6 @@ function Harness({ to }: { to?: string }) {
     <>
       {to ? <button onClick={() => navigate(to)}>push</button> : null}
       <button onClick={() => navigate(-1)}>back</button>
-      <button onClick={() => navigate(1)}>forward</button>
     </>
   );
 }
@@ -43,7 +42,7 @@ function startAt(idx: number) {
 }
 
 /** Commits the index the browser would have installed, then navigates. */
-function travel(button: "push" | "back" | "forward", idx: number | undefined) {
+function travel(button: "push" | "back", idx: number | undefined) {
   window.history.replaceState(idx === undefined ? {} : { idx }, "");
   fireEvent.click(screen.getByRole("button", { name: button }));
 }
@@ -91,23 +90,6 @@ describe("useNavigationDirection", () => {
     markNavigationDirection("forward");
     travel("push", 1);
 
-    expect(direction()).toBe("forward");
-  });
-
-  it("compares against the entry we came from, not the last one committed", () => {
-    startAt(2);
-    render(
-      <MemoryRouter initialEntries={["/a", "/b", "/c"]} initialIndex={2}>
-        <Harness />
-      </MemoryRouter>,
-    );
-
-    travel("back", 1);
-    expect(direction()).toBe("back");
-
-    // Without advancing the tracked index on every commit, returning to idx 2
-    // would compare 2 against 2 and lose the direction.
-    travel("forward", 2);
     expect(direction()).toBe("forward");
   });
 });

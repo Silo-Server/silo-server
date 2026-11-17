@@ -61,12 +61,13 @@ func TestSignerTTL(t *testing.T) {
 		name        string
 		input, want time.Duration
 	}{
-		{"default", 0, 4 * time.Hour}, {"minimum", time.Second, time.Minute}, {"maximum", 48 * time.Hour, 24 * time.Hour},
+		// The lifetime plus one URL bucket (15 minutes, or the TTL if shorter).
+		{"default", 0, 4*time.Hour + 15*time.Minute}, {"minimum", time.Second, 2 * time.Minute}, {"maximum", 48 * time.Hour, 24*time.Hour + 15*time.Minute},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			_, exp := NewSigner("secret", tc.input).Sign("a.webp", now)
-			if got := exp.Sub(now); got != tc.want+min(15*time.Minute, tc.want) {
-				t.Fatalf("TTL = %s, want %s", got, tc.want+min(15*time.Minute, tc.want))
+			if got := exp.Sub(now); got != tc.want {
+				t.Fatalf("TTL = %s, want %s", got, tc.want)
 			}
 		})
 	}

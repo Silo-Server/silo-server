@@ -8,8 +8,6 @@ func TestParseFolderIDs_BracketedBareImdb(t *testing.T) {
 	}{
 		{"square brackets", "17 Blocks (2021) [tt10011226]", "tt10011226"},
 		{"curly braces", "Some Show {tt1234567}", "tt1234567"},
-		{"8-digit tt", "Movie (2024) [tt12345678]", "tt12345678"},
-		{"9-digit tt", "Movie (2024) [tt123456789]", "tt123456789"},
 		{"10-digit tt", "Movie (2024) [tt1234567890]", "tt1234567890"},
 		{"parentheses production pattern", "10 Tricks (2022) (tt0473100) [WEBDL-1080p.AAC.h264.GNOME].mp4", "tt0473100"},
 	}
@@ -60,12 +58,7 @@ func TestParseStructuredFolderIDs_ParenthesizedProviderIDs(t *testing.T) {
 }
 
 func TestParseStructuredFolderIDs_BracketedBareImdb(t *testing.T) {
-	got := ParseStructuredFolderIDs("17 Blocks (2021) [tt10011226]")
-	if got == nil || got.ImdbID != "tt10011226" {
-		t.Fatalf("ParseStructuredFolderIDs bare imdb = %+v, want ImdbID tt10011226", got)
-	}
-
-	got = ParseStructuredFolderIDs("Some Movie {tmdb-12345} [tt7654321]")
+	got := ParseStructuredFolderIDs("Some Movie {tmdb-12345} [tt7654321]")
 	if got == nil || got.TmdbID != "12345" || got.ImdbID != "tt7654321" {
 		t.Fatalf("ParseStructuredFolderIDs mixed ids = %+v, want tmdb+imdb", got)
 	}

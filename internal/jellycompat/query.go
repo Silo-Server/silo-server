@@ -692,12 +692,6 @@ func parseSort(sortBy, sortOrder string, criticShown bool) (sort, order string) 
 	return sort, mapSortOrder(orderRaw, strings.TrimSpace(sortBy) != "")
 }
 
-// mapSortBy returns the browse sort parseSort selects for a SortBy list.
-func mapSortBy(raw string) string {
-	sort, _ := parseSort(raw, "", false)
-	return sort
-}
-
 // sortKey maps one Jellyfin SortBy key. Episode-order keys map to "" — the
 // natural season/episode order episode browses already use — rather than to
 // created_at.

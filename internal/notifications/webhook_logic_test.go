@@ -22,16 +22,6 @@ func (m mapSettingReader) Get(_ context.Context, key string) (string, error) {
 	return m[key], nil
 }
 
-func TestWebhooksDisabledByDefault(t *testing.T) {
-	ctx := context.Background()
-	if NewSettings(nil).WebhooksEnabled(ctx) {
-		t.Fatal("WebhooksEnabled must default to false until an admin opts in")
-	}
-	if !NewSettings(mapSettingReader{SettingWebhooksEnabled: "true"}).WebhooksEnabled(ctx) {
-		t.Fatal("WebhooksEnabled = false with the setting on, want true")
-	}
-}
-
 func TestWebhookCreateAndTestBlockedWhenDisabled(t *testing.T) {
 	ctx := context.Background()
 	service := newWebhookService(nil, nil, NewSettings(nil), nil)

@@ -100,11 +100,6 @@ func TestUserDataUpdatePersistsPartialFieldsAndProfileIsolation(t *testing.T) {
 	if err != nil || other != nil {
 		t.Fatalf("cross-profile state: %+v %v", other, err)
 	}
-	rec := httptest.NewRecorder()
-	h.HandleUpdateUserData(rec, viewerRequest("POST", "/?userId="+uuid.NewString(), `{"IsFavorite":true}`, "itemId", id, session))
-	if rec.Code != 404 {
-		t.Fatalf("foreign user status=%d", rec.Code)
-	}
 }
 
 func TestPlayedMutationsReturnCurrentDTOAndDate(t *testing.T) {

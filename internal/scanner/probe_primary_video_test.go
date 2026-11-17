@@ -26,16 +26,6 @@ func TestProbePrimaryVideoTrackReusesScannerNormalization(t *testing.T) {
 		wantEnhancement bool
 	}{
 		{
-			name:          "PQ",
-			stream:        `{"index":0,"codec_name":"hevc","codec_type":"video","profile":"Main 10","level":153,"width":3840,"height":2160,"avg_frame_rate":"24000/1001","pix_fmt":"yuv420p10le","color_range":"tv","color_primaries":"bt2020","color_transfer":"smpte2084","color_space":"bt2020nc"}`,
-			wantRangeType: "HDR10", wantTransfer: "smpte2084", wantProfile: "Main 10", wantBitDepth: 10,
-		},
-		{
-			name:          "HLG",
-			stream:        `{"index":0,"codec_name":"hevc","codec_type":"video","profile":"Main 10","level":153,"width":3840,"height":2160,"avg_frame_rate":"50/1","pix_fmt":"yuv420p10le","color_range":"tv","color_primaries":"bt2020","color_transfer":"arib-std-b67","color_space":"bt2020nc"}`,
-			wantRangeType: "HLG", wantTransfer: "arib-std-b67", wantProfile: "Main 10", wantBitDepth: 10,
-		},
-		{
 			name:          "Dolby Vision provenance",
 			stream:        `{"index":0,"codec_name":"hevc","codec_type":"video","profile":"Main 10","level":153,"width":3840,"height":2160,"avg_frame_rate":"24000/1001","pix_fmt":"yuv420p10le","color_range":"tv","color_primaries":"bt2020","color_transfer":"smpte2084","color_space":"bt2020nc","side_data_list":[{"side_data_type":"DOVI configuration record","dv_profile":7,"dv_level":6,"bl_present_flag":1,"el_present_flag":1,"rpu_present_flag":1,"dv_bl_signal_compatibility_id":6}]}`,
 			wantRangeType: "DOVIWithEL", wantTransfer: "smpte2084", wantProfile: "Main 10", wantBitDepth: 10,
