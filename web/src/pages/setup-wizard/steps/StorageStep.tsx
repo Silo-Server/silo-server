@@ -27,6 +27,8 @@ const REDIS_KEYS = ["redis.url", "redis.db"];
 
 const PUBLIC_S3_KEYS = [
   "s3.public_endpoint",
+  "s3.public_region",
+  "s3.public_path_style",
   "s3.public_bucket",
   "s3.public_key_prefix",
   "s3.public_access_key",
@@ -40,6 +42,8 @@ const PUBLIC_S3_KEYS = [
 
 const PRIVATE_S3_KEYS = [
   "s3.private_endpoint",
+  "s3.private_region",
+  "s3.private_path_style",
   "s3.private_bucket",
   "s3.private_key_prefix",
   "s3.private_access_key",
@@ -239,6 +243,19 @@ function S3Fields({
         value={form.getValue(key("key_prefix"))}
         onChange={(v) => form.setValue(key("key_prefix"), v)}
         disabled={locationLocked}
+      />
+      <SettingField
+        label={t("web.admin.settings.storage.s3.region")}
+        description={t("web.admin.settings.storage.s3.regionDescription")}
+        value={form.getValue(key("region"))}
+        onChange={(v) => form.setValue(key("region"), v)}
+      />
+      <SettingField
+        label={t("web.admin.settings.storage.s3.pathStyle")}
+        type="toggle"
+        description={t("web.admin.settings.storage.s3.pathStyleDescription")}
+        value={form.getValue(key("path_style"))}
+        onChange={(v) => form.setValue(key("path_style"), v)}
       />
       {prefix === "public" ? (
         <>
