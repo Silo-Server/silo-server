@@ -62,8 +62,12 @@ func (a *Arrivals) WaitingFor(ctx context.Context, q Querier, contentIDs []strin
 	if a == nil || len(contentIDs) == 0 {
 		return out, nil
 	}
-	for _, contentID := range contentIDs {
-		waiters, err := waitingFor(ctx, q, contentID, arrivedSince)
+	arrived, err := arrivedItems(ctx, q, contentIDs, arrivedSince)
+	if err != nil {
+		return nil, err
+	}
+	for _, contentID := range arrived {
+		waiters, err := waitingFor(ctx, q, contentID)
 		if err != nil {
 			return nil, err
 		}
@@ -87,25 +91,47 @@ func (a *Arrivals) PrunePromotions(ctx context.Context, q Querier, before time.T
 	return tag.RowsAffected(), nil
 }
 
-func waitingFor(ctx context.Context, q Querier, contentID string, arrivedSince time.Time) ([]Waiter, error) {
-	var arrived bool
-	rows, err := q.Query(ctx, `SELECT created_at >= $2 FROM media_items WHERE content_id = $1`, contentID, arrivedSince)
+// arrivedItems keeps the catalog items created at or after arrivedSince, in
+// one query for the whole batch. It keeps none while no profile has a title
+// entry or a promotion record, so a bulk import on a server where nobody
+// watchlists unavailable titles costs this query alone. The per-item reads in
+// waitingFor then run only for fresh items, at most one per claimed event.
+func arrivedItems(ctx context.Context, q Querier, contentIDs []string, arrivedSince time.Time) ([]string, error) {
+	rows, err := q.Query(ctx, `
+		SELECT content_id FROM media_items
+		WHERE content_id = ANY($1) AND created_at >= $2
+		  AND (EXISTS (SELECT 1 FROM user_watchlist_titles)
+		       OR EXISTS (SELECT 1 FROM watchlist_title_promotions))`, contentIDs, arrivedSince)
 	if err != nil {
-		return nil, fmt.Errorf("reading arrival time of %s: %w", contentID, err)
+		return nil, fmt.Errorf("reading arrived catalog items: %w", err)
 	}
-	for rows.Next() {
-		if err := rows.Scan(&arrived); err != nil {
-			rows.Close()
-			return nil, fmt.Errorf("reading arrival time of %s: %w", contentID, err)
+	fresh, err := pgx.CollectRows(rows, pgx.RowTo[string])
+	if err != nil {
+		return nil, fmt.Errorf("reading arrived catalog items: %w", err)
+	}
+	// Keep the caller's order.
+	arrived := make([]string, 0, len(fresh))
+	for _, contentID := range contentIDs {
+		if slices.Contains(fresh, contentID) && !slices.Contains(arrived, contentID) {
+			arrived = append(arrived, contentID)
 		}
 	}
-	rows.Close()
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("reading arrival time of %s: %w", contentID, err)
+	return arrived, nil
+}
+
+// ForgetPromotion deletes the record of a title entry promoted onto the item,
+// once the profile takes the item off its library watchlist: it no longer
+// waits for the title.
+func ForgetPromotion(ctx context.Context, q Querier, userID int, profileID, contentID string) error {
+	if _, err := q.Exec(ctx, `
+		DELETE FROM watchlist_title_promotions
+		WHERE user_id = $1 AND profile_id = $2 AND media_item_id = $3`, userID, profileID, contentID); err != nil {
+		return fmt.Errorf("forgetting watchlist title promotion: %w", err)
 	}
-	if !arrived {
-		return nil, nil
-	}
+	return nil
+}
+
+func waitingFor(ctx context.Context, q Querier, contentID string) ([]Waiter, error) {
 	mediaType, itemAliases, err := catalog.ItemProviderAliasesOn(ctx, q, contentID)
 	if err != nil || len(itemAliases) == 0 {
 		return nil, err

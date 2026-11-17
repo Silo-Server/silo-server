@@ -504,7 +504,9 @@ webhook IDs, timestamp, `version`, `test` flag, profile ID, delivery type,
 `reason_flags`, and the series/episode (or request) content blocks.
 `reason_flags` is `{"next_up": <bool>}`; Next Up is the only reason an
 episode notifies for. A `watchlist.available` payload names the arrived item
-in the series block, and its `reason_flags` read `{"next_up": false}`.
+in the series block and the watchlisted title in a `watchlist` block,
+`{"tmdb_id", "media_type"}` (`movie` or `series`; `tmdb_id` is left out when
+the title has none), and its `reason_flags` read `{"next_up": false}`.
 
 Each request is signed with the webhook's per-destination 32-byte secret:
 

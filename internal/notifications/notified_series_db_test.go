@@ -92,7 +92,7 @@ func TestListNotifiedSeriesMergesLibrariesAndAppliesPreferences(t *testing.T) {
 	}
 
 	// Turning Next Up off silences every series but lists the same ones.
-	if _, err := pool.Exec(ctx, `UPDATE notification_preferences SET notify_next_up = false WHERE profile_id = 'p1'`); err != nil {
+	if _, err := pool.Exec(ctx, `UPDATE notification_preferences SET notify_next_up = false WHERE user_id = 1 AND profile_id = 'p1'`); err != nil {
 		t.Fatal(err)
 	}
 	got, err = s.ListNotifiedSeries(ctx, 1, "p1")

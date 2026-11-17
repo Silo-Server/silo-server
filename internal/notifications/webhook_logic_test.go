@@ -334,6 +334,41 @@ func requestFulfilledTestRow() DeliveryRow {
 	}
 }
 
+// TestGenericWebhookPayloadWatchlistAvailable pins that a receiver can tell
+// which title arrived and whether it is a movie or a series.
+func TestGenericWebhookPayloadWatchlistAvailable(t *testing.T) {
+	itemID := "movie:dune-2021"
+	row := DeliveryRow{
+		Delivery: Delivery{
+			ID: "d1", ProfileID: "p1", SeriesID: &itemID, Type: DeliveryTypeWatchlistAvailable,
+			ReasonFlags: []byte(`{"tmdb_id":438631,"media_type":"movie"}`),
+		},
+		SeriesTitle: "Dune",
+	}
+	payload, err := BuildGenericWebhookPayload(row, "hook-1", false)
+	if err != nil {
+		t.Fatalf("build failed: %v", err)
+	}
+	var body struct {
+		Series *struct {
+			ID string `json:"id"`
+		} `json:"series"`
+		Watchlist *struct {
+			TMDBID    int    `json:"tmdb_id"`
+			MediaType string `json:"media_type"`
+		} `json:"watchlist"`
+	}
+	if err := json.Unmarshal(payload, &body); err != nil {
+		t.Fatalf("payload is not JSON: %v", err)
+	}
+	if body.Series == nil || body.Series.ID != itemID {
+		t.Errorf("series = %+v, want the arrived item", body.Series)
+	}
+	if body.Watchlist == nil || body.Watchlist.TMDBID != 438631 || body.Watchlist.MediaType != "movie" {
+		t.Errorf("watchlist = %+v, want tmdb_id 438631 and media_type movie", body.Watchlist)
+	}
+}
+
 func TestGenericWebhookPayloadRequestFulfilled(t *testing.T) {
 	payload, err := BuildGenericWebhookPayload(requestFulfilledTestRow(), "hook-1", false)
 	if err != nil {

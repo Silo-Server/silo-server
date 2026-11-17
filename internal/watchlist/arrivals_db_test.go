@@ -90,12 +90,9 @@ func TestArrivalFindsAnEntryPromotedOutsidePostgresDB(t *testing.T) {
 	folder, movie := seedLibraryMovie(ctx, t, pool, sfx, tmdbID, "")
 	arrivals := &Arrivals{}
 	arrivedSince := time.Now().Add(-72 * time.Hour)
-	waiting, err := arrivals.WaitingFor(ctx, pool, []string{movie}, arrivedSince)
-	if err != nil {
-		t.Fatal(err)
-	}
+	waiting := waitersFor(t, arrivals, pool, movie, arrivedSince)
 	want := Waiter{UserID: user, ProfileID: profile, MediaType: mediaTypeMovie, TMDBIDs: []int{tmdbID}}
-	if got := waiting[movie]; len(got) != 1 || got[0].UserID != want.UserID || got[0].ProfileID != want.ProfileID || len(got[0].TMDBIDs) != 1 || got[0].TMDBIDs[0] != tmdbID {
+	if got := waiting; len(got) != 1 || got[0].UserID != want.UserID || got[0].ProfileID != want.ProfileID || len(got[0].TMDBIDs) != 1 || got[0].TMDBIDs[0] != tmdbID {
 		t.Fatalf("waiters before promotion = %+v, want [%+v]", got, want)
 	}
 
@@ -111,21 +108,30 @@ func TestArrivalFindsAnEntryPromotedOutsidePostgresDB(t *testing.T) {
 		t.Fatal("promotion did not write the library entry to the profile's store")
 	}
 
-	waiting, err = arrivals.WaitingFor(ctx, pool, []string{movie}, arrivedSince)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got := waiting[movie]; len(got) != 1 || got[0].UserID != user || got[0].ProfileID != profile || len(got[0].TMDBIDs) != 1 || got[0].TMDBIDs[0] != tmdbID {
+	waiting = waitersFor(t, arrivals, pool, movie, arrivedSince)
+	if got := waiting; len(got) != 1 || got[0].UserID != user || got[0].ProfileID != profile || len(got[0].TMDBIDs) != 1 || got[0].TMDBIDs[0] != tmdbID {
 		t.Fatalf("waiters after promotion = %+v, want [%+v]", got, want)
 	}
 
 	// An item older than the horizon has not arrived.
-	waiting, err = arrivals.WaitingFor(ctx, pool, []string{movie}, time.Now().Add(time.Minute))
-	if err != nil {
-		t.Fatal(err)
-	}
+	waiting = waitersFor(t, arrivals, pool, movie, time.Now().Add(time.Minute))
 	if len(waiting) != 0 {
 		t.Fatalf("waiters for an item older than the horizon = %+v, want none", waiting)
+	}
+
+	// Taking the item off the library watchlist forgets that profile's
+	// promotion and leaves another profile's.
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO watchlist_title_promotions (user_id, profile_id, media_item_id, title_added_at)
+		VALUES ($1, 'other', $2, now() - interval '30 days')`, user, movie); err != nil {
+		t.Fatal(err)
+	}
+	if err := titles.ForgetPromotion(ctx, user, profile, movie); err != nil {
+		t.Fatal(err)
+	}
+	waiting = waitersFor(t, arrivals, pool, movie, arrivedSince)
+	if got := waiting; len(got) != 1 || got[0].ProfileID != "other" {
+		t.Fatalf("waiters after the profile removed the item = %+v, want only the other profile", got)
 	}
 
 	if _, err := arrivals.PrunePromotions(ctx, pool, time.Now().Add(time.Minute)); err != nil {
@@ -138,4 +144,15 @@ func TestArrivalFindsAnEntryPromotedOutsidePostgresDB(t *testing.T) {
 	if left != 0 {
 		t.Fatalf("promotion records after pruning = %d, want 0", left)
 	}
+}
+
+// waitersFor returns the profiles waiting for the item, as the notification
+// fanout reads them.
+func waitersFor(t *testing.T, arrivals *Arrivals, q Querier, contentID string, arrivedSince time.Time) []Waiter {
+	t.Helper()
+	waiting, err := arrivals.WaitingFor(t.Context(), q, []string{contentID}, arrivedSince)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return waiting[contentID]
 }

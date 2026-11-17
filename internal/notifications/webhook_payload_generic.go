@@ -36,6 +36,15 @@ type genericWebhookBody struct {
 	// matched item); approved/declined have no catalog item yet, so the
 	// request's own title rides here.
 	Request *genericWebhookRequest `json:"request,omitempty"`
+	// Watchlist is present for watchlist.available deliveries: the title the
+	// profile watchlisted. The arrived catalog item is in Series, movies
+	// included.
+	Watchlist *genericWebhookWatchlist `json:"watchlist,omitempty"`
+}
+
+type genericWebhookWatchlist struct {
+	TMDBID    int    `json:"tmdb_id,omitempty"`
+	MediaType string `json:"media_type"`
 }
 
 type genericWebhookSeries struct {
@@ -100,6 +109,10 @@ func BuildGenericWebhookPayload(row DeliveryRow, webhookID string, test bool) ([
 			Year:      flags.Year,
 			Reason:    flags.Reason,
 		}
+	case DeliveryTypeWatchlistAvailable:
+		var title TitleFlags
+		_ = json.Unmarshal(row.ReasonFlags, &title)
+		body.Watchlist = &genericWebhookWatchlist{TMDBID: title.TMDBID, MediaType: title.MediaType}
 	}
 	return json.Marshal(body)
 }
