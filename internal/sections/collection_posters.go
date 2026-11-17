@@ -166,6 +166,11 @@ func (f *Fetcher) fetchCollectionPosters(ctx context.Context, s ResolvedSection,
 	if len(refs) == 0 || f.CollectionCards == nil {
 		return result, nil
 	}
+	release, err := acquireCollectionCardGate(ctx)
+	if err != nil {
+		return SectionWithItems{}, err
+	}
+	defer release()
 	cards, err := f.CollectionCards.CollectionCards(ctx, refs, CollectionCardScope{
 		LibraryID: libraryID,
 		UserID:    userID,
@@ -181,4 +186,31 @@ func (f *Fetcher) fetchCollectionPosters(ctx context.Context, s ResolvedSection,
 	}
 	result.TotalCount = len(result.Collections)
 	return result, nil
+}
+
+type collectionCardGateKey struct{}
+
+// WithCollectionCardGate makes the rows of collections fetched under ctx
+// build their cards one row at a time. A read that fetches rows concurrently
+// (FetchAll, the Home layout's included rows) installs it. A row's cards already count and
+// collage several collections at once, so the rows of one aggregate read,
+// fetched concurrently, would otherwise multiply that into more database
+// connections than one request should hold.
+func WithCollectionCardGate(ctx context.Context) context.Context {
+	return context.WithValue(ctx, collectionCardGateKey{}, make(chan struct{}, 1))
+}
+
+// acquireCollectionCardGate waits for the gate ctx carries, if any, and
+// answers its release.
+func acquireCollectionCardGate(ctx context.Context) (func(), error) {
+	gate, ok := ctx.Value(collectionCardGateKey{}).(chan struct{})
+	if !ok {
+		return func() {}, nil
+	}
+	select {
+	case gate <- struct{}{}:
+		return func() { <-gate }, nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
 }

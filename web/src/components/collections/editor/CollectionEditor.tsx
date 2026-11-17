@@ -573,14 +573,14 @@ export function CollectionEditor<Raw extends WireCollection>({
       }
       setDeletingRows(rows);
       const done = await deleteRows
-        .mutateAsync({ collectionId: view.id, rows })
+        .mutateAsync({ collectionId: view.id, rows, etag })
         .catch(() => ({ remaining: [...rows], etag: undefined }));
       if (done.remaining.length > 0) {
         setDeletingRows(done.remaining);
         setDeleteError(rowsLeftMessage(rowLabels(done.remaining, libraryNames)));
         return;
       }
-      // Taking it off a row of collections moved its revision.
+      // Writing its rows moved its revision.
       etag = done.etag ?? etag;
     }
     remove.mutate(

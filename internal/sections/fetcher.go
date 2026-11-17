@@ -1210,7 +1210,7 @@ func (f *Fetcher) nextUpDismissedEpisodeIDs(ctx context.Context, userID int, pro
 // Because You Watched would otherwise each make.
 func (f *Fetcher) FetchAll(ctx context.Context, resolved []ResolvedSection, libraryID *int, libraryIDs []int, userID int, profileID string, filter catalog.AccessFilter) []SectionWithItems {
 	start := time.Now()
-	ctx = recommendations.WithWatchedSetMemo(ctx)
+	ctx = WithCollectionCardGate(recommendations.WithWatchedSetMemo(ctx))
 	results := fetchAllWithRunner(ctx, resolved, fetchAllMaxConcurrency, func(ctx context.Context, sec ResolvedSection) (SectionWithItems, error) {
 		return f.FetchOne(ctx, sec, libraryID, libraryIDs, userID, profileID, filter)
 	})

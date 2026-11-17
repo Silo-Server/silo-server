@@ -14,6 +14,7 @@ import { holdsCollections } from "@/lib/sectionTypes";
 import type { components } from "@/api/v2/schema";
 import { v2, V2ProblemError } from "@/api/v2/request";
 import type { CollectionRow } from "@/lib/collections/rows";
+import { stableJson } from "@/lib/homeRows/stableJson";
 import type { PageRef } from "@/lib/homeRows/types";
 
 type AdminCollectionSection = components["schemas"]["AdminCollectionSection"];
@@ -90,19 +91,27 @@ function isGone(error: unknown) {
  * stops the run: `remaining` holds that row and every row after it, with the
  * error.
  *
- * Changing a row (unlike deleting one) moves the collection's revision, so
- * the ETag read before the run would answer `412` on the collection's own
- * `DELETE`. When every row is done and at least one was changed, `etag` is
- * the collection's ETag read again; send that one.
+ * Deleting or changing a row that shows the collection moves the
+ * collection's revision (a section write locks the collections it
+ * referenced), so `etag`, the collection's ETag read before the run, would
+ * answer `412` on the collection's own `DELETE`. When every row is done and
+ * at least one was written, the answer's `etag` is the collection's ETag read
+ * again; send that one. It is left out when the collection itself changed
+ * since `etag` was read, so the `DELETE` still answers `412` to someone
+ * else's edit.
  */
 export async function deleteAdminCollectionRows(
   collectionId: string,
   rows: readonly CollectionRow[],
+  etag: string,
 ): Promise<{ remaining: CollectionRow[]; error?: unknown; etag?: string }> {
-  let changedRow = false;
+  // The collection before any row is touched, to tell this run's own change
+  // of its revision from someone else's edit.
+  const before = await fetchAdminCollectionSnapshot(collectionId).catch(() => undefined);
+  let wroteRow = false;
   for (const [index, row] of rows.entries()) {
     try {
-      const { section, etag } = await fetchAdminSectionSnapshot(row.id);
+      const { section, etag: rowEtag } = await fetchAdminSectionSnapshot(row.id);
       const config = section.config ?? {};
       if (holdsCollections(section.section_type)) {
         const listed = libraryCollectionIdsOf(config);
@@ -110,27 +119,43 @@ export async function deleteAdminCollectionRows(
         if (collectionRefsOf(config).length > 1) {
           await updateAdminSection({
             id: row.id,
-            etag,
+            etag: rowEtag,
             config: withoutLibraryCollection(config, collectionId),
           });
-          changedRow = true;
+          wroteRow = true;
           continue;
         }
       } else if (config.library_collection_id !== collectionId) {
         continue;
       }
-      await deleteAdminSection({ id: row.id, etag });
+      await deleteAdminSection({ id: row.id, etag: rowEtag });
+      wroteRow = true;
     } catch (error) {
       if (isGone(error)) continue;
       return { remaining: rows.slice(index), error };
     }
   }
-  if (!changedRow) return { remaining: [] };
+  if (!wroteRow) return { remaining: [] };
   try {
-    return { remaining: [], etag: (await fetchAdminCollectionSnapshot(collectionId)).etag };
+    const after = await fetchAdminCollectionSnapshot(collectionId);
+    const unchanged = before?.etag === etag && sameCollection(before, after);
+    return unchanged ? { remaining: [], etag: after.etag } : { remaining: [] };
   } catch (error) {
     // The rows are done; the collection's delete reports what is wrong.
     if (isGone(error)) return { remaining: [] };
     throw error;
   }
+}
+
+type CollectionSnapshot = Awaited<ReturnType<typeof fetchAdminCollectionSnapshot>>;
+
+/**
+ * Whether two reads of a collection show the same collection. Its image URLs
+ * are signed per read, so they are left out; the thumbhashes stand for the
+ * images.
+ */
+function sameCollection(a: CollectionSnapshot, b: CollectionSnapshot) {
+  const comparable = ({ collection }: CollectionSnapshot) =>
+    stableJson({ ...collection, poster_url: undefined, backdrop_url: undefined });
+  return comparable(a) === comparable(b);
 }

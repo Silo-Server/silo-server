@@ -7,15 +7,25 @@ import "encoding/json"
 // LibraryCollectionField or UserCollectionField.
 const CollectionListField = "collections"
 
+// MaxCollectionListEntries is the most entries a row of collections holds
+// (recipes.MaxCollectionPosters). A stored configuration is JSON no schema
+// constrains, so a longer list is not a row's: it is read as naming nothing.
+const MaxCollectionListEntries = 30
+
 // RemapCollectionList maps each entry of a configuration's collections list
 // through mapID, which is given the entry's field and id and answers the
 // local id, or false to drop the entry. Order is kept. It returns the
 // configuration with the mapped list and how many entries the list had and
-// kept. A configuration with no list comes back unchanged, with total 0.
+// kept. A configuration with no list comes back unchanged, with total 0. A
+// list over MaxCollectionListEntries loses every entry without a mapID call.
 func RemapCollectionList(config json.RawMessage, mapID func(field, id string) (string, bool, error)) (out json.RawMessage, total, kept int, err error) {
 	doc, entries, listed := collectionList(config)
 	if !listed {
 		return config, 0, 0, nil
+	}
+	total = len(entries)
+	if total > MaxCollectionListEntries {
+		entries = nil
 	}
 	mapped := make([]map[string]json.RawMessage, 0, len(entries))
 	for _, entry := range entries {
@@ -43,7 +53,7 @@ func RemapCollectionList(config json.RawMessage, mapID func(field, id string) (s
 	if err != nil {
 		return nil, 0, 0, err
 	}
-	return out, len(entries), len(mapped), nil
+	return out, total, len(mapped), nil
 }
 
 // collectionList decodes a configuration and its collections list; false

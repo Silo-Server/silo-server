@@ -9,10 +9,11 @@ vi.mock("@/api/v2/request", async () => ({
   v2: request,
 }));
 
-// Changing a row moves the collection's revision; the run reads its new ETag.
-vi.mock("@/api/adminCollections", () => ({
-  fetchAdminCollectionSnapshot: vi.fn(() => Promise.resolve({ etag: '"after-rows"' })),
-}));
+// Writing a row moves the collection's revision; the run reads its new ETag.
+const collectionReads = vi.hoisted(() => vi.fn());
+vi.mock("@/api/adminCollections", () => ({ fetchAdminCollectionSnapshot: collectionReads }));
+const read = (etag: string, title = "Marvel") =>
+  Promise.resolve({ etag, collection: { id: "marvel", title, poster_url: `/signed?${etag}` } });
 
 function section(
   id: string,
@@ -54,6 +55,8 @@ const list = (...ids: string[]) => ({
 
 beforeEach(() => {
   request.mockReset();
+  collectionReads.mockReset();
+  collectionReads.mockReturnValueOnce(read('"before"')).mockReturnValueOnce(read('"after-rows"'));
 });
 
 describe("deleteAdminCollectionRows", () => {
@@ -76,11 +79,11 @@ describe("deleteAdminCollectionRows", () => {
       },
     );
 
-    const result = await deleteAdminCollectionRows("marvel", [
-      row("single"),
-      row("shelf", 3),
-      row("only", 1),
-    ]);
+    const result = await deleteAdminCollectionRows(
+      "marvel",
+      [row("single"), row("shelf", 3), row("only", 1)],
+      '"before"',
+    );
 
     expect(result.remaining).toEqual([]);
     expect(result.etag).toBe('"after-rows"');
@@ -92,5 +95,23 @@ describe("deleteAdminCollectionRows", () => {
       ["PATCH /api/v2/admin/sections/{id}", "shelf", list("pixar", "ghibli")],
       ["DELETE /api/v2/admin/sections/{id}", "only", undefined],
     ]);
+  });
+
+  it("keeps the old ETag when the collection changed during the run", async () => {
+    const shelf = section("shelf", "collection_posters", list("pixar", "marvel"));
+    request.mockImplementation(
+      (_route: string, options: { onResponse?: (response: Response) => void }) => {
+        options.onResponse?.(new Response(null, { headers: { ETag: '"shelf"' } }));
+        return Promise.resolve(shelf);
+      },
+    );
+    collectionReads.mockReset();
+    collectionReads
+      .mockReturnValueOnce(read('"before"'))
+      .mockReturnValueOnce(read('"after-rows"', "Marvel, renamed"));
+
+    const result = await deleteAdminCollectionRows("marvel", [row("shelf", 2)], '"before"');
+
+    expect(result).toEqual({ remaining: [] });
   });
 });

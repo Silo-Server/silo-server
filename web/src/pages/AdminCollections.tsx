@@ -458,7 +458,7 @@ export default function AdminCollections() {
       }
       setPendingDelete((current) => current && { ...current, rows, error: null });
       const { remaining, etag: afterRows } = await deleteRows
-        .mutateAsync({ collectionId: id, rows })
+        .mutateAsync({ collectionId: id, rows, etag })
         .catch(() => ({ remaining: rows, etag: undefined }));
       if (remaining.length > 0) {
         setPendingDelete((current) =>
@@ -472,7 +472,7 @@ export default function AdminCollections() {
         );
         return;
       }
-      // Taking it off a row of collections moved its revision.
+      // Writing its rows moved its revision.
       etag = afterRows ?? etag;
     }
     holdDeleteOpen.current = true;
