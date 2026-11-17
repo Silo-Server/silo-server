@@ -544,7 +544,9 @@ func TestHandleSubtitleStreamAppliesSidecarTiming(t *testing.T) {
 
 // A stored subtitle's issued DeliveryUrl keeps serving that subtitle after an
 // earlier stored subtitle is deleted, and stops serving once its own is gone,
-// instead of sliding onto whichever subtitle now holds its stream index.
+// instead of sliding onto whichever subtitle now holds its stream index. Its
+// Path is the same route without a query, as a sidecar's is, and serves it
+// too (#4389).
 func TestStoredSubtitleDeliveryURLSurvivesEarlierDeletion(t *testing.T) {
 	codec := NewResourceIDCodec()
 	contentID := "movie-1"
@@ -591,9 +593,11 @@ func TestStoredSubtitleDeliveryURLSurvivesEarlierDeletion(t *testing.T) {
 		t.Fatalf("unmarshal PlaybackInfo: %v", err)
 	}
 	urls := map[string]string{}
+	paths := map[string]string{}
 	for _, stream := range resp.MediaSources[0].MediaStreams {
 		if stream.Type == "Subtitle" {
 			urls[stream.Language] = stream.DeliveryURL
+			paths[stream.Language] = stream.Path
 		}
 	}
 
@@ -621,6 +625,15 @@ func TestStoredSubtitleDeliveryURLSurvivesEarlierDeletion(t *testing.T) {
 	}
 	if rr := fetch(urls["ger"]); rr.Code != http.StatusOK || !strings.Contains(rr.Body.String(), "Hallo") {
 		t.Fatalf("German before deletion = %d %q", rr.Code, rr.Body.String())
+	}
+	for language, text := range map[string]string{"fre": "Bonjour", "ger": "Hallo", "spa": "Hola"} {
+		deliveryPath, _, _ := strings.Cut(urls[language], "?")
+		if paths[language] != deliveryPath {
+			t.Fatalf("%s Path = %q, want the DeliveryUrl route %q", language, paths[language], deliveryPath)
+		}
+		if rr := fetch(paths[language]); rr.Code != http.StatusOK || !strings.Contains(rr.Body.String(), text) {
+			t.Fatalf("%s Path = %d %q, want %q", language, rr.Code, rr.Body.String(), text)
+		}
 	}
 
 	// Delete the French subtitle, which precedes German in the stored list.
