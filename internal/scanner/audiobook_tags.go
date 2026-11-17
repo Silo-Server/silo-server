@@ -89,6 +89,24 @@ func parseGroupingSeries(grouping string) (name, position string) {
 	return strings.TrimSpace(m[1]), strings.TrimSpace(m[2])
 }
 
+// albumArtistGroupingSeries reads a series without a position from grouping
+// when album_artist repeats it and names none of the authors, as inAudible
+// writes a series ("Jack Reacher" in both). A grouping alone is too often a
+// category or a work name to count.
+func albumArtistGroupingSeries(tags map[string]string, authors []string) string {
+	first, _, _ := strings.Cut(tags["grouping"], ";")
+	name := strings.TrimSpace(first)
+	if name == "" || !strings.EqualFold(name, strings.TrimSpace(tags["album_artist"])) {
+		return ""
+	}
+	for _, author := range authors {
+		if strings.EqualFold(author, name) {
+			return ""
+		}
+	}
+	return name
+}
+
 // parseRomanNumeral parses a standalone Roman numeral up to 399, as used for
 // series positions ("III"). It returns 0 when s is not a well-formed numeral.
 func parseRomanNumeral(s string) int {
@@ -130,7 +148,7 @@ func formatRomanNumeral(n int) string {
 // Reading an audiobook's tags
 //
 // Taggers that export from Audible (inAudible, OpenAudible, Libation) write
-// tags the plain "first non-empty tag" rule reads wrongly. Three rules cover
+// tags the plain "first non-empty tag" rule reads wrongly. These rules cover
 // them; docs/architecture/audiobook-metadata.md describes them for readers.
 //
 //   - Title (audiobookTagTitle): the title tag, except that the album tag wins
@@ -147,6 +165,13 @@ func formatRomanNumeral(n int) string {
 //     A "subtitle" naming the series or ending in a position is not one.
 //     Unrelated tags keep the title, since a single file's album may name its
 //     series or a collection.
+//   - Authors (audiobookTagAuthors): the artist tag, as in Audiobookshelf.
+//     album_artist is read when artist is empty, or when it names some of
+//     artist's people and no one else: artist then lists the narrator too
+//     ("Author, Narrator"). inAudible writes the series to album_artist, so
+//     album_artist never wins over an artist naming someone else.
+//   - Series (albumArtistGroupingSeries): a grouping without a position when
+//     album_artist repeats it and names none of the authors.
 //   - Narrator (audiobookTagNarrators): an explicit narrator tag (narrator,
 //     ©nrt, narratedby) when present. Otherwise the first of performer and
 //     composer that names someone other than the tagged authors: some files
@@ -416,6 +441,32 @@ func audiobookTagNarrators(tags map[string]string, authors []string) []string {
 		}
 	}
 	return first
+}
+
+// audiobookTagAuthors reads the authors from the tags as the package comment
+// above describes.
+func audiobookTagAuthors(tags map[string]string) []string {
+	artist := splitAudiobookCredits(tags["artist"])
+	albumArtist := splitAudiobookCredits(tags["album_artist"])
+	if len(artist) == 0 {
+		if len(albumArtist) > 0 {
+			return albumArtist
+		}
+		return splitAudiobookCredits(tags["composer"])
+	}
+	if len(albumArtist) == 0 || len(albumArtist) >= len(artist) {
+		return artist
+	}
+	inArtist := make(map[string]bool, len(artist))
+	for _, name := range artist {
+		inArtist[strings.ToLower(name)] = true
+	}
+	for _, name := range albumArtist {
+		if !inArtist[strings.ToLower(name)] {
+			return artist
+		}
+	}
+	return albumArtist
 }
 
 // maxAudiobookTmpGenres bounds the tmp_genreN tags read from one file.
