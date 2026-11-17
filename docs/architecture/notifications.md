@@ -285,8 +285,9 @@ The Home-change marker and the second recompute live in the memory of the
 node that handled the removal. A resume handled by another node within ten
 minutes waits for that second recompute, and if the node restarts first, for
 the daily interest rebuild. A release fanned out in that window is judged on
-the stale interest. Evaluating Home removals at fanout time would close the
-gap.
+the stale interest, and it is not judged again: fanout marks the event
+processed, so a profile the stale row left out is never told about that
+episode. Evaluating Home removals at fanout time would close the gap.
 
 ### Upgrade
 
@@ -377,7 +378,13 @@ it from release events, in the same transaction as episode deliveries
 (`watchlist_arrival.go`). A fresh movie event names the movie; a fresh episode
 event names its series. The item counts as arrived only when its
 `media_items.created_at` is within the fanout staleness horizon, so a series
-arrives with its first episodes and its later episodes are no arrival.
+arrives with its first episodes and its later episodes are no arrival. The
+catalog row's creation stands in for the first file: a scan creates the row
+when it finds the file. A row created ahead of its file, as a catalog seed
+import does, is therefore no arrival once it is older than the horizon, and
+an entry added after the row exists was not waiting. Judging arrival by the
+first `movie_availability` or `episode_availability` row instead would cover
+those titles.
 
 For each arrived item, `watchlist.Arrivals.WaitingFor` finds two kinds of
 waiting profile:

@@ -368,7 +368,7 @@ func (r *titlesRepo) removeByTMDB(ctx context.Context, userID int, profileID, me
 // call removed the entry, the move is recorded in watchlist_title_promotions
 // in the same transaction, so the watchlist arrival notice finds the profile
 // whichever user store holds its library watchlist (see Arrivals).
-func (r *titlesRepo) promoteEntry(ctx context.Context, userID int, profileID string, titleID int64, contentID string, entryAddedAt time.Time, add func(context.Context) (bool, error)) (moved, newToUser bool, err error) {
+func (r *titlesRepo) promoteEntry(ctx context.Context, userID int, profileID string, titleID int64, contentID string, add func(context.Context) (bool, error)) (moved, newToUser bool, err error) {
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
 		return false, false, fmt.Errorf("beginning watchlist title promotion: %w", err)
@@ -378,15 +378,18 @@ func (r *titlesRepo) promoteEntry(ctx context.Context, userID int, profileID str
 	if err != nil || !locked {
 		return false, false, err
 	}
-	var present bool
-	if err := tx.QueryRow(ctx, `
-		SELECT EXISTS (
-			SELECT 1 FROM user_watchlist_titles
-			WHERE user_id = $1 AND profile_id = $2 AND title_id = $3)`, userID, profileID, titleID).Scan(&present); err != nil {
-		return false, false, fmt.Errorf("reading promoted watchlist title entry: %w", err)
-	}
-	if !present {
+	// The entry is read under the title lock: the profile may have removed
+	// and re-added it since the caller listed it, and the promotion record
+	// must carry the time of the entry that is moved.
+	var currentAddedAt time.Time
+	err = tx.QueryRow(ctx, `
+		SELECT added_at FROM user_watchlist_titles
+		WHERE user_id = $1 AND profile_id = $2 AND title_id = $3`, userID, profileID, titleID).Scan(&currentAddedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
 		return false, false, nil
+	}
+	if err != nil {
+		return false, false, fmt.Errorf("reading promoted watchlist title entry: %w", err)
 	}
 	newToUser, err = add(ctx)
 	if err != nil {
@@ -404,7 +407,7 @@ func (r *titlesRepo) promoteEntry(ctx context.Context, userID int, profileID str
 			INSERT INTO watchlist_title_promotions (user_id, profile_id, media_item_id, title_added_at)
 			VALUES ($1, $2, $3, $4)
 			ON CONFLICT (user_id, profile_id, media_item_id) DO NOTHING`,
-			userID, profileID, contentID, entryAddedAt); err != nil {
+			userID, profileID, contentID, currentAddedAt); err != nil {
 			return false, false, fmt.Errorf("recording watchlist title promotion: %w", err)
 		}
 	}

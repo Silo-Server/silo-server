@@ -561,9 +561,9 @@ func (s *Titles) promoteOne(ctx context.Context, store promotionStore, v Viewer,
 		if err != nil {
 			return false, false, err
 		}
-		return s.repo.promoteEntry(ctx, v.UserID, v.ProfileID, titleID, contentID, entryAddedAt, func(context.Context) (bool, error) { return added, nil })
+		return s.repo.promoteEntry(ctx, v.UserID, v.ProfileID, titleID, contentID, func(context.Context) (bool, error) { return added, nil })
 	}
-	return s.repo.promoteEntry(ctx, v.UserID, v.ProfileID, titleID, contentID, entryAddedAt, addToLibrary)
+	return s.repo.promoteEntry(ctx, v.UserID, v.ProfileID, titleID, contentID, addToLibrary)
 }
 
 // sameStoredTime reports whether a user store timestamp is t. Stores keep

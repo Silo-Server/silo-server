@@ -116,12 +116,19 @@ func (w *FanoutWorker) captureWatchlistArrivals(ctx context.Context, tx pgx.Tx, 
 	}
 	var arrivals []watchlistArrival
 	for _, contentID := range contentIDs {
-		// Two watchlist entries can match one item; a profile hears once.
+		// Two watchlist entries can match one item; a profile hears once,
+		// and keeps every TMDB ID its entries hold, so a request made under
+		// any of them is found.
 		var waiters []watchlist.Waiter
 		var keys []profileKey
 		for _, waiter := range waiting[contentID] {
 			key := waiterKey(waiter)
-			if slices.Contains(keys, key) {
+			if i := slices.Index(keys, key); i >= 0 {
+				for _, id := range waiter.TMDBIDs {
+					if !slices.Contains(waiters[i].TMDBIDs, id) {
+						waiters[i].TMDBIDs = append(waiters[i].TMDBIDs, id)
+					}
+				}
 				continue
 			}
 			keys = append(keys, key)
@@ -208,8 +215,24 @@ func (w *FanoutWorker) deliverWatchlistArrivals(ctx context.Context, tx pgx.Tx, 
 	if len(arrivals) == 0 {
 		return nil, nil
 	}
+	// Preferences are read again under the inbox locks, as the episode path
+	// does: a profile that turned notifications off while this batch waited
+	// for its lock is not told.
+	keys := make([]profileKey, 0, len(arrivals))
+	for _, arrival := range arrivals {
+		if key := waiterKey(arrival.waiter); !slices.Contains(keys, key) {
+			keys = append(keys, key)
+		}
+	}
+	prefs, err := w.preferences.GetMany(ctx, tx, keys)
+	if err != nil {
+		return nil, err
+	}
 	deliveries := make([]Delivery, 0, len(arrivals))
 	for _, arrival := range arrivals {
+		if !prefs[waiterKey(arrival.waiter)].Enabled {
+			continue
+		}
 		title := TitleFlags{MediaType: arrival.waiter.MediaType}
 		if len(arrival.waiter.TMDBIDs) > 0 {
 			title.TMDBID = arrival.waiter.TMDBIDs[0]
@@ -224,6 +247,9 @@ func (w *FanoutWorker) deliverWatchlistArrivals(ctx context.Context, tx pgx.Tx, 
 			Type:        DeliveryTypeWatchlistAvailable,
 			ReasonFlags: flags,
 		})
+	}
+	if len(deliveries) == 0 {
+		return nil, nil
 	}
 	inserted, err := w.deliveries.BulkInsert(ctx, tx, deliveries)
 	if err != nil || len(inserted) == 0 {
