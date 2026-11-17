@@ -24,7 +24,8 @@ type ratingsDocument struct {
 }
 
 // ratingEntry is one rating. Backups carry Score (1 to 10); a backup written
-// before scores carries whole stars (1 to 5) as Rating instead.
+// before scores (a restore set before version 7, a profile export before
+// version 2) carries whole stars (1 to 5) as Rating instead.
 type ratingEntry struct {
 	Item    string    `json:"item"`
 	Score   int       `json:"score,omitempty"`

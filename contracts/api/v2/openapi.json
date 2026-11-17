@@ -47714,7 +47714,7 @@
           "version": {
             "description": "The newest format version this server writes and reads",
             "examples": [
-              1
+              2
             ],
             "format": "int64",
             "type": "integer"

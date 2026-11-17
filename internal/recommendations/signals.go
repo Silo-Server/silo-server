@@ -542,8 +542,8 @@ const (
 	anchorCandidateLimit = 50
 )
 
-// itemRatingReader reads a profile's star ratings of the given items, keyed
-// by item. *catalog.RatingsRepo implements it.
+// itemRatingReader reads a profile's ratings (scores, 1 to 10) of the given
+// items, keyed by item. *catalog.RatingsRepo implements it.
 type itemRatingReader interface {
 	ListForItems(ctx context.Context, userID int, profileID string, itemIDs []string) (map[string]int, error)
 }

@@ -32716,7 +32716,7 @@ export interface components {
       /**
        * Format: int64
        * @description The newest format version this server writes and reads
-       * @example 1
+       * @example 2
        */
       version: number;
     };
