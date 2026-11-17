@@ -246,6 +246,8 @@ function Harness({
     streamUrl: playback.streamUrl,
     plan: playback.plan,
     planRevision: playback.planRevision,
+    transportRevision: playback.transportRevision,
+    replayRevision: playback.replayRevision,
     shouldAutoPlay: playback.shouldAutoPlay,
     replanning: playback.replanning,
     replanError: playback.error,
@@ -637,5 +639,63 @@ describe("VideoPlayer with the playback session: transport identity", () => {
     expect(sessionRef.current?.planRevision).toBe(1);
     expect(requests.starts).toHaveLength(1);
     expect(requests.replans).toHaveLength(0);
+  });
+});
+
+describe("VideoPlayer with the playback session: transport identity", () => {
+  it("keeps the HLS transport for a track_change the server answers on the same stream", async () => {
+    vi.spyOn(HTMLMediaElement.prototype, "canPlayType").mockReturnValue("");
+    const hlsPlan = fixturePlanV3({
+      plan_id: "plan:hls",
+      plan_attempt_key: "v3:hls",
+      stream: {
+        url: "/playback/transcode/session-1/master.m3u8",
+        protocol: "hls",
+        mime_type: "application/vnd.apple.mpegurl",
+        headers: {},
+        header_refresh: "none",
+      },
+    });
+    // The server kept the running generation: same stream, same route, same
+    // audio selection, only the plan's own start follows the live playhead.
+    const sameStreamPlan = fixturePlanV3({
+      plan_id: "plan:hls-track",
+      plan_attempt_key: "v3:hls-track",
+      stream: hlsPlan.stream,
+      timeline: { ...hlsPlan.timeline, player_start_seconds: 150 },
+    });
+    const requests = stubServer({
+      start: () => jsonResponse(playable("session-1", directPlan()), 201),
+      replan: (_url, body) =>
+        jsonResponse(
+          playable("session-1", body.operation === "quality_change" ? hlsPlan : sameStreamPlan),
+        ),
+    });
+
+    renderHarness();
+    const video = await startWatching();
+    act(() => sessionRef.current?.changeQuality("720p", 100));
+    await waitFor(() => expect(hlsJS.latest).not.toBeNull());
+    expect(hlsJS.loadSource).toHaveBeenCalledTimes(1);
+    vi.mocked(HTMLMediaElement.prototype.load).mockClear();
+    const src = video.getAttribute("src");
+
+    // Subtitles off on a plan that shows none is a track change that changes
+    // nothing: the A/V transport is reused, so the element must not reload and
+    // the manifest must not be fetched again.
+    act(() => sessionRef.current?.changeSubtitleTrack(null, 150));
+    await waitFor(() =>
+      expect(requests.replans.map(({ body }) => body.operation)).toEqual([
+        "quality_change",
+        "track_change",
+      ]),
+    );
+    await waitFor(() => expect(sessionRef.current?.planRevision).toBe(3));
+    await act(async () => Promise.resolve());
+
+    expect(sessionRef.current?.transportRevision).toBe(2);
+    expect(hlsJS.loadSource).toHaveBeenCalledTimes(1);
+    expect(HTMLMediaElement.prototype.load).not.toHaveBeenCalled();
+    expect(video.getAttribute("src")).toBe(src);
   });
 });

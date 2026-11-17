@@ -485,6 +485,50 @@ describe("WatchPage playback errors", () => {
     expect(screen.getByRole("button", { name: "Go Back" })).toBeInTheDocument();
   });
 
+  it("offers Try again for a retryable transport failure with no terminal reason", () => {
+    const retryStart = vi.fn();
+    playbackSessionMock.mockReturnValue(
+      playbackSession({
+        plan: null,
+        streamUrl: null,
+        sessionId: null,
+        mediaFileId: null,
+        errorTitle: "Playback unavailable",
+        // Copy the server's 503 answer carries; it already says to try again.
+        error: "Vio could not start playback right now. Please try again.",
+        errorReason: null,
+        errorRetryable: true,
+        retryStart,
+      }),
+    );
+
+    render(createElement(WatchPage, watchPageProps));
+
+    fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+    expect(retryStart).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole("button", { name: "Go Back" })).toBeInTheDocument();
+  });
+
+  it("keeps a definitive transport refusal a Go Back-only dead-end", () => {
+    playbackSessionMock.mockReturnValue(
+      playbackSession({
+        plan: null,
+        streamUrl: null,
+        sessionId: null,
+        mediaFileId: null,
+        errorTitle: "Authentication required",
+        error: "Your sign-in session has expired. Sign in again to continue playback.",
+        errorReason: null,
+        errorRetryable: false,
+      }),
+    );
+
+    render(createElement(WatchPage, watchPageProps));
+
+    expect(screen.queryByRole("button", { name: "Try again" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Go Back" })).toBeInTheDocument();
+  });
+
   it("keeps a refused initial bitmap subtitle off without treating it as a playback error", () => {
     playbackSessionMock.mockReturnValue(
       playbackSession({

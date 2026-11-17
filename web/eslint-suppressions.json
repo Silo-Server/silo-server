@@ -536,7 +536,7 @@
   },
   "src/player/components/VideoPlayer.tsx": {
     "formatjs/no-literal-string-in-jsx": {
-      "count": 33
+      "count": 34
     },
     "no-restricted-syntax": {
       "count": 2

@@ -1433,15 +1433,23 @@ function WatchPagePlayer({
   // virtual-source refusal gets a Try again action, as does a retryable
   // transcode start failure (e.g. a seek anchor that failed on a transient
   // relay error — a fresh start re-lists and can succeed where the same
-  // plan could not proceed); every other terminal keeps the plain Go Back
-  // dead-end. An adaptation refusal always offers the action: the server
-  // marks it non-retryable because replaying the same plan cannot work, but
-  // a *fresh start* can re-list and re-resolve the source.
+  // plan could not proceed), and a route ladder the server says can be tried
+  // again once its transient blocker clears. Every other terminal keeps the
+  // plain Go Back dead-end. An adaptation refusal always offers the action: the
+  // server marks it non-retryable because replaying the same plan cannot work,
+  // but a *fresh start* can re-list and re-resolve the source.
+  //
+  // A transport failure (a 5xx the server answers while it cannot reach a
+  // dependency, a timeout, a dropped connection) names no terminal reason at
+  // all: its description carries the retryable verdict instead, and its copy
+  // already says to try again.
   const canRetryTerminal =
     !session.plan &&
     (session.errorReason === "virtual_source_unavailable" ||
     session.errorReason === "source_mismatch" ||
-    session.errorReason === "transcode_start_failed"
+    session.errorReason === "transcode_start_failed" ||
+    session.errorReason === "routes_exhausted" ||
+    session.errorReason === null
       ? session.errorRetryable === true
       : isAdaptationUnavailableReason(session.errorReason));
   // A session answered gone cannot be replanned or reconnected. The only
@@ -1668,6 +1676,7 @@ function WatchPagePlayer({
         pendingSwitchFileId={session.pendingSwitchFileId}
         replanError={fallingBack ? null : session.error}
         replanErrorTitle={session.errorTitle}
+        replanErrorRetryable={session.errorRetryable}
         initialSubtitleError={session.initialSubtitleError}
         sessionId={session.sessionId}
         selectedVersion={selectedVersion}

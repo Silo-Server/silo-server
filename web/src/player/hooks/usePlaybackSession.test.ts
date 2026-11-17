@@ -4614,6 +4614,162 @@ describe("usePlaybackSession replans", () => {
 
     unmount();
   });
+
+  it("keeps transportRevision when a track_change lands on the same A/V transport", async () => {
+    const audioRows = [
+      {
+        codec: "aac",
+        channels: 2,
+        layout: "stereo",
+        language: "eng",
+        default: true,
+        track_id: "file:7:audio:0",
+        selection_index: 0,
+      },
+      {
+        codec: "ac3",
+        channels: 6,
+        layout: "5.1",
+        language: "spa",
+        default: false,
+        track_id: "file:7:audio:1",
+        selection_index: 1,
+      },
+    ];
+    const initialPlan = fixturePlanV3({
+      audio_tracks: audioRows,
+      selected_tracks: { audio: { id: "file:7:audio:0", index: 0 } },
+    });
+    // The server answered the pick with the track that was already playing and
+    // kept the running generation: only the plan's own start followed the
+    // request position.
+    const unchangedPlan = fixturePlanV3({
+      audio_tracks: audioRows,
+      selected_tracks: { audio: { id: "file:7:audio:0", index: 0 } },
+      plan_id: "plan:5555555555555555",
+      plan_attempt_key: "v3:5555555555555555",
+      timeline: { ...initialPlan.timeline, player_start_seconds: 90 },
+    });
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith("/playback/start")) {
+        return jsonResponse(
+          {
+            protocol_version: 3,
+            server_features: ["playback_plan_v3"],
+            outcome: "playable",
+            session_id: "session-1",
+            playback_plan: initialPlan,
+          },
+          { status: 201 },
+        );
+      }
+      if (url.endsWith("/playback/session-1/replan")) {
+        return jsonResponse({
+          protocol_version: 3,
+          server_features: ["playback_plan_v3"],
+          outcome: "playable",
+          session_id: "session-1",
+          playback_plan: unchangedPlan,
+        });
+      }
+      if (url.endsWith("/playback/route-events")) return new Response(null, { status: 202 });
+      if (init?.method === "DELETE") return new Response(null, { status: 204 });
+      throw new Error(`Unexpected request: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { result, unmount } = renderHook(
+      () => usePlaybackSession("request-1", [], [], 7, 0, false, "auto"),
+      { wrapper },
+    );
+    await waitFor(() => expect(result.current.plan).not.toBeNull());
+    expect(result.current.transportRevision).toBe(1);
+
+    act(() => result.current.switchAudioTrack(1, 90));
+    await waitFor(() => expect(result.current.plan?.plan_id).toBe("plan:5555555555555555"));
+    expect(result.current.planRevision).toBe(2);
+    // Same stream, same selected track: the player must keep the element.
+    expect(result.current.transportRevision).toBe(1);
+
+    unmount();
+  });
+
+  it("bumps transportRevision when a track_change moves the audio selection", async () => {
+    const audioRows = [
+      {
+        codec: "aac",
+        channels: 2,
+        layout: "stereo",
+        language: "eng",
+        default: true,
+        track_id: "file:7:audio:0",
+        selection_index: 0,
+      },
+      {
+        codec: "ac3",
+        channels: 6,
+        layout: "5.1",
+        language: "spa",
+        default: false,
+        track_id: "file:7:audio:1",
+        selection_index: 1,
+      },
+    ];
+    const initialPlan = fixturePlanV3({
+      audio_tracks: audioRows,
+      selected_tracks: { audio: { id: "file:7:audio:0", index: 0 } },
+    });
+    // The server restarts the generation behind the same session-scoped URL to
+    // mux another audio stream, so the bytes the element holds are now stale.
+    const switchedPlan = fixturePlanV3({
+      audio_tracks: audioRows,
+      selected_tracks: { audio: { id: "file:7:audio:1", index: 1 } },
+      plan_id: "plan:6666666666666666",
+      plan_attempt_key: "v3:6666666666666666",
+    });
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith("/playback/start")) {
+        return jsonResponse(
+          {
+            protocol_version: 3,
+            server_features: ["playback_plan_v3"],
+            outcome: "playable",
+            session_id: "session-1",
+            playback_plan: initialPlan,
+          },
+          { status: 201 },
+        );
+      }
+      if (url.endsWith("/playback/session-1/replan")) {
+        return jsonResponse({
+          protocol_version: 3,
+          server_features: ["playback_plan_v3"],
+          outcome: "playable",
+          session_id: "session-1",
+          playback_plan: switchedPlan,
+        });
+      }
+      if (url.endsWith("/playback/route-events")) return new Response(null, { status: 202 });
+      if (init?.method === "DELETE") return new Response(null, { status: 204 });
+      throw new Error(`Unexpected request: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { result, unmount } = renderHook(
+      () => usePlaybackSession("request-1", [], [], 7, 0, false, "auto"),
+      { wrapper },
+    );
+    await waitFor(() => expect(result.current.plan).not.toBeNull());
+    expect(result.current.transportRevision).toBe(1);
+
+    act(() => result.current.switchAudioTrack(1, 30));
+    await waitFor(() => expect(result.current.plan?.plan_id).toBe("plan:6666666666666666"));
+    expect(result.current.transportRevision).toBe(2);
+
+    unmount();
+  });
 });
 
 describe("usePlaybackSession held track picks", () => {
@@ -13132,7 +13288,14 @@ describe("usePlaybackSession mid-stream reconnect", () => {
     await waitFor(() => expect(result.current.planRevision).toBe(1));
 
     act(() => result.current.recoverFromFailure({ classification: "startup_timeout" }, 0));
-    await waitFor(() => expect(result.current.error).toBe("Failed to fetch"));
+    // A replan that never reached the server is a transport failure, so its
+    // copy names the connection instead of the fetch's own TypeError text.
+    await waitFor(() =>
+      expect(result.current.error).toBe(
+        "Vio couldn't reach the server to update playback. Check your connection, then try again.",
+      ),
+    );
+    expect(result.current.errorRetryable).toBe(true);
     expect(result.current.connectionStatus).toBe("connected");
     expect(harness.replanBodies).toHaveLength(1);
 

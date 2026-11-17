@@ -3135,10 +3135,15 @@ export function usePlaybackSession(
         // Keep a refused-start subtitle pinned off across unrelated replans.
         // A successful explicit subtitle choice is the one action that clears
         // the marker and lets the new server-selected track take ownership.
+        //
+        // A reconnect replaces a transport that is already dead, so it must
+        // reload even when the fresh plan reuses the same session-scoped URL,
+        // route and track selection: the shape heuristic cannot see that the
+        // generation behind that URL stopped answering.
         const adopted = adoptDecision(
           decision,
           options.operation === "track_change" && options.subtitle !== undefined ? null : undefined,
-          isFailureRecovery,
+          isFailureRecovery || reconnect,
         );
         if (
           subtitlePickKey !== null &&
