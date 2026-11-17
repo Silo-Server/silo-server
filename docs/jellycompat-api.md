@@ -689,6 +689,12 @@ whatever `{index}` says, and answers 404 once it is deleted, for an ID that is
 not one of that file's, or for a malformed ID. A URL without it, as a client
 builds from the index, resolves the index against the current list.
 
+An external subtitle's `Path`, sidecar or stored, is its stream route
+`/Videos/{itemId}/{mediaSourceId}/Subtitles/{index}/stream.{format}` with no
+query, so a client that loads external subtitles by `Path` gets the subtitle.
+A stored subtitle's `Path` therefore resolves by index; only its `DeliveryUrl`
+carries `StoredSubtitleId`.
+
 Extracting an embedded text subtitle reads the whole source file, which can
 take minutes for a large remux on network storage. As in Jellyfin, the first
 request for an embedded text track extracts every text track of the file in

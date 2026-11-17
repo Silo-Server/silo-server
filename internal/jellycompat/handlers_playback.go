@@ -2688,7 +2688,7 @@ func (h *PlaybackHandler) HandlePlaybackInfo(w http.ResponseWriter, r *http.Requ
 					SupportsExternalStream: true,
 					DeliveryURL:            storedSubtitleDeliveryURL(routeItemID, source.ID, streamIndex, format, playSessionID, dl.ID),
 					DeliveryMethod:         "External",
-					Path:                   downloadedSubtitlePath(source.Version, dl),
+					Path:                   subtitleStreamPath(routeItemID, source.ID, streamIndex, format),
 					IsExternalURL:          boolPtr(false),
 				})
 			}
@@ -3220,7 +3220,7 @@ func (h *PlaybackHandler) mediaSourceDTO(routeItemID, playSessionID string, sour
 		if delivery.Format != "" {
 			stream.DeliveryURL = subtitleDeliveryURL(routeItemID, source.ID, stream.Index, delivery.Format, playSessionID)
 			if stream.IsExternal {
-				stream.Path = fmt.Sprintf("/Videos/%s/%s/Subtitles/%d/stream.%s", routeItemID, source.ID, stream.Index, delivery.Format)
+				stream.Path = subtitleStreamPath(routeItemID, source.ID, stream.Index, delivery.Format)
 			}
 		}
 		if !source.SupportsDirectPlay {
@@ -4299,20 +4299,6 @@ func subtitleDeliveryMethod(external bool) string {
 	return "Embed"
 }
 
-func downloadedSubtitlePath(version catalog.FileVersion, sub subtitles.DownloadedSubtitle) string {
-	name := strings.TrimSpace(downloadedSubtitleDisplayTitle(sub))
-	if name == "" {
-		name = mediaSourceName(version)
-	}
-	if name == "" {
-		name = "subtitle"
-	}
-	name = strings.ReplaceAll(name, "/", "-")
-	name = strings.ReplaceAll(name, "\\", "-")
-	filename := name + "." + subtitleRouteFormat(string(sub.Format))
-	return filepath.ToSlash(filepath.Join("/silo/subtitles", filename))
-}
-
 func compatVideoPath(routeItemID string, audioV2 bool) string {
 	base := "/Videos/" + routeItemID
 	if audioV2 {
@@ -4326,7 +4312,7 @@ func compatVideoPath(routeItemID string, audioV2 bool) string {
 // whole account for as long as the login lasts, and a logged URL must grant at
 // most this play's media.
 func subtitleDeliveryURL(routeItemID, mediaSourceID string, streamIndex int, format, playSessionID string) string {
-	base := fmt.Sprintf("/Videos/%s/%s/Subtitles/%d/stream.%s", routeItemID, mediaSourceID, streamIndex, format)
+	base := subtitleStreamPath(routeItemID, mediaSourceID, streamIndex, format)
 	if playSessionID == "" {
 		return base
 	}
@@ -4341,14 +4327,23 @@ func storedSubtitleDeliveryURL(routeItemID, mediaSourceID string, streamIndex in
 	if playSessionID != "" {
 		query.Set("PlaySessionId", playSessionID)
 	}
-	return fmt.Sprintf("/Videos/%s/%s/Subtitles/%d/stream.%s?%s", routeItemID, mediaSourceID, streamIndex, format, query.Encode())
+	return subtitleStreamPath(routeItemID, mediaSourceID, streamIndex, format) + "?" + query.Encode()
+}
+
+// subtitleStreamPath is the subtitle stream route without a query. An external
+// subtitle's Path is this route, sidecar or stored alike, so a client that
+// fetches by Path gets the subtitle. A stored subtitle's Path resolves by its
+// stream index against the current stored list; only its DeliveryUrl pins it
+// by ID, because a query would hide the route's extension.
+func subtitleStreamPath(routeItemID, mediaSourceID string, streamIndex int, format string) string {
+	return fmt.Sprintf("/Videos/%s/%s/Subtitles/%d/stream.%s", routeItemID, mediaSourceID, streamIndex, format)
 }
 
 func subtitlePath(track catalog.VersionSubtitleTrack, routeItemID, mediaSourceID string, streamIndex int, format string) string {
 	if !track.External {
 		return ""
 	}
-	return fmt.Sprintf("/Videos/%s/%s/Subtitles/%d/stream.%s", routeItemID, mediaSourceID, streamIndex, format)
+	return subtitleStreamPath(routeItemID, mediaSourceID, streamIndex, format)
 }
 
 func subtitleExternalURL(track catalog.VersionSubtitleTrack) *bool {
