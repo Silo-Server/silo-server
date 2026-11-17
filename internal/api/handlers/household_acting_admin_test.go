@@ -260,4 +260,11 @@ func TestMayCreateProfileAPIKey(t *testing.T) {
 			t.Fatalf("%s = (%v, %v), want a refusal", name, ok, err)
 		}
 	}
+
+	// Profiles stored outside Postgres: no user key, even for the primary.
+	h.ProfilesOutsidePostgres = true
+	own := apimw.SetClaims(t.Context(), &auth.Claims{UserID: 1, Role: "user", SessionID: "s1", TokenType: auth.TokenTypeAccess})
+	if ok, _, err := h.MayCreateProfileAPIKey(own, 1, "profile-1", "profile-1", verified); ok || err != nil {
+		t.Fatalf("profiles outside postgres = (%v, %v), want a refusal", ok, err)
+	}
 }
