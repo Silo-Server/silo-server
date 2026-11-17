@@ -16,6 +16,8 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	"github.com/Silo-Server/silo-server/internal/buildinfo"
 )
 
 // Class is the trust class of a destination address.
@@ -240,7 +242,15 @@ func NewTransport(configure ...func(*http.Transport)) *Transport {
 	return t
 }
 
+// RoundTrip names Silo in a request that sets no User-Agent. Go's default
+// name is refused by some image hosts' bot rules (theposterdb.com's
+// Cloudflare answers it with 403). A caller's own User-Agent, including an
+// explicitly empty one, is kept.
 func (t *Transport) RoundTrip(req *http.Request) (*http.Response, error) {
+	if _, ok := req.Header["User-Agent"]; !ok {
+		req = req.Clone(req.Context())
+		req.Header.Set("User-Agent", buildinfo.UserAgent())
+	}
 	if PrivateAccess(req.Context()) {
 		return t.private.RoundTrip(req)
 	}

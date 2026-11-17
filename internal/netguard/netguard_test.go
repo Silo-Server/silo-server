@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/netip"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -207,4 +208,43 @@ func get(ctx context.Context, client *http.Client, url string) error {
 	}
 	_, _ = io.Copy(io.Discard, resp.Body)
 	return resp.Body.Close()
+}
+
+// Some image hosts refuse Go's default User-Agent (theposterdb.com's
+// Cloudflare rules answer it with 403), so guarded requests name Silo unless
+// the caller chose its own User-Agent.
+func TestTransportNamesSiloWhenCallerSetsNoUserAgent(t *testing.T) {
+	var got atomic.Value
+	server := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		got.Store(r.Header.Get("User-Agent"))
+	}))
+	defer server.Close()
+	client := NewClient(5 * time.Second)
+
+	for _, tc := range []struct {
+		name, set string
+		want      func(string) bool
+	}{
+		{"unset", "", func(ua string) bool { return strings.HasPrefix(ua, "Silo/") }},
+		{"caller's own", "silo-anime-ids", func(ua string) bool { return ua == "silo-anime-ids" }},
+	} {
+		req, err := http.NewRequestWithContext(WithPrivateAccess(context.Background()), http.MethodGet, server.URL, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if tc.set != "" {
+			req.Header.Set("User-Agent", tc.set)
+		}
+		resp, err := client.Do(req)
+		if err != nil {
+			t.Fatalf("%s: %v", tc.name, err)
+		}
+		resp.Body.Close()
+		if ua, _ := got.Load().(string); !tc.want(ua) {
+			t.Errorf("%s: server saw User-Agent %q", tc.name, ua)
+		}
+		if tc.set == "" && req.Header.Get("User-Agent") != "" {
+			t.Errorf("%s: transport modified the caller's request headers", tc.name)
+		}
+	}
 }
