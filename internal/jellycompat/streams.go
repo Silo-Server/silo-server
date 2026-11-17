@@ -521,6 +521,12 @@ var errAudioDownmixCapabilityUnavailable = errors.New("audio downmix capability 
 // persists a fresh recipe from the frozen source.
 var errCompatRecipeSourceMismatch = errors.New("transcode recipe does not match the selected media source")
 
+// errCompatVirtualInputUnavailable reports that the durable virtual source
+// could not be turned into an input the local encoder can open. It is retryable:
+// the provider relay may come back, and answering it as a missing segment would
+// invite a client to treat a route that produces nothing as a healthy one.
+var errCompatVirtualInputUnavailable = errors.New("virtual playback source could not be resolved for encoding")
+
 var errVirtualPrepUnavailable = errors.New("virtual playback preparation failed")
 
 // errCompatHLSRemuxAudioUnsupported prevents an audio-copy playlist from
@@ -1187,6 +1193,7 @@ func writeCompatTranscodeError(w http.ResponseWriter, err error) {
 	case errors.Is(err, errToneMapCapabilityUnavailable),
 		errors.Is(err, errAudioDownmixCapabilityUnavailable),
 		errors.Is(err, errCompatRecipeSourceMismatch),
+		errors.Is(err, errCompatVirtualInputUnavailable),
 		errors.Is(err, playback.ErrToneMapSourceValidationUnavailable),
 		errors.Is(err, playback.ErrToneMapExecutorUnavailable):
 		slog.Warn("compat transcode unavailable", "component", "jellycompat", "error", err)
@@ -1422,6 +1429,10 @@ func (h *PlaybackHandler) HandleHLSSegment(w http.ResponseWriter, r *http.Reques
 
 	segmentName := name + "." + ext
 	segmentLease, err := transcodeSession.OpenSegment(segmentName)
+	// localRestartAttempted marks a synchronous seek restart taken for this
+	// segment, so a segment still missing afterwards can be reported as the
+	// broken route it is rather than as an absent segment.
+	localRestartAttempted := false
 	if err != nil && errors.Is(err, playback.ErrSegmentNotFound) {
 		segNum, parseErr := playback.ParseSegmentNumber(name)
 		if parseErr == nil {
@@ -1540,6 +1551,7 @@ func (h *PlaybackHandler) HandleHLSSegment(w http.ResponseWriter, r *http.Reques
 				if restartErr != nil {
 					err = restartErr
 				} else if ok {
+					localRestartAttempted = true
 					slog.InfoContext(r.Context(), "transcode seek restart", "component", "jellycompat",
 						"segment", segmentName,
 						"requested_segment", segNum,
@@ -1567,6 +1579,22 @@ func (h *PlaybackHandler) HandleHLSSegment(w http.ResponseWriter, r *http.Reques
 		}
 	}
 	if err != nil {
+		if localRestartAttempted && !transcodeSession.IsRunning() &&
+			(errors.Is(err, playback.ErrSegmentNotFound) || errors.Is(err, playback.ErrTranscodeFailed)) {
+			// This route restarted its encoder for the segment and the encoder
+			// is gone again without producing it. That is not an absent
+			// segment: the route cannot produce the bytes right now, so answer
+			// retryably instead of the flat 404 a client reads as fatal.
+			slog.WarnContext(r.Context(), "transcode segment unavailable after restart", "component", "jellycompat",
+				"segment", segmentName,
+				"play_session", playSessionFingerprint(playSessionID),
+				"session", playSession.UpstreamSessionID,
+				"playback_session_id", playSession.UpstreamSessionID,
+			)
+			w.Header().Set("Retry-After", "1")
+			writeError(w, http.StatusServiceUnavailable, "TranscodeUnavailable", "Transcode is temporarily unavailable")
+			return
+		}
 		status, code, message := hlsSegmentErrorResponse(err)
 		writeError(w, status, code, message)
 		return
@@ -1769,6 +1797,10 @@ func hlsSegmentErrorResponse(err error) (status int, code, message string) {
 	case errors.Is(err, playback.ErrToneMapSourceValidationUnavailable):
 		return http.StatusServiceUnavailable, "TranscodeUnavailable", "Transcode is temporarily unavailable"
 	case errors.Is(err, playback.ErrToneMapExecutorUnavailable):
+		return http.StatusServiceUnavailable, "TranscodeUnavailable", "Transcode is temporarily unavailable"
+	case errors.Is(err, errCompatVirtualInputUnavailable):
+		// The encoder could not reopen its provider input for this seek. That is
+		// transient, and the route is not serving until it can.
 		return http.StatusServiceUnavailable, "TranscodeUnavailable", "Transcode is temporarily unavailable"
 	case errors.Is(err, playback.ErrManifestNotReady):
 		return http.StatusServiceUnavailable, "NotReady", "Transcode playlist not ready"
@@ -2923,7 +2955,10 @@ func (h *PlaybackHandler) upstreamRecipeCard(ps *PlaybackSession, cs *Session, s
 		card.OriginalStartedAt = ps.CreatedAt
 	}
 	if isCompatVirtualSource(source) {
-		card.InputPath = source.VirtualSourceURI
+		// Keep the durable identity, never a loopback relay URL. A manifest
+		// route that never bound VirtualSourceURI still names the source in the
+		// frozen version path, and reconstruction resolves either form.
+		card.InputPath = firstNonEmpty(strings.TrimSpace(source.VirtualSourceURI), strings.TrimSpace(source.Version.FilePath))
 		card.VirtualSourceOwnerInstallationID = source.VirtualSourceOwnerInstallationID
 	}
 	if source.StreamLocation != "" {
@@ -3378,6 +3413,23 @@ func (h *PlaybackHandler) ensureTranscodeSessionWithToneMapMode(
 	if err := os.MkdirAll(h.TranscodeDir, 0o755); err != nil {
 		return nil, fmt.Errorf("prepare transcode dir: %w", err)
 	}
+	// Resolve the input before anything probes or opens it. A virtual row's
+	// durable path is a virtual:// identity FFmpeg cannot open: starting on it
+	// yields an encoder that exits before its first segment, so the manifest
+	// answers 200 while every segment 404s. The session owns the relay
+	// registration once this start succeeds and releases it on close.
+	inputPath, canonicalInput, releaseInput, refreshInput, inputErr := h.compatLocalTranscodeInput(ctx, upstreamSessionID, source, file)
+	if inputErr != nil {
+		return nil, inputErr
+	}
+	inputOwnedBySession := false
+	if releaseInput != nil {
+		defer func() {
+			if !inputOwnedBySession {
+				releaseInput()
+			}
+		}()
+	}
 	sourceVideoCodec, sourceVideoProfile, sourceVideoBitDepth := playback.SourceVideoTranscodeFacts(file)
 
 	initialSeekSeconds := 0.0
@@ -3393,7 +3445,7 @@ func (h *PlaybackHandler) ensureTranscodeSessionWithToneMapMode(
 	streamOriginSeconds := 0.0
 	copySeekAnchorResolved := source.SiloSeekReanchor && compatHLSCopiesVideo(source)
 	if copySeekAnchorResolved {
-		streamOriginSeconds, startSegmentNumber, err = playback.ResolveCopySeekAnchor(ctx, h.FFmpegPath, file.FilePath, initialSeekSeconds, h.compatSegmentDuration())
+		streamOriginSeconds, startSegmentNumber, err = playback.ResolveCopySeekAnchor(ctx, h.FFmpegPath, inputPath, initialSeekSeconds, h.compatSegmentDuration())
 		if err != nil {
 			return nil, fmt.Errorf("resolve compatibility seek anchor: %w", err)
 		}
@@ -3401,7 +3453,10 @@ func (h *PlaybackHandler) ensureTranscodeSessionWithToneMapMode(
 
 	opts := playback.TranscodeOpts{
 		SessionID:              upstreamSessionID,
-		InputPath:              file.FilePath,
+		InputPath:              inputPath,
+		CanonicalInputPath:     canonicalInput,
+		InputCleanup:           releaseInput,
+		RefreshInput:           refreshInput,
 		SourceVideoCodec:       sourceVideoCodec,
 		SourceVideoProfile:     sourceVideoProfile,
 		SourceVideoBitDepth:    sourceVideoBitDepth,
@@ -3492,9 +3547,16 @@ func (h *PlaybackHandler) ensureTranscodeSessionWithToneMapMode(
 	// A disabled pipeline returns opts unchanged. An enabled one never carries
 	// a tone-map recipe, so the tone-map downgrade below cannot apply to it.
 	transcodeSession, err := playback.StartTranscode(ctx, autoPipeline.Current())
+	if err == nil {
+		// A started session owns the relay registration and releases it on close.
+		inputOwnedBySession = true
+	}
 	if err != nil && downgradeCompatLocalToneMap(&opts, toneMapCapabilities, autoVideoToolboxBitrate) {
+		// Nothing was started, so the registration is still live: the retry
+		// reuses it rather than resolving the provider twice.
 		transcodeSession, err = playback.StartTranscode(ctx, opts)
 		if err == nil {
+			inputOwnedBySession = true
 			manifestDeadline = time.Now().Add(compatManifestStartupTimeout)
 		}
 	}
@@ -3530,11 +3592,21 @@ func (h *PlaybackHandler) ensureTranscodeSessionWithToneMapMode(
 				replaceUnlock()
 				return nil, readyErr
 			}
+			// Closing that generation released its relay registration; the
+			// replacement needs a fresh concrete input.
+			if inputOwnedBySession {
+				inputOwnedBySession = false
+				if refreshErr := refreshCompatTranscodeInput(ctx, &opts, refreshInput); refreshErr != nil {
+					replaceUnlock()
+					return nil, refreshErr
+				}
+			}
 			transcodeSession, err = playback.StartTranscode(ctx, opts)
 			if err != nil {
 				replaceUnlock()
 				return nil, err
 			}
+			inputOwnedBySession = true
 			if !h.tm.RegisterTranscodeSession(upstreamSessionID, transcodeSession) {
 				replaceUnlock()
 				return nil, context.Canceled
@@ -3581,7 +3653,24 @@ func (h *PlaybackHandler) ensureTranscodeSessionWithToneMapMode(
 		}
 		return nil, playback.ErrSessionSuperseded
 	}
+	// An encoder that already exited will not produce the playlist this route
+	// is about to promise. Answer retryably and withdraw the session instead of
+	// publishing a route that looks healthy and serves 404s.
+	if !transcodeSession.IsRunning() {
+		if waitErr := transcodeSession.WaitError(); waitErr != nil {
+			slog.WarnContext(ctx, "compat transcode exited before publishing its manifest", "component", "jellycompat",
+				"playback_session_id", upstreamSessionID, "error", logredact.SanitizeText(waitErr.Error()))
+		}
+		h.tm.CloseTranscodeSessionIf(upstreamSessionID, transcodeSession, "")
+		publishUnlock()
+		return nil, fmt.Errorf("local transcode exited before its first segment: %w", playback.ErrManifestNotReady)
+	}
 	effectiveOpts := transcodeSession.Opts()
+	if canonicalInput != "" {
+		// The recipe is the durable reconstruction input: keep the source
+		// identity, never the loopback relay URL this process opened.
+		effectiveOpts.InputPath = canonicalInput
+	}
 
 	// Mirror the actual encode decisions onto the upstream session before the
 	// recipe is persisted — video-copy HLS must not sync as a video transcode.
@@ -3609,6 +3698,22 @@ func (h *PlaybackHandler) ensureTranscodeSessionWithToneMapMode(
 	publishUnlock()
 
 	return transcodeSession, nil
+}
+
+// refreshCompatTranscodeInput re-registers the concrete input a replacement
+// generation needs after the previous one released its relay registration. A
+// local input needs no resolution, so a nil refresh leaves the opts untouched.
+func refreshCompatTranscodeInput(ctx context.Context, opts *playback.TranscodeOpts, refresh func(context.Context) (string, func(), error)) error {
+	if refresh == nil {
+		return nil
+	}
+	path, cleanup, err := refresh(ctx)
+	if err != nil {
+		return err
+	}
+	opts.InputPath = path
+	opts.InputCleanup = cleanup
+	return nil
 }
 
 func (h *PlaybackHandler) newCompatAutoTranscodePipeline(ctx context.Context, opts playback.TranscodeOpts) *playback.AutoTranscodePipeline {

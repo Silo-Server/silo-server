@@ -12,6 +12,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"golang.org/x/text/language"
@@ -1260,6 +1261,95 @@ func (h *PlaybackHandler) registerVirtualInput(ctx context.Context, session *Ses
 		return "", nil, errors.New("compat playback session is unavailable")
 	}
 	return h.registerVirtualInputForIdentity(ctx, session.StreamAppUserID, session.ProfileID, source, forceRefresh)
+}
+
+// compatLocalTranscodeInput resolves the concrete input a local compat transcode
+// process may open. A local file passes through untouched. A virtual row carries
+// a virtual:// identity as its durable path, and no FFmpeg build can open that
+// scheme: handing it over starts an encoder that exits before its first segment,
+// which leaves the master manifest answering 200 while every child segment 404s
+// and nothing is ever produced. The remote executor and session reconstruction
+// resolve virtual sources through the relay for the same reason, so the local
+// manifest path has to do it too.
+//
+// canonical is the durable identity a recipe card keeps, so a reconstructed
+// session resolves the source again instead of replaying a dead loopback URL.
+// release frees the relay registration and is safe to call more than once;
+// refresh mints a fresh provider URL for a seek restart.
+func (h *PlaybackHandler) compatLocalTranscodeInput(
+	ctx context.Context,
+	upstreamSessionID string,
+	source PlaybackMediaSource,
+	file *models.MediaFile,
+) (inputPath, canonical string, release func(), refresh func(context.Context) (string, func(), error), err error) {
+	if !isCompatVirtualSource(source) && !isCompatVirtualFile(file) {
+		if file == nil {
+			return "", "", nil, nil, errors.New("media file is unavailable")
+		}
+		return file.FilePath, "", nil, nil, nil
+	}
+	canonical = firstNonEmpty(strings.TrimSpace(source.VirtualSourceURI), strings.TrimSpace(source.Version.FilePath))
+	if canonical == "" && file != nil {
+		canonical = strings.TrimSpace(file.FilePath)
+	}
+	if !isCompatVirtualPath(canonical) {
+		// A row flagged virtual whose frozen path is already concrete (a repaired
+		// or legacy binding) needs no relay: open the file it names.
+		if file != nil && file.FilePath != "" && !isCompatVirtualPath(file.FilePath) {
+			return file.FilePath, "", nil, nil, nil
+		}
+		return "", "", nil, nil, fmt.Errorf("%w: no virtual source identity to resolve", errCompatVirtualInputUnavailable)
+	}
+	userID, profileID := 0, ""
+	if h.sessionMgr != nil {
+		if upstream, getErr := h.sessionMgr.GetSession(upstreamSessionID); getErr == nil && upstream != nil {
+			userID, profileID = upstream.UserID, upstream.ProfileID
+		}
+	}
+	bound := source
+	bound.VirtualSourceURI = canonical
+	resolve := func(resolveCtx context.Context, forceRefresh bool) (string, func(), error) {
+		relayURL, cleanup, resolveErr := h.registerVirtualInputForIdentity(resolveCtx, userID, profileID, bound, forceRefresh)
+		if resolveErr != nil {
+			return "", nil, fmt.Errorf("%w: %w", errCompatVirtualInputUnavailable, resolveErr)
+		}
+		return relayURL, cleanup, nil
+	}
+	relayURL, cleanup, resolveErr := resolve(ctx, false)
+	if resolveErr != nil {
+		return "", "", nil, nil, resolveErr
+	}
+	// The session owns the registration once it starts and releases it on close;
+	// every failed start releases it here. Both meet this once.
+	var once sync.Once
+	release = func() { once.Do(cleanup) }
+	refresh = func(refreshCtx context.Context) (string, func(), error) {
+		return resolve(refreshCtx, true)
+	}
+	return relayURL, canonical, release, refresh, nil
+}
+
+// resolveCompatTranscodeInput is the compat TranscodeManager's ResolveInput
+// hook. A rebuilt encoder is handed the recipe's durable identity, which for a
+// virtual row is a virtual:// path FFmpeg cannot open, so it resolves through
+// the relay exactly as a fresh start does.
+func (h *PlaybackHandler) resolveCompatTranscodeInput(ctx context.Context, mediaFileID, ownerInstallationID int, userID int, profileID, canonicalPath string) (string, func(), error) {
+	if !isCompatVirtualPath(canonicalPath) {
+		return canonicalPath, nil, nil
+	}
+	if h == nil || h.RemoteStreamRelay == nil {
+		return "", nil, fmt.Errorf("%w: remote stream relay is not configured", errCompatVirtualInputUnavailable)
+	}
+	source := PlaybackMediaSource{
+		FileID:                           mediaFileID,
+		VirtualSourceURI:                 canonicalPath,
+		VirtualSourceOwnerInstallationID: ownerInstallationID,
+	}
+	relayURL, cleanup, err := h.registerVirtualInputForIdentity(ctx, userID, profileID, source, false)
+	if err != nil {
+		return "", nil, fmt.Errorf("%w: %w", errCompatVirtualInputUnavailable, err)
+	}
+	return relayURL, cleanup, nil
 }
 
 func (h *PlaybackHandler) registerVirtualInputForIdentity(ctx context.Context, userID int, profileID string, source PlaybackMediaSource, forceRefresh bool) (string, func(), error) {

@@ -169,6 +169,8 @@ type recordingCompatRelay struct {
 	proxyErr        error
 	lastRange       string
 	registerCalls   int
+	unregisterCalls int
+	registerURL     string
 	lastHeaders     map[string]string
 }
 
@@ -225,13 +227,21 @@ func (r *recordingCompatRelay) Register(ctx context.Context, source string) (str
 func (r *recordingCompatRelay) RegisterWithHeaders(ctx context.Context, source string, headers map[string]string) (string, func(), error) {
 	r.registerCalls++
 	r.lastHeaders = headers
-	return "http://127.0.0.1/relay", func() {}, nil
+	registered := r.registerURL
+	if registered == "" {
+		registered = "http://127.0.0.1/relay"
+	}
+	return registered, func() { r.unregisterCalls++ }, nil
 }
 
 func (r *recordingCompatRelay) RegisterInsecureWithHeaders(ctx context.Context, source string, headers map[string]string) (string, func(), error) {
 	r.registerCalls++
 	r.lastHeaders = headers
-	return "http://127.0.0.1/relay-insecure", func() {}, nil
+	registered := r.registerURL
+	if registered == "" {
+		registered = "http://127.0.0.1/relay-insecure"
+	}
+	return registered, func() { r.unregisterCalls++ }, nil
 }
 
 func TestServeVirtualDirectResolvesBoundSourceThroughRelay(t *testing.T) {

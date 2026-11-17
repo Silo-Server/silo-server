@@ -1335,6 +1335,10 @@ func NewPlaybackHandler(
 		tm:                      playback.NewTranscodeManager(),
 	}
 	h.SubtitleCache = playback.NewSubtitleCache(func() string { return h.TranscodeDir })
+	// Resolve a rebuilt encoder's durable source the same way a fresh start does.
+	// A virtual row's identity is a virtual:// path no FFmpeg build can open, so
+	// reconstruction through the recipe card has to pass the relay URL too.
+	h.tm.ResolveInput = h.resolveCompatTranscodeInput
 	// Wire the shared transcode manager with closures so it reads the handler's
 	// (late-set) JWTSecret lazily, matching the native handler.
 	h.tm.JWTSecretFn = func() string { return h.JWTSecret }
