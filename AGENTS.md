@@ -192,7 +192,8 @@ Write `Other clients: N/A (no client-visible change)` when nothing a client show
 
 Agents open the parity issues without asking and apply [Writing](#writing) to them. Ask the
 developer before opening a pull request in another repository; approval to open one here does not
-cover the others.
+cover the others. The `silo-translations` catalog pull request for this change's own keys is the
+exception: see [Translations](#translations).
 
 ## Translations
 
@@ -213,6 +214,11 @@ are in `web/src/i18n/README.md`.
 - The catalog pull request carries the translation pass for its keys (`make translate`, run as
   silo-translations' CONTRIBUTING describes) as a separate commit, and merges first. Never
   write translations by hand.
+- Agents open that catalog pull request without asking, for the keys their change adds or
+  changes. When its checks pass and their account can merge in silo-translations, they merge it,
+  wait for the release it publishes, and re-sync with `--version <release>`; otherwise they ask a
+  maintainer to merge it. Ask the developer first when it gets a review requesting changes, its
+  checks fail for a reason the change can't fix, or it touches keys another open pull request owns.
 - While the catalog change is unmerged, sync with `--local <checkout>`. Before the client
   pull request merges, re-sync with `--version <release>` so `.silo-translations` names a
   published release, not `local-<commit>`. Commit the generated files,
