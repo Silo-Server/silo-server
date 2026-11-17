@@ -120791,6 +120791,12 @@
       "value": "Duraklatıp sürdürebilirsiniz"
     }
   ],
+  "web.player.watchTogether.redisRequired": [
+    {
+      "type": 0,
+      "value": "Watch Party için Redis gerekiyor ancak bu sunucuda Redis ayarlanmamış. Sunucu yöneticinizden Redis’i yapılandırmasını isteyin."
+    }
+  ],
   "web.player.watchTogether.selfName": [
     {
       "type": 1,

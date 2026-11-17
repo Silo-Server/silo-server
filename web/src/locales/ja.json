@@ -111109,6 +111109,12 @@
       "value": "一時停止・再開できます"
     }
   ],
+  "web.player.watchTogether.redisRequired": [
+    {
+      "type": 0,
+      "value": "Watch Partyを利用するにはRedisが必要ですが、このサーバーでは設定されていません。サーバー管理者に設定を依頼してください。"
+    }
+  ],
   "web.player.watchTogether.selfName": [
     {
       "type": 1,

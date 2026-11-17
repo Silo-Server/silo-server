@@ -121405,6 +121405,12 @@
       "value": "Je kunt pauzeren en hervatten"
     }
   ],
+  "web.player.watchTogether.redisRequired": [
+    {
+      "type": 0,
+      "value": "Watch Party heeft Redis nodig, maar dat is niet ingesteld op deze server. Vraag je serverbeheerder om het te configureren."
+    }
+  ],
   "web.player.watchTogether.selfName": [
     {
       "type": 1,
