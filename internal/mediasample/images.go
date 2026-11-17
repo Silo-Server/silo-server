@@ -14,7 +14,8 @@ import (
 // MJPEG encoder at its default quality.
 type ImageOutput struct {
 	// Width scales the image to this many pixels wide, keeping the aspect
-	// ratio. Zero keeps the source size; otherwise it must be even.
+	// ratio. Zero keeps the source's display size (see pixelAspectFilter);
+	// otherwise it must be even.
 	Width int `json:"width,omitempty"`
 	// ToneMap converts an HDR source to SDR. Nil keeps the decoded colors.
 	ToneMap *ToneMap `json:"tone_map,omitempty"`
@@ -68,6 +69,20 @@ const (
 )
 
 const maxImageWidth = 7680
+
+// pixelAspectFilter scales an image to its display width, applying the
+// stream's sample aspect ratio so a frame from non-square-pixel video is not
+// squeezed. ffmpeg's sar is 1 when the stream has none, so a square-pixel or
+// unknown-SAR source scales to its own size and ffmpeg passes the frame
+// through unchanged. round, because ffmpeg truncates the expression and
+// floating point lands some exact widths one short. The width is not rounded
+// to even, which would shrink an odd-width square source by a pixel, and no
+// setsar follows, which would make ffmpeg write a JFIF header for sources
+// without a SAR. A ratio outside 1:4 to 4:1 is taken for bad metadata and
+// ignored, so such a frame keeps its coded size: applied, it would ask for a
+// frame wider than MJPEG allows or a few pixels wide. The escaped commas keep
+// the filtergraph parser from splitting the expression.
+const pixelAspectFilter = `scale=if(between(sar\,0.25\,4)\,round(iw*sar)\,iw):ih`
 
 func (o ImageOutput) validate() error {
 	if o.Width != 0 && (o.Width < 2 || o.Width > maxImageWidth || o.Width%2 != 0) {
@@ -210,8 +225,9 @@ func (r Runner) prepareImage(ctx context.Context, req Request, attempt Attempt, 
 // buildImageArgs builds the arguments of an At request with an Images
 // output. They keep the layout chapter thumbnails have always used: log
 // level error, hardware decode options, an accurate input seek, and one MJPEG
-// frame on stdout. softwareToneMap is the software tone-map chain, needed
-// when the attempt tone maps in software.
+// frame on stdout. The filter chain always ends by applying the pixel aspect
+// (pixelAspectFilter), before any width scale. softwareToneMap is the
+// software tone-map chain, needed when the attempt tone maps in software.
 func buildImageArgs(req Request, attempt Attempt, hw hardwareDecode, softwareToneMap string) ([]string, error) {
 	if req.At == nil || req.Images == nil {
 		return nil, errors.New("images need a single-frame sampling mode")
@@ -243,22 +259,18 @@ func buildImageArgs(req Request, attempt Attempt, hw hardwareDecode, softwareTon
 	default:
 		filter = softwareToneMap
 	}
-	if width := req.Images.Width; width > 0 {
-		scale := fmt.Sprintf("scale=%d:-2", width)
-		if filter == "" {
-			filter = scale
-		} else {
-			filter += "," + scale
-		}
+	if filter == "" {
+		filter = pixelAspectFilter
+	} else {
+		filter += "," + pixelAspectFilter
 	}
-	args = append(args,
-		"-ss", fmt.Sprintf("%.3f", req.At.Seconds),
-		"-i", req.Input,
-	)
-	if filter != "" {
-		args = append(args, videoFilterOption, filter)
+	if width := req.Images.Width; width > 0 {
+		filter += fmt.Sprintf(",scale=%d:-2", width)
 	}
 	return append(args,
+		"-ss", fmt.Sprintf("%.3f", req.At.Seconds),
+		"-i", req.Input,
+		videoFilterOption, filter,
 		"-frames:v", "1",
 		"-f", "image2pipe",
 		"-vcodec", "mjpeg",
