@@ -701,6 +701,18 @@
       "value": "Raccolta"
     }
   ],
+  "home.recipe.collectionPostersPick.description": [
+    {
+      "type": 0,
+      "value": "Mostra più raccolte come poster. Ognuna apre la propria raccolta."
+    }
+  ],
+  "home.recipe.collectionPostersPick.name": [
+    {
+      "type": 0,
+      "value": "Una riga di raccolte"
+    }
+  ],
   "home.recipe.continueListeningDefault.description": [
     {
       "type": 0,
@@ -79308,6 +79320,12 @@
       "value": "Consenti l’accesso con password"
     }
   ],
+  "web.admin.settings.signIn.page.apiKeysGroup": [
+    {
+      "type": 0,
+      "value": "Chiavi API"
+    }
+  ],
   "web.admin.settings.signIn.page.breakGlassAdmins": [
     {
       "type": 6,
@@ -79504,6 +79522,18 @@
     {
       "type": 0,
       "value": "Accesso"
+    }
+  ],
+  "web.admin.settings.signIn.page.userApiKeysDescription": [
+    {
+      "type": 0,
+      "value": "Qualsiasi account può creare chiavi per i propri profili in Impostazioni → Chiavi API. Queste chiavi possono leggere e modificare la cronologia di visione, gli elenchi e le richieste, ma non possono riprodurre né scaricare contenuti. Se disattivi questa opzione, non si possono creare nuove chiavi; quelle esistenti continuano a funzionare finché non vengono revocate."
+    }
+  ],
+  "web.admin.settings.signIn.page.userApiKeysLabel": [
+    {
+      "type": 0,
+      "value": "Consenti agli utenti di creare chiavi API"
     }
   ],
   "web.admin.settings.signIn.provider.accounts.title": [
@@ -100729,6 +100759,64 @@
       "value": "?"
     }
   ],
+  "web.collections.copy.deleteWithRowChangesLabel": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Eliminala e modifica "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " riga"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Eliminala e modifica "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " di righe"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Eliminala e modifica "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " righe"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.collections.copy.deleteWithRowsLabel": [
     {
       "type": 6,
@@ -102445,6 +102533,20 @@
     {
       "type": 0,
       "value": " per tutti."
+    }
+  ],
+  "web.collections.copy.removedFromRow": [
+    {
+      "type": 0,
+      "value": "La rimuove dalla riga “"
+    },
+    {
+      "type": 1,
+      "value": "title"
+    },
+    {
+      "type": 0,
+      "value": "”. La riga mantiene le altre raccolte."
     }
   ],
   "web.collections.copy.removedTitle": [
@@ -110863,6 +110965,12 @@
       "value": "Impostazioni account"
     }
   ],
+  "web.common.title.settings.apiKeys": [
+    {
+      "type": 0,
+      "value": "Impostazioni chiavi API"
+    }
+  ],
   "web.common.title.settings.connectApps": [
     {
       "type": 0,
@@ -115745,6 +115853,316 @@
       "value": "."
     }
   ],
+  "web.home.addRow.collections.add": [
+    {
+      "type": 0,
+      "value": "Aggiungi"
+    }
+  ],
+  "web.home.addRow.collections.addLabel": [
+    {
+      "type": 0,
+      "value": "Aggiungi raccolte"
+    }
+  ],
+  "web.home.addRow.collections.added": [
+    {
+      "type": 0,
+      "value": "Aggiunta"
+    }
+  ],
+  "web.home.addRow.collections.chosenLabel": [
+    {
+      "type": 0,
+      "value": "Raccolte in questa riga"
+    }
+  ],
+  "web.home.addRow.collections.count": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " raccolta, mostrata in quest’ordine"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " di raccolte, mostrate in quest’ordine"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " raccolte, mostrate in quest’ordine"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.home.addRow.collections.drag.canceled": [
+    {
+      "type": 0,
+      "value": "Spostamento della raccolta "
+    },
+    {
+      "type": 1,
+      "value": "collection"
+    },
+    {
+      "type": 0,
+      "value": " annullato."
+    }
+  ],
+  "web.home.addRow.collections.drag.dropped": [
+    {
+      "type": 0,
+      "value": "Raccolta "
+    },
+    {
+      "type": 1,
+      "value": "collection"
+    },
+    {
+      "type": 0,
+      "value": " rilasciata."
+    }
+  ],
+  "web.home.addRow.collections.drag.droppedAt": [
+    {
+      "type": 0,
+      "value": "Raccolta "
+    },
+    {
+      "type": 1,
+      "value": "collection"
+    },
+    {
+      "type": 0,
+      "value": " rilasciata in posizione "
+    },
+    {
+      "type": 1,
+      "value": "position"
+    },
+    {
+      "type": 0,
+      "value": " di "
+    },
+    {
+      "type": 1,
+      "value": "total"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.home.addRow.collections.drag.instructions": [
+    {
+      "type": 0,
+      "value": "Per spostare una raccolta, metti a fuoco la sua maniglia e premi Space o Enter. Usa i tasti freccia su e giù per spostarla, Space o Enter per rilasciarla o Escape per annullare."
+    }
+  ],
+  "web.home.addRow.collections.drag.over": [
+    {
+      "type": 0,
+      "value": "La raccolta "
+    },
+    {
+      "type": 1,
+      "value": "collection"
+    },
+    {
+      "type": 0,
+      "value": " è ora in posizione "
+    },
+    {
+      "type": 1,
+      "value": "position"
+    },
+    {
+      "type": 0,
+      "value": " di "
+    },
+    {
+      "type": 1,
+      "value": "total"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.home.addRow.collections.drag.pickedUp": [
+    {
+      "type": 0,
+      "value": "Raccolta "
+    },
+    {
+      "type": 1,
+      "value": "collection"
+    },
+    {
+      "type": 0,
+      "value": " selezionata, posizione "
+    },
+    {
+      "type": 1,
+      "value": "position"
+    },
+    {
+      "type": 0,
+      "value": " di "
+    },
+    {
+      "type": 1,
+      "value": "total"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.home.addRow.collections.dragHandle": [
+    {
+      "type": 0,
+      "value": "Riordina "
+    },
+    {
+      "type": 1,
+      "value": "collection"
+    }
+  ],
+  "web.home.addRow.collections.empty": [
+    {
+      "type": 0,
+      "value": "Aggiungi almeno una raccolta qui sotto."
+    }
+  ],
+  "web.home.addRow.collections.limit": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Una riga può contenere al massimo "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " raccolta."
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Una riga può contenere al massimo "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " di raccolte."
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Una riga può contenere al massimo "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " raccolte."
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.home.addRow.collections.moveDown": [
+    {
+      "type": 0,
+      "value": "Sposta giù "
+    },
+    {
+      "type": 1,
+      "value": "collection"
+    }
+  ],
+  "web.home.addRow.collections.moveUp": [
+    {
+      "type": 0,
+      "value": "Sposta su "
+    },
+    {
+      "type": 1,
+      "value": "collection"
+    }
+  ],
+  "web.home.addRow.collections.remove": [
+    {
+      "type": 0,
+      "value": "Rimuovi "
+    },
+    {
+      "type": 1,
+      "value": "collection"
+    }
+  ],
+  "web.home.addRow.collections.unavailable": [
+    {
+      "type": 0,
+      "value": "Non più disponibile"
+    }
+  ],
+  "web.home.addRow.collections.yours": [
+    {
+      "type": 0,
+      "value": "Tua"
+    }
+  ],
   "web.home.addRow.conflict": [
     {
       "type": 0,
@@ -119050,16 +119468,212 @@
       }
     }
   ],
+  "web.home.rows.describe.collectionCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " raccolta"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " di raccolte"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " raccolte"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.home.rows.describe.collectionGone": [
     {
       "type": 0,
       "value": "Raccolta non più disponibile"
     }
   ],
+  "web.home.rows.describe.collectionList": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " raccolta: "
+            },
+            {
+              "type": 1,
+              "value": "names"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " di raccolte: "
+            },
+            {
+              "type": 1,
+              "value": "names"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " raccolte: "
+            },
+            {
+              "type": 1,
+              "value": "names"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.home.rows.describe.collectionListMore": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " altra"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " altre"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " altre"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.home.rows.describe.collectionUnknown": [
     {
       "type": 0,
       "value": "Una raccolta"
+    }
+  ],
+  "web.home.rows.describe.collectionsGone": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " raccolta non più disponibile"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " di raccolte non più disponibili"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " raccolte non più disponibili"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.home.rows.describe.curated": [
@@ -120674,6 +121288,12 @@
       "value": "Cosa ha salvato da guardare ogni persona"
     }
   ],
+  "web.home.rows.draft.addCollection": [
+    {
+      "type": 0,
+      "value": "Aggiungi una raccolta per vedere la riga."
+    }
+  ],
   "web.home.rows.draft.addTitles": [
     {
       "type": 0,
@@ -120942,6 +121562,12 @@
       "value": "Mostra una delle tue raccolte."
     }
   ],
+  "web.home.rows.kindSentences.collectionPosters": [
+    {
+      "type": 0,
+      "value": "Mostra più raccolte come poster. Ognuna apre la propria raccolta."
+    }
+  ],
   "web.home.rows.kindSentences.continueWatching": [
     {
       "type": 0,
@@ -121144,6 +121770,12 @@
     {
       "type": 0,
       "value": "Una raccolta"
+    }
+  ],
+  "web.home.rows.kinds.collectionPosters": [
+    {
+      "type": 0,
+      "value": "Una riga di raccolte"
     }
   ],
   "web.home.rows.kinds.continueWatching": [
@@ -127134,6 +127766,12 @@
       "value": "Riceverai qui una notifica quando arrivano nuovi episodi delle serie che hai tra i preferiti, in Da guardare o che stai guardando."
     }
   ],
+  "web.notifications.inbox.emptyHintNextUp": [
+    {
+      "type": 0,
+      "value": "Riceverai qui una notifica quando arriva un nuovo episodio di una serie con cui sei in pari, o quando arriva un titolo che hai aggiunto a Da guardare o che hai richiesto."
+    }
+  ],
   "web.notifications.inbox.emptyUnread": [
     {
       "type": 0,
@@ -127560,6 +128198,30 @@
     {
       "type": 0,
       "value": "Viste delle notifiche"
+    }
+  ],
+  "web.notifications.inbox.watchlistAvailable": [
+    {
+      "type": 0,
+      "value": "Titolo in Da guardare disponibile"
+    }
+  ],
+  "web.notifications.inbox.watchlistMovieAvailable": [
+    {
+      "type": 0,
+      "value": "Un film che hai in Da guardare è ora disponibile"
+    }
+  ],
+  "web.notifications.inbox.watchlistSeriesAvailable": [
+    {
+      "type": 0,
+      "value": "Una serie che hai in Da guardare è ora disponibile"
+    }
+  ],
+  "web.notifications.inbox.watchlistTitleAvailable": [
+    {
+      "type": 0,
+      "value": "Un titolo che hai in Da guardare è ora disponibile"
     }
   ],
   "web.notifications.preferences.continueWatching": [
@@ -128076,6 +128738,12 @@
       "value": "Serie selezionate"
     }
   ],
+  "web.notifications.series.afterCatchUp": [
+    {
+      "type": 0,
+      "value": "Quando sarai in pari"
+    }
+  ],
   "web.notifications.series.allReasons": [
     {
       "type": 0,
@@ -128134,10 +128802,22 @@
       "value": "Qui compaiono le serie che aggiungi ai preferiti o a Da guardare, o che inizi a guardare."
     }
   ],
+  "web.notifications.series.emptyHintNextUp": [
+    {
+      "type": 0,
+      "value": "Le serie compaiono qui dopo che finisci un episodio. Quando sei in pari con una serie, ricevi una notifica all’arrivo del suo prossimo episodio."
+    }
+  ],
   "web.notifications.series.filterByReason": [
     {
       "type": 0,
       "value": "Filtra per motivo"
+    }
+  ],
+  "web.notifications.series.filterLabel": [
+    {
+      "type": 0,
+      "value": "Filtra serie"
     }
   ],
   "web.notifications.series.intro": [
@@ -128244,10 +128924,32 @@
       "value": "last"
     }
   ],
+  "web.notifications.series.nextEpisodeAfter": [
+    {
+      "type": 0,
+      "value": "Il prossimo episodio dopo "
+    },
+    {
+      "type": 1,
+      "value": "code"
+    }
+  ],
+  "web.notifications.series.nextNewEpisode": [
+    {
+      "type": 0,
+      "value": "Il prossimo nuovo episodio"
+    }
+  ],
   "web.notifications.series.noMatch": [
     {
       "type": 0,
       "value": "Nessuna serie corrisponde. Prova un’altra ricerca o un altro motivo."
+    }
+  ],
+  "web.notifications.series.noMatchFilter": [
+    {
+      "type": 0,
+      "value": "Nessuna serie corrisponde. Prova un’altra ricerca o un altro filtro."
     }
   ],
   "web.notifications.series.notificationsOff": [
@@ -128428,6 +129130,12 @@
     {
       "type": 0,
       "value": " è ora disponibile"
+    }
+  ],
+  "web.notifications.toast.watchlistArrived": [
+    {
+      "type": 0,
+      "value": "Un titolo che hai in Da guardare è arrivato nella libreria."
     }
   ],
   "web.onboarding.gate.progressFailed": [
@@ -137148,6 +137856,340 @@
       "value": "Avanzate"
     }
   ],
+  "web.settings.apiKeys.create.access": [
+    {
+      "type": 0,
+      "value": "Accesso"
+    }
+  ],
+  "web.settings.apiKeys.create.accessHint": [
+    {
+      "type": 0,
+      "value": "Scegline almeno uno. Nessuna chiave può riprodurre, trasmettere in streaming o scaricare contenuti."
+    }
+  ],
+  "web.settings.apiKeys.create.actsAs": [
+    {
+      "type": 0,
+      "value": "Agisce come"
+    }
+  ],
+  "web.settings.apiKeys.create.actsAsHint": [
+    {
+      "type": 0,
+      "value": "Una chiave per un solo profilo agisce sempre come quel profilo e ne mantiene i limiti. Una chiave per l’intero account può agire come qualsiasi profilo del tuo account."
+    }
+  ],
+  "web.settings.apiKeys.create.copied": [
+    {
+      "type": 0,
+      "value": "Copiata negli appunti"
+    }
+  ],
+  "web.settings.apiKeys.create.copyAndClose": [
+    {
+      "type": 0,
+      "value": "Copia e chiudi"
+    }
+  ],
+  "web.settings.apiKeys.create.copyFailed": [
+    {
+      "type": 0,
+      "value": "Impossibile copiare. Seleziona la chiave e copiala manualmente."
+    }
+  ],
+  "web.settings.apiKeys.create.creating": [
+    {
+      "type": 0,
+      "value": "Creazione…"
+    }
+  ],
+  "web.settings.apiKeys.create.description": [
+    {
+      "type": 0,
+      "value": "La chiave completa viene mostrata una sola volta."
+    }
+  ],
+  "web.settings.apiKeys.create.label": [
+    {
+      "type": 0,
+      "value": "Etichetta"
+    }
+  ],
+  "web.settings.apiKeys.create.secretNotice": [
+    {
+      "type": 0,
+      "value": "Copia ora la tua chiave API. Non potrai più visualizzarla."
+    }
+  ],
+  "web.settings.apiKeys.create.submit": [
+    {
+      "type": 0,
+      "value": "Crea"
+    }
+  ],
+  "web.settings.apiKeys.create.title": [
+    {
+      "type": 0,
+      "value": "Crea chiave API"
+    }
+  ],
+  "web.settings.apiKeys.create.uncertain": [
+    {
+      "type": 0,
+      "value": "L’esito è incerto. Ricarica la pagina prima di creare un’altra chiave."
+    }
+  ],
+  "web.settings.apiKeys.createKey": [
+    {
+      "type": 0,
+      "value": "Crea chiave"
+    }
+  ],
+  "web.settings.apiKeys.disabled": [
+    {
+      "type": 0,
+      "value": "Questo server non consente agli utenti di creare chiavi API. Chiedi all’admin di attivare l’opzione."
+    }
+  ],
+  "web.settings.apiKeys.empty": [
+    {
+      "type": 0,
+      "value": "Ancora nessuna chiave API."
+    }
+  ],
+  "web.settings.apiKeys.limitReached": [
+    {
+      "type": 0,
+      "value": "Hai raggiunto il limite di "
+    },
+    {
+      "type": 1,
+      "value": "max"
+    },
+    {
+      "type": 0,
+      "value": " chiavi. Revocane una per crearne un’altra."
+    }
+  ],
+  "web.settings.apiKeys.list.created": [
+    {
+      "type": 0,
+      "value": "Creata: "
+    },
+    {
+      "type": 1,
+      "value": "date"
+    }
+  ],
+  "web.settings.apiKeys.list.heading": [
+    {
+      "type": 0,
+      "value": "Le tue chiavi"
+    }
+  ],
+  "web.settings.apiKeys.list.lastUsed": [
+    {
+      "type": 0,
+      "value": "Ultimo utilizzo: "
+    },
+    {
+      "type": 1,
+      "value": "date"
+    }
+  ],
+  "web.settings.apiKeys.list.loadMore": [
+    {
+      "type": 0,
+      "value": "Carica altro"
+    }
+  ],
+  "web.settings.apiKeys.list.neverUsed": [
+    {
+      "type": 0,
+      "value": "Mai utilizzata"
+    }
+  ],
+  "web.settings.apiKeys.list.profile": [
+    {
+      "type": 0,
+      "value": "Profilo: "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    }
+  ],
+  "web.settings.apiKeys.list.revoke": [
+    {
+      "type": 0,
+      "value": "Revoca"
+    }
+  ],
+  "web.settings.apiKeys.list.revokeNamed": [
+    {
+      "type": 0,
+      "value": "Revoca "
+    },
+    {
+      "type": 1,
+      "value": "label"
+    }
+  ],
+  "web.settings.apiKeys.list.wholeAccount": [
+    {
+      "type": 0,
+      "value": "Intero account"
+    }
+  ],
+  "web.settings.apiKeys.loadFailed": [
+    {
+      "type": 0,
+      "value": "Impossibile caricare le tue chiavi API."
+    }
+  ],
+  "web.settings.apiKeys.loading": [
+    {
+      "type": 0,
+      "value": "Caricamento delle chiavi API…"
+    }
+  ],
+  "web.settings.apiKeys.revoke.description": [
+    {
+      "type": 1,
+      "value": "label"
+    },
+    {
+      "type": 0,
+      "value": " smette subito di funzionare. Questa azione non può essere annullata."
+    }
+  ],
+  "web.settings.apiKeys.revoke.done": [
+    {
+      "type": 0,
+      "value": "Chiave API revocata"
+    }
+  ],
+  "web.settings.apiKeys.revoke.failed": [
+    {
+      "type": 0,
+      "value": "Impossibile revocare la chiave. Ricarica la pagina e riprova."
+    }
+  ],
+  "web.settings.apiKeys.revoke.title": [
+    {
+      "type": 0,
+      "value": "Revoca chiave API"
+    }
+  ],
+  "web.settings.apiKeys.revoke.working": [
+    {
+      "type": 0,
+      "value": "Revoca in corso…"
+    }
+  ],
+  "web.settings.apiKeys.scope.catalogRead": [
+    {
+      "type": 0,
+      "value": "Sfogliare ciò che il profilo può vedere: librerie, righe della Home e delle librerie, titoli, persone e ricerca."
+    }
+  ],
+  "web.settings.apiKeys.scope.librariesRead": [
+    {
+      "type": 0,
+      "value": "Vedere quali librerie ha il profilo."
+    }
+  ],
+  "web.settings.apiKeys.scope.notifications": [
+    {
+      "type": 0,
+      "value": "Leggere le notifiche del profilo man mano che arrivano e segnarle come lette."
+    }
+  ],
+  "web.settings.apiKeys.scope.requests": [
+    {
+      "type": 0,
+      "value": "Sfogliare i titoli richiedibili e creare, seguire e annullare richieste di contenuti."
+    }
+  ],
+  "web.settings.apiKeys.scope.watchRead": [
+    {
+      "type": 0,
+      "value": "Leggere cronologia di visione, avanzamento, valutazioni, preferiti, lista Da guardare e titoli nascosti del profilo, ed esportarne i dati."
+    }
+  ],
+  "web.settings.apiKeys.scope.watchWrite": [
+    {
+      "type": 0,
+      "value": "Segnare i titoli come visti o non visti, sincronizzare l’avanzamento, rimuovere la cronologia e modificare valutazioni, preferiti, lista Da guardare e titoli nascosti."
+    }
+  ],
+  "web.settings.apiKeys.subtitle": [
+    {
+      "type": 0,
+      "value": "Le chiavi consentono a script e app di leggere e aggiornare i tuoi dati di Silo senza la tua password."
+    }
+  ],
+  "web.settings.apiKeys.title": [
+    {
+      "type": 0,
+      "value": "Chiavi API"
+    }
+  ],
+  "web.settings.apiKeys.usage.accountKey": [
+    {
+      "type": 0,
+      "value": "Questa chiave può agire come qualsiasi profilo del tuo account. Scegline uno per ogni richiesta con questa intestazione. L’esempio usa il profilo "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": "; "
+    },
+    {
+      "type": 1,
+      "value": "endpoint"
+    },
+    {
+      "type": 0,
+      "value": " elenca gli ID di tutti i profili."
+    }
+  ],
+  "web.settings.apiKeys.usage.docs": [
+    {
+      "type": 0,
+      "value": "Riferimento API"
+    }
+  ],
+  "web.settings.apiKeys.usage.header": [
+    {
+      "type": 0,
+      "value": "Inviala con ogni richiesta in questa intestazione:"
+    }
+  ],
+  "web.settings.apiKeys.usage.profileKey": [
+    {
+      "type": 0,
+      "value": "Questa chiave agisce sempre come il profilo "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": ". Non richiede alcuna intestazione del profilo."
+    }
+  ],
+  "web.settings.apiKeys.usage.title": [
+    {
+      "type": 0,
+      "value": "Come usare questa chiave"
+    }
+  ],
   "web.settings.cardOverlay.adjust": [
     {
       "type": 0,
@@ -140766,6 +141808,12 @@
       "value": "La password e i provider di accesso condivisi da tutti i profili della famiglia."
     }
   ],
+  "web.settings.nav.apiKeys.description": [
+    {
+      "type": 0,
+      "value": "Chiavi per script e app che usano la tua cronologia di visione e i tuoi elenchi."
+    }
+  ],
   "web.settings.nav.connectApps.description": [
     {
       "type": 0,
@@ -141342,6 +142390,12 @@
       "value": "Interruttore generale per questo profilo"
     }
   ],
+  "web.settings.notifications.episodes.nextUpDescription": [
+    {
+      "type": 0,
+      "value": "Ricevi una notifica quando arriva un nuovo episodio di una serie con cui sei in pari, o quando arriva un titolo che hai aggiunto a Da guardare o che hai richiesto."
+    }
+  ],
   "web.settings.notifications.episodes.seriesLink": [
     {
       "type": 0,
@@ -141631,7 +142685,7 @@
   "web.settings.notifications.reason.requests": [
     {
       "type": 0,
-      "value": "Richieste"
+      "value": "Richieste e Da guardare"
     }
   ],
   "web.settings.notifications.reason.watchlist": [

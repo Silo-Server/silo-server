@@ -31,6 +31,7 @@ var accessSettings = func() map[string]widerFunc {
 		// Who may sign in, and how.
 		settingLocalPasswordLogin:             on,
 		"auth.email_auto_match":               on,
+		config.AuthUserAPIKeysSettingKey:      on,
 		"signup.enabled":                      on,
 		"password_reset.self_service_enabled": on,
 		"jellyfin_compat.enabled":             on,

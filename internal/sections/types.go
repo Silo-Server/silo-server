@@ -20,6 +20,9 @@ const (
 	SectionCustomFilter     SectionType = "custom_filter"
 	SectionRandom           SectionType = "random"
 	SectionCollection       SectionType = "collection"
+	// SectionCollectionPosters is a row whose cards are collections rather
+	// than titles (see collection_posters.go).
+	SectionCollectionPosters SectionType = "collection_posters"
 
 	SectionRecommendedForYou   SectionType = "recommended_for_you"
 	SectionBecauseYouWatched   SectionType = "because_you_watched"
@@ -62,6 +65,7 @@ var ValidSectionTypes = map[SectionType]bool{
 	SectionCustomFilter:        true,
 	SectionRandom:              true,
 	SectionCollection:          true,
+	SectionCollectionPosters:   true,
 	SectionRecommendedForYou:   true,
 	SectionBecauseYouWatched:   true,
 	SectionSimilarUsersLiked:   true,

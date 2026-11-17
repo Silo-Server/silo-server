@@ -1,5 +1,5 @@
 {
-  "revision": "7afa7757a884269d917fd645c012e2734b8f2168a9f31eda8aaf1e0231eb54c3",
+  "revision": "356ede7264f1d74ab65c8df94b0b5a16bf873c392ee55923c1b34a7b26912fad",
   "state": "available",
   "allowed": true,
   "available": true,
@@ -7,27 +7,58 @@
   "scopes": [
     {
       "name": "admin:sessions:summary:read",
-      "description": "Read live playback summaries without diagnostic details or session control."
+      "description": "Read live playback summaries without diagnostic details or session control.",
+      "audience": "admin"
     },
     {
       "name": "libraries:read",
-      "description": "Discover libraries visible to the account or selected profile, without storage metadata."
+      "description": "Discover libraries visible to the account or selected profile, without storage metadata.",
+      "audience": "user"
+    },
+    {
+      "name": "catalog:read",
+      "description": "Browse what the profile can see: libraries, home and library rows, titles, people and search. No playback or downloads.",
+      "audience": "user"
+    },
+    {
+      "name": "watch:read",
+      "description": "Read the profile's watch history, progress, ratings, favorites, watchlist and hidden titles, and export the profile's data.",
+      "audience": "user"
+    },
+    {
+      "name": "watch:write",
+      "description": "Mark titles watched or unwatched, sync progress, remove history, and edit ratings, favorites, watchlist and hidden titles.",
+      "audience": "user"
+    },
+    {
+      "name": "requests",
+      "description": "Browse requestable titles and create, follow and cancel the profile's media requests.",
+      "audience": "user"
+    },
+    {
+      "name": "notifications",
+      "description": "Read the profile's notifications as they arrive and mark them read. No delivery settings.",
+      "audience": "user"
     },
     {
       "name": "admin:users",
-      "description": "Manage user accounts: create, list, read, update, and delete users and read their profiles. Cannot create or modify admin accounts."
+      "description": "Manage user accounts: create, list, read, update, and delete users and read their profiles. Cannot create or modify admin accounts.",
+      "audience": "admin"
     },
     {
       "name": "admin:access-groups:read",
-      "description": "Read access groups and their policies."
+      "description": "Read access groups and their policies.",
+      "audience": "admin"
     },
     {
       "name": "admin:monitor:read",
-      "description": "Monitor the server read-only: live sessions, playback history, activity stats, accounts, devices, downloads, node and host health, and the catalog listing. Never exposes filesystem paths, node addresses, storage keys, setting values or credentials."
+      "description": "Monitor the server read-only: live sessions, playback history, activity stats, accounts, devices, downloads, node and host health, and the catalog listing. Never exposes filesystem paths, node addresses, storage keys, setting values or credentials.",
+      "audience": "admin"
     },
     {
       "name": "admin:sessions:control",
-      "description": "Pause, resume, stop, message and terminate live playback sessions."
+      "description": "Pause, resume, stop, message and terminate live playback sessions.",
+      "audience": "admin"
     }
   ],
   "rate_tiers": [

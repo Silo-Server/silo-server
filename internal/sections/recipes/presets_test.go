@@ -8,8 +8,9 @@ import "testing"
 // preset must ship defaults that pass its own recipe's Validate — a preset
 // that fails validation out of the box is un-addable from the gallery.
 var presetsRequiringInput = map[string]bool{
-	"collection_pick": true, // collection: requires picking a collection
-	"acl_blank":       true, // admin_curated_list: drawer requires at least one item
+	"collection_pick":         true, // collection: requires picking a collection
+	"acl_blank":               true, // admin_curated_list: drawer requires at least one item
+	"collection_posters_pick": true, // collection_posters: requires picking collections
 }
 
 func TestAllGalleryPresetDefaultsValidate(t *testing.T) {

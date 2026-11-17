@@ -76,6 +76,7 @@ type metadataItemRepo interface {
 	GetByTitleYearType(ctx context.Context, title string, year int, itemType string) (*models.MediaItem, error)
 	Upsert(ctx context.Context, item *models.MediaItem) error
 	SetStatusUnlessMatched(ctx context.Context, contentID, status string) (bool, error)
+	UpdateProvisionalArtwork(ctx context.Context, read *models.MediaItem, upd *catalog.MetadataUpdate) (bool, error)
 	IncrementRefreshFailure(ctx context.Context, contentID string) error
 	ReplacePeople(ctx context.Context, contentID string, people []models.ItemPerson) error
 	ListUnmatchedByFolderAndPathPrefix(ctx context.Context, folderID int, pathPrefix string, limit int) ([]string, error)
@@ -2384,6 +2385,8 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 			// failure. The candidate decision remains actionable and deterministic.
 			matchDecision.Outcome = MatchOutcomeProviderPermanent
 		}
+		// Sidecar artwork found above still reaches an unmatched item.
+		s.saveProvisionalLocalArtwork(ctx, req.ContentID, req.Language, allImages)
 		return &ProcessResult{Updated: false, Decision: matchDecision}, nil
 	}
 
@@ -3100,6 +3103,9 @@ func (s *MetadataService) mergeAndPersist(
 			// With caching off a stored copy gives way to any provider image,
 			// rated or not; fill-empty would keep it over an unrated one.
 			stored = clearStoredItemArtwork(item)
+		} else {
+			// So does a poster taken from the video.
+			stored = clearFramePoster(item, existingItem)
 		}
 		applyBestImages(item, images, imageMode, req.Language, fallbackLanguage)
 		stored.restoreUnfilled(item)
@@ -3123,9 +3129,10 @@ func (s *MetadataService) mergeAndPersist(
 	}
 
 	if handleArtwork {
-		prepareItemImagesForQueue(item, existingItem, keepStored, req.Mode == ModeIdentify)
+		queuedFrom := withoutReplacedFramePoster(item, existingItem)
+		prepareItemImagesForQueue(item, queuedFrom, keepStored, req.Mode == ModeIdentify)
 		dropGoneItemOnlyArtwork(localArt, item, images)
-		applyLocalArtworkFallback(item, existingItem, images, req.Language, fallbackLanguage)
+		applyLocalArtworkFallback(item, queuedFrom, images, req.Language, fallbackLanguage)
 	}
 
 	if isNew && contentID == "" {
@@ -9903,6 +9910,36 @@ func clearStoredItemArtwork(item *models.MediaItem) storedItemArtwork {
 		}
 	}
 	return stored
+}
+
+// clearFramePoster empties a poster slot that serves a frame of the movie's
+// own video (the extras frame task's, marked by catalog.StillSourceFramePrefix
+// on the stored item), so applyBestImages fills it with any provider image.
+// The merged item carries no sources yet, so the stored one decides. A locked
+// slot keeps its frame.
+func clearFramePoster(item, existing *models.MediaItem) storedItemArtwork {
+	var stored storedItemArtwork
+	if existing != nil && !artworkLocked(item) && item.PosterPath != "" && item.PosterPath == existing.PosterPath &&
+		strings.HasPrefix(existing.PosterSourcePath, catalog.StillSourceFramePrefix) {
+		stored.poster, item.PosterPath = item.PosterPath, ""
+	}
+	return stored
+}
+
+// withoutReplacedFramePoster returns existing, or, when the merge replaced its
+// frame poster (clearFramePoster) with another image, a copy without that
+// poster's path and thumbhash. A frame's path only ever goes with its frame
+// source, so it never stands in while another source's copy is pending: the
+// slot serves what a slot with no stored copy would. The frame is left to the
+// artwork revision GC.
+func withoutReplacedFramePoster(item, existing *models.MediaItem) *models.MediaItem {
+	if existing == nil || artworkLocked(item) || item.PosterPath == existing.PosterPath ||
+		!strings.HasPrefix(existing.PosterSourcePath, catalog.StillSourceFramePrefix) {
+		return existing
+	}
+	trimmed := *existing
+	trimmed.PosterPath, trimmed.PosterThumbhash = "", ""
+	return &trimmed
 }
 
 // restoreUnfilled gives each slot no provider image filled its stored copy

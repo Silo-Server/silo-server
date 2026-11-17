@@ -701,6 +701,18 @@
       "value": "コレクション"
     }
   ],
+  "home.recipe.collectionPostersPick.description": [
+    {
+      "type": 0,
+      "value": "複数のコレクションをポスターで表示します。各ポスターからそのコレクションを開けます。"
+    }
+  ],
+  "home.recipe.collectionPostersPick.name": [
+    {
+      "type": 0,
+      "value": "コレクションの行"
+    }
+  ],
   "home.recipe.continueListeningDefault.description": [
     {
       "type": 0,
@@ -66181,6 +66193,12 @@
       "value": "パスワードでのサインインを許可"
     }
   ],
+  "web.admin.settings.signIn.page.apiKeysGroup": [
+    {
+      "type": 0,
+      "value": "APIキー"
+    }
+  ],
   "web.admin.settings.signIn.page.breakGlassAdmins": [
     {
       "type": 6,
@@ -66353,6 +66371,18 @@
     {
       "type": 0,
       "value": "サインイン"
+    }
+  ],
+  "web.admin.settings.signIn.page.userApiKeysDescription": [
+    {
+      "type": 0,
+      "value": "どのアカウントも、設定 → APIキーで自分のプロフィール用のキーを作成できます。これらのキーでは視聴履歴、リスト、リクエストの読み取りと変更ができますが、メディアの再生やダウンロードはできません。オフにすると新しいキーは作成できなくなりますが、既存のキーは無効化されるまで引き続き使用できます。"
+    }
+  ],
+  "web.admin.settings.signIn.page.userApiKeysLabel": [
+    {
+      "type": 0,
+      "value": "ユーザーにAPIキーの作成を許可"
     }
   ],
   "web.admin.settings.signIn.provider.accounts.title": [
@@ -83767,6 +83797,32 @@
       "value": "」を削除しますか？"
     }
   ],
+  "web.collections.copy.deleteWithRowChangesLabel": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "削除して"
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": "件の行を変更"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.collections.copy.deleteWithRowsLabel": [
     {
       "type": 6,
@@ -84983,6 +85039,20 @@
     {
       "type": 0,
       "value": "から削除されます。"
+    }
+  ],
+  "web.collections.copy.removedFromRow": [
+    {
+      "type": 0,
+      "value": "行「"
+    },
+    {
+      "type": 1,
+      "value": "title"
+    },
+    {
+      "type": 0,
+      "value": "」から外されます。この行の他のコレクションはそのまま残ります。"
     }
   ],
   "web.collections.copy.removedTitle": [
@@ -92201,6 +92271,12 @@
       "value": "アカウントの設定"
     }
   ],
+  "web.common.title.settings.apiKeys": [
+    {
+      "type": 0,
+      "value": "APIキーの設定"
+    }
+  ],
   "web.common.title.settings.connectApps": [
     {
       "type": 0,
@@ -96235,6 +96311,240 @@
       "value": "で行えます。"
     }
   ],
+  "web.home.addRow.collections.add": [
+    {
+      "type": 0,
+      "value": "追加"
+    }
+  ],
+  "web.home.addRow.collections.addLabel": [
+    {
+      "type": 0,
+      "value": "コレクションを追加"
+    }
+  ],
+  "web.home.addRow.collections.added": [
+    {
+      "type": 0,
+      "value": "追加済み"
+    }
+  ],
+  "web.home.addRow.collections.chosenLabel": [
+    {
+      "type": 0,
+      "value": "この行のコレクション"
+    }
+  ],
+  "web.home.addRow.collections.count": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": "件のコレクション（この順に表示）"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.home.addRow.collections.drag.canceled": [
+    {
+      "type": 1,
+      "value": "collection"
+    },
+    {
+      "type": 0,
+      "value": "の移動をキャンセルしました。"
+    }
+  ],
+  "web.home.addRow.collections.drag.dropped": [
+    {
+      "type": 1,
+      "value": "collection"
+    },
+    {
+      "type": 0,
+      "value": "をドロップしました。"
+    }
+  ],
+  "web.home.addRow.collections.drag.droppedAt": [
+    {
+      "type": 1,
+      "value": "collection"
+    },
+    {
+      "type": 0,
+      "value": "を"
+    },
+    {
+      "type": 1,
+      "value": "total"
+    },
+    {
+      "type": 0,
+      "value": "件中"
+    },
+    {
+      "type": 1,
+      "value": "position"
+    },
+    {
+      "type": 0,
+      "value": "番目にドロップしました。"
+    }
+  ],
+  "web.home.addRow.collections.drag.instructions": [
+    {
+      "type": 0,
+      "value": "コレクションを移動するには、ハンドルにフォーカスしてSpaceまたはEnterを押します。上下の矢印キーで移動し、SpaceまたはEnterでドロップ、Escapeでキャンセルします。"
+    }
+  ],
+  "web.home.addRow.collections.drag.over": [
+    {
+      "type": 1,
+      "value": "collection"
+    },
+    {
+      "type": 0,
+      "value": "は現在"
+    },
+    {
+      "type": 1,
+      "value": "total"
+    },
+    {
+      "type": 0,
+      "value": "件中"
+    },
+    {
+      "type": 1,
+      "value": "position"
+    },
+    {
+      "type": 0,
+      "value": "番目です。"
+    }
+  ],
+  "web.home.addRow.collections.drag.pickedUp": [
+    {
+      "type": 1,
+      "value": "collection"
+    },
+    {
+      "type": 0,
+      "value": "を持ち上げました。"
+    },
+    {
+      "type": 1,
+      "value": "total"
+    },
+    {
+      "type": 0,
+      "value": "件中"
+    },
+    {
+      "type": 1,
+      "value": "position"
+    },
+    {
+      "type": 0,
+      "value": "番目です。"
+    }
+  ],
+  "web.home.addRow.collections.dragHandle": [
+    {
+      "type": 1,
+      "value": "collection"
+    },
+    {
+      "type": 0,
+      "value": "を並べ替え"
+    }
+  ],
+  "web.home.addRow.collections.empty": [
+    {
+      "type": 0,
+      "value": "下から1つ以上のコレクションを追加してください。"
+    }
+  ],
+  "web.home.addRow.collections.limit": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "1つの行に追加できるコレクションは"
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": "件までです。"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.home.addRow.collections.moveDown": [
+    {
+      "type": 1,
+      "value": "collection"
+    },
+    {
+      "type": 0,
+      "value": "を下に移動"
+    }
+  ],
+  "web.home.addRow.collections.moveUp": [
+    {
+      "type": 1,
+      "value": "collection"
+    },
+    {
+      "type": 0,
+      "value": "を上に移動"
+    }
+  ],
+  "web.home.addRow.collections.remove": [
+    {
+      "type": 1,
+      "value": "collection"
+    },
+    {
+      "type": 0,
+      "value": "を外す"
+    }
+  ],
+  "web.home.addRow.collections.unavailable": [
+    {
+      "type": 0,
+      "value": "利用できなくなりました"
+    }
+  ],
+  "web.home.addRow.collections.yours": [
+    {
+      "type": 0,
+      "value": "自分"
+    }
+  ],
   "web.home.addRow.conflict": [
     {
       "type": 0,
@@ -99152,16 +99462,112 @@
       }
     }
   ],
+  "web.home.rows.describe.collectionCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": "件のコレクション"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.home.rows.describe.collectionGone": [
     {
       "type": 0,
       "value": "コレクションは利用できなくなりました"
     }
   ],
+  "web.home.rows.describe.collectionList": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": "件のコレクション："
+            },
+            {
+              "type": 1,
+              "value": "names"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.home.rows.describe.collectionListMore": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "他"
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": "件"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.home.rows.describe.collectionUnknown": [
     {
       "type": 0,
       "value": "コレクション"
+    }
+  ],
+  "web.home.rows.describe.collectionsGone": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": "件のコレクションが利用できなくなりました"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.home.rows.describe.curated": [
@@ -100568,6 +100974,12 @@
       "value": "各視聴者が後で見るために保存したもの"
     }
   ],
+  "web.home.rows.draft.addCollection": [
+    {
+      "type": 0,
+      "value": "コレクションを追加すると行が表示されます。"
+    }
+  ],
   "web.home.rows.draft.addTitles": [
     {
       "type": 0,
@@ -100820,6 +101232,12 @@
       "value": "コレクションを1つ表示します。"
     }
   ],
+  "web.home.rows.kindSentences.collectionPosters": [
+    {
+      "type": 0,
+      "value": "複数のコレクションをポスターで表示します。各ポスターからそのコレクションを開けます。"
+    }
+  ],
   "web.home.rows.kindSentences.continueWatching": [
     {
       "type": 0,
@@ -101022,6 +101440,12 @@
     {
       "type": 0,
       "value": "コレクション"
+    }
+  ],
+  "web.home.rows.kinds.collectionPosters": [
+    {
+      "type": 0,
+      "value": "コレクションの行"
     }
   ],
   "web.home.rows.kinds.continueWatching": [
@@ -106344,6 +106768,12 @@
       "value": "お気に入り、ウォッチリストに追加、または視聴中のシリーズに新しいエピソードが追加されると、ここに通知されます。"
     }
   ],
+  "web.notifications.inbox.emptyHintNextUp": [
+    {
+      "type": 0,
+      "value": "視聴が追いついているシリーズに新しいエピソードが追加されたとき、またはウォッチリストに追加したタイトルやリクエストしたタイトルがライブラリに追加されたときに、ここに通知されます。"
+    }
+  ],
   "web.notifications.inbox.emptyUnread": [
     {
       "type": 0,
@@ -106710,6 +107140,30 @@
     {
       "type": 0,
       "value": "通知の表示"
+    }
+  ],
+  "web.notifications.inbox.watchlistAvailable": [
+    {
+      "type": 0,
+      "value": "ウォッチリストのタイトルが視聴可能"
+    }
+  ],
+  "web.notifications.inbox.watchlistMovieAvailable": [
+    {
+      "type": 0,
+      "value": "ウォッチリストの映画が視聴可能になりました"
+    }
+  ],
+  "web.notifications.inbox.watchlistSeriesAvailable": [
+    {
+      "type": 0,
+      "value": "ウォッチリストのシリーズが視聴可能になりました"
+    }
+  ],
+  "web.notifications.inbox.watchlistTitleAvailable": [
+    {
+      "type": 0,
+      "value": "ウォッチリストのタイトルが視聴可能になりました"
     }
   ],
   "web.notifications.preferences.continueWatching": [
@@ -107130,6 +107584,12 @@
       "value": "選択したシリーズ"
     }
   ],
+  "web.notifications.series.afterCatchUp": [
+    {
+      "type": 0,
+      "value": "視聴が追いついた後"
+    }
+  ],
   "web.notifications.series.allReasons": [
     {
       "type": 0,
@@ -107188,10 +107648,22 @@
       "value": "お気に入りやウォッチリストに追加したシリーズ、視聴を始めたシリーズがここに表示されます。"
     }
   ],
+  "web.notifications.series.emptyHintNextUp": [
+    {
+      "type": 0,
+      "value": "エピソードを見終わると、そのシリーズがここに表示されます。シリーズの視聴が追いつくと、次のエピソードが追加されたときに通知されます。"
+    }
+  ],
   "web.notifications.series.filterByReason": [
     {
       "type": 0,
       "value": "理由で絞り込む"
+    }
+  ],
+  "web.notifications.series.filterLabel": [
+    {
+      "type": 0,
+      "value": "シリーズを絞り込む"
     }
   ],
   "web.notifications.series.intro": [
@@ -107298,10 +107770,32 @@
       "value": "last"
     }
   ],
+  "web.notifications.series.nextEpisodeAfter": [
+    {
+      "type": 1,
+      "value": "code"
+    },
+    {
+      "type": 0,
+      "value": "の次のエピソード"
+    }
+  ],
+  "web.notifications.series.nextNewEpisode": [
+    {
+      "type": 0,
+      "value": "次の新しいエピソード"
+    }
+  ],
   "web.notifications.series.noMatch": [
     {
       "type": 0,
       "value": "一致するシリーズがありません。別の検索語句か理由をお試しください。"
+    }
+  ],
+  "web.notifications.series.noMatchFilter": [
+    {
+      "type": 0,
+      "value": "一致するシリーズがありません。別の検索語句かフィルターをお試しください。"
     }
   ],
   "web.notifications.series.notificationsOff": [
@@ -107478,6 +107972,12 @@
     {
       "type": 0,
       "value": "が視聴可能になりました"
+    }
+  ],
+  "web.notifications.toast.watchlistArrived": [
+    {
+      "type": 0,
+      "value": "ウォッチリストのタイトルがライブラリに追加されました。"
     }
   ],
   "web.onboarding.gate.progressFailed": [
@@ -115020,6 +115520,340 @@
       "value": "詳細"
     }
   ],
+  "web.settings.apiKeys.create.access": [
+    {
+      "type": 0,
+      "value": "アクセス権限"
+    }
+  ],
+  "web.settings.apiKeys.create.accessHint": [
+    {
+      "type": 0,
+      "value": "1つ以上選択してください。どのキーでもメディアの再生、ストリーミング、ダウンロードはできません。"
+    }
+  ],
+  "web.settings.apiKeys.create.actsAs": [
+    {
+      "type": 0,
+      "value": "動作する対象"
+    }
+  ],
+  "web.settings.apiKeys.create.actsAsHint": [
+    {
+      "type": 0,
+      "value": "1つのプロフィール用のキーは、常にそのプロフィールとして動作し、その制限が適用されます。アカウント全体のキーは、アカウント内の任意のプロフィールとして動作できます。"
+    }
+  ],
+  "web.settings.apiKeys.create.copied": [
+    {
+      "type": 0,
+      "value": "クリップボードにコピーしました"
+    }
+  ],
+  "web.settings.apiKeys.create.copyAndClose": [
+    {
+      "type": 0,
+      "value": "コピーして閉じる"
+    }
+  ],
+  "web.settings.apiKeys.create.copyFailed": [
+    {
+      "type": 0,
+      "value": "コピーできませんでした。キーを選択して手動でコピーしてください。"
+    }
+  ],
+  "web.settings.apiKeys.create.creating": [
+    {
+      "type": 0,
+      "value": "作成中…"
+    }
+  ],
+  "web.settings.apiKeys.create.description": [
+    {
+      "type": 0,
+      "value": "キー全体は一度だけ表示されます。"
+    }
+  ],
+  "web.settings.apiKeys.create.label": [
+    {
+      "type": 0,
+      "value": "ラベル"
+    }
+  ],
+  "web.settings.apiKeys.create.secretNotice": [
+    {
+      "type": 0,
+      "value": "今すぐAPIキーをコピーしてください。再度表示することはできません。"
+    }
+  ],
+  "web.settings.apiKeys.create.submit": [
+    {
+      "type": 0,
+      "value": "作成"
+    }
+  ],
+  "web.settings.apiKeys.create.title": [
+    {
+      "type": 0,
+      "value": "APIキーを作成"
+    }
+  ],
+  "web.settings.apiKeys.create.uncertain": [
+    {
+      "type": 0,
+      "value": "結果を確認できません。別のキーを作成する前にページを再読み込みしてください。"
+    }
+  ],
+  "web.settings.apiKeys.createKey": [
+    {
+      "type": 0,
+      "value": "キーを作成"
+    }
+  ],
+  "web.settings.apiKeys.disabled": [
+    {
+      "type": 0,
+      "value": "このサーバーではユーザーがAPIキーを作成できません。管理者にこの機能をオンにするよう依頼してください。"
+    }
+  ],
+  "web.settings.apiKeys.empty": [
+    {
+      "type": 0,
+      "value": "APIキーはまだありません。"
+    }
+  ],
+  "web.settings.apiKeys.limitReached": [
+    {
+      "type": 0,
+      "value": "キーの上限（"
+    },
+    {
+      "type": 1,
+      "value": "max"
+    },
+    {
+      "type": 0,
+      "value": "個）に達しました。新しいキーを作成するには、いずれかを無効化してください。"
+    }
+  ],
+  "web.settings.apiKeys.list.created": [
+    {
+      "type": 0,
+      "value": "作成日："
+    },
+    {
+      "type": 1,
+      "value": "date"
+    }
+  ],
+  "web.settings.apiKeys.list.heading": [
+    {
+      "type": 0,
+      "value": "キー一覧"
+    }
+  ],
+  "web.settings.apiKeys.list.lastUsed": [
+    {
+      "type": 0,
+      "value": "最終使用："
+    },
+    {
+      "type": 1,
+      "value": "date"
+    }
+  ],
+  "web.settings.apiKeys.list.loadMore": [
+    {
+      "type": 0,
+      "value": "さらに読み込む"
+    }
+  ],
+  "web.settings.apiKeys.list.neverUsed": [
+    {
+      "type": 0,
+      "value": "未使用"
+    }
+  ],
+  "web.settings.apiKeys.list.profile": [
+    {
+      "type": 0,
+      "value": "プロフィール："
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    }
+  ],
+  "web.settings.apiKeys.list.revoke": [
+    {
+      "type": 0,
+      "value": "無効化"
+    }
+  ],
+  "web.settings.apiKeys.list.revokeNamed": [
+    {
+      "type": 1,
+      "value": "label"
+    },
+    {
+      "type": 0,
+      "value": "を無効化"
+    }
+  ],
+  "web.settings.apiKeys.list.wholeAccount": [
+    {
+      "type": 0,
+      "value": "アカウント全体"
+    }
+  ],
+  "web.settings.apiKeys.loadFailed": [
+    {
+      "type": 0,
+      "value": "APIキーを読み込めませんでした。"
+    }
+  ],
+  "web.settings.apiKeys.loading": [
+    {
+      "type": 0,
+      "value": "APIキーを読み込み中…"
+    }
+  ],
+  "web.settings.apiKeys.revoke.description": [
+    {
+      "type": 1,
+      "value": "label"
+    },
+    {
+      "type": 0,
+      "value": "はすぐに使用できなくなります。この操作は元に戻せません。"
+    }
+  ],
+  "web.settings.apiKeys.revoke.done": [
+    {
+      "type": 0,
+      "value": "APIキーを無効化しました"
+    }
+  ],
+  "web.settings.apiKeys.revoke.failed": [
+    {
+      "type": 0,
+      "value": "キーを無効化できませんでした。ページを再読み込みして、もう一度お試しください。"
+    }
+  ],
+  "web.settings.apiKeys.revoke.title": [
+    {
+      "type": 0,
+      "value": "APIキーを無効化"
+    }
+  ],
+  "web.settings.apiKeys.revoke.working": [
+    {
+      "type": 0,
+      "value": "無効化中…"
+    }
+  ],
+  "web.settings.apiKeys.scope.catalogRead": [
+    {
+      "type": 0,
+      "value": "プロフィールが閲覧できる内容（ライブラリ、ホームとライブラリの行、タイトル、人物、検索）を参照します。"
+    }
+  ],
+  "web.settings.apiKeys.scope.librariesRead": [
+    {
+      "type": 0,
+      "value": "プロフィールが持つライブラリを確認します。"
+    }
+  ],
+  "web.settings.apiKeys.scope.notifications": [
+    {
+      "type": 0,
+      "value": "プロフィールの通知を受信時に読み取り、既読にします。"
+    }
+  ],
+  "web.settings.apiKeys.scope.requests": [
+    {
+      "type": 0,
+      "value": "リクエスト可能なタイトルを参照し、メディアリクエストの作成、フォロー、キャンセルを行います。"
+    }
+  ],
+  "web.settings.apiKeys.scope.watchRead": [
+    {
+      "type": 0,
+      "value": "プロフィールの視聴履歴、進行状況、評価、お気に入り、ウォッチリスト、非表示のタイトルを読み取り、データをエクスポートします。"
+    }
+  ],
+  "web.settings.apiKeys.scope.watchWrite": [
+    {
+      "type": 0,
+      "value": "タイトルを視聴済みまたは未視聴にし、進行状況の同期、履歴の削除、評価・お気に入り・ウォッチリスト・非表示のタイトルの編集を行います。"
+    }
+  ],
+  "web.settings.apiKeys.subtitle": [
+    {
+      "type": 0,
+      "value": "キーを使うと、スクリプトやアプリがパスワードなしでSiloのデータを読み取り、更新できます。"
+    }
+  ],
+  "web.settings.apiKeys.title": [
+    {
+      "type": 0,
+      "value": "APIキー"
+    }
+  ],
+  "web.settings.apiKeys.usage.accountKey": [
+    {
+      "type": 0,
+      "value": "このキーはアカウント内の任意のプロフィールとして動作できます。リクエストごとに、このヘッダーでプロフィールを指定してください。例では"
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": "を使用しています。"
+    },
+    {
+      "type": 1,
+      "value": "endpoint"
+    },
+    {
+      "type": 0,
+      "value": "ですべてのプロフィールのIDを一覧表示できます。"
+    }
+  ],
+  "web.settings.apiKeys.usage.docs": [
+    {
+      "type": 0,
+      "value": "APIリファレンス"
+    }
+  ],
+  "web.settings.apiKeys.usage.header": [
+    {
+      "type": 0,
+      "value": "すべてのリクエストで、このヘッダーに含めて送信してください："
+    }
+  ],
+  "web.settings.apiKeys.usage.profileKey": [
+    {
+      "type": 0,
+      "value": "このキーは常に"
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": "として動作します。プロフィールのヘッダーは不要です。"
+    }
+  ],
+  "web.settings.apiKeys.usage.title": [
+    {
+      "type": 0,
+      "value": "このキーの使い方"
+    }
+  ],
   "web.settings.cardOverlay.adjust": [
     {
       "type": 0,
@@ -118210,6 +119044,12 @@
       "value": "世帯のすべてのプロフィールで共有するパスワードとサインインプロバイダー。"
     }
   ],
+  "web.settings.nav.apiKeys.description": [
+    {
+      "type": 0,
+      "value": "視聴履歴やリストを扱うスクリプトやアプリ用のキー。"
+    }
+  ],
   "web.settings.nav.connectApps.description": [
     {
       "type": 0,
@@ -118782,6 +119622,12 @@
       "value": "このプロフィールの通知全体のスイッチ"
     }
   ],
+  "web.settings.notifications.episodes.nextUpDescription": [
+    {
+      "type": 0,
+      "value": "視聴が追いついているシリーズに新しいエピソードが追加されたとき、またはウォッチリストに追加したタイトルやリクエストしたタイトルがライブラリに追加されたときに通知されます。"
+    }
+  ],
   "web.settings.notifications.episodes.seriesLink": [
     {
       "type": 0,
@@ -119067,7 +119913,7 @@
   "web.settings.notifications.reason.requests": [
     {
       "type": 0,
-      "value": "リクエスト"
+      "value": "リクエストとウォッチリスト"
     }
   ],
   "web.settings.notifications.reason.watchlist": [

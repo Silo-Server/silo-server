@@ -2,11 +2,14 @@ package metadata
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/fspath"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/rootcheck"
@@ -142,6 +145,102 @@ func applyLocalArtworkFallback(item, existing *models.MediaItem, images []Remote
 			}
 		}
 		*field.path = localArtworkFallbackPath(*field.path, *field.source, fallback)
+	}
+}
+
+// saveProvisionalLocalArtwork stores the local sidecar poster, backdrop and
+// logo a run found for a pending, unmatched or ambiguous item no provider gave
+// metadata; a matched item reaches this point only when its providers failed,
+// and is left alone. Remote images from the run are ignored, because an
+// unmatched item must not take art from an unconfirmed ID; only a remote image
+// the slot already serves can stand in while the copy is pending. Otherwise
+// slots follow applyBestImages and the queue preparation, so the artwork lock
+// behaves as for a matched item. Only the artwork columns of slots taking a
+// new local source are written, and only while the row is still provisional
+// with the sources and images lock read here. Such a slot drops a cached copy
+// of its previous source, so a replaced sidecar shows no image until its new
+// copy lands, and a slot on its sidecar with a cached copy is settled: it is
+// left alone, any other slot on its sidecar is queued again. A settled item
+// costs one item read per run. A failure is logged; the outcome stands.
+func (s *MetadataService) saveProvisionalLocalArtwork(ctx context.Context, contentID, language string, images []RemoteImage) {
+	images = slices.DeleteFunc(slices.Clone(images), func(img RemoteImage) bool { return !isLocalImageSourcePath(img.URL) })
+	if contentID == "" || len(images) == 0 {
+		return
+	}
+	existing, err := s.itemRepo.GetByID(ctx, contentID)
+	if err != nil {
+		if !errors.Is(err, catalog.ErrItemNotFound) {
+			slog.WarnContext(ctx, "metadata: failed to load item for local artwork", "component", "metadata",
+				"content_id", contentID, "error", err)
+		}
+		return
+	}
+	if !isProvisionalOwnershipStatus(existing.Status) {
+		return
+	}
+	item := *existing
+	fallback := s.configuredFallbackLanguage()
+	applyBestImages(&item, images, MergeFillEmpty, language, fallback)
+	// Local artwork is only found with image caching on, so stored copies keep
+	// serving until the new copy lands.
+	prepareItemImagesForQueue(&item, existing, true, false)
+	applyLocalArtworkFallback(&item, existing, images, language, fallback)
+
+	queued := &models.MediaItem{ContentID: existing.ContentID, Type: existing.Type}
+	var upd catalog.MetadataUpdate
+	write := false
+	stored, queue := itemArtworkFields(existing), itemArtworkFields(queued)
+	for i, field := range itemArtworkFields(&item) {
+		// The update has columns for the poster, backdrop and logo only.
+		if isItemOnlyArtworkType(field.imageType) || !isLocalImageSourcePath(*field.source) {
+			continue
+		}
+		if *field.source != *stored[i].source {
+			dropPreviousCopy(field)
+			setArtworkUpdate(&upd, field)
+			write = true
+		} else if isCachedImagePath(*stored[i].path) {
+			continue
+		}
+		*queue[i].path, *queue[i].source = *field.path, *field.source
+	}
+	if write {
+		wrote, err := s.itemRepo.UpdateProvisionalArtwork(ctx, existing, &upd)
+		if err != nil {
+			slog.WarnContext(ctx, "metadata: failed to save local artwork for unmatched item", "component", "metadata",
+				"content_id", contentID, "error", err)
+			return
+		}
+		if !wrote {
+			// Another writer changed the row; the next run looks again.
+			return
+		}
+	}
+	_ = s.enqueueItemImages(ctx, queued, nil, images) // logged by enqueueImageCacheJobs
+}
+
+// dropPreviousCopy empties a slot taking a new source that still serves a
+// cached copy, which can only be of its previous source: kept, it would make a
+// lost copy job of the new source look settled on every later run.
+func dropPreviousCopy(field itemArtworkField) {
+	if !isCachedImagePath(*field.path) {
+		return
+	}
+	*field.path = ""
+	if field.thumbhash != nil {
+		*field.thumbhash = ""
+	}
+}
+
+// setArtworkUpdate sets field's path, source and thumbhash on upd.
+func setArtworkUpdate(upd *catalog.MetadataUpdate, field itemArtworkField) {
+	switch field.imageType {
+	case ImagePoster:
+		upd.PosterPath, upd.PosterSourcePath, upd.PosterThumbhash = field.path, field.source, field.thumbhash
+	case ImageBackdrop:
+		upd.BackdropPath, upd.BackdropSourcePath, upd.BackdropThumbhash = field.path, field.source, field.thumbhash
+	case ImageLogo:
+		upd.LogoPath, upd.LogoSourcePath = field.path, field.source
 	}
 }
 

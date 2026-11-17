@@ -701,6 +701,18 @@
       "value": "Samling"
     }
   ],
+  "home.recipe.collectionPostersPick.description": [
+    {
+      "type": 0,
+      "value": "Vis flere samlinger som plakater. Hver av dem åpner sin samling."
+    }
+  ],
+  "home.recipe.collectionPostersPick.name": [
+    {
+      "type": 0,
+      "value": "En rad med samlinger"
+    }
+  ],
   "home.recipe.continueListeningDefault.description": [
     {
       "type": 0,
@@ -72719,6 +72731,12 @@
       "value": "Tillat pålogging med passord"
     }
   ],
+  "web.admin.settings.signIn.page.apiKeysGroup": [
+    {
+      "type": 0,
+      "value": "API-nøkler"
+    }
+  ],
   "web.admin.settings.signIn.page.breakGlassAdmins": [
     {
       "type": 6,
@@ -72903,6 +72921,18 @@
     {
       "type": 0,
       "value": "Pålogging"
+    }
+  ],
+  "web.admin.settings.signIn.page.userApiKeysDescription": [
+    {
+      "type": 0,
+      "value": "Alle kontoer kan opprette nøkler for sine egne profiler under Innstillinger → API-nøkler. Disse nøklene kan lese og endre seerhistorikk, lister og forespørsler, men kan ikke spille av eller laste ned medier. Hvis du slår av dette, kan ingen nye nøkler opprettes. Eksisterende nøkler fortsetter å virke til de blir tilbakekalt."
+    }
+  ],
+  "web.admin.settings.signIn.page.userApiKeysLabel": [
+    {
+      "type": 0,
+      "value": "La brukere opprette API-nøkler"
     }
   ],
   "web.admin.settings.signIn.provider.accounts.title": [
@@ -92360,6 +92390,48 @@
       "value": "?"
     }
   ],
+  "web.collections.copy.deleteWithRowChangesLabel": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Slett den og endre "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " rad"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Slett den og endre "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " rader"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.collections.copy.deleteWithRowsLabel": [
     {
       "type": 6,
@@ -93834,6 +93906,20 @@
     {
       "type": 0,
       "value": " for alle."
+    }
+  ],
+  "web.collections.copy.removedFromRow": [
+    {
+      "type": 0,
+      "value": "Fjerner den fra raden «"
+    },
+    {
+      "type": 1,
+      "value": "title"
+    },
+    {
+      "type": 0,
+      "value": "». Raden beholder de andre samlingene sine."
     }
   ],
   "web.collections.copy.removedTitle": [
@@ -101728,6 +101814,12 @@
       "value": "Kontoinnstillinger"
     }
   ],
+  "web.common.title.settings.apiKeys": [
+    {
+      "type": 0,
+      "value": "Innstillinger for API-nøkler"
+    }
+  ],
   "web.common.title.settings.connectApps": [
     {
       "type": 0,
@@ -106188,6 +106280,284 @@
       "value": "."
     }
   ],
+  "web.home.addRow.collections.add": [
+    {
+      "type": 0,
+      "value": "Legg til"
+    }
+  ],
+  "web.home.addRow.collections.addLabel": [
+    {
+      "type": 0,
+      "value": "Legg til samlinger"
+    }
+  ],
+  "web.home.addRow.collections.added": [
+    {
+      "type": 0,
+      "value": "Lagt til"
+    }
+  ],
+  "web.home.addRow.collections.chosenLabel": [
+    {
+      "type": 0,
+      "value": "Samlinger i denne raden"
+    }
+  ],
+  "web.home.addRow.collections.count": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " samling, vist i denne rekkefølgen"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " samlinger, vist i denne rekkefølgen"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.home.addRow.collections.drag.canceled": [
+    {
+      "type": 0,
+      "value": "Flyttingen av "
+    },
+    {
+      "type": 1,
+      "value": "collection"
+    },
+    {
+      "type": 0,
+      "value": " ble avbrutt."
+    }
+  ],
+  "web.home.addRow.collections.drag.dropped": [
+    {
+      "type": 1,
+      "value": "collection"
+    },
+    {
+      "type": 0,
+      "value": " er sluppet."
+    }
+  ],
+  "web.home.addRow.collections.drag.droppedAt": [
+    {
+      "type": 1,
+      "value": "collection"
+    },
+    {
+      "type": 0,
+      "value": " er sluppet på plass "
+    },
+    {
+      "type": 1,
+      "value": "position"
+    },
+    {
+      "type": 0,
+      "value": " av "
+    },
+    {
+      "type": 1,
+      "value": "total"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.home.addRow.collections.drag.instructions": [
+    {
+      "type": 0,
+      "value": "For å flytte en samling, flytt fokus til håndtaket og trykk på Space eller Enter. Bruk pil opp og pil ned for å flytte den, Space eller Enter for å slippe den, eller Escape for å avbryte."
+    }
+  ],
+  "web.home.addRow.collections.drag.over": [
+    {
+      "type": 1,
+      "value": "collection"
+    },
+    {
+      "type": 0,
+      "value": " er nå på plass "
+    },
+    {
+      "type": 1,
+      "value": "position"
+    },
+    {
+      "type": 0,
+      "value": " av "
+    },
+    {
+      "type": 1,
+      "value": "total"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.home.addRow.collections.drag.pickedUp": [
+    {
+      "type": 0,
+      "value": "Plukket opp "
+    },
+    {
+      "type": 1,
+      "value": "collection"
+    },
+    {
+      "type": 0,
+      "value": ", plass "
+    },
+    {
+      "type": 1,
+      "value": "position"
+    },
+    {
+      "type": 0,
+      "value": " av "
+    },
+    {
+      "type": 1,
+      "value": "total"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.home.addRow.collections.dragHandle": [
+    {
+      "type": 0,
+      "value": "Endre rekkefølge for "
+    },
+    {
+      "type": 1,
+      "value": "collection"
+    }
+  ],
+  "web.home.addRow.collections.empty": [
+    {
+      "type": 0,
+      "value": "Legg til minst én samling nedenfor."
+    }
+  ],
+  "web.home.addRow.collections.limit": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "En rad kan inneholde opptil "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " samling."
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "En rad kan inneholde opptil "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " samlinger."
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.home.addRow.collections.moveDown": [
+    {
+      "type": 0,
+      "value": "Flytt "
+    },
+    {
+      "type": 1,
+      "value": "collection"
+    },
+    {
+      "type": 0,
+      "value": " ned"
+    }
+  ],
+  "web.home.addRow.collections.moveUp": [
+    {
+      "type": 0,
+      "value": "Flytt "
+    },
+    {
+      "type": 1,
+      "value": "collection"
+    },
+    {
+      "type": 0,
+      "value": " opp"
+    }
+  ],
+  "web.home.addRow.collections.remove": [
+    {
+      "type": 0,
+      "value": "Fjern "
+    },
+    {
+      "type": 1,
+      "value": "collection"
+    }
+  ],
+  "web.home.addRow.collections.unavailable": [
+    {
+      "type": 0,
+      "value": "Ikke lenger tilgjengelig"
+    }
+  ],
+  "web.home.addRow.collections.yours": [
+    {
+      "type": 0,
+      "value": "Din"
+    }
+  ],
   "web.home.addRow.conflict": [
     {
       "type": 0,
@@ -109353,16 +109723,160 @@
       }
     }
   ],
+  "web.home.rows.describe.collectionCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " samling"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " samlinger"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.home.rows.describe.collectionGone": [
     {
       "type": 0,
       "value": "Samlingen er ikke lenger tilgjengelig"
     }
   ],
+  "web.home.rows.describe.collectionList": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " samling: "
+            },
+            {
+              "type": 1,
+              "value": "names"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " samlinger: "
+            },
+            {
+              "type": 1,
+              "value": "names"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.home.rows.describe.collectionListMore": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " til"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " til"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.home.rows.describe.collectionUnknown": [
     {
       "type": 0,
       "value": "En samling"
+    }
+  ],
+  "web.home.rows.describe.collectionsGone": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " samling er ikke lenger tilgjengelig"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " samlinger er ikke lenger tilgjengelige"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.home.rows.describe.curated": [
@@ -110875,6 +111389,12 @@
       "value": "Det hver seer har lagret for å se senere"
     }
   ],
+  "web.home.rows.draft.addCollection": [
+    {
+      "type": 0,
+      "value": "Legg til en samling for å se raden."
+    }
+  ],
   "web.home.rows.draft.addTitles": [
     {
       "type": 0,
@@ -111135,6 +111655,12 @@
       "value": "Vis en av samlingene dine."
     }
   ],
+  "web.home.rows.kindSentences.collectionPosters": [
+    {
+      "type": 0,
+      "value": "Vis flere samlinger som plakater. Hver av dem åpner sin samling."
+    }
+  ],
   "web.home.rows.kindSentences.continueWatching": [
     {
       "type": 0,
@@ -111337,6 +111863,12 @@
     {
       "type": 0,
       "value": "En samling"
+    }
+  ],
+  "web.home.rows.kinds.collectionPosters": [
+    {
+      "type": 0,
+      "value": "En rad med samlinger"
     }
   ],
   "web.home.rows.kinds.continueWatching": [
@@ -117021,6 +117553,12 @@
       "value": "Du får varsler her når det kommer nye episoder av serier som er favoritter, står på huskelisten eller som du ser på."
     }
   ],
+  "web.notifications.inbox.emptyHintNextUp": [
+    {
+      "type": 0,
+      "value": "Du får varsler her når det kommer en ny episode av en serie du har sett alt av, eller når en tittel du har lagt på huskelisten eller forespurt, kommer."
+    }
+  ],
   "web.notifications.inbox.emptyUnread": [
     {
       "type": 0,
@@ -117411,6 +117949,30 @@
     {
       "type": 0,
       "value": "Varslingsvisninger"
+    }
+  ],
+  "web.notifications.inbox.watchlistAvailable": [
+    {
+      "type": 0,
+      "value": "Tittel på huskelisten tilgjengelig"
+    }
+  ],
+  "web.notifications.inbox.watchlistMovieAvailable": [
+    {
+      "type": 0,
+      "value": "En film på huskelisten din er nå tilgjengelig"
+    }
+  ],
+  "web.notifications.inbox.watchlistSeriesAvailable": [
+    {
+      "type": 0,
+      "value": "En serie på huskelisten din er nå tilgjengelig"
+    }
+  ],
+  "web.notifications.inbox.watchlistTitleAvailable": [
+    {
+      "type": 0,
+      "value": "En tittel på huskelisten din er nå tilgjengelig"
     }
   ],
   "web.notifications.preferences.continueWatching": [
@@ -117883,6 +118445,12 @@
       "value": "Valgte serier"
     }
   ],
+  "web.notifications.series.afterCatchUp": [
+    {
+      "type": 0,
+      "value": "Når du har sett alt"
+    }
+  ],
   "web.notifications.series.allReasons": [
     {
       "type": 0,
@@ -117941,10 +118509,22 @@
       "value": "Serier du markerer som favoritt, legger til i huskelisten eller begynner å se, vises her."
     }
   ],
+  "web.notifications.series.emptyHintNextUp": [
+    {
+      "type": 0,
+      "value": "Serier vises her etter at du har sett ferdig en episode. Når du har sett alt i en serie, blir du varslet når neste episode kommer."
+    }
+  ],
   "web.notifications.series.filterByReason": [
     {
       "type": 0,
       "value": "Filtrer etter årsak"
+    }
+  ],
+  "web.notifications.series.filterLabel": [
+    {
+      "type": 0,
+      "value": "Filtrer serier"
     }
   ],
   "web.notifications.series.intro": [
@@ -118051,10 +118631,32 @@
       "value": "last"
     }
   ],
+  "web.notifications.series.nextEpisodeAfter": [
+    {
+      "type": 0,
+      "value": "Neste episode etter "
+    },
+    {
+      "type": 1,
+      "value": "code"
+    }
+  ],
+  "web.notifications.series.nextNewEpisode": [
+    {
+      "type": 0,
+      "value": "Neste nye episode"
+    }
+  ],
   "web.notifications.series.noMatch": [
     {
       "type": 0,
       "value": "Ingen serier samsvarer. Prøv et annet søk eller en annen årsak."
+    }
+  ],
+  "web.notifications.series.noMatchFilter": [
+    {
+      "type": 0,
+      "value": "Ingen serier samsvarer. Prøv et annet søk eller filter."
     }
   ],
   "web.notifications.series.notificationsOff": [
@@ -118235,6 +118837,12 @@
     {
       "type": 0,
       "value": " er nå tilgjengelig"
+    }
+  ],
+  "web.notifications.toast.watchlistArrived": [
+    {
+      "type": 0,
+      "value": "En tittel på huskelisten din har kommet til biblioteket."
     }
   ],
   "web.onboarding.gate.progressFailed": [
@@ -126353,6 +126961,340 @@
       "value": "Avansert"
     }
   ],
+  "web.settings.apiKeys.create.access": [
+    {
+      "type": 0,
+      "value": "Tilgang"
+    }
+  ],
+  "web.settings.apiKeys.create.accessHint": [
+    {
+      "type": 0,
+      "value": "Velg minst én. Ingen nøkkel kan spille av, strømme eller laste ned medier."
+    }
+  ],
+  "web.settings.apiKeys.create.actsAs": [
+    {
+      "type": 0,
+      "value": "Opptrer som"
+    }
+  ],
+  "web.settings.apiKeys.create.actsAsHint": [
+    {
+      "type": 0,
+      "value": "En nøkkel for én profil opptrer alltid som den profilen og beholder grensene dens. En nøkkel for hele kontoen kan opptre som hvilken som helst profil på kontoen din."
+    }
+  ],
+  "web.settings.apiKeys.create.copied": [
+    {
+      "type": 0,
+      "value": "Kopiert til utklippstavlen"
+    }
+  ],
+  "web.settings.apiKeys.create.copyAndClose": [
+    {
+      "type": 0,
+      "value": "Kopier og lukk"
+    }
+  ],
+  "web.settings.apiKeys.create.copyFailed": [
+    {
+      "type": 0,
+      "value": "Kunne ikke kopiere. Merk nøkkelen og kopier den manuelt."
+    }
+  ],
+  "web.settings.apiKeys.create.creating": [
+    {
+      "type": 0,
+      "value": "Oppretter …"
+    }
+  ],
+  "web.settings.apiKeys.create.description": [
+    {
+      "type": 0,
+      "value": "Hele nøkkelen vises bare én gang."
+    }
+  ],
+  "web.settings.apiKeys.create.label": [
+    {
+      "type": 0,
+      "value": "Etikett"
+    }
+  ],
+  "web.settings.apiKeys.create.secretNotice": [
+    {
+      "type": 0,
+      "value": "Kopier API-nøkkelen din nå. Du kan ikke se den igjen."
+    }
+  ],
+  "web.settings.apiKeys.create.submit": [
+    {
+      "type": 0,
+      "value": "Opprett"
+    }
+  ],
+  "web.settings.apiKeys.create.title": [
+    {
+      "type": 0,
+      "value": "Opprett API-nøkkel"
+    }
+  ],
+  "web.settings.apiKeys.create.uncertain": [
+    {
+      "type": 0,
+      "value": "Resultatet er usikkert. Last inn siden på nytt før du oppretter en ny nøkkel."
+    }
+  ],
+  "web.settings.apiKeys.createKey": [
+    {
+      "type": 0,
+      "value": "Opprett nøkkel"
+    }
+  ],
+  "web.settings.apiKeys.disabled": [
+    {
+      "type": 0,
+      "value": "Denne serveren lar ikke brukere opprette API-nøkler. Be administratoren om å slå det på."
+    }
+  ],
+  "web.settings.apiKeys.empty": [
+    {
+      "type": 0,
+      "value": "Ingen API-nøkler ennå."
+    }
+  ],
+  "web.settings.apiKeys.limitReached": [
+    {
+      "type": 0,
+      "value": "Du har nådd grensen på "
+    },
+    {
+      "type": 1,
+      "value": "max"
+    },
+    {
+      "type": 0,
+      "value": " nøkler. Tilbakekall én for å opprette en ny."
+    }
+  ],
+  "web.settings.apiKeys.list.created": [
+    {
+      "type": 0,
+      "value": "Opprettet "
+    },
+    {
+      "type": 1,
+      "value": "date"
+    }
+  ],
+  "web.settings.apiKeys.list.heading": [
+    {
+      "type": 0,
+      "value": "Nøklene dine"
+    }
+  ],
+  "web.settings.apiKeys.list.lastUsed": [
+    {
+      "type": 0,
+      "value": "Sist brukt "
+    },
+    {
+      "type": 1,
+      "value": "date"
+    }
+  ],
+  "web.settings.apiKeys.list.loadMore": [
+    {
+      "type": 0,
+      "value": "Last inn flere"
+    }
+  ],
+  "web.settings.apiKeys.list.neverUsed": [
+    {
+      "type": 0,
+      "value": "Aldri brukt"
+    }
+  ],
+  "web.settings.apiKeys.list.profile": [
+    {
+      "type": 0,
+      "value": "Profil: "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    }
+  ],
+  "web.settings.apiKeys.list.revoke": [
+    {
+      "type": 0,
+      "value": "Tilbakekall"
+    }
+  ],
+  "web.settings.apiKeys.list.revokeNamed": [
+    {
+      "type": 0,
+      "value": "Tilbakekall "
+    },
+    {
+      "type": 1,
+      "value": "label"
+    }
+  ],
+  "web.settings.apiKeys.list.wholeAccount": [
+    {
+      "type": 0,
+      "value": "Hele kontoen"
+    }
+  ],
+  "web.settings.apiKeys.loadFailed": [
+    {
+      "type": 0,
+      "value": "Kunne ikke laste inn API-nøklene dine."
+    }
+  ],
+  "web.settings.apiKeys.loading": [
+    {
+      "type": 0,
+      "value": "Laster inn API-nøkler …"
+    }
+  ],
+  "web.settings.apiKeys.revoke.description": [
+    {
+      "type": 1,
+      "value": "label"
+    },
+    {
+      "type": 0,
+      "value": " slutter å virke med en gang. Dette kan ikke angres."
+    }
+  ],
+  "web.settings.apiKeys.revoke.done": [
+    {
+      "type": 0,
+      "value": "API-nøkkelen er tilbakekalt"
+    }
+  ],
+  "web.settings.apiKeys.revoke.failed": [
+    {
+      "type": 0,
+      "value": "Kunne ikke tilbakekalle nøkkelen. Last inn siden på nytt og prøv igjen."
+    }
+  ],
+  "web.settings.apiKeys.revoke.title": [
+    {
+      "type": 0,
+      "value": "Tilbakekall API-nøkkel"
+    }
+  ],
+  "web.settings.apiKeys.revoke.working": [
+    {
+      "type": 0,
+      "value": "Tilbakekaller …"
+    }
+  ],
+  "web.settings.apiKeys.scope.catalogRead": [
+    {
+      "type": 0,
+      "value": "Bla gjennom det profilen kan se: biblioteker, rader på Hjem og i biblioteker, titler, personer og søk."
+    }
+  ],
+  "web.settings.apiKeys.scope.librariesRead": [
+    {
+      "type": 0,
+      "value": "Se hvilke biblioteker profilen har."
+    }
+  ],
+  "web.settings.apiKeys.scope.notifications": [
+    {
+      "type": 0,
+      "value": "Les profilens varsler etter hvert som de kommer, og merk dem som lest."
+    }
+  ],
+  "web.settings.apiKeys.scope.requests": [
+    {
+      "type": 0,
+      "value": "Bla gjennom titler som kan forespørres, og opprett, følg og avbryt medieforespørsler."
+    }
+  ],
+  "web.settings.apiKeys.scope.watchRead": [
+    {
+      "type": 0,
+      "value": "Les profilens seerhistorikk, fremdrift, vurderinger, favoritter, huskeliste og skjulte titler, og eksporter dataene."
+    }
+  ],
+  "web.settings.apiKeys.scope.watchWrite": [
+    {
+      "type": 0,
+      "value": "Merk titler som sett eller ikke sett, synkroniser fremdrift, fjern historikk og rediger vurderinger, favoritter, huskeliste og skjulte titler."
+    }
+  ],
+  "web.settings.apiKeys.subtitle": [
+    {
+      "type": 0,
+      "value": "Med nøkler kan skript og apper lese og oppdatere Silo-dataene dine uten passordet ditt."
+    }
+  ],
+  "web.settings.apiKeys.title": [
+    {
+      "type": 0,
+      "value": "API-nøkler"
+    }
+  ],
+  "web.settings.apiKeys.usage.accountKey": [
+    {
+      "type": 0,
+      "value": "Denne nøkkelen kan opptre som hvilken som helst profil på kontoen din. Velg én per forespørsel med denne headeren. Eksempelet bruker "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": "; "
+    },
+    {
+      "type": 1,
+      "value": "endpoint"
+    },
+    {
+      "type": 0,
+      "value": " viser ID-en til hver profil."
+    }
+  ],
+  "web.settings.apiKeys.usage.docs": [
+    {
+      "type": 0,
+      "value": "API-referanse"
+    }
+  ],
+  "web.settings.apiKeys.usage.header": [
+    {
+      "type": 0,
+      "value": "Send den med hver forespørsel i denne headeren:"
+    }
+  ],
+  "web.settings.apiKeys.usage.profileKey": [
+    {
+      "type": 0,
+      "value": "Denne nøkkelen opptrer alltid som "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": ". Den trenger ingen profilheader."
+    }
+  ],
+  "web.settings.apiKeys.usage.title": [
+    {
+      "type": 0,
+      "value": "Slik bruker du denne nøkkelen"
+    }
+  ],
   "web.settings.cardOverlay.adjust": [
     {
       "type": 0,
@@ -129805,6 +130747,12 @@
       "value": "Passordet og påloggingsleverandørene som alle profilene i husstanden deler."
     }
   ],
+  "web.settings.nav.apiKeys.description": [
+    {
+      "type": 0,
+      "value": "Nøkler for skript og apper som bruker seerhistorikken og listene dine."
+    }
+  ],
   "web.settings.nav.connectApps.description": [
     {
       "type": 0,
@@ -130381,6 +131329,12 @@
       "value": "Hovedbryter for denne profilen"
     }
   ],
+  "web.settings.notifications.episodes.nextUpDescription": [
+    {
+      "type": 0,
+      "value": "Få varsler når det kommer en ny episode av en serie du har sett alt av, eller når en tittel du har lagt på huskelisten eller forespurt, kommer."
+    }
+  ],
   "web.settings.notifications.episodes.seriesLink": [
     {
       "type": 0,
@@ -130670,7 +131624,7 @@
   "web.settings.notifications.reason.requests": [
     {
       "type": 0,
-      "value": "Forespørsler"
+      "value": "Forespørsler og huskeliste"
     }
   ],
   "web.settings.notifications.reason.watchlist": [

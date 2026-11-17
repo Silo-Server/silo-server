@@ -645,10 +645,24 @@ catalog check is never more than one renewal interval stale.
 
 On the node, `nodesource.Opener` exchanges the grant through
 `nodecontrol.Client.OpenSource`. With local source access it stats the approved
-path on its own mount and requires a regular file of the same size and
-modification time to the microsecond; with core access it serves the source on
-the loopback relay instead (see [Core source access](#core-source-access)). A
-mismatch is a `nodesource.MountMismatchError` naming both sides. A job route answers a missing or refused grant with `400`, a mismatch with
+path on its own mount and requires a regular file of the same size; with core
+access it serves the source on the loopback relay instead (see
+[Core source access](#core-source-access)). A mismatch is a
+`nodesource.MountMismatchError` naming both sides. The node does not compare
+the modification time: mounts of storage that keeps none each report a
+placeholder of their own, and network filesystems round times differently, so
+it tells two mounts apart more often than two files. A difference is logged,
+as a warning the first time and at debug afterwards, and the source reports
+both times (`ModTime`, `InputModTime`). Two things a job carries hold a file
+time the API server recorded, and playback compares each with a stat of the
+node's input, so the node restates them at its own mount's time when they name
+the granted revision. A session's planned subtitle version is restated, and
+otherwise made to match no file (`transcodenode.renditionSourceOnNode`), so
+on-demand subtitle segments still match the node's file. A tone-mapped job's
+catalog revision is restated (`transcodenode.toneMapRevisionOnNode`), so its
+recheck (`tonemap.SourceRevision.ValidatePath`) passes on the node's file; its
+size and content hash are checked either way, and a catalog revision the core
+did not grant is refused. A job route answers a missing or refused grant with `400`, a mismatch with
 `409`, and a core it cannot reach with `503` (`transcodenode.sourceFailure`);
 the caller runs the job elsewhere. A chapter thumbnail job refused for those
 two reasons, or because the node is draining or re-probing its hardware,
@@ -664,12 +678,15 @@ one minute until the current grant expires. A `400`, `403`, `404`, `410` or
 unreachable ends the source; a `401` is retried, since the core reloads keys
 when a signature fails.
 
-**Operator requirement.** Every API server, and every transcode node with local
-source access, must see each library file at the same path with the same size
-and the same modification time to the microsecond, as the shipped Compose file
-arranges by mounting the library at the same container path. A mismatch fails
-closed: the core answers `412`, and a node refuses the job with `409`. A node
-with core source access needs no library mount.
+**Operator requirement.** Every API server must see each library file at the
+same path with the same size and the same modification time to the
+microsecond: a grant minted on one is checked on another, and a difference
+answers `412`. Every transcode node with local source access must see each
+file at the same path with the same size, as the shipped Compose file arranges
+by mounting the library at the same container path; a file that is missing or
+of another size makes the node refuse the job with `409`. A node's mount may
+date files differently from the API servers'. A node with core source access
+needs no library mount.
 
 ## Core source access
 
@@ -904,7 +921,8 @@ the trickplay, media sample and chapter routes.
 | Key rotated | The old key stops working at once on the API server that issued the new one, and on every other API server and proxy when `node_pool_changed` reaches it. The node's calls get `401` and it reports `key_rejected` after its next configuration read (at once when another call got the `401`, else within 30 seconds); the next health sweep marks it unhealthy. The core's calls fail on the node, the relays answer "node unavailable" and ask their registry to reload, and nothing moves: its streams fail until it restarts with the new key. SIGTERM stops it at once, without waiting for those streams. |
 | Node clock more than 30 seconds off | Every signed request in either direction falls outside the signature window and gets `401`. The node reports `key_rejected` as for a rotated key; the logs name both causes. Fixing the clock heals it without a restart. |
 | Node deleted | Its key stops working at once, as a rotated key does: the API server that takes the delete drops the node from its registry before it answers, and every other API server and proxy drops it when `node_pool_changed` reaches it. Relays for its sessions cannot sign and answer "node unavailable" (`502`, or `503` through `/api/v2`) without moving them; clients recover by starting playback again. Its calls get `401`, so it reports `key_rejected` and SIGTERM stops it at once. |
-| Mount mismatch | The node refuses the job with `409` instead of reading other bytes, and the caller runs it elsewhere. A file that changed on the API server between minting and opening gets `412` from the core. |
+| Mount mismatch (the node's mount lacks the file, or shows another size) | The node refuses the job with `409` instead of reading other bytes, and the caller runs it elsewhere. A file that changed on the API server between minting and opening gets `412` from the core. |
+| Node mount dates a file differently from the API server's | The job runs on the node's file, matched by path and size. The node logs both times. |
 | Core unreachable under 30 seconds, core access | Source reads retry and resume; FFmpeg waits. Renewal retries. |
 | Core unreachable 30 seconds or more, core access | The active read fails and FFmpeg exits, as with a lost network mount; the source stays open, and a local-access job keeps reading its mount. A viewer's next request for a segment FFmpeg did not write waits, then restarts FFmpeg at that segment on the same source (`restartSegmentLocked`): once the core answers again, the player's retry recovers; until then the request answers `404`. Renewal still survives about 40 minutes. |
 | Rolling API restart, or reads spread over replicas, core access | Grants and revisions do not depend on the replica. A stopping API server cuts its source responses when graceful shutdown begins, and the relay resumes each from its offset against any replica. |

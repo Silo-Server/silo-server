@@ -37,12 +37,7 @@ function NotificationPreferencesPopover({
   const updatePrefs = useUpdateNotificationPreferences();
 
   const toggles: Array<{
-    key:
-      | "enabled"
-      | "notify_favorites"
-      | "notify_watchlist"
-      | "notify_continue_watching"
-      | "notify_next_up";
+    key: "enabled" | "notify_next_up";
     label: string;
     description: string;
   }> = [
@@ -50,21 +45,6 @@ function NotificationPreferencesPopover({
       key: "enabled",
       label: t("web.notifications.preferences.enabled"),
       description: t("web.notifications.preferences.enabledDescription"),
-    },
-    {
-      key: "notify_favorites",
-      label: t("web.notifications.preferences.favorites"),
-      description: t("web.notifications.preferences.favoritesDescription"),
-    },
-    {
-      key: "notify_watchlist",
-      label: t("web.notifications.preferences.watchlist"),
-      description: t("web.notifications.preferences.watchlistDescription"),
-    },
-    {
-      key: "notify_continue_watching",
-      label: t("web.notifications.preferences.continueWatching"),
-      description: t("web.notifications.preferences.continueWatchingDescription"),
     },
     {
       key: "notify_next_up",
@@ -84,7 +64,6 @@ function NotificationPreferencesPopover({
       <PopoverContent align="end" className="w-80 p-4">
         {isLoading ? (
           <div className="space-y-3">
-            <Skeleton className="h-6 w-full" />
             <Skeleton className="h-6 w-full" />
             <Skeleton className="h-6 w-full" />
           </div>

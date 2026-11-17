@@ -30,11 +30,14 @@ type notificationsDocument struct {
 }
 
 type notificationPreferences struct {
-	Enabled          bool `json:"enabled"`
-	Favorites        bool `json:"notify_favorites"`
-	Watchlist        bool `json:"notify_watchlist"`
-	ContinueWatching bool `json:"notify_continue_watching"`
-	NextUp           bool `json:"notify_next_up"`
+	Enabled bool `json:"enabled"`
+	NextUp  bool `json:"notify_next_up"`
+	// Backups written before Next Up was the only reason carry these three
+	// switches. They are accepted so such a backup restores, and ignored:
+	// nothing reads them, and an export never writes them.
+	RetiredFavorites        *bool `json:"notify_favorites,omitempty"`
+	RetiredWatchlist        *bool `json:"notify_watchlist,omitempty"`
+	RetiredContinueWatching *bool `json:"notify_continue_watching,omitempty"`
 }
 
 type mutedSeries struct {
@@ -46,9 +49,9 @@ func (BackupData) Export(ctx context.Context, tx pgx.Tx, owner userdata.Owner, k
 	doc := notificationsDocument{Muted: []mutedSeries{}}
 	var p notificationPreferences
 	err := tx.QueryRow(ctx, `
-		SELECT enabled, notify_favorites, notify_watchlist, notify_continue_watching, notify_next_up
+		SELECT enabled, notify_next_up
 		FROM notification_preferences WHERE user_id = $1 AND profile_id = $2`, owner.UserID, owner.ProfileID).Scan(
-		&p.Enabled, &p.Favorites, &p.Watchlist, &p.ContinueWatching, &p.NextUp)
+		&p.Enabled, &p.NextUp)
 	switch {
 	case err == nil:
 		doc.Preferences = &p
@@ -124,17 +127,14 @@ func (BackupData) Import(ctx context.Context, tx pgx.Tx, target userdata.Target,
 	if p := doc.Preferences; p != nil {
 		var inserted bool
 		err := tx.QueryRow(ctx, `
-			INSERT INTO notification_preferences (user_id, profile_id, enabled, notify_favorites, notify_watchlist, notify_continue_watching, notify_next_up)
-			VALUES ($1, $2, $3, $4, $5, $6, $7)
-			ON CONFLICT (user_id, profile_id) DO UPDATE SET enabled = EXCLUDED.enabled, notify_favorites = EXCLUDED.notify_favorites,
-				notify_watchlist = EXCLUDED.notify_watchlist, notify_continue_watching = EXCLUDED.notify_continue_watching,
+			INSERT INTO notification_preferences (user_id, profile_id, enabled, notify_next_up)
+			VALUES ($1, $2, $3, $4)
+			ON CONFLICT (user_id, profile_id) DO UPDATE SET enabled = EXCLUDED.enabled,
 				notify_next_up = EXCLUDED.notify_next_up, updated_at = now()
-			WHERE (notification_preferences.enabled, notification_preferences.notify_favorites, notification_preferences.notify_watchlist,
-				notification_preferences.notify_continue_watching, notification_preferences.notify_next_up)
-				IS DISTINCT FROM (EXCLUDED.enabled, EXCLUDED.notify_favorites, EXCLUDED.notify_watchlist,
-				EXCLUDED.notify_continue_watching, EXCLUDED.notify_next_up)
+			WHERE (notification_preferences.enabled, notification_preferences.notify_next_up)
+				IS DISTINCT FROM (EXCLUDED.enabled, EXCLUDED.notify_next_up)
 			RETURNING (xmax = 0)`,
-			target.UserID, target.ProfileID, p.Enabled, p.Favorites, p.Watchlist, p.ContinueWatching, p.NextUp).Scan(&inserted)
+			target.UserID, target.ProfileID, p.Enabled, p.NextUp).Scan(&inserted)
 		switch {
 		case errors.Is(err, pgx.ErrNoRows):
 			res.Unchanged++
@@ -185,9 +185,9 @@ func (BackupData) Pending(ctx context.Context, tx pgx.Tx, target userdata.Target
 	if p := doc.Preferences; p != nil {
 		var found, differs bool
 		err := tx.QueryRow(ctx, `
-			SELECT true, (enabled, notify_favorites, notify_watchlist, notify_continue_watching, notify_next_up) IS DISTINCT FROM ($3, $4, $5, $6, $7)
+			SELECT true, (enabled, notify_next_up) IS DISTINCT FROM ($3, $4)
 			FROM notification_preferences WHERE user_id = $1 AND profile_id = $2`,
-			target.UserID, target.ProfileID, p.Enabled, p.Favorites, p.Watchlist, p.ContinueWatching, p.NextUp).Scan(&found, &differs)
+			target.UserID, target.ProfileID, p.Enabled, p.NextUp).Scan(&found, &differs)
 		switch {
 		case errors.Is(err, pgx.ErrNoRows):
 			res.Added++

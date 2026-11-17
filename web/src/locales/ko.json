@@ -701,6 +701,18 @@
       "value": "컬렉션"
     }
   ],
+  "home.recipe.collectionPostersPick.description": [
+    {
+      "type": 0,
+      "value": "여러 컬렉션을 포스터로 표시해요. 포스터마다 해당 컬렉션이 열려요."
+    }
+  ],
+  "home.recipe.collectionPostersPick.name": [
+    {
+      "type": 0,
+      "value": "컬렉션 행"
+    }
+  ],
   "home.recipe.continueListeningDefault.description": [
     {
       "type": 0,
@@ -66461,6 +66473,12 @@
       "value": "비밀번호 로그인 허용"
     }
   ],
+  "web.admin.settings.signIn.page.apiKeysGroup": [
+    {
+      "type": 0,
+      "value": "API 키"
+    }
+  ],
   "web.admin.settings.signIn.page.breakGlassAdmins": [
     {
       "type": 6,
@@ -66633,6 +66651,18 @@
     {
       "type": 0,
       "value": "로그인"
+    }
+  ],
+  "web.admin.settings.signIn.page.userApiKeysDescription": [
+    {
+      "type": 0,
+      "value": "모든 계정은 설정 → API 키에서 자신의 프로필용 키를 생성할 수 있어요. 이 키로 시청 기록, 목록, 요청을 읽고 변경할 수 있지만 미디어를 재생하거나 다운로드할 수는 없어요. 이 옵션을 끄면 새 키를 생성할 수 없지만, 기존 키는 폐기할 때까지 계속 작동해요."
+    }
+  ],
+  "web.admin.settings.signIn.page.userApiKeysLabel": [
+    {
+      "type": 0,
+      "value": "사용자의 API 키 생성 허용"
     }
   ],
   "web.admin.settings.signIn.provider.accounts.title": [
@@ -84135,6 +84165,32 @@
       "value": " 선반을 삭제할까요?"
     }
   ],
+  "web.collections.copy.deleteWithRowChangesLabel": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "삭제하고 행 "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": "개 변경"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.collections.copy.deleteWithRowsLabel": [
     {
       "type": 6,
@@ -85371,6 +85427,20 @@
     {
       "type": 0,
       "value": "에서 제거돼요."
+    }
+  ],
+  "web.collections.copy.removedFromRow": [
+    {
+      "type": 0,
+      "value": "“"
+    },
+    {
+      "type": 1,
+      "value": "title"
+    },
+    {
+      "type": 0,
+      "value": "” 행에서 제거돼요. 이 행의 다른 컬렉션은 그대로 유지돼요."
     }
   ],
   "web.collections.copy.removedTitle": [
@@ -92691,6 +92761,12 @@
       "value": "계정 설정"
     }
   ],
+  "web.common.title.settings.apiKeys": [
+    {
+      "type": 0,
+      "value": "API 키 설정"
+    }
+  ],
   "web.common.title.settings.connectApps": [
     {
       "type": 0,
@@ -96757,6 +96833,244 @@
       "value": "에서 만들거나 변경하세요."
     }
   ],
+  "web.home.addRow.collections.add": [
+    {
+      "type": 0,
+      "value": "추가"
+    }
+  ],
+  "web.home.addRow.collections.addLabel": [
+    {
+      "type": 0,
+      "value": "컬렉션 추가"
+    }
+  ],
+  "web.home.addRow.collections.added": [
+    {
+      "type": 0,
+      "value": "추가됨"
+    }
+  ],
+  "web.home.addRow.collections.chosenLabel": [
+    {
+      "type": 0,
+      "value": "이 행의 컬렉션"
+    }
+  ],
+  "web.home.addRow.collections.count": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "컬렉션 "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": "개를 이 순서로 표시해요"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.home.addRow.collections.drag.canceled": [
+    {
+      "type": 1,
+      "value": "collection"
+    },
+    {
+      "type": 0,
+      "value": " 컬렉션 이동을 취소했어요."
+    }
+  ],
+  "web.home.addRow.collections.drag.dropped": [
+    {
+      "type": 1,
+      "value": "collection"
+    },
+    {
+      "type": 0,
+      "value": " 컬렉션을 놓았어요."
+    }
+  ],
+  "web.home.addRow.collections.drag.droppedAt": [
+    {
+      "type": 1,
+      "value": "collection"
+    },
+    {
+      "type": 0,
+      "value": " 컬렉션을 전체 "
+    },
+    {
+      "type": 1,
+      "value": "total"
+    },
+    {
+      "type": 0,
+      "value": "개 중 "
+    },
+    {
+      "type": 1,
+      "value": "position"
+    },
+    {
+      "type": 0,
+      "value": "번째 위치에 놓았어요."
+    }
+  ],
+  "web.home.addRow.collections.drag.instructions": [
+    {
+      "type": 0,
+      "value": "컬렉션을 이동하려면 핸들에 포커스를 두고 Space 또는 Enter 키를 누르세요. 위쪽 및 아래쪽 화살표 키로 이동하고, Space 또는 Enter 키로 놓거나 Escape 키로 취소하세요."
+    }
+  ],
+  "web.home.addRow.collections.drag.over": [
+    {
+      "type": 1,
+      "value": "collection"
+    },
+    {
+      "type": 0,
+      "value": " 컬렉션이 이제 전체 "
+    },
+    {
+      "type": 1,
+      "value": "total"
+    },
+    {
+      "type": 0,
+      "value": "개 중 "
+    },
+    {
+      "type": 1,
+      "value": "position"
+    },
+    {
+      "type": 0,
+      "value": "번째 위치에 있어요."
+    }
+  ],
+  "web.home.addRow.collections.drag.pickedUp": [
+    {
+      "type": 1,
+      "value": "collection"
+    },
+    {
+      "type": 0,
+      "value": " 컬렉션을 집었어요. 전체 "
+    },
+    {
+      "type": 1,
+      "value": "total"
+    },
+    {
+      "type": 0,
+      "value": "개 중 "
+    },
+    {
+      "type": 1,
+      "value": "position"
+    },
+    {
+      "type": 0,
+      "value": "번째 위치예요."
+    }
+  ],
+  "web.home.addRow.collections.dragHandle": [
+    {
+      "type": 1,
+      "value": "collection"
+    },
+    {
+      "type": 0,
+      "value": " 순서 변경"
+    }
+  ],
+  "web.home.addRow.collections.empty": [
+    {
+      "type": 0,
+      "value": "아래에서 컬렉션을 하나 이상 추가하세요."
+    }
+  ],
+  "web.home.addRow.collections.limit": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "행 하나에 컬렉션을 최대 "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": "개까지 넣을 수 있어요."
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.home.addRow.collections.moveDown": [
+    {
+      "type": 1,
+      "value": "collection"
+    },
+    {
+      "type": 0,
+      "value": " 아래로 이동"
+    }
+  ],
+  "web.home.addRow.collections.moveUp": [
+    {
+      "type": 1,
+      "value": "collection"
+    },
+    {
+      "type": 0,
+      "value": " 위로 이동"
+    }
+  ],
+  "web.home.addRow.collections.remove": [
+    {
+      "type": 1,
+      "value": "collection"
+    },
+    {
+      "type": 0,
+      "value": " 제거"
+    }
+  ],
+  "web.home.addRow.collections.unavailable": [
+    {
+      "type": 0,
+      "value": "더 이상 사용할 수 없음"
+    }
+  ],
+  "web.home.addRow.collections.yours": [
+    {
+      "type": 0,
+      "value": "내 컬렉션"
+    }
+  ],
   "web.home.addRow.conflict": [
     {
       "type": 0,
@@ -99936,16 +100250,120 @@
       }
     }
   ],
+  "web.home.rows.describe.collectionCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "컬렉션 "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": "개"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.home.rows.describe.collectionGone": [
     {
       "type": 0,
       "value": "더 이상 사용할 수 없는 컬렉션"
     }
   ],
+  "web.home.rows.describe.collectionList": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "컬렉션 "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": "개: "
+            },
+            {
+              "type": 1,
+              "value": "names"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.home.rows.describe.collectionListMore": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": "개 더"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.home.rows.describe.collectionUnknown": [
     {
       "type": 0,
       "value": "컬렉션"
+    }
+  ],
+  "web.home.rows.describe.collectionsGone": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "컬렉션 "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": "개를 더 이상 사용할 수 없음"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.home.rows.describe.curated": [
@@ -101364,6 +101782,12 @@
       "value": "각 시청자가 보려고 저장한 콘텐츠"
     }
   ],
+  "web.home.rows.draft.addCollection": [
+    {
+      "type": 0,
+      "value": "컬렉션을 추가하면 행이 표시돼요."
+    }
+  ],
   "web.home.rows.draft.addTitles": [
     {
       "type": 0,
@@ -101616,6 +102040,12 @@
       "value": "컬렉션 중 하나를 보여 줘요."
     }
   ],
+  "web.home.rows.kindSentences.collectionPosters": [
+    {
+      "type": 0,
+      "value": "여러 컬렉션을 포스터로 표시해요. 포스터마다 해당 컬렉션이 열려요."
+    }
+  ],
   "web.home.rows.kindSentences.continueWatching": [
     {
       "type": 0,
@@ -101818,6 +102248,12 @@
     {
       "type": 0,
       "value": "컬렉션"
+    }
+  ],
+  "web.home.rows.kinds.collectionPosters": [
+    {
+      "type": 0,
+      "value": "컬렉션 행"
     }
   ],
   "web.home.rows.kinds.continueWatching": [
@@ -107176,6 +107612,12 @@
       "value": "즐겨찾기했거나 보고 싶은 목록에 추가했거나 보고 있는 시리즈에 새 에피소드가 나오면 여기에서 알려 드려요."
     }
   ],
+  "web.notifications.inbox.emptyHintNextUp": [
+    {
+      "type": 0,
+      "value": "최신 에피소드까지 시청한 시리즈에 새 에피소드가 나오거나, 보고 싶은 목록에 추가했거나 요청한 콘텐츠가 라이브러리에 추가되면 여기에서 알려 드려요."
+    }
+  ],
   "web.notifications.inbox.emptyUnread": [
     {
       "type": 0,
@@ -107542,6 +107984,30 @@
     {
       "type": 0,
       "value": "알림 보기 방식"
+    }
+  ],
+  "web.notifications.inbox.watchlistAvailable": [
+    {
+      "type": 0,
+      "value": "보고 싶은 목록 콘텐츠 공개"
+    }
+  ],
+  "web.notifications.inbox.watchlistMovieAvailable": [
+    {
+      "type": 0,
+      "value": "보고 싶은 목록의 영화를 이제 볼 수 있어요"
+    }
+  ],
+  "web.notifications.inbox.watchlistSeriesAvailable": [
+    {
+      "type": 0,
+      "value": "보고 싶은 목록의 시리즈를 이제 볼 수 있어요"
+    }
+  ],
+  "web.notifications.inbox.watchlistTitleAvailable": [
+    {
+      "type": 0,
+      "value": "보고 싶은 목록의 콘텐츠를 이제 볼 수 있어요"
     }
   ],
   "web.notifications.preferences.continueWatching": [
@@ -107962,6 +108428,12 @@
       "value": "선택한 시리즈"
     }
   ],
+  "web.notifications.series.afterCatchUp": [
+    {
+      "type": 0,
+      "value": "최신 에피소드까지 시청한 후"
+    }
+  ],
   "web.notifications.series.allReasons": [
     {
       "type": 0,
@@ -108020,10 +108492,22 @@
       "value": "즐겨찾기했거나 보고 싶은 목록에 추가했거나 시청을 시작한 시리즈가 여기에 표시돼요."
     }
   ],
+  "web.notifications.series.emptyHintNextUp": [
+    {
+      "type": 0,
+      "value": "에피소드를 끝까지 보면 시리즈가 여기에 표시돼요. 시리즈를 최신 에피소드까지 시청하면 다음 에피소드가 나올 때 알림이 와요."
+    }
+  ],
   "web.notifications.series.filterByReason": [
     {
       "type": 0,
       "value": "이유별 필터"
+    }
+  ],
+  "web.notifications.series.filterLabel": [
+    {
+      "type": 0,
+      "value": "시리즈 필터"
     }
   ],
   "web.notifications.series.intro": [
@@ -108130,10 +108614,32 @@
       "value": "last"
     }
   ],
+  "web.notifications.series.nextEpisodeAfter": [
+    {
+      "type": 1,
+      "value": "code"
+    },
+    {
+      "type": 0,
+      "value": " 이후의 다음 에피소드"
+    }
+  ],
+  "web.notifications.series.nextNewEpisode": [
+    {
+      "type": 0,
+      "value": "다음 새 에피소드"
+    }
+  ],
   "web.notifications.series.noMatch": [
     {
       "type": 0,
       "value": "일치하는 시리즈가 없어요. 다른 검색어나 이유로 시도해 보세요."
+    }
+  ],
+  "web.notifications.series.noMatchFilter": [
+    {
+      "type": 0,
+      "value": "일치하는 시리즈가 없어요. 다른 검색어나 필터로 시도해 보세요."
     }
   ],
   "web.notifications.series.notificationsOff": [
@@ -108314,6 +108820,12 @@
     {
       "type": 0,
       "value": " 시리즈를 볼 수 있어요"
+    }
+  ],
+  "web.notifications.toast.watchlistArrived": [
+    {
+      "type": 0,
+      "value": "보고 싶은 목록의 콘텐츠가 라이브러리에 추가됐어요."
     }
   ],
   "web.onboarding.gate.progressFailed": [
@@ -115896,6 +116408,340 @@
       "value": "고급"
     }
   ],
+  "web.settings.apiKeys.create.access": [
+    {
+      "type": 0,
+      "value": "액세스 권한"
+    }
+  ],
+  "web.settings.apiKeys.create.accessHint": [
+    {
+      "type": 0,
+      "value": "하나 이상 선택하세요. 어떤 키로도 미디어를 재생, 스트리밍, 다운로드할 수 없어요."
+    }
+  ],
+  "web.settings.apiKeys.create.actsAs": [
+    {
+      "type": 0,
+      "value": "적용 대상"
+    }
+  ],
+  "web.settings.apiKeys.create.actsAsHint": [
+    {
+      "type": 0,
+      "value": "프로필 하나용 키는 항상 해당 프로필로 작동하고 그 프로필의 제한을 따라요. 계정 전체 키는 계정의 모든 프로필로 작동할 수 있어요."
+    }
+  ],
+  "web.settings.apiKeys.create.copied": [
+    {
+      "type": 0,
+      "value": "클립보드에 복사했어요."
+    }
+  ],
+  "web.settings.apiKeys.create.copyAndClose": [
+    {
+      "type": 0,
+      "value": "복사 후 닫기"
+    }
+  ],
+  "web.settings.apiKeys.create.copyFailed": [
+    {
+      "type": 0,
+      "value": "복사할 수 없어요. 키를 선택해 직접 복사하세요."
+    }
+  ],
+  "web.settings.apiKeys.create.creating": [
+    {
+      "type": 0,
+      "value": "생성 중…"
+    }
+  ],
+  "web.settings.apiKeys.create.description": [
+    {
+      "type": 0,
+      "value": "전체 키는 한 번만 표시돼요."
+    }
+  ],
+  "web.settings.apiKeys.create.label": [
+    {
+      "type": 0,
+      "value": "레이블"
+    }
+  ],
+  "web.settings.apiKeys.create.secretNotice": [
+    {
+      "type": 0,
+      "value": "지금 API 키를 복사하세요. 다시 볼 수 없어요."
+    }
+  ],
+  "web.settings.apiKeys.create.submit": [
+    {
+      "type": 0,
+      "value": "생성"
+    }
+  ],
+  "web.settings.apiKeys.create.title": [
+    {
+      "type": 0,
+      "value": "API 키 생성"
+    }
+  ],
+  "web.settings.apiKeys.create.uncertain": [
+    {
+      "type": 0,
+      "value": "결과를 확인할 수 없어요. 다른 키를 생성하기 전에 페이지를 새로고침하세요."
+    }
+  ],
+  "web.settings.apiKeys.createKey": [
+    {
+      "type": 0,
+      "value": "키 생성"
+    }
+  ],
+  "web.settings.apiKeys.disabled": [
+    {
+      "type": 0,
+      "value": "이 서버에서는 사용자가 API 키를 생성할 수 없어요. 서버 관리자에게 이 기능을 켜 달라고 요청하세요."
+    }
+  ],
+  "web.settings.apiKeys.empty": [
+    {
+      "type": 0,
+      "value": "아직 API 키가 없어요."
+    }
+  ],
+  "web.settings.apiKeys.limitReached": [
+    {
+      "type": 0,
+      "value": "키 한도인 "
+    },
+    {
+      "type": 1,
+      "value": "max"
+    },
+    {
+      "type": 0,
+      "value": "개에 도달했어요. 새 키를 생성하려면 키 하나를 폐기하세요."
+    }
+  ],
+  "web.settings.apiKeys.list.created": [
+    {
+      "type": 0,
+      "value": "생성일: "
+    },
+    {
+      "type": 1,
+      "value": "date"
+    }
+  ],
+  "web.settings.apiKeys.list.heading": [
+    {
+      "type": 0,
+      "value": "내 키"
+    }
+  ],
+  "web.settings.apiKeys.list.lastUsed": [
+    {
+      "type": 0,
+      "value": "마지막 사용: "
+    },
+    {
+      "type": 1,
+      "value": "date"
+    }
+  ],
+  "web.settings.apiKeys.list.loadMore": [
+    {
+      "type": 0,
+      "value": "더 불러오기"
+    }
+  ],
+  "web.settings.apiKeys.list.neverUsed": [
+    {
+      "type": 0,
+      "value": "사용한 적 없음"
+    }
+  ],
+  "web.settings.apiKeys.list.profile": [
+    {
+      "type": 0,
+      "value": "프로필: "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    }
+  ],
+  "web.settings.apiKeys.list.revoke": [
+    {
+      "type": 0,
+      "value": "폐기"
+    }
+  ],
+  "web.settings.apiKeys.list.revokeNamed": [
+    {
+      "type": 1,
+      "value": "label"
+    },
+    {
+      "type": 0,
+      "value": " 폐기"
+    }
+  ],
+  "web.settings.apiKeys.list.wholeAccount": [
+    {
+      "type": 0,
+      "value": "계정 전체"
+    }
+  ],
+  "web.settings.apiKeys.loadFailed": [
+    {
+      "type": 0,
+      "value": "API 키를 불러올 수 없어요."
+    }
+  ],
+  "web.settings.apiKeys.loading": [
+    {
+      "type": 0,
+      "value": "API 키 불러오는 중…"
+    }
+  ],
+  "web.settings.apiKeys.revoke.description": [
+    {
+      "type": 1,
+      "value": "label"
+    },
+    {
+      "type": 0,
+      "value": " 키는 즉시 작동을 멈춰요. 이 작업은 되돌릴 수 없어요."
+    }
+  ],
+  "web.settings.apiKeys.revoke.done": [
+    {
+      "type": 0,
+      "value": "API 키를 폐기했어요."
+    }
+  ],
+  "web.settings.apiKeys.revoke.failed": [
+    {
+      "type": 0,
+      "value": "키를 폐기할 수 없어요. 페이지를 새로고침하고 다시 시도해 주세요."
+    }
+  ],
+  "web.settings.apiKeys.revoke.title": [
+    {
+      "type": 0,
+      "value": "API 키 폐기"
+    }
+  ],
+  "web.settings.apiKeys.revoke.working": [
+    {
+      "type": 0,
+      "value": "폐기 중…"
+    }
+  ],
+  "web.settings.apiKeys.scope.catalogRead": [
+    {
+      "type": 0,
+      "value": "프로필에서 볼 수 있는 콘텐츠(라이브러리, 홈 및 라이브러리 행, 작품, 인물, 검색)를 둘러봐요."
+    }
+  ],
+  "web.settings.apiKeys.scope.librariesRead": [
+    {
+      "type": 0,
+      "value": "프로필에 있는 라이브러리를 확인해요."
+    }
+  ],
+  "web.settings.apiKeys.scope.notifications": [
+    {
+      "type": 0,
+      "value": "프로필의 알림을 도착하는 대로 읽고 읽음으로 표시해요."
+    }
+  ],
+  "web.settings.apiKeys.scope.requests": [
+    {
+      "type": 0,
+      "value": "요청 가능한 작품을 둘러보고 미디어 요청을 생성, 추적, 취소해요."
+    }
+  ],
+  "web.settings.apiKeys.scope.watchRead": [
+    {
+      "type": 0,
+      "value": "프로필의 시청 기록, 진행 상황, 평점, 즐겨찾기, 보고 싶은 목록, 숨긴 작품을 읽고 데이터를 내보내요."
+    }
+  ],
+  "web.settings.apiKeys.scope.watchWrite": [
+    {
+      "type": 0,
+      "value": "작품을 시청함 또는 시청 안 함으로 표시하고, 진행 상황을 동기화하고, 기록을 삭제하고, 평점, 즐겨찾기, 보고 싶은 목록, 숨긴 작품을 편집해요."
+    }
+  ],
+  "web.settings.apiKeys.subtitle": [
+    {
+      "type": 0,
+      "value": "키를 사용하면 스크립트와 앱이 비밀번호 없이 Silo 데이터를 읽고 업데이트할 수 있어요."
+    }
+  ],
+  "web.settings.apiKeys.title": [
+    {
+      "type": 0,
+      "value": "API 키"
+    }
+  ],
+  "web.settings.apiKeys.usage.accountKey": [
+    {
+      "type": 0,
+      "value": "이 키는 계정의 모든 프로필로 작동할 수 있어요. 요청마다 이 헤더로 프로필을 하나 선택하세요. 예시에서는 "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " 프로필을 사용해요. "
+    },
+    {
+      "type": 1,
+      "value": "endpoint"
+    },
+    {
+      "type": 0,
+      "value": "에서 모든 프로필의 ID를 확인할 수 있어요."
+    }
+  ],
+  "web.settings.apiKeys.usage.docs": [
+    {
+      "type": 0,
+      "value": "API 참조"
+    }
+  ],
+  "web.settings.apiKeys.usage.header": [
+    {
+      "type": 0,
+      "value": "모든 요청에 이 헤더로 키를 보내세요:"
+    }
+  ],
+  "web.settings.apiKeys.usage.profileKey": [
+    {
+      "type": 0,
+      "value": "이 키는 항상 "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " 프로필로 작동해요. 프로필 헤더는 필요 없어요."
+    }
+  ],
+  "web.settings.apiKeys.usage.title": [
+    {
+      "type": 0,
+      "value": "이 키 사용 방법"
+    }
+  ],
   "web.settings.cardOverlay.adjust": [
     {
       "type": 0,
@@ -119114,6 +119960,12 @@
       "value": "가족 구성원의 모든 프로필이 함께 쓰는 비밀번호와 로그인 제공자."
     }
   ],
+  "web.settings.nav.apiKeys.description": [
+    {
+      "type": 0,
+      "value": "시청 기록과 목록을 다루는 스크립트 및 앱용 키예요."
+    }
+  ],
   "web.settings.nav.connectApps.description": [
     {
       "type": 0,
@@ -119686,6 +120538,12 @@
       "value": "이 프로필의 전체 알림 스위치"
     }
   ],
+  "web.settings.notifications.episodes.nextUpDescription": [
+    {
+      "type": 0,
+      "value": "최신 에피소드까지 시청한 시리즈에 새 에피소드가 나오거나, 보고 싶은 목록에 추가했거나 요청한 콘텐츠가 라이브러리에 추가되면 알림을 받아요."
+    }
+  ],
   "web.settings.notifications.episodes.seriesLink": [
     {
       "type": 0,
@@ -119975,7 +120833,7 @@
   "web.settings.notifications.reason.requests": [
     {
       "type": 0,
-      "value": "요청"
+      "value": "요청 및 보고 싶은 목록"
     }
   ],
   "web.settings.notifications.reason.watchlist": [

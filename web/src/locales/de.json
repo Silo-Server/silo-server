@@ -701,6 +701,18 @@
       "value": "Sammlung"
     }
   ],
+  "home.recipe.collectionPostersPick.description": [
+    {
+      "type": 0,
+      "value": "Zeigt mehrere Sammlungen als Poster. Jedes öffnet seine Sammlung."
+    }
+  ],
+  "home.recipe.collectionPostersPick.name": [
+    {
+      "type": 0,
+      "value": "Eine Reihe mit Sammlungen"
+    }
+  ],
   "home.recipe.continueListeningDefault.description": [
     {
       "type": 0,
@@ -72551,6 +72563,12 @@
       "value": "Anmeldung mit Passwort erlauben"
     }
   ],
+  "web.admin.settings.signIn.page.apiKeysGroup": [
+    {
+      "type": 0,
+      "value": "API-Schlüssel"
+    }
+  ],
   "web.admin.settings.signIn.page.breakGlassAdmins": [
     {
       "type": 6,
@@ -72735,6 +72753,18 @@
     {
       "type": 0,
       "value": "Anmeldung"
+    }
+  ],
+  "web.admin.settings.signIn.page.userApiKeysDescription": [
+    {
+      "type": 0,
+      "value": "Jedes Konto kann unter Einstellungen → API-Schlüssel Schlüssel für seine eigenen Profile erstellen. Diese Schlüssel können Wiedergabeverlauf, Listen und Anfragen lesen und ändern, aber keine Medien abspielen oder herunterladen. Wenn du dies deaktivierst, können keine neuen Schlüssel erstellt werden; vorhandene funktionieren weiter, bis sie widerrufen werden."
+    }
+  ],
+  "web.admin.settings.signIn.page.userApiKeysLabel": [
+    {
+      "type": 0,
+      "value": "Benutzern das Erstellen von API-Schlüsseln erlauben"
     }
   ],
   "web.admin.settings.signIn.provider.accounts.title": [
@@ -91922,6 +91952,48 @@
       "value": "“ löschen?"
     }
   ],
+  "web.collections.copy.deleteWithRowChangesLabel": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Löschen und "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " Reihe ändern"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Löschen und "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " Reihen ändern"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.collections.copy.deleteWithRowsLabel": [
     {
       "type": 6,
@@ -93380,6 +93452,20 @@
     {
       "type": 0,
       "value": " entfernt."
+    }
+  ],
+  "web.collections.copy.removedFromRow": [
+    {
+      "type": 0,
+      "value": "Entfernt sie aus der Reihe „"
+    },
+    {
+      "type": 1,
+      "value": "title"
+    },
+    {
+      "type": 0,
+      "value": "“. Die Reihe behält ihre anderen Sammlungen."
     }
   ],
   "web.collections.copy.removedTitle": [
@@ -101156,6 +101242,12 @@
       "value": "Kontoeinstellungen"
     }
   ],
+  "web.common.title.settings.apiKeys": [
+    {
+      "type": 0,
+      "value": "Einstellungen für API-Schlüssel"
+    }
+  ],
   "web.common.title.settings.connectApps": [
     {
       "type": 0,
@@ -105632,6 +105724,272 @@
       "value": "."
     }
   ],
+  "web.home.addRow.collections.add": [
+    {
+      "type": 0,
+      "value": "Hinzufügen"
+    }
+  ],
+  "web.home.addRow.collections.addLabel": [
+    {
+      "type": 0,
+      "value": "Sammlungen hinzufügen"
+    }
+  ],
+  "web.home.addRow.collections.added": [
+    {
+      "type": 0,
+      "value": "Hinzugefügt"
+    }
+  ],
+  "web.home.addRow.collections.chosenLabel": [
+    {
+      "type": 0,
+      "value": "Sammlungen in dieser Reihe"
+    }
+  ],
+  "web.home.addRow.collections.count": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " Sammlung, in dieser Reihenfolge angezeigt"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " Sammlungen, in dieser Reihenfolge angezeigt"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.home.addRow.collections.drag.canceled": [
+    {
+      "type": 0,
+      "value": "Verschieben von "
+    },
+    {
+      "type": 1,
+      "value": "collection"
+    },
+    {
+      "type": 0,
+      "value": " abgebrochen."
+    }
+  ],
+  "web.home.addRow.collections.drag.dropped": [
+    {
+      "type": 1,
+      "value": "collection"
+    },
+    {
+      "type": 0,
+      "value": " abgelegt."
+    }
+  ],
+  "web.home.addRow.collections.drag.droppedAt": [
+    {
+      "type": 1,
+      "value": "collection"
+    },
+    {
+      "type": 0,
+      "value": " an Position "
+    },
+    {
+      "type": 1,
+      "value": "position"
+    },
+    {
+      "type": 0,
+      "value": " von "
+    },
+    {
+      "type": 1,
+      "value": "total"
+    },
+    {
+      "type": 0,
+      "value": " abgelegt."
+    }
+  ],
+  "web.home.addRow.collections.drag.instructions": [
+    {
+      "type": 0,
+      "value": "Um eine Sammlung zu verschieben, fokussiere ihren Griff und drücke Space oder Enter. Verschiebe sie mit den Pfeiltasten nach oben und unten, drücke Space oder Enter, um sie abzulegen, oder Escape, um abzubrechen."
+    }
+  ],
+  "web.home.addRow.collections.drag.over": [
+    {
+      "type": 1,
+      "value": "collection"
+    },
+    {
+      "type": 0,
+      "value": " ist jetzt an Position "
+    },
+    {
+      "type": 1,
+      "value": "position"
+    },
+    {
+      "type": 0,
+      "value": " von "
+    },
+    {
+      "type": 1,
+      "value": "total"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.home.addRow.collections.drag.pickedUp": [
+    {
+      "type": 1,
+      "value": "collection"
+    },
+    {
+      "type": 0,
+      "value": " aufgenommen, Position "
+    },
+    {
+      "type": 1,
+      "value": "position"
+    },
+    {
+      "type": 0,
+      "value": " von "
+    },
+    {
+      "type": 1,
+      "value": "total"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.home.addRow.collections.dragHandle": [
+    {
+      "type": 1,
+      "value": "collection"
+    },
+    {
+      "type": 0,
+      "value": " verschieben"
+    }
+  ],
+  "web.home.addRow.collections.empty": [
+    {
+      "type": 0,
+      "value": "Füge unten mindestens eine Sammlung hinzu."
+    }
+  ],
+  "web.home.addRow.collections.limit": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Eine Reihe enthält höchstens "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " Sammlung."
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Eine Reihe enthält höchstens "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " Sammlungen."
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.home.addRow.collections.moveDown": [
+    {
+      "type": 1,
+      "value": "collection"
+    },
+    {
+      "type": 0,
+      "value": " nach unten verschieben"
+    }
+  ],
+  "web.home.addRow.collections.moveUp": [
+    {
+      "type": 1,
+      "value": "collection"
+    },
+    {
+      "type": 0,
+      "value": " nach oben verschieben"
+    }
+  ],
+  "web.home.addRow.collections.remove": [
+    {
+      "type": 1,
+      "value": "collection"
+    },
+    {
+      "type": 0,
+      "value": " entfernen"
+    }
+  ],
+  "web.home.addRow.collections.unavailable": [
+    {
+      "type": 0,
+      "value": "Nicht mehr verfügbar"
+    }
+  ],
+  "web.home.addRow.collections.yours": [
+    {
+      "type": 0,
+      "value": "Von dir"
+    }
+  ],
   "web.home.addRow.conflict": [
     {
       "type": 0,
@@ -108771,16 +109129,160 @@
       }
     }
   ],
+  "web.home.rows.describe.collectionCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " Sammlung"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " Sammlungen"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.home.rows.describe.collectionGone": [
     {
       "type": 0,
       "value": "Sammlung nicht mehr verfügbar"
     }
   ],
+  "web.home.rows.describe.collectionList": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " Sammlung: "
+            },
+            {
+              "type": 1,
+              "value": "names"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " Sammlungen: "
+            },
+            {
+              "type": 1,
+              "value": "names"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.home.rows.describe.collectionListMore": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " weitere"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " weitere"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.home.rows.describe.collectionUnknown": [
     {
       "type": 0,
       "value": "Eine Sammlung"
+    }
+  ],
+  "web.home.rows.describe.collectionsGone": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " Sammlung nicht mehr verfügbar"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " Sammlungen nicht mehr verfügbar"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.home.rows.describe.curated": [
@@ -110309,6 +110811,12 @@
       "value": "Was jede Person sich zum Anschauen gemerkt hat"
     }
   ],
+  "web.home.rows.draft.addCollection": [
+    {
+      "type": 0,
+      "value": "Füge eine Sammlung hinzu, um die Reihe zu sehen."
+    }
+  ],
   "web.home.rows.draft.addTitles": [
     {
       "type": 0,
@@ -110565,6 +111073,12 @@
       "value": "Eine deiner Sammlungen anzeigen."
     }
   ],
+  "web.home.rows.kindSentences.collectionPosters": [
+    {
+      "type": 0,
+      "value": "Zeigt mehrere Sammlungen als Poster. Jedes öffnet seine Sammlung."
+    }
+  ],
   "web.home.rows.kindSentences.continueWatching": [
     {
       "type": 0,
@@ -110767,6 +111281,12 @@
     {
       "type": 0,
       "value": "Eine Sammlung"
+    }
+  ],
+  "web.home.rows.kinds.collectionPosters": [
+    {
+      "type": 0,
+      "value": "Eine Reihe mit Sammlungen"
     }
   ],
   "web.home.rows.kinds.continueWatching": [
@@ -116451,6 +116971,12 @@
       "value": "Hier wirst du benachrichtigt, wenn neue Folgen von Serien erscheinen, die du favorisiert hast, auf deiner Merkliste hast oder gerade schaust."
     }
   ],
+  "web.notifications.inbox.emptyHintNextUp": [
+    {
+      "type": 0,
+      "value": "Hier wirst du benachrichtigt, wenn eine neue Folge einer Serie erscheint, bei der du auf dem neuesten Stand bist, oder wenn ein Titel verfügbar wird, den du auf deine Merkliste gesetzt oder angefragt hast."
+    }
+  ],
   "web.notifications.inbox.emptyUnread": [
     {
       "type": 0,
@@ -116849,6 +117375,30 @@
     {
       "type": 0,
       "value": "Benachrichtigungsansichten"
+    }
+  ],
+  "web.notifications.inbox.watchlistAvailable": [
+    {
+      "type": 0,
+      "value": "Titel von deiner Merkliste verfügbar"
+    }
+  ],
+  "web.notifications.inbox.watchlistMovieAvailable": [
+    {
+      "type": 0,
+      "value": "Ein Film auf deiner Merkliste ist jetzt verfügbar"
+    }
+  ],
+  "web.notifications.inbox.watchlistSeriesAvailable": [
+    {
+      "type": 0,
+      "value": "Eine Serie auf deiner Merkliste ist jetzt verfügbar"
+    }
+  ],
+  "web.notifications.inbox.watchlistTitleAvailable": [
+    {
+      "type": 0,
+      "value": "Ein Titel auf deiner Merkliste ist jetzt verfügbar"
     }
   ],
   "web.notifications.preferences.continueWatching": [
@@ -117321,6 +117871,12 @@
       "value": "Ausgewählte Serien"
     }
   ],
+  "web.notifications.series.afterCatchUp": [
+    {
+      "type": 0,
+      "value": "Wenn du auf dem neuesten Stand bist"
+    }
+  ],
   "web.notifications.series.allReasons": [
     {
       "type": 0,
@@ -117379,10 +117935,22 @@
       "value": "Serien, die du zu deinen Favoriten oder deiner Merkliste hinzufügst oder zu schauen beginnst, erscheinen hier."
     }
   ],
+  "web.notifications.series.emptyHintNextUp": [
+    {
+      "type": 0,
+      "value": "Serien erscheinen hier, sobald du eine Folge zu Ende geschaut hast. Bist du bei einer Serie auf dem neuesten Stand, wirst du benachrichtigt, sobald ihre nächste Folge erscheint."
+    }
+  ],
   "web.notifications.series.filterByReason": [
     {
       "type": 0,
       "value": "Nach Grund filtern"
+    }
+  ],
+  "web.notifications.series.filterLabel": [
+    {
+      "type": 0,
+      "value": "Serien filtern"
     }
   ],
   "web.notifications.series.intro": [
@@ -117489,10 +118057,32 @@
       "value": "last"
     }
   ],
+  "web.notifications.series.nextEpisodeAfter": [
+    {
+      "type": 0,
+      "value": "Die nächste Folge nach "
+    },
+    {
+      "type": 1,
+      "value": "code"
+    }
+  ],
+  "web.notifications.series.nextNewEpisode": [
+    {
+      "type": 0,
+      "value": "Die nächste neue Folge"
+    }
+  ],
   "web.notifications.series.noMatch": [
     {
       "type": 0,
       "value": "Keine passenden Serien. Versuche eine andere Suche oder einen anderen Grund."
+    }
+  ],
+  "web.notifications.series.noMatchFilter": [
+    {
+      "type": 0,
+      "value": "Keine passenden Serien. Versuche eine andere Suche oder einen anderen Filter."
     }
   ],
   "web.notifications.series.notificationsOff": [
@@ -117681,6 +118271,12 @@
     {
       "type": 0,
       "value": " ist jetzt verfügbar"
+    }
+  ],
+  "web.notifications.toast.watchlistArrived": [
+    {
+      "type": 0,
+      "value": "Ein Titel auf deiner Merkliste ist jetzt in der Mediathek."
     }
   ],
   "web.onboarding.gate.progressFailed": [
@@ -125808,6 +126404,340 @@
       "value": "Erweitert"
     }
   ],
+  "web.settings.apiKeys.create.access": [
+    {
+      "type": 0,
+      "value": "Zugriff"
+    }
+  ],
+  "web.settings.apiKeys.create.accessHint": [
+    {
+      "type": 0,
+      "value": "Wähle mindestens eine Option. Kein Schlüssel kann Medien abspielen, streamen oder herunterladen."
+    }
+  ],
+  "web.settings.apiKeys.create.actsAs": [
+    {
+      "type": 0,
+      "value": "Handelt als"
+    }
+  ],
+  "web.settings.apiKeys.create.actsAsHint": [
+    {
+      "type": 0,
+      "value": "Ein Schlüssel für ein Profil handelt immer als dieses Profil und behält dessen Einschränkungen. Ein Schlüssel für das ganze Konto kann als jedes Profil deines Kontos handeln."
+    }
+  ],
+  "web.settings.apiKeys.create.copied": [
+    {
+      "type": 0,
+      "value": "In die Zwischenablage kopiert"
+    }
+  ],
+  "web.settings.apiKeys.create.copyAndClose": [
+    {
+      "type": 0,
+      "value": "Kopieren und schließen"
+    }
+  ],
+  "web.settings.apiKeys.create.copyFailed": [
+    {
+      "type": 0,
+      "value": "Kopieren fehlgeschlagen. Markiere den Schlüssel und kopiere ihn manuell."
+    }
+  ],
+  "web.settings.apiKeys.create.creating": [
+    {
+      "type": 0,
+      "value": "Wird erstellt…"
+    }
+  ],
+  "web.settings.apiKeys.create.description": [
+    {
+      "type": 0,
+      "value": "Der vollständige Schlüssel wird nur einmal angezeigt."
+    }
+  ],
+  "web.settings.apiKeys.create.label": [
+    {
+      "type": 0,
+      "value": "Bezeichnung"
+    }
+  ],
+  "web.settings.apiKeys.create.secretNotice": [
+    {
+      "type": 0,
+      "value": "Kopiere deinen API-Schlüssel jetzt. Du kannst ihn später nicht mehr sehen."
+    }
+  ],
+  "web.settings.apiKeys.create.submit": [
+    {
+      "type": 0,
+      "value": "Erstellen"
+    }
+  ],
+  "web.settings.apiKeys.create.title": [
+    {
+      "type": 0,
+      "value": "API-Schlüssel erstellen"
+    }
+  ],
+  "web.settings.apiKeys.create.uncertain": [
+    {
+      "type": 0,
+      "value": "Das Ergebnis ist unklar. Lade die Seite neu, bevor du einen weiteren Schlüssel erstellst."
+    }
+  ],
+  "web.settings.apiKeys.createKey": [
+    {
+      "type": 0,
+      "value": "Schlüssel erstellen"
+    }
+  ],
+  "web.settings.apiKeys.disabled": [
+    {
+      "type": 0,
+      "value": "Dieser Server erlaubt Benutzern nicht, API-Schlüssel zu erstellen. Bitte die Serververwaltung, dies zu aktivieren."
+    }
+  ],
+  "web.settings.apiKeys.empty": [
+    {
+      "type": 0,
+      "value": "Noch keine API-Schlüssel."
+    }
+  ],
+  "web.settings.apiKeys.limitReached": [
+    {
+      "type": 0,
+      "value": "Du hast das Limit von "
+    },
+    {
+      "type": 1,
+      "value": "max"
+    },
+    {
+      "type": 0,
+      "value": " Schlüsseln erreicht. Widerrufe einen, um einen neuen zu erstellen."
+    }
+  ],
+  "web.settings.apiKeys.list.created": [
+    {
+      "type": 0,
+      "value": "Erstellt: "
+    },
+    {
+      "type": 1,
+      "value": "date"
+    }
+  ],
+  "web.settings.apiKeys.list.heading": [
+    {
+      "type": 0,
+      "value": "Deine Schlüssel"
+    }
+  ],
+  "web.settings.apiKeys.list.lastUsed": [
+    {
+      "type": 0,
+      "value": "Zuletzt verwendet: "
+    },
+    {
+      "type": 1,
+      "value": "date"
+    }
+  ],
+  "web.settings.apiKeys.list.loadMore": [
+    {
+      "type": 0,
+      "value": "Mehr laden"
+    }
+  ],
+  "web.settings.apiKeys.list.neverUsed": [
+    {
+      "type": 0,
+      "value": "Nie verwendet"
+    }
+  ],
+  "web.settings.apiKeys.list.profile": [
+    {
+      "type": 0,
+      "value": "Profil: "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    }
+  ],
+  "web.settings.apiKeys.list.revoke": [
+    {
+      "type": 0,
+      "value": "Widerrufen"
+    }
+  ],
+  "web.settings.apiKeys.list.revokeNamed": [
+    {
+      "type": 1,
+      "value": "label"
+    },
+    {
+      "type": 0,
+      "value": " widerrufen"
+    }
+  ],
+  "web.settings.apiKeys.list.wholeAccount": [
+    {
+      "type": 0,
+      "value": "Ganzes Konto"
+    }
+  ],
+  "web.settings.apiKeys.loadFailed": [
+    {
+      "type": 0,
+      "value": "Deine API-Schlüssel konnten nicht geladen werden."
+    }
+  ],
+  "web.settings.apiKeys.loading": [
+    {
+      "type": 0,
+      "value": "API-Schlüssel werden geladen…"
+    }
+  ],
+  "web.settings.apiKeys.revoke.description": [
+    {
+      "type": 1,
+      "value": "label"
+    },
+    {
+      "type": 0,
+      "value": " funktioniert sofort nicht mehr. Dies kann nicht rückgängig gemacht werden."
+    }
+  ],
+  "web.settings.apiKeys.revoke.done": [
+    {
+      "type": 0,
+      "value": "API-Schlüssel widerrufen"
+    }
+  ],
+  "web.settings.apiKeys.revoke.failed": [
+    {
+      "type": 0,
+      "value": "Der Schlüssel konnte nicht widerrufen werden. Lade die Seite neu und versuche es erneut."
+    }
+  ],
+  "web.settings.apiKeys.revoke.title": [
+    {
+      "type": 0,
+      "value": "API-Schlüssel widerrufen"
+    }
+  ],
+  "web.settings.apiKeys.revoke.working": [
+    {
+      "type": 0,
+      "value": "Wird widerrufen…"
+    }
+  ],
+  "web.settings.apiKeys.scope.catalogRead": [
+    {
+      "type": 0,
+      "value": "Alles durchsuchen, was das Profil sehen kann: Mediatheken, Reihen auf der Startseite und in Mediatheken, Titel, Personen und Suche."
+    }
+  ],
+  "web.settings.apiKeys.scope.librariesRead": [
+    {
+      "type": 0,
+      "value": "Sehen, welche Mediatheken das Profil hat."
+    }
+  ],
+  "web.settings.apiKeys.scope.notifications": [
+    {
+      "type": 0,
+      "value": "Benachrichtigungen des Profils beim Eintreffen lesen und als gelesen markieren."
+    }
+  ],
+  "web.settings.apiKeys.scope.requests": [
+    {
+      "type": 0,
+      "value": "Anfragbare Titel durchsuchen sowie Medienanfragen erstellen, verfolgen und abbrechen."
+    }
+  ],
+  "web.settings.apiKeys.scope.watchRead": [
+    {
+      "type": 0,
+      "value": "Wiedergabeverlauf, Fortschritt, Bewertungen, Favoriten, Merkliste und ausgeblendete Titel des Profils lesen und seine Daten exportieren."
+    }
+  ],
+  "web.settings.apiKeys.scope.watchWrite": [
+    {
+      "type": 0,
+      "value": "Titel als gesehen oder ungesehen markieren, Fortschritt synchronisieren, Verlauf entfernen sowie Bewertungen, Favoriten, Merkliste und ausgeblendete Titel bearbeiten."
+    }
+  ],
+  "web.settings.apiKeys.subtitle": [
+    {
+      "type": 0,
+      "value": "Mit Schlüsseln können Skripte und Apps deine Silo-Daten ohne dein Passwort lesen und aktualisieren."
+    }
+  ],
+  "web.settings.apiKeys.title": [
+    {
+      "type": 0,
+      "value": "API-Schlüssel"
+    }
+  ],
+  "web.settings.apiKeys.usage.accountKey": [
+    {
+      "type": 0,
+      "value": "Dieser Schlüssel kann als jedes Profil deines Kontos handeln. Wähle mit diesem Header pro Anfrage eines aus. Das Beispiel verwendet "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": "; "
+    },
+    {
+      "type": 1,
+      "value": "endpoint"
+    },
+    {
+      "type": 0,
+      "value": " listet die IDs aller Profile auf."
+    }
+  ],
+  "web.settings.apiKeys.usage.docs": [
+    {
+      "type": 0,
+      "value": "API-Referenz"
+    }
+  ],
+  "web.settings.apiKeys.usage.header": [
+    {
+      "type": 0,
+      "value": "Sende ihn bei jeder Anfrage in diesem Header mit:"
+    }
+  ],
+  "web.settings.apiKeys.usage.profileKey": [
+    {
+      "type": 0,
+      "value": "Dieser Schlüssel handelt immer als "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": ". Er braucht keinen Profil-Header."
+    }
+  ],
+  "web.settings.apiKeys.usage.title": [
+    {
+      "type": 0,
+      "value": "So verwendest du diesen Schlüssel"
+    }
+  ],
   "web.settings.cardOverlay.adjust": [
     {
       "type": 0,
@@ -129248,6 +130178,12 @@
       "value": "Das Passwort und die Anmelde-Anbieter, die alle Profile im Haushalt teilen."
     }
   ],
+  "web.settings.nav.apiKeys.description": [
+    {
+      "type": 0,
+      "value": "Schlüssel für Skripte und Apps, die mit deinem Wiedergabeverlauf und deinen Listen arbeiten."
+    }
+  ],
   "web.settings.nav.connectApps.description": [
     {
       "type": 0,
@@ -129824,6 +130760,12 @@
       "value": "Hauptschalter für dieses Profil"
     }
   ],
+  "web.settings.notifications.episodes.nextUpDescription": [
+    {
+      "type": 0,
+      "value": "Erhalte eine Benachrichtigung, wenn eine neue Folge einer Serie erscheint, bei der du auf dem neuesten Stand bist, oder wenn ein Titel verfügbar wird, den du auf deine Merkliste gesetzt oder angefragt hast."
+    }
+  ],
   "web.settings.notifications.episodes.seriesLink": [
     {
       "type": 0,
@@ -130121,7 +131063,7 @@
   "web.settings.notifications.reason.requests": [
     {
       "type": 0,
-      "value": "Anfragen"
+      "value": "Anfragen und Merkliste"
     }
   ],
   "web.settings.notifications.reason.watchlist": [

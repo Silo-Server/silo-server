@@ -33,6 +33,7 @@ import { useSignInProviderDrafts } from "./useSignInProviderDrafts";
 
 export const LOCAL_LOGIN_KEY = "auth.local_password_login";
 export const EMAIL_MATCH_KEY = "auth.email_auto_match";
+export const USER_API_KEYS_KEY = "auth.user_api_keys";
 // Both only work for Silo-password accounts: the server refuses a signup while
 // password sign-in is off, and a reset needs a local password to replace.
 const PASSWORD_ACCOUNT_KEYS = ["signup.enabled", "password_reset.self_service_enabled"];
@@ -41,7 +42,13 @@ const PASSWORD_ACCOUNT_KEYS = ["signup.enabled", "password_reset.self_service_en
 // support — auth.access_token_expiry, auth.refresh_token_expiry,
 // auth.provider_recheck_interval, auth.provider_recheck_outage_policy.
 // server.public_url is read, not edited: OpenID Connect needs it.
-const KEYS = [LOCAL_LOGIN_KEY, ...PASSWORD_ACCOUNT_KEYS, EMAIL_MATCH_KEY, "server.public_url"];
+const KEYS = [
+  LOCAL_LOGIN_KEY,
+  ...PASSWORD_ACCOUNT_KEYS,
+  EMAIL_MATCH_KEY,
+  USER_API_KEYS_KEY,
+  "server.public_url",
+];
 
 /**
  * Settings → Sign-in: whether Silo passwords still sign in, with public
@@ -285,6 +292,20 @@ export default function SignInSettings() {
         </FieldGroup>
 
         <NetworkSignInSection installations={installations.data} />
+
+        <FieldGroup
+          label={t("web.admin.settings.signIn.page.apiKeysGroup")}
+          dirty={form.isDirty(USER_API_KEYS_KEY)}
+        >
+          <SettingField
+            label={t("web.admin.settings.signIn.page.userApiKeysLabel")}
+            dirty={form.isDirty(USER_API_KEYS_KEY)}
+            type="toggle"
+            description={t("web.admin.settings.signIn.page.userApiKeysDescription")}
+            value={form.getValue(USER_API_KEYS_KEY) === "true" ? "true" : "false"}
+            onChange={(value) => form.setValue(USER_API_KEYS_KEY, value)}
+          />
+        </FieldGroup>
       </div>
 
       <SaveBar

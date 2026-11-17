@@ -701,6 +701,18 @@
       "value": "\u200F\u202ECollection\u202C"
     }
   ],
+  "home.recipe.collectionPostersPick.description": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EShow several collections as posters. Each one opens its collection.\u202C"
+    }
+  ],
+  "home.recipe.collectionPostersPick.name": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EA row of collections\u202C"
+    }
+  ],
   "home.recipe.continueListeningDefault.description": [
     {
       "type": 0,
@@ -76435,6 +76447,12 @@
       "value": "\u200F\u202EAllow password sign-in\u202C"
     }
   ],
+  "web.admin.settings.signIn.page.apiKeysGroup": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EAPI keys\u202C"
+    }
+  ],
   "web.admin.settings.signIn.page.breakGlassAdmins": [
     {
       "type": 6,
@@ -76623,6 +76641,18 @@
     {
       "type": 0,
       "value": "\u200F\u202ESign-in\u202C"
+    }
+  ],
+  "web.admin.settings.signIn.page.userApiKeysDescription": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EAny account can create keys for its own profiles in Settings → API Keys. These keys can read and change watch history, lists and requests, and can't play or download media. Turning this off stops new keys; existing ones keep working until revoked.\u202C"
+    }
+  ],
+  "web.admin.settings.signIn.page.userApiKeysLabel": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ELet users create API keys\u202C"
     }
   ],
   "web.admin.settings.signIn.provider.accounts.title": [
@@ -96836,6 +96866,48 @@
       "value": "\u202E shelf?\u202C"
     }
   ],
+  "web.collections.copy.deleteWithRowChangesLabel": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "\u200F\u202EDelete it and change \u202C"
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": "\u202E row\u202C"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "\u200F\u202EDelete it and change \u202C"
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": "\u202E rows\u202C"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.collections.copy.deleteWithRowsLabel": [
     {
       "type": 6,
@@ -98382,6 +98454,20 @@
     {
       "type": 0,
       "value": "\u202E for everyone.\u202C"
+    }
+  ],
+  "web.collections.copy.removedFromRow": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ERemoves it from the row “\u202C"
+    },
+    {
+      "type": 1,
+      "value": "title"
+    },
+    {
+      "type": 0,
+      "value": "\u202E”. The row keeps its other collections.\u202C"
     }
   ],
   "web.collections.copy.removedTitle": [
@@ -106800,6 +106886,12 @@
       "value": "\u200F\u202EAccount Settings\u202C"
     }
   ],
+  "web.common.title.settings.apiKeys": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EAPI Keys Settings\u202C"
+    }
+  ],
   "web.common.title.settings.connectApps": [
     {
       "type": 0,
@@ -111512,6 +111604,304 @@
       "value": "\u202E.\u202C"
     }
   ],
+  "web.home.addRow.collections.add": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EAdd\u202C"
+    }
+  ],
+  "web.home.addRow.collections.addLabel": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EAdd collections\u202C"
+    }
+  ],
+  "web.home.addRow.collections.added": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EAdded\u202C"
+    }
+  ],
+  "web.home.addRow.collections.chosenLabel": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ECollections in this row\u202C"
+    }
+  ],
+  "web.home.addRow.collections.count": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "\u200F"
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": "\u202E collection, shown in this order\u202C"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "\u200F"
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": "\u202E collections, shown in this order\u202C"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.home.addRow.collections.drag.canceled": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EMoving \u202C"
+    },
+    {
+      "type": 1,
+      "value": "collection"
+    },
+    {
+      "type": 0,
+      "value": "\u202E was canceled.\u202C"
+    }
+  ],
+  "web.home.addRow.collections.drag.dropped": [
+    {
+      "type": 0,
+      "value": "\u200F"
+    },
+    {
+      "type": 1,
+      "value": "collection"
+    },
+    {
+      "type": 0,
+      "value": "\u202E dropped.\u202C"
+    }
+  ],
+  "web.home.addRow.collections.drag.droppedAt": [
+    {
+      "type": 0,
+      "value": "\u200F"
+    },
+    {
+      "type": 1,
+      "value": "collection"
+    },
+    {
+      "type": 0,
+      "value": "\u202E dropped at position \u202C"
+    },
+    {
+      "type": 1,
+      "value": "position"
+    },
+    {
+      "type": 0,
+      "value": "\u202E of \u202C"
+    },
+    {
+      "type": 1,
+      "value": "total"
+    },
+    {
+      "type": 0,
+      "value": "\u202E.\u202C"
+    }
+  ],
+  "web.home.addRow.collections.drag.instructions": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ETo move a collection, focus its handle and press Space or Enter. Use the up and down arrow keys to move it, Space or Enter to drop it, or Escape to cancel.\u202C"
+    }
+  ],
+  "web.home.addRow.collections.drag.over": [
+    {
+      "type": 0,
+      "value": "\u200F"
+    },
+    {
+      "type": 1,
+      "value": "collection"
+    },
+    {
+      "type": 0,
+      "value": "\u202E is now at position \u202C"
+    },
+    {
+      "type": 1,
+      "value": "position"
+    },
+    {
+      "type": 0,
+      "value": "\u202E of \u202C"
+    },
+    {
+      "type": 1,
+      "value": "total"
+    },
+    {
+      "type": 0,
+      "value": "\u202E.\u202C"
+    }
+  ],
+  "web.home.addRow.collections.drag.pickedUp": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EPicked up \u202C"
+    },
+    {
+      "type": 1,
+      "value": "collection"
+    },
+    {
+      "type": 0,
+      "value": "\u202E, position \u202C"
+    },
+    {
+      "type": 1,
+      "value": "position"
+    },
+    {
+      "type": 0,
+      "value": "\u202E of \u202C"
+    },
+    {
+      "type": 1,
+      "value": "total"
+    },
+    {
+      "type": 0,
+      "value": "\u202E.\u202C"
+    }
+  ],
+  "web.home.addRow.collections.dragHandle": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EReorder \u202C"
+    },
+    {
+      "type": 1,
+      "value": "collection"
+    }
+  ],
+  "web.home.addRow.collections.empty": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EAdd at least one collection below.\u202C"
+    }
+  ],
+  "web.home.addRow.collections.limit": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "\u200F\u202EA row holds up to \u202C"
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": "\u202E collection.\u202C"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "\u200F\u202EA row holds up to \u202C"
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": "\u202E collections.\u202C"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.home.addRow.collections.moveDown": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EMove \u202C"
+    },
+    {
+      "type": 1,
+      "value": "collection"
+    },
+    {
+      "type": 0,
+      "value": "\u202E down\u202C"
+    }
+  ],
+  "web.home.addRow.collections.moveUp": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EMove \u202C"
+    },
+    {
+      "type": 1,
+      "value": "collection"
+    },
+    {
+      "type": 0,
+      "value": "\u202E up\u202C"
+    }
+  ],
+  "web.home.addRow.collections.remove": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ERemove \u202C"
+    },
+    {
+      "type": 1,
+      "value": "collection"
+    }
+  ],
+  "web.home.addRow.collections.unavailable": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ENo longer available\u202C"
+    }
+  ],
+  "web.home.addRow.collections.yours": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EYours\u202C"
+    }
+  ],
   "web.home.addRow.conflict": [
     {
       "type": 0,
@@ -114805,16 +115195,192 @@
       }
     }
   ],
+  "web.home.rows.describe.collectionCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "\u200F"
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": "\u202E collection\u202C"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "\u200F"
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": "\u202E collections\u202C"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.home.rows.describe.collectionGone": [
     {
       "type": 0,
       "value": "\u200F\u202ECollection no longer available\u202C"
     }
   ],
+  "web.home.rows.describe.collectionList": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "\u200F"
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": "\u202E collection: \u202C"
+            },
+            {
+              "type": 1,
+              "value": "names"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "\u200F"
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": "\u202E collections: \u202C"
+            },
+            {
+              "type": 1,
+              "value": "names"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.home.rows.describe.collectionListMore": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "\u200F"
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": "\u202E more\u202C"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "\u200F"
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": "\u202E more\u202C"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.home.rows.describe.collectionUnknown": [
     {
       "type": 0,
       "value": "\u200F\u202EA collection\u202C"
+    }
+  ],
+  "web.home.rows.describe.collectionsGone": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "\u200F"
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": "\u202E collection no longer available\u202C"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "\u200F"
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": "\u202E collections no longer available\u202C"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.home.rows.describe.curated": [
@@ -116371,6 +116937,12 @@
       "value": "\u200F\u202EWhat each viewer saved to watch\u202C"
     }
   ],
+  "web.home.rows.draft.addCollection": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EAdd a collection to see the row.\u202C"
+    }
+  ],
   "web.home.rows.draft.addTitles": [
     {
       "type": 0,
@@ -116643,6 +117215,12 @@
       "value": "\u200F\u202EShow one of your collections.\u202C"
     }
   ],
+  "web.home.rows.kindSentences.collectionPosters": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EShow several collections as posters. Each one opens its collection.\u202C"
+    }
+  ],
   "web.home.rows.kindSentences.continueWatching": [
     {
       "type": 0,
@@ -116845,6 +117423,12 @@
     {
       "type": 0,
       "value": "\u200F\u202EA collection\u202C"
+    }
+  ],
+  "web.home.rows.kinds.collectionPosters": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EA row of collections\u202C"
     }
   ],
   "web.home.rows.kinds.continueWatching": [
@@ -122809,6 +123393,12 @@
       "value": "\u200F\u202EYou will be notified here when new episodes arrive for series you favorite, watchlist, or are watching.\u202C"
     }
   ],
+  "web.notifications.inbox.emptyHintNextUp": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EYou’ll be notified here when a new episode arrives for a series you’re caught up on, or when a title you watchlisted or requested arrives.\u202C"
+    }
+  ],
   "web.notifications.inbox.emptyUnread": [
     {
       "type": 0,
@@ -123243,6 +123833,30 @@
     {
       "type": 0,
       "value": "\u200F\u202ENotification views\u202C"
+    }
+  ],
+  "web.notifications.inbox.watchlistAvailable": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EWatchlist title available\u202C"
+    }
+  ],
+  "web.notifications.inbox.watchlistMovieAvailable": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EA movie on your watchlist is now available\u202C"
+    }
+  ],
+  "web.notifications.inbox.watchlistSeriesAvailable": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EA series on your watchlist is now available\u202C"
+    }
+  ],
+  "web.notifications.inbox.watchlistTitleAvailable": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EA title on your watchlist is now available\u202C"
     }
   ],
   "web.notifications.preferences.continueWatching": [
@@ -123731,6 +124345,12 @@
       "value": "\u200F\u202ESelected series\u202C"
     }
   ],
+  "web.notifications.series.afterCatchUp": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EAfter you catch up\u202C"
+    }
+  ],
   "web.notifications.series.allReasons": [
     {
       "type": 0,
@@ -123789,10 +124409,22 @@
       "value": "\u200F\u202ESeries you favorite, add to your watchlist, or start watching show up here.\u202C"
     }
   ],
+  "web.notifications.series.emptyHintNextUp": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ESeries show up here after you finish an episode. Once you’re caught up on a series, you’re notified when its next episode arrives.\u202C"
+    }
+  ],
   "web.notifications.series.filterByReason": [
     {
       "type": 0,
       "value": "\u200F\u202EFilter by reason\u202C"
+    }
+  ],
+  "web.notifications.series.filterLabel": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EFilter series\u202C"
     }
   ],
   "web.notifications.series.intro": [
@@ -123903,10 +124535,32 @@
       "value": "last"
     }
   ],
+  "web.notifications.series.nextEpisodeAfter": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EThe next episode after \u202C"
+    },
+    {
+      "type": 1,
+      "value": "code"
+    }
+  ],
+  "web.notifications.series.nextNewEpisode": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EThe next new episode\u202C"
+    }
+  ],
   "web.notifications.series.noMatch": [
     {
       "type": 0,
       "value": "\u200F\u202ENo series match. Try another search or reason.\u202C"
+    }
+  ],
+  "web.notifications.series.noMatchFilter": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ENo series match. Try another search or filter.\u202C"
     }
   ],
   "web.notifications.series.notificationsOff": [
@@ -124091,6 +124745,12 @@
     {
       "type": 0,
       "value": "\u202E is now available\u202C"
+    }
+  ],
+  "web.notifications.toast.watchlistArrived": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EA title on your watchlist has arrived in the library.\u202C"
     }
   ],
   "web.onboarding.gate.progressFailed": [
@@ -132589,6 +133249,344 @@
       "value": "\u200F\u202EAdvanced\u202C"
     }
   ],
+  "web.settings.apiKeys.create.access": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EAccess\u202C"
+    }
+  ],
+  "web.settings.apiKeys.create.accessHint": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EChoose at least one. No key can play, stream or download media.\u202C"
+    }
+  ],
+  "web.settings.apiKeys.create.actsAs": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EActs as\u202C"
+    }
+  ],
+  "web.settings.apiKeys.create.actsAsHint": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EA key for one profile always acts as that profile and keeps its limits. A whole-account key can act as any profile on your account.\u202C"
+    }
+  ],
+  "web.settings.apiKeys.create.copied": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ECopied to clipboard\u202C"
+    }
+  ],
+  "web.settings.apiKeys.create.copyAndClose": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ECopy & Close\u202C"
+    }
+  ],
+  "web.settings.apiKeys.create.copyFailed": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ECouldn't copy. Select the key and copy it manually.\u202C"
+    }
+  ],
+  "web.settings.apiKeys.create.creating": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ECreating…\u202C"
+    }
+  ],
+  "web.settings.apiKeys.create.description": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EThe full key is shown only once.\u202C"
+    }
+  ],
+  "web.settings.apiKeys.create.label": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ELabel\u202C"
+    }
+  ],
+  "web.settings.apiKeys.create.secretNotice": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ECopy your API key now. You can't see it again.\u202C"
+    }
+  ],
+  "web.settings.apiKeys.create.submit": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ECreate\u202C"
+    }
+  ],
+  "web.settings.apiKeys.create.title": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ECreate API Key\u202C"
+    }
+  ],
+  "web.settings.apiKeys.create.uncertain": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EThe result is uncertain. Reload the page before creating another key.\u202C"
+    }
+  ],
+  "web.settings.apiKeys.createKey": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ECreate Key\u202C"
+    }
+  ],
+  "web.settings.apiKeys.disabled": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EThis server doesn't let users create API keys. Ask its admin to turn that on.\u202C"
+    }
+  ],
+  "web.settings.apiKeys.empty": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ENo API keys yet.\u202C"
+    }
+  ],
+  "web.settings.apiKeys.limitReached": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EYou've reached the limit of \u202C"
+    },
+    {
+      "type": 1,
+      "value": "max"
+    },
+    {
+      "type": 0,
+      "value": "\u202E keys. Revoke one to create another.\u202C"
+    }
+  ],
+  "web.settings.apiKeys.list.created": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ECreated \u202C"
+    },
+    {
+      "type": 1,
+      "value": "date"
+    }
+  ],
+  "web.settings.apiKeys.list.heading": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EYour keys\u202C"
+    }
+  ],
+  "web.settings.apiKeys.list.lastUsed": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ELast used \u202C"
+    },
+    {
+      "type": 1,
+      "value": "date"
+    }
+  ],
+  "web.settings.apiKeys.list.loadMore": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ELoad more\u202C"
+    }
+  ],
+  "web.settings.apiKeys.list.neverUsed": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ENever used\u202C"
+    }
+  ],
+  "web.settings.apiKeys.list.profile": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EProfile: \u202C"
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    }
+  ],
+  "web.settings.apiKeys.list.revoke": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ERevoke\u202C"
+    }
+  ],
+  "web.settings.apiKeys.list.revokeNamed": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ERevoke \u202C"
+    },
+    {
+      "type": 1,
+      "value": "label"
+    }
+  ],
+  "web.settings.apiKeys.list.wholeAccount": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EWhole account\u202C"
+    }
+  ],
+  "web.settings.apiKeys.loadFailed": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ECouldn't load your API keys.\u202C"
+    }
+  ],
+  "web.settings.apiKeys.loading": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ELoading API keys…\u202C"
+    }
+  ],
+  "web.settings.apiKeys.revoke.description": [
+    {
+      "type": 0,
+      "value": "\u200F"
+    },
+    {
+      "type": 1,
+      "value": "label"
+    },
+    {
+      "type": 0,
+      "value": "\u202E stops working at once. This can't be undone.\u202C"
+    }
+  ],
+  "web.settings.apiKeys.revoke.done": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EAPI key revoked\u202C"
+    }
+  ],
+  "web.settings.apiKeys.revoke.failed": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ECouldn't revoke the key. Reload the page and try again.\u202C"
+    }
+  ],
+  "web.settings.apiKeys.revoke.title": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ERevoke API key\u202C"
+    }
+  ],
+  "web.settings.apiKeys.revoke.working": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ERevoking…\u202C"
+    }
+  ],
+  "web.settings.apiKeys.scope.catalogRead": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EBrowse what the profile can see: libraries, home and library rows, titles, people and search.\u202C"
+    }
+  ],
+  "web.settings.apiKeys.scope.librariesRead": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ESee which libraries the profile has.\u202C"
+    }
+  ],
+  "web.settings.apiKeys.scope.notifications": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ERead the profile's notifications as they arrive and mark them read.\u202C"
+    }
+  ],
+  "web.settings.apiKeys.scope.requests": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EBrowse requestable titles and create, follow and cancel media requests.\u202C"
+    }
+  ],
+  "web.settings.apiKeys.scope.watchRead": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ERead the profile's watch history, progress, ratings, favorites, watchlist and hidden titles, and export its data.\u202C"
+    }
+  ],
+  "web.settings.apiKeys.scope.watchWrite": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EMark titles watched or unwatched, sync progress, remove history, and edit ratings, favorites, watchlist and hidden titles.\u202C"
+    }
+  ],
+  "web.settings.apiKeys.subtitle": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EKeys let scripts and apps read and update your Silo data without your password.\u202C"
+    }
+  ],
+  "web.settings.apiKeys.title": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EAPI Keys\u202C"
+    }
+  ],
+  "web.settings.apiKeys.usage.accountKey": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EThis key can act as any profile on your account. Choose one per request with this header. The example uses \u202C"
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": "\u202E; \u202C"
+    },
+    {
+      "type": 1,
+      "value": "endpoint"
+    },
+    {
+      "type": 0,
+      "value": "\u202E lists every profile's ID.\u202C"
+    }
+  ],
+  "web.settings.apiKeys.usage.docs": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EAPI reference\u202C"
+    }
+  ],
+  "web.settings.apiKeys.usage.header": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ESend it with every request in this header:\u202C"
+    }
+  ],
+  "web.settings.apiKeys.usage.profileKey": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EThis key always acts as \u202C"
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": "\u202E. It needs no profile header.\u202C"
+    }
+  ],
+  "web.settings.apiKeys.usage.title": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EHow to use this key\u202C"
+    }
+  ],
   "web.settings.cardOverlay.adjust": [
     {
       "type": 0,
@@ -136181,6 +137179,12 @@
       "value": "\u200F\u202EThe password and sign-in providers every household profile shares.\u202C"
     }
   ],
+  "web.settings.nav.apiKeys.description": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EKeys for scripts and apps that work with your watch history and lists.\u202C"
+    }
+  ],
   "web.settings.nav.connectApps.description": [
     {
       "type": 0,
@@ -136757,6 +137761,12 @@
       "value": "\u200F\u202EMaster switch for this profile\u202C"
     }
   ],
+  "web.settings.notifications.episodes.nextUpDescription": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EGet notified when a new episode arrives for a series you’re caught up on, or when a title you watchlisted or requested arrives.\u202C"
+    }
+  ],
   "web.settings.notifications.episodes.seriesLink": [
     {
       "type": 0,
@@ -137050,7 +138060,7 @@
   "web.settings.notifications.reason.requests": [
     {
       "type": 0,
-      "value": "\u200F\u202ERequests\u202C"
+      "value": "\u200F\u202ERequests and watchlist\u202C"
     }
   ],
   "web.settings.notifications.reason.watchlist": [

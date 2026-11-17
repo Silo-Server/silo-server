@@ -94,6 +94,18 @@ type carrySpec struct {
 	// limit, when set, turns a switch off on a carried row instead of
 	// dropping it.
 	limit *carryLimit
+	// binding, when set, is a nullable column that narrows what a row's
+	// credential may do. A live row holding a value there is carried only
+	// when the restored schema has the column and what the value names is in
+	// the restored data: carried without it, the credential would be wider
+	// than it is live.
+	binding *carryBinding
+}
+
+// carryBinding names a carrySpec.binding column and the SQL condition, over
+// the live row r, that what it names is in the restored data.
+type carryBinding struct {
+	column, exists string
 }
 
 // carryLimit carries a row with column false where keep, over the live row
@@ -194,6 +206,10 @@ var secretTables = []secretTable{
 		key: "id", same: []string{"id", columnUserID, "key_hash", "key_prefix"}, credential: everyRow,
 		owned: ownerCarried(columnUserID), owners: []string{columnUserID},
 		describe: `format('API key %s %L (account %s)', r.id, r.label, r.user_id)`,
+		// A key bound to a profile acts only as that profile. Carried into
+		// a backup taken before keys could be bound, it would become an
+		// account key that names any profile.
+		binding: &carryBinding{column: columnProfileID, exists: profileOf("r."+columnUserID, "r."+columnProfileID)},
 	}},
 	{name: "invitations", handling: secretCarried, why: "pending invitations", carry: &carrySpec{
 		key: "id", same: []string{"id", "token_hash"}, credential: `t.accepted_at IS NULL AND t.revoked_at IS NULL`,
@@ -730,6 +746,16 @@ func (t secretTable) carryInto(ctx context.Context, tx pgx.Tx, live string, resu
 	}
 	keyColumns := strings.Split(c.key, ", ")
 	owned := c.owned
+	if b := c.binding; b != nil {
+		if slices.Contains(columns, b.column) {
+			owned = fmt.Sprintf(`(%s) AND (r.%s IS NULL OR %s)`, owned, b.column, b.exists)
+		} else {
+			// r has only the restored schema's columns, so the binding is
+			// read from the live rows themselves.
+			owned = fmt.Sprintf(`(%s) AND NOT EXISTS (SELECT 1 FROM json_array_elements($1::json) j
+				WHERE j->>'%s' = r.%s::text AND j->>'%s' IS NOT NULL)`, owned, c.key, c.key, b.column)
+		}
+	}
 	restoredKey, err := primaryKeyColumns(ctx, tx, t.name)
 	if err != nil {
 		return err

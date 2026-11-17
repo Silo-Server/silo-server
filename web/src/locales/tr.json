@@ -701,6 +701,18 @@
       "value": "Koleksiyon"
     }
   ],
+  "home.recipe.collectionPostersPick.description": [
+    {
+      "type": 0,
+      "value": "Birkaç koleksiyonu poster olarak gösterir. Her biri kendi koleksiyonunu açar."
+    }
+  ],
+  "home.recipe.collectionPostersPick.name": [
+    {
+      "type": 0,
+      "value": "Koleksiyon satırı"
+    }
+  ],
   "home.recipe.continueListeningDefault.description": [
     {
       "type": 0,
@@ -72071,6 +72083,12 @@
       "value": "Parolayla oturum açmaya izin ver"
     }
   ],
+  "web.admin.settings.signIn.page.apiKeysGroup": [
+    {
+      "type": 0,
+      "value": "API anahtarları"
+    }
+  ],
   "web.admin.settings.signIn.page.breakGlassAdmins": [
     {
       "type": 6,
@@ -72255,6 +72273,18 @@
     {
       "type": 0,
       "value": "Oturum açma"
+    }
+  ],
+  "web.admin.settings.signIn.page.userApiKeysDescription": [
+    {
+      "type": 0,
+      "value": "Her hesap, Ayarlar → API anahtarları sayfasında kendi profilleri için anahtar oluşturabilir. Bu anahtarlar izleme geçmişini, listeleri ve istekleri okuyup değiştirebilir; medya oynatamaz veya indiremez. Bunu kapatmak yeni anahtar oluşturulmasını durdurur; mevcut anahtarlar iptal edilene kadar çalışmaya devam eder."
+    }
+  ],
+  "web.admin.settings.signIn.page.userApiKeysLabel": [
+    {
+      "type": 0,
+      "value": "Kullanıcıların API anahtarı oluşturmasına izin ver"
     }
   ],
   "web.admin.settings.signIn.provider.accounts.title": [
@@ -91334,6 +91364,48 @@
       "value": " rafı silinsin mi?"
     }
   ],
+  "web.collections.copy.deleteWithRowChangesLabel": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Sil ve "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " satırı değiştir"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Sil ve "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " satırı değiştir"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.collections.copy.deleteWithRowsLabel": [
     {
       "type": 6,
@@ -92796,6 +92868,20 @@
     {
       "type": 0,
       "value": "."
+    }
+  ],
+  "web.collections.copy.removedFromRow": [
+    {
+      "type": 0,
+      "value": "Koleksiyonu “"
+    },
+    {
+      "type": 1,
+      "value": "title"
+    },
+    {
+      "type": 0,
+      "value": "” satırından kaldırır. Satır diğer koleksiyonlarını korur."
     }
   ],
   "web.collections.copy.removedTitle": [
@@ -100554,6 +100640,12 @@
       "value": "Hesap ayarları"
     }
   ],
+  "web.common.title.settings.apiKeys": [
+    {
+      "type": 0,
+      "value": "API anahtarları ayarları"
+    }
+  ],
   "web.common.title.settings.connectApps": [
     {
       "type": 0,
@@ -104954,6 +105046,268 @@
       "value": " sayfasında oluşturun veya değiştirin."
     }
   ],
+  "web.home.addRow.collections.add": [
+    {
+      "type": 0,
+      "value": "Ekle"
+    }
+  ],
+  "web.home.addRow.collections.addLabel": [
+    {
+      "type": 0,
+      "value": "Koleksiyon ekle"
+    }
+  ],
+  "web.home.addRow.collections.added": [
+    {
+      "type": 0,
+      "value": "Eklendi"
+    }
+  ],
+  "web.home.addRow.collections.chosenLabel": [
+    {
+      "type": 0,
+      "value": "Bu satırdaki koleksiyonlar"
+    }
+  ],
+  "web.home.addRow.collections.count": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " koleksiyon, bu sırayla gösterilir"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " koleksiyon, bu sırayla gösterilir"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.home.addRow.collections.drag.canceled": [
+    {
+      "type": 1,
+      "value": "collection"
+    },
+    {
+      "type": 0,
+      "value": " koleksiyonunun taşınması iptal edildi."
+    }
+  ],
+  "web.home.addRow.collections.drag.dropped": [
+    {
+      "type": 1,
+      "value": "collection"
+    },
+    {
+      "type": 0,
+      "value": " koleksiyonu bırakıldı."
+    }
+  ],
+  "web.home.addRow.collections.drag.droppedAt": [
+    {
+      "type": 1,
+      "value": "collection"
+    },
+    {
+      "type": 0,
+      "value": " koleksiyonu "
+    },
+    {
+      "type": 1,
+      "value": "position"
+    },
+    {
+      "type": 0,
+      "value": ". konuma bırakıldı (toplam "
+    },
+    {
+      "type": 1,
+      "value": "total"
+    },
+    {
+      "type": 0,
+      "value": ")."
+    }
+  ],
+  "web.home.addRow.collections.drag.instructions": [
+    {
+      "type": 0,
+      "value": "Bir koleksiyonu taşımak için tutamacına odaklanıp Space veya Enter tuşuna basın. Taşımak için yukarı ve aşağı ok tuşlarını, bırakmak için Space veya Enter tuşunu, iptal etmek için Escape tuşunu kullanın."
+    }
+  ],
+  "web.home.addRow.collections.drag.over": [
+    {
+      "type": 1,
+      "value": "collection"
+    },
+    {
+      "type": 0,
+      "value": " koleksiyonu artık "
+    },
+    {
+      "type": 1,
+      "value": "position"
+    },
+    {
+      "type": 0,
+      "value": ". konumda (toplam "
+    },
+    {
+      "type": 1,
+      "value": "total"
+    },
+    {
+      "type": 0,
+      "value": ")."
+    }
+  ],
+  "web.home.addRow.collections.drag.pickedUp": [
+    {
+      "type": 1,
+      "value": "collection"
+    },
+    {
+      "type": 0,
+      "value": " koleksiyonu alındı, konum "
+    },
+    {
+      "type": 1,
+      "value": "position"
+    },
+    {
+      "type": 0,
+      "value": "/"
+    },
+    {
+      "type": 1,
+      "value": "total"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.home.addRow.collections.dragHandle": [
+    {
+      "type": 0,
+      "value": "Sırayı değiştir: "
+    },
+    {
+      "type": 1,
+      "value": "collection"
+    }
+  ],
+  "web.home.addRow.collections.empty": [
+    {
+      "type": 0,
+      "value": "Aşağıdan en az bir koleksiyon ekleyin."
+    }
+  ],
+  "web.home.addRow.collections.limit": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Bir satırda en fazla "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " koleksiyon olabilir."
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Bir satırda en fazla "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " koleksiyon olabilir."
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.home.addRow.collections.moveDown": [
+    {
+      "type": 0,
+      "value": "Aşağı taşı: "
+    },
+    {
+      "type": 1,
+      "value": "collection"
+    }
+  ],
+  "web.home.addRow.collections.moveUp": [
+    {
+      "type": 0,
+      "value": "Yukarı taşı: "
+    },
+    {
+      "type": 1,
+      "value": "collection"
+    }
+  ],
+  "web.home.addRow.collections.remove": [
+    {
+      "type": 0,
+      "value": "Kaldır: "
+    },
+    {
+      "type": 1,
+      "value": "collection"
+    }
+  ],
+  "web.home.addRow.collections.unavailable": [
+    {
+      "type": 0,
+      "value": "Artık mevcut değil"
+    }
+  ],
+  "web.home.addRow.collections.yours": [
+    {
+      "type": 0,
+      "value": "Sizin"
+    }
+  ],
   "web.home.addRow.conflict": [
     {
       "type": 0,
@@ -108095,16 +108449,160 @@
       }
     }
   ],
+  "web.home.rows.describe.collectionCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " koleksiyon"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " koleksiyon"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.home.rows.describe.collectionGone": [
     {
       "type": 0,
       "value": "Koleksiyon artık kullanılamıyor"
     }
   ],
+  "web.home.rows.describe.collectionList": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " koleksiyon: "
+            },
+            {
+              "type": 1,
+              "value": "names"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " koleksiyon: "
+            },
+            {
+              "type": 1,
+              "value": "names"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.home.rows.describe.collectionListMore": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " koleksiyon daha"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " koleksiyon daha"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.home.rows.describe.collectionUnknown": [
     {
       "type": 0,
       "value": "Bir koleksiyon"
+    }
+  ],
+  "web.home.rows.describe.collectionsGone": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " koleksiyon artık mevcut değil"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " koleksiyon artık mevcut değil"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.home.rows.describe.curated": [
@@ -109613,6 +110111,12 @@
       "value": "Her izleyicinin izlemek için kaydettikleri"
     }
   ],
+  "web.home.rows.draft.addCollection": [
+    {
+      "type": 0,
+      "value": "Satırı görmek için bir koleksiyon ekleyin."
+    }
+  ],
   "web.home.rows.draft.addTitles": [
     {
       "type": 0,
@@ -109865,6 +110369,12 @@
       "value": "Koleksiyonlarınızdan birini gösterin."
     }
   ],
+  "web.home.rows.kindSentences.collectionPosters": [
+    {
+      "type": 0,
+      "value": "Birkaç koleksiyonu poster olarak gösterir. Her biri kendi koleksiyonunu açar."
+    }
+  ],
   "web.home.rows.kindSentences.continueWatching": [
     {
       "type": 0,
@@ -110067,6 +110577,12 @@
     {
       "type": 0,
       "value": "Bir koleksiyon"
+    }
+  ],
+  "web.home.rows.kinds.collectionPosters": [
+    {
+      "type": 0,
+      "value": "Koleksiyon satırı"
     }
   ],
   "web.home.rows.kinds.continueWatching": [
@@ -115695,6 +116211,12 @@
       "value": "Favorilerinizdeki, izleme listesindeki veya izlemekte olduğunuz dizilere yeni bölümler geldiğinde burada bildirim alırsınız."
     }
   ],
+  "web.notifications.inbox.emptyHintNextUp": [
+    {
+      "type": 0,
+      "value": "Son bölümüne kadar izlediğiniz bir diziye yeni bölüm geldiğinde veya izleme listenize eklediğiniz ya da istediğiniz bir içerik geldiğinde burada bildirim alırsınız."
+    }
+  ],
   "web.notifications.inbox.emptyUnread": [
     {
       "type": 0,
@@ -116085,6 +116607,30 @@
     {
       "type": 0,
       "value": "Bildirim görünümleri"
+    }
+  ],
+  "web.notifications.inbox.watchlistAvailable": [
+    {
+      "type": 0,
+      "value": "İzleme listesindeki içerik hazır"
+    }
+  ],
+  "web.notifications.inbox.watchlistMovieAvailable": [
+    {
+      "type": 0,
+      "value": "İzleme listenizdeki bir film artık izlenebilir"
+    }
+  ],
+  "web.notifications.inbox.watchlistSeriesAvailable": [
+    {
+      "type": 0,
+      "value": "İzleme listenizdeki bir dizi artık izlenebilir"
+    }
+  ],
+  "web.notifications.inbox.watchlistTitleAvailable": [
+    {
+      "type": 0,
+      "value": "İzleme listenizdeki bir içerik artık izlenebilir"
     }
   ],
   "web.notifications.preferences.continueWatching": [
@@ -116549,6 +117095,12 @@
       "value": "Seçili diziler"
     }
   ],
+  "web.notifications.series.afterCatchUp": [
+    {
+      "type": 0,
+      "value": "İzlemeyi yetiştirdikten sonra"
+    }
+  ],
   "web.notifications.series.allReasons": [
     {
       "type": 0,
@@ -116607,10 +117159,22 @@
       "value": "Favorilere eklediğiniz, izleme listesine eklediğiniz veya izlemeye başladığınız diziler burada görünür."
     }
   ],
+  "web.notifications.series.emptyHintNextUp": [
+    {
+      "type": 0,
+      "value": "Bir bölümü bitirdikten sonra diziler burada görünür. Bir dizide izlemeyi yetiştirdiğinizde, dizinin sonraki bölümü geldiğinde bildirim alırsınız."
+    }
+  ],
   "web.notifications.series.filterByReason": [
     {
       "type": 0,
       "value": "Nedene göre filtrele"
+    }
+  ],
+  "web.notifications.series.filterLabel": [
+    {
+      "type": 0,
+      "value": "Dizileri filtrele"
     }
   ],
   "web.notifications.series.intro": [
@@ -116717,10 +117281,32 @@
       "value": "last"
     }
   ],
+  "web.notifications.series.nextEpisodeAfter": [
+    {
+      "type": 1,
+      "value": "code"
+    },
+    {
+      "type": 0,
+      "value": " bölümünden sonraki bölüm"
+    }
+  ],
+  "web.notifications.series.nextNewEpisode": [
+    {
+      "type": 0,
+      "value": "Sonraki yeni bölüm"
+    }
+  ],
   "web.notifications.series.noMatch": [
     {
       "type": 0,
       "value": "Eşleşen dizi yok. Başka bir arama veya neden deneyin."
+    }
+  ],
+  "web.notifications.series.noMatchFilter": [
+    {
+      "type": 0,
+      "value": "Eşleşen dizi yok. Başka bir arama veya filtre deneyin."
     }
   ],
   "web.notifications.series.notificationsOff": [
@@ -116897,6 +117483,12 @@
     {
       "type": 0,
       "value": " artık izlenebilir"
+    }
+  ],
+  "web.notifications.toast.watchlistArrived": [
+    {
+      "type": 0,
+      "value": "İzleme listenizdeki bir içerik kitaplığa eklendi."
     }
   ],
   "web.onboarding.gate.progressFailed": [
@@ -124931,6 +125523,336 @@
       "value": "Gelişmiş"
     }
   ],
+  "web.settings.apiKeys.create.access": [
+    {
+      "type": 0,
+      "value": "Erişim"
+    }
+  ],
+  "web.settings.apiKeys.create.accessHint": [
+    {
+      "type": 0,
+      "value": "En az birini seçin. Hiçbir anahtar medya oynatamaz, akış yapamaz veya indiremez."
+    }
+  ],
+  "web.settings.apiKeys.create.actsAs": [
+    {
+      "type": 0,
+      "value": "Kimin adına çalışır"
+    }
+  ],
+  "web.settings.apiKeys.create.actsAsHint": [
+    {
+      "type": 0,
+      "value": "Tek bir profil için oluşturulan anahtar her zaman o profil adına çalışır ve profilin sınırlarını korur. Tüm hesap için oluşturulan anahtar, hesabınızdaki herhangi bir profil adına çalışabilir."
+    }
+  ],
+  "web.settings.apiKeys.create.copied": [
+    {
+      "type": 0,
+      "value": "Panoya kopyalandı"
+    }
+  ],
+  "web.settings.apiKeys.create.copyAndClose": [
+    {
+      "type": 0,
+      "value": "Kopyala ve kapat"
+    }
+  ],
+  "web.settings.apiKeys.create.copyFailed": [
+    {
+      "type": 0,
+      "value": "Kopyalanamadı. Anahtarı seçip elle kopyalayın."
+    }
+  ],
+  "web.settings.apiKeys.create.creating": [
+    {
+      "type": 0,
+      "value": "Oluşturuluyor…"
+    }
+  ],
+  "web.settings.apiKeys.create.description": [
+    {
+      "type": 0,
+      "value": "Anahtarın tamamı yalnızca bir kez gösterilir."
+    }
+  ],
+  "web.settings.apiKeys.create.label": [
+    {
+      "type": 0,
+      "value": "Etiket"
+    }
+  ],
+  "web.settings.apiKeys.create.secretNotice": [
+    {
+      "type": 0,
+      "value": "API anahtarınızı şimdi kopyalayın. Anahtarı tekrar göremezsiniz."
+    }
+  ],
+  "web.settings.apiKeys.create.submit": [
+    {
+      "type": 0,
+      "value": "Oluştur"
+    }
+  ],
+  "web.settings.apiKeys.create.title": [
+    {
+      "type": 0,
+      "value": "API anahtarı oluştur"
+    }
+  ],
+  "web.settings.apiKeys.create.uncertain": [
+    {
+      "type": 0,
+      "value": "Sonuç belirsiz. Başka bir anahtar oluşturmadan önce sayfayı yeniden yükleyin."
+    }
+  ],
+  "web.settings.apiKeys.createKey": [
+    {
+      "type": 0,
+      "value": "Anahtar oluştur"
+    }
+  ],
+  "web.settings.apiKeys.disabled": [
+    {
+      "type": 0,
+      "value": "Bu sunucu, kullanıcıların API anahtarı oluşturmasına izin vermiyor. Bu seçeneği açması için sunucu yöneticisine başvurun."
+    }
+  ],
+  "web.settings.apiKeys.empty": [
+    {
+      "type": 0,
+      "value": "Henüz API anahtarı yok."
+    }
+  ],
+  "web.settings.apiKeys.limitReached": [
+    {
+      "type": 1,
+      "value": "max"
+    },
+    {
+      "type": 0,
+      "value": " anahtar sınırına ulaştınız. Yeni bir anahtar oluşturmak için birini iptal edin."
+    }
+  ],
+  "web.settings.apiKeys.list.created": [
+    {
+      "type": 0,
+      "value": "Oluşturulma: "
+    },
+    {
+      "type": 1,
+      "value": "date"
+    }
+  ],
+  "web.settings.apiKeys.list.heading": [
+    {
+      "type": 0,
+      "value": "Anahtarlarınız"
+    }
+  ],
+  "web.settings.apiKeys.list.lastUsed": [
+    {
+      "type": 0,
+      "value": "Son kullanım: "
+    },
+    {
+      "type": 1,
+      "value": "date"
+    }
+  ],
+  "web.settings.apiKeys.list.loadMore": [
+    {
+      "type": 0,
+      "value": "Daha fazla yükle"
+    }
+  ],
+  "web.settings.apiKeys.list.neverUsed": [
+    {
+      "type": 0,
+      "value": "Hiç kullanılmadı"
+    }
+  ],
+  "web.settings.apiKeys.list.profile": [
+    {
+      "type": 0,
+      "value": "Profil: "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    }
+  ],
+  "web.settings.apiKeys.list.revoke": [
+    {
+      "type": 0,
+      "value": "İptal et"
+    }
+  ],
+  "web.settings.apiKeys.list.revokeNamed": [
+    {
+      "type": 0,
+      "value": "İptal et: "
+    },
+    {
+      "type": 1,
+      "value": "label"
+    }
+  ],
+  "web.settings.apiKeys.list.wholeAccount": [
+    {
+      "type": 0,
+      "value": "Tüm hesap"
+    }
+  ],
+  "web.settings.apiKeys.loadFailed": [
+    {
+      "type": 0,
+      "value": "API anahtarlarınız yüklenemedi."
+    }
+  ],
+  "web.settings.apiKeys.loading": [
+    {
+      "type": 0,
+      "value": "API anahtarları yükleniyor…"
+    }
+  ],
+  "web.settings.apiKeys.revoke.description": [
+    {
+      "type": 1,
+      "value": "label"
+    },
+    {
+      "type": 0,
+      "value": " hemen çalışmayı durdurur. Bu işlem geri alınamaz."
+    }
+  ],
+  "web.settings.apiKeys.revoke.done": [
+    {
+      "type": 0,
+      "value": "API anahtarı iptal edildi"
+    }
+  ],
+  "web.settings.apiKeys.revoke.failed": [
+    {
+      "type": 0,
+      "value": "Anahtar iptal edilemedi. Sayfayı yeniden yükleyip tekrar deneyin."
+    }
+  ],
+  "web.settings.apiKeys.revoke.title": [
+    {
+      "type": 0,
+      "value": "API anahtarını iptal et"
+    }
+  ],
+  "web.settings.apiKeys.revoke.working": [
+    {
+      "type": 0,
+      "value": "İptal ediliyor…"
+    }
+  ],
+  "web.settings.apiKeys.scope.catalogRead": [
+    {
+      "type": 0,
+      "value": "Profilin görebildiklerine göz atma: kitaplıklar, Ana sayfa ve kitaplık satırları, içerikler, kişiler ve arama."
+    }
+  ],
+  "web.settings.apiKeys.scope.librariesRead": [
+    {
+      "type": 0,
+      "value": "Profilin hangi kitaplıklara sahip olduğunu görme."
+    }
+  ],
+  "web.settings.apiKeys.scope.notifications": [
+    {
+      "type": 0,
+      "value": "Profilin bildirimlerini geldikçe okuma ve okundu olarak işaretleme."
+    }
+  ],
+  "web.settings.apiKeys.scope.requests": [
+    {
+      "type": 0,
+      "value": "İstenebilir içeriklere göz atma; medya istekleri oluşturma, takip etme ve iptal etme."
+    }
+  ],
+  "web.settings.apiKeys.scope.watchRead": [
+    {
+      "type": 0,
+      "value": "Profilin izleme geçmişini, ilerlemesini, puanlarını, favorilerini, izleme listesini ve gizli içeriklerini okuma; verilerini dışa aktarma."
+    }
+  ],
+  "web.settings.apiKeys.scope.watchWrite": [
+    {
+      "type": 0,
+      "value": "İçerikleri izlendi veya izlenmedi olarak işaretleme, ilerlemeyi eşitleme, geçmişi kaldırma; puanları, favorileri, izleme listesini ve gizli içerikleri düzenleme."
+    }
+  ],
+  "web.settings.apiKeys.subtitle": [
+    {
+      "type": 0,
+      "value": "Anahtarlar, betiklerin ve uygulamaların parolanız olmadan Silo verilerinizi okumasını ve güncellemesini sağlar."
+    }
+  ],
+  "web.settings.apiKeys.title": [
+    {
+      "type": 0,
+      "value": "API anahtarları"
+    }
+  ],
+  "web.settings.apiKeys.usage.accountKey": [
+    {
+      "type": 0,
+      "value": "Bu anahtar, hesabınızdaki herhangi bir profil adına çalışabilir. Her istekte bu başlıkla bir profil seçin. Örnekte "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " profili kullanılıyor; "
+    },
+    {
+      "type": 1,
+      "value": "endpoint"
+    },
+    {
+      "type": 0,
+      "value": " isteği tüm profillerin kimliklerini listeler."
+    }
+  ],
+  "web.settings.apiKeys.usage.docs": [
+    {
+      "type": 0,
+      "value": "API başvurusu"
+    }
+  ],
+  "web.settings.apiKeys.usage.header": [
+    {
+      "type": 0,
+      "value": "Anahtarı her istekte şu başlıkla gönderin:"
+    }
+  ],
+  "web.settings.apiKeys.usage.profileKey": [
+    {
+      "type": 0,
+      "value": "Bu anahtar her zaman "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": " profili adına çalışır. Profil başlığı gerekmez."
+    }
+  ],
+  "web.settings.apiKeys.usage.title": [
+    {
+      "type": 0,
+      "value": "Bu anahtarı kullanma"
+    }
+  ],
   "web.settings.cardOverlay.adjust": [
     {
       "type": 0,
@@ -128315,6 +129237,12 @@
       "value": "Tüm hane profillerinin paylaştığı parola ve oturum açma sağlayıcıları."
     }
   ],
+  "web.settings.nav.apiKeys.description": [
+    {
+      "type": 0,
+      "value": "İzleme geçmişiniz ve listelerinizle çalışan betikler ve uygulamalar için anahtarlar."
+    }
+  ],
   "web.settings.nav.connectApps.description": [
     {
       "type": 0,
@@ -128887,6 +129815,12 @@
       "value": "Bu profil için ana anahtar"
     }
   ],
+  "web.settings.notifications.episodes.nextUpDescription": [
+    {
+      "type": 0,
+      "value": "Son bölümüne kadar izlediğiniz bir diziye yeni bölüm geldiğinde veya izleme listenize eklediğiniz ya da istediğiniz bir içerik geldiğinde bildirim alın."
+    }
+  ],
   "web.settings.notifications.episodes.seriesLink": [
     {
       "type": 0,
@@ -129176,7 +130110,7 @@
   "web.settings.notifications.reason.requests": [
     {
       "type": 0,
-      "value": "İstekler"
+      "value": "İstekler ve izleme listesi"
     }
   ],
   "web.settings.notifications.reason.watchlist": [

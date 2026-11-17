@@ -29,9 +29,9 @@ var (
 	// ErrNoGrant is a job that carries no source grant.
 	ErrNoGrant = errors.New("nodesource: job carries no source grant")
 	// ErrMountMismatch is a source whose file on this node's mount is
-	// missing, not a regular file, or not the revision the core approved: the
-	// node does not see the library as the core does. See MountMismatchError.
-	ErrMountMismatch = errors.New("nodesource: this node's mount does not show the source revision the core approved")
+	// missing, not a regular file, or not the size the core approved: the node
+	// does not see the library as the core does. See MountMismatchError.
+	ErrMountMismatch = errors.New("nodesource: this node's mount does not show the source the core approved")
 	// ErrClosed is a source its holder closed.
 	ErrClosed = errors.New("nodesource: source closed")
 	// ErrOpenerClosed is an opener that has shut down.
@@ -79,6 +79,11 @@ type Source interface {
 	// ModTime is the granted modification time, as the core's stat returned
 	// it. Compare it at revision precision (SameModTime).
 	ModTime() time.Time
+	// InputModTime is the modification time a stat of Input returns. With
+	// core access it is the granted one. With local access it is this node's
+	// mount's, which need not be the granted one: mounts of storage that
+	// keeps no modification times each report their own.
+	InputModTime() time.Time
 	// Context ends when the source is closed or the core withdraws it. A job
 	// derives its own context from it, so a withdrawn source stops the job.
 	Context() context.Context
@@ -155,6 +160,9 @@ type Opener struct {
 	retry backoff
 	now   func() time.Time
 
+	// warnedModTime is set once noteModTimeDifference has warned.
+	warnedModTime atomic.Bool
+
 	// relay is the loopback listener of core-access sources, started by the
 	// first one.
 	relay relayListener
@@ -210,7 +218,7 @@ func (o *Opener) coreMode() bool {
 
 // Open exchanges a job's grant at the core and returns its source, renewed
 // until it is closed. With local access the core's approved path must be a
-// regular file of the approved revision on this node's mount
+// regular file of the approved size on this node's mount
 // (*MountMismatchError otherwise); with core access the source is served on
 // the loopback relay. A refusal from the core is a *StatusError; any other
 // error is transient. The caller closes the source when the job ends.
@@ -231,7 +239,8 @@ func (o *Opener) Open(ctx context.Context, grant string) (Source, error) {
 		return o.openCore(opened)
 	}
 	h := &handle{lease: o.newLease(opened)}
-	if err := o.checkLocal(ctx, h.lease); err != nil {
+	h.inputModTime, err = o.checkLocal(ctx, h.lease)
+	if err != nil {
 		h.cancel(err)
 		return nil, err
 	}
@@ -288,18 +297,28 @@ func (o *Opener) Close() error {
 	return o.relay.close()
 }
 
-// checkLocal checks that this node's mount shows l's approved path as the
-// revision the core approved, at revision precision. A mismatch is logged
-// here with what each side saw.
-func (o *Opener) checkLocal(ctx context.Context, l *lease) error {
+// checkLocal checks that this node's mount shows l's approved path as a
+// regular file of the size the core approved, and returns the modification
+// time the mount gives it. A mismatch is logged here with what each side saw.
+//
+// The modification time is not compared. Hosts that mount storage keeping no
+// modification times each report a placeholder of their own, and network
+// filesystems round times differently, so it tells two mounts apart more
+// often than two files. The core checks its own file against the full
+// revision at every open, renewal and read, which is what ends a job whose
+// source was replaced.
+func (o *Opener) checkLocal(ctx context.Context, l *lease) (time.Time, error) {
 	info, err := fspath.StatContext(ctx, l.path)
-	if err == nil && matchesRevision(info, l.size, l.modTime) {
-		return nil
+	if err == nil && info.Mode().IsRegular() && info.Size() == l.size {
+		if !SameModTime(info.ModTime(), l.modTime) {
+			o.noteModTimeDifference(ctx, l, info.ModTime())
+		}
+		return info.ModTime(), nil
 	}
 	if err != nil && ctx.Err() != nil {
 		// The job's request ended while the stat waited; that says nothing
 		// about the mount.
-		return err
+		return time.Time{}, err
 	}
 	mismatch := &MountMismatchError{Path: l.path, CoreSize: l.size, CoreModTime: l.modTime, NodeErr: err}
 	if err == nil {
@@ -307,7 +326,21 @@ func (o *Opener) checkLocal(ctx context.Context, l *lease) error {
 	}
 	o.logger.WarnContext(ctx, "this node's mount does not show the source the core approved; check that it mounts the library at the core's paths",
 		"source", l.etag, "error", mismatch)
-	return mismatch
+	return time.Time{}, mismatch
+}
+
+// noteModTimeDifference logs a source this node's mount dates differently
+// from the core's: as a warning the first time, since it usually holds for
+// the whole mount and would otherwise repeat at every job, then at debug.
+func (o *Opener) noteModTimeDifference(ctx context.Context, l *lease, nodeModTime time.Time) {
+	level := slog.LevelDebug
+	if o.warnedModTime.CompareAndSwap(false, true) {
+		level = slog.LevelWarn
+	}
+	o.logger.Log(ctx, level, "this node's mount gives a source another modification time than the core's; reading it by path and size",
+		"source", l.etag, "path", fspath.Display(l.path),
+		"core_modified", l.modTime.UTC().Format(time.RFC3339Nano),
+		"node_modified", nodeModTime.UTC().Format(time.RFC3339Nano))
 }
 
 func (o *Opener) forget(l *lease) {
@@ -480,13 +513,18 @@ func (l *lease) renew() error {
 	}
 }
 
-// handle is a local-access Source: the lease of its own revision.
-type handle struct{ *lease }
+// handle is a local-access Source: the lease of its own revision, and the
+// modification time this node's mount gave the file when it opened.
+type handle struct {
+	*lease
+	inputModTime time.Time
+}
 
 func (h *handle) Input() string            { return h.path }
 func (h *handle) Identity() string         { return h.etag }
 func (h *handle) Size() int64              { return h.size }
 func (h *handle) ModTime() time.Time       { return h.modTime }
+func (h *handle) InputModTime() time.Time  { return h.inputModTime }
 func (h *handle) Context() context.Context { return h.ctx }
 func (h *handle) Close() error             { h.end(ErrClosed); return nil }
 

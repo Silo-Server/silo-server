@@ -261,8 +261,14 @@ before `-i`, so ffmpeg decodes from the previous keyframe up to the time),
 one frame (`-frames:v 1`), and the MJPEG encoder writing to stdout. ffmpeg's
 whole stdout is the image; a run that succeeds without writing one, such as
 a time past the end of the video, fails the attempt as `empty`.
-`ImageOutput.Width` scales the image to an even width, keeping the aspect
-ratio; zero keeps the source size.
+Every image chain ends by applying the stream's sample aspect ratio
+(`scale=if(between(sar\,0.25\,4)\,round(iw*sar)\,iw):ih`), so a frame from
+non-square-pixel video, such as 1440x1080 HDV or a DVD rip, comes out at its
+display width instead of squeezed. A square-pixel source, or one without a
+sample aspect ratio, scales to its own size, which ffmpeg passes through
+unchanged; a ratio outside 1:4 to 4:1 is taken for bad metadata and ignored.
+`ImageOutput.Width` then scales the image to an even width, keeping the
+aspect ratio; zero keeps that display size.
 
 A hardware image attempt downloads VAAPI surfaces as NV12
 (`hwdownload,format=nv12`) before any scaling; see
@@ -295,6 +301,22 @@ refused; every other failure moves on to the next planned attempt. When a
 frame was extracted but encoding or storing its image fails, the chapter
 records `chapter_upload_failed` and backs off on its own; the file is not
 marked failed.
+
+One extracted frame is bounded twice. `-max_pixels` before `-i` stops the
+decoder on a picture over `MaxImagePixels` (100 megapixels), and the runner
+reads at most `MaxImageBytes` (64 MiB) of stdout, failing the attempt with
+`ErrImageTooLarge` past it. ffmpeg compares the width rounded up to its
+stride alignment, so it gets the limit plus a sixteenth. `chapterthumbs`
+also refuses a file before extraction when every video track with known
+dimensions is over the pixel limit. Each of these is reported as
+`decode_invalid_data`. A transcode node's response is read with the same
+byte limit; one over it fails as the node being unavailable, since a node
+with the limit never sends one, and `prefer_transcode_nodes` then extracts
+locally. The pixel limit equals the source budget in `imageutil`, which
+rejects any larger frame afterwards anyway, so a frame at its decoded size
+or wider that yields a thumbnail is not refused. The limit is on the decoded
+size, which decides the decoder's memory, so a larger source whose sample
+aspect ratio narrows it to under the budget is refused.
 
 ## Sheets
 

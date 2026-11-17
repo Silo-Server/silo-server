@@ -209,3 +209,62 @@ func TestMayCreatePersonalAPIKey_RequiresActingAdmin(t *testing.T) {
 		t.Fatalf("without stores = (%v, %v), want a closed refusal", ok, err)
 	}
 }
+
+// TestMayCreateProfileAPIKey: the primary profile mints a user key for any
+// profile on the account or for the account; every other profile mints only
+// a key bound to itself, and a PIN-locked one only with its own PIN proof.
+// A credential that is not the account's own login session mints none.
+func TestMayCreateProfileAPIKey(t *testing.T) {
+	verified := func(*userstore.Profile) error { return nil }
+	unverified := func(*userstore.Profile) error { return access.ErrProfileUnverified }
+	for _, tc := range []struct {
+		name, acting, target string
+		verify               func(*userstore.Profile) error
+		want                 bool
+		wantErr              error
+	}{
+		{name: "primary for itself", acting: "profile-1", target: "profile-1", verify: verified, want: true},
+		{name: "primary for the account", acting: "profile-1", verify: verified, want: true},
+		{name: "primary for a child", acting: "profile-1", target: "kid", verify: verified, want: true},
+		{name: "child for itself", acting: "kid", target: "kid", verify: verified, want: true},
+		{name: "child for the account", acting: "kid", verify: verified},
+		{name: "child for a sibling", acting: "kid", target: "alex", verify: verified},
+		{name: "child for the primary", acting: "kid", target: "profile-1", verify: verified},
+		{name: "PIN-locked sibling without its PIN", acting: "alex", target: "alex", verify: unverified, wantErr: access.ErrProfileUnverified},
+		{name: "PIN-locked sibling with its PIN", acting: "alex", target: "alex", verify: verified, want: true},
+		{name: "no profile named", target: "kid", verify: verified},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := NewAPIKeyHandler(&fakeAPIKeyStore{})
+			h.Stores = testUserStoreProvider{store: actingAdminHousehold(t, "")}
+			ctx := apimw.SetClaims(t.Context(), &auth.Claims{UserID: 1, Role: "user", SessionID: "s1", TokenType: auth.TokenTypeAccess})
+			ok, acting, err := h.MayCreateProfileAPIKey(ctx, 1, tc.acting, tc.target, tc.verify)
+			if ok != tc.want || !errors.Is(err, tc.wantErr) {
+				t.Fatalf("may create = (%v, %v), want (%v, %v)", ok, err, tc.want, tc.wantErr)
+			}
+			// The verified profile travels to the insert, which rechecks it.
+			if ok && acting.ID != tc.acting {
+				t.Fatalf("acting profile = %+v, want %q", acting, tc.acting)
+			}
+		})
+	}
+
+	h := NewAPIKeyHandler(&fakeAPIKeyStore{})
+	h.Stores = testUserStoreProvider{store: actingAdminHousehold(t, "")}
+	admin := 9
+	for name, claims := range map[string]*auth.Claims{
+		"api key": {UserID: 1, Role: "user", TokenType: auth.TokenTypeAPIKey, APIKeyID: 3},
+		"view-as": {UserID: 1, Role: "user", SessionID: "s1", TokenType: auth.TokenTypeAccess, ImpersonatorUserID: &admin},
+	} {
+		if ok, _, err := h.MayCreateProfileAPIKey(apimw.SetClaims(t.Context(), claims), 1, "profile-1", "kid", verified); ok || err != nil {
+			t.Fatalf("%s = (%v, %v), want a refusal", name, ok, err)
+		}
+	}
+
+	// Profiles stored outside Postgres: no user key, even for the primary.
+	h.ProfilesOutsidePostgres = true
+	own := apimw.SetClaims(t.Context(), &auth.Claims{UserID: 1, Role: "user", SessionID: "s1", TokenType: auth.TokenTypeAccess})
+	if ok, _, err := h.MayCreateProfileAPIKey(own, 1, "profile-1", "profile-1", verified); ok || err != nil {
+		t.Fatalf("profiles outside postgres = (%v, %v), want a refusal", ok, err)
+	}
+}

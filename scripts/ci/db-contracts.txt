@@ -106,6 +106,10 @@
 # A corrected match empties an item's localized text, keeping locks and manual translations.
 ./internal/catalog TestClearMatchTextDB
 
+# Sidecar artwork saved on an unmatched item does not overwrite a match or an
+# artwork change that committed after the read.
+./internal/catalog TestUpdateProvisionalArtworkIsCompareAndSetDB
+
 # A watched special does not anchor Next Up for a series with regular seasons.
 ./internal/catalog TestNextUpSkipsSpecialAnchorsPostgres
 
@@ -288,6 +292,7 @@
 ./internal/auth TestUserWithoutEmailOrUsernameDB
 ./internal/auth TestLoginIdentitySpaceDB
 ./internal/auth TestPasswordSignInForDB
+./internal/auth TestCreatePersonalAPIKeyDB
 ./internal/auth TestPasswordSignInForRoutesDB
 ./internal/auth TestLoginSessionActivityAndAdminRevocationDB
 ./internal/auth TestChangePasswordSignOutOtherSessionsDB
@@ -523,7 +528,7 @@
 ./internal/notifications TestRecomputeSeriesFollowsHomeRemovalsPostgres
 ./internal/notifications TestRecomputeSeriesNextUpCardSkipsSpecialAnchorPostgres
 ./internal/notifications TestRecomputeSeriesNextUpAnchorKeepsSubsecondOrderPostgres
-./internal/notifications TestRecomputeSeriesContinueWatchingKeepsWholeSecondSupersedePostgres
+./internal/notifications TestRecomputeSeriesNextUpCursorPostgres
 ./internal/notifications TestPushDeviceRepositoryUpsertApplePreservesStableIDs
 ./internal/notifications TestRetireApplePushStopsDeliveryAndOrdersAgainstRegistrationDB
 ./internal/notifications TestSendPushTestCarriesTheProfilesNewestNotification
@@ -534,10 +539,12 @@
 ./internal/notifications TestNotifyFulfilledSkipsRecipientWithoutAccess
 ./internal/notifications TestFanoutRetriesWhenRecipientScopeFails
 ./internal/notifications TestFanoutResolvesOnlyEligibleRecipients
+./internal/notifications TestFanoutNotifiesOnlyTheNextUpEpisode
 ./internal/notifications TestNotifyFulfilledRetriesWhenRecipientScopeFails
 ./internal/notifications TestNotifyFulfilledRetryResolvesOnlyUntoldRecipients
 ./internal/notifications TestDispatchOperationalResolvesBeforeHoldingConnection
 ./internal/notifications TestListNotifiedSeriesMergesLibrariesAndAppliesPreferences
+./internal/notifications TestWatchlistArrivalTellsEachWatcherOnce
 ./internal/notifications TestFanoutSkipsProfilesThatMutedTheSeries
 ./internal/notifications TestSeriesMutesList
 ./internal/notifications TestSeriesMutesUnmuteAndPurge
@@ -1005,6 +1012,9 @@
 # Server collections show a restricted viewer only the members it can open, and
 # leave out a collection whose members it can open none of (#2828).
 ./internal/api/handlers TestServerCollectionCountsFollowTheViewerDB
+./internal/api/handlers TestCollectionRowCardsFollowTheViewerDB
+./internal/api/handlers TestCollectionRowCardsShowVisiblePersonalCollectionsDB
+./internal/sections TestRowOfCollectionsReferencesItsCollectionsPostgres
 
 # A scan that adds or removes titles refreshes the stored counts of the smart
 # collections drawing from that library, and only those (#3697).
@@ -1193,6 +1203,7 @@
 # could not be read, reports it so it is retried without a fallback chain.
 ./internal/backup TestBackupRestoreRoundTripDB
 ./internal/backup TestCarryOntoAnOlderKeyDropsSharedRowsDB
+./internal/backup TestCarryDropsAProfileKeyItCannotBindDB
 ./internal/backup TestCarryMovesAnswerSequencePastCarriedLinksDB
 ./internal/backup TestEncryptedS3RoundTripDB
 ./internal/backup TestFullRestoresAreSerializedDB
@@ -1214,6 +1225,7 @@
 ./internal/backup TestTemplateCollectionsAndHomeSectionsDB
 ./internal/backup TestRestoredLibrarySectionsWaitForTheRestoreDB
 ./internal/backup TestManagedSectionPointedElsewhereIsRestoredDB
+./internal/backup TestRowOfCollectionsIsRestoredDB
 ./internal/backup TestSelectiveRestoreOnOneConnectionDB
 ./internal/backup TestUnverifiedRestoreLeavesCostlyWorkOffDB
 ./internal/backup TestRestoreItemWritesDoNotGrowDB
@@ -1312,6 +1324,11 @@
 # kept, which the title's deleted aliases no longer give.
 ./internal/watchlist TestWatchSyncFindsThePromotedItemByKeptIDsDB
 
+# A watchlist read that promoted an entry before the notification fanout ran,
+# on a user store outside PostgreSQL, still leaves the profile for the arrival
+# notice through the promotion record; past the horizon it no longer counts.
+./internal/watchlist TestArrivalFindsAnEntryPromotedOutsidePostgresDB
+
 # Smart collection collage records: a refresh deletes the collection's records
 # nobody refreshed for a week, with or without a collage, and keeps the rest.
 ./internal/catalog TestSmartCollageRecordsRetireWhenUnrefreshedDB
@@ -1346,3 +1363,7 @@
 # A transcode node's source grant is honored only while the catalog has its
 # exact media file: the row id, at exactly the granted path, not missing.
 ./internal/scanner TestFileRepositoryIsActiveFileDB
+
+# Frame posters list only movies whose poster slot is empty with nothing on its
+# way, and a frame is saved only while the slot is still empty with the source read.
+./internal/catalog TestFramePostersListOnlyEmptySlotsAndSaveOnlyOverThemDB

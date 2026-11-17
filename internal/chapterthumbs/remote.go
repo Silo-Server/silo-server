@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/mediasample"
 	"github.com/Silo-Server/silo-server/internal/nodeauth"
 	"github.com/Silo-Server/silo-server/internal/telemetry"
 
@@ -100,12 +101,15 @@ func (e *httpRemoteFrameExtractor) ExtractFrame(
 		return nil, chapterThumbnailNodeUnavailableReason, fmt.Errorf("chapter thumbnail remote extract: request failed: %w", err)
 	}
 	defer resp.Body.Close()
+	// One byte over the frame limit tells a frame that passes it from one
+	// that fits.
+	respBody := io.LimitReader(resp.Body, mediasample.MaxImageBytes+1)
 
 	if resp.StatusCode != http.StatusOK {
 		reason := chapterThumbnailNodeUnavailableReason
 		message := fmt.Sprintf("node returned status %d", resp.StatusCode)
 		var payload RemoteExtractErrorResponse
-		if decodeErr := json.NewDecoder(resp.Body).Decode(&payload); decodeErr == nil {
+		if decodeErr := json.NewDecoder(respBody).Decode(&payload); decodeErr == nil {
 			if payload.Reason != "" {
 				reason = payload.Reason
 			}
@@ -116,12 +120,17 @@ func (e *httpRemoteFrameExtractor) ExtractFrame(
 		return nil, reason, fmt.Errorf("chapter thumbnail remote extract: %s", message)
 	}
 
-	data, err := io.ReadAll(resp.Body)
+	data, err := io.ReadAll(respBody)
 	if err != nil {
 		return nil, chapterThumbnailNodeUnavailableReason, fmt.Errorf("chapter thumbnail remote extract: read response: %w", err)
 	}
 	if len(data) == 0 {
 		return nil, reasonChapterExtractFailed, fmt.Errorf("chapter thumbnail remote extract: empty response")
+	}
+	// A node with the same limit never sends this, so the fault is the
+	// node's: prefer_transcode_nodes extracts locally instead.
+	if len(data) > mediasample.MaxImageBytes {
+		return nil, chapterThumbnailNodeUnavailableReason, fmt.Errorf("chapter thumbnail remote extract: frame is over %d bytes", mediasample.MaxImageBytes)
 	}
 	return data, "", nil
 }

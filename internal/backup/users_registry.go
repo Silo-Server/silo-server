@@ -123,6 +123,7 @@ var excludedUserTables = map[string]string{
 	"client_diagnostic_reports":          excludedLogs,
 	"notification_deliveries":            "notification delivery log",
 	"notification_inbox_clocks":          "notification delivery state",
+	"watchlist_title_promotions":         "notification delivery state: recent watchlist promotions",
 	"watch_together_suggestion_receipts": "watch-together receipts",
 	// Derived state rebuilt from the data that is carried.
 	"user_aggregates":                          "derived; rebuilt by the reconciler",
@@ -132,7 +133,7 @@ var excludedUserTables = map[string]string{
 	"recommendation_cache":                     excludedRecommendation,
 	"user_taste_clusters":                      excludedRecommendation,
 	"user_taste_profiles":                      excludedRecommendation,
-	"profile_series_interest":                  "derived from favorites, watchlist, and progress",
+	"profile_series_interest":                  "derived from watch progress and history",
 	"user_personal_collection_poster_variants": excludedCollage,
 	"user_personal_collection_smart_collages":  excludedCollage,
 	"user_collection_revisions":                excludedRevision,

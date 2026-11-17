@@ -622,3 +622,183 @@ func TestTargetRefreshMarksLocalArtworkSearchOnlyWhenTheLocalProviderAnswered(t 
 		})
 	}
 }
+
+// A personal video no provider knows keeps its sidecar poster: the run stores
+// it on the unmatched item and changes nothing else, and a later scan that
+// finds the same poster writes and queues nothing.
+func TestUnmatchedItemTakesLocalSidecarPoster(t *testing.T) {
+	const (
+		contentID = "movie:local:birthday-2019"
+		poster    = "file:///media/home/Birthday 2019-poster.jpg?v=12-1"
+	)
+	ctx := context.Background()
+	h := newTestHarness()
+	if err := h.itemRepo.Upsert(ctx, &models.MediaItem{
+		ContentID: contentID, Type: "movie", Title: "Birthday 2019", Status: "unmatched",
+		Studios: []string{}, Networks: []string{}, Countries: []string{}, Genres: []string{},
+	}); err != nil {
+		t.Fatalf("seed item: %v", err)
+	}
+	jobs := &recordingImageCacheJobEnqueuer{}
+	h.service.SetAutoCacheImages(true)
+	h.service.SetImageCacheJobEnqueuer(jobs)
+	local := &localHintArtProvider{imageArtProvider{
+		slug:   "nfo",
+		images: []RemoteImage{{Type: ImagePoster, URL: poster, ProviderID: "nfo"}},
+	}}
+	process := func() *ProcessResult {
+		t.Helper()
+		result, err := h.service.ProcessWithProviders(ctx, ProcessRequest{
+			ContentID: contentID,
+			Hints:     &MatchHints{Title: "Birthday 2019", Type: "movie", FilePath: "/media/home/Birthday 2019.mp4"},
+			Language:  "en",
+			Mode:      ModeInitialMatch,
+		}, []Provider{local})
+		if err != nil {
+			t.Fatalf("process: %v", err)
+		}
+		if result == nil || result.Updated {
+			t.Fatalf("result = %#v, want not updated", result)
+		}
+		return result
+	}
+
+	process()
+	got, err := h.itemRepo.GetByID(ctx, contentID)
+	if err != nil {
+		t.Fatalf("load item: %v", err)
+	}
+	if got.PosterSourcePath != poster {
+		t.Fatalf("poster source = %q, want the sidecar %q", got.PosterSourcePath, poster)
+	}
+	if got.Status != "unmatched" || got.Title != "Birthday 2019" || got.SortTitle != "" ||
+		got.TmdbID != "" || got.ImdbID != "" || got.TvdbID != "" {
+		t.Fatalf("item = status %q title %q sort %q ids %q/%q/%q, want only the artwork changed",
+			got.Status, got.Title, got.SortTitle, got.TmdbID, got.ImdbID, got.TvdbID)
+	}
+	if len(jobs.inputs) != 1 || jobs.inputs[0].SourcePath != poster || jobs.inputs[0].TargetContentID != contentID {
+		t.Fatalf("queued jobs = %+v, want one copy of the sidecar poster", jobs.inputs)
+	}
+
+	// Until the copy lands, a repeat scan writes nothing but queues it again,
+	// so a lost job does not leave the poster blank.
+	updates := h.itemRepo.metadataUpdates
+	process()
+	if h.itemRepo.metadataUpdates != updates || len(jobs.inputs) != 2 || jobs.inputs[1].SourcePath != poster {
+		t.Fatalf("a repeat scan before the copy wrote %d times and queued %+v, want only the copy queued again",
+			h.itemRepo.metadataUpdates-updates, jobs.inputs[1:])
+	}
+
+	// Once the image cache stores the copy, a repeat scan does nothing.
+	h.itemRepo.items[contentID].PosterPath = "local/movies/birthday/aa/poster/original.webp"
+	process()
+	if h.itemRepo.metadataUpdates != updates || len(jobs.inputs) != 2 {
+		t.Fatalf("a repeat scan after the copy wrote %d times and queued %d jobs, want nothing",
+			h.itemRepo.metadataUpdates-updates, len(jobs.inputs)-2)
+	}
+}
+
+// A replaced sidecar drops the cached copy of the old file, so a copy job lost
+// after the write is queued again on the next run instead of the old copy
+// passing for the new file's. A sidecar that replaces a poster taken from the
+// video drops the frame the same way: a frame never stands in for another
+// source.
+func TestUnmatchedItemReplacedSidecarDropsOldCopy(t *testing.T) {
+	t.Run("replaced sidecar", func(t *testing.T) {
+		checkUnmatchedSidecarDropsOldCopy(t, "file:///media/home/Birthday 2019-poster.jpg?v=12-1")
+	})
+	t.Run("frame", func(t *testing.T) { checkUnmatchedSidecarDropsOldCopy(t, "frame:42?v=12-1") })
+}
+
+func checkUnmatchedSidecarDropsOldCopy(t *testing.T, oldPoster string) {
+	t.Helper()
+	const (
+		contentID = "movie:local:birthday-2019"
+		newPoster = "file:///media/home/Birthday 2019-poster.jpg?v=99-2"
+		oldCopy   = "local/movies/birthday/aa/poster/original.webp"
+	)
+	ctx := context.Background()
+	h := newTestHarness()
+	if err := h.itemRepo.Upsert(ctx, &models.MediaItem{
+		ContentID: contentID, Type: "movie", Title: "Birthday 2019", Status: "unmatched",
+		PosterPath: oldCopy, PosterSourcePath: oldPoster, PosterThumbhash: "old-thumb",
+		Studios: []string{}, Networks: []string{}, Countries: []string{}, Genres: []string{},
+	}); err != nil {
+		t.Fatalf("seed item: %v", err)
+	}
+	jobs := &recordingImageCacheJobEnqueuer{}
+	h.service.SetAutoCacheImages(true)
+	h.service.SetImageCacheJobEnqueuer(jobs)
+	local := &localHintArtProvider{imageArtProvider{
+		slug:   "nfo",
+		images: []RemoteImage{{Type: ImagePoster, URL: newPoster, ProviderID: "nfo"}},
+	}}
+	process := func() {
+		t.Helper()
+		if _, err := h.service.ProcessWithProviders(ctx, ProcessRequest{
+			ContentID: contentID,
+			Hints:     &MatchHints{Title: "Birthday 2019", Type: "movie", FilePath: "/media/home/Birthday 2019.mp4"},
+			Language:  "en",
+			Mode:      ModeInitialMatch,
+		}, []Provider{local}); err != nil {
+			t.Fatalf("process: %v", err)
+		}
+	}
+
+	process()
+	if got := h.itemRepo.items[contentID].PosterSourcePath; got != newPoster {
+		t.Fatalf("poster source = %q, want the replaced file %q", got, newPoster)
+	}
+	if len(jobs.inputs) != 1 || jobs.inputs[0].SourcePath != newPoster {
+		t.Fatalf("queued jobs = %+v, want one copy of the replaced file", jobs.inputs)
+	}
+
+	// The job is lost: the next run queues it again and writes nothing.
+	jobs.inputs = nil
+	updates := h.itemRepo.metadataUpdates
+	process()
+	if h.itemRepo.metadataUpdates != updates || len(jobs.inputs) != 1 || jobs.inputs[0].SourcePath != newPoster {
+		t.Fatalf("a run after the lost job wrote %d times and queued %+v, want only the copy queued again",
+			h.itemRepo.metadataUpdates-updates, jobs.inputs)
+	}
+	if got := h.itemRepo.items[contentID]; isCachedImagePath(got.PosterPath) || got.PosterThumbhash != "" {
+		t.Fatalf("poster path %q thumbhash %q, want the old copy dropped", got.PosterPath, got.PosterThumbhash)
+	}
+
+	// Once the new copy is cached, a run writes and queues nothing.
+	jobs.inputs = nil
+	h.itemRepo.items[contentID].PosterPath = "local/movies/birthday/bb/poster/original.webp"
+	process()
+	if h.itemRepo.metadataUpdates != updates || len(jobs.inputs) != 0 {
+		t.Fatalf("a run after the copy wrote %d times and queued %d jobs, want nothing",
+			h.itemRepo.metadataUpdates-updates, len(jobs.inputs))
+	}
+}
+
+// A matched item reaches the empty-metadata branch when its providers fail;
+// its artwork is not touched there.
+func TestMatchedItemWithoutMetadataKeepsItsArtwork(t *testing.T) {
+	const poster = "file:///media/movies/Film/poster.jpg?v=12-1"
+	ctx := context.Background()
+	h := newTestFilmHarness(ctx, t, models.MediaItem{PosterPath: "tmdb://poster.jpg", PosterSourcePath: "tmdb://poster.jpg"})
+	jobs := &recordingImageCacheJobEnqueuer{}
+	h.service.SetAutoCacheImages(true)
+	h.service.SetImageCacheJobEnqueuer(jobs)
+	local := &localHintArtProvider{imageArtProvider{
+		slug:   "nfo",
+		images: []RemoteImage{{Type: ImagePoster, URL: poster, ProviderID: "nfo"}},
+	}}
+	if _, err := h.service.ProcessWithProviders(ctx, ProcessRequest{
+		ContentID: testFilmContentID, Mode: ModeScheduledRefresh, Language: "en",
+	}, []Provider{local}); err != nil {
+		t.Fatalf("refresh: %v", err)
+	}
+	got, err := h.itemRepo.GetByID(ctx, testFilmContentID)
+	if err != nil {
+		t.Fatalf("load item: %v", err)
+	}
+	if got.PosterSourcePath != "tmdb://poster.jpg" || h.itemRepo.metadataUpdates != 0 || len(jobs.inputs) != 0 {
+		t.Fatalf("poster source = %q, %d writes, %d jobs; want the matched item untouched",
+			got.PosterSourcePath, h.itemRepo.metadataUpdates, len(jobs.inputs))
+	}
+}

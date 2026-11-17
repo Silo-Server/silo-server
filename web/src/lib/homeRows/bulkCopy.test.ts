@@ -8,7 +8,10 @@ function readyMadeTypes(): string[] {
   return Object.values(recipeCatalogFixture.categories ?? {})
     .flat()
     .map((def) => def!.type)
-    .filter((type) => !["collection", "custom_filter", "admin_curated_list"].includes(type));
+    .filter(
+      (type) =>
+        !["collection", "collection_posters", "custom_filter", "admin_curated_list"].includes(type),
+    );
 }
 
 describe("canCopyToLibraries", () => {
@@ -20,12 +23,16 @@ describe("canCopyToLibraries", () => {
     }
   });
 
-  it.each(["collection", "custom_filter", "admin_curated_list", "genre", "award_winners"])(
-    "refuses %s rows, whose settings belong to one page",
-    (sectionType) => {
-      expect(canCopyToLibraries({ sectionType, config: {} })).toBe(false);
-    },
-  );
+  it.each([
+    "collection",
+    "collection_posters",
+    "custom_filter",
+    "admin_curated_list",
+    "genre",
+    "award_winners",
+  ])("refuses %s rows, whose settings belong to one page", (sectionType) => {
+    expect(canCopyToLibraries({ sectionType, config: {} })).toBe(false);
+  });
 
   it.each([
     ["filter_library_ids", { filter_library_ids: [7] }],
