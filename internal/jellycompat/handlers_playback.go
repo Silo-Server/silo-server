@@ -4033,6 +4033,14 @@ func audioChannelsDisplayName(channels int) string {
 // "ENG 5.1" or "EAC3 Surround 5.1". A channel word that contradicts the track,
 // such as "Mono" on a stereo track, is kept.
 func audioLabelRepeatsTitle(label, displayTitle string, track models.AudioTrack) bool {
+	// A tag that is itself a language tag with a subtag, such as "de-DE" on a
+	// de-AT track, is compared whole: a different region says something new.
+	if strings.Contains(label, "-") {
+		if tag := lang.CanonicalTag(label); tag != "" && lang.PrimaryLanguage(tag) != "" &&
+			lang.PrimaryLanguage(tag) == lang.PrimaryLanguage(track.Language) {
+			return strings.EqualFold(tag, lang.CanonicalTag(track.Language))
+		}
+	}
 	known := map[string]bool{}
 	switch {
 	case track.Channels == 1:

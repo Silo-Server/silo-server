@@ -270,6 +270,7 @@ func TestBuildMediaStreamsAudioDisplayTitle(t *testing.T) {
 		{"language tag", models.AudioTrack{Codec: "eac3", Language: "eng", Channels: 6, Title: "English", EmbeddedTitle: "English"}, "English - EAC3 5.1"},
 		{"codec and channels tag", models.AudioTrack{Codec: "eac3", Language: "fr", Channels: 6, Title: "FRE E-AC-3 Surround 5.1", EmbeddedTitle: "FRE E-AC-3 Surround 5.1"}, "French - EAC3 5.1"},
 		{"channels that contradict the track", models.AudioTrack{Codec: "ac3", Language: "eng", Channels: 2, Title: "Mono", EmbeddedTitle: "Mono"}, "English - AC3 Stereo - Mono"},
+		{"language tag with another region", models.AudioTrack{Codec: "aac", Language: "de-AT", Channels: 2, Title: "de-DE", EmbeddedTitle: "de-DE"}, "Austrian German - AAC Stereo - de-DE"},
 		{"commentary", models.AudioTrack{Codec: "aac", Language: "eng", Channels: 2, Title: "Commentary", EmbeddedTitle: "Commentary"}, "English - AAC Stereo - Commentary"},
 		{"tag names a language the track lacks", models.AudioTrack{Codec: "aac", Channels: 2, Title: "English", EmbeddedTitle: "English"}, "Unknown - AAC Stereo - English"},
 	}
