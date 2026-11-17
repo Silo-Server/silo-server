@@ -3959,9 +3959,11 @@ func audioTrackDisplayTitle(track models.AudioTrack) string {
 	if lang != "" {
 		title = lang + " - " + title
 	}
-	// Append embedded title only when it adds info beyond codec/channels (e.g. "Commentary").
-	embedded := strings.TrimSpace(firstNonEmpty(track.Title, track.EmbeddedTitle))
-	if !isGenericAudioLabel(embedded) {
+	// Append the file's own title tag only when it adds something, such as
+	// "Commentary". Title is not used: for an untagged track the scanner fills
+	// it with ffprobe's codec long name ("ATSC A/52B (AC-3, E-AC-3)").
+	embedded := strings.TrimSpace(track.EmbeddedTitle)
+	if !audioLabelRepeatsTitle(embedded, title, track) {
 		title += " - " + embedded
 	}
 	return title
@@ -4024,12 +4026,35 @@ func audioChannelsDisplayName(channels int) string {
 	}
 }
 
-func isGenericAudioLabel(s string) bool {
-	switch strings.ToLower(strings.TrimSpace(s)) {
-	case "", "stereo", "mono", "5.1", "7.1", "surround", "5.1 surround", "7.1 surround":
-		return true
+// audioLabelRepeatsTitle reports whether every word of an audio title tag is
+// already in the display title or is a generic channel word, as with tags
+// such as "English", "Stereo" or "EAC3 5.1".
+func audioLabelRepeatsTitle(label, displayTitle string, track models.AudioTrack) bool {
+	known := map[string]bool{
+		"surround": true, "stereo": true, "mono": true, "ch": true,
+		"1.0": true, "2.0": true, "5.1": true, "7.1": true,
 	}
-	return false
+	for _, s := range []string{displayTitle, track.Language, track.Codec, compatChannelLayout(track.Layout)} {
+		for _, word := range audioLabelWords(s) {
+			known[word] = true
+		}
+	}
+	for _, word := range audioLabelWords(label) {
+		if !known[word] {
+			return false
+		}
+	}
+	return true
+}
+
+func audioLabelWords(s string) []string {
+	return strings.FieldsFunc(strings.ToLower(s), func(r rune) bool {
+		switch r {
+		case ' ', '-', '_', '/', ',', '(', ')', '[', ']', ':', '|':
+			return true
+		}
+		return false
+	})
 }
 
 func compatSubtitleDisplayTitle(track catalog.VersionSubtitleTrack) string {

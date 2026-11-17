@@ -255,3 +255,40 @@ func TestBuildMediaStreamsVideoDisplayTitle(t *testing.T) {
 		})
 	}
 }
+
+// Jellyfin clients list audio tracks by DisplayTitle. For a track with no
+// title tag the scanner stores ffprobe's codec long name as its Title, which
+// must not be appended, and a tag that only repeats the language, codec or
+// channels adds nothing (#4395).
+func TestBuildMediaStreamsAudioDisplayTitle(t *testing.T) {
+	cases := []struct {
+		name  string
+		track models.AudioTrack
+		want  string
+	}{
+		{"eac3 long name", models.AudioTrack{Codec: "eac3", Language: "eng", Channels: 6, Title: "ATSC A/52B (AC-3, E-AC-3)"}, "English - EAC3 5.1"},
+		{"aac long name", models.AudioTrack{Codec: "aac", Profile: "LC", Language: "eng", Channels: 2, Title: "AAC (Advanced Audio Coding)"}, "English - AAC Stereo"},
+		{"dts long name", models.AudioTrack{Codec: "dts", Profile: "DTS", Language: "eng", Channels: 6, Title: "DCA (DTS Coherent Acoustics)"}, "English - DTS 5.1"},
+		{"flac long name", models.AudioTrack{Codec: "flac", Language: "eng", Channels: 2, Title: "FLAC (Free Lossless Audio Codec)"}, "English - FLAC Stereo"},
+		{"no language", models.AudioTrack{Codec: "ac3", Channels: 6, Title: "ATSC A/52A (AC-3)"}, "Unknown - AC3 5.1"},
+		{"language tag", models.AudioTrack{Codec: "eac3", Language: "eng", Channels: 6, Title: "English", EmbeddedTitle: "English"}, "English - EAC3 5.1"},
+		{"codec and channels tag", models.AudioTrack{Codec: "eac3", Language: "eng", Channels: 6, Title: "EAC3 5.1", EmbeddedTitle: "EAC3 5.1"}, "English - EAC3 5.1"},
+		{"surround tag", models.AudioTrack{Codec: "truehd", Language: "eng", Channels: 8, Title: "English (Surround 7.1)", EmbeddedTitle: "English (Surround 7.1)"}, "English - TrueHD 7.1"},
+		{"commentary", models.AudioTrack{Codec: "aac", Language: "eng", Channels: 2, Title: "Commentary", EmbeddedTitle: "Commentary"}, "English - AAC Stereo - Commentary"},
+		{"director's commentary", models.AudioTrack{Codec: "ac3", Language: "eng", Channels: 2, Title: "English Director's Commentary", EmbeddedTitle: "English Director's Commentary"}, "English - AC3 Stereo - English Director's Commentary"},
+		{"audio description", models.AudioTrack{Codec: "eac3", Language: "eng", Channels: 6, Title: "Audio Description", EmbeddedTitle: "Audio Description"}, "English - EAC3 5.1 - Audio Description"},
+		{"language named by an untagged track", models.AudioTrack{Codec: "aac", Channels: 2, Title: "English", EmbeddedTitle: "English"}, "Unknown - AAC Stereo - English"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			version := catalog.FileVersion{AudioTracks: []models.AudioTrack{tc.track}}
+			streams := buildMediaStreams("item", "source", version)
+			if len(streams) != 1 {
+				t.Fatalf("streams length = %d, want 1", len(streams))
+			}
+			if got := streams[0].DisplayTitle; got != tc.want {
+				t.Fatalf("DisplayTitle = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
