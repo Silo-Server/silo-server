@@ -76,6 +76,7 @@ type metadataItemRepo interface {
 	GetByTitleYearType(ctx context.Context, title string, year int, itemType string) (*models.MediaItem, error)
 	Upsert(ctx context.Context, item *models.MediaItem) error
 	SetStatusUnlessMatched(ctx context.Context, contentID, status string) (bool, error)
+	UpdateProvisionalArtwork(ctx context.Context, read *models.MediaItem, upd *catalog.MetadataUpdate) (bool, error)
 	IncrementRefreshFailure(ctx context.Context, contentID string) error
 	ReplacePeople(ctx context.Context, contentID string, people []models.ItemPerson) error
 	ListUnmatchedByFolderAndPathPrefix(ctx context.Context, folderID int, pathPrefix string, limit int) ([]string, error)
@@ -2384,6 +2385,8 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 			// failure. The candidate decision remains actionable and deterministic.
 			matchDecision.Outcome = MatchOutcomeProviderPermanent
 		}
+		// Sidecar artwork found above still reaches an unmatched item.
+		s.saveProvisionalLocalArtwork(ctx, req.ContentID, req.Language, allImages)
 		return &ProcessResult{Updated: false, Decision: matchDecision}, nil
 	}
 

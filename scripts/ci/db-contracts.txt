@@ -106,6 +106,10 @@
 # A corrected match empties an item's localized text, keeping locks and manual translations.
 ./internal/catalog TestClearMatchTextDB
 
+# Sidecar artwork saved on an unmatched item does not overwrite a match or an
+# artwork change that committed after the read.
+./internal/catalog TestUpdateProvisionalArtworkIsCompareAndSetDB
+
 # A watched special does not anchor Next Up for a series with regular seasons.
 ./internal/catalog TestNextUpSkipsSpecialAnchorsPostgres
 
