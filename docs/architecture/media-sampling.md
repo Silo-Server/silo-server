@@ -302,6 +302,22 @@ frame was extracted but encoding or storing its image fails, the chapter
 records `chapter_upload_failed` and backs off on its own; the file is not
 marked failed.
 
+One extracted frame is bounded twice. `-max_pixels` before `-i` stops the
+decoder on a picture over `MaxImagePixels` (100 megapixels), and the runner
+reads at most `MaxImageBytes` (64 MiB) of stdout, failing the attempt with
+`ErrImageTooLarge` past it. ffmpeg compares the width rounded up to its
+stride alignment, so it gets the limit plus a sixteenth. `chapterthumbs`
+also refuses a file before extraction when every video track with known
+dimensions is over the pixel limit. Each of these is reported as
+`decode_invalid_data`. A transcode node's response is read with the same
+byte limit; one over it fails as the node being unavailable, since a node
+with the limit never sends one, and `prefer_transcode_nodes` then extracts
+locally. The pixel limit equals the source budget in `imageutil`, which
+rejects any larger frame afterwards anyway, so a frame at its decoded size
+or wider that yields a thumbnail is not refused. The limit is on the decoded
+size, which decides the decoder's memory, so a larger source whose sample
+aspect ratio narrows it to under the budget is refused.
+
 ## Sheets
 
 A `Samples` request with a `Sheets` output tiles the sampled frames into

@@ -184,8 +184,12 @@ func (p extractPlan) failure(err error) (string, error) {
 
 // reason maps a failed attempt to the persisted reason. lastPlanned reports
 // whether no attempt follows it in the plan; the others report as the
-// hardware stage.
+// hardware stage. A frame over mediasample's size limits is invalid data: the
+// file will produce it again on any decoder.
 func (p extractPlan) reason(attempt mediasample.Attempt, failure mediasample.AttemptError, lastPlanned bool) string {
+	if errors.Is(failure.Err, mediasample.ErrImageTooLarge) {
+		return reasonDecodeInvalidData
+	}
 	hardwareStage := attempt.Hardware || !lastPlanned
 	switch failure.Reason {
 	case mediasample.ReasonCapabilities:
@@ -213,7 +217,9 @@ func (p extractPlan) reason(attempt mediasample.Attempt, failure mediasample.Att
 	case strings.Contains(lower, "invalid nal unit size"),
 		strings.Contains(lower, "error splitting the input into nal units"),
 		strings.Contains(lower, "invalid data found when processing input"),
-		strings.Contains(lower, "invalid as first byte of an ebml number"):
+		strings.Contains(lower, "invalid as first byte of an ebml number"),
+		// -max_pixels refused every video stream.
+		failure.Reason == mediasample.ReasonExit && strings.Contains(lower, "exceeds specified max pixel count"):
 		return reasonDecodeInvalidData
 	case hardwareStage && strings.Contains(message, "signal: killed"):
 		return reasonHWKilled
