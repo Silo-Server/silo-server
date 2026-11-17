@@ -95,14 +95,16 @@ func (c *CollectionRowCards) libraryCards(ctx context.Context, ids []string, sco
 		tab := h.libraryTabCardOf(ctx, collection)
 		library := shownIn[collection.ID]
 		out[collection.ID] = sections.CollectionCard{
-			ID:              tab.ID,
-			Source:          sections.CollectionCardLibrary,
-			Title:           tab.Title,
-			PosterURL:       tab.PosterURL,
-			PosterThumbhash: tab.PosterThumbhash,
-			PosterIsCollage: tab.PosterIsCollage,
-			ItemCount:       tab.ItemCount,
-			LibraryID:       &library,
+			ID:                tab.ID,
+			Source:            sections.CollectionCardLibrary,
+			Title:             tab.Title,
+			PosterURL:         tab.PosterURL,
+			PosterThumbhash:   tab.PosterThumbhash,
+			PosterIsCollage:   tab.PosterIsCollage,
+			BackdropURL:       h.presignBackdropURLCtx(ctx, collection.BackdropURL),
+			BackdropThumbhash: collection.BackdropThumbhash,
+			ItemCount:         tab.ItemCount,
+			LibraryID:         &library,
 		}
 	}
 	return out, nil

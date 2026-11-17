@@ -50781,6 +50781,14 @@
       "SectionCollectionCard": {
         "additionalProperties": false,
         "properties": {
+          "backdrop_thumbhash": {
+            "type": "string"
+          },
+          "backdrop_url": {
+            "description": "Presigned, short-lived backdrop of a server collection that has one, for a hero backdrop while the card is focused: the page-width variant, or the card thumbnail when the backdrop is set to another artwork such as the collection's poster. Absent when none and on personal collections",
+            "format": "uri-reference",
+            "type": "string"
+          },
           "creator_profile_id": {
             "description": "Present on a personal collection: the profile that made it",
             "type": "string"
