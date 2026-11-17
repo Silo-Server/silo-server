@@ -20857,6 +20857,12 @@ export interface components {
       embeddings: components["schemas"]["AdminRecommendationJobStatus"];
       /** @description Why the stored embedding lock rejects the embedding settings this server runs with; empty when it does not. */
       lock_conflict: string;
+      /** @description Values for lock_conflict_key's placeholders, by name. Absent when lock_conflict is empty. */
+      lock_conflict_args?: {
+        [key: string]: string;
+      };
+      /** @description Translation catalog key of lock_conflict, which clients show in a non-English interface. Absent when lock_conflict is empty. */
+      lock_conflict_key?: string;
       recommendations: components["schemas"]["AdminRecommendationJobStatus"];
       /** @description The stale profile sweep, which rebuilds profiles after their signals or access change. */
       stale_sweep: components["schemas"]["AdminRecommendationStaleSweep"];

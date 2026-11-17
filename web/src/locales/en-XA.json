@@ -57671,6 +57671,20 @@
       "value": "⟦Çöññéçţîöñ çĥéçķ ƒåîļéđ.~~~~~~~~~~⟧"
     }
   ],
+  "web.admin.recommendations.embedding.lockConflictNoProvider": [
+    {
+      "type": 0,
+      "value": "⟦Ñö éɱƀéđđîñĝ þŕöṽîđéŕ îš çĥöšéñ. Çĥööšé å þŕöṽîđéŕ ţĥåţ šéŕṽéš \""
+    },
+    {
+      "type": 1,
+      "value": "locked_model"
+    },
+    {
+      "type": 0,
+      "value": "\", öŕ ŕéšéţ éɱƀéđđîñĝš ţö ûšé åñöţĥéŕ ɱöđéļ.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
   "web.admin.recommendations.embedding.model": [
     {
       "type": 0,

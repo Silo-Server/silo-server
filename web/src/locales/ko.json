@@ -47256,6 +47256,20 @@
       "value": "연결 확인에 실패했어요."
     }
   ],
+  "web.admin.recommendations.embedding.lockConflictNoProvider": [
+    {
+      "type": 0,
+      "value": "임베딩 제공자가 선택되지 않았어요. “"
+    },
+    {
+      "type": 1,
+      "value": "locked_model"
+    },
+    {
+      "type": 0,
+      "value": "” 모델을 제공하는 제공자를 선택하거나, 다른 모델을 사용하려면 임베딩을 초기화하세요."
+    }
+  ],
   "web.admin.recommendations.embedding.model": [
     {
       "type": 0,

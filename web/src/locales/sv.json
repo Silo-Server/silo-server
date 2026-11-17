@@ -52671,6 +52671,20 @@
       "value": "Anslutningskontrollen misslyckades."
     }
   ],
+  "web.admin.recommendations.embedding.lockConflictNoProvider": [
+    {
+      "type": 0,
+      "value": "Ingen embeddingleverantör är vald. Välj en leverantör som tillhandahåller ”"
+    },
+    {
+      "type": 1,
+      "value": "locked_model"
+    },
+    {
+      "type": 0,
+      "value": "”, eller återställ embeddings för att använda en annan modell."
+    }
+  ],
   "web.admin.recommendations.embedding.model": [
     {
       "type": 0,

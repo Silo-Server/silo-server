@@ -58769,6 +58769,20 @@
       "value": "Falha na verificação da conexão."
     }
   ],
+  "web.admin.recommendations.embedding.lockConflictNoProvider": [
+    {
+      "type": 0,
+      "value": "Nenhum provedor de embeddings foi escolhido. Escolha um provedor que ofereça “"
+    },
+    {
+      "type": 1,
+      "value": "locked_model"
+    },
+    {
+      "type": 0,
+      "value": "” ou redefina os embeddings para usar outro modelo."
+    }
+  ],
   "web.admin.recommendations.embedding.model": [
     {
       "type": 0,

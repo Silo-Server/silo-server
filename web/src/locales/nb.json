@@ -52787,6 +52787,20 @@
       "value": "Tilkoblingssjekken mislyktes."
     }
   ],
+  "web.admin.recommendations.embedding.lockConflictNoProvider": [
+    {
+      "type": 0,
+      "value": "Ingen embeddingleverandør er valgt. Velg en leverandør som tilbyr «"
+    },
+    {
+      "type": 1,
+      "value": "locked_model"
+    },
+    {
+      "type": 0,
+      "value": "», eller tilbakestill embeddingene for å bruke en annen modell."
+    }
+  ],
   "web.admin.recommendations.embedding.model": [
     {
       "type": 0,

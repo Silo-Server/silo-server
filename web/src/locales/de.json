@@ -52527,6 +52527,20 @@
       "value": "Verbindungsprüfung fehlgeschlagen."
     }
   ],
+  "web.admin.recommendations.embedding.lockConflictNoProvider": [
+    {
+      "type": 0,
+      "value": "Es ist kein Embedding-Anbieter ausgewählt. Wähle einen Anbieter, der „"
+    },
+    {
+      "type": 1,
+      "value": "locked_model"
+    },
+    {
+      "type": 0,
+      "value": "“ bereitstellt, oder setze die Embeddings zurück, um ein anderes Modell zu verwenden."
+    }
+  ],
   "web.admin.recommendations.embedding.model": [
     {
       "type": 0,

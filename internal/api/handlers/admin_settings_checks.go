@@ -652,13 +652,9 @@ func checkRecommendationsEmbeddingConnection(
 		return checkFailed(newCheckMessage("embeddingLockUnreadable", "The stored embedding lock cannot be read. Reset embeddings to clear it."))
 	}
 	if lock != nil {
-		conflict, name, args := recommendations.DescribeEmbeddingLockConflict(*lock, cfg.Recommendations.EmbeddingBaseURL, cfg.Recommendations.EmbeddingModel, dimensions)
+		conflict, key, args := recommendations.DescribeEmbeddingLockConflict(*lock, cfg.Recommendations.EmbeddingBaseURL, cfg.Recommendations.EmbeddingModel, dimensions)
 		if conflict != "" {
-			message := checkMessage{text: conflict, args: args}
-			if name != "" {
-				message.key = checkMessageKeyPrefix + name
-			}
-			return checkFailed(message)
+			return checkFailed(checkMessage{key: key, text: conflict, args: args})
 		}
 	}
 

@@ -64883,6 +64883,20 @@
       "value": "Kontrola připojení selhala."
     }
   ],
+  "web.admin.recommendations.embedding.lockConflictNoProvider": [
+    {
+      "type": 0,
+      "value": "Není vybrán žádný poskytovatel embeddingů. Vyberte poskytovatele, který poskytuje model „"
+    },
+    {
+      "type": 1,
+      "value": "locked_model"
+    },
+    {
+      "type": 0,
+      "value": "“, nebo resetujte embeddingy a použijte jiný model."
+    }
+  ],
   "web.admin.recommendations.embedding.model": [
     {
       "type": 0,

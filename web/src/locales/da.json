@@ -52727,6 +52727,20 @@
       "value": "Forbindelsestjekket mislykkedes."
     }
   ],
+  "web.admin.recommendations.embedding.lockConflictNoProvider": [
+    {
+      "type": 0,
+      "value": "Der er ikke valgt nogen embedding-udbyder. Vælg en udbyder, der leverer ”"
+    },
+    {
+      "type": 1,
+      "value": "locked_model"
+    },
+    {
+      "type": 0,
+      "value": "”, eller nulstil embeddings for at bruge en anden model."
+    }
+  ],
   "web.admin.recommendations.embedding.model": [
     {
       "type": 0,

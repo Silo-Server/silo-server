@@ -55791,6 +55791,20 @@
       "value": "\u200F\u202EConnection check failed.\u202C"
     }
   ],
+  "web.admin.recommendations.embedding.lockConflictNoProvider": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ENo embedding provider is chosen. Choose a provider that serves \"\u202C"
+    },
+    {
+      "type": 1,
+      "value": "locked_model"
+    },
+    {
+      "type": 0,
+      "value": "\u202E\", or reset embeddings to use another model.\u202C"
+    }
+  ],
   "web.admin.recommendations.embedding.model": [
     {
       "type": 0,

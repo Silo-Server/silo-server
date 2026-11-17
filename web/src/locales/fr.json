@@ -58473,6 +58473,20 @@
       "value": "Échec de la vérification de la connexion."
     }
   ],
+  "web.admin.recommendations.embedding.lockConflictNoProvider": [
+    {
+      "type": 0,
+      "value": "Aucun fournisseur d’embeddings n’est sélectionné. Choisissez un fournisseur qui propose « "
+    },
+    {
+      "type": 1,
+      "value": "locked_model"
+    },
+    {
+      "type": 0,
+      "value": " », ou réinitialisez les embeddings pour utiliser un autre modèle."
+    }
+  ],
   "web.admin.recommendations.embedding.model": [
     {
       "type": 0,

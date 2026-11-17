@@ -58705,6 +58705,20 @@
       "value": "No se pudo comprobar la conexión."
     }
   ],
+  "web.admin.recommendations.embedding.lockConflictNoProvider": [
+    {
+      "type": 0,
+      "value": "No se eligió ningún proveedor de embeddings. Elige un proveedor que ofrezca “"
+    },
+    {
+      "type": 1,
+      "value": "locked_model"
+    },
+    {
+      "type": 0,
+      "value": "” o restablece los embeddings para usar otro modelo."
+    }
+  ],
   "web.admin.recommendations.embedding.model": [
     {
       "type": 0,

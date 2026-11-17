@@ -65520,6 +65520,20 @@
       "value": "Не удалось проверить подключение."
     }
   ],
+  "web.admin.recommendations.embedding.lockConflictNoProvider": [
+    {
+      "type": 0,
+      "value": "Провайдер эмбеддингов не выбран. Выберите провайдера, который обслуживает модель «"
+    },
+    {
+      "type": 1,
+      "value": "locked_model"
+    },
+    {
+      "type": 0,
+      "value": "», или сбросьте эмбеддинги, чтобы использовать другую модель."
+    }
+  ],
   "web.admin.recommendations.embedding.model": [
     {
       "type": 0,

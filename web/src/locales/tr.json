@@ -52155,6 +52155,20 @@
       "value": "Bağlantı denetimi başarısız oldu."
     }
   ],
+  "web.admin.recommendations.embedding.lockConflictNoProvider": [
+    {
+      "type": 0,
+      "value": "Gömme sağlayıcısı seçilmedi. “"
+    },
+    {
+      "type": 1,
+      "value": "locked_model"
+    },
+    {
+      "type": 0,
+      "value": "” modelini sunan bir sağlayıcı seçin veya başka bir model kullanmak için gömmeleri sıfırlayın."
+    }
+  ],
   "web.admin.recommendations.embedding.model": [
     {
       "type": 0,

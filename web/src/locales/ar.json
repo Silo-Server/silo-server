@@ -75411,6 +75411,20 @@
       "value": "فشل التحقق من الاتصال."
     }
   ],
+  "web.admin.recommendations.embedding.lockConflictNoProvider": [
+    {
+      "type": 0,
+      "value": "لم يُختر أي مزود تضمين. اختر مزود تضمين يقدّم «"
+    },
+    {
+      "type": 1,
+      "value": "locked_model"
+    },
+    {
+      "type": 0,
+      "value": "»، أو أعد تعيين التضمينات لاستخدام نموذج آخر."
+    }
+  ],
   "web.admin.recommendations.embedding.model": [
     {
       "type": 0,
