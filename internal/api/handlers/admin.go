@@ -868,7 +868,8 @@ func rejectArtworkIdentityChange(recordedAssets, recordedPrivate string, before,
 	}
 	// Startup accepts only these exact forms: it rewrites a legacy assets row
 	// before serving, and binds the private row by exact match.
-	if !privateUnchanged && privateIdentity(afterInputs) != recordedPrivate {
+	if !privateUnchanged && (privateIdentity(afterInputs) != recordedPrivate ||
+		ambiguousS3Location(afterInputs[s3PrivateEndpointKey], afterInputs[s3PrivateBucketKey])) {
 		return errArtworkStorageLocked
 	}
 	// Without a recorded assets row only the private bucket is locked; the
@@ -876,10 +877,22 @@ func rejectArtworkIdentityChange(recordedAssets, recordedPrivate string, before,
 	if strings.TrimSpace(recordedAssets) == "" || assetsUnchanged {
 		return nil
 	}
+	if afterBackend == blobstore.BackendS3 && ambiguousS3Location(afterInputs[s3PublicEndpointKey], afterInputs[s3PublicBucketKey]) {
+		return errArtworkStorageLocked
+	}
 	if identity := assetsIdentity(afterBackend, afterInputs); identity != recordedAssets && !blobstore.SameLocalRoot(recordedAssets, identity) {
 		return errArtworkStorageLocked
 	}
 	return nil
+}
+
+// ambiguousS3Location reports whether an S3 endpoint or bucket contains the
+// "|" that separates identity parts. Only then can another location spell the
+// same identity, such as bucket "a|b" with prefix "c" for bucket "a" with
+// prefix "b|c", so a changed location with one never counts as the recorded
+// one.
+func ambiguousS3Location(endpoint, bucket string) bool {
+	return strings.Contains(endpoint, "|") || strings.Contains(bucket, "|")
 }
 
 // assetsIdentity is the identity the assets store would report for the

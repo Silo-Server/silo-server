@@ -193,6 +193,21 @@ func TestArtworkLockWhenSavedLocationDiffersFromRecorded(t *testing.T) {
 			blobstore.IdentitySettingKey: "s3|https://s3.example|artwork|cache",
 		}
 	}
+	// Saved settings match the recorded rows; the bucket or private bucket
+	// named by prefix is "alpha" under the key prefix "beta|cache".
+	collidingS3 := func(prefix, identityKey string) map[string]string {
+		stored := map[string]string{
+			"artwork.storage_backend":    "s3",
+			"s3.public_endpoint":         "https://s3.example",
+			"s3.public_bucket":           "artwork",
+			blobstore.IdentitySettingKey: "s3|https://s3.example|artwork|",
+		}
+		stored[prefix+"_endpoint"] = "https://s3.example"
+		stored[prefix+"_bucket"] = "alpha"
+		stored[prefix+"_key_prefix"] = "beta|cache"
+		stored[identityKey] = "s3|https://s3.example|alpha|beta|cache"
+		return stored
+	}
 	tenantS3 := map[string]string{
 		"s3.public_endpoint":         "https://s3.example/tenant",
 		"s3.public_bucket":           "artwork",
@@ -217,6 +232,10 @@ func TestArtworkLockWhenSavedLocationDiffersFromRecorded(t *testing.T) {
 		// An endpoint path addresses case-sensitive storage, so its case is a
 		// different location even when the recorded path is lowercase.
 		{"another endpoint path case", tenantS3, map[string]string{"s3.public_endpoint": "https://s3.example/Tenant"}, true},
+		// The identity joins its parts with "|", so a bucket carrying one can
+		// spell the recorded identity while naming another bucket.
+		{"bucket that collides with the recorded identity", collidingS3("s3.public", blobstore.IdentitySettingKey), map[string]string{"s3.public_bucket": "alpha|beta", "s3.public_key_prefix": "cache"}, true},
+		{"private bucket that collides with the recorded identity", collidingS3("s3.private", blobstore.OperationalIdentitySettingKey), map[string]string{"s3.private_bucket": "alpha|beta", "s3.private_key_prefix": "cache"}, true},
 	} {
 		_, err := (&AdminHandler{SettingsRepo: &fakeServerSettingsStore{values: tc.stored}}).UpdateAdminSettings(t.Context(), tc.values, nil)
 		requireArtworkLockAnswer(t, tc.name, err, tc.locked)
