@@ -235,6 +235,18 @@ describe("buildCatalogHref", () => {
     expect(built.has("order")).toBe(false);
   });
 
+  // A library browse lists newest first; a search typed there ranks by
+  // relevance, the server's default for search text.
+  it.each([
+    ["browsing", "", "added_at"],
+    ["searching", "heat", null],
+  ])("leaves the sort to the server when %s a library without a chosen sort", (_case, q, sort) => {
+    const browse = parseCatalogSearchParams(new URLSearchParams("library_id=17"));
+    const built = new URL(`http://example.test${buildCatalogQueryUpdateHref(browse, q)}`);
+    expect(built.searchParams.get("library_id")).toBe("17");
+    expect(built.searchParams.get("sort")).toBe(sort);
+  });
+
   it("builds collection catalog URLs with overlay params", () => {
     const href = buildCatalogHref({
       source: "user_collection",

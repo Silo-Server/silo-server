@@ -79,6 +79,14 @@ export function catalogSourceSupportsSourceOrder(source: CatalogSource): boolean
   );
 }
 
+/**
+ * Whether a text search ranks by relevance: the server's default for a query
+ * until the viewer picks another sort, and `sort=relevance` itself.
+ */
+export function searchSortsByRelevance(state: CatalogSearchState): boolean {
+  return state.query_definition.sort.field === "relevance" || !state.explicit_sort;
+}
+
 export function catalogSourceAllowsOverlay(source: CatalogSource): boolean {
   return overlaySources.has(source);
 }
@@ -414,10 +422,11 @@ export function buildCatalogApiSearchParams(state: CatalogSearchState): URLSearc
     !state.sort_from_server &&
     state.query_definition.sort.field &&
     (state.query_definition.sort.field !== "added_at" ||
-      // A library browse defaults to Date Added; an unscoped query only sends
-      // it when the viewer or an editor chose it, so text search keeps the
-      // server's relevance ranking.
-      (state.source === "query" && (effectiveLibraryID != null || state.explicit_sort)) ||
+      // A library browse defaults to Date Added; a text search, in a library
+      // or not, only sends it when the viewer or an editor chose it, so it
+      // keeps the server's relevance ranking.
+      (state.source === "query" &&
+        ((effectiveLibraryID != null && !state.q?.trim()) || state.explicit_sort)) ||
       // These sources default to source order, so an explicit Date Added pick
       // must be sent to distinguish it (the server maps it to list added-at).
       // Dropping it would round-trip back through parse as source order and
