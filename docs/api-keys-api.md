@@ -161,7 +161,10 @@ The admin setting `auth.user_api_keys` (default `false`) lets accounts that are
 not admins, and profiles other than the primary one, create keys for themselves.
 `GET /api/v2/api-keys/scopes` reports it as `user_keys_enabled`, with the
 per-account limit as `max_user_keys`. Turning the setting off stops new keys;
-existing ones keep working until they are revoked.
+existing ones keep working until they are revoked. A server whose profile store
+is not the Postgres one (`userdb.backend: sqlite`) reports `user_keys_enabled`
+false and refuses these keys whatever the setting says, because a key's profile
+binding and its PIN check read profiles from Postgres.
 
 Create one with `{"label":"Sync","scopes":["watch:read"],"profile_id":"<id>"}`.
 `profile_id` binds the key to that profile; omit it for an account key.
@@ -195,7 +198,7 @@ The Jellyfin and plugin surfaces refuse them, as they refuse every scoped key.
 | `watch:read` | `/history`, `/progress`, progress snapshots, `/favorites`, `/ratings`, `/watchlist`, `/not-interested`, and `/profile/export` |
 | `watch:write` | `POST` and `DELETE /watched/{id}`, `POST /sync/progress`, `POST /history/remove`, `DELETE /progress/{id}/position`, writes to favorites, ratings, watchlist and hidden titles. `POST /profile/import` stays outside it, because an import also overwrites the profile's settings and notification preferences |
 | `notifications` | `GET /notifications`, `/notifications/sync`, `/notifications/unread-count`, `/notifications/capabilities`, and marking read with `POST /notifications/{id}/read` and `/notifications/read-all`. No preferences, webhooks, email, Discord or push registrations |
-| `requests` | Request discovery and search, the profile's own requests, and creating, following, cancelling and removing them |
+| `requests` | Request discovery and search, and reading, creating, following, cancelling and removing requests as the profile's own session can: the account's requests, or only the profile's own when it is blocked from requests |
 | `libraries:read` | See [Restricted discovery scopes](#restricted-discovery-scopes) |
 
 `catalog:read`, `watch:read` and `notifications` also open the realtime events socket

@@ -42,6 +42,11 @@ type APIKeyHandler struct {
 	// one from a child profile would hand that profile every other profile on
 	// the account. Without Stores creation fails closed.
 	Stores userstore.UserStoreProvider
+	// ProfilesOutsidePostgres is set when the profile store is not the
+	// Postgres one (userdb.backend=sqlite). A user key's profile binding and
+	// the PIN recheck at its insert both read user_profiles in Postgres, so
+	// user keys are off there whatever the server setting says.
+	ProfilesOutsidePostgres bool
 }
 
 // MayCreatePersonalAPIKey reports whether the caller acting as
@@ -74,7 +79,7 @@ func (h *APIKeyHandler) personal() (personalAPIKeyStore, error) {
 // profiles other than the primary one, may create keys for themselves.
 func (h *APIKeyHandler) UserAPIKeysEnabled(ctx context.Context) (bool, error) {
 	store, err := h.personal()
-	if err != nil {
+	if err != nil || h.ProfilesOutsidePostgres {
 		return false, nil //nolint:nilerr // A store without personal keys has them off.
 	}
 	return store.UserAPIKeysEnabled(ctx)
@@ -92,7 +97,7 @@ func (h *APIKeyHandler) UserAPIKeysEnabled(ctx context.Context) (bool, error) {
 // where the key is stored.
 func (h *APIKeyHandler) MayCreateProfileAPIKey(ctx context.Context, userID int, activeProfileID, targetProfileID string, verify func(profile *userstore.Profile) error) (bool, auth.APIKeyActingProfile, error) {
 	none := auth.APIKeyActingProfile{}
-	if !apimw.GetClaims(ctx).IsOwnLoginSession() || h.Stores == nil {
+	if !apimw.GetClaims(ctx).IsOwnLoginSession() || h.Stores == nil || h.ProfilesOutsidePostgres {
 		return false, none, nil
 	}
 	store, err := h.Stores.ForUser(ctx, userID)

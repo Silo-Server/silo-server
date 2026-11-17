@@ -139,3 +139,16 @@ func TestPersonalAPIKeyServiceAccountBoundary(t *testing.T) {
 		t.Fatal(rows, more, err, store)
 	}
 }
+
+// User keys read profiles from Postgres, so a server whose profile store is
+// elsewhere keeps them off whatever its setting says.
+func TestUserAPIKeysOffOutsidePostgres(t *testing.T) {
+	h := NewAPIKeyHandler(new(personalKeySpy))
+	if on, err := h.UserAPIKeysEnabled(t.Context()); !on || err != nil {
+		t.Fatalf("postgres profiles: %v, %v", on, err)
+	}
+	h.ProfilesOutsidePostgres = true
+	if on, err := h.UserAPIKeysEnabled(t.Context()); on || err != nil {
+		t.Fatalf("profiles outside postgres: %v, %v", on, err)
+	}
+}

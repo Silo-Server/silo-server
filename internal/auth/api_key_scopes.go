@@ -55,8 +55,9 @@ const (
 	// favorites, watchlist and hidden titles. The profile import stays out:
 	// it also overwrites settings.
 	ScopeWatchWrite = "watch:write"
-	// ScopeRequests covers media requests: discovery, the profile's own
-	// requests, creating, canceling and following them.
+	// ScopeRequests covers media requests as the profile's own session sees
+	// them: discovery, the account's requests (only the profile's own when it
+	// is blocked from requests), creating, canceling and following them.
 	ScopeRequests = "requests"
 	// ScopeNotifications covers a profile's notification inbox: listing and
 	// syncing it, the unread count, and marking notifications read. It does

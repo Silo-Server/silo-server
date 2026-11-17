@@ -2838,7 +2838,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 			adminAPIKeys.Owners = userRepo
 		}
 		v2deps.AdminAPIKeys = adminAPIKeys
-		v2deps.PersonalAPIKeys = newPersonalAPIKeyHandler(apiKeyRepo, deps.UserStoreProvider)
+		v2deps.PersonalAPIKeys = newPersonalAPIKeyHandler(apiKeyRepo, deps.UserStoreProvider, deps.Config)
 	}
 	if markersHandler != nil {
 		v2deps.Markers = markersHandler
@@ -4048,9 +4048,10 @@ func profileNamesByUser(stores userstore.UserStoreProvider) downloads.ProfileNam
 
 // newPersonalAPIKeyHandler builds the account-scoped API key handler with the
 // household check its creation path runs.
-func newPersonalAPIKeyHandler(repo *auth.APIKeyRepository, stores userstore.UserStoreProvider) *handlers.APIKeyHandler {
+func newPersonalAPIKeyHandler(repo *auth.APIKeyRepository, stores userstore.UserStoreProvider, cfg *config.Config) *handlers.APIKeyHandler {
 	h := handlers.NewAPIKeyHandler(repo)
 	h.Stores = stores
+	h.ProfilesOutsidePostgres = cfg != nil && cfg.UserDB.Backend == "sqlite"
 	return h
 }
 
