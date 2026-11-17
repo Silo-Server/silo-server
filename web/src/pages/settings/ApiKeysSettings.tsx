@@ -88,8 +88,14 @@ export default function ApiKeysSettings() {
   const maxKeys = capability.data?.max_user_keys ?? 0;
   // The primary profile sees the whole account's keys, so its count is the
   // account's; another profile learns the limit from the server's refusal.
+  // An admin's own account keys are not held to the limit, so the server
+  // decides for an admin.
   const atLimit =
-    profile?.is_primary === true && !keys.hasNextPage && maxKeys > 0 && rows.length >= maxKeys;
+    user?.role !== "admin" &&
+    profile?.is_primary === true &&
+    !keys.hasNextPage &&
+    maxKeys > 0 &&
+    rows.length >= maxKeys;
   const profileName = (id: string) => profiles.data.find((p) => p.id === id)?.name ?? id;
 
   return (
