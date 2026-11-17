@@ -101,7 +101,10 @@ func albumArtistGroupingSeries(tags map[string]string, authors []string) string 
 		return ""
 	}
 	for _, author := range authors {
-		if containsTitleWords(name, author) {
+		// A surname-first author ("King, Stephen") is also checked in
+		// reading order.
+		last, first, comma := strings.Cut(author, ",")
+		if containsTitleWords(name, author) || comma && containsTitleWords(name, first+" "+last) {
 			return ""
 		}
 	}
@@ -455,19 +458,36 @@ func audiobookTagAuthors(tags map[string]string) []string {
 		}
 		return splitAudiobookCredits(tags["composer"])
 	}
-	if len(albumArtist) == 0 || len(albumArtist) >= len(artist) {
-		return artist
+	// splitAudiobookCredits keeps "Homer, Ian McKellen" whole because one
+	// piece is a single word, so also compare against artist split at every
+	// separator.
+	if len(albumArtist) > 0 && (namesSomeOf(albumArtist, artist) ||
+		namesSomeOf(albumArtist, audiobookCreditAnySeparatorRE.Split(tags["artist"], -1))) {
+		return albumArtist
 	}
-	inArtist := make(map[string]bool, len(artist))
-	for _, name := range artist {
-		inArtist[strings.ToLower(name)] = true
-	}
-	for _, name := range albumArtist {
-		if !inArtist[strings.ToLower(name)] {
-			return artist
+	return artist
+}
+
+var audiobookCreditAnySeparatorRE = regexp.MustCompile(`(?i)\s*(?:[;,]|\s(?:&|and)\s)\s*`)
+
+// namesSomeOf reports whether every name in some is also in all, ignoring
+// case and spacing, and all names at least one more person.
+func namesSomeOf(some, all []string) bool {
+	in := make(map[string]bool, len(all))
+	for _, name := range all {
+		if key := strings.ToLower(collapseSpacesRE.ReplaceAllString(strings.TrimSpace(name), " ")); key != "" {
+			in[key] = true
 		}
 	}
-	return albumArtist
+	if len(some) >= len(in) {
+		return false
+	}
+	for _, name := range some {
+		if !in[strings.ToLower(name)] {
+			return false
+		}
+	}
+	return true
 }
 
 // maxAudiobookTmpGenres bounds the tmp_genreN tags read from one file.
