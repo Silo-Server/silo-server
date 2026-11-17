@@ -90,9 +90,10 @@ func parseGroupingSeries(grouping string) (name, position string) {
 }
 
 // albumArtistGroupingSeries reads a series without a position from grouping
-// when album_artist repeats it and names none of the authors, as inAudible
-// writes a series ("Jack Reacher" in both). A grouping alone is too often a
-// category or a work name to count.
+// when album_artist repeats it and no author's name appears in it, as
+// inAudible writes a series ("Jack Reacher" in both). A grouping alone is too
+// often a category or a work name to count, and one naming an author is the
+// author with a note ("Stephen King (The Dark Tower)").
 func albumArtistGroupingSeries(tags map[string]string, authors []string) string {
 	first, _, _ := strings.Cut(tags["grouping"], ";")
 	name := strings.TrimSpace(first)
@@ -100,7 +101,7 @@ func albumArtistGroupingSeries(tags map[string]string, authors []string) string 
 		return ""
 	}
 	for _, author := range authors {
-		if strings.EqualFold(author, name) {
+		if containsTitleWords(name, author) {
 			return ""
 		}
 	}
@@ -171,7 +172,7 @@ func formatRomanNumeral(n int) string {
 //     ("Author, Narrator"). inAudible writes the series to album_artist, so
 //     album_artist never wins over an artist naming someone else.
 //   - Series (albumArtistGroupingSeries): a grouping without a position when
-//     album_artist repeats it and names none of the authors.
+//     album_artist repeats it and no author's name appears in it.
 //   - Narrator (audiobookTagNarrators): an explicit narrator tag (narrator,
 //     ©nrt, narratedby) when present. Otherwise the first of performer and
 //     composer that names someone other than the tagged authors: some files

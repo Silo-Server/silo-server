@@ -1072,6 +1072,8 @@ func TestPopulateFromTagsReadsGroupingSeriesAndLongDescription(t *testing.T) {
 		{map[string]string{"artist": "Lee Child", "album_artist": "Jack Reacher", "grouping": "Jack Reacher"}, "Jack Reacher", ""},
 		{map[string]string{"artist": "Ann Author", "album_artist": "Ann Author", "grouping": "Ann Author"}, "", ""},
 		{map[string]string{"album_artist": "Ann Author", "grouping": "Ann Author"}, "", ""},
+		// A grouping that names the author is the author with a series note.
+		{map[string]string{"artist": "Stephen King", "album_artist": "Stephen King (The Dark Tower)", "grouping": "Stephen King (The Dark Tower)"}, "", ""},
 		// An explicit series tag wins; grouping fills its missing position.
 		{map[string]string{"series": "Saga", "grouping": "Saga Vol. 3"}, "Saga", "Vol. 3"},
 		{map[string]string{"series": "Saga", "grouping": "Other #3"}, "Saga", ""},
