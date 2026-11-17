@@ -837,8 +837,8 @@ type chapterProcessingOptions struct {
 	deadline             time.Time
 	// openingNamed holds the season group keys whose files name an opening
 	// song chapter (openingNamedGroups), where an Intro chapter is a cold
-	// open. The episode passes pass the whole season groups of their
-	// candidates, so a file's chapters read the same in each of them.
+	// open. Every caller passes the whole season groups of its candidates,
+	// so a file's chapters read the same in every pass.
 	openingNamed map[string]bool
 	// withdrawStale withdraws intros placed from chapters that no longer
 	// produce one (staleChapterIntro). Only the episode passes set it: they
@@ -918,7 +918,8 @@ func (a *Analyzer) processChapterCandidates(ctx context.Context, candidates []Ca
 	if !opts.allowEpisodeCopy || len(directByEpisode) == 0 || len(remaining) == 0 {
 		return remaining, summary, withdrawn
 	}
-	return a.copyChapterIntrosToVersions(ctx, remaining, directByEpisode, directFileIDs, opts, &summary), summary, withdrawn
+	unresolved := a.copyChapterIntrosToVersions(ctx, remaining, directByEpisode, directFileIDs, opts, &summary)
+	return unresolved, summary, withdrawn
 }
 
 // detectChapterIntros runs DetectChapterIntro over candidates, each read
@@ -1199,15 +1200,21 @@ func (a *Analyzer) runSilenceBackfill(ctx context.Context, kinds EpisodeMarkerKi
 	if len(candidates) == 0 {
 		return summary, nil
 	}
+	// Chapters are read against their season groups here too, so a file
+	// whose chapters changed since the episode pass is not refined into a
+	// cold open. The backfill withdraws nothing: it does not compare season
+	// groups again, and the episode pass that runs just before it has
+	// already withdrawn the chapter intros chapters no longer produce.
+	openingNamed, err := a.loadOpeningNamedGroups(ctx, candidates, map[string][]Candidate{})
+	if err != nil {
+		return summary, err
+	}
 	// Backfill files are independent: no episode-version copies are made, so
-	// the candidates split across workers. The episode pass that runs just
-	// before reads each file against its season group and withdraws the
-	// chapter intros its chapters no longer produce, so the backfill lists
-	// only intros that pass kept and needs neither the season groups nor
-	// withdrawals of its own.
+	// the candidates split across workers.
 	opts := chapterProcessingOptions{
 		forceExistingScanner: true,
 		deadline:             time.Now().Add(cfg.SilenceBackfillMaxDuration),
+		openingNamed:         openingNamed,
 	}
 	workers := min(len(candidates), a.workerCount())
 	var (

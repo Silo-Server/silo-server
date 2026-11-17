@@ -1297,3 +1297,24 @@ func TestAnalyzeEpisodeReadsAColdOpenAgainstItsSeason(t *testing.T) {
 		})
 	}
 }
+
+// The silence backfill reads a file's chapters against its season group, so
+// a file whose chapters became a lone cold open after the episode pass ran is
+// not refined into one.
+func TestSilenceBackfillReadsAColdOpenAgainstItsSeason(t *testing.T) {
+	season := coldOpenSeason()
+	target := season[2]
+	repo := &fakeIntroRepository{
+		backfillCandidates: []Candidate{target},
+		groupCandidates:    map[string][]Candidate{groupKey(7, "season1", target.AnalysisGroupKey()): season},
+	}
+	analyzer := &Analyzer{repo: repo, config: DefaultConfig("ffmpeg"), logger: slog.New(slog.DiscardHandler)}
+
+	summary, err := analyzer.runSilenceBackfill(context.Background(), EpisodeMarkerKinds{Intro: true})
+	if err != nil {
+		t.Fatalf("runSilenceBackfill: %v", err)
+	}
+	if len(repo.patches) != 0 || len(repo.withdrawals) != 0 || summary.SilenceBackfillConsidered != 1 {
+		t.Fatalf("patches %+v, withdrawals %+v; want the cold open neither refined nor withdrawn by the backfill", repo.patches, repo.withdrawals)
+	}
+}

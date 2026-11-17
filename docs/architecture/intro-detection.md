@@ -50,9 +50,9 @@ for a single item does not take the lock.
    chapter there is read as a cold open and is not the intro. A release that
    never names an opening song keeps `Intro` as its intro. Two adjacent
    intro-like chapters, such as `Intro` then `OP`, are still ambiguous and go
-   to Chromaprint. The nightly episode pass, playback, and admin re-detection
-   read chapters against the whole season group, so a file's result does not
-   depend on how its analysis started.
+   to Chromaprint. Every pass that reads chapters, including playback, admin
+   re-detection, and the silence backfill, reads them against the whole season
+   group, so a file's result does not depend on how its analysis started.
 
    When a file's chapters no longer produce the chapter intro stored for it,
    as after a change to these rules or a remux, local analysis withdraws it
@@ -62,8 +62,8 @@ for a single item does not take the lock.
    outrank every Chromaprint result, so left in place they would keep their
    stale range for good. The file's season group is then compared again even
    when its stored analysis still stands. The silence backfill withdraws
-   nothing and reads chapters file by file: it runs right after the nightly
-   episode pass, which has already withdrawn what it would.
+   nothing, since it does not compare season groups; it runs right after the
+   nightly episode pass, which has already withdrawn what it would.
 2. **Chromaprint.** Remaining files are grouped by library, season, and
    presentation (edition and audio language). Each file's opening audio
    (25 percent of the runtime, at most ten minutes) is fingerprinted once and
