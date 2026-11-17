@@ -16,14 +16,7 @@ type ServerStatusResult = {
   isError: boolean;
   refetch?: () => void;
 };
-const serverStatusMock = vi.fn(
-  (): ServerStatusResult => ({
-    data: { artwork_storage: { backend: "local", locked: false, status_known: true } } as unknown,
-    isPending: false,
-    isError: false,
-    refetch: vi.fn(),
-  }),
-);
+const serverStatusMock = vi.fn<() => ServerStatusResult>();
 const fetchStatusMock = vi.fn();
 vi.mock("@/hooks/queries/admin/settings", () => ({
   useAdminServerStatus: () => serverStatusMock(),

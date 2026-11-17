@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useMemo, useState } from "react";
 import type { FormEvent, ReactNode } from "react";
 
 import {
@@ -7,9 +7,10 @@ import {
 } from "@/components/admin/ConnectionCheckAction";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
-import type { AdminServerStatus } from "@/api/types";
 import { fetchAdminServerStatus, useAdminServerStatus } from "@/hooks/queries/admin/settings";
 import { useRequestServerRestart } from "@/hooks/queries/admin/serverRestart";
+import { settingsRestartPending } from "@/hooks/admin/useSettingsHealth";
+import { useMounted } from "@/hooks/useMounted";
 import { useSettingsForm } from "@/hooks/useSettingsForm";
 import { useT, type MessageKey, type Translate } from "@/i18n";
 import { stageRedisUrl } from "@/pages/admin-settings/redisDraft";
@@ -67,27 +68,16 @@ const STORAGE_LOCATION_KEYS = [
   "s3.private_key_prefix",
 ];
 
-// The restart reasons the server can report for this step's keys. It reports
-// only keys read at startup (s3., artwork., redis.), so metadata.cache_images,
-// which applies live, never appears.
-const STORAGE_RESTART_REASONS = new Set(ALL_KEYS.map((key) => `setting:${key}`));
+// The namespaces of this step's settings that the server reads only at startup.
+const STORAGE_RESTART_PREFIXES = ["s3.", "artwork.", "redis."] as const;
 const RESTART_POLL_MS = 1_000;
+// Once the restart looks stuck, poll gently: each status read runs health probes.
+const RESTART_SLOW_POLL_MS = 5_000;
 // Shutdown waits a few seconds for streams to drain, then startup migrates and
 // opens storage; past a minute, nothing is bringing the process back.
 const RESTART_SLOW_MS = 60_000;
 
 type RestartPhase = "idle" | "applying" | "slow";
-
-/**
- * Whether storage settings this step saved are still waiting for a restart.
- * The answering process reports them until it restarts, so this also covers a
- * save made before a page reload.
- */
-function storageRestartPending(status: AdminServerStatus): boolean {
-  return (status.restart_required_reasons ?? []).some((reason) =>
-    STORAGE_RESTART_REASONS.has(reason),
-  );
-}
 
 const S3_URL_AUTH_OPTIONS: { value: string; label: MessageKey }[] = [
   { value: "presigned", label: "web.setup.storage.authPresigned" },
@@ -312,29 +302,29 @@ export function StorageStep() {
   const serverStatus = useAdminServerStatus();
   const restart = useRequestServerRestart();
   const [restartPhase, setRestartPhase] = useState<RestartPhase>("idle");
-  const mounted = useRef(true);
-  useEffect(() => {
-    mounted.current = true;
-    return () => {
-      mounted.current = false;
-    };
-  }, []);
+  const mounted = useMounted();
 
   // Storage settings take effect when Silo starts. Applying them before the
   // Libraries step keeps the first stored files in the location the admin chose,
   // instead of recording the old location and locking the new one out (#4418).
   async function applySavedStorage(): Promise<boolean> {
     const before = await fetchAdminServerStatus();
-    if (!storageRestartPending(before)) return true;
+    // The answering process reports these until it restarts, which also covers
+    // a save made before a page reload.
+    if (!settingsRestartPending(before, STORAGE_RESTART_PREFIXES)) return true;
     setRestartPhase("applying");
     const slowAt = Date.now() + RESTART_SLOW_MS;
+    let slow = false;
     try {
       await restart.mutateAsync({});
     } catch {
+      slow = true;
       setRestartPhase("slow");
     }
     while (mounted.current) {
-      await new Promise((resolve) => setTimeout(resolve, RESTART_POLL_MS));
+      await new Promise((resolve) =>
+        setTimeout(resolve, slow ? RESTART_SLOW_POLL_MS : RESTART_POLL_MS),
+      );
       try {
         const now = await fetchAdminServerStatus();
         if (now.started_at !== before.started_at) {
@@ -345,7 +335,10 @@ export function StorageStep() {
       } catch {
         // Expected while the old process stops and the new one starts.
       }
-      if (Date.now() >= slowAt) setRestartPhase("slow");
+      if (!slow && Date.now() >= slowAt) {
+        slow = true;
+        setRestartPhase("slow");
+      }
     }
     return false;
   }

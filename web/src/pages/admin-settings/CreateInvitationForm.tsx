@@ -31,7 +31,8 @@ import { invalidEmailMessage, isValidEmail } from "@/lib/email";
 import { cn } from "@/lib/utils";
 
 import { ClaimLinkBox } from "./InvitationDisplay";
-import { deliveryMessage, useMounted } from "./invitationRules";
+import { useMounted } from "@/hooks/useMounted";
+import { deliveryMessage } from "./invitationRules";
 import {
   FULL_SCREEN_BOTTOM_CLASS,
   PINNED_FOOTER_CLASS,

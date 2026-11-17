@@ -35,7 +35,8 @@ import { useT } from "@/i18n";
 import { CreateInvitationForm } from "./CreateInvitationForm";
 import { ClaimLinkBox } from "./InvitationDisplay";
 import { InvitationList } from "./InvitationList";
-import { deliveryMessage, isLinkInvitation, useMounted } from "./invitationRules";
+import { useMounted } from "@/hooks/useMounted";
+import { deliveryMessage, isLinkInvitation } from "./invitationRules";
 import {
   FULL_SCREEN_DIALOG_CLASS,
   TOUCH_DIALOG_CLOSE_CLASS,
