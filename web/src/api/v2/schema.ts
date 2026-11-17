@@ -34057,7 +34057,7 @@ export interface components {
       backdrop_thumbhash?: string;
       /**
        * Format: uri-reference
-       * @description Presigned, short-lived, page-width backdrop of a server collection that has one, for a hero backdrop while the card is focused; absent when none and on personal collections
+       * @description Presigned, short-lived backdrop of a server collection that has one, for a hero backdrop while the card is focused: the page-width variant, or the card thumbnail when the backdrop is set to another artwork such as the collection's poster. Absent when none and on personal collections
        */
       backdrop_url?: string;
       /** @description Present on a personal collection: the profile that made it */

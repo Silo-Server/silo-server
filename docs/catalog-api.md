@@ -75,7 +75,9 @@ personal one), `title`, `poster_url` (presigned, card size; the assigned poster,
 viewer's collage, else empty), `poster_thumbhash`, `poster_is_collage`, `backdrop_url` and
 `backdrop_thumbhash` on a server collection with a backdrop (presigned at the page-width variant
 a collection page uses, so a client can draw it as the hero backdrop while the card is focused;
-absent otherwise, and always absent on a personal collection), `item_count` (the titles
+a backdrop set to other artwork, such as the collection's poster, has no wide variant and comes
+at card thumbnail size, as on the collection page; absent otherwise, and always absent on a
+personal collection), `item_count` (the titles
 the viewer sees), `library_id` on a server collection (a library the viewer can open that holds
 it, for the collection page link; on a library page, that library), and `creator_profile_id` on
 a personal collection.

@@ -132,7 +132,7 @@ type SectionCollectionCard struct {
 	PosterURL         string  `json:"poster_url" format:"uri-reference" doc:"Presigned, short-lived; empty when none"`
 	PosterThumbhash   string  `json:"poster_thumbhash,omitempty"`
 	PosterIsCollage   bool    `json:"poster_is_collage" doc:"poster_url is the acting profile's collage of the collection's first titles it can see, composed by the server because the collection has no uploaded, template or imported poster. False for an uploaded, template or imported poster and whenever poster_url is empty" example:"false"`
-	BackdropURL       string  `json:"backdrop_url,omitempty" format:"uri-reference" doc:"Presigned, short-lived, page-width backdrop of a server collection that has one, for a hero backdrop while the card is focused; absent when none and on personal collections"`
+	BackdropURL       string  `json:"backdrop_url,omitempty" format:"uri-reference" doc:"Presigned, short-lived backdrop of a server collection that has one, for a hero backdrop while the card is focused: the page-width variant, or the card thumbnail when the backdrop is set to another artwork such as the collection's poster. Absent when none and on personal collections"`
 	BackdropThumbhash string  `json:"backdrop_thumbhash,omitempty"`
 	ItemCount         int     `json:"item_count" doc:"The titles the acting profile sees in the collection" example:"12"`
 	LibraryID         *ID     `json:"library_id,omitempty" doc:"Present on a server collection: a library the viewer can open that holds it, for the collection's page link. On a library page, that library" example:"1"`
