@@ -331,11 +331,3 @@ func TestSetRatingOneToTen(t *testing.T) {
 		requireProblem(t, do(t, h, http.MethodPut, "/api/v2/ratings/movie:c", body, viewerHeaders()), TypeValidationFailed)
 	}
 }
-
-func TestPersonalRatingCapabilities(t *testing.T) {
-	h := newTestHandler(t, ratingsDeps(&fakeRatings{}))
-	rec := do(t, h, http.MethodGet, "/api/v2/ratings/capabilities", "", viewerHeaders())
-	if rec.Code != 200 || !strings.Contains(rec.Body.String(), `"state":"available"`) || !strings.Contains(rec.Body.String(), `"max_score":10`) {
-		t.Fatalf("%d %s", rec.Code, rec.Body.String())
-	}
-}

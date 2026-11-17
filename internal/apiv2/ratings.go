@@ -41,21 +41,6 @@ type RatingSet struct {
 	Rating int `json:"rating" minimum:"1" maximum:"10" doc:"1 to 10; clients show it as five stars with half stars (7 is 3.5 stars)" example:"7"`
 }
 
-// PersonalRatingCapabilities describes the scale of the profile's own
-// ratings. getRatingsCapability covers the external rating sources.
-type PersonalRatingCapabilities struct {
-	Capability
-	MaxScore int `json:"max_score" doc:"The highest rating setRating accepts; ratings run from 1. A server without this document takes whole stars, 1 to 5" example:"10"`
-}
-
-// PersonalRatingCapabilitiesOutput is the getPersonalRatingCapabilities response.
-type PersonalRatingCapabilitiesOutput struct {
-	Status       int
-	ETag         string `header:"ETag"`
-	CacheControl string `header:"Cache-Control"`
-	Body         PersonalRatingCapabilities
-}
-
 // RatingSetInput names the item and carries the rating to set.
 type RatingSetInput struct {
 	ItemID ID `path:"item_id" doc:"Catalog item identifier" example:"movie:heat-1995"`
@@ -76,17 +61,6 @@ const opListRatings = "listRatings"
 
 func registerRatings(reg *Registry) {
 	cursors := NewCursors(reg.deps.CursorSecret)
-	Register(reg, Operation{
-		Operation: humaOp(http.MethodGet, Prefix+"/ratings/capabilities", "getPersonalRatingCapabilities", "ratings",
-			"Describe the rating scale: ratings from 1 to max_score."),
-		Class:         ClassProfileScoped,
-		ServiceBacked: true,
-	}, func(context.Context, *CapabilityInput) (*PersonalRatingCapabilitiesOutput, error) {
-		return &PersonalRatingCapabilitiesOutput{Body: PersonalRatingCapabilities{
-			Capability: Capability{State: configuredCapabilityState(reg.deps.Ratings != nil)},
-			MaxScore:   mediacatalog.MaxRatingScore,
-		}}, nil
-	})
 	Register(reg, Operation{
 		Operation: humaOp(http.MethodGet, Prefix+"/ratings", opListRatings, "ratings",
 			"List the acting profile's ratings, most recently rated first; items the viewer may not see are omitted."),
