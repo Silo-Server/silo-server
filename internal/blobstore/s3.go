@@ -130,9 +130,11 @@ func (s *S3) Identity() string {
 
 // S3Identity is the Identity an S3 store opened on endpoint, bucket, and key
 // prefix would report, for callers that compare configured settings with a
-// recorded identity without opening a client.
+// recorded identity without opening a client. keyPrefix must already be in
+// s3client.NormalizeKeyPrefix form, as the client stores it: normalizing it
+// again would trim a prefix such as " cache" and change a recorded identity.
 func S3Identity(endpoint, bucket, keyPrefix string) string {
-	return BackendS3 + "|" + normalizeEndpoint(endpoint) + "|" + strings.ToLower(strings.TrimSpace(bucket)) + "|" + s3client.NormalizeKeyPrefix(keyPrefix)
+	return BackendS3 + "|" + normalizeEndpoint(endpoint) + "|" + strings.ToLower(strings.TrimSpace(bucket)) + "|" + keyPrefix
 }
 
 // normalizeEndpoint lowercases only the case-insensitive parts of an endpoint
