@@ -312,25 +312,20 @@ export default defineConfig(({ mode }) => {
       setupFiles: ["./src/test-setup.ts"],
       // vmThreads workers are threads in one process, and vitest's default
       // recycle limit is total RAM divided by the worker count, so together
-      // they may grow to nearly all of the machine's memory. Four workers, as
-      // CI runs, each recycled at 512MB keep the full suite under 4GB; a
-      // lower limit recycles so often that the run slows down.
-      maxWorkers: 4,
+      // they may grow to nearly all of the machine's memory. Recycling each
+      // worker at 512MB bounds that without lowering the worker count or
+      // slowing the run; a lower limit recycles so often that it does slow.
       vmMemoryLimit: "512MB",
-      // Each project resets the inherited maxWorkers to 0 (unset). Vitest
-      // prefers a project's own value over the root one, and --maxWorkers
-      // reaches only the root, so an inherited 4 would silently override it.
       projects: [
         {
           extends: true,
-          test: { name: "threads", pool: "threads", include: THREADS_TESTS, maxWorkers: 0 },
+          test: { name: "threads", pool: "threads", include: THREADS_TESTS },
         },
         {
           extends: true,
           test: {
             name: "vmThreads",
             pool: "vmThreads",
-            maxWorkers: 0,
             include: [...configDefaults.include, ...THREADS_TESTS.map((file) => `!${file}`)],
           },
         },
