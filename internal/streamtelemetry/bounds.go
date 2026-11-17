@@ -54,6 +54,9 @@ func normalizeCapture(c CaptureSet) CaptureSet {
 	c.Client.Build = boundedDisplay(c.Client.Build, clientmetadata.Build)
 	c.Client.Channel = boundedDisplay(c.Client.Channel, clientmetadata.Channel)
 	c.UserAgent = boundedDisplay(c.UserAgent, clientmetadata.UserAgent)
+	c.Transport.Class = boundedText(c.Transport.Class, maxTagBytes)
+	c.Transport.HostID = boundedText(c.Transport.HostID, maxIdentityBytes)
+	c.Transport.AddressFamily = boundedText(c.Transport.AddressFamily, maxTagBytes)
 	if !validText(string(c.TokenIssuedFrom), maxTagBytes) {
 		c.TokenIssuedFrom = TokenIssuedAtSourceNone
 	}
@@ -158,6 +161,11 @@ func validateSessionText(w wireSession, limit int) error {
 	}
 	for _, v := range w.ClientVariants {
 		b.client(v)
+	}
+	for _, v := range w.Transports {
+		b.add(v.Class, maxTagBytes)
+		b.add(v.HostID, maxIdentityBytes)
+		b.add(v.AddressFamily, maxTagBytes)
 	}
 	for _, v := range w.IdentityConflicts {
 		b.add(v.Field, maxTagBytes)

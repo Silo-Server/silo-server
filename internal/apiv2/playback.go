@@ -75,6 +75,7 @@ type PlaybackStartBody struct {
 	ObservedThroughputKbps     *int                               `json:"observed_throughput_kbps,omitempty" nullable:"false" minimum:"100" maximum:"1000000" doc:"What the plan that kept buffering received, measured as plan_summary throughput_kbps. Only with bandwidth_estimate_source observed_rebuffer; the server plans with, and learns, the lower of it and bandwidth_estimate_kbps."`
 	LearnedLimit               string                             `json:"learned_limit,omitempty" enum:"ignore,clear"`
 	BandwidthCapKbps           *int                               `json:"bandwidth_cap_kbps,omitempty" nullable:"false"`
+	MediaTransport             string                             `json:"media_transport,omitempty" enum:"regular,direct" doc:"The transport the client asks the media to use. direct asks for the direct path to this server; send it only when the local route is not active, the device is enrolled and the engine is up. Omitted means regular."`
 	Capabilities               playback.ClientCodecCapabilitiesV3 `json:"client_capabilities"`
 	ClientPlaybackContext      playback.ClientPlaybackContextV3   `json:"client_playback_context"`
 }
@@ -109,6 +110,7 @@ type PlaybackPlan struct {
 	Source                 PlaybackSource                  `json:"source"`
 	SubtitleFidelityPolicy string                          `json:"subtitle_fidelity_policy"`
 	ActiveQuality          string                          `json:"active_quality,omitempty" doc:"The available_qualities label this plan delivers, so a client can mark that menu entry: the label quality_preference named while the menu lists it and the encode keeps its resolution, otherwise the rung whose resolution class and bitrate the encode matches. Absent when the plan delivers no listed entry, such as the source played unchanged or a plain-resolution or auto request whose capped encode falls between two rungs. Present on servers that advertise plan_active_quality_v1."`
+	MediaTransport         string                          `json:"media_transport" enum:"regular,direct" doc:"The transport this plan's media uses. direct means the client carries the media requests it would send to its saved base URL through the direct path to the api host; regular means the saved base URL, or the local route."`
 }
 type PlaybackSource struct {
 	MediaFileID        ID                          `json:"media_file_id"`
@@ -265,6 +267,7 @@ type PlaybackReplanBody struct {
 	ObservedThroughputKbps  *int                               `json:"observed_throughput_kbps,omitempty" nullable:"false" minimum:"100" maximum:"1000000" doc:"What the plan that kept buffering received, measured as plan_summary throughput_kbps. Only with bandwidth_estimate_source observed_rebuffer; the server plans with, and learns, the lower of it and bandwidth_estimate_kbps."`
 	LearnedLimit            string                             `json:"learned_limit,omitempty" enum:"ignore,clear"`
 	BandwidthCapKbps        *int                               `json:"bandwidth_cap_kbps,omitempty" nullable:"false"`
+	MediaTransport          string                             `json:"media_transport,omitempty" enum:"regular,direct" doc:"The transport the client asks the media to use. direct asks for the direct path to this server; send it only when the local route is not active, the device is enrolled and the engine is up. Omitted means regular."`
 	SelectedTracks          playback.SelectedTracksV3          `json:"selected_tracks"`
 	Failure                 playback.FailureV3                 `json:"failure,omitzero"`
 	Capabilities            playback.ClientCodecCapabilitiesV3 `json:"client_capabilities"`
@@ -453,7 +456,7 @@ func registerPlaybackReplan(reg *Registry, op func(method, path, id string) Oper
 	})
 }
 func (in PlaybackReplanBody) domain() playback.ReplanRequestV3 {
-	return playback.ReplanRequestV3{ProtocolVersion: in.ProtocolVersion, ClientFeatures: in.ClientFeatures, Operation: in.Operation, PlaybackAttemptID: in.PlaybackAttemptID, ReplanRequestID: in.ReplanRequestID, FailedPlanID: in.FailedPlanID, PlanAttemptID: in.PlanAttemptID, PlanAttemptKey: in.PlanAttemptKey, AttemptedPlanKeys: in.AttemptedPlanKeys, LocalMutations: in.LocalMutations, AttemptCount: in.AttemptCount, QualityPreference: in.QualityPreference, PositionSeconds: in.PositionSeconds, Metered: in.Metered, BandwidthEstimateKbps: in.BandwidthEstimateKbps, BandwidthEstimateSource: in.BandwidthEstimateSource, ObservedThroughputKbps: in.ObservedThroughputKbps, LearnedLimit: in.LearnedLimit, BandwidthCapKbps: in.BandwidthCapKbps, SelectedTracks: in.SelectedTracks, Failure: in.Failure, Capabilities: in.Capabilities, ClientPlaybackContext: in.ClientPlaybackContext}
+	return playback.ReplanRequestV3{ProtocolVersion: in.ProtocolVersion, ClientFeatures: in.ClientFeatures, Operation: in.Operation, PlaybackAttemptID: in.PlaybackAttemptID, ReplanRequestID: in.ReplanRequestID, FailedPlanID: in.FailedPlanID, PlanAttemptID: in.PlanAttemptID, PlanAttemptKey: in.PlanAttemptKey, AttemptedPlanKeys: in.AttemptedPlanKeys, LocalMutations: in.LocalMutations, AttemptCount: in.AttemptCount, QualityPreference: in.QualityPreference, PositionSeconds: in.PositionSeconds, Metered: in.Metered, BandwidthEstimateKbps: in.BandwidthEstimateKbps, BandwidthEstimateSource: in.BandwidthEstimateSource, ObservedThroughputKbps: in.ObservedThroughputKbps, LearnedLimit: in.LearnedLimit, BandwidthCapKbps: in.BandwidthCapKbps, MediaTransport: in.MediaTransport, SelectedTracks: in.SelectedTracks, Failure: in.Failure, Capabilities: in.Capabilities, ClientPlaybackContext: in.ClientPlaybackContext}
 }
 func registerPlaybackRouteEvents(reg *Registry, op func(method, path, id string) Operation) {
 	Register(reg, op(http.MethodPost, "/route-events", opReportPlaybackRouteEvent), func(ctx context.Context, in *PlaybackRouteEventInput) (*PlaybackRouteEventOutput, error) {
@@ -527,7 +530,7 @@ func playbackMutation(view handlers.PlaybackMutationView, err error) (*PlaybackM
 	return &PlaybackMutationOutput{Body: body}, nil
 }
 func (in PlaybackStartBody) domain(fileID int) playback.StartRequestV3 {
-	return playback.StartRequestV3{ProtocolVersion: in.ProtocolVersion, ClientFeatures: in.ClientFeatures, FileID: fileID, ProfileID: string(in.ProfileID), PlaybackAttemptID: in.PlaybackAttemptID, QualityPreference: in.QualityPreference, AllowAlternateVersions: in.AllowAlternateVersions, SubtitleFidelityPreference: in.SubtitleFidelityPreference, StartPosition: in.StartPosition, ProgressPersistence: in.ProgressPersistence, AudioTrackID: in.AudioTrackID, AudioTrackIndex: in.AudioTrackIndex, SubtitleTrackID: in.SubtitleTrackID, SubtitleTrackIndex: in.SubtitleTrackIndex, Metered: in.Metered, BandwidthEstimateKbps: in.BandwidthEstimateKbps, BandwidthEstimateSource: in.BandwidthEstimateSource, ObservedThroughputKbps: in.ObservedThroughputKbps, LearnedLimit: in.LearnedLimit, BandwidthCapKbps: in.BandwidthCapKbps, Capabilities: in.Capabilities, ClientPlaybackContext: in.ClientPlaybackContext}
+	return playback.StartRequestV3{ProtocolVersion: in.ProtocolVersion, ClientFeatures: in.ClientFeatures, FileID: fileID, ProfileID: string(in.ProfileID), PlaybackAttemptID: in.PlaybackAttemptID, QualityPreference: in.QualityPreference, AllowAlternateVersions: in.AllowAlternateVersions, SubtitleFidelityPreference: in.SubtitleFidelityPreference, StartPosition: in.StartPosition, ProgressPersistence: in.ProgressPersistence, AudioTrackID: in.AudioTrackID, AudioTrackIndex: in.AudioTrackIndex, SubtitleTrackID: in.SubtitleTrackID, SubtitleTrackIndex: in.SubtitleTrackIndex, Metered: in.Metered, BandwidthEstimateKbps: in.BandwidthEstimateKbps, BandwidthEstimateSource: in.BandwidthEstimateSource, ObservedThroughputKbps: in.ObservedThroughputKbps, LearnedLimit: in.LearnedLimit, BandwidthCapKbps: in.BandwidthCapKbps, MediaTransport: in.MediaTransport, Capabilities: in.Capabilities, ClientPlaybackContext: in.ClientPlaybackContext}
 }
 func playbackDecision(in playback.DecisionResponseV3) PlaybackDecision {
 	out := PlaybackDecision{ProtocolVersion: in.ProtocolVersion, ServerFeatures: in.ServerFeatures, Outcome: in.Outcome, SessionID: in.SessionID, Terminal: in.Terminal}
@@ -535,9 +538,18 @@ func playbackDecision(in playback.DecisionResponseV3) PlaybackDecision {
 		p := in.PlaybackPlan
 		stream := p.Stream
 		stream.URL = playbackV2MediaURL(stream.URL)
-		out.PlaybackPlan = &PlaybackPlan{ProtocolVersion: p.ProtocolVersion, PlanID: p.PlanID, PlanAttemptKey: p.PlanAttemptKey, SessionID: p.SessionID, ExpiresAt: p.ExpiresAt, Delivery: p.Delivery, Stream: stream, Timeline: p.Timeline, SelectedTracks: p.SelectedTracks, EffectiveRecipe: p.EffectiveRecipe, BandwidthLimit: playbackBandwidthLimit(p.BandwidthLimit), Claims: p.Claims, Subtitle: playbackV2Subtitle(p.Subtitle), Transformations: p.Transformations, AppliedQuirks: p.AppliedQuirks, RuntimeCorrections: p.RuntimeCorrections, AvailableQualities: playbackQualities(p.AvailableQualities), DegradationWarnings: p.DegradationWarnings, DecisionReason: p.DecisionReason, RequestedMediaFileID: ID(strconv.Itoa(p.RequestedMediaFileID)), EffectiveMediaFileID: ID(strconv.Itoa(p.EffectiveMediaFileID)), Source: playbackSource(p.Source), SubtitleFidelityPolicy: p.SubtitleFidelityPolicy, ActiveQuality: p.ActiveQuality}
+		out.PlaybackPlan = &PlaybackPlan{ProtocolVersion: p.ProtocolVersion, PlanID: p.PlanID, PlanAttemptKey: p.PlanAttemptKey, SessionID: p.SessionID, ExpiresAt: p.ExpiresAt, Delivery: p.Delivery, Stream: stream, Timeline: p.Timeline, SelectedTracks: p.SelectedTracks, EffectiveRecipe: p.EffectiveRecipe, BandwidthLimit: playbackBandwidthLimit(p.BandwidthLimit), Claims: p.Claims, Subtitle: playbackV2Subtitle(p.Subtitle), Transformations: p.Transformations, AppliedQuirks: p.AppliedQuirks, RuntimeCorrections: p.RuntimeCorrections, AvailableQualities: playbackQualities(p.AvailableQualities), DegradationWarnings: p.DegradationWarnings, DecisionReason: p.DecisionReason, RequestedMediaFileID: ID(strconv.Itoa(p.RequestedMediaFileID)), EffectiveMediaFileID: ID(strconv.Itoa(p.EffectiveMediaFileID)), Source: playbackSource(p.Source), SubtitleFidelityPolicy: p.SubtitleFidelityPolicy, ActiveQuality: p.ActiveQuality, MediaTransport: playbackMediaTransport(p.MediaTransport)}
 	}
 	return out
+}
+
+// playbackMediaTransport is the transport a plan publishes: a plan that
+// carries none is regular.
+func playbackMediaTransport(transport string) string {
+	if transport == "" {
+		return playback.MediaTransportRegularV3
+	}
+	return transport
 }
 
 // playbackQualities drops the source entry from the v2 menu: auto already

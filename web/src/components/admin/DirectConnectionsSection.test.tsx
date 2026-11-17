@@ -18,6 +18,7 @@ const state = vi.hoisted(() => ({
   host: undefined as unknown,
   persistedEnabled: "true",
   dirtyCount: 0,
+  dirtyKeys: [] as string[],
 }));
 
 vi.mock("@/hooks/useSettingsForm", () => ({
@@ -26,7 +27,7 @@ vi.mock("@/hooks/useSettingsForm", () => ({
     getPersistedValue: (key: string) =>
       key === "direct_connections.enabled" ? state.persistedEnabled : "",
     setValue: vi.fn(),
-    isDirty: () => false,
+    isDirty: (key: string) => state.dirtyKeys.includes(key),
     dirtyCount: state.dirtyCount,
     save: vi.fn(),
     discard: vi.fn(),
@@ -41,6 +42,7 @@ vi.mock("@/hooks/queries/admin/directConnections", () => ({
     data: { enabled: true, hosts: [state.host] },
   }),
   useRefreshDirectConnections: () => ({ isPending: false, isError: false, mutate: vi.fn() }),
+  useAdminDirectConnectionPeers: () => ({ isLoading: false, isError: false, data: { items: [] } }),
 }));
 
 function show(
@@ -95,6 +97,7 @@ afterEach(() => {
   cleanup();
   state.persistedEnabled = "true";
   state.dirtyCount = 0;
+  state.dirtyKeys = [];
 });
 
 describe("host tuning values", () => {
@@ -326,7 +329,7 @@ describe("host tuning field names", () => {
 });
 
 describe("section visibility", () => {
-  it("hides the section once enablement is off and nothing is staged", () => {
+  it("hides readiness once enablement is off and nothing is staged", () => {
     state.persistedEnabled = "false";
     show({});
 
@@ -338,7 +341,26 @@ describe("section visibility", () => {
     state.dirtyCount = 1;
     show({});
 
-    expect(screen.getByRole("heading", { name: "API server" })).toBeInTheDocument();
+    expect(screen.getByText("Enable direct connections")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Discard" })).toBeInTheDocument();
+  });
+
+  it("shows the toggle without readiness or connected devices while enablement is off", () => {
+    state.persistedEnabled = "false";
+    show({});
+
+    expect(screen.getByText("Enable direct connections")).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "API server" })).not.toBeInTheDocument();
+    expect(screen.queryByText("Connected devices")).not.toBeInTheDocument();
+  });
+
+  it("keeps Advanced and the save bar while an Advanced key is staged after enablement turns off", () => {
+    state.persistedEnabled = "false";
+    state.dirtyCount = 1;
+    state.dirtyKeys = ["direct_connections.port_mapping"];
+    show({});
+
+    expect(screen.getByText("Port mapping")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Discard" })).toBeInTheDocument();
   });
 });

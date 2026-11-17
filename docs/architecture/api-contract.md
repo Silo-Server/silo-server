@@ -523,6 +523,13 @@ client upgrade required, and internal error. Domain-specific types are added onl
 needs distinct corrective behavior. `token_refresh_required` (401) is one: the login
 session is valid but the access token predates a change to the account's role, so the client
 refreshes and retries instead of signing out.
+`direct_device_limit` and `direct_node_key_conflict` (both 409) are two more, on direct
+connection enrollment: the first tells the client to show the account's device limit, the second to
+make a new node key and enroll again. The validation code `missing` is the code of
+`body.connection_receipt` on `reportPlaybackBandwidthProbe` when a device that holds a direct
+connection enrollment sends no receipt; it differs from `required` because account state, not the
+schema, makes the field mandatory. `invalid` at the same location means the receipt is not the
+probe host's for that account and device.
 
 The foundation adapter replaces Huma's default problem output where necessary: every response has
 a Silo type and instance; validation details add stable codes and omit Huma's rejected `value`;

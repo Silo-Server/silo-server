@@ -30,7 +30,7 @@ func connectionDeviceV3(header string) string {
 
 func (h *PlaybackHandler) PlaybackConnection(ctx context.Context, device string, reset bool) (connectionstore.State, error) {
 	device = connectionDeviceV3(device)
-	key, label := connectionstore.Key(ctx, h.JWTSecret)
+	key, label := connectionstore.Key(ctx, h.JWTSecret, connectionstore.ClassRegular, "")
 	state := connectionstore.State{Connection: label}
 	if reset {
 		return state, h.Connections.Clear(ctx, apimw.GetUserID(ctx), device, key)
@@ -66,13 +66,12 @@ func (h *PlaybackHandler) currentReadings(probe *connectionstore.Probe, sample *
 // a seek replay keeps the stored request. A request that ignores the learned
 // limit gets none, because a Cast start sends ignore and no estimate on
 // purpose: the sender's reading is not the receiver's link. Nothing is
-// recorded.
-func (h *PlaybackHandler) applyConnectionReading(r *http.Request, req *playback.StartRequestV3) error {
+// recorded. key is the connection the reading is read under; empty applies none.
+func (h *PlaybackHandler) applyConnectionReading(r *http.Request, req *playback.StartRequestV3, key string) error {
 	if !playback.HasFeatureV3(req.ClientFeatures, playback.FeatureBufferingQualityV1) ||
 		req.QualityPreference != playback.QualityAutoV3 || req.BandwidthEstimateKbps != nil || req.LearnedLimit == playback.LearnedLimitIgnoreV3 {
 		return nil
 	}
-	key, _ := connectionstore.Key(r.Context(), h.JWTSecret)
 	device, _ := r.Context().Value(playbackConnectionDeviceContextKey{}).(string)
 	c, err := h.Connections.Connection(r.Context(), apimw.GetUserID(r.Context()), connectionDeviceV3(device), key)
 	if err != nil || c == nil {
@@ -94,7 +93,12 @@ func (h *PlaybackHandler) applyConnectionReading(r *http.Request, req *playback.
 // reports was paced by the server's transcode rather than the link (see
 // transcodeOutputBoundV3): the request still plans under its estimate, but the
 // device learns no limit from it. nil means no transcode is playing.
-func (h *PlaybackHandler) applyLearnedLimit(r *http.Request, req *playback.StartRequestV3, clientSent bool, outputBound func() bool) (*playback.BandwidthLimitV3, error) {
+//
+// key is the connection the limit is read under. record is the connection a
+// clear or an observed rebuffer is written under: the connection of the plan
+// that was buffering, which a replan takes from its session. An empty key or
+// record applies or writes nothing.
+func (h *PlaybackHandler) applyLearnedLimit(r *http.Request, req *playback.StartRequestV3, clientSent bool, key, record string, outputBound func() bool) (*playback.BandwidthLimitV3, error) {
 	if !playback.HasFeatureV3(req.ClientFeatures, playback.FeatureBufferingQualityV1) {
 		return nil, nil
 	}
@@ -103,7 +107,6 @@ func (h *PlaybackHandler) applyLearnedLimit(r *http.Request, req *playback.Start
 		// down from it: that throughput is what the link carried.
 		req.BandwidthEstimateKbps = new(*observed)
 	}
-	key, _ := connectionstore.Key(r.Context(), h.JWTSecret)
 	user := apimw.GetUserID(r.Context())
 	device, _ := r.Context().Value(playbackConnectionDeviceContextKey{}).(string)
 	device = connectionDeviceV3(device)
@@ -111,21 +114,21 @@ func (h *PlaybackHandler) applyLearnedLimit(r *http.Request, req *playback.Start
 		if !clientSent {
 			return nil, nil
 		}
-		return nil, h.Connections.Clear(r.Context(), user, device, key)
+		return nil, h.Connections.Clear(r.Context(), user, device, record)
 	}
 	if req.LearnedLimit == playback.LearnedLimitIgnoreV3 {
 		return nil, nil
 	}
 	if clientSent && req.BandwidthEstimateSource == playback.BandwidthEstimateObservedRebufferV3 && req.BandwidthEstimateKbps != nil && req.QualityPreference == playback.QualityAutoV3 {
 		switch {
-		case device == "" || key == "":
+		case device == "" || record == "":
 			// Observe stores nothing without a device and a connection, so
 			// the replan need not wait on a node to ask.
 		case outputBound != nil && outputBound():
 			slog.InfoContext(r.Context(), "learned limit not recorded: the server paced playback, or whether it did is unknown", "component", "playback",
 				"estimate_kbps", *req.BandwidthEstimateKbps)
 		default:
-			if err := h.Connections.Observe(r.Context(), user, device, key, *req.BandwidthEstimateKbps); err != nil {
+			if err := h.Connections.Observe(r.Context(), user, device, record, *req.BandwidthEstimateKbps); err != nil {
 				return nil, err
 			}
 		}
@@ -356,9 +359,16 @@ func isHDRRangeV3(dynamicRange string) bool {
 	return dynamicRange != "" && dynamicRange != playback.DynamicRangeSDRV3
 }
 
-func (h *PlaybackHandler) ReportPlaybackProbe(ctx context.Context, device string, result connectionstore.ProbeResult) error {
-	key, _ := connectionstore.Key(ctx, h.JWTSecret)
-	return h.Connections.ReportProbe(ctx, apimw.GetUserID(ctx), connectionDeviceV3(device), key, result)
+// ReportPlaybackProbe stores a device's speed test under the connection its
+// receipt names. receipt is the Silo-Connection-Receipt value the client got
+// with the probe bytes; probeResultKeyV3 says which results need one.
+func (h *PlaybackHandler) ReportPlaybackProbe(ctx context.Context, device string, result connectionstore.ProbeResult, receipt string) error {
+	user, device := apimw.GetUserID(ctx), connectionDeviceV3(device)
+	key, err := h.probeResultKeyV3(ctx, user, device, receipt)
+	if err != nil {
+		return err
+	}
+	return h.Connections.ReportProbe(ctx, user, device, key, result)
 }
 func (h *PlaybackHandler) AdminPlaybackConnections(ctx context.Context, user int, device string) ([]connectionstore.AdminConnection, error) {
 	return h.Connections.List(ctx, user, device)

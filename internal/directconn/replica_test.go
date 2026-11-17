@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net"
 	"strings"
@@ -389,6 +390,138 @@ func TestReplicaGateFailsClosedWhenRedisIsConfiguredButUnusable(t *testing.T) {
 					t.Fatalf("starts=%d feature=%+v, want 0 and off/replica_census_unavailable", starts.Load(), got)
 				}
 			})
+		})
+	}
+}
+
+// markerStore is an in-memory stand-in for the Redis keys that the presence
+// marker and the engine lease touch. It models the presence script's members of
+// the replica set as keys with the silo:api-replica: prefix.
+type markerStore struct {
+	mu   sync.Mutex
+	keys map[string]bool
+}
+
+func (s *markerStore) hook() leaseCommandHook {
+	return leaseCommandHook{process: func(cmd redis.Cmder) error {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		switch cmd := cmd.(type) {
+		case *redis.StatusCmd:
+			s.keys[cmd.Args()[1].(string)] = true
+		case *redis.IntCmd:
+			if args := cmd.Args(); fmt.Sprint(args[0]) == "zrem" && fmt.Sprint(args[1]) == "silo:api-replicas" {
+				delete(s.keys, "silo:api-replica:"+fmt.Sprint(args[2]))
+				return nil
+			}
+			delete(s.keys, cmd.Args()[1].(string))
+		case *redis.ScanCmd:
+			var found []string
+			for key := range s.keys {
+				if strings.HasPrefix(key, "silo:api-replica:") {
+					found = append(found, key)
+				}
+			}
+			cmd.SetVal(found, 0)
+		case *redis.BoolCmd:
+			cmd.SetVal(true)
+		case *redis.Cmd:
+			// The presence script: KEYS[1] is the set, ARGV is id, ttl and op.
+			if args := cmd.Args(); len(args) == 7 && fmt.Sprint(args[3]) == "silo:api-replicas" {
+				member := "silo:api-replica:" + fmt.Sprint(args[4])
+				if op := fmt.Sprint(args[6]); op == "touch" || (op == "count" && !s.keys[member]) {
+					s.keys[member] = true
+				}
+				count := 0
+				for key := range s.keys {
+					if strings.HasPrefix(key, "silo:api-replica:") {
+						count++
+					}
+				}
+				cmd.SetVal(int64(count))
+				return nil
+			}
+			cmd.SetVal(int64(1))
+		}
+		return nil
+	}}
+}
+
+func (s *markerStore) markers() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	n := 0
+	for key := range s.keys {
+		if strings.HasPrefix(key, "silo:api-replica:") {
+			n++
+		}
+	}
+	return n
+}
+
+// The census restores a marker that Redis lost while the process runs, and
+// writes none once the process has withdrawn its presence.
+func TestReplicaCensusRespectsWithdrawnPresence(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		store := &markerStore{keys: map[string]bool{}}
+		client := redis.NewClient(&redis.Options{})
+		t.Cleanup(func() { _ = client.Close() })
+		client.AddHook(store.hook())
+		presence := cache.NewAPIReplicaPresence(client, "api")
+		registerCtx, withdraw := context.WithCancel(t.Context())
+		if err := presence.Register(registerCtx); err != nil {
+			t.Fatal(err)
+		}
+		monitor := newReplicaMonitor(presence, &redisEngineLease{client: client, id: presence.ID()}, slog.New(slog.DiscardHandler))
+
+		store.mu.Lock()
+		clear(store.keys)
+		store.mu.Unlock()
+		monitor.update(t.Context())
+		if got := store.markers(); got != 1 {
+			t.Fatalf("markers after the census found Redis empty = %d, want 1", got)
+		}
+
+		withdraw()
+		synctest.Wait()
+		if got := store.markers(); got != 0 {
+			t.Fatalf("markers after withdrawal = %d, want 0", got)
+		}
+		monitor.update(t.Context())
+		if got := store.markers(); got != 0 {
+			t.Fatalf("markers after a census that ran past withdrawal = %d, want 0", got)
+		}
+	})
+}
+
+// The capability reports the API host available only while the engine runs and
+// the replica gate admits new connections. A holder that sees a second replica
+// keeps its engine for established sessions and reports the host unavailable.
+func TestCapabilityHostFollowsReplicaGate(t *testing.T) {
+	for _, tc := range []struct {
+		name          string
+		replicas      int
+		wantAvailable bool
+	}{
+		{"one replica holding the lease", 1, true},
+		{"a second replica joined the holder", 2, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := &Service{
+				cfg:       Config{Settings: &memorySettings{values: map[string]string{"direct_connections.enabled": "true"}}, SecretKey: bytes.Repeat([]byte{0x41}, 32)},
+				lifecycle: &engineState{feature: Feature{State: stateOn}, values: settings{enabled: true}, ready: true},
+				replica:   &replicaMonitor{lease: &redisEngineLease{}, count: tc.replicas, held: true, deadline: time.Now().Add(time.Minute)},
+			}
+			if gate := s.ReplicaGate(); !gate.EngineMayRun {
+				t.Fatalf("fixture gate = %+v, want an engine holder", gate)
+			}
+			host, err := s.CapabilityHost(t.Context())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if host.Available != tc.wantAvailable {
+				t.Fatalf("capability host available = %t, want %t (gate reason %q)", host.Available, tc.wantAvailable, s.ReplicaGate().Reason)
+			}
 		})
 	}
 }

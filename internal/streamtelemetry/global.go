@@ -103,6 +103,8 @@ type GlobalSessionView struct {
 	DeviceIDsOverflowed         bool
 	ClientVariants              []ClientVariant
 	ClientVariantsOverflowed    bool
+	Transports                  []Transport
+	TransportsOverflowed        bool
 	UserAgents                  []string
 	UserAgentsOverflowed        bool
 	MediaFileIDs                []int
@@ -367,6 +369,7 @@ func mergeSession(id string, contributions []sessionContribution, params ViewPar
 	viewerIPs, deviceIDs, userAgents, playMethods := map[string]struct{}{}, map[string]struct{}{}, map[string]struct{}{}, map[string]struct{}{}
 	mediaFileIDs, tokenTimes := map[int]struct{}{}, map[int64]struct{}{}
 	clients := map[ClientVariant]struct{}{}
+	transports := map[Transport]struct{}{}
 	routes := map[string]RouteActivityView{}
 	subjectValues, profileValues, mediaValues := map[string][]PublisherRef{}, map[string][]PublisherRef{}, map[string][]PublisherRef{}
 	winningRank := 0
@@ -479,6 +482,9 @@ func mergeSession(id string, contributions []sessionContribution, params ViewPar
 		for _, value := range session.ClientVariants {
 			clients[value] = struct{}{}
 		}
+		for _, value := range session.Transports {
+			transports[value] = struct{}{}
+		}
 		for _, value := range session.MediaFileIDs {
 			mediaFileIDs[value] = struct{}{}
 		}
@@ -504,6 +510,7 @@ func mergeSession(id string, contributions []sessionContribution, params ViewPar
 		result.ViewerIPsOverflowed = result.ViewerIPsOverflowed || session.ViewerIPsOverflowed
 		result.DeviceIDsOverflowed = result.DeviceIDsOverflowed || session.DeviceIDsOverflowed
 		result.ClientVariantsOverflowed = result.ClientVariantsOverflowed || session.ClientVariantsOverflowed
+		result.TransportsOverflowed = result.TransportsOverflowed || session.TransportsOverflowed
 		result.UserAgentsOverflowed = result.UserAgentsOverflowed || session.UserAgentsOverflowed
 		result.MediaFileIDsOverflowed = result.MediaFileIDsOverflowed || session.MediaFileIDsOverflowed
 		result.PlayMethodsOverflowed = result.PlayMethodsOverflowed || session.PlayMethodsOverflowed
@@ -528,6 +535,7 @@ func mergeSession(id string, contributions []sessionContribution, params ViewPar
 	result.PlayMethods, result.PlayMethodsOverflowed = cappedStrings(playMethods, params.MaxPlayMethodsPerSession, result.PlayMethodsOverflowed)
 	result.MediaFileIDs, result.MediaFileIDsOverflowed = cappedInts(mediaFileIDs, params.MaxMediaFileIDsPerSession, result.MediaFileIDsOverflowed)
 	result.ClientVariants, result.ClientVariantsOverflowed = cappedClients(clients, params.MaxClientVariantsPerSession, result.ClientVariantsOverflowed)
+	result.Transports, result.TransportsOverflowed = cappedTransports(transports, params.MaxClientVariantsPerSession, result.TransportsOverflowed)
 	result.TokenIssuedAts, result.TokenIssuedAtsOverflowed = cappedTimes(tokenTimes, params.MaxTokenIssuedAtPerSession, result.TokenIssuedAtsOverflowed)
 	for _, route := range routes {
 		result.Routes = append(result.Routes, route)
@@ -630,6 +638,18 @@ func cappedClients(values map[ClientVariant]struct{}, maximum int, overflow bool
 		out = append(out, value)
 	}
 	sort.Slice(out, func(i, j int) bool { return clientVariantKey(out[i]) < clientVariantKey(out[j]) })
+	if maximum > 0 && len(out) > maximum {
+		out = out[:maximum]
+		overflow = true
+	}
+	return out, overflow
+}
+func cappedTransports(values map[Transport]struct{}, maximum int, overflow bool) ([]Transport, bool) {
+	out := make([]Transport, 0, len(values))
+	for value := range values {
+		out = append(out, value)
+	}
+	sort.Slice(out, func(i, j int) bool { return transportKey(out[i]) < transportKey(out[j]) })
 	if maximum > 0 && len(out) > maximum {
 		out = out[:maximum]
 		overflow = true

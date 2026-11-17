@@ -30,6 +30,10 @@ type DeviceHandler struct {
 	// Connections, when set, deletes a device's playback connection rows
 	// with its last registration. Nil (as in tests) leaves them to retention.
 	Connections *connectionstore.Store
+
+	// DirectRevoker, when set, withdraws the direct-connection enrollment of a
+	// device the profile removed. Nil (as in tests) leaves it to lapse.
+	DirectRevoker DirectRevoker
 }
 
 func NewDeviceHandler(provider userstore.UserStoreProvider) *DeviceHandler {

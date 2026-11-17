@@ -1188,6 +1188,9 @@
 ./internal/api/handlers TestLearnedLimitMarksOnlyAStartItLoweredDB
 ./internal/api/handlers TestLearnedLimitMarksOnlyAReplanItLoweredDB
 ./internal/api/handlers TestConnectionReadingsDB
+./internal/api/handlers TestDirectStartPassesUseMediaHostKeyDB
+./internal/api/handlers TestProbeReceiptRecordsUnderReceiptKeyDB
+./internal/api/handlers TestPairedProbeOnOneAccount
 ./internal/playback/planstore TestSummaryResolvesReplacedPlanDelivery
 ./internal/playback/planstore TestAttemptDesiredTracksRoundTrip
 ./internal/playback/planstore TestProgressCommitsLifecycleStateDB
@@ -1655,3 +1658,11 @@
 ./internal/apiv2 TestDemoVisitorOnALimitedSessionDB
 ./internal/apiv2 TestLimitedSessionPagesByIDDB
 ./internal/apiv2 TestDemoVisitorSessionListDB
+# Signing out, or ending a View as user, ends the direct-connection enrollment of the session's device.
+./internal/apiv2 TestDirectRevocationSignOutDB
+./internal/apiv2 TestDirectRevocationEndImpersonationDB
+./internal/apiv2 TestDirectRevocationPasswordChangeKeepsCallerDB
+
+# The first enrollment of a node key for a device records one audit row; a renewal
+# records none; a failed audit write withdraws the new entry.
+./internal/apiv2 TestDirectConnectionEnrollmentAuditDB

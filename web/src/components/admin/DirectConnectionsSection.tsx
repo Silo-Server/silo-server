@@ -5,8 +5,18 @@ import type { components } from "@/api/v2/schema";
 import { SaveBar } from "@/components/SaveBar";
 import { AdvancedSection } from "@/components/settings/AdvancedSection";
 import { Button } from "@/components/ui/button";
+import { formatRelative } from "@/components/admin/deviceOverrides";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import {
+  useAdminDirectConnectionPeers,
   useAdminDirectConnectionsStatus,
   useRefreshDirectConnections,
   type DirectConnectionsHostStatus,
@@ -98,6 +108,7 @@ const REASON_LABELS = {
   udp_port_invalid: "web.admin.settings.network.direct.reason.udp_port_invalid",
   udp_port_bind_failed: "web.admin.settings.network.direct.reason.udp_port_bind_failed",
   engine_start_failed: "web.admin.settings.network.direct.reason.engine_start_failed",
+  state_store_unavailable: "web.admin.settings.network.direct.reason.state_store_unavailable",
 } satisfies Record<NonNullable<Feature["reason"]>, MessageKey> & Record<string, MessageKey>;
 
 const PORT_MAPPING_LABELS: Record<string, string> = {
@@ -501,20 +512,79 @@ function Diagnostics() {
   );
 }
 
-/** Readiness controls shown after an administrator enables the hidden setting through the API. */
+function ConnectedDevices() {
+  const t = useT();
+  const peers = useAdminDirectConnectionPeers();
+
+  return (
+    <div className="space-y-2 py-4">
+      <h4 className="font-medium">{t("web.admin.settings.network.direct.connected.title")}</h4>
+      {peers.isLoading ? (
+        <Skeleton className="h-12 w-full" aria-busy="true" />
+      ) : peers.isError ? (
+        <p className="text-destructive text-sm" role="alert">
+          {peers.error.message}
+        </p>
+      ) : !peers.data?.items.length ? (
+        <p className="text-muted-foreground text-sm">
+          {t("web.admin.settings.network.direct.connected.empty")}
+        </p>
+      ) : (
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>{t("web.admin.settings.network.direct.connected.device")}</TableHead>
+              <TableHead>{t("web.admin.settings.network.direct.connected.account")}</TableHead>
+              <TableHead>{t("web.admin.settings.network.direct.connected.peerEndpoint")}</TableHead>
+              <TableHead>
+                {t("web.admin.settings.network.direct.connected.connectedSince")}
+              </TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {peers.data.items.map((peer) => (
+              <TableRow key={`${peer.user_id}/${peer.device_id}`}>
+                <TableCell className="max-w-48 truncate">
+                  {peer.device_name || peer.device_id}
+                </TableCell>
+                <TableCell>{peer.username || peer.user_id}</TableCell>
+                <TableCell className="font-mono text-xs whitespace-nowrap">
+                  {peer.peer_endpoint}
+                  <span className="text-muted-foreground ms-1">
+                    {t("web.admin.settings.network.direct.connected.toPort", {
+                      port: peer.local_port,
+                    })}
+                  </span>
+                </TableCell>
+                <TableCell className="whitespace-nowrap">
+                  {formatRelative(peer.connected_at)}
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      )}
+    </div>
+  );
+}
+
+/** The direct-connections toggle, and its readiness and connected devices once the setting is on. */
 export function DirectConnectionsSection() {
   const t = useT();
   const form = useSettingsForm({ keys: KEYS });
-
-  // Unsaved edits keep the controls and SaveBar reachable, so an administrator can still
-  // save or discard a draft after another administrator turns the feature off.
-  if (form.getPersistedValue(ENABLED) !== "true" && form.dirtyCount === 0) return null;
+  // Readiness and connected devices follow the saved value. A staged Advanced edit keeps
+  // Advanced and the SaveBar reachable after the feature turns off, so an administrator can
+  // still save or discard it.
+  const enabled = form.getPersistedValue(ENABLED) === "true";
+  const advancedDirty = ADVANCED_KEYS.some((key) => form.isDirty(key));
 
   return (
     <>
       <FieldGroup
         label={t("web.admin.settings.network.direct.title")}
-        description={t("web.admin.settings.network.direct.description")}
+        description={t("web.admin.settings.network.direct.udpDescription", {
+          variable: "SILO_NET_DIRECT_UDP_PORT",
+        })}
         dirty={form.dirtyCount > 0}
       >
         <SettingField
@@ -525,30 +595,33 @@ export function DirectConnectionsSection() {
           dirty={form.isDirty(ENABLED)}
           disabled={form.isSaving}
         />
-        <Diagnostics />
-        <AdvancedSection
-          id="network-access.direct-connections"
-          count={ADVANCED_KEYS.length}
-          forceOpen={ADVANCED_KEYS.some((key) => form.isDirty(key))}
-        >
-          <SettingField
-            label={t("web.admin.settings.network.direct.portMapping.label")}
-            type="toggle"
-            description={t("web.admin.settings.network.direct.portMapping.description")}
-            value={form.getValue(PORT_MAPPING)}
-            onChange={(value) => form.setValue(PORT_MAPPING, value)}
-            dirty={form.isDirty(PORT_MAPPING)}
-            disabled={form.isSaving}
-          />
-          <SettingField
-            label={t("web.admin.settings.network.direct.stunServers.label")}
-            description={t("web.admin.settings.network.direct.stunServers.description")}
-            value={form.getValue(STUN_SERVERS)}
-            onChange={(value) => form.setValue(STUN_SERVERS, value)}
-            dirty={form.isDirty(STUN_SERVERS)}
-            disabled={form.isSaving}
-          />
-        </AdvancedSection>
+        {enabled ? <Diagnostics /> : null}
+        {enabled ? <ConnectedDevices /> : null}
+        {enabled || advancedDirty ? (
+          <AdvancedSection
+            id="network-access.direct-connections"
+            count={ADVANCED_KEYS.length}
+            forceOpen={advancedDirty}
+          >
+            <SettingField
+              label={t("web.admin.settings.network.direct.portMapping.label")}
+              type="toggle"
+              description={t("web.admin.settings.network.direct.portMapping.description")}
+              value={form.getValue(PORT_MAPPING)}
+              onChange={(value) => form.setValue(PORT_MAPPING, value)}
+              dirty={form.isDirty(PORT_MAPPING)}
+              disabled={form.isSaving}
+            />
+            <SettingField
+              label={t("web.admin.settings.network.direct.stunServers.label")}
+              description={t("web.admin.settings.network.direct.stunServers.description")}
+              value={form.getValue(STUN_SERVERS)}
+              onChange={(value) => form.setValue(STUN_SERVERS, value)}
+              dirty={form.isDirty(STUN_SERVERS)}
+              disabled={form.isSaving}
+            />
+          </AdvancedSection>
+        ) : null}
       </FieldGroup>
       <SaveBar
         dirtyCount={form.dirtyCount}

@@ -1,6 +1,8 @@
 package proxy
 
 import (
+	"fmt"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"time"
@@ -51,8 +53,37 @@ func (s *Server) handleBandwidthProbe(w http.ResponseWriter, r *http.Request) {
 		s.probeLimiter.Release(claims.UserID, size-writer.BytesWritten(), window, time.Now())
 	}()
 	streamtelemetry.Attach(r.Context(), streamtelemetry.Attachment{Subject: streamtelemetry.UserSubject(claims.UserID), StartedAtSource: streamtelemetry.StartedAtSourceFirstSeen, TokenIssuedAtSource: streamtelemetry.TokenIssuedAtSourceNone})
+	if receipt := s.probeReceipt(r, claims); receipt != "" {
+		w.Header().Set(streamtoken.ConnectionReceiptHeader, receipt)
+	}
 	w.Header().Set("Content-Type", "application/octet-stream")
 	w.Header().Set("Content-Length", strconv.Itoa(size))
 	w.Header().Set("Cache-Control", "no-store")
 	_ = bandwidthprobe.Write(writer, size)
+}
+
+// connectionReceiptLifetime is how long a receipt stays valid.
+const connectionReceiptLifetime = 2 * time.Minute
+
+// probeReceipt returns the connection receipt for a probe whose token names a
+// device: always the regular class, because a proxy serves no direct path. It
+// returns "" for a token without a device, and when this proxy cannot name
+// itself or sign, so no receipt is sent and the client's result is refused.
+func (s *Server) probeReceipt(r *http.Request, claims *streamtoken.Claims) string {
+	if claims.ProbeDevice == "" {
+		return ""
+	}
+	nodeID, known := s.currentNodeRowID()
+	if !known || nodeID <= 0 {
+		return ""
+	}
+	receipt, err := streamtoken.Sign(streamtoken.Claims{
+		PlayMethod: streamtoken.PlayMethodConnectionReceipt, UserID: claims.UserID, DeviceID: claims.ProbeDevice,
+		Host: fmt.Sprintf("node:%d", nodeID), ConnectionClass: streamtoken.ConnectionClassRegular,
+	}, s.watcher.Config().Auth.JWTSecret, connectionReceiptLifetime)
+	if err != nil {
+		slog.WarnContext(r.Context(), "bandwidth probe receipt not signed", "component", "proxy", "error", err)
+		return ""
+	}
+	return receipt
 }

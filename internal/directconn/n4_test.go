@@ -4,18 +4,23 @@ import (
 	"context"
 	"crypto/rand"
 	"errors"
+	"io"
 	"net/http"
 	"net/netip"
+	"os"
+	"path/filepath"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/darthShadow/shunpike/coordination/protocol"
+	coordserver "github.com/darthShadow/shunpike/coordination/server"
 	"github.com/darthShadow/shunpike/engine"
 	"github.com/darthShadow/shunpike/engine/n4"
 
 	"github.com/Silo-Server/silo-server/internal/lantls"
 	"github.com/Silo-Server/silo-server/internal/netaccess"
+	"github.com/Silo-Server/silo-server/internal/playback"
 )
 
 func newN4TestEngine(t *testing.T) *engine.Engine {
@@ -53,8 +58,10 @@ func n4TestTransport(t *testing.T, client, server *engine.Engine, pin string) *n
 	return tr
 }
 
-func TestN4RequestReachesHandler(t *testing.T) {
-	server, client := newN4TestEngine(t), newN4TestEngine(t)
+// pairN4TestEngines makes the two engines peers and waits until both hold a
+// direct endpoint for the other. It returns a context that ends after 5 s.
+func pairN4TestEngines(t *testing.T, server, client *engine.Engine) context.Context {
+	t.Helper()
 	if err := server.SetPeers([]engine.Peer{n4TestPeer(client)}); err != nil {
 		t.Fatal(err)
 	}
@@ -62,7 +69,7 @@ func TestN4RequestReachesHandler(t *testing.T) {
 		t.Fatal(err)
 	}
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
-	defer cancel()
+	t.Cleanup(cancel)
 	tick := time.NewTicker(time.Millisecond)
 	defer tick.Stop()
 	for !server.Path(client.PublicKey()).Endpoint.IsValid() || !client.Path(server.PublicKey()).Endpoint.IsValid() {
@@ -72,6 +79,12 @@ func TestN4RequestReachesHandler(t *testing.T) {
 		case <-tick.C:
 		}
 	}
+	return ctx
+}
+
+func TestN4RequestReachesHandler(t *testing.T) {
+	server, client := newN4TestEngine(t), newN4TestEngine(t)
+	ctx := pairN4TestEngines(t, server, client)
 	identity, err := lantls.New([]byte("01234567890123456789012345678901"))
 	if err != nil {
 		t.Fatal(err)
@@ -92,7 +105,10 @@ func TestN4RequestReachesHandler(t *testing.T) {
 		}
 		w.WriteHeader(http.StatusNoContent)
 	})
-	srv := NewHTTP3Server(server, identity.HTTP3Config(), n4.DefaultServerPolicy(), "api-test", handler)
+	lookup := func(_ context.Context, k protocol.NodeKey) (coordserver.PeerEntry, bool) {
+		return coordserver.PeerEntry{NodeKey: k, Ref: deviceRef(1, "client"), Policy: []byte(`{"connection_path":"automatic"}`)}, k == client.PublicKey()
+	}
+	srv := newHTTP3Server(server, identity.HTTP3Config(), n4.DefaultServerPolicy(), lookup, nil, handler)
 	done := make(chan error, 1)
 	go func() { done <- srv.Serve(server.PacketConn()) }()
 	t.Cleanup(func() {
@@ -149,5 +165,66 @@ func assertN4NonPeerRefused(t *testing.T, server *engine.Engine, pin string, cal
 	}
 	if calls.Load() != 1 {
 		t.Errorf("non-peer reached handler: calls=%d, want 1", calls.Load())
+	}
+}
+
+// The http3 client refuses a response that carries a connection-specific
+// field, so a remux handler must send none over N4.
+func TestN4RemuxResponseIsValidHTTP3(t *testing.T) {
+	dir := t.TempDir()
+	source := filepath.Join(dir, "movie.mkv")
+	if err := os.WriteFile(source, []byte("not really a movie"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	ffmpeg := filepath.Join(dir, "ffmpeg")
+	if err := os.WriteFile(ffmpeg, []byte("#!/bin/sh\nprintf remuxed\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	opts := playback.RemuxServeOptions{FFmpegPath: ffmpeg, ContentType: playback.RemuxContentType(true), AudioOnly: true}
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := playback.ServeRemuxWithOptions(w, r, source, "mp4", 0, false, 0, 0, opts); err != nil {
+			t.Errorf("serve remux: %v", err)
+		}
+	})
+
+	server, client := newN4TestEngine(t), newN4TestEngine(t)
+	ctx := pairN4TestEngines(t, server, client)
+	identity, err := lantls.New([]byte("01234567890123456789012345678901"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	lookup := func(_ context.Context, k protocol.NodeKey) (coordserver.PeerEntry, bool) {
+		return coordserver.PeerEntry{NodeKey: k, Ref: deviceRef(1, "client"), Policy: []byte(`{"connection_path":"automatic"}`)}, k == client.PublicKey()
+	}
+	srv := newHTTP3Server(server, identity.HTTP3Config(), n4.DefaultServerPolicy(), lookup, nil, handler)
+	done := make(chan error, 1)
+	go func() { done <- srv.Serve(server.PacketConn()) }()
+	t.Cleanup(func() {
+		if err := srv.Close(); err != nil {
+			t.Error(err)
+		}
+		if err := <-done; err != nil && !errors.Is(err, http.ErrServerClosed) {
+			t.Error(err)
+		}
+	})
+
+	tr := n4TestTransport(t, client, server, identity.Pin())
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://peer.invalid/stream", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err := tr.RoundTrip(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, err := io.ReadAll(res.Body)
+	if closeErr := res.Body.Close(); closeErr != nil {
+		t.Error(closeErr)
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.StatusCode != http.StatusOK || string(body) != "remuxed" {
+		t.Fatalf("status=%d body=%q, want 200 remuxed", res.StatusCode, body)
 	}
 }

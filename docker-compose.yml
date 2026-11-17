@@ -56,6 +56,7 @@ services:
       PORT: "8080"
       JF_PORT: "8096"
       ABS_PORT: "13378"
+      SILO_NET_DIRECT_UDP_PORT: ${SILO_NET_DIRECT_UDP_PORT:-8094}
       # The account that runs Silo, owns /config/silo, and reads the media.
       PUID: ${PUID:-1000}
       PGID: ${PGID:-1000}
@@ -83,6 +84,9 @@ services:
       # trust. Transcode nodes need neither: they reach this server on PORT.
       # - "${NODE_ACCESS_HOST:?Set NODE_ACCESS_HOST in .env}:${POSTGRES_PORT:-5432}:5432"
       # - "${NODE_ACCESS_HOST:?Set NODE_ACCESS_HOST in .env}:${REDIS_PORT:-6379}:6379"
+      # Direct connections. The engine advertises the UDP port it binds, so the
+      # host and container ports must be equal; one variable sets both.
+      - "${SILO_NET_DIRECT_UDP_PORT:-8094}:${SILO_NET_DIRECT_UDP_PORT:-8094}/udp"
     volumes:
       # Silo's state, the PostgreSQL cluster, and the Redis and Meilisearch data.
       - ${SILO_DATA_ROOT:-/opt/silo}/config:/config

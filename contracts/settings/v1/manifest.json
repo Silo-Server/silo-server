@@ -1,6 +1,6 @@
 {
   "api_version": 1,
-  "revision": 30,
+  "revision": 31,
   "option_sets": {
     "playback_audio_languages": {
       "type": "language_tag",
@@ -1682,6 +1682,28 @@
       "description": "Who can play and pause in Watch Parties you host. Changing it in a party saves it for your next one.",
       "recommended_control": "select",
       "notes": "The server reads it when the profile creates a Watch Party room and starts the room with this guest_control_policy instead of always host_only. The server also writes it at profile scope whenever the host changes a room's policy (updateWatchTogetherRoomPolicy), so the choice made in any client's party options carries to the next party on every client without each client storing or sending it. Profile scope because each household member hosts with their own choice. The enum members are the room's guest_control_policy values."
+    },
+    {
+      "key": "playback.connection_path",
+      "introduced_in": 31,
+      "persistence": "client_local",
+      "allowed_scopes": ["client_local"],
+      "resolution_order": ["client_local", "default"],
+      "value_schema": {
+        "type": "enum",
+        "ordered": false,
+        "values": [
+          { "value": "automatic", "label": "Automatic" },
+          { "value": "direct_only", "label": "Direct only" }
+        ]
+      },
+      "default_value": "automatic",
+      "platforms": ["ios", "macos", "android", "android_tv"],
+      "category": "playback",
+      "label": "Connection path",
+      "description": "Direct only still uses the local network connection when one is available.",
+      "recommended_control": "select",
+      "notes": "Contract-known local: the device chooses how its media reaches it, so the value does not roam. A client sends it as connection_path when it enrolls the device for direct connections (POST /api/v2/direct-connections/enrollment). Automatic lets the server fall back to the regular connection when no direct path is live; direct_only never plays over the regular connection except on a local-network route the client already holds."
     }
   ]
 }

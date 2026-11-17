@@ -2257,7 +2257,7 @@ func TestIdentityStreamURLV3VersionsOnlyBoostedRemuxRoutes(t *testing.T) {
 		PlayMethod: playback.PlayRemux, TranscodeAudio: true,
 		TargetAudioCodec: "aac", SourceAudioChannels: 6, TargetAudioChannels: 2,
 	}
-	boostedURL, servedByProxy := handler.identityStreamURLV3(boosted, file, proxy, netaccess.Path{})
+	boostedURL, servedByProxy := handler.identityStreamURLV3(boosted, file, proxy, netaccess.Path{}, nodepool.DirectMedia{})
 	boostedPrefix := "http://proxy-1/stream/remux/audio-v2/"
 	if !servedByProxy || !strings.HasPrefix(boostedURL, boostedPrefix) {
 		t.Fatalf("boosted remux URL = %q (proxy %v), want the audio-v2 route", boostedURL, servedByProxy)
@@ -2285,7 +2285,7 @@ func TestIdentityStreamURLV3VersionsOnlyBoostedRemuxRoutes(t *testing.T) {
 			ordinary := *boosted
 			ordinary.ID = "ordinary"
 			test.mutate(&ordinary)
-			ordinaryURL, ordinaryByProxy := handler.identityStreamURLV3(&ordinary, file, proxy, netaccess.Path{})
+			ordinaryURL, ordinaryByProxy := handler.identityStreamURLV3(&ordinary, file, proxy, netaccess.Path{}, nodepool.DirectMedia{})
 			legacyPrefix := "http://proxy-1/stream/remux/"
 			if !ordinaryByProxy || !strings.HasPrefix(ordinaryURL, legacyPrefix) || strings.HasPrefix(ordinaryURL, boostedPrefix) {
 				t.Fatalf("ordinary remux URL = %q (proxy %v), want the legacy route", ordinaryURL, ordinaryByProxy)

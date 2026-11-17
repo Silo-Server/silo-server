@@ -1588,6 +1588,7 @@ func main() {
 	// startup completes.
 	var ipResolver *clientip.Resolver
 	var directConn *directconn.Service
+	var directCoordination *directconn.Coordination
 	var rootHandler http.Handler
 	// Assigned below when recommendations start; nil (a no-op) otherwise.
 	var settingsRecWorker *recommendations.Worker
@@ -3294,10 +3295,21 @@ func main() {
 			// HandlerReady, after rootHandler exists.
 			AwaitHandler: true,
 			ServerFactory: func(e *engine.Engine, policy n4.Policy) *http3.Server {
-				return directconn.NewHTTP3Server(e, lanTLS.HTTP3Config(), policy, nodeID, rootHandler)
+				return directConn.NewHTTP3Server(e, lanTLS.HTTP3Config(), policy, rootHandler)
 			},
 		})
 		deps.DirectConnections = directConn
+		deps.DirectState = directConn
+		directCoordination = newDirectCoordination(appCtx, deps.DB, directconn.CoordinationConfig{
+			Store: directconn.NewCoordinationStore(apiRedisClient, apiReplicaPresence.ID()), AuthSecret: cfg.Auth.JWTSecret, Logger: slog.Default(),
+			Host: directConn, TLSPin: lanTLS.Pin(), ACKDecimation: tuningCfg.DirectACKDecimation, ReceiveWindowMiB: tuningCfg.DirectReceiveWindowMiB,
+		})
+		if directCoordination != nil {
+			deps.DirectCoordination = directCoordination
+			deps.DirectRevoker = directCoordination
+			// Attach before the first settings read starts the engine.
+			directConn.SetCoordination(directCoordination)
+		}
 		// Subscribe before the initial read: Subscribe returns once Redis
 		// confirms it, so a change another replica commits after that point
 		// reaches this service, and one committed before it is in the read.
@@ -4122,12 +4134,23 @@ func main() {
 	}); err != nil {
 		slog.Warn("subscribe session revocation failed", "error", err)
 	}
-	deps.OnUserSessionsRevoked = func(ctx context.Context, userID int) {
-		dropCompatSessions(userID)
+	announceSessionsRevoked := func(ctx context.Context, userID int) {
 		if err := eventBus.Publish(ctx, cache.ChannelAdmin, cache.Event{Type: cache.EventUserSessionsRevoked, Payload: strconv.Itoa(userID)}); err != nil {
 			slog.WarnContext(ctx, "publish session revocation failed", "user_id", userID, "error", err)
 		}
 	}
+	deps.OnUserSessionsRevoked = accountSessionsRevoked(dropCompatSessions, directCoordination, announceSessionsRevoked)
+	// A password change that signs out the other sessions keeps the enrollment
+	// that the session which made it issued for its own device.
+	keptSessions := auth.NewSessionRepository(deps.DB)
+	deps.OnUserOtherSessionsRevoked = accountOtherSessionsRevoked(dropCompatSessions, directCoordination, announceSessionsRevoked,
+		func(ctx context.Context, userID int, sessionID string) (string, error) {
+			session, err := keptSessions.LiveSession(ctx, userID, sessionID)
+			if err != nil {
+				return "", err
+			}
+			return session.DeviceID, nil
+		})
 	// Jellyfin- and Audiobookshelf-compatible downloads go through the
 	// router's download service, so they meet the same policy and share its
 	// bandwidth limiters. Without a service both refuse them.
@@ -4643,6 +4666,11 @@ func main() {
 	waitForAPIStop(sigCh, restartReqCh, errCh, apiShutdownDelay(os.Getenv(apiShutdownDelayEnv)), func() {
 		shuttingDown.Store(true)
 		stopLANDiscovery()
+		// Enrollment answers 503 and the capability marks the host draining; every
+		// other direct request serves as normal until the HTTP servers stop.
+		if directConn != nil {
+			directConn.BeginDrain()
+		}
 	})
 	appCancel()
 
@@ -5742,6 +5770,63 @@ type audiobooksSettingsAdapter struct {
 
 func (a *audiobooksSettingsAdapter) GetString(ctx context.Context, key string) (string, error) {
 	return a.repo.Get(ctx, key)
+}
+
+// newDirectCoordination builds direct-connection enrollment from cfg. With a
+// database, enrollments write their audit rows to db. A build failure is logged
+// and returns nil: the server then runs without enrollment.
+func newDirectCoordination(ctx context.Context, db *pgxpool.Pool, cfg directconn.CoordinationConfig) *directconn.Coordination {
+	if db != nil {
+		cfg.Audit = directconn.NewEnrollmentAudit(db)
+	}
+	coordination, err := directconn.NewCoordination(cfg)
+	if err != nil {
+		slog.ErrorContext(ctx, "direct connections: enrollment unavailable", "component", "directconn", "error", err)
+		return nil
+	}
+	return coordination
+}
+
+// accountSessionsRevoked is the hook that runs after every login session of an
+// account ended. It drops the account's cached Jellyfin-compatible sessions,
+// withdraws every direct-connection entry the account holds (direct may be nil
+// when enrollment is unavailable), then announces the revocation to the other
+// replicas.
+func accountSessionsRevoked(dropCompat func(userID int), direct *directconn.Coordination, announce func(ctx context.Context, userID int)) func(ctx context.Context, userID int) {
+	return func(ctx context.Context, userID int) {
+		dropCompat(userID)
+		if direct != nil {
+			direct.RevokeAccount(ctx, userID)
+		}
+		announce(ctx, userID)
+	}
+}
+
+// accountOtherSessionsRevoked is the hook that runs after a password change
+// signed the account out of its other login sessions. It drops the same
+// compatible sessions and announces the same event as accountSessionsRevoked,
+// but withdraws every direct-connection entry except the one that the kept
+// session issued for the device it was opened from. keptDevice reads that device
+// ID; when it fails or returns "", the hook withdraws every entry, so a read
+// failure never leaves a signed-out device enrolled.
+func accountOtherSessionsRevoked(
+	dropCompat func(userID int),
+	direct *directconn.Coordination,
+	announce func(ctx context.Context, userID int),
+	keptDevice func(ctx context.Context, userID int, sessionID string) (string, error),
+) func(ctx context.Context, userID int, keptSessionID string) {
+	return func(ctx context.Context, userID int, keptSessionID string) {
+		dropCompat(userID)
+		if direct != nil {
+			device, err := keptDevice(ctx, userID, keptSessionID)
+			if err != nil {
+				slog.WarnContext(ctx, "direct connections: kept session device unreadable, withdrawing every entry", "component", "directconn", "user_id", userID, "error", err)
+				device = ""
+			}
+			direct.RevokeAccountExceptSession(ctx, userID, keptSessionID, device)
+		}
+		announce(ctx, userID)
+	}
 }
 
 // directConnectionListener keeps the netadmin constructor out of directconn.

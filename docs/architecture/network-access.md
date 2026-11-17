@@ -97,6 +97,14 @@ Downstream, `Path.Provider` selects the proxy origin a client is handed: a
 tailnet client cannot reach a LAN proxy origin, so a provider path returns
 that provider's connected origin on the proxy or falls back to API relay.
 
+A direct connection is a third kind of access path and never passes through a
+provider plugin. The direct wrapper records `Path.Direct`, leaves `Provider`
+empty, and sets the client address to the observed UDP endpoint. It first deletes
+the forwarding headers and both ingress headers, so a direct peer cannot claim a
+provider path or a peer address. `Path.IsDefault()` stays true for it, so provider
+origin selection does not change. See
+[Direct Connections](direct-connections.md#http3-request-path).
+
 A status push is accepted only from the process holding the installation's
 current ingress token. A push that was in flight when its process was
 stopped, crashed, or replaced lands after the revoke and is dropped, so a

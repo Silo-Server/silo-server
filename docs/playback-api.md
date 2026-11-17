@@ -609,8 +609,10 @@ limit and returns 204. It requires `X-Silo-Device-Id`; a reset without one is
 a `422` validation problem, since it would clear nothing.
 
 `POST /api/v2/playback/bandwidth-probe/results` (`connection_speed_v1`)
-accepts `{kbps, bytes, duration_ms, transport, lower_bound, manual}` and
-returns 204. Bounds are 100–1,000,000 kbps (those of
+accepts `{kbps, bytes, duration_ms, transport, lower_bound, manual,
+connection_receipt}` and returns 204. A device that holds a direct-connection
+enrollment must send `connection_receipt` (see
+[Media transport](#media-transport)). Bounds are 100–1,000,000 kbps (those of
 `bandwidth_estimate_kbps`), 1–1,000,000,000 bytes and 1–60,000 milliseconds;
 `transport` is `wifi`, `ethernet`, `cellular` or `other`; the optional
 `lower_bound` (default `false`) marks a result that proves only "at least
@@ -629,9 +631,48 @@ that is higher or once it is older than the reading lifetime. A manual probe
 result clears it.
 
 The admin device detail adds optional `connections`. Each entry has `id`, an
-opaque connection identifier, `connection`, nullable `probe` (with
+opaque connection identifier, `connection` (`local`, `remote`,
+`provider:<name>` or `direct`), nullable `probe` (with
 `lower_bound`), nullable `playback_sample`, nullable `learned_limit` and
 nullable `plan_summary: {plan_id, reported_at, diagnostics}`.
 `DELETE /api/v2/admin/devices/{user_id}/{device_id}/connections/{connection_id}/learned-limit`
 needs acting-admin authority and returns 204. Both resets clear only the
 learned limit and keep the probe and plan summary.
+
+## Media transport
+
+A client that holds a direct-connection enrollment names the path it wants for
+the media with `media_transport`: `regular` (also the meaning of a missing field)
+or `direct`. The field is optional on the `startPlayback` and `replanPlayback`
+bodies and a query parameter of `getPlaybackBandwidthProbe`. Any other value is
+`422`. A request without a device in `X-Silo-Device-Id`, a device without an
+enrollment, and a request while direct connections are off plan as `regular`. The
+[direct connections API](direct-connections-api.md#media-transport) states the
+client rules.
+
+- Every v2 `playback_plan` carries `media_transport`. It is `direct` only when
+  the request asked for `direct` and the API host serves the media over a live,
+  confirmed direct path. A media proxy never serves `direct`, so a plan whose
+  media a proxy serves says `regular`. A replan that reuses its session's
+  transport, and a seek re-anchor, keep the session's value.
+- The server learns a limit and a reading for each connection. A `direct` plan
+  uses the device's direct connection and a `regular` plan uses its regular
+  connection, so a slow direct path does not lower the limit of the regular one.
+  The admin connection list labels a direct connection `direct`. The
+  `GET /api/v2/playback/connection` read reports the regular connection the
+  request arrives on.
+- A device enrolled with `connection_path` `direct_only` gets no media proxy
+  origin from start, replan or the probe redirect: the API host serves its media.
+- The probe sends the header `Silo-Connection-Receipt` with the bytes when the
+  request names its device. The receipt names the account, the device, the host
+  and the connection class that carried the bytes, and lasts 2 minutes. A media
+  proxy sends a `regular` receipt for a probe token that names a device. For a
+  device that holds an enrollment, the redirect to a proxy needs a proxy that
+  advertises `connection_receipt_v1`; without one the answer is
+  `503 dependency_unavailable`.
+- A client that runs the paired test sends the probe once per
+  `media_transport` and returns each receipt as `connection_receipt` with the
+  result. While direct connections are on, an enrolled device that sends none
+  gets `422` at `body.connection_receipt` with code `missing`. A receipt that is not the probe
+  host's for this account and device gets code `invalid`. An expired receipt, and a
+  direct receipt of an earlier path, answer `204` and record nothing.

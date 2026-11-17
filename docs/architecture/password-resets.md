@@ -104,7 +104,9 @@ sessions held in memory, the same as for administrator account edits, on every
 replica: it announces the revocation on the admin event channel. A self-service
 password change that asks to sign out other sessions (`sign_out_other_sessions`)
 revokes the same set in its own transaction, except the session that asked
-(`RevokeOtherSignInsInTransaction`), and runs the same hook, so both stay in step.
+(`RevokeOtherSignInsInTransaction`), and runs a hook of the same shape that also
+receives the kept session, so both stay in step. That hook keeps the direct-connection
+enrollment of the kept session's device; see `docs/architecture/direct-connections.md`.
 
 **Issuing takes the account lock too.** Every sign-out everywhere locks the
 account row before it revokes. A credential it covers is issued under that lock,

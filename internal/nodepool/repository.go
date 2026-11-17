@@ -235,6 +235,40 @@ func ClientReachableVia(path netaccess.Path, base func(*Node) bool) func(*Node) 
 	}
 }
 
+// DirectMedia is one device's direct-transport state for a playback request.
+// The zero value is a device with no direct enrollment, which treats every
+// proxy as it always has.
+type DirectMedia struct {
+	// Requested is set when the request asked for media_transport=direct.
+	Requested bool
+	// DirectOnly is set when the device's connection path is direct_only. A
+	// proxy origin is a regular transport and no proxy offers a direct one, so
+	// such a device takes no proxy: the API host relays its media.
+	DirectOnly bool
+}
+
+// MediaURLFor is the base URL to hand a streaming client for this proxy's
+// media, given the client's access path and direct-transport state: the
+// ClientURLFor answer, or empty when the device takes no regular origin. Empty
+// has ClientURLFor's meaning: the caller falls back to an API-relative URL.
+func (n *Node) MediaURLFor(path netaccess.Path, direct DirectMedia) string {
+	if direct.DirectOnly {
+		return ""
+	}
+	return n.ClientURLFor(path)
+}
+
+// MediaReachableVia is ClientReachableVia narrowed by the device's
+// direct-transport state: a direct_only device reaches no proxy. Like
+// ClientReachableVia, the returned predicate runs under the planner lock and
+// does a map lookup at most.
+func MediaReachableVia(path netaccess.Path, direct DirectMedia, base func(*Node) bool) func(*Node) bool {
+	if direct.DirectOnly {
+		return func(*Node) bool { return false }
+	}
+	return ClientReachableVia(path, base)
+}
+
 // StoredCapabilities returns this node's last stored capability report, nil-safe
 // like the Effective* accessors so a caller whose lookup came up empty prices a
 // missing node and a missing report through one path.

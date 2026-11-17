@@ -159,6 +159,10 @@ type preparedTransportV3 struct {
 	routingEgress      noderouting.Egress
 	routingEgressID    int
 	routingEgressURL   string
+	// mediaTransport and pathGeneration attribute the committed route's
+	// connection readings; see attributeTransportV3.
+	mediaTransport     string
+	pathGeneration     uint64
 	commit             func() *transportErrorV3
 	rollback           func()
 	rollbackRequired   func() error
@@ -1708,7 +1712,7 @@ func (h *PlaybackHandler) resolveHLSRouteWithPolicyV3(
 	// path this is nil and every healthy proxy stays eligible. Filtering here
 	// rather than at the URL builder keeps the resolver's fallbacks (API
 	// egress, API relay to the transcode node) in charge of what happens next.
-	proxyEligible := excludeUnreachableRouteNodesV3(ctx, nodepool.ClientReachableVia(netaccess.PathFromContext(ctx), nil))
+	proxyEligible := excludeUnreachableRouteNodesV3(ctx, nodepool.MediaReachableVia(netaccess.PathFromContext(ctx), directMediaFromContext(ctx), nil))
 	decision, err := noderouting.Resolve(noderouting.AdaptSessionPlanner(h.NodePlanner), noderouting.ResolveRequest{
 		Request: noderouting.Request{
 			Workload: workload, Delivery: delivery, Policy: policy, ProxyAllowed: proxyAllowed,
@@ -1892,6 +1896,78 @@ func (h *PlaybackHandler) plannerInputWithSubtitlesV3(ctx context.Context, p pla
 		AttemptedKeys:        p.attemptedKeys,
 		AdditionalSubtitles:  additional,
 	}
+}
+
+// startPassV3 is one planning pass of a start under one connection key: the
+// request, file and audio track it planned, the plan, and the limit and
+// comparison inputs the later steps need.
+type startPassV3 struct {
+	req                 playback.StartRequestV3
+	file                *models.MediaFile
+	audioIndex          int
+	planning            planningV3
+	result              playback.PlannerResultV3
+	warnings            []playback.DegradationWarningV3
+	learnedLimit        *playback.BandwidthLimitV3
+	unlimitedReq        playback.StartRequestV3
+	unlimitedFile       *models.MediaFile
+	unlimitedAudioIndex int
+	// read is the key the pass read its connection reading and limit under.
+	read string
+	// storeErr marks a pass that could not read the connection observations.
+	storeErr    bool
+	escalateErr *transportErrorV3
+}
+
+// planStartPassV3 plans a start from the request as the client sent it, under
+// keys. It writes the request's own observations only when keys says so, and
+// leaves the caller's request, file and audio track untouched so another pass
+// can start from them again.
+func (h *PlaybackHandler) planStartPassV3(r *http.Request, keys keyPassV3, req playback.StartRequestV3, requestedFile, alternateBase, effectiveFile *models.MediaFile, audioIndex, preferredAudio int, serverAudio bool, settings playback.PlannerSettingsV3, settingsErr error) startPassV3 {
+	pass := startPassV3{read: keys.read}
+	if err := h.applyConnectionReading(r, &req, keys.read); err != nil {
+		pass.storeErr = true
+		return pass
+	}
+	// The start without the limit, planned only when the plan would carry the
+	// limit's label, to check that the limit lowered it. A stall's estimate
+	// goes with the limit; the connection's reading then stands in for it.
+	pass.unlimitedReq, pass.unlimitedFile, pass.unlimitedAudioIndex = withoutObservedEstimateV3(req), effectiveFile, audioIndex
+	record := keys.record
+	learnedLimit, limitErr := h.applyLearnedLimit(r, &req, keys.writes, keys.read, record, nil)
+	if limitErr != nil {
+		pass.storeErr = true
+		return pass
+	}
+	pass.learnedLimit = learnedLimit
+	bufferedBase := effectiveFile
+	effectiveFile, req, audioIndex = h.lowerBufferedVersion(r, req, effectiveFile, audioIndex, settings)
+	if serverAudio && settingsErr == nil && effectiveFile != bufferedBase {
+		// A track refined on the requested file means little on another
+		// version: refine the preference again on the one that plays.
+		audioIndex = h.playableStartAudioV3(r.Context(), req, requestedFile, effectiveFile, remapAudioIndexV3(requestedFile, effectiveFile, preferredAudio), settings)
+	}
+	lowerVersion := h.lowerVersionV3(r.Context(), req, alternateBase, settings, requestAccessFilter(r))
+	pass.planning = planningV3{plannerRequestedFile: requestedFile, settings: settings, lowerVersion: lowerVersion}
+	planned, fallbackWarnings := h.planStartV3(r, pass.planning, req, alternateBase, effectiveFile, audioIndex)
+	pass.req, pass.file, pass.audioIndex = planned.request, planned.file, planned.audioIndex
+	pass.warnings = fallbackWarnings
+	result := retryIncompleteToneMapPlanningV3(planned.result, planned.toneMapErr)
+	result = retryIncompletePlaybackSettingsV3(result, settingsErr)
+	// A refused progressive remux is escalated before the route is chosen, so
+	// the route that is chosen is the one that will actually run.
+	escalated, escalateErr := h.escalateRefusedProgressiveRemuxV3(r.Context(), headerAuthenticatedMediaV3(pass.req.ClientFeatures),
+		func() playback.PlannerInputV3 {
+			escalation := pass.planning
+			escalation.settings = h.plannerSettingsV3(r.Context())
+			return h.plannerInputV3(r.Context(), escalation, pass.req, pass.file, pass.audioIndex)
+		}, result)
+	pass.escalateErr = escalateErr
+	if escalateErr == nil {
+		result = escalated
+	}
+	pass.result = result
+	return pass
 }
 
 // planStartV3 plans a start of effectiveFile. When the planner refuses it for a
@@ -2117,6 +2193,9 @@ func (h *PlaybackHandler) startPlaybackApplicationV3(r *http.Request, body []byt
 	}
 	timings.mark("idempotency")
 	r = r.WithContext(withServerBitrateCapV3(r.Context(), requestBitrateCapV3(r.Context())))
+	// The device's direct state is read here, once, before any route is
+	// resolved: planning and route selection only read fields of it.
+	r = r.WithContext(h.withDirectRequestV3(r.Context(), userID, req.MediaTransport, true))
 	requestedFile, err := h.loadAuthorizedFile(r, req.FileID)
 	if err != nil {
 		return playback.DecisionResponseV3{}, playbackFileOperationError(err)
@@ -2203,34 +2282,29 @@ func (h *PlaybackHandler) startPlaybackApplicationV3(r *http.Request, body []byt
 	if effectiveFile.PresentationPartTotal > 1 && effectiveFile.PresentationPartIndex > 0 {
 		alternateBase = effectiveFile
 	}
-	if err := h.applyConnectionReading(r, &req); err != nil {
-		return playback.DecisionResponseV3{}, playbackStoreOperationError()
-	}
-	// The start without the limit, planned only when the plan would carry the
-	// limit's label, to check that the limit lowered it. A stall's estimate
-	// goes with the limit; the connection's reading then stands in for it.
-	unlimitedReq, unlimitedFile, unlimitedAudioIndex := withoutObservedEstimateV3(req), effectiveFile, audioIndex
-	learnedLimit, limitErr := h.applyLearnedLimit(r, &req, true, nil)
-	if limitErr != nil {
-		return playback.DecisionResponseV3{}, playbackStoreOperationError()
-	}
-	bufferedBase := effectiveFile
-	effectiveFile, req, audioIndex = h.lowerBufferedVersion(r, req, effectiveFile, audioIndex, settings)
-	if serverAudio && settingsErr == nil && effectiveFile != bufferedBase {
-		// A track refined on the requested file means little on another
-		// version: refine the preference again on the one that plays.
-		audioIndex = h.playableStartAudioV3(r.Context(), req, requestedFile, effectiveFile, remapAudioIndexV3(requestedFile, effectiveFile, preferredAudio), settings)
-	}
-	lowerVersion := h.lowerVersionV3(r.Context(), req, alternateBase, settings, requestAccessFilter(r))
+	// The start plans under the connection key of the host that will serve its
+	// media (see planUnderKeysV3). The request, file and audio track as they
+	// stand here are what every pass starts from.
+	baseReq, baseFile, baseAudioIndex := req, effectiveFile, audioIndex
 	// Every planning pass of this start shares one bound on reading indexes.
 	r = r.WithContext(withCueIndexReadsV3(r.Context()))
-	planning := planningV3{plannerRequestedFile: requestedFile, settings: settings, lowerVersion: lowerVersion}
-	planned, fallbackWarnings := h.planStartV3(r, planning, req, alternateBase, effectiveFile, audioIndex)
-	req, effectiveFile, audioIndex = planned.request, planned.file, planned.audioIndex
-	warnings = append(warnings, fallbackWarnings...)
+	pass, r := planUnderKeysV3(h, r, h.connectionKeyV3(r.Context(), mediaHostAPI),
+		func(keys keyPassV3) startPassV3 {
+			return h.planStartPassV3(r, keys, baseReq, requestedFile, alternateBase, baseFile, baseAudioIndex, preferredAudio, serverAudio, settings, settingsErr)
+		},
+		func(p startPassV3) playback.PlannerResultV3 { return p.result },
+		func(p startPassV3) mediaAuthModeV3 {
+			return withNativeDeliveryFeaturesV3(headerAuthenticatedMediaV3(p.req.ClientFeatures), p.req)
+		},
+		func(p startPassV3) bool { return p.storeErr })
+	if pass.storeErr {
+		return playback.DecisionResponseV3{}, playbackStoreOperationError()
+	}
+	req, effectiveFile, audioIndex, planning := pass.req, pass.file, pass.audioIndex, pass.planning
+	learnedLimit, unlimitedReq, unlimitedFile, unlimitedAudioIndex := pass.learnedLimit, pass.unlimitedReq, pass.unlimitedFile, pass.unlimitedAudioIndex
+	warnings = append(warnings, pass.warnings...)
 	timings.mark("planning")
-	result := retryIncompleteToneMapPlanningV3(planned.result, planned.toneMapErr)
-	result = retryIncompletePlaybackSettingsV3(result, settingsErr)
+	result := pass.result
 	// The exact app identity is logged with every decision so a route or
 	// terminal reported against one build is attributable without asking the
 	// user which version they are running.
@@ -2253,22 +2327,16 @@ func (h *PlaybackHandler) startPlaybackApplicationV3(r *http.Request, body []byt
 		}
 		return response, nil
 	}
-	// A refused progressive remux is escalated before the decision is logged or
-	// a session is opened, so the logged route is the one that will actually run.
-	escalated, escalateErr := h.escalateRefusedProgressiveRemuxV3(r.Context(), headerAuthenticatedMediaV3(req.ClientFeatures),
-		func() playback.PlannerInputV3 {
-			escalation := planning
-			escalation.settings = h.plannerSettingsV3(r.Context())
-			return h.plannerInputV3(r.Context(), escalation, req, effectiveFile, audioIndex)
-		}, result)
-	if escalateErr != nil {
-		persistedResponse, persistErr := h.startFailureDecisionV3(r.Context(), userID, profileID, req, requestDigests, requestedFile.ID, effectiveFile.ID, escalateErr)
+	// A refused progressive remux was escalated inside the pass, before the
+	// decision is logged or a session is opened, so the logged route is the one
+	// that will actually run.
+	if pass.escalateErr != nil {
+		persistedResponse, persistErr := h.startFailureDecisionV3(r.Context(), userID, profileID, req, requestDigests, requestedFile.ID, effectiveFile.ID, pass.escalateErr)
 		if persistErr != nil {
 			return playback.DecisionResponseV3{}, playbackPersistenceOperationError(persistErr)
 		}
 		return persistedResponse, nil
 	}
-	result = escalated
 	timings.mark("remux_escalation")
 	// Marked on the plan that will run, after every fallback that can replace it.
 	markLearnedLimit(&result, learnedLimit, requestedFile, req, serverBitrateCapV3(r.Context()))
@@ -2277,7 +2345,7 @@ func (h *PlaybackHandler) startPlaybackApplicationV3(r *http.Request, body []byt
 		// compatibility, or the budget the start has without the limit, picks
 		// the same version, or nothing plays without it, the limit lowered
 		// nothing.
-		readingErr := h.applyConnectionReading(r, &unlimitedReq)
+		readingErr := h.applyConnectionReading(r, &unlimitedReq, pass.read)
 		unlimitedFile, unlimitedReq, unlimitedAudioIndex = h.lowerBufferedVersion(r, unlimitedReq, unlimitedFile, unlimitedAudioIndex, settings)
 		unlimited, _ := h.planStartV3(r, planning, unlimitedReq, alternateBase, unlimitedFile, unlimitedAudioIndex)
 		if readingErr != nil || unlimited.result.Plan == nil || deliveredKbpsV3(result.Plan) >= deliveredKbpsV3(unlimited.result.Plan) {
@@ -2476,6 +2544,7 @@ func (h *PlaybackHandler) startPlannedPlaybackV3(r *http.Request, userID int, pr
 		return playback.DecisionResponseV3{}, subtitleArtifactErrorV3("Failed to freeze the selected subtitle identity.", frozenErr)
 	}
 	h.setPlanStreamURLsV3(r.Context(), result.Plan, transport, req.ClientFeatures, apimw.LoginSessionID(r.Context()) != "")
+	attributeTransportV3(r.Context(), result.Plan, &transport, nil)
 	if err := h.attachSubtitleArtifactV3(r.Context(), session.ID, effectiveFile, result.Plan, result.SubtitleTrackIndex, &frozenRecipe, req.ClientFeatures); err != nil {
 		transport.rollback()
 		abort()
@@ -3247,9 +3316,9 @@ func (h *PlaybackHandler) prepareIdentityTransportV3(r *http.Request, session *p
 	accessPath := netaccess.PathFromContext(r.Context())
 	switch {
 	case !mode.headerAuth:
-		streamURL, servedByProxy = h.identityStreamURLV3(&routeSession, file, proxyNode, accessPath)
+		streamURL, servedByProxy = h.identityStreamURLV3(&routeSession, file, proxyNode, accessPath, directMediaFromContext(r.Context()))
 	case mode.proxyEgress:
-		streamURL, servedByProxy, priorGrant = h.identityGrantStreamURLV3(r.Context(), &routeSession, file, proxyNode, accessPath)
+		streamURL, servedByProxy, priorGrant = h.identityGrantStreamURLV3(r.Context(), &routeSession, file, proxyNode, accessPath, directMediaFromContext(r.Context()))
 	}
 	reservationReleased := false
 	if proxyNode != nil && !servedByProxy {
@@ -3444,11 +3513,11 @@ func (h *PlaybackHandler) revokeStaleProxyGrantOnCommitV3(ctx context.Context, s
 //
 // path is the client's access path: a proxy with no origin on it is treated
 // like no proxy at all, before any grant is written, so the API relays.
-func (h *PlaybackHandler) identityGrantStreamURLV3(ctx context.Context, s *playback.Session, file *models.MediaFile, proxyNode *nodepool.Node, path netaccess.Path) (string, bool, *playback.RecipeCard) {
+func (h *PlaybackHandler) identityGrantStreamURLV3(ctx context.Context, s *playback.Session, file *models.MediaFile, proxyNode *nodepool.Node, path netaccess.Path, direct nodepool.DirectMedia) (string, bool, *playback.RecipeCard) {
 	if proxyNode == nil || file == nil || s == nil {
 		return h.playbackStreamURL(s), false, nil
 	}
-	base := proxyNode.ClientURLFor(path)
+	base := proxyNode.MediaURLFor(path, direct)
 	if base == "" {
 		return h.playbackStreamURL(s), false, nil
 	}
@@ -3637,6 +3706,7 @@ func (h *PlaybackHandler) resolveIdentityRouteV3(r *http.Request, sessionID stri
 	// reachable proxy the resolver falls through to the API-egress shapes, or
 	// reports capacity unavailable under a proxy_only policy.
 	accessPath := netaccess.PathFromContext(r.Context())
+	direct := directMediaFromContext(r.Context())
 	decision, err := noderouting.Resolve(noderouting.AdaptSessionPlanner(h.NodePlanner), noderouting.ResolveRequest{
 		Request: noderouting.Request{
 			Workload: workload, Delivery: delivery,
@@ -3644,8 +3714,8 @@ func (h *PlaybackHandler) resolveIdentityRouteV3(r *http.Request, sessionID stri
 		},
 		SessionID: sessionID, EstimatedBitrateKbps: identityStreamBitrateKbpsV3(result),
 		TranscodeEligible:      excludeUnreachableRouteNodesV3(r.Context(), h.transcodeEligibilityV3(r.Context(), result, nil)),
-		ProxyEligible:          excludeUnreachableRouteNodesV3(r.Context(), nodepool.ClientReachableVia(accessPath, relayEligible)),
-		ProxyExecutionEligible: excludeUnreachableRouteNodesV3(r.Context(), nodepool.ClientReachableVia(accessPath, h.identityProxyEligibilityV3(r.Context(), result))),
+		ProxyEligible:          excludeUnreachableRouteNodesV3(r.Context(), nodepool.MediaReachableVia(accessPath, direct, relayEligible)),
+		ProxyExecutionEligible: excludeUnreachableRouteNodesV3(r.Context(), nodepool.MediaReachableVia(accessPath, direct, h.identityProxyEligibilityV3(r.Context(), result))),
 		ExcludedShapeIDs:       excludedShapes,
 		UnreachableNodes:       unreachableRouteNodesV3(r.Context()),
 		TranscodesAudio:        result.TranscodeAudio,
@@ -3900,11 +3970,11 @@ func identityStreamBitrateKbpsV3(result playback.PlannerResultV3) int {
 //
 // path is the client's access path; a proxy with no origin on it falls back
 // the same way, and the caller releases the reservation.
-func (h *PlaybackHandler) identityStreamURLV3(s *playback.Session, file *models.MediaFile, proxyNode *nodepool.Node, path netaccess.Path) (string, bool) {
+func (h *PlaybackHandler) identityStreamURLV3(s *playback.Session, file *models.MediaFile, proxyNode *nodepool.Node, path netaccess.Path, direct nodepool.DirectMedia) (string, bool) {
 	if proxyNode == nil || file == nil || (s != nil && s.RequireMediaAuthorization) {
 		return h.playbackStreamURL(s), false
 	}
-	base := proxyNode.ClientURLFor(path)
+	base := proxyNode.MediaURLFor(path, direct)
 	if base == "" {
 		return h.playbackStreamURL(s), false
 	}
@@ -4724,10 +4794,10 @@ func (h *PlaybackHandler) prepareRemoteTransportV3(r *http.Request, session *pla
 	accessPath := netaccess.PathFromContext(r.Context())
 	switch {
 	case !mode.headerAuth:
-		url = h.buildProxyManifestURL(card, nodePlan.ProxyNode, mode.headerAuth, accessPath)
+		url = h.buildProxyManifestURL(card, nodePlan.ProxyNode, mode.headerAuth, accessPath, directMediaFromContext(r.Context()))
 		servedByProxy = nodePlan.ProxyNode != nil && strings.HasPrefix(url, "http")
 	case mode.proxyEgress:
-		url, servedByProxy, priorGrant = h.grantManifestURLV3(r.Context(), card, nodePlan.ProxyNode, accessPath)
+		url, servedByProxy, priorGrant = h.grantManifestURLV3(r.Context(), card, nodePlan.ProxyNode, accessPath, directMediaFromContext(r.Context()))
 	}
 	if mode.headerAuth {
 		// No client-visible URL carries a stream token in this mode, so neither the
@@ -4874,12 +4944,12 @@ func remoteTranscodeRecipeCardV3(session *playback.Session, file *models.MediaFi
 // path, or when the grant cannot be stored — the client fetches the manifest
 // from this server, which relays the same node. The third value is the grant
 // this write displaced, for the caller's rollback.
-func (h *PlaybackHandler) grantManifestURLV3(ctx context.Context, card playback.RecipeCard, proxyNode *nodepool.Node, path netaccess.Path) (string, bool, *playback.RecipeCard) {
+func (h *PlaybackHandler) grantManifestURLV3(ctx context.Context, card playback.RecipeCard, proxyNode *nodepool.Node, path netaccess.Path, direct nodepool.DirectMedia) (string, bool, *playback.RecipeCard) {
 	localURL := fmt.Sprintf("/playback/transcode/%s/master.m3u8", card.SessionID)
 	if proxyNode == nil {
 		return localURL, false, nil
 	}
-	base := proxyNode.ClientURLFor(path)
+	base := proxyNode.MediaURLFor(path, direct)
 	if base == "" {
 		return localURL, false, nil
 	}
@@ -4982,6 +5052,8 @@ func (h *PlaybackHandler) v3SessionStreamState(ctx context.Context, session *pla
 		RoutingEgress:                 string(transport.routingEgress),
 		RoutingEgressNodeID:           transport.routingEgressID,
 		RoutingEgressNodeURL:          transport.routingEgressURL,
+		MediaTransport:                transport.mediaTransport,
+		PathGeneration:                transport.pathGeneration,
 		RequireMediaAuthorization:     mode.headerAuth,
 		MediaAuthorizationSet:         true,
 		ClientIP:                      clientip.FromContext(ctx),
@@ -5635,6 +5707,26 @@ type replanPassV3 struct {
 	audioDegraded, subtitleDegraded, subtitleNotShown bool
 }
 
+// replanKeyPassV3 is one planning pass of a replan under one connection key.
+type replanKeyPassV3 struct {
+	start               playback.StartRequestV3
+	file                *models.MediaFile
+	audioIndex          int
+	result              playback.PlannerResultV3
+	planning            replanPlanningV3
+	plannerSettingsErr  error
+	learnedLimit        *playback.BandwidthLimitV3
+	unlimitedStart      playback.StartRequestV3
+	unlimitedFile       *models.MediaFile
+	unlimitedAudioIndex int
+	audioDegraded       bool
+	subtitleDegraded    bool
+	subtitleNotShown    bool
+	// read is the key the pass read its connection reading and limit under.
+	read string
+	err  *transportErrorV3
+}
+
 // planReplanV3 plans a replan of effectiveFile for start. An output change the
 // planner refuses falls back to the version playing, and a refusal another
 // version can avoid falls back to another version (planReplanAlternateV3).
@@ -5808,6 +5900,9 @@ func (h *PlaybackHandler) executeReplanV3(r *http.Request, record *playback.Atte
 		}
 	}()
 	start := record.NormalizedRequest
+	// The replan names its own transport: an omitted field means regular, not
+	// the transport the attempt started with.
+	start.MediaTransport = req.MediaTransport
 	operation := req.EffectiveOperation()
 	if onDemandSubtitleSwitchV3(record, req) {
 		// A client that switched among on-demand renditions in its player may
@@ -5817,6 +5912,10 @@ func (h *PlaybackHandler) executeReplanV3(r *http.Request, record *playback.Atte
 		operation = playback.ReplanOperationTrackChangeV3
 	}
 	seekReanchor := operation == playback.ReplanOperationSeekReanchorV3
+	// The device's direct state is read here, once, before any route is
+	// resolved. A seek reanchor keeps its route and the session's attribution,
+	// so it reads nothing.
+	r = r.WithContext(h.withDirectRequestV3(r.Context(), record.UserID, req.MediaTransport, !seekReanchor))
 	seekFailureRecovery := operation == playback.ReplanOperationSeekFailureRecoveryV3
 	seekScopedRecovery := seekReanchor || seekFailureRecovery
 	// A seek reanchor must keep its route; every other replan first finds out
@@ -6109,22 +6208,6 @@ func (h *PlaybackHandler) executeReplanV3(r *http.Request, record *playback.Atte
 			}
 		}
 	}
-	var result playback.PlannerResultV3
-	var toneMapCapabilityErr error
-	var plannerSettings playback.PlannerSettingsV3
-	var plannerSettingsErr error
-	var lowerVersion *playback.LowerVersionV3
-	var learnedLimit *playback.BandwidthLimitV3
-	if !seekScopedRecovery {
-		if err := h.applyConnectionReading(r, &start); err != nil {
-			return playback.DecisionResponseV3{}, *record, nil, &transportErrorV3{reason: "internal_error", message: "Connection observations are temporarily unavailable.", retryable: true, cause: err}
-		}
-	}
-	// The replan without the learned limit, planned again only when the plan
-	// would carry the limit's label, to check that the limit lowered it. A
-	// stall's estimate goes with the limit; the connection's reading then
-	// stands in for it.
-	unlimitedStart, unlimitedFile, unlimitedAudioIndex := withoutObservedEstimateV3(start), effectiveFile, audioIndex
 	// A quality change, and an output change that went back to the requested
 	// edition, choose a version again. Under a buffering budget that must not
 	// be the source that stalled. A track change stays on the mounted version.
@@ -6133,54 +6216,114 @@ func (h *PlaybackHandler) executeReplanV3(r *http.Request, record *playback.Atte
 	if effectiveFile.EditionKey != requestedFile.EditionKey {
 		edition = requestedFile
 	}
-	if !seekReanchor {
-		var limitErr error
-		// The playing transcode is still mounted here: whether the client
-		// was waiting on it tells an encoder-paced stall from a slow link.
-		outputBound := func() bool { return h.transcodeOutputBoundV3(r.Context(), record.SessionID, unreachableNodes) }
-		learnedLimit, limitErr = h.applyLearnedLimit(r, &start, !seekScopedRecovery, outputBound)
-		if limitErr != nil {
-			return playback.DecisionResponseV3{}, *record, nil, &transportErrorV3{reason: "internal_error", message: "Connection observations are temporarily unavailable.", retryable: true, cause: limitErr}
+	// The playing transcode is still mounted here: whether the client was
+	// waiting on it tells an encoder-paced stall from a slow link.
+	outputBound := func() bool { return h.transcodeOutputBoundV3(r.Context(), record.SessionID, unreachableNodes) }
+	// Every pass starts from the request, file and audio track as they stand
+	// here (see planUnderKeysV3).
+	baseStart, baseFile, baseAudioIndex := start, effectiveFile, audioIndex
+	baseAudioDegraded, baseSubtitleDegraded, baseSubtitleNotShown := audioDegraded, subtitleDegraded, subtitleNotShown
+	planPass := func(keys keyPassV3) replanKeyPassV3 {
+		pass := replanKeyPassV3{
+			start: baseStart, file: baseFile, audioIndex: baseAudioIndex,
+			audioDegraded: baseAudioDegraded, subtitleDegraded: baseSubtitleDegraded, subtitleNotShown: baseSubtitleNotShown,
+			read: keys.read,
 		}
-		plannerSettings, plannerSettingsErr = h.plannerSettingsV3Result(r.Context())
-		if choosesVersion {
-			effectiveFile, start, audioIndex = h.lowerBufferedVersionForIntent(r, start, effectiveFile, edition, audioIndex, plannerSettings, desired)
-		}
-		if requestedEditionResolved {
-			lowerVersion = h.lowerVersionV3(r.Context(), start, requestedFile, plannerSettings, requestAccessFilter(r))
-		}
-	}
-	planning := replanPlanningV3{
-		planningV3: planningV3{plannerRequestedFile: plannerRequestedFile, settings: plannerSettings, lowerVersion: lowerVersion, attemptedKeys: attemptedKeys},
-		operation:  operation, requestedFile: requestedFile,
-		currentEffectiveFile: currentEffectiveFile, currentEffectiveStart: currentEffectiveStart,
-		keptActiveEditionForSubtitle: keptActiveEditionForSubtitle, desired: desired,
-		renditionTracks: pinnedRenditionTracksForRecordV3(record),
-	}
-	if seekReanchor {
-		if err := h.validateFrozenSubtitleIdentityV3(r.Context(), effectiveFile, record.FrozenRecipe); err != nil {
-			return playback.DecisionResponseV3{}, *record, nil, subtitleArtifactErrorV3("The selected subtitle is no longer available at its frozen route.", err)
-		}
-		var frozenErr error
-		result, frozenErr = frozenSeekReanchorResultV3(record, req.PositionSeconds, time.Now())
-		if frozenErr != nil {
-			return playback.DecisionResponseV3{}, *record, nil, &transportErrorV3{
-				reason:    "seek_reanchor_recipe_unavailable",
-				message:   "The active playback recipe cannot be reopened; start a new playback attempt.",
-				retryable: true,
+		var toneMapCapabilityErr error
+		var plannerSettings playback.PlannerSettingsV3
+		var plannerSettingsErr error
+		var lowerVersion *playback.LowerVersionV3
+		if !seekScopedRecovery {
+			if err := h.applyConnectionReading(r, &pass.start, keys.read); err != nil {
+				pass.err = &transportErrorV3{reason: "internal_error", message: "Connection observations are temporarily unavailable.", retryable: true, cause: err}
+				return pass
 			}
 		}
-	} else {
-		planned, planErr := h.planReplanV3(r, planning, start, effectiveFile, audioIndex, audioDegraded)
-		if planErr != nil {
-			return playback.DecisionResponseV3{}, *record, nil, planErr
+		// The replan without the learned limit, planned again only when the plan
+		// would carry the limit's label, to check that the limit lowered it. A
+		// stall's estimate goes with the limit; the connection's reading then
+		// stands in for it.
+		pass.unlimitedStart, pass.unlimitedFile, pass.unlimitedAudioIndex = withoutObservedEstimateV3(pass.start), pass.file, pass.audioIndex
+		if !seekReanchor {
+			var limitErr error
+			pass.learnedLimit, limitErr = h.applyLearnedLimit(r, &pass.start, keys.writes && !seekScopedRecovery, keys.read, keys.record, outputBound)
+			if limitErr != nil {
+				pass.err = &transportErrorV3{reason: "internal_error", message: "Connection observations are temporarily unavailable.", retryable: true, cause: limitErr}
+				return pass
+			}
+			plannerSettings, plannerSettingsErr = h.plannerSettingsV3Result(r.Context())
+			if choosesVersion {
+				pass.file, pass.start, pass.audioIndex = h.lowerBufferedVersionForIntent(r, pass.start, pass.file, edition, pass.audioIndex, plannerSettings, desired)
+			}
+			if requestedEditionResolved {
+				lowerVersion = h.lowerVersionV3(r.Context(), pass.start, requestedFile, plannerSettings, requestAccessFilter(r))
+			}
 		}
-		start, effectiveFile, audioIndex, result, toneMapCapabilityErr = planned.request, planned.file, planned.audioIndex, planned.result, planned.toneMapErr
-		audioDegraded, subtitleNotShown = planned.audioDegraded, planned.subtitleNotShown
-		subtitleDegraded = subtitleDegraded || planned.subtitleDegraded
+		pass.plannerSettingsErr = plannerSettingsErr
+		pass.planning = replanPlanningV3{
+			planningV3: planningV3{plannerRequestedFile: plannerRequestedFile, settings: plannerSettings, lowerVersion: lowerVersion, attemptedKeys: attemptedKeys},
+			operation:  operation, requestedFile: requestedFile,
+			currentEffectiveFile: currentEffectiveFile, currentEffectiveStart: currentEffectiveStart,
+			keptActiveEditionForSubtitle: keptActiveEditionForSubtitle, desired: desired,
+			renditionTracks: pinnedRenditionTracksForRecordV3(record),
+		}
+		if seekReanchor {
+			if pass.err = h.reanchorFrozenSeekV3(r.Context(), record, req.PositionSeconds, &pass); pass.err != nil {
+				return pass
+			}
+		} else {
+			planned, planErr := h.planReplanV3(r, pass.planning, pass.start, pass.file, pass.audioIndex, pass.audioDegraded)
+			if planErr != nil {
+				pass.err = planErr
+				return pass
+			}
+			pass.start, pass.file, pass.audioIndex, pass.result, toneMapCapabilityErr = planned.request, planned.file, planned.audioIndex, planned.result, planned.toneMapErr
+			pass.audioDegraded, pass.subtitleNotShown = planned.audioDegraded, planned.subtitleNotShown
+			pass.subtitleDegraded = pass.subtitleDegraded || planned.subtitleDegraded
+		}
+		pass.result = retryIncompleteToneMapPlanningV3(pass.result, toneMapCapabilityErr)
+		pass.result = retryIncompletePlaybackSettingsV3(pass.result, pass.plannerSettingsErr)
+		if !seekReanchor {
+			// A freshly planned replan can land on the same refused progressive
+			// remux a start would have; escalate it identically. A seek reanchor
+			// replays the frozen recipe verbatim and must not change route identity,
+			// so it is excluded — its route was escalated when the attempt started.
+			// Media authentication and the hls playlist form are attempt-sticky
+			// (pinned in HandleReplanPlaybackV3), so this mode always equals the one
+			// the attempt started under.
+			escalated, escalateErr := h.escalateRefusedProgressiveRemuxV3(r.Context(), withNativeDeliveryFeaturesV3(headerAuthenticatedMediaV3(pass.start.ClientFeatures), pass.start),
+				func() playback.PlannerInputV3 {
+					escalation := pass.planning.planningV3
+					escalation.settings = h.plannerSettingsV3(r.Context())
+					return h.plannerInputV3(r.Context(), escalation, pass.start, pass.file, pass.audioIndex)
+				}, pass.result)
+			if escalateErr != nil {
+				pass.err = escalateErr
+				return pass
+			}
+			pass.result = escalated
+		}
+		return pass
 	}
-	result = retryIncompleteToneMapPlanningV3(result, toneMapCapabilityErr)
-	result = retryIncompletePlaybackSettingsV3(result, plannerSettingsErr)
+	var pass replanKeyPassV3
+	if seekReanchor {
+		// A seek reanchor keeps its route and reads no connection.
+		pass = planPass(keyPassV3{})
+	} else {
+		pass, r = planUnderKeysV3(h, r, h.sessionConnectionKeyV3(r.Context(), record.SessionID), planPass,
+			func(p replanKeyPassV3) playback.PlannerResultV3 { return p.result },
+			func(p replanKeyPassV3) mediaAuthModeV3 {
+				return withNativeDeliveryFeaturesV3(headerAuthenticatedMediaV3(p.start.ClientFeatures), p.start)
+			},
+			func(p replanKeyPassV3) bool { return p.err != nil })
+	}
+	if pass.err != nil {
+		return playback.DecisionResponseV3{}, *record, nil, pass.err
+	}
+	start, effectiveFile, result := pass.start, pass.file, pass.result
+	audioDegraded, subtitleDegraded, subtitleNotShown = pass.audioDegraded, pass.subtitleDegraded, pass.subtitleNotShown
+	plannerSettings, learnedLimit, planning := pass.planning.settings, pass.learnedLimit, pass.planning
+	unlimitedStart, unlimitedFile, unlimitedAudioIndex := pass.unlimitedStart, pass.unlimitedFile, pass.unlimitedAudioIndex
 	// Media authentication and the hls playlist form are attempt-sticky (pinned
 	// in HandleReplanPlaybackV3), so they always equal the ones the attempt
 	// started under: a reused transport cannot change the session's media
@@ -6188,22 +6331,6 @@ func (h *PlaybackHandler) executeReplanV3(r *http.Request, record *playback.Atte
 	// refusal follows this replan's own request: it only changes the
 	// progressive URL this replan publishes.
 	mode := withNativeDeliveryFeaturesV3(headerAuthenticatedMediaV3(start.ClientFeatures), start)
-	if !seekReanchor {
-		// A freshly planned replan can land on the same refused progressive
-		// remux a start would have; escalate it identically. A seek reanchor
-		// replays the frozen recipe verbatim and must not change route identity,
-		// so it is excluded — its route was escalated when the attempt started.
-		escalated, escalateErr := h.escalateRefusedProgressiveRemuxV3(r.Context(), mode,
-			func() playback.PlannerInputV3 {
-				escalation := planning.planningV3
-				escalation.settings = h.plannerSettingsV3(r.Context())
-				return h.plannerInputV3(r.Context(), escalation, start, effectiveFile, audioIndex)
-			}, result)
-		if escalateErr != nil {
-			return playback.DecisionResponseV3{}, *record, nil, escalateErr
-		}
-		result = escalated
-	}
 	// Marked on the plan that will run, after every fallback that can replace it.
 	markLearnedLimit(&result, learnedLimit, requestedFile, start, serverBitrateCapV3(r.Context()))
 	// A replan that starts from the version playing and stays on it (a track
@@ -6215,7 +6342,7 @@ func (h *PlaybackHandler) executeReplanV3(r *http.Request, record *playback.Atte
 	if result.Plan != nil && result.Plan.BandwidthLimit != nil && !staysLimited {
 		var readingErr error
 		if !seekScopedRecovery {
-			readingErr = h.applyConnectionReading(r, &unlimitedStart)
+			readingErr = h.applyConnectionReading(r, &unlimitedStart, pass.read)
 		}
 		if choosesVersion {
 			unlimitedFile, unlimitedStart, unlimitedAudioIndex = h.lowerBufferedVersionForIntent(r, unlimitedStart, unlimitedFile, edition, unlimitedAudioIndex, plannerSettings, desired)
@@ -6358,6 +6485,11 @@ func (h *PlaybackHandler) executeReplanV3(r *http.Request, record *playback.Atte
 		break
 	}
 	h.setPlanStreamURLsV3(r.Context(), result.Plan, transport, start.ClientFeatures, record.LoginSessionID != "")
+	var keptSession *playback.Session
+	if transportReused || seekReanchor {
+		keptSession = session
+	}
+	attributeTransportV3(r.Context(), result.Plan, &transport, keptSession)
 	response := playback.DecisionResponseV3{ProtocolVersion: playback.ProtocolV3, ServerFeatures: playback.NativeServerFeaturesV3(), Outcome: playback.OutcomePlayableV3, SessionID: session.ID, PlaybackPlan: result.Plan}
 	updated := *record
 	updated.CurrentPlanID = result.Plan.PlanID
@@ -6438,6 +6570,25 @@ func applyTransportToneMapModeV3(result *playback.PlannerResultV3, transport pre
 	if result != nil && transport.toneMapMode != "" {
 		result.ToneMapMode = transport.toneMapMode
 	}
+}
+
+// reanchorFrozenSeekV3 replays the attempt's frozen recipe for a seek
+// reanchor into pass.result. A subtitle the frozen route no longer carries, or a
+// recipe that cannot be reopened, is a transport error.
+func (h *PlaybackHandler) reanchorFrozenSeekV3(ctx context.Context, record *playback.AttemptRecordV3, position float64, pass *replanKeyPassV3) *transportErrorV3 {
+	if err := h.validateFrozenSubtitleIdentityV3(ctx, pass.file, record.FrozenRecipe); err != nil {
+		return subtitleArtifactErrorV3("The selected subtitle is no longer available at its frozen route.", err)
+	}
+	result, err := frozenSeekReanchorResultV3(record, position, time.Now())
+	if err != nil {
+		return &transportErrorV3{
+			reason:    "seek_reanchor_recipe_unavailable",
+			message:   "The active playback recipe cannot be reopened; start a new playback attempt.",
+			retryable: true,
+		}
+	}
+	pass.result = result
+	return nil
 }
 
 func frozenSeekReanchorResultV3(record *playback.AttemptRecordV3, position float64, now time.Time) (playback.PlannerResultV3, error) {

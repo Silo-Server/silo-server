@@ -23,7 +23,7 @@ func TestAuditedOperationsAreExplicit(t *testing.T) {
 	slices.Sort(got)
 	want := []string{"allowCollection", "allowCollectionTitles", "allowTitle", "changePassword", "completePasswordReset", "completePasswordResetLink",
 		"createPersonalAPIKey", "createProfile", "deleteProfile", "deleteSession", "disallowCollection", "disallowTitle",
-		"endImpersonation", "revokePersonalAPIKey", "updateProfile"}
+		"endImpersonation", "enrollDirectConnectionDevice", "revokePersonalAPIKey", "updateProfile"}
 	if !slices.Equal(got, want) {
 		t.Fatalf("audited operations = %v, want %v", got, want)
 	}

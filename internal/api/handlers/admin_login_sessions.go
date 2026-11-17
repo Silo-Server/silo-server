@@ -57,5 +57,11 @@ func (h *AdminHandler) RevokeAdminLoginSessions(ctx context.Context, userID int,
 	if sessionID == nil && h.OnUserSessionsRevoked != nil {
 		h.OnUserSessionsRevoked(ctx, userID)
 	}
+	// Ending one session withdraws the direct-connection entries that session
+	// issued; signing out every session withdraws the account's entries through
+	// OnUserSessionsRevoked.
+	if sessionID != nil && h.DirectRevoker != nil {
+		h.DirectRevoker.RevokeSession(ctx, userID, *sessionID)
+	}
 	return n, nil
 }

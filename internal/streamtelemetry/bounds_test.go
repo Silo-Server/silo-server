@@ -3,6 +3,7 @@ package streamtelemetry
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"reflect"
 	"strings"
 	"testing"
@@ -180,4 +181,76 @@ func TestTelemetryPublicationOmitsOnlyInvalidRecord(t *testing.T) {
 	if view.Complete || len(view.Sessions) != 1 {
 		t.Fatalf("merge omitted-record state: %+v", view)
 	}
+}
+
+// A direct-path transport carries three strings the capture does not own.
+// They are cut like the other capture strings, and a record that holds one past
+// its bound, or more transports than the wire allows, is refused both ways.
+func TestTelemetryTransportBounds(t *testing.T) {
+	t.Run("capture cuts the three strings", func(t *testing.T) {
+		got := normalizeCapture(CaptureSet{Transport: Transport{
+			PathKind:      PathKindDirect,
+			Class:         strings.Repeat("c", maxTagBytes+10),
+			HostID:        strings.Repeat("h", maxIdentityBytes+10),
+			AddressFamily: strings.Repeat("f", maxTagBytes+10),
+			LocalPort:     8094,
+		}}).Transport
+		if len(got.Class) != maxTagBytes || len(got.HostID) != maxIdentityBytes || len(got.AddressFamily) != maxTagBytes {
+			t.Fatalf("lengths class=%d host=%d family=%d, want %d %d %d", len(got.Class), len(got.HostID), len(got.AddressFamily), maxTagBytes, maxIdentityBytes, maxTagBytes)
+		}
+		if got.PathKind != PathKindDirect || got.LocalPort != 8094 {
+			t.Fatalf("other transport fields changed: %+v", got)
+		}
+	})
+
+	t.Run("capture leaves no control bytes", func(t *testing.T) {
+		got := normalizeCapture(CaptureSet{Transport: Transport{Class: "di\x00rect", HostID: "ho\nst", AddressFamily: "ip\x07v6"}}).Transport
+		for _, value := range []string{got.Class, got.HostID, got.AddressFamily} {
+			if !validText(value, maxIdentityBytes) {
+				t.Fatalf("transport string %q still holds a control byte", value)
+			}
+		}
+	})
+
+	over := []struct {
+		name      string
+		transport wireTransport
+	}{
+		{"class", wireTransport{Class: strings.Repeat("c", maxTagBytes+1)}},
+		{"host", wireTransport{HostID: strings.Repeat("h", maxIdentityBytes+1)}},
+		{"address family", wireTransport{AddressFamily: strings.Repeat("f", maxTagBytes+1)}},
+		{"control in class", wireTransport{Class: "a\x00b"}},
+	}
+	for _, test := range over {
+		t.Run("record refuses "+test.name, func(t *testing.T) {
+			if err := validateSessionText(wireSession{Transports: []wireTransport{test.transport}}, maxSessionStringBytes); err == nil {
+				t.Fatalf("%s past its bound accepted", test.name)
+			}
+		})
+	}
+	t.Run("record accepts strings at the bound", func(t *testing.T) {
+		at := wireTransport{Class: strings.Repeat("c", maxTagBytes), HostID: strings.Repeat("h", maxIdentityBytes), AddressFamily: strings.Repeat("f", maxTagBytes)}
+		if err := validateSessionText(wireSession{Transports: []wireTransport{at}}, maxSessionStringBytes); err != nil {
+			t.Fatalf("strings at the bound refused: %v", err)
+		}
+	})
+
+	t.Run("encode and decode refuse too many transports", func(t *testing.T) {
+		const budget = 1 << 30 // lifted so only the transport count can refuse
+		tooMany := SessionView{Transports: make([]Transport, maxWireSlice+1)}
+		if _, err := encodeSessionBounded(tooMany, budget, budget); err == nil {
+			t.Fatal("encode accepted more transports than the wire bound")
+		}
+		wire := wireSession{V: codecVersion, Transports: make([]wireTransport, maxWireSlice+1)}
+		data, err := json.Marshal(wire)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := decodeSessionBounded(data, budget, budget); err == nil {
+			t.Fatal("decode accepted more transports than the wire bound")
+		}
+		if _, err := encodeSessionBounded(SessionView{Transports: make([]Transport, maxWireSlice)}, budget, budget); err != nil {
+			t.Fatalf("encode refused transports at the bound: %v", err)
+		}
+	})
 }

@@ -9,7 +9,7 @@
  */
 
 export const SETTINGS_API_VERSION = 1;
-export const SETTINGS_REVISION = 30;
+export const SETTINGS_REVISION = 31;
 
 export interface SettingSuggestedOption {
   value: string;
@@ -235,6 +235,8 @@ export const SETTING_KEYS = {
   PLAYBACK_CELLULAR_MAX_BITRATE_KBPS: "playback.cellular_max_bitrate_kbps",
   /** Cellular quality */
   PLAYBACK_CELLULAR_PREFERRED_QUALITY: "playback.cellular_preferred_quality",
+  /** Connection path */
+  PLAYBACK_CONNECTION_PATH: "playback.connection_path",
   /** Skip intros */
   PLAYBACK_INTRO_SKIP_MODE: "playback.intro_skip_mode",
   /** Maximum bitrate */
@@ -763,6 +765,26 @@ export const SETTING_DEFINITIONS: Record<SettingKey, SettingDefinition> = {
     ],
     ordered: true,
     constrainedBy: { policyInput: "max_playback_quality", constraint: "ceiling" },
+  },
+  "playback.connection_path": {
+    key: "playback.connection_path",
+    type: "enum",
+    nullable: false,
+    persistence: "client_local",
+    introducedIn: 31,
+    scopes: ["client_local"],
+    scopeIntroducedIn: [31],
+    resolutionOrder: ["client_local", "default"],
+    defaultValue: "automatic",
+    label: "Connection path",
+    description: "Direct only still uses the local network connection when one is available.",
+    category: "playback",
+    control: "select",
+    platforms: ["ios", "macos", "android", "android_tv"],
+    values: [
+      { value: "automatic", label: "Automatic", introducedIn: 31 },
+      { value: "direct_only", label: "Direct only", introducedIn: 31 },
+    ],
   },
   "playback.intro_skip_mode": {
     key: "playback.intro_skip_mode",

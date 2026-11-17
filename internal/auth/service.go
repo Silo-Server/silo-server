@@ -133,7 +133,7 @@ type Service struct {
 	signInFolds signInFoldCache
 	// sessionsRevoked runs after a password change signed the account out
 	// of its other sessions; see OnSessionsRevoked.
-	sessionsRevoked      func(ctx context.Context, userID int)
+	sessionsRevoked      func(ctx context.Context, userID int, keptSessionID string)
 	authProvidersChanged func(context.Context)
 }
 
@@ -572,8 +572,9 @@ func (s *Service) SetPluginProviderSource(src PluginProviderSource) {
 
 // OnSessionsRevoked registers fn to run after ChangePassword signed the
 // account out of its other sessions, so every replica drops the
-// Jellyfin-compatible sessions it holds in memory.
-func (s *Service) OnSessionsRevoked(fn func(ctx context.Context, userID int)) {
+// Jellyfin-compatible sessions it holds in memory. fn receives the login
+// session that made the change, the one session that stays signed in.
+func (s *Service) OnSessionsRevoked(fn func(ctx context.Context, userID int, keptSessionID string)) {
 	s.sessionsRevoked = fn
 }
 
@@ -1630,7 +1631,7 @@ func (s *Service) ChangePassword(ctx context.Context, userID int, sessionID, cur
 	if signOutOtherSessions && s.sessionsRevoked != nil {
 		cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
 		defer cancel()
-		s.sessionsRevoked(cleanupCtx, userID)
+		s.sessionsRevoked(cleanupCtx, userID, sessionID)
 	}
 	return nil
 }
@@ -1669,14 +1670,7 @@ func (s *Service) GetSessionsPage(ctx context.Context, userID int, after *Sessio
 // CurrentLoginSession returns the caller's live session independently of the
 // page position, so an older current session need not be paged into view.
 func (s *Service) CurrentLoginSession(ctx context.Context, userID int, sessionID string) (*models.AuthSession, error) {
-	session, err := s.sessions.GetByID(ctx, sessionID)
-	if err != nil {
-		return nil, err
-	}
-	if session.UserID != userID || session.RevokedAt != nil || !session.ExpiresAt.After(time.Now()) {
-		return nil, ErrSessionNotFound
-	}
-	return session, nil
+	return s.sessions.LiveSession(ctx, userID, sessionID)
 }
 
 // LoginSessionActive reports whether a login session is live: not revoked

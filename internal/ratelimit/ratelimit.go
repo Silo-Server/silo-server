@@ -135,6 +135,10 @@ func DefaultConfig() Config {
 			// Session-less Android push retirement. The 256-bit installation
 			// key is the guard; this is anti-probe hygiene.
 			"android_push_retire": {RequestsPerMinute: 20, Burst: 10},
+			// Direct-connection registration and netmap long polls. The limit
+			// is per client IP, so it fits a household of devices behind one
+			// NAT: each device registers every 30 s and holds a netmap poll.
+			"direct_signaling": {RequestsPerMinute: 240, Burst: 60},
 		},
 		// Sized from production traffic: the busiest first-party sessions
 		// stayed under 20,000 in an hour and rarely above 10,000, while a

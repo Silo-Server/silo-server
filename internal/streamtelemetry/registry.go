@@ -293,6 +293,9 @@ func (r *Registry) attach(obs *Observation, attachment Attachment) {
 	if obs.Capture.UserAgent != "" {
 		s.userAgents.add(obs.Capture.UserAgent)
 	}
+	if obs.Capture.Transport.PathKind != "" {
+		s.transports.add(obs.Capture.Transport)
+	}
 	if !incrementBounded(s.tokenIssuedSources, attachment.TokenIssuedAtSource) {
 		r.drop("telemetry token source metadata omitted")
 	}

@@ -1,0 +1,19 @@
+{
+  "items": [
+    {
+      "host": {
+        "id": "api",
+        "role": "api",
+        "name": "API"
+      },
+      "user_id": "7",
+      "username": "",
+      "device_id": "living-room-tv",
+      "class": "direct",
+      "address_family": "ipv4",
+      "peer_endpoint": "127.0.0.1:41641",
+      "local_port": 8094,
+      "connected_at": "2026-01-02T03:04:05.678Z"
+    }
+  ]
+}
