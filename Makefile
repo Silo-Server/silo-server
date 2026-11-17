@@ -5,7 +5,9 @@ MAIN_CHECKOUT_ROOT := $(if $(GIT_COMMON_DIR),$(abspath $(GIT_COMMON_DIR)/..))
 SHARED_MAKEFILE_LOCAL := $(if $(GIT_COMMON_DIR),$(abspath $(GIT_COMMON_DIR)/../Makefile.local))
 DEFAULT_PLUGIN_SDK_DIR := $(abspath ../silo-plugin-sdk)
 SHARED_PLUGIN_SDK_DIR := $(if $(MAIN_CHECKOUT_ROOT),$(abspath $(MAIN_CHECKOUT_ROOT)/../silo-plugin-sdk))
-GOOSE := go run github.com/pressly/goose/v3/cmd/goose@v3.27.1
+# The Goose CLI only creates and validates migration files here. Skip the
+# other database drivers when building it on a fresh runner.
+GOOSE := go run -tags=no_clickhouse,no_libsql,no_mssql,no_mysql,no_sqlite3,no_vertica,no_ydb github.com/pressly/goose/v3/cmd/goose@v3.27.1
 GOOSE_DIR := migrations/sql
 ENV_FILE ?= .env
 

@@ -638,7 +638,9 @@ jobs:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with: &no-assets
-          filter: blob:none
+          # Fetch small files in the first pack. Checkout then requests only
+          # the remaining large files it needs, excluding the source artwork.
+          filter: blob:limit=1m
           sparse-checkout: |
             /*
             !/web/assets-source/
