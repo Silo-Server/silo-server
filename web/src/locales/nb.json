@@ -117021,6 +117021,12 @@
       "value": "Du får varsler her når det kommer nye episoder av serier som er favoritter, står på huskelisten eller som du ser på."
     }
   ],
+  "web.notifications.inbox.emptyHintNextUp": [
+    {
+      "type": 0,
+      "value": "Du får varsler her når det kommer en ny episode av en serie du har sett alt av, eller når en tittel du har lagt på huskelisten eller forespurt, kommer."
+    }
+  ],
   "web.notifications.inbox.emptyUnread": [
     {
       "type": 0,
@@ -117411,6 +117417,30 @@
     {
       "type": 0,
       "value": "Varslingsvisninger"
+    }
+  ],
+  "web.notifications.inbox.watchlistAvailable": [
+    {
+      "type": 0,
+      "value": "Tittel på huskelisten tilgjengelig"
+    }
+  ],
+  "web.notifications.inbox.watchlistMovieAvailable": [
+    {
+      "type": 0,
+      "value": "En film på huskelisten din er nå tilgjengelig"
+    }
+  ],
+  "web.notifications.inbox.watchlistSeriesAvailable": [
+    {
+      "type": 0,
+      "value": "En serie på huskelisten din er nå tilgjengelig"
+    }
+  ],
+  "web.notifications.inbox.watchlistTitleAvailable": [
+    {
+      "type": 0,
+      "value": "En tittel på huskelisten din er nå tilgjengelig"
     }
   ],
   "web.notifications.preferences.continueWatching": [
@@ -117883,6 +117913,12 @@
       "value": "Valgte serier"
     }
   ],
+  "web.notifications.series.afterCatchUp": [
+    {
+      "type": 0,
+      "value": "Når du har sett alt"
+    }
+  ],
   "web.notifications.series.allReasons": [
     {
       "type": 0,
@@ -117941,10 +117977,22 @@
       "value": "Serier du markerer som favoritt, legger til i huskelisten eller begynner å se, vises her."
     }
   ],
+  "web.notifications.series.emptyHintNextUp": [
+    {
+      "type": 0,
+      "value": "Serier vises her etter at du har sett ferdig en episode. Når du har sett alt i en serie, blir du varslet når neste episode kommer."
+    }
+  ],
   "web.notifications.series.filterByReason": [
     {
       "type": 0,
       "value": "Filtrer etter årsak"
+    }
+  ],
+  "web.notifications.series.filterLabel": [
+    {
+      "type": 0,
+      "value": "Filtrer serier"
     }
   ],
   "web.notifications.series.intro": [
@@ -118051,10 +118099,32 @@
       "value": "last"
     }
   ],
+  "web.notifications.series.nextEpisodeAfter": [
+    {
+      "type": 0,
+      "value": "Neste episode etter "
+    },
+    {
+      "type": 1,
+      "value": "code"
+    }
+  ],
+  "web.notifications.series.nextNewEpisode": [
+    {
+      "type": 0,
+      "value": "Neste nye episode"
+    }
+  ],
   "web.notifications.series.noMatch": [
     {
       "type": 0,
       "value": "Ingen serier samsvarer. Prøv et annet søk eller en annen årsak."
+    }
+  ],
+  "web.notifications.series.noMatchFilter": [
+    {
+      "type": 0,
+      "value": "Ingen serier samsvarer. Prøv et annet søk eller filter."
     }
   ],
   "web.notifications.series.notificationsOff": [
@@ -118235,6 +118305,12 @@
     {
       "type": 0,
       "value": " er nå tilgjengelig"
+    }
+  ],
+  "web.notifications.toast.watchlistArrived": [
+    {
+      "type": 0,
+      "value": "En tittel på huskelisten din har kommet til biblioteket."
     }
   ],
   "web.onboarding.gate.progressFailed": [
@@ -130381,6 +130457,12 @@
       "value": "Hovedbryter for denne profilen"
     }
   ],
+  "web.settings.notifications.episodes.nextUpDescription": [
+    {
+      "type": 0,
+      "value": "Få varsler når det kommer en ny episode av en serie du har sett alt av, eller når en tittel du har lagt på huskelisten eller forespurt, kommer."
+    }
+  ],
   "web.settings.notifications.episodes.seriesLink": [
     {
       "type": 0,
@@ -130670,7 +130752,7 @@
   "web.settings.notifications.reason.requests": [
     {
       "type": 0,
-      "value": "Forespørsler"
+      "value": "Forespørsler og huskeliste"
     }
   ],
   "web.settings.notifications.reason.watchlist": [

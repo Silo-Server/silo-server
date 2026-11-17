@@ -126928,6 +126928,12 @@
       "value": "Vous recevrez ici une notification lorsque de nouveaux épisodes arrivent pour les séries de vos favoris, de votre liste à voir ou que vous regardez."
     }
   ],
+  "web.notifications.inbox.emptyHintNextUp": [
+    {
+      "type": 0,
+      "value": "Vous recevrez ici une notification lorsqu’une série pour laquelle vous êtes à jour reçoit un nouvel épisode, ou lorsqu’un titre que vous avez ajouté à votre liste à voir ou demandé arrive."
+    }
+  ],
   "web.notifications.inbox.emptyUnread": [
     {
       "type": 0,
@@ -127362,6 +127368,30 @@
     {
       "type": 0,
       "value": "Vues des notifications"
+    }
+  ],
+  "web.notifications.inbox.watchlistAvailable": [
+    {
+      "type": 0,
+      "value": "Titre de la liste à voir disponible"
+    }
+  ],
+  "web.notifications.inbox.watchlistMovieAvailable": [
+    {
+      "type": 0,
+      "value": "Un film de votre liste à voir est maintenant disponible"
+    }
+  ],
+  "web.notifications.inbox.watchlistSeriesAvailable": [
+    {
+      "type": 0,
+      "value": "Une série de votre liste à voir est maintenant disponible"
+    }
+  ],
+  "web.notifications.inbox.watchlistTitleAvailable": [
+    {
+      "type": 0,
+      "value": "Un titre de votre liste à voir est maintenant disponible"
     }
   ],
   "web.notifications.preferences.continueWatching": [
@@ -127890,6 +127920,12 @@
       "value": "Séries sélectionnées"
     }
   ],
+  "web.notifications.series.afterCatchUp": [
+    {
+      "type": 0,
+      "value": "Une fois à jour"
+    }
+  ],
   "web.notifications.series.allReasons": [
     {
       "type": 0,
@@ -127948,10 +127984,22 @@
       "value": "Les séries que vous ajoutez à vos favoris ou à votre liste à voir, ou que vous commencez à regarder, apparaissent ici."
     }
   ],
+  "web.notifications.series.emptyHintNextUp": [
+    {
+      "type": 0,
+      "value": "Les séries apparaissent ici une fois que vous avez terminé un épisode. Lorsque vous êtes à jour sur une série, vous recevez une notification dès que son prochain épisode arrive."
+    }
+  ],
   "web.notifications.series.filterByReason": [
     {
       "type": 0,
       "value": "Filtrer par raison"
+    }
+  ],
+  "web.notifications.series.filterLabel": [
+    {
+      "type": 0,
+      "value": "Filtrer les séries"
     }
   ],
   "web.notifications.series.intro": [
@@ -128062,10 +128110,32 @@
       "value": "last"
     }
   ],
+  "web.notifications.series.nextEpisodeAfter": [
+    {
+      "type": 0,
+      "value": "Le prochain épisode après "
+    },
+    {
+      "type": 1,
+      "value": "code"
+    }
+  ],
+  "web.notifications.series.nextNewEpisode": [
+    {
+      "type": 0,
+      "value": "Le prochain nouvel épisode"
+    }
+  ],
   "web.notifications.series.noMatch": [
     {
       "type": 0,
       "value": "Aucune série ne correspond. Essayez une autre recherche ou une autre raison."
+    }
+  ],
+  "web.notifications.series.noMatchFilter": [
+    {
+      "type": 0,
+      "value": "Aucune série ne correspond. Essayez une autre recherche ou un autre filtre."
     }
   ],
   "web.notifications.series.notificationsOff": [
@@ -128242,6 +128312,12 @@
     {
       "type": 0,
       "value": " est maintenant disponible"
+    }
+  ],
+  "web.notifications.toast.watchlistArrived": [
+    {
+      "type": 0,
+      "value": "Un titre de votre liste à voir est arrivé dans la bibliothèque."
     }
   ],
   "web.onboarding.gate.progressFailed": [
@@ -141172,6 +141248,12 @@
       "value": "Interrupteur général pour ce profil"
     }
   ],
+  "web.settings.notifications.episodes.nextUpDescription": [
+    {
+      "type": 0,
+      "value": "Recevez une notification lorsqu’une série pour laquelle vous êtes à jour reçoit un nouvel épisode, ou lorsqu’un titre que vous avez ajouté à votre liste à voir ou demandé arrive."
+    }
+  ],
   "web.settings.notifications.episodes.seriesLink": [
     {
       "type": 0,
@@ -141461,7 +141543,7 @@
   "web.settings.notifications.reason.requests": [
     {
       "type": 0,
-      "value": "Demandes"
+      "value": "Demandes et liste à voir"
     }
   ],
   "web.settings.notifications.reason.watchlist": [

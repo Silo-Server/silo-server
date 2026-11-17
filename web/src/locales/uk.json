@@ -137793,6 +137793,12 @@
       "value": "Тут з’являтимуться сповіщення про нові епізоди серіалів, які ви додали в обране чи до списку перегляду або які ви дивитеся."
     }
   ],
+  "web.notifications.inbox.emptyHintNextUp": [
+    {
+      "type": 0,
+      "value": "Тут з’являтимуться сповіщення, коли виходитиме новий епізод серіалу, усі доступні епізоди якого ви вже переглянули, або коли з’являтиметься вміст, який ви додали до списку перегляду чи запитали."
+    }
+  ],
   "web.notifications.inbox.emptyUnread": [
     {
       "type": 0,
@@ -138255,6 +138261,30 @@
     {
       "type": 0,
       "value": "Режими перегляду сповіщень"
+    }
+  ],
+  "web.notifications.inbox.watchlistAvailable": [
+    {
+      "type": 0,
+      "value": "Доступний вміст зі списку перегляду"
+    }
+  ],
+  "web.notifications.inbox.watchlistMovieAvailable": [
+    {
+      "type": 0,
+      "value": "Фільм із вашого списку перегляду тепер доступний"
+    }
+  ],
+  "web.notifications.inbox.watchlistSeriesAvailable": [
+    {
+      "type": 0,
+      "value": "Серіал із вашого списку перегляду тепер доступний"
+    }
+  ],
+  "web.notifications.inbox.watchlistTitleAvailable": [
+    {
+      "type": 0,
+      "value": "Вміст із вашого списку перегляду тепер доступний"
     }
   ],
   "web.notifications.preferences.continueWatching": [
@@ -138859,6 +138889,12 @@
       "value": "Вибрані серіали"
     }
   ],
+  "web.notifications.series.afterCatchUp": [
+    {
+      "type": 0,
+      "value": "Після перегляду доступних епізодів"
+    }
+  ],
   "web.notifications.series.allReasons": [
     {
       "type": 0,
@@ -138917,10 +138953,22 @@
       "value": "Тут з’являються серіали, які ви додали в обране чи до списку перегляду або почали дивитися."
     }
   ],
+  "web.notifications.series.emptyHintNextUp": [
+    {
+      "type": 0,
+      "value": "Серіали з’являються тут після того, як ви додивитеся епізод. Коли ви переглянете всі доступні епізоди серіалу, то отримаєте сповіщення, щойно вийде його наступний епізод."
+    }
+  ],
   "web.notifications.series.filterByReason": [
     {
       "type": 0,
       "value": "Фільтрувати за причиною"
+    }
+  ],
+  "web.notifications.series.filterLabel": [
+    {
+      "type": 0,
+      "value": "Фільтрувати серіали"
     }
   ],
   "web.notifications.series.intro": [
@@ -139027,10 +139075,32 @@
       "value": "last"
     }
   ],
+  "web.notifications.series.nextEpisodeAfter": [
+    {
+      "type": 0,
+      "value": "Наступний епізод після "
+    },
+    {
+      "type": 1,
+      "value": "code"
+    }
+  ],
+  "web.notifications.series.nextNewEpisode": [
+    {
+      "type": 0,
+      "value": "Наступний новий епізод"
+    }
+  ],
   "web.notifications.series.noMatch": [
     {
       "type": 0,
       "value": "Немає відповідних серіалів. Спробуйте інший пошуковий запит або причину."
+    }
+  ],
+  "web.notifications.series.noMatchFilter": [
+    {
+      "type": 0,
+      "value": "Немає відповідних серіалів. Спробуйте інший пошуковий запит або фільтр."
     }
   ],
   "web.notifications.series.notificationsOff": [
@@ -139211,6 +139281,12 @@
     {
       "type": 0,
       "value": " тепер доступний"
+    }
+  ],
+  "web.notifications.toast.watchlistArrived": [
+    {
+      "type": 0,
+      "value": "Вміст із вашого списку перегляду з’явився в бібліотеці."
     }
   ],
   "web.onboarding.gate.progressFailed": [
@@ -152923,6 +152999,12 @@
       "value": "Головний перемикач для цього профілю"
     }
   ],
+  "web.settings.notifications.episodes.nextUpDescription": [
+    {
+      "type": 0,
+      "value": "Отримуйте сповіщення, коли виходить новий епізод серіалу, усі доступні епізоди якого ви вже переглянули, або коли з’являється вміст, який ви додали до списку перегляду чи запитали."
+    }
+  ],
   "web.settings.notifications.episodes.seriesLink": [
     {
       "type": 0,
@@ -153212,7 +153294,7 @@
   "web.settings.notifications.reason.requests": [
     {
       "type": 0,
-      "value": "Запити"
+      "value": "Запити та список перегляду"
     }
   ],
   "web.settings.notifications.reason.watchlist": [

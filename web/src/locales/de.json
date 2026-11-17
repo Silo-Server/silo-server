@@ -116451,6 +116451,12 @@
       "value": "Hier wirst du benachrichtigt, wenn neue Folgen von Serien erscheinen, die du favorisiert hast, auf deiner Merkliste hast oder gerade schaust."
     }
   ],
+  "web.notifications.inbox.emptyHintNextUp": [
+    {
+      "type": 0,
+      "value": "Hier wirst du benachrichtigt, wenn eine neue Folge einer Serie erscheint, bei der du auf dem neuesten Stand bist, oder wenn ein Titel verfügbar wird, den du auf deine Merkliste gesetzt oder angefragt hast."
+    }
+  ],
   "web.notifications.inbox.emptyUnread": [
     {
       "type": 0,
@@ -116849,6 +116855,30 @@
     {
       "type": 0,
       "value": "Benachrichtigungsansichten"
+    }
+  ],
+  "web.notifications.inbox.watchlistAvailable": [
+    {
+      "type": 0,
+      "value": "Titel von deiner Merkliste verfügbar"
+    }
+  ],
+  "web.notifications.inbox.watchlistMovieAvailable": [
+    {
+      "type": 0,
+      "value": "Ein Film auf deiner Merkliste ist jetzt verfügbar"
+    }
+  ],
+  "web.notifications.inbox.watchlistSeriesAvailable": [
+    {
+      "type": 0,
+      "value": "Eine Serie auf deiner Merkliste ist jetzt verfügbar"
+    }
+  ],
+  "web.notifications.inbox.watchlistTitleAvailable": [
+    {
+      "type": 0,
+      "value": "Ein Titel auf deiner Merkliste ist jetzt verfügbar"
     }
   ],
   "web.notifications.preferences.continueWatching": [
@@ -117321,6 +117351,12 @@
       "value": "Ausgewählte Serien"
     }
   ],
+  "web.notifications.series.afterCatchUp": [
+    {
+      "type": 0,
+      "value": "Wenn du auf dem neuesten Stand bist"
+    }
+  ],
   "web.notifications.series.allReasons": [
     {
       "type": 0,
@@ -117379,10 +117415,22 @@
       "value": "Serien, die du zu deinen Favoriten oder deiner Merkliste hinzufügst oder zu schauen beginnst, erscheinen hier."
     }
   ],
+  "web.notifications.series.emptyHintNextUp": [
+    {
+      "type": 0,
+      "value": "Serien erscheinen hier, sobald du eine Folge zu Ende geschaut hast. Bist du bei einer Serie auf dem neuesten Stand, wirst du benachrichtigt, sobald ihre nächste Folge erscheint."
+    }
+  ],
   "web.notifications.series.filterByReason": [
     {
       "type": 0,
       "value": "Nach Grund filtern"
+    }
+  ],
+  "web.notifications.series.filterLabel": [
+    {
+      "type": 0,
+      "value": "Serien filtern"
     }
   ],
   "web.notifications.series.intro": [
@@ -117489,10 +117537,32 @@
       "value": "last"
     }
   ],
+  "web.notifications.series.nextEpisodeAfter": [
+    {
+      "type": 0,
+      "value": "Die nächste Folge nach "
+    },
+    {
+      "type": 1,
+      "value": "code"
+    }
+  ],
+  "web.notifications.series.nextNewEpisode": [
+    {
+      "type": 0,
+      "value": "Die nächste neue Folge"
+    }
+  ],
   "web.notifications.series.noMatch": [
     {
       "type": 0,
       "value": "Keine passenden Serien. Versuche eine andere Suche oder einen anderen Grund."
+    }
+  ],
+  "web.notifications.series.noMatchFilter": [
+    {
+      "type": 0,
+      "value": "Keine passenden Serien. Versuche eine andere Suche oder einen anderen Filter."
     }
   ],
   "web.notifications.series.notificationsOff": [
@@ -117681,6 +117751,12 @@
     {
       "type": 0,
       "value": " ist jetzt verfügbar"
+    }
+  ],
+  "web.notifications.toast.watchlistArrived": [
+    {
+      "type": 0,
+      "value": "Ein Titel auf deiner Merkliste ist jetzt in der Mediathek."
     }
   ],
   "web.onboarding.gate.progressFailed": [
@@ -129824,6 +129900,12 @@
       "value": "Hauptschalter für dieses Profil"
     }
   ],
+  "web.settings.notifications.episodes.nextUpDescription": [
+    {
+      "type": 0,
+      "value": "Erhalte eine Benachrichtigung, wenn eine neue Folge einer Serie erscheint, bei der du auf dem neuesten Stand bist, oder wenn ein Titel verfügbar wird, den du auf deine Merkliste gesetzt oder angefragt hast."
+    }
+  ],
   "web.settings.notifications.episodes.seriesLink": [
     {
       "type": 0,
@@ -130121,7 +130203,7 @@
   "web.settings.notifications.reason.requests": [
     {
       "type": 0,
-      "value": "Anfragen"
+      "value": "Anfragen und Merkliste"
     }
   ],
   "web.settings.notifications.reason.watchlist": [

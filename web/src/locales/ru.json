@@ -139143,6 +139143,12 @@
       "value": "Здесь будут появляться уведомления о новых сериях сериалов, которые вы добавили в Избранное или список просмотра либо смотрите сейчас."
     }
   ],
+  "web.notifications.inbox.emptyHintNextUp": [
+    {
+      "type": 0,
+      "value": "Здесь будут появляться уведомления о новых сериях сериалов, все вышедшие серии которых вы уже посмотрели, а также о появлении материалов из вашего списка просмотра или по вашим запросам."
+    }
+  ],
   "web.notifications.inbox.emptyUnread": [
     {
       "type": 0,
@@ -139605,6 +139611,30 @@
     {
       "type": 0,
       "value": "Режимы просмотра уведомлений"
+    }
+  ],
+  "web.notifications.inbox.watchlistAvailable": [
+    {
+      "type": 0,
+      "value": "Материал из списка просмотра доступен"
+    }
+  ],
+  "web.notifications.inbox.watchlistMovieAvailable": [
+    {
+      "type": 0,
+      "value": "Фильм из вашего списка просмотра теперь доступен"
+    }
+  ],
+  "web.notifications.inbox.watchlistSeriesAvailable": [
+    {
+      "type": 0,
+      "value": "Сериал из вашего списка просмотра теперь доступен"
+    }
+  ],
+  "web.notifications.inbox.watchlistTitleAvailable": [
+    {
+      "type": 0,
+      "value": "Материал из вашего списка просмотра теперь доступен"
     }
   ],
   "web.notifications.preferences.continueWatching": [
@@ -140205,6 +140235,12 @@
       "value": "Выбранные сериалы"
     }
   ],
+  "web.notifications.series.afterCatchUp": [
+    {
+      "type": 0,
+      "value": "После просмотра вышедших серий"
+    }
+  ],
   "web.notifications.series.allReasons": [
     {
       "type": 0,
@@ -140263,10 +140299,22 @@
       "value": "Здесь появятся сериалы, которые вы добавили в избранное или в список просмотра либо начали смотреть."
     }
   ],
+  "web.notifications.series.emptyHintNextUp": [
+    {
+      "type": 0,
+      "value": "Сериалы появятся здесь, когда вы досмотрите серию. Если вы посмотрели все вышедшие серии сериала, то, когда выйдет следующая, вы получите уведомление."
+    }
+  ],
   "web.notifications.series.filterByReason": [
     {
       "type": 0,
       "value": "Фильтр по причине"
+    }
+  ],
+  "web.notifications.series.filterLabel": [
+    {
+      "type": 0,
+      "value": "Фильтр сериалов"
     }
   ],
   "web.notifications.series.intro": [
@@ -140377,10 +140425,32 @@
       "value": "last"
     }
   ],
+  "web.notifications.series.nextEpisodeAfter": [
+    {
+      "type": 0,
+      "value": "Следующая серия после "
+    },
+    {
+      "type": 1,
+      "value": "code"
+    }
+  ],
+  "web.notifications.series.nextNewEpisode": [
+    {
+      "type": 0,
+      "value": "Следующая новая серия"
+    }
+  ],
   "web.notifications.series.noMatch": [
     {
       "type": 0,
       "value": "Нет подходящих сериалов. Измените запрос или причину."
+    }
+  ],
+  "web.notifications.series.noMatchFilter": [
+    {
+      "type": 0,
+      "value": "Нет подходящих сериалов. Измените запрос или фильтр."
     }
   ],
   "web.notifications.series.notificationsOff": [
@@ -140577,6 +140647,12 @@
     {
       "type": 0,
       "value": "» уже доступен"
+    }
+  ],
+  "web.notifications.toast.watchlistArrived": [
+    {
+      "type": 0,
+      "value": "Материал из вашего списка просмотра появился в медиатеке."
     }
   ],
   "web.onboarding.gate.progressFailed": [
@@ -154309,6 +154385,12 @@
       "value": "Общий переключатель для этого профиля"
     }
   ],
+  "web.settings.notifications.episodes.nextUpDescription": [
+    {
+      "type": 0,
+      "value": "Получайте уведомления о новых сериях сериалов, все вышедшие серии которых вы уже посмотрели, а также о появлении материалов из вашего списка просмотра или по вашим запросам."
+    }
+  ],
   "web.settings.notifications.episodes.seriesLink": [
     {
       "type": 0,
@@ -154598,7 +154680,7 @@
   "web.settings.notifications.reason.requests": [
     {
       "type": 0,
-      "value": "Запросы"
+      "value": "Запросы и список просмотра"
     }
   ],
   "web.settings.notifications.reason.watchlist": [

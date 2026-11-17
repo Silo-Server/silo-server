@@ -115695,6 +115695,12 @@
       "value": "Favorilerinizdeki, izleme listesindeki veya izlemekte olduğunuz dizilere yeni bölümler geldiğinde burada bildirim alırsınız."
     }
   ],
+  "web.notifications.inbox.emptyHintNextUp": [
+    {
+      "type": 0,
+      "value": "Son bölümüne kadar izlediğiniz bir diziye yeni bölüm geldiğinde veya izleme listenize eklediğiniz ya da istediğiniz bir içerik geldiğinde burada bildirim alırsınız."
+    }
+  ],
   "web.notifications.inbox.emptyUnread": [
     {
       "type": 0,
@@ -116085,6 +116091,30 @@
     {
       "type": 0,
       "value": "Bildirim görünümleri"
+    }
+  ],
+  "web.notifications.inbox.watchlistAvailable": [
+    {
+      "type": 0,
+      "value": "İzleme listesindeki içerik hazır"
+    }
+  ],
+  "web.notifications.inbox.watchlistMovieAvailable": [
+    {
+      "type": 0,
+      "value": "İzleme listenizdeki bir film artık izlenebilir"
+    }
+  ],
+  "web.notifications.inbox.watchlistSeriesAvailable": [
+    {
+      "type": 0,
+      "value": "İzleme listenizdeki bir dizi artık izlenebilir"
+    }
+  ],
+  "web.notifications.inbox.watchlistTitleAvailable": [
+    {
+      "type": 0,
+      "value": "İzleme listenizdeki bir içerik artık izlenebilir"
     }
   ],
   "web.notifications.preferences.continueWatching": [
@@ -116549,6 +116579,12 @@
       "value": "Seçili diziler"
     }
   ],
+  "web.notifications.series.afterCatchUp": [
+    {
+      "type": 0,
+      "value": "İzlemeyi yetiştirdikten sonra"
+    }
+  ],
   "web.notifications.series.allReasons": [
     {
       "type": 0,
@@ -116607,10 +116643,22 @@
       "value": "Favorilere eklediğiniz, izleme listesine eklediğiniz veya izlemeye başladığınız diziler burada görünür."
     }
   ],
+  "web.notifications.series.emptyHintNextUp": [
+    {
+      "type": 0,
+      "value": "Bir bölümü bitirdikten sonra diziler burada görünür. Bir dizide izlemeyi yetiştirdiğinizde, dizinin sonraki bölümü geldiğinde bildirim alırsınız."
+    }
+  ],
   "web.notifications.series.filterByReason": [
     {
       "type": 0,
       "value": "Nedene göre filtrele"
+    }
+  ],
+  "web.notifications.series.filterLabel": [
+    {
+      "type": 0,
+      "value": "Dizileri filtrele"
     }
   ],
   "web.notifications.series.intro": [
@@ -116717,10 +116765,32 @@
       "value": "last"
     }
   ],
+  "web.notifications.series.nextEpisodeAfter": [
+    {
+      "type": 1,
+      "value": "code"
+    },
+    {
+      "type": 0,
+      "value": " bölümünden sonraki bölüm"
+    }
+  ],
+  "web.notifications.series.nextNewEpisode": [
+    {
+      "type": 0,
+      "value": "Sonraki yeni bölüm"
+    }
+  ],
   "web.notifications.series.noMatch": [
     {
       "type": 0,
       "value": "Eşleşen dizi yok. Başka bir arama veya neden deneyin."
+    }
+  ],
+  "web.notifications.series.noMatchFilter": [
+    {
+      "type": 0,
+      "value": "Eşleşen dizi yok. Başka bir arama veya filtre deneyin."
     }
   ],
   "web.notifications.series.notificationsOff": [
@@ -116897,6 +116967,12 @@
     {
       "type": 0,
       "value": " artık izlenebilir"
+    }
+  ],
+  "web.notifications.toast.watchlistArrived": [
+    {
+      "type": 0,
+      "value": "İzleme listenizdeki bir içerik kitaplığa eklendi."
     }
   ],
   "web.onboarding.gate.progressFailed": [
@@ -128887,6 +128963,12 @@
       "value": "Bu profil için ana anahtar"
     }
   ],
+  "web.settings.notifications.episodes.nextUpDescription": [
+    {
+      "type": 0,
+      "value": "Son bölümüne kadar izlediğiniz bir diziye yeni bölüm geldiğinde veya izleme listenize eklediğiniz ya da istediğiniz bir içerik geldiğinde bildirim alın."
+    }
+  ],
   "web.settings.notifications.episodes.seriesLink": [
     {
       "type": 0,
@@ -129176,7 +129258,7 @@
   "web.settings.notifications.reason.requests": [
     {
       "type": 0,
-      "value": "İstekler"
+      "value": "İstekler ve izleme listesi"
     }
   ],
   "web.settings.notifications.reason.watchlist": [

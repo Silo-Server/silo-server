@@ -106344,6 +106344,12 @@
       "value": "お気に入り、ウォッチリストに追加、または視聴中のシリーズに新しいエピソードが追加されると、ここに通知されます。"
     }
   ],
+  "web.notifications.inbox.emptyHintNextUp": [
+    {
+      "type": 0,
+      "value": "視聴が追いついているシリーズに新しいエピソードが追加されたとき、またはウォッチリストに追加したタイトルやリクエストしたタイトルがライブラリに追加されたときに、ここに通知されます。"
+    }
+  ],
   "web.notifications.inbox.emptyUnread": [
     {
       "type": 0,
@@ -106710,6 +106716,30 @@
     {
       "type": 0,
       "value": "通知の表示"
+    }
+  ],
+  "web.notifications.inbox.watchlistAvailable": [
+    {
+      "type": 0,
+      "value": "ウォッチリストのタイトルが視聴可能"
+    }
+  ],
+  "web.notifications.inbox.watchlistMovieAvailable": [
+    {
+      "type": 0,
+      "value": "ウォッチリストの映画が視聴可能になりました"
+    }
+  ],
+  "web.notifications.inbox.watchlistSeriesAvailable": [
+    {
+      "type": 0,
+      "value": "ウォッチリストのシリーズが視聴可能になりました"
+    }
+  ],
+  "web.notifications.inbox.watchlistTitleAvailable": [
+    {
+      "type": 0,
+      "value": "ウォッチリストのタイトルが視聴可能になりました"
     }
   ],
   "web.notifications.preferences.continueWatching": [
@@ -107130,6 +107160,12 @@
       "value": "選択したシリーズ"
     }
   ],
+  "web.notifications.series.afterCatchUp": [
+    {
+      "type": 0,
+      "value": "視聴が追いついた後"
+    }
+  ],
   "web.notifications.series.allReasons": [
     {
       "type": 0,
@@ -107188,10 +107224,22 @@
       "value": "お気に入りやウォッチリストに追加したシリーズ、視聴を始めたシリーズがここに表示されます。"
     }
   ],
+  "web.notifications.series.emptyHintNextUp": [
+    {
+      "type": 0,
+      "value": "エピソードを見終わると、そのシリーズがここに表示されます。シリーズの視聴が追いつくと、次のエピソードが追加されたときに通知されます。"
+    }
+  ],
   "web.notifications.series.filterByReason": [
     {
       "type": 0,
       "value": "理由で絞り込む"
+    }
+  ],
+  "web.notifications.series.filterLabel": [
+    {
+      "type": 0,
+      "value": "シリーズを絞り込む"
     }
   ],
   "web.notifications.series.intro": [
@@ -107298,10 +107346,32 @@
       "value": "last"
     }
   ],
+  "web.notifications.series.nextEpisodeAfter": [
+    {
+      "type": 1,
+      "value": "code"
+    },
+    {
+      "type": 0,
+      "value": "の次のエピソード"
+    }
+  ],
+  "web.notifications.series.nextNewEpisode": [
+    {
+      "type": 0,
+      "value": "次の新しいエピソード"
+    }
+  ],
   "web.notifications.series.noMatch": [
     {
       "type": 0,
       "value": "一致するシリーズがありません。別の検索語句か理由をお試しください。"
+    }
+  ],
+  "web.notifications.series.noMatchFilter": [
+    {
+      "type": 0,
+      "value": "一致するシリーズがありません。別の検索語句かフィルターをお試しください。"
     }
   ],
   "web.notifications.series.notificationsOff": [
@@ -107478,6 +107548,12 @@
     {
       "type": 0,
       "value": "が視聴可能になりました"
+    }
+  ],
+  "web.notifications.toast.watchlistArrived": [
+    {
+      "type": 0,
+      "value": "ウォッチリストのタイトルがライブラリに追加されました。"
     }
   ],
   "web.onboarding.gate.progressFailed": [
@@ -118782,6 +118858,12 @@
       "value": "このプロフィールの通知全体のスイッチ"
     }
   ],
+  "web.settings.notifications.episodes.nextUpDescription": [
+    {
+      "type": 0,
+      "value": "視聴が追いついているシリーズに新しいエピソードが追加されたとき、またはウォッチリストに追加したタイトルやリクエストしたタイトルがライブラリに追加されたときに通知されます。"
+    }
+  ],
   "web.settings.notifications.episodes.seriesLink": [
     {
       "type": 0,
@@ -119067,7 +119149,7 @@
   "web.settings.notifications.reason.requests": [
     {
       "type": 0,
-      "value": "リクエスト"
+      "value": "リクエストとウォッチリスト"
     }
   ],
   "web.settings.notifications.reason.watchlist": [

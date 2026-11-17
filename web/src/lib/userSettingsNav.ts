@@ -472,6 +472,14 @@ const USER_SETTINGS_GROUPS: UserSettingsNavGroupSource[] = [
         ],
       },
       {
+        path: "api-keys",
+        label: "web.settings.apiKeys.title",
+        icon: KeyRound,
+        description: "web.settings.nav.apiKeys.description",
+        keywords: ["api", "key", "token", "script", "automation", "export", "sync", "websocket"],
+        settings: ["web.settings.apiKeys.createKey"],
+      },
+      {
         path: "watch-providers",
         label: "web.settings.watchProviders.title",
         icon: Cloud,

@@ -127563,6 +127563,12 @@
       "value": "Ovdje ćete dobiti obavijest kad stignu nove epizode serija koje su vam u favoritima, na popisu za gledanje ili koje gledate."
     }
   ],
+  "web.notifications.inbox.emptyHintNextUp": [
+    {
+      "type": 0,
+      "value": "Ovdje ćete dobiti obavijest kad stigne nova epizoda serije čije ste sve dostupne epizode pogledali ili kad stigne naslov koji ste dodali na popis za gledanje ili zatražili."
+    }
+  ],
   "web.notifications.inbox.emptyUnread": [
     {
       "type": 0,
@@ -127997,6 +128003,30 @@
     {
       "type": 0,
       "value": "Prikazi obavijesti"
+    }
+  ],
+  "web.notifications.inbox.watchlistAvailable": [
+    {
+      "type": 0,
+      "value": "Dostupan je naslov s popisa za gledanje"
+    }
+  ],
+  "web.notifications.inbox.watchlistMovieAvailable": [
+    {
+      "type": 0,
+      "value": "Film s vašeg popisa za gledanje sada je dostupan"
+    }
+  ],
+  "web.notifications.inbox.watchlistSeriesAvailable": [
+    {
+      "type": 0,
+      "value": "Serija s vašeg popisa za gledanje sada je dostupna"
+    }
+  ],
+  "web.notifications.inbox.watchlistTitleAvailable": [
+    {
+      "type": 0,
+      "value": "Naslov s vašeg popisa za gledanje sada je dostupan"
     }
   ],
   "web.notifications.preferences.continueWatching": [
@@ -128537,6 +128567,12 @@
       "value": "Odabrane serije"
     }
   ],
+  "web.notifications.series.afterCatchUp": [
+    {
+      "type": 0,
+      "value": "Nakon što pogledate dostupne epizode"
+    }
+  ],
   "web.notifications.series.allReasons": [
     {
       "type": 0,
@@ -128595,10 +128631,22 @@
       "value": "Ovdje se prikazuju serije koje dodate u favorite ili na popis za gledanje te serije koje počnete gledati."
     }
   ],
+  "web.notifications.series.emptyHintNextUp": [
+    {
+      "type": 0,
+      "value": "Serije se ovdje prikazuju nakon što pogledate epizodu do kraja. Kad pogledate sve dostupne epizode serije, dobit ćete obavijest kad stigne njezina sljedeća epizoda."
+    }
+  ],
   "web.notifications.series.filterByReason": [
     {
       "type": 0,
       "value": "Filtriraj po razlogu"
+    }
+  ],
+  "web.notifications.series.filterLabel": [
+    {
+      "type": 0,
+      "value": "Filtriraj serije"
     }
   ],
   "web.notifications.series.intro": [
@@ -128705,10 +128753,32 @@
       "value": "last"
     }
   ],
+  "web.notifications.series.nextEpisodeAfter": [
+    {
+      "type": 0,
+      "value": "Sljedeća epizoda nakon "
+    },
+    {
+      "type": 1,
+      "value": "code"
+    }
+  ],
+  "web.notifications.series.nextNewEpisode": [
+    {
+      "type": 0,
+      "value": "Sljedeća nova epizoda"
+    }
+  ],
   "web.notifications.series.noMatch": [
     {
       "type": 0,
       "value": "Nijedna serija ne odgovara. Pokušajte s drugim pretraživanjem ili razlogom."
+    }
+  ],
+  "web.notifications.series.noMatchFilter": [
+    {
+      "type": 0,
+      "value": "Nijedna serija ne odgovara. Pokušajte s drugim pretraživanjem ili filtrom."
     }
   ],
   "web.notifications.series.notificationsOff": [
@@ -128889,6 +128959,12 @@
     {
       "type": 0,
       "value": " sada je dostupna"
+    }
+  ],
+  "web.notifications.toast.watchlistArrived": [
+    {
+      "type": 0,
+      "value": "Naslov s vašeg popisa za gledanje stigao je u medijateku."
     }
   ],
   "web.onboarding.gate.progressFailed": [
@@ -141831,6 +141907,12 @@
       "value": "Glavni prekidač za ovaj profil"
     }
   ],
+  "web.settings.notifications.episodes.nextUpDescription": [
+    {
+      "type": 0,
+      "value": "Primajte obavijest kad stigne nova epizoda serije čije ste sve dostupne epizode pogledali ili kad stigne naslov koji ste dodali na popis za gledanje ili zatražili."
+    }
+  ],
   "web.settings.notifications.episodes.seriesLink": [
     {
       "type": 0,
@@ -142120,7 +142202,7 @@
   "web.settings.notifications.reason.requests": [
     {
       "type": 0,
-      "value": "Zahtjevi"
+      "value": "Zahtjevi i popis za gledanje"
     }
   ],
   "web.settings.notifications.reason.watchlist": [
