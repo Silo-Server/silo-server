@@ -128329,6 +128329,18 @@
       "value": "访问密钥"
     }
   ],
+  "web.setup.storage.applyingBody": [
+    {
+      "type": 0,
+      "value": "Silo正在重启以使用新的存储。Silo恢复后将继续设置。"
+    }
+  ],
+  "web.setup.storage.applyingTitle": [
+    {
+      "type": 0,
+      "value": "正在应用存储设置"
+    }
+  ],
   "web.setup.storage.authCloudflare": [
     {
       "type": 0,
@@ -128609,6 +128621,18 @@
     {
       "type": 0,
       "value": "连接URL"
+    }
+  ],
+  "web.setup.storage.restartSlowBody": [
+    {
+      "type": 0,
+      "value": "只有在Docker、Kubernetes或systemd设置为自动重启Silo时，Silo才会自行恢复。否则，请手动重新启动Silo。Silo恢复后将继续设置。"
+    }
+  ],
+  "web.setup.storage.restartSlowTitle": [
+    {
+      "type": 0,
+      "value": "Silo尚未重启"
     }
   ],
   "web.setup.storage.saveFailed": [

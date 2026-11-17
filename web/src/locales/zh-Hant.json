@@ -128835,6 +128835,18 @@
       "value": "存取金鑰"
     }
   ],
+  "web.setup.storage.applyingBody": [
+    {
+      "type": 0,
+      "value": "Silo 正在重新啟動以使用新的儲存空間。重新啟動完成後，設定會繼續進行。"
+    }
+  ],
+  "web.setup.storage.applyingTitle": [
+    {
+      "type": 0,
+      "value": "正在套用儲存空間設定"
+    }
+  ],
   "web.setup.storage.authCloudflare": [
     {
       "type": 0,
@@ -129115,6 +129127,18 @@
     {
       "type": 0,
       "value": "連線 URL"
+    }
+  ],
+  "web.setup.storage.restartSlowBody": [
+    {
+      "type": 0,
+      "value": "只有在 Docker、Kubernetes 或 systemd 設定為自動重新啟動 Silo 時，Silo 才會自行重新啟動。否則，請自行再次啟動 Silo。重新啟動完成後，設定會繼續進行。"
+    }
+  ],
+  "web.setup.storage.restartSlowTitle": [
+    {
+      "type": 0,
+      "value": "Silo 尚未重新啟動"
     }
   ],
   "web.setup.storage.saveFailed": [

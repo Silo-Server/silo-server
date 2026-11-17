@@ -127897,6 +127897,18 @@
       "value": "액세스 키"
     }
   ],
+  "web.setup.storage.applyingBody": [
+    {
+      "type": 0,
+      "value": "새 저장소를 사용하기 위해 Silo를 다시 시작하고 있어요. Silo가 다시 실행되면 설정이 계속돼요."
+    }
+  ],
+  "web.setup.storage.applyingTitle": [
+    {
+      "type": 0,
+      "value": "저장소 설정 적용 중"
+    }
+  ],
   "web.setup.storage.authCloudflare": [
     {
       "type": 0,
@@ -128177,6 +128189,18 @@
     {
       "type": 0,
       "value": "연결 URL"
+    }
+  ],
+  "web.setup.storage.restartSlowBody": [
+    {
+      "type": 0,
+      "value": "Docker, Kubernetes 또는 systemd에서 Silo를 다시 시작하도록 설정한 경우에만 Silo가 자동으로 다시 실행돼요. 그렇지 않으면 Silo를 직접 다시 시작하세요. Silo가 다시 실행되면 설정이 계속돼요."
+    }
+  ],
+  "web.setup.storage.restartSlowTitle": [
+    {
+      "type": 0,
+      "value": "Silo가 아직 다시 시작되지 않았어요"
     }
   ],
   "web.setup.storage.saveFailed": [

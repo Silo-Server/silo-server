@@ -163757,6 +163757,18 @@
       "value": "Ключ доступа"
     }
   ],
+  "web.setup.storage.applyingBody": [
+    {
+      "type": 0,
+      "value": "Silo перезапускается, чтобы использовать новое хранилище. Настройка продолжится, когда сервер снова станет доступен."
+    }
+  ],
+  "web.setup.storage.applyingTitle": [
+    {
+      "type": 0,
+      "value": "Применение настроек хранилища"
+    }
+  ],
   "web.setup.storage.authCloudflare": [
     {
       "type": 0,
@@ -164037,6 +164049,18 @@
     {
       "type": 0,
       "value": "URL подключения"
+    }
+  ],
+  "web.setup.storage.restartSlowBody": [
+    {
+      "type": 0,
+      "value": "Silo запустится снова сам, только если в Docker, Kubernetes или systemd настроен его автоматический перезапуск. В противном случае запустите Silo вручную. Настройка продолжится, когда сервер снова станет доступен."
+    }
+  ],
+  "web.setup.storage.restartSlowTitle": [
+    {
+      "type": 0,
+      "value": "Перезапуск Silo ещё не завершён"
     }
   ],
   "web.setup.storage.saveFailed": [

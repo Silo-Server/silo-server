@@ -126973,6 +126973,18 @@
       "value": "アクセスキー"
     }
   ],
+  "web.setup.storage.applyingBody": [
+    {
+      "type": 0,
+      "value": "新しいストレージを使用するため、Siloを再起動しています。再起動が完了すると、セットアップが続行されます。"
+    }
+  ],
+  "web.setup.storage.applyingTitle": [
+    {
+      "type": 0,
+      "value": "ストレージの設定を適用しています"
+    }
+  ],
   "web.setup.storage.authCloudflare": [
     {
       "type": 0,
@@ -127253,6 +127265,18 @@
     {
       "type": 0,
       "value": "接続URL"
+    }
+  ],
+  "web.setup.storage.restartSlowBody": [
+    {
+      "type": 0,
+      "value": "Siloが自動的に復帰するのは、Docker、Kubernetes、またはsystemdで再起動するよう設定されている場合のみです。それ以外の場合は、Siloを手動で起動し直してください。再起動が完了すると、セットアップが続行されます。"
+    }
+  ],
+  "web.setup.storage.restartSlowTitle": [
+    {
+      "type": 0,
+      "value": "Siloはまだ再起動していません"
     }
   ],
   "web.setup.storage.saveFailed": [

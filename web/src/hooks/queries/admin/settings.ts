@@ -210,18 +210,20 @@ export function useAdminRestartKeys() {
   });
 }
 
+/** Reads server status from whichever process answers, bypassing the query cache. */
+export async function fetchAdminServerStatus(): Promise<AdminServerStatus> {
+  const profileContext = captureProfileRequestContext();
+  if (!profileContext) throw new StaleApiRequestContextError();
+  const status = await v2("GET /api/v2/admin/server/status", { profileContext });
+  if (!isCapturedProfileAuthorityActive(profileContext)) throw new StaleApiRequestContextError();
+  return status;
+}
+
 export function useAdminServerStatus(enabled = true) {
   return useQuery({
     queryKey: adminKeys.serverStatus(),
     enabled,
-    queryFn: async (): Promise<AdminServerStatus> => {
-      const profileContext = captureProfileRequestContext();
-      if (!profileContext) throw new StaleApiRequestContextError();
-      const status = await v2("GET /api/v2/admin/server/status", { profileContext });
-      if (!isCapturedProfileAuthorityActive(profileContext))
-        throw new StaleApiRequestContextError();
-      return status;
-    },
+    queryFn: fetchAdminServerStatus,
     staleTime: 15_000,
   });
 }

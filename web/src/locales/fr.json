@@ -150205,6 +150205,18 @@
       "value": "Clé d’accès"
     }
   ],
+  "web.setup.storage.applyingBody": [
+    {
+      "type": 0,
+      "value": "Silo redémarre pour utiliser le nouveau stockage. La configuration reprendra à son retour."
+    }
+  ],
+  "web.setup.storage.applyingTitle": [
+    {
+      "type": 0,
+      "value": "Application des paramètres de stockage"
+    }
+  ],
   "web.setup.storage.authCloudflare": [
     {
       "type": 0,
@@ -150485,6 +150497,18 @@
     {
       "type": 0,
       "value": "URL de connexion"
+    }
+  ],
+  "web.setup.storage.restartSlowBody": [
+    {
+      "type": 0,
+      "value": "Silo ne redémarre de lui-même que si Docker, Kubernetes ou systemd est configuré pour le relancer. Sinon, relancez Silo vous-même. La configuration reprendra à son retour."
+    }
+  ],
+  "web.setup.storage.restartSlowTitle": [
+    {
+      "type": 0,
+      "value": "Silo n’a pas encore redémarré"
     }
   ],
   "web.setup.storage.saveFailed": [

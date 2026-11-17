@@ -138959,6 +138959,18 @@
       "value": "Åtkomstnyckel"
     }
   ],
+  "web.setup.storage.applyingBody": [
+    {
+      "type": 0,
+      "value": "Silo startar om för att använda den nya lagringen. Konfigurationen fortsätter när Silo är tillbaka."
+    }
+  ],
+  "web.setup.storage.applyingTitle": [
+    {
+      "type": 0,
+      "value": "Tillämpar lagringsinställningar"
+    }
+  ],
   "web.setup.storage.authCloudflare": [
     {
       "type": 0,
@@ -139239,6 +139251,18 @@
     {
       "type": 0,
       "value": "Anslutnings-URL"
+    }
+  ],
+  "web.setup.storage.restartSlowBody": [
+    {
+      "type": 0,
+      "value": "Silo kommer bara tillbaka av sig själv om Docker, Kubernetes eller systemd är inställt på att starta om Silo. Annars startar du Silo igen själv. Konfigurationen fortsätter när Silo är tillbaka."
+    }
+  ],
+  "web.setup.storage.restartSlowTitle": [
+    {
+      "type": 0,
+      "value": "Silo har inte startat om än"
     }
   ],
   "web.setup.storage.saveFailed": [
