@@ -160,12 +160,26 @@ func TestHDR10PlusBackfillRecordsFrameStatusDB(t *testing.T) {
 		return firstVideoFrame{SideData: row.sideData, ColorRange: row.frameRange}, row.readErr
 	}
 
+	updatedAt := func(name string) time.Time {
+		t.Helper()
+		var at time.Time
+		if err := pool.QueryRow(ctx, `SELECT updated_at FROM media_files WHERE id = $1`, ids[name]).Scan(&at); err != nil {
+			t.Fatal(err)
+		}
+		return at
+	}
+	unclassifiedAt := updatedAt("dv7-no-nlq")
+
 	result, err := backfiller.Run(ctx, nil)
 	if err != nil {
 		t.Fatalf("first pass: %v", err)
 	}
-	if result.DolbyVisionMEL != 1 || result.DolbyVisionFEL != 2 {
-		t.Fatalf("first pass = %+v, want one MEL and two FEL recorded", result)
+	if result.DolbyVisionMEL != 1 || result.DolbyVisionFEL != 2 || result.Unchanged != 1 {
+		t.Fatalf("first pass = %+v, want one MEL and two FEL recorded and one file unchanged", result)
+	}
+	// A read that tells nothing new leaves the row as it was.
+	if got := updatedAt("dv7-no-nlq"); !got.Equal(unclassifiedAt) {
+		t.Fatalf("unclassifiable file's updated_at = %v, want it left at %v", got, unclassifiedAt)
 	}
 	track := func(name string) map[string]any {
 		t.Helper()

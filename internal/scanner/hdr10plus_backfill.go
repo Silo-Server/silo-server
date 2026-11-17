@@ -88,6 +88,10 @@ type HDR10PlusBackfillResult struct {
 	// is read again on the next pass.
 	DolbyVisionMEL int `json:"dolby_vision_mel"`
 	DolbyVisionFEL int `json:"dolby_vision_fel"`
+	// Unchanged files were read but told nothing their row lacks: the
+	// enhancement layer of a Dolby Vision file whose first frame carries no
+	// NLQ coefficients. Their row is not written.
+	Unchanged int `json:"unchanged"`
 }
 
 // HDR10PlusBackfiller records HDR10+ status on video probed before the
@@ -166,6 +170,7 @@ const (
 	hdr10PlusOutcomeUnreadable
 	hdr10PlusOutcomeTimedOut
 	hdr10PlusOutcomeFrameRangeOnly
+	hdr10PlusOutcomeUnchanged
 )
 
 // Run makes one pass over every candidate file. progress, when non-nil, is
@@ -230,6 +235,8 @@ func (b *HDR10PlusBackfiller) Run(ctx context.Context, progress func(HDR10PlusBa
 					result.Unreadable++
 				case hdr10PlusOutcomeTimedOut:
 					result.TimedOut++
+				case hdr10PlusOutcomeUnchanged:
+					result.Unchanged++
 				}
 				if consecutiveTimeouts >= hdr10PlusBackfillMaxTimeouts {
 					return fmt.Errorf("%w: %d HDR10+ frame reads in a row timed out after %s",
@@ -377,6 +384,16 @@ func (b *HDR10PlusBackfiller) backfillFile(ctx context.Context, c hdr10PlusCandi
 	if hasEL && (c.track.DVEnhancementLayer == "" || c.track.DVEnhancementLayer == "unknown") {
 		layer = mediaprobe.DolbyVisionEnhancementLayer(frame.SideData)
 	}
+	frameRange := mediaprobe.RecordedFrameColorRange(frame.ColorRange)
+	if !c.track.HDR10PlusUnchecked && c.track.FrameColorRange == frameRange && layer == "" {
+		// The read told nothing new, as for an enhancement layer whose frame
+		// carries no NLQ coefficients, so the row and its updated_at stay as
+		// they are. Only a wait an earlier no-frame read left is dropped.
+		if _, err := b.pool.Exec(ctx, `DELETE FROM hdr10_plus_backfill_no_frame WHERE media_file_id = $1`, c.id); err != nil {
+			return 0, "", fmt.Errorf("clearing the HDR10+ no-frame wait for file %d: %w", c.id, err)
+		}
+		return hdr10PlusOutcomeUnchanged, "", nil
+	}
 	// Set only frame_color_range and, on a track not yet checked for HDR10+,
 	// hdr10_plus and for an HDR10+ file video_range_type, and for a known
 	// enhancement layer dv_enhancement_layer, on the first track, so fields
@@ -402,7 +419,7 @@ func (b *HDR10PlusBackfiller) backfillFile(ctx context.Context, c hdr10PlusCandi
 		  AND file_size = $2
 		  AND date_trunc('microseconds', file_modified_at) IS NOT DISTINCT FROM $3::timestamptz
 		  AND video_tracks->0 = $4::jsonb`,
-		c.id, c.size, c.normalizedModifiedAt(), c.trackJSON, hdr10Plus, mediaprobe.RangeTypeWithHDR10Plus(c.track), mediaprobe.RecordedFrameColorRange(frame.ColorRange), layer)
+		c.id, c.size, c.normalizedModifiedAt(), c.trackJSON, hdr10Plus, mediaprobe.RangeTypeWithHDR10Plus(c.track), frameRange, layer)
 	if err != nil {
 		return 0, "", fmt.Errorf("recording HDR10+ status for file %d: %w", c.id, err)
 	}
