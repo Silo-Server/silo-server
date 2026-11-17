@@ -47430,6 +47430,20 @@
       "value": "連線檢查失敗。"
     }
   ],
+  "web.admin.recommendations.embedding.lockConflictNoProvider": [
+    {
+      "type": 0,
+      "value": "未選擇嵌入提供者。請選擇提供「"
+    },
+    {
+      "type": 1,
+      "value": "locked_model"
+    },
+    {
+      "type": 0,
+      "value": "」的提供者，或重設嵌入向量以使用其他模型。"
+    }
+  ],
   "web.admin.recommendations.embedding.model": [
     {
       "type": 0,

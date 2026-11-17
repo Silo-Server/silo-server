@@ -58537,6 +58537,20 @@
       "value": "Verifica della connessione non riuscita."
     }
   ],
+  "web.admin.recommendations.embedding.lockConflictNoProvider": [
+    {
+      "type": 0,
+      "value": "Nessun provider di embedding selezionato. Scegli un provider che fornisca “"
+    },
+    {
+      "type": 1,
+      "value": "locked_model"
+    },
+    {
+      "type": 0,
+      "value": "” o reimposta gli embedding per usare un altro modello."
+    }
+  ],
   "web.admin.recommendations.embedding.model": [
     {
       "type": 0,

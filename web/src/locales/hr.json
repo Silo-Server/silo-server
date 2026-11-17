@@ -58769,6 +58769,20 @@
       "value": "Provjera veze nije uspjela."
     }
   ],
+  "web.admin.recommendations.embedding.lockConflictNoProvider": [
+    {
+      "type": 0,
+      "value": "Nije odabran pružatelj embeddinga. Odaberite pružatelja koji nudi „"
+    },
+    {
+      "type": 1,
+      "value": "locked_model"
+    },
+    {
+      "type": 0,
+      "value": "“ ili resetirajte embeddinge kako biste koristili drugi model."
+    }
+  ],
   "web.admin.recommendations.embedding.model": [
     {
       "type": 0,

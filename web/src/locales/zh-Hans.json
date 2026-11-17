@@ -47300,6 +47300,20 @@
       "value": "连接检查失败。"
     }
   ],
+  "web.admin.recommendations.embedding.lockConflictNoProvider": [
+    {
+      "type": 0,
+      "value": "未选择嵌入提供商。请选择提供“"
+    },
+    {
+      "type": 1,
+      "value": "locked_model"
+    },
+    {
+      "type": 0,
+      "value": "”的提供商，或重置嵌入以使用其他模型。"
+    }
+  ],
   "web.admin.recommendations.embedding.model": [
     {
       "type": 0,

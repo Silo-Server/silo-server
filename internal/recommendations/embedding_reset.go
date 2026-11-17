@@ -199,30 +199,42 @@ func (r *Repo) ResetEmbeddings(ctx context.Context) (EmbeddingsReset, error) {
 
 // EmbeddingLockConflict explains why the stored embedding lock rejects the
 // embedding configuration this server runs, or returns "" when it does not or
-// no lock is stored.
-func (w *Worker) EmbeddingLockConflict(ctx context.Context) (string, error) {
+// no lock is stored. key and args are as DescribeEmbeddingLockConflict
+// returns them.
+func (w *Worker) EmbeddingLockConflict(ctx context.Context) (text, key string, args map[string]string, err error) {
 	lock, err := w.engine.repo.GetEmbeddingLock(ctx)
 	if err != nil || lock == nil {
-		return "", err
+		return "", "", nil, err
 	}
-	conflict, _, _ := DescribeEmbeddingLockConflict(*lock, w.engine.cfg.EmbeddingBaseURL, w.engine.cfg.EmbeddingModel, 0)
-	return conflict, nil
+	text, key, args = DescribeEmbeddingLockConflict(*lock, w.engine.cfg.EmbeddingBaseURL, w.engine.cfg.EmbeddingModel, 0)
+	return text, key, args, nil
 }
+
+// Catalog keys of the lock conflict texts. The connection check shows all but
+// the no-provider text, so those keep its namespace.
+const (
+	lockConflictKeyNoProvider         = "web.admin.recommendations.embedding.lockConflictNoProvider"
+	lockConflictKeyStorageMismatch    = "web.admin.common.connectionCheck.result.embeddingStorageMismatch"
+	lockConflictKeyModelMismatch      = "web.admin.common.connectionCheck.result.embeddingModelMismatch"
+	lockConflictKeyDimensionsMismatch = "web.admin.common.connectionCheck.result.embeddingDimensionsMismatch"
+	lockConflictKeyLockOutOfRange     = "web.admin.common.connectionCheck.result.embeddingLockOutOfRange"
+)
 
 // DescribeEmbeddingLockConflict explains why lock rejects an embedding
 // configuration whose model returns sourceDimensions (0 when unknown), or
 // returns "" when it does not. A lock recording vectors Silo cannot store is a
 // conflict for every configuration. The text never quotes a base URL, which
-// can carry credentials. name identifies the text among the admin connection
-// check's catalog messages, filled from args; it is "" for text that check
-// never shows.
-func DescribeEmbeddingLockConflict(lock EmbeddingLock, baseURL, model string, sourceDimensions int) (text, name string, args map[string]string) {
+// can carry credentials. key is the text's translation catalog key, whose
+// placeholders args fills; the web admin shows the translation.
+func DescribeEmbeddingLockConflict(lock EmbeddingLock, baseURL, model string, sourceDimensions int) (text, key string, args map[string]string) {
 	if strings.TrimSpace(baseURL) == "" && lock.BaseURL != "" {
-		return fmt.Sprintf("No embedding provider is chosen. Choose a provider that serves %q, or reset embeddings to use another model.", lock.Model), "", nil
+		return fmt.Sprintf("No embedding provider is chosen. Choose a provider that serves %q, or reset embeddings to use another model.", lock.Model),
+			lockConflictKeyNoProvider,
+			map[string]string{"locked_model": lock.Model}
 	}
 	storageMismatch := func() (string, string, map[string]string) {
 		return fmt.Sprintf("Embeddings were stored at %d dimensions; this server stores %d. Reset embeddings.", lock.StorageDimensions, CanonicalEmbeddingDimensions),
-			"embeddingStorageMismatch",
+			lockConflictKeyStorageMismatch,
 			map[string]string{"stored": strconv.Itoa(lock.StorageDimensions), "supported": strconv.Itoa(CanonicalEmbeddingDimensions)}
 	}
 	err := lock.ValidateConfig(model)
@@ -238,11 +250,11 @@ func DescribeEmbeddingLockConflict(lock EmbeddingLock, baseURL, model string, so
 		switch {
 		case lock.Model != "" && !SameEmbeddingModel(lock.Model, model):
 			return fmt.Sprintf("Embeddings were created with model %q, not %q. Reset embeddings before switching models.", lock.Model, model),
-				"embeddingModelMismatch",
+				lockConflictKeyModelMismatch,
 				map[string]string{"locked_model": lock.Model, "model": model}
 		case lock.SourceDimensions != 0 && lock.SourceDimensions != sourceDimensions:
 			return fmt.Sprintf("Embeddings were created with %d-dimension vectors, but the model now returns %d. Reset embeddings before switching models.", lock.SourceDimensions, sourceDimensions),
-				"embeddingDimensionsMismatch",
+				lockConflictKeyDimensionsMismatch,
 				map[string]string{"locked": strconv.Itoa(lock.SourceDimensions), "current": strconv.Itoa(sourceDimensions)}
 		default:
 			return storageMismatch()
@@ -251,7 +263,7 @@ func DescribeEmbeddingLockConflict(lock EmbeddingLock, baseURL, model string, so
 	if lock.SourceDimensions <= 0 || lock.SourceDimensions > CanonicalEmbeddingDimensions {
 		return fmt.Sprintf("The embedding lock records %d-dimension vectors; Silo stores 1 to %d. Reset embeddings and use a model that returns at most %d dimensions.",
 				lock.SourceDimensions, CanonicalEmbeddingDimensions, CanonicalEmbeddingDimensions),
-			"embeddingLockOutOfRange",
+			lockConflictKeyLockOutOfRange,
 			map[string]string{"locked": strconv.Itoa(lock.SourceDimensions), "max": strconv.Itoa(CanonicalEmbeddingDimensions)}
 	}
 	return "", "", nil

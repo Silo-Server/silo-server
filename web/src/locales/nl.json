@@ -52439,6 +52439,20 @@
       "value": "Verbindingscontrole mislukt."
     }
   ],
+  "web.admin.recommendations.embedding.lockConflictNoProvider": [
+    {
+      "type": 0,
+      "value": "Er is geen embeddingprovider gekozen. Kies een provider die “"
+    },
+    {
+      "type": 1,
+      "value": "locked_model"
+    },
+    {
+      "type": 0,
+      "value": "” aanbiedt, of reset de embeddings om een ander model te gebruiken."
+    }
+  ],
   "web.admin.recommendations.embedding.model": [
     {
       "type": 0,

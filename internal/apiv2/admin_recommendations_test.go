@@ -22,15 +22,17 @@ type fakeAdminRecommendations struct {
 	last  recommendations.JobName
 	err   error
 
-	runsErr     error
-	noRuns      bool
-	conflict    string
-	conflictErr error
-	noRefresh   bool
-	refreshErr  error
-	resets      int
-	resetErr    error
-	sweepErr    error
+	runsErr      error
+	noRuns       bool
+	conflict     string
+	conflictKey  string
+	conflictArgs map[string]string
+	conflictErr  error
+	noRefresh    bool
+	refreshErr   error
+	resets       int
+	resetErr     error
+	sweepErr     error
 }
 
 func (f *fakeAdminRecommendations) StatusCounts(context.Context) (int, int, int, int, int, error) {
@@ -66,8 +68,8 @@ func (f *fakeAdminRecommendations) LastRuns(context.Context) (map[recommendation
 		},
 	}, nil
 }
-func (f *fakeAdminRecommendations) EmbeddingLockConflict(context.Context) (string, error) {
-	return f.conflict, f.conflictErr
+func (f *fakeAdminRecommendations) EmbeddingLockConflict(context.Context) (string, string, map[string]string, error) {
+	return f.conflict, f.conflictKey, f.conflictArgs, f.conflictErr
 }
 func (f *fakeAdminRecommendations) CacheRefreshedAt(context.Context) (*time.Time, error) {
 	if f.refreshErr != nil || f.noRefresh {
@@ -125,6 +127,19 @@ func TestAdminRecommendationsTransport(t *testing.T) {
 	if rec.Code != 200 || !status.Embeddings.Running || status.Embeddings.Count != 3 || status.Embeddings.Total == nil || *status.Embeddings.Total != 10 || status.TasteProfiles.Count != 4 || status.Recommendations.Count != 5 || status.Cowatch.Count != 6 {
 		t.Fatalf("status: %d %s", rec.Code, rec.Body)
 	}
+	if strings.Contains(rec.Body.String(), "lock_conflict_") {
+		t.Fatalf("lock conflict key without a conflict: %s", rec.Body)
+	}
+	f.conflict, f.conflictKey, f.conflictArgs = "Embeddings were created with model \"a\", not \"b\".", "web.admin.common.connectionCheck.result.embeddingModelMismatch", map[string]string{"locked_model": "a", "model": "b"}
+	rec = do(t, h, "GET", Prefix+"/admin/recommendations/status", "", bearer(adminToken))
+	status = AdminRecommendationsStatus{}
+	if err := json.Unmarshal(rec.Body.Bytes(), &status); err != nil {
+		t.Fatal(err)
+	}
+	if rec.Code != 200 || status.LockConflict != f.conflict || status.LockConflictKey != f.conflictKey || status.LockConflictArgs["locked_model"] != "a" || status.LockConflictArgs["model"] != "b" {
+		t.Fatalf("lock conflict: %d %s", rec.Code, rec.Body)
+	}
+	f.conflict, f.conflictKey, f.conflictArgs = "", "", nil
 	for _, tc := range []struct {
 		path string
 		job  recommendations.JobName

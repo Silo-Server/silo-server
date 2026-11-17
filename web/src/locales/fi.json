@@ -52759,6 +52759,20 @@
       "value": "Yhteyden tarkistus epäonnistui."
     }
   ],
+  "web.admin.recommendations.embedding.lockConflictNoProvider": [
+    {
+      "type": 0,
+      "value": "Upotuspalvelua ei ole valittu. Valitse palvelu, joka tarjoaa mallin ”"
+    },
+    {
+      "type": 1,
+      "value": "locked_model"
+    },
+    {
+      "type": 0,
+      "value": "”, tai nollaa upotukset, jotta voit käyttää toista mallia."
+    }
+  ],
   "web.admin.recommendations.embedding.model": [
     {
       "type": 0,

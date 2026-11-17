@@ -52815,6 +52815,20 @@
       "value": "Connection check failed."
     }
   ],
+  "web.admin.recommendations.embedding.lockConflictNoProvider": [
+    {
+      "type": 0,
+      "value": "No embedding provider is chosen. Choose a provider that serves \""
+    },
+    {
+      "type": 1,
+      "value": "locked_model"
+    },
+    {
+      "type": 0,
+      "value": "\", or reset embeddings to use another model."
+    }
+  ],
   "web.admin.recommendations.embedding.model": [
     {
       "type": 0,

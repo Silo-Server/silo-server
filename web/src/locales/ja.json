@@ -46980,6 +46980,20 @@
       "value": "接続チェックに失敗しました。"
     }
   ],
+  "web.admin.recommendations.embedding.lockConflictNoProvider": [
+    {
+      "type": 0,
+      "value": "エンベディングプロバイダーが選択されていません。「"
+    },
+    {
+      "type": 1,
+      "value": "locked_model"
+    },
+    {
+      "type": 0,
+      "value": "」を提供するプロバイダーを選択するか、別のモデルを使用する場合はエンベディングをリセットしてください。"
+    }
+  ],
   "web.admin.recommendations.embedding.model": [
     {
       "type": 0,

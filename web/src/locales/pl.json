@@ -65417,6 +65417,20 @@
       "value": "Sprawdzenie połączenia nie powiodło się."
     }
   ],
+  "web.admin.recommendations.embedding.lockConflictNoProvider": [
+    {
+      "type": 0,
+      "value": "Nie wybrano dostawcy embeddingów. Wybierz dostawcę obsługującego model „"
+    },
+    {
+      "type": 1,
+      "value": "locked_model"
+    },
+    {
+      "type": 0,
+      "value": "” lub zresetuj embeddingi, aby użyć innego modelu."
+    }
+  ],
   "web.admin.recommendations.embedding.model": [
     {
       "type": 0,

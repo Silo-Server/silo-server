@@ -18881,6 +18881,17 @@
             "description": "Why the stored embedding lock rejects the embedding settings this server runs with; empty when it does not.",
             "type": "string"
           },
+          "lock_conflict_args": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Values for lock_conflict_key's placeholders, by name. Absent when lock_conflict is empty.",
+            "type": "object"
+          },
+          "lock_conflict_key": {
+            "description": "Translation catalog key of lock_conflict, which clients show in a non-English interface. Absent when lock_conflict is empty.",
+            "type": "string"
+          },
           "recommendations": {
             "$ref": "#/components/schemas/AdminRecommendationJobStatus"
           },

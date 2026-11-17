@@ -64570,6 +64570,20 @@
       "value": "Не вдалося перевірити з’єднання."
     }
   ],
+  "web.admin.recommendations.embedding.lockConflictNoProvider": [
+    {
+      "type": 0,
+      "value": "Постачальника ембедингів не вибрано. Виберіть постачальника, який надає «"
+    },
+    {
+      "type": 1,
+      "value": "locked_model"
+    },
+    {
+      "type": 0,
+      "value": "», або скиньте ембединги, щоб використовувати іншу модель."
+    }
+  ],
   "web.admin.recommendations.embedding.model": [
     {
       "type": 0,
