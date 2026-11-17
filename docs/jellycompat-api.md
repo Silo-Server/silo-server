@@ -635,6 +635,16 @@ Vision but whose profile was never recorded, where Jellyfin writes `HDR`, and
 leaves out the stream title, which Silo cannot tell apart from ffprobe's codec
 name.
 
+An audio stream's `DisplayTitle` is the language name, the codec (or the
+profile, except AAC's "LC") and the channels ("English - EAC3 5.1"). The file's
+own title tag follows only when it adds a word the label does not already
+carry, such as "English - AAC Stereo - Commentary". A tag made only of words
+from the label, the language's ISO 639 codes, the codec, the channel layout or
+channel words that fit the track ("English", "ENG 5.1", "Surround") is left
+off, while one that contradicts the track ("Mono" on a stereo track, "de-DE"
+on a `de-AT` track) stays. An untagged track gets no suffix: its stored
+`title` is ffprobe's codec long name.
+
 HEVC Dolby Vision Profile 8 with a proven HDR10 base layer and no enhancement
 layer can use HLS fMP4 remux when a positive video-range condition names both
 `DOVI` and `HDR10`. The source retains its `DOVIWithHDR10` metadata and Dolby
