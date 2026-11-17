@@ -39,11 +39,12 @@ resolved copy seek anchor (`copy_seek_anchor_resolved` with a positive
 fits, the duration is known, the keyframe index exists and records where the
 video ends, the plan fits within the synthetic playlist's 50,000-segment limit,
 and the node can record the plan in the session's output directory. Any other
-copy keeps FFmpeg's playlist. A resume's plan starts at its origin, so its
+copy keeps FFmpeg's playlist. A resume's plan starts at that keyframe, so its
 segment numbers and boundaries differ from FFmpeg's playlist. A node that plans
 a resume answers `keyframe_plan_resume: true`, which the recipe records. A
 start that carries `keyframe_plan_resume: true`, a move of that resume to
-another node, must plan it again or fails. A rebuilt resume whose recipe lacks
+another node, must plan it again or fails, and the API rejects a node that
+doesn't echo it. A rebuilt resume whose recipe lacks
 it keeps FFmpeg's playlist. The plan comes from the Cues, which the node checks against
 only a few clusters. A keyframe-planned copy has FFmpeg cut at every keyframe and
 joins those groups into the planned segments, so it can restart anywhere and
@@ -54,8 +55,8 @@ playlist, until the file changes or the process restarts. While FFmpeg is
 running, a request for a segment up to 10 past the last one assembled waits for
 the copy to get there. Any other missing segment restarts FFmpeg at the keyframe
 before that segment. Assembled segments outlive the restart unless the audio
-changes. The session's recipe keeps the plan's start at the beginning, so a
-rebuilt session plans the same segments.
+changes. The session's recipe keeps the position its first run started from,
+the beginning or the resume's, so a rebuilt session plans the same segments.
 
 The throttle fields belong to the internal API-to-node contract. Apple and
 Android clients require no request or response changes.

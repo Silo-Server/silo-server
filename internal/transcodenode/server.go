@@ -245,9 +245,13 @@ func ValidateCopyFMP4RecipeAttestation(req TranscodeStartRequest, response Trans
 
 // ValidateKeyframePlaylistAttestation rejects an executor that silently
 // ignored a requested keyframe playlist. Requests without one stay compatible
-// with older nodes, which omit the field.
+// with older nodes, which omit the field. A resume that must serve its earlier
+// keyframe plan also needs the node to confirm it planned: an older node
+// echoes keyframe_playlist, ignores keyframe_plan_resume, and serves FFmpeg's
+// playlist, which numbers and cuts segments differently.
 func ValidateKeyframePlaylistAttestation(req TranscodeStartRequest, response TranscodeStartResponse) error {
-	if req.KeyframePlaylist && !response.KeyframePlaylist {
+	if (req.KeyframePlaylist && !response.KeyframePlaylist) ||
+		(req.KeyframePlanResume && !response.KeyframePlanResume) {
 		return ErrKeyframePlaylistAttestationMismatch
 	}
 	return nil

@@ -1012,6 +1012,15 @@ func TestValidateKeyframePlaylistAttestation(t *testing.T) {
 	if err := ValidateKeyframePlaylistAttestation(TranscodeStartRequest{}, TranscodeStartResponse{}); err != nil {
 		t.Fatalf("request without a keyframe playlist rejected a legacy node response: %v", err)
 	}
+	// An older node echoes keyframe_playlist but ignores keyframe_plan_resume
+	// and serves FFmpeg's playlist, whose segments the moved player can't use.
+	resume := TranscodeStartRequest{KeyframePlaylist: true, KeyframePlanResume: true}
+	if err := ValidateKeyframePlaylistAttestation(resume, TranscodeStartResponse{KeyframePlaylist: true}); !errors.Is(err, ErrKeyframePlaylistAttestationMismatch) {
+		t.Fatalf("missing resume plan attestation error = %v, want %v", err, ErrKeyframePlaylistAttestationMismatch)
+	}
+	if err := ValidateKeyframePlaylistAttestation(resume, TranscodeStartResponse{KeyframePlaylist: true, KeyframePlanResume: true}); err != nil {
+		t.Fatalf("matching resume plan attestation rejected: %v", err)
+	}
 }
 
 // A node that ignores requested MPEG-TS packaging would publish fMP4 under a
