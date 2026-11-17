@@ -219,6 +219,10 @@ function CreateKeyDialog({
   const [secret, setSecret] = useState<string | null>(null);
   const [error, setError] = useState("");
   const lock = useRef(false);
+  // The key's kind comes from the choice made, not from the profile list,
+  // which may not have loaded; then the profile is named by what is known.
+  const boundProfileName =
+    profiles.find((p) => p.id === target)?.name ?? (profile.id === target ? profile.name : target);
 
   async function submit(event: FormEvent) {
     event.preventDefault();
@@ -274,7 +278,7 @@ function CreateKeyDialog({
             <code className="break-all">{secret}</code>
             <KeyUsage
               secret={secret}
-              boundTo={profiles.find((p) => p.id === target)}
+              boundTo={target === WHOLE_ACCOUNT ? undefined : boundProfileName}
               example={profile}
             />
             {error ? <p role="alert">{error}</p> : null}
@@ -390,7 +394,8 @@ function KeyUsage({
   example,
 }: {
   secret: string;
-  boundTo: Profile | undefined;
+  /** The name of the one profile the key is tied to; undefined for a whole-account key. */
+  boundTo: string | undefined;
   example: Profile;
 }) {
   const t = useT();
@@ -404,7 +409,7 @@ function KeyUsage({
       <code className="break-all">{authorization}</code>
       {boundTo ? (
         <p className="text-muted-foreground">
-          {t("web.settings.apiKeys.usage.profileKey", { profile: boundTo.name })}
+          {t("web.settings.apiKeys.usage.profileKey", { profile: boundTo })}
         </p>
       ) : (
         <>
