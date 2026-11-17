@@ -219,10 +219,14 @@ function CreateKeyDialog({
   const [secret, setSecret] = useState<string | null>(null);
   const [error, setError] = useState("");
   const lock = useRef(false);
-  // The key's kind comes from the choice made, not from the profile list,
-  // which may not have loaded; then the profile is named by what is known.
+  // What the key shown was created for: the form's choice can still change
+  // while the request runs, and the usage text must describe the key made.
+  const [createdFor, setCreatedFor] = useState(target);
+  // The key's kind comes from that choice, not from the profile list, which
+  // may not have loaded; then the profile is named by what is known.
   const boundProfileName =
-    profiles.find((p) => p.id === target)?.name ?? (profile.id === target ? profile.name : target);
+    profiles.find((p) => p.id === createdFor)?.name ??
+    (profile.id === createdFor ? profile.name : createdFor);
 
   async function submit(event: FormEvent) {
     event.preventDefault();
@@ -230,11 +234,13 @@ function CreateKeyDialog({
     lock.current = true;
     setError("");
     try {
+      const submitted = target;
       const created = await create.mutateAsync({
         label,
         scopes: chosen,
-        profileId: target === WHOLE_ACCOUNT ? undefined : target,
+        profileId: submitted === WHOLE_ACCOUNT ? undefined : submitted,
       });
+      setCreatedFor(submitted);
       setSecret(created.key);
     } catch (e) {
       // A refusal says what was wrong; anything else may still have made a key.
@@ -278,7 +284,7 @@ function CreateKeyDialog({
             <code className="break-all">{secret}</code>
             <KeyUsage
               secret={secret}
-              boundTo={target === WHOLE_ACCOUNT ? undefined : boundProfileName}
+              boundTo={createdFor === WHOLE_ACCOUNT ? undefined : boundProfileName}
               example={profile}
             />
             {error ? <p role="alert">{error}</p> : null}
