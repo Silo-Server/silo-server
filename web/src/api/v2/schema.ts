@@ -30247,7 +30247,7 @@ export interface components {
       item: components["schemas"]["CatalogItem"];
       /** @description The profile muted the series: it gets no new-episode notification for it, whatever the reasons, until it unmutes. active_reasons still names the reasons that would notify once unmuted. */
       muted: boolean;
-      /** @description With an active Next Up reason, the last episode the profile finished: on that reason alone, only a new episode after it notifies */
+      /** @description With an active Next Up reason, the episode just before the one Next Up waits for, normally the last episode the profile finished: only a new episode after it notifies */
       next_up_after?: components["schemas"]["NotificationEpisodeRef"];
       /** @description True when the episode the profile waits for would notify on arrival: next_up is active, the profile has not muted the series, and it is caught up, meaning the first episode the catalog lists at or after the one Next Up waits for has not arrived, or none is listed. False while that episode is already available: the profile has an episode to watch first, and nothing notifies until it watches on. */
       notifies: boolean;
