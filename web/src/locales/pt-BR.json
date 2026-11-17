@@ -25362,6 +25362,270 @@
       "value": "Falha na verificação da conexão."
     }
   ],
+  "web.admin.common.connectionCheck.result.chatGPTSignInRequired": [
+    {
+      "type": 0,
+      "value": "Entre com o ChatGPT nas configurações de Serviços de IA."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.embeddingConnected": [
+    {
+      "type": 0,
+      "value": "Conexão de embeddings bem-sucedida. O modelo retorna "
+    },
+    {
+      "type": 1,
+      "value": "dimensions"
+    },
+    {
+      "type": 0,
+      "value": " dimensões."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.embeddingDimensionsMismatch": [
+    {
+      "type": 0,
+      "value": "Os embeddings foram criados com vetores de "
+    },
+    {
+      "type": 1,
+      "value": "locked"
+    },
+    {
+      "type": 0,
+      "value": " dimensões, mas o modelo agora retorna "
+    },
+    {
+      "type": 1,
+      "value": "current"
+    },
+    {
+      "type": 0,
+      "value": ". Redefina os embeddings antes de trocar de modelo."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.embeddingLockOutOfRange": [
+    {
+      "type": 0,
+      "value": "O bloqueio de embeddings registra vetores de "
+    },
+    {
+      "type": 1,
+      "value": "locked"
+    },
+    {
+      "type": 0,
+      "value": " dimensões; o Silo armazena de 1 a "
+    },
+    {
+      "type": 1,
+      "value": "max"
+    },
+    {
+      "type": 0,
+      "value": ". Redefina os embeddings e use um modelo que retorne no máximo "
+    },
+    {
+      "type": 1,
+      "value": "max"
+    },
+    {
+      "type": 0,
+      "value": " dimensões."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.embeddingLockUnreadable": [
+    {
+      "type": 0,
+      "value": "Não foi possível ler o bloqueio de embeddings armazenado. Redefina os embeddings para limpá-lo."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.embeddingModelMismatch": [
+    {
+      "type": 0,
+      "value": "Os embeddings foram criados com o modelo “"
+    },
+    {
+      "type": 1,
+      "value": "locked_model"
+    },
+    {
+      "type": 0,
+      "value": "”, não “"
+    },
+    {
+      "type": 1,
+      "value": "model"
+    },
+    {
+      "type": 0,
+      "value": "”. Redefina os embeddings antes de trocar de modelo."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.embeddingNoVector": [
+    {
+      "type": 0,
+      "value": "O provedor de embeddings não retornou nenhum vetor para o texto de teste."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.embeddingStorageMismatch": [
+    {
+      "type": 0,
+      "value": "Os embeddings foram armazenados com "
+    },
+    {
+      "type": 1,
+      "value": "stored"
+    },
+    {
+      "type": 0,
+      "value": " dimensões; este servidor armazena "
+    },
+    {
+      "type": 1,
+      "value": "supported"
+    },
+    {
+      "type": 0,
+      "value": ". Redefina os embeddings."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.embeddingTooManyDimensions": [
+    {
+      "type": 0,
+      "value": "O modelo retorna "
+    },
+    {
+      "type": 1,
+      "value": "dimensions"
+    },
+    {
+      "type": 0,
+      "value": " dimensões; o Silo armazena no máximo "
+    },
+    {
+      "type": 1,
+      "value": "max"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.failed": [
+    {
+      "type": 0,
+      "value": "Falha na verificação da conexão. Verifique as configurações enviadas e a disponibilidade do provedor."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.mdblistVerified": [
+    {
+      "type": 0,
+      "value": "Chave de API do MDBList verificada."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.meilisearchConnected": [
+    {
+      "type": 0,
+      "value": "Conexão com o Meilisearch bem-sucedida"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.meilisearchKeyRejected": [
+    {
+      "type": 0,
+      "value": "O Meilisearch recusou a chave de API ou exige uma. Informe uma chave que possa gerenciar índices e documentos, como a Default Admin API Key."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.meilisearchRedirected": [
+    {
+      "type": 0,
+      "value": "O Meilisearch redirecionou a verificação para outro endereço. Informe o endereço para o qual ele redireciona, como a URL https:// dele, e informe a chave de API novamente."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.redisConnected": [
+    {
+      "type": 0,
+      "value": "Conexão com o Redis bem-sucedida."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.s3Verified": [
+    {
+      "type": 0,
+      "value": "Conexão com o S3 e permissões de leitura/gravação/exclusão de objetos verificadas."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechConnected": [
+    {
+      "type": 0,
+      "value": "Conexão de conversão de fala em texto bem-sucedida: fala com marcações de tempo recebida."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechForbidden": [
+    {
+      "type": 0,
+      "value": "O acesso à conversão de fala em texto foi negado. Verifique as permissões da sua chave de API e os provedores permitidos."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechNoTimestamps": [
+    {
+      "type": 0,
+      "value": "O modelo de conversão de fala em texto não retorna segmentos com marcações de tempo, que o Silo precisa para criar legendas. Escolha um modelo compatível com marcações de tempo por segmento, como o whisper-1 da OpenAI."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechNotFound": [
+    {
+      "type": 0,
+      "value": "O endpoint ou o modelo de conversão de fala em texto não está disponível. Verifique a URL base do provedor, o modelo e os provedores permitidos."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechPaymentRequired": [
+    {
+      "type": 0,
+      "value": "O provedor de conversão de fala em texto exige pagamento. Verifique o saldo e o limite de gastos no provedor."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechQuotaExhausted": [
+    {
+      "type": 0,
+      "value": "A cota do provedor de conversão de fala em texto se esgotou. Verifique o saldo e os limites no provedor."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechRateLimited": [
+    {
+      "type": 0,
+      "value": "O provedor de conversão de fala em texto está limitando a taxa de solicitações. Tente novamente mais tarde."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechTimedOut": [
+    {
+      "type": 0,
+      "value": "A verificação da conexão de conversão de fala em texto atingiu o tempo limite. Verifique a disponibilidade do provedor e tente novamente."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechUnauthorized": [
+    {
+      "type": 0,
+      "value": "Falha na autenticação da conversão de fala em texto. Substitua a chave de API do provedor em Serviços de IA."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechUnavailable": [
+    {
+      "type": 0,
+      "value": "O provedor de conversão de fala em texto está temporariamente indisponível. Tente novamente mais tarde."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIConnected": [
+    {
+      "type": 0,
+      "value": "Conexão com a IA de texto bem-sucedida."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIFailed": [
+    {
+      "type": 0,
+      "value": "Falha na conexão com a IA de texto. Verifique o modelo, o nível de raciocínio, o nível de serviço, a conexão da conta e os limites de uso do provedor."
+    }
+  ],
   "web.admin.common.deviceConnections.bufferingAction.accepted": [
     {
       "type": 0,

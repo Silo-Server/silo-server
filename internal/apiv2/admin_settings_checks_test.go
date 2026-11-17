@@ -20,7 +20,7 @@ func (f *fakeAdminSettingsCheck) CheckAdminSettingsConnection(_ context.Context,
 	f.kind = kind
 	f.values = values
 	f.dirty = dirty
-	return handlers.AdminSettingsCheckResult{Success: true, Message: "Checked"}, nil
+	return handlers.AdminSettingsCheckResult{Success: true, Message: "Checked", MessageKey: "web.admin.common.connectionCheck.result.redisConnected", MessageArgs: map[string]string{"n": "1"}}, nil
 }
 func TestAdminSettingsCheckSingleInvocation(t *testing.T) {
 	f := &fakeAdminSettingsCheck{}
@@ -34,7 +34,7 @@ func TestAdminSettingsCheckSingleInvocation(t *testing.T) {
 		t.Fatal("invalid request invoked provider")
 	}
 	read := do(t, h, http.MethodPost, path, `{"values":{"redis.url":""},"dirty_keys":["redis.url"]}`, actingRequestAdmin)
-	if read.Code != 200 || !strings.Contains(read.Body.String(), `"success":true`) || f.calls != 1 || f.kind != "redis" || len(f.dirty) != 1 || f.values["redis.url"] != "" {
+	if read.Code != 200 || !strings.Contains(read.Body.String(), `"success":true`) || !strings.Contains(read.Body.String(), `"message_key":"web.admin.common.connectionCheck.result.redisConnected","message_args":{"n":"1"}`) || f.calls != 1 || f.kind != "redis" || len(f.dirty) != 1 || f.values["redis.url"] != "" {
 		t.Fatal(read.Code, read.Body.String(), f)
 	}
 }

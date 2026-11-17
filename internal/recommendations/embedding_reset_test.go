@@ -180,7 +180,7 @@ func TestDescribeEmbeddingLockConflict(t *testing.T) {
 		{"other storage, dimensions unknown", EmbeddingLock{Model: "m", SourceDimensions: 768, StorageDimensions: 1536}, "", "m", 0, "stored at 1536 dimensions"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			got := DescribeEmbeddingLockConflict(tc.lock, tc.baseURL, tc.model, tc.dims)
+			got, _, _ := DescribeEmbeddingLockConflict(tc.lock, tc.baseURL, tc.model, tc.dims)
 			if tc.want == "" && got != "" || !strings.Contains(got, tc.want) {
 				t.Fatalf("conflict = %q, want %q", got, tc.want)
 			}

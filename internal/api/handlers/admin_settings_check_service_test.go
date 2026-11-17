@@ -28,7 +28,8 @@ func TestAdminSettingsCheckServiceValidationAndSafeFailure(t *testing.T) {
 	}
 	// Missing credentials fail locally without a real provider call.
 	result, err := h.CheckAdminSettingsConnection(t.Context(), "mdblist", nil, nil)
-	if err != nil || result.Success || result.Message != "Connection check failed. Verify the submitted settings and provider availability." {
+	if err != nil || result.Success || result.Message != "Connection check failed. Verify the submitted settings and provider availability." ||
+		result.MessageKey != "web.admin.common.connectionCheck.result.failed" || result.MessageArgs != nil {
 		t.Fatal(result, err)
 	}
 	if _, err := (&AdminHandler{}).CheckAdminSettingsConnection(t.Context(), "redis", nil, nil); !errors.Is(err, ErrAdminSettingsUnavailable) {
@@ -55,7 +56,7 @@ func TestTextCheckReportsSafeProviderFailure(t *testing.T) {
 	}}}
 	result, err := h.CheckAdminSettingsConnection(t.Context(), "ai_chat", nil, nil)
 	const want = "Text AI connection failed. Check the model, reasoning level, service tier, account connection, and provider usage limits."
-	if err != nil || result.Success || result.Message != want {
+	if err != nil || result.Success || result.Message != want || result.MessageKey != "web.admin.common.connectionCheck.result.textAIFailed" {
 		t.Fatalf("result = %+v, err = %v; want %q", result, err, want)
 	}
 }
@@ -71,7 +72,7 @@ func TestTranscriptionCheckRetryFailureMessages(t *testing.T) {
 		{&llm.HTTPError{StatusCode: 503}, "Speech-to-text provider is temporarily unavailable. Try again later."},
 		{errors.New("private provider text"), ""},
 	} {
-		if got := transcriptionCheckFailureMessage(fmt.Errorf("wrapped: %w", tc.err)); got != tc.want {
+		if got := transcriptionCheckFailureMessage(fmt.Errorf("wrapped: %w", tc.err)).text; got != tc.want {
 			t.Errorf("message = %q; want %q", got, tc.want)
 		}
 	}
@@ -102,21 +103,22 @@ func TestTranscriptionCheckReportsSafeProviderFailure(t *testing.T) {
 	const privateError = `{"error":{"message":"returned 401: private-test-key https://private.example"}}`
 	const untimed = "Speech-to-text model does not return timestamped segments, which Silo needs to make subtitles. Choose a model that supports segment timestamps, such as whisper-1 on OpenAI."
 	for _, tc := range []struct {
-		name   string
-		status int
-		body   string
-		want   string
+		name    string
+		status  int
+		body    string
+		want    string
+		wantKey string
 	}{
-		{"401", http.StatusUnauthorized, privateError, "Speech-to-text authentication failed. Replace the provider's API key in AI Services."},
-		{"403", http.StatusForbidden, privateError, "Speech-to-text access was denied. Check your API key permissions and allowed providers."},
-		{"402", http.StatusPaymentRequired, privateError, "Speech-to-text provider requires payment. Check your provider balance and spending limit."},
-		{"404", http.StatusNotFound, privateError, "Speech-to-text endpoint or model is unavailable. Check the provider's base URL, the model, and allowed providers."},
-		{"400", http.StatusBadRequest, privateError, "Connection check failed. Verify the submitted settings and provider availability."},
+		{"401", http.StatusUnauthorized, privateError, "Speech-to-text authentication failed. Replace the provider's API key in AI Services.", "speechUnauthorized"},
+		{"403", http.StatusForbidden, privateError, "Speech-to-text access was denied. Check your API key permissions and allowed providers.", "speechForbidden"},
+		{"402", http.StatusPaymentRequired, privateError, "Speech-to-text provider requires payment. Check your provider balance and spending limit.", "speechPaymentRequired"},
+		{"404", http.StatusNotFound, privateError, "Speech-to-text endpoint or model is unavailable. Check the provider's base URL, the model, and allowed providers.", "speechNotFound"},
+		{"400", http.StatusBadRequest, privateError, "Connection check failed. Verify the submitted settings and provider availability.", "failed"},
 		// OpenAI's answer for gpt-transcribe, which has no timed output (#3518).
-		{"verbose_json rejected", http.StatusBadRequest, `{"error":{"message":"response_format 'verbose_json' is not compatible with model 'private-model'. Use 'json' or 'text' instead.","type":"invalid_request_error","param":"response_format","code":"unsupported_value"}}`, untimed},
-		{"timestamps rejected", http.StatusBadRequest, `{"error":{"message":"private","type":"invalid_request_error","param":"timestamp_granularities[]","code":"unsupported_value"}}`, untimed},
-		{"text without segments", http.StatusOK, `{"text":"private transcript"}`, untimed},
-		{"not a transcription reply", http.StatusOK, `{}`, "Connection check failed. Verify the submitted settings and provider availability."},
+		{"verbose_json rejected", http.StatusBadRequest, `{"error":{"message":"response_format 'verbose_json' is not compatible with model 'private-model'. Use 'json' or 'text' instead.","type":"invalid_request_error","param":"response_format","code":"unsupported_value"}}`, untimed, "speechNoTimestamps"},
+		{"timestamps rejected", http.StatusBadRequest, `{"error":{"message":"private","type":"invalid_request_error","param":"timestamp_granularities[]","code":"unsupported_value"}}`, untimed, "speechNoTimestamps"},
+		{"text without segments", http.StatusOK, `{"text":"private transcript"}`, untimed, "speechNoTimestamps"},
+		{"not a transcription reply", http.StatusOK, `{}`, "Connection check failed. Verify the submitted settings and provider availability.", "failed"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -136,7 +138,7 @@ func TestTranscriptionCheckReportsSafeProviderFailure(t *testing.T) {
 				"ai.asr_model":                    "test-model",
 			}}}
 			result, err := h.CheckAdminSettingsConnection(t.Context(), "ai_transcription", nil, nil)
-			if err != nil || result.Success || result.Message != tc.want {
+			if err != nil || result.Success || result.Message != tc.want || result.MessageKey != "web.admin.common.connectionCheck.result."+tc.wantKey {
 				t.Fatalf("result = %+v, err = %v; want %q", result, err, tc.want)
 			}
 		})
@@ -339,8 +341,10 @@ func TestCheckRecommendationsEmbeddingConnection(t *testing.T) {
 		dirty   map[string]string
 		success bool
 		want    string
+		key     string
+		args    map[string]string
 	}{
-		{name: "fits", vectors: vectorOf(1024), success: true, want: "returns 1024 dimensions"},
+		{name: "fits", vectors: vectorOf(1024), success: true, want: "returns 1024 dimensions", key: "embeddingConnected", args: map[string]string{"dimensions": "1024"}},
 		{name: "too many dimensions", vectors: vectorOf(4096), want: "The model returns 4096 dimensions; Silo stores at most 3072."},
 		{name: "exactly the stored size", vectors: vectorOf(3072), success: true, want: "returns 3072 dimensions"},
 		{name: "no vectors", vectors: [][]float32{}, want: "returned no vector"},
@@ -354,6 +358,7 @@ func TestCheckRecommendationsEmbeddingConnection(t *testing.T) {
 			name: "lock on another model", vectors: vectorOf(1024),
 			lock: embeddingLockJSON(t, recommendations.EmbeddingLock{BaseURL: baseURL, Model: "all-minilm", SourceDimensions: 384}),
 			want: `Embeddings were created with model "all-minilm", not "qwen3-embedding:0.6b". Reset embeddings before switching models.`,
+			key:  "embeddingModelMismatch", args: map[string]string{"locked_model": "all-minilm", "model": model},
 		},
 		{
 			name: "same model through another provider", vectors: vectorOf(1024), success: true, want: "returns 1024 dimensions",
@@ -403,6 +408,9 @@ func TestCheckRecommendationsEmbeddingConnection(t *testing.T) {
 			}
 			if result.Success != tc.success || !strings.Contains(result.Message, tc.want) {
 				t.Fatalf("check = %+v, want success=%v and %q", result, tc.success, tc.want)
+			}
+			if tc.key != "" && (result.MessageKey != "web.admin.common.connectionCheck.result."+tc.key || !maps.Equal(result.MessageArgs, tc.args)) {
+				t.Fatalf("check = %+v, want key %q with %v", result, tc.key, tc.args)
 			}
 			if strings.Contains(result.Message, "secret") || strings.Contains(result.Message, "ollama:11434") {
 				t.Fatalf("check quotes a base URL: %q", result.Message)

@@ -27985,6 +27985,270 @@
       "value": "Nie udało się sprawdzić połączenia."
     }
   ],
+  "web.admin.common.connectionCheck.result.chatGPTSignInRequired": [
+    {
+      "type": 0,
+      "value": "Zaloguj się przez ChatGPT w ustawieniach usług AI."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.embeddingConnected": [
+    {
+      "type": 0,
+      "value": "Połączenie do tworzenia embeddingów działa. Model zwraca wektory o wymiarze "
+    },
+    {
+      "type": 1,
+      "value": "dimensions"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.embeddingDimensionsMismatch": [
+    {
+      "type": 0,
+      "value": "Embeddingi utworzono z wektorów o wymiarze "
+    },
+    {
+      "type": 1,
+      "value": "locked"
+    },
+    {
+      "type": 0,
+      "value": ", ale model zwraca teraz wymiar "
+    },
+    {
+      "type": 1,
+      "value": "current"
+    },
+    {
+      "type": 0,
+      "value": ". Przed zmianą modelu zresetuj embeddingi."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.embeddingLockOutOfRange": [
+    {
+      "type": 0,
+      "value": "Blokada embeddingów zapisuje wektory o wymiarze "
+    },
+    {
+      "type": 1,
+      "value": "locked"
+    },
+    {
+      "type": 0,
+      "value": "; Silo przechowuje wymiary od 1 do "
+    },
+    {
+      "type": 1,
+      "value": "max"
+    },
+    {
+      "type": 0,
+      "value": ". Zresetuj embeddingi i użyj modelu zwracającego wymiar co najwyżej "
+    },
+    {
+      "type": 1,
+      "value": "max"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.embeddingLockUnreadable": [
+    {
+      "type": 0,
+      "value": "Nie można odczytać zapisanej blokady embeddingów. Zresetuj embeddingi, aby ją wyczyścić."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.embeddingModelMismatch": [
+    {
+      "type": 0,
+      "value": "Embeddingi utworzono modelem „"
+    },
+    {
+      "type": 1,
+      "value": "locked_model"
+    },
+    {
+      "type": 0,
+      "value": "”, a nie „"
+    },
+    {
+      "type": 1,
+      "value": "model"
+    },
+    {
+      "type": 0,
+      "value": "”. Przed zmianą modelu zresetuj embeddingi."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.embeddingNoVector": [
+    {
+      "type": 0,
+      "value": "Dostawca embeddingów nie zwrócił wektora dla tekstu testowego."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.embeddingStorageMismatch": [
+    {
+      "type": 0,
+      "value": "Embeddingi zapisano z wymiarem "
+    },
+    {
+      "type": 1,
+      "value": "stored"
+    },
+    {
+      "type": 0,
+      "value": "; ten serwer przechowuje wymiar "
+    },
+    {
+      "type": 1,
+      "value": "supported"
+    },
+    {
+      "type": 0,
+      "value": ". Zresetuj embeddingi."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.embeddingTooManyDimensions": [
+    {
+      "type": 0,
+      "value": "Model zwraca wektory o wymiarze "
+    },
+    {
+      "type": 1,
+      "value": "dimensions"
+    },
+    {
+      "type": 0,
+      "value": "; Silo przechowuje wymiar co najwyżej "
+    },
+    {
+      "type": 1,
+      "value": "max"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.failed": [
+    {
+      "type": 0,
+      "value": "Nie udało się sprawdzić połączenia. Sprawdź przesłane ustawienia i dostępność dostawcy."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.mdblistVerified": [
+    {
+      "type": 0,
+      "value": "Zweryfikowano klucz API MDBList."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.meilisearchConnected": [
+    {
+      "type": 0,
+      "value": "Połączenie z Meilisearch działa"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.meilisearchKeyRejected": [
+    {
+      "type": 0,
+      "value": "Meilisearch odrzucił klucz API albo go wymaga. Wpisz klucz, który może zarządzać indeksami i dokumentami, np. Default Admin API Key."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.meilisearchRedirected": [
+    {
+      "type": 0,
+      "value": "Meilisearch przekierował sprawdzanie na inny adres. Wpisz adres docelowy przekierowania, np. adres URL https://, i ponownie wpisz klucz API."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.redisConnected": [
+    {
+      "type": 0,
+      "value": "Połączenie z Redis działa."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.s3Verified": [
+    {
+      "type": 0,
+      "value": "Zweryfikowano połączenie z S3 oraz uprawnienia do odczytu, zapisu i usuwania obiektów."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechConnected": [
+    {
+      "type": 0,
+      "value": "Połączenie z zamianą mowy na tekst działa: odebrano transkrypcję ze znacznikami czasu."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechForbidden": [
+    {
+      "type": 0,
+      "value": "Odmówiono dostępu do zamiany mowy na tekst. Sprawdź uprawnienia klucza API i dozwolonych dostawców."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechNoTimestamps": [
+    {
+      "type": 0,
+      "value": "Model zamiany mowy na tekst nie zwraca segmentów ze znacznikami czasu, których Silo potrzebuje do tworzenia napisów. Wybierz model obsługujący znaczniki czasu segmentów, np. whisper-1 w OpenAI."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechNotFound": [
+    {
+      "type": 0,
+      "value": "Punkt końcowy lub model zamiany mowy na tekst jest niedostępny. Sprawdź bazowy adres URL dostawcy, model i dozwolonych dostawców."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechPaymentRequired": [
+    {
+      "type": 0,
+      "value": "Dostawca zamiany mowy na tekst wymaga płatności. Sprawdź saldo i limit wydatków u dostawcy."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechQuotaExhausted": [
+    {
+      "type": 0,
+      "value": "Wyczerpano limit u dostawcy zamiany mowy na tekst. Sprawdź saldo i limity u dostawcy."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechRateLimited": [
+    {
+      "type": 0,
+      "value": "Dostawca zamiany mowy na tekst ogranicza liczbę żądań. Spróbuj ponownie później."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechTimedOut": [
+    {
+      "type": 0,
+      "value": "Upłynął limit czasu sprawdzania połączenia z zamianą mowy na tekst. Sprawdź dostępność dostawcy i spróbuj ponownie."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechUnauthorized": [
+    {
+      "type": 0,
+      "value": "Nie udało się uwierzytelnić w usłudze zamiany mowy na tekst. Zastąp klucz API dostawcy w sekcji Usługi AI."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechUnavailable": [
+    {
+      "type": 0,
+      "value": "Dostawca zamiany mowy na tekst jest tymczasowo niedostępny. Spróbuj ponownie później."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIConnected": [
+    {
+      "type": 0,
+      "value": "Połączenie z tekstową AI działa."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIFailed": [
+    {
+      "type": 0,
+      "value": "Nie udało się połączyć z tekstową AI. Sprawdź model, poziom rozumowania, poziom usługi, połączenie konta i limity użycia u dostawcy."
+    }
+  ],
   "web.admin.common.deviceConnections.bufferingAction.accepted": [
     {
       "type": 0,

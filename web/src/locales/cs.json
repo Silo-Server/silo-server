@@ -27369,6 +27369,270 @@
       "value": "Ověření připojení selhalo."
     }
   ],
+  "web.admin.common.connectionCheck.result.chatGPTSignInRequired": [
+    {
+      "type": 0,
+      "value": "Přihlaste se pomocí ChatGPT v nastavení Služby AI."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.embeddingConnected": [
+    {
+      "type": 0,
+      "value": "Připojení k embeddingům proběhlo úspěšně. Model vrací vektory s počtem dimenzí "
+    },
+    {
+      "type": 1,
+      "value": "dimensions"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.embeddingDimensionsMismatch": [
+    {
+      "type": 0,
+      "value": "Embeddingy byly vytvořeny s vektory o "
+    },
+    {
+      "type": 1,
+      "value": "locked"
+    },
+    {
+      "type": 0,
+      "value": " dimenzích, ale model nyní vrací "
+    },
+    {
+      "type": 1,
+      "value": "current"
+    },
+    {
+      "type": 0,
+      "value": ". Před změnou modelu embeddingy resetujte."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.embeddingLockOutOfRange": [
+    {
+      "type": 0,
+      "value": "Zámek embeddingů uvádí vektory o "
+    },
+    {
+      "type": 1,
+      "value": "locked"
+    },
+    {
+      "type": 0,
+      "value": " dimenzích; Silo ukládá 1 až "
+    },
+    {
+      "type": 1,
+      "value": "max"
+    },
+    {
+      "type": 0,
+      "value": ". Resetujte embeddingy a použijte model, který vrací nejvýše "
+    },
+    {
+      "type": 1,
+      "value": "max"
+    },
+    {
+      "type": 0,
+      "value": " dimenzí."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.embeddingLockUnreadable": [
+    {
+      "type": 0,
+      "value": "Uložený zámek embeddingů nelze přečíst. Vymažte ho resetováním embeddingů."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.embeddingModelMismatch": [
+    {
+      "type": 0,
+      "value": "Embeddingy byly vytvořeny modelem „"
+    },
+    {
+      "type": 1,
+      "value": "locked_model"
+    },
+    {
+      "type": 0,
+      "value": "“, ne „"
+    },
+    {
+      "type": 1,
+      "value": "model"
+    },
+    {
+      "type": 0,
+      "value": "“. Před změnou modelu embeddingy resetujte."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.embeddingNoVector": [
+    {
+      "type": 0,
+      "value": "Poskytovatel embeddingů nevrátil pro testovací text žádný vektor."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.embeddingStorageMismatch": [
+    {
+      "type": 0,
+      "value": "Embeddingy byly uloženy s počtem dimenzí "
+    },
+    {
+      "type": 1,
+      "value": "stored"
+    },
+    {
+      "type": 0,
+      "value": "; tento server ukládá "
+    },
+    {
+      "type": 1,
+      "value": "supported"
+    },
+    {
+      "type": 0,
+      "value": ". Resetujte embeddingy."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.embeddingTooManyDimensions": [
+    {
+      "type": 0,
+      "value": "Model vrací vektory s počtem dimenzí "
+    },
+    {
+      "type": 1,
+      "value": "dimensions"
+    },
+    {
+      "type": 0,
+      "value": "; Silo ukládá nejvýše "
+    },
+    {
+      "type": 1,
+      "value": "max"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.failed": [
+    {
+      "type": 0,
+      "value": "Ověření připojení selhalo. Zkontrolujte odeslané nastavení a dostupnost poskytovatele."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.mdblistVerified": [
+    {
+      "type": 0,
+      "value": "Klíč API pro MDBList ověřen."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.meilisearchConnected": [
+    {
+      "type": 0,
+      "value": "Připojení k Meilisearch proběhlo úspěšně"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.meilisearchKeyRejected": [
+    {
+      "type": 0,
+      "value": "Meilisearch odmítl klíč API nebo nějaký vyžaduje. Zadejte klíč, který může spravovat indexy a dokumenty, například Default Admin API Key."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.meilisearchRedirected": [
+    {
+      "type": 0,
+      "value": "Meilisearch přesměroval ověření na jinou adresu. Zadejte adresu, na kterou přesměrovává, například jeho URL s https://, a znovu zadejte klíč API."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.redisConnected": [
+    {
+      "type": 0,
+      "value": "Připojení k Redis proběhlo úspěšně."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.s3Verified": [
+    {
+      "type": 0,
+      "value": "Připojení k S3 a oprávnění ke čtení, zápisu a mazání objektů ověřena."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechConnected": [
+    {
+      "type": 0,
+      "value": "Připojení k převodu řeči na text proběhlo úspěšně: přijata řeč s časovými značkami."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechForbidden": [
+    {
+      "type": 0,
+      "value": "Přístup k převodu řeči na text byl odepřen. Zkontrolujte oprávnění klíče API a povolené poskytovatele."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechNoTimestamps": [
+    {
+      "type": 0,
+      "value": "Model převodu řeči na text nevrací segmenty s časovými značkami, které Silo potřebuje k vytvoření titulků. Vyberte model, který podporuje časové značky segmentů, například whisper-1 od OpenAI."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechNotFound": [
+    {
+      "type": 0,
+      "value": "Koncový bod nebo model převodu řeči na text není dostupný. Zkontrolujte základní URL poskytovatele, model a povolené poskytovatele."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechPaymentRequired": [
+    {
+      "type": 0,
+      "value": "Poskytovatel převodu řeči na text vyžaduje platbu. Zkontrolujte zůstatek a limit útraty u poskytovatele."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechQuotaExhausted": [
+    {
+      "type": 0,
+      "value": "Kvóta u poskytovatele převodu řeči na text je vyčerpána. Zkontrolujte zůstatek a limity u poskytovatele."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechRateLimited": [
+    {
+      "type": 0,
+      "value": "Poskytovatel převodu řeči na text omezuje četnost požadavků. Zkuste to znovu později."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechTimedOut": [
+    {
+      "type": 0,
+      "value": "Časový limit ověření připojení k převodu řeči na text vypršel. Zkontrolujte dostupnost poskytovatele a zkuste to znovu."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechUnauthorized": [
+    {
+      "type": 0,
+      "value": "Ověření u převodu řeči na text selhalo. Nahraďte klíč API poskytovatele v nastavení Služby AI."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechUnavailable": [
+    {
+      "type": 0,
+      "value": "Poskytovatel převodu řeči na text je dočasně nedostupný. Zkuste to znovu později."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIConnected": [
+    {
+      "type": 0,
+      "value": "Připojení k textové AI proběhlo úspěšně."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIFailed": [
+    {
+      "type": 0,
+      "value": "Připojení k textové AI selhalo. Zkontrolujte model, úroveň uvažování, úroveň služby, připojení účtu a limity využití u poskytovatele."
+    }
+  ],
   "web.admin.common.deviceConnections.bufferingAction.accepted": [
     {
       "type": 0,

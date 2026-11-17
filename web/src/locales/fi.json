@@ -22955,6 +22955,270 @@
       "value": "Yhteyden tarkistus epäonnistui."
     }
   ],
+  "web.admin.common.connectionCheck.result.chatGPTSignInRequired": [
+    {
+      "type": 0,
+      "value": "Kirjaudu sisään ChatGPT-tilillä Tekoälypalvelut-asetuksissa."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.embeddingConnected": [
+    {
+      "type": 0,
+      "value": "Upotusyhteys toimii. Malli palauttaa "
+    },
+    {
+      "type": 1,
+      "value": "dimensions"
+    },
+    {
+      "type": 0,
+      "value": " ulottuvuutta."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.embeddingDimensionsMismatch": [
+    {
+      "type": 0,
+      "value": "Upotukset luotiin vektoreilla, joissa on "
+    },
+    {
+      "type": 1,
+      "value": "locked"
+    },
+    {
+      "type": 0,
+      "value": " ulottuvuutta, mutta malli palauttaa nyt "
+    },
+    {
+      "type": 1,
+      "value": "current"
+    },
+    {
+      "type": 0,
+      "value": " ulottuvuutta. Nollaa upotukset ennen mallin vaihtamista."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.embeddingLockOutOfRange": [
+    {
+      "type": 0,
+      "value": "Upotuslukitukseen on tallennettu vektorit, joissa on "
+    },
+    {
+      "type": 1,
+      "value": "locked"
+    },
+    {
+      "type": 0,
+      "value": " ulottuvuutta; Silo tallentaa 1–"
+    },
+    {
+      "type": 1,
+      "value": "max"
+    },
+    {
+      "type": 0,
+      "value": " ulottuvuutta. Nollaa upotukset ja käytä mallia, joka palauttaa enintään "
+    },
+    {
+      "type": 1,
+      "value": "max"
+    },
+    {
+      "type": 0,
+      "value": " ulottuvuutta."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.embeddingLockUnreadable": [
+    {
+      "type": 0,
+      "value": "Tallennettua upotuslukitusta ei voi lukea. Tyhjennä se nollaamalla upotukset."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.embeddingModelMismatch": [
+    {
+      "type": 0,
+      "value": "Upotukset luotiin mallilla ”"
+    },
+    {
+      "type": 1,
+      "value": "locked_model"
+    },
+    {
+      "type": 0,
+      "value": "”, ei mallilla ”"
+    },
+    {
+      "type": 1,
+      "value": "model"
+    },
+    {
+      "type": 0,
+      "value": "”. Nollaa upotukset ennen mallin vaihtamista."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.embeddingNoVector": [
+    {
+      "type": 0,
+      "value": "Upotuspalvelu ei palauttanut vektoria testitekstille."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.embeddingStorageMismatch": [
+    {
+      "type": 0,
+      "value": "Upotukset tallennettiin "
+    },
+    {
+      "type": 1,
+      "value": "stored"
+    },
+    {
+      "type": 0,
+      "value": " ulottuvuudella; tämä palvelin tallentaa "
+    },
+    {
+      "type": 1,
+      "value": "supported"
+    },
+    {
+      "type": 0,
+      "value": " ulottuvuutta. Nollaa upotukset."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.embeddingTooManyDimensions": [
+    {
+      "type": 0,
+      "value": "Malli palauttaa "
+    },
+    {
+      "type": 1,
+      "value": "dimensions"
+    },
+    {
+      "type": 0,
+      "value": " ulottuvuutta; Silo tallentaa enintään "
+    },
+    {
+      "type": 1,
+      "value": "max"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.failed": [
+    {
+      "type": 0,
+      "value": "Yhteyden tarkistus epäonnistui. Tarkista lähetetyt asetukset ja palvelun saatavuus."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.mdblistVerified": [
+    {
+      "type": 0,
+      "value": "MDBList-API-avain vahvistettu."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.meilisearchConnected": [
+    {
+      "type": 0,
+      "value": "Meilisearch-yhteys toimii"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.meilisearchKeyRejected": [
+    {
+      "type": 0,
+      "value": "Meilisearch hylkäsi API-avaimen tai vaatii sellaisen. Anna avain, jolla voi hallita indeksejä ja dokumentteja, kuten Default Admin API Key."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.meilisearchRedirected": [
+    {
+      "type": 0,
+      "value": "Meilisearch ohjasi tarkistuksen toiseen osoitteeseen. Anna osoite, johon se ohjaa, kuten sen https://-URL, ja anna API-avain uudelleen."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.redisConnected": [
+    {
+      "type": 0,
+      "value": "Redis-yhteys toimii."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.s3Verified": [
+    {
+      "type": 0,
+      "value": "S3-yhteys sekä objektien luku-, kirjoitus- ja poisto-oikeudet vahvistettu."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechConnected": [
+    {
+      "type": 0,
+      "value": "Puheentunnistusyhteys toimii: aikaleimattu puhe vastaanotettu."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechForbidden": [
+    {
+      "type": 0,
+      "value": "Pääsy puheentunnistukseen estettiin. Tarkista API-avaimen oikeudet ja sallitut palvelut."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechNoTimestamps": [
+    {
+      "type": 0,
+      "value": "Puheentunnistusmalli ei palauta aikaleimattuja segmenttejä, joita Silo tarvitsee tekstitysten luomiseen. Valitse malli, joka tukee segmenttien aikaleimoja, kuten OpenAI:n whisper-1."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechNotFound": [
+    {
+      "type": 0,
+      "value": "Puheentunnistuksen päätepiste tai malli ei ole käytettävissä. Tarkista palvelun perus-URL, malli ja sallitut palvelut."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechPaymentRequired": [
+    {
+      "type": 0,
+      "value": "Puheentunnistuspalvelu vaatii maksun. Tarkista palvelun saldo ja kulutusraja."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechQuotaExhausted": [
+    {
+      "type": 0,
+      "value": "Puheentunnistuspalvelun kiintiö on käytetty loppuun. Tarkista palvelun saldo ja rajat."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechRateLimited": [
+    {
+      "type": 0,
+      "value": "Puheentunnistuspalvelu rajoittaa pyyntöjen määrää. Yritä myöhemmin uudelleen."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechTimedOut": [
+    {
+      "type": 0,
+      "value": "Puheentunnistuksen yhteyden tarkistus aikakatkaistiin. Tarkista palvelun saatavuus ja yritä uudelleen."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechUnauthorized": [
+    {
+      "type": 0,
+      "value": "Puheentunnistuksen todennus epäonnistui. Vaihda palvelun API-avain kohdassa Tekoälypalvelut."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechUnavailable": [
+    {
+      "type": 0,
+      "value": "Puheentunnistuspalvelu ei ole tilapäisesti käytettävissä. Yritä myöhemmin uudelleen."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIConnected": [
+    {
+      "type": 0,
+      "value": "Tekstitekoälyn yhteys toimii."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIFailed": [
+    {
+      "type": 0,
+      "value": "Tekstitekoälyn yhteys epäonnistui. Tarkista malli, päättelytaso, palvelutaso, tiliyhteys ja palvelun käyttörajat."
+    }
+  ],
   "web.admin.common.deviceConnections.bufferingAction.accepted": [
     {
       "type": 0,

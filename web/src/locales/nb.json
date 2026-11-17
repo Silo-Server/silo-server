@@ -22891,6 +22891,270 @@
       "value": "Tilkoblingstesten mislyktes."
     }
   ],
+  "web.admin.common.connectionCheck.result.chatGPTSignInRequired": [
+    {
+      "type": 0,
+      "value": "Logg på med ChatGPT i innstillingene for AI-tjenester."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.embeddingConnected": [
+    {
+      "type": 0,
+      "value": "Tilkoblingen for embedding var vellykket. Modellen returnerer "
+    },
+    {
+      "type": 1,
+      "value": "dimensions"
+    },
+    {
+      "type": 0,
+      "value": " dimensjoner."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.embeddingDimensionsMismatch": [
+    {
+      "type": 0,
+      "value": "Embeddingene ble laget med vektorer på "
+    },
+    {
+      "type": 1,
+      "value": "locked"
+    },
+    {
+      "type": 0,
+      "value": " dimensjoner, men modellen returnerer nå "
+    },
+    {
+      "type": 1,
+      "value": "current"
+    },
+    {
+      "type": 0,
+      "value": ". Tilbakestill embeddingene før du bytter modell."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.embeddingLockOutOfRange": [
+    {
+      "type": 0,
+      "value": "Embedding-låsen registrerer vektorer på "
+    },
+    {
+      "type": 1,
+      "value": "locked"
+    },
+    {
+      "type": 0,
+      "value": " dimensjoner. Silo lagrer 1 til "
+    },
+    {
+      "type": 1,
+      "value": "max"
+    },
+    {
+      "type": 0,
+      "value": ". Tilbakestill embeddingene, og bruk en modell som returnerer høyst "
+    },
+    {
+      "type": 1,
+      "value": "max"
+    },
+    {
+      "type": 0,
+      "value": " dimensjoner."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.embeddingLockUnreadable": [
+    {
+      "type": 0,
+      "value": "Den lagrede embedding-låsen kan ikke leses. Tilbakestill embeddingene for å fjerne den."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.embeddingModelMismatch": [
+    {
+      "type": 0,
+      "value": "Embeddingene ble laget med modellen «"
+    },
+    {
+      "type": 1,
+      "value": "locked_model"
+    },
+    {
+      "type": 0,
+      "value": "», ikke «"
+    },
+    {
+      "type": 1,
+      "value": "model"
+    },
+    {
+      "type": 0,
+      "value": "». Tilbakestill embeddingene før du bytter modell."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.embeddingNoVector": [
+    {
+      "type": 0,
+      "value": "Embedding-leverandøren returnerte ingen vektor for testteksten."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.embeddingStorageMismatch": [
+    {
+      "type": 0,
+      "value": "Embeddingene ble lagret med "
+    },
+    {
+      "type": 1,
+      "value": "stored"
+    },
+    {
+      "type": 0,
+      "value": " dimensjoner. Denne serveren lagrer "
+    },
+    {
+      "type": 1,
+      "value": "supported"
+    },
+    {
+      "type": 0,
+      "value": ". Tilbakestill embeddingene."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.embeddingTooManyDimensions": [
+    {
+      "type": 0,
+      "value": "Modellen returnerer "
+    },
+    {
+      "type": 1,
+      "value": "dimensions"
+    },
+    {
+      "type": 0,
+      "value": " dimensjoner. Silo lagrer høyst "
+    },
+    {
+      "type": 1,
+      "value": "max"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.failed": [
+    {
+      "type": 0,
+      "value": "Tilkoblingstesten mislyktes. Kontroller innstillingene som ble sendt inn, og at leverandøren er tilgjengelig."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.mdblistVerified": [
+    {
+      "type": 0,
+      "value": "MDBList-API-nøkkelen er bekreftet."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.meilisearchConnected": [
+    {
+      "type": 0,
+      "value": "Tilkoblingen til Meilisearch var vellykket"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.meilisearchKeyRejected": [
+    {
+      "type": 0,
+      "value": "Meilisearch avviste API-nøkkelen eller krever en. Skriv inn en nøkkel som kan administrere indekser og dokumenter, for eksempel Default Admin API Key."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.meilisearchRedirected": [
+    {
+      "type": 0,
+      "value": "Meilisearch videresendte testen til en annen adresse. Skriv inn adressen den videresender til, for eksempel https://-URL-en, og skriv inn API-nøkkelen på nytt."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.redisConnected": [
+    {
+      "type": 0,
+      "value": "Tilkoblingen til Redis var vellykket."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.s3Verified": [
+    {
+      "type": 0,
+      "value": "S3-tilkoblingen og tillatelsene til å lese, skrive og slette objekter er bekreftet."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechConnected": [
+    {
+      "type": 0,
+      "value": "Tilkoblingen for tale til tekst var vellykket: tale med tidsstempler ble mottatt."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechForbidden": [
+    {
+      "type": 0,
+      "value": "Tilgang til tale til tekst ble nektet. Kontroller tillatelsene for API-nøkkelen og hvilke leverandører som er tillatt."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechNoTimestamps": [
+    {
+      "type": 0,
+      "value": "Modellen for tale til tekst returnerer ikke segmenter med tidsstempler, og det trenger Silo for å lage undertekster. Velg en modell som støtter tidsstempler for segmenter, for eksempel whisper-1 hos OpenAI."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechNotFound": [
+    {
+      "type": 0,
+      "value": "Endepunktet eller modellen for tale til tekst er ikke tilgjengelig. Kontroller leverandørens basis-URL, modellen og hvilke leverandører som er tillatt."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechPaymentRequired": [
+    {
+      "type": 0,
+      "value": "Leverandøren av tale til tekst krever betaling. Kontroller saldoen og forbruksgrensen hos leverandøren."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechQuotaExhausted": [
+    {
+      "type": 0,
+      "value": "Kvoten hos leverandøren av tale til tekst er brukt opp. Kontroller saldoen og grensene hos leverandøren."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechRateLimited": [
+    {
+      "type": 0,
+      "value": "Leverandøren av tale til tekst begrenser antallet forespørsler. Prøv igjen senere."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechTimedOut": [
+    {
+      "type": 0,
+      "value": "Tilkoblingstesten for tale til tekst ble tidsavbrutt. Kontroller at leverandøren er tilgjengelig, og prøv igjen."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechUnauthorized": [
+    {
+      "type": 0,
+      "value": "Autentiseringen for tale til tekst mislyktes. Erstatt leverandørens API-nøkkel i AI-tjenester."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechUnavailable": [
+    {
+      "type": 0,
+      "value": "Leverandøren av tale til tekst er midlertidig utilgjengelig. Prøv igjen senere."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIConnected": [
+    {
+      "type": 0,
+      "value": "Tilkoblingen til tekst-AI var vellykket."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIFailed": [
+    {
+      "type": 0,
+      "value": "Tilkoblingen til tekst-AI mislyktes. Kontroller modellen, resonneringsnivået, tjenestenivået, kontotilkoblingen og bruksgrensene hos leverandøren."
+    }
+  ],
   "web.admin.common.deviceConnections.bufferingAction.accepted": [
     {
       "type": 0,
