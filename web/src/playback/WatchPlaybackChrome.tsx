@@ -49,7 +49,10 @@ import { SETTING_KEYS, type SettingKey } from "@/lib/settingsContract";
 import { useWatchDetail } from "@/hooks/queries/items";
 import { catalogKeys } from "@/hooks/queries/keys";
 import { applyPlaybackProgressToCache } from "@/hooks/queries/playbackProgressCache";
-import { invalidatePlaybackSurfaceQueries } from "@/hooks/queries/playbackSurfaceRefresh";
+import {
+  invalidatePlaybackSurfaceQueries,
+  refreshPlaybackSurfaceQueries,
+} from "@/hooks/queries/playbackSurfaceRefresh";
 import { useAuth } from "@/hooks/useAuth";
 import { lastBufferingMode, rememberBufferingMode } from "@/player/buffering-mode-memory";
 import { useCurrentProfile } from "@/hooks/useCurrentProfile";
@@ -745,7 +748,7 @@ function WatchPlaybackHostContent() {
       getAuthContext: getAuthContextVersion,
       // Leaving the player marks these surfaces stale at once (below), but the
       // stop is still in flight then. Read them again once it lands.
-      onSessionStopped: () => void invalidatePlaybackSurfaceQueries(queryClient),
+      onSessionStopped: () => void refreshPlaybackSurfaceQueries(queryClient),
     }),
     [queryClient],
   );
