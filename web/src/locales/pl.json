@@ -139345,6 +139345,12 @@
       "value": "Tutaj pojawią się powiadomienia o nowych odcinkach seriali, które są w ulubionych, na liście do obejrzenia lub które oglądasz."
     }
   ],
+  "web.notifications.inbox.emptyHintNextUp": [
+    {
+      "type": 0,
+      "value": "Tutaj otrzymasz powiadomienie o nowym odcinku serialu, który oglądasz na bieżąco, oraz o pojawieniu się tytułu z twojej listy do obejrzenia lub z twojej prośby."
+    }
+  ],
   "web.notifications.inbox.emptyUnread": [
     {
       "type": 0,
@@ -139807,6 +139813,30 @@
     {
       "type": 0,
       "value": "Widoki powiadomień"
+    }
+  ],
+  "web.notifications.inbox.watchlistAvailable": [
+    {
+      "type": 0,
+      "value": "Dostępny tytuł z listy do obejrzenia"
+    }
+  ],
+  "web.notifications.inbox.watchlistMovieAvailable": [
+    {
+      "type": 0,
+      "value": "Film z twojej listy do obejrzenia jest już dostępny"
+    }
+  ],
+  "web.notifications.inbox.watchlistSeriesAvailable": [
+    {
+      "type": 0,
+      "value": "Serial z twojej listy do obejrzenia jest już dostępny"
+    }
+  ],
+  "web.notifications.inbox.watchlistTitleAvailable": [
+    {
+      "type": 0,
+      "value": "Tytuł z twojej listy do obejrzenia jest już dostępny"
     }
   ],
   "web.notifications.preferences.continueWatching": [
@@ -140423,6 +140453,12 @@
       "value": "Wybrane seriale"
     }
   ],
+  "web.notifications.series.afterCatchUp": [
+    {
+      "type": 0,
+      "value": "Po nadrobieniu zaległości"
+    }
+  ],
   "web.notifications.series.allReasons": [
     {
       "type": 0,
@@ -140481,10 +140517,22 @@
       "value": "Tutaj pojawiają się seriale dodane do ulubionych lub do listy do obejrzenia albo te, które zaczynasz oglądać."
     }
   ],
+  "web.notifications.series.emptyHintNextUp": [
+    {
+      "type": 0,
+      "value": "Seriale pojawiają się tutaj, gdy skończysz oglądać odcinek. Gdy nadrobisz zaległości w serialu, otrzymasz powiadomienie, kiedy pojawi się jego następny odcinek."
+    }
+  ],
   "web.notifications.series.filterByReason": [
     {
       "type": 0,
       "value": "Filtruj według powodu"
+    }
+  ],
+  "web.notifications.series.filterLabel": [
+    {
+      "type": 0,
+      "value": "Filtruj seriale"
     }
   ],
   "web.notifications.series.intro": [
@@ -140591,10 +140639,32 @@
       "value": "last"
     }
   ],
+  "web.notifications.series.nextEpisodeAfter": [
+    {
+      "type": 0,
+      "value": "Następny odcinek po "
+    },
+    {
+      "type": 1,
+      "value": "code"
+    }
+  ],
+  "web.notifications.series.nextNewEpisode": [
+    {
+      "type": 0,
+      "value": "Następny nowy odcinek"
+    }
+  ],
   "web.notifications.series.noMatch": [
     {
       "type": 0,
       "value": "Brak pasujących seriali. Spróbuj innego wyszukiwania lub powodu."
+    }
+  ],
+  "web.notifications.series.noMatchFilter": [
+    {
+      "type": 0,
+      "value": "Brak pasujących seriali. Spróbuj innego wyszukiwania lub filtra."
     }
   ],
   "web.notifications.series.notificationsOff": [
@@ -140775,6 +140845,12 @@
     {
       "type": 0,
       "value": " jest już dostępny"
+    }
+  ],
+  "web.notifications.toast.watchlistArrived": [
+    {
+      "type": 0,
+      "value": "Tytuł z twojej listy do obejrzenia jest już w bibliotece."
     }
   ],
   "web.onboarding.gate.progressFailed": [
@@ -154507,6 +154583,12 @@
       "value": "Główny przełącznik dla tego profilu"
     }
   ],
+  "web.settings.notifications.episodes.nextUpDescription": [
+    {
+      "type": 0,
+      "value": "Otrzymuj powiadomienia o nowym odcinku serialu, który oglądasz na bieżąco, oraz o pojawieniu się tytułu z twojej listy do obejrzenia lub z twojej prośby."
+    }
+  ],
   "web.settings.notifications.episodes.seriesLink": [
     {
       "type": 0,
@@ -154796,7 +154878,7 @@
   "web.settings.notifications.reason.requests": [
     {
       "type": 0,
-      "value": "Prośby"
+      "value": "Prośby i lista do obejrzenia"
     }
   ],
   "web.settings.notifications.reason.watchlist": [

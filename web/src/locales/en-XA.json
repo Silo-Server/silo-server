@@ -127745,6 +127745,12 @@
       "value": "⟦Ýöû ŵîļļ ƀé ñöţîƒîéđ ĥéŕé ŵĥéñ ñéŵ éþîšöđéš åŕŕîṽé ƒöŕ šéŕîéš ýöû ƒåṽöŕîţé, ŵåţçĥļîšţ, öŕ åŕé ŵåţçĥîñĝ.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
     }
   ],
+  "web.notifications.inbox.emptyHintNextUp": [
+    {
+      "type": 0,
+      "value": "⟦Ýöû’ļļ ƀé ñöţîƒîéđ ĥéŕé ŵĥéñ å ñéŵ éþîšöđé åŕŕîṽéš ƒöŕ å šéŕîéš ýöû’ŕé çåûĝĥţ ûþ öñ, öŕ ŵĥéñ å ţîţļé ýöû ŵåţçĥļîšţéđ öŕ ŕéǫûéšţéđ åŕŕîṽéš.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
   "web.notifications.inbox.emptyUnread": [
     {
       "type": 0,
@@ -128195,6 +128201,30 @@
     {
       "type": 0,
       "value": "⟦Ñöţîƒîçåţîöñ ṽîéŵš~~~~~~~~⟧"
+    }
+  ],
+  "web.notifications.inbox.watchlistAvailable": [
+    {
+      "type": 0,
+      "value": "⟦Ŵåţçĥļîšţ ţîţļé åṽåîļåƀļé~~~~~~~~~~⟧"
+    }
+  ],
+  "web.notifications.inbox.watchlistMovieAvailable": [
+    {
+      "type": 0,
+      "value": "⟦Å ɱöṽîé öñ ýöûŕ ŵåţçĥļîšţ îš ñöŵ åṽåîļåƀļé~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.notifications.inbox.watchlistSeriesAvailable": [
+    {
+      "type": 0,
+      "value": "⟦Å šéŕîéš öñ ýöûŕ ŵåţçĥļîšţ îš ñöŵ åṽåîļåƀļé~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.notifications.inbox.watchlistTitleAvailable": [
+    {
+      "type": 0,
+      "value": "⟦Å ţîţļé öñ ýöûŕ ŵåţçĥļîšţ îš ñöŵ åṽåîļåƀļé~~~~~~~~~~~~~~~~~⟧"
     }
   ],
   "web.notifications.preferences.continueWatching": [
@@ -128691,6 +128721,12 @@
       "value": "⟦Šéļéçţéđ šéŕîéš~~~~~~⟧"
     }
   ],
+  "web.notifications.series.afterCatchUp": [
+    {
+      "type": 0,
+      "value": "⟦Åƒţéŕ ýöû çåţçĥ ûþ~~~~~~~~⟧"
+    }
+  ],
   "web.notifications.series.allReasons": [
     {
       "type": 0,
@@ -128753,10 +128789,22 @@
       "value": "⟦Šéŕîéš ýöû ƒåṽöŕîţé, åđđ ţö ýöûŕ ŵåţçĥļîšţ, öŕ šţåŕţ ŵåţçĥîñĝ šĥöŵ ûþ ĥéŕé.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
     }
   ],
+  "web.notifications.series.emptyHintNextUp": [
+    {
+      "type": 0,
+      "value": "⟦Šéŕîéš šĥöŵ ûþ ĥéŕé åƒţéŕ ýöû ƒîñîšĥ åñ éþîšöđé. Öñçé ýöû’ŕé çåûĝĥţ ûþ öñ å šéŕîéš, ýöû’ŕé ñöţîƒîéđ ŵĥéñ îţš ñéẋţ éþîšöđé åŕŕîṽéš.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
   "web.notifications.series.filterByReason": [
     {
       "type": 0,
       "value": "⟦Ƒîļţéŕ ƀý ŕéåšöñ~~~~~~~⟧"
+    }
+  ],
+  "web.notifications.series.filterLabel": [
+    {
+      "type": 0,
+      "value": "⟦Ƒîļţéŕ šéŕîéš~~~~~~⟧"
     }
   ],
   "web.notifications.series.intro": [
@@ -128879,10 +128927,36 @@
       "value": "~~⟧"
     }
   ],
+  "web.notifications.series.nextEpisodeAfter": [
+    {
+      "type": 0,
+      "value": "⟦Ţĥé ñéẋţ éþîšöđé åƒţéŕ "
+    },
+    {
+      "type": 1,
+      "value": "code"
+    },
+    {
+      "type": 0,
+      "value": "~~~~~~~~~~⟧"
+    }
+  ],
+  "web.notifications.series.nextNewEpisode": [
+    {
+      "type": 0,
+      "value": "⟦Ţĥé ñéẋţ ñéŵ éþîšöđé~~~~~~~~⟧"
+    }
+  ],
   "web.notifications.series.noMatch": [
     {
       "type": 0,
       "value": "⟦Ñö šéŕîéš ɱåţçĥ. Ţŕý åñöţĥéŕ šéåŕçĥ öŕ ŕéåšöñ.~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.notifications.series.noMatchFilter": [
+    {
+      "type": 0,
+      "value": "⟦Ñö šéŕîéš ɱåţçĥ. Ţŕý åñöţĥéŕ šéåŕçĥ öŕ ƒîļţéŕ.~~~~~~~~~~~~~~~~~~~⟧"
     }
   ],
   "web.notifications.series.notificationsOff": [
@@ -129091,6 +129165,12 @@
     {
       "type": 0,
       "value": " îš ñöŵ åṽåîļåƀļé~~~~~~~⟧"
+    }
+  ],
+  "web.notifications.toast.watchlistArrived": [
+    {
+      "type": 0,
+      "value": "⟦Å ţîţļé öñ ýöûŕ ŵåţçĥļîšţ ĥåš åŕŕîṽéđ îñ ţĥé ļîƀŕåŕý.~~~~~~~~~~~~~~~~~~~~~~⟧"
     }
   ],
   "web.onboarding.gate.progressFailed": [
@@ -142129,6 +142209,12 @@
       "value": "⟦Ṁåšţéŕ šŵîţçĥ ƒöŕ ţĥîš þŕöƒîļé~~~~~~~~~~~~⟧"
     }
   ],
+  "web.settings.notifications.episodes.nextUpDescription": [
+    {
+      "type": 0,
+      "value": "⟦Ĝéţ ñöţîƒîéđ ŵĥéñ å ñéŵ éþîšöđé åŕŕîṽéš ƒöŕ å šéŕîéš ýöû’ŕé çåûĝĥţ ûþ öñ, öŕ ŵĥéñ å ţîţļé ýöû ŵåţçĥļîšţéđ öŕ ŕéǫûéšţéđ åŕŕîṽéš.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
   "web.settings.notifications.episodes.seriesLink": [
     {
       "type": 0,
@@ -142438,7 +142524,7 @@
   "web.settings.notifications.reason.requests": [
     {
       "type": 0,
-      "value": "⟦Ŕéǫûéšţš~~~~⟧"
+      "value": "⟦Ŕéǫûéšţš åñđ ŵåţçĥļîšţ~~~~~~~~~⟧"
     }
   ],
   "web.settings.notifications.reason.watchlist": [

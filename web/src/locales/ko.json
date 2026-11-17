@@ -107588,6 +107588,12 @@
       "value": "즐겨찾기했거나 보고 싶은 목록에 추가했거나 보고 있는 시리즈에 새 에피소드가 나오면 여기에서 알려 드려요."
     }
   ],
+  "web.notifications.inbox.emptyHintNextUp": [
+    {
+      "type": 0,
+      "value": "최신 에피소드까지 시청한 시리즈에 새 에피소드가 나오거나, 보고 싶은 목록에 추가했거나 요청한 콘텐츠가 라이브러리에 추가되면 여기에서 알려 드려요."
+    }
+  ],
   "web.notifications.inbox.emptyUnread": [
     {
       "type": 0,
@@ -107954,6 +107960,30 @@
     {
       "type": 0,
       "value": "알림 보기 방식"
+    }
+  ],
+  "web.notifications.inbox.watchlistAvailable": [
+    {
+      "type": 0,
+      "value": "보고 싶은 목록 콘텐츠 공개"
+    }
+  ],
+  "web.notifications.inbox.watchlistMovieAvailable": [
+    {
+      "type": 0,
+      "value": "보고 싶은 목록의 영화를 이제 볼 수 있어요"
+    }
+  ],
+  "web.notifications.inbox.watchlistSeriesAvailable": [
+    {
+      "type": 0,
+      "value": "보고 싶은 목록의 시리즈를 이제 볼 수 있어요"
+    }
+  ],
+  "web.notifications.inbox.watchlistTitleAvailable": [
+    {
+      "type": 0,
+      "value": "보고 싶은 목록의 콘텐츠를 이제 볼 수 있어요"
     }
   ],
   "web.notifications.preferences.continueWatching": [
@@ -108374,6 +108404,12 @@
       "value": "선택한 시리즈"
     }
   ],
+  "web.notifications.series.afterCatchUp": [
+    {
+      "type": 0,
+      "value": "최신 에피소드까지 시청한 후"
+    }
+  ],
   "web.notifications.series.allReasons": [
     {
       "type": 0,
@@ -108432,10 +108468,22 @@
       "value": "즐겨찾기했거나 보고 싶은 목록에 추가했거나 시청을 시작한 시리즈가 여기에 표시돼요."
     }
   ],
+  "web.notifications.series.emptyHintNextUp": [
+    {
+      "type": 0,
+      "value": "에피소드를 끝까지 보면 시리즈가 여기에 표시돼요. 시리즈를 최신 에피소드까지 시청하면 다음 에피소드가 나올 때 알림이 와요."
+    }
+  ],
   "web.notifications.series.filterByReason": [
     {
       "type": 0,
       "value": "이유별 필터"
+    }
+  ],
+  "web.notifications.series.filterLabel": [
+    {
+      "type": 0,
+      "value": "시리즈 필터"
     }
   ],
   "web.notifications.series.intro": [
@@ -108542,10 +108590,32 @@
       "value": "last"
     }
   ],
+  "web.notifications.series.nextEpisodeAfter": [
+    {
+      "type": 1,
+      "value": "code"
+    },
+    {
+      "type": 0,
+      "value": " 이후의 다음 에피소드"
+    }
+  ],
+  "web.notifications.series.nextNewEpisode": [
+    {
+      "type": 0,
+      "value": "다음 새 에피소드"
+    }
+  ],
   "web.notifications.series.noMatch": [
     {
       "type": 0,
       "value": "일치하는 시리즈가 없어요. 다른 검색어나 이유로 시도해 보세요."
+    }
+  ],
+  "web.notifications.series.noMatchFilter": [
+    {
+      "type": 0,
+      "value": "일치하는 시리즈가 없어요. 다른 검색어나 필터로 시도해 보세요."
     }
   ],
   "web.notifications.series.notificationsOff": [
@@ -108726,6 +108796,12 @@
     {
       "type": 0,
       "value": " 시리즈를 볼 수 있어요"
+    }
+  ],
+  "web.notifications.toast.watchlistArrived": [
+    {
+      "type": 0,
+      "value": "보고 싶은 목록의 콘텐츠가 라이브러리에 추가됐어요."
     }
   ],
   "web.onboarding.gate.progressFailed": [
@@ -120098,6 +120174,12 @@
       "value": "이 프로필의 전체 알림 스위치"
     }
   ],
+  "web.settings.notifications.episodes.nextUpDescription": [
+    {
+      "type": 0,
+      "value": "최신 에피소드까지 시청한 시리즈에 새 에피소드가 나오거나, 보고 싶은 목록에 추가했거나 요청한 콘텐츠가 라이브러리에 추가되면 알림을 받아요."
+    }
+  ],
   "web.settings.notifications.episodes.seriesLink": [
     {
       "type": 0,
@@ -120387,7 +120469,7 @@
   "web.settings.notifications.reason.requests": [
     {
       "type": 0,
-      "value": "요청"
+      "value": "요청 및 보고 싶은 목록"
     }
   ],
   "web.settings.notifications.reason.watchlist": [

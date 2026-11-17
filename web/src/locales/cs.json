@@ -138851,6 +138851,12 @@
       "value": "Zde se zobrazí oznámení o nových dílech seriálů, které máte v oblíbených, v seznamu ke zhlédnutí nebo je právě sledujete."
     }
   ],
+  "web.notifications.inbox.emptyHintNextUp": [
+    {
+      "type": 0,
+      "value": "Zde se zobrazí oznámení, když u seriálu, který máte dosledovaný, vyjde nový díl, nebo když do knihovny přibude titul z vašeho seznamu ke zhlédnutí či vámi vyžádaný titul."
+    }
+  ],
   "web.notifications.inbox.emptyUnread": [
     {
       "type": 0,
@@ -139321,6 +139327,30 @@
     {
       "type": 0,
       "value": "Zobrazení oznámení"
+    }
+  ],
+  "web.notifications.inbox.watchlistAvailable": [
+    {
+      "type": 0,
+      "value": "Titul ze seznamu ke zhlédnutí je k dispozici"
+    }
+  ],
+  "web.notifications.inbox.watchlistMovieAvailable": [
+    {
+      "type": 0,
+      "value": "Film z vašeho seznamu ke zhlédnutí je nyní k dispozici"
+    }
+  ],
+  "web.notifications.inbox.watchlistSeriesAvailable": [
+    {
+      "type": 0,
+      "value": "Seriál z vašeho seznamu ke zhlédnutí je nyní k dispozici"
+    }
+  ],
+  "web.notifications.inbox.watchlistTitleAvailable": [
+    {
+      "type": 0,
+      "value": "Titul z vašeho seznamu ke zhlédnutí je nyní k dispozici"
     }
   ],
   "web.notifications.preferences.continueWatching": [
@@ -139921,6 +139951,12 @@
       "value": "Vybrané seriály"
     }
   ],
+  "web.notifications.series.afterCatchUp": [
+    {
+      "type": 0,
+      "value": "Po dosledování"
+    }
+  ],
   "web.notifications.series.allReasons": [
     {
       "type": 0,
@@ -139979,10 +140015,22 @@
       "value": "Zobrazí se zde seriály, které si přidáte do oblíbených nebo na seznam ke zhlédnutí, nebo které začnete sledovat."
     }
   ],
+  "web.notifications.series.emptyHintNextUp": [
+    {
+      "type": 0,
+      "value": "Seriály se zde zobrazí po dokončení dílu. Jakmile máte seriál dosledovaný, dostanete upozornění, až přibude jeho další díl."
+    }
+  ],
   "web.notifications.series.filterByReason": [
     {
       "type": 0,
       "value": "Filtrovat podle důvodu"
+    }
+  ],
+  "web.notifications.series.filterLabel": [
+    {
+      "type": 0,
+      "value": "Filtrovat seriály"
     }
   ],
   "web.notifications.series.intro": [
@@ -140089,10 +140137,32 @@
       "value": "last"
     }
   ],
+  "web.notifications.series.nextEpisodeAfter": [
+    {
+      "type": 0,
+      "value": "Další díl po dílu "
+    },
+    {
+      "type": 1,
+      "value": "code"
+    }
+  ],
+  "web.notifications.series.nextNewEpisode": [
+    {
+      "type": 0,
+      "value": "Další nový díl"
+    }
+  ],
   "web.notifications.series.noMatch": [
     {
       "type": 0,
       "value": "Žádný seriál neodpovídá. Zkuste jiné hledání nebo důvod."
+    }
+  ],
+  "web.notifications.series.noMatchFilter": [
+    {
+      "type": 0,
+      "value": "Žádný seriál neodpovídá. Zkuste jiné hledání nebo filtr."
     }
   ],
   "web.notifications.series.notificationsOff": [
@@ -140273,6 +140343,12 @@
     {
       "type": 0,
       "value": " je nyní k dispozici"
+    }
+  ],
+  "web.notifications.toast.watchlistArrived": [
+    {
+      "type": 0,
+      "value": "Titul z vašeho seznamu ke zhlédnutí je nyní v knihovně."
     }
   ],
   "web.onboarding.gate.progressFailed": [
@@ -154117,6 +154193,12 @@
       "value": "Hlavní vypínač pro tento profil"
     }
   ],
+  "web.settings.notifications.episodes.nextUpDescription": [
+    {
+      "type": 0,
+      "value": "Dostávejte oznámení, když u seriálu, který máte dosledovaný, vyjde nový díl, nebo když do knihovny přibude titul z vašeho seznamu ke zhlédnutí či vámi vyžádaný titul."
+    }
+  ],
   "web.settings.notifications.episodes.seriesLink": [
     {
       "type": 0,
@@ -154406,7 +154488,7 @@
   "web.settings.notifications.reason.requests": [
     {
       "type": 0,
-      "value": "Žádosti"
+      "value": "Žádosti a seznam ke zhlédnutí"
     }
   ],
   "web.settings.notifications.reason.watchlist": [

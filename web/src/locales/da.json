@@ -117363,6 +117363,12 @@
       "value": "Du får besked her, når der kommer nye afsnit af serier, du har som favorit, har på din huskeliste eller er i gang med at se."
     }
   ],
+  "web.notifications.inbox.emptyHintNextUp": [
+    {
+      "type": 0,
+      "value": "Du får besked her, når der kommer et nyt afsnit af en serie, du er ajour med, eller når en titel, du har sat på din huskeliste eller anmodet om, kommer."
+    }
+  ],
   "web.notifications.inbox.emptyUnread": [
     {
       "type": 0,
@@ -117753,6 +117759,30 @@
     {
       "type": 0,
       "value": "Notifikationsvisninger"
+    }
+  ],
+  "web.notifications.inbox.watchlistAvailable": [
+    {
+      "type": 0,
+      "value": "Titel fra huskelisten tilgængelig"
+    }
+  ],
+  "web.notifications.inbox.watchlistMovieAvailable": [
+    {
+      "type": 0,
+      "value": "En film på din huskeliste er nu tilgængelig"
+    }
+  ],
+  "web.notifications.inbox.watchlistSeriesAvailable": [
+    {
+      "type": 0,
+      "value": "En serie på din huskeliste er nu tilgængelig"
+    }
+  ],
+  "web.notifications.inbox.watchlistTitleAvailable": [
+    {
+      "type": 0,
+      "value": "En titel på din huskeliste er nu tilgængelig"
     }
   ],
   "web.notifications.preferences.continueWatching": [
@@ -118233,6 +118263,12 @@
       "value": "Valgte serier"
     }
   ],
+  "web.notifications.series.afterCatchUp": [
+    {
+      "type": 0,
+      "value": "Når du er ajour"
+    }
+  ],
   "web.notifications.series.allReasons": [
     {
       "type": 0,
@@ -118291,10 +118327,22 @@
       "value": "Serier, du markerer som favorit, tilføjer til din huskeliste eller begynder at se, vises her."
     }
   ],
+  "web.notifications.series.emptyHintNextUp": [
+    {
+      "type": 0,
+      "value": "Serier vises her, når du har set et afsnit færdigt. Når du er ajour med en serie, får du besked, når dens næste afsnit kommer."
+    }
+  ],
   "web.notifications.series.filterByReason": [
     {
       "type": 0,
       "value": "Filtrer efter årsag"
+    }
+  ],
+  "web.notifications.series.filterLabel": [
+    {
+      "type": 0,
+      "value": "Filtrer serier"
     }
   ],
   "web.notifications.series.intro": [
@@ -118401,10 +118449,32 @@
       "value": "last"
     }
   ],
+  "web.notifications.series.nextEpisodeAfter": [
+    {
+      "type": 0,
+      "value": "Det næste afsnit efter "
+    },
+    {
+      "type": 1,
+      "value": "code"
+    }
+  ],
+  "web.notifications.series.nextNewEpisode": [
+    {
+      "type": 0,
+      "value": "Det næste nye afsnit"
+    }
+  ],
   "web.notifications.series.noMatch": [
     {
       "type": 0,
       "value": "Ingen serier matcher. Prøv en anden søgning eller årsag."
+    }
+  ],
+  "web.notifications.series.noMatchFilter": [
+    {
+      "type": 0,
+      "value": "Ingen serier matcher. Prøv en anden søgning eller et andet filter."
     }
   ],
   "web.notifications.series.notificationsOff": [
@@ -118585,6 +118655,12 @@
     {
       "type": 0,
       "value": " er nu tilgængelig"
+    }
+  ],
+  "web.notifications.toast.watchlistArrived": [
+    {
+      "type": 0,
+      "value": "En titel på din huskeliste er kommet i biblioteket."
     }
   ],
   "web.onboarding.gate.progressFailed": [
@@ -130715,6 +130791,12 @@
       "value": "Hovedkontakt for denne profil"
     }
   ],
+  "web.settings.notifications.episodes.nextUpDescription": [
+    {
+      "type": 0,
+      "value": "Få besked, når der kommer et nyt afsnit af en serie, du er ajour med, eller når en titel, du har sat på din huskeliste eller anmodet om, kommer."
+    }
+  ],
   "web.settings.notifications.episodes.seriesLink": [
     {
       "type": 0,
@@ -131004,7 +131086,7 @@
   "web.settings.notifications.reason.requests": [
     {
       "type": 0,
-      "value": "Anmodninger"
+      "value": "Anmodninger og huskeliste"
     }
   ],
   "web.settings.notifications.reason.watchlist": [

@@ -116741,6 +116741,12 @@
       "value": "Je krijgt hier een melding wanneer er nieuwe afleveringen verschijnen van series die je als favoriet hebt, op je kijklijst hebt staan of aan het kijken bent."
     }
   ],
+  "web.notifications.inbox.emptyHintNextUp": [
+    {
+      "type": 0,
+      "value": "Je krijgt hier een melding wanneer er een nieuwe aflevering verschijnt van een serie waarmee je bij bent, of wanneer een titel binnenkomt die je op je kijklijst hebt gezet of hebt aangevraagd."
+    }
+  ],
   "web.notifications.inbox.emptyUnread": [
     {
       "type": 0,
@@ -117131,6 +117137,30 @@
     {
       "type": 0,
       "value": "Meldingsweergaven"
+    }
+  ],
+  "web.notifications.inbox.watchlistAvailable": [
+    {
+      "type": 0,
+      "value": "Titel op kijklijst beschikbaar"
+    }
+  ],
+  "web.notifications.inbox.watchlistMovieAvailable": [
+    {
+      "type": 0,
+      "value": "Een film op je kijklijst is nu beschikbaar"
+    }
+  ],
+  "web.notifications.inbox.watchlistSeriesAvailable": [
+    {
+      "type": 0,
+      "value": "Een serie op je kijklijst is nu beschikbaar"
+    }
+  ],
+  "web.notifications.inbox.watchlistTitleAvailable": [
+    {
+      "type": 0,
+      "value": "Een titel op je kijklijst is nu beschikbaar"
     }
   ],
   "web.notifications.preferences.continueWatching": [
@@ -117603,6 +117633,12 @@
       "value": "Geselecteerde series"
     }
   ],
+  "web.notifications.series.afterCatchUp": [
+    {
+      "type": 0,
+      "value": "Zodra je bij bent"
+    }
+  ],
   "web.notifications.series.allReasons": [
     {
       "type": 0,
@@ -117661,10 +117697,22 @@
       "value": "Series die je als favoriet markeert, aan je kijklijst toevoegt of begint te kijken, verschijnen hier."
     }
   ],
+  "web.notifications.series.emptyHintNextUp": [
+    {
+      "type": 0,
+      "value": "Series verschijnen hier nadat je een aflevering hebt uitgekeken. Ben je bij met een serie, dan krijg je een melding zodra de volgende aflevering verschijnt."
+    }
+  ],
   "web.notifications.series.filterByReason": [
     {
       "type": 0,
       "value": "Filteren op reden"
+    }
+  ],
+  "web.notifications.series.filterLabel": [
+    {
+      "type": 0,
+      "value": "Series filteren"
     }
   ],
   "web.notifications.series.intro": [
@@ -117771,10 +117819,32 @@
       "value": "last"
     }
   ],
+  "web.notifications.series.nextEpisodeAfter": [
+    {
+      "type": 0,
+      "value": "De volgende aflevering na "
+    },
+    {
+      "type": 1,
+      "value": "code"
+    }
+  ],
+  "web.notifications.series.nextNewEpisode": [
+    {
+      "type": 0,
+      "value": "De volgende nieuwe aflevering"
+    }
+  ],
   "web.notifications.series.noMatch": [
     {
       "type": 0,
       "value": "Geen series gevonden. Probeer een andere zoekopdracht of reden."
+    }
+  ],
+  "web.notifications.series.noMatchFilter": [
+    {
+      "type": 0,
+      "value": "Geen series gevonden. Probeer een andere zoekopdracht of een ander filter."
     }
   ],
   "web.notifications.series.notificationsOff": [
@@ -117959,6 +118029,12 @@
     {
       "type": 0,
       "value": " is nu beschikbaar"
+    }
+  ],
+  "web.notifications.toast.watchlistArrived": [
+    {
+      "type": 0,
+      "value": "Een titel op je kijklijst staat nu in de bibliotheek."
     }
   ],
   "web.onboarding.gate.progressFailed": [
@@ -130053,6 +130129,12 @@
       "value": "Hoofdschakelaar voor dit profiel"
     }
   ],
+  "web.settings.notifications.episodes.nextUpDescription": [
+    {
+      "type": 0,
+      "value": "Ontvang een melding wanneer er een nieuwe aflevering verschijnt van een serie waarmee je bij bent, of wanneer een titel binnenkomt die je op je kijklijst hebt gezet of hebt aangevraagd."
+    }
+  ],
   "web.settings.notifications.episodes.seriesLink": [
     {
       "type": 0,
@@ -130342,7 +130424,7 @@
   "web.settings.notifications.reason.requests": [
     {
       "type": 0,
-      "value": "Aanvragen"
+      "value": "Aanvragen en kijklijst"
     }
   ],
   "web.settings.notifications.reason.watchlist": [
