@@ -595,16 +595,6 @@ func (h *PersonalDataHandler) RemoveFromWatchlist(ctx context.Context, viewer Pe
 	}
 	if removed {
 		h.notifyListChange(ctx, watchsync.ListKindWatchlist, watchsync.ListChangeRemoved, viewer, itemID)
-		// The profile no longer waits for the title, so the watchlist
-		// arrival notice must not find it through a promotion record. A
-		// failure leaves a record that can tell the profile once, within the
-		// fanout staleness horizon, and retention then removes it.
-		if h.watchlistTitles != nil {
-			if err := h.watchlistTitles.ForgetPromotion(ctx, viewer.UserID, viewer.ProfileID, itemID); err != nil {
-				slog.WarnContext(ctx, "forget watchlist promotion failed", "component", "watchlist",
-					"user_id", viewer.UserID, "profile_id", viewer.ProfileID, "error", err)
-			}
-		}
 	}
 	return nil
 }

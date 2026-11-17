@@ -12,6 +12,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Silo-Server/silo-server/internal/userstore"
+	"github.com/Silo-Server/silo-server/internal/watchlist"
 )
 
 // WrapUserStoreProvider decorates the shared user-store provider so every
@@ -366,6 +367,22 @@ func (s *interestTrackingStore) DeleteHomeDismissal(ctx context.Context, profile
 		s.updater.queueHomeChange(s.userID, profileID, mediaItemID)
 	}
 	return err
+}
+
+// RemoveFromWatchlist also forgets the record of a title entry promoted onto
+// the item, so the watchlist arrival notice does not tell a profile about a
+// title it took off its watchlist, whichever path removed it. A failed
+// cleanup leaves a record that can tell the profile once, inside the fanout
+// staleness horizon; retention then removes it.
+func (s *interestTrackingStore) RemoveFromWatchlist(ctx context.Context, profileID, mediaItemID string) (bool, error) {
+	removed, err := s.UserStore.RemoveFromWatchlist(ctx, profileID, mediaItemID)
+	if err == nil && removed && s.system != nil && s.system.pool != nil {
+		if forgetErr := watchlist.ForgetPromotion(ctx, s.system.pool, s.userID, profileID, mediaItemID); forgetErr != nil {
+			slog.WarnContext(ctx, "forget watchlist promotion failed", "component", "notifications",
+				"user_id", s.userID, "profile_id", profileID, "error", forgetErr)
+		}
+	}
+	return removed, err
 }
 
 // --- Progress: queue on transitions and new watch sessions only.

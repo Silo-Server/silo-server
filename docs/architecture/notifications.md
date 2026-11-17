@@ -395,7 +395,9 @@ waiting profile:
   `added_at`. A record counts when that `added_at` predates the item's
   `created_at`. Notification retention deletes records promoted before the
   staleness horizon, which can no longer match; deleting a profile deletes
-  its records.
+  its records, and so does taking the item off the library watchlist, by
+  any path, through the notification system's user store wrapper
+  (`interest_hooks.go`).
 
 The lookups run on the fanout transaction, and each item's waiters are checked
 in one batch. Each is told unless:

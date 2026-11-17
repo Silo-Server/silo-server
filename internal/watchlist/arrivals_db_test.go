@@ -126,7 +126,7 @@ func TestArrivalFindsAnEntryPromotedOutsidePostgresDB(t *testing.T) {
 		VALUES ($1, 'other', $2, now() - interval '30 days')`, user, movie); err != nil {
 		t.Fatal(err)
 	}
-	if err := titles.ForgetPromotion(ctx, user, profile, movie); err != nil {
+	if err := ForgetPromotion(ctx, pool, user, profile, movie); err != nil {
 		t.Fatal(err)
 	}
 	waiting = waitersFor(t, arrivals, pool, movie, arrivedSince)

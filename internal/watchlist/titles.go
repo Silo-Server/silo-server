@@ -357,12 +357,6 @@ func (s *Titles) OnWatchlist(ctx context.Context, v Viewer, keys []TitleKey) (ma
 	return s.repo.onWatchlist(ctx, v.UserID, v.ProfileID, keys)
 }
 
-// ForgetPromotion drops the promotion record the watchlist arrival notice
-// reads, when the profile removes the item from its library watchlist.
-func (s *Titles) ForgetPromotion(ctx context.Context, userID int, profileID, contentID string) error {
-	return ForgetPromotion(ctx, s.repo.pool, userID, profileID, contentID)
-}
-
 // PurgeProfile removes a deleted profile's entries and the titles left with
 // none. It implements the profile handler's purge hook.
 func (s *Titles) PurgeProfile(ctx context.Context, userID int, profileID string) error {

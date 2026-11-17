@@ -123,8 +123,10 @@ func arrivedItems(ctx context.Context, q Querier, contentIDs []string, arrivedSi
 }
 
 // ForgetPromotion deletes the record of a title entry promoted onto the item,
-// once the profile takes the item off its library watchlist: it no longer
-// waits for the title.
+// once the item leaves the profile's library watchlist: the profile no longer
+// waits for the title. The notification system calls it from its user store
+// wrapper, so a removal through the API, a watch provider sync or the
+// watched-movie cleanup all reach it.
 func ForgetPromotion(ctx context.Context, q Querier, userID int, profileID, contentID string) error {
 	if _, err := q.Exec(ctx, `
 		DELETE FROM watchlist_title_promotions
