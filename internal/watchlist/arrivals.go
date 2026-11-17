@@ -125,7 +125,8 @@ func arrivedItems(ctx context.Context, q Querier, contentIDs []string, arrivedSi
 // recordPromotion notes, in the promotion's transaction, that a title entry
 // added at titleAddedAt moved onto the item. It keeps every TMDB ID the title
 // holds or once held: the item may not carry a former one, and a request made
-// under it must still be found once the title row is gone.
+// under it must still be found once the title row is gone. A second title
+// promoted onto the same item adds its IDs and keeps the earlier entry time.
 func recordPromotion(ctx context.Context, q Querier, userID int, profileID string, titleID int64, contentID string, titleAddedAt time.Time) error {
 	if _, err := q.Exec(ctx, `
 		INSERT INTO watchlist_title_promotions (user_id, profile_id, media_item_id, title_added_at, title_tmdb_ids)
@@ -137,7 +138,10 @@ func recordPromotion(ctx context.Context, q Querier, userID int, profileID strin
 				FROM watchlist_title_aliases a
 				WHERE a.title_id = $5 AND a.provider = 'tmdb') ids
 			WHERE ids.id BETWEEN 1 AND 2147483647))
-		ON CONFLICT (user_id, profile_id, media_item_id) DO NOTHING`,
+		ON CONFLICT (user_id, profile_id, media_item_id) DO UPDATE
+		SET title_tmdb_ids = ARRAY(
+		        SELECT DISTINCT unnest(watchlist_title_promotions.title_tmdb_ids || EXCLUDED.title_tmdb_ids)),
+		    title_added_at = LEAST(watchlist_title_promotions.title_added_at, EXCLUDED.title_added_at)`,
 		userID, profileID, contentID, titleAddedAt, titleID); err != nil {
 		return fmt.Errorf("recording watchlist title promotion: %w", err)
 	}

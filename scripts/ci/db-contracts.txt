@@ -1010,6 +1010,9 @@
 # Server collections show a restricted viewer only the members it can open, and
 # leave out a collection whose members it can open none of (#2828).
 ./internal/api/handlers TestServerCollectionCountsFollowTheViewerDB
+./internal/api/handlers TestCollectionRowCardsFollowTheViewerDB
+./internal/api/handlers TestCollectionRowCardsShowVisiblePersonalCollectionsDB
+./internal/sections TestRowOfCollectionsReferencesItsCollectionsPostgres
 
 # A scan that adds or removes titles refreshes the stored counts of the smart
 # collections drawing from that library, and only those (#3697).
@@ -1219,6 +1222,7 @@
 ./internal/backup TestTemplateCollectionsAndHomeSectionsDB
 ./internal/backup TestRestoredLibrarySectionsWaitForTheRestoreDB
 ./internal/backup TestManagedSectionPointedElsewhereIsRestoredDB
+./internal/backup TestRowOfCollectionsIsRestoredDB
 ./internal/backup TestSelectiveRestoreOnOneConnectionDB
 ./internal/backup TestUnverifiedRestoreLeavesCostlyWorkOffDB
 ./internal/backup TestRestoreItemWritesDoNotGrowDB
@@ -1356,3 +1360,7 @@
 # A transcode node's source grant is honored only while the catalog has its
 # exact media file: the row id, at exactly the granted path, not missing.
 ./internal/scanner TestFileRepositoryIsActiveFileDB
+
+# Frame posters list only movies whose poster slot is empty with nothing on its
+# way, and a frame is saved only while the slot is still empty with the source read.
+./internal/catalog TestFramePostersListOnlyEmptySlotsAndSaveOnlyOverThemDB

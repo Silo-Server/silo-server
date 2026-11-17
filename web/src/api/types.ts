@@ -4637,6 +4637,21 @@ export interface SectionTitleKey {
   title_args?: Record<string, string>;
 }
 
+/** One collection on a row of collections (section_type collection_posters). */
+export interface SectionCollectionCard {
+  id: string;
+  source: "library" | "user";
+  title: string;
+  poster_url: string;
+  poster_thumbhash?: string;
+  poster_is_collage: boolean;
+  item_count: number;
+  /** A server collection's library, for its page link. */
+  library_id?: number;
+  /** A personal collection's owner. */
+  creator_profile_id?: string;
+}
+
 export interface ResolvedSection extends SectionTitleKey {
   id: string;
   section_type: string;
@@ -4647,6 +4662,8 @@ export interface ResolvedSection extends SectionTitleKey {
   is_custom: boolean;
   customized: boolean;
   items: SectionItem[];
+  /** A row of collections' cards; such a row has no items. Absent on other rows. */
+  collections?: SectionCollectionCard[];
   /**
    * The row was read with an item_limit and holds more cards than `items`
    * (see homeRowLimit). Absent when false.

@@ -3,7 +3,9 @@ import { serverText, t, type MessageKey } from "@/i18n";
 import { collectionKindLabel, collectionKindOf } from "@/lib/collections/types";
 import { formatDecimal } from "@/lib/numberFormat";
 import { homeRowTitle } from "@/lib/sectionTitle";
+import { joinNameParts } from "@/lib/collections/nameList";
 import { rowKindLabel } from "./catalog";
+import { collectionRefsOf } from "./collectionList";
 import type { HomeRow, PageRef, Surface } from "./types";
 
 /**
@@ -135,6 +137,53 @@ function describeCollection(
     kind: collection.kind ?? "",
   });
   return withStrong(text, collection.title);
+}
+
+/** How many names a row of collections' line lists before "and N more". */
+const LISTED_COLLECTIONS = 3;
+
+/**
+ * A row of collections: "3 collections: **Marvel**, **Pixar** and
+ * **Ghibli**", two names then "and N more" past three, and a warning for the
+ * collections that are gone.
+ */
+function describeCollectionList(
+  config: Record<string, unknown>,
+  context: DescribeContext,
+): DescriptionPart[] {
+  const found = collectionRefsOf(config).map((ref) => context.collection?.(ref.id));
+  const gone = found.filter((collection) => collection === null).length;
+  const names = found.flatMap((collection) => (collection ? [collection.title] : []));
+  const count = found.length - gone;
+  const parts: DescriptionPart[] = [];
+  if (names.length === 0) {
+    if (count > 0 || gone === 0) parts.push(collectionCount(count));
+  } else {
+    const more = names.length > LISTED_COLLECTIONS ? names.length - 2 : 0;
+    const listed = more > 0 ? [...names.slice(0, 2), STRONG] : names;
+    const [before = "", after = ""] = t("web.home.rows.describe.collectionList", {
+      count,
+      count_text: count,
+      names: STRONG,
+    }).split(STRONG);
+    if (before) parts.push(before);
+    for (const part of joinNameParts(listed)) {
+      if (part.type === "literal") parts.push(part.value);
+      else if (part.value === STRONG)
+        parts.push(
+          t("web.home.rows.describe.collectionListMore", { count: more, count_text: more }),
+        );
+      else parts.push({ strong: part.value });
+    }
+    if (after) parts.push(after);
+  }
+  if (gone > 0) {
+    if (parts.length > 0) parts.push(" ");
+    parts.push({
+      warning: t("web.home.rows.describe.collectionsGone", { count: gone, count_text: gone }),
+    });
+  }
+  return parts;
 }
 
 function sortKey(config: Record<string, unknown>): { key: string; newestAdded: boolean } {
@@ -389,6 +438,8 @@ function describeKind(row: HomeRow, context: DescribeContext): DescriptionPart[]
     }
     case "collection":
       return describeCollection(config, context);
+    case "collection_posters":
+      return describeCollectionList(config, context);
     case "custom_filter":
       return [describeRules(config)];
     default:
@@ -398,6 +449,11 @@ function describeKind(row: HomeRow, context: DescribeContext): DescriptionPart[]
 
 export function titleCount(count: number): string {
   return t("web.home.rows.describe.titleCount", { count, count_text: count });
+}
+
+/** "12 collections". */
+export function collectionCount(count: number): string {
+  return t("web.home.rows.describe.collectionCount", { count, count_text: count });
 }
 
 /**

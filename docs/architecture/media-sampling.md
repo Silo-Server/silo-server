@@ -261,8 +261,14 @@ before `-i`, so ffmpeg decodes from the previous keyframe up to the time),
 one frame (`-frames:v 1`), and the MJPEG encoder writing to stdout. ffmpeg's
 whole stdout is the image; a run that succeeds without writing one, such as
 a time past the end of the video, fails the attempt as `empty`.
-`ImageOutput.Width` scales the image to an even width, keeping the aspect
-ratio; zero keeps the source size.
+Every image chain ends by applying the stream's sample aspect ratio
+(`scale=if(between(sar\,0.25\,4)\,round(iw*sar)\,iw):ih`), so a frame from
+non-square-pixel video, such as 1440x1080 HDV or a DVD rip, comes out at its
+display width instead of squeezed. A square-pixel source, or one without a
+sample aspect ratio, scales to its own size, which ffmpeg passes through
+unchanged; a ratio outside 1:4 to 4:1 is taken for bad metadata and ignored.
+`ImageOutput.Width` then scales the image to an even width, keeping the
+aspect ratio; zero keeps that display size.
 
 A hardware image attempt downloads VAAPI surfaces as NV12
 (`hwdownload,format=nv12`) before any scaling; see

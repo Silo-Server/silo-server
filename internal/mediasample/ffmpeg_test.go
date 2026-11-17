@@ -243,6 +243,32 @@ func TestRunImageWithRealFFmpeg(t *testing.T) {
 	}
 }
 
+// TestRunImagePixelAspectWithRealFFmpeg extracts a frame from a 360x270 clip
+// with 4:3 pixels, which must come out at its display size, 480x270.
+func TestRunImagePixelAspectWithRealFFmpeg(t *testing.T) {
+	ffmpeg, _ := realFFmpeg(t)
+	clip := filepath.Join(t.TempDir(), "clip.mkv")
+	generate := exec.Command(ffmpeg, "-hide_banner", "-loglevel", "error",
+		"-f", "lavfi", "-i", "color=c=gray:s=360x270:r=24:d=1,setsar=4/3", clip)
+	if output, err := generate.CombinedOutput(); err != nil {
+		t.Skipf("cannot generate the clip: %v: %s", err, output)
+	}
+	runner := Runner{FFmpegPath: ffmpeg, Workload: processmetrics.Thumbnail}
+	ctx, cancel := context.WithTimeout(t.Context(), time.Minute)
+	defer cancel()
+	result, err := runner.Run(ctx, Request{Input: clip, At: &At{Seconds: 0.5}, Images: &ImageOutput{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	picture, err := jpeg.Decode(bytes.NewReader(result.Images[0].JPEG))
+	if err != nil {
+		t.Fatalf("decode image: %v", err)
+	}
+	if got, want := picture.Bounds().Size(), image.Pt(480, 270); got != want {
+		t.Fatalf("image is %v, want %v", got, want)
+	}
+}
+
 // TestRunSheetsWithRealFFmpeg tiles a generated 2.4:1 clip of six ten-second
 // gray scenes, keyframes every two seconds, sampled at each scene's middle,
 // into two 2x2 sheets: in Matroska and in MP4 with timestamps shifted to

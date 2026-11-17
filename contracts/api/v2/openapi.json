@@ -7243,6 +7243,11 @@
       "AdminCollectionSection": {
         "additionalProperties": false,
         "properties": {
+          "collection_count": {
+            "description": "For a row of collections (section_type collection_posters), how many collections it lists, this one included. Absent for every other row.",
+            "format": "int64",
+            "type": "integer"
+          },
           "enabled": {
             "type": "boolean"
           },
@@ -21019,6 +21024,13 @@
       "AdminSectionPreviewResult": {
         "additionalProperties": false,
         "properties": {
+          "collections": {
+            "description": "The cards a row of collections (section_type collection_posters) shows the acting admin, in order; items is then empty and total_count is their number. Absent for every other section type",
+            "items": {
+              "$ref": "#/components/schemas/SectionCollectionCard"
+            },
+            "type": "array"
+          },
           "items": {
             "description": "The page's items; empty, never null",
             "items": {
@@ -36993,6 +37005,13 @@
             "description": "Whether the current principal may use the capability",
             "type": "boolean"
           },
+          "collection_rows": {
+            "description": "Sections may be rows of collections (section_type collection_posters): such a section answers its cards in collections instead of items, and the section recipe gallery offers the collection_posters recipe. A client that does not show collections leaves the row out, as it leaves out any section with no items. Absent when the home sections service is not configured, and on a server that predates rows of collections",
+            "examples": [
+              true
+            ],
+            "type": "boolean"
+          },
           "include_items_max": {
             "description": "The largest include_items getHomeLayout accepts: the layout then also answers that many first sections with their cards in included_sections. Absent when the home sections service is not configured",
             "examples": [
@@ -50598,6 +50617,13 @@
       "Section": {
         "additionalProperties": false,
         "properties": {
+          "collections": {
+            "description": "The cards of a row of collections (section_type collection_posters), in the row's order: the collections the viewer can see. Such a section has no items, total_count is the number of collections, and item_limit does not apply. Absent on every other section. See getHomeCapabilities collection_rows",
+            "items": {
+              "$ref": "#/components/schemas/SectionCollectionCard"
+            },
+            "type": "array"
+          },
           "customized": {
             "examples": [
               false
@@ -50709,6 +50735,78 @@
         },
         "required": [
           "sections"
+        ],
+        "type": "object"
+      },
+      "SectionCollectionCard": {
+        "additionalProperties": false,
+        "properties": {
+          "creator_profile_id": {
+            "description": "Present on a personal collection: the profile that made it",
+            "type": "string"
+          },
+          "id": {
+            "examples": [
+              "01J9Z8C3W4R5T6Y7U8I9O0P1Q2"
+            ],
+            "type": "string"
+          },
+          "item_count": {
+            "description": "The titles the acting profile sees in the collection",
+            "examples": [
+              12
+            ],
+            "format": "int64",
+            "type": "integer"
+          },
+          "library_id": {
+            "description": "Present on a server collection: a library the viewer can open that holds it, for the collection's page link. On a library page, that library",
+            "examples": [
+              "1"
+            ],
+            "minLength": 1,
+            "type": "string"
+          },
+          "poster_is_collage": {
+            "description": "poster_url is the acting profile's collage of the collection's first titles it can see, composed by the server because the collection has no uploaded, template or imported poster. False for an uploaded, template or imported poster and whenever poster_url is empty",
+            "examples": [
+              false
+            ],
+            "type": "boolean"
+          },
+          "poster_thumbhash": {
+            "type": "string"
+          },
+          "poster_url": {
+            "description": "Presigned, short-lived; empty when none",
+            "format": "uri-reference",
+            "type": "string"
+          },
+          "source": {
+            "description": "library for a server collection, user for a personal collection",
+            "enum": [
+              "library",
+              "user"
+            ],
+            "examples": [
+              "library"
+            ],
+            "type": "string"
+          },
+          "title": {
+            "examples": [
+              "Marvel"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "source",
+          "title",
+          "poster_url",
+          "poster_is_collage",
+          "item_count"
         ],
         "type": "object"
       },

@@ -1047,7 +1047,9 @@ cleared, so the item's or season's own artwork shows. Items with locked
 artwork keep what they have; choosing artwork in Edit Metadata locks it, for a
 season or episode on the whole series. Banner, landscape thumb, clear art, and
 disc art come only from local files, so copies already stored stay. Nothing is
-deleted directly; the artwork revision GC collects the displaced copies.
+deleted directly; the artwork revision GC collects the displaced copies. Frames
+taken from a video, the extras' stills and the posters of movies with no
+poster, are stored regardless of the setting.
 Turning the setting back on caches artwork for later refreshes; the Backfill
 Metadata Images task stores the provider artwork already served by URL.
 

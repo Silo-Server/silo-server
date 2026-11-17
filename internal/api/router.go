@@ -2348,6 +2348,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 		libraryCollectionHandler.PersonalCollages = personalCollages
 		libraryCollectionHandler.PersonalMemberCounts = personalMemberCounts
 		libraryCollectionHandler.EventsHub = deps.EventsHub
+		sectionFetcher.CollectionCards = &handlers.CollectionRowCards{Library: libraryCollectionHandler, Personal: collectionHandler}
 		libraryCollectionHandler.SortPreferenceCleaner = collectionSortCleaner
 		libraryCollectionHandler.CollectionRowRenamer = collectionRowRenamer
 		if deps.FolderRepo != nil {

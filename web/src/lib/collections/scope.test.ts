@@ -425,6 +425,7 @@ describe("invalidate", () => {
     expect(spy.mock.calls.map(([filters]) => filters?.queryKey)).toEqual([
       ["collections"],
       ["catalog"],
+      ["sections"],
       ["collections", "items", "c1"],
       ["libraryCollections"],
     ]);
@@ -439,6 +440,7 @@ describe("invalidate", () => {
       ["libraryCollectionTitles"],
       ["collections", "server"],
       ["catalog"],
+      ["sections"],
       ["admin", "collections"],
       ["admin", "collectionGroups"],
     ]);

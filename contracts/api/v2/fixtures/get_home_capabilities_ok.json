@@ -1,9 +1,10 @@
 {
-  "revision": "e79e3494e0c6306105765c71ecbd233319ba8d07b83d2d1505fee415f0f045d2",
+  "revision": "be2a4fe5bdcd7b22b4b2d694b2d8d7b6288736ee6c6620f40482ee682c189620",
   "state": "available",
   "allowed": true,
   "include_items_max": 4,
   "section_item_limit_max": 100,
   "row_item_limit_max": 100,
+  "collection_rows": true,
   "section_title_keys": true
 }
