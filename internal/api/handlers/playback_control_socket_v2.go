@@ -266,7 +266,7 @@ func (h *PlaybackControlSocketV2) missingSessionError(ctx context.Context, ident
 	if id, err := uuid.Parse(playbackSessionID); store == nil || err != nil || id == uuid.Nil || id.String() != playbackSessionID {
 		return playback.ErrSessionNotFound
 	}
-	record, err := store.GetAttempt(ctx, playbackSessionID)
+	attempt, err := store.GetAttemptIdentity(ctx, playbackSessionID)
 	if errors.Is(err, playback.ErrSessionNotFound) {
 		return playback.ErrSessionNotFound
 	}
@@ -275,10 +275,10 @@ func (h *PlaybackControlSocketV2) missingSessionError(ctx context.Context, ident
 			"component", "api", "playback_session_id", playbackSessionID, "error", err)
 		return ErrPlaybackControlSocketUnavailable
 	}
-	if record == nil || record.UserID != identity.UserID || record.ProfileID == "" || record.ProfileID != identity.ProfileID {
+	if attempt == nil || attempt.UserID != identity.UserID || attempt.ProfileID == "" || attempt.ProfileID != identity.ProfileID {
 		return playback.ErrSessionNotFound
 	}
-	if record.StoppedAt != nil {
+	if attempt.Stopped {
 		return ErrPlaybackControlSocketSessionEnded
 	}
 	return ErrPlaybackControlSocketSessionResuming

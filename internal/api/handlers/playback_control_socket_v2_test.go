@@ -439,7 +439,7 @@ func TestControlSocketTicketStoreBoundsAndValidation(t *testing.T) {
 // failingAttemptStore reads no attempt: the durable store is unreachable.
 type failingAttemptStore struct{ playback.PlanStoreV3 }
 
-func (failingAttemptStore) GetAttempt(context.Context, string) (*playback.AttemptRecordV3, error) {
+func (failingAttemptStore) GetAttemptIdentity(context.Context, string) (*playback.AttemptIdentityV3, error) {
 	return nil, errors.New("store unreachable")
 }
 
