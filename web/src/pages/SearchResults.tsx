@@ -160,7 +160,8 @@ export default function SearchResults({
   const requestable = requestsEnabled
     ? requestSuggestions(requestQuery.data?.results, REQUEST_SHELF_LIMIT)
     : [];
-  const requestPages = requestQuery.data?.total_pages ?? 0;
+  // A disabled query keeps its cached data, such as another scope's pages.
+  const requestPages = requestsEnabled ? (requestQuery.data?.total_pages ?? 0) : 0;
   // A later page can hold titles the first page's library matches hid.
   const hasRequestResults = requestable.length > 0 || requestPages > 1;
   // The full request list needs discovery for this scope; an audiobook scope

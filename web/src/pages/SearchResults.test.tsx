@@ -261,6 +261,19 @@ describe("search results", () => {
     expect(screen.getByText("Film 0")).toBeInTheDocument();
   });
 
+  it("ignores request pages cached for another scope", () => {
+    libraryResults(0);
+    discovery([]);
+    mockUseRequestSearch.mockReturnValue({
+      data: { page: 1, total_pages: 2, total_results: 30, results: [] },
+      isLoading: false,
+      isFetching: false,
+      isError: false,
+    });
+    renderSearch("q=heat&type=audiobook");
+    expect(screen.getByText("No items found.")).toBeInTheDocument();
+  });
+
   it("says nothing was found once the library and discovery both come back empty", () => {
     libraryResults(0);
     discovery([]);
