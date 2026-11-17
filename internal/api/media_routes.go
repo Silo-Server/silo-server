@@ -46,6 +46,7 @@ var playbackV2MediaRoutes = []streamtelemetry.MediaRoute{
 	nativeRoute(http.MethodGet, "/api/v2/stream/{session_id}", streamtelemetry.ClassPlayback, true),
 	nativeRoute(http.MethodHead, "/api/v2/stream/{session_id}", streamtelemetry.ClassPlayback, true),
 	nativeRoute(http.MethodGet, "/api/v2/playback/transcode/{session_id}/master.m3u8", streamtelemetry.ClassManifest, true),
+	nativeRoute(http.MethodHead, "/api/v2/playback/transcode/{session_id}/master.m3u8", streamtelemetry.ClassManifest, true),
 	nativeRoute(http.MethodGet, "/api/v2/playback/transcode/{session_id}/segment/{name}", streamtelemetry.ClassPlayback, true),
 	nativeRoute(http.MethodGet, "/api/v2/stream/{session_id}/subtitles/{track}", streamtelemetry.ClassPlayback, true),
 	nativeRoute(http.MethodHead, "/api/v2/stream/{session_id}/subtitles/{track}", streamtelemetry.ClassPlayback, true),

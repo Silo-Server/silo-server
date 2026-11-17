@@ -319,6 +319,7 @@ var householdGateExemptOperations = map[string]string{
 	"getPlaybackSegment":       exemptPlaybackSession,
 	"getPlaybackSubtitle":      exemptPlaybackSession,
 	"getPlaybackSubtitleFonts": exemptPlaybackSession,
+	"headPlaybackManifest":     exemptPlaybackSession,
 	"headPlaybackMedia":        exemptPlaybackSession,
 	"headPlaybackSubtitle":     exemptPlaybackSession,
 

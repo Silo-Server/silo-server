@@ -99,6 +99,7 @@ func registerPlaybackDelivery(reg *Registry) {
 		{http.MethodGet, "/stream/{session_id}", "getPlaybackMedia", "media-bytes", handlers.Original, append(playback.MediaMIMETypes(), playbackMediaBinary, "multipart/byteranges"), true},
 		{http.MethodHead, "/stream/{session_id}", "headPlaybackMedia", "media-bytes", handlers.Original, nil, true},
 		{http.MethodGet, "/playback/transcode/{session_id}/master.m3u8", "getPlaybackManifest", "hls", handlers.Manifest, []string{"application/vnd.apple.mpegurl"}, false},
+		{http.MethodHead, "/playback/transcode/{session_id}/master.m3u8", playbackManifestHead, "hls", handlers.Manifest, nil, false},
 		{http.MethodGet, "/playback/transcode/{session_id}/segment/{name}", playbackSegmentOperation, "hls", handlers.Segment, []string{"video/mp4", "video/mp2t", playbackSubtitleVTT, playbackMediaBinary, "multipart/byteranges"}, true},
 		{http.MethodGet, "/stream/{session_id}/subtitles/{track}", playbackSubtitleOperation, "subtitle-sidecar", handlers.Subtitle, []string{playbackSubtitleVTT, playbackSubtitleSSA, playbackSubtitleSubrip, playbackMediaBinary}, false},
 		{http.MethodHead, "/stream/{session_id}/subtitles/{track}", playbackSubtitleHead, "subtitle-sidecar", handlers.Subtitle, nil, false},
