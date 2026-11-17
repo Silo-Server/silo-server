@@ -10480,6 +10480,14 @@ func autoNVENCPipelineSeamV3(t *testing.T) func(context.Context, playback.Transc
 
 func prepareAutoLocalTransportV3(t *testing.T, ffmpegPath, sessionID string) (*PlaybackHandler, preparedTransportV3, *transportErrorV3) {
 	t.Helper()
+	return prepareAutoLocalTransportV3InContext(t, context.Background(), ffmpegPath, sessionID)
+}
+
+// prepareAutoLocalTransportV3InContext is prepareAutoLocalTransportV3 under a
+// caller's deadline, so a test can run the hw_accel=auto walk inside the window
+// a virtual start reserves for it.
+func prepareAutoLocalTransportV3InContext(t *testing.T, ctx context.Context, ffmpegPath, sessionID string) (*PlaybackHandler, preparedTransportV3, *transportErrorV3) {
+	t.Helper()
 	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0))
 	transcodeDir := t.TempDir()
 	handler.PlaybackConfig = func() config.PlaybackConfig {
@@ -10492,7 +10500,7 @@ func prepareAutoLocalTransportV3(t *testing.T, ffmpegPath, sessionID string) (*P
 		PlayMethod: playback.PlayTranscode, TargetVideoCodec: "h264", TargetAudioCodec: "aac", TargetResolution: "720p",
 		SubtitleTrackIndex: -1, SubtitleTransportTrackIndex: -1,
 	}
-	request := httptest.NewRequest(http.MethodPost, "/", nil)
+	request := httptest.NewRequest(http.MethodPost, "/", nil).WithContext(ctx)
 	timeline, timelineErr := handler.prepareTransportTimelineV3(request.Context(), &playback.Session{ID: sessionID}, file, result)
 	if timelineErr != nil {
 		t.Fatalf("prepare timeline: %v", timelineErr)

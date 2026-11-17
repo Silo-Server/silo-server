@@ -2703,6 +2703,15 @@ func (h *PlaybackHandler) startPlaybackApplicationV3(r *http.Request, body []byt
 		startPhaseCtx, startPhaseCancel := withVirtualStartPhaseDeadline(r.Context(), virtualStartPhaseBudget)
 		defer startPhaseCancel()
 		r = r.WithContext(startPhaseCtx)
+		// The resolve half gets its own deadline inside the phase. Everything
+		// that names a candidate — the primary resolve, the alternate-version
+		// walk with its per-candidate budgets, the stale-pin recovery — derives
+		// from it, so a slow listing cannot spend the window the phase reserved
+		// for the transport's readiness wait. When the resolve half is spent the
+		// walk is refused rather than shortened into that window.
+		resolveCtx, resolveCancel := withVirtualStartPhaseDeadline(startPhaseCtx, virtualStartResolveBudget)
+		defer resolveCancel()
+		r = r.WithContext(resolveCtx)
 		requestedCatalogFileID := requestedFile.ID
 		// A detail-page read may have scheduled a detached probe for this row.
 		// It is left running: the ffprobe it opened is behind the shared
@@ -2751,13 +2760,27 @@ func (h *PlaybackHandler) startPlaybackApplicationV3(r *http.Request, body []byt
 		}
 		if resolveErr != nil {
 			if r.Context().Err() == context.DeadlineExceeded {
-				// The shared start phase ran out during catalog/provider
-				// work. Keep it distinct from a release verdict: the release
-				// was not indicted, the start simply hit its end-to-end
-				// bound.
+				// The resolve half ran out during catalog/provider work. Keep
+				// it distinct from a release verdict: the release was not
+				// indicted, the start simply hit the bound it was given.
 				slog.WarnContext(r.Context(), "virtual playback start budget exhausted during candidate resolve",
 					"component", "api", "signal", "start_budget_exhausted",
 					"file_id", requestedFile.ID, "error", resolveErr)
+			}
+			if virtualStartBudgetExhausted(r.Context(), persistCtx) {
+				// Nothing about the release was established: the start ran out
+				// of its resolve window while the request itself is alive. A
+				// stored terminal would replay a verdict this start never
+				// reached, so answer the retryable 503 and let the retry resolve
+				// again — usually against the listing discovery has since
+				// seeded.
+				slog.WarnContext(persistCtx, "virtual playback start answering the exhausted resolve budget as retryable",
+					"component", "api", "signal", "start_budget_exhausted",
+					"file_id", requestedFile.ID,
+					"resolve_budget_ms", virtualStartResolveBudget.Milliseconds(),
+					"phase_budget_ms", virtualStartPhaseBudget.Milliseconds(),
+					"error", resolveErr)
+				return playback.DecisionResponseV3{}, startBudgetExhaustedOperationErrorV3()
 			}
 			// A confirmed-dead pinned release is indicted here so a retry does
 			// not re-resolve it; an empty provider listing is not a verdict and
@@ -2784,6 +2807,11 @@ func (h *PlaybackHandler) startPlaybackApplicationV3(r *http.Request, body []byt
 		if resolved.File == nil {
 			return playback.DecisionResponseV3{}, playbackOperationError(http.StatusBadGateway, "virtual_resolve_failed", "Failed to resolve virtual source")
 		}
+		// The resolve half is over. Hand the rest of the start the whole-phase
+		// deadline so planning, the transport commit and its readiness wait are
+		// bounded by the phase rather than by the resolve's share of it.
+		resolveCancel()
+		r = r.WithContext(startPhaseCtx)
 		resolvedEffectiveFileID = resolved.File.ID
 		resolvedFile := *resolved.File
 		resolvedFile.ID = requestedCatalogFileID
@@ -3065,6 +3093,20 @@ func (h *PlaybackHandler) startPlaybackApplicationV3(r *http.Request, body []byt
 	timings.mark("session_transport_commit")
 	timings.observeTransportPhasesV3(phaseTimings)
 	if statusErr != nil {
+		if virtualStartBudgetExhausted(r.Context(), persistCtx) {
+			// The phase ran out while the transport was starting. The readiness
+			// wait reports that as a transport failure, but the transport never
+			// got the window the phase reserved for it: report the budget, not a
+			// verdict about the release, and store nothing so a retry starts a
+			// fresh transport instead of replaying this one.
+			slog.WarnContext(persistCtx, "virtual playback start phase exhausted during transport startup; answering retryable",
+				"component", "api", "signal", "start_budget_exhausted",
+				"file_id", requestedFile.ID,
+				"reason", statusErr.reason,
+				"phase_budget_ms", virtualStartPhaseBudget.Milliseconds(),
+				"error", statusErr.cause)
+			return playback.DecisionResponseV3{}, startBudgetExhaustedOperationErrorV3()
+		}
 		// A decoder-rejected source is a candidate failure, not a route failure:
 		// rotate to the next provider release before any terminal. An explicit
 		// pin is never substituted; it terminalls with the version-list hint.
@@ -3286,8 +3328,9 @@ var virtualStartVersionFallbackCandidateBudget = virtualStartVersionFallbackList
 // first healthy candidate wins; if none does, the terminal is returned once
 // every candidate has failed or this budget elapses, whichever is first. It
 // contains one candidate budget so the first wave can finish its listing and
-// then its probe, and stays far below the 30s start phase (virtualStartPhaseBudget)
-// the walk runs inside, so the walk cannot itself burn the start.
+// then its probe, and stays far below the start resolve half
+// (virtualStartResolveBudget) the walk runs inside, so the walk cannot itself
+// burn the start.
 var virtualStartVersionFallbackDecisionBudget = virtualStartVersionFallbackCandidateBudget + 500*time.Millisecond
 
 // runVirtualVersionFallbackCandidatesV3 resolves alternate version candidates
@@ -7253,7 +7296,8 @@ func (h *PlaybackHandler) startReadyLocalPlaybackTransportV3(ctx context.Context
 	// client waited, and the count separates a manifest that appeared promptly
 	// from one that rode the deadline out. The count is additive log
 	// observation; the wait and its result are unchanged.
-	_, manifestPolls, manifestErr := ts.WaitForManifestContextPolls(ctx, playback.ManifestStartupTimeout)
+	readinessWait := virtualStartReadinessWait(ctx, virtualStartReadinessBudget)
+	_, manifestPolls, manifestErr := ts.WaitForManifestContextPolls(ctx, readinessWait)
 	if manifestErr != nil {
 		recordTransportPhaseV3(ctx, "transport_readiness", spawnFinishedAt)
 		slog.InfoContext(ctx, "playback transport startup timing",
@@ -7264,6 +7308,7 @@ func (h *PlaybackHandler) startReadyLocalPlaybackTransportV3(ctx context.Context
 			"spawn_ms", spawnFinishedAt.Sub(startedAt).Milliseconds(),
 			"manifest_wait_ms", time.Since(spawnFinishedAt).Milliseconds(),
 			"manifest_polls", manifestPolls,
+			"readiness_budget_ms", readinessWait.Milliseconds(),
 			"total_ms", time.Since(startedAt).Milliseconds(),
 			"outcome", "readiness_failed",
 		)
@@ -7284,6 +7329,7 @@ func (h *PlaybackHandler) startReadyLocalPlaybackTransportV3(ctx context.Context
 		"spawn_ms", spawnFinishedAt.Sub(startedAt).Milliseconds(),
 		"manifest_wait_ms", time.Since(spawnFinishedAt).Milliseconds(),
 		"manifest_polls", manifestPolls,
+		"readiness_budget_ms", readinessWait.Milliseconds(),
 		"total_ms", time.Since(startedAt).Milliseconds(),
 		"outcome", transportStartupReadyV3,
 	)
@@ -7299,12 +7345,19 @@ func (h *PlaybackHandler) newAutoTranscodePipelineV3(ctx context.Context, opts p
 	return playback.NewAutoTranscodePipeline(ctx, opts)
 }
 
+// localAutoStartupPerPathV3 bounds one hw_accel=auto execution path's wait for
+// its first manifest. A var so tests can shrink the walk.
+var localAutoStartupPerPathV3 = playback.AutoTranscodeStartupPerPathTimeout
+
 // localAutoStartupBudgetV3 bounds a local hw_accel=auto readiness-gated start.
 // The remote path budgets TranscodeStartReadyMaxDuration + 5s for the same
 // fallback; the local path runs runTranscodeStartup in-process, where each of
-// the MaxAutoTranscodeStartupAttempts paths may consume its own
-// ManifestStartupTimeout. A variable so tests can shrink it.
-var localAutoStartupBudgetV3 = time.Duration(playback.MaxAutoTranscodeStartupAttempts)*playback.ManifestStartupTimeout + 5*time.Second
+// the MaxAutoTranscodeStartupAttempts paths may wait its own
+// localAutoStartupPerPathV3. The walk therefore fits inside one first-manifest
+// window instead of needing three of them: at the old per-path
+// ManifestStartupTimeout it totalled 95 s, which no start phase could admit.
+// It is a var so tests can shrink it.
+var localAutoStartupBudgetV3 = time.Duration(playback.MaxAutoTranscodeStartupAttempts)*localAutoStartupPerPathV3 + 5*time.Second
 
 // addTransportReadinessNetOfWalkV3 records an enabled hw_accel=auto walk's
 // readiness as its wall time net of the spans already named during the walk:
@@ -7323,17 +7376,20 @@ func addTransportReadinessNetOfWalkV3(ctx context.Context, elapsed, spawn, upstr
 //
 // The whole walk is bounded by one explicit budget (maxAttempts × per-attempt
 // timeout + margin), mirroring remotePlaybackTransportTimeout on the remote
-// path. Without it the walk runs under the bare request context, so 3 × 30s of
-// fallback could outlive the handler's own deadline and surface as a canceled
-// request instead of a classified readiness failure.
+// path, and each path waits only its own per-path timeout so one stalled path
+// cannot spend the walk. Without both the walk runs under the bare request
+// context, so 3 × 30s of fallback could outlive the handler's own deadline and
+// surface as a canceled request instead of a classified readiness failure.
 func (h *PlaybackHandler) startReadyAutoLocalPlaybackTransportV3(ctx context.Context, pipeline *playback.AutoTranscodePipeline) (*playback.TranscodeSession, *localTransportStartupFailureV3) {
 	startedAt := time.Now()
 	attempts := 0
 	spawnBefore := transportPhaseDurationV3(ctx, "transport_spawn")
 	upstreamBefore := transportPhaseDurationV3(ctx, "transport_upstream")
 	manifestBefore := transportPhaseDurationV3(ctx, transportPhaseManifestV3)
+	walkBudget := virtualStartReadinessWait(ctx, localAutoStartupBudgetV3)
 	ts, err := playback.StartReadyTranscode(ctx, pipeline, playback.TranscodeStartup{
-		Budget: localAutoStartupBudgetV3,
+		Timeout: localAutoStartupPerPathV3,
+		Budget:  walkBudget,
 		Start: func(ctx context.Context, opts playback.TranscodeOpts) (*playback.TranscodeSession, error) {
 			attempts++
 			upstreamBefore := transportPhaseDurationV3(ctx, "transport_upstream")
@@ -7383,6 +7439,7 @@ func (h *PlaybackHandler) startReadyAutoLocalPlaybackTransportV3(ctx context.Con
 		"transport", "local",
 		"session", pipeline.Current().SessionID,
 		"attempts", attempts,
+		"readiness_budget_ms", walkBudget.Milliseconds(),
 		"total_ms", time.Since(startedAt).Milliseconds(),
 		"outcome", outcome,
 	)

@@ -24,6 +24,16 @@ const (
 // a whole readiness-gated start size their budget to it.
 const MaxAutoTranscodeStartupAttempts = int(autoTranscodeSoftware) + 1
 
+// AutoTranscodeStartupPerPathTimeout is how long one hw_accel=auto execution
+// path may wait for its first manifest. It is the frame gate's grace
+// (noVideoFramesGrace): a video encode that has muxed past it without decoding
+// a frame is already a typed failure, and a path that cannot initialize its
+// device exits in well under a second. Waiting a full ManifestStartupTimeout
+// per path would let three paths total 90 s, which is longer than any client
+// waits for a start, so a hung path must be moved past on the encode's own
+// horizon instead.
+const AutoTranscodeStartupPerPathTimeout = noVideoFramesGrace
+
 const (
 	autoTranscodePreferenceTTL  = 15 * time.Minute
 	maxAutoTranscodePreferences = 256

@@ -4,6 +4,8 @@ import (
 	"context"
 	"testing"
 	"time"
+
+	"github.com/Silo-Server/silo-server/internal/playback"
 )
 
 // The catalog discovery budget and the completed-release retry budget are both
@@ -18,18 +20,18 @@ func TestVirtualStartPhaseBudgetBoundsCombinedStart(t *testing.T) {
 		t.Fatal("start phase has no deadline")
 	}
 
-	// Candidate resolve derives from the start deadline (the real path wraps
-	// r.Context() with virtualStartupBudget).
-	resolve, resolveCancel := context.WithTimeout(start, virtualStartupBudget)
+	// Candidate resolve derives from the start deadline through its own resolve
+	// half, which in turn wraps the cold path's virtualStartupBudget.
+	resolve, resolveCancel := withVirtualStartPhaseDeadline(start, virtualStartResolveBudget)
 	defer resolveCancel()
 	resolveDeadline, _ := resolve.Deadline()
 	if resolveDeadline.After(startDeadline) {
 		t.Fatalf("resolve deadline %v outlives the start deadline %v", resolveDeadline, startDeadline)
 	}
 
-	// Transport startup and the pin retry derive from the same resolve
-	// context, so neither can hand a stage a fresh full budget.
-	transport, transportCancel := context.WithTimeout(resolve, virtualStartupBudget)
+	// Transport startup and the pin retry derive from the phase, so neither can
+	// hand a stage a fresh full budget.
+	transport, transportCancel := context.WithTimeout(start, virtualStartupBudget)
 	defer transportCancel()
 	transportDeadline, _ := transport.Deadline()
 	if transportDeadline.After(startDeadline) {
@@ -40,6 +42,133 @@ func TestVirtualStartPhaseBudgetBoundsCombinedStart(t *testing.T) {
 	}
 	if budget, allowed := virtualPinRetryBudget(transport); !allowed || budget > virtualCompletedReleaseRetryBudget {
 		t.Fatalf("pin retry budget = %v allowed=%v, want a bounded retry", budget, allowed)
+	}
+}
+
+// The phase is the sum of the work it holds, so no stage inside it is handed a
+// bound its parent cannot reach. The 30 s phase this replaces was smaller than
+// the 60 s cold path it contained and than the 95 s auto walk, and a resolve
+// that spent most of it left the readiness wait a few seconds: a healthy
+// hw_accel=auto start therefore terminalised as transcode_start_failed.
+func TestVirtualStartPhaseBudgetCoversWhatItContains(t *testing.T) {
+	// The phase is built from the stages, not chosen beside them.
+	if want := virtualStartResolveBudget + max(virtualStartReadinessBudget, localAutoStartupBudgetV3); virtualStartPhaseBudget != want {
+		t.Fatalf("phase = %v, want resolve + max(readiness, auto walk) = %v", virtualStartPhaseBudget, want)
+	}
+
+	// Both shapes the start can take: a fixed-executor transport waits one
+	// ManifestStartupTimeout, an auto walk waits its three paths.
+	if virtualStartPhaseBudget < virtualStartResolveBudget+virtualStartReadinessBudget {
+		t.Fatalf("phase %v does not hold a resolve (%v) plus a readiness window (%v)",
+			virtualStartPhaseBudget, virtualStartResolveBudget, virtualStartReadinessBudget)
+	}
+	if virtualStartPhaseBudget < virtualStartResolveBudget+localAutoStartupBudgetV3 {
+		t.Fatalf("phase %v does not hold a resolve (%v) plus the auto walk (%v)",
+			virtualStartPhaseBudget, virtualStartResolveBudget, localAutoStartupBudgetV3)
+	}
+
+	// The auto walk fits one readiness window instead of three, and does so by
+	// bounding each path rather than the walk alone.
+	if localAutoStartupBudgetV3 > virtualStartReadinessBudget {
+		t.Fatalf("auto walk %v does not fit the readiness window %v", localAutoStartupBudgetV3, virtualStartReadinessBudget)
+	}
+	perPathTotal := time.Duration(playback.MaxAutoTranscodeStartupAttempts) * localAutoStartupPerPathV3
+	if localAutoStartupBudgetV3 < perPathTotal {
+		t.Fatalf("auto walk budget %v is smaller than its %d per-path allowances (%v)",
+			localAutoStartupBudgetV3, playback.MaxAutoTranscodeStartupAttempts, perPathTotal)
+	}
+	if localAutoStartupPerPathV3 >= playback.ManifestStartupTimeout {
+		t.Fatalf("auto per-path allowance %v is not shorter than one full manifest window (%v)",
+			localAutoStartupPerPathV3, playback.ManifestStartupTimeout)
+	}
+
+	// Every child of the resolve fits inside it: the listing window plus the
+	// probe it must leave room for, and the listing stage's own cap.
+	if virtualStartResolveBudget != virtualStartListingBudget+virtualStartProbeBudget {
+		t.Fatalf("resolve budget %v, want listing %v + probe %v",
+			virtualStartResolveBudget, virtualStartListingBudget, virtualStartProbeBudget)
+	}
+	if virtualStartListingBudget > virtualListingStageBudget {
+		t.Fatalf("start listing window %v exceeds the listing stage cap %v",
+			virtualStartListingBudget, virtualListingStageBudget)
+	}
+	// The reserve is what makes a slow listing unable to pre-empt the probe; it
+	// must not be capped below the probe's own bound in a start's resolve.
+	if reserve := virtualStartProbeReserve(true, virtualStartResolveBudget); reserve < virtualStartProbeBudget {
+		t.Fatalf("probe reserve %v is smaller than the probe budget %v in a start resolve",
+			reserve, virtualStartProbeBudget)
+	}
+
+	// A phase longer than the client's own start abort is never delivered.
+	if virtualStartPhaseBudget >= virtualStartClientBudget {
+		t.Fatalf("phase %v does not leave a margin under the client's %v start abort",
+			virtualStartPhaseBudget, virtualStartClientBudget)
+	}
+}
+
+// A start whose resolve spends most of its allowance still hands the readiness
+// wait a full window. The deadline is asserted directly rather than slept for:
+// the phase is sized as resolve + readiness, so the resolve half may be spent
+// entirely before the transport asks.
+func TestVirtualStartReadinessKeepsItsWindowAfterASlowResolve(t *testing.T) {
+	phaseStart := time.Now()
+	spentResolveDeadline := phaseStart.Add(virtualStartResolveBudget)
+	phaseDeadline := spentResolveDeadline.Add(virtualStartReadinessBudget)
+
+	// A phase at the moment the resolve half has been spent entirely: the
+	// deadline the transport sees is the phase's own, not the resolve's.
+	phase, cancel := context.WithDeadline(context.Background(), phaseDeadline)
+	defer cancel()
+	if remaining := time.Until(phaseDeadline); remaining < virtualStartReadinessBudget-100*time.Millisecond {
+		t.Fatalf("phase left %v after a spent resolve, want the %v window", remaining, virtualStartReadinessBudget)
+	}
+
+	got := virtualStartReadinessWait(phase, virtualStartReadinessBudget)
+	if got < virtualStartReadinessBudget-100*time.Millisecond {
+		t.Fatalf("readiness wait after a spent resolve = %v, want the full %v window", got, virtualStartReadinessBudget)
+	}
+	if got > virtualStartReadinessBudget {
+		t.Fatalf("readiness wait = %v, want at most its own %v window", got, virtualStartReadinessBudget)
+	}
+
+	// The clamp still applies when the phase itself is nearly out: the wait
+	// never claims time the phase does not have.
+	shortPhase, shortCancel := context.WithDeadline(context.Background(), time.Now().Add(time.Second))
+	defer shortCancel()
+	if got := virtualStartReadinessWait(shortPhase, virtualStartReadinessBudget); got > time.Second {
+		t.Fatalf("readiness wait = %v, want at most the second the phase has left", got)
+	}
+
+	// An exhausted phase is a zero wait, not a negative one.
+	expired, expiredCancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
+	defer expiredCancel()
+	if got := virtualStartReadinessWait(expired, 0); got != 0 {
+		t.Fatalf("readiness wait on an expired phase = %v, want 0", got)
+	}
+	if got := virtualStartReadinessWait(context.Background(), 0); got != virtualStartReadinessBudget {
+		t.Fatalf("readiness wait with no phase = %v, want the %v window", got, virtualStartReadinessBudget)
+	}
+}
+
+// A phase that ran out while the request is still alive is the only state that
+// answers "out of time". A request the client canceled, or a request that never
+// had a phase, must not be reclassified.
+func TestVirtualStartBudgetExhaustedRequiresALiveRequest(t *testing.T) {
+	phaseExpired, phaseCancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
+	defer phaseCancel()
+	if !virtualStartBudgetExhausted(phaseExpired, context.Background()) {
+		t.Fatal("an expired phase with a live request was not reported as exhausted")
+	}
+	if virtualStartBudgetExhausted(phaseExpired, phaseExpired) {
+		t.Fatal("a request that is itself expired was reported as a live request")
+	}
+	if virtualStartBudgetExhausted(context.Background(), context.Background()) {
+		t.Fatal("a start with no phase deadline was reported as exhausted")
+	}
+	canceled, cancelNow := context.WithCancel(context.Background())
+	cancelNow()
+	if virtualStartBudgetExhausted(canceled, context.Background()) {
+		t.Fatal("a canceled phase was reported as an exhausted budget")
 	}
 }
 

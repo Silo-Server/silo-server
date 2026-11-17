@@ -404,8 +404,10 @@ func (h *PlaybackHandler) startLocalPlaybackTransportOnce(ctx context.Context, o
 	// deadline produced a negative bound (bound_ms=-34, -65, -95, -126) and an
 	// attempt loop that "failed" every resolve before it ran; the last of those
 	// was then reported as a non-retryable transcode_start_failed, hiding that
-	// the start simply ran out of time.
-	startupBudget, startupAllowed := virtualResolveAttemptBudget(ctx, virtualStartupBudget)
+	// the start simply ran out of time. The cap is the readiness window the
+	// caller reserved for this loop, so it never claims a bound larger than the
+	// transport half of the phase it runs in.
+	startupBudget, startupAllowed := virtualResolveAttemptBudget(ctx, virtualStartReadinessBudget)
 	if !startupAllowed {
 		slog.WarnContext(ctx, "virtual transport startup skipped: the start budget is exhausted",
 			"component", "api", "signal", "start_budget_exhausted",

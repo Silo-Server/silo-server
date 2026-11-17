@@ -122,9 +122,19 @@ const (
 // virtualStartupBudget bounds the entire cold path: candidate listing,
 // provider resolution, probing, retries and the stale-source
 // fallback all run under one deadline started at cold-path entry, so a slow
-// early stage leaves a later stage only the remaining budget. It is a var so
-// tests can shrink the budget and observe the single deadline.
+// early stage leaves a later stage only the remaining budget. A caller that
+// owns a tighter bound — a virtual start's resolve half — narrows it through
+// the request context, so this is the bound for the detached discovery and
+// background resolves that have no narrower one. It is a var so tests can
+// shrink the budget and observe the single deadline.
 var virtualStartupBudget = 60 * time.Second
+
+// virtualListingStageBudget caps the candidate-listing stage of one resolve.
+// Provider listing is part of the startup critical path, so it is bounded on
+// its own even when the surrounding budget is larger; staging additionally
+// stops before the probe's reserve (see virtualStartProbeReserve), so a slow
+// listing cannot leave the probe a zero-length window.
+var virtualListingStageBudget = 15 * time.Second
 
 // virtualBackgroundProbeBudget bounds a background probe. Production uses the
 // scanner's shared probe timeout so the inner probe and the caller that waits
@@ -1877,11 +1887,12 @@ type virtualResolveTrace struct {
 	fallback    time.Duration
 	fallbackRan bool
 
-	// budgetMS is the cold-path budget in milliseconds the trace ran under
-	// (virtualStartupBudget at trace start). budgetExceeded is set when the
-	// wall-clock resolve time passed it: with every stage deriving from the
-	// single cold deadline, an overrun means the deadline was not honored
-	// end to end, and the line tells exactly which stages consumed it.
+	// budgetMS is the resolve budget in milliseconds the trace ran under: the
+	// caller's narrowed budget when it has one (a start's resolve half),
+	// otherwise virtualStartupBudget. budgetExceeded is set when the wall-clock
+	// resolve time passed it: with every stage deriving from the single cold
+	// deadline, an overrun means the deadline was not honored end to end, and
+	// the line tells exactly which stages consumed it.
 	budgetMS      int64
 	budgetRan     bool
 	budgetExceed  bool
@@ -2780,10 +2791,19 @@ func (h *PlaybackHandler) resolveVirtualPlaybackSource(r *http.Request, file *mo
 	// Every cache entry and sticky pin this resolve writes carries it, so a
 	// resolve that finishes late cannot overwrite a newer resolve's evidence.
 	generation := nextVirtualCacheGeneration()
+	// resolveBudget is the resolve's own bound as it exists after the caller's
+	// context narrowed it: the start hands its resolve half down this way, so
+	// the staging split and the trace below are computed against what the
+	// resolve can really spend rather than against the package default it may no
+	// longer have.
+	resolveBudget := virtualStartupBudget
+	if deadline, ok := r.Context().Deadline(); ok {
+		resolveBudget = min(resolveBudget, max(0, time.Until(deadline)))
+	}
 	// Split file_load_probe into its provider phases so a cold-start
 	// attribution is measured, not guessed. The deferred log runs on every
 	// return below, including the fast paths.
-	trace := &virtualResolveTrace{started: time.Now(), budgetMS: virtualStartupBudget.Milliseconds()}
+	trace := &virtualResolveTrace{started: time.Now(), budgetMS: resolveBudget.Milliseconds()}
 	defer trace.log(r.Context(), file)
 	// One deadline owns the entire cold path below. Listing,
 	// provider resolution, probing, retries and the stale-source fallback all
@@ -2797,20 +2817,21 @@ func (h *PlaybackHandler) resolveVirtualPlaybackSource(r *http.Request, file *mo
 	// stages can report their wall time net of discovery and a repeat start can
 	// show fetch_calls=0 instead of hiding the cost under a probe label.
 	coldCtx, fetchSnapshot := observeVirtualProviderFetches(coldCtx, virtualProviderLinkLatencyKey(file))
-	// Candidate selection (listing) must not be able to
-	// consume the resolve/probe attempt's budget. It runs under a staging
-	// deadline that stops at half the cold budget, reserving the other half for
-	// the attempt loop below. A caller that must bound the listing on its own —
-	// the start's alternate-version walk — passes a tighter listingBudget, which
-	// applies to this stage only: the attempt loop keeps coldCtx, so the probe
-	// there still gets its own full start-path bound. The attempt still inherits
-	// coldCtx, so the single overall cap and the no-restart property are
-	// unchanged; staging only guarantees that a slow early stage cannot starve a
-	// later one.
-	stagingBudget := virtualStartupBudget / 2
+	// Candidate selection (listing) must not be able to consume the
+	// resolve/probe attempt's budget. It runs under a staging deadline that
+	// stops before the probe's reserve, so the probe that follows the listing
+	// still gets its own bound instead of a zero-length window. A caller that
+	// must bound the listing on its own — the start's alternate-version walk —
+	// passes a tighter listingBudget, which applies to this stage only: the
+	// attempt loop keeps coldCtx, so the probe there still gets its own full
+	// start-path bound. The attempt still inherits coldCtx, so the single
+	// overall cap and the no-restart property are unchanged; staging only
+	// guarantees that a slow early stage cannot starve a later one.
+	stagingBudget := min(resolveBudget-virtualStartProbeReserve(deferProbe || options.startPathProbe, resolveBudget), virtualListingStageBudget)
 	if options.listingBudget > 0 {
 		stagingBudget = min(stagingBudget, options.listingBudget)
 	}
+	stagingBudget = max(0, stagingBudget)
 	stagingCtx, stagingCancel := context.WithTimeout(coldCtx, stagingBudget)
 	defer stagingCancel()
 	userID := apimw.GetUserID(r.Context())
@@ -3007,14 +3028,14 @@ func (h *PlaybackHandler) resolveVirtualPlaybackSource(r *http.Request, file *mo
 		// Candidate listing is part of the startup critical path. Keep it
 		// bounded so the first-byte SLA cannot be defeated before resolution,
 		// but derive that bound from the single cold-path deadline so listing
-		// cannot restart the budget. The 15s cap is a backstop for a staging
-		// budget larger than that; the staging deadline always wins when it
-		// is smaller.
-		listCtx, cancel := context.WithTimeout(stagingCtx, 15*time.Second)
+		// cannot restart the budget. The listing-stage cap is a backstop for a
+		// staging budget larger than it; the staging deadline always wins when
+		// it is smaller.
+		listCtx, cancel := context.WithTimeout(stagingCtx, virtualListingStageBudget)
 		// Report what the listing can actually spend: the staging deadline wins
-		// when it is smaller than the 15s cap, and an already-consumed staging
-		// budget is 0 ms rather than a negative bound.
-		listingBound := 15 * time.Second
+		// when it is smaller than the listing-stage cap, and an already-consumed
+		// staging budget is 0 ms rather than a negative bound.
+		listingBound := virtualListingStageBudget
 		if deadline, ok := stagingCtx.Deadline(); ok {
 			listingBound = min(listingBound, max(0, time.Until(deadline)))
 		}
@@ -3146,9 +3167,9 @@ func (h *PlaybackHandler) resolveVirtualPlaybackSource(r *http.Request, file *mo
 	// The attempt loop, its probes, its retries and the stale-source fallback
 	// run on the same cold-path deadline. Reusing coldCtx directly means they
 	// observe whatever budget listing left, rather than a
-	// freshly restarted virtualStartupBudget. The staging deadline above caps
-	// those early stages at half the cold budget, so the attempt is guaranteed
-	// at least that much time rather than being starved.
+	// freshly restarted virtualStartupBudget. The staging deadline above stops
+	// before the probe's reserve, so the probe is guaranteed its own bound
+	// rather than being starved.
 	attemptCtx := coldCtx
 	// A declared recovery re-lists past the fresh-serve floor and the
 	// provider-failure fail-fast, so recovery is not blocked by the 30s backoff

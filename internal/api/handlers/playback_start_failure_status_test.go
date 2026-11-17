@@ -81,12 +81,12 @@ func TestHandleStartPlaybackV3ServerFaultAnswersRetryableNotTerminal(t *testing.
 	}
 }
 
-// A start that runs out of its phase budget must still store the verdict it
-// reached. The save used to run on the expired phase context, fail
-// deterministically, and answer 503 with no attempt row — so the retry re-walked
-// the whole resolve into the same wall. The record must exist after the
-// response.
-func TestHandleStartPlaybackV3PersistsTerminalAfterPhaseBudgetExpires(t *testing.T) {
+// A start that runs out of its resolve budget established nothing about the
+// release, so it must answer the retryable 503 with Retry-After and store no
+// verdict. The pre-fix path persisted a terminal on the expired phase and
+// answered 201 with a verdict the start never reached — and the retry either
+// replayed it (same attempt id) or re-walked into the same wall.
+func TestHandleStartPlaybackV3ExhaustedResolveBudgetAnswersRetryable(t *testing.T) {
 	source := v3HandlerFixtureFile(t)
 	source.ID = 900
 	source.ContentID = "movie-phase-budget"
@@ -117,22 +117,86 @@ func TestHandleStartPlaybackV3PersistsTerminalAfterPhaseBudgetExpires(t *testing
 		strings.NewReader(marshalV3StartRequest(t, start)),
 	).WithContext(newAuthorizedPlaybackContext()))
 
-	if rr.Code != http.StatusCreated {
-		t.Fatalf("start status = %d, want the stored terminal, body = %s", rr.Code, rr.Body.String())
+	if rr.Code != http.StatusServiceUnavailable {
+		t.Fatalf("start status = %d, want the retryable 503, body = %s", rr.Code, rr.Body.String())
 	}
-	var response playback.DecisionResponseV3
-	if err := json.Unmarshal(rr.Body.Bytes(), &response); err != nil {
-		t.Fatalf("decode start response: %v", err)
+	if got := rr.Header().Get("Retry-After"); got != "5" {
+		t.Fatalf("Retry-After = %q, want 5", got)
 	}
-	if response.Terminal == nil {
-		t.Fatalf("response = %s, want a terminal after the exhausted phase", rr.Body.String())
+	var body struct {
+		Error string `json:"error"`
 	}
-	record, err := handler.PlanStoreV3.GetAttemptByPlaybackAttemptID(context.Background(), start.PlaybackAttemptID)
-	if err != nil {
-		t.Fatalf("terminal was not persisted: %v", err)
+	if err := json.Unmarshal(rr.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode body: %v", err)
 	}
-	if record.StartResponse.Terminal == nil || record.StartResponse.Terminal.Reason != response.Terminal.Reason {
-		t.Fatalf("stored attempt = %#v, want the answered terminal", record.StartResponse.Terminal)
+	if body.Error != "dependency_unavailable" {
+		t.Fatalf("error code = %q, want dependency_unavailable", body.Error)
+	}
+	if strings.Contains(rr.Body.String(), `"terminal"`) || strings.Contains(rr.Body.String(), `"outcome"`) {
+		t.Fatalf("body = %s, want no verdict for an exhausted budget", rr.Body.String())
+	}
+	// Nothing may be stored: the automatic retry replays a stored decision for
+	// the same attempt id, so a row here is the wall the retry cannot climb.
+	if _, err := handler.PlanStoreV3.GetAttemptByPlaybackAttemptID(context.Background(), start.PlaybackAttemptID); !errors.Is(err, playback.ErrSessionNotFound) {
+		t.Fatalf("attempt lookup err = %v, want no stored attempt for an exhausted budget", err)
+	}
+}
+
+// A start whose phase runs out while the transport is becoming ready must not
+// publish the readiness wait's own verdict. The transport never got the window
+// the phase reserved for it, so the answer is the retryable 503 rather than a
+// transcode_start_failed terminal the client would treat as a bad release.
+func TestHandleStartPlaybackV3ExhaustedTransportPhaseAnswersRetryable(t *testing.T) {
+	source := v3HandlerFixtureFile(t)
+	source.ID = 950
+	source.Container = "mp4"
+	source.FilePath = "virtual://movie/transport-phase-budget"
+	source.VirtualOwnerInstallationID = 5
+
+	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0), mapPlaybackFileResolver{files: map[int]*models.MediaFile{source.ID: source}})
+	// The fake FFmpeg starts and never writes a manifest, so the start can only
+	// end at a deadline.
+	handler.PlaybackConfig = playbackTestConfig(writePlaybackTestFFmpegStall(t), t.TempDir())
+	stubCopySeekAnchorV3(handler)
+	handler.VirtualPlaybackResolver = VirtualPlaybackResolverFunc(func(_ context.Context, path string, _ int, _ string, _ int) (string, error) {
+		return "http://127.0.0.1:8080/stream?path=" + path, nil
+	})
+	handler.VirtualMediaResolver = VirtualMediaResolverFunc(func(_ context.Context, uri string, _ int, _ int, _ string) (string, error) {
+		return "http://127.0.0.1:8080/stream?uri=" + uri, nil
+	})
+	handler.ItemAccess = allowAllPlaybackItemAccess{}
+
+	previousBudget := virtualStartPhaseBudget
+	virtualStartPhaseBudget = 300 * time.Millisecond
+	t.Cleanup(func() { virtualStartPhaseBudget = previousBudget })
+
+	start := v3HandlerStartRequest()
+	start.FileID = source.ID
+	// Ask for HLS with the fixture's own codecs so the plan commits a local
+	// HLS transport and the readiness wait is the phase's to cut.
+	start.ClientPlaybackContext.Deliveries[playback.DeliveryClassOriginalHTTPV3] = playback.DeliveryCapabilityV3{Enabled: false}
+	start.ClientPlaybackContext.Deliveries[playback.DeliveryClassHLSV3] = playback.DeliveryCapabilityV3{
+		Enabled: true, SupportedOnDevice: true, Containers: []string{"hls"},
+		VideoCodecs: []string{"h264"}, AudioDecodeCodecs: []string{"aac"},
+	}
+	rr := httptest.NewRecorder()
+	handler.HandleStartPlayback(rr, httptest.NewRequest(
+		http.MethodPost,
+		"/api/v1/playback/start",
+		strings.NewReader(marshalV3StartRequest(t, start)),
+	).WithContext(newAuthorizedPlaybackContext()))
+
+	if rr.Code != http.StatusServiceUnavailable {
+		t.Fatalf("start status = %d, want the retryable 503, body = %s", rr.Code, rr.Body.String())
+	}
+	if got := rr.Header().Get("Retry-After"); got != "5" {
+		t.Fatalf("Retry-After = %q, want 5", got)
+	}
+	if body := rr.Body.String(); strings.Contains(body, transcodeStartFailedReasonV3) || strings.Contains(body, `"terminal"`) {
+		t.Fatalf("body = %s, want the budget answer, not a transcode verdict", body)
+	}
+	if _, err := handler.PlanStoreV3.GetAttemptByPlaybackAttemptID(context.Background(), start.PlaybackAttemptID); !errors.Is(err, playback.ErrSessionNotFound) {
+		t.Fatalf("attempt lookup err = %v, want no stored attempt for an exhausted budget", err)
 	}
 }
 
