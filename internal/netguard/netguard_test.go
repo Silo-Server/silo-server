@@ -240,7 +240,7 @@ func TestTransportNamesSiloWhenCallerSetsNoUserAgent(t *testing.T) {
 		if err != nil {
 			t.Fatalf("%s: %v", tc.name, err)
 		}
-		resp.Body.Close()
+		_ = resp.Body.Close()
 		if ua, _ := got.Load().(string); !tc.want(ua) {
 			t.Errorf("%s: server saw User-Agent %q", tc.name, ua)
 		}
@@ -255,7 +255,7 @@ func TestTransportNamesSiloWhenCallerSetsNoUserAgent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("nil Header: %v", err)
 	}
-	resp.Body.Close()
+	_ = resp.Body.Close()
 	if ua, _ := got.Load().(string); !strings.HasPrefix(ua, "Silo/") {
 		t.Errorf("nil Header: server saw User-Agent %q", ua)
 	}
