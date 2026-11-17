@@ -7417,7 +7417,7 @@
       "response_headers": {
         "Cache-Control": "private, no-cache",
         "Content-Type": "application/json",
-        "ETag": "\"e524a14c4883542923d7e2be58ae12ff5a2e649615878e7fcafd8ff387f88801\""
+        "ETag": "\"e77118ae6a2649ae25baba0f650bd324b8bc731fa5e8775ff165ade34686e8d8\""
       },
       "response_media_type": "application/json",
       "schema": "#/components/schemas/HomeCapabilities",
@@ -7547,6 +7547,27 @@
       "response_media_type": "application/json",
       "schema": "#/components/schemas/Section",
       "body_file": "get_home_section_items_capped_ok.json"
+    },
+    {
+      "name": "get_home_section_items_collections_ok",
+      "operation_id": "getHomeSectionItems",
+      "scenario": "A row of collections: its cards are the collections the viewer can see, in collections, with no items; total_count is their number.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/home/sections/franchises/items",
+        "headers": {
+          "Authorization": "Bearer tok-member",
+          "X-Profile-Id": "p-owner"
+        }
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/Section",
+      "body_file": "get_home_section_items_collections_ok.json"
     },
     {
       "name": "get_home_section_items_item_limit_out_of_range",

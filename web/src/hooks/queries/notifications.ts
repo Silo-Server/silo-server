@@ -711,6 +711,14 @@ export function notificationToast(
         : t("web.notifications.toast.requestArrived"),
     };
   }
+  if (notification.type === "watchlist.available") {
+    return {
+      title: notification.series_title
+        ? t("web.notifications.toast.seriesAvailable", { series: notification.series_title })
+        : t("web.notifications.inbox.watchlistTitleAvailable"),
+      description: t("web.notifications.toast.watchlistArrived"),
+    };
+  }
   if (notification.type === "request.approved" || notification.type === "request.declined") {
     const approved = notification.type === "request.approved";
     const title = notification.reason_flags?.title;

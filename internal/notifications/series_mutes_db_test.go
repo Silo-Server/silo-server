@@ -43,20 +43,24 @@ func TestFanoutSkipsProfilesThatMutedTheSeries(t *testing.T) {
 	if got := accountRecipients(t, pool, "event-1"); !slices.Equal(got, []string{"1/open", "1/other-muted"}) {
 		t.Fatalf("event-1 recipients = %v, want account 1's open and other-muted", got)
 	}
-	var favorite, cursorMoved bool
+	var candidate, cursorMoved bool
 	if err := pool.QueryRow(ctx, `
-		SELECT favorite, last_notified_episode_key IS NOT NULL FROM profile_series_interest WHERE user_id = 1 AND profile_id = 'muted'`,
-	).Scan(&favorite, &cursorMoved); err != nil {
+		SELECT next_up_candidate, last_notified_episode_key IS NOT NULL FROM profile_series_interest WHERE user_id = 1 AND profile_id = 'muted'`,
+	).Scan(&candidate, &cursorMoved); err != nil {
 		t.Fatalf("read muted interest: %v", err)
 	}
-	if !favorite || cursorMoved {
-		t.Fatalf("muted interest favorite = %v, cursor moved = %v; want the row unchanged", favorite, cursorMoved)
+	if !candidate || cursorMoved {
+		t.Fatalf("muted interest next_up_candidate = %v, cursor moved = %v; want the row unchanged", candidate, cursorMoved)
 	}
 
 	if err := s.UnmuteSeries(ctx, 1, "muted", c.series); err != nil {
 		t.Fatalf("UnmuteSeries: %v", err)
 	}
+	// Every profile watches E2, which moves its cursor to E3.
 	nextKey := EpisodeKey(1, 3)
+	if _, err := pool.Exec(ctx, `UPDATE profile_series_interest SET next_expected_episode_key = $1`, nextKey); err != nil {
+		t.Fatalf("move cursors: %v", err)
+	}
 	for _, stmt := range []struct {
 		sql  string
 		args []any
@@ -97,9 +101,9 @@ func accountRecipients(t *testing.T, pool *pgxpool.Pool, eventID string) []strin
 }
 
 // seedSeriesMutes creates the list's tables in a test schema with two series
-// and a movie, the Bear as a favorite of p1 and p2 on account 1 and, through
-// another library, of p1 on account 2, and account 1 p1's mutes of both
-// series, each written twice.
+// and a movie, the Bear as a caught-up Next Up of p1 and p2 on account 1 and,
+// through another library, of p1 on account 2, and account 1 p1's mutes of
+// both series, each written twice.
 func seedSeriesMutes(t *testing.T) (*pgxpool.Pool, *System) {
 	t.Helper()
 	pool := schemaDB(t, "series_mutes_")
@@ -107,16 +111,18 @@ func seedSeriesMutes(t *testing.T) (*pgxpool.Pool, *System) {
 	for _, stmt := range []string{
 		`CREATE TABLE profile_series_interest (LIKE public.profile_series_interest INCLUDING ALL)`,
 		`CREATE TABLE media_items (LIKE public.media_items INCLUDING ALL)`,
+		`CREATE TABLE episodes (LIKE public.episodes INCLUDING ALL)`,
+		`CREATE TABLE media_files (LIKE public.media_files INCLUDING ALL)`,
 		`CREATE TABLE notification_preferences (LIKE public.notification_preferences INCLUDING ALL)`,
 		`CREATE TABLE profile_series_notification_mutes (LIKE public.profile_series_notification_mutes INCLUDING ALL)`,
 		`INSERT INTO media_items (content_id, type, title, sort_title, genres, year) VALUES
 			('series:bear', 'series', 'The Bear', '', '{}', 2022),
 			('series:andor', 'series', 'Andor', '', '{}', 2022),
 			('movie:heat', 'movie', 'Heat', '', '{}', 1995)`,
-		`INSERT INTO profile_series_interest (user_id, profile_id, library_id, series_id, favorite) VALUES
-			(1, 'p1', 1, 'series:bear', true),
-			(1, 'p2', 1, 'series:bear', true),
-			(2, 'p1', 2, 'series:bear', true)`,
+		`INSERT INTO profile_series_interest (user_id, profile_id, library_id, series_id, next_up_candidate, next_expected_episode_key) VALUES
+			(1, 'p1', 1, 'series:bear', true, 2000001),
+			(1, 'p2', 1, 'series:bear', true, 2000001),
+			(2, 'p1', 2, 'series:bear', true, 2000001)`,
 	} {
 		if _, err := pool.Exec(ctx, stmt); err != nil {
 			t.Fatalf("seed: %v", err)
@@ -153,11 +159,11 @@ func TestSeriesMutesList(t *testing.T) {
 		t.Fatalf("p1 series = %+v, want andor then bear", got)
 	}
 	andor, bear := got[0], got[1]
-	if !andor.Muted || andor.Reasons.Any() || andor.Notifies() || andor.Title != "Andor" {
+	if !andor.Muted || andor.Reasons.NextUp || andor.Notifies() || andor.Title != "Andor" {
 		t.Errorf("andor = %+v, want a muted entry with no reason", andor)
 	}
-	if !bear.Muted || !bear.Active.Favorite || bear.Notifies() {
-		t.Errorf("bear = %+v, want muted with its favorite still active", bear)
+	if !bear.Muted || !bear.Active.NextUp || bear.Notifies() {
+		t.Errorf("bear = %+v, want muted with its Next Up still active", bear)
 	}
 	for _, profile := range []struct {
 		userID int

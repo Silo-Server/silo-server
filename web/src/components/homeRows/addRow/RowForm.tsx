@@ -19,7 +19,10 @@ import { BULK_LIBRARY_LIMIT } from "@/lib/homeRows/bulkCopy";
 import type { LibraryPage, RowCollections } from "@/lib/homeRows/types";
 import { variantFamily } from "@/lib/homeRows/variants";
 import { FILTER_SECTION_TYPES } from "@/lib/sectionTypes";
+import { collectionRefsOf, withCollectionRefs } from "@/lib/homeRows/collectionList";
+import { holdsCollections } from "@/lib/sectionTypes";
 import { CollectionPicker } from "./CollectionPicker";
+import { CollectionsRowEditor } from "./CollectionsRowEditor";
 import { CuratedTitlesEditor } from "./CuratedTitlesEditor";
 import { LibraryPageChips } from "./LibraryPageChips";
 import { ParamFields, type ParamLibrary } from "./ParamFields";
@@ -49,6 +52,7 @@ export interface CollectionChoices {
 /** Kinds built with their own control, which comes before the preview. */
 const CONTROL_KINDS: ReadonlySet<string> = new Set([
   "collection",
+  "collection_posters",
   "admin_curated_list",
   ...FILTER_SECTION_TYPES,
 ]);
@@ -84,6 +88,15 @@ function KindControl({
         onPageIds={choices.onPageIds}
         pageLabel={choices.pageLabel}
         onPick={(option) => onChange(withCollection(draft, option, choices.current?.title))}
+      />
+    );
+  }
+  if (draft.sectionType === "collection_posters") {
+    return (
+      <CollectionsRowEditor
+        collections={choices.collections}
+        refs={collectionRefsOf(draft.config)}
+        onChange={(refs) => onChange({ ...draft, config: withCollectionRefs(draft.config, refs) })}
       />
     );
   }
@@ -255,27 +268,30 @@ export function RowForm({
           help={draft.hero ? t("web.home.addRow.pages.helpHero") : t("web.home.addRow.pages.help")}
         />
       ) : null}
-      <MoreOptions
-        itemLimit={draft.itemLimit}
-        hero={draft.hero}
-        webOnly={webOnlyChoice && draft.webOnly === true}
-        onWebOnlyChange={webOnlyChoice ? (webOnly) => onChange({ ...draft, webOnly }) : undefined}
-        summary={rules ? ruleSortSummary(draft.config) : undefined}
-        onItemLimitChange={(itemLimit) => onChange({ ...draft, itemLimit })}
-        // A hero row stays on this page alone, so turning it on drops the other pages.
-        onHeroChange={(hero) =>
-          onChange({ ...draft, hero, ...(hero ? { extraLibraryIds: [] } : {}) })
-        }
-      >
-        {rules && !contentLocked ? (
-          <RuleSortField
-            value={queryDefinitionFromSectionConfig(draft.config)}
-            onChange={(query) => onChange(withRules(draft, query))}
-            allowPersonalized
-          />
-        ) : null}
-        <ParamFields {...fieldProps} slot="more" />
-      </MoreOptions>
+      {/* A row of collections shows every collection it lists and can't be the hero, so it has no more options. */}
+      {holdsCollections(draft.sectionType) ? null : (
+        <MoreOptions
+          itemLimit={draft.itemLimit}
+          hero={draft.hero}
+          webOnly={webOnlyChoice && draft.webOnly === true}
+          onWebOnlyChange={webOnlyChoice ? (webOnly) => onChange({ ...draft, webOnly }) : undefined}
+          summary={rules ? ruleSortSummary(draft.config) : undefined}
+          onItemLimitChange={(itemLimit) => onChange({ ...draft, itemLimit })}
+          // A hero row stays on this page alone, so turning it on drops the other pages.
+          onHeroChange={(hero) =>
+            onChange({ ...draft, hero, ...(hero ? { extraLibraryIds: [] } : {}) })
+          }
+        >
+          {rules && !contentLocked ? (
+            <RuleSortField
+              value={queryDefinitionFromSectionConfig(draft.config)}
+              onChange={(query) => onChange(withRules(draft, query))}
+              allowPersonalized
+            />
+          ) : null}
+          <ParamFields {...fieldProps} slot="more" />
+        </MoreOptions>
+      )}
     </div>
   );
 }

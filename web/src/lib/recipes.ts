@@ -101,6 +101,14 @@ export interface PreviewResponse {
     poster_thumbhash?: string;
   }>;
   total_count: number;
+  /** A row of collections' cards, in order; it then has no items. */
+  collections?: Array<{
+    id: string;
+    source: "library" | "user";
+    title: string;
+    poster_url: string;
+    poster_thumbhash?: string;
+  }>;
 }
 
 export async function fetchRecipeCatalog(): Promise<RecipeCatalogResponse> {
@@ -159,5 +167,14 @@ export async function previewSection(
       poster_thumbhash: item.poster_thumbhash,
     })),
     total_count: result.total_count,
+    ...(result.collections?.length && {
+      collections: result.collections.map((card) => ({
+        id: card.id,
+        source: card.source,
+        title: card.title,
+        poster_url: card.poster_url,
+        poster_thumbhash: card.poster_thumbhash,
+      })),
+    }),
   };
 }

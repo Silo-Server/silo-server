@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type ComponentType, type ReactNode } from "react";
 import { useSearchParams } from "react-router";
-import { Bell, BellOff, Bookmark, Heart, Play, Search, SkipForward } from "lucide-react";
+import { Bell, BellOff, Search } from "lucide-react";
 import { toast } from "sonner";
 import type { NotificationPreferences } from "@/api/types";
 import type { NotifiedSeries, NotifiedSeriesOptions } from "@/api/v2/notifications";
@@ -29,45 +29,21 @@ import {
 } from "@/hooks/queries/notifications";
 import { useDebounce } from "@/hooks/useDebounce";
 import { NotificationPoster } from "./NotificationPoster";
-import { NOTIFICATION_REASONS } from "./reasons";
 import { SelectionBar } from "./SelectionBar";
 import { useT, type MessageKey, type Translate } from "@/i18n";
 
-type Reason = (typeof NOTIFICATION_REASONS)[number]["key"];
-
-/** The preference that lets each reason notify, named as its switch is. */
-const REASON_PREFERENCES: Record<
-  Reason,
-  { key: keyof NotificationPreferences; labelKey: MessageKey }
-> = {
-  favorite: { key: "notify_favorites", labelKey: "web.notifications.preferences.favorites" },
-  watchlist: { key: "notify_watchlist", labelKey: "web.notifications.preferences.watchlist" },
-  continue_watching: {
-    key: "notify_continue_watching",
-    labelKey: "web.notifications.preferences.continueWatching",
-  },
-  next_up: { key: "notify_next_up", labelKey: "web.notifications.preferences.nextUp" },
-};
-
-const REASON_ICONS: Record<Reason, ComponentType<{ className?: string }>> = {
-  favorite: Heart,
-  watchlist: Bookmark,
-  continue_watching: Play,
-  next_up: SkipForward,
-};
-
-/** What a new episode has to be for the series to notify. */
+/** Which new episode notifies for the series: only the first to arrive after
+ * the one the profile is up to. */
 function triggerText(t: Translate, series: NotifiedSeries): string {
-  const { favorite, watchlist, continue_watching: continueWatching } = series.active_reasons;
   const code = series.next_up_after && formatEpisodeCode(series.next_up_after);
-  if (favorite || watchlist || continueWatching || !code) {
-    return t("web.notifications.series.anyNewEpisode");
-  }
-  return t("web.notifications.series.anyEpisodeAfter", { code });
+  return code
+    ? t("web.notifications.series.nextEpisodeAfter", { code })
+    : t("web.notifications.series.nextNewEpisode");
 }
 
-/** Why a listed series does not notify: the mute, or the switches that
- * silence it. */
+/** Why a listed series does not notify on its next new episode: the mute,
+ * the switches that silence it, an episode to catch up on first, or Next Up
+ * being off for the series. */
 function silencedText(
   t: Translate,
   series: NotifiedSeries,
@@ -75,20 +51,12 @@ function silencedText(
 ) {
   if (series.muted) return t("web.notifications.series.muted");
   if (prefs && !prefs.enabled) return t("web.notifications.series.notificationsOff");
-  const off = prefs
-    ? NOTIFICATION_REASONS.filter(
-        (reason) => series.reasons[reason.key] && !prefs[REASON_PREFERENCES[reason.key].key],
-      ).map((reason) => t(REASON_PREFERENCES[reason.key].labelKey))
-    : [];
-  if (off.length === 0) return t("web.notifications.series.wontNotifyNow");
-  const names =
-    off.length === 1
-      ? off[0]
-      : t("web.notifications.series.nameList", {
-          names: off.slice(0, -1).join(", "),
-          last: off.at(-1) ?? "",
-        });
-  return t("web.notifications.series.reasonsOff", { names });
+  if (prefs && !prefs.notify_next_up)
+    return t("web.notifications.series.reasonsOff", {
+      names: t("web.notifications.preferences.nextUp"),
+    });
+  if (series.active_reasons.next_up) return t("web.notifications.series.afterCatchUp");
+  return t("web.notifications.series.wontNotifyNow");
 }
 
 /** Mutes or unmutes a row's series; absent when the server cannot. */
@@ -97,39 +65,14 @@ type MuteAction = {
   set: (series: NotifiedSeries, muted: boolean) => void;
 };
 
-/** The table's columns: selection, series, what notifies, why, and the
- * switch. Narrow screens drop the middle two into the series cell. */
+/** The table's columns: selection, series, what notifies, and the switch.
+ * Narrow screens drop what notifies into the series cell. */
 function rowGrid(selectable: boolean) {
   return cn(
     "grid items-center gap-x-3 px-3",
     selectable
-      ? "grid-cols-[1.25rem_minmax(0,1fr)_auto] sm:grid-cols-[1.25rem_minmax(0,1fr)_13rem_auto] lg:grid-cols-[1.25rem_minmax(0,1fr)_13rem_15rem_auto]"
-      : "grid-cols-[minmax(0,1fr)_auto] sm:grid-cols-[minmax(0,1fr)_13rem_auto] lg:grid-cols-[minmax(0,1fr)_13rem_15rem_auto]",
-  );
-}
-
-function ReasonChips({ series }: { series: NotifiedSeries }) {
-  const t = useT();
-  return (
-    <span className="flex min-w-0 flex-wrap gap-1">
-      {NOTIFICATION_REASONS.filter((reason) => series.reasons[reason.key]).map((reason) => {
-        const off = series.muted || !series.active_reasons[reason.key];
-        const Icon = REASON_ICONS[reason.key];
-        return (
-          <span
-            key={reason.key}
-            className={cn(
-              "text-muted-foreground inline-flex h-[22px] items-center gap-1 rounded-full px-2 text-[11.5px] font-medium whitespace-nowrap",
-              off ? "border-border border line-through" : "bg-secondary",
-            )}
-          >
-            <Icon className="h-3 w-3" />
-            {t(reason.labelKey)}
-            {off && <span className="sr-only"> {t("web.notifications.series.reasonOff")}</span>}
-          </span>
-        );
-      })}
-    </span>
+      ? "grid-cols-[1.25rem_minmax(0,1fr)_auto] sm:grid-cols-[1.25rem_minmax(0,1fr)_15rem_auto]"
+      : "grid-cols-[minmax(0,1fr)_auto] sm:grid-cols-[minmax(0,1fr)_15rem_auto]",
   );
 }
 
@@ -201,9 +144,6 @@ function NotifiedSeriesRow({
           notifyText
         )}
       </span>
-      <span className="hidden lg:block">
-        <ReasonChips series={series} />
-      </span>
       <span className="flex justify-end">
         {mute && (
           <Switch
@@ -223,17 +163,9 @@ function NotifiedSeriesRow({
   );
 }
 
-/** The tabs over the table: every series, one reason, or the muted ones. */
+/** The tabs over the table: every series, or the muted ones. */
 const SERIES_FILTERS = [
   { value: "all", labelKey: "web.notifications.inbox.filterAll", icon: undefined },
-  { value: "next_up", labelKey: "web.notifications.preferences.nextUp", icon: SkipForward },
-  { value: "favorite", labelKey: "web.notifications.preferences.favorites", icon: Heart },
-  { value: "watchlist", labelKey: "web.notifications.preferences.watchlist", icon: Bookmark },
-  {
-    value: "continue_watching",
-    labelKey: "web.notifications.preferences.continueWatching",
-    icon: Play,
-  },
   { value: "muted", labelKey: "web.notifications.series.muted", icon: BellOff },
 ] as const satisfies readonly {
   value: string;
@@ -266,10 +198,9 @@ function oneOf<T extends string>(
  */
 function useSeriesOptions(canFilterMuted: boolean) {
   const [params, setParams] = useSearchParams();
-  const filters = canFilterMuted
-    ? SERIES_FILTERS
-    : SERIES_FILTERS.filter((option) => option.value !== "muted");
-  const filter = oneOf(filters, params.get("reason"), "all");
+  // Without the Muted tab, All is the only one and the tabs are not shown.
+  const filters = canFilterMuted ? SERIES_FILTERS : [];
+  const filter = oneOf(filters, params.get("filter"), "all");
   const sort = oneOf(SORTS, params.get("sort"), "title");
   const q = params.get("q") ?? "";
   const set = (key: string, value: string, fallback: string) =>
@@ -287,15 +218,11 @@ function useSeriesOptions(canFilterMuted: boolean) {
     filter,
     sort,
     q,
-    setFilter: (value: SeriesFilter) => set("reason", value, "all"),
+    setFilter: (value: SeriesFilter) => set("filter", value, "all"),
     setSort: (value: SortOption) => set("sort", value, "title"),
     setQ: (value: string) => set("q", value, ""),
     status: filter === "muted" ? ("muted" as const) : ("all" as const),
-    options: {
-      q: q.trim(),
-      reason: filter === "all" || filter === "muted" ? undefined : filter,
-      sort,
-    } satisfies NotifiedSeriesOptions,
+    options: { q: q.trim(), sort } satisfies NotifiedSeriesOptions,
   };
 }
 
@@ -344,36 +271,38 @@ function SeriesToolbar({ series }: { series: ReturnType<typeof useSeriesOptions>
           </SelectContent>
         </Select>
       </div>
-      <div
-        role="group"
-        aria-label={t("web.notifications.series.filterByReason")}
-        className="-mx-1 mt-3 flex gap-1 overflow-x-auto px-1 pb-1"
-      >
-        {series.filters.map((option) => {
-          const Icon = option.icon;
-          const active = series.filter === option.value;
-          return (
-            <Button
-              key={option.value}
-              variant={active ? "secondary" : "ghost"}
-              size="sm"
-              className={cn("shrink-0 rounded-full", !active && "text-muted-foreground")}
-              aria-pressed={active}
-              onClick={() => series.setFilter(option.value)}
-            >
-              {Icon && <Icon className="h-3.5 w-3.5" />}
-              {t(option.labelKey)}
-            </Button>
-          );
-        })}
-      </div>
+      {series.filters.length > 0 && (
+        <div
+          role="group"
+          aria-label={t("web.notifications.series.filterLabel")}
+          className="-mx-1 mt-3 flex gap-1 overflow-x-auto px-1 pb-1"
+        >
+          {series.filters.map((option) => {
+            const Icon = option.icon;
+            const active = series.filter === option.value;
+            return (
+              <Button
+                key={option.value}
+                variant={active ? "secondary" : "ghost"}
+                size="sm"
+                className={cn("shrink-0 rounded-full", !active && "text-muted-foreground")}
+                aria-pressed={active}
+                onClick={() => series.setFilter(option.value)}
+              >
+                {Icon && <Icon className="h-3.5 w-3.5" />}
+                {t(option.labelKey)}
+              </Button>
+            );
+          })}
+        </div>
+      )}
     </>
   );
 }
 
 /**
  * The Series view of the notifications page: every series whose new episodes
- * can notify this profile, or that it muted, as a table filtered by reason.
+ * can notify this profile, or that it muted, as a table.
  * With canMute each row has a switch that mutes its series; with canBulkMute
  * rows can be selected and muted or unmuted together.
  */
@@ -486,13 +415,13 @@ export function NotifiedSeriesList({
   } else if (rows.length === 0 && !list.hasNextPage) {
     body = filtered ? (
       <div className="text-muted-foreground py-16 text-center text-sm">
-        {t("web.notifications.series.noMatch")}
+        {t("web.notifications.series.noMatchFilter")}
       </div>
     ) : (
       <div className="text-muted-foreground flex flex-col items-center gap-3 py-20 text-center">
         <BellOff className="h-10 w-10 opacity-50" />
         <div className="text-sm">{t("web.notifications.series.empty")}</div>
-        <div className="max-w-sm text-xs">{t("web.notifications.series.emptyHint")}</div>
+        <div className="max-w-sm text-xs">{t("web.notifications.series.emptyHintNextUp")}</div>
       </div>
     );
   } else {
@@ -516,9 +445,6 @@ export function NotifiedSeriesList({
           <span className={headCell}>{t("web.notifications.series.columnSeries")}</span>
           <span className={cn(headCell, "hidden sm:block")}>
             {t("web.notifications.series.columnNotifiesFor")}
-          </span>
-          <span className={cn(headCell, "hidden lg:block")}>
-            {t("web.notifications.series.columnReasons")}
           </span>
           <span className={cn(headCell, "text-end")}>
             {mute ? t("web.notifications.series.columnNotify") : null}

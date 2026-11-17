@@ -162,11 +162,15 @@ stays external (library or rating limits); one with several waits until the
 catalog merges them. For each title with exactly one visible copy:
 
 1. Lock the title and check the entry still exists (invariant 2).
-2. `AddToWatchlistAt(profileID, contentID, entry.added_at)` through the
-   notification-wrapped user store, so a promoted series queues an interest
-   recompute. When the row already exists, `GetWatchlistEntry` tells whether
-   it is a half-done promotion (invariant 3).
-3. Delete the entry, and the title if it is now orphaned, then commit.
+2. `AddToWatchlistAt(profileID, contentID, entry.added_at)`. When the row
+   already exists, `GetWatchlistEntry` tells whether it is a half-done
+   promotion (invariant 3). Watchlist changes do not affect new-episode
+   notifications, which follow Next Up only (see
+   [Eligibility rules](notifications.md#eligibility-rules)).
+3. Delete the entry, and the title if it is now orphaned. When this call
+   removed the entry and the library entry is new, record the move in
+   `watchlist_title_promotions` for the watchlist arrival notice (see
+   [Notifications](notifications.md#watchlist-arrivals)). Then commit.
 4. If this call removed the entry and the library entry is new (invariant 3),
    run `Effects.WatchlistPromoted`, implemented by
    `handlers.PersonalDataHandler`: the provider export event
@@ -256,6 +260,9 @@ and a remove button.
 Adding a title the library doesn't have can also request it, so the existing
 `request.fulfilled` notification tells the profile when it arrives. See
 [Media requests](media-requests.md#watchlist-requests) for the request side.
+Without a request the profile still hears: fanout sends `watchlist.available`
+when the title arrives (see
+[Notifications](notifications.md#watchlist-arrivals)).
 
 - Server switch: `request_settings.watchlist_requests` (default on), edited in
   admin Settings › Requests and carried by the v2 admin request settings.
@@ -365,6 +372,4 @@ least 15.
 
 Watch-provider (Simkl, MDBList) and Plex imports still drop rows the
 library doesn't have, and export only library items. Carrying unowned titles
-through them needs its own design; imports would never auto-request. A profile
-that cannot request, or has opted out, gets no arrival notification: only the
-request's `request.fulfilled` notification tells anyone.
+through them needs its own design; imports would never auto-request.

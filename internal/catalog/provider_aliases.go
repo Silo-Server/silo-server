@@ -101,6 +101,12 @@ func resolveProviderAliasesSQL() string {
 // another movie that shares a stale or wrong ID, while a series sharing the
 // title's TVDB ID is the same show whatever its TMDB ID.
 func (r *ItemRepository) ResolveProviderAliases(ctx context.Context, aliases []ProviderAlias) (map[int64][]string, error) {
+	return ResolveProviderAliasesOn(ctx, r.pool, aliases)
+}
+
+// ResolveProviderAliasesOn is ResolveProviderAliases on q, so a caller can
+// resolve inside its own transaction.
+func ResolveProviderAliasesOn(ctx context.Context, q rowQuerier, aliases []ProviderAlias) (map[int64][]string, error) {
 	keys := make([]int64, 0, len(aliases))
 	mediaTypes := make([]string, 0, len(aliases))
 	providers := make([]string, 0, len(aliases))
@@ -125,7 +131,7 @@ func (r *ItemRepository) ResolveProviderAliases(ctx context.Context, aliases []P
 	if len(keys) == 0 {
 		return out, nil
 	}
-	rows, err := r.pool.Query(ctx, resolveProviderAliasesSQL(), keys, mediaTypes, providers, providerIDs)
+	rows, err := q.Query(ctx, resolveProviderAliasesSQL(), keys, mediaTypes, providers, providerIDs)
 	if err != nil {
 		return nil, fmt.Errorf("resolving provider aliases: %w", err)
 	}
@@ -164,7 +170,13 @@ func (r *ItemRepository) ResolveProviderAliases(ctx context.Context, aliases []P
 // providers rejected. Key is left zero. An item that does not exist, is not a
 // movie or series, or carries no IDs has no aliases.
 func (r *ItemRepository) ItemProviderAliases(ctx context.Context, contentID string) (string, []ProviderAlias, error) {
-	rows, err := r.pool.Query(ctx, `
+	return ItemProviderAliasesOn(ctx, r.pool, contentID)
+}
+
+// ItemProviderAliasesOn is ItemProviderAliases on q, so a caller can read
+// inside its own transaction.
+func ItemProviderAliasesOn(ctx context.Context, q rowQuerier, contentID string) (string, []ProviderAlias, error) {
+	rows, err := q.Query(ctx, `
 		WITH item AS (
 			SELECT content_id, type, tmdb_id, imdb_id, tvdb_id
 			FROM media_items

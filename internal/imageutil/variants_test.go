@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"image"
+	"image/jpeg"
 	"image/png"
 	"reflect"
 	"slices"
@@ -173,6 +174,43 @@ func TestEncodePNGWithinFitsBoxWithoutUpscaling(t *testing.T) {
 			}
 		})
 	}
+}
+
+// A frame becomes a centered 2:3 crop at its own scale: a landscape frame
+// loses its sides, a frame narrower than 2:3 its top and bottom.
+func TestCropToPosterCentersA2x3CropWithoutScaling(t *testing.T) {
+	for _, tc := range []struct{ w, h, wantW, wantH, left, top int }{
+		{640, 360, 240, 360, 200, 0}, // landscape
+		{200, 400, 200, 300, 0, 50},  // portrait, narrower than 2:3
+	} {
+		t.Run(fmt.Sprintf("%dx%d", tc.w, tc.h), func(t *testing.T) {
+			out, err := CropToPoster(largeTestJPEG(t, tc.w, tc.h))
+			if err != nil {
+				t.Fatal(err)
+			}
+			img, err := jpeg.Decode(bytes.NewReader(out))
+			if err != nil {
+				t.Fatalf("decode crop: %v", err)
+			}
+			if b := img.Bounds(); b.Dx() != tc.wantW || b.Dy() != tc.wantH {
+				t.Fatalf("size = %dx%d, want %dx%d", b.Dx(), b.Dy(), tc.wantW, tc.wantH)
+			}
+			// largeTestJPEG's red follows x and its green follows y, so the
+			// crop's first pixel tells where the crop starts.
+			r, g, _, _ := img.At(0, 0).RGBA()
+			wantR, wantG := tc.left*255/tc.w, tc.top*255/tc.h
+			if absDiff(int(r>>8), wantR) > 8 || absDiff(int(g>>8), wantG) > 8 {
+				t.Fatalf("first pixel red/green = %d/%d, want about %d/%d (a centered crop)", r>>8, g>>8, wantR, wantG)
+			}
+		})
+	}
+}
+
+func absDiff(a, b int) int {
+	if a > b {
+		return a - b
+	}
+	return b - a
 }
 
 func TestEncodePNGWithinRejectsGarbage(t *testing.T) {

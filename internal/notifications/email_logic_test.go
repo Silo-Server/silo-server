@@ -88,7 +88,7 @@ func emailEpisodeRow(id, profileID, episodeID string, season, episode int) Deliv
 			SeriesID:    &seriesID,
 			EpisodeID:   &episodeID,
 			Type:        DeliveryTypeEpisodeAvailable,
-			ReasonFlags: []byte(`{"favorite":true}`),
+			ReasonFlags: []byte(`{"next_up":true}`),
 			CreatedAt:   time.Date(2026, 6, 11, 12, 0, 0, 0, time.UTC),
 		},
 		SeriesTitle:   "Severance",

@@ -58,6 +58,9 @@ function notificationTitle(t: Translate, notification: AppNotification): string 
   if (notification.type === "request.fulfilled") {
     return notification.series_title || t("web.notifications.inbox.requestAvailable");
   }
+  if (notification.type === "watchlist.available") {
+    return notification.series_title || t("web.notifications.inbox.watchlistAvailable");
+  }
   if (notification.type === "request.approved" || notification.type === "request.declined") {
     return notification.reason_flags?.title || t("web.notifications.inbox.mediaRequest");
   }
@@ -87,6 +90,14 @@ function notificationDescription(t: Translate, notification: AppNotification): s
       : mediaType === "series"
         ? t("web.notifications.inbox.requestedSeriesAvailable")
         : t("web.notifications.inbox.requestAvailableBody");
+  }
+  if (notification.type === "watchlist.available") {
+    const mediaType = notification.reason_flags?.media_type;
+    return mediaType === "movie"
+      ? t("web.notifications.inbox.watchlistMovieAvailable")
+      : mediaType === "series"
+        ? t("web.notifications.inbox.watchlistSeriesAvailable")
+        : t("web.notifications.inbox.watchlistTitleAvailable");
   }
   if (notification.type === "request.approved") {
     return t("web.notifications.inbox.requestApproved");
@@ -483,7 +494,7 @@ export function NotificationInbox({
             ? t("web.notifications.inbox.emptyUnread")
             : t("web.notifications.inbox.emptyAll")}
         </div>
-        <div className="max-w-sm text-xs">{t("web.notifications.inbox.emptyHint")}</div>
+        <div className="max-w-sm text-xs">{t("web.notifications.inbox.emptyHintNextUp")}</div>
         {onOpenSeries && (
           <Button variant="link" size="sm" onClick={onOpenSeries}>
             {t("web.notifications.inbox.seeSeriesCanNotify")}

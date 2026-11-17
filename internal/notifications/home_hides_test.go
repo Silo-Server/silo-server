@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"slices"
 	"testing"
 	"time"
 
@@ -15,35 +16,6 @@ import (
 	"github.com/Silo-Server/silo-server/internal/userstore"
 	"github.com/Silo-Server/silo-server/internal/userstore/pgstore"
 )
-
-func TestHomeHidesContinueWatching(t *testing.T) {
-	stamp := "2026-09-01T10:00:00Z"
-	inProgress := []userstore.WatchProgress{{MediaItemID: "ep-2", PositionSeconds: 30, UpdatedAt: stamp}}
-	dismissed := func(progressUpdatedAt string) catalog.HomeDismissalIndex {
-		return catalog.NewHomeDismissalIndex([]userstore.HomeItemDismissal{{
-			Surface: userstore.HomeSurfaceContinueWatching, MediaItemID: "ep-2", ProgressUpdatedAt: &progressUpdatedAt,
-		}})
-	}
-
-	for _, tc := range []struct {
-		name       string
-		hides      homeHides
-		inProgress []userstore.WatchProgress
-		want       bool
-	}{
-		{name: "nothing in progress", want: false},
-		{name: "in progress, not removed", inProgress: inProgress, want: true},
-		{name: "removed at the current progress", hides: homeHides{continueWatching: dismissed(stamp)}, inProgress: inProgress, want: false},
-		{name: "resumed after removal", hides: homeHides{continueWatching: dismissed("2026-08-01T10:00:00Z")}, inProgress: inProgress, want: true},
-		{name: "series dropped", hides: homeHides{dropped: true}, inProgress: inProgress, want: false},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			if got := tc.hides.continueWatchingVisible(tc.inProgress); got != tc.want {
-				t.Fatalf("continueWatchingVisible = %v, want %v", got, tc.want)
-			}
-		})
-	}
-}
 
 func newSQLiteUserStore(t *testing.T) userstore.UserStore {
 	t.Helper()
@@ -73,17 +45,26 @@ func TestInterestTrackingStoreQueuesHomeDismissals(t *testing.T) {
 	progressStamp := "2026-09-01T10:00:00Z"
 
 	if err := store.UpsertHomeDismissal(ctx, userstore.HomeItemDismissal{
-		ProfileID: "p1", Surface: userstore.HomeSurfaceContinueWatching, MediaItemID: "ep-1",
-		ProgressUpdatedAt: &progressStamp, DismissedAt: progressStamp,
+		ProfileID: "p1", Surface: userstore.HomeSurfaceNextUp, MediaItemID: "ep-1", DismissedAt: progressStamp,
 	}); err != nil {
 		t.Fatalf("UpsertHomeDismissal: %v", err)
 	}
 	if err := store.DeleteHomeDismissal(ctx, "p1", userstore.HomeSurfaceNextUp, "ep-2"); err != nil {
 		t.Fatalf("DeleteHomeDismissal: %v", err)
 	}
+	// Continue Watching removals change no interest.
+	if err := store.UpsertHomeDismissal(ctx, userstore.HomeItemDismissal{
+		ProfileID: "p1", Surface: userstore.HomeSurfaceContinueWatching, MediaItemID: "ep-3",
+		ProgressUpdatedAt: &progressStamp, DismissedAt: progressStamp,
+	}); err != nil {
+		t.Fatalf("UpsertHomeDismissal: %v", err)
+	}
 
 	updater.mu.Lock()
 	defer updater.mu.Unlock()
+	if _, ok := updater.pending[interestMutation{userID: 1, profileID: "p1", itemID: "ep-3"}]; ok {
+		t.Error("a Continue Watching removal queued an interest recompute")
+	}
 	for _, itemID := range []string{"ep-1", "ep-2"} {
 		if _, ok := updater.pending[interestMutation{userID: 1, profileID: "p1", itemID: itemID}]; !ok {
 			t.Errorf("no interest mutation queued for %s; a Home removal would not reach notifications", itemID)
@@ -196,10 +177,9 @@ func TestInterestTrackingStoreQueuesFirstWriteAfterHomeChange(t *testing.T) {
 	if err := store.SetProgressAt(ctx, "p1", "ep-1", 30, 100, false, time.Now().Add(-time.Minute).UTC().Truncate(time.Second)); err != nil {
 		t.Fatalf("SetProgressAt: %v", err)
 	}
-	stamp := "unused"
 	if err := store.UpsertHomeDismissal(ctx, userstore.HomeItemDismissal{
-		ProfileID: "p1", Surface: userstore.HomeSurfaceContinueWatching, MediaItemID: "ep-2",
-		ProgressUpdatedAt: &stamp, DismissedAt: time.Now().UTC().Format(time.RFC3339),
+		ProfileID: "p1", Surface: userstore.HomeSurfaceNextUp, MediaItemID: "ep-2",
+		DismissedAt: time.Now().UTC().Format(time.RFC3339),
 	}); err != nil {
 		t.Fatalf("UpsertHomeDismissal: %v", err)
 	}
@@ -225,31 +205,146 @@ func TestInterestTrackingStoreQueuesFirstWriteAfterHomeChange(t *testing.T) {
 	}
 }
 
-func TestSupersededInProgress(t *testing.T) {
-	keys := map[string]int{"e2": EpisodeKey(1, 2), "e3": EpisodeKey(1, 3), "e5": EpisodeKey(1, 5)}
-	at := func(minutes int) time.Time { return time.Date(2026, 9, 1, 10, minutes, 0, 0, time.UTC) }
-	inProgress := []userstore.WatchProgress{
-		{MediaItemID: "e2", PositionSeconds: 30, UpdatedAt: at(0).Format(time.RFC3339)},
-		{MediaItemID: "e3", PositionSeconds: 30, UpdatedAt: at(20).Format(time.RFC3339)},
+// TestInterestTrackingStoreQueuesResumeAfterLaterCompletion covers a partly
+// watched episode resumed right after a later one was finished. The
+// completion moved Home's anchor, so the resumed episode now keeps the series
+// off Next Up, and the position-only write inside the session gap must queue
+// a recompute.
+func TestInterestTrackingStoreQueuesResumeAfterLaterCompletion(t *testing.T) {
+	ctx := context.Background()
+	updater := &InterestUpdater{pending: map[interestMutation]int{}}
+	store := &interestTrackingStore{UserStore: newSQLiteUserStore(t), userID: 1, system: &System{}, updater: updater}
+	queued := func(itemID string) bool {
+		updater.mu.Lock()
+		defer updater.mu.Unlock()
+		_, ok := updater.pending[interestMutation{userID: 1, profileID: "p1", itemID: itemID}]
+		clear(updater.pending)
+		return ok
 	}
-	// E5 was completed after E2's progress but before E3's.
-	completed := []completedEpisode{{key: EpisodeKey(1, 5), at: at(10)}}
 
-	got := supersededInProgress(inProgress, completed, keys)
-	if _, ok := got["e2"]; !ok || len(got) != 1 {
-		t.Fatalf("superseded = %v, want only e2", got)
+	if err := store.SetProgressAt(ctx, "p1", "ep-1", 30, 100, false, time.Now().Add(-time.Minute).UTC().Truncate(time.Second)); err != nil {
+		t.Fatalf("SetProgressAt: %v", err)
+	}
+	if err := store.MarkWatched(ctx, "p1", "ep-2", 100); err != nil {
+		t.Fatalf("MarkWatched: %v", err)
+	}
+	queued("ep-2")
+
+	if err := store.UpdateProgress(ctx, "p1", "ep-1", 40, 100, userstore.ProgressThresholds{}); err != nil {
+		t.Fatalf("UpdateProgress: %v", err)
+	}
+	if !queued("ep-1") {
+		t.Fatal("resuming an older episode after finishing a later one queued no interest recompute")
+	}
+}
+
+func TestNextUpCursor(t *testing.T) {
+	s1 := func(n int) int { return EpisodeKey(1, n) }
+	// listed builds the catalog's episodes of season 1, keyed by ordinal.
+	listed := func(keys ...int) map[string]int {
+		out := make(map[string]int, len(keys))
+		for _, key := range keys {
+			out[fmt.Sprintf("ep-%d", key)] = key
+		}
+		return out
+	}
+	ids := func(keys ...int) []string {
+		out := make([]string, 0, len(keys))
+		for _, key := range keys {
+			out = append(out, fmt.Sprintf("ep-%d", key))
+		}
+		return out
+	}
+	for _, tc := range []struct {
+		name     string
+		anchor   int
+		episodes map[string]int
+		started  []string
+		want     int
+	}{
+		{
+			name: "caught up", anchor: s1(5),
+			episodes: listed(s1(1), s1(5)), started: ids(s1(1), s1(5)), want: s1(6),
+		},
+		{
+			// E06 is listed without a file yet. The cursor stops on it, so E07
+			// landing first is past a listed episode and stays silent.
+			name: "listed episode not started", anchor: s1(5),
+			episodes: listed(s1(5), s1(6), s1(7)), started: ids(s1(5)), want: s1(6),
+		},
+		{
+			// Caught up through S05 and rewatching S01E01: the cursor lands
+			// after S05, so S06E01 can notify.
+			name: "rewatch", anchor: s1(1),
+			episodes: listed(s1(1), s1(2), EpisodeKey(3, 4), EpisodeKey(5, 10)),
+			started:  ids(EpisodeKey(5, 10), s1(1), s1(2), EpisodeKey(3, 4)),
+			want:     EpisodeKey(5, 10) + 1,
+		},
+		{
+			// The walk stops at the first listed episode not started.
+			name: "rewatch with an unwatched episode", anchor: s1(1),
+			episodes: listed(s1(1), s1(2), s1(3), s1(4), EpisodeKey(5, 10)),
+			started:  ids(s1(2), s1(4), EpisodeKey(5, 10)),
+			want:     s1(3),
+		},
+		{
+			name: "started episodes before the anchor", anchor: s1(5),
+			episodes: listed(s1(3), s1(5)), started: ids(s1(3), s1(5)), want: s1(6),
+		},
+		{
+			// Two rows share S01E06 and one is started: the key is started.
+			name: "duplicate rows of one episode", anchor: s1(5),
+			episodes: map[string]int{"a": s1(5), "b": s1(6), "b-copy": s1(6)},
+			started:  []string{"a", "b"},
+			want:     s1(7),
+		},
+	} {
+		if got := nextUpCursor(tc.anchor, tc.episodes, tc.started); got != tc.want {
+			t.Errorf("%s: cursor = %d, want %d", tc.name, got, tc.want)
+		}
+	}
+}
+
+func TestPartlyWatchedSinceAnchor(t *testing.T) {
+	base := time.Date(2026, 9, 1, 10, 0, 0, 0, time.UTC)
+	keys := map[string]int{"special": EpisodeKey(0, 3), "e2": EpisodeKey(1, 2)}
+	progress := func(id string, at time.Time) []userstore.WatchProgress {
+		return []userstore.WatchProgress{{MediaItemID: id, PositionSeconds: 30, UpdatedAtTime: at}}
+	}
+	anchor := &nextUpAnchor{key: EpisodeKey(1, 1), at: base}
+	if partlyWatchedSinceAnchor(anchor, progress("e2", base.Add(-time.Minute)), keys) {
+		t.Error("progress older than the anchor completion suppressed Next Up")
+	}
+	if partlyWatchedSinceAnchor(anchor, progress("e2", base), keys) {
+		t.Error("progress as old as the anchor completion suppressed Next Up")
+	}
+	if !partlyWatchedSinceAnchor(anchor, progress("e2", base.Add(time.Minute)), keys) {
+		t.Error("progress newer than the anchor completion did not suppress Next Up")
 	}
 
-	// Specials have no airing position: a regular episode finished later
-	// leaves an in-progress special alone, and only a later special
-	// supersedes it.
-	keys["s5"] = EpisodeKey(0, 5)
-	special := []userstore.WatchProgress{{MediaItemID: "s5", PositionSeconds: 30, UpdatedAt: at(0).Format(time.RFC3339)}}
-	if got := supersededInProgress(special, []completedEpisode{{key: EpisodeKey(1, 1), at: at(10)}}, keys); len(got) != 0 {
-		t.Fatalf("special after a regular finish: superseded = %v, want none", got)
+	// Without a progress anchor (completed history only), any progress counts.
+	if !partlyWatchedSinceAnchor(nil, progress("e2", base.Add(-time.Hour)), keys) {
+		t.Error("history fallback: an episode in progress did not suppress Next Up")
 	}
-	if got := supersededInProgress(special, []completedEpisode{{key: EpisodeKey(0, 6), at: at(10)}}, keys); len(got) != 1 {
-		t.Fatalf("special after a later special finish: superseded = %v, want s5", got)
+	if partlyWatchedSinceAnchor(nil, nil, keys) {
+		t.Error("history fallback: nothing in progress suppressed Next Up")
+	}
+
+	// A special finished at base moved the anchor to the regular episode
+	// finished an hour earlier. Regular progress is measured against that
+	// regular completion, special progress against the special's.
+	moved := &nextUpAnchor{key: EpisodeKey(1, 1), at: base, moved: true, regularAt: base.Add(-time.Hour), hasRegularAt: true}
+	between := base.Add(-30 * time.Minute)
+	if !partlyWatchedSinceAnchor(moved, progress("e2", between), keys) {
+		t.Error("moved anchor: regular progress after the regular completion did not suppress Next Up")
+	}
+	if partlyWatchedSinceAnchor(moved, progress("special", between), keys) {
+		t.Error("moved anchor: special progress before the special's completion suppressed Next Up")
+	}
+	// Before any regular completion, every regular episode in progress counts.
+	onlySpecials := &nextUpAnchor{key: firstRegularEpisodeKey - 1, at: base, moved: true}
+	if !partlyWatchedSinceAnchor(onlySpecials, progress("e2", base.Add(-time.Hour)), keys) {
+		t.Error("moved anchor without a regular completion: regular progress did not suppress Next Up")
 	}
 }
 
@@ -261,8 +356,9 @@ func (allLibrariesScope) Resolve(_ context.Context, input access.ResolveInput) (
 
 // TestRecomputeSeriesFollowsHomeRemovalsPostgres walks one profile's interest
 // in one series through each Home removal against the production stores:
-// per-card Continue Watching and Next Up dismissals, then a series drop made
-// through the tracker the dismissal handler uses.
+// per-card Next Up dismissals, then a series drop made through the tracker the
+// dismissal handler uses. It starts from a row only a retired favorite flag
+// kept, which a recompute deletes.
 func TestRecomputeSeriesFollowsHomeRemovalsPostgres(t *testing.T) {
 	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
 	if dsn == "" {
@@ -353,34 +449,47 @@ func TestRecomputeSeriesFollowsHomeRemovalsPostgres(t *testing.T) {
 			t.Fatalf("seed progress: %v", err)
 		}
 	}
-	setProgress(episodes[0], true, watchedAt)
-	setProgress(episodes[1], false, watchedAt)
-	if _, err := store.AddFavorite(ctx, profileID, seriesID); err != nil {
-		t.Fatalf("AddFavorite: %v", err)
-	}
-
 	system := &System{}
 	updater := NewInterestUpdater(pool, NewInterestRepository(pool), provider, allLibrariesScope{})
 	system.Interest = updater
 
-	type flags struct{ favorite, continueWatching, nextUp bool }
-	recompute := func(stage string, want flags, wantNextExpected int) {
+	// A favorite gives no interest of its own: a row with no Next Up
+	// candidate and no completed episode is deleted by the next recompute.
+	if _, err := store.AddFavorite(ctx, profileID, seriesID); err != nil {
+		t.Fatalf("AddFavorite: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO profile_series_interest (user_id, profile_id, library_id, series_id) VALUES ($1, $2, $3, $4)`,
+		userID, profileID, libraryID, seriesID); err != nil {
+		t.Fatalf("seed inert interest: %v", err)
+	}
+	if err := updater.RecomputeSeries(ctx, userID, profileID, seriesID); err != nil {
+		t.Fatalf("RecomputeSeries: %v", err)
+	}
+	var left int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM profile_series_interest WHERE series_id = $1`, seriesID).Scan(&left); err != nil || left != 0 {
+		t.Fatalf("inert interest rows = %d, %v; want the row deleted", left, err)
+	}
+
+	setProgress(episodes[0], true, watchedAt)
+	setProgress(episodes[1], false, watchedAt)
+
+	recompute := func(stage string, wantNextUp bool, wantNextExpected int) {
 		t.Helper()
 		if err := updater.RecomputeSeries(ctx, userID, profileID, seriesID); err != nil {
 			t.Fatalf("%s: RecomputeSeries: %v", stage, err)
 		}
-		var got flags
+		var nextUp bool
 		var nextExpected *int
 		if err := pool.QueryRow(ctx, `
-			SELECT favorite, continue_watching, next_up_candidate, next_expected_episode_key
+			SELECT next_up_candidate, next_expected_episode_key
 			FROM profile_series_interest
 			WHERE profile_id = $1 AND library_id = $2 AND series_id = $3`,
 			profileID, libraryID, seriesID,
-		).Scan(&got.favorite, &got.continueWatching, &got.nextUp, &nextExpected); err != nil {
+		).Scan(&nextUp, &nextExpected); err != nil {
 			t.Fatalf("%s: read interest: %v", stage, err)
 		}
-		if got != want {
-			t.Fatalf("%s: interest = %+v, want %+v", stage, got, want)
+		if nextUp != wantNextUp {
+			t.Fatalf("%s: next_up_candidate = %v, want %v", stage, nextUp, wantNextUp)
 		}
 		if nextExpected == nil || *nextExpected != wantNextExpected {
 			t.Fatalf("%s: next_expected_episode_key = %v, want %d", stage, nextExpected, wantNextExpected)
@@ -395,23 +504,13 @@ func TestRecomputeSeriesFollowsHomeRemovalsPostgres(t *testing.T) {
 		}
 		clear(updater.pending)
 	}
-	afterE1, afterE2, afterE4 := EpisodeKey(1, 2), EpisodeKey(1, 3), EpisodeKey(1, 5)
+	// The cursor walks past the started E2, and Home's Next Up skips the
+	// file-less E3 and shows E4, so E3 is the next episode that could notify.
+	afterE2, afterE4 := EpisodeKey(1, 3), EpisodeKey(1, 5)
 
-	recompute("before any removal", flags{favorite: true, continueWatching: true, nextUp: true}, afterE1)
+	recompute("before any removal", true, afterE2)
 
-	progress, err := store.ListProgressByMediaItems(ctx, profileID, []string{episodes[1]})
-	if err != nil {
-		t.Fatalf("ListProgressByMediaItems: %v", err)
-	}
-	progressStamp := progress[episodes[1]].UpdatedAt
 	dismissedAt := time.Now().Add(-time.Hour).UTC().Format(time.RFC3339)
-	if err := store.UpsertHomeDismissal(ctx, userstore.HomeItemDismissal{
-		ProfileID: profileID, Surface: userstore.HomeSurfaceContinueWatching, MediaItemID: episodes[1],
-		ProgressUpdatedAt: &progressStamp, DismissedAt: dismissedAt,
-	}); err != nil {
-		t.Fatalf("dismiss from Continue Watching: %v", err)
-	}
-	recompute("removed from Continue Watching", flags{favorite: true, nextUp: true}, afterE1)
 
 	// Home's Next Up card after E1 skips the started E2 and the file-less E3,
 	// so it shows E4.
@@ -421,20 +520,20 @@ func TestRecomputeSeriesFollowsHomeRemovalsPostgres(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("dismiss from Next Up: %v", err)
 	}
-	recompute("removed from Next Up too", flags{favorite: true}, afterE1)
+	recompute("removed from Next Up", false, afterE2)
 
-	// Resuming E2 brings its Continue Watching card back; the Next Up card is
-	// still E4, so it stays dismissed.
+	// Resuming E2: the Next Up card is still E4, so it stays dismissed, and
+	// the newer progress on E2 keeps the series off Next Up anyway.
 	setProgress(episodes[1], false, time.Now().Add(-3*time.Minute).UTC().Truncate(time.Second))
-	recompute("resumed E2", flags{favorite: true, continueWatching: true}, afterE1)
+	recompute("resumed E2", false, afterE2)
 
 	// Finishing E2 leaves E4 as the Next Up card.
 	setProgress(episodes[1], true, time.Now().Add(-2*time.Minute).UTC().Truncate(time.Second))
-	recompute("finished E2", flags{favorite: true}, afterE2)
+	recompute("finished E2", false, afterE2)
 
 	// Finishing E4 moves Next Up past the dismissed card.
 	setProgress(episodes[3], true, time.Now().Add(-time.Minute).UTC().Truncate(time.Second))
-	recompute("finished E4", flags{favorite: true, nextUp: true}, afterE4)
+	recompute("finished E4", true, afterE4)
 
 	drops := TrackDroppedSeries(catalog.NewDroppedSeriesRepo(pool), system)
 	if err := drops.Drop(ctx, userID, profileID, seriesID); err != nil {
@@ -447,13 +546,13 @@ func TestRecomputeSeriesFollowsHomeRemovalsPostgres(t *testing.T) {
 	if !deferred {
 		t.Fatal("dropping the series deferred no second recompute")
 	}
-	recompute("series dropped", flags{favorite: true}, afterE4)
+	recompute("series dropped", false, afterE4)
 
 	if err := drops.Undrop(ctx, userID, profileID, seriesID); err != nil {
 		t.Fatalf("Undrop: %v", err)
 	}
 	requireQueued("undropping the series")
-	recompute("series undropped", flags{favorite: true, nextUp: true}, afterE4)
+	recompute("series undropped", true, afterE4)
 
 	// Drops imported from, and removed by, a watch provider.
 	droppedAt := time.Now().UTC().Truncate(time.Microsecond)
@@ -461,33 +560,36 @@ func TestRecomputeSeriesFollowsHomeRemovalsPostgres(t *testing.T) {
 		t.Fatalf("ImportDrop = %v, %v", applied, err)
 	}
 	requireQueued("importing a drop")
-	recompute("drop imported", flags{favorite: true}, afterE4)
+	recompute("drop imported", false, afterE4)
 
 	if removed, err := drops.DeleteIfUnchanged(ctx, userID, profileID, seriesID, droppedAt); err != nil || !removed {
 		t.Fatalf("DeleteIfUnchanged = %v, %v", removed, err)
 	}
 	requireQueued("removing an imported drop")
-	recompute("imported drop removed", flags{favorite: true, nextUp: true}, afterE4)
+	recompute("imported drop removed", true, afterE4)
 
 	// Home anchors Next Up on the most recently completed episode. E3 gets a
 	// file and the profile rewatches E1, so Home's card becomes E3 even though
-	// E4 is the highest episode watched.
+	// E4 is the highest episode watched. The cursor walks from E1 past the
+	// started E2 and stops at E3.
 	if _, err := pool.Exec(ctx, `INSERT INTO media_files (id, media_folder_id, file_path, episode_id) VALUES ($1, $2, $3 || '/e3.mkv', $4)`,
 		nonce%1_000_000_000_000+3, libraryID, "/"+prefix, episodes[2]); err != nil {
 		t.Fatalf("add E3 file: %v", err)
 	}
 	setProgress(episodes[0], true, time.Now().UTC().Truncate(time.Second))
-	recompute("Next Up moved to E3 despite the old E4 dismissal", flags{favorite: true, nextUp: true}, afterE4)
+	recompute("Next Up moved to E3 despite the old E4 dismissal", true, afterE2)
 	if err := store.UpsertHomeDismissal(ctx, userstore.HomeItemDismissal{
 		ProfileID: profileID, Surface: userstore.HomeSurfaceNextUp, MediaItemID: episodes[2],
 		SeriesID: &seriesID, DismissedAt: time.Now().UTC().Format(time.RFC3339),
 	}); err != nil {
 		t.Fatalf("dismiss E3 from Next Up: %v", err)
 	}
-	recompute("E3 card dismissed after a rewatch", flags{favorite: true}, afterE4)
+	recompute("E3 card dismissed after a rewatch", false, afterE2)
 
 	// Home's Next Up counts any progress row as started, even one a history
-	// hide covers. Starting E3 and hiding it leaves no card after E1.
+	// hide covers. Starting E3 and hiding it leaves no card after E1, and the
+	// cursor walks past every started episode to after E4. E3's progress is
+	// older than the E1 rewatch, so it does not keep the series off Next Up.
 	startedAt := time.Now().Add(-30 * time.Second).UTC().Truncate(time.Second)
 	setProgress(episodes[2], false, startedAt)
 	if _, err := pool.Exec(ctx, `
@@ -495,7 +597,7 @@ func TestRecomputeSeriesFollowsHomeRemovalsPostgres(t *testing.T) {
 		VALUES ($1, $2, $3, $4, $4)`, userID, profileID, episodes[2], startedAt.Add(time.Second)); err != nil {
 		t.Fatalf("hide E3: %v", err)
 	}
-	recompute("E3 started and hidden", flags{favorite: true, nextUp: true}, afterE4)
+	recompute("E3 started and hidden", true, afterE4)
 }
 
 // TestRecomputeSeriesNextUpCardSkipsSpecialAnchorPostgres pins that the Next
@@ -503,10 +605,12 @@ func TestRecomputeSeriesFollowsHomeRemovalsPostgres(t *testing.T) {
 // finished a special: the next regular episode, not the next special.
 func TestRecomputeSeriesNextUpCardSkipsSpecialAnchorPostgres(t *testing.T) {
 	watchedAt := time.Now().Add(-2 * time.Hour).UTC().Truncate(time.Second)
-	_, nextUp := recomputeSeriesInterest(t, "special-anchor", [][2]int{{0, 5}, {0, 6}, {2, 4}, {2, 5}},
-		[]progressAt{{season: 2, number: 4, at: watchedAt}, {season: 0, number: 5, at: watchedAt.Add(time.Minute)}},
-		[2]int{2, 5})
-	if nextUp {
+	got := recomputeSeriesInterest(t, "special-anchor", recomputeCase{
+		episodes:  [][2]int{{0, 5}, {0, 6}, {2, 4}, {2, 5}},
+		progress:  []progressAt{{season: 2, number: 4, at: watchedAt}, {season: 0, number: 5, at: watchedAt.Add(time.Minute)}},
+		dismissed: &[2]int{2, 5},
+	})
+	if got.nextUp {
 		t.Fatal("next_up_candidate = true; the dismissed S02E05 is Home's Next Up card, so want false")
 	}
 }
@@ -516,32 +620,121 @@ func TestRecomputeSeriesNextUpCardSkipsSpecialAnchorPostgres(t *testing.T) {
 // does with the full timestamps (#2878), not on the higher episode.
 func TestRecomputeSeriesNextUpAnchorKeepsSubsecondOrderPostgres(t *testing.T) {
 	second := time.Now().Add(-2 * time.Hour).UTC().Truncate(time.Second)
-	_, nextUp := recomputeSeriesInterest(t, "subsecond-anchor", [][2]int{{2, 4}, {2, 5}, {2, 8}, {2, 9}},
-		[]progressAt{
+	got := recomputeSeriesInterest(t, "subsecond-anchor", recomputeCase{
+		episodes: [][2]int{{2, 4}, {2, 5}, {2, 8}, {2, 9}},
+		progress: []progressAt{
 			{season: 2, number: 8, at: second.Add(100 * time.Millisecond)},
 			{season: 2, number: 4, at: second.Add(900 * time.Millisecond)},
 		},
-		[2]int{2, 5})
-	if nextUp {
+		dismissed: &[2]int{2, 5},
+	})
+	if got.nextUp {
 		t.Fatal("next_up_candidate = true; S02E04 was completed last, so the dismissed S02E05 is Home's Next Up card and want false")
 	}
 }
 
-// TestRecomputeSeriesContinueWatchingKeepsWholeSecondSupersedePostgres pins
-// that Continue Watching supersession compares the store's UpdatedAt, whole
-// seconds on Postgres, as catalog.ProgressSnapshots does for Home: a later
-// episode completed in the same second as an earlier episode's resume, even
-// after it, does not hide the resume.
-func TestRecomputeSeriesContinueWatchingKeepsWholeSecondSupersedePostgres(t *testing.T) {
-	second := time.Now().Add(-2 * time.Hour).UTC().Truncate(time.Second)
-	continueWatching, _ := recomputeSeriesInterest(t, "subsecond-resume", [][2]int{{2, 4}, {2, 5}, {2, 8}, {2, 9}},
-		[]progressAt{
-			{season: 2, number: 4, at: second.Add(100 * time.Millisecond), position: 30},
-			{season: 2, number: 8, at: second.Add(900 * time.Millisecond)},
+// TestRecomputeSeriesNextUpCursorPostgres pins the Next Up cursor and
+// next_up_candidate against the production stores: the cursor follows Home's
+// anchor and walks past started episodes, completed history anchors a series
+// with no completed progress, and newer partial progress suppresses Next Up.
+func TestRecomputeSeriesNextUpCursorPostgres(t *testing.T) {
+	watchedAt := time.Now().Add(-2 * time.Hour).UTC().Truncate(time.Second)
+	at := func(minutes int) time.Time { return watchedAt.Add(time.Duration(minutes) * time.Minute) }
+	for _, tc := range []struct {
+		name       string
+		c          recomputeCase
+		wantCursor int
+		wantNextUp bool
+	}{
+		{
+			// The finale's key + 1 matches no episode; fanout lets S02E01
+			// through because nothing listed lies between.
+			name: "finished season",
+			c: recomputeCase{
+				episodes: [][2]int{{1, 1}, {1, 2}, {1, 3}},
+				progress: []progressAt{{season: 1, number: 1, at: at(0)}, {season: 1, number: 2, at: at(1)}, {season: 1, number: 3, at: at(2)}},
+			},
+			wantCursor: EpisodeKey(1, 4), wantNextUp: true,
 		},
-		[2]int{2, 9})
-	if !continueWatching {
-		t.Fatal("continue_watching = false; Home compares whole seconds, so S02E08's completion does not supersede S02E04's resume and want true")
+		{
+			// Caught up through S02 and rewatching S01E01: the cursor walks
+			// past every started episode to after S02E02.
+			name: "rewatch",
+			c: recomputeCase{
+				episodes: [][2]int{{1, 1}, {1, 2}, {2, 1}, {2, 2}},
+				progress: []progressAt{
+					{season: 1, number: 2, at: at(1)}, {season: 2, number: 1, at: at(2)},
+					{season: 2, number: 2, at: at(3)}, {season: 1, number: 1, at: at(10)},
+				},
+			},
+			wantCursor: EpisodeKey(2, 3), wantNextUp: true,
+		},
+		{
+			// S01E02 is listed without a file. The walk stops on it although
+			// S01E03 after it is started, so S01E02 notifies when it lands.
+			name: "listed episode without a file",
+			c: recomputeCase{
+				episodes: [][2]int{{1, 1}, {1, 3}},
+				fileless: [][2]int{{1, 2}},
+				progress: []progressAt{{season: 1, number: 3, at: at(0)}, {season: 1, number: 1, at: at(1)}},
+			},
+			wantCursor: EpisodeKey(1, 2), wantNextUp: true,
+		},
+		{
+			// The walk stops at the first listed episode not started.
+			name: "rewatch with an unwatched episode",
+			c: recomputeCase{
+				episodes: [][2]int{{1, 1}, {1, 2}, {1, 3}, {1, 4}},
+				progress: []progressAt{{season: 1, number: 2, at: at(1)}, {season: 1, number: 4, at: at(2)}, {season: 1, number: 1, at: at(10)}},
+			},
+			wantCursor: EpisodeKey(1, 3), wantNextUp: true,
+		},
+		{
+			name: "history only",
+			c: recomputeCase{
+				episodes: [][2]int{{1, 1}, {1, 2}, {1, 3}},
+				history:  [][2]int{{1, 1}, {1, 2}},
+			},
+			wantCursor: EpisodeKey(1, 3), wantNextUp: true,
+		},
+		{
+			// Without a progress anchor any episode in progress suppresses.
+			name: "history only with an episode in progress",
+			c: recomputeCase{
+				episodes: [][2]int{{1, 1}, {1, 2}, {1, 3}},
+				history:  [][2]int{{1, 1}},
+				progress: []progressAt{{season: 1, number: 2, at: at(0), position: 30}},
+			},
+			wantCursor: EpisodeKey(1, 3), wantNextUp: false,
+		},
+		{
+			name: "partly watched after the last finish",
+			c: recomputeCase{
+				episodes: [][2]int{{1, 1}, {1, 2}, {1, 3}},
+				progress: []progressAt{{season: 1, number: 1, at: at(0)}, {season: 1, number: 2, at: at(1), position: 30}},
+			},
+			wantCursor: EpisodeKey(1, 3), wantNextUp: false,
+		},
+		{
+			// Older partial progress does not block Home's Next Up, and the
+			// started episode is walked past.
+			name: "partly watched before the last finish",
+			c: recomputeCase{
+				episodes: [][2]int{{1, 1}, {1, 2}, {1, 3}},
+				progress: []progressAt{{season: 1, number: 2, at: at(0), position: 30}, {season: 1, number: 1, at: at(1)}},
+			},
+			wantCursor: EpisodeKey(1, 3), wantNextUp: true,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := recomputeSeriesInterest(t, "cursor", tc.c)
+			if got.nextExpected == nil || *got.nextExpected != tc.wantCursor {
+				t.Errorf("next_expected_episode_key = %v, want %d", got.nextExpected, tc.wantCursor)
+			}
+			if got.nextUp != tc.wantNextUp {
+				t.Errorf("next_up_candidate = %v, want %v", got.nextUp, tc.wantNextUp)
+			}
+		})
 	}
 }
 
@@ -553,11 +746,25 @@ type progressAt struct {
 	position       float64
 }
 
-// recomputeSeriesInterest seeds a series with the given episodes, each with a
-// file, writes the progress rows, dismisses one episode from Next Up, runs
-// RecomputeSeries, and returns the series' continue_watching and
-// next_up_candidate.
-func recomputeSeriesInterest(t *testing.T, name string, episodes [][2]int, progress []progressAt, dismissed [2]int) (bool, bool) {
+// recomputeCase is one profile's state in one series: episodes with a file,
+// episodes without one, progress rows, completed history entries, and an
+// optional Next Up dismissal.
+type recomputeCase struct {
+	episodes, fileless [][2]int
+	progress           []progressAt
+	history            [][2]int
+	dismissed          *[2]int
+}
+
+// recomputeResult is the interest row RecomputeSeries wrote.
+type recomputeResult struct {
+	nextUp       bool
+	nextExpected *int
+}
+
+// recomputeSeriesInterest seeds the series and the profile's state described
+// by c, runs RecomputeSeries, and returns the interest row it wrote.
+func recomputeSeriesInterest(t *testing.T, name string, c recomputeCase) recomputeResult {
 	t.Helper()
 	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
 	if dsn == "" {
@@ -588,6 +795,7 @@ func recomputeSeriesInterest(t *testing.T, name string, episodes [][2]int, progr
 		_, _ = pool.Exec(cleanup, `DELETE FROM media_files WHERE media_folder_id = $1`, libraryID)
 		_, _ = pool.Exec(cleanup, `DELETE FROM media_items WHERE content_id = $1`, seriesID)
 		_, _ = pool.Exec(cleanup, `DELETE FROM media_folders WHERE id = $1`, libraryID)
+		_, _ = pool.Exec(cleanup, `DELETE FROM user_watch_history WHERE user_id = $1`, userID)
 		_, _ = pool.Exec(cleanup, `DELETE FROM users WHERE id = $1`, userID)
 	})
 	episode := func(season, number int) string { return fmt.Sprintf("%s-s%02de%02d", prefix, season, number) }
@@ -603,15 +811,17 @@ func recomputeSeriesInterest(t *testing.T, name string, episodes [][2]int, progr
 			t.Fatalf("seed catalog: %v", err)
 		}
 	}
-	for _, e := range episodes {
+	for _, e := range slices.Concat(c.episodes, c.fileless) {
 		if _, err := pool.Exec(ctx, `INSERT INTO episodes (content_id, series_id, season_number, episode_number, title) VALUES ($1, $2, $3, $4, $1)`,
 			episode(e[0], e[1]), seriesID, e[0], e[1]); err != nil {
 			t.Fatalf("seed episode: %v", err)
 		}
 	}
-	if _, err := pool.Exec(ctx, `INSERT INTO media_files (media_folder_id, file_path, episode_id)
-		SELECT $1, '/' || content_id, content_id FROM episodes WHERE series_id = $2`, libraryID, seriesID); err != nil {
-		t.Fatalf("seed files: %v", err)
+	for _, e := range c.episodes {
+		if _, err := pool.Exec(ctx, `INSERT INTO media_files (media_folder_id, file_path, episode_id) VALUES ($1, '/' || $2::text, $2)`,
+			libraryID, episode(e[0], e[1])); err != nil {
+			t.Fatalf("seed file: %v", err)
+		}
 	}
 
 	provider := pgstore.NewPostgresProvider(pool)
@@ -622,31 +832,47 @@ func recomputeSeriesInterest(t *testing.T, name string, episodes [][2]int, progr
 	if err := store.CreateProfile(ctx, userstore.Profile{ID: profileID, Name: "Viewer"}); err != nil {
 		t.Fatalf("CreateProfile: %v", err)
 	}
-	for _, p := range progress {
+	for _, p := range c.progress {
 		if _, err := pool.Exec(ctx, `
 			INSERT INTO user_watch_progress (user_id, profile_id, media_item_id, position_seconds, duration_seconds, completed, updated_at)
 			VALUES ($1, $2, $3, $4, 100, $5, $6)`, userID, profileID, episode(p.season, p.number), p.position, p.position == 0, p.at); err != nil {
 			t.Fatalf("seed progress: %v", err)
 		}
 	}
-	if err := store.UpsertHomeDismissal(ctx, userstore.HomeItemDismissal{
-		ProfileID: profileID, Surface: userstore.HomeSurfaceNextUp, MediaItemID: episode(dismissed[0], dismissed[1]),
-		SeriesID: &seriesID, DismissedAt: time.Now().UTC().Format(time.RFC3339),
-	}); err != nil {
-		t.Fatalf("dismiss from Next Up: %v", err)
+	seedCompletedHistory(t, pool, userID, profileID, c.history, episode)
+	if c.dismissed != nil {
+		if err := store.UpsertHomeDismissal(ctx, userstore.HomeItemDismissal{
+			ProfileID: profileID, Surface: userstore.HomeSurfaceNextUp, MediaItemID: episode(c.dismissed[0], c.dismissed[1]),
+			SeriesID: &seriesID, DismissedAt: time.Now().UTC().Format(time.RFC3339),
+		}); err != nil {
+			t.Fatalf("dismiss from Next Up: %v", err)
+		}
 	}
 
 	updater := NewInterestUpdater(pool, NewInterestRepository(pool), provider, allLibrariesScope{})
 	if err := updater.RecomputeSeries(ctx, userID, profileID, seriesID); err != nil {
 		t.Fatalf("RecomputeSeries: %v", err)
 	}
-	var continueWatching, nextUp bool
+	var got recomputeResult
 	if err := pool.QueryRow(ctx, `
-		SELECT continue_watching, next_up_candidate FROM profile_series_interest
+		SELECT next_up_candidate, next_expected_episode_key FROM profile_series_interest
 		WHERE profile_id = $1 AND library_id = $2 AND series_id = $3`,
 		profileID, libraryID, seriesID,
-	).Scan(&continueWatching, &nextUp); err != nil {
+	).Scan(&got.nextUp, &got.nextExpected); err != nil {
 		t.Fatalf("read interest: %v", err)
 	}
-	return continueWatching, nextUp
+	return got
+}
+
+// seedCompletedHistory writes a completed watch history entry, with no
+// progress row, for each episode, as a history import does.
+func seedCompletedHistory(t *testing.T, pool *pgxpool.Pool, userID int, profileID string, episodes [][2]int, episode func(season, number int) string) {
+	t.Helper()
+	for _, e := range episodes {
+		if _, err := pool.Exec(t.Context(), `
+			INSERT INTO user_watch_history (id, user_id, profile_id, media_item_id, watched_at, completed)
+			VALUES ($3 || '-history', $1, $2, $3, now() - interval '1 day', true)`, userID, profileID, episode(e[0], e[1])); err != nil {
+			t.Fatalf("seed history: %v", err)
+		}
+	}
 }
