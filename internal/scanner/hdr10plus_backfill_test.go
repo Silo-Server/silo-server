@@ -15,6 +15,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/Silo-Server/silo-server/internal/mediaprobe"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
@@ -159,8 +160,12 @@ func TestHDR10PlusBackfillRecordsFrameStatusDB(t *testing.T) {
 		return firstVideoFrame{SideData: row.sideData, ColorRange: row.frameRange}, row.readErr
 	}
 
-	if _, err := backfiller.Run(ctx, nil); err != nil {
+	result, err := backfiller.Run(ctx, nil)
+	if err != nil {
 		t.Fatalf("first pass: %v", err)
+	}
+	if result.DolbyVisionMEL != 1 || result.DolbyVisionFEL != 1 {
+		t.Fatalf("first pass = %+v, want one MEL and one FEL recorded", result)
 	}
 	track := func(name string) map[string]any {
 		t.Helper()
@@ -186,7 +191,7 @@ func TestHDR10PlusBackfillRecordsFrameStatusDB(t *testing.T) {
 	}
 	for name, count := range reads {
 		want := 0
-		if name == "undecodable" || name == "storage-error" || name == "timed-out" || name == "changed-on-disk" {
+		if name == "undecodable" || name == "storage-error" || name == "timed-out" || name == "changed-on-disk" || name == "dv7-no-nlq" {
 			want = 1
 		}
 		if count != want {
@@ -204,10 +209,16 @@ func hdr10PlusBackfillTestRows(t *testing.T) []hdr10PlusBackfillRow {
 		{SideDataType: "HDR Dynamic Metadata SMPTE2094-40 (HDR10+)"},
 	}
 	staticFrame := hdr10PlusFrame[:1]
+	dv7Frame := func(layer string) []ffprobeSideData {
+		return []ffprobeSideData{{SideDataType: "Dolby Vision RPU Data"}, dolbyVisionMetadataSideData(layer)}
+	}
 	const (
 		hdr10Track = `{"codec":"hevc","color_transfer":"smpte2084","video_range":"HDR","video_range_type":"HDR10","future_field":"kept"}`
 		dv81Track  = `{"codec":"hevc","color_transfer":"smpte2084","video_range":"DolbyVision","video_range_type":"DOVIWithHDR10","dv_profile":8,"dv_bl_compat_id":1,"dv_config_present":true,"dv_bl_compat_id_present":true}`
 		sdrTrack   = `{"codec":"h264","color_transfer":"bt709","video_range_type":"SDR"}`
+		// A Profile 7 track checked for HDR10+ before Silo read the type of
+		// its enhancement layer.
+		dv7Track = `{"codec":"hevc","color_transfer":"smpte2084","dv_profile":7,"dv_el_present":true,"dv_enhancement_layer":"unknown","hdr10_plus":false,"frame_color_range":"tv"}`
 	)
 	return []hdr10PlusBackfillRow{
 		{name: "hdr10plus", tracks: "[" + hdr10Track + "]", sideData: hdr10PlusFrame, frameRange: "tv"},
@@ -221,7 +232,32 @@ func hdr10PlusBackfillTestRows(t *testing.T) []hdr10PlusBackfillRow {
 		// Checked for HDR10+ before Silo recorded the frame's range.
 		{name: "checked-before-frame-range", tracks: `[{"codec":"hevc","color_transfer":"smpte2084","color_range":"tv","hdr10_plus":false}]`, sideData: hdr10PlusFrame, frameRange: "pc"},
 		{name: "changed-on-disk", tracks: "[" + hdr10Track + "]", sideData: hdr10PlusFrame},
+		{name: "dv7-mel", tracks: "[" + dv7Track + "]", sideData: dv7Frame("mel"), frameRange: "tv"},
+		{name: "dv7-fel", tracks: "[" + dv7Track + "]", sideData: dv7Frame("fel"), frameRange: "tv"},
+		// The frame's RPU carries no NLQ coefficients: the type stays unknown.
+		{name: "dv7-no-nlq", tracks: "[" + dv7Track + "]", sideData: dv7Frame(""), frameRange: "tv"},
 	}
+}
+
+// dolbyVisionMetadataSideData is a first frame's "Dolby Vision Metadata" as
+// FFmpeg 8.1.3 reports it for a Profile 7 remux with a minimal ("mel") or full
+// ("fel") enhancement layer, or without NLQ coefficients ("").
+func dolbyVisionMetadataSideData(layer string) ffprobeSideData {
+	denom := 23
+	data := ffprobeSideData{SideDataType: "Dolby Vision Metadata", DVCoefLog2Denom: &denom}
+	if layer == "" {
+		return data
+	}
+	offset, vdrInMax, slope, threshold := int64(0), uint64(1)<<denom, uint64(0), uint64(0)
+	if layer == "fel" {
+		offset, vdrInMax, slope = 512, 1048576, 2048
+	}
+	for range 3 {
+		data.DVComponents = append(data.DVComponents, mediaprobe.DolbyVisionComponent{
+			NLQOffset: &offset, VDRInMax: &vdrInMax, LinearDeadzoneSlope: &slope, LinearDeadzoneThreshold: &threshold,
+		})
+	}
+	return data
 }
 
 func readHDR10PlusBackfillTrack(t *testing.T, ctx context.Context, pool *pgxpool.Pool, fileID int) map[string]any {
@@ -264,6 +300,14 @@ func checkHDR10PlusBackfillFirstPass(t *testing.T, track func(string) map[string
 	}
 	if got := track("already-checked"); got["hdr10_plus"] != false {
 		t.Fatalf("already checked file = %v, want it unchanged", got)
+	}
+	for name, want := range map[string]string{"dv7-mel": "mel", "dv7-fel": "fel", "dv7-no-nlq": "unknown"} {
+		if got := track(name); got["dv_enhancement_layer"] != want || got["hdr10_plus"] != false {
+			t.Fatalf("%s file = %v, want enhancement layer %s and its HDR10+ status kept", name, got, want)
+		}
+		if reads[name] != 1 {
+			t.Fatalf("%s file was read %d times, want once", name, reads[name])
+		}
 	}
 	for _, name := range []string{"sdr", "already-checked"} {
 		if reads[name] != 0 {
@@ -448,6 +492,16 @@ func TestCarryCheckedHDR10PlusKeepsStatusForTheSameStream(t *testing.T) {
 		t.Fatalf("same stream = %+v, want the checked HDR10+ status and frame range kept", next[0])
 	}
 
+	// A Profile 7 track keeps the enhancement-layer type its frame told.
+	fel := checked
+	fel.DVProfile, fel.DVELPresent, fel.DVEnhancementLayer = 7, true, "fel"
+	next = reprobed()
+	next[0].DVProfile, next[0].DVELPresent, next[0].DVEnhancementLayer = 7, true, "unknown"
+	carryCheckedHDR10Plus([]models.VideoTrack{fel}, next)
+	if next[0].DVEnhancementLayer != "fel" {
+		t.Fatalf("Profile 7 stream = %+v, want its full enhancement layer kept", next[0])
+	}
+
 	next = reprobed()
 	next[0].Width = 1920
 	carryCheckedHDR10Plus([]models.VideoTrack{checked}, next)
@@ -537,12 +591,12 @@ func TestHDR10PlusBackfillBoundsTheOnDiskCheck(t *testing.T) {
 	}
 	candidate := hdr10PlusCandidate{id: 1, path: "/stalled/movie.mkv", size: 1000}
 
-	outcome, err := backfiller.backfillFile(context.Background(), candidate)
+	outcome, _, err := backfiller.backfillFile(context.Background(), candidate)
 	if err != nil || outcome != hdr10PlusOutcomeTimedOut {
 		t.Fatalf("stalled check = %v, %v; want a timed-out file", outcome, err)
 	}
 	// The first check still holds the only slot.
-	if _, err := backfiller.backfillFile(context.Background(), candidate); !errors.Is(err, errHDR10PlusStorageStalled) {
+	if _, _, err := backfiller.backfillFile(context.Background(), candidate); !errors.Is(err, errHDR10PlusStorageStalled) {
 		t.Fatalf("check with every slot stuck = %v, want the pass to end on stalled storage", err)
 	}
 
@@ -568,7 +622,7 @@ func TestHDR10PlusBackfillBoundsTheOnDiskCheck(t *testing.T) {
 		<-started
 		cancel()
 	}()
-	if _, err := backfiller.backfillFile(ctx, candidate); !errors.Is(err, context.Canceled) {
+	if _, _, err := backfiller.backfillFile(ctx, candidate); !errors.Is(err, context.Canceled) {
 		t.Fatalf("check canceled while blocked = %v, want context.Canceled", err)
 	}
 }

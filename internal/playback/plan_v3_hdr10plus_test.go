@@ -146,3 +146,26 @@ func TestHDR10PlusOutputKeepsHDR10Ceilings(t *testing.T) {
 		t.Fatalf("eligible = %v, claims = %+v; want a 24 fps HDR10+ source to claim HDR10+", eligible, claims)
 	}
 }
+
+// A client's Dolby Vision profile claims don't say it decodes a full
+// enhancement layer, so a Profile 7 source plays natively only when its layer
+// is known to be minimal.
+func TestProfile7PlaysNativelyOnlyWithAMinimalEnhancementLayer(t *testing.T) {
+	req := hdrRequestV3(&HDRCapabilitiesV3{HDR10: true, DolbyVisionProfiles: []int{7, 8}})
+	for _, tt := range []struct {
+		layer      EnhancementLayerV3
+		eligible   bool
+		wantReason string
+	}{
+		{layer: EnhancementMELV3, eligible: true, wantReason: "native_profile_supported"},
+		{layer: EnhancementFELV3, wantReason: "profile_7_full_enhancement_layer"},
+		{layer: EnhancementUnknownV3, wantReason: "profile_7_enhancement_layer_unknown"},
+	} {
+		source := SourceDescriptorV3{DynamicRange: DynamicRangeDolbyVisionV3, DVProfile: 7, DVLevel: 6, DVBLCompatID: 6,
+			DVEnhancementLayer: tt.layer, Width: 3840, Height: 2160, FrameRate: 24}
+		eligible, claims := outputRangeEligibleV3(source, req)
+		if eligible != tt.eligible || claims.DolbyVision != tt.eligible || claims.DolbyVisionReason != tt.wantReason {
+			t.Fatalf("%s: eligible = %v, claims = %+v; want eligible %v, reason %s", tt.layer, eligible, claims, tt.eligible, tt.wantReason)
+		}
+	}
+}
