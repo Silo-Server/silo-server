@@ -4,10 +4,13 @@ import { describe, expect, it } from "vitest";
 import type { MediaRequest } from "@/api/types";
 import {
   defaultRequestQueueView,
+  distinctTargets,
   parseRequestQueueUser,
   parseRequestQueueView,
   requestQueueActions,
   requestQueueView,
+  requestOptionColumns,
+  requestOptionValue,
 } from "./requestQueueModel";
 
 type Fields = Pick<MediaRequest, "status" | "outcome" | "targets">;
@@ -58,5 +61,50 @@ describe("queue links", () => {
     for (const value of ["0", "-1", "7a", "01", "", null, "99999999999"]) {
       expect(parseRequestQueueUser(value)).toBeUndefined();
     }
+  });
+});
+
+describe("distinctTargets", () => {
+  const target = (id: number, quality: string, external_id?: string, integration_id = "seerr") =>
+    ({ id, quality, external_id, integration_id, status: "queued" }) as NonNullable<
+      MediaRequest["targets"]
+    >[number];
+
+  it("shows one download that serves both qualities once", () => {
+    const entries = distinctTargets([target(1, "1080p", "42"), target(2, "2160p", "42")]);
+    expect(entries.map((entry) => [entry.target.id, entry.shared])).toEqual([[1, true]]);
+  });
+
+  it("keeps separate downloads, and targets without an external id, apart", () => {
+    const entries = distinctTargets([
+      target(1, "1080p", "42"),
+      target(2, "2160p", "43"),
+      target(3, "1080p", "42", "other"),
+      target(4, "1080p"),
+      target(5, "2160p"),
+    ]);
+    expect(entries.map((entry) => entry.target.id)).toEqual([1, 2, 3, 4, 5]);
+    expect(entries.every((entry) => !entry.shared)).toBe(true);
+  });
+});
+
+describe("requestOptionColumns", () => {
+  const movie = {
+    options: [
+      { key: "radarr_profile_id", label: "Quality", value: "4", value_label: "Ultra-HD" },
+      { key: "radarr_root_folder", label: "Folder", value: "/m", value_label: "/movies" },
+    ],
+  };
+  const series = {
+    options: [
+      { key: "sonarr_profile_id", label: "Quality", value: "9", value_label: "Series UHD" },
+    ],
+  };
+
+  it("names each chosen setting once, and reads a request's value for it", () => {
+    expect(requestOptionColumns([{}, series, movie])).toEqual(["Quality", "Folder"]);
+    expect(requestOptionColumns([{}, { options: [] }])).toEqual([]);
+    expect(requestOptionValue(series, "Quality")).toBe("Series UHD");
+    expect(requestOptionValue(series, "Folder")).toBeUndefined();
   });
 });

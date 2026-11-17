@@ -567,6 +567,7 @@
 ./internal/requests TestDeleteTargetWaitsForAConcurrentReclaimDatabase
 ./internal/requests TestMarkAvailableLeavesARetryResendingATierDatabase
 ./internal/requests TestListDownloadingRequestsOrderDatabase
+./internal/requests TestRequesterChoicesDatabase
 ./internal/requests TestRecordSubmissionReplacesFailedTargetDatabase
 ./internal/requests TestWithdrawIgnoresFailedTargetsDatabase
 ./internal/requests TestUpdateTargetStatusLeavesFinishedTargetDatabase

@@ -1,6 +1,7 @@
 import { useId, useState } from "react";
 import { Loader2 } from "lucide-react";
 import type { RequestMediaDetail, RequestMediaSeason } from "@/api/types";
+import { RequestOptionFields } from "@/components/RequestOptionFields";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -11,7 +12,11 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Switch } from "@/components/ui/switch";
-import { useCreateMediaRequest, useRequestMediaDetail } from "@/hooks/queries/useRequests";
+import {
+  useCreateMediaRequest,
+  useRequestMediaDetail,
+  useRequestOptions,
+} from "@/hooks/queries/useRequests";
 import {
   defaultRequestSeasons,
   formatRequestReason,
@@ -19,6 +24,8 @@ import {
   formatSeasonList,
   latestRequestSeason,
   requestInputFromMediaResult,
+  requestOptionsToSend,
+  type RequestOptionPicks,
   seasonHasAired,
   seasonRequestable,
   upcomingRequestSeasons,
@@ -63,6 +70,18 @@ export function RequestSeasonsDialog({
 
   const seasons = detail?.seasons ?? [];
   const requestable = detail?.request.requestable ?? false;
+  // What the download server lets the requester choose, such as a quality
+  // profile. Nothing on offer, or a failed read, shows no fields.
+  const requestOptions = useRequestOptions("series", tmdbID, { enabled: open && requestable });
+  const [optionPicks, setOptionPicks] = useState<RequestOptionPicks>({});
+  // Picks belong to the list they were made from: a reloaded list starts
+  // without them, as the same value can name another choice there.
+  const offerToken = requestOptions.data?.offer;
+  const [pickedFrom, setPickedFrom] = useState(offerToken);
+  if (pickedFrom !== offerToken) {
+    setPickedFrom(offerToken);
+    setOptionPicks({});
+  }
   const choices = requestable ? seasons.filter(seasonRequestable) : [];
   const defaults = defaultRequestSeasons(choices);
   const selected = (picked ?? defaults).filter((number) =>
@@ -80,7 +99,10 @@ export function RequestSeasonsDialog({
   const upcoming = upcomingRequestSeasons(choices);
 
   const close = (next: boolean) => {
-    if (!next) setPicked(null);
+    if (!next) {
+      setPicked(null);
+      setOptionPicks({});
+    }
     onOpenChange(next);
   };
   const toggle = (season: number, on: boolean) =>
@@ -90,7 +112,11 @@ export function RequestSeasonsDialog({
   const submit = () => {
     if (!detail) return;
     createRequest.mutate(
-      { ...requestInputFromMediaResult(detail), ...(!serverChooses && { seasons: selected }) },
+      {
+        ...requestInputFromMediaResult(detail),
+        ...(!serverChooses && { seasons: selected }),
+        ...requestOptionsToSend(requestOptions.data, optionPicks),
+      },
       { onSuccess: () => close(false) },
     );
   };
@@ -201,6 +227,15 @@ export function RequestSeasonsDialog({
           </>
         )}
 
+        {requestable && requestOptions.data ? (
+          <RequestOptionFields
+            options={requestOptions.data.options}
+            picks={optionPicks}
+            onChange={setOptionPicks}
+            disabled={createRequest.isPending}
+          />
+        ) : null}
+
         <DialogFooter>
           <Button variant="outline" onClick={() => close(false)}>
             {t("common.cancel")}
@@ -211,6 +246,7 @@ export function RequestSeasonsDialog({
               !detail ||
               !requestable ||
               refreshing ||
+              requestOptions.isLoading ||
               (!serverChooses && selected.length === 0) ||
               createRequest.isPending
             }

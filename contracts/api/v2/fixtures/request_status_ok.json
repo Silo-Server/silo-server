@@ -1,5 +1,5 @@
 {
-  "revision": "e4c71a296c2a0ebb2a1bb4ac60ea47b3a1b10c7287b3f49195a62b79cbaebb4e",
+  "revision": "52622ce7e197840f90e9b123de0628ba95e7d2795a50323c9c7dbcba63c1db95",
   "state": "available",
   "allowed": true,
   "requests_enabled": true,
@@ -11,5 +11,6 @@
   "watchlist_titles_supported": false,
   "watchlist_requests": false,
   "discover_rows_supported": true,
-  "remove_failed_supported": true
+  "remove_failed_supported": true,
+  "request_options_supported": true
 }

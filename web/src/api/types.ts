@@ -2138,6 +2138,43 @@ export interface CreateMediaRequestInput {
   backdrop_path?: string;
   /** Series only: the seasons to request. Omitted: every aired season not yet in the library. */
   seasons?: number[];
+  /** The requester's picks from the title's request options, as option key to value. */
+  options?: Record<string, string>;
+  /** The offer the picks were made from; required with options. */
+  options_offer?: string;
+}
+
+/**
+ * What may be chosen for a request right now. `offer` names the download
+ * server and its choices, and goes back with the picks: the server refuses
+ * picks made from a list it no longer offers.
+ */
+export interface RequestOptionOffer {
+  offer: string;
+  options: RequestOption[];
+}
+
+/** The picks to send with a request or an approval, and the offer they are from. */
+export interface RequestOptionsToSend {
+  options: Record<string, string>;
+  options_offer: string;
+}
+
+/** A download server setting the viewer may choose when requesting a title. */
+export interface RequestOption {
+  key: string;
+  label: string;
+  /** The value in effect when the requester chooses nothing; one of choices. */
+  default: string;
+  choices: { value: string; label: string }[];
+}
+
+/** One setting the requester chose, in the words it was offered in. */
+export interface RequestOptionChoice {
+  key: string;
+  label: string;
+  value: string;
+  value_label: string;
 }
 
 /** The download server details (integration_*, instance_name, route_name, external_*, last_error) reach admins only. */
@@ -2186,6 +2223,8 @@ export interface MediaRequest {
   seasons?: number[];
   /** Series season requests: each requested season's episodes, once the series is in the library. */
   season_progress?: RequestSeasonProgress[];
+  /** What the requester chose from the title's request options; empty when nothing. */
+  options?: RequestOptionChoice[];
   targets?: RequestTarget[];
   /** Over every server of the request: the phase that needs the most attention, the latest estimate. */
   download?: RequestDownload;
