@@ -879,7 +879,7 @@ func (h *PlaybackHandler) HandleMasterManifest(w http.ResponseWriter, r *http.Re
 		tcNode := plan.TranscodeNode
 		initialSeekSeconds, _ := compatInitialTranscodePosition(*source, h.compatSegmentDuration(), playSession.InitialSeekSeconds)
 		remoteNodeURL := tcNode.URL
-		startErr := h.startRemoteTranscodeWithToneMapMode(r.Context(), playSession.ID, playSession.UpstreamSessionID, *source, file, initialSeekSeconds, tcNode.URL, requiredToneMapMode)
+		startErr := h.startRemoteTranscodeWithToneMapMode(r.Context(), playSession.ID, playSession.UpstreamSessionID, *source, file, initialSeekSeconds, tcNode.URL, requiredToneMapMode, false)
 		if errors.Is(startErr, errRemoteStartAdoptedLocal) {
 			// Route resolution reserved the remote candidate before the concurrent
 			// local winner was observed. Neither the allowed local continuation nor
@@ -3973,7 +3973,27 @@ func (h *PlaybackHandler) restartCompatTranscodeForAudioSelection(
 	if err != nil {
 		return false, err
 	}
-	if err := h.startRemoteTranscode(context.WithoutCancel(ctx), playSession.ID, playSession.UpstreamSessionID, source, file, positionSeconds, upstreamSession.TranscodeNodeURL); err != nil {
+	// The player holds a keyframe-planned session's playlist, planned from the
+	// beginning. The node starts the replacement in a new output directory and
+	// plans only a run from the beginning, so restart from the recipe's start,
+	// as RecipeOpts keeps a local session's recipe: the node plans the same
+	// segments, and the player's next segment request restarts FFmpeg at the
+	// planned segment for its position once the from-start run has set the
+	// timeline (#4044). The recipe records whether the node planned: a session
+	// that kept FFmpeg's playlist, because the node couldn't plan it or
+	// predates the attestation, restarts at the position. A planned session's
+	// replacement must plan too: one that keeps FFmpeg's playlist, because the
+	// index has become unreadable or the plan can't be recorded, is stopped
+	// and the switch fails rather than serve segments the playlist doesn't
+	// list.
+	seekSeconds := positionSeconds
+	planned := false
+	if recipe := playSession.Recipe; recipe != nil && recipe.KeyframePlanned &&
+		recipe.SeekSeconds == 0 && recipe.StartSegmentNumber == 0 {
+		seekSeconds, planned = 0, true
+	}
+	if err := h.startRemoteTranscodeWithToneMapMode(context.WithoutCancel(ctx), playSession.ID, playSession.UpstreamSessionID,
+		source, file, seekSeconds, upstreamSession.TranscodeNodeURL, "", planned); err != nil {
 		if errors.Is(err, errRemoteStartAdoptedLocal) || errors.Is(err, errRemoteStartAdoptedRemote) {
 			return true, nil
 		}

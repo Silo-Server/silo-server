@@ -1191,6 +1191,22 @@ func TestHandleStartAttestsRecipeVersions(t *testing.T) {
 			receipt: func(response TranscodeStartResponse) string { return response.CopyAudioCodec },
 			want:    "aac",
 		},
+		{
+			// The echo says the node understood the request; the source has
+			// no keyframe index, so the node keeps FFmpeg's playlist and
+			// says so (#4044).
+			name: "keyframe playlist the node can't plan",
+			request: TranscodeStartRequest{
+				SessionID: "attested-unplanned", InputPath: "/media/movie.mkv",
+				SourceVideoCodec: "h264", TargetCodecVideo: "copy", TargetCodecAudio: "copy",
+				CopyFMP4RecipeVersion: playback.CopyFMP4RecipeVersion, KeyframePlaylist: true,
+				SegmentDuration: 2, TotalDuration: 60,
+			},
+			receipt: func(response TranscodeStartResponse) string {
+				return fmt.Sprintf("keyframe_playlist=%t keyframe_planned=%t", response.KeyframePlaylist, response.KeyframePlanned)
+			},
+			want: "keyframe_playlist=true keyframe_planned=false",
+		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			server := newLoopingFFmpegServer(t)

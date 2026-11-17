@@ -478,6 +478,11 @@ var errRemoteSoftwareToneMapStartFailed = errors.New("remote software tone-map s
 var errRemoteStartAdoptedLocal = errors.New("remote start superseded by local transcode")
 var errRemoteStartAdoptedRemote = errors.New("remote start adopted an already-published remote transcode")
 
+// errRemoteKeyframePlanLost reports a node restart of a keyframe-planned
+// session whose replacement keeps FFmpeg's playlist: its segments don't match
+// the planned playlist the player holds.
+var errRemoteKeyframePlanLost = errors.New("transcode node did not plan the keyframe playlist the player holds")
+
 type remoteStartAdoptedRemoteError struct {
 	nodeURL string
 }
@@ -1746,10 +1751,13 @@ func (h *PlaybackHandler) startRemoteTranscode(
 ) error {
 	return h.startRemoteTranscodeWithToneMapMode(
 		ctx, playSessionID, upstreamSessionID, source, file,
-		initialSeekSeconds, transcodeNodeURL, "",
+		initialSeekSeconds, transcodeNodeURL, "", false,
 	)
 }
 
+// startRemoteTranscodeWithToneMapMode is startRemoteTranscode with a required
+// tone-map mode. requireKeyframePlan rejects a node that keeps FFmpeg's
+// playlist: a restart of a session whose player holds the planned one.
 func (h *PlaybackHandler) startRemoteTranscodeWithToneMapMode(
 	ctx context.Context,
 	playSessionID string,
@@ -1759,6 +1767,7 @@ func (h *PlaybackHandler) startRemoteTranscodeWithToneMapMode(
 	initialSeekSeconds float64,
 	transcodeNodeURL string,
 	requiredToneMapMode tonemap.Mode,
+	requireKeyframePlan bool,
 ) error {
 	// Remote contenders for one upstream session single-flight across route
 	// binding, node start, and durable publication. This uses a dedicated key,
@@ -2142,6 +2151,10 @@ func (h *PlaybackHandler) startRemoteTranscodeWithToneMapMode(
 		h.tm.StopRemoteTranscode(upstreamSessionID, transcodeNodeURL)
 		return fmt.Errorf("%w: %w", errRemoteTranscodeStartFailed, err)
 	}
+	if requireKeyframePlan && !nodeResponse.KeyframePlanned {
+		h.tm.StopRemoteTranscode(upstreamSessionID, transcodeNodeURL)
+		return fmt.Errorf("%w: %w", errRemoteTranscodeStartFailed, errRemoteKeyframePlanLost)
+	}
 	if err := transcodenode.ValidateCopyVideoMPEGTSAttestation(reqBody, nodeResponse); err != nil {
 		h.tm.StopRemoteTranscode(upstreamSessionID, transcodeNodeURL)
 		return fmt.Errorf("%w: %w", errRemoteTranscodeStartFailed, err)
@@ -2217,6 +2230,7 @@ func (h *PlaybackHandler) startRemoteTranscodeWithToneMapMode(
 		VideoBitstreamFilter:   reqBody.VideoBitstreamFilter,
 		CopyVideoMPEGTS:        reqBody.CopyVideoMPEGTS,
 		KeyframePlaylist:       reqBody.KeyframePlaylist,
+		KeyframePlanned:        nodeResponse.KeyframePlanned,
 		KeyframePlanResume:     nodeResponse.KeyframePlanResume,
 		SegmentDuration:        reqBody.SegmentDuration,
 		AudioTrackIndex:        reqBody.AudioTrackIndex,

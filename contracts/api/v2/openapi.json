@@ -249591,6 +249591,9 @@
           "keyframe_plan_resume": {
             "type": "boolean"
           },
+          "keyframe_planned": {
+            "type": "boolean"
+          },
           "keyframe_playlist": {
             "type": "boolean"
           },
@@ -250346,6 +250349,9 @@
             "type": "string"
           },
           "keyframe_plan_resume": {
+            "type": "boolean"
+          },
+          "keyframe_planned": {
             "type": "boolean"
           },
           "keyframe_playlist": {
