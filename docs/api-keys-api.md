@@ -198,16 +198,17 @@ The Jellyfin and plugin surfaces refuse them, as they refuse every scoped key.
 |---|---|
 | `catalog:read` | `/user/libraries`, home and library layouts and rows, `/catalog` reads including `POST /catalog/query` and `/catalog/letters`, people, seasons and episodes |
 | `watch:read` | `/history`, `/progress`, progress snapshots, `/favorites`, `/ratings`, `/watchlist`, `/not-interested`, and `/profile/export` |
-| `watch:write` | `POST` and `DELETE /watched/{id}`, `POST /sync/progress`, `POST /history/remove`, `DELETE /progress/{id}/position`, writes to favorites, ratings, watchlist and hidden titles. `POST /profile/import` stays outside it, because an import also overwrites the profile's settings and notification preferences |
+| `watch:write` | `POST` and `DELETE /watched/{id}`, `POST /sync/progress`, `POST /history/remove`, `DELETE /progress/{id}/position`, writes to favorites, ratings, hidden titles and watchlist entries for titles in the library. `POST /profile/import` stays outside it, because an import also overwrites the profile's settings and notification preferences |
 | `notifications` | `GET /notifications`, `/notifications/sync`, `/notifications/unread-count`, `/notifications/capabilities`, and marking read with `POST /notifications/{id}/read` and `/notifications/read-all`. No preferences, webhooks, email, Discord or push registrations |
-| `requests` | Request discovery and search, and reading, creating, following, cancelling and removing requests as the profile's own session can: the account's requests, or only the profile's own when it is blocked from requests |
+| `requests` | Request discovery and search, and reading, creating, following, cancelling and removing requests as the profile's own session can: the account's requests, or only the profile's own when it is blocked from requests. Also adding and removing watchlist titles that are not in the library (`PUT` and `DELETE /watchlist/titles/{media_type}/{tmdb_id}`), which can create or withdraw a request |
 | `libraries:read` | See [Restricted discovery scopes](#restricted-discovery-scopes) |
 
 `catalog:read`, `watch:read` and `notifications` also open the realtime events socket
 (`GET /events/capabilities`, `POST /events/ws-ticket`), each for its own
 channel; see [User keys](realtime-api.md#user-keys) in the realtime API.
 
-Every user scope also admits `GET /account/me` and `GET /profiles`, so a script
+Every user scope except `libraries:read`, which predates them and keeps its
+original reach, also admits `GET /account/me` and `GET /profiles`, so a script
 can find the profile IDs an account key may name. No user scope admits playback,
 a stream, a download, a setting, a credential, or household management, and
 `GET /watch/{id}` stays outside them because it is the playback plan.
@@ -218,7 +219,7 @@ The scope catalog includes two additional native v2 read permissions:
 
 | Scope | Allowed reads |
 |---|---|
-| `libraries:read` | `/api/v2/user/libraries` and its `/capabilities`, plus `/api/v2/account/me` and `/api/v2/profiles` like every user scope |
+| `libraries:read` | `/api/v2/user/libraries` and its `/capabilities` |
 | `admin:sessions:summary:read` | `/api/v2/admin/sessions/summary` and `/api/v2/admin/sessions/capabilities` |
 
 Library discovery retains the owner's account/profile visibility. Session

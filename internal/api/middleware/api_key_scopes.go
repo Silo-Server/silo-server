@@ -75,8 +75,6 @@ var apiKeyScopeRoutes = map[string][]scopeRoute{
 		scopeRoute{http.MethodDelete, regexp.MustCompile(`^/api/v2/progress/[^/]+/position$`)},
 		scopeRoute{http.MethodPut, regexp.MustCompile(`^/api/v2/(favorites|ratings|watchlist|not-interested)/[^/]+$`)},
 		scopeRoute{http.MethodDelete, regexp.MustCompile(`^/api/v2/(favorites|ratings|watchlist|not-interested)/[^/]+$`)},
-		scopeRoute{http.MethodPut, regexp.MustCompile(`^/api/v2/watchlist/titles/[^/]+/[^/]+$`)},
-		scopeRoute{http.MethodDelete, regexp.MustCompile(`^/api/v2/watchlist/titles/[^/]+/[^/]+$`)},
 	),
 	// The inbox only. One notification is not read by ID: its path would
 	// also match the delivery-settings reads beside it.
@@ -92,15 +90,23 @@ var apiKeyScopeRoutes = map[string][]scopeRoute{
 		scopeRoute{http.MethodDelete, regexp.MustCompile(`^/api/v2/requests/[0-9]+$`)},
 		scopeRoute{http.MethodPut, regexp.MustCompile(`^/api/v2/requests/follows/[^/]+/[^/]+$`)},
 		scopeRoute{http.MethodDelete, regexp.MustCompile(`^/api/v2/requests/follows/[^/]+/[^/]+$`)},
+		// Watchlisting a title that is not in the library can create,
+		// follow or withdraw a media request, so it belongs here and not to
+		// watch:write.
+		scopeRoute{http.MethodPut, regexp.MustCompile(`^/api/v2/watchlist/titles/[^/]+/[^/]+$`)},
+		scopeRoute{http.MethodDelete, regexp.MustCompile(`^/api/v2/watchlist/titles/[^/]+/[^/]+$`)},
 	),
 	auth.ScopeAdminSessionsSummaryRead: {
 		{http.MethodGet, regexp.MustCompile(`^/api/v2/admin/sessions/summary$`)},
 		{http.MethodGet, regexp.MustCompile(`^/api/v2/admin/sessions/capabilities$`)},
 	},
-	auth.ScopeLibrariesRead: userScope(
-		scopeRoute{http.MethodGet, regexp.MustCompile(`^/api/v2/user/libraries$`)},
-		scopeRoute{http.MethodGet, regexp.MustCompile(`^/api/v2/user/libraries/capabilities$`)},
-	),
+	// Library discovery only, as it was before the user scopes: keys issued
+	// with it must not gain the account and profile reads the newer user
+	// scopes share.
+	auth.ScopeLibrariesRead: {
+		{http.MethodGet, regexp.MustCompile(`^/api/v2/user/libraries$`)},
+		{http.MethodGet, regexp.MustCompile(`^/api/v2/user/libraries/capabilities$`)},
+	},
 	auth.ScopeAdminUsers: {
 		{http.MethodPost, regexp.MustCompile(`^/api/v2/admin/users$`)},
 		{http.MethodGet, regexp.MustCompile(`^/api/v2/admin/users/capabilities$`)},
