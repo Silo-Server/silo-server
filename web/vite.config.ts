@@ -316,16 +316,20 @@ export default defineConfig(({ mode }) => {
       // CI runs, each recycled at 1.5GB keep a local run near 8GB.
       maxWorkers: 4,
       vmMemoryLimit: "1.5GB",
+      // Each project resets the inherited maxWorkers to 0 (unset). Vitest
+      // prefers a project's own value over the root one, and --maxWorkers
+      // reaches only the root, so an inherited 4 would silently override it.
       projects: [
         {
           extends: true,
-          test: { name: "threads", pool: "threads", include: THREADS_TESTS },
+          test: { name: "threads", pool: "threads", include: THREADS_TESTS, maxWorkers: 0 },
         },
         {
           extends: true,
           test: {
             name: "vmThreads",
             pool: "vmThreads",
+            maxWorkers: 0,
             include: [...configDefaults.include, ...THREADS_TESTS.map((file) => `!${file}`)],
           },
         },
