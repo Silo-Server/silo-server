@@ -147688,7 +147688,7 @@
   "web.settings.watchProviders.toggle.exportRatings.description": [
     {
       "type": 0,
-      "value": "Envoyer vos notes en étoiles à "
+      "value": "Envoyer vos notes à "
     },
     {
       "type": 1,
@@ -147696,7 +147696,7 @@
     },
     {
       "type": 0,
-      "value": " et effacer celles que vous retirez. 4 étoiles deviennent 8/10."
+      "value": " et effacer celles que vous retirez. 3,5 étoiles deviennent 7/10."
     }
   ],
   "web.settings.watchProviders.toggle.exportRatings.label": [
@@ -147780,7 +147780,7 @@
     },
     {
       "type": 0,
-      "value": " sous forme d’étoiles. Un 7/10 devient 4 étoiles."
+      "value": ". Un 7/10 devient 3,5 étoiles."
     }
   ],
   "web.settings.watchProviders.toggle.importRatings.label": [

@@ -136494,7 +136494,7 @@
   "web.settings.watchProviders.toggle.exportRatings.description": [
     {
       "type": 0,
-      "value": "Skicka dina stjärnbetyg till "
+      "value": "Skicka dina betyg till "
     },
     {
       "type": 1,
@@ -136502,7 +136502,7 @@
     },
     {
       "type": 0,
-      "value": " och rensa dem du tar bort. 4 stjärnor blir 8/10."
+      "value": " och rensa dem du tar bort. 3,5 stjärnor blir 7/10."
     }
   ],
   "web.settings.watchProviders.toggle.exportRatings.label": [
@@ -136586,7 +136586,7 @@
     },
     {
       "type": 0,
-      "value": " som stjärnor. 7/10 blir 4 stjärnor."
+      "value": ". 7/10 blir 3,5 stjärnor."
     }
   ],
   "web.settings.watchProviders.toggle.importRatings.label": [

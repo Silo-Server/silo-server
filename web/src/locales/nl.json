@@ -135722,7 +135722,7 @@
   "web.settings.watchProviders.toggle.exportRatings.description": [
     {
       "type": 0,
-      "value": "Stuur je sterbeoordelingen naar "
+      "value": "Stuur je beoordelingen naar "
     },
     {
       "type": 1,
@@ -135730,7 +135730,7 @@
     },
     {
       "type": 0,
-      "value": " en wis beoordelingen die je verwijdert. 4 sterren wordt 8/10."
+      "value": " en wis beoordelingen die je verwijdert. 3,5 sterren wordt 7/10."
     }
   ],
   "web.settings.watchProviders.toggle.exportRatings.label": [
@@ -135814,7 +135814,7 @@
     },
     {
       "type": 0,
-      "value": " over als sterren. Een 7/10 wordt 4 sterren."
+      "value": " over. Een 7/10 wordt 3,5 sterren."
     }
   ],
   "web.settings.watchProviders.toggle.importRatings.label": [

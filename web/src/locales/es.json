@@ -148097,7 +148097,7 @@
   "web.settings.watchProviders.toggle.exportRatings.description": [
     {
       "type": 0,
-      "value": "Envía tus calificaciones con estrellas a "
+      "value": "Envía tus calificaciones a "
     },
     {
       "type": 1,
@@ -148105,7 +148105,7 @@
     },
     {
       "type": 0,
-      "value": " y borra las que quites. 4 estrellas equivalen a 8/10."
+      "value": " y borra las que quites. 3,5 estrellas equivalen a 7/10."
     }
   ],
   "web.settings.watchProviders.toggle.exportRatings.label": [
@@ -148189,7 +148189,7 @@
     },
     {
       "type": 0,
-      "value": " como estrellas. Un 7/10 equivale a 4 estrellas."
+      "value": ". Un 7/10 equivale a 3,5 estrellas."
     }
   ],
   "web.settings.watchProviders.toggle.importRatings.label": [

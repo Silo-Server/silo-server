@@ -136776,7 +136776,7 @@
   "web.settings.watchProviders.toggle.exportRatings.description": [
     {
       "type": 0,
-      "value": "Lähettää tähtiarviosi palveluun "
+      "value": "Lähettää arviosi palveluun "
     },
     {
       "type": 1,
@@ -136784,7 +136784,7 @@
     },
     {
       "type": 0,
-      "value": " ja poistaa ne, jotka poistat. 4 tähteä vastaa arvoa 8/10."
+      "value": " ja poistaa sieltä ne, jotka poistat. 3,5 tähteä vastaa arvoa 7/10."
     }
   ],
   "web.settings.watchProviders.toggle.exportRatings.label": [
@@ -136868,7 +136868,7 @@
     },
     {
       "type": 0,
-      "value": " elokuva- ja sarja-arviot tähtinä. 7/10 vastaa 4 tähteä."
+      "value": " elokuva- ja sarja-arviot. Arvio 7/10 vastaa 3,5 tähteä."
     }
   ],
   "web.settings.watchProviders.toggle.importRatings.label": [

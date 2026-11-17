@@ -147942,7 +147942,7 @@
   "web.settings.watchProviders.toggle.exportRatings.description": [
     {
       "type": 0,
-      "value": "Envia suas avaliações em estrelas para o "
+      "value": "Envia suas avaliações para o "
     },
     {
       "type": 1,
@@ -147950,7 +147950,7 @@
     },
     {
       "type": 0,
-      "value": " e limpa as que você remover. 4 estrelas viram 8/10."
+      "value": " e limpa as que você remover. 3,5 estrelas viram 7/10."
     }
   ],
   "web.settings.watchProviders.toggle.exportRatings.label": [
@@ -148034,7 +148034,7 @@
     },
     {
       "type": 0,
-      "value": " como estrelas. Um 7/10 vira 4 estrelas."
+      "value": ". Um 7/10 vira 3,5 estrelas."
     }
   ],
   "web.settings.watchProviders.toggle.importRatings.label": [
