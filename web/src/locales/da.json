@@ -22883,6 +22883,270 @@
       "value": "Forbindelsestjekket mislykkedes."
     }
   ],
+  "web.admin.common.connectionCheck.result.chatGPTSignInRequired": [
+    {
+      "type": 0,
+      "value": "Log ind med ChatGPT i indstillingerne for AI-tjenester."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.embeddingConnected": [
+    {
+      "type": 0,
+      "value": "Embedding-forbindelsen lykkedes. Modellen returnerer "
+    },
+    {
+      "type": 1,
+      "value": "dimensions"
+    },
+    {
+      "type": 0,
+      "value": " dimensioner."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.embeddingDimensionsMismatch": [
+    {
+      "type": 0,
+      "value": "Embeddings blev oprettet med vektorer på "
+    },
+    {
+      "type": 1,
+      "value": "locked"
+    },
+    {
+      "type": 0,
+      "value": " dimensioner, men modellen returnerer nu "
+    },
+    {
+      "type": 1,
+      "value": "current"
+    },
+    {
+      "type": 0,
+      "value": ". Nulstil embeddings, før du skifter model."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.embeddingLockOutOfRange": [
+    {
+      "type": 0,
+      "value": "Embedding-låsen registrerer vektorer på "
+    },
+    {
+      "type": 1,
+      "value": "locked"
+    },
+    {
+      "type": 0,
+      "value": " dimensioner; Silo gemmer 1 til "
+    },
+    {
+      "type": 1,
+      "value": "max"
+    },
+    {
+      "type": 0,
+      "value": ". Nulstil embeddings, og brug en model, der returnerer højst "
+    },
+    {
+      "type": 1,
+      "value": "max"
+    },
+    {
+      "type": 0,
+      "value": " dimensioner."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.embeddingLockUnreadable": [
+    {
+      "type": 0,
+      "value": "Den gemte embedding-lås kan ikke læses. Nulstil embeddings for at rydde den."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.embeddingModelMismatch": [
+    {
+      "type": 0,
+      "value": "Embeddings blev oprettet med modellen ”"
+    },
+    {
+      "type": 1,
+      "value": "locked_model"
+    },
+    {
+      "type": 0,
+      "value": "”, ikke ”"
+    },
+    {
+      "type": 1,
+      "value": "model"
+    },
+    {
+      "type": 0,
+      "value": "”. Nulstil embeddings, før du skifter model."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.embeddingNoVector": [
+    {
+      "type": 0,
+      "value": "Embedding-udbyderen returnerede ingen vektor for testteksten."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.embeddingStorageMismatch": [
+    {
+      "type": 0,
+      "value": "Embeddings blev gemt med "
+    },
+    {
+      "type": 1,
+      "value": "stored"
+    },
+    {
+      "type": 0,
+      "value": " dimensioner; denne server gemmer "
+    },
+    {
+      "type": 1,
+      "value": "supported"
+    },
+    {
+      "type": 0,
+      "value": ". Nulstil embeddings."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.embeddingTooManyDimensions": [
+    {
+      "type": 0,
+      "value": "Modellen returnerer "
+    },
+    {
+      "type": 1,
+      "value": "dimensions"
+    },
+    {
+      "type": 0,
+      "value": " dimensioner; Silo gemmer højst "
+    },
+    {
+      "type": 1,
+      "value": "max"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.failed": [
+    {
+      "type": 0,
+      "value": "Forbindelsestjekket mislykkedes. Kontrollér de indsendte indstillinger, og at udbyderen er tilgængelig."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.mdblistVerified": [
+    {
+      "type": 0,
+      "value": "API-nøgle til MDBList bekræftet."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.meilisearchConnected": [
+    {
+      "type": 0,
+      "value": "Meilisearch-forbindelsen lykkedes"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.meilisearchKeyRejected": [
+    {
+      "type": 0,
+      "value": "Meilisearch afviste API-nøglen eller kræver en. Angiv en nøgle, der kan administrere indekser og dokumenter, f.eks. Default Admin API Key."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.meilisearchRedirected": [
+    {
+      "type": 0,
+      "value": "Meilisearch omdirigerede tjekket til en anden adresse. Angiv den adresse, der omdirigeres til, f.eks. dens https://-URL, og angiv API-nøglen igen."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.redisConnected": [
+    {
+      "type": 0,
+      "value": "Redis-forbindelsen lykkedes."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.s3Verified": [
+    {
+      "type": 0,
+      "value": "S3-forbindelse og tilladelser til at læse, skrive og slette objekter bekræftet."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechConnected": [
+    {
+      "type": 0,
+      "value": "Tale-til-tekst-forbindelsen lykkedes: tale med tidsstempler modtaget."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechForbidden": [
+    {
+      "type": 0,
+      "value": "Adgang til tale-til-tekst blev nægtet. Tjek API-nøglens tilladelser og de tilladte udbydere."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechNoTimestamps": [
+    {
+      "type": 0,
+      "value": "Tale-til-tekst-modellen returnerer ikke segmenter med tidsstempler, som Silo skal bruge for at lave undertekster. Vælg en model, der understøtter tidsstempler for segmenter, f.eks. whisper-1 hos OpenAI."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechNotFound": [
+    {
+      "type": 0,
+      "value": "Endpoint eller model til tale-til-tekst er ikke tilgængelig. Tjek udbyderens basis-URL, modellen og de tilladte udbydere."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechPaymentRequired": [
+    {
+      "type": 0,
+      "value": "Udbyderen af tale-til-tekst kræver betaling. Tjek din saldo og dit forbrugsloft hos udbyderen."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechQuotaExhausted": [
+    {
+      "type": 0,
+      "value": "Udbyderens kvote til tale-til-tekst er opbrugt. Tjek din saldo og dine grænser hos udbyderen."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechRateLimited": [
+    {
+      "type": 0,
+      "value": "Udbyderen af tale-til-tekst begrænser antallet af forespørgsler. Prøv igen senere."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechTimedOut": [
+    {
+      "type": 0,
+      "value": "Forbindelsestjekket for tale-til-tekst fik timeout. Tjek, at udbyderen er tilgængelig, og prøv igen."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechUnauthorized": [
+    {
+      "type": 0,
+      "value": "Godkendelse til tale-til-tekst mislykkedes. Erstat udbyderens API-nøgle under AI-tjenester."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechUnavailable": [
+    {
+      "type": 0,
+      "value": "Udbyderen af tale-til-tekst er midlertidigt utilgængelig. Prøv igen senere."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIConnected": [
+    {
+      "type": 0,
+      "value": "Forbindelsen til tekst-AI lykkedes."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIFailed": [
+    {
+      "type": 0,
+      "value": "Forbindelsen til tekst-AI mislykkedes. Tjek modellen, ræsonneringsniveauet, serviceniveauet, kontotilknytningen og udbyderens forbrugsgrænser."
+    }
+  ],
   "web.admin.common.deviceConnections.bufferingAction.accepted": [
     {
       "type": 0,

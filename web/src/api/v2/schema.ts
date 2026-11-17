@@ -21742,6 +21742,20 @@ export interface components {
     };
     AdminSettingsCheckResult: {
       message: string;
+      /**
+       * @description Values of the message_key message's placeholders by name; present only with message_key, and absent when the message has none
+       * @example {
+       *       "dimensions": "1024"
+       *     }
+       */
+      message_args?: {
+        [key: string]: string;
+      };
+      /**
+       * @description Key of the shared translation catalog message whose English is message. A client that has the key shows its translation, filling message_args, and otherwise shows message. Absent when message has no catalog entry
+       * @example web.admin.common.connectionCheck.result.redisConnected
+       */
+      message_key?: string;
       success: boolean;
     };
     AdminSettingsUpdateInputBody: {

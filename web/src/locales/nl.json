@@ -22835,6 +22835,270 @@
       "value": "Verbindingscontrole mislukt."
     }
   ],
+  "web.admin.common.connectionCheck.result.chatGPTSignInRequired": [
+    {
+      "type": 0,
+      "value": "Log in met ChatGPT in de instellingen voor AI-services."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.embeddingConnected": [
+    {
+      "type": 0,
+      "value": "Embeddingverbinding geslaagd. Het model geeft "
+    },
+    {
+      "type": 1,
+      "value": "dimensions"
+    },
+    {
+      "type": 0,
+      "value": " dimensies terug."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.embeddingDimensionsMismatch": [
+    {
+      "type": 0,
+      "value": "Embeddings zijn gemaakt met vectoren van "
+    },
+    {
+      "type": 1,
+      "value": "locked"
+    },
+    {
+      "type": 0,
+      "value": " dimensies, maar het model geeft er nu "
+    },
+    {
+      "type": 1,
+      "value": "current"
+    },
+    {
+      "type": 0,
+      "value": " terug. Reset de embeddings voordat je van model wisselt."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.embeddingLockOutOfRange": [
+    {
+      "type": 0,
+      "value": "De embeddingvergrendeling vermeldt vectoren van "
+    },
+    {
+      "type": 1,
+      "value": "locked"
+    },
+    {
+      "type": 0,
+      "value": " dimensies; Silo slaat 1 tot "
+    },
+    {
+      "type": 1,
+      "value": "max"
+    },
+    {
+      "type": 0,
+      "value": " op. Reset de embeddings en gebruik een model dat maximaal "
+    },
+    {
+      "type": 1,
+      "value": "max"
+    },
+    {
+      "type": 0,
+      "value": " dimensies teruggeeft."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.embeddingLockUnreadable": [
+    {
+      "type": 0,
+      "value": "De opgeslagen embeddingvergrendeling kan niet worden gelezen. Reset de embeddings om deze te wissen."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.embeddingModelMismatch": [
+    {
+      "type": 0,
+      "value": "Embeddings zijn gemaakt met model “"
+    },
+    {
+      "type": 1,
+      "value": "locked_model"
+    },
+    {
+      "type": 0,
+      "value": "”, niet “"
+    },
+    {
+      "type": 1,
+      "value": "model"
+    },
+    {
+      "type": 0,
+      "value": "”. Reset de embeddings voordat je van model wisselt."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.embeddingNoVector": [
+    {
+      "type": 0,
+      "value": "De embeddingprovider gaf geen vector terug voor de testtekst."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.embeddingStorageMismatch": [
+    {
+      "type": 0,
+      "value": "Embeddings zijn opgeslagen met "
+    },
+    {
+      "type": 1,
+      "value": "stored"
+    },
+    {
+      "type": 0,
+      "value": " dimensies; deze server slaat er "
+    },
+    {
+      "type": 1,
+      "value": "supported"
+    },
+    {
+      "type": 0,
+      "value": " op. Reset de embeddings."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.embeddingTooManyDimensions": [
+    {
+      "type": 0,
+      "value": "Het model geeft "
+    },
+    {
+      "type": 1,
+      "value": "dimensions"
+    },
+    {
+      "type": 0,
+      "value": " dimensies terug; Silo slaat er maximaal "
+    },
+    {
+      "type": 1,
+      "value": "max"
+    },
+    {
+      "type": 0,
+      "value": " op."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.failed": [
+    {
+      "type": 0,
+      "value": "Verbindingscontrole mislukt. Controleer de verzonden instellingen en of de provider beschikbaar is."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.mdblistVerified": [
+    {
+      "type": 0,
+      "value": "MDBList-API-sleutel geverifieerd."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.meilisearchConnected": [
+    {
+      "type": 0,
+      "value": "Verbinding met Meilisearch geslaagd"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.meilisearchKeyRejected": [
+    {
+      "type": 0,
+      "value": "Meilisearch heeft de API-sleutel geweigerd of vereist er een. Voer een sleutel in die indexen en documenten kan beheren, zoals de Default Admin API Key."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.meilisearchRedirected": [
+    {
+      "type": 0,
+      "value": "Meilisearch heeft de controle doorgestuurd naar een ander adres. Voer het adres in waarnaar wordt doorgestuurd, zoals de https://-URL, en voer de API-sleutel opnieuw in."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.redisConnected": [
+    {
+      "type": 0,
+      "value": "Verbinding met Redis geslaagd."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.s3Verified": [
+    {
+      "type": 0,
+      "value": "S3-verbinding en lees-, schrijf- en verwijderrechten voor objecten geverifieerd."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechConnected": [
+    {
+      "type": 0,
+      "value": "Verbinding voor spraak-naar-tekst geslaagd: spraak met tijdstempels ontvangen."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechForbidden": [
+    {
+      "type": 0,
+      "value": "Toegang tot spraak-naar-tekst geweigerd. Controleer de rechten van je API-sleutel en de toegestane providers."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechNoTimestamps": [
+    {
+      "type": 0,
+      "value": "Het model voor spraak-naar-tekst geeft geen segmenten met tijdstempels terug, en die heeft Silo nodig om ondertitels te maken. Kies een model dat tijdstempels per segment ondersteunt, zoals whisper-1 bij OpenAI."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechNotFound": [
+    {
+      "type": 0,
+      "value": "Endpoint of model voor spraak-naar-tekst is niet beschikbaar. Controleer de basis-URL van de provider, het model en de toegestane providers."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechPaymentRequired": [
+    {
+      "type": 0,
+      "value": "De provider voor spraak-naar-tekst vereist betaling. Controleer je tegoed en bestedingslimiet bij de provider."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechQuotaExhausted": [
+    {
+      "type": 0,
+      "value": "Het quotum bij de provider voor spraak-naar-tekst is op. Controleer je tegoed en limieten bij de provider."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechRateLimited": [
+    {
+      "type": 0,
+      "value": "De provider voor spraak-naar-tekst beperkt het aantal verzoeken. Probeer het later opnieuw."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechTimedOut": [
+    {
+      "type": 0,
+      "value": "De verbindingscontrole voor spraak-naar-tekst duurde te lang. Controleer of de provider beschikbaar is en probeer het opnieuw."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechUnauthorized": [
+    {
+      "type": 0,
+      "value": "Authenticatie voor spraak-naar-tekst mislukt. Vervang de API-sleutel van de provider in AI-services."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechUnavailable": [
+    {
+      "type": 0,
+      "value": "De provider voor spraak-naar-tekst is tijdelijk niet beschikbaar. Probeer het later opnieuw."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIConnected": [
+    {
+      "type": 0,
+      "value": "Verbinding met tekst-AI geslaagd."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIFailed": [
+    {
+      "type": 0,
+      "value": "Verbinding met tekst-AI mislukt. Controleer het model, het redeneerniveau, het serviceniveau, de accountkoppeling en de gebruikslimieten van de provider."
+    }
+  ],
   "web.admin.common.deviceConnections.bufferingAction.accepted": [
     {
       "type": 0,

@@ -20936,6 +20936,270 @@
       "value": "연결을 확인하지 못했어요."
     }
   ],
+  "web.admin.common.connectionCheck.result.chatGPTSignInRequired": [
+    {
+      "type": 0,
+      "value": "AI 서비스 설정에서 ChatGPT로 로그인하세요."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.embeddingConnected": [
+    {
+      "type": 0,
+      "value": "임베딩 연결에 성공했어요. 모델이 "
+    },
+    {
+      "type": 1,
+      "value": "dimensions"
+    },
+    {
+      "type": 0,
+      "value": "차원을 반환해요."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.embeddingDimensionsMismatch": [
+    {
+      "type": 0,
+      "value": "임베딩은 "
+    },
+    {
+      "type": 1,
+      "value": "locked"
+    },
+    {
+      "type": 0,
+      "value": "차원 벡터로 만들어졌지만 지금 모델은 "
+    },
+    {
+      "type": 1,
+      "value": "current"
+    },
+    {
+      "type": 0,
+      "value": "차원을 반환해요. 모델을 바꾸기 전에 임베딩을 재설정하세요."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.embeddingLockOutOfRange": [
+    {
+      "type": 0,
+      "value": "임베딩 잠금에 "
+    },
+    {
+      "type": 1,
+      "value": "locked"
+    },
+    {
+      "type": 0,
+      "value": "차원 벡터가 기록돼 있지만 Silo는 1~"
+    },
+    {
+      "type": 1,
+      "value": "max"
+    },
+    {
+      "type": 0,
+      "value": "차원만 저장해요. 임베딩을 재설정하고 최대 "
+    },
+    {
+      "type": 1,
+      "value": "max"
+    },
+    {
+      "type": 0,
+      "value": "차원을 반환하는 모델을 사용하세요."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.embeddingLockUnreadable": [
+    {
+      "type": 0,
+      "value": "저장된 임베딩 잠금을 읽을 수 없어요. 임베딩을 재설정해서 지우세요."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.embeddingModelMismatch": [
+    {
+      "type": 0,
+      "value": "임베딩은 “"
+    },
+    {
+      "type": 1,
+      "value": "model"
+    },
+    {
+      "type": 0,
+      "value": "” 모델이 아니라 “"
+    },
+    {
+      "type": 1,
+      "value": "locked_model"
+    },
+    {
+      "type": 0,
+      "value": "” 모델로 만들어졌어요. 모델을 바꾸기 전에 임베딩을 재설정하세요."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.embeddingNoVector": [
+    {
+      "type": 0,
+      "value": "임베딩 제공자가 테스트 텍스트에 대한 벡터를 반환하지 않았어요."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.embeddingStorageMismatch": [
+    {
+      "type": 0,
+      "value": "임베딩은 "
+    },
+    {
+      "type": 1,
+      "value": "stored"
+    },
+    {
+      "type": 0,
+      "value": "차원으로 저장돼 있지만 이 서버는 "
+    },
+    {
+      "type": 1,
+      "value": "supported"
+    },
+    {
+      "type": 0,
+      "value": "차원으로 저장해요. 임베딩을 재설정하세요."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.embeddingTooManyDimensions": [
+    {
+      "type": 0,
+      "value": "모델이 "
+    },
+    {
+      "type": 1,
+      "value": "dimensions"
+    },
+    {
+      "type": 0,
+      "value": "차원을 반환하지만 Silo는 최대 "
+    },
+    {
+      "type": 1,
+      "value": "max"
+    },
+    {
+      "type": 0,
+      "value": "차원까지 저장해요."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.failed": [
+    {
+      "type": 0,
+      "value": "연결을 확인하지 못했어요. 입력한 설정과 제공자의 사용 가능 여부를 확인하세요."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.mdblistVerified": [
+    {
+      "type": 0,
+      "value": "MDBList API 키를 확인했어요."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.meilisearchConnected": [
+    {
+      "type": 0,
+      "value": "Meilisearch 연결에 성공했어요"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.meilisearchKeyRejected": [
+    {
+      "type": 0,
+      "value": "Meilisearch에서 API 키를 거부했거나 API 키가 필요해요. Default Admin API Key처럼 인덱스와 문서를 관리할 수 있는 키를 입력하세요."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.meilisearchRedirected": [
+    {
+      "type": 0,
+      "value": "Meilisearch에서 확인 요청을 다른 주소로 리디렉션했어요. https:// URL처럼 리디렉션되는 주소를 입력하고 API 키를 다시 입력하세요."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.redisConnected": [
+    {
+      "type": 0,
+      "value": "Redis 연결에 성공했어요."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.s3Verified": [
+    {
+      "type": 0,
+      "value": "S3 연결과 객체 읽기/쓰기/삭제 권한을 확인했어요."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechConnected": [
+    {
+      "type": 0,
+      "value": "음성 텍스트 변환 연결에 성공했어요. 타임스탬프가 포함된 음성 인식 결과를 받았어요."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechForbidden": [
+    {
+      "type": 0,
+      "value": "음성 텍스트 변환 액세스가 거부됐어요. API 키 권한과 허용된 제공자를 확인하세요."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechNoTimestamps": [
+    {
+      "type": 0,
+      "value": "음성 텍스트 변환 모델이 타임스탬프가 포함된 세그먼트를 반환하지 않아요. Silo에서 자막을 만들려면 이 정보가 필요해요. OpenAI의 whisper-1처럼 세그먼트 타임스탬프를 지원하는 모델을 선택하세요."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechNotFound": [
+    {
+      "type": 0,
+      "value": "음성 텍스트 변환 엔드포인트나 모델을 사용할 수 없어요. 제공자의 기본 URL, 모델, 허용된 제공자를 확인하세요."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechPaymentRequired": [
+    {
+      "type": 0,
+      "value": "음성 텍스트 변환 제공자에서 결제가 필요해요. 제공자 잔액과 지출 한도를 확인하세요."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechQuotaExhausted": [
+    {
+      "type": 0,
+      "value": "음성 텍스트 변환 제공자의 할당량을 모두 사용했어요. 제공자 잔액과 한도를 확인하세요."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechRateLimited": [
+    {
+      "type": 0,
+      "value": "음성 텍스트 변환 제공자가 요청 속도를 제한하고 있어요. 잠시 후 다시 시도해 주세요."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechTimedOut": [
+    {
+      "type": 0,
+      "value": "음성 텍스트 변환 연결 확인 시간이 초과됐어요. 제공자의 사용 가능 여부를 확인하고 다시 시도해 주세요."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechUnauthorized": [
+    {
+      "type": 0,
+      "value": "음성 텍스트 변환 인증에 실패했어요. AI 서비스에서 제공자의 API 키를 교체하세요."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechUnavailable": [
+    {
+      "type": 0,
+      "value": "음성 텍스트 변환 제공자를 일시적으로 사용할 수 없어요. 잠시 후 다시 시도해 주세요."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIConnected": [
+    {
+      "type": 0,
+      "value": "텍스트 AI 연결에 성공했어요."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIFailed": [
+    {
+      "type": 0,
+      "value": "텍스트 AI에 연결하지 못했어요. 모델, 추론 수준, 서비스 등급, 계정 연결, 제공자 사용 한도를 확인하세요."
+    }
+  ],
   "web.admin.common.deviceConnections.bufferingAction.accepted": [
     {
       "type": 0,

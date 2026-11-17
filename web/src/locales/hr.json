@@ -25078,6 +25078,270 @@
       "value": "Provjera veze nije uspjela."
     }
   ],
+  "web.admin.common.connectionCheck.result.chatGPTSignInRequired": [
+    {
+      "type": 0,
+      "value": "Prijavite se ChatGPT računom u postavkama AI usluga."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.embeddingConnected": [
+    {
+      "type": 0,
+      "value": "Veza za embeddinge je uspješna. Model vraća "
+    },
+    {
+      "type": 1,
+      "value": "dimensions"
+    },
+    {
+      "type": 0,
+      "value": " dimenzija."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.embeddingDimensionsMismatch": [
+    {
+      "type": 0,
+      "value": "Embeddingi su stvoreni s vektorima od "
+    },
+    {
+      "type": 1,
+      "value": "locked"
+    },
+    {
+      "type": 0,
+      "value": " dimenzija, ali model sada vraća "
+    },
+    {
+      "type": 1,
+      "value": "current"
+    },
+    {
+      "type": 0,
+      "value": ". Poništite embeddinge prije promjene modela."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.embeddingLockOutOfRange": [
+    {
+      "type": 0,
+      "value": "Zaključavanje embeddinga bilježi vektore od "
+    },
+    {
+      "type": 1,
+      "value": "locked"
+    },
+    {
+      "type": 0,
+      "value": " dimenzija; Silo sprema od 1 do "
+    },
+    {
+      "type": 1,
+      "value": "max"
+    },
+    {
+      "type": 0,
+      "value": ". Poništite embeddinge i koristite model koji vraća najviše "
+    },
+    {
+      "type": 1,
+      "value": "max"
+    },
+    {
+      "type": 0,
+      "value": " dimenzija."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.embeddingLockUnreadable": [
+    {
+      "type": 0,
+      "value": "Spremljeno zaključavanje embeddinga nije moguće pročitati. Poništite embeddinge da biste ga očistili."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.embeddingModelMismatch": [
+    {
+      "type": 0,
+      "value": "Embeddingi su stvoreni modelom „"
+    },
+    {
+      "type": 1,
+      "value": "locked_model"
+    },
+    {
+      "type": 0,
+      "value": "“, a ne „"
+    },
+    {
+      "type": 1,
+      "value": "model"
+    },
+    {
+      "type": 0,
+      "value": "“. Poništite embeddinge prije promjene modela."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.embeddingNoVector": [
+    {
+      "type": 0,
+      "value": "Pružatelj embeddinga nije vratio vektor za testni tekst."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.embeddingStorageMismatch": [
+    {
+      "type": 0,
+      "value": "Embeddingi su spremljeni s "
+    },
+    {
+      "type": 1,
+      "value": "stored"
+    },
+    {
+      "type": 0,
+      "value": " dimenzija; ovaj poslužitelj sprema "
+    },
+    {
+      "type": 1,
+      "value": "supported"
+    },
+    {
+      "type": 0,
+      "value": ". Poništite embeddinge."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.embeddingTooManyDimensions": [
+    {
+      "type": 0,
+      "value": "Model vraća "
+    },
+    {
+      "type": 1,
+      "value": "dimensions"
+    },
+    {
+      "type": 0,
+      "value": " dimenzija; Silo sprema najviše "
+    },
+    {
+      "type": 1,
+      "value": "max"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.failed": [
+    {
+      "type": 0,
+      "value": "Provjera veze nije uspjela. Provjerite poslane postavke i dostupnost pružatelja."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.mdblistVerified": [
+    {
+      "type": 0,
+      "value": "MDBList API ključ je potvrđen."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.meilisearchConnected": [
+    {
+      "type": 0,
+      "value": "Veza s Meilisearchom je uspješna"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.meilisearchKeyRejected": [
+    {
+      "type": 0,
+      "value": "Meilisearch je odbio API ključ ili ga zahtijeva. Unesite ključ koji može upravljati indeksima i dokumentima, kao što je Default Admin API Key."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.meilisearchRedirected": [
+    {
+      "type": 0,
+      "value": "Meilisearch je preusmjerio provjeru na drugu adresu. Unesite adresu na koju preusmjerava, primjerice njegov https:// URL, i ponovno unesite API ključ."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.redisConnected": [
+    {
+      "type": 0,
+      "value": "Veza s Redisom je uspješna."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.s3Verified": [
+    {
+      "type": 0,
+      "value": "Potvrđeni su S3 veza i dopuštenja za čitanje, pisanje i brisanje objekata."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechConnected": [
+    {
+      "type": 0,
+      "value": "Veza za pretvaranje govora u tekst je uspješna: primljen je govor s vremenskim oznakama."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechForbidden": [
+    {
+      "type": 0,
+      "value": "Pristup pretvaranju govora u tekst je odbijen. Provjerite dopuštenja API ključa i dopuštene pružatelje."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechNoTimestamps": [
+    {
+      "type": 0,
+      "value": "Model za pretvaranje govora u tekst ne vraća segmente s vremenskim oznakama, a Silo ih treba za izradu titlova. Odaberite model koji podržava vremenske oznake segmenata, primjerice whisper-1 kod pružatelja OpenAI."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechNotFound": [
+    {
+      "type": 0,
+      "value": "Krajnja točka ili model za pretvaranje govora u tekst nije dostupan. Provjerite osnovni URL pružatelja, model i dopuštene pružatelje."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechPaymentRequired": [
+    {
+      "type": 0,
+      "value": "Pružatelj pretvaranja govora u tekst zahtijeva plaćanje. Provjerite stanje računa kod pružatelja i ograničenje potrošnje."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechQuotaExhausted": [
+    {
+      "type": 0,
+      "value": "Kvota pružatelja pretvaranja govora u tekst je potrošena. Provjerite stanje računa kod pružatelja i ograničenja."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechRateLimited": [
+    {
+      "type": 0,
+      "value": "Pružatelj pretvaranja govora u tekst ograničava učestalost zahtjeva. Pokušajte ponovno kasnije."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechTimedOut": [
+    {
+      "type": 0,
+      "value": "Isteklo je vrijeme za provjeru veze za pretvaranje govora u tekst. Provjerite dostupnost pružatelja i pokušajte ponovno."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechUnauthorized": [
+    {
+      "type": 0,
+      "value": "Autentifikacija za pretvaranje govora u tekst nije uspjela. Zamijenite API ključ pružatelja u AI uslugama."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechUnavailable": [
+    {
+      "type": 0,
+      "value": "Pružatelj pretvaranja govora u tekst privremeno nije dostupan. Pokušajte ponovno kasnije."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIConnected": [
+    {
+      "type": 0,
+      "value": "Veza s tekstnim AI-jem je uspješna."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIFailed": [
+    {
+      "type": 0,
+      "value": "Veza s tekstnim AI-jem nije uspjela. Provjerite model, razinu zaključivanja, razinu usluge, povezanost računa i ograničenja korištenja kod pružatelja."
+    }
+  ],
   "web.admin.common.deviceConnections.bufferingAction.accepted": [
     {
       "type": 0,

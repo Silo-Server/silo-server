@@ -24931,6 +24931,270 @@
       "value": "⟦Çöññéçţîöñ çĥéçķ ƒåîļéđ.~~~~~~~~~~⟧"
     }
   ],
+  "web.admin.common.connectionCheck.result.chatGPTSignInRequired": [
+    {
+      "type": 0,
+      "value": "⟦Šîĝñ îñ ŵîţĥ ÇĥåţĜÞŢ îñ ÅÎ Šéŕṽîçéš šéţţîñĝš.~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.embeddingConnected": [
+    {
+      "type": 0,
+      "value": "⟦Éɱƀéđđîñĝ çöññéçţîöñ šûççéššƒûļ. Ţĥé ɱöđéļ ŕéţûŕñš "
+    },
+    {
+      "type": 1,
+      "value": "dimensions"
+    },
+    {
+      "type": 0,
+      "value": " đîɱéñšîöñš.~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.embeddingDimensionsMismatch": [
+    {
+      "type": 0,
+      "value": "⟦Éɱƀéđđîñĝš ŵéŕé çŕéåţéđ ŵîţĥ "
+    },
+    {
+      "type": 1,
+      "value": "locked"
+    },
+    {
+      "type": 0,
+      "value": "-đîɱéñšîöñ ṽéçţöŕš, ƀûţ ţĥé ɱöđéļ ñöŵ ŕéţûŕñš "
+    },
+    {
+      "type": 1,
+      "value": "current"
+    },
+    {
+      "type": 0,
+      "value": ". Ŕéšéţ éɱƀéđđîñĝš ƀéƒöŕé šŵîţçĥîñĝ ɱöđéļš.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.embeddingLockOutOfRange": [
+    {
+      "type": 0,
+      "value": "⟦Ţĥé éɱƀéđđîñĝ ļöçķ ŕéçöŕđš "
+    },
+    {
+      "type": 1,
+      "value": "locked"
+    },
+    {
+      "type": 0,
+      "value": "-đîɱéñšîöñ ṽéçţöŕš; Šîļö šţöŕéš 1 ţö "
+    },
+    {
+      "type": 1,
+      "value": "max"
+    },
+    {
+      "type": 0,
+      "value": ". Ŕéšéţ éɱƀéđđîñĝš åñđ ûšé å ɱöđéļ ţĥåţ ŕéţûŕñš åţ ɱöšţ "
+    },
+    {
+      "type": 1,
+      "value": "max"
+    },
+    {
+      "type": 0,
+      "value": " đîɱéñšîöñš.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.embeddingLockUnreadable": [
+    {
+      "type": 0,
+      "value": "⟦Ţĥé šţöŕéđ éɱƀéđđîñĝ ļöçķ çåññöţ ƀé ŕéåđ. Ŕéšéţ éɱƀéđđîñĝš ţö çļéåŕ îţ.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.embeddingModelMismatch": [
+    {
+      "type": 0,
+      "value": "⟦Éɱƀéđđîñĝš ŵéŕé çŕéåţéđ ŵîţĥ ɱöđéļ \""
+    },
+    {
+      "type": 1,
+      "value": "locked_model"
+    },
+    {
+      "type": 0,
+      "value": "\", ñöţ \""
+    },
+    {
+      "type": 1,
+      "value": "model"
+    },
+    {
+      "type": 0,
+      "value": "\". Ŕéšéţ éɱƀéđđîñĝš ƀéƒöŕé šŵîţçĥîñĝ ɱöđéļš.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.embeddingNoVector": [
+    {
+      "type": 0,
+      "value": "⟦Ţĥé éɱƀéđđîñĝ þŕöṽîđéŕ ŕéţûŕñéđ ñö ṽéçţöŕ ƒöŕ ţĥé ţéšţ ţéẋţ.~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.embeddingStorageMismatch": [
+    {
+      "type": 0,
+      "value": "⟦Éɱƀéđđîñĝš ŵéŕé šţöŕéđ åţ "
+    },
+    {
+      "type": 1,
+      "value": "stored"
+    },
+    {
+      "type": 0,
+      "value": " đîɱéñšîöñš; ţĥîš šéŕṽéŕ šţöŕéš "
+    },
+    {
+      "type": 1,
+      "value": "supported"
+    },
+    {
+      "type": 0,
+      "value": ". Ŕéšéţ éɱƀéđđîñĝš.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.embeddingTooManyDimensions": [
+    {
+      "type": 0,
+      "value": "⟦Ţĥé ɱöđéļ ŕéţûŕñš "
+    },
+    {
+      "type": 1,
+      "value": "dimensions"
+    },
+    {
+      "type": 0,
+      "value": " đîɱéñšîöñš; Šîļö šţöŕéš åţ ɱöšţ "
+    },
+    {
+      "type": 1,
+      "value": "max"
+    },
+    {
+      "type": 0,
+      "value": ".~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.failed": [
+    {
+      "type": 0,
+      "value": "⟦Çöññéçţîöñ çĥéçķ ƒåîļéđ. Ṽéŕîƒý ţĥé šûƀɱîţţéđ šéţţîñĝš åñđ þŕöṽîđéŕ åṽåîļåƀîļîţý.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.mdblistVerified": [
+    {
+      "type": 0,
+      "value": "⟦ṀĐƁĻîšţ ÅÞÎ ķéý ṽéŕîƒîéđ.~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.meilisearchConnected": [
+    {
+      "type": 0,
+      "value": "⟦Ṁéîļîšéåŕçĥ çöññéçţîöñ šûççéššƒûļ~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.meilisearchKeyRejected": [
+    {
+      "type": 0,
+      "value": "⟦Ṁéîļîšéåŕçĥ ŕéƒûšéđ ţĥé ÅÞÎ ķéý, öŕ ŕéǫûîŕéš öñé. Éñţéŕ å ķéý ţĥåţ çåñ ɱåñåĝé îñđéẋéš åñđ đöçûɱéñţš, šûçĥ åš ţĥé Đéƒåûļţ Åđɱîñ ÅÞÎ Ķéý.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.meilisearchRedirected": [
+    {
+      "type": 0,
+      "value": "⟦Ṁéîļîšéåŕçĥ ŕéđîŕéçţéđ ţĥé çĥéçķ ţö åñöţĥéŕ åđđŕéšš. Éñţéŕ ţĥé åđđŕéšš îţ ŕéđîŕéçţš ţö, šûçĥ åš îţš ĥţţþš:// ÛŔĻ, åñđ éñţéŕ ţĥé ÅÞÎ ķéý åĝåîñ.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.redisConnected": [
+    {
+      "type": 0,
+      "value": "⟦Ŕéđîš çöññéçţîöñ šûççéššƒûļ.~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.s3Verified": [
+    {
+      "type": 0,
+      "value": "⟦Š3 çöññéçţîöñ åñđ öƀĵéçţ ŕéåđ/ŵŕîţé/đéļéţé þéŕɱîššîöñš ṽéŕîƒîéđ.~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechConnected": [
+    {
+      "type": 0,
+      "value": "⟦Šþééçĥ-ţö-ţéẋţ çöññéçţîöñ šûççéššƒûļ: ţîɱéšţåɱþéđ šþééçĥ ŕéçéîṽéđ.~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechForbidden": [
+    {
+      "type": 0,
+      "value": "⟦Šþééçĥ-ţö-ţéẋţ åççéšš ŵåš đéñîéđ. Çĥéçķ ýöûŕ ÅÞÎ ķéý þéŕɱîššîöñš åñđ åļļöŵéđ þŕöṽîđéŕš.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechNoTimestamps": [
+    {
+      "type": 0,
+      "value": "⟦Šþééçĥ-ţö-ţéẋţ ɱöđéļ đöéš ñöţ ŕéţûŕñ ţîɱéšţåɱþéđ šéĝɱéñţš, ŵĥîçĥ Šîļö ñééđš ţö ɱåķé šûƀţîţļéš. Çĥööšé å ɱöđéļ ţĥåţ šûþþöŕţš šéĝɱéñţ ţîɱéšţåɱþš, šûçĥ åš ŵĥîšþéŕ-1 öñ ÖþéñÅÎ.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechNotFound": [
+    {
+      "type": 0,
+      "value": "⟦Šþééçĥ-ţö-ţéẋţ éñđþöîñţ öŕ ɱöđéļ îš ûñåṽåîļåƀļé. Çĥéçķ ţĥé þŕöṽîđéŕ'š ƀåšé ÛŔĻ, ţĥé ɱöđéļ, åñđ åļļöŵéđ þŕöṽîđéŕš.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechPaymentRequired": [
+    {
+      "type": 0,
+      "value": "⟦Šþééçĥ-ţö-ţéẋţ þŕöṽîđéŕ ŕéǫûîŕéš þåýɱéñţ. Çĥéçķ ýöûŕ þŕöṽîđéŕ ƀåļåñçé åñđ šþéñđîñĝ ļîɱîţ.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechQuotaExhausted": [
+    {
+      "type": 0,
+      "value": "⟦Šþééçĥ-ţö-ţéẋţ þŕöṽîđéŕ ǫûöţå îš éẋĥåûšţéđ. Çĥéçķ ýöûŕ þŕöṽîđéŕ ƀåļåñçé åñđ ļîɱîţš.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechRateLimited": [
+    {
+      "type": 0,
+      "value": "⟦Šþééçĥ-ţö-ţéẋţ þŕöṽîđéŕ îš ŕåţé ļîɱîţîñĝ ŕéǫûéšţš. Ţŕý åĝåîñ ļåţéŕ.~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechTimedOut": [
+    {
+      "type": 0,
+      "value": "⟦Šþééçĥ-ţö-ţéẋţ çöññéçţîöñ çĥéçķ ţîɱéđ öûţ. Çĥéçķ þŕöṽîđéŕ åṽåîļåƀîļîţý åñđ ţŕý åĝåîñ.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechUnauthorized": [
+    {
+      "type": 0,
+      "value": "⟦Šþééçĥ-ţö-ţéẋţ åûţĥéñţîçåţîöñ ƒåîļéđ. Ŕéþļåçé ţĥé þŕöṽîđéŕ'š ÅÞÎ ķéý îñ ÅÎ Šéŕṽîçéš.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechUnavailable": [
+    {
+      "type": 0,
+      "value": "⟦Šþééçĥ-ţö-ţéẋţ þŕöṽîđéŕ îš ţéɱþöŕåŕîļý ûñåṽåîļåƀļé. Ţŕý åĝåîñ ļåţéŕ.~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIConnected": [
+    {
+      "type": 0,
+      "value": "⟦Ţéẋţ ÅÎ çöññéçţîöñ šûççéššƒûļ.~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIFailed": [
+    {
+      "type": 0,
+      "value": "⟦Ţéẋţ ÅÎ çöññéçţîöñ ƒåîļéđ. Çĥéçķ ţĥé ɱöđéļ, ŕéåšöñîñĝ ļéṽéļ, šéŕṽîçé ţîéŕ, åççöûñţ çöññéçţîöñ, åñđ þŕöṽîđéŕ ûšåĝé ļîɱîţš.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
   "web.admin.common.deviceConnections.bufferingAction.accepted": [
     {
       "type": 0,

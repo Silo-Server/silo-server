@@ -27233,6 +27233,270 @@
       "value": "Не вдалося перевірити з’єднання."
     }
   ],
+  "web.admin.common.connectionCheck.result.chatGPTSignInRequired": [
+    {
+      "type": 0,
+      "value": "Увійдіть за допомогою ChatGPT у налаштуваннях «Сервіси ШІ»."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.embeddingConnected": [
+    {
+      "type": 0,
+      "value": "З’єднання для ембедингів установлено. Модель повертає вектори розмірності "
+    },
+    {
+      "type": 1,
+      "value": "dimensions"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.embeddingDimensionsMismatch": [
+    {
+      "type": 0,
+      "value": "Ембединги створено з векторами розмірності "
+    },
+    {
+      "type": 1,
+      "value": "locked"
+    },
+    {
+      "type": 0,
+      "value": ", але зараз модель повертає "
+    },
+    {
+      "type": 1,
+      "value": "current"
+    },
+    {
+      "type": 0,
+      "value": ". Скиньте ембединги, перш ніж змінювати модель."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.embeddingLockOutOfRange": [
+    {
+      "type": 0,
+      "value": "Блокування ембедингів фіксує вектори розмірності "
+    },
+    {
+      "type": 1,
+      "value": "locked"
+    },
+    {
+      "type": 0,
+      "value": "; Silo зберігає від 1 до "
+    },
+    {
+      "type": 1,
+      "value": "max"
+    },
+    {
+      "type": 0,
+      "value": ". Скиньте ембединги й використовуйте модель, яка повертає не більше "
+    },
+    {
+      "type": 1,
+      "value": "max"
+    },
+    {
+      "type": 0,
+      "value": " вимірів."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.embeddingLockUnreadable": [
+    {
+      "type": 0,
+      "value": "Не вдається прочитати збережене блокування ембедингів. Скиньте ембединги, щоб очистити його."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.embeddingModelMismatch": [
+    {
+      "type": 0,
+      "value": "Ембединги створено моделлю «"
+    },
+    {
+      "type": 1,
+      "value": "locked_model"
+    },
+    {
+      "type": 0,
+      "value": "», а не «"
+    },
+    {
+      "type": 1,
+      "value": "model"
+    },
+    {
+      "type": 0,
+      "value": "». Скиньте ембединги, перш ніж змінювати модель."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.embeddingNoVector": [
+    {
+      "type": 0,
+      "value": "Постачальник ембедингів не повернув вектор для тестового тексту."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.embeddingStorageMismatch": [
+    {
+      "type": 0,
+      "value": "Ембединги збережено з розмірністю "
+    },
+    {
+      "type": 1,
+      "value": "stored"
+    },
+    {
+      "type": 0,
+      "value": "; цей сервер зберігає "
+    },
+    {
+      "type": 1,
+      "value": "supported"
+    },
+    {
+      "type": 0,
+      "value": ". Скиньте ембединги."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.embeddingTooManyDimensions": [
+    {
+      "type": 0,
+      "value": "Модель повертає вектори розмірності "
+    },
+    {
+      "type": 1,
+      "value": "dimensions"
+    },
+    {
+      "type": 0,
+      "value": "; Silo зберігає не більше "
+    },
+    {
+      "type": 1,
+      "value": "max"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.failed": [
+    {
+      "type": 0,
+      "value": "Не вдалося перевірити з’єднання. Перевірте надіслані налаштування й доступність постачальника."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.mdblistVerified": [
+    {
+      "type": 0,
+      "value": "Ключ API MDBList перевірено."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.meilisearchConnected": [
+    {
+      "type": 0,
+      "value": "З’єднання з Meilisearch установлено"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.meilisearchKeyRejected": [
+    {
+      "type": 0,
+      "value": "Meilisearch відхилив ключ API або вимагає його. Введіть ключ, який може керувати індексами й документами, наприклад Default Admin API Key."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.meilisearchRedirected": [
+    {
+      "type": 0,
+      "value": "Meilisearch переспрямував перевірку на іншу адресу. Введіть адресу, на яку відбувається переспрямування, наприклад його URL https://, і знову введіть ключ API."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.redisConnected": [
+    {
+      "type": 0,
+      "value": "З’єднання з Redis установлено."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.s3Verified": [
+    {
+      "type": 0,
+      "value": "З’єднання з S3 і дозволи на читання, запис і видалення об’єктів перевірено."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechConnected": [
+    {
+      "type": 0,
+      "value": "З’єднання з розпізнаванням мовлення встановлено: отримано мовлення з часовими мітками."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechForbidden": [
+    {
+      "type": 0,
+      "value": "У доступі до розпізнавання мовлення відмовлено. Перевірте дозволи ключа API й дозволених постачальників."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechNoTimestamps": [
+    {
+      "type": 0,
+      "value": "Модель розпізнавання мовлення не повертає сегменти з часовими мітками, а Silo потрібні вони для створення субтитрів. Виберіть модель, яка підтримує часові мітки сегментів, наприклад whisper-1 в OpenAI."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechNotFound": [
+    {
+      "type": 0,
+      "value": "Кінцева точка або модель розпізнавання мовлення недоступна. Перевірте базовий URL постачальника, модель і дозволених постачальників."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechPaymentRequired": [
+    {
+      "type": 0,
+      "value": "Постачальник розпізнавання мовлення вимагає оплати. Перевірте баланс і ліміт витрат у постачальника."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechQuotaExhausted": [
+    {
+      "type": 0,
+      "value": "Квоту постачальника розпізнавання мовлення вичерпано. Перевірте баланс і ліміти в постачальника."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechRateLimited": [
+    {
+      "type": 0,
+      "value": "Постачальник розпізнавання мовлення обмежує частоту запитів. Спробуйте пізніше."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechTimedOut": [
+    {
+      "type": 0,
+      "value": "Час очікування перевірки з’єднання з розпізнаванням мовлення минув. Перевірте доступність постачальника й спробуйте ще раз."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechUnauthorized": [
+    {
+      "type": 0,
+      "value": "Не вдалося автентифікуватися в розпізнаванні мовлення. Замініть ключ API постачальника в розділі «Сервіси ШІ»."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.speechUnavailable": [
+    {
+      "type": 0,
+      "value": "Постачальник розпізнавання мовлення тимчасово недоступний. Спробуйте пізніше."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIConnected": [
+    {
+      "type": 0,
+      "value": "З’єднання з текстовим ШІ встановлено."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIFailed": [
+    {
+      "type": 0,
+      "value": "Не вдалося з’єднатися з текстовим ШІ. Перевірте модель, рівень міркування, рівень обслуговування, під’єднання облікового запису й ліміти використання в постачальника."
+    }
+  ],
   "web.admin.common.deviceConnections.bufferingAction.accepted": [
     {
       "type": 0,
