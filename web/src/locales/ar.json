@@ -31696,7 +31696,7 @@
   "web.admin.common.connectionCheck.result.embeddingConnected": [
     {
       "type": 0,
-      "value": "نجح اتصال التضمين. يُرجع النموذج "
+      "value": "نجح اتصال التضمين. عدد الأبعاد التي يُرجعها النموذج: "
     },
     {
       "type": 1,
@@ -31704,13 +31704,13 @@
     },
     {
       "type": 0,
-      "value": " بُعدًا."
+      "value": "."
     }
   ],
   "web.admin.common.connectionCheck.result.embeddingDimensionsMismatch": [
     {
       "type": 0,
-      "value": "أُنشئت التضمينات بمتجهات ذات "
+      "value": "أُنشئت التضمينات بمتجهات عدد أبعادها "
     },
     {
       "type": 1,
@@ -31718,7 +31718,7 @@
     },
     {
       "type": 0,
-      "value": " بُعد، لكن النموذج يُرجع الآن "
+      "value": "، لكن النموذج يُرجع الآن "
     },
     {
       "type": 1,
@@ -31732,7 +31732,7 @@
   "web.admin.common.connectionCheck.result.embeddingLockOutOfRange": [
     {
       "type": 0,
-      "value": "يسجّل قفل التضمين متجهات ذات "
+      "value": "يسجّل قفل التضمين متجهات عدد أبعادها "
     },
     {
       "type": 1,
@@ -31740,7 +31740,7 @@
     },
     {
       "type": 0,
-      "value": " بُعد؛ ويخزّن Silo من 1 إلى "
+      "value": "؛ بينما يخزّن Silo متجهات عدد أبعادها من 1 إلى "
     },
     {
       "type": 1,
@@ -31748,7 +31748,7 @@
     },
     {
       "type": 0,
-      "value": ". أعد تعيين التضمينات واستخدم نموذجًا يُرجع "
+      "value": ". أعد تعيين التضمينات واستخدم نموذجًا لا يتجاوز عدد أبعاده "
     },
     {
       "type": 1,
@@ -31756,7 +31756,7 @@
     },
     {
       "type": 0,
-      "value": " بُعد على الأكثر."
+      "value": "."
     }
   ],
   "web.admin.common.connectionCheck.result.embeddingLockUnreadable": [
@@ -31796,7 +31796,7 @@
   "web.admin.common.connectionCheck.result.embeddingStorageMismatch": [
     {
       "type": 0,
-      "value": "خُزّنت التضمينات بـ "
+      "value": "خُزّنت التضمينات بمتجهات عدد أبعادها "
     },
     {
       "type": 1,
@@ -31804,7 +31804,7 @@
     },
     {
       "type": 0,
-      "value": " بُعد؛ بينما يخزّن هذا الخادم "
+      "value": "؛ بينما يخزّن هذا الخادم "
     },
     {
       "type": 1,
@@ -31818,7 +31818,7 @@
   "web.admin.common.connectionCheck.result.embeddingTooManyDimensions": [
     {
       "type": 0,
-      "value": "يُرجع النموذج "
+      "value": "يُرجع النموذج متجهات عدد أبعادها "
     },
     {
       "type": 1,
@@ -31826,7 +31826,7 @@
     },
     {
       "type": 0,
-      "value": " بُعد؛ ويخزّن Silo "
+      "value": "؛ والحد الأقصى الذي يخزّنه Silo هو "
     },
     {
       "type": 1,
@@ -31834,7 +31834,7 @@
     },
     {
       "type": 0,
-      "value": " على الأكثر."
+      "value": "."
     }
   ],
   "web.admin.common.connectionCheck.result.failed": [

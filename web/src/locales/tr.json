@@ -22800,7 +22800,7 @@
   "web.admin.common.connectionCheck.result.embeddingConnected": [
     {
       "type": 0,
-      "value": "Embedding bağlantısı başarılı. Model "
+      "value": "Gömme bağlantısı başarılı. Model "
     },
     {
       "type": 1,
@@ -22814,7 +22814,7 @@
   "web.admin.common.connectionCheck.result.embeddingDimensionsMismatch": [
     {
       "type": 0,
-      "value": "Embedding’ler "
+      "value": "Gömmeler "
     },
     {
       "type": 1,
@@ -22830,13 +22830,13 @@
     },
     {
       "type": 0,
-      "value": " boyut döndürüyor. Model değiştirmeden önce embedding’leri sıfırlayın."
+      "value": " boyut döndürüyor. Model değiştirmeden önce gömmeleri sıfırlayın."
     }
   ],
   "web.admin.common.connectionCheck.result.embeddingLockOutOfRange": [
     {
       "type": 0,
-      "value": "Embedding kilidi "
+      "value": "Gömme kilidi "
     },
     {
       "type": 1,
@@ -22852,7 +22852,7 @@
     },
     {
       "type": 0,
-      "value": " arasında boyut saklar. Embedding’leri sıfırlayın ve en fazla "
+      "value": " arasında boyut saklar. Gömmeleri sıfırlayın ve en fazla "
     },
     {
       "type": 1,
@@ -22866,13 +22866,13 @@
   "web.admin.common.connectionCheck.result.embeddingLockUnreadable": [
     {
       "type": 0,
-      "value": "Saklanan embedding kilidi okunamıyor. Kilidi temizlemek için embedding’leri sıfırlayın."
+      "value": "Saklanan gömme kilidi okunamıyor. Kilidi temizlemek için gömmeleri sıfırlayın."
     }
   ],
   "web.admin.common.connectionCheck.result.embeddingModelMismatch": [
     {
       "type": 0,
-      "value": "Embedding’ler “"
+      "value": "Gömmeler “"
     },
     {
       "type": 1,
@@ -22888,19 +22888,19 @@
     },
     {
       "type": 0,
-      "value": "” modeliyle oluşturuldu. Model değiştirmeden önce embedding’leri sıfırlayın."
+      "value": "” modeliyle oluşturuldu. Model değiştirmeden önce gömmeleri sıfırlayın."
     }
   ],
   "web.admin.common.connectionCheck.result.embeddingNoVector": [
     {
       "type": 0,
-      "value": "Embedding sağlayıcısı test metni için vektör döndürmedi."
+      "value": "Gömme sağlayıcısı test metni için vektör döndürmedi."
     }
   ],
   "web.admin.common.connectionCheck.result.embeddingStorageMismatch": [
     {
       "type": 0,
-      "value": "Embedding’ler "
+      "value": "Gömmeler "
     },
     {
       "type": 1,
@@ -22916,7 +22916,7 @@
     },
     {
       "type": 0,
-      "value": " boyut saklıyor. Embedding’leri sıfırlayın."
+      "value": " boyut saklıyor. Gömmeleri sıfırlayın."
     }
   ],
   "web.admin.common.connectionCheck.result.embeddingTooManyDimensions": [

@@ -27478,7 +27478,7 @@
   "web.admin.common.connectionCheck.result.embeddingStorageMismatch": [
     {
       "type": 0,
-      "value": "Embeddingy byly uloženy s "
+      "value": "Embeddingy byly uloženy s počtem dimenzí "
     },
     {
       "type": 1,
@@ -27486,7 +27486,7 @@
     },
     {
       "type": 0,
-      "value": " dimenzemi; tento server ukládá "
+      "value": "; tento server ukládá "
     },
     {
       "type": 1,
@@ -27500,7 +27500,7 @@
   "web.admin.common.connectionCheck.result.embeddingTooManyDimensions": [
     {
       "type": 0,
-      "value": "Model vrací "
+      "value": "Model vrací vektory s počtem dimenzí "
     },
     {
       "type": 1,
@@ -27508,7 +27508,7 @@
     },
     {
       "type": 0,
-      "value": " dimenzí; Silo ukládá nejvýše "
+      "value": "; Silo ukládá nejvýše "
     },
     {
       "type": 1,

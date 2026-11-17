@@ -27994,7 +27994,7 @@
   "web.admin.common.connectionCheck.result.embeddingConnected": [
     {
       "type": 0,
-      "value": "Połączenie do tworzenia osadzeń działa. Model zwraca wektory o wymiarze "
+      "value": "Połączenie do tworzenia embeddingów działa. Model zwraca wektory o wymiarze "
     },
     {
       "type": 1,
@@ -28008,7 +28008,7 @@
   "web.admin.common.connectionCheck.result.embeddingDimensionsMismatch": [
     {
       "type": 0,
-      "value": "Osadzenia utworzono z wektorów o wymiarze "
+      "value": "Embeddingi utworzono z wektorów o wymiarze "
     },
     {
       "type": 1,
@@ -28024,13 +28024,13 @@
     },
     {
       "type": 0,
-      "value": ". Przed zmianą modelu zresetuj osadzenia."
+      "value": ". Przed zmianą modelu zresetuj embeddingi."
     }
   ],
   "web.admin.common.connectionCheck.result.embeddingLockOutOfRange": [
     {
       "type": 0,
-      "value": "Blokada osadzeń zapisuje wektory o wymiarze "
+      "value": "Blokada embeddingów zapisuje wektory o wymiarze "
     },
     {
       "type": 1,
@@ -28046,7 +28046,7 @@
     },
     {
       "type": 0,
-      "value": ". Zresetuj osadzenia i użyj modelu zwracającego wymiar co najwyżej "
+      "value": ". Zresetuj embeddingi i użyj modelu zwracającego wymiar co najwyżej "
     },
     {
       "type": 1,
@@ -28060,13 +28060,13 @@
   "web.admin.common.connectionCheck.result.embeddingLockUnreadable": [
     {
       "type": 0,
-      "value": "Nie można odczytać zapisanej blokady osadzeń. Zresetuj osadzenia, aby ją wyczyścić."
+      "value": "Nie można odczytać zapisanej blokady embeddingów. Zresetuj embeddingi, aby ją wyczyścić."
     }
   ],
   "web.admin.common.connectionCheck.result.embeddingModelMismatch": [
     {
       "type": 0,
-      "value": "Osadzenia utworzono modelem „"
+      "value": "Embeddingi utworzono modelem „"
     },
     {
       "type": 1,
@@ -28082,19 +28082,19 @@
     },
     {
       "type": 0,
-      "value": "”. Przed zmianą modelu zresetuj osadzenia."
+      "value": "”. Przed zmianą modelu zresetuj embeddingi."
     }
   ],
   "web.admin.common.connectionCheck.result.embeddingNoVector": [
     {
       "type": 0,
-      "value": "Dostawca osadzeń nie zwrócił wektora dla tekstu testowego."
+      "value": "Dostawca embeddingów nie zwrócił wektora dla tekstu testowego."
     }
   ],
   "web.admin.common.connectionCheck.result.embeddingStorageMismatch": [
     {
       "type": 0,
-      "value": "Osadzenia zapisano z wymiarem "
+      "value": "Embeddingi zapisano z wymiarem "
     },
     {
       "type": 1,
@@ -28110,7 +28110,7 @@
     },
     {
       "type": 0,
-      "value": ". Zresetuj osadzenia."
+      "value": ". Zresetuj embeddingi."
     }
   ],
   "web.admin.common.connectionCheck.result.embeddingTooManyDimensions": [

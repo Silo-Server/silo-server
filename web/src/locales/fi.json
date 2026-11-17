@@ -22994,7 +22994,7 @@
     },
     {
       "type": 0,
-      "value": ". Nollaa upotukset ennen mallin vaihtamista."
+      "value": " ulottuvuutta. Nollaa upotukset ennen mallin vaihtamista."
     }
   ],
   "web.admin.common.connectionCheck.result.embeddingLockOutOfRange": [
@@ -23016,7 +23016,7 @@
     },
     {
       "type": 0,
-      "value": ". Nollaa upotukset ja käytä mallia, joka palauttaa enintään "
+      "value": " ulottuvuutta. Nollaa upotukset ja käytä mallia, joka palauttaa enintään "
     },
     {
       "type": 1,
@@ -23080,7 +23080,7 @@
     },
     {
       "type": 0,
-      "value": ". Nollaa upotukset."
+      "value": " ulottuvuutta. Nollaa upotukset."
     }
   ],
   "web.admin.common.connectionCheck.result.embeddingTooManyDimensions": [

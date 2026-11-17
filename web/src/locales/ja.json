@@ -20905,7 +20905,7 @@
   "web.admin.common.connectionCheck.result.embeddingConnected": [
     {
       "type": 0,
-      "value": "埋め込みの接続に成功しました。モデルは"
+      "value": "エンベディングに接続しました。モデルは"
     },
     {
       "type": 1,
@@ -20919,7 +20919,7 @@
   "web.admin.common.connectionCheck.result.embeddingDimensionsMismatch": [
     {
       "type": 0,
-      "value": "埋め込みは"
+      "value": "エンベディングは"
     },
     {
       "type": 1,
@@ -20935,13 +20935,13 @@
     },
     {
       "type": 0,
-      "value": "次元を返します。モデルを切り替える前に埋め込みをリセットしてください。"
+      "value": "次元を返します。モデルを切り替える前にエンベディングをリセットしてください。"
     }
   ],
   "web.admin.common.connectionCheck.result.embeddingLockOutOfRange": [
     {
       "type": 0,
-      "value": "埋め込みのロックには"
+      "value": "エンベディングのロックには"
     },
     {
       "type": 1,
@@ -20957,7 +20957,7 @@
     },
     {
       "type": 0,
-      "value": "次元です。埋め込みをリセットし、最大"
+      "value": "次元です。エンベディングをリセットし、最大"
     },
     {
       "type": 1,
@@ -20971,13 +20971,13 @@
   "web.admin.common.connectionCheck.result.embeddingLockUnreadable": [
     {
       "type": 0,
-      "value": "保存されている埋め込みのロックを読み取れません。埋め込みをリセットしてクリアしてください。"
+      "value": "保存されているエンベディングのロックを読み取れません。エンベディングをリセットしてクリアしてください。"
     }
   ],
   "web.admin.common.connectionCheck.result.embeddingModelMismatch": [
     {
       "type": 0,
-      "value": "埋め込みは「"
+      "value": "エンベディングは「"
     },
     {
       "type": 1,
@@ -20993,19 +20993,19 @@
     },
     {
       "type": 0,
-      "value": "」モデルで作成されています。モデルを切り替える前に埋め込みをリセットしてください。"
+      "value": "」モデルで作成されています。モデルを切り替える前にエンベディングをリセットしてください。"
     }
   ],
   "web.admin.common.connectionCheck.result.embeddingNoVector": [
     {
       "type": 0,
-      "value": "埋め込みプロバイダーがテスト用テキストのベクトルを返しませんでした。"
+      "value": "エンベディングプロバイダーがテスト用テキストのベクトルを返しませんでした。"
     }
   ],
   "web.admin.common.connectionCheck.result.embeddingStorageMismatch": [
     {
       "type": 0,
-      "value": "埋め込みは"
+      "value": "エンベディングは"
     },
     {
       "type": 1,
@@ -21021,7 +21021,7 @@
     },
     {
       "type": 0,
-      "value": "次元で保存します。埋め込みをリセットしてください。"
+      "value": "次元で保存します。エンベディングをリセットしてください。"
     }
   ],
   "web.admin.common.connectionCheck.result.embeddingTooManyDimensions": [

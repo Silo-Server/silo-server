@@ -25115,7 +25115,7 @@
   "web.admin.common.connectionCheck.result.embeddingConnected": [
     {
       "type": 0,
-      "value": "Conexión de incrustaciones correcta. El modelo devuelve "
+      "value": "Conexión de embeddings correcta. El modelo devuelve "
     },
     {
       "type": 1,
@@ -25129,7 +25129,7 @@
   "web.admin.common.connectionCheck.result.embeddingDimensionsMismatch": [
     {
       "type": 0,
-      "value": "Las incrustaciones se crearon con vectores de "
+      "value": "Los embeddings se crearon con vectores de "
     },
     {
       "type": 1,
@@ -25145,13 +25145,13 @@
     },
     {
       "type": 0,
-      "value": ". Restablece las incrustaciones antes de cambiar de modelo."
+      "value": ". Restablece los embeddings antes de cambiar de modelo."
     }
   ],
   "web.admin.common.connectionCheck.result.embeddingLockOutOfRange": [
     {
       "type": 0,
-      "value": "El bloqueo de incrustaciones registra vectores de "
+      "value": "El bloqueo de embeddings registra vectores de "
     },
     {
       "type": 1,
@@ -25167,7 +25167,7 @@
     },
     {
       "type": 0,
-      "value": ". Restablece las incrustaciones y usa un modelo que devuelva como máximo "
+      "value": ". Restablece los embeddings y usa un modelo que devuelva como máximo "
     },
     {
       "type": 1,
@@ -25181,13 +25181,13 @@
   "web.admin.common.connectionCheck.result.embeddingLockUnreadable": [
     {
       "type": 0,
-      "value": "No se puede leer el bloqueo de incrustaciones guardado. Restablece las incrustaciones para borrarlo."
+      "value": "No se puede leer el bloqueo de embeddings guardado. Restablece los embeddings para borrarlo."
     }
   ],
   "web.admin.common.connectionCheck.result.embeddingModelMismatch": [
     {
       "type": 0,
-      "value": "Las incrustaciones se crearon con el modelo “"
+      "value": "Los embeddings se crearon con el modelo “"
     },
     {
       "type": 1,
@@ -25203,19 +25203,19 @@
     },
     {
       "type": 0,
-      "value": "”. Restablece las incrustaciones antes de cambiar de modelo."
+      "value": "”. Restablece los embeddings antes de cambiar de modelo."
     }
   ],
   "web.admin.common.connectionCheck.result.embeddingNoVector": [
     {
       "type": 0,
-      "value": "El proveedor de incrustaciones no devolvió ningún vector para el texto de prueba."
+      "value": "El proveedor de embeddings no devolvió ningún vector para el texto de prueba."
     }
   ],
   "web.admin.common.connectionCheck.result.embeddingStorageMismatch": [
     {
       "type": 0,
-      "value": "Las incrustaciones se almacenaron con "
+      "value": "Los embeddings se almacenaron con "
     },
     {
       "type": 1,
@@ -25231,7 +25231,7 @@
     },
     {
       "type": 0,
-      "value": ". Restablece las incrustaciones."
+      "value": ". Restablece los embeddings."
     }
   ],
   "web.admin.common.connectionCheck.result.embeddingTooManyDimensions": [

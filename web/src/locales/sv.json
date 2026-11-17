@@ -22876,7 +22876,7 @@
   "web.admin.common.connectionCheck.result.embeddingConnected": [
     {
       "type": 0,
-      "value": "Anslutningen för inbäddningar lyckades. Modellen returnerar "
+      "value": "Anslutningen för embeddings lyckades. Modellen returnerar "
     },
     {
       "type": 1,
@@ -22890,7 +22890,7 @@
   "web.admin.common.connectionCheck.result.embeddingDimensionsMismatch": [
     {
       "type": 0,
-      "value": "Inbäddningarna skapades med vektorer med "
+      "value": "Embeddingarna skapades med vektorer med "
     },
     {
       "type": 1,
@@ -22906,13 +22906,13 @@
     },
     {
       "type": 0,
-      "value": ". Återställ inbäddningarna innan du byter modell."
+      "value": ". Återställ embeddings innan du byter modell."
     }
   ],
   "web.admin.common.connectionCheck.result.embeddingLockOutOfRange": [
     {
       "type": 0,
-      "value": "Inbäddningslåset anger vektorer med "
+      "value": "Embedding-låset anger vektorer med "
     },
     {
       "type": 1,
@@ -22928,7 +22928,7 @@
     },
     {
       "type": 0,
-      "value": ". Återställ inbäddningarna och använd en modell som returnerar högst "
+      "value": ". Återställ embeddings och använd en modell som returnerar högst "
     },
     {
       "type": 1,
@@ -22942,13 +22942,13 @@
   "web.admin.common.connectionCheck.result.embeddingLockUnreadable": [
     {
       "type": 0,
-      "value": "Det lagrade inbäddningslåset går inte att läsa. Återställ inbäddningarna för att rensa det."
+      "value": "Det lagrade embedding-låset går inte att läsa. Återställ embeddings för att rensa det."
     }
   ],
   "web.admin.common.connectionCheck.result.embeddingModelMismatch": [
     {
       "type": 0,
-      "value": "Inbäddningarna skapades med modellen ”"
+      "value": "Embeddingarna skapades med modellen ”"
     },
     {
       "type": 1,
@@ -22964,19 +22964,19 @@
     },
     {
       "type": 0,
-      "value": "”. Återställ inbäddningarna innan du byter modell."
+      "value": "”. Återställ embeddings innan du byter modell."
     }
   ],
   "web.admin.common.connectionCheck.result.embeddingNoVector": [
     {
       "type": 0,
-      "value": "Leverantören av inbäddningar returnerade ingen vektor för testtexten."
+      "value": "Leverantören av embeddings returnerade ingen vektor för testtexten."
     }
   ],
   "web.admin.common.connectionCheck.result.embeddingStorageMismatch": [
     {
       "type": 0,
-      "value": "Inbäddningarna lagrades med "
+      "value": "Embeddingarna lagrades med "
     },
     {
       "type": 1,
@@ -22992,7 +22992,7 @@
     },
     {
       "type": 0,
-      "value": ". Återställ inbäddningarna."
+      "value": ". Återställ embeddings."
     }
   ],
   "web.admin.common.connectionCheck.result.embeddingTooManyDimensions": [
