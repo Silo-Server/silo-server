@@ -858,16 +858,7 @@ func (a *Analyzer) processChapterCandidates(ctx context.Context, candidates []Ca
 	directByEpisode := map[string]chapterSourceMarker{}
 	directFileIDs := map[int]struct{}{}
 	withdrawn := map[int]struct{}{}
-
-	detected := make([]Segment, len(candidates))
-	found := make([]bool, len(candidates))
-	episodeHasChapter := map[string]bool{}
-	for i, candidate := range candidates {
-		detected[i], found[i] = DetectChapterIntro(candidate.Chapters, opts.openingNamed[seasonGroupKey(candidate)])
-		if found[i] {
-			episodeHasChapter[candidate.EpisodeID] = true
-		}
-	}
+	detected, found, episodeHasChapter := detectChapterIntros(candidates, opts.openingNamed)
 
 	for i, candidate := range candidates {
 		if err := ctx.Err(); err != nil {
@@ -878,26 +869,9 @@ func (a *Analyzer) processChapterCandidates(ctx context.Context, candidates []Ca
 			return remaining, summary, withdrawn
 		}
 		segment, ok := detected[i], found[i]
-		if candidate.hasHigherPriority(kindIntro, models.MarkerSourceScanner) {
-			// Only an online intro rated below the file's own chapter gives
-			// way to it. Refinement can only raise the chapter's confidence.
-			if !ok || !candidate.yieldsToChapter(kindIntro, segment) {
-				continue
-			}
-		} else {
-			hasIntro := candidate.marker(kindIntro).present()
-			effectiveSource := candidate.effectiveSource(kindIntro)
-			if hasIntro && effectiveSource != "" && effectiveSource != models.MarkerSourceScanner {
-				continue
-			}
-			if hasIntro && !ok && staleChapterIntro(candidate, opts.allowEpisodeCopy && !episodeHasChapter[candidate.EpisodeID]) &&
-				a.withdrawChapterIntro(ctx, candidate, &summary) {
-				withdrawn[candidate.FileID] = struct{}{}
-				hasIntro = false
-			}
-			if hasIntro && !opts.forceExistingScanner {
-				continue
-			}
+		copyStale := opts.allowEpisodeCopy && !episodeHasChapter[candidate.EpisodeID]
+		if !a.chapterMayPlaceIntro(ctx, candidate, segment, ok, copyStale, opts, &summary, withdrawn) {
+			continue
 		}
 		if !ok {
 			remaining = append(remaining, candidate)
@@ -937,7 +911,52 @@ func (a *Analyzer) processChapterCandidates(ctx context.Context, candidates []Ca
 	if !opts.allowEpisodeCopy || len(directByEpisode) == 0 || len(remaining) == 0 {
 		return remaining, summary, withdrawn
 	}
+	return a.copyChapterIntrosToVersions(ctx, remaining, directByEpisode, directFileIDs, opts, &summary), summary, withdrawn
+}
 
+// detectChapterIntros runs DetectChapterIntro over candidates, each read
+// against its season group's openingNamed entry, and reports which episodes
+// have a file whose chapters produce an intro.
+func detectChapterIntros(candidates []Candidate, openingNamed map[string]bool) ([]Segment, []bool, map[string]bool) {
+	detected := make([]Segment, len(candidates))
+	found := make([]bool, len(candidates))
+	episodeHasChapter := map[string]bool{}
+	for i, candidate := range candidates {
+		detected[i], found[i] = DetectChapterIntro(candidate.Chapters, openingNamed[seasonGroupKey(candidate)])
+		if found[i] {
+			episodeHasChapter[candidate.EpisodeID] = true
+		}
+	}
+	return detected, found, episodeHasChapter
+}
+
+// chapterMayPlaceIntro reports whether the chapter pass may go on with
+// candidate: place its chapter intro when ok, or hand it on when not. A
+// stored intro its chapters no longer produce is withdrawn first (see
+// staleChapterIntro) and its file added to withdrawn; copyStale extends that
+// to a version copy.
+func (a *Analyzer) chapterMayPlaceIntro(ctx context.Context, candidate Candidate, segment Segment, ok, copyStale bool, opts chapterProcessingOptions, summary *RunSummary, withdrawn map[int]struct{}) bool {
+	if candidate.hasHigherPriority(kindIntro, models.MarkerSourceScanner) {
+		// Only an online intro rated below the file's own chapter gives
+		// way to it. Refinement can only raise the chapter's confidence.
+		return ok && candidate.yieldsToChapter(kindIntro, segment)
+	}
+	hasIntro := candidate.marker(kindIntro).present()
+	effectiveSource := candidate.effectiveSource(kindIntro)
+	if hasIntro && effectiveSource != "" && effectiveSource != models.MarkerSourceScanner {
+		return false
+	}
+	if hasIntro && !ok && staleChapterIntro(candidate, copyStale) && a.withdrawChapterIntro(ctx, candidate, summary) {
+		withdrawn[candidate.FileID] = struct{}{}
+		hasIntro = false
+	}
+	return !hasIntro || opts.forceExistingScanner
+}
+
+// copyChapterIntrosToVersions copies the chapter intros placed on an episode
+// to its other versions of a matching duration, and returns the files still
+// without an intro.
+func (a *Analyzer) copyChapterIntrosToVersions(ctx context.Context, remaining []Candidate, directByEpisode map[string]chapterSourceMarker, directFileIDs map[int]struct{}, opts chapterProcessingOptions, summary *RunSummary) []Candidate {
 	unresolved := remaining[:0]
 	for _, candidate := range remaining {
 		if err := ctx.Err(); err != nil {
@@ -991,8 +1010,7 @@ func (a *Analyzer) processChapterCandidates(ctx context.Context, candidates []Ca
 			summary.EpisodeVersionMarkersCopied++
 		}
 	}
-
-	return unresolved, summary, withdrawn
+	return unresolved
 }
 
 // loadOpeningNamedGroups returns openingNamedGroups over the whole season
