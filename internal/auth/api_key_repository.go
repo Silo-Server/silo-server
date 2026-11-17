@@ -169,9 +169,11 @@ func (r *APIKeyRepository) UserAPIKeysEnabled(ctx context.Context) (bool, error)
 // admin's account key: one bound to profileID, or an account key (empty
 // profileID) on an account that is not an admin. Such a key is a profile's
 // credential, so it must carry user scopes only, the server must allow user
-// keys, and the account stays under MaxUserAPIKeys. All three are judged in
-// the inserting transaction with the account share-locked, so a setting
-// change or a demotion that commits first is what the check sees. An admin's
+// keys, and the account stays under MaxUserAPIKeys. The setting and the
+// limit are judged in the inserting transaction under the server-settings
+// mutation lock, which a setting change also takes: a key is never stored
+// after the setting was turned off, and concurrent creations count each
+// other's keys. An admin's
 // own account key is Create's; an empty profileID on an admin account is
 // still held to user scopes here.
 func (r *APIKeyRepository) CreatePersonal(ctx context.Context, userID int, profileID, label string, scopes []string) (*models.APIKey, error) {
@@ -187,6 +189,10 @@ func (r *APIKeyRepository) CreatePersonal(ctx context.Context, userID int, profi
 		defer cancel()
 		_ = tx.Rollback(cleanupCtx)
 	}()
+	// Before the account locks, as signup takes it.
+	if err := lockServerSettings(ctx, tx); err != nil {
+		return nil, err
+	}
 	// The audit row's accounts join the id order CreateAsActor locks in.
 	if _, err := tx.Exec(ctx, `SELECT id FROM users WHERE id = ANY($1) ORDER BY id FOR SHARE`,
 		append([]int{userID}, auditmutation.ActorIDs(ctx)...)); err != nil {

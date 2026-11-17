@@ -43,7 +43,7 @@ func eventsSocketIdentity(ctx context.Context) (evt.SocketIdentity, *Problem) {
 	if claims == nil || claims.TokenType != auth.TokenTypeAPIKey {
 		return socketIdentity(ctx)
 	}
-	if claims.APIKeyID > 0 && !slices.Contains(claims.APIKeyScopes, auth.ScopeAdminMonitorRead) && auth.HoldsAPIKeyEventScope(claims.APIKeyScopes) {
+	if claims.APIKeyID > 0 && userKeyEventsSocket(ctx, claims) {
 		// A user key acts as the profile it named (a bound key always names
 		// its own) and holds the user role on the socket.
 		identity := evt.SocketIdentity{UserID: claims.UserID, Role: models.RoleUser, APIKeyID: claims.APIKeyID, ProfileID: profileFrom(ctx), AccessExpiresAt: time.Now().Add(evt.APIKeySocketMaxLifetime)}
@@ -60,6 +60,17 @@ func eventsSocketIdentity(ctx context.Context) (evt.SocketIdentity, *Problem) {
 		identity.DeviceID = socketDeviceID(r)
 	}
 	return identity, nil
+}
+
+// userKeyEventsSocket reports whether an API key's request opens the events
+// socket as a user key: it holds an event scope and is not a monitoring
+// request. A key holding admin:monitor:read as well is a monitoring key when
+// it names no profile and a user key when it names one.
+func userKeyEventsSocket(ctx context.Context, claims *auth.Claims) bool {
+	if !auth.HoldsAPIKeyEventScope(claims.APIKeyScopes) {
+		return false
+	}
+	return !slices.Contains(claims.APIKeyScopes, auth.ScopeAdminMonitorRead) || declaresProfile(ctx)
 }
 
 func registerEventsSocket(reg *Registry) {

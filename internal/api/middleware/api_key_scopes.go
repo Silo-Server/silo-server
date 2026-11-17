@@ -68,8 +68,10 @@ var apiKeyScopeRoutes = map[string][]scopeRoute{
 	auth.ScopeWatchWrite: userScope(
 		scopeRoute{http.MethodPost, regexp.MustCompile(`^/api/v2/watched/[^/]+$`)},
 		scopeRoute{http.MethodDelete, regexp.MustCompile(`^/api/v2/watched/[^/]+$`)},
-		scopeRoute{http.MethodPost, regexp.MustCompile(`^/api/v2/(sync/progress|history/remove|profile/import)$`)},
-		scopeRoute{http.MethodGet, regexp.MustCompile(`^/api/v2/(progress/capabilities|sync/progress/capabilities|capabilities/profile-export)$`)},
+		// POST /profile/import stays out: it also overwrites the profile's
+		// settings and notification preferences, which no user scope reaches.
+		scopeRoute{http.MethodPost, regexp.MustCompile(`^/api/v2/(sync/progress|history/remove)$`)},
+		scopeRoute{http.MethodGet, regexp.MustCompile(`^/api/v2/(progress/capabilities|sync/progress/capabilities)$`)},
 		scopeRoute{http.MethodDelete, regexp.MustCompile(`^/api/v2/progress/[^/]+/position$`)},
 		scopeRoute{http.MethodPut, regexp.MustCompile(`^/api/v2/(favorites|ratings|watchlist|not-interested)/[^/]+$`)},
 		scopeRoute{http.MethodDelete, regexp.MustCompile(`^/api/v2/(favorites|ratings|watchlist|not-interested)/[^/]+$`)},
@@ -95,10 +97,10 @@ var apiKeyScopeRoutes = map[string][]scopeRoute{
 		{http.MethodGet, regexp.MustCompile(`^/api/v2/admin/sessions/summary$`)},
 		{http.MethodGet, regexp.MustCompile(`^/api/v2/admin/sessions/capabilities$`)},
 	},
-	auth.ScopeLibrariesRead: {
-		{http.MethodGet, regexp.MustCompile(`^/api/v2/user/libraries$`)},
-		{http.MethodGet, regexp.MustCompile(`^/api/v2/user/libraries/capabilities$`)},
-	},
+	auth.ScopeLibrariesRead: userScope(
+		scopeRoute{http.MethodGet, regexp.MustCompile(`^/api/v2/user/libraries$`)},
+		scopeRoute{http.MethodGet, regexp.MustCompile(`^/api/v2/user/libraries/capabilities$`)},
+	),
 	auth.ScopeAdminUsers: {
 		{http.MethodPost, regexp.MustCompile(`^/api/v2/admin/users$`)},
 		{http.MethodGet, regexp.MustCompile(`^/api/v2/admin/users/capabilities$`)},

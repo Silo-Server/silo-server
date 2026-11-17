@@ -193,7 +193,7 @@ The Jellyfin and plugin surfaces refuse them, as they refuse every scoped key.
 |---|---|
 | `catalog:read` | `/user/libraries`, home and library layouts and rows, `/catalog` reads including `POST /catalog/query` and `/catalog/letters`, people, seasons and episodes |
 | `watch:read` | `/history`, `/progress`, progress snapshots, `/favorites`, `/ratings`, `/watchlist`, `/not-interested`, and `/profile/export` |
-| `watch:write` | `POST` and `DELETE /watched/{id}`, `POST /sync/progress`, `POST /history/remove`, `DELETE /progress/{id}/position`, writes to favorites, ratings, watchlist and hidden titles, and `POST /profile/import` |
+| `watch:write` | `POST` and `DELETE /watched/{id}`, `POST /sync/progress`, `POST /history/remove`, `DELETE /progress/{id}/position`, writes to favorites, ratings, watchlist and hidden titles. `POST /profile/import` stays outside it, because an import also overwrites the profile's settings and notification preferences |
 | `notifications` | `GET /notifications`, `/notifications/sync`, `/notifications/unread-count`, `/notifications/capabilities`, and marking read with `POST /notifications/{id}/read` and `/notifications/read-all`. No preferences, webhooks, email, Discord or push registrations |
 | `requests` | Request discovery and search, the profile's own requests, and creating, following, cancelling and removing them |
 | `libraries:read` | See [Restricted discovery scopes](#restricted-discovery-scopes) |
@@ -213,7 +213,7 @@ The scope catalog includes two additional native v2 read permissions:
 
 | Scope | Allowed reads |
 |---|---|
-| `libraries:read` | `/api/v2/user/libraries` and its `/capabilities` |
+| `libraries:read` | `/api/v2/user/libraries` and its `/capabilities`, plus `/api/v2/account/me` and `/api/v2/profiles` like every user scope |
 | `admin:sessions:summary:read` | `/api/v2/admin/sessions/summary` and `/api/v2/admin/sessions/capabilities` |
 
 Library discovery retains the owner's account/profile visibility. Session

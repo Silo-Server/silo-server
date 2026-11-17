@@ -66,6 +66,7 @@ func TestEventsSocketTicketDelegatesLoginOrMonitorKey(t *testing.T) {
 		"sa_member":   {ID: 8, UserID: 1, Scopes: []string{auth.ScopeAdminMonitorRead}},
 		"sa_watch":    {ID: 9, UserID: 1, Scopes: []string{auth.ScopeWatchRead}, ProfileID: "p-owner"},
 		"sa_requests": {ID: 10, UserID: 1, Scopes: []string{auth.ScopeRequests}},
+		"sa_mixed":    {ID: 11, UserID: 2, Scopes: []string{auth.ScopeAdminMonitorRead, auth.ScopeWatchRead}},
 	}}
 	deps.EventsCapability = handlers.NewEventsHandler(evt.NewHub("key-capability", nil), nil, nil, nil, nil, nil, nil)
 	deps.Auth = apimw.NewAuthMiddleware(fakeTokens{}, fakeSessions{}, keys, fakeUsers{users: map[int]*models.User{1: {ID: 1, Role: "user", Enabled: true}, 2: {ID: 2, Role: "admin", Enabled: true}}})
@@ -110,6 +111,16 @@ func TestEventsSocketTicketDelegatesLoginOrMonitorKey(t *testing.T) {
 	requireProblem(t, do(t, h, http.MethodPost, path, "", bearer("sa_requests")), TypePermissionDenied)
 	if fake.calls != before || !allowed(bearer("sa_watch")) {
 		t.Fatal("events socket does not follow the user key's scopes")
+	}
+	// A key holding both kinds of scope monitors with no profile and acts
+	// as a user key when it names one.
+	mixed := with(bearer("sa_mixed"), "X-Profile-Id", "p-owner")
+	rec = do(t, h, http.MethodPost, path, "", mixed)
+	if rec.Code != 200 || fake.identity.Role != "user" || fake.identity.ProfileID != "p-owner" || !allowed(mixed) {
+		t.Fatalf("mixed key with a profile: %d %s %+v", rec.Code, rec.Body.String(), fake.identity)
+	}
+	if rec = do(t, h, http.MethodPost, path, "", bearer("sa_mixed")); rec.Code != 200 || fake.identity.Role != "admin" || fake.identity.ProfileID != "" {
+		t.Fatalf("mixed key without a profile: %d %+v", rec.Code, fake.identity)
 	}
 }
 

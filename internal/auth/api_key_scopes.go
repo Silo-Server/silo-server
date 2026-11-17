@@ -52,7 +52,8 @@ const (
 	ScopeWatchRead = "watch:read"
 	// ScopeWatchWrite covers changing that activity: marking watched and
 	// unwatched, syncing progress, removing history, and editing ratings,
-	// favorites, watchlist and hidden titles, plus the profile import.
+	// favorites, watchlist and hidden titles. The profile import stays out:
+	// it also overwrites settings.
 	ScopeWatchWrite = "watch:write"
 	// ScopeRequests covers media requests: discovery, the profile's own
 	// requests, creating, canceling and following them.
@@ -98,7 +99,7 @@ func APIKeyScopeCatalog() []APIKeyScope {
 		},
 		{
 			Name: ScopeWatchWrite, Audience: APIKeyScopeAudienceUser,
-			Description: "Mark titles watched or unwatched, sync progress, remove history, edit ratings, favorites, watchlist and hidden titles, and import profile data.",
+			Description: "Mark titles watched or unwatched, sync progress, remove history, and edit ratings, favorites, watchlist and hidden titles.",
 		},
 		{
 			Name: ScopeRequests, Audience: APIKeyScopeAudienceUser,

@@ -1,5 +1,5 @@
 {
-  "revision": "d0e3b8ee6d78bba221d4160f73790faa18d51d63f6a19643ee5ea44ba989b4f7",
+  "revision": "356ede7264f1d74ab65c8df94b0b5a16bf873c392ee55923c1b34a7b26912fad",
   "state": "available",
   "allowed": true,
   "available": true,
@@ -27,7 +27,7 @@
     },
     {
       "name": "watch:write",
-      "description": "Mark titles watched or unwatched, sync progress, remove history, edit ratings, favorites, watchlist and hidden titles, and import profile data.",
+      "description": "Mark titles watched or unwatched, sync progress, remove history, and edit ratings, favorites, watchlist and hidden titles.",
       "audience": "user"
     },
     {
