@@ -78,6 +78,12 @@ type TranscodeOpts struct {
 	// durable because a reconstructed session must keep serving the playlist
 	// the player already has.
 	KeyframePlaylist bool
+	// KeyframePlanned reports that the session serves a keyframe plan, which
+	// KeyframePlaylist only asks for: a copy that can't be planned keeps
+	// FFmpeg's playlist. StartTranscode sets it from the plan it resolved,
+	// whatever the caller passed. It is durable so a node-backed session's
+	// recipe records which playlist the node served (#4044).
+	KeyframePlanned bool
 	// Reconstructed marks a session rebuilt from its recipe after its server
 	// or node lost it. It isn't durable: each rebuild sets it.
 	Reconstructed bool
@@ -539,6 +545,7 @@ func StartTranscode(ctx context.Context, opts TranscodeOpts) (*TranscodeSession,
 		releaseHWDevice()
 		return nil, fmt.Errorf("plan rebuilt keyframe playlist: %w", err)
 	}
+	opts.KeyframePlanned = copyPlan != nil
 	var copyGroups *copyGroupAssembler
 	if copyPlan != nil {
 		log.Printf("playback: session %s serves a %d-segment keyframe playlist", opts.SessionID, len(copyPlan.durations))

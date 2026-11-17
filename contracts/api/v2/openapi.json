@@ -249553,6 +249553,9 @@
           "is_jellyfin_compat": {
             "type": "boolean"
           },
+          "keyframe_planned": {
+            "type": "boolean"
+          },
           "keyframe_playlist": {
             "type": "boolean"
           },
@@ -250303,6 +250306,9 @@
           },
           "hw_accel": {
             "type": "string"
+          },
+          "keyframe_planned": {
+            "type": "boolean"
           },
           "keyframe_playlist": {
             "type": "boolean"

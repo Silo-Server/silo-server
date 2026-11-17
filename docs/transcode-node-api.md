@@ -32,7 +32,11 @@ default, adds a keyframe-planned mode. With it on, a fresh copy-video
 `POST /transcode/start` carries `keyframe_playlist: true` and the node echoes
 `keyframe_playlist: true` in the start response; the API rejects a missing echo
 and stops the transport. The echo confirms the node understood the request, not
-that it planned. A copy serves one complete playlist planned from the source's
+that it planned. `keyframe_planned: true` in the response reports that the
+session serves the plan. The API records it in the session's recipe, and a
+Jellyfin audio switch restarts a planned session from the beginning so the node
+plans the same segments again; a session without it restarts at the playback
+position. Older nodes omit the field, which reads as FFmpeg's playlist. A copy serves one complete playlist planned from the source's
 keyframes only when it starts at the beginning of the source, the duration is
 known, the keyframe index exists and records where the video ends, the plan
 fits within the synthetic playlist's 50,000-segment limit, and the node can

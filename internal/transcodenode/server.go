@@ -155,6 +155,11 @@ type TranscodeStartResponse struct {
 	// serve FFmpeg's growing playlist under a recipe that records the planned
 	// one.
 	KeyframePlaylist bool `json:"keyframe_playlist,omitempty"`
+	// KeyframePlanned reports that the session serves the keyframe plan,
+	// which keyframe_playlist only confirms was understood: a copy the node
+	// can't plan keeps FFmpeg's playlist. Older nodes omit it, which reads as
+	// FFmpeg's playlist.
+	KeyframePlanned bool `json:"keyframe_planned,omitempty"`
 	// SubtitleRendition attests that the executor emits the requested subtitle
 	// rendition. Older nodes omit it and are rejected before the plan
 	// promises a rendition their playlist does not carry; nodes that predate
@@ -1957,6 +1962,7 @@ func (s *Server) handleStart(w http.ResponseWriter, r *http.Request) {
 		ThrottleSeconds:       req.ThrottleSeconds,
 		SoftwareVideoDecode:   session.Opts().SoftwareVideoDecode,
 		KeyframePlaylist:      session.Opts().KeyframePlaylist,
+		KeyframePlanned:       session.Opts().KeyframePlanned,
 		SubtitleRendition:     session.HasSubtitleRendition(),
 		CopyVideoMPEGTS:       session.Opts().CopyVideoMPEGTS,
 		CopyAudioCodec:        session.Opts().CopyAudioCodec,

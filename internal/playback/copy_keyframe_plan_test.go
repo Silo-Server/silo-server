@@ -358,6 +358,49 @@ func TestRecipeOptsKeepsAPlannedSessionAtItsStart(t *testing.T) {
 	}
 }
 
+// A session records whether it serves a keyframe plan, which
+// KeyframePlaylist only asks for, whatever its caller passed: a node attests
+// it, and an audio switch on the node restarts only a planned session from
+// the beginning (#4044).
+func TestStartTranscodeRecordsWhetherItPlanned(t *testing.T) {
+	dir := t.TempDir()
+	ffmpeg := filepath.Join(dir, "ffmpeg")
+	if err := os.WriteFile(ffmpeg, []byte("#!/bin/sh\nexec sleep 30\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	input := filepath.Join(dir, "episode.mkv")
+	if err := os.WriteFile(input, []byte("video"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		name  string
+		index error
+		want  bool
+	}{
+		{name: "planned", want: true},
+		{name: "no keyframe index", index: keyframes.ErrNoIndex, want: false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			stubKeyframeIndex(t, keyframes.Index{Keyframes: []float64{0, 2, 4, 6, 8}, VideoEnd: 10}, tc.index)
+			opts := plannedOpts()
+			opts.InputPath, opts.OutputDir, opts.FFmpegPath = input, filepath.Join(t.TempDir(), "out"), ffmpeg
+			opts.SourceVideoCodec, opts.HWAccel = "h264", HWAccelNone
+			opts.KeyframePlanned = !tc.want
+			s, err := StartTranscode(t.Context(), opts)
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = s.Close() })
+			if got := s.Opts().KeyframePlanned; got != tc.want {
+				t.Fatalf("KeyframePlanned = %t, want %t", got, tc.want)
+			}
+			if got := s.RecipeOpts().KeyframePlanned; got != tc.want {
+				t.Fatalf("recipe KeyframePlanned = %t, want %t", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestCopySegmentPlanManifest(t *testing.T) {
 	plan := &copySegmentPlan{durations: []float64{2.6, 5.2, 0.4}}
 	got := string(plan.manifest(plannedOpts(), "segment/", "token=abc"))

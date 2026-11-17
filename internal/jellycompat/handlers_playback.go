@@ -2216,6 +2216,7 @@ func (h *PlaybackHandler) startRemoteTranscodeWithToneMapMode(
 		VideoBitstreamFilter:   reqBody.VideoBitstreamFilter,
 		CopyVideoMPEGTS:        reqBody.CopyVideoMPEGTS,
 		KeyframePlaylist:       reqBody.KeyframePlaylist,
+		KeyframePlanned:        nodeResponse.KeyframePlanned,
 		SegmentDuration:        reqBody.SegmentDuration,
 		AudioTrackIndex:        reqBody.AudioTrackIndex,
 		RequireAudioTrack:      reqBody.RequireAudioTrack,

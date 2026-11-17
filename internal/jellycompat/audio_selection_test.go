@@ -661,18 +661,22 @@ func TestRestartCompatAudioSelectionTreatsPublishedRemoteAsSuccess(t *testing.T)
 // in a new output directory and plans only a run from the beginning, so the
 // restart sends the recipe's from-start start, as RecipeOpts does locally: the
 // node plans the same segments, and the player's next segment request restarts
-// FFmpeg at the planned segment for its position. A session that resumed
-// mid-stream serves FFmpeg's playlist and still restarts at the position.
+// FFmpeg at the planned segment for its position. A session the node kept on
+// FFmpeg's playlist, though it asked for the keyframe playlist, or that
+// resumed mid-stream, still restarts at the position: a from-start restart
+// would hold the throttled run far behind the player.
 func TestRestartCompatAudioSelectionKeepsANodeSessionsKeyframePlan(t *testing.T) {
 	const position = 125.0
 	for _, tc := range []struct {
 		name             string
+		planned          bool
 		recipeSeek       float64
 		recipeSegment    int
 		wantSeek         float64
 		wantStartSegment int
 	}{
-		{name: "planned from the start", wantSeek: 0, wantStartSegment: 0},
+		{name: "planned from the start", planned: true, wantSeek: 0, wantStartSegment: 0},
+		{name: "kept FFmpeg's playlist", wantSeek: position, wantStartSegment: int(position) / compatSegmentDuration},
 		{name: "resumed mid-stream", recipeSeek: 90, recipeSegment: 90 / compatSegmentDuration,
 			wantSeek: position, wantStartSegment: int(position) / compatSegmentDuration},
 	} {
@@ -699,6 +703,7 @@ func TestRestartCompatAudioSelectionKeepsANodeSessionsKeyframePlan(t *testing.T)
 					CopyFMP4RecipeVersion: req.CopyFMP4RecipeVersion,
 					ThrottleSeconds:       req.ThrottleSeconds,
 					KeyframePlaylist:      req.KeyframePlaylist,
+					KeyframePlanned:       tc.planned,
 					CopyAudioCodec:        req.CopyAudioCodec,
 				})
 			}))
@@ -707,7 +712,8 @@ func TestRestartCompatAudioSelectionKeepsANodeSessionsKeyframePlan(t *testing.T)
 			recipe := playback.NewRecipeCard(7, "profile-1", version.FileID, node.URL, playback.TranscodeOpts{
 				SessionID: "upstream-1", InputPath: "/media/movie.mkv",
 				TargetCodecVideo: compatCopyCodec, TargetCodecAudio: compatCopyCodec, CopyAudioCodec: "ac3",
-				KeyframePlaylist: true, SeekSeconds: tc.recipeSeek, StartSegmentNumber: tc.recipeSegment,
+				KeyframePlaylist: true, KeyframePlanned: tc.planned,
+				SeekSeconds: tc.recipeSeek, StartSegmentNumber: tc.recipeSegment,
 				SegmentDuration: compatSegmentDuration, AudioTrackIndex: 0, RequireAudioTrack: true,
 			})
 			store := NewPlaybackSessionStore(time.Hour, nil)
@@ -741,8 +747,10 @@ func TestRestartCompatAudioSelectionKeepsANodeSessionsKeyframePlan(t *testing.T)
 			}
 			persisted, ok := store.Get("play-1")
 			if !ok || persisted.Recipe == nil || persisted.Recipe.AudioTrackIndex != 1 ||
-				persisted.Recipe.SeekSeconds != tc.wantSeek || persisted.Recipe.StartSegmentNumber != tc.wantStartSegment {
-				t.Fatalf("persisted recipe = %+v, want track 1 from seek %v, segment %d", persisted.Recipe, tc.wantSeek, tc.wantStartSegment)
+				persisted.Recipe.SeekSeconds != tc.wantSeek || persisted.Recipe.StartSegmentNumber != tc.wantStartSegment ||
+				persisted.Recipe.KeyframePlanned != tc.planned {
+				t.Fatalf("persisted recipe = %+v, want track 1 from seek %v, segment %d, planned %t",
+					persisted.Recipe, tc.wantSeek, tc.wantStartSegment, tc.planned)
 			}
 		})
 	}
