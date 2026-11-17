@@ -159754,7 +159754,7 @@
   "web.settings.watchProviders.toggle.exportRatings.description": [
     {
       "type": 0,
-      "value": "Надсилати ваші оцінки в зірках до "
+      "value": "Надсилати ваші оцінки до "
     },
     {
       "type": 1,
@@ -159762,7 +159762,7 @@
     },
     {
       "type": 0,
-      "value": " і видаляти ті, які ви прибрали. 4 зірки відповідають 8/10."
+      "value": " і вилучати там ті, які ви прибрали. 3,5 зірки відповідають 7/10."
     }
   ],
   "web.settings.watchProviders.toggle.exportRatings.label": [
@@ -159846,7 +159846,7 @@
     },
     {
       "type": 0,
-      "value": " як зірки. 7/10 стає 4 зірками."
+      "value": ". Оцінка 7/10 відповідає 3,5 зірки."
     }
   ],
   "web.settings.watchProviders.toggle.importRatings.label": [

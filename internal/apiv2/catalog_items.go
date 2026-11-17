@@ -417,7 +417,7 @@ type CatalogItemDetail struct {
 	AirDate                         *string                              `json:"air_date,omitempty" format:"date" doc:"Calendar date, YYYY-MM-DD"`
 	IsSpecials                      bool                                 `json:"is_specials,omitempty"`
 	UserData                        *WatchRollup                         `json:"user_data,omitempty"`
-	UserRating                      *int                                 `json:"user_rating,omitempty"`
+	UserRating                      *int                                 `json:"user_rating,omitempty" minimum:"1" maximum:"10" doc:"The profile's rating, 1 to 10, which clients show as five stars with half stars; absent when unrated"`
 	Versions                        []FileVersion                        `json:"versions" doc:"Empty, never null"`
 	PlaybackVariants                []PlaybackVariant                    `json:"playback_variants,omitempty"`
 	Videos                          []catalogpkg.ItemVideoInfo           `json:"videos,omitempty" doc:"Trailers and clips"`

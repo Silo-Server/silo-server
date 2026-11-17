@@ -180177,7 +180177,7 @@
   "web.settings.watchProviders.toggle.exportRatings.description": [
     {
       "type": 0,
-      "value": "أرسل تقييماتك بالنجوم إلى "
+      "value": "أرسل تقييماتك إلى "
     },
     {
       "type": 1,
@@ -180185,7 +180185,7 @@
     },
     {
       "type": 0,
-      "value": " وامسح ما تزيله منها. تصبح 4 نجوم 8/10."
+      "value": " وامسح ما تزيله منها. يصبح التقييم 3.5 نجمة بقيمة 7/10."
     }
   ],
   "web.settings.watchProviders.toggle.exportRatings.label": [
@@ -180269,7 +180269,7 @@
     },
     {
       "type": 0,
-      "value": " على شكل نجوم. يصبح التقييم 7/10 أربع نجوم."
+      "value": ". يصبح التقييم 7/10 بقيمة 3.5 نجمة."
     }
   ],
   "web.settings.watchProviders.toggle.importRatings.label": [

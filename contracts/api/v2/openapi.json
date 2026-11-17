@@ -28208,7 +28208,10 @@
             "$ref": "#/components/schemas/WatchRollup"
           },
           "user_rating": {
+            "description": "The profile's rating, 1 to 10, which clients show as five stars with half stars; absent when unrated",
             "format": "int64",
+            "maximum": 10,
+            "minimum": 1,
             "type": "integer"
           },
           "user_state": {
@@ -47673,7 +47676,7 @@
           "version": {
             "description": "The newest format version this server writes and reads",
             "examples": [
-              1
+              2
             ],
             "format": "int64",
             "type": "integer"
@@ -48900,11 +48903,13 @@
             "type": "string"
           },
           "rating": {
-            "description": "Stars, 1 to 5",
+            "description": "1 to 10; clients show it as five stars with half stars (7 is 3.5 stars)",
             "examples": [
-              4
+              7
             ],
             "format": "int64",
+            "maximum": 10,
+            "minimum": 1,
             "type": "integer"
           }
         },
@@ -48919,12 +48924,12 @@
         "additionalProperties": false,
         "properties": {
           "rating": {
-            "description": "Stars, 1 to 5",
+            "description": "1 to 10; clients show it as five stars with half stars (7 is 3.5 stars)",
             "examples": [
-              4
+              7
             ],
             "format": "int64",
-            "maximum": 5,
+            "maximum": 10,
             "minimum": 1,
             "type": "integer"
           }
@@ -56623,7 +56628,7 @@
             "type": "boolean"
           },
           "export_ratings_enabled": {
-            "description": "Send the profile's star ratings to the provider (stars times two) and clear removed ones.",
+            "description": "Send the profile's ratings, 1 to 10, to the provider unchanged and clear removed ones.",
             "type": "boolean"
           },
           "export_unwatched_enabled": {
@@ -56643,7 +56648,7 @@
             "type": "boolean"
           },
           "import_ratings_enabled": {
-            "description": "Import the provider's movie and series ratings as stars (1-2 is 1 star, 9-10 is 5 stars).",
+            "description": "Import the provider's movie and series ratings, 1 to 10, unchanged.",
             "type": "boolean"
           },
           "import_watched_enabled": {

@@ -125916,7 +125916,7 @@
   "web.settings.watchProviders.toggle.exportRatings.description": [
     {
       "type": 0,
-      "value": "将你的星级评分发送到"
+      "value": "将你的评分发送到"
     },
     {
       "type": 1,
@@ -125924,7 +125924,7 @@
     },
     {
       "type": 0,
-      "value": "，并清除你移除的评分。4星对应8/10。"
+      "value": "，并清除你移除的评分。3.5星对应7/10。"
     }
   ],
   "web.settings.watchProviders.toggle.exportRatings.label": [
@@ -126000,7 +126000,7 @@
   "web.settings.watchProviders.toggle.importRatings.description": [
     {
       "type": 0,
-      "value": "将"
+      "value": "导入"
     },
     {
       "type": 1,
@@ -126008,7 +126008,7 @@
     },
     {
       "type": 0,
-      "value": "中的电影和剧集评分导入为星级。7/10对应4星。"
+      "value": "中的电影和剧集评分。7/10对应3.5星。"
     }
   ],
   "web.settings.watchProviders.toggle.importRatings.label": [

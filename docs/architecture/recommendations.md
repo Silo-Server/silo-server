@@ -171,6 +171,9 @@ not lost. A refresh that finds the profile's lock held by
 another server marks the profile stale and stops, so two refreshes never
 finish out of order.
 
+- Ratings are stored as scores from 1 to 10 and weighed in whole stars,
+  rounding half up: 9-10 is 5 stars, 7-8 is 4, 5-6 is 3, and 1-4 (1-2
+  stars) is a dislike. The star counts below use those bands.
 - Episodes roll up to their series. A series decays once by its most recent
   signal, as a movie decays by its last watch. A series with no signal for
   30 days counts in proportion to its episodes watched with a positive

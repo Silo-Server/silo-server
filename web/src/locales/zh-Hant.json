@@ -126430,7 +126430,7 @@
     },
     {
       "type": 0,
-      "value": "，並清除你移除的評分。4 顆星會轉為 8/10。"
+      "value": "，並清除你移除的評分。3.5 顆星會轉為 7/10。"
     }
   ],
   "web.settings.watchProviders.toggle.exportRatings.label": [
@@ -126514,7 +126514,7 @@
     },
     {
       "type": 0,
-      "value": " 的電影和影集評分轉為星級匯入。7/10 會轉為 4 顆星。"
+      "value": " 的電影和影集評分轉為星級匯入。7/10 會轉為 3.5 顆星。"
     }
   ],
   "web.settings.watchProviders.toggle.importRatings.label": [

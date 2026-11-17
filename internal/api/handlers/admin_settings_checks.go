@@ -236,6 +236,9 @@ func checkAITranscriptionConnection(ctx context.Context, cfg *config.Config) con
 }
 
 func transcriptionCheckFailureMessage(err error) string {
+	if errors.Is(err, llm.ErrTimedSegmentsUnsupported) {
+		return "Speech-to-text model does not return timestamped segments, which Silo needs to make subtitles. Choose a model that supports segment timestamps, such as whisper-1 on OpenAI."
+	}
 	switch llm.Classify(err) {
 	case llm.FailureQuotaExhausted:
 		return "Speech-to-text provider quota is exhausted. Check your provider balance and limits."

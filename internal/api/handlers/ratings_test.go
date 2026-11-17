@@ -55,9 +55,9 @@ func (idsFailingItemRepo) EnsureAccessibleIDs(context.Context, []string, catalog
 func TestRatingsFollowViewerAccess(t *testing.T) {
 	now := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
 	repo := &memoryRatings{rows: []catalog.UserRating{
-		{UserID: 1, ProfileID: "p1", MediaItemID: "movie:visible", Rating: 4, RatedAt: now},
-		{UserID: 1, ProfileID: "p1", MediaItemID: "series:hidden", Rating: 5, RatedAt: now.Add(-time.Hour)},
-		{UserID: 1, ProfileID: "p1", MediaItemID: "movie:also-visible", Rating: 2, RatedAt: now.Add(-2 * time.Hour)},
+		{UserID: 1, ProfileID: "p1", MediaItemID: "movie:visible", Score: 4, RatedAt: now},
+		{UserID: 1, ProfileID: "p1", MediaItemID: "series:hidden", Score: 5, RatedAt: now.Add(-time.Hour)},
+		{UserID: 1, ProfileID: "p1", MediaItemID: "movie:also-visible", Score: 2, RatedAt: now.Add(-2 * time.Hour)},
 	}}
 	// The item repository holds only what the viewer may see.
 	items := markItemRepo{items: map[string]*models.MediaItem{
@@ -69,7 +69,7 @@ func TestRatingsFollowViewerAccess(t *testing.T) {
 	ctx := context.Background()
 	access := catalog.AccessFilter{UserID: 1, ProfileID: "p1"}
 
-	if r, found, err := h.GetRating(ctx, 1, "p1", "movie:visible", access); err != nil || !found || r.Rating != 4 {
+	if r, found, err := h.GetRating(ctx, 1, "p1", "movie:visible", access); err != nil || !found || r.Score != 4 {
 		t.Fatalf("visible = %+v, %v, %v", r, found, err)
 	}
 	if _, found, err := h.GetRating(ctx, 1, "p1", "movie:unrated", access); err != nil || found {

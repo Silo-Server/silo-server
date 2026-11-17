@@ -86,6 +86,15 @@ write are in `internal/scanner/audiobook_tags.go`:
   when there is no `album`. Otherwise `title` stays, because a single file's `album` may name its
   series or a collection. A multi-file book whose part titles name the parts
   uses `album`.
+- Authors: the `artist` tag, as in Audiobookshelf. `album_artist` is read when
+  `artist` is empty, or when it names some of the people in `artist` and no
+  one else (`artist` then also lists the narrator). inAudible writes the
+  series to `album_artist`, so it never wins over an `artist` naming someone
+  else. `composer` is the last resort.
+- Series without a position: a `grouping` tag counts only when it ends in a
+  position, because it often holds a category or a work name, or when
+  `album_artist` repeats it and no author's name appears in it, as inAudible
+  writes a series.
 - Narrators: an explicit narrator tag (`narrator`, the MP4 `©nrt` atom, or
   `narratedby`) when present. Otherwise the first of `performer` and
   `composer` that names someone other than the tagged authors: some files put

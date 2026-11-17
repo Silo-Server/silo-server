@@ -160284,7 +160284,7 @@
   "web.settings.watchProviders.toggle.exportRatings.description": [
     {
       "type": 0,
-      "value": "Odesílat hodnocení hvězdičkami do služby "
+      "value": "Odesílat vaše hodnocení do služby "
     },
     {
       "type": 1,
@@ -160292,7 +160292,7 @@
     },
     {
       "type": 0,
-      "value": " a mazat ta, která odeberete. 4 hvězdičky odpovídají 8/10."
+      "value": " a mazat ta, která odeberete. Hodnocení 3,5 hvězdičky se převede na 7/10."
     }
   ],
   "web.settings.watchProviders.toggle.exportRatings.label": [
@@ -160368,7 +160368,7 @@
   "web.settings.watchProviders.toggle.importRatings.description": [
     {
       "type": 0,
-      "value": "Převést hodnocení filmů a seriálů ze služby "
+      "value": "Přenést hodnocení filmů a seriálů ze služby "
     },
     {
       "type": 1,
@@ -160376,7 +160376,7 @@
     },
     {
       "type": 0,
-      "value": " na hvězdičky. 7/10 odpovídá 4 hvězdičkám."
+      "value": ". Hodnocení 7/10 se převede na 3,5 hvězdičky."
     }
   ],
   "web.settings.watchProviders.toggle.importRatings.label": [

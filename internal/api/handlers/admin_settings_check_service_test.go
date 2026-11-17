@@ -9,7 +9,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"slices"
-	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -99,24 +98,33 @@ func (s settingsCheckChatGPTStore) UpdateValueAtomic(ctx context.Context, key st
 }
 
 func TestTranscriptionCheckReportsSafeProviderFailure(t *testing.T) {
+	// Provider text must neither leak nor control the diagnosis.
+	const privateError = `{"error":{"message":"returned 401: private-test-key https://private.example"}}`
+	const untimed = "Speech-to-text model does not return timestamped segments, which Silo needs to make subtitles. Choose a model that supports segment timestamps, such as whisper-1 on OpenAI."
 	for _, tc := range []struct {
+		name   string
 		status int
+		body   string
 		want   string
 	}{
-		{http.StatusUnauthorized, "Speech-to-text authentication failed. Replace the provider's API key in AI Services."},
-		{http.StatusForbidden, "Speech-to-text access was denied. Check your API key permissions and allowed providers."},
-		{http.StatusPaymentRequired, "Speech-to-text provider requires payment. Check your provider balance and spending limit."},
-		{http.StatusNotFound, "Speech-to-text endpoint or model is unavailable. Check the provider's base URL, the model, and allowed providers."},
-		{http.StatusBadRequest, "Connection check failed. Verify the submitted settings and provider availability."},
+		{"401", http.StatusUnauthorized, privateError, "Speech-to-text authentication failed. Replace the provider's API key in AI Services."},
+		{"403", http.StatusForbidden, privateError, "Speech-to-text access was denied. Check your API key permissions and allowed providers."},
+		{"402", http.StatusPaymentRequired, privateError, "Speech-to-text provider requires payment. Check your provider balance and spending limit."},
+		{"404", http.StatusNotFound, privateError, "Speech-to-text endpoint or model is unavailable. Check the provider's base URL, the model, and allowed providers."},
+		{"400", http.StatusBadRequest, privateError, "Connection check failed. Verify the submitted settings and provider availability."},
+		// OpenAI's answer for gpt-transcribe, which has no timed output (#3518).
+		{"verbose_json rejected", http.StatusBadRequest, `{"error":{"message":"response_format 'verbose_json' is not compatible with model 'private-model'. Use 'json' or 'text' instead.","type":"invalid_request_error","param":"response_format","code":"unsupported_value"}}`, untimed},
+		{"timestamps rejected", http.StatusBadRequest, `{"error":{"message":"private","type":"invalid_request_error","param":"timestamp_granularities[]","code":"unsupported_value"}}`, untimed},
+		{"text without segments", http.StatusOK, `{"text":"private transcript"}`, untimed},
+		{"not a transcription reply", http.StatusOK, `{}`, "Connection check failed. Verify the submitted settings and provider availability."},
 	} {
-		t.Run(strconv.Itoa(tc.status), func(t *testing.T) {
+		t.Run(tc.name, func(t *testing.T) {
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				if r.Header.Get("Authorization") != "Bearer private-test-key" {
 					t.Error("saved ASR key was not sent")
 				}
 				w.WriteHeader(tc.status)
-				// Provider text must neither leak nor control the diagnosis.
-				_, _ = w.Write([]byte(`{"error":{"message":"returned 401: private-test-key https://private.example"}}`))
+				_, _ = w.Write([]byte(tc.body))
 			}))
 			defer server.Close()
 			h := &AdminHandler{SettingsRepo: &fakeServerSettingsStore{values: map[string]string{

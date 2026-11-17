@@ -87,12 +87,12 @@ func (f *fakeRatings) SetRating(_ context.Context, userID int, profileID, itemID
 	}
 	for i, r := range f.ratings {
 		if r.UserID == userID && r.ProfileID == profileID && r.MediaItemID == itemID {
-			f.ratings[i].Rating = rating
+			f.ratings[i].Score = rating
 			f.ratings[i].RatedAt = fixedTime().Add(time.Hour)
 			return nil
 		}
 	}
-	f.ratings = append([]catalogpkg.UserRating{{UserID: userID, ProfileID: profileID, MediaItemID: itemID, Rating: rating, RatedAt: fixedTime().Add(time.Hour)}}, f.ratings...)
+	f.ratings = append([]catalogpkg.UserRating{{UserID: userID, ProfileID: profileID, MediaItemID: itemID, Score: rating, RatedAt: fixedTime().Add(time.Hour)}}, f.ratings...)
 	return nil
 }
 
@@ -118,10 +118,10 @@ func ratingsDeps(ratings *fakeRatings) Dependencies {
 
 func ratingRows() []catalogpkg.UserRating {
 	return []catalogpkg.UserRating{
-		{UserID: 1, ProfileID: "p-owner", MediaItemID: "movie:c", Rating: 5, RatedAt: fixedTime()},
-		{UserID: 1, ProfileID: "p-owner", MediaItemID: "movie:b", Rating: 3, RatedAt: fixedTime().Add(-time.Hour)},
-		{UserID: 1, ProfileID: "p-owner", MediaItemID: "movie:a", Rating: 1, RatedAt: fixedTime().Add(-2 * time.Hour)},
-		{UserID: 1, ProfileID: "p-other", MediaItemID: "movie:z", Rating: 2, RatedAt: fixedTime()},
+		{UserID: 1, ProfileID: "p-owner", MediaItemID: "movie:c", Score: 5 * 2, RatedAt: fixedTime()},
+		{UserID: 1, ProfileID: "p-owner", MediaItemID: "movie:b", Score: 3 * 2, RatedAt: fixedTime().Add(-time.Hour)},
+		{UserID: 1, ProfileID: "p-owner", MediaItemID: "movie:a", Score: 1 * 2, RatedAt: fixedTime().Add(-2 * time.Hour)},
+		{UserID: 1, ProfileID: "p-other", MediaItemID: "movie:z", Score: 2 * 2, RatedAt: fixedTime()},
 	}
 }
 
@@ -134,7 +134,7 @@ func TestListRatings(t *testing.T) {
 	deps.CursorSecret = []byte("ratings-cursor-test-key")
 	h := newTestHandler(t, deps)
 	rec := do(t, h, http.MethodGet, "/api/v2/ratings", "", viewerHeaders())
-	if rec.Code != 200 || !strings.HasPrefix(rec.Body.String(), `{"items":[{"item_id":"movie:c","rating":5,"rated_at":"2026-01-02T03:04:05.678Z"},`) || !strings.Contains(rec.Body.String(), `"has_more":false`) {
+	if rec.Code != 200 || !strings.HasPrefix(rec.Body.String(), `{"items":[{"item_id":"movie:c","rating":10,"rated_at":"2026-01-02T03:04:05.678Z"},`) || !strings.Contains(rec.Body.String(), `"has_more":false`) {
 		t.Fatalf("%d %s", rec.Code, rec.Body.String())
 	}
 	if ratings.limits[0] != DefaultLimit+1 {
@@ -237,7 +237,7 @@ func ratingPages(t *testing.T, h http.Handler, limit int) (pages [][]string, pay
 func TestRatingsHideItemsTheViewerMayNotSee(t *testing.T) {
 	ratings := &fakeRatings{hidden: map[string]bool{"movie:e": true, "movie:d": true, "movie:c": true}}
 	for i, id := range []string{"movie:f", "movie:e", "movie:d", "movie:c", "movie:b", "movie:a"} {
-		ratings.ratings = append(ratings.ratings, catalogpkg.UserRating{UserID: 1, ProfileID: "p-owner", MediaItemID: id, Rating: 5 - i%5, RatedAt: fixedTime().Add(-time.Duration(i) * time.Hour)})
+		ratings.ratings = append(ratings.ratings, catalogpkg.UserRating{UserID: 1, ProfileID: "p-owner", MediaItemID: id, Score: 10 - 2*(i%5), RatedAt: fixedTime().Add(-time.Duration(i) * time.Hour)})
 	}
 	deps := ratingsDeps(ratings)
 	deps.CursorSecret = []byte("ratings-cursor-test-key")
@@ -253,7 +253,7 @@ func TestRatingsHideItemsTheViewerMayNotSee(t *testing.T) {
 
 	// A hidden title's rating reads as 404, a visible one as before.
 	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/ratings/movie:d", "", viewerHeaders()), TypeNotFound)
-	if rec := do(t, h, http.MethodGet, "/api/v2/ratings/movie:f", "", viewerHeaders()); rec.Code != 200 || !strings.Contains(rec.Body.String(), `"rating":5`) {
+	if rec := do(t, h, http.MethodGet, "/api/v2/ratings/movie:f", "", viewerHeaders()); rec.Code != 200 || !strings.Contains(rec.Body.String(), `"rating":10`) {
 		t.Fatalf("%d %s", rec.Code, rec.Body.String())
 	}
 
@@ -282,7 +282,7 @@ func TestRatingsHideItemsTheViewerMayNotSee(t *testing.T) {
 func TestGetRating(t *testing.T) {
 	h := newTestHandler(t, ratingsDeps(&fakeRatings{ratings: ratingRows()}))
 	rec := do(t, h, http.MethodGet, "/api/v2/ratings/movie:c", "", viewerHeaders())
-	if rec.Code != 200 || rec.Body.String() != `{"item_id":"movie:c","rating":5,"rated_at":"2026-01-02T03:04:05.678Z"}`+"\n" {
+	if rec.Code != 200 || rec.Body.String() != `{"item_id":"movie:c","rating":10,"rated_at":"2026-01-02T03:04:05.678Z"}`+"\n" {
 		t.Fatalf("%d %s", rec.Code, rec.Body.String())
 	}
 	// Not rated, and another profile's rating, are both 404.
@@ -310,3 +310,24 @@ func TestRatingsDenied(t *testing.T) {
 }
 
 var _ RatingService = (*handlers.RatingsHandler)(nil)
+
+// A rating runs from 1 to 10, shown as five stars with half stars, and reads
+// back as it was set.
+func TestSetRatingOneToTen(t *testing.T) {
+	ratings := &fakeRatings{}
+	h := newTestHandler(t, ratingsDeps(ratings))
+	for _, rating := range []int{7, 1, 10} {
+		body := `{"rating":` + strconv.Itoa(rating) + `}`
+		if rec := do(t, h, http.MethodPut, "/api/v2/ratings/movie:c", body, viewerHeaders()); rec.Code != http.StatusNoContent {
+			t.Fatalf("%s: %d %s", body, rec.Code, rec.Body.String())
+		}
+		rec := do(t, h, http.MethodGet, "/api/v2/ratings/movie:c", "", viewerHeaders())
+		want := `"rating":` + strconv.Itoa(rating) + `,"rated_at"`
+		if rec.Code != 200 || !strings.Contains(rec.Body.String(), want) {
+			t.Fatalf("%s: %d %s, want %s", body, rec.Code, rec.Body.String(), want)
+		}
+	}
+	for _, body := range []string{`{}`, `{"rating":0}`} {
+		requireProblem(t, do(t, h, http.MethodPut, "/api/v2/ratings/movie:c", body, viewerHeaders()), TypeValidationFailed)
+	}
+}

@@ -161176,7 +161176,7 @@
   "web.settings.watchProviders.toggle.exportRatings.description": [
     {
       "type": 0,
-      "value": "Отправлять ваши оценки в звёздах в сервис "
+      "value": "Отправлять ваши оценки в сервис "
     },
     {
       "type": 1,
@@ -161184,7 +161184,7 @@
     },
     {
       "type": 0,
-      "value": " и удалять там те, что вы убрали. 4 звезды — это 8/10."
+      "value": " и удалять там те, что вы убрали. 3,5 звезды — это 7/10."
     }
   ],
   "web.settings.watchProviders.toggle.exportRatings.label": [
@@ -161268,7 +161268,7 @@
     },
     {
       "type": 0,
-      "value": " в виде звёзд. 7/10 — это 4 звезды."
+      "value": ". 7/10 — это 3,5 звезды."
     }
   ],
   "web.settings.watchProviders.toggle.importRatings.label": [

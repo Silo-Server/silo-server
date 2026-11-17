@@ -124596,7 +124596,7 @@
   "web.settings.watchProviders.toggle.exportRatings.description": [
     {
       "type": 0,
-      "value": "星の評価を"
+      "value": "評価を"
     },
     {
       "type": 1,
@@ -124612,7 +124612,7 @@
     },
     {
       "type": 0,
-      "value": "でもクリアします。星4つは8/10になります。"
+      "value": "でもクリアします。星3.5は7/10になります。"
     }
   ],
   "web.settings.watchProviders.toggle.exportRatings.label": [
@@ -124688,7 +124688,7 @@
     },
     {
       "type": 0,
-      "value": "の映画とシリーズの評価を星として取り込みます。7/10は星4つになります。"
+      "value": "の映画とシリーズの評価を取り込みます。7/10は星3.5になります。"
     }
   ],
   "web.settings.watchProviders.toggle.importRatings.label": [

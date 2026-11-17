@@ -90,7 +90,7 @@ func TestRatingsPageFollowsAccessDB(t *testing.T) {
 	})
 	now := time.Now().UTC().Truncate(time.Second)
 	for i, id := range []string{m1, s1, gone, m2} {
-		batchEquivExec(t, pool, `INSERT INTO user_ratings (user_id, profile_id, media_item_id, rating, rated_at) VALUES ($1, 'p1', $2, 3, $3)`, userID, id, now.Add(-time.Duration(i)*time.Hour))
+		batchEquivExec(t, pool, `INSERT INTO user_ratings (user_id, profile_id, media_item_id, rating, rated_at) VALUES ($1, 'p1', $2, 6, $3)`, userID, id, now.Add(-time.Duration(i)*time.Hour))
 	}
 
 	repo := NewRatingsRepo(pool)
