@@ -54,6 +54,9 @@ type fakeItemRepo struct {
 
 	// unmatchedIDs is what ListUnmatchedByFolderAndPathPrefix returns.
 	unmatchedIDs []string
+
+	// metadataUpdates counts UpdateMetadata calls.
+	metadataUpdates int
 }
 
 // trailersClaimResult forces a fixed answer out of the cooldown gate, for the
@@ -120,6 +123,38 @@ func (r *fakeItemRepo) Upsert(_ context.Context, item *models.MediaItem) error {
 	cp := *item
 	r.items[item.ContentID] = &cp
 	return nil
+}
+
+// UpdateProvisionalArtwork applies the artwork columns of upd under the
+// repository's condition: the item is still provisional, its images lock is as
+// the caller read it, and each slot upd writes still has the source read.
+func (r *fakeItemRepo) UpdateProvisionalArtwork(_ context.Context, read *models.MediaItem, upd *catalog.MetadataUpdate) (bool, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	contentID := read.ContentID
+	item, ok := r.items[contentID]
+	if !ok || !isProvisionalOwnershipStatus(item.Status) || artworkLocked(item) != artworkLocked(read) ||
+		(upd.PosterSourcePath != nil && item.PosterSourcePath != read.PosterSourcePath) ||
+		(upd.BackdropSourcePath != nil && item.BackdropSourcePath != read.BackdropSourcePath) ||
+		(upd.LogoSourcePath != nil && item.LogoSourcePath != read.LogoSourcePath) {
+		return false, nil
+	}
+	r.metadataUpdates++
+	cp := *item
+	for _, col := range []struct {
+		dst *string
+		val *string
+	}{
+		{&cp.PosterPath, upd.PosterPath}, {&cp.PosterSourcePath, upd.PosterSourcePath}, {&cp.PosterThumbhash, upd.PosterThumbhash},
+		{&cp.BackdropPath, upd.BackdropPath}, {&cp.BackdropSourcePath, upd.BackdropSourcePath}, {&cp.BackdropThumbhash, upd.BackdropThumbhash},
+		{&cp.LogoPath, upd.LogoPath}, {&cp.LogoSourcePath, upd.LogoSourcePath},
+	} {
+		if col.val != nil {
+			*col.dst = *col.val
+		}
+	}
+	r.items[contentID] = &cp
+	return true, nil
 }
 
 func (r *fakeItemRepo) SetStatusUnlessMatched(_ context.Context, contentID, status string) (bool, error) {
