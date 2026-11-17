@@ -402,7 +402,10 @@ precedence order, each tried with `.jpg`, `.jpeg`, `.png`, `.webp`, `.tbn`,
   shows a frame. Any other image replaces a frame: a sidecar or admin pick as
   usual, and in a fill-empty refresh (initial match, scheduled refresh) the
   merge treats an unlocked frame poster as empty, so even an unrated provider
-  poster wins; with no image offered the frame stays. A localized provider
+  poster wins; with no image offered the frame stays. A frame's stored path
+  only ever goes with its `frame:` source: when another image replaces it, the
+  slot serves that image's remote path, or nothing while a local copy is
+  pending, never the frame as a stand-in. A localized provider
   poster also replaces a frame for viewers in its language, although the frame
   sits under the `local/` keys that otherwise mark library artwork. Known limits: only the
   poster slot is filled, so a detail screen that shows only a backdrop still

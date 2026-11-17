@@ -3129,9 +3129,10 @@ func (s *MetadataService) mergeAndPersist(
 	}
 
 	if handleArtwork {
-		prepareItemImagesForQueue(item, existingItem, keepStored, req.Mode == ModeIdentify)
+		queuedFrom := withoutReplacedFramePoster(item, existingItem)
+		prepareItemImagesForQueue(item, queuedFrom, keepStored, req.Mode == ModeIdentify)
 		dropGoneItemOnlyArtwork(localArt, item, images)
-		applyLocalArtworkFallback(item, existingItem, images, req.Language, fallbackLanguage)
+		applyLocalArtworkFallback(item, queuedFrom, images, req.Language, fallbackLanguage)
 	}
 
 	if isNew && contentID == "" {
@@ -9923,6 +9924,22 @@ func clearFramePoster(item, existing *models.MediaItem) storedItemArtwork {
 		stored.poster, item.PosterPath = item.PosterPath, ""
 	}
 	return stored
+}
+
+// withoutReplacedFramePoster returns existing, or, when the merge replaced its
+// frame poster (clearFramePoster) with another image, a copy without that
+// poster's path and thumbhash. A frame's path only ever goes with its frame
+// source, so it never stands in while another source's copy is pending: the
+// slot serves what a slot with no stored copy would. The frame is left to the
+// artwork revision GC.
+func withoutReplacedFramePoster(item, existing *models.MediaItem) *models.MediaItem {
+	if existing == nil || artworkLocked(item) || item.PosterPath == existing.PosterPath ||
+		!strings.HasPrefix(existing.PosterSourcePath, catalog.StillSourceFramePrefix) {
+		return existing
+	}
+	trimmed := *existing
+	trimmed.PosterPath, trimmed.PosterThumbhash = "", ""
+	return &trimmed
 }
 
 // restoreUnfilled gives each slot no provider image filled its stored copy

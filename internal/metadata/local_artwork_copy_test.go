@@ -904,7 +904,9 @@ func TestCachingOffKeepsStoredArtworkNoProviderFills(t *testing.T) {
 }
 
 // A poster taken from the movie's video gives way to any provider poster in
-// a fill-empty refresh, unrated included, and stays when none is offered.
+// a fill-empty refresh, unrated included, and stays when none is offered. A
+// frame never stands in for another source while its copy is pending: the
+// slot serves the provider's image instead.
 func TestFramePosterGivesWayToAnyProviderPoster(t *testing.T) {
 	const (
 		framePoster  = "local/movies/movie:tmdb:7/0badf00d/poster/original.r1.webp"
@@ -913,12 +915,12 @@ func TestFramePosterGivesWayToAnyProviderPoster(t *testing.T) {
 	)
 	ctx := context.Background()
 	for _, tc := range []struct {
-		name       string
-		images     []RemoteImage
-		wantSource string
+		name                 string
+		images               []RemoteImage
+		wantPath, wantSource string
 	}{
-		{"unrated provider poster", []RemoteImage{{Type: ImagePoster, URL: remotePoster, ProviderID: "tmdb", Language: "en"}}, remotePoster},
-		{"no image offered", nil, frameSource},
+		{"unrated provider poster", []RemoteImage{{Type: ImagePoster, URL: remotePoster, ProviderID: "tmdb", Language: "en"}}, remotePoster, remotePoster},
+		{"no image offered", nil, framePoster, frameSource},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			h := newTestFilmHarness(ctx, t, models.MediaItem{PosterPath: framePoster, PosterSourcePath: frameSource, PosterThumbhash: "frame-thumb"})
@@ -929,9 +931,8 @@ func TestFramePosterGivesWayToAnyProviderPoster(t *testing.T) {
 			if got.PosterSourcePath != tc.wantSource {
 				t.Errorf("poster source = %q, want %q", got.PosterSourcePath, tc.wantSource)
 			}
-			// The frame serves until the provider poster's copy lands.
-			if got.PosterPath != framePoster {
-				t.Errorf("poster path = %q, want the frame %q", got.PosterPath, framePoster)
+			if got.PosterPath != tc.wantPath {
+				t.Errorf("poster path = %q, want %q", got.PosterPath, tc.wantPath)
 			}
 		})
 	}
