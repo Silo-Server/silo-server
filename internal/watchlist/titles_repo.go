@@ -396,17 +396,18 @@ func (r *titlesRepo) promoteEntry(ctx context.Context, userID int, profileID str
 	if err != nil {
 		return false, false, err
 	}
+	// Recorded before the delete, which can take the title and its aliases.
+	if newToUser {
+		if err := recordPromotion(ctx, tx, userID, profileID, titleID, contentID, currentAddedAt); err != nil {
+			return false, false, err
+		}
+	}
 	if err := keepSyncTitleIDsLocked(ctx, tx, userID, profileID, titleID); err != nil {
 		return false, false, err
 	}
 	removed, err := deleteEntryLocked(ctx, tx, userID, profileID, titleID)
 	if err != nil {
 		return false, false, err
-	}
-	if removed && newToUser {
-		if err := recordPromotion(ctx, tx, userID, profileID, contentID, currentAddedAt); err != nil {
-			return false, false, err
-		}
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return false, false, fmt.Errorf("committing watchlist title promotion: %w", err)

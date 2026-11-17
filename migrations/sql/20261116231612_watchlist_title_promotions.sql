@@ -18,6 +18,9 @@ CREATE TABLE public.watchlist_title_promotions (
     media_item_id text NOT NULL,
     -- The title entry's added_at, which the library entry also keeps.
     title_added_at timestamptz NOT NULL,
+    -- Every TMDB ID the title held when it was promoted. The catalog item may
+    -- not carry a former one, and a request made under it must still be found.
+    title_tmdb_ids integer[] NOT NULL DEFAULT '{}',
     promoted_at timestamptz NOT NULL DEFAULT now(),
     PRIMARY KEY (user_id, profile_id, media_item_id)
 );

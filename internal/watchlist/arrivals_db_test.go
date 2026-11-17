@@ -96,6 +96,17 @@ func TestArrivalFindsAnEntryPromotedOutsidePostgresDB(t *testing.T) {
 		t.Fatalf("waiters before promotion = %+v, want [%+v]", got, want)
 	}
 
+	// The title once had another TMDB ID, which the library item does not
+	// carry. Promotion keeps it for the request check.
+	formerTMDB := tmdbID + 1
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO watchlist_title_aliases (title_id, media_type, provider, provider_id)
+		SELECT a.title_id, a.media_type, 'tmdb', $2 FROM watchlist_title_aliases a
+		WHERE a.media_type = 'movie' AND a.provider = 'tmdb' AND a.provider_id = $1`,
+		strconv.Itoa(tmdbID), strconv.Itoa(formerTMDB)); err != nil {
+		t.Fatal(err)
+	}
+
 	viewer := Viewer{UserID: user, ProfileID: profile, Access: catalog.AccessFilter{UserID: user, ProfileID: profile, AllowedLibraryIDs: []int{folder}}}
 	promoted, err := titles.PromoteProfile(ctx, viewer)
 	if err != nil {
@@ -109,8 +120,9 @@ func TestArrivalFindsAnEntryPromotedOutsidePostgresDB(t *testing.T) {
 	}
 
 	waiting = waitersFor(t, arrivals, pool, movie, arrivedSince)
-	if got := waiting; len(got) != 1 || got[0].UserID != user || got[0].ProfileID != profile || len(got[0].TMDBIDs) != 1 || got[0].TMDBIDs[0] != tmdbID {
-		t.Fatalf("waiters after promotion = %+v, want [%+v]", got, want)
+	if got := waiting; len(got) != 1 || got[0].UserID != user || got[0].ProfileID != profile ||
+		len(got[0].TMDBIDs) != 2 || got[0].TMDBIDs[0] != tmdbID || got[0].TMDBIDs[1] != formerTMDB {
+		t.Fatalf("waiters after promotion = %+v, want the profile with TMDB IDs [%d %d]", got, tmdbID, formerTMDB)
 	}
 
 	// An item older than the horizon has not arrived.

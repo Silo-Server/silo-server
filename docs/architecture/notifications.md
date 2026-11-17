@@ -399,7 +399,8 @@ waiting profile:
   promotes its entry first. The library watchlist can live in the per-user
   SQLite store, which fanout cannot query, so promotion records the move in
   `watchlist_title_promotions` in its own transaction, keeping the entry's
-  `added_at`. A record counts when that `added_at` predates the item's
+  `added_at` and every TMDB ID the title held, so a request made under a
+  former ID is still found. A record counts when that `added_at` predates the item's
   `created_at`. Notification retention deletes records promoted before the
   staleness horizon, which can no longer match; deleting a profile deletes
   its records, and so does taking the item off the library watchlist, by

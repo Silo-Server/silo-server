@@ -123,13 +123,19 @@ func arrivedItems(ctx context.Context, q Querier, contentIDs []string, arrivedSi
 }
 
 // recordPromotion notes, in the promotion's transaction, that a title entry
-// added at titleAddedAt moved onto the item.
-func recordPromotion(ctx context.Context, q Querier, userID int, profileID, contentID string, titleAddedAt time.Time) error {
+// added at titleAddedAt moved onto the item. It keeps every TMDB ID the title
+// holds or once held: the item may not carry a former one, and a request made
+// under it must still be found once the title row is gone.
+func recordPromotion(ctx context.Context, q Querier, userID int, profileID string, titleID int64, contentID string, titleAddedAt time.Time) error {
 	if _, err := q.Exec(ctx, `
-		INSERT INTO watchlist_title_promotions (user_id, profile_id, media_item_id, title_added_at)
-		VALUES ($1, $2, $3, $4)
+		INSERT INTO watchlist_title_promotions (user_id, profile_id, media_item_id, title_added_at, title_tmdb_ids)
+		VALUES ($1, $2, $3, $4, ARRAY(
+			SELECT t.tmdb_id FROM watchlist_titles t WHERE t.id = $5
+			UNION
+			SELECT a.provider_id::integer FROM watchlist_title_aliases a
+			WHERE a.title_id = $5 AND a.provider = 'tmdb' AND a.provider_id ~ '^[0-9]{1,9}$'))
 		ON CONFLICT (user_id, profile_id, media_item_id) DO NOTHING`,
-		userID, profileID, contentID, titleAddedAt); err != nil {
+		userID, profileID, contentID, titleAddedAt, titleID); err != nil {
 		return fmt.Errorf("recording watchlist title promotion: %w", err)
 	}
 	return nil
@@ -264,10 +270,11 @@ func unpromotedWaiters(ctx context.Context, q Querier, contentID, mediaType stri
 
 // promotedWaiters returns the profiles whose entry promotion already moved
 // onto the item, when the entry predates the item. The title row may be gone
-// by then, so the item's TMDB IDs name the title, its current one first.
+// by then, so the item's TMDB IDs name the title, its current one first,
+// joined by the IDs the promotion kept from the title.
 func promotedWaiters(ctx context.Context, q Querier, contentID, mediaType string, itemAliases []catalog.ProviderAlias) ([]Waiter, error) {
 	rows, err := q.Query(ctx, `
-		SELECT p.user_id, p.profile_id, i.tmdb_id
+		SELECT p.user_id, p.profile_id, i.tmdb_id, p.title_tmdb_ids
 		FROM watchlist_title_promotions p
 		JOIN media_items i ON i.content_id = p.media_item_id
 		WHERE p.media_item_id = $1 AND p.title_added_at < i.created_at
@@ -290,10 +297,16 @@ func promotedWaiters(ctx context.Context, q Querier, contentID, mediaType string
 	for rows.Next() {
 		w := Waiter{MediaType: mediaType}
 		var currentTMDB *string
-		if err := rows.Scan(&w.UserID, &w.ProfileID, &currentTMDB); err != nil {
+		var titleTMDBIDs []int
+		if err := rows.Scan(&w.UserID, &w.ProfileID, &currentTMDB, &titleTMDBIDs); err != nil {
 			return nil, fmt.Errorf("scanning promoted watchlist waiter: %w", err)
 		}
 		w.TMDBIDs = currentFirst(itemTMDBIDs, currentTMDB)
+		for _, id := range titleTMDBIDs {
+			if !slices.Contains(w.TMDBIDs, id) {
+				w.TMDBIDs = append(w.TMDBIDs, id)
+			}
+		}
 		waiters = append(waiters, w)
 	}
 	return waiters, rows.Err()
