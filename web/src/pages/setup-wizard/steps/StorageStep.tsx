@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { FormEvent, ReactNode } from "react";
 
 import {
@@ -7,7 +7,9 @@ import {
 } from "@/components/admin/ConnectionCheckAction";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
-import { useAdminServerStatus } from "@/hooks/queries/admin/settings";
+import type { AdminServerStatus } from "@/api/types";
+import { fetchAdminServerStatus, useAdminServerStatus } from "@/hooks/queries/admin/settings";
+import { useRequestServerRestart } from "@/hooks/queries/admin/serverRestart";
 import { useSettingsForm } from "@/hooks/useSettingsForm";
 import { useT, type MessageKey, type Translate } from "@/i18n";
 import { stageRedisUrl } from "@/pages/admin-settings/redisDraft";
@@ -64,6 +66,26 @@ const STORAGE_LOCATION_KEYS = [
   "s3.private_bucket",
   "s3.private_key_prefix",
 ];
+
+// Every key on this step that the server reads only at startup.
+const STORAGE_RESTART_REASONS = new Set(ALL_KEYS.map((key) => `setting:${key}`));
+const RESTART_POLL_MS = 1_000;
+// Shutdown waits a few seconds for streams to drain, then startup migrates and
+// opens storage; past a minute, nothing is bringing the process back.
+const RESTART_SLOW_MS = 60_000;
+
+type RestartPhase = "idle" | "applying" | "slow";
+
+/**
+ * Whether storage settings this step saved are still waiting for a restart.
+ * The answering process reports them until it restarts, so this also covers a
+ * save made before a page reload.
+ */
+function storageRestartPending(status: AdminServerStatus): boolean {
+  return (status.restart_required_reasons ?? []).some((reason) =>
+    STORAGE_RESTART_REASONS.has(reason),
+  );
+}
 
 const S3_URL_AUTH_OPTIONS: { value: string; label: MessageKey }[] = [
   { value: "presigned", label: "web.setup.storage.authPresigned" },
@@ -285,10 +307,52 @@ function S3Fields({
 export function StorageStep() {
   const t = useT();
   const form = useSettingsForm({ keys: useMemo(() => ALL_KEYS, []) });
+  const serverStatus = useAdminServerStatus();
+  const restart = useRequestServerRestart();
+  const [restartPhase, setRestartPhase] = useState<RestartPhase>("idle");
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
+
+  // Storage settings take effect when Silo starts. Applying them before the
+  // Libraries step keeps the first stored files in the location the admin chose,
+  // instead of recording the old location and locking the new one out (#4418).
+  async function applySavedStorage(): Promise<boolean> {
+    const before = await fetchAdminServerStatus();
+    if (!storageRestartPending(before)) return true;
+    setRestartPhase("applying");
+    const slowAt = Date.now() + RESTART_SLOW_MS;
+    try {
+      await restart.mutateAsync({});
+    } catch {
+      setRestartPhase("slow");
+    }
+    while (mounted.current) {
+      await new Promise((resolve) => setTimeout(resolve, RESTART_POLL_MS));
+      try {
+        const now = await fetchAdminServerStatus();
+        if (now.started_at !== before.started_at) {
+          setRestartPhase("idle");
+          void serverStatus.refetch();
+          return true;
+        }
+      } catch {
+        // Expected while the old process stops and the new one starts.
+      }
+      if (Date.now() >= slowAt) setRestartPhase("slow");
+    }
+    return false;
+  }
+
   const { handleSubmit, busy, skip } = useStepSubmit(
     "storage",
     form,
     t("web.setup.storage.saveFailed"),
+    applySavedStorage,
   );
   const [open, setOpen] = useState<{ redis: boolean; public: boolean; private: boolean }>({
     redis: false,
@@ -303,7 +367,6 @@ export function StorageStep() {
   const redisManaged = form.sensitiveManagedByEnv.includes("redis.url");
   // The health probe pings Redis and Postgres; only worth it once there is a
   // Redis to report on.
-  const serverStatus = useAdminServerStatus();
   const artworkStorage = serverStatus.data?.artwork_storage;
   const storageLockStatusKnown =
     !serverStatus.isError &&
@@ -360,6 +423,22 @@ export function StorageStep() {
       onSkip={skip}
       footnote={t("web.setup.storage.footnote")}
     >
+      {restartPhase === "applying" ? (
+        <div className="rounded-xl border p-4" role="status">
+          <p className="text-sm font-medium">{t("web.setup.storage.applyingTitle")}</p>
+          <p className="text-muted-foreground mt-1 text-xs">
+            {t("web.setup.storage.applyingBody")}
+          </p>
+        </div>
+      ) : null}
+      {restartPhase === "slow" ? (
+        <div className="rounded-xl border border-amber-500/30 bg-amber-500/5 p-4" role="alert">
+          <p className="text-sm font-medium">{t("web.setup.storage.restartSlowTitle")}</p>
+          <p className="text-muted-foreground mt-1 text-xs">
+            {t("web.setup.storage.restartSlowBody")}
+          </p>
+        </div>
+      ) : null}
       {locationStatusUnavailable ? (
         <div className="rounded-xl border border-red-500/20 bg-red-500/5 p-4" role="alert">
           <p className="text-sm font-medium">{t("web.setup.storage.lockUnknownTitle")}</p>

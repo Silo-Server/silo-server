@@ -14,21 +14,29 @@ interface SaveableForm {
 /**
  * The submit protocol every settings step shares: nothing dirty means the step
  * is simply done; otherwise save first and only then mark it done, so a failed
- * write keeps the admin on the step with their edits intact.
+ * write keeps the admin on the step with their edits intact. `afterSave` runs
+ * whether or not anything was dirty, and the step is done once it resolves true.
  */
-export function useStepSubmit(step: SkippableStep, form: SaveableForm, errorMessage: string) {
+export function useStepSubmit(
+  step: SkippableStep,
+  form: SaveableForm,
+  errorMessage: string,
+  // Resolving false keeps the step open without an error, as when it unmounted.
+  afterSave?: () => Promise<boolean>,
+) {
   const { markDone } = useWizardContext();
   const [submitting, setSubmitting] = useState(false);
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
-    if (form.dirtyCount === 0) {
+    if (form.dirtyCount === 0 && !afterSave) {
       markDone(step);
       return;
     }
     setSubmitting(true);
     try {
-      await form.save();
+      if (form.dirtyCount > 0) await form.save();
+      if ((await afterSave?.()) === false) return;
       markDone(step);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : errorMessage);

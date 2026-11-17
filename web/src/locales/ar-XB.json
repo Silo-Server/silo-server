@@ -145711,6 +145711,18 @@
       "value": "\u200F\u202EAccess key\u202C"
     }
   ],
+  "web.setup.storage.applyingBody": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ESilo is restarting to use the new storage. Setup continues when it’s back.\u202C"
+    }
+  ],
+  "web.setup.storage.applyingTitle": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EApplying storage settings\u202C"
+    }
+  ],
   "web.setup.storage.authCloudflare": [
     {
       "type": 0,
@@ -145991,6 +146003,18 @@
     {
       "type": 0,
       "value": "\u200F\u202EConnection URL\u202C"
+    }
+  ],
+  "web.setup.storage.restartSlowBody": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ESilo comes back on its own when Docker, Kubernetes or systemd runs it. Otherwise, start Silo again yourself. Setup continues when it’s back.\u202C"
+    }
+  ],
+  "web.setup.storage.restartSlowTitle": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ESilo hasn’t restarted yet\u202C"
     }
   ],
   "web.setup.storage.saveFailed": [
