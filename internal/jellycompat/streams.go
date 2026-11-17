@@ -3973,7 +3973,20 @@ func (h *PlaybackHandler) restartCompatTranscodeForAudioSelection(
 	if err != nil {
 		return false, err
 	}
-	if err := h.startRemoteTranscode(context.WithoutCancel(ctx), playSession.ID, playSession.UpstreamSessionID, source, file, positionSeconds, upstreamSession.TranscodeNodeURL); err != nil {
+	// The player holds a keyframe-planned session's playlist, planned from the
+	// beginning. The node starts the replacement in a new output directory and
+	// plans only a run from the beginning, so restart from the recipe's start,
+	// as RecipeOpts keeps a local session's recipe: the node plans the same
+	// segments, and the player's next segment request restarts FFmpeg at the
+	// planned segment for its position once the from-start run has set the
+	// timeline (#4044). A session that resumed mid-stream serves FFmpeg's
+	// playlist and restarts at the position.
+	seekSeconds := positionSeconds
+	if recipe := playSession.Recipe; recipe != nil && recipe.KeyframePlaylist && source.KeyframePlaylist &&
+		compatHLSCopiesVideo(source) && recipe.SeekSeconds == 0 && recipe.StartSegmentNumber == 0 {
+		seekSeconds = 0
+	}
+	if err := h.startRemoteTranscode(context.WithoutCancel(ctx), playSession.ID, playSession.UpstreamSessionID, source, file, seekSeconds, upstreamSession.TranscodeNodeURL); err != nil {
 		if errors.Is(err, errRemoteStartAdoptedLocal) || errors.Is(err, errRemoteStartAdoptedRemote) {
 			return true, nil
 		}
