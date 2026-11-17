@@ -40,7 +40,10 @@ interface UsePlaybackRealtimeResult {
   connectionState: ConnectionState;
 }
 
-const reconnectDelays = [500, 1_000, 2_000, 5_000];
+// The last delay repeats. A mint can fail for minutes, for example while a
+// restarted server has not yet rebuilt the session, so the backoff keeps
+// growing instead of asking every few seconds for as long as the tab is open.
+const reconnectDelays = [500, 1_000, 2_000, 5_000, 10_000, 30_000];
 
 export function usePlaybackRealtime({
   sessionId,

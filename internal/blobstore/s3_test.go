@@ -225,6 +225,11 @@ func TestS3IdentityCoversStorageLocationOnly(t *testing.T) {
 	if !strings.HasPrefix(base, BackendS3+"|") {
 		t.Fatalf("identity = %q", base)
 	}
+	// The prefix is the client's stored form, normalized once, as earlier
+	// releases recorded it; a second pass would trim " cache" to "cache".
+	if got, want := build("https://s3.example", "artwork", "/ cache/", ""), BackendS3+"|https://s3.example|artwork| cache"; got != want {
+		t.Fatalf("identity = %q, want %q", got, want)
+	}
 	// Only the scheme and host of an endpoint are case-insensitive; a path
 	// names case-sensitive upstream storage on gateways.
 	if build("https://gateway.example/TenantA", "artwork", "", "") == build("https://gateway.example/tenanta", "artwork", "", "") {

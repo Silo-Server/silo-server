@@ -1067,6 +1067,14 @@ func TestPopulateFromTagsReadsGroupingSeriesAndLongDescription(t *testing.T) {
 		// Grouping without a position is not a series: it often holds a store
 		// category or a work name.
 		{map[string]string{"grouping": "Science Fiction"}, "", ""},
+		// It is the series when album_artist repeats it and does not name
+		// the author, as inAudible writes it.
+		{map[string]string{"artist": "Lee Child", "album_artist": "Jack Reacher", "grouping": "Jack Reacher"}, "Jack Reacher", ""},
+		{map[string]string{"artist": "Ann Author", "album_artist": "Ann Author", "grouping": "Ann Author"}, "", ""},
+		{map[string]string{"album_artist": "Ann Author", "grouping": "Ann Author"}, "", ""},
+		// A grouping that names the author is the author with a series note.
+		{map[string]string{"artist": "Stephen King", "album_artist": "Stephen King (The Dark Tower)", "grouping": "Stephen King (The Dark Tower)"}, "", ""},
+		{map[string]string{"artist": "King, Stephen", "album_artist": "Stephen King (The Dark Tower)", "grouping": "Stephen King (The Dark Tower)"}, "", ""},
 		// An explicit series tag wins; grouping fills its missing position.
 		{map[string]string{"series": "Saga", "grouping": "Saga Vol. 3"}, "Saga", "Vol. 3"},
 		{map[string]string{"series": "Saga", "grouping": "Other #3"}, "Saga", ""},
@@ -1204,6 +1212,35 @@ func TestAudiobookTagTitle(t *testing.T) {
 	b.populateFromTags(map[string]string{"title": "Saga Name 2 - Book Title", "album": "Other Words", "series": "Saga Name", "series-part": "2"})
 	if b.Title != "Book Title" {
 		t.Errorf("title read from tags = %q, want %q", b.Title, "Book Title")
+	}
+}
+
+func TestPopulateFromTagsAuthors(t *testing.T) {
+	cases := []struct {
+		tags map[string]string
+		want []string
+	}{
+		// artist names the author; album_artist may hold the series, as
+		// inAudible writes it, or the author with a series note.
+		{map[string]string{"artist": "Lee Child", "album_artist": "Jack Reacher", "composer": "Jeff Harding"}, []string{"Lee Child"}},
+		{map[string]string{"artist": "Stephen King", "album_artist": "Stephen King (The Dark Tower)"}, []string{"Stephen King"}},
+		// album_artist is the author when artist is empty.
+		{map[string]string{"album_artist": "Ann Author", "composer": "Ned Narrator"}, []string{"Ann Author"}},
+		{map[string]string{"artist": " ", "album_artist": "Ann Author"}, []string{"Ann Author"}},
+		// artist that adds the narrator to album_artist's author.
+		{map[string]string{"artist": "Ann Author, Ned Narrator", "album_artist": "Ann Author"}, []string{"Ann Author"}},
+		{map[string]string{"artist": "Homer, Ian McKellen", "album_artist": "Homer"}, []string{"Homer"}},
+		// Co-authors in artist are kept when album_artist names someone else.
+		{map[string]string{"artist": "Ann Author & Bea Writer", "album_artist": "Saga Name"}, []string{"Ann Author", "Bea Writer"}},
+		// composer is the last resort, as before.
+		{map[string]string{"composer": "Ann Author"}, []string{"Ann Author"}},
+	}
+	for _, tc := range cases {
+		b := &parsedAudiobook{}
+		b.populateFromTags(tc.tags)
+		if !reflect.DeepEqual(b.Authors, tc.want) {
+			t.Errorf("tags %v: authors %q, want %q", tc.tags, b.Authors, tc.want)
+		}
 	}
 }
 

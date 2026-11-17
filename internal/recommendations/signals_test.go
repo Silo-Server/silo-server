@@ -649,7 +649,7 @@ type fakeRatedItems []string
 func (f fakeRatedItems) ListAll(context.Context, int, string) ([]catalog.UserRating, error) {
 	out := make([]catalog.UserRating, len(f))
 	for i, id := range f {
-		out[i] = catalog.UserRating{MediaItemID: id, Rating: 4}
+		out[i] = catalog.UserRating{MediaItemID: id, Score: 8}
 	}
 	return out, nil
 }

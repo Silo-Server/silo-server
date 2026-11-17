@@ -174,12 +174,12 @@ type sectionAvailability struct {
 // wg, alongside the other card lookups, since those series are known before
 // the cards are assembled. It returns nil, and counts nothing, when the read
 // does not carry availability.
-func (h *SectionHandler) startSectionAvailability(ctx context.Context, wg *sync.WaitGroup, include bool, access catalog.AccessFilter, items []*models.MediaItem) *sectionAvailability {
+func (h *SectionHandler) startSectionAvailability(ctx context.Context, wg *sync.WaitGroup, timings *sectionBuildTimings, include bool, access catalog.AccessFilter, items []*models.MediaItem) *sectionAvailability {
 	if !include {
 		return nil
 	}
 	lookup := &sectionAvailability{store: h.fetcher, access: access, counted: seriesItemIDs(items)}
-	goSectionLookup(ctx, wg, "availability", func() {
+	goSectionLookup(ctx, wg, sectionLookupAvailability, timings, func() {
 		lookup.counts = loadSeriesAvailability(ctx, lookup.store, lookup.access, lookup.counted)
 	})
 	return lookup

@@ -504,7 +504,7 @@ func (h *ItemsHandler) populateDetailSubtitles(ctx context.Context, detail *upst
 				SupportsExternalStream: true,
 				DeliveryURL:            storedSubtitleDeliveryURL(routeItemID, sourceID, streamIndex, format, "", dl.ID),
 				DeliveryMethod:         "External",
-				Path:                   downloadedSubtitlePath(version, dl),
+				Path:                   subtitleStreamPath(routeItemID, sourceID, streamIndex, format),
 				IsExternalURL:          boolPtr(false),
 			}
 			dto.MediaSources[i].MediaStreams = append(dto.MediaSources[i].MediaStreams, stream)
