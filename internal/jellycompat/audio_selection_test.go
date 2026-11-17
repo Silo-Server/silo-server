@@ -664,18 +664,23 @@ func TestRestartCompatAudioSelectionTreatsPublishedRemoteAsSuccess(t *testing.T)
 // FFmpeg at the planned segment for its position. A session the node kept on
 // FFmpeg's playlist, though it asked for the keyframe playlist, or that
 // resumed mid-stream, still restarts at the position: a from-start restart
-// would hold the throttled run far behind the player.
+// would hold the throttled run far behind the player. A planned session's
+// replacement that the node can't plan is stopped and the switch fails, since
+// its segments don't match the playlist the player holds.
 func TestRestartCompatAudioSelectionKeepsANodeSessionsKeyframePlan(t *testing.T) {
 	const position = 125.0
 	for _, tc := range []struct {
 		name             string
-		planned          bool
+		planned          bool // the recipe's record of the running session
+		nodePlanned      bool // the replacement's
 		recipeSeek       float64
 		recipeSegment    int
 		wantSeek         float64
 		wantStartSegment int
+		wantPlanLost     bool
 	}{
-		{name: "planned from the start", planned: true, wantSeek: 0, wantStartSegment: 0},
+		{name: "planned from the start", planned: true, nodePlanned: true, wantSeek: 0, wantStartSegment: 0},
+		{name: "replacement lost the plan", planned: true, wantSeek: 0, wantStartSegment: 0, wantPlanLost: true},
 		{name: "kept FFmpeg's playlist", wantSeek: position, wantStartSegment: int(position) / compatSegmentDuration},
 		{name: "resumed mid-stream", recipeSeek: 90, recipeSegment: 90 / compatSegmentDuration,
 			wantSeek: position, wantStartSegment: int(position) / compatSegmentDuration},
@@ -687,7 +692,13 @@ func TestRestartCompatAudioSelectionKeepsANodeSessionsKeyframePlan(t *testing.T)
 			source.SelectedAudioStreamIndex = intPtr(len(version.VideoTracks) + 1)
 
 			var started []transcodenode.TranscodeStartRequest
+			stopped := make(chan string, 1)
 			node := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Method == http.MethodDelete {
+					stopped <- r.URL.Path
+					w.WriteHeader(http.StatusNoContent)
+					return
+				}
 				if r.Method != http.MethodPost || r.URL.Path != "/transcode/start" {
 					w.WriteHeader(http.StatusNotFound)
 					return
@@ -703,7 +714,7 @@ func TestRestartCompatAudioSelectionKeepsANodeSessionsKeyframePlan(t *testing.T)
 					CopyFMP4RecipeVersion: req.CopyFMP4RecipeVersion,
 					ThrottleSeconds:       req.ThrottleSeconds,
 					KeyframePlaylist:      req.KeyframePlaylist,
-					KeyframePlanned:       tc.planned,
+					KeyframePlanned:       tc.nodePlanned,
 					CopyAudioCodec:        req.CopyAudioCodec,
 				})
 			}))
@@ -731,9 +742,6 @@ func TestRestartCompatAudioSelectionKeepsANodeSessionsKeyframePlan(t *testing.T)
 			}
 			playSession, _ := store.Get("play-1")
 			restarted, err := handler.restartCompatTranscodeForAudioSelection(t.Context(), playSession, source, position)
-			if err != nil || !restarted {
-				t.Fatalf("audio restart = %t, %v; want restarted", restarted, err)
-			}
 			if len(started) != 1 {
 				t.Fatalf("node received %d starts, want 1", len(started))
 			}
@@ -746,13 +754,41 @@ func TestRestartCompatAudioSelectionKeepsANodeSessionsKeyframePlan(t *testing.T)
 					req.SeekSeconds, req.StartSegmentNumber, tc.wantSeek, tc.wantStartSegment)
 			}
 			persisted, ok := store.Get("play-1")
+			if tc.wantPlanLost {
+				checkKeyframePlanLossRefused(t, restarted, err, stopped, persisted.Recipe)
+				return
+			}
+			if err != nil || !restarted {
+				t.Fatalf("audio restart = %t, %v; want restarted", restarted, err)
+			}
 			if !ok || persisted.Recipe == nil || persisted.Recipe.AudioTrackIndex != 1 ||
 				persisted.Recipe.SeekSeconds != tc.wantSeek || persisted.Recipe.StartSegmentNumber != tc.wantStartSegment ||
-				persisted.Recipe.KeyframePlanned != tc.planned {
+				persisted.Recipe.KeyframePlanned != tc.nodePlanned {
 				t.Fatalf("persisted recipe = %+v, want track 1 from seek %v, segment %d, planned %t",
-					persisted.Recipe, tc.wantSeek, tc.wantStartSegment, tc.planned)
+					persisted.Recipe, tc.wantSeek, tc.wantStartSegment, tc.nodePlanned)
 			}
 		})
+	}
+}
+
+// checkKeyframePlanLossRefused checks that an audio switch refused a node
+// replacement that lost the keyframe plan: the switch failed, the node's job
+// was stopped, and the recipe still records the planned session on track 0.
+func checkKeyframePlanLossRefused(t *testing.T, restarted bool, err error, stopped <-chan string, recipe *playback.RecipeCard) {
+	t.Helper()
+	if restarted || !errors.Is(err, errRemoteKeyframePlanLost) || !errors.Is(err, errRemoteTranscodeStartFailed) {
+		t.Fatalf("audio restart = %t, %v; want the lost plan refused", restarted, err)
+	}
+	select {
+	case path := <-stopped:
+		if path != "/transcode/upstream-1" {
+			t.Fatalf("stopped %q, want /transcode/upstream-1", path)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("the unplanned replacement was not stopped")
+	}
+	if recipe == nil || recipe.AudioTrackIndex != 0 || !recipe.KeyframePlanned {
+		t.Fatalf("persisted recipe = %+v, want the planned recipe on track 0 kept", recipe)
 	}
 }
 
