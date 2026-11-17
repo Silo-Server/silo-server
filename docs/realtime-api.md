@@ -2,9 +2,10 @@
 
 `GET /api/v2/events/capabilities` describes the shared event subscription
 protocol. It requires an authenticated account; no active profile is required.
-`allowed` is true for a current access-token login session and for an
-administrator's `admin:monitor:read` API key sent with no profile, the callers
-that may mint an events socket ticket.
+`allowed` is true for a current access-token login session, for an
+administrator's `admin:monitor:read` API key sent with no profile, and for a
+user API key holding `catalog:read`, `watch:read` or `notifications`, the callers that may mint
+an events socket ticket.
 When the event service is unavailable, the capability response remains `200` with `state: not_configured` and `allowed: false`.
 
 The response contains `schema_version`, `subscribe_frame`, `declared_channels`,
@@ -113,6 +114,35 @@ advances its revision), demoting the account, or an acting-admin refusal sends
 `access_changed` (see [Access changes](#access-changes)); the tool mints a new
 ticket, which a key that lost the scope or an account that lost the admin role
 cannot do.
+
+#### User keys
+
+A user key (see [User keys](api-keys-api.md#user-keys)) opens the events socket
+when it holds `catalog:read`, `watch:read` or `notifications`; any other user key is refused with
+`403 permission_denied`. The ticket names the key, its configuration revision,
+the profile the request acted as, and that profile's resolved access policy. A
+profile key always acts as its profile. An account key acts as the profile it
+names in `X-Profile-Id`, or as none. The connection holds the user role
+whatever its account's role is, so it never receives administrator events.
+
+Channels follow the key's scopes, and the hello frame's `available_channels`
+lists exactly these:
+
+| Scope | Channel |
+|---|---|
+| `catalog:read` | `catalog` |
+| `watch:read` | `user_state` |
+| `notifications` | `notifications` |
+
+`user_state` delivers only the acting profile's events, so a connection minted
+with no profile receives none, and `notifications` is rejected with
+`profile_required` on such a connection. `user_settings` and `history_import`
+have no user scope and come back rejected.
+
+The connection lasts up to four hours (`max_connection_seconds` 14400) and is
+rechecked every 15 seconds. Deleting the key or its profile, or disabling the
+account, closes it. Editing the key, or a change to the profile's access policy,
+sends `access_changed`; the tool mints a new ticket.
 
 ### Personal event recipients
 

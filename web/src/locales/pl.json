@@ -87111,6 +87111,12 @@
       "value": "Zezwalaj na logowanie hasłem"
     }
   ],
+  "web.admin.settings.signIn.page.apiKeysGroup": [
+    {
+      "type": 0,
+      "value": "Klucze API"
+    }
+  ],
   "web.admin.settings.signIn.page.breakGlassAdmins": [
     {
       "type": 6,
@@ -87323,6 +87329,18 @@
     {
       "type": 0,
       "value": "Logowanie"
+    }
+  ],
+  "web.admin.settings.signIn.page.userApiKeysDescription": [
+    {
+      "type": 0,
+      "value": "Każde konto może tworzyć klucze dla własnych profili w sekcji Ustawienia → Klucze API. Te klucze mogą odczytywać i zmieniać historię oglądania, listy i prośby, ale nie mogą odtwarzać ani pobierać multimediów. Wyłączenie tej opcji blokuje tworzenie nowych kluczy; istniejące działają, dopóki nie zostaną unieważnione."
+    }
+  ],
+  "web.admin.settings.signIn.page.userApiKeysLabel": [
+    {
+      "type": 0,
+      "value": "Zezwalaj użytkownikom na tworzenie kluczy API"
     }
   ],
   "web.admin.settings.signIn.provider.accounts.title": [
@@ -121432,6 +121450,12 @@
       "value": "Ustawienia konta"
     }
   ],
+  "web.common.title.settings.apiKeys": [
+    {
+      "type": 0,
+      "value": "Ustawienia kluczy API"
+    }
+  ],
   "web.common.title.settings.connectApps": [
     {
       "type": 0,
@@ -150179,6 +150203,344 @@
       "value": "Zaawansowane"
     }
   ],
+  "web.settings.apiKeys.create.access": [
+    {
+      "type": 0,
+      "value": "Dostęp"
+    }
+  ],
+  "web.settings.apiKeys.create.accessHint": [
+    {
+      "type": 0,
+      "value": "Wybierz co najmniej jedną opcję. Żaden klucz nie może odtwarzać, przesyłać strumieniowo ani pobierać multimediów."
+    }
+  ],
+  "web.settings.apiKeys.create.actsAs": [
+    {
+      "type": 0,
+      "value": "Działa jako"
+    }
+  ],
+  "web.settings.apiKeys.create.actsAsHint": [
+    {
+      "type": 0,
+      "value": "Klucz dla jednego profilu zawsze działa jako ten profil i podlega jego ograniczeniom. Klucz dla całego konta może działać jako dowolny profil na twoim koncie."
+    }
+  ],
+  "web.settings.apiKeys.create.copied": [
+    {
+      "type": 0,
+      "value": "Skopiowano do schowka"
+    }
+  ],
+  "web.settings.apiKeys.create.copyAndClose": [
+    {
+      "type": 0,
+      "value": "Skopiuj i zamknij"
+    }
+  ],
+  "web.settings.apiKeys.create.copyFailed": [
+    {
+      "type": 0,
+      "value": "Nie udało się skopiować. Zaznacz klucz i skopiuj go ręcznie."
+    }
+  ],
+  "web.settings.apiKeys.create.creating": [
+    {
+      "type": 0,
+      "value": "Tworzenie…"
+    }
+  ],
+  "web.settings.apiKeys.create.description": [
+    {
+      "type": 0,
+      "value": "Pełny klucz jest wyświetlany tylko raz."
+    }
+  ],
+  "web.settings.apiKeys.create.label": [
+    {
+      "type": 0,
+      "value": "Etykieta"
+    }
+  ],
+  "web.settings.apiKeys.create.secretNotice": [
+    {
+      "type": 0,
+      "value": "Skopiuj teraz klucz API. Później nie będzie można go ponownie wyświetlić."
+    }
+  ],
+  "web.settings.apiKeys.create.submit": [
+    {
+      "type": 0,
+      "value": "Utwórz"
+    }
+  ],
+  "web.settings.apiKeys.create.title": [
+    {
+      "type": 0,
+      "value": "Utwórz klucz API"
+    }
+  ],
+  "web.settings.apiKeys.create.uncertain": [
+    {
+      "type": 0,
+      "value": "Wynik jest niepewny. Odśwież stronę przed utworzeniem kolejnego klucza."
+    }
+  ],
+  "web.settings.apiKeys.createKey": [
+    {
+      "type": 0,
+      "value": "Utwórz klucz"
+    }
+  ],
+  "web.settings.apiKeys.disabled": [
+    {
+      "type": 0,
+      "value": "Ten serwer nie pozwala użytkownikom tworzyć kluczy API. Poproś administratora o włączenie tej opcji."
+    }
+  ],
+  "web.settings.apiKeys.empty": [
+    {
+      "type": 0,
+      "value": "Nie ma jeszcze kluczy API."
+    }
+  ],
+  "web.settings.apiKeys.limitReached": [
+    {
+      "type": 0,
+      "value": "Osiągnięto limit kluczy: "
+    },
+    {
+      "type": 1,
+      "value": "max"
+    },
+    {
+      "type": 0,
+      "value": ". Unieważnij jeden, aby utworzyć kolejny."
+    }
+  ],
+  "web.settings.apiKeys.list.created": [
+    {
+      "type": 0,
+      "value": "Utworzono: "
+    },
+    {
+      "type": 1,
+      "value": "date"
+    }
+  ],
+  "web.settings.apiKeys.list.heading": [
+    {
+      "type": 0,
+      "value": "Twoje klucze"
+    }
+  ],
+  "web.settings.apiKeys.list.lastUsed": [
+    {
+      "type": 0,
+      "value": "Ostatnie użycie: "
+    },
+    {
+      "type": 1,
+      "value": "date"
+    }
+  ],
+  "web.settings.apiKeys.list.loadMore": [
+    {
+      "type": 0,
+      "value": "Wczytaj więcej"
+    }
+  ],
+  "web.settings.apiKeys.list.neverUsed": [
+    {
+      "type": 0,
+      "value": "Nigdy nieużywany"
+    }
+  ],
+  "web.settings.apiKeys.list.profile": [
+    {
+      "type": 0,
+      "value": "Profil: "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    }
+  ],
+  "web.settings.apiKeys.list.revoke": [
+    {
+      "type": 0,
+      "value": "Unieważnij"
+    }
+  ],
+  "web.settings.apiKeys.list.revokeNamed": [
+    {
+      "type": 0,
+      "value": "Unieważnij klucz "
+    },
+    {
+      "type": 1,
+      "value": "label"
+    }
+  ],
+  "web.settings.apiKeys.list.wholeAccount": [
+    {
+      "type": 0,
+      "value": "Całe konto"
+    }
+  ],
+  "web.settings.apiKeys.loadFailed": [
+    {
+      "type": 0,
+      "value": "Nie udało się wczytać twoich kluczy API."
+    }
+  ],
+  "web.settings.apiKeys.loading": [
+    {
+      "type": 0,
+      "value": "Wczytywanie kluczy API…"
+    }
+  ],
+  "web.settings.apiKeys.revoke.description": [
+    {
+      "type": 0,
+      "value": "Klucz "
+    },
+    {
+      "type": 1,
+      "value": "label"
+    },
+    {
+      "type": 0,
+      "value": " natychmiast przestanie działać. Tej operacji nie można cofnąć."
+    }
+  ],
+  "web.settings.apiKeys.revoke.done": [
+    {
+      "type": 0,
+      "value": "Unieważniono klucz API"
+    }
+  ],
+  "web.settings.apiKeys.revoke.failed": [
+    {
+      "type": 0,
+      "value": "Nie udało się unieważnić klucza. Odśwież stronę i spróbuj ponownie."
+    }
+  ],
+  "web.settings.apiKeys.revoke.title": [
+    {
+      "type": 0,
+      "value": "Unieważnij klucz API"
+    }
+  ],
+  "web.settings.apiKeys.revoke.working": [
+    {
+      "type": 0,
+      "value": "Unieważnianie…"
+    }
+  ],
+  "web.settings.apiKeys.scope.catalogRead": [
+    {
+      "type": 0,
+      "value": "Przeglądanie tego, co widzi profil: biblioteki, rzędy na ekranie głównym i w bibliotekach, tytuły, osoby i wyszukiwanie."
+    }
+  ],
+  "web.settings.apiKeys.scope.librariesRead": [
+    {
+      "type": 0,
+      "value": "Sprawdzanie, jakie biblioteki ma profil."
+    }
+  ],
+  "web.settings.apiKeys.scope.notifications": [
+    {
+      "type": 0,
+      "value": "Odczytywanie powiadomień profilu na bieżąco i oznaczanie ich jako przeczytane."
+    }
+  ],
+  "web.settings.apiKeys.scope.requests": [
+    {
+      "type": 0,
+      "value": "Przeglądanie tytułów, o które można poprosić, oraz tworzenie, śledzenie i anulowanie próśb o multimedia."
+    }
+  ],
+  "web.settings.apiKeys.scope.watchRead": [
+    {
+      "type": 0,
+      "value": "Odczytywanie historii oglądania, postępu, ocen, ulubionych, listy do obejrzenia i ukrytych tytułów profilu oraz eksport jego danych."
+    }
+  ],
+  "web.settings.apiKeys.scope.watchWrite": [
+    {
+      "type": 0,
+      "value": "Oznaczanie tytułów jako obejrzane lub nieobejrzane, synchronizacja postępu, usuwanie historii oraz edycja ocen, ulubionych, listy do obejrzenia i ukrytych tytułów."
+    }
+  ],
+  "web.settings.apiKeys.subtitle": [
+    {
+      "type": 0,
+      "value": "Klucze pozwalają skryptom i aplikacjom odczytywać i aktualizować twoje dane w Silo bez użycia hasła."
+    }
+  ],
+  "web.settings.apiKeys.title": [
+    {
+      "type": 0,
+      "value": "Klucze API"
+    }
+  ],
+  "web.settings.apiKeys.usage.accountKey": [
+    {
+      "type": 0,
+      "value": "Ten klucz może działać jako dowolny profil na twoim koncie. Wybierz profil dla każdego żądania za pomocą tego nagłówka. Przykład używa profilu "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": "; "
+    },
+    {
+      "type": 1,
+      "value": "endpoint"
+    },
+    {
+      "type": 0,
+      "value": " zwraca identyfikatory wszystkich profili."
+    }
+  ],
+  "web.settings.apiKeys.usage.docs": [
+    {
+      "type": 0,
+      "value": "Dokumentacja API"
+    }
+  ],
+  "web.settings.apiKeys.usage.header": [
+    {
+      "type": 0,
+      "value": "Wysyłaj go z każdym żądaniem w tym nagłówku:"
+    }
+  ],
+  "web.settings.apiKeys.usage.profileKey": [
+    {
+      "type": 0,
+      "value": "Ten klucz zawsze działa jako profil "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": ". Nie wymaga nagłówka profilu."
+    }
+  ],
+  "web.settings.apiKeys.usage.title": [
+    {
+      "type": 0,
+      "value": "Jak używać tego klucza"
+    }
+  ],
   "web.settings.cardOverlay.adjust": [
     {
       "type": 0,
@@ -154005,6 +154367,12 @@
     {
       "type": 0,
       "value": "Hasło i dostawcy logowania dla wszystkich profili w gospodarstwie domowym."
+    }
+  ],
+  "web.settings.nav.apiKeys.description": [
+    {
+      "type": 0,
+      "value": "Klucze dla skryptów i aplikacji, które korzystają z twojej historii oglądania i list."
     }
   ],
   "web.settings.nav.connectApps.description": [

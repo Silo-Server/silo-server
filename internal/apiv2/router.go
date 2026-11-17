@@ -582,7 +582,7 @@ func humaConfig() huma.Config {
 					securitySchemeBearer: {
 						Type:        "http",
 						Scheme:      "bearer",
-						Description: "A session token or an API key in the Authorization header. The server decides which it holds.",
+						Description: bearerAuthDescription,
 					},
 				},
 			},

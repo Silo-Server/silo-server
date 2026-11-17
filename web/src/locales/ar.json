@@ -98367,6 +98367,12 @@
       "value": "السماح بتسجيل الدخول بكلمة المرور"
     }
   ],
+  "web.admin.settings.signIn.page.apiKeysGroup": [
+    {
+      "type": 0,
+      "value": "مفاتيح API"
+    }
+  ],
   "web.admin.settings.signIn.page.breakGlassAdmins": [
     {
       "type": 6,
@@ -98603,6 +98609,18 @@
     {
       "type": 0,
       "value": "تسجيل الدخول"
+    }
+  ],
+  "web.admin.settings.signIn.page.userApiKeysDescription": [
+    {
+      "type": 0,
+      "value": "يمكن لأي حساب إنشاء مفاتيح لملفاته الشخصية في الإعدادات ← مفاتيح API. يمكن لهذه المفاتيح قراءة سجل المشاهدة والقوائم والطلبات وتغييرها، ولا يمكنها تشغيل الوسائط أو تنزيلها. يؤدي تعطيل هذا الخيار إلى منع إنشاء مفاتيح جديدة؛ وتظل المفاتيح الحالية تعمل حتى يتم إبطالها."
+    }
+  ],
+  "web.admin.settings.signIn.page.userApiKeysLabel": [
+    {
+      "type": 0,
+      "value": "السماح للمستخدمين بإنشاء مفاتيح API"
     }
   ],
   "web.admin.settings.signIn.provider.accounts.title": [
@@ -137511,6 +137529,12 @@
       "value": "إعدادات الحساب"
     }
   ],
+  "web.common.title.settings.apiKeys": [
+    {
+      "type": 0,
+      "value": "إعدادات مفاتيح API"
+    }
+  ],
   "web.common.title.settings.connectApps": [
     {
       "type": 0,
@@ -168877,6 +168901,344 @@
       "value": "متقدم"
     }
   ],
+  "web.settings.apiKeys.create.access": [
+    {
+      "type": 0,
+      "value": "الوصول"
+    }
+  ],
+  "web.settings.apiKeys.create.accessHint": [
+    {
+      "type": 0,
+      "value": "اختر خيارًا واحدًا على الأقل. لا يمكن لأي مفتاح تشغيل الوسائط أو بثها أو تنزيلها."
+    }
+  ],
+  "web.settings.apiKeys.create.actsAs": [
+    {
+      "type": 0,
+      "value": "يعمل باسم"
+    }
+  ],
+  "web.settings.apiKeys.create.actsAsHint": [
+    {
+      "type": 0,
+      "value": "يعمل المفتاح الخاص بملف شخصي واحد دائمًا باسم ذلك الملف الشخصي ويلتزم بحدوده. ويمكن لمفتاح الحساب بالكامل العمل باسم أي ملف شخصي في حسابك."
+    }
+  ],
+  "web.settings.apiKeys.create.copied": [
+    {
+      "type": 0,
+      "value": "تم النسخ إلى الحافظة"
+    }
+  ],
+  "web.settings.apiKeys.create.copyAndClose": [
+    {
+      "type": 0,
+      "value": "النسخ والإغلاق"
+    }
+  ],
+  "web.settings.apiKeys.create.copyFailed": [
+    {
+      "type": 0,
+      "value": "تعذّر النسخ. حدد المفتاح وانسخه يدويًا."
+    }
+  ],
+  "web.settings.apiKeys.create.creating": [
+    {
+      "type": 0,
+      "value": "جارٍ الإنشاء…"
+    }
+  ],
+  "web.settings.apiKeys.create.description": [
+    {
+      "type": 0,
+      "value": "يُعرض المفتاح الكامل مرة واحدة فقط."
+    }
+  ],
+  "web.settings.apiKeys.create.label": [
+    {
+      "type": 0,
+      "value": "التسمية"
+    }
+  ],
+  "web.settings.apiKeys.create.secretNotice": [
+    {
+      "type": 0,
+      "value": "انسخ مفتاح API الآن. لن تتمكن من رؤيته مرة أخرى."
+    }
+  ],
+  "web.settings.apiKeys.create.submit": [
+    {
+      "type": 0,
+      "value": "إنشاء"
+    }
+  ],
+  "web.settings.apiKeys.create.title": [
+    {
+      "type": 0,
+      "value": "إنشاء مفتاح API"
+    }
+  ],
+  "web.settings.apiKeys.create.uncertain": [
+    {
+      "type": 0,
+      "value": "النتيجة غير مؤكدة. أعد تحميل الصفحة قبل إنشاء مفتاح آخر."
+    }
+  ],
+  "web.settings.apiKeys.createKey": [
+    {
+      "type": 0,
+      "value": "إنشاء مفتاح"
+    }
+  ],
+  "web.settings.apiKeys.disabled": [
+    {
+      "type": 0,
+      "value": "لا يسمح هذا الخادم للمستخدمين بإنشاء مفاتيح API. اطلب من مسؤوله تفعيل ذلك."
+    }
+  ],
+  "web.settings.apiKeys.empty": [
+    {
+      "type": 0,
+      "value": "لا توجد مفاتيح API بعد."
+    }
+  ],
+  "web.settings.apiKeys.limitReached": [
+    {
+      "type": 0,
+      "value": "لقد بلغت الحد الأقصى للمفاتيح وهو "
+    },
+    {
+      "type": 1,
+      "value": "max"
+    },
+    {
+      "type": 0,
+      "value": ". أبطل مفتاحًا لإنشاء مفتاح آخر."
+    }
+  ],
+  "web.settings.apiKeys.list.created": [
+    {
+      "type": 0,
+      "value": "أُنشئ في "
+    },
+    {
+      "type": 1,
+      "value": "date"
+    }
+  ],
+  "web.settings.apiKeys.list.heading": [
+    {
+      "type": 0,
+      "value": "مفاتيحك"
+    }
+  ],
+  "web.settings.apiKeys.list.lastUsed": [
+    {
+      "type": 0,
+      "value": "آخر استخدام في "
+    },
+    {
+      "type": 1,
+      "value": "date"
+    }
+  ],
+  "web.settings.apiKeys.list.loadMore": [
+    {
+      "type": 0,
+      "value": "تحميل المزيد"
+    }
+  ],
+  "web.settings.apiKeys.list.neverUsed": [
+    {
+      "type": 0,
+      "value": "لم يُستخدم قط"
+    }
+  ],
+  "web.settings.apiKeys.list.profile": [
+    {
+      "type": 0,
+      "value": "الملف الشخصي: "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    }
+  ],
+  "web.settings.apiKeys.list.revoke": [
+    {
+      "type": 0,
+      "value": "إبطال"
+    }
+  ],
+  "web.settings.apiKeys.list.revokeNamed": [
+    {
+      "type": 0,
+      "value": "إبطال "
+    },
+    {
+      "type": 1,
+      "value": "label"
+    }
+  ],
+  "web.settings.apiKeys.list.wholeAccount": [
+    {
+      "type": 0,
+      "value": "الحساب بالكامل"
+    }
+  ],
+  "web.settings.apiKeys.loadFailed": [
+    {
+      "type": 0,
+      "value": "تعذّر تحميل مفاتيح API الخاصة بك."
+    }
+  ],
+  "web.settings.apiKeys.loading": [
+    {
+      "type": 0,
+      "value": "جارٍ تحميل مفاتيح API…"
+    }
+  ],
+  "web.settings.apiKeys.revoke.description": [
+    {
+      "type": 0,
+      "value": "سيتوقف "
+    },
+    {
+      "type": 1,
+      "value": "label"
+    },
+    {
+      "type": 0,
+      "value": " عن العمل فورًا. لا يمكن التراجع عن ذلك."
+    }
+  ],
+  "web.settings.apiKeys.revoke.done": [
+    {
+      "type": 0,
+      "value": "تم إبطال مفتاح API"
+    }
+  ],
+  "web.settings.apiKeys.revoke.failed": [
+    {
+      "type": 0,
+      "value": "تعذّر إبطال المفتاح. أعد تحميل الصفحة وحاول مرة أخرى."
+    }
+  ],
+  "web.settings.apiKeys.revoke.title": [
+    {
+      "type": 0,
+      "value": "إبطال مفتاح API"
+    }
+  ],
+  "web.settings.apiKeys.revoke.working": [
+    {
+      "type": 0,
+      "value": "جارٍ الإبطال…"
+    }
+  ],
+  "web.settings.apiKeys.scope.catalogRead": [
+    {
+      "type": 0,
+      "value": "تصفح ما يمكن للملف الشخصي رؤيته: المكتبات وصفوف الرئيسية والمكتبة والعناوين والأشخاص والبحث."
+    }
+  ],
+  "web.settings.apiKeys.scope.librariesRead": [
+    {
+      "type": 0,
+      "value": "معرفة المكتبات المتاحة للملف الشخصي."
+    }
+  ],
+  "web.settings.apiKeys.scope.notifications": [
+    {
+      "type": 0,
+      "value": "قراءة إشعارات الملف الشخصي فور وصولها وتعليمها كمقروءة."
+    }
+  ],
+  "web.settings.apiKeys.scope.requests": [
+    {
+      "type": 0,
+      "value": "تصفح العناوين القابلة للطلب وإنشاء طلبات الوسائط ومتابعتها وإلغاؤها."
+    }
+  ],
+  "web.settings.apiKeys.scope.watchRead": [
+    {
+      "type": 0,
+      "value": "قراءة سجل المشاهدة والتقدم والتقييمات والمفضلة وقائمة المشاهدة والعناوين المخفية للملف الشخصي، وتصدير بياناته."
+    }
+  ],
+  "web.settings.apiKeys.scope.watchWrite": [
+    {
+      "type": 0,
+      "value": "تعليم العناوين كمُشاهَدة أو غير مُشاهَدة، ومزامنة التقدم، وإزالة السجل، وتعديل التقييمات والمفضلة وقائمة المشاهدة والعناوين المخفية."
+    }
+  ],
+  "web.settings.apiKeys.subtitle": [
+    {
+      "type": 0,
+      "value": "تتيح المفاتيح للنصوص البرمجية والتطبيقات قراءة بياناتك في Silo وتحديثها دون كلمة المرور."
+    }
+  ],
+  "web.settings.apiKeys.title": [
+    {
+      "type": 0,
+      "value": "مفاتيح API"
+    }
+  ],
+  "web.settings.apiKeys.usage.accountKey": [
+    {
+      "type": 0,
+      "value": "يمكن لهذا المفتاح العمل باسم أي ملف شخصي في حسابك. اختر ملفًا شخصيًا لكل طلب باستخدام هذا الترويسة. يستخدم المثال "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": "؛ ويسرد "
+    },
+    {
+      "type": 1,
+      "value": "endpoint"
+    },
+    {
+      "type": 0,
+      "value": " معرّف كل ملف شخصي."
+    }
+  ],
+  "web.settings.apiKeys.usage.docs": [
+    {
+      "type": 0,
+      "value": "مرجع API"
+    }
+  ],
+  "web.settings.apiKeys.usage.header": [
+    {
+      "type": 0,
+      "value": "أرسله مع كل طلب في هذه الترويسة:"
+    }
+  ],
+  "web.settings.apiKeys.usage.profileKey": [
+    {
+      "type": 0,
+      "value": "يعمل هذا المفتاح دائمًا باسم "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": ". ولا يحتاج إلى ترويسة الملف الشخصي."
+    }
+  ],
+  "web.settings.apiKeys.usage.title": [
+    {
+      "type": 0,
+      "value": "كيفية استخدام هذا المفتاح"
+    }
+  ],
   "web.settings.cardOverlay.adjust": [
     {
       "type": 0,
@@ -173119,6 +173481,12 @@
     {
       "type": 0,
       "value": "كلمة المرور ومزودو تسجيل الدخول المشتركون بين جميع الملفات الشخصية في المنزل."
+    }
+  ],
+  "web.settings.nav.apiKeys.description": [
+    {
+      "type": 0,
+      "value": "مفاتيح للنصوص البرمجية والتطبيقات التي تتعامل مع سجل المشاهدة والقوائم."
     }
   ],
   "web.settings.nav.connectApps.description": [

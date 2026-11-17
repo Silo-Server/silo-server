@@ -52,6 +52,15 @@ const (
 // it holds.
 const securitySchemeBearer = "bearerAuth"
 
+// bearerAuthDescription says how each credential is sent and, for an API
+// key, which profile it acts as: what a script needs before its first call.
+const bearerAuthDescription = "A session token or an API key in the Authorization header. The server decides which it holds. " +
+	"An API key is sent as `Authorization: Bearer sa_…`. " +
+	"A profile key (created with profile_id) always acts as its profile: the server supplies X-Profile-Id, and a request naming another profile is 403 permission_denied. " +
+	"An account key chooses the profile per request with X-Profile-Id and needs no X-Profile-Token, even for a PIN-protected profile; GET /api/v2/profiles lists the IDs. " +
+	"Most profile operations require the header and answer 422 validation_failed without it. The few that accept its absence, such as GET /api/v2/profiles and GET /api/v2/user/libraries, then answer for the account as a whole. " +
+	"A key carrying scopes reaches only the operations those scopes admit and is 403 permission_denied everywhere else; GET /api/v2/api-keys/scopes lists them."
+
 // profileHeader is the header every profile-resolving class reads;
 // profileTokenHeader is the proof it reads alongside it for a PIN-locked
 // profile.
@@ -174,7 +183,7 @@ func profileTokenHeaderParam() *huma.Param {
 // householdProfileHeaderDescription documents X-Profile-Id on an operation
 // that runs the household profile gate (Operation.HouseholdProfileGate): the
 // header is optional only while no profile on the account is limited.
-const householdProfileHeaderDescription = "Optional while no profile on the authenticated account is PIN-protected or access-restricted (content-rating, advisory-age or library limits). Otherwise it is required: a request without it, or with an empty value, is refused with 422 validation_failed at header.x-profile-id; API keys are exempt. When present, it must name a profile of the authenticated account."
+const householdProfileHeaderDescription = "Optional while no profile on the authenticated account is PIN-protected or access-restricted (content-rating, advisory-age or library limits). Otherwise it is required: a request without it, or with an empty value, is refused with 422 validation_failed at header.x-profile-id. An API key, on an operation that admits one, is not held to this: a profile key's binding supplies the header and refuses any other profile, and an account key may name any profile on its account without X-Profile-Token, or send no header and act with the account's own access rather than one profile's limits and state. When present, it must name a profile of the authenticated account."
 
 // profileHeaderParam documents X-Profile-Id the way the class's gate chain
 // really reads it. Only ClassProfileScoped runs RequireProfile, so only it

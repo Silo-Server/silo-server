@@ -397,3 +397,44 @@ func TestAPIKeyMonitorScopeResponsesCarryNoDeploymentDetails(t *testing.T) {
 		}
 	}
 }
+
+// A profile-bound key always acts as its profile: it is declared for a request
+// that names none, another profile is refused, and the key holds no admin
+// role even on an admin account. A bound key the store should never hold (one
+// without user scopes) is refused rather than treated as an account key.
+func TestRequireAuthBindsAPIKeyToItsProfile(t *testing.T) {
+	owner := &models.User{ID: 7, Role: "admin", Enabled: true}
+	serve := func(key *models.APIKey, path, profile string) (int, string, string) {
+		am := NewAuthMiddleware(nil, nil, &fakeAPIKeyValidator{key: key}, &fakeAPIKeyUserLoader{user: owner})
+		var acted, role string
+		handler := am.RequireAuth(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+			acted, role = r.Header.Get("X-Profile-Id"), GetClaims(r.Context()).Role
+		}))
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		req.Header.Set("Authorization", "Bearer sa_test")
+		if profile != "" {
+			req.Header.Set("X-Profile-Id", profile)
+		}
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+		return rec.Code, acted, role
+	}
+	bound := &models.APIKey{ID: 1, UserID: 7, Key: "sa_test", ProfileID: "kid", Scopes: []string{auth.ScopeWatchRead}}
+	for _, named := range []string{"", "kid"} {
+		if code, acted, role := serve(bound, "/api/v2/history", named); code != http.StatusOK || acted != "kid" || role != models.RoleUser {
+			t.Fatalf("naming %q: status %d, acted as %q with role %q", named, code, acted, role)
+		}
+	}
+	if code, _, _ := serve(bound, "/api/v2/history", "parent"); code != http.StatusForbidden {
+		t.Fatalf("another profile: status %d, want 403", code)
+	}
+	if code, _, _ := serve(bound, "/api/v2/playback/start", ""); code != http.StatusForbidden {
+		t.Fatalf("playback: status %d, want 403", code)
+	}
+	for _, scopes := range [][]string{nil, {auth.ScopeAdminUsers}} {
+		broken := &models.APIKey{ID: 1, UserID: 7, Key: "sa_test", ProfileID: "kid", Scopes: scopes}
+		if code, _, _ := serve(broken, "/api/v2/admin/users", ""); code != http.StatusForbidden {
+			t.Fatalf("bound key with scopes %v: status %d, want 403", scopes, code)
+		}
+	}
+}

@@ -79095,6 +79095,12 @@
       "value": "⟦Åļļöŵ þåššŵöŕđ šîĝñ-îñ~~~~~~~~~⟧"
     }
   ],
+  "web.admin.settings.signIn.page.apiKeysGroup": [
+    {
+      "type": 0,
+      "value": "⟦ÅÞÎ ķéýš~~~~⟧"
+    }
+  ],
   "web.admin.settings.signIn.page.breakGlassAdmins": [
     {
       "type": 6,
@@ -79291,6 +79297,18 @@
     {
       "type": 0,
       "value": "⟦Šîĝñ-îñ~~~⟧"
+    }
+  ],
+  "web.admin.settings.signIn.page.userApiKeysDescription": [
+    {
+      "type": 0,
+      "value": "⟦Åñý åççöûñţ çåñ çŕéåţé ķéýš ƒöŕ îţš öŵñ þŕöƒîļéš îñ Šéţţîñĝš → ÅÞÎ Ķéýš. Ţĥéšé ķéýš çåñ ŕéåđ åñđ çĥåñĝé ŵåţçĥ ĥîšţöŕý, ļîšţš åñđ ŕéǫûéšţš, åñđ çåñ'ţ þļåý öŕ đöŵñļöåđ ɱéđîå. Ţûŕñîñĝ ţĥîš öƒƒ šţöþš ñéŵ ķéýš; éẋîšţîñĝ öñéš ķééþ ŵöŕķîñĝ ûñţîļ ŕéṽöķéđ.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.settings.signIn.page.userApiKeysLabel": [
+    {
+      "type": 0,
+      "value": "⟦Ļéţ ûšéŕš çŕéåţé ÅÞÎ ķéýš~~~~~~~~~~⟧"
     }
   ],
   "web.admin.settings.signIn.provider.accounts.title": [
@@ -110588,6 +110606,12 @@
       "value": "⟦Åççöûñţ Šéţţîñĝš~~~~~~~⟧"
     }
   ],
+  "web.common.title.settings.apiKeys": [
+    {
+      "type": 0,
+      "value": "⟦ÅÞÎ Ķéýš Šéţţîñĝš~~~~~~~⟧"
+    }
+  ],
   "web.common.title.settings.connectApps": [
     {
       "type": 0,
@@ -137961,6 +137985,360 @@
       "value": "⟦Åđṽåñçéđ~~~~⟧"
     }
   ],
+  "web.settings.apiKeys.create.access": [
+    {
+      "type": 0,
+      "value": "⟦Åççéšš~~~⟧"
+    }
+  ],
+  "web.settings.apiKeys.create.accessHint": [
+    {
+      "type": 0,
+      "value": "⟦Çĥööšé åţ ļéåšţ öñé. Ñö ķéý çåñ þļåý, šţŕéåɱ öŕ đöŵñļöåđ ɱéđîå.~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.settings.apiKeys.create.actsAs": [
+    {
+      "type": 0,
+      "value": "⟦Åçţš åš~~~⟧"
+    }
+  ],
+  "web.settings.apiKeys.create.actsAsHint": [
+    {
+      "type": 0,
+      "value": "⟦Å ķéý ƒöŕ öñé þŕöƒîļé åļŵåýš åçţš åš ţĥåţ þŕöƒîļé åñđ ķééþš îţš ļîɱîţš. Å ŵĥöļé-åççöûñţ ķéý çåñ åçţ åš åñý þŕöƒîļé öñ ýöûŕ åççöûñţ.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.settings.apiKeys.create.copied": [
+    {
+      "type": 0,
+      "value": "⟦Çöþîéđ ţö çļîþƀöåŕđ~~~~~~~~⟧"
+    }
+  ],
+  "web.settings.apiKeys.create.copyAndClose": [
+    {
+      "type": 0,
+      "value": "⟦Çöþý & Çļöšé~~~~~⟧"
+    }
+  ],
+  "web.settings.apiKeys.create.copyFailed": [
+    {
+      "type": 0,
+      "value": "⟦Çöûļđñ'ţ çöþý. Šéļéçţ ţĥé ķéý åñđ çöþý îţ ɱåñûåļļý.~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.settings.apiKeys.create.creating": [
+    {
+      "type": 0,
+      "value": "⟦Çŕéåţîñĝ…~~~~⟧"
+    }
+  ],
+  "web.settings.apiKeys.create.description": [
+    {
+      "type": 0,
+      "value": "⟦Ţĥé ƒûļļ ķéý îš šĥöŵñ öñļý öñçé.~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.settings.apiKeys.create.label": [
+    {
+      "type": 0,
+      "value": "⟦Ļåƀéļ~~⟧"
+    }
+  ],
+  "web.settings.apiKeys.create.secretNotice": [
+    {
+      "type": 0,
+      "value": "⟦Çöþý ýöûŕ ÅÞÎ ķéý ñöŵ. Ýöû çåñ'ţ šéé îţ åĝåîñ.~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.settings.apiKeys.create.submit": [
+    {
+      "type": 0,
+      "value": "⟦Çŕéåţé~~~⟧"
+    }
+  ],
+  "web.settings.apiKeys.create.title": [
+    {
+      "type": 0,
+      "value": "⟦Çŕéåţé ÅÞÎ Ķéý~~~~~~⟧"
+    }
+  ],
+  "web.settings.apiKeys.create.uncertain": [
+    {
+      "type": 0,
+      "value": "⟦Ţĥé ŕéšûļţ îš ûñçéŕţåîñ. Ŕéļöåđ ţĥé þåĝé ƀéƒöŕé çŕéåţîñĝ åñöţĥéŕ ķéý.~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.settings.apiKeys.createKey": [
+    {
+      "type": 0,
+      "value": "⟦Çŕéåţé Ķéý~~~~⟧"
+    }
+  ],
+  "web.settings.apiKeys.disabled": [
+    {
+      "type": 0,
+      "value": "⟦Ţĥîš šéŕṽéŕ đöéšñ'ţ ļéţ ûšéŕš çŕéåţé ÅÞÎ ķéýš. Åšķ îţš åđɱîñ ţö ţûŕñ ţĥåţ öñ.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.settings.apiKeys.empty": [
+    {
+      "type": 0,
+      "value": "⟦Ñö ÅÞÎ ķéýš ýéţ.~~~~~~~⟧"
+    }
+  ],
+  "web.settings.apiKeys.limitReached": [
+    {
+      "type": 0,
+      "value": "⟦Ýöû'ṽé ŕéåçĥéđ ţĥé ļîɱîţ öƒ "
+    },
+    {
+      "type": 1,
+      "value": "max"
+    },
+    {
+      "type": 0,
+      "value": " ķéýš. Ŕéṽöķé öñé ţö çŕéåţé åñöţĥéŕ.~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.settings.apiKeys.list.created": [
+    {
+      "type": 0,
+      "value": "⟦Çŕéåţéđ "
+    },
+    {
+      "type": 1,
+      "value": "date"
+    },
+    {
+      "type": 0,
+      "value": "~~~~⟧"
+    }
+  ],
+  "web.settings.apiKeys.list.heading": [
+    {
+      "type": 0,
+      "value": "⟦Ýöûŕ ķéýš~~~~⟧"
+    }
+  ],
+  "web.settings.apiKeys.list.lastUsed": [
+    {
+      "type": 0,
+      "value": "⟦Ļåšţ ûšéđ "
+    },
+    {
+      "type": 1,
+      "value": "date"
+    },
+    {
+      "type": 0,
+      "value": "~~~~⟧"
+    }
+  ],
+  "web.settings.apiKeys.list.loadMore": [
+    {
+      "type": 0,
+      "value": "⟦Ļöåđ ɱöŕé~~~~⟧"
+    }
+  ],
+  "web.settings.apiKeys.list.neverUsed": [
+    {
+      "type": 0,
+      "value": "⟦Ñéṽéŕ ûšéđ~~~~⟧"
+    }
+  ],
+  "web.settings.apiKeys.list.profile": [
+    {
+      "type": 0,
+      "value": "⟦Þŕöƒîļé: "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": "~~~~⟧"
+    }
+  ],
+  "web.settings.apiKeys.list.revoke": [
+    {
+      "type": 0,
+      "value": "⟦Ŕéṽöķé~~~⟧"
+    }
+  ],
+  "web.settings.apiKeys.list.revokeNamed": [
+    {
+      "type": 0,
+      "value": "⟦Ŕéṽöķé "
+    },
+    {
+      "type": 1,
+      "value": "label"
+    },
+    {
+      "type": 0,
+      "value": "~~~⟧"
+    }
+  ],
+  "web.settings.apiKeys.list.wholeAccount": [
+    {
+      "type": 0,
+      "value": "⟦Ŵĥöļé åççöûñţ~~~~~~⟧"
+    }
+  ],
+  "web.settings.apiKeys.loadFailed": [
+    {
+      "type": 0,
+      "value": "⟦Çöûļđñ'ţ ļöåđ ýöûŕ ÅÞÎ ķéýš.~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.settings.apiKeys.loading": [
+    {
+      "type": 0,
+      "value": "⟦Ļöåđîñĝ ÅÞÎ ķéýš…~~~~~~~⟧"
+    }
+  ],
+  "web.settings.apiKeys.revoke.description": [
+    {
+      "type": 0,
+      "value": "⟦"
+    },
+    {
+      "type": 1,
+      "value": "label"
+    },
+    {
+      "type": 0,
+      "value": " šţöþš ŵöŕķîñĝ åţ öñçé. Ţĥîš çåñ'ţ ƀé ûñđöñé.~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.settings.apiKeys.revoke.done": [
+    {
+      "type": 0,
+      "value": "⟦ÅÞÎ ķéý ŕéṽöķéđ~~~~~~⟧"
+    }
+  ],
+  "web.settings.apiKeys.revoke.failed": [
+    {
+      "type": 0,
+      "value": "⟦Çöûļđñ'ţ ŕéṽöķé ţĥé ķéý. Ŕéļöåđ ţĥé þåĝé åñđ ţŕý åĝåîñ.~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.settings.apiKeys.revoke.title": [
+    {
+      "type": 0,
+      "value": "⟦Ŕéṽöķé ÅÞÎ ķéý~~~~~~⟧"
+    }
+  ],
+  "web.settings.apiKeys.revoke.working": [
+    {
+      "type": 0,
+      "value": "⟦Ŕéṽöķîñĝ…~~~~⟧"
+    }
+  ],
+  "web.settings.apiKeys.scope.catalogRead": [
+    {
+      "type": 0,
+      "value": "⟦Ɓŕöŵšé ŵĥåţ ţĥé þŕöƒîļé çåñ šéé: ļîƀŕåŕîéš, ĥöɱé åñđ ļîƀŕåŕý ŕöŵš, ţîţļéš, þéöþļé åñđ šéåŕçĥ.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.settings.apiKeys.scope.librariesRead": [
+    {
+      "type": 0,
+      "value": "⟦Šéé ŵĥîçĥ ļîƀŕåŕîéš ţĥé þŕöƒîļé ĥåš.~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.settings.apiKeys.scope.notifications": [
+    {
+      "type": 0,
+      "value": "⟦Ŕéåđ ţĥé þŕöƒîļé'š ñöţîƒîçåţîöñš åš ţĥéý åŕŕîṽé åñđ ɱåŕķ ţĥéɱ ŕéåđ.~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.settings.apiKeys.scope.requests": [
+    {
+      "type": 0,
+      "value": "⟦Ɓŕöŵšé ŕéǫûéšţåƀļé ţîţļéš åñđ çŕéåţé, ƒöļļöŵ åñđ çåñçéļ ɱéđîå ŕéǫûéšţš.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.settings.apiKeys.scope.watchRead": [
+    {
+      "type": 0,
+      "value": "⟦Ŕéåđ ţĥé þŕöƒîļé'š ŵåţçĥ ĥîšţöŕý, þŕöĝŕéšš, ŕåţîñĝš, ƒåṽöŕîţéš, ŵåţçĥļîšţ åñđ ĥîđđéñ ţîţļéš, åñđ éẋþöŕţ îţš đåţå.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.settings.apiKeys.scope.watchWrite": [
+    {
+      "type": 0,
+      "value": "⟦Ṁåŕķ ţîţļéš ŵåţçĥéđ öŕ ûñŵåţçĥéđ, šýñç þŕöĝŕéšš, ŕéɱöṽé ĥîšţöŕý, åñđ éđîţ ŕåţîñĝš, ƒåṽöŕîţéš, ŵåţçĥļîšţ åñđ ĥîđđéñ ţîţļéš.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.settings.apiKeys.subtitle": [
+    {
+      "type": 0,
+      "value": "⟦Ķéýš ļéţ šçŕîþţš åñđ åþþš ŕéåđ åñđ ûþđåţé ýöûŕ Šîļö đåţå ŵîţĥöûţ ýöûŕ þåššŵöŕđ.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.settings.apiKeys.title": [
+    {
+      "type": 0,
+      "value": "⟦ÅÞÎ Ķéýš~~~~⟧"
+    }
+  ],
+  "web.settings.apiKeys.usage.accountKey": [
+    {
+      "type": 0,
+      "value": "⟦Ţĥîš ķéý çåñ åçţ åš åñý þŕöƒîļé öñ ýöûŕ åççöûñţ. Çĥööšé öñé þéŕ ŕéǫûéšţ ŵîţĥ ţĥîš ĥéåđéŕ. Ţĥé éẋåɱþļé ûšéš "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": "; "
+    },
+    {
+      "type": 1,
+      "value": "endpoint"
+    },
+    {
+      "type": 0,
+      "value": " ļîšţš éṽéŕý þŕöƒîļé'š ÎĐ.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.settings.apiKeys.usage.docs": [
+    {
+      "type": 0,
+      "value": "⟦ÅÞÎ ŕéƒéŕéñçé~~~~~~⟧"
+    }
+  ],
+  "web.settings.apiKeys.usage.header": [
+    {
+      "type": 0,
+      "value": "⟦Šéñđ îţ ŵîţĥ éṽéŕý ŕéǫûéšţ îñ ţĥîš ĥéåđéŕ:~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.settings.apiKeys.usage.profileKey": [
+    {
+      "type": 0,
+      "value": "⟦Ţĥîš ķéý åļŵåýš åçţš åš "
+    },
+    {
+      "type": 1,
+      "value": "profile"
+    },
+    {
+      "type": 0,
+      "value": ". Îţ ñééđš ñö þŕöƒîļé ĥéåđéŕ.~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.settings.apiKeys.usage.title": [
+    {
+      "type": 0,
+      "value": "⟦Ĥöŵ ţö ûšé ţĥîš ķéý~~~~~~~~⟧"
+    }
+  ],
   "web.settings.cardOverlay.adjust": [
     {
       "type": 0,
@@ -141627,6 +142005,12 @@
     {
       "type": 0,
       "value": "⟦Ţĥé þåššŵöŕđ åñđ šîĝñ-îñ þŕöṽîđéŕš éṽéŕý ĥöûšéĥöļđ þŕöƒîļé šĥåŕéš.~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.settings.nav.apiKeys.description": [
+    {
+      "type": 0,
+      "value": "⟦Ķéýš ƒöŕ šçŕîþţš åñđ åþþš ţĥåţ ŵöŕķ ŵîţĥ ýöûŕ ŵåţçĥ ĥîšţöŕý åñđ ļîšţš.~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
     }
   ],
   "web.settings.nav.connectApps.description": [

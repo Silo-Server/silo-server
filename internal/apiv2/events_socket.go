@@ -8,6 +8,7 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/auth"
 	evt "github.com/Silo-Server/silo-server/internal/events"
+	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/danielgtaylor/huma/v2"
 )
 
@@ -34,15 +35,22 @@ type EventsSocketTicket struct {
 type EventsSocketTicketOutput struct{ Body EventsSocketTicket }
 
 // eventsSocketIdentity is socketIdentity, or for an API key the key itself:
-// only a key holding admin:monitor:read, sent with no profile, may open the
-// events socket, and its ticket names the key rather than a login session.
+// a key holding admin:monitor:read, sent with no profile, or a user key
+// holding catalog:read, watch:read or notifications may open the events socket, and its
+// ticket names the key rather than a login session.
 func eventsSocketIdentity(ctx context.Context) (evt.SocketIdentity, *Problem) {
 	claims := claimsFrom(ctx)
 	if claims == nil || claims.TokenType != auth.TokenTypeAPIKey {
 		return socketIdentity(ctx)
 	}
+	if claims.APIKeyID > 0 && userKeyEventsSocket(ctx, claims) {
+		// A user key acts as the profile it named (a bound key always names
+		// its own) and holds the user role on the socket.
+		identity := evt.SocketIdentity{UserID: claims.UserID, Role: models.RoleUser, APIKeyID: claims.APIKeyID, ProfileID: profileFrom(ctx), AccessExpiresAt: time.Now().Add(evt.APIKeySocketMaxLifetime)}
+		return identity, nil
+	}
 	if claims.APIKeyID <= 0 || !slices.Contains(claims.APIKeyScopes, auth.ScopeAdminMonitorRead) {
-		return evt.SocketIdentity{}, NewProblem(TypePermissionDenied, "Only an API key with the admin:monitor:read scope may open the realtime socket.")
+		return evt.SocketIdentity{}, NewProblem(TypePermissionDenied, "Only an API key with the admin:monitor:read, catalog:read, watch:read or notifications scope may open the realtime socket.")
 	}
 	if profileFrom(ctx) != "" {
 		return evt.SocketIdentity{}, NewProblem(TypePermissionDenied, "An API key opens the realtime socket without a profile.")
@@ -54,8 +62,19 @@ func eventsSocketIdentity(ctx context.Context) (evt.SocketIdentity, *Problem) {
 	return identity, nil
 }
 
+// userKeyEventsSocket reports whether an API key's request opens the events
+// socket as a user key: it holds an event scope and is not a monitoring
+// request. A key holding admin:monitor:read as well is a monitoring key when
+// it names no profile and a user key when it names one.
+func userKeyEventsSocket(ctx context.Context, claims *auth.Claims) bool {
+	if !auth.HoldsAPIKeyEventScope(claims.APIKeyScopes) {
+		return false
+	}
+	return !slices.Contains(claims.APIKeyScopes, auth.ScopeAdminMonitorRead) || declaresProfile(ctx)
+}
+
 func registerEventsSocket(reg *Registry) {
-	mint := Operation{Operation: humaOp(http.MethodPost, Prefix+"/events/ws-ticket", "createEventsSocketTicket", "realtime", "Delegate the current login session, or an admin:monitor:read API key, for one realtime handshake."), Class: ClassProfileScoped, ProfileOptional: true, ServiceBacked: true, RetrySafety: RetrySafetyNaturalIdempotent}
+	mint := Operation{Operation: humaOp(http.MethodPost, Prefix+"/events/ws-ticket", "createEventsSocketTicket", "realtime", "Delegate the current login session, or an API key holding admin:monitor:read, catalog:read, watch:read or notifications, for one realtime handshake."), Class: ClassProfileScoped, ProfileOptional: true, ServiceBacked: true, RetrySafety: RetrySafetyNaturalIdempotent}
 	Register(reg, mint, func(ctx context.Context, _ *struct{}) (*EventsSocketTicketOutput, error) {
 		svc := reg.deps.EventsSocket
 		if svc == nil {
