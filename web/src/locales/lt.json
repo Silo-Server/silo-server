@@ -106614,6 +106614,12 @@
       "value": "Tvarka"
     }
   ],
+  "web.catalog.sort.relevance": [
+    {
+      "type": 0,
+      "value": "Aktualumas"
+    }
+  ],
   "web.catalog.sort.sortBy": [
     {
       "type": 0,
@@ -145595,6 +145601,12 @@
       "value": "Galite pristabdyti ir tęsti"
     }
   ],
+  "web.player.watchTogether.redisRequired": [
+    {
+      "type": 0,
+      "value": "„Watch Party“ reikia „Redis“, tačiau šiame serveryje jis nesukonfigūruotas. Paprašykite serverio administratoriaus jį sukonfigūruoti."
+    }
+  ],
   "web.player.watchTogether.selfName": [
     {
       "type": 1,
@@ -150005,6 +150017,86 @@
     {
       "type": 0,
       "value": "Ieškokite bibliotekoje arba raskite pavadinimų užklausai…"
+    }
+  ],
+  "web.search.results.allInLibrary": [
+    {
+      "type": 0,
+      "value": "Visi rezultatai jūsų bibliotekoje"
+    }
+  ],
+  "web.search.results.atLeastCount": [
+    {
+      "type": 1,
+      "value": "count"
+    },
+    {
+      "type": 0,
+      "value": "+"
+    }
+  ],
+  "web.search.results.backToRelevance": [
+    {
+      "type": 0,
+      "value": "Vėl rikiuoti pagal aktualumą"
+    }
+  ],
+  "web.search.results.bestMatches": [
+    {
+      "type": 0,
+      "value": "Geriausi atitikmenys"
+    }
+  ],
+  "web.search.results.inLibrary": [
+    {
+      "type": 0,
+      "value": "Jūsų bibliotekoje"
+    }
+  ],
+  "web.search.results.moreResults": [
+    {
+      "type": 0,
+      "value": "Daugiau rezultatų"
+    }
+  ],
+  "web.search.results.notInLibrary": [
+    {
+      "type": 0,
+      "value": "Nėra jūsų bibliotekoje"
+    }
+  ],
+  "web.search.results.overview": [
+    {
+      "type": 0,
+      "value": "Apžvalga"
+    }
+  ],
+  "web.search.results.requestToAdd": [
+    {
+      "type": 0,
+      "value": "Pateikti užklausą pridėti"
+    }
+  ],
+  "web.search.results.showAll": [
+    {
+      "type": 0,
+      "value": "Rodyti visus rezultatus"
+    }
+  ],
+  "web.search.results.sortedBy": [
+    {
+      "type": 0,
+      "value": "Rikiuota pagal: "
+    },
+    {
+      "type": 1,
+      "value": "sort"
+    }
+  ],
+  "web.search.results.viewsLabel": [
+    {
+      "type": 0,
+      "value": "Rezultatų rodiniai"
     }
   ],
   "web.search.resultsLabel": [

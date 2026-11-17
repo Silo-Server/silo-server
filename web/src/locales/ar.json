@@ -119388,6 +119388,12 @@
       "value": "الترتيب"
     }
   ],
+  "web.catalog.sort.relevance": [
+    {
+      "type": 0,
+      "value": "الصلة"
+    }
+  ],
   "web.catalog.sort.sortBy": [
     {
       "type": 0,
@@ -167461,6 +167467,86 @@
     {
       "type": 0,
       "value": "ابحث في المكتبة أو اعثر على عناوين لطلبها..."
+    }
+  ],
+  "web.search.results.allInLibrary": [
+    {
+      "type": 0,
+      "value": "كل النتائج في مكتبتك"
+    }
+  ],
+  "web.search.results.atLeastCount": [
+    {
+      "type": 1,
+      "value": "count"
+    },
+    {
+      "type": 0,
+      "value": "+"
+    }
+  ],
+  "web.search.results.backToRelevance": [
+    {
+      "type": 0,
+      "value": "العودة إلى الترتيب حسب الصلة"
+    }
+  ],
+  "web.search.results.bestMatches": [
+    {
+      "type": 0,
+      "value": "أفضل التطابقات"
+    }
+  ],
+  "web.search.results.inLibrary": [
+    {
+      "type": 0,
+      "value": "في مكتبتك"
+    }
+  ],
+  "web.search.results.moreResults": [
+    {
+      "type": 0,
+      "value": "المزيد من النتائج"
+    }
+  ],
+  "web.search.results.notInLibrary": [
+    {
+      "type": 0,
+      "value": "غير موجود في مكتبتك"
+    }
+  ],
+  "web.search.results.overview": [
+    {
+      "type": 0,
+      "value": "نظرة عامة"
+    }
+  ],
+  "web.search.results.requestToAdd": [
+    {
+      "type": 0,
+      "value": "طلب إضافة"
+    }
+  ],
+  "web.search.results.showAll": [
+    {
+      "type": 0,
+      "value": "عرض كل النتائج"
+    }
+  ],
+  "web.search.results.sortedBy": [
+    {
+      "type": 0,
+      "value": "مرتّب حسب "
+    },
+    {
+      "type": 1,
+      "value": "sort"
+    }
+  ],
+  "web.search.results.viewsLabel": [
+    {
+      "type": 0,
+      "value": "طرق عرض النتائج"
     }
   ],
   "web.search.resultsLabel": [

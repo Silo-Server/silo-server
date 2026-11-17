@@ -166,6 +166,37 @@ describe("CatalogFiltersPanel toolbar", () => {
   });
 });
 
+describe("CatalogFiltersPanel on a text search", () => {
+  // The sheet's editors offer no Relevance, so a media type change there must
+  // not quietly re-sort the search by their first sort.
+  it("keeps the relevance sort when the sheet changes the media type", () => {
+    const onStateChange = vi.fn<(next: CatalogSearchState) => void>();
+    render(
+      <CatalogFiltersPanel
+        relevanceSort
+        state={{
+          source: "query",
+          q: "heat",
+          explicit_sort: true,
+          query_definition: {
+            ...createEmptyQueryDefinition(),
+            sort: { field: "relevance", order: "desc" },
+          },
+        }}
+        onStateChange={onStateChange}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /Filters/ }));
+    choose("All Media", "Movies");
+
+    expect(lastQuery(onStateChange)).toMatchObject({
+      media_scope: "movie",
+      sort: { field: "relevance", order: "desc" },
+    });
+  });
+});
+
 describe("CatalogFiltersPanel rules the Guided view can't show", () => {
   it("opens the Filters sheet in Advanced with Guided switched off", () => {
     renderPanel({ source: "query", query_definition: ADVANCED_RULES });

@@ -96897,6 +96897,12 @@
       "value": "סדר"
     }
   ],
+  "web.catalog.sort.relevance": [
+    {
+      "type": 0,
+      "value": "רלוונטיות"
+    }
+  ],
   "web.catalog.sort.sortBy": [
     {
       "type": 0,
@@ -131746,6 +131752,12 @@
       "value": "יש לך אפשרות להשהות ולהמשיך"
     }
   ],
+  "web.player.watchTogether.redisRequired": [
+    {
+      "type": 0,
+      "value": "כדי להשתמש ב-Watch Party נדרש Redis, והוא לא הוגדר בשרת הזה. אפשר לבקש ממנהל השרת להגדיר אותו."
+    }
+  ],
   "web.player.watchTogether.selfName": [
     {
       "type": 1,
@@ -135864,6 +135876,86 @@
     {
       "type": 0,
       "value": "חיפוש בספרייה או מציאת פריטים לבקשה…"
+    }
+  ],
+  "web.search.results.allInLibrary": [
+    {
+      "type": 0,
+      "value": "כל התוצאות בספרייה שלך"
+    }
+  ],
+  "web.search.results.atLeastCount": [
+    {
+      "type": 1,
+      "value": "count"
+    },
+    {
+      "type": 0,
+      "value": "+"
+    }
+  ],
+  "web.search.results.backToRelevance": [
+    {
+      "type": 0,
+      "value": "חזרה למיון לפי רלוונטיות"
+    }
+  ],
+  "web.search.results.bestMatches": [
+    {
+      "type": 0,
+      "value": "ההתאמות הטובות ביותר"
+    }
+  ],
+  "web.search.results.inLibrary": [
+    {
+      "type": 0,
+      "value": "בספרייה שלך"
+    }
+  ],
+  "web.search.results.moreResults": [
+    {
+      "type": 0,
+      "value": "תוצאות נוספות"
+    }
+  ],
+  "web.search.results.notInLibrary": [
+    {
+      "type": 0,
+      "value": "לא בספרייה שלך"
+    }
+  ],
+  "web.search.results.overview": [
+    {
+      "type": 0,
+      "value": "סקירה כללית"
+    }
+  ],
+  "web.search.results.requestToAdd": [
+    {
+      "type": 0,
+      "value": "בקשה להוספה"
+    }
+  ],
+  "web.search.results.showAll": [
+    {
+      "type": 0,
+      "value": "הצגת כל התוצאות"
+    }
+  ],
+  "web.search.results.sortedBy": [
+    {
+      "type": 0,
+      "value": "מיון לפי "
+    },
+    {
+      "type": 1,
+      "value": "sort"
+    }
+  ],
+  "web.search.results.viewsLabel": [
+    {
+      "type": 0,
+      "value": "תצוגות התוצאות"
     }
   ],
   "web.search.resultsLabel": [

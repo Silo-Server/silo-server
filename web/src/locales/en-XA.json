@@ -97380,6 +97380,12 @@
       "value": "⟦Öŕđéŕ~~⟧"
     }
   ],
+  "web.catalog.sort.relevance": [
+    {
+      "type": 0,
+      "value": "⟦Ŕéļéṽåñçé~~~~⟧"
+    }
+  ],
   "web.catalog.sort.sortBy": [
     {
       "type": 0,
@@ -137045,6 +137051,94 @@
     {
       "type": 0,
       "value": "⟦Šéåŕçĥ ļîƀŕåŕý öŕ ƒîñđ ţîţļéš ţö ŕéǫûéšţ...~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.search.results.allInLibrary": [
+    {
+      "type": 0,
+      "value": "⟦Åļļ ŕéšûļţš îñ ýöûŕ ļîƀŕåŕý~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.search.results.atLeastCount": [
+    {
+      "type": 0,
+      "value": "⟦"
+    },
+    {
+      "type": 1,
+      "value": "count"
+    },
+    {
+      "type": 0,
+      "value": "+~⟧"
+    }
+  ],
+  "web.search.results.backToRelevance": [
+    {
+      "type": 0,
+      "value": "⟦Ɓåçķ ţö ŕéļéṽåñçé~~~~~~~⟧"
+    }
+  ],
+  "web.search.results.bestMatches": [
+    {
+      "type": 0,
+      "value": "⟦Ɓéšţ ɱåţçĥéš~~~~~⟧"
+    }
+  ],
+  "web.search.results.inLibrary": [
+    {
+      "type": 0,
+      "value": "⟦Îñ ýöûŕ ļîƀŕåŕý~~~~~~⟧"
+    }
+  ],
+  "web.search.results.moreResults": [
+    {
+      "type": 0,
+      "value": "⟦Ṁöŕé ŕéšûļţš~~~~~⟧"
+    }
+  ],
+  "web.search.results.notInLibrary": [
+    {
+      "type": 0,
+      "value": "⟦Ñöţ îñ ýöûŕ ļîƀŕåŕý~~~~~~~~⟧"
+    }
+  ],
+  "web.search.results.overview": [
+    {
+      "type": 0,
+      "value": "⟦Öṽéŕṽîéŵ~~~~⟧"
+    }
+  ],
+  "web.search.results.requestToAdd": [
+    {
+      "type": 0,
+      "value": "⟦Ŕéǫûéšţ ţö åđđ~~~~~~⟧"
+    }
+  ],
+  "web.search.results.showAll": [
+    {
+      "type": 0,
+      "value": "⟦Šĥöŵ åļļ ŕéšûļţš~~~~~~~⟧"
+    }
+  ],
+  "web.search.results.sortedBy": [
+    {
+      "type": 0,
+      "value": "⟦Šöŕţéđ ƀý "
+    },
+    {
+      "type": 1,
+      "value": "sort"
+    },
+    {
+      "type": 0,
+      "value": "~~~~⟧"
+    }
+  ],
+  "web.search.results.viewsLabel": [
+    {
+      "type": 0,
+      "value": "⟦Ŕéšûļţ ṽîéŵš~~~~~⟧"
     }
   ],
   "web.search.resultsLabel": [

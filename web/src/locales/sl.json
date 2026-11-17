@@ -105502,6 +105502,12 @@
       "value": "Vrstni red"
     }
   ],
+  "web.catalog.sort.relevance": [
+    {
+      "type": 0,
+      "value": "Ustreznost"
+    }
+  ],
   "web.catalog.sort.sortBy": [
     {
       "type": 0,
@@ -143803,6 +143809,12 @@
       "value": "Lahko začasno ustavite in nadaljujete"
     }
   ],
+  "web.player.watchTogether.redisRequired": [
+    {
+      "type": 0,
+      "value": "Watch Party potrebuje Redis, ki na tem strežniku ni nastavljen. Prosite skrbnika strežnika, da ga konfigurira."
+    }
+  ],
   "web.player.watchTogether.selfName": [
     {
       "type": 1,
@@ -148157,6 +148169,86 @@
     {
       "type": 0,
       "value": "Iščite po knjižnici ali poiščite naslove za zahtevo …"
+    }
+  ],
+  "web.search.results.allInLibrary": [
+    {
+      "type": 0,
+      "value": "Vsi rezultati v vaši knjižnici"
+    }
+  ],
+  "web.search.results.atLeastCount": [
+    {
+      "type": 1,
+      "value": "count"
+    },
+    {
+      "type": 0,
+      "value": "+"
+    }
+  ],
+  "web.search.results.backToRelevance": [
+    {
+      "type": 0,
+      "value": "Nazaj na ustreznost"
+    }
+  ],
+  "web.search.results.bestMatches": [
+    {
+      "type": 0,
+      "value": "Najboljša ujemanja"
+    }
+  ],
+  "web.search.results.inLibrary": [
+    {
+      "type": 0,
+      "value": "V vaši knjižnici"
+    }
+  ],
+  "web.search.results.moreResults": [
+    {
+      "type": 0,
+      "value": "Več rezultatov"
+    }
+  ],
+  "web.search.results.notInLibrary": [
+    {
+      "type": 0,
+      "value": "Ni v vaši knjižnici"
+    }
+  ],
+  "web.search.results.overview": [
+    {
+      "type": 0,
+      "value": "Pregled"
+    }
+  ],
+  "web.search.results.requestToAdd": [
+    {
+      "type": 0,
+      "value": "Pošlji zahtevo za dodajanje"
+    }
+  ],
+  "web.search.results.showAll": [
+    {
+      "type": 0,
+      "value": "Prikaži vse rezultate"
+    }
+  ],
+  "web.search.results.sortedBy": [
+    {
+      "type": 0,
+      "value": "Razvrščeno po: "
+    },
+    {
+      "type": 1,
+      "value": "sort"
+    }
+  ],
+  "web.search.results.viewsLabel": [
+    {
+      "type": 0,
+      "value": "Pogledi rezultatov"
     }
   ],
   "web.search.resultsLabel": [

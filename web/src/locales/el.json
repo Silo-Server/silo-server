@@ -89978,6 +89978,12 @@
       "value": "Σειρά"
     }
   ],
+  "web.catalog.sort.relevance": [
+    {
+      "type": 0,
+      "value": "Συνάφεια"
+    }
+  ],
   "web.catalog.sort.sortBy": [
     {
       "type": 0,
@@ -122749,6 +122755,12 @@
       "value": "Μπορείτε να κάνετε παύση και συνέχιση"
     }
   ],
+  "web.player.watchTogether.redisRequired": [
+    {
+      "type": 0,
+      "value": "Το Watch Party χρειάζεται το Redis, το οποίο δεν έχει ρυθμιστεί σε αυτόν τον διακομιστή. Ζητήστε από τον διαχειριστή του διακομιστή να το ρυθμίσει."
+    }
+  ],
   "web.player.watchTogether.selfName": [
     {
       "type": 1,
@@ -126683,6 +126695,86 @@
     {
       "type": 0,
       "value": "Αναζήτηση στη βιβλιοθήκη ή εύρεση τίτλων για αίτημα…"
+    }
+  ],
+  "web.search.results.allInLibrary": [
+    {
+      "type": 0,
+      "value": "Όλα τα αποτελέσματα στη βιβλιοθήκη σας"
+    }
+  ],
+  "web.search.results.atLeastCount": [
+    {
+      "type": 1,
+      "value": "count"
+    },
+    {
+      "type": 0,
+      "value": "+"
+    }
+  ],
+  "web.search.results.backToRelevance": [
+    {
+      "type": 0,
+      "value": "Επιστροφή στη συνάφεια"
+    }
+  ],
+  "web.search.results.bestMatches": [
+    {
+      "type": 0,
+      "value": "Καλύτερες αντιστοιχίες"
+    }
+  ],
+  "web.search.results.inLibrary": [
+    {
+      "type": 0,
+      "value": "Στη βιβλιοθήκη σας"
+    }
+  ],
+  "web.search.results.moreResults": [
+    {
+      "type": 0,
+      "value": "Περισσότερα αποτελέσματα"
+    }
+  ],
+  "web.search.results.notInLibrary": [
+    {
+      "type": 0,
+      "value": "Εκτός της βιβλιοθήκης σας"
+    }
+  ],
+  "web.search.results.overview": [
+    {
+      "type": 0,
+      "value": "Επισκόπηση"
+    }
+  ],
+  "web.search.results.requestToAdd": [
+    {
+      "type": 0,
+      "value": "Αίτημα για προσθήκη"
+    }
+  ],
+  "web.search.results.showAll": [
+    {
+      "type": 0,
+      "value": "Εμφάνιση όλων των αποτελεσμάτων"
+    }
+  ],
+  "web.search.results.sortedBy": [
+    {
+      "type": 0,
+      "value": "Ταξινόμηση: "
+    },
+    {
+      "type": 1,
+      "value": "sort"
+    }
+  ],
+  "web.search.results.viewsLabel": [
+    {
+      "type": 0,
+      "value": "Προβολές αποτελεσμάτων"
     }
   ],
   "web.search.resultsLabel": [

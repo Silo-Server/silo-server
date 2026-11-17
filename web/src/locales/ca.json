@@ -97587,6 +97587,12 @@
       "value": "Ordre"
     }
   ],
+  "web.catalog.sort.relevance": [
+    {
+      "type": 0,
+      "value": "Rellevància"
+    }
+  ],
   "web.catalog.sort.sortBy": [
     {
       "type": 0,
@@ -133181,6 +133187,12 @@
       "value": "Pots posar en pausa i reprendre"
     }
   ],
+  "web.player.watchTogether.redisRequired": [
+    {
+      "type": 0,
+      "value": "Watch Party necessita Redis, que aquest servidor no té configurat. Demana a l’administrador del servidor que el configuri."
+    }
+  ],
   "web.player.watchTogether.selfName": [
     {
       "type": 1,
@@ -137337,6 +137349,86 @@
     {
       "type": 0,
       "value": "Cerca a la biblioteca o troba títols per sol·licitar…"
+    }
+  ],
+  "web.search.results.allInLibrary": [
+    {
+      "type": 0,
+      "value": "Tots els resultats de la biblioteca"
+    }
+  ],
+  "web.search.results.atLeastCount": [
+    {
+      "type": 1,
+      "value": "count"
+    },
+    {
+      "type": 0,
+      "value": "+"
+    }
+  ],
+  "web.search.results.backToRelevance": [
+    {
+      "type": 0,
+      "value": "Torna a ordenar per rellevància"
+    }
+  ],
+  "web.search.results.bestMatches": [
+    {
+      "type": 0,
+      "value": "Millors coincidències"
+    }
+  ],
+  "web.search.results.inLibrary": [
+    {
+      "type": 0,
+      "value": "A la biblioteca"
+    }
+  ],
+  "web.search.results.moreResults": [
+    {
+      "type": 0,
+      "value": "Més resultats"
+    }
+  ],
+  "web.search.results.notInLibrary": [
+    {
+      "type": 0,
+      "value": "Fora de la biblioteca"
+    }
+  ],
+  "web.search.results.overview": [
+    {
+      "type": 0,
+      "value": "Resum"
+    }
+  ],
+  "web.search.results.requestToAdd": [
+    {
+      "type": 0,
+      "value": "Sol·licita per afegir"
+    }
+  ],
+  "web.search.results.showAll": [
+    {
+      "type": 0,
+      "value": "Mostra tots els resultats"
+    }
+  ],
+  "web.search.results.sortedBy": [
+    {
+      "type": 0,
+      "value": "Ordenats per "
+    },
+    {
+      "type": 1,
+      "value": "sort"
+    }
+  ],
+  "web.search.results.viewsLabel": [
+    {
+      "type": 0,
+      "value": "Vistes de resultats"
     }
   ],
   "web.search.resultsLabel": [

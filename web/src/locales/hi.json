@@ -89280,6 +89280,12 @@
       "value": "क्रम"
     }
   ],
+  "web.catalog.sort.relevance": [
+    {
+      "type": 0,
+      "value": "प्रासंगिकता"
+    }
+  ],
   "web.catalog.sort.sortBy": [
     {
       "type": 0,
@@ -121437,6 +121443,12 @@
       "value": "आपको रोकने और जारी रखने की अनुमति है"
     }
   ],
+  "web.player.watchTogether.redisRequired": [
+    {
+      "type": 0,
+      "value": "Watch Party के लिए Redis ज़रूरी है, जो इस सर्वर पर सेट अप नहीं है। अपने सर्वर एडमिनिस्ट्रेटर से इसे कॉन्फ़िगर करने के लिए कहें।"
+    }
+  ],
   "web.player.watchTogether.selfName": [
     {
       "type": 1,
@@ -125339,6 +125351,86 @@
     {
       "type": 0,
       "value": "लाइब्रेरी में खोजें या अनुरोध के लिए टाइटल ढूँढें…"
+    }
+  ],
+  "web.search.results.allInLibrary": [
+    {
+      "type": 0,
+      "value": "आपकी लाइब्रेरी के सभी नतीजे"
+    }
+  ],
+  "web.search.results.atLeastCount": [
+    {
+      "type": 1,
+      "value": "count"
+    },
+    {
+      "type": 0,
+      "value": "+"
+    }
+  ],
+  "web.search.results.backToRelevance": [
+    {
+      "type": 0,
+      "value": "फिर से प्रासंगिकता के अनुसार लगाएँ"
+    }
+  ],
+  "web.search.results.bestMatches": [
+    {
+      "type": 0,
+      "value": "सबसे सटीक नतीजे"
+    }
+  ],
+  "web.search.results.inLibrary": [
+    {
+      "type": 0,
+      "value": "आपकी लाइब्रेरी में"
+    }
+  ],
+  "web.search.results.moreResults": [
+    {
+      "type": 0,
+      "value": "और नतीजे"
+    }
+  ],
+  "web.search.results.notInLibrary": [
+    {
+      "type": 0,
+      "value": "आपकी लाइब्रेरी में नहीं"
+    }
+  ],
+  "web.search.results.overview": [
+    {
+      "type": 0,
+      "value": "सारांश"
+    }
+  ],
+  "web.search.results.requestToAdd": [
+    {
+      "type": 0,
+      "value": "जोड़ने का अनुरोध करें"
+    }
+  ],
+  "web.search.results.showAll": [
+    {
+      "type": 0,
+      "value": "सभी नतीजे दिखाएँ"
+    }
+  ],
+  "web.search.results.sortedBy": [
+    {
+      "type": 1,
+      "value": "sort"
+    },
+    {
+      "type": 0,
+      "value": " के अनुसार क्रम में"
+    }
+  ],
+  "web.search.results.viewsLabel": [
+    {
+      "type": 0,
+      "value": "नतीजों के व्यू"
     }
   ],
   "web.search.resultsLabel": [

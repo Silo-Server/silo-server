@@ -94080,6 +94080,12 @@
       "value": "\u200F\u202EOrder\u202C"
     }
   ],
+  "web.catalog.sort.relevance": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ERelevance\u202C"
+    }
+  ],
   "web.catalog.sort.sortBy": [
     {
       "type": 0,
@@ -132353,6 +132359,90 @@
     {
       "type": 0,
       "value": "\u200F\u202ESearch library or find titles to request...\u202C"
+    }
+  ],
+  "web.search.results.allInLibrary": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EAll results in your library\u202C"
+    }
+  ],
+  "web.search.results.atLeastCount": [
+    {
+      "type": 0,
+      "value": "\u200F"
+    },
+    {
+      "type": 1,
+      "value": "count"
+    },
+    {
+      "type": 0,
+      "value": "\u202E+\u202C"
+    }
+  ],
+  "web.search.results.backToRelevance": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EBack to relevance\u202C"
+    }
+  ],
+  "web.search.results.bestMatches": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EBest matches\u202C"
+    }
+  ],
+  "web.search.results.inLibrary": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EIn your library\u202C"
+    }
+  ],
+  "web.search.results.moreResults": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EMore results\u202C"
+    }
+  ],
+  "web.search.results.notInLibrary": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ENot in your library\u202C"
+    }
+  ],
+  "web.search.results.overview": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EOverview\u202C"
+    }
+  ],
+  "web.search.results.requestToAdd": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ERequest to add\u202C"
+    }
+  ],
+  "web.search.results.showAll": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EShow all results\u202C"
+    }
+  ],
+  "web.search.results.sortedBy": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ESorted by \u202C"
+    },
+    {
+      "type": 1,
+      "value": "sort"
+    }
+  ],
+  "web.search.results.viewsLabel": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EResult views\u202C"
     }
   ],
   "web.search.resultsLabel": [

@@ -89930,6 +89930,12 @@
       "value": "Thứ tự"
     }
   ],
+  "web.catalog.sort.relevance": [
+    {
+      "type": 0,
+      "value": "Mức độ liên quan"
+    }
+  ],
   "web.catalog.sort.sortBy": [
     {
       "type": 0,
@@ -122575,6 +122581,12 @@
       "value": "Bạn có thể tạm dừng và tiếp tục"
     }
   ],
+  "web.player.watchTogether.redisRequired": [
+    {
+      "type": 0,
+      "value": "Watch Party cần Redis, nhưng máy chủ này chưa được thiết lập Redis. Hãy yêu cầu quản trị viên máy chủ định cấu hình Redis."
+    }
+  ],
   "web.player.watchTogether.selfName": [
     {
       "type": 1,
@@ -126505,6 +126517,86 @@
     {
       "type": 0,
       "value": "Tìm trong thư viện hoặc tìm tựa để yêu cầu…"
+    }
+  ],
+  "web.search.results.allInLibrary": [
+    {
+      "type": 0,
+      "value": "Tất cả kết quả trong thư viện của bạn"
+    }
+  ],
+  "web.search.results.atLeastCount": [
+    {
+      "type": 1,
+      "value": "count"
+    },
+    {
+      "type": 0,
+      "value": "+"
+    }
+  ],
+  "web.search.results.backToRelevance": [
+    {
+      "type": 0,
+      "value": "Quay lại sắp xếp theo mức độ liên quan"
+    }
+  ],
+  "web.search.results.bestMatches": [
+    {
+      "type": 0,
+      "value": "Phù hợp nhất"
+    }
+  ],
+  "web.search.results.inLibrary": [
+    {
+      "type": 0,
+      "value": "Trong thư viện của bạn"
+    }
+  ],
+  "web.search.results.moreResults": [
+    {
+      "type": 0,
+      "value": "Kết quả khác"
+    }
+  ],
+  "web.search.results.notInLibrary": [
+    {
+      "type": 0,
+      "value": "Không có trong thư viện của bạn"
+    }
+  ],
+  "web.search.results.overview": [
+    {
+      "type": 0,
+      "value": "Tổng quan"
+    }
+  ],
+  "web.search.results.requestToAdd": [
+    {
+      "type": 0,
+      "value": "Yêu cầu thêm"
+    }
+  ],
+  "web.search.results.showAll": [
+    {
+      "type": 0,
+      "value": "Hiển thị tất cả kết quả"
+    }
+  ],
+  "web.search.results.sortedBy": [
+    {
+      "type": 0,
+      "value": "Sắp xếp theo "
+    },
+    {
+      "type": 1,
+      "value": "sort"
+    }
+  ],
+  "web.search.results.viewsLabel": [
+    {
+      "type": 0,
+      "value": "Chế độ xem kết quả"
     }
   ],
   "web.search.resultsLabel": [

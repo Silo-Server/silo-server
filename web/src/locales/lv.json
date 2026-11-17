@@ -98819,6 +98819,12 @@
       "value": "Secība"
     }
   ],
+  "web.catalog.sort.relevance": [
+    {
+      "type": 0,
+      "value": "Atbilstība"
+    }
+  ],
   "web.catalog.sort.sortBy": [
     {
       "type": 0,
@@ -134904,6 +134910,12 @@
       "value": "Jūs varat pauzēt un turpināt"
     }
   ],
+  "web.player.watchTogether.redisRequired": [
+    {
+      "type": 0,
+      "value": "Watch Party darbībai nepieciešams Redis, kas šajā serverī nav iestatīts. Lūdziet servera administratoram to konfigurēt."
+    }
+  ],
   "web.player.watchTogether.selfName": [
     {
       "type": 1,
@@ -139080,6 +139092,86 @@
     {
       "type": 0,
       "value": "Meklēt bibliotēkā vai atrast nosaukumus, ko pieprasīt…"
+    }
+  ],
+  "web.search.results.allInLibrary": [
+    {
+      "type": 0,
+      "value": "Visi rezultāti jūsu bibliotēkā"
+    }
+  ],
+  "web.search.results.atLeastCount": [
+    {
+      "type": 1,
+      "value": "count"
+    },
+    {
+      "type": 0,
+      "value": "+"
+    }
+  ],
+  "web.search.results.backToRelevance": [
+    {
+      "type": 0,
+      "value": "Atpakaļ pie atbilstības"
+    }
+  ],
+  "web.search.results.bestMatches": [
+    {
+      "type": 0,
+      "value": "Labākās atbilstības"
+    }
+  ],
+  "web.search.results.inLibrary": [
+    {
+      "type": 0,
+      "value": "Jūsu bibliotēkā"
+    }
+  ],
+  "web.search.results.moreResults": [
+    {
+      "type": 0,
+      "value": "Citi rezultāti"
+    }
+  ],
+  "web.search.results.notInLibrary": [
+    {
+      "type": 0,
+      "value": "Nav jūsu bibliotēkā"
+    }
+  ],
+  "web.search.results.overview": [
+    {
+      "type": 0,
+      "value": "Pārskats"
+    }
+  ],
+  "web.search.results.requestToAdd": [
+    {
+      "type": 0,
+      "value": "Pieprasīt pievienošanu"
+    }
+  ],
+  "web.search.results.showAll": [
+    {
+      "type": 0,
+      "value": "Rādīt visus rezultātus"
+    }
+  ],
+  "web.search.results.sortedBy": [
+    {
+      "type": 0,
+      "value": "Kārtošana: "
+    },
+    {
+      "type": 1,
+      "value": "sort"
+    }
+  ],
+  "web.search.results.viewsLabel": [
+    {
+      "type": 0,
+      "value": "Rezultātu skati"
     }
   ],
   "web.search.resultsLabel": [
