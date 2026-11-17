@@ -367,7 +367,7 @@ connection with `1009` (message too big).
 `protocol`, an empty string when this server does not serve the handshake. The web
 player mints under captured profile authority for every connection, offers the
 protocol pair, discards frames once that authority changes, and retries a refused
-mint with bounded backoff under the same authority.
+mint under the same authority with a backoff that grows to one attempt every 30 seconds.
 
 
 ### V2 suggestion reads and vote membership
