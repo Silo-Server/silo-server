@@ -404,12 +404,8 @@ func (r *titlesRepo) promoteEntry(ctx context.Context, userID int, profileID str
 		return false, false, err
 	}
 	if removed && newToUser {
-		if _, err := tx.Exec(ctx, `
-			INSERT INTO watchlist_title_promotions (user_id, profile_id, media_item_id, title_added_at)
-			VALUES ($1, $2, $3, $4)
-			ON CONFLICT (user_id, profile_id, media_item_id) DO NOTHING`,
-			userID, profileID, contentID, currentAddedAt); err != nil {
-			return false, false, fmt.Errorf("recording watchlist title promotion: %w", err)
+		if err := recordPromotion(ctx, tx, userID, profileID, contentID, currentAddedAt); err != nil {
+			return false, false, err
 		}
 	}
 	if err := tx.Commit(ctx); err != nil {

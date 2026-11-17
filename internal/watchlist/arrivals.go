@@ -122,6 +122,19 @@ func arrivedItems(ctx context.Context, q Querier, contentIDs []string, arrivedSi
 	return arrived, nil
 }
 
+// recordPromotion notes, in the promotion's transaction, that a title entry
+// added at titleAddedAt moved onto the item.
+func recordPromotion(ctx context.Context, q Querier, userID int, profileID, contentID string, titleAddedAt time.Time) error {
+	if _, err := q.Exec(ctx, `
+		INSERT INTO watchlist_title_promotions (user_id, profile_id, media_item_id, title_added_at)
+		VALUES ($1, $2, $3, $4)
+		ON CONFLICT (user_id, profile_id, media_item_id) DO NOTHING`,
+		userID, profileID, contentID, titleAddedAt); err != nil {
+		return fmt.Errorf("recording watchlist title promotion: %w", err)
+	}
+	return nil
+}
+
 // ForgetPromotion deletes the record of a title entry promoted onto the item,
 // once the item leaves the profile's library watchlist: the profile no longer
 // waits for the title. The notification system calls it from its user store
