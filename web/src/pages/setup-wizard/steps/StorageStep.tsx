@@ -316,12 +316,12 @@ export function StorageStep() {
     setRestartPhase("applying");
     const slowAt = Date.now() + RESTART_SLOW_MS;
     let slow = false;
-    try {
-      await restart.mutateAsync({});
-    } catch {
+    // Not awaited: polling for the new process is the real signal, and a
+    // request that never answers must not hold it up.
+    restart.mutateAsync({}).catch(() => {
       slow = true;
-      setRestartPhase("slow");
-    }
+      if (mounted.current) setRestartPhase("slow");
+    });
     while (mounted.current) {
       await new Promise((resolve) =>
         setTimeout(resolve, slow ? RESTART_SLOW_POLL_MS : RESTART_POLL_MS),

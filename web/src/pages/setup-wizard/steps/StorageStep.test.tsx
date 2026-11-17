@@ -346,6 +346,20 @@ describe("StorageStep", () => {
       expect(restartMock).toHaveBeenCalledOnce();
     });
 
+    it("keeps polling while the restart request has not answered", async () => {
+      fetchStatusMock
+        .mockResolvedValueOnce(pendingStorage)
+        .mockResolvedValue({ started_at: REBOOT, restart_required: false });
+      restartMock.mockReturnValue(new Promise(() => {}));
+      const { markDone } = setup({ dirtyKeys: ["s3.public_bucket"] });
+      render(<StorageStep />);
+
+      await userEvent.click(screen.getByRole("button", { name: /Continue/ }));
+      await vi.advanceTimersByTimeAsync(5_000);
+
+      await waitFor(() => expect(markDone).toHaveBeenCalledWith("storage"));
+    });
+
     it("applies a pending storage change when the admin skips", async () => {
       fetchStatusMock
         .mockResolvedValueOnce(pendingStorage)
