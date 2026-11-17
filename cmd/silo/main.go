@@ -2676,8 +2676,8 @@ func main() {
 
 	// User-facing release notifications. The system reads user state through
 	// the raw store provider; the provider handed to everything downstream is
-	// wrapped so every favorites/watchlist/progress mutation (REST handlers,
-	// jellycompat, imports, playback) feeds the interest index.
+	// wrapped so every progress, history and Home removal mutation (REST
+	// handlers, jellycompat, imports, playback) feeds the interest index.
 	var notificationSystem *notifications.System
 	if deps.DB != nil && userStoreProvider != nil {
 		userRepo := auth.NewUserRepository(deps.DB)
@@ -2700,6 +2700,12 @@ func main() {
 			deps.SecretCipher,
 			mail.NewSMTPSender(settingsRepo),
 			deps.EmailBrand,
+		)
+		// A title arriving tells the profiles whose watchlist waited for it,
+		// unless a request of it tells them.
+		notificationSystem.SetWatchlistArrivals(
+			&watchlist.Arrivals{},
+			mediarequests.NewRepository(deps.DB, deps.SecretCipher),
 		)
 		userStoreProvider = notifications.WrapUserStoreProvider(userStoreProvider, notificationSystem)
 		deps.Notifications = notificationSystem

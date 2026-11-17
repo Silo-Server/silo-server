@@ -13,8 +13,9 @@ import (
 // fallback.
 const DeliveryTypeEpisodeAvailable = "episode.available"
 
-// SuppressedReasonSeriesBurst marks release events consumed by the per-series
-// burst cap without fanout.
+// SuppressedReasonSeriesBurst marks release events the retired per-series
+// burst cap consumed without fanout. Fanout no longer writes it; rows from
+// before keep it.
 const SuppressedReasonSeriesBurst = "series_burst"
 
 // SuppressedReasonStale marks release events that aged past the fanout
@@ -74,9 +75,6 @@ type SeriesInterest struct {
 	ProfileID               string
 	LibraryID               int
 	SeriesID                string
-	Favorite                bool
-	Watchlist               bool
-	ContinueWatching        bool
 	NextUpCandidate         bool
 	LastCompletedEpisodeKey *int
 	NextExpectedEpisodeKey  *int
@@ -86,72 +84,32 @@ type SeriesInterest struct {
 
 func (i SeriesInterest) key() profileKey { return profileKey{i.UserID, i.ProfileID} }
 
-// HasAnyInterest reports whether at least one interest flag is set.
-func (i SeriesInterest) HasAnyInterest() bool {
-	return i.Favorite || i.Watchlist || i.ContinueWatching || i.NextUpCandidate
-}
-
 // ReasonFlags records which interest reasons matched for an
-// episode.available delivery.
+// episode.available delivery. Next Up is the only one. Inbox rows written
+// before it was carry favorite, watchlist and continue_watching keys too;
+// decoding ignores them.
 type ReasonFlags struct {
-	Favorite         bool `json:"favorite"`
-	Watchlist        bool `json:"watchlist"`
-	ContinueWatching bool `json:"continue_watching"`
-	NextUp           bool `json:"next_up"`
-}
-
-// The reason names, as ReasonFlags' JSON keys spell them.
-const (
-	ReasonFavorite         = "favorite"
-	ReasonWatchlist        = "watchlist"
-	ReasonContinueWatching = "continue_watching"
-	ReasonNextUp           = "next_up"
-)
-
-// Has reports whether the named reason is set; an unknown name never is.
-func (f ReasonFlags) Has(reason string) bool {
-	switch reason {
-	case ReasonFavorite:
-		return f.Favorite
-	case ReasonWatchlist:
-		return f.Watchlist
-	case ReasonContinueWatching:
-		return f.ContinueWatching
-	case ReasonNextUp:
-		return f.NextUp
-	}
-	return false
-}
-
-// Any reports whether at least one reason matched.
-func (f ReasonFlags) Any() bool {
-	return f.Favorite || f.Watchlist || f.ContinueWatching || f.NextUp
+	NextUp bool `json:"next_up"`
 }
 
 // Preferences are the per-profile notification controls. Missing rows default
 // to all-enabled.
 type Preferences struct {
-	UserID                 int       `json:"-"`
-	ProfileID              string    `json:"profile_id"`
-	Enabled                bool      `json:"enabled"`
-	NotifyFavorites        bool      `json:"notify_favorites"`
-	NotifyWatchlist        bool      `json:"notify_watchlist"`
-	NotifyContinueWatching bool      `json:"notify_continue_watching"`
-	NotifyNextUp           bool      `json:"notify_next_up"`
-	UpdatedAt              time.Time `json:"-"`
+	UserID       int       `json:"-"`
+	ProfileID    string    `json:"profile_id"`
+	Enabled      bool      `json:"enabled"`
+	NotifyNextUp bool      `json:"notify_next_up"`
+	UpdatedAt    time.Time `json:"-"`
 }
 
 // DefaultPreferences returns the all-enabled defaults for the profile on
 // userID's account.
 func DefaultPreferences(userID int, profileID string) Preferences {
 	return Preferences{
-		UserID:                 userID,
-		ProfileID:              profileID,
-		Enabled:                true,
-		NotifyFavorites:        true,
-		NotifyWatchlist:        true,
-		NotifyContinueWatching: true,
-		NotifyNextUp:           true,
+		UserID:       userID,
+		ProfileID:    profileID,
+		Enabled:      true,
+		NotifyNextUp: true,
 	}
 }
 

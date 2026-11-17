@@ -152,18 +152,9 @@ it("does not describe failed initial loading as an empty inbox or permit an unbo
 const prefs = {
   profile_id: "owner",
   enabled: true,
-  notify_favorites: true,
-  notify_watchlist: false,
-  notify_continue_watching: true,
   notify_next_up: true,
 };
-const reasons = (set: Partial<Record<string, boolean>>) => ({
-  favorite: false,
-  watchlist: false,
-  continue_watching: false,
-  next_up: false,
-  ...set,
-});
+const reasons = (set: Partial<Record<string, boolean>>) => ({ next_up: false, ...set });
 function seriesQuery(series: unknown[]) {
   return { data: { pages: [{ series }] }, isLoading: false, isError: false, hasNextPage: false };
 }
@@ -179,35 +170,33 @@ it("offers the Series view only when the server lists notified series", () => {
   expect(screen.getByText("Displayed episode")).toBeInTheDocument();
 });
 it("searches, filters, and sorts the Series view from the URL", async () => {
-  state.capability = { series: { available: true } };
+  state.capability = { series: { available: true, mute: true, bulk_mute: true } };
   state.series = { all: seriesQuery([]), muted: seriesQuery([]) };
-  renderAt("/notifications?view=series&reason=watchlist&sort=-year");
-  expect(state.seriesOptions.at(-1)).toEqual({ q: "", reason: "watchlist", sort: "-year" });
-  expect(screen.getByRole("button", { name: "Watchlist" })).toHaveAttribute("aria-pressed", "true");
+  renderAt("/notifications?view=series&filter=muted&sort=-year");
+  expect(state.seriesOptions.at(-1)).toEqual({ q: "", sort: "-year" });
+  expect(screen.getByRole("button", { name: "Muted" })).toHaveAttribute("aria-pressed", "true");
   expect(screen.getByRole("combobox", { name: "Sort" })).toHaveTextContent("Release year");
-  expect(screen.getByText("No series match. Try another search or reason.")).toBeInTheDocument();
+  expect(screen.getByText("No series match. Try another search or filter.")).toBeInTheDocument();
   fireEvent.change(screen.getByRole("searchbox", { name: "Search series" }), {
     target: { value: " bear " },
   });
-  await waitFor(() =>
-    expect(state.seriesOptions.at(-1)).toEqual({ q: "bear", reason: "watchlist", sort: "-year" }),
-  );
+  await waitFor(() => expect(state.seriesOptions.at(-1)).toEqual({ q: "bear", sort: "-year" }));
 });
 it("lists only the muted series under the Muted tab", () => {
   state.capability = { series: { available: true, mute: true, bulk_mute: true } };
   const muted = seriesQuery([
     seriesEntry("series:wire", "The Wire", {
-      reasons: reasons({ favorite: true }),
-      active_reasons: reasons({ favorite: true }),
+      reasons: reasons({ next_up: true }),
+      active_reasons: reasons({ next_up: true }),
       notifies: false,
       muted: true,
     }),
   ]);
   state.series = { all: seriesQuery([]), muted };
-  renderAt("/notifications?view=series&reason=muted");
-  expect(state.seriesOptions.at(-1)).toEqual({ q: "", reason: undefined, sort: "title" });
+  renderAt("/notifications?view=series&filter=muted");
+  expect(state.seriesOptions.at(-1)).toEqual({ q: "", sort: "title" });
   const wire = screen.getByRole("link", { name: /The Wire/ });
-  expect(wire.closest("li")).toHaveTextContent("Favorite (off)");
+  expect(wire.closest("li")).toHaveTextContent("Muted");
   expect(
     screen.getByRole("switch", { name: "Notify me about new episodes of The Wire" }),
   ).not.toBeChecked();
@@ -227,20 +216,30 @@ it("mutes and unmutes a series from its row switch", () => {
   state.series = {
     all: seriesQuery([
       seriesEntry("series:andor", "Andor", {
-        reasons: reasons({ favorite: true }),
-        active_reasons: reasons({ favorite: true }),
+        reasons: reasons({ next_up: true }),
+        active_reasons: reasons({ next_up: true }),
         notifies: true,
         muted: false,
       }),
       seriesEntry("series:wire", "The Wire", {
-        reasons: reasons({ favorite: true }),
-        active_reasons: reasons({ favorite: true }),
+        reasons: reasons({ next_up: true }),
+        active_reasons: reasons({ next_up: true }),
         notifies: false,
         muted: true,
+      }),
+      seriesEntry("series:bear", "The Bear", {
+        reasons: reasons({ next_up: true }),
+        active_reasons: reasons({ next_up: true }),
+        notifies: false,
+        muted: false,
       }),
     ]),
   };
   renderAt("/notifications?view=series");
+  // Next Up is on but an episode is waiting: it notifies once caught up.
+  expect(screen.getByRole("link", { name: /The Bear/ }).closest("li")).toHaveTextContent(
+    "After you catch up",
+  );
   fireEvent.click(screen.getByRole("switch", { name: "Notify me about new episodes of Andor" }));
   expect(state.mute.mutate).toHaveBeenLastCalledWith({
     seriesId: "series:andor",
@@ -260,8 +259,8 @@ it("offers no switch or selection when the server cannot mute a series", () => {
   state.series = {
     all: seriesQuery([
       seriesEntry("series:andor", "Andor", {
-        reasons: reasons({ favorite: true }),
-        active_reasons: reasons({ favorite: true }),
+        reasons: reasons({ next_up: true }),
+        active_reasons: reasons({ next_up: true }),
         notifies: true,
       }),
     ]),
@@ -298,9 +297,9 @@ it("mutes the selected series together", () => {
 it("offers no Muted tab and no selection while the previous filter's rows show", () => {
   state.capability = { series: { available: true, mute: true } };
   state.series = { all: seriesQuery([]) };
-  renderAt("/notifications?view=series&reason=muted");
+  renderAt("/notifications?view=series&filter=muted");
   expect(screen.queryByRole("button", { name: "Muted" })).not.toBeInTheDocument();
-  expect(state.seriesOptions.at(-1)).toEqual({ q: "", reason: undefined, sort: "title" });
+  expect(state.seriesOptions.at(-1)).toEqual({ q: "", sort: "title" });
   cleanup();
 
   state.capability = { series: { available: true, mute: true, bulk_mute: true } };

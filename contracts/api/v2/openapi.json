@@ -41897,16 +41897,7 @@
           "enabled": {
             "type": "boolean"
           },
-          "notify_continue_watching": {
-            "type": "boolean"
-          },
-          "notify_favorites": {
-            "type": "boolean"
-          },
           "notify_next_up": {
-            "type": "boolean"
-          },
-          "notify_watchlist": {
             "type": "boolean"
           },
           "profile_id": {
@@ -41921,9 +41912,6 @@
         "required": [
           "profile_id",
           "enabled",
-          "notify_favorites",
-          "notify_watchlist",
-          "notify_continue_watching",
           "notify_next_up"
         ],
         "type": "object"
@@ -41934,16 +41922,7 @@
           "enabled": {
             "type": "boolean"
           },
-          "notify_continue_watching": {
-            "type": "boolean"
-          },
-          "notify_favorites": {
-            "type": "boolean"
-          },
           "notify_next_up": {
-            "type": "boolean"
-          },
-          "notify_watchlist": {
             "type": "boolean"
           }
         },
@@ -42098,10 +42077,10 @@
           },
           "next_up_after": {
             "$ref": "#/components/schemas/NotificationEpisodeRef",
-            "description": "With an active Next Up reason, the last episode the profile finished: on that reason alone, only a new episode after it notifies"
+            "description": "With an active Next Up reason, the episode just before the one Next Up waits for, normally the last episode the profile finished: only a new episode after it notifies"
           },
           "notifies": {
-            "description": "True when at least one reason is active and the profile has not muted the series",
+            "description": "True when the episode the profile waits for would notify on arrival: next_up is active, the profile has not muted the series, and it is caught up, meaning the first episode the catalog lists at or after the one Next Up waits for has not arrived, or none is listed. False while that episode is already available: the profile has an episode to watch first, and nothing notifies until it watches on.",
             "type": "boolean"
           },
           "reasons": {
@@ -42236,27 +42215,12 @@
       "NotificationSeriesReasons": {
         "additionalProperties": false,
         "properties": {
-          "continue_watching": {
-            "description": "The profile is partway through the series",
-            "type": "boolean"
-          },
-          "favorite": {
-            "description": "The series is one of the profile's favorites",
-            "type": "boolean"
-          },
           "next_up": {
-            "description": "The profile finished an episode and waits for the next",
-            "type": "boolean"
-          },
-          "watchlist": {
-            "description": "The series is on the profile's watchlist",
+            "description": "The profile finished an episode and waits for the next: the series is not dropped, its Next Up card is not removed, and no episode is partly watched since",
             "type": "boolean"
           }
         },
         "required": [
-          "favorite",
-          "watchlist",
-          "continue_watching",
           "next_up"
         ],
         "type": "object"
@@ -42657,19 +42621,10 @@
             "minLength": 1,
             "type": "string"
           },
-          "notify_continue_watching": {
-            "type": "boolean"
-          },
-          "notify_favorites": {
-            "type": "boolean"
-          },
           "notify_next_up": {
             "type": "boolean"
           },
           "notify_requests": {
-            "type": "boolean"
-          },
-          "notify_watchlist": {
             "type": "boolean"
           },
           "type": {
@@ -42755,19 +42710,10 @@
           "name": {
             "type": "string"
           },
-          "notify_continue_watching": {
-            "type": "boolean"
-          },
-          "notify_favorites": {
-            "type": "boolean"
-          },
           "notify_next_up": {
             "type": "boolean"
           },
           "notify_requests": {
-            "type": "boolean"
-          },
-          "notify_watchlist": {
             "type": "boolean"
           },
           "type": {
@@ -42788,9 +42734,6 @@
           "type",
           "url_host",
           "enabled",
-          "notify_favorites",
-          "notify_watchlist",
-          "notify_continue_watching",
           "notify_next_up",
           "notify_requests",
           "consecutive_failures",
@@ -42823,19 +42766,10 @@
           "name": {
             "type": "string"
           },
-          "notify_continue_watching": {
-            "type": "boolean"
-          },
-          "notify_favorites": {
-            "type": "boolean"
-          },
           "notify_next_up": {
             "type": "boolean"
           },
           "notify_requests": {
-            "type": "boolean"
-          },
-          "notify_watchlist": {
             "type": "boolean"
           },
           "url": {
@@ -195083,7 +195017,7 @@
     },
     "/api/v2/notifications/series": {
       "get": {
-        "description": "Every series the profile favorited, put on its watchlist, is partway through, or waits on a next episode of, and every series it muted, filtered and sorted as asked (by title by default). Each carries its reasons, which of them the profile's notification preferences let notify, and whether the profile muted it. Series the viewer may not see are omitted.",
+        "description": "Every series the profile has finished an episode of and waits on a next episode of, and every series it muted, filtered and sorted as asked (by title by default). Each carries its Next Up reason, whether the profile's notification preferences let it notify, whether the next new episode would notify, and whether the profile muted it. Series the viewer may not see are omitted.",
         "operationId": "listNotificationSeries",
         "parameters": [
           {
@@ -195239,34 +195173,18 @@
             }
           },
           {
-            "description": "active keeps the series that notify; inactive keeps the ones that do not, because the profile's preferences silence every reason or the profile muted the series; muted keeps only the series the profile muted",
+            "description": "active keeps the series whose next new episode would notify (notifies is true); inactive keeps the rest: the profile's preferences silence Next Up, the profile has an available episode to watch first, Next Up is off for the series (dropped, its card removed, an episode partly watched), or the profile muted it; muted keeps only the series the profile muted",
             "explode": false,
             "in": "query",
             "name": "status",
             "schema": {
               "default": "all",
-              "description": "active keeps the series that notify; inactive keeps the ones that do not, because the profile's preferences silence every reason or the profile muted the series; muted keeps only the series the profile muted",
+              "description": "active keeps the series whose next new episode would notify (notifies is true); inactive keeps the rest: the profile's preferences silence Next Up, the profile has an available episode to watch first, Next Up is off for the series (dropped, its card removed, an episode partly watched), or the profile muted it; muted keeps only the series the profile muted",
               "enum": [
                 "all",
                 "active",
                 "inactive",
                 "muted"
-              ],
-              "type": "string"
-            }
-          },
-          {
-            "description": "Keeps the series with this reason, whether or not the preferences let it notify; absent keeps every reason",
-            "explode": false,
-            "in": "query",
-            "name": "reason",
-            "schema": {
-              "description": "Keeps the series with this reason, whether or not the preferences let it notify; absent keeps every reason",
-              "enum": [
-                "favorite",
-                "watchlist",
-                "continue_watching",
-                "next_up"
               ],
               "type": "string"
             }

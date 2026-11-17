@@ -3102,7 +3102,8 @@ export interface NotificationReasonFlags {
   continue_watching?: boolean;
   next_up?: boolean;
   // request.* operational payload (title/year/reason ride on
-  // request.approved / request.declined, which have no catalog item yet)
+  // request.approved / request.declined, which have no catalog item yet).
+  // watchlist.available carries tmdb_id and media_type ("movie" | "series").
   request_id?: string;
   tmdb_id?: number;
   media_type?: string;
@@ -3150,9 +3151,6 @@ export interface NotificationUnreadCountResponse {
 export interface NotificationPreferences {
   profile_id: string;
   enabled: boolean;
-  notify_favorites: boolean;
-  notify_watchlist: boolean;
-  notify_continue_watching: boolean;
   notify_next_up: boolean;
 }
 
@@ -3171,9 +3169,6 @@ export interface NotificationWebhook {
   type: NotificationWebhookType;
   url_host: string;
   enabled: boolean;
-  notify_favorites: boolean;
-  notify_watchlist: boolean;
-  notify_continue_watching: boolean;
   notify_next_up: boolean;
   notify_requests: boolean;
   consecutive_failures: number;
@@ -3191,9 +3186,6 @@ export interface NotificationWebhookInput {
   url?: string;
   type?: NotificationWebhookType;
   enabled?: boolean;
-  notify_favorites?: boolean;
-  notify_watchlist?: boolean;
-  notify_continue_watching?: boolean;
   notify_next_up?: boolean;
   notify_requests?: boolean;
 }

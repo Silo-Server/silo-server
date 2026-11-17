@@ -303,17 +303,4 @@ func TestPartitionEventsByKind(t *testing.T) {
 	if others[0].ID != "3" || others[1].ID != "5" || others[2].ID != "6" {
 		t.Fatalf("unexpected non-episode partition: %+v", others)
 	}
-
-	// The fanout path applies the burst cap only to the episode partition;
-	// movies with empty series_id must never reach it, or they would all
-	// collapse into one (library, "") burst group.
-	fanout, suppressed := ApplyBurstCap(episodes, 2)
-	if len(fanout)+len(suppressed) != len(episodes) {
-		t.Fatalf("burst cap lost events: %d + %d != %d", len(fanout), len(suppressed), len(episodes))
-	}
-	for _, event := range append(fanout, suppressed...) {
-		if event.Kind == EventKindMovie {
-			t.Fatal("movie event leaked into burst-capped fanout set")
-		}
-	}
 }

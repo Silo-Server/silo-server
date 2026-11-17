@@ -13,10 +13,10 @@ import (
 	"github.com/Silo-Server/silo-server/internal/notifications"
 )
 
-// The notified-series list: every series whose new episodes the acting
-// profile has a reason to hear about, the index episode fanout reads, so a
-// profile can see why a series notifies it or why it does not. A profile can
-// mute one series, which stops its new-episode notifications whatever its
+// The notified-series list: every series the acting profile has a Next Up
+// cursor for, the index episode fanout reads, so a profile can see whether a
+// series notifies it now, notifies once it catches up, or does not. A profile
+// can mute one series, which stops its new-episode notifications whatever its
 // reasons, until it unmutes.
 
 const (
@@ -46,23 +46,20 @@ type NotificationSeriesInput struct {
 	ArtworkQuery
 	LimitParam
 	Cursor string `query:"cursor" doc:"Opaque cursor from page.next_cursor" example:"eyJ0IjoiYmVhciJ9"`
-	Status string `query:"status" default:"all" enum:"all,active,inactive,muted" doc:"active keeps the series that notify; inactive keeps the ones that do not, because the profile's preferences silence every reason or the profile muted the series; muted keeps only the series the profile muted"`
-	Reason string `query:"reason" enum:"favorite,watchlist,continue_watching,next_up" doc:"Keeps the series with this reason, whether or not the preferences let it notify; absent keeps every reason"`
+	Status string `query:"status" default:"all" enum:"all,active,inactive,muted" doc:"active keeps the series whose next new episode would notify (notifies is true); inactive keeps the rest: the profile's preferences silence Next Up, the profile has an available episode to watch first, Next Up is off for the series (dropped, its card removed, an episode partly watched), or the profile muted it; muted keeps only the series the profile muted"`
 	Q      string `query:"q" maxLength:"200" doc:"Keeps the series whose title or sort title contains this text, case-insensitively" example:"bear"`
 	Sort   string `query:"sort" default:"title" enum:"title,-title,year,-year,added_at,-added_at,latest_episode_added,-latest_episode_added" doc:"One field, descending with a leading '-'. added_at is when the series joined the catalog; latest_episode_added when it last gained an episode. A series without a year or an episode sorts last either way; ties order by title."`
 }
 
 // NotificationSeriesReasons are the reasons a profile can hear about a
-// series, keyed like an episode notification's reason_flags.
+// series, keyed like an episode notification's reason_flags. Next Up is the
+// only one.
 type NotificationSeriesReasons struct {
-	Favorite         bool `json:"favorite" doc:"The series is one of the profile's favorites"`
-	Watchlist        bool `json:"watchlist" doc:"The series is on the profile's watchlist"`
-	ContinueWatching bool `json:"continue_watching" doc:"The profile is partway through the series"`
-	NextUp           bool `json:"next_up" doc:"The profile finished an episode and waits for the next"`
+	NextUp bool `json:"next_up" doc:"The profile finished an episode and waits for the next: the series is not dropped, its Next Up card is not removed, and no episode is partly watched since"`
 }
 
 func notificationSeriesReasonsOf(f notifications.ReasonFlags) NotificationSeriesReasons {
-	return NotificationSeriesReasons{Favorite: f.Favorite, Watchlist: f.Watchlist, ContinueWatching: f.ContinueWatching, NextUp: f.NextUp}
+	return NotificationSeriesReasons{NextUp: f.NextUp}
 }
 
 // NotificationEpisodeRef names an episode by its season and episode number.
@@ -76,9 +73,9 @@ type NotificationSeries struct {
 	Item          CatalogItem               `json:"item" doc:"The series as a catalog card"`
 	Reasons       NotificationSeriesReasons `json:"reasons" doc:"The profile's relationships to the series"`
 	ActiveReasons NotificationSeriesReasons `json:"active_reasons" doc:"The reasons the profile's notification preferences let notify; all false when they silence the series"`
-	Notifies      bool                      `json:"notifies" doc:"True when at least one reason is active and the profile has not muted the series"`
+	Notifies      bool                      `json:"notifies" doc:"True when the episode the profile waits for would notify on arrival: next_up is active, the profile has not muted the series, and it is caught up, meaning the first episode the catalog lists at or after the one Next Up waits for has not arrived, or none is listed. False while that episode is already available: the profile has an episode to watch first, and nothing notifies until it watches on."`
 	Muted         bool                      `json:"muted" doc:"The profile muted the series: it gets no new-episode notification for it, whatever the reasons, until it unmutes. active_reasons still names the reasons that would notify once unmuted."`
-	NextUpAfter   *NotificationEpisodeRef   `json:"next_up_after,omitempty" doc:"With an active Next Up reason, the last episode the profile finished: on that reason alone, only a new episode after it notifies"`
+	NextUpAfter   *NotificationEpisodeRef   `json:"next_up_after,omitempty" doc:"With an active Next Up reason, the episode just before the one Next Up waits for, normally the last episode the profile finished: only a new episode after it notifies"`
 }
 
 // NotificationSeriesCollection is the listNotificationSeries envelope.
@@ -151,15 +148,13 @@ func orderMissingLast(aMissing, bMissing bool, c int, desc bool) int {
 }
 
 // notificationSeriesMatch reports whether a series passes the query's
-// status, reason, and search filters.
+// status and search filters.
 func notificationSeriesMatch(in *NotificationSeriesInput, query string) func(notifications.NotifiedSeries) bool {
 	return func(s notifications.NotifiedSeries) bool {
 		switch {
 		case in.Status == notificationSeriesActive && !s.Notifies(),
 			in.Status == notificationSeriesInactive && s.Notifies(),
 			in.Status == notificationSeriesMuted && !s.Muted:
-			return false
-		case in.Reason != "" && !s.Reasons.Has(in.Reason):
 			return false
 		}
 		return query == "" || strings.Contains(strings.ToLower(s.Title), query) || strings.Contains(s.SortKey, query)
@@ -170,7 +165,7 @@ func registerNotificationSeries(reg *Registry) {
 	cursors := NewCursors(reg.deps.CursorSecret)
 	op := notificationOperation(http.MethodGet, "/series", opListNotificationSeries)
 	op.Summary = "List the series whose new episodes can notify the acting profile."
-	op.Description = "Every series the profile favorited, put on its watchlist, is partway through, or waits on a next episode of, and every series it muted, filtered and sorted as asked (by title by default). Each carries its reasons, which of them the profile's notification preferences let notify, and whether the profile muted it. Series the viewer may not see are omitted."
+	op.Description = "Every series the profile has finished an episode of and waits on a next episode of, and every series it muted, filtered and sorted as asked (by title by default). Each carries its Next Up reason, whether the profile's notification preferences let it notify, whether the next new episode would notify, and whether the profile muted it. Series the viewer may not see are omitted."
 	Register(reg, op, func(ctx context.Context, in *NotificationSeriesInput) (*NotificationSeriesOutput, error) {
 		return reg.listNotificationSeries(ctx, cursors, in)
 	})
@@ -342,7 +337,7 @@ func (reg *Registry) listNotificationSeries(ctx context.Context, cursors *Cursor
 	scope := CursorScope{
 		OperationID: opListNotificationSeries,
 		Security:    strconv.Itoa(viewer.UserID) + "/" + viewer.ProfileID + "/" + viewerScopeDigest(ctx),
-		Filter:      in.Status + "|" + in.Reason + "|" + query,
+		Filter:      in.Status + "|" + query,
 		Sort:        in.Sort,
 		Tiebreaker:  tiebreakerItemID,
 	}
@@ -425,9 +420,15 @@ func notificationSeriesOf(s notifications.NotifiedSeries, item CatalogItem) Noti
 	// Next Up waits for any episode keyed at or past last-finished + 1, which
 	// need not exist (after a season finale the next is the following season's
 	// first), so the contract names the finished episode instead.
+	//
+	// A profile that finished only specials in a series with regular seasons
+	// waits from the start of season 1 (the cursor is S01E00), and no episode
+	// precedes that, so the field is left out.
 	if s.NextExpectedEpisodeKey != nil {
-		season, episode := notifications.SplitEpisodeKey(*s.NextExpectedEpisodeKey - 1)
-		out.NextUpAfter = &NotificationEpisodeRef{SeasonNumber: season, EpisodeNumber: episode}
+		if _, first := notifications.SplitEpisodeKey(*s.NextExpectedEpisodeKey); first != 0 {
+			season, episode := notifications.SplitEpisodeKey(*s.NextExpectedEpisodeKey - 1)
+			out.NextUpAfter = &NotificationEpisodeRef{SeasonNumber: season, EpisodeNumber: episode}
+		}
 	}
 	return out
 }
