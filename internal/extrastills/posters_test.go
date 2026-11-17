@@ -18,13 +18,13 @@ type fakePosterStore struct {
 	pending []catalog.PendingFramePoster
 	won     map[string]bool // content ID -> whether the save finds the slot as read
 	saved   []string
-	// cleanups counts ClearFramePostersSpanningLibraries calls, which fail
+	// cleanups counts ClearStaleFramePosters calls, which fail
 	// with cleanupErr.
 	cleanups   int
 	cleanupErr error
 }
 
-func (s *fakePosterStore) ClearFramePostersSpanningLibraries(context.Context) (int64, error) {
+func (s *fakePosterStore) ClearStaleFramePosters(context.Context) (int64, error) {
 	s.cleanups++
 	return 0, s.cleanupErr
 }

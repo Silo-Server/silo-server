@@ -108,29 +108,46 @@ func (r *ItemRepository) SetFramePosterIfSource(ctx context.Context, contentID, 
 	return tag.RowsAffected() == 1, nil
 }
 
-// ClearFramePostersSpanningLibraries empties the poster slot of every item
-// that shows a frame, or waits to take one again, and whose live main files
-// are now in more than one library: the poster is shown in every library the
-// item is in, and the frame came from one library's file. That access rule
-// outranks the images lock: a frame was never anyone's choice. It returns how
-// many it cleared; the cleared slot has no source, and the pending list leaves
-// the item out while it spans libraries. The stored frame is left to the
-// artwork revision GC.
+// ClearStaleFramePosters empties the poster slot of every item that shows a
+// frame, or waits to take one again, when the frame may no longer be shown:
+// the file it was taken from is no longer a live main file of the item
+// (missing, deleted, moved to another item, or a source that names no file),
+// or the item's live main files are now in more than one library. The poster
+// is shown in every library the item is in, and the frame came from one
+// library's file. That access rule outranks the images lock: a frame was
+// never anyone's choice. It returns how many it cleared. The cleared slot has
+// no source, so the pending list takes the item again, with a file it has
+// now, while it is in one library. The stored frame is left to the artwork
+// revision GC.
 //
 // The prefix test is the predicate of the partial index
-// idx_media_items_frame_poster, so only frame-sourced rows are read, and each
-// probes its files.
-func (r *ItemRepository) ClearFramePostersSpanningLibraries(ctx context.Context) (int64, error) {
+// idx_media_items_frame_poster, so only frame-sourced rows are read. Each
+// probes its frame's file by the media_files primary key, and its other files
+// through idx_media_files_active_content_folder.
+func (r *ItemRepository) ClearStaleFramePosters(ctx context.Context) (int64, error) {
 	tag, err := r.pool.Exec(ctx, `
 		UPDATE media_items
 		SET poster_path = '', poster_source_path = '', poster_thumbhash = '', updated_at = NOW()
 		WHERE poster_source_path LIKE `+frameSourcePatternSQL+`
-			AND `+spansLibrariesSQL("media_items.content_id"))
+			AND (`+frameFileGoneSQL+`
+				OR `+spansLibrariesSQL("media_items.content_id")+`)`)
 	if err != nil {
-		return 0, fmt.Errorf("clear frame posters of items in several libraries: %w", err)
+		return 0, fmt.Errorf("clear stale frame posters: %w", err)
 	}
 	return tag.RowsAffected(), nil
 }
+
+// frameFileGoneSQL holds when the media_items row's frame source does not
+// name a live main file of the item. The source is StillSourceFramePrefix and
+// a frame key (frameKeySQL), which starts with the file id. A source whose id
+// does not parse matches no file, so it counts as gone; the regex admits only
+// digits short enough for bigint, so the cast cannot fail.
+const frameFileGoneSQL = `NOT EXISTS (
+				SELECT 1 FROM media_files src
+				WHERE src.id = substring(media_items.poster_source_path FROM '^frame:([0-9]{1,18})\?')::bigint
+					AND src.content_id = media_items.content_id
+					AND src.missing_since IS NULL AND src.episode_id IS NULL AND src.extra_id IS NULL
+			)`
 
 // frameSourcePatternSQL is the LIKE pattern of StillSourceFramePrefix, spelled
 // out as a literal because it must equal the predicate of the partial index

@@ -47,7 +47,7 @@ type FailureStore interface {
 
 // posterStore lists, saves and withdraws frame posters; catalog.ItemRepository.
 type posterStore interface {
-	ClearFramePostersSpanningLibraries(ctx context.Context) (int64, error)
+	ClearStaleFramePosters(ctx context.Context) (int64, error)
 	ListPendingFramePosters(ctx context.Context, failures mediaartifact.Key, limit int) ([]catalog.PendingFramePoster, error)
 	SetFramePosterIfSource(ctx context.Context, contentID, expectedSource, path, source, thumbhash string) (bool, error)
 }
@@ -90,14 +90,16 @@ const (
 // maxPosterFailuresInARow failures in a row, and with an error when a poster
 // cannot be saved.
 func (p *posterPass) run(ctx context.Context, limit int) (int, error) {
-	// A frame came from one library's file, and the poster is shown in every
-	// library its movie is in. If the cleanup cannot run, take no new frames.
-	cleared, err := p.items.ClearFramePostersSpanningLibraries(ctx)
+	// A frame came from one file in one library, and the poster is shown in
+	// every library its movie is in: it goes once that file is no longer the
+	// movie's live file, or the movie spans libraries. If the cleanup cannot
+	// run, take no new frames.
+	cleared, err := p.items.ClearStaleFramePosters(ctx)
 	if err != nil {
 		return 0, err
 	}
 	if cleared > 0 {
-		slog.InfoContext(ctx, "frame posters: removed the frames of movies now in more than one library",
+		slog.InfoContext(ctx, "frame posters: removed frames whose file is gone or whose movie is now in more than one library",
 			"component", "extrastills", "cleared", cleared)
 	}
 	pending, err := p.items.ListPendingFramePosters(ctx, framePosterKey, limit)

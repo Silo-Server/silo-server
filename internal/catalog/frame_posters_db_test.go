@@ -225,6 +225,46 @@ func TestFramePostersListOnlyEmptySlotsAndSaveOnlyOverThemDB(t *testing.T) {
 		t.Errorf("poster = %q from %q, want the sidecar's pending slot untouched", path, source)
 	}
 	checkFramesLeaveMoviesInSeveralLibraries(t, f, repo, key, versions, StillSourceFramePrefix+got[versions].FrameKey)
+	checkFramesFollowTheirFile(t, f, repo)
+}
+
+// checkFramesFollowTheirFile: a frame poster lives only while the file it was
+// taken from is a live main file of the item. A frame whose file went missing
+// while the item lives on in another library, a frame whose file row is gone,
+// and a source that names no file are cleared; a frame of a live file in the
+// item's only library is kept.
+func checkFramesFollowTheirFile(t *testing.T, f *framePosterFixture, repo *ItemRepository) {
+	t.Helper()
+	framed := func(name string, source func(fileID int) string) (string, int) {
+		t.Helper()
+		id := f.item(name, "movie", "matched", "", false)
+		fileID := f.file(id, name, false)
+		f.exec(`UPDATE media_items SET poster_path = $2, poster_source_path = $3 WHERE content_id = $1`,
+			id, "local/movies/"+id+"/g/poster/original.webp", source(fileID))
+		return id, fileID
+	}
+	frameOf := func(fileID int) string { return fmt.Sprintf("%s%d?v=1000-0", StillSourceFramePrefix, fileID) }
+
+	kept, keptFile := framed("frame-kept", frameOf)
+	missing, missingFile := framed("frame-missing", frameOf)
+	f.fileIn(f.library("frame-moved", true), missing, "frame-moved", false)
+	f.exec(`UPDATE media_files SET missing_since = NOW() WHERE id = $1`, missingFile)
+	deleted, deletedFile := framed("frame-deleted", frameOf)
+	f.exec(`DELETE FROM media_files WHERE id = $1`, deletedFile)
+	garbled, _ := framed("frame-garbled", func(int) string { return StillSourceFramePrefix + "abc?v=1-1" })
+	huge, _ := framed("frame-huge", func(int) string { return StillSourceFramePrefix + "123456789012345678901234?v=1-1" })
+
+	if _, err := repo.ClearStaleFramePosters(t.Context()); err != nil {
+		t.Fatalf("cleanup: %v", err)
+	}
+	if path, source := f.poster(kept); path == "" || source != frameOf(keptFile) {
+		t.Errorf("%s poster = %q from %q, want the frame of its live file kept", kept, path, source)
+	}
+	for _, id := range []string{missing, deleted, garbled, huge} {
+		if path, source := f.poster(id); path != "" || source != "" {
+			t.Errorf("%s poster = %q from %q, want the frame cleared", id, path, source)
+		}
+	}
 }
 
 // checkFramesLeaveMoviesInSeveralLibraries: a movie that gains a file in a
@@ -245,7 +285,7 @@ func checkFramesLeaveMoviesInSeveralLibraries(t *testing.T, f *framePosterFixtur
 	f.exec(`UPDATE media_items SET poster_path = $2 WHERE content_id = $1`, locked, "local/movies/"+locked+"/f/poster/original.webp")
 	f.file(locked, "locked-frame", false)
 	f.fileIn(gained, locked, "locked-frame-other", false)
-	if _, err := repo.ClearFramePostersSpanningLibraries(ctx); err != nil {
+	if _, err := repo.ClearStaleFramePosters(ctx); err != nil {
 		t.Fatal(err)
 	}
 	for _, id := range []string{listed, locked} {
