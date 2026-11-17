@@ -208,7 +208,8 @@ func (u *InterestUpdater) QueueItemMutationAfter(userID int, profileID, itemID s
 	u.mu.Unlock()
 }
 
-// noteHomeChange records a Home removal or restore of the profile.
+// noteHomeChange records a change to what Home shows the profile: a removal
+// or restore, or a finished episode, which moves the Next Up anchor.
 func (u *InterestUpdater) noteHomeChange(userID int, profileID string, at time.Time) {
 	if u == nil {
 		return

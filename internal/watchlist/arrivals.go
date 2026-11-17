@@ -132,8 +132,11 @@ func recordPromotion(ctx context.Context, q Querier, userID int, profileID strin
 		VALUES ($1, $2, $3, $4, ARRAY(
 			SELECT t.tmdb_id FROM watchlist_titles t WHERE t.id = $5
 			UNION
-			SELECT a.provider_id::integer FROM watchlist_title_aliases a
-			WHERE a.title_id = $5 AND a.provider = 'tmdb' AND a.provider_id ~ '^[0-9]{1,9}$'))
+			SELECT ids.id::integer FROM (
+				SELECT CASE WHEN a.provider_id ~ '^[0-9]{1,10}$' THEN a.provider_id::bigint END AS id
+				FROM watchlist_title_aliases a
+				WHERE a.title_id = $5 AND a.provider = 'tmdb') ids
+			WHERE ids.id BETWEEN 1 AND 2147483647))
 		ON CONFLICT (user_id, profile_id, media_item_id) DO NOTHING`,
 		userID, profileID, contentID, titleAddedAt, titleID); err != nil {
 		return fmt.Errorf("recording watchlist title promotion: %w", err)

@@ -348,6 +348,19 @@ func (s *interestTrackingStore) queueOnTransition(profileID, mediaItemID string,
 	if before != after || resumed {
 		s.updater.QueueItemMutation(s.userID, profileID, mediaItemID)
 	}
+	if after.completed && !before.completed {
+		s.noteCompletion(profileID)
+	}
+}
+
+// noteCompletion marks that the profile finished an episode. A completion
+// moves Home's Next Up anchor, which decides whether an older partly watched
+// episode keeps its series off Next Up (partlyWatchedSinceAnchor). Noting it
+// like a Home change makes the next write to such an episode queue a
+// recompute even inside the session gap, where a position-only write would
+// otherwise queue none.
+func (s *interestTrackingStore) noteCompletion(profileID string) {
+	s.updater.noteHomeChange(s.userID, profileID, time.Now())
 }
 
 // --- Home dismissals: a card removed from Next Up stops the next_up reason
@@ -464,6 +477,7 @@ func (s *interestTrackingStore) MarkProgressBatch(ctx context.Context, profileID
 			}
 			s.updater.QueueItemMutation(s.userID, profileID, mediaItemID)
 		}
+		s.noteCompletion(profileID)
 	}
 	return err
 }
@@ -575,6 +589,7 @@ func (s *interestTrackingStore) queueItemMutations(profileID string, entries []u
 	for _, entry := range entries {
 		s.updater.QueueItemMutation(s.userID, profileID, entry.MediaItemID)
 	}
+	s.noteCompletion(profileID)
 }
 
 // queueTargetMutations queues by requested target rather than written entry,
@@ -583,6 +598,7 @@ func (s *interestTrackingStore) queueTargetMutations(profileID string, targets [
 	for _, target := range targets {
 		s.updater.QueueItemMutation(s.userID, profileID, target.MediaItemID)
 	}
+	s.noteCompletion(profileID)
 }
 
 // AddVisibleHistory forwards the watermark-aware history insert. The generic

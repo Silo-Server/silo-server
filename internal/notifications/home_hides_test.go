@@ -205,6 +205,39 @@ func TestInterestTrackingStoreQueuesFirstWriteAfterHomeChange(t *testing.T) {
 	}
 }
 
+// TestInterestTrackingStoreQueuesResumeAfterLaterCompletion covers a partly
+// watched episode resumed right after a later one was finished. The
+// completion moved Home's anchor, so the resumed episode now keeps the series
+// off Next Up, and the position-only write inside the session gap must queue
+// a recompute.
+func TestInterestTrackingStoreQueuesResumeAfterLaterCompletion(t *testing.T) {
+	ctx := context.Background()
+	updater := &InterestUpdater{pending: map[interestMutation]int{}}
+	store := &interestTrackingStore{UserStore: newSQLiteUserStore(t), userID: 1, system: &System{}, updater: updater}
+	queued := func(itemID string) bool {
+		updater.mu.Lock()
+		defer updater.mu.Unlock()
+		_, ok := updater.pending[interestMutation{userID: 1, profileID: "p1", itemID: itemID}]
+		clear(updater.pending)
+		return ok
+	}
+
+	if err := store.SetProgressAt(ctx, "p1", "ep-1", 30, 100, false, time.Now().Add(-time.Minute).UTC().Truncate(time.Second)); err != nil {
+		t.Fatalf("SetProgressAt: %v", err)
+	}
+	if err := store.MarkWatched(ctx, "p1", "ep-2", 100); err != nil {
+		t.Fatalf("MarkWatched: %v", err)
+	}
+	queued("ep-2")
+
+	if err := store.UpdateProgress(ctx, "p1", "ep-1", 40, 100, userstore.ProgressThresholds{}); err != nil {
+		t.Fatalf("UpdateProgress: %v", err)
+	}
+	if !queued("ep-1") {
+		t.Fatal("resuming an older episode after finishing a later one queued no interest recompute")
+	}
+}
+
 func TestNextUpCursor(t *testing.T) {
 	s1 := func(n int) int { return EpisodeKey(1, n) }
 	// listed builds the catalog's episodes of season 1, keyed by ordinal.

@@ -279,7 +279,9 @@ playback can lift a drop without changing any progress state, so a progress
 write queues one too when it is the row's first write since the profile's
 last Home change on this node, or when it lands more than ten minutes after
 the row's stamp, by its own stamp or by the clock (a new watch session, or a
-late import).
+late import). Finishing an episode counts as a Home change here: it moves the
+anchor, so resuming an older partly watched episode right afterwards queues a
+recompute, which takes the series off Next Up as Home does.
 
 The Home-change marker and the second recompute live in the memory of the
 node that handled the removal. A resume handled by another node within ten
