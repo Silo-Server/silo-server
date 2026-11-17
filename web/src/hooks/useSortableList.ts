@@ -1,6 +1,14 @@
 import { useMemo } from "react";
 
-import { KeyboardSensor, PointerSensor, closestCenter, useSensor, useSensors } from "@dnd-kit/core";
+import {
+  KeyboardSensor,
+  MouseSensor,
+  PointerSensor,
+  TouchSensor,
+  closestCenter,
+  useSensor,
+  useSensors,
+} from "@dnd-kit/core";
 import type { DragEndEvent } from "@dnd-kit/core";
 import { arrayMove, sortableKeyboardCoordinates, useSortable } from "@dnd-kit/sortable";
 
@@ -49,6 +57,25 @@ export function useSortableList<T>(
   );
 
   return { sensors, collisionDetection: closestCenter, handleDragEnd };
+}
+
+/** How long a touch rests on a grip before it starts a drag, so a list can still scroll. */
+const TOUCH_DRAG_DELAY_MS = 200;
+
+/**
+ * The sensors of a list dragged by its grips: a mouse after a short move, a
+ * touch after a short rest (so the page still scrolls), and the keyboard.
+ */
+export function useGripDragSensors(): ReturnType<typeof useSensors> {
+  const scrollBehavior = useMotionScrollBehavior();
+  return useSensors(
+    useSensor(MouseSensor, { activationConstraint: { distance: 5 } }),
+    useSensor(TouchSensor, { activationConstraint: { delay: TOUCH_DRAG_DELAY_MS, tolerance: 5 } }),
+    useSensor(KeyboardSensor, {
+      coordinateGetter: sortableKeyboardCoordinates,
+      scrollBehavior,
+    }),
+  );
 }
 
 /**

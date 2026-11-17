@@ -701,6 +701,18 @@
       "value": "컬렉션"
     }
   ],
+  "home.recipe.collectionPostersPick.description": [
+    {
+      "type": 0,
+      "value": "여러 컬렉션을 포스터로 표시해요. 포스터마다 해당 컬렉션이 열려요."
+    }
+  ],
+  "home.recipe.collectionPostersPick.name": [
+    {
+      "type": 0,
+      "value": "컬렉션 행"
+    }
+  ],
   "home.recipe.continueListeningDefault.description": [
     {
       "type": 0,
@@ -84135,6 +84147,32 @@
       "value": " 선반을 삭제할까요?"
     }
   ],
+  "web.collections.copy.deleteWithRowChangesLabel": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "삭제하고 행 "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": "개 변경"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.collections.copy.deleteWithRowsLabel": [
     {
       "type": 6,
@@ -85371,6 +85409,20 @@
     {
       "type": 0,
       "value": "에서 제거돼요."
+    }
+  ],
+  "web.collections.copy.removedFromRow": [
+    {
+      "type": 0,
+      "value": "“"
+    },
+    {
+      "type": 1,
+      "value": "title"
+    },
+    {
+      "type": 0,
+      "value": "” 행에서 제거돼요. 이 행의 다른 컬렉션은 그대로 유지돼요."
     }
   ],
   "web.collections.copy.removedTitle": [
@@ -96757,6 +96809,244 @@
       "value": "에서 만들거나 변경하세요."
     }
   ],
+  "web.home.addRow.collections.add": [
+    {
+      "type": 0,
+      "value": "추가"
+    }
+  ],
+  "web.home.addRow.collections.addLabel": [
+    {
+      "type": 0,
+      "value": "컬렉션 추가"
+    }
+  ],
+  "web.home.addRow.collections.added": [
+    {
+      "type": 0,
+      "value": "추가됨"
+    }
+  ],
+  "web.home.addRow.collections.chosenLabel": [
+    {
+      "type": 0,
+      "value": "이 행의 컬렉션"
+    }
+  ],
+  "web.home.addRow.collections.count": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "컬렉션 "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": "개를 이 순서로 표시해요"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.home.addRow.collections.drag.canceled": [
+    {
+      "type": 1,
+      "value": "collection"
+    },
+    {
+      "type": 0,
+      "value": " 컬렉션 이동을 취소했어요."
+    }
+  ],
+  "web.home.addRow.collections.drag.dropped": [
+    {
+      "type": 1,
+      "value": "collection"
+    },
+    {
+      "type": 0,
+      "value": " 컬렉션을 놓았어요."
+    }
+  ],
+  "web.home.addRow.collections.drag.droppedAt": [
+    {
+      "type": 1,
+      "value": "collection"
+    },
+    {
+      "type": 0,
+      "value": " 컬렉션을 전체 "
+    },
+    {
+      "type": 1,
+      "value": "total"
+    },
+    {
+      "type": 0,
+      "value": "개 중 "
+    },
+    {
+      "type": 1,
+      "value": "position"
+    },
+    {
+      "type": 0,
+      "value": "번째 위치에 놓았어요."
+    }
+  ],
+  "web.home.addRow.collections.drag.instructions": [
+    {
+      "type": 0,
+      "value": "컬렉션을 이동하려면 핸들에 포커스를 두고 Space 또는 Enter 키를 누르세요. 위쪽 및 아래쪽 화살표 키로 이동하고, Space 또는 Enter 키로 놓거나 Escape 키로 취소하세요."
+    }
+  ],
+  "web.home.addRow.collections.drag.over": [
+    {
+      "type": 1,
+      "value": "collection"
+    },
+    {
+      "type": 0,
+      "value": " 컬렉션이 이제 전체 "
+    },
+    {
+      "type": 1,
+      "value": "total"
+    },
+    {
+      "type": 0,
+      "value": "개 중 "
+    },
+    {
+      "type": 1,
+      "value": "position"
+    },
+    {
+      "type": 0,
+      "value": "번째 위치에 있어요."
+    }
+  ],
+  "web.home.addRow.collections.drag.pickedUp": [
+    {
+      "type": 1,
+      "value": "collection"
+    },
+    {
+      "type": 0,
+      "value": " 컬렉션을 집었어요. 전체 "
+    },
+    {
+      "type": 1,
+      "value": "total"
+    },
+    {
+      "type": 0,
+      "value": "개 중 "
+    },
+    {
+      "type": 1,
+      "value": "position"
+    },
+    {
+      "type": 0,
+      "value": "번째 위치예요."
+    }
+  ],
+  "web.home.addRow.collections.dragHandle": [
+    {
+      "type": 1,
+      "value": "collection"
+    },
+    {
+      "type": 0,
+      "value": " 순서 변경"
+    }
+  ],
+  "web.home.addRow.collections.empty": [
+    {
+      "type": 0,
+      "value": "아래에서 컬렉션을 하나 이상 추가하세요."
+    }
+  ],
+  "web.home.addRow.collections.limit": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "행 하나에 컬렉션을 최대 "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": "개까지 넣을 수 있어요."
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.home.addRow.collections.moveDown": [
+    {
+      "type": 1,
+      "value": "collection"
+    },
+    {
+      "type": 0,
+      "value": " 아래로 이동"
+    }
+  ],
+  "web.home.addRow.collections.moveUp": [
+    {
+      "type": 1,
+      "value": "collection"
+    },
+    {
+      "type": 0,
+      "value": " 위로 이동"
+    }
+  ],
+  "web.home.addRow.collections.remove": [
+    {
+      "type": 1,
+      "value": "collection"
+    },
+    {
+      "type": 0,
+      "value": " 제거"
+    }
+  ],
+  "web.home.addRow.collections.unavailable": [
+    {
+      "type": 0,
+      "value": "더 이상 사용할 수 없음"
+    }
+  ],
+  "web.home.addRow.collections.yours": [
+    {
+      "type": 0,
+      "value": "내 컬렉션"
+    }
+  ],
   "web.home.addRow.conflict": [
     {
       "type": 0,
@@ -99936,16 +100226,120 @@
       }
     }
   ],
+  "web.home.rows.describe.collectionCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "컬렉션 "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": "개"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.home.rows.describe.collectionGone": [
     {
       "type": 0,
       "value": "더 이상 사용할 수 없는 컬렉션"
     }
   ],
+  "web.home.rows.describe.collectionList": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "컬렉션 "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": "개: "
+            },
+            {
+              "type": 1,
+              "value": "names"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.home.rows.describe.collectionListMore": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": "개 더"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.home.rows.describe.collectionUnknown": [
     {
       "type": 0,
       "value": "컬렉션"
+    }
+  ],
+  "web.home.rows.describe.collectionsGone": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "컬렉션 "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": "개를 더 이상 사용할 수 없음"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.home.rows.describe.curated": [
@@ -101364,6 +101758,12 @@
       "value": "각 시청자가 보려고 저장한 콘텐츠"
     }
   ],
+  "web.home.rows.draft.addCollection": [
+    {
+      "type": 0,
+      "value": "컬렉션을 추가하면 행이 표시돼요."
+    }
+  ],
   "web.home.rows.draft.addTitles": [
     {
       "type": 0,
@@ -101616,6 +102016,12 @@
       "value": "컬렉션 중 하나를 보여 줘요."
     }
   ],
+  "web.home.rows.kindSentences.collectionPosters": [
+    {
+      "type": 0,
+      "value": "여러 컬렉션을 포스터로 표시해요. 포스터마다 해당 컬렉션이 열려요."
+    }
+  ],
   "web.home.rows.kindSentences.continueWatching": [
     {
       "type": 0,
@@ -101818,6 +102224,12 @@
     {
       "type": 0,
       "value": "컬렉션"
+    }
+  ],
+  "web.home.rows.kinds.collectionPosters": [
+    {
+      "type": 0,
+      "value": "컬렉션 행"
     }
   ],
   "web.home.rows.kinds.continueWatching": [
@@ -107176,6 +107588,12 @@
       "value": "즐겨찾기했거나 보고 싶은 목록에 추가했거나 보고 있는 시리즈에 새 에피소드가 나오면 여기에서 알려 드려요."
     }
   ],
+  "web.notifications.inbox.emptyHintNextUp": [
+    {
+      "type": 0,
+      "value": "최신 에피소드까지 시청한 시리즈에 새 에피소드가 나오거나, 보고 싶은 목록에 추가했거나 요청한 콘텐츠가 라이브러리에 추가되면 여기에서 알려 드려요."
+    }
+  ],
   "web.notifications.inbox.emptyUnread": [
     {
       "type": 0,
@@ -107542,6 +107960,30 @@
     {
       "type": 0,
       "value": "알림 보기 방식"
+    }
+  ],
+  "web.notifications.inbox.watchlistAvailable": [
+    {
+      "type": 0,
+      "value": "보고 싶은 목록 콘텐츠 공개"
+    }
+  ],
+  "web.notifications.inbox.watchlistMovieAvailable": [
+    {
+      "type": 0,
+      "value": "보고 싶은 목록의 영화를 이제 볼 수 있어요"
+    }
+  ],
+  "web.notifications.inbox.watchlistSeriesAvailable": [
+    {
+      "type": 0,
+      "value": "보고 싶은 목록의 시리즈를 이제 볼 수 있어요"
+    }
+  ],
+  "web.notifications.inbox.watchlistTitleAvailable": [
+    {
+      "type": 0,
+      "value": "보고 싶은 목록의 콘텐츠를 이제 볼 수 있어요"
     }
   ],
   "web.notifications.preferences.continueWatching": [
@@ -107962,6 +108404,12 @@
       "value": "선택한 시리즈"
     }
   ],
+  "web.notifications.series.afterCatchUp": [
+    {
+      "type": 0,
+      "value": "최신 에피소드까지 시청한 후"
+    }
+  ],
   "web.notifications.series.allReasons": [
     {
       "type": 0,
@@ -108020,10 +108468,22 @@
       "value": "즐겨찾기했거나 보고 싶은 목록에 추가했거나 시청을 시작한 시리즈가 여기에 표시돼요."
     }
   ],
+  "web.notifications.series.emptyHintNextUp": [
+    {
+      "type": 0,
+      "value": "에피소드를 끝까지 보면 시리즈가 여기에 표시돼요. 시리즈를 최신 에피소드까지 시청하면 다음 에피소드가 나올 때 알림이 와요."
+    }
+  ],
   "web.notifications.series.filterByReason": [
     {
       "type": 0,
       "value": "이유별 필터"
+    }
+  ],
+  "web.notifications.series.filterLabel": [
+    {
+      "type": 0,
+      "value": "시리즈 필터"
     }
   ],
   "web.notifications.series.intro": [
@@ -108130,10 +108590,32 @@
       "value": "last"
     }
   ],
+  "web.notifications.series.nextEpisodeAfter": [
+    {
+      "type": 1,
+      "value": "code"
+    },
+    {
+      "type": 0,
+      "value": " 이후의 다음 에피소드"
+    }
+  ],
+  "web.notifications.series.nextNewEpisode": [
+    {
+      "type": 0,
+      "value": "다음 새 에피소드"
+    }
+  ],
   "web.notifications.series.noMatch": [
     {
       "type": 0,
       "value": "일치하는 시리즈가 없어요. 다른 검색어나 이유로 시도해 보세요."
+    }
+  ],
+  "web.notifications.series.noMatchFilter": [
+    {
+      "type": 0,
+      "value": "일치하는 시리즈가 없어요. 다른 검색어나 필터로 시도해 보세요."
     }
   ],
   "web.notifications.series.notificationsOff": [
@@ -108314,6 +108796,12 @@
     {
       "type": 0,
       "value": " 시리즈를 볼 수 있어요"
+    }
+  ],
+  "web.notifications.toast.watchlistArrived": [
+    {
+      "type": 0,
+      "value": "보고 싶은 목록의 콘텐츠가 라이브러리에 추가됐어요."
     }
   ],
   "web.onboarding.gate.progressFailed": [
@@ -119686,6 +120174,12 @@
       "value": "이 프로필의 전체 알림 스위치"
     }
   ],
+  "web.settings.notifications.episodes.nextUpDescription": [
+    {
+      "type": 0,
+      "value": "최신 에피소드까지 시청한 시리즈에 새 에피소드가 나오거나, 보고 싶은 목록에 추가했거나 요청한 콘텐츠가 라이브러리에 추가되면 알림을 받아요."
+    }
+  ],
   "web.settings.notifications.episodes.seriesLink": [
     {
       "type": 0,
@@ -119975,7 +120469,7 @@
   "web.settings.notifications.reason.requests": [
     {
       "type": 0,
-      "value": "요청"
+      "value": "요청 및 보고 싶은 목록"
     }
   ],
   "web.settings.notifications.reason.watchlist": [
