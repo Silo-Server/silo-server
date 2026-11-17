@@ -122035,6 +122035,12 @@
       "value": "Du kan sætte på pause og genoptage"
     }
   ],
+  "web.player.watchTogether.redisRequired": [
+    {
+      "type": 0,
+      "value": "Watch Party kræver Redis, som ikke er konfigureret på denne server. Bed din serveradministrator om at konfigurere det."
+    }
+  ],
   "web.player.watchTogether.selfName": [
     {
       "type": 1,

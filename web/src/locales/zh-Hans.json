@@ -112241,6 +112241,12 @@
       "value": "你可以暂停和继续播放"
     }
   ],
+  "web.player.watchTogether.redisRequired": [
+    {
+      "type": 0,
+      "value": "Watch Party需要Redis，但此服务器尚未设置。请让你的服务器管理员进行配置。"
+    }
+  ],
   "web.player.watchTogether.selfName": [
     {
       "type": 1,

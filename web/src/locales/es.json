@@ -132883,6 +132883,12 @@
       "value": "Puedes pausar y reanudar"
     }
   ],
+  "web.player.watchTogether.redisRequired": [
+    {
+      "type": 0,
+      "value": "Watch Party necesita Redis, que este servidor no tiene configurado. Pídele a la persona que administra tu servidor que lo configure."
+    }
+  ],
   "web.player.watchTogether.selfName": [
     {
       "type": 1,

@@ -144639,6 +144639,12 @@
       "value": "Możesz wstrzymywać i wznawiać"
     }
   ],
+  "web.player.watchTogether.redisRequired": [
+    {
+      "type": 0,
+      "value": "Watch Party wymaga usługi Redis, której ten serwer nie ma skonfigurowanej. Poproś administratora serwera o jej skonfigurowanie."
+    }
+  ],
   "web.player.watchTogether.selfName": [
     {
       "type": 1,

@@ -144141,6 +144141,12 @@
       "value": "Můžete pozastavit a obnovit přehrávání"
     }
   ],
+  "web.player.watchTogether.redisRequired": [
+    {
+      "type": 0,
+      "value": "Watch Party vyžaduje Redis, který tento server nemá nastavený. Požádejte správce serveru, aby ho nakonfiguroval."
+    }
+  ],
   "web.player.watchTogether.selfName": [
     {
       "type": 1,
