@@ -107346,6 +107346,22 @@
       "value": "last"
     }
   ],
+  "web.notifications.series.nextEpisodeAfter": [
+    {
+      "type": 1,
+      "value": "code"
+    },
+    {
+      "type": 0,
+      "value": "の次のエピソード"
+    }
+  ],
+  "web.notifications.series.nextNewEpisode": [
+    {
+      "type": 0,
+      "value": "次の新しいエピソード"
+    }
+  ],
   "web.notifications.series.noMatch": [
     {
       "type": 0,

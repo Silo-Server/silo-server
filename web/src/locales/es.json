@@ -128474,6 +128474,22 @@
       "value": "last"
     }
   ],
+  "web.notifications.series.nextEpisodeAfter": [
+    {
+      "type": 0,
+      "value": "El siguiente episodio después de "
+    },
+    {
+      "type": 1,
+      "value": "code"
+    }
+  ],
+  "web.notifications.series.nextNewEpisode": [
+    {
+      "type": 0,
+      "value": "El siguiente episodio nuevo"
+    }
+  ],
   "web.notifications.series.noMatch": [
     {
       "type": 0,

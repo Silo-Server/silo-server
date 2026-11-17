@@ -11,6 +11,15 @@ DELETE FROM public.profile_series_interest
 WHERE NOT next_up_candidate
   AND last_completed_episode_key IS NULL;
 
+-- The old rules notified every arriving episode at or past the cursor, so a
+-- row's last notified episode can be above its cursor. Under the new rule
+-- that mark would silence the episode the profile waits for when it arrives
+-- after a later one. A mark at the cursor itself stays: it says the profile
+-- was told about that episode.
+UPDATE public.profile_series_interest
+SET last_notified_episode_key = NULL
+WHERE last_notified_episode_key > next_expected_episode_key;
+
 -- Dropping the columns drops profile_series_interest_active_idx, whose
 -- predicate reads them. Fanout now reads Next Up candidates only.
 ALTER TABLE public.profile_series_interest
@@ -38,7 +47,8 @@ DELETE FROM public.server_settings WHERE key = 'notifications.fanout.max_series_
 -- +goose Down
 -- The removed switches come back on, their default. The removed interest
 -- flags come back unset until the interest rebuild runs on the old build, and
--- the deleted rows and the burst setting do not come back.
+-- the deleted rows, the cleared last notified marks and the burst setting do
+-- not come back.
 ALTER TABLE public.notification_webhooks
     ADD COLUMN notify_favorites boolean NOT NULL DEFAULT true,
     ADD COLUMN notify_watchlist boolean NOT NULL DEFAULT true,

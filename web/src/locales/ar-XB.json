@@ -123951,6 +123951,22 @@
       "value": "last"
     }
   ],
+  "web.notifications.series.nextEpisodeAfter": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EThe next episode after \u202C"
+    },
+    {
+      "type": 1,
+      "value": "code"
+    }
+  ],
+  "web.notifications.series.nextNewEpisode": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EThe next new episode\u202C"
+    }
+  ],
   "web.notifications.series.noMatch": [
     {
       "type": 0,

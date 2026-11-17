@@ -174,17 +174,23 @@ func (w *FanoutWorker) titleToldElsewhere(ctx context.Context, tx pgx.Tx, waiter
 			}
 		}
 	}
-	told, err := w.deliveries.TitleFulfilledFor(ctx, tx, keys, mediaType, tmdbIDs)
-	if err != nil || w.requests == nil {
-		return told, err
-	}
-	var followers []requests.Follower
-	for _, key := range keys {
-		if !told[key] {
-			followers = append(followers, requests.Follower{UserID: key.userID, ProfileID: key.profileID})
+	// Requests still to tell are read before deliveries already sent. The
+	// request notifier commits its delivery before it stamps the request, so
+	// a fulfillment that lands between these two statements is seen by one
+	// of them; in the other order it could slip past both.
+	awaiting := map[requests.Follower]bool{}
+	if w.requests != nil {
+		followers := make([]requests.Follower, len(keys))
+		for i, key := range keys {
+			followers[i] = requests.Follower{UserID: key.userID, ProfileID: key.profileID}
+		}
+		var err error
+		awaiting, err = w.requests.AwaitingFulfillment(ctx, tx, requests.MediaType(mediaType), tmdbIDs, followers)
+		if err != nil {
+			return nil, err
 		}
 	}
-	awaiting, err := w.requests.AwaitingFulfillment(ctx, tx, requests.MediaType(mediaType), tmdbIDs, followers)
+	told, err := w.deliveries.TitleFulfilledFor(ctx, tx, keys, mediaType, tmdbIDs)
 	if err != nil {
 		return nil, err
 	}

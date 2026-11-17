@@ -116765,6 +116765,22 @@
       "value": "last"
     }
   ],
+  "web.notifications.series.nextEpisodeAfter": [
+    {
+      "type": 1,
+      "value": "code"
+    },
+    {
+      "type": 0,
+      "value": " bölümünden sonraki bölüm"
+    }
+  ],
+  "web.notifications.series.nextNewEpisode": [
+    {
+      "type": 0,
+      "value": "Sonraki yeni bölüm"
+    }
+  ],
   "web.notifications.series.noMatch": [
     {
       "type": 0,

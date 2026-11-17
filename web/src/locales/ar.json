@@ -157604,6 +157604,22 @@
       "value": "last"
     }
   ],
+  "web.notifications.series.nextEpisodeAfter": [
+    {
+      "type": 0,
+      "value": "الحلقة التالية بعد "
+    },
+    {
+      "type": 1,
+      "value": "code"
+    }
+  ],
+  "web.notifications.series.nextNewEpisode": [
+    {
+      "type": 0,
+      "value": "الحلقة الجديدة التالية"
+    }
+  ],
   "web.notifications.series.noMatch": [
     {
       "type": 0,

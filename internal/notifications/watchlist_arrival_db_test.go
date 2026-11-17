@@ -29,7 +29,8 @@ func TestWatchlistArrivalTellsEachWatcherOnce(t *testing.T) {
 
 	worker := newAccessFanoutWorker(pool, scopeByProfile{
 		"watcher": {}, "requester": {}, "follower": {}, "told": {}, "off": {}, "promoted": {}, "later": {}, "later-entry": {},
-		"blocked": {AllowedLibraryIDs: []int{c.otherLibrary + 1}},
+		"failed-requester": {},
+		"blocked":          {AllowedLibraryIDs: []int{c.otherLibrary + 1}},
 	})
 	worker.watchlist = &watchlist.Arrivals{}
 	worker.requests = requests.NewRepository(pool, nil)
@@ -75,7 +76,7 @@ func TestWatchlistArrivalTellsEachWatcherOnce(t *testing.T) {
 
 	// A declined request no longer tells its requester or followers, so the
 	// watchlist does.
-	if _, err := pool.Exec(ctx, `UPDATE media_requests SET outcome = 'declined'`); err != nil {
+	if _, err := pool.Exec(ctx, `UPDATE media_requests SET outcome = 'declined' WHERE id = 'req-open'`); err != nil {
 		t.Fatal(err)
 	}
 	nextEvent("event-3", 4)
@@ -105,8 +106,8 @@ func TestWatchlistArrivalTellsEachWatcherOnce(t *testing.T) {
 // schema and seeds TestWatchlistArrivalTellsEachWatcherOnce's profiles for
 // c's series: watchers under its current and former TMDB IDs, one entry newer
 // than the series, two promoted entries, an open request with its requester
-// and a follower, a profile a request already told, and one with
-// notifications off.
+// and a follower, a recently failed request's requester, a profile a request
+// already told, and one with notifications off.
 func seedWatchlistArrival(t *testing.T, pool *pgxpool.Pool, c accessCatalog) {
 	t.Helper()
 	ctx := t.Context()
@@ -120,6 +121,7 @@ func seedWatchlistArrival(t *testing.T, pool *pgxpool.Pool, c accessCatalog) {
 		  CREATE TABLE user_watchlist_titles (LIKE public.user_watchlist_titles INCLUDING ALL);
 		  CREATE TABLE watchlist_title_promotions (LIKE public.watchlist_title_promotions INCLUDING ALL);
 		  CREATE TABLE media_requests (LIKE public.media_requests INCLUDING ALL);
+		  CREATE TABLE media_request_targets (LIKE public.media_request_targets INCLUDING ALL);
 		  CREATE TABLE media_request_follows (LIKE public.media_request_follows INCLUDING ALL)`, nil},
 		{`UPDATE media_items SET tmdb_id = $2 WHERE content_id = $1`, []any{c.series, "424242"}},
 		{`INSERT INTO watchlist_titles (id, media_type, tmdb_id, title) VALUES (1, 'series', $1, 'Series')`, []any{currentTMDB}},
@@ -128,7 +130,7 @@ func seedWatchlistArrival(t *testing.T, pool *pgxpool.Pool, c accessCatalog) {
 		{`INSERT INTO user_watchlist_titles (user_id, profile_id, title_id, added_at)
 			SELECT user_id, profile_id, 1, now() - interval '1 day'
 			FROM (VALUES (1, 'watcher'), (2, 'watcher'), (1, 'requester'), (1, 'follower'),
-			             (1, 'told'), (1, 'off'), (1, 'blocked')) AS p(user_id, profile_id)`, nil},
+			             (1, 'told'), (1, 'off'), (1, 'blocked'), (1, 'failed-requester')) AS p(user_id, profile_id)`, nil},
 		// A profile whose entry is newer than the series was not waiting.
 		{`INSERT INTO user_watchlist_titles (user_id, profile_id, title_id, added_at)
 			VALUES (1, 'later-entry', 1, now() + interval '1 minute')`, nil},
@@ -140,6 +142,10 @@ func seedWatchlistArrival(t *testing.T, pool *pgxpool.Pool, c accessCatalog) {
 		// The open request was made under the title's former TMDB ID.
 		{`INSERT INTO media_requests (id, media_type, tmdb_id, title, status, requested_by_user_id, requested_by_profile_id)
 			VALUES ('req-open', 'series', $1, 'Series', 'approved', 1, 'requester')`, []any{formerTMDB}},
+		// A request that failed recently without delivering anything: the
+		// library completes it and it then tells its requester.
+		{`INSERT INTO media_requests (id, media_type, tmdb_id, title, status, outcome, requested_by_user_id, requested_by_profile_id)
+			VALUES ('req-failed', 'series', $1, 'Series', 'approved', 'failed', 1, 'failed-requester')`, []any{currentTMDB}},
 		{`INSERT INTO media_request_follows (media_type, tmdb_id, user_id, profile_id, request_id)
 			VALUES ('series', $1, 1, 'follower', 'req-open')`, []any{formerTMDB}},
 		{`INSERT INTO notification_deliveries (id, user_id, profile_id, series_id, type, reason_flags)

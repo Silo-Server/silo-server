@@ -295,7 +295,9 @@ Migration `20261116231355_drop_retired_notification_reasons` drops
 `notification_preferences.notify_favorites`, `notify_watchlist` and
 `notify_continue_watching`, and the same three `notify_*` columns on
 `notification_webhooks`. It also deletes the interest rows only a removed
-reason kept, rebuilds `profile_series_interest_active_idx` on
+reason kept, clears `last_notified_episode_key` where it is above the cursor
+(the old rules notified later episodes, and the mark would silence the one the
+profile waits for), rebuilds `profile_series_interest_active_idx` on
 `next_up_candidate`, and deletes the `notifications.fanout.max_series_burst`
 setting.
 

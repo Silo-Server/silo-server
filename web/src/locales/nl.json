@@ -117323,6 +117323,22 @@
       "value": "last"
     }
   ],
+  "web.notifications.series.nextEpisodeAfter": [
+    {
+      "type": 0,
+      "value": "De volgende aflevering na "
+    },
+    {
+      "type": 1,
+      "value": "code"
+    }
+  ],
+  "web.notifications.series.nextNewEpisode": [
+    {
+      "type": 0,
+      "value": "De volgende nieuwe aflevering"
+    }
+  ],
   "web.notifications.series.noMatch": [
     {
       "type": 0,

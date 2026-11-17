@@ -128351,6 +128351,26 @@
       "value": "~~⟧"
     }
   ],
+  "web.notifications.series.nextEpisodeAfter": [
+    {
+      "type": 0,
+      "value": "⟦Ţĥé ñéẋţ éþîšöđé åƒţéŕ "
+    },
+    {
+      "type": 1,
+      "value": "code"
+    },
+    {
+      "type": 0,
+      "value": "~~~~~~~~~~⟧"
+    }
+  ],
+  "web.notifications.series.nextNewEpisode": [
+    {
+      "type": 0,
+      "value": "⟦Ţĥé ñéẋţ ñéŵ éþîšöđé~~~~~~~~⟧"
+    }
+  ],
   "web.notifications.series.noMatch": [
     {
       "type": 0,

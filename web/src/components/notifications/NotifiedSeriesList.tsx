@@ -32,12 +32,13 @@ import { NotificationPoster } from "./NotificationPoster";
 import { SelectionBar } from "./SelectionBar";
 import { useT, type MessageKey, type Translate } from "@/i18n";
 
-/** What a new episode has to be for the series to notify. */
+/** Which new episode notifies for the series: only the first to arrive after
+ * the one the profile is up to. */
 function triggerText(t: Translate, series: NotifiedSeries): string {
   const code = series.next_up_after && formatEpisodeCode(series.next_up_after);
   return code
-    ? t("web.notifications.series.anyEpisodeAfter", { code })
-    : t("web.notifications.series.anyNewEpisode");
+    ? t("web.notifications.series.nextEpisodeAfter", { code })
+    : t("web.notifications.series.nextNewEpisode");
 }
 
 /** Why a listed series does not notify on its next new episode: the mute,

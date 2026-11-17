@@ -117999,6 +117999,22 @@
       "value": "last"
     }
   ],
+  "web.notifications.series.nextEpisodeAfter": [
+    {
+      "type": 0,
+      "value": "Nästa avsnitt efter "
+    },
+    {
+      "type": 1,
+      "value": "code"
+    }
+  ],
+  "web.notifications.series.nextNewEpisode": [
+    {
+      "type": 0,
+      "value": "Nästa nya avsnitt"
+    }
+  ],
   "web.notifications.series.noMatch": [
     {
       "type": 0,

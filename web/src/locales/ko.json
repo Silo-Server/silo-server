@@ -108178,6 +108178,22 @@
       "value": "last"
     }
   ],
+  "web.notifications.series.nextEpisodeAfter": [
+    {
+      "type": 1,
+      "value": "code"
+    },
+    {
+      "type": 0,
+      "value": " 이후의 다음 에피소드"
+    }
+  ],
+  "web.notifications.series.nextNewEpisode": [
+    {
+      "type": 0,
+      "value": "다음 새 에피소드"
+    }
+  ],
   "web.notifications.series.noMatch": [
     {
       "type": 0,
