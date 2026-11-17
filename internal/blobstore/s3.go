@@ -125,7 +125,14 @@ func (s *S3) BeginMutationFence(ctx context.Context) (func(), error) {
 // storage and are kept as configured, the prefix normalized exactly as the
 // client applies it.
 func (s *S3) Identity() string {
-	return BackendS3 + "|" + normalizeEndpoint(s.client.Endpoint()) + "|" + strings.ToLower(strings.TrimSpace(s.client.Bucket())) + "|" + s.client.KeyPrefix()
+	return S3Identity(s.client.Endpoint(), s.client.Bucket(), s.client.KeyPrefix())
+}
+
+// S3Identity is the Identity an S3 store opened on endpoint, bucket, and key
+// prefix would report, for callers that compare configured settings with a
+// recorded identity without opening a client.
+func S3Identity(endpoint, bucket, keyPrefix string) string {
+	return BackendS3 + "|" + normalizeEndpoint(endpoint) + "|" + strings.ToLower(strings.TrimSpace(bucket)) + "|" + s3client.NormalizeKeyPrefix(keyPrefix)
 }
 
 // normalizeEndpoint lowercases only the case-insensitive parts of an endpoint

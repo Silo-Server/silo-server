@@ -843,34 +843,59 @@ func artworkIdentityInputs(effective map[string]string) (backend string, inputs 
 }
 
 // rejectArtworkIdentityChange refuses a write that would move artwork storage
-// after it has been recorded: a backend other than the recorded one, or a
-// different value for any setting that backend's identity is built from.
-// Writes that leave the location as it is, including re-saving the same
-// values or adding a bucket an explicit local backend ignores, are allowed so
-// a settings form that includes the keys can still submit.
-func rejectArtworkIdentityChange(recorded string, before, after map[string]string) error {
-	recordedBackend, _, _ := strings.Cut(strings.TrimSpace(recorded), "|")
-	_, beforeInputs := artworkIdentityInputs(before)
+// after it has been recorded. A write that leaves the location settings as they
+// are saves, including re-saving the same values or adding a bucket an explicit
+// local backend ignores, so a settings form that includes the keys can still
+// submit. That holds even when the saved settings already name another
+// location: one saved before the first write recorded the running store, while
+// a restart was pending. A write that changes them must name the recorded
+// location, which is how such a pending change is put back. The assets and
+// private locations are judged separately against their own recorded rows.
+func rejectArtworkIdentityChange(recordedAssets, recordedPrivate string, before, after map[string]string) error {
+	beforeBackend, beforeInputs := artworkIdentityInputs(before)
 	afterBackend, afterInputs := artworkIdentityInputs(after)
-	if recordedBackend == "" {
-		// Only the private bucket is recorded. The assets location can still
-		// be chosen until the first artwork write.
-		for key, value := range beforeInputs {
-			if strings.HasPrefix(key, "s3.private_") && afterInputs[key] != value {
-				return errArtworkStorageLocked
-			}
+	privateUnchanged := true
+	assetsUnchanged := afterBackend == beforeBackend
+	for key, value := range beforeInputs {
+		if afterInputs[key] == value {
+			continue
 		}
-		return nil
+		if strings.HasPrefix(key, "s3.private_") {
+			privateUnchanged = false
+		} else {
+			assetsUnchanged = false
+		}
 	}
-	if afterBackend != recordedBackend {
+	if !privateUnchanged && !blobstore.NamesRecordedLocation(recordedPrivate, privateIdentity(afterInputs)) {
 		return errArtworkStorageLocked
 	}
-	for key, value := range beforeInputs {
-		if afterInputs[key] != value {
-			return errArtworkStorageLocked
-		}
+	// Without a recorded assets row only the private bucket is locked; the
+	// assets location can still be chosen until the first artwork write.
+	if strings.TrimSpace(recordedAssets) == "" || assetsUnchanged {
+		return nil
+	}
+	if !blobstore.NamesRecordedLocation(recordedAssets, assetsIdentity(afterBackend, afterInputs)) {
+		return errArtworkStorageLocked
 	}
 	return nil
+}
+
+// assetsIdentity is the identity the assets store would report for the
+// normalized inputs artworkIdentityInputs returns.
+func assetsIdentity(backend string, inputs map[string]string) string {
+	if backend == blobstore.BackendS3 {
+		return blobstore.S3Identity(inputs[s3PublicEndpointKey], inputs[s3PublicBucketKey], inputs[s3PublicKeyPrefixKey])
+	}
+	return blobstore.BackendLocal + "|" + inputs[artworkLocalPathKey]
+}
+
+// privateIdentity is the identity startup records for the private bucket the
+// inputs name: empty without one, as storage.operational_identity is.
+func privateIdentity(inputs map[string]string) string {
+	if inputs[s3PrivateBucketKey] == "" {
+		return ""
+	}
+	return blobstore.S3Identity(inputs[s3PrivateEndpointKey], inputs[s3PrivateBucketKey], inputs[s3PrivateKeyPrefixKey])
 }
 
 func redactAdminSettings(values map[string]string) {
@@ -1635,7 +1660,7 @@ func (h *AdminHandler) updateAdminSettings(ctx context.Context, tx pgx.Tx, value
 				}
 			}
 			if artworkStorageLocked(stored) {
-				if err := rejectArtworkIdentityChange(stored[blobstore.IdentitySettingKey], h.effectiveAdminSettings(stored), h.effectiveAdminSettings(prospective)); err != nil {
+				if err := rejectArtworkIdentityChange(stored[blobstore.IdentitySettingKey], stored[blobstore.OperationalIdentitySettingKey], h.effectiveAdminSettings(stored), h.effectiveAdminSettings(prospective)); err != nil {
 					preconditionErr = err
 					return nil, err
 				}
@@ -2002,7 +2027,7 @@ func (h *AdminHandler) UpdateAdminSetting(ctx context.Context, key, value string
 				}
 			}
 			if artworkStorageLocked(stored) {
-				if err := rejectArtworkIdentityChange(stored[blobstore.IdentitySettingKey], h.effectiveAdminSettings(stored), h.effectiveAdminSettings(prospective)); err != nil {
+				if err := rejectArtworkIdentityChange(stored[blobstore.IdentitySettingKey], stored[blobstore.OperationalIdentitySettingKey], h.effectiveAdminSettings(stored), h.effectiveAdminSettings(prospective)); err != nil {
 					preconditionErr = err
 					return nil, err
 				}
