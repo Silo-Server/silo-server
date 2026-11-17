@@ -343,6 +343,38 @@ describe("StorageStep", () => {
       expect(restartMock).toHaveBeenCalledOnce();
     });
 
+    it("applies a pending storage change when the admin skips", async () => {
+      fetchStatusMock
+        .mockResolvedValueOnce(pendingStorage)
+        .mockResolvedValue({ started_at: REBOOT, restart_required: false });
+      const { markDone, save } = setup();
+      render(<StorageStep />);
+
+      await userEvent.click(screen.getByRole("button", { name: "Skip for now" }));
+
+      await waitFor(() => expect(markDone).toHaveBeenCalledWith("storage"));
+      expect(restartMock).toHaveBeenCalledOnce();
+      expect(save).not.toHaveBeenCalled();
+    });
+
+    it("does not finish the step after it unmounts mid-restart", async () => {
+      let back = false;
+      fetchStatusMock.mockImplementation(async () =>
+        back ? { started_at: REBOOT, restart_required: false } : pendingStorage,
+      );
+      const { markDone } = setup({ dirtyKeys: ["s3.public_bucket"] });
+      const { unmount } = render(<StorageStep />);
+
+      await userEvent.click(screen.getByRole("button", { name: /Continue/ }));
+      await waitFor(() => expect(restartMock).toHaveBeenCalledOnce());
+      // The poll is waiting on its timer when the admin leaves the step.
+      back = true;
+      unmount();
+      await vi.advanceTimersByTimeAsync(5_000);
+
+      expect(markDone).not.toHaveBeenCalled();
+    });
+
     it("continues without a restart when only other settings wait for one", async () => {
       fetchStatusMock.mockResolvedValue({
         started_at: BOOT,

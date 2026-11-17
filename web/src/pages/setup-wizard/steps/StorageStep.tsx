@@ -327,6 +327,8 @@ export function StorageStep() {
       );
       try {
         const now = await fetchAdminServerStatus();
+        // An admin who left the step mid-restart has moved on; don't finish it.
+        if (!mounted.current) return false;
         if (now.started_at !== before.started_at) {
           setRestartPhase("idle");
           void serverStatus.refetch();

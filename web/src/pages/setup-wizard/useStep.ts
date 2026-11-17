@@ -14,8 +14,9 @@ interface SaveableForm {
 /**
  * The submit protocol every settings step shares: save what is dirty, then mark
  * the step done, so a failed write keeps the admin on the step with their edits
- * intact. `beforeDone` runs after the save, whether or not anything was dirty;
- * resolving false keeps the step open without an error (it unmounted).
+ * intact. Skipping leaves the edits unsaved. `beforeDone` runs before the step
+ * is done either way, for work already saved settings still need; resolving
+ * false keeps the step open without an error (it unmounted).
  */
 export function useStepSubmit(
   step: SkippableStep,
@@ -26,11 +27,10 @@ export function useStepSubmit(
   const { markDone } = useWizardContext();
   const [submitting, setSubmitting] = useState(false);
 
-  async function handleSubmit(e: FormEvent) {
-    e.preventDefault();
+  async function finish(save: boolean) {
     setSubmitting(true);
     try {
-      if (form.dirtyCount > 0) await form.save();
+      if (save && form.dirtyCount > 0) await form.save();
       if ((await beforeDone?.()) === false) return;
       markDone(step);
     } catch (err) {
@@ -40,7 +40,16 @@ export function useStepSubmit(
     }
   }
 
-  return { handleSubmit, busy: submitting || form.isSaving, skip: () => markDone(step) };
+  function handleSubmit(e: FormEvent) {
+    e.preventDefault();
+    return finish(true);
+  }
+
+  return {
+    handleSubmit,
+    busy: submitting || form.isSaving,
+    skip: () => (beforeDone ? void finish(false) : markDone(step)),
+  };
 }
 
 /** Publishes a step's one-line summary to the rail whenever it changes. */
