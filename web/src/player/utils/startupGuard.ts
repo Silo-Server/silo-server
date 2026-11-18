@@ -18,6 +18,24 @@ export class StartupGuard {
     this.timeoutId = setTimeout(() => this.fail("deadline"), STARTUP_TIMEOUT_MS);
   }
 
+  /**
+   * A plan adoption installed a new transport. Only a transport that already
+   * answered gets a fresh startup window: a start that has not shown a frame
+   * yet keeps the deadline it began with, so a session that keeps replanning
+   * still reaches its own failure instead of pushing the deadline out forever.
+   * A start that already failed gets a new window too, because the failure was
+   * reported (the Auto ladder lowers and retries on it), and its retry is a
+   * genuinely new attempt.
+   */
+  armForReplacementTransport() {
+    if (this.state === "starting" || this.state === "disposed") return;
+
+    this.state = "starting";
+    this.fatalNetworkRecoveries = 0;
+    this.clearTimeout();
+    this.timeoutId = setTimeout(() => this.fail("deadline"), STARTUP_TIMEOUT_MS);
+  }
+
   handleFatalNetworkError(): boolean {
     if (this.state === "playable") return true;
     if (this.state !== "starting") return false;

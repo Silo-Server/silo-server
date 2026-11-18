@@ -54,6 +54,75 @@ describe("StartupGuard", () => {
 
     expect(onFailure).not.toHaveBeenCalled();
   });
+
+  it("fails at the first deadline when replanning adopts transports before a frame", () => {
+    const onFailure = vi.fn();
+    const guard = new StartupGuard(onFailure);
+
+    // Two plans adopted inside the window, each installing a new transport. A
+    // start that never showed a frame must not push its deadline out with them.
+    vi.advanceTimersByTime(20_000);
+    guard.armForReplacementTransport();
+    vi.advanceTimersByTime(20_000);
+    guard.armForReplacementTransport();
+
+    vi.advanceTimersByTime(STARTUP_TIMEOUT_MS - 40_000 - 1);
+    expect(onFailure).not.toHaveBeenCalled();
+
+    vi.advanceTimersByTime(1);
+    expect(onFailure).toHaveBeenCalledExactlyOnceWith("deadline");
+    expect(guard.hasFailed()).toBe(true);
+    guard.dispose();
+  });
+
+  it("gives a transport that replaces a played one its own startup window", () => {
+    const onFailure = vi.fn();
+    const guard = new StartupGuard(onFailure);
+
+    guard.markPlaybackStarted();
+    vi.advanceTimersByTime(STARTUP_TIMEOUT_MS);
+    expect(onFailure).not.toHaveBeenCalled();
+
+    // A real reconnect from a working stream is a new start and may use the
+    // full window.
+    guard.armForReplacementTransport();
+    expect(guard.isStarting()).toBe(true);
+    vi.advanceTimersByTime(STARTUP_TIMEOUT_MS - 1);
+    expect(onFailure).not.toHaveBeenCalled();
+
+    vi.advanceTimersByTime(1);
+    expect(onFailure).toHaveBeenCalledExactlyOnceWith("deadline");
+    guard.dispose();
+  });
+
+  it("re-arms for the retry a failed start lowered into", () => {
+    const onFailure = vi.fn();
+    const guard = new StartupGuard(onFailure);
+
+    vi.advanceTimersByTime(STARTUP_TIMEOUT_MS);
+    expect(onFailure).toHaveBeenCalledExactlyOnceWith("deadline");
+
+    // The reported failure is the Auto ladder's cue to lower; its replacement
+    // transport is a genuinely new attempt with its own deadline.
+    guard.armForReplacementTransport();
+    expect(guard.hasFailed()).toBe(false);
+    expect(guard.isStarting()).toBe(true);
+
+    vi.advanceTimersByTime(STARTUP_TIMEOUT_MS);
+    expect(onFailure).toHaveBeenCalledTimes(2);
+    guard.dispose();
+  });
+
+  it("does not revive a disposed guard for a replacement transport", () => {
+    const onFailure = vi.fn();
+    const guard = new StartupGuard(onFailure);
+
+    guard.dispose();
+    guard.armForReplacementTransport();
+    vi.advanceTimersByTime(STARTUP_TIMEOUT_MS);
+
+    expect(onFailure).not.toHaveBeenCalled();
+  });
 });
 
 describe("isStaleGenerationError", () => {

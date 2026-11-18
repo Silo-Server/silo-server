@@ -1378,14 +1378,24 @@ export function VideoPlayer({
     [reportCurrentPlanFailure, setPlayerError],
   );
 
+  const failStartupRef = useRef(failStartup);
+  failStartupRef.current = failStartup;
+
   // Every transport must show a frame by the startup deadline, the element's
   // own progressive loads included: a start that never plays otherwise sits
   // on its spinner with no failure path. The browser engine keeps its own
   // readiness deadline and stands this one down when it attaches.
+  //
+  // The guard belongs to the playback session, not to a plan: `planRevision`
+  // bumps on every adoption, so recreating the guard there handed a session
+  // that keeps replanning a fresh 60 s each time and it never reached its own
+  // deadline (no error, no Try again). A new transport asks for a fresh window
+  // through `armForReplacementTransport`, which only grants one to a transport
+  // that already played or already failed.
   useEffect(() => {
     if (!isPlayerReady) return;
 
-    const guard = new StartupGuard(failStartup);
+    const guard = new StartupGuard((cause) => failStartupRef.current(cause));
     startupGuardRef.current = guard;
 
     return () => {
@@ -1394,7 +1404,7 @@ export function VideoPlayer({
         startupGuardRef.current = null;
       }
     };
-  }, [failStartup, isPlayerReady, planRevision]);
+  }, [isPlayerReady]);
 
   // The media's full runtime, from the plan and nowhere else: on an HLS copy
   // remux the engine reports only the length produced so far, so substituting it
@@ -3213,7 +3223,12 @@ export function VideoPlayer({
     streamPlayedRef.current = false;
     transportIdleSinceRef.current = null;
     const video = videoRef.current;
-    if (!video || !isPlayerReady || startupGuardRef.current?.hasFailed()) return;
+    if (!video || !isPlayerReady) return;
+    // This effect reruns only when the transport changed, so the guard's
+    // startup window follows the transport rather than the plan (see the guard
+    // effect above). A start still waiting for its first frame keeps its
+    // deadline; one that already played or failed gets a fresh window.
+    startupGuardRef.current?.armForReplacementTransport();
     transportStartupPendingRef.current = true;
     // A source is loading, a replan's as well as the first: speed tests wait
     // for it as for a start.
