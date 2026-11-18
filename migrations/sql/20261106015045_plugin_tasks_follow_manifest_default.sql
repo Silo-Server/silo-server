@@ -16,13 +16,17 @@ WHERE trigger = '{"type": "startup"}'::jsonb;
 -- those seeded schedules: exactly one startup trigger with no runtime limit, on
 -- a task whose binding sets no interval, daily or weekly trigger (that binding
 -- would have seeded its own trigger, so a startup schedule there is an edit).
--- An administrator who saved exactly "at startup" on the task page cannot be
--- told apart from a seed; that task now follows its binding and manifest
--- default, which before a plugin declares a default is still one startup run.
+-- A seed leaves the schedule at revision 2 (1 if it predates revisions), and
+-- every later save raises it, so a higher revision is an administrator's edit
+-- and stays. An administrator who saved exactly "at startup" before revisions
+-- existed cannot be told apart from a seed; that task now follows its binding
+-- and manifest default, which before a plugin declares a default is still one
+-- startup run.
 CREATE TEMPORARY TABLE seeded_plugin_task_schedules ON COMMIT DROP AS
 SELECT s.task_key
 FROM task_schedules s
 WHERE s.task_key LIKE 'plugin:%'
+  AND s.revision <= 2
   AND (SELECT count(*) FROM task_triggers t WHERE t.task_key = s.task_key) = 1
   AND EXISTS (
       SELECT 1 FROM task_triggers t

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"strings"
 	"time"
 
@@ -266,6 +267,10 @@ func ManifestDefaultTrigger(descriptor *pluginv1.ScheduledTaskDescriptor) *taskm
 	return &trigger
 }
 
+// maxTriggerIntervalMs is the longest interval a time.Duration holds; a
+// longer one overflows into a timer that fires at once.
+const maxTriggerIntervalMs = math.MaxInt64 / int64(time.Millisecond)
+
 // runnableTrigger reports whether the task manager can schedule trigger:
 // its type is one the manager knows and the fields that type reads are
 // valid.
@@ -274,7 +279,7 @@ func runnableTrigger(trigger taskmanager.TriggerConfig) bool {
 	case taskmanager.TriggerTypeStartup:
 		return true
 	case taskmanager.TriggerTypeInterval:
-		return trigger.IntervalMs > 0
+		return trigger.IntervalMs > 0 && trigger.IntervalMs <= maxTriggerIntervalMs
 	case taskmanager.TriggerTypeDaily:
 		return validTimeOfDay(trigger.TimeOfDay)
 	case taskmanager.TriggerTypeWeekly:

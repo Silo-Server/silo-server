@@ -42,6 +42,7 @@ func TestPluginTaskTriggers(t *testing.T) {
 			want: taskmanager.TriggerConfig{Type: taskmanager.TriggerTypeWeekly, TimeOfDay: "04:00"}},
 		{name: "startup default", declared: &pluginv1.ScheduledTaskTrigger{Type: "startup"}, want: startup},
 		{name: "interval default below the minimum", declared: &pluginv1.ScheduledTaskTrigger{Type: "interval", IntervalMs: 59_999}, want: startup},
+		{name: "interval default too long for a timer", declared: &pluginv1.ScheduledTaskTrigger{Type: "interval", IntervalMs: 9_223_372_036_855}, want: startup},
 		{name: "default of an unknown type", declared: &pluginv1.ScheduledTaskTrigger{Type: "cron"}, want: startup},
 		{name: "daily default without a valid time", declared: &pluginv1.ScheduledTaskTrigger{Type: "daily", TimeOfDay: "25:00"}, want: startup},
 		{name: "weekly default on no weekday", declared: &pluginv1.ScheduledTaskTrigger{Type: "weekly", TimeOfDay: "04:00", DayOfWeek: 7}, want: startup},
