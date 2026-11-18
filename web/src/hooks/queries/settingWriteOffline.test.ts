@@ -1,4 +1,5 @@
 import { renderHook } from "@testing-library/react";
+import { toast } from "sonner";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { V2ProblemError } from "@/api/v2/request";
@@ -6,8 +7,9 @@ import { appearanceCache, storage } from "@/utils/storage";
 
 import { useShowThenSave } from "./settingWriteOffline";
 
-const toastError = vi.hoisted(() => vi.fn());
-vi.mock("sonner", () => ({ toast: { error: toastError } }));
+// A spy on the real toast, not a module mock: in a shared vmThreads worker
+// another file may load sonner first, and the mock then misses this module.
+const toastError = vi.spyOn(toast, "error").mockImplementation(() => 0);
 
 function problem(status: number) {
   return new V2ProblemError("op", {

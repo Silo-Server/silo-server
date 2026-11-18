@@ -253,7 +253,9 @@ function StepBody({ step }: { step: OnboardingStep }) {
       )}
       {step.kind === "setting_choice" && step.setting && (
         <div className="border-border bg-popover mt-5 rounded-xl border p-4">
-          <SettingControl step={step} />
+          {/* One instance per step: each starts from its own field, and a late
+              rollback from an earlier step can't land on this one. */}
+          <SettingControl key={step.id} step={step} />
         </div>
       )}
       {step.links && step.links.length > 0 && (
