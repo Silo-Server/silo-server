@@ -708,6 +708,9 @@ func TestValidateValueRejectsOutOfContractValues(t *testing.T) {
 		{name: "app language empty string rejected", key: "ui.app_language", value: `""`, wantErr: true},
 
 		{name: "non-nullable boolean rejects null", key: keyAutoPlayNext, value: jsonNull, wantErr: true},
+
+		// Off turns the Next Up card off.
+		{name: "next up off", key: "playback.next_up_enabled", value: `false`},
 	}
 
 	for _, tc := range cases {
