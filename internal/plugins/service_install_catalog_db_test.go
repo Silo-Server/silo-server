@@ -37,6 +37,9 @@ func TestServiceInstallCatalogStopsPluginOnlyForAnAcceptedPackageDB(t *testing.T
 		// recorded update, and the install lands while the catalog resolves.
 		replacedBy string
 		viaUpdate  bool
+		// replacedWhileResolving lands the other install while the catalog
+		// index is fetched, before the package downloads.
+		replacedWhileResolving bool
 	}{
 		{name: "checksum mismatch", wrongSum: true, wantEvents: []string{}, wantRefusal: "SHA-256 checksum", wantVersion: "1.0.0", wantEnabled: true},
 		// A binary has nowhere to carry assets, so its stored archive is
@@ -49,6 +52,7 @@ func TestServiceInstallCatalogStopsPluginOnlyForAnAcceptedPackageDB(t *testing.T
 		// 3.0.0 another install wrote meanwhile, nor stop its process.
 		{name: "replaced during download", replacedBy: "3.0.0", wantEvents: []string{}, wantVersion: "3.0.0", wantEnabled: true},
 		{name: "replaced while an applied update resolves", viaUpdate: true, replacedBy: "3.0.0", wantEvents: []string{}, wantVersion: "3.0.0", wantEnabled: true},
+		{name: "replaced while a catalog install resolves", replacedWhileResolving: true, replacedBy: "3.0.0", wantEvents: []string{}, wantVersion: "3.0.0", wantEnabled: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			ctx := context.Background()
@@ -81,13 +85,13 @@ func TestServiceInstallCatalogStopsPluginOnlyForAnAcceptedPackageDB(t *testing.T
 					store.byID[7].Enabled = *tc.toggleTo
 					store.mu.Unlock()
 				}
-				if tc.replacedBy != "" && !tc.viaUpdate {
+				if tc.replacedBy != "" && !tc.viaUpdate && !tc.replacedWhileResolving {
 					replace(tc.replacedBy)
 				}
 				_, _ = w.Write(binary)
 			})
 			mux.HandleFunc("/index.json", func(w http.ResponseWriter, _ *http.Request) {
-				if tc.replacedBy != "" && tc.viaUpdate {
+				if tc.replacedBy != "" && (tc.viaUpdate || tc.replacedWhileResolving) {
 					replace(tc.replacedBy)
 				}
 				_ = json.NewEncoder(w).Encode(RepositoryIndex{Plugins: []CatalogPackage{{

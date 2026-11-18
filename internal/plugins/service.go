@@ -318,22 +318,24 @@ func (s *Service) InstallCatalog(ctx context.Context, req InstallCatalogRequest)
 }
 
 // installCatalog installs req. A non-nil expected is the installation the
-// caller chose req for: the replacement is prepared against it, so another
-// install that lands while the catalog resolves refuses it rather than being
-// replaced by an older release.
+// caller chose req for; otherwise it is read before the catalog resolves. The
+// replacement is prepared against it, so another install that lands while the
+// catalog resolves or the package downloads refuses this one rather than
+// being replaced by it.
 func (s *Service) installCatalog(ctx context.Context, req InstallCatalogRequest, expected *Installation) (*InstallResult, error) {
-	target, err := s.catalog.ResolveInstall(ctx, req)
-	if err != nil {
-		return nil, err
-	}
-
 	existing := expected
 	if existing == nil {
+		var err error
 		existing, err = s.existingInstallationByPluginID(ctx, req.PluginID)
 		if err != nil {
 			return nil, err
 		}
 	}
+	target, err := s.catalog.ResolveInstall(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+
 	var result *InstallResult
 	switch {
 	case existing != nil:
@@ -482,15 +484,18 @@ func (s *Service) stopInstallationIfRunning(existing *Installation) error {
 
 // replaceStopped stops the existing installation's process and runs replace.
 // Callers check the new package before calling it, so a refused package
-// never stops the running plugin, and an installation another install or
+// never stops the running plugin. An installation that another install or
 // update changed while the package downloaded is refused before its newer
-// process is stopped; replace itself refuses one changed after this check. When replace fails the row still names the
-// old release but its process is gone: a lazily started plugin comes back on
-// its next RPC, while a resident only restarts on a lifecycle reconcile, so
-// the hooks run before the error is returned. On success the caller runs them
-// after the row has changed. The replacement leaves the row's enabled flag
-// alone, so an admin's switch made while the package downloaded stands, and
-// the result reports the flag as stored.
+// process is stopped, and replace itself refuses one changed after that
+// check.
+//
+// When replace fails the row still names the old release but its process is
+// gone: a lazily started plugin comes back on its next RPC, while a resident
+// only restarts on a lifecycle reconcile, so the hooks run before the error
+// is returned. On success the caller runs them after the row has changed.
+// The replacement leaves the row's enabled flag alone, so an admin's switch
+// made while the package downloaded stands, and the result reports the flag
+// as stored.
 func (s *Service) replaceStopped(ctx context.Context, existing *Installation, replace func() (*InstallResult, error)) (*InstallResult, error) {
 	if s.installations != nil {
 		if err := checkUnchanged(ctx, s.installations.GetByID, existing); err != nil {
