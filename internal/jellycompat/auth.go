@@ -2,7 +2,6 @@ package jellycompat
 
 import (
 	"context"
-	"crypto/subtle"
 	"errors"
 	"log/slog"
 	"net"
@@ -377,7 +376,7 @@ func PlaybackSessionAuth(sessions *SessionStore, playbackStore CompatPlaybackSto
 			var playSessionErr error
 			if playSessionID != "" && playbackStore != nil {
 				var handled bool
-				if handled, playSessionErr = servePlaySessionGrant(next, w, r, sessions, playbackStore, keyAuth, playSessionID, ""); handled {
+				if handled, playSessionErr = servePlaySessionGrant(next, w, r, sessions, playbackStore, keyAuth, playSessionID); handled {
 					return
 				}
 			}
@@ -462,21 +461,17 @@ func addressStreamGrantEnabled(ctx context.Context, settings SettingsReader) boo
 }
 
 // servePlaySessionGrant answers a request through the play session that
-// playSessionID names when that session grants it. A non-empty tag must also
-// equal the per-play tag recorded for the request's source. It reports
-// handled=false when the session is absent or does not cover the request,
-// with the store error when the session could not be read.
+// playSessionID names when that session grants it. It reports handled=false
+// when the session is absent or does not cover the request, with the store
+// error when the session could not be read.
 func servePlaySessionGrant(
 	next http.Handler, w http.ResponseWriter, r *http.Request,
 	sessions *SessionStore, playbackStore CompatPlaybackStore, keyAuth *AdminAPIKeyAuthenticator,
-	playSessionID, tag string,
+	playSessionID string,
 ) (bool, error) {
 	playSession, found, err := playbackStore.Lookup(playSessionID)
 	if err != nil || !found || !playbackGrantMatchesRequest(r, playSession) {
 		return false, err
-	}
-	if tag != "" && !playTagMatchesSource(r, playSession, tag) {
-		return false, nil
 	}
 	session, ok, err := resolveCompatToken(r.Context(), sessions, keyAuth, playSession.CompatToken)
 	switch {
@@ -492,9 +487,10 @@ func servePlaySessionGrant(
 
 // servePlayTagGrant answers a static video stream through the play session a
 // per-play tag names, under the same rules as a PlaySessionId grant. The
-// request must name its source, carry one tag value in the per-play shape,
-// and that tag must be the one recorded for the source. It returns the play
-// session ID it looked up so a store error can be logged against it.
+// request must name its source and carry one tag value in the per-play
+// shape. Only the play session ID in the tag is checked: whoever holds a tag
+// holds that ID, which already covers every source of the play. It returns
+// the play session ID it looked up so a store error can be logged against it.
 func servePlayTagGrant(
 	next http.Handler, w http.ResponseWriter, r *http.Request,
 	sessions *SessionStore, playbackStore CompatPlaybackStore, keyAuth *AdminAPIKeyAuthenticator,
@@ -512,7 +508,7 @@ func servePlayTagGrant(
 	if !ok {
 		return false, "", nil
 	}
-	handled, err := servePlaySessionGrant(next, w, r, sessions, playbackStore, keyAuth, playSessionID, tag)
+	handled, err := servePlaySessionGrant(next, w, r, sessions, playbackStore, keyAuth, playSessionID)
 	return handled, playSessionID, err
 }
 
@@ -540,21 +536,6 @@ func playTagSessionID(tag string) (string, bool) {
 		return "", false
 	}
 	return id.String(), true
-}
-
-// playTagMatchesSource reports whether tag is the per-play tag the play
-// recorded for the source the request names.
-func playTagMatchesSource(r *http.Request, playSession *PlaybackSession, tag string) bool {
-	sourceID, ok := queryMediaSourceID(r.URL.Query())
-	if !ok || sourceID == "" {
-		return false
-	}
-	for _, source := range playSession.MediaSources {
-		if mediaSourceIDsEqual(source.ID, sourceID) {
-			return subtle.ConstantTimeCompare([]byte(source.ETag), []byte(tag)) == 1
-		}
-	}
-	return false
 }
 
 // singleQueryValue is the value of the query parameter name, matched

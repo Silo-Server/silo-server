@@ -586,10 +586,13 @@ forks open static direct-play URLs with no auth header, `api_key` or
 `PlaySessionId`, but echo that ETag as `tag` (upstream Jellyfin ignores `tag`).
 So a GET or HEAD of `/Videos/{id}/stream` or `/Videos/{id}/stream.{container}`
 with `Static=true`, a `MediaSourceId`, and a `tag` (parameter name in any case)
-is granted exactly as that play's `PlaySessionId` would be, when the tag equals
-the one the play recorded for the named source. A 16-hex item-detail ETag, a
-`tag` repeated with different values, or a `tag` on any other route grants
-nothing.
+is granted exactly as that play's `PlaySessionId` would be, and the stream is
+served as that play. A 16-hex item-detail ETag, a `tag` repeated with
+different values, or a `tag` on any other route grants nothing. The tag is no
+narrower a credential than the `PlaySessionId` it starts with: whoever holds
+one can send those 32 digits as `PlaySessionId` and reach every source and
+media route that play covers, so a URL carrying a tag needs the same care as
+one carrying a `PlaySessionId`.
 
 The address-only static-stream grant runs only while the administrator turns
 on `jellyfin_compat.address_stream_grant_enabled`; its default is the
