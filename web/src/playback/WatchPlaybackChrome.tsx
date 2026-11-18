@@ -44,7 +44,7 @@ import {
   useEffectiveSettings,
   useSettingsCapabilities,
 } from "@/hooks/queries/settingValues";
-import { SETTING_DEFINITIONS, SETTING_KEYS, type SettingKey } from "@/lib/settingsContract";
+import { SETTING_KEYS, type SettingKey } from "@/lib/settingsContract";
 import { useWatchDetail } from "@/hooks/queries/items";
 import { catalogKeys } from "@/hooks/queries/keys";
 import { applyPlaybackProgressToCache } from "@/hooks/queries/playbackProgressCache";
@@ -91,7 +91,7 @@ import {
 import { canEditMarkers as canEditMarkersForUser } from "@/lib/permissions";
 import { markPlaybackIntent } from "@/player/first-frame";
 import { onMeteredConnection } from "@/player/bandwidth-probe";
-import { isInNextUpPromptWindow } from "./nextUpPrompt";
+import { isInNextUpPromptWindow, resolveNextUp } from "./nextUpPrompt";
 import { playbackQualitySettings } from "./playbackQualitySettings";
 
 const WatchPage = lazy(() =>
@@ -651,6 +651,14 @@ function WatchPlaybackHostContent() {
       settingsCapabilities.data,
       SETTING_KEYS.PLAYBACK_SHOW_MARKER_CONFIDENCE,
     );
+  // Whether Next Up can be turned off: a server below revision 30 does not
+  // define the key and rejects the whole batch for it.
+  const supportsNextUpEnabled =
+    capabilitiesKnown &&
+    settingsCapabilitiesSupportKey(
+      settingsCapabilities.data,
+      SETTING_KEYS.PLAYBACK_NEXT_UP_ENABLED,
+    );
   // Resolved through the contract, so a device override winning over the
   // profile's own choice is the manifest's resolution order rather than a
   // precedence rule spelled out here.
@@ -673,8 +681,10 @@ function WatchPlaybackHostContent() {
         ? SETTING_KEYS.PLAYBACK_INTRO_SKIP_MODE
         : SETTING_KEYS.PLAYBACK_AUTO_SKIP_INTRO,
       SETTING_KEYS.PLAYBACK_AUTO_SKIP_RECAP,
-      // How long before the end of the file Next Up opens.
+      // How long before the end of the file Next Up opens, and whether it
+      // opens at all.
       SETTING_KEYS.PLAYBACK_NEXT_UP_PROMPT_SECONDS,
+      ...(supportsNextUpEnabled ? [SETTING_KEYS.PLAYBACK_NEXT_UP_ENABLED] : []),
       // The resolution cap, which the quality picker writes canonically and
       // no longer mirrors into the profile column playback used to read.
       SETTING_KEYS.PLAYBACK_PREFERRED_QUALITY,
@@ -973,22 +983,23 @@ function WatchPlaybackHostContent() {
 
   const requestKeyValue = activeRequest?.requestKey ?? "";
 
-  // -- Early post-roll trigger (the viewer's Show Next Up lead time) --
-  // 0 means "At end", which leaves post-roll to the `ended` fallback below.
-  // Until the setting loads nothing opens early, so an "At end" viewer who
-  // starts near the end is not shown Next Up on the default; a failed read
-  // falls back to the contract default.
-  const nextUpPromptSeconds =
-    effectivePlaybackSettings === undefined && !settingsReadFailed
-      ? 0
-      : Number(
-          effectivePlaybackSettings?.[SETTING_KEYS.PLAYBACK_NEXT_UP_PROMPT_SECONDS]?.value ??
-            SETTING_DEFINITIONS[SETTING_KEYS.PLAYBACK_NEXT_UP_PROMPT_SECONDS].defaultValue,
-        );
-  const nextUpPromptSecondsRef = useRef(nextUpPromptSeconds);
+  // -- Next Up: the early post-roll trigger and what the end of the file does --
+  // A promptSeconds of 0 ("At end", or Next Up off) leaves post-roll to the
+  // `ended` fallback below. Until capabilities say whether the read includes
+  // next_up_enabled, the settings count as still loading: a read without the
+  // key would otherwise open Next Up early for a viewer who turned it off.
+  const capabilitiesPending = settingsCapabilities.isPending;
+  const nextUp = resolveNextUp({
+    settings: capabilitiesPending ? undefined : effectivePlaybackSettings,
+    readFailed: !capabilitiesPending && settingsReadFailed,
+    shuffled: Boolean(shuffleId),
+  });
+  const nextUpPromptSecondsRef = useRef(nextUp.promptSeconds);
+  const nextUpAtEndRef = useRef(nextUp.atEnd);
   useEffect(() => {
-    nextUpPromptSecondsRef.current = nextUpPromptSeconds;
-  }, [nextUpPromptSeconds]);
+    nextUpPromptSecondsRef.current = nextUp.promptSeconds;
+    nextUpAtEndRef.current = nextUp.atEnd;
+  }, [nextUp.promptSeconds, nextUp.atEnd]);
   const postRollEnteredRef = useRef(false);
   const [postRollVideoEnded, setPostRollVideoEnded] = useState(false);
 
@@ -1017,6 +1028,20 @@ function WatchPlaybackHostContent() {
     postRollEnteredRef.current = false;
     setPostRollVideoEnded(false);
   }, [requestKeyValue]);
+
+  const handlePostRollClose = useCallback(() => {
+    if (activeRequest) {
+      stopPlayback();
+      // A shuffle returns to the library, series, or collection it started
+      // from rather than to whichever item happened to play last.
+      navigate(
+        activeRequest.shuffleId
+          ? buildPlaybackReturnHref(activeRequest)
+          : buildWatchItemHref(activeRequest),
+        { up: true },
+      );
+    }
+  }, [activeRequest, stopPlayback, navigate]);
 
   // -- Handle video ended → enter post-roll or exit --
   const handleEnded = useCallback(
@@ -1082,6 +1107,12 @@ function WatchPlaybackHostContent() {
         }
         return;
       }
+      // With Next Up off the episode ends where post-roll's own close would
+      // take the viewer: no card, no countdown, no automatic next episode.
+      if (nextUpAtEndRef.current === "close") {
+        handlePostRollClose();
+        return;
+      }
       // Enter post-roll on ended: with Show Next Up set to "At end", or when
       // the early window was missed (a seek past it, a short file).
       // Applies whether or not a next episode exists; the screen renders an
@@ -1100,22 +1131,9 @@ function WatchPlaybackHostContent() {
       stopPlayback,
       navigate,
       controller,
+      handlePostRollClose,
     ],
   );
-
-  const handlePostRollClose = useCallback(() => {
-    if (activeRequest) {
-      stopPlayback();
-      // A shuffle returns to the library, series, or collection it started
-      // from rather than to whichever item happened to play last.
-      navigate(
-        activeRequest.shuffleId
-          ? buildPlaybackReturnHref(activeRequest)
-          : buildWatchItemHref(activeRequest),
-        { up: true },
-      );
-    }
-  }, [activeRequest, stopPlayback, navigate]);
 
   const handlePictureInPictureChange = useCallback(
     (change: PlayerPictureInPictureChange) => {
