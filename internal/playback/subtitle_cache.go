@@ -119,6 +119,15 @@ type SubtitleCache struct {
 	pageCostMu    sync.Mutex
 	pageReadRates map[string]float64
 
+	// pageWaitMu guards pageWaits, one bounded wait per refused bitmap page
+	// while its track's progressive artifact parses toward it (see
+	// subtitle_page_recovery.go). pageWaitBudget and pageWaitNow are test seams;
+	// zero keeps the production budget and wall clock.
+	pageWaitMu     sync.Mutex
+	pageWaits      map[string]subtitlePageRecovery
+	pageWaitBudget time.Duration
+	pageWaitNow    func() time.Time
+
 	// fontFailureMu guards fontFailureRetryAt, the per-font-bundle extraction
 	// backoff. A failed font extraction is optional to playback, so callers
 	// degrade to an empty pending bundle instead of retrying a flapping
@@ -366,6 +375,11 @@ type SubtitleExtractionRetryError struct {
 	// than one request may spend on it, so a caller may start the detached
 	// warm and have the retry served from a committed slice.
 	WindowBudgetExceeded bool
+	// PageRecoveryDue reports that this is the first refusal for this bitmap
+	// page, so the caller may start the one recovery fill it is allowed. Later
+	// refusals keep the fill that already owns the track (see
+	// subtitle_page_recovery.go).
+	PageRecoveryDue bool
 }
 
 func (e *SubtitleExtractionRetryError) Error() string {
@@ -485,6 +499,7 @@ func NewSubtitleCache(transcodeDir func() string) *SubtitleCache {
 		extractRetryDelays: subtitleExtractRetryDelays(),
 		fillWaitTimeout:    subtitleFillWaitTimeout,
 		inflight:           make(map[string]*SubtitleCacheFill),
+		pageWaits:          make(map[string]subtitlePageRecovery),
 		warmGuard:          make(map[string]subtitleWarmGuard),
 		warmSem:            make(chan struct{}, subtitleCacheWarmSlots),
 	}
@@ -2162,6 +2177,9 @@ func (c *SubtitleCache) serveWindowedSUP(w http.ResponseWriter, r *http.Request,
 		}
 	} else {
 		c.noteExtractionSuccess(sourceOpts, subtitleFormatSUP)
+		if pageStart, _, _ := progressiveSUPWindow(sourceOpts); true {
+			c.clearPageRecovery(sourceOpts, pageStart)
+		}
 		c.storeCompletedWindow(r.Context(), windowKey, sourceOpts, subtitleFormatSUP, capture)
 	}
 	outcome := subtitleTraceOutcome(r.Context(), err)
@@ -2187,7 +2205,7 @@ func (c *SubtitleCache) serveWindowedSUP(w http.ResponseWriter, r *http.Request,
 // state and the range the artifact covers. A generic subtitle_source_unavailable
 // here dropped both: the handler starts the recovery fill only for a page
 // refusal, so the retry could only repeat the read that earned the cooldown.
-func (c *SubtitleCache) windowedSUPMissRefusal(opts StreamExtractOpts) *SubtitleExtractionRetryError {
+func (c *SubtitleCache) windowedSUPMissRefusal(opts StreamExtractOpts) error {
 	retryAfter, cooling := c.extractionCoolingDownFor(opts, subtitleFormatSUP)
 	if !cooling {
 		return nil
@@ -2205,7 +2223,7 @@ func (c *SubtitleCache) windowedSUPMissRefusal(opts StreamExtractOpts) *Subtitle
 // running the page either answered from it already (see serveProgressiveSUPPage)
 // or cannot use it yet, so the cooldown's own delay is the honest answer and nil
 // is returned.
-func (c *SubtitleCache) bitmapPageCooldownRefusal(opts StreamExtractOpts, retryAfter time.Duration) *SubtitleExtractionRetryError {
+func (c *SubtitleCache) bitmapPageCooldownRefusal(opts StreamExtractOpts, retryAfter time.Duration) error {
 	if !opts.pageReadWatch() {
 		return nil
 	}
@@ -2215,10 +2233,8 @@ func (c *SubtitleCache) bitmapPageCooldownRefusal(opts StreamExtractOpts, retryA
 	if fill, _ := c.progressiveSUPArtifact(opts); fill != nil {
 		return nil
 	}
-	return &SubtitleExtractionRetryError{
-		RetryAfter: max(retryAfter, subtitlePageCostlyRetryAfter),
-		Reason:     SubtitlePageTooCostlyReason,
-	}
+	start, _, _ := progressiveSUPWindow(opts)
+	return c.pageRecoveryRefusal(opts, start, 0, max(retryAfter, subtitlePageCostlyRetryAfter), SubtitlePageTooCostlyReason)
 }
 
 // formatEntryKey computes the in-flight/cache key for a source identity,
@@ -2477,6 +2493,27 @@ func (c *SubtitleCache) WarmInBackground(opts StreamExtractOpts, extract SUPExtr
 // subtitleWarmPageYieldAttempts times, or after subtitleWarmPageYieldWait
 // without a gap; the next windowed miss re-kicks it.
 //
+// AllowWarmAfterPageRefusal clears the failed-warm cooldown for one track so the
+// single recovery fill a refused bitmap page is waiting on may start. A page that
+// a previous fill could not reach has already armed that cooldown for this
+// identity; honoring it would leave the page with nothing to be served from, and
+// the refusal and the retry would repeat forever. The page's own wait ledger
+// (see subtitle_page_recovery.go) is what keeps this to one fill per page, and
+// the ordinary fill reservation still single-flights it against every other warm
+// for the same track.
+func (c *SubtitleCache) AllowWarmAfterPageRefusal(opts StreamExtractOpts) {
+	if c == nil {
+		return
+	}
+	key, ok := c.formatEntryKey(opts.InputPath, opts.CacheIdentity, opts.TrackIndex, subtitleFormatSUP)
+	if !ok {
+		return
+	}
+	c.warmMu.Lock()
+	delete(c.warmGuard, key)
+	c.warmMu.Unlock()
+}
+
 // Staleness for identity-keyed (virtual) sources follows the same generation
 // bucket as every other cache lookup: an entry committed under an
 // earlier bucket is not found by later lookups, so a warm that loses its

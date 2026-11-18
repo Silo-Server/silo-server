@@ -117,18 +117,16 @@ func (o StreamExtractOpts) pagePrefixEstimate(observedBytesPerSecond float64) (p
 	return prefixBytes, prefixSeconds, true
 }
 
-// pageTooCostlyRetry is the retryable answer for a page the source cannot serve
-// at an affordable read cost: the client backs off, learns how far the track's
-// progressive artifact has parsed, and the handler starts that fill. It is shared
-// by the pre-extract refusal, the runtime read cap, and a page that ran out its
-// extract deadline, so all three answer the same way.
-func (c *SubtitleCache) pageTooCostlyRetry(opts StreamExtractOpts) *SubtitleExtractionRetryError {
+// pageTooCostlyRetry is the answer for a page the source cannot serve at an
+// affordable read cost: while the track's progressive artifact may still reach
+// the page the client backs off and the first refusal starts that fill; once the
+// wait budget is spent the answer is final (see subtitle_page_recovery.go). It is
+// shared by the pre-extract refusal, the runtime read cap, and a page that ran out
+// its extract deadline, so all three answer the same way.
+func (c *SubtitleCache) pageTooCostlyRetry(opts StreamExtractOpts) error {
+	start, _, _ := progressiveSUPWindow(opts)
 	_, covered := c.progressiveSUPArtifact(opts)
-	return &SubtitleExtractionRetryError{
-		RetryAfter:   subtitlePageCostlyRetryAfter,
-		Reason:       SubtitlePageTooCostlyReason,
-		CoveredUntil: covered,
-	}
+	return c.pageRecoveryRefusal(opts, start, covered, subtitlePageCostlyRetryAfter, SubtitlePageTooCostlyReason)
 }
 
 // pagePrefixBeyondBudget reports whether the container prefix this page would
@@ -149,7 +147,7 @@ func (c *SubtitleCache) pagePrefixBeyondBudget(opts StreamExtractOpts) bool {
 // the retryable shape when the page must wait for the track's progressive
 // artifact instead. It reads only the cache's own bookkeeping, so no provider
 // read happens before the answer.
-func (c *SubtitleCache) pagePrefixRefusal(opts StreamExtractOpts) *SubtitleExtractionRetryError {
+func (c *SubtitleCache) pagePrefixRefusal(opts StreamExtractOpts) error {
 	if !c.pagePrefixBeyondBudget(opts) {
 		return nil
 	}

@@ -448,12 +448,11 @@ func (c *SubtitleCache) serveProgressiveSUPPage(w http.ResponseWriter, r *http.R
 	if start >= covered {
 		// The fill is running and has not parsed the page's own start yet. The
 		// page is not failing; it is not ready, and the covered range says how
-		// far it got.
-		return false, &SubtitleExtractionRetryError{
-			RetryAfter:   subtitleFillBusyRetryAfter,
-			Reason:       SubtitlePageNotReadyReason,
-			CoveredUntil: covered,
-		}
+		// far it got. Each page gets one bounded wait: while the watermark is
+		// still advancing it is worth retrying, and once it stops advancing or
+		// the page has waited out its recovery budget the answer is final rather
+		// than another retry the client would repeat forever.
+		return false, c.pageRecoveryRefusal(opts, start, covered, subtitleFillBusyRetryAfter, SubtitlePageNotReadyReason)
 	}
 	// The headers go on before the copy: the first Write commits the status and
 	// headers, so setting them after a non-empty page's copy would leave every
@@ -466,6 +465,7 @@ func (c *SubtitleCache) serveProgressiveSUPPage(w http.ResponseWriter, r *http.R
 	SetSubtitleCoverageRange(w.Header(), start, cutEnd)
 	written, served, err := fill.serveWindow(w, start, cutEnd)
 	if served {
+		c.clearPageRecovery(opts, start)
 		recordSubtitleServeSource(subtitleServePGSProgressive)
 		slog.Log(r.Context(), slog.LevelInfo, "subtitle page served from the progressive artifact",
 			"component", "playback",

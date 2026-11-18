@@ -164,6 +164,29 @@ func recordSubtitleWarmPageOverlap(format string, elapsed time.Duration) {
 
 // recordSubtitlePageTooCostly counts one windowed bitmap page extract killed for
 // reading more of the source container than a page may cost.
+var subtitlePageRecoveries = promauto.NewCounterVec(prometheus.CounterOpts{
+	Name: "vio_subtitle_page_recovery_total",
+	Help: "Bounded waits for a windowed bitmap page against its track's progressive artifact, by result (recovery_warm or unavailable). Measurement only.",
+}, []string{subtitleMetricLabelResult})
+
+const (
+	subtitlePageRecoveryStarted     = "recovery_warm"
+	subtitlePageRecoveryUnavailable = "unavailable"
+)
+
+// recordSubtitlePageRecoveryStarted counts one page's single recovery fill: the
+// first refusal for that page, the only request allowed to start it.
+func recordSubtitlePageRecoveryStarted() {
+	subtitlePageRecoveries.WithLabelValues(subtitlePageRecoveryStarted).Inc()
+}
+
+// recordSubtitlePageRecoveryUnavailable counts one page answered finally because
+// its progressive artifact could not reach it inside the recovery budget (or
+// stopped advancing toward it).
+func recordSubtitlePageRecoveryUnavailable() {
+	subtitlePageRecoveries.WithLabelValues(subtitlePageRecoveryUnavailable).Inc()
+}
+
 func recordSubtitlePageTooCostly() {
 	subtitlePageCostRejections.WithLabelValues(subtitleFormatSUP).Inc()
 }
